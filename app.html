@@ -1532,6 +1532,7 @@
           <div class="um-name" id="um-name">User</div>
           <div class="um-email" id="um-email"></div>
           <div class="um-plan" id="um-plan"></div>
+          <button class="um-logout" onclick="event.stopPropagation(); openTelegramSettings()" style="background:#229ED9;color:#fff;margin-bottom:8px;">✈️ Daily Plan on Telegram</button>
           <button class="um-logout" onclick="event.stopPropagation(); handleLogout()">↩ Logout</button>
         </div>
       </div>
@@ -2350,6 +2351,20 @@
       <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:6px;">⚠️ Weak Subjects <span style="font-weight:400;color:var(--muted);">(AI inhe prioritize karega)</span></label>
       <div id="sp-sub-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1.25rem;min-height:32px;">
         <span style="font-size:.75rem;color:var(--muted);">Subjects add karo syllabus mein — yahan aayenge.</span>
+      </div>
+
+      <div style="border-top:1px solid var(--border);padding-top:1rem;margin-bottom:1rem;">
+        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:6px;">📩 Daily Plan on Telegram</label>
+        <div style="font-size:.72rem;color:var(--muted);line-height:1.5;margin-bottom:8px;">
+          Roz subah apni study plan Telegram pe pao. <b>Steps:</b> (1) niche button se bot kholo aur <b>Start</b> dabao, (2) bot tumhe ek <b>chat ID</b> dega — wo niche paste karo, (3) toggle ON karke Save karo.
+        </div>
+        <button onclick="connectTelegram()" style="width:100%;background:#229ED9;color:#fff;border:none;border-radius:8px;padding:.6rem;font-weight:700;font-size:.85rem;cursor:pointer;font-family:var(--font);margin-bottom:.6rem;">✈️ Connect Telegram (Start the bot)</button>
+        <input type="text" id="tg-chatid" class="ai-gen-input" placeholder="Telegram chat ID (bot se milegi)" style="width:100%;margin:0 0 .6rem;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:.8rem;cursor:pointer;">
+          <input type="checkbox" id="tg-enabled" style="width:16px;height:16px;accent-color:var(--accent);">
+          <span>Send my daily plan to Telegram</span>
+        </label>
+        <button onclick="saveTelegramSettings()" style="margin-top:.6rem;width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:.5rem;font-weight:600;font-size:.8rem;cursor:pointer;font-family:var(--font);">Save Telegram Settings</button>
       </div>
 
       <div class="modal-actions">
@@ -3685,7 +3700,11 @@ function getDefaultState() {
     studyProfile: null,  // Feature 3 – set via Study Profile modal
     plans: [],            // Saved plans: [{id, type, name, createdAt, cfg}]
     activePlanId: null,
-    planSchedule: null    // date -> [topic items] for the active syllabus plan
+    planSchedule: null,   // date -> [topic items] for the active syllabus plan
+    /* Telegram daily-plan delivery. The GitHub Actions sender reads this from
+       Firestore: chatId (target account), enabled (opt-in), and digest
+       (precomputed plan text per date so the job needs no browser logic). */
+    telegram: { chatId: '', username: '', enabled: false, digest: null }
   };
 }
 
@@ -3970,6 +3989,10 @@ let _localDirty = false; // true when there are local edits not yet written to F
 function saveProgress() {
   if (!currentUser || currentUser.isGuest) return;
 
+  /* Refresh the precomputed Telegram digest so the daily sender always reads
+     an up-to-date plan. Guarded so it can never block a save. */
+  try { if (appState.telegram && appState.telegram.enabled) refreshTelegramDigest(); } catch(e) {}
+
   _localDirty = true;
   // Immediate localStorage cache (always)
   localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState));
@@ -4031,6 +4054,88 @@ document.addEventListener('visibilitychange', function() {
 });
 window.addEventListener('pagehide', flushSaveOnExit);
 window.addEventListener('beforeunload', flushSaveOnExit);
+
+/* ══════════════════════════════════════════════
+   TELEGRAM DAILY PLAN — link + precomputed digest
+   The actual sending is done by a daily GitHub Actions job (server-side).
+   The browser's only jobs are:
+     1. let the user opt in + store their Telegram chatId
+     2. precompute a per-date plain-text digest so the job can just read it
+══════════════════════════════════════════════ */
+
+/* Build up to 7 days (today + next 6) of plan text from the combined schedule
+   map (study topics + due revisions). Stored as { 'YYYY-MM-DD': 'line\nline' }. */
+function buildTelegramDigest() {
+  const digest = {};
+  try {
+    const map = (typeof getPlanScheduleMap === 'function') ? getPlanScheduleMap() : {};
+    const start = new Date();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      const ds = (typeof fmtDate === 'function') ? fmtDate(d) : d.toISOString().slice(0, 10);
+      const items = (map[ds] || []).filter(it => it.type !== 'spacer');
+      if (!items.length) continue;
+      const lines = items.map(it => {
+        const ch = it.ch || {};
+        if (it.type === 'revise') return `🔁 Revise: ${ch.name || ''}${it.dueLabel ? ' (' + it.dueLabel + ')' : ''}`;
+        return `📖 ${ch.name || ''}${it.part ? ' ' + it.part : ''}${ch.subName ? '  — ' + ch.subName : ''}`;
+      });
+      digest[ds] = lines.join('\n');
+    }
+  } catch(e) {}
+  return digest;
+}
+
+/* Refresh the stored digest (called whenever the plan or progress changes). */
+function refreshTelegramDigest() {
+  if (!appState.telegram) appState.telegram = { chatId:'', username:'', enabled:false, digest:null };
+  appState.telegram.digest = buildTelegramDigest();
+}
+
+/* Save the Telegram settings from the Study Profile modal. */
+function saveTelegramSettings() {
+  if (!appState.telegram) appState.telegram = { chatId:'', username:'', enabled:false, digest:null };
+  const chatEl = document.getElementById('tg-chatid');
+  const onEl   = document.getElementById('tg-enabled');
+  if (chatEl) appState.telegram.chatId = (chatEl.value || '').trim();
+  if (onEl)   appState.telegram.enabled = !!onEl.checked;
+  refreshTelegramDigest();
+  saveProgress();
+  if (typeof showToast === 'function') {
+    showToast(appState.telegram.enabled
+      ? (appState.telegram.chatId ? '📩 Daily Telegram plan ON' : '⚠️ Pehle Telegram bot Start karke chat ID dalo')
+      : 'Telegram daily plan OFF', appState.telegram.enabled && appState.telegram.chatId ? 'success' : 'info');
+  }
+}
+
+/* Open the bot so the user can press Start; payload carries their uid. */
+const TELEGRAM_BOT_USERNAME = 'SSCplannerbot'; /* Connect button opens https://t.me/SSCplannerbot */
+function connectTelegram() {
+  const uid = (currentUser && currentUser.uid) ? currentUser.uid : '';
+  const url = 'https://t.me/' + TELEGRAM_BOT_USERNAME + (uid ? '?start=' + encodeURIComponent(uid) : '');
+  window.open(url, '_blank');
+}
+
+/* Opened from the user dropdown — close the menu and show the Study Profile
+   modal, which contains the full Telegram daily-plan section. */
+function openTelegramSettings() {
+  try {
+    const menu = document.getElementById('user-menu-dropdown');
+    if (menu) menu.classList.remove('open');
+  } catch(e) {}
+  if (typeof openStudyProfileModal === 'function') {
+    openStudyProfileModal();
+    /* Scroll the Telegram section into view inside the modal. */
+    setTimeout(function() {
+      try {
+        const el = document.getElementById('tg-chatid');
+        if (el) el.scrollIntoView({ behavior:'smooth', block:'center' });
+      } catch(e) {}
+    }, 200);
+  } else if (typeof showToast === 'function') {
+    showToast('Open Planner → ⚙️ Profile to connect Telegram.', 'info');
+  }
+}
 
 /* ══════════════════════════════════════════════
    APP INIT
@@ -4984,10 +5089,44 @@ function buildScheduleForCfg(cfg) {
   return {};
 }
 
+/* Overlay the spaced-repetition revision queue onto a plan schedule map.
+   Each due / upcoming (next 30 days) chapter revision is placed on its real
+   nextRevisionAt date as a clickable revise item (type:'revise', fromEngine).
+   This is what unifies the study plan with the revision system. */
+function injectRevisionsIntoMap(map) {
+  if (!map) map = {};
+  try {
+    const today = (typeof todayISO === 'function') ? todayISO() : new Date().toISOString().slice(0,10);
+    const subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : [];
+    const subOf = chId => subs.find(s => s.chapters.some(c => c.id === chId));
+    const due  = (typeof getDueRevisions === 'function') ? getDueRevisions() : [];
+    const soon = (typeof getUpcomingRevisions === 'function') ? getUpcomingRevisions(30) : [];
+    const seen = new Set();
+    [...due, ...soon].forEach(({ ch, state }) => {
+      if (!ch || !state || !state.nextRevisionAt || seen.has(ch.id)) return;
+      seen.add(ch.id);
+      /* Overdue revisions surface on today so they aren't buried in the past. */
+      const date = state.nextRevisionAt < today ? today : state.nextRevisionAt;
+      const sub = subOf(ch.id);
+      const overdue = state.nextRevisionAt < today;
+      const dueLabel = overdue ? 'overdue' : (date === today ? 'due today' : 'due ' + date);
+      const meta = { ...ch, subName: sub ? sub.name : '', color: sub ? sub.color : '#A855F7', subId: sub ? sub.id : '' };
+      if (!map[date]) map[date] = [];
+      map[date].push({ type:'revise', fromEngine:true, ch: meta, dueLabel });
+    });
+  } catch(e) {}
+  return map;
+}
+
 /* Returns a COMBINED date->items map across ALL saved plans (syllabus + mock),
-   so the planner shows study topics AND mock tests together on their dates.
-   Rebuilt every call so Day/Week/Month/3-Month always stay in sync. */
+   PLUS real revision-queue items, so the planner shows study topics, mock
+   tests AND due revisions together on their dates. Rebuilt every call so
+   Day/Week/Month/3-Month always stay in sync. */
 function getPlanScheduleMap() {
+  return injectRevisionsIntoMap(_getPlanStudyMap());
+}
+
+function _getPlanStudyMap() {
   const combined = {};
   const merge = (map) => {
     if (!map) return;
@@ -5461,13 +5600,24 @@ function buildPlanSchedule(cfg) {
      slots (1/N..N/N) followed by `gap` revise slots. */
   const perSubject = subjects.map((sub, idx) => {
     const slots = [];
-    sub.chapters.filter(c => !appState.progress[c.id]?.done).forEach(ch => {
+    const pending = sub.chapters.filter(c => !appState.progress[c.id]?.done);
+    /* Study chapters in the user-chosen Order (#). Chapters with a lower
+       number come first; ties / blanks keep their original syllabus order. */
+    const ordered = pending
+      .map((ch, i) => ({ ch, i, ord: Number((chConf[ch.id] || {}).order) || (i + 1) }))
+      .sort((a, b) => (a.ord - b.ord) || (a.i - b.i))
+      .map(x => x.ch);
+    ordered.forEach(ch => {
       const cc   = chConf[ch.id] || {};
       const days = Math.max(1, Number(cc.days) || 3);
       const gap  = Math.max(0, Number(cc.gap)  || 0);
       const meta = { ...ch, subName: sub.name, color: sub.color, subId: sub.id };
       for (let i = 0; i < days; i++) slots.push({ type:'study',  ch: meta, part: days>1 ? `(${i+1}/${days})` : '' });
-      for (let i = 0; i < gap;  i++) slots.push({ type:'revise', ch: meta });
+      /* Gap days reserve spacing after a chapter, but the actual revision
+         reminders now come from the spaced-repetition engine (see
+         getPlanScheduleMap), so we add empty spacer slots instead of static
+         "Revise" blocks to avoid duplicating the real revision queue. */
+      for (let i = 0; i < gap;  i++) slots.push({ type:'spacer', ch: meta });
     });
     return { subId: sub.id, freq: freqOf(sub.id), offset: idx, slots };
   }).filter(s => s.slots.length);
@@ -5511,20 +5661,27 @@ function buildPlanSchedule(cfg) {
 /* Render a list of schedule items (study/revise) as simple topic rows — no
    clock times. Used by the day/week/month/3-month planner views. */
 function renderTopicListItems(items, emptyMsg) {
-  if (!items || !items.length) {
+  const visible = (items || []).filter(it => it.type !== 'spacer');
+  if (!visible.length) {
     return `<div style="color:var(--muted);font-size:.82rem;padding:.4rem 0;">${escapeHtml(emptyMsg || 'No topics scheduled.')}</div>`;
   }
-  return items.map(it => {
+  return visible.map(it => {
     const ch = it.ch || {};
     const isRevise = it.type === 'revise';
+    /* Engine-backed revisions (from the spaced-repetition queue) are clickable:
+       clicking opens the rating modal which updates mastery + reschedules. */
+    const clickable = isRevise && it.fromEngine && ch.id;
     const accent = isRevise ? '#A855F7' : (ch.color || 'var(--accent)');
+    const revLabel = it.dueLabel ? ` <span style="font-size:.62rem;color:#A855F7;">(${escapeHtml(it.dueLabel)})</span>` : '';
     const tag = isRevise
-      ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:rgba(168,85,247,.12);color:#A855F7;white-space:nowrap;">🔁 Revise</span>`
+      ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:rgba(168,85,247,.12);color:#A855F7;white-space:nowrap;">${clickable ? '🔁 Revise now' : '🔁 Revise'}</span>`
       : (ch.diff ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:var(--card);color:var(--muted);white-space:nowrap;">${escapeHtml(ch.diff)}</span>` : '');
+    const clickAttr = clickable
+      ? ` onclick="openReviseModal('${ch.id}')" title="Click to revise &amp; rate"` : '';
     return `
-      <div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${accent};border-radius:8px;padding:.55rem .85rem;display:flex;align-items:center;gap:10px;">
+      <div${clickAttr} style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${accent};border-radius:8px;padding:.55rem .85rem;display:flex;align-items:center;gap:10px;${clickable?'cursor:pointer;':''}">
         <div style="width:8px;height:8px;border-radius:50%;background:${accent};flex-shrink:0;"></div>
-        <span style="flex:1;font-size:.82rem;${isRevise?'color:#A855F7;':''}">${isRevise?'🔁 ':''}${escapeHtml(ch.name||'')} <span style="color:var(--muted);font-size:.7rem;">${it.part||''}</span></span>
+        <span style="flex:1;font-size:.82rem;${isRevise?'color:#A855F7;':''}">${isRevise?'🔁 ':''}${escapeHtml(ch.name||'')}${revLabel} <span style="color:var(--muted);font-size:.7rem;">${it.part||''}</span></span>
         <span style="font-size:.62rem;color:var(--muted);white-space:nowrap;">${escapeHtml(ch.subName||'')}</span>
         ${tag}
       </div>`;
@@ -5571,9 +5728,10 @@ function renderSyllabusPlan(cfg) {
   const subKeys = schedule.subjectIds;
   const phase = getPreparationPhase(getDaysLeft());
 
-  /* Today's topic list (no clock). */
+  /* Today's topic list (no clock). Use the combined map so due revisions from
+     the spaced-repetition engine appear alongside today's study topics. */
   const todayStr = fmtDate(new Date());
-  const todayItems = schedule.byDate[todayStr] || [];
+  const todayItems = (getPlanScheduleMap()[todayStr]) || schedule.byDate[todayStr] || [];
   window._lastPlanQueue = todayItems.filter(it => it.type === 'study').map(it => it.ch);
   window._lastPlanType = 'syllabus';
 
@@ -6121,8 +6279,17 @@ function closePlanWizard() {
 }
 
 function planWizardOutsideClose(e) {
-  if (e.target.id === 'plan-wizard-overlay') closePlanWizard();
+  /* Intentionally a no-op: clicking outside the wizard must NOT close it, so an
+     accidental backdrop click can't wipe the plan config the user is setting up.
+     The wizard closes only via the × button (closePlanWizard) or the Escape key. */
 }
+
+/* Allow Escape to close the wizard (keyboard-friendly, still deliberate). */
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Escape') return;
+  const ov = document.getElementById('plan-wizard-overlay');
+  if (ov && ov.classList.contains('open')) closePlanWizard();
+});
 
 /* Sync DOM inputs ←→ state (when opening wizard) */
 function pwSyncInputsFromState() {
@@ -6280,10 +6447,12 @@ function pwEnsureChapterConf() {
     if (PW_STATE.syllabus.subjectHours[sub.id] == null) PW_STATE.syllabus.subjectHours[sub.id] = PW_STATE.syllabus.dailyHours || 2;
   });
   subs.forEach(sub => {
-    sub.chapters.forEach(ch => {
+    sub.chapters.forEach((ch, i) => {
       if (!PW_STATE.syllabus.chapters[ch.id]) {
         const defMins = ch.diff === 'Hard' ? 60 : ch.diff === 'Medium' ? 45 : 30;
-        PW_STATE.syllabus.chapters[ch.id] = { days: 3, gap: 0, mins: defMins, minsOverride: false };
+        PW_STATE.syllabus.chapters[ch.id] = { order: i + 1, days: 3, gap: 0, mins: defMins, minsOverride: false };
+      } else if (PW_STATE.syllabus.chapters[ch.id].order == null) {
+        PW_STATE.syllabus.chapters[ch.id].order = i + 1;
       }
     });
   });
@@ -6395,8 +6564,14 @@ function pwRenderSyllabusSubjectPane() {
       <span style="font-size:.7rem;color:var(--accent);font-weight:600;">Auto: ${autoEnd}</span>
     </div>`;
 
-  /* Chapter table */
-  const rows = sub.chapters.map(ch => {
+  /* Chapter table — rendered sorted by the user-chosen Order (#) so a row
+     jumps to its new position as soon as the number changes. Ties / blanks
+     keep the original syllabus order. */
+  const orderedChapters = sub.chapters
+    .map((ch, i) => ({ ch, i, ord: Number((PW_STATE.syllabus.chapters[ch.id] || {}).order) || (i + 1) }))
+    .sort((a, b) => (a.ord - b.ord) || (a.i - b.i))
+    .map(x => x.ch);
+  const rows = orderedChapters.map(ch => {
     const c = PW_STATE.syllabus.chapters[ch.id];
     const diffColor = ch.diff==='Hard' ? 'var(--amber)' : ch.diff==='Medium' ? 'var(--blue)' : 'var(--accent)';
     return `
@@ -6405,6 +6580,14 @@ function pwRenderSyllabusSubjectPane() {
           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${sub.color||'var(--accent)'};margin-right:6px;"></span>
           ${escapeHtml(ch.name)}
           <span style="font-size:.65rem;color:${diffColor};margin-left:4px;">${ch.diff||''}</span>
+        </td>
+        <td style="padding:6px 4px;">
+          <input type="number" min="1" max="99" value="${c.order}"
+                 style="width:48px;background:var(--surface);border:1px solid var(--border);border-radius:6px;
+                        color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
+                 title="Order — which chapter to study first (1 = first)"
+                 oninput="pwUpdateChConf('${ch.id}','order',this.value)"
+                 onchange="pwReorderChapter('${ch.id}',this.value)">
         </td>
         <td style="padding:6px 4px;">
           <input type="number" min="1" max="30" value="${c.days}"
@@ -6437,6 +6620,7 @@ function pwRenderSyllabusSubjectPane() {
         <thead>
           <tr style="background:var(--surface);">
             <th style="padding:6px 8px;text-align:left;font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Chapter</th>
+            <th style="padding:6px 4px;text-align:center;font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;" title="Order — which chapter to study first (1 = first)">#</th>
             <th style="padding:6px 4px;text-align:center;font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;" title="Days to study this chapter">Days</th>
             <th style="padding:6px 4px;text-align:center;font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;" title="Revision gap days after chapter">Gap</th>
             <th style="padding:6px 4px;text-align:center;font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;" title="Optional: minutes per day (blank = auto)">Mins</th>
@@ -6446,7 +6630,7 @@ function pwRenderSyllabusSubjectPane() {
       </table>
     </div>
     <div style="font-size:.7rem;color:var(--muted);margin-top:.6rem;line-height:1.6;">
-      💡 <b>Days</b> = chapter padhne ke din &nbsp;|&nbsp; <b>Gap</b> = baad mein revision ke din (timetable mein 🔁 Revise block banega) &nbsp;|&nbsp; <b>Mins</b> = optional override
+      💡 <b>#</b> = kaunsa chapter pehle (1 = sabse pehle) &nbsp;|&nbsp; <b>Days</b> = chapter padhne ke din &nbsp;|&nbsp; <b>Gap</b> = baad mein revision ke din (timetable mein 🔁 Revise block banega) &nbsp;|&nbsp; <b>Mins</b> = optional override
     </div>`;
 
   pwUpdateFooter();
@@ -6469,6 +6653,7 @@ function pwSetSubjectHours(subId, val) {
 function pwUpdateChConf(chId, key, val) {
   pwEnsureChapterConf();
   const c = PW_STATE.syllabus.chapters[chId];
+  if (key === 'order') c.order = Math.max(1, parseInt(val) || 1);
   if (key === 'days') c.days = Math.max(1, parseInt(val) || 1);
   if (key === 'gap')  c.gap  = Math.max(0, parseInt(val) || 0);
   if (key === 'mins') {
@@ -6503,6 +6688,38 @@ function pwIsStep2Valid() {
     return anySubj || PW_STATE.mock.fullMockPerWeek > 0;
   }
   return false;
+}
+
+/* Move a chapter to the chosen position (1 = first). Renumbers every chapter
+   of the current subject into a clean 1..N sequence with the moved chapter at
+   the requested slot, then re-renders so the row visibly jumps there. */
+function pwReorderChapter(chId, val) {
+  pwEnsureChapterConf();
+  const subs = getActiveSubjects();
+  const sub  = subs.find(s => s.id === PW_STATE.syllabus.subId) || subs[0];
+  if (!sub) return;
+  const conf = PW_STATE.syllabus.chapters;
+
+  /* Current order of this subject's chapters (by their order number). */
+  const seq = sub.chapters
+    .map((ch, i) => ({ id: ch.id, i, ord: Number((conf[ch.id] || {}).order) || (i + 1) }))
+    .sort((a, b) => (a.ord - b.ord) || (a.i - b.i))
+    .map(x => x.id);
+
+  const total = seq.length;
+  let target = parseInt(val);
+  if (isNaN(target)) return;
+  target = Math.max(1, Math.min(total, target)); /* clamp 1..N */
+
+  const from = seq.indexOf(chId);
+  if (from === -1) return;
+  seq.splice(from, 1);                /* remove from current spot */
+  seq.splice(target - 1, 0, chId);    /* insert at chosen position */
+
+  /* Renumber 1..N */
+  seq.forEach((id, idx) => { if (conf[id]) conf[id].order = idx + 1; });
+
+  pwRenderSyllabusSubjectPane();
 }
 
 function pwUpdateSylConf() {} /* legacy stub — no longer used */
@@ -7293,6 +7510,10 @@ function submitRevision(chId, rating) {
   buildSyllabus();
   renderRevisionQueue();
   renderRevisionWidget();
+  /* Keep the planner in sync — the revised chapter should reschedule / drop
+     off today's plan immediately. */
+  try { if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar(); } catch(e) {}
+  try { if (typeof renderPlannerView === 'function') renderPlannerView(); } catch(e) {}
   const overlay = document.getElementById('revise-modal-overlay');
   if (overlay) overlay.remove();
   const messages = {
@@ -11493,6 +11714,23 @@ function ezExportNotesPdf() {
       }
     }, 1500);
   });
+})();
+
+/* Pre-fill the Telegram fields whenever the Study Profile modal opens. */
+(function() {
+  if (typeof openStudyProfileModal === 'function') {
+    var _openSPM = openStudyProfileModal;
+    openStudyProfileModal = function() {
+      _openSPM.apply(this, arguments);
+      try {
+        var tg = (appState && appState.telegram) || {};
+        var c = document.getElementById('tg-chatid');
+        var e = document.getElementById('tg-enabled');
+        if (c) c.value = tg.chatId || '';
+        if (e) e.checked = !!tg.enabled;
+      } catch(err) {}
+    };
+  }
 })();
 
 /* ══════════════════════════════════════════════

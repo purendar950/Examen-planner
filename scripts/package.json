@@ -1,0 +1,11 @@
+{
+  "name": "examzen-telegram-sender",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daily Telegram study-plan sender for ExamZen (runs in GitHub Actions).",
+  "main": "send-telegram.js",
+  "dependencies": {
+    "firebase-admin": "^12.0.0",
+    "node-fetch": "^2.7.0"
+  }
+}
