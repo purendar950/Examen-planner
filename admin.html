@@ -1617,33 +1617,6 @@ async function markRequest(id, status) {
 </script>
 <style>
 #minimax-floating-ball { display:none !important; }
-/*
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  padding: 10px 12px;
-  background: #222222;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  color: #F8F8F8;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  z-index: 9999;
-  transition: all 0.3s ease;
-  overflow: hidden;
-  cursor: pointer;
-}
-
-#minimax-floating-ball:hover {
-  transform: translateY(-2px);
-  background: #383838;
-}
-.minimax-ball-content {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .minimax-logo-wave {
   width: 20px;
   height: 20px;
@@ -1679,55 +1652,5 @@ async function markRequest(id, status) {
   opacity: 1;
 }
 </style>
-<div id="minimax-floating-ball">
-  <div class="minimax-ball-content">
-    <div class="minimax-logo-wave"></div>
-    <span class="minimax-ball-text">Created by MiniMax Agent</span>
-  </div>
-  <div class="minimax-close-icon">×</div>
-</div>
-<script>
-// Initialize floating ball functionality
-function initFloatingBall() {
-  const ball = document.getElementById('minimax-floating-ball');
-  if (!ball) return;
-
-  // Initial animation
-  ball.style.opacity = '0';
-  ball.style.transform = 'translateY(20px)';
-
-  setTimeout(() => {
-    ball.style.opacity = '1';
-    ball.style.transform = 'translateY(0)';
-  }, 500);
-
-  // Handle logo click
-  const ballContent = ball.querySelector('.minimax-ball-content');
-  ballContent.addEventListener('click', function (e) {
-    e.stopPropagation();
-    window.open('https://agent.minimax.io/', '_blank');
-    ball.style.transform = 'scale(0.95)';
-    setTimeout(() => {
-      ball.style.transform = 'scale(1)';
-    }, 100);
-  });
-
-  // Handle close button click
-  const closeIcon = ball.querySelector('.minimax-close-icon');
-  closeIcon.addEventListener('click', function (e) {
-    e.stopPropagation();
-    ball.style.opacity = '0';
-    ball.style.transform = 'translateY(20px)';
-
-    setTimeout(() => {
-      ball.style.display = 'none';
-    }, 300);
-  });
-}
-
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', initFloatingBall); 
-</script>
-*/
 </body>
 </html>
