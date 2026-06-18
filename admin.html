@@ -1230,15 +1230,18 @@ function buildTgMessage(name, digest) {
   return header + body + '\n\n— ExamZen';
 }
 
-/* Send a message to one user via Telegram API */
+/* Render bot proxy URL — routes /send to Telegram server-side (fixes CORS) */
+const RENDER_BOT_URL = 'https://examen-planner-2.onrender.com';
+
+/* Send a message to one user via Render bot proxy (avoids browser CORS block) */
 async function tgSendOne(chatId, text, token) {
-  const res = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+  const res = await fetch(RENDER_BOT_URL + '/send', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true })
+    body: JSON.stringify({ chatId, text })
   });
   const data = await res.json();
-  if (!data.ok) throw new Error('Telegram: ' + (data.description || data.error_code));
+  if (!data.ok) throw new Error('Telegram: ' + (data.error || 'Send failed'));
   return data;
 }
 

@@ -1,21 +1,21 @@
 /**
  * ExamZen Telegram Bot Server
  * ─────────────────────────────────────────────────────────────────────────────
- * Ye bot kya karta hai:
- *   - Jab user /start dabata hai → apna Telegram Chat ID reply karta hai
- *   - Woh ID user ExamZen app mein paste karta hai → daily plan milta hai
+ * Routes:
+ *   GET  /          → health check
+ *   POST /send      → proxy: sends a Telegram message server-side (CORS-safe)
  *
- * Deploy on Render (free Worker):
- *   1. GitHub par push karo
- *   2. Render → New Worker → connect repo
- *   3. Root directory: bot/
- *   4. Build: npm install
- *   5. Start: node bot-server.js
- *   6. Env var: TELEGRAM_BOT_TOKEN = <BotFather token>
+ * Deploy on Render (Web Service):
+ *   Root directory: bot
+ *   Build:          npm install
+ *   Start:          node bot-server.js
+ *   Env vars:       TELEGRAM_BOT_TOKEN
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 const TelegramBot = require('node-telegram-bot-api');
+const http        = require('http');
+const https       = require('https');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TOKEN) {
@@ -24,14 +24,12 @@ if (!TOKEN) {
 }
 
 const bot = new TelegramBot(TOKEN, { polling: true });
-
 console.log('🤖 ExamZen Bot running (long-polling)...');
 
 /* ── /start handler ─────────────────────────────────────────────────────── */
 bot.onText(/^\/start(.*)$/, (msg) => {
-  const chatId   = msg.chat.id;
-  const name     = msg.from.first_name || 'Student';
-
+  const chatId = msg.chat.id;
+  const name   = msg.from.first_name || 'Student';
   const text =
     `👋 Namaste <b>${name}</b>!\n\n` +
     `✅ Bot se successfully connect ho gaye!\n\n` +
@@ -40,13 +38,12 @@ bot.onText(/^\/start(.*)$/, (msg) => {
     `👆 Upar wala number <b>copy karo</b> aur ExamZen app mein:\n` +
     `<b>Profile → Daily Plan on Telegram → Chat ID field</b> mein paste karo, toggle ON karo, Save karo.\n\n` +
     `📚 Phir roz <b>6:00 AM IST</b> pe aaj ka study plan yahan milega!`;
-
   bot.sendMessage(chatId, text, { parse_mode: 'HTML' })
     .then(() => console.log(`✅ Sent chat ID to ${chatId} (${name})`))
     .catch(err => console.error(`❌ sendMessage error for ${chatId}:`, err.message));
 });
 
-/* ── /id  or  /chatid  — in case user forgot their ID ─────────────────── */
+/* ── /id  or  /chatid ───────────────────────────────────────────────────── */
 bot.onText(/^\/(id|chatid)$/, (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId,
@@ -67,7 +64,7 @@ bot.onText(/^\/help$/, (msg) => {
   ).catch(err => console.error('sendMessage error:', err.message));
 });
 
-/* ── Handle any other text — guide them to /start ──────────────────────── */
+/* ── Handle any other text ──────────────────────────────────────────────── */
 bot.on('message', (msg) => {
   if (msg.text && !msg.text.startsWith('/')) {
     bot.sendMessage(msg.chat.id,
@@ -77,31 +74,100 @@ bot.on('message', (msg) => {
   }
 });
 
-/* ── Polling error handler ─────────────────────────────────────────────── */
+/* ── Polling error handler ──────────────────────────────────────────────── */
 bot.on('polling_error', (err) => {
   console.error('⚠️  Polling error:', err.code, err.message);
-  /* Don't exit — let Render restart if needed */
 });
 
-/* ── Keep alive on Render free tier (pings self every 14 min) ─────────── */
-if (process.env.RENDER_EXTERNAL_URL) {
-  const https = require('https');
-  const http  = require('http');
-  const url   = process.env.RENDER_EXTERNAL_URL;
+/* ── HTTP Server (health check + /send proxy) ───────────────────────────── */
+const PORT = process.env.PORT || 3000;
 
-  /* Tiny HTTP server so Render health checks don't fail */
-  const server = require('http').createServer((req, res) => {
-    res.writeHead(200);
+const server = http.createServer((req, res) => {
+
+  /* CORS headers — allow admin.html on GitHub Pages to call this */
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  /* Preflight */
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  /* Health check */
+  if (req.method === 'GET' && req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ExamZen Bot is alive 🤖');
-  });
-  const PORT = process.env.PORT || 3000;
-  server.listen(PORT, () => console.log(`🌐 Health server on :${PORT}`));
+    return;
+  }
 
-  /* Ping self every 14 minutes to prevent sleep on free tier */
+  /* ── POST /send — proxy Telegram sendMessage ── */
+  if (req.method === 'POST' && req.url === '/send') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { chatId, text } = JSON.parse(body);
+        if (!chatId || !text) throw new Error('chatId and text are required');
+
+        const tgUrl = `https://api.telegram.org/bot${TOKEN}/sendMessage`;
+        const payload = JSON.stringify({
+          chat_id:                  chatId,
+          text,
+          parse_mode:               'HTML',
+          disable_web_page_preview: true,
+        });
+
+        /* Call Telegram API from server side — no CORS issues */
+        const tgRes = await new Promise((resolve, reject) => {
+          const r = https.request(tgUrl, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+          }, (resp) => {
+            let d = '';
+            resp.on('data', c => d += c);
+            resp.on('end', () => resolve(JSON.parse(d)));
+          });
+          r.on('error', reject);
+          r.write(payload);
+          r.end();
+        });
+
+        if (!tgRes.ok) {
+          const msg = tgRes.description || String(tgRes.error_code);
+          console.error(`❌ /send failed for ${chatId}: ${msg}`);
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: msg }));
+        } else {
+          console.log(`✅ /send → chatId:${chatId}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+        }
+      } catch (e) {
+        console.error('❌ /send error:', e.message);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
+  /* 404 for anything else */
+  res.writeHead(404);
+  res.end('Not found');
+});
+
+server.listen(PORT, () => console.log(`🌐 Health server on :${PORT}`));
+
+/* ── Keep-alive ping every 14 min (prevents free tier sleep) ───────────── */
+const renderUrl = process.env.RENDER_EXTERNAL_URL;
+if (renderUrl) {
   setInterval(() => {
     try {
-      const mod = url.startsWith('https') ? https : http;
-      mod.get(url, (r) => console.log(`💓 Keep-alive ping → ${r.statusCode}`))
+      const mod = renderUrl.startsWith('https') ? https : http;
+      mod.get(renderUrl, (r) => console.log(`💓 Keep-alive ping → ${r.statusCode}`))
          .on('error', (e) => console.log('Keep-alive ping error:', e.message));
     } catch(e) {}
   }, 14 * 60 * 1000);
