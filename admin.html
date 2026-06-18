@@ -92,7 +92,6 @@
     <div class="tab" data-t="analytics" onclick="setTab('analytics')">📊 Analytics</div>
     <div class="tab active" data-t="pending" onclick="setTab('pending')">⏳ Pending <span id="cnt-pending"></span></div>
     <div class="tab" data-t="users" onclick="setTab('users')">👥 Users</div>
-    <div class="tab" data-t="telegram" onclick="setTab('telegram')">✈️ Telegram <span id="cnt-tg"></span></div>
     <div class="tab" data-t="plans" onclick="setTab('plans')">💰 Plans</div>
     <div class="tab" data-t="payments" onclick="setTab('payments')">🧾 Payments</div>
     <div class="tab" data-t="referrals" onclick="setTab('referrals')">🔗 Referrals</div>
@@ -123,7 +122,6 @@ const db = firebase.firestore(), auth = firebase.auth();
 let USERS = [], PLANS = [], PAYMENTS = [], REQUESTS = [], COUPONS = [], REDEMPTIONS = [], TAB = 'pending', PAY_FILTER = 'all', PAY_VIEW = 'list'; // 'list' | 'reconcile'
 let CONFIG = {}, SETTINGS = { requireApproval: false };
 let DUP = { mobile:{}, fp:{}, ip:{} };
-let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = false;
 
 function showToast(msg) { let t=document.getElementById('adm-toast'); if(!t){t=document.createElement('div');t.id='adm-toast';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 20px;border-radius:10px;font-size:0.85rem;z-index:999;';document.body.appendChild(t);} t.textContent=msg;t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(()=>t.style.opacity='0',2500); }
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -298,7 +296,6 @@ function flagsFor(u) {
 function setTab(t) {
   TAB = t;
   document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.t === t));
-  if (t === 'telegram' && !TG_CONFIG.loaded) loadTelegramData();
   render();
 }
 function render() {
@@ -310,9 +307,6 @@ function render() {
   const newReqs = (REQUESTS || []).filter(r => r.status === 'new').length;
   const cntReqEl = document.getElementById('cnt-requests');
   if (cntReqEl) cntReqEl.textContent = newReqs ? '(' + newReqs + ')' : '';
-  const tgEnabled = TG_USERS.filter(u => u.tg.enabled && u.tg.chatId).length;
-  const cntTgEl = document.getElementById('cnt-tg');
-  if (cntTgEl) cntTgEl.textContent = tgEnabled ? '(' + tgEnabled + ')' : '';
   document.getElementById('stats').innerHTML =
     '<div class="stat"><b>' + USERS.length + '</b><div>Total users</div></div>' +
     '<div class="stat"><b style="color:var(--amber)">' + pending + '</b><div>Pending requests</div></div>' +
@@ -329,7 +323,6 @@ function render() {
   else if (TAB === 'payouts') c.innerHTML = renderPayouts();
   else if (TAB === 'coupons') c.innerHTML = renderCoupons();
   else if (TAB === 'requests') c.innerHTML = renderRequests();
-  else if (TAB === 'telegram') c.innerHTML = renderTelegram();
   else if (TAB === 'settings') c.innerHTML = renderSettings();
 }
 
@@ -1162,251 +1155,6 @@ function renderRequests() {
     (r.status==='new' ? '<div class="row" style="flex-shrink:0;align-items:flex-start;"><button class="btn btn-green" onclick="markRequest(\'' + r.id + '\',\'done\')">&#10003; Mark Done</button><button class="btn btn-red" onclick="markRequest(\'' + r.id + '\',\'dismissed\')">Dismiss</button></div>' : '') +
     '</div></div>';
   }).join('');
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   TELEGRAM ADMIN TAB
-   ════════════════════════════════════════════════════════════════════ */
-
-/* Load bot token from Firestore + all users' telegram data */
-async function loadTelegramData() {
-  TG_CONFIG.loaded = true;
-  /* Load bot token */
-  try {
-    const snap = await db.collection('config').doc('telegram').get();
-    TG_CONFIG = { ...(snap.exists ? snap.data() : {}), loaded: true };
-  } catch(e) { TG_CONFIG = { loaded: true }; }
-  /* Load every user's full doc to get appState.telegram */
-  try {
-    const snap = await db.collection('users').get();
-    TG_USERS = snap.docs
-      .map(d => {
-        const data = d.data() || {};
-        const tg   = (data.appState && data.appState.telegram) || {};
-        const prof = data.profile || {};
-        return {
-          id:   d.id,
-          name: prof.name  || 'Unknown',
-          email:prof.email || '',
-          tg:   {
-            chatId:  tg.chatId  || prof.telegramChatId || '',
-            enabled: (typeof tg.enabled === 'boolean') ? tg.enabled : !!prof.telegramEnabled,
-            digest:  tg.digest  || {}
-          }
-        };
-      })
-      .filter(u => u.tg.chatId); /* only users who've set a chat ID */
-    TG_USERS.sort((a,b) => (b.tg.enabled ? 1 : 0) - (a.tg.enabled ? 1 : 0));
-  } catch(e) { TG_USERS = []; showToast('TG users load failed: ' + e.message); }
-  render();
-}
-
-/* Save bot token to Firestore */
-async function saveTgBotToken() {
-  const el = document.getElementById('tg-token-input');
-  if (!el) return;
-  const token = el.value.trim();
-  if (!token || !/^\d+:/.test(token)) { showToast('⚠️ Valid bot token daalo (format: 123456:ABC-xyz)'); return; }
-  try {
-    await db.collection('config').doc('telegram').set({ botToken: token, savedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
-    TG_CONFIG.botToken = token;
-    showToast('✅ Bot token saved!');
-    render();
-  } catch(e) { showToast('Failed: ' + e.message); }
-}
-
-/* Build today's message text for a user */
-function buildTgMessage(name, digest) {
-  const today = (function() {
-    const now = new Date();
-    const ist = new Date(now.getTime() + (5*60+30)*60000);
-    return ist.toISOString().slice(0,10);
-  })();
-  const header = '☀️ <b>Good morning, ' + name + '!</b>\n📅 Aaj ka study plan (' + today + ')\n\n';
-  const plan   = digest && digest[today];
-  const body   = (plan && plan.trim())
-    ? plan
-    : '📋 Aaj koi topic scheduled nahi.\n💡 App kholo → Planner mein topics add karo → Save karo.';
-  return header + body + '\n\n— ExamZen';
-}
-
-/* Send a message to one user via Telegram API */
-async function tgSendOne(chatId, text, token) {
-  const res = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true })
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error('Telegram: ' + (data.description || data.error_code));
-  return data;
-}
-
-/* Send to a single user from the table row */
-async function tgSendToUser(uid) {
-  const token = TG_CONFIG.botToken;
-  if (!token) { showToast('⚠️ Pehle Bot Token save karo!'); document.getElementById('tg-token-input') && document.getElementById('tg-token-input').focus(); return; }
-  const u = TG_USERS.find(x => x.id === uid);
-  if (!u) return;
-  const btn = document.getElementById('tg-btn-' + uid);
-  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
-  try {
-    const msg = buildTgMessage(u.name.split(' ')[0], u.tg.digest);
-    await tgSendOne(u.tg.chatId, msg, token);
-    if (btn) { btn.textContent = '✅ Sent'; btn.style.background = 'var(--accent-dark)'; }
-    showToast('✅ Sent to ' + u.name);
-  } catch(e) {
-    if (btn) { btn.disabled = false; btn.textContent = '📤 Send'; btn.style.background = ''; }
-    showToast('❌ ' + u.name + ': ' + e.message);
-  }
-}
-
-/* Send to ALL enabled users */
-async function tgSendAll(testMode) {
-  const token = TG_CONFIG.botToken;
-  if (!token) { showToast('⚠️ Pehle Bot Token save karo!'); return; }
-  if (TG_SENDING) { showToast('Already sending…'); return; }
-  const targets = testMode
-    ? TG_USERS.filter(u => u.tg.chatId) /* test: send to all with chatId, even disabled */
-    : TG_USERS.filter(u => u.tg.enabled && u.tg.chatId);
-  if (!targets.length) { showToast('No users to send to.'); return; }
-  if (!confirm('Send Telegram message to ' + targets.length + ' user(s)' + (testMode ? ' (TEST — includes disabled users)' : ' (enabled only)') + '?')) return;
-  TG_SENDING = true;
-  const logEl = document.getElementById('tg-send-log');
-  if (logEl) { logEl.style.display = 'block'; logEl.innerHTML = '<b>Sending…</b><br>'; }
-  let ok = 0, fail = 0;
-  for (const u of targets) {
-    try {
-      const msg = buildTgMessage(u.name.split(' ')[0], u.tg.digest);
-      await tgSendOne(u.tg.chatId, msg, token);
-      ok++;
-      if (logEl) logEl.innerHTML += '✅ ' + esc(u.name) + ' (' + esc(u.tg.chatId) + ')<br>';
-    } catch(e) {
-      fail++;
-      if (logEl) logEl.innerHTML += '❌ ' + esc(u.name) + ': ' + esc(e.message) + '<br>';
-    }
-    await new Promise(r => setTimeout(r, 80)); /* small delay to avoid rate-limit */
-  }
-  TG_SENDING = false;
-  if (logEl) logEl.innerHTML += '<br><b>Done. ✅ ' + ok + ' sent  ❌ ' + fail + ' failed</b>';
-  showToast('Done: ' + ok + ' sent, ' + fail + ' failed');
-}
-
-/* Toggle enabled flag for a user (saves to Firestore) */
-async function tgToggleUser(uid) {
-  const u = TG_USERS.find(x => x.id === uid); if (!u) return;
-  const newVal = !u.tg.enabled;
-  try {
-    await db.collection('users').doc(uid).update({
-      'appState.telegram.enabled': newVal,
-      'profile.telegramEnabled':   newVal
-    });
-    u.tg.enabled = newVal;
-    showToast((newVal ? '✅ Enabled' : '🔕 Disabled') + ' for ' + u.name);
-    render();
-  } catch(e) { showToast('Update failed: ' + e.message); }
-}
-
-/* Render the Telegram admin tab */
-function renderTelegram() {
-  const total   = TG_USERS.length;
-  const enabled = TG_USERS.filter(u => u.tg.enabled && u.tg.chatId).length;
-  const noDigest= TG_USERS.filter(u => {
-    const today = (function() { const n=new Date(); const i=new Date(n.getTime()+(5*60+30)*60000); return i.toISOString().slice(0,10); })();
-    return u.tg.enabled && u.tg.chatId && !(u.tg.digest && u.tg.digest[today]);
-  }).length;
-  const tokenSet = TG_CONFIG.botToken ? true : false;
-
-  /* ── Stats bar ── */
-  var s = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px;">' +
-    '<div class="stat"><b style="color:#229ED9">' + total + '</b><div>Chat IDs saved</div></div>' +
-    '<div class="stat"><b style="color:var(--accent-dark)">' + enabled + '</b><div>Notifications ON</div></div>' +
-    '<div class="stat"><b style="color:var(--amber)">' + noDigest + '</b><div>No plan today</div></div>' +
-    '<div class="stat"><b style="color:' + (tokenSet ? 'var(--accent-dark)' : 'var(--red)') + '">' + (tokenSet ? '✓' : '✗') + '</b><div>Bot token</div></div>' +
-    '</div>';
-
-  /* ── Bot Token Card ── */
-  s += '<div class="card" style="margin-bottom:12px;">' +
-    '<h3 style="margin:0 0 10px;">🤖 Bot Settings</h3>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-      '<input id="tg-token-input" type="password" placeholder="Bot Token (BotFather se mila tha)" ' +
-        'value="' + esc(TG_CONFIG.botToken || '') + '" ' +
-        'style="flex:1;min-width:240px;font-family:monospace;font-size:.82rem;" ' +
-        'oninput="document.getElementById(\'tg-token-show\').textContent=this.value?\'●●●●●●●●…\':\'\'">' +
-      '<button class="btn btn-blue" onclick="saveTgBotToken()">💾 Save Token</button>' +
-      '<button class="btn btn-gray" onclick="var i=document.getElementById(\'tg-token-input\');i.type=i.type===\'password\'?\'text\':\'password\';">👁 Show/Hide</button>' +
-    '</div>' +
-    '<div id="tg-token-show" class="muted" style="font-size:.72rem;margin-top:4px;">' + (TG_CONFIG.botToken ? '✅ Token saved in Firestore' : '⚠️ Token nahi set hai — Send Now kaam nahi karega') + '</div>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:6px;">💡 Token sirf Firestore mein store hoga (config/telegram) — code mein nahi. GitHub Secrets mein bhi alag se add karo daily cron ke liye.</div>' +
-    '</div>';
-
-  /* ── Send Controls Card ── */
-  s += '<div class="card" style="margin-bottom:12px;">' +
-    '<h3 style="margin:0 0 10px;">📤 Send Controls</h3>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
-      '<button class="btn btn-green" onclick="tgSendAll(false)" style="font-weight:700;">' +
-        '📤 Send to All Enabled (' + enabled + ')' +
-      '</button>' +
-      '<button class="btn btn-gray" onclick="tgSendAll(true)">' +
-        '🧪 Test — Send to All with ChatID (' + total + ')' +
-      '</button>' +
-      '<button class="btn btn-gray" onclick="TG_CONFIG.loaded=false;loadTelegramData();">🔄 Refresh Users</button>' +
-    '</div>' +
-    '<div id="tg-send-log" style="display:none;max-height:200px;overflow-y:auto;background:#f8f9fa;border-radius:8px;padding:10px;margin-top:10px;font-size:.77rem;font-family:monospace;border:1px solid var(--border);"></div>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
-      '⏰ Auto-send: roz <b>6:00 AM IST</b> ko GitHub Actions chalata hai (free, automatic).' +
-    '</div>' +
-    '</div>';
-
-  /* ── Users Table ── */
-  if (!TG_CONFIG.loaded || (TG_USERS.length === 0 && TG_CONFIG.loaded)) {
-    s += '<div class="card"><div class="muted" style="text-align:center;padding:20px;">' +
-      (TG_CONFIG.loaded ? '⚠️ Koi user nahi mila jisne Telegram connect kiya ho.' : '⏳ Loading users…') +
-      '</div></div>';
-    return s;
-  }
-
-  const today = (function() { const n=new Date(); const i=new Date(n.getTime()+(5*60+30)*60000); return i.toISOString().slice(0,10); })();
-
-  s += '<div class="card">' +
-    '<h3 style="margin:0 0 10px;">👥 Connected Users (' + total + ')</h3>' +
-    '<div style="overflow-x:auto;">' +
-    '<table style="width:100%;border-collapse:collapse;font-size:.8rem;">' +
-    '<thead><tr style="text-align:left;border-bottom:2px solid var(--border);color:var(--muted);">' +
-      '<th style="padding:7px 8px;">User</th>' +
-      '<th style="padding:7px 8px;">Chat ID</th>' +
-      '<th style="padding:7px 8px;">Status</th>' +
-      '<th style="padding:7px 8px;">Plan today</th>' +
-      '<th style="padding:7px 8px;">Actions</th>' +
-    '</tr></thead><tbody>';
-
-  TG_USERS.forEach(function(u) {
-    const hasDigest = u.tg.digest && u.tg.digest[today];
-    const statusBadge = u.tg.enabled
-      ? '<span class="badge badge-green">ON</span>'
-      : '<span class="badge" style="background:#eee;color:#666;">OFF</span>';
-    const digestBadge = hasDigest
-      ? '<span class="badge badge-blue">✓ Ready</span>'
-      : '<span class="badge badge-amber">No plan</span>';
-
-    s += '<tr style="border-bottom:1px solid var(--border);">' +
-      '<td style="padding:7px 8px;"><b>' + esc(u.name) + '</b><div class="muted" style="font-size:.72rem;">' + esc(u.email) + '</div></td>' +
-      '<td style="padding:7px 8px;font-family:monospace;font-size:.78rem;">' + esc(u.tg.chatId) + '</td>' +
-      '<td style="padding:7px 8px;">' + statusBadge + '</td>' +
-      '<td style="padding:7px 8px;">' + digestBadge + '</td>' +
-      '<td style="padding:7px 8px;">' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
-          '<button id="tg-btn-' + u.id + '" class="btn btn-blue" onclick="tgSendToUser(\'' + u.id + '\')" style="padding:4px 10px;font-size:.75rem;">📤 Send Now</button>' +
-          '<button class="btn btn-gray" onclick="tgToggleUser(\'' + u.id + '\')" style="padding:4px 10px;font-size:.75rem;">' +
-            (u.tg.enabled ? '🔕 Disable' : '✅ Enable') +
-          '</button>' +
-        '</div>' +
-      '</td>' +
-    '</tr>';
-  });
-
-  s += '</tbody></table></div></div>';
-  return s;
 }
 
 /* SETTINGS TAB */
