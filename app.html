@@ -4085,14 +4085,21 @@ window.addEventListener('beforeunload', flushSaveOnExit);
      2. precompute a per-date plain-text digest so the job can just read it
 ══════════════════════════════════════════════ */
 
-/* Build up to 7 days (today + next 6) of plan text from the combined schedule
-   map (study topics + due revisions). Stored as { 'YYYY-MM-DD': 'line\nline' }. */
+/* How many days of plan text to precompute ahead. The daily GitHub Actions
+   sender can only read this precomputed digest (it can't recompute the
+   schedule), so a wide window keeps the daily message accurate for months even
+   if the user rarely reopens the app. */
+const TELEGRAM_DIGEST_DAYS = 90;
+
+/* Build TELEGRAM_DIGEST_DAYS days (today + next N-1) of plan text from the
+   combined schedule map (study topics + due revisions).
+   Stored as { 'YYYY-MM-DD': 'line\nline' }. */
 function buildTelegramDigest() {
   const digest = {};
   try {
     const map = (typeof getPlanScheduleMap === 'function') ? getPlanScheduleMap() : {};
     const start = new Date();
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < TELEGRAM_DIGEST_DAYS; i++) {
       const d = new Date(start); d.setDate(start.getDate() + i);
       const ds = (typeof fmtDate === 'function') ? fmtDate(d) : d.toISOString().slice(0, 10);
       const items = (map[ds] || []).filter(it => it.type !== 'spacer');
@@ -4259,6 +4266,16 @@ function initApp() {
   safely(renderPaceTrackerCard);  // Feature 5
   safely(refreshPlannerBadges);        // refresh chips with phase badge
   safely(renderSavedPlansList);        // My Plans list (under AI gen card)
+
+  /* Keep the Telegram digest fresh: rebuild + persist the rolling plan window
+     every time the app loads, so the daily sender never runs out of dates for
+     active users (fixes auto-send going stale after the old 7-day window). */
+  safely(function() {
+    if (currentUser && !currentUser.isGuest && appState.telegram && appState.telegram.enabled && appState.telegram.chatId) {
+      refreshTelegramDigest();
+      saveProgress();
+    }
+  });
 }
 
 /* ══════════════════════════════════════════════
