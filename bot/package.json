@@ -1,0 +1,17 @@
+{
+  "name": "examzen-telegram-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Telegram bot for ExamZen — replies with chat ID on /start",
+  "main": "bot-server.js",
+  "scripts": {
+    "start": "node bot-server.js",
+    "dev": "node bot-server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}

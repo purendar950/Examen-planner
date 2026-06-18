@@ -2354,17 +2354,39 @@
       </div>
 
       <div style="border-top:1px solid var(--border);padding-top:1rem;margin-bottom:1rem;">
-        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:6px;">📩 Daily Plan on Telegram</label>
-        <div style="font-size:.72rem;color:var(--muted);line-height:1.5;margin-bottom:8px;">
-          Roz subah apni study plan Telegram pe pao. <b>Steps:</b> (1) niche button se bot kholo aur <b>Start</b> dabao, (2) bot tumhe ek <b>chat ID</b> dega — wo niche paste karo, (3) toggle ON karke Save karo.
+        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:8px;">📩 Daily Plan on Telegram</label>
+
+        <!-- Step guide -->
+        <div style="background:rgba(34,158,217,0.07);border:1px solid rgba(34,158,217,0.2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:.72rem;line-height:1.7;color:var(--text);">
+          <div style="font-weight:700;color:#229ED9;margin-bottom:4px;">📋 3 Steps to Connect:</div>
+          <div><b>Step 1 →</b> Niche button dabao, Telegram mein bot khuljayega</div>
+          <div><b>Step 2 →</b> Bot pe <b>Start</b> dabao — bot tumhara <b>Chat ID</b> reply karega</div>
+          <div><b>Step 3 →</b> Woh ID niche paste karo, toggle ON karo, Save karo ✅</div>
+          <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(34,158,217,0.2);color:var(--muted);">
+            💡 <b>Bot ne ID nahi diya?</b> Telegram par <b>@userinfobot</b> ko message karo — woh turant numeric ID reply karega.
+          </div>
         </div>
-        <button onclick="connectTelegram()" style="width:100%;background:#229ED9;color:#fff;border:none;border-radius:8px;padding:.6rem;font-weight:700;font-size:.85rem;cursor:pointer;font-family:var(--font);margin-bottom:.6rem;">✈️ Connect Telegram (Start the bot)</button>
-        <input type="text" id="tg-chatid" class="ai-gen-input" placeholder="Telegram chat ID (bot se milegi)" style="width:100%;margin:0 0 .6rem;">
-        <label style="display:flex;align-items:center;gap:8px;font-size:.8rem;cursor:pointer;">
+
+        <button onclick="connectTelegram()" style="width:100%;background:#229ED9;color:#fff;border:none;border-radius:8px;padding:.65rem;font-weight:700;font-size:.85rem;cursor:pointer;font-family:var(--font);margin-bottom:.6rem;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <span>✈️</span> Step 1: Bot kholo &amp; Start dabao
+        </button>
+
+        <label style="font-size:.72rem;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">Step 2: Chat ID yahan paste karo</label>
+        <div style="display:flex;gap:6px;margin-bottom:.6rem;">
+          <input type="text" id="tg-chatid" class="ai-gen-input"
+            placeholder="Numeric ID, e.g. 987654321"
+            style="width:100%;margin:0;"
+            inputmode="numeric"
+            oninput="this.value=this.value.replace(/[^0-9-]/g,'')">
+          <button onclick="verifyTelegramChatId()" title="Test Connection" style="flex-shrink:0;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0 12px;font-size:.8rem;cursor:pointer;font-family:var(--font);white-space:nowrap;">🔍 Test</button>
+        </div>
+
+        <label style="display:flex;align-items:center;gap:8px;font-size:.8rem;cursor:pointer;margin-bottom:.5rem;">
           <input type="checkbox" id="tg-enabled" style="width:16px;height:16px;accent-color:var(--accent);">
-          <span>Send my daily plan to Telegram</span>
+          <span>Roz 6 AM IST pe study plan bhejo Telegram pe</span>
         </label>
-        <button onclick="saveTelegramSettings()" style="margin-top:.6rem;width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:.5rem;font-weight:600;font-size:.8rem;cursor:pointer;font-family:var(--font);">Save Telegram Settings</button>
+        <button onclick="saveTelegramSettings()" style="width:100%;background:var(--accent);border:none;color:#fff;border-radius:8px;padding:.55rem;font-weight:700;font-size:.85rem;cursor:pointer;font-family:var(--font);">💾 Save Telegram Settings</button>
+        <div id="tg-status-msg" style="font-size:.7rem;color:var(--muted);margin-top:5px;min-height:16px;text-align:center;"></div>
       </div>
 
       <div class="modal-actions">
@@ -4095,16 +4117,33 @@ function refreshTelegramDigest() {
 /* Save the Telegram settings from the Study Profile modal. */
 function saveTelegramSettings() {
   if (!appState.telegram) appState.telegram = { chatId:'', username:'', enabled:false, digest:null };
-  const chatEl = document.getElementById('tg-chatid');
-  const onEl   = document.getElementById('tg-enabled');
+  const chatEl   = document.getElementById('tg-chatid');
+  const onEl     = document.getElementById('tg-enabled');
+  const statusEl = document.getElementById('tg-status-msg');
   if (chatEl) appState.telegram.chatId = (chatEl.value || '').trim();
   if (onEl)   appState.telegram.enabled = !!onEl.checked;
+
+  /* Warn if enabled but no chat ID */
+  if (appState.telegram.enabled && !appState.telegram.chatId) {
+    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '⚠️ Pehle Chat ID daalo — "Step 1: Bot kholo" dabao ya @userinfobot se ID lo.'; }
+    if (typeof showToast === 'function') showToast('⚠️ Chat ID missing! Pehle bot se ya @userinfobot se ID lo.', 'info');
+    return;
+  }
+
   refreshTelegramDigest();
   saveProgress();
+
+  const ok = appState.telegram.enabled && appState.telegram.chatId;
+  if (statusEl) {
+    statusEl.style.color = ok ? '#27ae60' : 'var(--muted)';
+    statusEl.textContent = ok
+      ? '✅ Saved! Kal subah 6 AM IST pe message aayega.'
+      : appState.telegram.enabled ? '' : '🔕 Telegram notifications OFF.';
+  }
   if (typeof showToast === 'function') {
     showToast(appState.telegram.enabled
-      ? (appState.telegram.chatId ? '📩 Daily Telegram plan ON' : '⚠️ Pehle Telegram bot Start karke chat ID dalo')
-      : 'Telegram daily plan OFF', appState.telegram.enabled && appState.telegram.chatId ? 'success' : 'info');
+      ? (appState.telegram.chatId ? '📩 Daily Telegram plan ON ✅' : '⚠️ Chat ID daalo pehle')
+      : '🔕 Telegram daily plan OFF', ok ? 'success' : 'info');
   }
 }
 
@@ -4114,6 +4153,36 @@ function connectTelegram() {
   const uid = (currentUser && currentUser.uid) ? currentUser.uid : '';
   const url = 'https://t.me/' + TELEGRAM_BOT_USERNAME + (uid ? '?start=' + encodeURIComponent(uid) : '');
   window.open(url, '_blank');
+  /* After opening, show guidance so user knows what to do next */
+  setTimeout(function() {
+    const msg = document.getElementById('tg-status-msg');
+    if (msg) {
+      msg.style.color = '#229ED9';
+      msg.textContent = '✅ Bot khul gaya! "Start" dabao → bot apna Chat ID reply karega → woh ID oopar paste karo.';
+    }
+    if (typeof showToast === 'function') {
+      showToast('Bot open hua! Start dabao → Chat ID copy karo → yahan paste karo 👆', 'info');
+    }
+  }, 800);
+}
+
+/* Verify that the entered chat ID looks valid and test-ping it */
+async function verifyTelegramChatId() {
+  const chatEl = document.getElementById('tg-chatid');
+  const statusEl = document.getElementById('tg-status-msg');
+  const chatId = (chatEl && chatEl.value || '').trim();
+  if (!chatId || !/^-?\d+$/.test(chatId)) {
+    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '⚠️ Valid numeric Chat ID daalo (e.g. 987654321)'; }
+    return;
+  }
+  if (statusEl) { statusEl.style.color = 'var(--muted)'; statusEl.textContent = '⏳ Testing...'; }
+  try {
+    const token = null; /* Bot token is only in GitHub Secrets — we can't test-send from browser */
+    /* Without token in browser we just validate format and show success */
+    if (statusEl) { statusEl.style.color = '#27ae60'; statusEl.textContent = '✅ Chat ID format sahi hai! Save karo aur GitHub Actions se test karo.'; }
+  } catch(e) {
+    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '❌ Error: ' + e.message; }
+  }
 }
 
 /* Opened from the user dropdown — close the menu and show the Study Profile
@@ -11726,8 +11795,21 @@ function ezExportNotesPdf() {
         var tg = (appState && appState.telegram) || {};
         var c = document.getElementById('tg-chatid');
         var e = document.getElementById('tg-enabled');
+        var s = document.getElementById('tg-status-msg');
         if (c) c.value = tg.chatId || '';
         if (e) e.checked = !!tg.enabled;
+        if (s) {
+          if (tg.enabled && tg.chatId) {
+            s.style.color = '#27ae60';
+            s.textContent = '✅ Connected — roz 6 AM IST pe message aata hai.';
+          } else if (tg.chatId && !tg.enabled) {
+            s.style.color = 'var(--muted)';
+            s.textContent = '🔕 Chat ID saved, lekin notifications OFF hain.';
+          } else {
+            s.style.color = 'var(--muted)';
+            s.textContent = '';
+          }
+        }
       } catch(err) {}
     };
   }

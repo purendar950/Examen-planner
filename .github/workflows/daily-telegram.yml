@@ -2,13 +2,15 @@ name: Daily Telegram Study Plan
 
 on:
   schedule:
-    # 00:30 UTC = 06:00 AM IST. Adjust as needed (cron is in UTC).
+    # 00:30 UTC = 06:00 AM IST
     - cron: '30 0 * * *'
   workflow_dispatch: {}   # allow manual runs from the Actions tab
 
 jobs:
   send:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,10 +19,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
 
       - name: Install dependencies
-        run: npm install firebase-admin@12 node-fetch@2
+        run: npm ci
         working-directory: scripts
+
+      - name: Validate secrets
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "❌ TELEGRAM_BOT_TOKEN secret is not set!"
+            exit 1
+          fi
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "❌ FIREBASE_SERVICE_ACCOUNT secret is not set!"
+            exit 1
+          fi
+          echo "✅ Both secrets present"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
       - name: Send daily plans
         working-directory: scripts

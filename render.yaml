@@ -1,0 +1,15 @@
+services:
+  # ExamZen Telegram Bot — replies with Chat ID on /start
+  # Free worker tier on Render.com
+  - type: web
+    name: examzen-telegram-bot
+    runtime: node
+    rootDir: bot
+    buildCommand: npm install
+    startCommand: node bot-server.js
+    plan: free
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false          # Set this manually in Render dashboard
+      - key: NODE_ENV
+        value: production
