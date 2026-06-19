@@ -66,9 +66,12 @@
     display: flex; flex-direction: column; gap: 1.4rem;
   }
   .focus-main { display: grid; grid-template-columns: 1fr auto; gap: 1.75rem; align-items: center; }
-  .focus-head { border-bottom: 1px solid var(--line); padding-bottom: 1.1rem; }
+  .focus-head { display: flex; align-items: center; gap: 1.25rem; border-bottom: 1px solid var(--line); padding-bottom: 1.1rem; flex-wrap: wrap; }
   .focus-eyebrow { font-size: 0.72rem; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 5px; }
   .focus-exam { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+  .focus-greet { padding-left: 1.25rem; border-left: 1px solid var(--line); }
+  .focus-greet .g-title { font-size: 1.05rem; font-weight: 800; }
+  .focus-greet .g-sub { font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
   .focus-label { font-size: 0.72rem; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
   .focus h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 1.1rem; }
   .focus h2 b { color: var(--accent); }
@@ -176,22 +179,17 @@
     <span>Light &amp; minimal direction. <b>Sample data</b> — your real widgets &amp; live data stay the same once approved.</span>
   </div>
 
-  <div class="greet">
-    <div>
-      <h1>Good evening, Puren</h1>
-      <div class="sub">Let's get a little closer today.</div>
-    </div>
-    <div class="greet-right">
-      <span class="chip days" id="daysChip">⏳ — days left</span>
-      <label class="chip date-chip" title="Set your exam date">📅 <input type="date" id="examDate" value="2026-07-14"></label>
-    </div>
-  </div>
-
   <!-- FOCUS HERO -->
   <div class="focus">
     <div class="focus-head">
-      <div class="focus-eyebrow">🎯 Today's focus</div>
-      <div class="focus-exam">SSC CGL 2026</div>
+      <div class="focus-head-l">
+        <div class="focus-eyebrow">🎯 Today's focus</div>
+        <div class="focus-exam">SSC CGL 2026</div>
+      </div>
+      <div class="focus-greet">
+        <div class="g-title">Good evening, Puren</div>
+        <div class="g-sub">Let's get a little closer today.</div>
+      </div>
     </div>
     <div class="focus-main">
     <div class="focus-left">
@@ -237,7 +235,7 @@
             </svg>
             <div class="ring-c"><div class="big amber" id="daysNum">57</div><div class="lbl">Days left</div></div>
           </div>
-          <div class="ring-cap"><b id="examDateCap">14 Jul 2026</b></div>
+          <label class="chip date-chip" title="Set your exam date">📅 <input type="date" id="examDate" value="2026-07-14"></label>
         </div>
       </div>
       <span class="streak-mini">🔥 7-day streak</span>
@@ -299,22 +297,14 @@
 
 </div>
 <script>
-  // Live countdown — updates when the exam date is changed
+  // Live "days left" — updates when the exam date is changed
   var input = document.getElementById('examDate');
-  var chip = document.getElementById('daysChip');
   var num = document.getElementById('daysNum');
-  var cap = document.getElementById('examDateCap');
-  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function refresh() {
-    if (!input.value) { chip.textContent = '⏳ set a date'; num.textContent = '—'; return; }
+    if (!input.value) { num.textContent = '—'; return; }
     var dt = new Date(input.value + 'T00:00:00');
     var days = Math.ceil((dt.getTime() - Date.now()) / 86400000);
-    cap.textContent = dt.getDate() + ' ' + MON[dt.getMonth()] + ' ' + dt.getFullYear();
     num.textContent = days > 0 ? days : 0;
-    if (days > 1) chip.textContent = '⏳ ' + days + ' days left';
-    else if (days === 1) chip.textContent = '⏳ 1 day left';
-    else if (days === 0) chip.textContent = '🎯 Exam is today!';
-    else chip.textContent = '✅ exam passed';
   }
   input.addEventListener('change', refresh);
   refresh();
