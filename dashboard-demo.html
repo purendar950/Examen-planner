@@ -70,11 +70,16 @@
   .focus-eyebrow { font-size: 0.72rem; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 5px; }
   .focus-exam { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
   .focus-greet { padding-left: 1.25rem; border-left: 1px solid var(--line); }
-  .focus-greet .g-title { font-size: 1.35rem; font-weight: 800; color: var(--accent); letter-spacing: -0.01em; }
-  .focus-greet .g-sub { font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
+  .focus-greet .g-small { font-size: 0.78rem; color: var(--muted); }
+  .focus-greet .g-name { font-size: 1.55rem; font-weight: 800; color: var(--accent); line-height: 1.1; letter-spacing: -0.01em; margin: 1px 0; }
+  .focus-greet .g-sub { font-size: 0.78rem; color: var(--muted); }
   .focus-date { margin-left: auto; text-align: right; padding-left: 1.25rem; border-left: 1px solid var(--line); }
   .focus-date .fd-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-  .focus-date .fd-val { font-size: 1.05rem; font-weight: 800; margin-top: 3px; }
+  .focus-date .fd-val { font-size: 1.15rem; font-weight: 800; margin-top: 3px; color: var(--amber); animation: glowPulse 2.4s ease-in-out infinite; }
+  @keyframes glowPulse {
+    0%, 100% { text-shadow: 0 0 5px rgba(232,146,12,0.35); }
+    50% { text-shadow: 0 0 16px rgba(232,146,12,0.85); }
+  }
   .focus-label { font-size: 0.72rem; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
   .focus h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 1.1rem; }
   .focus h2 b { color: var(--accent); }
@@ -190,7 +195,8 @@
         <div class="focus-exam">SSC CGL 2026</div>
       </div>
       <div class="focus-greet">
-        <div class="g-title">Good evening, Puren</div>
+        <div class="g-small">Good evening,</div>
+        <div class="g-name">Puren</div>
         <div class="g-sub">Let's get a little closer today.</div>
       </div>
       <div class="focus-date">
