@@ -66,6 +66,9 @@
     display: flex; flex-direction: column; gap: 1.4rem;
   }
   .focus-main { display: grid; grid-template-columns: 1fr auto; gap: 1.75rem; align-items: center; }
+  .focus-head { border-bottom: 1px solid var(--line); padding-bottom: 1.1rem; }
+  .focus-eyebrow { font-size: 0.72rem; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 5px; }
+  .focus-exam { font-size: 1.7rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
   .focus-label { font-size: 0.72rem; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
   .focus h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 1.1rem; }
   .focus h2 b { color: var(--accent); }
@@ -181,15 +184,17 @@
     <div class="greet-right">
       <span class="chip days" id="daysChip">⏳ — days left</span>
       <label class="chip date-chip" title="Set your exam date">📅 <input type="date" id="examDate" value="2026-07-14"></label>
-      <span class="chip"><span class="dot"></span> SSC CGL 2026</span>
     </div>
   </div>
 
   <!-- FOCUS HERO -->
   <div class="focus">
+    <div class="focus-head">
+      <div class="focus-eyebrow">🎯 Today's focus</div>
+      <div class="focus-exam">SSC CGL 2026</div>
+    </div>
     <div class="focus-main">
     <div class="focus-left">
-      <div class="focus-label">Today's focus</div>
       <h2>Finish <b>3 chapters</b> to stay on track</h2>
       <div class="todo">
         <div class="todo-item">
