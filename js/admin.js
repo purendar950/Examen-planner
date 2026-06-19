@@ -1380,7 +1380,7 @@ function renderTelegram() {
         '<button class="btn btn-blue" onclick="saveTgSendTime()">💾 Save Time</button>' +
       '</div>' +
       '<div class="muted" style="font-size:.72rem;margin-top:8px;line-height:1.6;">' +
-        '⏰ GitHub Actions har <b>30 min</b> chalta hai aur set time ke baad pehle run pe sabhi enabled users ko bhejta hai (free, automatic, din mein ek hi baar). ' +
+        '⏰ GitHub Actions har <b>~15 min</b> chalta hai aur set time ke baad pehle run pe sabhi enabled users ko bhejta hai (free, automatic, din mein ek hi baar). ' +
         'Abhi set: <b>' + esc(TG_CONFIG.sendTime || '06:00') + ' IST</b>' +
         (TG_CONFIG.lastSentDate ? ' · last auto-sent: <b>' + esc(TG_CONFIG.lastSentDate) + '</b>' : '') +
       '</div>' +
