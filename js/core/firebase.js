@@ -49,15 +49,7 @@
    Authentication → Settings → Authorized domains →
    Add: localhost  AND  your-domain.com
    ══════════════════════════════════════════════════════════════ */
-const FIREBASE_CONFIG = {
-  apiKey:            "AIzaSyDTBc3RAED-HuFZv7xyT2X0WFBRIXr9png",
-  authDomain:        "syncstudy-3d734.firebaseapp.com",
-  projectId:         "syncstudy-3d734",
-  storageBucket:     "syncstudy-3d734.firebasestorage.app",
-  messagingSenderId: "729906734037",
-  appId:             "1:729906734037:web:d75d73d101bfbb52c3535c"
-};
-
+/* FIREBASE_CONFIG is defined once in js/firebase-config.js (loaded first). */
 /* ── CONFIG VALIDATION ──
    Agar config fill nahi ki to app localStorage mode mein chalega
    (sirf usi device pe data save hoga, sync nahi hoga) ── */

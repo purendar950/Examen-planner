@@ -123,23 +123,7 @@ async function handleForgotPassword() {
   }
 }
 
-function getDefaultState() {
-  return {
-    progress: {}, tasks: {},
-    examDate: '2026-07-14', streak: 0,
-    lastStudyDate: null, ytLinks: {}, ytNotes: [],
-    ytLastVideo: null, ytPlaylists: {}, ytWatched: {},
-    ytOrganiser: null, ytoLibrary: {}, ytVidProgress: {},
-    studyProfile: null,  // Feature 3 – set via Study Profile modal
-    plans: [],            // Saved plans: [{id, type, name, createdAt, cfg}]
-    activePlanId: null,
-    planSchedule: null,   // date -> [topic items] for the active syllabus plan
-    /* Telegram daily-plan delivery. The GitHub Actions sender reads this from
-       Firestore: chatId (target account), enabled (opt-in), and digest
-       (precomputed plan text per date so the job needs no browser logic). */
-    telegram: { chatId: '', username: '', enabled: false, digest: null }
-  };
-}
+/* getDefaultState() is defined once in js/core/state.js (loaded before this file). */
 
 function loginUser(email, name, uid, state) {
   currentUser = { email, name, uid };
