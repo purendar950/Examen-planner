@@ -1,0 +1,75 @@
+    <div class="page" id="page-yt-organiser">
+      <div style="margin-bottom:1.25rem;">
+        <h2 style="margin-bottom:4px;">📋 YouTube Playlist Organiser</h2>
+        <p style="color:var(--muted);font-size:0.82rem;">Playlist URL paste karo, videos ko custom groups mein organise karo, tags add karo aur progress track karo.</p>
+      </div>
+
+      <!-- URL Input -->
+      <div class="yt-input-bar" style="margin-bottom:1rem;">
+        <input type="text" class="yt-url-input" id="yto-url-input"
+          placeholder="YouTube playlist URL paste karo... (youtube.com/playlist?list=PL...)"
+          style="font-size:0.875rem;">
+        <button class="btn-yt-play" id="yto-load-btn" onclick="ytoLoadPlaylist()" style="background:var(--purple);color:#fff;min-width:90px;">
+          📥 Load
+        </button>
+      </div>
+      <div id="yto-error" style="color:var(--red);font-size:0.8rem;margin-bottom:0.5rem;display:none;"></div>
+
+      <!-- Stats bar (shown after load) -->
+      <div id="yto-stats" style="display:none;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:0.85rem 1.1rem;margin-bottom:1.25rem;display:none;">
+        <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;justify-content:space-between;">
+          <div style="display:flex;gap:1.5rem;flex-wrap:wrap;">
+            <div style="display:flex;flex-direction:column;">
+              <span style="font-size:1.35rem;font-weight:800;color:var(--text);" id="yto-stat-total">0</span>
+              <span style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">Total Videos</span>
+            </div>
+            <div style="display:flex;flex-direction:column;">
+              <span style="font-size:1.35rem;font-weight:800;color:var(--accent);" id="yto-stat-done">0</span>
+              <span style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">Completed</span>
+            </div>
+            <div style="display:flex;flex-direction:column;">
+              <span style="font-size:1.35rem;font-weight:800;color:var(--amber);" id="yto-stat-groups">0</span>
+              <span style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">Groups</span>
+            </div>
+            <div style="display:flex;flex-direction:column;">
+              <span style="font-size:1.35rem;font-weight:800;color:var(--blue);" id="yto-stat-tagged">0</span>
+              <span style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;">Tagged</span>
+            </div>
+          </div>
+          <div style="flex:1;min-width:160px;max-width:260px;">
+            <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--muted);margin-bottom:4px;">
+              <span>Progress</span><span id="yto-pct">0%</span>
+            </div>
+            <div style="height:8px;background:var(--surface);border-radius:99px;overflow:hidden;">
+              <div id="yto-progress-fill" style="height:100%;background:var(--accent);border-radius:99px;width:0%;transition:width 0.3s;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div id="yto-toolbar" style="display:none;margin-bottom:1rem;display:none;gap:8px;flex-wrap:wrap;align-items:center;">
+        <button onclick="ytoAddGroup()" style="background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,150,0.3);border-radius:8px;padding:6px 14px;font-size:0.8rem;cursor:pointer;font-weight:600;">＋ New Group</button>
+        <button onclick="ytoMarkAllGroup()" style="background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:0.8rem;cursor:pointer;">✅ Mark Group Done</button>
+        <button onclick="ytoResetProgress()" style="background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:0.8rem;cursor:pointer;">↺ Reset Progress</button>
+        <div style="margin-left:auto;display:flex;gap:6px;align-items:center;">
+          <input id="yto-search" type="text" placeholder="Search videos..." oninput="ytoRender()" style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:5px 10px;color:var(--text);font-size:0.8rem;outline:none;width:180px;">
+          <select id="yto-filter" onchange="ytoRender()" style="background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:5px 8px;color:var(--text);font-size:0.8rem;outline:none;">
+            <option value="all">All</option>
+            <option value="done">Completed</option>
+            <option value="pending">Pending</option>
+            <option value="tagged">Tagged</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Main organiser content -->
+      <div id="yto-content">
+        <div style="text-align:center;padding:3rem 1rem;color:var(--muted);">
+          <div style="font-size:2.5rem;margin-bottom:0.75rem;">📋</div>
+          <p style="font-size:0.9rem;">YouTube playlist URL paste karo aur Load karo</p>
+          <p style="font-size:0.78rem;margin-top:0.35rem;">Videos automatically list honge — phir groups banao, tags add karo</p>
+        </div>
+      </div>
+    </div>
+

@@ -1,0 +1,163 @@
+    <div class="page" id="page-youtube">
+      <div style="margin-bottom:1.25rem;">
+        <h2 style="margin-bottom:4px;">▶ YouTube Player</h2>
+        <p style="color:var(--muted);font-size:0.82rem;">Playlist ya single video URL paste karo aur seedha yahan dekho. Notes, progress tracking, aur chapter links sab yahan hain.</p>
+      </div>
+
+      <!-- URL input bar -->
+      <div class="yt-input-bar">
+        <input type="text" class="yt-url-input" id="yt-url-input"
+          placeholder="YouTube playlist ya video URL paste karo... (e.g. youtube.com/playlist?list=PL...)"
+          oninput="ytInputChange(this.value)"
+          onpaste="setTimeout(()=>ytInputChange(document.getElementById('yt-url-input').value),0)">
+        <button class="btn-yt-play" id="yt-play-btn" onclick="ytPlay()" disabled>
+          ▶ Play
+        </button>
+      </div>
+      <div class="yt-error-msg" id="yt-err"></div>
+
+      <!-- Resume Last Video Banner -->
+      <div class="yt-resume-banner" id="yt-resume-banner">
+        <span style="font-size:1rem;flex-shrink:0;">⏮</span>
+        <div class="yt-resume-title" id="yt-resume-title">Resume last video</div>
+        <button class="yt-resume-btn" onclick="ytResume()">▶ Resume</button>
+        <button class="yt-resume-dismiss" onclick="ytDismissResume()" title="Dismiss">×</button>
+      </div>
+      <div class="yt-course-header" id="yt-course-header">
+        <div class="yt-course-thumb" id="yt-course-thumb"></div>
+        <div class="yt-course-info">
+          <div class="yt-course-title" id="yt-course-title">Loading...</div>
+          <div class="yt-course-sub" id="yt-course-sub"></div>
+        </div>
+      </div>
+
+      <div class="yt-layout">
+        <!-- Left: player + meta + Notes -->
+        <div>
+          <div class="yt-player-wrap" id="yt-player-wrap">
+            <div class="yt-placeholder" id="yt-placeholder">
+              <div class="yt-placeholder-icon">▶</div>
+              <p>URL paste karo aur Play karo, ya neeche Chapter Links se koi video open karo</p>
+            </div>
+            <div id="yt-player" style="display:none;width:100%;height:100%;"></div>
+          </div>
+          <div class="yt-meta-bar" id="yt-meta-bar" style="display:none">
+            <span class="yt-now-title" id="yt-now-title"></span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <button class="yt-focus-btn" id="yt-focus-btn" onclick="ytToggleFocus()">🎯 Focus Mode</button>
+              <a id="yt-open-link" href="#" target="_blank" rel="noopener" class="yt-open-btn">↗ YouTube</a>
+            </div>
+          </div>
+          <!-- Speed Control Bar -->
+          <div class="yt-speed-bar" id="yt-speed-bar">
+            <span style="font-size:0.7rem;color:var(--muted);font-weight:600;">⚡ Speed:</span>
+            <button class="yt-speed-btn" data-rate="0.5"  onclick="ytSetSpeed(0.5)">0.5x</button>
+            <button class="yt-speed-btn" data-rate="0.75" onclick="ytSetSpeed(0.75)">0.75x</button>
+            <button class="yt-speed-btn active" data-rate="1" onclick="ytSetSpeed(1)">1x</button>
+            <button class="yt-speed-btn" data-rate="1.25" onclick="ytSetSpeed(1.25)">1.25x</button>
+            <button class="yt-speed-btn" data-rate="1.5"  onclick="ytSetSpeed(1.5)">1.5x</button>
+            <button class="yt-speed-btn" data-rate="1.75" onclick="ytSetSpeed(1.75)">1.75x</button>
+            <button class="yt-speed-btn" data-rate="2"    onclick="ytSetSpeed(2)">2x</button>
+            <button class="yt-pip-btn" onclick="ytPiP()" title="Picture in Picture">📺 PiP</button>
+          </div>
+
+          <!-- ═══ NOTES PANEL ═══ -->
+          <div class="yt-notes-panel" id="yt-notes-panel">
+            <div class="yt-notes-tabs">
+              <div class="yt-notes-tab active" onclick="ytNotesTab('write')" id="yt-ntab-write">📝 Notes</div>
+              <div class="yt-notes-tab" onclick="ytNotesTab('saved')" id="yt-ntab-saved">🗂 Saved <span id="yt-notes-count-badge" style="background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:0.68rem;margin-left:4px;">0</span></div>
+            </div>
+
+            <!-- Write Tab -->
+            <div id="yt-ntab-write-body" class="yt-notes-body">
+              <div class="yt-notes-toolbar">
+                <button class="yt-fmt-btn" title="Bold" id="yt-fmt-b" onclick="ytFmt('bold')"><b>B</b></button>
+                <button class="yt-fmt-btn" title="Italic" id="yt-fmt-i" onclick="ytFmt('italic')"><i>I</i></button>
+                <button class="yt-fmt-btn" title="Underline" id="yt-fmt-u" onclick="ytFmt('underline')"><u>U</u></button>
+                <div class="yt-toolbar-sep"></div>
+                <div class="yt-color-dot dot-default active" title="Default" onclick="ytSetColor('default',this)" data-color="default"></div>
+                <div class="yt-color-dot dot-green" title="Green" onclick="ytSetColor('green',this)" data-color="green"></div>
+                <div class="yt-color-dot dot-yellow" title="Yellow" onclick="ytSetColor('yellow',this)" data-color="yellow"></div>
+                <div class="yt-color-dot dot-red" title="Red" onclick="ytSetColor('red',this)" data-color="red"></div>
+                <div class="yt-color-dot dot-blue" title="Blue" onclick="ytSetColor('blue',this)" data-color="blue"></div>
+                <div class="yt-color-dot dot-purple" title="Purple" onclick="ytSetColor('purple',this)" data-color="purple"></div>
+                <div class="yt-toolbar-sep"></div>
+                <button class="yt-timestamp-btn" onclick="ytInsertTimestamp()" title="Insert current timestamp">⏱ Timestamp</button>
+              </div>
+              <textarea class="yt-notes-area" id="yt-note-input"
+                placeholder="Is video ke notes yahan likho... Timestamps insert karo aur colors use karo!" rows="5"></textarea>
+              <div class="yt-notes-footer">
+                <div class="yt-notes-context">
+                  📌 Saving for: <span id="yt-note-context-label">No video selected</span>
+                </div>
+                <div class="yt-notes-save-row">
+                  <button class="btn-sm" onclick="ytClearNoteInput()">Clear</button>
+                  <button class="btn-sm green" id="yt-note-save-btn" onclick="ytSaveNote()">Save Note</button>
+                </div>
+              </div>
+              <div id="yt-note-save-toast" style="display:none;font-size:0.75rem;color:var(--accent);margin-top:6px;text-align:right;">✓ Saved!</div>
+            </div>
+
+            <!-- Saved Notes Tab -->
+            <div id="yt-ntab-saved-body" class="yt-notes-body" style="display:none">
+              <input type="text" class="yt-notes-search" id="yt-notes-search"
+                placeholder="🔍 Notes search karo (title ya content)..."
+                oninput="ytRenderSavedNotes()">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.85rem;flex-wrap:wrap;gap:8px;">
+                <select class="notes-select" id="yt-notes-filter-sel" onchange="ytRenderSavedNotes()" style="font-size:0.78rem;">
+                  <option value="all">All Videos</option>
+                  <option value="current">Current Video Only</option>
+                </select>
+                <div style="font-size:0.75rem;color:var(--muted);" id="yt-saved-notes-summary"></div>
+              </div>
+              <div id="yt-saved-notes-list" class="yt-notes-list"></div>
+            </div>
+          </div>
+
+          <!-- Saved chapter links section -->
+          <div class="yt-saved-section" style="margin-top:1.25rem;">
+            <div class="yt-saved-header">
+              <div class="section-title" style="margin:0">Chapter Links</div>
+              <span id="yt-saved-count" style="font-size:0.75rem;color:var(--muted)"></span>
+            </div>
+            <div class="yt-saved-list" id="yt-saved-list">
+              <div class="yt-panel-empty">Koi bhi chapter mein YouTube link add nahi kiya abhi.<br>Syllabus tab mein chapter ke ▶ button par click karo.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: playlist panel -->
+        <div class="yt-panel">
+          <div class="yt-panel-header">
+            <span class="yt-panel-title">Course Content</span>
+            <span class="yt-panel-count" id="yt-pl-count"></span>
+          </div>
+          <!-- Progress bar -->
+          <div class="yt-pl-progress" id="yt-pl-progress" style="display:none">
+            <div class="yt-pl-progress-label">
+              <span id="yt-pl-watched-label">0% Completed</span>
+              <span id="yt-pl-watched-count">0 / 0 videos</span>
+            </div>
+            <div class="yt-pl-progress-bar">
+              <div class="yt-pl-progress-fill" id="yt-pl-progress-fill" style="width:0%"></div>
+            </div>
+          </div>
+          <!-- Remaining Time Row -->
+          <div class="yt-duration-row" id="yt-duration-row">
+            <span class="yt-dur-label">⏱ Total hrs:</span>
+            <input type="number" class="yt-duration-input" id="yt-dur-input"
+              min="0.1" step="0.5" placeholder="e.g. 8.5"
+              title="Playlist ki total duration hours mein likho (e.g. 8.5 = 8 hrs 30 min)">
+            <button class="yt-dur-set-btn" onclick="ytSetDuration()">Set</button>
+            <span class="yt-remaining-badge" id="yt-remaining-badge" style="display:none"></span>
+          </div>
+          <div class="yt-video-list" id="yt-video-list">
+            <div class="yt-panel-empty" id="yt-pl-empty">
+              Playlist URL enter karo — videos yahan list honge.<br><br>
+              Single video URL ke liye playlist nahi hoti.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
