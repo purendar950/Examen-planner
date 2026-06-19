@@ -130,7 +130,13 @@ function isProUser(data, today) {
 /* ── 4. Main ────────────────────────────────────────────────────────────── */
 async function main() {
   const today = todayIST();
-  const forced = (process.env.GITHUB_EVENT_NAME || '') === 'workflow_dispatch';
+  const eventName = process.env.GITHUB_EVENT_NAME || '';
+  /* "Force" = a MANUAL "Run workflow" (gated input false) → send immediately.
+     Scheduled runs AND external-cron dispatches (gated=true) respect the
+     admin-set time gate below, so the external cron can safely ping every few
+     minutes without sending more than once per day. */
+  const gated = process.env.GATED === 'true';
+  const forced = (eventName === 'workflow_dispatch') && !gated;
 
   /* ── Schedule gate ───────────────────────────────────────────────────────
      The workflow runs every 30 min. The admin sets the daily send time in

@@ -2,15 +2,17 @@ name: Daily Telegram Study Plan
 
 on:
   schedule:
-    # Runs every 15 minutes at OFF-PEAK minutes (avoids :00/:30, which GitHub
-    # drops most often due to peak load). The sender only actually sends once
-    # per day, on the first run at/after the admin-configured time stored in
-    # Firestore config/telegram.sendTime (IST, default 06:00). Other runs read
-    # one config doc and exit immediately.
-    # NB: GitHub scheduled runs can still be delayed; reliability is best on a
-    # public repo (free, unlimited Actions minutes).
+    # Off-peak minutes (GitHub drops :00/:30 peak-load runs most often). This is
+    # only a best-effort BACKUP trigger — GitHub's scheduler is unreliable. The
+    # RELIABLE trigger is an external cron (e.g. cron-job.org) calling
+    # workflow_dispatch with gated=true every ~15 min. See SETUP notes in the PR.
     - cron: '8,23,38,53 * * * *'
-  workflow_dispatch: {}   # manual runs from the Actions tab (force send, bypasses the time gate)
+  workflow_dispatch:
+    inputs:
+      gated:
+        description: 'true = respect the admin-set send time in Firestore (external cron uses this). false = send immediately (manual test).'
+        type: boolean
+        default: false
 
 jobs:
   send:
@@ -52,4 +54,5 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GATED: ${{ inputs.gated }}
         run: node send-telegram.js
