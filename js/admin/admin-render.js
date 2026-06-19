@@ -107,6 +107,26 @@ function renderPending() {
 let BULK_SEL = new Set();
 let SHOWN_USER_IDS = [];
 
+/* Builds the bulk-action bar HTML from the current selection. Reused by
+   renderUsers (full render) and admRefreshBulkBar (lightweight in-place update). */
+function buildBulkBar() {
+  const ids = SHOWN_USER_IDS || [];
+  const selCount = BULK_SEL.size;
+  const allShownSelected = ids.length > 0 && ids.every(id => BULK_SEL.has(id));
+  const planOpts = '<option value="free">Free</option>' + PLANS.map(p => '<option value="' + p.id + '">' + esc(p.name) + ' (₹' + (p.price || 0) + ')</option>').join('');
+  return '<div class="bulk-bar' + (selCount ? ' active' : '') + '">' +
+    '<label class="bulk-all"><input type="checkbox" ' + (allShownSelected ? 'checked' : '') + ' onclick="admBulkSelectAllShown()"> Select all shown</label>' +
+    (selCount
+      ? '<span class="bulk-count">' + selCount + ' selected</span>' +
+        '<select id="bulk-plan"><option value="" disabled selected>⚙ Set plan…</option>' + planOpts + '</select>' +
+        '<button class="btn btn-blue" onclick="admBulkSetPlan()">Apply plan</button>' +
+        '<button class="btn btn-gray" onclick="admBulkGiveTrial()">🎁 Give trial</button>' +
+        '<button class="btn btn-red" onclick="admBulkSuspend()">⏸ Suspend</button>' +
+        '<button class="btn btn-gray" onclick="admBulkClear()">✕ Clear</button>'
+      : '<span class="muted">Tick users to act on several at once</span>') +
+    '</div>';
+}
+
 function renderUsers() {
   const search = (document.getElementById('user-search')?.value || '').toLowerCase().trim();
   const filter = document.getElementById('user-filter')?.value || 'all';
@@ -161,19 +181,7 @@ function renderUsers() {
   if (!totalCount) return '<div class="empty">Koi user nahi.</div>';
   const planOpts = (sel) => '<option value="free">Free</option>' + PLANS.map(p => '<option value="' + p.id + '"' + (sel === p.name ? ' selected' : '') + '>' + esc(p.name) + ' (₹' + (p.price || 0) + ')</option>').join('');
   SHOWN_USER_IDS = list.map(u => u.id);
-  const selCount = BULK_SEL.size;
-  const allShownSelected = SHOWN_USER_IDS.length > 0 && SHOWN_USER_IDS.every(id => BULK_SEL.has(id));
-  const bulkBar = '<div class="bulk-bar' + (selCount ? ' active' : '') + '">' +
-    '<label class="bulk-all"><input type="checkbox" ' + (allShownSelected ? 'checked' : '') + ' onclick="admBulkSelectAllShown()"> Select all shown</label>' +
-    (selCount
-      ? '<span class="bulk-count">' + selCount + ' selected</span>' +
-        '<select id="bulk-plan"><option value="" disabled selected>⚙ Set plan…</option>' + planOpts('') + '</select>' +
-        '<button class="btn btn-blue" onclick="admBulkSetPlan()">Apply plan</button>' +
-        '<button class="btn btn-gray" onclick="admBulkGiveTrial()">🎁 Give trial</button>' +
-        '<button class="btn btn-red" onclick="admBulkSuspend()">⏸ Suspend</button>' +
-        '<button class="btn btn-gray" onclick="admBulkClear()">✕ Clear</button>'
-      : '<span class="muted">Tick users to act on several at once</span>') +
-    '</div>';
+  const bulkBar = buildBulkBar();
   if (!list.length) return toolbar + bulkBar + '<div class="empty">No users match your filters.</div>';
   return toolbar + bulkBar + list.map(u => {
     const suspended = u.p.status === 'rejected';
@@ -190,7 +198,7 @@ function renderUsers() {
       : '';
     return '<div class="card user-card ' + tone + '">' +
       '<div class="user-head">' +
-        '<label class="user-check"><input type="checkbox" ' + (BULK_SEL.has(u.id) ? 'checked' : '') + ' onclick="admBulkToggle(event,\'' + u.id + '\')"></label>' +
+        '<label class="user-check"><input type="checkbox" data-uid="' + u.id + '" ' + (BULK_SEL.has(u.id) ? 'checked' : '') + ' onclick="admBulkToggle(event,\'' + u.id + '\')"></label>' +
         '<div class="user-id"><strong>' + esc(u.p.name || '?') + '</strong> <span class="muted">' + esc(u.p.email || '') + '</span> ' + planBadge + (suspended ? ' <span class="badge badge-red">Suspended</span>' : '') + (trialSuspended ? ' <span class="badge badge-red">Trial Suspended</span>' : '') + userMeta(u) + '</div>' +
       '</div>' +
       '<div class="user-actions">' +

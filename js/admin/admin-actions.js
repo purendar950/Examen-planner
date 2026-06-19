@@ -141,16 +141,26 @@ document.addEventListener('click', function() {
 function admBulkToggle(ev, id) {
   if (ev) ev.stopPropagation();
   if (BULK_SEL.has(id)) BULK_SEL.delete(id); else BULK_SEL.add(id);
-  render();
+  admRefreshBulkBar();
 }
 function admBulkSelectAllShown() {
   const ids = SHOWN_USER_IDS || [];
   const allSel = ids.length > 0 && ids.every(id => BULK_SEL.has(id));
   if (allSel) ids.forEach(id => BULK_SEL.delete(id));
   else ids.forEach(id => BULK_SEL.add(id));
-  render();
+  document.querySelectorAll('.user-check input').forEach(cb => { cb.checked = BULK_SEL.has(cb.dataset.uid); });
+  admRefreshBulkBar();
 }
-function admBulkClear() { BULK_SEL.clear(); render(); }
+function admBulkClear() {
+  BULK_SEL.clear();
+  document.querySelectorAll('.user-check input').forEach(cb => { cb.checked = false; });
+  admRefreshBulkBar();
+}
+// Re-render only the bulk bar in place (keeps list, scroll, and any open panels untouched).
+function admRefreshBulkBar() {
+  const el = document.querySelector('.bulk-bar');
+  if (el) el.outerHTML = buildBulkBar();
+}
 
 async function admBulkSuspend() {
   const ids = [...BULK_SEL];
