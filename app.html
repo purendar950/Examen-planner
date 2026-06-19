@@ -324,6 +324,9 @@
      core → data → tabs → features. The order preserves shared state,
      global handler functions, and the switchPage/switchExam/updateDashboard
      monkey-patch layering that later files rely on.
+     A boot integrity guard (js/core/load-guard.js, loaded LAST) verifies the
+     critical globals exist at startup and logs a clear console error if this
+     order is ever broken.
      ═══════════════════════════════════════════════════════════════ -->
 <!-- HTML partial loader — MUST run first so tab markup exists before app code -->
 <script src="js/core/include-loader.js"></script>
@@ -371,6 +374,8 @@
 </div>
 <script src="js/floating-ball.js"></script>
 <script src="js/planner-enhance.js"></script>
+<!-- Boot integrity guard — MUST be last; verifies the load order didn't break -->
+<script src="js/core/load-guard.js"></script>
 
 <!-- ═══ PLAN WIZARD (3-step modal) ═══ -->
 <div class="plan-wizard-overlay" id="plan-wizard-overlay" onclick="planWizardOutsideClose(event)">
