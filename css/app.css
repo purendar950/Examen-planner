@@ -1639,3 +1639,92 @@
   @media (max-width: 480px) {
     .ezw-exam-grid { grid-template-columns: 1fr; }
   }
+
+
+  /* ══════════════════ GOLD TARGET PILL (Today's focus) ══════════════════ */
+  .dash-target-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin-top: 8px; padding: 4px 12px; border-radius: 99px;
+    font-size: .8rem; font-weight: 800; letter-spacing: .02em;
+    background: linear-gradient(135deg, rgba(255,196,0,0.18), rgba(255,150,0,0.08));
+    border: 1px solid rgba(255,196,0,0.55);
+    color: #FFD24A;
+    text-shadow: 0 0 8px rgba(255,196,0,0.55);
+    box-shadow: 0 0 10px rgba(255,196,0,0.25);
+    animation: dtpGlow 2.4s ease-in-out infinite;
+  }
+  .dash-target-pill .dtp-text {
+    background: linear-gradient(90deg, #FFE08A, #FFB300, #FFE08A);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: #FFB300;
+  }
+  @keyframes dtpGlow {
+    0%, 100% { box-shadow: 0 0 8px rgba(255,196,0,0.22); border-color: rgba(255,196,0,0.45); }
+    50%      { box-shadow: 0 0 18px rgba(255,196,0,0.55); border-color: rgba(255,196,0,0.85); }
+  }
+  @media (prefers-reduced-motion: reduce) { .dash-target-pill { animation: none; } }
+
+
+  /* ══════════════════ PROFILE PAGE ══════════════════ */
+  .pf-wrap { max-width: 760px; margin: 0 auto; }
+  .pf-header {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 1.25rem 1.4rem;
+  }
+  .pf-avatar {
+    width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; font-weight: 800; color: #00120c;
+    background: linear-gradient(135deg, var(--accent), #00e6aa);
+  }
+  .pf-id { flex: 1 1 auto; min-width: 0; }
+  .pf-name { margin: 0; font-size: 1.3rem; }
+  .pf-post { font-size: .85rem; color: var(--text); margin-top: 2px; }
+  .pf-email { font-size: .78rem; color: var(--muted); margin-top: 2px; word-break: break-all; }
+  .pf-plan { font-size: .78rem; color: var(--accent); margin-top: 6px; font-weight: 600; }
+  .pf-edit-btn {
+    padding: .5rem 1rem; border-radius: 9px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-family: var(--font);
+    font-size: .8rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  .pf-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .pf-target {
+    display: flex; align-items: center; gap: 10px; margin-top: 1rem;
+    padding: .7rem 1.1rem; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(255,196,0,0.16), rgba(255,150,0,0.06));
+    border: 1px solid rgba(255,196,0,0.55);
+    box-shadow: 0 0 14px rgba(255,196,0,0.22);
+    animation: dtpGlow 2.4s ease-in-out infinite;
+  }
+  .pf-target-label { font-size: .78rem; font-weight: 800; color: #FFD24A; text-shadow: 0 0 8px rgba(255,196,0,0.5); }
+  .pf-target-val {
+    font-size: 1.05rem; font-weight: 800;
+    background: linear-gradient(90deg, #FFE08A, #FFB300, #FFE08A);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent; color: #FFB300;
+  }
+
+  .pf-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .pf-stat {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: .85rem 1rem;
+  }
+  .pf-stat-label { font-size: .68rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 5px; }
+  .pf-stat-val { font-size: .95rem; font-weight: 700; color: var(--text); }
+
+  .pf-actions { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+  .pf-action {
+    padding: .7rem 1rem; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); font-family: var(--font);
+    font-size: .85rem; font-weight: 600; cursor: pointer; text-align: center;
+  }
+  .pf-action:hover { border-color: var(--accent); }
+  .pf-logout { color: var(--red); border-color: rgba(239,68,68,0.4); }
+  .pf-logout:hover { background: rgba(239,68,68,0.12); border-color: var(--red); }
+
+  @media (max-width: 640px) {
+    .pf-grid { grid-template-columns: 1fr 1fr; }
+    .pf-edit-btn { width: 100%; }
+  }

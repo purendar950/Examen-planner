@@ -123,17 +123,9 @@
         <div class="sync-dot"></div>
         <span id="sync-label"></span>
       </div>
-      <div class="user-chip" onclick="toggleUserMenu(event)">
+      <div class="user-chip" onclick="openProfilePage(event)" title="My Profile">
         <div class="user-avatar" id="user-avatar-text">A</div>
         <span id="user-name-display">User</span>
-        <span style="font-size:0.7rem;">▾</span>
-        <div class="user-menu-dropdown" id="user-menu-dropdown">
-          <div class="um-name" id="um-name">User</div>
-          <div class="um-email" id="um-email"></div>
-          <div class="um-plan" id="um-plan"></div>
-          <button class="um-logout" onclick="event.stopPropagation(); openTelegramSettings()" style="background:#229ED9;color:#fff;margin-bottom:8px;">✈️ Daily Plan on Telegram</button>
-          <button class="um-logout" onclick="event.stopPropagation(); handleLogout()">↩ Logout</button>
-        </div>
       </div>
     </div>
   </div>
@@ -196,6 +188,8 @@
     <div data-include="pages/youtube.html"></div>
     <!-- ═══ YOUTUBE PLAYLIST ORGANISER PAGE ═══ -->
     <div data-include="pages/yt-organiser.html"></div>
+    <!-- ═══ PROFILE PAGE ═══ -->
+    <div data-include="pages/profile.html"></div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
@@ -224,6 +218,12 @@
       <div class="ezw-step" id="ezw-step-2" style="display:none;">
         <h4 class="ezw-h">Tell us about your preparation</h4>
         <p class="ezw-sub" id="ezw-prep-sub">We'll personalize your study plan.</p>
+
+        <label class="ezw-label">Your Name</label>
+        <input type="text" id="ezw-name" class="ezw-select" placeholder="e.g. Rahul Kumar">
+
+        <label class="ezw-label">Target Post / Position <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+        <input type="text" id="ezw-post" class="ezw-select" placeholder="e.g. Income Tax Inspector, SDM, PO">
 
         <label class="ezw-label">Target Exam Year</label>
         <select id="ezw-target-year" class="ezw-select"></select>
@@ -395,6 +395,7 @@
 <script src="js/tabs/youtube.js"></script>
 <script src="js/tabs/playlist-organiser.js"></script>
 <script src="js/tabs/mock-tests.js"></script>
+<script src="js/tabs/profile.js"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
 <script src="js/features/responsive.js"></script>
 <script src="js/features/examzen-branding.js"></script>

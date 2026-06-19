@@ -1,0 +1,49 @@
+    <div class="page" id="page-profile">
+      <div class="pf-wrap">
+
+        <!-- Header card -->
+        <div class="pf-header">
+          <div class="pf-avatar" id="pf-avatar">A</div>
+          <div class="pf-id">
+            <h2 class="pf-name" id="pf-name">User</h2>
+            <div class="pf-post" id="pf-post" style="display:none;"></div>
+            <div class="pf-email" id="pf-email"></div>
+            <div class="pf-plan" id="pf-plan">Plan: Free</div>
+          </div>
+          <button class="pf-edit-btn" onclick="openOnboardingWizard()">✏️ Edit setup</button>
+        </div>
+
+        <!-- Target highlight -->
+        <div class="pf-target" id="pf-target" style="display:none;">
+          <span class="pf-target-label">🏆 Target</span>
+          <span class="pf-target-val" id="pf-target-val"></span>
+        </div>
+
+        <!-- Preparation grid -->
+        <div class="section-title" style="margin-top:1.5rem;">📋 Preparation</div>
+        <div class="pf-grid">
+          <div class="pf-stat"><div class="pf-stat-label">Exam</div><div class="pf-stat-val" id="pf-exam">—</div></div>
+          <div class="pf-stat"><div class="pf-stat-label">Target Year</div><div class="pf-stat-val" id="pf-year">—</div></div>
+          <div class="pf-stat"><div class="pf-stat-label">Preparation Level</div><div class="pf-stat-val" id="pf-level">—</div></div>
+          <div class="pf-stat"><div class="pf-stat-label">Daily Study Hours</div><div class="pf-stat-val" id="pf-hours">—</div></div>
+          <div class="pf-stat"><div class="pf-stat-label">Preparation Mode</div><div class="pf-stat-val" id="pf-mode">—</div></div>
+          <div class="pf-stat"><div class="pf-stat-label">Rest Day</div><div class="pf-stat-val" id="pf-restday">—</div></div>
+        </div>
+
+        <!-- Progress grid -->
+        <div class="section-title" style="margin-top:1.5rem;">📈 Progress</div>
+        <div class="pf-grid">
+          <div class="pf-stat"><div class="pf-stat-label">Syllabus Complete</div><div class="pf-stat-val" id="pf-syllabus">0%</div></div>
+          <div class="pf-stat"><div class="pf-stat-label">Current Streak</div><div class="pf-stat-val" id="pf-streak">0 days</div></div>
+        </div>
+
+        <!-- Actions -->
+        <div class="section-title" style="margin-top:1.5rem;">⚙️ Settings</div>
+        <div class="pf-actions">
+          <button class="pf-action" onclick="openTelegramSettings()" style="background:#229ED9;color:#fff;border-color:#229ED9;">✈️ Daily Plan on Telegram</button>
+          <button class="pf-action" onclick="openOnboardingWizard()">🎯 Re-run Setup Wizard</button>
+          <button class="pf-action pf-logout" onclick="handleLogout()">↩ Logout</button>
+        </div>
+
+      </div>
+    </div>

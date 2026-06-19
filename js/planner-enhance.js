@@ -71,6 +71,10 @@ function openStudyProfileModal(startStep) {
 
   /* Step 2 — preparation fields */
   ezwBuildYearOptions(p.targetYear);
+  const nm = document.getElementById('ezw-name');
+  if (nm) nm.value = p.displayName || (currentUser && currentUser.name) || '';
+  const pst = document.getElementById('ezw-post');
+  if (pst) pst.value = p.targetPost || '';
   ezwSetSegment('ezw-level', p.prepLevel || 'beginner');
   ezwSetSegment('ezw-mode',  p.prepMode  || 'self');
   const dh = document.getElementById('ezw-daily-hours');
@@ -226,6 +230,8 @@ function saveStudyProfile() {
   const examTarget   = ezwSelectedExam || (typeof currentExam !== 'undefined' ? currentExam : null);
   /* Step 2 */
   const targetYear   = parseInt(document.getElementById('ezw-target-year')?.value) || (new Date().getFullYear() + 1);
+  const displayName  = (document.getElementById('ezw-name')?.value || '').trim();
+  const targetPost   = (document.getElementById('ezw-post')?.value || '').trim();
   const prepLevel    = ezwSegValue('ezw-level', 'beginner');
   const prepMode     = ezwSegValue('ezw-mode', 'self');
   const dailyHours   = parseInt(document.getElementById('ezw-daily-hours')?.value) || 6;
@@ -245,7 +251,7 @@ function saveStudyProfile() {
   } catch(e) {}
 
   appState.studyProfile = {
-    examTarget, targetYear, prepLevel, prepMode, targetScore,
+    examTarget, targetYear, displayName, targetPost, prepLevel, prepMode, targetScore,
     dailyHours, startHour, morningHours, eveningHours, restDay, weakSubjects,
     setupDone: true
   };
@@ -256,7 +262,7 @@ function saveStudyProfile() {
   try {
     if (currentUser && typeof db !== 'undefined' && db) {
       db.collection('users').doc(currentUser.uid).set({
-        profile: { examTarget, targetYear, prepLevel, prepMode, targetScore }
+        profile: { examTarget, targetYear, displayName, targetPost, prepLevel, prepMode, targetScore }
       }, { merge: true }).catch(function(){});
     }
     if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {

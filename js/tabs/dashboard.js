@@ -14,7 +14,8 @@ function dashTint(hex, a) {
 /* Best-effort current user's first name */
 function dashUserName() {
   let nm = '';
-  try { if (window.EZ_PROFILE && EZ_PROFILE.name) nm = EZ_PROFILE.name; } catch (e) {}
+  try { if (typeof appState !== 'undefined' && appState.studyProfile && appState.studyProfile.displayName) nm = appState.studyProfile.displayName; } catch (e) {}
+  try { if (!nm && window.EZ_PROFILE && EZ_PROFILE.name) nm = EZ_PROFILE.name; } catch (e) {}
   try { if (!nm && typeof currentUser !== 'undefined' && currentUser) nm = currentUser.name || currentUser.displayName || ''; } catch (e) {}
   try { if (!nm && typeof appState !== 'undefined' && appState.userName) nm = appState.userName; } catch (e) {}
   nm = (nm || 'Aspirant').trim().split(/\s+/)[0];
@@ -45,6 +46,23 @@ function updateDashboard() {
   } catch (e) {}
   if ($('dash-greeting')) $('dash-greeting').textContent = dashGreeting();
   if ($('dash-username')) $('dash-username').textContent = dashUserName();
+
+  // Gold target pill — target rank + optional post
+  const pill = $('dash-target-pill');
+  if (pill) {
+    const sp = (typeof appState !== 'undefined' && appState.studyProfile) || {};
+    const rank = (sp.targetScore || '').trim();
+    const post = (sp.targetPost || '').trim();
+    if (rank || post) {
+      const parts = [];
+      if (rank) parts.push(escapeHtml(rank));
+      if (post) parts.push(escapeHtml(post));
+      pill.innerHTML = '🏆 <span class="dtp-text">' + parts.join(' · ') + '</span>';
+      pill.style.display = 'inline-flex';
+    } else {
+      pill.style.display = 'none';
+    }
+  }
 
   // Stats
   if ($('stat-total')) $('stat-total').textContent = total;
