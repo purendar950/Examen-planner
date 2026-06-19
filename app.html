@@ -198,89 +198,132 @@
     <div data-include="pages/yt-organiser.html"></div>
   </div><!-- /main-content -->
 
-  <!-- ═══ F3: STUDY PROFILE SETUP MODAL ═══ -->
+  <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
   <div class="ch-link-modal-overlay" id="sp-modal-overlay" onclick="spOutsideClose(event)" style="z-index:10002;">
-    <div class="ch-link-modal" style="max-width:440px;max-height:90vh;overflow-y:auto;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;">
-        <h3 style="margin:0;">🎯 Study Profile Setup</h3>
+    <div class="ch-link-modal ezw-modal" style="max-width:480px;max-height:92vh;overflow-y:auto;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.55rem;">
+        <h3 style="margin:0;" id="ezw-title">🎯 Quick Setup</h3>
         <button onclick="closeStudyProfileModal()" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;">×</button>
       </div>
-      <p style="font-size:.78rem;color:var(--muted);margin:0 0 1rem;line-height:1.6;">Ek baar set karo — AI planner iske basis pe personalized plan banega.</p>
 
-      <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:4px;">🕐 Study Start Time</label>
-      <select id="sp-start-hour" style="width:100%;margin-bottom:.85rem;padding:.5rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.82rem;">
-        <option value="4">4:00 AM (Very Early)</option>
-        <option value="5">5:00 AM (Early Morning)</option>
-        <option value="6">6:00 AM (Morning)</option>
-        <option value="7">7:00 AM</option>
-        <option value="8">8:00 AM</option>
-        <option value="9">9:00 AM</option>
-        <option value="10">10:00 AM</option>
-      </select>
+      <!-- Progress -->
+      <div style="display:flex;align-items:center;justify-content:space-between;font-size:.72rem;color:var(--muted);margin-bottom:6px;">
+        <span id="ezw-step-label">Step 1 of 3</span>
+        <span id="ezw-step-sub">Choose Exam</span>
+      </div>
+      <div class="ezw-progress"><div class="ezw-progress-bar" id="ezw-progress-bar" style="width:33%;"></div></div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:.85rem;">
-        <div>
-          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:4px;">🌅 Morning Hours</label>
-          <input type="number" id="sp-morning-hours" class="ai-gen-input" value="2" min="0" max="8" step="0.5" style="width:100%;margin:0;">
-        </div>
-        <div>
-          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:4px;">🌙 Evening Hours</label>
-          <input type="number" id="sp-evening-hours" class="ai-gen-input" value="2" min="0" max="8" step="0.5" style="width:100%;margin:0;">
-        </div>
+      <!-- ─── STEP 1: CHOOSE EXAM ─── -->
+      <div class="ezw-step" id="ezw-step-1">
+        <h4 class="ezw-h">Choose your exam</h4>
+        <p class="ezw-sub">Select the exam you're preparing for — we'll load its syllabus &amp; pattern.</p>
+        <div id="ezw-exam-grid" class="ezw-exam-grid"></div>
       </div>
 
-      <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:4px;">😴 Weekly Rest Day</label>
-      <select id="sp-rest-day" style="width:100%;margin-bottom:.85rem;padding:.5rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.82rem;">
-        <option value="-1">No Rest Day</option>
-        <option value="0">Sunday</option>
-        <option value="6">Saturday</option>
-        <option value="5">Friday</option>
-      </select>
+      <!-- ─── STEP 2: PREPARATION ─── -->
+      <div class="ezw-step" id="ezw-step-2" style="display:none;">
+        <h4 class="ezw-h">Tell us about your preparation</h4>
+        <p class="ezw-sub" id="ezw-prep-sub">We'll personalize your study plan.</p>
 
-      <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:6px;">⚠️ Weak Subjects <span style="font-weight:400;color:var(--muted);">(AI inhe prioritize karega)</span></label>
-      <div id="sp-sub-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1.25rem;min-height:32px;">
-        <span style="font-size:.75rem;color:var(--muted);">Subjects add karo syllabus mein — yahan aayenge.</span>
+        <label class="ezw-label">Target Exam Year</label>
+        <select id="ezw-target-year" class="ezw-select"></select>
+
+        <label class="ezw-label">Current Preparation Level</label>
+        <div class="ezw-seg" id="ezw-level">
+          <button type="button" class="ezw-seg-btn active" data-val="beginner" onclick="ezwSetLevel(this)">Beginner</button>
+          <button type="button" class="ezw-seg-btn" data-val="intermediate" onclick="ezwSetLevel(this)">Intermediate</button>
+          <button type="button" class="ezw-seg-btn" data-val="advanced" onclick="ezwSetLevel(this)">Advanced</button>
+        </div>
+
+        <label class="ezw-label">Daily Study Hours: <span id="ezw-hours-label" style="color:var(--accent);font-weight:700;">6h</span></label>
+        <input type="range" id="ezw-daily-hours" class="ezw-range" min="1" max="12" step="1" value="6" oninput="ezwSlider(this.value)">
+        <div style="display:flex;justify-content:space-between;font-size:.66rem;color:var(--muted);margin-bottom:.85rem;"><span>1h</span><span>12h</span></div>
+
+        <label class="ezw-label">Preparation Mode</label>
+        <div class="ezw-seg" id="ezw-mode">
+          <button type="button" class="ezw-seg-btn active" data-val="self" onclick="ezwSetMode(this)">Self Study</button>
+          <button type="button" class="ezw-seg-btn" data-val="coaching" onclick="ezwSetMode(this)">Coaching</button>
+        </div>
+
+        <label class="ezw-label">Target Score / Rank <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+        <input type="text" id="ezw-target-score" class="ezw-select" placeholder="e.g. AIR 50 or 700+">
       </div>
 
-      <div style="border-top:1px solid var(--border);padding-top:1rem;margin-bottom:1rem;">
-        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:8px;">📩 Daily Plan on Telegram <span id="tg-pro-badge" style="display:none;background:rgba(0,200,150,0.15);color:var(--accent);font-size:.65rem;font-weight:700;border-radius:99px;padding:2px 8px;margin-left:4px;">💎 PRO</span></label>
+      <!-- ─── STEP 3: SCHEDULE + TELEGRAM ─── -->
+      <div class="ezw-step" id="ezw-step-3" style="display:none;">
+        <h4 class="ezw-h">Study schedule &amp; reminders</h4>
+        <p class="ezw-sub">Set your routine — the AI planner builds your timetable from this.</p>
 
-        <!-- Step guide -->
-        <div style="background:rgba(34,158,217,0.07);border:1px solid rgba(34,158,217,0.2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:.72rem;line-height:1.7;color:var(--text);">
-          <div style="font-weight:700;color:#229ED9;margin-bottom:4px;">📋 3 Steps to Connect:</div>
-          <div><b>Step 1 →</b> Niche button dabao, Telegram mein bot khuljayega</div>
-          <div><b>Step 2 →</b> Bot pe <b>Start</b> dabao — bot tumhara <b>Chat ID</b> reply karega</div>
-          <div><b>Step 3 →</b> Woh ID niche paste karo, toggle ON karo, Save karo ✅</div>
-          <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(34,158,217,0.2);color:var(--muted);">
-            💡 <b>Bot ne ID nahi diya?</b> Telegram par <b>@userinfobot</b> ko message karo — woh turant numeric ID reply karega.
+        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:4px;">🕐 Study Start Time</label>
+        <select id="sp-start-hour" style="width:100%;margin-bottom:.85rem;padding:.5rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.82rem;">
+          <option value="4">4:00 AM (Very Early)</option>
+          <option value="5">5:00 AM (Early Morning)</option>
+          <option value="6">6:00 AM (Morning)</option>
+          <option value="7">7:00 AM</option>
+          <option value="8">8:00 AM</option>
+          <option value="9">9:00 AM</option>
+          <option value="10">10:00 AM</option>
+        </select>
+
+        <!-- Daily hours from Step 2 are split into morning/evening for the planner -->
+        <input type="hidden" id="sp-morning-hours" value="3">
+        <input type="hidden" id="sp-evening-hours" value="3">
+
+        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:4px;">😴 Weekly Rest Day</label>
+        <select id="sp-rest-day" style="width:100%;margin-bottom:.85rem;padding:.5rem .75rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.82rem;">
+          <option value="-1">No Rest Day</option>
+          <option value="0">Sunday</option>
+          <option value="6">Saturday</option>
+          <option value="5">Friday</option>
+        </select>
+
+        <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:6px;">⚠️ Weak Subjects <span style="font-weight:400;color:var(--muted);">(AI inhe prioritize karega)</span></label>
+        <div id="sp-sub-checkboxes" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:1.25rem;min-height:32px;">
+          <span style="font-size:.75rem;color:var(--muted);">Subjects add karo syllabus mein — yahan aayenge.</span>
+        </div>
+
+        <div style="border-top:1px solid var(--border);padding-top:1rem;margin-bottom:.25rem;">
+          <label style="font-size:.78rem;font-weight:600;display:block;margin-bottom:8px;">📩 Daily Plan on Telegram <span id="tg-pro-badge" style="display:none;background:rgba(0,200,150,0.15);color:var(--accent);font-size:.65rem;font-weight:700;border-radius:99px;padding:2px 8px;margin-left:4px;">💎 PRO</span></label>
+
+          <!-- Step guide -->
+          <div style="background:rgba(34,158,217,0.07);border:1px solid rgba(34,158,217,0.2);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:.72rem;line-height:1.7;color:var(--text);">
+            <div style="font-weight:700;color:#229ED9;margin-bottom:4px;">📋 3 Steps to Connect:</div>
+            <div><b>Step 1 →</b> Niche button dabao, Telegram mein bot khuljayega</div>
+            <div><b>Step 2 →</b> Bot pe <b>Start</b> dabao — bot tumhara <b>Chat ID</b> reply karega</div>
+            <div><b>Step 3 →</b> Woh ID niche paste karo, toggle ON karo, Save karo ✅</div>
+            <div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(34,158,217,0.2);color:var(--muted);">
+              💡 <b>Bot ne ID nahi diya?</b> Telegram par <b>@userinfobot</b> ko message karo — woh turant numeric ID reply karega.
+            </div>
           </div>
+
+          <button onclick="connectTelegram()" style="width:100%;background:#229ED9;color:#fff;border:none;border-radius:8px;padding:.65rem;font-weight:700;font-size:.85rem;cursor:pointer;font-family:var(--font);margin-bottom:.6rem;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span>✈️</span> Step 1: Bot kholo &amp; Start dabao
+          </button>
+
+          <label style="font-size:.72rem;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">Step 2: Chat ID yahan paste karo</label>
+          <div style="display:flex;gap:6px;margin-bottom:.6rem;">
+            <input type="text" id="tg-chatid" class="ai-gen-input"
+              placeholder="Numeric ID, e.g. 987654321"
+              style="width:100%;margin:0;"
+              inputmode="numeric"
+              oninput="this.value=this.value.replace(/[^0-9-]/g,'')">
+            <button onclick="verifyTelegramChatId()" title="Test Connection" style="flex-shrink:0;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0 12px;font-size:.8rem;cursor:pointer;font-family:var(--font);white-space:nowrap;">🔍 Test</button>
+          </div>
+
+          <label style="display:flex;align-items:center;gap:8px;font-size:.8rem;cursor:pointer;margin-bottom:.5rem;">
+            <input type="checkbox" id="tg-enabled" style="width:16px;height:16px;accent-color:var(--accent);">
+            <span>Roz 6 AM IST pe study plan bhejo Telegram pe</span>
+          </label>
+          <button onclick="saveTelegramSettings()" style="width:100%;background:var(--accent);border:none;color:#fff;border-radius:8px;padding:.55rem;font-weight:700;font-size:.85rem;cursor:pointer;font-family:var(--font);">💾 Save Telegram Settings</button>
+          <div id="tg-status-msg" style="font-size:.7rem;color:var(--muted);margin-top:5px;min-height:16px;text-align:center;"></div>
         </div>
-
-        <button onclick="connectTelegram()" style="width:100%;background:#229ED9;color:#fff;border:none;border-radius:8px;padding:.65rem;font-weight:700;font-size:.85rem;cursor:pointer;font-family:var(--font);margin-bottom:.6rem;display:flex;align-items:center;justify-content:center;gap:6px;">
-          <span>✈️</span> Step 1: Bot kholo &amp; Start dabao
-        </button>
-
-        <label style="font-size:.72rem;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">Step 2: Chat ID yahan paste karo</label>
-        <div style="display:flex;gap:6px;margin-bottom:.6rem;">
-          <input type="text" id="tg-chatid" class="ai-gen-input"
-            placeholder="Numeric ID, e.g. 987654321"
-            style="width:100%;margin:0;"
-            inputmode="numeric"
-            oninput="this.value=this.value.replace(/[^0-9-]/g,'')">
-          <button onclick="verifyTelegramChatId()" title="Test Connection" style="flex-shrink:0;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:0 12px;font-size:.8rem;cursor:pointer;font-family:var(--font);white-space:nowrap;">🔍 Test</button>
-        </div>
-
-        <label style="display:flex;align-items:center;gap:8px;font-size:.8rem;cursor:pointer;margin-bottom:.5rem;">
-          <input type="checkbox" id="tg-enabled" style="width:16px;height:16px;accent-color:var(--accent);">
-          <span>Roz 6 AM IST pe study plan bhejo Telegram pe</span>
-        </label>
-        <button onclick="saveTelegramSettings()" style="width:100%;background:var(--accent);border:none;color:#fff;border-radius:8px;padding:.55rem;font-weight:700;font-size:.85rem;cursor:pointer;font-family:var(--font);">💾 Save Telegram Settings</button>
-        <div id="tg-status-msg" style="font-size:.7rem;color:var(--muted);margin-top:5px;min-height:16px;text-align:center;"></div>
       </div>
 
-      <div class="modal-actions">
-        <button class="btn-modal-cancel" onclick="closeStudyProfileModal()">Skip for now</button>
-        <button class="btn-modal-save" onclick="saveStudyProfile()">Save Profile 🚀</button>
+      <!-- Footer navigation -->
+      <div class="modal-actions" style="margin-top:1.1rem;">
+        <button class="btn-modal-cancel" id="ezw-skip-btn" onclick="closeStudyProfileModal()">Skip for now</button>
+        <button class="btn-modal-cancel" id="ezw-back-btn" onclick="ezwBack()" style="display:none;">← Back</button>
+        <button class="btn-modal-save" id="ezw-next-btn" onclick="ezwNext()">Next →</button>
       </div>
     </div>
   </div>

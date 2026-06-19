@@ -26,23 +26,68 @@ function getPreparationPhase(daysLeft) {
   return { id:'final', label:'Final Sprint', icon:'🚀', color:'#ef4444', tip:'Sirf revision — koi naya topic nahi' };
 }
 
-/* ─── F3: STUDY PROFILE MODAL ─── */
-function openStudyProfileModal() {
+/* ─── F3: ONBOARDING + STUDY PROFILE WIZARD (3 steps) ─── */
+let ezwStep = 1;                 /* current wizard step (1..3) */
+let ezwSelectedExam = null;      /* exam id chosen in step 1 */
+
+/* Build the exam picker grid in step 1 from ALL_EXAMS. */
+function ezwBuildExamGrid() {
+  const grid = document.getElementById('ezw-exam-grid');
+  if (!grid || typeof ALL_EXAMS === 'undefined') return;
+  const active = ezwSelectedExam || (typeof currentExam !== 'undefined' ? currentExam : null);
+  grid.innerHTML = Object.keys(ALL_EXAMS).map(id => {
+    const ex = ALL_EXAMS[id] || {};
+    const color = ex.color || 'var(--accent)';
+    const isActive = id === active;
+    return `<button type="button" class="ezw-exam-card${isActive ? ' active' : ''}" data-exam="${id}"
+      onclick="ezwSelectExam('${id}')" style="--ec:${color};">
+      <span class="ezw-exam-dot" style="background:${color};"></span>
+      <span class="ezw-exam-name">${escapeHtml(ex.name || id.toUpperCase())}</span>
+    </button>`;
+  }).join('');
+}
+
+/* Populate the Target Exam Year dropdown (this year .. +4). */
+function ezwBuildYearOptions(selected) {
+  const sel = document.getElementById('ezw-target-year');
+  if (!sel) return;
+  const y0 = new Date().getFullYear();
+  let html = '';
+  for (let y = y0; y <= y0 + 4; y++) html += `<option value="${y}">${y}</option>`;
+  sel.innerHTML = html;
+  sel.value = selected || (y0 + 1);
+}
+
+/* Open the wizard. Optional startStep (1..3) — used for "edit later" entry points. */
+function openStudyProfileModal(startStep) {
   const overlay = document.getElementById('sp-modal-overlay');
   if (!overlay) return;
 
-  /* Pre-fill from saved profile */
   const p = appState.studyProfile || {};
+
+  /* Step 1 — exam grid */
+  ezwSelectedExam = p.examTarget || (typeof currentExam !== 'undefined' ? currentExam : null);
+  ezwBuildExamGrid();
+
+  /* Step 2 — preparation fields */
+  ezwBuildYearOptions(p.targetYear);
+  ezwSetSegment('ezw-level', p.prepLevel || 'beginner');
+  ezwSetSegment('ezw-mode',  p.prepMode  || 'self');
+  const dh = document.getElementById('ezw-daily-hours');
+  const startHours = (p.dailyHours != null)
+    ? p.dailyHours
+    : ((p.morningHours || 0) + (p.eveningHours || 0)) || 6;
+  if (dh) { dh.value = startHours; ezwSlider(startHours); }
+  const ts = document.getElementById('ezw-target-score');
+  if (ts) ts.value = p.targetScore || '';
+
+  /* Step 3 — schedule fields */
   const sh = document.getElementById('sp-start-hour');
-  const mh = document.getElementById('sp-morning-hours');
-  const eh = document.getElementById('sp-evening-hours');
   const rd = document.getElementById('sp-rest-day');
   if (sh) sh.value = p.startHour || 6;
-  if (mh) mh.value = p.morningHours !== undefined ? p.morningHours : 2;
-  if (eh) eh.value = p.eveningHours !== undefined ? p.eveningHours : 2;
   if (rd) rd.value = p.restDay !== undefined ? p.restDay : 0;
 
-  /* Populate subject checkboxes dynamically */
+  /* Step 3 — weak subject checkboxes (depend on active exam) */
   const subsBox = document.getElementById('sp-sub-checkboxes');
   if (subsBox) {
     try {
@@ -64,9 +109,22 @@ function openStudyProfileModal() {
     }
   }
 
+  /* Step 3 — Telegram fields */
+  try {
+    const tg = (appState && appState.telegram) || {};
+    const c = document.getElementById('tg-chatid');
+    const e = document.getElementById('tg-enabled');
+    if (c) c.value = tg.chatId || '';
+    if (e) e.checked = !!tg.enabled;
+  } catch(e) {}
+
   overlay.style.display = 'flex';
   overlay.classList.add('open');
+  ezwGoStep(typeof startStep === 'number' ? startStep : 1);
 }
+
+/* Allow other modules / buttons to open straight to a given step. */
+function openOnboardingWizard() { openStudyProfileModal(1); }
 
 function closeStudyProfileModal() {
   const overlay = document.getElementById('sp-modal-overlay');
@@ -77,15 +135,135 @@ function spOutsideClose(e) {
   if (e.target.id === 'sp-modal-overlay') closeStudyProfileModal();
 }
 
+/* ── Wizard navigation ── */
+const EZW_STEP_META = {
+  1: { label: 'Step 1 of 3', sub: 'Choose Exam',  title: '🎯 Choose Your Exam' },
+  2: { label: 'Step 2 of 3', sub: 'Preparation',  title: '🎯 Your Preparation' },
+  3: { label: 'Step 3 of 3', sub: 'Schedule',     title: '🎯 Schedule & Reminders' }
+};
+
+function ezwGoStep(n) {
+  ezwStep = Math.max(1, Math.min(3, n));
+  for (let i = 1; i <= 3; i++) {
+    const panel = document.getElementById('ezw-step-' + i);
+    if (panel) panel.style.display = (i === ezwStep) ? 'block' : 'none';
+  }
+  const meta = EZW_STEP_META[ezwStep];
+  const lbl = document.getElementById('ezw-step-label');
+  const sub = document.getElementById('ezw-step-sub');
+  const ttl = document.getElementById('ezw-title');
+  const bar = document.getElementById('ezw-progress-bar');
+  if (lbl) lbl.textContent = meta.label;
+  if (sub) sub.textContent = meta.sub;
+  if (ttl) ttl.textContent = meta.title;
+  if (bar) bar.style.width = Math.round(ezwStep / 3 * 100) + '%';
+
+  const backBtn = document.getElementById('ezw-back-btn');
+  const skipBtn = document.getElementById('ezw-skip-btn');
+  const nextBtn = document.getElementById('ezw-next-btn');
+  if (backBtn) backBtn.style.display = ezwStep === 1 ? 'none' : '';
+  if (skipBtn) skipBtn.style.display = ezwStep === 1 ? '' : 'none';
+  if (nextBtn) nextBtn.textContent = ezwStep === 3 ? 'Finish Setup 🚀' : 'Next →';
+}
+
+function ezwBack() { if (ezwStep > 1) ezwGoStep(ezwStep - 1); }
+
+function ezwNext() {
+  if (ezwStep === 1 && !ezwSelectedExam) {
+    showToast('Pehle apna exam choose karo.', 'info');
+    return;
+  }
+  if (ezwStep < 3) { ezwGoStep(ezwStep + 1); return; }
+  saveStudyProfile();
+}
+
+/* Step 1 — exam selection (switches the app's active exam immediately so the
+   weak-subject list in step 3 reflects the chosen exam). */
+function ezwSelectExam(id) {
+  ezwSelectedExam = id;
+  document.querySelectorAll('#ezw-exam-grid .ezw-exam-card').forEach(c => {
+    c.classList.toggle('active', c.getAttribute('data-exam') === id);
+  });
+  try {
+    if (typeof switchExam === 'function' && typeof currentExam !== 'undefined' && currentExam !== id) {
+      switchExam(id);
+    }
+  } catch(e) {}
+  const sub = document.getElementById('ezw-prep-sub');
+  if (sub && typeof ALL_EXAMS !== 'undefined' && ALL_EXAMS[id]) {
+    sub.textContent = `We'll personalize your study plan for ${ALL_EXAMS[id].name}.`;
+  }
+}
+
+/* Segmented control helpers (preparation level / mode). */
+function ezwSetSegment(groupId, val) {
+  const group = document.getElementById(groupId);
+  if (!group) return;
+  group.querySelectorAll('.ezw-seg-btn').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('data-val') === val);
+  });
+}
+function ezwSetLevel(btn) { ezwSetSegment('ezw-level', btn.getAttribute('data-val')); }
+function ezwSetMode(btn)  { ezwSetSegment('ezw-mode',  btn.getAttribute('data-val')); }
+function ezwSegValue(groupId, fallback) {
+  const active = document.querySelector('#' + groupId + ' .ezw-seg-btn.active');
+  return active ? active.getAttribute('data-val') : fallback;
+}
+
+/* Daily-hours slider → label + hidden morning/evening split for the planner. */
+function ezwSlider(val) {
+  const v = parseInt(val) || 6;
+  const lbl = document.getElementById('ezw-hours-label');
+  if (lbl) lbl.textContent = v + 'h';
+  const mh = document.getElementById('sp-morning-hours');
+  const eh = document.getElementById('sp-evening-hours');
+  if (mh) mh.value = Math.ceil(v / 2);
+  if (eh) eh.value = Math.floor(v / 2);
+}
+
 function saveStudyProfile() {
+  /* Step 1 */
+  const examTarget   = ezwSelectedExam || (typeof currentExam !== 'undefined' ? currentExam : null);
+  /* Step 2 */
+  const targetYear   = parseInt(document.getElementById('ezw-target-year')?.value) || (new Date().getFullYear() + 1);
+  const prepLevel    = ezwSegValue('ezw-level', 'beginner');
+  const prepMode     = ezwSegValue('ezw-mode', 'self');
+  const dailyHours   = parseInt(document.getElementById('ezw-daily-hours')?.value) || 6;
+  const targetScore  = (document.getElementById('ezw-target-score')?.value || '').trim();
+  /* Step 3 */
   const startHour    = parseInt(document.getElementById('sp-start-hour')?.value) || 6;
-  const morningHours = parseFloat(document.getElementById('sp-morning-hours')?.value) || 2;
-  const eveningHours = parseFloat(document.getElementById('sp-evening-hours')?.value) || 2;
+  const morningHours = parseFloat(document.getElementById('sp-morning-hours')?.value) || Math.ceil(dailyHours / 2);
+  const eveningHours = parseFloat(document.getElementById('sp-evening-hours')?.value) || Math.floor(dailyHours / 2);
   const restDay      = parseInt(document.getElementById('sp-rest-day')?.value);
   const weakSubjects = [...(document.querySelectorAll('.sp-sub-check:checked') || [])].map(cb => cb.value);
 
-  appState.studyProfile = { startHour, morningHours, eveningHours, restDay, weakSubjects, setupDone: true };
+  /* Apply chosen exam to the app */
+  try {
+    if (examTarget && typeof switchExam === 'function' && typeof currentExam !== 'undefined' && currentExam !== examTarget) {
+      switchExam(examTarget);
+    }
+  } catch(e) {}
+
+  appState.studyProfile = {
+    examTarget, targetYear, prepLevel, prepMode, targetScore,
+    dailyHours, startHour, morningHours, eveningHours, restDay, weakSubjects,
+    setupDone: true
+  };
   saveProgress();
+
+  /* Mirror exam + preparation onto the Firestore user profile (used by admin
+     dashboard / EZ_PROFILE), best-effort. */
+  try {
+    if (currentUser && typeof db !== 'undefined' && db) {
+      db.collection('users').doc(currentUser.uid).set({
+        profile: { examTarget, targetYear, prepLevel, prepMode, targetScore }
+      }, { merge: true }).catch(function(){});
+    }
+    if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {
+      EZ_PROFILE.examTarget = examTarget;
+    }
+  } catch(e) {}
+
   closeStudyProfileModal();
 
   /* Refresh all cards */
@@ -97,7 +275,7 @@ function saveStudyProfile() {
   const hi = document.getElementById('ai-hours-input');
   if (hi) { hi._profileSet = false; hi.value = morningHours + eveningHours; }
 
-  showToast('Study Profile saved! 🎯', 'success');
+  showToast('Setup complete! 🎯', 'success');
 }
 
 /* ─── F4: MONTHLY MILESTONE PLANNER ─── */

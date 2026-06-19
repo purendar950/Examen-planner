@@ -114,7 +114,7 @@ function openTelegramSettings() {
     if (menu) menu.classList.remove('open');
   } catch(e) {}
   if (typeof openStudyProfileModal === 'function') {
-    openStudyProfileModal();
+    openStudyProfileModal(3); /* jump straight to the Schedule & Telegram step */
     /* Scroll the Telegram section into view inside the modal. */
     setTimeout(function() {
       try {

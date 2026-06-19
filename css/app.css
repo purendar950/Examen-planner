@@ -1567,3 +1567,75 @@
 .minimax-close-icon:hover {
   opacity: 1;
 }
+
+
+  /* ══════════════════ ONBOARDING / STUDY PROFILE WIZARD ══════════════════ */
+  .ezw-modal h3 { font-size: 1.05rem; }
+  .ezw-progress {
+    height: 6px; border-radius: 99px; background: var(--surface);
+    border: 1px solid var(--border); overflow: hidden; margin-bottom: 1.1rem;
+  }
+  .ezw-progress-bar {
+    height: 100%; background: var(--accent); border-radius: 99px;
+    transition: width .3s ease;
+  }
+  .ezw-h { font-size: 1rem; font-weight: 800; margin: 0 0 4px; }
+  .ezw-sub { font-size: .78rem; color: var(--muted); margin: 0 0 1.1rem; line-height: 1.6; }
+  .ezw-label {
+    font-size: .78rem; font-weight: 700; display: block;
+    margin: 0 0 6px; color: var(--text);
+  }
+  .ezw-select {
+    width: 100%; margin-bottom: 1rem; padding: .6rem .75rem;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: .85rem;
+    outline: none; font-family: var(--font);
+  }
+  .ezw-select:focus { border-color: var(--accent); }
+
+  /* Exam picker grid */
+  .ezw-exam-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 10px; margin-bottom: .5rem;
+  }
+  .ezw-exam-card {
+    display: flex; align-items: center; gap: 10px;
+    padding: .8rem .9rem; border-radius: 12px; cursor: pointer;
+    background: var(--surface); border: 1.5px solid var(--border);
+    color: var(--text); font-family: var(--font); font-size: .85rem;
+    font-weight: 600; text-align: left; transition: all .15s;
+  }
+  .ezw-exam-card:hover { border-color: var(--ec, var(--accent)); }
+  .ezw-exam-card.active {
+    border-color: var(--ec, var(--accent));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ec, var(--accent)) 22%, transparent);
+    background: color-mix(in srgb, var(--ec, var(--accent)) 10%, var(--surface));
+  }
+  .ezw-exam-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .ezw-exam-name { line-height: 1.2; }
+
+  /* Segmented controls (level / mode) */
+  .ezw-seg {
+    display: flex; gap: 8px; margin-bottom: 1.1rem; flex-wrap: wrap;
+  }
+  .ezw-seg-btn {
+    flex: 1 1 auto; min-width: 90px; padding: .6rem .5rem; border-radius: 9px;
+    background: var(--surface); border: 1.5px solid var(--border);
+    color: var(--muted); font-family: var(--font); font-size: .82rem;
+    font-weight: 600; cursor: pointer; transition: all .15s;
+  }
+  .ezw-seg-btn:hover { color: var(--text); }
+  .ezw-seg-btn.active {
+    border-color: var(--accent); color: var(--accent);
+    background: rgba(0,200,150,0.10);
+  }
+
+  /* Daily-hours range slider */
+  .ezw-range {
+    width: 100%; margin: 2px 0 6px; accent-color: var(--accent);
+    height: 6px; cursor: pointer;
+  }
+
+  @media (max-width: 480px) {
+    .ezw-exam-grid { grid-template-columns: 1fr; }
+  }
