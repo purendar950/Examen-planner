@@ -72,6 +72,9 @@
   .focus-greet { padding-left: 1.25rem; border-left: 1px solid var(--line); }
   .focus-greet .g-title { font-size: 1.05rem; font-weight: 800; }
   .focus-greet .g-sub { font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
+  .focus-date { padding-left: 1.25rem; border-left: 1px solid var(--line); }
+  .focus-date .fd-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .focus-date .fd-val { font-size: 1.05rem; font-weight: 800; margin-top: 3px; }
   .focus-label { font-size: 0.72rem; font-weight: 700; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
   .focus h2 { font-size: 1.3rem; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 1.1rem; }
   .focus h2 b { color: var(--accent); }
@@ -190,6 +193,10 @@
         <div class="g-title">Good evening, Puren</div>
         <div class="g-sub">Let's get a little closer today.</div>
       </div>
+      <div class="focus-date">
+        <div class="fd-label">📅 Exam date</div>
+        <div class="fd-val" id="examDateText">14 Jul 2026</div>
+      </div>
     </div>
     <div class="focus-main">
     <div class="focus-left">
@@ -297,14 +304,17 @@
 
 </div>
 <script>
-  // Live "days left" — updates when the exam date is changed
+  // Live "days left" + exam date — update when the date is changed
   var input = document.getElementById('examDate');
   var num = document.getElementById('daysNum');
+  var dateText = document.getElementById('examDateText');
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function refresh() {
-    if (!input.value) { num.textContent = '—'; return; }
+    if (!input.value) { num.textContent = '—'; dateText.textContent = 'Not set'; return; }
     var dt = new Date(input.value + 'T00:00:00');
     var days = Math.ceil((dt.getTime() - Date.now()) / 86400000);
     num.textContent = days > 0 ? days : 0;
+    dateText.textContent = dt.getDate() + ' ' + MON[dt.getMonth()] + ' ' + dt.getFullYear();
   }
   input.addEventListener('change', refresh);
   refresh();
