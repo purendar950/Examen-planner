@@ -1,84 +1,101 @@
     <div class="page active" id="page-dashboard">
-      <div class="exam-countdown" id="countdown-wrap">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;flex-wrap:wrap;gap:8px;">
-          <div class="countdown-label" id="countdown-title">⏱ SSC CGL Exam Countdown</div>
-          <input type="date" class="exam-date-input" id="exam-date-picker" onchange="updateExamDate(this.value)" title="Set your exam date">
-        </div>
-        <div class="countdown-timer">
-          <div class="countdown-unit">
-            <div class="countdown-num" id="cd-days">00</div>
-            <div class="countdown-label-unit">Days</div>
+
+      <!-- ═══ FOCUS CARD ═══ -->
+      <div class="dash-focus">
+        <div class="dash-head">
+          <div class="dash-head-l">
+            <div class="dash-eyebrow">🎯 Today's focus</div>
+            <div class="dash-exam" id="dash-exam-title">SSC CGL 2026</div>
           </div>
-          <span class="countdown-sep">:</span>
-          <div class="countdown-unit">
-            <div class="countdown-num" id="cd-hours">00</div>
-            <div class="countdown-label-unit">Hours</div>
+          <div class="dash-greet">
+            <div class="dg-small" id="dash-greeting">Good evening,</div>
+            <div class="dg-name" id="dash-username">Aspirant</div>
+            <div class="dg-sub">Let's get a little closer today.</div>
           </div>
-          <span class="countdown-sep">:</span>
-          <div class="countdown-unit">
-            <div class="countdown-num" id="cd-mins">00</div>
-            <div class="countdown-label-unit">Mins</div>
-          </div>
-          <span class="countdown-sep">:</span>
-          <div class="countdown-unit">
-            <div class="countdown-num accent-border" id="cd-secs">00</div>
-            <div class="countdown-label-unit">Secs</div>
+          <div class="dash-date">
+            <div class="dd-label">📅 Exam date</div>
+            <div class="dd-val" id="exam-date-label">Set your date</div>
           </div>
         </div>
-        <div class="countdown-date" id="exam-date-label">Exam date: July 14, 2026 — Set your date above</div>
+
+        <div class="dash-main">
+          <div class="dash-left">
+            <h2 class="dash-h2" id="dash-focus-line">Pick up where you left off</h2>
+            <div class="dash-todo" id="dash-today-list"></div>
+            <button class="dash-btn" onclick="switchPage('syllabus')">Start studying →</button>
+          </div>
+
+          <div class="dash-right">
+            <div class="dash-rings">
+              <div class="ring-stat">
+                <div class="ring">
+                  <svg width="120" height="120" viewBox="0 0 120 120">
+                    <circle class="ring-track" cx="60" cy="60" r="52" stroke-width="9" fill="none"></circle>
+                    <circle class="ring-prog" id="dash-syllabus-ring" cx="60" cy="60" r="52" stroke-width="9" fill="none" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
+                  </svg>
+                  <div class="ring-c"><div class="ring-big" id="dash-syllabus-pct">0%</div><div class="ring-lbl">Syllabus</div></div>
+                </div>
+                <div class="ring-cap"><b id="dash-done-frac">0 / 0</b> done</div>
+              </div>
+
+              <div class="ring-stat">
+                <div class="ring">
+                  <svg width="120" height="120" viewBox="0 0 120 120">
+                    <circle class="ring-amber-track" cx="60" cy="60" r="52" stroke-width="9" fill="none"></circle>
+                    <circle class="ring-amber" cx="60" cy="60" r="52" stroke-width="9" fill="none" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="0"></circle>
+                  </svg>
+                  <div class="ring-c"><div class="ring-big amber" id="cd-days">00</div><div class="ring-lbl">Days left</div></div>
+                </div>
+                <div class="dash-timer"><span id="cd-hours">00</span>h <span id="cd-mins">00</span>m <span id="cd-secs">00</span>s</div>
+              </div>
+            </div>
+
+            <label class="dash-datepick" title="Set your exam date">📅
+              <input type="date" class="exam-date-input" id="exam-date-picker" onchange="updateExamDate(this.value)">
+            </label>
+            <span class="dash-streak"><span class="streak-fire">🔥</span> <strong id="streak-count">0</strong>-day streak</span>
+          </div>
+        </div>
+
+        <!-- merged stats -->
+        <div class="dash-stats">
+          <div class="dstat"><div class="dstat-v" id="stat-total">0</div><div class="dstat-l">Total</div></div>
+          <div class="dstat green"><div class="dstat-v" id="stat-done">0</div><div class="dstat-l">Completed</div></div>
+          <div class="dstat amber"><div class="dstat-v" id="stat-remaining">0</div><div class="dstat-l">Remaining</div></div>
+          <div class="dstat purple"><div class="dstat-v" id="stat-bookmarked">0</div><div class="dstat-l">Bookmarked</div></div>
+        </div>
       </div>
 
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-icon icon-blue">📋</div>
-          <div class="stat-val" id="stat-total">161</div>
-          <div class="stat-lbl">Total Chapters</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon icon-green">✅</div>
-          <div class="stat-val" id="stat-done">0</div>
-          <div class="stat-lbl">Completed</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon icon-amber">📖</div>
-          <div class="stat-val" id="stat-remaining">161</div>
-          <div class="stat-lbl">Remaining</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon icon-purple">🔖</div>
-          <div class="stat-val" id="stat-bookmarked">0</div>
-          <div class="stat-lbl">Bookmarked</div>
-        </div>
-      </div>
+      <!-- chapters/day hint -->
+      <div class="dash-pace">⚡ Aim for ~<strong id="chapters-per-day">6</strong> chapters/day to finish on time</div>
 
-      <div class="streak-bar">
-        <span class="streak-fire">🔥</span>
-        <span class="streak-text"><strong id="streak-count">0</strong> day streak</span>
-        <span class="streak-hint">~<strong id="chapters-per-day">6</strong> chapters/day to finish on time</span>
-      </div>
+      <!-- mock-test summary injects/renders here -->
+      <div id="mock-dash-summary"></div>
 
-      <!-- Revision Reminders Widget -->
-      <div class="revision-widget" id="revision-dashboard-widget" onclick="switchPage('revision')" style="cursor:pointer;">
-        <div class="revision-widget-head">
-          <div class="revision-widget-title">🔁 Revision Queue</div>
-          <div class="revision-widget-stats">
-            <span>Due: <b id="rev-due-count">0</b></span>
-            <span>This week: <b id="rev-week-count">0</b></span>
-            <span>Mastered: <b id="rev-mastered-count">0</b></span>
+      <!-- ═══ UP NEXT ═══ -->
+      <div class="section-title">Up next</div>
+      <div class="dash-grid2">
+        <div class="revision-widget" id="revision-dashboard-widget" onclick="switchPage('revision')" style="cursor:pointer;">
+          <div class="revision-widget-head">
+            <div class="revision-widget-title">🔁 Revision Queue</div>
+            <div class="revision-widget-stats">
+              <span>Due: <b id="rev-due-count">0</b></span>
+              <span>This week: <b id="rev-week-count">0</b></span>
+              <span>Mastered: <b id="rev-mastered-count">0</b></span>
+            </div>
           </div>
+          <div id="rev-due-preview" style="font-size:0.82rem; color:var(--muted);">Loading...</div>
         </div>
-        <div id="rev-due-preview" style="font-size:0.82rem; color:var(--muted);">Loading...</div>
-      </div>
 
-      <!-- Continue Watching -->
-      <div class="yt-continue-card" id="yt-continue-card" onclick="switchPage('youtube');setTimeout(ytResume,120)"></div>
+        <!-- Continue Watching -->
+        <div class="yt-continue-card" id="yt-continue-card" onclick="switchPage('youtube');setTimeout(ytResume,120)"></div>
+      </div>
 
       <!-- Subject Progress -->
       <div class="section-title">Subject-wise Progress</div>
-      <div style="display:grid;gap:0.85rem;margin-bottom:1.5rem;" id="subject-progress-cards"></div>
+      <div class="dash-subjects" id="subject-progress-cards"></div>
 
       <!-- Recent Activity -->
       <div class="section-title">Recently Completed</div>
       <div id="recent-activity-list"></div>
     </div>
-
