@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>ExamZen — Dashboard Redesign Preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0A0D12;
+    --surface: #111620;
+    --card: #161B26;
+    --border: #1E2535;
+    --accent: #00C896;
+    --text: #E8EDF5;
+    --muted: #6B7488;
+    --amber: #F59E0B;
+    --red: #EF4444;
+    --blue: #3B82F6;
+    --purple: #A855F7;
+    --font: 'Inter', -apple-system, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--font); background: var(--bg); color: var(--text);
+    min-height: 100vh; -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(900px circle at 0% -10%, rgba(0,200,150,0.10), transparent 45%),
+      radial-gradient(800px circle at 100% 0%, rgba(59,130,246,0.10), transparent 40%);
+    background-attachment: fixed;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 1.5rem; }
+
+  /* Demo ribbon */
+  .demo-note {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: linear-gradient(135deg, rgba(0,200,150,0.14), rgba(0,200,150,0.04));
+    border: 1px solid rgba(0,200,150,0.3); border-radius: 12px;
+    padding: 0.7rem 1rem; margin-bottom: 1.5rem; font-size: 0.82rem; color: var(--text);
+  }
+  .demo-note b { color: var(--accent); }
+  .demo-pill { background: var(--accent); color: #04130d; font-weight: 800; font-size: 0.65rem; letter-spacing: 0.06em; padding: 3px 9px; border-radius: 99px; text-transform: uppercase; }
+
+  /* Greeting */
+  .greet { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 1.25rem; flex-wrap: wrap; }
+  .greet h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em; }
+  .greet h1 span { background: linear-gradient(120deg, var(--accent), #45e3b4); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .greet p { color: var(--muted); font-size: 0.86rem; margin-top: 3px; }
+  .exam-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--card); border: 1px solid var(--border); border-radius: 99px;
+    padding: 7px 14px; font-size: 0.8rem; font-weight: 600;
+  }
+  .exam-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+
+  /* HERO countdown + ring */
+  .hero {
+    position: relative; overflow: hidden;
+    background:
+      linear-gradient(135deg, rgba(0,200,150,0.10), rgba(59,130,246,0.06) 60%, transparent),
+      var(--card);
+    border: 1px solid var(--border); border-radius: 20px;
+    padding: 1.5rem; margin-bottom: 1.25rem;
+    display: flex; gap: 1.5rem; align-items: center; flex-wrap: wrap;
+  }
+  .hero::before {
+    content: ''; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--blue), transparent);
+  }
+  .hero-left { flex: 1; min-width: 260px; }
+  .hero-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 4px; }
+  .hero-title { font-size: 1.15rem; font-weight: 800; margin-bottom: 2px; }
+  .hero-date { font-size: 0.8rem; color: var(--muted); margin-bottom: 1.1rem; }
+  .timer { display: flex; gap: 10px; align-items: center; }
+  .tunit { text-align: center; min-width: 60px; }
+  .tnum {
+    font-size: 2rem; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1;
+    background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+    border-radius: 12px; padding: 0.55rem 0.4rem; color: var(--text);
+  }
+  .tunit:last-child .tnum { border-color: rgba(0,200,150,0.5); box-shadow: 0 0 22px rgba(0,200,150,0.22); color: var(--accent); }
+  .tlbl { font-size: 0.6rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 6px; }
+  .tsep { font-size: 1.4rem; color: var(--border); font-weight: 800; margin-top: -14px; }
+
+  /* progress ring */
+  .ring-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .ring { position: relative; width: 132px; height: 132px; }
+  .ring svg { transform: rotate(-90deg); }
+  .ring-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .ring-pct { font-size: 1.7rem; font-weight: 900; line-height: 1; }
+  .ring-sub { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 3px; }
+  .ring-cap { font-size: 0.74rem; color: var(--muted); }
+  .ring-cap b { color: var(--accent); }
+
+  /* STAT CARDS */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.9rem; margin-bottom: 1.25rem; }
+  .stat {
+    position: relative; overflow: hidden;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 16px; padding: 1.05rem; transition: transform .18s, border-color .18s, box-shadow .18s;
+  }
+  .stat:hover { transform: translateY(-3px); border-color: rgba(255,255,255,0.14); box-shadow: 0 12px 28px rgba(0,0,0,0.35); }
+  .stat::after { content: ''; position: absolute; right: -30px; top: -30px; width: 90px; height: 90px; border-radius: 50%; opacity: 0.12; }
+  .stat .ic { width: 40px; height: 40px; border-radius: 11px; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; margin-bottom: 0.7rem; }
+  .stat .v { font-size: 1.7rem; font-weight: 900; line-height: 1; }
+  .stat .l { font-size: 0.74rem; color: var(--muted); margin-top: 3px; }
+  .stat .trend { font-size: 0.68rem; font-weight: 700; margin-top: 7px; display: inline-block; }
+  .s-blue .ic { background: rgba(59,130,246,0.15); color: #7cb0ff; } .s-blue::after { background: var(--blue); }
+  .s-green .ic { background: rgba(0,200,150,0.15); color: var(--accent); } .s-green::after { background: var(--accent); } .s-green .trend { color: var(--accent); }
+  .s-amber .ic { background: rgba(245,158,11,0.15); color: var(--amber); } .s-amber::after { background: var(--amber); }
+  .s-purple .ic { background: rgba(168,85,247,0.15); color: #c79bff; } .s-purple::after { background: var(--purple); }
+
+  /* streak banner */
+  .streak {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    background: linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.02)), var(--card);
+    border: 1px solid rgba(245,158,11,0.22); border-radius: 16px;
+    padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+  }
+  .streak .fire { font-size: 1.7rem; filter: drop-shadow(0 0 8px rgba(245,158,11,0.5)); }
+  .streak .big { font-size: 1.35rem; font-weight: 900; color: var(--amber); }
+  .streak .txt { font-size: 0.82rem; color: var(--muted); }
+  .streak .txt b { color: var(--text); }
+  .week-dots { display: flex; gap: 6px; margin-left: auto; }
+  .wd { width: 26px; text-align: center; }
+  .wd .d { width: 22px; height: 22px; border-radius: 7px; background: var(--surface); border: 1px solid var(--border); margin: 0 auto 4px; display: flex; align-items: center; justify-content: center; font-size: 0.62rem; }
+  .wd.on .d { background: var(--amber); border-color: var(--amber); color: #1a1205; }
+  .wd .n { font-size: 0.58rem; color: var(--muted); }
+
+  /* two col */
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.25rem; }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 1.1rem 1.25rem; transition: border-color .18s, transform .18s; cursor: pointer; }
+  .panel:hover { border-color: rgba(255,255,255,0.14); transform: translateY(-2px); }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem; }
+  .panel-title { font-weight: 800; font-size: 0.92rem; display: flex; align-items: center; gap: 8px; }
+  .panel-go { font-size: 0.72rem; color: var(--accent); font-weight: 700; }
+  .rev-stats { display: flex; gap: 8px; }
+  .rev-stat { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 11px; padding: 0.6rem; text-align: center; }
+  .rev-stat .n { font-size: 1.25rem; font-weight: 900; }
+  .rev-stat .k { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 2px; }
+  .rev-stat.due .n { color: var(--red); } .rev-stat.week .n { color: var(--amber); } .rev-stat.mast .n { color: var(--accent); }
+  .rev-preview { font-size: 0.78rem; color: var(--muted); margin-top: 0.7rem; }
+  .rev-preview b { color: var(--text); }
+
+  .yt { display: flex; align-items: center; gap: 12px; }
+  .yt-thumb { width: 92px; height: 54px; border-radius: 9px; background: linear-gradient(135deg,#2a1a1a,#3a1f1f); flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; position: relative; overflow: hidden; border: 1px solid var(--border); }
+  .yt-thumb::after { content: '▶'; color: #ff4444; }
+  .yt-info { flex: 1; min-width: 0; }
+  .yt-info .t { font-size: 0.84rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .yt-info .b { font-size: 0.7rem; color: var(--muted); margin-top: 3px; }
+  .yt-resume { background: var(--accent); color: #04130d; border: none; border-radius: 9px; padding: 7px 15px; font-size: 0.78rem; font-weight: 800; cursor: pointer; white-space: nowrap; }
+
+  .sec-title { font-size: 0.95rem; font-weight: 800; margin: 0.4rem 0 0.85rem; display: flex; align-items: center; gap: 8px; }
+  .sec-title .count { font-size: 0.7rem; color: var(--muted); font-weight: 600; background: var(--surface); border: 1px solid var(--border); padding: 2px 9px; border-radius: 99px; }
+
+  /* subject progress */
+  .subjects { display: grid; gap: 0.7rem; margin-bottom: 1.5rem; }
+  .subj { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 0.9rem 1.1rem; cursor: pointer; transition: border-color .18s, transform .18s; }
+  .subj:hover { border-color: rgba(255,255,255,0.14); transform: translateX(3px); }
+  .subj-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
+  .subj-name { font-weight: 700; font-size: 0.88rem; display: flex; align-items: center; gap: 9px; }
+  .subj-name .sw { width: 10px; height: 10px; border-radius: 50%; }
+  .subj-frac { font-size: 0.74rem; color: var(--muted); }
+  .bar { flex: 1; height: 8px; background: var(--surface); border-radius: 99px; overflow: hidden; }
+  .bar > div { height: 100%; border-radius: 99px; transition: width 1s cubic-bezier(.2,.8,.2,1); }
+  .subj-row { display: flex; align-items: center; gap: 11px; }
+  .subj-pct { font-size: 0.8rem; font-weight: 800; min-width: 36px; text-align: right; }
+
+  /* recent */
+  .recent { display: grid; gap: 0; position: relative; }
+  .ritem { display: flex; align-items: center; gap: 12px; padding: 0.7rem 0; border-bottom: 1px solid rgba(30,37,53,0.6); }
+  .ritem:last-child { border-bottom: none; }
+  .rdot { width: 30px; height: 30px; border-radius: 9px; background: rgba(0,200,150,0.14); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; flex-shrink: 0; }
+  .rinfo { flex: 1; min-width: 0; }
+  .rinfo .t { font-size: 0.85rem; font-weight: 600; }
+  .rinfo .s { font-size: 0.71rem; color: var(--muted); }
+  .rdate { font-size: 0.71rem; color: var(--muted); white-space: nowrap; }
+
+  @media (max-width: 760px) {
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .grid2 { grid-template-columns: 1fr; }
+    .hero { justify-content: center; }
+    .week-dots { margin-left: 0; }
+  }
+  @media (max-width: 420px) {
+    .tsep { display: none; } .timer { gap: 6px; } .tnum { font-size: 1.5rem; min-width: 0; }
+    .wrap { padding: 1rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="demo-note">
+    <span class="demo-pill">Preview</span>
+    <span>This is a <b>design demo</b> with sample data. Your real dashboard, features &amp; live data stay exactly the same once approved.</span>
+  </div>
+
+  <div class="greet">
+    <div>
+      <h1>Good evening, <span>Puren</span> 👋</h1>
+      <p>You're on track. 6 chapters a day keeps the cutoff away.</p>
+    </div>
+    <div class="exam-chip"><span class="dot"></span> SSC CGL 2026</div>
+  </div>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-left">
+      <div class="hero-label">⏱ Exam Countdown</div>
+      <div class="hero-title">SSC CGL 2026 — Tier I</div>
+      <div class="hero-date">Exam date: July 14, 2026</div>
+      <div class="timer">
+        <div class="tunit"><div class="tnum" id="d">00</div><div class="tlbl">Days</div></div>
+        <div class="tsep">:</div>
+        <div class="tunit"><div class="tnum" id="h">00</div><div class="tlbl">Hours</div></div>
+        <div class="tsep">:</div>
+        <div class="tunit"><div class="tnum" id="m">00</div><div class="tlbl">Mins</div></div>
+        <div class="tsep">:</div>
+        <div class="tunit"><div class="tnum" id="s">00</div><div class="tlbl">Secs</div></div>
+      </div>
+    </div>
+    <div class="ring-wrap">
+      <div class="ring">
+        <svg width="132" height="132">
+          <circle cx="66" cy="66" r="58" stroke="#1E2535" stroke-width="11" fill="none"></circle>
+          <circle cx="66" cy="66" r="58" stroke="url(#g)" stroke-width="11" fill="none"
+            stroke-linecap="round" stroke-dasharray="364.4" stroke-dashoffset="142.1"></circle>
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#00C896"></stop><stop offset="1" stop-color="#3B82F6"></stop>
+          </linearGradient></defs>
+        </svg>
+        <div class="ring-center"><div class="ring-pct">61%</div><div class="ring-sub">Syllabus</div></div>
+      </div>
+      <div class="ring-cap"><b>98</b> of 161 chapters done</div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat s-blue"><div class="ic">📋</div><div class="v">161</div><div class="l">Total Chapters</div></div>
+    <div class="stat s-green"><div class="ic">✅</div><div class="v">98</div><div class="l">Completed</div><span class="trend">▲ 12 this week</span></div>
+    <div class="stat s-amber"><div class="ic">📖</div><div class="v">63</div><div class="l">Remaining</div></div>
+    <div class="stat s-purple"><div class="ic">🔖</div><div class="v">14</div><div class="l">Bookmarked</div></div>
+  </div>
+
+  <!-- STREAK -->
+  <div class="streak">
+    <span class="fire">🔥</span>
+    <div>
+      <div class="big">7 day streak</div>
+      <div class="txt">Keep it alive — study at least <b>1 chapter</b> today</div>
+    </div>
+    <div class="week-dots">
+      <div class="wd on"><div class="d">✓</div><div class="n">M</div></div>
+      <div class="wd on"><div class="d">✓</div><div class="n">T</div></div>
+      <div class="wd on"><div class="d">✓</div><div class="n">W</div></div>
+      <div class="wd on"><div class="d">✓</div><div class="n">T</div></div>
+      <div class="wd on"><div class="d">✓</div><div class="n">F</div></div>
+      <div class="wd on"><div class="d">✓</div><div class="n">S</div></div>
+      <div class="wd"><div class="d"></div><div class="n">S</div></div>
+    </div>
+  </div>
+
+  <!-- TWO COLUMN -->
+  <div class="grid2">
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">🔁 Revision Queue</div><div class="panel-go">Open →</div></div>
+      <div class="rev-stats">
+        <div class="rev-stat due"><div class="n">5</div><div class="k">Due</div></div>
+        <div class="rev-stat week"><div class="n">11</div><div class="k">This week</div></div>
+        <div class="rev-stat mast"><div class="n">42</div><div class="k">Mastered</div></div>
+      </div>
+      <div class="rev-preview">Next up: <b>Percentage</b>, <b>Reading Comprehension</b>, <b>Mughal Empire</b> …</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title">▶ Continue Watching</div><div class="panel-go">YouTube →</div></div>
+      <div class="yt">
+        <div class="yt-thumb"></div>
+        <div class="yt-info">
+          <div class="t">Time &amp; Work — Full Concept + PYQs</div>
+          <div class="b">📋 Playlist · 4/18 watched</div>
+        </div>
+        <button class="yt-resume">▶ Resume</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUBJECT PROGRESS -->
+  <div class="sec-title">Subject-wise Progress <span class="count">4 subjects</span></div>
+  <div class="subjects">
+    <div class="subj">
+      <div class="subj-top"><div class="subj-name"><span class="sw" style="background:#00C896;"></span>General Intelligence &amp; Reasoning</div><div class="subj-frac">34/40</div></div>
+      <div class="subj-row"><div class="bar"><div style="width:85%;background:linear-gradient(90deg,#00C896,#45e3b4);"></div></div><div class="subj-pct" style="color:#00C896;">85%</div></div>
+    </div>
+    <div class="subj">
+      <div class="subj-top"><div class="subj-name"><span class="sw" style="background:#3B82F6;"></span>General Awareness</div><div class="subj-frac">28/45</div></div>
+      <div class="subj-row"><div class="bar"><div style="width:62%;background:linear-gradient(90deg,#3B82F6,#7cb0ff);"></div></div><div class="subj-pct" style="color:#3B82F6;">62%</div></div>
+    </div>
+    <div class="subj">
+      <div class="subj-top"><div class="subj-name"><span class="sw" style="background:#F59E0B;"></span>Quantitative Aptitude</div><div class="subj-frac">22/46</div></div>
+      <div class="subj-row"><div class="bar"><div style="width:48%;background:linear-gradient(90deg,#F59E0B,#fbbf24);"></div></div><div class="subj-pct" style="color:#F59E0B;">48%</div></div>
+    </div>
+    <div class="subj">
+      <div class="subj-top"><div class="subj-name"><span class="sw" style="background:#A855F7;"></span>English Comprehension</div><div class="subj-frac">14/30</div></div>
+      <div class="subj-row"><div class="bar"><div style="width:47%;background:linear-gradient(90deg,#A855F7,#c79bff);"></div></div><div class="subj-pct" style="color:#A855F7;">47%</div></div>
+    </div>
+  </div>
+
+  <!-- RECENT -->
+  <div class="sec-title">Recently Completed <span class="count">last 5</span></div>
+  <div class="panel" style="cursor:default;">
+    <div class="recent">
+      <div class="ritem"><div class="rdot">✅</div><div class="rinfo"><div class="t">Coding-Decoding</div><div class="s">General Intelligence &amp; Reasoning</div></div><div class="rdate">Today</div></div>
+      <div class="ritem"><div class="rdot">✅</div><div class="rinfo"><div class="t">Profit &amp; Loss</div><div class="s">Quantitative Aptitude</div></div><div class="rdate">Today</div></div>
+      <div class="ritem"><div class="rdot">✅</div><div class="rinfo"><div class="t">Indian Polity — Fundamental Rights</div><div class="s">General Awareness</div></div><div class="rdate">Yesterday</div></div>
+      <div class="ritem"><div class="rdot">✅</div><div class="rinfo"><div class="t">Synonyms &amp; Antonyms</div><div class="s">English Comprehension</div></div><div class="rdate">18 Jun</div></div>
+      <div class="ritem"><div class="rdot">✅</div><div class="rinfo"><div class="t">Blood Relations</div><div class="s">General Intelligence &amp; Reasoning</div></div><div class="rdate">17 Jun</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Live countdown to make the demo feel real
+  var target = new Date('2026-07-14T10:00:00').getTime();
+  function tick() {
+    var now = Date.now(), diff = Math.max(0, target - now);
+    var d = Math.floor(diff / 86400000);
+    var h = Math.floor(diff % 86400000 / 3600000);
+    var m = Math.floor(diff % 3600000 / 60000);
+    var s = Math.floor(diff % 60000 / 1000);
+    var p = function(n){ return String(n).padStart(2,'0'); };
+    document.getElementById('d').textContent = p(d);
+    document.getElementById('h').textContent = p(h);
+    document.getElementById('m').textContent = p(m);
+    document.getElementById('s').textContent = p(s);
+  }
+  tick(); setInterval(tick, 1000);
+</script>
+</body>
+</html>
