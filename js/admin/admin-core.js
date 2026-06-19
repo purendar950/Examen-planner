@@ -198,13 +198,13 @@ function render() {
   const approved = USERS.filter(u => u.p.status === 'approved' || !u.p.status).length;
   const paid = USERS.filter(u => u.p.plan && u.p.plan !== 'free').length;
   const payPending = PAYMENTS.filter(p => p.status === 'pending').length;
-  document.getElementById('cnt-pending').textContent = pending ? '(' + pending + ')' : '';
+  document.getElementById('cnt-pending').textContent = pending ? String(pending) : '';
   const newReqs = (REQUESTS || []).filter(r => r.status === 'new').length;
   const cntReqEl = document.getElementById('cnt-requests');
-  if (cntReqEl) cntReqEl.textContent = newReqs ? '(' + newReqs + ')' : '';
+  if (cntReqEl) cntReqEl.textContent = newReqs ? String(newReqs) : '';
   const tgEnabled = TG_USERS.filter(u => u.tg.enabled && u.tg.chatId).length;
   const cntTgEl = document.getElementById('cnt-tg');
-  if (cntTgEl) cntTgEl.textContent = tgEnabled ? '(' + tgEnabled + ')' : '';
+  if (cntTgEl) cntTgEl.textContent = tgEnabled ? String(tgEnabled) : '';
   document.getElementById('stats').innerHTML =
     '<div class="stat"><b>' + USERS.length + '</b><div>Total users</div></div>' +
     '<div class="stat"><b style="color:var(--amber)">' + pending + '</b><div>Pending requests</div></div>' +
