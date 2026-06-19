@@ -3,10 +3,10 @@
 ## Architecture
 
 ```
-Firebase Firestore              GitHub Actions (6 AM IST daily)
+Firebase Firestore         GitHub Actions (triggered by external cron, gated by admin time)
   users/{uid}                        send-telegram.js
     appState.telegram ──────────────► reads digest ──► Telegram Bot API ──► User's phone
-      chatId: "123456"
+      chatId: "123456"          config/telegram.sendTime ─┘ (admin-set time gate)
       enabled: true
       digest: { "2026-06-18": "📖 History\n🔁 Revise: Polity" }
 ```
@@ -90,6 +90,63 @@ Done. Sent=1  Skipped=4  Failed=0  NoDigest=0
 
 ---
 
+## Step 7 — Set the daily send time (Admin panel)
+
+The send time is now configurable — no need to edit the cron.
+
+1. Open **admin.html → Telegram tab → Send Controls**
+2. Set **"Daily auto-send time (IST)"** → click **Save Time**
+3. This saves to Firestore `config/telegram.sendTime`. The sender reads it and
+   sends **once per day**, on the first run at/after that time, and records
+   `lastSentDate` so it never double-sends.
+
+---
+
+## Step 8 — Reliable auto-send (external cron) ⭐ IMPORTANT
+
+**Why this is needed:** GitHub's built-in `schedule:` trigger is unreliable —
+scheduled runs are frequently delayed or **dropped entirely** (you may see them
+almost never fire). A **manual** `workflow_dispatch` run, however, always works.
+So we use a free external cron to call that reliable trigger on a schedule. The
+in-app send time (Step 7) still decides exactly when the message goes out.
+
+### 8a. Create a GitHub token
+GitHub → **Settings → Developer settings → Fine-grained tokens → Generate new token**
+- **Repository access:** Only select repositories → `Examen-planner`
+- **Permissions → Repository permissions → Actions: Read and write**
+- Generate and **copy the token** (you won't see it again).
+
+### 8b. Create a free cron job at [cron-job.org](https://console.cron-job.org)
+Create a job with:
+
+| Field | Value |
+|---|---|
+| **URL** | `https://api.github.com/repos/purendar950/Examen-planner/actions/workflows/daily-telegram.yml/dispatches` |
+| **Method** | `POST` |
+| **Schedule** | Every **15 minutes** (or every 5 for tighter timing) |
+
+**Request headers:**
+```
+Accept: application/vnd.github+json
+Authorization: Bearer YOUR_TOKEN_HERE
+X-GitHub-Api-Version: 2022-11-28
+Content-Type: application/json
+```
+
+**Request body:**
+```json
+{"ref":"main","inputs":{"gated":"true"}}
+```
+
+That's it. cron-job.org pings every 15 min → the workflow runs with `gated=true`
+→ it checks your admin-set time and sends once that time is reached each day.
+You change the time only in the **admin panel** — never touch cron-job.org again.
+
+> `gated=true` = respect the admin time. A normal **Run workflow** from the
+> Actions tab (gated unchecked) **force-sends immediately** — use that to test.
+
+---
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -100,6 +157,8 @@ Done. Sent=1  Skipped=4  Failed=0  NoDigest=0
 | `Sent=0` every day | No user has enabled=true + valid chatId in Firestore |
 | Bot doesn't reply | Bot server not running on Render — check Render logs |
 | Message says "Aaj koi topic scheduled nahi" | User hasn't built a study plan in the app yet |
+| **Auto-send only works when you click "Run workflow" manually; scheduled runs never fire** | GitHub's `schedule:` trigger is unreliable. Set up the **external cron (Step 8)** — that's the real fix. |
+| Scheduled run is green but no message arrived | A green run can mean it **skipped** (not send time yet, or already sent today). Check the log: `Not send time yet` / `Already auto-sent today`. |
 
 ---
 
@@ -107,5 +166,4 @@ Done. Sent=1  Skipped=4  Failed=0  NoDigest=0
 
 - The Firebase **web config** in `app.html` is public by design — safe.
 - The **bot token and service account JSON must never be committed** — only in GitHub Secrets.
-- Change send time: edit `cron: '30 0 * * *'` (UTC) in `.github/workflows/daily-telegram.yml`.
-  - `30 0` = 06:00 IST · `0 1` = 06:30 IST · `30 2` = 08:00 IST
+- **Change send time:** use the **Admin panel → Telegram → Daily auto-send time** (Step 7). No need to edit the cron anymore. The workflow cron (`8,23,38,53 * * * *`, off-peak) is only a best-effort backup; the reliable trigger is the external cron in Step 8.
