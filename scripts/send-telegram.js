@@ -88,8 +88,29 @@ function isProUser(data, today) {
   if (profile.plan && profile.plan !== 'free') {
     if (!profile.planExpiry || profile.planExpiry >= today) return true;
   }
+
+  // Admin-granted trial (profile.trialExpiry). This field is admin-only-writable
+  // in the Firestore rules, so it's trusted (no tamper guard needed). Mirrors
+  // the web app's ezIsTrialActive(): active unless suspended and not yet expired.
+  if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
+
   const trial = appState.proTrial;
-  if (trial && trial.expiry && trial.expiry >= today) return true;
+  if (trial && trial.expiry && trial.expiry >= today) {
+    // Mirror the web app's ezIsProTrialActive() guards. proTrial lives in
+    // user-writable appState, so don't trust it blindly:
+    //   1. An admin can suspend a trial (profile.trialSuspended).
+    //   2. A self-serve trial lasts at most ~4 days (3 + 1 grace) from
+    //      startedAt — this rejects a tampered far-future expiry written
+    //      straight to Firestore on first activation.
+    if (profile.trialSuspended) return false;
+    if (trial.startedAt) {
+      const startedAt = new Date(trial.startedAt);
+      const maxExpiry = new Date(startedAt.getTime() + 4 * 86400000);
+      const claimedExpiry = new Date(trial.expiry + 'T23:59:59');
+      if (!isNaN(startedAt.getTime()) && claimedExpiry > maxExpiry) return false;
+    }
+    return true;
+  }
   return false;
 }
 
