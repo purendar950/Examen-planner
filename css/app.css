@@ -1404,7 +1404,6 @@
 #minimax-floating-ball { display:none !important; }
 #milestone-card, #pace-tracker-card { display:none !important; }
 #page-planner .timetable-card { display:none !important; }
-#pw-mock-sections, #pw-mock-sec-toggle, #pw-mock-sec-per, #pw-mock-sections-wrap { display:none !important; }
 /*
   position: fixed;
   bottom: 20px;
