@@ -463,7 +463,7 @@ function buildMockSchedule(cfg) {
       included.forEach(({ s, f, n, offset }) => {
         if ((d % f) === (offset % f)) {
           for (let k = 0; k < n; k++) {
-            const label = n > 1 ? `Test ${k+1}/${n} — ${s.name}` : `Test — ${s.name}`;
+            const label = n > 1 ? `Test ${k+1}/${n}` : `Test`;
             items.push({ type:'study', ch: { name: label, subName: s.name, color: s.color, diff:'', subId: s.id } });
           }
         }
