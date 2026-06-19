@@ -132,6 +132,31 @@ body {
 
 h3 { font-size:1rem; font-weight:700; margin-bottom:0.7rem; letter-spacing:-0.02em; }
 
+/* ── User management cards ──────────────────────────── */
+.user-toolbar {
+  position:sticky; top:118px; z-index:30;
+  background:rgba(255,255,255,0.92);
+  backdrop-filter:saturate(180%) blur(10px);
+  -webkit-backdrop-filter:saturate(180%) blur(10px);
+}
+.user-card { border-left:4px solid var(--border-strong); }
+.user-card.paid      { border-left-color:var(--blue); }
+.user-card.free      { border-left-color:var(--accent); }
+.user-card.suspended { border-left-color:var(--red); background:rgba(239,68,68,0.025); }
+.user-head { line-height:1.5; }
+.user-head strong { font-size:0.98rem; }
+.user-actions {
+  display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+  margin-top:0.85rem; padding-top:0.85rem; border-top:1px dashed var(--border);
+}
+.user-actions select { min-width:168px; }
+.user-danger { margin-left:auto; }
+@media (max-width:600px) {
+  .user-toolbar { top:104px; }
+  .user-actions select { flex:1; min-width:140px; }
+  .user-danger { margin-left:0; }
+}
+
 /* ── Text / badges / flags ──────────────────────────── */
 .muted { color:var(--muted); font-size:0.78rem; }
 .flag {

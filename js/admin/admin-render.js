@@ -107,6 +107,7 @@ function renderUsers() {
   const search = (document.getElementById('user-search')?.value || '').toLowerCase().trim();
   const filter = document.getElementById('user-filter')?.value || 'all';
   const exam   = document.getElementById('user-exam')?.value || 'all';
+  const sort   = document.getElementById('user-sort')?.value || 'newest';
   let list = USERS.filter(u => u.p.status !== 'pending');
   if (search) list = list.filter(u =>
     (u.p.name   || '').toLowerCase().includes(search) ||
@@ -118,9 +119,16 @@ function renderUsers() {
   else if (filter === 'free') list = list.filter(u => !u.p.plan || u.p.plan === 'free');
   else if (filter === 'suspended') list = list.filter(u => u.p.status === 'rejected');
   if (exam !== 'all') list = list.filter(u => u.p.examTarget === exam);
+  // Sort (does not change which users are shown, only their order)
+  const toMs = (t) => { try { return t && t.toDate ? t.toDate().getTime() : (t ? new Date(t).getTime() : 0) || 0; } catch(e) { return 0; } };
+  const joined = (u) => toMs(u.p.requestedAt || u.p.createdAt);
+  if (sort === 'oldest')      list.sort((a, b) => joined(a) - joined(b));
+  else if (sort === 'name')   list.sort((a, b) => (a.p.name || '').localeCompare(b.p.name || ''));
+  else if (sort === 'expiry') list.sort((a, b) => (a.p.planExpiry || '9999-99-99').localeCompare(b.p.planExpiry || '9999-99-99'));
+  else                        list.sort((a, b) => joined(b) - joined(a)); // newest (default)
   const totalCount = USERS.filter(u => u.p.status !== 'pending').length;
   const examOptions = [...new Set(USERS.map(u => u.p.examTarget).filter(Boolean))].sort();
-  const toolbar = '<div class="card" style="padding:0.75rem 1rem;">' +
+  const toolbar = '<div class="card user-toolbar" style="padding:0.75rem 1rem;">' +
     '<div class="row" style="gap:8px;flex-wrap:wrap;">' +
       '<input id="user-search" placeholder="🔍 Search name, email, mobile, UID…" ' +
              'value="' + esc(search) + '" style="flex:1;min-width:200px;" oninput="render()">' +
@@ -134,6 +142,12 @@ function renderUsers() {
         '<option value="all">All exams</option>' +
         examOptions.map(e => '<option value="' + esc(e) + '"' + (exam===e?' selected':'') + '>' + esc(e).toUpperCase() + '</option>').join('') +
       '</select>' +
+      '<select id="user-sort" onchange="render()" title="Sort users">' +
+        '<option value="newest"' + (sort==='newest'?' selected':'') + '>↓ Newest first</option>' +
+        '<option value="oldest"' + (sort==='oldest'?' selected':'') + '>↑ Oldest first</option>' +
+        '<option value="name"'   + (sort==='name'  ?' selected':'') + '>A–Z Name</option>' +
+        '<option value="expiry"' + (sort==='expiry'?' selected':'') + '>⏳ Expiry soonest</option>' +
+      '</select>' +
       (search || filter !== 'all' || exam !== 'all'
         ? '<button class="btn btn-gray" onclick="document.getElementById(\'user-search\').value=\'\';document.getElementById(\'user-filter\').value=\'all\';document.getElementById(\'user-exam\').value=\'all\';render();">↻ Clear</button>'
         : '') +
@@ -146,10 +160,11 @@ function renderUsers() {
   return toolbar + list.map(u => {
     const suspended = u.p.status === 'rejected';
     const trialSuspended = !!u.p.trialSuspended;
+    const tone = suspended ? 'suspended' : ((u.p.plan && u.p.plan !== 'free') ? 'paid' : 'free');
     const planBadge = (u.p.plan && u.p.plan !== 'free') ? '<span class="badge badge-blue">' + esc(u.p.plan) + (u.p.planExpiry ? ' till ' + esc(u.p.planExpiry) : '') + '</span>' : '<span class="badge badge-green">Free</span>';
-    return '<div class="card"><div class="row" style="justify-content:space-between;">' +
-      '<div style="flex:1;min-width:220px;"><strong>' + esc(u.p.name || '?') + '</strong> <span class="muted">' + esc(u.p.email || '') + '</span> ' + planBadge + (suspended ? ' <span class="badge badge-red">Suspended</span>' : '') + (trialSuspended ? ' <span class="badge badge-red">Trial Suspended</span>' : '') + userMeta(u) + '</div>' +
-      '<div class="row">' +
+    return '<div class="card user-card ' + tone + '">' +
+      '<div class="user-head"><strong>' + esc(u.p.name || '?') + '</strong> <span class="muted">' + esc(u.p.email || '') + '</span> ' + planBadge + (suspended ? ' <span class="badge badge-red">Suspended</span>' : '') + (trialSuspended ? ' <span class="badge badge-red">Trial Suspended</span>' : '') + userMeta(u) + '</div>' +
+      '<div class="user-actions">' +
       '<select id="plan-' + u.id + '">' + planOpts(u.p.plan) + '</select>' +
       '<button class="btn btn-blue" onclick="setPlan(\'' + u.id + '\')">Set Plan</button>' +
       // Single context-aware Trial button:
@@ -164,11 +179,11 @@ function renderUsers() {
       '<button class="btn btn-gray" onclick="showUserPayments(\'' + u.id + '\')" title="View this user payments">🧾 Payments</button>' +
       ((u.p.fp || u.p.deviceDuplicate) ? '<button class="btn btn-gray" onclick="resetDeviceFlag(\'' + u.id + '\')" title="Clear device fingerprint / duplicate flag">🔓 Reset device</button>' : '') +
       (suspended
-        ? '<button class="btn btn-green" onclick="approveUser(\'' + u.id + '\')">✓ Re-activate</button>'
-        : '<button class="btn btn-red" onclick="suspendUser(\'' + u.id + '\')">⏸ Suspend</button>') +
+        ? '<button class="btn btn-green user-danger" onclick="approveUser(\'' + u.id + '\')">✓ Re-activate</button>'
+        : '<button class="btn btn-red user-danger" onclick="suspendUser(\'' + u.id + '\')">⏸ Suspend</button>') +
       '</div>' +
-      '<div id="user-pay-' + u.id + '" style="flex-basis:100%;display:none;margin-top:8px;"></div>' +
-      '</div></div>';
+      '<div id="user-pay-' + u.id + '" style="display:none;margin-top:8px;"></div>' +
+      '</div>';
   }).join('');
 }
 
