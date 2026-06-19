@@ -52,6 +52,12 @@
   .chip { display: inline-flex; align-items: center; gap: 7px; background: var(--card); border: 1px solid var(--line); border-radius: 99px; padding: 7px 13px; font-size: 0.8rem; font-weight: 600; box-shadow: var(--shadow); }
   .chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
   .chip.days { color: var(--accent); }
+  .date-chip { gap: 6px; cursor: pointer; padding-right: 11px; }
+  .date-chip input[type="date"] {
+    border: none; background: transparent; font-family: var(--font); font-size: 0.8rem; font-weight: 600;
+    color: var(--ink); cursor: pointer; outline: none; padding: 0;
+  }
+  .date-chip input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: 0.55; }
 
   /* FOCUS HERO */
   .focus {
@@ -169,7 +175,8 @@
       <div class="sub">Let's get a little closer today.</div>
     </div>
     <div class="greet-right">
-      <span class="chip days">⏳ 57 days left</span>
+      <span class="chip days" id="daysChip">⏳ — days left</span>
+      <label class="chip date-chip" title="Set your exam date">📅 <input type="date" id="examDate" value="2026-07-14"></label>
       <span class="chip"><span class="dot"></span> SSC CGL 2026</span>
     </div>
   </div>
@@ -267,5 +274,21 @@
   </div>
 
 </div>
+<script>
+  // Live "days left" that updates when the exam date is changed
+  var input = document.getElementById('examDate');
+  var chip = document.getElementById('daysChip');
+  function refresh() {
+    if (!input.value) { chip.textContent = '⏳ set a date'; return; }
+    var target = new Date(input.value + 'T00:00:00').getTime();
+    var days = Math.ceil((target - Date.now()) / 86400000);
+    if (days > 1) chip.textContent = '⏳ ' + days + ' days left';
+    else if (days === 1) chip.textContent = '⏳ 1 day left';
+    else if (days === 0) chip.textContent = '🎯 Exam is today!';
+    else chip.textContent = '✅ exam passed';
+  }
+  input.addEventListener('change', refresh);
+  refresh();
+</script>
 </body>
 </html>
