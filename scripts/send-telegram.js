@@ -55,6 +55,19 @@ function todayIST() {
   return ist.toISOString().slice(0, 10);
 }
 
+/** Current IST time as minutes-since-midnight (0–1439). */
+function istMinutesNow() {
+  const ist = new Date(Date.now() + (5 * 60 + 30) * 60000);
+  return ist.getUTCHours() * 60 + ist.getUTCMinutes();
+}
+
+/** Current IST wall-clock as "HH:MM" (for logs). */
+function istClockNow() {
+  const ist = new Date(Date.now() + (5 * 60 + 30) * 60000);
+  const p = n => String(n).padStart(2, '0');
+  return p(ist.getUTCHours()) + ':' + p(ist.getUTCMinutes());
+}
+
 /** Send a message via Telegram Bot API. Throws on API error. */
 async function sendTelegramMessage(chatId, text) {
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
@@ -117,6 +130,47 @@ function isProUser(data, today) {
 /* ── 4. Main ────────────────────────────────────────────────────────────── */
 async function main() {
   const today = todayIST();
+  const forced = (process.env.GITHUB_EVENT_NAME || '') === 'workflow_dispatch';
+
+  /* ── Schedule gate ───────────────────────────────────────────────────────
+     The workflow runs every 30 min. The admin sets the daily send time in
+     config/telegram.sendTime ("HH:MM", IST, default 06:00). We send on the
+     FIRST run at/after that time each day and record config/telegram.lastSentDate
+     so we never send twice. A manual workflow_dispatch run bypasses the gate. */
+  let cfg = {};
+  try {
+    const cfgSnap = await db.collection('config').doc('telegram').get();
+    cfg = cfgSnap.exists ? (cfgSnap.data() || {}) : {};
+  } catch (e) { console.warn('⚠️  Could not read config/telegram:', e.message); }
+
+  const sendTime = /^\d{1,2}:\d{2}$/.test(cfg.sendTime) ? cfg.sendTime : '06:00';
+  const [sh, sm] = sendTime.split(':').map(n => parseInt(n, 10));
+  const targetMin = (sh * 60) + sm;
+
+  if (forced) {
+    console.log('🚀 Manual run (workflow_dispatch) — bypassing schedule gate.');
+  } else {
+    if (cfg.lastSentDate === today) {
+      console.log(`⏭  Already auto-sent today (${today}). Nothing to do.`);
+      return;
+    }
+    if (istMinutesNow() < targetMin) {
+      console.log(`⏰ Not send time yet. Now ${istClockNow()} IST, scheduled ${sendTime} IST. Skipping this run.`);
+      return;
+    }
+    console.log(`✅ Send window reached (now ${istClockNow()} IST ≥ ${sendTime} IST).`);
+  }
+
+  /* Claim today's slot BEFORE sending so an overlapping/next 30-min run can't
+     double-send. A manual re-run (workflow_dispatch) ignores lastSentDate, so
+     the admin can always force a resend. */
+  try {
+    await db.collection('config').doc('telegram').set(
+      { lastSentDate: today, lastRunAt: admin.firestore.FieldValue.serverTimestamp() },
+      { merge: true }
+    );
+  } catch (e) { console.warn('⚠️  Could not record lastSentDate:', e.message); }
+
   console.log(`📅 Sending plans for ${today}`);
 
   const snap = await db.collection('users').get();
