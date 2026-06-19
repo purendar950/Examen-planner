@@ -23,7 +23,7 @@ async function ezLoadPlans() {
 }
 
 async function ezLoadProfile() {
-  if (!currentUser || currentUser.isGuest || !_fbReady || !db) return;
+  if (!currentUser || !_fbReady || !db) return;
   try {
     const s = await db.collection('users').doc(currentUser.uid).get();
     EZ_PROFILE = (s.exists && s.data().profile) || {};
@@ -128,7 +128,6 @@ function ezRenderPlanBadge() {
 
 function ezOpenUpgrade() {
   if (!currentUser) return;
-  if (currentUser.isGuest) { showToast('Guest mode mein upgrade nahi — pehle account banao.', 'error'); return; }
   let ov = document.getElementById('ez-upgrade-overlay');
   if (!ov) {
     ov = document.createElement('div');
@@ -210,7 +209,7 @@ function ezFreeProCompareHtml() {
       '<div style="font-size:.82rem;color:#EF4444;font-weight:700;margin-bottom:6px;">⚠ Aapka ' + escapeHtml(EZ_PROFILE.plan) + ' plan expire ho gaya (' + EZ_PROFILE.planExpiry + ')</div>' +
       '<div style="font-size:.72rem;color:var(--muted);">Neeche koi bhi plan select karke renew karo — Pro features turant restore ho jayenge.</div>' +
       '</div>';
-  } else if (currentUser && !currentUser.isGuest && typeof ezIsPro === 'function' && !ezIsPro() && !ezProTrialUsed()) {
+  } else if (currentUser && typeof ezIsPro === 'function' && !ezIsPro() && !ezProTrialUsed()) {
     // No plan, no trial used yet — offer free trial
     trialBtn = '<button class="btn-modal-save" style="width:100%;margin-top:12px;" onclick="ezStartProTrial()">🎁 Start 3-day free Pro trial</button>' +
       '<div style="font-size:.68rem;color:var(--muted);text-align:center;margin-top:4px;">No payment needed — ek baar hi milta hai.</div>';

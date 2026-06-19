@@ -204,9 +204,8 @@ function toggleUserMenu(e) {
   const menu = document.getElementById('user-menu-dropdown');
   if (!menu) return;
   if (!menu.classList.contains('open')) {
-    const isGuest = currentUser && currentUser.isGuest;
-    document.getElementById('um-name').textContent  = currentUser ? (isGuest ? 'Guest' : currentUser.name) : 'User';
-    document.getElementById('um-email').textContent = currentUser && !isGuest ? currentUser.email : '';
+    document.getElementById('um-name').textContent  = currentUser ? currentUser.name : 'User';
+    document.getElementById('um-email').textContent = currentUser ? currentUser.email : '';
     let planText = 'Plan: Free';
     if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {
       const p = EZ_PROFILE;
@@ -239,7 +238,7 @@ function toggleUserMenu(e) {
         planText = 'Trial: Ended';
       }
     }
-    document.getElementById('um-plan').textContent = isGuest ? '' : planText;
+    document.getElementById('um-plan').textContent = planText;
   }
   menu.classList.toggle('open');
 }
@@ -316,9 +315,6 @@ if (_fbReady && auth) {
 }
 
 /* Guest login removed — users must register a free account to save progress. */
-function handleGuestLogin() {
-  showToast('Guest mode hataya gaya. Kripya free account banayein — data save hoga aur sync hoga.', 'info');
-}
 
 function showAuthError(type, msg) {
   const el = document.getElementById(type + '-error');
@@ -371,7 +367,7 @@ const _authTimeout = setTimeout(() => {
             + 'Fix: PC pe Python server start karo:<br>'
             + '<code style="font-size:0.71rem;background:rgba(0,0,0,0.3);padding:2px 5px;border-radius:3px;">python -m http.server 8080</code><br>'
             + 'Phir Android Chrome mein: <code style="font-size:0.71rem;background:rgba(0,0,0,0.3);padding:2px 5px;border-radius:3px;">http://YOUR_PC_IP:8080/filename.html</code><br>'
-            + '<span style="color:var(--muted);font-size:0.72rem;">Abhi ke liye Guest login use karo — data locally save hoga</span>';
+            + '<span style="color:var(--muted);font-size:0.72rem;">Phir normal browser (http://) se login karo — data cloud pe save hoga</span>';
           authCard.insertBefore(w, authCard.firstChild);
         }
       }, 80);

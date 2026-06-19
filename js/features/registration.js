@@ -108,7 +108,7 @@ function _ezShowRegBanner(regStatus) {
 const _loginUserBaseEZ = loginUser;
 loginUser = function(email, name, uid, state) {
   _loginUserBaseEZ(email, name, uid, state);
-  if (currentUser && !currentUser.isGuest) ezCheckApproval(uid, email);
+  if (currentUser) ezCheckApproval(uid, email);
 };
 
 async function ezCheckApproval(uid, email) {
