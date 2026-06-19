@@ -1061,6 +1061,8 @@
   .nav-tab[onclick*="youtube"] .tab-icon { color: #FF4444; }
   .nav-tab[onclick*="yt-organiser"] { border-bottom-color: var(--red) !important; }
   #examBtn-upsc.active { background: linear-gradient(135deg,rgba(168,85,247,0.25),rgba(168,85,247,0.1)) !important; border-color: #A855F7 !important; color: #A855F7 !important; }
+  #examBtn-uppcs.active { background: linear-gradient(135deg,rgba(234,88,12,0.25),rgba(234,88,12,0.1)) !important; border-color: #EA580C !important; color: #EA580C !important; }
+  #examBtn-bpsc.active { background: linear-gradient(135deg,rgba(8,145,178,0.25),rgba(8,145,178,0.1)) !important; border-color: #0891B2 !important; color: #0891B2 !important; }
   @media (max-width: 600px) {
     .topbar { padding: 0 1rem; }
     .main-content { padding: 1rem; }

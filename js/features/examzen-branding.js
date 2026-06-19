@@ -50,7 +50,8 @@ async function ezGetIp() {
     '<option value="">Select your exam...</option>' +
     '<option value="cgl">SSC CGL</option><option value="ntpc">RRB NTPC</option>' +
     '<option value="gd">SSC GD</option><option value="ibps">IBPS PO</option>' +
-    '<option value="upsc">UPSC CSE</option></select></div>';
+    '<option value="upsc">UPSC CSE</option><option value="uppcs">UPPCS</option>' +
+    '<option value="bpsc">BPSC</option></select></div>';
   while (wrap.firstChild) grp.parentNode.insertBefore(wrap.firstChild, grp.nextSibling === null ? null : grp.nextSibling);
 })();
 

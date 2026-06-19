@@ -56,6 +56,17 @@ const MOCK_EXAMS = {
       {k:'gs',   name:'GS Paper I',                  q:100, max:200},
       {k:'csat', name:'CSAT Paper II (Qualifying)',  q:80,  max:200, perQ:2.5, neg:0.83}
     ]}
+  }},
+  uppcs: { tiers: {
+    pre: { label:'Prelims', neg:0.33, perQ:null, note:'CSAT sirf qualifying hai (min 33%). Merit GS Paper I se banta hai.', sections:[
+      {k:'gs',   name:'GS Paper I',                  q:150, max:200, perQ:200/150, neg:0.44},
+      {k:'csat', name:'CSAT Paper II (Qualifying)',  q:100, max:200, perQ:2,       neg:0.66}
+    ]}
+  }},
+  bpsc: { tiers: {
+    pre: { label:'Prelims', neg:1/3, perQ:1, sections:[
+      {k:'gs', name:'General Studies', q:150, max:150}
+    ]}
   }}
 };
 
@@ -191,7 +202,9 @@ function mockGetCutoff(exam, tier) {
     'ntpc|cbt1': 72, 'ntpc|cbt2': 100,
     'gd|cbt': 90,
     'ibps|pre': 60, 'ibps|mains': 130,
-    'upsc|pre': 100
+    'upsc|pre': 100,
+    'uppcs|pre': 95,
+    'bpsc|pre': 90
   };
   return M[exam + '|' + tier] || 0;
 }
