@@ -1,0 +1,17 @@
+    <div class="page" id="page-syllabus">
+      <div class="syllabus-header">
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" class="search-input" placeholder="Search chapters or topics..." oninput="filterChapters(this.value)" id="search-input">
+        </div>
+        <div class="filter-pills">
+          <div class="pill active" onclick="setFilter('all', this)">All</div>
+          <div class="pill" onclick="setFilter('completed', this)">Completed</div>
+          <div class="pill" onclick="setFilter('pending', this)">Pending</div>
+          <div class="pill" onclick="setFilter('bookmarked', this)">Bookmarked</div>
+        </div>
+      </div>
+
+      <div id="syllabus-list"></div>
+    </div>
+

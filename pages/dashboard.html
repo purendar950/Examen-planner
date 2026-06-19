@@ -1,0 +1,84 @@
+    <div class="page active" id="page-dashboard">
+      <div class="exam-countdown" id="countdown-wrap">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;flex-wrap:wrap;gap:8px;">
+          <div class="countdown-label" id="countdown-title">⏱ SSC CGL Exam Countdown</div>
+          <input type="date" class="exam-date-input" id="exam-date-picker" onchange="updateExamDate(this.value)" title="Set your exam date">
+        </div>
+        <div class="countdown-timer">
+          <div class="countdown-unit">
+            <div class="countdown-num" id="cd-days">00</div>
+            <div class="countdown-label-unit">Days</div>
+          </div>
+          <span class="countdown-sep">:</span>
+          <div class="countdown-unit">
+            <div class="countdown-num" id="cd-hours">00</div>
+            <div class="countdown-label-unit">Hours</div>
+          </div>
+          <span class="countdown-sep">:</span>
+          <div class="countdown-unit">
+            <div class="countdown-num" id="cd-mins">00</div>
+            <div class="countdown-label-unit">Mins</div>
+          </div>
+          <span class="countdown-sep">:</span>
+          <div class="countdown-unit">
+            <div class="countdown-num accent-border" id="cd-secs">00</div>
+            <div class="countdown-label-unit">Secs</div>
+          </div>
+        </div>
+        <div class="countdown-date" id="exam-date-label">Exam date: July 14, 2026 — Set your date above</div>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon icon-blue">📋</div>
+          <div class="stat-val" id="stat-total">161</div>
+          <div class="stat-lbl">Total Chapters</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-green">✅</div>
+          <div class="stat-val" id="stat-done">0</div>
+          <div class="stat-lbl">Completed</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-amber">📖</div>
+          <div class="stat-val" id="stat-remaining">161</div>
+          <div class="stat-lbl">Remaining</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon icon-purple">🔖</div>
+          <div class="stat-val" id="stat-bookmarked">0</div>
+          <div class="stat-lbl">Bookmarked</div>
+        </div>
+      </div>
+
+      <div class="streak-bar">
+        <span class="streak-fire">🔥</span>
+        <span class="streak-text"><strong id="streak-count">0</strong> day streak</span>
+        <span class="streak-hint">~<strong id="chapters-per-day">6</strong> chapters/day to finish on time</span>
+      </div>
+
+      <!-- Revision Reminders Widget -->
+      <div class="revision-widget" id="revision-dashboard-widget" onclick="switchPage('revision')" style="cursor:pointer;">
+        <div class="revision-widget-head">
+          <div class="revision-widget-title">🔁 Revision Queue</div>
+          <div class="revision-widget-stats">
+            <span>Due: <b id="rev-due-count">0</b></span>
+            <span>This week: <b id="rev-week-count">0</b></span>
+            <span>Mastered: <b id="rev-mastered-count">0</b></span>
+          </div>
+        </div>
+        <div id="rev-due-preview" style="font-size:0.82rem; color:var(--muted);">Loading...</div>
+      </div>
+
+      <!-- Continue Watching -->
+      <div class="yt-continue-card" id="yt-continue-card" onclick="switchPage('youtube');setTimeout(ytResume,120)"></div>
+
+      <!-- Subject Progress -->
+      <div class="section-title">Subject-wise Progress</div>
+      <div style="display:grid;gap:0.85rem;margin-bottom:1.5rem;" id="subject-progress-cards"></div>
+
+      <!-- Recent Activity -->
+      <div class="section-title">Recently Completed</div>
+      <div id="recent-activity-list"></div>
+    </div>
+

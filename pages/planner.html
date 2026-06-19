@@ -1,0 +1,244 @@
+    <div class="page" id="page-planner">
+      <div class="planner-shell">
+
+        <!-- ═══ LEFT SIDEBAR ═══ -->
+        <div class="planner-sidebar">
+
+          <!-- Mini Calendar -->
+          <div class="planner-cal-card">
+            <div class="planner-cal-header">
+              <div class="planner-cal-month" id="planner-month-label">June 2026</div>
+              <div class="planner-cal-nav">
+                <button onclick="plannerNavMonth(-1)">&#8249;</button>
+                <button onclick="plannerNavMonth(1)">&#8250;</button>
+              </div>
+            </div>
+            <div class="planner-grid" id="planner-calendar"></div>
+          </div>
+
+          <!-- Progress -->
+          <div class="planner-progress-card">
+            <h4>Progress</h4>
+            <div class="prog-row">
+              <div class="prog-meta">
+                <span>Today</span>
+                <span style="display:flex;gap:8px;">
+                  <span class="prog-pct" id="prog-today-pct">0%</span>
+                  <span class="prog-val" id="prog-today-val">0/0</span>
+                </span>
+              </div>
+              <div class="prog-track"><div class="prog-fill" id="prog-today-bar" style="width:0%"></div></div>
+            </div>
+            <div class="prog-row">
+              <div class="prog-meta">
+                <span>This Month</span>
+                <span style="display:flex;gap:8px;">
+                  <span class="prog-pct" id="prog-month-pct">0%</span>
+                  <span class="prog-val" id="prog-month-val">0/0</span>
+                </span>
+              </div>
+              <div class="prog-track"><div class="prog-fill" id="prog-month-bar" style="width:0%"></div></div>
+            </div>
+          </div>
+
+          <!-- Course Schedule -->
+          <div class="cs-toggle-card">
+            <div class="cs-toggle-info">
+              <div class="cs-toggle-icon">📖</div>
+              <div>
+                <div class="cs-toggle-title">Course Schedule</div>
+                <div class="cs-toggle-sub">Sync videos from your courses</div>
+              </div>
+            </div>
+            <label class="cs-switch">
+              <input type="checkbox" id="cs-toggle-input" onchange="toggleCourseSchedule(this.checked)">
+              <span class="cs-switch-track"></span>
+            </label>
+          </div>
+
+          <!-- Smart AI Generator -->
+          <div class="ai-gen-card">
+            <div class="ai-gen-header">
+              <div class="ai-gen-title">🗓 AI Plan Generator</div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <button class="btn-ai-reset" onclick="openStudyProfileModal()" title="Study Profile Setup" style="font-size:.65rem;">⚙️ Profile</button>
+              </div>
+            </div>
+            <div class="ai-gen-body">
+
+              <!-- F1: Phase Badge -->
+              <div id="ai-phase-badge" style="margin-bottom:.6rem;"></div>
+
+              <!-- F8: Backlog Alert -->
+              <div id="ai-backlog-chip" style="display:none;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.3);border-radius:7px;padding:5px 10px;margin-bottom:.6rem;font-size:.72rem;color:#f59e0b;"></div>
+
+              <!-- Hours — now reads from profile too -->
+              <div class="ai-gen-label">Study Hours Today
+                <span id="ai-session-hint" style="color:var(--accent);font-size:.6rem;float:right;"></span>
+              </div>
+              <input type="number" class="ai-gen-input" id="ai-hours-input" value="4" min="1" max="16" placeholder="4 hours">
+
+              <div class="ai-gen-divider"></div>
+
+              <div class="ai-gen-footer">
+                <button class="btn-ai-gen" onclick="openPlanWizard()">🗓 Generate Plan</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- My Plans: switch between saved plans (so generating a new one doesn't wipe the old) -->
+          <div class="ai-gen-card saved-plans-card" id="saved-plans-card" style="margin-top:10px;">
+            <div class="ai-gen-header">
+              <div class="ai-gen-title">📚 My Plans <span id="saved-plans-count" style="color:var(--muted);font-weight:500;font-size:.7rem;margin-left:4px;">(0)</span></div>
+              <div style="font-size:.62rem;color:var(--muted);">switch anytime</div>
+            </div>
+            <div class="ai-gen-body" id="saved-plans-list" style="padding:.6rem .8rem;max-height:280px;overflow-y:auto;">
+              <!-- populated by renderSavedPlansList() -->
+            </div>
+          </div>
+
+          <!-- F4: Monthly Milestone Roadmap -->
+          <div class="planner-progress-card" id="milestone-card" style="margin-top:10px;">
+            <h4>🗓 6-Month Roadmap</h4>
+            <div style="font-size:.75rem;color:var(--muted);">Exam date set karo aur subjects add karo — roadmap auto-generate hoga.</div>
+          </div>
+
+          <!-- F5: Subject-wise Pace Tracker -->
+          <div class="planner-progress-card" id="pace-tracker-card" style="margin-top:10px;">
+            <h4>📊 Subject-wise Pace</h4>
+            <div style="font-size:.75rem;color:var(--muted);">Subjects add karo — pace tracking shuru hogi.</div>
+          </div>
+
+        </div><!-- /sidebar -->
+
+        <!-- ═══ RIGHT PANEL ═══ -->
+        <div class="planner-right">
+
+          <!-- View tabs + mode icons + Add -->
+          <div class="day-view-header">
+            <div class="planner-view-tabs">
+              <button class="planner-view-tab active" data-view="day" onclick="setPlannerView('day',this)">Day</button>
+              <button class="planner-view-tab" data-view="week" onclick="setPlannerView('week',this)">Week</button>
+              <button class="planner-view-tab" data-view="month" onclick="setPlannerView('month',this)">Month</button>
+              <button class="planner-view-tab" data-view="3month" onclick="setPlannerView('3month',this)">3 Months</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <div class="view-mode-icons" id="day-view-mode-icons">
+                <button class="view-mode-btn active" data-mode="kanban" onclick="setDayViewMode('kanban',this)" title="Kanban view">▦</button>
+                <button class="view-mode-btn" data-mode="list" onclick="setDayViewMode('list',this)" title="List view">☰</button>
+              </div>
+              <button class="btn-add-task" onclick="focusPlannerAdd()">＋ Add Task</button>
+            </div>
+          </div>
+
+          <!-- Range heading + nav -->
+          <div class="day-nav">
+            <button class="day-nav-btn" onclick="plannerNavRange(-1)">&#8249;</button>
+            <button class="day-nav-btn" onclick="plannerNavRange(1)">&#8250;</button>
+            <div>
+              <div class="planner-range-title" id="day-view-title">Monday, Jun 15th</div>
+              <div class="planner-range-sub" id="day-view-sub">0 tasks · 0 completed</div>
+            </div>
+          </div>
+
+          <!-- Stats grid (week/month/year) -->
+          <div class="stats-grid" id="planner-stats-grid" style="display:none;">
+            <div class="stat-card">
+              <div class="stat-icon icon-blue">📋</div>
+              <div class="stat-val" id="stat-total-tasks">0</div>
+              <div class="stat-lbl">Total Tasks</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon icon-green">✅</div>
+              <div class="stat-val" id="stat-completed" style="color:var(--accent);">0</div>
+              <div class="stat-lbl">Completed</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon icon-amber">📈</div>
+              <div class="stat-val" id="stat-completion-rate" style="color:var(--blue);">0%</div>
+              <div class="stat-lbl">Completion Rate</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon icon-purple">🚀</div>
+              <div class="stat-val productivity" id="stat-productivity">Keep Going</div>
+              <div class="stat-lbl">Productivity</div>
+            </div>
+          </div>
+
+          <!-- ═══ DAY VIEW CONTENT ═══ -->
+          <div id="planner-day-content">
+
+            <!-- Scheduled Videos -->
+            <div class="sv-card" id="sv-card" style="display:none;" onclick="toggleScheduledVideos(event)">
+              <div class="sv-header">
+                <div class="sv-header-title">📹 Scheduled Videos <span class="sv-badge" id="sv-badge-count">0 remaining</span></div>
+                <span class="sv-chevron">▾</span>
+              </div>
+              <div class="sv-body" id="sv-body"></div>
+            </div>
+
+            <!-- Kanban board -->
+            <div class="kanban-board" id="kanban-board"></div>
+
+            <!-- Tasks panel (list view) -->
+            <div class="task-panel" id="task-panel-wrap" style="display:none;">
+              <div class="task-panel-header">
+                <div class="task-panel-title">
+                  📋 <span id="tasks-for-day-label">Today's Tasks</span>
+                  <span class="task-panel-badge" id="task-count-badge">0</span>
+                </div>
+              </div>
+              <div class="task-panel-body">
+                <div class="task-list" id="task-list">
+                  <div class="planner-empty" id="task-empty-state">
+                    <div class="planner-empty-icon">＋</div>
+                    <p>No tasks for today.<br>Use the AI generator or add tasks manually.</p>
+                    <button class="btn-empty-add" onclick="focusPlannerAdd()">＋ Add First Task</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Add task bar (always visible in Day view) -->
+            <div class="task-panel" style="margin-top:1rem;">
+              <div class="task-add-bar" style="border-top:none;">
+                <input type="text" class="task-input" id="task-input" placeholder="Add a study task…" onkeydown="if(event.key==='Enter')addTask()">
+                <select class="task-select" id="task-subject"><option value="">📚 Subject</option></select>
+                <select class="task-select" id="task-priority">
+                  <option value="normal">Normal</option>
+                  <option value="high">🔴 High</option>
+                  <option value="low">🟢 Low</option>
+                </select>
+                <button class="btn-task-save" onclick="addTask()">Add</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ═══ WEEK / MONTH / YEAR CONTENT ═══ -->
+          <div class="days-list" id="planner-days-list" style="display:none;"></div>
+
+          <!-- AI Timetable output -->
+          <div class="timetable-card">
+            <div class="timetable-card-header">
+              <span class="timetable-card-title">📅 Study Plan</span>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <button id="tt-tab-day" class="btn-sm green" onclick="setTimetableView('day')" style="font-size:.7rem;padding:3px 10px;">Today</button>
+                <button id="tt-tab-week" class="btn-sm" onclick="setTimetableView('week')" style="font-size:.7rem;padding:3px 10px;background:var(--surface);border:1px solid var(--border);color:var(--muted);">7-Day</button>
+                <button class="btn-sm green" onclick="openPlanWizard()" style="font-size:.75rem;" title="New plan">🗓</button>
+              </div>
+            </div>
+            <!-- Day view -->
+            <div id="timetable-container">
+              <div class="planner-empty" style="padding:2rem 1rem;">
+                <div class="planner-empty-icon">📅</div>
+                <p>Click <b>🗓 Generate Plan</b> — choose a plan type, set your targets, and the AI will build a personalised daily schedule.</p>
+              </div>
+            </div>
+            <!-- F6: Weekly view -->
+            <div id="weekly-plan-container" style="display:none;"></div>
+          </div>
+
+        </div><!-- /right -->
+      </div><!-- /shell -->
+    </div>
+
