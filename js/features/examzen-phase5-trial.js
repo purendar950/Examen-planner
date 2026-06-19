@@ -30,7 +30,15 @@ function ezIsProTrialActive() {
   return new Date(exp + 'T23:59:59') >= new Date();
 }
 function ezProTrialUsed() {
-  return !!(appState && appState.proTrial && appState.proTrial.startedAt);
+  // Once per account: the trial counts as USED if ANY durable marker says so.
+  // Checking several independent sources keeps the rule resilient if a user
+  // clears/edits their local appState — the flag also lives on the synced
+  // profile doc, and any admin-granted trial (profile.trialExpiry) counts too.
+  if (appState && appState.proTrial && appState.proTrial.startedAt) return true;
+  if (appState && appState.proTrialUsed) return true;
+  if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE &&
+      (EZ_PROFILE.proTrialUsed || EZ_PROFILE.trialExpiry)) return true;
+  return false;
 }
 function ezProTrialDaysLeft() {
   var exp = ezProTrialExpiry();
@@ -39,12 +47,30 @@ function ezProTrialDaysLeft() {
 }
 function ezStartProTrial() {
   if (!currentUser || currentUser.isGuest) { showToast('Pehle account banao/login karo.', 'error'); return; }
-  if (ezProTrialUsed()) { showToast('Free trial already use ho chuka hai.', 'error'); return; }
+  // Once per account: don't grant until we authoritatively know this account's
+  // trial history. If the profile/appState hasn't loaded yet (offline, mid-load
+  // or a cleared cache), granting now could RESET a trial the account already
+  // used. EZ_PROFILE is null only during that load window, so wait for it.
+  if (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null) {
+    showToast('Profile load ho raha hai — ek second baad try karo.', 'info'); return;
+  }
+  if (ezProTrialUsed()) { showToast('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.', 'error'); return; }
   if (typeof ezIsPro === 'function' && ezIsPro()) { showToast('Aap already Pro ho 🎉', 'info'); return; }
   var today = new Date();
   var exp = new Date(today.getTime() + 3 * 86400000);
   appState.proTrial = { startedAt: today.toISOString(), expiry: exp.toISOString().slice(0, 10), days: 3 };
+  appState.proTrialUsed = true; // durable flag — survives even if proTrial obj is cleared
   try { saveProgress(); } catch(e) {}
+  // Best-effort: also stamp the profile doc so the "used" marker survives an
+  // appState reset/clear on another device. Silently ignored if Firestore
+  // rules disallow the profile write — the appState flag still enforces it.
+  try {
+    if (_fbReady && db && currentUser && currentUser.uid) {
+      db.collection('users').doc(currentUser.uid)
+        .update({ 'profile.proTrialUsed': true, 'profile.proTrialStartedAt': appState.proTrial.startedAt })
+        .catch(function() {});
+    }
+  } catch(e) {}
   showToast('🎉 3-din ka Pro trial shuru! Saare Pro features unlock.', 'success');
   try { var ov = document.getElementById('ez-upgrade-overlay'); if (ov) ov.classList.remove('open'); } catch(e) {}
   // FIX 8: Use ezRefreshGates() instead of calling individual lock functions —
