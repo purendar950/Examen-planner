@@ -462,10 +462,11 @@ function buildMockSchedule(cfg) {
     } else {
       included.forEach(({ s, f, n, offset }) => {
         if ((d % f) === (offset % f)) {
-          for (let k = 0; k < n; k++) {
-            const label = n > 1 ? `Test ${k+1}/${n}` : `Test`;
-            items.push({ type:'study', ch: { name: label, subName: s.name, color: s.color, diff:'', subId: s.id } });
-          }
+          /* One row per subject per day. Show the mock count in subName
+             instead of repeating the subject name for each individual test
+             (which made the schedule show the subject twice per test). */
+          const label = n > 1 ? `${n} mocks` : '1 mock';
+          items.push({ type:'study', ch: { name: s.name, subName: label, color: s.color, diff:'', subId: s.id } });
         }
       });
     }

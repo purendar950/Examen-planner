@@ -371,7 +371,8 @@ function renderRangeView(view) {
       const ch = it.ch || {};
       const isRev = it.type === 'revise';
       const accent = isRev ? '#A855F7' : (ch.color || 'var(--accent)');
-      return `<div class="day-list-task-item"><span class="day-list-task-dot" style="background:${accent};"></span>${isRev?'🔁 ':''}${escapeHtml(ch.name||'')} <span style="color:var(--muted);font-size:.7rem;">${it.part||''} · ${escapeHtml(ch.subName||'')}</span></div>`;
+      const metaStr = [it.part, ch.subName].map(x => (x || '').trim()).filter(Boolean).join(' · ');
+      return `<div class="day-list-task-item"><span class="day-list-task-dot" style="background:${accent};"></span>${isRev?'🔁 ':''}${escapeHtml(ch.name||'')}${metaStr ? ` <span style="color:var(--muted);font-size:.7rem;">${escapeHtml(metaStr)}</span>` : ''}</div>`;
     }).join('');
     /* Manually-added tasks */
     const taskRows = tasks.map(t =>
