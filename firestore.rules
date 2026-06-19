@@ -213,6 +213,15 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // ── Admin audit log ──────────────────────────────────
+    // Written by adminLog() on every admin action. Admin-only, append-only:
+    // entries can be created and read by admins but never edited or deleted.
+    match /admin_logs/{logId} {
+      allow create:         if isAdmin();
+      allow read:           if isAdmin();
+      allow update, delete: if false;
+    }
+
     // ── Default deny ─────────────────────────────────────
     // Catch-all: any path not matched above is denied.
     match /{document=**} {
