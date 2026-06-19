@@ -88,6 +88,12 @@ function isProUser(data, today) {
   if (profile.plan && profile.plan !== 'free') {
     if (!profile.planExpiry || profile.planExpiry >= today) return true;
   }
+
+  // Admin-granted trial (profile.trialExpiry). This field is admin-only-writable
+  // in the Firestore rules, so it's trusted (no tamper guard needed). Mirrors
+  // the web app's ezIsTrialActive(): active unless suspended and not yet expired.
+  if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
+
   const trial = appState.proTrial;
   if (trial && trial.expiry && trial.expiry >= today) {
     // Mirror the web app's ezIsProTrialActive() guards. proTrial lives in
