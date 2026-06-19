@@ -50,4 +50,38 @@
   #panel { display:none; }
   h3 { font-size:0.95rem; margin-bottom:0.6rem; }
   .empty { text-align:center; padding:2.5rem 1rem; color:var(--muted); font-size:0.85rem; }
-  @media (max-width:600px) { .wrap { padding:0.75rem; } .card { padding:0.85rem; } }
+
+  /* ── Compact button variant ── */
+  .btn-sm { padding:6px 12px; font-size:0.78rem; }
+  .btn-amber { background:rgba(245,158,11,0.12); color:var(--amber); }
+  .btn-amber:hover { background:rgba(245,158,11,0.2); }
+  .btn-red:hover { background:rgba(239,68,68,0.18); }
+  .btn-blue:hover { background:rgba(59,130,246,0.18); }
+  .btn-gray:hover { background:#E2E8F0; }
+  html[data-theme="dark"] .btn-gray:hover { background:#283143; }
+
+  /* ── Clean user card ── */
+  .user-card { padding:0; overflow:hidden; transition:box-shadow .15s, border-color .15s; }
+  .user-card:hover { border-color:#cbd5e1; box-shadow:0 2px 10px rgba(15,23,42,0.06); }
+  html[data-theme="dark"] .user-card:hover { border-color:#2a3346; box-shadow:none; }
+  .uc-top { display:flex; align-items:flex-start; gap:12px; padding:0.9rem 1.1rem 0.7rem; }
+  .uc-avatar { flex-shrink:0; width:44px; height:44px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:0.95rem; color:#fff; letter-spacing:0.5px; }
+  .uc-info { flex:1; min-width:0; }
+  .uc-name { font-weight:700; font-size:0.98rem; line-height:1.2; }
+  .uc-email { color:var(--muted); font-size:0.8rem; margin-top:2px; word-break:break-all; }
+  .uc-badges { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .uc-meta { display:flex; flex-wrap:wrap; gap:6px; padding:0 1.1rem 0.85rem; }
+  .uc-chip { display:inline-flex; align-items:center; gap:5px; background:var(--bg); border:1px solid var(--border); border-radius:7px; padding:3px 9px; font-size:0.74rem; color:var(--muted); white-space:nowrap; }
+  .uc-chip.warn { background:rgba(239,68,68,0.08); border-color:rgba(239,68,68,0.25); color:var(--red); font-weight:600; }
+  .uc-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:0.7rem 1.1rem; border-top:1px solid var(--border); background:rgba(99,116,139,0.04); }
+  html[data-theme="dark"] .uc-actions { background:rgba(255,255,255,0.02); }
+  .uc-plan-group { display:flex; gap:6px; align-items:center; margin-right:auto; flex-wrap:wrap; }
+  .uc-plan-group select { min-width:150px; }
+
+  @media (max-width:600px) {
+    .wrap { padding:0.75rem; } .card { padding:0.85rem; }
+    .user-card { padding:0; }
+    .uc-plan-group { margin-right:0; width:100%; }
+    .uc-plan-group select { flex:1; min-width:0; }
+    .uc-actions .btn { flex:1; text-align:center; }
+  }
