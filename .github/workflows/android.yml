@@ -10,6 +10,15 @@ on:
       - 'pages/**'
       - '*.html'
       - '.github/workflows/android.yml'
+  pull_request:
+    branches: ["main"]
+    paths:
+      - 'android/**'
+      - 'css/**'
+      - 'js/**'
+      - 'pages/**'
+      - '*.html'
+      - '.github/workflows/android.yml'
   workflow_dispatch:
 
 permissions:
@@ -30,6 +39,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+
+      # setup-android points ANDROID_HOME at a fresh SDK that only has the
+      # command-line tools, so the platform/build-tools must be installed
+      # explicitly or AGP fails to find the build target (android-34).
+      - name: Install Android SDK packages
+        run: sdkmanager --install "platform-tools" "platforms;android-34" "build-tools;34.0.0"
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
