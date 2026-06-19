@@ -415,19 +415,11 @@
             </div>
             <div class="ptc-check">✓</div>
           </div>
-          <div class="plan-type-card" data-type="practice" onclick="pwSelectType('practice', this)">
-            <div class="ptc-icon">🎯</div>
-            <div>
-              <div class="ptc-title">Practice</div>
-              <div class="ptc-sub">Syllabus done, now PYQ + MCQ practice on a shorter daily slot.</div>
-            </div>
-            <div class="ptc-check">✓</div>
-          </div>
           <div class="plan-type-card" data-type="mock" onclick="pwSelectType('mock', this)">
             <div class="ptc-icon">📝</div>
             <div>
               <div class="ptc-title">Mock Test Schedule</div>
-              <div class="ptc-sub">Full mocks, section tests, subject tests — 7-day rotation.</div>
+              <div class="ptc-sub">Full mocks + subject tests — 7-day rotation.</div>
             </div>
             <div class="ptc-check">✓</div>
           </div>
@@ -457,49 +449,10 @@
         </div>
       </div>
 
-      <!-- ── STEP 2B: Practice config ── -->
-      <div class="plan-step-pane" id="pw-step-2-practice">
-        <h3>Practice — Configure</h3>
-        <p class="pane-sub">Pick subjects, choose practice type, and set your daily load.</p>
-
-        <div class="cfg-field">
-          <label>Subjects (multi-select)</label>
-          <div class="sub-checks" id="pw-prac-subjects"></div>
-        </div>
-
-        <div class="cfg-field" style="margin-top:.85rem;">
-          <label>Practice type</label>
-          <div class="ptype-row" id="pw-prac-type">
-            <div class="ptype-chip" data-v="pyq"       onclick="pwSelectPracticeType('pyq', this)">📋 PYQ</div>
-            <div class="ptype-chip" data-v="topicmcq"  onclick="pwSelectPracticeType('topicmcq', this)">🎯 Topic-wise MCQ</div>
-            <div class="ptype-chip" data-v="mixed"     onclick="pwSelectPracticeType('mixed', this)">🔀 Mixed</div>
-          </div>
-        </div>
-
-        <div class="cfg-row-global">
-          <h5>⏱ Daily load</h5>
-          <div class="cfg-grid cols-3">
-            <div class="cfg-field">
-              <label>Daily time (hours)</label>
-              <input type="number" id="pw-prac-time" value="2" min="1" max="3" step="0.5">
-              <div class="cfg-hint">1–3 hours (shorter than syllabus)</div>
-            </div>
-            <div class="cfg-field">
-              <label>Questions per day</label>
-              <input type="number" id="pw-prac-q" value="50" min="10" max="200" step="5">
-            </div>
-            <div class="cfg-field">
-              <label>Start date</label>
-              <input type="date" id="pw-prac-start">
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- ── STEP 2C: Mock Test config ── -->
       <div class="plan-step-pane" id="pw-step-2-mock">
         <h3>Mock Test Schedule — Configure</h3>
-        <p class="pane-sub">Full mocks + section tests + subject tests across 7 days.</p>
+        <p class="pane-sub">Full mocks + subject tests across the week.</p>
 
         <div class="cfg-row-global">
           <h5>📝 Full Mock Tests</h5>
@@ -507,25 +460,6 @@
             <label>Per week</label>
             <input type="number" id="pw-mock-full" value="1" min="0" max="7" style="max-width:140px;">
             <div class="cfg-hint">Set 0 to skip full mocks. Full mock is scheduled on Sunday.</div>
-          </div>
-        </div>
-
-        <div class="cfg-row-global">
-          <h5>📊 Section Tests</h5>
-          <div class="cfg-field" style="margin-bottom:.65rem;">
-            <label>Daily section tests?</label>
-            <div class="toggle-row">
-              <div class="toggle-pill on" id="pw-mock-sec-toggle" onclick="pwToggleSectionDaily()">Yes</div>
-              <div class="toggle-pill" onclick="pwToggleSectionDaily()">No</div>
-            </div>
-          </div>
-          <div class="cfg-field">
-            <label>Sections</label>
-            <div class="sub-checks" id="pw-mock-sections"></div>
-          </div>
-          <div class="cfg-field" style="margin-top:.65rem;">
-            <label>Sections per day</label>
-            <input type="number" id="pw-mock-sec-per" value="1" min="1" max="4" style="max-width:120px;">
           </div>
         </div>
 

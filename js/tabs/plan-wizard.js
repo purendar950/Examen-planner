@@ -138,9 +138,10 @@ function pwGoToStep(n) {
 
 function pwShowStep2Pane() {
   const t = PW_STATE.type;
-  if (t === 'syllabus') document.getElementById('pw-step-2-syllabus').classList.add('active');
-  if (t === 'practice') document.getElementById('pw-step-2-practice').classList.add('active');
-  if (t === 'mock')     document.getElementById('pw-step-2-mock').classList.add('active');
+  const show = id => { const el = document.getElementById(id); if (el) el.classList.add('active'); };
+  if (t === 'syllabus') show('pw-step-2-syllabus');
+  if (t === 'practice') show('pw-step-2-practice'); /* pane removed; guarded for any legacy practice plan */
+  if (t === 'mock')     show('pw-step-2-mock');
   pwPushInputsToState();
   pwRenderSyllabusSubjectPane(); /* re-render with current values */
   pwUpdateFooter();
@@ -744,7 +745,7 @@ function pwGenerate() {
       const t = cfg.practiceType === 'pyq' ? 'PYQ' : cfg.practiceType === 'topicmcq' ? 'Topic MCQ' : 'Mixed';
       return `Practice — ${t}, ${cfg.questionsPerDay} Qs/day`;
     }
-    return `Mock — ${cfg.fullMockPerWeek}/wk, ${cfg.sectionDaily ? (cfg.sectionPerDay||1)+' section/day' : 'sections off'}`;
+    return `Mock — ${cfg.fullMockPerWeek}/wk · ${cfg.durationDays||30}d`;
   })();
   const planName = PW_STATE.name || autoName;
 
