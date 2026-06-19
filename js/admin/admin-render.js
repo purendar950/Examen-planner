@@ -7,6 +7,29 @@ function userMeta(u) {
     flagsFor(u).map(f => '<span class="flag">⚠ ' + f + '</span>').join('');
 }
 
+/* Initials for the user avatar (e.g. "Vijay Sharma" -> "VS"). */
+function userInitials(name, email) {
+  const src = (name || '').trim() || (email || '').trim();
+  if (!src) return '?';
+  const parts = src.split(/[\s._@]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.substring(0, 2).toUpperCase();
+}
+
+/* Deterministic avatar background gradient from a string. */
+function avatarColor(str) {
+  const palette = [
+    ['#6366F1', '#8B5CF6'], ['#0EA5E9', '#22D3EE'], ['#10B981', '#34D399'],
+    ['#F59E0B', '#FBBF24'], ['#EF4444', '#F87171'], ['#EC4899', '#F472B6'],
+    ['#14B8A6', '#2DD4BF'], ['#8B5CF6', '#A78BFA']
+  ];
+  let h = 0;
+  const s = String(str || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  const [a, b] = palette[h % palette.length];
+  return 'linear-gradient(135deg,' + a + ',' + b + ')';
+}
+
 function renderAnalytics() {
   var now = new Date();
   var dayMs = 86400000;
@@ -146,29 +169,55 @@ function renderUsers() {
   return toolbar + list.map(u => {
     const suspended = u.p.status === 'rejected';
     const trialSuspended = !!u.p.trialSuspended;
-    const planBadge = (u.p.plan && u.p.plan !== 'free') ? '<span class="badge badge-blue">' + esc(u.p.plan) + (u.p.planExpiry ? ' till ' + esc(u.p.planExpiry) : '') + '</span>' : '<span class="badge badge-green">Free</span>';
-    return '<div class="card"><div class="row" style="justify-content:space-between;">' +
-      '<div style="flex:1;min-width:220px;"><strong>' + esc(u.p.name || '?') + '</strong> <span class="muted">' + esc(u.p.email || '') + '</span> ' + planBadge + (suspended ? ' <span class="badge badge-red">Suspended</span>' : '') + (trialSuspended ? ' <span class="badge badge-red">Trial Suspended</span>' : '') + userMeta(u) + '</div>' +
-      '<div class="row">' +
-      '<select id="plan-' + u.id + '">' + planOpts(u.p.plan) + '</select>' +
-      '<button class="btn btn-blue" onclick="setPlan(\'' + u.id + '\')">Set Plan</button>' +
-      // Single context-aware Trial button:
-      //  - suspended            -> Restore trial
-      //  - active admin trial   -> Remove trial
-      //  - otherwise            -> Give trial
-      (u.p.trialSuspended
-        ? '<button class="btn btn-green" onclick="restoreTrial(\'' + u.id + '\')" title="Restore suspended trial access">▶ Restore Trial</button>'
-        : u.p.trialExpiry
-          ? '<button class="btn btn-red" onclick="clearTrial(\'' + u.id + '\')" title="Remove this user trial">✕ Remove Trial</button>'
-          : '<button class="btn btn-gray" onclick="giveTrial(\'' + u.id + '\')" title="Grant a free trial">🎁 Give Trial</button>') +
-      '<button class="btn btn-gray" onclick="showUserPayments(\'' + u.id + '\')" title="View this user payments">🧾 Payments</button>' +
-      ((u.p.fp || u.p.deviceDuplicate) ? '<button class="btn btn-gray" onclick="resetDeviceFlag(\'' + u.id + '\')" title="Clear device fingerprint / duplicate flag">🔓 Reset device</button>' : '') +
-      (suspended
-        ? '<button class="btn btn-green" onclick="approveUser(\'' + u.id + '\')">✓ Re-activate</button>'
-        : '<button class="btn btn-red" onclick="suspendUser(\'' + u.id + '\')">⏸ Suspend</button>') +
+    const isPaid = u.p.plan && u.p.plan !== 'free';
+    const planBadge = isPaid
+      ? '<span class="badge badge-blue">⭐ ' + esc(u.p.plan) + (u.p.planExpiry ? ' · till ' + esc(u.p.planExpiry) : '') + '</span>'
+      : '<span class="badge badge-green">Free</span>';
+    const badges = planBadge +
+      (suspended ? ' <span class="badge badge-red">⏸ Suspended</span>' : '') +
+      (trialSuspended ? ' <span class="badge badge-red">Trial Suspended</span>' : '') +
+      (u.p.trialExpiry && !trialSuspended ? ' <span class="badge badge-amber">🎁 Trial</span>' : '');
+
+    // Metadata chips
+    const chips = [];
+    chips.push('<span class="uc-chip">📱 ' + esc(u.p.mobile || '—') + '</span>');
+    if (u.p.examTarget) chips.push('<span class="uc-chip">🎯 ' + esc(u.p.examTarget.toUpperCase()) + '</span>');
+    chips.push('<span class="uc-chip">🕒 ' + fmtDate(u.p.requestedAt || u.p.createdAt) + '</span>');
+    if (u.p.ip) chips.push('<span class="uc-chip">🌐 ' + esc(u.p.ip) + '</span>');
+    if (u.p.referredBy) chips.push('<span class="uc-chip">🔗 ' + esc(u.p.referredBy.substring(0, 8)) + '…</span>');
+    flagsFor(u).forEach(f => chips.push('<span class="uc-chip warn">⚠ ' + f + '</span>'));
+
+    // Context-aware trial button
+    const trialBtn = u.p.trialSuspended
+      ? '<button class="btn btn-green btn-sm" onclick="restoreTrial(\'' + u.id + '\')" title="Restore suspended trial access">▶ Restore Trial</button>'
+      : u.p.trialExpiry
+        ? '<button class="btn btn-amber btn-sm" onclick="clearTrial(\'' + u.id + '\')" title="Remove this user trial">✕ Remove Trial</button>'
+        : '<button class="btn btn-gray btn-sm" onclick="giveTrial(\'' + u.id + '\')" title="Grant a free trial">🎁 Give Trial</button>';
+
+    return '<div class="card user-card">' +
+      '<div class="uc-top">' +
+        '<div class="uc-avatar" style="background:' + avatarColor(u.p.name || u.p.email || u.id) + ';">' + esc(userInitials(u.p.name, u.p.email)) + '</div>' +
+        '<div class="uc-info">' +
+          '<div class="uc-name">' + esc(u.p.name || 'Unnamed user') + '</div>' +
+          '<div class="uc-email">' + esc(u.p.email || '') + '</div>' +
+          '<div class="uc-badges">' + badges + '</div>' +
+        '</div>' +
       '</div>' +
-      '<div id="user-pay-' + u.id + '" style="flex-basis:100%;display:none;margin-top:8px;"></div>' +
-      '</div></div>';
+      '<div class="uc-meta">' + chips.join('') + '</div>' +
+      '<div class="uc-actions">' +
+        '<div class="uc-plan-group">' +
+          '<select id="plan-' + u.id + '">' + planOpts(u.p.plan) + '</select>' +
+          '<button class="btn btn-blue btn-sm" onclick="setPlan(\'' + u.id + '\')">Set Plan</button>' +
+        '</div>' +
+        trialBtn +
+        '<button class="btn btn-gray btn-sm" onclick="showUserPayments(\'' + u.id + '\')" title="View this user payments">🧾 Payments</button>' +
+        ((u.p.fp || u.p.deviceDuplicate) ? '<button class="btn btn-gray btn-sm" onclick="resetDeviceFlag(\'' + u.id + '\')" title="Clear device fingerprint / duplicate flag">🔓 Reset Device</button>' : '') +
+        (suspended
+          ? '<button class="btn btn-green btn-sm" onclick="approveUser(\'' + u.id + '\')">✓ Re-activate</button>'
+          : '<button class="btn btn-red btn-sm" onclick="suspendUser(\'' + u.id + '\')">⏸ Suspend</button>') +
+      '</div>' +
+      '<div id="user-pay-' + u.id + '" style="display:none;padding:0 1.1rem 0.9rem;"></div>' +
+    '</div>';
   }).join('');
 }
 
