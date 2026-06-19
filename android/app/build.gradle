@@ -1,0 +1,67 @@
+plugins {
+    id 'com.android.application'
+}
+
+/*
+ * ── Single source of truth ──
+ * The web app lives at the repo root. Instead of duplicating it, we copy the
+ * relevant web files into the Android assets folder at build time. The
+ * generated assets/www directory is git-ignored.
+ */
+def webRoot = rootProject.file('..')              // repo root (one level above /android)
+def bundledWww = file('src/main/assets/www')
+
+tasks.register('copyWebAssets', Copy) {
+    description = 'Copies the ExamZen web app into the Android assets folder.'
+    group = 'build'
+    into bundledWww
+    from(webRoot) {
+        include 'index.html'
+        include 'app.html'
+        include 'admin.html'
+        include 'dashboard-demo.html'
+        include 'css/**'
+        include 'js/**'
+        include 'pages/**'
+    }
+}
+
+// Make sure assets are fresh before the app is assembled.
+tasks.named('preBuild').configure {
+    dependsOn 'copyWebAssets'
+}
+
+// Remove generated assets on clean.
+tasks.named('clean').configure {
+    delete bundledWww
+}
+
+android {
+    namespace 'com.examzen.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.examzen.app"
+        minSdk 23
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.webkit:webkit:1.11.0'
+}

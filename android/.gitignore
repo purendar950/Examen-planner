@@ -1,0 +1,16 @@
+# Gradle / build output
+.gradle/
+build/
+*/build/
+
+# Local config
+local.properties
+
+# Generated web assets (copied from repo root by the copyWebAssets task)
+app/src/main/assets/www/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+captures/

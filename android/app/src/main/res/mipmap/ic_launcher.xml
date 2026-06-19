@@ -1,0 +1,33 @@
+<!-- Fallback launcher icon for API < 26 (no adaptive-icon support). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Background -->
+    <path
+        android:fillColor="#0A0D12"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+
+    <!-- Zen leaf -->
+    <path
+        android:fillColor="#00C896"
+        android:pathData="M54,28
+            C72,40 73,70 54,82
+            C35,70 36,40 54,28 Z" />
+
+    <!-- Leaf midrib -->
+    <path
+        android:strokeColor="#0A0D12"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:pathData="M54,34 L54,78" />
+
+    <!-- Side veins -->
+    <path
+        android:strokeColor="#0A0D12"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M54,48 L64,42 M54,58 L65,53 M54,48 L44,42 M54,58 L43,53" />
+</vector>
