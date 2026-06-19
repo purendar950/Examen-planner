@@ -143,14 +143,51 @@ h3 { font-size:1rem; font-weight:700; margin-bottom:0.7rem; letter-spacing:-0.02
 .user-card.paid      { border-left-color:var(--blue); }
 .user-card.free      { border-left-color:var(--accent); }
 .user-card.suspended { border-left-color:var(--red); background:rgba(239,68,68,0.025); }
-.user-head { line-height:1.5; }
+.user-head { display:flex; gap:10px; align-items:flex-start; line-height:1.5; }
 .user-head strong { font-size:0.98rem; }
+.user-id { flex:1; min-width:0; }
+.user-check { display:flex; align-items:center; padding-top:3px; }
+.user-check input { width:17px; height:17px; accent-color:var(--accent); cursor:pointer; margin:0; }
 .user-actions {
   display:flex; gap:8px; flex-wrap:wrap; align-items:center;
   margin-top:0.85rem; padding-top:0.85rem; border-top:1px dashed var(--border);
 }
 .user-actions select { min-width:168px; }
 .user-danger { margin-left:auto; }
+
+/* per-card "More" dropdown */
+.user-menu { position:relative; display:inline-flex; }
+.user-menu-pop {
+  display:none; position:absolute; right:0; top:calc(100% + 6px); z-index:25;
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius-sm);
+  box-shadow:var(--shadow-md); padding:6px; min-width:184px; flex-direction:column; gap:5px;
+}
+.user-menu.open .user-menu-pop { display:flex; }
+.user-menu-pop .btn { width:100%; justify-content:flex-start; }
+
+/* bulk-action bar */
+.bulk-bar {
+  display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:0.6rem 0.9rem; margin-bottom:0.9rem; box-shadow:var(--shadow-sm);
+}
+.bulk-bar.active { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.bulk-all { display:flex; align-items:center; gap:7px; font-size:0.8rem; font-weight:600; cursor:pointer; }
+.bulk-all input { width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
+.bulk-count { font-weight:700; font-size:0.8rem; color:var(--accent-dark); background:var(--accent-soft); padding:4px 11px; border-radius:999px; }
+.bulk-bar select { min-width:150px; }
+
+/* inline payment-history panel */
+.pay-panel { border-top:1px solid var(--border); margin-top:10px; padding-top:10px; }
+.pay-head { display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:0.85rem; margin-bottom:9px; }
+.pay-head .btn { padding:6px 11px; font-size:0.74rem; }
+.pay-list { display:flex; flex-direction:column; gap:6px; }
+.pay-item { background:rgba(15,23,42,0.025); border:1px solid var(--border); border-radius:var(--radius-xs); padding:8px 12px; }
+.pay-main { display:flex; align-items:center; gap:8px; }
+.pay-amt { font-weight:800; font-size:0.96rem; }
+.pay-meta { font-size:0.74rem; margin-top:3px; }
+.pay-empty { padding:10px 2px; }
+html[data-theme="dark"] .pay-item { background:rgba(255,255,255,0.03); }
 @media (max-width:600px) {
   .user-toolbar { top:104px; }
   .user-actions select { flex:1; min-width:140px; }

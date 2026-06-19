@@ -121,6 +121,97 @@ async function giveTrialAll() {
   await loadAll(); render();
   showToast('✅ Trial enabled for all users until ' + exp);
 }
+/* ══ BULK ACTIONS + per-card "More" menu (Users tab) ══
+   BULK_SEL / SHOWN_USER_IDS are declared in admin-render.js and shared
+   across these classic scripts via the global lexical scope. */
+function admToggleMenu(ev, id) {
+  if (ev) ev.stopPropagation();
+  const pop = document.getElementById('umenu-' + id);
+  if (!pop) return;
+  const parent = pop.parentElement;
+  const isOpen = parent.classList.contains('open');
+  document.querySelectorAll('.user-menu.open').forEach(m => m.classList.remove('open'));
+  if (!isOpen) parent.classList.add('open');
+}
+// Close any open "More" menu when clicking elsewhere.
+document.addEventListener('click', function() {
+  document.querySelectorAll('.user-menu.open').forEach(m => m.classList.remove('open'));
+});
+
+function admBulkToggle(ev, id) {
+  if (ev) ev.stopPropagation();
+  if (BULK_SEL.has(id)) BULK_SEL.delete(id); else BULK_SEL.add(id);
+  render();
+}
+function admBulkSelectAllShown() {
+  const ids = SHOWN_USER_IDS || [];
+  const allSel = ids.length > 0 && ids.every(id => BULK_SEL.has(id));
+  if (allSel) ids.forEach(id => BULK_SEL.delete(id));
+  else ids.forEach(id => BULK_SEL.add(id));
+  render();
+}
+function admBulkClear() { BULK_SEL.clear(); render(); }
+
+async function admBulkSuspend() {
+  const ids = [...BULK_SEL];
+  if (!ids.length) return;
+  const reason = prompt('Suspend ' + ids.length + ' user(s). Reason:', 'Suspended by admin');
+  if (reason === null) return;
+  try {
+    const batch = db.batch();
+    ids.forEach(id => batch.update(db.collection('users').doc(id), { 'profile.status': 'rejected', 'profile.rejectReason': reason || 'Suspended by admin' }));
+    await batch.commit();
+    await adminLog('bulk_suspend', null, { count: ids.length, uids: ids });
+    BULK_SEL.clear();
+    await loadAll(); render();
+    showToast('⏸ Suspended ' + ids.length + ' user(s).');
+  } catch(e) { showToast('Bulk suspend failed: ' + (e.message || e)); }
+}
+
+async function admBulkSetPlan() {
+  const ids = [...BULK_SEL];
+  if (!ids.length) return;
+  const sel = document.getElementById('bulk-plan');
+  if (!sel || !sel.value) { showToast('Choose a plan first.'); return; }
+  const batch = db.batch();
+  let label;
+  if (sel.value === 'free') {
+    ids.forEach(id => batch.update(db.collection('users').doc(id), { 'profile.plan': 'free', 'profile.planId': '', 'profile.planExpiry': '' }));
+    label = 'Free';
+  } else {
+    const pl = PLANS.find(p => p.id === sel.value);
+    if (!pl) { showToast('Plan not found.'); return; }
+    const exp = new Date(Date.now() + (pl.days || 30) * 86400000).toISOString().slice(0, 10);
+    ids.forEach(id => batch.update(db.collection('users').doc(id), { 'profile.plan': pl.name, 'profile.planId': pl.id, 'profile.planExpiry': exp }));
+    label = pl.name + ' (till ' + exp + ')';
+  }
+  if (!confirm('Set plan "' + label + '" for ' + ids.length + ' user(s)?')) return;
+  try {
+    await batch.commit();
+    await adminLog('bulk_set_plan', null, { count: ids.length, plan: label, uids: ids });
+    BULK_SEL.clear();
+    await loadAll(); render();
+    showToast('✅ Plan set for ' + ids.length + ' user(s).');
+  } catch(e) { showToast('Bulk set plan failed: ' + (e.message || e)); }
+}
+
+async function admBulkGiveTrial() {
+  const ids = [...BULK_SEL];
+  if (!ids.length) return;
+  const days = parseInt(prompt('Give trial to ' + ids.length + ' user(s). How many days?', '7')) || 0;
+  if (days <= 0) return;
+  const exp = new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+  try {
+    const batch = db.batch();
+    ids.forEach(id => batch.update(db.collection('users').doc(id), { 'profile.trialExpiry': exp, 'profile.trialDays': days }));
+    await batch.commit();
+    await adminLog('bulk_give_trial', null, { count: ids.length, days, expiry: exp, uids: ids });
+    BULK_SEL.clear();
+    await loadAll(); render();
+    showToast('🎁 Trial until ' + exp + ' for ' + ids.length + ' user(s).');
+  } catch(e) { showToast('Bulk trial failed: ' + (e.message || e)); }
+}
+
 async function saveUpiConfig() {
   const upiId = document.getElementById('cfg-upi').value.trim();
   const payeeName = document.getElementById('cfg-payee').value.trim();

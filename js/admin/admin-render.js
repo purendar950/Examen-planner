@@ -103,6 +103,10 @@ function renderPending() {
   }).join('');
 }
 
+/* Bulk-selection state for the Users tab (persists across re-renders). */
+let BULK_SEL = new Set();
+let SHOWN_USER_IDS = [];
+
 function renderUsers() {
   const search = (document.getElementById('user-search')?.value || '').toLowerCase().trim();
   const filter = document.getElementById('user-filter')?.value || 'all';
@@ -155,29 +159,48 @@ function renderUsers() {
     '<div class="muted" style="margin-top:6px;">Showing <strong>' + list.length + '</strong> of ' + totalCount + ' users</div>' +
     '</div>';
   if (!totalCount) return '<div class="empty">Koi user nahi.</div>';
-  if (!list.length) return toolbar + '<div class="empty">No users match your filters.</div>';
   const planOpts = (sel) => '<option value="free">Free</option>' + PLANS.map(p => '<option value="' + p.id + '"' + (sel === p.name ? ' selected' : '') + '>' + esc(p.name) + ' (₹' + (p.price || 0) + ')</option>').join('');
-  return toolbar + list.map(u => {
+  SHOWN_USER_IDS = list.map(u => u.id);
+  const selCount = BULK_SEL.size;
+  const allShownSelected = SHOWN_USER_IDS.length > 0 && SHOWN_USER_IDS.every(id => BULK_SEL.has(id));
+  const bulkBar = '<div class="bulk-bar' + (selCount ? ' active' : '') + '">' +
+    '<label class="bulk-all"><input type="checkbox" ' + (allShownSelected ? 'checked' : '') + ' onclick="admBulkSelectAllShown()"> Select all shown</label>' +
+    (selCount
+      ? '<span class="bulk-count">' + selCount + ' selected</span>' +
+        '<select id="bulk-plan"><option value="" disabled selected>⚙ Set plan…</option>' + planOpts('') + '</select>' +
+        '<button class="btn btn-blue" onclick="admBulkSetPlan()">Apply plan</button>' +
+        '<button class="btn btn-gray" onclick="admBulkGiveTrial()">🎁 Give trial</button>' +
+        '<button class="btn btn-red" onclick="admBulkSuspend()">⏸ Suspend</button>' +
+        '<button class="btn btn-gray" onclick="admBulkClear()">✕ Clear</button>'
+      : '<span class="muted">Tick users to act on several at once</span>') +
+    '</div>';
+  if (!list.length) return toolbar + bulkBar + '<div class="empty">No users match your filters.</div>';
+  return toolbar + bulkBar + list.map(u => {
     const suspended = u.p.status === 'rejected';
     const trialSuspended = !!u.p.trialSuspended;
     const tone = suspended ? 'suspended' : ((u.p.plan && u.p.plan !== 'free') ? 'paid' : 'free');
     const planBadge = (u.p.plan && u.p.plan !== 'free') ? '<span class="badge badge-blue">' + esc(u.p.plan) + (u.p.planExpiry ? ' till ' + esc(u.p.planExpiry) : '') + '</span>' : '<span class="badge badge-green">Free</span>';
+    const trialBtn = u.p.trialSuspended
+      ? '<button class="btn btn-green" onclick="restoreTrial(\'' + u.id + '\')" title="Restore suspended trial access">▶ Restore Trial</button>'
+      : u.p.trialExpiry
+        ? '<button class="btn btn-red" onclick="clearTrial(\'' + u.id + '\')" title="Remove this user trial">✕ Remove Trial</button>'
+        : '<button class="btn btn-gray" onclick="giveTrial(\'' + u.id + '\')" title="Grant a free trial">🎁 Give Trial</button>';
+    const resetBtn = (u.p.fp || u.p.deviceDuplicate)
+      ? '<button class="btn btn-gray" onclick="resetDeviceFlag(\'' + u.id + '\')" title="Clear device fingerprint / duplicate flag">🔓 Reset device</button>'
+      : '';
     return '<div class="card user-card ' + tone + '">' +
-      '<div class="user-head"><strong>' + esc(u.p.name || '?') + '</strong> <span class="muted">' + esc(u.p.email || '') + '</span> ' + planBadge + (suspended ? ' <span class="badge badge-red">Suspended</span>' : '') + (trialSuspended ? ' <span class="badge badge-red">Trial Suspended</span>' : '') + userMeta(u) + '</div>' +
+      '<div class="user-head">' +
+        '<label class="user-check"><input type="checkbox" ' + (BULK_SEL.has(u.id) ? 'checked' : '') + ' onclick="admBulkToggle(event,\'' + u.id + '\')"></label>' +
+        '<div class="user-id"><strong>' + esc(u.p.name || '?') + '</strong> <span class="muted">' + esc(u.p.email || '') + '</span> ' + planBadge + (suspended ? ' <span class="badge badge-red">Suspended</span>' : '') + (trialSuspended ? ' <span class="badge badge-red">Trial Suspended</span>' : '') + userMeta(u) + '</div>' +
+      '</div>' +
       '<div class="user-actions">' +
       '<select id="plan-' + u.id + '">' + planOpts(u.p.plan) + '</select>' +
       '<button class="btn btn-blue" onclick="setPlan(\'' + u.id + '\')">Set Plan</button>' +
-      // Single context-aware Trial button:
-      //  - suspended            -> Restore trial
-      //  - active admin trial   -> Remove trial
-      //  - otherwise            -> Give trial
-      (u.p.trialSuspended
-        ? '<button class="btn btn-green" onclick="restoreTrial(\'' + u.id + '\')" title="Restore suspended trial access">▶ Restore Trial</button>'
-        : u.p.trialExpiry
-          ? '<button class="btn btn-red" onclick="clearTrial(\'' + u.id + '\')" title="Remove this user trial">✕ Remove Trial</button>'
-          : '<button class="btn btn-gray" onclick="giveTrial(\'' + u.id + '\')" title="Grant a free trial">🎁 Give Trial</button>') +
       '<button class="btn btn-gray" onclick="showUserPayments(\'' + u.id + '\')" title="View this user payments">🧾 Payments</button>' +
-      ((u.p.fp || u.p.deviceDuplicate) ? '<button class="btn btn-gray" onclick="resetDeviceFlag(\'' + u.id + '\')" title="Clear device fingerprint / duplicate flag">🔓 Reset device</button>' : '') +
+      '<div class="user-menu">' +
+        '<button class="btn btn-gray" onclick="admToggleMenu(event,\'' + u.id + '\')" title="More actions">⋯ More</button>' +
+        '<div class="user-menu-pop" id="umenu-' + u.id + '">' + trialBtn + resetBtn + '</div>' +
+      '</div>' +
       (suspended
         ? '<button class="btn btn-green user-danger" onclick="approveUser(\'' + u.id + '\')">✓ Re-activate</button>'
         : '<button class="btn btn-red user-danger" onclick="suspendUser(\'' + u.id + '\')">⏸ Suspend</button>') +
@@ -191,24 +214,26 @@ function renderUsers() {
 function showUserPayments(uid) {
   const box = document.getElementById('user-pay-' + uid);
   if (!box) return;
-  if (box.style.display === 'block') { box.style.display = 'none'; return; }
+  if (box.style.display === 'block') { box.style.display = 'none'; box.innerHTML = ''; return; }
   const list = PAYMENTS.filter(p => p.uid === uid);
+  const badge = s => (s === 'verified' || s === 'approved') ? 'badge-green' : (s === 'declined' ? 'badge-red' : 'badge-amber');
+  let inner;
   if (!list.length) {
-    box.innerHTML = '<div class="muted" style="padding:8px;border-top:1px solid var(--border);">No payments for this user.</div>';
+    inner = '<div class="pay-empty muted">No payments recorded for this user.</div>';
   } else {
-    const badge = s => s === 'verified' || s === 'approved' ? 'badge-green' : (s === 'declined' ? 'badge-red' : 'badge-amber');
-    box.innerHTML = '<div style="border-top:1px solid var(--border);padding-top:8px;">' +
-      '<table style="width:100%;border-collapse:collapse;font-size:.78rem;"><thead><tr style="text-align:left;color:var(--muted);">' +
-      '<th style="padding:4px 6px;">Date</th><th style="padding:4px 6px;">Plan</th><th style="padding:4px 6px;">Amount</th><th style="padding:4px 6px;">Txn</th><th style="padding:4px 6px;">Status</th></tr></thead><tbody>' +
-      list.map(p => '<tr>' +
-        '<td style="padding:4px 6px;">' + fmtDate(p.createdAt) + '</td>' +
-        '<td style="padding:4px 6px;">' + esc(p.planName || p.planId || '') + '</td>' +
-        '<td style="padding:4px 6px;">₹' + (Number(p.amount) || 0) + '</td>' +
-        '<td style="padding:4px 6px;">' + esc(p.txnId || '') + '</td>' +
-        '<td style="padding:4px 6px;"><span class="badge ' + badge(p.status) + '">' + esc(p.status || '') + '</span></td>' +
-      '</tr>').join('') +
-      '</tbody></table></div>';
+    inner = '<div class="pay-list">' + list.map(p =>
+      '<div class="pay-item">' +
+        '<div class="pay-main"><span class="pay-amt">₹' + (Number(p.amount) || 0) + '</span>' +
+          '<span class="badge ' + badge(p.status) + '">' + esc(p.status || '—') + '</span></div>' +
+        '<div class="pay-meta muted">' + esc(p.planName || p.planId || '—') + ' · ' + fmtDate(p.createdAt) +
+          (p.txnId ? ' · Txn ' + esc(p.txnId) : '') + '</div>' +
+      '</div>'
+    ).join('') + '</div>';
   }
+  box.innerHTML = '<div class="pay-panel">' +
+    '<div class="pay-head"><span>🧾 Payment history (' + list.length + ')</span>' +
+      '<button class="btn btn-gray" onclick="showUserPayments(\'' + uid + '\')">✕ Close</button></div>' +
+    inner + '</div>';
   box.style.display = 'block';
 }
 
