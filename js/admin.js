@@ -1211,7 +1211,26 @@ async function saveTgBotToken() {
   } catch(e) { showToast('Failed: ' + e.message); }
 }
 
-/* Build today's message text for a user */
+/* Save the daily auto-send time (IST) to Firestore. The GitHub Actions
+   sender reads config/telegram.sendTime and only sends once per day at/after
+   this time. Admin-only write is allowed by the Firestore rules. */
+async function saveTgSendTime() {
+  const el = document.getElementById('tg-sendtime-input');
+  if (!el) return;
+  const t = (el.value || '').trim();
+  if (!/^\d{2}:\d{2}$/.test(t)) { showToast('⚠️ Valid time chahiye (HH:MM)'); return; }
+  const [h, m] = t.split(':').map(n => parseInt(n, 10));
+  if (h > 23 || m > 59) { showToast('⚠️ Invalid time (00:00–23:59)'); return; }
+  try {
+    await db.collection('config').doc('telegram').set({
+      sendTime: t, sendHour: h, sendMinute: m,
+      sendTimeUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    TG_CONFIG.sendTime = t; TG_CONFIG.sendHour = h; TG_CONFIG.sendMinute = m;
+    showToast('✅ Auto-send time set to ' + t + ' IST');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
 function buildTgMessage(name, digest) {
   const today = (function() {
     const now = new Date();
@@ -1352,8 +1371,19 @@ function renderTelegram() {
       '<button class="btn btn-gray" onclick="TG_CONFIG.loaded=false;loadTelegramData();">🔄 Refresh Users</button>' +
     '</div>' +
     '<div id="tg-send-log" style="display:none;max-height:200px;overflow-y:auto;background:#f8f9fa;border-radius:8px;padding:10px;margin-top:10px;font-size:.77rem;font-family:monospace;border:1px solid var(--border);"></div>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
-      '⏰ Auto-send: roz <b>6:00 AM IST</b> ko GitHub Actions chalata hai (free, automatic).' +
+    /* ── Auto-send schedule (admin-set time, saved to config/telegram) ── */
+    '<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+        '<span style="font-size:.82rem;font-weight:700;">⏰ Daily auto-send time (IST):</span>' +
+        '<input id="tg-sendtime-input" type="time" value="' + esc(TG_CONFIG.sendTime || '06:00') + '" ' +
+          'style="font-size:.85rem;padding:5px 8px;border:1px solid var(--border);border-radius:8px;">' +
+        '<button class="btn btn-blue" onclick="saveTgSendTime()">💾 Save Time</button>' +
+      '</div>' +
+      '<div class="muted" style="font-size:.72rem;margin-top:8px;line-height:1.6;">' +
+        '⏰ GitHub Actions har <b>30 min</b> chalta hai aur set time ke baad pehle run pe sabhi enabled users ko bhejta hai (free, automatic, din mein ek hi baar). ' +
+        'Abhi set: <b>' + esc(TG_CONFIG.sendTime || '06:00') + ' IST</b>' +
+        (TG_CONFIG.lastSentDate ? ' · last auto-sent: <b>' + esc(TG_CONFIG.lastSentDate) + '</b>' : '') +
+      '</div>' +
     '</div>' +
     '</div>';
 

@@ -2,9 +2,12 @@ name: Daily Telegram Study Plan
 
 on:
   schedule:
-    # 00:30 UTC = 06:00 AM IST
-    - cron: '30 0 * * *'
-  workflow_dispatch: {}   # allow manual runs from the Actions tab
+    # Runs every 30 minutes. The sender (send-telegram.js) only actually sends
+    # once per day, on the first run at/after the admin-configured time stored
+    # in Firestore config/telegram.sendTime (IST, default 06:00). Other runs
+    # read one config doc and exit immediately.
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}   # allow manual runs from the Actions tab (force send, bypasses the time gate)
 
 jobs:
   send:
