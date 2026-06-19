@@ -159,7 +159,7 @@ function renderSyllabusPlan(cfg) {
      in PARALLEL by their frequency. No clock times — just a topic list. */
   const schedule = buildPlanSchedule(cfg);
   window._planSchedule = schedule;
-  if (currentUser && !currentUser.isGuest) { appState.planSchedule = schedule.byDate; }
+  if (currentUser) { appState.planSchedule = schedule.byDate; }
 
   const subjects = getActiveSubjects();
   const totalRemaining = subjects.reduce((t,s) => t + s.chapters.filter(c => !appState.progress[c.id]?.done).length, 0);
@@ -489,7 +489,7 @@ function renderMockPlan(cfg) {
   const byDate = sched.byDate;
   const included = sched.subjectIds;
   window._planSchedule = sched;
-  if (currentUser && !currentUser.isGuest) appState.planSchedule = byDate;
+  if (currentUser) appState.planSchedule = byDate;
 
   const todayStr = fmtDate(new Date());
   const todayItems = byDate[todayStr] || [];

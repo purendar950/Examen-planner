@@ -46,7 +46,7 @@ function ezProTrialDaysLeft() {
   return Math.max(0, Math.ceil((new Date(exp + 'T23:59:59') - new Date()) / 86400000));
 }
 function ezStartProTrial() {
-  if (!currentUser || currentUser.isGuest) { showToast('Pehle account banao/login karo.', 'error'); return; }
+  if (!currentUser) { showToast('Pehle account banao/login karo.', 'error'); return; }
   // Once per account: don't grant until we authoritatively know this account's
   // trial history. If the profile/appState hasn't loaded yet (offline, mid-load
   // or a cleared cache), granting now could RESET a trial the account already
@@ -134,7 +134,7 @@ function ezRefreshGates() {
 (function() {
   var _wasPro = null;
   function checkExpiry() {
-    if (!currentUser || currentUser.isGuest) return;
+    if (!currentUser) return;
     // FIX 2a: EZ_PROFILE must be loaded before we can make a meaningful check.
     // If it's still null (loading race), skip this tick — the ezLoadProfile()
     // call will trigger ezRefreshGates() directly once it resolves.
@@ -216,10 +216,10 @@ function ezRefreshGates() {
    Free users can browse the full syllabus of every exam, but may only
    mark / save topics (complete toggle, bookmark, difficulty, notes) for
    their selected target exam. Other exams stay read-only with an upgrade
-   nudge. Pro/trial users, admins and guests are unaffected.
+   nudge. Pro/trial users and admins are unaffected.
 ══════════════════════════════════════════════ */
 function ezCanEditSyllabus() {
-  // Not gated (Pro/trial/admin) or a guest — full edit access.
+  // Not gated (Pro/trial/admin) — full edit access.
   if (!ezGated()) return true;
   // Free user: editing allowed only on their selected target exam.
   // FIX: the old fallback was `currentExam` — meaning if examTarget was
@@ -258,7 +258,7 @@ function ezApplySyllabusLockUI() {
     });
   }
 
-  // Pro/trial/admin/guest — full edit, remove any stale locks
+  // Pro/trial/admin — full edit, remove any stale locks
   if (!ezGated()) { _unlockAll(); return; }
 
   // FIX 2: Profile not loaded yet → lock everything until we know the target.

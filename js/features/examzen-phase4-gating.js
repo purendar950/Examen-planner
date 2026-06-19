@@ -18,7 +18,6 @@
   }
   window.openReqModal=function(){
     if(typeof currentUser==='undefined'||!currentUser){showToast('Pehle login karo.','error');return;}
-    if(currentUser.isGuest){showToast('Guest mode mein request nahi.','error');return;}
     selType='';buildModal();
     document.getElementById('ez-req-overlay').classList.add('open');
     document.body.style.overflow='hidden';
@@ -91,15 +90,15 @@ function ezIsPro() {
     EZ_PROFILE.trialExpiry >= today);
   return !!(planActive || adminTrialActive || ezIsTrialActive());
 }
-/* Gating applies only to real (non-guest) logged-in free users */
-// FIX 6: ezGated() returns true (gated/restricted) for any real logged-in user
+/* Gating applies only to real logged-in free users */
+// FIX 6: ezGated() returns true (gated/restricted) for any logged-in user
 // who is NOT on an active Pro plan or trial.
 // When EZ_PROFILE is null (still loading from Firestore), ezIsPro() returns false
 // → ezGated() returns true → gates are CLOSED by default until plan data arrives.
 // This is the correct fail-safe: deny Pro features until we've confirmed Pro status.
 // ezLoadProfile() calls ezRefreshGates() once EZ_PROFILE loads, which opens gates
 // for users who actually have a valid Pro plan/trial.
-function ezGated() { return !!(currentUser && !currentUser.isGuest && !ezIsPro()); }
+function ezGated() { return !!(currentUser && !ezIsPro()); }
 function ezLockedMsg(feature) {
   showToast('💎 ' + feature + ' — Pro plan mein milta hai.', 'error');
   setTimeout(ezOpenUpgrade, 600);
@@ -182,7 +181,7 @@ ytoLoadPlaylist = async function() {
   const lib = ytoLib();
   const existing = plId && lib[plId];
   const maxSaved = ezIsPro() ? 10 : EZ_FREE_LIMITS.mediaSaves;
-  if (currentUser && !currentUser.isGuest && !existing && Object.keys(lib).length >= maxSaved) {
+  if (currentUser && !existing && Object.keys(lib).length >= maxSaved) {
     if (ezIsPro()) showToast('Pro users max 10 playlists/videos save kar sakte hain. Admin panel se user limit manage karein.', 'error');
     else ezLockedMsg('Free plan: sirf ' + EZ_FREE_LIMITS.mediaSaves + ' playlists/videos save. Pro mein 10 tak save kar sakte ho');
     return;
@@ -196,7 +195,7 @@ chLinkSave = function() {
   if (!appState.ytLinks) appState.ytLinks = {};
   const existing = chLinkCurrentId && appState.ytLinks[chLinkCurrentId];
   const maxLinks = ezIsPro() ? 10 : EZ_FREE_LIMITS.mediaSaves;
-  if (currentUser && !currentUser.isGuest && !existing && Object.keys(appState.ytLinks).length >= maxLinks) {
+  if (currentUser && !existing && Object.keys(appState.ytLinks).length >= maxLinks) {
     chLinkClose();
     if (ezIsPro()) showToast('Pro users max 10 chapter video links save kar sakte hain. Admin panel se user limit manage karein.', 'error');
     else ezLockedMsg('Free plan: sirf ' + EZ_FREE_LIMITS.mediaSaves + ' chapter video links. Pro mein 10 tak save kar sakte ho');

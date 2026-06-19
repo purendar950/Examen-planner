@@ -2,13 +2,13 @@
    EXAMZEN PHASE 3 — REFERRAL SHARE WIDGET + PAYOUT PROGRESS
 ══════════════════════════════════════════════ */
 function ezRefLink() {
-  if (!currentUser || currentUser.isGuest) return '';
+  if (!currentUser) return '';
   const base = location.origin + location.pathname.replace(/app\.html.*$/, '');
   return base + '?ref=' + encodeURIComponent(currentUser.uid);
 }
 
 function ezRenderRefWidget() {
-  if (!currentUser || currentUser.isGuest) return;
+  if (!currentUser) return;
   // Share & Earn now lives on the Playlist Organiser page (was on Dashboard).
   const organiser = document.getElementById('page-yt-organiser'); if (!organiser) return;
   let w = document.getElementById('ez-ref-widget');

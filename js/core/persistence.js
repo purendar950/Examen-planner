@@ -6,7 +6,7 @@ let _lastSavedJSON = '';
 let _localDirty = false; // true when there are local edits not yet written to Firestore
 
 function saveProgress() {
-  if (!currentUser || currentUser.isGuest) return;
+  if (!currentUser) return;
 
   /* Refresh the precomputed Telegram digest so the daily sender always reads
      an up-to-date plan. Guarded so it can never block a save. */
@@ -27,7 +27,7 @@ function saveProgress() {
 }
 
 async function saveProgressNow() {
-  if (!currentUser || currentUser.isGuest || !_fbReady || !db) return;
+  if (!currentUser || !_fbReady || !db) return;
   const json = JSON.stringify(appState);
   if (json === _lastSavedJSON) { _localDirty = false; setSyncStatus('', ''); return; } // Nothing changed
   _lastSavedJSON = json;
@@ -54,14 +54,14 @@ async function saveProgressNow() {
 }
 
 // Auto-save every 30s as final safety net
-setInterval(() => { if (currentUser && !currentUser.isGuest) saveProgressNow(); }, 30000);
+setInterval(() => { if (currentUser) saveProgressNow(); }, 30000);
 
 /* ── Flush pending changes when the app is hidden or closed ──
    Mobile browsers often kill backgrounded tabs before the 2s save debounce
    fires, which could lose the user's last change. We flush on every
    exit-ish event so nothing is lost. */
 function flushSaveOnExit() {
-  if (!currentUser || currentUser.isGuest) return;
+  if (!currentUser) return;
   /* Always refresh the local cache synchronously (survives reload offline). */
   try { localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState)); } catch(e) {}
   /* Cancel the debounce and write to Firestore immediately. */
