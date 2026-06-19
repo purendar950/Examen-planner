@@ -66,12 +66,11 @@ function updateDashboard() {
   const focusLine = $('dash-focus-line');
   const todoEl = $('dash-today-list');
   if (todoEl) {
+    // one incomplete topic from each subject
     const nextChapters = [];
     for (const sub of subjects) {
-      for (const ch of sub.chapters) {
-        if (!appState.progress[ch.id]?.done) { nextChapters.push({ ch, sub }); if (nextChapters.length >= 3) break; }
-      }
-      if (nextChapters.length >= 3) break;
+      const ch = sub.chapters.find(c => !appState.progress[c.id]?.done);
+      if (ch) nextChapters.push({ ch, sub });
     }
     if (!nextChapters.length) {
       if (focusLine) focusLine.textContent = 'All caught up — great work! 🎉';
