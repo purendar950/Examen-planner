@@ -83,11 +83,14 @@
   .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,181,137,0.38); }
 
   .focus-right { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-left: 1.75rem; border-left: 1px solid var(--line); }
+  .rings { display: flex; gap: 1.5rem; }
+  .ring-stat { display: flex; flex-direction: column; align-items: center; gap: 10px; }
   .ring { position: relative; width: 120px; height: 120px; }
   .ring svg { transform: rotate(-90deg); }
   .ring-c { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  .ring-c .big { font-size: 1.5rem; font-weight: 800; line-height: 1; }
-  .ring-c .lbl { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 3px; }
+  .ring-c .big { font-size: 1.9rem; font-weight: 800; line-height: 1; }
+  .ring-c .big.amber { color: var(--amber); }
+  .ring-c .lbl { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 4px; }
   .goal-cap { font-size: 0.78rem; color: var(--muted); text-align: center; }
   .goal-cap b { color: var(--ink); }
   .streak-mini { display: inline-flex; align-items: center; gap: 6px; background: var(--amber-soft); color: var(--amber); font-weight: 700; font-size: 0.78rem; padding: 5px 11px; border-radius: 99px; }
@@ -206,15 +209,30 @@
       <button class="btn">Start studying →</button>
     </div>
     <div class="focus-right">
-      <div class="ring">
-        <svg width="120" height="120">
-          <circle cx="60" cy="60" r="52" stroke="#EAECEF" stroke-width="9" fill="none"></circle>
-          <circle cx="60" cy="60" r="52" stroke="#00B589" stroke-width="9" fill="none"
-            stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="127.4"></circle>
-        </svg>
-        <div class="ring-c"><div class="big">61%</div><div class="lbl">Syllabus</div></div>
+      <div class="rings">
+        <div class="ring-stat">
+          <div class="ring">
+            <svg width="120" height="120">
+              <circle cx="60" cy="60" r="52" stroke="#EAECEF" stroke-width="9" fill="none"></circle>
+              <circle cx="60" cy="60" r="52" stroke="#00B589" stroke-width="9" fill="none"
+                stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="127.4"></circle>
+            </svg>
+            <div class="ring-c"><div class="big">61%</div><div class="lbl">Syllabus</div></div>
+          </div>
+          <div class="ring-cap"><b>98</b> / 161 done</div>
+        </div>
+        <div class="ring-stat">
+          <div class="ring">
+            <svg width="120" height="120">
+              <circle cx="60" cy="60" r="52" stroke="#FDF2DD" stroke-width="9" fill="none"></circle>
+              <circle cx="60" cy="60" r="52" stroke="#E8920C" stroke-width="9" fill="none"
+                stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="0"></circle>
+            </svg>
+            <div class="ring-c"><div class="big amber" id="daysNum">57</div><div class="lbl">Days left</div></div>
+          </div>
+          <div class="ring-cap"><b id="examDateCap">14 Jul 2026</b></div>
+        </div>
       </div>
-      <div class="goal-cap"><b>98</b> / 161 chapters</div>
       <span class="streak-mini">🔥 7-day streak</span>
     </div>
   </div>
@@ -275,13 +293,18 @@
 
 </div>
 <script>
-  // Live "days left" that updates when the exam date is changed
+  // Live countdown — updates when the exam date is changed
   var input = document.getElementById('examDate');
   var chip = document.getElementById('daysChip');
+  var num = document.getElementById('daysNum');
+  var cap = document.getElementById('examDateCap');
+  var MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function refresh() {
-    if (!input.value) { chip.textContent = '⏳ set a date'; return; }
-    var target = new Date(input.value + 'T00:00:00').getTime();
-    var days = Math.ceil((target - Date.now()) / 86400000);
+    if (!input.value) { chip.textContent = '⏳ set a date'; num.textContent = '—'; return; }
+    var dt = new Date(input.value + 'T00:00:00');
+    var days = Math.ceil((dt.getTime() - Date.now()) / 86400000);
+    cap.textContent = dt.getDate() + ' ' + MON[dt.getMonth()] + ' ' + dt.getFullYear();
+    num.textContent = days > 0 ? days : 0;
     if (days > 1) chip.textContent = '⏳ ' + days + ' days left';
     else if (days === 1) chip.textContent = '⏳ 1 day left';
     else if (days === 0) chip.textContent = '🎯 Exam is today!';
