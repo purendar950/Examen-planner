@@ -14,9 +14,9 @@ function updateExamDate(val, save=true) {
   const safe = safeExamDate(val);
   if (save) { appState.examDate = safe; saveProgress(); }
   const d = new Date(safe + 'T09:00:00');
-  const opts = { day:'numeric', month:'long', year:'numeric' };
+  const opts = { day:'numeric', month:'short', year:'numeric' };
   const label = document.getElementById('exam-date-label');
-  if (label) label.textContent = `Exam date: ${d.toLocaleDateString('en-IN', opts)}`;
+  if (label) label.textContent = d.toLocaleDateString('en-IN', opts);
   if (countdownInterval) clearInterval(countdownInterval);
   startCountdown();
 }
