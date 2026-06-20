@@ -46,7 +46,7 @@ function updateDashboard() {
   if ($('dash-greeting')) $('dash-greeting').textContent = dashGreeting();
   if ($('dash-username')) $('dash-username').textContent = dashUserName();
 
-  // Target score / rank — shown in glowing golden under the name
+  // Target score / rank — shown after the name in glowing golden, on its own line
   const rankEl = $('dash-target-rank');
   if (rankEl) {
     let tRank = '';
@@ -54,11 +54,10 @@ function updateDashboard() {
     if (!tRank) { try { tRank = (window.EZ_PROFILE && EZ_PROFILE.targetScore) || ''; } catch (e) {} }
     tRank = (tRank || '').trim();
     if (tRank) {
-      rankEl.innerHTML = '<span class="dr-label">RANK</span>' +
-                         '<span class="dr-val">Target: ' + tRank + '</span>';
+      rankEl.textContent = '🎯 Target Rank: ' + tRank;
       rankEl.style.display = '';
     } else {
-      rankEl.innerHTML = '';
+      rankEl.textContent = '';
       rankEl.style.display = 'none';
     }
   }
