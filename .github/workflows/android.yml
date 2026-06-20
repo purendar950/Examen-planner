@@ -13,7 +13,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: read
 
 jobs:
   build:
@@ -45,3 +46,18 @@ jobs:
           name: examzen-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+          tag_name: build-${{ github.run_number }}
+          name: Build #${{ github.run_number }}
+          body: |
+            Automated APK build from commit ${{ github.sha }}
+            
+            **Changes:**
+            - Branch: ${{ github.ref_name }}
+            - Commit: ${{ github.sha }}
+          draft: false
+          prerelease: false
