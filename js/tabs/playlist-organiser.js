@@ -359,14 +359,21 @@ function ytoLoad() {
   ytoRenderLibrary();
 }
 
-/* ── Load playlist from URL → save as course ── */
+/* ── Load playlist OR single video from URL → save as course ── */
 async function ytoLoadPlaylist() {
   const url = document.getElementById('yto-url-input').value.trim();
   const errEl = document.getElementById('yto-error');
   errEl.style.display = 'none';
   if (!url) { errEl.textContent = 'URL enter karo pehle.'; errEl.style.display='block'; return; }
   const plId = ytExtractPlaylistId(url);
-  if (!plId) { errEl.textContent = 'Valid YouTube playlist URL nahi mili. Example: youtube.com/playlist?list=PL...'; errEl.style.display='block'; return; }
+  if (!plId) {
+    // Not a playlist — try a single video URL before giving up
+    const vId = ytExtractVideoId(url);
+    if (vId) { return ytoLoadSingleVideo(vId); }
+    errEl.textContent = 'Valid YouTube playlist ya video URL nahi mili. Example: youtube.com/playlist?list=PL... ya youtube.com/watch?v=...';
+    errEl.style.display='block';
+    return;
+  }
 
   const loadBtn = document.getElementById('yto-load-btn');
   const orig = loadBtn.innerHTML;
@@ -391,6 +398,7 @@ async function ytoLoadPlaylist() {
   const existing = lib[plId];
   lib[plId] = {
     id: plId,
+    type: 'playlist',
     title: info?.title || existing?.title || 'Playlist',
     channel: info?.channelTitle || existing?.channel || '',
     thumb: info?.thumb || videos[0]?.thumb || '',
@@ -406,8 +414,52 @@ async function ytoLoadPlaylist() {
   ytoOpenCourse(plId);
 }
 
+/* ── Load a single video URL → save as a 1-video course ── */
+async function ytoLoadSingleVideo(vId) {
+  const errEl = document.getElementById('yto-error');
+  if (errEl) errEl.style.display = 'none';
+  const loadBtn = document.getElementById('yto-load-btn');
+  const orig = loadBtn ? loadBtn.innerHTML : '';
+  if (loadBtn) { loadBtn.disabled = true; loadBtn.innerHTML = '⏳ Loading...'; }
+
+  const info = await ytFetchVideoInfo(vId).catch(() => null);
+  if (loadBtn) { loadBtn.disabled = false; loadBtn.innerHTML = orig; }
+
+  // API may fail (quota/key) — fall back to sensible defaults so the video still loads
+  const title   = info?.title || 'Video';
+  const channel = info?.channelTitle || '';
+  const thumb   = info?.thumb || `https://i.ytimg.com/vi/${vId}/mqdefault.jpg`;
+  const dur     = info?.duration || 0;
+
+  const key = 'vid_' + vId;            // namespace single videos so they never clash with playlist IDs
+  const lib = ytoLib();
+  const existing = lib[key];
+  lib[key] = {
+    id: key,
+    type: 'video',
+    videoId: vId,
+    title: existing?.title || title,
+    channel: existing?.channel || channel,
+    thumb: existing?.thumb || thumb,
+    videos: [{ id: vId, title: existing?.videos?.[0]?.title || title, thumb, dur }],
+    watched: existing?.watched || {},
+    lastVideo: existing?.lastVideo || vId,
+    plan: existing?.plan || null,
+    addedAt: existing?.addedAt || Date.now()
+  };
+  ytoPersist();
+  document.getElementById('yto-url-input').value = '';
+  showToast(`✅ "${lib[key].title}" added${dur ? ' · ' + ytoFmtHM(dur) : ''}`, 'success');
+  ytoOpenCourse(key);
+}
+
 async function ytoRefetch(plId) {
-  document.getElementById('yto-url-input').value = 'https://www.youtube.com/playlist?list=' + plId;
+  const pl = ytoLib()[plId];
+  if (pl && pl.type === 'video') {
+    document.getElementById('yto-url-input').value = 'https://www.youtube.com/watch?v=' + (pl.videoId || pl.videos?.[0]?.id || '');
+  } else {
+    document.getElementById('yto-url-input').value = 'https://www.youtube.com/playlist?list=' + plId;
+  }
   await ytoLoadPlaylist();
 }
 
@@ -421,8 +473,8 @@ function ytoRenderLibrary() {
   const entries = Object.values(ytoLib()).sort((a,b) => b.addedAt - a.addedAt);
   if (!entries.length) {
     content.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div>
-      <p>YouTube playlist URL paste karo aur Load karo</p>
-      <p style="font-size:0.75rem;margin-top:4px;">Playlist automatically structured course ban jayegi — chapters, total time aur study plan ke saath</p></div>`;
+      <p>YouTube playlist ya single video URL paste karo aur Load karo</p>
+      <p style="font-size:0.75rem;margin-top:4px;">Playlist structured course ban jayegi; single video bhi course ki tarah save aur track hogi</p></div>`;
     return;
   }
   content.innerHTML = `<div class="section-title">📚 My Courses (${entries.length})</div>

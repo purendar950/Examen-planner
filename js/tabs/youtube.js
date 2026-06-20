@@ -368,6 +368,26 @@ async function ytFetchPlaylistInfo(plId) {
   return null;
 }
 
+/* Fetch a single video's snippet + duration (used for single-video loads) */
+async function ytFetchVideoInfo(videoId) {
+  try {
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${YT_API_KEY}`);
+    const data = await res.json();
+    if (data.items && data.items[0]) {
+      const it = data.items[0];
+      const s  = it.snippet || {};
+      return {
+        id: videoId,
+        title: s.title || 'Video',
+        channelTitle: s.channelTitle || '',
+        thumb: s.thumbnails?.medium?.url || s.thumbnails?.default?.url || `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+        duration: ytParseIsoDuration(it.contentDetails?.duration || '')
+      };
+    }
+  } catch (e) {}
+  return null;
+}
+
 async function ytFetchPlaylistVideos(plId) {
   const videos = [];
   let pageToken = '';

@@ -1,14 +1,15 @@
     <div class="page" id="page-yt-organiser">
       <div style="margin-bottom:1.25rem;">
         <h2 style="margin-bottom:4px;">📋 YouTube Playlist Organiser</h2>
-        <p style="color:var(--muted);font-size:0.82rem;">Playlist URL paste karo, videos ko custom groups mein organise karo, tags add karo aur progress track karo.</p>
+        <p style="color:var(--muted);font-size:0.82rem;">Playlist <b>ya single video</b> URL paste karo, videos ko custom groups mein organise karo, tags add karo aur progress track karo.</p>
       </div>
 
       <!-- URL Input -->
       <div class="yt-input-bar" style="margin-bottom:1rem;">
         <input type="text" class="yt-url-input" id="yto-url-input"
-          placeholder="YouTube playlist URL paste karo... (youtube.com/playlist?list=PL...)"
-          style="font-size:0.875rem;">
+          placeholder="Playlist ya single video URL paste karo... (playlist?list=PL... ya watch?v=...)"
+          style="font-size:0.875rem;"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();ytoLoadPlaylist();}">
         <button class="btn-yt-play" id="yto-load-btn" onclick="ytoLoadPlaylist()" style="background:var(--purple);color:#fff;min-width:90px;">
           📥 Load
         </button>
@@ -67,7 +68,7 @@
       <div id="yto-content">
         <div style="text-align:center;padding:3rem 1rem;color:var(--muted);">
           <div style="font-size:2.5rem;margin-bottom:0.75rem;">📋</div>
-          <p style="font-size:0.9rem;">YouTube playlist URL paste karo aur Load karo</p>
+          <p style="font-size:0.9rem;">YouTube playlist ya single video URL paste karo aur Load karo</p>
           <p style="font-size:0.78rem;margin-top:0.35rem;">Videos automatically list honge — phir groups banao, tags add karo</p>
         </div>
       </div>
