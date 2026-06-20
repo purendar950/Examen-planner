@@ -112,6 +112,11 @@ function renderTopicListItems(items, emptyMsg) {
   return visible.map(it => {
     const ch = it.ch || {};
     const isRevise = it.type === 'revise';
+    /* Study topics tied to a real chapter (ch.id) get an inline check-off box so
+       the user can mark them complete straight from the planner — this writes to
+       appState.progress (same store the Syllabus tab uses), keeping both in sync. */
+    const canCheck = it.type === 'study' && !!ch.id;
+    const isDone = canCheck && !!(appState.progress[ch.id] && appState.progress[ch.id].done);
     /* Engine-backed revisions (from the spaced-repetition queue) are clickable:
        clicking opens the rating modal which updates mastery + reschedules. */
     const clickable = isRevise && it.fromEngine && ch.id;
@@ -122,10 +127,16 @@ function renderTopicListItems(items, emptyMsg) {
       : (ch.diff ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:var(--card);color:var(--muted);white-space:nowrap;">${escapeHtml(ch.diff)}</span>` : '');
     const clickAttr = clickable
       ? ` onclick="openReviseModal('${ch.id}')" title="Click to revise &amp; rate"` : '';
+    /* Leading marker: a clickable check-off box for study topics, otherwise the
+       small coloured status dot used by revise/mock rows. */
+    const marker = canCheck
+      ? `<div onclick="event.stopPropagation();togglePlanTopicDone('${ch.id}','${ch.subId||''}')" title="${isDone?'Mark as not done':'Mark complete'}" style="width:18px;height:18px;border-radius:5px;border:2px solid ${isDone?'var(--accent)':'var(--border)'};background:${isDone?'var(--accent)':'transparent'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:.72rem;line-height:1;cursor:pointer;flex-shrink:0;">${isDone?'✓':''}</div>`
+      : `<div style="width:8px;height:8px;border-radius:50%;background:${accent};flex-shrink:0;"></div>`;
+    const nameStyle = `flex:1;font-size:.82rem;${isRevise?'color:#A855F7;':''}${isDone?'color:var(--muted);text-decoration:line-through;':''}`;
     return `
-      <div${clickAttr} style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${accent};border-radius:8px;padding:.55rem .85rem;display:flex;align-items:center;gap:10px;${clickable?'cursor:pointer;':''}">
-        <div style="width:8px;height:8px;border-radius:50%;background:${accent};flex-shrink:0;"></div>
-        <span style="flex:1;font-size:.82rem;${isRevise?'color:#A855F7;':''}">${isRevise?'🔁 ':''}${escapeHtml(ch.name||'')}${revLabel} <span style="color:var(--muted);font-size:.7rem;">${it.part||''}</span></span>
+      <div${clickAttr} style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${accent};border-radius:8px;padding:.55rem .85rem;display:flex;align-items:center;gap:10px;${clickable?'cursor:pointer;':''}${isDone?'opacity:.7;':''}">
+        ${marker}
+        <span style="${nameStyle}">${isRevise?'🔁 ':''}${escapeHtml(ch.name||'')}${revLabel} <span style="color:var(--muted);font-size:.7rem;">${it.part||''}</span></span>
         <span style="font-size:.62rem;color:var(--muted);white-space:nowrap;">${escapeHtml(ch.subName||'')}</span>
         ${tag}
       </div>`;

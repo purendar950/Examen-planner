@@ -183,6 +183,7 @@ function renderDayView() {
   const badge = document.getElementById('task-count-badge');
   if (badge) badge.textContent = tasks.length;
   renderDayScheduledTopics();
+  renderCompletedTopicsCard();
   renderDayContent();
   renderScheduledVideos();
 }
@@ -230,6 +231,106 @@ function addScheduledTopicsToTasks(dateStr) {
   });
   if (added) { saveProgress(); buildPlannerCalendar(); showToast(`${added} topics added to ${dateStr}! ✅`, 'success'); }
   else showToast('All topics already added.', 'info');
+}
+
+/* ══════════════════════════════════════════════
+   IN-PLANNER TOPIC COMPLETION + COMPLETED HISTORY
+   Mirrors toggleChapter() (syllabus.js) so completion done from the planner
+   writes to the same appState.progress store and stays in sync everywhere.
+══════════════════════════════════════════════ */
+
+/* Toggle a chapter's completed state from inside the planner (check-off box on
+   a scheduled study topic, or the undo box in the Completed card). */
+function togglePlanTopicDone(chId, subId) {
+  if (!chId) return;
+  if (!appState.progress[chId]) appState.progress[chId] = {};
+  const wasDone = appState.progress[chId].done;
+  appState.progress[chId].done = !wasDone;
+  try { _cachedRemainingCount = null; } catch (e) {} // invalidate countdown cache
+  if (!wasDone) {
+    appState.progress[chId].completedAt = new Date().toISOString();
+    if (!appState.progress[chId].nextRevisionAt && typeof addDaysISO === 'function') {
+      appState.progress[chId].nextRevisionAt = addDaysISO(new Date(), 1);
+    }
+    if (typeof updateStreak === 'function') updateStreak();
+    showToast('Topic complete! 🎯 Moved to Completed.', 'success');
+  } else {
+    showToast('Topic moved back to your plan.', 'info');
+  }
+  if (typeof saveProgress === 'function') saveProgress();
+
+  /* Refresh planner surfaces: the calendar (→ day view → scheduled + completed
+     cards) and the generated timetable output (so a checked-off topic drops out
+     of the active plan, since buildPlanSchedule excludes done chapters). */
+  try { if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar(); } catch (e) {}
+  try {
+    if (window._planConfig && window._planConfig.planType && typeof generateTimetable === 'function') {
+      generateTimetable();
+    }
+  } catch (e) {}
+}
+
+/* Collect every chapter the user has marked complete (across the active exam's
+   subjects), most-recently-completed first. */
+function getCompletedTopics() {
+  const out = [];
+  let subs = [];
+  try { subs = getActiveSubjects() || []; } catch (e) {}
+  subs.forEach(s => {
+    (s.chapters || []).forEach(ch => {
+      const p = appState.progress[ch.id];
+      if (p && p.done) {
+        out.push({ id: ch.id, name: ch.name, subName: s.name, color: s.color, subId: s.id, completedAt: p.completedAt || null });
+      }
+    });
+  });
+  out.sort((a, b) => (b.completedAt ? Date.parse(b.completedAt) : 0) - (a.completedAt ? Date.parse(a.completedAt) : 0));
+  return out;
+}
+
+let _plannerCompletedOpen = false;
+function toggleCompletedTopics() {
+  _plannerCompletedOpen = !_plannerCompletedOpen;
+  renderCompletedTopicsCard();
+}
+
+/* Collapsible "Completed Topics" history card, shown in the planner Day view.
+   Lists all completed chapters with their completion date and an undo box. */
+function renderCompletedTopicsCard() {
+  const host = document.getElementById('planner-day-content');
+  if (!host) return;
+  let card = document.getElementById('planner-completed-topics');
+  const list = getCompletedTopics();
+  if (!list.length) { if (card) card.remove(); return; }
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'planner-completed-topics';
+    card.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:1rem;';
+    const sched = document.getElementById('day-scheduled-topics');
+    if (sched) host.insertBefore(card, sched.nextSibling);
+    else host.insertBefore(card, host.firstChild);
+  }
+  const mons = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const fmtDone = iso => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return `${mons[d.getMonth()]} ${d.getDate()}`;
+  };
+  const rows = _plannerCompletedOpen ? list.map(t => `
+    <div style="display:flex;align-items:center;gap:10px;padding:.5rem .85rem;border-top:1px solid var(--border);">
+      <div onclick="togglePlanTopicDone('${t.id}','${t.subId||''}')" title="Mark as not done (move back to plan)" style="width:18px;height:18px;border-radius:5px;border:2px solid var(--accent);background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:.72rem;line-height:1;cursor:pointer;flex-shrink:0;">✓</div>
+      <span style="flex:1;font-size:.82rem;color:var(--muted);text-decoration:line-through;">${escapeHtml(t.name)}</span>
+      <span style="font-size:.62rem;color:${t.color||'var(--muted)'};white-space:nowrap;">${escapeHtml(t.subName||'')}</span>
+      <span style="font-size:.62rem;color:var(--muted);white-space:nowrap;min-width:42px;text-align:right;">${fmtDone(t.completedAt)}</span>
+    </div>`).join('') : '';
+  card.innerHTML = `
+    <div onclick="toggleCompletedTopics()" style="padding:.85rem 1.1rem;display:flex;align-items:center;gap:8px;cursor:pointer;${_plannerCompletedOpen?'border-bottom:1px solid var(--border);':''}">
+      <span style="font-size:.8rem;font-weight:700;color:var(--accent);">✅ Completed Topics</span>
+      <span style="background:var(--accent-dim);color:var(--accent);border-radius:99px;padding:2px 10px;font-size:.68rem;font-weight:700;">${list.length}</span>
+      <span style="margin-left:auto;color:var(--muted);font-size:.8rem;display:inline-block;transition:transform .2s;transform:rotate(${_plannerCompletedOpen?'180':'0'}deg);">▾</span>
+    </div>
+    ${rows}`;
 }
 
 function selectDay(dateStr) {
