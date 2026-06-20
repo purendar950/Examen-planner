@@ -30,7 +30,7 @@ async function ezGetIp() {
 /* Rebrand to PrepPath */
 (function() {
   document.title = 'PrepPath — Study Planner';
-  const tt = document.querySelector('.topbar-title'); if (tt) tt.textContent = 'PrepPath';
+  const tt = document.querySelector('.topbar-title'); if (tt) tt.innerHTML = 'Prep<span class="z">Path</span>';
   try {
     const box = document.querySelector('.auth-logo > div:last-child');
     if (box && box.firstElementChild) box.firstElementChild.textContent = 'PrepPath';

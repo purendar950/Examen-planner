@@ -115,8 +115,8 @@
     height: 60px;
     display: flex; align-items: center; justify-content: space-between;
   }
-  .topbar-left { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-  .topbar-logo { width: 28px; height: 28px; border-radius: 6px; object-fit: contain; flex-shrink: 0; }
+  .topbar-left { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+  .topbar-logo { width: 40px; height: 40px; border-radius: 9px; object-fit: contain; flex-shrink: 0; }
   .logo-badge {
     background: var(--accent-dim);
     border: 1px solid rgba(0,200,150,0.25);
@@ -126,7 +126,10 @@
     font-weight: 700; font-size: 0.78rem; letter-spacing: 0.08em;
     flex-shrink: 0; white-space: nowrap;
   }
-  .topbar-title { font-weight: 700; font-size: 1rem; }
+  .topbar-title { font-weight: 800; font-size: 1.18rem; letter-spacing: -0.02em; color: var(--text); }
+  .topbar-title .z { color: var(--accent); }
+  /* Brand accent stays readable on the near-white light theme */
+  html[data-theme="light"] .topbar-title .z { color: #008f66; }
   .topbar-right { display: flex; align-items: center; gap: 1rem; min-width: 0; }
 
   /* Phones: the topbar-right cluster (trial badge, request, theme, user chip)
