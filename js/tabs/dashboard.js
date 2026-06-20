@@ -46,6 +46,22 @@ function updateDashboard() {
   if ($('dash-greeting')) $('dash-greeting').textContent = dashGreeting();
   if ($('dash-username')) $('dash-username').textContent = dashUserName();
 
+  // Target score / rank — shown in glowing golden under the name
+  const rankEl = $('dash-target-rank');
+  if (rankEl) {
+    let tRank = '';
+    try { tRank = (appState.studyProfile && appState.studyProfile.targetScore) || ''; } catch (e) {}
+    if (!tRank) { try { tRank = (window.EZ_PROFILE && EZ_PROFILE.targetScore) || ''; } catch (e) {} }
+    tRank = (tRank || '').trim();
+    if (tRank) {
+      rankEl.textContent = '🎯 Target: ' + tRank;
+      rankEl.style.display = '';
+    } else {
+      rankEl.textContent = '';
+      rankEl.style.display = 'none';
+    }
+  }
+
   // Stats
   if ($('stat-total')) $('stat-total').textContent = total;
   if ($('stat-done')) $('stat-done').textContent = done;
