@@ -67,7 +67,15 @@ function buildPlanSchedule(cfg) {
   }).filter(s => s.slots.length);
 
   const byDate = {};
-  const startD = new Date((cfg.startDate || fmtDate(new Date())) + 'T00:00:00');
+  /* AUTO-RESCHEDULE: anchor the layout to TODAY whenever the plan's start date
+     is in the past. This way missed days never strand topics on invisible past
+     dates — the remaining (pending) topics always redistribute from today
+     forward, so "Today" always shows the next pending topics. (Same model the
+     YouTube playlist organiser uses.) ISO YYYY-MM-DD compares chronologically. */
+  const todayStr = fmtDate(new Date());
+  const origStart = cfg.startDate || todayStr;
+  const effectiveStart = (origStart < todayStr) ? todayStr : origStart;
+  const startD = new Date(effectiveStart + 'T00:00:00');
   const totalSlots = perSubject.reduce((t, s) => t + s.slots.length, 0);
   let placed = 0, dayIdx = 0, guard = 0, lastDateStr = fmtDate(startD);
   const cursor = {};
@@ -97,6 +105,7 @@ function buildPlanSchedule(cfg) {
   return {
     byDate,
     totalDays,
+    startDate: effectiveStart,
     endDate: lastDateStr,
     subjectIds: perSubject.map(s => s.subId)
   };
@@ -199,7 +208,7 @@ function renderSyllabusPlan(cfg) {
   container.innerHTML = `
     <div style="padding:.6rem 1.25rem .3rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
       <span style="font-size:.65rem;padding:2px 10px;border-radius:99px;background:${phase.color}1a;color:${phase.color};font-weight:600;border:1px solid ${phase.color}33;">📚 Syllabus Plan — ${phase.tip}</span>
-      <span style="font-size:.65rem;color:var(--muted);">${cfg.startDate} → ${schedule.endDate} (${totalDays} days)</span>
+      <span style="font-size:.65rem;color:var(--muted);">${schedule.startDate || cfg.startDate} → ${schedule.endDate} (${totalDays} days) · ⟳ auto-reschedules</span>
     </div>
     ${backlogHtml}
     <div class="tt-summary-bar">

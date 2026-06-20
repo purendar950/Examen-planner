@@ -32,6 +32,14 @@ function ezRefreshExamYears() {
 
 function initApp() {
   ezRefreshExamYears();
+  // Restore the user's last-selected exam (defaults to SSC CGL). Done first so
+  // every render below uses the right exam. Silent = no "Switched to…" toast.
+  try {
+    const savedExam = appState.selectedExam;
+    if (savedExam && savedExam !== currentExam && typeof ALL_EXAMS !== 'undefined' && ALL_EXAMS[savedExam]) {
+      switchExam(savedExam, { silent: true });
+    }
+  } catch (e) { console.error('restore exam failed:', e); }
   // Migrate a legacy single global exam date into the per-exam map so switching
   // exams and back restores the user's own date instead of the built-in default.
   if (appState.examDate) {
