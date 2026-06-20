@@ -165,9 +165,9 @@
 
 
   <!-- EXAM SELECTOR BAR -->
-  <div id="exam-selector-bar" style="background:var(--surface);border-bottom:1px solid var(--border);padding:0.6rem 1.5rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    <span style="font-size:0.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;">Exam:</span>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+  <div id="exam-selector-bar" style="background:var(--surface);border-bottom:1px solid var(--border);padding:0.6rem 1.5rem;display:flex;align-items:center;gap:12px;">
+    <span style="font-size:0.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;flex:0 0 auto;">Exam:</span>
+    <div class="exam-pills-scroll" style="display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;">
       <button class="exam-select-btn active" onclick="switchExam('cgl')" id="examBtn-cgl">SSC CGL</button>
       <button class="exam-select-btn" onclick="switchExam('ntpc')" id="examBtn-ntpc">RRB NTPC</button>
       <button class="exam-select-btn" onclick="switchExam('gd')" id="examBtn-gd">SSC GD</button>
