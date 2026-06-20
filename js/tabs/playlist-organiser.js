@@ -429,16 +429,16 @@ function ytoRenderLibrary() {
     <div style="display:grid;gap:10px;">` + entries.map(pl => {
       const pct = pl.videos.length ? Math.round(ytoDoneCount(pl)/pl.videos.length*100) : 0;
       const fin = ytoEstimateFinish(pl);
-      return `<div class="info-card" style="display:flex;gap:12px;align-items:center;cursor:pointer;margin-bottom:0;padding:1rem;" onclick="ytoOpenCourse('${pl.id}')">
-        <div style="width:80px;height:45px;border-radius:8px;overflow:hidden;background:var(--surface);flex-shrink:0;">${pl.thumb?`<img src="${pl.thumb}" style="width:100%;height:100%;object-fit:cover;">`:''}</div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-weight:700;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(pl.title)}</div>
-          <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">${escapeHtml(pl.channel)} · ${pl.videos.length} videos · ${ytoFmtHM(ytoTotalSecs(pl))}${fin?` · 🎯 ~${fin}`:''}</div>
+      return `<div class="info-card" style="display:flex;gap:10px;align-items:center;cursor:pointer;margin-bottom:0;padding:1rem;overflow:hidden;min-width:0;width:100%;max-width:100%;" onclick="ytoOpenCourse('${pl.id}')">
+        <div style="width:72px;height:41px;border-radius:8px;overflow:hidden;background:var(--surface);flex:0 0 auto;">${pl.thumb?`<img src="${pl.thumb}" style="width:100%;height:100%;object-fit:cover;">`:''}</div>
+        <div style="flex:1 1 auto;min-width:0;overflow:hidden;">
+          <div style="font-weight:700;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(pl.title)}</div>
+          <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(pl.channel)} · ${pl.videos.length} videos · ${ytoFmtHM(ytoTotalSecs(pl))}${fin?` · 🎯 ~${fin}`:''}</div>
           <div class="progress-bar" style="margin-top:6px;"><div class="progress-fill" style="width:${pct}%"></div></div>
         </div>
-        <span style="font-size:0.8rem;color:var(--accent);font-weight:700;flex-shrink:0;">${pct}%</span>
-        <button class="ch-action-btn" onclick="event.stopPropagation();ytoRename('${pl.id}')" title="Rename">✏️</button>
-        <button class="ch-action-btn" onclick="event.stopPropagation();ytoDelete('${pl.id}')" title="Delete">🗑</button>
+        <span style="font-size:0.8rem;color:var(--accent);font-weight:700;flex:0 0 auto;">${pct}%</span>
+        <button class="ch-action-btn" style="flex:0 0 auto;" onclick="event.stopPropagation();ytoRename('${pl.id}')" title="Rename">✏️</button>
+        <button class="ch-action-btn" style="flex:0 0 auto;" onclick="event.stopPropagation();ytoDelete('${pl.id}')" title="Delete">🗑</button>
       </div>`;
     }).join('') + `</div>`;
 }
