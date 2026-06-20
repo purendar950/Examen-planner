@@ -24,12 +24,13 @@ function switchExam(examId) {
   const ct = document.getElementById('countdown-title');
   if (ct) ct.textContent = '⏱ ' + exam.fullName + ' Countdown';
 
-  // Update exam date
-  const oldDate = appState.examDate;
-  appState.examDate = exam.examDate;
+  // Update exam date — restore the user's saved date for this exam (or its
+  // built-in default if they never set one). Never clobbers a custom date.
+  const newDate = getExamDateFor(examId);
+  appState.examDate = newDate;
   const dp = document.getElementById('exam-date-picker');
-  if (dp) dp.value = exam.examDate;
-  updateExamDate(exam.examDate, false);
+  if (dp) dp.value = newDate;
+  updateExamDate(newDate, false);
 
   // Rebuild syllabus
   buildSyllabus();

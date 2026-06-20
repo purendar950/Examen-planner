@@ -32,6 +32,14 @@ function ezRefreshExamYears() {
 
 function initApp() {
   ezRefreshExamYears();
+  // Migrate a legacy single global exam date into the per-exam map so switching
+  // exams and back restores the user's own date instead of the built-in default.
+  if (appState.examDate) {
+    if (!appState.examDates) appState.examDates = {};
+    if (typeof currentExam !== 'undefined' && currentExam && !appState.examDates[currentExam]) {
+      appState.examDates[currentExam] = safeExamDate(appState.examDate);
+    }
+  }
   // Set exam date picker + start the countdown FIRST, so a later failing
   // call (syllabus/dashboard/etc.) can never prevent the timer from running.
   const dp = document.getElementById('exam-date-picker');

@@ -10,9 +10,25 @@ function safeExamDate(val) {
   return isNaN(d.getTime()) ? DEFAULT_EXAM_DATE : v;
 }
 
+// Returns the user's saved exam date for a given exam, falling back to that
+// exam's built-in default date. Each exam keeps its own date so switching
+// exams never clobbers a date the user set for a different exam.
+function getExamDateFor(examId) {
+  const saved = appState.examDates && appState.examDates[examId];
+  if (saved) return safeExamDate(saved);
+  const def = (typeof ALL_EXAMS !== 'undefined' && ALL_EXAMS[examId]) ? ALL_EXAMS[examId].examDate : null;
+  return safeExamDate(def);
+}
+
 function updateExamDate(val, save=true) {
   const safe = safeExamDate(val);
-  if (save) { appState.examDate = safe; saveProgress(); }
+  appState.examDate = safe; // keep the global in sync — many features read appState.examDate
+  if (save) {
+    // Persist per-exam so each exam remembers its own date.
+    if (!appState.examDates) appState.examDates = {};
+    if (typeof currentExam !== 'undefined' && currentExam) appState.examDates[currentExam] = safe;
+    saveProgress();
+  }
   const d = new Date(safe + 'T09:00:00');
   const opts = { day:'numeric', month:'short', year:'numeric' };
   const label = document.getElementById('exam-date-label');
