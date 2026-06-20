@@ -21,6 +21,7 @@ let appState = {
   progress: {},
   tasks: {},
   examDate: '2026-07-14',
+  examDates: {},        // per-exam saved dates: { examId: 'YYYY-MM-DD' }
   streak: 0,
   lastStudyDate: null,
   ytLinks: {},
