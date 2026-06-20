@@ -26,14 +26,27 @@ tasks.register('copyWebAssets', Copy) {
     }
 }
 
+// Copy PrepPath logo to resources
+tasks.register('copyLogo', Copy) {
+    description = 'Copies PrepPath logo to drawable resources.'
+    group = 'build'
+    into file('src/main/res/drawable')
+    from(webRoot) {
+        include 'PrepPath.png'
+        rename 'PrepPath.png', 'ic_launcher.png'
+    }
+}
+
 // Make sure assets are fresh before the app is assembled.
 tasks.named('preBuild').configure {
     dependsOn 'copyWebAssets'
+    dependsOn 'copyLogo'
 }
 
 // Remove generated assets on clean.
 tasks.named('clean').configure {
     delete bundledWww
+    delete file('src/main/res/drawable/ic_launcher.png')
 }
 
 android {
