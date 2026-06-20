@@ -115,7 +115,7 @@
     height: 60px;
     display: flex; align-items: center; justify-content: space-between;
   }
-  .topbar-left { display: flex; align-items: center; gap: 12px; }
+  .topbar-left { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
   .logo-badge {
     background: var(--accent-dim);
     border: 1px solid rgba(0,200,150,0.25);
@@ -123,9 +123,22 @@
     padding: 4px 10px;
     border-radius: 6px;
     font-weight: 700; font-size: 0.78rem; letter-spacing: 0.08em;
+    flex-shrink: 0; white-space: nowrap;
   }
   .topbar-title { font-weight: 700; font-size: 1rem; }
-  .topbar-right { display: flex; align-items: center; gap: 1rem; }
+  .topbar-right { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+
+  /* Phones: the topbar-right cluster (trial badge, request, theme, user chip)
+     can be wider than the screen — let it scroll horizontally instead of
+     pushing the logo off-screen. The dropdown is pinned to the viewport so the
+     horizontal-scroll container never clips it. */
+  @media (max-width: 600px) {
+    .topbar-right { gap: 8px; overflow-x: auto; overflow-y: visible; -ms-overflow-style: none; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .topbar-right::-webkit-scrollbar { height: 0; display: none; }
+    .topbar-right > * { flex-shrink: 0; }
+    .user-menu-dropdown { position: fixed; top: 58px; right: 10px; left: auto; }
+  }
+
   .user-chip {
     position: relative;
     display: flex; align-items: center; gap: 8px;
@@ -306,8 +319,8 @@
   .dash-todo-item { display: flex; align-items: center; gap: 11px; padding: 0.65rem 0.8rem; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: transform .12s; }
   .dash-todo-item:hover { transform: translateX(2px); }
   .dash-todo-check { width: 19px; height: 19px; border-radius: 6px; border: 2px solid var(--muted); opacity: .5; flex-shrink: 0; }
-  .dash-todo-name { flex: 1; min-width: 0; font-size: 0.86rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .dash-todo-tag { font-size: 0.66rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+  .dash-todo-name { flex: 1 1 auto; min-width: 0; font-size: 0.86rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dash-todo-tag { flex: 0 1 auto; min-width: 0; max-width: 45%; font-size: 0.66rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .dash-todo-empty { font-size: 0.85rem; color: var(--muted); padding: 0.4rem 0; }
   .dash-btn { display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #04130d; border: none; border-radius: 12px; padding: 0.75rem 1.35rem; font-size: 0.9rem; font-weight: 800; cursor: pointer; font-family: var(--font); transition: transform .12s; box-shadow: 0 4px 14px rgba(0,200,150,0.28); }
   .dash-btn:hover { transform: translateY(-1px); }
@@ -1403,9 +1416,13 @@
     padding: 4px 14px; border-radius: 99px; font-size: 0.75rem; font-weight: 600;
     cursor: pointer; border: 1px solid var(--border); color: var(--muted);
     background: var(--card); transition: all 0.15s; font-family: var(--font);
+    flex: 0 0 auto; white-space: nowrap;
   }
   .exam-select-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
   .exam-select-btn:hover:not(.active) { border-color: var(--muted); color: var(--text); }
+  /* Single-line, horizontally scrollable pill row (scrollbar hidden) */
+  .exam-pills-scroll { -ms-overflow-style: none; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .exam-pills-scroll::-webkit-scrollbar { height: 0; display: none; }
 
   /* ══════════════════ RESUME BANNER ══════════════════ */
   .yt-resume-banner {
