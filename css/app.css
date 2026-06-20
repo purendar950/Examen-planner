@@ -362,7 +362,8 @@
   .dash-pace { text-align: center; font-size: 0.82rem; color: var(--muted); margin-bottom: 1.25rem; }
   .dash-pace strong { color: var(--accent); }
 
-  .dash-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.5rem; }
+  .dash-grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; margin-bottom: 0.5rem; }
+  .dash-grid2 > * { min-width: 0; }
   .dash-subjects { display: grid; gap: 0.7rem; margin-bottom: 1.5rem; }
 
   @media (max-width: 720px) {
@@ -370,7 +371,7 @@
     .dash-right { flex-direction: row; flex-wrap: wrap; justify-content: center; padding-left: 0; border-left: none; border-top: 1px solid var(--border); padding-top: 1.2rem; gap: 16px; }
     .dash-greet, .dash-date, .dash-rank { text-align: left; border-left: none; padding-left: 0; }
     .dash-head { gap: 0.6rem; }
-    .dash-grid2 { grid-template-columns: 1fr; }
+    .dash-grid2 { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 440px) {
     .dash-rings { gap: 0.75rem; }
