@@ -77,7 +77,7 @@ jobs:
           tag_name: latest-build
           name: Latest Build
           body: |
-            📱 **PrepPath Debug APK - Latest Build**
+            📱 **PrepStride Debug APK - Latest Build**
             
             This is the most recent build. Download and use this APK.
             

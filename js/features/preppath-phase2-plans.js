@@ -2,7 +2,7 @@
    PREPPATH PHASE 2 — PLANS, UPI PAYMENTS, PLAN BADGE
 ══════════════════════════════════════════════ */
 /* Fallback UPI — used only if admin has not saved one in Admin Panel → Plans → Payment Settings */
-const EZ_UPI_FALLBACK = { upiId: 'yourname@upi', payeeName: 'PrepPath' };
+const EZ_UPI_FALLBACK = { upiId: 'yourname@upi', payeeName: 'PrepStride' };
 let EZ_PLANS = [], EZ_PROFILE = null, EZ_UPI = null, EZ_PENDING_PAY = null, _ezPickedPlan = null, _ezCoupon = null, _ezFinalAmount = 0;
 
 async function ezLoadPlans() {
@@ -239,9 +239,9 @@ function ezPickPlan(pid) {
   const upi = EZ_UPI && EZ_UPI.upiId ? EZ_UPI : EZ_UPI_FALLBACK;
   const amount = _ezFinalAmount;
   const upiDeep = 'upi://pay?pa=' + encodeURIComponent(upi.upiId) +
-    '&pn=' + encodeURIComponent(upi.payeeName || 'PrepPath') +
+    '&pn=' + encodeURIComponent(upi.payeeName || 'PrepStride') +
     '&am=' + amount + '&cu=INR' +
-    '&tn=' + encodeURIComponent('PrepPath ' + _ezPickedPlan.name);
+    '&tn=' + encodeURIComponent('PrepStride ' + _ezPickedPlan.name);
   const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiDeep);
   const step = document.getElementById('ez-pay-step'); if (!step) return;
   step.style.display = 'block';
@@ -315,9 +315,9 @@ async function ezApplyCoupon() {
     /* Re-render QR + deep link with new amount */
     const upi = EZ_UPI && EZ_UPI.upiId ? EZ_UPI : EZ_UPI_FALLBACK;
     const upiDeep = 'upi://pay?pa=' + encodeURIComponent(upi.upiId) +
-      '&pn=' + encodeURIComponent(upi.payeeName || 'PrepPath') +
+      '&pn=' + encodeURIComponent(upi.payeeName || 'PrepStride') +
       '&am=' + _ezFinalAmount + '&cu=INR' +
-      '&tn=' + encodeURIComponent('PrepPath ' + _ezPickedPlan.name + ' [' + code + ']');
+      '&tn=' + encodeURIComponent('PrepStride ' + _ezPickedPlan.name + ' [' + code + ']');
     const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiDeep);
     const qrImg = document.getElementById('ez-qr-img'); if (qrImg) qrImg.src = qrUrl;
     const upiLink = document.getElementById('ez-upi-link'); if (upiLink) upiLink.href = upiDeep;
@@ -339,9 +339,9 @@ function ezRemoveCoupon() {
   /* Reset QR to full price */
   const upi = EZ_UPI && EZ_UPI.upiId ? EZ_UPI : EZ_UPI_FALLBACK;
   const upiDeep = 'upi://pay?pa=' + encodeURIComponent(upi.upiId) +
-    '&pn=' + encodeURIComponent(upi.payeeName || 'PrepPath') +
+    '&pn=' + encodeURIComponent(upi.payeeName || 'PrepStride') +
     '&am=' + baseAmount + '&cu=INR' +
-    '&tn=' + encodeURIComponent('PrepPath ' + _ezPickedPlan.name);
+    '&tn=' + encodeURIComponent('PrepStride ' + _ezPickedPlan.name);
   const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=' + encodeURIComponent(upiDeep);
   const qrImg = document.getElementById('ez-qr-img'); if (qrImg) qrImg.src = qrUrl;
   const upiLink = document.getElementById('ez-upi-link'); if (upiLink) upiLink.href = upiDeep;

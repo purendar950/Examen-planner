@@ -12,7 +12,7 @@ def webRoot = rootProject.file('..')              // repo root (one level above 
 def bundledWww = file('src/main/assets/www')
 
 tasks.register('copyWebAssets', Copy) {
-    description = 'Copies the PrepPath web app into the Android assets folder.'
+    description = 'Copies the PrepStride web app into the Android assets folder.'
     group = 'build'
     into bundledWww
     from(webRoot) {
@@ -26,9 +26,9 @@ tasks.register('copyWebAssets', Copy) {
     }
 }
 
-// Copy PrepPath logo to resources
+// Copy PrepStride logo to resources
 tasks.register('copyLogo', Copy) {
-    description = 'Copies PrepPath logo to drawable resources.'
+    description = 'Copies PrepStride logo to drawable resources.'
     group = 'build'
     into file('src/main/res/drawable')
     from(webRoot) {

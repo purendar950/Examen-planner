@@ -477,7 +477,7 @@ function buildTgMessage(name, digest) {
   const body   = (plan && plan.trim())
     ? plan
     : '📋 Aaj koi topic scheduled nahi.\n💡 App kholo → Planner mein topics add karo → Save karo.';
-  return header + body + '\n\n— PrepPath';
+  return header + body + '\n\n— PrepStride';
 }
 
 /* Render bot proxy URL — routes /send to Telegram server-side (fixes CORS) */
