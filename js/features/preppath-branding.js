@@ -27,13 +27,13 @@ async function ezGetIp() {
   try { const r = await fetch('https://api.ipify.org?format=json'); const j = await r.json(); return j.ip || ''; } catch(e) { return ''; }
 }
 
-/* Rebrand to PrepStride */
+/* Rebrand to StudyPlanner */
 (function() {
-  document.title = 'PrepStride — Study Planner';
-  const tt = document.querySelector('.topbar-title'); if (tt) tt.innerHTML = 'Prep<span class="z">Stride</span>';
+  document.title = 'StudyPlanner — Smart Study Planner';
+  const tt = document.querySelector('.topbar-title'); if (tt) tt.innerHTML = 'Study<span class="z">Planner</span>';
   try {
     const box = document.querySelector('.auth-logo > div:last-child');
-    if (box && box.firstElementChild) box.firstElementChild.textContent = 'PrepStride';
+    if (box && box.firstElementChild) box.firstElementChild.textContent = 'StudyPlanner';
   } catch(e) {}
 })();
 

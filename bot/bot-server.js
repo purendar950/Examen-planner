@@ -1,5 +1,5 @@
 /**
- * PrepStride Telegram Bot Server
+ * StudyPlanner Telegram Bot Server
  * ─────────────────────────────────────────────────────────────────────────────
  * Routes:
  *   GET  /          → health check
@@ -24,7 +24,7 @@ if (!TOKEN) {
 }
 
 const bot = new TelegramBot(TOKEN, { polling: true });
-console.log('🤖 PrepStride Bot running (long-polling)...');
+console.log('🤖 StudyPlanner Bot running (long-polling)...');
 
 /* ── /start handler ─────────────────────────────────────────────────────── */
 bot.onText(/^\/start(.*)$/, (msg) => {
@@ -35,7 +35,7 @@ bot.onText(/^\/start(.*)$/, (msg) => {
     `✅ Bot se successfully connect ho gaye!\n\n` +
     `📋 <b>Tumhara Telegram Chat ID:</b>\n` +
     `<code>${chatId}</code>\n\n` +
-    `👆 Upar wala number <b>copy karo</b> aur PrepStride app mein:\n` +
+    `👆 Upar wala number <b>copy karo</b> aur StudyPlanner app mein:\n` +
     `<b>Profile → Daily Plan on Telegram → Chat ID field</b> mein paste karo, toggle ON karo, Save karo.\n\n` +
     `📚 Phir roz <b>6:00 AM IST</b> pe aaj ka study plan yahan milega!`;
   bot.sendMessage(chatId, text, { parse_mode: 'HTML' })
@@ -47,7 +47,7 @@ bot.onText(/^\/start(.*)$/, (msg) => {
 bot.onText(/^\/(id|chatid)$/, (msg) => {
   const chatId = msg.chat.id;
   bot.sendMessage(chatId,
-    `🆔 Tumhara Chat ID: <code>${chatId}</code>\n\nIse PrepStride app mein paste karo.`,
+    `🆔 Tumhara Chat ID: <code>${chatId}</code>\n\nIse StudyPlanner app mein paste karo.`,
     { parse_mode: 'HTML' }
   ).catch(err => console.error('sendMessage error:', err.message));
 });
@@ -55,7 +55,7 @@ bot.onText(/^\/(id|chatid)$/, (msg) => {
 /* ── /help ──────────────────────────────────────────────────────────────── */
 bot.onText(/^\/help$/, (msg) => {
   bot.sendMessage(msg.chat.id,
-    `📖 <b>PrepStride Bot Commands:</b>\n\n` +
+    `📖 <b>StudyPlanner Bot Commands:</b>\n\n` +
     `/start — Apna Chat ID pao\n` +
     `/id — Chat ID dobara dekho\n` +
     `/help — Yeh help message\n\n` +

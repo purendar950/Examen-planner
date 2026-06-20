@@ -77,7 +77,7 @@ jobs:
           tag_name: latest-build
           name: Latest Build
           body: |
-            📱 **PrepStride Debug APK - Latest Build**
+            📱 **StudyPlanner Debug APK - Latest Build**
             
             This is the most recent build. Download and use this APK.
             
