@@ -6,8 +6,10 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>ExamZen — Smart Study Planner for SSC, Railway, Banking & UPSC</title>
-<meta name="description" content="ExamZen — track syllabus, analyse mock tests, organise YouTube courses and follow AI study plans for SSC CGL, RRB NTPC, SSC GD, IBPS PO & UPSC CSE.">
+<title>PrepPath — Smart Study Planner for SSC, Railway, Banking & UPSC</title>
+<meta name="description" content="PrepPath — every day, one step closer. Track syllabus, analyse mock tests, organise YouTube courses and follow AI study plans for SSC CGL, RRB NTPC, SSC GD, IBPS PO & UPSC CSE.">
+<link rel="icon" type="image/png" href="PrepPath.png">
+<link rel="apple-touch-icon" href="PrepPath.png">
 <link rel="stylesheet" href="css/index.css">
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
@@ -17,7 +19,7 @@
 
 <nav class="nav">
   <div class="nav-inner">
-    <div class="logo">🧘 Exam<span class="z">Zen</span></div>
+    <div class="logo"><img src="PrepPath.png" alt="PrepPath logo" class="brand-logo">Prep<span class="z">Path</span></div>
     <div class="nav-cta">
       <button class="btn-theme" id="ez-theme-btn" title="Toggle theme">☀️</button>
       <a class="btn btn-ghost" href="#" onclick="openAuth('login');return false;">Login</a>
@@ -29,8 +31,8 @@
 <main class="hero">
   <div class="container">
     <div class="hero-badge">🎯 SSC · Railway · Banking · UPSC</div>
-    <h1>Crack your exam with <span class="z">Zen</span>-level focus</h1>
-    <p>One simple app to track your syllabus, plan your study, and stay consistent till exam day.</p>
+    <h1>Every day, <span class="z">one step</span> closer.</h1>
+    <p class="hero-motto">Your guided study plan from day one to exam day — one simple app to track your syllabus, plan smart, and stay consistent.</p>
     <div class="hero-cta">
       <a class="btn btn-green btn-big" href="#" onclick="openAuth('register');return false;">🚀 Start Free</a>
       <a class="btn btn-ghost btn-big" href="#" onclick="openAuth('login');return false;">Login</a>
@@ -51,8 +53,8 @@
 
 <footer>
   <div class="container foot">
-    <div class="logo" style="font-size:0.9rem;">🧘 Exam<span class="z">Zen</span></div>
-    <div>© 2026 ExamZen</div>
+    <div class="logo" style="font-size:0.9rem;"><img src="PrepPath.png" alt="PrepPath logo" class="brand-logo" style="width:22px;height:22px;">Prep<span class="z">Path</span></div>
+    <div>© 2026 PrepPath · Every day, one step closer.</div>
     <div style="display:flex;gap:1rem;">
       <a href="#" onclick="openAuth('login');return false;">Login</a>
       <a href="#" onclick="openAuth('register');return false;">Sign Up</a>
@@ -64,7 +66,7 @@
 <div class="auth-overlay" id="auth-overlay" onclick="if(event.target===this)closeAuth()">
   <div class="auth-modal">
     <button class="auth-close" onclick="closeAuth()" title="Close">×</button>
-    <div class="auth-logo">🧘 Exam<span class="z">Zen</span></div>
+    <div class="auth-logo"><img src="PrepPath.png" alt="PrepPath logo" class="brand-logo">Prep<span class="z">Path</span></div>
     <div class="auth-sub" id="auth-sub">Welcome back — sign in to continue.</div>
 
     <div class="auth-tabs">

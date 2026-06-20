@@ -43,7 +43,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: examzen-debug-apk
+          name: preppath-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
@@ -77,7 +77,7 @@ jobs:
           tag_name: latest-build
           name: Latest Build
           body: |
-            📱 **ExamZen Debug APK - Latest Build**
+            📱 **PrepPath Debug APK - Latest Build**
             
             This is the most recent build. Download and use this APK.
             

@@ -116,6 +116,7 @@
     display: flex; align-items: center; justify-content: space-between;
   }
   .topbar-left { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .topbar-logo { width: 28px; height: 28px; border-radius: 6px; object-fit: contain; flex-shrink: 0; }
   .logo-badge {
     background: var(--accent-dim);
     border: 1px solid rgba(0,200,150,0.25);

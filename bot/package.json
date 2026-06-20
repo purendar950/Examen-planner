@@ -1,8 +1,8 @@
 {
-  "name": "examzen-telegram-bot",
+  "name": "preppath-telegram-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Telegram bot for ExamZen — replies with chat ID on /start",
+  "description": "Telegram bot for PrepPath — replies with chat ID on /start",
   "main": "bot-server.js",
   "scripts": {
     "start": "node bot-server.js",

@@ -1,5 +1,5 @@
 /*
- * ExamZen — Daily Telegram study-plan sender
+ * PrepPath — Daily Telegram study-plan sender
  * ─────────────────────────────────────────────────────────────────────────────
  * Runs in GitHub Actions (see .github/workflows/daily-telegram.yml).
  *
@@ -221,7 +221,7 @@ async function main() {
       body = '📋 Aaj koi topic scheduled nahi.\n💡 App kholo → Planner mein topics add karo → Save karo.';
       noDigest++;
     }
-    const footer = '\n\n— <a href="https://examzen.in">ExamZen</a>';
+    const footer = '\n\n— <a href="https://examzen.in">PrepPath</a>';
 
     try {
       await sendTelegramMessage(tg.chatId, header + body + footer);

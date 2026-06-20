@@ -1,4 +1,4 @@
-/* ExamZen Admin — ACTIONS: audit log, approve/reject/plan/trial/payment/coupon/telegram/settings handlers,
+/* PrepPath Admin — ACTIONS: audit log, approve/reject/plan/trial/payment/coupon/telegram/settings handlers,
    plus coupon/request/telegram/settings render helpers and the theme-toggle IIFE.
    Depends on globals from admin-core.js + admin-render.js; must load last. */
 /* ══ ACTIONS ══ */
@@ -377,7 +377,7 @@ function exportRedemptionsCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'examzen-redemptions-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.download = 'preppath-redemptions-' + new Date().toISOString().slice(0,10) + '.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('\u2705 Exported ' + REDEMPTIONS.length + ' redemptions');
@@ -477,7 +477,7 @@ function buildTgMessage(name, digest) {
   const body   = (plan && plan.trim())
     ? plan
     : '📋 Aaj koi topic scheduled nahi.\n💡 App kholo → Planner mein topics add karo → Save karo.';
-  return header + body + '\n\n— ExamZen';
+  return header + body + '\n\n— PrepPath';
 }
 
 /* Render bot proxy URL — routes /send to Telegram server-side (fixes CORS) */

@@ -19,7 +19,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.webkit.WebViewAssetLoader;
 
 /**
- * Thin native shell around the ExamZen web app.
+ * Thin native shell around the PrepPath web app.
  *
  * The bundled web assets (copied into assets/www at build time) are served over
  * a virtual https origin via {@link WebViewAssetLoader}. Serving over https —

@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════
-   EXAMZEN PHASE 4 — FREE/PRO GATING + THEME TOGGLE
+   PREPPATH PHASE 4 — FREE/PRO GATING + THEME TOGGLE
 ══════════════════════════════════════════════ */
 /* REQUEST NEW OPTION - users can suggest features/content/exams */
 (function() {

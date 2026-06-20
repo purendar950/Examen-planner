@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════
-   EXAMZEN — REBRAND + APPROVAL FLOW + REFERRAL META
+   PREPPATH — REBRAND + APPROVAL FLOW + REFERRAL META
 ══════════════════════════════════════════════ */
 const EZ_ADMIN_EMAILS = []; // legacy — roles now stored in Firestore admins/{uid}
 let _ezIsAdminCache = null;
@@ -27,13 +27,13 @@ async function ezGetIp() {
   try { const r = await fetch('https://api.ipify.org?format=json'); const j = await r.json(); return j.ip || ''; } catch(e) { return ''; }
 }
 
-/* Rebrand to ExamZen */
+/* Rebrand to PrepPath */
 (function() {
-  document.title = 'ExamZen — Study Planner';
-  const tt = document.querySelector('.topbar-title'); if (tt) tt.textContent = 'ExamZen';
+  document.title = 'PrepPath — Study Planner';
+  const tt = document.querySelector('.topbar-title'); if (tt) tt.textContent = 'PrepPath';
   try {
     const box = document.querySelector('.auth-logo > div:last-child');
-    if (box && box.firstElementChild) box.firstElementChild.textContent = 'ExamZen';
+    if (box && box.firstElementChild) box.firstElementChild.textContent = 'PrepPath';
   } catch(e) {}
 })();
 

@@ -146,7 +146,7 @@ function ezShowGate(status, reason) {
     '<h2 style="margin-bottom:0.5rem;">' + (pending ? 'Approval Pending' : 'Access Denied') + '</h2>' +
     '<p style="color:var(--muted);line-height:1.7;margin-bottom:1.5rem;font-size:0.875rem;">' +
     (pending
-      ? 'Aapki request admin ke paas pahunch gayi hai. Approval milte hi aap ExamZen use kar paoge. Thodi der baad dobara login karke check karo.'
+      ? 'Aapki request admin ke paas pahunch gayi hai. Approval milte hi aap PrepPath use kar paoge. Thodi der baad dobara login karke check karo.'
       : 'Aapki request approve nahi hui.' + (reason ? '<br><br><strong>Reason:</strong> ' + escapeHtml(reason) : '')) +
     '</p>' +
     '<button onclick="ezGateLogout()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:0.7rem 1.6rem;font-weight:700;cursor:pointer;font-family:var(--font);">← Logout</button>' +
