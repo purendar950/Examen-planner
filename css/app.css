@@ -137,6 +137,9 @@
     .topbar-right::-webkit-scrollbar { height: 0; display: none; }
     .topbar-right > * { flex-shrink: 0; }
     .user-menu-dropdown { position: fixed; top: 58px; right: 10px; left: auto; }
+    /* Collapse the user chip to just the avatar so the crowded topbar fits
+       (full name + email remain inside the dropdown) */
+    #user-name-display { display: none; }
   }
 
   .user-chip {
@@ -313,7 +316,8 @@
   .dash-date .dd-val { font-size: 1.1rem; font-weight: 800; margin-top: 4px; color: var(--red); animation: dashDateGlow 2.4s ease-in-out infinite; }
   @keyframes dashDateGlow { 0%,100% { text-shadow: 0 0 5px rgba(0,0,0,0.5); } 50% { text-shadow: 0 0 14px rgba(0,0,0,0.9); } }
 
-  .dash-main { display: grid; grid-template-columns: 1fr auto; gap: 1.75rem; align-items: center; }
+  .dash-main { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1.75rem; align-items: center; }
+  .dash-left { min-width: 0; }
   .dash-left .dash-h2 { font-size: 1.2rem; font-weight: 800; letter-spacing: -0.01em; margin-bottom: 1.05rem; color: var(--text); }
   .dash-todo { display: flex; flex-direction: column; gap: 8px; margin-bottom: 1.2rem; }
   .dash-todo-item { display: flex; align-items: center; gap: 11px; padding: 0.65rem 0.8rem; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; cursor: pointer; transition: transform .12s; }
@@ -362,7 +366,7 @@
   .dash-subjects { display: grid; gap: 0.7rem; margin-bottom: 1.5rem; }
 
   @media (max-width: 720px) {
-    .dash-main { grid-template-columns: 1fr; }
+    .dash-main { grid-template-columns: minmax(0, 1fr); }
     .dash-right { flex-direction: row; flex-wrap: wrap; justify-content: center; padding-left: 0; border-left: none; border-top: 1px solid var(--border); padding-top: 1.2rem; gap: 16px; }
     .dash-greet, .dash-date, .dash-rank { text-align: left; border-left: none; padding-left: 0; }
     .dash-head { gap: 0.6rem; }
