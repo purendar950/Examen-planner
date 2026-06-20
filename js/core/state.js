@@ -21,6 +21,7 @@ let appState = {
   progress: {},
   tasks: {},
   examDate: '2026-07-14',
+  selectedExam: 'cgl',   // last exam the user switched to (restored on reload)
   streak: 0,
   lastStudyDate: null,
   ytLinks: {},

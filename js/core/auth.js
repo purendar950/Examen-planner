@@ -126,7 +126,7 @@ async function handleForgotPassword() {
 function getDefaultState() {
   return {
     progress: {}, tasks: {},
-    examDate: '2026-07-14', streak: 0,
+    examDate: '2026-07-14', selectedExam: 'cgl', streak: 0,
     lastStudyDate: null, ytLinks: {}, ytNotes: [],
     ytLastVideo: null, ytPlaylists: {}, ytWatched: {},
     ytOrganiser: null, ytoLibrary: {}, ytVidProgress: {},

@@ -6,15 +6,21 @@ function getActiveSubjects() {
   return ALL_EXAMS[currentExam].subjects || SUBJECTS;
 }
 
-function switchExam(examId) {
+function switchExam(examId, opts) {
+  opts = opts || {};
   if (currentExam === examId) return;
   currentExam = examId;
   _cachedRemainingCount = null; // subjects changed — discard cached chapter count
   const exam = ALL_EXAMS[examId];
 
+  // Remember the choice so it's restored on the next reload.
+  appState.selectedExam = examId;
+  if (typeof saveProgress === 'function') saveProgress();
+
   // Update buttons
   document.querySelectorAll('.exam-select-btn').forEach(btn => btn.classList.remove('active'));
-  document.getElementById('examBtn-' + examId).classList.add('active');
+  const activeBtn = document.getElementById('examBtn-' + examId);
+  if (activeBtn) activeBtn.classList.add('active');
 
   // Update badge
   const badge = document.getElementById('exam-logo-badge');
@@ -44,7 +50,7 @@ function switchExam(examId) {
   // Update exam pattern
   updateExamPattern();
 
-  showToast('Switched to ' + exam.name + ' 🎯', 'info');
+  if (!opts.silent) showToast('Switched to ' + exam.name + ' 🎯', 'info');
 }
 
 /* Make the active plan + schedule reflect the current exam. Picks the most

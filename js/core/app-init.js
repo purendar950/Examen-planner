@@ -32,6 +32,14 @@ function ezRefreshExamYears() {
 
 function initApp() {
   ezRefreshExamYears();
+  // Restore the user's last-selected exam (defaults to SSC CGL). Done first so
+  // every render below uses the right exam. Silent = no "Switched to…" toast.
+  try {
+    const savedExam = appState.selectedExam;
+    if (savedExam && savedExam !== currentExam && typeof ALL_EXAMS !== 'undefined' && ALL_EXAMS[savedExam]) {
+      switchExam(savedExam, { silent: true });
+    }
+  } catch (e) { console.error('restore exam failed:', e); }
   // Set exam date picker + start the countdown FIRST, so a later failing
   // call (syllabus/dashboard/etc.) can never prevent the timer from running.
   const dp = document.getElementById('exam-date-picker');
