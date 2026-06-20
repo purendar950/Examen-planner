@@ -221,7 +221,7 @@ async function main() {
       body = '📋 Aaj koi topic scheduled nahi.\n💡 App kholo → Planner mein topics add karo → Save karo.';
       noDigest++;
     }
-    const footer = '\n\n— <a href="https://examzen.in">PrepStride</a>';
+    const footer = '\n\n— <a href="https://examzen.in">StudyPlanner</a>';
 
     try {
       await sendTelegramMessage(tg.chatId, header + body + footer);

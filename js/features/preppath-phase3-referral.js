@@ -51,7 +51,7 @@ function ezCopyRef() {
   } catch(e) { showToast('Link select karke manually copy karo.', 'info'); }
 }
 function ezShareWa() {
-  const msg = '🎯 PrepStride — SSC/Railway/Banking/UPSC ki smart study planner! Syllabus tracker, mock test analysis, YouTube course organiser — sab ek jagah. Mere link se join karo: ' + ezRefLink();
+  const msg = '🎯 StudyPlanner — SSC/Railway/Banking/UPSC ki smart study planner! Syllabus tracker, mock test analysis, YouTube course organiser — sab ek jagah. Mere link se join karo: ' + ezRefLink();
   window.open('https://wa.me/?text=' + encodeURIComponent(msg), '_blank');
 }
 
