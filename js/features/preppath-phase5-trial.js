@@ -305,14 +305,14 @@ function ezExportPdf(title, bodyHtml) {
   var w = window.open('', '_blank');
   if (!w) { showToast('Popup block ho gaya — PDF export ke liye popups allow karo.', 'error'); return; }
   w.document.write(
-    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + (title || 'PrepPath Export') + '</title>' +
+    '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + (title || 'StudyPlanner Export') + '</title>' +
     '<style>body{font-family:Inter,Arial,sans-serif;color:#16202E;padding:24px;line-height:1.6;}' +
     'h1{font-size:1.3rem;margin-bottom:4px;}h2{font-size:1rem;margin:18px 0 6px;}' +
     '.muted{color:#64748B;font-size:.85rem;margin-bottom:16px;}' +
     'table{width:100%;border-collapse:collapse;font-size:.85rem;}td,th{border:1px solid #E3E8EF;padding:6px 8px;text-align:left;}' +
     'ul{margin:0 0 12px 18px;}@media print{button{display:none;}}</style></head><body>' +
-    '<h1>' + (title || 'PrepPath Export') + '</h1>' +
-    '<div class="muted">PrepPath — ' + new Date().toLocaleString('en-IN') + '</div>' +
+    '<h1>' + (title || 'StudyPlanner Export') + '</h1>' +
+    '<div class="muted">StudyPlanner — ' + new Date().toLocaleString('en-IN') + '</div>' +
     (bodyHtml || '<p>No data.</p>') +
     '<button onclick="window.print()" style="margin-top:20px;background:#00C896;color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:700;cursor:pointer;">🖨 Save as PDF</button>' +
     '</body></html>'
