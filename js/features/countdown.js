@@ -28,14 +28,8 @@ function startCountdown() {
     let diff = target - now;
     if (!isFinite(diff) || diff < 0) diff = 0;
     const days = Math.floor(diff / 86400000);
-    const hrs = Math.floor((diff % 86400000) / 3600000);
-    const mins = Math.floor((diff % 3600000) / 60000);
-    const secs = Math.floor((diff % 60000) / 1000);
     const pad = n => String(n).padStart(2,'0');
     document.getElementById('cd-days').textContent = pad(days);
-    document.getElementById('cd-hours').textContent = pad(hrs);
-    document.getElementById('cd-mins').textContent = pad(mins);
-    document.getElementById('cd-secs').textContent = pad(secs);
 
     // chapters per day — use cached count; only recalculate when cache is invalidated
     if (_cachedRemainingCount === null) {
