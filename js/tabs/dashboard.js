@@ -54,10 +54,11 @@ function updateDashboard() {
     if (!tRank) { try { tRank = (window.EZ_PROFILE && EZ_PROFILE.targetScore) || ''; } catch (e) {} }
     tRank = (tRank || '').trim();
     if (tRank) {
-      rankEl.textContent = '🎯 Target: ' + tRank;
+      rankEl.innerHTML = '<span class="dr-label">RANK</span>' +
+                         '<span class="dr-val">Target: ' + tRank + '</span>';
       rankEl.style.display = '';
     } else {
-      rankEl.textContent = '';
+      rankEl.innerHTML = '';
       rankEl.style.display = 'none';
     }
   }
