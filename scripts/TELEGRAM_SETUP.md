@@ -1,4 +1,4 @@
-# ExamZen — Daily Telegram Study Plan Setup
+# PrepPath — Daily Telegram Study Plan Setup
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Firebase Firestore              GitHub Actions (6 AM IST daily)
 ## Step 1 — Create the bot (BotFather)
 
 1. Telegram → message **@BotFather** → `/newbot`
-2. Give it a name (e.g. `ExamZen Daily`) and username (e.g. `SSCplannerbot`)
+2. Give it a name (e.g. `PrepPath Daily`) and username (e.g. `SSCplannerbot`)
 3. Copy the **bot token** — looks like `123456789:ABC-xyz...`
 
 ---

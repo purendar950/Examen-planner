@@ -12,7 +12,7 @@ def webRoot = rootProject.file('..')              // repo root (one level above 
 def bundledWww = file('src/main/assets/www')
 
 tasks.register('copyWebAssets', Copy) {
-    description = 'Copies the ExamZen web app into the Android assets folder.'
+    description = 'Copies the PrepPath web app into the Android assets folder.'
     group = 'build'
     into bundledWww
     from(webRoot) {

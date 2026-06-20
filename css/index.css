@@ -23,6 +23,9 @@
   .nav-inner { display:flex; align-items:center; justify-content:space-between; height:64px; max-width:760px; margin:0 auto; padding:0 1.25rem; }
   .logo { font-weight:800; font-size:1.1rem; display:flex; align-items:center; gap:8px; }
   .logo .z { color:var(--accent); }
+  .brand-logo { width:30px; height:30px; border-radius:7px; object-fit:contain; flex-shrink:0; }
+  .auth-logo .brand-logo { width:34px; height:34px; }
+  .hero-motto { font-size:clamp(0.95rem,2.5vw,1.15rem); color:var(--muted); max-width:36ch; margin:0 auto 1.4rem; line-height:1.6; }
   .nav-cta { display:flex; gap:8px; align-items:center; }
   .btn { display:inline-flex; align-items:center; justify-content:center; border-radius:10px; padding:9px 18px; font-weight:700; font-size:0.88rem; cursor:pointer; border:none; font-family:var(--font); transition:all .15s; }
   .btn-ghost { background:transparent; color:var(--text); border:1px solid var(--border); }

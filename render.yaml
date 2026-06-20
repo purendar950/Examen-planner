@@ -1,5 +1,5 @@
 services:
-  # ExamZen Telegram Bot — replies with Chat ID on /start
+  # PrepPath Telegram Bot — replies with Chat ID on /start
   # Free worker tier on Render.com
   - type: web
     name: examzen-telegram-bot

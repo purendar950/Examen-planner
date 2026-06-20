@@ -1,4 +1,4 @@
-/* ExamZen Admin — RENDER: all render*() view builders (read-only HTML generation).
+/* PrepPath Admin — RENDER: all render*() view builders (read-only HTML generation).
    Depends on globals from admin-core.js; must load after it. */
 
 function userMeta(u) {
@@ -525,7 +525,7 @@ function exportPaymentsCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'examzen-payments-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.download = 'preppath-payments-' + new Date().toISOString().slice(0,10) + '.csv';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
