@@ -236,8 +236,9 @@ function mockRenderAnalysis() {
     return { k: s.k, name: s.name, max: s.max, avg: Math.round(avg * 10) / 10, pct: Math.round(avg / s.max * 100) };
   });
   const weakest = secAvgs.length > 1 ? secAvgs.reduce((w, s) => s.pct < w.pct ? s : w, secAvgs[0]) : null;
-  const cutoff    = mockGetCutoff(currentExam, mockTierKey());
-  const topTarget = Math.round(totalMax * 0.875);
+  const cutoff     = mockGetCutoff(currentExam, mockTierKey());
+  const safeTarget = Math.round(totalMax * 0.75);
+  const topTarget  = Math.round(totalMax * 0.875);
 
   el.innerHTML =
     /* Section title */
@@ -257,7 +258,7 @@ function mockRenderAnalysis() {
     /* ROW 3: Weakest section (left, red border) + Percentile estimator (right) */
     '<div class="mock-row2">' +
       '<div class="info-card" style="border-color:var(--red);border-width:1.5px;">' + mockWeakestCardHtml(weakest, secAvgs) + '</div>' +
-      '<div class="info-card">' + mockPercentileCardHtml(latest, cutoff, topTarget, totalMax) + '</div>' +
+      '<div class="info-card">' + mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax) + '</div>' +
     '</div>' +
 
     /* ROW 5: Mock comparison table (last 3 attempts, full-width) */
@@ -382,8 +383,8 @@ function markChaptersForRevision(secK) {
   showToast && showToast('📌 ' + chapters.length + ' chapters marked for revision', 'success');
 }
 
-/* ── Percentile estimator card (two progress bars: green cutoff + amber top target) ── */
-function mockPercentileCardHtml(latest, cutoff, topTarget, totalMax) {
+/* ── Percentile estimator card (three progress bars: green cutoff + blue safe score + amber top target) ── */
+function mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax) {
   const aboveCut = latest - cutoff;
   const abovePct = cutoff > 0 ? Math.round(latest / cutoff * 100) : Math.round(latest / totalMax * 100);
   const bar1Fill = cutoff > 0 ? Math.min(100, Math.round(latest / cutoff * 100)) : Math.round(latest / totalMax * 100);
@@ -393,6 +394,12 @@ function mockPercentileCardHtml(latest, cutoff, topTarget, totalMax) {
   const bar1Delta = cutoff > 0
     ? '<span style="color:' + (aboveCut >= 0 ? 'var(--accent)' : 'var(--red)') + ';font-weight:600;">' + (aboveCut >= 0 ? '+' : '') + aboveCut + ' marks</span>'
     : '';
+
+  const toSafe = safeTarget - latest;
+  const safeFill = Math.min(100, Math.round(latest / safeTarget * 100));
+  const bar15Label = toSafe <= 0
+    ? '<span style="color:var(--blue);font-weight:700;">Reached ✓</span>'
+    : '<span style="color:var(--blue);font-weight:600;">+' + toSafe + ' to go</span>';
 
   const toTop = topTarget - latest;
   const topFill = Math.min(100, Math.round(latest / topTarget * 100));
@@ -410,6 +417,17 @@ function mockPercentileCardHtml(latest, cutoff, topTarget, totalMax) {
         '<div style="height:100%;width:' + bar1Fill + '%;background:linear-gradient(90deg,#00C896,#10B981);border-radius:5px;transition:width 0.5s;"></div>' +
       '</div>' +
       '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">' + abovePct + '% of cutoff ' + (cutoff > 0 ? '· you are at ' + latest + ' (' + (aboveCut >= 0 ? '+' : '') + aboveCut + ')' : '') + ' ' + bar1Delta + '</div>' +
+    '</div>' +
+
+    /* Bar 1.5: safe score (blue) */
+    '<div style="margin-bottom:14px;">' +
+      '<div style="display:flex;justify-content:space-between;font-size:0.78rem;margin-bottom:4px;">' +
+        '<span>Safe score (' + safeTarget + ')</span>' + bar15Label +
+      '</div>' +
+      '<div style="height:10px;background:var(--surface);border-radius:5px;overflow:hidden;border:1px solid var(--border);">' +
+        '<div style="height:100%;width:' + safeFill + '%;background:linear-gradient(90deg,#3B82F6,#60A5FA);border-radius:5px;transition:width 0.5s;"></div>' +
+      '</div>' +
+      '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">' + safeFill + '% there · ' + latest + ' of ' + safeTarget + ' safe mark</div>' +
     '</div>' +
 
     /* Bar 2: top percentile (amber) */
