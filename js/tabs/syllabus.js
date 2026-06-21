@@ -124,6 +124,8 @@ function buildSyllabus() {
         <span class="subject-chevron" id="chev-${sub.id}">▼</span>
         <span style="font-size:1.1rem;">${subjectIcon(sub.id)}</span>
         <span class="subject-name">${sub.name}</span>
+        <button class="subject-focus-btn" title="Make a focused single-subject plan for ${escapeHtml(sub.name)}"
+                onclick="event.stopPropagation();openSinglePlanForSubject('${sub.id}')">🎯 Focus</button>
         <span class="subject-badge" id="badge-${sub.id}">${doneCount} / ${sub.chapters.length}</span>
       </div>
       <div class="subject-progress-bar" style="margin:0 1.25rem 0;"><div class="subject-progress-fill" style="width:${pct}%;background:${sub.color};" id="prog-${sub.id}"></div></div>

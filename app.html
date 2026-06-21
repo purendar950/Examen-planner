@@ -472,20 +472,10 @@
 
         <div class="sub-tab-row" id="pw-syl-subtabs"></div>
         <div id="pw-syl-subject-pane"></div>
-
-        <div class="cfg-row-global" style="margin-top:1rem;">
-          <h5>📅 Schedule</h5>
-          <div class="cfg-grid cols-2">
-            <div class="cfg-field">
-              <label>Start date</label>
-              <input type="date" id="pw-syl-start">
-            </div>
-            <div class="cfg-field">
-              <label>End date</label>
-              <input type="date" id="pw-syl-end">
-            </div>
-          </div>
-        </div>
+        <!-- Start/End date inputs (ids pw-syl-start / pw-syl-end) are rendered
+             inside #pw-syl-subject-pane by pwRenderSyllabusSubjectPane(), which
+             wires the auto end-date logic. The old static duplicate block here
+             was removed to avoid duplicate element ids. -->
       </div>
 
       <!-- ── STEP 2C: Mock Test config ── -->

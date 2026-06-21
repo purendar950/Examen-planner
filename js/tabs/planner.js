@@ -522,7 +522,7 @@ function buildScheduleForCfg(cfg) {
    Each due / upcoming (next 30 days) chapter revision is placed on its real
    nextRevisionAt date as a clickable revise item (type:'revise', fromEngine).
    This is what unifies the study plan with the revision system. */
-function injectRevisionsIntoMap(map) {
+function injectRevisionsIntoMap(map, allowedSubs) {
   if (!map) map = {};
   try {
     const today = (typeof todayISO === 'function') ? todayISO() : new Date().toISOString().slice(0,10);
@@ -534,9 +534,11 @@ function injectRevisionsIntoMap(map) {
     [...due, ...soon].forEach(({ ch, state }) => {
       if (!ch || !state || !state.nextRevisionAt || seen.has(ch.id)) return;
       seen.add(ch.id);
+      const sub = subOf(ch.id);
+      /* Single-subject scope: drop revisions for any other subject. */
+      if (allowedSubs && !(sub && allowedSubs.has(sub.id))) return;
       /* Overdue revisions surface on today so they aren't buried in the past. */
       const date = state.nextRevisionAt < today ? today : state.nextRevisionAt;
-      const sub = subOf(ch.id);
       const overdue = state.nextRevisionAt < today;
       const dueLabel = overdue ? 'overdue' : (date === today ? 'due today' : 'due ' + date);
       const meta = { ...ch, subName: sub ? sub.name : '', color: sub ? sub.color : '#A855F7', subId: sub ? sub.id : '' };
@@ -547,12 +549,30 @@ function injectRevisionsIntoMap(map) {
   return map;
 }
 
+/* When EVERY active plan for the current exam is a Single Subject plan, scope
+   the injected revisions to those subject(s) so a focused plan stays focused.
+   Returns a Set of allowed subject ids, or null for no scoping (global, the
+   default for full syllabus / mock / mixed-plan setups). */
+function planRevisionScopeSubs() {
+  try {
+    let plans = (typeof plansForCurrentExam === 'function')
+      ? plansForCurrentExam()
+      : (Array.isArray(appState.plans) ? appState.plans : []);
+    if (!plans.length && window._planConfig) plans = [{ cfg: window._planConfig }];
+    if (!plans.length) return null;
+    if (plans.every(p => p && p.cfg && p.cfg.scopeSubId)) {
+      return new Set(plans.map(p => p.cfg.scopeSubId));
+    }
+  } catch (e) {}
+  return null;
+}
+
 /* Returns a COMBINED date->items map across ALL saved plans (syllabus + mock),
    PLUS real revision-queue items, so the planner shows study topics, mock
    tests AND due revisions together on their dates. Rebuilt every call so
    Day/Week/Month/3-Month always stay in sync. */
 function getPlanScheduleMap() {
-  return injectRevisionsIntoMap(_getPlanStudyMap());
+  return injectRevisionsIntoMap(_getPlanStudyMap(), planRevisionScopeSubs());
 }
 
 function _getPlanStudyMap() {
@@ -575,6 +595,18 @@ function _getPlanStudyMap() {
       merge(buildScheduleForCfg(window._planConfig));
     }
   } catch(e) {}
+  /* De-duplicate overlapping topics: if two plans schedule the same chapter
+     (same type/part) on the same date, keep one entry so the planner views
+     don't render duplicates when a full plan and a single-subject plan overlap. */
+  Object.keys(combined).forEach(ds => {
+    const seen = new Set();
+    combined[ds] = combined[ds].filter(it => {
+      const key = (it.type || '') + '|' + ((it.ch && it.ch.id) || '') + '|' + (it.part || '');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  });
   if (Object.keys(combined).length) return combined;
   /* If a saved-plans list exists but produced nothing (e.g. all plans were
      removed), do NOT fall back to a stale active config/schedule — that is
