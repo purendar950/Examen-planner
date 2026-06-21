@@ -239,6 +239,16 @@ function mockRenderAnalysis() {
   const cutoff     = mockGetCutoff(currentExam, mockTierKey());
   const safeTarget = Math.round(totalMax * 0.75);
   const topTarget  = Math.round(totalMax * 0.875);
+  /* Per-section cutoff shares from the latest mock (#9): each section's
+     proportional slice of the total cutoff (cutoff × sectionMax / totalMax). */
+  const latestMock = list[list.length - 1];
+  const sectionCutoffs = (cutoff > 0 && tier.sections.length > 1)
+    ? tier.sections.map(s => {
+        const share = cutoff * s.max / totalMax;
+        const score = (latestMock.s[s.k] && latestMock.s[s.k].m) || 0;
+        return { name: s.name, score: Math.round(score * 10) / 10, share: Math.round(share * 10) / 10, gap: Math.round((score - share) * 10) / 10 };
+      })
+    : [];
 
   el.innerHTML =
     /* Section title */
@@ -251,14 +261,14 @@ function mockRenderAnalysis() {
 
     /* ROW 2: Score trend (left) + Section averages (right) */
     '<div class="mock-row2">' +
-      '<div class="info-card">' + mockScoreTrendCardHtml(list, totalMax, cutoff, best) + '</div>' +
+      '<div class="info-card">' + mockScoreTrendCardHtml(list, totalMax, cutoff, best, safeTarget, topTarget) + '</div>' +
       '<div class="info-card">' + mockSectionAveragesCardHtml(secAvgs, weakest, totalMax) + '</div>' +
     '</div>' +
 
     /* ROW 3: Weakest section (left, red border) + Percentile estimator (right) */
     '<div class="mock-row2">' +
       '<div class="info-card" style="border-color:var(--red);border-width:1.5px;">' + mockWeakestCardHtml(weakest, secAvgs) + '</div>' +
-      '<div class="info-card">' + mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax) + '</div>' +
+      '<div class="info-card">' + mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax, sectionCutoffs) + '</div>' +
     '</div>' +
 
     /* ROW 5: Mock comparison table (last 3 attempts, full-width) */
@@ -279,19 +289,24 @@ function mockMetricCardsHtml(d) {
   '</div>';
 }
 
-/* ── Score trend card (with dashed red cutoff line + green fill under line) ── */
-function mockScoreTrendCardHtml(list, totalMax, cutoff, best) {
-  const svg = mockTrendSvgV2(list, totalMax, cutoff);
-  const cutoffLine = cutoff > 0
-    ? '<div style="font-size:0.72rem;color:var(--red);margin-top:6px;display:flex;align-items:center;gap:6px;">' +
-        '<span style="display:inline-block;width:18px;height:0;border-top:1.5px dashed var(--red);"></span>' +
-        'Cutoff est. ' + cutoff + ' — ' + (best >= cutoff ? 'you\'re above it' : 'aim for cutoff') +
-      '</div>'
-    : '';
-  return '<h3>📈 Score trend</h3>' + svg + cutoffLine;
+/* ── Score trend card (dashed cutoff/safe/top lines + green fill under line) ── */
+function mockScoreTrendCardHtml(list, totalMax, cutoff, best, safeTarget, topTarget) {
+  const svg = mockTrendSvgV2(list, totalMax, cutoff, safeTarget, topTarget);
+  const chip = (color, label) =>
+    '<span style="display:inline-flex;align-items:center;gap:5px;">' +
+      '<span style="display:inline-block;width:18px;height:0;border-top:1.5px dashed ' + color + ';"></span>' +
+      '<span style="color:' + color + ';">' + label + '</span>' +
+    '</span>';
+  const legend =
+    '<div style="font-size:0.72rem;margin-top:6px;display:flex;flex-wrap:wrap;gap:12px;">' +
+      (cutoff > 0 ? chip('#EF4444', 'Cutoff ' + cutoff + (best >= cutoff ? ' (above ✓)' : '')) : '') +
+      (safeTarget > 0 ? chip('#3B82F6', 'Safe ' + safeTarget) : '') +
+      (topTarget > 0 ? chip('#F59E0B', 'Top ' + topTarget) : '') +
+    '</div>';
+  return '<h3>📈 Score trend</h3>' + svg + legend;
 }
 
-function mockTrendSvgV2(list, totalMax, cutoff) {
+function mockTrendSvgV2(list, totalMax, cutoff, safeTarget, topTarget) {
   const W = 560, H = 200, P = 32;
   const n = list.length;
   const xs = i => n === 1 ? W / 2 : P + i * (W - 2 * P) / (n - 1);
@@ -320,12 +335,21 @@ function mockTrendSvgV2(list, totalMax, cutoff) {
     cutoffLine = '<line x1="' + P + '" y1="' + cy + '" x2="' + (W - P) + '" y2="' + cy + '" stroke="#EF4444" stroke-width="1.5" stroke-dasharray="5 4"></line>' +
       '<text x="' + (W - P - 4) + '" y="' + (cy - 5) + '" text-anchor="end" font-size="9" fill="#EF4444" font-weight="700">' + cutoff + '</text>';
   }
+  /* Dashed benchmark lines: blue "safe score" + amber "top target" */
+  const benchLine = (val, color) => {
+    if (!(val > 0 && val <= totalMax)) return '';
+    const by = ys(val);
+    return '<line x1="' + P + '" y1="' + by + '" x2="' + (W - P) + '" y2="' + by + '" stroke="' + color + '" stroke-width="1.5" stroke-dasharray="5 4"></line>' +
+      '<text x="' + (W - P - 4) + '" y="' + (by - 5) + '" text-anchor="end" font-size="9" fill="' + color + '" font-weight="700">' + val + '</text>';
+  };
+  const safeLine = benchLine(safeTarget, '#3B82F6');
+  const topLine  = benchLine(topTarget, '#F59E0B');
   const grad = '<defs><linearGradient id="mockTrendGrad" x1="0" x2="0" y1="0" y2="1">' +
     '<stop offset="0%" stop-color="#00C896" stop-opacity="0.45"></stop>' +
     '<stop offset="100%" stop-color="#00C896" stop-opacity="0"></stop>' +
     '</linearGradient></defs>';
   return '<div style="overflow-x:auto;"><svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;min-width:300px;height:auto;">' +
-    grad + grid + cutoffLine + fill +
+    grad + grid + cutoffLine + safeLine + topLine + fill +
     (n > 1 ? '<polyline points="' + pts + '" fill="none" stroke="#00C896" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"></polyline>' : '') +
     dots +
     list.map((m, i) => '<text x="' + xs(i) + '" y="' + (H - 8) + '" text-anchor="middle" font-size="9" fill="#5A6478">M' + (i + 1) + '</text>').join('') +
@@ -371,7 +395,35 @@ function mockWeakestCardHtml(weakest, secAvgs) {
     '<div style="display:flex;flex-wrap:wrap;gap:6px;">' +
       chapters.map(c => '<span class="tag" style="background:rgba(239,68,68,0.12);color:#FCA5A5;border:1px solid rgba(239,68,68,0.35);">' + escapeHtml(c) + '</span>').join('') +
     '</div>' +
-    '<button class="btn-modal-save" style="margin-top:12px;font-size:0.78rem;padding:6px 12px;" onclick="markChaptersForRevision(\'' + weakest.k + '\')">📌 Mark these for revision</button>';
+    '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;">' +
+      '<button class="btn-modal-save" style="font-size:0.78rem;padding:6px 12px;" onclick="markChaptersForRevision(\'' + weakest.k + '\')">📌 Mark these for revision</button>' +
+      '<button class="btn-modal-save" style="font-size:0.78rem;padding:6px 12px;background:rgba(168,85,247,0.15);color:#A855F7;border:1px solid rgba(168,85,247,0.35);" onclick="mockFocusWeakSubject(\'' + weakest.k + '\')">🎯 Make a focused plan</button>' +
+    '</div>';
+}
+
+/* From the mock "weakest section" card, open the Plan Wizard as a focused
+   Single Subject plan. Best-effort maps the mock section to a syllabus subject
+   by name similarity; if none matches, opens Single mode so the user can pick. */
+function mockFocusWeakSubject(secKey) {
+  if (typeof openSinglePlanForSubject !== 'function') {
+    if (typeof showToast === 'function') showToast('Plan wizard not available.', 'error');
+    return;
+  }
+  const subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : [];
+  /* Resolve the section name from the current tier config. */
+  let secName = secKey;
+  try {
+    const cfg = mockExamCfg();
+    const sec = cfg && cfg.tiers[mockTierKey()].sections.find(x => x.k === secKey);
+    if (sec) secName = sec.name;
+  } catch (e) {}
+  /* Fuzzy match: share a significant word between section name and subject name. */
+  const words = (secName || '').toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3);
+  const match = subs.find(s => {
+    const sn = (s.name || '').toLowerCase();
+    return words.some(w => sn.includes(w));
+  });
+  openSinglePlanForSubject(match ? match.id : null);
 }
 
 function markChaptersForRevision(secK) {
@@ -384,7 +436,7 @@ function markChaptersForRevision(secK) {
 }
 
 /* ── Percentile estimator card (three progress bars: green cutoff + blue safe score + amber top target) ── */
-function mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax) {
+function mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax, sectionCutoffs) {
   const aboveCut = latest - cutoff;
   const abovePct = cutoff > 0 ? Math.round(latest / cutoff * 100) : Math.round(latest / totalMax * 100);
   const bar1Fill = cutoff > 0 ? Math.min(100, Math.round(latest / cutoff * 100)) : Math.round(latest / totalMax * 100);
@@ -404,6 +456,31 @@ function mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax)
   const toTop = topTarget - latest;
   const topFill = Math.min(100, Math.round(latest / topTarget * 100));
   const bar2Delta = '<span style="color:var(--amber);font-weight:600;">' + (toTop > 0 ? '+' + toTop + ' to go' : 'reached') + '</span>';
+
+  /* Per-section cutoff share (#9): each section's slice of the total cutoff,
+     proportional to its max marks. Flags which section dragged the latest
+     total below the cutoff. */
+  let sectionBlock = '';
+  if (sectionCutoffs && sectionCutoffs.length) {
+    const sorted = sectionCutoffs.slice().sort((a, b) => a.gap - b.gap);
+    const below = sorted.filter(s => s.gap < 0);
+    const rows = sorted.map(s => {
+      const ok = s.gap >= 0;
+      const col = ok ? 'var(--accent)' : 'var(--red)';
+      return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:0.72rem;padding:2px 0;">' +
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;">' + (ok ? '✓ ' : '⚠ ') + escapeHtml(s.name) + '</span>' +
+        '<span style="white-space:nowrap;color:' + col + ';font-weight:600;">' + s.score + ' / ' + s.share +
+          ' <span style="color:var(--muted);font-weight:500;">(' + (s.gap >= 0 ? '+' : '') + s.gap + ')</span></span>' +
+      '</div>';
+    }).join('');
+    const note = below.length
+      ? '<div style="font-size:0.72rem;color:var(--red);margin-top:6px;">Biggest drag: <strong>' + escapeHtml(below[0].name) + '</strong> — ' + Math.abs(below[0].gap) + ' below its cutoff share.</div>'
+      : '<div style="font-size:0.72rem;color:var(--accent);margin-top:6px;">Every section is at or above its cutoff share 🎯</div>';
+    sectionBlock = '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">' +
+      '<div style="font-size:0.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">Section vs cutoff share (latest)</div>' +
+      rows + note +
+    '</div>';
+  }
 
   return '<h3>🎯 Percentile estimator</h3>' +
     '<div style="font-size:0.78rem;color:var(--muted);margin-bottom:10px;">Latest ' + latest + '/' + totalMax + ' vs known benchmarks</div>' +
@@ -439,7 +516,7 @@ function mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax)
         '<div style="height:100%;width:' + topFill + '%;background:linear-gradient(90deg,#F59E0B,#FBBF24);border-radius:5px;transition:width 0.5s;"></div>' +
       '</div>' +
       '<div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">' + topFill + '% there · ' + latest + ' of ' + topTarget + ' target</div>' +
-    '</div>';
+    '</div>' + sectionBlock;
 }
 
 /* ── Mock comparison table (last 3 attempts) ── */

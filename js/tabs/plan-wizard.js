@@ -52,6 +52,25 @@ function openPlanWizard() {
   pwUpdateFooter();
 }
 
+/* Open the Plan Wizard pre-set to a Single Subject plan for a given subject.
+   Powers the "Focus this subject" shortcuts (Syllabus tab + Mock weakest card).
+   Pass a subId to pre-select it; pass null to land on Single mode with the
+   first subject selected so the user can pick from the dropdown. */
+function openSinglePlanForSubject(subId) {
+  if (typeof openPlanWizard !== 'function') return;
+  openPlanWizard();
+  PW_STATE.type = 'single';
+  PW_STATE._editingId = null;
+  const subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : [];
+  if (subId && subs.some(s => s.id === subId)) PW_STATE.syllabus.subId = subId;
+  /* Reflect the choice in the Step-1 type grid. */
+  document.querySelectorAll('#pw-type-grid .plan-type-card').forEach(c => {
+    c.classList.toggle('selected', c.dataset.type === 'single');
+  });
+  /* Type + subject are chosen — jump straight to the config step. */
+  pwGoToStep(2);
+}
+
 function closePlanWizard() {
   document.getElementById('plan-wizard-overlay').classList.remove('open');
   /* Drop any in-progress edit so the next wizard run creates a fresh plan. */
@@ -177,25 +196,9 @@ function pwUpdateFooter() {
   }
 }
 
-function pwIsStep2Valid() {
-  const t = PW_STATE.type;
-  if (t === 'syllabus') {
-    const subs = getActiveSubjects();
-    const has = subs.some(sub => {
-      const conf = PW_STATE.syllabus.subjects[sub.id];
-      return conf && conf.days > 0 && conf.targetPct > 0;
-    });
-    return has && !!PW_STATE.syllabus.startDate && !!PW_STATE.syllabus.endDate;
-  }
-  if (t === 'practice') {
-    return PW_STATE.practice.subjects.length > 0 && !!PW_STATE.practice.practiceType;
-  }
-  if (t === 'mock') {
-    const anySubj = Object.values(PW_STATE.mock.subjectFreq || {}).some(f => f > 0);
-    return anySubj || PW_STATE.mock.fullMockPerWeek > 0;
-  }
-  return false;
-}
+/* NOTE: pwIsStep2Valid() is defined once below (chapter-level validation).
+   A second, older subjects/targetPct-based copy used to live here and shadowed
+   it; it was dead code and has been removed. */
 
 function pwBack() {
   if (PW_STATE.step > 1) pwGoToStep(PW_STATE.step - 1);
