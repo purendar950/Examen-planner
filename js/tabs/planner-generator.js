@@ -39,6 +39,15 @@ function planScopedSubjects(cfg) {
   return subs;
 }
 
+/* Parse a user-typed "topics per day" pattern like "3,4,2" or "3 4 2" into an
+   array of positive integers [3,4,2]. Returns [] when blank/invalid (→ the
+   default 1-topic-per-day behavior). The last number repeats for any extra
+   days beyond the list. */
+function parsePerDayCounts(str) {
+  if (!str || typeof str !== 'string') return [];
+  return str.split(/[^0-9]+/).map(x => parseInt(x, 10)).filter(n => Number.isFinite(n) && n > 0);
+}
+
 /* ---------------------------------------------------------------------------
    buildPlanSchedule(cfg) — core day-by-day topic schedule.
    Subjects run IN PARALLEL by their frequency (subjectFreq: 1=daily,
@@ -55,9 +64,15 @@ function buildPlanSchedule(cfg) {
   const freqOf   = id => Math.max(1, (cfg.subjectFreq && cfg.subjectFreq[id]) || 1);
   const profile  = appState.studyProfile || {};
   const restDay  = (profile.restDay !== undefined) ? Number(profile.restDay) : -1;
+  /* "Topics per day" pattern (e.g. [3,4,2]): when set, each pending chapter is
+     one whole topic and we place that many distinct chapters per scheduled day
+     (the per-chapter Days/Gap splitting is bypassed so the counts are exact). */
+  const perDayCounts = parsePerDayCounts(cfg.topicsPerDay);
+  const useCounts = perDayCounts.length > 0;
 
   /* Per-subject slot queues: each pending chapter expands into `days` study
-     slots (1/N..N/N) followed by `gap` revise slots. */
+     slots (1/N..N/N) followed by `gap` revise slots. In "topics per day" mode
+     each chapter is a single study slot instead. */
   const perSubject = subjects.map((sub, idx) => {
     const slots = [];
     const pending = sub.chapters.filter(c => !appState.progress[c.id]?.done);
@@ -68,10 +83,14 @@ function buildPlanSchedule(cfg) {
       .sort((a, b) => (a.ord - b.ord) || (a.i - b.i))
       .map(x => x.ch);
     ordered.forEach(ch => {
+      const meta = { ...ch, subName: sub.name, color: sub.color, subId: sub.id };
+      if (useCounts) {
+        slots.push({ type:'study', ch: meta, part: '' });
+        return;
+      }
       const cc   = chConf[ch.id] || {};
       const days = Math.max(1, Number(cc.days) || 3);
       const gap  = Math.max(0, Number(cc.gap)  || 0);
-      const meta = { ...ch, subName: sub.name, color: sub.color, subId: sub.id };
       for (let i = 0; i < days; i++) slots.push({ type:'study',  ch: meta, part: days>1 ? `(${i+1}/${days})` : '' });
       /* Gap days reserve spacing after a chapter, but the actual revision
          reminders now come from the spaced-repetition engine (see
@@ -95,7 +114,8 @@ function buildPlanSchedule(cfg) {
   const totalSlots = perSubject.reduce((t, s) => t + s.slots.length, 0);
   let placed = 0, dayIdx = 0, guard = 0, lastDateStr = fmtDate(startD);
   const cursor = {};
-  perSubject.forEach(s => { cursor[s.subId] = 0; });
+  const dayCount = {};
+  perSubject.forEach(s => { cursor[s.subId] = 0; dayCount[s.subId] = 0; });
 
   while (placed < totalSlots && guard < totalSlots * 12 + 400) {
     guard++;
@@ -104,13 +124,32 @@ function buildPlanSchedule(cfg) {
     /* Skip the weekly rest day entirely (no topics placed, no slot consumed). */
     if (restDay >= 0 && d.getDay() === restDay) { dayIdx++; continue; }
     const dayItems = [];
-    /* Every subject whose turn is today contributes its current slot. */
+    /* Every subject whose turn is today contributes its current slot(s). */
     for (const s of perSubject) {
       if (cursor[s.subId] >= s.slots.length) continue;
       if ((dayIdx % s.freq) !== (s.offset % s.freq)) continue;
-      dayItems.push(s.slots[cursor[s.subId]]);
-      cursor[s.subId]++;
-      placed++;
+      if (useCounts) {
+        /* Pull this day's quota of DISTINCT chapters for the subject. The quota
+           follows the user's pattern; the last value repeats for extra days. */
+        const quota = perDayCounts[Math.min(dayCount[s.subId], perDayCounts.length - 1)] || 1;
+        const chaptersToday = new Set();
+        let added = 0;
+        while (cursor[s.subId] < s.slots.length && added < quota) {
+          const slot = s.slots[cursor[s.subId]];
+          const chId = slot.ch && slot.ch.id;
+          if (chId && chaptersToday.has(chId)) break; /* never stack parts of one chapter */
+          dayItems.push(slot);
+          if (chId) chaptersToday.add(chId);
+          cursor[s.subId]++;
+          placed++;
+          added++;
+        }
+        dayCount[s.subId]++;
+      } else {
+        dayItems.push(s.slots[cursor[s.subId]]);
+        cursor[s.subId]++;
+        placed++;
+      }
     }
     if (dayItems.length) { byDate[dateStr] = dayItems; lastDateStr = dateStr; }
     dayIdx++;
