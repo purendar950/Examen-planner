@@ -8,7 +8,7 @@ const PW_STATE = {
   step: 1,
   type: null,                 /* 'syllabus' | 'practice' | 'mock' */
   name: '',
-  syllabus: { subId: null, subjects: {}, chapters: {}, order: 'sequential', endDateOverride: false, startDate: '', endDate: '', dailyHours: 4 },
+  syllabus: { subId: null, subjects: {}, chapters: {}, order: 'sequential', endDateOverride: false, startDate: '', endDate: '', dailyHours: 4, topicsPerDay: '' },
   practice: { subjects: [], practiceType: 'pyq', dailyTime: 2, questionsPerDay: 50, startDate: '' },
   mock:     { fullMockPerWeek: 1, subjectFreq: {}, subjectCount: {}, durationDays: 30, analysisDay: true }
 };
@@ -263,14 +263,28 @@ function pwEnsureChapterConf() {
 function pwCalcEndDate() {
   pwEnsureChapterConf();
   const subs = pwPlanSubjects();
+  const counts = (typeof parsePerDayCounts === 'function') ? parsePerDayCounts(PW_STATE.syllabus.topicsPerDay) : [];
   let maxSpan = 0;
   subs.forEach(sub => {
     let subDays = 0;
-    sub.chapters.forEach(ch => {
-      if (appState.progress[ch.id]?.done) return;
-      const c = PW_STATE.syllabus.chapters[ch.id] || { days: 3, gap: 0 };
-      subDays += (Number(c.days) || 3) + (Number(c.gap) || 0);
-    });
+    if (counts.length) {
+      /* "Topics per day" mode: each pending chapter = 1 topic; distribute them
+         across days following the pattern (last value repeats). */
+      let remaining = sub.chapters.filter(ch => !appState.progress[ch.id]?.done).length;
+      let idx = 0;
+      while (remaining > 0) {
+        const n = counts[Math.min(idx, counts.length - 1)] || 1;
+        remaining -= n;
+        subDays++;
+        idx++;
+      }
+    } else {
+      sub.chapters.forEach(ch => {
+        if (appState.progress[ch.id]?.done) return;
+        const c = PW_STATE.syllabus.chapters[ch.id] || { days: 3, gap: 0 };
+        subDays += (Number(c.days) || 3) + (Number(c.gap) || 0);
+      });
+    }
     const freq = Math.max(1, (PW_STATE.syllabus.subjectFreq && PW_STATE.syllabus.subjectFreq[sub.id]) || 1);
     maxSpan = Math.max(maxSpan, subDays * freq);
   });
@@ -374,6 +388,19 @@ function pwRenderSyllabusSubjectPane() {
       <span style="font-size:.7rem;color:var(--muted);">har subject ke alag hours set kar sakte ho.</span>
     </div>`;
 
+  /* Topics-per-day pattern (e.g. 3,4,2). Blank = 1 topic/day. */
+  const topicsRow = `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap;">
+      <span style="font-size:.78rem;color:var(--muted);font-weight:600;">📚 Topics per day:</span>
+      <input type="text" value="${escapeHtml(PW_STATE.syllabus.topicsPerDay || '')}"
+             placeholder="e.g. 3,4,2 (blank = 1/day)"
+             onchange="pwSetTopicsPerDay(this.value)"
+             style="width:180px;background:var(--surface);border:1px solid var(--border);border-radius:8px;
+                    color:var(--text);font-size:.82rem;padding:5px 10px;outline:none;font-family:var(--font);"
+             title="Har din kitne topic. Comma se alag karo. Aakhri number aage repeat hoga.">
+      <span style="font-size:.7rem;color:var(--muted);">Pehla din 3, doosra 4, teesra 2… last number aage tak repeat hoga.</span>
+    </div>`;
+
   /* End-date row */
   const autoEnd = pwCalcEndDate();
   if (!PW_STATE.syllabus.endDateOverride) PW_STATE.syllabus.endDate = autoEnd;
@@ -442,6 +469,7 @@ function pwRenderSyllabusSubjectPane() {
   pane.innerHTML = `
     ${orderSel}
     ${freqSel}
+    ${topicsRow}
     ${endRow}
     <div style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
@@ -476,6 +504,16 @@ function pwSetSubjectFreq(subId, val) {
 function pwSetSubjectHours(subId, val) {
   pwEnsureChapterConf();
   PW_STATE.syllabus.subjectHours[subId] = Math.max(0.5, parseFloat(val) || 2);
+}
+
+/* Topics-per-day pattern (e.g. "3,4,2"). Re-renders so the auto end-date and
+   the field reflect the new value. */
+function pwSetTopicsPerDay(val) {
+  PW_STATE.syllabus.topicsPerDay = (val || '').trim();
+  if (!PW_STATE.syllabus.endDateOverride) {
+    PW_STATE.syllabus.endDate = pwCalcEndDate();
+  }
+  pwRenderSyllabusSubjectPane();
 }
 
 function pwUpdateChConf(chId, key, val) {
@@ -720,6 +758,7 @@ function pwShowStep3Summary() {
         <span>Schedule</span>
         <span><strong>${PW_STATE.syllabus.startDate}</strong> → <strong>${PW_STATE.syllabus.endDate}</strong> (${totalDays} days)</span>
       </div>
+      ${PW_STATE.syllabus.topicsPerDay ? '<div class="confirm-row"><span>Topics per day</span><span><strong>' + escapeHtml(PW_STATE.syllabus.topicsPerDay) + '</strong> (then repeats last)</span></div>' : ''}
       <div class="confirm-row"><span>Daily hours</span><span><strong>${PW_STATE.syllabus.dailyHours}h</strong></span></div>
     `;
   } else if (t === 'practice') {
@@ -778,6 +817,7 @@ function pwGenerate() {
     cfg.chapters = JSON.parse(JSON.stringify(PW_STATE.syllabus.chapters || {}));
     cfg.subjectFreq = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectFreq || {}));
     cfg.subjectHours = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectHours || {}));
+    cfg.topicsPerDay = PW_STATE.syllabus.topicsPerDay || '';
     /* Single Subject mode: scope the whole plan to one subject. */
     if (PW_STATE.type === 'single') cfg.scopeSubId = PW_STATE.syllabus.subId;
   } else if (PW_STATE.type === 'practice') {
@@ -989,6 +1029,7 @@ function editPlan(planId) {
     PW_STATE.syllabus.chapters       = cfg.chapters     || {};
     PW_STATE.syllabus.subjectFreq    = cfg.subjectFreq  || {};
     PW_STATE.syllabus.subjectHours   = cfg.subjectHours || {};
+    PW_STATE.syllabus.topicsPerDay   = cfg.topicsPerDay || '';
     /* Single Subject: restore which subject this plan is scoped to. */
     if (p.type === 'single' && cfg.scopeSubId) PW_STATE.syllabus.subId = cfg.scopeSubId;
   } else if (p.type === 'practice') {
