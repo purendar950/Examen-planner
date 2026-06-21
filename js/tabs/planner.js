@@ -512,7 +512,7 @@ function ensurePlanSchedule() {
 /* Build a date->items map for a single plan config (syllabus or mock). */
 function buildScheduleForCfg(cfg) {
   try {
-    if (cfg && cfg.planType === 'syllabus' && typeof buildPlanSchedule === 'function') return buildPlanSchedule(cfg).byDate || {};
+    if (cfg && (cfg.planType === 'syllabus' || cfg.planType === 'single') && typeof buildPlanSchedule === 'function') return buildPlanSchedule(cfg).byDate || {};
     if (cfg && cfg.planType === 'mock' && typeof buildMockSchedule === 'function') return buildMockSchedule(cfg).byDate || {};
   } catch(e) {}
   return {};

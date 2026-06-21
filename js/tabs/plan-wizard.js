@@ -140,9 +140,23 @@ function pwShowStep2Pane() {
   const t = PW_STATE.type;
   const show = id => { const el = document.getElementById(id); if (el) el.classList.add('active'); };
   if (t === 'syllabus') show('pw-step-2-syllabus');
+  if (t === 'single')   show('pw-step-2-syllabus'); /* reuse the syllabus pane, scoped to one subject */
   if (t === 'practice') show('pw-step-2-practice'); /* pane removed; guarded for any legacy practice plan */
   if (t === 'mock')     show('pw-step-2-mock');
+  /* Update the syllabus-pane heading to reflect Single Subject mode. */
+  const h = document.getElementById('pw-syl-heading');
+  const sub = document.getElementById('pw-syl-subheading');
+  if (h && sub) {
+    if (t === 'single') {
+      h.textContent = 'Single Subject — Configure';
+      sub.textContent = 'Pick one subject, then set days / gap / order per chapter.';
+    } else {
+      h.textContent = 'Syllabus Study — Configure';
+      sub.textContent = 'Days per subject × target % = chapters per day, auto-calculated.';
+    }
+  }
   pwPushInputsToState();
+  pwRenderSyllabusSubTabs();      /* renders sub-tab buttons, or a subject dropdown in single mode */
   pwRenderSyllabusSubjectPane(); /* re-render with current values */
   pwUpdateFooter();
 }
@@ -245,7 +259,7 @@ function pwEnsureChapterConf() {
    days+gap) * frequency (alternate-day subjects take ~2x the calendar span). */
 function pwCalcEndDate() {
   pwEnsureChapterConf();
-  const subs = getActiveSubjects();
+  const subs = pwPlanSubjects();
   let maxSpan = 0;
   subs.forEach(sub => {
     let subDays = 0;
@@ -262,11 +276,41 @@ function pwCalcEndDate() {
   return fmtDate(start);
 }
 
-/* ── Sub-tabs (one per subject) ── */
+/* Subjects this wizard run should plan for. In Single Subject mode this is the
+   one chosen subject (PW_STATE.syllabus.subId); otherwise all active subjects. */
+function pwPlanSubjects() {
+  const subs = getActiveSubjects();
+  if (PW_STATE.type === 'single' && PW_STATE.syllabus.subId) {
+    const only = subs.filter(s => s.id === PW_STATE.syllabus.subId);
+    if (only.length) return only;
+  }
+  return subs;
+}
+
+/* ── Sub-tabs (one per subject) — or a single subject dropdown in Single mode ── */
 function pwRenderSyllabusSubTabs() {
   const subs = getActiveSubjects();
   const wrap = document.getElementById('pw-syl-subtabs');
   if (!wrap) return;
+
+  /* Single Subject mode: a dropdown picker instead of multiple sub-tabs. */
+  if (PW_STATE.type === 'single') {
+    if (!subs.some(s => s.id === PW_STATE.syllabus.subId)) {
+      PW_STATE.syllabus.subId = subs.length ? subs[0].id : null;
+    }
+    wrap.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;padding:2px 0 4px;">
+        <span style="font-size:.8rem;color:var(--muted);font-weight:700;">🎯 Subject:</span>
+        <select onchange="pwSelectSyllabusSub(this.value)"
+                style="background:var(--surface);border:1px solid var(--border);border-radius:8px;
+                       color:var(--text);font-size:.85rem;padding:6px 12px;outline:none;font-family:var(--font);font-weight:600;">
+          ${subs.map(s => `<option value="${s.id}" ${s.id===PW_STATE.syllabus.subId?'selected':''}>${escapeHtml(s.name)}</option>`).join('')}
+        </select>
+        <span style="font-size:.7rem;color:var(--muted);">Plan covers only this subject.</span>
+      </div>`;
+    return;
+  }
+
   wrap.innerHTML = subs.map(s => `
     <button class="sub-tab ${s.id === PW_STATE.syllabus.subId ? 'active' : ''}"
             data-subid="${s.id}" onclick="pwSelectSyllabusSub('${s.id}')">
@@ -291,8 +335,8 @@ function pwRenderSyllabusSubjectPane() {
   const pane = document.getElementById('pw-syl-subject-pane');
   if (!pane || !sub) { if (pane) pane.innerHTML = ''; return; }
 
-  /* Order dropdown */
-  const orderSel = `
+  /* Order dropdown (only meaningful with multiple subjects — hidden in Single mode) */
+  const orderSel = (PW_STATE.type === 'single') ? '' : `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap;">
       <span style="font-size:.78rem;color:var(--muted);font-weight:600;">Subject order:</span>
       <select id="pw-order-sel" onchange="pwSetOrder(this.value)"
@@ -456,9 +500,14 @@ function pwUpdateChConf(chId, key, val) {
 /* Validation: at least one chapter has days > 0 */
 function pwIsStep2Valid() {
   const t = PW_STATE.type;
-  if (t === 'syllabus') {
+  if (t === 'syllabus' || t === 'single') {
     pwEnsureChapterConf();
-    const hasChapters = Object.values(PW_STATE.syllabus.chapters).some(c => c.days > 0);
+    /* Only require chapters of the subject(s) this plan actually covers. */
+    const planSubs = pwPlanSubjects();
+    const chIds = new Set();
+    planSubs.forEach(s => s.chapters.forEach(c => chIds.add(c.id)));
+    const hasChapters = Object.keys(PW_STATE.syllabus.chapters)
+      .some(id => chIds.has(id) && PW_STATE.syllabus.chapters[id].days > 0);
     return hasChapters && !!PW_STATE.syllabus.startDate;
   }
   if (t === 'practice') {
@@ -632,9 +681,9 @@ function pwShowStep3Summary() {
   pwPushInputsToState();
   const t = PW_STATE.type;
   const wrap = document.getElementById('pw-summary');
-  if (t === 'syllabus') {
+  if (t === 'syllabus' || t === 'single') {
     pwEnsureChapterConf();
-    const subs = getActiveSubjects();
+    const subs = pwPlanSubjects();
     const chConf = PW_STATE.syllabus.chapters || {};
     const rows = subs.map(sub => {
       const pending = sub.chapters.filter(c => !appState.progress[c.id]?.done);
@@ -651,13 +700,19 @@ function pwShowStep3Summary() {
     }).join('');
     const orderLabel = (PW_STATE.syllabus.order === 'interleave') ? '🔀 Mix / Interleave' : '📚 Subject-by-subject';
     const totalDays = daysBetween(PW_STATE.syllabus.startDate, PW_STATE.syllabus.endDate);
-    wrap.innerHTML = `
-      <h4>📚 Syllabus Study Plan</h4>
-      ${rows}
+    const isSingle = (t === 'single');
+    const heading = isSingle
+      ? `🎯 Single Subject Plan — ${escapeHtml((subs[0] && subs[0].name) || '')}`
+      : '📚 Syllabus Study Plan';
+    const orderRow = isSingle ? '' : `
       <div class="confirm-row" style="border-top:1px solid var(--border);padding-top:6px;margin-top:6px;">
         <span>Order</span>
         <span><strong>${orderLabel}</strong></span>
-      </div>
+      </div>`;
+    wrap.innerHTML = `
+      <h4>${heading}</h4>
+      ${rows}
+      ${orderRow}
       <div class="confirm-row">
         <span>Schedule</span>
         <span><strong>${PW_STATE.syllabus.startDate}</strong> → <strong>${PW_STATE.syllabus.endDate}</strong> (${totalDays} days)</span>
@@ -711,7 +766,7 @@ function pwGenerate() {
   PW_STATE.name = (nameInput && nameInput.value || '').trim();
   /* Build the config object consumed by the renderer */
   const cfg = { planType: PW_STATE.type };
-  if (PW_STATE.type === 'syllabus') {
+  if (PW_STATE.type === 'syllabus' || PW_STATE.type === 'single') {
     cfg.startDate  = PW_STATE.syllabus.startDate;
     cfg.endDate    = PW_STATE.syllabus.endDate;
     cfg.dailyHours = PW_STATE.syllabus.dailyHours;
@@ -720,6 +775,8 @@ function pwGenerate() {
     cfg.chapters = JSON.parse(JSON.stringify(PW_STATE.syllabus.chapters || {}));
     cfg.subjectFreq = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectFreq || {}));
     cfg.subjectHours = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectHours || {}));
+    /* Single Subject mode: scope the whole plan to one subject. */
+    if (PW_STATE.type === 'single') cfg.scopeSubId = PW_STATE.syllabus.subId;
   } else if (PW_STATE.type === 'practice') {
     cfg.subjects        = PW_STATE.practice.subjects.slice();
     cfg.practiceType    = PW_STATE.practice.practiceType;
@@ -737,6 +794,11 @@ function pwGenerate() {
   /* ── Persist this plan so the user can switch back later ── */
   if (!Array.isArray(appState.plans)) appState.plans = [];
   const autoName = (() => {
+    if (PW_STATE.type === 'single') {
+      const sub = getActiveSubjects().find(s => s.id === cfg.scopeSubId);
+      const nm = sub ? sub.name : 'Subject';
+      return `${nm} — Single Subject`;
+    }
     if (PW_STATE.type === 'syllabus') {
       const n = Object.keys(cfg.chapters || {}).length;
       return `Syllabus — ${n} chapter${n===1?'':'s'}, ${cfg.dailyHours}h/day`;
@@ -810,12 +872,19 @@ function pwGenerate() {
 /* ── My Plans: list / switch / delete ── */
 function planTypeMeta(type) {
   if (type === 'syllabus') return { icon: '📚', label: 'Syllabus' };
+  if (type === 'single')   return { icon: '🎯', label: 'Single Subject' };
   if (type === 'practice') return { icon: '🎯', label: 'Practice' };
   if (type === 'mock')     return { icon: '📝', label: 'Mock Tests' };
   return { icon: '🗓', label: 'Plan' };
 }
 function planShortSummary(p) {
   const cfg = p.cfg || {};
+  if (p.type === 'single') {
+    let nm = 'Subject';
+    try { const s = getActiveSubjects().find(x => x.id === cfg.scopeSubId); if (s) nm = s.name; } catch(e) {}
+    const n = Object.keys(cfg.chapters || {}).length;
+    return `${nm} · ${cfg.dailyHours || '?'}h/day`;
+  }
   if (p.type === 'syllabus') {
     const chapters = cfg.chapters || {};
     const n = (cfg.subjects ? cfg.subjects.length : Object.keys(chapters).length);
@@ -908,7 +977,7 @@ function editPlan(planId) {
   PW_STATE.name = p.name || '';
   PW_STATE._editingId = p.id;
 
-  if (p.type === 'syllabus') {
+  if (p.type === 'syllabus' || p.type === 'single') {
     PW_STATE.syllabus.startDate      = cfg.startDate || PW_STATE.syllabus.startDate;
     PW_STATE.syllabus.endDate        = cfg.endDate   || PW_STATE.syllabus.endDate;
     PW_STATE.syllabus.endDateOverride = !!cfg.endDate;
@@ -917,6 +986,8 @@ function editPlan(planId) {
     PW_STATE.syllabus.chapters       = cfg.chapters     || {};
     PW_STATE.syllabus.subjectFreq    = cfg.subjectFreq  || {};
     PW_STATE.syllabus.subjectHours   = cfg.subjectHours || {};
+    /* Single Subject: restore which subject this plan is scoped to. */
+    if (p.type === 'single' && cfg.scopeSubId) PW_STATE.syllabus.subId = cfg.scopeSubId;
   } else if (p.type === 'practice') {
     PW_STATE.practice.subjects        = Array.isArray(cfg.subjects) ? cfg.subjects.slice() : [];
     PW_STATE.practice.practiceType    = cfg.practiceType || 'pyq';

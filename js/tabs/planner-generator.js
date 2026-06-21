@@ -12,6 +12,7 @@ function generateTimetable() {
   }
   try {
     if (cfg.planType === 'syllabus') return renderSyllabusPlan(cfg);
+    if (cfg.planType === 'single')   return renderSyllabusPlan(cfg);
     if (cfg.planType === 'practice') return renderPracticePlan(cfg);
     if (cfg.planType === 'mock')     return renderMockPlan(cfg);
     openPlanWizard();
@@ -21,6 +22,21 @@ function generateTimetable() {
     if (c) c.innerHTML = `<div style="padding:1.5rem;color:var(--red);font-size:.85rem;">⚠️ Plan generate karne mein error: ${escapeHtml(e.message||String(e))}<br><span style="color:var(--muted);font-size:.78rem;">Console (F12) mein detail dekho.</span></div>`;
     if (typeof showToast === 'function') showToast('Plan generate failed: ' + (e.message||e), 'error');
   }
+}
+
+/* ---------------------------------------------------------------------------
+   planScopedSubjects(cfg) — returns the active subjects a plan should cover.
+   For a "single subject" plan (cfg.scopeSubId set), this narrows the list to
+   just that one subject so the same syllabus engine produces a focused,
+   single-subject schedule. Falls back to all active subjects otherwise.
+--------------------------------------------------------------------------- */
+function planScopedSubjects(cfg) {
+  const subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : [];
+  if (cfg && cfg.scopeSubId) {
+    const only = subs.filter(s => s.id === cfg.scopeSubId);
+    if (only.length) return only;
+  }
+  return subs;
 }
 
 /* ---------------------------------------------------------------------------
@@ -34,7 +50,7 @@ function generateTimetable() {
 --------------------------------------------------------------------------- */
 function buildPlanSchedule(cfg) {
   cfg = cfg || {};
-  const subjects = getActiveSubjects();
+  const subjects = planScopedSubjects(cfg);
   const chConf   = cfg.chapters || {};
   const freqOf   = id => Math.max(1, (cfg.subjectFreq && cfg.subjectFreq[id]) || 1);
   const profile  = appState.studyProfile || {};
@@ -181,7 +197,7 @@ function renderSyllabusPlan(cfg) {
   window._planSchedule = schedule;
   if (currentUser) { appState.planSchedule = schedule.byDate; }
 
-  const subjects = getActiveSubjects();
+  const subjects = planScopedSubjects(cfg);
   const totalRemaining = subjects.reduce((t,s) => t + s.chapters.filter(c => !appState.progress[c.id]?.done).length, 0);
   if (totalRemaining === 0) {
     container.innerHTML = `<div style="padding:2rem;text-align:center;"><div style="font-size:2rem;margin-bottom:8px;">🎉</div><div style="font-weight:700;color:var(--accent);">All chapters complete!</div><div style="font-size:.82rem;color:var(--muted);margin-top:4px;">Switch to revision mode.</div></div>`;
@@ -205,16 +221,21 @@ function renderSyllabusPlan(cfg) {
       ⚠️ <strong>${backlog.chaptersGap} chapters behind schedule!</strong> Aaj +${backlog.extraPerDay} extra chapters complete karo.
     </div>` : '';
 
+  const isSingle = cfg.planType === 'single' || !!cfg.scopeSubId;
+  const planLabel = isSingle
+    ? `🎯 Single Subject — ${escapeHtml((subjects[0] && subjects[0].name) || '')}`
+    : `📚 Syllabus Plan — ${phase.tip}`;
+
   container.innerHTML = `
     <div style="padding:.6rem 1.25rem .3rem;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
-      <span style="font-size:.65rem;padding:2px 10px;border-radius:99px;background:${phase.color}1a;color:${phase.color};font-weight:600;border:1px solid ${phase.color}33;">📚 Syllabus Plan — ${phase.tip}</span>
+      <span style="font-size:.65rem;padding:2px 10px;border-radius:99px;background:${phase.color}1a;color:${phase.color};font-weight:600;border:1px solid ${phase.color}33;">${planLabel}</span>
       <span style="font-size:.65rem;color:var(--muted);">${schedule.startDate || cfg.startDate} → ${schedule.endDate} (${totalDays} days) · ⟳ auto-reschedules</span>
     </div>
     ${backlogHtml}
     <div class="tt-summary-bar">
       <span>📚 <strong>${totalRemaining}</strong> topics left</span>
       <span>📅 <strong>${totalDays}</strong> days</span>
-      <span>🎯 <strong>${subKeys.length}</strong> subjects</span>
+      <span>🎯 <strong>${subKeys.length}</strong> subject${subKeys.length!==1?'s':''}</span>
     </div>
     <div style="padding:.4rem 1.25rem .2rem;font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;">📆 Today — ${todayStr}</div>
     <div style="padding:.4rem 1.25rem 1rem;display:flex;flex-direction:column;gap:6px;">

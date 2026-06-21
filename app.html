@@ -454,13 +454,21 @@
             </div>
             <div class="ptc-check">✓</div>
           </div>
+          <div class="plan-type-card" data-type="single" onclick="pwSelectType('single', this)">
+            <div class="ptc-icon">🎯</div>
+            <div>
+              <div class="ptc-title">Single Subject</div>
+              <div class="ptc-sub">Deep-focus on one subject's full syllabus — chapter by chapter.</div>
+            </div>
+            <div class="ptc-check">✓</div>
+          </div>
         </div>
       </div>
 
-      <!-- ── STEP 2A: Syllabus config ── -->
+      <!-- ── STEP 2A: Syllabus config (also reused for Single Subject) ── -->
       <div class="plan-step-pane" id="pw-step-2-syllabus">
-        <h3>Syllabus Study — Configure</h3>
-        <p class="pane-sub">Days per subject × target % = chapters per day, auto-calculated.</p>
+        <h3 id="pw-syl-heading">Syllabus Study — Configure</h3>
+        <p class="pane-sub" id="pw-syl-subheading">Days per subject × target % = chapters per day, auto-calculated.</p>
 
         <div class="sub-tab-row" id="pw-syl-subtabs"></div>
         <div id="pw-syl-subject-pane"></div>
