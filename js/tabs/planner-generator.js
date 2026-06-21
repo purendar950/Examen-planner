@@ -55,6 +55,10 @@ function buildPlanSchedule(cfg) {
   const freqOf   = id => Math.max(1, (cfg.subjectFreq && cfg.subjectFreq[id]) || 1);
   const profile  = appState.studyProfile || {};
   const restDay  = (profile.restDay !== undefined) ? Number(profile.restDay) : -1;
+  /* Single Subject plans are chapter-based: each chapter is one whole topic and
+     we place `perDay` of them per day (no Days/Gap splitting). */
+  const isSingle = !!cfg.scopeSubId;
+  const perDay   = isSingle ? Math.max(1, parseInt(cfg.topicsPerDay, 10) || 1) : 1;
 
   /* Per-subject slot queues: each pending chapter expands into `days` study
      slots (1/N..N/N) followed by `gap` revise slots. */
@@ -68,10 +72,14 @@ function buildPlanSchedule(cfg) {
       .sort((a, b) => (a.ord - b.ord) || (a.i - b.i))
       .map(x => x.ch);
     ordered.forEach(ch => {
+      const meta = { ...ch, subName: sub.name, color: sub.color, subId: sub.id };
+      if (isSingle) {
+        slots.push({ type:'study', ch: meta, part: '' });
+        return;
+      }
       const cc   = chConf[ch.id] || {};
       const days = Math.max(1, Number(cc.days) || 3);
       const gap  = Math.max(0, Number(cc.gap)  || 0);
-      const meta = { ...ch, subName: sub.name, color: sub.color, subId: sub.id };
       for (let i = 0; i < days; i++) slots.push({ type:'study',  ch: meta, part: days>1 ? `(${i+1}/${days})` : '' });
       /* Gap days reserve spacing after a chapter, but the actual revision
          reminders now come from the spaced-repetition engine (see
@@ -104,13 +112,29 @@ function buildPlanSchedule(cfg) {
     /* Skip the weekly rest day entirely (no topics placed, no slot consumed). */
     if (restDay >= 0 && d.getDay() === restDay) { dayIdx++; continue; }
     const dayItems = [];
-    /* Every subject whose turn is today contributes its current slot. */
+    /* Every subject whose turn is today contributes its current slot(s). */
     for (const s of perSubject) {
       if (cursor[s.subId] >= s.slots.length) continue;
       if ((dayIdx % s.freq) !== (s.offset % s.freq)) continue;
-      dayItems.push(s.slots[cursor[s.subId]]);
-      cursor[s.subId]++;
-      placed++;
+      if (isSingle) {
+        /* Pull this day's quota of distinct chapters (topics per day). */
+        let added = 0;
+        const seenCh = new Set();
+        while (cursor[s.subId] < s.slots.length && added < perDay) {
+          const slot = s.slots[cursor[s.subId]];
+          const chId = slot.ch && slot.ch.id;
+          if (chId && seenCh.has(chId)) break;
+          dayItems.push(slot);
+          if (chId) seenCh.add(chId);
+          cursor[s.subId]++;
+          placed++;
+          added++;
+        }
+      } else {
+        dayItems.push(s.slots[cursor[s.subId]]);
+        cursor[s.subId]++;
+        placed++;
+      }
     }
     if (dayItems.length) { byDate[dateStr] = dayItems; lastDateStr = dateStr; }
     dayIdx++;
