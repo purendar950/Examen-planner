@@ -193,7 +193,7 @@
 
     <div data-include="pages/planner.html"></div>
     <!-- ═══ YOUTUBE PAGE ═══ -->
-    <div data-include="pages/youtube.html"></div>
+    <div data-include="pages/youtube.html?v=20260623"></div>
     <!-- ═══ YOUTUBE PLAYLIST ORGANISER PAGE ═══ -->
     <div data-include="pages/yt-organiser.html"></div>
   </div><!-- /main-content -->
@@ -392,8 +392,10 @@
 <script src="js/tabs/revision.js"></script>
 <script src="js/features/streak.js"></script>
 <script src="js/core/ui-helpers.js"></script>
-<script src="js/tabs/youtube.js"></script>
-<script src="js/tabs/playlist-organiser.js"></script>
+<!-- Bump the ?v= number whenever youtube.js / playlist-organiser.js change,
+     so returning browsers fetch the new file instead of a cached copy. -->
+<script src="js/tabs/youtube.js?v=20260623"></script>
+<script src="js/tabs/playlist-organiser.js?v=20260623"></script>
 <script src="js/tabs/mock-tests.js"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
 <script src="js/features/responsive.js"></script>
