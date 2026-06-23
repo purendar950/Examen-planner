@@ -769,9 +769,15 @@ function ytMarkWatched(videoId, rerender = true) {
    Works for BOTH Plain Playlist + YT Organiser
 ══════════════════════════════════════════════ */
 
-/* Start polling every 5 sec while video is playing */
+/* Start polling every 5 sec while video is playing.
+   NOTE: we update position in memory every tick, but only PERSIST
+   (saveProgress → Firebase sync) when the watched % crosses a new 5%
+   milestone (5,10,15,...). This caps writes at ~20 per video instead
+   of one every 5 seconds, so it doesn't exhaust the sync quota. */
+let ytLastSaveBucket = -1;
 function ytStartProgressPolling() {
   ytStopProgressPolling();
+  ytLastSaveBucket = -1; // reset milestone tracker for the new play session
   ytProgressTimer = setInterval(function() {
     if (!ytPlayer || !ytPlayerReady || !ytCurrentVideoId) return;
     var dur = 0, cur = 0;
@@ -779,17 +785,21 @@ function ytStartProgressPolling() {
     if (!dur || dur < 1) return;
     var pct = Math.round(cur / dur * 100);
 
-    // Save per-video progress to appState
+    // Update progress + position in memory every tick (cheap, no sync)
     if (!appState.ytVidProgress) appState.ytVidProgress = {};
     var plKey = ytoCurrentPl || ytCurrentPlaylistId || '_single';
     if (!appState.ytVidProgress[plKey]) appState.ytVidProgress[plKey] = {};
     appState.ytVidProgress[plKey][ytCurrentVideoId] = pct;
-
-    // Save exact playback position (seconds) for resume-on-reopen
     if (!appState.ytVidTime) appState.ytVidTime = {};
     if (!appState.ytVidTime[plKey]) appState.ytVidTime[plKey] = {};
     appState.ytVidTime[plKey][ytCurrentVideoId] = Math.floor(cur);
-    saveProgress();
+
+    // Persist only when crossing a new 5% milestone (5,10,15,...)
+    var bucket = Math.floor(pct / 5);
+    if (bucket !== ytLastSaveBucket) {
+      ytLastSaveBucket = bucket;
+      saveProgress();
+    }
 
     // Update "X% watched" label in sidebar list
     ytUpdateVideoWatchLabel(ytCurrentVideoId, pct);
