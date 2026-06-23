@@ -136,6 +136,22 @@ function ssCapture() {
     return;
   }
 
+  // Free user limit: max 10 moments
+  var FREE_MOMENT_LIMIT = 10;
+  var state = ssGetState();
+  var totalMoments = 0;
+  Object.values(state.folders).forEach(function(f) {
+    Object.values(f.videos).forEach(function(vf) {
+      totalMoments += vf.items.filter(function(i) { return i.type === 'screenshot'; }).length;
+    });
+  });
+
+  var isPro = (typeof ezIsPro === 'function') ? ezIsPro() : false;
+  if (!isPro && totalMoments >= FREE_MOMENT_LIMIT) {
+    showToast('⚠️ Free limit reached! (' + FREE_MOMENT_LIMIT + ' moments). Upgrade to Pro for unlimited.', 'error');
+    return;
+  }
+
   var timestamp = ssGetVideoTimestamp();
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
@@ -381,7 +397,7 @@ function ssRenderGallery() {
         if (item.type === 'screenshot') {
           var imgSrc = item.dataUrl || item.imageUrl || '';
           html += `<div class="ss-item ss-item-screenshot">
-            <div class="ss-item-thumb" onclick="ssSeekTo(${item.timestamp})">
+            <div class="ss-item-thumb" onclick="ssEnlarge('${imgSrc}','${escapeHtml(item.label)}','${item.timeLabel}')">
               <img src="${imgSrc}" alt="${escapeHtml(item.label)}" loading="lazy">
             </div>
             <div class="ss-item-info">
@@ -442,6 +458,17 @@ function ssPreview(plId, vId, itemId) {
   const info = document.getElementById('ss-preview-info');
   img.src = src;
   info.textContent = `${item.label} — ${item.timeLabel}`;
+  overlay.classList.add('open');
+}
+
+/* ── Enlarge image on tap (simple version — takes URL directly) ── */
+function ssEnlarge(imgUrl, label, timeLabel) {
+  if (!imgUrl) return;
+  const overlay = document.getElementById('ss-preview-overlay');
+  const img = document.getElementById('ss-preview-img');
+  const info = document.getElementById('ss-preview-info');
+  img.src = imgUrl;
+  info.textContent = (label || 'Screenshot') + ' — ' + (timeLabel || '');
   overlay.classList.add('open');
 }
 
@@ -647,7 +674,7 @@ function ssRenderNotesTree(container, folderKeys, typeFilter) {
         if (item.type === 'screenshot') {
           var imgSrc2 = item.dataUrl || item.imageUrl || '';
           html += `<div class="ss-item ss-item-screenshot ss-page-item">
-            <div class="ss-item-thumb" onclick="ssSeekTo(${item.timestamp})">
+            <div class="ss-item-thumb" onclick="ssEnlarge('${imgSrc2}','${escapeHtml(item.label)}','${item.timeLabel}')">
               <img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy">
             </div>
             <div class="ss-item-info">
@@ -708,7 +735,7 @@ function ssRenderNotesGrid(container, folderKeys, typeFilter) {
   allItems.forEach(item => {
     if (item.type === 'screenshot') {
       html += `<div class="ss-grid-card">
-        <div class="ss-grid-thumb" onclick="ssSeekTo(${item.timestamp})">
+        <div class="ss-grid-thumb" onclick="ssEnlarge('${item.dataUrl || item.imageUrl}','${escapeHtml(item.label)}','${item.timeLabel}')">
           <img src="${item.dataUrl || item.imageUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
           <div class="ss-grid-time-badge">▶ ${item.timeLabel}</div>
         </div>
