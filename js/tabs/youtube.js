@@ -241,6 +241,8 @@ function ytLoadInTab(type, id, originalUrl, label) {
       </div>`;
     document.getElementById('yt-pl-count').textContent = '';
     document.getElementById('yt-pl-progress').style.display = 'none';
+    const _sortRow = document.getElementById('yt-sort-row');
+    if (_sortRow) _sortRow.style.display = 'none';
     document.getElementById('yt-duration-row').classList.remove('show');
     // Course header
     document.getElementById('yt-course-thumb').innerHTML = `<img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt="" onerror="this.style.display='none'">`;
@@ -256,7 +258,8 @@ let ytCurrentPlaylistId = null;
 let ytCurrentVideoId = null;
 let ytCurrentVideoTitle = 'Unknown Video';
 let ytVideoWatched = {}; // videoId -> true
-let ytPlaylistVideos = []; // [{id, title, thumb, duration, position}]
+let ytPlaylistVideos = []; // [{id, title, thumb, duration, position, publishedAt}]
+let ytSortMode = 'playlist'; // 'playlist' | 'oldest' | 'newest'
 
 const YT_API_KEY = 'AIzaSyDJVRXrAcvAzslMfjSAU2os4cobdzOyHmw';
 
@@ -342,15 +345,77 @@ function ytSetSpeed(rate) {
     b.classList.toggle('active', parseFloat(b.dataset.rate) === rate));
 }
 
+/* ══════════════════════════════════════════════
+   PiP — Document Picture-in-Picture API
+   (iframe.requestPictureInPicture does NOT work — the
+    <video> is inside a cross-origin YouTube iframe and is
+    inaccessible. We pop the whole player DOM into a floating
+    Document-PiP window instead, which keeps playback alive.)
+══════════════════════════════════════════════ */
+let ytPipReturn = null; // { placeholder } to restore the player on close
+
 function ytPiP() {
-  const iframe = document.querySelector('#yt-player iframe');
-  if (iframe && document.pictureInPictureEnabled) {
-    // PiP needs video element; for iframes we use the experimental API
-    iframe.requestPictureInPicture?.()
-      .catch(() => showToast('PiP: browser mein supported nahi', 'error'));
-  } else {
-    showToast('Pehle koi video play karo', 'error');
+  // Toggle: if a PiP window is already open, close it
+  if (window.documentPictureInPicture && window.documentPictureInPicture.window) {
+    window.documentPictureInPicture.window.close();
+    return;
   }
+
+  const wrap = document.getElementById('yt-player-wrap');
+  const playerEl = document.getElementById('yt-player');
+  const hasVideo = playerEl && playerEl.style.display !== 'none';
+  if (!wrap || !hasVideo) {
+    showToast('Pehle koi video play karo', 'error');
+    return;
+  }
+
+  if (!('documentPictureInPicture' in window)) {
+    showToast('PiP is browser mein supported nahi — Chrome/Edge desktop use karo 📺', 'error');
+    return;
+  }
+
+  window.documentPictureInPicture.requestWindow({ width: 480, height: 300 })
+    .then(function(pipWin) {
+      // Copy current page styles so the player looks right inside PiP
+      try {
+        [...document.styleSheets].forEach(function(ss) {
+          try {
+            const rules = [...ss.cssRules].map(function(r) { return r.cssText; }).join('');
+            const styleEl = pipWin.document.createElement('style');
+            styleEl.textContent = rules;
+            pipWin.document.head.appendChild(styleEl);
+          } catch (e) {
+            if (ss.href) {
+              const link = pipWin.document.createElement('link');
+              link.rel = 'stylesheet'; link.href = ss.href;
+              pipWin.document.head.appendChild(link);
+            }
+          }
+        });
+      } catch (e) {}
+
+      pipWin.document.body.style.margin = '0';
+      pipWin.document.body.style.background = '#000';
+
+      // Leave a placeholder so we can put the player back exactly where it was
+      const placeholder = document.createElement('div');
+      wrap.parentNode.insertBefore(placeholder, wrap);
+      ytPipReturn = { placeholder: placeholder };
+
+      pipWin.document.body.appendChild(wrap);
+      showToast('Picture-in-Picture ON 📺', 'success');
+
+      // When the PiP window closes, move the player back
+      pipWin.addEventListener('pagehide', function() {
+        if (ytPipReturn && ytPipReturn.placeholder && ytPipReturn.placeholder.parentNode) {
+          ytPipReturn.placeholder.parentNode.replaceChild(wrap, ytPipReturn.placeholder);
+        }
+        ytPipReturn = null;
+      });
+    })
+    .catch(function() {
+      showToast('PiP open nahi ho saka. Browser permission check karo.', 'error');
+    });
 }
 
 /* ══════════════════════════════════════════════
@@ -393,7 +458,7 @@ async function ytFetchPlaylistVideos(plId) {
   let pageToken = '';
   for (let page = 0; page < 10; page++) {
     try {
-      const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${plId}&maxResults=50&key=${YT_API_KEY}${pageToken ? '&pageToken=' + pageToken : ''}`;
+      const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${plId}&maxResults=50&key=${YT_API_KEY}${pageToken ? '&pageToken=' + pageToken : ''}`;
       const res = await fetch(url);
       const data = await res.json();
       if (data.error) {
@@ -411,6 +476,8 @@ async function ytFetchPlaylistVideos(plId) {
             title: s.title,
             thumb: s.thumbnails?.medium?.url || s.thumbnails?.default?.url || '',
             position: s.position,
+            // Actual upload date of the video (falls back to "added to playlist" date)
+            publishedAt: item.contentDetails?.videoPublishedAt || s.publishedAt || null,
             duration: 0
           });
         }
@@ -518,6 +585,15 @@ async function ytBuildPlaylistPanel(plId) {
   if (durInput) durInput.value = (totalSecs / 3600).toFixed(1);
 
   countEl.textContent = `${ytPlaylistVideos.length} videos`;
+
+  // Restore + apply saved sort preference, reveal the sort control
+  ytSortMode = appState.ytSortMode || 'playlist';
+  const sortRow = document.getElementById('yt-sort-row');
+  const sortSel = document.getElementById('yt-sort-sel');
+  if (sortSel) sortSel.value = ytSortMode;
+  if (sortRow) sortRow.style.display = 'flex';
+  ytApplySort();
+
   ytRenderVideoList();
   ytUpdatePlaylistProgress();
 
@@ -525,6 +601,35 @@ async function ytBuildPlaylistPanel(plId) {
   if (durRow) durRow.classList.add('show');
   ytUpdateRemaining();
   saveProgress();
+}
+
+/* ── Sort the playlist video list ── */
+function ytApplySort() {
+  if (!ytPlaylistVideos.length) return;
+  if (ytSortMode === 'oldest' || ytSortMode === 'newest') {
+    const dir = ytSortMode === 'oldest' ? 1 : -1;
+    ytPlaylistVideos.sort((a, b) => {
+      // Videos without a date fall back to their playlist position so they don't jump around
+      const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : null;
+      const tb = b.publishedAt ? new Date(b.publishedAt).getTime() : null;
+      if (ta === null && tb === null) return (a.position || 0) - (b.position || 0);
+      if (ta === null) return 1;   // undated items go last
+      if (tb === null) return -1;
+      return (ta - tb) * dir;
+    });
+  } else {
+    // Original playlist order
+    ytPlaylistVideos.sort((a, b) => (a.position || 0) - (b.position || 0));
+  }
+}
+
+/* ── Sort dropdown handler ── */
+function ytSetSort(mode) {
+  ytSortMode = mode || 'playlist';
+  if (appState) appState.ytSortMode = ytSortMode;
+  try { saveProgress(); } catch (e) {}
+  ytApplySort();
+  ytRenderVideoList();
 }
 
 /* ── Render video list ── */
