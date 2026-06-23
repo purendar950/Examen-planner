@@ -57,11 +57,13 @@ function initApp() {
 
   const safely = (fn) => { try { fn(); } catch (e) { console.error('initApp step failed:', e); } };
   safely(updateStreak);
+  safely(rolloverIncompleteTasks);  // carry unfinished manual tasks forward to today
   safely(buildSyllabus);
   safely(updateDashboard);
   safely(buildPlannerCalendar);
   safely(updateExamPattern);
   safely(populateTaskSubjectDropdown);
+  safely(syncRolloverToggle);          // reflect auto-rollover setting on its toggle
   safely(renderRevisionWidget);
   safely(renderMilestoneCard);    // Feature 4
   safely(renderPaceTrackerCard);  // Feature 5

@@ -133,6 +133,8 @@ function getDefaultState() {
     studyProfile: null,  // Feature 3 – set via Study Profile modal
     plans: [],            // Saved plans: [{id, type, name, createdAt, cfg}]
     activePlanId: null,
+    autoRolloverTasks: true, // move incomplete manual tasks forward to today (on by default)
+    lastRolloverDate: null,  // guard so the rollover sweep runs once per day
     planSchedule: null,   // date -> [topic items] for the active syllabus plan
     /* Telegram daily-plan delivery. The GitHub Actions sender reads this from
        Firestore: chatId (target account), enabled (opt-in), and digest
