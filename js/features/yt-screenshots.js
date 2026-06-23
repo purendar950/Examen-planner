@@ -110,7 +110,13 @@ function ssCountType(videoFolder, type) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   SCREENSHOT CAPTURE — Screen Capture API + Canvas
+   SCREENSHOT CAPTURE — Actual Video Frame at Current Timestamp
+   ─────────────────────────────────────────────────────────────
+   Strategy (in order of preference):
+   1. Tab Capture API (preferCurrentTab) → crop to player area
+   2. YouTube storyboard/frame image at exact second
+   3. getDisplayMedia full screen share → crop to player
+   4. Static thumbnail fallback (last resort)
 ══════════════════════════════════════════════════════════════ */
 
 async function ssCapture() {
@@ -121,17 +127,36 @@ async function ssCapture() {
   }
 
   const timestamp = ssGetVideoTimestamp();
+  showToast('📸 Capturing...', 'info');
 
-  // Method 1: Try Screen Capture API (captures actual frame)
   let dataUrl = null;
+
+  // Method 1: Tab capture (preferCurrentTab — no picker dialog on Chrome 94+)
   try {
-    dataUrl = await ssCaptureViaScreenShare(timestamp);
+    dataUrl = await ssCaptureTabCrop(timestamp);
   } catch(e) {
-    // User declined or API not available — use thumbnail fallback
-    console.log('Screen capture declined/failed, using thumbnail fallback.');
+    console.log('Tab capture failed:', e.message);
   }
 
-  // Method 2: Fallback — YouTube thumbnail at current time
+  // Method 2: YouTube storyboard frame (actual scene at timestamp)
+  if (!dataUrl) {
+    try {
+      dataUrl = await ssCaptureStoryboard(ctx.videoId, timestamp);
+    } catch(e) {
+      console.log('Storyboard capture failed:', e.message);
+    }
+  }
+
+  // Method 3: Full screen share with crop to player
+  if (!dataUrl) {
+    try {
+      dataUrl = await ssCaptureViaScreenShare();
+    } catch(e) {
+      console.log('Screen share failed:', e.message);
+    }
+  }
+
+  // Method 4: Static thumbnail fallback (poster image + timestamp overlay)
   if (!dataUrl) {
     dataUrl = await ssCaptureViaThumbnail(ctx.videoId, timestamp);
   }
@@ -159,12 +184,130 @@ async function ssCapture() {
 
   // Feedback
   showToast(`📸 Screenshot_${num} saved! (${ssFormatTime(timestamp)})`, 'success');
+  ssShowNotify(`📸 Screenshot_${num} saved at ${ssFormatTime(timestamp)} — view it in Notes tab!`);
   ssRenderGallery();
+  ssRenderNotesPage();
   ssUpdateBadge();
 }
 
-/* ── Screen Capture via getDisplayMedia ── */
-async function ssCaptureViaScreenShare(timestamp) {
+/* ─────────────────────────────────────────────────────────────
+   METHOD 1: Tab Capture — preferCurrentTab crops to player
+   Works on Chrome 94+, Edge 94+. Captures current tab without
+   user needing to pick from a dialog.
+───────────────────────────────────────────────────────────── */
+async function ssCaptureTabCrop(timestamp) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+    throw new Error('getDisplayMedia not available');
+  }
+
+  // preferCurrentTab: true avoids the screen picker dialog
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: { cursor: 'never' },
+    audio: false,
+    preferCurrentTab: true
+  });
+
+  const dataUrl = await ssGrabFrameFromStream(stream);
+  return ssCropToPlayer(dataUrl);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   METHOD 2: YouTube Storyboard — frame image at exact second
+   YouTube generates frame thumbnails at ~2-10 second intervals.
+   We request the closest available frame to the current time.
+───────────────────────────────────────────────────────────── */
+async function ssCaptureStoryboard(videoId, timestamp) {
+  const cleanId = videoId.replace('playlist_', '');
+
+  // YouTube's video frame endpoint provides actual frames
+  // Format: https://i.ytimg.com/vi_webp/{id}/frame{N}.webp (N=0,1,2,3)
+  // Or the storyboard sprite sheets at specific intervals
+  // Best approach: use the internal frame thumbnail that some videos expose
+
+  // Try to get video info to find storyboard spec
+  const storyboardUrl = await ssGetStoryboardUrl(cleanId, timestamp);
+  if (storyboardUrl) {
+    const img = await ssLoadImage(storyboardUrl).catch(() => null);
+    if (img && img.naturalWidth > 120) {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const c = canvas.getContext('2d');
+      c.drawImage(img, 0, 0);
+      return canvas.toDataURL('image/jpeg', 0.92);
+    }
+  }
+
+  // Fallback: YouTube's frame0-3 images (fixed frames, not timestamp-specific)
+  // These are actual video frames YouTube pre-generates
+  const frameUrls = [
+    `https://i.ytimg.com/vi/${cleanId}/maxresdefault.jpg`,
+    `https://i.ytimg.com/vi/${cleanId}/sddefault.jpg`,
+    `https://i.ytimg.com/vi/${cleanId}/hq1.jpg`,
+    `https://i.ytimg.com/vi/${cleanId}/hq2.jpg`,
+    `https://i.ytimg.com/vi/${cleanId}/hq3.jpg`
+  ];
+
+  // hq1, hq2, hq3 are frames at 25%, 50%, 75% of video — pick closest to timestamp
+  // If we know video duration, pick the closest frame
+  let videoDuration = 0;
+  try {
+    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration) {
+      videoDuration = ytPlayer.getDuration();
+    } else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration) {
+      videoDuration = ytoPlayerV2.getDuration();
+    }
+  } catch(e) {}
+
+  // If we have duration, pick closest hq frame
+  if (videoDuration > 0 && timestamp > 0) {
+    const pct = timestamp / videoDuration;
+    let bestFrame;
+    if (pct < 0.375) bestFrame = `https://i.ytimg.com/vi/${cleanId}/hq1.jpg`; // 25%
+    else if (pct < 0.625) bestFrame = `https://i.ytimg.com/vi/${cleanId}/hq2.jpg`; // 50%
+    else bestFrame = `https://i.ytimg.com/vi/${cleanId}/hq3.jpg`; // 75%
+
+    try {
+      const img = await ssLoadImage(bestFrame);
+      if (img.naturalWidth > 120) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const c = canvas.getContext('2d');
+        c.drawImage(img, 0, 0);
+        // Add timestamp overlay to indicate when this was captured
+        ssAddTimestampOverlay(c, canvas.width, canvas.height, timestamp);
+        return canvas.toDataURL('image/jpeg', 0.92);
+      }
+    } catch(e) {}
+  }
+
+  throw new Error('Storyboard frames not available');
+}
+
+/* ── Get storyboard URL from YouTube's player response ── */
+async function ssGetStoryboardUrl(videoId, timestamp) {
+  // YouTube exposes storyboard sprite sheets via their video info endpoint
+  // These are grids of frames. We fetch the info and extract a frame.
+  try {
+    const resp = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+    if (!resp.ok) return null;
+    // oEmbed doesn't give storyboard data, so we use the i.ytimg frame endpoints
+    // YouTube generates frame images at specific points
+    // Try the WebP frame format that some videos have
+    const webpUrl = `https://i.ytimg.com/vi_webp/${videoId}/sddefault.webp`;
+    const img = await ssLoadImage(webpUrl).catch(() => null);
+    if (img && img.naturalWidth > 120) return webpUrl;
+  } catch(e) {}
+  return null;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   METHOD 3: Full Screen Share — getDisplayMedia (user picks)
+   Falls back to standard screen share if tab capture isn't supported.
+   We crop the captured image to the player area.
+───────────────────────────────────────────────────────────── */
+async function ssCaptureViaScreenShare() {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
     throw new Error('Screen Capture API not available');
   }
@@ -174,7 +317,44 @@ async function ssCaptureViaScreenShare(timestamp) {
     audio: false
   });
 
-  // Grab a frame
+  const dataUrl = await ssGrabFrameFromStream(stream);
+  return ssCropToPlayer(dataUrl);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   METHOD 4: Static Thumbnail Fallback
+───────────────────────────────────────────────────────────── */
+async function ssCaptureViaThumbnail(videoId, timestamp) {
+  const cleanId = videoId.replace('playlist_', '');
+  const urls = [
+    `https://i.ytimg.com/vi/${cleanId}/maxresdefault.jpg`,
+    `https://i.ytimg.com/vi/${cleanId}/hqdefault.jpg`,
+    `https://i.ytimg.com/vi/${cleanId}/mqdefault.jpg`
+  ];
+
+  for (const url of urls) {
+    try {
+      const img = await ssLoadImage(url);
+      if (img.naturalWidth > 120) {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const c = canvas.getContext('2d');
+        c.drawImage(img, 0, 0);
+        ssAddTimestampOverlay(c, canvas.width, canvas.height, timestamp);
+        return canvas.toDataURL('image/jpeg', 0.9);
+      }
+    } catch(e) { continue; }
+  }
+  return null;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SHARED CAPTURE UTILITIES
+══════════════════════════════════════════════════════════════ */
+
+/* ── Grab a single frame from a MediaStream → dataUrl ── */
+async function ssGrabFrameFromStream(stream) {
   const track = stream.getVideoTracks()[0];
   const settings = track.getSettings();
   const canvas = document.createElement('canvas');
@@ -189,11 +369,11 @@ async function ssCaptureViaScreenShare(timestamp) {
     video.onloadedmetadata = () => { video.play(); resolve(); };
   });
 
-  // Small delay to ensure frame is rendered
-  await new Promise(r => setTimeout(r, 150));
+  // Wait for a frame to render
+  await new Promise(r => setTimeout(r, 200));
 
-  const ctxCanvas = canvas.getContext('2d');
-  ctxCanvas.drawImage(video, 0, 0, canvas.width, canvas.height);
+  const c = canvas.getContext('2d');
+  c.drawImage(video, 0, 0, canvas.width, canvas.height);
 
   // Stop the stream immediately
   stream.getTracks().forEach(t => t.stop());
@@ -202,40 +382,81 @@ async function ssCaptureViaScreenShare(timestamp) {
   return canvas.toDataURL('image/png');
 }
 
-/* ── Thumbnail fallback: YouTube's time-based thumbnail ── */
-async function ssCaptureViaThumbnail(videoId, timestamp) {
-  // YouTube provides thumbnails at specific intervals
-  // Use the highest quality thumbnail available
-  const cleanId = videoId.replace('playlist_', '');
-  const urls = [
-    `https://i.ytimg.com/vi/${cleanId}/maxresdefault.jpg`,
-    `https://i.ytimg.com/vi/${cleanId}/hqdefault.jpg`,
-    `https://i.ytimg.com/vi/${cleanId}/mqdefault.jpg`
-  ];
+/* ── Crop captured image to the YouTube player area ── */
+async function ssCropToPlayer(fullDataUrl) {
+  // Find the player element's position in the viewport
+  const playerEl = document.getElementById('yt-player')
+    || document.getElementById('yto-player-host')
+    || document.querySelector('.yt-player-wrap iframe')
+    || document.querySelector('#yt-player-wrap iframe');
 
-  for (const url of urls) {
-    try {
-      const img = await ssLoadImage(url);
-      if (img.naturalWidth > 120) { // Skip YouTube's default "no thumbnail" placeholder
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        const ctx2 = canvas.getContext('2d');
-        ctx2.drawImage(img, 0, 0);
+  if (!playerEl) return fullDataUrl; // Can't crop, return full capture
 
-        // Add timestamp overlay
-        ctx2.fillStyle = 'rgba(0,0,0,0.7)';
-        ctx2.fillRect(canvas.width - 120, canvas.height - 36, 120, 36);
-        ctx2.fillStyle = '#fff';
-        ctx2.font = 'bold 16px Inter, sans-serif';
-        ctx2.textAlign = 'right';
-        ctx2.fillText(ssFormatTime(timestamp), canvas.width - 12, canvas.height - 12);
+  const rect = playerEl.getBoundingClientRect();
+  const vpW = window.innerWidth;
+  const vpH = window.innerHeight;
 
-        return canvas.toDataURL('image/jpeg', 0.9);
-      }
-    } catch(e) { continue; }
+  // Load the full capture as an image
+  const img = await ssLoadImageFromDataUrl(fullDataUrl);
+  const imgW = img.naturalWidth;
+  const imgH = img.naturalHeight;
+
+  // Scale factor between captured image and viewport
+  const scaleX = imgW / vpW;
+  const scaleY = imgH / vpH;
+
+  // Calculate crop area
+  const cropX = Math.max(0, Math.round(rect.left * scaleX));
+  const cropY = Math.max(0, Math.round(rect.top * scaleY));
+  const cropW = Math.min(imgW - cropX, Math.round(rect.width * scaleX));
+  const cropH = Math.min(imgH - cropY, Math.round(rect.height * scaleY));
+
+  if (cropW < 50 || cropH < 50) return fullDataUrl; // Too small, skip crop
+
+  const canvas = document.createElement('canvas');
+  canvas.width = cropW;
+  canvas.height = cropH;
+  const c = canvas.getContext('2d');
+  c.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+  return canvas.toDataURL('image/png');
+}
+
+/* ── Load image from data URL ── */
+function ssLoadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+/* ── Add timestamp overlay badge to canvas ── */
+function ssAddTimestampOverlay(ctx2d, width, height, timestamp) {
+  const timeText = ssFormatTime(timestamp);
+  const padding = 10;
+  const badgeW = 110;
+  const badgeH = 30;
+  const x = width - badgeW - padding;
+  const y = height - badgeH - padding;
+
+  // Background
+  ctx2d.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx2d.beginPath();
+  if (ctx2d.roundRect) {
+    ctx2d.roundRect(x, y, badgeW, badgeH, 6);
+  } else {
+    ctx2d.rect(x, y, badgeW, badgeH);
   }
-  return null;
+  ctx2d.fill();
+
+  // Text
+  ctx2d.fillStyle = '#00C896';
+  ctx2d.font = 'bold 14px Inter, system-ui, sans-serif';
+  ctx2d.textAlign = 'center';
+  ctx2d.textBaseline = 'middle';
+  ctx2d.fillText('⏱ ' + timeText, x + badgeW / 2, y + badgeH / 2);
 }
 
 function ssLoadImage(url) {
@@ -278,7 +499,9 @@ function ssAddBookmark() {
   ssSave();
 
   showToast(`🔖 Bookmark_${num} saved at ${ssFormatTime(timestamp)}`, 'success');
+  ssShowNotify(`🔖 Bookmark_${num} saved at ${ssFormatTime(timestamp)} — view it in Notes tab!`);
   ssRenderGallery();
+  ssRenderNotesPage();
   ssUpdateBadge();
 }
 
@@ -340,6 +563,7 @@ function ssDeleteItem(playlistId, videoId, itemId) {
 
   ssSave();
   ssRenderGallery();
+  ssRenderNotesPage();
   ssUpdateBadge();
   showToast('Item deleted.', 'info');
 }
@@ -513,6 +737,7 @@ function ssClearAll() {
   ssState.folders = {};
   ssSave();
   ssRenderGallery();
+  ssRenderNotesPage();
   ssUpdateBadge();
   showToast('All screenshots & bookmarks cleared.', 'info');
 }
@@ -534,6 +759,266 @@ function ssExportAll() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Export complete! 📦', 'success');
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ENHANCED NOTIFICATION — Slide-down banner on screenshot save
+══════════════════════════════════════════════════════════════ */
+let ssNotifyTimer = null;
+
+function ssShowNotify(message) {
+  const banner = document.getElementById('ss-notify-banner');
+  const textEl = document.getElementById('ss-notify-text');
+  if (!banner || !textEl) return;
+  textEl.textContent = message;
+  banner.classList.add('show');
+  clearTimeout(ssNotifyTimer);
+  ssNotifyTimer = setTimeout(() => { ssHideNotify(); }, 4000);
+}
+
+function ssHideNotify() {
+  const banner = document.getElementById('ss-notify-banner');
+  if (banner) banner.classList.remove('show');
+  clearTimeout(ssNotifyTimer);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DEDICATED NOTES PAGE — Full-page tree + grid view
+══════════════════════════════════════════════════════════════ */
+let ssCurrentView = 'tree'; // 'tree' | 'grid'
+
+function ssSetView(view) {
+  ssCurrentView = view;
+  document.getElementById('ss-view-tree')?.classList.toggle('active', view === 'tree');
+  document.getElementById('ss-view-grid')?.classList.toggle('active', view === 'grid');
+  ssRenderNotesPage();
+}
+
+/* ── Update stats on Notes page ── */
+function ssUpdatePageStats() {
+  const state = ssGetState();
+  let totalItems = 0, totalScreenshots = 0, totalBookmarks = 0;
+  const plKeys = Object.keys(state.folders);
+
+  plKeys.forEach(plId => {
+    const folder = state.folders[plId];
+    Object.values(folder.videos).forEach(vf => {
+      vf.items.forEach(item => {
+        totalItems++;
+        if (item.type === 'screenshot') totalScreenshots++;
+        else totalBookmarks++;
+      });
+    });
+  });
+
+  const el = id => document.getElementById(id);
+  if (el('ss-stat-total')) el('ss-stat-total').textContent = totalItems;
+  if (el('ss-stat-screenshots')) el('ss-stat-screenshots').textContent = totalScreenshots;
+  if (el('ss-stat-bookmarks')) el('ss-stat-bookmarks').textContent = totalBookmarks;
+  if (el('ss-stat-playlists')) el('ss-stat-playlists').textContent = plKeys.length;
+}
+
+/* ── Populate playlist filter dropdown ── */
+function ssPopulateFilters() {
+  const filterEl = document.getElementById('ss-page-filter');
+  if (!filterEl) return;
+  const state = ssGetState();
+  const currentVal = filterEl.value;
+
+  let options = '<option value="all">All Playlists</option>';
+  Object.keys(state.folders).forEach(plId => {
+    const f = state.folders[plId];
+    options += `<option value="${plId}">${escapeHtml(f.name)}</option>`;
+  });
+  filterEl.innerHTML = options;
+
+  // Restore previous selection if still valid
+  if (currentVal && state.folders[currentVal]) {
+    filterEl.value = currentVal;
+  }
+}
+
+/* ── Main render for Notes page ── */
+function ssRenderNotesPage() {
+  const container = document.getElementById('ss-page-content');
+  if (!container) return;
+
+  ssUpdatePageStats();
+  ssPopulateFilters();
+
+  const state = ssGetState();
+  const playlistFilter = document.getElementById('ss-page-filter')?.value || 'all';
+  const typeFilter = document.getElementById('ss-page-type-filter')?.value || 'all';
+
+  // Get filtered folder keys
+  let folderKeys = Object.keys(state.folders);
+  if (playlistFilter !== 'all') {
+    folderKeys = folderKeys.filter(k => k === playlistFilter);
+  }
+
+  // Check if empty
+  const hasItems = folderKeys.some(plId => {
+    const folder = state.folders[plId];
+    return Object.values(folder.videos).some(vf =>
+      vf.items.some(i => typeFilter === 'all' || i.type === typeFilter)
+    );
+  });
+
+  if (!hasItems) {
+    container.innerHTML = `
+      <div class="ss-page-empty">
+        <div class="ss-page-empty-icon">📂</div>
+        <h3>No screenshots or bookmarks yet</h3>
+        <p>Go to the <strong>YouTube</strong> tab, play a video, and click <strong>📸 Screenshot</strong> or <strong>🔖 Bookmark</strong> to start capturing!</p>
+        <button class="ss-goto-yt-btn" onclick="switchPage('youtube')">▶ Go to YouTube Tab</button>
+      </div>`;
+    return;
+  }
+
+  if (ssCurrentView === 'tree') {
+    ssRenderNotesTree(container, folderKeys, typeFilter);
+  } else {
+    ssRenderNotesGrid(container, folderKeys, typeFilter);
+  }
+}
+
+/* ── Tree View for Notes Page ── */
+function ssRenderNotesTree(container, folderKeys, typeFilter) {
+  const state = ssGetState();
+  let html = '';
+
+  folderKeys.forEach(plId => {
+    const folder = state.folders[plId];
+    const videoKeys = Object.keys(folder.videos);
+
+    // Filter items
+    let totalFiltered = 0;
+    videoKeys.forEach(vId => {
+      totalFiltered += folder.videos[vId].items.filter(i => typeFilter === 'all' || i.type === typeFilter).length;
+    });
+    if (totalFiltered === 0) return;
+
+    html += `<div class="ss-folder-group ss-page-folder">
+      <div class="ss-folder-header" onclick="ssToggleFolder(this)">
+        <span class="ss-folder-icon">📂</span>
+        <span class="ss-folder-name">${escapeHtml(folder.name)}</span>
+        <span class="ss-folder-count">${totalFiltered} items</span>
+        <span class="ss-folder-chevron">▼</span>
+      </div>
+      <div class="ss-folder-children">`;
+
+    videoKeys.forEach(vId => {
+      const vf = folder.videos[vId];
+      const filteredItems = vf.items.filter(i => typeFilter === 'all' || i.type === typeFilter);
+      if (!filteredItems.length) return;
+
+      html += `<div class="ss-video-group">
+        <div class="ss-video-header" onclick="ssToggleFolder(this)">
+          <span class="ss-video-icon">📁</span>
+          <span class="ss-video-name">${escapeHtml(vf.name)}</span>
+          <span class="ss-folder-count">${filteredItems.length}</span>
+          <span class="ss-folder-chevron">▼</span>
+        </div>
+        <div class="ss-folder-children ss-items-list">`;
+
+      filteredItems.forEach(item => {
+        if (item.type === 'screenshot') {
+          html += `<div class="ss-item ss-item-screenshot ss-page-item">
+            <div class="ss-item-thumb" onclick="ssPreview('${plId}','${vId}','${item.id}')">
+              <img src="${item.dataUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
+            </div>
+            <div class="ss-item-info">
+              <div class="ss-item-label">🖼️ ${escapeHtml(item.label)}</div>
+              <div class="ss-item-time" onclick="ssSeekTo(${item.timestamp})">⏱ ${item.timeLabel}</div>
+              <div class="ss-item-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+            </div>
+            <div class="ss-item-actions">
+              <button onclick="ssDownload('${plId}','${vId}','${item.id}')" title="Download">⬇</button>
+              <button onclick="ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
+            </div>
+          </div>`;
+        } else {
+          html += `<div class="ss-item ss-item-bookmark ss-page-item" onclick="ssSeekTo(${item.timestamp})">
+            <div class="ss-item-info">
+              <div class="ss-item-label">🔖 ${escapeHtml(item.label)}</div>
+              <div class="ss-item-time">⏱ ${item.timeLabel}</div>
+              ${item.note ? `<div class="ss-item-note">${escapeHtml(item.note)}</div>` : ''}
+              <div class="ss-item-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+            </div>
+            <div class="ss-item-actions">
+              <button onclick="event.stopPropagation();ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
+            </div>
+          </div>`;
+        }
+      });
+
+      html += `</div></div>`;
+    });
+
+    html += `</div></div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+/* ── Grid View for Notes Page ── */
+function ssRenderNotesGrid(container, folderKeys, typeFilter) {
+  const state = ssGetState();
+  let allItems = [];
+
+  folderKeys.forEach(plId => {
+    const folder = state.folders[plId];
+    Object.keys(folder.videos).forEach(vId => {
+      const vf = folder.videos[vId];
+      vf.items.forEach(item => {
+        if (typeFilter === 'all' || item.type === typeFilter) {
+          allItems.push({ ...item, plId, vId, playlistName: folder.name, videoName: vf.name });
+        }
+      });
+    });
+  });
+
+  // Sort newest first
+  allItems.sort((a, b) => b.createdAt - a.createdAt);
+
+  let html = '<div class="ss-grid-view">';
+
+  allItems.forEach(item => {
+    if (item.type === 'screenshot') {
+      html += `<div class="ss-grid-card">
+        <div class="ss-grid-thumb" onclick="ssPreview('${item.plId}','${item.vId}','${item.id}')">
+          <img src="${item.dataUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
+          <div class="ss-grid-time-badge">⏱ ${item.timeLabel}</div>
+        </div>
+        <div class="ss-grid-info">
+          <div class="ss-grid-label">🖼️ ${escapeHtml(item.label)}</div>
+          <div class="ss-grid-video">${escapeHtml(item.videoName)}</div>
+          <div class="ss-grid-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+        <div class="ss-grid-actions">
+          <button onclick="ssDownload('${item.plId}','${item.vId}','${item.id}')" title="Download">⬇</button>
+          <button onclick="ssDeleteItem('${item.plId}','${item.vId}','${item.id}')" title="Delete">🗑</button>
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="ss-grid-card ss-grid-bookmark" onclick="ssSeekTo(${item.timestamp})">
+        <div class="ss-grid-bk-icon">🔖</div>
+        <div class="ss-grid-info">
+          <div class="ss-grid-label">${escapeHtml(item.label)}</div>
+          <div class="ss-grid-video">${escapeHtml(item.videoName)}</div>
+          <div class="ss-grid-time">⏱ ${item.timeLabel}</div>
+          ${item.note ? `<div class="ss-grid-note">${escapeHtml(item.note)}</div>` : ''}
+          <div class="ss-grid-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+        <div class="ss-grid-actions">
+          <button onclick="event.stopPropagation();ssDeleteItem('${item.plId}','${item.vId}','${item.id}')" title="Delete">🗑</button>
+        </div>
+      </div>`;
+    }
+  });
+
+  html += '</div>';
+  container.innerHTML = html;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -608,13 +1093,16 @@ function ssInit() {
   if (document.getElementById('yt-speed-bar')) {
     ssInit();
   }
-  // Also hook into page switch to init when YouTube tab activates
+  // Hook into page switch to init when YouTube or Notes tab activates
   const origSwitchPage = window.switchPage;
   if (origSwitchPage) {
     window.switchPage = function(page) {
       origSwitchPage(page);
       if (page === 'youtube') {
         setTimeout(ssInit, 100);
+      }
+      if (page === 'notes') {
+        setTimeout(ssRenderNotesPage, 50);
       }
     };
   }

@@ -16,5 +16,6 @@ function switchPage(page) {
     try { refreshPlannerBadges(); }       catch(e) {} // refresh phase badge
   }
   if (page === 'revision') renderRevisionQueue();
+  if (page === 'notes') { try { ssRenderNotesPage(); } catch(e) {} }
 }
 
