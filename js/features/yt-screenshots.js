@@ -136,6 +136,22 @@ function ssCapture() {
     return;
   }
 
+  // Free user limit: max 10 moments
+  var FREE_MOMENT_LIMIT = 10;
+  var state = ssGetState();
+  var totalMoments = 0;
+  Object.values(state.folders).forEach(function(f) {
+    Object.values(f.videos).forEach(function(vf) {
+      totalMoments += vf.items.filter(function(i) { return i.type === 'screenshot'; }).length;
+    });
+  });
+
+  var isPro = (typeof ezIsPro === 'function') ? ezIsPro() : false;
+  if (!isPro && totalMoments >= FREE_MOMENT_LIMIT) {
+    showToast('⚠️ Free limit reached! (' + FREE_MOMENT_LIMIT + ' moments). Upgrade to Pro for unlimited.', 'error');
+    return;
+  }
+
   var timestamp = ssGetVideoTimestamp();
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
