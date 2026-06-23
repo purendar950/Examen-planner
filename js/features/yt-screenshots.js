@@ -111,21 +111,25 @@ function ssCountType(videoFolder, type) {
 
 
 /* ══════════════════════════════════════════════════════════════
-   SCREENSHOT CAPTURE — Current Scene via Screen Capture
+   SCREENSHOT / SCENE CAPTURE
    ─────────────────────────────────────────────────────────────
-   The ONLY way to capture the exact current video frame is via
-   the Screen Capture API. YouTube's iframe is cross-origin so
-   we cannot access its <video> element directly.
+   YouTube's cross-origin iframe + CORS restrictions make it
+   impossible to capture the exact video frame on mobile without
+   special permissions.
 
-   Flow:
-   1. Show user a toast explaining they need to tap "Allow"
-   2. Request screen/tab capture
-   3. Auto-crop to the YouTube player area
-   4. Save the actual frame the user sees on screen
-   5. If user declines → save YouTube's nearest frame image as fallback
+   Our approach: Save a SMART VISUAL BOOKMARK that includes:
+   - The YouTube thumbnail image (displayed via <img> tag)
+   - The exact timestamp (clickable — seeks video to that point)
+   - Video title and playlist context
+   - A "▶ Replay" button that jumps to that exact second
+
+   This is MORE useful than a static screenshot because:
+   - You can tap to replay the exact moment
+   - It works on ALL devices without any permissions
+   - No CORS, no Screen Capture API needed
 ══════════════════════════════════════════════════════════════ */
 
-async function ssCapture() {
+function ssCapture() {
   var ctx = ssGetCurrentContext();
   if (ctx.videoId === 'unknown') {
     showToast('Pehle ek video play karo!', 'error');
@@ -136,23 +140,24 @@ async function ssCapture() {
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
 
-  var dataUrl = null;
-  var imageUrl = null;
+  // YouTube serves frame thumbnails at these URLs (no CORS needed for <img>)
+  // We use the highest quality available
+  var imageUrl = 'https://i.ytimg.com/vi/' + cleanId + '/hqdefault.jpg';
 
-  // Screen Capture — the only way to get the actual current frame
-  if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
-    showToast('📸 Tap "Allow" to capture the current scene...', 'info');
-    try {
-      dataUrl = await ssCaptureScreen();
-    } catch(e) {
-      // User declined — use fallback
-      showToast('Screen share declined — saving nearest YouTube frame instead', 'info');
-    }
-  }
+  // Try to get a frame closer to current position
+  var duration = 0;
+  try {
+    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration)
+      duration = ytPlayer.getDuration();
+    else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration)
+      duration = ytoPlayerV2.getDuration();
+  } catch(e) {}
 
-  // Fallback: YouTube frame URL (not exact timestamp, but closest available)
-  if (!dataUrl) {
-    imageUrl = ssPickFrameUrl(cleanId, timestamp);
+  if (duration > 0 && timestamp > 0) {
+    var pct = timestamp / duration;
+    if (pct >= 0.15 && pct < 0.375) imageUrl = 'https://i.ytimg.com/vi/' + cleanId + '/hq1.jpg';
+    else if (pct >= 0.375 && pct < 0.625) imageUrl = 'https://i.ytimg.com/vi/' + cleanId + '/hq2.jpg';
+    else if (pct >= 0.625) imageUrl = 'https://i.ytimg.com/vi/' + cleanId + '/hq3.jpg';
   }
 
   // Save to folder
@@ -164,83 +169,20 @@ async function ssCapture() {
     number: num,
     timestamp: timestamp,
     timeLabel: ssFormatTime(timestamp),
-    dataUrl: dataUrl || null,
-    imageUrl: imageUrl || null,
+    imageUrl: imageUrl,
+    videoId: cleanId,
+    videoTitle: ctx.videoName,
     createdAt: Date.now(),
     label: 'Screenshot_' + num
   };
   videoFolder.items.push(item);
   ssSave();
 
-  var method = dataUrl ? '(actual scene captured!)' : '(YouTube frame - tap Allow next time for exact scene)';
-  showToast('📸 Screenshot_' + num + ' saved! ' + method, 'success');
-  ssShowNotify('📸 Screenshot_' + num + ' at ' + ssFormatTime(timestamp) + ' — ' + (dataUrl ? 'exact scene!' : 'tap Allow for exact capture'));
+  showToast('📸 Screenshot_' + num + ' saved at ' + ssFormatTime(timestamp) + '!', 'success');
+  ssShowNotify('📸 Screenshot_' + num + ' at ' + ssFormatTime(timestamp) + ' — tap to replay this moment!');
   ssRenderGallery();
   ssRenderNotesPage();
   ssUpdateBadge();
-}
-
-/* ── Pick the best YouTube frame URL based on playback position ── */
-function ssPickFrameUrl(cleanId, timestamp) {
-  var duration = 0;
-  try {
-    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration)
-      duration = ytPlayer.getDuration();
-    else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration)
-      duration = ytoPlayerV2.getDuration();
-  } catch(e) {}
-
-  var pct = (duration > 0 && timestamp > 0) ? (timestamp / duration) : 0.5;
-
-  // Pick frame: 1=25%, 2=50%, 3=75%, default=poster
-  if (pct < 0.15) return 'https://i.ytimg.com/vi/' + cleanId + '/hqdefault.jpg';
-  if (pct < 0.375) return 'https://i.ytimg.com/vi/' + cleanId + '/hq1.jpg';
-  if (pct < 0.625) return 'https://i.ytimg.com/vi/' + cleanId + '/hq2.jpg';
-  return 'https://i.ytimg.com/vi/' + cleanId + '/hq3.jpg';
-}
-
-/* ── Screen Capture (desktop) ── */
-async function ssCaptureScreen() {
-  var stream;
-  try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { displaySurface: 'browser', cursor: 'never' },
-      audio: false, preferCurrentTab: true
-    });
-  } catch(e) {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'never' }, audio: false
-    });
-  }
-  var track = stream.getVideoTracks()[0];
-  var s = track.getSettings();
-  var w = s.width || 1920, h = s.height || 1080;
-  var video = document.createElement('video');
-  video.srcObject = stream; video.muted = true; video.playsInline = true;
-  await new Promise(function(r) { video.onloadedmetadata = function() { video.play(); r(); }; });
-  await new Promise(function(r) { setTimeout(r, 300); });
-  var canvas = document.createElement('canvas');
-  canvas.width = w; canvas.height = h;
-  canvas.getContext('2d').drawImage(video, 0, 0, w, h);
-  stream.getTracks().forEach(function(t) { t.stop(); });
-  video.srcObject = null;
-
-  // Crop to player
-  var el = document.querySelector('#yt-player-wrap iframe') || document.getElementById('yt-player')
-    || document.querySelector('#yto-player-host iframe');
-  if (el) {
-    var r = el.getBoundingClientRect();
-    var sx = w / window.innerWidth, sy = h / window.innerHeight;
-    var cx = Math.floor(r.left * sx), cy = Math.floor(r.top * sy);
-    var cw = Math.floor(r.width * sx), ch = Math.floor(r.height * sy);
-    if (cw > 100 && ch > 60) {
-      var c2 = document.createElement('canvas');
-      c2.width = cw; c2.height = ch;
-      c2.getContext('2d').drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
-      return c2.toDataURL('image/jpeg', 0.92);
-    }
-  }
-  return canvas.toDataURL('image/jpeg', 0.92);
 }
 
 
@@ -437,16 +379,16 @@ function ssRenderGallery() {
 
       vf.items.forEach(item => {
         if (item.type === 'screenshot') {
+          var imgSrc = item.dataUrl || item.imageUrl || '';
           html += `<div class="ss-item ss-item-screenshot">
-            <div class="ss-item-thumb" onclick="ssPreview('${plId}','${vId}','${item.id}')">
-              <img src="${item.dataUrl || item.imageUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
+            <div class="ss-item-thumb" onclick="ssSeekTo(${item.timestamp})">
+              <img src="${imgSrc}" alt="${escapeHtml(item.label)}" loading="lazy">
             </div>
             <div class="ss-item-info">
               <div class="ss-item-label">🖼️ ${escapeHtml(item.label)}</div>
-              <div class="ss-item-time" onclick="ssSeekTo(${item.timestamp})">⏱ ${item.timeLabel}</div>
+              <div class="ss-item-time" onclick="ssSeekTo(${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
             </div>
             <div class="ss-item-actions">
-              <button onclick="ssDownload('${plId}','${vId}','${item.id}')" title="Download">⬇</button>
               <button onclick="ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
             </div>
           </div>`;
@@ -703,17 +645,17 @@ function ssRenderNotesTree(container, folderKeys, typeFilter) {
 
       filteredItems.forEach(item => {
         if (item.type === 'screenshot') {
+          var imgSrc2 = item.dataUrl || item.imageUrl || '';
           html += `<div class="ss-item ss-item-screenshot ss-page-item">
-            <div class="ss-item-thumb" onclick="ssPreview('${plId}','${vId}','${item.id}')">
-              <img src="${item.dataUrl || item.imageUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
+            <div class="ss-item-thumb" onclick="ssSeekTo(${item.timestamp})">
+              <img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy">
             </div>
             <div class="ss-item-info">
               <div class="ss-item-label">🖼️ ${escapeHtml(item.label)}</div>
-              <div class="ss-item-time" onclick="ssSeekTo(${item.timestamp})">⏱ ${item.timeLabel}</div>
+              <div class="ss-item-time" onclick="ssSeekTo(${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
               <div class="ss-item-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
             </div>
             <div class="ss-item-actions">
-              <button onclick="ssDownload('${plId}','${vId}','${item.id}')" title="Download">⬇</button>
               <button onclick="ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
             </div>
           </div>`;
@@ -766,9 +708,9 @@ function ssRenderNotesGrid(container, folderKeys, typeFilter) {
   allItems.forEach(item => {
     if (item.type === 'screenshot') {
       html += `<div class="ss-grid-card">
-        <div class="ss-grid-thumb" onclick="ssPreview('${item.plId}','${item.vId}','${item.id}')">
+        <div class="ss-grid-thumb" onclick="ssSeekTo(${item.timestamp})">
           <img src="${item.dataUrl || item.imageUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
-          <div class="ss-grid-time-badge">⏱ ${item.timeLabel}</div>
+          <div class="ss-grid-time-badge">▶ ${item.timeLabel}</div>
         </div>
         <div class="ss-grid-info">
           <div class="ss-grid-label">🖼️ ${escapeHtml(item.label)}</div>
@@ -776,7 +718,7 @@ function ssRenderNotesGrid(container, folderKeys, typeFilter) {
           <div class="ss-grid-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
         </div>
         <div class="ss-grid-actions">
-          <button onclick="ssDownload('${item.plId}','${item.vId}','${item.id}')" title="Download">⬇</button>
+          <button onclick="ssSeekTo(${item.timestamp})" title="Replay">▶</button>
           <button onclick="ssDeleteItem('${item.plId}','${item.vId}','${item.id}')" title="Delete">🗑</button>
         </div>
       </div>`;
@@ -815,8 +757,8 @@ function ssInit() {
     toolbar.id = 'ss-toolbar';
     toolbar.className = 'ss-toolbar';
     toolbar.innerHTML = `
-      <button class="ss-capture-btn" onclick="ssCapture()" title="Capture current video frame (tap Allow when asked)">
-        📸 Capture Scene
+      <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment with thumbnail + timestamp">
+        📸 Save Moment
       </button>
       <button class="ss-bookmark-btn" onclick="ssAddBookmark()" title="Add timestamp bookmark at current position">
         🔖 Bookmark
