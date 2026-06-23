@@ -56,6 +56,21 @@
             </label>
           </div>
 
+          <!-- Auto-move unfinished tasks -->
+          <div class="cs-toggle-card">
+            <div class="cs-toggle-info">
+              <div class="cs-toggle-icon">⏳</div>
+              <div>
+                <div class="cs-toggle-title">Auto-move Tasks</div>
+                <div class="cs-toggle-sub">Carry unfinished tasks to today</div>
+              </div>
+            </div>
+            <label class="cs-switch">
+              <input type="checkbox" id="rollover-toggle-input" checked onchange="toggleAutoRollover(this.checked)">
+              <span class="cs-switch-track"></span>
+            </label>
+          </div>
+
           <!-- Smart AI Generator -->
           <div class="ai-gen-card">
             <div class="ai-gen-header">

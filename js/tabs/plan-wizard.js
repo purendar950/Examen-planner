@@ -1139,6 +1139,7 @@ function renderTaskList(dateStr) {
     return `<div class="task-item" style="border-left-color:${sc};">
       <div class="ch-checkbox${t.done?' checked':''}" onclick="toggleTask('${dateStr}','${t.id}')">${t.done?'✓':''}</div>
       <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${escapeHtml(t.text)}</span>
+      ${typeof rolloverBadgeHtml === 'function' ? rolloverBadgeHtml(t) : ''}
       ${s?`<span class="task-subject-chip" style="background:${sc}22;color:${sc};">${escapeHtml(ss)}</span>`:''}
       <button class="ch-action-btn" onclick="deleteTask('${dateStr}','${t.id}')">🗑</button>
     </div>`;

@@ -10,6 +10,7 @@ function switchPage(page) {
   if (page === 'dashboard') updateDashboard();
   if (page === 'planner') {
     buildPlannerCalendar();
+    try { syncRolloverToggle(); }    catch(e) {} // reflect auto-rollover setting
     try { renderMilestoneCard(); }   catch(e) {} // Feature 4
     try { renderPaceTrackerCard(); } catch(e) {} // Feature 5
     try { refreshPlannerBadges(); }       catch(e) {} // refresh phase badge

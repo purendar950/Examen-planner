@@ -33,7 +33,9 @@ let appState = {
   revisionStreak: 0,
   lastRevisionDate: null,
   plans: [],          // Saved plans: [{id, type, name, createdAt, cfg}]
-  activePlanId: null  // id of the plan currently shown in the timetable
+  activePlanId: null, // id of the plan currently shown in the timetable
+  autoRolloverTasks: true, // move incomplete manual tasks forward to today (on by default)
+  lastRolloverDate: null   // guard so the rollover sweep runs once per day
 };
 
 let currentFilter = 'all';
