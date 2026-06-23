@@ -259,7 +259,7 @@ let ytCurrentVideoId = null;
 let ytCurrentVideoTitle = 'Unknown Video';
 let ytVideoWatched = {}; // videoId -> true
 let ytPlaylistVideos = []; // [{id, title, thumb, duration, position, publishedAt}]
-let ytSortMode = 'playlist'; // 'playlist' | 'oldest' | 'newest'
+let ytSortMode = 'oldest'; // 'playlist' | 'oldest' | 'newest' — default: oldest uploaded first
 
 const YT_API_KEY = 'AIzaSyDJVRXrAcvAzslMfjSAU2os4cobdzOyHmw';
 
@@ -293,7 +293,7 @@ window.onYouTubeIframeAPIReady = function() {
       },
       onStateChange: function(e) {
         if (e.data === YT.PlayerState.PLAYING)  { ytStartProgressPolling(); }
-        if (e.data === YT.PlayerState.PAUSED)   { ytStopProgressPolling(); }
+        if (e.data === YT.PlayerState.PAUSED)   { ytStopProgressPolling(); ytSaveCurrentTime(); }
         if (e.data === YT.PlayerState.ENDED) {
           ytStopProgressPolling();
           ytAutoMarkOnComplete();     // plain playlist + organiser (90% path)
@@ -329,9 +329,57 @@ function ytDoLoad(type, id) {
   if (type === 'playlist') {
     ytPlayer.loadPlaylist({ listType: 'playlist', list: id, index: 0 });
   } else {
-    ytPlayer.loadVideoById({ videoId: id });
+    const start = ytResumeSeconds(id);
+    if (start > 0) {
+      ytPlayer.loadVideoById({ videoId: id, startSeconds: start });
+      showToast('▶ Resuming from ' + ytFormatDuration(start), 'info');
+    } else {
+      ytPlayer.loadVideoById({ videoId: id });
+    }
   }
 }
+
+/* Returns the saved resume time (seconds) for a video, or 0 if it should
+   start fresh (no saved progress, or it was already ~finished). */
+function ytResumeSeconds(videoId) {
+  try {
+    const plKey = ytoCurrentPl || ytCurrentPlaylistId || '_single';
+    const pct = (appState.ytVidProgress && appState.ytVidProgress[plKey] && appState.ytVidProgress[plKey][videoId]) || 0;
+    if (pct >= 95) return 0; // basically finished — restart from the top
+    const t = (appState.ytVidTime && appState.ytVidTime[plKey] && appState.ytVidTime[plKey][videoId]) || 0;
+    return (t && t > 5) ? Math.floor(t) : 0;
+  } catch (e) { return 0; }
+}
+
+/* Save the current playback time + percent so it survives tab close / refresh */
+function ytSaveCurrentTime() {
+  if (!ytPlayer || !ytPlayerReady || !ytCurrentVideoId) return;
+  if (/^playlist_/.test(ytCurrentVideoId)) return;
+  let cur = 0, dur = 0;
+  try { cur = ytPlayer.getCurrentTime(); dur = ytPlayer.getDuration(); } catch (e) { return; }
+  if (!cur || cur < 1) return;
+  const plKey = ytoCurrentPl || ytCurrentPlaylistId || '_single';
+  if (!appState.ytVidTime) appState.ytVidTime = {};
+  if (!appState.ytVidTime[plKey]) appState.ytVidTime[plKey] = {};
+  appState.ytVidTime[plKey][ytCurrentVideoId] = Math.floor(cur);
+  if (dur > 0) {
+    const pct = Math.round(cur / dur * 100);
+    if (!appState.ytVidProgress) appState.ytVidProgress = {};
+    if (!appState.ytVidProgress[plKey]) appState.ytVidProgress[plKey] = {};
+    appState.ytVidProgress[plKey][ytCurrentVideoId] = pct;
+  }
+  try { saveProgress(); } catch (e) {}
+}
+
+/* Save playback position when the tab is hidden, closed, or backgrounded
+   — covers the "suddenly closed the tab" case so progress isn't lost. */
+(function ytRegisterSaveOnExit() {
+  document.addEventListener('visibilitychange', function() {
+    if (document.hidden) ytSaveCurrentTime();
+  });
+  window.addEventListener('pagehide', ytSaveCurrentTime);
+  window.addEventListener('beforeunload', ytSaveCurrentTime);
+})();
 
 /* ══════════════════════════════════════════════
    SPEED CONTROL + PiP
@@ -347,12 +395,15 @@ function ytSetSpeed(rate) {
 
 /* ══════════════════════════════════════════════
    PiP — Document Picture-in-Picture API
-   (iframe.requestPictureInPicture does NOT work — the
-    <video> is inside a cross-origin YouTube iframe and is
-    inaccessible. We pop the whole player DOM into a floating
-    Document-PiP window instead, which keeps playback alive.)
+   NOTE: iframe.requestPictureInPicture() never works — the <video>
+   lives inside a cross-origin YouTube iframe and is inaccessible.
+   Re-parenting the player iframe into a PiP window RELOADS it and
+   breaks the JS API (speed/progress/auto-mark). So instead we keep
+   the main player intact (just paused) and spawn a FRESH lightweight
+   embed in the PiP window starting at the current timestamp. On close
+   we seek the main player to where PiP playback reached and resume.
 ══════════════════════════════════════════════ */
-let ytPipReturn = null; // { placeholder } to restore the player on close
+let ytPipState = null;
 
 function ytPiP() {
   // Toggle: if a PiP window is already open, close it
@@ -361,10 +412,21 @@ function ytPiP() {
     return;
   }
 
-  const wrap = document.getElementById('yt-player-wrap');
-  const playerEl = document.getElementById('yt-player');
-  const hasVideo = playerEl && playerEl.style.display !== 'none';
-  if (!wrap || !hasVideo) {
+  if (!ytPlayer || !ytPlayerReady) {
+    showToast('Pehle koi video play karo', 'error');
+    return;
+  }
+
+  // Resolve the real video id + current time from the live player
+  let vid = ytCurrentVideoId;
+  let time = 0;
+  try {
+    const vd = ytPlayer.getVideoData && ytPlayer.getVideoData();
+    if (vd && vd.video_id) vid = vd.video_id;
+    time = ytPlayer.getCurrentTime() || 0;
+  } catch (e) {}
+
+  if (!vid || /^playlist_/.test(vid) || vid.length !== 11) {
     showToast('Pehle koi video play karo', 'error');
     return;
   }
@@ -374,43 +436,37 @@ function ytPiP() {
     return;
   }
 
-  window.documentPictureInPicture.requestWindow({ width: 480, height: 300 })
+  window.documentPictureInPicture.requestWindow({ width: 480, height: 285 })
     .then(function(pipWin) {
-      // Copy current page styles so the player looks right inside PiP
-      try {
-        [...document.styleSheets].forEach(function(ss) {
-          try {
-            const rules = [...ss.cssRules].map(function(r) { return r.cssText; }).join('');
-            const styleEl = pipWin.document.createElement('style');
-            styleEl.textContent = rules;
-            pipWin.document.head.appendChild(styleEl);
-          } catch (e) {
-            if (ss.href) {
-              const link = pipWin.document.createElement('link');
-              link.rel = 'stylesheet'; link.href = ss.href;
-              pipWin.document.head.appendChild(link);
-            }
-          }
-        });
-      } catch (e) {}
+      pipWin.document.body.style.cssText = 'margin:0;background:#000;overflow:hidden;';
+      const startSec = Math.floor(time);
+      const iframe = pipWin.document.createElement('iframe');
+      iframe.style.cssText = 'width:100%;height:100%;border:0;position:fixed;inset:0;';
+      iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+      iframe.allowFullscreen = true;
+      iframe.src = ytBuildEmbedUrl('video', vid, 1) + '&start=' + startSec;
+      pipWin.document.body.appendChild(iframe);
 
-      pipWin.document.body.style.margin = '0';
-      pipWin.document.body.style.background = '#000';
+      // Pause the main player so audio doesn't play twice
+      let rate = 1;
+      try { rate = ytPlayer.getPlaybackRate() || 1; } catch (e) {}
+      try { ytPlayer.pauseVideo(); } catch (e) {}
 
-      // Leave a placeholder so we can put the player back exactly where it was
-      const placeholder = document.createElement('div');
-      wrap.parentNode.insertBefore(placeholder, wrap);
-      ytPipReturn = { placeholder: placeholder };
-
-      pipWin.document.body.appendChild(wrap);
+      ytPipState = { vid: vid, startSec: startSec, openedAt: Date.now(), rate: rate };
       showToast('Picture-in-Picture ON 📺', 'success');
 
-      // When the PiP window closes, move the player back
+      // On close: resume the main player roughly where PiP playback reached
       pipWin.addEventListener('pagehide', function() {
-        if (ytPipReturn && ytPipReturn.placeholder && ytPipReturn.placeholder.parentNode) {
-          ytPipReturn.placeholder.parentNode.replaceChild(wrap, ytPipReturn.placeholder);
-        }
-        ytPipReturn = null;
+        if (!ytPipState) return;
+        const elapsed = ((Date.now() - ytPipState.openedAt) / 1000) * (ytPipState.rate || 1);
+        const resumeAt = ytPipState.startSec + elapsed;
+        try {
+          ytPlayer.seekTo(resumeAt, true);
+          ytPlayer.playVideo();
+        } catch (e) {}
+        // Persist the new position immediately
+        ytSaveCurrentTime();
+        ytPipState = null;
       });
     })
     .catch(function() {
@@ -587,7 +643,7 @@ async function ytBuildPlaylistPanel(plId) {
   countEl.textContent = `${ytPlaylistVideos.length} videos`;
 
   // Restore + apply saved sort preference, reveal the sort control
-  ytSortMode = appState.ytSortMode || 'playlist';
+  ytSortMode = appState.ytSortMode || 'oldest';
   const sortRow = document.getElementById('yt-sort-row');
   const sortSel = document.getElementById('yt-sort-sel');
   if (sortSel) sortSel.value = ytSortMode;
@@ -728,6 +784,12 @@ function ytStartProgressPolling() {
     var plKey = ytoCurrentPl || ytCurrentPlaylistId || '_single';
     if (!appState.ytVidProgress[plKey]) appState.ytVidProgress[plKey] = {};
     appState.ytVidProgress[plKey][ytCurrentVideoId] = pct;
+
+    // Save exact playback position (seconds) for resume-on-reopen
+    if (!appState.ytVidTime) appState.ytVidTime = {};
+    if (!appState.ytVidTime[plKey]) appState.ytVidTime[plKey] = {};
+    appState.ytVidTime[plKey][ytCurrentVideoId] = Math.floor(cur);
+    saveProgress();
 
     // Update "X% watched" label in sidebar list
     ytUpdateVideoWatchLabel(ytCurrentVideoId, pct);
