@@ -1635,3 +1635,358 @@
   @media (max-width: 480px) {
     .ezw-exam-grid { grid-template-columns: 1fr; }
   }
+
+
+
+  /* ══════════════════════════════════════════════════════════════
+     SCREENSHOT & BOOKMARKS FEATURE — Styles
+  ══════════════════════════════════════════════════════════════ */
+
+  /* ── Capture Toolbar (below speed bar) ── */
+  .ss-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+  }
+  .ss-capture-btn, .ss-bookmark-btn, .ss-gallery-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--text);
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .ss-capture-btn:hover {
+    background: rgba(0,200,150,0.12);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .ss-bookmark-btn:hover {
+    background: rgba(245,158,11,0.12);
+    border-color: var(--amber);
+    color: var(--amber);
+  }
+  .ss-gallery-btn:hover {
+    background: rgba(59,130,246,0.12);
+    border-color: var(--blue);
+    color: var(--blue);
+  }
+  .ss-badge {
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 700;
+    border-radius: 99px;
+    padding: 1px 6px;
+    min-width: 18px;
+    text-align: center;
+  }
+
+  /* ── Gallery Side Panel ── */
+  .ss-gallery-panel {
+    position: fixed;
+    top: 0;
+    right: -380px;
+    width: 370px;
+    max-width: 90vw;
+    height: 100vh;
+    background: var(--card);
+    border-left: 1px solid var(--border);
+    box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    transition: right 0.3s ease;
+  }
+  .ss-gallery-panel.open {
+    right: 0;
+  }
+  .ss-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 16px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .ss-panel-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+  .ss-panel-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .ss-panel-action-btn {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+  }
+  .ss-panel-action-btn:hover {
+    color: var(--text);
+    border-color: var(--accent);
+  }
+  .ss-panel-action-btn.ss-danger:hover {
+    color: var(--red);
+    border-color: var(--red);
+  }
+  .ss-panel-close {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: color 0.2s;
+  }
+  .ss-panel-close:hover {
+    color: var(--text);
+  }
+  .ss-panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+  }
+
+  /* ── Tree View ── */
+  .ss-folder-group {
+    margin-bottom: 8px;
+  }
+  .ss-folder-header, .ss-video-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    user-select: none;
+  }
+  .ss-folder-header:hover, .ss-video-header:hover {
+    background: var(--surface);
+  }
+  .ss-folder-icon, .ss-video-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+  .ss-folder-name, .ss-video-name {
+    flex: 1;
+    font-size: 0.82rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ss-video-name {
+    font-weight: 500;
+    color: var(--text);
+  }
+  .ss-folder-count {
+    font-size: 0.68rem;
+    color: var(--muted);
+    background: var(--surface);
+    padding: 2px 7px;
+    border-radius: 99px;
+    flex-shrink: 0;
+  }
+  .ss-folder-chevron {
+    font-size: 0.65rem;
+    color: var(--muted);
+    flex-shrink: 0;
+    transition: transform 0.2s;
+  }
+  .ss-folder-children {
+    padding-left: 16px;
+  }
+  .ss-video-group {
+    margin-bottom: 4px;
+  }
+
+  /* ── Items ── */
+  .ss-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 4px;
+    padding-left: 8px;
+  }
+  .ss-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    transition: border-color 0.2s;
+  }
+  .ss-item:hover {
+    border-color: var(--accent);
+  }
+  .ss-item-screenshot .ss-item-thumb {
+    width: 64px;
+    height: 36px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: #000;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .ss-item-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .ss-item-info {
+    flex: 1;
+    min-width: 0;
+  }
+  .ss-item-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ss-item-time {
+    font-size: 0.7rem;
+    color: var(--accent);
+    cursor: pointer;
+    margin-top: 2px;
+  }
+  .ss-item-time:hover {
+    text-decoration: underline;
+  }
+  .ss-item-note {
+    font-size: 0.7rem;
+    color: var(--muted);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ss-item-bookmark {
+    cursor: pointer;
+    border-left: 3px solid var(--amber);
+  }
+  .ss-item-bookmark:hover {
+    border-color: var(--amber);
+    background: rgba(245,158,11,0.06);
+  }
+  .ss-item-actions {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  .ss-item-actions button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    transition: all 0.2s;
+  }
+  .ss-item-actions button:hover {
+    color: var(--text);
+    background: var(--card);
+  }
+
+  /* ── Empty State ── */
+  .ss-empty {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: var(--muted);
+  }
+  .ss-empty p {
+    font-size: 0.82rem;
+  }
+
+  /* ── Preview Modal ── */
+  .ss-preview-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 10010;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+  }
+  .ss-preview-overlay.open {
+    display: flex;
+  }
+  .ss-preview-modal {
+    position: relative;
+    max-width: 90vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .ss-preview-modal img {
+    max-width: 100%;
+    max-height: 75vh;
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .ss-preview-close {
+    position: absolute;
+    top: -12px;
+    right: -12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 1rem;
+    z-index: 1;
+  }
+  .ss-preview-info {
+    margin-top: 12px;
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .ss-gallery-panel {
+      width: 100%;
+      right: -100%;
+    }
+    .ss-toolbar {
+      padding: 6px 8px;
+      gap: 6px;
+    }
+    .ss-capture-btn, .ss-bookmark-btn, .ss-gallery-btn {
+      padding: 5px 10px;
+      font-size: 0.72rem;
+    }
+  }
