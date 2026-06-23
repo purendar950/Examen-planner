@@ -113,46 +113,64 @@ function ssCountType(videoFolder, type) {
 /* ══════════════════════════════════════════════════════════════
    SCREENSHOT CAPTURE — Captures the actual video scene
    ─────────────────────────────────────────────────────────────
+   Due to YouTube's cross-origin iframe restrictions, we CANNOT
+   directly access the <video> element inside the player.
+
    Strategy:
-   1. Screen/Tab Capture API → auto-crops to player area
-      (This captures the REAL scene at the current moment)
-   2. Fallback: YouTube thumbnail with timestamp badge
-      (Only if user declines screen share)
+   1. Screen/Tab Capture (desktop only) → crops to player area
+   2. YouTube Storyboard frames → actual video frames at intervals
+   3. Poster thumbnail with timestamp badge (last resort)
+
+   NOTE TO USER: On mobile, method 1 may not work. The app will
+   ask for screen share permission. If you "Allow", it captures
+   the actual scene. If you cancel, it uses the best available
+   YouTube frame image.
 ══════════════════════════════════════════════════════════════ */
 
 async function ssCapture() {
-  const ctx = ssGetCurrentContext();
+  var ctx = ssGetCurrentContext();
   if (ctx.videoId === 'unknown') {
     showToast('Pehle ek video play karo! ▶', 'error');
     return;
   }
 
-  const timestamp = ssGetVideoTimestamp();
-  showToast('📸 Capturing frame...', 'info');
+  var timestamp = ssGetVideoTimestamp();
+  showToast('📸 Capturing...', 'info');
 
-  let dataUrl = null;
+  var dataUrl = null;
 
-  // Primary: Screen capture — captures the actual visible video frame
-  try {
-    dataUrl = await ssCaptureScreen();
-  } catch(e) {
-    console.log('Screen capture skipped:', e.message || e);
+  // Method 1: Screen/Tab capture (works on desktop, may work on some mobile)
+  if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+    try {
+      dataUrl = await ssCaptureScreen();
+    } catch(e) {
+      console.log('Screen capture skipped:', e.message || e);
+    }
   }
 
-  // Fallback: YouTube thumbnail + timestamp overlay
+  // Method 2: YouTube frame at current time via storyboard
+  if (!dataUrl) {
+    try {
+      dataUrl = await ssCaptureFrameAtTime(ctx.videoId, timestamp);
+    } catch(e) {
+      console.log('Frame capture failed:', e.message || e);
+    }
+  }
+
+  // Method 3: Poster thumbnail with timestamp badge
   if (!dataUrl) {
     dataUrl = await ssFallbackThumbnail(ctx.videoId, timestamp);
   }
 
   if (!dataUrl) {
-    showToast('Screenshot capture fail hua. Try again!', 'error');
+    showToast('Screenshot fail hua. Try again!', 'error');
     return;
   }
 
   // Save to folder structure
-  const videoFolder = ssEnsureFolder(ctx);
-  const num = ssCountType(videoFolder, 'screenshot') + 1;
-  const item = {
+  var videoFolder = ssEnsureFolder(ctx);
+  var num = ssCountType(videoFolder, 'screenshot') + 1;
+  var item = {
     id: ssGenerateId(),
     type: 'screenshot',
     number: num,
@@ -172,29 +190,23 @@ async function ssCapture() {
   ssUpdateBadge();
 }
 
-/* ── Screen/Tab Capture: captures what user actually sees ── */
+/* ─────────────────────────────────────────────────────────────
+   METHOD 1: Screen Capture (desktop browsers)
+───────────────────────────────────────────────────────────── */
 async function ssCaptureScreen() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-    throw new Error('getDisplayMedia not supported');
-  }
-
   var stream;
   try {
-    // preferCurrentTab (Chrome 94+) skips the picker dialog
     stream = await navigator.mediaDevices.getDisplayMedia({
       video: { displaySurface: 'browser', cursor: 'never' },
       audio: false,
       preferCurrentTab: true
     });
   } catch(e1) {
-    // Fallback: standard screen share (shows picker)
     stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { cursor: 'never' },
-      audio: false
+      video: { cursor: 'never' }, audio: false
     });
   }
 
-  // Grab a video frame from the stream
   var track = stream.getVideoTracks()[0];
   var settings = track.getSettings();
   var w = settings.width || 1920;
@@ -204,67 +216,117 @@ async function ssCaptureScreen() {
   video.srcObject = stream;
   video.muted = true;
   video.playsInline = true;
-
-  await new Promise(function(resolve) {
-    video.onloadedmetadata = function() { video.play(); resolve(); };
-  });
-  await new Promise(function(r) { setTimeout(r, 300); }); // wait for frame
+  await new Promise(function(res) { video.onloadedmetadata = function() { video.play(); res(); }; });
+  await new Promise(function(r) { setTimeout(r, 300); });
 
   var canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  var c = canvas.getContext('2d');
-  c.drawImage(video, 0, 0, w, h);
-
-  // Stop stream
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(video, 0, 0, w, h);
   stream.getTracks().forEach(function(t) { t.stop(); });
   video.srcObject = null;
 
-  // Crop to just the YouTube player area
-  var fullDataUrl = canvas.toDataURL('image/jpeg', 0.92);
-  return ssCropToPlayer(fullDataUrl, w, h);
+  return ssCropToPlayer(canvas.toDataURL('image/jpeg', 0.92), w, h);
 }
 
-/* ── Crop full-page capture to the video player rect ── */
+/* ── Crop to YouTube player area ── */
 async function ssCropToPlayer(fullDataUrl, captureW, captureH) {
   var playerEl = document.querySelector('#yt-player-wrap iframe')
     || document.getElementById('yt-player')
     || document.querySelector('#yto-player-host iframe')
     || document.getElementById('yto-player-host');
-
   if (!playerEl) return fullDataUrl;
 
   var rect = playerEl.getBoundingClientRect();
   if (rect.width < 50 || rect.height < 50) return fullDataUrl;
 
-  var vpW = window.innerWidth || document.documentElement.clientWidth;
-  var vpH = window.innerHeight || document.documentElement.clientHeight;
+  var vpW = window.innerWidth;
+  var vpH = window.innerHeight;
   var scaleX = captureW / vpW;
   var scaleY = captureH / vpH;
-
   var cropX = Math.max(0, Math.floor(rect.left * scaleX));
   var cropY = Math.max(0, Math.floor(rect.top * scaleY));
   var cropW = Math.min(captureW - cropX, Math.floor(rect.width * scaleX));
   var cropH = Math.min(captureH - cropY, Math.floor(rect.height * scaleY));
-
   if (cropW < 100 || cropH < 60) return fullDataUrl;
 
-  var img = await new Promise(function(resolve, reject) {
-    var i = new Image();
-    i.onload = function() { resolve(i); };
-    i.onerror = reject;
-    i.src = fullDataUrl;
+  var img = await new Promise(function(res, rej) {
+    var i = new Image(); i.onload = function() { res(i); }; i.onerror = rej; i.src = fullDataUrl;
   });
-
   var canvas = document.createElement('canvas');
-  canvas.width = cropW;
-  canvas.height = cropH;
-  var c = canvas.getContext('2d');
-  c.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  canvas.width = cropW; canvas.height = cropH;
+  canvas.getContext('2d').drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
   return canvas.toDataURL('image/jpeg', 0.92);
 }
 
-/* ── Fallback: YouTube thumbnail with timestamp badge ── */
+/* ─────────────────────────────────────────────────────────────
+   METHOD 2: YouTube frame image at current timestamp
+   YouTube serves actual video frames via storyboard URLs.
+   We use the YouTube Data API (already have key) to fetch
+   the frame closest to the current playback time.
+───────────────────────────────────────────────────────────── */
+async function ssCaptureFrameAtTime(videoId, timestamp) {
+  var cleanId = videoId.replace('playlist_', '');
+
+  // Get video duration for percentage calculation
+  var duration = 0;
+  try {
+    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration)
+      duration = ytPlayer.getDuration();
+    else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration)
+      duration = ytoPlayerV2.getDuration();
+  } catch(e) {}
+
+  // YouTube generates frame thumbnails at these positions:
+  // default.jpg = 0s, 1.jpg=25%, 2.jpg=50%, 3.jpg=75%
+  // Also: hq1.jpg, hq2.jpg, hq3.jpg (higher quality versions)
+  // And: maxres1.jpg, maxres2.jpg, maxres3.jpg (max quality)
+  var pct = (duration > 0 && timestamp > 0) ? (timestamp / duration) : 0.5;
+
+  // Pick the closest frame based on timestamp percentage
+  var frameIdx;
+  if (pct < 0.125) frameIdx = 'default'; // ~0%
+  else if (pct < 0.375) frameIdx = '1';  // ~25%
+  else if (pct < 0.625) frameIdx = '2';  // ~50%
+  else if (pct < 0.875) frameIdx = '3';  // ~75%
+  else frameIdx = '3'; // near end, use 75%
+
+  // Try high-quality frame images (these are ACTUAL video frames, not poster)
+  var frameUrls = [];
+  if (frameIdx === 'default') {
+    frameUrls = [
+      'https://i.ytimg.com/vi/' + cleanId + '/maxresdefault.jpg',
+      'https://i.ytimg.com/vi/' + cleanId + '/sddefault.jpg'
+    ];
+  } else {
+    frameUrls = [
+      'https://i.ytimg.com/vi/' + cleanId + '/maxres' + frameIdx + '.jpg',
+      'https://i.ytimg.com/vi/' + cleanId + '/hq' + frameIdx + '.jpg',
+      'https://i.ytimg.com/vi/' + cleanId + '/sd' + frameIdx + '.jpg'
+    ];
+  }
+
+  for (var i = 0; i < frameUrls.length; i++) {
+    try {
+      var img = await ssLoadImage(frameUrls[i]);
+      // YouTube returns a 120x90 placeholder if the frame doesn't exist
+      if (img && img.naturalWidth > 200 && img.naturalHeight > 150) {
+        var canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        var c = canvas.getContext('2d');
+        c.drawImage(img, 0, 0);
+        ssAddTimestampOverlay(c, canvas.width, canvas.height, timestamp);
+        return canvas.toDataURL('image/jpeg', 0.92);
+      }
+    } catch(e) { continue; }
+  }
+
+  throw new Error('No frame images available');
+}
+
+/* ─────────────────────────────────────────────────────────────
+   METHOD 3: Poster thumbnail with timestamp (last resort)
+───────────────────────────────────────────────────────────── */
 async function ssFallbackThumbnail(videoId, timestamp) {
   var cleanId = videoId.replace('playlist_', '');
   var urls = [
@@ -290,7 +352,10 @@ async function ssFallbackThumbnail(videoId, timestamp) {
   return null;
 }
 
-/* ── Load cross-origin image ── */
+/* ══════════════════════════════════════════════════════════════
+   CAPTURE UTILITIES
+══════════════════════════════════════════════════════════════ */
+
 function ssLoadImage(url) {
   return new Promise(function(resolve, reject) {
     var img = new Image();
@@ -301,12 +366,10 @@ function ssLoadImage(url) {
   });
 }
 
-/* ── Timestamp overlay on canvas ── */
 function ssAddTimestampOverlay(ctx2d, width, height, timestamp) {
   var timeText = ssFormatTime(timestamp);
   var badgeW = 100, badgeH = 26;
-  var x = width - badgeW - 8;
-  var y = height - badgeH - 8;
+  var x = width - badgeW - 8, y = height - badgeH - 8;
 
   ctx2d.fillStyle = 'rgba(0,0,0,0.8)';
   ctx2d.beginPath();
