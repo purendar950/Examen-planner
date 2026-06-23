@@ -111,20 +111,18 @@ function ssCountType(videoFolder, type) {
 
 
 /* ══════════════════════════════════════════════════════════════
-   SCREENSHOT CAPTURE
+   SCREENSHOT CAPTURE — Current Scene via Screen Capture
    ─────────────────────────────────────────────────────────────
-   YouTube iframe is cross-origin — we cannot draw it to canvas.
-   YouTube CDN blocks CORS headers — crossOrigin='anonymous' fails.
+   The ONLY way to capture the exact current video frame is via
+   the Screen Capture API. YouTube's iframe is cross-origin so
+   we cannot access its <video> element directly.
 
-   Solution: Store the YouTube image URL directly (not as dataUrl).
-   The browser can display <img src="youtube-url"> just fine.
-   We pick the frame closest to current playback position:
-   - hq1.jpg = ~25% of video (actual frame, not poster)
-   - hq2.jpg = ~50% of video
-   - hq3.jpg = ~75% of video
-   - hqdefault.jpg = poster/intro frame
-
-   On desktop: Screen Capture API captures the real screen.
+   Flow:
+   1. Show user a toast explaining they need to tap "Allow"
+   2. Request screen/tab capture
+   3. Auto-crop to the YouTube player area
+   4. Save the actual frame the user sees on screen
+   5. If user declines → save YouTube's nearest frame image as fallback
 ══════════════════════════════════════════════════════════════ */
 
 async function ssCapture() {
@@ -138,17 +136,21 @@ async function ssCapture() {
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
 
-  // Try Screen Capture first (desktop only — captures real scene)
   var dataUrl = null;
+  var imageUrl = null;
+
+  // Screen Capture — the only way to get the actual current frame
   if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+    showToast('📸 Tap "Allow" to capture the current scene...', 'info');
     try {
       dataUrl = await ssCaptureScreen();
-    } catch(e) { /* user declined or mobile */ }
+    } catch(e) {
+      // User declined — use fallback
+      showToast('Screen share declined — saving nearest YouTube frame instead', 'info');
+    }
   }
 
-  // If screen capture worked, save as dataUrl
-  // Otherwise, save YouTube frame image URL directly
-  var imageUrl = null;
+  // Fallback: YouTube frame URL (not exact timestamp, but closest available)
   if (!dataUrl) {
     imageUrl = ssPickFrameUrl(cleanId, timestamp);
   }
@@ -170,8 +172,9 @@ async function ssCapture() {
   videoFolder.items.push(item);
   ssSave();
 
-  showToast('Screenshot_' + num + ' saved! (' + ssFormatTime(timestamp) + ')', 'success');
-  ssShowNotify('Screenshot_' + num + ' saved at ' + ssFormatTime(timestamp) + ' — view in Notes tab!');
+  var method = dataUrl ? '(actual scene captured!)' : '(YouTube frame - tap Allow next time for exact scene)';
+  showToast('📸 Screenshot_' + num + ' saved! ' + method, 'success');
+  ssShowNotify('📸 Screenshot_' + num + ' at ' + ssFormatTime(timestamp) + ' — ' + (dataUrl ? 'exact scene!' : 'tap Allow for exact capture'));
   ssRenderGallery();
   ssRenderNotesPage();
   ssUpdateBadge();
@@ -812,8 +815,8 @@ function ssInit() {
     toolbar.id = 'ss-toolbar';
     toolbar.className = 'ss-toolbar';
     toolbar.innerHTML = `
-      <button class="ss-capture-btn" onclick="ssCapture()" title="Capture screenshot of current video frame">
-        📸 Screenshot
+      <button class="ss-capture-btn" onclick="ssCapture()" title="Capture current video frame (tap Allow when asked)">
+        📸 Capture Scene
       </button>
       <button class="ss-bookmark-btn" onclick="ssAddBookmark()" title="Add timestamp bookmark at current position">
         🔖 Bookmark
