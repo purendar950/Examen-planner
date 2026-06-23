@@ -787,9 +787,6 @@ function ssInit() {
       <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment with thumbnail + timestamp">
         📸 Save Moment
       </button>
-      <button class="ss-bookmark-btn" onclick="ssAddBookmark()" title="Add timestamp bookmark at current position">
-        🔖 Bookmark
-      </button>
       <button class="ss-gallery-btn" onclick="ssTogglePanel()" title="Open screenshot gallery">
         📂 Gallery <span class="ss-badge" id="ss-badge-count" style="display:none">0</span>
       </button>
