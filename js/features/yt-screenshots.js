@@ -159,7 +159,9 @@ async function ssCapture() {
 
   // Feedback
   showToast(`📸 Screenshot_${num} saved! (${ssFormatTime(timestamp)})`, 'success');
+  ssShowNotify(`📸 Screenshot_${num} saved at ${ssFormatTime(timestamp)} — view it in Notes tab!`);
   ssRenderGallery();
+  ssRenderNotesPage();
   ssUpdateBadge();
 }
 
@@ -278,7 +280,9 @@ function ssAddBookmark() {
   ssSave();
 
   showToast(`🔖 Bookmark_${num} saved at ${ssFormatTime(timestamp)}`, 'success');
+  ssShowNotify(`🔖 Bookmark_${num} saved at ${ssFormatTime(timestamp)} — view it in Notes tab!`);
   ssRenderGallery();
+  ssRenderNotesPage();
   ssUpdateBadge();
 }
 
@@ -340,6 +344,7 @@ function ssDeleteItem(playlistId, videoId, itemId) {
 
   ssSave();
   ssRenderGallery();
+  ssRenderNotesPage();
   ssUpdateBadge();
   showToast('Item deleted.', 'info');
 }
@@ -513,6 +518,7 @@ function ssClearAll() {
   ssState.folders = {};
   ssSave();
   ssRenderGallery();
+  ssRenderNotesPage();
   ssUpdateBadge();
   showToast('All screenshots & bookmarks cleared.', 'info');
 }
@@ -534,6 +540,266 @@ function ssExportAll() {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('Export complete! 📦', 'success');
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ENHANCED NOTIFICATION — Slide-down banner on screenshot save
+══════════════════════════════════════════════════════════════ */
+let ssNotifyTimer = null;
+
+function ssShowNotify(message) {
+  const banner = document.getElementById('ss-notify-banner');
+  const textEl = document.getElementById('ss-notify-text');
+  if (!banner || !textEl) return;
+  textEl.textContent = message;
+  banner.classList.add('show');
+  clearTimeout(ssNotifyTimer);
+  ssNotifyTimer = setTimeout(() => { ssHideNotify(); }, 4000);
+}
+
+function ssHideNotify() {
+  const banner = document.getElementById('ss-notify-banner');
+  if (banner) banner.classList.remove('show');
+  clearTimeout(ssNotifyTimer);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   DEDICATED NOTES PAGE — Full-page tree + grid view
+══════════════════════════════════════════════════════════════ */
+let ssCurrentView = 'tree'; // 'tree' | 'grid'
+
+function ssSetView(view) {
+  ssCurrentView = view;
+  document.getElementById('ss-view-tree')?.classList.toggle('active', view === 'tree');
+  document.getElementById('ss-view-grid')?.classList.toggle('active', view === 'grid');
+  ssRenderNotesPage();
+}
+
+/* ── Update stats on Notes page ── */
+function ssUpdatePageStats() {
+  const state = ssGetState();
+  let totalItems = 0, totalScreenshots = 0, totalBookmarks = 0;
+  const plKeys = Object.keys(state.folders);
+
+  plKeys.forEach(plId => {
+    const folder = state.folders[plId];
+    Object.values(folder.videos).forEach(vf => {
+      vf.items.forEach(item => {
+        totalItems++;
+        if (item.type === 'screenshot') totalScreenshots++;
+        else totalBookmarks++;
+      });
+    });
+  });
+
+  const el = id => document.getElementById(id);
+  if (el('ss-stat-total')) el('ss-stat-total').textContent = totalItems;
+  if (el('ss-stat-screenshots')) el('ss-stat-screenshots').textContent = totalScreenshots;
+  if (el('ss-stat-bookmarks')) el('ss-stat-bookmarks').textContent = totalBookmarks;
+  if (el('ss-stat-playlists')) el('ss-stat-playlists').textContent = plKeys.length;
+}
+
+/* ── Populate playlist filter dropdown ── */
+function ssPopulateFilters() {
+  const filterEl = document.getElementById('ss-page-filter');
+  if (!filterEl) return;
+  const state = ssGetState();
+  const currentVal = filterEl.value;
+
+  let options = '<option value="all">All Playlists</option>';
+  Object.keys(state.folders).forEach(plId => {
+    const f = state.folders[plId];
+    options += `<option value="${plId}">${escapeHtml(f.name)}</option>`;
+  });
+  filterEl.innerHTML = options;
+
+  // Restore previous selection if still valid
+  if (currentVal && state.folders[currentVal]) {
+    filterEl.value = currentVal;
+  }
+}
+
+/* ── Main render for Notes page ── */
+function ssRenderNotesPage() {
+  const container = document.getElementById('ss-page-content');
+  if (!container) return;
+
+  ssUpdatePageStats();
+  ssPopulateFilters();
+
+  const state = ssGetState();
+  const playlistFilter = document.getElementById('ss-page-filter')?.value || 'all';
+  const typeFilter = document.getElementById('ss-page-type-filter')?.value || 'all';
+
+  // Get filtered folder keys
+  let folderKeys = Object.keys(state.folders);
+  if (playlistFilter !== 'all') {
+    folderKeys = folderKeys.filter(k => k === playlistFilter);
+  }
+
+  // Check if empty
+  const hasItems = folderKeys.some(plId => {
+    const folder = state.folders[plId];
+    return Object.values(folder.videos).some(vf =>
+      vf.items.some(i => typeFilter === 'all' || i.type === typeFilter)
+    );
+  });
+
+  if (!hasItems) {
+    container.innerHTML = `
+      <div class="ss-page-empty">
+        <div class="ss-page-empty-icon">📂</div>
+        <h3>No screenshots or bookmarks yet</h3>
+        <p>Go to the <strong>YouTube</strong> tab, play a video, and click <strong>📸 Screenshot</strong> or <strong>🔖 Bookmark</strong> to start capturing!</p>
+        <button class="ss-goto-yt-btn" onclick="switchPage('youtube')">▶ Go to YouTube Tab</button>
+      </div>`;
+    return;
+  }
+
+  if (ssCurrentView === 'tree') {
+    ssRenderNotesTree(container, folderKeys, typeFilter);
+  } else {
+    ssRenderNotesGrid(container, folderKeys, typeFilter);
+  }
+}
+
+/* ── Tree View for Notes Page ── */
+function ssRenderNotesTree(container, folderKeys, typeFilter) {
+  const state = ssGetState();
+  let html = '';
+
+  folderKeys.forEach(plId => {
+    const folder = state.folders[plId];
+    const videoKeys = Object.keys(folder.videos);
+
+    // Filter items
+    let totalFiltered = 0;
+    videoKeys.forEach(vId => {
+      totalFiltered += folder.videos[vId].items.filter(i => typeFilter === 'all' || i.type === typeFilter).length;
+    });
+    if (totalFiltered === 0) return;
+
+    html += `<div class="ss-folder-group ss-page-folder">
+      <div class="ss-folder-header" onclick="ssToggleFolder(this)">
+        <span class="ss-folder-icon">📂</span>
+        <span class="ss-folder-name">${escapeHtml(folder.name)}</span>
+        <span class="ss-folder-count">${totalFiltered} items</span>
+        <span class="ss-folder-chevron">▼</span>
+      </div>
+      <div class="ss-folder-children">`;
+
+    videoKeys.forEach(vId => {
+      const vf = folder.videos[vId];
+      const filteredItems = vf.items.filter(i => typeFilter === 'all' || i.type === typeFilter);
+      if (!filteredItems.length) return;
+
+      html += `<div class="ss-video-group">
+        <div class="ss-video-header" onclick="ssToggleFolder(this)">
+          <span class="ss-video-icon">📁</span>
+          <span class="ss-video-name">${escapeHtml(vf.name)}</span>
+          <span class="ss-folder-count">${filteredItems.length}</span>
+          <span class="ss-folder-chevron">▼</span>
+        </div>
+        <div class="ss-folder-children ss-items-list">`;
+
+      filteredItems.forEach(item => {
+        if (item.type === 'screenshot') {
+          html += `<div class="ss-item ss-item-screenshot ss-page-item">
+            <div class="ss-item-thumb" onclick="ssPreview('${plId}','${vId}','${item.id}')">
+              <img src="${item.dataUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
+            </div>
+            <div class="ss-item-info">
+              <div class="ss-item-label">🖼️ ${escapeHtml(item.label)}</div>
+              <div class="ss-item-time" onclick="ssSeekTo(${item.timestamp})">⏱ ${item.timeLabel}</div>
+              <div class="ss-item-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+            </div>
+            <div class="ss-item-actions">
+              <button onclick="ssDownload('${plId}','${vId}','${item.id}')" title="Download">⬇</button>
+              <button onclick="ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
+            </div>
+          </div>`;
+        } else {
+          html += `<div class="ss-item ss-item-bookmark ss-page-item" onclick="ssSeekTo(${item.timestamp})">
+            <div class="ss-item-info">
+              <div class="ss-item-label">🔖 ${escapeHtml(item.label)}</div>
+              <div class="ss-item-time">⏱ ${item.timeLabel}</div>
+              ${item.note ? `<div class="ss-item-note">${escapeHtml(item.note)}</div>` : ''}
+              <div class="ss-item-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+            </div>
+            <div class="ss-item-actions">
+              <button onclick="event.stopPropagation();ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
+            </div>
+          </div>`;
+        }
+      });
+
+      html += `</div></div>`;
+    });
+
+    html += `</div></div>`;
+  });
+
+  container.innerHTML = html;
+}
+
+/* ── Grid View for Notes Page ── */
+function ssRenderNotesGrid(container, folderKeys, typeFilter) {
+  const state = ssGetState();
+  let allItems = [];
+
+  folderKeys.forEach(plId => {
+    const folder = state.folders[plId];
+    Object.keys(folder.videos).forEach(vId => {
+      const vf = folder.videos[vId];
+      vf.items.forEach(item => {
+        if (typeFilter === 'all' || item.type === typeFilter) {
+          allItems.push({ ...item, plId, vId, playlistName: folder.name, videoName: vf.name });
+        }
+      });
+    });
+  });
+
+  // Sort newest first
+  allItems.sort((a, b) => b.createdAt - a.createdAt);
+
+  let html = '<div class="ss-grid-view">';
+
+  allItems.forEach(item => {
+    if (item.type === 'screenshot') {
+      html += `<div class="ss-grid-card">
+        <div class="ss-grid-thumb" onclick="ssPreview('${item.plId}','${item.vId}','${item.id}')">
+          <img src="${item.dataUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
+          <div class="ss-grid-time-badge">⏱ ${item.timeLabel}</div>
+        </div>
+        <div class="ss-grid-info">
+          <div class="ss-grid-label">🖼️ ${escapeHtml(item.label)}</div>
+          <div class="ss-grid-video">${escapeHtml(item.videoName)}</div>
+          <div class="ss-grid-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+        <div class="ss-grid-actions">
+          <button onclick="ssDownload('${item.plId}','${item.vId}','${item.id}')" title="Download">⬇</button>
+          <button onclick="ssDeleteItem('${item.plId}','${item.vId}','${item.id}')" title="Delete">🗑</button>
+        </div>
+      </div>`;
+    } else {
+      html += `<div class="ss-grid-card ss-grid-bookmark" onclick="ssSeekTo(${item.timestamp})">
+        <div class="ss-grid-bk-icon">🔖</div>
+        <div class="ss-grid-info">
+          <div class="ss-grid-label">${escapeHtml(item.label)}</div>
+          <div class="ss-grid-video">${escapeHtml(item.videoName)}</div>
+          <div class="ss-grid-time">⏱ ${item.timeLabel}</div>
+          ${item.note ? `<div class="ss-grid-note">${escapeHtml(item.note)}</div>` : ''}
+          <div class="ss-grid-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+        </div>
+        <div class="ss-grid-actions">
+          <button onclick="event.stopPropagation();ssDeleteItem('${item.plId}','${item.vId}','${item.id}')" title="Delete">🗑</button>
+        </div>
+      </div>`;
+    }
+  });
+
+  html += '</div>';
+  container.innerHTML = html;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -608,13 +874,16 @@ function ssInit() {
   if (document.getElementById('yt-speed-bar')) {
     ssInit();
   }
-  // Also hook into page switch to init when YouTube tab activates
+  // Hook into page switch to init when YouTube or Notes tab activates
   const origSwitchPage = window.switchPage;
   if (origSwitchPage) {
     window.switchPage = function(page) {
       origSwitchPage(page);
       if (page === 'youtube') {
         setTimeout(ssInit, 100);
+      }
+      if (page === 'notes') {
+        setTimeout(ssRenderNotesPage, 50);
       }
     };
   }

@@ -1,0 +1,63 @@
+    <div class="page" id="page-notes">
+      <div style="margin-bottom:1.25rem;">
+        <h2 style="margin-bottom:4px;">📂 Notes & Screenshots</h2>
+        <p style="color:var(--muted);font-size:0.82rem;">All your video screenshots and bookmarks organized by playlist and video. Capture screenshots from the YouTube tab — they appear here automatically.</p>
+      </div>
+
+      <!-- Save Notification Banner (shown when screenshot is taken) -->
+      <div class="ss-notify-banner" id="ss-notify-banner">
+        <div class="ss-notify-icon">📸</div>
+        <div class="ss-notify-text" id="ss-notify-text">Screenshot saved!</div>
+        <button class="ss-notify-close" onclick="ssHideNotify()">✕</button>
+      </div>
+
+      <!-- Stats Bar -->
+      <div class="ss-page-stats" id="ss-page-stats">
+        <div class="ss-stat-card">
+          <div class="ss-stat-val" id="ss-stat-total">0</div>
+          <div class="ss-stat-lbl">Total Items</div>
+        </div>
+        <div class="ss-stat-card">
+          <div class="ss-stat-val" id="ss-stat-screenshots" style="color:var(--accent);">0</div>
+          <div class="ss-stat-lbl">Screenshots</div>
+        </div>
+        <div class="ss-stat-card">
+          <div class="ss-stat-val" id="ss-stat-bookmarks" style="color:var(--amber);">0</div>
+          <div class="ss-stat-lbl">Bookmarks</div>
+        </div>
+        <div class="ss-stat-card">
+          <div class="ss-stat-val" id="ss-stat-playlists" style="color:var(--blue);">0</div>
+          <div class="ss-stat-lbl">Playlists</div>
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="ss-page-toolbar">
+        <div class="ss-page-toolbar-left">
+          <select class="ss-filter-select" id="ss-page-filter" onchange="ssRenderNotesPage()">
+            <option value="all">All Playlists</option>
+          </select>
+          <select class="ss-filter-select" id="ss-page-type-filter" onchange="ssRenderNotesPage()">
+            <option value="all">All Types</option>
+            <option value="screenshot">Screenshots Only</option>
+            <option value="bookmark">Bookmarks Only</option>
+          </select>
+        </div>
+        <div class="ss-page-toolbar-right">
+          <button class="ss-page-action-btn" onclick="ssExportAll()" title="Export All">📦 Export</button>
+          <button class="ss-page-action-btn ss-danger-btn" onclick="ssClearAll()" title="Clear All">🗑 Clear All</button>
+        </div>
+      </div>
+
+      <!-- View Toggle -->
+      <div class="ss-view-toggle">
+        <button class="ss-view-btn active" id="ss-view-tree" onclick="ssSetView('tree')">🌳 Tree View</button>
+        <button class="ss-view-btn" id="ss-view-grid" onclick="ssSetView('grid')">🖼️ Grid View</button>
+      </div>
+
+      <!-- Main Content Area -->
+      <div id="ss-page-content" class="ss-page-content">
+        <!-- Rendered by JavaScript -->
+      </div>
+    </div>
+
