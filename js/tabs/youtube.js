@@ -770,14 +770,18 @@ function ytMarkWatched(videoId, rerender = true) {
 ══════════════════════════════════════════════ */
 
 /* Start polling every 5 sec while video is playing.
-   NOTE: we update position in memory every tick, but only PERSIST
-   (saveProgress → Firebase sync) when the watched % crosses a new 5%
-   milestone (5,10,15,...). This caps writes at ~20 per video instead
-   of one every 5 seconds, so it doesn't exhaust the sync quota. */
-let ytLastSaveBucket = -1;
+   QUOTA-SAFE DESIGN: this loop does NOT write appState every tick. It only
+   updates the on-screen "% watched" label (DOM) and checks for completion.
+   Persistence happens via:
+     • a 60-second checkpoint (ytSaveCurrentTime),
+     • and the save-on-pause / seek / tab-close / PiP-close handlers.
+   Because appState isn't mutated each tick, the global 30s safety-net
+   autosave has nothing to write during continuous playback — so watching a
+   long video no longer spams Firestore. */
+let ytPollTicks = 0;
 function ytStartProgressPolling() {
   ytStopProgressPolling();
-  ytLastSaveBucket = -1; // reset milestone tracker for the new play session
+  ytPollTicks = 0;
   ytProgressTimer = setInterval(function() {
     if (!ytPlayer || !ytPlayerReady || !ytCurrentVideoId) return;
     var dur = 0, cur = 0;
@@ -785,26 +789,15 @@ function ytStartProgressPolling() {
     if (!dur || dur < 1) return;
     var pct = Math.round(cur / dur * 100);
 
-    // Update progress + position in memory every tick (cheap, no sync)
-    if (!appState.ytVidProgress) appState.ytVidProgress = {};
-    var plKey = ytoCurrentPl || ytCurrentPlaylistId || '_single';
-    if (!appState.ytVidProgress[plKey]) appState.ytVidProgress[plKey] = {};
-    appState.ytVidProgress[plKey][ytCurrentVideoId] = pct;
-    if (!appState.ytVidTime) appState.ytVidTime = {};
-    if (!appState.ytVidTime[plKey]) appState.ytVidTime[plKey] = {};
-    appState.ytVidTime[plKey][ytCurrentVideoId] = Math.floor(cur);
-
-    // Persist only when crossing a new 5% milestone (5,10,15,...)
-    var bucket = Math.floor(pct / 5);
-    if (bucket !== ytLastSaveBucket) {
-      ytLastSaveBucket = bucket;
-      saveProgress();
-    }
-
-    // Update "X% watched" label in sidebar list
+    // DOM-only: update the "X% watched" label (no appState write, no sync)
     ytUpdateVideoWatchLabel(ytCurrentVideoId, pct);
 
-    // Auto-mark watched at 90%+
+    // Periodic checkpoint: persist the live position once per ~60s so a crash
+    // (no pause/close event) loses at most a minute of progress.
+    ytPollTicks++;
+    if (ytPollTicks % 12 === 0) ytSaveCurrentTime();
+
+    // Auto-mark watched at 90%+ (persists once, then stops polling)
     if (pct >= 90) {
       ytAutoMarkOnComplete();
       ytStopProgressPolling();
