@@ -859,6 +859,14 @@ function toggleCourseSchedule(checked) {
   renderScheduledVideos();
 }
 
+/* Reflect the saved Course Schedule setting on its toggle when the planner opens.
+   Without this, the checkbox always rendered unchecked after a refresh even
+   though the ON state was persisted in appState. */
+function syncCourseScheduleToggle() {
+  const el = document.getElementById('cs-toggle-input');
+  if (el) el.checked = appState.courseScheduleEnabled === true;
+}
+
 /* Pulls the next pending videos (today / future dates only) from any course
    in the YouTube Organiser that has a study plan (target date / hours-per-day) */
 function getScheduledVideosForDate(dateStr) {
