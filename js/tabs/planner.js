@@ -880,7 +880,13 @@ function getScheduledVideosForDate(dateStr) {
     if (!pl || !pl.plan || !pl.videos) return;
     if (pl.plan.targetDate && dateStr > pl.plan.targetDate) return;
     const watched = pl.watched || {};
-    const pending = pl.videos.filter(v => !watched[v.id]);
+    const pending = pl.videos.filter(v => !watched[v.id]).slice().sort((a, b) => {
+      // Oldest first when upload dates are known; otherwise keep stored order
+      const ta = a.pub ? new Date(a.pub).getTime() : null;
+      const tb = b.pub ? new Date(b.pub).getTime() : null;
+      if (ta === null || tb === null) return 0;
+      return ta - tb;
+    });
     if (!pending.length) return;
     const budgetSecs = (pl.plan.hoursPerDay || 1) * 3600;
     let used = 0;
