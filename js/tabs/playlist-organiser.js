@@ -404,6 +404,16 @@ async function ytoLoadPlaylist() {
   const durMap = await ytFetchDurations(videos).catch(() => ({}));
   loadBtn.disabled = false; loadBtn.innerHTML = orig;
 
+  // Sort oldest video first (by upload date; fall back to playlist position)
+  videos.sort((a, b) => {
+    const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : null;
+    const tb = b.publishedAt ? new Date(b.publishedAt).getTime() : null;
+    if (ta === null && tb === null) return (a.position || 0) - (b.position || 0);
+    if (ta === null) return 1;   // undated items go last
+    if (tb === null) return -1;
+    return ta - tb;              // ascending = oldest first
+  });
+
   const lib = ytoLib();
   const existing = lib[plId];
   lib[plId] = {
@@ -412,7 +422,7 @@ async function ytoLoadPlaylist() {
     title: info?.title || existing?.title || 'Playlist',
     channel: info?.channelTitle || existing?.channel || '',
     thumb: info?.thumb || videos[0]?.thumb || '',
-    videos: videos.map(v => ({ id: v.id, title: v.title, thumb: v.thumb, dur: durMap[v.id] || 0 })),
+    videos: videos.map(v => ({ id: v.id, title: v.title, thumb: v.thumb, dur: durMap[v.id] || 0, pub: v.publishedAt || null })),
     watched: existing?.watched || {},
     lastVideo: existing?.lastVideo || null,
     plan: existing?.plan || null,
