@@ -2,7 +2,7 @@
   "name": "preppath-telegram-bot",
   "version": "1.0.0",
   "private": true,
-  "description": "Telegram bot for PrepPath — replies with chat ID on /start",
+  "description": "Telegram bot for PrepPath — replies with chat ID on /start and auto-schedules tasks sent by users into their planner",
   "main": "bot-server.js",
   "scripts": {
     "start": "node bot-server.js",
@@ -12,6 +12,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "firebase-admin": "^12.0.0",
     "node-telegram-bot-api": "^0.66.0"
   }
 }
