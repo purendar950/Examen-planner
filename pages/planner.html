@@ -228,9 +228,32 @@
                   <option value="high">🔴 High</option>
                   <option value="low">🟢 Low</option>
                 </select>
+                <label class="task-recurring-toggle" title="Make this a recurring habit">
+                  <input type="checkbox" id="task-recurring" onchange="toggleRecurringOptions()"> 🔁
+                </label>
                 <button class="btn-task-save" onclick="addTask()">Add</button>
               </div>
+              <!-- Recurring options (hidden by default) -->
+              <div class="recurring-options" id="recurring-options" style="display:none;">
+                <select class="task-select" id="task-freq" onchange="toggleRecurringDays()">
+                  <option value="daily">Daily</option>
+                  <option value="weekdays">Mon–Fri</option>
+                  <option value="weekly">Weekly (pick days)</option>
+                </select>
+                <div class="recurring-days-row" id="recurring-days-row" style="display:none;">
+                  <label class="day-chk-label"><input type="checkbox" class="task-day-chk" value="0"> S</label>
+                  <label class="day-chk-label"><input type="checkbox" class="task-day-chk" value="1"> M</label>
+                  <label class="day-chk-label"><input type="checkbox" class="task-day-chk" value="2"> T</label>
+                  <label class="day-chk-label"><input type="checkbox" class="task-day-chk" value="3"> W</label>
+                  <label class="day-chk-label"><input type="checkbox" class="task-day-chk" value="4"> T</label>
+                  <label class="day-chk-label"><input type="checkbox" class="task-day-chk" value="5"> F</label>
+                  <label class="day-chk-label"><input type="checkbox" class="task-day-chk" value="6"> S</label>
+                </div>
+              </div>
             </div>
+
+            <!-- My Habits panel -->
+            <div id="habits-panel" style="display:none;"></div>
           </div>
 
           <!-- ═══ WEEK / MONTH / YEAR CONTENT ═══ -->

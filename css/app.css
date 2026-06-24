@@ -853,6 +853,30 @@
   .task-select:focus { border-color:var(--accent); }
   .btn-task-save { background:var(--accent); color:#000; border:none; border-radius:8px; padding:0 14px; font-weight:700; font-size:.82rem; cursor:pointer; font-family:var(--font); white-space:nowrap; }
 
+  /* ── Recurring / Habit task styles ── */
+  .task-recurring-toggle { display:flex; align-items:center; gap:4px; font-size:.82rem; cursor:pointer; white-space:nowrap; user-select:none; }
+  .task-recurring-toggle input[type="checkbox"] { width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
+  .recurring-options { display:flex; gap:8px; padding:.5rem 1.25rem; background:var(--surface); flex-wrap:wrap; align-items:center; border-top:1px dashed var(--border); }
+  .recurring-days-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .day-chk-label { display:flex; align-items:center; gap:2px; font-size:.72rem; color:var(--muted); cursor:pointer; padding:3px 6px; border-radius:5px; border:1px solid var(--border); transition: all .15s; }
+  .day-chk-label:has(input:checked) { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+  .day-chk-label input { width:0; height:0; opacity:0; position:absolute; }
+  .task-recurring-badge { font-size:.65rem; opacity:.7; margin-left:2px; }
+
+  /* My Habits panel */
+  #habits-panel { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; margin-top:.75rem; }
+  .habits-header { display:flex; align-items:center; gap:8px; padding:.75rem 1rem; cursor:pointer; font-size:.8rem; font-weight:700; color:var(--accent); }
+  .habits-count { background:var(--accent-dim); color:var(--accent); border-radius:99px; padding:2px 10px; font-size:.68rem; font-weight:700; }
+  .habits-chevron { margin-left:auto; color:var(--muted); font-size:.8rem; transition:transform .2s; }
+  .habits-body { border-top:1px solid var(--border); }
+  .habit-row { display:flex; align-items:center; gap:10px; padding:.6rem 1rem; border-bottom:1px solid var(--border); }
+  .habit-row:last-child { border-bottom:none; }
+  .habit-icon { font-size:.75rem; opacity:.6; }
+  .habit-text { flex:1; font-size:.82rem; color:var(--text); }
+  .habit-freq { font-size:.68rem; color:var(--muted); background:var(--surface); padding:2px 8px; border-radius:5px; }
+  .habit-del { background:none; border:none; cursor:pointer; font-size:.8rem; opacity:.5; transition:opacity .15s; }
+  .habit-del:hover { opacity:1; }
+
   /* Timetable card */
   .timetable-card { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
   .timetable-card-header { padding:1rem 1.25rem; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }

@@ -1093,12 +1093,54 @@ function addTask() {
   const type = typeEl ? typeEl.value : 'study';
   const text = input.value.trim();
   if (!text) { input.focus(); return; }
+
+  /* ── Recurring / Habit toggle ── */
+  const recurChk = document.getElementById('task-recurring');
+  const isRecurring = recurChk && recurChk.checked;
+
+  if (isRecurring) {
+    const freqEl = document.getElementById('task-freq');
+    const freq = freqEl ? freqEl.value : 'daily';
+    let days = [];
+    if (freq === 'weekly' || freq === 'custom') {
+      document.querySelectorAll('.task-day-chk:checked').forEach(el => {
+        days.push(parseInt(el.value, 10));
+      });
+      if (!days.length) days = [new Date().getDay()]; // default to today's day
+    }
+    addRecurringRule({ text, priority, subject, type, freq, days });
+    input.value = ''; input.focus();
+    if (recurChk) recurChk.checked = false;
+    toggleRecurringOptions();
+    buildPlannerCalendar();
+    renderHabitsPanel();
+    showToast('Habit added! 🔁 Will repeat ' + (freq === 'daily' ? 'every day' : freq === 'weekdays' ? 'Mon–Fri' : 'on selected days'), 'success');
+    return;
+  }
+
   const dateStr = selectedPlannerDate || fmtDate(new Date());
   if (!appState.tasks[dateStr]) appState.tasks[dateStr] = [];
   appState.tasks[dateStr].push({ id: Date.now().toString(), text, done:false, priority, subject, type });
   input.value = ''; input.focus();
   saveProgress(); buildPlannerCalendar();
   showToast(type === 'video' ? 'Video task added! 🎥' : 'Task added! ✅', 'success');
+}
+
+/* Show/hide the recurring frequency options based on checkbox state */
+function toggleRecurringOptions() {
+  const chk = document.getElementById('task-recurring');
+  const opts = document.getElementById('recurring-options');
+  if (opts) opts.style.display = (chk && chk.checked) ? 'flex' : 'none';
+  toggleRecurringDays();
+}
+
+/* Show/hide day checkboxes when freq is weekly/custom */
+function toggleRecurringDays() {
+  const freqEl = document.getElementById('task-freq');
+  const daysRow = document.getElementById('recurring-days-row');
+  if (!freqEl || !daysRow) return;
+  const needDays = (freqEl.value === 'weekly' || freqEl.value === 'custom');
+  daysRow.style.display = needDays ? 'flex' : 'none';
 }
 
 function populateTaskSubjectDropdown() {
@@ -1159,6 +1201,7 @@ function renderTaskList(dateStr) {
       <div class="ch-checkbox${t.done?' checked':''}" onclick="toggleTask('${dateStr}','${t.id}')">${t.done?'✓':''}</div>
       <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${typeIcon}${escapeHtml(t.text)}</span>
       ${typeof rolloverBadgeHtml === 'function' ? rolloverBadgeHtml(t) : ''}
+      ${t.isRecurring ? '<span class="task-recurring-badge" title="Recurring habit">🔁</span>' : ''}
       ${s?`<span class="task-subject-chip" style="background:${sc}22;color:${sc};">${escapeHtml(ss)}</span>`:''}
       ${t.type === 'video' && t.videoId ? `<button class="ch-action-btn" title="Play in YouTube tab" onclick="event.stopPropagation();playTaskVideo('${dateStr}','${t.id}')">▶</button>` : ''}
       <button class="ch-action-btn" onclick="deleteTask('${dateStr}','${t.id}')">🗑</button>

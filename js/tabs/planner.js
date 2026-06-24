@@ -169,6 +169,8 @@ function updatePlannerProgress() {
 
 function renderDayView() {
   if (!selectedPlannerDate) selectedPlannerDate = fmtDate(new Date());
+  // Seed recurring habits for the selected day (idempotent)
+  try { seedRecurringTasks(selectedPlannerDate); } catch(e) {}
   try { if (typeof resolveTelegramTaskSubjects === 'function') resolveTelegramTaskSubjects(); } catch(e) {}
   const d = new Date(selectedPlannerDate + 'T12:00:00');
   const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
@@ -187,6 +189,7 @@ function renderDayView() {
   renderCompletedTopicsCard();
   renderDayContent();
   renderScheduledVideos();
+  renderHabitsPanel();
 }
 
 /* Show the day's scheduled study topics (from the active plan) above the task
@@ -642,6 +645,195 @@ function jumpToDay(dateStr) {
     if (el.dataset.date === dateStr && !el.classList.contains('today')) el.classList.add('selected');
   });
   renderPlannerView();
+}
+
+/* ══════════════════════════════════════════════
+   RECURRING / HABIT TASKS — auto-seed daily/weekly habits
+   Each rule in appState.recurringTasks defines a repeating task.
+   seedRecurringTasks(dateStr) materializes them into appState.tasks[dateStr]
+   so all existing consumers (rollover, Telegram, stats) work unchanged.
+══════════════════════════════════════════════ */
+
+/**
+ * Seed recurring habit tasks into a specific date's task list.
+ * Idempotent: won't duplicate if already seeded (checks recurringId).
+ * @param {string} dateStr - 'YYYY-MM-DD'
+ * @returns {number} count of tasks seeded
+ */
+function seedRecurringTasks(dateStr) {
+  if (!appState.recurringTasks || !appState.recurringTasks.length) return 0;
+  if (!appState.tasks) appState.tasks = {};
+  if (!appState.tasks[dateStr]) appState.tasks[dateStr] = [];
+
+  const existing = new Set(
+    appState.tasks[dateStr].filter(t => t.recurringId).map(t => t.recurringId)
+  );
+
+  const d = new Date(dateStr + 'T12:00:00');
+  if (isNaN(d.getTime())) return 0;
+  const dow = d.getDay(); // 0=Sun, 1=Mon ... 6=Sat
+
+  let seeded = 0;
+
+  appState.recurringTasks.forEach(rule => {
+    // Already seeded for this date
+    if (existing.has(rule.id)) return;
+
+    // Date range check
+    if (dateStr < rule.startDate) return;
+    if (rule.endDate && dateStr > rule.endDate) return;
+
+    // Frequency match
+    let match = false;
+    switch (rule.freq) {
+      case 'daily':
+        match = true;
+        break;
+      case 'weekdays':
+        match = (dow >= 1 && dow <= 5);
+        break;
+      case 'weekly':
+      case 'custom':
+        match = Array.isArray(rule.days) && rule.days.includes(dow);
+        break;
+      default:
+        match = false;
+    }
+
+    if (!match) return;
+
+    // Materialize the task
+    appState.tasks[dateStr].push({
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 8),
+      recurringId: rule.id,
+      text: rule.text,
+      done: false,
+      priority: rule.priority || 'normal',
+      subject: rule.subject || '',
+      type: rule.type || 'study',
+      isRecurring: true
+    });
+    seeded++;
+  });
+
+  return seeded;
+}
+
+/**
+ * Seed recurring tasks for today + upcoming N days.
+ * Called on app init and when calendar builds.
+ * @param {number} [lookahead=7] - how many days ahead to pre-seed
+ */
+function seedRecurringRange(lookahead) {
+  if (!appState.recurringTasks || !appState.recurringTasks.length) return;
+  if (typeof lookahead !== 'number') lookahead = 7;
+  const today = new Date();
+  let changed = false;
+  for (let i = 0; i <= lookahead; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    const ds = fmtDate(d);
+    if (seedRecurringTasks(ds) > 0) changed = true;
+  }
+  if (changed && typeof saveProgress === 'function') saveProgress();
+}
+
+/**
+ * Add a new recurring task rule.
+ * @param {{text, priority?, subject?, type?, freq, days?, startDate?, endDate?}} opts
+ */
+function addRecurringRule(opts) {
+  if (!opts || !opts.text) return null;
+  if (!appState.recurringTasks) appState.recurringTasks = [];
+  const rule = {
+    id: 'rec_' + Date.now().toString() + Math.random().toString(36).slice(2, 6),
+    text: opts.text,
+    priority: opts.priority || 'normal',
+    subject: opts.subject || '',
+    type: opts.type || 'study',
+    freq: opts.freq || 'daily',
+    days: opts.days || [],
+    startDate: opts.startDate || fmtDate(new Date()),
+    endDate: opts.endDate || null
+  };
+  appState.recurringTasks.push(rule);
+  // Immediately seed for today + next week
+  seedRecurringRange(7);
+  if (typeof saveProgress === 'function') saveProgress();
+  return rule;
+}
+
+/**
+ * Delete a recurring task rule and remove future un-done seeded instances.
+ * Past completed instances are preserved as history.
+ */
+function deleteRecurringRule(ruleId) {
+  if (!appState.recurringTasks) return;
+  appState.recurringTasks = appState.recurringTasks.filter(r => r.id !== ruleId);
+
+  // Remove future un-done seeded tasks for this rule
+  const todayStr = fmtDate(new Date());
+  Object.keys(appState.tasks || {}).forEach(ds => {
+    if (ds < todayStr) return; // keep past history
+    appState.tasks[ds] = (appState.tasks[ds] || []).filter(t => {
+      if (t.recurringId === ruleId && !t.done) return false;
+      return true;
+    });
+    if (!appState.tasks[ds].length) delete appState.tasks[ds];
+  });
+
+  if (typeof saveProgress === 'function') saveProgress();
+  if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar();
+  renderHabitsPanel();
+}
+
+/**
+ * Render the "My Habits" management panel below the task list.
+ */
+function renderHabitsPanel() {
+  let panel = document.getElementById('habits-panel');
+  if (!panel) return;
+
+  const rules = appState.recurringTasks || [];
+  if (!rules.length) {
+    panel.innerHTML = '';
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+  const freqLabel = { daily: 'Daily', weekdays: 'Mon–Fri', weekly: 'Weekly', custom: 'Custom' };
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  const rows = rules.map(r => {
+    let sched = freqLabel[r.freq] || r.freq;
+    if ((r.freq === 'weekly' || r.freq === 'custom') && r.days && r.days.length) {
+      sched = r.days.map(d => dayNames[d]).join(', ');
+    }
+    return `<div class="habit-row">
+      <span class="habit-icon">🔁</span>
+      <span class="habit-text">${typeof escapeHtml === 'function' ? escapeHtml(r.text) : r.text}</span>
+      <span class="habit-freq">${sched}</span>
+      <button class="habit-del" onclick="deleteRecurringRule('${r.id}')" title="Delete habit">🗑</button>
+    </div>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <div class="habits-header" onclick="toggleHabitsPanel()">
+      <span>🔁 My Habits</span>
+      <span class="habits-count">${rules.length}</span>
+      <span class="habits-chevron" id="habits-chevron">▾</span>
+    </div>
+    <div class="habits-body" id="habits-body">${rows}</div>`;
+}
+
+let _habitsPanelOpen = true;
+function toggleHabitsPanel() {
+  _habitsPanelOpen = !_habitsPanelOpen;
+  const body = document.getElementById('habits-body');
+  const chev = document.getElementById('habits-chevron');
+  if (body) body.style.display = _habitsPanelOpen ? '' : 'none';
+  if (chev) chev.style.transform = _habitsPanelOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
 }
 
 /* ══════════════════════════════════════════════
