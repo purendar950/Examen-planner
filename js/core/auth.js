@@ -153,6 +153,7 @@ function loginUser(email, name, uid, state) {
   if (!appState.ytNotes)   appState.ytNotes    = [];
   if (!appState.ytWatched) appState.ytWatched  = {};
   if (!appState.plans)     appState.plans      = [];
+  if (!appState.recurringTasks) appState.recurringTasks = [];
   if (typeof appState.activePlanId === 'undefined') appState.activePlanId = null;
   /* Hydrate the active plan marker from persisted state */
   if (appState.activePlanId && appState.plans.some(p => p.id === appState.activePlanId)) {
