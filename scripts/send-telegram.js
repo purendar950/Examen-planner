@@ -128,6 +128,163 @@ function isProUser(data, today) {
 }
 
 /* ── 4. Main ────────────────────────────────────────────────────────────── */
+
+const _MONS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+/** "YYYY-MM-DD" → "25 Jun" */
+function fmtDM(ds) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ds || '')) return ds || '';
+  const [y, m, d] = ds.split('-').map(Number);
+  return `${d} ${_MONS[(m - 1) % 12]}`;
+}
+
+/** Shift an ISO date string by N days. */
+function shiftDate(ds, n) {
+  const dt = new Date(ds + 'T12:00:00Z');
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** Label a rolled-forward / overdue task: "from yesterday" or "from earlier · 22 Jun". */
+function rolloverLabel(fromDate, today) {
+  if (fromDate === shiftDate(today, -1)) return 'from yesterday';
+  return 'from earlier · ' + fmtDM(fromDate);
+}
+
+/* Port of the app's getScheduledVideosForDate() — the auto-scheduled course
+   videos for "today" from any YouTube Organiser course that has a study plan. */
+function scheduledCourseVideos(appState, today) {
+  const lib = (appState && appState.ytoLibrary) || {};
+  const out = [];
+  Object.keys(lib).forEach(plId => {
+    const pl = lib[plId];
+    if (!pl || !pl.plan || !Array.isArray(pl.videos)) return;
+    if (pl.plan.targetDate && today > pl.plan.targetDate) return;
+    const watched = pl.watched || {};
+    const pending = pl.videos.filter(v => v && !watched[v.id]).slice().sort((a, b) => {
+      const ta = a.pub ? new Date(a.pub).getTime() : null;
+      const tb = b.pub ? new Date(b.pub).getTime() : null;
+      if (ta === null || tb === null) return 0;
+      return ta - tb;
+    });
+    if (!pending.length) return;
+    const budget = (pl.plan.hoursPerDay || 1) * 3600;
+    let used = 0;
+    for (const v of pending) {
+      const dur = v.dur || 600;
+      if (used > 0 && used + dur > budget) break;
+      out.push({ id: v.id, title: v.title || 'Video' });
+      used += dur;
+      if (used >= budget) break;
+    }
+  });
+  return out;
+}
+
+/* Build the To-Do + Videos sections for today's message from appState.tasks.
+   - Hides completed tasks (shows a "✅ N done" count instead).
+   - Folds in incomplete tasks from the past 14 days (rollover preview) with a
+     "from yesterday/earlier" label — accurate even if the browser rollover
+     hasn't run yet.
+   - Video tasks + Telegram YouTube links + course auto-scheduled videos go to
+     the Videos section as clickable links (de-duplicated by videoId). */
+function buildTaskSections(appState, today) {
+  const tasks = (appState && appState.tasks) || {};
+  const todayList = Array.isArray(tasks[today]) ? tasks[today] : [];
+  const isDone = t => t && (t.done === true || t.status === 'done');
+  const norm = s => String(s || '').trim().toLowerCase();
+  const lookbackStart = shiftDate(today, -14);
+
+  const todoLines = [];          // { line }
+  const videoItems = [];         // { title, url }
+  const seenVideo = new Set();
+  const seenText = new Set();
+  let doneCount = 0;
+
+  const pushVideo = (videoId, title, url) => {
+    if (!videoId || seenVideo.has(videoId)) return;
+    seenVideo.add(videoId);
+    videoItems.push({ title: title || 'Video', url: url || ('https://www.youtube.com/watch?v=' + videoId) });
+  };
+
+  /* 1. Today's tasks */
+  todayList.forEach(t => {
+    if (!t) return;
+    if (isDone(t)) { doneCount++; return; }
+    if (t.type === 'video' && t.videoId) { pushVideo(t.videoId, t.text, t.url); return; }
+    const txt = norm(t.text);
+    if (txt) seenText.add(txt);
+    const from = (t.rolledFrom && t.rolledFrom < today) ? t.rolledFrom
+               : (t.originalDate && t.originalDate < today) ? t.originalDate : null;
+    if (from) {
+      todoLines.push('• ⏳ ' + escHtml(t.text || 'Task') + ' (' + rolloverLabel(from, today) + ')');
+    } else {
+      todoLines.push('• ' + escHtml(t.text || 'Task') + (t.fromTelegram ? ' 📩' : ''));
+    }
+  });
+
+  /* 2. Past incomplete tasks not yet physically rolled (preview) */
+  Object.keys(tasks).forEach(ds => {
+    if (ds >= today || ds < lookbackStart) return;
+    (Array.isArray(tasks[ds]) ? tasks[ds] : []).forEach(t => {
+      if (!t || isDone(t)) return;
+      if (t.type === 'video' && t.videoId) { pushVideo(t.videoId, t.text, t.url); return; }
+      const txt = norm(t.text);
+      if (!txt || seenText.has(txt)) return;
+      seenText.add(txt);
+      const fromDate = (t.originalDate && t.originalDate < today) ? t.originalDate : ds;
+      todoLines.push('• ⏳ ' + escHtml(t.text || 'Task') + ' (' + rolloverLabel(fromDate, today) + ')');
+    });
+  });
+
+  /* 3. Course auto-scheduled videos */
+  scheduledCourseVideos(appState, today).forEach(v => pushVideo(v.id, v.title));
+
+  return { todoLines, videoItems, doneCount };
+}
+
+/** Join a section list with a "+N more" cap to respect Telegram's size limit. */
+function capLines(lines, max) {
+  if (lines.length <= max) return lines.join('\n');
+  return lines.slice(0, max).join('\n') + `\n…+${lines.length - max} more`;
+}
+
+/* Assemble the full per-user message: Study Topics + To-Do + Videos. */
+function buildMessage(name, appState, topicDigest, today) {
+  const header = `☀️ <b>Good morning, ${escHtml(name)}!</b>\n📅 Aaj ka plan (${fmtDM(today)})\n`;
+  const sections = [];
+
+  if (topicDigest && topicDigest.trim()) {
+    sections.push('▪ <b>Study Topics</b>\n' + topicDigest.trim());
+  }
+
+  const { todoLines, videoItems, doneCount } = buildTaskSections(appState, today);
+
+  if (todoLines.length) {
+    let block = '✓ <b>To-Do</b>\n' + capLines(todoLines, 12);
+    if (doneCount) block += `\n✅ ${doneCount} done`;
+    sections.push(block);
+  } else if (doneCount) {
+    sections.push(`✓ <b>To-Do</b>\n✅ Sab ${doneCount} tasks done — shabash! 🎉`);
+  }
+
+  if (videoItems.length) {
+    const vlines = videoItems.map(v => `▶ <a href="${v.url}">${escHtml(v.title)}</a>`);
+    sections.push('🎥 <b>Videos</b>\n' + capLines(vlines, 10));
+  }
+
+  const footer = '\n\n— <a href="https://examzen.in">StudyPlanner</a>';
+  const hasContent = sections.length > 0;
+  const body = hasContent
+    ? sections.join('\n\n')
+    : '📋 Aaj koi topic/task scheduled nahi.\n💡 App kholo → Planner mein add karo → Save karo.';
+  return { text: header + '\n' + body + footer, hasContent };
+}
+
 async function main() {
   const today = todayIST();
   const eventName = process.env.GITHUB_EVENT_NAME || '';
@@ -205,26 +362,21 @@ async function main() {
       continue;
     }
 
-    /* Read today's digest entry */
+    /* Read today's digest entry (study topics + revisions, browser-built) and
+       assemble the full message (topics + to-do + videos) at send time so the
+       to-do list, videos, and rolled-over items are always accurate. */
     const digest = tg.digest || {};
     const plan   = digest[today];
+    const aState = data.appState || {};
     const name   = (data.profile && data.profile.name)
                     ? data.profile.name.split(' ')[0]
                     : 'there';
 
-    /* Build message */
-    const header = `☀️ <b>Good morning, ${name}!</b>\n📅 Aaj ka study plan (${today})\n\n`;
-    let   body;
-    if (plan && plan.trim()) {
-      body = plan;
-    } else {
-      body = '📋 Aaj koi topic scheduled nahi.\n💡 App kholo → Planner mein topics add karo → Save karo.';
-      noDigest++;
-    }
-    const footer = '\n\n— <a href="https://examzen.in">StudyPlanner</a>';
+    const built = buildMessage(name, aState, plan, today);
+    if (!built.hasContent) noDigest++;
 
     try {
-      await sendTelegramMessage(tg.chatId, header + body + footer);
+      await sendTelegramMessage(tg.chatId, built.text);
       sent++;
       console.log(`  ✅ Sent → ${doc.id} (${name}) chat:${tg.chatId}`);
     } catch (e) {
