@@ -901,11 +901,29 @@ function getScheduledVideosForDate(dateStr) {
   return result;
 }
 
+let _svBackfillDone = false;
+/* Ensure courses feeding the Scheduled Videos card have upload dates so they
+   can be ordered oldest-first — backfills any missing dates once per session. */
+function ensureScheduledVideoDates() {
+  if (_svBackfillDone) return;
+  if (typeof ytoBackfillDatesAndSort !== 'function') return;
+  const lib = appState.ytoLibrary || {};
+  const ids = Object.keys(lib).filter(plId => {
+    const pl = lib[plId];
+    return pl && pl.plan && pl.videos && pl.videos.some(v => !v.pub);
+  });
+  _svBackfillDone = true;
+  if (!ids.length) return;
+  Promise.all(ids.map(id => ytoBackfillDatesAndSort(id).catch(() => {})))
+    .then(() => { renderScheduledVideos(); });
+}
+
 function renderScheduledVideos() {
   const card = document.getElementById('sv-card');
   if (!card) return;
   if (!appState.courseScheduleEnabled) { card.style.display = 'none'; return; }
   card.style.display = '';
+  ensureScheduledVideoDates();
   const videos = getScheduledVideosForDate(selectedPlannerDate);
   const badge = document.getElementById('sv-badge-count');
   if (badge) badge.textContent = `${videos.length} remaining`;
