@@ -909,14 +909,48 @@ function renderScheduledVideos() {
     body.innerHTML = `<div class="sv-empty">Is din ke liye koi scheduled video nahi.<br>YouTube Organiser mein course ka study plan banao (📅 Plan banayein).</div>`;
     return;
   }
-  body.innerHTML = videos.map(v => `<div class="sv-item">
+  const dateStr = selectedPlannerDate || fmtDate(new Date());
+  const dayTasks = appState.tasks[dateStr] || [];
+  body.innerHTML = videos.map(v => {
+    const added = dayTasks.some(t => t.videoId === v.id);
+    return `<div class="sv-item">
     <span class="sv-item-icon">▶</span>
     <div class="sv-item-title-wrap" style="flex:1;">
       <div class="sv-item-title">${escapeHtml(v.title)}</div>
       <div class="sv-item-course">${escapeHtml(v.courseTitle)}</div>
     </div>
+    <button class="btn-sm ${added ? '' : 'blue'}" style="font-size:.68rem;" ${added ? 'disabled' : ''} onclick="event.stopPropagation();addScheduledVideoToTodo('${v.plId}','${v.id}')">${added ? '✓ Added' : '+ To Do'}</button>
     <button class="btn-sm green" style="font-size:.68rem;" onclick="event.stopPropagation();ytoPlayInYtTab('${v.plId}','${v.id}')">▶ Play</button>
-  </div>`).join('');
+  </div>`;
+  }).join('');
+}
+
+/* Add a scheduled course video to the To Do list for the selected day. */
+function addScheduledVideoToTodo(plId, vid) {
+  const lib = appState.ytoLibrary || {};
+  const pl = lib[plId];
+  if (!pl || !pl.videos) return;
+  const v = pl.videos.find(x => x.id === vid);
+  if (!v) return;
+  const dateStr = selectedPlannerDate || fmtDate(new Date());
+  if (!appState.tasks[dateStr]) appState.tasks[dateStr] = [];
+  if (appState.tasks[dateStr].some(t => t.videoId === vid)) {
+    if (typeof showToast === 'function') showToast('Ye video pehle se To Do mein hai.', 'info');
+    return;
+  }
+  appState.tasks[dateStr].push({
+    id: Date.now().toString(),
+    text: v.title,
+    done: false,
+    priority: 'normal',
+    subject: '',
+    type: 'video',
+    videoId: vid,
+    plId: plId
+  });
+  saveProgress();
+  buildPlannerCalendar();
+  if (typeof showToast === 'function') showToast('Video To Do mein add ho gaya! 🎥', 'success');
 }
 
 function toggleScheduledVideos(e) {
