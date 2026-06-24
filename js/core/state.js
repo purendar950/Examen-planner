@@ -37,7 +37,8 @@ let appState = {
   autoRolloverTasks: true, // move incomplete manual tasks forward to today (on by default)
   lastRolloverDate: null,  // guard so the rollover sweep runs once per day
   recurringTasks: [],      // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
-  habitsLog: {}            // {dateStr: {ruleId: true/false}} — per-day habit completion
+  habitsLog: {},           // {dateStr: {ruleId: true/false}} — per-day habit completion
+  lastWeeklyReviewSeen: null // ISO week key (e.g. 2026-W26) of last opened weekly review
 };
 
 let currentFilter = 'all';

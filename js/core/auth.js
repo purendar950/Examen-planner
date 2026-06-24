@@ -137,6 +137,7 @@ function getDefaultState() {
     lastRolloverDate: null,  // guard so the rollover sweep runs once per day
     recurringTasks: [],      // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
     habitsLog: {},           // {dateStr: {ruleId: true/false}} — per-day habit completion
+    lastWeeklyReviewSeen: null, // ISO week key of last opened weekly review
     planSchedule: null,   // date -> [topic items] for the active syllabus plan
     /* Telegram daily-plan delivery. The GitHub Actions sender reads this from
        Firestore: chatId (target account), enabled (opt-in), and digest
