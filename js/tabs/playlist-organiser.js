@@ -69,6 +69,16 @@ async function ytoLoadPlaylist() {
   }
 
   if (fetchedVideos && fetchedVideos.length > 0) {
+    // Sort oldest video first (by upload date; fall back to playlist position)
+    fetchedVideos.sort((a, b) => {
+      const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : null;
+      const tb = b.publishedAt ? new Date(b.publishedAt).getTime() : null;
+      if (ta === null && tb === null) return (a.position || 0) - (b.position || 0);
+      if (ta === null) return 1;   // undated items go last
+      if (tb === null) return -1;
+      return ta - tb;              // ascending = oldest first
+    });
+
     // Fetch playlist title
     const info = await ytFetchPlaylistInfo(plId).catch(()=>null);
     if (info && info.title) ytoState.playlistTitle = info.title;
