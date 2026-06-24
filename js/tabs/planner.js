@@ -193,11 +193,11 @@ function renderDayView() {
   if (sub) sub.textContent = `${tasks.length} task${tasks.length!==1?'s':''} · ${done} completed`;
   const badge = document.getElementById('task-count-badge');
   if (badge) badge.textContent = tasks.length;
+  renderHabitsCard(selectedPlannerDate);
   renderDayScheduledTopics();
   renderCompletedTopicsCard();
   renderDayContent();
   renderScheduledVideos();
-  renderHabitsCard(selectedPlannerDate);
   renderHabitsManagePanel();
 }
 
