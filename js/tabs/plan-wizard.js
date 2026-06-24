@@ -1138,10 +1138,18 @@ function renderTaskList(dateStr) {
     const s = t.subject && subjMap[t.subject] ? subjMap[t.subject] : null;
     const sc = s ? s.color : 'var(--border)';
     const ss = s ? s.name.split(/[ &]/)[0] : '';
-    const typeIcon = t.type === 'video' ? '🎥 ' : '';
+    const isVid = t.type === 'video';
+    const hasUrl = isVid && t.url;
+    const safeUrl = hasUrl ? String(t.url).replace(/"/g, '%22').replace(/'/g, '%27') : '';
+    const typeIcon = isVid ? (hasUrl ? '▶️ ' : '🎥 ') : '';
+    /* Video tasks with a URL become a click-to-play link (opens YouTube). */
+    const textInner = `${pIcon[t.priority]||'🟡'} ${typeIcon}${escapeHtml(t.text)}`;
+    const textHtml = hasUrl
+      ? `<a href="${safeUrl}" target="_blank" rel="noopener" title="Play on YouTube" class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;color:var(--accent-dark);text-decoration:none;">${textInner}</a>`
+      : `<span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${textInner}</span>`;
     return `<div class="task-item" style="border-left-color:${sc};">
       <div class="ch-checkbox${t.done?' checked':''}" onclick="toggleTask('${dateStr}','${t.id}')">${t.done?'✓':''}</div>
-      <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${typeIcon}${escapeHtml(t.text)}</span>
+      ${textHtml}
       ${typeof rolloverBadgeHtml === 'function' ? rolloverBadgeHtml(t) : ''}
       ${s?`<span class="task-subject-chip" style="background:${sc}22;color:${sc};">${escapeHtml(ss)}</span>`:''}
       <button class="ch-action-btn" onclick="deleteTask('${dateStr}','${t.id}')">🗑</button>

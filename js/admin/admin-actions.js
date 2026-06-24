@@ -407,6 +407,17 @@ async function loadTelegramData() {
     const snap = await db.collection('config').doc('telegram').get();
     TG_CONFIG = { ...(snap.exists ? snap.data() : {}), loaded: true };
   } catch(e) { TG_CONFIG = { loaded: true }; }
+  /* Load AI (Groq) config from config/ai */
+  try {
+    const aiSnap = await db.collection('config').doc('ai').get();
+    const d = aiSnap.exists ? (aiSnap.data() || {}) : {};
+    AI_CONFIG = {
+      groqApiKey: d.groqApiKey || '',
+      model:      d.model || 'llama-3.1-8b-instant',
+      enabled:    d.enabled !== false,
+      loaded:     true
+    };
+  } catch(e) { AI_CONFIG = { groqApiKey:'', model:'llama-3.1-8b-instant', enabled:true, loaded:true }; }
   /* Load every user's full doc to get appState.telegram */
   try {
     const snap = await db.collection('users').get();
@@ -444,6 +455,62 @@ async function saveTgBotToken() {
     showToast('✅ Bot token saved!');
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
+}
+
+/* Save Groq AI config (key + model + enabled) to Firestore config/ai.
+   The bot server reads this doc to auto-schedule tasks/videos sent on Telegram. */
+async function saveAiConfig() {
+  const keyEl   = document.getElementById('ai-key-input');
+  const modelEl = document.getElementById('ai-model-select');
+  const enEl    = document.getElementById('ai-enabled');
+  if (!keyEl || !modelEl) return;
+  const key   = keyEl.value.trim();
+  const model = modelEl.value;
+  const enabled = enEl ? enEl.checked : true;
+  if (key && !/^gsk_/.test(key)) {
+    if (!confirm('Groq keys usually start with "gsk_". Save anyway?')) return;
+  }
+  try {
+    await db.collection('config').doc('ai').set({
+      groqApiKey: key,
+      model: model,
+      enabled: enabled,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    AI_CONFIG.groqApiKey = key; AI_CONFIG.model = model; AI_CONFIG.enabled = enabled;
+    showToast('✅ AI settings saved!');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
+/* Test the saved Groq config by asking the bot server to run a sample parse.
+   Keeps the key server-side (bot reads config/ai via Admin SDK). */
+async function testAiConfig() {
+  const out = document.getElementById('ai-test-out');
+  const sampleEl = document.getElementById('ai-test-input');
+  const sample = (sampleEl && sampleEl.value.trim()) || '';
+  if (out) { out.style.display = 'block'; out.innerHTML = '⏳ Testing Groq…'; }
+  try {
+    const res = await fetch(RENDER_BOT_URL + '/ai-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sample ? { message: sample } : {})
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Test failed');
+    const intents = (data.parsed && data.parsed.intents) || [];
+    const rows = intents.map(function(it) {
+      return '• <b>' + esc(it.action) + '</b> — ' + esc(it.text) +
+        ' <span class="muted">[' + esc(it.date) + (it.subject ? ', ' + esc(it.subject) : '') +
+        (it.priority === 'high' ? ', high' : '') + (it.url ? ', 🎥' : '') + ']</span>';
+    }).join('<br>') || '<i>No intents parsed</i>';
+    if (out) out.innerHTML =
+      '✅ <b>Working!</b> Model: <code>' + esc(data.model) + '</code><br>' +
+      '<div class="muted" style="margin:4px 0;">Sample: "' + esc(data.sample) + '"</div>' + rows;
+  } catch(e) {
+    if (out) out.innerHTML = '❌ ' + esc(e.message) +
+      '<div class="muted" style="margin-top:4px;">Check: key saved? Bot server (Render) running with FIREBASE_SERVICE_ACCOUNT?</div>';
+  }
 }
 
 /* Save the daily auto-send time (IST) to Firestore. The GitHub Actions
@@ -591,6 +658,45 @@ function renderTelegram() {
     '</div>' +
     '<div id="tg-token-show" class="muted" style="font-size:.72rem;margin-top:4px;">' + (TG_CONFIG.botToken ? '✅ Token saved in Firestore' : '⚠️ Token nahi set hai — Send Now kaam nahi karega') + '</div>' +
     '<div class="muted" style="font-size:.72rem;margin-top:6px;">💡 Token sirf Firestore mein store hoga (config/telegram) — code mein nahi. GitHub Secrets mein bhi alag se add karo daily cron ke liye.</div>' +
+    '</div>';
+
+  /* ── AI Auto-Scheduling Card (Groq) ── */
+  var aiModels = [
+    { v: 'llama-3.1-8b-instant',    t: 'Llama 3.1 8B Instant (fast, recommended)' },
+    { v: 'llama-3.3-70b-versatile', t: 'Llama 3.3 70B Versatile (smartest)' },
+    { v: 'openai/gpt-oss-120b',     t: 'GPT-OSS 120B' },
+    { v: 'openai/gpt-oss-20b',      t: 'GPT-OSS 20B' }
+  ];
+  var aiKeySet = AI_CONFIG.groqApiKey ? true : false;
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">🧠 AI Auto-Scheduling (Groq)</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+      'Jab user bot ko koi task ya YouTube link bhejta hai, AI use samajh ke sahi date + subject ke saath planner mein daal deta hai. ' +
+      'Key sirf Firestore (config/ai) mein store hoti hai; bot server use Admin SDK se padhta hai.' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+      '<input id="ai-key-input" type="password" placeholder="Groq API Key (gsk_…)" ' +
+        'value="' + esc(AI_CONFIG.groqApiKey || '') + '" ' +
+        'style="flex:1;min-width:240px;font-family:monospace;font-size:.82rem;">' +
+      '<button class="btn btn-gray" onclick="var i=document.getElementById(\'ai-key-input\');i.type=i.type===\'password\'?\'text\':\'password\';">👁 Show/Hide</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+      '<label style="font-size:.82rem;font-weight:700;">Model:</label>' +
+      '<select id="ai-model-select" style="font-size:.82rem;padding:5px 8px;border:1px solid var(--border);border-radius:8px;min-width:240px;">' +
+        aiModels.map(function(m){ return '<option value="' + esc(m.v) + '"' + (AI_CONFIG.model === m.v ? ' selected' : '') + '>' + esc(m.t) + '</option>'; }).join('') +
+      '</select>' +
+      '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.82rem;font-weight:700;">' +
+        '<input type="checkbox" id="ai-enabled"' + (AI_CONFIG.enabled !== false ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:var(--accent);cursor:pointer;">' +
+        'Enable AI' +
+      '</label>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+      '<button class="btn btn-blue" onclick="saveAiConfig()">💾 Save AI Settings</button>' +
+      '<input id="ai-test-input" type="text" placeholder="Test message (optional) e.g. kal polity revise karna" style="flex:1;min-width:200px;font-size:.8rem;padding:5px 8px;border:1px solid var(--border);border-radius:8px;">' +
+      '<button class="btn btn-gray" onclick="testAiConfig()">🧪 Test</button>' +
+    '</div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:6px;">' + (aiKeySet ? '✅ Key saved in Firestore' : '⚠️ Koi key nahi — AI off rahega, bot simple parser use karega') + ' · Get a free key at <b>console.groq.com</b></div>' +
+    '<div id="ai-test-out" style="display:none;font-size:.78rem;background:#f8f9fa;border:1px solid var(--border);border-radius:8px;padding:10px;margin-top:8px;"></div>' +
     '</div>';
 
   /* ── Send Controls Card ── */

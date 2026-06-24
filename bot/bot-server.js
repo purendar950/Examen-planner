@@ -35,6 +35,8 @@
 const TelegramBot = require('node-telegram-bot-api');
 const http        = require('http');
 const https       = require('https');
+const { aiParse, SUPPORTED_MODELS, DEFAULT_MODEL } = require('./ai');
+const { subjectPromptList, resolveSubjectId }       = require('./exam-subjects');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TOKEN) {
@@ -69,6 +71,30 @@ try {
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 console.log('🤖 StudyPlanner Bot running (long-polling)...');
+
+/* ── AI (Groq) config, read from Firestore config/ai (admin-managed) ──────
+   Cached for 2 min so we don't hit Firestore on every message. The admin
+   panel writes { groqApiKey, model, enabled } to this doc. */
+let _aiCache = { value: null, ts: 0 };
+async function getAiConfig() {
+  if (!db) return { enabled: false };
+  const now = Date.now();
+  if (_aiCache.value && (now - _aiCache.ts) < 120000) return _aiCache.value;
+  try {
+    const snap = await db.collection('config').doc('ai').get();
+    const d = snap.exists ? (snap.data() || {}) : {};
+    const cfg = {
+      enabled: d.enabled !== false && !!d.groqApiKey, // enabled unless explicitly off
+      apiKey:  d.groqApiKey || '',
+      model:   d.model || DEFAULT_MODEL,
+    };
+    _aiCache = { value: cfg, ts: now };
+    return cfg;
+  } catch (e) {
+    console.warn('⚠️  getAiConfig failed:', e.message);
+    return { enabled: false };
+  }
+}
 
 /* ════════════════════════════════════════════════════════════════════════
    DATE + TASK PARSING HELPERS
@@ -125,6 +151,18 @@ function dateLabel(dateStr) {
   const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const mons = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${days[d.getUTCDay()]}, ${mons[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+/** Full weekday name for today's IST date (for the AI prompt context). */
+function weekdayNameToday() {
+  const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return names[istNow().getUTCDay()];
+}
+
+/** Extract the first YouTube URL from a string, or '' if none. */
+function extractYouTubeUrl(text) {
+  const m = String(text || '').match(/https?:\/\/(?:www\.)?(?:youtube\.com\/\S+|youtu\.be\/\S+)/i);
+  return m ? m[0] : '';
 }
 
 /* The "core" regex fragments for date expressions and how to resolve them. */
@@ -266,6 +304,70 @@ function getTodaysTasks(user) {
   return tasks[istDateStr(0)] || [];
 }
 
+/**
+ * Write a list of AI-produced intents into the user's planner. Intents may span
+ * multiple dates. Each becomes a task { text, done, priority, subject, type, url }.
+ * Returns [{ date, label, text, type }] for the ones actually added (deduped).
+ */
+async function addIntentsToPlanner(user, intents, examId) {
+  const appState = user.data.appState || {};
+  const tasksMap = appState.tasks || {};
+
+  // Group intents by date and build the updated day lists.
+  const touched = {};   // dateStr -> updated array
+  const added   = [];   // summary rows
+
+  intents.forEach((it) => {
+    const dateStr = it.date;
+    if (!touched[dateStr]) {
+      touched[dateStr] = Array.isArray(tasksMap[dateStr]) ? tasksMap[dateStr].slice() : [];
+    }
+    const dayList  = touched[dateStr];
+    const existing = new Set(dayList.map(t => (t.text || '').toLowerCase()));
+
+    const text = (it.text || '').trim();
+    if (!text || existing.has(text.toLowerCase())) return;
+
+    const isVideo = it.action === 'add_video';
+    const task = {
+      id:       Date.now().toString() + Math.floor(Math.random() * 100000),
+      text,
+      done:     false,
+      priority: it.priority === 'high' ? 'high' : 'normal',
+      subject:  resolveSubjectId(examId, it.subject),
+      type:     isVideo ? 'video' : 'study',
+      source:   'telegram',
+    };
+    if (isVideo && it.url) task.url = it.url;
+
+    dayList.push(task);
+    added.push({ date: dateStr, label: dateLabel(dateStr), text, type: task.type });
+  });
+
+  if (!added.length) return [];
+
+  // Build one update per touched date (tasks + merged digest).
+  const tg        = appState.telegram || {};
+  const digestMap = tg.digest || {};
+
+  for (const dateStr of Object.keys(touched)) {
+    const newRows = added.filter(a => a.date === dateStr)
+      .map(a => (a.type === 'video' ? '🎥 ' : '📝 ') + a.text);
+    const prev = digestMap[dateStr] ? digestMap[dateStr] + '\n' : '';
+    const digestText = prev + newRows.join('\n');
+
+    const tasksPath  = new admin.firestore.FieldPath('appState', 'tasks', dateStr);
+    const digestPath = new admin.firestore.FieldPath('appState', 'telegram', 'digest', dateStr);
+    try {
+      await user.ref.update(tasksPath, touched[dateStr], digestPath, digestText);
+    } catch (e) {
+      console.warn(`⚠️  digest merge failed for ${user.uid} (${dateStr}): ${e.message} — saving tasks only.`);
+      await user.ref.update(tasksPath, touched[dateStr]);
+    }
+  }
+  return added;
+}
+
 /* ════════════════════════════════════════════════════════════════════════
    MESSAGE HANDLERS
    ════════════════════════════════════════════════════════════════════════ */
@@ -300,7 +402,44 @@ async function handleTaskMessage(msg, rawText) {
   }
   if (!user) return send(chatId, NOT_CONNECTED_MSG);
 
+  const examId = (user.data.appState && user.data.appState.selectedExam) || 'cgl';
+
+  /* ── 1) Try the AI path (Groq) — understands subject, dates, videos ── */
+  const aiCfg = await getAiConfig();
+  if (aiCfg.enabled && aiCfg.apiKey) {
+    try {
+      const parsed = await aiParse(rawText, aiCfg, {
+        todayIST:     istDateStr(0),
+        weekdayIST:   weekdayNameToday(),
+        examName:     examId.toUpperCase(),
+        subjectList:  subjectPromptList(examId),
+        fallbackDate: istDateStr(0),
+      });
+      if (parsed.intents && parsed.intents.length) {
+        const added = await addIntentsToPlanner(user, parsed.intents, examId);
+        if (!added.length) {
+          return send(chatId, 'ℹ️ Yeh task(s) planner mein pehle se hain.');
+        }
+        return send(chatId, formatAddedSummary(added, parsed.reply));
+      }
+      // AI understood nothing actionable — fall through to regex.
+    } catch (e) {
+      console.warn(`⚠️  AI parse failed (${e.message}) — falling back to regex parser.`);
+    }
+  }
+
+  /* ── 2) Fallback: regex date/priority parser (also detects YouTube links) ── */
   const { dateStr, label, rest } = resolveDate(rawText);
+  const ytUrl = extractYouTubeUrl(rest);
+  if (ytUrl) {
+    const title = rest.replace(ytUrl, '').replace(/[:\-–]\s*$/, '').trim() || 'Watch video';
+    const added = await addIntentsToPlanner(user,
+      [{ action: 'add_video', date: dateStr, text: 'Watch: ' + title, priority: 'normal', subject: '', url: ytUrl }],
+      examId);
+    if (!added.length) return send(chatId, `ℹ️ Yeh video <b>${label}</b> ke liye pehle se hai.`);
+    return send(chatId, formatAddedSummary(added));
+  }
+
   const lines = rest.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   if (!lines.length) {
     return send(chatId,
@@ -327,6 +466,23 @@ async function handleTaskMessage(msg, rawText) {
   return send(chatId,
     `✅ <b>${added.length} task${added.length > 1 ? 's' : ''}</b> planner mein add ho gaye — <b>${label}</b> (${dateStr}):\n\n` +
     `${list}\n\n📲 App kholo to dekho — Planner → ${label === 'today' ? 'Aaj' : label}.`);
+}
+
+/** Build a confirmation message from structured added-rows. */
+function formatAddedSummary(added, aiReply) {
+  // Group rows by date for a tidy summary.
+  const byDate = {};
+  added.forEach(a => { (byDate[a.date] = byDate[a.date] || []).push(a); });
+  const blocks = Object.keys(byDate).sort().map(date => {
+    const label = byDate[date][0].label;
+    const rows = byDate[date].map(a =>
+      (a.type === 'video' ? '🎥 ' : '• ') + escapeHtml(a.text)).join('\n');
+    return `📅 <b>${label}</b> (${date}):\n${rows}`;
+  });
+  const head = (aiReply && aiReply.trim())
+    ? '✅ ' + escapeHtml(aiReply.trim()) + '\n\n'
+    : `✅ <b>${added.length} item${added.length > 1 ? 's' : ''}</b> planner mein add ho gaye:\n\n`;
+  return head + blocks.join('\n\n') + '\n\n📲 App kholo → Planner mein dekho.';
 }
 
 function escapeHtml(s) {
@@ -368,7 +524,9 @@ bot.onText(/^\/help$/, (msg) => {
     `/list — Aaj ke planner tasks dekho\n` +
     `/help — Yeh help message\n\n` +
     `📝 <b>Task add karne ka tareeka</b> (connect hone ke baad):\n` +
-    `Seedha apna task type karke bhej do — ya /task use karo.\n\n` +
+    `Seedha apna task type karke bhej do — ya /task use karo. AI khud subject samajh ke planner mein daal dega.\n\n` +
+    `🎥 <b>YouTube video bhejo</b> → woh planner mein "click to play" task ban jayega:\n` +
+    `<code>kal ye lecture dekhna https://youtu.be/xxxx</code>\n\n` +
     `📅 <b>Date bhi bata sakte ho</b> (aage ya peeche):\n` +
     `• <code>today / aaj</code>, <code>tomorrow / kal</code>, <code>parso</code>\n` +
     `• weekday: <code>monday</code> ... <code>sunday</code>\n` +
@@ -445,6 +603,38 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('PrepPath Bot is alive 🤖');
+    return;
+  }
+
+  /* ── POST /ai-test — admin panel "Test AI" button ──
+     Reads config/ai from Firestore and runs a sample parse so the admin can
+     verify the Groq key + model work. Returns the parsed intents. */
+  if (req.method === 'POST' && req.url === '/ai-test') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', async () => {
+      try {
+        const { message } = JSON.parse(body || '{}');
+        const cfg = await getAiConfig();
+        // Bypass the cache for an immediate test if Firestore has fresher data.
+        _aiCache = { value: null, ts: 0 };
+        const fresh = await getAiConfig();
+        if (!fresh.apiKey) throw new Error('No Groq API key saved in config/ai');
+        const sample = message || 'kal Revise Polity Ch 3 and solve 30 quant Qs, important';
+        const parsed = await aiParse(sample, fresh, {
+          todayIST:     istDateStr(0),
+          weekdayIST:   weekdayNameToday(),
+          examName:     'CGL',
+          subjectList:  subjectPromptList('cgl'),
+          fallbackDate: istDateStr(0),
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, model: fresh.model, sample, parsed }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
     return;
   }
 

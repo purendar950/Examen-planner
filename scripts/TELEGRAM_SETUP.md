@@ -78,6 +78,56 @@ the web planner reads) and also merged into the daily digest for that date.
 
 ---
 
+## AI auto-scheduling with Groq (smart parsing + subject detection)
+
+The bot can use **Groq AI** to understand messages far better than the built-in
+parser — it auto-detects the **subject**, resolves any date phrasing, splits
+multiple tasks, and turns **YouTube links into click-to-play planner tasks**.
+
+### Setup
+
+1. Get a free API key at **console.groq.com** (keys start with `gsk_`).
+2. Open **admin panel → Telegram tab → 🧠 AI Auto-Scheduling (Groq)**.
+3. Paste the key, pick a **model**, tick **Enable AI**, and **Save**.
+4. Click **🧪 Test** to verify — it runs a sample message through Groq via the
+   bot server and shows the parsed tasks.
+
+The key is stored only in Firestore (`config/ai`); the bot server reads it via
+the Admin SDK (so it needs `FIREBASE_SERVICE_ACCOUNT`, same as Step 2/4).
+
+### Models
+
+| Model | Notes |
+|---|---|
+| `llama-3.1-8b-instant` | **Default** — fast and basically free |
+| `llama-3.3-70b-versatile` | Smartest for messy / Hinglish input |
+| `openai/gpt-oss-120b`, `openai/gpt-oss-20b` | Alternatives |
+
+### What it does
+
+- `Revise polity tomorrow, important` → high-priority task on tomorrow, subject auto-set to GA/Polity.
+- `Mon-Fri 1hr current affairs` → one task per weekday.
+- `kal ye dekhna https://youtu.be/xxxx` → a **🎥 click-to-play** task on tomorrow that opens YouTube.
+
+### Safety / fallback
+
+- If AI is **disabled**, the key is missing, or Groq errors, the bot
+  automatically falls back to the built-in regex parser (which also detects
+  YouTube links) — so scheduling never fully breaks.
+- **Firestore rule:** keep `config/ai` **admin-only** (the client app must not
+  read it). Example rule:
+
+  ```
+  match /config/ai {
+    allow read, write: if request.auth != null
+                       && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+  }
+  ```
+
+
+
+---
+
 ## Step 3 — Set the bot username in app.html
 
 In `app.html`, find and update:
@@ -142,6 +192,8 @@ Done. Sent=1  Skipped=4  Failed=0  NoDigest=0
 | Bot replies "Pehle apna account connect karo" when sending a task | User's Chat ID isn't saved in the app yet — connect via Profile → Daily Plan on Telegram |
 | Bot says "Task scheduling abhi available nahi hai" | `FIREBASE_SERVICE_ACCOUNT` env var is missing on the Render bot service — add it (see Step 2) |
 | Tasks not appearing in planner | Confirm the same Chat ID is saved in the app and the bot logs show `task auto-scheduling ENABLED` |
+| AI Test button shows an error | Key not saved, not starting with `gsk_`, or the Render bot is asleep/missing `FIREBASE_SERVICE_ACCOUNT` |
+| AI ignored but simple parser works | AI is disabled in admin, or Groq quota/network error — bot fell back to the regex parser (expected) |
 
 ---
 
