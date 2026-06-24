@@ -136,6 +136,7 @@ function getDefaultState() {
     autoRolloverTasks: true, // move incomplete manual tasks forward to today (on by default)
     lastRolloverDate: null,  // guard so the rollover sweep runs once per day
     recurringTasks: [],      // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
+    habitsLog: {},           // {dateStr: {ruleId: true/false}} — per-day habit completion
     planSchedule: null,   // date -> [topic items] for the active syllabus plan
     /* Telegram daily-plan delivery. The GitHub Actions sender reads this from
        Firestore: chatId (target account), enabled (opt-in), and digest
@@ -154,6 +155,7 @@ function loginUser(email, name, uid, state) {
   if (!appState.ytWatched) appState.ytWatched  = {};
   if (!appState.plans)     appState.plans      = [];
   if (!appState.recurringTasks) appState.recurringTasks = [];
+  if (!appState.habitsLog) appState.habitsLog = {};
   if (typeof appState.activePlanId === 'undefined') appState.activePlanId = null;
   /* Hydrate the active plan marker from persisted state */
   if (appState.activePlanId && appState.plans.some(p => p.id === appState.activePlanId)) {

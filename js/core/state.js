@@ -36,7 +36,8 @@ let appState = {
   activePlanId: null, // id of the plan currently shown in the timetable
   autoRolloverTasks: true, // move incomplete manual tasks forward to today (on by default)
   lastRolloverDate: null,  // guard so the rollover sweep runs once per day
-  recurringTasks: []       // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
+  recurringTasks: [],      // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
+  habitsLog: {}            // {dateStr: {ruleId: true/false}} — per-day habit completion
 };
 
 let currentFilter = 'all';
