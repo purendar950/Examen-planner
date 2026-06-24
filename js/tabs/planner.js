@@ -169,6 +169,7 @@ function updatePlannerProgress() {
 
 function renderDayView() {
   if (!selectedPlannerDate) selectedPlannerDate = fmtDate(new Date());
+  try { if (typeof resolveTelegramTaskSubjects === 'function') resolveTelegramTaskSubjects(); } catch(e) {}
   const d = new Date(selectedPlannerDate + 'T12:00:00');
   const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
   const mons = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -820,6 +821,7 @@ function renderKanbanBoard(dateStr) {
               <option value="in-progress" ${taskStatus(t)==='in-progress'?'selected':''}>In Progress</option>
               <option value="done" ${taskStatus(t)==='done'?'selected':''}>Done</option>
             </select>
+            ${t.type === 'video' && t.videoId ? `<button class="kanban-card-del" title="Play in YouTube tab" onclick="event.stopPropagation();playTaskVideo('${dateStr}','${t.id}')">▶</button>` : ''}
             <button class="kanban-card-del" onclick="deleteTask('${dateStr}','${t.id}')" title="Delete">🗑</button>
           </div>
         </div>

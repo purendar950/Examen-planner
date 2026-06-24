@@ -447,6 +447,11 @@ if (auth && !_isBadProtocol) {
         //    requiring the user to manually reload the page. ──
         const snapData = snap.data();
         const newProfile = snapData?.profile;
+
+        /* ── Telegram AI auto-schedule: drain any tasks the user texted the
+           bot. Done before the local-edit guard so new tasks always appear. ── */
+        try { if (typeof drainTelegramInbox === 'function') drainTelegramInbox(snapData); } catch(e) {}
+
         if (typeof newProfile !== 'undefined') {
           const oldSuspended = EZ_PROFILE && EZ_PROFILE.trialSuspended;
           const newSuspended = newProfile && newProfile.trialSuspended;

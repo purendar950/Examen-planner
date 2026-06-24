@@ -407,6 +407,11 @@ async function loadTelegramData() {
     const snap = await db.collection('config').doc('telegram').get();
     TG_CONFIG = { ...(snap.exists ? snap.data() : {}), loaded: true };
   } catch(e) { TG_CONFIG = { loaded: true }; }
+  /* Load AI (Groq) auto-schedule config */
+  try {
+    const aiSnap = await db.collection('config').doc('ai').get();
+    AI_CONFIG = { groqApiKey:'', model:'llama-3.1-8b-instant', enabled:false, ...(aiSnap.exists ? aiSnap.data() : {}), loaded: true };
+  } catch(e) { AI_CONFIG = { groqApiKey:'', model:'llama-3.1-8b-instant', enabled:false, loaded: true }; }
   /* Load every user's full doc to get appState.telegram */
   try {
     const snap = await db.collection('users').get();
@@ -463,6 +468,35 @@ async function saveTgSendTime() {
     }, { merge: true });
     TG_CONFIG.sendTime = t; TG_CONFIG.sendHour = h; TG_CONFIG.sendMinute = m;
     showToast('✅ Auto-send time set to ' + t + ' IST');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
+/* ── AI auto-schedule (Groq) config ─────────────────────────────────────────
+   Saves the Groq API key + chosen model + on/off flag to Firestore config/ai.
+   The Telegram bot server reads this doc to parse incoming user messages into
+   planner tasks. Admin-only write (Firestore rules must allow config/ai like
+   config/telegram). The key lives only in Firestore — never in the codebase. */
+async function saveGroqConfig() {
+  const keyEl   = document.getElementById('ai-groq-key');
+  const modelEl = document.getElementById('ai-model');
+  const onEl    = document.getElementById('ai-enabled');
+  if (!keyEl || !modelEl || !onEl) return;
+  const key   = keyEl.value.trim();
+  const model = modelEl.value;
+  const on    = !!onEl.checked;
+  if (on && !key) { showToast('⚠️ Groq API key daalo (gsk_…) ya AI toggle OFF karo'); keyEl.focus(); return; }
+  if (key && !/^gsk_/.test(key)) { showToast('⚠️ Groq key usually starts with "gsk_"'); }
+  try {
+    await db.collection('config').doc('ai').set({
+      groqApiKey: key,
+      model: model,
+      enabled: on,
+      provider: 'groq',
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    AI_CONFIG.groqApiKey = key; AI_CONFIG.model = model; AI_CONFIG.enabled = on;
+    showToast('✅ AI auto-schedule config saved!');
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }
@@ -591,6 +625,48 @@ function renderTelegram() {
     '</div>' +
     '<div id="tg-token-show" class="muted" style="font-size:.72rem;margin-top:4px;">' + (TG_CONFIG.botToken ? '✅ Token saved in Firestore' : '⚠️ Token nahi set hai — Send Now kaam nahi karega') + '</div>' +
     '<div class="muted" style="font-size:.72rem;margin-top:6px;">💡 Token sirf Firestore mein store hoga (config/telegram) — code mein nahi. GitHub Secrets mein bhi alag se add karo daily cron ke liye.</div>' +
+    '</div>';
+
+  /* ── AI Auto-Schedule (Groq) Card ── */
+  var aiOn    = AI_CONFIG && AI_CONFIG.enabled;
+  var aiKeySet= AI_CONFIG && AI_CONFIG.groqApiKey;
+  var aiModel = (AI_CONFIG && AI_CONFIG.model) || 'llama-3.1-8b-instant';
+  var aiModels = [
+    ['llama-3.1-8b-instant',   'Llama 3.1 8B Instant (fast, cheap — recommended)'],
+    ['llama-3.3-70b-versatile','Llama 3.3 70B Versatile (smartest)'],
+    ['openai/gpt-oss-120b',    'GPT-OSS 120B'],
+    ['openai/gpt-oss-20b',     'GPT-OSS 20B']
+  ];
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">🧠 AI Auto-Schedule (Groq)</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+      'Jab user bot ko apna task ya YouTube link bhejta hai, AI usse padhke subject auto-detect karke ' +
+      'uske planner ki To-Do list mein add kar deta hai. YouTube link click karne pe video YouTube tab mein chalti hai.' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+      '<input id="ai-groq-key" type="password" placeholder="Groq API Key (gsk_…)" ' +
+        'value="' + esc(AI_CONFIG.groqApiKey || '') + '" ' +
+        'style="flex:1;min-width:240px;font-family:monospace;font-size:.82rem;">' +
+      '<button class="btn btn-gray" onclick="var i=document.getElementById(\'ai-groq-key\');i.type=i.type===\'password\'?\'text\':\'password\';">👁 Show/Hide</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+      '<span style="font-size:.82rem;font-weight:700;">Model:</span>' +
+      '<select id="ai-model" style="font-size:.82rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:260px;">' +
+        aiModels.map(function(m){ return '<option value="'+m[0]+'"'+(aiModel===m[0]?' selected':'')+'>'+m[1]+'</option>'; }).join('') +
+      '</select>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;">' +
+        '<input id="ai-enabled" type="checkbox"' + (aiOn ? ' checked' : '') + '> AI auto-schedule ON' +
+      '</label>' +
+      '<button class="btn btn-blue" onclick="saveGroqConfig()">💾 Save AI Config</button>' +
+    '</div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
+      (aiKeySet ? '✅ Groq key saved' : '⚠️ Groq key not set') + ' · ' +
+      (aiOn ? '🟢 AI ON' : '⚪ AI OFF') + ' · model: <b>' + esc(aiModel) + '</b><br>' +
+      '🔑 <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a> se free key banao. ' +
+      'Render bot ko <code>FIREBASE_SERVICE_ACCOUNT</code> env var chahiye taki ye config padh sake.' +
+    '</div>' +
     '</div>';
 
   /* ── Send Controls Card ── */
