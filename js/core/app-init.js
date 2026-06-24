@@ -71,5 +71,6 @@ function initApp() {
   safely(renderPaceTrackerCard);  // Feature 5
   safely(refreshPlannerBadges);        // refresh chips with phase badge
   safely(renderSavedPlansList);        // My Plans list (under AI gen card)
+  safely(maybeShowWeeklyReviewPrompt); // Sunday weekly-review banner on dashboard
 }
 

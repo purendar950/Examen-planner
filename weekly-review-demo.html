@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weekly Review — Demo</title>
+<style>
+  :root{--bg:#0A0D12;--surface:#111620;--card:#161B26;--border:#1E2535;--accent:#00C896;--accent-dim:rgba(0,200,150,0.12);--text:#E8EDF5;--muted:#5A6478;--red:#EF4444;--font:'Inter',-apple-system,sans-serif;}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:100vh;padding:1.5rem;}
+  .wrap{max-width:860px;margin:0 auto;}
+  .section-title{font-size:1.15rem;font-weight:800;}
+  .demo-note{text-align:center;color:var(--muted);font-size:.82rem;margin-bottom:1.25rem;}
+
+  /* Sunday banner */
+  .wr-sunday-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:linear-gradient(90deg,rgba(0,200,150,0.12),rgba(0,200,150,0.04));border:1px solid rgba(0,200,150,0.35);border-radius:12px;padding:.7rem 1rem;margin-bottom:1rem;font-size:.82rem;}
+  .wr-sb-text{flex:1;min-width:180px;}
+  .wr-sb-actions{display:flex;gap:8px;align-items:center;margin-left:auto;}
+  .wr-banner-btn{background:var(--accent);color:#04130d;border:none;border-radius:8px;padding:6px 14px;font-weight:700;font-size:.78rem;cursor:pointer;font-family:var(--font);white-space:nowrap;}
+  .wr-banner-x{background:none;border:none;color:var(--muted);font-size:1rem;cursor:pointer;}
+
+  .wr-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:1rem;}
+  .wr-range{font-size:.82rem;color:var(--muted);margin-top:2px;}
+  .wr-thisweek{background:var(--accent-dim);color:var(--accent);border-radius:99px;padding:1px 9px;font-size:.66rem;font-weight:700;margin-left:6px;}
+  .wr-nav{display:flex;gap:6px;align-items:center;}
+  .wr-nav-btn{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;min-width:34px;height:32px;padding:0 10px;font-size:1rem;cursor:pointer;font-family:var(--font);}
+  .wr-nav-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .wr-nav-today{font-size:.74rem;font-weight:700;}
+
+  .wr-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:1rem 1.1rem;margin-bottom:1rem;}
+  .wr-card-title{font-size:.8rem;font-weight:700;color:var(--accent);margin-bottom:.75rem;display:flex;align-items:center;gap:8px;}
+  .wr-card-hint{font-size:.66rem;font-weight:500;color:var(--muted);}
+  .wr-headline{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;}
+  .wr-headline-main{display:flex;align-items:center;gap:14px;}
+  .wr-headline-pct{font-size:2.4rem;font-weight:800;line-height:1;color:var(--accent);}
+  .wr-headline-line{font-size:.9rem;}
+  .wr-headline-sub{font-size:.74rem;color:var(--muted);margin-top:2px;}
+  .wr-headline-chips{display:flex;gap:8px;flex-wrap:wrap;}
+  .wr-chip{font-size:.66rem;font-weight:600;border-radius:99px;padding:3px 10px;white-space:nowrap;}
+  .wr-chip-muted{background:var(--surface);color:var(--muted);border:1px solid var(--border);}
+  .wr-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
+  @media(max-width:760px){.wr-grid{grid-template-columns:1fr;}}
+  .wr-grid .wr-card{margin-bottom:0;}
+  .wr-bar-wrap{height:8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-bottom:.85rem;}
+  .wr-bar-fill{height:100%;background:var(--accent);border-radius:6px;}
+  .wr-metric-row,.wr-mock-row{display:flex;gap:8px;flex-wrap:wrap;}
+  .wr-metric{flex:1;min-width:64px;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:.55rem .4rem;text-align:center;}
+  .wr-metric-val{font-size:1.15rem;font-weight:800;line-height:1.1;}
+  .wr-metric-lbl{font-size:.62rem;color:var(--muted);margin-top:3px;}
+  .wr-mock-row{margin-top:.6rem;}
+  .wr-subj-row{display:flex;align-items:center;gap:10px;margin-bottom:.6rem;}
+  .wr-subj-name{flex:0 0 32%;font-size:.78rem;display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .wr-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+  .wr-subj-bar{flex:1;height:8px;background:var(--surface);border:1px solid var(--border);border-radius:6px;overflow:hidden;}
+  .wr-subj-fill{height:100%;border-radius:6px;}
+  .wr-subj-pct{flex:0 0 auto;font-size:.66rem;font-weight:600;white-space:nowrap;}
+  .wr-focus{border-color:rgba(0,200,150,0.3);}
+  .wr-focus-list{display:flex;flex-direction:column;gap:8px;margin-bottom:.85rem;}
+  .wr-focus-item{display:flex;gap:10px;align-items:flex-start;font-size:.82rem;line-height:1.5;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:.6rem .8rem;}
+  .wr-focus-icon{flex-shrink:0;}
+  .wr-focus-btn{background:var(--accent-dim);border:1px solid rgba(0,200,150,.3);color:var(--accent);border-radius:8px;padding:7px 14px;font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--font);}
+  .wr-focus-btn:hover{background:var(--accent);color:#04130d;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="demo-note">Standalone preview of the Weekly Review screen (sample data). The live version reads your real tasks, mocks, subjects &amp; revisions.</div>
+
+  <!-- Sunday banner preview -->
+  <div class="wr-sunday-banner">
+    <span class="wr-sb-text">📅 <b>Sunday Weekly Review ready</b> — dekho is hafte kaisa raha aur agle hafte ka focus.</span>
+    <span class="wr-sb-actions">
+      <button class="wr-banner-btn">Open Review →</button>
+      <button class="wr-banner-x" title="Dismiss">✕</button>
+    </span>
+  </div>
+
+  <div class="wr-header">
+    <div>
+      <div class="section-title" style="margin:0;">📅 Weekly Review</div>
+      <div class="wr-range">Jun 22 – 28, 2026 <span class="wr-thisweek">This week</span></div>
+    </div>
+    <div class="wr-nav">
+      <button class="wr-nav-btn" title="Previous week">‹</button>
+      <button class="wr-nav-btn" title="Next week">›</button>
+    </div>
+  </div>
+
+  <!-- Headline -->
+  <div class="wr-card wr-headline">
+    <div class="wr-headline-main">
+      <div class="wr-headline-pct">72%</div>
+      <div>
+        <div class="wr-headline-line"><b>18/25</b> tasks &amp; habits complete</div>
+        <div class="wr-headline-sub">Great Job</div>
+      </div>
+    </div>
+    <div class="wr-headline-chips">
+      <span class="wr-chip" style="background:#f59e0b1a;color:#f59e0b;border:1px solid #f59e0b44;">🎯 Mock + Revision</span>
+      <span class="wr-chip wr-chip-muted">🔥 12-day streak</span>
+      <span class="wr-chip wr-chip-muted">⏳ 20 days to exam</span>
+    </div>
+  </div>
+
+  <div class="wr-grid">
+    <!-- Plan vs Actual -->
+    <div class="wr-card">
+      <div class="wr-card-title">📊 Plan vs Actual</div>
+      <div class="wr-bar-wrap"><div class="wr-bar-fill" style="width:72%;"></div></div>
+      <div class="wr-metric-row">
+        <div class="wr-metric"><div class="wr-metric-val">21</div><div class="wr-metric-lbl">Topics planned</div></div>
+        <div class="wr-metric"><div class="wr-metric-val">14</div><div class="wr-metric-lbl">Tasks done</div></div>
+        <div class="wr-metric"><div class="wr-metric-val">11/14</div><div class="wr-metric-lbl">Habits hit</div></div>
+        <div class="wr-metric"><div class="wr-metric-val">6</div><div class="wr-metric-lbl">Revisions due</div></div>
+      </div>
+    </div>
+
+    <!-- Subject scorecard -->
+    <div class="wr-card">
+      <div class="wr-card-title">🎯 Subject Scorecard <span class="wr-card-hint">weakest first</span></div>
+      <div class="wr-subj-row"><span class="wr-subj-name"><span class="wr-dot" style="background:#EF4444;"></span>General Awareness</span><div class="wr-subj-bar"><div class="wr-subj-fill" style="width:38%;background:#EF4444;"></div></div><span class="wr-subj-pct" style="color:#ef4444;">38% · Behind ⚠️</span></div>
+      <div class="wr-subj-row"><span class="wr-subj-name"><span class="wr-dot" style="background:#3B82F6;"></span>English</span><div class="wr-subj-bar"><div class="wr-subj-fill" style="width:55%;background:#3B82F6;"></div></div><span class="wr-subj-pct" style="color:#3b82f6;">55% · On Track 🎯</span></div>
+      <div class="wr-subj-row"><span class="wr-subj-name"><span class="wr-dot" style="background:#A855F7;"></span>Reasoning</span><div class="wr-subj-bar"><div class="wr-subj-fill" style="width:68%;background:#A855F7;"></div></div><span class="wr-subj-pct" style="color:#10b981;">68% · Ahead ↑</span></div>
+      <div class="wr-subj-row"><span class="wr-subj-name"><span class="wr-dot" style="background:#00C896;"></span>Quant</span><div class="wr-subj-bar"><div class="wr-subj-fill" style="width:81%;background:#00C896;"></div></div><span class="wr-subj-pct" style="color:#10b981;">81% · Ahead ↑</span></div>
+    </div>
+
+    <!-- Mock trend -->
+    <div class="wr-card">
+      <div class="wr-card-title">📈 Mock Trend <span class="wr-card-hint">Tier I · 6 mocks</span></div>
+      <svg viewBox="0 0 240 56" style="width:100%;height:auto;display:block;">
+        <polygon points="7,49 7,34 53,30 99,24 145,28 191,18 233,15 233,49" fill="#00C896" opacity="0.12"></polygon>
+        <polyline points="7,34 53,30 99,24 145,28 191,18 233,15" fill="none" stroke="#00C896" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>
+        <circle cx="7" cy="34" r="2.6" fill="#00C896"></circle><circle cx="53" cy="30" r="2.6" fill="#00C896"></circle><circle cx="99" cy="24" r="2.6" fill="#00C896"></circle><circle cx="145" cy="28" r="2.6" fill="#00C896"></circle><circle cx="191" cy="18" r="2.6" fill="#00C896"></circle><circle cx="233" cy="15" r="2.6" fill="#00C896"></circle>
+      </svg>
+      <div class="wr-mock-row">
+        <div class="wr-metric"><div class="wr-metric-val">142 <span style="font-size:.72rem;color:var(--accent);">+8</span></div><div class="wr-metric-lbl">Latest / 200</div></div>
+        <div class="wr-metric"><div class="wr-metric-val">148</div><div class="wr-metric-lbl">Best</div></div>
+        <div class="wr-metric"><div class="wr-metric-val" style="color:var(--red);">41%</div><div class="wr-metric-lbl">General (weak)</div></div>
+      </div>
+    </div>
+
+    <!-- Revision health -->
+    <div class="wr-card">
+      <div class="wr-card-title">🔁 Revision Health</div>
+      <div class="wr-metric-row">
+        <div class="wr-metric"><div class="wr-metric-val" style="color:#f59e0b;">4</div><div class="wr-metric-lbl">Due now</div></div>
+        <div class="wr-metric"><div class="wr-metric-val">9</div><div class="wr-metric-lbl">This week</div></div>
+        <div class="wr-metric"><div class="wr-metric-val" style="color:var(--accent);">23</div><div class="wr-metric-lbl">Mastered</div></div>
+        <div class="wr-metric"><div class="wr-metric-val">5</div><div class="wr-metric-lbl">Rev streak</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI focus -->
+  <div class="wr-card wr-focus">
+    <div class="wr-card-title">🤖 AI Next-Week Focus</div>
+    <div class="wr-focus-list">
+      <div class="wr-focus-item"><span class="wr-focus-icon" style="color:#ef4444;">⚠️</span><span><b>9 chapters behind</b> schedule — agle hafte <b>+2/day</b> extra complete karo.</span></div>
+      <div class="wr-focus-item"><span class="wr-focus-icon" style="color:#EF4444;">📉</span><span>Sabse kamzor subject: <b>General Awareness</b> (38% done). Ispe time do.</span></div>
+      <div class="wr-focus-item"><span class="wr-focus-icon" style="color:#f59e0b;">📝</span><span>Weakest mock section: <b>General Awareness</b> (avg 41%). PYQ sets lagao.</span></div>
+      <div class="wr-focus-item"><span class="wr-focus-icon" style="color:#A855F7;">🔁</span><span><b>4</b> revisions due — Mon/Tue clear kar lo.</span></div>
+    </div>
+    <button class="wr-focus-btn">＋ Add focus to today's tasks</button>
+  </div>
+</div>
+</body>
+</html>
