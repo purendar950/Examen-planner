@@ -183,6 +183,9 @@
           <!-- ═══ DAY VIEW CONTENT ═══ -->
           <div id="planner-day-content">
 
+            <!-- ═══ DAILY HABITS CARD (always at top of day view) ═══ -->
+            <div class="habits-card" id="habits-card" style="display:none;"></div>
+
             <!-- Scheduled Videos -->
             <div class="sv-card" id="sv-card" style="display:none;" onclick="toggleScheduledVideos(event)">
               <div class="sv-header">
@@ -194,9 +197,6 @@
 
             <!-- Kanban board -->
             <div class="kanban-board" id="kanban-board"></div>
-
-            <!-- ═══ DAILY HABITS CARD (separate from tasks) ═══ -->
-            <div class="habits-card" id="habits-card" style="display:none;"></div>
 
             <!-- Tasks panel (list view) -->
             <div class="task-panel" id="task-panel-wrap" style="display:none;">
