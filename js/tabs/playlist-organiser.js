@@ -560,6 +560,40 @@ function ytoDetectChapters(videos) {
   return [{ name: 'All Videos', videos }];
 }
 
+/* ── Sort a course's videos oldest-upload-first (stable; missing dates keep order) ── */
+function ytoSortVideosOldestFirst(videos) {
+  if (!videos || videos.length < 2) return;
+  videos.sort((a, b) => {
+    const ta = a.pub ? new Date(a.pub).getTime() : null;
+    const tb = b.pub ? new Date(b.pub).getTime() : null;
+    if (ta === null && tb === null) return 0;   // both undated → keep order
+    if (ta === null) return 1;                   // undated goes last
+    if (tb === null) return -1;
+    return ta - tb;                              // ascending = oldest first
+  });
+}
+
+/* ── One-time backfill of upload dates for courses saved before sorting existed.
+   Fetches publishedAt from the API, stores it on each video, sorts, persists. ── */
+async function ytoBackfillDatesAndSort(plId) {
+  const pl = ytoLib()[plId];
+  if (!pl || pl.type === 'video' || !pl.videos || pl.videos.length < 2) return false;
+  const needsDates = pl.videos.some(v => !v.pub);
+  if (needsDates && typeof ytFetchPlaylistVideos === 'function') {
+    try {
+      const fetched = await ytFetchPlaylistVideos(plId);
+      if (fetched && fetched.length) {
+        const pubMap = {};
+        fetched.forEach(f => { pubMap[f.id] = f.publishedAt || null; });
+        pl.videos.forEach(v => { if (!v.pub && pubMap[v.id]) v.pub = pubMap[v.id]; });
+      }
+    } catch (e) { /* quota/network — fall through, order unchanged */ }
+  }
+  ytoSortVideosOldestFirst(pl.videos);
+  ytoPersist();
+  return true;
+}
+
 /* ── Course view skeleton ── */
 function ytoOpenCourse(plId) {
   const pl = ytoLib()[plId];
@@ -584,6 +618,10 @@ function ytoOpenCourse(plId) {
     <div id="yto-plan-area"></div>
     <div id="yto-chapters" style="margin-top:1.25rem;"></div>`;
   ytoRefreshCourse();
+  // Backfill missing upload dates for older courses, then re-sort + re-render once.
+  ytoBackfillDatesAndSort(plId).then(function(changed) {
+    if (changed && ytoCurrentPl === plId) ytoRefreshCourse();
+  });
   // Pre-populate YouTube tab sidebar so course content is ready when user switches
   setTimeout(function() { ytoPopulateYtSidebar(plId, pl.lastVideo || ''); }, 100);
 }
@@ -591,6 +629,7 @@ function ytoOpenCourse(plId) {
 /* ── Refresh header + chapters + plan (player untouched) ── */
 function ytoRefreshCourse() {
   const pl = ytoLib()[ytoCurrentPl]; if (!pl) return;
+  ytoSortVideosOldestFirst(pl.videos);
   const total = ytoTotalSecs(pl), done = ytoDoneCount(pl);
   const pct = pl.videos.length ? Math.round(done/pl.videos.length*100) : 0;
   const fin = ytoEstimateFinish(pl);
