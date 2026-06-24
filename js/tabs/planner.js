@@ -806,9 +806,10 @@ function renderKanbanBoard(dateStr) {
       const s = t.subject && subjMap[t.subject] ? subjMap[t.subject] : null;
       const ss = s ? s.name.split(/[ &]/)[0] : '';
       const pr = t.priority || 'normal';
+      const typeIcon = t.type === 'video' ? '🎥 ' : '';
       return `<div class="kanban-card" draggable="true"
           ondragstart="kbDragStart(event,'${t.id}')" ondragend="kbDragEnd(event)">
-        <div class="kanban-card-text ${t.done?'done':''}">${escapeHtml(t.text)}</div>
+        <div class="kanban-card-text ${t.done?'done':''}">${typeIcon}${escapeHtml(t.text)}</div>
         <div class="kanban-card-meta">
           <span class="priority-badge ${pr}">${PRIORITY_LABEL[pr]||'MEDIUM'}</span>
           ${rolloverBadgeHtml(t)}

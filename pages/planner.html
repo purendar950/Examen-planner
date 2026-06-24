@@ -219,6 +219,10 @@
               <div class="task-add-bar" style="border-top:none;">
                 <input type="text" class="task-input" id="task-input" placeholder="Add a study task…" onkeydown="if(event.key==='Enter')addTask()">
                 <select class="task-select" id="task-subject"><option value="">📚 Subject</option></select>
+                <select class="task-select" id="task-type">
+                  <option value="study">📖 Study</option>
+                  <option value="video">🎥 Video</option>
+                </select>
                 <select class="task-select" id="task-priority">
                   <option value="normal">Normal</option>
                   <option value="high">🔴 High</option>

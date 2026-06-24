@@ -1089,14 +1089,16 @@ function addTask() {
   const input = document.getElementById('task-input');
   const priority = document.getElementById('task-priority').value;
   const subject = document.getElementById('task-subject').value;
+  const typeEl = document.getElementById('task-type');
+  const type = typeEl ? typeEl.value : 'study';
   const text = input.value.trim();
   if (!text) { input.focus(); return; }
   const dateStr = selectedPlannerDate || fmtDate(new Date());
   if (!appState.tasks[dateStr]) appState.tasks[dateStr] = [];
-  appState.tasks[dateStr].push({ id: Date.now().toString(), text, done:false, priority, subject });
+  appState.tasks[dateStr].push({ id: Date.now().toString(), text, done:false, priority, subject, type });
   input.value = ''; input.focus();
   saveProgress(); buildPlannerCalendar();
-  showToast('Task added! ✅', 'success');
+  showToast(type === 'video' ? 'Video task added! 🎥' : 'Task added! ✅', 'success');
 }
 
 function populateTaskSubjectDropdown() {
@@ -1136,9 +1138,10 @@ function renderTaskList(dateStr) {
     const s = t.subject && subjMap[t.subject] ? subjMap[t.subject] : null;
     const sc = s ? s.color : 'var(--border)';
     const ss = s ? s.name.split(/[ &]/)[0] : '';
+    const typeIcon = t.type === 'video' ? '🎥 ' : '';
     return `<div class="task-item" style="border-left-color:${sc};">
       <div class="ch-checkbox${t.done?' checked':''}" onclick="toggleTask('${dateStr}','${t.id}')">${t.done?'✓':''}</div>
-      <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${escapeHtml(t.text)}</span>
+      <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${typeIcon}${escapeHtml(t.text)}</span>
       ${typeof rolloverBadgeHtml === 'function' ? rolloverBadgeHtml(t) : ''}
       ${s?`<span class="task-subject-chip" style="background:${sc}22;color:${sc};">${escapeHtml(ss)}</span>`:''}
       <button class="ch-action-btn" onclick="deleteTask('${dateStr}','${t.id}')">🗑</button>
