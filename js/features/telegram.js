@@ -16,13 +16,31 @@ function buildTelegramDigest() {
     for (let i = 0; i < 7; i++) {
       const d = new Date(start); d.setDate(start.getDate() + i);
       const ds = (typeof fmtDate === 'function') ? fmtDate(d) : d.toISOString().slice(0, 10);
+
+      /* Scheduled study/revision topics from the active plan(s). */
       const items = (map[ds] || []).filter(it => it.type !== 'spacer');
-      if (!items.length) continue;
       const lines = items.map(it => {
         const ch = it.ch || {};
         if (it.type === 'revise') return `🔁 Revise: ${ch.name || ''}${it.dueLabel ? ' (' + it.dueLabel + ')' : ''}`;
         return `📖 ${ch.name || ''}${it.part ? ' ' + it.part : ''}${ch.subName ? '  — ' + ch.subName : ''}`;
       });
+
+      /* Manually-added tasks for that day (includes tasks sent via the Telegram
+         bot, which writes them straight into appState.tasks). Skip ones already
+         covered by a scheduled topic line so the digest stays clean. */
+      try {
+        const tasks = (appState.tasks && appState.tasks[ds]) || [];
+        const seen = new Set(lines.map(l => l.toLowerCase()));
+        tasks.forEach(t => {
+          if (!t || !t.text) return;
+          const line = `📝 ${t.text}${t.priority === 'high' ? ' ❗' : ''}`;
+          if (seen.has(line.toLowerCase())) return;
+          seen.add(line.toLowerCase());
+          lines.push(line);
+        });
+      } catch(e) {}
+
+      if (!lines.length) continue;
       digest[ds] = lines.join('\n');
     }
   } catch(e) {}

@@ -16,6 +16,7 @@ let USERS = [], PLANS = [], PAYMENTS = [], REQUESTS = [], COUPONS = [], REDEMPTI
 let CONFIG = {}, SETTINGS = { requireApproval: false };
 let DUP = { mobile:{}, fp:{}, ip:{} };
 let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = false;
+let AI_CONFIG = { groqApiKey: '', model: 'llama-3.1-8b-instant', enabled: true, loaded: false };
 
 function showToast(msg) { let t=document.getElementById('adm-toast'); if(!t){t=document.createElement('div');t.id='adm-toast';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 20px;border-radius:10px;font-size:0.85rem;z-index:999;';document.body.appendChild(t);} t.textContent=msg;t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(()=>t.style.opacity='0',2500); }
 function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

@@ -9,6 +9,16 @@ Firebase Firestore              GitHub Actions (6 AM IST daily)
       chatId: "123456"
       enabled: true
       digest: { "2026-06-18": "📖 History\n🔁 Revise: Polity" }
+
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │  NEW: inbound task scheduling (bot/bot-server.js on Render, 24/7)         │
+  │                                                                           │
+  │  User sends "kal: Revise Polity Ch 3"  ──►  bot-server.js                 │
+  │     1. finds the user by appState.telegram.chatId                         │
+  │     2. parses the date ("kal" → tomorrow) + task text                     │
+  │     3. writes it to users/{uid}.appState.tasks["YYYY-MM-DD"]              │
+  │  The web planner reads the same store, so the task is already scheduled.  │
+  └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -21,9 +31,9 @@ Firebase Firestore              GitHub Actions (6 AM IST daily)
 
 ---
 
-## Step 2 — Deploy the bot server on Render (so bot replies with Chat ID)
+## Step 2 — Deploy the bot server on Render (replies with Chat ID **and** schedules tasks)
 
-The bot must run 24/7 to reply to users who press Start.
+The bot must run 24/7 to reply to users who press Start and to receive tasks they send.
 
 1. Go to **render.com** → New → Web Service
 2. Connect this GitHub repo
@@ -32,10 +42,89 @@ The bot must run 24/7 to reply to users who press Start.
    - **Build command:** `npm install`
    - **Start command:** `node bot-server.js`
    - **Plan:** Free
-4. Add env var: `TELEGRAM_BOT_TOKEN` = your token from BotFather
+4. Add env vars:
+   - `TELEGRAM_BOT_TOKEN` = your token from BotFather
+   - `FIREBASE_SERVICE_ACCOUNT` = full service-account JSON (same value as the
+     GitHub secret in Step 4). **Required for task auto-scheduling.** Without it
+     the bot still replies with Chat IDs, but cannot add tasks to the planner.
 5. Deploy. When live, press **Start** in your bot → it should reply with your Chat ID.
 
-> **Alternative (no Render):** Users can message **@userinfobot** on Telegram — it replies instantly with their numeric Chat ID. No bot server needed.
+> The startup logs will show `✅ Firebase Admin connected — task auto-scheduling ENABLED`
+> when the service account is set correctly.
+
+> **Alternative (no Render):** Users can message **@userinfobot** on Telegram — it replies instantly with their numeric Chat ID. But task auto-scheduling needs the bot server running, so Render (or any always-on host) is required for that feature.
+
+---
+
+## How task auto-scheduling works (for users)
+
+Once a user has connected (Chat ID saved + toggle ON in the app), they can just
+message the bot and the task lands in their planner automatically:
+
+| User sends | Result |
+|---|---|
+| `Revise Polity Ch 3` | Added to **today** |
+| `kal: Solve 50 maths Qs` | Added to **tomorrow** (`kal`) |
+| `monday Mock test attempt` | Added to next **Monday** |
+| `Attempt Mock Test 25 Jun` | Added to **25 Jun** |
+| `2026-06-25 Revise Economics` | Added to that exact date |
+
+- **Multiple tasks:** send each on its own line.
+- **High priority:** end the line with `!` or add `#high` / `#urgent` / `#important`.
+- **Commands:** `/task <text>` to add explicitly, `/list` (or `/today`) to see today's tasks.
+
+Tasks are saved to `users/{uid}.appState.tasks["YYYY-MM-DD"]` (the exact store
+the web planner reads) and also merged into the daily digest for that date.
+
+---
+
+## AI auto-scheduling with Groq (smart parsing + subject detection)
+
+The bot can use **Groq AI** to understand messages far better than the built-in
+parser — it auto-detects the **subject**, resolves any date phrasing, splits
+multiple tasks, and turns **YouTube links into click-to-play planner tasks**.
+
+### Setup
+
+1. Get a free API key at **console.groq.com** (keys start with `gsk_`).
+2. Open **admin panel → Telegram tab → 🧠 AI Auto-Scheduling (Groq)**.
+3. Paste the key, pick a **model**, tick **Enable AI**, and **Save**.
+4. Click **🧪 Test** to verify — it runs a sample message through Groq via the
+   bot server and shows the parsed tasks.
+
+The key is stored only in Firestore (`config/ai`); the bot server reads it via
+the Admin SDK (so it needs `FIREBASE_SERVICE_ACCOUNT`, same as Step 2/4).
+
+### Models
+
+| Model | Notes |
+|---|---|
+| `llama-3.1-8b-instant` | **Default** — fast and basically free |
+| `llama-3.3-70b-versatile` | Smartest for messy / Hinglish input |
+| `openai/gpt-oss-120b`, `openai/gpt-oss-20b` | Alternatives |
+
+### What it does
+
+- `Revise polity tomorrow, important` → high-priority task on tomorrow, subject auto-set to GA/Polity.
+- `Mon-Fri 1hr current affairs` → one task per weekday.
+- `kal ye dekhna https://youtu.be/xxxx` → a **🎥 click-to-play** task on tomorrow that opens YouTube.
+
+### Safety / fallback
+
+- If AI is **disabled**, the key is missing, or Groq errors, the bot
+  automatically falls back to the built-in regex parser (which also detects
+  YouTube links) — so scheduling never fully breaks.
+- **Firestore rule:** keep `config/ai` **admin-only** (the client app must not
+  read it). Example rule:
+
+  ```
+  match /config/ai {
+    allow read, write: if request.auth != null
+                       && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+  }
+  ```
+
+
 
 ---
 
@@ -100,6 +189,11 @@ Done. Sent=1  Skipped=4  Failed=0  NoDigest=0
 | `Sent=0` every day | No user has enabled=true + valid chatId in Firestore |
 | Bot doesn't reply | Bot server not running on Render — check Render logs |
 | Message says "Aaj koi topic scheduled nahi" | User hasn't built a study plan in the app yet |
+| Bot replies "Pehle apna account connect karo" when sending a task | User's Chat ID isn't saved in the app yet — connect via Profile → Daily Plan on Telegram |
+| Bot says "Task scheduling abhi available nahi hai" | `FIREBASE_SERVICE_ACCOUNT` env var is missing on the Render bot service — add it (see Step 2) |
+| Tasks not appearing in planner | Confirm the same Chat ID is saved in the app and the bot logs show `task auto-scheduling ENABLED` |
+| AI Test button shows an error | Key not saved, not starting with `gsk_`, or the Render bot is asleep/missing `FIREBASE_SERVICE_ACCOUNT` |
+| AI ignored but simple parser works | AI is disabled in admin, or Groq quota/network error — bot fell back to the regex parser (expected) |
 
 ---
 
