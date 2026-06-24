@@ -282,7 +282,16 @@ function buildMessage(name, appState, topicDigest, today) {
   const body = hasContent
     ? sections.join('\n\n')
     : '📋 Aaj koi topic/task scheduled nahi.\n💡 App kholo → Planner mein add karo → Save karo.';
-  return { text: header + '\n' + body + footer, hasContent };
+  const stats = {
+    hasTopics: !!(topicDigest && topicDigest.trim()),
+    tasksTodayTotal: Array.isArray((appState.tasks || {})[today]) ? appState.tasks[today].length : 0,
+    todo: todoLines.length,
+    videos: videoItems.length,
+    done: doneCount,
+    courses: Object.keys((appState && appState.ytoLibrary) || {}).length,
+    taskDates: Object.keys(appState.tasks || {}).length
+  };
+  return { text: header + '\n' + body + footer, hasContent, stats };
 }
 
 async function main() {
@@ -374,6 +383,8 @@ async function main() {
 
     const built = buildMessage(name, aState, plan, today);
     if (!built.hasContent) noDigest++;
+    const _s = built.stats;
+    console.log(`  🔎 ${doc.id} (${name}): today=${today} taskDates=${_s.taskDates} tasksToday=${_s.tasksTodayTotal} todo=${_s.todo} videos=${_s.videos} done=${_s.done} courses=${_s.courses} topics=${_s.hasTopics}`);
 
     try {
       await sendTelegramMessage(tg.chatId, built.text);
