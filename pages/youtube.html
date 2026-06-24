@@ -61,58 +61,7 @@
             <button class="yt-pip-btn" onclick="ytPiP()" title="Picture in Picture">📺 PiP</button>
           </div>
 
-          <!-- ═══ NOTES PANEL ═══ -->
-          <div class="yt-notes-panel" id="yt-notes-panel">
-            <div class="yt-notes-tabs">
-              <div class="yt-notes-tab active" onclick="ytNotesTab('write')" id="yt-ntab-write">📝 Notes</div>
-              <div class="yt-notes-tab" onclick="ytNotesTab('saved')" id="yt-ntab-saved">🗂 Saved <span id="yt-notes-count-badge" style="background:var(--accent-dim);color:var(--accent);border-radius:4px;padding:1px 6px;font-size:0.68rem;margin-left:4px;">0</span></div>
-            </div>
-
-            <!-- Write Tab -->
-            <div id="yt-ntab-write-body" class="yt-notes-body">
-              <div class="yt-notes-toolbar">
-                <button class="yt-fmt-btn" title="Bold" id="yt-fmt-b" onclick="ytFmt('bold')"><b>B</b></button>
-                <button class="yt-fmt-btn" title="Italic" id="yt-fmt-i" onclick="ytFmt('italic')"><i>I</i></button>
-                <button class="yt-fmt-btn" title="Underline" id="yt-fmt-u" onclick="ytFmt('underline')"><u>U</u></button>
-                <div class="yt-toolbar-sep"></div>
-                <div class="yt-color-dot dot-default active" title="Default" onclick="ytSetColor('default',this)" data-color="default"></div>
-                <div class="yt-color-dot dot-green" title="Green" onclick="ytSetColor('green',this)" data-color="green"></div>
-                <div class="yt-color-dot dot-yellow" title="Yellow" onclick="ytSetColor('yellow',this)" data-color="yellow"></div>
-                <div class="yt-color-dot dot-red" title="Red" onclick="ytSetColor('red',this)" data-color="red"></div>
-                <div class="yt-color-dot dot-blue" title="Blue" onclick="ytSetColor('blue',this)" data-color="blue"></div>
-                <div class="yt-color-dot dot-purple" title="Purple" onclick="ytSetColor('purple',this)" data-color="purple"></div>
-                <div class="yt-toolbar-sep"></div>
-                <button class="yt-timestamp-btn" onclick="ytInsertTimestamp()" title="Insert current timestamp">⏱ Timestamp</button>
-              </div>
-              <textarea class="yt-notes-area" id="yt-note-input"
-                placeholder="Is video ke notes yahan likho... Timestamps insert karo aur colors use karo!" rows="5"></textarea>
-              <div class="yt-notes-footer">
-                <div class="yt-notes-context">
-                  📌 Saving for: <span id="yt-note-context-label">No video selected</span>
-                </div>
-                <div class="yt-notes-save-row">
-                  <button class="btn-sm" onclick="ytClearNoteInput()">Clear</button>
-                  <button class="btn-sm green" id="yt-note-save-btn" onclick="ytSaveNote()">Save Note</button>
-                </div>
-              </div>
-              <div id="yt-note-save-toast" style="display:none;font-size:0.75rem;color:var(--accent);margin-top:6px;text-align:right;">✓ Saved!</div>
-            </div>
-
-            <!-- Saved Notes Tab -->
-            <div id="yt-ntab-saved-body" class="yt-notes-body" style="display:none">
-              <input type="text" class="yt-notes-search" id="yt-notes-search"
-                placeholder="🔍 Notes search karo (title ya content)..."
-                oninput="ytRenderSavedNotes()">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.85rem;flex-wrap:wrap;gap:8px;">
-                <select class="notes-select" id="yt-notes-filter-sel" onchange="ytRenderSavedNotes()" style="font-size:0.78rem;">
-                  <option value="all">All Videos</option>
-                  <option value="current">Current Video Only</option>
-                </select>
-                <div style="font-size:0.75rem;color:var(--muted);" id="yt-saved-notes-summary"></div>
-              </div>
-              <div id="yt-saved-notes-list" class="yt-notes-list"></div>
-            </div>
-          </div>
+          <!-- Notes panel removed (use the 📂 Gallery for saved moments) -->
 
           <!-- Saved chapter links section -->
           <div class="yt-saved-section" style="margin-top:1.25rem;">

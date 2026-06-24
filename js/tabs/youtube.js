@@ -903,7 +903,8 @@ function ytLoadNotes() {
   if (!appState.ytNotes) appState.ytNotes = [];
   ytNotes = appState.ytNotes;
   ytUpdateNotesBadge();
-  if (document.getElementById('yt-ntab-saved-body').style.display !== 'none') {
+  const savedBody = document.getElementById('yt-ntab-saved-body');
+  if (savedBody && savedBody.style.display !== 'none') {
     ytRenderSavedNotes();
   }
 }
@@ -914,15 +915,21 @@ function ytSaveNotesToState() {
 }
 
 function ytNotesTab(tab) {
-  document.getElementById('yt-ntab-write').classList.toggle('active', tab === 'write');
-  document.getElementById('yt-ntab-saved').classList.toggle('active', tab === 'saved');
-  document.getElementById('yt-ntab-write-body').style.display = tab === 'write' ? '' : 'none';
-  document.getElementById('yt-ntab-saved-body').style.display = tab === 'saved' ? '' : 'none';
+  const w = document.getElementById('yt-ntab-write');
+  const s = document.getElementById('yt-ntab-saved');
+  const wb = document.getElementById('yt-ntab-write-body');
+  const sb = document.getElementById('yt-ntab-saved-body');
+  if (!w || !s || !wb || !sb) return;
+  w.classList.toggle('active', tab === 'write');
+  s.classList.toggle('active', tab === 'saved');
+  wb.style.display = tab === 'write' ? '' : 'none';
+  sb.style.display = tab === 'saved' ? '' : 'none';
   if (tab === 'saved') ytRenderSavedNotes();
 }
 
 function ytUpdateNotesContext() {
   const label = document.getElementById('yt-note-context-label');
+  if (!label) return;
   if (ytCurrentVideoId) {
     label.textContent = ytCurrentVideoTitle || ytCurrentVideoId;
     label.style.color = 'var(--accent)';
@@ -933,7 +940,8 @@ function ytUpdateNotesContext() {
 }
 
 function ytUpdateNotesBadge() {
-  document.getElementById('yt-notes-count-badge').textContent = ytNotes.length;
+  const badge = document.getElementById('yt-notes-count-badge');
+  if (badge) badge.textContent = ytNotes.length;
 }
 
 function ytFmt(cmd) {
@@ -978,7 +986,9 @@ function ytClearNoteInput() {
 }
 
 function ytSaveNote() {
-  const content = document.getElementById('yt-note-input').value.trim();
+  const inputEl = document.getElementById('yt-note-input');
+  if (!inputEl) return;
+  const content = inputEl.value.trim();
   if (!content) { showToast('Kuch likho pehle!', 'error'); return; }
 
   const note = {
@@ -1010,6 +1020,7 @@ function ytSaveNote() {
 function ytRenderSavedNotes() {
   const listEl    = document.getElementById('yt-saved-notes-list');
   const summaryEl = document.getElementById('yt-saved-notes-summary');
+  if (!listEl || !summaryEl) return;
   const filter    = document.getElementById('yt-notes-filter-sel').value;
   const searchQ   = (document.getElementById('yt-notes-search')?.value || '').toLowerCase().trim();
 
