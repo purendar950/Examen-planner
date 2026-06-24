@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recurring / Habit Tasks — Demo</title>
+<style>
+  :root {
+    --bg: #0A0D12;
+    --surface: #111620;
+    --card: #161B26;
+    --border: #1E2535;
+    --accent: #00C896;
+    --accent-dim: rgba(0,200,150,0.12);
+    --text: #E8EDF5;
+    --muted: #5A6478;
+    --red: #EF4444;
+    --radius: 10px;
+    --font: 'Inter', -apple-system, sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; padding: 1.5rem; }
+
+  h1 { font-size: 1.4rem; margin-bottom: .25rem; }
+  .subtitle { color: var(--muted); font-size: .85rem; margin-bottom: 1.5rem; }
+
+  /* Layout */
+  .demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; max-width: 1000px; margin: 0 auto; }
+  @media (max-width: 700px) { .demo-grid { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .panel-header { padding: .85rem 1.1rem; border-bottom: 1px solid var(--border); font-size: .8rem; font-weight: 700; color: var(--accent); }
+
+  /* Add task bar */
+  .task-add-bar { display: flex; gap: 8px; padding: .75rem 1rem; flex-wrap: wrap; background: var(--surface); }
+  .task-input { flex:1; min-width:140px; padding:.5rem .75rem; background:var(--card); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.85rem; outline:none; font-family:var(--font); }
+  .task-input:focus { border-color: var(--accent); }
+  .task-select { padding:.5rem .6rem; background:var(--card); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.78rem; outline:none; font-family:var(--font); cursor:pointer; }
+  .task-recurring-toggle { display:flex; align-items:center; gap:4px; font-size:.82rem; cursor:pointer; white-space:nowrap; user-select:none; }
+  .task-recurring-toggle input[type="checkbox"] { width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
+  .btn-task-save { background:var(--accent); color:#000; border:none; border-radius:8px; padding:.5rem 14px; font-weight:700; font-size:.82rem; cursor:pointer; font-family:var(--font); }
+  .btn-task-save:hover { opacity:.9; }
+
+  /* Recurring options */
+  .recurring-options { display:flex; gap:8px; padding:.5rem 1rem; background:var(--surface); flex-wrap:wrap; align-items:center; border-top:1px dashed var(--border); }
+  .recurring-days-row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .day-chk-label { display:flex; align-items:center; gap:2px; font-size:.72rem; color:var(--muted); cursor:pointer; padding:4px 8px; border-radius:5px; border:1px solid var(--border); transition: all .15s; }
+  .day-chk-label.active { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+  .day-chk-label input { width:0; height:0; opacity:0; position:absolute; }
+
+  /* Task list */
+  .task-list { padding: .5rem 0; }
+  .task-item { display:flex; align-items:center; gap:10px; padding:.6rem 1rem; border-bottom:1px solid var(--border); }
+  .task-item:last-child { border-bottom:none; }
+  .task-checkbox { width:20px; height:20px; border-radius:6px; border:2px solid var(--border); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:.7rem; flex-shrink:0; transition: all .15s; }
+  .task-checkbox.checked { background:var(--accent); border-color:var(--accent); color:#000; }
+  .task-text { flex:1; font-size:.85rem; }
+  .task-text.done { text-decoration:line-through; color:var(--muted); }
+  .task-recurring-badge { font-size:.65rem; opacity:.7; }
+  .task-del { background:none; border:none; cursor:pointer; font-size:.8rem; opacity:.4; transition:opacity .15s; }
+  .task-del:hover { opacity:1; }
+
+  /* Habits panel */
+  .habits-header { display:flex; align-items:center; gap:8px; padding:.75rem 1rem; cursor:pointer; font-size:.8rem; font-weight:700; color:var(--accent); }
+  .habits-count { background:var(--accent-dim); color:var(--accent); border-radius:99px; padding:2px 10px; font-size:.68rem; font-weight:700; }
+  .habits-chevron { margin-left:auto; color:var(--muted); font-size:.8rem; transition:transform .2s; }
+  .habits-body { border-top:1px solid var(--border); }
+  .habit-row { display:flex; align-items:center; gap:10px; padding:.6rem 1rem; border-bottom:1px solid var(--border); }
+  .habit-row:last-child { border-bottom:none; }
+  .habit-icon { font-size:.75rem; opacity:.6; }
+  .habit-text { flex:1; font-size:.82rem; color:var(--text); }
+  .habit-freq { font-size:.68rem; color:var(--muted); background:var(--surface); padding:2px 8px; border-radius:5px; }
+  .habit-del { background:none; border:none; cursor:pointer; font-size:.8rem; opacity:.4; transition:opacity .15s; }
+  .habit-del:hover { opacity:1; }
+
+  /* Calendar mini */
+  .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; padding:.75rem 1rem; }
+  .cal-hdr { text-align:center; font-size:.65rem; color:var(--muted); font-weight:700; padding:4px 0; }
+  .cal-day { text-align:center; font-size:.75rem; padding:6px 4px; border-radius:6px; cursor:pointer; transition:all .15s; position:relative; }
+  .cal-day:hover { background:var(--surface); }
+  .cal-day.today { background:var(--accent); color:#000; font-weight:700; }
+  .cal-day.selected { background:var(--accent-dim); border:1px solid var(--accent); }
+  .cal-day.has-task::after { content:''; position:absolute; bottom:2px; left:50%; transform:translateX(-50%); width:4px; height:4px; border-radius:50%; background:var(--accent); }
+
+  /* Toast */
+  .toast { position:fixed; bottom:1.5rem; left:50%; transform:translateX(-50%); background:var(--accent); color:#000; padding:.6rem 1.2rem; border-radius:8px; font-size:.82rem; font-weight:700; opacity:0; transition:opacity .3s; pointer-events:none; z-index:999; }
+  .toast.show { opacity:1; }
+
+  /* Info card */
+  .info-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1rem 1.2rem; margin-top:1.5rem; max-width:1000px; margin-left:auto; margin-right:auto; }
+  .info-card h3 { font-size:.85rem; color:var(--accent); margin-bottom:.5rem; }
+  .info-card ul { padding-left:1.2rem; }
+  .info-card li { font-size:.78rem; color:var(--muted); line-height:1.7; }
+  .info-card code { background:var(--card); padding:1px 5px; border-radius:4px; font-size:.72rem; color:var(--text); }
+
+  .demo-title-area { text-align:center; margin-bottom:1.5rem; }
+</style>
+</head>
+<body>
+
+<div class="demo-title-area">
+  <h1>🔁 Recurring / Habit Tasks Demo</h1>
+  <p class="subtitle">Add daily habits that auto-seed into your planner every day. Try it below!</p>
+</div>
+
+<div class="demo-grid">
+  <!-- Left: Add Task + Task List -->
+  <div>
+    <div class="panel">
+      <div class="panel-header">📋 Today's Tasks</div>
+      <div class="task-add-bar">
+        <input type="text" class="task-input" id="task-input" placeholder="Add a study task..." onkeydown="if(event.key==='Enter')demoAddTask()">
+        <select class="task-select" id="task-freq-select" style="display:none;" onchange="demoToggleDays()">
+          <option value="daily">Daily</option>
+          <option value="weekdays">Mon-Fri</option>
+          <option value="weekly">Weekly</option>
+        </select>
+        <label class="task-recurring-toggle">
+          <input type="checkbox" id="task-recurring-chk" onchange="demoToggleRecurring()"> 🔁
+        </label>
+        <button class="btn-task-save" onclick="demoAddTask()">Add</button>
+      </div>
+      <div class="recurring-options" id="recurring-options" style="display:none;">
+        <span style="font-size:.72rem;color:var(--muted);">Repeat:</span>
+        <select class="task-select" id="task-freq" onchange="demoToggleDays()">
+          <option value="daily">Every day</option>
+          <option value="weekdays">Mon – Fri</option>
+          <option value="weekly">Pick days</option>
+        </select>
+        <div class="recurring-days-row" id="recurring-days" style="display:none;">
+          <label class="day-chk-label" onclick="this.classList.toggle('active')"><input type="checkbox" value="0"> S</label>
+          <label class="day-chk-label" onclick="this.classList.toggle('active')"><input type="checkbox" value="1"> M</label>
+          <label class="day-chk-label" onclick="this.classList.toggle('active')"><input type="checkbox" value="2"> T</label>
+          <label class="day-chk-label" onclick="this.classList.toggle('active')"><input type="checkbox" value="3"> W</label>
+          <label class="day-chk-label" onclick="this.classList.toggle('active')"><input type="checkbox" value="4"> T</label>
+          <label class="day-chk-label" onclick="this.classList.toggle('active')"><input type="checkbox" value="5"> F</label>
+          <label class="day-chk-label" onclick="this.classList.toggle('active')"><input type="checkbox" value="6"> S</label>
+        </div>
+      </div>
+      <div class="task-list" id="task-list"></div>
+    </div>
+
+    <!-- My Habits panel -->
+    <div class="panel" style="margin-top:.75rem;" id="habits-panel-wrap" style="display:none;">
+      <div class="habits-header" onclick="toggleHabits()">
+        <span>🔁 My Habits</span>
+        <span class="habits-count" id="habits-count">0</span>
+        <span class="habits-chevron" id="habits-chev">▾</span>
+      </div>
+      <div class="habits-body" id="habits-body"></div>
+    </div>
+  </div>
+
+  <!-- Right: Mini calendar -->
+  <div>
+    <div class="panel">
+      <div class="panel-header">📅 This Week (click a day)</div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+
+    <div class="panel" style="margin-top:.75rem;">
+      <div class="panel-header">📊 How It Works</div>
+      <div style="padding:1rem;font-size:.78rem;color:var(--muted);line-height:1.7;">
+        <p><b style="color:var(--text);">1.</b> Type a task and check 🔁 to make it recurring.</p>
+        <p><b style="color:var(--text);">2.</b> Choose frequency: Daily / Mon-Fri / Pick specific days.</p>
+        <p><b style="color:var(--text);">3.</b> The habit auto-seeds into each matching day's task list.</p>
+        <p><b style="color:var(--text);">4.</b> Each day's completion is independent — check off today, it returns tomorrow.</p>
+        <p><b style="color:var(--text);">5.</b> Delete the rule from "My Habits" to stop it from recurring.</p>
+        <p style="margin-top:.75rem;color:var(--accent);font-weight:700;">Try: Add "Daily current affairs" as Daily, then click different days in the calendar to see it appear!</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="info-card">
+  <h3>Implementation Details</h3>
+  <ul>
+    <li><code>appState.recurringTasks[]</code> stores rules with <code>id, text, freq, days, startDate, endDate</code></li>
+    <li><code>seedRecurringTasks(dateStr)</code> materializes rules into <code>appState.tasks[dateStr]</code> — idempotent via <code>recurringId</code></li>
+    <li>Each seeded task has <code>isRecurring: true</code> and <code>recurringId</code> linking back to the rule</li>
+    <li>Completion is per-day (each day gets its own task instance with independent <code>done</code> state)</li>
+    <li>Deletion of a rule removes only future un-done instances; past completed ones are preserved</li>
+    <li>Integrates with existing rollover, Telegram digest, and progress stats — zero breaking changes</li>
+  </ul>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════
+// DEMO STATE (simulates appState)
+// ═══════════════════════════════════════════════
+const state = {
+  tasks: {},           // dateStr -> [{id, text, done, isRecurring, recurringId}]
+  recurringTasks: []   // [{id, text, freq, days, startDate}]
+};
+
+let selectedDate = fmtDate(new Date());
+
+function fmtDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// ═══════════════════════════════════════════════
+// SEED RECURRING TASKS
+// ═══════════════════════════════════════════════
+function seedRecurringTasks(dateStr) {
+  if (!state.recurringTasks.length) return 0;
+  if (!state.tasks[dateStr]) state.tasks[dateStr] = [];
+
+  const existing = new Set(state.tasks[dateStr].filter(t => t.recurringId).map(t => t.recurringId));
+  const d = new Date(dateStr + 'T12:00:00');
+  const dow = d.getDay();
+  let seeded = 0;
+
+  state.recurringTasks.forEach(rule => {
+    if (existing.has(rule.id)) return;
+    if (dateStr < rule.startDate) return;
+    if (rule.endDate && dateStr > rule.endDate) return;
+
+    let match = false;
+    switch (rule.freq) {
+      case 'daily': match = true; break;
+      case 'weekdays': match = (dow >= 1 && dow <= 5); break;
+      case 'weekly': match = (rule.days || []).includes(dow); break;
+    }
+    if (!match) return;
+
+    state.tasks[dateStr].push({
+      id: Date.now().toString() + Math.random().toString(36).slice(2,8),
+      recurringId: rule.id,
+      text: rule.text,
+      done: false,
+      isRecurring: true
+    });
+    seeded++;
+  });
+  return seeded;
+}
+
+// ═══════════════════════════════════════════════
+// ADD TASK / RECURRING RULE
+// ═══════════════════════════════════════════════
+function demoAddTask() {
+  const input = document.getElementById('task-input');
+  const text = input.value.trim();
+  if (!text) { input.focus(); return; }
+
+  const isRecurring = document.getElementById('task-recurring-chk').checked;
+
+  if (isRecurring) {
+    const freq = document.getElementById('task-freq').value;
+    let days = [];
+    if (freq === 'weekly') {
+      document.querySelectorAll('.day-chk-label.active input').forEach(el => {
+        days.push(parseInt(el.value, 10));
+      });
+      if (!days.length) days = [new Date().getDay()];
+    }
+
+    const rule = {
+      id: 'rec_' + Date.now() + Math.random().toString(36).slice(2,5),
+      text,
+      freq,
+      days,
+      startDate: fmtDate(new Date()),
+      endDate: null
+    };
+    state.recurringTasks.push(rule);
+
+    // Seed for all visible days
+    seedAllVisible();
+    input.value = '';
+    document.getElementById('task-recurring-chk').checked = false;
+    demoToggleRecurring();
+    renderAll();
+    showToast('Habit added! 🔁 Repeats ' + (freq === 'daily' ? 'every day' : freq === 'weekdays' ? 'Mon–Fri' : 'on selected days'));
+    return;
+  }
+
+  // Regular one-time task
+  if (!state.tasks[selectedDate]) state.tasks[selectedDate] = [];
+  state.tasks[selectedDate].push({
+    id: Date.now().toString(),
+    text,
+    done: false,
+    isRecurring: false
+  });
+  input.value = '';
+  renderAll();
+  showToast('Task added! ✅');
+}
+
+function seedAllVisible() {
+  const today = new Date();
+  for (let i = -1; i <= 7; i++) {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    seedRecurringTasks(fmtDate(d));
+  }
+}
+
+// ═══════════════════════════════════════════════
+// TOGGLE / DELETE
+// ═══════════════════════════════════════════════
+function toggleTask(dateStr, taskId) {
+  const task = (state.tasks[dateStr] || []).find(t => t.id === taskId);
+  if (task) { task.done = !task.done; renderAll(); }
+}
+
+function deleteTask(dateStr, taskId) {
+  state.tasks[dateStr] = (state.tasks[dateStr] || []).filter(t => t.id !== taskId);
+  renderAll();
+}
+
+function deleteHabit(ruleId) {
+  state.recurringTasks = state.recurringTasks.filter(r => r.id !== ruleId);
+  // Remove future un-done instances
+  const todayStr = fmtDate(new Date());
+  Object.keys(state.tasks).forEach(ds => {
+    if (ds < todayStr) return;
+    state.tasks[ds] = (state.tasks[ds] || []).filter(t => !(t.recurringId === ruleId && !t.done));
+  });
+  renderAll();
+  showToast('Habit deleted');
+}
+
+// ═══════════════════════════════════════════════
+// UI TOGGLES
+// ═══════════════════════════════════════════════
+function demoToggleRecurring() {
+  const chk = document.getElementById('task-recurring-chk');
+  const opts = document.getElementById('recurring-options');
+  opts.style.display = chk.checked ? 'flex' : 'none';
+}
+
+function demoToggleDays() {
+  const freq = document.getElementById('task-freq').value;
+  document.getElementById('recurring-days').style.display = freq === 'weekly' ? 'flex' : 'none';
+}
+
+let habitsOpen = true;
+function toggleHabits() {
+  habitsOpen = !habitsOpen;
+  document.getElementById('habits-body').style.display = habitsOpen ? '' : 'none';
+  document.getElementById('habits-chev').style.transform = habitsOpen ? 'rotate(0)' : 'rotate(-90deg)';
+}
+
+// ═══════════════════════════════════════════════
+// RENDER
+// ═══════════════════════════════════════════════
+function renderAll() {
+  renderCalendar();
+  renderTaskList();
+  renderHabits();
+}
+
+function renderCalendar() {
+  const grid = document.getElementById('cal-grid');
+  const today = new Date();
+  const todayStr = fmtDate(today);
+
+  // Show 7 day headers
+  const hdrs = ['S','M','T','W','T','F','S'];
+  let html = hdrs.map(h => `<div class="cal-hdr">${h}</div>`).join('');
+
+  // Show current week (Sun to Sat)
+  const startOfWeek = new Date(today);
+  startOfWeek.setDate(today.getDate() - today.getDay());
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startOfWeek);
+    d.setDate(startOfWeek.getDate() + i);
+    const ds = fmtDate(d);
+    const isToday = ds === todayStr;
+    const isSel = ds === selectedDate && !isToday;
+    const hasTasks = (state.tasks[ds] || []).length > 0;
+    html += `<div class="cal-day${isToday?' today':''}${isSel?' selected':''}${hasTasks?' has-task':''}" onclick="selectDay('${ds}')">${d.getDate()}</div>`;
+  }
+
+  // Next week too
+  for (let i = 7; i < 14; i++) {
+    const d = new Date(startOfWeek);
+    d.setDate(startOfWeek.getDate() + i);
+    const ds = fmtDate(d);
+    const isToday = ds === todayStr;
+    const isSel = ds === selectedDate && !isToday;
+    const hasTasks = (state.tasks[ds] || []).length > 0;
+    html += `<div class="cal-day${isToday?' today':''}${isSel?' selected':''}${hasTasks?' has-task':''}" onclick="selectDay('${ds}')">${d.getDate()}</div>`;
+  }
+
+  grid.innerHTML = html;
+}
+
+function selectDay(ds) {
+  selectedDate = ds;
+  seedRecurringTasks(ds);
+  renderAll();
+}
+
+function renderTaskList() {
+  const list = document.getElementById('task-list');
+  const tasks = state.tasks[selectedDate] || [];
+
+  if (!tasks.length) {
+    const d = new Date(selectedDate + 'T12:00:00');
+    const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];
+    list.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--muted);font-size:.8rem;">
+      <div style="font-size:1.3rem;margin-bottom:.5rem;">📝</div>
+      ${dayName}, ${d.getDate()} — No tasks yet.<br>Add a task or create a recurring habit!
+    </div>`;
+    return;
+  }
+
+  list.innerHTML = tasks.map(t => `
+    <div class="task-item">
+      <div class="task-checkbox${t.done?' checked':''}" onclick="toggleTask('${selectedDate}','${t.id}')">${t.done?'✓':''}</div>
+      <span class="task-text${t.done?' done':''}">${escHtml(t.text)}</span>
+      ${t.isRecurring ? '<span class="task-recurring-badge" title="Recurring habit">🔁</span>' : ''}
+      <button class="task-del" onclick="deleteTask('${selectedDate}','${t.id}')">🗑</button>
+    </div>
+  `).join('');
+}
+
+function renderHabits() {
+  const wrap = document.getElementById('habits-panel-wrap');
+  const body = document.getElementById('habits-body');
+  const count = document.getElementById('habits-count');
+  const rules = state.recurringTasks;
+
+  if (!rules.length) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = '';
+  count.textContent = rules.length;
+
+  const freqLabel = { daily: 'Daily', weekdays: 'Mon–Fri', weekly: 'Weekly' };
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  body.innerHTML = rules.map(r => {
+    let sched = freqLabel[r.freq] || r.freq;
+    if (r.freq === 'weekly' && r.days.length) sched = r.days.map(d => dayNames[d]).join(', ');
+    return `<div class="habit-row">
+      <span class="habit-icon">🔁</span>
+      <span class="habit-text">${escHtml(r.text)}</span>
+      <span class="habit-freq">${sched}</span>
+      <button class="habit-del" onclick="deleteHabit('${r.id}')" title="Delete habit">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+// ═══════════════════════════════════════════════
+// INIT — pre-load some demo habits
+// ═══════════════════════════════════════════════
+(function init() {
+  // Add sample recurring rules
+  state.recurringTasks = [
+    { id: 'rec_demo1', text: 'Daily current affairs', freq: 'daily', days: [], startDate: '2026-06-01', endDate: null },
+    { id: 'rec_demo2', text: '10 vocab words', freq: 'daily', days: [], startDate: '2026-06-01', endDate: null },
+    { id: 'rec_demo3', text: 'Weekly full mock test', freq: 'weekly', days: [0], startDate: '2026-06-01', endDate: null }
+  ];
+
+  // Seed today and surrounding days
+  seedAllVisible();
+
+  // Add a one-time sample task for today
+  const todayStr = fmtDate(new Date());
+  if (!state.tasks[todayStr]) state.tasks[todayStr] = [];
+  state.tasks[todayStr].push({ id: 'demo_onetimer', text: 'Polity Ch.5 notes complete karo', done: false, isRecurring: false });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>
