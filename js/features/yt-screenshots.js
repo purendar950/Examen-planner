@@ -397,7 +397,7 @@ function ssRenderGallery() {
         if (item.type === 'screenshot') {
           var imgSrc = item.dataUrl || item.imageUrl || '';
           html += `<div class="ss-item ss-item-screenshot">
-            <div class="ss-item-thumb" onclick="ssEnlarge('${imgSrc}','${escapeHtml(item.label)}','${item.timeLabel}')">
+            <div class="ss-item-thumb" onclick="ssSeekTo(${item.timestamp})">
               <img src="${imgSrc}" alt="${escapeHtml(item.label)}" loading="lazy">
             </div>
             <div class="ss-item-info">
@@ -674,7 +674,7 @@ function ssRenderNotesTree(container, folderKeys, typeFilter) {
         if (item.type === 'screenshot') {
           var imgSrc2 = item.dataUrl || item.imageUrl || '';
           html += `<div class="ss-item ss-item-screenshot ss-page-item">
-            <div class="ss-item-thumb" onclick="ssEnlarge('${imgSrc2}','${escapeHtml(item.label)}','${item.timeLabel}')">
+            <div class="ss-item-thumb" onclick="ssSeekTo(${item.timestamp})">
               <img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy">
             </div>
             <div class="ss-item-info">
@@ -735,7 +735,7 @@ function ssRenderNotesGrid(container, folderKeys, typeFilter) {
   allItems.forEach(item => {
     if (item.type === 'screenshot') {
       html += `<div class="ss-grid-card">
-        <div class="ss-grid-thumb" onclick="ssEnlarge('${item.dataUrl || item.imageUrl}','${escapeHtml(item.label)}','${item.timeLabel}')">
+        <div class="ss-grid-thumb" onclick="ssSeekTo(${item.timestamp})">
           <img src="${item.dataUrl || item.imageUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
           <div class="ss-grid-time-badge">▶ ${item.timeLabel}</div>
         </div>
