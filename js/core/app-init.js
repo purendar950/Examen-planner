@@ -64,6 +64,7 @@ function initApp() {
   safely(updateExamPattern);
   safely(populateTaskSubjectDropdown);
   safely(syncRolloverToggle);          // reflect auto-rollover setting on its toggle
+  safely(syncCourseScheduleToggle);    // reflect course-schedule setting on its toggle
   safely(renderRevisionWidget);
   safely(renderMilestoneCard);    // Feature 4
   safely(renderPaceTrackerCard);  // Feature 5

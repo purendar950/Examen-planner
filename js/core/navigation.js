@@ -11,6 +11,7 @@ function switchPage(page) {
   if (page === 'planner') {
     buildPlannerCalendar();
     try { syncRolloverToggle(); }    catch(e) {} // reflect auto-rollover setting
+    try { syncCourseScheduleToggle(); } catch(e) {} // reflect course-schedule setting
     try { renderMilestoneCard(); }   catch(e) {} // Feature 4
     try { renderPaceTrackerCard(); } catch(e) {} // Feature 5
     try { refreshPlannerBadges(); }       catch(e) {} // refresh phase badge
