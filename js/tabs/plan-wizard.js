@@ -1113,7 +1113,8 @@ function addTask() {
     if (recurChk) recurChk.checked = false;
     toggleRecurringOptions();
     buildPlannerCalendar();
-    renderHabitsPanel();
+    renderHabitsCard();
+    renderHabitsManagePanel();
     showToast('Habit added! 🔁 Will repeat ' + (freq === 'daily' ? 'every day' : freq === 'weekdays' ? 'Mon–Fri' : 'on selected days'), 'success');
     return;
   }
@@ -1201,7 +1202,6 @@ function renderTaskList(dateStr) {
       <div class="ch-checkbox${t.done?' checked':''}" onclick="toggleTask('${dateStr}','${t.id}')">${t.done?'✓':''}</div>
       <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${typeIcon}${escapeHtml(t.text)}</span>
       ${typeof rolloverBadgeHtml === 'function' ? rolloverBadgeHtml(t) : ''}
-      ${t.isRecurring ? '<span class="task-recurring-badge" title="Recurring habit">🔁</span>' : ''}
       ${s?`<span class="task-subject-chip" style="background:${sc}22;color:${sc};">${escapeHtml(ss)}</span>`:''}
       ${t.type === 'video' && t.videoId ? `<button class="ch-action-btn" title="Play in YouTube tab" onclick="event.stopPropagation();playTaskVideo('${dateStr}','${t.id}')">▶</button>` : ''}
       <button class="ch-action-btn" onclick="deleteTask('${dateStr}','${t.id}')">🗑</button>
