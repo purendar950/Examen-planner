@@ -1120,6 +1120,22 @@ function deleteTask(dateStr, taskId) {
   saveProgress(); buildPlannerCalendar();
 }
 
+/* Play a video-type to-do task inside the YouTube tab (in-app player).
+   Used by tasks added from the Telegram bot or any task carrying a videoId. */
+function playTaskVideo(dateStr, taskId) {
+  const task = (appState.tasks[dateStr]||[]).find(t=>t.id===taskId);
+  if (!task || !task.videoId) { if (typeof showToast==='function') showToast('Is task mein video link nahi hai.', 'info'); return; }
+  /* If it came from a YouTube Organiser course, use that richer player path. */
+  if (task.plId && appState.ytoLibrary && appState.ytoLibrary[task.plId] && typeof ytoPlayInYtTab === 'function') {
+    ytoPlayInYtTab(task.plId, task.videoId);
+    return;
+  }
+  if (typeof switchPage === 'function') switchPage('youtube');
+  const url = task.url || ('https://www.youtube.com/watch?v=' + task.videoId);
+  if (typeof ytLoadInTab === 'function') ytLoadInTab('video', task.videoId, url, task.text || 'Video');
+  else window.open(url, '_blank');
+}
+
 function renderTaskList(dateStr) {
   const tasks = appState.tasks[dateStr] || [];
   const list = document.getElementById('task-list');
@@ -1144,6 +1160,7 @@ function renderTaskList(dateStr) {
       <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${typeIcon}${escapeHtml(t.text)}</span>
       ${typeof rolloverBadgeHtml === 'function' ? rolloverBadgeHtml(t) : ''}
       ${s?`<span class="task-subject-chip" style="background:${sc}22;color:${sc};">${escapeHtml(ss)}</span>`:''}
+      ${t.type === 'video' && t.videoId ? `<button class="ch-action-btn" title="Play in YouTube tab" onclick="event.stopPropagation();playTaskVideo('${dateStr}','${t.id}')">▶</button>` : ''}
       <button class="ch-action-btn" onclick="deleteTask('${dateStr}','${t.id}')">🗑</button>
     </div>`;
   }).join('');
