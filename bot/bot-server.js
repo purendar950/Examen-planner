@@ -226,6 +226,46 @@ async function pushToInbox(uid, items) {
   );
 }
 
+/* ── Pro check — mirrors isProUser() in scripts/send-telegram.js and the web
+   app's ezIsPro(). AI auto-scheduling is a Pro-only feature, so a free user's
+   message must not be scheduled even if everything else is set up. ─────────── */
+function isProUser(data, today) {
+  const profile  = (data && data.profile)  || {};
+  const appState = (data && data.appState) || {};
+
+  /* Paid plan, not expired. */
+  if (profile.plan && profile.plan !== 'free') {
+    if (!profile.planExpiry || profile.planExpiry >= today) return true;
+  }
+  /* Admin-granted trial (admin-only-writable field, trusted). */
+  if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
+
+  /* Self-serve trial in user-writable appState — guard against tampering,
+     mirroring ezIsProTrialActive(): max ~4 days from startedAt, respect
+     admin suspension. */
+  const trial = appState.proTrial;
+  if (trial && trial.expiry && trial.expiry >= today) {
+    if (profile.trialSuspended) return false;
+    if (trial.startedAt) {
+      const startedAt = new Date(trial.startedAt);
+      const maxExpiry = new Date(startedAt.getTime() + 4 * 86400000);
+      const claimedExpiry = new Date(trial.expiry + 'T23:59:59');
+      if (!isNaN(startedAt.getTime()) && claimedExpiry > maxExpiry) return false;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** Admins are always treated as Pro (mirrors the daily sender). */
+async function isAdminUid(uid) {
+  if (!db || !uid) return false;
+  try {
+    const snap = await db.collection('admins').doc(uid).get();
+    return snap.exists;
+  } catch (e) { return false; }
+}
+
 /* ── Simple in-memory rate limit: max 15 scheduling msgs / chat / minute ──── */
 const _rate = new Map();
 function rateLimited(chatId) {
@@ -322,6 +362,22 @@ bot.on('message', async (msg) => {
         `🔗 Pehle account connect karo:\n\n1️⃣ <b>/start</b> dabao\n2️⃣ Apna Chat ID <code>${chatId}</code> app mein paste karo (Profile → Daily Plan on Telegram)\n3️⃣ Save karo.\n\nPhir mujhe apne tasks bhejo!`,
         { parse_mode: 'HTML' }
       ).catch(() => {});
+      return;
+    }
+
+    /* 1b. Pro gate — AI auto-scheduling is a Pro-only feature. Free users can
+       still connect / get /start, but cannot schedule via the bot. */
+    const today = todayIST();
+    const isPro = isProUser(user.data, today) || (await isAdminUid(user.uid));
+    if (!isPro) {
+      bot.sendMessage(chatId,
+        `🔒 <b>AI auto-schedule Pro feature hai.</b>\n\n` +
+        `Telegram se task/video bhejke planner mein auto-add karna Pro members ke liye hai.\n\n` +
+        `💎 Upgrade karo: <a href="https://examzen.in">examzen.in</a>\n` +
+        `(Tumhara daily study plan free mein milta rahega.)`,
+        { parse_mode: 'HTML', disable_web_page_preview: true }
+      ).catch(() => {});
+      console.log(`💎 Blocked (not Pro) → uid:${user.uid} chat:${chatId}`);
       return;
     }
 
