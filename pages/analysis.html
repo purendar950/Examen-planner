@@ -1,0 +1,178 @@
+<div class="page" id="page-analysis">
+  <style>
+  /* ════════ ANALYSIS TAB — scoped styles (an- prefix avoids collisions) ════════ */
+  #page-analysis { --an-blue: var(--blue, #3B82F6); --an-purple: var(--purple, #A855F7); --an-amber: var(--amber, #F59E0B); }
+  #page-analysis .an-head { display:flex; align-items:center; gap:12px; margin-bottom:1.1rem; }
+  #page-analysis .an-head .an-ico { width:46px; height:46px; border-radius:12px; display:grid; place-items:center; font-size:1.4rem; background:var(--accent-dim, rgba(0,200,150,0.12)); border:1px solid rgba(0,200,150,0.25); }
+  #page-analysis .an-head h1 { font-size:1.4rem; font-weight:800; letter-spacing:-0.02em; margin:0; }
+  #page-analysis .an-head p { color:var(--muted); font-size:0.82rem; margin:2px 0 0; }
+
+  #page-analysis .an-subtabs { display:inline-flex; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px; gap:4px; margin-bottom:1.3rem; }
+  #page-analysis .an-subtab { padding:9px 18px; border-radius:9px; font-size:0.84rem; font-weight:600; color:var(--muted); cursor:pointer; border:none; background:transparent; transition:all .18s; display:inline-flex; align-items:center; gap:7px; }
+  #page-analysis .an-subtab.active { background:var(--accent); color:#04130d; box-shadow:0 4px 14px rgba(0,200,150,0.3); }
+
+  #page-analysis .an-view { display:none; animation:anFade .3s ease; }
+  #page-analysis .an-view.active { display:block; }
+  @keyframes anFade { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+
+  /* GALLERY */
+  #page-analysis .an-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:1rem; }
+  #page-analysis .an-search { flex:1; min-width:200px; display:flex; align-items:center; gap:8px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:9px 13px; }
+  #page-analysis .an-search input { background:transparent; border:none; outline:none; color:var(--text); font-size:0.85rem; width:100%; font-family:inherit; }
+  #page-analysis .an-view-toggle { display:inline-flex; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:3px; gap:3px; }
+  #page-analysis .an-vt { padding:7px 12px; border-radius:7px; border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:0.9rem; }
+  #page-analysis .an-vt.active { background:var(--card); color:var(--accent); }
+  #page-analysis .an-label { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); font-weight:700; margin:1.2rem 0 0.7rem; }
+
+  #page-analysis .an-recent-row { display:flex; gap:12px; overflow-x:auto; padding-bottom:8px; }
+  #page-analysis .an-recent { flex:0 0 158px; cursor:pointer; border-radius:10px; overflow:hidden; border:1px solid var(--border); background:var(--card); transition:transform .15s, border-color .15s; }
+  #page-analysis .an-recent:hover { transform:translateY(-3px); border-color:var(--accent); }
+  #page-analysis .an-thumb { position:relative; aspect-ratio:16/9; background:#000; }
+  #page-analysis .an-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  #page-analysis .an-play { position:absolute; inset:0; display:grid; place-items:center; background:rgba(0,0,0,0.25); opacity:0; transition:opacity .15s; }
+  #page-analysis .an-recent:hover .an-play, #page-analysis .an-chip:hover .an-play { opacity:1; }
+  #page-analysis .an-play span { width:38px; height:38px; border-radius:50%; background:rgba(0,200,150,0.92); color:#04130d; display:grid; place-items:center; font-size:0.9rem; padding-left:3px; }
+  #page-analysis .an-time { position:absolute; bottom:6px; right:6px; background:rgba(0,0,0,0.8); color:#fff; font-size:0.66rem; font-weight:600; padding:2px 6px; border-radius:4px; }
+  #page-analysis .an-recent-meta { padding:8px 9px; }
+  #page-analysis .an-recent-meta .t { font-size:0.74rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #page-analysis .an-recent-meta .s { font-size:0.66rem; color:var(--muted); margin-top:2px; }
+
+  #page-analysis .an-tree { background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  #page-analysis .an-folder { border-bottom:1px solid var(--border); }
+  #page-analysis .an-folder:last-child { border-bottom:none; }
+  #page-analysis .an-folder-head { display:flex; align-items:center; gap:10px; padding:12px 14px; cursor:pointer; user-select:none; transition:background .12s; }
+  #page-analysis .an-folder-head:hover { background:var(--card); }
+  #page-analysis .an-chev { color:var(--muted); transition:transform .2s; font-size:0.7rem; width:12px; display:inline-block; }
+  #page-analysis .an-folder.open > .an-folder-head .an-chev { transform:rotate(90deg); }
+  #page-analysis .an-folder-head .fname { font-weight:700; font-size:0.88rem; flex:1; }
+  #page-analysis .an-count { font-size:0.68rem; color:var(--muted); background:var(--card); border:1px solid var(--border); padding:2px 9px; border-radius:99px; }
+  #page-analysis .an-folder-body { display:none; padding:0 0 6px 14px; }
+  #page-analysis .an-folder.open > .an-folder-body { display:block; }
+  #page-analysis .an-sub { border-left:2px solid var(--border); margin-left:8px; }
+  #page-analysis .an-sub-head { display:flex; align-items:center; gap:9px; padding:9px 12px; cursor:pointer; user-select:none; border-radius:8px; }
+  #page-analysis .an-sub-head:hover { background:var(--card); }
+  #page-analysis .an-sub-head .vname { font-size:0.82rem; font-weight:600; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #page-analysis .an-sub.open > .an-sub-head .an-chev { transform:rotate(90deg); }
+  #page-analysis .an-moment-list { display:none; padding:4px 0 8px 22px; }
+  #page-analysis .an-sub.open > .an-moment-list { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:10px; padding-right:12px; }
+
+  #page-analysis .an-chip { cursor:pointer; border-radius:9px; overflow:hidden; border:1px solid var(--border); background:var(--card); transition:transform .15s, border-color .15s; }
+  #page-analysis .an-chip:hover { transform:translateY(-2px); border-color:var(--accent); }
+  #page-analysis .an-chip .mt { position:relative; aspect-ratio:16/9; background:#000; }
+  #page-analysis .an-chip .mt img { width:100%; height:100%; object-fit:cover; }
+  #page-analysis .an-chip .ml { padding:6px 8px; font-size:0.68rem; color:var(--muted); display:flex; align-items:center; gap:5px; }
+  #page-analysis .an-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+  #page-analysis .an-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:14px; }
+  #page-analysis .an-empty { text-align:center; padding:3rem 1rem; color:var(--muted); }
+  #page-analysis .an-empty .em { font-size:2.4rem; margin-bottom:0.6rem; }
+
+  /* SCHEDULED ANALYSIS */
+  #page-analysis .an-range { display:inline-flex; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:4px; gap:4px; margin-bottom:1.2rem; }
+  #page-analysis .an-range button { padding:8px 16px; border-radius:7px; font-size:0.8rem; font-weight:600; color:var(--muted); cursor:pointer; border:none; background:transparent; transition:all .15s; }
+  #page-analysis .an-range button.active { background:var(--accent); color:#04130d; }
+  #page-analysis .an-stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; margin-bottom:1.4rem; }
+  #page-analysis .an-stat { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1rem 1.1rem; }
+  #page-analysis .an-stat .lab { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted); font-weight:700; }
+  #page-analysis .an-stat .val { font-size:1.7rem; font-weight:800; margin-top:6px; letter-spacing:-0.02em; }
+  #page-analysis .an-stat .sub { font-size:0.72rem; color:var(--muted); margin-top:2px; }
+  #page-analysis .an-stat.accent .val { color:var(--accent); }
+  #page-analysis .an-stat.amber .val { color:var(--an-amber); }
+  #page-analysis .an-stat.blue .val { color:var(--an-blue); }
+  #page-analysis .an-stat.purple .val { color:var(--an-purple); }
+  #page-analysis .an-panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:1.2rem; margin-bottom:1.3rem; }
+  #page-analysis .an-panel h3 { font-size:0.95rem; font-weight:700; margin:0 0 1rem; display:flex; align-items:center; gap:8px; }
+  #page-analysis .an-panel h3 .cnt { font-size:0.7rem; color:var(--muted); font-weight:600; background:var(--card); border:1px solid var(--border); padding:2px 9px; border-radius:99px; }
+
+  #page-analysis .an-heatmap { display:flex; flex-wrap:wrap; gap:5px; }
+  #page-analysis .an-cell { width:26px; height:26px; border-radius:5px; background:var(--card); border:1px solid var(--border); position:relative; cursor:pointer; transition:transform .12s; }
+  #page-analysis .an-cell:hover { transform:scale(1.18); z-index:2; }
+  #page-analysis .an-cell .tip { display:none; position:absolute; bottom:130%; left:50%; transform:translateX(-50%); background:#000; color:#fff; font-size:0.66rem; white-space:nowrap; padding:4px 8px; border-radius:6px; z-index:5; }
+  #page-analysis .an-cell:hover .tip { display:block; }
+  #page-analysis .an-legend { display:flex; align-items:center; gap:6px; margin-top:0.9rem; font-size:0.7rem; color:var(--muted); }
+  #page-analysis .an-legend .sq { width:14px; height:14px; border-radius:3px; }
+
+  #page-analysis .an-bar { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+  #page-analysis .an-bar .name { width:150px; font-size:0.8rem; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #page-analysis .an-track { flex:1; height:12px; background:var(--card); border-radius:99px; overflow:hidden; }
+  #page-analysis .an-fill { height:100%; border-radius:99px; transition:width .5s; }
+  #page-analysis .an-bar .pct { width:92px; text-align:right; font-size:0.74rem; color:var(--muted); }
+
+  #page-analysis .an-done-list { display:flex; flex-direction:column; gap:8px; max-height:340px; overflow-y:auto; }
+  #page-analysis .an-done { display:flex; align-items:flex-start; gap:10px; padding:9px 11px; background:var(--card); border:1px solid var(--border); border-radius:9px; }
+  #page-analysis .an-done .tick { color:var(--accent); flex-shrink:0; }
+  #page-analysis .an-done .di-main { flex:1; min-width:0; }
+  #page-analysis .an-done .di-title { font-size:0.82rem; font-weight:600; }
+  #page-analysis .an-done .di-sub { font-size:0.7rem; color:var(--muted); margin-top:2px; }
+  #page-analysis .an-done .di-date { font-size:0.68rem; color:var(--muted); flex-shrink:0; }
+  #page-analysis .an-done.video { cursor:pointer; }
+  #page-analysis .an-done.video:hover { border-color:var(--accent); }
+  #page-analysis .an-pills { display:inline-flex; gap:6px; margin-bottom:0.9rem; flex-wrap:wrap; }
+  #page-analysis .an-pills button { background:var(--card); border:1px solid var(--border); color:var(--muted); border-radius:99px; padding:6px 13px; font-size:0.76rem; font-weight:600; cursor:pointer; }
+  #page-analysis .an-pills button.active { background:var(--accent-dim, rgba(0,200,150,0.12)); border-color:var(--accent); color:var(--accent); }
+  @media (max-width:560px) { #page-analysis .an-stat .val { font-size:1.4rem; } #page-analysis .an-bar .name { width:100px; } }
+  </style>
+
+  <div class="an-head">
+    <div class="an-ico">📈</div>
+    <div>
+      <h1>Analysis</h1>
+      <p>Review your saved video moments and track the topics, videos &amp; daily targets you've completed.</p>
+    </div>
+  </div>
+
+  <div class="an-subtabs">
+    <button class="an-subtab active" id="an-st-gallery" onclick="anSwitchView('gallery')">🗂️ Gallery</button>
+    <button class="an-subtab" id="an-st-schedule" onclick="anSwitchView('schedule')">📊 Scheduled Analysis</button>
+  </div>
+
+  <!-- GALLERY -->
+  <div class="an-view active" id="an-view-gallery">
+    <div class="an-toolbar">
+      <div class="an-search"><span>🔍</span>
+        <input type="text" id="an-search" placeholder="Search moments, videos or playlists..." oninput="anRenderTree()"></div>
+      <div class="an-view-toggle">
+        <button class="an-vt active" id="an-vt-tree" onclick="anSetGalleryView('tree')" title="Folder view">🗂️</button>
+        <button class="an-vt" id="an-vt-grid" onclick="anSetGalleryView('grid')" title="Grid view">▦</button>
+      </div>
+    </div>
+    <div class="an-label">⭐ Recent moments</div>
+    <div class="an-recent-row" id="an-recent"></div>
+    <div class="an-label">📂 Folders (Playlist › Video › Moments)</div>
+    <div id="an-gallery-body"></div>
+  </div>
+
+  <!-- SCHEDULED ANALYSIS -->
+  <div class="an-view" id="an-view-schedule">
+    <div class="an-range">
+      <button class="active" id="an-r-week" onclick="anSetRange('week')">Weekly</button>
+      <button id="an-r-month" onclick="anSetRange('month')">Monthly</button>
+      <button id="an-r-quarter" onclick="anSetRange('quarter')">3 Months</button>
+    </div>
+    <div class="an-stats" id="an-stats"></div>
+
+    <div class="an-panel">
+      <h3>🔥 Daily target completion</h3>
+      <div class="an-heatmap" id="an-heatmap"></div>
+      <div class="an-legend"><span>Less</span>
+        <span class="sq" style="background:var(--card);border:1px solid var(--border);"></span>
+        <span class="sq" style="background:rgba(0,200,150,0.3);"></span>
+        <span class="sq" style="background:rgba(0,200,150,0.6);"></span>
+        <span class="sq" style="background:var(--accent);"></span><span>More</span></div>
+    </div>
+
+    <div class="an-panel">
+      <div class="an-pills" id="an-completed-tabs">
+        <button class="active" onclick="anSetCompletedTab('topics')">✅ Completed Topics</button>
+        <button onclick="anSetCompletedTab('videos')">🎬 Completed Videos</button>
+        <button onclick="anSetCompletedTab('tasks')">📝 Completed Targets</button>
+      </div>
+      <h3 id="an-completed-head">✅ Completed Topics <span class="cnt" id="an-completed-count"></span></h3>
+      <div class="an-done-list" id="an-completed-list"></div>
+    </div>
+
+    <div class="an-panel">
+      <h3>📚 Subject-wise progress</h3>
+      <div id="an-subject-bars"></div>
+    </div>
+  </div>
+</div>
