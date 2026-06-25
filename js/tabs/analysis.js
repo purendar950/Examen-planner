@@ -278,35 +278,29 @@ function anGroupBox(title, count, innerHtml){
 }
 
 function anRenderCompleted(){
-  anRenderTargets();
-  anRenderVideos();
+  anRenderActivity();
   anRenderTopics();
 }
 
-/* ── 📝 COMPLETED TARGETS — grouped by date ── */
-function anRenderTargets(){
-  const cnt = document.getElementById('an-targets-count');
-  const list = document.getElementById('an-targets-list');
+/* ── ✅ COMPLETED TARGETS & VIDEOS — merged into one box ── */
+function anRenderActivity(){
+  const cnt = document.getElementById('an-tv-count');
+  const list = document.getElementById('an-tv-list');
   if (!list) return;
+
+  /* targets grouped by date */
   const tasks = appState.tasks || {}; const start = anRangeStart();
   const dates = Object.keys(tasks).filter(ds => { const d = new Date(ds); return d >= start; }).sort((a,b) => b.localeCompare(a));
-  let total = 0; const boxes = [];
+  let tTotal = 0; const targetBoxes = [];
   dates.forEach(ds => {
     const done = (tasks[ds] || []).filter(t => t.done);
-    if (!done.length) return; total += done.length;
-    boxes.push(anGroupBox('📅 ' + anFullDate(ds), done.length + ' done',
+    if (!done.length) return; tTotal += done.length;
+    targetBoxes.push(anGroupBox('📅 ' + anFullDate(ds), done.length + ' targets',
       done.map(t => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(t.text)}</div><div class="di-sub">${anEsc(t.subjectName || anSubjectNameById[t.subject] || t.type || '')}</div></div></div>`).join('')
     ));
   });
-  if (cnt) cnt.textContent = total + ' done';
-  list.innerHTML = total ? boxes.join('') : `<div class="an-empty"><div class="em">📝</div><div>No daily targets completed in this range.</div></div>`;
-}
 
-/* ── 🎬 COMPLETED VIDEOS — grouped by course / playlist ── */
-function anRenderVideos(){
-  const cnt = document.getElementById('an-videos-count');
-  const list = document.getElementById('an-videos-list');
-  if (!list) return;
+  /* videos grouped by course / playlist */
   const groups = [];
   const lib = anYtoLib();
   Object.values(lib).forEach(pl => {
@@ -318,17 +312,20 @@ function anRenderVideos(){
   const org = appState.ytOrganiser || {};
   const orgDone = (org.videos || []).filter(v => v.done);
   if (orgDone.length) groups.push({ title: '📋 ' + (org.playlistTitle || 'Organiser'), items: orgDone.map(v => ({ id: anYtId(v), title: v.title || 'Video' })) });
+  let vTotal = 0; const videoBoxes = groups.map(g => {
+    vTotal += g.items.length;
+    return anGroupBox(anEsc(g.title), g.items.length + ' videos',
+      g.items.map(v => `<div class="an-done video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(v.title)}</div><div class="di-sub">${v.id?'▶ Click to play':'YouTube video'}</div></div></div>`).join('')
+    );
+  });
 
-  const totalV = groups.reduce((t,g) => t + g.items.length, 0);
-  if (cnt) cnt.textContent = totalV + ' done';
-  list.innerHTML = totalV
-    ? groups.map(g => anGroupBox(anEsc(g.title), g.items.length + ' done',
-        g.items.map(v => `<div class="an-done video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(v.title)}</div><div class="di-sub">${v.id?'▶ Click to play':'YouTube video'}</div></div></div>`).join('')
-      )).join('')
-    : `<div class="an-empty"><div class="em">🎬</div><div>No completed videos yet. Mark videos done in the Playlist Organiser.</div></div>`;
+  if (cnt) cnt.textContent = tTotal + ' targets · ' + vTotal + ' videos';
+  const all = targetBoxes.concat(videoBoxes);
+  list.innerHTML = all.length ? all.join('')
+    : `<div class="an-empty"><div class="em">📭</div><div>No completed targets or videos in this range yet.</div></div>`;
 }
 
-/* ── ✅ COMPLETED TOPICS — grouped by subject ── */
+/* ── 📚 COMPLETED TOPICS — grouped by subject ── */
 function anRenderTopics(){
   const cnt = document.getElementById('an-topics-count');
   const list = document.getElementById('an-topics-list');
