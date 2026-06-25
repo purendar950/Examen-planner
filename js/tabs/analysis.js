@@ -100,21 +100,34 @@ function anNavRoot(){ anNav = { plId:null, vId:null }; anRenderTree(); }
 function anNavTo(plId, vId){ anNav = { plId: plId || null, vId: vId || null }; anRenderTree(); }
 function anOpenFolder(plId){ anNav = { plId: plId, vId: null }; anRenderTree(); }
 function anOpenVideo(plId, vId){ anNav = { plId: plId, vId: vId }; anRenderTree(); }
+function anNavBack(){ if (anNav.vId) anNav.vId = null; else if (anNav.plId) anNav.plId = null; anRenderTree(); }
+
+/* classic two-tone folder icon (variant 'pl' = yellow, 'vid' = blue w/ play) */
+function anFolderIcon(variant){
+  const back  = variant === 'vid' ? '#38BDF8' : '#F59E0B';
+  const front = variant === 'vid' ? '#7DD3FC' : '#FBBF24';
+  const glyph = variant === 'vid' ? '<path d="M27 26 L27 40 L40 33 Z" fill="rgba(255,255,255,0.92)"/>' : '';
+  return `<svg class="an-folder-svg" viewBox="0 0 64 54" width="64" height="54" aria-hidden="true">`
+    + `<path d="M3 12 a5 5 0 0 1 5-5 h14 l6 6 h28 a5 5 0 0 1 5 5 v4 H3 Z" fill="${back}"/>`
+    + `<path d="M3 16 h58 v28 a5 5 0 0 1-5 5 H8 a5 5 0 0 1-5-5 Z" fill="${front}"/>`
+    + glyph + `</svg>`;
+}
 
 function anBreadcrumb(){
   const el = document.getElementById('an-breadcrumb'); if (!el) return;
   const folders = anFolders();
-  const crumbs = [`<span class="an-crumb${anNav.plId?'':' cur'}" onclick="anNavRoot()">🏠 All</span>`];
+  let html = `<button class="an-back" ${anNav.plId?'':'disabled'} onclick="anNavBack()">⬅ Back</button>`;
+  html += `<span class="an-crumb${anNav.plId?'':' cur'}" onclick="anNavRoot()">🏠 All</span>`;
   if (anNav.plId && folders[anNav.plId]){
     const pl = folders[anNav.plId];
-    crumbs.push('<span class="an-sep">›</span>');
-    crumbs.push(`<span class="an-crumb${anNav.vId?'':' cur'}" onclick="anNavTo('${anNav.plId}',null)">📁 ${anEsc(pl.name||'Playlist')}</span>`);
+    html += '<span class="an-sep">›</span>';
+    html += `<span class="an-crumb${anNav.vId?'':' cur'}" onclick="anNavTo('${anNav.plId}',null)">📁 ${anEsc(pl.name||'Playlist')}</span>`;
     if (anNav.vId && pl.videos && pl.videos[anNav.vId]){
-      crumbs.push('<span class="an-sep">›</span>');
-      crumbs.push(`<span class="an-crumb cur">🎬 ${anEsc(pl.videos[anNav.vId].name||'Video')}</span>`);
+      html += '<span class="an-sep">›</span>';
+      html += `<span class="an-crumb cur">🎬 ${anEsc(pl.videos[anNav.vId].name||'Video')}</span>`;
     }
   }
-  el.innerHTML = crumbs.join('');
+  el.innerHTML = html;
   el.style.display = 'flex';
 }
 
@@ -145,7 +158,7 @@ function anRenderTree(){
     const tiles = Object.entries(folders).map(([plId, pl]) => {
       const moments = Object.values(pl.videos||{}).reduce((t,v) => t + (v.items||[]).length, 0);
       const vids = Object.keys(pl.videos||{}).length;
-      return `<div class="an-tile" onclick="anOpenFolder('${plId}')"><div class="an-tile-ico">📁</div><div class="an-tile-name">${anEsc(pl.name||'Playlist')}</div><div class="an-tile-meta">${vids} video${vids===1?'':'s'} · ${moments} moments</div></div>`;
+      return `<div class="an-tile" onclick="anOpenFolder('${plId}')">${anFolderIcon('pl')}<div class="an-tile-name">${anEsc(pl.name||'Playlist')}</div><div class="an-tile-meta">${vids} video${vids===1?'':'s'} · ${moments} moments</div></div>`;
     }).join('');
     body.innerHTML = `<div class="an-explorer">${tiles}</div>`;
 
@@ -155,9 +168,7 @@ function anRenderTree(){
     const entries = Object.entries(pl.videos||{});
     body.innerHTML = entries.length ? `<div class="an-explorer">${entries.map(([vId, v]) => {
       const count = (v.items||[]).length;
-      const vid = (v.items && v.items[0] && v.items[0].videoId) || String(vId).replace('playlist_','');
-      const thumb = 'https://i.ytimg.com/vi/' + vid + '/hqdefault.jpg';
-      return `<div class="an-tile" onclick="anOpenVideo('${anNav.plId}','${vId}')"><div class="an-tile-thumb"><img src="${thumb}" alt=""><span class="an-tile-badge">🎬 folder</span></div><div class="an-tile-name">${anEsc(v.name||'Video')}</div><div class="an-tile-meta">${count} moment${count===1?'':'s'}</div></div>`;
+      return `<div class="an-tile" onclick="anOpenVideo('${anNav.plId}','${vId}')">${anFolderIcon('vid')}<div class="an-tile-name">${anEsc(v.name||'Video')}</div><div class="an-tile-meta">${count} moment${count===1?'':'s'}</div></div>`;
     }).join('')}</div>`
       : `<div class="an-empty"><div class="em">📂</div><div>This playlist has no videos with saved moments.</div></div>`;
 
