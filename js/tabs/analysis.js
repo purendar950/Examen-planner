@@ -243,13 +243,7 @@ function anRenderSubjectBars(){
   }).join('');
 }
 
-/* completed tab: topics | videos | tasks */
-let anCompletedTab = 'topics';
-function anSetCompletedTab(t){
-  anCompletedTab = t;
-  document.querySelectorAll('#an-completed-tabs button').forEach((b,i) => b.classList.toggle('active', (['topics','videos','tasks'][i] === t)));
-  anRenderCompleted();
-}
+/* completed sections render into their own separate boxes */
 
 function anYtId(v){
   if (v.videoId) return v.videoId;
@@ -284,69 +278,76 @@ function anGroupBox(title, count, innerHtml){
 }
 
 function anRenderCompleted(){
-  const head = document.getElementById('an-completed-head');
-  const cnt  = document.getElementById('an-completed-count');
-  const list = document.getElementById('an-completed-list');
-  if (!head || !list) return;
+  anRenderTargets();
+  anRenderVideos();
+  anRenderTopics();
+}
 
-  if (anCompletedTab === 'topics'){
-    /* ── grouped by SUBJECT ── */
-    head.firstChild.textContent = '✅ Completed Topics ';
-    const prog = appState.progress || {};
-    const bySub = {};
-    Object.keys(prog).filter(id => prog[id] && prog[id].done).forEach(id => {
-      const c = anChapterById[id];
-      const sub = (c && c.subjectName) || 'Other';
-      (bySub[sub] = bySub[sub] || []).push({ name: c ? c.name : id, at: prog[id].completedAt || '' });
-    });
-    const subs = Object.keys(bySub).sort();
-    const totalTopics = subs.reduce((t,s) => t + bySub[s].length, 0);
-    cnt.textContent = totalTopics + ' completed';
-    list.innerHTML = totalTopics
-      ? subs.map(s => anGroupBox('📚 ' + anEsc(s), bySub[s].length + ' done',
-          bySub[s].map(r => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(r.name)}</div></div>${r.at?`<span class="di-date">${anShortDate(r.at)}</span>`:''}</div>`).join('')
-        )).join('')
-      : `<div class="an-empty"><div class="em">📘</div><div>No completed topics yet. Mark chapters done in the Syllabus tab.</div></div>`;
+/* ── 📝 COMPLETED TARGETS — grouped by date ── */
+function anRenderTargets(){
+  const cnt = document.getElementById('an-targets-count');
+  const list = document.getElementById('an-targets-list');
+  if (!list) return;
+  const tasks = appState.tasks || {}; const start = anRangeStart();
+  const dates = Object.keys(tasks).filter(ds => { const d = new Date(ds); return d >= start; }).sort((a,b) => b.localeCompare(a));
+  let total = 0; const boxes = [];
+  dates.forEach(ds => {
+    const done = (tasks[ds] || []).filter(t => t.done);
+    if (!done.length) return; total += done.length;
+    boxes.push(anGroupBox('📅 ' + anFullDate(ds), done.length + ' done',
+      done.map(t => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(t.text)}</div><div class="di-sub">${anEsc(t.subjectName || anSubjectNameById[t.subject] || t.type || '')}</div></div></div>`).join('')
+    ));
+  });
+  if (cnt) cnt.textContent = total + ' done';
+  list.innerHTML = total ? boxes.join('') : `<div class="an-empty"><div class="em">📝</div><div>No daily targets completed in this range.</div></div>`;
+}
 
-  } else if (anCompletedTab === 'videos'){
-    /* ── grouped by COURSE / PLAYLIST ── reads watched map + legacy organiser ── */
-    head.firstChild.textContent = '🎬 Completed Videos ';
-    const groups = [];
-    const lib = anYtoLib();
-    Object.values(lib).forEach(pl => {
-      if (!pl || !pl.videos) return;
-      const w = pl.watched || {};
-      const done = pl.videos.filter(v => w[v.id]);
-      if (done.length) groups.push({ title: (pl.type === 'video' ? '🎬 ' : '📁 ') + (pl.title || 'Course'), items: done.map(v => ({ id: v.id, title: v.title || 'Video' })) });
-    });
-    const org = appState.ytOrganiser || {};
-    const orgDone = (org.videos || []).filter(v => v.done);
-    if (orgDone.length) groups.push({ title: '📋 ' + (org.playlistTitle || 'Organiser'), items: orgDone.map(v => ({ id: anYtId(v), title: v.title || 'Video' })) });
+/* ── 🎬 COMPLETED VIDEOS — grouped by course / playlist ── */
+function anRenderVideos(){
+  const cnt = document.getElementById('an-videos-count');
+  const list = document.getElementById('an-videos-list');
+  if (!list) return;
+  const groups = [];
+  const lib = anYtoLib();
+  Object.values(lib).forEach(pl => {
+    if (!pl || !pl.videos) return;
+    const w = pl.watched || {};
+    const done = pl.videos.filter(v => w[v.id]);
+    if (done.length) groups.push({ title: (pl.type === 'video' ? '🎬 ' : '📁 ') + (pl.title || 'Course'), items: done.map(v => ({ id: v.id, title: v.title || 'Video' })) });
+  });
+  const org = appState.ytOrganiser || {};
+  const orgDone = (org.videos || []).filter(v => v.done);
+  if (orgDone.length) groups.push({ title: '📋 ' + (org.playlistTitle || 'Organiser'), items: orgDone.map(v => ({ id: anYtId(v), title: v.title || 'Video' })) });
 
-    const totalV = groups.reduce((t,g) => t + g.items.length, 0);
-    cnt.textContent = totalV + ' done';
-    list.innerHTML = totalV
-      ? groups.map(g => anGroupBox(anEsc(g.title), g.items.length + ' done',
-          g.items.map(v => `<div class="an-done video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(v.title)}</div><div class="di-sub">${v.id?'▶ Click to play':'YouTube video'}</div></div></div>`).join('')
-        )).join('')
-      : `<div class="an-empty"><div class="em">🎬</div><div>No completed videos yet. Mark videos done in the Playlist Organiser.</div></div>`;
+  const totalV = groups.reduce((t,g) => t + g.items.length, 0);
+  if (cnt) cnt.textContent = totalV + ' done';
+  list.innerHTML = totalV
+    ? groups.map(g => anGroupBox(anEsc(g.title), g.items.length + ' done',
+        g.items.map(v => `<div class="an-done video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(v.title)}</div><div class="di-sub">${v.id?'▶ Click to play':'YouTube video'}</div></div></div>`).join('')
+      )).join('')
+    : `<div class="an-empty"><div class="em">🎬</div><div>No completed videos yet. Mark videos done in the Playlist Organiser.</div></div>`;
+}
 
-  } else {
-    /* ── grouped by DATE ── */
-    head.firstChild.textContent = '📝 Completed Targets ';
-    const tasks = appState.tasks || {}; const start = anRangeStart();
-    const dates = Object.keys(tasks).filter(ds => { const d = new Date(ds); return d >= start; }).sort((a,b) => b.localeCompare(a));
-    let total = 0; const boxes = [];
-    dates.forEach(ds => {
-      const done = (tasks[ds] || []).filter(t => t.done);
-      if (!done.length) return; total += done.length;
-      boxes.push(anGroupBox('📅 ' + anFullDate(ds), done.length + ' done',
-        done.map(t => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(t.text)}</div><div class="di-sub">${anEsc(t.subjectName || anSubjectNameById[t.subject] || t.type || '')}</div></div></div>`).join('')
-      ));
-    });
-    cnt.textContent = total + ' done';
-    list.innerHTML = total ? boxes.join('') : `<div class="an-empty"><div class="em">📝</div><div>No daily targets completed in this range.</div></div>`;
-  }
+/* ── ✅ COMPLETED TOPICS — grouped by subject ── */
+function anRenderTopics(){
+  const cnt = document.getElementById('an-topics-count');
+  const list = document.getElementById('an-topics-list');
+  if (!list) return;
+  const prog = appState.progress || {};
+  const bySub = {};
+  Object.keys(prog).filter(id => prog[id] && prog[id].done).forEach(id => {
+    const c = anChapterById[id];
+    const sub = (c && c.subjectName) || 'Other';
+    (bySub[sub] = bySub[sub] || []).push({ name: c ? c.name : id, at: prog[id].completedAt || '' });
+  });
+  const subs = Object.keys(bySub).sort();
+  const totalTopics = subs.reduce((t,s) => t + bySub[s].length, 0);
+  if (cnt) cnt.textContent = totalTopics + ' completed';
+  list.innerHTML = totalTopics
+    ? subs.map(s => anGroupBox('📚 ' + anEsc(s), bySub[s].length + ' done',
+        bySub[s].map(r => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(r.name)}</div></div>${r.at?`<span class="di-date">${anShortDate(r.at)}</span>`:''}</div>`).join('')
+      )).join('')
+    : `<div class="an-empty"><div class="em">📘</div><div>No completed topics yet. Mark chapters done in the Syllabus tab.</div></div>`;
 }
 
 /* ════════ ENTRY POINT ════════ */
