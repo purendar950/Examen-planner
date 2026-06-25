@@ -106,6 +106,13 @@
   #page-analysis .an-done .di-date { font-size:0.68rem; color:var(--muted); flex-shrink:0; }
   #page-analysis .an-done.video { cursor:pointer; }
   #page-analysis .an-done.video:hover { border-color:var(--accent); }
+  /* grouped "systematic" boxes inside the completed panel */
+  #page-analysis .an-group { border:1px solid var(--border); border-radius:10px; margin-bottom:12px; overflow:hidden; }
+  #page-analysis .an-group:last-child { margin-bottom:0; }
+  #page-analysis .an-group-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 12px; background:var(--card); border-bottom:1px solid var(--border); font-size:0.82rem; font-weight:700; }
+  #page-analysis .an-group-head .gc { font-size:0.66rem; color:var(--muted); font-weight:600; background:var(--surface); border:1px solid var(--border); padding:2px 9px; border-radius:99px; white-space:nowrap; }
+  #page-analysis .an-group-body { display:flex; flex-direction:column; gap:6px; padding:10px; }
+  #page-analysis .an-group .an-done { background:var(--surface); }
   #page-analysis .an-pills { display:inline-flex; gap:6px; margin-bottom:0.9rem; flex-wrap:wrap; }
   #page-analysis .an-pills button { background:var(--card); border:1px solid var(--border); color:var(--muted); border-radius:99px; padding:6px 13px; font-size:0.76rem; font-weight:600; cursor:pointer; }
   #page-analysis .an-pills button.active { background:var(--accent-dim, rgba(0,200,150,0.12)); border-color:var(--accent); color:var(--accent); }
