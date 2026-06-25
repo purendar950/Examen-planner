@@ -63,6 +63,21 @@
   #page-analysis .an-chip .ml { padding:6px 8px; font-size:0.68rem; color:var(--muted); display:flex; align-items:center; gap:5px; }
   #page-analysis .an-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
   #page-analysis .an-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:14px; }
+  /* file-explorer view */
+  #page-analysis .an-crumbs { display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin:0 0 12px; font-size:0.82rem; }
+  #page-analysis .an-crumb { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:8px; background:var(--surface); border:1px solid var(--border); color:var(--muted); cursor:pointer; font-weight:600; max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #page-analysis .an-crumb:hover { border-color:var(--accent); color:var(--text); }
+  #page-analysis .an-crumb.cur { background:var(--accent-dim, rgba(0,200,150,0.12)); border-color:var(--accent); color:var(--accent); cursor:default; }
+  #page-analysis .an-sep { color:var(--muted); font-size:0.8rem; }
+  #page-analysis .an-explorer { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px; }
+  #page-analysis .an-tile { cursor:pointer; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 12px 12px; display:flex; flex-direction:column; align-items:center; gap:7px; text-align:center; transition:transform .15s, border-color .15s, box-shadow .15s; }
+  #page-analysis .an-tile:hover { transform:translateY(-3px); border-color:var(--accent); box-shadow:0 8px 20px rgba(0,0,0,0.22); }
+  #page-analysis .an-tile-ico { font-size:2.6rem; line-height:1; }
+  #page-analysis .an-tile-thumb { position:relative; width:100%; aspect-ratio:16/9; border-radius:8px; overflow:hidden; background:#000; }
+  #page-analysis .an-tile-thumb img { width:100%; height:100%; object-fit:cover; display:block; }
+  #page-analysis .an-tile-badge { position:absolute; left:6px; top:6px; background:rgba(0,0,0,0.75); color:#fff; font-size:0.6rem; font-weight:700; padding:2px 7px; border-radius:6px; }
+  #page-analysis .an-tile-name { font-size:0.8rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+  #page-analysis .an-tile-meta { font-size:0.66rem; color:var(--muted); }
   #page-analysis .an-empty { text-align:center; padding:3rem 1rem; color:var(--muted); }
   #page-analysis .an-empty .em { font-size:2.4rem; margin-bottom:0.6rem; }
 
@@ -143,13 +158,13 @@
       <div class="an-search"><span>🔍</span>
         <input type="text" id="an-search" placeholder="Search moments, videos or playlists..." oninput="anRenderTree()"></div>
       <div class="an-view-toggle">
-        <button class="an-vt active" id="an-vt-tree" onclick="anSetGalleryView('tree')" title="Folder view">🗂️</button>
-        <button class="an-vt" id="an-vt-grid" onclick="anSetGalleryView('grid')" title="Grid view">▦</button>
+        <button class="an-vt active" id="an-vt-tree" onclick="anSetGalleryView('tree')" title="Folder explorer">🗂️</button>
+        <button class="an-vt" id="an-vt-grid" onclick="anSetGalleryView('grid')" title="All moments">▦</button>
       </div>
     </div>
     <div class="an-label">⭐ Recent moments</div>
     <div class="an-recent-row" id="an-recent"></div>
-    <div class="an-label">📂 Folders (Playlist › Video › Moments)</div>
+    <div class="an-crumbs" id="an-breadcrumb"></div>
     <div id="an-gallery-body"></div>
   </div>
 

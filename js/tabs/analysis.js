@@ -93,38 +93,81 @@ function anRenderRecent(){
     </div>`).join('');
 }
 
-/* ── folder tree (Playlist › Video › Moments) ── */
+/* ── file-explorer style gallery (Playlist → Video → Moments) ── */
+let anNav = { plId: null, vId: null };
+function anFolders(){ return (appState.ytScreenshots && appState.ytScreenshots.folders) || {}; }
+function anNavRoot(){ anNav = { plId:null, vId:null }; anRenderTree(); }
+function anNavTo(plId, vId){ anNav = { plId: plId || null, vId: vId || null }; anRenderTree(); }
+function anOpenFolder(plId){ anNav = { plId: plId, vId: null }; anRenderTree(); }
+function anOpenVideo(plId, vId){ anNav = { plId: plId, vId: vId }; anRenderTree(); }
+
+function anBreadcrumb(){
+  const el = document.getElementById('an-breadcrumb'); if (!el) return;
+  const folders = anFolders();
+  const crumbs = [`<span class="an-crumb${anNav.plId?'':' cur'}" onclick="anNavRoot()">🏠 All</span>`];
+  if (anNav.plId && folders[anNav.plId]){
+    const pl = folders[anNav.plId];
+    crumbs.push('<span class="an-sep">›</span>');
+    crumbs.push(`<span class="an-crumb${anNav.vId?'':' cur'}" onclick="anNavTo('${anNav.plId}',null)">📁 ${anEsc(pl.name||'Playlist')}</span>`);
+    if (anNav.vId && pl.videos && pl.videos[anNav.vId]){
+      crumbs.push('<span class="an-sep">›</span>');
+      crumbs.push(`<span class="an-crumb cur">🎬 ${anEsc(pl.videos[anNav.vId].name||'Video')}</span>`);
+    }
+  }
+  el.innerHTML = crumbs.join('');
+  el.style.display = 'flex';
+}
+
 function anRenderTree(){
   const searchEl = document.getElementById('an-search');
   const q = searchEl ? searchEl.value.trim() : '';
   const body = document.getElementById('an-gallery-body');
+  const bc = document.getElementById('an-breadcrumb');
   if (!body) return;
-  const folders = (appState.ytScreenshots && appState.ytScreenshots.folders) || {};
+  const folders = anFolders();
   if (!Object.keys(folders).length){
     body.innerHTML = `<div class="an-empty"><div class="em">🗂️</div><div>No saved moments yet.<br>Capture some from the YouTube tab and they'll appear here.</div></div>`;
     const r = document.getElementById('an-recent'); if (r) r.innerHTML = '';
+    if (bc) bc.style.display = 'none';
     return;
   }
-  if (anGalleryView === 'grid') return anRenderGrid(q);
+  // flat "all moments" grid, or flat search results across every folder
+  if (anGalleryView === 'grid' || q){ if (bc) bc.style.display = 'none'; return anRenderGrid(q); }
 
-  let html = '<div class="an-tree">'; let any = false;
-  Object.entries(folders).forEach(([plId, pl]) => {
-    const vids = Object.entries(pl.videos || {}).filter(([vId, v]) =>
-      anMatches(q, pl.name, v.name) || (v.items||[]).some(it => anMatches(q, it.label, it.videoTitle)));
-    if (!vids.length) return; any = true;
-    const total = vids.reduce((t,[,v]) => t + (v.items||[]).length, 0);
-    html += `<div class="an-folder${q?' open':''}"><div class="an-folder-head" onclick="this.parentElement.classList.toggle('open')">
-      <span class="an-chev">▶</span><span>📁</span><span class="fname">${anEsc(pl.name||'Playlist')}</span><span class="an-count">${total} moments</span></div><div class="an-folder-body">`;
-    vids.forEach(([vId, v]) => {
-      const items = (v.items||[]).filter(it => !q || anMatches(q, it.label, it.videoTitle, v.name, pl.name));
-      html += `<div class="an-sub${q?' open':''}"><div class="an-sub-head" onclick="this.parentElement.classList.toggle('open')">
-        <span class="an-chev">▶</span><span>🎬</span><span class="vname">${anEsc(v.name||'Video')}</span><span class="an-count">${items.length}</span></div>
-        <div class="an-moment-list">${items.map(it => anMomentChip(anNormItem(it, vId, v))).join('')}</div></div>`;
-    });
-    html += `</div></div>`;
-  });
-  html += '</div>';
-  body.innerHTML = any ? html : `<div class="an-empty"><div class="em">🔍</div><div>No moments match "<b>${anEsc(q)}</b>".</div></div>`;
+  // guard against stale navigation (folder/video removed since last render)
+  if (anNav.plId && !folders[anNav.plId]) anNav = { plId:null, vId:null };
+  if (anNav.plId && anNav.vId && !((folders[anNav.plId].videos||{})[anNav.vId])) anNav.vId = null;
+
+  anBreadcrumb();
+
+  if (!anNav.plId){
+    /* LEVEL 0 — playlists as folder tiles */
+    const tiles = Object.entries(folders).map(([plId, pl]) => {
+      const moments = Object.values(pl.videos||{}).reduce((t,v) => t + (v.items||[]).length, 0);
+      const vids = Object.keys(pl.videos||{}).length;
+      return `<div class="an-tile" onclick="anOpenFolder('${plId}')"><div class="an-tile-ico">📁</div><div class="an-tile-name">${anEsc(pl.name||'Playlist')}</div><div class="an-tile-meta">${vids} video${vids===1?'':'s'} · ${moments} moments</div></div>`;
+    }).join('');
+    body.innerHTML = `<div class="an-explorer">${tiles}</div>`;
+
+  } else if (!anNav.vId){
+    /* LEVEL 1 — videos inside the playlist as folder tiles */
+    const pl = folders[anNav.plId];
+    const entries = Object.entries(pl.videos||{});
+    body.innerHTML = entries.length ? `<div class="an-explorer">${entries.map(([vId, v]) => {
+      const count = (v.items||[]).length;
+      const vid = (v.items && v.items[0] && v.items[0].videoId) || String(vId).replace('playlist_','');
+      const thumb = 'https://i.ytimg.com/vi/' + vid + '/hqdefault.jpg';
+      return `<div class="an-tile" onclick="anOpenVideo('${anNav.plId}','${vId}')"><div class="an-tile-thumb"><img src="${thumb}" alt=""><span class="an-tile-badge">🎬 folder</span></div><div class="an-tile-name">${anEsc(v.name||'Video')}</div><div class="an-tile-meta">${count} moment${count===1?'':'s'}</div></div>`;
+    }).join('')}</div>`
+      : `<div class="an-empty"><div class="em">📂</div><div>This playlist has no videos with saved moments.</div></div>`;
+
+  } else {
+    /* LEVEL 2 — moments inside the video */
+    const pl = folders[anNav.plId]; const v = (pl.videos||{})[anNav.vId];
+    const items = (v && v.items) || [];
+    body.innerHTML = items.length ? `<div class="an-grid">${items.map(it => anMomentChip(anNormItem(it, anNav.vId, v))).join('')}</div>`
+      : `<div class="an-empty"><div class="em">📭</div><div>No moments in this video.</div></div>`;
+  }
 }
 function anNormItem(it, vId, v){
   const vid = it.videoId || String(vId).replace('playlist_','');
