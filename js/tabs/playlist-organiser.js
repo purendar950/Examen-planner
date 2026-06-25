@@ -702,6 +702,8 @@ function ytoToggleChap(ci) {
 function ytoToggleWatch(plId, vid) {
   const pl = ytoLib()[plId]; if (!pl) return;
   if (pl.watched[vid]) delete pl.watched[vid]; else pl.watched[vid] = true;
+  /* Keep any matching planner video To-Do task in sync with the watched flag. */
+  if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(vid, !!pl.watched[vid]);
   ytoPersist();
   const y = window.scrollY; ytoRefreshCourse(); window.scrollTo(0, y);
 }

@@ -989,8 +989,58 @@ function setTaskStatus(dateStr, taskId, status) {
   if (!task) return;
   task.status = status;
   task.done = (status === 'done');
+  syncVideoTaskToWatched(task);
   saveProgress();
   buildPlannerCalendar();
+}
+
+/* ══════════════════════════════════════════════
+   VIDEO COMPLETION SYNC
+   A video can be completed in two independent places:
+     1. as a planner To-Do task (checkbox / Kanban) — tracked by task.done
+     2. by watching it (YouTube tab auto-mark at 90%, the ✓ in the YouTube tab,
+        or the course organiser checkbox) — tracked by a separate "watched" store
+   Without syncing, watching a video to completion left its planner task stuck
+   in the "To Do" column (and vice-versa). These helpers keep both in sync.
+══════════════════════════════════════════════ */
+
+/* Mirror a video's watched flag onto both watched stores for the given course. */
+function setCourseVideoWatched(plId, videoId, watched) {
+  if (!videoId || !plId) return;
+  const lib = appState.ytoLibrary || {};
+  if (lib[plId]) {
+    if (!lib[plId].watched) lib[plId].watched = {};
+    if (watched) lib[plId].watched[videoId] = true; else delete lib[plId].watched[videoId];
+  }
+  if (!appState.ytWatched) appState.ytWatched = {};
+  if (!appState.ytWatched[plId]) appState.ytWatched[plId] = {};
+  if (watched) appState.ytWatched[plId][videoId] = true; else delete appState.ytWatched[plId][videoId];
+}
+
+/* Planner video task → watched store. */
+function syncVideoTaskToWatched(task) {
+  if (!task || task.type !== 'video' || !task.videoId) return;
+  setCourseVideoWatched(task.plId, task.videoId, !!task.done);
+}
+
+/* Watched store → planner video tasks (matched by videoId across all dates).
+   Returns true if any task changed so callers can refresh the planner UI. */
+function syncWatchedToVideoTasks(videoId, watched) {
+  if (!videoId || !appState.tasks) return false;
+  let changed = false;
+  Object.keys(appState.tasks).forEach(ds => {
+    (appState.tasks[ds] || []).forEach(t => {
+      if (t.type === 'video' && t.videoId === videoId && (!!t.done) !== (!!watched)) {
+        t.done = !!watched;
+        t.status = watched ? 'done' : 'todo';
+        changed = true;
+      }
+    });
+  });
+  if (changed && typeof buildPlannerCalendar === 'function') {
+    try { buildPlannerCalendar(); } catch (e) {}
+  }
+  return changed;
 }
 
 function renderDayContent() {

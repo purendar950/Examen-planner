@@ -758,6 +758,8 @@ function ytMarkWatched(videoId, rerender = true) {
     ytVideoWatched[videoId] = true;
     appState.ytWatched[ytCurrentPlaylistId][videoId] = true;
   }
+  /* Keep any matching planner video To-Do task in sync with the watched flag. */
+  if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(videoId, !!ytVideoWatched[videoId]);
   saveProgress();
   if (rerender) ytRenderVideoList();
   ytUpdatePlaylistProgress();
@@ -821,6 +823,7 @@ function ytAutoMarkOnComplete() {
       pl.watched[ytCurrentVideoId] = true;
       ytoPersist();
       ytoPopulateYtSidebar(ytoCurrentPl, ytCurrentVideoId);
+      if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(ytCurrentVideoId, true);
       showToast('✅ Video complete — watched mark ho gayi!', 'success');
     }
     return;
@@ -833,6 +836,7 @@ function ytAutoMarkOnComplete() {
   if (!appState.ytWatched[plKey][ytCurrentVideoId]) {
     appState.ytWatched[plKey][ytCurrentVideoId] = true;
     ytVideoWatched[ytCurrentVideoId] = true;
+    if (typeof syncWatchedToVideoTasks === 'function') syncWatchedToVideoTasks(ytCurrentVideoId, true);
     saveProgress();
     ytRenderVideoList();
     ytUpdatePlaylistProgress();
