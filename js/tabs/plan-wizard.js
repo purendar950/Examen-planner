@@ -1162,6 +1162,9 @@ function toggleTask(dateStr, taskId) {
        that carries a status (e.g. any auto-rolled-over task has status:'todo')
        would stay stuck in the "To Do" column and never move to "Completed". */
     task.status = task.done ? 'done' : 'todo';
+    /* Mirror onto the course "watched" store so the Scheduled Videos card and
+       course progress reflect the completion too. */
+    if (typeof syncVideoTaskToWatched === 'function') syncVideoTaskToWatched(task);
     saveProgress();
     buildPlannerCalendar();
   }
