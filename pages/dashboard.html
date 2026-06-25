@@ -91,6 +91,19 @@
         <div class="yt-continue-card" id="yt-continue-card" onclick="switchPage('youtube');setTimeout(ytResume,120)"></div>
       </div>
 
+      <!-- Analysis snapshot -->
+      <div class="revision-widget" id="analysis-dashboard-widget" onclick="switchPage('analysis')" style="cursor:pointer;margin-bottom:1.25rem;">
+        <div class="revision-widget-head">
+          <div class="revision-widget-title">📈 Analysis</div>
+          <div class="revision-widget-stats">
+            <span>This week: <b id="an-dash-pct">0%</b></span>
+            <span>Streak: <b id="an-dash-streak">0</b></span>
+            <span>Moments: <b id="an-dash-moments">0</b></span>
+          </div>
+        </div>
+        <div id="an-dash-sub" style="font-size:0.82rem; color:var(--muted);">View your schedule analysis &amp; saved video gallery →</div>
+      </div>
+
       <!-- Subject Progress -->
       <div class="section-title">Subject-wise Progress</div>
       <div class="dash-subjects" id="subject-progress-cards"></div>

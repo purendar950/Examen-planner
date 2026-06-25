@@ -338,3 +338,58 @@ function anRender(){
     if (page === 'analysis') anRender();
   };
 })();
+
+/* ════════ DASHBOARD SNAPSHOT WIDGET ════════ */
+/* Fills the #analysis-dashboard-widget card on the Dashboard with a quick
+   7-day completion %, trailing streak, and saved-moment count. Computed
+   independently so it works even before the Analysis tab is opened. */
+function anRenderDashWidget(){
+  const pctEl = document.getElementById('an-dash-pct');
+  if (!pctEl || typeof appState === 'undefined' || !appState) return; // widget absent
+
+  const tasks = appState.tasks || {};
+  const habitsLog = appState.habitsLog || {};
+  const today = new Date(); today.setHours(0,0,0,0);
+  let total = 0, done = 0;
+  const dayRatios = [];
+  for (let i = 6; i >= 0; i--){
+    const d = new Date(today); d.setDate(today.getDate()-i); const key = anFmtKey(d);
+    const t = tasks[key] || []; let tt = t.length, dd = t.filter(x => x.done).length;
+    const h = habitsLog[key] || {}; const hv = Object.values(h); tt += hv.length; dd += hv.filter(Boolean).length;
+    total += tt; done += dd; dayRatios.push(tt ? dd/tt : 0);
+  }
+  let streak = 0;
+  dayRatios.forEach(p => { if (p >= 0.8) streak++; else streak = 0; });
+  const pct = total ? Math.round(done/total*100) : 0;
+
+  let moments = 0;
+  const folders = (appState.ytScreenshots && appState.ytScreenshots.folders) || {};
+  Object.values(folders).forEach(pl => Object.values(pl.videos || {}).forEach(v => { moments += (v.items || []).length; }));
+
+  pctEl.textContent = pct + '%';
+  const sEl = document.getElementById('an-dash-streak'); if (sEl) sEl.textContent = streak;
+  const mEl = document.getElementById('an-dash-moments'); if (mEl) mEl.textContent = moments;
+}
+
+/* ── refresh the dashboard widget whenever the dashboard renders ── */
+(function(){
+  if (typeof updateDashboard !== 'function') return;
+  const _anDashBase = updateDashboard;
+  updateDashboard = function(){
+    _anDashBase();
+    try { anRenderDashWidget(); } catch(e){}
+  };
+})();
+
+/* ── re-render the Analysis tab when the exam is switched while it's open ── */
+(function(){
+  if (typeof switchExam !== 'function') return;
+  const _anExamBase = switchExam;
+  switchExam = function(examId, opts){
+    _anExamBase(examId, opts);
+    try {
+      const pg = document.getElementById('page-analysis');
+      if (pg && pg.classList.contains('active')) anRender();
+    } catch(e){}
+  };
+})();
