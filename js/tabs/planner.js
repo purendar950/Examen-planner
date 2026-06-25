@@ -976,8 +976,12 @@ function rolloverBadgeHtml(t) {
    DAY VIEW CONTENT — Kanban board / List toggle
 ══════════════════════════════════════════════ */
 function taskStatus(t) {
+  /* A task flagged done is always "done", regardless of a stale status field.
+     This also recovers tasks that were completed via the list checkbox before
+     status-syncing was added (done:true but status still 'todo'). */
+  if (t.done) return 'done';
   if (t.status) return t.status;
-  return t.done ? 'done' : 'todo';
+  return 'todo';
 }
 
 function setTaskStatus(dateStr, taskId, status) {
