@@ -272,9 +272,9 @@ function anFullDate(s){
   } catch(e){ return s; }
 }
 
-/* a labelled "systematic" box: header (title + count) over a list of rows */
-function anGroupBox(title, count, innerHtml){
-  return `<div class="an-group"><div class="an-group-head"><span>${title}</span><span class="gc">${count}</span></div><div class="an-group-body">${innerHtml}</div></div>`;
+/* a collapsible "systematic" card: header (title + count) toggles its body */
+function anGroupBox(title, count, innerHtml, open){
+  return `<div class="an-group${open?' open':''}"><div class="an-group-head" onclick="this.parentElement.classList.toggle('open')"><span class="an-chev">▶</span><span class="gt">${title}</span><span class="gc">${count}</span></div><div class="an-group-body">${innerHtml}</div></div>`;
 }
 
 function anRenderCompleted(){
@@ -291,13 +291,12 @@ function anRenderActivity(){
   /* targets grouped by date */
   const tasks = appState.tasks || {}; const start = anRangeStart();
   const dates = Object.keys(tasks).filter(ds => { const d = new Date(ds); return d >= start; }).sort((a,b) => b.localeCompare(a));
-  let tTotal = 0; const targetBoxes = [];
+  let tTotal = 0; const cards = [];
   dates.forEach(ds => {
     const done = (tasks[ds] || []).filter(t => t.done);
     if (!done.length) return; tTotal += done.length;
-    targetBoxes.push(anGroupBox('📅 ' + anFullDate(ds), done.length + ' targets',
-      done.map(t => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(t.text)}</div><div class="di-sub">${anEsc(t.subjectName || anSubjectNameById[t.subject] || t.type || '')}</div></div></div>`).join('')
-    ));
+    cards.push({ title: '📅 ' + anFullDate(ds), count: done.length + ' targets',
+      inner: done.map(t => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(t.text)}</div><div class="di-sub">${anEsc(t.subjectName || anSubjectNameById[t.subject] || t.type || '')}</div></div></div>`).join('') });
   });
 
   /* videos grouped by course / playlist */
@@ -312,16 +311,16 @@ function anRenderActivity(){
   const org = appState.ytOrganiser || {};
   const orgDone = (org.videos || []).filter(v => v.done);
   if (orgDone.length) groups.push({ title: '📋 ' + (org.playlistTitle || 'Organiser'), items: orgDone.map(v => ({ id: anYtId(v), title: v.title || 'Video' })) });
-  let vTotal = 0; const videoBoxes = groups.map(g => {
+  let vTotal = 0;
+  groups.forEach(g => {
     vTotal += g.items.length;
-    return anGroupBox(anEsc(g.title), g.items.length + ' videos',
-      g.items.map(v => `<div class="an-done video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(v.title)}</div><div class="di-sub">${v.id?'▶ Click to play':'YouTube video'}</div></div></div>`).join('')
-    );
+    cards.push({ title: anEsc(g.title), count: g.items.length + ' videos',
+      inner: g.items.map(v => `<div class="an-done video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(v.title)}</div><div class="di-sub">${v.id?'▶ Click to play':'YouTube video'}</div></div></div>`).join('') });
   });
 
   if (cnt) cnt.textContent = tTotal + ' targets · ' + vTotal + ' videos';
-  const all = targetBoxes.concat(videoBoxes);
-  list.innerHTML = all.length ? all.join('')
+  list.innerHTML = cards.length
+    ? cards.map((c,i) => anGroupBox(c.title, c.count, c.inner, i === 0)).join('')
     : `<div class="an-empty"><div class="em">📭</div><div>No completed targets or videos in this range yet.</div></div>`;
 }
 
@@ -341,8 +340,8 @@ function anRenderTopics(){
   const totalTopics = subs.reduce((t,s) => t + bySub[s].length, 0);
   if (cnt) cnt.textContent = totalTopics + ' completed';
   list.innerHTML = totalTopics
-    ? subs.map(s => anGroupBox('📚 ' + anEsc(s), bySub[s].length + ' done',
-        bySub[s].map(r => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(r.name)}</div></div>${r.at?`<span class="di-date">${anShortDate(r.at)}</span>`:''}</div>`).join('')
+    ? subs.map((s,i) => anGroupBox('📚 ' + anEsc(s), bySub[s].length + ' done',
+        bySub[s].map(r => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(r.name)}</div></div>${r.at?`<span class="di-date">${anShortDate(r.at)}</span>`:''}</div>`).join(''), i === 0
       )).join('')
     : `<div class="an-empty"><div class="em">📘</div><div>No completed topics yet. Mark chapters done in the Syllabus tab.</div></div>`;
 }
