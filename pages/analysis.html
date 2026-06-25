@@ -97,7 +97,7 @@
   #page-analysis .an-fill { height:100%; border-radius:99px; transition:width .5s; }
   #page-analysis .an-bar .pct { width:92px; text-align:right; font-size:0.74rem; color:var(--muted); }
 
-  #page-analysis .an-done-list { display:flex; flex-direction:column; gap:8px; max-height:340px; overflow-y:auto; }
+  #page-analysis .an-done-list { display:flex; flex-direction:column; gap:8px; }
   #page-analysis .an-done { display:flex; align-items:flex-start; gap:10px; padding:9px 11px; background:var(--card); border:1px solid var(--border); border-radius:9px; }
   #page-analysis .an-done .tick { color:var(--accent); flex-shrink:0; }
   #page-analysis .an-done .di-main { flex:1; min-width:0; }
@@ -106,13 +106,15 @@
   #page-analysis .an-done .di-date { font-size:0.68rem; color:var(--muted); flex-shrink:0; }
   #page-analysis .an-done.video { cursor:pointer; }
   #page-analysis .an-done.video:hover { border-color:var(--accent); }
-  /* grouped "systematic" boxes inside the completed panel */
-  #page-analysis .an-group { border:1px solid var(--border); border-radius:10px; margin-bottom:12px; overflow:hidden; }
+  /* grouped "systematic" cards inside the completed panels */
+  #page-analysis .an-group { background:var(--surface); border:1px solid var(--border); border-radius:14px; margin-bottom:14px; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,0.18); transition:transform .15s, box-shadow .15s, border-color .15s; }
   #page-analysis .an-group:last-child { margin-bottom:0; }
-  #page-analysis .an-group-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 12px; background:var(--card); border-bottom:1px solid var(--border); font-size:0.82rem; font-weight:700; }
-  #page-analysis .an-group-head .gc { font-size:0.66rem; color:var(--muted); font-weight:600; background:var(--surface); border:1px solid var(--border); padding:2px 9px; border-radius:99px; white-space:nowrap; }
-  #page-analysis .an-group-body { display:flex; flex-direction:column; gap:6px; padding:10px; }
-  #page-analysis .an-group .an-done { background:var(--surface); }
+  #page-analysis .an-group:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(0,0,0,0.26); border-color:var(--accent); }
+  #page-analysis .an-group-head { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:11px 14px; background:linear-gradient(135deg, var(--accent-dim, rgba(0,200,150,0.12)), transparent); border-bottom:1px solid var(--border); font-size:0.86rem; font-weight:800; letter-spacing:-0.01em; }
+  #page-analysis .an-group-head .gc { font-size:0.66rem; color:var(--accent); font-weight:700; background:var(--accent-dim, rgba(0,200,150,0.12)); border:1px solid rgba(0,200,150,0.3); padding:3px 10px; border-radius:99px; white-space:nowrap; }
+  #page-analysis .an-group-body { display:flex; flex-direction:column; gap:8px; padding:12px; }
+  #page-analysis .an-group .an-done { background:var(--card); border-radius:10px; transition:border-color .12s, transform .12s; }
+  #page-analysis .an-group .an-done:hover { transform:translateX(2px); }
   #page-analysis .an-pills { display:inline-flex; gap:6px; margin-bottom:0.9rem; flex-wrap:wrap; }
   #page-analysis .an-pills button { background:var(--card); border:1px solid var(--border); color:var(--muted); border-radius:99px; padding:6px 13px; font-size:0.76rem; font-weight:600; cursor:pointer; }
   #page-analysis .an-pills button.active { background:var(--accent-dim, rgba(0,200,150,0.12)); border-color:var(--accent); color:var(--accent); }
@@ -168,17 +170,12 @@
     </div>
 
     <div class="an-panel">
-      <h3>📝 Completed Targets <span class="cnt" id="an-targets-count"></span></h3>
-      <div class="an-done-list" id="an-targets-list"></div>
+      <h3>✅ Completed Targets &amp; Videos <span class="cnt" id="an-tv-count"></span></h3>
+      <div class="an-done-list" id="an-tv-list"></div>
     </div>
 
     <div class="an-panel">
-      <h3>🎬 Completed Videos <span class="cnt" id="an-videos-count"></span></h3>
-      <div class="an-done-list" id="an-videos-list"></div>
-    </div>
-
-    <div class="an-panel">
-      <h3>✅ Completed Topics <span class="cnt" id="an-topics-count"></span></h3>
+      <h3>📚 Completed Topics <span class="cnt" id="an-topics-count"></span></h3>
       <div class="an-done-list" id="an-topics-list"></div>
     </div>
 
