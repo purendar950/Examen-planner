@@ -1155,7 +1155,16 @@ function populateTaskSubjectDropdown() {
 
 function toggleTask(dateStr, taskId) {
   const task = (appState.tasks[dateStr]||[]).find(t=>t.id===taskId);
-  if (task) { task.done = !task.done; saveProgress(); buildPlannerCalendar(); }
+  if (task) {
+    task.done = !task.done;
+    /* Keep the Kanban status field in sync with the checkbox. taskStatus()
+       prefers task.status over task.done, so without this a completed task
+       that carries a status (e.g. any auto-rolled-over task has status:'todo')
+       would stay stuck in the "To Do" column and never move to "Completed". */
+    task.status = task.done ? 'done' : 'todo';
+    saveProgress();
+    buildPlannerCalendar();
+  }
 }
 
 function deleteTask(dateStr, taskId) {
