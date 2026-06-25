@@ -24,6 +24,7 @@
   #page-analysis .an-vt.active { background:var(--card); color:var(--accent); }
   #page-analysis .an-label { font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); font-weight:700; margin:1.2rem 0 0.7rem; }
 
+  #page-analysis .an-recent-wrap { margin-top:1.5rem; padding-top:1.2rem; border-top:1px dashed var(--border); }
   #page-analysis .an-recent-row { display:flex; gap:12px; overflow-x:auto; padding-bottom:8px; }
   #page-analysis .an-recent { flex:0 0 158px; cursor:pointer; border-radius:10px; overflow:hidden; border:1px solid var(--border); background:var(--card); transition:transform .15s, border-color .15s; }
   #page-analysis .an-recent:hover { transform:translateY(-3px); border-color:var(--accent); }
@@ -166,10 +167,12 @@
         <button class="an-vt" id="an-vt-grid" onclick="anSetGalleryView('grid')" title="All moments">▦</button>
       </div>
     </div>
-    <div class="an-label">⭐ Recent moments</div>
-    <div class="an-recent-row" id="an-recent"></div>
     <div class="an-crumbs" id="an-breadcrumb"></div>
     <div id="an-gallery-body"></div>
+    <div class="an-recent-wrap" id="an-recent-wrap">
+      <div class="an-label">⭐ Recent moments</div>
+      <div class="an-recent-row" id="an-recent"></div>
+    </div>
   </div>
 
   <!-- SCHEDULED ANALYSIS -->
