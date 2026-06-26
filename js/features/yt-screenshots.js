@@ -156,11 +156,6 @@ function ssCapture() {
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
 
-  // Save the MOMENT (a replayable timestamp) plus a PREVIEW of the screen at
-  // that time. The exact frame can't be read from the cross-origin player, so
-  // we use YouTube's frame thumbnails (hq1/hq2/hq3) closest to the timestamp.
-  // We deliberately avoid hqdefault (the channel cover/title card) so the
-  // preview always shows real video content, never branding.
   var duration = 0;
   try {
     if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration)
@@ -168,6 +163,12 @@ function ssCapture() {
     else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration)
       duration = ytoPlayerV2.getDuration();
   } catch (e) {}
+
+  /* Store ONLY the lightweight YouTube frame URL (~0.3 KB), never the image
+     bytes — the preview is fetched from YouTube's CDN on demand. This keeps a
+     saved moment ~200x smaller than a base64 screenshot, so 10 moments are
+     ~3 KB instead of ~500 KB and syncing stays well within the 1 MB doc limit.
+     We map the timestamp to a real frame (hq1/hq2/hq3), never the cover card. */
   var imageUrl = ssFrameUrl(cleanId, timestamp, duration);
 
   var videoFolder = ssEnsureFolder(ctx);
@@ -879,7 +880,7 @@ function ssInit() {
     toolbar.id = 'ss-toolbar';
     toolbar.className = 'ss-toolbar';
     toolbar.innerHTML = `
-      <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment with thumbnail + timestamp">
+      <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment — a replayable timestamp + preview frame (tiny, no screenshot stored)">
         📸 Save Moment
       </button>
       <button class="ss-gallery-btn" onclick="ssTogglePanel()" title="Open screenshot gallery">
