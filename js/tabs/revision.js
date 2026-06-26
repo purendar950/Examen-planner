@@ -9,6 +9,13 @@ const REVISION_INTERVALS = {
   forgot:  [1, 1, 2, 3, 7, 14]
 };
 const MASTERY_LEVELS = 5;
+/* Soft daily limit on how many revisions are surfaced per day. Overflow is
+   rolled forward to the next day(s) — see getCappedRevisionMap(). The cap is a
+   presentation layer only: real nextRevisionAt dates are never mutated, so the
+   spaced-repetition schedule stays intact and self-heals if a day is skipped. */
+const DAILY_REVISION_CAP = 5;
+/* Queue page toggle: false → show only today's capped set; true → full backlog. */
+let _revShowAllDue = false;
 
 function addDaysISO(d, days) {
   const x = new Date(d);
@@ -147,6 +154,77 @@ function getUpcomingRevisions(daysAhead) {
     .filter(x => x.state.nextRevisionAt && x.state.nextRevisionAt > today && x.state.nextRevisionAt <= limit && !x.state.isMastered);
 }
 
+/* ── Daily revision cap (load balancing) ──────────────────────────────────
+   Build a date → [{ch,state}] schedule from the full active revision pool,
+   placing at most DAILY_REVISION_CAP items per day and rolling the rest
+   forward. Overdue items want "today"; future items want their nextRevisionAt.
+   Ordering within the queue: most-overdue first, then weakest mastery, then a
+   stable id tiebreak. Pass an allowedSubs Set to scope the pool (e.g. a
+   single-subject plan) BEFORE capping. Nothing here writes to appState. */
+function getCappedRevisionMap(allowedSubs) {
+  const today = todayISO();
+  let subs = [];
+  try { subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : (window.SUBJECTS || []); } catch (e) {}
+  const subOf = chId => subs.find(s => s.chapters.some(c => c.id === chId));
+
+  let pool = getAllChapterRefs()
+    .map(({ ch }) => ({ ch, state: getRevisionState(ch.id) }))
+    .filter(x => x.state.nextRevisionAt && !x.state.isMastered);
+
+  if (allowedSubs) {
+    pool = pool.filter(({ ch }) => {
+      const sub = subOf(ch.id) || (ch.subId ? subs.find(s => s.id === ch.subId) : null);
+      /* Keep this subject's revisions; keep task revisions with no subject. */
+      return !sub || allowedSubs.has(sub.id);
+    });
+  }
+
+  /* Desired (earliest) date: overdue → today, otherwise its scheduled date. */
+  pool.forEach(x => { x.desired = x.state.nextRevisionAt < today ? today : x.state.nextRevisionAt; });
+
+  pool.sort((a, b) => {
+    if (a.desired !== b.desired) return a.desired < b.desired ? -1 : 1;
+    if (a.state.nextRevisionAt !== b.state.nextRevisionAt) return a.state.nextRevisionAt < b.state.nextRevisionAt ? -1 : 1;
+    if (a.state.mastery !== b.state.mastery) return a.state.mastery - b.state.mastery;
+    return a.ch.id < b.ch.id ? -1 : (a.ch.id > b.ch.id ? 1 : 0);
+  });
+
+  const map = {};
+  const count = {};
+  pool.forEach(x => {
+    let date = x.desired;
+    /* Spill to the next day until that day is under the cap. */
+    while ((count[date] || 0) >= DAILY_REVISION_CAP) {
+      date = addDaysISO(new Date(date + 'T00:00:00'), 1);
+    }
+    count[date] = (count[date] || 0) + 1;
+    if (!map[date]) map[date] = [];
+    map[date].push(x);
+  });
+  return map;
+}
+
+/* The capped set of revisions to surface for today. */
+function getTodaysRevisions(allowedSubs) {
+  return getCappedRevisionMap(allowedSubs)[todayISO()] || [];
+}
+
+/* Capped revisions assigned to the next `daysAhead` days (excluding today),
+   flattened — reflects the forward-filled overflow, not raw nextRevisionAt. */
+function getCappedUpcoming(daysAhead, allowedSubs) {
+  const today = todayISO();
+  const limit = addDaysISO(new Date(), daysAhead || 7);
+  const map = getCappedRevisionMap(allowedSubs);
+  const out = [];
+  Object.keys(map).forEach(date => {
+    if (date > today && date <= limit) {
+      map[date].forEach(x => out.push({ ...x, scheduledFor: date }));
+    }
+  });
+  out.sort((a, b) => (a.scheduledFor < b.scheduledFor ? -1 : a.scheduledFor > b.scheduledFor ? 1 : 0));
+  return out;
+}
+
 function getMasteredCount() {
   return getAllChapterRefs().filter(({ch}) => {
     const p = appState.progress[ch.id] || {};
@@ -264,28 +342,38 @@ function bumpRevisionStreak() {
 function renderRevisionQueue() {
   const list = document.getElementById('revision-queue-list');
   if (!list) return;
-  const due = getDueRevisions();
-  const week = getUpcomingRevisions(7);
+  const dueAll = getDueRevisions();           // true backlog (overdue + due today)
+  const todays = getTodaysRevisions();         // capped set to actually do today
+  const week = getCappedUpcoming(7);           // capped, forward-filled
   const all = getAllChapterRefs();
   const mastered = all.filter(({ch}) => {
     const p = appState.progress[ch.id] || {};
     return p.done && (p.revisionCount || 0) >= MASTERY_LEVELS;
   });
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setText('rev-page-due', due.length);
+  setText('rev-page-due', todays.length);
   setText('rev-page-week', week.length);
   setText('rev-page-mastered', mastered.length);
   setText('rev-page-streak', appState.revisionStreak || 0);
-  if (!due.length && !week.length && !mastered.length) {
+  if (!dueAll.length && !week.length && !mastered.length) {
     list.innerHTML = '<div class="rev-empty">📚 No chapters completed yet. Finish a chapter in the Syllabus tab — or complete a task in the Planner — to start your revision queue.</div>';
     return;
   }
-  const renderCard = ({ch, state}, kind) => {
+  const renderCard = (x, kind) => {
+    const { ch, state } = x;
     const sub = (typeof getActiveSubjects === 'function') ? getActiveSubjects().find(s => s.chapters.some(c => c.id === ch.id)) : null;
     const subColor = sub ? sub.color : (ch.color || 'var(--accent)');
     const subName = sub ? sub.name : (ch.subName || '');
     const masteryPct = Math.min(100, (state.mastery / MASTERY_LEVELS) * 100);
-    const dueLabel = state.nextRevisionAt === todayISO() ? 'Due today' : (state.nextRevisionAt < todayISO() ? 'Overdue' : 'In ' + daysUntil(state.nextRevisionAt) + ' days');
+    let dueLabel;
+    if (kind === 'upcoming' && x.scheduledFor) {
+      const d = daysUntil(x.scheduledFor);
+      dueLabel = 'In ' + d + ' day' + (d === 1 ? '' : 's');
+      /* An item that's already due but bumped to a later day by the daily cap. */
+      if (state.nextRevisionAt <= todayISO()) dueLabel += ' · rolled over';
+    } else {
+      dueLabel = state.nextRevisionAt === todayISO() ? 'Due today' : (state.nextRevisionAt < todayISO() ? 'Overdue' : 'In ' + daysUntil(state.nextRevisionAt) + ' days');
+    }
     return `<div class="revision-queue-card ${kind}">
       <div style="flex:1;min-width:200px;">
         <div class="revision-queue-name">${escapeHtml(ch.name)}</div>
@@ -302,9 +390,19 @@ function renderRevisionQueue() {
     </div>`;
   };
   let html = '';
-  if (due.length) {
-    html += '<div class="rev-section-title">⏰ Due Now (' + due.length + ')</div>';
-    html += due.map(x => renderCard(x, 'due')).join('');
+  /* ── Due Now: capped to DAILY_REVISION_CAP, overflow revealed on demand ── */
+  const overflow = dueAll.length - todays.length;
+  if (dueAll.length) {
+    if (_revShowAllDue) {
+      html += '<div class="rev-section-title">⏰ Due Now (' + dueAll.length + ' total)</div>';
+      html += dueAll.map(x => renderCard(x, 'due')).join('');
+      html += '<div style="text-align:center;margin:0.4rem 0 0.2rem;"><button onclick="toggleRevisionShowAll()" style="background:none;border:none;color:var(--accent);font-size:0.78rem;cursor:pointer;text-decoration:underline;font-family:inherit;">Show less — focus on ' + DAILY_REVISION_CAP + ' a day</button></div>';
+    } else {
+      html += '<div class="rev-section-title">⏰ Due Now (' + todays.length + (overflow > 0 ? ' of ' + dueAll.length : '') + ')</div>';
+      if (overflow > 0) html += '<div style="font-size:0.76rem;color:var(--muted);margin:-0.4rem 0 0.6rem;">🎯 Today\'s focus — ' + overflow + ' more rolled to the coming days so you\'re not swamped.</div>';
+      html += todays.map(x => renderCard(x, 'due')).join('');
+      if (overflow > 0) html += '<div style="text-align:center;margin:0.4rem 0 0.2rem;"><button onclick="toggleRevisionShowAll()" style="background:none;border:none;color:var(--accent);font-size:0.78rem;cursor:pointer;text-decoration:underline;font-family:inherit;">＋ Revise ' + overflow + ' more now</button></div>';
+    }
   }
   if (week.length) {
     html += '<div class="rev-section-title">📅 Upcoming This Week (' + week.length + ')</div>';
@@ -318,22 +416,33 @@ function renderRevisionQueue() {
   list.innerHTML = html;
 }
 
+/* Toggle between the capped daily view and the full backlog on the queue page. */
+function toggleRevisionShowAll() {
+  _revShowAllDue = !_revShowAllDue;
+  renderRevisionQueue();
+}
+
 function renderRevisionWidget() {
-  const due = getDueRevisions();
-  const week = getUpcomingRevisions(7);
+  const dueAll = getDueRevisions();            // true backlog
+  const todays = getTodaysRevisions();          // capped for today
+  const week = getCappedUpcoming(7);
   const mastered = getMasteredCount();
+  const backlog = dueAll.length - todays.length;
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-  setText('rev-due-count', due.length);
+  setText('rev-due-count', todays.length);
   setText('rev-week-count', week.length);
   setText('rev-mastered-count', mastered);
   const preview = document.getElementById('rev-due-preview');
   if (preview) {
-    if (due.length === 0) {
+    if (todays.length === 0) {
       preview.innerHTML = week.length
-        ? '🎉 Nothing due today! Next revision: <b>' + escapeHtml(week[0].ch.name) + '</b> in <b>' + daysUntil(week[0].state.nextRevisionAt) + ' days</b>'
+        ? '🎉 Nothing due today! Next revision: <b>' + escapeHtml(week[0].ch.name) + '</b> in <b>' + daysUntil(week[0].scheduledFor || week[0].state.nextRevisionAt) + ' days</b>'
         : '🎉 All caught up! No revisions pending.';
     } else {
-      preview.innerHTML = '🔔 ' + due.slice(0, 3).map(x => '<b>' + escapeHtml(x.ch.name) + '</b>').join(', ') + (due.length > 3 ? ' and ' + (due.length - 3) + ' more' : '') + ' — click to revise';
+      preview.innerHTML = '🔔 ' + todays.slice(0, 3).map(x => '<b>' + escapeHtml(x.ch.name) + '</b>').join(', ')
+        + (todays.length > 3 ? ' and ' + (todays.length - 3) + ' more' : '')
+        + ' — today\'s focus'
+        + (backlog > 0 ? ' <span style="color:var(--muted);">(' + backlog + ' rolled forward)</span>' : '');
     }
   }
 }

@@ -541,23 +541,24 @@ function injectRevisionsIntoMap(map, allowedSubs) {
     const today = (typeof todayISO === 'function') ? todayISO() : new Date().toISOString().slice(0,10);
     const subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : [];
     const subOf = chId => subs.find(s => s.chapters.some(c => c.id === chId));
-    const due  = (typeof getDueRevisions === 'function') ? getDueRevisions() : [];
-    const soon = (typeof getUpcomingRevisions === 'function') ? getUpcomingRevisions(30) : [];
-    const seen = new Set();
-    [...due, ...soon].forEach(({ ch, state }) => {
-      if (!ch || !state || !state.nextRevisionAt || seen.has(ch.id)) return;
-      seen.add(ch.id);
-      const sub = subOf(ch.id) || (ch.subId ? subs.find(s => s.id === ch.subId) : null);
-      /* Single-subject scope: drop revisions for any OTHER syllabus subject, but
-         keep task revisions that aren't tied to a scoped subject (sub == null). */
-      if (allowedSubs && sub && !allowedSubs.has(sub.id)) return;
-      /* Overdue revisions surface on today so they aren't buried in the past. */
-      const date = state.nextRevisionAt < today ? today : state.nextRevisionAt;
-      const overdue = state.nextRevisionAt < today;
-      const dueLabel = overdue ? 'overdue' : (date === today ? 'due today' : 'due ' + date);
-      const meta = { ...ch, subName: sub ? sub.name : (ch.subName || ''), color: sub ? sub.color : (ch.color || '#A855F7'), subId: sub ? sub.id : (ch.subId || '') };
-      if (!map[date]) map[date] = [];
-      map[date].push({ type:'revise', fromEngine:true, ch: meta, dueLabel });
+    /* Use the daily-capped schedule so each day shows at most DAILY_REVISION_CAP
+       revisions, with the overflow rolled forward — the planner mirrors exactly
+       what the Revision tab surfaces. Scope (single-subject plans) is applied to
+       the pool BEFORE capping. */
+    const capped = (typeof getCappedRevisionMap === 'function') ? getCappedRevisionMap(allowedSubs) : {};
+    Object.keys(capped).forEach(date => {
+      capped[date].forEach(({ ch, state }) => {
+        if (!ch || !state || !state.nextRevisionAt) return;
+        const sub = subOf(ch.id) || (ch.subId ? subs.find(s => s.id === ch.subId) : null);
+        const overdue = state.nextRevisionAt < today;
+        /* date is where the cap placed it; flag rolled-over backlog clearly. */
+        const dueLabel = date === today
+          ? (overdue ? 'overdue' : 'due today')
+          : ((state.nextRevisionAt <= today) ? 'rolled over' : 'due ' + date);
+        const meta = { ...ch, subName: sub ? sub.name : (ch.subName || ''), color: sub ? sub.color : (ch.color || '#A855F7'), subId: sub ? sub.id : (ch.subId || '') };
+        if (!map[date]) map[date] = [];
+        map[date].push({ type:'revise', fromEngine:true, ch: meta, dueLabel });
+      });
     });
   } catch(e) {}
   return map;
