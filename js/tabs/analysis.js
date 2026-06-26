@@ -331,51 +331,104 @@ function anGroupBox(title, count, innerHtml, open){
   return `<div class="an-group${open?' open':''}"><div class="an-group-head" onclick="this.parentElement.classList.toggle('open')"><span class="an-chev">▶</span><span class="gt">${title}</span><span class="gc">${count}</span></div><div class="an-group-body">${innerHtml}</div></div>`;
 }
 
+/* Progressive disclosure: show the first `max` rows, hide the rest behind a
+   "+ N more" toggle so groups stay short and scannable on mobile. */
+function anDisclose(rows, max){
+  max = max || 3;
+  if (!rows || !rows.length) return '';
+  if (rows.length <= max) return rows.join('');
+  const head = rows.slice(0, max).join('');
+  const rest = rows.slice(max).join('');
+  const n = rows.length - max;
+  return head + '<div class="an-extra">' + rest + '</div>' +
+    '<button class="an-more" onclick="anToggleMore(this, ' + n + ')">+ ' + n + ' more</button>';
+}
+function anToggleMore(btn, n){
+  const g = btn.closest('.an-tlg, .an-group');
+  if (!g) return;
+  const open = g.classList.toggle('show-all');
+  btn.textContent = open ? 'Show less' : ('+ ' + n + ' more');
+}
+
+/* Compact timeline group: a thin collapsible row (title + count badge) that
+   expands to reveal its rows (with progressive disclosure). */
+function anTimelineGroup(title, countLabel, rows, open){
+  return `<div class="an-tlg${open?' open':''}">
+    <div class="an-tlg-head" onclick="this.parentElement.classList.toggle('open')">
+      <span class="an-chev">▶</span>
+      <span class="an-tlg-title">${title}</span>
+      <span class="an-tlg-count">${countLabel}</span>
+    </div>
+    <div class="an-tlg-body">${anDisclose(rows, 3)}</div>
+  </div>`;
+}
+
 function anRenderCompleted(){
   anRenderActivity();
   anRenderTopics();
 }
 
-/* ── ✅ COMPLETED TARGETS & VIDEOS — merged into one box ── */
+/* ── ✅ COMPLETED TARGETS & VIDEOS — date timeline + playlist sections ── */
 function anRenderActivity(){
   const cnt = document.getElementById('an-tv-count');
   const list = document.getElementById('an-tv-list');
   if (!list) return;
 
-  /* targets grouped by date */
+  /* Targets grouped by date (newest first). */
   const tasks = appState.tasks || {}; const start = anRangeStart();
   const dates = Object.keys(tasks).filter(ds => { const d = new Date(ds); return d >= start; }).sort((a,b) => b.localeCompare(a));
-  let tTotal = 0; const cards = [];
+  let tTotal = 0; const dateGroups = [];
   dates.forEach(ds => {
     const done = (tasks[ds] || []).filter(t => t.done);
     if (!done.length) return; tTotal += done.length;
-    cards.push({ title: '📅 ' + anFullDate(ds), count: done.length + ' targets',
-      inner: done.map(t => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(t.text)}</div><div class="di-sub">${anEsc(t.subjectName || anSubjectNameById[t.subject] || t.type || '')}</div></div></div>`).join('') });
+    const rows = done.map(t => `<div class="an-row"><span class="r-tick">✔</span><div class="r-main"><div class="r-title">${anEsc(t.text)}</div><div class="r-sub">${anEsc(t.subjectName || anSubjectNameById[t.subject] || t.type || '')}</div></div></div>`);
+    dateGroups.push({ title: anFullDate(ds), label: done.length + ' target' + (done.length>1?'s':''), rows });
   });
+  const activeDays = dateGroups.length;
 
-  /* videos grouped by course / playlist */
-  const groups = [];
+  /* Videos grouped by course / playlist. */
+  const playGroups = [];
   const lib = anYtoLib();
   Object.values(lib).forEach(pl => {
     if (!pl || !pl.videos) return;
     const w = pl.watched || {};
     const done = pl.videos.filter(v => w[v.id]);
-    if (done.length) groups.push({ title: (pl.type === 'video' ? '🎬 ' : '📁 ') + (pl.title || 'Course'), items: done.map(v => ({ id: v.id, title: v.title || 'Video' })) });
+    if (done.length) playGroups.push({ icon: pl.type === 'video' ? '🎬' : '📁', title: pl.title || 'Course', items: done.map(v => ({ id: v.id, title: v.title || 'Video' })) });
   });
   const org = appState.ytOrganiser || {};
   const orgDone = (org.videos || []).filter(v => v.done);
-  if (orgDone.length) groups.push({ title: '📋 ' + (org.playlistTitle || 'Organiser'), items: orgDone.map(v => ({ id: anYtId(v), title: v.title || 'Video' })) });
+  if (orgDone.length) playGroups.push({ icon:'📋', title: org.playlistTitle || 'Organiser', items: orgDone.map(v => ({ id: anYtId(v), title: v.title || 'Video' })) });
+
   let vTotal = 0;
-  groups.forEach(g => {
+  const playHtml = playGroups.map((g, i) => {
     vTotal += g.items.length;
-    cards.push({ title: anEsc(g.title), count: g.items.length + ' videos',
-      inner: g.items.map(v => `<div class="an-done video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(v.title)}</div><div class="di-sub">${v.id?'▶ Click to play':'YouTube video'}</div></div></div>`).join('') });
+    const rows = g.items.map(v => `<div class="an-row video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="r-tick">${v.id?'▶':'✔'}</span><div class="r-main"><div class="r-title">${anEsc(v.title)}</div><div class="r-sub">${v.id?'Tap to play':'YouTube video'}</div></div></div>`);
+    return anTimelineGroup(g.icon + ' ' + anEsc(g.title), g.items.length + ' video' + (g.items.length>1?'s':''), rows, i === 0);
   });
 
   if (cnt) cnt.textContent = tTotal + ' targets · ' + vTotal + ' videos';
-  list.innerHTML = cards.length
-    ? cards.map((c,i) => anGroupBox(c.title, c.count, c.inner, i === 0)).join('')
-    : `<div class="an-empty"><div class="em">📭</div><div>No completed targets or videos in this range yet.</div></div>`;
+
+  if (!dateGroups.length && !playGroups.length){
+    list.innerHTML = `<div class="an-empty"><div class="em">📭</div><div>No completed targets or videos in this range yet.</div></div>`;
+    return;
+  }
+
+  /* Summary strip first (motivation before details). */
+  let html = `<div class="an-summary">
+    <div class="an-sum"><span class="n">${tTotal}</span><span class="l">targets</span></div>
+    <div class="an-sum"><span class="n">${vTotal}</span><span class="l">videos</span></div>
+    <div class="an-sum"><span class="n">${activeDays}</span><span class="l">active days</span></div>
+  </div>`;
+
+  if (dateGroups.length){
+    html += `<div class="an-tl-title">Recent</div>`;
+    html += dateGroups.map((g, i) => anTimelineGroup('📅 ' + g.title, g.label, g.rows, i === 0)).join('');
+  }
+  if (playHtml.length){
+    html += `<div class="an-tl-title">Playlists</div>`;
+    html += playHtml.join('');
+  }
+  list.innerHTML = html;
 }
 
 /* ── 📚 COMPLETED TOPICS — grouped by subject ── */
@@ -395,7 +448,7 @@ function anRenderTopics(){
   if (cnt) cnt.textContent = totalTopics + ' completed';
   list.innerHTML = totalTopics
     ? subs.map((s,i) => anGroupBox('📚 ' + anEsc(s), bySub[s].length + ' done',
-        bySub[s].map(r => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(r.name)}</div></div>${r.at?`<span class="di-date">${anShortDate(r.at)}</span>`:''}</div>`).join(''), i === 0
+        anDisclose(bySub[s].map(r => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(r.name)}</div></div>${r.at?`<span class="di-date">${anShortDate(r.at)}</span>`:''}</div>`), 3), i === 0
       )).join('')
     : `<div class="an-empty"><div class="em">📘</div><div>No completed topics yet. Mark chapters done in the Syllabus tab.</div></div>`;
 }
