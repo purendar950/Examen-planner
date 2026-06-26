@@ -156,27 +156,10 @@ function ssCapture() {
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
 
-  // YouTube serves frame thumbnails at these URLs (no CORS needed for <img>)
-  // We use the highest quality available
-  var imageUrl = 'https://i.ytimg.com/vi/' + cleanId + '/hqdefault.jpg';
-
-  // Try to get a frame closer to current position
-  var duration = 0;
-  try {
-    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration)
-      duration = ytPlayer.getDuration();
-    else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration)
-      duration = ytoPlayerV2.getDuration();
-  } catch(e) {}
-
-  if (duration > 0 && timestamp > 0) {
-    var pct = timestamp / duration;
-    if (pct >= 0.15 && pct < 0.375) imageUrl = 'https://i.ytimg.com/vi/' + cleanId + '/hq1.jpg';
-    else if (pct >= 0.375 && pct < 0.625) imageUrl = 'https://i.ytimg.com/vi/' + cleanId + '/hq2.jpg';
-    else if (pct >= 0.625) imageUrl = 'https://i.ytimg.com/vi/' + cleanId + '/hq3.jpg';
-  }
-
-  // Save to folder
+  // Save the MOMENT only — a replayable timestamp. We intentionally do NOT
+  // capture/store any screenshot image: YouTube thumbnails were misleading
+  // (only 4 fixed frames) and the exact frame can't be read from the
+  // cross-origin player. Tapping the moment seeks the video to this second.
   var videoFolder = ssEnsureFolder(ctx);
   var num = ssCountType(videoFolder, 'screenshot') + 1;
   var item = {
@@ -185,17 +168,16 @@ function ssCapture() {
     number: num,
     timestamp: timestamp,
     timeLabel: ssFormatTime(timestamp),
-    imageUrl: imageUrl,
     videoId: cleanId,
     videoTitle: ctx.videoName,
     createdAt: Date.now(),
-    label: 'Screenshot_' + num
+    label: 'Moment_' + num
   };
   videoFolder.items.push(item);
   ssSave();
 
-  showToast('📸 Screenshot_' + num + ' saved at ' + ssFormatTime(timestamp) + '!', 'success');
-  ssShowNotify('📸 Screenshot_' + num + ' at ' + ssFormatTime(timestamp) + ' — tap to replay this moment!');
+  showToast('🎯 Moment_' + num + ' saved at ' + ssFormatTime(timestamp) + '!', 'success');
+  ssShowNotify('🎯 Moment_' + num + ' at ' + ssFormatTime(timestamp) + ' — tap to replay this moment!');
   ssRenderGallery();
   ssRenderNotesPage();
   ssUpdateBadge();
@@ -344,7 +326,7 @@ function ssDeleteItem(playlistId, videoId, itemId) {
     if (item.type === 'screenshot') {
       ssNum++;
       item.number = ssNum;
-      item.label = `Screenshot_${ssNum}`;
+      item.label = `Moment_${ssNum}`;
     } else {
       bkNum++;
       item.number = bkNum;
@@ -420,14 +402,20 @@ function ssRenderGallery() {
   if (!container) return;
   const state = ssGetState();
   const folders = state.folders;
-  const keys = Object.keys(folders);
+
+  /* Scope the YouTube-tab panel to the CURRENT playlist/course only. The full
+     cross-playlist view still lives on the Notes page. */
+  const ctx = (typeof ssGetCurrentContext === 'function') ? ssGetCurrentContext() : { playlistId: null };
+  const curPl = ctx.playlistId;
+  const keys = Object.keys(folders).filter(k => k === curPl);
 
   if (!keys.length) {
+    const hasOthers = Object.keys(folders).length > 0;
     container.innerHTML = `
       <div class="ss-empty">
         <div style="font-size:2rem;margin-bottom:8px;">📂</div>
-        <p>No screenshots or bookmarks yet.</p>
-        <p style="font-size:0.72rem;color:var(--muted);margin-top:4px;">Play a video and click 📸 to capture!</p>
+        <p>No moments saved for this video yet.</p>
+        <p style="font-size:0.72rem;color:var(--muted);margin-top:4px;">Play a video and tap 🎯 Save Moment to bookmark a replayable moment.${hasOthers ? '<br>Other saved moments are in the Notes tab.' : ''}</p>
       </div>`;
     return;
   }
@@ -459,33 +447,21 @@ function ssRenderGallery() {
         <div class="ss-folder-children ss-items-list">`;
 
       vf.items.forEach(item => {
-        if (item.type === 'screenshot') {
-          var imgSrc = item.dataUrl || item.imageUrl || '';
-          html += `<div class="ss-item ss-item-screenshot">
-            <div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
-              <img src="${imgSrc}" alt="${escapeHtml(item.label)}" loading="lazy">
-            </div>
-            <div class="ss-item-info">
-              <div class="ss-item-label">🖼️ ${escapeHtml(item.label)}</div>
-              <div class="ss-item-time" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
-            </div>
-            <div class="ss-item-actions">
-              <button onclick="ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
-            </div>
-          </div>`;
-        } else {
-          // Bookmark
-          html += `<div class="ss-item ss-item-bookmark" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
-            <div class="ss-item-info">
-              <div class="ss-item-label">🔖 ${escapeHtml(item.label)}</div>
-              <div class="ss-item-time">⏱ ${item.timeLabel}</div>
-              ${item.note ? `<div class="ss-item-note">${escapeHtml(item.note)}</div>` : ''}
-            </div>
-            <div class="ss-item-actions">
-              <button onclick="event.stopPropagation();ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
-            </div>
-          </div>`;
-        }
+        /* Moments are image-less — just a replayable timestamp. This applies to
+           previously-saved screenshots too (their thumbnails are not shown). */
+        const isBookmark = item.type === 'bookmark';
+        const icon = isBookmark ? '🔖' : '🎯';
+        const timeText = isBookmark ? `⏱ ${item.timeLabel}` : `▶ ${item.timeLabel} — tap to replay`;
+        html += `<div class="ss-item ss-item-bookmark" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
+          <div class="ss-item-info">
+            <div class="ss-item-label">${icon} ${escapeHtml(item.label)}</div>
+            <div class="ss-item-time">${timeText}</div>
+            ${item.note ? `<div class="ss-item-note">${escapeHtml(item.note)}</div>` : ''}
+          </div>
+          <div class="ss-item-actions">
+            <button onclick="event.stopPropagation();ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
+          </div>
+        </div>`;
       });
 
       html += `</div></div>`; // close ss-folder-children + ss-video-group
@@ -738,12 +714,13 @@ function ssRenderNotesTree(container, folderKeys, typeFilter) {
       filteredItems.forEach(item => {
         if (item.type === 'screenshot') {
           var imgSrc2 = item.dataUrl || item.imageUrl || '';
+          var thumb2 = imgSrc2
+            ? `<div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})"><img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy"></div>`
+            : '';
           html += `<div class="ss-item ss-item-screenshot ss-page-item">
-            <div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
-              <img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy">
-            </div>
+            ${thumb2}
             <div class="ss-item-info">
-              <div class="ss-item-label">🖼️ ${escapeHtml(item.label)}</div>
+              <div class="ss-item-label">🎯 ${escapeHtml(item.label)}</div>
               <div class="ss-item-time" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
               <div class="ss-item-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
             </div>
@@ -799,13 +776,14 @@ function ssRenderNotesGrid(container, folderKeys, typeFilter) {
 
   allItems.forEach(item => {
     if (item.type === 'screenshot') {
+      var gImg = item.dataUrl || item.imageUrl || '';
+      var gThumb = gImg
+        ? `<div class="ss-grid-thumb" onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})"><img src="${gImg}" alt="${escapeHtml(item.label)}" loading="lazy"><div class="ss-grid-time-badge">▶ ${item.timeLabel}</div></div>`
+        : `<div class="ss-grid-thumb" onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})" style="display:flex;align-items:center;justify-content:center;background:var(--soft);min-height:84px;position:relative;"><span style="font-size:1.8rem;">🎯</span><div class="ss-grid-time-badge">▶ ${item.timeLabel}</div></div>`;
       html += `<div class="ss-grid-card">
-        <div class="ss-grid-thumb" onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})">
-          <img src="${item.dataUrl || item.imageUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
-          <div class="ss-grid-time-badge">▶ ${item.timeLabel}</div>
-        </div>
+        ${gThumb}
         <div class="ss-grid-info">
-          <div class="ss-grid-label">🖼️ ${escapeHtml(item.label)}</div>
+          <div class="ss-grid-label">🎯 ${escapeHtml(item.label)}</div>
           <div class="ss-grid-video">${escapeHtml(item.videoName)}</div>
           <div class="ss-grid-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
         </div>
