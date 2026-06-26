@@ -156,10 +156,20 @@ function ssCapture() {
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
 
-  // Save the MOMENT only — a replayable timestamp. We intentionally do NOT
-  // capture/store any screenshot image: YouTube thumbnails were misleading
-  // (only 4 fixed frames) and the exact frame can't be read from the
-  // cross-origin player. Tapping the moment seeks the video to this second.
+  // Save the MOMENT (a replayable timestamp) plus a PREVIEW of the screen at
+  // that time. The exact frame can't be read from the cross-origin player, so
+  // we use YouTube's frame thumbnails (hq1/hq2/hq3) closest to the timestamp.
+  // We deliberately avoid hqdefault (the channel cover/title card) so the
+  // preview always shows real video content, never branding.
+  var duration = 0;
+  try {
+    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration)
+      duration = ytPlayer.getDuration();
+    else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration)
+      duration = ytoPlayerV2.getDuration();
+  } catch (e) {}
+  var imageUrl = ssFrameUrl(cleanId, timestamp, duration);
+
   var videoFolder = ssEnsureFolder(ctx);
   var num = ssCountType(videoFolder, 'screenshot') + 1;
   var item = {
@@ -168,6 +178,7 @@ function ssCapture() {
     number: num,
     timestamp: timestamp,
     timeLabel: ssFormatTime(timestamp),
+    imageUrl: imageUrl,
     videoId: cleanId,
     videoTitle: ctx.videoName,
     createdAt: Date.now(),
@@ -181,6 +192,42 @@ function ssCapture() {
   ssRenderGallery();
   ssRenderNotesPage();
   ssUpdateBadge();
+}
+
+/* Pick the YouTube frame-thumbnail closest to a timestamp. YouTube exposes 3
+   real frames per video (~25/50/75% via hq1/hq2/hq3) plus the cover image
+   (hqdefault). We map the timestamp onto hq1/hq2/hq3 and NEVER return the cover
+   so the preview always shows actual video content. Works on mobile (plain
+   <img>, no permissions). The frame is approximate — the exact frame isn't
+   accessible from the cross-origin player. */
+function ssFrameUrl(videoId, timestamp, duration) {
+  var base = 'https://i.ytimg.com/vi/' + videoId + '/';
+  var frame = 'hq2.jpg'; // sensible default (mid-video real frame)
+  if (duration > 0 && timestamp > 0) {
+    var pct = timestamp / duration;
+    if (pct < 0.375) frame = 'hq1.jpg';
+    else if (pct < 0.625) frame = 'hq2.jpg';
+    else frame = 'hq3.jpg';
+  } else if (timestamp > 0 && timestamp < 120) {
+    frame = 'hq1.jpg'; // very start of the video
+  }
+  return base + frame;
+}
+
+/* Resolve the preview image for a saved moment, with safe fallbacks. Upgrades
+   any legacy cover-card (hqdefault) to a real frame so old moments stop showing
+   branding. Used by every render path. */
+function ssPreviewUrl(item) {
+  if (!item) return '';
+  var src = item.dataUrl || item.imageUrl || '';
+  if (src) {
+    // Legacy moments saved with the cover image → swap to a real frame.
+    src = src.replace(/\/(hqdefault|default|mqdefault|sddefault|maxresdefault)\.jpg/, '/hq2.jpg');
+    return src;
+  }
+  // Moment saved without any image (moment-only era) → derive from videoId.
+  if (item.videoId) return 'https://i.ytimg.com/vi/' + item.videoId + '/hq2.jpg';
+  return '';
 }
 
 
@@ -447,12 +494,17 @@ function ssRenderGallery() {
         <div class="ss-folder-children ss-items-list">`;
 
       vf.items.forEach(item => {
-        /* Moments are image-less — just a replayable timestamp. This applies to
-           previously-saved screenshots too (their thumbnails are not shown). */
+        /* Moments show a preview of the screen at that time (YouTube frame).
+           Bookmarks stay image-less (pure timestamp notes). */
         const isBookmark = item.type === 'bookmark';
         const icon = isBookmark ? '🔖' : '🎯';
         const timeText = isBookmark ? `⏱ ${item.timeLabel}` : `▶ ${item.timeLabel} — tap to replay`;
-        html += `<div class="ss-item ss-item-bookmark" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
+        const previewUrl = isBookmark ? '' : ssPreviewUrl(item);
+        const thumb = previewUrl
+          ? `<div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})"><img src="${previewUrl}" alt="${escapeHtml(item.label)}" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${item.videoId||''}/hqdefault.jpg';"></div>`
+          : '';
+        html += `<div class="ss-item ${isBookmark ? 'ss-item-bookmark' : 'ss-item-screenshot'}" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
+          ${thumb}
           <div class="ss-item-info">
             <div class="ss-item-label">${icon} ${escapeHtml(item.label)}</div>
             <div class="ss-item-time">${timeText}</div>
@@ -713,9 +765,9 @@ function ssRenderNotesTree(container, folderKeys, typeFilter) {
 
       filteredItems.forEach(item => {
         if (item.type === 'screenshot') {
-          var imgSrc2 = item.dataUrl || item.imageUrl || '';
+          var imgSrc2 = ssPreviewUrl(item);
           var thumb2 = imgSrc2
-            ? `<div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})"><img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy"></div>`
+            ? `<div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})"><img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${item.videoId||''}/hqdefault.jpg';"></div>`
             : '';
           html += `<div class="ss-item ss-item-screenshot ss-page-item">
             ${thumb2}
@@ -776,9 +828,9 @@ function ssRenderNotesGrid(container, folderKeys, typeFilter) {
 
   allItems.forEach(item => {
     if (item.type === 'screenshot') {
-      var gImg = item.dataUrl || item.imageUrl || '';
+      var gImg = ssPreviewUrl(item);
       var gThumb = gImg
-        ? `<div class="ss-grid-thumb" onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})"><img src="${gImg}" alt="${escapeHtml(item.label)}" loading="lazy"><div class="ss-grid-time-badge">▶ ${item.timeLabel}</div></div>`
+        ? `<div class="ss-grid-thumb" onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})"><img src="${gImg}" alt="${escapeHtml(item.label)}" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${item.videoId||''}/hqdefault.jpg';"><div class="ss-grid-time-badge">▶ ${item.timeLabel}</div></div>`
         : `<div class="ss-grid-thumb" onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})" style="display:flex;align-items:center;justify-content:center;background:var(--soft);min-height:84px;position:relative;"><span style="font-size:1.8rem;">🎯</span><div class="ss-grid-time-badge">▶ ${item.timeLabel}</div></div>`;
       html += `<div class="ss-grid-card">
         ${gThumb}
