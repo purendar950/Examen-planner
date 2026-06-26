@@ -2,10 +2,11 @@
 # The site is served from the `public/` directory.
 pages:
   stage: deploy
-  image: alpine:latest
+  image: node:20-alpine
   script:
-    - mkdir -p public
-    - cp *.html public/
+    - npm ci
+    - npm run build
+    - mv dist public
   artifacts:
     paths:
       - public

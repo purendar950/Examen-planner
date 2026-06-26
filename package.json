@@ -1,0 +1,15 @@
+{
+  "name": "preppath-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PrepPath web app with Vite-powered frontend migration scaffolding.",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "check": "node --check js/core/persistence.js && node --check vite.config.mjs"
+  },
+  "devDependencies": {
+    "vite": "^8.1.0"
+  }
+}
