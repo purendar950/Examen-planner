@@ -22,6 +22,7 @@ let appState = {
   tasks: {},
   examDate: '2026-07-14',
   selectedExam: 'cgl',   // last exam the user switched to (restored on reload)
+  activePage: 'dashboard', // last tab/page the user opened (restored on reload)
   examDates: {},         // per-exam saved dates: { examId: 'YYYY-MM-DD' }
   streak: 0,
   lastStudyDate: null,

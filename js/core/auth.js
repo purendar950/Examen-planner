@@ -131,7 +131,7 @@ async function handleForgotPassword() {
 function getDefaultState() {
   return {
     progress: {}, tasks: {},
-    examDate: '2026-07-14', selectedExam: 'cgl', examDates: {}, streak: 0,
+    examDate: '2026-07-14', selectedExam: 'cgl', activePage: 'dashboard', examDates: {}, streak: 0,
     lastStudyDate: null, ytLinks: {}, ytNotes: [],
     ytLastVideo: null, ytPlaylists: {}, ytWatched: {},
     ytOrganiser: null, ytoLibrary: {}, ytVidProgress: {},
@@ -161,6 +161,7 @@ function loginUser(email, name, uid, state) {
   if (!appState.plans)     appState.plans      = [];
   if (!appState.recurringTasks) appState.recurringTasks = [];
   if (!appState.habitsLog) appState.habitsLog = {};
+  if (!appState.activePage) appState.activePage = 'dashboard';
   if (typeof appState.activePlanId === 'undefined') appState.activePlanId = null;
   /* Hydrate the active plan marker from persisted state */
   if (appState.activePlanId && appState.plans.some(p => p.id === appState.activePlanId)) {
