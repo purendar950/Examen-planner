@@ -262,6 +262,71 @@ function ssSeekTo(seconds) {
 }
 
 /* ══════════════════════════════════════════════════════════════
+   OPEN A SAVED MOMENT — video-aware
+
+   Clicking a moment must replay it in the video it was captured from,
+   NOT whatever video happens to be loaded. If the target video is already
+   playing we just seek; otherwise we load the correct video (organiser course
+   or single video) and seek to the timestamp once it's ready.
+══════════════════════════════════════════════════════════════ */
+function ssOpenMoment(plId, vId, seconds) {
+  seconds = parseInt(seconds, 10) || 0;
+  var targetVid = String(vId || '').replace('playlist_', '');
+  if (!targetVid || targetVid === 'unknown') { ssSeekTo(seconds); return; }
+
+  var curVid = (typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId)
+    ? String(ytCurrentVideoId).replace('playlist_', '') : '';
+
+  /* Same video already loaded → simple seek. */
+  if (targetVid === curVid) { ssSeekTo(seconds); return; }
+
+  /* Load the correct video first. */
+  try {
+    var lib = (typeof ytoLib === 'function') ? ytoLib() : null;
+    var isOrganiserCourse = lib && lib[plId] && (lib[plId].videos || []).some(function(v){ return v.id === targetVid; });
+    if (isOrganiserCourse && typeof ytoPlayInYtTab === 'function') {
+      ytoPlayInYtTab(plId, targetVid);
+    } else {
+      if (typeof switchPage === 'function') switchPage('youtube');
+      var title = 'Video';
+      try {
+        var vf = ssGetState().folders[plId] && ssGetState().folders[plId].videos[vId];
+        if (vf && vf.name && vf.name !== 'Unknown Video') title = vf.name;
+      } catch(e) {}
+      if (typeof ytLoadInTab === 'function') {
+        ytLoadInTab('video', targetVid, 'https://www.youtube.com/watch?v=' + targetVid, title);
+      }
+    }
+  } catch(e) {}
+
+  /* Close the slide-in gallery so the player is visible, then seek when ready. */
+  if (ssPanelOpen) ssTogglePanel();
+  ssSeekWhenReady(targetVid, seconds, 0);
+}
+
+/* Poll until the requested video is actually the one loaded in the player,
+   then seek. Guards against seeking the previously-playing video. */
+function ssSeekWhenReady(videoId, seconds, attempts) {
+  attempts = attempts || 0;
+  if (attempts > 50) return; // give up after ~10s
+  try {
+    var player = (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.seekTo) ? ytPlayer
+               : ((typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.seekTo) ? ytoPlayerV2 : null);
+    if (player) {
+      var loadedId = '';
+      try { loadedId = (player.getVideoData && player.getVideoData().video_id) || ''; } catch(e) {}
+      if (loadedId === videoId) {
+        player.seekTo(seconds, true);
+        try { player.playVideo(); } catch(e) {}
+        showToast('⏩ Jumped to ' + ssFormatTime(seconds), 'info');
+        return;
+      }
+    }
+  } catch(e) {}
+  setTimeout(function() { ssSeekWhenReady(videoId, seconds, attempts + 1); }, 200);
+}
+
+/* ══════════════════════════════════════════════════════════════
    DELETE ITEM
 ══════════════════════════════════════════════════════════════ */
 
@@ -397,12 +462,12 @@ function ssRenderGallery() {
         if (item.type === 'screenshot') {
           var imgSrc = item.dataUrl || item.imageUrl || '';
           html += `<div class="ss-item ss-item-screenshot">
-            <div class="ss-item-thumb" onclick="ssSeekTo(${item.timestamp})">
+            <div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
               <img src="${imgSrc}" alt="${escapeHtml(item.label)}" loading="lazy">
             </div>
             <div class="ss-item-info">
               <div class="ss-item-label">🖼️ ${escapeHtml(item.label)}</div>
-              <div class="ss-item-time" onclick="ssSeekTo(${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
+              <div class="ss-item-time" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
             </div>
             <div class="ss-item-actions">
               <button onclick="ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
@@ -410,7 +475,7 @@ function ssRenderGallery() {
           </div>`;
         } else {
           // Bookmark
-          html += `<div class="ss-item ss-item-bookmark" onclick="ssSeekTo(${item.timestamp})">
+          html += `<div class="ss-item ss-item-bookmark" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
             <div class="ss-item-info">
               <div class="ss-item-label">🔖 ${escapeHtml(item.label)}</div>
               <div class="ss-item-time">⏱ ${item.timeLabel}</div>
@@ -674,12 +739,12 @@ function ssRenderNotesTree(container, folderKeys, typeFilter) {
         if (item.type === 'screenshot') {
           var imgSrc2 = item.dataUrl || item.imageUrl || '';
           html += `<div class="ss-item ss-item-screenshot ss-page-item">
-            <div class="ss-item-thumb" onclick="ssSeekTo(${item.timestamp})">
+            <div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
               <img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy">
             </div>
             <div class="ss-item-info">
               <div class="ss-item-label">🖼️ ${escapeHtml(item.label)}</div>
-              <div class="ss-item-time" onclick="ssSeekTo(${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
+              <div class="ss-item-time" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
               <div class="ss-item-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
             </div>
             <div class="ss-item-actions">
@@ -687,7 +752,7 @@ function ssRenderNotesTree(container, folderKeys, typeFilter) {
             </div>
           </div>`;
         } else {
-          html += `<div class="ss-item ss-item-bookmark ss-page-item" onclick="ssSeekTo(${item.timestamp})">
+          html += `<div class="ss-item ss-item-bookmark ss-page-item" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
             <div class="ss-item-info">
               <div class="ss-item-label">🔖 ${escapeHtml(item.label)}</div>
               <div class="ss-item-time">⏱ ${item.timeLabel}</div>
@@ -735,7 +800,7 @@ function ssRenderNotesGrid(container, folderKeys, typeFilter) {
   allItems.forEach(item => {
     if (item.type === 'screenshot') {
       html += `<div class="ss-grid-card">
-        <div class="ss-grid-thumb" onclick="ssSeekTo(${item.timestamp})">
+        <div class="ss-grid-thumb" onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})">
           <img src="${item.dataUrl || item.imageUrl}" alt="${escapeHtml(item.label)}" loading="lazy">
           <div class="ss-grid-time-badge">▶ ${item.timeLabel}</div>
         </div>
@@ -745,12 +810,12 @@ function ssRenderNotesGrid(container, folderKeys, typeFilter) {
           <div class="ss-grid-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
         </div>
         <div class="ss-grid-actions">
-          <button onclick="ssSeekTo(${item.timestamp})" title="Replay">▶</button>
+          <button onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})" title="Replay">▶</button>
           <button onclick="ssDeleteItem('${item.plId}','${item.vId}','${item.id}')" title="Delete">🗑</button>
         </div>
       </div>`;
     } else {
-      html += `<div class="ss-grid-card ss-grid-bookmark" onclick="ssSeekTo(${item.timestamp})">
+      html += `<div class="ss-grid-card ss-grid-bookmark" onclick="ssOpenMoment('${item.plId}','${item.vId}',${item.timestamp})">
         <div class="ss-grid-bk-icon">🔖</div>
         <div class="ss-grid-info">
           <div class="ss-grid-label">${escapeHtml(item.label)}</div>
