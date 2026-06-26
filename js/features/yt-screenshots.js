@@ -130,6 +130,44 @@ function ssCountType(videoFolder, type) {
 ══════════════════════════════════════════════════════════════ */
 
 function ssCapture() {
+  return ssCaptureAsync();
+}
+
+/* Real screen capture via the browser's built-in Screen Capture API. The user
+   picks a tab/window/screen and the browser shows a permission prompt (required
+   — silent capture is impossible). This bypasses the cross-origin video-pixel
+   block because it captures at the screen level. HTTPS/localhost only; desktop
+   mainly (mobile support is limited). Returns a compact JPEG dataURL, or null
+   if unavailable/denied/cancelled. The frame is downscaled + compressed so it
+   stays small enough to sync into the Firestore user-doc (1 MB limit). */
+async function captureScreenShot() {
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return null;
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    const video = document.createElement('video');
+    video.srcObject = stream;
+    await new Promise(resolve => { video.onloadedmetadata = resolve; });
+    await video.play();
+
+    const vw = video.videoWidth || 1280;
+    const vh = video.videoHeight || 720;
+    const maxW = 640;                          // cap width to keep the image small
+    const scale = Math.min(1, maxW / vw);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vw * scale);
+    canvas.height = Math.round(vh * scale);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+
+    stream.getTracks().forEach(track => track.stop());
+    return dataUrl;
+  } catch (error) {
+    console.log('Screen capture cancelled or failed:', error);
+    return null;
+  }
+}
+
+async function ssCaptureAsync() {
   var ctx = ssGetCurrentContext();
   if (ctx.videoId === 'unknown') {
     showToast('Pehle ek video play karo!', 'error');
@@ -156,11 +194,6 @@ function ssCapture() {
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
 
-  // Save the MOMENT (a replayable timestamp) plus a PREVIEW of the screen at
-  // that time. The exact frame can't be read from the cross-origin player, so
-  // we use YouTube's frame thumbnails (hq1/hq2/hq3) closest to the timestamp.
-  // We deliberately avoid hqdefault (the channel cover/title card) so the
-  // preview always shows real video content, never branding.
   var duration = 0;
   try {
     if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration)
@@ -168,7 +201,13 @@ function ssCapture() {
     else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration)
       duration = ytoPlayerV2.getDuration();
   } catch (e) {}
+
+  /* The YouTube frame is a lightweight fallback preview (a small URL). If the
+     user grants screen capture we ALSO store the real frame as a dataUrl, which
+     the renderers prefer. We never put the big base64 into imageUrl, so storage
+     stays lean even when a capture exists. */
   var imageUrl = ssFrameUrl(cleanId, timestamp, duration);
+  var actualImage = await captureScreenShot();
 
   var videoFolder = ssEnsureFolder(ctx);
   var num = ssCountType(videoFolder, 'screenshot') + 1;
@@ -179,15 +218,18 @@ function ssCapture() {
     timestamp: timestamp,
     timeLabel: ssFormatTime(timestamp),
     imageUrl: imageUrl,
+    captureType: actualImage ? 'actual-screen' : 'youtube-preview',
     videoId: cleanId,
     videoTitle: ctx.videoName,
     createdAt: Date.now(),
     label: 'Moment_' + num
   };
+  if (actualImage) item.dataUrl = actualImage;
   videoFolder.items.push(item);
   ssSave();
 
-  showToast('🎯 Moment_' + num + ' saved at ' + ssFormatTime(timestamp) + '!', 'success');
+  var savedMsg = actualImage ? 'Moment saved with screen capture 📸' : 'Moment saved with preview image';
+  showToast('🎯 Moment_' + num + ' — ' + savedMsg + ' (' + ssFormatTime(timestamp) + ')', 'success');
   ssShowNotify('🎯 Moment_' + num + ' at ' + ssFormatTime(timestamp) + ' — tap to replay this moment!');
   ssRenderGallery();
   ssRenderNotesPage();
@@ -879,7 +921,7 @@ function ssInit() {
     toolbar.id = 'ss-toolbar';
     toolbar.className = 'ss-toolbar';
     toolbar.innerHTML = `
-      <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment with thumbnail + timestamp">
+      <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment — captures the screen (asks permission once); falls back to a preview frame if denied/unsupported">
         📸 Save Moment
       </button>
       <button class="ss-gallery-btn" onclick="ssTogglePanel()" title="Open screenshot gallery">
