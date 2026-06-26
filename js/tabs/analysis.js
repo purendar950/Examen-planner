@@ -438,7 +438,7 @@ function anRenderTopics(){
   if (!list) return;
   const prog = appState.progress || {};
   const bySub = {};
-  Object.keys(prog).filter(id => prog[id] && prog[id].done).forEach(id => {
+  Object.keys(prog).filter(id => prog[id] && prog[id].done && id.indexOf('task:') !== 0).forEach(id => {
     const c = anChapterById[id];
     const sub = (c && c.subjectName) || 'Other';
     (bySub[sub] = bySub[sub] || []).push({ name: c ? c.name : id, at: prog[id].completedAt || '' });
