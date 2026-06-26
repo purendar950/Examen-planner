@@ -45,7 +45,91 @@ function getAllChapterRefs() {
     const subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : (window.SUBJECTS || []);
     subs.forEach(sub => sub.chapters.forEach(ch => out.push({ ch, sub })));
   } catch(e) {}
+  /* Manually-added + Telegram-bot tasks live in a separate store
+     (appState.tasks) and have no syllabus chapter id. Surface every COMPLETED
+     task as a virtual chapter so it flows through the same revision engine. */
+  try { getTaskChapterRefs().forEach(r => out.push(r)); } catch(e) {}
   return out;
+}
+
+/* ── Tasks ⇄ revision bridge ─────────────────────────────────────────────
+   Manual tasks (addTask) and Telegram tasks (drainTelegramInbox) are stored in
+   appState.tasks[date] as free-text objects with no chapter id and no
+   appState.progress entry, so they never entered the spaced-repetition queue.
+   We treat each completed task as a "virtual chapter" keyed `task:<taskId>`
+   inside appState.progress, reusing the entire existing revision pipeline. */
+function taskRevisionId(taskId) { return 'task:' + taskId; }
+
+/* Build virtual-chapter refs for every completed task. Lazily seeds an initial
+   revision schedule (in-memory) for any completed task that has none yet, so it
+   shows up even if it was completed before this feature existed. */
+function getTaskChapterRefs() {
+  const out = [];
+  const seen = new Set();
+  try {
+    const tasks = appState.tasks || {};
+    const subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : (window.SUBJECTS || []);
+    Object.keys(tasks).forEach(date => {
+      (tasks[date] || []).forEach(t => {
+        if (!t || !t.id) return;
+        const isDone = t.done || t.status === 'done';
+        if (!isDone) return;
+        const chId = taskRevisionId(t.id);
+        if (seen.has(chId)) return;
+        seen.add(chId);
+        let p = appState.progress[chId];
+        if (!p) p = appState.progress[chId] = {};
+        if (!p.done) p.done = true;
+        if (!p.completedAt) p.completedAt = t.completedAt || new Date().toISOString();
+        if (!p.nextRevisionAt && typeof addDaysISO === 'function') {
+          p.nextRevisionAt = addDaysISO(new Date(), 1);
+        }
+        const sub = t.subject ? subs.find(s => s.id === t.subject) : null;
+        const subName = sub ? sub.name : (t.fromTelegram ? 'Telegram Task' : 'My Tasks');
+        const color = sub ? sub.color : '#A855F7';
+        const ch = {
+          id: chId,
+          name: t.text || 'Task',
+          isTask: true,
+          subId: sub ? sub.id : '',
+          subName,
+          color
+        };
+        const subObj = sub || { id: '', name: subName, color, chapters: [] };
+        out.push({ ch, sub: subObj });
+      });
+    });
+  } catch (e) {}
+  return out;
+}
+
+/* Seed (on completion) or clear (on un-completion) a task's revision record.
+   Called from the task completion paths so the schedule persists across reloads.
+   Revision history is preserved if the task is later un-completed and re-done. */
+function syncTaskRevision(task) {
+  if (!task || !task.id) return;
+  const chId = taskRevisionId(task.id);
+  const isDone = task.done || task.status === 'done';
+  if (isDone) {
+    const p = appState.progress[chId] || (appState.progress[chId] = {});
+    p.done = true;
+    if (!p.completedAt) p.completedAt = new Date().toISOString();
+    if (!p.nextRevisionAt && typeof addDaysISO === 'function') {
+      p.nextRevisionAt = addDaysISO(new Date(), 1);
+    }
+  } else {
+    const p = appState.progress[chId];
+    if (p && !(p.revisionCount > 0)) delete appState.progress[chId];
+    else if (p) { p.done = false; }
+  }
+}
+
+/* Drop a deleted task's revision record so it doesn't linger in storage. */
+function removeTaskRevision(taskId) {
+  if (!taskId) return;
+  const chId = taskRevisionId(taskId);
+  const p = appState.progress[chId];
+  if (p && !(p.revisionCount > 0)) delete appState.progress[chId];
 }
 
 function getDueRevisions() {
@@ -193,13 +277,13 @@ function renderRevisionQueue() {
   setText('rev-page-mastered', mastered.length);
   setText('rev-page-streak', appState.revisionStreak || 0);
   if (!due.length && !week.length && !mastered.length) {
-    list.innerHTML = '<div class="rev-empty">📚 No chapters completed yet. Finish a chapter in the Syllabus tab to start your revision queue.</div>';
+    list.innerHTML = '<div class="rev-empty">📚 No chapters completed yet. Finish a chapter in the Syllabus tab — or complete a task in the Planner — to start your revision queue.</div>';
     return;
   }
   const renderCard = ({ch, state}, kind) => {
     const sub = (typeof getActiveSubjects === 'function') ? getActiveSubjects().find(s => s.chapters.some(c => c.id === ch.id)) : null;
-    const subColor = sub ? sub.color : 'var(--accent)';
-    const subName = sub ? sub.name : '';
+    const subColor = sub ? sub.color : (ch.color || 'var(--accent)');
+    const subName = sub ? sub.name : (ch.subName || '');
     const masteryPct = Math.min(100, (state.mastery / MASTERY_LEVELS) * 100);
     const dueLabel = state.nextRevisionAt === todayISO() ? 'Due today' : (state.nextRevisionAt < todayISO() ? 'Overdue' : 'In ' + daysUntil(state.nextRevisionAt) + ' days');
     return `<div class="revision-queue-card ${kind}">
