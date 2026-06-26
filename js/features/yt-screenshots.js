@@ -133,7 +133,7 @@ function ssCapture() {
   var ctx = ssGetCurrentContext();
   if (ctx.videoId === 'unknown') {
     showToast('Pehle ek video play karo!', 'error');
-    return;
+    return false;
   }
 
   // Free user limit: max 10 moments
@@ -149,12 +149,12 @@ function ssCapture() {
   var isPro = (typeof ezIsPro === 'function') ? ezIsPro() : false;
   if (!isPro && totalMoments >= FREE_MOMENT_LIMIT) {
     showToast('⚠️ Free limit reached! (' + FREE_MOMENT_LIMIT + ' moments). Upgrade to Pro for unlimited.', 'error');
-    return;
+    return false;
   }
 
   var timestamp = ssGetVideoTimestamp();
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
-  if (!cleanId) { showToast('Video ID not found!', 'error'); return; }
+  if (!cleanId) { showToast('Video ID not found!', 'error'); return false; }
 
   var duration = 0;
   try {
@@ -193,7 +193,92 @@ function ssCapture() {
   ssRenderGallery();
   ssRenderNotesPage();
   ssUpdateBadge();
+  return true;
 }
+
+/* ══════════════════════════════════════════════════════════════
+   FULLSCREEN FLOATING "SAVE MOMENT" BUTTON
+   ─────────────────────────────────────────────────────────────
+   A YouTube cross-origin iframe in *native* fullscreen renders only
+   itself — we can't overlay our own button on it. So we provide a
+   custom fullscreen that makes OUR player wrapper fill the screen,
+   keeping the floating Save Moment button on top. The video keeps
+   playing in the same iframe, so timestamps are still captured.
+
+   We use a CSS "fill the viewport" technique as the reliable base
+   (works on every browser incl. iOS, where the Fullscreen API does
+   not support non-video elements) and also request native fullscreen
+   when available for a fully immersive experience.
+══════════════════════════════════════════════════════════════ */
+
+var ssFsActive = false;
+
+function ssToggleFullscreen() {
+  var wrap = document.getElementById('yt-player-wrap');
+  if (!wrap) return;
+  if (ssFsActive) { ssExitFullscreen(); return; }
+
+  ssFsActive = true;
+  wrap.classList.add('ss-fs-active');
+  document.body.classList.add('ss-fs-lock');
+  ssSetFsToggleIcon(true);
+
+  // Try native fullscreen for an immersive view (ignored gracefully if unsupported)
+  try {
+    var req = wrap.requestFullscreen || wrap.webkitRequestFullscreen || wrap.msRequestFullscreen;
+    if (req) { var p = req.call(wrap); if (p && p.catch) p.catch(function(){}); }
+  } catch (e) {}
+
+  // Best-effort landscape lock on mobile
+  try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(function(){}); } catch (e) {}
+}
+
+function ssExitFullscreen() {
+  var wrap = document.getElementById('yt-player-wrap');
+  ssFsActive = false;
+  if (wrap) wrap.classList.remove('ss-fs-active');
+  document.body.classList.remove('ss-fs-lock');
+  ssSetFsToggleIcon(false);
+  try {
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      var exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+      if (exit) { var p = exit.call(document); if (p && p.catch) p.catch(function(){}); }
+    }
+  } catch (e) {}
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {}
+}
+
+function ssSetFsToggleIcon(active) {
+  var btn = document.getElementById('ss-fs-toggle');
+  if (btn) { btn.innerHTML = active ? '✕' : '⛶'; btn.title = active ? 'Exit fullscreen' : 'Fullscreen (with Save Moment)'; }
+}
+
+/* Floating Save Moment button handler — captures the moment and gives an
+   in-player confirmation (toasts/banners live outside the fullscreen element
+   and would be invisible during native fullscreen). */
+function ssFsSave() {
+  var ok = ssCapture();
+  if (ok) ssFsFlash('✅ Moment saved');
+}
+
+function ssFsFlash(text) {
+  var flash = document.getElementById('ss-fs-flash');
+  if (!flash) return;
+  flash.textContent = text || '✅ Saved';
+  flash.classList.add('show');
+  clearTimeout(ssFsFlash._t);
+  ssFsFlash._t = setTimeout(function () { flash.classList.remove('show'); }, 1300);
+}
+
+// Keep our state in sync if the user exits native fullscreen via ESC / back gesture.
+document.addEventListener('fullscreenchange', ssSyncFullscreen);
+document.addEventListener('webkitfullscreenchange', ssSyncFullscreen);
+function ssSyncFullscreen() {
+  var inNative = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  // Only react when leaving native FS while our overlay thinks it's active.
+  if (!inNative && ssFsActive) ssExitFullscreen();
+}
+
 
 /* Pick the YouTube frame-thumbnail closest to a timestamp. YouTube exposes 3
    real frames per video (~25/50/75% via hq1/hq2/hq3) plus the cover image
@@ -888,6 +973,33 @@ function ssInit() {
       </button>
     `;
     speedBar.insertAdjacentElement('afterend', toolbar);
+  }
+
+  // Inject the in-player floating controls: a custom fullscreen toggle and a
+  // floating "Save Moment" button that stays visible while fullscreen.
+  const playerWrap = document.getElementById('yt-player-wrap');
+  if (playerWrap && !document.getElementById('ss-fs-toggle')) {
+    const fsToggle = document.createElement('button');
+    fsToggle.id = 'ss-fs-toggle';
+    fsToggle.className = 'ss-fs-toggle';
+    fsToggle.title = 'Fullscreen (with Save Moment)';
+    fsToggle.innerHTML = '⛶';
+    fsToggle.onclick = ssToggleFullscreen;
+
+    const fsSave = document.createElement('button');
+    fsSave.id = 'ss-fs-save';
+    fsSave.className = 'ss-fs-save';
+    fsSave.title = 'Save this moment';
+    fsSave.innerHTML = '🎯 Save Moment';
+    fsSave.onclick = ssFsSave;
+
+    const fsFlash = document.createElement('div');
+    fsFlash.id = 'ss-fs-flash';
+    fsFlash.className = 'ss-fs-flash';
+
+    playerWrap.appendChild(fsToggle);
+    playerWrap.appendChild(fsSave);
+    playerWrap.appendChild(fsFlash);
   }
 
   // Inject the gallery side-panel (right side, slides in)
