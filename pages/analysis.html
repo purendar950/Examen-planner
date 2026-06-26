@@ -138,6 +138,43 @@
   #page-analysis .an-group-body { display:none; flex-direction:column; gap:6px; padding:10px; border-top:1px solid var(--border); }
   #page-analysis .an-group.open > .an-group-body { display:flex; }
   #page-analysis .an-group .an-done { background:var(--card); border-radius:9px; }
+
+  /* ── Completed Targets & Videos: timeline redesign ── */
+  #page-analysis #an-tv-list { display:block; }   /* override the grid → single-column timeline */
+  #page-analysis .an-summary { display:flex; gap:10px; margin-bottom:14px; }
+  #page-analysis .an-summary .an-sum { flex:1; background:var(--card); border:1px solid var(--border); border-radius:10px; padding:9px 6px; text-align:center; }
+  #page-analysis .an-summary .an-sum .n { display:block; font-size:1.18rem; font-weight:800; color:var(--text); line-height:1.1; }
+  #page-analysis .an-summary .an-sum .l { font-size:0.62rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; }
+  #page-analysis .an-tl-title { font-size:0.66rem; font-weight:700; text-transform:uppercase; letter-spacing:0.07em; color:var(--muted); margin:15px 2px 7px; }
+  #page-analysis .an-tlg { border:1px solid var(--border); border-radius:10px; margin-bottom:8px; background:var(--surface); box-shadow:0 3px 10px rgba(15,23,42,0.05); transition:border-color .15s, box-shadow .15s; overflow:hidden; }
+  #page-analysis .an-tlg-head { display:flex; align-items:center; gap:10px; min-height:46px; padding:0 12px; cursor:pointer; user-select:none; }
+  #page-analysis .an-tlg-head:hover { background:rgba(0,200,150,0.04); }
+  #page-analysis .an-tlg-title { flex:1; font-size:0.86rem; font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #page-analysis .an-tlg-count { font-size:0.66rem; font-weight:700; color:var(--muted); background:var(--card); border:1px solid var(--border); padding:2px 9px; border-radius:99px; white-space:nowrap; flex-shrink:0; }
+  #page-analysis .an-tlg .an-chev { color:var(--muted); font-size:0.62rem; width:10px; flex-shrink:0; transition:transform .2s; }
+  #page-analysis .an-tlg.open { border-color:rgba(0,200,150,0.42); box-shadow:0 4px 14px rgba(0,200,150,0.10); }
+  #page-analysis .an-tlg.open > .an-tlg-head .an-chev { transform:rotate(90deg); }
+  #page-analysis .an-tlg.open > .an-tlg-head .an-tlg-count { color:var(--accent); background:var(--accent-dim, rgba(0,200,150,0.12)); border-color:rgba(0,200,150,0.3); }
+  #page-analysis .an-tlg-body { display:none; flex-direction:column; gap:5px; padding:8px 10px 10px; border-top:1px solid var(--border); }
+  #page-analysis .an-tlg.open > .an-tlg-body { display:flex; }
+  #page-analysis .an-row { display:flex; align-items:flex-start; gap:9px; padding:6px 8px; border-radius:8px; }
+  #page-analysis .an-row .r-tick { color:var(--accent); font-size:0.78rem; flex-shrink:0; margin-top:1px; }
+  #page-analysis .an-row .r-main { flex:1; min-width:0; }
+  #page-analysis .an-row .r-title { font-size:0.82rem; font-weight:600; color:var(--text); line-height:1.3; }
+  #page-analysis .an-row .r-sub { font-size:0.67rem; color:var(--muted); margin-top:1px; }
+  #page-analysis .an-row.video { cursor:pointer; }
+  #page-analysis .an-row.video:hover { background:rgba(0,200,150,0.06); }
+  #page-analysis .an-extra { display:none; flex-direction:column; gap:5px; }
+  #page-analysis .an-tlg.show-all .an-extra,
+  #page-analysis .an-group.show-all .an-extra { display:flex; }
+  #page-analysis .an-more { align-self:flex-start; margin-top:2px; background:none; border:none; color:var(--accent); font-size:0.72rem; font-weight:700; cursor:pointer; padding:3px 4px; font-family:inherit; }
+  #page-analysis .an-more:hover { text-decoration:underline; }
+  /* Soften the topic group cards — teal only when open (less visual noise). */
+  #page-analysis .an-group { box-shadow:0 3px 10px rgba(15,23,42,0.05); }
+  #page-analysis .an-group-head { background:none; }
+  #page-analysis .an-group.open { border-color:rgba(0,200,150,0.42); }
+  #page-analysis .an-group.open > .an-group-head { background:linear-gradient(135deg, var(--accent-dim, rgba(0,200,150,0.10)), transparent); }
+  @media (max-width:768px) { #page-analysis .an-done-list { grid-template-columns:1fr; } }
   #page-analysis .an-pills { display:inline-flex; gap:6px; margin-bottom:0.9rem; flex-wrap:wrap; }
   #page-analysis .an-pills button { background:var(--card); border:1px solid var(--border); color:var(--muted); border-radius:99px; padding:6px 13px; font-size:0.76rem; font-weight:600; cursor:pointer; }
   #page-analysis .an-pills button.active { background:var(--accent-dim, rgba(0,200,150,0.12)); border-color:var(--accent); color:var(--accent); }
