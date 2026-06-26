@@ -1,9 +1,35 @@
 /* ══════════════════════════════════════════════
+   DOM SAFETY HELPERS
+══════════════════════════════════════════════ */
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function setText(target, value) {
+  const el = typeof target === 'string' ? document.querySelector(target) : target;
+  if (el) el.textContent = value ?? '';
+  return el;
+}
+
+function bindEvent(target, eventName, handler, options) {
+  const el = typeof target === 'string' ? document.querySelector(target) : target;
+  if (!el) return function noopUnbind() {};
+  el.addEventListener(eventName, handler, options);
+  return () => el.removeEventListener(eventName, handler, options);
+}
+
+/* ══════════════════════════════════════════════
    TOAST
 ══════════════════════════════════════════════ */
 let toastTimeout;
 function showToast(msg, type='info') {
   const toast = document.getElementById('toast');
+  if (!toast) return;
   toast.textContent = msg;
   toast.className = `toast ${type} show`;
   clearTimeout(toastTimeout);
