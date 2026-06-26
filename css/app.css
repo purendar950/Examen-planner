@@ -2404,3 +2404,60 @@
       justify-content: space-between;
     }
   }
+
+
+/* ══════════════════════════════════════════════════════════════
+   IN-PLAYER FLOATING CONTROLS — custom fullscreen + Save Moment
+   A native YouTube iframe in fullscreen can't host our overlay, so
+   we fullscreen our own wrapper and float the Save Moment button on
+   top of it. Base mechanism = CSS viewport-fill (works everywhere,
+   incl. iOS); native Fullscreen API is layered on when available.
+══════════════════════════════════════════════════════════════ */
+.yt-player-wrap .ss-fs-toggle {
+  position: absolute; top: 8px; right: 8px;
+  width: 40px; height: 34px; display: none;
+  align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.55); color: #fff;
+  border: 1px solid rgba(255,255,255,0.28); border-radius: 8px;
+  font-size: 1.05rem; line-height: 1; cursor: pointer;
+  z-index: 50; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+  transition: background .15s;
+}
+.yt-player-wrap .ss-fs-toggle:hover { background: rgba(0,200,150,0.85); }
+.yt-player-wrap.ss-has-video .ss-fs-toggle { display: inline-flex; }
+
+.yt-player-wrap .ss-fs-save {
+  position: absolute; right: 16px; bottom: 64px;
+  display: none; align-items: center; gap: 6px;
+  padding: 11px 18px; border: none; border-radius: 30px;
+  background: rgba(0,200,150,0.95); color: #04231b;
+  font-family: var(--font); font-size: 0.9rem; font-weight: 800;
+  cursor: pointer; z-index: 51;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+  -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+}
+.yt-player-wrap .ss-fs-save:active { transform: scale(0.94); }
+.yt-player-wrap.ss-fs-active .ss-fs-save { display: inline-flex; }
+
+.yt-player-wrap.ss-fs-active {
+  position: fixed !important; inset: 0 !important;
+  width: 100vw !important; height: 100vh !important;
+  height: 100dvh !important; max-width: none !important;
+  margin: 0 !important; padding-bottom: 0 !important;
+  border-radius: 0 !important; aspect-ratio: auto !important;
+  z-index: 99990 !important; background: #000;
+}
+body.ss-fs-lock { overflow: hidden !important; }
+
+.yt-player-wrap .ss-fs-flash {
+  position: absolute; top: 14px; left: 50%;
+  transform: translateX(-50%) translateY(-8px);
+  padding: 9px 16px; border-radius: 24px;
+  background: rgba(0,200,150,0.95); color: #04231b;
+  font-family: var(--font); font-size: 0.85rem; font-weight: 800;
+  opacity: 0; pointer-events: none; z-index: 52;
+  transition: opacity .2s, transform .2s;
+}
+.yt-player-wrap .ss-fs-flash.show {
+  opacity: 1; transform: translateX(-50%) translateY(0);
+}

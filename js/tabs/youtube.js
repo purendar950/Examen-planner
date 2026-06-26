@@ -317,6 +317,8 @@ function ytDoLoad(type, id) {
   const playerEl = document.getElementById('yt-player');
   playerEl.style.display = 'block';
   document.getElementById('yt-placeholder').style.display = 'none';
+  // Reveal the in-player floating controls (custom fullscreen + Save Moment)
+  try { document.getElementById('yt-player-wrap')?.classList.add('ss-has-video'); } catch (e) {}
 
   if (!ytPlayer || !ytPlayerReady) {
     ytPendingLoad = { type, id };
