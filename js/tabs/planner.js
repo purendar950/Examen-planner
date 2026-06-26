@@ -547,14 +547,15 @@ function injectRevisionsIntoMap(map, allowedSubs) {
     [...due, ...soon].forEach(({ ch, state }) => {
       if (!ch || !state || !state.nextRevisionAt || seen.has(ch.id)) return;
       seen.add(ch.id);
-      const sub = subOf(ch.id);
-      /* Single-subject scope: drop revisions for any other subject. */
-      if (allowedSubs && !(sub && allowedSubs.has(sub.id))) return;
+      const sub = subOf(ch.id) || (ch.subId ? subs.find(s => s.id === ch.subId) : null);
+      /* Single-subject scope: drop revisions for any OTHER syllabus subject, but
+         keep task revisions that aren't tied to a scoped subject (sub == null). */
+      if (allowedSubs && sub && !allowedSubs.has(sub.id)) return;
       /* Overdue revisions surface on today so they aren't buried in the past. */
       const date = state.nextRevisionAt < today ? today : state.nextRevisionAt;
       const overdue = state.nextRevisionAt < today;
       const dueLabel = overdue ? 'overdue' : (date === today ? 'due today' : 'due ' + date);
-      const meta = { ...ch, subName: sub ? sub.name : '', color: sub ? sub.color : '#A855F7', subId: sub ? sub.id : '' };
+      const meta = { ...ch, subName: sub ? sub.name : (ch.subName || ''), color: sub ? sub.color : (ch.color || '#A855F7'), subId: sub ? sub.id : (ch.subId || '') };
       if (!map[date]) map[date] = [];
       map[date].push({ type:'revise', fromEngine:true, ch: meta, dueLabel });
     });
@@ -990,8 +991,11 @@ function setTaskStatus(dateStr, taskId, status) {
   task.status = status;
   task.done = (status === 'done');
   syncVideoTaskToWatched(task);
+  if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
   saveProgress();
   buildPlannerCalendar();
+  try { if (typeof renderRevisionWidget === 'function') renderRevisionWidget(); } catch(e) {}
+  try { if (typeof renderRevisionQueue === 'function') renderRevisionQueue(); } catch(e) {}
 }
 
 /* ══════════════════════════════════════════════

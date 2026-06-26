@@ -1165,13 +1165,19 @@ function toggleTask(dateStr, taskId) {
     /* Mirror onto the course "watched" store so the Scheduled Videos card and
        course progress reflect the completion too. */
     if (typeof syncVideoTaskToWatched === 'function') syncVideoTaskToWatched(task);
+    /* Bridge into the spaced-repetition engine: a completed task becomes a
+       revision-eligible virtual chapter (cleared again if un-completed). */
+    if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
     saveProgress();
     buildPlannerCalendar();
+    try { if (typeof renderRevisionWidget === 'function') renderRevisionWidget(); } catch(e) {}
+    try { if (typeof renderRevisionQueue === 'function') renderRevisionQueue(); } catch(e) {}
   }
 }
 
 function deleteTask(dateStr, taskId) {
   appState.tasks[dateStr] = (appState.tasks[dateStr]||[]).filter(t=>t.id!==taskId);
+  if (typeof removeTaskRevision === 'function') removeTaskRevision(taskId);
   saveProgress(); buildPlannerCalendar();
 }
 
