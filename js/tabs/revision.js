@@ -22,6 +22,15 @@ function addDaysISO(d, days) {
   x.setDate(x.getDate() + days);
   return x.toISOString().slice(0, 10);
 }
+/* Timezone-SAFE increment of a 'YYYY-MM-DD' string. addDaysISO() mixes local
+   setDate() with UTC toISOString(), so for a date-only string in a UTC+ zone
+   (e.g. IST) it can return the SAME day — which would make date-advancing
+   loops never terminate. This parses and advances purely in UTC. */
+function addDaysToISODate(iso, days) {
+  const x = new Date(iso + 'T00:00:00Z');
+  x.setUTCDate(x.getUTCDate() + days);
+  return x.toISOString().slice(0, 10);
+}
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function daysUntil(isoDate) {
   const today = new Date(todayISO());
@@ -193,9 +202,12 @@ function getCappedRevisionMap(allowedSubs) {
   const count = {};
   pool.forEach(x => {
     let date = x.desired;
-    /* Spill to the next day until that day is under the cap. */
-    while ((count[date] || 0) >= DAILY_REVISION_CAP) {
-      date = addDaysISO(new Date(date + 'T00:00:00'), 1);
+    /* Spill to the next day until that day is under the cap. Use the
+       timezone-safe increment so this loop always terminates (a plain
+       local-date +1 can return the same day in UTC+ zones → infinite loop). */
+    let guard = 0;
+    while ((count[date] || 0) >= DAILY_REVISION_CAP && guard++ < 3650) {
+      date = addDaysToISODate(date, 1);
     }
     count[date] = (count[date] || 0) + 1;
     if (!map[date]) map[date] = [];
