@@ -30,26 +30,21 @@ async function saveProgressNow() {
   if (!currentUser || !_fbReady || !db) return;
   const json = JSON.stringify(appState);
   if (json === _lastSavedJSON) { _localDirty = false; setSyncStatus('', ''); return; } // Nothing changed
-  _lastSavedJSON = json;
+
   try {
-    await db.collection('users').doc(currentUser.uid).update({ appState });
+    await db.collection('users').doc(currentUser.uid).set({
+      appState,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    _lastSavedJSON = json;
     _localDirty = false;
     setSyncStatus('saved', '☁ Saved');
     setTimeout(() => setSyncStatus('', ''), 2500);
   } catch(e) {
-    // Document may not exist yet (new user who registered via localStorage fallback)
-    try {
-      await db.collection('users').doc(currentUser.uid).set({
-        profile:  { name: currentUser.name, email: currentUser.email },
-        appState
-      });
-      _localDirty = false;
-      setSyncStatus('saved', '☁ Saved');
-      setTimeout(() => setSyncStatus('', ''), 2500);
-    } catch(e2) {
-      setSyncStatus('error', '⚠ Sync failed');
-      setTimeout(() => setSyncStatus('', ''), 4000);
-    }
+    _localDirty = true;
+    setSyncStatus('error', '⚠ Sync failed');
+    setTimeout(() => setSyncStatus('', ''), 4000);
   }
 }
 
