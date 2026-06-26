@@ -1059,6 +1059,7 @@
   .yt-player-wrap {
     background: #000; border-radius: 12px; overflow: hidden;
     aspect-ratio: 16/9;
+    position: relative;
     display: flex; align-items: center; justify-content: center;
     border: 1px solid var(--border);
   }
@@ -2414,7 +2415,7 @@
    incl. iOS); native Fullscreen API is layered on when available.
 ══════════════════════════════════════════════════════════════ */
 .yt-player-wrap .ss-fs-toggle {
-  position: absolute; top: 8px; right: 8px;
+  position: absolute; top: 8px; left: 8px;
   width: 40px; height: 34px; display: none;
   align-items: center; justify-content: center;
   background: rgba(0,0,0,0.55); color: #fff;
