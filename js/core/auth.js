@@ -54,11 +54,16 @@ function _afterRegisterRedirect(email) {
   if (!banner) {
     banner = document.createElement('div');
     banner.id = 'reg-success-banner';
-    banner.style.cssText = 'background:rgba(0,200,150,0.12);border:1px solid rgba(0,200,150,0.35);border-radius:8px;padding:10px 14px;font-size:0.8rem;color:#00C896;margin-bottom:1rem;line-height:1.6;';
+    banner.className = 'auth-success-banner';
     const form = document.getElementById('form-login');
     if (form) form.insertBefore(banner, form.firstChild);
   }
-  banner.innerHTML = '🎉 <strong>Congratulations! Account created successfully.</strong><br>Ab apna email aur password daal kar Sign In karo.';
+  banner.replaceChildren(
+    document.createTextNode('🎉 '),
+    Object.assign(document.createElement('strong'), { textContent: 'Congratulations! Account created successfully.' }),
+    document.createElement('br'),
+    document.createTextNode('Ab apna email aur password daal kar Sign In karo.')
+  );
   banner.style.display = 'block';
   showToast('🎉 Account created! Ab login karo.', 'success');
   setTimeout(() => { if (banner) banner.style.display = 'none'; }, 20000);

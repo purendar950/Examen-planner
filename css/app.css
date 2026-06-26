@@ -101,6 +101,16 @@
   .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
   .btn-primary:active { transform: translateY(0); }
   .auth-error { color: var(--red); font-size: 0.82rem; margin-top: 0.5rem; display: none; }
+  .auth-success-banner {
+    background: rgba(0,200,150,0.12);
+    border: 1px solid rgba(0,200,150,0.35);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.8rem;
+    color: #00C896;
+    margin-bottom: 1rem;
+    line-height: 1.6;
+  }
   .auth-note { font-size: 0.78rem; color: var(--muted); text-align: center; margin-top: 1rem; }
 
   /* ══════════════════ APP LAYOUT ══════════════════ */
