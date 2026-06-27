@@ -1,0 +1,56 @@
+{
+  "test": {
+    "id": "ssc-cgl-mock-01",
+    "title": "SSC CGL Tier 1 — Mock 01",
+    "exam": "cgl",
+    "tier": "t1",
+    "correct_score": 2,
+    "negative_score": 0.5,
+    "section_time_min": 15,
+    "is_published": true
+  },
+  "sections": [
+    {
+      "name": "General Awareness",
+      "time_min": 15,
+      "questions": [
+        {
+          "id": "Q1",
+          "question": { "en": "What is the capital of India?", "hi": "भारत की राजधानी क्या है?" },
+          "option_1": { "en": "Mumbai", "hi": "मुंबई" },
+          "option_2": { "en": "New Delhi", "hi": "नई दिल्ली" },
+          "option_3": { "en": "Kolkata", "hi": "कोलकाता" },
+          "option_4": { "en": "Chennai", "hi": "चेन्नई" },
+          "answer": "2",
+          "explanation": { "en": "New Delhi is the capital of India.", "hi": "नई दिल्ली भारत की राजधानी है।" }
+        },
+        {
+          "id": "Q2",
+          "question": "Who wrote the Indian National Anthem?",
+          "option_1": "Bankim Chandra Chatterjee",
+          "option_2": "Rabindranath Tagore",
+          "option_3": "Sarojini Naidu",
+          "option_4": "Mahatma Gandhi",
+          "answer": "2",
+          "explanation": "Rabindranath Tagore wrote 'Jana Gana Mana'."
+        }
+      ]
+    },
+    {
+      "name": "Quantitative Aptitude",
+      "time_min": 15,
+      "questions": [
+        {
+          "id": "Q3",
+          "question": { "en": "What is 15% of 200?", "hi": "200 का 15% कितना है?" },
+          "option_1": "20",
+          "option_2": "25",
+          "option_3": "30",
+          "option_4": "35",
+          "answer": "3",
+          "explanation": { "en": "15% of 200 = 30.", "hi": "200 का 15% = 30।" }
+        }
+      ]
+    }
+  ]
+}

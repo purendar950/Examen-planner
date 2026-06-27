@@ -724,6 +724,7 @@ function mockRenderPage() {
   const editing = mockEditId ? mockList().find(m => m.id === mockEditId) : null;
   const today = new Date().toISOString().slice(0, 10);
   page.innerHTML =
+    '<div id="mock-live-tests"></div>' +
     '<div class="section-title">📈 ' + exam.fullName + ' — Mock Test Analysis</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:1.1rem;">' +
     '<span style="font-size:0.78rem;color:var(--muted);">Stage:</span> ' + tierBtns +
@@ -761,6 +762,7 @@ function mockRenderPage() {
     '<div id="mock-saved-list"></div>';
   mockRenderAnalysis();
   mockRenderSaved();
+  mockRenderLiveTests();
 }
 
 function mockUpdateDashSummary() {
@@ -841,3 +843,54 @@ updateDashboard = function() {
   mockUpdateDashSummary();
 };
 
+
+
+
+/* ══════════════════════════════════════════════
+   LINK OUT TO THE STANDALONE "StudyPlanner Mock" PLATFORM
+   (test-taking lives on its own page: mocks.html → test-engine.html)
+══════════════════════════════════════════════ */
+function mockRenderLiveTests() {
+  const box = document.getElementById('mock-live-tests');
+  if (!box) return;
+  box.innerHTML =
+    '<div class="mock-portal-banner" onclick="mockOpenPortal()">' +
+      '<div class="mpb-ic">📝</div>' +
+      '<div class="mpb-text">' +
+        '<div class="mpb-title">Take a live mock test</div>' +
+        '<div class="mpb-sub">Full mocks & sectional tests for competitive exams — real exam interface, timers & solutions.</div>' +
+      '</div>' +
+      '<span class="mpb-arrow">Open StudyPlanner Mock →</span>' +
+    '</div>';
+}
+
+/* Open the standalone mock platform. Passes the signed-in identity via
+   localStorage (same origin) so attempts are attributed to this user. */
+function mockOpenPortal() {
+  try {
+    if (typeof currentUser !== 'undefined' && currentUser) {
+      localStorage.setItem('ez_user_uid', currentUser.uid || '');
+      const nm = (typeof appState !== 'undefined' && appState.profile && appState.profile.name)
+        || currentUser.displayName || currentUser.email || 'Student';
+      localStorage.setItem('ez_user_name', nm);
+    }
+  } catch (e) {}
+  window.open('mocks.html', '_blank');
+}
+
+/* Banner styles */
+(function () {
+  const st = document.createElement('style');
+  st.textContent =
+    '.mock-portal-banner{display:flex;align-items:center;gap:14px;cursor:pointer;margin-bottom:1.25rem;' +
+      'padding:1rem 1.2rem;border-radius:14px;border:1px solid var(--border);' +
+      'background:linear-gradient(120deg,rgba(0,200,150,0.12),rgba(0,200,150,0.02));transition:transform .15s,border-color .15s;}' +
+    '.mock-portal-banner:hover{transform:translateY(-1px);border-color:var(--accent);}' +
+    '.mpb-ic{font-size:1.8rem;flex-shrink:0;}' +
+    '.mpb-text{flex:1;min-width:0;}' +
+    '.mpb-title{font-weight:700;font-size:1rem;}' +
+    '.mpb-sub{font-size:0.78rem;color:var(--muted);margin-top:2px;}' +
+    '.mpb-arrow{flex-shrink:0;font-weight:700;font-size:0.82rem;color:var(--accent);white-space:nowrap;}' +
+    '@media(max-width:560px){.mpb-arrow{display:none;}}';
+  document.head.appendChild(st);
+})();
