@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<script>
+  // Apply saved theme instantly (shared with the test engine) — no flash
+  (function(){ var t = localStorage.getItem('mmh_theme'); if(t) document.documentElement.setAttribute('data-theme', t); })();
+</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>StudyPlanner Mock — Mock Tests for SSC, Railway, Banking & UPSC</title>
+<meta name="description" content="StudyPlanner Mock — free & premium mock tests for competitive exams: SSC CGL, CHSL, MTS, GD, RRB NTPC, IBPS PO, UPSC and more. Real test interface with sectional timers, solutions and analysis.">
+<link rel="stylesheet" href="css/index.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/core/supabase-config.js"></script>
+<style>
+  .container { max-width: 1080px; }
+  .mock-hero { padding: 3rem 1.25rem 1.5rem; text-align:center;
+    background:radial-gradient(700px 380px at 50% 20%, rgba(0,200,150,0.10), transparent); }
+  .mock-hero h1 { font-size:clamp(1.9rem,5vw,3rem); font-weight:800; letter-spacing:-0.03em; margin-bottom:0.6rem; }
+  .mock-hero h1 .z { color:var(--accent); }
+  .mock-hero p { color:var(--muted); max-width:520px; margin:0 auto; font-size:1.02rem; }
+
+  .toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:1.5rem 0 0.5rem; }
+  .search { flex:1; min-width:220px; background:var(--card); border:1px solid var(--border); color:var(--text);
+    border-radius:12px; padding:11px 14px; font-family:var(--font); font-size:0.92rem; }
+  .search:focus { outline:none; border-color:var(--accent); }
+
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin:0.75rem 0 1.5rem; }
+  .chip { background:var(--card); border:1px solid var(--border); color:var(--muted); border-radius:99px;
+    padding:7px 15px; font-size:0.8rem; font-weight:700; cursor:pointer; transition:all .15s; }
+  .chip:hover { border-color:var(--accent); color:var(--text); }
+  .chip.active { background:rgba(0,200,150,0.12); border-color:var(--accent); color:var(--accent); }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:1rem; padding-bottom:3rem; }
+  .test-card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:1.2rem;
+    display:flex; flex-direction:column; gap:0.6rem; transition:transform .15s,border-color .15s; }
+  .test-card:hover { transform:translateY(-2px); border-color:var(--accent); }
+  .tc-top { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+  .tc-title { font-weight:700; font-size:1rem; line-height:1.35; }
+  .tag { display:inline-block; background:rgba(0,200,150,0.12); color:var(--accent);
+    border-radius:8px; padding:3px 9px; font-size:0.68rem; font-weight:700; white-space:nowrap; }
+  .tc-meta { display:flex; gap:10px; flex-wrap:wrap; font-size:0.76rem; color:var(--muted); }
+  .tc-meta b { color:var(--text); font-weight:700; }
+  .tc-start { margin-top:0.4rem; background:var(--accent); color:#000; border:none; border-radius:10px;
+    padding:11px; font-weight:700; font-size:0.9rem; cursor:pointer; font-family:var(--font); transition:all .15s; }
+  .tc-start:hover { background:var(--accent-dark); }
+
+  .state { text-align:center; color:var(--muted); padding:3rem 1rem; font-size:0.95rem; grid-column:1/-1; }
+  .state code { background:var(--surface); padding:2px 6px; border-radius:5px; font-size:0.85em; }
+  .skeleton { height:150px; border-radius:16px; background:linear-gradient(90deg,var(--card),var(--surface),var(--card));
+    background-size:200% 100%; animation:sk 1.2s infinite; }
+  @keyframes sk { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner" style="max-width:1080px;">
+    <a class="logo" href="index.html">Study<span class="z">Planner</span>&nbsp;Mock</a>
+    <div class="nav-cta">
+      <button class="btn-theme" id="theme-btn" title="Toggle theme" onclick="toggleTheme()">🌙</button>
+      <a class="btn btn-ghost" href="app.html">Open Planner</a>
+    </div>
+  </div>
+</nav>
+
+<header class="mock-hero">
+  <div class="hero-badge">🎯 SSC · Railway · Banking · UPSC</div>
+  <h1>Mock tests for <span class="z">competitive exams</span></h1>
+  <p>Attempt full mocks and sectional tests in a real exam interface — sectional timers, question palette, bilingual questions, instant solutions and analysis.</p>
+</header>
+
+<main class="container">
+  <div class="toolbar">
+    <input class="search" id="search" type="search" placeholder="🔍 Search mock tests…" oninput="renderTests()">
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="grid" id="grid">
+    <div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>
+  </div>
+</main>
+
+<footer>
+  <div class="container foot" style="max-width:1080px;">
+    <a class="logo" href="index.html" style="font-size:0.95rem;">Study<span class="z">Planner</span>&nbsp;Mock</a>
+    <div>© 2026 StudyPlanner · Mock tests for competitive exams.</div>
+    <div style="display:flex;gap:1rem;"><a href="app.html">Planner</a><a href="index.html">Home</a></div>
+  </div>
+</footer>
+
+<script>
+  /* ── Theme toggle (shared key with the engine) ── */
+  function applyThemeButton() {
+    var dark = document.documentElement.getAttribute('data-theme') !== 'light';
+    var b = document.getElementById('theme-btn'); if (b) b.textContent = dark ? '🌙' : '☀️';
+  }
+  function toggleTheme() {
+    var dark = document.documentElement.getAttribute('data-theme') !== 'light';
+    var next = dark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('mmh_theme', next);
+    applyThemeButton();
+  }
+  if (!localStorage.getItem('mmh_theme')) document.documentElement.setAttribute('data-theme', 'dark');
+  applyThemeButton();
+
+  /* ── Friendly exam labels ── */
+  var EXAM_LABELS = {
+    cgl:'SSC CGL', chsl:'SSC CHSL', mts:'SSC MTS', cpo:'SSC CPO', steno:'SSC Steno',
+    gd:'SSC GD', ntpc:'RRB NTPC', 'group-d':'RRB Group D', rrb:'RRB',
+    ibps:'IBPS PO', sbi:'SBI PO', bank:'Banking', upsc:'UPSC CSE', uppcs:'UPPCS', bpsc:'BPSC'
+  };
+  function examLabel(e) { if (!e) return 'General'; return EXAM_LABELS[String(e).toLowerCase()] || String(e).toUpperCase(); }
+
+  var ALL_TESTS = [];
+  var ACTIVE_EXAM = 'all';
+
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  async function loadTests() {
+    var grid = document.getElementById('grid');
+    if (!(window.MockAPI && MockAPI.configured)) {
+      grid.innerHTML = '<div class="state">⚠️ Mock tests are not connected yet.<br>Set your Supabase keys in <code>js/core/supabase-config.js</code> (see <code>supabase/SETUP.md</code>).</div>';
+      return;
+    }
+    try {
+      ALL_TESTS = await MockAPI.listTests({ publishedOnly: true });
+    } catch (e) {
+      grid.innerHTML = '<div class="state">Could not load tests: ' + esc(e.message || String(e)) + '</div>';
+      return;
+    }
+    renderChips();
+    renderTests();
+  }
+
+  function renderChips() {
+    var exams = {};
+    ALL_TESTS.forEach(function(t){ var k = (t.exam || '').toLowerCase(); if (k) exams[k] = (exams[k]||0)+1; });
+    var keys = Object.keys(exams).sort();
+    var html = '<div class="chip ' + (ACTIVE_EXAM==='all'?'active':'') + '" onclick="setExam(\'all\')">All (' + ALL_TESTS.length + ')</div>';
+    keys.forEach(function(k){
+      html += '<div class="chip ' + (ACTIVE_EXAM===k?'active':'') + '" onclick="setExam(\'' + k + '\')">' + esc(examLabel(k)) + ' (' + exams[k] + ')</div>';
+    });
+    document.getElementById('chips').innerHTML = keys.length ? html : '';
+  }
+
+  function setExam(e) { ACTIVE_EXAM = e; renderChips(); renderTests(); }
+
+  function renderTests() {
+    var grid = document.getElementById('grid');
+    var q = (document.getElementById('search').value || '').toLowerCase().trim();
+    var list = ALL_TESTS.filter(function(t){
+      if (ACTIVE_EXAM !== 'all' && (t.exam || '').toLowerCase() !== ACTIVE_EXAM) return false;
+      if (q && !((t.title||'') + ' ' + (t.exam||'') + ' ' + (t.id||'')).toLowerCase().includes(q)) return false;
+      return true;
+    });
+    if (!list.length) {
+      grid.innerHTML = '<div class="state">No mock tests found' + (q ? ' for "' + esc(q) + '"' : '') + '.</div>';
+      return;
+    }
+    grid.innerHTML = list.map(function(t){
+      return '<div class="test-card">' +
+        '<div class="tc-top"><div class="tc-title">' + esc(t.title || t.id) + '</div>' +
+          '<span class="tag">' + esc(examLabel(t.exam)) + (t.tier ? ' · ' + esc(String(t.tier).toUpperCase()) : '') + '</span></div>' +
+        '<div class="tc-meta">' +
+          '<span><b>' + (t.total_questions||0) + '</b> Qs</span>' +
+          '<span><b>' + (t.total_sections||0) + '</b> sections</span>' +
+          '<span>+<b>' + t.correct_score + '</b> / -<b>' + t.negative_score + '</b></span>' +
+        '</div>' +
+        '<button class="tc-start" onclick="startTest(\'' + String(t.id).replace(/'/g,"\\'") + '\')">▶ Start Test</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function startTest(id) {
+    window.location.href = 'test-engine.html?id=' + encodeURIComponent(id);
+  }
+
+  loadTests();
+</script>
+</body>
+</html>

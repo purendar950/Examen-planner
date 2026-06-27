@@ -724,9 +724,8 @@ function mockRenderPage() {
   const editing = mockEditId ? mockList().find(m => m.id === mockEditId) : null;
   const today = new Date().toISOString().slice(0, 10);
   page.innerHTML =
-    '<div class="section-title">📝 ' + exam.fullName + ' — Take a Mock Test</div>' +
-    '<div id="mock-live-tests"><div class="streak-bar" style="justify-content:center;">Loading available tests…</div></div>' +
-    '<div class="section-title" style="margin-top:1.5rem;">📈 Mock Test Analysis</div>' +
+    '<div id="mock-live-tests"></div>' +
+    '<div class="section-title">📈 ' + exam.fullName + ' — Mock Test Analysis</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:1.1rem;">' +
     '<span style="font-size:0.78rem;color:var(--muted);">Stage:</span> ' + tierBtns +
     '<span class="tag tag-red" style="margin-left:auto;">–' + negLabel + ' per wrong</span>' +
@@ -848,79 +847,50 @@ updateDashboard = function() {
 
 
 /* ══════════════════════════════════════════════
-   LIVE MOCK TESTS — fetched from Supabase, launched in test-engine.html
+   LINK OUT TO THE STANDALONE "StudyPlanner Mock" PLATFORM
+   (test-taking lives on its own page: mocks.html → test-engine.html)
 ══════════════════════════════════════════════ */
-async function mockRenderLiveTests() {
+function mockRenderLiveTests() {
   const box = document.getElementById('mock-live-tests');
   if (!box) return;
-
-  if (!(window.MockAPI && MockAPI.configured)) {
-    box.innerHTML = '<div class="info-card" style="text-align:center;color:var(--muted);font-size:0.85rem;">' +
-      'Online mock tests are not available yet. (Supabase is not configured.)</div>';
-    return;
-  }
-
-  let tests = [];
-  try {
-    tests = await MockAPI.listTests({ publishedOnly: true });
-  } catch (e) {
-    box.innerHTML = '<div class="info-card" style="color:var(--red);font-size:0.85rem;">Could not load tests: ' +
-      escapeHtml(e.message || String(e)) + '</div>';
-    return;
-  }
-
-  if (!tests.length) {
-    box.innerHTML = '<div class="info-card" style="text-align:center;color:var(--muted);font-size:0.85rem;">' +
-      'No mock tests published yet. Check back soon!</div>';
-    return;
-  }
-
-  // Show tests for the current exam first, then the rest
-  tests.sort((a, b) => {
-    const am = a.exam === currentExam ? 0 : 1;
-    const bm = b.exam === currentExam ? 0 : 1;
-    return am - bm;
-  });
-
-  box.innerHTML = '<div class="mock-test-grid">' + tests.map(t => {
-    const examTag = t.exam
-      ? '<span class="tag tag-blue">' + escapeHtml(String(t.exam).toUpperCase()) + (t.tier ? ' · ' + escapeHtml(String(t.tier).toUpperCase()) : '') + '</span>'
-      : '';
-    return '<div class="mock-test-card">' +
-      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">' +
-        '<div style="font-weight:700;font-size:0.95rem;">' + escapeHtml(t.title || t.id) + '</div>' + examTag +
+  box.innerHTML =
+    '<div class="mock-portal-banner" onclick="mockOpenPortal()">' +
+      '<div class="mpb-ic">📝</div>' +
+      '<div class="mpb-text">' +
+        '<div class="mpb-title">Take a live mock test</div>' +
+        '<div class="mpb-sub">Full mocks & sectional tests for competitive exams — real exam interface, timers & solutions.</div>' +
       '</div>' +
-      '<div style="color:var(--muted);font-size:0.75rem;margin:6px 0 10px;">' +
-        (t.total_questions || 0) + ' questions · ' + (t.total_sections || 0) + ' sections · +' +
-        t.correct_score + ' / -' + t.negative_score +
-      '</div>' +
-      '<button class="btn-modal-save" style="width:100%;" onclick="mockLaunchTest(\'' +
-        String(t.id).replace(/'/g, "\\'") + '\')">▶ Start Test</button>' +
+      '<span class="mpb-arrow">Open StudyPlanner Mock →</span>' +
     '</div>';
-  }).join('') + '</div>';
 }
 
-/* Launch the test engine for a given test id. Passes the user identity through
-   localStorage so attempts saved to Supabase are attributed to this user. */
-function mockLaunchTest(testId) {
+/* Open the standalone mock platform. Passes the signed-in identity via
+   localStorage (same origin) so attempts are attributed to this user. */
+function mockOpenPortal() {
   try {
     if (typeof currentUser !== 'undefined' && currentUser) {
       localStorage.setItem('ez_user_uid', currentUser.uid || '');
-      const nm = (appState && appState.profile && appState.profile.name)
+      const nm = (typeof appState !== 'undefined' && appState.profile && appState.profile.name)
         || currentUser.displayName || currentUser.email || 'Student';
       localStorage.setItem('ez_user_name', nm);
     }
   } catch (e) {}
-  window.open('test-engine.html?id=' + encodeURIComponent(testId), '_blank');
+  window.open('mocks.html', '_blank');
 }
 
-/* Styles for the live-test cards */
+/* Banner styles */
 (function () {
   const st = document.createElement('style');
   st.textContent =
-    '.mock-test-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:0.9rem;}' +
-    '.mock-test-card{border:1px solid var(--border);border-radius:12px;padding:1rem;background:var(--surface);' +
-      'display:flex;flex-direction:column;justify-content:space-between;}' +
-    '.tag-blue{background:rgba(59,130,246,0.12);color:#3B82F6;}';
+    '.mock-portal-banner{display:flex;align-items:center;gap:14px;cursor:pointer;margin-bottom:1.25rem;' +
+      'padding:1rem 1.2rem;border-radius:14px;border:1px solid var(--border);' +
+      'background:linear-gradient(120deg,rgba(0,200,150,0.12),rgba(0,200,150,0.02));transition:transform .15s,border-color .15s;}' +
+    '.mock-portal-banner:hover{transform:translateY(-1px);border-color:var(--accent);}' +
+    '.mpb-ic{font-size:1.8rem;flex-shrink:0;}' +
+    '.mpb-text{flex:1;min-width:0;}' +
+    '.mpb-title{font-weight:700;font-size:1rem;}' +
+    '.mpb-sub{font-size:0.78rem;color:var(--muted);margin-top:2px;}' +
+    '.mpb-arrow{flex-shrink:0;font-weight:700;font-size:0.82rem;color:var(--accent);white-space:nowrap;}' +
+    '@media(max-width:560px){.mpb-arrow{display:none;}}';
   document.head.appendChild(st);
 })();
