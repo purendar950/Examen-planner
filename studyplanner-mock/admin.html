@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<script>(function(){ var t = localStorage.getItem('mmh_theme'); if(t) document.documentElement.setAttribute('data-theme', t); })();</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>StudyPlanner Mock — Admin</title>
+<link rel="stylesheet" href="css/style.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/supabase-config.js"></script>
+<style>
+  .container { max-width: 980px; padding-top: 1.5rem; padding-bottom: 3rem; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:1.2rem; margin-bottom:1.2rem; }
+  .card h3 { margin-bottom:0.6rem; font-size:1.05rem; }
+  .muted { color:var(--muted); font-size:0.85rem; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  input[type=text], input[type=email], input[type=password], input[type=file], textarea {
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    border-radius:9px; padding:10px 12px; font-family:var(--font); font-size:0.9rem; }
+  input:focus, textarea:focus { outline:none; border-color:var(--accent); }
+  textarea { width:100%; min-height:160px; font-family:monospace; font-size:0.8rem; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; border-radius:9px; padding:9px 16px;
+    font-weight:700; font-size:0.85rem; cursor:pointer; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:var(--font); }
+  .btn:hover { border-color:var(--accent); }
+  .btn-green { background:var(--accent); color:#000; border:none; }
+  .btn-green:hover { background:var(--accent-dark); }
+  .btn-red { background:transparent; border-color:var(--red); color:var(--red); }
+  .btn-sm { padding:6px 11px; font-size:0.78rem; }
+  .badge { display:inline-block; border-radius:7px; padding:2px 9px; font-size:0.7rem; font-weight:700; }
+  .badge-green { background:rgba(0,200,150,0.14); color:var(--accent); }
+  .badge-amber { background:rgba(245,158,11,0.16); color:#F59E0B; }
+  .empty { color:var(--muted); text-align:center; padding:1.5rem; font-size:0.88rem; }
+  table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+  th, td { padding:5px 8px; }
+  code { background:var(--surface); padding:1px 5px; border-radius:4px; font-size:0.85em; }
+  #login-screen { min-height:80vh; display:flex; align-items:center; justify-content:center; }
+  .login-card { width:100%; max-width:380px; }
+  #toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:#111; color:#fff;
+    border:1px solid var(--border); padding:10px 20px; border-radius:10px; font-size:0.85rem; z-index:999; opacity:0; transition:opacity .2s; }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner" style="max-width:980px;">
+    <a class="logo" href="index.html">Study<span class="z">Planner</span>&nbsp;Mock · Admin</a>
+    <div class="nav-cta">
+      <button class="btn-theme" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+      <a class="btn btn-ghost" href="index.html">View site</a>
+    </div>
+  </div>
+</nav>
+
+<!-- LOGIN -->
+<div id="login-screen" class="container">
+  <div class="card login-card">
+    <h3>🔐 Admin sign in</h3>
+    <p class="muted" style="margin-bottom:1rem;">Sign in with your Supabase account to create &amp; manage mock tests.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <input type="email" id="login-email" placeholder="Email">
+      <input type="password" id="login-pass" placeholder="Password">
+      <button class="btn btn-green" onclick="adminSignIn()">Sign In</button>
+      <div id="login-err" class="muted" style="color:var(--red);"></div>
+    </div>
+    <p class="muted" style="margin-top:12px;">No account? Create one in Supabase → Authentication → Users. See <code>supabase/SETUP.md</code>.</p>
+  </div>
+</div>
+
+<!-- PANEL -->
+<div id="panel" class="container" style="display:none;">
+  <div class="card row" style="justify-content:space-between;">
+    <div class="muted">Signed in as <strong id="who"></strong></div>
+    <button class="btn btn-sm" onclick="adminSignOut()">Sign out</button>
+  </div>
+
+  <div class="card">
+    <h3>⬆️ Upload a test (JSON)</h3>
+    <p class="muted" style="margin-bottom:10px;">Pick a <code>.json</code> file or paste JSON. Format: see <code>supabase/sample-mock.json</code>. Bilingual <code>{en,hi}</code> &amp; image URLs supported.</p>
+    <div class="row">
+      <input type="file" id="mock-file" accept="application/json,.json" onchange="adminParseFile(this)">
+      <button class="btn" onclick="adminTogglePaste()">📋 Paste JSON instead</button>
+    </div>
+    <textarea id="mock-json-text" placeholder='{ "test": { ... }, "sections": [ ... ] }' style="display:none;margin-top:10px;" oninput="adminParseText()"></textarea>
+    <div id="mock-preview" style="margin-top:12px;"></div>
+  </div>
+
+  <div class="card">
+    <h3>🖼️ Upload an image</h3>
+    <p class="muted" style="margin-bottom:10px;">Uploads to the <code>mock-images</code> bucket and returns a public URL to paste into a question's <code>question_image</code> / <code>option_image_n</code> / <code>solution_image</code> field.</p>
+    <input type="file" id="mock-img-file" accept="image/*" onchange="adminUploadImage(this)">
+    <div id="mock-img-result" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <h3 style="margin:0;">🗂 Existing tests</h3>
+      <button class="btn btn-sm" onclick="adminRefreshList()">↻ Refresh</button>
+    </div>
+    <div id="mock-tests-list" style="margin-top:10px;"><div class="empty">Loading…</div></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  function toggleTheme() {
+    var dark = document.documentElement.getAttribute('data-theme') !== 'light';
+    var next = dark ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('mmh_theme', next);
+  }
+  if (!localStorage.getItem('mmh_theme')) document.documentElement.setAttribute('data-theme', 'dark');
+</script>
+<script src="js/admin.js"></script>
+</body>
+</html>
