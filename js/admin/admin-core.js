@@ -216,6 +216,7 @@ function render() {
   else if (TAB === 'referrals') c.innerHTML = renderReferrals();
   else if (TAB === 'payouts') c.innerHTML = renderPayouts();
   else if (TAB === 'coupons') c.innerHTML = renderCoupons();
+  else if (TAB === 'mocks') c.innerHTML = renderMocks();
   else if (TAB === 'requests') c.innerHTML = renderRequests();
   else if (TAB === 'telegram') c.innerHTML = renderTelegram();
   else if (TAB === 'settings') c.innerHTML = renderSettings();

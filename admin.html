@@ -13,6 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
@@ -47,6 +48,7 @@
     <div class="tab" data-t="referrals" onclick="setTab('referrals')">🔗 Referrals</div>
     <div class="tab" data-t="payouts" onclick="setTab('payouts')">💸 Payouts</div>
     <div class="tab" data-t="coupons" onclick="setTab('coupons')">🎟️ Coupons</div>
+    <div class="tab" data-t="mocks" onclick="setTab('mocks')">🧪 Mock Tests</div>
     <div class="tab" data-t="requests" onclick="setTab('requests')">&#x1f4a1; Requests <span id="cnt-requests"></span></div>
     <div class="tab" data-t="settings" onclick="setTab('settings')">&#x2699; Settings</div>
   </div>
@@ -57,9 +59,11 @@
 </div>
 
 <script src="js/core/firebase-config.js"></script>
+<script src="js/core/supabase-config.js"></script>
 <script type="module" src="src/main.js"></script>
 <script src="js/admin/admin-core.js"></script>
 <script src="js/admin/admin-render.js"></script>
 <script src="js/admin/admin-actions.js"></script>
+<script src="js/admin/admin-mocks.js"></script>
 </body>
 </html>

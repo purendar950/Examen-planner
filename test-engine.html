@@ -27,17 +27,21 @@
   
 <!-- ✅ STANDALONE MODE: Stubs for auth.js & firebase-config.js -->
 <script>
-  // Stub for auth.js — returns a Guest profile so init() proceeds without a server
+  // Stub for auth.js — returns a Guest profile so init() proceeds without a server.
+  // If the user opened the engine from the logged-in app, reuse their name.
   function getLocalProfile() {
+    try {
+      var n = localStorage.getItem('ez_user_name');
+      if (n) return { username: n, displayName: n };
+    } catch (e) {}
     return { username: "Guest", displayName: "Guest" };
   }
   // Stub for firebase-config.js — prevents FIREBASE_PROJECTS ReferenceError
   var FIREBASE_PROJECTS = {};
-  // Stub for Supabase — prevents _supabase.auth crashes
-  var _supabase = null;
 </script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<!-- 🟢 Supabase: question source + attempt storage (window._supabase, window.MockAPI) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/core/supabase-config.js"></script>
 
 <style>
 
@@ -4089,9 +4093,53 @@ async function autoSubmitQuiz() {
 // 📊 FIREBASE & DATA FUNCTIONS
 // ===============================
 
+// 🟢 Save attempt/result to Supabase (mock_attempts table)
+async function saveAttemptSupabase(payload) {
+  if (!(window.MockAPI && MockAPI.configured)) return false;
+  try {
+    const sections = payload.sections || {};
+    let totalQ = 0, unattempted = 0;
+    const breakdown = Object.keys(sections).map(name => {
+      const s = sections[name] || {};
+      totalQ      += (s.correct || 0) + (s.wrong || 0) + (s.unattempted || 0);
+      unattempted += (s.unattempted || 0);
+      return {
+        section: name, score: s.score, max: s.total,
+        correct: s.correct, wrong: s.wrong,
+        unattempted: s.unattempted, time_taken: s.timeTaken
+      };
+    });
+    const attempted = (payload.correct || 0) + (payload.wrong || 0);
+    const pct = payload.total ? Number(((payload.score / payload.total) * 100).toFixed(2)) : 0;
+
+    await MockAPI.saveAttempt({
+      test_id:           payload.quizId,
+      user_id:           (typeof localStorage !== 'undefined' && localStorage.getItem('ez_user_uid')) || payload.emailKey || null,
+      user_name:         payload.name || "Guest",
+      score:             payload.score,
+      max_score:         payload.total,
+      total_questions:   totalQ,
+      attempted:         attempted,
+      correct:           payload.correct,
+      wrong:             payload.wrong,
+      unattempted:       unattempted,
+      time_taken:        payload.timeTaken,
+      percentage:        pct,
+      section_breakdown: breakdown,
+      answers:           answers || {}
+    });
+    console.log("✅ Attempt saved to Supabase");
+    return true;
+  } catch (e) {
+    console.warn("Supabase saveAttempt failed:", e.message || e);
+    return false;
+  }
+}
 
 // 1. Save Result (uses email as unique folder)
 function saveResultFirebase(payload) {
+  // 🟢 Mirror the attempt into Supabase (non-blocking)
+  saveAttemptSupabase(payload);
   // ✅ FIX: Guard against null db (standalone/offline mode)
   if (!db) return Promise.resolve(false);
   const ref = db.ref("quiz_results/" + payload.quizId + "/" + USER_EMAIL_KEY);
@@ -5337,7 +5385,16 @@ document.addEventListener("DOMContentLoaded", function () {
   // loadQuizData() is now called via showQuizPage() from home screen
   SECURITY.init();
   requestAnimationFrame(() => requestAnimationFrame(syncHeaderHeight));
-  // Show home screen on load
+
+  // If a test id is supplied (?id=...), load that test directly and skip the
+  // topic-picker home screen (topics are defined by the test's sections).
+  if (typeof quizIdParam !== "undefined" && quizIdParam) {
+    document.getElementById('homeScreen').style.display = 'none';
+    showQuizPage();
+    return;
+  }
+
+  // No id → show the topic home screen
   document.getElementById('homeScreen').style.display = 'block';
   document.getElementById('loadingOverlay').style.display = 'none';
 });
@@ -5472,34 +5529,66 @@ async function loadQuizData() {
   }
 
   const LOCAL_SECTIONS = {
-  // ── PASTE YOUR QUESTION DATA HERE ────────────────────────────────────────
-  // Format:
-  // "Section Name": [
-  //   {
-  //     "id": "EZ0001",
-  //     "question": "Question text here",
-  //     "option_1": "A", "option_2": "B", "option_3": "C", "option_4": "D",
-  //     "answer": "1",                   // correct option number as string
-  //     "explanation": "Why A is correct",
-  //     "topic": "Section Name",
-  //     "examSource": "SSC CGL 2025"     // optional
-  //   },
-  //   ...more questions
-  // ],
-  // "Another Section": [ ... ],
+  // ── OPTIONAL OFFLINE FALLBACK ────────────────────────────────────────────
+  // Questions normally come from Supabase (?id=<test id>). If Supabase is not
+  // configured or the id is missing, you can paste a {section:[questions]} map
+  // here so the engine still works offline. Format per question:
+  //   { "id":"Q1", "question":{"en":"..","hi":".."}, "option_1":"A", ...,
+  //     "answer":"1", "explanation":{"en":"..","hi":".."} }
 };
 
-  // ── CONFIGURE YOUR TEST ─────────────────────────────────────────────────────
-  QUIZ_TITLE     = "ExamZen – Mock Test";   // Change this
-  QUIZ_ID        = "EZ-MOCK-001";           // Unique ID for state/result keys
-  CORRECT_SCORE  = 2;                       // Marks per correct answer
-  NEGATIVE_SCORE = 0.5;                     // Marks deducted per wrong answer
+  // ── DEFAULT TEST CONFIG (overridden by Supabase when available) ──────────────
+  QUIZ_TITLE     = "ExamZen – Mock Test";
+  QUIZ_ID        = quizIdParam || "EZ-MOCK-001";   // from URL ?id=
+  CORRECT_SCORE  = 2;
+  NEGATIVE_SCORE = 0.5;
+
+  let TIME_PER_SECTION = 15 * 60;            // default seconds per section
+  const SECTION_TIME_MAP = {};               // sectionName -> seconds (from Supabase)
+
+  // ── 🟢 FETCH FROM SUPABASE (questions + config) ──────────────────────────────
+  if (window.MockAPI && MockAPI.configured && quizIdParam) {
+    try {
+      const { test, questions } = await MockAPI.getTest(quizIdParam);
+
+      QUIZ_TITLE     = test.title || QUIZ_TITLE;
+      QUIZ_ID        = test.id || QUIZ_ID;
+      CORRECT_SCORE  = (test.correct_score != null) ? Number(test.correct_score) : CORRECT_SCORE;
+      NEGATIVE_SCORE = (test.negative_score != null) ? Number(test.negative_score) : NEGATIVE_SCORE;
+      TIME_PER_SECTION = (test.section_time_min ? Number(test.section_time_min) : 15) * 60;
+
+      // Per-section custom times from sections_meta
+      (test.sections_meta || []).forEach(m => {
+        if (m && m.name && m.time_min) SECTION_TIME_MAP[m.name] = Number(m.time_min) * 60;
+      });
+
+      // Group questions into { sectionName: [question, ...] } preserving order.
+      // Each row's `data` jsonb IS the question object the engine renders, and we
+      // stamp per-question marks so renderQuestion shows the right +/- values.
+      questions.forEach(row => {
+        const q = row.data || {};
+        if (q.correct_score == null)  q.correct_score  = CORRECT_SCORE;
+        if (q.negative_score == null) q.negative_score = NEGATIVE_SCORE;
+        const sec = row.section_name || q.topic || "Section 1";
+        if (!LOCAL_SECTIONS[sec]) LOCAL_SECTIONS[sec] = [];
+        LOCAL_SECTIONS[sec].push(q);
+      });
+
+      if (questions.length === 0) {
+        console.warn("Supabase returned 0 questions for", quizIdParam);
+      }
+    } catch (err) {
+      console.error("Supabase fetch failed:", err.message || err);
+      const lt = document.getElementById("loadingText");
+      if (lt) lt.textContent = "Could not load this test. " + (err.message || "");
+    }
+  }
 
   QUIZ_STATE_KEY           = "state_"  + USER_EMAIL_KEY + "_" + QUIZ_ID;
   QUIZ_RESULT_KEY          = "result_" + USER_EMAIL_KEY + "_" + QUIZ_ID;
   QUIZ_RESPONSE_STREAM_KEY = "stream_" + USER_EMAIL_KEY + "_" + QUIZ_ID;
 
-  const TIME_PER_SECTION = 15 * 60;
+  const secTime = (name) => SECTION_TIME_MAP[name] || TIME_PER_SECTION;
 
   SECTIONS = {};
   SECTION_TIMERS = {};
@@ -5526,17 +5615,34 @@ async function loadQuizData() {
           const setQs = shuffled.slice(s * ezMockSize, (s + 1) * ezMockSize);
           const setName = numSets > 1 ? `${sec} – Set ${s + 1}` : sec;
           SECTIONS[setName]       = setQs;
-          SECTION_TIMERS[setName] = TIME_PER_SECTION;
+          SECTION_TIMERS[setName] = secTime(sec);
         }
       } else {
         SECTIONS[sec]       = qs;
-        SECTION_TIMERS[sec] = TIME_PER_SECTION;
+        SECTION_TIMERS[sec] = secTime(sec);
       }
     }
   });
 
   SECTION_NAMES = Object.keys(SECTIONS);
   QUESTIONS     = SECTIONS[SECTION_NAMES[0]];
+
+  // ── Empty-state guard: no questions loaded (bad id / unpublished / offline) ──
+  if (!SECTION_NAMES.length) {
+    document.getElementById("loadingOverlay").style.display = "none";
+    document.getElementById("welcomeScreen").style.display = "none";
+    const home = document.getElementById("homeScreen");
+    if (home) {
+      home.style.display = "block";
+      const sub = document.getElementById("homeExamSub");
+      if (sub) sub.textContent = window.MockAPI && MockAPI.configured
+        ? "No questions found for this test. Check the test id or publish it in the admin panel."
+        : "Supabase is not configured. Add your keys in js/core/supabase-config.js.";
+      const title = document.getElementById("homeExamTitle");
+      if (title) title.textContent = "Test unavailable";
+    }
+    return;
+  }
 
   // Rename title for single-topic mock mode (may be split into multiple sets)
   if (ezMockSize && ezSelected && ezSelected.length === 1) {
