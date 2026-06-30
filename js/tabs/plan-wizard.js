@@ -8,7 +8,7 @@ const PW_STATE = {
   step: 1,
   type: null,                 /* 'syllabus' | 'practice' | 'mock' */
   name: '',
-  syllabus: { subId: null, subjects: {}, chapters: {}, order: 'sequential', endDateOverride: false, startDate: '', endDate: '', dailyHours: 4 },
+  syllabus: { subId: null, subjects: {}, chapters: {}, order: 'sequential', endDateOverride: false, startDate: '', endDate: '', dailyHours: 4, topicsPerDay: 1 },
   practice: { subjects: [], practiceType: 'pyq', dailyTime: 2, questionsPerDay: 50, startDate: '' },
   mock:     { fullMockPerWeek: 1, subjectFreq: {}, subjectCount: {}, durationDays: 30, analysisDay: true }
 };
@@ -263,14 +263,22 @@ function pwEnsureChapterConf() {
 function pwCalcEndDate() {
   pwEnsureChapterConf();
   const subs = pwPlanSubjects();
+  const isSingle = PW_STATE.type === 'single';
+  const perDay = isSingle ? Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1) : 1;
   let maxSpan = 0;
   subs.forEach(sub => {
     let subDays = 0;
-    sub.chapters.forEach(ch => {
-      if (appState.progress[ch.id]?.done) return;
-      const c = PW_STATE.syllabus.chapters[ch.id] || { days: 3, gap: 0 };
-      subDays += (Number(c.days) || 3) + (Number(c.gap) || 0);
-    });
+    if (isSingle) {
+      /* Single Subject: each chapter is one topic; pack `perDay` per day. */
+      const pendingCount = sub.chapters.filter(ch => !appState.progress[ch.id]?.done).length;
+      subDays = Math.ceil(pendingCount / perDay);
+    } else {
+      sub.chapters.forEach(ch => {
+        if (appState.progress[ch.id]?.done) return;
+        const c = PW_STATE.syllabus.chapters[ch.id] || { days: 3, gap: 0 };
+        subDays += (Number(c.days) || 3) + (Number(c.gap) || 0);
+      });
+    }
     const freq = Math.max(1, (PW_STATE.syllabus.subjectFreq && PW_STATE.syllabus.subjectFreq[sub.id]) || 1);
     maxSpan = Math.max(maxSpan, subDays * freq);
   });
@@ -439,11 +447,64 @@ function pwRenderSyllabusSubjectPane() {
       </tr>`;
   }).join('');
 
-  pane.innerHTML = `
-    ${orderSel}
-    ${freqSel}
-    ${endRow}
-    <div style="overflow-x:auto;">
+  /* Single Subject: a colour-grouped, day-by-day topic list driven by
+     "Topics per day". Multi-subject syllabus keeps the full Days/Gap/Mins table. */
+  const isSingle = PW_STATE.type === 'single';
+  const perDay = Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1);
+  const dayColors = ['#3B82F6','#00C896','#F59E0B','#A855F7','#EF4444','#0891B2'];
+
+  const topicsInput = isSingle ? `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:1rem;flex-wrap:wrap;">
+      <span style="font-size:.82rem;color:var(--text);font-weight:700;">📚 Topics per day:</span>
+      <input type="number" min="1" max="20" value="${perDay}"
+             onchange="pwSetTopicsPerDay(this.value)"
+             style="width:72px;background:var(--surface);border:1px solid var(--border);border-radius:8px;
+                    color:var(--text);font-size:.85rem;padding:5px 10px;outline:none;text-align:center;font-family:var(--font);"
+             title="Ek din me kitne topic. Niche colour groups me dikhega.">
+      <span style="font-size:.7rem;color:var(--muted);">Itne topics ek din me — niche har din ka colour group dikhega.</span>
+    </div>` : '';
+
+  let tableHtml;
+  if (isSingle) {
+    let body = '';
+    orderedChapters.forEach((ch, idx) => {
+      const c = PW_STATE.syllabus.chapters[ch.id];
+      const dayNo = Math.floor(idx / perDay) + 1;
+      const color = dayColors[(dayNo - 1) % dayColors.length];
+      if (idx % perDay === 0) {
+        const inDay = Math.min(perDay, orderedChapters.length - idx);
+        body += `<tr><td colspan="2" style="background:${color}1a;color:${color};font-weight:800;font-size:.72rem;padding:7px 8px;border-top:2px solid ${color};">📅 Day ${dayNo} — ${inDay} topic${inDay>1?'s':''}</td></tr>`;
+      }
+      body += `
+        <tr style="border-bottom:1px solid var(--border);">
+          <td style="padding:6px 8px;font-size:.8rem;border-left:3px solid ${color};">
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;"></span>
+            ${escapeHtml(ch.name)}
+            <span style="font-size:.65rem;color:var(--muted);margin-left:4px;">${ch.diff||''}</span>
+          </td>
+          <td style="padding:6px 4px;text-align:center;">
+            <input type="number" min="1" max="99" value="${c.order}"
+                   style="width:48px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
+                   title="Order — kaunsa topic pehle (1 = pehla)"
+                   oninput="pwUpdateChConf('${ch.id}','order',this.value)"
+                   onchange="pwReorderChapter('${ch.id}',this.value)">
+          </td>
+        </tr>`;
+    });
+    tableHtml = `<div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+        <thead><tr style="background:var(--surface);">
+          <th style="padding:6px 8px;text-align:left;font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;">Topic / Chapter</th>
+          <th style="padding:6px 4px;text-align:center;font-size:.7rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;" title="Order">#</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <div style="font-size:.7rem;color:var(--muted);margin-top:.6rem;line-height:1.6;">
+      💡 Har colour ek din ke topics hain. <b>Topics per day</b> badlo to grouping change hogi &nbsp;|&nbsp; <b>#</b> se order badal sakte ho.
+    </div>`;
+  } else {
+    tableHtml = `<div style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
         <thead>
           <tr style="background:var(--surface);">
@@ -460,6 +521,14 @@ function pwRenderSyllabusSubjectPane() {
     <div style="font-size:.7rem;color:var(--muted);margin-top:.6rem;line-height:1.6;">
       💡 <b>#</b> = kaunsa chapter pehle (1 = sabse pehle) &nbsp;|&nbsp; <b>Days</b> = chapter padhne ke din &nbsp;|&nbsp; <b>Gap</b> = baad mein revision ke din (timetable mein 🔁 Revise block banega) &nbsp;|&nbsp; <b>Mins</b> = optional override
     </div>`;
+  }
+
+  pane.innerHTML = `
+    ${orderSel}
+    ${freqSel}
+    ${topicsInput}
+    ${endRow}
+    ${tableHtml}`;
 
   pwUpdateFooter();
 }
@@ -476,6 +545,16 @@ function pwSetSubjectFreq(subId, val) {
 function pwSetSubjectHours(subId, val) {
   pwEnsureChapterConf();
   PW_STATE.syllabus.subjectHours[subId] = Math.max(0.5, parseFloat(val) || 2);
+}
+
+/* Single Subject: how many topics (chapters) to study each day. Re-renders so
+   the colour day-groups and auto end-date update. */
+function pwSetTopicsPerDay(val) {
+  PW_STATE.syllabus.topicsPerDay = Math.max(1, Math.min(20, parseInt(val, 10) || 1));
+  if (!PW_STATE.syllabus.endDateOverride) {
+    PW_STATE.syllabus.endDate = pwCalcEndDate();
+  }
+  pwRenderSyllabusSubjectPane();
 }
 
 function pwUpdateChConf(chId, key, val) {
@@ -720,7 +799,7 @@ function pwShowStep3Summary() {
         <span>Schedule</span>
         <span><strong>${PW_STATE.syllabus.startDate}</strong> → <strong>${PW_STATE.syllabus.endDate}</strong> (${totalDays} days)</span>
       </div>
-      <div class="confirm-row"><span>Daily hours</span><span><strong>${PW_STATE.syllabus.dailyHours}h</strong></span></div>
+      ${isSingle ? '<div class="confirm-row"><span>Topics per day</span><span><strong>' + Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1) + '</strong></span></div>' : '<div class="confirm-row"><span>Daily hours</span><span><strong>' + PW_STATE.syllabus.dailyHours + 'h</strong></span></div>'}
     `;
   } else if (t === 'practice') {
     const p = PW_STATE.practice;
@@ -779,7 +858,10 @@ function pwGenerate() {
     cfg.subjectFreq = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectFreq || {}));
     cfg.subjectHours = JSON.parse(JSON.stringify(PW_STATE.syllabus.subjectHours || {}));
     /* Single Subject mode: scope the whole plan to one subject. */
-    if (PW_STATE.type === 'single') cfg.scopeSubId = PW_STATE.syllabus.subId;
+    if (PW_STATE.type === 'single') {
+      cfg.scopeSubId = PW_STATE.syllabus.subId;
+      cfg.topicsPerDay = Math.max(1, parseInt(PW_STATE.syllabus.topicsPerDay, 10) || 1);
+    }
   } else if (PW_STATE.type === 'practice') {
     cfg.subjects        = PW_STATE.practice.subjects.slice();
     cfg.practiceType    = PW_STATE.practice.practiceType;
@@ -991,6 +1073,7 @@ function editPlan(planId) {
     PW_STATE.syllabus.subjectHours   = cfg.subjectHours || {};
     /* Single Subject: restore which subject this plan is scoped to. */
     if (p.type === 'single' && cfg.scopeSubId) PW_STATE.syllabus.subId = cfg.scopeSubId;
+    PW_STATE.syllabus.topicsPerDay   = Math.max(1, parseInt(cfg.topicsPerDay, 10) || 1);
   } else if (p.type === 'practice') {
     PW_STATE.practice.subjects        = Array.isArray(cfg.subjects) ? cfg.subjects.slice() : [];
     PW_STATE.practice.practiceType    = cfg.practiceType || 'pyq';
