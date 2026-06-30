@@ -5,9 +5,9 @@ import { createStorageService } from './shared/storageService.js';
 import * as youtubeService from './shared/youtubeService.js';
 import * as plannerEngine from './shared/plannerEngine.js';
 
-window.PREPPATH_FIREBASE_CONFIG ||= firebaseConfig;
+window.SP_FIREBASE_CONFIG ||= firebaseConfig;
 
-window.PrepPathModules = Object.freeze({
+window.StudyPlannerModules = Object.freeze({
   firebaseConfig,
   dateUtils,
   domUtils,
@@ -16,6 +16,6 @@ window.PrepPathModules = Object.freeze({
   plannerEngine
 });
 
-window.dispatchEvent(new CustomEvent('preppath:modules-ready', {
-  detail: window.PrepPathModules
+window.dispatchEvent(new CustomEvent('studyplanner:modules-ready', {
+  detail: window.StudyPlannerModules
 }));

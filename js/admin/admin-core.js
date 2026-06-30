@@ -1,7 +1,7 @@
-/* PrepPath Admin — CORE: Firebase init, auth/role gate, data loading, realtime, render dispatcher.
+/* StudyPlanner Admin — CORE: Firebase init, auth/role gate, data loading, realtime, render dispatcher.
    Loaded first (defines db/auth + all shared globals). Split from the original monolithic admin.js. */
 /* ══ CONFIG — admin role stored in Firestore admins/{uid} ══ */
-const FIREBASE_CONFIG = window.PREPPATH_FIREBASE_CONFIG || {};
+const FIREBASE_CONFIG = window.SP_FIREBASE_CONFIG || {};
 firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.firestore(), auth = firebase.auth();
 

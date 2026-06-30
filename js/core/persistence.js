@@ -14,7 +14,7 @@ function saveProgress() {
 
   _localDirty = true;
   // Immediate localStorage cache (always)
-  localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState));
+  localStorage.setItem('sp_cache_' + currentUser.uid, JSON.stringify(appState));
 
   if (!_fbReady || !db) return;
 
@@ -58,7 +58,7 @@ setInterval(() => { if (currentUser) saveProgressNow(); }, 30000);
 function flushSaveOnExit() {
   if (!currentUser) return;
   /* Always refresh the local cache synchronously (survives reload offline). */
-  try { localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState)); } catch(e) {}
+  try { localStorage.setItem('sp_cache_' + currentUser.uid, JSON.stringify(appState)); } catch(e) {}
   /* Cancel the debounce and write to Firestore immediately. */
   try { clearTimeout(_saveDebounce); } catch(e) {}
   try { saveProgressNow(); } catch(e) {}

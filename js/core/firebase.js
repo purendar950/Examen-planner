@@ -49,7 +49,7 @@
    Authentication → Settings → Authorized domains →
    Add: localhost  AND  your-domain.com
    ══════════════════════════════════════════════════════════════ */
-const FIREBASE_CONFIG = window.PREPPATH_FIREBASE_CONFIG || {};
+const FIREBASE_CONFIG = window.SP_FIREBASE_CONFIG || {};
 
 /* ── CONFIG VALIDATION ──
    Agar config fill nahi ki to app localStorage mode mein chalega

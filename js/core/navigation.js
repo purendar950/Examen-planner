@@ -9,7 +9,7 @@ function isValidPage(page) {
 
 function activePageStorageKey() {
   const uid = currentUser && currentUser.uid ? currentUser.uid : 'guest';
-  return 'preppath_active_page_' + uid;
+  return 'sp_active_page_' + uid;
 }
 
 function getSavedActivePage() {

@@ -14,7 +14,7 @@ function dashTint(hex, a) {
 /* Best-effort current user's first name */
 function dashUserName() {
   let nm = '';
-  try { if (window.EZ_PROFILE && EZ_PROFILE.name) nm = EZ_PROFILE.name; } catch (e) {}
+  try { if (window.SP_PROFILE && SP_PROFILE.name) nm = SP_PROFILE.name; } catch (e) {}
   try { if (!nm && typeof currentUser !== 'undefined' && currentUser) nm = currentUser.name || currentUser.displayName || ''; } catch (e) {}
   try { if (!nm && typeof appState !== 'undefined' && appState.userName) nm = appState.userName; } catch (e) {}
   nm = (nm || 'Aspirant').trim().split(/\s+/)[0];
@@ -51,7 +51,7 @@ function updateDashboard() {
   if (rankEl) {
     let tRank = '';
     try { tRank = (appState.studyProfile && appState.studyProfile.targetScore) || ''; } catch (e) {}
-    if (!tRank) { try { tRank = (window.EZ_PROFILE && EZ_PROFILE.targetScore) || ''; } catch (e) {} }
+    if (!tRank) { try { tRank = (window.SP_PROFILE && SP_PROFILE.targetScore) || ''; } catch (e) {} }
     tRank = (tRank || '').trim();
     if (tRank) {
       rankEl.innerHTML = '<span class="dr-label">RANK</span>' +

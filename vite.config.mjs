@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 const rootDir = resolve(import.meta.dirname);
 const outDir = resolve(rootDir, 'dist');
 const legacyDirectories = ['css', 'js', 'pages'];
-const legacyFiles = ['PrepPath.png', 'dashboard-demo.html', 'recurring-demo.html'];
+const legacyFiles = ['StudyPlanner.png', 'dashboard-demo.html', 'recurring-demo.html'];
 
 function copyLegacyStaticAssets() {
   return {

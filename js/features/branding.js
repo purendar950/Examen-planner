@@ -1,9 +1,9 @@
 /* ══════════════════════════════════════════════
-   PREPPATH — REBRAND + APPROVAL FLOW + REFERRAL META
+   STUDYPLANNER — REBRAND + APPROVAL FLOW + REFERRAL META
 ══════════════════════════════════════════════ */
-const EZ_ADMIN_EMAILS = []; // legacy — roles now stored in Firestore admins/{uid}
+const SP_ADMIN_EMAILS = []; // legacy — roles now stored in Firestore admins/{uid}
 let _ezIsAdminCache = null;
-async function ezIsAdmin(uid) {
+async function isAdmin(uid) {
   if (!uid || !_fbReady || !db) return false;
   if (_ezIsAdminCache !== null) return _ezIsAdminCache;
   try { const snap = await db.collection('admins').doc(uid).get(); _ezIsAdminCache = snap.exists; }
@@ -12,18 +12,18 @@ async function ezIsAdmin(uid) {
 }
 
 /* Capture referral code from URL (?ref=...) */
-(function() { try { const r = new URLSearchParams(location.search).get('ref'); if (r) localStorage.setItem('ez_ref', r); } catch(e) {} })();
-function ezGetRef() { try { return localStorage.getItem('ez_ref') || null; } catch(e) { return null; } }
+(function() { try { const r = new URLSearchParams(location.search).get('ref'); if (r) localStorage.setItem('sp_ref', r); } catch(e) {} })();
+function getRef() { try { return localStorage.getItem('sp_ref') || null; } catch(e) { return null; } }
 
 /* Soft device fingerprint — flagging signal for admin review only */
-function ezFingerprint() {
+function fingerprint() {
   try {
     const s = [navigator.userAgent, screen.width + 'x' + screen.height, Intl.DateTimeFormat().resolvedOptions().timeZone, navigator.language, navigator.hardwareConcurrency || ''].join('|');
     let h = 0; for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
     return 'fp_' + Math.abs(h).toString(36);
   } catch(e) { return 'fp_unknown'; }
 }
-async function ezGetIp() {
+async function getIp() {
   try { const r = await fetch('https://api.ipify.org?format=json'); const j = await r.json(); return j.ip || ''; } catch(e) { return ''; }
 }
 

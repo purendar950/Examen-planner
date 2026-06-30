@@ -22,8 +22,8 @@ handleRegister = async function() {
   btn.disabled = true; btn.textContent = 'Checking device...';
   document.getElementById('reg-error').style.display = 'none';
 
-  const fp = ezFingerprint();
-  const ip = await ezGetIp();
+  const fp = fingerprint();
+  const ip = await getIp();
 
   /* ── localStorage-only fallback (no Firebase) ── */
   if (!_fbReady) {
@@ -71,7 +71,7 @@ handleRegister = async function() {
       profile: {
         name, email, mobile, examTarget: examT,
         status: regStatus, plan: 'free',
-        referredBy: ezGetRef(), fp, ip,
+        referredBy: getRef(), fp, ip,
         deviceDuplicate: deviceAlreadyUsed,
         requestedAt: firebase.firestore.FieldValue.serverTimestamp(),
         createdAt:   firebase.firestore.FieldValue.serverTimestamp()
@@ -108,11 +108,11 @@ function _ezShowRegBanner(regStatus) {
 const _loginUserBaseEZ = loginUser;
 loginUser = function(email, name, uid, state) {
   _loginUserBaseEZ(email, name, uid, state);
-  if (currentUser) ezCheckApproval(uid, email);
+  if (currentUser) CheckApproval(uid, email);
 };
 
-async function ezCheckApproval(uid, email) {
-  if (await ezIsAdmin(uid)) return; // Firestore admins/{uid} role check
+async function CheckApproval(uid, email) {
+  if (await isAdmin(uid)) return; // Firestore admins/{uid} role check
   let status = 'approved', reason = '';
   if (_fbReady && db) {
     try {
@@ -129,10 +129,10 @@ async function ezCheckApproval(uid, email) {
   }
   const old = document.getElementById('ez-gate');
   if (status === 'approved') { if (old) old.remove(); return; }
-  ezShowGate(status, reason);
+  ShowGate(status, reason);
 }
 
-function ezShowGate(status, reason) {
+function ShowGate(status, reason) {
   let ov = document.getElementById('ez-gate');
   if (!ov) {
     ov = document.createElement('div');
@@ -146,13 +146,13 @@ function ezShowGate(status, reason) {
     '<h2 style="margin-bottom:0.5rem;">' + (pending ? 'Approval Pending' : 'Access Denied') + '</h2>' +
     '<p style="color:var(--muted);line-height:1.7;margin-bottom:1.5rem;font-size:0.875rem;">' +
     (pending
-      ? 'Aapki request admin ke paas pahunch gayi hai. Approval milte hi aap PrepPath use kar paoge. Thodi der baad dobara login karke check karo.'
+      ? 'Aapki request admin ke paas pahunch gayi hai. Approval milte hi aap StudyPlanner use kar paoge. Thodi der baad dobara login karke check karo.'
       : 'Aapki request approve nahi hui.' + (reason ? '<br><br><strong>Reason:</strong> ' + escapeHtml(reason) : '')) +
     '</p>' +
-    '<button onclick="ezGateLogout()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:0.7rem 1.6rem;font-weight:700;cursor:pointer;font-family:var(--font);">← Logout</button>' +
+    '<button onclick="GateLogout()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:0.7rem 1.6rem;font-weight:700;cursor:pointer;font-family:var(--font);">← Logout</button>' +
     '</div>';
 }
-function ezGateLogout() {
+function GateLogout() {
   const ov = document.getElementById('ez-gate'); if (ov) ov.remove();
   handleLogout();
 }

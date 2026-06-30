@@ -252,15 +252,15 @@ function saveStudyProfile() {
   saveProgress();
 
   /* Mirror exam + preparation onto the Firestore user profile (used by admin
-     dashboard / EZ_PROFILE), best-effort. */
+     dashboard / SP_PROFILE), best-effort. */
   try {
     if (currentUser && typeof db !== 'undefined' && db) {
       db.collection('users').doc(currentUser.uid).set({
         profile: { examTarget, targetYear, prepLevel, prepMode, targetScore }
       }, { merge: true }).catch(function(){});
     }
-    if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {
-      EZ_PROFILE.examTarget = examTarget;
+    if (typeof SP_PROFILE !== 'undefined' && SP_PROFILE) {
+      SP_PROFILE.examTarget = examTarget;
     }
   } catch(e) {}
 

@@ -1,14 +1,14 @@
 /* ══════════════════════════════════════════════
    THEME TOGGLE — light default, persisted across all pages
 ══════════════════════════════════════════════ */
-function ezApplyTheme(t) {
+function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  try { localStorage.setItem('ez_theme', t); } catch(e) {}
+  try { localStorage.setItem('sp_theme', t); } catch(e) {}
   const b = document.getElementById('ez-theme-btn');
   if (b) { b.textContent = t === 'light' ? '🌙' : '☀️'; b.title = t === 'light' ? 'Switch to dark theme' : 'Switch to light theme'; }
 }
-function ezToggleTheme() {
-  ezApplyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
+function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
 }
 (function() {
   const st = document.createElement('style');
@@ -47,11 +47,11 @@ function ezToggleTheme() {
     const b = document.createElement('button');
     b.id = 'ez-theme-btn';
     b.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;width:34px;height:34px;cursor:pointer;font-size:0.95rem;flex-shrink:0;';
-    b.onclick = ezToggleTheme;
+    b.onclick = toggleTheme;
     right.appendChild(b);
   }
   let t = 'light';
-  try { t = localStorage.getItem('ez_theme') || 'light'; } catch(e) {}
-  ezApplyTheme(t);
+  try { t = localStorage.getItem('sp_theme') || 'light'; } catch(e) {}
+  applyTheme(t);
 })();
 

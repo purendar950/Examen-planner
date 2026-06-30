@@ -834,11 +834,11 @@ function pwGenerate() {
   /* FIX: free users may only generate / save plans for their target exam.
      They can VIEW any exam's syllabus/exam-pattern (exam switching is free),
      but plan generation is a Pro feature on non-target exams. */
-  if (ezGated()) {
-    const allowed = (EZ_PROFILE && EZ_PROFILE.examTarget) ? EZ_PROFILE.examTarget : null;
+  if (Gated()) {
+    const allowed = (SP_PROFILE && SP_PROFILE.examTarget) ? SP_PROFILE.examTarget : null;
     if (allowed && currentExam !== allowed) {
       closePlanWizard();
-      ezLockedMsg('Plan generation for non-target exams');
+      LockedMsg('Plan generation for non-target exams');
       return;
     }
   }

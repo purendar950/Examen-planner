@@ -2471,10 +2471,10 @@ document.getElementById('btnClear').addEventListener('click', () => {
 document.getElementById('btnStart').addEventListener('click', () => {
   if (selected.size > 0) {
     const keys = [...selected].map(i => TOPICS[i].key);
-    localStorage.setItem('ezSelectedTopics', JSON.stringify(keys));
+    localStorage.setItem('SelectedTopics', JSON.stringify(keys));
   } else {
     // Full test — clear any previously stored topic filter
-    localStorage.removeItem('ezSelectedTopics');
+    localStorage.removeItem('SelectedTopics');
   }
   showQuizPage();
 });
@@ -2486,8 +2486,8 @@ render();
 // matching the SSC exam format of 25-question sectional sets.
 function startTopicMock(i) {
   const t = TOPICS[i];
-  localStorage.setItem('ezSelectedTopics', JSON.stringify([t.key]));
-  localStorage.setItem('ezMockSize', '25');
+  localStorage.setItem('SelectedTopics', JSON.stringify([t.key]));
+  localStorage.setItem('MockSize', '25');
   showQuizPage();
 }
 // ─────────────────────────────────────────────────────────────────────────────
@@ -5504,26 +5504,26 @@ async function loadQuizData() {
   SECTIONS = {};
   SECTION_TIMERS = {};
   // ── ExamZen Home: respect topic selection saved in localStorage ──────────────
-  const ezSelected = (() => {
-    try { return JSON.parse(localStorage.getItem('ezSelectedTopics') || 'null'); }
+  const Selected = (() => {
+    try { return JSON.parse(localStorage.getItem('SelectedTopics') || 'null'); }
     catch(e) { return null; }
   })();
-  localStorage.removeItem('ezSelectedTopics'); // Clear after reading
+  localStorage.removeItem('SelectedTopics'); // Clear after reading
 
   // ── Quick-mock mode: split into multiple 25-Q sets if topic has >25 questions ──
-  const ezMockSizeStr = localStorage.getItem('ezMockSize');
-  const ezMockSize = ezMockSizeStr ? parseInt(ezMockSizeStr) : null;
-  if (ezMockSizeStr) localStorage.removeItem('ezMockSize');
+  const MockSizeStr = localStorage.getItem('MockSize');
+  const MockSize = MockSizeStr ? parseInt(MockSizeStr) : null;
+  if (MockSizeStr) localStorage.removeItem('MockSize');
   // ─────────────────────────────────────────────────────────────────────────────
   Object.keys(LOCAL_SECTIONS).forEach(sec => {
-    if (!ezSelected || ezSelected.length === 0 || ezSelected.includes(sec)) {
+    if (!Selected || Selected.length === 0 || Selected.includes(sec)) {
       let qs = LOCAL_SECTIONS[sec];
-      if (ezMockSize && qs.length > ezMockSize) {
-        // Shuffle all questions, then split into sets of ezMockSize
+      if (MockSize && qs.length > MockSize) {
+        // Shuffle all questions, then split into sets of MockSize
         const shuffled = [...qs].sort(() => Math.random() - 0.5);
-        const numSets = Math.ceil(shuffled.length / ezMockSize);
+        const numSets = Math.ceil(shuffled.length / MockSize);
         for (let s = 0; s < numSets; s++) {
-          const setQs = shuffled.slice(s * ezMockSize, (s + 1) * ezMockSize);
+          const setQs = shuffled.slice(s * MockSize, (s + 1) * MockSize);
           const setName = numSets > 1 ? `${sec} – Set ${s + 1}` : sec;
           SECTIONS[setName]       = setQs;
           SECTION_TIMERS[setName] = TIME_PER_SECTION;
@@ -5539,12 +5539,12 @@ async function loadQuizData() {
   QUESTIONS     = SECTIONS[SECTION_NAMES[0]];
 
   // Rename title for single-topic mock mode (may be split into multiple sets)
-  if (ezMockSize && ezSelected && ezSelected.length === 1) {
-    const topicName = ezSelected[0];
+  if (MockSize && Selected && Selected.length === 1) {
+    const topicName = Selected[0];
     const totalQ = SECTION_NAMES.reduce((sum, n) => sum + SECTIONS[n].length, 0);
     const numSets = SECTION_NAMES.length;
     QUIZ_TITLE = numSets > 1
-      ? `${topicName} — ${numSets} Sets × ${ezMockSize}-Q SSC Mock`
+      ? `${topicName} — ${numSets} Sets × ${MockSize}-Q SSC Mock`
       : `${topicName} — ${totalQ}-Q SSC Mock`;
   }
 
@@ -5783,7 +5783,7 @@ const SECURITY = {
 function showQuizPage() {
   document.getElementById('homeScreen').style.display = 'none';
   document.getElementById('loadingOverlay').style.display = 'flex';
-  // Load quiz data (reads ezSelectedTopics from localStorage)
+  // Load quiz data (reads SelectedTopics from localStorage)
   loadQuizData().then(() => {
     // loadingOverlay will be hidden inside loadQuizData after data is ready
   }).catch(err => {

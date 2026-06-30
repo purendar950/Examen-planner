@@ -87,7 +87,7 @@ function generateTimetable() {
 function buildSyllabus() {
   const container = document.getElementById('syllabus-list');
   // Apply lock UI after DOM is built so free users see locked checkboxes on non-target exams
-  setTimeout(function() { try { ezApplySyllabusLockUI(); } catch(e) {} }, 80);
+  setTimeout(function() { try { ApplySyllabusLockUI(); } catch(e) {} }, 80);
   container.innerHTML = '';
 
   // FIX 5: Show a locked-exam banner for free users on non-target exams
@@ -95,8 +95,8 @@ function buildSyllabus() {
   try {
     var _existBanner = document.getElementById('ez-syllabus-lock-banner');
     if (_existBanner) _existBanner.remove();
-    if (typeof ezGated === 'function' && ezGated() && typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {
-      var _target = EZ_PROFILE.examTarget || null;
+    if (typeof Gated === 'function' && Gated() && typeof SP_PROFILE !== 'undefined' && SP_PROFILE) {
+      var _target = SP_PROFILE.examTarget || null;
       if (_target && currentExam !== _target) {
         var _allExamsMap = (typeof ALL_EXAMS !== 'undefined') ? ALL_EXAMS : {};
         var _targetName = (_allExamsMap[_target] && _allExamsMap[_target].name) ? _allExamsMap[_target].name : _target.toUpperCase();
@@ -105,7 +105,7 @@ function buildSyllabus() {
         _banner.style.cssText = 'background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:10px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px;font-size:0.82rem;color:var(--muted);';
         _banner.innerHTML = '<span style="font-size:1.1rem;">🔒</span>' +
           '<span>Free users sirf <strong style="color:var(--text);">' + _targetName + '</strong> mein topics mark kar sakte hain. ' +
-          'Is exam ke liye <a href="#" onclick="ezOpenUpgrade();return false;" style="color:var(--accent);font-weight:700;">Pro upgrade karo</a>.</span>';
+          'Is exam ke liye <a href="#" onclick="OpenUpgrade();return false;" style="color:var(--accent);font-weight:700;">Pro upgrade karo</a>.</span>';
         container.parentNode.insertBefore(_banner, container);
       }
     }
