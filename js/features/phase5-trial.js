@@ -1,22 +1,22 @@
 /* ══════════════════════════════════════════════
-   PREPPATH PHASE 5 — 7-DAY TRIAL, WEEKLY/MONTHLY GATING, PDF EXPORT
+   STUDYPLANNER PHASE 5 — 7-DAY TRIAL, WEEKLY/MONTHLY GATING, PDF EXPORT
    NOTE: the 3-day trial is stored in appState.proTrial because Firestore
    rules make profile.trialExpiry admin-only. appState is user-writable and
    syncs via saveProgress().
 ══════════════════════════════════════════════ */
 
 /* ── Self-serve 3-day Pro trial (stored in appState) ── */
-function ezProTrialExpiry() {
+function ProTrialExpiry() {
   return (appState && appState.proTrial && appState.proTrial.expiry) ? appState.proTrial.expiry : null;
 }
-function ezIsProTrialActive() {
+function IsProTrialActive() {
   // If profile hasn't loaded from Firestore yet, deny trial access.
   // This prevents the 400ms race window where free users bypass gating.
-  if (EZ_PROFILE === null) return false;
+  if (SP_PROFILE === null) return false;
   // Admin can suspend any trial by setting profile.trialSuspended = true
   // (admin-only writable field). Blocks access immediately on next snapshot.
-  if (EZ_PROFILE.trialSuspended) return false;
-  var exp = ezProTrialExpiry();
+  if (SP_PROFILE.trialSuspended) return false;
+  var exp = ProTrialExpiry();
   if (!exp) return false;
   // FIX (Bug 3): Tamper guard — the trial expiry stored in user-writable
   // appState/localStorage must not exceed 4 days from startedAt.
@@ -29,33 +29,33 @@ function ezIsProTrialActive() {
   }
   return new Date(exp + 'T23:59:59') >= new Date();
 }
-function ezProTrialUsed() {
+function ProTrialUsed() {
   // Once per account: the trial counts as USED if ANY durable marker says so.
   // Checking several independent sources keeps the rule resilient if a user
   // clears/edits their local appState — the flag also lives on the synced
   // profile doc, and any admin-granted trial (profile.trialExpiry) counts too.
   if (appState && appState.proTrial && appState.proTrial.startedAt) return true;
   if (appState && appState.proTrialUsed) return true;
-  if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE &&
-      (EZ_PROFILE.proTrialUsed || EZ_PROFILE.trialExpiry)) return true;
+  if (typeof SP_PROFILE !== 'undefined' && SP_PROFILE &&
+      (SP_PROFILE.proTrialUsed || SP_PROFILE.trialExpiry)) return true;
   return false;
 }
-function ezProTrialDaysLeft() {
-  var exp = ezProTrialExpiry();
+function ProTrialDaysLeft() {
+  var exp = ProTrialExpiry();
   if (!exp) return 0;
   return Math.max(0, Math.ceil((new Date(exp + 'T23:59:59') - new Date()) / 86400000));
 }
-function ezStartProTrial() {
+function StartProTrial() {
   if (!currentUser) { showToast('Pehle account banao/login karo.', 'error'); return; }
   // Once per account: don't grant until we authoritatively know this account's
   // trial history. If the profile/appState hasn't loaded yet (offline, mid-load
   // or a cleared cache), granting now could RESET a trial the account already
-  // used. EZ_PROFILE is null only during that load window, so wait for it.
-  if (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null) {
+  // used. SP_PROFILE is null only during that load window, so wait for it.
+  if (typeof SP_PROFILE === 'undefined' || SP_PROFILE === null) {
     showToast('Profile load ho raha hai — ek second baad try karo.', 'info'); return;
   }
-  if (ezProTrialUsed()) { showToast('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.', 'error'); return; }
-  if (typeof ezIsPro === 'function' && ezIsPro()) { showToast('Aap already Pro ho 🎉', 'info'); return; }
+  if (ProTrialUsed()) { showToast('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.', 'error'); return; }
+  if (typeof IsPro === 'function' && IsPro()) { showToast('Aap already Pro ho 🎉', 'info'); return; }
   var today = new Date();
   var exp = new Date(today.getTime() + 3 * 86400000);
   appState.proTrial = { startedAt: today.toISOString(), expiry: exp.toISOString().slice(0, 10), days: 3 };
@@ -73,19 +73,19 @@ function ezStartProTrial() {
   } catch(e) {}
   showToast('🎉 3-din ka Pro trial shuru! Saare Pro features unlock.', 'success');
   try { var ov = document.getElementById('ez-upgrade-overlay'); if (ov) ov.classList.remove('open'); } catch(e) {}
-  // FIX 8: Use ezRefreshGates() instead of calling individual lock functions —
+  // FIX 8: Use RefreshGates() instead of calling individual lock functions —
   // it re-applies ALL gates, re-renders the active page, and updates the plan badge.
-  try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+  try { if (typeof RefreshGates === 'function') RefreshGates(); } catch(e) {}
 }
 
-/* Extend ezIsPro to also honor the self-serve trial (without losing the
+/* Extend IsPro to also honor the self-serve trial (without losing the
    original profile-based logic). */
 (function() {
-  if (typeof ezIsPro !== 'function') return;
-  var _ezIsProBase = ezIsPro;
-  ezIsPro = function() {
+  if (typeof IsPro !== 'function') return;
+  var _ezIsProBase = IsPro;
+  IsPro = function() {
     if (_ezIsProBase()) return true;
-    return ezIsProTrialActive();
+    return IsProTrialActive();
   };
 })();
 
@@ -96,15 +96,15 @@ function ezStartProTrial() {
    This fixes: after trial expires/suspends, a user could still use Pro
    features (syllabus editing on other exams, week/month/3-month planner
    views) because those gates were only applied on login / navigation. */
-function ezRefreshGates() {
-  try { ezApplyExamLock(); }        catch(e) {}
-  try { ezApplyTelegramLock(); }    catch(e) {}
-  try { ezApplyPageLock(); }        catch(e) {}
-  try { ezApplySyllabusLockUI(); }  catch(e) {}
+function RefreshGates() {
+  try { ApplyExamLock(); }        catch(e) {}
+  try { ApplyTelegramLock(); }    catch(e) {}
+  try { ApplyPageLock(); }        catch(e) {}
+  try { ApplySyllabusLockUI(); }  catch(e) {}
   /* If a now-gated user is sitting on a Pro-only planner view, bounce them
      back to the free day view. */
   try {
-    if (typeof ezGated === 'function' && ezGated() &&
+    if (typeof Gated === 'function' && Gated() &&
         typeof plannerView !== 'undefined' &&
         (plannerView === 'week' || plannerView === 'month' || plannerView === '3month')) {
       plannerView = 'day';
@@ -124,7 +124,7 @@ function ezRefreshGates() {
     else if (pid === 'dashboard' && typeof updateDashboard === 'function') updateDashboard();
   } catch(e) {}
   /* Refresh the plan badge in the top bar (Upgrade vs 💎 Plan). */
-  try { if (typeof ezRenderPlanBadge === 'function') ezRenderPlanBadge(); } catch(e) {}
+  try { if (typeof RenderPlanBadge === 'function') RenderPlanBadge(); } catch(e) {}
 }
 
 /* ── Trial expiry watchdog ──
@@ -135,20 +135,20 @@ function ezRefreshGates() {
   var _wasPro = null;
   function checkExpiry() {
     if (!currentUser) return;
-    // FIX 2a: EZ_PROFILE must be loaded before we can make a meaningful check.
-    // If it's still null (loading race), skip this tick — the ezLoadProfile()
-    // call will trigger ezRefreshGates() directly once it resolves.
-    if (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null) return;
-    var nowPro = (typeof ezIsPro === 'function') ? ezIsPro() : false;
+    // FIX 2a: SP_PROFILE must be loaded before we can make a meaningful check.
+    // If it's still null (loading race), skip this tick — the loadProfile()
+    // call will trigger RefreshGates() directly once it resolves.
+    if (typeof SP_PROFILE === 'undefined' || SP_PROFILE === null) return;
+    var nowPro = (typeof IsPro === 'function') ? IsPro() : false;
     if (_wasPro === null) { _wasPro = nowPro; return; }
     if (_wasPro && !nowPro) {
       // Just dropped from Pro → free (trial expired or plan ended)
       _wasPro = false;
-      try { ezRefreshGates(); } catch(e) {}
+      try { RefreshGates(); } catch(e) {}
       try { showToast('ℹ️ Aapka Pro access khatam ho gaya. Free plan active hai.', 'info'); } catch(e) {}
     } else if (!_wasPro && nowPro) {
       _wasPro = true;
-      try { ezRefreshGates(); } catch(e) {}
+      try { RefreshGates(); } catch(e) {}
     } else {
       _wasPro = nowPro;
     }
@@ -160,13 +160,13 @@ function ezRefreshGates() {
   // they come back next morning — should immediately see free-tier gating.
   document.addEventListener('visibilitychange', function() {
     if (document.visibilityState === 'visible') {
-      setTimeout(checkExpiry, 200); // slight delay so EZ_PROFILE is stable
+      setTimeout(checkExpiry, 200); // slight delay so SP_PROFILE is stable
     }
   });
   // FIX 2d: Also check on window focus (e.g. user switches back from another app).
   window.addEventListener('focus', function() { setTimeout(checkExpiry, 200); });
   window.addEventListener('load', function() { setTimeout(checkExpiry, 2000); });
-  window.ezCheckExpiryNow = checkExpiry;
+  window.CheckExpiryNow = checkExpiry;
 })();
 
 /* ── Gate the weekly + monthly planner views to Pro/trial ──
@@ -176,8 +176,8 @@ function ezRefreshGates() {
   if (typeof setTimetableView === 'function') {
     var _setView = setTimetableView;
     setTimetableView = function(view) {
-      if ((view === 'week' || view === 'month') && ezGated()) {
-        ezLockedMsg('Weekly / Monthly plan view');
+      if ((view === 'week' || view === 'month') && Gated()) {
+        LockedMsg('Weekly / Monthly plan view');
         return _setView('day');
       }
       return _setView(view);
@@ -190,8 +190,8 @@ function ezRefreshGates() {
   if (typeof setPlannerView === 'function') {
     var _setPlannerView = setPlannerView;
     setPlannerView = function(view, btn) {
-      if ((view === 'week' || view === 'month' || view === '3month') && ezGated()) {
-        ezLockedMsg('Weekly / Monthly / 3-Month plan view');
+      if ((view === 'week' || view === 'month' || view === '3month') && Gated()) {
+        LockedMsg('Weekly / Monthly / 3-Month plan view');
         var dayTab = document.querySelector('.planner-view-tab[data-view="day"]');
         return _setPlannerView('day', dayTab);
       }
@@ -202,7 +202,7 @@ function ezRefreshGates() {
     var _renderPV = renderPlannerView;
     renderPlannerView = function() {
       /* Force free users back to day view if they somehow land on a gated view. */
-      if (ezGated() && (typeof plannerView !== 'undefined') &&
+      if (Gated() && (typeof plannerView !== 'undefined') &&
           (plannerView === 'week' || plannerView === 'month' || plannerView === '3month')) {
         try { plannerView = 'day'; } catch(e) {}
       }
@@ -218,25 +218,25 @@ function ezRefreshGates() {
    their selected target exam. Other exams stay read-only with an upgrade
    nudge. Pro/trial users and admins are unaffected.
 ══════════════════════════════════════════════ */
-function ezCanEditSyllabus() {
+function CanEditSyllabus() {
   // Not gated (Pro/trial/admin) — full edit access.
-  if (!ezGated()) return true;
+  if (!Gated()) return true;
   // Free user: editing allowed only on their selected target exam.
   // FIX: the old fallback was `currentExam` — meaning if examTarget was
   // missing from the profile (e.g. old user, or profile not yet loaded),
   // `allowed` would equal `currentExam` and the check always returned true,
   // letting the free user mark topics on ANY exam they switched to.
-  // New fallback: if EZ_PROFILE hasn't loaded yet (null) → DENY by default.
+  // New fallback: if SP_PROFILE hasn't loaded yet (null) → DENY by default.
   // If profile is loaded but examTarget is missing → DENY (safe default).
-  if (!EZ_PROFILE) return false; // profile not loaded yet — deny until confirmed
-  var allowed = EZ_PROFILE.examTarget || null;
+  if (!SP_PROFILE) return false; // profile not loaded yet — deny until confirmed
+  var allowed = SP_PROFILE.examTarget || null;
   if (!allowed) return false; // no target exam set in profile — deny all editing
   return currentExam === allowed;
 }
 
 /* Visual lock indicator on syllabus checkboxes for non-target exams.
    Free users see a 🔒 cursor + tooltip so they know upfront it is view-only. */
-function ezApplySyllabusLockUI() {
+function ApplySyllabusLockUI() {
   // Helper to remove lock styles from all checkboxes
   function _unlockAll() {
     document.querySelectorAll('.ch-checkbox[data-locked]').forEach(function(el) {
@@ -259,14 +259,14 @@ function ezApplySyllabusLockUI() {
   }
 
   // Pro/trial/admin — full edit, remove any stale locks
-  if (!ezGated()) { _unlockAll(); return; }
+  if (!Gated()) { _unlockAll(); return; }
 
   // FIX 2: Profile not loaded yet → lock everything until we know the target.
-  // This closes the race window where buildSyllabus() fires before ezLoadProfile()
-  // resolves, causing the lock UI to run with EZ_PROFILE=null and skip locking.
-  if (!EZ_PROFILE) { _lockAll('YOUR TARGET'); return; }
+  // This closes the race window where buildSyllabus() fires before loadProfile()
+  // resolves, causing the lock UI to run with SP_PROFILE=null and skip locking.
+  if (!SP_PROFILE) { _lockAll('YOUR TARGET'); return; }
 
-  var allowed = EZ_PROFILE.examTarget || null;
+  var allowed = SP_PROFILE.examTarget || null;
 
   // FIX 2: No target exam in profile → lock ALL exams (safe default).
   // Old code fell back to currentExam here, which made every exam editable.
@@ -285,8 +285,8 @@ function ezApplySyllabusLockUI() {
     if (typeof window[name] !== 'function') return;
     var _base = window[name];
     window[name] = function() {
-      if (!ezCanEditSyllabus()) {
-        ezLockedMsg(feature + ' — sirf apne selected exam ke liye allowed hai. All exams');
+      if (!CanEditSyllabus()) {
+        LockedMsg(feature + ' — sirf apne selected exam ke liye allowed hai. All exams');
         return;
       }
       return _base.apply(this, arguments);
@@ -300,8 +300,8 @@ function ezApplySyllabusLockUI() {
 
 /* ── PDF / print export (Pro) ──
    Opens a clean print window of the given HTML so the user can Save as PDF. */
-function ezExportPdf(title, bodyHtml) {
-  if (ezGated()) { ezLockedMsg('PDF export'); return; }
+function ExportPdf(title, bodyHtml) {
+  if (Gated()) { LockedMsg('PDF export'); return; }
   var w = window.open('', '_blank');
   if (!w) { showToast('Popup block ho gaya — PDF export ke liye popups allow karo.', 'error'); return; }
   w.document.write(
@@ -321,18 +321,18 @@ function ezExportPdf(title, bodyHtml) {
 }
 
 /* Export the current saved plans for this exam. */
-function ezExportPlansPdf() {
+function ExportPlansPdf() {
   var plans = (typeof plansForCurrentExam === 'function') ? plansForCurrentExam() : (appState.plans || []);
   if (!plans.length) { showToast('Koi plan nahi hai export karne ke liye.', 'info'); return; }
   var rows = plans.map(function(p) {
     var sum = (typeof planShortSummary === 'function') ? planShortSummary(p) : '';
     return '<tr><td>' + escapeHtml(p.name || '') + '</td><td>' + escapeHtml((p.type || '')) + '</td><td>' + escapeHtml(sum) + '</td></tr>';
   }).join('');
-  ezExportPdf('My Study Plans', '<table><thead><tr><th>Name</th><th>Type</th><th>Summary</th></tr></thead><tbody>' + rows + '</tbody></table>');
+  ExportPdf('My Study Plans', '<table><thead><tr><th>Name</th><th>Type</th><th>Summary</th></tr></thead><tbody>' + rows + '</tbody></table>');
 }
 
 /* Export saved video notes. */
-function ezExportNotesPdf() {
+function ExportNotesPdf() {
   var notes = (typeof ytNotes !== 'undefined' && Array.isArray(ytNotes)) ? ytNotes : (appState.ytNotes || []);
   if (!notes.length) { showToast('Koi note nahi hai export karne ke liye.', 'info'); return; }
   var html = notes.map(function(n) {
@@ -340,7 +340,7 @@ function ezExportNotesPdf() {
     var body = (n.text || n.body || n.content || '').toString();
     return '<h2>' + escapeHtml(t) + '</h2><div>' + escapeHtml(body).replace(/\n/g, '<br>') + '</div>';
   }).join('');
-  ezExportPdf('My Notes', html);
+  ExportPdf('My Notes', html);
 }
 
 /* ══════════════════════════════════════════════
@@ -436,7 +436,7 @@ function ezExportNotesPdf() {
   }
 
   /* Ask for permission once (after login), then start the scheduler. */
-  window.ezInitNotifications = function() {
+  window.InitNotifications = function() {
     if (!('Notification' in window)) return;
     if (Notification.permission === 'granted') { startScheduler(); return; }
     if (Notification.permission === 'denied') return;
@@ -451,14 +451,14 @@ function ezExportNotesPdf() {
     var _loginUserNotif = loginUser;
     loginUser = function(email, name, uid, state) {
       _loginUserNotif(email, name, uid, state);
-      setTimeout(function() { try { window.ezInitNotifications(); } catch(e) {} }, 1200);
+      setTimeout(function() { try { window.InitNotifications(); } catch(e) {} }, 1200);
     };
   }
   /* Also start if the user is already logged in when this loads. */
   window.addEventListener('load', function() {
     setTimeout(function() {
       if (typeof currentUser !== 'undefined' && currentUser) {
-        try { window.ezInitNotifications(); } catch(e) {}
+        try { window.InitNotifications(); } catch(e) {}
       }
     }, 1500);
   });

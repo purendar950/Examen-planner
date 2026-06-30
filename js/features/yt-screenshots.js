@@ -146,7 +146,7 @@ function ssCapture() {
     });
   });
 
-  var isPro = (typeof ezIsPro === 'function') ? ezIsPro() : false;
+  var isPro = (typeof IsPro === 'function') ? IsPro() : false;
   if (!isPro && totalMoments >= FREE_MOMENT_LIMIT) {
     showToast('⚠️ Free limit reached! (' + FREE_MOMENT_LIMIT + ' moments). Upgrade to Pro for unlimited.', 'error');
     return false;

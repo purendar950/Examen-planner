@@ -1,5 +1,5 @@
 /*
- * PrepPath — Daily Telegram study-plan sender
+ * StudyPlanner — Daily Telegram study-plan sender
  * ─────────────────────────────────────────────────────────────────────────────
  * Runs in GitHub Actions (see .github/workflows/daily-telegram.yml).
  *
@@ -92,7 +92,7 @@ async function sendTelegramMessage(chatId, text) {
   }
 }
 
-/* ── Pro check — mirrors ezIsPro() in app.html. Auto Telegram delivery is a
+/* ── Pro check — mirrors IsPro() in app.html. Auto Telegram delivery is a
    Pro feature, so the cron must not send to free users even if their
    appState.telegram.enabled is somehow true (stale data, expired plan, etc.) */
 function isProUser(data, today) {
@@ -104,12 +104,12 @@ function isProUser(data, today) {
 
   // Admin-granted trial (profile.trialExpiry). This field is admin-only-writable
   // in the Firestore rules, so it's trusted (no tamper guard needed). Mirrors
-  // the web app's ezIsTrialActive(): active unless suspended and not yet expired.
+  // the web app's IsTrialActive(): active unless suspended and not yet expired.
   if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
 
   const trial = appState.proTrial;
   if (trial && trial.expiry && trial.expiry >= today) {
-    // Mirror the web app's ezIsProTrialActive() guards. proTrial lives in
+    // Mirror the web app's IsProTrialActive() guards. proTrial lives in
     // user-writable appState, so don't trust it blindly:
     //   1. An admin can suspend a trial (profile.trialSuspended).
     //   2. A self-serve trial lasts at most ~4 days (3 + 1 grace) from

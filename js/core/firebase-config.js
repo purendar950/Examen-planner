@@ -1,6 +1,6 @@
 /* Shared Firebase config for legacy global scripts.
    Keep this file loaded before js/core/firebase.js, js/index.js, and admin-core.js. */
-window.PREPPATH_FIREBASE_CONFIG = Object.freeze({
+window.SP_FIREBASE_CONFIG = Object.freeze({
   apiKey:            "AIzaSyDTBc3RAED-HuFZv7xyT2X0WFBRIXr9png",
   authDomain:        "syncstudy-3d734.firebaseapp.com",
   projectId:         "syncstudy-3d734",

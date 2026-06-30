@@ -1,5 +1,5 @@
 /* ══ FIREBASE — same project as app.html / admin.html ══ */
-const FIREBASE_CONFIG = window.PREPPATH_FIREBASE_CONFIG || {};
+const FIREBASE_CONFIG = window.SP_FIREBASE_CONFIG || {};
 let fbAuth = null, fbDb = null, fbReady = false;
 try {
   firebase.initializeApp(FIREBASE_CONFIG);
@@ -95,7 +95,7 @@ async function doRegister() {
   var btn = document.getElementById('r-btn'); btn.disabled = true; btn.textContent = 'Creating account...';
   window._ezRegistering = true;
   try {
-    var ref = null; try { ref = localStorage.getItem('ez_ref'); } catch(e) {}
+    var ref = null; try { ref = localStorage.getItem('sp_ref'); } catch(e) {}
     var cred = await fbAuth.createUserWithEmailAndPassword(email, pass);
     await cred.user.updateProfile({ displayName: name });
     await fbDb.collection('users').doc(cred.user.uid).set({
@@ -151,7 +151,7 @@ async function doGoogle() {
 (function() {
   try {
     var ref = new URLSearchParams(location.search).get('ref');
-    if (ref) localStorage.setItem('ez_ref', ref);
+    if (ref) localStorage.setItem('sp_ref', ref);
   } catch(e) {}
 })();
 
@@ -165,16 +165,16 @@ async function doGoogle() {
   } catch(e) {}
 })();
 
-/* ══ THEME (synced via ez_theme, dark default) ══ */
+/* ══ THEME (synced via sp_theme, dark default) ══ */
 (function() {
   function apply(t) {
     document.documentElement.dataset.theme = t;
-    try { localStorage.setItem('ez_theme', t); } catch(e) {}
+    try { localStorage.setItem('sp_theme', t); } catch(e) {}
     var b = document.getElementById('ez-theme-btn');
     if (b) b.textContent = t === 'dark' ? '☀️' : '🌙';
   }
   var t = 'dark';
-  try { t = localStorage.getItem('ez_theme') || 'dark'; } catch(e) {}
+  try { t = localStorage.getItem('sp_theme') || 'dark'; } catch(e) {}
   apply(t);
   var btn = document.getElementById('ez-theme-btn');
   if (btn) btn.onclick = function(){ apply(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); };

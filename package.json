@@ -1,8 +1,8 @@
 {
-  "name": "preppath-web",
+  "name": "studyplanner-web",
   "version": "1.0.0",
   "private": true,
-  "description": "PrepPath web app with Vite-powered frontend migration scaffolding.",
+  "description": "StudyPlanner web app with Vite-powered frontend migration scaffolding.",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",

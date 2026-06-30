@@ -227,7 +227,7 @@ async function pushToInbox(uid, items) {
 }
 
 /* ── Pro check — mirrors isProUser() in scripts/send-telegram.js and the web
-   app's ezIsPro(). AI auto-scheduling is a Pro-only feature, so a free user's
+   app's IsPro(). AI auto-scheduling is a Pro-only feature, so a free user's
    message must not be scheduled even if everything else is set up. ─────────── */
 function isProUser(data, today) {
   const profile  = (data && data.profile)  || {};
@@ -241,7 +241,7 @@ function isProUser(data, today) {
   if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
 
   /* Self-serve trial in user-writable appState — guard against tampering,
-     mirroring ezIsProTrialActive(): max ~4 days from startedAt, respect
+     mirroring IsProTrialActive(): max ~4 days from startedAt, respect
      admin suspension. */
   const trial = appState.proTrial;
   if (trial && trial.expiry && trial.expiry >= today) {
@@ -489,7 +489,7 @@ const server = http.createServer((req, res) => {
   /* Health check */
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('PrepPath Bot is alive 🤖');
+    res.end('StudyPlanner Bot is alive 🤖');
     return;
   }
 

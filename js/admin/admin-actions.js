@@ -1,4 +1,4 @@
-/* PrepPath Admin — ACTIONS: audit log, approve/reject/plan/trial/payment/coupon/telegram/settings handlers,
+/* StudyPlanner Admin — ACTIONS: audit log, approve/reject/plan/trial/payment/coupon/telegram/settings handlers,
    plus coupon/request/telegram/settings render helpers and the theme-toggle IIFE.
    Depends on globals from admin-core.js + admin-render.js; must load last. */
 /* ══ ACTIONS ══ */
@@ -377,7 +377,7 @@ function exportRedemptionsCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'preppath-redemptions-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.download = 'studyplanner-redemptions-' + new Date().toISOString().slice(0,10) + '.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('\u2705 Exported ' + REDEMPTIONS.length + ' redemptions');
@@ -918,7 +918,7 @@ async function markRequest(id, status) {
   try { await db.collection('requests').doc(id).update({ status: status }); await loadAll(); render(); } catch(e) { showToast('Error: ' + e.message); }
 }
 
-/* ── Theme toggle — persisted across landing / app / admin via ez_theme ── */
+/* ── Theme toggle — persisted across landing / app / admin via sp_theme ── */
 (function() {
   const st = document.createElement('style');
   st.textContent = `
@@ -935,7 +935,7 @@ async function markRequest(id, status) {
 
   function apply(t) {
     document.documentElement.dataset.theme = t;
-    try { localStorage.setItem('ez_theme', t); } catch(e) {}
+    try { localStorage.setItem('sp_theme', t); } catch(e) {}
     const b = document.getElementById('ez-theme-btn');
     if (b) b.textContent = t === 'light' ? '🌙' : '☀️';
   }
@@ -948,6 +948,6 @@ async function markRequest(id, status) {
     row.insertBefore(b, row.firstChild);
   }
   let t = 'light';
-  try { t = localStorage.getItem('ez_theme') || 'light'; } catch(e) {}
+  try { t = localStorage.getItem('sp_theme') || 'light'; } catch(e) {}
   apply(t);
 })();

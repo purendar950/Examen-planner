@@ -202,8 +202,8 @@ async function handleLogout() {
 
   // ── Reset all per-user plan/admin state ──
   if (typeof _ezIsAdminCache !== 'undefined') _ezIsAdminCache = null;
-  if (typeof EZ_PROFILE      !== 'undefined') EZ_PROFILE      = null;
-  if (typeof EZ_PENDING_PAY  !== 'undefined') EZ_PENDING_PAY  = null;
+  if (typeof SP_PROFILE      !== 'undefined') SP_PROFILE      = null;
+  if (typeof SP_PENDING_PAY  !== 'undefined') SP_PENDING_PAY  = null;
 
   clearInterval(countdownInterval);
   // Redirect to landing page after logout
@@ -219,8 +219,8 @@ function toggleUserMenu(e) {
     document.getElementById('um-name').textContent  = currentUser ? currentUser.name : 'User';
     document.getElementById('um-email').textContent = currentUser ? currentUser.email : '';
     let planText = 'Plan: Free';
-    if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {
-      const p = EZ_PROFILE;
+    if (typeof SP_PROFILE !== 'undefined' && SP_PROFILE) {
+      const p = SP_PROFILE;
       const today = new Date().toISOString().slice(0, 10);
       const isLifetimePlan = p.plan && p.plan.toLowerCase().includes('lifetime');
       if (p.plan && p.plan !== 'free' && isLifetimePlan) {
@@ -237,14 +237,14 @@ function toggleUserMenu(e) {
         planText = 'Plan: ' + p.plan + ' (No expiry set — contact admin)';
       } else if (p.trialSuspended) {
         planText = 'Trial: Suspended by admin';
-      } else if (typeof ezIsProTrialActive === 'function' && ezIsProTrialActive()) {
-        const daysLeft = typeof ezProTrialDaysLeft === 'function' ? ezProTrialDaysLeft() : '?';
+      } else if (typeof IsProTrialActive === 'function' && IsProTrialActive()) {
+        const daysLeft = typeof ProTrialDaysLeft === 'function' ? ProTrialDaysLeft() : '?';
         planText = 'Trial: Active · ' + daysLeft + ' day' + (daysLeft === 1 ? '' : 's') + ' left';
-      } else if (typeof ezIsTrialActive === 'function' && ezIsTrialActive()) {
-        // Admin-granted trial from EZ_PROFILE.trialExpiry
-        const aDays = typeof ezGetTrialDaysLeft === 'function' ? ezGetTrialDaysLeft() : '?';
+      } else if (typeof IsTrialActive === 'function' && IsTrialActive()) {
+        // Admin-granted trial from SP_PROFILE.trialExpiry
+        const aDays = typeof GetTrialDaysLeft === 'function' ? GetTrialDaysLeft() : '?';
         planText = 'Trial: Active · ' + aDays + ' day' + (aDays === 1 ? '' : 's') + ' left';
-      } else if (typeof ezProTrialUsed === 'function' && ezProTrialUsed()) {
+      } else if (typeof ProTrialUsed === 'function' && ProTrialUsed()) {
         planText = 'Trial: Ended';
       } else if (p.trialExpiry && p.trialExpiry < today) {
         planText = 'Trial: Ended';
@@ -438,7 +438,7 @@ if (auth && !_isBadProtocol) {
       loginUser(user.email, name, user.uid, state);
     } catch(e) {
       // Offline — try localStorage cache
-      const cached = localStorage.getItem('cache_' + user.uid);
+      const cached = localStorage.getItem('sp_cache_' + user.uid);
       const state  = cached ? JSON.parse(cached) : getDefaultState();
       loginUser(user.email, name, user.uid, state);
       showToast('Offline mode — using cached data 📦', 'info');
@@ -452,7 +452,7 @@ if (auth && !_isBadProtocol) {
       .onSnapshot({ includeMetadataChanges: false }, (snap) => {
         if (!snap.exists || !currentUser || snap.metadata.hasPendingWrites) return;
 
-        // ── FIX: Refresh EZ_PROFILE on every snapshot so admin actions
+        // ── FIX: Refresh SP_PROFILE on every snapshot so admin actions
         //    (suspend trial, plan change) take effect immediately without
         //    requiring the user to manually reload the page. ──
         const snapData = snap.data();
@@ -463,16 +463,16 @@ if (auth && !_isBadProtocol) {
         try { if (typeof drainTelegramInbox === 'function') drainTelegramInbox(snapData); } catch(e) {}
 
         if (typeof newProfile !== 'undefined') {
-          const oldSuspended = EZ_PROFILE && EZ_PROFILE.trialSuspended;
+          const oldSuspended = SP_PROFILE && SP_PROFILE.trialSuspended;
           const newSuspended = newProfile && newProfile.trialSuspended;
-          const oldPlan = EZ_PROFILE && EZ_PROFILE.plan;
-          const oldExpiry = EZ_PROFILE && EZ_PROFILE.planExpiry;
-          EZ_PROFILE = newProfile || {};
+          const oldPlan = SP_PROFILE && SP_PROFILE.plan;
+          const oldExpiry = SP_PROFILE && SP_PROFILE.planExpiry;
+          SP_PROFILE = newProfile || {};
           // Re-apply ALL gates if suspension, plan, or expiry changed so an
           // expired/suspended user immediately loses Pro features (no reload).
-          const planChanged = (oldPlan !== EZ_PROFILE.plan) || (oldExpiry !== EZ_PROFILE.planExpiry);
+          const planChanged = (oldPlan !== SP_PROFILE.plan) || (oldExpiry !== SP_PROFILE.planExpiry);
           if (oldSuspended !== newSuspended || planChanged) {
-            try { ezRefreshGates(); } catch(e) {}
+            try { RefreshGates(); } catch(e) {}
             if (newSuspended) {
               showToast('ℹ️ Aapka Pro trial admin ne suspend kar diya. Free features active hain.', 'info');
             }

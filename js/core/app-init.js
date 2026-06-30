@@ -1,10 +1,54 @@
 /* ══════════════════════════════════════════════
    APP INIT
 ══════════════════════════════════════════════ */
+/* ── StudyPlanner storage-key migration (legacy → sp_*) ──────────────────────
+   One-time read of old keys, copy to new sp_* keys, delete the old ones.
+   Runs immediately on script load (before anything that might read these).
+   Safe to leave in place — once keys are migrated, all reads return null and
+   the cleanup branch is a no-op. Remove this block ~6 months after release. */
+(function migrateStorageKeys() {
+  try {
+    var uid = (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || null;
+    /* Static keys */
+    var staticKeys = [
+      ['sp_theme', 'sp_theme'],
+      ['sp_ref',   'sp_ref']
+    ];
+    staticKeys.forEach(function (pair) {
+      var newKey = pair[0], oldKey = pair[1];
+      try {
+        if (localStorage.getItem(newKey) === null) {
+          var v = localStorage.getItem(oldKey);
+          if (v !== null) localStorage.setItem(newKey, v);
+        }
+        localStorage.removeItem(oldKey);
+      } catch (e) {}
+    });
+    /* Per-user keys (need uid) — deferred to initApp() since currentUser
+       may not be set at script-load time on the landing page. */
+    window.__spMigrateUserKeys = function (userUid) {
+      if (!userUid) return;
+      var pairs = [
+        ['sp_active_page_' + userUid, 'preppath_active_page_' + userUid],
+        ['sp_cache_'         + userUid, 'cache_'               + userUid]
+      ];
+      pairs.forEach(function (p) {
+        try {
+          if (localStorage.getItem(p[0]) === null) {
+            var v = localStorage.getItem(p[1]);
+            if (v !== null) localStorage.setItem(p[0], v);
+          }
+          localStorage.removeItem(p[1]);
+        } catch (e) {}
+      });
+    };
+  } catch (e) { /* localStorage may be unavailable (private mode) */ }
+})();
+
 /* Current exam cycle helpers — keep exam titles showing the live year.
    SSC CGL uses a two-year cycle label (e.g. 2026-27); most others use a single
    year. The cycle rolls over mid-year (notifications usually open ~mid-year). */
-function ezCurrentExamCycle() {
+function currentExamCycle() {
   var d = new Date();
   var y = d.getFullYear();
   /* Before July, the active recruitment cycle is still the one that opened the
@@ -16,9 +60,9 @@ function ezCurrentExamCycle() {
 
 /* Rewrite the trailing year token in every exam fullName to the live cycle.
    Idempotent: matches 'YYYY-YY', 'YYYY-YYYY' or 'YYYY' at the end of the name. */
-function ezRefreshExamYears() {
+function refreshExamYears() {
   try {
-    var cyc = ezCurrentExamCycle();
+    var cyc = currentExamCycle();
     Object.keys(ALL_EXAMS).forEach(function(k) {
       var ex = ALL_EXAMS[k];
       if (!ex || !ex.fullName) return;
@@ -31,7 +75,9 @@ function ezRefreshExamYears() {
 }
 
 function initApp() {
-  ezRefreshExamYears();
+  refreshExamYears();
+  // One-time per-user storage migration (see top of file for context).
+  try { if (currentUser && currentUser.uid) window.__spMigrateUserKeys(currentUser.uid); } catch(e) {}
   // Restore the user's last-selected exam (defaults to SSC CGL). Done first so
   // every render below uses the right exam. Silent = no "Switched to…" toast.
   try {
