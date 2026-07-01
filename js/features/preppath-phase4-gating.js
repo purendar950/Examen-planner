@@ -66,6 +66,10 @@ function ezIsTrialActive() {
   return ezGetTrialDaysLeft() > 0;
 }
 
+/* Client-side Pro/trial gate. The two server-side jobs (bot/bot-server.js
+   and scripts/send-telegram.js) run the SAME rules via shared/proGating.js
+   (Node/CommonJS, can't be imported into this classic <script> file). If you
+   change the rules here, mirror the change in shared/proGating.js too. */
 function ezIsPro() {
   if (_ezIsAdminCache === true) return true; // admin = always pro
   if (!EZ_PROFILE) return false;

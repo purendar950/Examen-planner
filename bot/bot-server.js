@@ -29,6 +29,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const http        = require('http');
 const https       = require('https');
+const { isProUser } = require('../shared/proGating');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TOKEN) {
@@ -226,36 +227,11 @@ async function pushToInbox(uid, items) {
   );
 }
 
-/* ── Pro check — mirrors isProUser() in scripts/send-telegram.js and the web
-   app's ezIsPro(). AI auto-scheduling is a Pro-only feature, so a free user's
-   message must not be scheduled even if everything else is set up. ─────────── */
-function isProUser(data, today) {
-  const profile  = (data && data.profile)  || {};
-  const appState = (data && data.appState) || {};
-
-  /* Paid plan, not expired. */
-  if (profile.plan && profile.plan !== 'free') {
-    if (!profile.planExpiry || profile.planExpiry >= today) return true;
-  }
-  /* Admin-granted trial (admin-only-writable field, trusted). */
-  if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
-
-  /* Self-serve trial in user-writable appState — guard against tampering,
-     mirroring ezIsProTrialActive(): max ~4 days from startedAt, respect
-     admin suspension. */
-  const trial = appState.proTrial;
-  if (trial && trial.expiry && trial.expiry >= today) {
-    if (profile.trialSuspended) return false;
-    if (trial.startedAt) {
-      const startedAt = new Date(trial.startedAt);
-      const maxExpiry = new Date(startedAt.getTime() + 4 * 86400000);
-      const claimedExpiry = new Date(trial.expiry + 'T23:59:59');
-      if (!isNaN(startedAt.getTime()) && claimedExpiry > maxExpiry) return false;
-    }
-    return true;
-  }
-  return false;
-}
+/* ── Pro check ──────────────────────────────────────────────────────────────
+   Delegated to shared/proGating.js — the single source of truth for
+   server-side Pro/trial gating, also used by scripts/send-telegram.js.
+   It must stay behaviourally in sync with the web app's ezIsPro()
+   (js/features/preppath-phase4-gating.js) — see the comment in that file. */
 
 /** Admins are always treated as Pro (mirrors the daily sender). */
 async function isAdminUid(uid) {
