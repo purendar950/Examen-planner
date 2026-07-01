@@ -247,9 +247,38 @@ async function getGroupLeaderboard(groupId, weekStart = null) {
   const week = weekStart || getWeekStart();
 
   try {
+    // Try leaderboard cache first (populated by Cloud Functions)
+    const cacheId = `${groupId}_${week}`;
+    const cacheDoc = await db.collection('leaderboardCache').doc(cacheId).get();
+    
+    if (cacheDoc.exists && cacheDoc.data().topUsers) {
+      const topUsers = cacheDoc.data().topUsers;
+      // Mark current user
+      return topUsers.map(user => ({
+        ...user,
+        isCurrentUser: user.uid === currentUser?.uid
+      }));
+    }
+
+    // Fallback: Client-side calculation if cache doesn't exist
+    // (happens before Cloud Functions run for the first time)
+    console.log('Leaderboard cache miss, falling back to client calculation');
+    return await getGroupLeaderboardClientSide(groupId, week);
+  } catch (e) {
+    console.error('Error fetching group leaderboard:', e);
+    return [];
+  }
+}
+
+/**
+ * Client-side fallback for leaderboard calculation
+ * Used when Cloud Functions haven't populated the cache yet
+ */
+async function getGroupLeaderboardClientSide(groupId, weekStart) {
+  try {
     const snapshot = await db.collection('groupStats')
       .where('groupId', '==', groupId)
-      .where('weekStart', '==', week)
+      .where('weekStart', '==', weekStart)
       .orderBy('weeklyScore', 'desc')
       .limit(50)
       .get();
@@ -269,7 +298,7 @@ async function getGroupLeaderboard(groupId, weekStart = null) {
       };
     });
   } catch (e) {
-    console.error('Error fetching group leaderboard:', e);
+    console.error('Error in client-side leaderboard calculation:', e);
     return [];
   }
 }
@@ -287,17 +316,33 @@ async function getGlobalLeaderboard(examId = null, weekStart = null) {
   const cacheId = `${exam}_${week}`;
 
   try {
-    // Try cache first
-    const cacheDoc = await db.collection('leaderboardCache').doc(cacheId).get();
+    // Try global leaderboard cache first (populated by Cloud Functions)
+    const cacheDoc = await db.collection('globalLeaderboard').doc(cacheId).get();
     
-    if (cacheDoc.exists) {
-      return cacheDoc.data().topUsers || [];
+    if (cacheDoc.exists && cacheDoc.data().topUsers) {
+      const topUsers = cacheDoc.data().topUsers;
+      return topUsers.map(user => ({
+        ...user,
+        isCurrentUser: user.uid === currentUser?.uid
+      }));
     }
 
-    // No cache - compute on client (for now)
-    // In production, this should be done by Cloud Functions
+    // Fallback: Client-side calculation
+    console.log('Global leaderboard cache miss, falling back to client calculation');
+    return await getGlobalLeaderboardClientSide(exam, week);
+  } catch (e) {
+    console.error('Error fetching global leaderboard:', e);
+    return [];
+  }
+}
+
+/**
+ * Client-side fallback for global leaderboard calculation
+ */
+async function getGlobalLeaderboardClientSide(examId, weekStart) {
+  try {
     const groupsSnapshot = await db.collection('groups')
-      .where('examId', '==', exam)
+      .where('examId', '==', examId)
       .where('isPublic', '==', true)
       .get();
 
@@ -306,14 +351,13 @@ async function getGlobalLeaderboard(examId = null, weekStart = null) {
     for (const groupDoc of groupsSnapshot.docs) {
       const statsSnapshot = await db.collection('groupStats')
         .where('groupId', '==', groupDoc.id)
-        .where('weekStart', '==', week)
+        .where('weekStart', '==', weekStart)
         .get();
 
       statsSnapshot.docs.forEach(doc => {
         const data = doc.data();
         const uid = data.uid;
         
-        // Aggregate scores for users in multiple groups
         if (!allStats.has(uid)) {
           allStats.set(uid, {
             uid,
@@ -332,14 +376,12 @@ async function getGlobalLeaderboard(examId = null, weekStart = null) {
       });
     }
 
-    // Sort by score and return top 50
     return Array.from(allStats.values())
       .sort((a, b) => b.weeklyScore - a.weeklyScore)
       .slice(0, 50)
       .map((user, index) => ({ ...user, rank: index + 1 }));
-
   } catch (e) {
-    console.error('Error fetching global leaderboard:', e);
+    console.error('Error in client-side global leaderboard calculation:', e);
     return [];
   }
 }

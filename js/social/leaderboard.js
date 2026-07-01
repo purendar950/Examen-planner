@@ -214,6 +214,7 @@ async function renderGlobalLeaderboard(examId, containerId = 'global-leaderboard
 
 /**
  * Subscribe to real-time leaderboard updates
+ * Uses leaderboardCache collection populated by Cloud Functions
  */
 function subscribeToLeaderboard(groupId) {
   if (!_fbReady || !db || !groupId) return;
@@ -224,54 +225,80 @@ function subscribeToLeaderboard(groupId) {
   }
 
   const weekStart = getWeekStart();
+  const cacheId = `${groupId}_${weekStart}`;
 
-  _leaderboardUnsub[groupId] = db.collection('groupStats')
-    .where('groupId', '==', groupId)
-    .where('weekStart', '==', weekStart)
-    .orderBy('weeklyScore', 'desc')
-    .limit(50)
+  // Subscribe to leaderboard cache document
+  _leaderboardUnsub[groupId] = db.collection('leaderboardCache')
+    .doc(cacheId)
     .onSnapshot(snapshot => {
-      const leaderboard = snapshot.docs.map((doc, index) => {
-        const data = doc.data();
-        return {
-          rank: index + 1,
-          uid: data.uid,
-          userName: data.userName,
-          weeklyTasksCompleted: data.weeklyTasksCompleted || 0,
-          weeklyStreak: data.weeklyStreak || 0,
-          weeklyMockAvg: data.weeklyMockAvg || 0,
-          weeklyStudyHours: data.weeklyStudyHours || 0,
-          weeklyScore: data.weeklyScore || 0,
-          isCurrentUser: data.uid === currentUser?.uid
-        };
-      });
-
-      // Update UI
       const container = document.getElementById('group-leaderboard');
-      if (container) {
-        const group = userGroups.find(g => g.id === groupId);
-        const groupName = group?.name || 'Study Group';
+      if (!container) return;
 
+      const group = userGroups.find(g => g.id === groupId);
+      const groupName = group?.name || 'Study Group';
+
+      if (!snapshot.exists || !snapshot.data().topUsers) {
+        // Cache doesn't exist yet - show loading state
         container.innerHTML = `
           <div class="leaderboard-header">
             <h3>🏆 ${escapeHtml(groupName)} Leaderboard</h3>
             <div class="leaderboard-week">${getWeekLabel(weekStart)} · ${formatWeekRange(weekStart)}</div>
           </div>
-          
-          <div class="leaderboard-metrics">
-            <div class="metric-pill">📋 Tasks: <strong>2 pts each</strong></div>
-            <div class="metric-pill">🔥 Streak: <strong>5 pts/day</strong></div>
-            <div class="metric-pill">📝 Mock Avg: <strong>1 pt/mark</strong></div>
-          </div>
-
-          <div class="leaderboard-list">
-            ${leaderboard.map((user, index) => renderLeaderboardRow(user, index === 0)).join('')}
+          <div class="empty-state">
+            <div class="empty-icon">⏳</div>
+            <p>Loading leaderboard...</p>
           </div>
         `;
+        return;
       }
+
+      const cacheData = snapshot.data();
+      const leaderboard = cacheData.topUsers.map(user => ({
+        ...user,
+        isCurrentUser: user.uid === currentUser?.uid
+      }));
+
+      container.innerHTML = `
+        <div class="leaderboard-header">
+          <h3>🏆 ${escapeHtml(groupName)} Leaderboard</h3>
+          <div class="leaderboard-week">${getWeekLabel(weekStart)} · ${formatWeekRange(weekStart)}</div>
+        </div>
+        
+        <div class="leaderboard-metrics">
+          <div class="metric-pill">📋 Tasks: <strong>2 pts each</strong></div>
+          <div class="metric-pill">🔥 Streak: <strong>5 pts/day</strong></div>
+          <div class="metric-pill">📝 Mock Avg: <strong>1 pt/mark</strong></div>
+        </div>
+
+        <div class="leaderboard-list">
+          ${leaderboard.map((user, index) => renderLeaderboardRow(user, index === 0)).join('')}
+        </div>
+        
+        <div class="leaderboard-footer">
+          <span class="leaderboard-updated">Updated: ${cacheData.updatedAt?.toDate ? formatTimeAgo(cacheData.updatedAt.toDate()) : 'just now'}</span>
+        </div>
+      `;
     }, error => {
       console.error('Leaderboard subscription error:', error);
     });
+}
+
+/**
+ * Format time ago helper
+ */
+function formatTimeAgo(date) {
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
 }
 
 /**
