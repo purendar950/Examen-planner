@@ -330,7 +330,7 @@ bot.onText(/^\/help$/, (msg) => {
     `/help — Yeh help message\n\n` +
     `🧠 <b>AI auto-schedule:</b> Bas apna task likho (e.g. "Polity Article 14 kal") ` +
     `ya YouTube link bhejo — main planner mein add kar dunga.\n\n` +
-    `🌐 App: <a href="https://examzen.in">examzen.in</a>`,
+    `🌐 App: <a href="https://studyplanner.app">studyplanner.app</a>`,
     { parse_mode: 'HTML', disable_web_page_preview: true }
   ).catch(err => console.error('sendMessage error:', err.message));
 });
@@ -373,7 +373,7 @@ bot.on('message', async (msg) => {
       bot.sendMessage(chatId,
         `🔒 <b>AI auto-schedule Pro feature hai.</b>\n\n` +
         `Telegram se task/video bhejke planner mein auto-add karna Pro members ke liye hai.\n\n` +
-        `💎 Upgrade karo: <a href="https://examzen.in">examzen.in</a>\n` +
+        `💎 Upgrade karo: <a href="https://studyplanner.app">studyplanner.app</a>\n` +
         `(Tumhara daily study plan free mein milta rahega.)`,
         { parse_mode: 'HTML', disable_web_page_preview: true }
       ).catch(() => {});
@@ -489,7 +489,7 @@ const server = http.createServer((req, res) => {
   /* Health check */
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('PrepPath Bot is alive 🤖');
+    res.end('StudyPlanner Bot is alive 🤖');
     return;
   }
 

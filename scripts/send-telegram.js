@@ -1,5 +1,5 @@
 /*
- * PrepPath — Daily Telegram study-plan sender
+ * StudyPlanner — Daily Telegram study-plan sender
  * ─────────────────────────────────────────────────────────────────────────────
  * Runs in GitHub Actions (see .github/workflows/daily-telegram.yml).
  *
@@ -277,7 +277,7 @@ function buildMessage(name, appState, topicDigest, today) {
     sections.push('🎥 <b>Videos</b>\n' + capLines(vlines, 10));
   }
 
-  const footer = '\n\n— <a href="https://examzen.in">StudyPlanner</a>';
+  const footer = '\n\n— <a href="https://studyplanner.app">StudyPlanner</a>';
   const hasContent = sections.length > 0;
   const body = hasContent
     ? sections.join('\n\n')

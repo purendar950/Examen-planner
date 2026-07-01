@@ -2272,7 +2272,7 @@ const savedDb = null;
           <line x1="46.6" y1="41.3" x2="39" y2="7.8"/>
         </g>
       </svg>
-      <span class="brand-name">ExamZen</span>
+      <span class="brand-name">StudyPlanner</span>
     </div>
     <div class="home-header-right">
       <button class="home-dark-toggle" id="homeDarkModeToggle" onclick="toggleHomeDarkMode()" title="Toggle Dark Mode">🌙</button>
@@ -2286,8 +2286,8 @@ const savedDb = null;
     <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.93 6.86l-1.77 8.34c-.13.58-.47.72-.95.45l-2.63-1.94-1.27 1.22c-.14.14-.26.26-.53.26l.19-2.68 4.88-4.41c.21-.19-.05-.29-.33-.1L7.38 14.5l-2.58-.81c-.56-.18-.57-.56.12-.83l10.1-3.89c.46-.17.87.11.71.89z" fill="white"/>
   </svg>
   <div class="tg-text">
-    <span class="tg-title">Join ExamZen on Telegram</span>
-    <span class="tg-sub">Free notes, PYQs & updates · @Exam_Zen</span>
+    <span class="tg-title">Join StudyPlanner on Telegram</span>
+    <span class="tg-sub">Free notes, PYQs & updates · @StudyPlanner</span>
   </div>
   <span class="tg-arrow">›</span>
 </a>
@@ -5490,7 +5490,7 @@ async function loadQuizData() {
 };
 
   // ── CONFIGURE YOUR TEST ─────────────────────────────────────────────────────
-  QUIZ_TITLE     = "ExamZen – Mock Test";   // Change this
+  QUIZ_TITLE     = "StudyPlanner – Mock Test";   // Change this
   QUIZ_ID        = "EZ-MOCK-001";           // Unique ID for state/result keys
   CORRECT_SCORE  = 2;                       // Marks per correct answer
   NEGATIVE_SCORE = 0.5;                     // Marks deducted per wrong answer
@@ -5503,7 +5503,7 @@ async function loadQuizData() {
 
   SECTIONS = {};
   SECTION_TIMERS = {};
-  // ── ExamZen Home: respect topic selection saved in localStorage ──────────────
+  // ── StudyPlanner Home: respect topic selection saved in localStorage ──────────────
   const ezSelected = (() => {
     try { return JSON.parse(localStorage.getItem('ezSelectedTopics') || 'null'); }
     catch(e) { return null; }
