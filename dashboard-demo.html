@@ -325,8 +325,9 @@
 </div>
 
 <script>
-  // Live countdown to make the demo feel real
-  var target = new Date('2026-07-14T10:00:00').getTime();
+  // Live countdown to make the demo feel real. Uses a rolling target (today +
+  // ~90 days) instead of a hardcoded date so the demo never freezes at 00:00:00.
+  var target = (function(){ var t = new Date(); t.setHours(10,0,0,0); t.setDate(t.getDate() + 90); return t.getTime(); })();
   function tick() {
     var now = Date.now(), diff = Math.max(0, target - now);
     var d = Math.floor(diff / 86400000);
