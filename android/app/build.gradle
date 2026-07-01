@@ -19,7 +19,6 @@ tasks.register('copyWebAssets', Copy) {
         include 'index.html'
         include 'app.html'
         include 'admin.html'
-        include 'dashboard-demo.html'
         include 'css/**'
         include 'js/**'
         include 'src/**'
