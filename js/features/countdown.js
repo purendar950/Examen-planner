@@ -1,13 +1,27 @@
 /* ══════════════════════════════════════════════
    COUNTDOWN
 ══════════════════════════════════════════════ */
-const DEFAULT_EXAM_DATE = '2026-07-14';
+// Rolling fallback so nothing here can ever be stale. getDefaultExamDate is
+// defined in state.js (loaded first); guard in case this file is used in isolation.
+function defaultExamDate() {
+  return (typeof getDefaultExamDate === 'function')
+    ? getDefaultExamDate()
+    : '2026-07-14';
+}
 
-// Returns a valid YYYY-MM-DD string, falling back to the default if invalid.
+// Returns a valid, non-past YYYY-MM-DD string. Falls back to the rolling
+// default when the value is unparseable OR already in the past — the latter
+// is what previously caused 00-day / "cram everything in 1 day" UI once a
+// hardcoded date slipped into the past.
 function safeExamDate(val) {
-  const v = (val || appState.examDate || DEFAULT_EXAM_DATE);
+  const fallback = defaultExamDate();
+  const v = (val || appState.examDate || fallback);
   const d = new Date(v + 'T09:00:00');
-  return isNaN(d.getTime()) ? DEFAULT_EXAM_DATE : v;
+  if (isNaN(d.getTime())) return fallback;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(v + 'T00:00:00');
+  if (isNaN(day.getTime()) || day < today) return fallback;
+  return v;
 }
 
 // Returns the user's saved exam date for a given exam, falling back to that

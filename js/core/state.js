@@ -16,11 +16,26 @@
   } catch(e) {}
 })();
 
+/* Default exam date is a rolling window from *today* (not a hardcoded string)
+   so a fresh user / stale build never shows a 0-day or negative countdown.
+   Users override this via the date picker; per-exam real dates are applied on
+   exam switch. Kept global so auth.js / countdown.js / planners share one source. */
+const DEFAULT_EXAM_DAYS_AHEAD = 90;
+function getDefaultExamDate() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + DEFAULT_EXAM_DAYS_AHEAD);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 let currentUser = null;
 let appState = {
   progress: {},
   tasks: {},
-  examDate: '2026-07-14',
+  examDate: getDefaultExamDate(),
   selectedExam: 'cgl',   // last exam the user switched to (restored on reload)
   activePage: 'dashboard', // last tab/page the user opened (restored on reload)
   examDates: {},         // per-exam saved dates: { examId: 'YYYY-MM-DD' }

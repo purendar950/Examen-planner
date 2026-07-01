@@ -2,7 +2,7 @@
    AI STUDY TIMETABLE GENERATOR
 ══════════════════════════════════════════════ */
 function generateTimetable() {
-  const examDate = appState.examDate || '2026-07-14';
+  const examDate = safeExamDate(appState.examDate);
   const today = new Date(); today.setHours(0,0,0,0);
   const target = new Date(examDate); target.setHours(0,0,0,0);
   const daysLeft = Math.max(1, Math.ceil((target - today) / 86400000));
