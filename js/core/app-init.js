@@ -52,7 +52,12 @@ function initApp() {
   // call (syllabus/dashboard/etc.) can never prevent the timer from running.
   const dp = document.getElementById('exam-date-picker');
   const startVal = safeExamDate(appState.examDate);
-  if (dp) dp.value = startVal;
+  if (dp) {
+    // Block picking a stale/past date at the UI level, complementing safeExamDate.
+    const t = new Date(); t.setHours(0, 0, 0, 0);
+    dp.min = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    dp.value = startVal;
+  }
   updateExamDate(startVal, false);
 
   const safely = (fn) => { try { fn(); } catch (e) { console.error('initApp step failed:', e); } };
