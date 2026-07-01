@@ -164,6 +164,9 @@
     <div class="nav-tab" onclick="switchPage('analysis')" id="nav-analysis">
       <span class="tab-icon" style="color:#3B82F6;">📈</span> Analysis
     </div>
+    <div class="nav-tab" onclick="switchPage('groups')" id="nav-groups">
+      <span class="tab-icon" style="color:#10B981;">👥</span> Groups
+    </div>
   </div>
 
 
@@ -201,6 +204,15 @@
     <div data-include="pages/yt-organiser.html"></div>
     <!-- ═══ ANALYSIS PAGE ═══ -->
     <div data-include="pages/analysis.html?v=20260626j"></div>
+    
+    <!-- ═══ GROUPS PAGE ═══ -->
+    <div class="page" id="page-groups">
+      <div class="groups-empty">
+        <div class="groups-empty-icon">👥</div>
+        <h3>Loading Study Groups...</h3>
+        <p style="color: var(--muted);">Fetching your groups...</p>
+      </div>
+    </div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
@@ -418,6 +430,12 @@
 <!-- YouTube IFrame API -->
 <script src="https://www.youtube.com/iframe_api"></script>
 <script src="js/planner-enhance.js"></script>
+
+<!-- ═══ STUDY GROUPS & LEADERBOARDS ═══ -->
+<script src="js/social/groups-core.js"></script>
+<script src="js/social/social-sync.js"></script>
+<script src="js/social/leaderboard.js"></script>
+<script src="js/social/groups-ui.js"></script>
 
 <!-- ═══ PLAN WIZARD (3-step modal) ═══ -->
 <div class="plan-wizard-overlay" id="plan-wizard-overlay" onclick="planWizardOutsideClose(event)">

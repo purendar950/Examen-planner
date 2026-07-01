@@ -2472,3 +2472,449 @@ body.ss-fs-lock { overflow: hidden !important; }
 .yt-player-wrap .ss-fs-flash.show {
   opacity: 1; transform: translateX(-50%) translateY(0);
 }
+
+
+
+/* ═══════════════════════════════════════════════
+   STUDY GROUPS & LEADERBOARDS
+════════════════════════════════════════════════ */
+
+/* Empty State for Groups */
+.groups-empty {
+  text-align: center;
+  padding: 3rem 1rem;
+}
+
+.groups-empty-icon {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.groups-empty h3 {
+  margin: 0 0 0.5rem 0;
+  color: var(--text);
+}
+
+.groups-empty p {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0 0 1.5rem 0;
+  line-height: 1.6;
+}
+
+/* Groups Container */
+.groups-container {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 1.5rem;
+  min-height: 500px;
+}
+
+@media (max-width: 900px) {
+  .groups-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Group Cards */
+.group-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.group-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 200, 150, 0.1);
+}
+
+.group-card.selected {
+  border-color: var(--accent);
+  background: rgba(0, 200, 150, 0.05);
+}
+
+.group-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 0.75rem;
+}
+
+.group-card-name {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.group-card-exam {
+  font-size: 0.72rem;
+  color: var(--accent);
+  background: rgba(0, 200, 150, 0.1);
+  padding: 3px 8px;
+  border-radius: 99px;
+}
+
+.group-card-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 0.6rem;
+}
+
+.group-card-meta span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.group-card-desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.group-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.group-members-avatars {
+  display: flex;
+  align-items: center;
+}
+
+.group-member-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-left: -8px;
+  border: 2px solid var(--surface);
+}
+
+.group-member-avatar:first-child {
+  margin-left: 0;
+}
+
+.group-member-avatar.more {
+  background: var(--accent);
+  color: #fff;
+}
+
+.group-badge {
+  font-size: 0.7rem;
+  padding: 3px 8px;
+  border-radius: 99px;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.group-badge.private {
+  background: rgba(168, 85, 247, 0.1);
+  color: #A855F7;
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+/* Leaderboard Styles */
+.leaderboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.leaderboard-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.leaderboard-week {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.leaderboard-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+
+.metric-pill {
+  font-size: 0.7rem;
+  padding: 4px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  color: var(--muted);
+}
+
+.metric-pill strong {
+  color: var(--accent);
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: all 0.2s ease;
+}
+
+.leaderboard-row:hover {
+  background: rgba(0, 200, 150, 0.03);
+}
+
+.leaderboard-row.top-1 {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.08), rgba(255, 215, 0, 0.02));
+  border-color: rgba(255, 215, 0, 0.3);
+}
+
+.leaderboard-row.top-2 {
+  background: linear-gradient(135deg, rgba(192, 192, 192, 0.08), rgba(192, 192, 192, 0.02));
+  border-color: rgba(192, 192, 192, 0.3);
+}
+
+.leaderboard-row.top-3 {
+  background: linear-gradient(135deg, rgba(205, 127, 50, 0.08), rgba(205, 127, 50, 0.02));
+  border-color: rgba(205, 127, 50, 0.3);
+}
+
+.leaderboard-row.current-user {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.leaderboard-rank {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 50px;
+}
+
+.rank-number {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.leaderboard-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.leaderboard-user .user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.leaderboard-user .user-info {
+  min-width: 0;
+}
+
+.leaderboard-user .user-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.leaderboard-user .user-stats {
+  display: flex;
+  gap: 10px;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.leaderboard-score {
+  text-align: right;
+  min-width: 60px;
+}
+
+.score-value {
+  font-weight: 800;
+  font-size: 1.1rem;
+  color: var(--accent);
+}
+
+.score-label {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.you-badge {
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 99px;
+}
+
+/* Mini Leaderboard */
+.mini-leaderboard-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 0.82rem;
+}
+
+.mini-leaderboard-row.current-user {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mini-rank {
+  min-width: 32px;
+}
+
+.mini-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-score {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mini-leaderboard-gap {
+  text-align: center;
+  color: var(--muted);
+  padding: 4px 0;
+}
+
+/* Create Group Button */
+.create-group-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 1rem;
+  background: transparent;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.create-group-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(0, 200, 150, 0.03);
+}
+
+/* Groups Dashboard Widget */
+.groups-dashboard-widget {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.groups-dashboard-widget h3 {
+  margin: 0 0 1rem 0;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.groups-dashboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.groups-dashboard-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  background: rgba(0, 200, 150, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.groups-dashboard-item:hover {
+  border-color: var(--accent);
+}
+
+.groups-dashboard-item .group-name {
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+
+.groups-dashboard-item .group-rank {
+  font-size: 0.82rem;
+  color: var(--accent);
+}
+
+/* Groups List */
+.groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Leaderboard Footer */
+.leaderboard-footer {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.leaderboard-updated,
+.leaderboard-note {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
