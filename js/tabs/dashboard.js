@@ -171,4 +171,9 @@ function updateDashboard() {
   } else if (contCard) {
     contCard.innerHTML = '<div style="font-size:0.65rem;text-transform:uppercase;color:var(--muted);letter-spacing:0.08em;margin-bottom:8px;font-weight:700;">▶ Continue Watching</div><div style="font-size:0.82rem;color:var(--muted);">No video yet — open the YouTube tab to start a course.</div>';
   }
+
+  // ── Study Groups Widget ──
+  if (typeof renderGroupsDashboardWidget === 'function') {
+    renderGroupsDashboardWidget();
+  }
 }
