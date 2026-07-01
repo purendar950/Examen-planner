@@ -5,6 +5,23 @@ let _saveDebounce = null;
 let _lastSavedJSON = '';
 let _localDirty = false; // true when there are local edits not yet written to Firestore
 
+/* ── Storage backend ──
+   Cache read/write + the Firestore save call are delegated to the shared
+   src/shared/storageService.js module (loaded as an ES module by
+   src/main.js — see docs/frontend-migration.md) so this logic has one
+   implementation instead of two. Module scripts are deferred and run AFTER
+   this classic script's top-level code, so window.PrepPathModules is looked
+   up lazily on every call (never cached at parse time) with an inline
+   fallback that reproduces the exact prior behavior if, for any reason, the
+   module hasn't loaded (e.g. it failed to fetch). */
+function _storageService() {
+  const mods = window.PrepPathModules;
+  if (mods && typeof mods.createStorageService === 'function') {
+    return mods.createStorageService({ db, auth });
+  }
+  return null;
+}
+
 function saveProgress() {
   if (!currentUser) return;
 
@@ -14,7 +31,9 @@ function saveProgress() {
 
   _localDirty = true;
   // Immediate localStorage cache (always)
-  localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState));
+  const svc = _storageService();
+  if (svc) svc.writeCache(currentUser.uid, appState);
+  else localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState));
 
   if (!_fbReady || !db) return;
 
@@ -32,10 +51,15 @@ async function saveProgressNow() {
   if (json === _lastSavedJSON) { _localDirty = false; setSyncStatus('', ''); return; } // Nothing changed
 
   try {
-    await db.collection('users').doc(currentUser.uid).set({
-      appState,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    }, { merge: true });
+    const svc = _storageService();
+    if (svc) {
+      await svc.saveUserState(currentUser.uid, appState);
+    } else {
+      await db.collection('users').doc(currentUser.uid).set({
+        appState,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
 
     _lastSavedJSON = json;
     _localDirty = false;
@@ -57,7 +81,11 @@ setInterval(() => { if (currentUser) saveProgressNow(); }, 30000);
    exit-ish event so nothing is lost. */
 function flushSaveOnExit() {
   if (!currentUser) return;
-  /* Always refresh the local cache synchronously (survives reload offline). */
+  /* Always refresh the local cache synchronously (survives reload offline).
+     Uses localStorage directly (not _storageService().writeCache, which is
+     equivalent but adds an extra property-lookup) — this handler runs on
+     pagehide/beforeunload where every millisecond before the tab is killed
+     matters, so keep it the most direct call possible. */
   try { localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState)); } catch(e) {}
   /* Cancel the debounce and write to Firestore immediately. */
   try { clearTimeout(_saveDebounce); } catch(e) {}

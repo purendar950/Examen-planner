@@ -437,9 +437,13 @@ if (auth && !_isBadProtocol) {
       }
       loginUser(user.email, name, user.uid, state);
     } catch(e) {
-      // Offline — try localStorage cache
-      const cached = localStorage.getItem('cache_' + user.uid);
-      const state  = cached ? JSON.parse(cached) : getDefaultState();
+      // Offline — try localStorage cache (via the shared storage module when
+      // available; readCache() only touches localStorage, never Firestore,
+      // so it's safe to call here even though we just failed a Firestore read).
+      const mods = window.PrepPathModules;
+      const state = mods && typeof mods.createStorageService === 'function'
+        ? mods.createStorageService({ db, auth }).readCache(user.uid, getDefaultState())
+        : (function() { const cached = localStorage.getItem('cache_' + user.uid); return cached ? JSON.parse(cached) : getDefaultState(); })();
       loginUser(user.email, name, user.uid, state);
       showToast('Offline mode — using cached data 📦', 'info');
     }

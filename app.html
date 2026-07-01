@@ -380,7 +380,16 @@
 <script type="module" src="src/main.js"></script>
 <!-- core + shared -->
 <script src="js/core/firebase.js"></script>
-<script src="js/data/exams.js"></script>
+<!-- exams.js split into one file per exam + an index assembler (see
+     js/data/exams/index.js header comment) — index.js MUST load last. -->
+<script src="js/data/exams/cgl.js"></script>
+<script src="js/data/exams/ntpc.js"></script>
+<script src="js/data/exams/gd.js"></script>
+<script src="js/data/exams/ibps.js"></script>
+<script src="js/data/exams/upsc.js"></script>
+<script src="js/data/exams/uppcs.js"></script>
+<script src="js/data/exams/bpsc.js"></script>
+<script src="js/data/exams/index.js"></script>
 <script src="js/data/syllabus-data.js"></script>
 <script src="js/core/state.js"></script>
 <script src="js/core/ui-helpers.js"></script>
@@ -393,7 +402,16 @@
 <!-- tabs -->
 <script src="js/tabs/dashboard.js"></script>
 <script src="js/tabs/syllabus.js"></script>
-<script src="js/tabs/planner.js?v=20260624c"></script>
+<!-- planner.js split into 8 cohesive modules (see js/tabs/planner-calendar.js
+     header comment) — load order matches original internal section order. -->
+<script src="js/tabs/planner-calendar.js?v=20260624c"></script>
+<script src="js/tabs/planner-schedule.js?v=20260624c"></script>
+<script src="js/tabs/planner-day-view.js?v=20260624c"></script>
+<script src="js/tabs/planner-habits.js?v=20260624c"></script>
+<script src="js/tabs/planner-rollover.js?v=20260624c"></script>
+<script src="js/tabs/planner-tasks-kanban.js?v=20260624c"></script>
+<script src="js/tabs/planner-scheduled-videos.js?v=20260624c"></script>
+<script src="js/tabs/planner-ai-insights.js?v=20260624c"></script>
 <script src="js/tabs/planner-generator.js"></script>
 <script src="js/tabs/plan-wizard.js"></script>
 <script src="js/core/exam-switch.js"></script>

@@ -19,6 +19,7 @@
 
 const admin = require('firebase-admin');
 const fetch = require('node-fetch');
+const { isProUser } = require('../shared/proGating');
 
 /* ── 1. Validate secrets ────────────────────────────────────────────────── */
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -92,40 +93,14 @@ async function sendTelegramMessage(chatId, text) {
   }
 }
 
-/* ── Pro check — mirrors ezIsPro() in app.html. Auto Telegram delivery is a
-   Pro feature, so the cron must not send to free users even if their
-   appState.telegram.enabled is somehow true (stale data, expired plan, etc.) */
-function isProUser(data, today) {
-  const profile  = data.profile  || {};
-  const appState = data.appState || {};
-  if (profile.plan && profile.plan !== 'free') {
-    if (!profile.planExpiry || profile.planExpiry >= today) return true;
-  }
-
-  // Admin-granted trial (profile.trialExpiry). This field is admin-only-writable
-  // in the Firestore rules, so it's trusted (no tamper guard needed). Mirrors
-  // the web app's ezIsTrialActive(): active unless suspended and not yet expired.
-  if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
-
-  const trial = appState.proTrial;
-  if (trial && trial.expiry && trial.expiry >= today) {
-    // Mirror the web app's ezIsProTrialActive() guards. proTrial lives in
-    // user-writable appState, so don't trust it blindly:
-    //   1. An admin can suspend a trial (profile.trialSuspended).
-    //   2. A self-serve trial lasts at most ~4 days (3 + 1 grace) from
-    //      startedAt — this rejects a tampered far-future expiry written
-    //      straight to Firestore on first activation.
-    if (profile.trialSuspended) return false;
-    if (trial.startedAt) {
-      const startedAt = new Date(trial.startedAt);
-      const maxExpiry = new Date(startedAt.getTime() + 4 * 86400000);
-      const claimedExpiry = new Date(trial.expiry + 'T23:59:59');
-      if (!isNaN(startedAt.getTime()) && claimedExpiry > maxExpiry) return false;
-    }
-    return true;
-  }
-  return false;
-}
+/* ── Pro check ──────────────────────────────────────────────────────────────
+   Delegated to shared/proGating.js — the single source of truth for
+   server-side Pro/trial gating, also used by bot/bot-server.js. Auto
+   Telegram delivery is a Pro feature, so the cron must not send to free
+   users even if their appState.telegram.enabled is somehow true (stale
+   data, expired plan, etc.). Must stay behaviourally in sync with the web
+   app's ezIsPro() (js/features/preppath-phase4-gating.js) — see the
+   comment in that file. */
 
 /* ── 4. Main ────────────────────────────────────────────────────────────── */
 

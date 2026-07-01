@@ -5,7 +5,10 @@
    syncs via saveProgress().
 ══════════════════════════════════════════════ */
 
-/* ── Self-serve 3-day Pro trial (stored in appState) ── */
+/* ── Self-serve 3-day Pro trial (stored in appState) ──
+   The tamper-guard logic in ezIsProTrialActive() below is mirrored
+   server-side in shared/proGating.js (used by the bot + daily Telegram
+   sender). Keep both in sync if you change the trial rules. ── */
 function ezProTrialExpiry() {
   return (appState && appState.proTrial && appState.proTrial.expiry) ? appState.proTrial.expiry : null;
 }

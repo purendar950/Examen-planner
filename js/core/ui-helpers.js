@@ -1,7 +1,17 @@
 /* ══════════════════════════════════════════════
    DOM SAFETY HELPERS
 ══════════════════════════════════════════════ */
+/* Canonical escapeHtml now lives in src/shared/domUtils.js (loaded as an ES
+   module by src/main.js). Module scripts are deferred, so window.PrepPathModules
+   may not exist yet the first time this file is parsed/called — every call
+   re-checks and falls back to the identical inline implementation below if
+   the shared module hasn't finished loading. This keeps a single source of
+   truth for the escaping rules without introducing any load-order risk. */
 function escapeHtml(value) {
+  const mods = window.PrepPathModules;
+  if (mods && mods.domUtils && typeof mods.domUtils.escapeHtml === 'function') {
+    return mods.domUtils.escapeHtml(value);
+  }
   return String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
