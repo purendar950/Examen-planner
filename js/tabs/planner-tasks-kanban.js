@@ -84,9 +84,41 @@ function syncWatchedToVideoTasks(videoId, watched) {
    leaves its chapter pending, and the plan re-flows it onto the next day
    (the reschedule-next-day bug). Mirrors togglePlanTopicDone().
 ══════════════════════════════════════════════ */
+
+/* Resolve the chapter id a task represents. Prefers the stored task.chId
+   (set when the task is created from the plan). For older tasks that predate
+   chId — or tasks typed in manually — fall back to matching the task text
+   against the active syllabus chapter names (ignoring a trailing part suffix
+   like " (1/3)"), preferring the task's own subject. Returns '' when no match,
+   so callers treat the task as an ordinary free-text to-do. */
+function resolveTaskChapterId(task) {
+  if (!task) return '';
+  if (task.chId) return task.chId;
+  const text = (task.text || '').replace(/\s*\(\d+\/\d+\)\s*$/, '').trim().toLowerCase();
+  if (!text) return '';
+  let subs = [];
+  try { subs = getActiveSubjects() || []; } catch (e) { return ''; }
+  /* First pass: only within the task's declared subject (most reliable). */
+  if (task.subject) {
+    for (const s of subs) {
+      if (s.id !== task.subject) continue;
+      for (const ch of (s.chapters || [])) {
+        if ((ch.name || '').trim().toLowerCase() === text) return ch.id;
+      }
+    }
+  }
+  /* Second pass: any subject (covers tasks saved without a subject id). */
+  for (const s of subs) {
+    for (const ch of (s.chapters || [])) {
+      if ((ch.name || '').trim().toLowerCase() === text) return ch.id;
+    }
+  }
+  return '';
+}
+
 function syncTaskChapterProgress(task) {
-  if (!task || !task.chId) return;
-  const chId = task.chId;
+  const chId = resolveTaskChapterId(task);
+  if (!chId) return;
   if (!appState.progress[chId]) appState.progress[chId] = {};
   const p = appState.progress[chId];
   const wasDone = !!p.done;

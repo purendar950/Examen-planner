@@ -55,7 +55,10 @@ function rolloverIncompleteTasks() {
            check, a topic the user already finished rolls forward again as an
            incomplete "from earlier" task the next day (the completed-work-
            reappears / reschedule-next-day bug). */
-        const chapterDone = !!(t.chId && appState.progress[t.chId] && appState.progress[t.chId].done);
+        const chId = (typeof resolveTaskChapterId === 'function')
+          ? resolveTaskChapterId(t)
+          : (t.chId || '');
+        const chapterDone = !!(chId && appState.progress[chId] && appState.progress[chId].done);
         const isDone = t.done || taskStatus(t) === 'done' || chapterDone;
         if (isDone) {
           /* Keep it as a dated completed record. If only the chapter flag said
