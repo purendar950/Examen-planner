@@ -65,7 +65,10 @@ function addScheduledTopicsToTasks(dateStr) {
     const ch = it.ch || {};
     const text = ch.name + (it.part ? ' ' + it.part : '');
     if (existing.has(text)) return;
-    appState.tasks[dateStr].push({ id: Date.now().toString()+Math.random(), text, done:false, priority: ch.diff==='Hard'?'high':'normal', subject: ch.subId||'' });
+    /* Carry the real chapter id (chId) so completing this task from the task
+       list / Kanban also marks the chapter done in appState.progress — otherwise
+       buildPlanSchedule keeps re-flowing the "completed" topic onto the next day. */
+    appState.tasks[dateStr].push({ id: Date.now().toString()+Math.random(), text, done:false, priority: ch.diff==='Hard'?'high':'normal', subject: ch.subId||'', chId: ch.id||'' });
     added++;
   });
   if (added) { saveProgress(); buildPlannerCalendar(); showToast(`${added} topics added to ${dateStr}! ✅`, 'success'); }

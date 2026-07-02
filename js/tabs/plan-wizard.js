@@ -1251,6 +1251,10 @@ function toggleTask(dateStr, taskId) {
     /* Bridge into the spaced-repetition engine: a completed task becomes a
        revision-eligible virtual chapter (cleared again if un-completed). */
     if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
+    /* Bridge to chapter progress: if this task came from the study plan
+       (carries task.chId), mark the underlying chapter done so it stops
+       rescheduling onto the next day. */
+    if (typeof syncTaskChapterProgress === 'function') syncTaskChapterProgress(task);
     saveProgress();
     buildPlannerCalendar();
     try { if (typeof renderRevisionWidget === 'function') renderRevisionWidget(); } catch(e) {}

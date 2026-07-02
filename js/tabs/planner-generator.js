@@ -540,7 +540,9 @@ function addTimetableToToday() {
     queue.forEach(ch => {
       if (seen.has(ch.id) || existing.has(ch.name)) { seen.add(ch.id); return; }
       seen.add(ch.id);
-      appState.tasks[todayStr].push({ id: Date.now().toString()+Math.random(), text:ch.name, done:false, priority: ch.diff==='Hard'?'high':'normal', subject: ch.subId||'' });
+      /* Persist the chapter id so completing this task syncs back to
+         appState.progress (keeps the topic out of tomorrow's schedule). */
+      appState.tasks[todayStr].push({ id: Date.now().toString()+Math.random(), text:ch.name, done:false, priority: ch.diff==='Hard'?'high':'normal', subject: ch.subId||'', chId: ch.id||'' });
       added++;
     });
   }

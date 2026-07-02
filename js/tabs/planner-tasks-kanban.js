@@ -19,6 +19,8 @@ function setTaskStatus(dateStr, taskId, status) {
   task.done = (status === 'done');
   syncVideoTaskToWatched(task);
   if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
+  /* Bridge to chapter progress so plan-derived tasks don't re-schedule next day. */
+  if (typeof syncTaskChapterProgress === 'function') syncTaskChapterProgress(task);
   saveProgress();
   buildPlannerCalendar();
   try { if (typeof renderRevisionWidget === 'function') renderRevisionWidget(); } catch(e) {}
@@ -72,6 +74,42 @@ function syncWatchedToVideoTasks(videoId, watched) {
     try { buildPlannerCalendar(); } catch (e) {}
   }
   return changed;
+}
+
+/* ══════════════════════════════════════════════
+   TASK ↔ CHAPTER PROGRESS SYNC
+   Tasks spawned from the study plan carry the real chapter id (task.chId).
+   Completing such a task must also mark that chapter done in appState.progress
+   — the SAME store buildPlanSchedule() reads. Without this, a "completed" task
+   leaves its chapter pending, and the plan re-flows it onto the next day
+   (the reschedule-next-day bug). Mirrors togglePlanTopicDone().
+══════════════════════════════════════════════ */
+function syncTaskChapterProgress(task) {
+  if (!task || !task.chId) return;
+  const chId = task.chId;
+  if (!appState.progress[chId]) appState.progress[chId] = {};
+  const p = appState.progress[chId];
+  const wasDone = !!p.done;
+  const nowDone = !!task.done;
+  if (nowDone === wasDone) return; // no transition — nothing to sync
+
+  p.done = nowDone;
+  try { _cachedRemainingCount = null; } catch (e) {} // invalidate countdown cache
+  if (nowDone) {
+    p.completedAt = new Date().toISOString();
+    if (!p.nextRevisionAt && typeof addDaysISO === 'function') {
+      p.nextRevisionAt = addDaysISO(new Date(), 1);
+    }
+    if (typeof updateStreak === 'function') updateStreak();
+  }
+
+  /* Refresh the generated timetable so a chapter completed via a task drops out
+     of the active plan immediately (buildPlanSchedule excludes done chapters). */
+  try {
+    if (window._planConfig && window._planConfig.planType && typeof generateTimetable === 'function') {
+      generateTimetable();
+    }
+  } catch (e) {}
 }
 
 function renderDayContent() {
