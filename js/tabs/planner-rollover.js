@@ -38,6 +38,7 @@ function rolloverIncompleteTasks() {
     const existingToday = new Set(todayList.map(t => (t.text || '').trim().toLowerCase()));
 
     let moved = 0;
+    let touched = false; // true if we mutated a task in place (needs a save even if nothing moved)
 
     Object.keys(appState.tasks).forEach(ds => {
       /* Only past dates within the lookback window. */
@@ -47,8 +48,22 @@ function rolloverIncompleteTasks() {
 
       const keep = [];
       list.forEach(t => {
-        const isDone = t.done || taskStatus(t) === 'done';
-        if (isDone) { keep.push(t); return; } // completed tasks stay as a dated record
+        /* A task counts as done if its own flag/status says so, OR if the
+           chapter it was created from (task.chId) has since been completed
+           anywhere else — via the plan check-off box, the Syllabus tab, or a
+           different task instance of the same chapter. Without this chapter
+           check, a topic the user already finished rolls forward again as an
+           incomplete "from earlier" task the next day (the completed-work-
+           reappears / reschedule-next-day bug). */
+        const chapterDone = !!(t.chId && appState.progress[t.chId] && appState.progress[t.chId].done);
+        const isDone = t.done || taskStatus(t) === 'done' || chapterDone;
+        if (isDone) {
+          /* Keep it as a dated completed record. If only the chapter flag said
+             done, reflect that on the task so it also renders as completed. */
+          if (chapterDone && !t.done) { t.done = true; t.status = 'done'; touched = true; }
+          keep.push(t);
+          return;
+        } // completed tasks stay as a dated record
 
         /* Skip duplicates already present on today. */
         const key = (t.text || '').trim().toLowerCase();
@@ -70,7 +85,7 @@ function rolloverIncompleteTasks() {
     });
 
     appState.lastRolloverDate = todayStr;
-    if (moved && typeof saveProgress === 'function') saveProgress();
+    if ((moved || touched) && typeof saveProgress === 'function') saveProgress();
     return moved;
   } catch (e) { return 0; }
 }
