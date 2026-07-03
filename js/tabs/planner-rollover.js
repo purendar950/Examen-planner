@@ -47,7 +47,10 @@ function rolloverIncompleteTasks() {
 
       const keep = [];
       list.forEach(t => {
-        const isDone = t.done || taskStatus(t) === 'done';
+        const isDone =
+          t.done ||
+          taskStatus(t) === 'done' ||
+          (t.chId && appState.progress && appState.progress[t.chId]?.done);
         if (isDone) { keep.push(t); return; } // completed tasks stay as a dated record
 
         /* Skip duplicates already present on today. */
