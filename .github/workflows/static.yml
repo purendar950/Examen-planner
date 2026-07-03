@@ -43,13 +43,16 @@ jobs:
       - name: Build with Vite
         run: npm run build
       
-      - name: Verify CSS files in dist
+      - name: Verify dist directory
         run: |
-          echo "Contents of dist directory:"
+          echo "===== Contents of dist directory ====="
           ls -la dist/
           echo ""
-          echo "Contents of dist/css directory:"
-          ls -la dist/css/ || echo "CSS directory not found!"
+          echo "===== Contents of dist/css directory ====="
+          ls -la dist/css/ || echo "ERROR: CSS directory not found!"
+          echo ""
+          echo "===== Checking if index.html exists ====="
+          [ -f dist/index.html ] && echo "✓ index.html found" || echo "✗ index.html NOT found"
       
       - name: Setup Pages
         uses: actions/configure-pages@v4
@@ -62,5 +65,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-        with:
-          timeout: 600000
