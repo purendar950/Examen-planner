@@ -41,6 +41,11 @@
     '.grp-hub-hero:after{content:"";position:absolute;right:-60px;top:-60px;width:180px;height:180px;border-radius:50%;background:rgba(99,102,241,.18);filter:blur(2px);}' +
     '.grp-hero-title{font-size:1.25rem;font-weight:800;margin:0 0 6px;letter-spacing:-.02em;}' +
     '.grp-hero-actions{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px;position:relative;z-index:1;}' +
+    '.grp-privacy-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;}' +
+    '.grp-privacy-option{border:1px solid var(--border);border-radius:14px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start;cursor:pointer;background:rgba(255,255,255,.03);}' +
+    '.grp-privacy-option:hover{border-color:var(--accent);}' +
+    '.grp-privacy-option strong{display:block;font-size:.86rem;}' +
+    '.grp-privacy-option span{display:block;font-size:.74rem;color:var(--muted);margin-top:2px;}' +
     '.grp-group-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;}' +
     '.grp-card{border:1px solid var(--border);border-radius:16px;padding:13px;background:rgba(255,255,255,.035);cursor:pointer;transition:.18s ease;}' +
     '.grp-card:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 10px 28px rgba(0,0,0,.12);}' +
@@ -64,9 +69,10 @@
     '        <input class="pf-input" id="grp-new-name" maxlength="40" placeholder="Group name (e.g. UPSC 2026 Warriors)" style="flex:1;min-width:200px;">',
     '        <button class="pf-btn pf-btn-accent" onclick="createStudyGroup()">➕ Create Group</button>',
     '      </div>',
-    '      <label class="pf-row" style="font-size:0.82rem;color:var(--muted);cursor:pointer;">',
-    '        <input type="checkbox" id="grp-new-public"> 🌍 Public group — discover list mein sabko dikhega (💎 Pro only)',
-    '      </label>',
+    '      <div class="grp-privacy-options">',
+    '        <label class="grp-privacy-option"><input type="radio" name="grp-privacy" value="private" checked><div><strong>🔒 Private Group</strong><span>Invite code se hi join hoga</span></div></label>',
+    '        <label class="grp-privacy-option"><input type="radio" name="grp-privacy" value="public"><div><strong>🌍 Public Group</strong><span>Discover list mein dikhega (💎 Pro)</span></div></label>',
+    '      </div>',
     '      <div class="pf-row">',
     '        <input class="pf-input" id="grp-join-code" maxlength="12" placeholder="Invite code (e.g. X4B2ZK)" style="flex:1;min-width:160px;text-transform:uppercase;">',
     '        <button class="pf-btn" onclick="joinStudyGroup()">🎫 Join Code</button>',
@@ -86,7 +92,7 @@
     '<div class="pf-wrap" id="grp-inside-view" style="display:none;">',
     '  <div id="grp-detail"></div>',
     '</div>'
-  ].join('\\n');
+  ].join('\n');
 
   /* ── inject page + visible nav tab ── */
   function injectPage() {
@@ -297,8 +303,8 @@
     var inp = document.getElementById('grp-new-name');
     var name = ((inp && inp.value) || '').trim();
     if (name.length < 3) { toast('Group name kam se kam 3 characters ka ho.', 'error'); return; }
-    var pubCb = document.getElementById('grp-new-public');
-    var wantPublic = !!(pubCb && pubCb.checked);
+    var privacy = document.querySelector('input[name="grp-privacy"]:checked');
+    var wantPublic = !!(privacy && privacy.value === 'public');
     var isPro = (typeof ezIsPro === 'function') && ezIsPro();
     if (wantPublic && !isPro) { toast('🌍 Public groups sirf Pro users bana sakte hain. Upgrade karo! 💎', 'error'); return; }
     try {
