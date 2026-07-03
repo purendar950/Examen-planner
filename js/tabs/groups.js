@@ -34,6 +34,9 @@
     '.grp-lb-table th:nth-child(3),.grp-lb-table td:nth-child(3){width:18%;}' +
     '.grp-lb-table th:nth-child(4),.grp-lb-table td:nth-child(4){width:16%;}' +
     '.grp-lb-table th:nth-child(5),.grp-lb-table td:nth-child(5){width:16%;}' +
+    '.grp-mock-table th:nth-child(1),.grp-mock-table td:nth-child(1){width:34px;}' +
+    '.grp-mock-table th:nth-child(3),.grp-mock-table td:nth-child(3){width:22%;}' +
+    '.grp-mock-table th:nth-child(4),.grp-mock-table td:nth-child(4){width:22%;}' +
     '.grp-item{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px dashed var(--border);}' +
     '.grp-item:last-child{border-bottom:none;}' +
     '.grp-code{font-family:monospace;font-weight:800;letter-spacing:2px;background:var(--surface);border:1px dashed var(--accent);border-radius:8px;padding:4px 10px;}' +
@@ -58,8 +61,11 @@
     '.grp-card-title{font-weight:800;margin-bottom:5px;display:flex;align-items:center;gap:6px;}' +
     '.grp-card-meta{font-size:.76rem;color:var(--muted);}' +
     '.grp-detail-head{border:1px solid var(--border);border-radius:18px;padding:14px;background:linear-gradient(135deg,rgba(15,23,42,.05),rgba(99,102,241,.10));margin-bottom:12px;}' +
-    '.grp-box-grid{display:grid;grid-template-columns:1fr;gap:12px;align-items:start;width:100%;max-width:100%;}' +
-    '.grp-box-grid>*{min-width:0;max-width:100%;width:100%;}' +
+    /* Responsive dashboard grid: 2+ columns on wide screens, 1 column on phones.
+       minmax(min(100%,300px),1fr) guarantees a track never forces the grid wider
+       than its container (the classic auto-fit overflow trap on <300px screens). */
+    '.grp-box-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;align-items:start;width:100%;max-width:100%;}' +
+    '.grp-box-grid>*{min-width:0;max-width:100%;}' +
     '.grp-dash-box{border:1px solid var(--border);border-radius:16px;padding:13px;background:var(--card-bg,rgba(255,255,255,.04));min-height:120px;min-width:0;max-width:100%;width:100%;overflow:hidden;}' +
     '.grp-dash-box h3{margin:0 0 10px;font-size:.95rem;display:flex;align-items:center;gap:6px;}' +
     '.grp-member-count{font-size:.74rem;font-weight:700;color:var(--muted);margin:-4px 0 10px;text-transform:uppercase;letter-spacing:.04em;}' +
@@ -425,7 +431,7 @@
       return (b.points || 0) - (a.points || 0);
     });
     if (!ranked.length) return '<div class="pf-muted">Abhi mock ranking empty hai. Mock complete karte hi rank yahan dikhegi.</div>';
-    return '<div class="grp-table-scroll"><table class="grp-table"><thead><tr><th class="grp-rank">#</th><th>User</th><th>Mocks</th><th>Pts</th></tr></thead><tbody>' +
+    return '<div class="grp-table-scroll"><table class="grp-table grp-mock-table"><thead><tr><th class="grp-rank">#</th><th>User</th><th>Mocks</th><th>Pts</th></tr></thead><tbody>' +
       ranked.slice(0, 10).map(function (r, i) {
         var m = Number(r.mocksTaken || r.mocks || r.mockTests || 0);
         return '<tr' + (r.uid === uid ? ' class="grp-me"' : '') + '><td class="grp-rank">' + (i + 1) + '</td><td>' + clean(r.name || 'Student') + '</td><td>' + m + '</td><td>' + (r.points || 0) + '</td></tr>';
@@ -516,8 +522,8 @@
       box.innerHTML =
         '<div class="grp-detail-head">' +
         '  <div class="pf-row" style="justify-content:space-between;align-items:flex-start;gap:12px;">' +
-        '    <div><button class="pf-btn" onclick="grpBackToHub()">← Groups</button>' +
-        '    <h2 style="margin:10px 0 4px;font-size:1.25rem;">👥 ' + clean(g.name || 'Group') + (g.isPublic ? ' <span class="grp-pub-badge">🌍 PUBLIC</span>' : '') + '</h2>' +
+        '    <div style="min-width:0;flex:1;"><button class="pf-btn" onclick="grpBackToHub()">← Groups</button>' +
+        '    <h2 style="margin:10px 0 4px;font-size:1.25rem;overflow-wrap:anywhere;word-break:break-word;">👥 ' + clean(g.name || 'Group') + (g.isPublic ? ' <span class="grp-pub-badge">🌍 PUBLIC</span>' : '') + '</h2>' +
         '    <div class="pf-muted">' + (g.memberCount || members.length || rows.length || 1) + ' members · Week ' + wk + ' · Leaderboard resets Monday</div></div>' +
         '    <div class="pf-row"><span class="grp-code" id="grp-code-txt">' + clean(g.inviteCode || '') + '</span><button class="pf-btn" onclick="grpCopyCode()">📋 Copy</button>' +
         (isOwner ? '<button class="pf-btn pf-btn-danger" onclick="grpDeleteGroup(\'' + gid + '\')">🗑 Delete</button>' : '') + '</div>' +
