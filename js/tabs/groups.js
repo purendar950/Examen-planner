@@ -328,7 +328,8 @@
       grpMyGroups().push({ id: ref.id, name: name });
       try { saveProgress(); } catch (e) {}
       if (inp) inp.value = '';
-      if (pubCb) pubCb.checked = false;
+      var privReset = document.querySelector('input[name="grp-privacy"][value="private"]');
+      if (privReset) privReset.checked = true;
       window.grpSyncScores(true);
       renderGroupsPage();
       toast('🎉 Group ban gaya! Invite code: ' + code + (wantPublic ? ' (public — Discover mein dikhega)' : ''), 'success');
