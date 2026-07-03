@@ -314,7 +314,13 @@
 
   if (typeof switchPage === 'function') {
     var _spg = switchPage;
-    switchPage = function (p) { _spg(p); if (p === 'groups') { try { renderGroupsPage(); } catch (e) {} } };
+    switchPage = function (p) {
+      // Leaving the Groups page entirely — kill any live chat listener so it
+      // doesn't keep running (and re-rendering a detached DOM node) forever.
+      if (p !== 'groups') { try { grpDetachWall(); } catch (e) {} }
+      _spg(p);
+      if (p === 'groups') { try { renderGroupsPage(); } catch (e) {} }
+    };
   }
 
   /* ── create / join ── */
@@ -418,8 +424,17 @@
   /* ── group detail: leaderboard + mock ranking + members + chat ── */
   var _openGid = null;
   var _openTab = 'chat';   // remembered across re-renders (chat post / member kick)
+  var _wallUnsub = null;   // live onSnapshot unsubscribe fn for the open group's chat
+
+  /* Stop the live chat listener — call this whenever the chat panel leaves
+     the DOM (back to hub, page switch, group left/deleted) to avoid leaked
+     Firestore listeners piling up across sessions. */
+  window.grpDetachWall = function () {
+    if (_wallUnsub) { try { _wallUnsub(); } catch (e) {} _wallUnsub = null; }
+  };
 
   window.grpBackToHub = function () {
+    grpDetachWall();
     var hub = document.getElementById('grp-hub-view'), inside = document.getElementById('grp-inside-view');
     if (inside) inside.style.display = 'none';
     if (hub) hub.style.display = '';
@@ -517,6 +532,9 @@
   window.openStudyGroup = async function (gid, opts) {
     var box = document.getElementById('grp-detail');
     if (!box || !fbReady()) return;
+    // Switching groups (or reopening) — drop any listener from the
+    // previously open group before attaching a new one.
+    if (_openGid !== gid) grpDetachWall();
     var hub = document.getElementById('grp-hub-view'), inside = document.getElementById('grp-inside-view');
     if (hub) hub.style.display = 'none';
     if (inside) inside.style.display = '';
@@ -553,7 +571,7 @@
         '  <button class="grp-tab" data-grp-tab="members" onclick="grpSwitchTab(\'members\')">👤 Members <span class="grp-tab-badge">' + members.length + '</span></button>' +
         '</div>' +
         '<div class="grp-dash-box grp-panel active" data-grp-panel="chat">' +
-        '  <h3>💬 Group Chat</h3>' +
+        '  <h3>💬 Group Chat <span id="grp-chat-live" class="pf-muted" style="font-size:.68rem;font-weight:400;">🟢 Live</span></h3>' +
         '  <div class="pf-row" style="margin-bottom:10px;"><input class="pf-input" id="grp-wall-input" maxlength="300" placeholder="Message type karo…" style="flex:1;min-width:160px;" onkeydown="if(event.key===\'Enter\')grpPostWall(\'' + gid + '\')"><button class="pf-btn pf-btn-accent" onclick="grpPostWall(\'' + gid + '\')">Send</button></div>' +
         '  <div id="grp-wall" class="grp-chat-scroll"><div class="pf-muted">Loading chat…</div></div>' +
         '</div>' +
@@ -566,26 +584,41 @@
         '<div class="grp-dash-box grp-panel" data-grp-panel="members">' +
         '  <h3>👤 Members</h3>' + memberListHtml(members, g.createdBy, u && u.uid, gid, isOwner) +
         '</div>';
-      grpLoadWall(gid, isOwner);
+      grpAttachWallListener(gid, isOwner);
       grpSwitchTab(_openTab);   // restore remembered tab (chat on fresh open)
     } catch (e) { box.innerHTML = '<div class="pf-card"><div class="pf-muted">Load failed: ' + clean(e.message || e) + '</div></div>'; }
   };
 
-  window.grpLoadWall = function (gid, isOwner) {
+  /* Live chat — replaces the old one-shot .get() with an onSnapshot
+     listener so new messages / likes / deletes appear instantly for
+     everyone in the group, without needing to reopen it. */
+  window.grpAttachWallListener = function (gid, isOwner) {
+    grpDetachWall();   // never stack more than one listener at a time
     var box = document.getElementById('grp-wall');
     if (!box || !fbReady()) return;
-    var u = me();
-    db.collection('groups').doc(gid).collection('wall')
-      .orderBy('createdAt', 'desc').limit(30).get()
-      .then(function (snap) {
+    var liveDot = document.getElementById('grp-chat-live');
+
+    _wallUnsub = db.collection('groups').doc(gid).collection('wall')
+      .orderBy('createdAt', 'desc').limit(30)
+      .onSnapshot(function (snap) {
+        if (liveDot) liveDot.textContent = '🟢 Live';
+        var u = me();
         if (snap.empty) { box.innerHTML = '<div class="pf-muted">Wall khali hai — pehla message post karo! 🚀</div>'; return; }
-        box.innerHTML = snap.docs.map(function (d) {
+
+        // Preserve the reader's scroll position unless they're already
+        // pinned near the bottom — don't yank someone down mid-scroll-up.
+        var wasNearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 60;
+
+        // docs come back newest-first (for the limit(30) to cap correctly);
+        // reverse for natural oldest→newest chat reading order.
+        var docs = snap.docs.slice().reverse();
+        box.innerHTML = docs.map(function (d) {
           var m = d.data();
           var likes = Array.isArray(m.likes) ? m.likes : [];
           var liked = u && likes.indexOf(u.uid) >= 0;
           var canDel = u && (m.uid === u.uid || isOwner);
           var when = '';
-          try { when = m.createdAt && m.createdAt.toDate ? m.createdAt.toDate().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''; } catch (e) {}
+          try { when = m.createdAt && m.createdAt.toDate ? m.createdAt.toDate().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'sending…'; } catch (e) {}
           return '<div class="grp-wall-msg' + (m.auto ? ' auto' : '') + '">' +
             '<div class="grp-wall-head"><span><strong>' + clean(m.name || 'Student') + '</strong> · ' + when + '</span>' +
             (canDel ? '<span style="cursor:pointer;" title="Delete" onclick="grpDelWall(\'' + gid + '\',\'' + d.id + '\')">✕</span>' : '') +
@@ -594,8 +627,12 @@
             '<button class="grp-like"' + (liked ? ' style="border-color:var(--accent);color:var(--accent);" disabled' : ' onclick="grpLikeWall(\'' + gid + '\',\'' + d.id + '\')"') + '>💪 ' + likes.length + '</button>' +
             '</div>';
         }).join('');
-      })
-      .catch(function () { box.innerHTML = '<div class="pf-muted">Wall load nahi hua.</div>'; });
+
+        if (wasNearBottom) box.scrollTop = box.scrollHeight;
+      }, function (err) {
+        if (liveDot) liveDot.textContent = '🔴 Offline';
+        box.innerHTML = '<div class="pf-muted">Chat load nahi hua: ' + clean((err && err.message) || err) + '</div>';
+      });
   };
 
   window.grpPostWall = async function (gid) {
@@ -604,14 +641,16 @@
     var inp = document.getElementById('grp-wall-input');
     var text = ((inp && inp.value) || '').trim();
     if (!text) return;
+    if (inp) inp.value = '';   // clear immediately — the live listener renders the sent message
     try {
       await db.collection('groups').doc(gid).collection('wall').add({
         uid: u.uid, name: u.name || 'Student', text: text, auto: false, likes: [],
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
-      if (inp) inp.value = '';
-      window.openStudyGroup(gid, { keepTab: true });
-    } catch (e) { toast('Post failed: ' + (e.message || e), 'error'); }
+    } catch (e) {
+      if (inp) inp.value = text;   // restore so the message isn't lost on failure
+      toast('Post failed: ' + (e.message || e), 'error');
+    }
   };
 
   window.grpLikeWall = async function (gid, msgId) {
@@ -620,7 +659,7 @@
     try {
       await db.collection('groups').doc(gid).collection('wall').doc(msgId)
         .update({ likes: firebase.firestore.FieldValue.arrayUnion(u.uid) });
-      window.openStudyGroup(gid, { keepTab: true });
+      // no manual refresh needed — the onSnapshot listener updates the UI
     } catch (e) {}
   };
 
@@ -629,7 +668,7 @@
     if (!confirm('Message delete karein?')) return;
     try {
       await db.collection('groups').doc(gid).collection('wall').doc(msgId).delete();
-      window.openStudyGroup(gid, { keepTab: true });
+      // no manual refresh needed — the onSnapshot listener updates the UI
     } catch (e) { toast('Delete failed: ' + (e.message || e), 'error'); }
   };
 
@@ -651,7 +690,7 @@
       var i = list.findIndex(function (g) { return g.id === gid; });
       if (i >= 0) list.splice(i, 1);
       try { saveProgress(); } catch (e) {}
-      if (_openGid === gid) { var d = document.getElementById('grp-detail'); if (d) d.innerHTML = ''; _openGid = null; }
+      if (_openGid === gid) { grpDetachWall(); var d = document.getElementById('grp-detail'); if (d) d.innerHTML = ''; _openGid = null; }
       renderGroupsPage();
       toast('Group chhod diya.', 'info');
     } catch (e) { toast('Failed: ' + (e.message || e), 'error'); }
@@ -679,7 +718,7 @@
       var i = list.findIndex(function (g) { return g.id === gid; });
       if (i >= 0) list.splice(i, 1);
       try { saveProgress(); } catch (e) {}
-      if (_openGid === gid) { var d = document.getElementById('grp-detail'); if (d) d.innerHTML = ''; _openGid = null; }
+      if (_openGid === gid) { grpDetachWall(); var d = document.getElementById('grp-detail'); if (d) d.innerHTML = ''; _openGid = null; }
       renderGroupsPage();
       toast('🗑 Group delete ho gaya.', 'info');
     } catch (e) { toast('Delete failed: ' + (e.message || e), 'error'); }
