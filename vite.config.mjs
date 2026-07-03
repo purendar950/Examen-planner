@@ -40,6 +40,12 @@ function copyLegacyStaticAssets() {
 }
 
 export default defineConfig({
+  // GitHub Pages serves this project from /Examen-planner/, not the domain
+  // root. Vite defaults to absolute root-relative asset paths (/assets/...),
+  // which 404 on a project Pages site and leave the deployed app unstyled.
+  // Setting `base` scopes every built <script>/<link> reference to the
+  // correct subpath so CSS/JS actually load in production.
+  base: '/Examen-planner/',
   appType: 'mpa',
   build: {
     outDir: 'dist',
