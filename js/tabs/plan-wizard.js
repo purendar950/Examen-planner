@@ -1265,6 +1265,16 @@ function toggleTask(dateStr, taskId) {
 function deleteTask(dateStr, taskId) {
   appState.tasks[dateStr] = (appState.tasks[dateStr]||[]).filter(t=>t.id!==taskId);
   if (typeof removeTaskRevision === 'function') removeTaskRevision(taskId);
+  /* Record a tombstone so the cross-tab save merge (mergeRemoteIntoLocal in
+     persistence.js) never resurrects this task from a stale remote copy that
+     still has it — without this, deleting a task in one tab could bring it
+     right back on the next save if another tab/device saves around the same
+     time. Trimmed to the most recent 500 so this never grows unbounded. */
+  if (!Array.isArray(appState._deletedTaskIds)) appState._deletedTaskIds = [];
+  appState._deletedTaskIds.push(taskId);
+  if (appState._deletedTaskIds.length > 500) {
+    appState._deletedTaskIds = appState._deletedTaskIds.slice(-500);
+  }
   saveProgress(); buildPlannerCalendar();
 }
 
