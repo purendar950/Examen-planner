@@ -10,18 +10,31 @@ const legacyFiles = ['PrepPath.png'];
 function copyLegacyStaticAssets() {
   return {
     name: 'copy-legacy-static-assets',
+    apply: 'build',
+    enforce: 'post',
     closeBundle() {
+      console.log('📋 Copying legacy assets to dist...');
       mkdirSync(outDir, { recursive: true });
 
       legacyDirectories.forEach((dir) => {
         const from = resolve(rootDir, dir);
-        if (existsSync(from)) cpSync(from, resolve(outDir, dir), { recursive: true });
+        const to = resolve(outDir, dir);
+        if (existsSync(from)) {
+          console.log(`  ✓ Copying ${dir}/ → dist/${dir}/`);
+          cpSync(from, to, { recursive: true, force: true });
+        }
       });
 
       legacyFiles.forEach((file) => {
         const from = resolve(rootDir, file);
-        if (existsSync(from)) cpSync(from, resolve(outDir, file));
+        const to = resolve(outDir, file);
+        if (existsSync(from)) {
+          console.log(`  ✓ Copying ${file} → dist/${file}`);
+          cpSync(from, to, { force: true });
+        }
       });
+      
+      console.log('✅ Legacy assets copied successfully!');
     }
   };
 }
