@@ -72,7 +72,19 @@
     '.grp-role-member{background:rgba(148,163,184,.12);color:var(--muted);border:1px solid var(--border);}' +
     '.grp-kick{flex-shrink:0;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#EF4444;border:1px solid rgba(239,68,68,.3);cursor:pointer;transition:.15s ease;}' +
     '.grp-kick:hover{background:rgba(239,68,68,.15);border-color:#EF4444;}' +
-    '.grp-pub-badge{font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(99,102,241,0.15);color:#818CF8;border:1px solid rgba(99,102,241,0.35);}';
+    '.grp-pub-badge{font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(99,102,241,0.15);color:#818CF8;border:1px solid rgba(99,102,241,0.35);}' +
+    /* ── in-group tabs ── */
+    '.grp-tabs{display:flex;gap:4px;overflow-x:auto;-webkit-overflow-scrolling:touch;border-bottom:1px solid var(--border);margin-bottom:14px;scrollbar-width:none;}' +
+    '.grp-tabs::-webkit-scrollbar{display:none;}' +
+    '.grp-tab{flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:10px 14px;font-size:0.86rem;font-weight:600;color:var(--muted);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;white-space:nowrap;transition:.15s ease;margin-bottom:-1px;}' +
+    '.grp-tab:hover{color:var(--text);}' +
+    '.grp-tab.active{color:var(--accent);border-bottom-color:var(--accent);}' +
+    '.grp-tab-badge{font-size:0.64rem;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--surface);border:1px solid var(--border);color:var(--muted);}' +
+    '.grp-tab.active .grp-tab-badge{background:rgba(99,102,241,.15);border-color:rgba(99,102,241,.35);color:var(--accent);}' +
+    '.grp-panel{display:none;}' +
+    '.grp-panel.active{display:block;animation:grpFade .2s ease;}' +
+    '@keyframes grpFade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}' +
+    '.grp-chat-scroll{max-height:min(52vh,460px);overflow-y:auto;overflow-x:hidden;padding-right:2px;}';
   document.head.appendChild(st);
 
   var MARKUP = [
@@ -405,12 +417,27 @@
 
   /* ── group detail: leaderboard + mock ranking + members + chat ── */
   var _openGid = null;
+  var _openTab = 'chat';   // remembered across re-renders (chat post / member kick)
 
   window.grpBackToHub = function () {
     var hub = document.getElementById('grp-hub-view'), inside = document.getElementById('grp-inside-view');
     if (inside) inside.style.display = 'none';
     if (hub) hub.style.display = '';
     _openGid = null;
+    _openTab = 'chat';   // reset to default when leaving the group
+  };
+
+  /* Toggle the active in-group tab + panel (client-side only, no refetch). */
+  window.grpSwitchTab = function (tab) {
+    _openTab = tab;
+    var tabs = document.querySelectorAll('#grp-tabs .grp-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle('active', tabs[i].getAttribute('data-grp-tab') === tab);
+    }
+    var panels = document.querySelectorAll('.grp-panel');
+    for (var j = 0; j < panels.length; j++) {
+      panels[j].classList.toggle('active', panels[j].getAttribute('data-grp-panel') === tab);
+    }
   };
 
   function mockRankTable(rows, uid) {
@@ -487,13 +514,14 @@
     }).join('') + '</div>';
   }
 
-  window.openStudyGroup = async function (gid) {
+  window.openStudyGroup = async function (gid, opts) {
     var box = document.getElementById('grp-detail');
     if (!box || !fbReady()) return;
     var hub = document.getElementById('grp-hub-view'), inside = document.getElementById('grp-inside-view');
     if (hub) hub.style.display = 'none';
     if (inside) inside.style.display = '';
     _openGid = gid;
+    if (!(opts && opts.keepTab)) _openTab = 'chat';   // fresh open → default Chat
     box.innerHTML = '<div class="pf-card"><div class="pf-muted">Loading group dashboard…</div></div>';
     try {
       var u = me();
@@ -518,16 +546,28 @@
         (isOwner ? '<button class="pf-btn pf-btn-danger" onclick="grpDeleteGroup(\'' + gid + '\')">🗑 Delete</button>' : '') + '</div>' +
         '  </div>' +
         '</div>' +
-        '<div class="grp-box-grid">' +
-        '  <div class="grp-dash-box"><h3>🏆 Group Leaderboard</h3><div id="grp-inside-global">' + lbTable(rows, u && u.uid) + '</div></div>' +
-        '  <div class="grp-dash-box"><h3>🧪 Mock Test Ranking</h3>' + mockRankTable(rows, u && u.uid) + '</div>' +
-        '  <div class="grp-dash-box"><h3>👤 Members</h3>' + memberListHtml(members, g.createdBy, u && u.uid, gid, isOwner) + '</div>' +
-        '  <div class="grp-dash-box"><h3>💬 Group Chat</h3>' +
-        '    <div class="pf-row" style="margin-bottom:10px;"><input class="pf-input" id="grp-wall-input" maxlength="300" placeholder="Message type karo…" style="flex:1;min-width:160px;" onkeydown="if(event.key===\'Enter\')grpPostWall(\'' + gid + '\')"><button class="pf-btn pf-btn-accent" onclick="grpPostWall(\'' + gid + '\')">Send</button></div>' +
-        '    <div id="grp-wall"><div class="pf-muted">Loading chat…</div></div>' +
-        '  </div>' +
+        '<div class="grp-tabs" id="grp-tabs">' +
+        '  <button class="grp-tab active" data-grp-tab="chat" onclick="grpSwitchTab(\'chat\')">💬 Chat</button>' +
+        '  <button class="grp-tab" data-grp-tab="leaderboard" onclick="grpSwitchTab(\'leaderboard\')">🏆 Leaderboard</button>' +
+        '  <button class="grp-tab" data-grp-tab="mock" onclick="grpSwitchTab(\'mock\')">🧪 Mock Rank</button>' +
+        '  <button class="grp-tab" data-grp-tab="members" onclick="grpSwitchTab(\'members\')">👤 Members <span class="grp-tab-badge">' + members.length + '</span></button>' +
+        '</div>' +
+        '<div class="grp-dash-box grp-panel active" data-grp-panel="chat">' +
+        '  <h3>💬 Group Chat</h3>' +
+        '  <div class="pf-row" style="margin-bottom:10px;"><input class="pf-input" id="grp-wall-input" maxlength="300" placeholder="Message type karo…" style="flex:1;min-width:160px;" onkeydown="if(event.key===\'Enter\')grpPostWall(\'' + gid + '\')"><button class="pf-btn pf-btn-accent" onclick="grpPostWall(\'' + gid + '\')">Send</button></div>' +
+        '  <div id="grp-wall" class="grp-chat-scroll"><div class="pf-muted">Loading chat…</div></div>' +
+        '</div>' +
+        '<div class="grp-dash-box grp-panel" data-grp-panel="leaderboard">' +
+        '  <h3>🏆 Group Leaderboard</h3><div id="grp-inside-global">' + lbTable(rows, u && u.uid) + '</div>' +
+        '</div>' +
+        '<div class="grp-dash-box grp-panel" data-grp-panel="mock">' +
+        '  <h3>🧪 Mock Test Ranking</h3>' + mockRankTable(rows, u && u.uid) +
+        '</div>' +
+        '<div class="grp-dash-box grp-panel" data-grp-panel="members">' +
+        '  <h3>👤 Members</h3>' + memberListHtml(members, g.createdBy, u && u.uid, gid, isOwner) +
         '</div>';
       grpLoadWall(gid, isOwner);
+      grpSwitchTab(_openTab);   // restore remembered tab (chat on fresh open)
     } catch (e) { box.innerHTML = '<div class="pf-card"><div class="pf-muted">Load failed: ' + clean(e.message || e) + '</div></div>'; }
   };
 
@@ -570,7 +610,7 @@
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       if (inp) inp.value = '';
-      window.openStudyGroup(gid);
+      window.openStudyGroup(gid, { keepTab: true });
     } catch (e) { toast('Post failed: ' + (e.message || e), 'error'); }
   };
 
@@ -580,7 +620,7 @@
     try {
       await db.collection('groups').doc(gid).collection('wall').doc(msgId)
         .update({ likes: firebase.firestore.FieldValue.arrayUnion(u.uid) });
-      window.openStudyGroup(gid);
+      window.openStudyGroup(gid, { keepTab: true });
     } catch (e) {}
   };
 
@@ -589,7 +629,7 @@
     if (!confirm('Message delete karein?')) return;
     try {
       await db.collection('groups').doc(gid).collection('wall').doc(msgId).delete();
-      window.openStudyGroup(gid);
+      window.openStudyGroup(gid, { keepTab: true });
     } catch (e) { toast('Delete failed: ' + (e.message || e), 'error'); }
   };
 
@@ -624,7 +664,7 @@
       await db.collection('groups').doc(gid).collection('members').doc(uid).delete();
       try { await db.collection('groups').doc(gid).collection('weeks').doc(grpWeekId()).collection('entries').doc(uid).delete(); } catch (e) {}
       db.collection('groups').doc(gid).update({ memberCount: firebase.firestore.FieldValue.increment(-1) }).catch(function () {});
-      window.openStudyGroup(gid);
+      window.openStudyGroup(gid, { keepTab: true });
       toast('Member hata diya.', 'info');
     } catch (e) { toast('Failed: ' + (e.message || e), 'error'); }
   };
