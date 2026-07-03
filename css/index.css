@@ -135,3 +135,42 @@
     .hero-note { flex-direction:column; gap:.5rem; align-items:center; }
     .auth-modal { padding:1.6rem 1.25rem; }
   }
+
+  /* ═══ MODERN REFRESH — landing polish (override layer) ═══ */
+  body { -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  ::selection { background:rgba(0,200,150,.3); }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+
+  /* Richer ambient hero glow (dark theme) */
+  html:not([data-theme="light"]) .hero {
+    background:
+      radial-gradient(700px 400px at 50% 25%, rgba(0,200,150,.1), transparent 65%),
+      radial-gradient(500px 320px at 85% 70%, rgba(34,211,238,.06), transparent 65%);
+  }
+
+  /* Gradient brand text in dark theme */
+  html:not([data-theme="light"]) .hero h1 .z,
+  html:not([data-theme="light"]) .logo .z {
+    background:linear-gradient(120deg,#00C896,#22D3EE);
+    -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent; color:transparent;
+  }
+
+  /* Gradient CTA */
+  .btn { border-radius:12px; }
+  .btn-green { background:linear-gradient(135deg,#00C896,#0AB6A0); }
+  .btn-green:hover { background:linear-gradient(135deg,#00A47C,#089C8A); transform:translateY(-1px); box-shadow:0 10px 26px rgba(0,200,150,.3); }
+
+  /* Feature chips: lift on hover */
+  .feat { transition:transform .18s ease; }
+  .feat:hover { transform:translateY(-3px); }
+  .feat .ic { font-size:1.7rem; }
+
+  /* Softer modal */
+  .auth-modal { border-radius:22px; }
+  .auth-field input:focus, .auth-field select:focus { box-shadow:0 0 0 3px rgba(0,200,150,.14); }
+  .auth-btn { background:linear-gradient(135deg,#00C896,#22D3EE); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .feat:hover, .btn-green:hover { transform:none; }
+  }

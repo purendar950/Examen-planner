@@ -72,6 +72,16 @@ const MOCK_EXAMS = {
 
 let mockTierSel = {};   // examId -> selected tier key
 let mockEditId  = null;
+let mockWeakSel = [];   // chapter ids tagged as weak in the add/edit form
+let mockSavedOpen = false; // Saved Mocks card collapsed by default
+
+function mockToggleSaved() {
+  mockSavedOpen = !mockSavedOpen;
+  const body = document.getElementById('mock-saved-list');
+  const chev = document.getElementById('mock-saved-chevron');
+  if (body) body.style.display = mockSavedOpen ? 'block' : 'none';
+  if (chev) chev.style.transform = 'rotate(' + (mockSavedOpen ? '180' : '0') + 'deg)';
+}
 
 function mockExamCfg() { return MOCK_EXAMS[currentExam] || null; }
 
@@ -128,11 +138,11 @@ function mockSave() {
   const list = mockList();
   if (mockEditId) {
     const ex = list.find(x => x.id === mockEditId);
-    if (ex) { ex.name = name; ex.date = date; ex.s = s; ex.total = total; }
+    if (ex) { ex.name = name; ex.date = date; ex.s = s; ex.total = total; ex.weakTopics = mockWeakSel.slice(); }
     mockEditId = null;
     showToast('Mock updated! ✏️', 'success');
   } else {
-    list.push({ id: Date.now().toString(), name, date, s, total });
+    list.push({ id: Date.now().toString(), name, date, s, total, weakTopics: mockWeakSel.slice() });
     showToast('Mock saved! Total: ' + total + ' 🎯', 'success');
   }
   saveProgress();
@@ -195,8 +205,14 @@ const MOCK_CHAPTER_MAP = {
   'csat': ['Comprehension', 'Reasoning', 'Numeracy', 'Data Interpretation', 'Decision Making']
 };
 
-/* ── Per-exam cutoff lookup (for percentile estimator) ── */
+/* ── Per-exam cutoff lookup (for percentile estimator) ──
+   User-set cutoffs (appState.mockCutoffs) take priority — official cutoffs
+   change every year, so the hardcoded values are only fallback estimates. */
 function mockGetCutoff(exam, tier) {
+  try {
+    const o = appState.mockCutoffs && appState.mockCutoffs[exam + '|' + tier];
+    if (o != null && !isNaN(parseFloat(o))) return parseFloat(o);
+  } catch (e) {}
   const M = {
     'cgl|t1': 135, 'cgl|t2': 320,
     'ntpc|cbt1': 72, 'ntpc|cbt2': 100,
@@ -207,6 +223,24 @@ function mockGetCutoff(exam, tier) {
     'bpsc|pre': 90
   };
   return M[exam + '|' + tier] || 0;
+}
+
+/* Let the user set/update the expected cutoff for the current exam+tier */
+function mockEditCutoff() {
+  const cfg = mockExamCfg(); if (!cfg) return;
+  const tk = mockTierKey();
+  const tier = cfg.tiers[tk];
+  const totalMax = tier.sections.reduce((t, s) => t + s.max, 0);
+  const cur = mockGetCutoff(currentExam, tk);
+  const raw = prompt('Expected cutoff for ' + tier.label + ' (0–' + totalMax + ').\nCutoffs change every year — set the latest one you are targeting:', cur || '');
+  if (raw === null) return;
+  const v = parseFloat(raw);
+  if (isNaN(v) || v < 0 || v > totalMax) { showToast('Enter a number between 0 and ' + totalMax + '.', 'error'); return; }
+  if (!appState.mockCutoffs) appState.mockCutoffs = {};
+  appState.mockCutoffs[currentExam + '|' + tk] = Math.round(v * 100) / 100;
+  if (typeof saveProgress === 'function') saveProgress();
+  mockRenderPage();
+  showToast('Cutoff set to ' + v + ' 🎯', 'success');
 }
 
 /* ── Render the redesigned Pro Mock Test Analysis panel ── */
@@ -230,6 +264,16 @@ function mockRenderAnalysis() {
     if (v.c != null || v.w != null) { attAll += (v.c || 0) + (v.w || 0); corAll += (v.c || 0); }
   }));
   const acc = attAll > 0 ? Math.round(corAll / attAll * 100) : null;
+  /* Marks lost to negative marking (needs Wrong counts) — latest mock shown */
+  const negLostByMock = list.map(m => {
+    let lost = 0, has = false;
+    tier.sections.forEach(s => {
+      const v = m.s[s.k] || {};
+      if (v.w != null) { has = true; lost += v.w * ((s.neg != null) ? s.neg : tier.neg); }
+    });
+    return has ? Math.round(lost * 100) / 100 : null;
+  });
+  const negLatest = negLostByMock[negLostByMock.length - 1];
   const secAvgs = tier.sections.map(s => {
     const vals = list.map(m => (m.s[s.k] && m.s[s.k].m) || 0);
     const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
@@ -257,7 +301,7 @@ function mockRenderAnalysis() {
     '</div>' +
 
     /* ROW 1: 5 metric cards */
-    mockMetricCardsHtml({ count: list.length, best, latest, prev, delta, avg5, last5: last5.length, acc, totalMax }) +
+    mockMetricCardsHtml({ count: list.length, best, latest, prev, delta, avg5, last5: last5.length, acc, totalMax, negLatest }) +
 
     /* ROW 2: Score trend (left) + Section averages (right) */
     '<div class="mock-row2">' +
@@ -271,8 +315,14 @@ function mockRenderAnalysis() {
       '<div class="info-card">' + mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax, sectionCutoffs) + '</div>' +
     '</div>' +
 
+    /* ROW 4: Recurring weak topics (tagged per mock, real syllabus chapters) */
+    mockWeakTopicsCardHtml(list) +
+
     /* ROW 5: Mock comparison table (last 3 attempts, full-width) */
-    mockMockComparisonTableHtml(list, tier, totalMax);
+    mockMockComparisonTableHtml(list, tier, totalMax) +
+
+    /* ROW 6: Attempt-rate vs hit-rate strategy trends per section */
+    mockPerSectionAccuracyTrendHtml(list, tier, weakest);
 }
 
 /* ── 5 metric cards row ── */
@@ -286,6 +336,7 @@ function mockMetricCardsHtml(d) {
     '<div class="stat-card"><div class="stat-label-sm">Latest</div><div class="stat-val-big">' + d.latest + (d.prev !== null ? ' <span style="font-size:0.78rem;color:' + deltaColor + ';font-weight:700;vertical-align:middle;">' + deltaSign + d.delta + '</span>' : '') + '</div><div class="stat-foot">' + (d.prev !== null ? (d.delta > 0 ? 'improving' : (d.delta < 0 ? 'sliding' : 'flat')) : 'first mock') + '</div></div>' +
     (accAcc ? '<div class="stat-card"><div class="stat-label-sm">Accuracy</div><div class="stat-val-big">' + d.acc + '%</div><div class="stat-foot">correct / attempted</div></div>' : '') +
     '<div class="stat-card"><div class="stat-label-sm">Avg (last ' + d.last5 + ')</div><div class="stat-val-big">' + d.avg5 + '</div><div class="stat-foot">smoother than best</div></div>' +
+    (d.negLatest != null ? '<div class="stat-card"' + (d.negLatest > 0 ? ' style="border-color:rgba(239,68,68,0.4);"' : '') + '><div class="stat-label-sm">Lost to negatives</div><div class="stat-val-big" style="color:' + (d.negLatest > 0 ? 'var(--red)' : 'var(--accent)') + ';">−' + d.negLatest + '</div><div class="stat-foot">latest mock · cost of wrong answers</div></div>' : '') +
   '</div>';
 }
 
@@ -488,7 +539,7 @@ function mockPercentileCardHtml(latest, cutoff, safeTarget, topTarget, totalMax,
     /* Bar 1: cutoff (green if above) */
     '<div style="margin-bottom:14px;">' +
       '<div style="display:flex;justify-content:space-between;font-size:0.78rem;margin-bottom:4px;">' +
-        '<span>Cutoff (est. ' + cutoff + ')</span>' + bar1Label +
+        '<span>Cutoff (' + (cutoff > 0 ? 'est. ' + cutoff : 'not set') + ') <span onclick="mockEditCutoff()" title="Edit expected cutoff" style="cursor:pointer;color:var(--accent);font-weight:700;">✎</span></span>' + bar1Label +
       '</div>' +
       '<div style="height:10px;background:var(--surface);border-radius:5px;overflow:hidden;border:1px solid var(--border);">' +
         '<div style="height:100%;width:' + bar1Fill + '%;background:linear-gradient(90deg,#00C896,#10B981);border-radius:5px;transition:width 0.5s;"></div>' +
@@ -670,6 +721,92 @@ function mockDualLineSvg(perMock) {
   '</svg>';
 }
 
+/* ══ Weak-topic tagging — real syllabus chapters, tagged per mock ══ */
+function mockTopicMeta(chId) {
+  let subs = [];
+  try { subs = getActiveSubjects() || []; } catch (e) {}
+  for (const s of subs) {
+    const c = (s.chapters || []).find(x => x.id === chId);
+    if (c) return { name: c.name, subName: s.name, color: s.color };
+  }
+  return null;
+}
+
+function mockWeakTopicOptionsHtml() {
+  let subs = [];
+  try { subs = getActiveSubjects() || []; } catch (e) {}
+  return '<option value="">📚 Pick a topic you struggled with…</option>' + subs.map(s =>
+    '<optgroup label="' + escapeHtml(s.name) + '">' +
+      (s.chapters || []).map(c => '<option value="' + c.id + '">' + escapeHtml(c.name) + '</option>').join('') +
+    '</optgroup>').join('');
+}
+
+function mockWeakChipsHtml() {
+  if (!mockWeakSel.length) return '<span style="font-size:0.74rem;color:var(--muted);">No topics tagged yet — tags power the “Recurring weak topics” analysis below.</span>';
+  return mockWeakSel.map(id => {
+    const t = mockTopicMeta(id);
+    if (!t) return '';
+    return '<span class="tag" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#FCA5A5;">' + escapeHtml(t.name) +
+      ' <span style="color:var(--muted);font-size:0.66rem;">' + escapeHtml(t.subName) + '</span>' +
+      ' <span onclick="mockRemoveWeakTopic(\'' + id + '\')" style="cursor:pointer;margin-left:4px;font-weight:800;">×</span></span>';
+  }).join('');
+}
+
+function mockAddWeakTopic() {
+  const sel = document.getElementById('mock-weak-sel');
+  const id = sel ? sel.value : '';
+  if (!id) return;
+  if (!mockWeakSel.includes(id)) mockWeakSel.push(id);
+  const chips = document.getElementById('mock-weak-chips');
+  if (chips) chips.innerHTML = mockWeakChipsHtml();
+  if (sel) sel.value = '';
+}
+
+function mockRemoveWeakTopic(id) {
+  mockWeakSel = mockWeakSel.filter(x => x !== id);
+  const chips = document.getElementById('mock-weak-chips');
+  if (chips) chips.innerHTML = mockWeakChipsHtml();
+}
+
+/* Recurring weak topics across all mocks of the current tier */
+function mockWeakTopicsCardHtml(list) {
+  const freq = {};
+  list.forEach(m => (m.weakTopics || []).forEach(id => { freq[id] = (freq[id] || 0) + 1; }));
+  const ids = Object.keys(freq);
+  if (!ids.length) {
+    return '<div class="info-card" style="margin-bottom:1rem;"><h3>😓 Recurring weak topics</h3>' +
+      '<div style="color:var(--muted);font-size:0.82rem;">Tag the topics you struggled with when saving a mock — repeat offenders will surface here, ready to push into your revision queue.</div></div>';
+  }
+  const rows = ids.map(id => ({ id: id, n: freq[id], t: mockTopicMeta(id) })).filter(x => x.t).sort((a, b) => b.n - a.n).slice(0, 12);
+  return '<div class="info-card" style="margin-bottom:1rem;">' +
+    '<h3>😓 Recurring weak topics <span style="font-size:0.7rem;color:var(--muted);font-weight:500;">across ' + list.length + ' mock' + (list.length > 1 ? 's' : '') + '</span></h3>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px;">' +
+      rows.map(x => '<span class="tag" style="background:rgba(239,68,68,' + (x.n > 1 ? '0.16' : '0.08') + ');border:1px solid rgba(239,68,68,0.35);color:#FCA5A5;">' +
+        escapeHtml(x.t.name) + ' <span style="color:' + (x.t.color || 'var(--muted)') + ';font-size:0.66rem;">' + escapeHtml(x.t.subName) + '</span>' +
+        (x.n > 1 ? ' <strong style="margin-left:4px;">×' + x.n + '</strong>' : '') +
+      '</span>').join('') +
+    '</div>' +
+    '<button class="btn-modal-save" style="font-size:0.78rem;padding:6px 12px;" onclick="mockPushWeakTopicsToRevision()">📌 Push all to revision queue</button>' +
+  '</div>';
+}
+
+function mockPushWeakTopicsToRevision() {
+  const ids = new Set();
+  mockList().forEach(m => (m.weakTopics || []).forEach(id => ids.add(id)));
+  if (!ids.size) return;
+  const tomorrow = (typeof addDaysISO === 'function') ? addDaysISO(new Date(), 1) : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  let n = 0;
+  ids.forEach(id => {
+    if (!appState.progress[id]) appState.progress[id] = {};
+    if (!appState.progress[id].nextRevisionAt || appState.progress[id].nextRevisionAt > tomorrow) {
+      appState.progress[id].nextRevisionAt = tomorrow;
+      n++;
+    }
+  });
+  if (typeof saveProgress === 'function') saveProgress();
+  showToast('📌 ' + n + ' weak topic' + (n !== 1 ? 's' : '') + ' queued for revision from tomorrow.', 'success');
+}
+
 function mockRenderSaved() {
   const el = document.getElementById('mock-saved-list'); if (!el) return;
   const tier = mockExamCfg().tiers[mockTierKey()];
@@ -722,6 +859,7 @@ function mockRenderPage() {
     '<button class="exam-select-btn' + (k === tk ? ' active' : '') + '" onclick="mockSetTier(\'' + k + '\')">' + cfg.tiers[k].label + '</button>'
   ).join(' ');
   const editing = mockEditId ? mockList().find(m => m.id === mockEditId) : null;
+  mockWeakSel = (editing && Array.isArray(editing.weakTopics)) ? editing.weakTopics.slice() : [];
   const today = new Date().toISOString().slice(0, 10);
   page.innerHTML =
     '<div class="section-title">📈 ' + exam.fullName + ' — Mock Test Analysis</div>' +
@@ -750,6 +888,14 @@ function mockRenderPage() {
         '</tr>';
     }).join('') +
     '</table></div>' +
+    '<div style="margin-top:1rem;">' +
+    '<div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">😓 Weak topics in this mock <span style="text-transform:none;">(optional — powers the recurring-weakness analysis)</span></div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+    '<select class="task-select" id="mock-weak-sel" style="min-width:230px;max-width:100%;">' + mockWeakTopicOptionsHtml() + '</select>' +
+    '<button class="btn-modal-save" style="font-size:0.78rem;padding:6px 12px;" onclick="mockAddWeakTopic()">＋ Tag topic</button>' +
+    '</div>' +
+    '<div id="mock-weak-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">' + mockWeakChipsHtml() + '</div>' +
+    '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:1rem;flex-wrap:wrap;align-items:center;">' +
     '<span style="font-size:0.72rem;color:var(--muted);margin-right:auto;">* Correct/Wrong bharo to marks negative marking ke saath auto-calculate ho jate hain</span>' +
     (editing ? '<button class="btn-modal-cancel" onclick="mockCancelEdit()">Cancel</button>' : '') +
@@ -757,8 +903,14 @@ function mockRenderPage() {
     '</div>' +
     '</div>' +
     '<div id="mock-analysis"></div>' +
-    '<div class="section-title" style="margin-top:1.5rem;">🗂 Saved Mocks (' + mockList().length + ')</div>' +
-    '<div id="mock-saved-list"></div>';
+    '<div class="info-card" style="margin-top:1.5rem;padding:0;overflow:hidden;">' +
+    '<div onclick="mockToggleSaved()" style="padding:.85rem 1.1rem;display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+    '<span style="font-weight:700;font-size:.9rem;">🗂 Saved Mocks</span>' +
+    '<span style="background:var(--accent-dim);color:var(--accent);border-radius:99px;padding:2px 10px;font-size:.68rem;font-weight:700;">' + mockList().length + '</span>' +
+    '<span id="mock-saved-chevron" style="margin-left:auto;color:var(--muted);font-size:.85rem;display:inline-block;transition:transform .2s;transform:rotate(' + (mockSavedOpen ? '180' : '0') + 'deg);">▾</span>' +
+    '</div>' +
+    '<div id="mock-saved-list" style="display:' + (mockSavedOpen ? 'block' : 'none') + ';padding:0 1rem 1rem;"></div>' +
+    '</div>';
   mockRenderAnalysis();
   mockRenderSaved();
 }

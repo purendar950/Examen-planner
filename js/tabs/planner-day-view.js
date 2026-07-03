@@ -28,7 +28,13 @@ function renderDayView() {
 }
 
 /* Show the day's scheduled study topics (from the active plan) above the task
-   board. Simple topic list — no clock times. */
+   board. Simple topic list — no clock times.
+   Collapsible (collapsed by default) — mirrors the Completed Topics card. */
+let _plannerTopicsOpen = false;
+function toggleDayScheduledTopics() {
+  _plannerTopicsOpen = !_plannerTopicsOpen;
+  renderDayScheduledTopics();
+}
 function renderDayScheduledTopics() {
   const host = document.getElementById('planner-day-content');
   if (!host) return;
@@ -41,17 +47,20 @@ function renderDayScheduledTopics() {
     card.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:1rem;';
     host.insertBefore(card, host.firstChild);
   }
-  card.innerHTML = `
-    <div style="padding:.85rem 1.1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;">
-      <span style="font-size:.8rem;font-weight:700;color:var(--accent);">📚 Study Plan — Topics</span>
-      <span style="margin-left:auto;background:var(--accent-dim);color:var(--accent);border-radius:99px;padding:2px 10px;font-size:.68rem;font-weight:700;">${items.length}</span>
-    </div>
+  const body = _plannerTopicsOpen ? `
     <div style="padding:.75rem 1.1rem;display:flex;flex-direction:column;gap:6px;">
       ${renderTopicListItems(items)}
     </div>
     <div style="padding:0 1.1rem .85rem;display:flex;justify-content:flex-end;">
       <button onclick="addScheduledTopicsToTasks('${selectedPlannerDate}')" style="font-size:.72rem;background:var(--accent-dim);border:1px solid rgba(0,200,150,.3);color:var(--accent);border-radius:6px;padding:4px 12px;cursor:pointer;font-family:var(--font);font-weight:700;">＋ Add these topics to Tasks</button>
-    </div>`;
+    </div>` : '';
+  card.innerHTML = `
+    <div onclick="toggleDayScheduledTopics()" style="padding:.85rem 1.1rem;display:flex;align-items:center;gap:8px;cursor:pointer;${_plannerTopicsOpen?'border-bottom:1px solid var(--border);':''}">
+      <span style="font-size:.8rem;font-weight:700;color:var(--accent);">📚 Study Plan — Topics</span>
+      <span style="background:var(--accent-dim);color:var(--accent);border-radius:99px;padding:2px 10px;font-size:.68rem;font-weight:700;">${items.length}</span>
+      <span style="margin-left:auto;color:var(--muted);font-size:.8rem;display:inline-block;transition:transform .2s;transform:rotate(${_plannerTopicsOpen?'180':'0'}deg);">▾</span>
+    </div>
+    ${body}`;
 }
 
 /* Add a date's scheduled study topics into that date's task list. */

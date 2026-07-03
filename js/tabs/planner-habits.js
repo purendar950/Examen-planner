@@ -57,27 +57,69 @@ function toggleHabitDone(dateStr, ruleId) {
   if (typeof updatePlannerProgress === 'function') updatePlannerProgress();
 }
 
+/* ── UNIFIED DAILY HABITS CARD ───────────────────────────────────
+   One card = today's checkable pills + ＋ Add Habit inline form + ⚙ Manage
+   list (schedule + delete). Replaces the separate #habits-manage-panel and
+   supplements the hidden 🔁 recurring toggle in the Add Task bar. */
+let _habitsManageMode = false;
+let _habitsAddOpen = false;
+
+function toggleHabitsManageMode() {
+  _habitsManageMode = !_habitsManageMode;
+  renderHabitsCard();
+}
+
+function toggleHabitsAddForm() {
+  _habitsAddOpen = !_habitsAddOpen;
+  renderHabitsCard();
+  if (_habitsAddOpen) {
+    const inp = document.getElementById('habit-add-text');
+    if (inp) inp.focus();
+  }
+}
+
+function addHabitFromCard() {
+  const inp = document.getElementById('habit-add-text');
+  const text = inp ? inp.value.trim() : '';
+  if (!text) { if (typeof showToast === 'function') showToast('Give the habit a name first.', 'info'); return; }
+  const freqEl = document.getElementById('habit-add-freq');
+  const freq = freqEl ? freqEl.value : 'daily';
+  const days = Array.from(document.querySelectorAll('.habit-add-day:checked')).map(c => parseInt(c.value, 10));
+  if (freq === 'weekly' && !days.length) { if (typeof showToast === 'function') showToast('Pick at least one day.', 'info'); return; }
+  addRecurringRule({ text: text, freq: freq, days: days });
+  _habitsAddOpen = false;
+  renderHabitsCard();
+  if (typeof showToast === 'function') showToast('Habit added! 🔁', 'success');
+}
+
+function _habitScheduleLabel(r) {
+  const freqLabel = { daily: 'Daily', weekdays: 'Mon–Fri', weekly: 'Weekly', custom: 'Custom' };
+  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  let sched = freqLabel[r.freq] || r.freq;
+  if ((r.freq === 'weekly' || r.freq === 'custom') && r.days && r.days.length) {
+    sched = r.days.map(d => dayNames[d]).join(', ');
+  }
+  return sched;
+}
+
 /**
- * Render the compact "Daily Habits" card above the task list.
- * Shows pill-style checkable items with progress. Auto-collapses when all done.
+ * Render the unified "Daily Habits" card above the task list.
+ * Pills with progress (auto-collapses when all done) + add form + manage list.
  */
 function renderHabitsCard(dateStr) {
   if (!dateStr) dateStr = selectedPlannerDate || fmtDate(new Date());
   const container = document.getElementById('habits-card');
   if (!container) return;
 
+  const esc = t => (typeof escapeHtml === 'function' ? escapeHtml(t) : t);
+  const rules = appState.recurringTasks || [];
   const habits = getHabitsForDate(dateStr);
-  if (!habits.length) {
-    container.style.display = 'none';
-    container.innerHTML = '';
-    return;
-  }
-
   container.style.display = '';
+
   const done = habits.filter(h => h.done).length;
   const total = habits.length;
-  const allDone = done === total;
-  const pct = Math.round(done / total * 100);
+  const allDone = total > 0 && done === total;
+  const pct = total ? Math.round(done / total * 100) : 0;
 
   const subjMap = {};
   try { getActiveSubjects().forEach(s => { subjMap[s.id] = s; }); } catch(e) {}
@@ -89,18 +131,53 @@ function renderHabitsCard(dateStr) {
     const doneClass = h.done ? 'habit-pill-done' : '';
     return `<div class="habit-pill ${doneClass}" style="border-color:${borderColor};" onclick="toggleHabitDone('${dateStr}','${r.id}')">
       <span class="habit-pill-check">${h.done ? '✓' : ''}</span>
-      <span class="habit-pill-text">${typeof escapeHtml === 'function' ? escapeHtml(r.text) : r.text}</span>
+      <span class="habit-pill-text">${esc(r.text)}</span>
     </div>`;
   }).join('');
 
+  const btnStyle = 'font-size:.7rem;background:var(--accent-dim);border:1px solid rgba(0,200,150,.3);color:var(--accent);border-radius:6px;padding:3px 10px;cursor:pointer;font-family:var(--font);font-weight:700;white-space:nowrap;';
+
+  const addForm = _habitsAddOpen ? `
+    <div style="border-top:1px dashed var(--border);margin-top:.6rem;padding-top:.7rem;display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="text" id="habit-add-text" maxlength="80" placeholder="e.g. 30 min current affairs" onkeydown="if(event.key==='Enter')addHabitFromCard()" style="flex:2;min-width:170px;padding:.55rem .7rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem;outline:none;font-family:var(--font);">
+        <select id="habit-add-freq" onchange="var r=document.getElementById('habit-add-days');if(r)r.style.display=this.value==='weekly'?'flex':'none';" style="flex:1;min-width:120px;padding:.55rem .6rem;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.82rem;font-family:var(--font);">
+          <option value="daily">Daily</option>
+          <option value="weekdays">Mon–Fri</option>
+          <option value="weekly">Weekly (pick days)</option>
+        </select>
+        <button onclick="addHabitFromCard()" style="${btnStyle}">Save</button>
+      </div>
+      <div id="habit-add-days" style="display:none;gap:6px;flex-wrap:wrap;">
+        ${['S','M','T','W','T','F','S'].map((d, i) => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:.75rem;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:3px 8px;cursor:pointer;"><input type="checkbox" class="habit-add-day" value="${i}"> ${d}</label>`).join('')}
+      </div>
+    </div>` : '';
+
+  const manageRows = _habitsManageMode ? `
+    <div style="border-top:1px solid var(--border);margin-top:.6rem;">
+      ${rules.length ? rules.map(r => `
+        <div style="display:flex;align-items:center;gap:10px;padding:.5rem .2rem;border-bottom:1px solid var(--border);">
+          <span style="font-size:.8rem;">🔁</span>
+          <span style="flex:1;font-size:.82rem;color:var(--text);">${esc(r.text)}</span>
+          <span style="font-size:.68rem;color:var(--muted);white-space:nowrap;">${_habitScheduleLabel(r)}</span>
+          <button onclick="deleteRecurringRule('${r.id}')" title="Delete habit" style="background:none;border:none;cursor:pointer;font-size:.85rem;opacity:.7;">🗑</button>
+        </div>`).join('') : '<div style="padding:.6rem .2rem;font-size:.78rem;color:var(--muted);">No habits yet — click ＋ Add Habit to create your first.</div>'}
+    </div>` : '';
+
   container.innerHTML = `
-    <div class="habits-card-header">
+    <div class="habits-card-header" style="flex-wrap:wrap;">
       <span class="habits-card-title">🔁 Daily Habits</span>
-      <span class="habits-card-progress ${allDone ? 'all-done' : ''}">${done}/${total}</span>
+      ${total ? `<span class="habits-card-progress ${allDone ? 'all-done' : ''}">${done}/${total}</span>
       <div class="habits-card-bar"><div class="habits-card-bar-fill" style="width:${pct}%"></div></div>
-      ${allDone ? '<span class="habits-card-complete">✅ All done!</span>' : ''}
+      ${allDone ? '<span class="habits-card-complete">✅ All done!</span>' : ''}` : '<span style="font-size:.72rem;color:var(--muted);">Repeat tasks daily / weekly — build a routine.</span>'}
+      <span style="margin-left:auto;display:inline-flex;gap:6px;">
+        <button onclick="toggleHabitsAddForm()" style="${btnStyle}">${_habitsAddOpen ? '× Close' : '＋ Add Habit'}</button>
+        ${rules.length ? `<button onclick="toggleHabitsManageMode()" style="${btnStyle}${_habitsManageMode ? 'opacity:.75;' : ''}">⚙ Manage (${rules.length})</button>` : ''}
+      </span>
     </div>
-    <div class="habits-card-pills ${allDone ? 'habits-collapsed' : ''}">${pills}</div>`;
+    ${total ? `<div class="habits-card-pills ${allDone && !_habitsManageMode && !_habitsAddOpen ? 'habits-collapsed' : ''}">${pills}</div>` : ''}
+    ${addForm}
+    ${manageRows}`;
 }
 
 /**
@@ -153,54 +230,16 @@ function deleteRecurringRule(ruleId) {
 
   if (typeof saveProgress === 'function') saveProgress();
   if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar();
-  renderHabitsManagePanel();
+  renderHabitsCard();
 }
 
 /**
- * Render the "My Habits" management panel (add/delete rules).
+ * Legacy "Manage Habits" panel — merged into the Daily Habits card above.
+ * Kept as stubs (still called from renderDayView) so the old #habits-manage-panel
+ * stays hidden and any stray callers keep working.
  */
 function renderHabitsManagePanel() {
-  let panel = document.getElementById('habits-manage-panel');
-  if (!panel) return;
-
-  const rules = appState.recurringTasks || [];
-  if (!rules.length) {
-    panel.innerHTML = '';
-    panel.style.display = 'none';
-    return;
-  }
-
-  panel.style.display = '';
-  const freqLabel = { daily: 'Daily', weekdays: 'Mon–Fri', weekly: 'Weekly', custom: 'Custom' };
-  const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-
-  const rows = rules.map(r => {
-    let sched = freqLabel[r.freq] || r.freq;
-    if ((r.freq === 'weekly' || r.freq === 'custom') && r.days && r.days.length) {
-      sched = r.days.map(d => dayNames[d]).join(', ');
-    }
-    return `<div class="habit-manage-row">
-      <span class="habit-manage-icon">🔁</span>
-      <span class="habit-manage-text">${typeof escapeHtml === 'function' ? escapeHtml(r.text) : r.text}</span>
-      <span class="habit-manage-freq">${sched}</span>
-      <button class="habit-manage-del" onclick="deleteRecurringRule('${r.id}')" title="Delete habit">🗑</button>
-    </div>`;
-  }).join('');
-
-  panel.innerHTML = `
-    <div class="habits-manage-header" onclick="toggleHabitsManagePanel()">
-      <span>⚙ Manage Habits</span>
-      <span class="habits-manage-count">${rules.length}</span>
-      <span class="habits-manage-chevron" id="habits-manage-chevron">▾</span>
-    </div>
-    <div class="habits-manage-body" id="habits-manage-body">${rows}</div>`;
+  const panel = document.getElementById('habits-manage-panel');
+  if (panel) { panel.innerHTML = ''; panel.style.display = 'none'; }
 }
-
-let _habitsManageOpen = true;
-function toggleHabitsManagePanel() {
-  _habitsManageOpen = !_habitsManageOpen;
-  const body = document.getElementById('habits-manage-body');
-  const chev = document.getElementById('habits-manage-chevron');
-  if (body) body.style.display = _habitsManageOpen ? '' : 'none';
-  if (chev) chev.style.transform = _habitsManageOpen ? 'rotate(0deg)' : 'rotate(-90deg)';
-}
+function toggleHabitsManagePanel() { toggleHabitsManageMode(); }
