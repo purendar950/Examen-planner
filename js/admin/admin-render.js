@@ -130,6 +130,8 @@ function renderUsers() {
   const search = (document.getElementById('user-search')?.value || '').toLowerCase().trim();
   const filter = document.getElementById('user-filter')?.value || 'all';
   const exam   = document.getElementById('user-exam')?.value || 'all';
+  const sort   = document.getElementById('user-sort')?.value || USER_SORT || 'new';
+  USER_SORT = sort;
   let list = USERS.filter(u => u.p.status !== 'pending');
   if (search) list = list.filter(u =>
     (u.p.name   || '').toLowerCase().includes(search) ||
@@ -140,29 +142,60 @@ function renderUsers() {
   if (filter === 'paid')      list = list.filter(u => u.p.plan && u.p.plan !== 'free');
   else if (filter === 'free') list = list.filter(u => !u.p.plan || u.p.plan === 'free');
   else if (filter === 'suspended') list = list.filter(u => u.p.status === 'rejected');
+  else if (filter === 'trial') list = list.filter(u => u.p.trialExpiry && !u.p.trialSuspended);
   if (exam !== 'all') list = list.filter(u => u.p.examTarget === exam);
+
+  /* ── sort ── */
+  const _ts = (u) => { const t = u.p.createdAt || u.p.requestedAt; return (t && t.seconds) || 0; };
+  if (sort === 'new')        list.sort((a, b) => _ts(b) - _ts(a));
+  else if (sort === 'old')   list.sort((a, b) => _ts(a) - _ts(b));
+  else if (sort === 'name')  list.sort((a, b) => (a.p.name || '').localeCompare(b.p.name || ''));
+  else if (sort === 'expiry') list.sort((a, b) => (a.p.planExpiry || '9999').localeCompare(b.p.planExpiry || '9999'));
+
+  /* ── pagination ── */
+  const matched = list.length;
+  const totalPages = Math.max(1, Math.ceil(matched / USERS_PER_PAGE));
+  if (USER_PAGE > totalPages) USER_PAGE = totalPages;
+  if (USER_PAGE < 1) USER_PAGE = 1;
+  const pageStart = (USER_PAGE - 1) * USERS_PER_PAGE;
+  list = list.slice(pageStart, pageStart + USERS_PER_PAGE);
+
   const totalCount = USERS.filter(u => u.p.status !== 'pending').length;
   const examOptions = [...new Set(USERS.map(u => u.p.examTarget).filter(Boolean))].sort();
   const toolbar = '<div class="card" style="padding:0.75rem 1rem;">' +
     '<div class="row" style="gap:8px;flex-wrap:wrap;">' +
       '<input id="user-search" placeholder="🔍 Search name, email, mobile, UID…" ' +
-             'value="' + esc(search) + '" style="flex:1;min-width:200px;" oninput="render()">' +
-      '<select id="user-filter" onchange="render()">' +
+             'value="' + esc(search) + '" style="flex:1;min-width:200px;" oninput="USER_PAGE=1;render()">' +
+      '<select id="user-filter" onchange="USER_PAGE=1;render()">' +
         '<option value="all"'         + (filter==='all'?' selected':'') + '>All (' + totalCount + ')</option>' +
         '<option value="paid"'        + (filter==='paid'?' selected':'') + '>Paid only</option>' +
         '<option value="free"'        + (filter==='free'?' selected':'') + '>Free only</option>' +
+        '<option value="trial"'       + (filter==='trial'?' selected':'') + '>Trial active</option>' +
         '<option value="suspended"'   + (filter==='suspended'?' selected':'') + '>Suspended</option>' +
       '</select>' +
-      '<select id="user-exam" onchange="render()">' +
+      '<select id="user-exam" onchange="USER_PAGE=1;render()">' +
         '<option value="all">All exams</option>' +
         examOptions.map(e => '<option value="' + esc(e) + '"' + (exam===e?' selected':'') + '>' + esc(e).toUpperCase() + '</option>').join('') +
       '</select>' +
+      '<select id="user-sort" onchange="USER_PAGE=1;render()">' +
+        '<option value="new"'    + (sort==='new'?' selected':'')    + '>Newest first</option>' +
+        '<option value="old"'    + (sort==='old'?' selected':'')    + '>Oldest first</option>' +
+        '<option value="name"'   + (sort==='name'?' selected':'')   + '>Name A–Z</option>' +
+        '<option value="expiry"' + (sort==='expiry'?' selected':'') + '>Plan expiry</option>' +
+      '</select>' +
       (search || filter !== 'all' || exam !== 'all'
-        ? '<button class="btn btn-gray" onclick="document.getElementById(\'user-search\').value=\'\';document.getElementById(\'user-filter\').value=\'all\';document.getElementById(\'user-exam\').value=\'all\';render();">↻ Clear</button>'
+        ? '<button class="btn btn-gray" onclick="document.getElementById(\'user-search\').value=\'\';document.getElementById(\'user-filter\').value=\'all\';document.getElementById(\'user-exam\').value=\'all\';USER_PAGE=1;render();">↻ Clear</button>'
         : '') +
     '</div>' +
-    '<div class="muted" style="margin-top:6px;">Showing <strong>' + list.length + '</strong> of ' + totalCount + ' users</div>' +
+    '<div class="muted" style="margin-top:6px;">Showing <strong>' + list.length + '</strong> of ' + matched + ' matched (' + totalCount + ' total) · Page ' + USER_PAGE + '/' + totalPages + '</div>' +
     '</div>';
+  const pager = totalPages > 1
+    ? '<div class="card" style="padding:0.6rem 1rem;display:flex;justify-content:center;align-items:center;gap:12px;">' +
+      '<button class="btn btn-gray btn-sm"' + (USER_PAGE <= 1 ? ' disabled style="opacity:.5;"' : '') + ' onclick="userPage(-1)">← Prev</button>' +
+      '<span class="muted">Page ' + USER_PAGE + ' / ' + totalPages + '</span>' +
+      '<button class="btn btn-gray btn-sm"' + (USER_PAGE >= totalPages ? ' disabled style="opacity:.5;"' : '') + ' onclick="userPage(1)">Next →</button>' +
+      '</div>'
+    : '';
   if (!totalCount) return '<div class="empty">Koi user nahi.</div>';
   if (!list.length) return toolbar + '<div class="empty">No users match your filters.</div>';
   const planOpts = (sel) => '<option value="free">Free</option>' + PLANS.map(p => '<option value="' + p.id + '"' + (sel === p.name ? ' selected' : '') + '>' + esc(p.name) + ' (₹' + (p.price || 0) + ')</option>').join('');
@@ -215,10 +248,11 @@ function renderUsers() {
         (suspended
           ? '<button class="btn btn-green btn-sm" onclick="approveUser(\'' + u.id + '\')">✓ Re-activate</button>'
           : '<button class="btn btn-red btn-sm" onclick="suspendUser(\'' + u.id + '\')">⏸ Suspend</button>') +
+        '<button class="btn btn-red btn-sm" onclick="deleteUser(\'' + u.id + '\')" title="Permanently delete this user (type DELETE to confirm)">🗑 Delete</button>' +
       '</div>' +
       '<div id="user-pay-' + u.id + '" style="display:none;padding:0 1.1rem 0.9rem;"></div>' +
     '</div>';
-  }).join('');
+  }).join('') + pager;
 }
 
 /* Show a user's payment history inline (from already-loaded PAYMENTS). */

@@ -1,0 +1,333 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ════════════════════════════════════════════════════
+    //  HELPER FUNCTIONS
+    // ════════════════════════════════════════════════════
+
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isLoggedIn() && request.auth.uid == uid;
+    }
+
+    // Admin check: doc existence in /admins/{uid} (written only from Console).
+    function isAdmin() {
+      return isLoggedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // ── Billing / status guard (updates) ────────────────
+    // Returns true only when the incoming write does NOT change any
+    // admin-controlled field inside profile.*.
+    function billingUnchanged() {
+      let oldP = resource.data.get('profile', {});
+      let newP = request.resource.data.get('profile', {});
+      return newP.get('plan',             oldP.get('plan', 'free'))          == oldP.get('plan', 'free')
+          && newP.get('planId',           oldP.get('planId', ''))            == oldP.get('planId', '')
+          && newP.get('planExpiry',       oldP.get('planExpiry', ''))        == oldP.get('planExpiry', '')
+          && newP.get('status',           oldP.get('status', 'pending'))     == oldP.get('status', 'pending')
+          && newP.get('rejectReason',     oldP.get('rejectReason', ''))      == oldP.get('rejectReason', '')
+          && newP.get('trialExpiry',      oldP.get('trialExpiry', ''))       == oldP.get('trialExpiry', '')
+          && newP.get('trialDays',        oldP.get('trialDays', 0))          == oldP.get('trialDays', 0)
+          && newP.get('trialSuspended',   oldP.get('trialSuspended', false)) == oldP.get('trialSuspended', false)
+          && newP.get('referredBy',       oldP.get('referredBy', ''))        == oldP.get('referredBy', '')
+          && newP.get('payoutPaidAmount', oldP.get('payoutPaidAmount', 0))   == oldP.get('payoutPaidAmount', 0)
+          && newP.get('refPaidCount',     oldP.get('refPaidCount', 0))       == oldP.get('refPaidCount', 0)
+          && newP.get('refTotalCount',    oldP.get('refTotalCount', 0))      == oldP.get('refTotalCount', 0);
+    }
+
+    // ── proTrial first-activation shape guard ───────────
+    // SECURITY FIX: the old rule allowed the FIRST proTrial write to contain
+    // ANY value (e.g. { expiry: '2099-01-01' } with no startedAt). Rules
+    // cannot parse date strings, so temporal validation (startedAt not in
+    // the future, expiry <= startedAt + 4 days) lives in shared/proGating.js
+    // and js/features/preppath-phase5-trial.js. This rule enforces the SHAPE
+    // the app actually writes so a hand-crafted trial object is rejected:
+    //   { startedAt: <ISO string>, expiry: <YYYY-MM-DD string>, days: 3 }
+    function validFirstProTrial(t) {
+      return t is map
+          && t.keys().hasOnly(['startedAt', 'expiry', 'days'])
+          && t.get('startedAt', 0) is string
+          && t.get('expiry', 0) is string
+          && t.get('days', 0) == 3;
+    }
+
+    // ── proTrial guard (updates) ─────────────────────────
+    // Once proTrial is set it is frozen for the user; only admin can change
+    // it. First activation is permitted once, but must match the exact shape
+    // the app writes (see validFirstProTrial above).
+    function proTrialUnchanged() {
+      let oldAT = resource.data.get('appState', {});
+      let newAT = request.resource.data.get('appState', {});
+      let oldTrial = oldAT.get('proTrial', null);
+      let newTrial = newAT.get('proTrial', null);
+
+      return oldTrial == null
+          ? (newTrial == null || validFirstProTrial(newTrial))
+          : newTrial == oldTrial;
+    }
+
+    // ── Billing guard (create) ───────────────────────────
+    // SECURITY FIX: the old version only checked plan / planId /
+    // payoutPaidAmount / trialSuspended / status. A user could CREATE their
+    // doc directly via the API with profile.trialExpiry = '2099-12-31' (or
+    // trialDays / planExpiry / referral counters) and gain a permanent
+    // admin-grade trial, because billingUnchanged() only protects UPDATEs.
+    // Every admin-controlled field is now pinned to its safe default at
+    // create time. referredBy stays user-settable (legitimate referral
+    // registration flow); it is frozen on update by billingUnchanged().
+    function billingSafeOnCreate() {
+      let p = request.resource.data.get('profile', {});
+      return p.get('plan', 'free')          == 'free'
+          && p.get('planId', '')            == ''
+          && p.get('planExpiry', '')        == ''
+          && p.get('trialExpiry', '')       == ''
+          && p.get('trialDays', 0)          == 0
+          && p.get('rejectReason', '')      == ''
+          && p.get('payoutPaidAmount', 0)   == 0
+          && p.get('refPaidCount', 0)       == 0
+          && p.get('refTotalCount', 0)      == 0
+          && p.get('trialSuspended', false) == false
+          && (p.get('status', 'pending')    == 'pending'
+           || p.get('status', 'approved')   == 'approved');
+          // 'approved' is kept as a valid create-time status because the app
+          // auto-approves on registration. If you want manual approval, change
+          // this to: p.get('status', 'pending') == 'pending'
+    }
+
+    // ════════════════════════════════════════════════════
+    //  COLLECTIONS
+    // ════════════════════════════════════════════════════
+
+    // ── Admin role collection ────────────────────────────
+    match /admins/{uid} {
+      allow read:  if isOwner(uid);
+      allow write: if false;
+    }
+
+    // ── User documents ───────────────────────────────────
+    match /users/{uid} {
+      // Read: owner or admin
+      allow read: if isOwner(uid) || isAdmin();
+
+      // Create: owner only, with billing safety checks
+      allow create: if isOwner(uid) && billingSafeOnCreate();
+
+      // Update: owner (billing + proTrial fields frozen) OR admin (unrestricted)
+      allow update: if isAdmin()
+                 || (isOwner(uid) && billingUnchanged() && proTrialUnchanged());
+
+      // Delete: admin only
+      allow delete: if isAdmin();
+    }
+
+    // ── Plans ────────────────────────────────────────────
+    match /plans/{planId} {
+      allow read:  if isLoggedIn();
+      allow write: if isAdmin();
+    }
+
+    // ── Config (UPI, free limits, feature flags) ─────────
+    // SECURITY FIX: config/ai holds the Groq API key (read by the bot via
+    // the Admin SDK, which bypasses rules, and managed by the admin panel).
+    // The old rule let EVERY logged-in user read it and steal the key.
+    // Regular users can read all config docs EXCEPT config/ai.
+    match /config/{docId} {
+      allow read:  if isAdmin() || (isLoggedIn() && docId != 'ai');
+      allow write: if isAdmin();
+    }
+
+    // ── Payments ─────────────────────────────────────────
+    match /payments/{payId} {
+      allow create: if isLoggedIn()
+        && request.resource.data.uid      == request.auth.uid
+        && request.resource.data.amount   is number
+        && request.resource.data.amount   >  0
+        && request.resource.data.status   == 'pending'
+        && request.resource.data.keys().hasAll(['uid', 'planId', 'amount', 'status', 'createdAt'])
+        // Verify the referenced plan actually exists
+        && exists(/databases/$(database)/documents/plans/$(request.resource.data.planId))
+        // SECURITY FIX: amount may not exceed the plan's listed price
+        // (coupons can make it lower, never higher). Falls back to a no-op
+        // if the plan doc has no numeric 'price' field. For airtight
+        // price + coupon validation, move payment creation into a Cloud
+        // Function transaction.
+        && request.resource.data.amount <= get(/databases/$(database)/documents/plans/$(request.resource.data.planId)).data.get('price', request.resource.data.amount);
+
+      allow read:   if isLoggedIn()
+        && (resource.data.uid == request.auth.uid || isAdmin());
+
+      allow update: if isAdmin();
+
+      // Payments are immutable once created (no delete, no user update)
+      allow delete: if false;
+    }
+
+    // ── Coupons ──────────────────────────────────────────
+    // SECURITY FIX: 'allow read' also permits LIST queries, so any user
+    // could enumerate every coupon code + discount. Users may now only GET
+    // a coupon whose exact code they already know; listing is admin-only.
+    // NOTE: the usedCount increment is still racy under high concurrency;
+    // for hard single-use / per-user guarantees, move redemption into a
+    // Cloud Function with a Firestore transaction.
+    match /coupons/{code} {
+      allow get:  if isLoggedIn();
+      allow list: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        || ( isLoggedIn()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount'])
+          && request.resource.data.usedCount is number
+          && request.resource.data.usedCount == resource.data.get('usedCount', 0) + 1 );
+    }
+
+    // ── Coupon redemptions (audit log) ───────────────────
+    match /coupon_redemptions/{redemptionId} {
+      allow create: if isLoggedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.keys().hasAll([
+             'couponCode', 'uid', 'planId',
+             'originalAmount', 'discountAmount', 'finalAmount',
+             'createdAt'
+           ])
+        && request.resource.data.originalAmount is number
+        && request.resource.data.originalAmount >  0
+        && request.resource.data.discountAmount is number
+        && request.resource.data.discountAmount >  0
+        && request.resource.data.discountAmount <  request.resource.data.originalAmount
+        && request.resource.data.finalAmount    is number
+        && request.resource.data.finalAmount    >  0
+        && request.resource.data.originalAmount
+           == request.resource.data.discountAmount + request.resource.data.finalAmount
+        // Ensure the coupon code actually exists...
+        && exists(/databases/$(database)/documents/coupons/$(request.resource.data.couponCode))
+        // SECURITY FIX: ...and is not disabled (defaults to enabled when the
+        // field is absent, matching existing coupon docs).
+        && get(/databases/$(database)/documents/coupons/$(request.resource.data.couponCode)).data.get('enabled', true) == true;
+
+      allow read:   if isLoggedIn()
+        && (resource.data.uid == request.auth.uid || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ── Feature / content requests ───────────────────────
+    // SECURITY FIX: uid is now REQUIRED and bound to the authenticated user
+    // (was optional), detail is length-bounded to block oversized spam
+    // payloads, and status must start as 'new'. Matches the payload built
+    // by js/features/preppath-phase4-gating.js exactly.
+    match /requests/{docId} {
+      allow create: if isLoggedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type is string
+        && request.resource.data.detail is string
+        && request.resource.data.detail.size() >= 10
+        && request.resource.data.detail.size() <= 2000
+        && request.resource.data.get('status', 'new') == 'new';
+      allow read, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ── Referrals ────────────────────────────────────────
+    match /referrals/{uid} {
+      allow read:  if isOwner(uid) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── Payouts ──────────────────────────────────────────
+    match /payouts/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    // ── Admin audit log ──────────────────────────────────
+    match /admin_logs/{logId} {
+      allow create:         if isAdmin();
+      allow read:           if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // ── Study groups + weekly leaderboards ─────────────
+    // Any signed-in user can read groups (required for invite-code
+    // lookup). Create binds createdBy to the caller. The create LIMIT
+    // (free: 1 group, Pro: 10) is enforced client-side — rules cannot
+    // count documents; move creation into a Cloud Function if this
+    // ever needs to be airtight.
+    match /groups/{gid} {
+      allow read: if isLoggedIn();
+      allow create: if isLoggedIn()
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 3
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.inviteCode is string
+        && request.resource.data.inviteCode.size() >= 4
+        && request.resource.data.inviteCode.size() <= 12;
+      // Owner/admin: full update. Members: may ONLY bump memberCount
+      // (join/leave counter).
+      allow update: if isAdmin()
+        || (isLoggedIn() && resource.data.createdBy == request.auth.uid)
+        || (isLoggedIn()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberCount']));
+      allow delete: if isAdmin() || (isLoggedIn() && resource.data.createdBy == request.auth.uid);
+
+      match /members/{uid} {
+        allow read: if isLoggedIn();
+        allow create, update: if isOwner(uid);
+        allow delete: if isOwner(uid) || isAdmin()
+          || get(/databases/$(database)/documents/groups/$(gid)).data.createdBy == request.auth.uid;
+      }
+
+      // Weekly score entries — users write only their OWN entry, with a
+      // 2000-points/week cap as a tamper limit.
+      match /weeks/{weekId}/entries/{uid} {
+        allow read: if isLoggedIn();
+        allow create, update: if isOwner(uid)
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.points is number
+          && request.resource.data.points >= 0
+          && request.resource.data.points <= 2000;
+        allow delete: if isAdmin() || isOwner(uid)
+          || get(/databases/$(database)/documents/groups/$(gid)).data.createdBy == request.auth.uid;
+      }
+
+      // Motivation wall — members-only feed. Posts bind uid to the
+      // caller and are length-capped; likes is the only field members
+      // may edit on others' posts (one-tap reactions).
+      match /wall/{msgId} {
+        allow read: if isLoggedIn()
+          && exists(/databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid));
+        allow create: if isLoggedIn()
+          && exists(/databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid))
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1
+          && request.resource.data.text.size() <= 300;
+        allow update: if isLoggedIn()
+          && exists(/databases/$(database)/documents/groups/$(gid)/members/$(request.auth.uid))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes']);
+        allow delete: if isAdmin()
+          || (isLoggedIn() && resource.data.uid == request.auth.uid)
+          || get(/databases/$(database)/documents/groups/$(gid)).data.createdBy == request.auth.uid;
+      }
+    }
+
+    // ── Global weekly leaderboard ───────────────────────
+    match /global_leaderboard/{weekId}/entries/{uid} {
+      allow read: if isLoggedIn();
+      allow create, update: if isOwner(uid)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.points is number
+        && request.resource.data.points >= 0
+        && request.resource.data.points <= 2000;
+      allow delete: if isAdmin();
+    }
+
+    // ── Default deny ─────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

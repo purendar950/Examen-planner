@@ -53,16 +53,24 @@ function isProUser(userData, today) {
   /* 2. Admin-granted trial — admin-only-writable field, trusted as-is. */
   if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
 
-  /* 3. Self-serve trial in user-writable appState — guard against tampering. */
+  /* 3. Self-serve trial in user-writable appState — guard against tampering.
+     SECURITY FIX: the old guard only ran when startedAt was present and only
+     bounded expiry RELATIVE to startedAt. Two bypasses existed:
+       a) omit startedAt entirely ({ expiry: '2099-01-01' }) — guard skipped;
+       b) future-date both ({ startedAt: '2099-01-01', expiry: '2099-01-04' })
+          — guard passed because expiry <= startedAt + 4 days.
+     A trial is now denied unless startedAt exists, parses, is not in the
+     future (1 day of clock-skew grace), and expiry <= startedAt + 4 days. */
   const trial = appState.proTrial;
   if (trial && trial.expiry && trial.expiry >= today) {
     if (profile.trialSuspended) return false;
-    if (trial.startedAt) {
-      const startedAt = new Date(trial.startedAt);
-      const maxExpiry = new Date(startedAt.getTime() + 4 * 86400000); // 3 days + 1 grace
-      const claimedExpiry = new Date(trial.expiry + 'T23:59:59');
-      if (!isNaN(startedAt.getTime()) && claimedExpiry > maxExpiry) return false; // tampered — deny
-    }
+    if (!trial.startedAt) return false;                       // no start marker: deny
+    const startedAt = new Date(trial.startedAt);
+    if (isNaN(startedAt.getTime())) return false;             // unparseable: deny
+    if (startedAt.getTime() > Date.now() + 86400000) return false; // future-dated: deny
+    const maxExpiry = new Date(startedAt.getTime() + 4 * 86400000); // 3 days + 1 grace
+    const claimedExpiry = new Date(trial.expiry + 'T23:59:59');
+    if (claimedExpiry > maxExpiry) return false;              // stretched expiry: deny
     return true;
   }
 

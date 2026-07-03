@@ -1,0 +1,24 @@
+# ── GitLab Pages deployment ─────────────────────────────────────────────
+# Builds the Vite MPA (index/app/admin + legacy css/js/pages assets copied
+# by vite.config.mjs) and publishes it to GitLab Pages.
+#
+# Live URL after the first successful pipeline:
+#   https://ditrdf-group.gitlab.io/Examen-planner/
+#
+# NOTE: --base=./ makes all built asset URLs relative, so the site works
+# both on the default unique Pages domain (served at the domain root,
+# e.g. https://examen-planner-xxxx.gitlab.io/) and on the classic
+# subpath URL (https://ditrdf-group.gitlab.io/Examen-planner/).
+
+pages:
+  stage: deploy
+  image: node:22-alpine
+  script:
+    - npm ci
+    - npm run build -- --base=./
+    - rm -rf public && cp -r dist public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

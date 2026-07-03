@@ -35,6 +35,44 @@ async function suspendUser(id) {
   await adminLog('suspend_user', id, { reason });
   await loadAll(); render();
 }
+
+/* ══ PERMANENT USER DELETE ══
+   Deletes the Firestore user doc + referral doc (payments are immutable
+   accounting records and are kept). Requires typing DELETE to confirm.
+   NOTE: the Firebase AUTH account can only be deleted from the Firebase
+   Console (Authentication > Users) — client SDKs cannot delete other
+   users. Until the auth account is removed there, the user can sign in
+   again and a fresh empty doc will be created. Use Suspend to block. */
+async function deleteUser(id) {
+  const u = USERS.find(x => x.id === id);
+  const label = (u && (u.p.email || u.p.name)) || id;
+  const typed = prompt(
+    '\u26a0 PERMANENT DELETE\n\nUser: ' + label + '\n\n' +
+    'Ye user ka poora Firestore data (profile, progress, plans, referral) delete kar dega. ' +
+    'Payments record accounting ke liye kept rahega.\n\n' +
+    'NOTE: Login (Firebase Auth) account sirf Firebase Console \u2192 Authentication \u2192 Users se delete hota hai. ' +
+    'Jab tak wahan se delete nahi karte, user dobara login karke naya khaali account bana sakta hai. ' +
+    'Sirf block karna ho to Suspend use karo.\n\n' +
+    'Confirm karne ke liye DELETE type karo:'
+  );
+  if (typed !== 'DELETE') { if (typed !== null) showToast('Cancelled — exact "DELETE" type karna hota hai.'); return; }
+  try {
+    await db.collection('users').doc(id).delete();
+    try { await db.collection('referrals').doc(id).delete(); } catch(e) {}
+    await adminLog('delete_user', id, { email: (u && u.p.email) || '', name: (u && u.p.name) || '' });
+    const idx = USERS.findIndex(x => x.id === id);
+    if (idx >= 0) USERS.splice(idx, 1);
+    rebuildDupIndex();
+    render();
+    showToast('\ud83d\uddd1 User data deleted. Auth account Firebase Console se bhi delete karna na bhoolna.');
+  } catch(e) { showToast('Delete failed: ' + (e.message || e)); }
+}
+
+/* ══ Users tab view state (pagination + sort) ══ */
+var USER_PAGE = 1;
+var USER_SORT = 'new';
+var USERS_PER_PAGE = 20;
+function userPage(delta) { USER_PAGE = Math.max(1, USER_PAGE + delta); render(); }
 async function setPlan(id) {
   const sel = document.getElementById('plan-' + id); if (!sel) return;
   if (sel.value === 'free') {

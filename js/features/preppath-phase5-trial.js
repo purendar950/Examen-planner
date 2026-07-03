@@ -21,16 +21,20 @@ function ezIsProTrialActive() {
   if (EZ_PROFILE.trialSuspended) return false;
   var exp = ezProTrialExpiry();
   if (!exp) return false;
-  // FIX (Bug 3): Tamper guard — the trial expiry stored in user-writable
-  // appState/localStorage must not exceed 4 days from startedAt.
-  // If a user manually edits localStorage to extend their trial, we deny access.
-  if (appState && appState.proTrial && appState.proTrial.startedAt) {
-    var startedAt = new Date(appState.proTrial.startedAt);
-    var maxAllowedExpiry = new Date(startedAt.getTime() + 4 * 86400000); // 3 days + 1 grace
-    var claimedExpiry = new Date(exp + 'T23:59:59');
-    if (claimedExpiry > maxAllowedExpiry) return false; // Tampered expiry — deny
-  }
-  return new Date(exp + 'T23:59:59') >= new Date();
+  // FIX (Bug 3) + SECURITY FIX: Tamper guard — mirrors shared/proGating.js.
+  // A trial with no startedAt, an unparseable startedAt, a future-dated
+  // startedAt, or an expiry beyond startedAt + 4 days is denied. The old
+  // guard skipped entirely when startedAt was missing and never checked
+  // that startedAt is in the past, so hand-edited trials could pass.
+  var trial = appState && appState.proTrial;
+  if (!trial || !trial.startedAt) return false;               // no start marker — deny
+  var startedAt = new Date(trial.startedAt);
+  if (isNaN(startedAt.getTime())) return false;               // unparseable — deny
+  if (startedAt.getTime() > Date.now() + 86400000) return false; // future-dated — deny
+  var maxAllowedExpiry = new Date(startedAt.getTime() + 4 * 86400000); // 3 days + 1 grace
+  var claimedExpiry = new Date(exp + 'T23:59:59');
+  if (claimedExpiry > maxAllowedExpiry) return false;         // Tampered expiry — deny
+  return claimedExpiry >= new Date();
 }
 function ezProTrialUsed() {
   // Once per account: the trial counts as USED if ANY durable marker says so.
