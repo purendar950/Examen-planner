@@ -22,12 +22,21 @@
   /* ── styles (pf-* base classes come from profile.js) ── */
   var st = document.createElement('style');
   st.textContent =
-    '.grp-table{width:100%;border-collapse:collapse;font-size:0.82rem;}' +
-    '.grp-table th{color:var(--muted);font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);}' +
-    '.grp-table td{padding:6px 8px;border-bottom:1px solid var(--border);}' +
+    '.grp-table{width:100%;max-width:100%;border-collapse:collapse;font-size:0.78rem;table-layout:fixed;}' +
+    '.grp-table th{color:var(--muted);font-weight:600;text-align:left;padding:6px 4px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+    '.grp-table td{padding:6px 4px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
     '.grp-table tr:last-child td{border-bottom:none;}' +
+    '.grp-table-scroll{display:block;width:100%;max-width:100%;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;margin:0;padding:0;}' +
     '.grp-me td{background:rgba(0,200,150,0.08);}' +
-    '.grp-rank{font-weight:800;width:36px;}' +
+    '.grp-rank{font-weight:800;width:28px;}' +
+    '.grp-lb-table th:nth-child(1),.grp-lb-table td:nth-child(1){width:36px;}' +
+    '.grp-lb-table th:nth-child(2),.grp-lb-table td:nth-child(2){width:32%;}' +
+    '.grp-lb-table th:nth-child(3),.grp-lb-table td:nth-child(3){width:18%;}' +
+    '.grp-lb-table th:nth-child(4),.grp-lb-table td:nth-child(4){width:16%;}' +
+    '.grp-lb-table th:nth-child(5),.grp-lb-table td:nth-child(5){width:16%;}' +
+    '.grp-mock-table th:nth-child(1),.grp-mock-table td:nth-child(1){width:34px;}' +
+    '.grp-mock-table th:nth-child(3),.grp-mock-table td:nth-child(3){width:22%;}' +
+    '.grp-mock-table th:nth-child(4),.grp-mock-table td:nth-child(4){width:22%;}' +
     '.grp-item{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px dashed var(--border);}' +
     '.grp-item:last-child{border-bottom:none;}' +
     '.grp-code{font-family:monospace;font-weight:800;letter-spacing:2px;background:var(--surface);border:1px dashed var(--accent);border-radius:8px;padding:4px 10px;}' +
@@ -37,41 +46,79 @@
     '.grp-wall-text{font-size:0.85rem;word-break:break-word;}' +
     '.grp-like{background:none;border:1px solid var(--border);border-radius:99px;padding:2px 10px;font-size:0.72rem;cursor:pointer;color:var(--text);margin-top:5px;}' +
     '.grp-like:hover{border-color:var(--accent);}' +
+    '.grp-hub-hero{position:relative;overflow:hidden;border:1px solid rgba(99,102,241,.22);background:linear-gradient(135deg,rgba(99,102,241,.14),rgba(14,165,233,.08));}' +
+    '.grp-hub-hero:after{content:"";position:absolute;right:-60px;top:-60px;width:180px;height:180px;border-radius:50%;background:rgba(99,102,241,.18);filter:blur(2px);}' +
+    '.grp-hero-title{font-size:1.25rem;font-weight:800;margin:0 0 6px;letter-spacing:-.02em;}' +
+    '.grp-hero-actions{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px;position:relative;z-index:1;}' +
+    '.grp-privacy-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;}' +
+    '.grp-privacy-option{border:1px solid var(--border);border-radius:14px;padding:10px 12px;display:flex;gap:8px;align-items:flex-start;cursor:pointer;background:rgba(255,255,255,.03);}' +
+    '.grp-privacy-option:hover{border-color:var(--accent);}' +
+    '.grp-privacy-option strong{display:block;font-size:.86rem;}' +
+    '.grp-privacy-option span{display:block;font-size:.74rem;color:var(--muted);margin-top:2px;}' +
+    '.grp-group-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;}' +
+    '.grp-card{border:1px solid var(--border);border-radius:16px;padding:13px;background:rgba(255,255,255,.035);cursor:pointer;transition:.18s ease;}' +
+    '.grp-card:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:0 10px 28px rgba(0,0,0,.12);}' +
+    '.grp-card-title{font-weight:800;margin-bottom:5px;display:flex;align-items:center;gap:6px;}' +
+    '.grp-card-meta{font-size:.76rem;color:var(--muted);}' +
+    '.grp-detail-head{border:1px solid var(--border);border-radius:18px;padding:14px;background:linear-gradient(135deg,rgba(15,23,42,.05),rgba(99,102,241,.10));margin-bottom:12px;}' +
+    /* Responsive dashboard grid: 2+ columns on wide screens, 1 column on phones.
+       minmax(min(100%,300px),1fr) guarantees a track never forces the grid wider
+       than its container (the classic auto-fit overflow trap on <300px screens). */
+    '.grp-box-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:12px;align-items:start;width:100%;max-width:100%;}' +
+    '.grp-box-grid>*{min-width:0;max-width:100%;}' +
+    '.grp-dash-box{border:1px solid var(--border);border-radius:16px;padding:13px;background:var(--card-bg,rgba(255,255,255,.04));min-height:120px;min-width:0;max-width:100%;width:100%;overflow:hidden;}' +
+    '.grp-dash-box h3{margin:0 0 10px;font-size:.95rem;display:flex;align-items:center;gap:6px;}' +
+    '.grp-member-count{font-size:.74rem;font-weight:700;color:var(--muted);margin:-4px 0 10px;text-transform:uppercase;letter-spacing:.04em;}' +
+    '.grp-user-scroll{max-height:280px;overflow-y:auto;overflow-x:hidden;}' +
+    '.grp-user-pill{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:7px 10px;margin-bottom:7px;font-size:.82rem;transition:.15s ease;}' +
+    '.grp-user-pill:hover{border-color:var(--accent);}' +
+    '.grp-user-me{background:rgba(0,200,150,.08);border-color:rgba(0,200,150,.3);}' +
+    '.grp-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.78rem;color:#fff;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,.18);}' +
+    '.grp-user-info{flex:1;min-width:0;}' +
+    '.grp-user-name{font-weight:700;display:flex;align-items:center;gap:6px;min-width:0;}' +
+    '.grp-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}' +
+    '.grp-user-sub{font-size:.69rem;color:var(--muted);margin-top:1px;}' +
+    '.grp-you-badge{font-size:.6rem;font-weight:700;padding:1px 7px;border-radius:99px;background:rgba(0,200,150,.18);color:#10B981;border:1px solid rgba(0,200,150,.35);flex-shrink:0;}' +
+    '.grp-role-badge{font-size:.64rem;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap;flex-shrink:0;}' +
+    '.grp-role-owner{background:rgba(250,204,21,.15);color:#EAB308;border:1px solid rgba(250,204,21,.35);}' +
+    '.grp-role-member{background:rgba(148,163,184,.12);color:var(--muted);border:1px solid var(--border);}' +
+    '.grp-kick{flex-shrink:0;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#EF4444;border:1px solid rgba(239,68,68,.3);cursor:pointer;transition:.15s ease;}' +
+    '.grp-kick:hover{background:rgba(239,68,68,.15);border-color:#EF4444;}' +
     '.grp-pub-badge{font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(99,102,241,0.15);color:#818CF8;border:1px solid rgba(99,102,241,0.35);}';
   document.head.appendChild(st);
 
   var MARKUP = [
-    '<div class="pf-wrap">',
-    '  <div class="pf-card">',
-    '    <h3>🌍 Global Leaderboard <span class="pf-muted" id="grp-week-label"></span></h3>',
-    '    <div id="grp-global"><div class="pf-muted">Loading…</div></div>',
+    '<div class="pf-wrap" id="grp-hub-view">',
+    '  <div class="pf-card grp-hub-hero">',
+    '    <p class="grp-hero-title">👥 Study Groups</p>',
+    '    <p class="pf-muted">First screen par apne groups dekho, naya group banao, public group join karo. Kisi group par click karte hi andar leaderboard, mock ranking, users aur chat dikhega.</p>',
+    '    <div class="grp-hero-actions">',
+    '      <div class="pf-row">',
+    '        <input class="pf-input" id="grp-new-name" maxlength="40" placeholder="Group name (e.g. UPSC 2026 Warriors)" style="flex:1;min-width:200px;">',
+    '        <button class="pf-btn pf-btn-accent" onclick="createStudyGroup()">➕ Create Group</button>',
+    '      </div>',
+    '      <div class="grp-privacy-options">',
+    '        <label class="grp-privacy-option"><input type="radio" name="grp-privacy" value="private" checked><div><strong>🔒 Private Group</strong><span>Invite code se hi join hoga</span></div></label>',
+    '        <label class="grp-privacy-option"><input type="radio" name="grp-privacy" value="public"><div><strong>🌍 Public Group</strong><span>Discover list mein dikhega (💎 Pro)</span></div></label>',
+    '      </div>',
+    '      <div class="pf-row">',
+    '        <input class="pf-input" id="grp-join-code" maxlength="12" placeholder="Invite code (e.g. X4B2ZK)" style="flex:1;min-width:160px;text-transform:uppercase;">',
+    '        <button class="pf-btn" onclick="joinStudyGroup()">🎫 Join Code</button>',
+    '      </div>',
+    '    </div>',
     '  </div>',
     '  <div class="pf-card">',
-    '    <h3>👥 My Groups</h3>',
-    '    <div id="grp-mine"><div class="pf-muted">Koi group nahi — neeche se banao ya join karo.</div></div>',
-    '    <div id="grp-detail" style="margin-top:12px;"></div>',
+    '    <h3>📌 Your Groups</h3>',
+    '    <div id="grp-mine"><div class="pf-muted">Koi group nahi — upar se banao ya join karo.</div></div>',
     '  </div>',
     '  <div class="pf-card">',
     '    <h3>🧭 Discover Public Groups</h3>',
     '    <p class="pf-muted" style="margin-bottom:8px;">Public groups sabke liye open hain — bina code ke join karo.</p>',
     '    <div id="grp-discover"><div class="pf-muted">Loading…</div></div>',
     '  </div>',
-    '  <div class="pf-card">',
-    '    <h3>➕ Create Group</h3>',
-    '    <div class="pf-row">',
-    '      <input class="pf-input" id="grp-new-name" maxlength="40" placeholder="Group name (e.g. UPSC 2026 Warriors)" style="flex:1;min-width:200px;">',
-    '      <button class="pf-btn pf-btn-accent" onclick="createStudyGroup()">Create</button>',
-    '    </div>',
-    '    <label class="pf-row" style="margin-top:8px;font-size:0.82rem;color:var(--muted);cursor:pointer;">',
-    '      <input type="checkbox" id="grp-new-public"> 🌍 Public group — Discover list mein sabko dikhega (💎 Pro only)',
-    '    </label>',
-    '    <p class="pf-muted" style="margin-top:6px;">Free: 1 private group · Pro: 10 groups + public groups. Group current exam se link hota hai.</p>',
-    '    <h3 style="margin-top:14px;">🎫 Join with Code</h3>',
-    '    <div class="pf-row">',
-    '      <input class="pf-input" id="grp-join-code" maxlength="12" placeholder="Invite code (e.g. X4B2ZK)" style="flex:1;min-width:160px;text-transform:uppercase;">',
-    '      <button class="pf-btn pf-btn-accent" onclick="joinStudyGroup()">Join</button>',
-    '    </div>',
-    '  </div>',
+    '</div>',
+    '<div class="pf-wrap" id="grp-inside-view" style="display:none;">',
+    '  <div id="grp-detail"></div>',
     '</div>'
   ].join('\n');
 
@@ -190,7 +237,7 @@
   function lbTable(rows, myUid) {
     if (!rows.length) return '<div class="pf-muted">Is week abhi koi entry nahi. Tasks complete karo! 💪</div>';
     var medal = ['🥇', '🥈', '🥉'];
-    return '<table class="grp-table"><thead><tr><th></th><th>Student</th><th>Points</th><th>Tasks</th><th>Mocks</th><th>🔥</th></tr></thead><tbody>' +
+    return '<div class="grp-table-scroll"><table class="grp-table grp-lb-table"><thead><tr><th></th><th>Student</th><th>Points</th><th>Tasks</th><th>Mocks</th></tr></thead><tbody>' +
       rows.map(function (r, i) {
         var ex = r.exam ? ' <span class="pf-muted">· ' + clean(r.exam).toUpperCase() + '</span>' : '';
         return '<tr' + (r.uid === myUid ? ' class="grp-me"' : '') + '>' +
@@ -198,9 +245,8 @@
           '<td>' + clean(r.name || 'Student') + (r.uid === myUid ? ' <strong>(you)</strong>' : '') + ex + '</td>' +
           '<td><strong>' + (Number(r.points) || 0) + '</strong></td>' +
           '<td>' + (Number(r.tasksDone) || 0) + '</td>' +
-          '<td>' + (Number(r.mocksTaken) || 0) + '</td>' +
-          '<td>' + (Number(r.streak) || 0) + '</td></tr>';
-      }).join('') + '</tbody></table>';
+          '<td>' + (Number(r.mocksTaken) || 0) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
   }
 
   function loadGlobal() {
@@ -246,14 +292,16 @@
     var box = document.getElementById('grp-mine');
     if (!box) return;
     var list = grpMyGroups();
-    if (!list.length) { box.innerHTML = '<div class="pf-muted">Koi group nahi — neeche se banao ya join karo.</div>'; return; }
-    box.innerHTML = list.map(function (g) {
-      return '<div class="grp-item"><strong>' + clean(g.name || 'Group') + '</strong>' +
-        '<span class="pf-row">' +
-        '<button class="pf-btn" onclick="openStudyGroup(\'' + g.id + '\')">🏆 Open</button>' +
-        '<button class="pf-btn pf-btn-danger" onclick="leaveStudyGroup(\'' + g.id + '\')">Leave</button>' +
-        '</span></div>';
-    }).join('');
+    if (!list.length) { box.innerHTML = '<div class="pf-muted">Koi group nahi — upar se banao ya join karo.</div>'; return; }
+    box.innerHTML = '<div class="grp-group-grid">' + list.map(function (g) {
+      return '<div class="grp-card" onclick="openStudyGroup(\'' + g.id + '\')">' +
+        '<div class="grp-card-title">👥 ' + clean(g.name || 'Group') + '</div>' +
+        '<div class="grp-card-meta">Tap to open dashboard · leaderboard · mock rank · chat</div>' +
+        '<div class="pf-row" style="margin-top:10px;justify-content:space-between;">' +
+        '<button class="pf-btn pf-btn-accent" onclick="event.stopPropagation();openStudyGroup(\'' + g.id + '\')">Open</button>' +
+        '<button class="pf-btn pf-btn-danger" onclick="event.stopPropagation();leaveStudyGroup(\'' + g.id + '\')">Leave</button>' +
+        '</div></div>';
+    }).join('') + '</div>';
   }
 
   window.renderGroupsPage = function () {
@@ -282,8 +330,8 @@
     var inp = document.getElementById('grp-new-name');
     var name = ((inp && inp.value) || '').trim();
     if (name.length < 3) { toast('Group name kam se kam 3 characters ka ho.', 'error'); return; }
-    var pubCb = document.getElementById('grp-new-public');
-    var wantPublic = !!(pubCb && pubCb.checked);
+    var privacy = document.querySelector('input[name="grp-privacy"]:checked');
+    var wantPublic = !!(privacy && privacy.value === 'public');
     var isPro = (typeof ezIsPro === 'function') && ezIsPro();
     if (wantPublic && !isPro) { toast('🌍 Public groups sirf Pro users bana sakte hain. Upgrade karo! 💎', 'error'); return; }
     try {
@@ -307,7 +355,8 @@
       grpMyGroups().push({ id: ref.id, name: name });
       try { saveProgress(); } catch (e) {}
       if (inp) inp.value = '';
-      if (pubCb) pubCb.checked = false;
+      var privReset = document.querySelector('input[name="grp-privacy"][value="private"]');
+      if (privReset) privReset.checked = true;
       window.grpSyncScores(true);
       renderGroupsPage();
       toast('🎉 Group ban gaya! Invite code: ' + code + (wantPublic ? ' (public — Discover mein dikhega)' : ''), 'success');
@@ -365,48 +414,132 @@
     } catch (e) { toast('Join failed: ' + (e.message || e), 'error'); }
   };
 
-  /* ── group detail: leaderboard + motivation wall ── */
+  /* ── group detail: leaderboard + mock ranking + members + chat ── */
   var _openGid = null;
+
+  window.grpBackToHub = function () {
+    var hub = document.getElementById('grp-hub-view'), inside = document.getElementById('grp-inside-view');
+    if (inside) inside.style.display = 'none';
+    if (hub) hub.style.display = '';
+    _openGid = null;
+  };
+
+  function mockRankTable(rows, uid) {
+    var ranked = (rows || []).slice().sort(function (a, b) {
+      var am = Number(a.mocksTaken || a.mocks || a.mockTests || 0), bm = Number(b.mocksTaken || b.mocks || b.mockTests || 0);
+      if (bm !== am) return bm - am;
+      return (b.points || 0) - (a.points || 0);
+    });
+    if (!ranked.length) return '<div class="pf-muted">Abhi mock ranking empty hai. Mock complete karte hi rank yahan dikhegi.</div>';
+    return '<div class="grp-table-scroll"><table class="grp-table grp-mock-table"><thead><tr><th class="grp-rank">#</th><th>User</th><th>Mocks</th><th>Pts</th></tr></thead><tbody>' +
+      ranked.slice(0, 10).map(function (r, i) {
+        var m = Number(r.mocksTaken || r.mocks || r.mockTests || 0);
+        return '<tr' + (r.uid === uid ? ' class="grp-me"' : '') + '><td class="grp-rank">' + (i + 1) + '</td><td>' + clean(r.name || 'Student') + '</td><td>' + m + '</td><td>' + (r.points || 0) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+
+  /* ── member box helpers ── */
+  function grpAvatarColor(name) {
+    var colors = ['#6366F1', '#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#8B5CF6', '#14B8A6', '#F97316'];
+    var s = String(name || '?'), h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 99991;
+    return colors[h % colors.length];
+  }
+  function grpInitials(name) {
+    var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    var a = parts[0].charAt(0);
+    var b = parts.length > 1 ? parts[parts.length - 1].charAt(0) : '';
+    return (a + b).toUpperCase();
+  }
+  function grpJoinedText(ts) {
+    try {
+      var d = ts && ts.toDate ? ts.toDate() : null;
+      if (!d) return '';
+      var diff = Date.now() - d.getTime(), day = 86400000;
+      if (diff < 0) return 'Joined just now';
+      if (diff < day) return 'Joined today';
+      if (diff < 2 * day) return 'Joined yesterday';
+      if (diff < 7 * day) return 'Joined ' + Math.floor(diff / day) + 'd ago';
+      return 'Joined ' + d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    } catch (e) { return ''; }
+  }
+
+  function memberListHtml(members, ownerUid, myUid, gid, viewerIsOwner) {
+    if (!members.length) return '<div class="pf-muted">Members load nahi hue.</div>';
+    /* Owner first, then current user, then everyone else. */
+    var sorted = members.slice().sort(function (a, b) {
+      if (a.uid === ownerUid) return -1;
+      if (b.uid === ownerUid) return 1;
+      if (a.uid === myUid) return -1;
+      if (b.uid === myUid) return 1;
+      return 0;
+    });
+    var count = members.length;
+    var head = '<div class="grp-member-count">👥 ' + count + ' member' + (count === 1 ? '' : 's') + '</div>';
+    return head + '<div class="grp-user-scroll">' + sorted.map(function (m) {
+      var isOwner = m.uid === ownerUid;
+      var isMe = myUid && m.uid === myUid;
+      var name = clean(m.name || 'Student');
+      var sub = grpJoinedText(m.joinedAt);
+      /* Owner can remove any member except themselves. */
+      var kick = (viewerIsOwner && !isOwner)
+        ? '<span class="grp-kick" title="Remove member" onclick="grpRemoveMember(\'' + gid + '\',\'' + m.uid + '\')">✕</span>'
+        : '';
+      return '<div class="grp-user-pill' + (isMe ? ' grp-user-me' : '') + '">' +
+        '<div class="grp-avatar" style="background:' + grpAvatarColor(m.name) + ';">' + clean(grpInitials(m.name)) + '</div>' +
+        '<div class="grp-user-info">' +
+        '<div class="grp-user-name"><span class="grp-name-text">' + name + '</span>' + (isMe ? '<span class="grp-you-badge">You</span>' : '') + '</div>' +
+        (sub ? '<div class="grp-user-sub">' + sub + '</div>' : '') +
+        '</div>' +
+        '<span class="grp-role-badge ' + (isOwner ? 'grp-role-owner' : 'grp-role-member') + '">' + (isOwner ? '👑 Owner' : 'Member') + '</span>' +
+        kick +
+        '</div>';
+    }).join('') + '</div>';
+  }
 
   window.openStudyGroup = async function (gid) {
     var box = document.getElementById('grp-detail');
     if (!box || !fbReady()) return;
+    var hub = document.getElementById('grp-hub-view'), inside = document.getElementById('grp-inside-view');
+    if (hub) hub.style.display = 'none';
+    if (inside) inside.style.display = '';
     _openGid = gid;
-    box.innerHTML = '<div class="pf-muted">Loading group…</div>';
+    box.innerHTML = '<div class="pf-card"><div class="pf-muted">Loading group dashboard…</div></div>';
     try {
       var u = me();
       var gdoc = await db.collection('groups').doc(gid).get();
-      if (!gdoc.exists) { box.innerHTML = '<div class="pf-muted">Group delete ho chuka hai.</div>'; return; }
+      if (!gdoc.exists) { box.innerHTML = '<div class="pf-card"><div class="pf-muted">Group delete ho chuka hai.</div></div>'; return; }
       var g = gdoc.data();
       var isOwner = u && g.createdBy === u.uid;
       var wk = grpWeekId();
-      var snap = await db.collection('groups').doc(gid).collection('weeks').doc(wk).collection('entries').get();
-      var rows = snap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (b.points || 0) - (a.points || 0); });
+      var entrySnap = await db.collection('groups').doc(gid).collection('weeks').doc(wk).collection('entries').get();
+      var rows = entrySnap.docs.map(function (d) { return d.data(); }).sort(function (a, b) { return (b.points || 0) - (a.points || 0); });
+      var memberSnap = await db.collection('groups').doc(gid).collection('members').limit(100).get().catch(function () { return { docs: [] }; });
+      var members = memberSnap.docs.map(function (d) { var x = d.data() || {}; x.uid = d.id; return x; });
+      if (!members.length && rows.length) members = rows.map(function (r) { return { uid: r.uid, name: r.name }; });
+
       box.innerHTML =
-        '<div style="border-top:1px solid var(--border);padding-top:12px;">' +
-        '<div class="pf-row" style="justify-content:space-between;">' +
-        '<strong>🏆 ' + clean(g.name || 'Group') + (g.isPublic ? ' <span class="grp-pub-badge">🌍 PUBLIC</span>' : '') + ' — Week ' + wk + '</strong>' +
-        '<span class="pf-row">' +
-        '<span class="grp-code" id="grp-code-txt">' + clean(g.inviteCode || '') + '</span>' +
-        '<button class="pf-btn" onclick="grpCopyCode()">📋 Copy</button>' +
-        (isOwner ? '<button class="pf-btn pf-btn-danger" onclick="grpDeleteGroup(\'' + gid + '\')">🗑 Delete Group</button>' : '') +
-        '</span></div>' +
-        '<div class="pf-muted" style="margin:4px 0 10px;">' + (g.memberCount || rows.length || 1) + ' members · Leaderboard har Monday reset hota hai.</div>' +
-        lbTable(rows, u && u.uid) +
-        (isOwner && rows.length ? '<div class="pf-row" style="margin-top:8px;">' +
-          rows.filter(function (r) { return r.uid !== u.uid; }).map(function (r) {
-            return '<button class="pf-btn pf-btn-danger" onclick="grpRemoveMember(\'' + gid + '\',\'' + r.uid + '\')">🚫 ' + clean(r.name || 'Member') + '</button>';
-          }).join('') + '</div>' : '') +
-        /* ── motivation wall ── */
-        '<h3 style="margin:16px 0 8px;font-size:0.92rem;">💬 Motivation Wall</h3>' +
-        '<div class="pf-row" style="margin-bottom:10px;">' +
-        '<input class="pf-input" id="grp-wall-input" maxlength="300" placeholder="Kuch motivate karne wala likho…" style="flex:1;min-width:200px;" onkeydown="if(event.key===\'Enter\')grpPostWall(\'' + gid + '\')">' +
-        '<button class="pf-btn pf-btn-accent" onclick="grpPostWall(\'' + gid + '\')">Post</button>' +
+        '<div class="grp-detail-head">' +
+        '  <div class="pf-row" style="justify-content:space-between;align-items:flex-start;gap:12px;">' +
+        '    <div style="min-width:0;flex:1;"><button class="pf-btn" onclick="grpBackToHub()">← Groups</button>' +
+        '    <h2 style="margin:10px 0 4px;font-size:1.25rem;overflow-wrap:anywhere;word-break:break-word;">👥 ' + clean(g.name || 'Group') + (g.isPublic ? ' <span class="grp-pub-badge">🌍 PUBLIC</span>' : '') + '</h2>' +
+        '    <div class="pf-muted">' + (g.memberCount || members.length || rows.length || 1) + ' members · Week ' + wk + ' · Leaderboard resets Monday</div></div>' +
+        '    <div class="pf-row"><span class="grp-code" id="grp-code-txt">' + clean(g.inviteCode || '') + '</span><button class="pf-btn" onclick="grpCopyCode()">📋 Copy</button>' +
+        (isOwner ? '<button class="pf-btn pf-btn-danger" onclick="grpDeleteGroup(\'' + gid + '\')">🗑 Delete</button>' : '') + '</div>' +
+        '  </div>' +
         '</div>' +
-        '<div id="grp-wall"><div class="pf-muted">Loading wall…</div></div>' +
+        '<div class="grp-box-grid">' +
+        '  <div class="grp-dash-box"><h3>🏆 Group Leaderboard</h3><div id="grp-inside-global">' + lbTable(rows, u && u.uid) + '</div></div>' +
+        '  <div class="grp-dash-box"><h3>🧪 Mock Test Ranking</h3>' + mockRankTable(rows, u && u.uid) + '</div>' +
+        '  <div class="grp-dash-box"><h3>👤 Members</h3>' + memberListHtml(members, g.createdBy, u && u.uid, gid, isOwner) + '</div>' +
+        '  <div class="grp-dash-box"><h3>💬 Group Chat</h3>' +
+        '    <div class="pf-row" style="margin-bottom:10px;"><input class="pf-input" id="grp-wall-input" maxlength="300" placeholder="Message type karo…" style="flex:1;min-width:160px;" onkeydown="if(event.key===\'Enter\')grpPostWall(\'' + gid + '\')"><button class="pf-btn pf-btn-accent" onclick="grpPostWall(\'' + gid + '\')">Send</button></div>' +
+        '    <div id="grp-wall"><div class="pf-muted">Loading chat…</div></div>' +
+        '  </div>' +
         '</div>';
       grpLoadWall(gid, isOwner);
-    } catch (e) { box.innerHTML = '<div class="pf-muted">Load failed: ' + clean(e.message || e) + '</div>'; }
+    } catch (e) { box.innerHTML = '<div class="pf-card"><div class="pf-muted">Load failed: ' + clean(e.message || e) + '</div></div>'; }
   };
 
   window.grpLoadWall = function (gid, isOwner) {
