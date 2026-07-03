@@ -22,13 +22,18 @@
   /* ── styles (pf-* base classes come from profile.js) ── */
   var st = document.createElement('style');
   st.textContent =
-    '.grp-table{width:100%;max-width:100%;border-collapse:collapse;font-size:0.82rem;table-layout:fixed;}' +
-    '.grp-table th{color:var(--muted);font-weight:600;text-align:left;padding:6px 7px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
-    '.grp-table td{padding:6px 7px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+    '.grp-table{width:100%;max-width:100%;border-collapse:collapse;font-size:0.78rem;table-layout:fixed;}' +
+    '.grp-table th{color:var(--muted);font-weight:600;text-align:left;padding:6px 4px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
+    '.grp-table td{padding:6px 4px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}' +
     '.grp-table tr:last-child td{border-bottom:none;}' +
-    '.grp-table-scroll{width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -3px;padding:0 3px;}' +
+    '.grp-table-scroll{display:block;width:100%;max-width:100%;overflow:hidden;-webkit-overflow-scrolling:touch;margin:0;padding:0;}' +
     '.grp-me td{background:rgba(0,200,150,0.08);}' +
-    '.grp-rank{font-weight:800;width:34px;}' +
+    '.grp-rank{font-weight:800;width:28px;}' +
+    '.grp-lb-table th:nth-child(1),.grp-lb-table td:nth-child(1){width:36px;}' +
+    '.grp-lb-table th:nth-child(2),.grp-lb-table td:nth-child(2){width:32%;}' +
+    '.grp-lb-table th:nth-child(3),.grp-lb-table td:nth-child(3){width:18%;}' +
+    '.grp-lb-table th:nth-child(4),.grp-lb-table td:nth-child(4){width:16%;}' +
+    '.grp-lb-table th:nth-child(5),.grp-lb-table td:nth-child(5){width:16%;}' +
     '.grp-item{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px dashed var(--border);}' +
     '.grp-item:last-child{border-bottom:none;}' +
     '.grp-code{font-family:monospace;font-weight:800;letter-spacing:2px;background:var(--surface);border:1px dashed var(--accent);border-radius:8px;padding:4px 10px;}' +
@@ -228,7 +233,7 @@
   function lbTable(rows, myUid) {
     if (!rows.length) return '<div class="pf-muted">Is week abhi koi entry nahi. Tasks complete karo! 💪</div>';
     var medal = ['🥇', '🥈', '🥉'];
-    return '<div class="grp-table-scroll"><table class="grp-table"><thead><tr><th></th><th>Student</th><th>Points</th><th>Tasks</th><th>Mocks</th><th>🔥</th></tr></thead><tbody>' +
+    return '<div class="grp-table-scroll"><table class="grp-table grp-lb-table"><thead><tr><th></th><th>Student</th><th>Points</th><th>Tasks</th><th>Mocks</th></tr></thead><tbody>' +
       rows.map(function (r, i) {
         var ex = r.exam ? ' <span class="pf-muted">· ' + clean(r.exam).toUpperCase() + '</span>' : '';
         return '<tr' + (r.uid === myUid ? ' class="grp-me"' : '') + '>' +
@@ -236,8 +241,7 @@
           '<td>' + clean(r.name || 'Student') + (r.uid === myUid ? ' <strong>(you)</strong>' : '') + ex + '</td>' +
           '<td><strong>' + (Number(r.points) || 0) + '</strong></td>' +
           '<td>' + (Number(r.tasksDone) || 0) + '</td>' +
-          '<td>' + (Number(r.mocksTaken) || 0) + '</td>' +
-          '<td>' + (Number(r.streak) || 0) + '</td></tr>';
+          '<td>' + (Number(r.mocksTaken) || 0) + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
 
