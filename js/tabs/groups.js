@@ -569,6 +569,7 @@
         '  <button class="grp-tab" data-grp-tab="leaderboard" onclick="grpSwitchTab(\'leaderboard\')">🏆 Leaderboard</button>' +
         '  <button class="grp-tab" data-grp-tab="mock" onclick="grpSwitchTab(\'mock\')">🧪 Mock Rank</button>' +
         '  <button class="grp-tab" data-grp-tab="members" onclick="grpSwitchTab(\'members\')">👤 Members <span class="grp-tab-badge">' + members.length + '</span></button>' +
+        '  <button class="grp-tab" data-grp-tab="global" onclick="grpSwitchTab(\'global\')">🌐 Global</button>' +
         '</div>' +
         '<div class="grp-dash-box grp-panel active" data-grp-panel="chat">' +
         '  <h3>💬 Group Chat <span id="grp-chat-live" class="pf-muted" style="font-size:.68rem;font-weight:400;">🟢 Live</span></h3>' +
@@ -583,8 +584,14 @@
         '</div>' +
         '<div class="grp-dash-box grp-panel" data-grp-panel="members">' +
         '  <h3>👤 Members</h3>' + memberListHtml(members, g.createdBy, u && u.uid, gid, isOwner) +
+        '</div>' +
+        '<div class="grp-dash-box grp-panel" data-grp-panel="global">' +
+        '  <h3>🌐 Global Leaderboard <span id="grp-week-label" class="pf-muted" style="font-size:.7rem;font-weight:400;"></span></h3>' +
+        '  <p class="pf-muted" style="margin:-4px 0 10px;">Sabhi groups ke members mila ke, is hafte ka overall top 50 — sirf is group tak limited nahi.</p>' +
+        '  <div id="grp-global"><div class="pf-muted">Loading…</div></div>' +
         '</div>';
       grpAttachWallListener(gid, isOwner);
+      loadGlobal();
       grpSwitchTab(_openTab);   // restore remembered tab (chat on fresh open)
     } catch (e) { box.innerHTML = '<div class="pf-card"><div class="pf-muted">Load failed: ' + clean(e.message || e) + '</div></div>'; }
   };
