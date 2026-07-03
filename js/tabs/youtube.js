@@ -79,6 +79,86 @@ function ytFindOrganiserPlId(videoId) {
   return null;
 }
 
+/* ══════════════════════════════════════════════
+   FEATURE: MANAGE A SINGLE (NON-PLAYLIST) VIDEO
+   Directly playing a lone video (paste URL → Play) never gave a way to
+   "store" it the way playlist videos are stored/tracked in the Organiser.
+   This renders a small action box under the "Single video mode" label so
+   a single video can be saved as its own mini-course OR appended into an
+   existing course — reusing the Organiser's existing storage functions
+   (ytoLoadSingleVideo / ytoLib) so it shows up, is watch-tracked, and
+   resumes exactly like any other Organiser video.
+══════════════════════════════════════════════ */
+function ytSingleVideoManageHtml(id) {
+  var existingPlId = ytFindOrganiserPlId(id);
+  var lib = (typeof ytoLib === 'function') ? ytoLib() : ((appState && appState.ytoLibrary) || {});
+
+  if (existingPlId) {
+    var pl = lib[existingPlId];
+    var isOwn = existingPlId === ('vid_' + id);
+    return '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:0.75rem;">' +
+      '<div style="color:var(--accent);font-weight:600;margin-bottom:6px;">✓ Saved' + (isOwn ? ' as its own course' : ' in course: ' + escapeHtml(pl ? pl.title : 'Course')) + '</div>' +
+      '<button onclick="switchPage(\'yt-organiser\');ytoOpenCourse(\'' + existingPlId + '\')" style="background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,150,0.3);border-radius:8px;padding:5px 12px;font-size:0.72rem;cursor:pointer;font-weight:600;font-family:var(--font);">📂 Manage in Organiser</button>' +
+      '</div>';
+  }
+
+  var courses = Object.values(lib);
+  var courseOptions = courses.map(function (c) {
+    return '<option value="' + c.id + '">' + escapeHtml(c.title) + '</option>';
+  }).join('');
+
+  return '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:0.75rem;">' +
+    '<div style="color:var(--muted);margin-bottom:6px;">Ye video kahin save nahi hai — playlist ki tarah manage karna hai?</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;' + (courseOptions ? 'margin-bottom:8px;' : '') + '">' +
+    '<button onclick="ytManageSaveAsCourse(\'' + id + '\')" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:5px 12px;font-size:0.72rem;font-weight:700;cursor:pointer;font-family:var(--font);">💾 Save as own course</button>' +
+    '</div>' +
+    (courseOptions
+      ? '<div style="display:flex;gap:6px;align-items:center;">' +
+        '<select id="yt-manage-course-sel" style="flex:1;background:var(--card,#1b1f2a);color:var(--text,#e7ecf5);border:1px solid var(--border,#2a3140);border-radius:6px;padding:4px 6px;font-size:0.72rem;">' + courseOptions + '</select>' +
+        '<button onclick="ytManageAddToCourse(\'' + id + '\')" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 12px;font-size:0.72rem;cursor:pointer;font-family:var(--font);">➕ Add to course</button>' +
+        '</div>'
+      : '<div style="font-size:0.7rem;color:var(--muted);">Koi existing course nahi — pehle upar se ek save karo, phir yahan se aur videos add kar sakte ho.</div>') +
+    '</div>';
+}
+
+/* "Save as own course" — reuses Organiser's single-video save path, then
+   jumps to the Organiser tab so the user immediately sees it saved/tracked
+   (matches how "Manage in Organiser" behaves once a video is already saved). */
+async function ytManageSaveAsCourse(id) {
+  if (typeof ytoLoadSingleVideo !== 'function') { showToast('Playlist Organiser load nahi hua.', 'error'); return; }
+  var box = document.querySelector('#yt-video-list [data-yt-manage]');
+  if (box) box.innerHTML = '<div style="color:var(--muted);font-size:0.72rem;">Saving…</div>';
+  await ytoLoadSingleVideo(id);
+  switchPage('yt-organiser');
+}
+
+/* "Add to existing course" — append this video into a course chosen from
+   the dropdown, same shape as the Organiser's own "+ Add Video" flow. */
+function ytManageAddToCourse(id) {
+  var sel = document.getElementById('yt-manage-course-sel');
+  var plId = sel && sel.value;
+  if (!plId) { showToast('Pehle koi course select karo.', 'error'); return; }
+  var lib = ytoLib();
+  var pl = lib[plId];
+  if (!pl) { showToast('Course nahi mila.', 'error'); return; }
+  if (pl.videos.some(function (v) { return v.id === id; })) {
+    showToast('Ye video already "' + pl.title + '" mein hai.', 'info');
+    return;
+  }
+  var title = ytCurrentVideoTitle || 'Video';
+  pl.videos.push({ id: id, title: title, thumb: 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg', dur: 0 });
+  ytoPersist();
+  showToast('✅ "' + title + '" course "' + pl.title + '" mein add ho gaya!', 'success');
+  ytRefreshSingleVideoManage(id);
+}
+
+/* Re-render just the manage box in place (used after "Add to course",
+   since that path doesn't otherwise touch the YouTube tab sidebar). */
+function ytRefreshSingleVideoManage(id) {
+  var box = document.querySelector('#yt-video-list [data-yt-manage]');
+  if (box) box.innerHTML = ytSingleVideoManageHtml(id);
+}
+
 function ytResume() {
   const lv = appState.ytLastVideo;
   if (!lv) return;
@@ -237,7 +317,8 @@ function ytLoadInTab(type, id, originalUrl, label) {
           <div class="yt-video-info"><div class="yt-video-title">${escapeHtml(label || 'Video')}</div></div>
           <div class="yt-video-mark checked">✓</div>
         </div>
-        <div style="font-size:0.75rem;color:var(--muted);text-align:center;padding-top:0.5rem;">Single video mode</div>
+        <div style="font-size:0.75rem;color:var(--muted);text-align:center;">Single video mode</div>
+        <div data-yt-manage>${ytSingleVideoManageHtml(id)}</div>
       </div>`;
     document.getElementById('yt-pl-count').textContent = '';
     document.getElementById('yt-pl-progress').style.display = 'none';
