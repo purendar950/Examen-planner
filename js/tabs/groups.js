@@ -23,11 +23,12 @@
   var st = document.createElement('style');
   st.textContent =
     '.grp-table{width:100%;border-collapse:collapse;font-size:0.82rem;}' +
-    '.grp-table th{color:var(--muted);font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);}' +
-    '.grp-table td{padding:6px 8px;border-bottom:1px solid var(--border);}' +
+    '.grp-table th{color:var(--muted);font-weight:600;text-align:left;padding:6px 7px;border-bottom:1px solid var(--border);white-space:nowrap;}' +
+    '.grp-table td{padding:6px 7px;border-bottom:1px solid var(--border);white-space:nowrap;}' +
     '.grp-table tr:last-child td{border-bottom:none;}' +
+    '.grp-table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -3px;padding:0 3px;}' +
     '.grp-me td{background:rgba(0,200,150,0.08);}' +
-    '.grp-rank{font-weight:800;width:36px;}' +
+    '.grp-rank{font-weight:800;width:34px;}' +
     '.grp-item{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px dashed var(--border);}' +
     '.grp-item:last-child{border-bottom:none;}' +
     '.grp-code{font-family:monospace;font-weight:800;letter-spacing:2px;background:var(--surface);border:1px dashed var(--accent);border-radius:8px;padding:4px 10px;}' +
@@ -56,15 +57,16 @@
     '.grp-dash-box{border:1px solid var(--border);border-radius:16px;padding:13px;background:var(--card-bg,rgba(255,255,255,.04));min-height:120px;}' +
     '.grp-dash-box h3{margin:0 0 10px;font-size:.95rem;display:flex;align-items:center;gap:6px;}' +
     '.grp-member-count{font-size:.74rem;font-weight:700;color:var(--muted);margin:-4px 0 10px;text-transform:uppercase;letter-spacing:.04em;}' +
-    '.grp-user-scroll{max-height:280px;overflow-y:auto;margin:0 -3px;padding:0 3px;}' +
+    '.grp-user-scroll{max-height:280px;overflow-y:auto;overflow-x:hidden;}' +
     '.grp-user-pill{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:7px 10px;margin-bottom:7px;font-size:.82rem;transition:.15s ease;}' +
     '.grp-user-pill:hover{border-color:var(--accent);}' +
     '.grp-user-me{background:rgba(0,200,150,.08);border-color:rgba(0,200,150,.3);}' +
     '.grp-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.78rem;color:#fff;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,.18);}' +
     '.grp-user-info{flex:1;min-width:0;}' +
-    '.grp-user-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;}' +
+    '.grp-user-name{font-weight:700;display:flex;align-items:center;gap:6px;min-width:0;}' +
+    '.grp-name-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}' +
     '.grp-user-sub{font-size:.69rem;color:var(--muted);margin-top:1px;}' +
-    '.grp-you-badge{font-size:.6rem;font-weight:700;padding:1px 7px;border-radius:99px;background:rgba(0,200,150,.18);color:#10B981;border:1px solid rgba(0,200,150,.35);}' +
+    '.grp-you-badge{font-size:.6rem;font-weight:700;padding:1px 7px;border-radius:99px;background:rgba(0,200,150,.18);color:#10B981;border:1px solid rgba(0,200,150,.35);flex-shrink:0;}' +
     '.grp-role-badge{font-size:.64rem;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap;flex-shrink:0;}' +
     '.grp-role-owner{background:rgba(250,204,21,.15);color:#EAB308;border:1px solid rgba(250,204,21,.35);}' +
     '.grp-role-member{background:rgba(148,163,184,.12);color:var(--muted);border:1px solid var(--border);}' +
@@ -223,7 +225,7 @@
   function lbTable(rows, myUid) {
     if (!rows.length) return '<div class="pf-muted">Is week abhi koi entry nahi. Tasks complete karo! 💪</div>';
     var medal = ['🥇', '🥈', '🥉'];
-    return '<table class="grp-table"><thead><tr><th></th><th>Student</th><th>Points</th><th>Tasks</th><th>Mocks</th><th>🔥</th></tr></thead><tbody>' +
+    return '<div class="grp-table-scroll"><table class="grp-table"><thead><tr><th></th><th>Student</th><th>Points</th><th>Tasks</th><th>Mocks</th><th>🔥</th></tr></thead><tbody>' +
       rows.map(function (r, i) {
         var ex = r.exam ? ' <span class="pf-muted">· ' + clean(r.exam).toUpperCase() + '</span>' : '';
         return '<tr' + (r.uid === myUid ? ' class="grp-me"' : '') + '>' +
@@ -233,7 +235,7 @@
           '<td>' + (Number(r.tasksDone) || 0) + '</td>' +
           '<td>' + (Number(r.mocksTaken) || 0) + '</td>' +
           '<td>' + (Number(r.streak) || 0) + '</td></tr>';
-      }).join('') + '</tbody></table>';
+      }).join('') + '</tbody></table></div>';
   }
 
   function loadGlobal() {
@@ -418,11 +420,11 @@
       return (b.points || 0) - (a.points || 0);
     });
     if (!ranked.length) return '<div class="pf-muted">Abhi mock ranking empty hai. Mock complete karte hi rank yahan dikhegi.</div>';
-    return '<table class="grp-table"><thead><tr><th>#</th><th>User</th><th>Mocks</th><th>Pts</th></tr></thead><tbody>' +
+    return '<div class="grp-table-scroll"><table class="grp-table"><thead><tr><th class="grp-rank">#</th><th>User</th><th>Mocks</th><th>Pts</th></tr></thead><tbody>' +
       ranked.slice(0, 10).map(function (r, i) {
         var m = Number(r.mocksTaken || r.mocks || r.mockTests || 0);
-        return '<tr' + (r.uid === uid ? ' class="grp-me"' : '') + '><td>' + (i + 1) + '</td><td>' + clean(r.name || 'Student') + '</td><td>' + m + '</td><td>' + (r.points || 0) + '</td></tr>';
-      }).join('') + '</tbody></table>';
+        return '<tr' + (r.uid === uid ? ' class="grp-me"' : '') + '><td class="grp-rank">' + (i + 1) + '</td><td>' + clean(r.name || 'Student') + '</td><td>' + m + '</td><td>' + (r.points || 0) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
   }
 
   /* ── member box helpers ── */
@@ -476,7 +478,7 @@
       return '<div class="grp-user-pill' + (isMe ? ' grp-user-me' : '') + '">' +
         '<div class="grp-avatar" style="background:' + grpAvatarColor(m.name) + ';">' + clean(grpInitials(m.name)) + '</div>' +
         '<div class="grp-user-info">' +
-        '<div class="grp-user-name">' + name + (isMe ? ' <span class="grp-you-badge">You</span>' : '') + '</div>' +
+        '<div class="grp-user-name"><span class="grp-name-text">' + name + '</span>' + (isMe ? '<span class="grp-you-badge">You</span>' : '') + '</div>' +
         (sub ? '<div class="grp-user-sub">' + sub + '</div>' : '') +
         '</div>' +
         '<span class="grp-role-badge ' + (isOwner ? 'grp-role-owner' : 'grp-role-member') + '">' + (isOwner ? '👑 Owner' : 'Member') + '</span>' +
