@@ -55,7 +55,21 @@
     '.grp-box-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;align-items:start;}' +
     '.grp-dash-box{border:1px solid var(--border);border-radius:16px;padding:13px;background:var(--card-bg,rgba(255,255,255,.04));min-height:120px;}' +
     '.grp-dash-box h3{margin:0 0 10px;font-size:.95rem;display:flex;align-items:center;gap:6px;}' +
-    '.grp-user-pill{display:flex;justify-content:space-between;gap:8px;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-bottom:7px;font-size:.82rem;}' +
+    '.grp-member-count{font-size:.74rem;font-weight:700;color:var(--muted);margin:-4px 0 10px;text-transform:uppercase;letter-spacing:.04em;}' +
+    '.grp-user-scroll{max-height:280px;overflow-y:auto;margin:0 -3px;padding:0 3px;}' +
+    '.grp-user-pill{display:flex;align-items:center;gap:10px;border:1px solid var(--border);border-radius:12px;padding:7px 10px;margin-bottom:7px;font-size:.82rem;transition:.15s ease;}' +
+    '.grp-user-pill:hover{border-color:var(--accent);}' +
+    '.grp-user-me{background:rgba(0,200,150,.08);border-color:rgba(0,200,150,.3);}' +
+    '.grp-avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.78rem;color:#fff;flex-shrink:0;box-shadow:0 2px 6px rgba(0,0,0,.18);}' +
+    '.grp-user-info{flex:1;min-width:0;}' +
+    '.grp-user-name{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;}' +
+    '.grp-user-sub{font-size:.69rem;color:var(--muted);margin-top:1px;}' +
+    '.grp-you-badge{font-size:.6rem;font-weight:700;padding:1px 7px;border-radius:99px;background:rgba(0,200,150,.18);color:#10B981;border:1px solid rgba(0,200,150,.35);}' +
+    '.grp-role-badge{font-size:.64rem;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap;flex-shrink:0;}' +
+    '.grp-role-owner{background:rgba(250,204,21,.15);color:#EAB308;border:1px solid rgba(250,204,21,.35);}' +
+    '.grp-role-member{background:rgba(148,163,184,.12);color:var(--muted);border:1px solid var(--border);}' +
+    '.grp-kick{flex-shrink:0;width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#EF4444;border:1px solid rgba(239,68,68,.3);cursor:pointer;transition:.15s ease;}' +
+    '.grp-kick:hover{background:rgba(239,68,68,.15);border-color:#EF4444;}' +
     '.grp-pub-badge{font-size:0.68rem;font-weight:700;padding:2px 8px;border-radius:99px;background:rgba(99,102,241,0.15);color:#818CF8;border:1px solid rgba(99,102,241,0.35);}';
   document.head.appendChild(st);
 
@@ -411,11 +425,64 @@
       }).join('') + '</tbody></table>';
   }
 
-  function memberListHtml(members, ownerUid) {
+  /* ── member box helpers ── */
+  function grpAvatarColor(name) {
+    var colors = ['#6366F1', '#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#8B5CF6', '#14B8A6', '#F97316'];
+    var s = String(name || '?'), h = 0;
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 99991;
+    return colors[h % colors.length];
+  }
+  function grpInitials(name) {
+    var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    var a = parts[0].charAt(0);
+    var b = parts.length > 1 ? parts[parts.length - 1].charAt(0) : '';
+    return (a + b).toUpperCase();
+  }
+  function grpJoinedText(ts) {
+    try {
+      var d = ts && ts.toDate ? ts.toDate() : null;
+      if (!d) return '';
+      var diff = Date.now() - d.getTime(), day = 86400000;
+      if (diff < 0) return 'Joined just now';
+      if (diff < day) return 'Joined today';
+      if (diff < 2 * day) return 'Joined yesterday';
+      if (diff < 7 * day) return 'Joined ' + Math.floor(diff / day) + 'd ago';
+      return 'Joined ' + d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    } catch (e) { return ''; }
+  }
+
+  function memberListHtml(members, ownerUid, myUid, gid, viewerIsOwner) {
     if (!members.length) return '<div class="pf-muted">Members load nahi hue.</div>';
-    return members.map(function (m) {
-      return '<div class="grp-user-pill"><span>' + (m.uid === ownerUid ? '👑 ' : '👤 ') + clean(m.name || 'Student') + '</span><span class="pf-muted">' + (m.uid === ownerUid ? 'Owner' : 'Member') + '</span></div>';
-    }).join('');
+    /* Owner first, then current user, then everyone else. */
+    var sorted = members.slice().sort(function (a, b) {
+      if (a.uid === ownerUid) return -1;
+      if (b.uid === ownerUid) return 1;
+      if (a.uid === myUid) return -1;
+      if (b.uid === myUid) return 1;
+      return 0;
+    });
+    var count = members.length;
+    var head = '<div class="grp-member-count">👥 ' + count + ' member' + (count === 1 ? '' : 's') + '</div>';
+    return head + '<div class="grp-user-scroll">' + sorted.map(function (m) {
+      var isOwner = m.uid === ownerUid;
+      var isMe = myUid && m.uid === myUid;
+      var name = clean(m.name || 'Student');
+      var sub = grpJoinedText(m.joinedAt);
+      /* Owner can remove any member except themselves. */
+      var kick = (viewerIsOwner && !isOwner)
+        ? '<span class="grp-kick" title="Remove member" onclick="grpRemoveMember(\'' + gid + '\',\'' + m.uid + '\')">✕</span>'
+        : '';
+      return '<div class="grp-user-pill' + (isMe ? ' grp-user-me' : '') + '">' +
+        '<div class="grp-avatar" style="background:' + grpAvatarColor(m.name) + ';">' + clean(grpInitials(m.name)) + '</div>' +
+        '<div class="grp-user-info">' +
+        '<div class="grp-user-name">' + name + (isMe ? ' <span class="grp-you-badge">You</span>' : '') + '</div>' +
+        (sub ? '<div class="grp-user-sub">' + sub + '</div>' : '') +
+        '</div>' +
+        '<span class="grp-role-badge ' + (isOwner ? 'grp-role-owner' : 'grp-role-member') + '">' + (isOwner ? '👑 Owner' : 'Member') + '</span>' +
+        kick +
+        '</div>';
+    }).join('') + '</div>';
   }
 
   window.openStudyGroup = async function (gid) {
@@ -438,10 +505,7 @@
       var memberSnap = await db.collection('groups').doc(gid).collection('members').limit(100).get().catch(function () { return { docs: [] }; });
       var members = memberSnap.docs.map(function (d) { var x = d.data() || {}; x.uid = d.id; return x; });
       if (!members.length && rows.length) members = rows.map(function (r) { return { uid: r.uid, name: r.name }; });
-      var userButtons = (isOwner && rows.length) ? '<div class="pf-row" style="margin-top:8px;">' +
-        rows.filter(function (r) { return r.uid !== u.uid; }).map(function (r) {
-          return '<button class="pf-btn pf-btn-danger" onclick="grpRemoveMember(\'' + gid + '\',\'' + r.uid + '\')">🚫 ' + clean(r.name || 'Member') + '</button>';
-        }).join('') + '</div>' : '';
+
       box.innerHTML =
         '<div class="grp-detail-head">' +
         '  <div class="pf-row" style="justify-content:space-between;align-items:flex-start;gap:12px;">' +
@@ -453,9 +517,9 @@
         '  </div>' +
         '</div>' +
         '<div class="grp-box-grid">' +
-        '  <div class="grp-dash-box"><h3>🌍 Global Leaderboard</h3><div id="grp-inside-global">' + lbTable(rows, u && u.uid) + '</div></div>' +
+        '  <div class="grp-dash-box"><h3>🏆 Group Leaderboard</h3><div id="grp-inside-global">' + lbTable(rows, u && u.uid) + '</div></div>' +
         '  <div class="grp-dash-box"><h3>🧪 Mock Test Ranking</h3>' + mockRankTable(rows, u && u.uid) + '</div>' +
-        '  <div class="grp-dash-box"><h3>👤 User List</h3>' + memberListHtml(members, g.createdBy) + userButtons + '</div>' +
+        '  <div class="grp-dash-box"><h3>👤 Members</h3>' + memberListHtml(members, g.createdBy, u && u.uid, gid, isOwner) + '</div>' +
         '  <div class="grp-dash-box"><h3>💬 Group Chat</h3>' +
         '    <div class="pf-row" style="margin-bottom:10px;"><input class="pf-input" id="grp-wall-input" maxlength="300" placeholder="Message type karo…" style="flex:1;min-width:160px;" onkeydown="if(event.key===\'Enter\')grpPostWall(\'' + gid + '\')"><button class="pf-btn pf-btn-accent" onclick="grpPostWall(\'' + gid + '\')">Send</button></div>' +
         '    <div id="grp-wall"><div class="pf-muted">Loading chat…</div></div>' +
