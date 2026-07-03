@@ -19,7 +19,7 @@ permissions:
 # However, do NOT cancel in-progress runs as we want to allow these production deployments to complete.
 concurrency:
   group: "pages"
-  cancel-in-progress: false
+  cancel-in-progress: true  # Changed from false to true to clear old artifacts
 
 jobs:
   # Single deploy job since we're just deploying
@@ -35,6 +35,23 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm ci
+      - name: Build with Vite
+        run: npm run build
+      - name: List dist directory (Debug)
+        run: ls -la dist/
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          # Upload the built output directory
+          path: 'dist'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5          node-version: '20'
           cache: 'npm'
       - name: Install dependencies
         run: npm ci
