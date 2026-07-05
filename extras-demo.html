@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StudyPlanner</title>
+<link rel="stylesheet" href="css/app.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--font); padding: 22px; }
+  h1 { font-size: 1.1rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 14px; }
+  .demo-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .demo-bar button { font-family: var(--font); font-weight: 700; font-size: .78rem; cursor: pointer;
+    background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+  #day-view-sub { color: var(--muted); font-size: .85rem; margin: 8px 0 14px; }
+  .chip-demo { display:flex; align-items:center; gap:6px; margin-top:10px; font-size:.8rem; color:var(--muted); }
+</style>
+</head>
+<body>
+  <h1>⏱️ Timer quick wins — demo</h1>
+  <div class="sub">Real modules + <code>app.css</code>. Tab title clock · manual adjust ✎ · weekly chart.</div>
+  <div id="day-view-sub"></div>
+
+  <div class="demo-bar">
+    <button onclick="startTaskTimer('__TODAY__','r1')">▶ Start running task (sets tab title)</button>
+    <button onclick="openAdjustTimeModal('__TODAY__','r1')">✎ Open adjust modal</button>
+  </div>
+
+  <!-- the chart injects itself at the top of this container -->
+  <div id="planner-day-content">
+    <div class="chip-demo">Shared task chip (kanban + list) now ends with ✎: <span id="chip-slot"></span></div>
+  </div>
+
+<script>
+  function fmtDate(d){ return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+  const _today = fmtDate(new Date());
+  function _dateBack(n){ const d=new Date(); d.setDate(d.getDate()-n); return fmtDate(d); }
+
+  let selectedPlannerDate = _today;
+  let appState = { tasks: {}, studyLog: {} };
+  // Seed the last 7 days with study time so the weekly chart has bars.
+  const seed = [0, 3600, 5400, 1800, 0, 7200, 2700]; // today .. 6 days ago
+  seed.forEach((secs, i) => {
+    const ds = _dateBack(i);
+    appState.tasks[ds] = [];
+    if (i === 0) appState.tasks[ds].push({ id:'r1', text:'Counting — Reasoning practice set', priority:'high', status:'todo', totalSeconds: 1500 });
+    else appState.tasks[ds].push({ id:'d'+i, text:'Study', status:'done', done:true, totalSeconds: secs });
+  });
+
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function taskStatus(t){ if(t.done) return 'done'; if(t.status) return t.status; return 'todo'; }
+  function saveProgress(){}
+  function buildPlannerCalendar(){}
+  function setTaskStatus(d,id,st){ const t=(appState.tasks[d]||[]).find(x=>x.id===id); if(!t)return; if(typeof _stopActiveSession==='function')_stopActiveSession(t); t.status=st; t.done=(st==='done'); renderDayContent(); }
+  function renderDayContent(){
+    const sub=document.getElementById('day-view-sub');
+    const tasks=appState.tasks[selectedPlannerDate]||[];
+    if(sub) sub.textContent = `${tasks.length} tasks · ${tasks.filter(t=>t.done).length} completed`;
+    if(typeof refreshDayStudyTime==='function') refreshDayStudyTime();
+    if(typeof renderWeekChart==='function') renderWeekChart();
+    // show the shared chip with the new ✎ button
+    const slot=document.getElementById('chip-slot');
+    if(slot && typeof taskTimerControlHtml==='function') slot.innerHTML = taskTimerControlHtml(_today, appState.tasks[_today][0]);
+  }
+</script>
+
+<script src="js/tabs/planner-timer.js"></script>
+<script src="js/tabs/planner-focus-timer.js"></script>
+<script src="js/tabs/planner-pomodoro.js"></script>
+<script src="js/tabs/planner-timer-extras.js"></script>
+<script>
+  // fix up the seeded onclick placeholders to the real today string
+  document.querySelectorAll('.demo-bar button').forEach(b=>{ b.setAttribute('onclick', b.getAttribute('onclick').replaceAll('__TODAY__', _today)); });
+  backfillStudyLog();
+  renderDayContent();
+</script>
+</body>
+</html>
