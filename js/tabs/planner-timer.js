@@ -30,9 +30,22 @@ function _stopActiveSession(task, opts = {}) {
   task.activeSessionStart = null;
 }
 
+// One-at-a-time: bank (pause) every OTHER running task so there is only ever a
+// single active session — the one the focus popup / full-screen mode shows.
+function _pauseAllOtherSessions(exceptDateStr, exceptTaskId) {
+  Object.keys(appState.tasks || {}).forEach(ds => {
+    (appState.tasks[ds] || []).forEach(t => {
+      if (t.activeSessionStart && !(ds === exceptDateStr && t.id === exceptTaskId)) {
+        _stopActiveSession(t);
+      }
+    });
+  });
+}
+
 function startTaskTimer(dateStr, taskId) {
   const task = _findTask(dateStr, taskId);
   if (!task || task.activeSessionStart) return; // already running
+  _pauseAllOtherSessions(dateStr, taskId); // enforce single active timer
   task.activeSessionStart = Date.now();
   task.status = 'in-progress';
   task.done = false;
@@ -40,6 +53,8 @@ function startTaskTimer(dateStr, taskId) {
   renderDayContent();      // repaint kanban/list so the button flips to Pause
   refreshDayStudyTime();   // reflect immediately in the day-header total
   buildPlannerCalendar();
+  // Auto-open the focus popup for this task (focus layer defines this).
+  if (typeof openFocusPopup === 'function') openFocusPopup(dateStr, taskId);
 }
 
 function pauseTaskTimer(dateStr, taskId) {
@@ -49,6 +64,7 @@ function pauseTaskTimer(dateStr, taskId) {
   saveProgress();
   renderDayContent();
   refreshDayStudyTime();
+  if (typeof refreshFocusUI === 'function') refreshFocusUI(); // keep popup/fullscreen in sync
 }
 
 function resumeTaskTimer(dateStr, taskId) {
@@ -129,19 +145,29 @@ function refreshDayStudyTime() {
   span.textContent = `⏱ ${formatStudyTotal(total)} studied`;
 }
 
+// When a running session reaches the 4h cap: bank exactly 4h, HOLD (pause) so a
+// forgotten timer can't inflate past 4h, then ask the user to continue via the
+// focus layer's onSessionCapReached hook. Continue starts a fresh 4h block.
+// Idempotent: once paused, activeSessionStart is null so repeat calls no-op.
+// Callable by both the tick (current day) and the focus updater (focus task on
+// any day), so the cap is enforced even when you've navigated to another date.
+function _enforceSessionCap(dateStr, task) {
+  if (!task || !task.activeSessionStart) return false;
+  if ((Date.now() - task.activeSessionStart) / 1000 <= MAX_SESSION_SECONDS) return false;
+  pauseTaskTimer(dateStr, task.id);        // banks exactly MAX_SESSION_SECONDS, clears activeSessionStart
+  if (typeof onSessionCapReached === 'function') onSessionCapReached(dateStr, task.id);
+  return true;
+}
+
 // Ticks every running timer's on-screen number once a second, WITHOUT
-// re-rendering the board (keeps drag state / dropdown intact). Also
-// auto-pauses (and banks the capped time) if a session runs past the cap
-// while the tab stays open — not just at reload.
+// re-rendering the board (keeps drag state / dropdown intact). Also enforces
+// the 4h cap (bank + hold + Continue prompt) while the tab stays open.
 setInterval(() => {
   if (typeof appState === 'undefined' || !appState.tasks) return;
   const tasks = appState.tasks[selectedPlannerDate] || [];
   tasks.forEach(t => {
     if (!t.activeSessionStart) return;
-    if ((Date.now() - t.activeSessionStart) / 1000 > MAX_SESSION_SECONDS) {
-      pauseTaskTimer(selectedPlannerDate, t.id);
-      return;
-    }
+    if (_enforceSessionCap(selectedPlannerDate, t)) return;
     // querySelectorAll (not querySelector): the day view keeps both the Kanban
     // and List containers in the DOM (one hidden via display:none, not cleared),
     // so a task can have a data-timer-task span in BOTH. Update every match, or
