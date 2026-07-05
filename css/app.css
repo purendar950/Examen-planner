@@ -2690,3 +2690,58 @@ html:not([data-theme="light"]) .topbar {
     background: radial-gradient(circle at 50% 35%, rgba(245,158,11,.10), var(--bg) 60%), var(--bg);
   }
   .focus-fullscreen.is-break .focus-pomo-clock { color: var(--amber, #F59E0B); }
+
+
+  /* ── Timer extras: weekly chart, adjust ✎, adjust modal (planner-timer-extras.js) ── */
+  .week-chart-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 12px 14px; margin-bottom: 1rem;
+  }
+  .wc-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+  .wc-title { font-size: .8rem; font-weight: 700; color: var(--text); }
+  .wc-total { font-size: .8rem; font-weight: 800; color: var(--accent); }
+  .wc-bars { display: flex; align-items: flex-end; gap: 8px; height: 84px; }
+  .wc-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .wc-bar-wrap { height: 64px; width: 100%; display: flex; align-items: flex-end; justify-content: center; }
+  .wc-bar {
+    width: 62%; max-width: 30px; min-height: 0; border-radius: 5px 5px 0 0;
+    background: var(--accent-dim); border: 1px solid rgba(0,200,150,.35);
+    transition: height .3s ease;
+  }
+  .wc-bar.today { background: var(--accent); border-color: var(--accent); }
+  .wc-bar.empty { background: var(--surface); border: 1px dashed var(--border); }
+  .wc-day { font-size: .68rem; color: var(--muted); font-weight: 700; }
+  .wc-day.today { color: var(--accent); }
+
+  .task-adjust-btn {
+    background: transparent; border: none; color: var(--muted); cursor: pointer;
+    font-size: .72rem; padding: 2px 4px; border-radius: 5px; line-height: 1; opacity: .7;
+  }
+  .task-adjust-btn:hover { opacity: 1; color: var(--accent); background: var(--surface); }
+
+  .adjust-backdrop {
+    position: fixed; inset: 0; z-index: 10001; background: rgba(0,0,0,.6); backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .adjust-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 22px 22px; width: 320px; max-width: 100%; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .adjust-title { font-size: 1rem; font-weight: 800; color: var(--text); }
+  .adjust-task { font-size: .82rem; color: var(--muted); margin: 2px 0 10px; }
+  .adjust-current { font-size: 2rem; font-weight: 800; color: var(--accent); text-align: center; font-variant-numeric: tabular-nums; margin-bottom: 4px; }
+  .adjust-live { font-size: .7rem; font-weight: 700; color: var(--muted); }
+  .adjust-quick { display: flex; gap: 6px; justify-content: center; margin: 12px 0; }
+  .adjust-quick .focus-btn { flex: 1; padding: 8px 0; }
+  .adjust-setrow { display: flex; align-items: center; gap: 6px; justify-content: center; font-size: .8rem; color: var(--muted); margin-bottom: 14px; }
+  .adjust-input {
+    width: 48px; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 6px; text-align: center; font-family: var(--font); font-weight: 700;
+  }
+  .adjust-actions { display: flex; justify-content: flex-end; }
+
+  @media (max-width: 640px) {
+    .adjust-card { width: 100%; }
+    .wc-bars { height: 76px; }
+    .wc-bar-wrap { height: 56px; }
+  }

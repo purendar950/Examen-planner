@@ -90,21 +90,23 @@ function taskLiveSeconds(task) {
 // the two views never drift out of sync with each other.
 function taskTimerControlHtml(dateStr, t) {
   const chip = 'display:inline-flex;align-items:center;gap:4px;font-size:.68rem;font-weight:700;border-radius:6px;padding:3px 8px;cursor:pointer;border:1px solid transparent;font-family:var(--font);white-space:nowrap;';
+  // ✎ manual add/adjust entry (planner-timer-extras.js) — appended to the chip.
+  const adj = (typeof adjustTimeBtnHtml === 'function') ? adjustTimeBtnHtml(dateStr, t.id) : '';
   if (taskStatus(t) === 'done') {
     const total = t.totalSeconds || 0;
-    return total > 0 ? `<span style="${chip}color:var(--muted);cursor:default;">⏱ ${formatElapsed(total)}</span>` : '';
+    return total > 0 ? `<span style="${chip}color:var(--muted);cursor:default;">⏱ ${formatElapsed(total)}</span>${adj}` : '';
   }
   if (t.activeSessionStart) {
     return `<button style="${chip}background:var(--accent-dim);border-color:rgba(0,200,150,.3);color:var(--accent);"
       onclick="event.stopPropagation();pauseTaskTimer('${dateStr}','${t.id}')" title="Pause">
-      ⏸ <span data-timer-task="${t.id}">${formatElapsed(taskLiveSeconds(t))}</span></button>`;
+      ⏸ <span data-timer-task="${t.id}">${formatElapsed(taskLiveSeconds(t))}</span></button>${adj}`;
   }
   if (t.totalSeconds) {
     return `<button style="${chip}background:var(--surface);border-color:var(--border);color:var(--text);"
-      onclick="event.stopPropagation();resumeTaskTimer('${dateStr}','${t.id}')" title="Resume">▶ ${formatElapsed(t.totalSeconds)}</button>`;
+      onclick="event.stopPropagation();resumeTaskTimer('${dateStr}','${t.id}')" title="Resume">▶ ${formatElapsed(t.totalSeconds)}</button>${adj}`;
   }
   return `<button style="${chip}background:var(--surface);border-color:var(--border);color:var(--muted);"
-    onclick="event.stopPropagation();startTaskTimer('${dateStr}','${t.id}')" title="Start studying">▶ Start</button>`;
+    onclick="event.stopPropagation();startTaskTimer('${dateStr}','${t.id}')" title="Start studying">▶ Start</button>${adj}`;
 }
 
 // ── Day total ─────────────────────────────────────────────────────────────
