@@ -2662,3 +2662,31 @@ html:not([data-theme="light"]) .topbar {
     .focus-popup-clock { font-size: 2.6rem; }
     .focus-fs-controls .focus-btn { flex: 1; min-width: 120px; }
   }
+
+
+  /* ── Pomodoro mode (planner-pomodoro.js) ── */
+  .focus-dot.break { background: var(--amber, #F59E0B); }
+
+  .focus-pomo-label {
+    text-align: center; font-size: .68rem; font-weight: 800; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--muted); padding: 12px 10px 0;
+  }
+  .focus-pomo-clock { padding-top: 6px; color: var(--accent); }
+  /* Break phases (short/long) shift the label + countdown to a calmer amber. */
+  .focus-pomo-label.pomo-short, .focus-pomo-label.pomo-long,
+  .focus-fs-label.pomo-short, .focus-fs-label.pomo-long,
+  .focus-pomo-clock.pomo-short, .focus-pomo-clock.pomo-long { color: var(--amber, #F59E0B); }
+  .focus-pomo-sub {
+    text-align: center; font-size: .7rem; color: var(--muted); padding: 4px 10px 10px;
+  }
+  .focus-pomo-row {
+    display: flex; gap: 6px; align-items: center; justify-content: center;
+    padding: 0 10px 12px; border-top: 1px solid var(--border); margin-top: 2px; padding-top: 10px;
+  }
+  .focus-pomo-row .focus-btn { font-size: .72rem; padding: 5px 9px; }
+
+  /* Break gives the full-screen a calmer amber wash instead of the focus green. */
+  .focus-fullscreen.is-break {
+    background: radial-gradient(circle at 50% 35%, rgba(245,158,11,.10), var(--bg) 60%), var(--bg);
+  }
+  .focus-fullscreen.is-break .focus-pomo-clock { color: var(--amber, #F59E0B); }
