@@ -38,6 +38,7 @@ function startTaskTimer(dateStr, taskId) {
   task.done = false;
   saveProgress();
   renderDayContent();      // repaint kanban/list so the button flips to Pause
+  refreshDayStudyTime();   // reflect immediately in the day-header total
   buildPlannerCalendar();
 }
 
@@ -47,6 +48,7 @@ function pauseTaskTimer(dateStr, taskId) {
   _stopActiveSession(task);
   saveProgress();
   renderDayContent();
+  refreshDayStudyTime();
 }
 
 function resumeTaskTimer(dateStr, taskId) {
@@ -89,6 +91,44 @@ function taskTimerControlHtml(dateStr, t) {
     onclick="event.stopPropagation();startTaskTimer('${dateStr}','${t.id}')" title="Start studying">▶ Start</button>`;
 }
 
+// ── Day total ─────────────────────────────────────────────────────────────
+// Sum of study time across every task on a given day, including the live
+// portion of any task currently running (taskLiveSeconds handles that).
+function plannerDayTotalSeconds(dateStr) {
+  return (appState.tasks[dateStr] || []).reduce((sum, t) => sum + taskLiveSeconds(t), 0);
+}
+
+// Compact "1h 23m" / "23m" / "45s" for the day header (distinct from the
+// per-task clock format in formatElapsed).
+function formatStudyTotal(totalSeconds) {
+  const s = Math.floor(Math.max(0, totalSeconds));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${s}s`;
+}
+
+// Adds/updates a "⏱ 1h 23m studied" chip beside the "N tasks · M completed"
+// line in the day header (#day-view-sub). Called by renderDayView (initial
+// paint), the 1s tick (so it climbs live while a task runs), and start/pause.
+// Rebuilds its own span each time because renderDayView resets sub.textContent.
+function refreshDayStudyTime() {
+  const sub = document.getElementById('day-view-sub');
+  if (!sub) return;
+  const total = plannerDayTotalSeconds(selectedPlannerDate);
+  let span = document.getElementById('day-view-study-time');
+  if (total <= 0) { if (span) { span.previousSibling && span.previousSibling.remove(); span.remove(); } return; }
+  if (!span) {
+    sub.appendChild(document.createTextNode(' · '));
+    span = document.createElement('span');
+    span.id = 'day-view-study-time';
+    span.style.color = 'var(--accent)';
+    span.style.fontWeight = '700';
+    sub.appendChild(span);
+  }
+  span.textContent = `⏱ ${formatStudyTotal(total)} studied`;
+}
+
 // Ticks every running timer's on-screen number once a second, WITHOUT
 // re-rendering the board (keeps drag state / dropdown intact). Also
 // auto-pauses (and banks the capped time) if a session runs past the cap
@@ -110,6 +150,7 @@ setInterval(() => {
     const txt = formatElapsed(taskLiveSeconds(t));
     els.forEach(el => { el.textContent = txt; });
   });
+  refreshDayStudyTime(); // keep the day-header total climbing live too
 }, 1000);
 
 // Runs once on load. Catches sessions left running across a reload/reopen

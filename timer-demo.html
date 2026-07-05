@@ -46,6 +46,12 @@
   <h1>⏱️ Task Timer — live demo</h1>
   <div class="sub">Real <code>planner-timer.js</code> engine, stubbed data. Left = Kanban, right = List. Both share one control so they stay in sync.</div>
 
+  <!-- Day header — mirrors the real app's #day-view-title / #day-view-sub -->
+  <div style="margin:8px 0 18px;">
+    <div id="day-view-title" style="font-size:1.15rem;font-weight:700;">Saturday, Jul 4th</div>
+    <div id="day-view-sub" style="color:var(--muted);font-size:.85rem;"></div>
+  </div>
+
   <div class="views">
     <div>
       <div class="panel-title">Kanban view</div>
@@ -126,7 +132,14 @@ function renderTaskList(dateStr){
     </div>`;
   }).join('');
 }
-function renderDayContent(){ renderKanbanBoard(selectedPlannerDate); renderTaskList(selectedPlannerDate); }
+function renderDayHeader(){
+  const tasks = appState.tasks[selectedPlannerDate] || [];
+  const done = tasks.filter(t=>t.done).length;
+  const sub = document.getElementById('day-view-sub');
+  if (sub) sub.textContent = `${tasks.length} task${tasks.length!==1?'s':''} · ${done} completed`;
+  if (typeof refreshDayStudyTime === 'function') refreshDayStudyTime();
+}
+function renderDayContent(){ renderKanbanBoard(selectedPlannerDate); renderTaskList(selectedPlannerDate); renderDayHeader(); }
 
 /* setTaskStatus / toggleTask incl. the SAME time-banking hook added to the real files */
 function setTaskStatus(dateStr,taskId,status){
