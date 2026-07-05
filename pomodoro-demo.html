@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pomodoro — Demo</title>
+<link rel="stylesheet" href="css/app.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--font); padding: 22px; }
+  h1 { font-size: 1.15rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 16px; }
+  #day-view-title { font-size: 1.15rem; font-weight: 700; }
+  #day-view-sub { color: var(--muted); font-size: .85rem; margin-bottom: 18px; }
+  .demo-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .demo-bar button { font-family: var(--font); font-weight: 700; font-size: .78rem; cursor: pointer;
+    background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; }
+  .hint { color: var(--muted); font-size: .8rem; max-width: 640px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>🍅 Pomodoro — live demo</h1>
+  <div class="sub">Real <code>planner-timer.js</code> + <code>planner-focus-timer.js</code> + <code>planner-pomodoro.js</code> + <code>app.css</code>.</div>
+  <div id="day-view-title">Sunday, Jul 5th</div>
+  <div id="day-view-sub"></div>
+
+  <div class="demo-bar">
+    <button onclick="startTaskTimer('2026-07-05','t1')">▶ Start "Counting"</button>
+    <button onclick="pomodoroToggle()">🍅 Toggle Pomodoro</button>
+    <button onclick="enterFocusFullscreen()">⛶ Full screen</button>
+    <button onclick="demoToBreak()">→ Jump to break</button>
+    <button onclick="reopenFocusPopup()">↺ Reopen popup</button>
+  </div>
+  <div class="hint">Toggle Pomodoro on a running task → the popup shows the 25-min focus countdown + block number. At 0 it auto-flows to a 5-min break (clock pauses, so breaks never count as study time), then back to focus. Long break after 4 blocks. Chime + notification at each switch (🔔 mute button). Skip break / Break early / End Pomodoro all available.</div>
+
+  <div id="kanban-board" style="display:none;"></div>
+  <div id="task-panel-wrap" style="display:none;"><div id="task-list"></div></div>
+
+<script>
+  let selectedPlannerDate = '2026-07-05';
+  let appState = { tasks: { '2026-07-05': [
+    { id:'t1', text:'Counting — Reasoning practice set', priority:'high', subject:'reasoning', status:'todo' }
+  ] } };
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function taskStatus(t){ if(t.done) return 'done'; if(t.status) return t.status; return 'todo'; }
+  function saveProgress(){}
+  function buildPlannerCalendar(){}
+  function renderDayContent(){ renderDayHeader(); }
+  function setTaskStatus(d,id,st){ const t=(appState.tasks[d]||[]).find(x=>x.id===id); if(!t)return; if(typeof _stopActiveSession==='function')_stopActiveSession(t); t.status=st; t.done=(st==='done'); renderDayContent(); }
+  function renderDayHeader(){ const tasks=appState.tasks[selectedPlannerDate]||[]; const done=tasks.filter(t=>t.done).length;
+    const sub=document.getElementById('day-view-sub'); if(sub) sub.textContent=`${tasks.length} tasks · ${done} completed`;
+    if(typeof refreshDayStudyTime==='function') refreshDayStudyTime(); }
+  // Demo helper: force the current focus phase to end so we can see the break.
+  function demoToBreak(){ if(typeof _pomo==='undefined'||!_pomo){ alert('Toggle Pomodoro first'); return; } _pomo.endsAt=Date.now(); _pomo.remaining=null; pomodoroTick(); }
+  renderDayHeader();
+</script>
+
+<script src="js/tabs/planner-timer.js"></script>
+<script src="js/tabs/planner-focus-timer.js"></script>
+<script src="js/tabs/planner-pomodoro.js"></script>
+<script>
+  // Start a task and turn Pomodoro on, with a realistic ~24:13 left on the block.
+  startTaskTimer('2026-07-05','t1');
+  pomodoroToggle();
+  _pomo.endsAt = Date.now() + (24*60 + 13) * 1000;
+  refreshFocusUI();
+</script>
+</body>
+</html>

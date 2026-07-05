@@ -49,6 +49,9 @@ function _focusTask() {
   return t || null;
 }
 
+// Exposed so the Pomodoro layer can attach to the current focus task.
+function focusCurrentRef() { return _focusRef; }
+
 function _focusTaskTitle(t) {
   const txt = (t && t.text) ? t.text : 'Study session';
   return (typeof escapeHtml === 'function') ? escapeHtml(txt) : txt;
@@ -70,6 +73,7 @@ function onSessionCapReached(dateStr, taskId) {
   _focusRef = _focusRef || { dateStr, taskId };
   _focusCapPrompt = { dateStr, taskId };
   _focusMinimized = false;
+  if (typeof pomodoroPause === 'function') pomodoroPause(); // freeze Pomodoro while the cap prompt is up
   _renderFocus();
 }
 
@@ -83,16 +87,19 @@ function exitFocusFullscreen() { _focusFullscreen = false; _renderFocus(); }
 
 function focusPause() {
   if (_focusRef) pauseTaskTimer(_focusRef.dateStr, _focusRef.taskId); // banks time
+  if (typeof pomodoroPause === 'function') pomodoroPause();           // freeze the block countdown
   _renderFocus();
 }
 function focusResume() {
   if (_focusRef) startTaskTimer(_focusRef.dateStr, _focusRef.taskId); // resumes (reopens popup)
+  if (typeof pomodoroResume === 'function') pomodoroResume();         // unfreeze the block countdown
   _renderFocus();
 }
 function focusMarkDone() {
   if (_focusRef && typeof setTaskStatus === 'function') {
     setTaskStatus(_focusRef.dateStr, _focusRef.taskId, 'done'); // banks + marks done
   }
+  if (typeof pomodoroEnd === 'function') pomodoroEnd(); // completing the task ends any Pomodoro run
   _focusRef = null; _focusFullscreen = false; _focusCapPrompt = null;
   _renderFocus();
 }
@@ -101,6 +108,7 @@ function focusMarkDone() {
 function focusCapContinue() {
   const ref = _focusCapPrompt; _focusCapPrompt = null;
   if (ref) startTaskTimer(ref.dateStr, ref.taskId); // fresh 4h block (reopens popup)
+  if (typeof pomodoroResume === 'function') pomodoroResume(); // resume Pomodoro block too
   _renderFocus();
 }
 function focusCapStop() { _focusCapPrompt = null; _renderFocus(); } // stays paused at 4h
@@ -114,11 +122,20 @@ function _ensureFocusInterval() {
     if (!t) return;
     // If completed elsewhere (kanban/list), tear the focus UI down.
     if (typeof taskStatus === 'function' && taskStatus(t) === 'done') {
-      _focusRef = null; _focusFullscreen = false; _renderFocus(); return;
+      _focusRef = null; _focusFullscreen = false;
+      if (typeof pomodoroEnd === 'function' && typeof pomodoroIsOn === 'function' && pomodoroIsOn()) pomodoroEnd();
+      _renderFocus(); return;
     }
+    // Pomodoro auto-flow: a focus/break switch re-renders, so bail this tick.
+    if (typeof pomodoroTick === 'function' && pomodoroTick()) return;
     // Enforce the 4h cap for the focus task on ANY day (tick only covers today).
     if (typeof _enforceSessionCap === 'function' && _enforceSessionCap(_focusRef.dateStr, t)) return;
     _updateFocusClock(t);
+    // Tick the Pomodoro block/break countdown in place.
+    if (typeof pomodoroIsOn === 'function' && pomodoroIsOn()) {
+      const txt = pomodoroCountdownText();
+      document.querySelectorAll('[data-pomo-clock]').forEach(el => { el.textContent = txt; });
+    }
   }, 1000);
 }
 
@@ -153,23 +170,31 @@ function _renderFocus() {
   const title = _focusTaskTitle(t);
   let html = '';
 
+  const pomoOn = (typeof pomodoroIsOn === 'function' && pomodoroIsOn());
+  const pomoBreak = (typeof pomodoroIsBreak === 'function' && pomodoroIsBreak());
+
   // ── Full-screen focus mode ──
   if (_focusFullscreen) {
-    html += `<div class="focus-fullscreen">
-      <button class="focus-fs-close" title="Exit full screen" onclick="exitFocusFullscreen()">✕</button>
-      <div class="focus-fs-label">${running ? 'FOCUSING ON' : 'PAUSED'}</div>
-      <div class="focus-fs-task">${title}</div>
-      <div class="focus-fs-clock" data-focus-clock>${clock}</div>
-      <div class="focus-fs-controls">
-        ${running
-          ? _focusBtn('focusPause()', 'Pause', '⏸ Pause', 'ghost')
-          : _focusBtn('focusResume()', 'Resume', '▶ Resume', 'accent')}
-        ${_focusBtn('focusMarkDone()', 'Mark done', '✓ Done', 'accent')}
-      </div>
-      <div class="focus-fs-sub">
-        ${_focusBtn('exitFocusFullscreen()', 'Minimise to popup', '⤡ Minimise', 'ghost')}
-      </div>
-    </div>`;
+    if (pomoOn) {
+      html += `<div class="focus-fullscreen${pomoBreak ? ' is-break' : ''}">${pomodoroFullscreenBody()}</div>`;
+    } else {
+      html += `<div class="focus-fullscreen">
+        <button class="focus-fs-close" title="Exit full screen" onclick="exitFocusFullscreen()">✕</button>
+        <div class="focus-fs-label">${running ? 'FOCUSING ON' : 'PAUSED'}</div>
+        <div class="focus-fs-task">${title}</div>
+        <div class="focus-fs-clock" data-focus-clock>${clock}</div>
+        <div class="focus-fs-controls">
+          ${running
+            ? _focusBtn('focusPause()', 'Pause', '⏸ Pause', 'ghost')
+            : _focusBtn('focusResume()', 'Resume', '▶ Resume', 'accent')}
+          ${_focusBtn('focusMarkDone()', 'Mark done', '✓ Done', 'accent')}
+        </div>
+        <div class="focus-fs-sub">
+          ${typeof pomodoroToggleBtnHtml === 'function' ? pomodoroToggleBtnHtml() : ''}
+          ${_focusBtn('exitFocusFullscreen()', 'Minimise to popup', '⤡ Minimise', 'ghost')}
+        </div>
+      </div>`;
+    }
   }
 
   // ── Floating popup ──
@@ -178,22 +203,26 @@ function _renderFocus() {
     const posStyle = _focusIsMobile()
       ? '' // mobile: CSS pins it as a bottom sheet
       : `left:${pos.x}px;top:${pos.y}px;`;
-    html += `<div class="focus-popup" id="focus-popup" style="${posStyle}">
-      <div class="focus-popup-head" onpointerdown="focusDragStart(event)">
-        <span class="focus-dot ${running ? 'live' : 'paused'}"></span>
-        <span class="focus-popup-title">${title}</span>
-        <span class="focus-popup-actions">
-          ${_focusBtn('enterFocusFullscreen()', 'Full screen', '⛶', 'icon')}
-          ${_focusBtn('closeFocusPopup()', 'Minimise (timer keeps running)', '–', 'icon')}
-        </span>
-      </div>
+    const dotClass = pomoBreak ? 'break' : (running ? 'live' : 'paused');
+    const body = pomoOn ? pomodoroPopupBody() : `
       <div class="focus-popup-clock" data-focus-clock>${clock}</div>
       <div class="focus-popup-controls">
         ${running
           ? _focusBtn('focusPause()', 'Pause', '⏸ Pause', 'ghost')
           : _focusBtn('focusResume()', 'Resume', '▶ Resume', 'accent')}
         ${_focusBtn('focusMarkDone()', 'Mark done', '✓ Done', 'ghost')}
+      </div>`;
+    html += `<div class="focus-popup" id="focus-popup" style="${posStyle}">
+      <div class="focus-popup-head" onpointerdown="focusDragStart(event)">
+        <span class="focus-dot ${dotClass}"></span>
+        <span class="focus-popup-title">${title}</span>
+        <span class="focus-popup-actions">
+          ${typeof pomodoroToggleBtnHtml === 'function' ? pomodoroToggleBtnHtml() : ''}
+          ${_focusBtn('enterFocusFullscreen()', 'Full screen', '⛶', 'icon')}
+          ${_focusBtn('closeFocusPopup()', 'Minimise (timer keeps running)', '–', 'icon')}
+        </span>
       </div>
+      ${body}
     </div>`;
   }
 
