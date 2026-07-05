@@ -15,6 +15,9 @@ function taskStatus(t) {
 function setTaskStatus(dateStr, taskId, status) {
   const task = (appState.tasks[dateStr]||[]).find(t=>t.id===taskId);
   if (!task) return;
+  /* Bank any running study session before the status changes, so dragging a
+     running card straight to Done (skipping Pause) doesn't lose the time. */
+  if (typeof _stopActiveSession === 'function') _stopActiveSession(task);
   task.status = status;
   task.done = (status === 'done');
   syncVideoTaskToWatched(task);
@@ -156,6 +159,7 @@ function renderKanbanBoard(dateStr) {
           ${rolloverBadgeHtml(t)}
           ${s?`<span class="task-subject-chip" style="background:${s.color}22;color:${s.color};">${escapeHtml(ss)}</span>`:''}
           <div class="kanban-card-actions">
+            ${typeof taskTimerControlHtml === 'function' ? taskTimerControlHtml(dateStr, t) : ''}
             <select onchange="setTaskStatus('${dateStr}','${t.id}',this.value)" onclick="event.stopPropagation()">
               <option value="todo" ${taskStatus(t)==='todo'?'selected':''}>To Do</option>
               <option value="in-progress" ${taskStatus(t)==='in-progress'?'selected':''}>In Progress</option>
