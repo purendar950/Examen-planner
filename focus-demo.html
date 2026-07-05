@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Focus Timer — Demo</title>
+<!-- REAL stylesheet from the app -->
+<link rel="stylesheet" href="css/app.css">
+<style>
+  body { background: var(--bg); color: var(--text); font-family: var(--font); padding: 22px; }
+  h1 { font-size: 1.15rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 16px; }
+  #day-view-title { font-size: 1.15rem; font-weight: 700; }
+  #day-view-sub { color: var(--muted); font-size: .85rem; margin-bottom: 18px; }
+  .demo-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .demo-bar button {
+    font-family: var(--font); font-weight: 700; font-size: .78rem; cursor: pointer;
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px;
+  }
+  .hint { color: var(--muted); font-size: .8rem; max-width: 620px; line-height: 1.5; }
+</style>
+</head>
+<body>
+  <h1>⏱️ Focus Timer — live demo</h1>
+  <div class="sub">Real <code>planner-timer.js</code> + <code>planner-focus-timer.js</code> + <code>app.css</code>, stubbed data.</div>
+
+  <div id="day-view-title">Sunday, Jul 5th</div>
+  <div id="day-view-sub"></div>
+
+  <div class="demo-bar">
+    <button onclick="startTaskTimer('2026-07-05','t1')">▶ Start "Counting"</button>
+    <button onclick="startTaskTimer('2026-07-05','t2')">▶ Start "Maths" (tests one-at-a-time)</button>
+    <button onclick="enterFocusFullscreen()">⛶ Full screen</button>
+    <button onclick="demoTriggerCap()">⏰ Simulate 4h cap</button>
+    <button onclick="reopenFocusPopup()">↺ Reopen popup</button>
+  </div>
+  <div class="hint">The popup auto-opens on Start (bottom-right, draggable on desktop). Minimising/closing it keeps the clock running — only Pause or Done stop it. Starting a second task auto-pauses the first. At 4h it holds and asks to continue.</div>
+
+  <!-- kanban/list containers so renderDayContent() doesn't no-op unexpectedly -->
+  <div id="kanban-board" style="display:none;"></div>
+  <div id="task-panel-wrap" style="display:none;"><div id="task-list"></div></div>
+
+<script>
+/* ---- minimal stubs standing in for the real app ---- */
+let selectedPlannerDate = '2026-07-05';
+let appState = {
+  tasks: {
+    '2026-07-05': [
+      { id:'t1', text:'Counting — Reasoning practice set', priority:'high',   subject:'reasoning', status:'todo' },
+      { id:'t2', text:'Maths — Time & Work',                priority:'normal', subject:'maths',     status:'todo' }
+    ]
+  }
+};
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function taskStatus(t){ if(t.done) return 'done'; if(t.status) return t.status; return 'todo'; }
+function saveProgress(){}
+function buildPlannerCalendar(){}
+function renderDayContent(){ renderDayHeader(); }
+function setTaskStatus(dateStr, taskId, status){
+  const t=(appState.tasks[dateStr]||[]).find(x=>x.id===taskId); if(!t) return;
+  if(typeof _stopActiveSession==='function') _stopActiveSession(t);
+  t.status=status; t.done=(status==='done'); saveProgress(); renderDayContent();
+}
+function renderDayHeader(){
+  const tasks = appState.tasks[selectedPlannerDate] || [];
+  const done = tasks.filter(t=>t.done).length;
+  const sub = document.getElementById('day-view-sub');
+  if (sub) sub.textContent = `${tasks.length} tasks · ${done} completed`;
+  if (typeof refreshDayStudyTime === 'function') refreshDayStudyTime();
+}
+
+/* Demo helper: shove the running task past the 4h cap and let the real
+   cap-enforcement path fire (bank 4h -> pause -> Continue prompt). */
+function demoTriggerCap(){
+  const t = (appState.tasks['2026-07-05']||[]).find(x=>x.activeSessionStart);
+  if(!t){ alert('Start a timer first'); return; }
+  t.activeSessionStart = Date.now() - (MAX_SESSION_SECONDS + 5) * 1000;
+  _enforceSessionCap('2026-07-05', t);
+}
+
+renderDayHeader();
+</script>
+
+<!-- REAL modules, loaded unchanged from the repo -->
+<script src="js/tabs/planner-timer.js"></script>
+<script src="js/tabs/planner-focus-timer.js"></script>
+<script>
+  // Auto-start "Counting" with ~1h05m already on the clock so screenshots
+  // show a realistic h:mm:ss value.
+  startTaskTimer('2026-07-05','t1');
+  const _t1 = appState.tasks['2026-07-05'].find(t=>t.id==='t1');
+  _t1.activeSessionStart = Date.now() - 3925*1000; // 1:05:25
+  refreshFocusUI();
+</script>
+</body>
+</html>
