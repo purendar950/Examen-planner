@@ -1,0 +1,128 @@
+/* ══════════════════════════════════════════════
+   PLANNER — TASK TIMER
+   Adds Start/Pause/Resume on top of the existing todo → in-progress → done
+   flow (planner-tasks-kanban.js). No new status value — 'in-progress' now
+   has two sub-states, told apart by activeSessionStart: a timestamp means
+   running, null means paused.
+
+   Data model (extends appState.tasks[dateStr][i], no migration needed):
+     activeSessionStart : epoch ms (Date.now()) while running, else null
+     totalSeconds       : banked study time for this task, survives pause/resume
+══════════════════════════════════════════════ */
+
+// Cap any single credited session. Longer than this almost always means the
+// tab/laptop was left open (sleep, closed lid, overnight) rather than real
+// study time — protects totalSeconds from one forgotten Pause.
+const MAX_SESSION_SECONDS = 4 * 60 * 60; // 4h — tune freely
+
+function _findTask(dateStr, taskId) {
+  return (appState.tasks[dateStr] || []).find(t => t.id === taskId);
+}
+
+// Folds any in-flight session into totalSeconds and clears activeSessionStart.
+// Shared by pause, setTaskStatus, toggleTask, and the stale-session guard —
+// anything that leaves the "running" sub-state, for any reason.
+function _stopActiveSession(task, opts = {}) {
+  if (!task || !task.activeSessionStart) return;
+  const raw = (Date.now() - task.activeSessionStart) / 1000;
+  const capped = Math.min(Math.max(raw, 0), opts.maxSeconds ?? MAX_SESSION_SECONDS);
+  task.totalSeconds = (task.totalSeconds || 0) + capped;
+  task.activeSessionStart = null;
+}
+
+function startTaskTimer(dateStr, taskId) {
+  const task = _findTask(dateStr, taskId);
+  if (!task || task.activeSessionStart) return; // already running
+  task.activeSessionStart = Date.now();
+  task.status = 'in-progress';
+  task.done = false;
+  saveProgress();
+  renderDayContent();      // repaint kanban/list so the button flips to Pause
+  buildPlannerCalendar();
+}
+
+function pauseTaskTimer(dateStr, taskId) {
+  const task = _findTask(dateStr, taskId);
+  if (!task || !task.activeSessionStart) return; // not running
+  _stopActiveSession(task);
+  saveProgress();
+  renderDayContent();
+}
+
+function resumeTaskTimer(dateStr, taskId) {
+  startTaskTimer(dateStr, taskId); // same op — the guard above does the rest
+}
+
+function formatElapsed(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
+    : `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+// Banked totalSeconds + whatever's ticked since activeSessionStart, if running.
+function taskLiveSeconds(task) {
+  if (!task) return 0;
+  const base = task.totalSeconds || 0;
+  return task.activeSessionStart ? base + (Date.now() - task.activeSessionStart) / 1000 : base;
+}
+
+// One shared control, used by BOTH renderKanbanBoard and renderTaskList so
+// the two views never drift out of sync with each other.
+function taskTimerControlHtml(dateStr, t) {
+  const chip = 'display:inline-flex;align-items:center;gap:4px;font-size:.68rem;font-weight:700;border-radius:6px;padding:3px 8px;cursor:pointer;border:1px solid transparent;font-family:var(--font);white-space:nowrap;';
+  if (taskStatus(t) === 'done') {
+    const total = t.totalSeconds || 0;
+    return total > 0 ? `<span style="${chip}color:var(--muted);cursor:default;">⏱ ${formatElapsed(total)}</span>` : '';
+  }
+  if (t.activeSessionStart) {
+    return `<button style="${chip}background:var(--accent-dim);border-color:rgba(0,200,150,.3);color:var(--accent);"
+      onclick="event.stopPropagation();pauseTaskTimer('${dateStr}','${t.id}')" title="Pause">
+      ⏸ <span data-timer-task="${t.id}">${formatElapsed(taskLiveSeconds(t))}</span></button>`;
+  }
+  if (t.totalSeconds) {
+    return `<button style="${chip}background:var(--surface);border-color:var(--border);color:var(--text);"
+      onclick="event.stopPropagation();resumeTaskTimer('${dateStr}','${t.id}')" title="Resume">▶ ${formatElapsed(t.totalSeconds)}</button>`;
+  }
+  return `<button style="${chip}background:var(--surface);border-color:var(--border);color:var(--muted);"
+    onclick="event.stopPropagation();startTaskTimer('${dateStr}','${t.id}')" title="Start studying">▶ Start</button>`;
+}
+
+// Ticks every running timer's on-screen number once a second, WITHOUT
+// re-rendering the board (keeps drag state / dropdown intact). Also
+// auto-pauses (and banks the capped time) if a session runs past the cap
+// while the tab stays open — not just at reload.
+setInterval(() => {
+  if (typeof appState === 'undefined' || !appState.tasks) return;
+  const tasks = appState.tasks[selectedPlannerDate] || [];
+  tasks.forEach(t => {
+    if (!t.activeSessionStart) return;
+    if ((Date.now() - t.activeSessionStart) / 1000 > MAX_SESSION_SECONDS) {
+      pauseTaskTimer(selectedPlannerDate, t.id);
+      return;
+    }
+    // querySelectorAll (not querySelector): the day view keeps both the Kanban
+    // and List containers in the DOM (one hidden via display:none, not cleared),
+    // so a task can have a data-timer-task span in BOTH. Update every match, or
+    // the live number freezes in whichever view isn't first in document order.
+    const els = document.querySelectorAll(`[data-timer-task="${t.id}"]`);
+    const txt = formatElapsed(taskLiveSeconds(t));
+    els.forEach(el => { el.textContent = txt; });
+  });
+}, 1000);
+
+// Runs once on load. Catches sessions left running across a reload/reopen
+// (the interval above only catches it if the tab stayed open).
+function guardStaleActiveSessions() {
+  let changed = false;
+  Object.keys(appState.tasks || {}).forEach(ds => {
+    (appState.tasks[ds] || []).forEach(t => {
+      if (t.activeSessionStart && (Date.now() - t.activeSessionStart) / 1000 > MAX_SESSION_SECONDS) {
+        _stopActiveSession(t, { maxSeconds: MAX_SESSION_SECONDS });
+        changed = true;
+      }
+    });
+  });
+  if (changed && typeof saveProgress === 'function') saveProgress();
+}

@@ -1239,6 +1239,9 @@ function populateTaskSubjectDropdown() {
 function toggleTask(dateStr, taskId) {
   const task = (appState.tasks[dateStr]||[]).find(t=>t.id===taskId);
   if (task) {
+    /* Bank any running study session before completing/uncompleting via the
+       list checkbox, so the elapsed time isn't lost. */
+    if (typeof _stopActiveSession === 'function') _stopActiveSession(task);
     task.done = !task.done;
     /* Keep the Kanban status field in sync with the checkbox. taskStatus()
        prefers task.status over task.done, so without this a completed task
@@ -1306,6 +1309,7 @@ function renderTaskList(dateStr) {
     return `<div class="task-item" style="border-left-color:${sc};">
       <div class="ch-checkbox${t.done?' checked':''}" onclick="toggleTask('${dateStr}','${t.id}')">${t.done?'✓':''}</div>
       <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${typeIcon}${escapeHtml(t.text)}</span>
+      ${typeof taskTimerControlHtml === 'function' ? taskTimerControlHtml(dateStr, t) : ''}
       ${typeof rolloverBadgeHtml === 'function' ? rolloverBadgeHtml(t) : ''}
       ${s?`<span class="task-subject-chip" style="background:${sc}22;color:${sc};">${escapeHtml(ss)}</span>`:''}
       ${t.type === 'video' && t.videoId ? `<button class="ch-action-btn" title="Play in YouTube tab" onclick="event.stopPropagation();playTaskVideo('${dateStr}','${t.id}')">▶</button>` : ''}

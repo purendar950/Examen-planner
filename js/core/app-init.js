@@ -63,6 +63,7 @@ function initApp() {
   const safely = (fn) => { try { fn(); } catch (e) { console.error('initApp step failed:', e); } };
   safely(updateStreak);
   safely(rolloverIncompleteTasks);  // carry unfinished manual tasks forward to today
+  safely(guardStaleActiveSessions); // cap timers left running across a reload/overnight
   safely(seedRecurringRange);        // seed recurring/habit tasks for today + next 7 days
   safely(buildSyllabus);
   safely(updateDashboard);

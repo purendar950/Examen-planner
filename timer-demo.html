@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task Timer — Demo</title>
+<style>
+  :root{
+    --bg:#0A0D12; --surface:#111620; --card:#161B26; --border:#1E2535;
+    --accent:#00C896; --accent-dim:rgba(0,200,150,0.12); --text:#E8EDF5;
+    --muted:#5A6478; --font:'Inter',-apple-system,'Segoe UI',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:var(--font);background:var(--bg);color:var(--text);padding:24px;line-height:1.5;}
+  h1{font-size:1.2rem;margin-bottom:4px;}
+  .sub{color:var(--muted);font-size:.85rem;margin-bottom:20px;}
+  .views{display:grid;grid-template-columns:1fr 380px;gap:24px;align-items:start;}
+  .panel-title{font-size:.75rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:10px;font-weight:700;}
+
+  /* Kanban */
+  .kanban-board{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;}
+  .kanban-col{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px;min-height:120px;}
+  .kanban-col-header{font-size:.72rem;font-weight:700;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+  .kc-count{margin-left:auto;background:var(--card);border-radius:20px;padding:1px 8px;font-size:.68rem;}
+  .kanban-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;}
+  .kanban-card-text{font-size:.82rem;margin-bottom:8px;}
+  .kanban-card-text.done{text-decoration:line-through;color:var(--muted);}
+  .kanban-card-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+  .priority-badge{font-size:.6rem;font-weight:700;border-radius:5px;padding:2px 6px;background:var(--surface);color:var(--muted);}
+  .priority-badge.high{background:rgba(239,68,68,.15);color:#EF4444;}
+  .kanban-card-actions{display:flex;gap:6px;align-items:center;margin-top:8px;width:100%;}
+  .kanban-card-actions select{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:.7rem;padding:3px;}
+  .kanban-card-del{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;padding:3px 7px;font-size:.7rem;}
+  .kanban-col-empty{color:var(--muted);font-size:.75rem;text-align:center;padding:16px 0;}
+
+  /* List */
+  .task-panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;}
+  .task-item{display:flex;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;border-left:3px solid var(--border);background:var(--card);margin-bottom:8px;}
+  .ch-checkbox{width:20px;height:20px;border:2px solid var(--border);border-radius:6px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:.7rem;color:var(--accent);flex:none;}
+  .ch-checkbox.checked{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .task-done{text-decoration:line-through;color:var(--muted);}
+  .ch-action-btn{background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--muted);cursor:pointer;padding:3px 7px;font-size:.72rem;}
+</style>
+</head>
+<body>
+  <h1>⏱️ Task Timer — live demo</h1>
+  <div class="sub">Real <code>planner-timer.js</code> engine, stubbed data. Left = Kanban, right = List. Both share one control so they stay in sync.</div>
+
+  <div class="views">
+    <div>
+      <div class="panel-title">Kanban view</div>
+      <div class="kanban-board" id="kanban-board"></div>
+    </div>
+    <div>
+      <div class="panel-title">List view</div>
+      <div class="task-panel"><div id="task-list"></div></div>
+    </div>
+  </div>
+
+<script>
+/* ---- minimal stubs standing in for the real app globals ---- */
+const selectedPlannerDate = '2026-07-05';
+let appState = {
+  tasks: {
+    '2026-07-05': [
+      { id:'t1', text:'Polity — Fundamental Rights', priority:'high',   subject:'pol',  status:'todo' },
+      { id:'t2', text:'Maths — Time & Work practice', priority:'normal', subject:'math', status:'in-progress',
+        activeSessionStart: Date.now() - 65*1000 },            // running ~1:05, will tick
+      { id:'t3', text:'History — Revolt of 1857 notes', priority:'normal', subject:'his', status:'in-progress',
+        activeSessionStart: null, totalSeconds: 125 },          // paused at 2:05
+      { id:'t4', text:'English — Reading comprehension', priority:'low', subject:'eng',
+        done:true, status:'done', totalSeconds: 3725 }          // done, 1:02:05 banked
+    ]
+  }
+};
+const SUBJ = { pol:{name:'Polity',color:'#00C896'}, math:{name:'Maths',color:'#3B82F6'},
+               his:{name:'History',color:'#F59E0B'}, eng:{name:'English',color:'#A78BFA'} };
+function getActiveSubjects(){ return Object.keys(SUBJ).map(id=>({id,...SUBJ[id]})); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function taskStatus(t){ if(t.done) return 'done'; if(t.status) return t.status; return 'todo'; }
+function saveProgress(){ /* no-op in demo (real app debounces to Firestore) */ }
+function buildPlannerCalendar(){ /* no-op in demo */ }
+function rolloverBadgeHtml(){ return ''; }
+
+/* ---- render both views (mirrors renderKanbanBoard / renderTaskList) ---- */
+const PRIORITY_LABEL={high:'HIGH',normal:'MEDIUM',low:'LOW'};
+function renderKanbanBoard(dateStr){
+  const board=document.getElementById('kanban-board');
+  const tasks=appState.tasks[dateStr]||[];
+  const cols=[{key:'todo',label:'To Do',icon:'📝'},{key:'in-progress',label:'In Progress',icon:'⏱️'},{key:'done',label:'Completed',icon:'✅'}];
+  const subjMap={}; getActiveSubjects().forEach(s=>subjMap[s.id]=s);
+  board.innerHTML=cols.map(col=>{
+    const colTasks=tasks.filter(t=>taskStatus(t)===col.key);
+    const cards=colTasks.length?colTasks.map(t=>{
+      const s=subjMap[t.subject]; const ss=s?s.name.split(/[ &]/)[0]:''; const pr=t.priority||'normal';
+      return `<div class="kanban-card">
+        <div class="kanban-card-text ${t.done?'done':''}">${escapeHtml(t.text)}</div>
+        <div class="kanban-card-meta">
+          <span class="priority-badge ${pr}">${PRIORITY_LABEL[pr]||'MEDIUM'}</span>
+          ${s?`<span class="priority-badge" style="background:${s.color}22;color:${s.color};">${escapeHtml(ss)}</span>`:''}
+          <div class="kanban-card-actions">
+            ${typeof taskTimerControlHtml==='function'?taskTimerControlHtml(dateStr,t):''}
+            <select onchange="setTaskStatus('${dateStr}','${t.id}',this.value)">
+              <option value="todo" ${taskStatus(t)==='todo'?'selected':''}>To Do</option>
+              <option value="in-progress" ${taskStatus(t)==='in-progress'?'selected':''}>In Progress</option>
+              <option value="done" ${taskStatus(t)==='done'?'selected':''}>Done</option>
+            </select>
+            <button class="kanban-card-del">🗑</button>
+          </div>
+        </div></div>`;
+    }).join(''):`<div class="kanban-col-empty">No tasks</div>`;
+    return `<div class="kanban-col"><div class="kanban-col-header"><span>${col.icon}</span> ${col.label} <span class="kc-count">${colTasks.length}</span></div>${cards}</div>`;
+  }).join('');
+}
+function renderTaskList(dateStr){
+  const tasks=appState.tasks[dateStr]||[]; const list=document.getElementById('task-list');
+  const pIcon={high:'🔴',normal:'🟡',low:'🟢'}; const subjMap={}; getActiveSubjects().forEach(s=>subjMap[s.id]=s);
+  list.innerHTML=tasks.map(t=>{
+    const s=subjMap[t.subject]; const sc=s?s.color:'var(--border)'; const ss=s?s.name.split(/[ &]/)[0]:'';
+    return `<div class="task-item" style="border-left-color:${sc};">
+      <div class="ch-checkbox${t.done?' checked':''}" onclick="toggleTask('${dateStr}','${t.id}')">${t.done?'✓':''}</div>
+      <span class="${t.done?'task-done':''}" style="flex:1;font-size:.875rem;">${pIcon[t.priority]||'🟡'} ${escapeHtml(t.text)}</span>
+      ${typeof taskTimerControlHtml==='function'?taskTimerControlHtml(dateStr,t):''}
+      ${s?`<span class="priority-badge" style="background:${sc}22;color:${sc};">${escapeHtml(ss)}</span>`:''}
+      <button class="ch-action-btn">🗑</button>
+    </div>`;
+  }).join('');
+}
+function renderDayContent(){ renderKanbanBoard(selectedPlannerDate); renderTaskList(selectedPlannerDate); }
+
+/* setTaskStatus / toggleTask incl. the SAME time-banking hook added to the real files */
+function setTaskStatus(dateStr,taskId,status){
+  const task=(appState.tasks[dateStr]||[]).find(t=>t.id===taskId); if(!task)return;
+  if(typeof _stopActiveSession==='function') _stopActiveSession(task);
+  task.status=status; task.done=(status==='done'); saveProgress(); renderDayContent();
+}
+function toggleTask(dateStr,taskId){
+  const task=(appState.tasks[dateStr]||[]).find(t=>t.id===taskId); if(!task)return;
+  if(typeof _stopActiveSession==='function') _stopActiveSession(task);
+  task.done=!task.done; task.status=task.done?'done':'todo'; saveProgress(); renderDayContent();
+}
+</script>
+
+<!-- the REAL engine, loaded unchanged from the repo -->
+<script src="js/tabs/planner-timer.js"></script>
+<script>renderDayContent();</script>
+</body>
+</html>
