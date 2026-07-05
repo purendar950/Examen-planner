@@ -262,11 +262,15 @@ function fmtRangeTitle(view, start, end) {
 }
 
 function computeRangeStats(dates) {
-  let total = 0, done = 0;
+  let total = 0, done = 0, studySeconds = 0;
+  /* Reuse the timer engine's live-aware sum when it's loaded; fall back to
+     banked totalSeconds so this still works if planner-timer.js is absent. */
+  const liveSecs = (typeof taskLiveSeconds === 'function') ? taskLiveSeconds : (t => t.totalSeconds || 0);
   dates.forEach(ds => {
     const tasks = appState.tasks[ds] || [];
     total += tasks.length;
     done += tasks.filter(t=>t.done).length;
+    tasks.forEach(t => { studySeconds += liveSecs(t); });
   });
   const pct = total ? Math.round(done/total*100) : 0;
   let productivity = 'Keep Going';
@@ -274,7 +278,7 @@ function computeRangeStats(dates) {
   else if (pct >= 80) productivity = 'On Fire 🔥';
   else if (pct >= 50) productivity = 'Great Job';
   else if (pct > 0)   productivity = 'Good Start';
-  return { total, done, pct, productivity };
+  return { total, done, pct, productivity, studySeconds };
 }
 
 function setStatCard(id, val) {
@@ -298,6 +302,7 @@ function renderRangeView(view) {
   setStatCard('stat-completed', stats.done);
   setStatCard('stat-completion-rate', stats.pct + '%');
   setStatCard('stat-productivity', stats.productivity);
+  setStatCard('stat-study-time', (typeof formatStudyTotal === 'function') ? formatStudyTotal(stats.studySeconds) : Math.round(stats.studySeconds/60) + 'm');
 
   const list = document.getElementById('planner-days-list');
   if (!list) return;
