@@ -2562,3 +2562,103 @@ html:not([data-theme="light"]) .topbar {
   .page.active { animation: none; }
   .stat-card:hover, .progress-overview:hover, .btn-primary:hover { transform: none; }
 }
+
+
+  /* ══════════════════════════════════════════════
+     FOCUS TIMER — floating popup + full-screen focus mode
+     (planner-focus-timer.js). Pure UI; time lives in the task state.
+  ══════════════════════════════════════════════ */
+  #focus-timer-root { font-family: var(--font); }
+
+  .focus-btn {
+    font-family: var(--font); font-weight: 700; font-size: .8rem;
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 12px;
+    cursor: pointer; white-space: nowrap; line-height: 1;
+    transition: filter .12s ease, transform .06s ease;
+  }
+  .focus-btn:hover { filter: brightness(1.08); }
+  .focus-btn:active { transform: translateY(1px); }
+
+  /* ── Floating popup (desktop) ── */
+  .focus-popup {
+    position: fixed; z-index: 9998; width: 250px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,.45);
+    overflow: hidden; user-select: none;
+  }
+  .focus-popup-head {
+    display: flex; align-items: center; gap: 7px;
+    padding: 9px 10px; background: var(--surface);
+    border-bottom: 1px solid var(--border); cursor: grab;
+  }
+  .focus-popup-head:active { cursor: grabbing; }
+  .focus-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .focus-dot.live { background: var(--accent); box-shadow: 0 0 0 0 rgba(0,200,150,.5); animation: focusPulse 1.6s infinite; }
+  .focus-dot.paused { background: var(--muted); }
+  @keyframes focusPulse {
+    0%   { box-shadow: 0 0 0 0 rgba(0,200,150,.5); }
+    70%  { box-shadow: 0 0 0 7px rgba(0,200,150,0); }
+    100% { box-shadow: 0 0 0 0 rgba(0,200,150,0); }
+  }
+  .focus-popup-title {
+    flex: 1; font-size: .78rem; font-weight: 700; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .focus-popup-actions { display: flex; gap: 2px; flex: none; }
+  .focus-popup-actions .focus-btn { font-size: 1rem; padding: 2px 7px; }
+  .focus-popup-clock {
+    font-size: 2.3rem; font-weight: 800; text-align: center; color: var(--accent);
+    padding: 16px 10px 10px; font-variant-numeric: tabular-nums; letter-spacing: 1px;
+  }
+  .focus-popup-controls { display: flex; gap: 8px; padding: 0 12px 14px; }
+  .focus-popup-controls .focus-btn { flex: 1; }
+
+  /* ── Full-screen focus mode ── */
+  .focus-fullscreen {
+    position: fixed; inset: 0; z-index: 10000;
+    background: radial-gradient(circle at 50% 35%, rgba(0,200,150,.08), var(--bg) 60%), var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px; padding: 24px; text-align: center;
+  }
+  .focus-fs-close {
+    position: absolute; top: 20px; right: 22px; background: transparent;
+    border: none; color: var(--muted); font-size: 1.4rem; cursor: pointer;
+  }
+  .focus-fs-close:hover { color: var(--text); }
+  .focus-fs-label { font-size: .8rem; font-weight: 700; letter-spacing: 3px; color: var(--muted); }
+  .focus-fs-task { font-size: 1.4rem; font-weight: 700; color: var(--text); max-width: 90%; }
+  .focus-fs-clock {
+    font-size: clamp(3.5rem, 16vw, 8rem); font-weight: 800; color: var(--accent);
+    font-variant-numeric: tabular-nums; letter-spacing: 2px; line-height: 1;
+  }
+  .focus-fs-controls { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .focus-fs-controls .focus-btn { font-size: 1rem; padding: 12px 26px; }
+  .focus-fs-sub .focus-btn { font-size: .8rem; color: var(--muted); }
+
+  /* ── 4h Continue prompt ── */
+  .focus-cap-backdrop {
+    position: fixed; inset: 0; z-index: 10001;
+    background: rgba(0,0,0,.6); backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  .focus-cap-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+    padding: 26px 24px; max-width: 360px; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .focus-cap-emoji { font-size: 2.4rem; margin-bottom: 6px; }
+  .focus-cap-title { font-size: 1.15rem; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+  .focus-cap-text { font-size: .86rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+  .focus-cap-controls { display: flex; gap: 10px; }
+  .focus-cap-controls .focus-btn { flex: 1; padding: 11px; }
+
+  /* ── Mobile: popup becomes a bottom sheet (no drag) ── */
+  @media (max-width: 640px) {
+    .focus-popup {
+      left: 0 !important; right: 0; top: auto !important; bottom: 0; width: 100%;
+      border-radius: 16px 16px 0 0; box-shadow: 0 -8px 30px rgba(0,0,0,.5);
+    }
+    .focus-popup-head { cursor: default; }
+    .focus-popup-clock { font-size: 2.6rem; }
+    .focus-fs-controls .focus-btn { flex: 1; min-width: 120px; }
+  }
