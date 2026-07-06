@@ -2,11 +2,29 @@
 name: Deploy static content to Pages
 
 on:
-  # Runs on pushes targeting the default branch
+  # Runs on pushes targeting the default branch, but ONLY when files that are
+  # actually part of the deployed static site change. Pushes that touch only
+  # backend/server code (the Render bot, cron scripts, shared server gating,
+  # Android app, docs, Firestore rules) do not affect the website, so they no
+  # longer trigger a Pages deploy — which avoids pointless runs that could only
+  # fail on GitHub's transient "Deployment failed, try again later" hiccup.
+  # NOTE: a push that changes BOTH web and ignored files still deploys.
   push:
     branches: ["main"]
+    paths-ignore:
+      - 'bot/**'
+      - 'scripts/**'
+      - 'shared/**'
+      - 'android/**'
+      - 'docs/**'
+      - '**.md'
+      - 'firestore.rules'
+      - '.github/workflows/daily-telegram.yml'
+      - '.github/workflows/android.yml'
 
-  # Allows you to run this workflow manually from the Actions tab
+  # Allows you to run this workflow manually from the Actions tab (use this to
+  # re-deploy after a transient failure instead of "Re-run failed jobs", which
+  # can duplicate the github-pages artifact and cause a different failure).
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
