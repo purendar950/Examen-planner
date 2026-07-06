@@ -470,7 +470,12 @@ async function verifyAdmin(req) {
   try {
     decoded = await fbAdmin.auth().verifyIdToken(m[1]);
   } catch (e) {
-    return { ok: false, code: 401, error: 'Invalid or expired admin token' };
+    /* Surface the real reason: Firebase error codes like auth/id-token-expired,
+       auth/argument-error, auth/id-token-revoked, or "used too early" (server
+       clock skew) tell us exactly what to fix. Only admins reach this path. */
+    console.error('❌ /send verifyIdToken failed:', e.code || '', '-', e.message);
+    const code = e.code || (e.message || 'verify-failed');
+    return { ok: false, code: 401, error: 'Invalid or expired admin token [' + code + ']' };
   }
   try {
     const adminDoc = await db.collection('admins').doc(decoded.uid).get();
