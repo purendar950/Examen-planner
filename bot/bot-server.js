@@ -29,7 +29,6 @@
 const TelegramBot = require('node-telegram-bot-api');
 const http        = require('http');
 const https       = require('https');
-const crypto      = require('crypto');
 const { isProUser } = require('../shared/proGating');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -40,23 +39,14 @@ if (!TOKEN) {
 
 /* ── Firebase Admin (optional but required for AI auto-scheduling) ─────────── */
 let db = null;
-let fbAdmin = null; // module-level ref so the /send route can verify ID tokens
 try {
   const admin = require('firebase-admin');
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT || '';
   if (raw.trim()) {
     const svc = JSON.parse(raw);
     if (svc.project_id && svc.private_key) {
-      admin.initializeApp({
-        credential: admin.credential.cert(svc),
-        // Explicit projectId: cert() usually infers this, but on some hosts it
-        // doesn't propagate to auth().verifyIdToken(), which then throws
-        // auth/argument-error because it can't resolve the project to check the
-        // token's audience against. Setting it explicitly removes that failure.
-        projectId: svc.project_id
-      });
+      admin.initializeApp({ credential: admin.credential.cert(svc) });
       db = admin.firestore();
-      fbAdmin = admin;
       global._fbAdmin = admin; // for FieldValue
       console.log(`✅ Firebase Admin ready (project: ${svc.project_id}) — AI auto-schedule enabled`);
     } else {
@@ -458,175 +448,12 @@ bot.on('polling_error', (err) => {
    ════════════════════════════════════════════════════════════════════════════ */
 const PORT = process.env.PORT || 3000;
 
-/* ── Admin auth for /send ────────────────────────────────────────────────────
-   The /send proxy relays arbitrary messages through the bot token, so it must
-   be admin-only (previously it was open to the whole internet). We verify the
-   caller's Firebase ID token — sent by the admin panel as
-   `Authorization: Bearer <idToken>` — and confirm an admins/{uid} doc exists,
-   the same check admin-core.js runs client-side. Fails CLOSED: if Firebase
-   Admin isn't configured we can't verify anyone, so we refuse rather than relay.
-   (The daily cron in scripts/send-telegram.js talks to Telegram directly and
-   never touches /send, so it is unaffected.) */
-/* ── Google public-cert fetch + manual ID-token verification ─────────────────
-   Some hosts (notably free-tier PaaS egress IPs) get an HTML "your client does
-   not have permission" page back from Google's x509 cert endpoint instead of
-   JSON. firebase-admin's internal fetch then throws `auth/argument-error:
-   Error fetching public keys for Google certs`, which is NOT a bad token — the
-   server just couldn't reach Google to verify a perfectly valid one.
-
-   To stay resilient we (1) retry verifyIdToken a couple of times (the block is
-   often intermittent), and (2) fall back to verifying the token ourselves:
-   fetch the certs with the runtime's own fetch (a different HTTP path than the
-   SDK's), then check the RS256 signature + standard Firebase claims. This uses
-   only Node's built-in `crypto`, no extra dependency, and mirrors the exact
-   checks documented for manual Firebase ID-token verification. */
-
-const GOOGLE_X509_URL =
-  'https://www.googleapis.com/robots/v1/metadata/x509/securetoken@system.gserviceaccount.com';
-let _certCache = { certs: null, exp: 0 };
-
-/** True when an error is the "can't fetch Google certs" network failure. */
-function isCertFetchError(e) {
-  const msg = String((e && e.message) || '');
-  return /public keys for Google certs/i.test(msg) ||
-         /does not have permission to get URL/i.test(msg) ||
-         /<!DOCTYPE html>/i.test(msg);
-}
-
-/** Fetch Google's securetoken x509 certs (kid → PEM), honouring cache-control. */
-async function fetchGoogleCerts() {
-  const now = Date.now();
-  if (_certCache.certs && now < _certCache.exp) return _certCache.certs;
-  const r = await fetch(GOOGLE_X509_URL, { headers: { Accept: 'application/json' } });
-  const body = await r.text();
-  if (!r.ok || body.trim().startsWith('<')) {
-    throw new Error('Error fetching public keys for Google certs: ' + body.slice(0, 120));
-  }
-  const certs = JSON.parse(body);
-  let maxAge = 3600;
-  const cc = r.headers.get('cache-control') || '';
-  const mm = /max-age=(\d+)/.exec(cc);
-  if (mm) maxAge = parseInt(mm[1], 10);
-  _certCache = { certs, exp: now + Math.max(60, maxAge) * 1000 };
-  return certs;
-}
-
-function b64urlToBuf(s) {
-  return Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
-}
-
-/**
- * Verify a Firebase ID token by hand (signature + claims). Returns the decoded
- * payload ({ sub: uid, ... }) or throws. `projectId` is the Firebase project.
- */
-async function verifyIdTokenManually(idToken, projectId) {
-  const parts = String(idToken).split('.');
-  if (parts.length !== 3) throw new Error('malformed token');
-  const header  = JSON.parse(b64urlToBuf(parts[0]).toString('utf8'));
-  const payload = JSON.parse(b64urlToBuf(parts[1]).toString('utf8'));
-  if (header.alg !== 'RS256') throw new Error('unexpected alg ' + header.alg);
-  if (!header.kid) throw new Error('no kid in token header');
-
-  const certs = await fetchGoogleCerts();
-  const pem = certs[header.kid];
-  if (!pem) throw new Error('no matching public key for kid');
-
-  const verifier = crypto.createVerify('RSA-SHA256');
-  verifier.update(parts[0] + '.' + parts[1]);
-  if (!verifier.verify(pem, b64urlToBuf(parts[2]))) throw new Error('signature verification failed');
-
-  const now = Math.floor(Date.now() / 1000);
-  const skew = 300; // tolerate 5 min of clock skew
-  if (typeof payload.exp !== 'number' || payload.exp < now - skew) throw new Error('token expired');
-  if (typeof payload.iat === 'number' && payload.iat > now + skew) throw new Error('token issued in the future');
-  if (payload.aud !== projectId) throw new Error('token audience mismatch');
-  if (payload.iss !== 'https://securetoken.google.com/' + projectId) throw new Error('token issuer mismatch');
-  if (!payload.sub || typeof payload.sub !== 'string') throw new Error('token has no subject (uid)');
-  return payload;
-}
-
-async function verifyAdmin(req) {
-  if (!fbAdmin || !db) {
-    return { ok: false, code: 503, error: 'Auth unavailable: server is missing FIREBASE_SERVICE_ACCOUNT' };
-  }
-  const hdr = req.headers['authorization'] || '';
-  const m = /^Bearer\s+(.+)$/i.exec(hdr.trim());
-  if (!m) return { ok: false, code: 401, error: 'Missing admin credentials' };
-  const idToken = m[1];
-
-  let decoded = null;
-  let lastErr = null;
-
-  /* 1. Preferred path: the Admin SDK. Retry once — the cert-endpoint block is
-     frequently intermittent, so a second attempt often succeeds. */
-  for (let attempt = 0; attempt < 2 && !decoded; attempt++) {
-    try {
-      decoded = await fbAdmin.auth().verifyIdToken(idToken);
-    } catch (e) {
-      lastErr = e;
-      /* Only retry the transient cert-fetch network failure; a genuinely bad or
-         expired token will fail deterministically, so bail immediately. */
-      if (!isCertFetchError(e)) break;
-      if (attempt === 0) await new Promise(r => setTimeout(r, 300));
-    }
-  }
-
-  /* 2. Fallback: the SDK couldn't reach Google's cert endpoint. Verify the
-     token ourselves via a direct fetch (different HTTP path than the SDK). */
-  if (!decoded && isCertFetchError(lastErr)) {
-    const projectId = (fbAdmin.app().options && fbAdmin.app().options.projectId) ||
-                      process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || '';
-    if (projectId) {
-      try {
-        decoded = await verifyIdTokenManually(idToken, projectId);
-        console.log('ℹ️  /send: verified admin token via manual fallback (SDK cert fetch was blocked)');
-      } catch (e) {
-        console.error('❌ /send manual verify failed:', e.message);
-        if (isCertFetchError(e)) {
-          /* Both the SDK and our own fetch were denied by Google → this is a
-             server/network problem, not the admin's login. Say so clearly and
-             return 503 so the panel doesn't tell the admin to re-log-in. */
-          return {
-            ok: false, code: 503,
-            error: 'Server could not reach Google to verify the token ' +
-                   '(cert endpoint blocked from the bot host, not your login). ' +
-                   'Check the Render service network/region.'
-          };
-        }
-        lastErr = e; // a real token problem surfaced during manual verify
-      }
-    }
-  }
-
-  if (!decoded) {
-    console.error('❌ /send verifyIdToken failed:', (lastErr && lastErr.code) || '', '-', (lastErr && lastErr.message) || '');
-    if (isCertFetchError(lastErr)) {
-      return {
-        ok: false, code: 503,
-        error: 'Server could not reach Google to verify the token ' +
-               '(cert endpoint blocked from the bot host, not your login).'
-      };
-    }
-    const detail = ((lastErr && lastErr.code) || 'verify-failed') +
-                   (lastErr && lastErr.message ? ': ' + String(lastErr.message).slice(0, 140) : '');
-    return { ok: false, code: 401, error: 'Invalid or expired admin token [' + detail + ']' };
-  }
-
-  try {
-    const adminDoc = await db.collection('admins').doc(decoded.uid || decoded.sub).get();
-    if (!adminDoc.exists) return { ok: false, code: 403, error: 'Not an admin account' };
-  } catch (e) {
-    return { ok: false, code: 403, error: 'Could not verify admin access' };
-  }
-  return { ok: true, uid: decoded.uid || decoded.sub };
-}
-
 const server = http.createServer((req, res) => {
 
   /* CORS headers — allow admin.html on GitHub Pages to call this */
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   /* Preflight */
   if (req.method === 'OPTIONS') {
@@ -648,15 +475,6 @@ const server = http.createServer((req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
-        /* Admin-only: reject anyone without a valid admin ID token */
-        const authz = await verifyAdmin(req);
-        if (!authz.ok) {
-          console.warn(`🚫 /send rejected (${authz.code}): ${authz.error}`);
-          res.writeHead(authz.code, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: authz.error }));
-          return;
-        }
-
         const { chatId, text } = JSON.parse(body);
         if (!chatId || !text) throw new Error('chatId and text are required');
 
