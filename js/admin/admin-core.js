@@ -14,7 +14,22 @@ let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = fal
 let AI_CONFIG = { groqApiKey: '', model: 'llama-3.1-8b-instant', enabled: false, loaded: false };
 
 function showToast(msg) { let t=document.getElementById('adm-toast'); if(!t){t=document.createElement('div');t.id='adm-toast';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 20px;border-radius:10px;font-size:0.85rem;z-index:999;';document.body.appendChild(t);} t.textContent=msg;t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(()=>t.style.opacity='0',2500); }
-function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+/* Delegates to the canonical escaper in src/shared/domUtils.js (single source
+   of truth for the escaping rules) with an identical inline fallback for the
+   brief window before the deferred ES module (window.PrepPathModules) loads.
+   Same pattern as escapeHtml() in js/core/ui-helpers.js. */
+function esc(s) {
+  const mods = window.PrepPathModules;
+  if (mods && mods.domUtils && typeof mods.domUtils.escapeHtml === 'function') {
+    return mods.domUtils.escapeHtml(s);
+  }
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 function fmtDate(ts) { try { const d = ts && ts.toDate ? ts.toDate() : (ts ? new Date(ts) : null); return d ? d.toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'; } catch(e){ return '—'; } }
 
 /* ══ AUTH ══ */
