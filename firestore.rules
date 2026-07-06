@@ -98,6 +98,52 @@ service cloud.firestore {
           // this to: p.get('status', 'pending') == 'pending'
     }
 
+    // ── Payment amount integrity (create) ────────────────
+    // SECURITY FIX: the old payment rule only enforced an amount CEILING
+    // (amount <= plan.price), so a client hitting the SDK directly could
+    // create a `pending` payment of ₹1 for any plan. These helpers add the
+    // matching FLOOR so the amount must be exactly right:
+    //   • no coupon → amount must equal the plan price exactly
+    //   • coupon    → amount must equal price − discount, where discount is
+    //                 bounded by the coupon's real percentOff (+1 for the
+    //                 client's Math.round slack), and the coupon must be live
+    //                 (enabled + not expired).
+    // Plans with a non-positive price fall back to the legacy amount>0 check
+    // so misconfigured / free plans keep working.
+    // NOTE: coupon single-use / per-user caps still can't be made atomic in
+    // rules (see the coupons match block) — hard guarantees need the
+    // Admin-SDK bot-server transaction.
+    function couponLivePayment(price) {
+      let d = request.resource.data;
+      let c = get(/databases/$(database)/documents/coupons/$(d.couponCode)).data;
+      return d.get('couponPercent', 0) is number
+          && d.couponPercent >= 1
+          && d.couponPercent <= 100
+          && d.couponPercent == c.get('percentOff', 0)
+          && c.get('enabled', true) == true
+          && (c.get('expiresAt', null) == null || c.expiresAt > request.time)
+          && d.get('discountAmount', 0) is number
+          && d.discountAmount >= 0
+          // discount may not exceed the coupon's % of price (+1 rounding slack)
+          && d.discountAmount <= (price * d.couponPercent) / 100 + 1
+          // final amount = price − discount, floored at 1 (matches the client's
+          // Math.max(1, ...) for ~100%-off coupons)
+          && (d.amount == price - d.discountAmount
+              || (price - d.discountAmount <= 1 && d.amount == 1));
+    }
+
+    function paymentAmountValid() {
+      let d = request.resource.data;
+      let price = get(/databases/$(database)/documents/plans/$(d.planId)).data.get('price', 0);
+      return price <= 0
+          ? d.amount > 0
+          : ( d.get('originalAmount', price) == price
+              && ( d.get('couponCode', null) == null
+                   ? (d.amount == price && d.get('discountAmount', 0) == 0)
+                   : ( exists(/databases/$(database)/documents/coupons/$(d.couponCode))
+                       && couponLivePayment(price) ) ) );
+    }
+
     // ════════════════════════════════════════════════════
     //  COLLECTIONS
     // ════════════════════════════════════════════════════
@@ -150,12 +196,10 @@ service cloud.firestore {
         && request.resource.data.keys().hasAll(['uid', 'planId', 'amount', 'status', 'createdAt'])
         // Verify the referenced plan actually exists
         && exists(/databases/$(database)/documents/plans/$(request.resource.data.planId))
-        // SECURITY FIX: amount may not exceed the plan's listed price
-        // (coupons can make it lower, never higher). Falls back to a no-op
-        // if the plan doc has no numeric 'price' field. For airtight
-        // price + coupon validation, move payment creation into a Cloud
-        // Function transaction.
-        && request.resource.data.amount <= get(/databases/$(database)/documents/plans/$(request.resource.data.planId)).data.get('price', request.resource.data.amount);
+        // SECURITY FIX: enforce the exact price FLOOR (not just a ceiling), so a
+        // hand-crafted ₹1 payment is rejected. amount must equal the plan price,
+        // or price − a coupon-bounded discount. See paymentAmountValid() above.
+        && paymentAmountValid();
 
       allow read:   if isLoggedIn()
         && (resource.data.uid == request.auth.uid || isAdmin());
@@ -181,7 +225,19 @@ service cloud.firestore {
         || ( isLoggedIn()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount'])
           && request.resource.data.usedCount is number
-          && request.resource.data.usedCount == resource.data.get('usedCount', 0) + 1 );
+          && request.resource.data.usedCount == resource.data.get('usedCount', 0) + 1
+          // SECURITY FIX: only a LIVE coupon may be incremented, and never
+          // past maxUses. This blocks griefing (burning a disabled/expired
+          // coupon toward its cap) and bounds the residual increment race so
+          // usedCount can't exceed maxUses. maxUses == 0 (or absent) means
+          // unlimited, matching the client's `if (c.maxUses && ...)` check.
+          // The read-then-write race itself still can't be serialised in
+          // rules — hard single-use needs the Admin-SDK bot transaction.
+          && resource.data.get('enabled', true) == true
+          && ( resource.data.get('expiresAt', null) == null
+               || resource.data.expiresAt > request.time )
+          && ( resource.data.get('maxUses', 0) == 0
+               || request.resource.data.usedCount <= resource.data.maxUses ) );
     }
 
     // ── Coupon redemptions (audit log) ───────────────────
@@ -205,8 +261,12 @@ service cloud.firestore {
         // Ensure the coupon code actually exists...
         && exists(/databases/$(database)/documents/coupons/$(request.resource.data.couponCode))
         // SECURITY FIX: ...and is not disabled (defaults to enabled when the
-        // field is absent, matching existing coupon docs).
-        && get(/databases/$(database)/documents/coupons/$(request.resource.data.couponCode)).data.get('enabled', true) == true;
+        // field is absent, matching existing coupon docs)...
+        && get(/databases/$(database)/documents/coupons/$(request.resource.data.couponCode)).data.get('enabled', true) == true
+        // ...and is not past its expiry (expiresAt is a Timestamp, so unlike
+        // date strings it IS comparable to request.time inside rules).
+        && ( get(/databases/$(database)/documents/coupons/$(request.resource.data.couponCode)).data.get('expiresAt', null) == null
+             || get(/databases/$(database)/documents/coupons/$(request.resource.data.couponCode)).data.expiresAt > request.time );
 
       allow read:   if isLoggedIn()
         && (resource.data.uid == request.auth.uid || isAdmin());
