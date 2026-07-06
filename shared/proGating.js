@@ -3,8 +3,9 @@
  * ─────────────────────────────────────────────────────────────────────────────
  * Single source of truth for "is this user allowed Pro features?" on the
  * SERVER side. Required by:
- *   - bot/bot-server.js            (gates AI auto-schedule via Telegram)
- *   - scripts/send-telegram.js     (gates the daily Telegram digest)
+ *   - bot/bot-server.js                (gates AI auto-schedule via Telegram)
+ *   - scripts/send-telegram.js         (gates the daily morning Telegram digest)
+ *   - scripts/send-telegram-evening.js (gates the evening incomplete-tasks check-in)
  *
  * This MUST stay behaviourally in sync with the CLIENT-side gate:
  *   - js/features/preppath-phase4-gating.js  → ezIsPro()

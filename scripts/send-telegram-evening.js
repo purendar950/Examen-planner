@@ -1,19 +1,26 @@
 /*
- * PrepPath — Daily Telegram study-plan sender
+ * PrepPath — Evening Telegram "incomplete tasks" check-in
  * ─────────────────────────────────────────────────────────────────────────────
- * Runs in GitHub Actions (see .github/workflows/daily-telegram.yml).
+ * Runs in GitHub Actions (see .github/workflows/evening-telegram.yml).
+ * Companion to scripts/send-telegram.js (the morning digest) — this one fires
+ * later in the day and tells each user what's STILL not done today: incomplete
+ * To-Do tasks and pending videos. Shares its date math, Telegram send helper,
+ * and task/video extraction with the morning script via ./telegram-lib.js so
+ * the two stay behaviourally consistent.
  *
  * For every user who has:
  *   - appState.telegram.enabled  = true
  *   - appState.telegram.chatId   = a numeric Telegram chat ID
- * it reads their precomputed digest for today and sends it via Telegram Bot API.
+ *   - (Pro or admin — same gate as the morning digest)
+ * it looks at today's tasks and sends whatever is still incomplete.
  *
- * Required GitHub secrets:
+ * If a user has nothing tracked for today at all (no tasks, nothing done),
+ * we skip them rather than send an empty "nothing to report" message every
+ * evening — see the `noContent` branch in main().
+ *
+ * Required GitHub secrets (same two as the morning script):
  *   TELEGRAM_BOT_TOKEN        – from @BotFather
  *   FIREBASE_SERVICE_ACCOUNT  – full service-account JSON (one line or pretty-printed)
- *
- * The digest is built in the browser (buildTelegramDigest in app.html) and
- * stored at Firestore: users/{uid}.appState.telegram.digest = { 'YYYY-MM-DD': text }
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -22,8 +29,8 @@ const { isProUser } = require('../shared/proGating');
 const {
   todayIST, istMinutesNow, istClockNow,
   sendTelegramMessage: _sendTelegramMessage,
-  fmtDM, shiftDate, escHtml, rolloverLabel, capLines,
-  scheduledCourseVideos, buildTaskSections,
+  fmtDM, escHtml, capLines,
+  buildTaskSections,
 } = require('./telegram-lib');
 
 /* ── 1. Validate secrets ────────────────────────────────────────────────── */
@@ -52,90 +59,76 @@ console.log(`✅ Firebase project: ${svc.project_id}`);
 admin.initializeApp({ credential: admin.credential.cert(svc) });
 const db = admin.firestore();
 
-/* ── 3. Helpers ─────────────────────────────────────────────────────────── */
-/* Date/IST-time helpers, buildTaskSections, and the Telegram send helper now
-   live in ./telegram-lib.js (shared with send-telegram-evening.js) — see that
-   file's header comment. Nothing below was changed, just moved. */
-
-/** Send a message via Telegram Bot API. Throws on API error. Thin wrapper so
- *  the rest of this file can keep calling sendTelegramMessage(chatId, text). */
+/** Send a message via Telegram Bot API. Throws on API error. */
 function sendTelegramMessage(chatId, text) {
   return _sendTelegramMessage(BOT_TOKEN, chatId, text);
 }
 
 /* ── Pro check ──────────────────────────────────────────────────────────────
-   Delegated to shared/proGating.js — the single source of truth for
-   server-side Pro/trial gating, also used by bot/bot-server.js. Auto
-   Telegram delivery is a Pro feature, so the cron must not send to free
-   users even if their appState.telegram.enabled is somehow true (stale
-   data, expired plan, etc.). Must stay behaviourally in sync with the web
-   app's ezIsPro() (js/features/preppath-phase4-gating.js) — see the
-   comment in that file. */
+   Same gate as the morning digest (shared/proGating.js) — the evening
+   check-in is part of the same Pro Telegram feature, not a separate one. */
 
-/* ── 4. Main ────────────────────────────────────────────────────────────── */
-
-/* Assemble the full per-user message: Study Topics + To-Do + Videos. */
-function buildMessage(name, appState, topicDigest, today) {
-  const header = `☀️ <b>Good morning, ${escHtml(name)}!</b>\n📅 Aaj ka plan (${fmtDM(today)})\n`;
-  const sections = [];
-
-  if (topicDigest && topicDigest.trim()) {
-    sections.push('▪ <b>Study Topics</b>\n' + topicDigest.trim());
-  }
-
+/* Assemble the evening message: what's still not done today.
+   Returns { text, hasContent } — hasContent is false when there is truly
+   nothing to say (no tasks tracked today, nothing done either), so main()
+   can skip sending rather than nag an empty message every evening. */
+function buildEveningMessage(name, appState, today) {
+  const header = `🌙 <b>Evening check-in, ${escHtml(name)}!</b>\n📅 ${fmtDM(today)} — kya baaki hai?\n`;
   const { todoLines, videoItems, doneCount } = buildTaskSections(appState, today);
+  const pending = todoLines.length > 0 || videoItems.length > 0;
 
-  if (todoLines.length) {
-    let block = '✓ <b>To-Do</b>\n' + capLines(todoLines, 12);
-    if (doneCount) block += `\n✅ ${doneCount} done`;
-    sections.push(block);
-  } else if (doneCount) {
-    sections.push(`✓ <b>To-Do</b>\n✅ Sab ${doneCount} tasks done — shabash! 🎉`);
+  if (!pending && doneCount === 0) {
+    /* Nothing tracked for today at all — nothing meaningful to report. */
+    return { text: '', hasContent: false };
   }
 
+  const sections = [];
+  if (todoLines.length) {
+    sections.push('⏳ <b>Still pending</b>\n' + capLines(todoLines, 12));
+  }
   if (videoItems.length) {
     const vlines = videoItems.map(v => `▶ <a href="${v.url}">${escHtml(v.title)}</a>`);
-    sections.push('🎥 <b>Videos</b>\n' + capLines(vlines, 10));
+    sections.push('🎥 <b>Videos still pending</b>\n' + capLines(vlines, 10));
+  }
+  if (!pending) {
+    /* Everything that was tracked today is done. */
+    sections.push(`✅ Sab ${doneCount} tasks done for today — shabash! 🎉`);
+  } else if (doneCount) {
+    sections.push(`✅ ${doneCount} already done today`);
   }
 
   const footer = '\n\n— <a href="https://examzen.in">StudyPlanner</a>';
-  const hasContent = sections.length > 0;
-  const body = hasContent
-    ? sections.join('\n\n')
-    : '📋 Aaj koi topic/task scheduled nahi.\n💡 App kholo → Planner mein add karo → Save karo.';
-  return { text: header + '\n' + body + footer, hasContent };
+  return { text: header + '\n' + sections.join('\n\n') + footer, hasContent: true };
 }
 
 async function main() {
   const today = todayIST();
   const eventName = process.env.GITHUB_EVENT_NAME || '';
-  /* "Force" = a MANUAL "Run workflow" (gated input false) → send immediately.
-     Scheduled runs AND external-cron dispatches (gated=true) respect the
-     admin-set time gate below, so the external cron can safely ping every few
-     minutes without sending more than once per day. */
+  /* Same "gated" pattern as the morning script: a plain manual run sends
+     immediately; scheduled runs and gated=true external-cron dispatches
+     respect the admin-set evening time + once-per-day guard below. */
   const gated = process.env.GATED === 'true';
   const forced = (eventName === 'workflow_dispatch') && !gated;
 
   /* ── Schedule gate ───────────────────────────────────────────────────────
-     The workflow runs every 30 min. The admin sets the daily send time in
-     config/telegram.sendTime ("HH:MM", IST, default 06:00). We send on the
-     FIRST run at/after that time each day and record config/telegram.lastSentDate
-     so we never send twice. A manual workflow_dispatch run bypasses the gate. */
+     Separate from the morning gate: config/telegram.eveningSendTime ("HH:MM",
+     IST, default 20:00) and config/telegram.lastEveningSentDate, so the
+     morning and evening sends never interfere with each other's guard. */
   let cfg = {};
   try {
     const cfgSnap = await db.collection('config').doc('telegram').get();
     cfg = cfgSnap.exists ? (cfgSnap.data() || {}) : {};
   } catch (e) { console.warn('⚠️  Could not read config/telegram:', e.message); }
 
-  const sendTime = /^\d{1,2}:\d{2}$/.test(cfg.sendTime) ? cfg.sendTime : '06:00';
+  const sendTime = /^\d{1,2}:\d{2}$/.test(cfg.eveningSendTime) ? cfg.eveningSendTime : '20:00';
   const [sh, sm] = sendTime.split(':').map(n => parseInt(n, 10));
   const targetMin = (sh * 60) + sm;
 
   if (forced) {
     console.log('🚀 Manual run (workflow_dispatch) — bypassing schedule gate.');
   } else {
-    if (cfg.lastSentDate === today) {
-      console.log(`⏭  Already auto-sent today (${today}). Nothing to do.`);
+    if (cfg.lastEveningSentDate === today) {
+      console.log(`⏭  Already auto-sent this evening (${today}). Nothing to do.`);
       return;
     }
     if (istMinutesNow() < targetMin) {
@@ -145,56 +138,47 @@ async function main() {
     console.log(`✅ Send window reached (now ${istClockNow()} IST ≥ ${sendTime} IST).`);
   }
 
-  /* Claim today's slot BEFORE sending so an overlapping/next 30-min run can't
-     double-send. A manual re-run (workflow_dispatch) ignores lastSentDate, so
-     the admin can always force a resend. */
+  /* Claim today's evening slot BEFORE sending so an overlapping/next run
+     can't double-send. A manual re-run (workflow_dispatch) ignores the
+     guard, so the admin can always force a resend. */
   try {
     await db.collection('config').doc('telegram').set(
-      { lastSentDate: today, lastRunAt: admin.firestore.FieldValue.serverTimestamp() },
+      { lastEveningSentDate: today, lastEveningRunAt: admin.firestore.FieldValue.serverTimestamp() },
       { merge: true }
     );
-  } catch (e) { console.warn('⚠️  Could not record lastSentDate:', e.message); }
+  } catch (e) { console.warn('⚠️  Could not record lastEveningSentDate:', e.message); }
 
-  console.log(`📅 Sending plans for ${today}`);
+  console.log(`📅 Sending evening check-ins for ${today}`);
 
   const snap = await db.collection('users').get();
   console.log(`👥 Total users in Firestore: ${snap.size}`);
 
   const adminSnap = await db.collection('admins').get();
   const adminUids = new Set(adminSnap.docs.map(d => d.id));
-  console.log(`🛡️  Admins (always treated as Pro): ${adminUids.size}`);
 
-  let sent = 0, skipped = 0, skippedFree = 0, failed = 0, noDigest = 0;
+  let sent = 0, skipped = 0, skippedFree = 0, failed = 0, noContent = 0;
 
   for (const doc of snap.docs) {
     const data = doc.data() || {};
     const tg   = (data.appState && data.appState.telegram) || {};
 
-    /* Skip users who haven't connected Telegram */
     if (!tg.enabled || !tg.chatId) {
       skipped++;
       continue;
     }
 
-    /* Pro-only feature — skip free users even if enabled/chatId are set */
     if (!adminUids.has(doc.id) && !isProUser(data, today)) {
       skippedFree++;
-      console.log(`  💎 Skipped (not Pro) → ${doc.id} chat:${tg.chatId}`);
       continue;
     }
 
-    /* Read today's digest entry (study topics + revisions, browser-built) and
-       assemble the full message (topics + to-do + videos) at send time so the
-       to-do list, videos, and rolled-over items are always accurate. */
-    const digest = tg.digest || {};
-    const plan   = digest[today];
     const aState = data.appState || {};
     const name   = (data.profile && data.profile.name)
                     ? data.profile.name.split(' ')[0]
                     : 'there';
 
-    const built = buildMessage(name, aState, plan, today);
-    if (!built.hasContent) noDigest++;
+    const built = buildEveningMessage(name, aState, today);
+    if (!built.hasContent) { noContent++; continue; } /* nothing tracked today — don't nag */
 
     try {
       await sendTelegramMessage(tg.chatId, built.text);
@@ -212,11 +196,8 @@ async function main() {
   }
 
   console.log('\n─────────────────────────────');
-  console.log(`Done. Sent=${sent}  Skipped=${skipped}  SkippedFree=${skippedFree}  Failed=${failed}  NoDigest=${noDigest}`);
+  console.log(`Done. Sent=${sent}  Skipped=${skipped}  SkippedFree=${skippedFree}  Failed=${failed}  NoContent=${noContent}`);
 
-  if (noDigest > 0) {
-    console.log(`ℹ️  ${noDigest} user(s) got fallback message — they haven't set up a study plan yet.`);
-  }
   if (failed > 0) {
     console.log('⚠️  Some sends failed — check the error lines above.');
     process.exit(1); // Make the Actions step red so you notice

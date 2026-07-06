@@ -510,6 +510,28 @@ async function saveTgSendTime() {
   } catch(e) { showToast('Failed: ' + e.message); }
 }
 
+/* Save the evening "incomplete tasks" check-in time (IST) to Firestore.
+   Mirrors saveTgSendTime() above but writes eveningSendTime — a SEPARATE
+   field, read by scripts/send-telegram-evening.js, so the morning digest
+   and evening check-in gates never interfere with each other. */
+async function saveTgEveningSendTime() {
+  const el = document.getElementById('tg-eveningsendtime-input');
+  if (!el) return;
+  const t = (el.value || '').trim();
+  if (!/^\d{2}:\d{2}$/.test(t)) { showToast('⚠️ Valid time chahiye (HH:MM)'); return; }
+  const [h, m] = t.split(':').map(n => parseInt(n, 10));
+  if (h > 23 || m > 59) { showToast('⚠️ Invalid time (00:00–23:59)'); return; }
+  try {
+    await db.collection('config').doc('telegram').set({
+      eveningSendTime: t, eveningSendHour: h, eveningSendMinute: m,
+      eveningSendTimeUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    TG_CONFIG.eveningSendTime = t; TG_CONFIG.eveningSendHour = h; TG_CONFIG.eveningSendMinute = m;
+    showToast('✅ Evening check-in time set to ' + t + ' IST');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
 /* ── AI auto-schedule (Groq) config ─────────────────────────────────────────
    Saves the Groq API key + chosen model + on/off flag to Firestore config/ai.
    The Telegram bot server reads this doc to parse incoming user messages into
@@ -732,6 +754,17 @@ function renderTelegram() {
         '⏰ GitHub Actions har <b>~15 min</b> chalta hai aur set time ke baad pehle run pe sabhi enabled users ko bhejta hai (free, automatic, din mein ek hi baar). ' +
         'Abhi set: <b>' + esc(TG_CONFIG.sendTime || '06:00') + ' IST</b>' +
         (TG_CONFIG.lastSentDate ? ' · last auto-sent: <b>' + esc(TG_CONFIG.lastSentDate) + '</b>' : '') +
+      '</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;">' +
+        '<span style="font-size:.82rem;font-weight:700;">🌙 Evening check-in time (IST):</span>' +
+        '<input id="tg-eveningsendtime-input" type="time" value="' + esc(TG_CONFIG.eveningSendTime || '20:00') + '" ' +
+          'style="font-size:.85rem;padding:5px 8px;border:1px solid var(--border);border-radius:8px;">' +
+        '<button class="btn btn-blue" onclick="saveTgEveningSendTime()">💾 Save Time</button>' +
+      '</div>' +
+      '<div class="muted" style="font-size:.72rem;margin-top:8px;line-height:1.6;">' +
+        '🌙 Alag workflow (evening-telegram.yml): har user ko batata hai aaj ke kaunse tasks + videos abhi tak pending hain. Jinhone aaj kuch track nahi kiya unhe skip karta hai (no nag). ' +
+        'Abhi set: <b>' + esc(TG_CONFIG.eveningSendTime || '20:00') + ' IST</b>' +
+        (TG_CONFIG.lastEveningSentDate ? ' · last auto-sent: <b>' + esc(TG_CONFIG.lastEveningSentDate) + '</b>' : '') +
       '</div>' +
     '</div>' +
     '</div>';
