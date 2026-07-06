@@ -10,12 +10,15 @@
 <link rel="stylesheet" href="css/app.css?v=20260705e">
 
 <!-- ═══════════════════════════════════════════════════════════
-     FIREBASE SDK — Must load in <head> before any inline scripts
+     FIREBASE SDK — deferred so it downloads in parallel during HTML
+     parsing without blocking render. `defer` preserves execution order,
+     and all app scripts below are also deferred, so firebase.* globals
+     are guaranteed ready before firebase.js / auth.js run.
      ═══════════════════════════════════════════════════════════ -->
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 </head>
 <body>
 
@@ -374,74 +377,83 @@
      global handler functions, and the switchPage/switchExam/updateDashboard
      monkey-patch layering that later files rely on.
      ═══════════════════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════════════════
+     Every script below uses `defer`: the browser downloads them in
+     parallel while parsing the HTML (no render blocking) and then runs
+     them in document order, right before DOMContentLoaded. This keeps
+     the strict core → data → tabs → features ordering these files rely
+     on, while removing the ~1MB of blocking, sequential fetches that
+     previously stalled first render on slow mobile connections.
+     src/main.js is a module and is deferred by the browser by default.
+     ═══════════════════════════════════════════════════════════════ -->
 <!-- HTML partial loader — MUST run first so tab markup exists before app code -->
-<script src="js/core/include-loader.js"></script>
-<script src="js/core/firebase-config.js"></script>
+<script defer src="js/core/include-loader.js"></script>
+<script defer src="js/core/firebase-config.js"></script>
 <script type="module" src="src/main.js"></script>
 <!-- core + shared -->
-<script src="js/core/firebase.js"></script>
+<script defer src="js/core/firebase.js"></script>
 <!-- exams.js split into one file per exam + an index assembler (see
      js/data/exams/index.js header comment) — index.js MUST load last. -->
-<script src="js/data/exams/cgl.js"></script>
-<script src="js/data/exams/ntpc.js"></script>
-<script src="js/data/exams/gd.js"></script>
-<script src="js/data/exams/ibps.js"></script>
-<script src="js/data/exams/upsc.js"></script>
-<script src="js/data/exams/uppcs.js"></script>
-<script src="js/data/exams/bpsc.js"></script>
-<script src="js/data/exams/index.js"></script>
-<script src="js/data/syllabus-data.js"></script>
-<script src="js/core/state.js"></script>
-<script src="js/core/ui-helpers.js"></script>
-<script src="js/core/auth.js"></script>
-<script src="js/core/persistence.js"></script>
-<script src="js/features/telegram.js"></script>
-<script src="js/core/app-init.js"></script>
-<script src="js/core/navigation.js"></script>
-<script src="js/features/countdown.js"></script>
+<script defer src="js/data/exams/cgl.js"></script>
+<script defer src="js/data/exams/ntpc.js"></script>
+<script defer src="js/data/exams/gd.js"></script>
+<script defer src="js/data/exams/ibps.js"></script>
+<script defer src="js/data/exams/upsc.js"></script>
+<script defer src="js/data/exams/uppcs.js"></script>
+<script defer src="js/data/exams/bpsc.js"></script>
+<script defer src="js/data/exams/index.js"></script>
+<script defer src="js/data/syllabus-data.js"></script>
+<script defer src="js/core/state.js"></script>
+<script defer src="js/core/ui-helpers.js"></script>
+<script defer src="js/core/auth.js"></script>
+<script defer src="js/core/persistence.js"></script>
+<script defer src="js/features/telegram.js"></script>
+<script defer src="js/core/app-init.js"></script>
+<script defer src="js/core/navigation.js"></script>
+<script defer src="js/features/countdown.js"></script>
 <!-- tabs -->
-<script src="js/tabs/dashboard.js"></script>
-<script src="js/tabs/syllabus.js"></script>
+<script defer src="js/tabs/dashboard.js"></script>
+<script defer src="js/tabs/syllabus.js"></script>
 <!-- planner.js split into 8 cohesive modules (see js/tabs/planner-calendar.js
      header comment) — load order matches original internal section order. -->
-<script src="js/tabs/planner-calendar.js?v=20260705c"></script>
-<script src="js/tabs/planner-schedule.js?v=20260624c"></script>
-<script src="js/tabs/planner-day-view.js?v=20260705e"></script>
-<script src="js/tabs/planner-habits.js?v=20260703a"></script>
-<script src="js/tabs/planner-rollover.js?v=20260703a"></script>
-<script src="js/tabs/planner-tasks-kanban.js?v=20260705c"></script>
-<script src="js/tabs/planner-timer.js?v=20260705e"></script>
-<script src="js/tabs/planner-focus-timer.js?v=20260705d"></script>
-<script src="js/tabs/planner-pomodoro.js?v=20260705d"></script>
-<script src="js/tabs/planner-timer-extras.js?v=20260705e"></script>
-<script src="js/tabs/planner-scheduled-videos.js?v=20260624c"></script>
-<script src="js/tabs/planner-ai-insights.js?v=20260624c"></script>
-<script src="js/tabs/planner-generator.js"></script>
-<script src="js/tabs/plan-wizard.js?v=20260705c"></script>
-<script src="js/core/exam-switch.js"></script>
-<script src="js/tabs/revision.js?v=20260626a"></script>
-<script src="js/features/streak.js"></script>
+<script defer src="js/tabs/planner-calendar.js?v=20260705c"></script>
+<script defer src="js/tabs/planner-schedule.js?v=20260624c"></script>
+<script defer src="js/tabs/planner-day-view.js?v=20260705e"></script>
+<script defer src="js/tabs/planner-habits.js?v=20260703a"></script>
+<script defer src="js/tabs/planner-rollover.js?v=20260703a"></script>
+<script defer src="js/tabs/planner-tasks-kanban.js?v=20260705c"></script>
+<script defer src="js/tabs/planner-timer.js?v=20260705e"></script>
+<script defer src="js/tabs/planner-focus-timer.js?v=20260705d"></script>
+<script defer src="js/tabs/planner-pomodoro.js?v=20260705d"></script>
+<script defer src="js/tabs/planner-timer-extras.js?v=20260705e"></script>
+<script defer src="js/tabs/planner-scheduled-videos.js?v=20260624c"></script>
+<script defer src="js/tabs/planner-ai-insights.js?v=20260624c"></script>
+<script defer src="js/tabs/planner-generator.js"></script>
+<script defer src="js/tabs/plan-wizard.js?v=20260705c"></script>
+<script defer src="js/core/exam-switch.js"></script>
+<script defer src="js/tabs/revision.js?v=20260626a"></script>
+<script defer src="js/features/streak.js"></script>
 <!-- Bump the ?v= number whenever youtube.js / playlist-organiser.js change,
      so returning browsers fetch the new file instead of a cached copy. -->
-<script src="js/tabs/youtube.js?v=20260703a"></script>
-<script src="js/tabs/playlist-organiser.js?v=20260624b"></script>
-<script src="js/features/yt-screenshots.js?v=20260626c"></script>
-<script src="js/tabs/mock-tests.js?v=20260703b"></script>
-<script src="js/tabs/analysis.js?v=20260626j"></script>
-<script src="js/tabs/profile.js"></script>
-<script src="js/tabs/groups.js"></script>
+<script defer src="js/tabs/youtube.js?v=20260703a"></script>
+<script defer src="js/tabs/playlist-organiser.js?v=20260624b"></script>
+<script defer src="js/features/yt-screenshots.js?v=20260626c"></script>
+<script defer src="js/tabs/mock-tests.js?v=20260703b"></script>
+<script defer src="js/tabs/analysis.js?v=20260626j"></script>
+<script defer src="js/tabs/profile.js"></script>
+<script defer src="js/tabs/groups.js"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
-<script src="js/features/responsive.js"></script>
-<script src="js/features/preppath-branding.js"></script>
-<script src="js/features/registration.js"></script>
-<script src="js/features/preppath-phase2-plans.js"></script>
-<script src="js/features/preppath-phase3-referral.js"></script>
-<script src="js/features/preppath-phase4-gating.js"></script>
-<script src="js/features/preppath-phase5-trial.js"></script>
-<script src="js/core/theme.js"></script>
-<!-- YouTube IFrame API -->
-<script src="https://www.youtube.com/iframe_api"></script>
-<script src="js/planner-enhance.js"></script>
+<script defer src="js/features/responsive.js"></script>
+<script defer src="js/features/preppath-branding.js"></script>
+<script defer src="js/features/registration.js"></script>
+<script defer src="js/features/preppath-phase2-plans.js"></script>
+<script defer src="js/features/preppath-phase3-referral.js"></script>
+<script defer src="js/features/preppath-phase4-gating.js"></script>
+<script defer src="js/features/preppath-phase5-trial.js"></script>
+<script defer src="js/core/theme.js"></script>
+<!-- YouTube IFrame API — deferred; onYouTubeIframeAPIReady fires after load -->
+<script defer src="https://www.youtube.com/iframe_api"></script>
+<script defer src="js/planner-enhance.js"></script>
 
 <!-- ═══ PLAN WIZARD (3-step modal) ═══ -->
 <div class="plan-wizard-overlay" id="plan-wizard-overlay" onclick="planWizardOutsideClose(event)">
