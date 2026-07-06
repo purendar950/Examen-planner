@@ -183,5 +183,5 @@ function renderCompletedTopicsCard() {
       <span style="background:var(--accent-dim);color:var(--accent);border-radius:99px;padding:2px 10px;font-size:.68rem;font-weight:700;">${list.length}</span>
       <span style="margin-left:auto;color:var(--muted);font-size:.8rem;display:inline-block;transition:transform .2s;transform:rotate(${_plannerCompletedOpen?'180':'0'}deg);">▾</span>
     </div>
-    ${rows}`;
+    ${_plannerCompletedOpen ? `<div style="max-height:220px;overflow-y:auto;-webkit-overflow-scrolling:touch;">${rows}</div>` : ''}`;
 }
