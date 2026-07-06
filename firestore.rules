@@ -237,6 +237,7 @@ service cloud.firestore {
           && ( resource.data.get('expiresAt', null) == null
                || resource.data.expiresAt > request.time )
           && ( resource.data.get('maxUses', 0) == 0
+               || resource.data.get('maxUses', 0) == null
                || request.resource.data.usedCount <= resource.data.maxUses ) );
     }
 
