@@ -147,7 +147,22 @@
   function toast(m, t) { try { showToast(m, t); } catch (e) {} }
   function fbReady() { return typeof _fbReady !== 'undefined' && _fbReady && typeof db !== 'undefined' && db; }
   function me() { return (typeof currentUser !== 'undefined' && currentUser) ? currentUser : null; }
-  function clean(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  /* Delegates to the canonical escaper in src/shared/domUtils.js (single source
+     of truth for the escaping rules) with an identical inline fallback for the
+     brief window before the deferred ES module (window.PrepPathModules) loads.
+     Same pattern as escapeHtml() in js/core/ui-helpers.js. */
+  function clean(s) {
+    var mods = window.PrepPathModules;
+    if (mods && mods.domUtils && typeof mods.domUtils.escapeHtml === 'function') {
+      return mods.domUtils.escapeHtml(s);
+    }
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   /* ── week helpers (local time) ── */
   function fmtLocal(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
