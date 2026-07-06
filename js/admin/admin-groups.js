@@ -1,7 +1,8 @@
 /* PrepPath Admin — GROUPS: study-group management tab.
    Self-injecting: adds its own tab button and hooks render(), so
-   admin.html only needs the <script> tag. Loads after admin-actions.js
-   (uses db, esc, fmtDate, showToast, adminLog, setTab/TAB, render). */
+   admin.html only needs the <script> tag. Loads last, after the admin-*
+   action files (uses db, esc, fmtDate, showToast, adminLog [admin-users.js],
+   setTab/TAB, render). */
 (function () {
 
   var ADM_GROUPS = [];
