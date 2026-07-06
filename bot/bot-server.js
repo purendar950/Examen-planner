@@ -39,6 +39,7 @@ if (!TOKEN) {
 
 /* ── Firebase Admin (optional but required for AI auto-scheduling) ─────────── */
 let db = null;
+let fbAdmin = null; // module-level ref so the /send route can verify ID tokens
 try {
   const admin = require('firebase-admin');
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT || '';
@@ -47,6 +48,7 @@ try {
     if (svc.project_id && svc.private_key) {
       admin.initializeApp({ credential: admin.credential.cert(svc) });
       db = admin.firestore();
+      fbAdmin = admin;
       global._fbAdmin = admin; // for FieldValue
       console.log(`✅ Firebase Admin ready (project: ${svc.project_id}) — AI auto-schedule enabled`);
     } else {
@@ -448,12 +450,43 @@ bot.on('polling_error', (err) => {
    ════════════════════════════════════════════════════════════════════════════ */
 const PORT = process.env.PORT || 3000;
 
+/* ── Admin auth for /send ────────────────────────────────────────────────────
+   The /send proxy relays arbitrary messages through the bot token, so it must
+   be admin-only (previously it was open to the whole internet). We verify the
+   caller's Firebase ID token — sent by the admin panel as
+   `Authorization: Bearer <idToken>` — and confirm an admins/{uid} doc exists,
+   the same check admin-core.js runs client-side. Fails CLOSED: if Firebase
+   Admin isn't configured we can't verify anyone, so we refuse rather than relay.
+   (The daily cron in scripts/send-telegram.js talks to Telegram directly and
+   never touches /send, so it is unaffected.) */
+async function verifyAdmin(req) {
+  if (!fbAdmin || !db) {
+    return { ok: false, code: 503, error: 'Auth unavailable: server is missing FIREBASE_SERVICE_ACCOUNT' };
+  }
+  const hdr = req.headers['authorization'] || '';
+  const m = /^Bearer\s+(.+)$/i.exec(hdr.trim());
+  if (!m) return { ok: false, code: 401, error: 'Missing admin credentials' };
+  let decoded;
+  try {
+    decoded = await fbAdmin.auth().verifyIdToken(m[1]);
+  } catch (e) {
+    return { ok: false, code: 401, error: 'Invalid or expired admin token' };
+  }
+  try {
+    const adminDoc = await db.collection('admins').doc(decoded.uid).get();
+    if (!adminDoc.exists) return { ok: false, code: 403, error: 'Not an admin account' };
+  } catch (e) {
+    return { ok: false, code: 403, error: 'Could not verify admin access' };
+  }
+  return { ok: true, uid: decoded.uid };
+}
+
 const server = http.createServer((req, res) => {
 
   /* CORS headers — allow admin.html on GitHub Pages to call this */
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   /* Preflight */
   if (req.method === 'OPTIONS') {
@@ -475,6 +508,15 @@ const server = http.createServer((req, res) => {
     req.on('data', chunk => { body += chunk; });
     req.on('end', async () => {
       try {
+        /* Admin-only: reject anyone without a valid admin ID token */
+        const authz = await verifyAdmin(req);
+        if (!authz.ok) {
+          console.warn(`🚫 /send rejected (${authz.code}): ${authz.error}`);
+          res.writeHead(authz.code, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: authz.error }));
+          return;
+        }
+
         const { chatId, text } = JSON.parse(body);
         if (!chatId || !text) throw new Error('chatId and text are required');
 
