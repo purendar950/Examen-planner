@@ -1,79 +1,16 @@
 /* ══════════════════════════════════════════════
-   MOCK TEST ANALYSIS — manual marks entry + analytics
-   Per exam + per tier/stage, synced via appState.mocks
-══════════════════════════════════════════════ */
-const MOCK_EXAMS = {
-  cgl: { tiers: {
-    t1: { label:'Tier I', neg:0.5, perQ:2, sections:[
-      {k:'gi', name:'General Intelligence & Reasoning', q:25, max:50},
-      {k:'ga', name:'General Awareness',                q:25, max:50},
-      {k:'qa', name:'Quantitative Aptitude',            q:25, max:50},
-      {k:'en', name:'English Comprehension',            q:25, max:50}
-    ]},
-    t2: { label:'Tier II (Paper I)', neg:1, perQ:3, sections:[
-      {k:'ma', name:'Mathematical Abilities',           q:30, max:90},
-      {k:'re', name:'Reasoning & General Intelligence', q:30, max:90},
-      {k:'en', name:'English Language & Comprehension', q:45, max:135},
-      {k:'ga', name:'General Awareness',                q:25, max:75},
-      {k:'ck', name:'Computer Knowledge',               q:20, max:60}
-    ]}
-  }},
-  ntpc: { tiers: {
-    cbt1: { label:'CBT 1', neg:1/3, perQ:1, sections:[
-      {k:'ma', name:'Mathematics',                      q:30, max:30},
-      {k:'gi', name:'General Intelligence & Reasoning', q:30, max:30},
-      {k:'ga', name:'General Awareness',                q:40, max:40}
-    ]},
-    cbt2: { label:'CBT 2', neg:1/3, perQ:1, sections:[
-      {k:'ma', name:'Mathematics',                      q:35, max:35},
-      {k:'gi', name:'General Intelligence & Reasoning', q:35, max:35},
-      {k:'ga', name:'General Awareness',                q:50, max:50}
-    ]}
-  }},
-  gd: { tiers: {
-    cbt: { label:'CBT', neg:0.5, perQ:2, sections:[
-      {k:'gi', name:'General Intelligence & Reasoning', q:20, max:40},
-      {k:'gk', name:'General Knowledge & Awareness',    q:20, max:40},
-      {k:'em', name:'Elementary Mathematics',           q:20, max:40},
-      {k:'eh', name:'English / Hindi',                  q:20, max:40}
-    ]}
-  }},
-  ibps: { tiers: {
-    pre: { label:'Prelims', neg:0.25, perQ:1, sections:[
-      {k:'en', name:'English Language',      q:30, max:30},
-      {k:'qa', name:'Quantitative Aptitude', q:35, max:35},
-      {k:'re', name:'Reasoning Ability',     q:35, max:35}
-    ]},
-    mains: { label:'Mains (Objective)', neg:0.25, perQ:null, sections:[
-      {k:'rc', name:'Reasoning & Computer Aptitude',         q:45, max:60},
-      {k:'ga', name:'General / Economy / Banking Awareness', q:40, max:40},
-      {k:'en', name:'English Language',                      q:35, max:40},
-      {k:'di', name:'Data Analysis & Interpretation',        q:35, max:60}
-    ]}
-  }},
-  upsc: { tiers: {
-    pre: { label:'Prelims', neg:0.66, perQ:2, note:'CSAT sirf qualifying hai — 66/200 (33%) chahiye. Merit GS Paper I se banta hai.', sections:[
-      {k:'gs',   name:'GS Paper I',                  q:100, max:200},
-      {k:'csat', name:'CSAT Paper II (Qualifying)',  q:80,  max:200, perQ:2.5, neg:0.83}
-    ]}
-  }},
-  uppcs: { tiers: {
-    pre: { label:'Prelims', neg:0.33, perQ:null, note:'CSAT sirf qualifying hai (min 33%). Merit GS Paper I se banta hai.', sections:[
-      {k:'gs',   name:'GS Paper I',                  q:150, max:200, perQ:200/150, neg:0.44},
-      {k:'csat', name:'CSAT Paper II (Qualifying)',  q:100, max:200, perQ:2,       neg:0.66}
-    ]}
-  }},
-  bpsc: { tiers: {
-    pre: { label:'Prelims', neg:1/3, perQ:1, sections:[
-      {k:'gs', name:'General Studies', q:150, max:150}
-    ]}
-  }}
-};
+   MOCK TEST ANALYSIS — RENDER + UI WIRING
+   Split from the original monolithic js/tabs/mock-tests.js into three cohesive
+   files (same pattern as the planner-*.js split):
+     • mock-tests-data.js    — config, chapter map, shared state, accessors
+     • mock-tests-scoring.js — marks calc, save/edit/delete, weak-topic tagging
+     • mock-tests-render.js  — (this file) HTML/SVG builders, page render,
+                               dashboard summary, one-time UI injection, and the
+                               switchPage/switchExam/updateDashboard hooks
 
-let mockTierSel = {};   // examId -> selected tier key
-let mockEditId  = null;
-let mockWeakSel = [];   // chapter ids tagged as weak in the add/edit form
-let mockSavedOpen = false; // Saved Mocks card collapsed by default
+   LOAD ORDER (see app.html): mock-tests-data.js → mock-tests-scoring.js →
+   mock-tests-render.js.
+══════════════════════════════════════════════ */
 
 function mockToggleSaved() {
   mockSavedOpen = !mockSavedOpen;
@@ -81,87 +18,6 @@ function mockToggleSaved() {
   const chev = document.getElementById('mock-saved-chevron');
   if (body) body.style.display = mockSavedOpen ? 'block' : 'none';
   if (chev) chev.style.transform = 'rotate(' + (mockSavedOpen ? '180' : '0') + 'deg)';
-}
-
-function mockExamCfg() { return MOCK_EXAMS[currentExam] || null; }
-
-function mockTierKey() {
-  const cfg = mockExamCfg(); if (!cfg) return null;
-  if (!mockTierSel[currentExam] || !cfg.tiers[mockTierSel[currentExam]]) {
-    mockTierSel[currentExam] = Object.keys(cfg.tiers)[0];
-  }
-  return mockTierSel[currentExam];
-}
-
-function mockList() {
-  if (!appState.mocks) appState.mocks = {};
-  if (!appState.mocks[currentExam]) appState.mocks[currentExam] = {};
-  const tk = mockTierKey();
-  if (!appState.mocks[currentExam][tk]) appState.mocks[currentExam][tk] = [];
-  return appState.mocks[currentExam][tk];
-}
-
-function mockSetTier(k) { mockTierSel[currentExam] = k; mockEditId = null; mockRenderPage(); }
-
-function mockAutoCalc(k) {
-  const tier = mockExamCfg().tiers[mockTierKey()];
-  const s = tier.sections.find(x => x.k === k); if (!s) return;
-  const c = parseFloat(document.getElementById('mock-c-' + k).value);
-  const w = parseFloat(document.getElementById('mock-w-' + k).value);
-  if (isNaN(c) && isNaN(w)) return;
-  const perQ = (s.perQ != null) ? s.perQ : (tier.perQ != null ? tier.perQ : (s.max / s.q));
-  const neg  = (s.neg  != null) ? s.neg  : tier.neg;
-  const marks = (isNaN(c) ? 0 : c) * perQ - (isNaN(w) ? 0 : w) * neg;
-  document.getElementById('mock-m-' + k).value = Math.round(marks * 100) / 100;
-}
-
-function mockSave() {
-  const cfg = mockExamCfg(); if (!cfg) return;
-  const tier = cfg.tiers[mockTierKey()];
-  const name = document.getElementById('mock-name').value.trim() || ('Mock ' + (mockList().length + 1));
-  const date = document.getElementById('mock-date').value || new Date().toISOString().slice(0, 10);
-  const s = {}; let total = 0;
-  for (const sec of tier.sections) {
-    const m = parseFloat(document.getElementById('mock-m-' + sec.k).value);
-    const c = parseFloat(document.getElementById('mock-c-' + sec.k).value);
-    const w = parseFloat(document.getElementById('mock-w-' + sec.k).value);
-    if (isNaN(m)) { showToast('"' + sec.name + '" ke marks bharo (ya Correct/Wrong se auto-calc hoga).', 'error'); return; }
-    if (m > sec.max) { showToast('"' + sec.name + '" ke max marks ' + sec.max + ' hain.', 'error'); return; }
-    if (!isNaN(c) && c > sec.q) { showToast('"' + sec.name + '" mein sirf ' + sec.q + ' questions hain.', 'error'); return; }
-    if (!isNaN(c) && !isNaN(w) && (c + w) > sec.q) { showToast('"' + sec.name + '": attempted (' + (c + w) + ') total questions (' + sec.q + ') se zyada nahi ho sakte.', 'error'); return; }
-    s[sec.k] = { m: Math.round(m * 100) / 100 };
-    if (!isNaN(c)) s[sec.k].c = c;
-    if (!isNaN(w)) s[sec.k].w = w;
-    total += m;
-  }
-  total = Math.round(total * 100) / 100;
-  const list = mockList();
-  if (mockEditId) {
-    const ex = list.find(x => x.id === mockEditId);
-    if (ex) { ex.name = name; ex.date = date; ex.s = s; ex.total = total; ex.weakTopics = mockWeakSel.slice(); }
-    mockEditId = null;
-    showToast('Mock updated! ✏️', 'success');
-  } else {
-    list.push({ id: Date.now().toString(), name, date, s, total, weakTopics: mockWeakSel.slice() });
-    showToast('Mock saved! Total: ' + total + ' 🎯', 'success');
-  }
-  saveProgress();
-  mockRenderPage();
-  mockUpdateDashSummary();
-}
-
-function mockEdit(id) { mockEditId = id; mockRenderPage(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
-function mockCancelEdit() { mockEditId = null; mockRenderPage(); }
-
-function mockDelete(id) {
-  if (!confirm('Is mock ko delete karein?')) return;
-  const tk = mockTierKey();
-  appState.mocks[currentExam][tk] = mockList().filter(m => m.id !== id);
-  if (mockEditId === id) mockEditId = null;
-  saveProgress();
-  mockRenderPage();
-  mockUpdateDashSummary();
-  showToast('Mock deleted.', 'info');
 }
 
 function mockTrendSvg(list, totalMax) {
@@ -185,62 +41,6 @@ function mockTrendSvg(list, totalMax) {
     (n > 1 ? '<polyline points="' + pts + '" fill="none" stroke="#00C896" stroke-width="2"></polyline>' : '') +
     dots +
     '</svg></div>';
-}
-
-/* ── Chapter-pill map (for weakest section card) ── */
-const MOCK_CHAPTER_MAP = {
-  'qa': ['Percentage', 'Time & Work', 'SI & CI', 'Data Interpretation', 'Ratio & Proportion'],
-  'gi': ['Coding-Decoding', 'Blood Relations', 'Syllogism', 'Series', 'Analogy'],
-  'ga': ['History', 'Polity', 'Geography', 'Economics', 'Science'],
-  'en': ['Grammar', 'Vocabulary', 'Comprehension', 'Cloze Test', 'Error Spotting'],
-  'ma': ['Algebra', 'Geometry', 'Trigonometry', 'Mensuration', 'Statistics'],
-  're': ['Puzzles', 'Seating Arrangement', 'Syllogism', 'Inequalities', 'Input-Output'],
-  'ck': ['Computer Fundamentals', 'MS Office', 'Networking', 'Internet', 'DBMS'],
-  'rc': ['Puzzles', 'Seating Arrangement', 'Syllogism', 'Inequalities', 'Coding-Decoding'],
-  'di': ['Data Interpretation', 'Data Sufficiency', 'Caselet', 'Charts', 'Tables'],
-  'em': ['Number System', 'Simplification', 'Percentage', 'Ratio', 'Average'],
-  'gk': ['History', 'Polity', 'Geography', 'Economics', 'Science'],
-  'eh': ['Grammar', 'Vocabulary', 'Comprehension', 'Idioms', 'Synonyms'],
-  'gs':   ['History', 'Polity', 'Geography', 'Economy', 'Environment'],
-  'csat': ['Comprehension', 'Reasoning', 'Numeracy', 'Data Interpretation', 'Decision Making']
-};
-
-/* ── Per-exam cutoff lookup (for percentile estimator) ──
-   User-set cutoffs (appState.mockCutoffs) take priority — official cutoffs
-   change every year, so the hardcoded values are only fallback estimates. */
-function mockGetCutoff(exam, tier) {
-  try {
-    const o = appState.mockCutoffs && appState.mockCutoffs[exam + '|' + tier];
-    if (o != null && !isNaN(parseFloat(o))) return parseFloat(o);
-  } catch (e) {}
-  const M = {
-    'cgl|t1': 135, 'cgl|t2': 320,
-    'ntpc|cbt1': 72, 'ntpc|cbt2': 100,
-    'gd|cbt': 90,
-    'ibps|pre': 60, 'ibps|mains': 130,
-    'upsc|pre': 100,
-    'uppcs|pre': 95,
-    'bpsc|pre': 90
-  };
-  return M[exam + '|' + tier] || 0;
-}
-
-/* Let the user set/update the expected cutoff for the current exam+tier */
-function mockEditCutoff() {
-  const cfg = mockExamCfg(); if (!cfg) return;
-  const tk = mockTierKey();
-  const tier = cfg.tiers[tk];
-  const totalMax = tier.sections.reduce((t, s) => t + s.max, 0);
-  const cur = mockGetCutoff(currentExam, tk);
-  const raw = prompt('Expected cutoff for ' + tier.label + ' (0–' + totalMax + ').\nCutoffs change every year — set the latest one you are targeting:', cur || '');
-  if (raw === null) return;
-  const v = parseFloat(raw);
-  if (isNaN(v) || v < 0 || v > totalMax) { showToast('Enter a number between 0 and ' + totalMax + '.', 'error'); return; }
-  if (!appState.mockCutoffs) appState.mockCutoffs = {};
-  appState.mockCutoffs[currentExam + '|' + tk] = Math.round(v * 100) / 100;
-  if (typeof saveProgress === 'function') saveProgress();
-  mockRenderPage();
-  showToast('Cutoff set to ' + v + ' 🎯', 'success');
 }
 
 /* ── Render the redesigned Pro Mock Test Analysis panel ── */
@@ -450,40 +250,6 @@ function mockWeakestCardHtml(weakest, secAvgs) {
       '<button class="btn-modal-save" style="font-size:0.78rem;padding:6px 12px;" onclick="markChaptersForRevision(\'' + weakest.k + '\')">📌 Mark these for revision</button>' +
       '<button class="btn-modal-save" style="font-size:0.78rem;padding:6px 12px;background:rgba(168,85,247,0.15);color:#A855F7;border:1px solid rgba(168,85,247,0.35);" onclick="mockFocusWeakSubject(\'' + weakest.k + '\')">🎯 Make a focused plan</button>' +
     '</div>';
-}
-
-/* From the mock "weakest section" card, open the Plan Wizard as a focused
-   Single Subject plan. Best-effort maps the mock section to a syllabus subject
-   by name similarity; if none matches, opens Single mode so the user can pick. */
-function mockFocusWeakSubject(secKey) {
-  if (typeof openSinglePlanForSubject !== 'function') {
-    if (typeof showToast === 'function') showToast('Plan wizard not available.', 'error');
-    return;
-  }
-  const subs = (typeof getActiveSubjects === 'function') ? getActiveSubjects() : [];
-  /* Resolve the section name from the current tier config. */
-  let secName = secKey;
-  try {
-    const cfg = mockExamCfg();
-    const sec = cfg && cfg.tiers[mockTierKey()].sections.find(x => x.k === secKey);
-    if (sec) secName = sec.name;
-  } catch (e) {}
-  /* Fuzzy match: share a significant word between section name and subject name. */
-  const words = (secName || '').toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3);
-  const match = subs.find(s => {
-    const sn = (s.name || '').toLowerCase();
-    return words.some(w => sn.includes(w));
-  });
-  openSinglePlanForSubject(match ? match.id : null);
-}
-
-function markChaptersForRevision(secK) {
-  const chapters = MOCK_CHAPTER_MAP[secK] || [];
-  if (!appState.revision || typeof appState.revision !== 'object') appState.revision = {};
-  if (!appState.revision[secK]) appState.revision[secK] = [];
-  chapters.forEach(c => { if (!appState.revision[secK].includes(c)) appState.revision[secK].push(c); });
-  if (typeof saveProgress === 'function') saveProgress();
-  showToast && showToast('📌 ' + chapters.length + ' chapters marked for revision', 'success');
 }
 
 /* ── Percentile estimator card (three progress bars: green cutoff + blue safe score + amber top target) ── */
@@ -721,17 +487,6 @@ function mockDualLineSvg(perMock) {
   '</svg>';
 }
 
-/* ══ Weak-topic tagging — real syllabus chapters, tagged per mock ══ */
-function mockTopicMeta(chId) {
-  let subs = [];
-  try { subs = getActiveSubjects() || []; } catch (e) {}
-  for (const s of subs) {
-    const c = (s.chapters || []).find(x => x.id === chId);
-    if (c) return { name: c.name, subName: s.name, color: s.color };
-  }
-  return null;
-}
-
 function mockWeakTopicOptionsHtml() {
   let subs = [];
   try { subs = getActiveSubjects() || []; } catch (e) {}
@@ -750,22 +505,6 @@ function mockWeakChipsHtml() {
       ' <span style="color:var(--muted);font-size:0.66rem;">' + escapeHtml(t.subName) + '</span>' +
       ' <span onclick="mockRemoveWeakTopic(\'' + id + '\')" style="cursor:pointer;margin-left:4px;font-weight:800;">×</span></span>';
   }).join('');
-}
-
-function mockAddWeakTopic() {
-  const sel = document.getElementById('mock-weak-sel');
-  const id = sel ? sel.value : '';
-  if (!id) return;
-  if (!mockWeakSel.includes(id)) mockWeakSel.push(id);
-  const chips = document.getElementById('mock-weak-chips');
-  if (chips) chips.innerHTML = mockWeakChipsHtml();
-  if (sel) sel.value = '';
-}
-
-function mockRemoveWeakTopic(id) {
-  mockWeakSel = mockWeakSel.filter(x => x !== id);
-  const chips = document.getElementById('mock-weak-chips');
-  if (chips) chips.innerHTML = mockWeakChipsHtml();
 }
 
 /* Recurring weak topics across all mocks of the current tier */
@@ -788,23 +527,6 @@ function mockWeakTopicsCardHtml(list) {
     '</div>' +
     '<button class="btn-modal-save" style="font-size:0.78rem;padding:6px 12px;" onclick="mockPushWeakTopicsToRevision()">📌 Push all to revision queue</button>' +
   '</div>';
-}
-
-function mockPushWeakTopicsToRevision() {
-  const ids = new Set();
-  mockList().forEach(m => (m.weakTopics || []).forEach(id => ids.add(id)));
-  if (!ids.size) return;
-  const tomorrow = (typeof addDaysISO === 'function') ? addDaysISO(new Date(), 1) : new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-  let n = 0;
-  ids.forEach(id => {
-    if (!appState.progress[id]) appState.progress[id] = {};
-    if (!appState.progress[id].nextRevisionAt || appState.progress[id].nextRevisionAt > tomorrow) {
-      appState.progress[id].nextRevisionAt = tomorrow;
-      n++;
-    }
-  });
-  if (typeof saveProgress === 'function') saveProgress();
-  showToast('📌 ' + n + ' weak topic' + (n !== 1 ? 's' : '') + ' queued for revision from tomorrow.', 'success');
 }
 
 function mockRenderSaved() {
