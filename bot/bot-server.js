@@ -545,6 +545,51 @@ async function verifyIdTokenManually(idToken, projectId) {
   return payload;
 }
 
+/* Firebase web API key — public/safe to embed (it's a client key, already
+   shipped in js/core/firebase-config.js). Used only to ask Google to verify a
+   token via the Identity Toolkit REST API. Override with FIREBASE_WEB_API_KEY. */
+const FIREBASE_WEB_API_KEY =
+  process.env.FIREBASE_WEB_API_KEY || 'AIzaSyDTBc3RAED-HuFZv7xyT2X0WFBRIXr9png';
+
+/**
+ * Verify a Firebase ID token by asking Google's Identity Toolkit to look up the
+ * account. This runs against `identitytoolkit.googleapis.com` — a DIFFERENT
+ * host from the x509 cert endpoint on `www.googleapis.com` — so it keeps
+ * working even when the latter is IP-blocked for this server (the exact failure
+ * behind "Error fetching public keys for Google certs"). Google does the
+ * signature/claim checks for us and returns the account, so no local certs are
+ * needed. Returns { sub: localId, uid, email } or throws. A thrown error tagged
+ * `.tokenInvalid = true` means Google rejected the token itself (→ 401), while
+ * an untagged error means the host was unreachable/blocked (→ try next / 503).
+ */
+async function verifyIdTokenViaIdentityToolkit(idToken, apiKey) {
+  const url = 'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' +
+              encodeURIComponent(apiKey);
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken })
+  });
+  const text = await r.text();
+  if (r.ok) {
+    let data;
+    try { data = JSON.parse(text); } catch (_) { throw new Error('Identity Toolkit returned non-JSON'); }
+    const u = data && Array.isArray(data.users) && data.users[0];
+    if (!u || !u.localId) throw new Error('Identity Toolkit returned no user');
+    return { sub: u.localId, uid: u.localId, email: u.email, email_verified: !!u.emailVerified };
+  }
+  /* Google explicitly rejected the token → genuine auth failure (401). */
+  if (r.status === 400 || r.status === 401) {
+    let code = 'INVALID_ID_TOKEN';
+    try { code = ((JSON.parse(text).error) || {}).message || code; } catch (_) {}
+    const err = new Error('token rejected by Google: ' + code);
+    err.tokenInvalid = true;
+    throw err;
+  }
+  /* Any other status (403 permission HTML, 5xx, etc.) → treat as blocked. */
+  throw new Error('Identity Toolkit unreachable (HTTP ' + r.status + '): ' + text.slice(0, 120));
+}
+
 async function verifyAdmin(req) {
   if (!fbAdmin || !db) {
     return { ok: false, code: 503, error: 'Auth unavailable: server is missing FIREBASE_SERVICE_ACCOUNT' };
@@ -571,29 +616,38 @@ async function verifyAdmin(req) {
     }
   }
 
-  /* 2. Fallback: the SDK couldn't reach Google's cert endpoint. Verify the
-     token ourselves via a direct fetch (different HTTP path than the SDK). */
+  /* 2. Fallback A (primary): the SDK couldn't reach www.googleapis.com to fetch
+     certs. Ask Google to verify the token via the Identity Toolkit REST API,
+     which lives on a DIFFERENT host (identitytoolkit.googleapis.com) that is
+     usually still reachable even when the cert host is IP-blocked. */
+  if (!decoded && isCertFetchError(lastErr) && FIREBASE_WEB_API_KEY) {
+    try {
+      decoded = await verifyIdTokenViaIdentityToolkit(idToken, FIREBASE_WEB_API_KEY);
+      console.log('ℹ️  /send: verified admin token via Identity Toolkit REST (SDK cert fetch was blocked)');
+    } catch (e) {
+      if (e.tokenInvalid) {
+        /* Google itself rejected the token → this really is a bad/expired login. */
+        console.error('❌ /send Identity Toolkit rejected token:', e.message);
+        return { ok: false, code: 401, error: 'Invalid or expired admin token [' + String(e.message).slice(0, 120) + ']' };
+      }
+      console.error('⚠️  /send Identity Toolkit verify unavailable:', e.message);
+      /* Host also unreachable — fall through to fallback B. */
+    }
+  }
+
+  /* 3. Fallback B (last resort): verify the token ourselves by fetching the
+     certs directly. Same host as the SDK, so this only helps when the SDK's
+     internal HTTP client (not the network) was the problem. */
   if (!decoded && isCertFetchError(lastErr)) {
     const projectId = (fbAdmin.app().options && fbAdmin.app().options.projectId) ||
                       process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT || '';
     if (projectId) {
       try {
         decoded = await verifyIdTokenManually(idToken, projectId);
-        console.log('ℹ️  /send: verified admin token via manual fallback (SDK cert fetch was blocked)');
+        console.log('ℹ️  /send: verified admin token via manual cert verify (SDK path was blocked)');
       } catch (e) {
-        console.error('❌ /send manual verify failed:', e.message);
-        if (isCertFetchError(e)) {
-          /* Both the SDK and our own fetch were denied by Google → this is a
-             server/network problem, not the admin's login. Say so clearly and
-             return 503 so the panel doesn't tell the admin to re-log-in. */
-          return {
-            ok: false, code: 503,
-            error: 'Server could not reach Google to verify the token ' +
-                   '(cert endpoint blocked from the bot host, not your login). ' +
-                   'Check the Render service network/region.'
-          };
-        }
-        lastErr = e; // a real token problem surfaced during manual verify
+        console.error('⚠️  /send manual verify unavailable:', e.message);
+        if (!isCertFetchError(e)) lastErr = e; // a real token problem surfaced
       }
     }
   }
@@ -601,10 +655,13 @@ async function verifyAdmin(req) {
   if (!decoded) {
     console.error('❌ /send verifyIdToken failed:', (lastErr && lastErr.code) || '', '-', (lastErr && lastErr.message) || '');
     if (isCertFetchError(lastErr)) {
+      /* Every verification path was denied by Google → server/network problem,
+         not the admin's login. Return 503 with a clear, actionable message. */
       return {
         ok: false, code: 503,
         error: 'Server could not reach Google to verify the token ' +
-               '(cert endpoint blocked from the bot host, not your login).'
+               '(all verification hosts blocked from the bot host, not your login). ' +
+               'Check the Render service network/region.'
       };
     }
     const detail = ((lastErr && lastErr.code) || 'verify-failed') +
