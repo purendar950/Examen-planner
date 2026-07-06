@@ -1,0 +1,60 @@
+name: Evening Telegram Check-in
+
+on:
+  schedule:
+    # Off-peak minutes (GitHub drops :00/:30 peak-load runs most often). This is
+    # only a best-effort BACKUP trigger — GitHub's scheduler is unreliable. The
+    # RELIABLE trigger is an external cron (e.g. cron-job.org) calling
+    # workflow_dispatch with gated=true every ~15 min — same pattern as
+    # daily-telegram.yml, set up as a SEPARATE cron-job.org job pointed at this
+    # workflow (see scripts/TELEGRAM_SETUP.md).
+    - cron: '12,27,42,57 * * * *'
+  workflow_dispatch:
+    inputs:
+      gated:
+        description: 'true = respect the admin-set evening send time in Firestore (external cron uses this). false = send immediately (manual test).'
+        type: boolean
+        default: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: scripts
+
+      - name: Validate secrets
+        run: |
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo "❌ TELEGRAM_BOT_TOKEN secret is not set!"
+            exit 1
+          fi
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "❌ FIREBASE_SERVICE_ACCOUNT secret is not set!"
+            exit 1
+          fi
+          echo "✅ Both secrets present"
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Send evening check-ins
+        working-directory: scripts
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GATED: ${{ inputs.gated }}
+        run: node send-telegram-evening.js
