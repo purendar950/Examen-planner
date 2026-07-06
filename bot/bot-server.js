@@ -46,7 +46,14 @@ try {
   if (raw.trim()) {
     const svc = JSON.parse(raw);
     if (svc.project_id && svc.private_key) {
-      admin.initializeApp({ credential: admin.credential.cert(svc) });
+      admin.initializeApp({
+        credential: admin.credential.cert(svc),
+        // Explicit projectId: cert() usually infers this, but on some hosts it
+        // doesn't propagate to auth().verifyIdToken(), which then throws
+        // auth/argument-error because it can't resolve the project to check the
+        // token's audience against. Setting it explicitly removes that failure.
+        projectId: svc.project_id
+      });
       db = admin.firestore();
       fbAdmin = admin;
       global._fbAdmin = admin; // for FieldValue
@@ -474,8 +481,8 @@ async function verifyAdmin(req) {
        auth/argument-error, auth/id-token-revoked, or "used too early" (server
        clock skew) tell us exactly what to fix. Only admins reach this path. */
     console.error('❌ /send verifyIdToken failed:', e.code || '', '-', e.message);
-    const code = e.code || (e.message || 'verify-failed');
-    return { ok: false, code: 401, error: 'Invalid or expired admin token [' + code + ']' };
+    const detail = (e.code || 'verify-failed') + (e.message ? ': ' + String(e.message).slice(0, 140) : '');
+    return { ok: false, code: 401, error: 'Invalid or expired admin token [' + detail + ']' };
   }
   try {
     const adminDoc = await db.collection('admins').doc(decoded.uid).get();
