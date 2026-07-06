@@ -438,7 +438,12 @@
 <script defer src="js/tabs/youtube.js?v=20260703a"></script>
 <script defer src="js/tabs/playlist-organiser.js?v=20260624b"></script>
 <script defer src="js/features/yt-screenshots.js?v=20260626c"></script>
-<script defer src="js/tabs/mock-tests.js?v=20260703b"></script>
+<!-- mock-tests.js split by responsibility (see mock-tests-render.js header).
+     Load order matters: data.js declares the shared const/let that
+     scoring.js and render.js read. -->
+<script defer src="js/tabs/mock-tests-data.js?v=20260706a"></script>
+<script defer src="js/tabs/mock-tests-scoring.js?v=20260706a"></script>
+<script defer src="js/tabs/mock-tests-render.js?v=20260706a"></script>
 <script defer src="js/tabs/analysis.js?v=20260626j"></script>
 <script defer src="js/tabs/profile.js"></script>
 <script defer src="js/tabs/groups.js"></script>
