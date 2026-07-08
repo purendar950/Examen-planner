@@ -17,3 +17,7 @@ services:
       # Leave empty to run without cookies (many videos will be bot-gated).
       - key: YT_COOKIES
         sync: false
+      # Optional: set to the SAME service-account JSON the Telegram bot uses to
+      # let admins manage cookies from the admin panel (Firestore config/turbo).
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false

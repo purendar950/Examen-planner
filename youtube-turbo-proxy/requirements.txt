@@ -5,5 +5,9 @@ flask>=3.0.0
 flask-cors>=4.0.0
 requests>=2.31.0
 gunicorn>=21.2.0
+# Lets the backend read cookies from Firestore config/turbo (admin-managed),
+# same service account the Telegram bot uses. Optional: without
+# FIREBASE_SERVICE_ACCOUNT set, the backend falls back to env/file cookies.
+firebase-admin>=6.5.0
 # bgutil PO-token plugin is installed from the same git clone as the POT server
 # (see Dockerfile) so the plugin and server versions always match.

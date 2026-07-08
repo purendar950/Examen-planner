@@ -52,6 +52,24 @@ Browser ── /api/stream ─▶  this server ──▶ googlevideo.com (bytes,
   group; a bottleneck at scale. `MAX_HEIGHT=720` (or lower) keeps bandwidth down.
 - yt-dlp needs occasional updates when YouTube changes; redeploy to pull latest.
 
+## Managing cookies from the admin panel (recommended)
+
+Instead of editing Render every time cookies expire, wire the backend to your
+app's Firestore so an admin can paste fresh cookies from the **admin panel**:
+
+1. In Render → this service → **Environment**, add **`FIREBASE_SERVICE_ACCOUNT`**
+   = the **same** service-account JSON your Telegram bot already uses.
+2. Redeploy. `/health` will then show `"cookie_source":"firestore"` once cookies
+   are set in the panel.
+3. In the app's **Admin panel → Settings → ⚡ Turbo Player — YouTube Cookies**,
+   paste a fresh `cookies.txt` and **Save**. It's stored admin-only in Firestore
+   (`config/turbo`), and the backend picks it up automatically (within
+   `COOKIE_REFRESH_SEC`, default 10 min, or instantly on the next bot-check retry).
+
+Cookie source priority: **Firestore** → `YT_COOKIES` env → secret file. So the
+env/secret-file method still works as a fallback if `FIREBASE_SERVICE_ACCOUNT`
+isn't set.
+
 ## Run locally
 
 ```bash
