@@ -1,0 +1,7 @@
+yt-dlp>=2025.10.0
+flask>=3.0.0
+flask-cors>=4.0.0
+requests>=2.31.0
+gunicorn>=21.2.0
+# bgutil PO-token plugin is installed from the same git clone as the POT server
+# (see Dockerfile) so the plugin and server versions always match.
