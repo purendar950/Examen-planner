@@ -279,6 +279,80 @@ function ssSyncFullscreen() {
   if (!inNative && ssFsActive) ssExitFullscreen();
 }
 
+/* ══════════════════════════════════════════════════════════════
+   DRAGGABLE FLOATING "SAVE MOMENT" BUTTON (fullscreen)
+   ─────────────────────────────────────────────────────────────
+   In fullscreen the Save Moment button can sit over the exact spot you
+   want to capture. Make it draggable (mouse + touch) so it can be moved
+   out of the way. A genuine drag suppresses the click so it never saves
+   by accident. The chosen position is remembered in localStorage.
+══════════════════════════════════════════════════════════════ */
+function ssMakeDraggable(el) {
+  if (!el || el._draggable) return;
+  el._draggable = true;
+  el.style.touchAction = 'none';
+  var startX, startY, originLeft, originTop, dragging = false;
+
+  function point(e) { return (e.touches && e.touches[0]) || e; }
+
+  function onDown(e) {
+    var p = point(e);
+    var wrap = el.parentElement;
+    if (!wrap) return;
+    var r = el.getBoundingClientRect();
+    var wr = wrap.getBoundingClientRect();
+    originLeft = r.left - wr.left;
+    originTop = r.top - wr.top;
+    startX = p.clientX;
+    startY = p.clientY;
+    dragging = true;
+    el._dragMoved = false;
+    el.style.transition = 'none';
+    try { if (e.pointerId != null && el.setPointerCapture) el.setPointerCapture(e.pointerId); } catch (_) {}
+    e.preventDefault();
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    var p = point(e);
+    var dx = p.clientX - startX, dy = p.clientY - startY;
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) el._dragMoved = true;
+    var wrap = el.parentElement;
+    var nx = Math.max(0, Math.min(originLeft + dx, wrap.clientWidth - el.offsetWidth));
+    var ny = Math.max(0, Math.min(originTop + dy, wrap.clientHeight - el.offsetHeight));
+    el.style.left = nx + 'px';
+    el.style.top = ny + 'px';
+    el.style.right = 'auto';
+    el.style.bottom = 'auto';
+    e.preventDefault();
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    if (el._dragMoved) {
+      try { localStorage.setItem('ssFsSavePos', JSON.stringify({ left: el.style.left, top: el.style.top })); } catch (_) {}
+    }
+  }
+  el.addEventListener('pointerdown', onDown);
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+  // Touch fallback for browsers without Pointer Events
+  el.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+}
+
+function ssApplyFsSavePos(el) {
+  try {
+    var pos = JSON.parse(localStorage.getItem('ssFsSavePos') || 'null');
+    if (pos && pos.left && pos.top) {
+      el.style.left = pos.left;
+      el.style.top = pos.top;
+      el.style.right = 'auto';
+      el.style.bottom = 'auto';
+    }
+  } catch (_) {}
+}
+
 
 /* Pick the YouTube frame-thumbnail closest to a timestamp. YouTube exposes 3
    real frames per video (~25/50/75% via hq1/hq2/hq3) plus the cover image
@@ -991,7 +1065,11 @@ function ssInit() {
     fsSave.className = 'ss-fs-save';
     fsSave.title = 'Save this moment';
     fsSave.innerHTML = '🎯 Save Moment';
-    fsSave.onclick = ssFsSave;
+    // Drag-aware: a real drag repositions the button; a tap saves the moment.
+    fsSave.addEventListener('click', function () {
+      if (fsSave._dragMoved) { fsSave._dragMoved = false; return; }
+      ssFsSave();
+    });
 
     const fsFlash = document.createElement('div');
     fsFlash.id = 'ss-fs-flash';
@@ -1000,6 +1078,11 @@ function ssInit() {
     playerWrap.appendChild(fsToggle);
     playerWrap.appendChild(fsSave);
     playerWrap.appendChild(fsFlash);
+
+    // Make the floating Save Moment button draggable (mouse + touch) and
+    // restore any position the user set previously.
+    ssMakeDraggable(fsSave);
+    ssApplyFsSavePos(fsSave);
   }
 
   // Inject the gallery side-panel (right side, slides in)
