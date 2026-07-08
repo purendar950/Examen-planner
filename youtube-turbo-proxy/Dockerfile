@@ -26,7 +26,10 @@ RUN git clone --depth 1 --branch "${BGUTIL_REF}" \
     && cd /opt/bgutil/server \
     && npm install \
     && npx --yes tsc \
-    && pip install /opt/bgutil/plugin
+    && pip install /opt/bgutil/plugin \
+    # Fail the build loudly if the PO-token server didn't compile, instead of
+    # silently shipping an image where pot_provider is always false.
+    && test -f /opt/bgutil/server/build/main.js
 
 # App code
 COPY app.py start.sh ./

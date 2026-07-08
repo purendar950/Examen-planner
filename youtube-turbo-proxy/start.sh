@@ -1,22 +1,31 @@
 #!/usr/bin/env bash
-set -e
+# Launch the bgutil PO-token provider (BotGuard solver) and the web app.
+set -u
 
-# 1) Start the bgutil PO-token provider (BotGuard solver) in the background.
-#    yt-dlp's plugin talks to it on 127.0.0.1:4416.
-node /opt/bgutil/server/build/main.js --port 4416 &
-POT_PID=$!
+POT_MAIN="/opt/bgutil/server/build/main.js"
 
-# Give the POT server a moment to come up.
-sleep 3
+echo "[start] node $(node --version 2>/dev/null || echo '??')"
+echo "[start] POT server file: $POT_MAIN ($( [ -f "$POT_MAIN" ] && echo present || echo MISSING ))"
 
-# If the POT server dies, take the container down so the platform restarts it.
-( wait "$POT_PID"; echo "POT server exited"; kill 1 ) &
+# Keep the PO-token server alive: if it crashes (e.g. transient OOM), restart it.
+start_pot() {
+  while true; do
+    echo "[start] launching PO-token provider on :4416"
+    node "$POT_MAIN" --port 4416
+    code=$?
+    echo "[start] PO-token provider exited (code $code); restarting in 3s"
+    sleep 3
+  done
+}
+start_pot &
 
-# 2) Start the web app. gthread workers so the streaming byte-proxy can serve
-#    many concurrent clients without blocking.
+# Give the provider a moment to bind before the app starts taking traffic.
+sleep 4
+
+echo "[start] launching gunicorn on :${PORT:-8080}"
 exec gunicorn \
     --bind "0.0.0.0:${PORT:-8080}" \
-    --workers "${WEB_WORKERS:-2}" \
+    --workers "${WEB_WORKERS:-1}" \
     --threads "${WEB_THREADS:-8}" \
     --worker-class gthread \
     --timeout 120 \
