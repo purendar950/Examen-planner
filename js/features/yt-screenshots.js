@@ -291,39 +291,42 @@ function ssMakeDraggable(el) {
   if (!el || el._draggable) return;
   el._draggable = true;
   el.style.touchAction = 'none';
-  var startX, startY, originLeft, originTop, dragging = false;
-
-  function point(e) { return (e.touches && e.touches[0]) || e; }
+  // Pointer Events cover mouse + touch + pen, so we bind ONCE (no separate
+  // touch handlers — double-binding + preventDefault was cancelling the tap).
+  var startX = 0, startY = 0, originLeft = 0, originTop = 0, dragging = false;
 
   function onDown(e) {
-    var p = point(e);
     var wrap = el.parentElement;
     if (!wrap) return;
     var r = el.getBoundingClientRect();
     var wr = wrap.getBoundingClientRect();
     originLeft = r.left - wr.left;
     originTop = r.top - wr.top;
-    startX = p.clientX;
-    startY = p.clientY;
+    startX = e.clientX;
+    startY = e.clientY;
     dragging = true;
     el._dragMoved = false;
     el.style.transition = 'none';
-    try { if (e.pointerId != null && el.setPointerCapture) el.setPointerCapture(e.pointerId); } catch (_) {}
-    e.preventDefault();
+    // IMPORTANT: do NOT preventDefault here — that cancels the click, so a
+    // plain tap would stop firing Save Moment. We only preventDefault once a
+    // real drag is under way (in onMove below).
   }
   function onMove(e) {
     if (!dragging) return;
-    var p = point(e);
-    var dx = p.clientX - startX, dy = p.clientY - startY;
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) el._dragMoved = true;
+    var dx = e.clientX - startX, dy = e.clientY - startY;
+    if (!el._dragMoved) {
+      if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;  // jitter → still a tap
+      el._dragMoved = true;
+    }
     var wrap = el.parentElement;
+    if (!wrap) return;
     var nx = Math.max(0, Math.min(originLeft + dx, wrap.clientWidth - el.offsetWidth));
     var ny = Math.max(0, Math.min(originTop + dy, wrap.clientHeight - el.offsetHeight));
     el.style.left = nx + 'px';
     el.style.top = ny + 'px';
     el.style.right = 'auto';
     el.style.bottom = 'auto';
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();   // only while genuinely dragging
   }
   function onUp() {
     if (!dragging) return;
@@ -335,10 +338,7 @@ function ssMakeDraggable(el) {
   el.addEventListener('pointerdown', onDown);
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onUp);
-  // Touch fallback for browsers without Pointer Events
-  el.addEventListener('touchstart', onDown, { passive: false });
-  window.addEventListener('touchmove', onMove, { passive: false });
-  window.addEventListener('touchend', onUp);
+  window.addEventListener('pointercancel', onUp);
 }
 
 function ssApplyFsSavePos(el) {
