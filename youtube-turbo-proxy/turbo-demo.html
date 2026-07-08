@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>⚡ Turbo Player Demo — self-hosted backend</title>
+<style>
+  :root{--bg:#0f172a;--surface:#1e293b;--border:rgba(255,255,255,.1);--accent:#6366f1;--muted:#94a3b8;--text:#e2e8f0;--green:#22c55e;--red:#ef4444;--amber:#f59e0b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:20px;line-height:1.5}
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-size:1.3rem;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:.85rem;margin-bottom:16px}
+  label{font-size:.75rem;color:var(--muted);display:block;margin-bottom:4px}
+  input{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;font-size:.9rem}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .row>div{flex:1;min-width:200px}
+  button.load{background:var(--accent);border:none;color:#fff;padding:10px 18px;border-radius:10px;font-weight:600;cursor:pointer;font-size:.9rem;align-self:flex-end;height:40px}
+  button.load:hover{filter:brightness(1.1)}
+  .status{font-size:.75rem;margin:6px 0 14px;padding:8px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .dot.g{background:var(--green)}.dot.r{background:var(--red)}.dot.a{background:var(--amber)}
+  .player{position:relative;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:16/9;border:1px solid var(--border)}
+  .player video{width:100%;height:100%;object-fit:contain;display:block}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:20px;background:rgba(0,0,0,.85)}
+  .overlay.hidden{display:none}
+  .spinner{width:34px;height:34px;border:3px solid rgba(255,255,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .overlay a{color:var(--accent);font-size:.85rem}
+  .badge{position:absolute;top:10px;left:10px;background:rgba(0,0,0,.7);color:var(--green);padding:4px 10px;border-radius:6px;font-size:12px;display:none}
+  .badge.show{display:block}
+  .controls{position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent,rgba(0,0,0,.9));padding:30px 12px 10px;display:flex;flex-direction:column;gap:8px;opacity:0;transition:opacity .2s;pointer-events:none}
+  .player:hover .controls{opacity:1;pointer-events:auto}
+  .progress{width:100%;height:5px;background:rgba(255,255,255,.25);border-radius:3px;cursor:pointer}
+  .progress-fill{height:100%;width:0;background:var(--accent);border-radius:3px}
+  .btn-row{display:flex;align-items:center;justify-content:space-between}
+  .btn-group{display:flex;align-items:center;gap:6px}
+  .cbtn{background:none;border:none;color:#fff;cursor:pointer;font-size:17px;padding:4px 6px;border-radius:6px;line-height:1}
+  .cbtn:hover{background:rgba(255,255,255,.15)}
+  .time{color:rgba(255,255,255,.75);font-size:12px;font-variant-numeric:tabular-nums}
+  .speed-wrap{position:relative}
+  .speed-toggle{background:rgba(99,102,241,.35);border:none;color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:700}
+  .speed-menu{position:absolute;bottom:100%;right:0;margin-bottom:8px;background:#0b1220;border:1px solid var(--border);border-radius:10px;padding:6px;display:none;flex-direction:column;max-height:240px;overflow-y:auto;min-width:70px}
+  .speed-menu.show{display:flex}
+  .speed-menu button{background:transparent;border:none;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+  .speed-menu button.active{background:var(--accent)}
+  .meta{margin-top:14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;font-size:.85rem;display:none}
+  .meta .r{display:flex;justify-content:space-between;gap:10px;padding:3px 0}
+  .meta .k{color:var(--muted)}
+  .note{margin-top:14px;font-size:.78rem;color:var(--muted);border-left:3px solid var(--amber);padding:8px 12px;background:rgba(245,158,11,.08);border-radius:0 8px 8px 0}
+  code{background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;font-size:.85em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚡ Turbo Player Demo</h1>
+  <div class="sub">Plays YouTube through <strong>your own backend</strong> (yt-dlp + PO-token + byte-proxy) in a native player — so speed can hit <strong>4x</strong> and Picture-in-Picture works. Falls back to YouTube if the backend can't serve a video.</div>
+
+  <div class="row">
+    <div>
+      <label>Backend URL (your Render service)</label>
+      <input id="backend" type="text" placeholder="https://youtube-turbo-proxy.onrender.com" />
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>YouTube link or video ID</label>
+      <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ" />
+    </div>
+    <button class="load" onclick="loadFromInput()">Load</button>
+  </div>
+
+  <div class="status" id="status"><span class="dot a"></span>Enter your backend URL, then click <b>Check backend</b> or just Load a video. <a href="#" onclick="checkHealth();return false" style="color:var(--accent)">Check backend</a></div>
+
+  <div class="player" id="player">
+    <video id="video" playsinline></video>
+    <div class="badge" id="pipBadge">📌 Picture-in-Picture active</div>
+    <div class="overlay" id="overlay">
+      <div style="font-size:38px">▶️</div>
+      <div>Set your backend URL, paste a link, hit <strong>Load</strong></div>
+    </div>
+    <div class="controls" id="controls">
+      <div class="progress" id="progress"><div class="progress-fill" id="fill"></div></div>
+      <div class="btn-row">
+        <div class="btn-group">
+          <button class="cbtn" id="playBtn" onclick="togglePlay()">▶️</button>
+          <button class="cbtn" onclick="seek(-10)">⏪</button>
+          <button class="cbtn" onclick="seek(10)">⏩</button>
+          <span class="time" id="time">0:00 / 0:00</span>
+        </div>
+        <div class="btn-group">
+          <div class="speed-wrap">
+            <button class="speed-toggle" id="speedToggle" onclick="toggleSpeedMenu()">1x</button>
+            <div class="speed-menu" id="speedMenu"></div>
+          </div>
+          <button class="cbtn" onclick="togglePiP()" title="Picture-in-Picture">📌</button>
+          <button class="cbtn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="meta" id="meta"></div>
+
+  <div class="note">
+    <strong>Reliability reminder:</strong> on Render's free datacenter IP, videos without server-side <b>cookies</b> often return <code>youtube_bot_check</code>. Add a throwaway-account cookie via the <code>YT_COOKIES</code> env var (see the service README). Progressive streams are usually <b>360p</b>; higher resolutions aren't offered as single-file streams.
+  </div>
+</div>
+
+<script>
+const SPEEDS=[0.5,0.75,1,1.25,1.5,1.75,2,2.5,3,3.5,4];
+const video=document.getElementById('video');
+const overlay=document.getElementById('overlay');
+const fill=document.getElementById('fill');
+const timeEl=document.getElementById('time');
+const playBtn=document.getElementById('playBtn');
+const speedMenu=document.getElementById('speedMenu');
+const speedToggle=document.getElementById('speedToggle');
+const meta=document.getElementById('meta');
+const statusEl=document.getElementById('status');
+let currentUrl='',currentRate=1;
+
+// remember backend url
+document.getElementById('backend').value=localStorage.getItem('turboBackend')||'';
+document.getElementById('backend').addEventListener('change',e=>localStorage.setItem('turboBackend',e.target.value.trim().replace(/\/$/,'')));
+
+SPEEDS.forEach(s=>{const b=document.createElement('button');b.textContent=s+'x';if(s===1)b.classList.add('active');b.onclick=()=>setSpeed(s);speedMenu.appendChild(b);});
+
+function backend(){return (document.getElementById('backend').value||'').trim().replace(/\/$/,'');}
+function setStatus(cls,html){statusEl.innerHTML='<span class="dot '+cls+'"></span>'+html;}
+
+function extractVideoId(u){if(!u)return null;const m=u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtube\.com\/live\/)([a-zA-Z0-9_-]{11})/);if(m)return m[1];if(/^[a-zA-Z0-9_-]{11}$/.test(u.trim()))return u.trim();return null;}
+
+async function checkHealth(){
+  const b=backend();
+  if(!b){setStatus('r','Enter your backend URL first.');return;}
+  setStatus('a','Checking '+b+'/health …');
+  try{
+    const r=await fetch(b+'/health',{signal:AbortSignal.timeout(60000)});
+    const d=await r.json();
+    const cookieTxt=d.cookies?'cookies ✓':'no cookies ⚠';
+    const potTxt=d.pot_provider?'PO-token ✓':'PO-token ✗';
+    setStatus(d.pot_provider?'g':'a','Backend online — '+potTxt+', '+cookieTxt+'. '+(d.cookies?'':'(Add YT_COOKIES for reliable extraction.)'));
+  }catch(e){setStatus('r','Backend unreachable: '+e.message+' (free instances take ~30–60s to wake up — retry).');}
+}
+
+function loadFromInput(){
+  const b=backend();
+  if(!b){setStatus('r','Enter your backend URL first.');return;}
+  currentUrl=document.getElementById('url').value.trim();
+  const id=extractVideoId(currentUrl);
+  if(!id){showError('That is not a valid YouTube URL or ID.');return;}
+  loadVideo(id,b);
+}
+
+function showLoading(m){overlay.classList.remove('hidden');overlay.innerHTML='<div class="spinner"></div><div>'+m+'</div>';}
+function showError(msg,extra){
+  overlay.classList.remove('hidden');
+  const yt=currentUrl?'<a href="'+currentUrl+'" target="_blank" rel="noreferrer">▶ Open in YouTube instead (fallback)</a>':'';
+  overlay.innerHTML='<div style="font-size:34px">⚠️</div><div><strong>'+msg+'</strong></div>'+(extra?'<div style="font-size:.8rem;color:var(--muted);max-width:440px">'+extra+'</div>':'')+yt;
+}
+
+async function loadVideo(id,b){
+  showLoading('Extracting via your backend… (first request may wake a sleeping instance, ~30–60s)');
+  meta.style.display='none';
+  try{
+    const r=await fetch(b+'/api/info?id='+id,{signal:AbortSignal.timeout(90000)});
+    const d=await r.json();
+    if(!r.ok){
+      if(d.error==='youtube_bot_check'){showError('Backend needs cookies',d.detail||'This video is bot-gated. Add YT_COOKIES to the service.');return;}
+      showError('Extraction failed',d.detail||d.error||('HTTP '+r.status));return;
+    }
+    const f=(d.formats||[])[0];
+    if(!f){showError('No playable stream','No progressive formats for this video.');return;}
+    video.src=b+'/api/stream?id='+id+'&itag='+encodeURIComponent(f.itag);
+    video.playbackRate=currentRate;
+    await video.play().catch(()=>{});
+    overlay.classList.add('hidden');
+    meta.style.display='block';
+    meta.innerHTML=
+      '<div class="r"><span class="k">Title</span><span>'+esc(d.title)+'</span></div>'+
+      '<div class="r"><span class="k">Uploader</span><span>'+esc(d.uploader||'—')+'</span></div>'+
+      '<div class="r"><span class="k">Quality</span><span>'+esc(f.quality||'?')+'</span></div>'+
+      '<div class="r"><span class="k">Served by</span><span>your backend → googlevideo</span></div>';
+    setStatus('g','Playing through your backend. Try 3x/4x and 📌 PiP.');
+  }catch(e){
+    showError('Backend request failed',e.name==='TimeoutError'?'Timed out — a free instance may be waking up. Try again.':e.message);
+  }
+}
+
+function togglePlay(){video.paused?video.play():video.pause();}
+function seek(s){video.currentTime=Math.max(0,video.currentTime+s);}
+function setSpeed(s){currentRate=s;video.playbackRate=s;speedToggle.textContent=s+'x';[...speedMenu.children].forEach(b=>b.classList.toggle('active',b.textContent===s+'x'));speedMenu.classList.remove('show');}
+function toggleSpeedMenu(){speedMenu.classList.toggle('show');}
+async function togglePiP(){try{if(document.pictureInPictureElement){await document.exitPictureInPicture();}else{if(video.readyState===0){alert('Load a video first.');return;}if(video.paused)await video.play();await video.requestPictureInPicture();}}catch(e){alert('PiP unavailable: '+e.message);}}
+function toggleFullscreen(){const el=document.getElementById('player');document.fullscreenElement?document.exitFullscreen():el.requestFullscreen&&el.requestFullscreen();}
+function fmt(s){if(!s||isNaN(s))return'0:00';const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=Math.floor(s%60);return(h?h+':':'')+(h?String(m).padStart(2,'0'):m)+':'+String(sec).padStart(2,'0');}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+video.addEventListener('play',()=>playBtn.textContent='⏸');
+video.addEventListener('pause',()=>playBtn.textContent='▶️');
+video.addEventListener('timeupdate',()=>{if(video.duration){fill.style.width=(video.currentTime/video.duration*100)+'%';timeEl.textContent=fmt(video.currentTime)+' / '+fmt(video.duration);}});
+video.addEventListener('enterpictureinpicture',()=>document.getElementById('pipBadge').classList.add('show'));
+video.addEventListener('leavepictureinpicture',()=>document.getElementById('pipBadge').classList.remove('show'));
+document.getElementById('progress').addEventListener('click',e=>{if(!video.duration)return;const r=e.currentTarget.getBoundingClientRect();video.currentTime=(e.clientX-r.left)/r.width*video.duration;});
+document.getElementById('url').addEventListener('keydown',e=>{if(e.key==='Enter')loadFromInput();});
+</script>
+</body>
+</html>
