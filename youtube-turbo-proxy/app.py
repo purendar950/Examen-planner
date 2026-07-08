@@ -89,6 +89,10 @@ _HAS_COOKIES = bool(COOKIES_FILE)
 _cache = {}
 _cache_lock = threading.Lock()
 
+# Limit how many extractions (Deno subprocesses) run at once. 1 is safest for
+# 512MB / low-CPU free tiers; raise it on bigger instances via env.
+_extract_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_EXTRACT", "1")))
+
 
 def _base_ydl_opts():
     opts = {
@@ -153,12 +157,23 @@ def _extract(video_id, force=False):
         if hit and not force and (now - hit["ts"] < CACHE_TTL):
             return hit["info"], hit["raw"]
 
-    url = "https://www.youtube.com/watch?v=" + video_id
-    with yt_dlp.YoutubeDL(_base_ydl_opts()) as ydl:
-        raw = ydl.extract_info(url, download=False)
-    info = _normalize(raw)
-    with _cache_lock:
-        _cache[video_id] = {"ts": now, "info": info, "raw": raw}
+    # Extraction spawns a Deno subprocess (signature/n-sig solving) which is the
+    # main memory/CPU spike. Serialize it so a burst of requests doesn't spawn
+    # many Deno processes at once and OOM/CPU-starve small instances. Requests
+    # queue instead of crashing the worker.
+    with _extract_sem:
+        # Re-check cache: another thread may have populated it while we waited.
+        with _cache_lock:
+            hit = _cache.get(video_id)
+            if hit and not force and (time.time() - hit["ts"] < CACHE_TTL):
+                return hit["info"], hit["raw"]
+
+        url = "https://www.youtube.com/watch?v=" + video_id
+        with yt_dlp.YoutubeDL(_base_ydl_opts()) as ydl:
+            raw = ydl.extract_info(url, download=False)
+        info = _normalize(raw)
+        with _cache_lock:
+            _cache[video_id] = {"ts": time.time(), "info": info, "raw": raw}
     return info, raw
 
 

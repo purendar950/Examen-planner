@@ -26,7 +26,7 @@ echo "[start] launching gunicorn on :${PORT:-8080}"
 exec gunicorn \
     --bind "0.0.0.0:${PORT:-8080}" \
     --workers "${WEB_WORKERS:-1}" \
-    --threads "${WEB_THREADS:-8}" \
+    --threads "${WEB_THREADS:-4}" \
     --worker-class gthread \
     --timeout 120 \
     app:app
