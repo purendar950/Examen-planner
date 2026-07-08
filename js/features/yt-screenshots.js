@@ -287,13 +287,21 @@ function ssSyncFullscreen() {
    out of the way. A genuine drag suppresses the click so it never saves
    by accident. The chosen position is remembered in localStorage.
 ══════════════════════════════════════════════════════════════ */
-function ssMakeDraggable(el) {
+function ssMakeDraggable(el, onTap) {
   if (!el || el._draggable) return;
   el._draggable = true;
   el.style.touchAction = 'none';
-  var startX, startY, originLeft, originTop, dragging = false;
+  var startX, startY, originLeft, originTop, dragging = false, moved = false;
 
-  function point(e) { return (e.touches && e.touches[0]) || e; }
+  // Register EITHER Pointer Events OR (mouse + touch). Registering both makes a
+  // single touch fire two overlapping gestures, and the touch-path
+  // preventDefault() then cancels the tap — which is why "Save Moment" stopped
+  // working. Pointer Events already cover mouse + touch + pen.
+  var hasPointer = (typeof window.PointerEvent !== 'undefined');
+
+  function point(e) {
+    return (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+  }
 
   function onDown(e) {
     var p = point(e);
@@ -306,17 +314,20 @@ function ssMakeDraggable(el) {
     startX = p.clientX;
     startY = p.clientY;
     dragging = true;
-    el._dragMoved = false;
+    moved = false;
     el.style.transition = 'none';
     try { if (e.pointerId != null && el.setPointerCapture) el.setPointerCapture(e.pointerId); } catch (_) {}
-    e.preventDefault();
+    // NOTE: do NOT preventDefault here — doing so on touchstart/pointerdown
+    // suppresses the tap. We only preventDefault once an actual drag begins.
   }
   function onMove(e) {
     if (!dragging) return;
     var p = point(e);
     var dx = p.clientX - startX, dy = p.clientY - startY;
-    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) el._dragMoved = true;
+    if (!moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) moved = true;
+    if (!moved) return; // still a potential tap — leave the page alone
     var wrap = el.parentElement;
+    if (!wrap) return;
     var nx = Math.max(0, Math.min(originLeft + dx, wrap.clientWidth - el.offsetWidth));
     var ny = Math.max(0, Math.min(originTop + dy, wrap.clientHeight - el.offsetHeight));
     el.style.left = nx + 'px';
@@ -328,17 +339,29 @@ function ssMakeDraggable(el) {
   function onUp() {
     if (!dragging) return;
     dragging = false;
-    if (el._dragMoved) {
+    if (moved) {
       try { localStorage.setItem('ssFsSavePos', JSON.stringify({ left: el.style.left, top: el.style.top })); } catch (_) {}
+    } else if (typeof onTap === 'function') {
+      // A clean tap (no drag) → run the action. We handle it here instead of a
+      // native 'click' listener so the drag setup can't swallow it.
+      onTap();
     }
   }
-  el.addEventListener('pointerdown', onDown);
-  window.addEventListener('pointermove', onMove);
-  window.addEventListener('pointerup', onUp);
-  // Touch fallback for browsers without Pointer Events
-  el.addEventListener('touchstart', onDown, { passive: false });
-  window.addEventListener('touchmove', onMove, { passive: false });
-  window.addEventListener('touchend', onUp);
+
+  if (hasPointer) {
+    el.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  } else {
+    el.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    el.addEventListener('touchstart', onDown, { passive: false });
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+    window.addEventListener('touchcancel', onUp);
+  }
 }
 
 function ssApplyFsSavePos(el) {
@@ -1065,11 +1088,6 @@ function ssInit() {
     fsSave.className = 'ss-fs-save';
     fsSave.title = 'Save this moment';
     fsSave.innerHTML = '🎯 Save Moment';
-    // Drag-aware: a real drag repositions the button; a tap saves the moment.
-    fsSave.addEventListener('click', function () {
-      if (fsSave._dragMoved) { fsSave._dragMoved = false; return; }
-      ssFsSave();
-    });
 
     const fsFlash = document.createElement('div');
     fsFlash.id = 'ss-fs-flash';
@@ -1079,9 +1097,10 @@ function ssInit() {
     playerWrap.appendChild(fsSave);
     playerWrap.appendChild(fsFlash);
 
-    // Make the floating Save Moment button draggable (mouse + touch) and
-    // restore any position the user set previously.
-    ssMakeDraggable(fsSave);
+    // Make the floating Save Moment button draggable (mouse + touch). A clean
+    // tap fires ssFsSave; a genuine drag just repositions it. Restore any
+    // position the user set previously.
+    ssMakeDraggable(fsSave, ssFsSave);
     ssApplyFsSavePos(fsSave);
   }
 
