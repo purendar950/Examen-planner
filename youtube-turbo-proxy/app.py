@@ -111,12 +111,17 @@ def _normalize(info):
     """Reduce a yt-dlp info dict to just what the frontend needs."""
     formats = []
     for f in info.get("formats", []):
-        # progressive only: has both audio + video, http(s), mp4 preferred
+        # We need a PROGRESSIVE, SINGLE-FILE stream that a native <video> can
+        # play through the byte-proxy: both audio + video, and a plain http(s)
+        # download (NOT HLS m3u8 or DASH segments, which need hls.js / MSE).
         if f.get("vcodec") in (None, "none"):
             continue
         if f.get("acodec") in (None, "none"):
             continue
         if not f.get("url"):
+            continue
+        proto = f.get("protocol") or ""
+        if proto not in ("https", "http"):   # skips m3u8_native, http_dash_segments, etc.
             continue
         height = f.get("height") or 0
         if height and height > MAX_HEIGHT:

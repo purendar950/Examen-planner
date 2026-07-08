@@ -5,13 +5,19 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     BGUTIL_REF=master
 
-# System deps: node (for the PO-token server), git, ffmpeg, curl
+# System deps: node (for the PO-token server), git, ffmpeg, unzip, curl
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        git curl ca-certificates ffmpeg gnupg \
+        git curl ca-certificates ffmpeg gnupg unzip \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Deno: the JavaScript runtime yt-dlp uses to solve YouTube's signature and
+# n-parameter challenges. Without it, extraction returns incomplete/throttled
+# formats ("Requested format is not available"). Installs to /usr/local/bin/deno.
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+    && deno --version
 
 WORKDIR /opt/app
 

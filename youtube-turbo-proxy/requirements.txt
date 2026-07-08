@@ -1,4 +1,6 @@
-yt-dlp>=2025.10.0
+# [default] extra bundles yt-dlp-ejs (the JS challenge solver scripts) required
+# by modern YouTube extraction. Paired with a Deno runtime (see Dockerfile).
+yt-dlp[default]>=2026.7.0
 flask>=3.0.0
 flask-cors>=4.0.0
 requests>=2.31.0
