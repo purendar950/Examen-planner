@@ -611,7 +611,7 @@ function ytoOpenCourse(plId) {
       <div style="display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap;">
         <span id="yto-np-title" style="flex:1;font-size:0.85rem;font-weight:600;min-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></span>
         <span style="font-size:0.72rem;color:var(--muted);">⚡</span>
-        ${[0.5,0.75,1,1.25,1.5,1.75,2].map(r => `<button class="yt-speed-btn yto-speed-btn${r===1?' active':''}" data-rate="${r}" onclick="ytoSpeed(${r})">${r}x</button>`).join('')}
+        ${[0.5,0.75,1,1.25,1.5,1.75,2,2.25,2.5,2.75,3].map(r => `<button class="yt-speed-btn yto-speed-btn${r===1?' active':''}" data-rate="${r}" onclick="ytoSpeed(${r})">${r}x</button>`).join('')}
         <button class="yt-pip-btn" onclick="ytoPiP()" style="margin-left:0;">📺 PiP</button>
       </div>
     </div>
