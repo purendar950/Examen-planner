@@ -43,24 +43,46 @@ app = Flask(__name__)
 CORS(app)  # allow the static frontend (GitHub Pages) to call us
 
 # ------------------------------------------------------------------ config
+import shutil
+
 POT_BASE_URL = os.environ.get("POT_BASE_URL", "http://127.0.0.1:4416")
-COOKIES_PATH = os.environ.get("COOKIES_PATH", "/tmp/cookies.txt")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "18000"))       # 5h (URLs expire ~6h)
 MAX_HEIGHT = int(os.environ.get("MAX_HEIGHT", "720"))       # cap resolution
 REQUEST_TIMEOUT = 20
 
-# Write cookies from an env var if provided (handy on Render where you paste the
-# cookie file contents into a secret env var instead of committing a file).
-_cookie_env = os.environ.get("YT_COOKIES", "").strip()
-if _cookie_env and not os.path.exists(COOKIES_PATH):
-    try:
-        with open(COOKIES_PATH, "w") as fh:
-            fh.write(_cookie_env)
-        log.info("Wrote cookies from YT_COOKIES env to %s", COOKIES_PATH)
-    except OSError as exc:
-        log.warning("Could not write cookies file: %s", exc)
+# yt-dlp REWRITES the cookie file after each request (to persist refreshed
+# tokens), so the file it uses MUST be writable. Render secret files and mounted
+# cookie files are read-only, so we always resolve the cookie source into a
+# writable copy under /tmp and hand THAT to yt-dlp.
+WRITABLE_COOKIES = "/tmp/yt-cookies.txt"
 
-_HAS_COOKIES = os.path.exists(COOKIES_PATH)
+
+def _init_cookies():
+    """Resolve cookies (from env var or a read-only file) into a writable copy."""
+    env_cookies = os.environ.get("YT_COOKIES", "").strip()
+    # A read-only source file, e.g. a Render Secret File. Falls back to the old
+    # COOKIES_PATH name for backwards compatibility.
+    src_file = (os.environ.get("COOKIES_FILE")
+                or os.environ.get("COOKIES_PATH")
+                or "").strip()
+    try:
+        if env_cookies:
+            with open(WRITABLE_COOKIES, "w") as fh:
+                fh.write(env_cookies)
+            log.info("Loaded cookies from YT_COOKIES env -> %s", WRITABLE_COOKIES)
+            return WRITABLE_COOKIES
+        if src_file and os.path.exists(src_file):
+            shutil.copyfile(src_file, WRITABLE_COOKIES)
+            log.info("Copied cookies from %s -> %s (writable)", src_file, WRITABLE_COOKIES)
+            return WRITABLE_COOKIES
+    except OSError as exc:
+        log.warning("Could not initialise cookies: %s", exc)
+    log.info("No cookies configured; running without authentication")
+    return None
+
+
+COOKIES_FILE = _init_cookies()
+_HAS_COOKIES = bool(COOKIES_FILE)
 
 # ------------------------------------------------------------------ cache
 # key: video_id -> {"ts": epoch, "info": {...normalized...}}
@@ -79,7 +101,7 @@ def _base_ydl_opts():
         "socket_timeout": REQUEST_TIMEOUT,
     }
     if _HAS_COOKIES:
-        opts["cookiefile"] = COOKIES_PATH
+        opts["cookiefile"] = COOKIES_FILE
     if POT_BASE_URL and POT_BASE_URL != "http://127.0.0.1:4416":
         opts["extractor_args"] = {"youtubepot-bgutilhttp": {"base_url": [POT_BASE_URL]}}
     return opts
