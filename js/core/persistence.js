@@ -45,8 +45,98 @@ function saveProgress() {
   _saveDebounce = setTimeout(() => saveProgressNow(), 2000);
 }
 
+/* ── Cross-tab / cross-device safe merge ──
+   Firestore's { merge: true } only merges TOP-LEVEL document fields — since
+   the whole appState is written as a single field, every save fully REPLACES
+   appState.tasks and appState.progress. If two tabs/devices are open (or a
+   backgrounded mobile tab auto-saves a stale copy), whichever save lands last
+   wins and silently discards whatever the other tab had just added/completed.
+   Observed symptoms: tasks carried forward by auto-rollover disappearing
+   within minutes, and a task marked complete "un-completing" itself and
+   getting rescheduled onto the next day.
+   Fix: merge appState.tasks/progress against the last-known-remote copy
+   before writing, instead of trusting local state to be the full picture.
+     - tasks: union by id per date; a task is TASKS present on either side.
+       When both sides have the same id, "done" wins if EITHER side has it
+       done (a completion can never be silently reverted by a stale write).
+     - progress: same "done true wins" rule per chapter id, and numeric/latest
+       fields (revisionCount, nextRevisionAt, completedAt) prefer the side with
+       the more advanced value so an older tab can't roll back real progress. */
+function _mergeTaskLists(localList, remoteList, deletedIds) {
+  const byId = new Map();
+  (remoteList || []).forEach(t => { if (t && t.id) byId.set(t.id, t); });
+  (localList || []).forEach(t => {
+    if (!t || !t.id) return;
+    const other = byId.get(t.id);
+    if (!other) { byId.set(t.id, t); return; }
+    // Same task on both sides: prefer whichever copy is "further along"
+    // (done beats not-done) but otherwise keep the local edit (freshest text/edits).
+    const merged = { ...other, ...t };
+    merged.done = !!(t.done || other.done);
+    if (merged.done) merged.status = 'done';
+    byId.set(t.id, merged);
+  });
+  // A task deleted locally must not be resurrected by a stale remote copy.
+  if (deletedIds && deletedIds.size) {
+    deletedIds.forEach(id => byId.delete(id));
+  }
+  return Array.from(byId.values());
+}
+
+function mergeRemoteIntoLocal(local, remote) {
+  if (!remote) return local;
+  const out = { ...local };
+  const deletedIds = new Set(local._deletedTaskIds || []);
+
+  // tasks: union per date, id-deduped, completions never lost, deletions kept.
+  const dates = new Set([...Object.keys(local.tasks || {}), ...Object.keys(remote.tasks || {})]);
+  const mergedTasks = {};
+  dates.forEach(ds => {
+    const merged = _mergeTaskLists(local.tasks?.[ds], remote.tasks?.[ds], deletedIds);
+    if (merged.length) mergedTasks[ds] = merged;
+  });
+  out.tasks = mergedTasks;
+
+  // Union the tombstone lists too, so a delete made on another device is also
+  // respected here (and trim to the same 500-entry cap as deleteTask()).
+  if (Array.isArray(remote._deletedTaskIds) && remote._deletedTaskIds.length) {
+    const unionDeleted = new Set([...(local._deletedTaskIds || []), ...remote._deletedTaskIds]);
+    out._deletedTaskIds = Array.from(unionDeleted).slice(-500);
+  }
+
+  // progress: per chapter/task id, "done" wins, keep the more advanced record.
+  const progIds = new Set([...Object.keys(local.progress || {}), ...Object.keys(remote.progress || {})]);
+  const mergedProgress = {};
+  progIds.forEach(id => {
+    const l = local.progress?.[id];
+    const r = remote.progress?.[id];
+    if (l && r) {
+      mergedProgress[id] = {
+        ...r, ...l,
+        done: !!(l.done || r.done),
+        revisionCount: Math.max(l.revisionCount || 0, r.revisionCount || 0),
+        nextRevisionAt: (l.nextRevisionAt || '') > (r.nextRevisionAt || '') ? l.nextRevisionAt : r.nextRevisionAt
+      };
+    } else {
+      mergedProgress[id] = l || r;
+    }
+  });
+  out.progress = mergedProgress;
+
+  return out;
+}
+
 async function saveProgressNow() {
   if (!currentUser || !_fbReady || !db) return;
+
+  /* Reconcile against the latest known server copy BEFORE computing the
+     save payload, so a stale local tab can't wipe out tasks/completions
+     another tab already persisted. No-op when there's nothing to merge yet
+     (first save of a session) or nothing has diverged. */
+  if (typeof _lastRemoteAppState !== 'undefined' && _lastRemoteAppState) {
+    appState = mergeRemoteIntoLocal(appState, _lastRemoteAppState);
+  }
+
   const json = JSON.stringify(appState);
   if (json === _lastSavedJSON) { _localDirty = false; setSyncStatus('', ''); return; } // Nothing changed
 
@@ -63,6 +153,7 @@ async function saveProgressNow() {
 
     _lastSavedJSON = json;
     _localDirty = false;
+    if (typeof _lastRemoteAppState !== 'undefined') _lastRemoteAppState = appState;
     setSyncStatus('saved', '☁ Saved');
     setTimeout(() => setSyncStatus('', ''), 2500);
   } catch(e) {

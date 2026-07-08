@@ -339,6 +339,13 @@ function showAuthError(type, msg) {
 ══════════════════════════════════════════════ */
 let _snapshotUnsub = null;
 let _authInitDone  = false;
+/* Last appState we know is on the server (kept fresh by the initial load and
+   every real-time snapshot). Used by saveProgressNow() to merge tasks/progress
+   instead of blindly overwriting the whole document — see mergeRemoteIntoLocal()
+   in persistence.js for why (fixes: completed tasks reverting/rescheduling and
+   carried-forward tasks vanishing when two tabs/devices save around the same
+   time). */
+let _lastRemoteAppState = null;
 
 /* ── PROTOCOL GUARD ──
    content:// = Android file manager se directly open
@@ -435,6 +442,7 @@ if (auth && !_isBadProtocol) {
         state = { ...getDefaultState(), ...(data.appState || {}) };
         if (data.profile?.name) currentUser = { email: user.email, name: data.profile.name, uid: user.uid };
       }
+      _lastRemoteAppState = state;
       loginUser(user.email, name, user.uid, state);
     } catch(e) {
       // Offline — try localStorage cache (via the shared storage module when
@@ -483,15 +491,22 @@ if (auth && !_isBadProtocol) {
           }
         }
 
+        /* Track the latest server copy regardless of whether we apply it
+           locally right now — saveProgressNow() merges against this so a
+           save from this tab can never silently discard tasks/progress that
+           another tab/device just wrote (the vanishing-tasks / reverted-
+           completion bug). */
+        const remoteState = snapData?.appState;
+        if (remoteState) _lastRemoteAppState = { ...getDefaultState(), ...remoteState };
+
         /* Don't clobber unsaved local edits with a remote echo. Flush our
            pending changes first; the next snapshot will reconcile. */
         if (_localDirty) { try { saveProgressNow(); } catch(e) {} return; }
-        const remoteState = snapData?.appState;
         if (!remoteState) return;
         const localJSON  = JSON.stringify(appState);
-        const remoteJSON = JSON.stringify({ ...getDefaultState(), ...remoteState });
+        const remoteJSON = JSON.stringify(_lastRemoteAppState);
         if (localJSON !== remoteJSON) {
-          appState = { ...getDefaultState(), ...remoteState };
+          appState = _lastRemoteAppState;
           if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
           updateDashboard();
           buildSyllabus();
