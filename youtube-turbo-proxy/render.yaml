@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: youtube-turbo-proxy
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    rootDir: youtube-turbo-proxy
+    healthCheckPath: /health
+    envVars:
+      - key: MAX_HEIGHT
+        value: "720"
+      - key: CACHE_TTL
+        value: "18000"
+      # Paste the contents of a Netscape cookies.txt from a THROWAWAY YouTube
+      # account here (Render dashboard -> Environment -> add as a secret).
+      # Leave empty to run without cookies (many videos will be bot-gated).
+      - key: YT_COOKIES
+        sync: false
