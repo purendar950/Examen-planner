@@ -339,6 +339,17 @@ function showAuthError(type, msg) {
 ══════════════════════════════════════════════ */
 let _snapshotUnsub = null;
 let _authInitDone  = false;
+/* Holds a queued "redirect to login" timer. When onAuthStateChanged reports
+   no user we do NOT redirect immediately — we schedule it and cancel it if a
+   real session shows up a moment later. This absorbs the brief unauthenticated
+   window during the logout→re-login handoff between index.html and app.html
+   (and any spurious token-refresh null), which was bouncing a freshly
+   logged-in user straight back to the login page ("logs in then suddenly
+   logs out"). */
+let _pendingRedirect = null;
+function _cancelPendingRedirect() {
+  if (_pendingRedirect) { clearTimeout(_pendingRedirect); _pendingRedirect = null; }
+}
 
 /* ── PROTOCOL GUARD ──
    content:// = Android file manager se directly open
@@ -362,7 +373,12 @@ const _authTimeout = setTimeout(() => {
     }
     document.getElementById('app').style.display = 'none';
     if (!_isBadProtocol) {
-      setTimeout(function() { window.location.href = 'index.html?tab=login'; }, 300);
+      // Guard against redirecting a user whose session resolved late: only
+      // bounce to the login page if Firebase still reports nobody signed in.
+      setTimeout(function() {
+        if (auth && auth.currentUser) { location.reload(); return; }
+        window.location.href = 'index.html?tab=login';
+      }, 300);
       return; // Skip showing auth-screen — redirect handles it
     }
     // Bad protocol (file://) — can't redirect, show inline auth-screen as fallback
@@ -413,10 +429,32 @@ if (auth && !_isBadProtocol) {
         overlay.style.display = 'flex';
       }
       document.getElementById('app').style.display = 'none';
-      // Give 300ms for any pending Firebase ops, then redirect
-      setTimeout(function() { window.location.href = 'index.html?tab=login'; }, 300);
+      // FIX (auto-logout on re-login): DON'T redirect on the first sign of a
+      // null user. Right after a logout→login handoff (or a transient token
+      // refresh) Firebase can briefly report no user before the freshly
+      // persisted session becomes visible on this page. If we navigated away
+      // immediately (the old 300ms redirect), the late-arriving session was
+      // discarded and the user was thrown back to the login page even though
+      // the login had actually succeeded.
+      //
+      // Instead we QUEUE the redirect and re-check `auth.currentUser` when it
+      // fires. If a real session showed up in the meantime, the subsequent
+      // onAuthStateChanged(user) callback below cancels this timer, and even
+      // if that callback is delayed, the currentUser guard here aborts the
+      // redirect. A genuinely logged-out visitor stays null and is redirected
+      // after the grace period as before.
+      _cancelPendingRedirect();
+      _pendingRedirect = setTimeout(function() {
+        _pendingRedirect = null;
+        if (auth.currentUser) return; // a session arrived — do NOT log out
+        window.location.href = 'index.html?tab=login';
+      }, 1500);
       return;
     }
+
+    // A real user is present — cancel any queued "back to login" redirect that
+    // a preceding null callback may have scheduled.
+    _cancelPendingRedirect();
 
     // A new user signed in — clear the logout flag so this and future
     // onAuthStateChanged callbacks are processed normally.
