@@ -182,7 +182,10 @@ service cloud.firestore {
     // The old rule let EVERY logged-in user read it and steal the key.
     // Regular users can read all config docs EXCEPT config/ai.
     match /config/{docId} {
-      allow read:  if isAdmin() || (isLoggedIn() && docId != 'ai');
+      // config/ai (Groq key) and config/turbo (YouTube cookies) hold secrets
+      // read server-side via the Admin SDK (which bypasses rules). Regular
+      // users may read every OTHER config doc, but not these two.
+      allow read:  if isAdmin() || (isLoggedIn() && docId != 'ai' && docId != 'turbo');
       allow write: if isAdmin();
     }
 

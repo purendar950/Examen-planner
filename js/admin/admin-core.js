@@ -159,6 +159,7 @@ async function loadAll() {
   } catch(e) { PAYMENTS = []; }
   try { const cf = await db.collection('config').doc('payment').get(); CONFIG = cf.exists ? cf.data() : {}; } catch(e) { CONFIG = {}; }
   try { const ff = await db.collection('config').doc('free').get(); CONFIG.free = ff.exists ? ff.data() : { mocks:5, mediaSaves:2, notes:10 }; } catch(e) { CONFIG.free = { mocks:5, mediaSaves:2, notes:10 }; }
+  try { const tb = await db.collection('config').doc('turbo').get(); CONFIG.turbo = tb.exists ? tb.data() : {}; } catch(e) { CONFIG.turbo = {}; }
   DUP = { mobile:{}, fp:{}, ip:{} };
   USERS.forEach(u => {
     if (u.p.mobile) DUP.mobile[u.p.mobile] = (DUP.mobile[u.p.mobile] || 0) + 1;

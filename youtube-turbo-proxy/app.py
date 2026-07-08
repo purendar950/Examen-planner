@@ -44,11 +44,16 @@ CORS(app)  # allow the static frontend (GitHub Pages) to call us
 
 # ------------------------------------------------------------------ config
 import shutil
+import json
 
 POT_BASE_URL = os.environ.get("POT_BASE_URL", "http://127.0.0.1:4416")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "18000"))       # 5h (URLs expire ~6h)
 MAX_HEIGHT = int(os.environ.get("MAX_HEIGHT", "720"))       # cap resolution
 REQUEST_TIMEOUT = 20
+
+# How often to re-read cookies from Firestore so an admin's paste in the panel
+# takes effect without a redeploy. Default 10 min.
+COOKIE_REFRESH_SEC = int(os.environ.get("COOKIE_REFRESH_SEC", "600"))
 
 # yt-dlp REWRITES the cookie file after each request (to persist refreshed
 # tokens), so the file it uses MUST be writable. Render secret files and mounted
@@ -56,33 +61,104 @@ REQUEST_TIMEOUT = 20
 # writable copy under /tmp and hand THAT to yt-dlp.
 WRITABLE_COOKIES = "/tmp/yt-cookies.txt"
 
+COOKIES_FILE = None      # path handed to yt-dlp (set once cookies are resolved)
+_HAS_COOKIES = False
+_cookie_source = "none"  # "firestore" | "env" | "file" | "none"  (shown in /health)
+_cookie_lock = threading.Lock()
 
-def _init_cookies():
-    """Resolve cookies (from env var or a read-only file) into a writable copy."""
-    env_cookies = os.environ.get("YT_COOKIES", "").strip()
-    # A read-only source file, e.g. a Render Secret File. Falls back to the old
-    # COOKIES_PATH name for backwards compatibility.
-    src_file = (os.environ.get("COOKIES_FILE")
-                or os.environ.get("COOKIES_PATH")
-                or "").strip()
+# ── Firebase Admin (optional): lets the admin panel manage cookies from
+#    Firestore config/turbo without anyone touching Render. Mirrors how the
+#    Telegram bot reads config/ai. Set FIREBASE_SERVICE_ACCOUNT to the SAME
+#    service-account JSON the bot already uses. ──
+_fb_db = None
+
+
+def _init_firebase():
+    global _fb_db
+    raw = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "").strip()
+    if not raw:
+        log.info("FIREBASE_SERVICE_ACCOUNT not set — cookies come from env/file only.")
+        return None
     try:
-        if env_cookies:
-            with open(WRITABLE_COOKIES, "w") as fh:
-                fh.write(env_cookies)
-            log.info("Loaded cookies from YT_COOKIES env -> %s", WRITABLE_COOKIES)
-            return WRITABLE_COOKIES
-        if src_file and os.path.exists(src_file):
-            shutil.copyfile(src_file, WRITABLE_COOKIES)
-            log.info("Copied cookies from %s -> %s (writable)", src_file, WRITABLE_COOKIES)
-            return WRITABLE_COOKIES
-    except OSError as exc:
-        log.warning("Could not initialise cookies: %s", exc)
-    log.info("No cookies configured; running without authentication")
+        import firebase_admin
+        from firebase_admin import credentials, firestore
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(credentials.Certificate(json.loads(raw)))
+        _fb_db = firestore.client()
+        log.info("Firebase Admin ready — cookies sync from Firestore config/turbo")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Firebase init failed (%s) — falling back to env/file cookies.", exc)
+        _fb_db = None
+    return _fb_db
+
+
+def _write_cookies(text):
+    with open(WRITABLE_COOKIES, "w") as fh:
+        fh.write(text)
+    return WRITABLE_COOKIES
+
+
+def _load_cookies_from_firestore():
+    if not _fb_db:
+        return None
+    try:
+        doc = _fb_db.collection("config").document("turbo").get()
+        if not doc.exists:
+            return None
+        cookies = ((doc.to_dict() or {}).get("cookies") or "").strip()
+        if cookies and "youtube.com" in cookies:
+            return _write_cookies(cookies)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Firestore cookie read failed: %s", exc)
     return None
 
 
-COOKIES_FILE = _init_cookies()
-_HAS_COOKIES = bool(COOKIES_FILE)
+def _load_cookies_from_env_or_file():
+    env_cookies = os.environ.get("YT_COOKIES", "").strip()
+    src_file = (os.environ.get("COOKIES_FILE")
+                or os.environ.get("COOKIES_PATH") or "").strip()
+    try:
+        if env_cookies:
+            return _write_cookies(env_cookies), "env"
+        if src_file and os.path.exists(src_file):
+            shutil.copyfile(src_file, WRITABLE_COOKIES)
+            return WRITABLE_COOKIES, "file"
+    except OSError as exc:
+        log.warning("Could not initialise env/file cookies: %s", exc)
+    return None, "none"
+
+
+def refresh_cookies():
+    """Resolve cookies, preferring Firestore (freshest, admin-managed) and
+    falling back to env var / secret file. Safe to call repeatedly."""
+    global COOKIES_FILE, _HAS_COOKIES, _cookie_source
+    with _cookie_lock:
+        path = _load_cookies_from_firestore()
+        source = "firestore" if path else None
+        if not path:
+            path, source = _load_cookies_from_env_or_file()
+        COOKIES_FILE = path
+        _HAS_COOKIES = bool(path)
+        _cookie_source = source or "none"
+        return _HAS_COOKIES
+
+
+def _cookie_refresh_loop():
+    while True:
+        time.sleep(COOKIE_REFRESH_SEC)
+        try:
+            before = _cookie_source
+            refresh_cookies()
+            log.info("Cookie refresh tick (source=%s)", _cookie_source)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Cookie refresh failed: %s", exc)
+
+
+_init_firebase()
+refresh_cookies()
+# Background refresh so admin-panel cookie updates land without a redeploy.
+if _fb_db:
+    threading.Thread(target=_cookie_refresh_loop, daemon=True).start()
 
 # ------------------------------------------------------------------ cache
 # key: video_id -> {"ts": epoch, "info": {...normalized...}}
@@ -197,6 +273,7 @@ def health():
         "status": "ok",
         "pot_provider": pot_ok,
         "cookies": _HAS_COOKIES,
+        "cookie_source": _cookie_source,   # firestore | env | file | none
         "cached_videos": len(_cache),
     })
 
@@ -214,8 +291,17 @@ def api_info():
     except yt_dlp.utils.DownloadError as exc:
         msg = str(exc)
         if "confirm you" in msg or "bot" in msg or "Sign in" in msg:
+            # Maybe the admin just pasted fresh cookies — pull the latest from
+            # Firestore and retry once before giving up.
+            if refresh_cookies() and _cookie_source == "firestore":
+                try:
+                    info, _ = _extract(video_id, force=True)
+                    if info["formats"]:
+                        return jsonify(info)
+                except Exception:  # noqa: BLE001
+                    pass
             return jsonify({"error": "youtube_bot_check",
-                            "detail": "This video is bot-gated. The server needs valid YouTube cookies."}), 403
+                            "detail": "This video is bot-gated. Update the YouTube cookies in the admin panel."}), 403
         return jsonify({"error": "extract_failed", "detail": msg[:300]}), 502
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "server_error", "detail": str(exc)[:300]}), 500

@@ -826,7 +826,22 @@ function renderSettings() {
   var maintOn = (SETTINGS && SETTINGS.maintenance === true);
   var welcome = (SETTINGS && SETTINGS.welcomeMessage) || '';
   var defaultPlan = (SETTINGS && SETTINGS.defaultPlanId) || '';
-  return '<div class="card" style="margin-bottom:1rem;">' +
+  var turboUpdated = (CONFIG && CONFIG.turbo && CONFIG.turbo.updatedAt) ? fmtDate(CONFIG.turbo.updatedAt) : 'never';
+  var turboBy = (CONFIG && CONFIG.turbo && CONFIG.turbo.updatedBy) || '';
+  var turboCard = '<div class="card" style="margin-bottom:1rem;">' +
+    '<h3 style="margin-bottom:0.5rem;">&#9889; Turbo Player — YouTube Cookies</h3>' +
+    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.75rem;">Turbo videos bot-check se fail hone lage? Yahan ek fresh Netscape <code>cookies.txt</code> (throwaway YouTube account se) paste karke Save karo. Firestore mein save hota hai — Turbo backend ise automatically ~10 min mein utha leta hai (Render kholne ki zarurat nahi).</p>' +
+    '<textarea id="cfg-turbo-cookies" placeholder="# Netscape HTTP Cookie File — poori cookies.txt yahan paste karo" style="width:100%;min-height:120px;resize:vertical;font-family:monospace;font-size:0.75rem;"></textarea>' +
+    '<div class="row" style="margin-top:8px;align-items:center;gap:12px;flex-wrap:wrap;">' +
+      '<button class="btn btn-green" onclick="saveTurboCookies()">&#128190; Save Cookies</button>' +
+      '<button class="btn btn-gray" onclick="checkTurboBackend()">&#128268; Check Backend</button>' +
+      '<span class="muted" style="font-size:0.78rem;">Last updated: <b>' + turboUpdated + '</b>' + (turboBy ? ' by ' + esc(turboBy) : '') + '</span>' +
+    '</div>' +
+    '<div id="turbo-backend-status" class="muted" style="font-size:0.78rem;margin-top:6px;"></div>' +
+    '<div class="muted" style="font-size:0.72rem;margin-top:6px;">&#128274; Admin-only Firestore (config/turbo). Backend ko <code>FIREBASE_SERVICE_ACCOUNT</code> env var chahiye (bot wala hi) taaki ye padh sake. Code mein kabhi save nahi hota.</div>' +
+    '</div>';
+  return turboCard +
+    '<div class="card" style="margin-bottom:1rem;">' +
     '<h3 style="margin-bottom:0.5rem;">&#128273; Same-Device Detection (Always Active)</h3>' +
     '<p class="muted" style="line-height:1.65;font-size:0.85rem;margin-bottom:0.5rem;">This is the <strong>default rule</strong> and cannot be disabled:<br>' +
     '&#10004; <strong>First account</strong> from a device &rarr; <span style="color:var(--accent);font-weight:700;">Instantly approved</span><br>' +
@@ -968,6 +983,48 @@ async function saveDefaultPlan() {
     SETTINGS = SETTINGS || {}; SETTINGS.defaultPlanId = id;
     showToast(id ? '✅ Default plan set to ' + (PLANS.find(p=>p.id===id)?.name || id) + '.' : '✅ Default plan cleared (user will pick).');
   } catch(e) { showToast('Save failed: ' + e.message); }
+}
+
+/* ⚡ Turbo Player — save YouTube cookies to Firestore config/turbo. The
+   youtube-turbo-proxy backend reads this via the Firebase Admin SDK (same
+   service account as the bot) and refreshes automatically — no Render visit. */
+async function saveTurboCookies() {
+  var ta = document.getElementById('cfg-turbo-cookies');
+  var cookies = ta ? ta.value.trim() : '';
+  if (!cookies || cookies.indexOf('youtube.com') === -1) {
+    showToast('⚠️ Netscape cookies.txt paste karo (youtube.com wali lines honi chahiye).');
+    return;
+  }
+  try {
+    await db.collection('config').doc('turbo').set({
+      cookies: cookies,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: (firebase.auth().currentUser || {}).email || 'admin'
+    }, { merge: true });
+    CONFIG.turbo = Object.assign({}, CONFIG.turbo, { cookies: cookies, updatedBy: (firebase.auth().currentUser || {}).email || 'admin' });
+    if (ta) ta.value = ''; // don't keep the sensitive value in the DOM
+    await adminLog('update_turbo_cookies', null);
+    showToast('✅ Turbo cookies saved! Backend ~10 min mein (ya agle bot-check retry pe) utha lega.');
+    render();
+  } catch(e) { showToast('Save failed: ' + e.message); }
+}
+
+/* Ping the Turbo backend /health so the admin can see if it's up + cookie state.
+   Backend URL defaults to the deployed service; override with
+   localStorage.setItem('turboBackendUrl', '<url>'). */
+async function checkTurboBackend() {
+  var el = document.getElementById('turbo-backend-status');
+  var url = (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+  if (el) el.textContent = '⏳ Checking ' + url + '/health …';
+  try {
+    var r = await fetch(url + '/health');
+    var d = await r.json();
+    if (el) el.innerHTML = (d.pot_provider ? '🟢' : '🟡') +
+      ' Backend online — cookies: <b>' + (d.cookies ? 'yes' : 'no') + '</b>' +
+      ' (source: ' + esc(d.cookie_source || '?') + '), PO-token: ' + (d.pot_provider ? 'yes' : 'no') + '.';
+  } catch(e) {
+    if (el) el.innerHTML = '🔴 Backend not reachable (' + esc(e.message) + '). Free tier wake ho raha ho to ~40s baad retry karo.';
+  }
 }
 
 async function forceLogoutAll() {
