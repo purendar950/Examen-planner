@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Piped Player Demo — True 3x/4x Speed + PiP</title>
+<style>
+  :root {
+    --bg: #0f172a; --surface: #1e293b; --border: rgba(255,255,255,0.1);
+    --accent: #6366f1; --muted: #94a3b8; --text: #e2e8f0;
+    --green: #22c55e; --red: #ef4444; --amber: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 20px; line-height: 1.5;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 18px; }
+  .input-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .input-bar input {
+    flex: 1; min-width: 200px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 12px; border-radius: 10px; font-size: 0.9rem;
+  }
+  .input-bar button {
+    background: var(--accent); border: none; color: #fff; padding: 10px 18px;
+    border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 0.9rem;
+  }
+  .input-bar button:hover { filter: brightness(1.1); }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .chip {
+    background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+    padding: 5px 10px; border-radius: 8px; font-size: 0.72rem; cursor: pointer;
+  }
+  .chip:hover { color: var(--text); border-color: var(--accent); }
+
+  /* ── Player ── */
+  .player {
+    position: relative; background: #000; border-radius: 12px; overflow: hidden;
+    aspect-ratio: 16/9; border: 1px solid var(--border);
+  }
+  .player video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; text-align: center;
+    padding: 20px; background: rgba(0,0,0,0.85);
+  }
+  .overlay.hidden { display: none; }
+  .spinner {
+    width: 34px; height: 34px; border: 3px solid rgba(255,255,255,0.2);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .overlay a { color: var(--accent); font-size: 0.85rem; }
+  .badge {
+    position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7);
+    color: var(--green); padding: 4px 10px; border-radius: 6px; font-size: 12px; display: none;
+  }
+  .badge.show { display: block; }
+
+  /* ── Controls ── */
+  .controls {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.9));
+    padding: 30px 12px 10px; display: flex; flex-direction: column; gap: 8px;
+    opacity: 0; transition: opacity 0.2s; pointer-events: none;
+  }
+  .player:hover .controls, .controls.pinned { opacity: 1; pointer-events: auto; }
+  .progress { width: 100%; height: 5px; background: rgba(255,255,255,0.25); border-radius: 3px; cursor: pointer; position: relative; }
+  .progress-fill { height: 100%; width: 0; background: var(--accent); border-radius: 3px; }
+  .btn-row { display: flex; align-items: center; justify-content: space-between; }
+  .btn-group { display: flex; align-items: center; gap: 6px; }
+  .cbtn {
+    background: none; border: none; color: #fff; cursor: pointer; font-size: 17px;
+    padding: 4px 6px; border-radius: 6px; line-height: 1;
+  }
+  .cbtn:hover { background: rgba(255,255,255,0.15); }
+  .time { color: rgba(255,255,255,0.75); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .speed-wrap { position: relative; }
+  .speed-toggle {
+    background: rgba(99,102,241,0.35); border: none; color: #fff; padding: 4px 10px;
+    border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 700;
+  }
+  .speed-menu {
+    position: absolute; bottom: 100%; right: 0; margin-bottom: 8px; background: #0b1220;
+    border: 1px solid var(--border); border-radius: 10px; padding: 6px; display: none;
+    flex-direction: column; max-height: 240px; overflow-y: auto; min-width: 70px;
+  }
+  .speed-menu.show { display: flex; }
+  .speed-menu button {
+    background: transparent; border: none; color: #fff; padding: 7px 14px; border-radius: 6px;
+    cursor: pointer; font-size: 13px;
+  }
+  .speed-menu button.active { background: var(--accent); }
+  .speed-menu button:hover { background: rgba(99,102,241,0.4); }
+
+  .meta { margin-top: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 0.85rem; }
+  .meta .row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; }
+  .meta .k { color: var(--muted); }
+  .note { margin-top: 14px; font-size: 0.78rem; color: var(--muted); border-left: 3px solid var(--amber); padding: 8px 12px; background: rgba(245,158,11,0.08); border-radius: 0 8px 8px 0; }
+  code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚡ Piped Player Demo</h1>
+  <div class="sub">Proof-of-concept for "Turbo mode": pulls the raw video via the Piped API into a native &lt;video&gt; element so playback speed can go up to <strong>4x</strong> and Picture-in-Picture works natively. Falls back to a normal YouTube embed if Piped fails.</div>
+
+  <div class="input-bar">
+    <input id="url" type="text" placeholder="Paste a YouTube link (watch, youtu.be, shorts, embed)…" />
+    <button onclick="loadFromInput()">Load</button>
+  </div>
+  <div class="chips">
+    <span style="font-size:0.72rem;color:var(--muted);align-self:center;">Try (known-working right now):</span>
+    <span class="chip" onclick="quick('dQw4w9WgXcQ')">Rick Astley</span>
+    <span class="chip" onclick="quick('kJQP7kiw5Fk')">Despacito</span>
+    <span style="font-size:0.72rem;color:var(--muted);align-self:center;">— or paste any link to test reliability</span>
+  </div>
+
+  <div class="player" id="player">
+    <video id="video" playsinline></video>
+    <div class="badge" id="pipBadge">📌 Picture-in-Picture active</div>
+    <div class="overlay" id="overlay">
+      <div style="font-size:38px;">▶️</div>
+      <div>Paste a YouTube link above and hit <strong>Load</strong></div>
+    </div>
+    <div class="controls" id="controls">
+      <div class="progress" id="progress"><div class="progress-fill" id="fill"></div></div>
+      <div class="btn-row">
+        <div class="btn-group">
+          <button class="cbtn" id="playBtn" onclick="togglePlay()">▶️</button>
+          <button class="cbtn" onclick="seek(-10)">⏪</button>
+          <button class="cbtn" onclick="seek(10)">⏩</button>
+          <span class="time" id="time">0:00 / 0:00</span>
+        </div>
+        <div class="btn-group">
+          <div class="speed-wrap">
+            <button class="speed-toggle" id="speedToggle" onclick="toggleSpeedMenu()">1x</button>
+            <div class="speed-menu" id="speedMenu"></div>
+          </div>
+          <button class="cbtn" onclick="togglePiP()" title="Picture-in-Picture">📌</button>
+          <button class="cbtn" onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="meta" id="meta" style="display:none;"></div>
+
+  <div class="note">
+    <strong>What this demo proves:</strong> the speed menu goes up to <strong>4x</strong> (YouTube's own embed caps at 2x), and 📌 gives you real native PiP. <br>
+    <strong>Known limits (by design):</strong> only <strong>360p</strong> is available as a directly-playable stream; only one public Piped instance is currently alive, so if it's down you'll see the YouTube fallback link. In the real app, Turbo would be an opt-in toggle that automatically falls back to your existing YouTube player.
+  </div>
+</div>
+
+<script>
+/* ──────────────────────────────────────────────────────────────
+   Piped API layer (vanilla — mirrors what would live in js/core)
+   ────────────────────────────────────────────────────────────── */
+const PIPED_INSTANCES = [
+  'https://api.piped.private.coffee',   // only instance confirmed alive (Jul 2026)
+  'https://pipedapi.kavin.rocks',       // fallbacks kept in case they recover
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.reallyaweso.me'
+];
+
+function extractVideoId(url) {
+  if (!url) return null;
+  const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtube\.com\/live\/)([a-zA-Z0-9_-]{11})/);
+  if (m) return m[1];
+  // bare 11-char id
+  if (/^[a-zA-Z0-9_-]{11}$/.test(url.trim())) return url.trim();
+  return null;
+}
+
+async function fetchVideoStreams(videoId) {
+  let lastErr = 'No instances reachable';
+  for (const base of PIPED_INSTANCES) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 12000);
+      const res = await fetch(base + '/streams/' + videoId, { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) { lastErr = base + ' → HTTP ' + res.status; continue; }
+      const data = await res.json();
+      if (data.error) { lastErr = base + ' → ' + data.error; continue; }
+      const streams = (data.videoStreams || []).filter(s => s.url && !s.videoOnly);
+      if (!streams.length) { lastErr = base + ' → no progressive streams'; continue; }
+      return {
+        instance: base,
+        title: data.title, uploader: data.uploader,
+        duration: data.duration, streams
+      };
+    } catch (e) {
+      lastErr = base + ' → ' + (e.name === 'AbortError' ? 'timeout' : e.message);
+    }
+  }
+  throw new Error(lastErr);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Player UI
+   ────────────────────────────────────────────────────────────── */
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const controls = document.getElementById('controls');
+const fill = document.getElementById('fill');
+const timeEl = document.getElementById('time');
+const playBtn = document.getElementById('playBtn');
+const speedMenu = document.getElementById('speedMenu');
+const speedToggle = document.getElementById('speedToggle');
+const meta = document.getElementById('meta');
+let currentUrl = '';
+
+// build speed menu
+SPEEDS.forEach(s => {
+  const b = document.createElement('button');
+  b.textContent = s + 'x';
+  if (s === 1) b.classList.add('active');
+  b.onclick = () => setSpeed(s);
+  speedMenu.appendChild(b);
+});
+
+function quick(id) {
+  document.getElementById('url').value = 'https://www.youtube.com/watch?v=' + id;
+  loadFromInput();
+}
+
+function loadFromInput() {
+  const url = document.getElementById('url').value.trim();
+  currentUrl = url;
+  const id = extractVideoId(url);
+  if (!id) { showError('That doesn\'t look like a valid YouTube URL.'); return; }
+  loadVideo(id);
+}
+
+function showLoading() {
+  overlay.classList.remove('hidden');
+  overlay.innerHTML = '<div class="spinner"></div><div>Fetching stream via Piped…</div>';
+}
+function showError(msg) {
+  overlay.classList.remove('hidden');
+  const yt = currentUrl ? '<a href="' + currentUrl + '" target="_blank" rel="noreferrer">▶ Open in YouTube instead (fallback)</a>' : '';
+  overlay.innerHTML = '<div style="font-size:34px;">⚠️</div><div><strong>Piped fetch failed</strong></div>' +
+    '<div style="font-size:0.8rem;color:var(--muted);max-width:420px;">' + msg + '</div>' + yt;
+}
+
+async function loadVideo(id) {
+  showLoading();
+  meta.style.display = 'none';
+  try {
+    const data = await fetchVideoStreams(id);
+    // prefer highest progressive quality available
+    const stream = data.streams.slice().sort((a, b) =>
+      (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0))[0];
+    video.src = stream.url;
+    video.playbackRate = currentRate;
+    await video.play().catch(() => {});
+    overlay.classList.add('hidden');
+    meta.style.display = 'block';
+    meta.innerHTML =
+      '<div class="row"><span class="k">Title</span><span>' + esc(data.title) + '</span></div>' +
+      '<div class="row"><span class="k">Uploader</span><span>' + esc(data.uploader || '—') + '</span></div>' +
+      '<div class="row"><span class="k">Quality served</span><span>' + esc(stream.quality || '?') + '</span></div>' +
+      '<div class="row"><span class="k">Piped instance</span><span>' + esc(data.instance) + '</span></div>';
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+function togglePlay() { video.paused ? video.play() : video.pause(); }
+function seek(sec) { video.currentTime = Math.max(0, video.currentTime + sec); }
+
+let currentRate = 1;
+function setSpeed(s) {
+  currentRate = s;
+  video.playbackRate = s;
+  speedToggle.textContent = s + 'x';
+  [...speedMenu.children].forEach(b => b.classList.toggle('active', b.textContent === s + 'x'));
+  speedMenu.classList.remove('show');
+}
+function toggleSpeedMenu() { speedMenu.classList.toggle('show'); }
+
+async function togglePiP() {
+  try {
+    if (document.pictureInPictureElement) { await document.exitPictureInPicture(); }
+    else {
+      if (video.readyState === 0) { alert('Load a video first.'); return; }
+      if (video.paused) await video.play();
+      await video.requestPictureInPicture();
+    }
+  } catch (e) { alert('PiP unavailable: ' + e.message); }
+}
+
+function toggleFullscreen() {
+  const el = document.getElementById('player');
+  if (document.fullscreenElement) document.exitFullscreen();
+  else el.requestFullscreen && el.requestFullscreen();
+}
+
+function fmt(s) {
+  if (!s || isNaN(s)) return '0:00';
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60);
+  const mm = h ? String(m).padStart(2, '0') : m;
+  return (h ? h + ':' : '') + mm + ':' + String(sec).padStart(2, '0');
+}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+video.addEventListener('play', () => playBtn.textContent = '⏸');
+video.addEventListener('pause', () => playBtn.textContent = '▶️');
+video.addEventListener('timeupdate', () => {
+  if (video.duration) {
+    fill.style.width = (video.currentTime / video.duration * 100) + '%';
+    timeEl.textContent = fmt(video.currentTime) + ' / ' + fmt(video.duration);
+  }
+});
+video.addEventListener('enterpictureinpicture', () => document.getElementById('pipBadge').classList.add('show'));
+video.addEventListener('leavepictureinpicture', () => document.getElementById('pipBadge').classList.remove('show'));
+document.getElementById('progress').addEventListener('click', (e) => {
+  if (!video.duration) return;
+  const r = e.currentTarget.getBoundingClientRect();
+  video.currentTime = (e.clientX - r.left) / r.width * video.duration;
+});
+document.getElementById('url').addEventListener('keydown', e => { if (e.key === 'Enter') loadFromInput(); });
+</script>
+</body>
+</html>
