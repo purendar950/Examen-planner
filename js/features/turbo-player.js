@@ -103,8 +103,20 @@
       } catch (e) {}
     });
     v.addEventListener('pause', saveTurboProgress);
-    v.addEventListener('enterpictureinpicture', function () { showBadge(true); });
-    v.addEventListener('leavepictureinpicture', function () { showBadge(false); });
+    v.addEventListener('enterpictureinpicture', function () {
+      showBadge(true);
+      // Keep the hidden background YouTube iframe silenced while the native
+      // <video> is in PiP. Without this, the browser media session can wake
+      // the background iframe on pause/resume and playback "escapes" back
+      // into the original YouTube iframe. The onStateChange guard in
+      // youtube.js re-pauses the iframe whenever this flag is set.
+      window.ytPipBlockMain = true;
+      try { if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo(); } catch (e) {}
+    });
+    v.addEventListener('leavepictureinpicture', function () {
+      showBadge(false);
+      window.ytPipBlockMain = false;
+    });
     return v;
   }
 

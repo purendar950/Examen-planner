@@ -373,7 +373,20 @@ window.onYouTubeIframeAPIReady = function() {
         }
       },
       onStateChange: function(e) {
-        if (e.data === YT.PlayerState.PLAYING)  { ytStartProgressPolling(); }
+        if (e.data === YT.PlayerState.PLAYING)  {
+          // GUARD: While a Picture-in-Picture session is active — either the
+          // Document-PiP window (normal mode) or the native <video> PiP (Turbo
+          // mode) — the main background iframe must NEVER play. Otherwise the
+          // browser media session (hardware keys / notification) or YouTube's
+          // autoplay can wake it up, so pausing then resuming inside PiP makes
+          // playback "escape" back into the original YouTube iframe. If it
+          // tries to play, re-pause it immediately and keep audio in the PiP.
+          if (ytPipState || window.ytPipBlockMain) {
+            try { ytPlayer.pauseVideo(); } catch (err) {}
+            return;
+          }
+          ytStartProgressPolling();
+        }
         if (e.data === YT.PlayerState.PAUSED)   { ytStopProgressPolling(); ytSaveCurrentTime(); }
         if (e.data === YT.PlayerState.ENDED) {
           ytStopProgressPolling();
@@ -538,18 +551,22 @@ function ytPiP() {
       ytPipState = { vid: vid, startSec: startSec, openedAt: Date.now(), rate: rate };
       showToast('Picture-in-Picture ON 📺', 'success');
 
-      // On close: resume the main player roughly where PiP playback reached
+      // On close: resume the main player roughly where PiP playback reached.
       pipWin.addEventListener('pagehide', function() {
-        if (!ytPipState) return;
-        const elapsed = ((Date.now() - ytPipState.openedAt) / 1000) * (ytPipState.rate || 1);
-        const resumeAt = ytPipState.startSec + elapsed;
+        const st = ytPipState;
+        if (!st) return;
+        // Clear the PiP flag FIRST so the onStateChange PLAYING guard above
+        // lets the main player resume (it only blocks playback while PiP is
+        // still open). Resuming BEFORE clearing would get instantly re-paused.
+        ytPipState = null;
+        const elapsed = ((Date.now() - st.openedAt) / 1000) * (st.rate || 1);
+        const resumeAt = st.startSec + elapsed;
         try {
           ytPlayer.seekTo(resumeAt, true);
           ytPlayer.playVideo();
         } catch (e) {}
         // Persist the new position immediately
         ytSaveCurrentTime();
-        ytPipState = null;
       });
     })
     .catch(function() {
