@@ -120,10 +120,19 @@
       // youtube.js re-pauses the iframe whenever this flag is set.
       window.ytPipBlockMain = true;
       try { if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo(); } catch (e) {}
+      // Claim the media-session play/pause actions for the native <video>.
+      // A page has a single media session and the YouTube iframe owns it, so
+      // the PiP window's play button otherwise routes "play" to the iframe
+      // (which the youtube.js guard re-pauses) — leaving the PiP video stuck
+      // paused. Routing these actions to the native video lets it resume.
+      setPipMediaSession(true);
     });
     v.addEventListener('leavepictureinpicture', function () {
       showBadge(false);
       window.ytPipBlockMain = false;
+      // Release the media-session handlers so normal playback controls behave
+      // as before once we're out of PiP.
+      setPipMediaSession(false);
     });
     return v;
   }
@@ -131,6 +140,26 @@
   function showBadge(on) {
     var b = document.getElementById('yt-turbo-badge');
     if (b) b.style.display = on ? 'block' : 'none';
+  }
+
+  /* Route the OS / PiP-window play & pause buttons to the native <video>
+     while it is in Picture-in-Picture. Setting these to null on exit hands
+     control back to the browser default (and the YouTube iframe). */
+  function setPipMediaSession(on) {
+    if (!('mediaSession' in navigator)) return;
+    try {
+      if (on) {
+        navigator.mediaSession.setActionHandler('play', function () {
+          try { if (turboVideoEl) { var p = turboVideoEl.play(); if (p && p.catch) p.catch(function () {}); } } catch (e) {}
+        });
+        navigator.mediaSession.setActionHandler('pause', function () {
+          try { if (turboVideoEl) turboVideoEl.pause(); } catch (e) {}
+        });
+      } else {
+        navigator.mediaSession.setActionHandler('play', null);
+        navigator.mediaSession.setActionHandler('pause', null);
+      }
+    } catch (e) {}
   }
   function status(msg) {
     var st = document.getElementById('yt-turbo-status');
