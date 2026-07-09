@@ -277,6 +277,18 @@
       else if (typeof showToast === 'function') showToast('⚡ Turbo Pro plan mein milta hai.', 'error');
       return;
     }
+    // Capture the EXACT position of whichever player is live RIGHT NOW, before
+    // anything changes. When we reload the video in the other player below, it
+    // resumes from the saved position — so switching Turbo⇄iframe continues from
+    // the same point instead of an old throttled checkpoint. Both players only
+    // persist on a timer (Turbo ~10s / iframe ~60s) or async on pause, so without
+    // this synchronous save the new player would jump back to a stale time.
+    var _wasTurboLive = turboActive();
+    if (_wasTurboLive) {
+      saveTurboProgress();
+    } else if (typeof ytSaveCurrentTime === 'function') {
+      ytSaveCurrentTime();
+    }
     turboEnabled = !turboEnabled;
     localStorage.setItem('turboEnabled', turboEnabled ? '1' : '0');
     updateToggleUI();
