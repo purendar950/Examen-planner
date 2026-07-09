@@ -96,9 +96,17 @@
       var now = Date.now();
       if (now - lastSave > 10000) { lastSave = now; saveTurboProgress(); }
       try {
-        if (v.duration && (v.currentTime / v.duration) >= 0.9 &&
-            typeof ytAutoMarkOnComplete === 'function') {
-          ytAutoMarkOnComplete();
+        if (v.duration && v.duration > 0) {
+          var pct = Math.round(v.currentTime / v.duration * 100);
+          // Update the on-screen "X% watched" label — the iframe player does
+          // this in its polling loop, but Turbo's native <video> must do it
+          // itself, otherwise the watch % never updates in Turbo mode.
+          if (typeof ytUpdateVideoWatchLabel === 'function' && turboVid) {
+            ytUpdateVideoWatchLabel(turboVid, pct);
+          }
+          if (pct >= 90 && typeof ytAutoMarkOnComplete === 'function') {
+            ytAutoMarkOnComplete();
+          }
         }
       } catch (e) {}
     });
