@@ -426,7 +426,16 @@ function detectBacklog() {
   return null;
 }
 
-/* ─── F6 + F7: WEEKLY PLAN GENERATOR + MOCK SCHEDULER ─── */
+/* ─── F6 + F7: WEEKLY (7-DAY) PLAN — reads the SAME scope-aware schedule as Today ───
+   Previously this function built its own round-robin over ALL active subjects,
+   ignoring the wizard config (window._planConfig / scopeSubId). That made the
+   7-Day tab diverge from the Today tab — e.g. a Single Subject plan correctly
+   showed one subject on Today but every subject on 7-Day.
+
+   It now derives its days from getPlanScheduleMap() — the exact same combined,
+   scope-aware map (buildPlanSchedule -> planScopedSubjects + injected
+   revisions + mock days) that the Today/Day/Month views use — so the two
+   schedulers can never disagree again. */
 function generateWeeklyPlan() {
   const container = document.getElementById('weekly-plan-container');
   if (!container) return;
@@ -435,89 +444,59 @@ function generateWeeklyPlan() {
   const phase     = getPreparationPhase(daysLeft);
   const profile   = appState.studyProfile || {};
   const restDay   = profile.restDay !== undefined ? Number(profile.restDay) : -1;
-  const mornH     = profile.morningHours || 2;
-  const eveH      = profile.eveningHours || 2;
-  const hoursPerDay = mornH + eveH || 4;
   const today     = new Date(); today.setHours(0,0,0,0);
 
-  /* Build pending chapters per subject */
-  let subjects = [];
-  try { subjects = getActiveSubjects(); } catch(e) {}
-  const pendingBySub = {};
-  subjects.forEach(sub => {
-    const pending = sub.chapters.filter(c => !appState.progress[c.id]?.done);
-    if (pending.length) pendingBySub[sub.id] = { sub, chapters: [...pending] };
-  });
-  const subIds = Object.keys(pendingBySub);
+  /* Single source of truth: the same schedule map the Today tab renders from.
+     This honours the wizard config (scopeSubId, subjectFreq, chapter order,
+     rest days) and includes mock days + due revisions. */
+  let scheduleMap = {};
+  try {
+    scheduleMap = (typeof getPlanScheduleMap === 'function')
+      ? getPlanScheduleMap()
+      : ((window._planSchedule && window._planSchedule.byDate) || {});
+  } catch (e) { scheduleMap = {}; }
 
   const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  let subRotIdx = 0;
+  const isoOf = (typeof fmtDate === 'function')
+    ? fmtDate
+    : (dt => dt.toISOString().slice(0, 10));
   const days = [];
 
   for (let d = 0; d < 7; d++) {
-    const date   = new Date(today); date.setDate(today.getDate() + d);
-    const dow    = date.getDay();
-    const label  = d === 0 ? 'Today' : DAY_NAMES[dow];
+    const date    = new Date(today); date.setDate(today.getDate() + d);
+    const dow     = date.getDay();
+    const label   = d === 0 ? 'Today' : DAY_NAMES[dow];
     const dateStr = date.toLocaleDateString('en-IN', { day:'numeric', month:'short' });
 
-    /* Rest day */
+    /* Rest day (same rule buildPlanSchedule uses — no topics are placed here) */
     if (restDay >= 0 && dow === restDay) {
       days.push({ label, dateStr, dow, type:'rest' }); continue;
     }
 
-    /* F7: Mock Sunday in mock/final phase */
-    if ((phase.id === 'mock' || phase.id === 'final') && dow === 0) {
-      days.push({ label, dateStr, dow, type:'mock',
-        slots:[{ label:'📝 Full Mock Test', mins:120 },{ label:'🔍 Mock Analysis', mins:60 }]
-      }); continue;
-    }
-
-    /* Regular study day — pick 2 subjects by rotation */
-    const pickedSubs = [];
-    for (let i = 0; i < Math.min(2, subIds.length); i++) {
-      pickedSubs.push(subIds[(subRotIdx + i) % subIds.length]);
-    }
-    subRotIdx = (subRotIdx + 2) % Math.max(1, subIds.length);
-
-    const slots = [];
-    const dayMins = hoursPerDay * 60;
-    let used = 0;
-
-    pickedSubs.forEach(sid => {
-      const sd = pendingBySub[sid]; if (!sd) return;
-      const alotted = Math.floor(dayMins / pickedSubs.length);
-      let subUsed = 0;
-      for (const ch of sd.chapters) {
-        if (subUsed >= alotted || used >= dayMins) break;
-        const m = phase.id==='final' ? (ch.diff==='Hard'?30:ch.diff==='Medium'?20:15)
-                                     : (ch.diff==='Hard'?60:ch.diff==='Medium'?45:30);
-        slots.push({ chName:ch.name, subName:sd.sub.name, color:sd.sub.color, mins:m, diff:ch.diff });
-        subUsed += m; used += m;
-      }
-    });
-
-    days.push({ label, dateStr, dow, type:'study', slots, totalMins: used });
+    /* Pull this date's items straight from the shared map. Drop spacer slots
+       (spacing-only) exactly like the Today tab's renderTopicListItems does. */
+    const items = (scheduleMap[isoOf(date)] || []).filter(it => it.type !== 'spacer');
+    days.push({ label, dateStr, dow, type:'study', items });
   }
 
-  /* Render */
+  /* Render — reuse renderTopicListItems() so each day looks identical to Today. */
   const phColor = phase.color;
-  const subTags = s => {
-    const g = {};
-    s.forEach(sl => { if (sl.subName) g[sl.subName] = (g[sl.subName]||0)+1; });
-    return Object.entries(g).map(([n,c]) => `${n} (${c}ch)`).join(' · ');
-  };
+  const renderItems = (items, empty) =>
+    (typeof renderTopicListItems === 'function')
+      ? renderTopicListItems(items, empty)
+      : `<div style="font-size:.63rem;color:var(--muted);">${empty}</div>`;
 
   container.innerHTML = `
     <div style="padding:.85rem 1.25rem;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:1rem;flex-wrap:wrap;">
         <span style="font-size:.68rem;padding:2px 10px;border-radius:99px;background:${phColor}1a;color:${phColor};font-weight:600;border:1px solid ${phColor}33;">${phase.icon} ${phase.label}</span>
-        <span style="font-size:.68rem;color:var(--muted);">${daysLeft} days left · ${hoursPerDay}h/day</span>
+        <span style="font-size:.68rem;color:var(--muted);">${daysLeft} days left</span>
       </div>
-      <div style="display:flex;flex-direction:column;gap:8px;">
+      <div style="display:flex;flex-direction:column;gap:10px;">
         ${days.map((day, i) => {
           const isToday = i === 0;
           const wrapStyle = isToday
-            ? 'background:rgba(0,200,150,.04);margin:-3px;padding:3px;border-radius:10px;border:1px solid rgba(0,200,150,.2);'
+            ? 'background:rgba(0,200,150,.04);margin:-3px;padding:6px 3px;border-radius:10px;border:1px solid rgba(0,200,150,.2);'
             : '';
 
           if (day.type === 'rest') return `
@@ -529,27 +508,21 @@ function generateWeeklyPlan() {
               <div style="flex:1;background:var(--surface);border-radius:8px;padding:.5rem .85rem;font-size:.75rem;color:var(--muted);">😴 Rest Day</div>
             </div>`;
 
-          if (day.type === 'mock') return `
-            <div style="display:flex;gap:10px;align-items:flex-start;${wrapStyle}">
-              <div style="width:42px;text-align:center;flex-shrink:0;">
-                <div style="font-size:.62rem;color:${isToday?'var(--accent)':'var(--muted)'};">${day.label}</div>
-                <div style="font-size:.82rem;font-weight:700;color:${isToday?'var(--accent)':'var(--text)'};">${day.dateStr}</div>
-              </div>
-              <div style="flex:1;background:#f59e0b12;border:1px solid #f59e0b44;border-radius:8px;padding:.6rem .85rem;">
-                <div style="font-size:.7rem;font-weight:700;color:#f59e0b;margin-bottom:4px;">🎯 Mock Test Day</div>
-                ${day.slots.map(s=>`<div style="font-size:.68rem;color:var(--muted);">• ${s.label} (${s.mins}m)</div>`).join('')}
-              </div>
-            </div>`;
+          const studyCount = day.items.filter(it => it.type === 'study').length;
+          const reviseCount = day.items.filter(it => it.type === 'revise').length;
+          const metaBits = [];
+          if (studyCount)  metaBits.push(`${studyCount} topic${studyCount!==1?'s':''}`);
+          if (reviseCount) metaBits.push(`${reviseCount} revision${reviseCount!==1?'s':''}`);
 
           return `
             <div style="display:flex;gap:10px;align-items:flex-start;${wrapStyle}">
-              <div style="width:42px;text-align:center;flex-shrink:0;">
+              <div style="width:42px;text-align:center;flex-shrink:0;padding-top:2px;">
                 <div style="font-size:.62rem;color:${isToday?'var(--accent)':'var(--muted)'};">${day.label}</div>
                 <div style="font-size:.82rem;font-weight:700;color:${isToday?'var(--accent)':'var(--text)'};">${day.dateStr}</div>
               </div>
-              <div style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:.6rem .85rem;">
-                <div style="font-size:.7rem;font-weight:600;color:var(--text);margin-bottom:3px;">${day.slots.length} chapters · ${Math.floor((day.totalMins||0)/60)}h ${(day.totalMins||0)%60}m</div>
-                <div style="font-size:.63rem;color:var(--muted);">${subTags(day.slots) || 'No chapters queued'}</div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">
+                <div style="font-size:.63rem;color:var(--muted);">${metaBits.join(' · ') || 'No topics scheduled'}</div>
+                ${renderItems(day.items, 'Aaj koi topic scheduled nahi.')}
               </div>
             </div>`;
         }).join('')}
