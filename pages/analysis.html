@@ -179,6 +179,23 @@
   #page-analysis .an-pills button { background:var(--card); border:1px solid var(--border); color:var(--muted); border-radius:99px; padding:6px 13px; font-size:0.76rem; font-weight:600; cursor:pointer; }
   #page-analysis .an-pills button.active { background:var(--accent-dim, rgba(0,200,150,0.12)); border-color:var(--accent); color:var(--accent); }
   @media (max-width:560px) { #page-analysis .an-stat .val { font-size:1.4rem; } #page-analysis .an-bar .name { width:100px; } }
+
+  /* ── 💡 Insights & Suggestions ── */
+  #page-analysis .an-insights { display:flex; flex-direction:column; gap:10px; }
+  #page-analysis .an-insight { display:flex; gap:11px; align-items:flex-start; padding:11px 13px; border-radius:11px; border:1px solid var(--border); background:var(--card); }
+  #page-analysis .an-insight .ai-ico { font-size:1.1rem; line-height:1; flex-shrink:0; width:32px; height:32px; display:grid; place-items:center; border-radius:9px; background:var(--surface); }
+  #page-analysis .an-insight .ai-body { flex:1; min-width:0; }
+  #page-analysis .an-insight .ai-title { font-size:0.84rem; font-weight:700; margin-bottom:2px; letter-spacing:-0.01em; }
+  #page-analysis .an-insight .ai-msg { font-size:0.76rem; color:var(--muted); line-height:1.5; }
+  #page-analysis .an-insight .ai-msg b { color:var(--text); font-weight:700; }
+  #page-analysis .an-insight.good { border-color:rgba(0,200,150,0.42); background:rgba(0,200,150,0.06); }
+  #page-analysis .an-insight.good .ai-ico { background:rgba(0,200,150,0.14); }
+  #page-analysis .an-insight.tip  { border-color:rgba(59,130,246,0.42); background:rgba(59,130,246,0.06); }
+  #page-analysis .an-insight.tip .ai-ico { background:rgba(59,130,246,0.14); }
+  #page-analysis .an-insight.warn { border-color:rgba(245,158,11,0.45); background:rgba(245,158,11,0.07); }
+  #page-analysis .an-insight.warn .ai-ico { background:rgba(245,158,11,0.16); }
+  #page-analysis .an-insight.crit { border-color:rgba(239,68,68,0.48); background:rgba(239,68,68,0.07); }
+  #page-analysis .an-insight.crit .ai-ico { background:rgba(239,68,68,0.16); }
   </style>
 
   <div class="an-head">
@@ -245,6 +262,11 @@
       <button id="an-r-quarter" onclick="anSetRange('quarter')">3 Months</button>
     </div>
     <div class="an-stats" id="an-stats"></div>
+
+    <div class="an-panel">
+      <h3>💡 Insights &amp; Suggestions <span class="cnt" id="an-insights-count"></span></h3>
+      <div class="an-insights" id="an-insights"></div>
+    </div>
 
     <div class="an-panel">
       <h3>🔥 Daily target completion</h3>

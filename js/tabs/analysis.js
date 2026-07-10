@@ -551,8 +551,153 @@ function anRenderSchedule(){
     return `<div class="an-cell" style="background:${bg}"><span class="tip">${anShortDate(d.date)} — ${d.done}/${d.total||0}</span></div>`;
   }).join('');
 
+  anRenderInsights(days);
   anRenderSubjectBars();
   anRenderCompleted();
+}
+
+/* ════════ 💡 INSIGHTS & SUGGESTIONS ════════
+   Turns the raw completion data into a short, prioritised list of actionable
+   suggestions. Every check is derived from the user's REAL data (tasks,
+   habitsLog, progress, syllabus, exam date) — no new data structures. */
+const AN_DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+function anInsight(kind, icon, title, msg){
+  return `<div class="an-insight ${kind}"><div class="ai-ico">${icon}</div><div class="ai-body"><div class="ai-title">${anEsc(title)}</div><div class="ai-msg">${msg}</div></div></div>`;
+}
+function anRate(arr){ const t = arr.reduce((s,d)=>s+d.total,0); const dn = arr.reduce((s,d)=>s+d.done,0); return t ? Math.round(dn/t*100) : null; }
+
+function anRenderInsights(days){
+  const el = document.getElementById('an-insights');
+  if (!el) return;
+  days = days || anGetDays();
+  const cnt = document.getElementById('an-insights-count');
+  const rangeLabel = { week:'this week', month:'this month', quarter:'over 3 months' }[anRange] || 'this range';
+  const prog = appState.progress || {};
+
+  const totalT = days.reduce((s,d)=>s+d.total,0);
+  const doneT  = days.reduce((s,d)=>s+d.done,0);
+  const activeDays = days.filter(d => d.total>0).length;
+  const pct = totalT ? Math.round(doneT/totalT*100) : 0;
+
+  const cards = [];   // { pri, html } — lower pri = shown first
+
+  /* ── Exam pacing: days left vs remaining topics vs recent pace ── */
+  try {
+    let remaining = 0, totalCh = 0;
+    AN_SUBJECTS.forEach(s => (s.chapters||[]).forEach(c => { totalCh++; if (!(prog[c.id] && prog[c.id].done)) remaining++; }));
+    const examStr = (typeof safeExamDate === 'function') ? safeExamDate() : (appState.examDate || '');
+    const exam = examStr ? new Date(examStr + 'T00:00:00') : null;
+    const today = new Date(); today.setHours(0,0,0,0);
+    const daysLeft = exam && !isNaN(exam.getTime()) ? Math.max(0, Math.round((exam - today) / 86400000)) : null;
+
+    if (totalCh > 0 && remaining === 0){
+      cards.push({ pri:0, html: anInsight('good','🏁','Syllabus complete','You have finished every topic in this syllabus. Shift your energy to <b>revision and mock tests</b> now.') });
+    } else if (totalCh > 0 && daysLeft !== null && daysLeft > 0){
+      const needPerDay = remaining / daysLeft;
+      const start = anRangeStart();
+      let recentDone = 0;
+      Object.keys(prog).forEach(id => {
+        if (!anChapterById[id]) return;
+        const p = prog[id];
+        if (p && p.done && p.completedAt){ const d = new Date(p.completedAt); if (!isNaN(d.getTime()) && d >= start) recentDone++; }
+      });
+      const actualPerDay = recentDone / AN_RANGE_DAYS[anRange];
+      const need = needPerDay < 1 ? needPerDay.toFixed(1) : Math.ceil(needPerDay);
+      if (actualPerDay > 0 && actualPerDay < needPerDay * 0.9){
+        cards.push({ pri:0, html: anInsight('warn','⏳','Behind the pace for exam day',
+          `<b>${remaining}</b> topics left in <b>${daysLeft}</b> days needs about <b>${need}/day</b>, but lately you are averaging <b>${actualPerDay.toFixed(1)}/day</b>. Pick up the pace or trim lower-priority topics.`) });
+      } else if (actualPerDay >= needPerDay){
+        cards.push({ pri:1, html: anInsight('good','✅','On track for the exam',
+          `At your recent pace you will clear the remaining <b>${remaining}</b> topics before your exam in <b>${daysLeft}</b> days. Nicely paced.`) });
+      } else {
+        cards.push({ pri:2, html: anInsight('tip','⏳','Keep topics moving',
+          `<b>${remaining}</b> topics left with <b>${daysLeft}</b> days to go (~<b>${need}/day</b>). Mark chapters done in the Syllabus tab as you finish so this stays accurate.`) });
+      }
+    }
+  } catch(e){}
+
+  /* ── No tracked targets yet ── */
+  if (!activeDays){
+    cards.push({ pri:3, html: anInsight('tip','🧭','Start tracking targets','Add daily targets in the Planner and tick them off. As a history builds, tailored suggestions will show up here.') });
+  } else {
+    /* ── Completion rate ── */
+    if (pct >= 85){
+      cards.push({ pri:2, html: anInsight('good','🎯','Strong completion rate', `You have completed <b>${pct}%</b> of your targets ${rangeLabel} (<b>${doneT}/${totalT}</b>). Keep this rhythm going.`) });
+    } else if (pct >= 60){
+      cards.push({ pri:1, html: anInsight('tip','📈','Room to tighten up', `You are at <b>${pct}%</b> completion — <b>${totalT-doneT}</b> targets slipped. Trim your daily list a little so you can finish everything you set.`) });
+    } else {
+      cards.push({ pri:0, html: anInsight('warn','⚠️','Completion is low', `Only <b>${pct}%</b> of targets are getting done. Cut your daily targets by roughly a quarter so the plan feels achievable, then build back up.`) });
+    }
+
+    /* ── Streak (≥80% days) ── */
+    let cur=0, best=0; days.forEach(d => { const p = d.total ? d.done/d.total : 0; if (p>=0.8){ cur++; best=Math.max(best,cur); } else cur=0; });
+    if (cur >= 3){
+      cards.push({ pri:2, html: anInsight('good','🔥',`${cur}-day streak going`, `You have hit 80%+ of your targets <b>${cur} days</b> in a row. Protect the streak — even a light day counts.`) });
+    } else if (cur === 0 && best >= 3){
+      cards.push({ pri:1, html: anInsight('tip','🔁','Rebuild your streak', `Your best run was <b>${best} days</b> at 80%+. Clear most of today's targets to kick off a fresh streak.`) });
+    }
+
+    /* ── Missed days (planned but nothing done) ── */
+    const missed = days.filter(d => d.total>0 && d.done===0).length;
+    if (missed > 0){
+      cards.push({ pri:1, html: anInsight('warn','📅', `${missed} fully missed day${missed>1?'s':''}`, `You had targets on <b>${missed}</b> day${missed>1?'s':''} ${rangeLabel} but completed none. A quick 15-minute session on busy days keeps momentum alive.`) });
+    }
+
+    /* ── Trend: first half vs second half ── */
+    if (days.length >= 6){
+      const half = Math.floor(days.length/2);
+      const ra = anRate(days.slice(0, half));
+      const rb = anRate(days.slice(half));
+      if (ra !== null && rb !== null){
+        if (rb - ra >= 12){
+          cards.push({ pri:2, html: anInsight('good','🚀','Trending upward', `Your completion climbed from <b>${ra}%</b> to <b>${rb}%</b> across ${rangeLabel}. Momentum is building — keep it up.`) });
+        } else if (ra - rb >= 12){
+          cards.push({ pri:1, html: anInsight('warn','📉','Losing momentum', `Completion slipped from <b>${ra}%</b> to <b>${rb}%</b> across ${rangeLabel}. Ease your load for a couple of days to reset, then ramp back.`) });
+        }
+      }
+    }
+
+    /* ── Weakest weekday (needs enough spread) ── */
+    if (days.length >= 12){
+      const dow = AN_DOW.map(() => ({ total:0, done:0 }));
+      days.forEach(d => { const w = d.date.getDay(); dow[w].total += d.total; dow[w].done += d.done; });
+      let worst = -1, worstRate = 101;
+      dow.forEach((x, i) => { if (x.total >= 2){ const r = x.done/x.total*100; if (r < worstRate){ worstRate = r; worst = i; } } });
+      if (worst >= 0 && worstRate < pct - 15 && worstRate < 70){
+        cards.push({ pri:2, html: anInsight('tip','🗓️', `${AN_DOW[worst]}s are your weak spot`, `You finish only <b>${Math.round(worstRate)}%</b> of targets on ${AN_DOW[worst]}s versus <b>${pct}%</b> overall. Plan a lighter, realistic list for that day.`) });
+      }
+    }
+  }
+
+  /* ── Subject balance (from syllabus progress) ── */
+  const subStats = AN_SUBJECTS.map(s => {
+    const tot = (s.chapters||[]).length;
+    const done = (s.chapters||[]).filter(c => prog[c.id] && prog[c.id].done).length;
+    return { name: s.name, tot, done, pc: tot ? Math.round(done/tot*100) : 0 };
+  }).filter(s => s.tot > 0);
+  if (subStats.length >= 2){
+    const zero = subStats.filter(s => s.done === 0);
+    const sorted = subStats.slice().sort((a,b) => a.pc - b.pc);
+    const low = sorted[0], high = sorted[sorted.length-1];
+    if (zero.length && zero.length < subStats.length){
+      const names = zero.slice(0,2).map(s => s.name).join(', ');
+      const extra = zero.length > 2 ? ` and ${zero.length-2} more` : '';
+      cards.push({ pri:1, html: anInsight('tip','📚','Untouched subjects', `<b>${anEsc(names)}</b>${extra} ${zero.length>1?'have':'has'} no completed topics yet. Slot ${zero.length>1?'them':'it'} into your week so nothing gets left to the end.`) });
+    } else if (high.pc - low.pc >= 30){
+      cards.push({ pri:2, html: anInsight('tip','⚖️','Uneven subject progress', `<b>${anEsc(low.name)}</b> (${low.pc}%) is trailing <b>${anEsc(high.name)}</b> (${high.pc}%). Give the weaker subject priority to keep your prep balanced.`) });
+    }
+  }
+
+  if (!cards.length){
+    el.innerHTML = anInsight('good','🌟','Looking good','No issues spotted in your schedule right now. Keep doing what you are doing.');
+    if (cnt) cnt.textContent = '';
+    return;
+  }
+
+  cards.sort((a,b) => a.pri - b.pri);
+  const shown = cards.slice(0, 6);
+  el.innerHTML = shown.map(c => c.html).join('');
+  if (cnt) cnt.textContent = shown.length + (cards.length > shown.length ? '+' : '') + ' insight' + (shown.length>1?'s':'');
 }
 
 function anRenderSubjectBars(){
