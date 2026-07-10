@@ -163,6 +163,51 @@ function resolveTelegramTaskSubjects() {
   } catch (e) {}
 }
 
+/* Base URL of the proxy that streams Telegram-hosted images (/tg-photo). */
+function tgProxyBase() {
+  return (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+}
+
+/* Add an image the user sent the bot as a "moment" in the Screenshots gallery,
+   under a "📥 Telegram Uploads" folder grouped by date. Stores only the
+   Telegram file_id (no bytes). Returns true if it was newly added. */
+function addTelegramImageMoment(item) {
+  try {
+    if (!item || !item.tgFileId) return false;
+    if (!appState.ytScreenshots) appState.ytScreenshots = { folders: {} };
+    const folders = appState.ytScreenshots.folders;
+    const plId = 'tg_uploads';
+    if (!folders[plId]) folders[plId] = { name: '📥 Telegram Uploads', videos: {} };
+    const pl = folders[plId];
+
+    const d = item.createdAt ? new Date(item.createdAt) : new Date();
+    const dateKey = d.toISOString().slice(0, 10);
+    const vId = 'up_' + dateKey;
+    if (!pl.videos[vId]) {
+      pl.videos[vId] = { name: d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }), items: [] };
+    }
+    const vf = pl.videos[vId];
+    if (vf.items.some(i => i.tgFileId === item.tgFileId)) return false;   // de-dupe
+
+    const num = vf.items.length + 1;
+    vf.items.push({
+      id: 'tg_' + (item.id || Date.now()) + Math.random().toString(36).slice(2, 5),
+      type: 'screenshot',
+      number: num,
+      timestamp: 0,
+      timeLabel: '',
+      imageUrl: tgProxyBase() + '/tg-photo?file_id=' + encodeURIComponent(item.tgFileId),
+      tgFileId: item.tgFileId,
+      videoId: '',
+      videoTitle: item.caption || 'Telegram image',
+      label: item.caption || ('Image_' + num),
+      createdAt: item.createdAt || new Date().toISOString(),
+      source: 'telegram-upload'
+    });
+    return true;
+  } catch (e) { return false; }
+}
+
 /* Drain the telegramInbox array from a Firestore user-doc snapshot into the
    planner. Safe to call on every snapshot — it no-ops when the inbox is empty
    and clears the inbox after merging so items are processed exactly once. */
@@ -185,6 +230,7 @@ function drainTelegramInbox(snapData) {
     const fmt = (typeof fmtDate === 'function') ? fmtDate : (d => d.toISOString().slice(0, 10));
     const todayStr = fmt(new Date());
     let added = 0;
+    let imgAdded = 0;
     const newlyProcessed = [];
 
     inbox.forEach(item => {
@@ -193,6 +239,9 @@ function drainTelegramInbox(snapData) {
       /* Already materialised once — never re-add (even if the user deleted it). */
       if (item.id != null && processed.has(item.id)) return;
       if (item.id != null) { processed.add(item.id); newlyProcessed.push(item.id); }
+
+      /* Images the user sent the bot → Screenshots gallery (not a task). */
+      if (item.kind === 'image') { if (addTelegramImageMoment(item)) imgAdded++; return; }
 
       const date = /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : todayStr;
       if (!appState.tasks[date]) appState.tasks[date] = [];
@@ -248,6 +297,19 @@ function drainTelegramInbox(snapData) {
       try { if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar(); } catch (e) {}
       if (typeof showToast === 'function') {
         showToast('📩 ' + added + ' naya task' + (added > 1 ? 's' : '') + ' Telegram se add hua! Planner check karo.', 'success');
+      }
+    }
+
+    if (imgAdded) {
+      if (typeof saveProgress === 'function') saveProgress();
+      try { if (typeof ssUpdateBadge === 'function') ssUpdateBadge(); } catch (e) {}
+      /* Live-refresh the Analysis tab if it's open. */
+      try {
+        const pg = document.getElementById('page-analysis');
+        if (typeof anRender === 'function' && pg && pg.classList.contains('active')) anRender();
+      } catch (e) {}
+      if (typeof showToast === 'function') {
+        showToast('🖼️ ' + imgAdded + ' image Telegram se aayi — Analysis → 📸 Screenshots dekho.', 'success');
       }
     }
   } catch (e) {}
