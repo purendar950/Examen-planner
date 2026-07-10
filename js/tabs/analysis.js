@@ -62,15 +62,18 @@ function anBuildMoments(){
           playlistName: pl.name || 'Playlist',
           source: it.source || ''
         };
-        if (mo.source === 'turbo-telegram') AN_SHOTS.push(mo);
+        if (anIsShotSrc(mo.source)) AN_SHOTS.push(mo);
         else AN_MOMENTS.push(mo);
       });
     });
   });
 }
 
-/* Gallery shows everything EXCEPT Turbo screenshots (those live in their tab). */
-function anGalleryItems(v){ return (v && v.items ? v.items : []).filter(it => it.source !== 'turbo-telegram'); }
+/* A "shot" = captured in Turbo OR uploaded to the bot — both live in the
+   dedicated 📸 Screenshots tab, not the Gallery. */
+function anIsShotSrc(s){ return s === 'turbo-telegram' || s === 'telegram-upload'; }
+/* Gallery shows everything EXCEPT those shots. */
+function anGalleryItems(v){ return (v && v.items ? v.items : []).filter(it => !anIsShotSrc(it.source)); }
 function anGalleryEmpty(){ return `<div class="an-empty"><div class="em">🗂️</div><div>No saved moments yet.<br>Capture some from the YouTube tab and they'll appear here.</div></div>`; }
 
 /* ── sub-tab + view switching ── */
@@ -87,7 +90,7 @@ function anSwitchView(v){
    (Playlist → Video → Moments), but filtered to Turbo/Telegram shots only.
    Its own navigation state so it doesn't fight the Gallery's. ── */
 let anShotsNav = { plId:null, vId:null };
-function anShotItems(v){ return (v && v.items ? v.items : []).filter(it => it.source === 'turbo-telegram'); }
+function anShotItems(v){ return (v && v.items ? v.items : []).filter(it => anIsShotSrc(it.source)); }
 function anShotsRoot(){ anShotsNav = { plId:null, vId:null }; anRenderShots(); }
 function anShotsOpenFolder(plId){ anShotsNav = { plId:plId, vId:null }; anRenderShots(); }
 function anShotsOpenVideo(plId, vId){ anShotsNav = { plId:plId, vId:vId }; anRenderShots(); }
@@ -317,6 +320,11 @@ function anOpenInFullModal(videoId, startSec, title){
 function anOpenMoment(id){
   const m = AN_MOMENTS.find(x => x.id === id) || AN_SHOTS.find(x => x.id === id);
   if (!m) return;
+  /* Uploaded images have no playable video — open the image itself. */
+  if (m.source === 'telegram-upload' || !/^[\w-]{11}$/.test(m.videoId || '')) {
+    if (m.img) window.open(m.img, '_blank');
+    return;
+  }
   anOpenInFullModal(m.videoId, m.timestamp, (AN_TYPE_ICON[m.type]||'📸') + ' ' + m.videoTitle);
 }
 
