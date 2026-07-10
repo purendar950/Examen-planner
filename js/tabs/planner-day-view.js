@@ -71,11 +71,27 @@ function addScheduledTopicsToTasks(dateStr) {
   if (!items.length) { showToast('No topics scheduled for this day.', 'info'); return; }
   if (!appState.tasks[dateStr]) appState.tasks[dateStr] = [];
   const existing = new Set(appState.tasks[dateStr].map(t => t.text));
+  const cfg = window._planConfig || {};
+  const isMock = cfg.planType === 'mock';
   let added = 0;
   items.forEach(it => {
     const ch = it.ch || {};
+    if (isMock) {
+      /* Mock plans: expand subjectCount into individual mock tasks and tag them
+         type:'mock' so completion doesn't leak into the revision engine. Mock
+         items have no real chId, so they never bridge to chapter progress. */
+      const texts = (typeof mockTaskTexts === 'function') ? mockTaskTexts(ch, cfg) : [ch.name];
+      texts.forEach(text => {
+        if (existing.has(text)) return;
+        existing.add(text);
+        appState.tasks[dateStr].push({ id: Date.now().toString()+Math.random(), text, done:false, priority:'normal', subject: ch.subId||'', type:'mock' });
+        added++;
+      });
+      return;
+    }
     const text = ch.name + (it.part ? ' ' + it.part : '');
     if (existing.has(text)) return;
+    existing.add(text);
     /* Carry the real chapter id (chId) so completing this task from the task
        list / Kanban also marks the chapter done in appState.progress — otherwise
        buildPlanSchedule keeps re-flowing the "completed" topic onto the next day. */

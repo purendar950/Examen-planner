@@ -504,6 +504,19 @@ function daysBetween(a, b) {
   return Math.max(1, Math.ceil((db - da) / 86400000) + 1);
 }
 
+/* Expand a mock schedule item into individual mock task texts. buildMockSchedule
+   stores a single row per subject per day even when subjectCount > 1, so here we
+   split it back into N tasks ("Reasoning — Mock 1/2", "Reasoning — Mock 2/2") so
+   the user can track "1 of 2 done". Count 1 — and the Full Mock / Analysis rows
+   (which have no subId) — stay as a single task. */
+function mockTaskTexts(ch, cfg) {
+  ch = ch || {};
+  const counts = (cfg && cfg.subjectCount) || {};
+  const n = ch.subId ? Math.max(1, counts[ch.subId] || 1) : 1;
+  if (n > 1) return Array.from({ length: n }, (_, i) => `${ch.name} — Mock ${i + 1}/${n}`);
+  return [ch.name || 'Mock'];
+}
+
 // One-click: add all generated chapters as tasks for today
 function addTimetableToToday() {
   const todayStr = fmtDate(new Date());
@@ -527,13 +540,21 @@ function addTimetableToToday() {
       added++;
     });
   } else if (window._lastPlanType === 'mock') {
-    /* Use today's scheduled test items from the mock schedule. */
+    /* Use today's scheduled test items from the mock schedule. A subject with
+       subjectCount N is expanded into N separate mock tasks (see mockTaskTexts)
+       so each mock can be ticked off individually — buildMockSchedule stores
+       just one row per subject. Tag them type:'mock' so completing them does
+       NOT leak into the revision / spaced-repetition engine. */
+    const cfg = window._planConfig || {};
     const items = (getPlanScheduleMap()[todayStr] || []);
     items.forEach(it => {
       const ch = it.ch || {};
-      if (existing.has(ch.name)) return;
-      appState.tasks[todayStr].push({ id: Date.now().toString()+Math.random(), text: ch.name, done:false, priority:'normal', subject: ch.subId||'' });
-      added++;
+      mockTaskTexts(ch, cfg).forEach(text => {
+        if (existing.has(text)) return;
+        existing.add(text);
+        appState.tasks[todayStr].push({ id: Date.now().toString()+Math.random(), text, done:false, priority:'normal', subject: ch.subId||'', type:'mock' });
+        added++;
+      });
     });
   } else {
     /* syllabus — use queue */

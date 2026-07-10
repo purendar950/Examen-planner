@@ -90,6 +90,9 @@ function getTaskChapterRefs() {
         if (!t || !t.id) return;
         const isDone = t.done || t.status === 'done';
         if (!isDone) return;
+        /* Mock tasks are one-off tests, not revisable chapters — never seed them
+           into the spaced-repetition pool. */
+        if (t.type === 'mock') return;
         const chId = taskRevisionId(t.id);
         if (seen.has(chId)) return;
         seen.add(chId);
@@ -124,6 +127,9 @@ function getTaskChapterRefs() {
    Revision history is preserved if the task is later un-completed and re-done. */
 function syncTaskRevision(task) {
   if (!task || !task.id) return;
+  /* Mock tasks are one-off tests, not spaced-repetition chapters — keep them
+     out of the revision engine entirely (matches getTaskChapterRefs). */
+  if (task.type === 'mock') return;
   const chId = taskRevisionId(task.id);
   const isDone = task.done || task.status === 'done';
   if (isDone) {
