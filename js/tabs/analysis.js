@@ -130,8 +130,22 @@ function anUpDeleteImage(imgId){
   u.images = u.images.filter(im => im.id !== imgId);
   anUpSave(); anRenderUploads();
 }
+/* Open an uploaded image in an in-app lightbox (not a new browser tab). */
 function anUpOpenImage(imgId){
-  const im = anUp().images.find(x => x.id === imgId); if (im) window.open(anUpImgUrl(im), '_blank');
+  const im = anUp().images.find(x => x.id === imgId); if (!im) return;
+  let ov = document.getElementById('an-up-lightbox');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'an-up-lightbox';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;gap:12px;';
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML =
+    '<button title="Close" onclick="document.getElementById(\'an-up-lightbox\').remove()" style="position:absolute;top:14px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:1.1rem;width:40px;height:40px;border-radius:50%;cursor:pointer;">✕</button>' +
+    '<img src="' + anUpImgUrl(im) + '" alt="" style="max-width:100%;max-height:82vh;object-fit:contain;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.5);">' +
+    (im.caption ? '<div style="color:#e2e8f0;font-size:.85rem;max-width:90%;text-align:center;">' + anEsc(im.caption) + '</div>' : '') +
+    '<a href="' + anUpImgUrl(im) + '" target="_blank" rel="noreferrer" style="color:#8ab4ff;font-size:.76rem;">Open original ↗</a>';
 }
 
 /* Move-to-folder picker: lists Root + every folder (indented) as buttons. */
