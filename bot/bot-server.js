@@ -8,8 +8,9 @@
  *      planner To-Do list (via the user doc's `telegramInbox` field).
  *
  * Routes:
- *   GET  /          → health check
- *   POST /send      → proxy: sends a Telegram message server-side (CORS-safe)
+ *   GET  /            → health check
+ *   POST /send        → proxy: sends a Telegram message server-side (CORS-safe)
+ *   POST /send-photo  → proxy: relays a Turbo screenshot (base64 JPEG) via sendPhoto
  *
  * Deploy on Render (Web Service):
  *   Root directory: bot
@@ -250,6 +251,17 @@ function rateLimited(chatId) {
   arr.push(now);
   _rate.set(chatId, arr);
   return arr.length > 15;
+}
+
+/* ── Photo rate limit: max 6 screenshots / chat / minute (uploads are heavy
+   and the /send-photo endpoint is unauthenticated, like /send). ──────────── */
+const _photoRate = new Map();
+function photoRateLimited(chatId) {
+  const now = Date.now();
+  const arr = (_photoRate.get(chatId) || []).filter(t => now - t < 60000);
+  arr.push(now);
+  _photoRate.set(chatId, arr);
+  return arr.length > 6;
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -515,6 +527,60 @@ const server = http.createServer((req, res) => {
         console.error('❌ /send error:', e.message);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+
+  /* ── POST /send-photo — relay a Turbo screenshot to a Telegram chat ──
+     Body: JSON { chatId, imageBase64, caption }. The browser captures the
+     current Turbo <video> frame to a JPEG and base64-encodes it; we decode it
+     to a Buffer and hand it to node-telegram-bot-api's sendPhoto (which does
+     the multipart upload to Telegram for us). */
+  if (req.method === 'POST' && req.url === '/send-photo') {
+    let body = '';
+    let aborted = false;
+    req.on('data', chunk => {
+      body += chunk;
+      // Guard against oversized uploads (JPEG frames are ~0.1–0.4 MB; base64
+      // inflates ~33%). Cap the raw body at 12 MB and reject anything larger.
+      if (body.length > 12 * 1024 * 1024) {
+        aborted = true;
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'image too large' }));
+        req.destroy();
+      }
+    });
+    req.on('end', async () => {
+      if (aborted) return;
+      try {
+        const { chatId, imageBase64, caption } = JSON.parse(body);
+        if (!chatId || !imageBase64) throw new Error('chatId and imageBase64 are required');
+
+        if (photoRateLimited(chatId)) {
+          res.writeHead(429, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'Too many screenshots — ek minute baad try karo.' }));
+          return;
+        }
+
+        const buffer = Buffer.from(imageBase64, 'base64');
+        if (!buffer.length) throw new Error('empty image');
+
+        await bot.sendPhoto(
+          chatId,
+          buffer,
+          { caption: (caption || '').slice(0, 1024), parse_mode: 'HTML' },
+          { filename: 'turbo-frame.jpg', contentType: 'image/jpeg' }
+        );
+
+        console.log(`✅ /send-photo → chatId:${chatId} (${buffer.length} bytes)`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
+        console.error('❌ /send-photo error:', errMsg);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: errMsg }));
       }
     });
     return;
