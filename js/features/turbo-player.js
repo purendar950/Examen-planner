@@ -40,6 +40,7 @@
   var turboVideoEl = null;      // the native <video>
   var turboActiveNow = false;   // true while a video is actually playing via Turbo
   var turboVid = null;          // current video id playing in Turbo
+  var turboVidTitle = '';       // current video title (from /api/info) for saved moments
   var lastSave = 0;
 
   function isPro() {
@@ -245,6 +246,7 @@
         if (!res.ok || !res.d || !res.d.formats || !res.d.formats.length) {
           throw new Error((res.d && (res.d.detail || res.d.error)) || 'no stream');
         }
+        turboVidTitle = (res.d && res.d.title) || turboVidTitle;
         var f = res.d.formats[0];              // highest single-file quality
         var current = (typeof ytSpeedCurrent !== 'undefined') ? ytSpeedCurrent : 1;
         v.src = TURBO_BACKEND_URL + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
@@ -429,12 +431,34 @@
      Gallery tab (same folder structure: Playlist → Video → Moment). */
   function turboSaveMoment(fileId, ts, title) {
     try {
-      if (typeof ssGetState !== 'function' || typeof ssEnsureFolder !== 'function') return;
-      var ctx = (typeof ssGetCurrentContext === 'function') ? ssGetCurrentContext() : null;
-      if (!ctx || ctx.videoId === 'unknown') return;
-      if (title && ctx.videoName === 'Video') ctx.videoName = title;
+      if (!fileId || typeof ssGetState !== 'function') return;
 
-      var vf = ssEnsureFolder(ctx);
+      /* Use turboVid — the id of the video actually playing in Turbo — as the
+         source of truth. ytCurrentVideoId is NOT reliable here because Turbo's
+         entry paths can bypass the loader that sets it, so ssGetCurrentContext()
+         would return 'unknown' and the moment would never save. */
+      var vid = String(turboVid || '').replace('playlist_', '');
+      if (!vid && typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) {
+        vid = String(ytCurrentVideoId).replace('playlist_', '');
+      }
+      if (!vid) return;
+
+      var vname = title || turboVidTitle
+        || ((typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) ? ytCurrentVideoTitle : 'Video');
+
+      /* Best-effort playlist grouping (doesn't matter for the flat Screenshots
+         tab, but keeps the gallery folder structure consistent). */
+      var plId = 'general', plName = 'General';
+      if (typeof ytCurrentPlaylistId !== 'undefined' && ytCurrentPlaylistId) { plId = ytCurrentPlaylistId; plName = 'Playlist'; }
+      else if (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl) { plId = ytoCurrentPl; plName = 'Course'; }
+
+      var state = ssGetState();
+      if (!state.folders[plId]) state.folders[plId] = { name: plName, videos: {} };
+      var folder = state.folders[plId];
+      if (!folder.videos[vid]) folder.videos[vid] = { name: vname, items: [] };
+      var vf = folder.videos[vid];
+      if (vname && (vf.name === 'Video' || vf.name === 'Unknown Video')) vf.name = vname;
+
       var num = vf.items.filter(function (i) { return i.type === 'screenshot'; }).length + 1;
       vf.items.push({
         id: 'tg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -445,8 +469,8 @@
         // Real captured frame, served from Telegram via the proxy (no bytes stored here).
         imageUrl: TURBO_BACKEND_URL + '/tg-photo?file_id=' + encodeURIComponent(fileId),
         tgFileId: fileId,
-        videoId: (ctx.videoId || '').replace('playlist_', ''),
-        videoTitle: ctx.videoName,
+        videoId: vid,
+        videoTitle: vname,
         createdAt: Date.now(),
         label: 'Moment_' + num,
         source: 'turbo-telegram'
