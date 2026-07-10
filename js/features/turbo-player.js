@@ -27,6 +27,13 @@
   var TURBO_BACKEND_URL = (localStorage.getItem('turboBackendUrl')
     || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
 
+  /* Telegram bot server (bot/bot-server.js on Render). The Turbo screenshot is
+     POSTed to its /send-photo endpoint, which forwards it to the user's chat.
+     Set once with:  localStorage.setItem('telegramBotUrl','https://your-bot.onrender.com')
+     (falls back to the hardcoded default below so it works out of the box). */
+  var TELEGRAM_BOT_URL = (localStorage.getItem('telegramBotUrl')
+    || 'https://studyplanner-bot.onrender.com').replace(/\/+$/, '');
+
   var turboEnabled = localStorage.getItem('turboEnabled') === '1';
   var turboVideoEl = null;      // the native <video>
   var turboActiveNow = false;   // true while a video is actually playing via Turbo
@@ -67,6 +74,11 @@
     v.id = 'yt-turbo-video';
     v.setAttribute('playsinline', '');
     v.setAttribute('controls', '');   // native play/seek/fullscreen/volume
+    // crossorigin MUST be set BEFORE src is assigned, otherwise drawing this
+    // video onto a <canvas> "taints" it and canvas.toDataURL() throws — which
+    // is exactly what the Turbo screenshot→Telegram feature needs. The proxy
+    // sends Access-Control-Allow-Origin:* on /api/stream, so "anonymous" is safe.
+    v.setAttribute('crossorigin', 'anonymous');
     wrap.appendChild(v);
     turboVideoEl = v;
 
@@ -306,6 +318,106 @@
   }
 
   /* ══════════════════════════════════════════════
+     SCREENSHOT → TELEGRAM  (Turbo-only)
+     ──────────────────────────────────────────────
+     Turbo plays a NATIVE <video>, so — unlike the cross-origin YouTube iframe —
+     we can paint the exact current frame onto a <canvas> and read the pixels
+     back. We then POST that JPEG to the bot server, which relays it to the
+     user's connected Telegram chat via sendPhoto.
+
+     Only usable while Turbo is actually on screen (turboActive()); in iframe
+     mode there is no readable frame, so the button is hidden entirely.
+  ══════════════════════════════════════════════ */
+
+  /* mm:ss / h:mm:ss for the caption timecode. */
+  function turboFmtTs(secs) {
+    secs = Math.max(0, Math.floor(secs || 0));
+    var h = Math.floor(secs / 3600);
+    var m = Math.floor((secs % 3600) / 60);
+    var s = secs % 60;
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return h > 0 ? (h + ':' + pad(m) + ':' + pad(s)) : (m + ':' + pad(s));
+  }
+
+  /* Minimal HTML-escape for the caption (Telegram parse_mode:HTML). */
+  function turboEsc(str) {
+    return String(str == null ? '' : str)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function turboSendToTelegram() {
+    var v = turboVideoEl;
+    if (!turboActive() || !v) {
+      if (typeof showToast === 'function') showToast('📤 Screenshot sirf Turbo mein video chalte waqt bhej sakte ho.', 'error');
+      return;
+    }
+    if (!v.videoWidth || !v.videoHeight) {
+      if (typeof showToast === 'function') showToast('Video abhi load ho raha hai — 1–2 second ruk ke try karo.', 'error');
+      return;
+    }
+
+    /* Destination = the user's own connected Telegram chat. */
+    var chatId = '';
+    try { chatId = (appState && appState.telegram && appState.telegram.chatId) ? String(appState.telegram.chatId).trim() : ''; } catch (e) {}
+    if (!chatId) {
+      if (typeof showToast === 'function') showToast('Pehle Telegram connect karo: Profile → Daily Plan on Telegram.', 'error');
+      return;
+    }
+    if (!TELEGRAM_BOT_URL) {
+      if (typeof showToast === 'function') showToast('Bot URL set nahi hai (telegramBotUrl).', 'error');
+      return;
+    }
+
+    /* Paint the current frame. */
+    var base64;
+    try {
+      var canvas = document.createElement('canvas');
+      canvas.width = v.videoWidth;
+      canvas.height = v.videoHeight;
+      canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+      // toDataURL throws a SecurityError if the canvas is tainted (i.e. the
+      // proxy didn't send Access-Control-Allow-Origin on the stream).
+      base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('⚠️ Server ne frame block kiya (CORS). Backend cookies/headers check karo.', 'error');
+      return;
+    }
+    if (!base64) {
+      if (typeof showToast === 'function') showToast('Screenshot capture fail hua — dobara try karo.', 'error');
+      return;
+    }
+
+    var t = Math.floor(v.currentTime || 0);
+    var title = (typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) ? ytCurrentVideoTitle : 'YouTube video';
+    var caption = '📸 <b>' + turboEsc(title) + '</b>\n⏱ ' + turboFmtTs(t) + '  ·  ⚡ Turbo';
+
+    var btn = document.getElementById('yt-turbo-tg');
+    if (btn) { btn.disabled = true; btn.dataset.busy = '1'; }
+    if (typeof showToast === 'function') showToast('📤 Telegram par bhej rahe hain…', 'info');
+
+    fetch(TELEGRAM_BOT_URL + '/send-photo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chatId: chatId, imageBase64: base64, caption: caption })
+    })
+      .then(function (r) { return r.json().catch(function () { return { ok: r.ok }; }); })
+      .then(function (res) {
+        if (res && res.ok) {
+          if (typeof showToast === 'function') showToast('✅ Screenshot Telegram par bhej diya!', 'success');
+        } else {
+          if (typeof showToast === 'function') showToast('❌ Nahi bhej paye: ' + ((res && res.error) || 'unknown'), 'error');
+        }
+      })
+      .catch(function () {
+        if (typeof showToast === 'function') showToast('❌ Bot tak nahi pahuche — bot URL / server check karo.', 'error');
+      })
+      .then(function () {
+        if (btn) { btn.disabled = false; delete btn.dataset.busy; }
+      });
+  }
+  window.turboSendToTelegram = turboSendToTelegram;
+
+  /* ══════════════════════════════════════════════
      UI — toggle button + speed-bar tidy-up
   ══════════════════════════════════════════════ */
   function ytToggleTurbo() {
@@ -366,6 +478,20 @@
       var r = parseFloat(b.dataset.rate);
       if (r > 2) b.style.display = turboEnabled ? '' : 'none';
     });
+
+    // "Send screenshot to Telegram" — Turbo-only (needs the native <video>).
+    if (!bar.querySelector('#yt-turbo-tg')) {
+      var pip2 = bar.querySelector('.yt-pip-btn');
+      var tg = document.createElement('button');
+      tg.id = 'yt-turbo-tg';
+      tg.className = 'yt-speed-btn';
+      tg.textContent = '📤 TG';
+      tg.title = 'Send a screenshot of this exact frame to your Telegram';
+      tg.setAttribute('onclick', 'turboSendToTelegram()');
+      bar.insertBefore(tg, pip2);
+    }
+    var tgBtn = bar.querySelector('#yt-turbo-tg');
+    if (tgBtn) tgBtn.style.display = turboEnabled ? '' : 'none';
   }
 
   function initUI() {

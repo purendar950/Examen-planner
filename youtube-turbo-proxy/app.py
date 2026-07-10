@@ -346,6 +346,13 @@ def api_stream():
         "Accept-Ranges": "bytes",
         "Content-Type": upstream.headers.get("Content-Type", "video/mp4"),
         "Cache-Control": "no-store",
+        # Explicit CORS on the STREAMED response. flask-cors' after_request
+        # normally covers this, but streamed Response objects can bypass it in
+        # some setups — and without an Access-Control-Allow-Origin header the
+        # browser marks a crossorigin <video> as "tainted", which makes
+        # canvas.toDataURL() throw. The Turbo screenshot feature draws this
+        # <video> onto a canvas, so this header is what keeps capture working.
+        "Access-Control-Allow-Origin": "*",
     }
     for h in ("Content-Length", "Content-Range"):
         if h in upstream.headers:
