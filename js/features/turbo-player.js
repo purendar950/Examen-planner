@@ -27,12 +27,14 @@
   var TURBO_BACKEND_URL = (localStorage.getItem('turboBackendUrl')
     || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
 
-  /* Telegram bot server (bot/bot-server.js on Render). The Turbo screenshot is
-     POSTed to its /send-photo endpoint, which forwards it to the user's chat.
-     Set once with:  localStorage.setItem('telegramBotUrl','https://your-bot.onrender.com')
-     (falls back to the hardcoded default below so it works out of the box). */
+  /* Where the Turbo screenshot is POSTed. It goes to the SAME backend that
+     streams the video (the proxy exposes /send-photo, which relays to Telegram
+     server-side using the token from Firestore). Reusing TURBO_BACKEND_URL
+     means there's no separate bot URL to configure — if video plays, sending
+     works. Override only if you host the relay elsewhere:
+       localStorage.setItem('telegramBotUrl','https://your-relay.onrender.com') */
   var TELEGRAM_BOT_URL = (localStorage.getItem('telegramBotUrl')
-    || 'https://studyplanner-bot.onrender.com').replace(/\/+$/, '');
+    || TURBO_BACKEND_URL).replace(/\/+$/, '');
 
   var turboEnabled = localStorage.getItem('turboEnabled') === '1';
   var turboVideoEl = null;      // the native <video>

@@ -28,6 +28,7 @@ Reliability notes:
 
 import os
 import time
+import base64
 import threading
 import logging
 
@@ -363,11 +364,108 @@ def api_stream():
                     headers=resp_headers)
 
 
+# ── Telegram screenshot relay ─────────────────────────────────────────────
+#   The Turbo "📤 send screenshot to Telegram" button POSTs the captured JPEG
+#   here. We relay it to Telegram's sendPhoto server-side, so the bot token is
+#   never exposed to the browser. This lives in the proxy (not the separate bot
+#   web service) because the proxy is already reachable + CORS-enabled and
+#   already has Firebase Admin access to read the token from Firestore.
+
+_photo_rate = {}          # chatId -> [timestamps]  (simple in-memory limiter)
+_photo_rate_lock = threading.Lock()
+
+
+def _photo_rate_limited(chat_id, limit=6, window=60):
+    now = time.time()
+    with _photo_rate_lock:
+        hits = [t for t in _photo_rate.get(chat_id, []) if now - t < window]
+        hits.append(now)
+        _photo_rate[chat_id] = hits
+        return len(hits) > limit
+
+
+def _telegram_token():
+    """Bot token: env var first, else Firestore config/telegram.botToken."""
+    tok = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+    if tok:
+        return tok
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("telegram").get()
+            if doc.exists:
+                return ((doc.to_dict() or {}).get("botToken") or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("telegram token read failed: %s", exc)
+    return ""
+
+
+def _group_route(chat_id):
+    """If the user ran /setup, return their group + Images topic id, else None."""
+    if not _fb_db:
+        return None
+    try:
+        doc = _fb_db.collection("telegram_groups").document(str(chat_id)).get()
+        if doc.exists:
+            d = doc.to_dict() or {}
+            if d.get("groupId") and d.get("imagesTopicId"):
+                return {"groupId": d["groupId"], "topicId": d["imagesTopicId"]}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("group route read failed: %s", exc)
+    return None
+
+
+@app.post("/send-photo")
+def api_send_photo():
+    data = request.get_json(silent=True) or {}
+    chat_id = str(data.get("chatId") or "").strip()
+    image_b64 = data.get("imageBase64") or ""
+    caption = (data.get("caption") or "")[:1024]
+
+    if not chat_id or not image_b64:
+        return jsonify({"ok": False, "error": "chatId and imageBase64 required"}), 400
+    if _photo_rate_limited(chat_id):
+        return jsonify({"ok": False, "error": "Too many screenshots — ek minute baad try karo."}), 429
+
+    token = _telegram_token()
+    if not token:
+        return jsonify({"ok": False, "error": "bot token not configured (config/telegram.botToken)"}), 500
+
+    try:
+        img = base64.b64decode(image_b64)
+    except Exception:  # noqa: BLE001
+        return jsonify({"ok": False, "error": "bad base64 image"}), 400
+    if not img:
+        return jsonify({"ok": False, "error": "empty image"}), 400
+
+    # Route to the user's group "📸 Images" topic if they ran /setup, else DM.
+    payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+    route = _group_route(chat_id)
+    if route:
+        payload["chat_id"] = route["groupId"]
+        payload["message_thread_id"] = route["topicId"]
+
+    try:
+        r = requests.post(
+            "https://api.telegram.org/bot%s/sendPhoto" % token,
+            data=payload,
+            files={"photo": ("turbo-frame.jpg", img, "image/jpeg")},
+            timeout=REQUEST_TIMEOUT,
+        )
+        j = r.json()
+        if not j.get("ok"):
+            return jsonify({"ok": False, "error": j.get("description") or ("HTTP " + str(r.status_code))}), 400
+        log.info("send-photo → %s (%d bytes)", payload["chat_id"], len(img))
+        return jsonify({"ok": True})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("sendPhoto relay failed: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)[:200]}), 502
+
+
 @app.get("/")
 def index():
     return jsonify({
         "service": "youtube-turbo-proxy",
-        "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG"],
+        "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG", "/send-photo"],
     })
 
 
