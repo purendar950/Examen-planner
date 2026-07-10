@@ -528,47 +528,110 @@ function anRenderSchedule(){
   const days = anGetDays();
   const totalT = days.reduce((s,d)=>s+d.total,0), doneT = days.reduce((s,d)=>s+d.done,0);
   const pct = totalT ? Math.round(doneT/totalT*100) : 0;
-  const fullDays = days.filter(d => d.total>0 && d.done>=d.total).length;
-  let cur=0, best=0; days.forEach(d => { const p = d.total ? d.done/d.total : 0; if (p>=0.8){ cur++; best=Math.max(best,cur); } else cur=0; });
+
+  /* Streak = consecutive trailing days with ≥80% completion (only counts days
+     that had at least one target — a no-target day shouldn't break a streak). */
+  let cur=0, best=0, run=0;
+  days.forEach(d => {
+    const p = d.total ? d.done/d.total : 0;
+    if (d.total && p>=0.8){ run++; best=Math.max(best,run); }
+    else if (d.total) run=0;   /* active day but missed → streak breaks */
+    /* no-target days neither extend nor break the streak */
+  });
+  /* trailing streak: walk backwards from today */
+  cur = 0;
+  for (let i = days.length-1; i >= 0; i--){
+    const d = days[i];
+    if (!d.total) continue;
+    if (d.done/d.total >= 0.8) cur++;
+    else break;
+  }
+
   const activeDays = days.filter(d => d.total>0).length;
   const consistency = activeDays ? Math.round(days.filter(d => d.total && d.done/d.total>=0.8).length/activeDays*100) : 0;
+  const bestDay = days.reduce((best,d) => {
+    if (!d.total) return best;
+    const p = d.done/d.total;
+    return (!best || p > best.p) ? { p, d } : best;
+  }, null);
+
+  /* Overall empty state: no tasks, no habits, no videos → show empty hero. */
+  const hasAnyActivity = totalT > 0 || activeDays > 0 ||
+    Object.values(anYtoLib()).some(pl => pl && pl.videos && (pl.watched ? Object.keys(pl.watched).length : 0) > 0) ||
+    ((appState.ytOrganiser || {}).videos || []).some(v => v.done);
+  const emptyEl = document.getElementById('an-schedule-empty');
+  const bodyEl  = document.getElementById('an-schedule-body');
+  if (emptyEl) emptyEl.style.display = hasAnyActivity ? 'none' : 'block';
+  if (bodyEl)  bodyEl.style.display  = hasAnyActivity ? 'block' : 'none';
+  if (!hasAnyActivity) return;
 
   const statsEl = document.getElementById('an-stats');
   if (statsEl) statsEl.innerHTML = `
     <div class="an-stat accent"><div class="lab">Target completion</div><div class="val">${pct}%</div><div class="sub">${doneT}/${totalT} targets done</div></div>
-    <div class="an-stat blue"><div class="lab">Full-target days</div><div class="val">${fullDays}</div><div class="sub">of ${activeDays} active days</div></div>
     <div class="an-stat amber"><div class="lab">Current streak</div><div class="val">${cur}🔥</div><div class="sub">Best: ${best} days</div></div>
-    <div class="an-stat purple"><div class="lab">Consistency</div><div class="val">${consistency}%</div><div class="sub">days ≥ 80% done</div></div>`;
-
-  const heatEl = document.getElementById('an-heatmap');
-  if (heatEl) heatEl.innerHTML = days.map(d => {
-    const p = d.total ? d.done/d.total : 0;
-    let bg = 'var(--card)';
-    if (p>0 && p<0.34) bg = 'rgba(0,200,150,0.3)';
-    else if (p<0.67) bg = 'rgba(0,200,150,0.55)';
-    else if (p<1) bg = 'rgba(0,200,150,0.78)';
-    else if (p>=1 && d.total>0) bg = 'var(--accent)';
-    return `<div class="an-cell" style="background:${bg}"><span class="tip">${anShortDate(d.date)} — ${d.done}/${d.total||0}</span></div>`;
-  }).join('');
+    <div class="an-stat blue"><div class="lab">Consistency</div><div class="val">${consistency}%</div><div class="sub">${activeDays} active day${activeDays===1?'':'s'}</div></div>
+    <div class="an-stat purple"><div class="lab">Best day</div><div class="val">${bestDay?Math.round(bestDay.p*100)+'%':'—'}</div><div class="sub">${bestDay?anShortDate(bestDay.d.date):'no active day'}</div></div>`;
 
   anRenderSubjectBars();
   anRenderCompleted();
 }
 
+/* Subject progress bars — click a bar to expand its completed topics inline
+   (replaces the old standalone "Completed Topics" panel). */
+let anOpenSubjectId = null;
 function anRenderSubjectBars(){
   const el = document.getElementById('an-subject-bars');
+  const cntEl = document.getElementById('an-subject-count');
   if (!el) return;
-  if (!AN_SUBJECTS.length){ el.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;">No syllabus data available.</div>'; return; }
+  if (!AN_SUBJECTS.length){
+    el.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;">No syllabus data available.</div>';
+    if (cntEl) cntEl.textContent = '';
+    return;
+  }
   const prog = appState.progress || {};
-  el.innerHTML = AN_SUBJECTS.map(s => {
+  const subjectsWithDone = AN_SUBJECTS.map(s => {
     const tot = (s.chapters||[]).length;
     const done = (s.chapters||[]).filter(c => prog[c.id] && prog[c.id].done).length;
-    const pc = tot ? Math.round(done/tot*100) : 0;
-    return `<div class="an-bar"><span class="name">${anEsc(s.name)}</span><div class="an-track"><div class="an-fill" style="width:${pc}%;background:${s.color||'var(--accent)'}"></div></div><span class="pct">${done}/${tot} · ${pc}%</span></div>`;
-  }).join('');
-}
+    return { ...s, _tot: tot, _done: done, _pc: tot ? Math.round(done/tot*100) : 0 };
+  });
+  const totalDone = subjectsWithDone.reduce((t,s)=>t+s._done,0);
+  if (cntEl) cntEl.textContent = totalDone ? (totalDone + ' done') : '';
 
-/* completed sections render into their own separate boxes */
+  el.innerHTML = subjectsWithDone.map(s => {
+    const isOpen = anOpenSubjectId === s.id;
+    return `<div class="an-bar${isOpen?' open':''}" onclick="anToggleSubject('${s.id}')">
+      <span class="name"><span class="an-chev">▶</span>${anEsc(s.name)}</span>
+      <div class="an-track"><div class="an-fill" style="width:${s._pc}%;background:${s.color||'var(--accent)'}"></div></div>
+      <span class="pct">${s._done}/${s._tot} · ${s._pc}%</span>
+    </div>`;
+  }).join('');
+
+  /* Render the expanded subject's completed topics below the bars. */
+  const topicsEl = document.getElementById('an-topics-list');
+  if (topicsEl){
+    if (!anOpenSubjectId){
+      topicsEl.innerHTML = '';
+    } else {
+      const s = subjectsWithDone.find(x => x.id === anOpenSubjectId);
+      if (!s){ topicsEl.innerHTML = ''; }
+      else {
+        const doneChapters = (s.chapters||[]).filter(c => prog[c.id] && prog[c.id].done)
+          .map(c => ({ name: c.name, at: prog[c.id].completedAt || '' }))
+          .sort((a,b) => (a.at < b.at ? 1 : -1));
+        if (!doneChapters.length){
+          topicsEl.innerHTML = `<div class="an-empty" style="padding:1.2rem 1rem;"><div class="em" style="font-size:1.6rem;">📘</div><div>No completed topics in <b>${anEsc(s.name)}</b> yet.<br>Mark chapters done in the Syllabus tab.</div></div>`;
+        } else {
+          topicsEl.innerHTML = anGroupBox('📚 ' + anEsc(s.name), doneChapters.length + ' done',
+            anDisclose(doneChapters.map(r => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(r.name)}</div></div>${r.at?`<span class="di-date">${anShortDate(r.at)}</span>`:''}</div>`), 5), true);
+        }
+      }
+    }
+  }
+}
+function anToggleSubject(id){
+  anOpenSubjectId = (anOpenSubjectId === id) ? null : id;
+  anRenderSubjectBars();
+}
 
 function anYtId(v){
   if (v.videoId) return v.videoId;
@@ -636,93 +699,550 @@ function anTimelineGroup(title, countLabel, rows, open){
 
 function anRenderCompleted(){
   anRenderActivity();
-  anRenderTopics();
+  anRenderAllList();
+  anRenderAllCompleted();
 }
 
-/* ── ✅ COMPLETED TARGETS & VIDEOS — date timeline + playlist sections ── */
-function anRenderActivity(){
-  const cnt = document.getElementById('an-tv-count');
-  const list = document.getElementById('an-tv-list');
-  if (!list) return;
+/* ── tab switcher for the All Completed panel (List | Timeline) ── */
+let anAllTab = 'list';
+function anSwitchAllTab(tab){
+  anAllTab = tab;
+  const listEl = document.getElementById('an-all-view-list');
+  const tlEl   = document.getElementById('an-all-view-timeline');
+  const listBtn = document.getElementById('an-all-tab-list');
+  const tlBtn   = document.getElementById('an-all-tab-timeline');
+  if (listEl) listEl.style.display = (tab === 'list') ? 'block' : 'none';
+  if (tlEl)   tlEl.style.display   = (tab === 'timeline') ? 'block' : 'none';
+  if (listBtn) listBtn.classList.toggle('active', tab === 'list');
+  if (tlBtn)   tlBtn.classList.toggle('active', tab === 'timeline');
+  if (tab === 'list') anRenderAllList();
+  if (tab === 'timeline') anRenderAllCompleted();
+}
 
-  /* Targets grouped by date (newest first). */
-  const tasks = appState.tasks || {}; const start = anRangeStart();
-  const dates = Object.keys(tasks).filter(ds => { const d = new Date(ds); return d >= start; }).sort((a,b) => b.localeCompare(a));
-  let tTotal = 0; const dateGroups = [];
-  dates.forEach(ds => {
-    const done = (tasks[ds] || []).filter(t => t.done);
-    if (!done.length) return; tTotal += done.length;
-    const rows = done.map(t => `<div class="an-row"><span class="r-tick">✔</span><div class="r-main"><div class="r-title">${anEsc(t.text)}</div><div class="r-sub">${anEsc(t.subjectName || anSubjectNameById[t.subject] || t.type || '')}</div></div></div>`);
-    dateGroups.push({ title: anFullDate(ds), label: done.length + ' target' + (done.length>1?'s':''), rows });
+/* ── 📋 ALL COMPLETED — LIST view: flat two-column Tasks | Videos ──
+   Each column has its own search + sort. Shows ALL dates (no range filter). */
+function anRenderAllList(){
+  const tasksList = document.getElementById('an-all-tasks-list');
+  const videosList = document.getElementById('an-all-videos-list');
+  if (!tasksList && !videosList) return;
+
+  /* flatten all done tasks */
+  const allTasks = [];
+  const tasks = appState.tasks || {};
+  Object.keys(tasks).forEach(ds => {
+    (tasks[ds] || []).forEach(t => {
+      if (!t.done) return;
+      const subjName = t.subjectName || anSubjectNameById[t.subject] || t.type || '';
+      let color = 'var(--muted)';
+      const subj = AN_SUBJECTS.find(s => s.id === t.subject || s.name === subjName);
+      if (subj && subj.color) color = subj.color;
+      allTasks.push({ text: t.text || 'Task', subject: subjName, color, date: ds });
+    });
   });
-  const activeDays = dateGroups.length;
 
-  /* Videos grouped by course / playlist. */
+  /* flatten all watched videos */
+  const allVideos = [];
+  const lib = anYtoLib();
+  Object.values(lib).forEach(pl => {
+    if (!pl || !pl.videos) return;
+    const w = pl.watched || {};
+    pl.videos.forEach(v => {
+      if (!w[v.id]) return;
+      allVideos.push({
+        id: v.id, title: v.title || 'Video',
+        playlist: pl.title || 'Course', playlistType: pl.type === 'video' ? '🎬' : '📁',
+        watchedAt: w[v.id] && w[v.id].watchedAt ? w[v.id].watchedAt : '',
+      });
+    });
+  });
+  const org = appState.ytOrganiser || {};
+  (org.videos || []).forEach(v => {
+    if (!v.done) return;
+    allVideos.push({
+      id: anYtId(v), title: v.title || 'Video',
+      playlist: org.playlistTitle || 'Organiser', playlistType: '📋',
+      watchedAt: v.completedAt || v.watchedAt || '',
+    });
+  });
+
+  /* header count chip + column counts */
+  const cntEl = document.getElementById('an-all-count');
+  if (cntEl) cntEl.textContent = (allTasks.length + allVideos.length) ? (allTasks.length + ' tasks · ' + allVideos.length + ' videos') : '';
+  const tCntEl = document.getElementById('an-all-tasks-count');
+  const vCntEl = document.getElementById('an-all-videos-count');
+  if (tCntEl) tCntEl.textContent = allTasks.length;
+  if (vCntEl) vCntEl.textContent = allVideos.length;
+
+  /* TASKS column */
+  if (tasksList){
+    if (!allTasks.length){
+      tasksList.innerHTML = '<div class="an-all-empty"><div class="em">🎯</div><div>No completed tasks yet.<br>Tick off targets in the Planner tab.</div></div>';
+    } else {
+      const searchEl = document.getElementById('an-all-tasks-search');
+      const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+      let filtered = q
+        ? allTasks.filter(t => (t.text||'').toLowerCase().includes(q) || (t.subject||'').toLowerCase().includes(q))
+        : allTasks.slice();
+      const sortEl = document.getElementById('an-all-tasks-sort');
+      const sort = sortEl ? sortEl.value : 'newest';
+      filtered.sort((a,b) => {
+        if (sort === 'oldest')  return (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+        if (sort === 'alpha')   return (a.text||'').localeCompare(b.text||'');
+        if (sort === 'subject') return (a.subject||'').localeCompare(b.subject||'') || (a.date < b.date ? 1 : -1);
+        return (a.date < b.date ? 1 : a.date > b.date ? -1 : 0);
+      });
+      tasksList.innerHTML = filtered.length
+        ? filtered.map(t => `<div class="an-all-row">
+            <span class="a-dot" style="background:${t.color}"></span>
+            <span class="a-tick">✔</span>
+            <div class="a-main">
+              <div class="a-title">${anEsc(t.text)}</div>
+              <div class="a-sub">
+                ${t.subject ? `<span class="a-chip" style="color:${t.color};border-color:${t.color}33">${anEsc(t.subject)}</span>` : ''}
+                <span>${anFullDate(t.date)}</span>
+              </div>
+            </div>
+            <span class="a-date">${anShortDate(t.date)}</span>
+          </div>`).join('')
+        : '<div class="an-all-empty"><div class="em">🔍</div><div>No tasks match "<b>' + anEsc(q) + '</b>".</div></div>';
+    }
+  }
+
+  /* VIDEOS column */
+  if (videosList){
+    if (!allVideos.length){
+      videosList.innerHTML = '<div class="an-all-empty"><div class="em">🎬</div><div>No watched videos yet.<br>Finish videos in the YouTube tab to see them here.</div></div>';
+    } else {
+      const searchEl = document.getElementById('an-all-videos-search');
+      const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+      let filtered = q
+        ? allVideos.filter(v => (v.title||'').toLowerCase().includes(q) || (v.playlist||'').toLowerCase().includes(q))
+        : allVideos.slice();
+      const sortEl = document.getElementById('an-all-videos-sort');
+      const sort = sortEl ? sortEl.value : 'newest';
+      filtered.sort((a,b) => {
+        if (sort === 'oldest')   return (a.watchedAt < b.watchedAt ? -1 : a.watchedAt > b.watchedAt ? 1 : 0);
+        if (sort === 'alpha')    return (a.title||'').localeCompare(b.title||'');
+        if (sort === 'playlist') return (a.playlist||'').localeCompare(b.playlist||'') || (a.title||'').localeCompare(b.title||'');
+        return (a.watchedAt < b.watchedAt ? 1 : a.watchedAt > b.watchedAt ? -1 : 0);
+      });
+      videosList.innerHTML = filtered.length
+        ? filtered.map(v => {
+            const thumb = v.id ? `https://i.ytimg.com/vi/${v.id}/default.jpg` : '';
+            const playAttr = v.id ? `onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"` : '';
+            return `<div class="an-all-row video" ${playAttr}>
+              ${thumb ? `<img class="a-thumb" src="${thumb}" alt="" onerror="this.style.display='none'">` : '<span class="a-tick">✔</span>'}
+              <div class="a-main">
+                <div class="a-title">${anEsc(v.title)}</div>
+                <div class="a-sub">
+                  <span class="a-chip">${v.playlistType} ${anEsc(v.playlist)}</span>
+                  ${v.watchedAt ? `<span>${anFullDate(v.watchedAt)}</span>` : ''}
+                </div>
+              </div>
+              ${v.id ? '<button class="a-play" title="Play" onclick="event.stopPropagation(); anOpenInFullModal(\'' + v.id + '\',0,\'' + anEsc(v.title).replace(/'/g,'&#39;') + '\')">▶</button>' : ''}
+            </div>`;
+          }).join('')
+        : '<div class="an-all-empty"><div class="em">🔍</div><div>No videos match "<b>' + anEsc(q) + '</b>".</div></div>';
+    }
+  }
+}
+
+/* ── 📋 ALL COMPLETED — TIMELINE view: filter pills + two-column timeline ──
+   Mirrors anRenderActivity's design but spans EVERY date. */
+let anAllFilter = 'all';
+function anSetAllFilter(f){
+  anAllFilter = f;
+  document.querySelectorAll('#an-all-pills button').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+  anRenderAllCompleted();
+}
+
+function anRenderAllCompleted(){
+  const cntEl   = document.getElementById('an-all-count');
+  const gridEl  = document.getElementById('an-all-grid');
+  const singleEl = document.getElementById('an-all-single');
+  const targetsCol = document.getElementById('an-all-targets-col');
+  const videosCol  = document.getElementById('an-all-videos-col');
+  if (!gridEl && !singleEl) return;
+
+  const tasks = appState.tasks || {};
+  const searchEl = document.getElementById('an-all-search');
+  const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  const sortEl = document.getElementById('an-all-sort');
+  const sort = sortEl ? sortEl.value : 'newest';
+
+  /* gather ALL done tasks across every date (no range filter) */
+  const allDoneByDate = {};
+  let rawT = 0;
+  Object.keys(tasks).forEach(ds => {
+    const done = (tasks[ds] || []).filter(t => t.done);
+    if (!done.length) return;
+    rawT += done.length;
+    allDoneByDate[ds] = done;
+  });
+
+  /* build target date-groups (sorted newest/oldest) or subject-groups */
+  let dateGroups = [];
+  let tTotal = 0;
+  if (sort === 'subject'){
+    const bySub = {};
+    Object.keys(allDoneByDate).forEach(ds => {
+      allDoneByDate[ds].forEach(t => {
+        if (q && !(t.text||'').toLowerCase().includes(q) && !(t.subjectName || anSubjectNameById[t.subject] || t.type || '').toLowerCase().includes(q)) return;
+        const sName = t.subjectName || anSubjectNameById[t.subject] || t.type || 'Other';
+        (bySub[sName] = bySub[sName] || []).push(t);
+      });
+    });
+    Object.keys(bySub).sort().forEach(sName => {
+      tTotal += bySub[sName].length;
+      dateGroups.push({ key: sName, subjectGroup:true, rows: bySub[sName].map(anTvTargetRow), count: bySub[sName].length });
+    });
+  } else {
+    const dates = Object.keys(allDoneByDate).sort((a,b) => sort === 'oldest' ? a.localeCompare(b) : b.localeCompare(a));
+    dates.forEach(ds => {
+      const matches = allDoneByDate[ds].filter(t => !q || (t.text||'').toLowerCase().includes(q) || (t.subjectName || anSubjectNameById[t.subject] || t.type || '').toLowerCase().includes(q));
+      if (!matches.length) return;
+      tTotal += matches.length;
+      dateGroups.push({ key: ds, rows: matches.map(anTvTargetRow), count: matches.length });
+    });
+  }
+
+  /* gather ALL watched videos across every playlist */
   const playGroups = [];
+  let vTotal = 0, rawV = 0;
   const lib = anYtoLib();
   Object.values(lib).forEach(pl => {
     if (!pl || !pl.videos) return;
     const w = pl.watched || {};
     const done = pl.videos.filter(v => w[v.id]);
-    if (done.length) playGroups.push({ icon: pl.type === 'video' ? '🎬' : '📁', title: pl.title || 'Course', items: done.map(v => ({ id: v.id, title: v.title || 'Video' })) });
+    rawV += done.length;
+    const matches = done.filter(v => !q || (v.title||'').toLowerCase().includes(q) || (pl.title||'').toLowerCase().includes(q));
+    if (matches.length){
+      vTotal += matches.length;
+      playGroups.push({ icon: pl.type === 'video' ? '🎬' : '📁', title: pl.title || 'Course',
+        items: matches.map(v => ({ id: v.id, title: v.title || 'Video', playlist: pl.title || 'Course' })) });
+    }
   });
   const org = appState.ytOrganiser || {};
-  const orgDone = (org.videos || []).filter(v => v.done);
-  if (orgDone.length) playGroups.push({ icon:'📋', title: org.playlistTitle || 'Organiser', items: orgDone.map(v => ({ id: anYtId(v), title: v.title || 'Video' })) });
+  const orgMatches = (org.videos || []).filter(v => v.done && (!q || (v.title||'').toLowerCase().includes(q) || (org.playlistTitle||'').toLowerCase().includes(q)));
+  rawV += (org.videos || []).filter(v => v.done).length;
+  if (orgMatches.length){
+    vTotal += orgMatches.length;
+    playGroups.push({ icon:'📋', title: org.playlistTitle || 'Organiser',
+      items: orgMatches.map(v => ({ id: anYtId(v), title: v.title || 'Video', playlist: org.playlistTitle || 'Organiser' })) });
+  }
+  if (sort === 'playlist') playGroups.sort((a,b) => (a.title||'').localeCompare(b.title||''));
+  if (sort === 'alpha')    playGroups.forEach(g => g.items.sort((a,b) => (a.title||'').localeCompare(b.title||'')));
 
-  let vTotal = 0;
-  const playHtml = playGroups.map((g, i) => {
-    vTotal += g.items.length;
-    const rows = g.items.map(v => `<div class="an-row video" ${v.id?`onclick="anOpenInFullModal('${v.id}',0,'${anEsc(v.title).replace(/'/g,'&#39;')}')"`:''}><span class="r-tick">${v.id?'▶':'✔'}</span><div class="r-main"><div class="r-title">${anEsc(v.title)}</div><div class="r-sub">${v.id?'Tap to play':'YouTube video'}</div></div></div>`);
-    return anTimelineGroup(g.icon + ' ' + anEsc(g.title), g.items.length + ' video' + (g.items.length>1?'s':''), rows, i === 0);
-  });
+  /* counts */
+  const nAllEl = document.getElementById('an-all-n-all');
+  const nTEl   = document.getElementById('an-all-n-targets');
+  const nVEl   = document.getElementById('an-all-n-videos');
+  if (nAllEl) nAllEl.textContent = rawT + rawV;
+  if (nTEl)   nTEl.textContent   = rawT;
+  if (nVEl)   nVEl.textContent   = rawV;
+  if (cntEl)  cntEl.textContent  = tTotal + ' targets · ' + vTotal + ' videos';
+  const colTEl = document.getElementById('an-all-col-t-count');
+  const colVEl = document.getElementById('an-all-col-v-count');
+  if (colTEl) colTEl.textContent = tTotal;
+  if (colVEl) colVEl.textContent = vTotal;
 
-  if (cnt) cnt.textContent = tTotal + ' targets · ' + vTotal + ' videos';
-
-  if (!dateGroups.length && !playGroups.length){
-    list.innerHTML = `<div class="an-empty"><div class="em">📭</div><div>No completed targets or videos in this range yet.</div></div>`;
+  /* empty state */
+  if (!tTotal && !vTotal){
+    if (gridEl) gridEl.style.display = 'none';
+    if (singleEl){ singleEl.style.display = 'block'; singleEl.innerHTML = '<div class="an-tv-empty"><div class="em">📭</div><div>No completed targets or videos yet.</div></div>'; }
     return;
   }
 
-  /* Summary strip first (motivation before details). */
-  let html = `<div class="an-summary">
-    <div class="an-sum"><span class="n">${tTotal}</span><span class="l">targets</span></div>
-    <div class="an-sum"><span class="n">${vTotal}</span><span class="l">videos</span></div>
-    <div class="an-sum"><span class="n">${activeDays}</span><span class="l">active days</span></div>
+  function groupCard(title, countLabel, rowsHtml, open){
+    return anTimelineGroup(title, countLabel, rowsHtml, open);
+  }
+
+  if (anAllFilter === 'all'){
+    if (gridEl) gridEl.style.display = 'grid';
+    if (singleEl) singleEl.style.display = 'none';
+    if (targetsCol){
+      if (!dateGroups.length){
+        targetsCol.innerHTML = '<div class="an-tv-empty"><div class="em">🎯</div><div>No completed targets yet.</div></div>';
+      } else {
+        targetsCol.innerHTML = dateGroups.map((g, i) => {
+          const title = g.subjectGroup ? '📚 ' + anEsc(g.key) : '📅 ' + anEsc(anFullDate(g.key));
+          return groupCard(title, g.count + ' target' + (g.count>1?'s':''), g.rows.join(''), i === 0);
+        }).join('');
+      }
+    }
+    if (videosCol){
+      if (!playGroups.length){
+        videosCol.innerHTML = '<div class="an-tv-empty"><div class="em">🎬</div><div>No watched videos yet.</div></div>';
+      } else {
+        videosCol.innerHTML = playGroups.map((g, i) => {
+          const rows = g.items.map(it => anTvVideoRow(it));
+          return groupCard(g.icon + ' ' + anEsc(g.title), g.items.length + ' video' + (g.items.length>1?'s':''), rows.join(''), i === 0);
+        }).join('');
+      }
+    }
+  } else if (anAllFilter === 'targets'){
+    if (gridEl) gridEl.style.display = 'none';
+    if (singleEl){ singleEl.style.display = 'block';
+      if (!dateGroups.length){
+        singleEl.innerHTML = '<div class="an-tv-empty"><div class="em">🎯</div><div>No targets match.</div></div>';
+      } else {
+        singleEl.innerHTML = dateGroups.map((g, i) => {
+          const title = g.subjectGroup ? '📚 ' + anEsc(g.key) : '📅 ' + anEsc(anFullDate(g.key));
+          return groupCard(title, g.count + ' target' + (g.count>1?'s':''), g.rows.join(''), i === 0);
+        }).join('');
+      }
+    }
+  } else if (anAllFilter === 'videos'){
+    if (gridEl) gridEl.style.display = 'none';
+    if (singleEl){ singleEl.style.display = 'block';
+      if (!playGroups.length){
+        singleEl.innerHTML = '<div class="an-tv-empty"><div class="em">🎬</div><div>No videos match.</div></div>';
+      } else {
+        singleEl.innerHTML = playGroups.map((g, i) => {
+          const rows = g.items.map(it => anTvVideoRow(it));
+          return groupCard(g.icon + ' ' + anEsc(g.title), g.items.length + ' video' + (g.items.length>1?'s':''), rows.join(''), i === 0);
+        }).join('');
+      }
+    }
+  }
+}
+
+/* wire up All Completed filter pill clicks */
+(function(){
+  function wire(){ document.querySelectorAll('#an-all-pills button').forEach(b => b.addEventListener('click', () => anSetAllFilter(b.dataset.filter))); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+  else wire();
+})();
+
+
+/* ── ✅ COMPLETED TARGETS & VIDEOS — filter pills + two-column timeline ──
+   Filter: All (two columns: Targets | Videos) / Targets (single col, date-grouped)
+   / Videos (single col, playlist-grouped). Search + sort. Subject color dots,
+   video thumbnails, play buttons, idle-day notes for gap days in the range. */
+let anTvFilter = 'all';
+function anSetTvFilter(f){
+  anTvFilter = f;
+  document.querySelectorAll('#an-tv-pills button').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+  anRenderActivity();
+}
+
+function anTvTargetRow(t){
+  const subjName = t.subjectName || anSubjectNameById[t.subject] || t.type || '';
+  let color = 'var(--muted)';
+  const subj = AN_SUBJECTS.find(s => s.id === t.subject || s.name === subjName);
+  if (subj && subj.color) color = subj.color;
+  return `<div class="an-tv-row">
+    <span class="r-dot" style="background:${color}"></span>
+    <span class="r-tick">✔</span>
+    <div class="r-main">
+      <div class="r-title">${anEsc(t.text || 'Task')}</div>
+      <div class="r-sub">${subjName ? `<span class="chip" style="color:${color};border-color:${color}33">${anEsc(subjName)}</span>` : ''}</div>
+    </div>
   </div>`;
-
-  if (dateGroups.length){
-    html += `<div class="an-tl-title">Recent</div>`;
-    html += dateGroups.map((g, i) => anTimelineGroup('📅 ' + g.title, g.label, g.rows, i === 0)).join('');
-  }
-  if (playHtml.length){
-    html += `<div class="an-tl-title">Playlists</div>`;
-    html += playHtml.join('');
-  }
-  list.innerHTML = html;
 }
 
-/* ── 📚 COMPLETED TOPICS — grouped by subject ── */
-function anRenderTopics(){
-  const cnt = document.getElementById('an-topics-count');
-  const list = document.getElementById('an-topics-list');
-  if (!list) return;
-  const prog = appState.progress || {};
-  const bySub = {};
-  Object.keys(prog).filter(id => prog[id] && prog[id].done && id.indexOf('task:') !== 0).forEach(id => {
-    const c = anChapterById[id];
-    const sub = (c && c.subjectName) || 'Other';
-    (bySub[sub] = bySub[sub] || []).push({ name: c ? c.name : id, at: prog[id].completedAt || '' });
+function anTvVideoRow(v){
+  const id = v.id || anYtId(v);
+  const title = v.title || 'Video';
+  const playlist = v.playlist || '';
+  const thumb = id ? `https://i.ytimg.com/vi/${id}/default.jpg` : '';
+  const playAttr = id ? `onclick="anOpenInFullModal('${id}',0,'${anEsc(title).replace(/'/g,'&#39;')}')"` : '';
+  return `<div class="an-tv-row video" ${playAttr}>
+    ${thumb ? `<img class="r-thumb" src="${thumb}" alt="" onerror="this.style.display='none'">` : '<span class="r-tick">✔</span>'}
+    <div class="r-main">
+      <div class="r-title">${anEsc(title)}</div>
+      <div class="r-sub">${playlist ? `<span class="chip">📁 ${anEsc(playlist)}</span>` : ''}</div>
+    </div>
+    ${id ? `<button class="r-play" title="Play" onclick="event.stopPropagation(); anOpenInFullModal('${id}',0,'${anEsc(title).replace(/'/g,'&#39;')}')">▶</button>` : ''}
+  </div>`;
+}
+
+function anRenderActivity(){
+  const cntEl = document.getElementById('an-tv-count');
+  const gridEl = document.getElementById('an-tv-grid');
+  const singleEl = document.getElementById('an-tv-single');
+  const targetsCol = document.getElementById('an-tv-targets-col');
+  const videosCol  = document.getElementById('an-tv-videos-col');
+  if (!gridEl && !singleEl) return;
+
+  /* gather targets within range */
+  const tasks = appState.tasks || {}; const start = anRangeStart();
+  const searchEl = document.getElementById('an-tv-search');
+  const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  const sortEl = document.getElementById('an-tv-sort');
+  const sort = sortEl ? sortEl.value : 'newest';
+
+  /* find all in-range dates (including idle days) for timeline continuity */
+  const n = AN_RANGE_DAYS[anRange];
+  const today = new Date(); today.setHours(0,0,0,0);
+  const inRangeDates = [];
+  for (let i = n-1; i >= 0; i--){
+    const d = new Date(today); d.setDate(today.getDate()-i);
+    inRangeDates.push(anFmtKey(d));
+  }
+  inRangeDates.sort((a,b) => sort === 'oldest' ? a.localeCompare(b) : b.localeCompare(a));
+
+  /* build target date-groups (with idle-day notes for gap days) */
+  const dateGroups = [];
+  let tTotal = 0;
+  inRangeDates.forEach(ds => {
+    const done = (tasks[ds] || []).filter(t => t.done);
+    const matches = done.filter(t => !q || (t.text||'').toLowerCase().includes(q) || (t.subjectName || anSubjectNameById[t.subject] || t.type || '').toLowerCase().includes(q));
+    if (matches.length){
+      tTotal += matches.length;
+      dateGroups.push({ ds, idle:false, rows: matches.map(anTvTargetRow), count: matches.length });
+    } else if (!done.length && q === '' && sort !== 'subject'){
+      /* idle day — only show in date-sorted, no-search mode */
+      dateGroups.push({ ds, idle:true, rows:[], count:0 });
+    }
   });
-  const subs = Object.keys(bySub).sort();
-  const totalTopics = subs.reduce((t,s) => t + bySub[s].length, 0);
-  if (cnt) cnt.textContent = totalTopics + ' completed';
-  list.innerHTML = totalTopics
-    ? subs.map((s,i) => anGroupBox('📚 ' + anEsc(s), bySub[s].length + ' done',
-        anDisclose(bySub[s].map(r => `<div class="an-done"><span class="tick">✔</span><div class="di-main"><div class="di-title">${anEsc(r.name)}</div></div>${r.at?`<span class="di-date">${anShortDate(r.at)}</span>`:''}</div>`), 3), i === 0
-      )).join('')
-    : `<div class="an-empty"><div class="em">📘</div><div>No completed topics yet. Mark chapters done in the Syllabus tab.</div></div>`;
+  /* "by subject" sort regroups targets by subject instead of date */
+  if (sort === 'subject'){
+    const bySub = {};
+    Object.keys(tasks).forEach(ds => {
+      const d = new Date(ds); if (d < start) return;
+      (tasks[ds] || []).forEach(t => {
+        if (!t.done) return;
+        if (q && !(t.text||'').toLowerCase().includes(q) && !(t.subjectName || anSubjectNameById[t.subject] || '').toLowerCase().includes(q)) return;
+        const sName = t.subjectName || anSubjectNameById[t.subject] || t.type || 'Other';
+        (bySub[sName] = bySub[sName] || []).push(t);
+      });
+    });
+    Object.keys(bySub).sort().forEach(sName => {
+      tTotal += bySub[sName].length;
+      dateGroups.push({ ds: sName, idle:false, subjectGroup:true, rows: bySub[sName].map(anTvTargetRow), count: bySub[sName].length });
+    });
+    /* reset tTotal (was double-counted above) */
+    tTotal = dateGroups.reduce((s,g) => s + (g.idle ? 0 : g.count), 0);
+  }
+
+  /* build video playlist-groups */
+  const playGroups = [];
+  let vTotal = 0;
+  const lib = anYtoLib();
+  Object.values(lib).forEach(pl => {
+    if (!pl || !pl.videos) return;
+    const w = pl.watched || {};
+    const done = pl.videos.filter(v => w[v.id] && (!q || (v.title||'').toLowerCase().includes(q) || (pl.title||'').toLowerCase().includes(q)));
+    if (done.length){
+      vTotal += done.length;
+      playGroups.push({ icon: pl.type === 'video' ? '🎬' : '📁', title: pl.title || 'Course', items: done.map(v => ({ id: v.id, title: v.title || 'Video', playlist: pl.title || 'Course' })) });
+    }
+  });
+  const org = appState.ytOrganiser || {};
+  const orgDone = (org.videos || []).filter(v => v.done && (!q || (v.title||'').toLowerCase().includes(q) || (org.playlistTitle||'').toLowerCase().includes(q)));
+  if (orgDone.length){
+    vTotal += orgDone.length;
+    playGroups.push({ icon:'📋', title: org.playlistTitle || 'Organiser', items: orgDone.map(v => ({ id: anYtId(v), title: v.title || 'Video', playlist: org.playlistTitle || 'Organiser' })) });
+  }
+  if (sort === 'playlist') playGroups.sort((a,b) => (a.title||'').localeCompare(b.title||''));
+  if (sort === 'alpha')    playGroups.forEach(g => g.items.sort((a,b) => (a.title||'').localeCompare(b.title||'')));
+
+  /* counts in pills + panel header */
+  const nAllEl = document.getElementById('an-tv-n-all');
+  const nTEl   = document.getElementById('an-tv-n-targets');
+  const nVEl   = document.getElementById('an-tv-n-videos');
+  /* raw (unfiltered) totals for the pill badges */
+  let rawT = 0, rawV = 0;
+  Object.keys(tasks).forEach(ds => { const d = new Date(ds); if (d < start) return; rawT += (tasks[ds]||[]).filter(t=>t.done).length; });
+  Object.values(lib).forEach(pl => { if (!pl || !pl.videos) return; const w = pl.watched||{}; rawV += pl.videos.filter(v => w[v.id]).length; });
+  rawV += (org.videos||[]).filter(v => v.done).length;
+  if (nAllEl) nAllEl.textContent = rawT + rawV;
+  if (nTEl)   nTEl.textContent   = rawT;
+  if (nVEl)   nVEl.textContent   = rawV;
+  if (cntEl)  cntEl.textContent  = tTotal + ' targets · ' + vTotal + ' videos';
+  const colTEl = document.getElementById('an-tv-col-t-count');
+  const colVEl = document.getElementById('an-tv-col-v-count');
+  if (colTEl) colTEl.textContent = tTotal;
+  if (colVEl) colVEl.textContent = vTotal;
+
+  /* empty state */
+  if (!tTotal && !vTotal){
+    gridEl.style.display = 'none';
+    if (singleEl){ singleEl.style.display = 'block'; singleEl.innerHTML = `<div class="an-tv-empty"><div class="em">📭</div><div>No completed targets or videos in this range yet.</div></div>`; }
+    return;
+  }
+
+  /* helper to build a timeline group card */
+  function groupCard(title, countLabel, rowsHtml, open){
+    return anTimelineGroup(title, countLabel, rowsHtml, open);
+  }
+
+  if (anTvFilter === 'all'){
+    /* two-column mode */
+    gridEl.style.display = 'grid';
+    if (singleEl) singleEl.style.display = 'none';
+
+    /* targets column */
+    if (targetsCol){
+      if (!dateGroups.filter(g => !g.idle).length){
+        targetsCol.innerHTML = `<div class="an-tv-empty"><div class="em">🎯</div><div>No targets in this range.</div></div>`;
+      } else {
+        targetsCol.innerHTML = dateGroups.map((g, i) => {
+          if (g.idle){
+            return `<div class="an-tv-idle"><span class="ico">⏸</span> No activity on ${anEsc(anFullDate(g.ds))}</div>`;
+          }
+          const title = g.subjectGroup ? '📚 ' + anEsc(g.ds) : '📅 ' + anEsc(anFullDate(g.ds));
+          return groupCard(title, g.count + ' target' + (g.count>1?'s':''), g.rows.join(''), i === 0);
+        }).join('');
+      }
+    }
+
+    /* videos column */
+    if (videosCol){
+      if (!playGroups.length){
+        videosCol.innerHTML = `<div class="an-tv-empty"><div class="em">🎬</div><div>No videos in this range.</div></div>`;
+      } else {
+        videosCol.innerHTML = playGroups.map((g, i) => {
+          const rows = g.items.map(it => anTvVideoRow(it));
+          return groupCard(g.icon + ' ' + anEsc(g.title), g.items.length + ' video' + (g.items.length>1?'s':''), rows.join(''), i === 0);
+        }).join('');
+      }
+    }
+
+  } else if (anTvFilter === 'targets'){
+    /* single-column: targets only */
+    gridEl.style.display = 'none';
+    if (singleEl){ singleEl.style.display = 'block';
+      if (!dateGroups.filter(g => !g.idle).length){
+        singleEl.innerHTML = `<div class="an-tv-empty"><div class="em">🎯</div><div>No targets match.</div></div>`;
+      } else {
+        singleEl.innerHTML = dateGroups.map((g, i) => {
+          if (g.idle){
+            return `<div class="an-tv-idle"><span class="ico">⏸</span> No activity on ${anEsc(anFullDate(g.ds))}</div>`;
+          }
+          const title = g.subjectGroup ? '📚 ' + anEsc(g.ds) : '📅 ' + anEsc(anFullDate(g.ds));
+          return groupCard(title, g.count + ' target' + (g.count>1?'s':''), g.rows.join(''), i === 0);
+        }).join('');
+      }
+    }
+
+  } else if (anTvFilter === 'videos'){
+    /* single-column: videos only */
+    gridEl.style.display = 'none';
+    if (singleEl){ singleEl.style.display = 'block';
+      if (!playGroups.length){
+        singleEl.innerHTML = `<div class="an-tv-empty"><div class="em">🎬</div><div>No videos match.</div></div>`;
+      } else {
+        singleEl.innerHTML = playGroups.map((g, i) => {
+          const rows = g.items.map(it => anTvVideoRow(it));
+          return groupCard(g.icon + ' ' + anEsc(g.title), g.items.length + ' video' + (g.items.length>1?'s':''), rows.join(''), i === 0);
+        }).join('');
+      }
+    }
+  }
 }
+
+/* wire up filter pill clicks once the DOM is ready */
+(function(){
+  function wire(){ document.querySelectorAll('#an-tv-pills button').forEach(b => b.addEventListener('click', () => anSetTvFilter(b.dataset.filter))); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+  else wire();
+})();
+
+/* ── 📚 COMPLETED TOPICS — now rendered inline under the subject bar
+   (see anRenderSubjectBars + anToggleSubject). The standalone panel
+   and this function were removed to deduplicate subject-wise data. */
 
 /* ════════ ENTRY POINT ════════ */
 function anRender(){
