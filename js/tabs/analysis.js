@@ -71,19 +71,175 @@ function anBuildMoments(){
 
 /* A "shot" = captured in Turbo OR uploaded to the bot — both live in the
    dedicated 📸 Screenshots tab, not the Gallery. */
-function anIsShotSrc(s){ return s === 'turbo-telegram' || s === 'telegram-upload'; }
+function anIsShotSrc(s){ return s === 'turbo-telegram'; }   /* uploads now live in their own Uploads tab */
 /* Gallery shows everything EXCEPT those shots. */
 function anGalleryItems(v){ return (v && v.items ? v.items : []).filter(it => !anIsShotSrc(it.source)); }
 function anGalleryEmpty(){ return `<div class="an-empty"><div class="em">🗂️</div><div>No saved moments yet.<br>Capture some from the YouTube tab and they'll appear here.</div></div>`; }
 
 /* ── sub-tab + view switching ── */
 function anSwitchView(v){
-  ['gallery','shots','schedule'].forEach(x => {
+  ['gallery','shots','uploads','schedule'].forEach(x => {
     const view = document.getElementById('an-view-' + x); if (view) view.classList.toggle('active', x === v);
     const btn  = document.getElementById('an-st-' + x);   if (btn)  btn.classList.toggle('active', x === v);
   });
   if (v === 'schedule') anRenderSchedule();
   else if (v === 'shots') anRenderShots();
+  else if (v === 'uploads') anRenderUploads();
+}
+
+/* ════════ 📥 TELEGRAM UPLOADS — file manager (folders/subfolders + move) ════════
+   Data lives in appState.tgUploads (see tgUploadsState() in telegram.js):
+     folders: { id: {id, name, parentId} }   images: [ {id, tgFileId, caption, folderId, imageUrl} ]
+   folderId / parentId === null means "root". Arbitrary nesting supported. */
+let anUpNav = null;   // current folder id (null = root)
+function anUp(){ return (typeof tgUploadsState === 'function') ? tgUploadsState() : (appState.tgUploads = appState.tgUploads || { folders:{}, images:[] }); }
+function anUpSave(){ if (typeof saveProgress === 'function') saveProgress(); }
+function anUpChildFolders(pid){ const u = anUp(); return Object.values(u.folders).filter(f => (f.parentId||null) === (pid||null)); }
+function anUpImagesIn(pid){ const u = anUp(); return u.images.filter(im => (im.folderId||null) === (pid||null)); }
+function anUpFolderById(id){ return id ? (anUp().folders[id] || null) : null; }
+function anUpImgUrl(im){ return im.imageUrl || ((typeof tgProxyBase === 'function' ? tgProxyBase() : 'https://youtube-turbo-proxy.onrender.com') + '/tg-photo?file_id=' + encodeURIComponent(im.tgFileId||'')); }
+
+function anUpNewFolder(){
+  const name = (prompt('New folder name:') || '').trim();
+  if (!name) return;
+  const u = anUp();
+  const id = 'f_' + Date.now() + Math.random().toString(36).slice(2,5);
+  u.folders[id] = { id, name: name.slice(0,60), parentId: anUpNav || null, createdAt: Date.now() };
+  anUpSave(); anRenderUploads();
+}
+function anUpRename(fid){
+  const f = anUpFolderById(fid); if (!f) return;
+  const name = (prompt('Rename folder:', f.name) || '').trim();
+  if (!name) return;
+  f.name = name.slice(0,60); anUpSave(); anRenderUploads();
+}
+function anUpDeleteFolder(fid){
+  const u = anUp(); const f = u.folders[fid]; if (!f) return;
+  if (!confirm('Delete folder "' + f.name + '"? Its images and subfolders move up one level.')) return;
+  const parent = f.parentId || null;
+  Object.values(u.folders).forEach(c => { if ((c.parentId||null) === fid) c.parentId = parent; });
+  u.images.forEach(im => { if ((im.folderId||null) === fid) im.folderId = parent; });
+  delete u.folders[fid];
+  anUpSave(); anRenderUploads();
+}
+function anUpOpen(fid){ anUpNav = fid || null; anRenderUploads(); }
+function anUpBack(){ const f = anUpFolderById(anUpNav); anUpNav = f ? (f.parentId || null) : null; anRenderUploads(); }
+function anUpDeleteImage(imgId){
+  const u = anUp();
+  if (!confirm('Remove this image from the app? (It stays in Telegram.)')) return;
+  u.images = u.images.filter(im => im.id !== imgId);
+  anUpSave(); anRenderUploads();
+}
+function anUpOpenImage(imgId){
+  const im = anUp().images.find(x => x.id === imgId); if (im) window.open(anUpImgUrl(im), '_blank');
+}
+
+/* Move-to-folder picker: lists Root + every folder (indented) as buttons. */
+function anUpMove(imgId){
+  const u = anUp();
+  const im = u.images.find(x => x.id === imgId); if (!im) return;
+  let ov = document.getElementById('an-up-move');
+  if (!ov){
+    ov = document.createElement('div');
+    ov.id = 'an-up-move';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  const rows = [];
+  function walk(pid, depth){
+    anUpChildFolders(pid).sort((a,b)=>a.name.localeCompare(b.name)).forEach(f => {
+      const disabled = (im.folderId||null) === f.id;
+      rows.push(`<button class="an-back" style="display:block;width:100%;text-align:left;margin:3px 0;${disabled?'opacity:.4;':''}" ${disabled?'disabled':''} onclick="anUpDoMove('${imgId}','${f.id}')">${'&nbsp;&nbsp;'.repeat(depth)}📁 ${anEsc(f.name)}</button>`);
+      walk(f.id, depth+1);
+    });
+  }
+  walk(null, 0);
+  const rootDisabled = (im.folderId||null) === null;
+  ov.innerHTML = `<div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;max-width:420px;width:100%;max-height:80vh;overflow:auto;padding:16px;">
+    <div style="font-weight:800;margin-bottom:10px;">Move image to…</div>
+    <button class="an-back" style="display:block;width:100%;text-align:left;margin:3px 0;${rootDisabled?'opacity:.4;':''}" ${rootDisabled?'disabled':''} onclick="anUpDoMove('${imgId}',null)">🏠 Root</button>
+    ${rows.join('') || '<div style="color:var(--muted);font-size:.8rem;padding:6px 2px;">No folders yet — create one with ➕ New folder.</div>'}
+    <button class="an-back" style="margin-top:12px;" onclick="document.getElementById('an-up-move').remove()">Cancel</button>
+  </div>`;
+}
+function anUpDoMove(imgId, folderId){
+  const im = anUp().images.find(x => x.id === imgId);
+  if (im){ im.folderId = folderId || null; anUpSave(); }
+  const ov = document.getElementById('an-up-move'); if (ov) ov.remove();
+  anRenderUploads();
+}
+
+function anUpBreadcrumb(){
+  const el = document.getElementById('an-uploads-breadcrumb'); if (!el) return;
+  const chain = []; let f = anUpFolderById(anUpNav);
+  while (f){ chain.unshift(f); f = anUpFolderById(f.parentId); }
+  let html = `<button class="an-back" ${anUpNav?'':'disabled'} onclick="anUpBack()">⬅ Back</button>`;
+  html += `<span class="an-crumb${anUpNav?'':' cur'}" onclick="anUpOpen(null)">🏠 Uploads</span>`;
+  chain.forEach((c, i) => {
+    html += '<span class="an-sep">›</span>';
+    const cur = i === chain.length - 1;
+    html += `<span class="an-crumb${cur?' cur':''}" onclick="anUpOpen('${c.id}')">📁 ${anEsc(c.name)}</span>`;
+  });
+  el.innerHTML = html; el.style.display = 'flex';
+}
+
+function anRenderUploads(){
+  const body = document.getElementById('an-uploads-body');
+  const bc   = document.getElementById('an-uploads-breadcrumb');
+  const cnt  = document.getElementById('an-uploads-count');
+  if (!body) return;
+  const u = anUp();
+  if (cnt) cnt.textContent = u.images.length ? '(' + u.images.length + ')' : '';
+
+  if (!u.images.length && !Object.keys(u.folders).length){
+    body.innerHTML = `<div class="an-empty"><div class="em">📥</div><div>No uploads yet.<br>Send any image to your Telegram bot — it'll appear here to organise.</div></div>`;
+    if (bc) bc.style.display = 'none';
+    return;
+  }
+
+  if (anUpNav && !u.folders[anUpNav]) anUpNav = null;   // stale nav guard
+  anUpBreadcrumb();
+
+  const subFolders = anUpChildFolders(anUpNav).sort((a,b) => a.name.localeCompare(b.name));
+  const imgs = anUpImagesIn(anUpNav).sort((a,b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+  let html = '';
+  if (subFolders.length){
+    html += `<div class="an-explorer">${subFolders.map(f => {
+      const n = anUpImagesIn(f.id).length, sub = anUpChildFolders(f.id).length;
+      return `<div class="an-tile">
+        <div onclick="anUpOpen('${f.id}')" style="cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;">
+          ${anFolderIcon('pl')}
+          <div class="an-tile-name">${anEsc(f.name)}</div>
+          <div class="an-tile-meta">${sub?sub+' folder'+(sub>1?'s':'')+' · ':''}${n} image${n===1?'':'s'}</div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <button class="an-back" style="font-size:.68rem;padding:3px 8px;" onclick="anUpRename('${f.id}')">✏️</button>
+          <button class="an-back" style="font-size:.68rem;padding:3px 8px;" onclick="anUpDeleteFolder('${f.id}')">🗑</button>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+  }
+
+  if (imgs.length){
+    html += `<div class="an-label">Images</div><div class="an-grid">${imgs.map(im => `
+      <div class="an-chip">
+        <div class="mt" onclick="anUpOpenImage('${im.id}')" style="cursor:pointer;"><img src="${anUpImgUrl(im)}" loading="lazy" alt=""><div class="an-play"><span>🔍</span></div></div>
+        <div class="ml" style="justify-content:space-between;">
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${anEsc((im.caption||'Image').slice(0,26))}</span>
+          <span style="display:flex;gap:4px;flex-shrink:0;">
+            <button class="an-back" style="font-size:.66rem;padding:2px 7px;" onclick="anUpMove('${im.id}')" title="Move to folder">📂</button>
+            <button class="an-back" style="font-size:.66rem;padding:2px 7px;" onclick="anUpDeleteImage('${im.id}')" title="Remove">🗑</button>
+          </span>
+        </div>
+      </div>`).join('')}</div>`;
+  }
+
+  if (!subFolders.length && !imgs.length){
+    html += `<div class="an-empty"><div class="em">📂</div><div>This folder is empty. Add a subfolder or move images here.</div></div>`;
+  }
+  body.innerHTML = html;
 }
 
 /* ── 📸 Turbo Screenshots sub-tab — SAME folder structure as the Gallery
@@ -561,10 +717,13 @@ function anRender(){
   appState.progress = appState.progress || {};
   appState.ytScreenshots = appState.ytScreenshots || { folders: {} };
   anIndexSubjects();
+  /* Move any legacy uploads out of the Screenshots store into the Uploads store. */
+  try { if (typeof migrateTelegramUploads === 'function' && migrateTelegramUploads() > 0 && typeof saveProgress === 'function') saveProgress(); } catch (e) {}
   anBuildMoments();
   anRenderRecent();
   anRenderTree();
   anRenderShots();
+  anRenderUploads();
   anRenderSchedule();
   // auto-open the first playlist folder for quick orientation
   setTimeout(() => { const f = document.querySelector('#page-analysis .an-folder'); if (f) f.classList.add('open'); }, 40);

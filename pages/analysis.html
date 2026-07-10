@@ -192,6 +192,7 @@
   <div class="an-subtabs">
     <button class="an-subtab active" id="an-st-gallery" onclick="anSwitchView('gallery')">🗂️ Gallery</button>
     <button class="an-subtab" id="an-st-shots" onclick="anSwitchView('shots')">📸 Screenshots</button>
+    <button class="an-subtab" id="an-st-uploads" onclick="anSwitchView('uploads')">📥 Uploads</button>
     <button class="an-subtab" id="an-st-schedule" onclick="anSwitchView('schedule')">📊 Scheduled Analysis</button>
   </div>
 
@@ -222,6 +223,18 @@
     </div>
     <div class="an-crumbs" id="an-shots-breadcrumb"></div>
     <div id="an-shots-body"></div>
+  </div>
+
+  <!-- TELEGRAM UPLOADS — file manager: folders / subfolders + move images -->
+  <div class="an-view" id="an-view-uploads">
+    <div class="an-toolbar" style="justify-content:space-between;flex-wrap:wrap;gap:10px;">
+      <div style="font-size:0.82rem;color:var(--muted);line-height:1.5;">
+        📥 Images you send the bot land here. Make folders &amp; move images in. <span id="an-uploads-count"></span>
+      </div>
+      <button class="an-back" onclick="anUpNewFolder()" title="Create a folder inside the current one">➕ New folder</button>
+    </div>
+    <div class="an-crumbs" id="an-uploads-breadcrumb"></div>
+    <div id="an-uploads-body"></div>
   </div>
 
   <!-- SCHEDULED ANALYSIS -->

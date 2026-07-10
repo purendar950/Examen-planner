@@ -553,7 +553,7 @@ bot.on('photo', async (msg) => {
     }, { merge: true });
 
     bot.sendMessage(chatId,
-      '🖼️ Image add ho gaya! App mein <b>Analysis → 📸 Screenshots → 📥 Telegram Uploads</b> mein dikhega.',
+      '🖼️ Image add ho gaya! App mein <b>Analysis → 📥 Uploads</b> mein dikhega — wahan folder bana ke organise kar sakte ho.',
       { parse_mode: 'HTML' }).catch(() => {});
     console.log(`🖼️ image inbox → uid:${user.uid} chat:${chatId}`);
   } catch (e) {
