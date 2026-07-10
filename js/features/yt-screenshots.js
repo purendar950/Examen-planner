@@ -54,6 +54,14 @@ function ssGetCurrentContext() {
 }
 
 function ssGetVideoTimestamp() {
+  // ⚡ Turbo mode plays a NATIVE <video>, while the YouTube iframe is paused &
+  // hidden with a stale time. Read the real Turbo playback time FIRST, or Save
+  // Moment captures the wrong timestamp (usually 0).
+  try {
+    if (typeof window.ytTurboActive === 'function' && window.ytTurboActive()) {
+      return Math.floor(window.ytTurboCurrentTime() || 0);
+    }
+  } catch(e) {}
   // Try to get current time from YT IFrame API player
   try {
     if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getCurrentTime) {
@@ -65,6 +73,24 @@ function ssGetVideoTimestamp() {
     if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getCurrentTime) {
       return Math.floor(ytoPlayerV2.getCurrentTime());
     }
+  } catch(e) {}
+  return 0;
+}
+
+/* Duration of whatever player is actually on screen (Turbo native <video> or
+   the YouTube iframe). Used to map a timestamp to the right preview frame. */
+function ssGetVideoDuration() {
+  try {
+    if (typeof window.ytTurboActive === 'function' && window.ytTurboActive()) {
+      var d = window.ytTurboDuration();
+      if (d && !isNaN(d)) return d;
+    }
+  } catch(e) {}
+  try {
+    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration) return ytPlayer.getDuration();
+  } catch(e) {}
+  try {
+    if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration) return ytoPlayerV2.getDuration();
   } catch(e) {}
   return 0;
 }
@@ -156,13 +182,7 @@ function ssCapture() {
   var cleanId = (ctx.videoId || '').replace('playlist_', '');
   if (!cleanId) { showToast('Video ID not found!', 'error'); return false; }
 
-  var duration = 0;
-  try {
-    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration)
-      duration = ytPlayer.getDuration();
-    else if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration)
-      duration = ytoPlayerV2.getDuration();
-  } catch (e) {}
+  var duration = ssGetVideoDuration();
 
   /* Store ONLY the lightweight YouTube frame URL (~0.3 KB), never the image
      bytes — the preview is fetched from YouTube's CDN on demand. This keeps a
@@ -433,6 +453,18 @@ function ssAddBookmark() {
 ══════════════════════════════════════════════════════════════ */
 
 function ssSeekTo(seconds) {
+  // ⚡ Turbo mode: seek the native <video> that's actually on screen.
+  try {
+    if (typeof window.ytTurboActive === 'function' && window.ytTurboActive()) {
+      var tv = document.getElementById('yt-turbo-video');
+      if (tv) {
+        tv.currentTime = seconds;
+        var pp = tv.play(); if (pp && pp.catch) pp.catch(function(){});
+        showToast(`⏩ Jumped to ${ssFormatTime(seconds)}`, 'info');
+        return;
+      }
+    }
+  } catch(e) {}
   try {
     if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.seekTo) {
       ytPlayer.seekTo(seconds, true);
