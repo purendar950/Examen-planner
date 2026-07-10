@@ -587,7 +587,100 @@ function ssTogglePanel() {
   if (panel) {
     panel.classList.toggle('open', ssPanelOpen);
   }
+  // Only one slide-in panel at a time.
+  if (ssPanelOpen && ssVideoPanelOpen) {
+    ssVideoPanelOpen = false;
+    const vp = document.getElementById('ss-video-panel');
+    if (vp) vp.classList.remove('open');
+  }
   if (ssPanelOpen) ssRenderGallery();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   VIDEO-SCOPED GALLERY — shows ONLY the current video's moments.
+   The full Gallery (ssTogglePanel) still shows the whole playlist.
+══════════════════════════════════════════════════════════════ */
+let ssVideoPanelOpen = false;
+
+function ssToggleVideoPanel() {
+  ssVideoPanelOpen = !ssVideoPanelOpen;
+  const panel = document.getElementById('ss-video-panel');
+  if (panel) {
+    panel.classList.toggle('open', ssVideoPanelOpen);
+  }
+  // Only one slide-in panel at a time.
+  if (ssVideoPanelOpen && ssPanelOpen) {
+    ssPanelOpen = false;
+    const gp = document.getElementById('ss-gallery-panel');
+    if (gp) gp.classList.remove('open');
+  }
+  if (ssVideoPanelOpen) ssRenderVideoGallery();
+}
+
+function ssRenderVideoGallery() {
+  const container = document.getElementById('ss-video-tree');
+  if (!container) return;
+  const state = ssGetState();
+  const ctx = (typeof ssGetCurrentContext === 'function') ? ssGetCurrentContext() : { playlistId: null, videoId: 'unknown' };
+  const plId = ctx.playlistId;
+  const vId = ctx.videoId;
+
+  const folder = plId ? state.folders[plId] : null;
+  const vf = (folder && folder.videos) ? folder.videos[vId] : null;
+
+  // Sub-header shows which video we're scoped to.
+  const nameEl = document.getElementById('ss-video-panel-name');
+  if (nameEl) {
+    const vName = vf ? vf.name : (ctx.videoName || 'This video');
+    nameEl.textContent = (vId && vId !== 'unknown') ? '📁 ' + vName : '';
+  }
+
+  // No video playing.
+  if (!vId || vId === 'unknown') {
+    container.innerHTML = `
+      <div class="ss-empty">
+        <div style="font-size:2rem;margin-bottom:8px;">🎬</div>
+        <p>Play a video first.</p>
+        <p style="font-size:0.72rem;color:var(--muted);margin-top:4px;">This gallery shows only the moments saved for the video you're currently watching.</p>
+      </div>`;
+    return;
+  }
+
+  // Video playing but no moments yet.
+  if (!vf || !vf.items.length) {
+    container.innerHTML = `
+      <div class="ss-empty">
+        <div style="font-size:2rem;margin-bottom:8px;">🎯</div>
+        <p>No moments for this video yet.</p>
+        <p style="font-size:0.72rem;color:var(--muted);margin-top:4px;">Tap 📸 Save Moment while watching to bookmark a replayable point.</p>
+      </div>`;
+    return;
+  }
+
+  // Flat list of just this video's moments/bookmarks (no folder tree needed).
+  let html = '<div class="ss-items-list ss-video-items">';
+  vf.items.forEach(item => {
+    const isBookmark = item.type === 'bookmark';
+    const icon = isBookmark ? '🔖' : '🎯';
+    const timeText = isBookmark ? `⏱ ${item.timeLabel}` : `▶ ${item.timeLabel} — tap to replay`;
+    const previewUrl = isBookmark ? '' : ssPreviewUrl(item);
+    const thumb = previewUrl
+      ? `<div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})"><img src="${previewUrl}" alt="${escapeHtml(item.label)}" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${item.videoId||''}/hqdefault.jpg';"></div>`
+      : '';
+    html += `<div class="ss-item ${isBookmark ? 'ss-item-bookmark' : 'ss-item-screenshot'}" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
+      ${thumb}
+      <div class="ss-item-info">
+        <div class="ss-item-label">${icon} ${escapeHtml(item.label)}</div>
+        <div class="ss-item-time">${timeText}</div>
+        ${item.note ? `<div class="ss-item-note">${escapeHtml(item.note)}</div>` : ''}
+      </div>
+      <div class="ss-item-actions">
+        <button onclick="event.stopPropagation();ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  container.innerHTML = html;
 }
 
 function ssUpdateBadge() {
@@ -602,6 +695,20 @@ function ssUpdateBadge() {
   });
   badge.textContent = total;
   badge.style.display = total > 0 ? '' : 'none';
+
+  // "This Video" badge — count only the currently playing video's moments.
+  const vBadge = document.getElementById('ss-video-badge-count');
+  if (vBadge) {
+    const ctx = (typeof ssGetCurrentContext === 'function') ? ssGetCurrentContext() : { playlistId: null, videoId: 'unknown' };
+    const vf = ctx.playlistId && state.folders[ctx.playlistId]
+      ? state.folders[ctx.playlistId].videos[ctx.videoId] : null;
+    const vCount = vf ? vf.items.length : 0;
+    vBadge.textContent = vCount;
+    vBadge.style.display = vCount > 0 ? '' : 'none';
+  }
+
+  // Keep the video-scoped panel live while it's open.
+  if (ssVideoPanelOpen) ssRenderVideoGallery();
 }
 
 function ssRenderGallery() {
@@ -1042,8 +1149,11 @@ function ssInit() {
       <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment — a replayable timestamp + preview frame (tiny, no screenshot stored)">
         📸 Save Moment
       </button>
-      <button class="ss-gallery-btn" onclick="ssTogglePanel()" title="Open screenshot gallery">
+      <button class="ss-gallery-btn" onclick="ssTogglePanel()" title="Open the full gallery (all videos in this course/playlist)">
         📂 Gallery <span class="ss-badge" id="ss-badge-count" style="display:none">0</span>
+      </button>
+      <button class="ss-gallery-btn ss-video-gallery-btn" onclick="ssToggleVideoPanel()" title="Show only THIS video's saved moments">
+        🎬 This Video <span class="ss-badge" id="ss-video-badge-count" style="display:none">0</span>
       </button>
     `;
     speedBar.insertAdjacentElement('afterend', toolbar);
@@ -1102,6 +1212,26 @@ function ssInit() {
       <div class="ss-panel-body" id="ss-gallery-tree"></div>
     `;
     document.getElementById('app').appendChild(panel);
+  }
+
+  // Inject the VIDEO-SCOPED gallery side-panel — shows only the currently
+  // playing video's saved moments (the full Gallery above stays untouched).
+  if (!document.getElementById('ss-video-panel')) {
+    const vpanel = document.createElement('div');
+    vpanel.id = 'ss-video-panel';
+    vpanel.className = 'ss-gallery-panel';
+    vpanel.innerHTML = `
+      <div class="ss-panel-header">
+        <div class="ss-panel-title">🎬 This Video's Moments</div>
+        <div class="ss-panel-actions">
+          <button onclick="ssTogglePanel()" title="Open full gallery instead" class="ss-panel-action-btn">📂</button>
+          <button onclick="ssToggleVideoPanel()" title="Close" class="ss-panel-close">✕</button>
+        </div>
+      </div>
+      <div class="ss-video-panel-sub" id="ss-video-panel-name"></div>
+      <div class="ss-panel-body" id="ss-video-tree"></div>
+    `;
+    document.getElementById('app').appendChild(vpanel);
   }
 
   // Inject preview modal

@@ -1769,6 +1769,25 @@
   .ss-gallery-panel.open {
     right: 0;
   }
+  .ss-video-gallery-btn:hover {
+    background: rgba(168,85,247,0.12);
+    border-color: #a855f7;
+    color: #a855f7;
+  }
+  .ss-video-panel-sub {
+    padding: 8px 16px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--muted);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .ss-video-panel-sub:empty {
+    display: none;
+  }
   .ss-panel-header {
     display: flex;
     align-items: center;
