@@ -191,6 +191,7 @@
 
   <div class="an-subtabs">
     <button class="an-subtab active" id="an-st-gallery" onclick="anSwitchView('gallery')">🗂️ Gallery</button>
+    <button class="an-subtab" id="an-st-shots" onclick="anSwitchView('shots')">📸 Screenshots</button>
     <button class="an-subtab" id="an-st-schedule" onclick="anSwitchView('schedule')">📊 Scheduled Analysis</button>
   </div>
 
@@ -210,6 +211,16 @@
       <div class="an-label">⭐ Recent moments</div>
       <div class="an-recent-row" id="an-recent"></div>
     </div>
+  </div>
+
+  <!-- TURBO SCREENSHOTS (captured in Turbo mode, stored on Telegram) -->
+  <div class="an-view" id="an-view-shots">
+    <div class="an-toolbar">
+      <div style="font-size:0.82rem;color:var(--muted);line-height:1.5;">
+        ⚡ Screenshots captured in <b>Turbo mode</b> and saved on Telegram. <span id="an-shots-count"></span>
+      </div>
+    </div>
+    <div id="an-shots-body"></div>
   </div>
 
   <!-- SCHEDULED ANALYSIS -->
