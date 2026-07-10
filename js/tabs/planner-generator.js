@@ -196,24 +196,40 @@ function renderTopicListItems(items, emptyMsg) {
    Syllabus Study — simple topic list per day (parallel multi-subject schedule)
    cfg: { planType:'syllabus', startDate, endDate, subjectFreq, chapters{} }
 --------------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------------
+   isRestDayToday() / renderRestDayNotice(container) — shared rest-day guard.
+   The user's weekly rest day (studyProfile.restDay) must be honoured by EVERY
+   plan type. renderRestDayNotice renders the "Rest Day" card into `container`
+   and returns true when today is the rest day, so each renderer can simply do:
+     if (renderRestDayNotice(container)) return;
+   Keeping this in one place stops Syllabus / Practice / Mock from drifting
+   apart (Practice & Mock previously had no guard and studied on rest days).
+--------------------------------------------------------------------------- */
+function isRestDayToday() {
+  const profile = appState.studyProfile || {};
+  const restDay = (profile.restDay !== undefined) ? Number(profile.restDay) : -1;
+  return restDay >= 0 && new Date().getDay() === restDay;
+}
+function renderRestDayNotice(container) {
+  if (!container || !isRestDayToday()) return false;
+  const restDay = Number((appState.studyProfile || {}).restDay);
+  const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][restDay];
+  container.innerHTML = `<div style="padding:2.5rem;text-align:center;">
+    <div style="font-size:2.5rem;margin-bottom:10px;">😴</div>
+    <div style="font-size:1rem;font-weight:700;color:var(--accent);">Rest Day!</div>
+    <div style="font-size:.82rem;color:var(--muted);margin-top:6px;">Aaj ${dayName} hai — scheduled rest day. Kal wapas aao 💪</div>
+  </div>`;
+  return true;
+}
+
 function renderSyllabusPlan(cfg) {
   const container = document.getElementById('timetable-container');
   document.getElementById('weekly-plan-container').style.display = 'none';
   container.style.display = '';
   setTimetableView('day');
 
-  const profile = appState.studyProfile || {};
-  const restDay = (profile.restDay !== undefined) ? Number(profile.restDay) : -1;
-  const todayDOW = new Date().getDay();
-  if (restDay >= 0 && todayDOW === restDay) {
-    const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][restDay];
-    container.innerHTML = `<div style="padding:2.5rem;text-align:center;">
-      <div style="font-size:2.5rem;margin-bottom:10px;">😴</div>
-      <div style="font-size:1rem;font-weight:700;color:var(--accent);">Rest Day!</div>
-      <div style="font-size:.82rem;color:var(--muted);margin-top:6px;">Aaj ${dayName} hai — scheduled rest day. Kal wapas aao 💪</div>
-    </div>`;
-    return;
-  }
+  /* Honour the user's scheduled rest day. */
+  if (renderRestDayNotice(container)) return;
 
   /* Build the full day-by-day schedule (date -> topic items), running subjects
      in PARALLEL by their frequency. No clock times — just a topic list. */
@@ -287,6 +303,9 @@ function renderPracticePlan(cfg) {
   document.getElementById('weekly-plan-container').style.display = 'none';
   container.style.display = '';
   setTimetableView('day');
+
+  /* Honour the user's scheduled rest day — no practice session on rest days. */
+  if (renderRestDayNotice(container)) return;
 
   const profile = appState.studyProfile || {};
   const allSubs = getActiveSubjects();
@@ -412,6 +431,9 @@ function renderMockPlan(cfg) {
   if (wk) wk.style.display = 'none';
   container.style.display = '';
   setTimetableView('day');
+
+  /* Honour the user's scheduled rest day — no mock/analysis on rest days. */
+  if (renderRestDayNotice(container)) return;
 
   const duration = Math.max(1, cfg.durationDays || 30);
   const phase = getPreparationPhase(getDaysLeft());
