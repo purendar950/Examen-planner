@@ -163,6 +163,39 @@ function resolveTelegramTaskSubjects() {
   } catch (e) {}
 }
 
+/* Base URL of the proxy that streams Telegram-hosted images (/tg-photo). */
+function tgProxyBase() {
+  return (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+}
+
+/* The "Telegram Uploads" store: a flat tree the user organises in the Uploads
+   tab. folders keyed by id ({id,name,parentId}); images carry a folderId
+   (null = root). Only the Telegram file_id is stored — never image bytes. */
+function tgUploadsState() {
+  if (!appState.tgUploads || typeof appState.tgUploads !== 'object') appState.tgUploads = { folders: {}, images: [] };
+  if (!appState.tgUploads.folders) appState.tgUploads.folders = {};
+  if (!Array.isArray(appState.tgUploads.images)) appState.tgUploads.images = [];
+  return appState.tgUploads;
+}
+
+/* Add an image the user sent the bot into the Uploads store (at root). */
+function addTgUploadImage(item) {
+  try {
+    if (!item || !item.tgFileId) return false;
+    const u = tgUploadsState();
+    if (u.images.some(im => im.tgFileId === item.tgFileId)) return false;   // de-dupe
+    u.images.push({
+      id: 'im_' + (item.id || Date.now()) + Math.random().toString(36).slice(2, 5),
+      tgFileId: item.tgFileId,
+      caption: item.caption || '',
+      createdAt: item.createdAt || new Date().toISOString(),
+      folderId: null,                                   // arrives at root
+      imageUrl: tgProxyBase() + '/tg-photo?file_id=' + encodeURIComponent(item.tgFileId)
+    });
+    return true;
+  } catch (e) { return false; }
+}
+
 /* Drain the telegramInbox array from a Firestore user-doc snapshot into the
    planner. Safe to call on every snapshot — it no-ops when the inbox is empty
    and clears the inbox after merging so items are processed exactly once. */
@@ -185,6 +218,7 @@ function drainTelegramInbox(snapData) {
     const fmt = (typeof fmtDate === 'function') ? fmtDate : (d => d.toISOString().slice(0, 10));
     const todayStr = fmt(new Date());
     let added = 0;
+    let imgAdded = 0;
     const newlyProcessed = [];
 
     inbox.forEach(item => {
@@ -193,6 +227,9 @@ function drainTelegramInbox(snapData) {
       /* Already materialised once — never re-add (even if the user deleted it). */
       if (item.id != null && processed.has(item.id)) return;
       if (item.id != null) { processed.add(item.id); newlyProcessed.push(item.id); }
+
+      /* Images → the Telegram Uploads store (organised in the Uploads tab). */
+      if (item.kind === 'image') { if (addTgUploadImage(item)) imgAdded++; return; }
 
       const date = /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : todayStr;
       if (!appState.tasks[date]) appState.tasks[date] = [];
@@ -248,6 +285,17 @@ function drainTelegramInbox(snapData) {
       try { if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar(); } catch (e) {}
       if (typeof showToast === 'function') {
         showToast('📩 ' + added + ' naya task' + (added > 1 ? 's' : '') + ' Telegram se add hua! Planner check karo.', 'success');
+      }
+    }
+
+    if (imgAdded) {
+      if (typeof saveProgress === 'function') saveProgress();
+      try {
+        const pg = document.getElementById('page-analysis');
+        if (typeof anRenderUploads === 'function' && pg && pg.classList.contains('active')) anRenderUploads();
+      } catch (e) {}
+      if (typeof showToast === 'function') {
+        showToast('🖼️ ' + imgAdded + ' image Telegram se aayi — Analysis → 📥 Uploads dekho.', 'success');
       }
     }
   } catch (e) {}

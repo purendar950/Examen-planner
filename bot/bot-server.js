@@ -521,6 +521,46 @@ bot.on('message', async (msg) => {
   }
 });
 
+/* ── Incoming PHOTOS → app "Telegram Uploads" ────────────────────────────
+   Any image a connected user sends the bot is queued (as a file_id reference,
+   no bytes) in their telegramInbox. The app drains it into the Uploads tab,
+   where the user can organise it into folders/subfolders. */
+bot.on('photo', async (msg) => {
+  const chatId = msg.chat.id;
+  if (!db) return;
+  if (rateLimited(chatId)) return;
+  try {
+    const user = await findUserByChatId(chatId);
+    if (!user) {
+      bot.sendMessage(chatId,
+        `🔗 Pehle account connect karo: <b>/start</b> dabao aur Chat ID <code>${chatId}</code> app mein paste karo.`,
+        { parse_mode: 'HTML' }).catch(() => {});
+      return;
+    }
+    const photos = msg.photo || [];
+    const largest = photos[photos.length - 1];   // biggest PhotoSize
+    if (!largest || !largest.file_id) return;
+
+    const admin = global._fbAdmin;
+    await db.collection('users').doc(user.uid).set({
+      telegramInbox: admin.firestore.FieldValue.arrayUnion({
+        id: 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        kind: 'image',
+        tgFileId: largest.file_id,
+        caption: (msg.caption || '').slice(0, 200),
+        createdAt: new Date().toISOString()
+      })
+    }, { merge: true });
+
+    bot.sendMessage(chatId,
+      '🖼️ Image add ho gaya! App mein <b>Analysis → 📥 Uploads</b> mein dikhega — wahan folder bana ke organise kar sakte ho.',
+      { parse_mode: 'HTML' }).catch(() => {});
+    console.log(`🖼️ image inbox → uid:${user.uid} chat:${chatId}`);
+  } catch (e) {
+    console.error('❌ photo handler error:', e.message);
+  }
+});
+
 /* ── Polling error handler ──────────────────────────────────────────────── */
 bot.on('polling_error', (err) => {
   console.error('⚠️  Polling error:', err.code, err.message);
