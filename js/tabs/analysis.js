@@ -37,16 +37,19 @@ function anIndexSubjects(){
   });
 }
 
-/* ════════ GALLERY: derive moments from appState.ytScreenshots ════════ */
-let AN_MOMENTS = [];
+/* ════════ GALLERY: derive moments from appState.ytScreenshots ════════
+   Turbo screenshots (source === 'turbo-telegram') get their OWN sub-tab, so we
+   keep them in a separate list (AN_SHOTS) and exclude them from the Gallery. */
+let AN_MOMENTS = [];   // gallery moments (everything EXCEPT Turbo screenshots)
+let AN_SHOTS = [];     // Turbo/Telegram screenshots only
 function anBuildMoments(){
-  AN_MOMENTS = [];
+  AN_MOMENTS = []; AN_SHOTS = [];
   const folders = (appState.ytScreenshots && appState.ytScreenshots.folders) || {};
   Object.entries(folders).forEach(([plId, pl]) => {
     Object.entries(pl.videos || {}).forEach(([vId, v]) => {
       (v.items || []).forEach(it => {
         const vid = it.videoId || String(vId).replace('playlist_','');
-        AN_MOMENTS.push({
+        const mo = {
           id: it.id,
           type: it.type || 'screenshot',
           timestamp: it.timestamp || 0,
@@ -56,20 +59,48 @@ function anBuildMoments(){
           label: it.label || it.note || '',
           createdAt: it.createdAt || '',
           img: it.dataUrl || it.imageUrl || ('https://i.ytimg.com/vi/' + vid + '/hqdefault.jpg'),
-          playlistName: pl.name || 'Playlist'
-        });
+          playlistName: pl.name || 'Playlist',
+          source: it.source || ''
+        };
+        if (mo.source === 'turbo-telegram') AN_SHOTS.push(mo);
+        else AN_MOMENTS.push(mo);
       });
     });
   });
 }
 
+/* Gallery shows everything EXCEPT Turbo screenshots (those live in their tab). */
+function anGalleryItems(v){ return (v && v.items ? v.items : []).filter(it => it.source !== 'turbo-telegram'); }
+function anGalleryEmpty(){ return `<div class="an-empty"><div class="em">🗂️</div><div>No saved moments yet.<br>Capture some from the YouTube tab and they'll appear here.</div></div>`; }
+
 /* ── sub-tab + view switching ── */
 function anSwitchView(v){
-  document.getElementById('an-view-gallery').classList.toggle('active', v === 'gallery');
-  document.getElementById('an-view-schedule').classList.toggle('active', v === 'schedule');
-  document.getElementById('an-st-gallery').classList.toggle('active', v === 'gallery');
-  document.getElementById('an-st-schedule').classList.toggle('active', v === 'schedule');
+  ['gallery','shots','schedule'].forEach(x => {
+    const view = document.getElementById('an-view-' + x); if (view) view.classList.toggle('active', x === v);
+    const btn  = document.getElementById('an-st-' + x);   if (btn)  btn.classList.toggle('active', x === v);
+  });
   if (v === 'schedule') anRenderSchedule();
+  else if (v === 'shots') anRenderShots();
+}
+
+/* ── 📸 Turbo Screenshots sub-tab — flat grid (same chip style as the gallery),
+   sourced only from AN_SHOTS ── */
+function anRenderShots(){
+  const body = document.getElementById('an-shots-body');
+  const cnt  = document.getElementById('an-shots-count');
+  if (!body) return;
+  if (cnt) cnt.textContent = AN_SHOTS.length ? '(' + AN_SHOTS.length + ')' : '';
+  if (!AN_SHOTS.length){
+    body.innerHTML = `<div class="an-empty"><div class="em">📸</div><div>No Turbo screenshots yet.<br>Play a video in <b>Turbo</b> mode and tap <b>📤 TG</b> to capture &amp; send — they'll show up here.</div></div>`;
+    return;
+  }
+  const items = [...AN_SHOTS].sort((a,b) => (a.createdAt < b.createdAt ? 1 : -1));
+  body.innerHTML = `<div class="an-grid">${items.map(it => `
+    <div class="an-chip" onclick="anOpenMoment('${it.id}')"><div class="mt"><img src="${it.img}" loading="lazy" alt="">
+      <span class="an-time">${anEsc(it.timeLabel)}</span><div class="an-play"><span>▶</span></div></div>
+      <div class="ml" style="flex-direction:column;align-items:flex-start;gap:3px;">
+        <span style="color:var(--text);font-weight:600;">⚡ ${anEsc(it.videoTitle)}</span>
+        <span>${anEsc(anShortDate(it.createdAt))}</span></div></div>`).join('')}</div>`;
 }
 
 let anGalleryView = 'tree';
@@ -154,10 +185,13 @@ function anRenderTree(){
   anBreadcrumb();
 
   if (!anNav.plId){
-    /* LEVEL 0 — playlists as folder tiles */
-    const tiles = Object.entries(folders).map(([plId, pl]) => {
-      const moments = Object.values(pl.videos||{}).reduce((t,v) => t + (v.items||[]).length, 0);
-      const vids = Object.keys(pl.videos||{}).length;
+    /* LEVEL 0 — playlists as folder tiles (skip ones that only hold Turbo shots) */
+    const plEntries = Object.entries(folders).filter(([plId, pl]) =>
+      Object.values(pl.videos||{}).some(v => anGalleryItems(v).length));
+    if (!plEntries.length){ body.innerHTML = anGalleryEmpty(); if (bc) bc.style.display = 'none'; return; }
+    const tiles = plEntries.map(([plId, pl]) => {
+      const moments = Object.values(pl.videos||{}).reduce((t,v) => t + anGalleryItems(v).length, 0);
+      const vids = Object.values(pl.videos||{}).filter(v => anGalleryItems(v).length).length;
       return `<div class="an-tile" onclick="anOpenFolder('${plId}')">${anFolderIcon('pl')}<div class="an-tile-name">${anEsc(pl.name||'Playlist')}</div><div class="an-tile-meta">${vids} video${vids===1?'':'s'} · ${moments} moments</div></div>`;
     }).join('');
     body.innerHTML = `<div class="an-explorer">${tiles}</div>`;
@@ -165,17 +199,17 @@ function anRenderTree(){
   } else if (!anNav.vId){
     /* LEVEL 1 — videos inside the playlist as folder tiles */
     const pl = folders[anNav.plId];
-    const entries = Object.entries(pl.videos||{});
+    const entries = Object.entries(pl.videos||{}).filter(([vId, v]) => anGalleryItems(v).length);
     body.innerHTML = entries.length ? `<div class="an-explorer">${entries.map(([vId, v]) => {
-      const count = (v.items||[]).length;
+      const count = anGalleryItems(v).length;
       return `<div class="an-tile" onclick="anOpenVideo('${anNav.plId}','${vId}')">${anFolderIcon('vid')}<div class="an-tile-name">${anEsc(v.name||'Video')}</div><div class="an-tile-meta">${count} moment${count===1?'':'s'}</div></div>`;
     }).join('')}</div>`
       : `<div class="an-empty"><div class="em">📂</div><div>This playlist has no videos with saved moments.</div></div>`;
 
   } else {
-    /* LEVEL 2 — moments inside the video */
+    /* LEVEL 2 — moments inside the video (Turbo shots excluded) */
     const pl = folders[anNav.plId]; const v = (pl.videos||{})[anNav.vId];
-    const items = (v && v.items) || [];
+    const items = anGalleryItems(v);
     body.innerHTML = items.length ? `<div class="an-grid">${items.map(it => anMomentChip(anNormItem(it, anNav.vId, v))).join('')}</div>`
       : `<div class="an-empty"><div class="em">📭</div><div>No moments in this video.</div></div>`;
   }
@@ -222,7 +256,7 @@ function anOpenInFullModal(videoId, startSec, title){
   document.body.style.overflow = 'hidden';
 }
 function anOpenMoment(id){
-  const m = AN_MOMENTS.find(x => x.id === id);
+  const m = AN_MOMENTS.find(x => x.id === id) || AN_SHOTS.find(x => x.id === id);
   if (!m) return;
   anOpenInFullModal(m.videoId, m.timestamp, (AN_TYPE_ICON[m.type]||'📸') + ' ' + m.videoTitle);
 }
@@ -463,6 +497,7 @@ function anRender(){
   anBuildMoments();
   anRenderRecent();
   anRenderTree();
+  anRenderShots();
   anRenderSchedule();
   // auto-open the first playlist folder for quick orientation
   setTimeout(() => { const f = document.querySelector('#page-analysis .an-folder'); if (f) f.classList.add('open'); }, 40);

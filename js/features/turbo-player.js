@@ -406,6 +406,9 @@
       .then(function (res) {
         if (res && res.ok) {
           if (typeof showToast === 'function') showToast('✅ Screenshot Telegram par bhej diya!', 'success');
+          // Save a lightweight moment (only the Telegram file_id, no image
+          // bytes) so it shows up in the Gallery / Analysis tab.
+          if (res.fileId) turboSaveMoment(res.fileId, t, title);
         } else {
           if (typeof showToast === 'function') showToast('❌ Nahi bhej paye: ' + ((res && res.error) || 'unknown'), 'error');
         }
@@ -418,6 +421,41 @@
       });
   }
   window.turboSendToTelegram = turboSendToTelegram;
+
+  /* Persist a captured screenshot as a gallery "moment" WITHOUT storing image
+     bytes — we keep only the Telegram file_id and point the thumbnail at the
+     proxy's /tg-photo streamer. Reuses the existing yt-screenshots store, so
+     the moment automatically appears in the YouTube gallery AND the Analysis →
+     Gallery tab (same folder structure: Playlist → Video → Moment). */
+  function turboSaveMoment(fileId, ts, title) {
+    try {
+      if (typeof ssGetState !== 'function' || typeof ssEnsureFolder !== 'function') return;
+      var ctx = (typeof ssGetCurrentContext === 'function') ? ssGetCurrentContext() : null;
+      if (!ctx || ctx.videoId === 'unknown') return;
+      if (title && ctx.videoName === 'Video') ctx.videoName = title;
+
+      var vf = ssEnsureFolder(ctx);
+      var num = vf.items.filter(function (i) { return i.type === 'screenshot'; }).length + 1;
+      vf.items.push({
+        id: 'tg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        type: 'screenshot',
+        number: num,
+        timestamp: ts,
+        timeLabel: turboFmtTs(ts),
+        // Real captured frame, served from Telegram via the proxy (no bytes stored here).
+        imageUrl: TURBO_BACKEND_URL + '/tg-photo?file_id=' + encodeURIComponent(fileId),
+        tgFileId: fileId,
+        videoId: (ctx.videoId || '').replace('playlist_', ''),
+        videoTitle: ctx.videoName,
+        createdAt: Date.now(),
+        label: 'Moment_' + num,
+        source: 'turbo-telegram'
+      });
+      if (typeof ssSave === 'function') ssSave();
+      if (typeof ssRenderGallery === 'function') ssRenderGallery();
+      if (typeof ssUpdateBadge === 'function') ssUpdateBadge();
+    } catch (e) {}
+  }
 
   /* ══════════════════════════════════════════════
      UI — toggle button + speed-bar tidy-up
