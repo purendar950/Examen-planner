@@ -276,6 +276,12 @@ function drainTelegramInbox(snapData) {
       const txt = (item.text || item.title || '').trim();
       if (!item.videoId && txt && list.some(t => t.fromTelegram && (t.text || '').trim().toLowerCase() === txt.toLowerCase())) return;
 
+      /* Stay-deleted guard for inbox items with no stable id (which the
+         telegramProcessedIds ledger can't track): if the user already deleted
+         this exact video/text, don't recreate it on a later snapshot. */
+      if (typeof isTaskDeleted === 'function' &&
+          isTaskDeleted(item.videoId ? { videoId: item.videoId } : { text: txt })) return;
+
       const task = {
         id: 'tg_' + (item.id || (Date.now().toString())) + Math.random().toString(36).slice(2, 6),
         text: txt || 'Task',

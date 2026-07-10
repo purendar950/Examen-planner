@@ -142,6 +142,7 @@ function getDefaultState() {
     lastRolloverDate: null,  // guard so the rollover sweep runs once per day
     recurringTasks: [],      // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
     habitsLog: {},           // {dateStr: {ruleId: true/false}} — per-day habit completion
+    deletedTaskKeys: [],     // content signatures of deleted regenerable tasks — stops a deleted plan/mock/video task re-appearing next day
     telegramProcessedIds: [], // inbox item ids already materialised — makes the drain idempotent so a deleted Telegram task never comes back
     planSchedule: null,   // date -> [topic items] for the active syllabus plan
     /* Telegram daily-plan delivery. The GitHub Actions sender reads this from
@@ -162,6 +163,7 @@ function loginUser(email, name, uid, state) {
   if (!appState.plans)     appState.plans      = [];
   if (!appState.recurringTasks) appState.recurringTasks = [];
   if (!appState.habitsLog) appState.habitsLog = {};
+  if (!Array.isArray(appState.deletedTaskKeys)) appState.deletedTaskKeys = [];
   if (!appState.activePage) appState.activePage = 'dashboard';
   if (typeof appState.activePlanId === 'undefined') appState.activePlanId = null;
   /* Hydrate the active plan marker from persisted state */
