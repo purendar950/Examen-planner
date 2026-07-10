@@ -10,7 +10,9 @@
  * Routes:
  *   GET  /            → health check
  *   POST /send        → proxy: sends a Telegram message server-side (CORS-safe)
- *   POST /send-photo  → proxy: relays a Turbo screenshot (base64 JPEG) via sendPhoto
+ *   POST /send-photo  → proxy: relays a Turbo screenshot (base64 JPEG) via sendPhoto;
+ *                       routed to the user's group "📸 Images" topic if they ran
+ *                       /setup, else to their private DM.
  *
  * Deploy on Render (Web Service):
  *   Root directory: bot
@@ -315,12 +317,81 @@ bot.onText(/^\/help$/, (msg) => {
     `📖 <b>StudyPlanner Bot Commands:</b>\n\n` +
     `/start — Apna Chat ID pao\n` +
     `/id — Chat ID dobara dekho\n` +
+    `/setup — (Ek group mein) apne screenshots ke liye ek 📸 Images topic banao\n` +
     `/help — Yeh help message\n\n` +
     `🧠 <b>AI auto-schedule:</b> Bas apna task likho (e.g. "Polity Article 14 kal") ` +
     `ya YouTube link bhejo — main planner mein add kar dunga.\n\n` +
+    `📸 <b>Screenshots alag rakhne ke liye:</b> ek group banao → Settings → <b>Topics</b> ON ` +
+    `→ mujhe admin (Manage Topics) banao → group mein <b>/setup</b> bhejo. Uske baad tumhare ` +
+    `Turbo screenshots seedhe us group ke <b>📸 Images</b> topic mein jayenge (daily plan DM mein hi rahega).\n\n` +
     `🌐 App: <a href="https://examzen.in">examzen.in</a>`,
     { parse_mode: 'HTML', disable_web_page_preview: true }
   ).catch(err => console.error('sendMessage error:', err.message));
+});
+
+/* ── /setup ───────────────────────────────────────────────────────────────
+   Option B: the user creates their OWN forum supergroup, adds this bot as an
+   admin (with "Manage Topics"), and runs /setup inside it. The bot creates a
+   "📸 Images" topic and remembers { groupId, imagesTopicId } keyed by the
+   user's Telegram id (which equals their private-chat / app chatId). After
+   that, their Turbo screenshots are routed to that topic (see /send-photo).
+
+   A bot CANNOT create a group/channel itself (Bot API limitation), so the
+   group creation is the one manual step; everything after is automatic. */
+bot.onText(/^\/setup(?:@\w+)?$/, async (msg) => {
+  const chat   = msg.chat;
+  const fromId = msg.from && msg.from.id;
+
+  if (chat.type !== 'supergroup') {
+    bot.sendMessage(chat.id,
+      `⚠️ Yeh command ek <b>group</b> mein chalao (private chat mein nahi).\n\n` +
+      `1️⃣ Ek naya group banao\n2️⃣ Group Settings → <b>Topics</b> ON karo\n` +
+      `3️⃣ Mujhe us group mein <b>admin</b> banao (Manage Topics permission ke saath)\n` +
+      `4️⃣ Phir group mein <b>/setup</b> bhejo.`,
+      { parse_mode: 'HTML' }
+    ).catch(() => {});
+    return;
+  }
+  if (!chat.is_forum) {
+    bot.sendMessage(chat.id,
+      `⚠️ Is group mein <b>Topics</b> OFF hai. Group Settings → <b>Topics</b> ON karo, phir dobara <b>/setup</b> bhejo.`,
+      { parse_mode: 'HTML' }
+    ).catch(() => {});
+    return;
+  }
+  if (!db) {
+    bot.sendMessage(chat.id, '⚠️ Server config missing — setup abhi save nahi ho sakta.').catch(() => {});
+    return;
+  }
+
+  try {
+    const topic = await bot.createForumTopic(chat.id, '📸 Images', { icon_color: 0x6FB9F0 });
+    const threadId = topic && topic.message_thread_id;
+    if (!threadId) throw new Error('no message_thread_id returned');
+
+    await db.collection('telegram_groups').doc(String(fromId)).set({
+      groupId:       chat.id,
+      imagesTopicId: threadId,
+      groupTitle:    chat.title || '',
+      username:      (msg.from && msg.from.username) || '',
+      updatedAt:     new Date().toISOString()
+    }, { merge: true });
+
+    bot.sendMessage(chat.id,
+      `✅ <b>Setup complete!</b>\nTumhare Turbo screenshots ab is group ke <b>📸 Images</b> topic mein aayenge.\n` +
+      `(Daily study plan pehle jaisa tumhare private chat mein hi milega.)`,
+      { parse_mode: 'HTML', message_thread_id: threadId }
+    ).catch(() => {});
+    console.log(`✅ /setup → user:${fromId} group:${chat.id} topic:${threadId}`);
+  } catch (e) {
+    const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
+    bot.sendMessage(chat.id,
+      `❌ Topic nahi bana paya: ${errMsg}\n\n` +
+      `Check karo: kya main is group ka <b>admin</b> hoon <b>"Manage Topics"</b> permission ke saath?`,
+      { parse_mode: 'HTML' }
+    ).catch(() => {});
+    console.error('❌ /setup error:', errMsg);
+  }
 });
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -566,14 +637,29 @@ const server = http.createServer((req, res) => {
         const buffer = Buffer.from(imageBase64, 'base64');
         if (!buffer.length) throw new Error('empty image');
 
+        /* Destination: if this user ran /setup in a group, route the screenshot
+           to that group's "📸 Images" topic; otherwise fall back to their DM. */
+        let target = chatId;
+        const opts = { caption: (caption || '').slice(0, 1024), parse_mode: 'HTML' };
+        if (db) {
+          try {
+            const g = await db.collection('telegram_groups').doc(String(chatId)).get();
+            const gd = g.exists ? g.data() : null;
+            if (gd && gd.groupId && gd.imagesTopicId) {
+              target = gd.groupId;
+              opts.message_thread_id = gd.imagesTopicId;
+            }
+          } catch (e) { /* fall back to DM on any lookup error */ }
+        }
+
         await bot.sendPhoto(
-          chatId,
+          target,
           buffer,
-          { caption: (caption || '').slice(0, 1024), parse_mode: 'HTML' },
+          opts,
           { filename: 'turbo-frame.jpg', contentType: 'image/jpeg' }
         );
 
-        console.log(`✅ /send-photo → chatId:${chatId} (${buffer.length} bytes)`);
+        console.log(`✅ /send-photo → ${target === chatId ? 'DM' : 'group ' + target + ' topic ' + opts.message_thread_id} (from chatId:${chatId}, ${buffer.length} bytes)`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (e) {
