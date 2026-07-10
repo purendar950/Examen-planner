@@ -4,6 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>📸 Turbo Screenshot → Telegram (Demo)</title>
+<!-- Firebase (same version the app uses) so we can auto-fill from your account -->
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 <style>
   :root{--bg:#0f172a;--surface:#1e293b;--border:rgba(255,255,255,.1);--accent:#6366f1;--muted:#94a3b8;--text:#e2e8f0;--green:#22c55e;--red:#ef4444;--amber:#f59e0b}
   *{box-sizing:border-box}
@@ -51,9 +55,36 @@
   <h1>📸 Turbo Screenshot → Telegram <span style="font-size:.7rem;color:var(--amber)">DEMO</span></h1>
   <div class="sub">Standalone test. Plays a video through your Turbo proxy in a native player, captures the <strong>exact current frame</strong>, and sends it to Telegram. Sends <strong>directly from the browser</strong> using the bot token below — so it needs no bot deployment and doesn't touch your app.</div>
 
+  <!-- ── Sign in → auto-fill ── -->
+  <div class="card">
+    <h2>0 · Sign in with your admin account (auto-fills everything)</h2>
+    <div id="auth-out">
+      <div class="row">
+        <div>
+          <label>Admin email</label>
+          <input id="adm-email" type="email" placeholder="you@example.com" />
+        </div>
+        <div>
+          <label>Password</label>
+          <input id="adm-pass" type="password" placeholder="••••••••" />
+        </div>
+        <button class="load" onclick="signInEmail()">Sign in &amp; auto-fill</button>
+      </div>
+      <div style="font-size:.72rem;color:var(--muted)">
+        Uses the same login as your app. Reads the bot token from <code>config/telegram</code> and your chat ID from your user doc — nothing is stored in this file.
+        <br>Google sign-in only works on an authorised domain; if this page is on githack/локально, use <b>email + password</b>.
+        <a href="#" onclick="signInGoogle();return false">Try Google anyway</a>
+      </div>
+    </div>
+    <div id="auth-in" style="display:none">
+      <span class="dot g"></span> Signed in as <b id="auth-email"></b> <span id="auth-admin"></span>
+      &nbsp; <a href="#" onclick="signOutNow();return false">Sign out</a>
+    </div>
+  </div>
+
   <!-- ── Config ── -->
   <div class="card">
-    <h2>1 · Config</h2>
+    <h2>1 · Config <span style="font-size:.7rem;color:var(--muted)">(auto-filled after sign-in — editable)</span></h2>
     <div class="row">
       <div>
         <label>Turbo backend URL (your Render proxy)</label>
@@ -135,6 +166,73 @@ let currentUrl='',currentRate=1,currentTitle='YouTube video',lastBlob=null;
   el.value=localStorage.getItem('ttd_'+id)||'';
   el.addEventListener('change',()=>localStorage.setItem('ttd_'+id,el.value.trim()));
 });
+/* sensible default backend so you rarely have to type it */
+if(!document.getElementById('backend').value){document.getElementById('backend').value='https://youtube-turbo-proxy.onrender.com';}
+
+/* ── Firebase: sign in with your account and auto-fill token + chat ID ──
+   Public web config (already shipped in the app — not a secret). The bot
+   token is fetched at RUNTIME from Firestore with your own auth; it is never
+   written into this file. */
+const FB_CONFIG={
+  apiKey:"AIzaSyDTBc3RAED-HuFZv7xyT2X0WFBRIXr9png",
+  authDomain:"syncstudy-3d734.firebaseapp.com",
+  projectId:"syncstudy-3d734",
+  storageBucket:"syncstudy-3d734.firebasestorage.app",
+  messagingSenderId:"729906734037",
+  appId:"1:729906734037:web:d75d73d101bfbb52c3535c"
+};
+let fbAuth=null,fbDb=null;
+try{ firebase.initializeApp(FB_CONFIG); fbAuth=firebase.auth(); fbDb=firebase.firestore(); }
+catch(e){ log('Firebase init failed: '+e.message,'err'); }
+
+async function signInEmail(){
+  const em=(document.getElementById('adm-email').value||'').trim();
+  const pw=document.getElementById('adm-pass').value||'';
+  if(!em||!pw){setStatus('r','Enter email + password.');return;}
+  setStatus('a','Signing in…');log('signing in as '+em);
+  try{ await fbAuth.signInWithEmailAndPassword(em,pw); }
+  catch(e){ setStatus('r','Login failed: '+(e.code||e.message)); log('login failed: '+(e.code||e.message),'err'); }
+}
+async function signInGoogle(){
+  try{ await fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+  catch(e){ setStatus('r','Google login failed: '+(e.code||e.message)+(e.code==='auth/unauthorized-domain'?' — this page domain isn\'t in Firebase Authorized domains; use email/password.':'')); log('google login failed: '+(e.code||e.message),'err'); }
+}
+async function signOutNow(){ try{ await fbAuth.signOut(); }catch(e){} }
+
+if(fbAuth){
+  fbAuth.onAuthStateChanged(async(user)=>{
+    if(!user){
+      document.getElementById('auth-in').style.display='none';
+      document.getElementById('auth-out').style.display='';
+      return;
+    }
+    document.getElementById('auth-out').style.display='none';
+    document.getElementById('auth-in').style.display='';
+    document.getElementById('auth-email').textContent=user.email||user.uid;
+    log('signed in as '+(user.email||user.uid),'ok');
+
+    /* admin? (just for the label) */
+    try{ const a=await fbDb.collection('admins').doc(user.uid).get(); document.getElementById('auth-admin').textContent=a.exists?'(admin ✓)':'(not admin)'; }catch(e){}
+
+    /* bot token ← config/telegram */
+    try{
+      const snap=await fbDb.collection('config').doc('telegram').get();
+      const tok=snap.exists?(snap.data().botToken||''):'';
+      if(tok){ document.getElementById('token').value=tok; localStorage.setItem('ttd_token',tok); log('bot token auto-filled ✓','ok'); }
+      else log('config/telegram has no botToken — set it in the admin panel, or paste manually.','warn');
+    }catch(e){ log('couldn\'t read config/telegram: '+(e.code||e.message),'err'); }
+
+    /* chat ID ← your own user doc */
+    try{
+      const u=await fbDb.collection('users').doc(user.uid).get();
+      const cid=u.exists?(((u.data().appState||{}).telegram||{}).chatId||''):'';
+      if(cid){ document.getElementById('chat').value=cid; localStorage.setItem('ttd_chat',cid); log('chat ID auto-filled ✓ ('+cid+')','ok'); }
+      else log('no chatId on your user doc — connect Telegram in the app (Profile → Daily Plan on Telegram), or paste manually.','warn');
+    }catch(e){ log('couldn\'t read your user doc: '+(e.code||e.message),'err'); }
+
+    setStatus('g','Auto-filled from your account. Load a video and capture.');
+  });
+}
 
 /* speed buttons */
 SPEEDS.forEach(s=>{const b=document.createElement('button');b.textContent=s+'x';if(s===1)b.classList.add('active');b.onclick=()=>setSpeed(s,b);document.getElementById('speed').appendChild(b);});
