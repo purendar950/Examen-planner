@@ -454,18 +454,69 @@ def api_send_photo():
         j = r.json()
         if not j.get("ok"):
             return jsonify({"ok": False, "error": j.get("description") or ("HTTP " + str(r.status_code))}), 400
-        log.info("send-photo → %s (%d bytes)", payload["chat_id"], len(img))
-        return jsonify({"ok": True})
+        # Return the largest PhotoSize's file_id so the app can store a
+        # lightweight reference (no image bytes) and display it later via
+        # /tg-photo. Telegram hosts the actual image, permanently.
+        photos = ((j.get("result") or {}).get("photo") or [])
+        file_id = photos[-1].get("file_id", "") if photos else ""
+        log.info("send-photo → %s (%d bytes, file_id=%s)", payload["chat_id"], len(img), file_id[:12])
+        return jsonify({"ok": True, "fileId": file_id})
     except Exception as exc:  # noqa: BLE001
         log.warning("sendPhoto relay failed: %s", exc)
         return jsonify({"ok": False, "error": str(exc)[:200]}), 502
+
+
+@app.get("/tg-photo")
+def api_tg_photo():
+    """Stream a Telegram-hosted photo by file_id so the app can display saved
+    moments without storing any image bytes. Resolves file_id → file_path via
+    getFile, then proxies the download (token stays server-side)."""
+    file_id = (request.args.get("file_id") or "").strip()
+    if not file_id:
+        return jsonify({"error": "need ?file_id"}), 400
+    token = _telegram_token()
+    if not token:
+        return jsonify({"error": "bot token not configured"}), 500
+    try:
+        gf = requests.get("https://api.telegram.org/bot%s/getFile" % token,
+                          params={"file_id": file_id}, timeout=REQUEST_TIMEOUT)
+        gj = gf.json()
+        if not gj.get("ok"):
+            return jsonify({"error": gj.get("description") or "getFile failed"}), 404
+        file_path = (gj.get("result") or {}).get("file_path") or ""
+        if not file_path:
+            return jsonify({"error": "no file_path"}), 404
+
+        dl = requests.get("https://api.telegram.org/file/bot%s/%s" % (token, file_path),
+                          stream=True, timeout=REQUEST_TIMEOUT)
+        if dl.status_code != 200:
+            return jsonify({"error": "download failed (%d)" % dl.status_code}), 502
+
+        def generate():
+            try:
+                for chunk in dl.iter_content(chunk_size=64 * 1024):
+                    if chunk:
+                        yield chunk
+            finally:
+                dl.close()
+
+        ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else "jpg"
+        ctype = "image/png" if ext == "png" else ("image/webp" if ext == "webp" else "image/jpeg")
+        return Response(stream_with_context(generate()), headers={
+            "Content-Type": ctype,
+            "Cache-Control": "public, max-age=86400",   # browser caches repeat views
+            "Access-Control-Allow-Origin": "*",
+        })
+    except Exception as exc:  # noqa: BLE001
+        log.warning("tg-photo failed: %s", exc)
+        return jsonify({"error": str(exc)[:200]}), 502
 
 
 @app.get("/")
 def index():
     return jsonify({
         "service": "youtube-turbo-proxy",
-        "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG", "/send-photo"],
+        "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG", "/send-photo", "/tg-photo?file_id=..."],
     })
 
 
