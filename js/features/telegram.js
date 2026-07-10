@@ -172,12 +172,28 @@ function drainTelegramInbox(snapData) {
     if (!Array.isArray(inbox) || !inbox.length) return;
     if (!appState.tasks) appState.tasks = {};
 
+    /* Remember which inbox items we've already turned into tasks. Without this,
+       a Telegram task the user later DELETED would be re-created on the very
+       next snapshot (and every day after) whenever the server-side inbox clear
+       below didn't stick — offline, a permission hiccup, or a racing write all
+       leave the item lingering. Keying on the inbox item's stable id makes the
+       drain idempotent: each texted task is materialised exactly once, ever, so
+       deleting it makes it stay deleted. */
+    if (!Array.isArray(appState.telegramProcessedIds)) appState.telegramProcessedIds = [];
+    const processed = new Set(appState.telegramProcessedIds);
+
     const fmt = (typeof fmtDate === 'function') ? fmtDate : (d => d.toISOString().slice(0, 10));
     const todayStr = fmt(new Date());
     let added = 0;
+    const newlyProcessed = [];
 
     inbox.forEach(item => {
       if (!item) return;
+
+      /* Already materialised once — never re-add (even if the user deleted it). */
+      if (item.id != null && processed.has(item.id)) return;
+      if (item.id != null) { processed.add(item.id); newlyProcessed.push(item.id); }
+
       const date = /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : todayStr;
       if (!appState.tasks[date]) appState.tasks[date] = [];
       const list = appState.tasks[date];
@@ -207,14 +223,28 @@ function drainTelegramInbox(snapData) {
       added++;
     });
 
+    /* Persist the processed-id ledger (capped so it can't grow unbounded) so the
+       "add exactly once" guarantee survives reloads and future snapshots. */
+    if (newlyProcessed.length) {
+      const MAX_PROCESSED = 500;
+      appState.telegramProcessedIds = appState.telegramProcessedIds
+        .concat(newlyProcessed)
+        .slice(-MAX_PROCESSED);
+    }
+
     /* Clear the server inbox so items aren't re-added on the next snapshot. */
     try {
       if (db && currentUser) db.collection('users').doc(currentUser.uid).update({ telegramInbox: [] }).catch(() => {});
     } catch (e) {}
 
+    /* Persist even when nothing was newly added but the ledger grew, so the
+       "process once" guarantee is durable. Only surface UI when tasks actually
+       appeared. */
+    if (added || newlyProcessed.length) {
+      if (typeof saveProgress === 'function') saveProgress();
+    }
     if (added) {
       resolveTelegramTaskSubjects();
-      if (typeof saveProgress === 'function') saveProgress();
       try { if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar(); } catch (e) {}
       if (typeof showToast === 'function') {
         showToast('📩 ' + added + ' naya task' + (added > 1 ? 's' : '') + ' Telegram se add hua! Planner check karo.', 'success');

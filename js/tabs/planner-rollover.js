@@ -35,7 +35,15 @@ function rolloverIncompleteTasks() {
 
     if (!appState.tasks[todayStr]) appState.tasks[todayStr] = [];
     const todayList = appState.tasks[todayStr];
-    const existingToday = new Set(todayList.map(t => (t.text || '').trim().toLowerCase()));
+    /* De-dupe by task IDENTITY (id), never by text. A previous version keyed on
+       lowercased text, which silently DESTROYED a distinct task whenever another
+       task with the same text already sat on today (e.g. a repeated daily task
+       like "Current Affairs" / "Revision" / "PYQ practice"): the straggler was
+       neither kept on its date nor moved forward, so the user's task just
+       vanished. Keying on id only skips a genuine duplicate of the SAME task
+       object (which can only happen if the store was corrupted), so distinct
+       to-dos that happen to share a title are all carried forward. */
+    const existingIds = new Set(todayList.map(t => t.id));
 
     let moved = 0;
 
@@ -53,10 +61,10 @@ function rolloverIncompleteTasks() {
           (t.chId && appState.progress && appState.progress[t.chId]?.done);
         if (isDone) { keep.push(t); return; } // completed tasks stay as a dated record
 
-        /* Skip duplicates already present on today. */
-        const key = (t.text || '').trim().toLowerCase();
-        if (existingToday.has(key)) return;
-        existingToday.add(key);
+        /* Skip only an exact duplicate of the SAME task (same id) already on
+           today — this drops a corrupted clone without losing the live copy. */
+        if (t.id != null && existingIds.has(t.id)) return;
+        if (t.id != null) existingIds.add(t.id);
 
         /* Carry the task forward, preserving where it came from. */
         t.rolledFrom = t.originalDate || t.rolledFrom || ds;
