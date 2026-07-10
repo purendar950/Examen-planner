@@ -509,6 +509,23 @@
   }
   window.ytToggleTurbo = ytToggleTurbo;
 
+  /* ── Expose Turbo playback state to other modules ──
+     Save Moment (yt-screenshots.js) must read the ACTUAL playback time from the
+     native <video> when Turbo is on — the YouTube iframe it normally polls is
+     paused/hidden with a stale time in Turbo mode. These return 0 / false when
+     Turbo isn't active so callers cleanly fall back to the iframe player. */
+  window.ytTurboActive = function () {
+    try { return turboActive(); } catch (e) { return false; }
+  };
+  window.ytTurboCurrentTime = function () {
+    try { return (turboActive() && turboVideoEl) ? (turboVideoEl.currentTime || 0) : 0; }
+    catch (e) { return 0; }
+  };
+  window.ytTurboDuration = function () {
+    try { return (turboActive() && turboVideoEl) ? (turboVideoEl.duration || 0) : 0; }
+    catch (e) { return 0; }
+  };
+
   function updateToggleUI() {
     var btn = document.getElementById('yt-turbo-toggle');
     if (!btn) return;
