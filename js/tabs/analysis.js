@@ -83,24 +83,83 @@ function anSwitchView(v){
   else if (v === 'shots') anRenderShots();
 }
 
-/* ── 📸 Turbo Screenshots sub-tab — flat grid (same chip style as the gallery),
-   sourced only from AN_SHOTS ── */
+/* ── 📸 Turbo Screenshots sub-tab — SAME folder structure as the Gallery
+   (Playlist → Video → Moments), but filtered to Turbo/Telegram shots only.
+   Its own navigation state so it doesn't fight the Gallery's. ── */
+let anShotsNav = { plId:null, vId:null };
+function anShotItems(v){ return (v && v.items ? v.items : []).filter(it => it.source === 'turbo-telegram'); }
+function anShotsRoot(){ anShotsNav = { plId:null, vId:null }; anRenderShots(); }
+function anShotsOpenFolder(plId){ anShotsNav = { plId:plId, vId:null }; anRenderShots(); }
+function anShotsOpenVideo(plId, vId){ anShotsNav = { plId:plId, vId:vId }; anRenderShots(); }
+function anShotsNavTo(plId, vId){ anShotsNav = { plId:plId||null, vId:vId||null }; anRenderShots(); }
+function anShotsBack(){ if (anShotsNav.vId) anShotsNav.vId = null; else if (anShotsNav.plId) anShotsNav.plId = null; anRenderShots(); }
+
+function anShotsBreadcrumb(){
+  const el = document.getElementById('an-shots-breadcrumb'); if (!el) return;
+  const folders = anFolders();
+  let html = `<button class="an-back" ${anShotsNav.plId?'':'disabled'} onclick="anShotsBack()">⬅ Back</button>`;
+  html += `<span class="an-crumb${anShotsNav.plId?'':' cur'}" onclick="anShotsRoot()">🏠 All</span>`;
+  if (anShotsNav.plId && folders[anShotsNav.plId]){
+    const pl = folders[anShotsNav.plId];
+    html += '<span class="an-sep">›</span>';
+    html += `<span class="an-crumb${anShotsNav.vId?'':' cur'}" onclick="anShotsNavTo('${anShotsNav.plId}',null)">📁 ${anEsc(pl.name||'Playlist')}</span>`;
+    if (anShotsNav.vId && pl.videos && pl.videos[anShotsNav.vId]){
+      html += '<span class="an-sep">›</span>';
+      html += `<span class="an-crumb cur">🎬 ${anEsc(pl.videos[anShotsNav.vId].name||'Video')}</span>`;
+    }
+  }
+  el.innerHTML = html;
+  el.style.display = 'flex';
+}
+
 function anRenderShots(){
   const body = document.getElementById('an-shots-body');
+  const bc   = document.getElementById('an-shots-breadcrumb');
   const cnt  = document.getElementById('an-shots-count');
   if (!body) return;
   if (cnt) cnt.textContent = AN_SHOTS.length ? '(' + AN_SHOTS.length + ')' : '';
-  if (!AN_SHOTS.length){
+
+  const folders = anFolders();
+  const hasShots = Object.values(folders).some(pl => Object.values(pl.videos||{}).some(v => anShotItems(v).length));
+  if (!hasShots){
     body.innerHTML = `<div class="an-empty"><div class="em">📸</div><div>No Turbo screenshots yet.<br>Play a video in <b>Turbo</b> mode and tap <b>📤 TG</b> to capture &amp; send — they'll show up here.</div></div>`;
+    if (bc) bc.style.display = 'none';
     return;
   }
-  const items = [...AN_SHOTS].sort((a,b) => (a.createdAt < b.createdAt ? 1 : -1));
-  body.innerHTML = `<div class="an-grid">${items.map(it => `
-    <div class="an-chip" onclick="anOpenMoment('${it.id}')"><div class="mt"><img src="${it.img}" loading="lazy" alt="">
-      <span class="an-time">${anEsc(it.timeLabel)}</span><div class="an-play"><span>▶</span></div></div>
-      <div class="ml" style="flex-direction:column;align-items:flex-start;gap:3px;">
-        <span style="color:var(--text);font-weight:600;">⚡ ${anEsc(it.videoTitle)}</span>
-        <span>${anEsc(anShortDate(it.createdAt))}</span></div></div>`).join('')}</div>`;
+
+  // guard against stale navigation (folder/video removed since last render)
+  if (anShotsNav.plId && !folders[anShotsNav.plId]) anShotsNav = { plId:null, vId:null };
+  if (anShotsNav.plId && anShotsNav.vId && !((folders[anShotsNav.plId].videos||{})[anShotsNav.vId])) anShotsNav.vId = null;
+
+  anShotsBreadcrumb();
+
+  if (!anShotsNav.plId){
+    /* LEVEL 0 — playlists (only those holding Turbo shots) */
+    const plEntries = Object.entries(folders).filter(([plId, pl]) =>
+      Object.values(pl.videos||{}).some(v => anShotItems(v).length));
+    body.innerHTML = `<div class="an-explorer">${plEntries.map(([plId, pl]) => {
+      const shots = Object.values(pl.videos||{}).reduce((t,v) => t + anShotItems(v).length, 0);
+      const vids = Object.values(pl.videos||{}).filter(v => anShotItems(v).length).length;
+      return `<div class="an-tile" onclick="anShotsOpenFolder('${plId}')">${anFolderIcon('pl')}<div class="an-tile-name">${anEsc(pl.name||'Playlist')}</div><div class="an-tile-meta">${vids} video${vids===1?'':'s'} · ${shots} shot${shots===1?'':'s'}</div></div>`;
+    }).join('')}</div>`;
+
+  } else if (!anShotsNav.vId){
+    /* LEVEL 1 — videos inside the playlist */
+    const pl = folders[anShotsNav.plId];
+    const entries = Object.entries(pl.videos||{}).filter(([vId, v]) => anShotItems(v).length);
+    body.innerHTML = entries.length ? `<div class="an-explorer">${entries.map(([vId, v]) => {
+      const count = anShotItems(v).length;
+      return `<div class="an-tile" onclick="anShotsOpenVideo('${anShotsNav.plId}','${vId}')">${anFolderIcon('vid')}<div class="an-tile-name">${anEsc(v.name||'Video')}</div><div class="an-tile-meta">${count} shot${count===1?'':'s'}</div></div>`;
+    }).join('')}</div>`
+      : `<div class="an-empty"><div class="em">📂</div><div>No screenshots in this playlist.</div></div>`;
+
+  } else {
+    /* LEVEL 2 — the Turbo shots inside the video */
+    const pl = folders[anShotsNav.plId]; const v = (pl.videos||{})[anShotsNav.vId];
+    const items = anShotItems(v);
+    body.innerHTML = items.length ? `<div class="an-grid">${items.map(it => anMomentChip(anNormItem(it, anShotsNav.vId, v))).join('')}</div>`
+      : `<div class="an-empty"><div class="em">📭</div><div>No screenshots in this video.</div></div>`;
+  }
 }
 
 let anGalleryView = 'tree';
