@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>📸 Turbo Screenshot → Telegram (Demo)</title>
+<style>
+  :root{--bg:#0f172a;--surface:#1e293b;--border:rgba(255,255,255,.1);--accent:#6366f1;--muted:#94a3b8;--text:#e2e8f0;--green:#22c55e;--red:#ef4444;--amber:#f59e0b}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:20px;line-height:1.5}
+  .wrap{max-width:820px;margin:0 auto}
+  h1{font-size:1.3rem;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:.85rem;margin-bottom:16px}
+  label{font-size:.72rem;color:var(--muted);display:block;margin-bottom:4px}
+  input{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:9px;font-size:.88rem}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .row>div{flex:1;min-width:200px}
+  button.load{background:var(--accent);border:none;color:#fff;padding:9px 16px;border-radius:9px;font-weight:600;cursor:pointer;font-size:.88rem;align-self:flex-end;height:38px}
+  button.load:hover{filter:brightness(1.1)}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px}
+  .card h2{font-size:.9rem;margin:0 0 10px;color:var(--text)}
+  .status{font-size:.75rem;margin:6px 0 14px;padding:8px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  .dot.g{background:var(--green)}.dot.r{background:var(--red)}.dot.a{background:var(--amber)}
+  .player{position:relative;background:#000;border-radius:12px;overflow:hidden;aspect-ratio:16/9;border:1px solid var(--border)}
+  .player video{width:100%;height:100%;object-fit:contain;display:block}
+  .overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:20px;background:rgba(0,0,0,.85)}
+  .overlay.hidden{display:none}
+  .spinner{width:34px;height:34px;border:3px solid rgba(255,255,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .overlay a{color:var(--accent);font-size:.85rem}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}
+  .actions button{flex:1;min-width:180px;border:none;border-radius:10px;padding:12px;font-weight:700;cursor:pointer;font-size:.9rem}
+  .btn-tg{background:#229ED9;color:#fff}
+  .btn-tg:disabled{opacity:.5;cursor:not-allowed}
+  .btn-dl{background:var(--surface);color:var(--text);border:1px solid var(--border)!important}
+  .speed{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+  .speed button{background:var(--surface);border:1px solid var(--border);color:var(--muted);padding:5px 11px;border-radius:99px;cursor:pointer;font-size:.78rem;font-weight:700}
+  .speed button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .log{background:#0b1220;border:1px solid var(--border);border-radius:10px;padding:10px 12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.75rem;max-height:220px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+  .log .ok{color:var(--green)}.log .err{color:var(--red)}.log .warn{color:var(--amber)}.log .dim{color:var(--muted)}
+  .preview{margin-top:10px;display:none}
+  .preview img{max-width:100%;border-radius:8px;border:1px solid var(--border)}
+  .note{margin-top:14px;font-size:.78rem;color:var(--muted);border-left:3px solid var(--amber);padding:8px 12px;background:rgba(245,158,11,.08);border-radius:0 8px 8px 0}
+  code{background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px;font-size:.85em}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📸 Turbo Screenshot → Telegram <span style="font-size:.7rem;color:var(--amber)">DEMO</span></h1>
+  <div class="sub">Standalone test. Plays a video through your Turbo proxy in a native player, captures the <strong>exact current frame</strong>, and sends it to Telegram. Sends <strong>directly from the browser</strong> using the bot token below — so it needs no bot deployment and doesn't touch your app.</div>
+
+  <!-- ── Config ── -->
+  <div class="card">
+    <h2>1 · Config</h2>
+    <div class="row">
+      <div>
+        <label>Turbo backend URL (your Render proxy)</label>
+        <input id="backend" type="text" placeholder="https://youtube-turbo-proxy.onrender.com" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Telegram bot token (from @BotFather)</label>
+        <input id="token" type="password" placeholder="123456:ABC-..." />
+      </div>
+      <div>
+        <label>Telegram chat ID (your /start id, or channel id)</label>
+        <input id="chat" type="text" placeholder="123456789" />
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>YouTube link or video ID</label>
+        <input id="url" type="text" placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ" />
+      </div>
+      <button class="load" onclick="loadFromInput()">Load</button>
+    </div>
+    <div style="font-size:.72rem;color:var(--muted)">
+      Tip: message your bot <code>/start</code> once first (else Telegram blocks the very first message). The token is only used in this browser tab.
+    </div>
+  </div>
+
+  <div class="status" id="status"><span class="dot a"></span>Fill config, then <a href="#" onclick="checkHealth();return false">Check backend</a> and Load a video.</div>
+
+  <!-- ── Player ── -->
+  <div class="card">
+    <h2>2 · Play in Turbo (native video)</h2>
+    <div class="player" id="player">
+      <!-- crossorigin MUST be present before src, or the capture canvas is tainted -->
+      <video id="video" playsinline controls crossorigin="anonymous"></video>
+      <div class="overlay" id="overlay">
+        <div style="font-size:38px">▶️</div>
+        <div>Set config above, then hit <strong>Load</strong></div>
+      </div>
+    </div>
+    <div class="speed" id="speed"></div>
+  </div>
+
+  <!-- ── Capture & send ── -->
+  <div class="card">
+    <h2>3 · Capture this frame &amp; send</h2>
+    <div class="actions">
+      <button class="btn-tg" id="btnTg" onclick="captureAndSend()" disabled>📤 Capture &amp; Send to Telegram</button>
+      <button class="btn-dl" id="btnDl" onclick="captureAndDownload()" disabled>💾 Just capture &amp; download</button>
+    </div>
+    <div class="preview" id="preview"><label>Last captured frame:</label><img id="previewImg" alt="captured frame" /></div>
+  </div>
+
+  <!-- ── Log ── -->
+  <div class="card">
+    <h2>4 · Live log</h2>
+    <div class="log" id="log"><span class="dim">Ready.</span></div>
+  </div>
+
+  <div class="note">
+    <strong>What this proves:</strong> if the screenshot lands in Telegram, then (a) the proxy's CORS lets us read the native video's pixels, and (b) <code>sendPhoto</code> works. If you see <span style="color:var(--red)">"canvas tainted / SecurityError"</span>, the proxy isn't sending <code>Access-Control-Allow-Origin</code> on <code>/api/stream</code> — that's the one server fix needed before wiring this into the real app.
+  </div>
+</div>
+
+<script>
+const SPEEDS=[1,1.5,2,3,4];
+const video=document.getElementById('video');
+const overlay=document.getElementById('overlay');
+const statusEl=document.getElementById('status');
+const logEl=document.getElementById('log');
+const btnTg=document.getElementById('btnTg');
+const btnDl=document.getElementById('btnDl');
+let currentUrl='',currentRate=1,currentTitle='YouTube video',lastBlob=null;
+
+/* restore saved fields */
+['backend','token','chat'].forEach(id=>{
+  const el=document.getElementById(id);
+  el.value=localStorage.getItem('ttd_'+id)||'';
+  el.addEventListener('change',()=>localStorage.setItem('ttd_'+id,el.value.trim()));
+});
+
+/* speed buttons */
+SPEEDS.forEach(s=>{const b=document.createElement('button');b.textContent=s+'x';if(s===1)b.classList.add('active');b.onclick=()=>setSpeed(s,b);document.getElementById('speed').appendChild(b);});
+
+function backend(){return (document.getElementById('backend').value||'').trim().replace(/\/+$/,'');}
+function token(){return (document.getElementById('token').value||'').trim();}
+function chatId(){return (document.getElementById('chat').value||'').trim();}
+function setStatus(cls,html){statusEl.innerHTML='<span class="dot '+cls+'"></span>'+html;}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function fmtTs(s){s=Math.max(0,Math.floor(s||0));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=s%60,p=n=>(n<10?'0':'')+n;return h?h+':'+p(m)+':'+p(sec):m+':'+p(sec);}
+
+function log(msg,cls){
+  const t=new Date().toLocaleTimeString();
+  logEl.innerHTML+='\n<span class="dim">['+t+']</span> <span class="'+(cls||'')+'">'+msg+'</span>';
+  logEl.scrollTop=logEl.scrollHeight;
+}
+function clearLog(){logEl.innerHTML='<span class="dim">Ready.</span>';}
+
+function extractVideoId(u){if(!u)return null;const m=u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/|youtube\.com\/live\/)([a-zA-Z0-9_-]{11})/);if(m)return m[1];if(/^[a-zA-Z0-9_-]{11}$/.test(u.trim()))return u.trim();return null;}
+
+async function checkHealth(){
+  const b=backend();
+  if(!b){setStatus('r','Enter your backend URL first.');return;}
+  setStatus('a','Checking '+b+'/health …');
+  log('GET '+b+'/health');
+  try{
+    const r=await fetch(b+'/health',{signal:AbortSignal.timeout(60000)});
+    const d=await r.json();
+    setStatus(d.pot_provider?'g':'a','Backend online — '+(d.pot_provider?'PO-token ✓':'PO-token ✗')+', '+(d.cookies?'cookies ✓':'no cookies ⚠'));
+    log('health ok: '+JSON.stringify(d),'ok');
+  }catch(e){setStatus('r','Backend unreachable: '+e.message+' (free instances take ~30–60s to wake up).');log('health failed: '+e.message,'err');}
+}
+
+function loadFromInput(){
+  const b=backend();
+  if(!b){setStatus('r','Enter your backend URL first.');return;}
+  currentUrl=document.getElementById('url').value.trim();
+  const id=extractVideoId(currentUrl);
+  if(!id){setStatus('r','That is not a valid YouTube URL or ID.');return;}
+  loadVideo(id,b);
+}
+
+function showLoading(m){overlay.classList.remove('hidden');overlay.innerHTML='<div class="spinner"></div><div>'+m+'</div>';}
+function showError(msg,extra){
+  overlay.classList.remove('hidden');
+  const yt=currentUrl?'<a href="'+currentUrl+'" target="_blank" rel="noreferrer">▶ Open in YouTube instead</a>':'';
+  overlay.innerHTML='<div style="font-size:34px">⚠️</div><div><strong>'+esc(msg)+'</strong></div>'+(extra?'<div style="font-size:.8rem;color:var(--muted);max-width:440px">'+esc(extra)+'</div>':'')+yt;
+}
+
+async function loadVideo(id,b){
+  showLoading('Extracting via your backend… (first request may wake a sleeping instance, ~30–60s)');
+  btnTg.disabled=true;btnDl.disabled=true;
+  log('GET '+b+'/api/info?id='+id);
+  try{
+    const r=await fetch(b+'/api/info?id='+id,{signal:AbortSignal.timeout(90000)});
+    const d=await r.json();
+    if(!r.ok){
+      if(d.error==='youtube_bot_check'){showError('Backend needs cookies',d.detail||'Video is bot-gated. Add YT_COOKIES.');log('info bot-gated','err');return;}
+      showError('Extraction failed',d.detail||d.error||('HTTP '+r.status));log('info failed: '+(d.detail||d.error),'err');return;
+    }
+    const f=(d.formats||[])[0];
+    if(!f){showError('No playable stream','No progressive formats for this video.');log('no formats','err');return;}
+    currentTitle=d.title||'YouTube video';
+    video.crossOrigin='anonymous';                       // belt-and-suspenders (attr already set)
+    video.src=b+'/api/stream?id='+id+'&itag='+encodeURIComponent(f.itag);
+    video.playbackRate=currentRate;
+    await video.play().catch(()=>{});
+    overlay.classList.add('hidden');
+    btnTg.disabled=false;btnDl.disabled=false;
+    setStatus('g','Playing "'+esc(currentTitle)+'". Seek to any moment, then capture.');
+    log('streaming itag '+f.itag+' — "'+currentTitle+'"','ok');
+  }catch(e){
+    showError('Backend request failed',e.name==='TimeoutError'?'Timed out — a free instance may be waking. Retry.':e.message);
+    log('info request failed: '+e.message,'err');
+  }
+}
+
+function setSpeed(s,btn){currentRate=s;video.playbackRate=s;[...document.getElementById('speed').children].forEach(b=>b.classList.remove('active'));btn.classList.add('active');}
+
+/* ── Capture the current frame → JPEG Blob (throws if canvas is tainted) ── */
+function captureBlob(){
+  return new Promise((resolve,reject)=>{
+    if(!video.videoWidth||!video.videoHeight){reject(new Error('video not ready (no dimensions yet)'));return;}
+    const c=document.createElement('canvas');
+    c.width=video.videoWidth;c.height=video.videoHeight;
+    try{
+      c.getContext('2d').drawImage(video,0,0,c.width,c.height);
+      // toBlob throws synchronously if the canvas is tainted by cross-origin media
+      c.toBlob(b=>{ b?resolve(b):reject(new Error('toBlob returned null')); },'image/jpeg',0.85);
+    }catch(e){ reject(e); }
+  });
+}
+
+function showPreview(blob){
+  const img=document.getElementById('previewImg');
+  if(img.src)URL.revokeObjectURL(img.src);
+  img.src=URL.createObjectURL(blob);
+  document.getElementById('preview').style.display='block';
+}
+
+async function captureAndDownload(){
+  log('capturing frame at '+fmtTs(video.currentTime)+' …');
+  try{
+    const blob=await captureBlob();
+    lastBlob=blob;showPreview(blob);
+    log('captured ✓  ('+Math.round(blob.size/1024)+' KB, '+video.videoWidth+'×'+video.videoHeight+')','ok');
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='turbo-frame-'+Math.floor(video.currentTime)+'s.jpg';a.click();
+  }catch(e){onCaptureError(e);}
+}
+
+async function captureAndSend(){
+  const tk=token(),ch=chatId();
+  if(!tk||!ch){setStatus('r','Enter bot token + chat ID first.');log('missing token/chat','err');return;}
+  log('capturing frame at '+fmtTs(video.currentTime)+' …');
+  let blob;
+  try{ blob=await captureBlob(); }catch(e){ onCaptureError(e); return; }
+  lastBlob=blob;showPreview(blob);
+  log('captured ✓  ('+Math.round(blob.size/1024)+' KB, '+video.videoWidth+'×'+video.videoHeight+')','ok');
+
+  const caption='📸 '+currentTitle+'\n⏱ '+fmtTs(video.currentTime)+'  ·  ⚡ Turbo (demo)';
+  const fd=new FormData();
+  fd.append('chat_id',ch);
+  fd.append('caption',caption);
+  fd.append('photo',blob,'turbo-frame.jpg');
+
+  btnTg.disabled=true;
+  log('POST api.telegram.org/bot***/sendPhoto …');
+  try{
+    const r=await fetch('https://api.telegram.org/bot'+tk+'/sendPhoto',{method:'POST',body:fd});
+    const d=await r.json();
+    if(d.ok){setStatus('g','✅ Sent to Telegram!');log('sent ✓ — message_id '+(d.result&&d.result.message_id),'ok');}
+    else{setStatus('r','Telegram rejected it: '+(d.description||'unknown'));log('telegram error: '+(d.description||JSON.stringify(d)),'err');}
+  }catch(e){
+    setStatus('r','Send failed: '+e.message);log('sendPhoto failed: '+e.message,'err');
+  }finally{ btnTg.disabled=false; }
+}
+
+function onCaptureError(e){
+  const tainted=/tainted|secur|cross-origin|operation is insecure/i.test(e.message||String(e));
+  if(tainted){
+    setStatus('r','Canvas tainted — proxy CORS missing on /api/stream.');
+    log('CAPTURE BLOCKED (canvas tainted): '+e.message,'err');
+    log('→ Fix: send "Access-Control-Allow-Origin: *" on the /api/stream response in app.py, then redeploy.','warn');
+  }else{
+    setStatus('r','Capture failed: '+e.message);
+    log('capture error: '+e.message,'err');
+  }
+}
+
+document.getElementById('url').addEventListener('keydown',e=>{if(e.key==='Enter')loadFromInput();});
+</script>
+</body>
+</html>
