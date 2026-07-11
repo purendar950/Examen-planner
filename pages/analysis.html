@@ -83,6 +83,15 @@
   #page-analysis .an-tile-name { font-size:0.8rem; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
   #page-analysis .an-tile-meta { font-size:0.66rem; color:var(--muted); }
   #page-analysis .an-folder-svg { display:block; filter:drop-shadow(0 3px 5px rgba(0,0,0,0.3)); }
+  /* list view — full folder names (no truncation, wraps) */
+  #page-analysis .an-list { display:flex; flex-direction:column; gap:8px; }
+  #page-analysis .an-list-row { display:flex; align-items:center; gap:12px; padding:11px 14px; background:var(--card); border:1px solid var(--border); border-radius:10px; cursor:pointer; transition:border-color .15s, transform .12s; }
+  #page-analysis .an-list-row:hover { border-color:var(--accent); transform:translateX(2px); }
+  #page-analysis .an-list-row .an-folder-svg { width:42px; height:35px; flex-shrink:0; }
+  #page-analysis .an-list-row .lr-main { flex:1; min-width:0; }
+  #page-analysis .an-list-row .lr-name { font-size:0.86rem; font-weight:700; color:var(--text); line-height:1.35; overflow-wrap:anywhere; }
+  #page-analysis .an-list-row .lr-meta { font-size:0.68rem; color:var(--muted); margin-top:3px; }
+  #page-analysis .an-list-row .lr-chev { color:var(--muted); font-size:0.95rem; flex-shrink:0; }
   #page-analysis .an-empty { text-align:center; padding:3rem 1rem; color:var(--muted); }
   #page-analysis .an-empty .em { font-size:2.4rem; margin-bottom:0.6rem; }
 
@@ -277,7 +286,8 @@
       <div class="an-search"><span>🔍</span>
         <input type="text" id="an-search" placeholder="Search moments, videos or playlists..." oninput="anRenderTree()"></div>
       <div class="an-view-toggle">
-        <button class="an-vt active" id="an-vt-tree" onclick="anSetGalleryView('tree')" title="Folder explorer">🗂️</button>
+        <button class="an-vt active" id="an-vt-tree" onclick="anSetGalleryView('tree')" title="Folder grid">🗂️</button>
+        <button class="an-vt" id="an-vt-list" onclick="anSetGalleryView('list')" title="Folder list (full names)">☰</button>
         <button class="an-vt" id="an-vt-grid" onclick="anSetGalleryView('grid')" title="All moments">▦</button>
       </div>
     </div>
