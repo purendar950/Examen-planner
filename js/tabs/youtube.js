@@ -343,37 +343,38 @@ let ytPlaylistVideos = []; // [{id, title, thumb, duration, position, publishedA
 let ytSortMode = 'oldest'; // 'playlist' | 'oldest' | 'newest' — default: oldest uploaded first
 
 /* ══════════════════════════════════════════════
-   🔑 API KEYS — loaded from Firestore, NOT hardcoded
-   The YouTube Data API key is no longer stored in this file. It lives in
-   Firestore at  config/youtube  and is fetched after login (ytLoadApiKeys()).
-   This keeps the key OUT of the public git repo, serves it only to logged-in
-   users, and lets you rotate it without redeploying.
+   🔑 YOUTUBE API ACCESS — Cloudflare proxy (preferred) or direct key
+   The YouTube Data API key is NOT stored in this file. Two supported modes,
+   both configured via Firestore at  config/youtube  (read after login):
 
-   Create the doc in the Firebase Console → Firestore → collection "config",
-   document id "youtube", with EITHER a single key:
-       { "key": "AIzaSy...YOUR_KEY" }
-   OR an array (enables automatic key rotation = higher daily quota):
-       { "keys": ["AIzaSy...KEY1", "AIzaSy...KEY2", "AIzaSy...KEY3"] }
+   ── MODE 1 (recommended): Cloudflare Worker proxy ──
+     { "proxyUrl": "https://youtube-proxy.<you>.workers.dev" }
+   The Worker holds the key as a server-side Secret and adds it to each
+   request. The browser NEVER sees the key. See cloudflare/youtube-proxy/.
 
-   The existing firestore.rules already allow any logged-in user to read
-   config/youtube (only config/ai and config/turbo are blocked).
+   ── MODE 2 (fallback): direct call with key(s) from Firestore ──
+     { "key":  "AIzaSy...YOUR_KEY" }                      // single
+     { "keys": ["AIzaSy...K1", "AIzaSy...K2"] }           // array = rotation
+   The key is fetched by the browser, so restrict it in Google Cloud Console
+   (HTTP referrers → your domain, API → YouTube Data API v3 only).
 
-   ⚠️ SECURITY: a key used by browser JS can never be fully hidden. The real
-   protection is to restrict the key in the Google Cloud Console:
-     • Application restriction → HTTP referrers → add your domain(s)
-     • API restriction → allow only "YouTube Data API v3"
-   Each Google Cloud key gives 10,000 quota units/day; extra keys multiply it.
+   If BOTH are present, the proxy wins. firestore.rules already allow any
+   logged-in user to read config/youtube (only config/ai + config/turbo are
+   blocked).
 ══════════════════════════════════════════════ */
-let YT_API_KEYS    = [];      // populated at runtime from Firestore
+let YT_API_KEYS    = [];      // direct-mode key(s), populated from Firestore
 let YT_API_KEY     = '';      // first key — kept for backward compatibility
+let _ytProxyBase   = '';      // Cloudflare Worker base URL (proxy mode)
 let _ytKeyIdx      = 0;
+let _ytConfigLoaded = false;  // true once proxyUrl OR key(s) are known
 let _ytKeysLoading = null;    // de-dupes concurrent load attempts
 
-/* Load the API key(s) from Firestore once and cache them in memory, with a
-   sessionStorage fallback that survives the index.html → app.html hop and a
-   brief Firestore outage. Safe to call repeatedly — it's a no-op once loaded. */
+/* Load the YouTube config (proxy URL and/or key[s]) from Firestore once and
+   cache it in memory, with a sessionStorage fallback that survives the
+   index.html → app.html hop and a brief Firestore outage. Safe to call
+   repeatedly — it's a no-op once loaded. (Name kept for auth.js callers.) */
 async function ytLoadApiKeys() {
-  if (YT_API_KEYS.length) return YT_API_KEYS;
+  if (_ytConfigLoaded) return YT_API_KEYS;
   if (_ytKeysLoading) return _ytKeysLoading;
 
   _ytKeysLoading = (async () => {
@@ -384,28 +385,30 @@ async function ytLoadApiKeys() {
         const snap = await db.collection('config').doc('youtube').get();
         if (snap.exists) {
           const d = snap.data() || {};
+          if (d.proxyUrl) _ytProxyBase = String(d.proxyUrl).trim().replace(/\/+$/, '');
           const keys = (Array.isArray(d.keys) ? d.keys : (d.key ? [d.key] : []))
             .map(k => (k || '').trim()).filter(Boolean);
-          if (keys.length) {
-            YT_API_KEYS = keys;
-            YT_API_KEY  = keys[0];
-            try { sessionStorage.setItem('yt_api_keys', JSON.stringify(keys)); } catch (e) {}
-            console.log(`✅ Loaded ${keys.length} YouTube API key(s) from Firestore.`);
+          if (keys.length) { YT_API_KEYS = keys; YT_API_KEY = keys[0]; }
+          if (_ytProxyBase || keys.length) {
+            _ytConfigLoaded = true;
+            try { sessionStorage.setItem('yt_cfg', JSON.stringify({ proxyUrl: _ytProxyBase, keys: YT_API_KEYS })); } catch (e) {}
+            console.log(`✅ YouTube access loaded (${_ytProxyBase ? 'Cloudflare proxy' : YT_API_KEYS.length + ' direct key(s)'}).`);
             return YT_API_KEYS;
           }
         }
-        console.warn('⚠️ Firestore config/youtube missing or has no "key"/"keys" field.');
+        console.warn('⚠️ Firestore config/youtube missing or has no proxyUrl/key(s).');
       }
     } catch (e) {
-      console.warn('YouTube key load from Firestore failed:', e.message || e);
+      console.warn('YouTube config load from Firestore failed:', e.message || e);
     }
     // 2. Fallback — sessionStorage copy from earlier this session
     try {
-      const cached = JSON.parse(sessionStorage.getItem('yt_api_keys') || '[]');
-      if (Array.isArray(cached) && cached.length) {
-        YT_API_KEYS = cached;
-        YT_API_KEY  = cached[0];
-        return YT_API_KEYS;
+      const c = JSON.parse(sessionStorage.getItem('yt_cfg') || 'null');
+      if (c && (c.proxyUrl || (Array.isArray(c.keys) && c.keys.length))) {
+        _ytProxyBase = c.proxyUrl || '';
+        YT_API_KEYS  = c.keys || [];
+        YT_API_KEY   = YT_API_KEYS[0] || '';
+        _ytConfigLoaded = true;
       }
     } catch (e) {}
     return YT_API_KEYS;
@@ -415,16 +418,28 @@ async function ytLoadApiKeys() {
   finally { _ytKeysLoading = null; }
 }
 
-/* Fetch a YouTube Data API endpoint, rotating keys and auto-failing-over to
-   the next key when the current one is rate-limited / out of quota.
-   `pathAndQuery` is everything after /youtube/v3/ WITHOUT the &key= part,
-   e.g. 'playlists?part=snippet&id=PL123'. Always returns the parsed JSON
-   (which may contain an `error` object the caller can inspect). */
+/* Fetch a YouTube Data API endpoint. `pathAndQuery` is everything after
+   /youtube/v3/ WITHOUT the &key= part, e.g. 'playlists?part=snippet&id=PL123'.
+   Prefers the Cloudflare Worker proxy (key stays server-side); otherwise calls
+   googleapis directly with rotating keys + quota failover. Always returns the
+   parsed JSON (which may contain an `error` object the caller can inspect). */
 async function ytApiFetchJson(pathAndQuery) {
-  // Lazy-load the key(s) on first use in case the post-login warm-up hasn't run
-  if (!YT_API_KEYS.length) { try { await ytLoadApiKeys(); } catch (e) {} }
+  // Lazy-load config on first use in case the post-login warm-up hasn't run
+  if (!_ytConfigLoaded) { try { await ytLoadApiKeys(); } catch (e) {} }
+
+  // ── MODE 1: Cloudflare Worker proxy (no key in the browser) ──
+  if (_ytProxyBase) {
+    try {
+      const res = await fetch(`${_ytProxyBase}/${pathAndQuery}`);
+      return await res.json();
+    } catch (e) {
+      return { error: { errors: [{ reason: 'networkError' }], message: String(e) } };
+    }
+  }
+
+  // ── MODE 2: direct call with rotating keys ──
   if (!YT_API_KEYS.length) {
-    return { error: { errors: [{ reason: 'noApiKey' }], message: 'YouTube API key not configured (Firestore config/youtube).' } };
+    return { error: { errors: [{ reason: 'noApiKey' }], message: 'No YouTube proxy or API key configured (Firestore config/youtube).' } };
   }
   const n = YT_API_KEYS.length;
   let last = null;
