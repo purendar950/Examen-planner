@@ -523,9 +523,11 @@ function anOpenInFullModal(videoId, startSec, title){
     window.open('https://www.youtube.com/watch?v=' + videoId + (startSec?('&t='+Math.floor(startSec)+'s'):''), '_blank');
     return;
   }
+  // autoplay=0 so the moment opens PAUSED at its timestamp — the user presses
+  // play and it starts from that exact second (no surprise auto-play).
   let url = (typeof ytBuildEmbedUrl === 'function')
-    ? ytBuildEmbedUrl('video', videoId, 1)
-    : ('https://www.youtube-nocookie.com/embed/' + videoId + '?autoplay=1&rel=0');
+    ? ytBuildEmbedUrl('video', videoId, 0)
+    : ('https://www.youtube-nocookie.com/embed/' + videoId + '?autoplay=0&rel=0');
   if (startSec) url += '&start=' + Math.floor(startSec);
   if (titleEl) titleEl.textContent = '▶ ' + (title || 'Video');
   iframe.src = url;
