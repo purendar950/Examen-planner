@@ -745,9 +745,12 @@ function anTimelineGroup(title, countLabel, rows, open){
 }
 
 function anRenderCompleted(){
-  anRenderActivity();
-  anRenderAllList();
-  anRenderAllCompleted();
+  /* Isolate each panel so an error in one never prevents the others from
+     rendering (e.g. the top panel throwing must not leave "All Completed"
+     stuck at its default 0/0). */
+  try { anRenderActivity(); }    catch (e) { console.error('anRenderActivity failed', e); }
+  try { anRenderAllList(); }     catch (e) { console.error('anRenderAllList failed', e); }
+  try { anRenderAllCompleted(); } catch (e) { console.error('anRenderAllCompleted failed', e); }
 }
 
 /* ── tab switcher for the All Completed panel (List | Timeline) ── */
