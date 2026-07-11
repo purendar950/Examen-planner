@@ -342,7 +342,106 @@ let ytVideoWatched = {}; // videoId -> true
 let ytPlaylistVideos = []; // [{id, title, thumb, duration, position, publishedAt}]
 let ytSortMode = 'oldest'; // 'playlist' | 'oldest' | 'newest' — default: oldest uploaded first
 
-const YT_API_KEY = 'AIzaSyDJVRXrAcvAzslMfjSAU2os4cobdzOyHmw';
+/* ══════════════════════════════════════════════
+   🔑 API KEY ROTATION
+   Each Google Cloud API key gives 10,000 quota units/day. Add more keys
+   below to multiply the daily limit (3 keys = 30,000 units/day). When one
+   key hits its quota, ytApiFetchJson() automatically fails over to the next.
+══════════════════════════════════════════════ */
+const YT_API_KEYS = [
+  'AIzaSyDJVRXrAcvAzslMfjSAU2os4cobdzOyHmw'
+  // , 'AIzaSy...YOUR_SECOND_KEY'
+  // , 'AIzaSy...YOUR_THIRD_KEY'
+];
+// Kept for backward compatibility with any external reference.
+const YT_API_KEY = YT_API_KEYS[0];
+let _ytKeyIdx = 0;
+
+/* Fetch a YouTube Data API endpoint, rotating keys and auto-failing-over to
+   the next key when the current one is rate-limited / out of quota.
+   `pathAndQuery` is everything after /youtube/v3/ WITHOUT the &key= part,
+   e.g. 'playlists?part=snippet&id=PL123'. Always returns the parsed JSON
+   (which may contain an `error` object the caller can inspect). */
+async function ytApiFetchJson(pathAndQuery) {
+  const n = YT_API_KEYS.length || 1;
+  let last = null;
+  for (let i = 0; i < n; i++) {
+    const key = YT_API_KEYS[_ytKeyIdx % n];
+    _ytKeyIdx++;
+    try {
+      const res  = await fetch(`https://www.googleapis.com/youtube/v3/${pathAndQuery}&key=${key}`);
+      const data = await res.json();
+      const reason = data.error?.errors?.[0]?.reason || '';
+      // Quota / rate-limit reasons → try the next key
+      if (['quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded', 'userRateLimitExceeded'].includes(reason)) {
+        last = data;
+        continue;
+      }
+      // Success, or a non-quota error (keyInvalid, etc.) the caller should see
+      return data;
+    } catch (e) {
+      last = { error: { errors: [{ reason: 'networkError' }], message: String(e) } };
+    }
+  }
+  return last || { error: { errors: [{ reason: 'quotaExceeded' }] } };
+}
+
+/* ══════════════════════════════════════════════
+   🚀 SMART CACHING ENGINE (localStorage)
+   Fetches every playlist from the YouTube API only ONCE per week. If 100
+   users load the same playlist, only the first request costs quota — the
+   rest are served from cache (0 quota). Durations never change, so they are
+   cached permanently (and shared across playlists that reuse a video).
+══════════════════════════════════════════════ */
+const YT_CACHE_TTL     = 7 * 24 * 60 * 60 * 1000;   // 7 days for info + video lists
+const YT_DUR_CACHE_KEY = 'yt_c_durs';               // persistent per-video duration map
+
+function _ytCacheKey(kind, id) { return 'yt_c_' + kind + '_' + id; }
+
+function ytCacheGet(kind, id) {
+  try {
+    const raw = localStorage.getItem(_ytCacheKey(kind, id));
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || !o.ts || (Date.now() - o.ts) > YT_CACHE_TTL) {
+      localStorage.removeItem(_ytCacheKey(kind, id));
+      return null;
+    }
+    return o.v;
+  } catch (e) { return null; }
+}
+
+function ytCacheSet(kind, id, v) {
+  try {
+    localStorage.setItem(_ytCacheKey(kind, id), JSON.stringify({ ts: Date.now(), v }));
+  } catch (e) {
+    // localStorage full — drop old yt caches and retry once
+    ytClearCache();
+    try { localStorage.setItem(_ytCacheKey(kind, id), JSON.stringify({ ts: Date.now(), v })); } catch (e2) {}
+  }
+}
+
+/* Persistent per-video duration cache (immutable data, no TTL) */
+function ytDurCacheLoad() {
+  try { return JSON.parse(localStorage.getItem(YT_DUR_CACHE_KEY) || '{}') || {}; }
+  catch (e) { return {}; }
+}
+function ytDurCacheSave(map) {
+  try { localStorage.setItem(YT_DUR_CACHE_KEY, JSON.stringify(map)); }
+  catch (e) { try { localStorage.removeItem(YT_DUR_CACHE_KEY); } catch (e2) {} }
+}
+
+/* Clear all cached YouTube metadata — call ytClearCache() from the console to
+   force fresh fetches (e.g. after a playlist gets new videos before the 7-day
+   TTL expires). */
+function ytClearCache() {
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.indexOf('yt_c_') === 0)
+      .forEach(k => localStorage.removeItem(k));
+    console.log('✅ YouTube metadata cache cleared.');
+  } catch (e) {}
+}
 
 /* ══════════════════════════════════════════════
    YOUTUBE IFRAME API SETUP
@@ -578,12 +677,15 @@ function ytPiP() {
    YOUTUBE DATA API — FETCH PLAYLIST
 ══════════════════════════════════════════════ */
 async function ytFetchPlaylistInfo(plId) {
+  const cached = ytCacheGet('info', plId);
+  if (cached) return cached;
   try {
-    const res = await fetch(`https://www.googleapis.com/youtube/v3/playlists?part=snippet&id=${plId}&key=${YT_API_KEY}`);
-    const data = await res.json();
+    const data = await ytApiFetchJson(`playlists?part=snippet&id=${plId}`);
     if (data.items && data.items[0]) {
       const s = data.items[0].snippet;
-      return { title: s.title, channelTitle: s.channelTitle, thumb: s.thumbnails?.medium?.url || '' };
+      const info = { title: s.title, channelTitle: s.channelTitle, thumb: s.thumbnails?.medium?.url || '' };
+      ytCacheSet('info', plId, info);
+      return info;
     }
   } catch(e) {}
   return null;
@@ -591,72 +693,97 @@ async function ytFetchPlaylistInfo(plId) {
 
 /* Fetch a single video's snippet + duration (used for single-video loads) */
 async function ytFetchVideoInfo(videoId) {
+  const cached = ytCacheGet('vinfo', videoId);
+  if (cached) return cached;
   try {
-    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${videoId}&key=${YT_API_KEY}`);
-    const data = await res.json();
+    const data = await ytApiFetchJson(`videos?part=snippet,contentDetails&id=${videoId}`);
     if (data.items && data.items[0]) {
       const it = data.items[0];
       const s  = it.snippet || {};
-      return {
+      const info = {
         id: videoId,
         title: s.title || 'Video',
         channelTitle: s.channelTitle || '',
         thumb: s.thumbnails?.medium?.url || s.thumbnails?.default?.url || `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
         duration: ytParseIsoDuration(it.contentDetails?.duration || '')
       };
+      ytCacheSet('vinfo', videoId, info);
+      return info;
     }
   } catch (e) {}
   return null;
 }
 
 async function ytFetchPlaylistVideos(plId) {
+  const cached = ytCacheGet('vids', plId);
+  if (cached) return cached;
+
   const videos = [];
   let pageToken = '';
   for (let page = 0; page < 10; page++) {
-    try {
-      const url = `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${plId}&maxResults=50&key=${YT_API_KEY}${pageToken ? '&pageToken=' + pageToken : ''}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      if (data.error) {
-        const reason = data.error.errors?.[0]?.reason || '';
-        if (reason === 'quotaExceeded') showToast('⚠️ YouTube API quota exceed ho gaya. Kal try karo.', 'error');
-        else if (reason === 'keyInvalid') showToast('⚠️ YouTube API key invalid hai. YT_API_KEY check karo.', 'error');
-        else console.warn('YT API error:', data.error.message, reason);
-        return null;
+    const data = await ytApiFetchJson(
+      `playlistItems?part=snippet,contentDetails&playlistId=${plId}&maxResults=50` +
+      (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '')
+    );
+    if (data.error) {
+      const reason = data.error.errors?.[0]?.reason || '';
+      // quota reasons only surface here after ytApiFetchJson exhausted every key
+      if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded')
+        showToast('⚠️ YouTube API quota exceed ho gaya (saare keys). Kal try karo ya nayi API key add karo.', 'error');
+      else if (reason === 'keyInvalid')
+        showToast('⚠️ YouTube API key invalid hai. YT_API_KEYS check karo.', 'error');
+      else console.warn('YT API error:', data.error.message, reason);
+      return null;
+    }
+    for (const item of (data.items || [])) {
+      const s = item.snippet;
+      if (s.resourceId?.videoId) {
+        videos.push({
+          id: s.resourceId.videoId,
+          title: s.title,
+          thumb: s.thumbnails?.medium?.url || s.thumbnails?.default?.url || '',
+          position: s.position,
+          // Actual upload date of the video (falls back to "added to playlist" date)
+          publishedAt: item.contentDetails?.videoPublishedAt || s.publishedAt || null,
+          duration: 0
+        });
       }
-      for (const item of (data.items || [])) {
-        const s = item.snippet;
-        if (s.resourceId?.videoId) {
-          videos.push({
-            id: s.resourceId.videoId,
-            title: s.title,
-            thumb: s.thumbnails?.medium?.url || s.thumbnails?.default?.url || '',
-            position: s.position,
-            // Actual upload date of the video (falls back to "added to playlist" date)
-            publishedAt: item.contentDetails?.videoPublishedAt || s.publishedAt || null,
-            duration: 0
-          });
-        }
-      }
-      pageToken = data.nextPageToken || '';
-      if (!pageToken) break;
-    } catch(e) { break; }
+    }
+    pageToken = data.nextPageToken || '';
+    if (!pageToken) break;
   }
+  // Cache the full video list so repeat loads (any user) cost 0 quota for a week
+  if (videos.length > 0) ytCacheSet('vids', plId, videos);
   return videos;
 }
 
 async function ytFetchDurations(videos) {
   const map = {};
-  for (let i = 0; i < videos.length; i += 50) {
-    const ids = videos.slice(i, i + 50).map(v => v.id).join(',');
+  const durCache = ytDurCacheLoad();
+
+  // Only request videos whose duration we haven't cached before (durations are
+  // immutable, so a cached value never goes stale — this also dedupes videos
+  // that appear across multiple playlists).
+  const need = [];
+  for (const v of videos) {
+    if (durCache[v.id] != null) map[v.id] = durCache[v.id];
+    else need.push(v);
+  }
+
+  let fetchedAny = false;
+  for (let i = 0; i < need.length; i += 50) {
+    const ids = need.slice(i, i + 50).map(v => v.id).join(',');
     try {
-      const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${ids}&key=${YT_API_KEY}`);
-      const data = await res.json();
+      const data = await ytApiFetchJson(`videos?part=contentDetails&id=${ids}`);
       for (const item of (data.items || [])) {
-        map[item.id] = ytParseIsoDuration(item.contentDetails.duration);
+        const secs = ytParseIsoDuration(item.contentDetails.duration);
+        map[item.id] = secs;
+        durCache[item.id] = secs;
+        fetchedAny = true;
       }
     } catch(e) {}
   }
+  if (fetchedAny) ytDurCacheSave(durCache);
   return map;
 }
 
