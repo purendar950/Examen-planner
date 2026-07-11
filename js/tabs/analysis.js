@@ -339,8 +339,22 @@ let anGalleryView = 'tree';
 function anSetGalleryView(view){
   anGalleryView = view;
   document.getElementById('an-vt-tree').classList.toggle('active', view === 'tree');
+  var listBtn = document.getElementById('an-vt-list');
+  if (listBtn) listBtn.classList.toggle('active', view === 'list');
   document.getElementById('an-vt-grid').classList.toggle('active', view === 'grid');
   anRenderTree();
+}
+
+/* Render one folder entry as a tile (grid view) or a full-width row (list view).
+   List rows show the FULL name (wraps, no ellipsis). */
+function anFolderEntry(onclick, variant, name, meta){
+  if (anGalleryView === 'list'){
+    return `<div class="an-list-row" onclick="${onclick}">${anFolderIcon(variant)}`
+      + `<div class="lr-main"><div class="lr-name">${anEsc(name)}</div><div class="lr-meta">${anEsc(meta)}</div></div>`
+      + `<span class="lr-chev">›</span></div>`;
+  }
+  return `<div class="an-tile" onclick="${onclick}">${anFolderIcon(variant)}`
+    + `<div class="an-tile-name">${anEsc(name)}</div><div class="an-tile-meta">${anEsc(meta)}</div></div>`;
 }
 
 /* ── recent moments row ── */
@@ -416,25 +430,26 @@ function anRenderTree(){
 
   anBreadcrumb();
 
+  const wrapCls = anGalleryView === 'list' ? 'an-list' : 'an-explorer';
   if (!anNav.plId){
-    /* LEVEL 0 — playlists as folder tiles (skip ones that only hold Turbo shots) */
+    /* LEVEL 0 — playlists as folders (tiles or full-name rows) */
     const plEntries = Object.entries(folders).filter(([plId, pl]) =>
       Object.values(pl.videos||{}).some(v => anGalleryItems(v).length));
     if (!plEntries.length){ body.innerHTML = anGalleryEmpty(); if (bc) bc.style.display = 'none'; return; }
     const tiles = plEntries.map(([plId, pl]) => {
       const moments = Object.values(pl.videos||{}).reduce((t,v) => t + anGalleryItems(v).length, 0);
       const vids = Object.values(pl.videos||{}).filter(v => anGalleryItems(v).length).length;
-      return `<div class="an-tile" onclick="anOpenFolder('${plId}')">${anFolderIcon('pl')}<div class="an-tile-name">${anEsc(pl.name||'Playlist')}</div><div class="an-tile-meta">${vids} video${vids===1?'':'s'} · ${moments} moments</div></div>`;
+      return anFolderEntry(`anOpenFolder('${plId}')`, 'pl', pl.name||'Playlist', `${vids} video${vids===1?'':'s'} · ${moments} moments`);
     }).join('');
-    body.innerHTML = `<div class="an-explorer">${tiles}</div>`;
+    body.innerHTML = `<div class="${wrapCls}">${tiles}</div>`;
 
   } else if (!anNav.vId){
-    /* LEVEL 1 — videos inside the playlist as folder tiles */
+    /* LEVEL 1 — videos inside the playlist as folders (tiles or full-name rows) */
     const pl = folders[anNav.plId];
     const entries = Object.entries(pl.videos||{}).filter(([vId, v]) => anGalleryItems(v).length);
-    body.innerHTML = entries.length ? `<div class="an-explorer">${entries.map(([vId, v]) => {
+    body.innerHTML = entries.length ? `<div class="${wrapCls}">${entries.map(([vId, v]) => {
       const count = anGalleryItems(v).length;
-      return `<div class="an-tile" onclick="anOpenVideo('${anNav.plId}','${vId}')">${anFolderIcon('vid')}<div class="an-tile-name">${anEsc(v.name||'Video')}</div><div class="an-tile-meta">${count} moment${count===1?'':'s'}</div></div>`;
+      return anFolderEntry(`anOpenVideo('${anNav.plId}','${vId}')`, 'vid', v.name||'Video', `${count} moment${count===1?'':'s'}`);
     }).join('')}</div>`
       : `<div class="an-empty"><div class="em">📂</div><div>This playlist has no videos with saved moments.</div></div>`;
 
