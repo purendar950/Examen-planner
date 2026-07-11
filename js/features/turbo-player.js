@@ -539,51 +539,71 @@
                       : 'Turn on Turbo for real 4x speed + Picture-in-Picture');
   }
 
-  /* Show >2x speed buttons only in Turbo (they do nothing on the YouTube
-     iframe, which caps at 2x). Also injects 3.5x & 4x for Turbo. */
+  /* The exact speed options shown in Turbo mode. The YouTube iframe caps at
+     2x, so anything >2 only applies in Turbo. Non-Turbo mode shows the <=2
+     subset. */
+  var TURBO_RATES = ['1', '1.5', '2', '2.25', '2.5', '2.75', '3', '3.25', '3.5', '3.75', '4'];
+
   function applySpeedVisibility() {
     var bar = document.getElementById('yt-speed-bar');
     if (!bar) return;
-    if (!bar.querySelector('[data-rate="4"]')) {
-      var pip = bar.querySelector('.yt-pip-btn');
-      ['3.5', '4'].forEach(function (r) {
+
+    // Inject any missing Turbo-rate buttons (e.g. 3.25, 3.5, 3.75, 4) before PiP.
+    var pip = bar.querySelector('.yt-pip-btn');
+    TURBO_RATES.forEach(function (r) {
+      if (!bar.querySelector('.yt-speed-btn[data-rate="' + r + '"]')) {
         var b = document.createElement('button');
         b.className = 'yt-speed-btn';
         b.dataset.rate = r;
         b.textContent = r + 'x';
         b.setAttribute('onclick', 'ytSetSpeed(' + r + ')');
-        bar.insertBefore(b, pip);
-      });
-    }
-    bar.querySelectorAll('.yt-speed-btn').forEach(function (b) {
-      var r = parseFloat(b.dataset.rate);
-      if (r > 2) b.style.display = turboEnabled ? '' : 'none';
+        if (pip) bar.insertBefore(b, pip); else bar.appendChild(b);
+      }
     });
 
-    // "Send screenshot to Telegram" — Turbo-only (needs the native <video>).
-    if (!bar.querySelector('#yt-turbo-tg')) {
-      var pip2 = bar.querySelector('.yt-pip-btn');
-      var tg = document.createElement('button');
-      tg.id = 'yt-turbo-tg';
-      tg.className = 'yt-speed-btn';
-      tg.textContent = '📤 TG';
-      tg.title = 'Send a screenshot of this exact frame to your Telegram';
-      tg.setAttribute('onclick', 'turboSendToTelegram()');
-      bar.insertBefore(tg, pip2);
-    }
-    var tgBtn = bar.querySelector('#yt-turbo-tg');
+    // Visibility:
+    //  • Turbo ON  → show ONLY the Turbo set (hides 0.5 / 0.75 / 1.25 / 1.75).
+    //  • Turbo OFF → show the iframe-capable set (rate <= 2).
+    bar.querySelectorAll('.yt-speed-btn').forEach(function (b) {
+      var rate = b.dataset.rate;
+      var show = turboEnabled ? (TURBO_RATES.indexOf(rate) !== -1) : (parseFloat(rate) <= 2);
+      b.style.display = show ? '' : 'none';
+    });
+
+    // TG (screenshot) button lives below the Turbo toggle (built in initUI);
+    // only usable in Turbo mode.
+    var tgBtn = document.getElementById('yt-turbo-tg');
     if (tgBtn) tgBtn.style.display = turboEnabled ? '' : 'none';
   }
 
   function initUI() {
     var bar = document.getElementById('yt-speed-bar');
     if (!bar) return;
-    if (!document.getElementById('yt-turbo-toggle')) {
+    if (!document.getElementById('yt-turbo-controls')) {
+      // Vertical stack at the start of the speed bar: the Turbo toggle on top,
+      // the TG (screenshot) button directly BELOW it. align-items:stretch makes
+      // both buttons the SAME width/size.
+      var col = document.createElement('div');
+      col.id = 'yt-turbo-controls';
+      col.style.cssText = 'display:flex;flex-direction:column;gap:4px;align-items:stretch;';
+
       var btn = document.createElement('button');
       btn.id = 'yt-turbo-toggle';
       btn.className = 'yt-turbo-toggle';
       btn.setAttribute('onclick', 'ytToggleTurbo()');
-      bar.insertBefore(btn, bar.firstChild);
+      col.appendChild(btn);
+
+      // Send-screenshot-to-Telegram — same class as the Turbo button (= same
+      // size), placed right below it. Only shown in Turbo mode.
+      var tg = document.createElement('button');
+      tg.id = 'yt-turbo-tg';
+      tg.className = 'yt-turbo-toggle';
+      tg.textContent = '📤 TG';
+      tg.title = 'Send a screenshot of this exact frame to your Telegram';
+      tg.setAttribute('onclick', 'turboSendToTelegram()');
+      col.appendChild(tg);
+
+      bar.insertBefore(col, bar.firstChild);
     }
     ensureVideoEl();
     updateToggleUI();
