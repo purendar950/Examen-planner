@@ -734,13 +734,18 @@ function anToggleMore(btn, n){
 /* Compact timeline group: a thin collapsible row (title + count badge) that
    expands to reveal its rows (with progressive disclosure). */
 function anTimelineGroup(title, countLabel, rows, open){
+  /* Callers pass either an array of row-HTML strings (enables the "+N more"
+     progressive disclosure) OR an already-joined HTML string. anDisclose()
+     expects an array (it calls .slice().join()), so passing a string used to
+     throw a TypeError and leave the group body empty. Normalise here. */
+  const body = Array.isArray(rows) ? anDisclose(rows, 3) : (rows || '');
   return `<div class="an-tlg${open?' open':''}">
     <div class="an-tlg-head" onclick="this.parentElement.classList.toggle('open')">
       <span class="an-chev">▶</span>
       <span class="an-tlg-title">${title}</span>
       <span class="an-tlg-count">${countLabel}</span>
     </div>
-    <div class="an-tlg-body">${anDisclose(rows, 3)}</div>
+    <div class="an-tlg-body">${body}</div>
   </div>`;
 }
 
