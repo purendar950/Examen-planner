@@ -54,7 +54,8 @@ export default defineConfig({
       input: {
         index: resolve(rootDir, 'index.html'),
         app: resolve(rootDir, 'app.html'),
-        admin: resolve(rootDir, 'admin.html')
+        admin: resolve(rootDir, 'admin.html'),
+        ytProxyDemo: resolve(rootDir, 'yt-proxy-demo.html')
       }
     }
   },
