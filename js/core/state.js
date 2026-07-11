@@ -53,7 +53,8 @@ let appState = {
   autoRolloverTasks: true, // move incomplete manual tasks forward to today (on by default)
   lastRolloverDate: null,  // guard so the rollover sweep runs once per day
   recurringTasks: [],      // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
-  habitsLog: {}            // {dateStr: {ruleId: true/false}} — per-day habit completion
+  habitsLog: {},           // {dateStr: {ruleId: true/false}} — per-day habit completion
+  deletedTaskKeys: []      // content signatures of deleted regenerable tasks — keeps a deleted plan/mock/video task from re-appearing the next day
 };
 
 let currentFilter = 'all';

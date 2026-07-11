@@ -1204,6 +1204,9 @@ function addTask() {
 
   const dateStr = selectedPlannerDate || fmtDate(new Date());
   if (!appState.tasks[dateStr]) appState.tasks[dateStr] = [];
+  /* An explicit manual add clears any prior tombstone for this text, so a task
+     the user deliberately re-adds is never suppressed by a stale deletion. */
+  if (typeof clearTaskDeletion === 'function') clearTaskDeletion({ text });
   appState.tasks[dateStr].push({ id: Date.now().toString(), text, done:false, priority, subject, type });
   input.value = ''; input.focus();
   saveProgress(); buildPlannerCalendar();
@@ -1265,7 +1268,61 @@ function toggleTask(dateStr, taskId) {
   }
 }
 
+/* ══════════════════════════════════════════════
+   DELETED-TASK TOMBSTONES
+   Completing a task bridges to chapter progress (syncTaskChapterProgress) so
+   the study plan stops re-scheduling it. DELETING a task had no such signal —
+   so a task that came from a regenerating source (study-plan topic, mock /
+   practice slot, or a scheduled course video) was simply re-created the next
+   time that source was materialised, and the user's deleted task "came back
+   the next day". These helpers remember a small content signature of every
+   deleted task (mirrors the Telegram telegramProcessedIds ledger) so the
+   re-add paths can skip it. Manually re-typing the same task clears its
+   tombstone, so an intentional re-add always wins. */
+function taskDedupKey(t) {
+  if (!t) return '';
+  if (t.chId)    return 'ch:'  + String(t.chId);
+  if (t.videoId) return 'vid:' + String(t.videoId);
+  const txt = (t.text || '').trim().toLowerCase();
+  return txt ? 'txt:' + txt : '';
+}
+function _deletedTaskLedger() {
+  if (!Array.isArray(appState.deletedTaskKeys)) appState.deletedTaskKeys = [];
+  return appState.deletedTaskKeys;
+}
+/* Record a deleted task's signature so regenerating sources don't re-add it. */
+function recordTaskDeletion(t) {
+  const key = taskDedupKey(t);
+  if (!key) return;
+  const led = _deletedTaskLedger();
+  if (!led.includes(key)) {
+    led.push(key);
+    /* Cap so the ledger can't grow unbounded (keeps the most recent). */
+    const MAX = 800;
+    if (led.length > MAX) appState.deletedTaskKeys = led.slice(-MAX);
+  }
+}
+/* True when a would-be task (or its {chId|videoId|text} signature) was deleted
+   before and should NOT be auto-recreated. */
+function isTaskDeleted(keyOrTask) {
+  const key = (typeof keyOrTask === 'string') ? keyOrTask : taskDedupKey(keyOrTask);
+  return !!key && _deletedTaskLedger().includes(key);
+}
+/* Forget a tombstone — called when the user explicitly (re-)adds the task, so
+   an intentional add is never silently suppressed. */
+function clearTaskDeletion(keyOrTask) {
+  const key = (typeof keyOrTask === 'string') ? keyOrTask : taskDedupKey(keyOrTask);
+  if (!key) return;
+  const led = _deletedTaskLedger();
+  const i = led.indexOf(key);
+  if (i !== -1) led.splice(i, 1);
+}
+
 function deleteTask(dateStr, taskId) {
+  const task = (appState.tasks[dateStr]||[]).find(t=>t.id===taskId);
+  /* Remember this deletion so a regenerating source (study plan, mock/practice
+     slot, scheduled video) doesn't re-create the task the next day. */
+  if (task) recordTaskDeletion(task);
   appState.tasks[dateStr] = (appState.tasks[dateStr]||[]).filter(t=>t.id!==taskId);
   if (typeof removeTaskRevision === 'function') removeTaskRevision(taskId);
   saveProgress(); buildPlannerCalendar();

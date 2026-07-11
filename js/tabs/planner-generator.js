@@ -558,6 +558,7 @@ function addTimetableToToday() {
     chosen.forEach(sub => {
       const text = `${practiceLabel} — ${sub.name}`;
       if (existing.has(text)) return;
+      if (typeof isTaskDeleted === 'function' && isTaskDeleted({ text })) return; // stays deleted
       appState.tasks[todayStr].push({ id: Date.now().toString()+Math.random(), text, done:false, priority:'normal', subject: sub.id||'' });
       added++;
     });
@@ -573,6 +574,7 @@ function addTimetableToToday() {
       const ch = it.ch || {};
       mockTaskTexts(ch, cfg).forEach(text => {
         if (existing.has(text)) return;
+        if (typeof isTaskDeleted === 'function' && isTaskDeleted({ text })) return; // stays deleted
         existing.add(text);
         appState.tasks[todayStr].push({ id: Date.now().toString()+Math.random(), text, done:false, priority:'normal', subject: ch.subId||'', type:'mock' });
         added++;
@@ -582,6 +584,8 @@ function addTimetableToToday() {
     /* syllabus — use queue */
     queue.forEach(ch => {
       if (seen.has(ch.id) || existing.has(ch.name)) { seen.add(ch.id); return; }
+      /* Skip a topic the user previously deleted (keyed on chapter id). */
+      if (typeof isTaskDeleted === 'function' && isTaskDeleted({ chId: ch.id || '', text: ch.name })) { seen.add(ch.id); return; }
       seen.add(ch.id);
       /* Persist the chapter id so completing this task syncs back to
          appState.progress (keeps the topic out of tomorrow's schedule). */

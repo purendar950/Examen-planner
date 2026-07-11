@@ -83,6 +83,8 @@ function addScheduledTopicsToTasks(dateStr) {
       const texts = (typeof mockTaskTexts === 'function') ? mockTaskTexts(ch, cfg) : [ch.name];
       texts.forEach(text => {
         if (existing.has(text)) return;
+        /* Skip a mock the user previously deleted — don't resurrect it. */
+        if (typeof isTaskDeleted === 'function' && isTaskDeleted({ text })) return;
         existing.add(text);
         appState.tasks[dateStr].push({ id: Date.now().toString()+Math.random(), text, done:false, priority:'normal', subject: ch.subId||'', type:'mock' });
         added++;
@@ -91,6 +93,9 @@ function addScheduledTopicsToTasks(dateStr) {
     }
     const text = ch.name + (it.part ? ' ' + it.part : '');
     if (existing.has(text)) return;
+    /* Skip a plan topic the user previously deleted (keyed on its chapter id so
+       it stays deleted even though the plan keeps it "pending"). */
+    if (typeof isTaskDeleted === 'function' && isTaskDeleted({ chId: ch.id || '', text })) return;
     existing.add(text);
     /* Carry the real chapter id (chId) so completing this task from the task
        list / Kanban also marks the chapter done in appState.progress — otherwise

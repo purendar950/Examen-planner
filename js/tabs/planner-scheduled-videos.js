@@ -112,6 +112,9 @@ function addScheduledVideoToTodo(plId, vid) {
     if (typeof showToast === 'function') showToast('Ye video pehle se To Do mein hai.', 'info');
     return;
   }
+  /* Explicit click = deliberate re-add, so forget any prior deletion tombstone
+     for this video (otherwise a video deleted once could never be re-added). */
+  if (typeof clearTaskDeletion === 'function') clearTaskDeletion({ videoId: vid });
   appState.tasks[dateStr].push({
     id: Date.now().toString(),
     text: v.title,
