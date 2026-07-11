@@ -112,7 +112,7 @@ function ssGenerateId() {
 function ssEnsureFolder(ctx) {
   const state = ssGetState();
   if (!state.folders[ctx.playlistId]) {
-    state.folders[ctx.playlistId] = { name: ctx.playlistName, videos: {} };
+    state.folders[ctx.playlistId] = { name: ctx.playlistName, videos: {}, createdAt: Date.now() };
   }
   const folder = state.folders[ctx.playlistId];
   // Update name if it was generic
@@ -120,7 +120,7 @@ function ssEnsureFolder(ctx) {
     folder.name = ctx.playlistName;
   }
   if (!folder.videos[ctx.videoId]) {
-    folder.videos[ctx.videoId] = { name: ctx.videoName, items: [] };
+    folder.videos[ctx.videoId] = { name: ctx.videoName, items: [], createdAt: Date.now() };
   }
   const videoFolder = folder.videos[ctx.videoId];
   // Update video name if better info available
