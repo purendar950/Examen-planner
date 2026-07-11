@@ -1,0 +1,12 @@
+name = "youtube-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Secrets are NOT stored here. Set them AFTER the first deploy (dashboard or CLI):
+#   npx wrangler secret put YT_API_KEYS   ->  AIza1,AIza2,AIza3,AIza4
+#   (or a single)  npx wrangler secret put YT_API_KEY
+#
+# Optional: override the CORS allow-list (comma-separated origins).
+# Defaults live in worker.js (DEFAULT_ALLOWED_ORIGINS).
+# [vars]
+# ALLOWED_ORIGINS = "https://purendar950.github.io,http://localhost:8080"
