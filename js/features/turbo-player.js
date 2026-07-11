@@ -106,6 +106,14 @@
         var s = (typeof ytResumeSeconds === 'function') ? ytResumeSeconds(turboVid) : 0;
         if (s > 0) v.currentTime = s;
       } catch (e) {}
+      // Re-assert the chosen speed — the browser resets playbackRate to
+      // defaultPlaybackRate on every new stream load, which otherwise makes
+      // Turbo play at 1x even though a higher speed was selected.
+      try {
+        var r = (typeof ytSpeedCurrent === 'number' && ytSpeedCurrent > 0) ? ytSpeedCurrent : 1;
+        v.defaultPlaybackRate = r;
+        v.playbackRate = r;
+      } catch (e) {}
     });
     v.addEventListener('timeupdate', function () {
       var now = Date.now();
@@ -250,6 +258,10 @@
         var f = res.d.formats[0];              // highest single-file quality
         var current = (typeof ytSpeedCurrent !== 'undefined') ? ytSpeedCurrent : 1;
         v.src = TURBO_BACKEND_URL + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
+        // Set BOTH rates: on a fresh stream the browser resets playbackRate to
+        // defaultPlaybackRate, so without setting defaultPlaybackRate too, Turbo
+        // reverts to 1x (the "still slow after changing speed" bug).
+        v.defaultPlaybackRate = current || 1;
         v.playbackRate = current || 1;
         status(null);
         var p = v.play();
@@ -293,7 +305,8 @@
       ytSpeedCurrent = rate;
       window.ytSpeedCurrent = rate;
       if (turboActive()) {
-        try { turboVideoEl.playbackRate = rate; } catch (e) {}
+        // Set both so the speed sticks across buffering / reloads.
+        try { turboVideoEl.defaultPlaybackRate = rate; turboVideoEl.playbackRate = rate; } catch (e) {}
         if (typeof showToast === 'function') showToast('Speed: ' + rate + 'x', 'info');
         document.querySelectorAll('.yt-speed-btn').forEach(function (b) {
           b.classList.toggle('active', parseFloat(b.dataset.rate) === rate);
