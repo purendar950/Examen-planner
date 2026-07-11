@@ -540,6 +540,14 @@ if (auth && !_isBadProtocol) {
           if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
           updateDashboard();
           buildSyllabus();
+          /* Keep the Analysis tab in sync with freshly-hydrated remote data.
+             Without this, its completed-targets/videos panels can render once
+             (before data loads) and never refresh — leaving "All Completed"
+             stuck at 0 while the top panel updates via its own controls. */
+          try {
+            const anPg = document.getElementById('page-analysis');
+            if (typeof anRender === 'function' && anPg && anPg.classList.contains('active')) anRender();
+          } catch (e) {}
           setSyncStatus('saved', '📱 Synced');
           setTimeout(() => setSyncStatus('', ''), 3000);
         }
