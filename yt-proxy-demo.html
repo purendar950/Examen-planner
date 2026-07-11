@@ -29,19 +29,20 @@
   .badge { display:inline-block; font-size:0.68rem; padding:2px 8px; border-radius:20px; margin-left:6px; }
   .b-worker { background:rgba(0,200,150,.2); color:var(--accent); }
   .b-fallback { background:rgba(245,158,11,.2); color:var(--warn); }
+  .b-type { background:rgba(59,130,246,.2); color:#7db4ff; }
   code { background:#0f1319; padding:1px 5px; border-radius:4px; font-size:0.78rem; }
 </style>
 </head>
 <body>
   <h1>🔬 YouTube Proxy Demo</h1>
-  <p class="sub">Tests the Cloudflare Worker (metadata fetch) with automatic fallback to the plain YouTube IFrame if all keys fail. This page does NOT touch the real app.</p>
+  <p class="sub">Tests the Cloudflare Worker (metadata fetch) with automatic fallback to the plain YouTube IFrame if all keys fail. Works with playlists AND single videos. This page does NOT touch the real app.</p>
 
   <div class="card">
     <label>Cloudflare Worker URL</label>
     <input type="text" id="worker" value="https://cold-paper-bc65.syncstudyssc.workers.dev" />
 
-    <label>YouTube Playlist URL or ID</label>
-    <input type="text" id="playlist" value="PLbpi6ZahtOH6Blw3RGYpWkSByi_T7Rygb" />
+    <label>YouTube URL or ID (playlist OR video — /live, /watch, youtu.be, /shorts all work)</label>
+    <input type="text" id="input" value="https://www.youtube.com/live/FNiqmNSYS9Q" />
 
     <div class="chk">
       <input type="checkbox" id="simFail" />
@@ -49,7 +50,7 @@
     </div>
 
     <div class="row" style="margin-top:14px;">
-      <button id="loadBtn">▶ Load playlist</button>
+      <button id="loadBtn">▶ Load</button>
       <button class="secondary" id="clearBtn">Clear</button>
     </div>
 
@@ -65,25 +66,29 @@
 <script>
 const $ = id => document.getElementById(id);
 
-function extractPlaylistId(v) {
+/* Detect whether the input is a playlist or a single video, and pull the id. */
+function parseInput(v) {
   v = (v || '').trim();
-  const m = v.match(/[?&]list=([A-Za-z0-9_-]+)/);
-  if (m) return m[1];
-  if (/^[A-Za-z0-9_-]{10,}$/.test(v)) return v; // looks like a raw ID
+  // Playlist (has list=)
+  const pl = v.match(/[?&]list=([A-Za-z0-9_-]+)/);
+  if (pl) return { type: 'playlist', id: pl[1] };
+  // Single video — /watch?v=, youtu.be/, /live/, /shorts/, /embed/
+  const vid = v.match(/(?:youtube\.com\/(?:watch\?v=|live\/|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  if (vid) return { type: 'video', id: vid[1] };
+  // Raw ids
+  if (/^PL[A-Za-z0-9_-]{10,}$/.test(v)) return { type: 'playlist', id: v };
+  if (/^[A-Za-z0-9_-]{11}$/.test(v))    return { type: 'video', id: v };
   return null;
 }
 
-function setStatus(msg, cls) {
-  const el = $('status');
-  el.className = cls;
-  el.textContent = msg;
-}
+function setStatus(msg, cls) { const el = $('status'); el.className = cls; el.textContent = msg; }
 
-function showPlayer(plId) {
-  // Original YouTube IFrame — plays the playlist WITHOUT the Data API (0 quota)
-  $('playerWrap').innerHTML =
-    '<iframe src="https://www.youtube-nocookie.com/embed/videoseries?list=' + plId +
-    '&rel=0&modestbranding=1" allow="autoplay;encrypted-media;fullscreen" allowfullscreen></iframe>';
+/* Original YouTube IFrame — plays without the Data API (0 quota). */
+function showPlayer(kind, id) {
+  const src = kind === 'playlist'
+    ? 'https://www.youtube-nocookie.com/embed/videoseries?list=' + id + '&rel=0&modestbranding=1'
+    : 'https://www.youtube-nocookie.com/embed/' + id + '?rel=0&modestbranding=1';
+  $('playerWrap').innerHTML = '<iframe src="' + src + '" allow="autoplay;encrypted-media;fullscreen" allowfullscreen></iframe>';
 }
 
 async function workerFetch(base, endpoint, params) {
@@ -93,69 +98,72 @@ async function workerFetch(base, endpoint, params) {
   return { status: res.status, data };
 }
 
+function fallback(kind, id, msg) {
+  setStatus(msg, 'warn');
+  $('resultHead').innerHTML = '<strong>' + (kind === 'playlist' ? 'Playlist' : 'Video') + '</strong> <span class="badge b-fallback">IFrame fallback</span>';
+  showPlayer(kind, id);
+  $('resultCard').style.display = 'block';
+}
+
 async function load() {
   const base = $('worker').value.trim();
-  const plId = extractPlaylistId($('playlist').value);
+  const parsed = parseInput($('input').value);
   const simFail = $('simFail').checked;
 
   $('resultCard').style.display = 'none';
   $('videoList').innerHTML = '';
   $('resultHead').innerHTML = '';
 
-  if (!plId) { setStatus('❌ Valid playlist URL/ID daalo.', 'bad'); return; }
+  if (!parsed) { setStatus('❌ Valid YouTube URL/ID daalo (playlist ya video).', 'bad'); return; }
+  const { type, id } = parsed;
 
-  // ── Fallback path: pretend all keys failed → use plain IFrame only ──
+  // Fallback path: pretend all keys failed → plain IFrame only
   if (simFail) {
-    setStatus('⚠️ Simulated: all 4 keys failed.\n→ Falling back to the ORIGINAL YouTube IFrame (playback still works, 0 quota).\nSidebar video list unavailable in this mode — exactly how the real app degrades.', 'warn');
-    $('resultHead').innerHTML = '<strong>Playlist</strong> <span class="badge b-fallback">IFrame fallback</span>';
-    showPlayer(plId);
-    $('resultCard').style.display = 'block';
+    fallback(type, id, '⚠️ Simulated: all 4 keys failed.\n→ Falling back to the ORIGINAL YouTube IFrame (playback still works, 0 quota).\nMetadata (title/list) unavailable in this mode — exactly how the real app degrades.');
     return;
   }
 
-  setStatus('⏳ Fetching via Cloudflare Worker…', 'ok');
+  setStatus('⏳ Fetching ' + type + ' via Cloudflare Worker…', 'ok');
 
   try {
-    // 1) playlist title
-    const info = await workerFetch(base, 'playlists', 'part=snippet&id=' + plId);
-    // 2) first page of videos
-    const items = await workerFetch(base, 'playlistItems', 'part=snippet&maxResults=50&playlistId=' + plId);
-
-    const reason = info.data?.error?.errors?.[0]?.reason || items.data?.error?.errors?.[0]?.reason || '';
-    const gotVideos = Array.isArray(items.data?.items) && items.data.items.length > 0;
-
-    if (reason || !gotVideos) {
-      // Worker/keys failed → fall back to plain IFrame (this is the desired behaviour)
-      setStatus('⚠️ Worker fetch failed (reason: ' + (reason || 'no data') + ').\n→ Falling back to the ORIGINAL YouTube IFrame so playback still works.', 'warn');
-      $('resultHead').innerHTML = '<strong>Playlist</strong> <span class="badge b-fallback">IFrame fallback</span>';
-      showPlayer(plId);
+    if (type === 'video') {
+      const info = await workerFetch(base, 'videos', 'part=snippet&id=' + id);
+      const reason = info.data?.error?.errors?.[0]?.reason || '';
+      const item = info.data?.items?.[0];
+      if (reason || !item) {
+        fallback('video', id, '⚠️ Worker fetch failed (reason: ' + (reason || 'no data') + ').\n→ Falling back to the ORIGINAL YouTube IFrame so playback still works.');
+        return;
+      }
+      const s = item.snippet || {};
+      setStatus('✅ SUCCESS via Cloudflare Worker — key never left the server.\nVideo metadata fetched. No googleapis call from the browser, no key= in the URL.', 'ok');
+      $('resultHead').innerHTML = '<strong>' + escapeHtml(s.title || '(untitled)') + '</strong> <span class="badge b-worker">via Worker</span><span class="badge b-type">video</span><div style="color:var(--muted);font-size:0.75rem;margin-top:2px;">' + escapeHtml(s.channelTitle || '') + '</div>';
+      showPlayer('video', id);
       $('resultCard').style.display = 'block';
       return;
     }
 
-    // ✅ Success via Worker
+    // Playlist
+    const info  = await workerFetch(base, 'playlists', 'part=snippet&id=' + id);
+    const items = await workerFetch(base, 'playlistItems', 'part=snippet&maxResults=50&playlistId=' + id);
+    const reason = info.data?.error?.errors?.[0]?.reason || items.data?.error?.errors?.[0]?.reason || '';
+    const vids = Array.isArray(items.data?.items) ? items.data.items : [];
+    if (reason || vids.length === 0) {
+      fallback('playlist', id, '⚠️ Worker fetch failed (reason: ' + (reason || 'no data') + ').\n→ Falling back to the ORIGINAL YouTube IFrame so playback still works.');
+      return;
+    }
     const title = info.data.items?.[0]?.snippet?.title || '(untitled)';
     const channel = info.data.items?.[0]?.snippet?.channelTitle || '';
-    const vids = items.data.items;
-
     setStatus('✅ SUCCESS via Cloudflare Worker — key never left the server.\nFetched ' + vids.length + ' videos (first page). No googleapis call from the browser, no key= in the URL.', 'ok');
-    $('resultHead').innerHTML = '<strong>' + escapeHtml(title) + '</strong> <span class="badge b-worker">via Worker</span><div style="color:var(--muted);font-size:0.75rem;margin-top:2px;">' + escapeHtml(channel) + ' · ' + vids.length + ' videos (page 1)</div>';
-
-    showPlayer(plId);
-
-    const listHtml = vids.map((v, i) => {
+    $('resultHead').innerHTML = '<strong>' + escapeHtml(title) + '</strong> <span class="badge b-worker">via Worker</span><span class="badge b-type">playlist</span><div style="color:var(--muted);font-size:0.75rem;margin-top:2px;">' + escapeHtml(channel) + ' · ' + vids.length + ' videos (page 1)</div>';
+    showPlayer('playlist', id);
+    $('videoList').innerHTML = vids.map((v, i) => {
       const s = v.snippet || {};
       return '<li><span class="num">' + (i + 1) + '</span><span>' + escapeHtml(s.title || '') + '</span></li>';
     }).join('');
-    $('videoList').innerHTML = listHtml;
     $('resultCard').style.display = 'block';
 
   } catch (e) {
-    // Network/CORS error → also fall back to IFrame
-    setStatus('⚠️ Worker unreachable (' + e.message + ').\n→ Falling back to the ORIGINAL YouTube IFrame.', 'warn');
-    $('resultHead').innerHTML = '<strong>Playlist</strong> <span class="badge b-fallback">IFrame fallback</span>';
-    showPlayer(plId);
-    $('resultCard').style.display = 'block';
+    fallback(type, id, '⚠️ Worker unreachable (' + e.message + ').\n→ Falling back to the ORIGINAL YouTube IFrame.');
   }
 }
 
