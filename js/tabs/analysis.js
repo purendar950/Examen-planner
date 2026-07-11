@@ -345,6 +345,34 @@ function anSetGalleryView(view){
   anRenderTree();
 }
 
+/* Normalize a timestamp (number ms or ISO string) to ms. */
+function anTime(x){ return typeof x === 'number' ? x : (Date.parse(x) || 0); }
+
+/* A folder's date for sorting: its own createdAt if set, otherwise the EARLIEST
+   saved moment inside it (a good proxy for when the folder was first created —
+   works for folders that predate the createdAt field). */
+function anFolderDate(pl){
+  if (pl && pl.createdAt) return anTime(pl.createdAt);
+  var earliest = Infinity;
+  Object.values((pl && pl.videos) || {}).forEach(function(v){
+    if (v && v.createdAt) { var vt = anTime(v.createdAt); if (vt) earliest = Math.min(earliest, vt); }
+    (anGalleryItems(v) || []).forEach(function(it){
+      if (it && it.createdAt) { var t = anTime(it.createdAt); if (t) earliest = Math.min(earliest, t); }
+    });
+  });
+  return earliest === Infinity ? 0 : earliest;
+}
+
+/* Same idea for a video folder. */
+function anVideoDate(v){
+  if (v && v.createdAt) return anTime(v.createdAt);
+  var earliest = Infinity;
+  (anGalleryItems(v) || []).forEach(function(it){
+    if (it && it.createdAt) { var t = anTime(it.createdAt); if (t) earliest = Math.min(earliest, t); }
+  });
+  return earliest === Infinity ? 0 : earliest;
+}
+
 /* Render one folder entry as a tile (grid view) or a full-width row (list view).
    List rows show the FULL name (wraps, no ellipsis). */
 function anFolderEntry(onclick, variant, name, meta){
@@ -434,7 +462,8 @@ function anRenderTree(){
   if (!anNav.plId){
     /* LEVEL 0 — playlists as folders (tiles or full-name rows) */
     const plEntries = Object.entries(folders).filter(([plId, pl]) =>
-      Object.values(pl.videos||{}).some(v => anGalleryItems(v).length));
+      Object.values(pl.videos||{}).some(v => anGalleryItems(v).length))
+      .sort((a, b) => anFolderDate(b[1]) - anFolderDate(a[1])); // latest-created folder first
     if (!plEntries.length){ body.innerHTML = anGalleryEmpty(); if (bc) bc.style.display = 'none'; return; }
     const tiles = plEntries.map(([plId, pl]) => {
       const moments = Object.values(pl.videos||{}).reduce((t,v) => t + anGalleryItems(v).length, 0);
@@ -446,7 +475,8 @@ function anRenderTree(){
   } else if (!anNav.vId){
     /* LEVEL 1 — videos inside the playlist as folders (tiles or full-name rows) */
     const pl = folders[anNav.plId];
-    const entries = Object.entries(pl.videos||{}).filter(([vId, v]) => anGalleryItems(v).length);
+    const entries = Object.entries(pl.videos||{}).filter(([vId, v]) => anGalleryItems(v).length)
+      .sort((a, b) => anVideoDate(b[1]) - anVideoDate(a[1])); // latest-created video first
     body.innerHTML = entries.length ? `<div class="${wrapCls}">${entries.map(([vId, v]) => {
       const count = anGalleryItems(v).length;
       return anFolderEntry(`anOpenVideo('${anNav.plId}','${vId}')`, 'vid', v.name||'Video', `${count} moment${count===1?'':'s'}`);
