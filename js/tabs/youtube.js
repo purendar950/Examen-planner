@@ -343,19 +343,77 @@ let ytPlaylistVideos = []; // [{id, title, thumb, duration, position, publishedA
 let ytSortMode = 'oldest'; // 'playlist' | 'oldest' | 'newest' — default: oldest uploaded first
 
 /* ══════════════════════════════════════════════
-   🔑 API KEY ROTATION
-   Each Google Cloud API key gives 10,000 quota units/day. Add more keys
-   below to multiply the daily limit (3 keys = 30,000 units/day). When one
-   key hits its quota, ytApiFetchJson() automatically fails over to the next.
+   🔑 API KEYS — loaded from Firestore, NOT hardcoded
+   The YouTube Data API key is no longer stored in this file. It lives in
+   Firestore at  config/youtube  and is fetched after login (ytLoadApiKeys()).
+   This keeps the key OUT of the public git repo, serves it only to logged-in
+   users, and lets you rotate it without redeploying.
+
+   Create the doc in the Firebase Console → Firestore → collection "config",
+   document id "youtube", with EITHER a single key:
+       { "key": "AIzaSy...YOUR_KEY" }
+   OR an array (enables automatic key rotation = higher daily quota):
+       { "keys": ["AIzaSy...KEY1", "AIzaSy...KEY2", "AIzaSy...KEY3"] }
+
+   The existing firestore.rules already allow any logged-in user to read
+   config/youtube (only config/ai and config/turbo are blocked).
+
+   ⚠️ SECURITY: a key used by browser JS can never be fully hidden. The real
+   protection is to restrict the key in the Google Cloud Console:
+     • Application restriction → HTTP referrers → add your domain(s)
+     • API restriction → allow only "YouTube Data API v3"
+   Each Google Cloud key gives 10,000 quota units/day; extra keys multiply it.
 ══════════════════════════════════════════════ */
-const YT_API_KEYS = [
-  'AIzaSyDJVRXrAcvAzslMfjSAU2os4cobdzOyHmw'
-  // , 'AIzaSy...YOUR_SECOND_KEY'
-  // , 'AIzaSy...YOUR_THIRD_KEY'
-];
-// Kept for backward compatibility with any external reference.
-const YT_API_KEY = YT_API_KEYS[0];
-let _ytKeyIdx = 0;
+let YT_API_KEYS    = [];      // populated at runtime from Firestore
+let YT_API_KEY     = '';      // first key — kept for backward compatibility
+let _ytKeyIdx      = 0;
+let _ytKeysLoading = null;    // de-dupes concurrent load attempts
+
+/* Load the API key(s) from Firestore once and cache them in memory, with a
+   sessionStorage fallback that survives the index.html → app.html hop and a
+   brief Firestore outage. Safe to call repeatedly — it's a no-op once loaded. */
+async function ytLoadApiKeys() {
+  if (YT_API_KEYS.length) return YT_API_KEYS;
+  if (_ytKeysLoading) return _ytKeysLoading;
+
+  _ytKeysLoading = (async () => {
+    // 1. Primary source — Firestore config/youtube (needs a signed-in user)
+    try {
+      if (typeof db !== 'undefined' && db &&
+          typeof auth !== 'undefined' && auth && auth.currentUser) {
+        const snap = await db.collection('config').doc('youtube').get();
+        if (snap.exists) {
+          const d = snap.data() || {};
+          const keys = (Array.isArray(d.keys) ? d.keys : (d.key ? [d.key] : []))
+            .map(k => (k || '').trim()).filter(Boolean);
+          if (keys.length) {
+            YT_API_KEYS = keys;
+            YT_API_KEY  = keys[0];
+            try { sessionStorage.setItem('yt_api_keys', JSON.stringify(keys)); } catch (e) {}
+            console.log(`✅ Loaded ${keys.length} YouTube API key(s) from Firestore.`);
+            return YT_API_KEYS;
+          }
+        }
+        console.warn('⚠️ Firestore config/youtube missing or has no "key"/"keys" field.');
+      }
+    } catch (e) {
+      console.warn('YouTube key load from Firestore failed:', e.message || e);
+    }
+    // 2. Fallback — sessionStorage copy from earlier this session
+    try {
+      const cached = JSON.parse(sessionStorage.getItem('yt_api_keys') || '[]');
+      if (Array.isArray(cached) && cached.length) {
+        YT_API_KEYS = cached;
+        YT_API_KEY  = cached[0];
+        return YT_API_KEYS;
+      }
+    } catch (e) {}
+    return YT_API_KEYS;
+  })();
+
+  try { return await _ytKeysLoading; }
+  finally { _ytKeysLoading = null; }
+}
 
 /* Fetch a YouTube Data API endpoint, rotating keys and auto-failing-over to
    the next key when the current one is rate-limited / out of quota.
@@ -363,7 +421,12 @@ let _ytKeyIdx = 0;
    e.g. 'playlists?part=snippet&id=PL123'. Always returns the parsed JSON
    (which may contain an `error` object the caller can inspect). */
 async function ytApiFetchJson(pathAndQuery) {
-  const n = YT_API_KEYS.length || 1;
+  // Lazy-load the key(s) on first use in case the post-login warm-up hasn't run
+  if (!YT_API_KEYS.length) { try { await ytLoadApiKeys(); } catch (e) {} }
+  if (!YT_API_KEYS.length) {
+    return { error: { errors: [{ reason: 'noApiKey' }], message: 'YouTube API key not configured (Firestore config/youtube).' } };
+  }
+  const n = YT_API_KEYS.length;
   let last = null;
   for (let i = 0; i < n; i++) {
     const key = YT_API_KEYS[_ytKeyIdx % n];
@@ -730,8 +793,10 @@ async function ytFetchPlaylistVideos(plId) {
       // quota reasons only surface here after ytApiFetchJson exhausted every key
       if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded')
         showToast('⚠️ YouTube API quota exceed ho gaya (saare keys). Kal try karo ya nayi API key add karo.', 'error');
+      else if (reason === 'noApiKey')
+        showToast('⚠️ YouTube API key set nahi hai (Firestore config/youtube). Admin se contact karo.', 'error');
       else if (reason === 'keyInvalid')
-        showToast('⚠️ YouTube API key invalid hai. YT_API_KEYS check karo.', 'error');
+        showToast('⚠️ YouTube API key invalid hai. Firestore config/youtube check karo.', 'error');
       else console.warn('YT API error:', data.error.message, reason);
       return null;
     }

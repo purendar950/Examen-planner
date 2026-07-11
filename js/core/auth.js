@@ -183,6 +183,9 @@ function loginUser(email, name, uid, state) {
 
   initApp();
   ytoLoad(); // Restore Playlist Organiser data (cloud-synced via Firestore)
+  // Warm the YouTube Data API key(s) from Firestore (config/youtube) so the
+  // first playlist load has them ready. Safe no-op if already loaded / offline.
+  if (typeof ytLoadApiKeys === 'function') { try { ytLoadApiKeys(); } catch (e) {} }
   showToast(`Welcome back, ${name.split(' ')[0]}! 👋`, 'success');
   // Feature 3: show Study Profile modal if never set up
   setTimeout(() => { if (!appState.studyProfile?.setupDone) openStudyProfileModal(); }, 1200);
