@@ -11,7 +11,7 @@ let DUP = { mobile:{}, fp:{}, ip:{} };
 let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = false;
 /* AI Study usage limits + admin-granted unlimited users (Firestore config/aiLimits),
    read by youtube-turbo-proxy to rate-limit /api/study + /api/tutor. */
-let AI_LIMITS = { unlimited: {}, unlimitedEmails: [], studyPerHour: 15, tutorPerHour: 20, tutorPerDay: 80, loaded: false };
+let AI_LIMITS = { unlimited: {}, unlimitedEmails: [], focusUsers: {}, focusEmails: [], studyPerHour: 15, tutorPerHour: 20, tutorPerDay: 80, loaded: false };
 /* AI auto-schedule (Groq) config — stored in Firestore config/ai, read by the
    Telegram bot server to parse incoming messages into planner tasks. */
 let AI_CONFIG = { groqApiKey: '', model: 'llama-3.1-8b-instant', enabled: false, loaded: false };
