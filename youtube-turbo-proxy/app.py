@@ -923,15 +923,16 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + (
-                 "Give the KEY INSIGHTS / most important takeaways from this "
-                 "lecture as a SHORT, curated list \u2014 the crux only, NOT an "
-                 "exhaustive re-listing of every fact (that belongs in detailed "
-                 "notes). Rules:\n"
-                 "- Pick ONLY the 10\u201315 most exam-relevant points.\n"
-                 "- One concise bullet each (use '- '), bold ONLY the keyword.\n"
-                 "- No sub-lists, no long paragraphs, no repetition.\n"
-                 "- Make sure the list is COMPLETE \u2014 finish the last bullet, "
-                 "never stop mid-line.\n\n") + body}], ai, max_tokens=1800)}
+                 "List ALL the important, exam-relevant KEY INSIGHTS / takeaways "
+                 "from this lecture as bullets. Do NOT miss any important point. "
+                 "Rules:\n"
+                 "- One SHORT bullet per point (use '- '), bold ONLY the keyword "
+                 "or name. No long sentences, no sub-lists, no repetition.\n"
+                 "- Keep each bullet tight so the WHOLE list fits in one reply.\n"
+                 "- CRITICAL: the list MUST be complete \u2014 always finish the "
+                 "final bullet. Never stop in the middle of a line. If space is "
+                 "running out, shorten the bullets rather than cut the list.\n\n"
+             ) + body}], ai, max_tokens=2500)}
     if mode == "flashcards":
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
