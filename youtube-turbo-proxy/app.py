@@ -980,12 +980,12 @@ async function go(){
  var mode=document.getElementById('mode').value, out=document.getElementById('out').value.trim()||'English';
  var box=document.getElementById('out2');
  if(!v){box.innerHTML='<p class=err>Enter a URL or ID</p>';return;}
- box.innerHTML='<p class=muted>Generating with Groq… (long lectures take a bit)</p>';
+ box.innerHTML='<p class=muted>Generating… (long lectures take a bit)</p>';
  try{
   var r=await fetch('/api/study?id='+encodeURIComponent(v)+'&mode='+mode+'&out='+encodeURIComponent(out));
   var j=await r.json();
   if(j.error){box.innerHTML='<p class=err><b>'+j.error+'</b><br>'+esc(j.detail||'')+'</p>';return;}
-  var meta='<div class=meta>'+esc(j.title||'')+' — '+j.mode+' / '+j.out_lang+' · '+j.segment_count+' segments · model '+esc(j.model)+'</div>';
+  var meta='<div class=meta>'+esc(j.title||'')+' — '+j.mode+' / '+j.out_lang+' · '+j.segment_count+' segments · '+esc(j.provider||'ai')+' / '+esc(j.model)+'</div>';
   if(j.format==='markdown'){box.innerHTML=meta+'<pre>'+esc(j.content)+'</pre>';return;}
   if(j.mode==='quiz'){
    var h=meta+'<h3>Quiz</h3>';
