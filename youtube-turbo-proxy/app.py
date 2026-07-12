@@ -298,6 +298,45 @@ def _transcript_ydl_opts(client):
     return opts
 
 
+# A real browser User-Agent: YouTube's timedtext endpoint often returns an
+# EMPTY body to requests without one, which shows up as a blank transcript even
+# though metadata extraction (which yt-dlp does with its own UA) succeeded.
+_CAPTION_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/124.0.0.0 Safari/537.36"),
+    "Accept-Language": "en,hi;q=0.9,*;q=0.8",
+}
+
+
+def _force_json3(cap_url):
+    """Ensure the caption URL asks for the json3 format (yt-dlp may hand us a
+    track whose default fmt isn't json3)."""
+    if "fmt=" in cap_url:
+        return re.sub(r"fmt=[^&]*", "fmt=json3", cap_url)
+    return cap_url + ("&" if "?" in cap_url else "?") + "fmt=json3"
+
+
+def _fetch_captions(cap_url):
+    """Download + parse a caption track as json3. Returns (segments, http_status).
+    Forces json3 and sends a browser UA so YouTube doesn't return an empty body."""
+    url = _force_json3(cap_url)
+    r = requests.get(url, headers=_CAPTION_HEADERS, timeout=REQUEST_TIMEOUT)
+    status = r.status_code
+    if status == 200 and r.text.strip():
+        try:
+            return _parse_json3(r.json()), status
+        except ValueError:
+            # Not JSON despite fmt=json3 (rare) — try the original URL once.
+            r2 = requests.get(cap_url, headers=_CAPTION_HEADERS, timeout=REQUEST_TIMEOUT)
+            if r2.status_code == 200 and r2.text.strip():
+                try:
+                    return _parse_json3(r2.json()), r2.status_code
+                except ValueError:
+                    return [], r2.status_code
+    return [], status
+
+
 def _parse_json3(data):
     """YouTube json3 caption payload -> [{start, dur, text}] (blanks skipped)."""
     segments = []
@@ -405,11 +444,10 @@ def _extract_transcript(video_id, lang="auto", force=False):
 
         cap_url, chosen_lang, kind = _pick_caption_url(raw, lang)
         segments = []
+        http_status = None
         if cap_url:
             try:
-                r = requests.get(cap_url, timeout=REQUEST_TIMEOUT)
-                if r.status_code == 200 and r.text.strip():
-                    segments = _parse_json3(r.json())
+                segments, http_status = _fetch_captions(cap_url)
             except Exception as exc:          # noqa: BLE001
                 log.warning("caption download/parse failed: %s", exc)
 
@@ -429,6 +467,13 @@ def _extract_transcript(video_id, lang="auto", force=False):
             "char_count": len(text),
             "segments": segments,                       # full timestamped list
             "text": text,                               # FULL transcript text
+            # diagnostics — helps explain an empty result at a glance
+            "_debug": {
+                "had_caption_url": bool(cap_url),
+                "caption_http_status": http_status,
+                "n_manual_langs": len(raw.get("subtitles") or {}),
+                "n_auto_langs": len(raw.get("automatic_captions") or {}),
+            },
         }
         with _transcript_lock:
             _transcript_cache[ckey] = {"ts": time.time(), "data": data}
