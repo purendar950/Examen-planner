@@ -719,10 +719,16 @@ def _gen_notes(transcript, out_lang, ai, head):
     process the transcript section-by-section (so nothing gets cut by the output
     limit); non-big providers use the condensed body."""
     sysmsg = _study_sys(out_lang)
-    instr = ("Create COMPREHENSIVE study notes in Markdown. Cover EVERY topic, "
-             "point, fact, figure, date, name, place, definition, formula and "
-             "example mentioned \u2014 do NOT omit or over-summarize any information. "
-             "Keep the lecture's order; use clear headings and sub-bullets.")
+    instr = ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
+             "topic, point, fact, figure, date, name, place, definition, formula "
+             "and example mentioned \u2014 do NOT omit or over-summarize any "
+             "information. Keep the lecture's order.\n"
+             "Formatting rules for a clean, readable result:\n"
+             "- Use ## for main sections and ### for sub-sections.\n"
+             "- Use '- ' bullet points for details; nest with indentation.\n"
+             "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
+             "- Use a Markdown table when comparing items or listing facts/dates.\n"
+             "- Do not wrap the whole answer in code fences.")
     secs = _chunk_words(transcript, 16000) if ai.get("big_context") \
         else [_condense(transcript, out_lang, ai)]
     if len(secs) == 1:
@@ -1022,7 +1028,8 @@ def api_study():
 
 _STUDY_DEMO_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Study Demo</title><style>
+<title>Study Demo</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script><style>
  body{font-family:system-ui,Arial,sans-serif;max-width:820px;margin:20px auto;padding:0 16px;color:#1a1a1a}
  h1{font-size:20px} label{font-size:13px;color:#555;display:block;margin:8px 0 3px}
  input,select,button{font-size:15px;padding:9px;border-radius:8px;border:1px solid #ccc;box-sizing:border-box}
@@ -1030,9 +1037,19 @@ _STUDY_DEMO_HTML = """<!doctype html>
  button{background:#111;color:#fff;border:none;cursor:pointer;margin-top:12px;width:100%}
  pre{white-space:pre-wrap;background:#0d1117;color:#c9d1d9;padding:14px;border-radius:10px;overflow:auto;font-size:13px}
  .q{border:1px solid #e3e3e3;border-radius:10px;padding:10px 12px;margin:8px 0}.opt{padding:2px 0}.ok{color:#0a7d33;font-weight:600}
- .muted{color:#666}.err{background:#ffebe9;color:#82071e;padding:12px;border-radius:8px}.meta{background:#eef4ff;padding:8px 12px;border-radius:8px;font-size:13px}
+ .muted{color:#666}.err{background:#ffebe9;color:#82071e;padding:12px;border-radius:8px}.meta{background:#eef4ff;padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:12px}
+ .md{background:#fff;border:1px solid #e6e6e6;border-radius:12px;padding:14px 20px;line-height:1.65}
+ .md h1{font-size:1.3rem;margin:.6em 0 .3em;border-bottom:2px solid #eee;padding-bottom:.2em}
+ .md h2{font-size:1.13rem;margin:.9em 0 .3em;color:#1a3e72}
+ .md h3{font-size:1.02rem;margin:.7em 0 .25em;color:#333}
+ .md ul,.md ol{margin:.3em 0 .5em 1.25em;padding:0}.md li{margin:.2em 0}
+ .md hr{border:none;border-top:1px solid #ececec;margin:1em 0}
+ .md code{background:#f2f4f7;padding:1px 5px;border-radius:5px;font-size:.9em}
+ .md strong{color:#111}.md p{margin:.4em 0}
+ .md table{border-collapse:collapse;margin:.6em 0;width:100%}
+ .md th,.md td{border:1px solid #ddd;padding:6px 9px;font-size:.9em;text-align:left}.md th{background:#f6f8fa}
 </style></head><body>
-<h1>Study Demo <span class="muted">(/api/study — Groq via config/ai)</span></h1>
+<h1>Study Demo <span class="muted">(/api/study — AI via config/ai)</span></h1>
 <label>YouTube URL or 11-char ID</label>
 <input id="v" placeholder="https://www.youtube.com/watch?v=...">
 <div class="row">
@@ -1060,7 +1077,9 @@ async function go(){
   var j=await r.json();
   if(j.error){box.innerHTML='<p class=err><b>'+j.error+'</b><br>'+esc(j.detail||'')+'</p>';return;}
   var meta='<div class=meta>'+esc(j.title||'')+' — '+j.mode+' / '+j.out_lang+' · '+j.segment_count+' segments · '+esc(j.provider||'ai')+' / '+esc(j.model)+'</div>';
-  if(j.format==='markdown'){box.innerHTML=meta+'<pre>'+esc(j.content)+'</pre>';return;}
+  if(j.format==='markdown'){
+   var rendered=(window.marked?marked.parse(j.content||''):'<pre>'+esc(j.content)+'</pre>');
+   box.innerHTML=meta+'<div class="md">'+rendered+'</div>';return;}
   if(j.mode==='quiz'){
    var h=meta+'<h3>Quiz</h3>';
    (j.questions||[]).forEach(function(q,i){
