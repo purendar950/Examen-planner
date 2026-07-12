@@ -167,11 +167,12 @@
   var state = { tab: 'notes' };
 
   /* ── Notes / Summary / Insights / Flashcards (from /api/study) ── */
-  function showStudy(mode, n, force, focus) {
+  function showStudy(mode, n, force, focus, langOverride) {
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
-    el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + mode + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
-    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid());
+    var lang = langOverride || outLang();
+    el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
+    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid());
     if (mode === 'quiz') url += '&n=' + (n || 25);
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
@@ -220,16 +221,48 @@
     });
   }
 
+  /* ── "already generated in language X" bar ── */
+  // Loads a specific cached language for the current tab (instant, no quota).
+  function loadLang(mode, n, lang) {
+    if (mode === 'quiz') startQuiz(false, lang);
+    else showStudy(mode, n, false, '', lang);
+  }
+  // Asks the backend which of Hinglish/English/Hindi are already cached for this
+  // video+mode, then renders chips into #ai-langbar. If the user's chosen language
+  // is already there and autoShow is on (notes/cards), it opens it directly.
+  function checkLangs(mode, n, autoShow) {
+    var vid = curVid(), bar = document.getElementById('ai-langbar');
+    if (!vid || !bar) return;
+    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25)).then(function (j) {
+      var bar2 = document.getElementById('ai-langbar'); if (!bar2) return;
+      var avail = (j && j.available) || [];
+      if (!avail.length) { bar2.innerHTML = ''; return; }
+      var chosen = outLang();
+      var chips = avail.map(function (l) {
+        return '<span class="ai-chip ai-lang-chip' + (l === chosen ? ' on' : '') + '" data-l="' + esc(l) + '">' +
+          (l === chosen ? '✓ ' : '📁 ') + esc(l) + '</span>';
+      }).join('');
+      bar2.innerHTML = '<div class="ai-muted" style="font-size:.72rem;margin:2px 0 4px">Already generated — tap to view instantly:</div>' +
+        '<div class="ai-chips" style="margin-bottom:8px">' + chips + '</div>';
+      Array.prototype.forEach.call(bar2.querySelectorAll('.ai-lang-chip'), function (c) {
+        c.onclick = function () { loadLang(mode, n, c.dataset.l); };
+      });
+      // chosen language already available → show it directly (notes/cards only)
+      if (autoShow && avail.indexOf(chosen) !== -1) loadLang(mode, n, chosen);
+    }).catch(function () {});
+  }
+
   /* ── Quiz engine ── */
   var quiz = { qs: [], idx: 0, correct: 0, wrong: [] };
-  function startQuiz(force) {
+  function startQuiz(force, langOverride) {
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var sel = document.getElementById('ai-qn');
     var n = parseInt(sel ? sel.value : 25, 10) || 25;
     var focus = quizFocus();
-    el.innerHTML = loading((force ? 'Building a fresh ' : 'Building a ') + n + '-question quiz' + (focus ? ' on “' + focus + '”' : '') + '…');
-    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid());
+    var lang = langOverride || outLang();
+    el.innerHTML = loading((force ? 'Building a fresh ' : 'Building a ') + n + '-question quiz (' + lang + ')' + (focus ? ' on “' + focus + '”' : '') + '…');
+    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid());
     if (focus) qurl += '&focus=' + encodeURIComponent(focus);
     if (force) qurl += '&refresh=1';
     apiGet(qurl).then(function (j) {
@@ -377,25 +410,33 @@
     if (state.tab === 'notes') {
       b.innerHTML = '<div style="margin-bottom:8px">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select> ' +
-        '<button class="ai-btn" id="ai-notes-go">Generate</button></div><div id="ai-sub"></div>';
-      // switching the dropdown auto-loads that mode (cached ones are instant) so
-      // you never see a previous mode's stale output mixed in.
-      document.getElementById('ai-notes-mode').onchange = function () { showStudy(this.value); };
+        '<button class="ai-btn" id="ai-notes-go">Generate</button></div><div id="ai-langbar"></div><div id="ai-sub"></div>';
+      // switching the dropdown: clear stale output + show which languages are
+      // already available (and auto-open the chosen language if it's cached).
+      document.getElementById('ai-notes-mode').onchange = function () {
+        var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
+        checkLangs(this.value, 25, true);
+      };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(document.getElementById('ai-notes-mode').value); };
+      checkLangs(document.getElementById('ai-notes-mode').value, 25, true);
     } else if (state.tab === 'cards') {
       b.innerHTML = '<div id="ai-cards-focus-wrap" style="margin-bottom:8px;display:none">' +
         '<input id="ai-cards-focus" placeholder="Optional: kis topic ke cards? (blank = important)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
-        '<button class="ai-btn" id="ai-cards-go">Generate flashcards</button><div id="ai-sub" style="margin-top:10px"></div>';
+        '<button class="ai-btn" id="ai-cards-go">Generate flashcards</button><div id="ai-langbar" style="margin-top:8px"></div><div id="ai-sub" style="margin-top:10px"></div>';
       document.getElementById('ai-cards-go').onclick = function () { showStudy('flashcards', null, false, cardsFocus()); };
       applyFocusVisibility();
+      checkLangs('flashcards', 25, true);
     } else if (state.tab === 'quiz') {
       b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">Questions: ' +
         '<select id="ai-qn" class="ai-btn sec" style="padding:6px 8px"><option>15</option><option selected>25</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option>90</option><option>100</option></select> ' +
         '<button class="ai-btn" id="ai-quiz-go">Start quiz</button></div>' +
         '<div id="ai-quiz-focus-wrap" style="margin-bottom:8px;display:none"><input id="ai-quiz-focus" placeholder="Optional: kis type/topic ke questions? (blank = important points)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
-        '<div id="ai-sub"></div>';
+        '<div id="ai-langbar"></div><div id="ai-sub"></div>';
       document.getElementById('ai-quiz-go').onclick = function () { startQuiz(); };
+      // quiz isn't auto-started; just surface which languages/counts are ready.
+      document.getElementById('ai-qn').onchange = function () { checkLangs('quiz', parseInt(this.value, 10) || 25, false); };
       applyFocusVisibility();
+      checkLangs('quiz', parseInt((document.getElementById('ai-qn') || {}).value, 10) || 25, false);
     } else if (state.tab === 'tutor') {
       renderTutor();
     }

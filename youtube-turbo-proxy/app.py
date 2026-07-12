@@ -1202,6 +1202,41 @@ def api_study():
     return jsonify(data)
 
 
+# Which languages a video's study material (for a given mode) is ALREADY cached
+# in. Lets the UI show "already available in Hindi/English" and load it instantly
+# instead of regenerating. Cheap: just checks the 3 known languages' doc IDs
+# exist (no Firestore query / index needed). Only the default (no-focus) copies.
+_STUDY_LANGS = ("Hinglish", "English", "Hindi")
+
+
+@app.get("/api/study/langs")
+def api_study_langs():
+    raw_arg = (request.args.get("id") or request.args.get("url")
+               or request.args.get("v") or "").strip()
+    mode = (request.args.get("mode") or "notes").strip().lower()
+    video_id = _parse_video_id(raw_arg)
+    if not video_id or mode not in STUDY_MODES:
+        return jsonify({"available": []})
+    try:
+        num_q = int(request.args.get("n") or request.args.get("count") or 25)
+    except (TypeError, ValueError):
+        num_q = 25
+    num_q = max(1, min(100, num_q))
+    ai = _load_ai_config()
+    model = ai.get("model") or ""
+    if not model:
+        return jsonify({"available": []})
+    available = []
+    for lang in _STUDY_LANGS:
+        fs_id = _fs_doc_id(video_id, mode, lang, model, num_q)
+        try:
+            if _fs_get("study", fs_id):
+                available.append(lang)
+        except Exception:  # noqa: BLE001
+            pass
+    return jsonify({"available": available, "model": model})
+
+
 _STUDY_DEMO_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Study Demo</title>
