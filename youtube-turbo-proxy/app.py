@@ -512,6 +512,144 @@ def _extract_transcript(video_id, lang="auto", force=False):
     return data
 
 
+# ------------------------------------------------------------------ study (Groq)
+# Turns a transcript into study material. Groq key + model come from Firestore
+# config/ai (the SAME doc the Telegram bot uses via parseWithGroq) — never from
+# the browser. Falls back to GROQ_API_KEY / GROQ_MODEL env vars.
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
+STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
+_study_cache = {}
+_study_lock = threading.Lock()
+
+
+def _load_ai_config():
+    """(groq_api_key, model) from Firestore config/ai, env as fallback."""
+    cfg = {}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                cfg = doc.to_dict() or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/ai read failed: %s", exc)
+    key = (cfg.get("groqApiKey") or os.environ.get("GROQ_API_KEY") or "").strip()
+    model = (cfg.get("model") or os.environ.get("GROQ_MODEL")
+             or "llama-3.3-70b-versatile").strip()
+    return key, model
+
+
+def _groq_chat(messages, key, model, temperature=0.3, max_tokens=2048, json_mode=False):
+    body = {"model": model, "messages": messages,
+            "temperature": temperature, "max_tokens": max_tokens}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
+    r = requests.post(GROQ_URL,
+                      headers={"Authorization": "Bearer " + key,
+                               "Content-Type": "application/json"},
+                      json=body, timeout=90)
+    if r.status_code != 200:
+        raise RuntimeError("Groq %s: %s" % (r.status_code, r.text[:200]))
+    return r.json()["choices"][0]["message"]["content"]
+
+
+def _chunk_words(text, size_chars=9000):
+    words = (text or "").split()
+    chunks, cur, n = [], [], 0
+    for w in words:
+        cur.append(w)
+        n += len(w) + 1
+        if n >= size_chars:
+            chunks.append(" ".join(cur))
+            cur, n = [], 0
+    if cur:
+        chunks.append(" ".join(cur))
+    return chunks or [""]
+
+
+def _condense(text, out_lang, key, model):
+    """Map long transcripts to key-point bullets first, so we stay under Groq
+    free-tier tokens-per-minute limits. Short transcripts pass through."""
+    chunks = _chunk_words(text, 9000)
+    if len(chunks) <= 1:
+        return text.strip()
+    sysmsg = ("You extract faithful key points from a chunk of an auto-generated "
+              "lecture transcript (may be Hindi/Hinglish, no punctuation, ASR "
+              "errors). Do not invent facts. Write points in " + out_lang + ".")
+    parts = []
+    for i, ch in enumerate(chunks):
+        parts.append(_groq_chat(
+            [{"role": "system", "content": sysmsg},
+             {"role": "user", "content": "Part %d of %d:\n\n%s\n\nList key points "
+              "as concise bullets." % (i + 1, len(chunks), ch)}],
+            key, model, max_tokens=900))
+    return "\n".join(parts)
+
+
+def _safe_json(raw):
+    try:
+        return json.loads(raw)
+    except Exception:  # noqa: BLE001
+        a, b = raw.find("{"), raw.rfind("}")
+        if a != -1 and b > a:
+            try:
+                return json.loads(raw[a:b + 1])
+            except Exception:  # noqa: BLE001
+                pass
+    return {}
+
+
+def _study_sys(out_lang):
+    return ("The source is an auto-generated lecture transcript that may be in "
+            "Hindi/Hinglish with no punctuation and ASR errors. First mentally "
+            "clean and punctuate it, then respond. Respond ONLY in " + out_lang +
+            ". Stay strictly faithful to the transcript — never invent facts.")
+
+
+def _generate_study(mode, transcript, out_lang, key, model, title=None, num_questions=8):
+    body = _condense(transcript, out_lang, key, model)
+    head = ("Video title: %s\n\n" % title) if title else ""
+    sysmsg = _study_sys(out_lang)
+    if mode == "summary":
+        return {"format": "markdown", "content": _groq_chat(
+            [{"role": "system", "content": sysmsg},
+             {"role": "user", "content": head + "Write a concise summary as 4-7 "
+              "bullet points:\n\n" + body}], key, model, max_tokens=700)}
+    if mode == "insights":
+        return {"format": "markdown", "content": _groq_chat(
+            [{"role": "system", "content": sysmsg},
+             {"role": "user", "content": head + "List the most important exam-"
+              "relevant insights as bullets:\n\n" + body}], key, model, max_tokens=900)}
+    if mode == "notes":
+        return {"format": "markdown", "content": _groq_chat(
+            [{"role": "system", "content": sysmsg},
+             {"role": "user", "content": head + "Create comprehensive, well-"
+              "structured study notes in Markdown with headings, sub-points, and "
+              "clearly marked facts, dates, definitions, and formulas:\n\n" + body}],
+            key, model, max_tokens=2400)}
+    if mode == "quiz":
+        raw = _groq_chat(
+            [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
+             {"role": "user", "content": head + ('Generate %d multiple-choice '
+              'questions. Return JSON: {"questions":[{"question":"...","options":'
+              '["a","b","c","d"],"answer_index":0,"explanation":"..."}]}. Exactly 4 '
+              "options each, answer_index 0-3.\n\n" % num_questions) + body}],
+            key, model, max_tokens=3000, json_mode=True)
+        data = _safe_json(raw)
+        qs = data.get("questions") if isinstance(data, dict) else data
+        return {"format": "json", "questions": qs or []}
+    if mode == "flashcards":
+        raw = _groq_chat(
+            [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
+             {"role": "user", "content": head + 'Create 8-12 flashcards. Return '
+              'JSON: {"cards":[{"front":"...","back":"..."}]}.\n\n' + body}],
+            key, model, max_tokens=2000, json_mode=True)
+        data = _safe_json(raw)
+        cards = data.get("cards") if isinstance(data, dict) else data
+        return {"format": "json", "cards": cards or []}
+    raise ValueError("bad mode")
+
+
 # ------------------------------------------------------------------ routes
 @app.get("/health")
 def health():
@@ -640,6 +778,131 @@ async function go(){
 @app.get("/transcript-demo")
 def transcript_demo():
     return Response(_TRANSCRIPT_DEMO_HTML, mimetype="text/html")
+
+
+@app.get("/api/study")
+def api_study():
+    """Transcript -> study material via Groq (key from config/ai).
+    ?id=VIDEOID (or url/v) &mode=summary|insights|notes|quiz|flashcards &out=English"""
+    raw_arg = (request.args.get("id") or request.args.get("url")
+               or request.args.get("v") or "").strip()
+    mode = (request.args.get("mode") or "notes").strip().lower()
+    out_lang = (request.args.get("out") or request.args.get("lang")
+                or "English").strip() or "English"
+    if mode not in STUDY_MODES:
+        return jsonify({"error": "bad_mode", "detail": "mode must be one of %s" % STUDY_MODES}), 400
+    video_id = _parse_video_id(raw_arg)
+    if not video_id:
+        return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
+
+    key, model = _load_ai_config()
+    if not key:
+        return jsonify({"error": "ai_not_configured",
+                        "detail": "Set the Groq API key in the admin panel (config/ai)."}), 503
+
+    ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, model)
+    now = time.time()
+    with _study_lock:
+        hit = _study_cache.get(ckey)
+        if hit and (now - hit["ts"] < STUDY_TTL):
+            return jsonify(hit["data"])
+
+    # transcript (reuses transcript cache + bot-check self-heal)
+    try:
+        t = _extract_transcript(video_id, "auto")
+    except yt_dlp.utils.DownloadError as exc:
+        msg = str(exc)
+        if "confirm you" in msg or "bot" in msg or "Sign in" in msg:
+            if refresh_cookies() and _cookie_source == "firestore":
+                try:
+                    t = _extract_transcript(video_id, "auto", force=True)
+                except Exception:  # noqa: BLE001
+                    return jsonify({"error": "youtube_bot_check",
+                                    "detail": "Bot-gated. Update cookies in the admin panel."}), 403
+            else:
+                return jsonify({"error": "youtube_bot_check",
+                                "detail": "Bot-gated. Update cookies in the admin panel."}), 403
+        else:
+            return jsonify({"error": "extract_failed", "detail": msg[:200]}), 502
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "server_error", "detail": str(exc)[:200]}), 500
+
+    if not t.get("segments"):
+        return jsonify({"error": "no_captions",
+                        "detail": "No captions found for this video.",
+                        "transcript_lang": t.get("chosen_lang")}), 200
+    try:
+        result = _generate_study(mode, t["text"], out_lang, key, model, title=t.get("title"))
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
+
+    data = {"id": video_id, "title": t.get("title"), "mode": mode,
+            "out_lang": out_lang, "model": model,
+            "transcript_lang": t.get("chosen_lang"),
+            "segment_count": t.get("segment_count")}
+    data.update(result)
+    with _study_lock:
+        _study_cache[ckey] = {"ts": time.time(), "data": data}
+    return jsonify(data)
+
+
+_STUDY_DEMO_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Study Demo</title><style>
+ body{font-family:system-ui,Arial,sans-serif;max-width:820px;margin:20px auto;padding:0 16px;color:#1a1a1a}
+ h1{font-size:20px} label{font-size:13px;color:#555;display:block;margin:8px 0 3px}
+ input,select,button{font-size:15px;padding:9px;border-radius:8px;border:1px solid #ccc;box-sizing:border-box}
+ input{width:100%} .row{display:flex;gap:10px;flex-wrap:wrap}.row>div{flex:1;min-width:120px}
+ button{background:#111;color:#fff;border:none;cursor:pointer;margin-top:12px;width:100%}
+ pre{white-space:pre-wrap;background:#0d1117;color:#c9d1d9;padding:14px;border-radius:10px;overflow:auto;font-size:13px}
+ .q{border:1px solid #e3e3e3;border-radius:10px;padding:10px 12px;margin:8px 0}.opt{padding:2px 0}.ok{color:#0a7d33;font-weight:600}
+ .muted{color:#666}.err{background:#ffebe9;color:#82071e;padding:12px;border-radius:8px}.meta{background:#eef4ff;padding:8px 12px;border-radius:8px;font-size:13px}
+</style></head><body>
+<h1>Study Demo <span class="muted">(/api/study — Groq via config/ai)</span></h1>
+<label>YouTube URL or 11-char ID</label>
+<input id="v" placeholder="https://www.youtube.com/watch?v=...">
+<div class="row">
+ <div><label>Mode</label><select id="mode">
+  <option>summary</option><option>insights</option><option selected>notes</option><option>quiz</option><option>flashcards</option>
+ </select></div>
+ <div><label>Output language</label><input id="out" value="English" placeholder="English / Hindi / Hinglish"></div>
+</div>
+<button onclick="go()">Generate</button>
+<div id="out2"></div>
+<script>
+function esc(t){return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+async function go(){
+ var v=document.getElementById('v').value.trim();
+ var mode=document.getElementById('mode').value, out=document.getElementById('out').value.trim()||'English';
+ var box=document.getElementById('out2');
+ if(!v){box.innerHTML='<p class=err>Enter a URL or ID</p>';return;}
+ box.innerHTML='<p class=muted>Generating with Groq… (long lectures take a bit)</p>';
+ try{
+  var r=await fetch('/api/study?id='+encodeURIComponent(v)+'&mode='+mode+'&out='+encodeURIComponent(out));
+  var j=await r.json();
+  if(j.error){box.innerHTML='<p class=err><b>'+j.error+'</b><br>'+esc(j.detail||'')+'</p>';return;}
+  var meta='<div class=meta>'+esc(j.title||'')+' — '+j.mode+' / '+j.out_lang+' · '+j.segment_count+' segments · model '+esc(j.model)+'</div>';
+  if(j.format==='markdown'){box.innerHTML=meta+'<pre>'+esc(j.content)+'</pre>';return;}
+  if(j.mode==='quiz'){
+   var h=meta+'<h3>Quiz</h3>';
+   (j.questions||[]).forEach(function(q,i){
+    h+='<div class=q><b>Q'+(i+1)+'.</b> '+esc(q.question);
+    (q.options||[]).forEach(function(o,k){h+='<div class="opt'+(k===q.answer_index?' ok':'')+'">'+String.fromCharCode(65+k)+'. '+esc(o)+'</div>';});
+    if(q.explanation)h+='<div class=muted>'+esc(q.explanation)+'</div>'; h+='</div>';});
+   box.innerHTML=h;return;}
+  if(j.mode==='flashcards'){
+   var h2=meta+'<h3>Flashcards</h3>';
+   (j.cards||[]).forEach(function(c){h2+='<div class=q><b>'+esc(c.front)+'</b><br>'+esc(c.back)+'</div>';});
+   box.innerHTML=h2;return;}
+  box.innerHTML=meta+'<pre>'+esc(JSON.stringify(j,null,2))+'</pre>';
+ }catch(e){box.innerHTML='<p class=err>'+e+'</p>';}
+}
+</script></body></html>"""
+
+
+@app.get("/study-demo")
+def study_demo():
+    return Response(_STUDY_DEMO_HTML, mimetype="text/html")
 
 
 @app.get("/api/stream")
@@ -852,6 +1115,7 @@ def index():
         "service": "youtube-turbo-proxy",
         "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG",
                       "/api/transcript?id=VIDEOID&lang=en", "/transcript-demo",
+                      "/api/study?id=VIDEOID&mode=notes&out=English", "/study-demo",
                       "/send-photo", "/tg-photo?file_id=..."],
     })
 
