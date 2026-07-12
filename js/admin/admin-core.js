@@ -206,6 +206,7 @@ function setTab(t) {
   TAB = t;
   document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.t === t));
   if (t === 'telegram' && !TG_CONFIG.loaded) loadTelegramData();
+  if (t === 'aistudy' && !AI_CONFIG.loaded) loadAiStudyData();
   render();
 }
 function render() {
@@ -237,5 +238,6 @@ function render() {
   else if (TAB === 'coupons') c.innerHTML = renderCoupons();
   else if (TAB === 'requests') c.innerHTML = renderRequests();
   else if (TAB === 'telegram') c.innerHTML = renderTelegram();
+  else if (TAB === 'aistudy') c.innerHTML = renderAiStudy();
   else if (TAB === 'settings') c.innerHTML = renderSettings();
 }
