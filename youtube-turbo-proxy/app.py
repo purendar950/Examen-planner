@@ -539,18 +539,72 @@ def _load_ai_config():
     return key, model
 
 
+# Free-tier tokens-per-minute budget. gpt-oss-120b = 8000 TPM; keep a margin.
+# Raise via env GROQ_TPM if config/ai uses a higher-limit model.
+_GROQ_TPM = int(os.environ.get("GROQ_TPM", "7000"))
+_groq_calls = []                 # (ts, est_tokens) within the last 60s
+_groq_pace_lock = threading.Lock()
+
+
+def _est_tokens(messages, max_tokens):
+    chars = sum(len(m.get("content", "")) for m in messages)
+    return int(chars / 4) + int(max_tokens)
+
+
+def _groq_pace(est):
+    """Block until sending `est` tokens keeps us under GROQ_TPM for the minute."""
+    with _groq_pace_lock:
+        now = time.time()
+        while _groq_calls and now - _groq_calls[0][0] > 60:
+            _groq_calls.pop(0)
+        used = sum(t for _, t in _groq_calls)
+        if _groq_calls and used + est > _GROQ_TPM:
+            wait = 60 - (now - _groq_calls[0][0]) + 0.5
+            if wait > 0:
+                time.sleep(min(wait, 60))
+            now = time.time()
+            while _groq_calls and now - _groq_calls[0][0] > 60:
+                _groq_calls.pop(0)
+        _groq_calls.append((time.time(), est))
+
+
+def _retry_after_secs(resp):
+    ra = resp.headers.get("retry-after")
+    if ra:
+        try:
+            return min(float(ra) + 0.5, 30)
+        except ValueError:
+            pass
+    m = re.search(r"try again in ([\d.]+)s", resp.text or "")
+    if m:
+        try:
+            return min(float(m.group(1)) + 0.5, 30)
+        except ValueError:
+            pass
+    return 10.0
+
+
 def _groq_chat(messages, key, model, temperature=0.3, max_tokens=2048, json_mode=False):
     body = {"model": model, "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
-    r = requests.post(GROQ_URL,
-                      headers={"Authorization": "Bearer " + key,
-                               "Content-Type": "application/json"},
-                      json=body, timeout=90)
-    if r.status_code != 200:
+    est = _est_tokens(messages, max_tokens)
+    last = ""
+    for _ in range(4):
+        _groq_pace(est)                       # throttle to stay under TPM
+        r = requests.post(GROQ_URL,
+                          headers={"Authorization": "Bearer " + key,
+                                   "Content-Type": "application/json"},
+                          json=body, timeout=120)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"]
+        if r.status_code == 429:              # rate limited — wait and retry
+            last = r.text[:200]
+            time.sleep(_retry_after_secs(r))
+            continue
         raise RuntimeError("Groq %s: %s" % (r.status_code, r.text[:200]))
-    return r.json()["choices"][0]["message"]["content"]
+    raise RuntimeError("Groq rate limit (429) after retries: " + last)
 
 
 def _chunk_words(text, size_chars=9000):
@@ -567,12 +621,15 @@ def _chunk_words(text, size_chars=9000):
     return chunks or [""]
 
 
-def _condense(text, out_lang, key, model):
-    """Map long transcripts to key-point bullets first, so we stay under Groq
-    free-tier tokens-per-minute limits. Short transcripts pass through."""
-    chunks = _chunk_words(text, 9000)
-    if len(chunks) <= 1:
-        return text.strip()
+def _condense(text, out_lang, key, model, target_chars=14000, depth=0):
+    """Recursively map a long transcript down to key-point bullets until it fits
+    a single downstream call under the TPM budget. Each chunk is small enough
+    that input+output stays well under the per-minute token limit; the pacer +
+    429-retry in _groq_chat handle the rate. Short transcripts pass through."""
+    text = (text or "").strip()
+    if len(text) <= target_chars or depth >= 3:
+        return text
+    chunks = _chunk_words(text, 6000)     # ~1.5k input tokens/chunk
     sysmsg = ("You extract faithful key points from a chunk of an auto-generated "
               "lecture transcript (may be Hindi/Hinglish, no punctuation, ASR "
               "errors). Do not invent facts. Write points in " + out_lang + ".")
@@ -580,10 +637,10 @@ def _condense(text, out_lang, key, model):
     for i, ch in enumerate(chunks):
         parts.append(_groq_chat(
             [{"role": "system", "content": sysmsg},
-             {"role": "user", "content": "Part %d of %d:\n\n%s\n\nList key points "
-              "as concise bullets." % (i + 1, len(chunks), ch)}],
-            key, model, max_tokens=900))
-    return "\n".join(parts)
+             {"role": "user", "content": "Part %d of %d:\n\n%s\n\nList the key "
+              "points as concise bullets." % (i + 1, len(chunks), ch)}],
+            key, model, max_tokens=600))
+    return _condense("\n".join(parts), out_lang, key, model, target_chars, depth + 1)
 
 
 def _safe_json(raw):
