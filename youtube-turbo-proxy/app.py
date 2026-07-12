@@ -524,7 +524,13 @@ _study_lock = threading.Lock()
 
 
 def _load_ai_config():
-    """(groq_api_key, model) from Firestore config/ai, env as fallback."""
+    """Study AI provider from Firestore config/ai. Returns a dict:
+        {base_url, key, model, big_context, tpm}
+
+    Prefers a generic OpenAI-compatible provider (e.g. Bynara — ~1M context, so
+    full lectures need no chunking) when studyBaseUrl + studyApiKey are set;
+    otherwise falls back to Groq (groqApiKey/model). The key never reaches the
+    browser."""
     cfg = {}
     if _fb_db:
         try:
@@ -533,24 +539,97 @@ def _load_ai_config():
                 cfg = doc.to_dict() or {}
         except Exception as exc:  # noqa: BLE001
             log.warning("config/ai read failed: %s", exc)
+
+    url = (cfg.get("studyBaseUrl") or os.environ.get("AI_BASE_URL") or "").strip()
+    skey = (cfg.get("studyApiKey") or os.environ.get("AI_API_KEY") or "").strip()
+    if url and skey:                               # generic provider (Bynara, etc.)
+        return {
+            "base_url": url,
+            "key": skey,
+            "model": (cfg.get("studyModel") or "mistral-large").strip(),
+            # big_context providers (1M ctx) skip chunking; default True for these
+            "big_context": bool(cfg.get("studyBigContext", True)),
+            "tpm": int(cfg.get("studyTpm") or 0),  # 0 = no client-side pacing
+        }
     key = (cfg.get("groqApiKey") or os.environ.get("GROQ_API_KEY") or "").strip()
-    model = (cfg.get("model") or os.environ.get("GROQ_MODEL")
-             or "llama-3.3-70b-versatile").strip()
-    return key, model
+    return {
+        "base_url": GROQ_URL,
+        "key": key,
+        "model": (cfg.get("model") or os.environ.get("GROQ_MODEL")
+                  or "llama-3.3-70b-versatile").strip(),
+        "big_context": False,
+        "tpm": int(os.environ.get("GROQ_TPM", "7000")),
+    }
 
 
-def _groq_chat(messages, key, model, temperature=0.3, max_tokens=2048, json_mode=False):
-    body = {"model": model, "messages": messages,
+_ai_calls = []                   # (ts, est_tokens) within the last 60s
+_ai_pace_lock = threading.Lock()
+
+
+def _est_tokens(messages, max_tokens):
+    chars = sum(len(m.get("content", "")) for m in messages)
+    return int(chars / 4) + int(max_tokens)
+
+
+def _ai_pace(est, tpm):
+    """Throttle to stay under `tpm` tokens/minute. tpm<=0 disables pacing
+    (used for big-context providers like Bynara with their own limits)."""
+    if not tpm or tpm <= 0:
+        return
+    with _ai_pace_lock:
+        now = time.time()
+        while _ai_calls and now - _ai_calls[0][0] > 60:
+            _ai_calls.pop(0)
+        used = sum(t for _, t in _ai_calls)
+        if _ai_calls and used + est > tpm:
+            wait = 60 - (now - _ai_calls[0][0]) + 0.5
+            if wait > 0:
+                time.sleep(min(wait, 60))
+            now = time.time()
+            while _ai_calls and now - _ai_calls[0][0] > 60:
+                _ai_calls.pop(0)
+        _ai_calls.append((time.time(), est))
+
+
+def _retry_after_secs(resp):
+    ra = resp.headers.get("retry-after")
+    if ra:
+        try:
+            return min(float(ra) + 0.5, 30)
+        except ValueError:
+            pass
+    m = re.search(r"try again in ([\d.]+)s", resp.text or "")
+    if m:
+        try:
+            return min(float(m.group(1)) + 0.5, 30)
+        except ValueError:
+            pass
+    return 10.0
+
+
+def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
+    """OpenAI-compatible chat call for whichever provider config/ai selects
+    (Groq or a generic endpoint like Bynara). Paces to TPM when set, retries 429."""
+    body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
-    r = requests.post(GROQ_URL,
-                      headers={"Authorization": "Bearer " + key,
-                               "Content-Type": "application/json"},
-                      json=body, timeout=90)
-    if r.status_code != 200:
-        raise RuntimeError("Groq %s: %s" % (r.status_code, r.text[:200]))
-    return r.json()["choices"][0]["message"]["content"]
+    est = _est_tokens(messages, max_tokens)
+    last = ""
+    for _ in range(4):
+        _ai_pace(est, ai.get("tpm", 0))
+        r = requests.post(ai["base_url"],
+                          headers={"Authorization": "Bearer " + ai["key"],
+                                   "Content-Type": "application/json"},
+                          json=body, timeout=120)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"]
+        if r.status_code == 429:              # rate limited — wait and retry
+            last = r.text[:200]
+            time.sleep(_retry_after_secs(r))
+            continue
+        raise RuntimeError("AI %s: %s" % (r.status_code, r.text[:200]))
+    raise RuntimeError("AI rate limit (429) after retries: " + last)
 
 
 def _chunk_words(text, size_chars=9000):
@@ -567,23 +646,25 @@ def _chunk_words(text, size_chars=9000):
     return chunks or [""]
 
 
-def _condense(text, out_lang, key, model):
-    """Map long transcripts to key-point bullets first, so we stay under Groq
-    free-tier tokens-per-minute limits. Short transcripts pass through."""
-    chunks = _chunk_words(text, 9000)
-    if len(chunks) <= 1:
-        return text.strip()
+def _condense(text, out_lang, ai, target_chars=14000, depth=0):
+    """Recursively map a long transcript to key-point bullets until it fits a
+    single downstream call under the TPM budget. Skipped entirely for
+    big-context providers (e.g. Bynara ~1M ctx) — the full transcript is sent."""
+    text = (text or "").strip()
+    if ai.get("big_context") or len(text) <= target_chars or depth >= 3:
+        return text
+    chunks = _chunk_words(text, 6000)     # ~1.5k input tokens/chunk
     sysmsg = ("You extract faithful key points from a chunk of an auto-generated "
               "lecture transcript (may be Hindi/Hinglish, no punctuation, ASR "
               "errors). Do not invent facts. Write points in " + out_lang + ".")
     parts = []
     for i, ch in enumerate(chunks):
-        parts.append(_groq_chat(
+        parts.append(_ai_chat(
             [{"role": "system", "content": sysmsg},
-             {"role": "user", "content": "Part %d of %d:\n\n%s\n\nList key points "
-              "as concise bullets." % (i + 1, len(chunks), ch)}],
-            key, model, max_tokens=900))
-    return "\n".join(parts)
+             {"role": "user", "content": "Part %d of %d:\n\n%s\n\nList the key "
+              "points as concise bullets." % (i + 1, len(chunks), ch)}],
+            ai, max_tokens=600))
+    return _condense("\n".join(parts), out_lang, ai, target_chars, depth + 1)
 
 
 def _safe_json(raw):
@@ -606,44 +687,44 @@ def _study_sys(out_lang):
             ". Stay strictly faithful to the transcript — never invent facts.")
 
 
-def _generate_study(mode, transcript, out_lang, key, model, title=None, num_questions=8):
-    body = _condense(transcript, out_lang, key, model)
+def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=8):
+    body = _condense(transcript, out_lang, ai)
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
     if mode == "summary":
-        return {"format": "markdown", "content": _groq_chat(
+        return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "Write a concise summary as 4-7 "
-              "bullet points:\n\n" + body}], key, model, max_tokens=700)}
+              "bullet points:\n\n" + body}], ai, max_tokens=700)}
     if mode == "insights":
-        return {"format": "markdown", "content": _groq_chat(
+        return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "List the most important exam-"
-              "relevant insights as bullets:\n\n" + body}], key, model, max_tokens=900)}
+              "relevant insights as bullets:\n\n" + body}], ai, max_tokens=900)}
     if mode == "notes":
-        return {"format": "markdown", "content": _groq_chat(
+        return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "Create comprehensive, well-"
               "structured study notes in Markdown with headings, sub-points, and "
               "clearly marked facts, dates, definitions, and formulas:\n\n" + body}],
-            key, model, max_tokens=2400)}
+            ai, max_tokens=2400)}
     if mode == "quiz":
-        raw = _groq_chat(
+        raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
              {"role": "user", "content": head + ('Generate %d multiple-choice '
               'questions. Return JSON: {"questions":[{"question":"...","options":'
               '["a","b","c","d"],"answer_index":0,"explanation":"..."}]}. Exactly 4 '
               "options each, answer_index 0-3.\n\n" % num_questions) + body}],
-            key, model, max_tokens=3000, json_mode=True)
+            ai, max_tokens=3000, json_mode=True)
         data = _safe_json(raw)
         qs = data.get("questions") if isinstance(data, dict) else data
         return {"format": "json", "questions": qs or []}
     if mode == "flashcards":
-        raw = _groq_chat(
+        raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
              {"role": "user", "content": head + 'Create 8-12 flashcards. Return '
               'JSON: {"cards":[{"front":"...","back":"..."}]}.\n\n' + body}],
-            key, model, max_tokens=2000, json_mode=True)
+            ai, max_tokens=2000, json_mode=True)
         data = _safe_json(raw)
         cards = data.get("cards") if isinstance(data, dict) else data
         return {"format": "json", "cards": cards or []}
@@ -795,10 +876,12 @@ def api_study():
     if not video_id:
         return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
 
-    key, model = _load_ai_config()
-    if not key:
+    ai = _load_ai_config()
+    if not ai["key"]:
         return jsonify({"error": "ai_not_configured",
-                        "detail": "Set the Groq API key in the admin panel (config/ai)."}), 503
+                        "detail": "Set an AI key in the admin panel (config/ai) — "
+                                  "Groq, or a Study AI provider (e.g. Bynara)."}), 503
+    model = ai["model"]
 
     ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, model)
     now = time.time()
@@ -832,12 +915,13 @@ def api_study():
                         "detail": "No captions found for this video.",
                         "transcript_lang": t.get("chosen_lang")}), 200
     try:
-        result = _generate_study(mode, t["text"], out_lang, key, model, title=t.get("title"))
+        result = _generate_study(mode, t["text"], out_lang, ai, title=t.get("title"))
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
             "out_lang": out_lang, "model": model,
+            "provider": "bynara/custom" if ai["base_url"] != GROQ_URL else "groq",
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count")}
     data.update(result)
