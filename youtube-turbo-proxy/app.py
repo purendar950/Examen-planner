@@ -918,12 +918,12 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "Write a concise summary as 4-7 "
-              "bullet points:\n\n" + body}], ai, max_tokens=700)}
+              "bullet points:\n\n" + body}], ai, max_tokens=1000)}
     if mode == "insights":
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "List the most important exam-"
-              "relevant insights as bullets:\n\n" + body}], ai, max_tokens=900)}
+              "relevant insights as bullets:\n\n" + body}], ai, max_tokens=2500)}
     if mode == "flashcards":
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
