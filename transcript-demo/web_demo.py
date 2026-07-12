@@ -67,7 +67,16 @@ def home():
             out = render_result(fetch(v, lang))
         except Exception as e:  # noqa
             out = f'<p class="err">{type(e).__name__}: {e}</p>'
-    return Response(PAGE.format(v=v, lang=lang, out=out), mimetype="text/html")
+    # NOTE: don't use str.format() here — the CSS in PAGE contains literal
+    # { } braces (e.g. body{font-family:...}) which .format() would try to
+    # parse as fields and raise KeyError. Use plain replace() instead.
+    v_safe = v.replace('"', "&quot;")
+    html = (
+        PAGE.replace("{v}", v_safe)
+        .replace("{lang}", lang)
+        .replace("{out}", out)
+    )
+    return Response(html, mimetype="text/html")
 
 
 @app.get("/api/transcript")
