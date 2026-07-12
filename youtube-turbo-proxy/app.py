@@ -1235,6 +1235,24 @@ def study_demo():
     return Response(_STUDY_DEMO_HTML, mimetype="text/html")
 
 
+@app.get("/api/status")
+def api_status():
+    """Cheap status check for the AI Study dot. Only reads Firestore (no YouTube,
+    no AI, no quota). A successful response means the server is up; cachedTranscript
+    tells the UI whether this video is already generated (yellow) or not (green)."""
+    raw_arg = (request.args.get("id") or request.args.get("v")
+               or request.args.get("url") or "").strip()
+    video_id = _parse_video_id(raw_arg)
+    out = {"ok": True, "persistent": bool(_fb_db), "cachedTranscript": False}
+    if video_id:
+        try:
+            fs = _fs_get("transcripts", _fs_doc_id(video_id, "auto"))
+            out["cachedTranscript"] = bool(fs and fs.get("segments"))
+        except Exception:  # noqa: BLE001
+            pass
+    return jsonify(out)
+
+
 @app.route("/api/tutor", methods=["GET", "POST"])
 def api_tutor():
     """AI tutor grounded in a video's transcript. Per-user chat — NOT cached.
@@ -1532,7 +1550,8 @@ def index():
         "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG",
                       "/api/transcript?id=VIDEOID&lang=en", "/transcript-demo",
                       "/api/study?id=VIDEOID&mode=notes&out=English", "/study-demo",
-                      "/api/tutor?id=VIDEOID&q=...&out=English", "/send-photo",
+                      "/api/tutor?id=VIDEOID&q=...&out=English", "/api/status?id=VIDEOID",
+                      "/send-photo",
                       "/tg-photo?file_id=..."],
     })
 
