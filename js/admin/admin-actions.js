@@ -560,6 +560,32 @@ async function saveGroqConfig() {
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }
+
+/* ── Study AI provider (Notes/Quiz) ─────────────────────────────────────────
+   Optional OpenAI-compatible endpoint (e.g. Bynara, ~1M context) used by the
+   transcript → /api/study feature in youtube-turbo-proxy. Stored in the SAME
+   config/ai doc (merge) so the proxy reads it via Firebase Admin. Leaving the
+   base URL blank makes /api/study fall back to the Groq key above. The key
+   lives only in Firestore — never in the codebase. */
+async function saveStudyAiConfig() {
+  const base  = (document.getElementById('study-base-url')   || {}).value || '';
+  const key   = (document.getElementById('study-api-key')    || {}).value || '';
+  const model = (document.getElementById('study-model')      || {}).value || '';
+  const big   = !!(document.getElementById('study-bigcontext') || {}).checked;
+  const b = base.trim(), k = key.trim(), m = model.trim();
+  if (b && !/^https?:\/\//.test(b)) { showToast('⚠️ Base URL http(s):// se start hona chahiye'); return; }
+  if (b && !k) { showToast('⚠️ Provider ke liye API key bhi daalo (ya base URL blank karo)'); return; }
+  try {
+    await db.collection('config').doc('ai').set({
+      studyBaseUrl: b, studyApiKey: k, studyModel: m, studyBigContext: big,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    AI_CONFIG.studyBaseUrl = b; AI_CONFIG.studyApiKey = k;
+    AI_CONFIG.studyModel = m; AI_CONFIG.studyBigContext = big;
+    showToast('✅ Study AI provider saved!');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
 function buildTgMessage(name, digest) {
   const today = (function() {
     const now = new Date();
@@ -726,6 +752,39 @@ function renderTelegram() {
       (aiOn ? '🟢 AI ON' : '⚪ AI OFF') + ' · model: <b>' + esc(aiModel) + '</b><br>' +
       '🔑 <a href="https://console.groq.com/keys" target="_blank">console.groq.com/keys</a> se free key banao. ' +
       'Render bot ko <code>FIREBASE_SERVICE_ACCOUNT</code> env var chahiye taki ye config padh sake.' +
+    '</div>' +
+    '</div>';
+
+  /* ── Study AI Provider (Notes/Quiz) Card ── */
+  var sBase  = (AI_CONFIG && AI_CONFIG.studyBaseUrl) || '';
+  var sKey   = (AI_CONFIG && AI_CONFIG.studyApiKey) || '';
+  var sModel = (AI_CONFIG && AI_CONFIG.studyModel) || '';
+  var sBig   = !(AI_CONFIG && AI_CONFIG.studyBigContext === false);   // default ON
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz) — optional provider</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+      'Transcript → notes/quiz/summary (<code>/api/study</code>) ke liye. Koi bhi OpenAI-compatible ' +
+      'endpoint (jaise <b>Bynara</b> — ~1M context, isliye poori lecture bina chunking ke chalti hai). ' +
+      'Blank chhodo to Groq key (upar wali) use hogi.' +
+    '</div>' +
+    '<input id="study-base-url" placeholder="Base URL e.g. https://router.bynara.id/v1/chat/completions" ' +
+      'value="' + esc(sBase) + '" style="width:100%;font-family:monospace;font-size:.8rem;margin-bottom:8px;">' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
+      '<input id="study-api-key" type="password" placeholder="API Key" value="' + esc(sKey) + '" ' +
+        'style="flex:1;min-width:220px;font-family:monospace;font-size:.82rem;">' +
+      '<button class="btn btn-gray" onclick="var i=document.getElementById(\'study-api-key\');i.type=i.type===\'password\'?\'text\':\'password\';">👁 Show/Hide</button>' +
+    '</div>' +
+    '<input id="study-model" placeholder="model e.g. mistral-large / tencent-hy3 / mistral-medium-3-5" ' +
+      'value="' + esc(sModel) + '" style="width:100%;font-size:.82rem;margin-bottom:8px;">' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer;">' +
+        '<input id="study-bigcontext" type="checkbox"' + (sBig ? ' checked' : '') + '> Large context (send full transcript, no chunking)' +
+      '</label>' +
+      '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
+    '</div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
+      (sBase ? ('✅ Provider set · model: <b>' + esc(sModel || '(none)') + '</b> · ' + (sBig ? 'large-context ON' : 'chunking mode'))
+             : '⚪ Using Groq key above') +
     '</div>' +
     '</div>';
 
