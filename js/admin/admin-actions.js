@@ -450,6 +450,11 @@ async function loadTelegramData() {
     const aiSnap = await db.collection('config').doc('ai').get();
     AI_CONFIG = { groqApiKey:'', model:'llama-3.1-8b-instant', enabled:false, ...(aiSnap.exists ? aiSnap.data() : {}), loaded: true };
   } catch(e) { AI_CONFIG = { groqApiKey:'', model:'llama-3.1-8b-instant', enabled:false, loaded: true }; }
+  /* Load AI Study usage limits + admin-granted unlimited users (config/aiLimits) */
+  try {
+    const lSnap = await db.collection('config').doc('aiLimits').get();
+    AI_LIMITS = { unlimited:{}, unlimitedEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, ...(lSnap.exists ? lSnap.data() : {}), loaded: true };
+  } catch(e) { AI_LIMITS = { unlimited:{}, unlimitedEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, loaded: true }; }
   /* Load every user's full doc to get appState.telegram */
   try {
     const snap = await db.collection('users').get();
@@ -578,6 +583,40 @@ async function saveStudyAiConfig() {
     }, { merge: true });
     AI_CONFIG.studyApiKeys = keys; AI_CONFIG.studyModel = model.trim();
     showToast('✅ Study AI saved (' + keys.length + ' key' + (keys.length === 1 ? '' : 's') + ')');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
+/* ── AI Study usage limits + grant unlimited ────────────────────────────────
+   Saves per-hour/day rate limits and the admin-granted "unlimited" user list to
+   Firestore config/aiLimits. The youtube-turbo-proxy reads this: normal users
+   are rate-limited per IP; uids in `unlimited` bypass all limits. Admins enter
+   emails; we resolve them to uids from the loaded USERS list. */
+async function saveAiLimits() {
+  const emailsRaw = (document.getElementById('ail-emails') || {}).value || '';
+  const sph = parseInt((document.getElementById('ail-study') || {}).value, 10);
+  const tph = parseInt((document.getElementById('ail-tutor-h') || {}).value, 10);
+  const tpd = parseInt((document.getElementById('ail-tutor-d') || {}).value, 10);
+  const emails = emailsRaw.split(/[\n,]+/).map(function (e) { return e.trim().toLowerCase(); }).filter(Boolean);
+  const unlimited = {}, resolvedEmails = [], unresolved = [];
+  emails.forEach(function (em) {
+    const u = (typeof USERS !== 'undefined' ? USERS : []).find(function (x) { return (x.p && (x.p.email || '').toLowerCase()) === em; });
+    if (u) { unlimited[u.id] = true; resolvedEmails.push(em); } else { unresolved.push(em); }
+  });
+  try {
+    await db.collection('config').doc('aiLimits').set({
+      unlimited: unlimited,
+      unlimitedEmails: resolvedEmails,
+      studyPerHour: isNaN(sph) ? 15 : Math.max(0, sph),
+      tutorPerHour: isNaN(tph) ? 20 : Math.max(0, tph),
+      tutorPerDay:  isNaN(tpd) ? 80 : Math.max(0, tpd),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    AI_LIMITS = Object.assign({}, AI_LIMITS, { unlimited: unlimited, unlimitedEmails: resolvedEmails,
+      studyPerHour: isNaN(sph) ? 15 : sph, tutorPerHour: isNaN(tph) ? 20 : tph, tutorPerDay: isNaN(tpd) ? 80 : tpd });
+    var msg = '✅ AI limits saved. Unlimited: ' + resolvedEmails.length + ' user(s).';
+    if (unresolved.length) msg += ' ⚠️ Not found: ' + unresolved.join(', ');
+    showToast(msg);
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }
@@ -780,6 +819,28 @@ function renderTelegram() {
       (sKeysArr.length ? ('✅ ' + sKeysArr.length + ' key(s) · model: <b>' + esc(sModel) + '</b>')
                        : '⚪ No Bynara key — /api/study will use the Groq key above') +
     '</div>' +
+    '</div>';
+
+  /* ── AI Study usage limits + grant unlimited Card ── */
+  var ailEmails = (AI_LIMITS && Array.isArray(AI_LIMITS.unlimitedEmails)) ? AI_LIMITS.unlimitedEmails.join('\n') : '';
+  var ailStudy = (AI_LIMITS && AI_LIMITS.studyPerHour != null) ? AI_LIMITS.studyPerHour : 15;
+  var ailTutorH = (AI_LIMITS && AI_LIMITS.tutorPerHour != null) ? AI_LIMITS.tutorPerHour : 20;
+  var ailTutorD = (AI_LIMITS && AI_LIMITS.tutorPerDay != null) ? AI_LIMITS.tutorPerDay : 80;
+  var ailCount = (AI_LIMITS && AI_LIMITS.unlimited) ? Object.keys(AI_LIMITS.unlimited).length : 0;
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">🎓 AI Study — Usage Limits</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+      'Per-IP rate limits for Notes/Quiz/Tutor (prevents quota abuse). Cached results don\'t count. ' +
+      'Users listed below get <b>unlimited</b> access (bypass all limits).' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
+      '<label style="font-size:.78rem;">New generations/hr <input id="ail-study" type="number" min="0" value="' + ailStudy + '" style="width:70px;margin-left:4px;"></label>' +
+      '<label style="font-size:.78rem;">Tutor msgs/hr <input id="ail-tutor-h" type="number" min="0" value="' + ailTutorH + '" style="width:70px;margin-left:4px;"></label>' +
+      '<label style="font-size:.78rem;">Tutor msgs/day <input id="ail-tutor-d" type="number" min="0" value="' + ailTutorD + '" style="width:70px;margin-left:4px;"></label>' +
+    '</div>' +
+    '<label style="font-size:.8rem;color:#555;">Unlimited users — one email per line (' + ailCount + ' active)</label>' +
+    '<textarea id="ail-emails" placeholder="user1@email.com&#10;user2@email.com" style="width:100%;min-height:66px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(ailEmails) + '</textarea>' +
+    '<button class="btn btn-blue" onclick="saveAiLimits()">💾 Save AI Limits</button>' +
     '</div>';
 
   /* ── Send Controls Card ── */
