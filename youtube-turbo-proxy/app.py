@@ -178,6 +178,38 @@ TRANSCRIPT_TTL = int(os.environ.get("TRANSCRIPT_TTL", str(30 * 24 * 3600)))  # 3
 _transcript_cache = {}
 _transcript_lock = threading.Lock()
 
+# ---- persistent cache (Firestore) ----------------------------------------
+# Transcripts + generated study material are saved to Firestore so they:
+#   * survive Render free-tier restarts (in-memory cache is wiped on sleep), and
+#   * are shared across ALL users (one generation serves everyone).
+# Uses the same Firebase Admin client (_fb_db) already set up for cookies/config.
+import re as _re_fs  # local alias; re is imported later for transcript helpers
+
+
+def _fs_doc_id(*parts):
+    raw = "__".join(str(p) for p in parts)
+    return _re_fs.sub(r"[^A-Za-z0-9_.-]", "_", raw)[:1400]
+
+
+def _fs_get(collection, doc_id):
+    if not _fb_db:
+        return None
+    try:
+        snap = _fb_db.collection(collection).document(doc_id).get()
+        return snap.to_dict() if snap.exists else None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("firestore get %s/%s failed: %s", collection, doc_id, exc)
+        return None
+
+
+def _fs_set(collection, doc_id, data):
+    if not _fb_db:
+        return
+    try:
+        _fb_db.collection(collection).document(doc_id).set(data)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("firestore set %s/%s failed: %s", collection, doc_id, exc)
+
 
 def _base_ydl_opts():
     opts = {
@@ -447,11 +479,20 @@ def _extract_transcript(video_id, lang="auto", force=False):
     the extraction semaphore. Tries the android client first, then web.
     lang='auto' (default) auto-detects the video's caption language."""
     ckey = "%s:%s" % (video_id, lang)
+    fs_id = _fs_doc_id(video_id, lang)
     now = time.time()
     with _transcript_lock:
         hit = _transcript_cache.get(ckey)
         if hit and not force and (now - hit["ts"] < TRANSCRIPT_TTL):
             return hit["data"]
+
+    # persistent cache: survives Render restarts, shared across all users
+    if not force:
+        fs = _fs_get("transcripts", fs_id)
+        if fs and fs.get("segments"):
+            with _transcript_lock:
+                _transcript_cache[ckey] = {"ts": time.time(), "data": fs}
+            return fs
 
     with _extract_sem:
         with _transcript_lock:               # re-check after acquiring the sem
@@ -509,6 +550,8 @@ def _extract_transcript(video_id, lang="auto", force=False):
         }
         with _transcript_lock:
             _transcript_cache[ckey] = {"ts": time.time(), "data": data}
+        if data.get("segments"):          # persist only successful transcripts
+            _fs_set("transcripts", fs_id, data)
     return data
 
 
@@ -835,6 +878,7 @@ def health():
         "cookie_source": _cookie_source,   # firestore | env | file | none
         "cached_videos": len(_cache),
         "cached_transcripts": len(_transcript_cache),
+        "persistent_cache": bool(_fb_db),   # Firestore-backed (survives restarts)
     })
 
 
@@ -977,11 +1021,20 @@ def api_study():
     model = ai["model"]
 
     ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q)
+    fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q)
     now = time.time()
     with _study_lock:
         hit = _study_cache.get(ckey)
         if hit and (now - hit["ts"] < STUDY_TTL):
             return jsonify(hit["data"])
+
+    # persistent cache: return saved result if this video+mode+lang+count exists
+    fs = _fs_get("study", fs_id)
+    if fs:
+        fs["cached"] = True
+        with _study_lock:
+            _study_cache[ckey] = {"ts": time.time(), "data": fs}
+        return jsonify(fs)
 
     # transcript (reuses transcript cache + bot-check self-heal)
     try:
@@ -1019,10 +1072,12 @@ def api_study():
             "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
             "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
-            "segment_count": t.get("segment_count")}
+            "segment_count": t.get("segment_count"),
+            "cached": False}
     data.update(result)
     with _study_lock:
         _study_cache[ckey] = {"ts": time.time(), "data": data}
+    _fs_set("study", fs_id, data)             # persist for next time (all users)
     return jsonify(data)
 
 
