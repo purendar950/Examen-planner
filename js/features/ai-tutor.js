@@ -167,12 +167,13 @@
   var state = { tab: 'notes' };
 
   /* ── Notes / Summary / Insights / Flashcards (from /api/study) ── */
-  function showStudy(mode, n, force) {
+  function showStudy(mode, n, force, focus) {
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + mode + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid());
     if (mode === 'quiz') url += '&n=' + (n || 25);
+    if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
     apiGet(url).then(function (j) {
       var box = contentEl();
@@ -206,8 +207,10 @@
       card.onclick = function () { var bk = card.querySelector('.ai-flip-bk'); bk.style.display = bk.style.display === 'none' ? 'block' : 'none'; };
     });
     var rb = document.getElementById('ai-regen');
-    if (rb) rb.onclick = function () { showStudy('flashcards', null, true); };
+    if (rb) rb.onclick = function () { showStudy('flashcards', null, true, cardsFocus()); };
   }
+  function cardsFocus() { return ((document.getElementById('ai-cards-focus') || {}).value || '').trim(); }
+  function quizFocus() { return ((document.getElementById('ai-quiz-focus') || {}).value || '').trim(); }
 
   /* ── Quiz engine ── */
   var quiz = { qs: [], idx: 0, correct: 0, wrong: [] };
@@ -216,8 +219,10 @@
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var sel = document.getElementById('ai-qn');
     var n = parseInt(sel ? sel.value : 25, 10) || 25;
-    el.innerHTML = loading((force ? 'Building a fresh ' : 'Building a ') + n + '-question quiz…');
+    var focus = quizFocus();
+    el.innerHTML = loading((force ? 'Building a fresh ' : 'Building a ') + n + '-question quiz' + (focus ? ' on “' + focus + '”' : '') + '…');
     var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid());
+    if (focus) qurl += '&focus=' + encodeURIComponent(focus);
     if (force) qurl += '&refresh=1';
     apiGet(qurl).then(function (j) {
       if (j.error && j.error !== 'no_captions') { contentEl().innerHTML = errHtml(j); return; }
@@ -365,14 +370,21 @@
       b.innerHTML = '<div style="margin-bottom:8px">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select> ' +
         '<button class="ai-btn" id="ai-notes-go">Generate</button></div><div id="ai-sub"></div>';
+      // switching the dropdown auto-loads that mode (cached ones are instant) so
+      // you never see a previous mode's stale output mixed in.
+      document.getElementById('ai-notes-mode').onchange = function () { showStudy(this.value); };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(document.getElementById('ai-notes-mode').value); };
     } else if (state.tab === 'cards') {
-      b.innerHTML = '<button class="ai-btn" id="ai-cards-go">Generate flashcards</button><div id="ai-sub" style="margin-top:10px"></div>';
-      document.getElementById('ai-cards-go').onclick = function () { showStudy('flashcards'); };
+      b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+        '<input id="ai-cards-focus" placeholder="Optional: kis topic ke cards? (blank = important)" style="flex:1;min-width:180px;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"> ' +
+        '<button class="ai-btn" id="ai-cards-go">Generate flashcards</button></div><div id="ai-sub" style="margin-top:4px"></div>';
+      document.getElementById('ai-cards-go').onclick = function () { showStudy('flashcards', null, false, cardsFocus()); };
     } else if (state.tab === 'quiz') {
-      b.innerHTML = '<div style="margin-bottom:8px">Questions: ' +
+      b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">Questions: ' +
         '<select id="ai-qn" class="ai-btn sec" style="padding:6px 8px"><option>15</option><option selected>25</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option>90</option><option>100</option></select> ' +
-        '<button class="ai-btn" id="ai-quiz-go">Start quiz</button></div><div id="ai-sub"></div>';
+        '<button class="ai-btn" id="ai-quiz-go">Start quiz</button></div>' +
+        '<div style="margin-bottom:8px"><input id="ai-quiz-focus" placeholder="Optional: kis type/topic ke questions? (blank = important points)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
+        '<div id="ai-sub"></div>';
       document.getElementById('ai-quiz-go').onclick = function () { startQuiz(); };
     } else if (state.tab === 'tutor') {
       renderTutor();
