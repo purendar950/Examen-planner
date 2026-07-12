@@ -714,10 +714,83 @@ def _study_sys(out_lang):
             ". Stay strictly faithful to the transcript — never invent facts.")
 
 
-def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=8):
-    body = _condense(transcript, out_lang, ai)
+def _gen_notes(transcript, out_lang, ai, head):
+    """COMPREHENSIVE notes covering the whole transcript. Big-context providers
+    process the transcript section-by-section (so nothing gets cut by the output
+    limit); non-big providers use the condensed body."""
+    sysmsg = _study_sys(out_lang)
+    instr = ("Create COMPREHENSIVE study notes in Markdown. Cover EVERY topic, "
+             "point, fact, figure, date, name, place, definition, formula and "
+             "example mentioned \u2014 do NOT omit or over-summarize any information. "
+             "Keep the lecture's order; use clear headings and sub-bullets.")
+    secs = _chunk_words(transcript, 16000) if ai.get("big_context") \
+        else [_condense(transcript, out_lang, ai)]
+    if len(secs) == 1:
+        return _ai_chat(
+            [{"role": "system", "content": sysmsg},
+             {"role": "user", "content": head + instr + "\n\n" + secs[0]}],
+            ai, max_tokens=(8000 if ai.get("big_context") else 2400))
+    parts = []
+    for i, sec in enumerate(secs):
+        parts.append(_ai_chat(
+            [{"role": "system", "content": sysmsg},
+             {"role": "user", "content": head + ("(Part %d of %d \u2014 detailed notes "
+              "for THIS part only.) " % (i + 1, len(secs))) + instr + "\n\n" + sec}],
+            ai, max_tokens=6000))
+    return "\n\n".join(parts)
+
+
+def _gen_quiz(transcript, out_lang, ai, head, n):
+    """Up to `n` MCQs, one per important point. Generated in batches (default 25/
+    call), cycling through transcript sections, de-duplicating, so it scales to
+    100 and covers the whole lecture."""
+    sysmsg = _study_sys(out_lang) + " Output ONLY valid JSON."
+    secs = _chunk_words(transcript, 16000) if ai.get("big_context") \
+        else [_condense(transcript, out_lang, ai)]
+    questions, seen = [], set()
+    BATCH, i, stagnation = 25, 0, 0
+    while len(questions) < n and stagnation <= len(secs):
+        sec = secs[i % len(secs)]
+        i += 1
+        want = min(BATCH, n - len(questions))
+        avoid = ""
+        if questions:
+            recent = [q.get("question", "") for q in questions[-40:]]
+            avoid = ("Do NOT repeat or paraphrase these already-asked questions:\n- "
+                     + "\n- ".join(recent) + "\n\n")
+        raw = _ai_chat(
+            [{"role": "system", "content": sysmsg},
+             {"role": "user", "content": head + avoid + ('Generate %d NEW multiple-'
+              'choice questions on the important points in the content below. Each '
+              'has exactly 4 options and one correct answer. Return JSON: '
+              '{"questions":[{"question":"...","options":["a","b","c","d"],'
+              '"answer_index":0,"explanation":"..."}]}.\n\n' % want) + sec}],
+            ai, max_tokens=min(300 + want * 120, 8000), json_mode=True)
+        data = _safe_json(raw)
+        qs = data.get("questions") if isinstance(data, dict) else data
+        added = 0
+        for q in (qs or []):
+            key = (q.get("question") or "").strip().lower()[:80]
+            if key and key not in seen and q.get("options"):
+                seen.add(key)
+                questions.append(q)
+                added += 1
+                if len(questions) >= n:
+                    break
+        stagnation = 0 if added else stagnation + 1
+    return questions[:n]
+
+
+def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
+    if mode == "notes":
+        return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head)}
+    if mode == "quiz":
+        return {"format": "json",
+                "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions)}
+    # summary / insights / flashcards work well from a condensed body
+    body = _condense(transcript, out_lang, ai)
     if mode == "summary":
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
@@ -728,24 +801,6 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=8)
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "List the most important exam-"
               "relevant insights as bullets:\n\n" + body}], ai, max_tokens=900)}
-    if mode == "notes":
-        return {"format": "markdown", "content": _ai_chat(
-            [{"role": "system", "content": sysmsg},
-             {"role": "user", "content": head + "Create comprehensive, well-"
-              "structured study notes in Markdown with headings, sub-points, and "
-              "clearly marked facts, dates, definitions, and formulas:\n\n" + body}],
-            ai, max_tokens=2400)}
-    if mode == "quiz":
-        raw = _ai_chat(
-            [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
-             {"role": "user", "content": head + ('Generate %d multiple-choice '
-              'questions. Return JSON: {"questions":[{"question":"...","options":'
-              '["a","b","c","d"],"answer_index":0,"explanation":"..."}]}. Exactly 4 '
-              "options each, answer_index 0-3.\n\n" % num_questions) + body}],
-            ai, max_tokens=3000, json_mode=True)
-        data = _safe_json(raw)
-        qs = data.get("questions") if isinstance(data, dict) else data
-        return {"format": "json", "questions": qs or []}
     if mode == "flashcards":
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
@@ -897,6 +952,11 @@ def api_study():
     mode = (request.args.get("mode") or "notes").strip().lower()
     out_lang = (request.args.get("out") or request.args.get("lang")
                 or "English").strip() or "English"
+    try:
+        num_q = int(request.args.get("n") or request.args.get("count") or 25)
+    except (TypeError, ValueError):
+        num_q = 25
+    num_q = max(1, min(100, num_q))            # cap at 100
     if mode not in STUDY_MODES:
         return jsonify({"error": "bad_mode", "detail": "mode must be one of %s" % STUDY_MODES}), 400
     video_id = _parse_video_id(raw_arg)
@@ -910,7 +970,7 @@ def api_study():
                                   "(Study AI \u2014 Bynara, or Groq)."}), 503
     model = ai["model"]
 
-    ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, model)
+    ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q)
     now = time.time()
     with _study_lock:
         hit = _study_cache.get(ckey)
@@ -942,12 +1002,14 @@ def api_study():
                         "detail": "No captions found for this video.",
                         "transcript_lang": t.get("chosen_lang")}), 200
     try:
-        result = _generate_study(mode, t["text"], out_lang, ai, title=t.get("title"))
+        result = _generate_study(mode, t["text"], out_lang, ai,
+                                 title=t.get("title"), num_questions=num_q)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
             "out_lang": out_lang, "model": model,
+            "num_questions": num_q if mode == "quiz" else None,
             "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
             "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
@@ -978,6 +1040,9 @@ _STUDY_DEMO_HTML = """<!doctype html>
   <option>summary</option><option>insights</option><option selected>notes</option><option>quiz</option><option>flashcards</option>
  </select></div>
  <div><label>Output language</label><input id="out" value="English" placeholder="English / Hindi / Hinglish"></div>
+ <div><label>Quiz questions</label><select id="qn">
+  <option>15</option><option selected>25</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option>90</option><option>100</option>
+ </select></div>
 </div>
 <button onclick="go()">Generate</button>
 <div id="out2"></div>
@@ -986,11 +1051,12 @@ function esc(t){return (t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');}
 async function go(){
  var v=document.getElementById('v').value.trim();
  var mode=document.getElementById('mode').value, out=document.getElementById('out').value.trim()||'English';
+ var qn=(document.getElementById('qn')||{}).value||'25';
  var box=document.getElementById('out2');
  if(!v){box.innerHTML='<p class=err>Enter a URL or ID</p>';return;}
- box.innerHTML='<p class=muted>Generating… (long lectures take a bit)</p>';
+ box.innerHTML='<p class=muted>Generating… (comprehensive notes / '+qn+'-question quiz can take a bit)</p>';
  try{
-  var r=await fetch('/api/study?id='+encodeURIComponent(v)+'&mode='+mode+'&out='+encodeURIComponent(out));
+  var r=await fetch('/api/study?id='+encodeURIComponent(v)+'&mode='+mode+'&out='+encodeURIComponent(out)+'&n='+qn);
   var j=await r.json();
   if(j.error){box.innerHTML='<p class=err><b>'+j.error+'</b><br>'+esc(j.detail||'')+'</p>';return;}
   var meta='<div class=meta>'+esc(j.title||'')+' — '+j.mode+' / '+j.out_lang+' · '+j.segment_count+' segments · '+esc(j.provider||'ai')+' / '+esc(j.model)+'</div>';
