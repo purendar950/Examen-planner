@@ -6,7 +6,7 @@
      GET  /api/study?id=&mode=notes|summary|insights|quiz|flashcards&out=&n=
      POST /api/tutor  {id,q,out,mode:chat|teach,history}
    Notes/quiz/etc. are cached server-side in Firestore (shared across users);
-   tutor chats are per-user, saved into appState.aiTutorChats[videoId].
+   tutor chats are stored in localStorage (device-local), NOT Firestore.
 
    Self-contained (own markdown renderer + styles). Loaded after youtube.js,
    yt-screenshots.js and turbo-player.js so it can reuse ytCurrentVideoId and
@@ -260,20 +260,17 @@
   }
 
   /* ── Tutor chat ── */
+  // Tutor chat is stored in localStorage (device-local) — NOT Firestore — so it
+  // never bloats the synced user document. Capped at 30 messages per video.
+  function chatKey() { return 'aiTutorChat_' + curVid(); }
   function getHistory() {
-    try {
-      if (typeof appState !== 'undefined' && appState.aiTutorChats && appState.aiTutorChats[curVid()])
-        return appState.aiTutorChats[curVid()].slice();
-    } catch (e) {}
-    return [];
+    try { var raw = localStorage.getItem(chatKey()); return raw ? JSON.parse(raw) : []; } catch (e) { return []; }
   }
   function saveHistory(h) {
-    try {
-      if (typeof appState === 'undefined') return;
-      if (!appState.aiTutorChats) appState.aiTutorChats = {};
-      appState.aiTutorChats[curVid()] = h.slice(-30);
-      if (typeof saveProgress === 'function') saveProgress();
-    } catch (e) {}
+    try { localStorage.setItem(chatKey(), JSON.stringify(h.slice(-30))); } catch (e) {}
+  }
+  function clearHistory() {
+    try { localStorage.removeItem(chatKey()); } catch (e) {}
   }
   function chatHtml() {
     var h = getHistory();
@@ -281,7 +278,10 @@
       return '<div class="ai-msg ' + (m.role === 'user' ? 'u' : 'a') + '">' +
         (m.role === 'user' ? esc(m.content) : '<div class="ai-md">' + mdToHtml(m.content) + '</div>') + '</div>';
     }).join('');
-    return '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted">Ask a doubt about this video, ya "Teach me" dabao.</div>') + '</div>' +
+    var clearBar = h.length
+      ? '<div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button class="ai-btn sec" id="ai-clear" style="padding:4px 10px;font-size:0.72rem">🗑 Clear chat</button></div>'
+      : '';
+    return clearBar + '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted">Ask a doubt about this video, ya "Teach me" dabao.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span></div>') + '</div>' +
       '<div class="ai-chips">' +
       '<span class="ai-chip" data-q="Is video ko simple example se samjhao">Explain simpler</span>' +
       '<span class="ai-chip" data-q="Ek real example do is topic ka">Give example</span>' +
@@ -298,6 +298,8 @@
     Array.prototype.forEach.call(b.querySelectorAll('.ai-chip'), function (c) {
       c.onclick = function () { c.dataset.teach ? sendTutor('', 'teach') : sendTutor(c.dataset.q); };
     });
+    var clr = document.getElementById('ai-clear');
+    if (clr) clr.onclick = function () { if (confirm('Clear this video\'s tutor chat?')) { clearHistory(); renderTutor(); } };
     var input = document.getElementById('ai-chat-in'), send = document.getElementById('ai-chat-send');
     function go() { var v = input.value.trim(); if (v) { input.value = ''; sendTutor(v); } }
     if (send) send.onclick = go;
@@ -382,6 +384,14 @@
   function mountRightColumn() {
     var panel = rightCol();
     if (!panel || document.getElementById('ai-view-toggle')) return;
+
+    // one-time: reclaim Firestore space from the old appState-based chat store
+    try {
+      if (typeof appState !== 'undefined' && appState && appState.aiTutorChats) {
+        delete appState.aiTutorChats;
+        if (typeof saveProgress === 'function') saveProgress();
+      }
+    } catch (e) {}
 
     var toggle = document.createElement('div');
     toggle.id = 'ai-view-toggle'; toggle.className = 'ai-view-toggle';
