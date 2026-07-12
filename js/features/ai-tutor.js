@@ -183,12 +183,16 @@
         box.innerHTML = '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>'; return;
       }
       if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); return; }
-      var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="margin-left:auto;padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
+      var content = j.content || '';
+      var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
+      var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
       box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-        '<span class="ai-muted">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
-        regenBtn + '</div>' +
-        '<div class="ai-scroll"><div class="ai-md">' + mdToHtml(j.content || '') + '</div></div>';
+        '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
+        pdfBtn + regenBtn + '</div>' +
+        '<div class="ai-scroll"><div class="ai-md">' + mdToHtml(content) + '</div></div>';
       bindTsLinks(box);
+      var pb = document.getElementById('ai-pdf');
+      if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode), '<div class="ai-md">' + mdToHtml(content) + '</div>'); };
       var rb = document.getElementById('ai-regen');
       if (rb) rb.onclick = function () { showStudy(mode, n, true); };
     }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
@@ -250,6 +254,62 @@
       // chosen language already available → show it directly (notes/cards only)
       if (autoShow && avail.indexOf(chosen) !== -1) loadLang(mode, n, chosen);
     }).catch(function () {});
+  }
+
+  /* ── Download as PDF (A4) — client-side print, nothing stored on the server ── */
+  var PDF_CSS =
+    '@page{size:A4;margin:18mm 15mm;}' +
+    '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;}' +
+    'body{font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans","Noto Sans Devanagari",Arial,sans-serif;color:#1a1f2b;line-height:1.65;font-size:11.5pt;margin:0;}' +
+    '.pdf-title{font-size:19pt;font-weight:800;margin:0 0 2px;color:#0f172a;}' +
+    '.pdf-meta{font-size:9pt;color:#64748b;margin:0 0 14px;padding-bottom:10px;border-bottom:2px solid #e2e8f0;}' +
+    '.pdf-body h1{font-size:16pt;} .pdf-body h2{font-size:14pt;} .pdf-body h3{font-size:12.5pt;}' +
+    '.pdf-body h1,.pdf-body h2,.pdf-body h3,.pdf-body h4{color:#1e293b;margin:14px 0 6px;page-break-after:avoid;}' +
+    '.pdf-body h2{border-bottom:1px solid #e2e8f0;padding-bottom:3px;}' +
+    '.pdf-body p{margin:6px 0;} .pdf-body ul,.pdf-body ol{margin:6px 0 6px 4px;padding-left:20px;}' +
+    '.pdf-body li{margin:3px 0;page-break-inside:avoid;}' +
+    '.pdf-body strong{color:#0f172a;} .pdf-body code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:.9em;}' +
+    '.pdf-body hr{border:none;border-top:1px solid #e2e8f0;margin:12px 0;}' +
+    '.pdf-msg{margin:0 0 10px;padding:8px 12px;border-radius:8px;page-break-inside:avoid;}' +
+    '.pdf-msg.pdf-u{background:#eef2ff;border:1px solid #e0e7ff;}' +
+    '.pdf-msg.pdf-a{background:#f8fafc;border:1px solid #eef2f6;}' +
+    '.pdf-who{font-size:8.5pt;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:3px;}' +
+    '.ai-ts,.ai-ts-link{color:#2563eb;font-weight:600;}';
+  function pdfDownload(titleText, innerHtml) {
+    var w = window.open('', '_blank');
+    if (!w) {
+      if (typeof showToast === 'function') showToast('Allow pop-ups to download the PDF', 'error');
+      else alert('Please allow pop-ups to download the PDF.');
+      return;
+    }
+    var when = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    var d = w.document;
+    d.open();
+    d.write('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+      '<title>' + esc(titleText) + '</title><style>' + PDF_CSS + '</style></head><body>' +
+      '<div class="pdf-title">' + esc(titleText) + '</div>' +
+      '<div class="pdf-meta">' + esc(when) + ' · 🎓 AI Study — StudyPlanner</div>' +
+      '<div class="pdf-body">' + innerHtml + '</div>' +
+      '</body></html>');
+    d.close();
+    w.focus();
+    // let fonts/layout settle, then open the print → "Save as PDF" dialog
+    setTimeout(function () { try { w.print(); } catch (e) {} }, 400);
+  }
+  function pdfTitleFor(mode) {
+    var label = mode === 'insights' ? 'Key Insights' : (mode === 'summary' ? 'Summary' : 'Notes');
+    var t = (curTitle() || 'Video').replace(/\s+/g, ' ').trim();
+    return t + ' — ' + label;
+  }
+  function tutorChatPdfHtml() {
+    var h = getHistory();
+    if (!h.length) return '<p>No chat yet.</p>';
+    return h.map(function (m) {
+      var who = m.role === 'user' ? 'You' : 'AI Tutor';
+      var body = m.role === 'user' ? '<div>' + esc(m.content) + '</div>' : '<div>' + mdToHtml(m.content) + '</div>';
+      return '<div class="pdf-msg pdf-' + (m.role === 'user' ? 'u' : 'a') + '"><div class="pdf-who">' + who + '</div>' + body + '</div>';
+    }).join('');
   }
 
   /* ── Quiz engine ── */
@@ -347,7 +407,9 @@
         (m.role === 'user' ? esc(m.content) : '<div class="ai-md">' + mdToHtml(m.content) + '</div>') + '</div>';
     }).join('');
     var clearBar = h.length
-      ? '<div style="display:flex;justify-content:flex-end;margin-bottom:4px"><button class="ai-btn sec" id="ai-clear" style="padding:4px 10px;font-size:0.72rem">🗑 Clear chat</button></div>'
+      ? '<div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:4px">' +
+          '<button class="ai-btn sec" id="ai-tutor-pdf" title="Download chat as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>' +
+          '<button class="ai-btn sec" id="ai-clear" style="padding:4px 10px;font-size:0.72rem">🗑 Clear chat</button></div>'
       : '';
     return clearBar + '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted">Ask a doubt about this video, ya "Teach me" dabao.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span></div>') + '</div>' +
       '<div class="ai-chips">' +
@@ -368,6 +430,8 @@
     });
     var clr = document.getElementById('ai-clear');
     if (clr) clr.onclick = function () { if (confirm('Clear this video\'s tutor chat?')) { clearHistory(); renderTutor(); } };
+    var tpdf = document.getElementById('ai-tutor-pdf');
+    if (tpdf) tpdf.onclick = function () { pdfDownload((curTitle() || 'Video').replace(/\s+/g, ' ').trim() + ' — AI Tutor Chat', tutorChatPdfHtml()); };
     var input = document.getElementById('ai-chat-in'), send = document.getElementById('ai-chat-send');
     function go() { var v = input.value.trim(); if (v) { input.value = ''; sendTutor(v); } }
     if (send) send.onclick = go;
