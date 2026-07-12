@@ -922,8 +922,16 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
     if mode == "insights":
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
-             {"role": "user", "content": head + "List the most important exam-"
-              "relevant insights as bullets:\n\n" + body}], ai, max_tokens=2500)}
+             {"role": "user", "content": head + (
+                 "Give the KEY INSIGHTS / most important takeaways from this "
+                 "lecture as a SHORT, curated list \u2014 the crux only, NOT an "
+                 "exhaustive re-listing of every fact (that belongs in detailed "
+                 "notes). Rules:\n"
+                 "- Pick ONLY the 10\u201315 most exam-relevant points.\n"
+                 "- One concise bullet each (use '- '), bold ONLY the keyword.\n"
+                 "- No sub-lists, no long paragraphs, no repetition.\n"
+                 "- Make sure the list is COMPLETE \u2014 finish the last bullet, "
+                 "never stop mid-line.\n\n") + body}], ai, max_tokens=1800)}
     if mode == "flashcards":
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
