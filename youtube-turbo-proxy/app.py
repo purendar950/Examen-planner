@@ -380,15 +380,35 @@ def _pick_caption_url(raw, lang):
                 return t["url"]
         return None
 
+    def is_translation(tracks):
+        # Auto-TRANSLATED tracks carry tlang= in their URL; the ORIGINAL
+        # spoken-language ASR track does not.
+        for t in (tracks or []):
+            if t.get("url"):
+                return "tlang=" in t["url"]
+        return False
+
+    def original_auto_lang():
+        # The video's real spoken-language auto-caption = the auto track that
+        # is NOT a translation.
+        for lg, tracks in autos.items():
+            if tracks and not is_translation(tracks):
+                return lg
+        return None
+
     if _is_auto_lang(lang):
-        # native language yt-dlp reports for the video, if any
         native = (raw.get("language") or "").strip()
         order = []
         if native:
             order += [native, native.split("-")[0]]
-        # then whatever the video actually provides (manual first, then auto)
-        order += sorted(subs.keys()) + sorted(autos.keys())
+        order += sorted(subs.keys())          # human captions first
+        orig = original_auto_lang()            # the ORIGINAL spoken-language auto track
+        if orig:
+            order.append(orig)
         order += ["en", "hi"]
+        # IMPORTANT: do NOT add sorted(autos.keys()) here — it is alphabetical
+        # (aa, ab, af, ...) and would pick a random auto-TRANSLATION instead of
+        # the actual caption. That was the "auto picks nothing useful" bug.
     else:
         order = [lang, str(lang).split("-")[0], "en", "hi"]
 
@@ -402,7 +422,14 @@ def _pick_caption_url(raw, lang):
                 u = json3_url(src[lg])
                 if u:
                     return u, lg, kind
-    for src, kind in ((subs, "manual"), (autos, "auto")):   # anything available
+    # last resort: any track, but prefer a non-translation over a translation
+    for src, kind in ((subs, "manual"), (autos, "auto")):
+        for lg, tracks in src.items():
+            if not is_translation(tracks):
+                u = json3_url(tracks)
+                if u:
+                    return u, lg, kind
+    for src, kind in ((subs, "manual"), (autos, "auto")):
         for lg, tracks in src.items():
             u = json3_url(tracks)
             if u:
