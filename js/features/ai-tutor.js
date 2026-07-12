@@ -167,28 +167,35 @@
   var state = { tab: 'notes' };
 
   /* ── Notes / Summary / Insights / Flashcards (from /api/study) ── */
-  function showStudy(mode, n) {
+  function showStudy(mode, n, force) {
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
-    el.innerHTML = loading('Generating ' + mode + ' (first time takes a bit — it caches after)…');
+    el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + mode + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid());
     if (mode === 'quiz') url += '&n=' + (n || 25);
+    if (force) url += '&refresh=1';
     apiGet(url).then(function (j) {
       var box = contentEl();
       if (j.error && j.error !== 'no_captions') { box.innerHTML = errHtml(j); return; }
       if (j.warning === 'no_captions' || j.error === 'no_captions') {
         box.innerHTML = '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>'; return;
       }
-      if (mode === 'flashcards') { renderCards(j.cards || [], box); return; }
-      box.innerHTML = '<div class="ai-muted" style="margin-bottom:6px">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (j.cached ? ' · cached' : '') + '</div>' +
+      if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); return; }
+      box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+        '<span class="ai-muted">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
+        '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="margin-left:auto;padding:4px 10px;font-size:0.72rem">↻ Regenerate</button></div>' +
         '<div class="ai-scroll"><div class="ai-md">' + mdToHtml(j.content || '') + '</div></div>';
       bindTsLinks(box);
+      var rb = document.getElementById('ai-regen');
+      if (rb) rb.onclick = function () { showStudy(mode, n, true); };
     }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
   }
-  function renderCards(cards, box) {
+  function renderCards(cards, box, mode) {
     box = box || contentEl();
     if (!cards.length) { box.innerHTML = '<div class="ai-muted">No flashcards.</div>'; return; }
-    box.innerHTML = '<div class="ai-muted" style="margin-bottom:8px">Tap a card to flip.</div>' +
+    box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+      '<span class="ai-muted">Tap a card to flip.</span>' +
+      '<button class="ai-btn sec" id="ai-regen" title="Generate fresh flashcards" style="margin-left:auto;padding:4px 10px;font-size:0.72rem">↻ Regenerate</button></div>' +
       '<div class="ai-scroll">' + cards.map(function (c) {
         return '<div class="ai-q ai-flip" style="cursor:pointer">' +
           '<div><strong>' + esc(c.front) + '</strong></div>' +
@@ -197,17 +204,21 @@
     Array.prototype.forEach.call(box.querySelectorAll('.ai-flip'), function (card) {
       card.onclick = function () { var bk = card.querySelector('.ai-flip-bk'); bk.style.display = bk.style.display === 'none' ? 'block' : 'none'; };
     });
+    var rb = document.getElementById('ai-regen');
+    if (rb) rb.onclick = function () { showStudy('flashcards', null, true); };
   }
 
   /* ── Quiz engine ── */
   var quiz = { qs: [], idx: 0, correct: 0, wrong: [] };
-  function startQuiz() {
+  function startQuiz(force) {
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var sel = document.getElementById('ai-qn');
     var n = parseInt(sel ? sel.value : 25, 10) || 25;
-    el.innerHTML = loading('Building a ' + n + '-question quiz…');
-    apiGet('/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid())).then(function (j) {
+    el.innerHTML = loading((force ? 'Building a fresh ' : 'Building a ') + n + '-question quiz…');
+    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid());
+    if (force) qurl += '&refresh=1';
+    apiGet(qurl).then(function (j) {
       if (j.error && j.error !== 'no_captions') { contentEl().innerHTML = errHtml(j); return; }
       var qs = j.questions || [];
       if (!qs.length) { contentEl().innerHTML = '<div class="ai-muted">Could not generate questions.</div>'; return; }
@@ -250,7 +261,7 @@
     if (quiz.wrong.length) html += '<button class="ai-btn" id="ai-weak">🎯 Re-explain what I missed (' + quiz.wrong.length + ')</button> ';
     html += '<button class="ai-btn sec" id="ai-retry">↻ New quiz</button>';
     el.innerHTML = html;
-    if (document.getElementById('ai-retry')) document.getElementById('ai-retry').onclick = startQuiz;
+    if (document.getElementById('ai-retry')) document.getElementById('ai-retry').onclick = function () { startQuiz(true); };
     if (document.getElementById('ai-weak')) document.getElementById('ai-weak').onclick = function () {
       var topics = quiz.wrong.map(function (q) { return q.question; }).slice(0, 8).join('; ');
       state.tab = 'tutor'; renderTabs(); renderBody();
@@ -361,7 +372,7 @@
       b.innerHTML = '<div style="margin-bottom:8px">Questions: ' +
         '<select id="ai-qn" class="ai-btn sec" style="padding:6px 8px"><option>15</option><option selected>25</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option>90</option><option>100</option></select> ' +
         '<button class="ai-btn" id="ai-quiz-go">Start quiz</button></div><div id="ai-sub"></div>';
-      document.getElementById('ai-quiz-go').onclick = startQuiz;
+      document.getElementById('ai-quiz-go').onclick = function () { startQuiz(); };
     } else if (state.tab === 'tutor') {
       renderTutor();
     }

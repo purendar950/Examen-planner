@@ -918,12 +918,12 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "Write a concise summary as 4-7 "
-              "bullet points:\n\n" + body}], ai, max_tokens=700)}
+              "bullet points:\n\n" + body}], ai, max_tokens=1000)}
     if mode == "insights":
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "List the most important exam-"
-              "relevant insights as bullets:\n\n" + body}], ai, max_tokens=900)}
+              "relevant insights as bullets:\n\n" + body}], ai, max_tokens=2500)}
     if mode == "flashcards":
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
@@ -1094,16 +1094,23 @@ def api_study():
                                   "(Study AI \u2014 Bynara, or Groq)."}), 503
     model = ai["model"]
 
+    # ?refresh=1 (or nocache=1) forces a fresh generation, ignoring BOTH the
+    # in-memory and Firestore caches, and overwrites the old saved copy. Used by
+    # the "Regenerate" button so a previously-truncated result can be replaced.
+    force = (request.args.get("refresh") or request.args.get("nocache")
+             or "").strip().lower() in ("1", "true", "yes")
+
     ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q)
     fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q)
     now = time.time()
-    with _study_lock:
-        hit = _study_cache.get(ckey)
-        if hit and (now - hit["ts"] < STUDY_TTL):
-            return jsonify(hit["data"])
+    if not force:
+        with _study_lock:
+            hit = _study_cache.get(ckey)
+            if hit and (now - hit["ts"] < STUDY_TTL):
+                return jsonify(hit["data"])
 
     # persistent cache: return saved result if this video+mode+lang+count exists
-    fs = _fs_get("study", fs_id)
+    fs = None if force else _fs_get("study", fs_id)
     if fs:
         fs["cached"] = True
         with _study_lock:
