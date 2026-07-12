@@ -517,6 +517,9 @@ def _extract_transcript(video_id, lang="auto", force=False):
 # config/ai (the SAME doc the Telegram bot uses via parseWithGroq) — never from
 # the browser. Falls back to GROQ_API_KEY / GROQ_MODEL env vars.
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+# Bynara: OpenAI-compatible, ~1M context. URL is fixed so the admin only sets
+# key(s) + model. Multiple keys enable automatic failover on limit/error.
+BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 _study_cache = {}
@@ -540,21 +543,27 @@ def _load_ai_config():
         except Exception as exc:  # noqa: BLE001
             log.warning("config/ai read failed: %s", exc)
 
-    url = (cfg.get("studyBaseUrl") or os.environ.get("AI_BASE_URL") or "").strip()
-    skey = (cfg.get("studyApiKey") or os.environ.get("AI_API_KEY") or "").strip()
-    if url and skey:                               # generic provider (Bynara, etc.)
+    # Bynara key(s): studyApiKeys can be a list or a comma/newline string.
+    keys = cfg.get("studyApiKeys")
+    if isinstance(keys, str):
+        keys = re.split(r"[,\n]+", keys)
+    keys = [k.strip() for k in (keys or []) if k and str(k).strip()]
+    if not keys and cfg.get("studyApiKey"):        # legacy single-key field
+        keys = [cfg["studyApiKey"].strip()]
+    if not keys and os.environ.get("BYNARA_API_KEY"):
+        keys = [os.environ["BYNARA_API_KEY"].strip()]
+    if keys:
         return {
-            "base_url": url,
-            "key": skey,
+            "base_url": BYNARA_URL,
+            "keys": keys,                          # failover across keys
             "model": (cfg.get("studyModel") or "mistral-large").strip(),
-            # big_context providers (1M ctx) skip chunking; default True for these
-            "big_context": bool(cfg.get("studyBigContext", True)),
-            "tpm": int(cfg.get("studyTpm") or 0),  # 0 = no client-side pacing
+            "big_context": True,                   # ~1M ctx — send full transcript
+            "tpm": 0,                              # provider-managed limits
         }
-    key = (cfg.get("groqApiKey") or os.environ.get("GROQ_API_KEY") or "").strip()
+    gkey = (cfg.get("groqApiKey") or os.environ.get("GROQ_API_KEY") or "").strip()
     return {
         "base_url": GROQ_URL,
-        "key": key,
+        "keys": [gkey] if gkey else [],
         "model": (cfg.get("model") or os.environ.get("GROQ_MODEL")
                   or "llama-3.3-70b-versatile").strip(),
         "big_context": False,
@@ -608,28 +617,38 @@ def _retry_after_secs(resp):
 
 
 def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
-    """OpenAI-compatible chat call for whichever provider config/ai selects
-    (Groq or a generic endpoint like Bynara). Paces to TPM when set, retries 429."""
+    """OpenAI-compatible chat call (Groq or Bynara). Tries each configured key in
+    turn: a 429 is retried a couple times on the same key, any other error (or a
+    persistent 429) fails over to the next key. Paces to TPM only when tpm>0."""
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
+    keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
+    if not keys:
+        raise RuntimeError("no AI API key configured")
     est = _est_tokens(messages, max_tokens)
-    last = ""
-    for _ in range(4):
-        _ai_pace(est, ai.get("tpm", 0))
-        r = requests.post(ai["base_url"],
-                          headers={"Authorization": "Bearer " + ai["key"],
-                                   "Content-Type": "application/json"},
-                          json=body, timeout=120)
-        if r.status_code == 200:
-            return r.json()["choices"][0]["message"]["content"]
-        if r.status_code == 429:              # rate limited — wait and retry
-            last = r.text[:200]
-            time.sleep(_retry_after_secs(r))
-            continue
-        raise RuntimeError("AI %s: %s" % (r.status_code, r.text[:200]))
-    raise RuntimeError("AI rate limit (429) after retries: " + last)
+    last = "unknown error"
+    for ki, key in enumerate(keys):
+        for _ in range(3):
+            _ai_pace(est, ai.get("tpm", 0))
+            try:
+                r = requests.post(ai["base_url"],
+                                  headers={"Authorization": "Bearer " + key,
+                                           "Content-Type": "application/json"},
+                                  json=body, timeout=120)
+            except requests.RequestException as exc:
+                last = "network (key %d): %s" % (ki + 1, exc)
+                break                          # → next key
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"]
+            if r.status_code == 429:           # limited — brief retry, else next key
+                last = "429 (key %d): %s" % (ki + 1, r.text[:120])
+                time.sleep(_retry_after_secs(r))
+                continue
+            last = "%s (key %d): %s" % (r.status_code, ki + 1, r.text[:120])
+            break                              # 401/402/5xx → next key
+    raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
 
 
 def _chunk_words(text, size_chars=9000):
@@ -877,10 +896,10 @@ def api_study():
         return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
 
     ai = _load_ai_config()
-    if not ai["key"]:
+    if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
-                        "detail": "Set an AI key in the admin panel (config/ai) — "
-                                  "Groq, or a Study AI provider (e.g. Bynara)."}), 503
+                        "detail": "Add an AI key in the admin panel "
+                                  "(Study AI \u2014 Bynara, or Groq)."}), 503
     model = ai["model"]
 
     ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, model)
@@ -921,7 +940,8 @@ def api_study():
 
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
             "out_lang": out_lang, "model": model,
-            "provider": "bynara/custom" if ai["base_url"] != GROQ_URL else "groq",
+            "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
+            "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count")}
     data.update(result)

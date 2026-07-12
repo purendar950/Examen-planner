@@ -568,21 +568,16 @@ async function saveGroqConfig() {
    base URL blank makes /api/study fall back to the Groq key above. The key
    lives only in Firestore — never in the codebase. */
 async function saveStudyAiConfig() {
-  const base  = (document.getElementById('study-base-url')   || {}).value || '';
-  const key   = (document.getElementById('study-api-key')    || {}).value || '';
-  const model = (document.getElementById('study-model')      || {}).value || '';
-  const big   = !!(document.getElementById('study-bigcontext') || {}).checked;
-  const b = base.trim(), k = key.trim(), m = model.trim();
-  if (b && !/^https?:\/\//.test(b)) { showToast('⚠️ Base URL http(s):// se start hona chahiye'); return; }
-  if (b && !k) { showToast('⚠️ Provider ke liye API key bhi daalo (ya base URL blank karo)'); return; }
+  const rawKeys = (document.getElementById('study-api-keys') || {}).value || '';
+  const model   = (document.getElementById('study-model')   || {}).value || 'mistral-large';
+  const keys = rawKeys.split(/[\n,]+/).map(function(k){ return k.trim(); }).filter(Boolean);
   try {
     await db.collection('config').doc('ai').set({
-      studyBaseUrl: b, studyApiKey: k, studyModel: m, studyBigContext: big,
+      studyApiKeys: keys, studyModel: model.trim(),
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-    AI_CONFIG.studyBaseUrl = b; AI_CONFIG.studyApiKey = k;
-    AI_CONFIG.studyModel = m; AI_CONFIG.studyBigContext = big;
-    showToast('✅ Study AI provider saved!');
+    AI_CONFIG.studyApiKeys = keys; AI_CONFIG.studyModel = model.trim();
+    showToast('✅ Study AI saved (' + keys.length + ' key' + (keys.length === 1 ? '' : 's') + ')');
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }
@@ -755,36 +750,35 @@ function renderTelegram() {
     '</div>' +
     '</div>';
 
-  /* ── Study AI Provider (Notes/Quiz) Card ── */
-  var sBase  = (AI_CONFIG && AI_CONFIG.studyBaseUrl) || '';
-  var sKey   = (AI_CONFIG && AI_CONFIG.studyApiKey) || '';
-  var sModel = (AI_CONFIG && AI_CONFIG.studyModel) || '';
-  var sBig   = !(AI_CONFIG && AI_CONFIG.studyBigContext === false);   // default ON
+  /* ── Study AI (Notes/Quiz) Card — Bynara: key(s) + model only ── */
+  var sKeysRaw = (AI_CONFIG && AI_CONFIG.studyApiKeys)
+                 || (AI_CONFIG && AI_CONFIG.studyApiKey ? [AI_CONFIG.studyApiKey] : []);
+  var sKeysArr = Array.isArray(sKeysRaw) ? sKeysRaw
+                 : String(sKeysRaw).split(/[\n,]+/).map(function(k){return k.trim();}).filter(Boolean);
+  var sKeysText = sKeysArr.join('\n');
+  var sModel = (AI_CONFIG && AI_CONFIG.studyModel) || 'mistral-large';
+  var BYNARA_MODELS = ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3'];
+  if (BYNARA_MODELS.indexOf(sModel) === -1) BYNARA_MODELS.unshift(sModel);
+  var modelOpts = BYNARA_MODELS.map(function(m){
+    return '<option value="' + esc(m) + '"' + (m === sModel ? ' selected' : '') + '>' + esc(m) + '</option>';
+  }).join('');
   s += '<div class="card" style="margin-bottom:12px;">' +
-    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz) — optional provider</h3>' +
+    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz) — Bynara</h3>' +
     '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
-      'Transcript → notes/quiz/summary (<code>/api/study</code>) ke liye. Koi bhi OpenAI-compatible ' +
-      'endpoint (jaise <b>Bynara</b> — ~1M context, isliye poori lecture bina chunking ke chalti hai). ' +
-      'Blank chhodo to Groq key (upar wali) use hogi.' +
+      'Transcript → notes/quiz (<code>/api/study</code>). ~1M context, so poori lecture ek hi call mein. ' +
+      '<b>Ek se zyada key</b> daal sakte ho (har line pe ek) — ek limit/fail ho to agli apne aap use hogi.' +
     '</div>' +
-    '<input id="study-base-url" placeholder="Base URL e.g. https://router.bynara.id/v1/chat/completions" ' +
-      'value="' + esc(sBase) + '" style="width:100%;font-family:monospace;font-size:.8rem;margin-bottom:8px;">' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
-      '<input id="study-api-key" type="password" placeholder="API Key" value="' + esc(sKey) + '" ' +
-        'style="flex:1;min-width:220px;font-family:monospace;font-size:.82rem;">' +
-      '<button class="btn btn-gray" onclick="var i=document.getElementById(\'study-api-key\');i.type=i.type===\'password\'?\'text\':\'password\';">👁 Show/Hide</button>' +
-    '</div>' +
-    '<input id="study-model" placeholder="model e.g. mistral-large / tencent-hy3 / mistral-medium-3-5" ' +
-      'value="' + esc(sModel) + '" style="width:100%;font-size:.82rem;margin-bottom:8px;">' +
+    '<label style="font-size:.8rem;color:#555;">API key(s) — one per line</label>' +
+    '<textarea id="study-api-keys" placeholder="key1&#10;key2&#10;key3" ' +
+      'style="width:100%;min-height:72px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(sKeysText) + '</textarea>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-      '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer;">' +
-        '<input id="study-bigcontext" type="checkbox"' + (sBig ? ' checked' : '') + '> Large context (send full transcript, no chunking)' +
-      '</label>' +
+      '<label style="font-size:.85rem;">Model</label>' +
+      '<select id="study-model" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:200px;">' + modelOpts + '</select>' +
       '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
     '</div>' +
     '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
-      (sBase ? ('✅ Provider set · model: <b>' + esc(sModel || '(none)') + '</b> · ' + (sBig ? 'large-context ON' : 'chunking mode'))
-             : '⚪ Using Groq key above') +
+      (sKeysArr.length ? ('✅ ' + sKeysArr.length + ' key(s) · model: <b>' + esc(sModel) + '</b>')
+                       : '⚪ No Bynara key — /api/study will use the Groq key above') +
     '</div>' +
     '</div>';
 
