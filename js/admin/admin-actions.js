@@ -751,6 +751,122 @@ async function tgToggleUser(uid) {
   } catch(e) { showToast('Update failed: ' + e.message); }
 }
 
+/* Load only the AI config docs (config/ai + config/aiLimits) for the AI Study
+   tab — lighter than loadTelegramData (no user docs). */
+async function loadAiStudyData() {
+  try {
+    const aiSnap = await db.collection('config').doc('ai').get();
+    AI_CONFIG = { groqApiKey:'', model:'llama-3.1-8b-instant', enabled:false, ...(aiSnap.exists ? aiSnap.data() : {}), loaded: true };
+  } catch(e) { AI_CONFIG = { groqApiKey:'', model:'llama-3.1-8b-instant', enabled:false, loaded: true }; }
+  try {
+    const lSnap = await db.collection('config').doc('aiLimits').get();
+    AI_LIMITS = { unlimited:{}, unlimitedEmails:[], focusUsers:{}, focusEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, ...(lSnap.exists ? lSnap.data() : {}), loaded: true };
+  } catch(e) { AI_LIMITS = { unlimited:{}, unlimitedEmails:[], focusUsers:{}, focusEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, loaded: true }; }
+  render();
+}
+
+/* Render the dedicated 🎓 AI Study admin tab:
+   Study AI provider (Bynara keys/model) · AI Study Controls (regenerate + focus
+   box) · AI Study Usage Limits (rate limits + unlimited grant). */
+function renderAiStudy() {
+  if (!AI_CONFIG.loaded) return '<div class="muted" style="padding:16px;">Loading AI Study settings…</div>';
+  var s = '<div class="muted" style="font-size:.8rem;margin-bottom:12px;line-height:1.6;">' +
+    'Everything for the <b>🎓 AI Study</b> feature (transcript → notes / quiz / cards / tutor) in the YouTube tab. ' +
+    'Keys &amp; models, what users can see, and usage limits.' +
+    '</div>';
+
+  /* ── Study AI (Notes/Quiz) Card — Bynara: key(s) + model only ── */
+  var sKeysRaw = (AI_CONFIG && AI_CONFIG.studyApiKeys)
+                 || (AI_CONFIG && AI_CONFIG.studyApiKey ? [AI_CONFIG.studyApiKey] : []);
+  var sKeysArr = Array.isArray(sKeysRaw) ? sKeysRaw
+                 : String(sKeysRaw).split(/[\n,]+/).map(function(k){return k.trim();}).filter(Boolean);
+  var sKeysText = sKeysArr.join('\n');
+  var sModel = (AI_CONFIG && AI_CONFIG.studyModel) || 'mistral-large';
+  var BYNARA_MODELS = ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3'];
+  if (BYNARA_MODELS.indexOf(sModel) === -1) BYNARA_MODELS.unshift(sModel);
+  var modelOpts = BYNARA_MODELS.map(function(m){
+    return '<option value="' + esc(m) + '"' + (m === sModel ? ' selected' : '') + '>' + esc(m) + '</option>';
+  }).join('');
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz) — Bynara</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+      'Transcript → notes/quiz (<code>/api/study</code>). ~1M context, so poori lecture ek hi call mein. ' +
+      '<b>Ek se zyada key</b> daal sakte ho (har line pe ek) — ek limit/fail ho to agli apne aap use hogi.' +
+    '</div>' +
+    '<label style="font-size:.8rem;color:#555;">API key(s) — one per line</label>' +
+    '<textarea id="study-api-keys" placeholder="key1&#10;key2&#10;key3" ' +
+      'style="width:100%;min-height:72px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(sKeysText) + '</textarea>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+      '<label style="font-size:.85rem;">Model</label>' +
+      '<select id="study-model" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:200px;">' + modelOpts + '</select>' +
+      '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
+    '</div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
+      (sKeysArr.length ? ('✅ ' + sKeysArr.length + ' key(s) · model: <b>' + esc(sModel) + '</b>')
+                       : '⚪ No Bynara key — /api/study will use the Groq key from the Telegram tab') +
+    '</div>' +
+    '</div>';
+
+  /* ── AI Study Controls Card — Regenerate button + focus box show/hide ── */
+  var showRegen  = !!(AI_CONFIG && AI_CONFIG.showRegenerate);
+  var showFocus  = !!(AI_CONFIG && AI_CONFIG.showFocusBox);
+  var focusEmails = (AI_LIMITS && Array.isArray(AI_LIMITS.focusEmails)) ? AI_LIMITS.focusEmails.join('\n') : '';
+  var focusCount  = (AI_LIMITS && AI_LIMITS.focusUsers) ? Object.keys(AI_LIMITS.focusUsers).length : 0;
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">🎓 AI Study — Controls</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:8px;line-height:1.6;">' +
+      'The <b>↻ Regenerate</b> button (on Notes / Insights / Quiz / Cards) lets users throw away ' +
+      'a saved result and generate a fresh one. It uses AI quota + counts against the rate limit, ' +
+      'so it stays <b>hidden by default</b>.' +
+    '</div>' +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:4px;">' +
+      '<input id="study-show-regen" type="checkbox"' + (showRegen ? ' checked' : '') + '> Show the “↻ Regenerate” button' +
+    '</label>' +
+    '<div class="muted" style="font-size:.72rem;margin-bottom:12px;">' +
+      (showRegen ? '🟢 Regenerate is VISIBLE to everyone' : '⚪ Regenerate is HIDDEN (default)') +
+    '</div>' +
+    '<hr style="border:none;border-top:1px solid var(--border,#ddd);margin:10px 0;">' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:8px;line-height:1.6;">' +
+      'The <b>focus box</b> on <b>Quiz &amp; Cards</b> lets a user type what kind of questions/cards they want ' +
+      '(e.g. a topic or type). Hidden by default. Turn it on for <b>everyone</b>, and/or allow it for ' +
+      '<b>specific users</b> below (they get it even when the global switch is off).' +
+    '</div>' +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:8px;">' +
+      '<input id="study-show-focus" type="checkbox"' + (showFocus ? ' checked' : '') + '> Show the focus box for everyone' +
+    '</label>' +
+    '<label style="font-size:.8rem;color:#555;">Allow focus box for these users — one email per line (' + focusCount + ' active)</label>' +
+    '<textarea id="study-focus-emails" placeholder="user1@email.com&#10;user2@email.com" style="width:100%;min-height:60px;font-family:monospace;font-size:.8rem;margin:4px 0 10px;">' + esc(focusEmails) + '</textarea>' +
+    '<button class="btn btn-blue" onclick="saveStudyControls()">💾 Save AI Study controls</button>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
+      (showFocus ? '🟢 Focus box VISIBLE to everyone' : (focusCount ? ('🟡 Focus box hidden globally — allowed for ' + focusCount + ' user(s)') : '⚪ Focus box HIDDEN (default)')) +
+    '</div>' +
+    '</div>';
+
+  /* ── AI Study usage limits + grant unlimited Card ── */
+  var ailEmails = (AI_LIMITS && Array.isArray(AI_LIMITS.unlimitedEmails)) ? AI_LIMITS.unlimitedEmails.join('\n') : '';
+  var ailStudy = (AI_LIMITS && AI_LIMITS.studyPerHour != null) ? AI_LIMITS.studyPerHour : 15;
+  var ailTutorH = (AI_LIMITS && AI_LIMITS.tutorPerHour != null) ? AI_LIMITS.tutorPerHour : 20;
+  var ailTutorD = (AI_LIMITS && AI_LIMITS.tutorPerDay != null) ? AI_LIMITS.tutorPerDay : 80;
+  var ailCount = (AI_LIMITS && AI_LIMITS.unlimited) ? Object.keys(AI_LIMITS.unlimited).length : 0;
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">🎓 AI Study — Usage Limits</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+      'Per-IP rate limits for Notes/Quiz/Tutor (prevents quota abuse). Cached results don\'t count. ' +
+      'Users listed below get <b>unlimited</b> access (bypass all limits).' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
+      '<label style="font-size:.78rem;">New generations/hr <input id="ail-study" type="number" min="0" value="' + ailStudy + '" style="width:70px;margin-left:4px;"></label>' +
+      '<label style="font-size:.78rem;">Tutor msgs/hr <input id="ail-tutor-h" type="number" min="0" value="' + ailTutorH + '" style="width:70px;margin-left:4px;"></label>' +
+      '<label style="font-size:.78rem;">Tutor msgs/day <input id="ail-tutor-d" type="number" min="0" value="' + ailTutorD + '" style="width:70px;margin-left:4px;"></label>' +
+    '</div>' +
+    '<label style="font-size:.8rem;color:#555;">Unlimited users — one email per line (' + ailCount + ' active)</label>' +
+    '<textarea id="ail-emails" placeholder="user1@email.com&#10;user2@email.com" style="width:100%;min-height:66px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(ailEmails) + '</textarea>' +
+    '<button class="btn btn-blue" onclick="saveAiLimits()">💾 Save AI Limits</button>' +
+    '</div>';
+
+  return s;
+}
+
 /* Render the Telegram admin tab */
 function renderTelegram() {
   const total   = TG_USERS.length;
@@ -826,96 +942,8 @@ function renderTelegram() {
     '</div>' +
     '</div>';
 
-  /* ── Study AI (Notes/Quiz) Card — Bynara: key(s) + model only ── */
-  var sKeysRaw = (AI_CONFIG && AI_CONFIG.studyApiKeys)
-                 || (AI_CONFIG && AI_CONFIG.studyApiKey ? [AI_CONFIG.studyApiKey] : []);
-  var sKeysArr = Array.isArray(sKeysRaw) ? sKeysRaw
-                 : String(sKeysRaw).split(/[\n,]+/).map(function(k){return k.trim();}).filter(Boolean);
-  var sKeysText = sKeysArr.join('\n');
-  var sModel = (AI_CONFIG && AI_CONFIG.studyModel) || 'mistral-large';
-  var BYNARA_MODELS = ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3'];
-  if (BYNARA_MODELS.indexOf(sModel) === -1) BYNARA_MODELS.unshift(sModel);
-  var modelOpts = BYNARA_MODELS.map(function(m){
-    return '<option value="' + esc(m) + '"' + (m === sModel ? ' selected' : '') + '>' + esc(m) + '</option>';
-  }).join('');
-  s += '<div class="card" style="margin-bottom:12px;">' +
-    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz) — Bynara</h3>' +
-    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
-      'Transcript → notes/quiz (<code>/api/study</code>). ~1M context, so poori lecture ek hi call mein. ' +
-      '<b>Ek se zyada key</b> daal sakte ho (har line pe ek) — ek limit/fail ho to agli apne aap use hogi.' +
-    '</div>' +
-    '<label style="font-size:.8rem;color:#555;">API key(s) — one per line</label>' +
-    '<textarea id="study-api-keys" placeholder="key1&#10;key2&#10;key3" ' +
-      'style="width:100%;min-height:72px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(sKeysText) + '</textarea>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-      '<label style="font-size:.85rem;">Model</label>' +
-      '<select id="study-model" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:200px;">' + modelOpts + '</select>' +
-      '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
-    '</div>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
-      (sKeysArr.length ? ('✅ ' + sKeysArr.length + ' key(s) · model: <b>' + esc(sModel) + '</b>')
-                       : '⚪ No Bynara key — /api/study will use the Groq key above') +
-    '</div>' +
-    '</div>';
-
-  /* ── AI Study Controls Card — Regenerate button show/hide ── */
-  var showRegen  = !!(AI_CONFIG && AI_CONFIG.showRegenerate);
-  var showFocus  = !!(AI_CONFIG && AI_CONFIG.showFocusBox);
-  var focusEmails = (AI_LIMITS && Array.isArray(AI_LIMITS.focusEmails)) ? AI_LIMITS.focusEmails.join('\n') : '';
-  var focusCount  = (AI_LIMITS && AI_LIMITS.focusUsers) ? Object.keys(AI_LIMITS.focusUsers).length : 0;
-  s += '<div class="card" style="margin-bottom:12px;">' +
-    '<h3 style="margin:0 0 4px;">🎓 AI Study — Controls</h3>' +
-    /* Regenerate toggle */
-    '<div class="muted" style="font-size:.74rem;margin-bottom:8px;line-height:1.6;">' +
-      'The <b>↻ Regenerate</b> button (on Notes / Insights / Quiz / Cards) lets users throw away ' +
-      'a saved result and generate a fresh one. It uses AI quota + counts against the rate limit, ' +
-      'so it stays <b>hidden by default</b>.' +
-    '</div>' +
-    '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:4px;">' +
-      '<input id="study-show-regen" type="checkbox"' + (showRegen ? ' checked' : '') + '> Show the “↻ Regenerate” button' +
-    '</label>' +
-    '<div class="muted" style="font-size:.72rem;margin-bottom:12px;">' +
-      (showRegen ? '🟢 Regenerate is VISIBLE to everyone' : '⚪ Regenerate is HIDDEN (default)') +
-    '</div>' +
-    '<hr style="border:none;border-top:1px solid var(--border,#ddd);margin:10px 0;">' +
-    /* Focus box toggle + per-user grant */
-    '<div class="muted" style="font-size:.74rem;margin-bottom:8px;line-height:1.6;">' +
-      'The <b>focus box</b> on <b>Quiz &amp; Cards</b> lets a user type what kind of questions/cards they want ' +
-      '(e.g. a topic or type). Hidden by default. Turn it on for <b>everyone</b>, and/or allow it for ' +
-      '<b>specific users</b> below (they get it even when the global switch is off).' +
-    '</div>' +
-    '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:8px;">' +
-      '<input id="study-show-focus" type="checkbox"' + (showFocus ? ' checked' : '') + '> Show the focus box for everyone' +
-    '</label>' +
-    '<label style="font-size:.8rem;color:#555;">Allow focus box for these users — one email per line (' + focusCount + ' active)</label>' +
-    '<textarea id="study-focus-emails" placeholder="user1@email.com&#10;user2@email.com" style="width:100%;min-height:60px;font-family:monospace;font-size:.8rem;margin:4px 0 10px;">' + esc(focusEmails) + '</textarea>' +
-    '<button class="btn btn-blue" onclick="saveStudyControls()">💾 Save AI Study controls</button>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
-      (showFocus ? '🟢 Focus box VISIBLE to everyone' : (focusCount ? ('🟡 Focus box hidden globally — allowed for ' + focusCount + ' user(s)') : '⚪ Focus box HIDDEN (default)')) +
-    '</div>' +
-    '</div>';
-
-  /* ── AI Study usage limits + grant unlimited Card ── */
-  var ailEmails = (AI_LIMITS && Array.isArray(AI_LIMITS.unlimitedEmails)) ? AI_LIMITS.unlimitedEmails.join('\n') : '';
-  var ailStudy = (AI_LIMITS && AI_LIMITS.studyPerHour != null) ? AI_LIMITS.studyPerHour : 15;
-  var ailTutorH = (AI_LIMITS && AI_LIMITS.tutorPerHour != null) ? AI_LIMITS.tutorPerHour : 20;
-  var ailTutorD = (AI_LIMITS && AI_LIMITS.tutorPerDay != null) ? AI_LIMITS.tutorPerDay : 80;
-  var ailCount = (AI_LIMITS && AI_LIMITS.unlimited) ? Object.keys(AI_LIMITS.unlimited).length : 0;
-  s += '<div class="card" style="margin-bottom:12px;">' +
-    '<h3 style="margin:0 0 4px;">🎓 AI Study — Usage Limits</h3>' +
-    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
-      'Per-IP rate limits for Notes/Quiz/Tutor (prevents quota abuse). Cached results don\'t count. ' +
-      'Users listed below get <b>unlimited</b> access (bypass all limits).' +
-    '</div>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
-      '<label style="font-size:.78rem;">New generations/hr <input id="ail-study" type="number" min="0" value="' + ailStudy + '" style="width:70px;margin-left:4px;"></label>' +
-      '<label style="font-size:.78rem;">Tutor msgs/hr <input id="ail-tutor-h" type="number" min="0" value="' + ailTutorH + '" style="width:70px;margin-left:4px;"></label>' +
-      '<label style="font-size:.78rem;">Tutor msgs/day <input id="ail-tutor-d" type="number" min="0" value="' + ailTutorD + '" style="width:70px;margin-left:4px;"></label>' +
-    '</div>' +
-    '<label style="font-size:.8rem;color:#555;">Unlimited users — one email per line (' + ailCount + ' active)</label>' +
-    '<textarea id="ail-emails" placeholder="user1@email.com&#10;user2@email.com" style="width:100%;min-height:66px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(ailEmails) + '</textarea>' +
-    '<button class="btn btn-blue" onclick="saveAiLimits()">💾 Save AI Limits</button>' +
-    '</div>';
+  /* AI Study cards (Study AI keys, Controls, Usage Limits) moved to the
+     dedicated 🎓 AI Study tab — see renderAiStudy(). */
 
   /* ── Send Controls Card ── */
   s += '<div class="card" style="margin-bottom:12px;">' +
