@@ -1263,11 +1263,22 @@ def api_status():
     raw_arg = (request.args.get("id") or request.args.get("v")
                or request.args.get("url") or "").strip()
     video_id = _parse_video_id(raw_arg)
-    out = {"ok": True, "persistent": bool(_fb_db), "cachedTranscript": False}
+    out = {"ok": True, "persistent": bool(_fb_db), "cachedTranscript": False,
+           "showRegenerate": False}
     if video_id:
         try:
             fs = _fs_get("transcripts", _fs_doc_id(video_id, "auto"))
             out["cachedTranscript"] = bool(fs and fs.get("segments"))
+        except Exception:  # noqa: BLE001
+            pass
+    # UI flag managed by the admin panel (config/ai.showRegenerate). The browser
+    # can't read config/ai directly (Firestore rules block it), so we surface it
+    # here. Default False = Regenerate button hidden for everyone.
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                out["showRegenerate"] = bool((doc.to_dict() or {}).get("showRegenerate", False))
         except Exception:  # noqa: BLE001
             pass
     return jsonify(out)
