@@ -170,6 +170,14 @@ _cache_lock = threading.Lock()
 # 512MB / low-CPU free tiers; raise it on bigger instances via env.
 _extract_sem = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_EXTRACT", "1")))
 
+# ---- transcript cache (captions) -----------------------------------------
+# Transcripts never change, so cache them long and GLOBALLY by videoId+lang.
+# This is what keeps YouTube fetches rare: the first viewer of a video pays the
+# fetch; everyone after (across all users) gets a cache hit. key: "id:lang".
+TRANSCRIPT_TTL = int(os.environ.get("TRANSCRIPT_TTL", str(30 * 24 * 3600)))  # 30 days
+_transcript_cache = {}
+_transcript_lock = threading.Lock()
+
 
 def _base_ydl_opts():
     opts = {
@@ -261,6 +269,143 @@ def _direct_url(raw, itag):
     return None
 
 
+# ------------------------------------------------------------------ transcript
+import re
+
+
+def _parse_video_id(s):
+    """Accept a bare 11-char id OR any common URL (watch/live/youtu.be/shorts/
+    embed). The trailing boundary makes sure we grab EXACTLY the 11-char id and
+    never a slice of a longer query token like ?si=... ."""
+    s = (s or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_-]{11}", s):
+        return s
+    m = re.search(
+        r"(?:v=|/live/|/shorts/|/embed/|/v/|youtu\.be/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])",
+        s,
+    )
+    return m.group(1) if m else None
+
+
+def _transcript_ydl_opts(client):
+    """Base opts (cookies + PO token) + a specific YouTube player_client.
+    The 'android' client returns caption tracks without cookies far more
+    reliably than 'web' (verified in the transcript-demo)."""
+    opts = dict(_base_ydl_opts())
+    ea = dict(opts.get("extractor_args") or {})
+    ea["youtube"] = {"player_client": [client]}
+    opts["extractor_args"] = ea
+    return opts
+
+
+def _parse_json3(data):
+    """YouTube json3 caption payload -> [{start, dur, text}] (blanks skipped)."""
+    segments = []
+    for ev in (data.get("events") or []):
+        segs = ev.get("segs")
+        if not segs:
+            continue
+        text = "".join(s.get("utf8", "") for s in segs).strip()
+        if not text:
+            continue
+        segments.append({
+            "start": round(ev.get("tStartMs", 0) / 1000.0, 2),
+            "dur": round(ev.get("dDurationMs", 0) / 1000.0, 2),
+            "text": text,
+        })
+    return segments
+
+
+def _pick_caption_url(raw, lang):
+    """Choose a json3 caption track URL. Prefers manual over auto, and the
+    requested language (then its base code, then en/hi, then anything).
+    Returns (url, chosen_lang, kind) where kind is 'manual'|'auto'|None."""
+    subs = raw.get("subtitles") or {}
+    autos = raw.get("automatic_captions") or {}
+
+    def json3_url(tracks):
+        for t in (tracks or []):
+            if t.get("ext") == "json3" and t.get("url"):
+                return t["url"]
+        for t in (tracks or []):          # fall back to any format with a url
+            if t.get("url"):
+                return t["url"]
+        return None
+
+    wanted = [lang, (lang or "").split("-")[0], "en", "hi"]
+    for src, kind in ((subs, "manual"), (autos, "auto")):
+        for lg in wanted:
+            if lg and lg in src:
+                u = json3_url(src[lg])
+                if u:
+                    return u, lg, kind
+    for src, kind in ((subs, "manual"), (autos, "auto")):   # anything available
+        for lg, tracks in src.items():
+            u = json3_url(tracks)
+            if u:
+                return u, lg, kind
+    return None, None, None
+
+
+def _extract_transcript(video_id, lang="en", force=False):
+    """Fetch + parse a video's captions. Reuses the global transcript cache and
+    the extraction semaphore. Tries the android client first, then web."""
+    ckey = "%s:%s" % (video_id, lang)
+    now = time.time()
+    with _transcript_lock:
+        hit = _transcript_cache.get(ckey)
+        if hit and not force and (now - hit["ts"] < TRANSCRIPT_TTL):
+            return hit["data"]
+
+    with _extract_sem:
+        with _transcript_lock:               # re-check after acquiring the sem
+            hit = _transcript_cache.get(ckey)
+            if hit and not force and (time.time() - hit["ts"] < TRANSCRIPT_TTL):
+                return hit["data"]
+
+        url = "https://www.youtube.com/watch?v=" + video_id
+        raw = None
+        last_err = None
+        for client in ("android", "web"):
+            try:
+                with yt_dlp.YoutubeDL(_transcript_ydl_opts(client)) as ydl:
+                    raw = ydl.extract_info(url, download=False)
+                if raw.get("subtitles") or raw.get("automatic_captions"):
+                    break                     # got tracks — stop here
+            except yt_dlp.utils.DownloadError as exc:
+                last_err = exc
+                continue
+        if raw is None:
+            raise last_err or RuntimeError("extraction failed")
+
+        cap_url, chosen_lang, kind = _pick_caption_url(raw, lang)
+        segments = []
+        if cap_url:
+            try:
+                r = requests.get(cap_url, timeout=REQUEST_TIMEOUT)
+                if r.status_code == 200 and r.text.strip():
+                    segments = _parse_json3(r.json())
+            except Exception as exc:          # noqa: BLE001
+                log.warning("caption download/parse failed: %s", exc)
+
+        text = " ".join(s["text"] for s in segments)
+        data = {
+            "id": video_id,
+            "title": raw.get("title"),
+            "requested_lang": lang,
+            "chosen_lang": chosen_lang,
+            "kind": kind,                     # manual | auto | None
+            "languages_manual": sorted((raw.get("subtitles") or {}).keys()),
+            "segment_count": len(segments),
+            "char_count": len(text),
+            "segments": segments,
+            "text": text,
+        }
+        with _transcript_lock:
+            _transcript_cache[ckey] = {"ts": time.time(), "data": data}
+    return data
+
+
 # ------------------------------------------------------------------ routes
 @app.get("/health")
 def health():
@@ -276,6 +421,7 @@ def health():
         "cookies": _HAS_COOKIES,
         "cookie_source": _cookie_source,   # firestore | env | file | none
         "cached_videos": len(_cache),
+        "cached_transcripts": len(_transcript_cache),
     })
 
 
@@ -306,6 +452,86 @@ def api_info():
         return jsonify({"error": "extract_failed", "detail": msg[:300]}), 502
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "server_error", "detail": str(exc)[:300]}), 500
+
+
+@app.get("/api/transcript")
+def api_transcript():
+    """Return a video's captions as clean text + timestamped segments.
+    Accepts ?id=VIDEOID (or ?url=/?v= with a full URL) and ?lang=en|hi|...
+    No video/audio is downloaded — captions only."""
+    raw_arg = (request.args.get("id") or request.args.get("url")
+               or request.args.get("v") or "").strip()
+    lang = (request.args.get("lang") or "en").strip() or "en"
+    video_id = _parse_video_id(raw_arg)
+    if not video_id:
+        return jsonify({"error": "missing or invalid ?id "
+                        "(11-char video id or a YouTube URL)"}), 400
+    try:
+        data = _extract_transcript(video_id, lang)
+        if not data["segments"]:
+            # Not an error — the video may simply have no captions for this lang.
+            return jsonify({**data, "warning": "no_captions",
+                            "detail": "No captions found for this video/language."}), 200
+        return jsonify(data)
+    except yt_dlp.utils.DownloadError as exc:
+        msg = str(exc)
+        if "confirm you" in msg or "bot" in msg or "Sign in" in msg:
+            # Same self-heal as /api/info: an admin may have just pasted fresh
+            # cookies — pull the latest from Firestore and retry once.
+            if refresh_cookies() and _cookie_source == "firestore":
+                try:
+                    return jsonify(_extract_transcript(video_id, lang, force=True))
+                except Exception:  # noqa: BLE001
+                    pass
+            return jsonify({"error": "youtube_bot_check",
+                            "detail": "This video is bot-gated. Update the YouTube cookies in the admin panel."}), 403
+        return jsonify({"error": "extract_failed", "detail": msg[:300]}), 502
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "server_error", "detail": str(exc)[:300]}), 500
+
+
+# Small self-contained page to click-test the transcript endpoint in-app.
+# Pure static HTML + client-side fetch (no server-side templating).
+_TRANSCRIPT_DEMO_HTML = """<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Transcript Demo</title><style>
+ body{font-family:system-ui,Arial,sans-serif;max-width:760px;margin:32px auto;padding:0 16px;color:#222}
+ h1{font-size:20px} input,button{font-size:15px;padding:9px;border-radius:8px;border:1px solid #ccc}
+ #v{width:64%} #lang{width:60px} button{background:#111;color:#fff;border:none;cursor:pointer}
+ .seg{padding:3px 0;border-bottom:1px solid #eee} .t{color:#0969da;font-variant-numeric:tabular-nums}
+ pre{background:#0d1117;color:#c9d1d9;padding:14px;border-radius:10px;overflow:auto;font-size:12px}
+ .err{background:#ffebe9;color:#82071e;padding:12px;border-radius:8px} .muted{color:#666}
+</style></head><body>
+<h1>YouTube Transcript Demo <span class="muted">(/api/transcript)</span></h1>
+<p class="muted">Paste a YouTube URL or 11-char ID. Captions only — no video download.</p>
+<div><input id="v" placeholder="YouTube URL or 11-char ID">
+ <input id="lang" value="en"> <button onclick="go()">Fetch</button></div>
+<div id="out"></div>
+<script>
+async function go(){
+ const v=document.getElementById('v').value.trim();
+ const lang=document.getElementById('lang').value.trim()||'en';
+ const out=document.getElementById('out');
+ if(!v){out.innerHTML='<p class=err>Enter a URL or ID</p>';return;}
+ out.innerHTML='<p class=muted>Fetching…</p>';
+ try{
+  const r=await fetch('/api/transcript?id='+encodeURIComponent(v)+'&lang='+encodeURIComponent(lang));
+  const j=await r.json();
+  if(j.error){out.innerHTML='<p class=err><b>'+j.error+'</b><br>'+(j.detail||'')+'</p>';return;}
+  const segs=(j.segments||[]).slice(0,8).map(s=>'<div class=seg><span class=t>'+s.start.toFixed(1)+'s</span> &nbsp; '+s.text+'</div>').join('');
+  out.innerHTML='<h3>'+(j.title||'')+'</h3>'
+   +'<p><b>'+j.segment_count+'</b> segments, <b>'+j.char_count+'</b> chars &nbsp;|&nbsp; lang: '+(j.chosen_lang||'—')+' ('+(j.kind||'none')+')'
+   +(j.warning?' &nbsp;⚠️ '+j.warning:'')+'</p>'
+   +(segs?'<h4>First segments</h4>'+segs:'')
+   +'<h4>Full text</h4><pre>'+(j.text||'(empty)').slice(0,4000)+'</pre>';
+ }catch(e){out.innerHTML='<p class=err>'+e+'</p>';}
+}
+</script></body></html>"""
+
+
+@app.get("/transcript-demo")
+def transcript_demo():
+    return Response(_TRANSCRIPT_DEMO_HTML, mimetype="text/html")
 
 
 @app.get("/api/stream")
@@ -516,7 +742,9 @@ def api_tg_photo():
 def index():
     return jsonify({
         "service": "youtube-turbo-proxy",
-        "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG", "/send-photo", "/tg-photo?file_id=..."],
+        "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG",
+                      "/api/transcript?id=VIDEOID&lang=en", "/transcript-demo",
+                      "/send-photo", "/tg-photo?file_id=..."],
     })
 
 
