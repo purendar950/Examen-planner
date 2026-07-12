@@ -368,7 +368,9 @@ def _pick_caption_url(raw, lang):
     - explicit lang: that language (then its base code), then en/hi, then
       anything available.
     Prefers manual over auto. Returns (url, chosen_lang, kind)."""
-    subs = raw.get("subtitles") or {}
+    # Drop 'live_chat' — on live streams YouTube lists the live-chat replay as a
+    # "subtitle" track, but it has no real captions. It must never be selected.
+    subs = {k: v for k, v in (raw.get("subtitles") or {}).items() if k != "live_chat"}
     autos = raw.get("automatic_captions") or {}
 
     def json3_url(tracks):
@@ -416,8 +418,11 @@ def _pick_caption_url(raw, lang):
     seen = set()
     wanted = [x for x in order if x and not (x in seen or seen.add(x))]
 
-    for src, kind in ((subs, "manual"), (autos, "auto")):
-        for lg in wanted:
+    # Language priority dominates source: try each wanted language against both
+    # sources (manual preferred when the SAME language exists in both). This
+    # ensures the detected/native language wins over an unrelated manual track.
+    for lg in wanted:
+        for src, kind in ((subs, "manual"), (autos, "auto")):
             if lg in src:
                 u = json3_url(src[lg])
                 if u:
@@ -488,7 +493,7 @@ def _extract_transcript(video_id, lang="auto", force=False):
             "detected_language": raw.get("language"),   # what YouTube says the video is
             "chosen_lang": chosen_lang,                 # the caption track we used
             "kind": kind,                               # manual | auto | None
-            "languages_manual": sorted((raw.get("subtitles") or {}).keys()),
+            "languages_manual": sorted(k for k in (raw.get("subtitles") or {}) if k != "live_chat"),
             "languages_auto": sorted((raw.get("automatic_captions") or {}).keys()),
             "segment_count": len(segments),
             "char_count": len(text),
