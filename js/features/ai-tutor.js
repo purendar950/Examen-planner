@@ -132,6 +132,8 @@
       '.ai-md th,.ai-md td{border:1px solid var(--border,#2a3140);padding:5px 8px;font-size:.85em;text-align:left}',
       '.ai-ts{color:var(--accent,#00c896);cursor:pointer;font-weight:600;white-space:nowrap}',
       '.ai-scroll{max-height:60vh;overflow:auto;border:1px solid var(--border,#2a3140);border-radius:10px;padding:12px;background:var(--surface,#1b1f2a)}',
+      '.ai-dot{cursor:pointer;font-size:0.85rem;line-height:1;margin-right:6px}',
+      '.ai-dot.checking{color:#f59e0b}.ai-dot.off{color:#ef4444}.ai-dot.ready{color:#22c55e}.ai-dot.cached{color:#eab308}',
       '.ai-view-toggle{display:flex;gap:6px;margin-bottom:10px}',
       '.ai-view-toggle button{flex:1;cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--muted,#8b93a7);border-radius:8px;padding:7px 10px;font-size:0.78rem;font-weight:600;font-family:inherit}',
       '.ai-view-toggle button.on{background:var(--accent,#00c896);color:#04120d;border-color:var(--accent,#00c896)}',
@@ -365,7 +367,7 @@
     }
   }
   function panelHtml() {
-    return '<div class="ai-head"><span class="ai-title">🎓 AI Study</span>' +
+    return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">🎓 AI Study</span>' +
       '<select id="ai-lang" title="Output language" style="margin-left:auto">' +
       ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
       '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
@@ -375,6 +377,30 @@
   function ytLayout() { return document.querySelector('#page-youtube .yt-layout'); }
   function rightCol() { var l = ytLayout(); return l ? (l.querySelector('.yt-panel') || l.children[1]) : null; }
   function currentView() { return localStorage.getItem('aiView') === 'ai' ? 'ai' : 'course'; }
+
+  /* ── server/cache status dot: 🟠 checking · 🔴 offline · 🟢 ready · 🟡 cached ── */
+  var _statusVid = null;
+  function setDot(state, label) {
+    var d = document.getElementById('ai-status-dot');
+    if (d) { d.className = 'ai-dot ' + state; d.title = label; }
+  }
+  function checkStatus(vid) {
+    if (!document.getElementById('ai-status-dot')) return;
+    if (!vid) { setDot('off', 'No video playing'); return; }
+    setDot('checking', 'Checking server…');
+    var ctrl = ('AbortController' in window) ? new AbortController() : null;
+    var to = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
+    fetch(BACKEND + '/api/status?id=' + encodeURIComponent(vid), ctrl ? { signal: ctrl.signal } : {})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        clearTimeout(to);
+        if (j && j.ok) {
+          if (j.cachedTranscript) setDot('cached', 'Transcript already generated — instant');
+          else setDot('ready', 'Server ready — will generate on first use');
+        } else setDot('off', 'Server error');
+      })
+      .catch(function () { clearTimeout(to); setDot('off', 'Server offline / waking up — tap to retry'); });
+  }
 
   function applyView() {
     var wrap = document.getElementById('yt-course-wrap');
@@ -392,6 +418,11 @@
       Array.prototype.forEach.call(t.querySelectorAll('button'), function (b) { b.classList.toggle('on', b.dataset.v === v); });
       var aiBtn = t.querySelector('button[data-v="ai"]');
       if (aiBtn) aiBtn.innerHTML = '🎓 AI Study' + (isPro() ? '' : ' 💎');
+    }
+    // refresh the status dot only when AI Study is shown and the video changed
+    if (v === 'ai') {
+      var cv = curVid();
+      if (cv !== _statusVid) { _statusVid = cv; checkStatus(cv); }
     }
   }
 
@@ -436,6 +467,8 @@
     });
     var lang = document.getElementById('ai-lang');
     if (lang) lang.onchange = function () { setLang(lang.value); };
+    var dot = document.getElementById('ai-status-dot');
+    if (dot) dot.onclick = function () { _statusVid = null; checkStatus(curVid()); };
     renderTabs(); renderBody();
     applyView();
   }
