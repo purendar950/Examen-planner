@@ -862,14 +862,17 @@ def _gen_notes(transcript, out_lang, ai, head):
     return "\n\n".join(parts)
 
 
-def _gen_quiz(transcript, out_lang, ai, head, n):
+def _gen_quiz(transcript, out_lang, ai, head, n, focus=""):
     """Up to `n` MCQs, one per important point. Generated in batches (default 25/
     call), cycling through transcript sections, de-duplicating, so it scales to
-    100 and covers the whole lecture."""
+    100 and covers the whole lecture. `focus` (optional) steers what the questions
+    are about; blank = the most important points across the whole lecture."""
     sysmsg = _study_sys(out_lang) + " Output ONLY valid JSON."
     secs = _chunk_words(transcript, 10000) if ai.get("big_context") \
         else [_condense(transcript, out_lang, ai)]
     questions, seen = [], set()
+    focus_instr = (("IMPORTANT: focus the questions on \u2014 %s. Prioritise this "
+                    "topic/type; skip unrelated parts. " % focus) if focus else "")
     # smaller batches so each call's output stays small/fast (avoids CF 524)
     BATCH, i, stagnation = 12, 0, 0
     while len(questions) < n and stagnation <= len(secs):
@@ -883,7 +886,7 @@ def _gen_quiz(transcript, out_lang, ai, head, n):
                      + "\n- ".join(recent) + "\n\n")
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg},
-             {"role": "user", "content": head + avoid + ('Generate %d NEW multiple-'
+             {"role": "user", "content": head + focus_instr + avoid + ('Generate %d NEW multiple-'
               'choice questions on the important points in the content below. Each '
               'has exactly 4 options and one correct answer. Return JSON: '
               '{"questions":[{"question":"...","options":["a","b","c","d"],'
@@ -904,14 +907,14 @@ def _gen_quiz(transcript, out_lang, ai, head, n):
     return questions[:n]
 
 
-def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25):
+def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus=""):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
     if mode == "notes":
         return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head)}
     if mode == "quiz":
         return {"format": "json",
-                "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions)}
+                "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions, focus)}
     # summary / insights / flashcards work well from a condensed body
     body = _condense(transcript, out_lang, ai)
     if mode == "summary":
@@ -934,9 +937,10 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
                  "running out, shorten the bullets rather than cut the list.\n\n"
              ) + body}], ai, max_tokens=2500)}
     if mode == "flashcards":
+        fc_focus = (("Focus the flashcards on \u2014 %s. " % focus) if focus else "")
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
-             {"role": "user", "content": head + 'Create 8-12 flashcards. Return '
+             {"role": "user", "content": head + fc_focus + 'Create 8-12 flashcards. Return '
               'JSON: {"cards":[{"front":"...","back":"..."}]}.\n\n' + body}],
             ai, max_tokens=2000, json_mode=True)
         data = _safe_json(raw)
@@ -1109,8 +1113,21 @@ def api_study():
     force = (request.args.get("refresh") or request.args.get("nocache")
              or "").strip().lower() in ("1", "true", "yes")
 
-    ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q)
-    fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q)
+    # ?focus=... (quiz/flashcards only): optional user instruction on what kind of
+    # questions/cards to make. Empty = important points across the whole lecture.
+    focus = (request.args.get("focus") or "").strip()[:200]
+    if mode not in ("quiz", "flashcards"):
+        focus = ""                              # other modes ignore focus
+    fkey = re.sub(r"\s+", " ", focus).lower()[:120]
+
+    # keep the cache key IDENTICAL to before when there's no focus, so existing
+    # cached results are still reused; only a non-empty focus gets its own bucket.
+    if fkey:
+        ckey = "%s:%s:%s:%s:%s::%s" % (video_id, mode, out_lang, model, num_q, fkey)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q, fkey)
+    else:
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q)
     now = time.time()
     if not force:
         with _study_lock:
@@ -1160,7 +1177,8 @@ def api_study():
                         "transcript_lang": t.get("chosen_lang")}), 200
     try:
         result = _generate_study(mode, t["text"], out_lang, ai,
-                                 title=t.get("title"), num_questions=num_q)
+                                 title=t.get("title"), num_questions=num_q,
+                                 focus=focus)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
