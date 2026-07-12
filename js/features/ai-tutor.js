@@ -22,14 +22,23 @@
   function outLang() { return localStorage.getItem(LANG_KEY) || 'Hinglish'; }
   function setLang(v) { try { localStorage.setItem(LANG_KEY, v); } catch (e) {} }
 
+  // NOTE: youtube.js declares ytCurrentVideoId with `let`, so it is NOT a
+  // window property — must be read as a bare global (same as yt-screenshots.js).
   function curVid() {
-    var v = (typeof window.ytCurrentVideoId !== 'undefined' && window.ytCurrentVideoId)
-      ? String(window.ytCurrentVideoId).replace('playlist_', '') : '';
+    var v = '';
+    try { if (typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) v = String(ytCurrentVideoId); } catch (e) {}
+    // Playlist/organiser mode may leave a 'playlist_' id — resolve the real
+    // playing video via the app's own context helper.
+    if (!v || v.indexOf('playlist_') === 0) {
+      try { if (typeof ssGetCurrentContext === 'function') { var c = ssGetCurrentContext(); if (c && c.videoId) v = String(c.videoId); } } catch (e) {}
+    }
+    v = v.replace('playlist_', '');
     return /^[A-Za-z0-9_-]{11}$/.test(v) ? v : '';
   }
   function curTitle() {
-    return (typeof window.ytCurrentVideoTitle !== 'undefined' && window.ytCurrentVideoTitle)
-      ? window.ytCurrentVideoTitle : 'Video';
+    try { if (typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) return ytCurrentVideoTitle; } catch (e) {}
+    try { if (typeof ssGetCurrentContext === 'function') { var c = ssGetCurrentContext(); if (c && c.videoName) return c.videoName; } } catch (e) {}
+    return 'Video';
   }
 
   /* ── DOM targets ── */
