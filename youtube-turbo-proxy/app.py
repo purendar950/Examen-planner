@@ -625,6 +625,68 @@ _ai_calls = []                   # (ts, est_tokens) within the last 60s
 _ai_pace_lock = threading.Lock()
 
 
+# ---- AI usage limits / anti-abuse ----------------------------------------
+# Per-IP rate limits (can't be gamed by switching accounts). Admin can grant
+# specific users (by uid) unlimited access via config/aiLimits.unlimited.
+AI_LIMITS_TTL = 300
+_ai_limits = {"ts": 0.0, "data": None}
+_rate = {}
+_rate_lock = threading.Lock()
+
+
+def _load_ai_limits():
+    now = time.time()
+    if _ai_limits["data"] is not None and now - _ai_limits["ts"] < AI_LIMITS_TTL:
+        return _ai_limits["data"]
+    data = {"unlimited": {}, "studyPerHour": 15, "tutorPerHour": 20, "tutorPerDay": 80}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("aiLimits").get()
+            if doc.exists:
+                d = doc.to_dict() or {}
+                unl = d.get("unlimited") or {}
+                if isinstance(unl, list):
+                    unl = {u: True for u in unl}
+                data["unlimited"] = unl
+                for k in ("studyPerHour", "tutorPerHour", "tutorPerDay"):
+                    if isinstance(d.get(k), (int, float)):
+                        data[k] = int(d[k])
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/aiLimits read failed: %s", exc)
+    _ai_limits["ts"] = now
+    _ai_limits["data"] = data
+    return data
+
+
+def _client_ip():
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _rate_ok(bucket, key, limit, window):
+    now = time.time()
+    with _rate_lock:
+        b = _rate.setdefault(bucket, {})
+        hits = [t for t in b.get(key, []) if now - t < window]
+        if len(hits) >= limit:
+            b[key] = hits
+            return False
+        hits.append(now)
+        b[key] = hits
+        return True
+
+
+def _is_unlimited(uid):
+    if not uid:
+        return False
+    try:
+        return bool(_load_ai_limits()["unlimited"].get(uid))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _est_tokens(messages, max_tokens):
     chars = sum(len(m.get("content", "")) for m in messages)
     return int(chars / 4) + int(max_tokens)
@@ -1044,6 +1106,14 @@ def api_study():
             _study_cache[ckey] = {"ts": time.time(), "data": fs}
         return jsonify(fs)
 
+    # rate limit only NEW generations (cached hits above are free). Skip for
+    # admin-granted unlimited users.
+    uid = (request.args.get("uid") or "").strip()
+    if not _is_unlimited(uid):
+        if not _rate_ok("study", _client_ip(), _load_ai_limits()["studyPerHour"], 3600):
+            return jsonify({"error": "rate_limited",
+                            "detail": "Hourly AI generation limit reached. Try later, or ask the admin for unlimited access."}), 429
+
     # transcript (reuses transcript cache + bot-check self-heal)
     try:
         t = _extract_transcript(video_id, "auto")
@@ -1187,6 +1257,14 @@ def api_tutor():
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503
+
+    uid = (request.args.get("uid") or body.get("uid") or "").strip()
+    if not _is_unlimited(uid):
+        lims, ip = _load_ai_limits(), _client_ip()
+        if (not _rate_ok("tutor_h", ip, lims["tutorPerHour"], 3600)
+                or not _rate_ok("tutor_d", ip, lims["tutorPerDay"], 86400)):
+            return jsonify({"error": "rate_limited",
+                            "detail": "Tutor message limit reached. Try later, or ask the admin for unlimited access."}), 429
 
     try:
         t = _extract_transcript(video_id, "auto")

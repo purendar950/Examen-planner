@@ -40,6 +40,13 @@
     try { if (typeof ssGetCurrentContext === 'function') { var c = ssGetCurrentContext(); if (c && c.videoName) return c.videoName; } } catch (e) {}
     return 'Video';
   }
+  // AI Study is Pro-only. Default true only if the gating fn is absent.
+  function isPro() { return typeof ezIsPro === 'function' ? !!ezIsPro() : true; }
+  // uid lets the proxy skip limits for admin-granted "unlimited" users.
+  function curUid() {
+    try { if (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) return currentUser.uid; } catch (e) {}
+    return '';
+  }
 
   /* ── DOM targets ── */
   function shellBody() { return document.getElementById('ai-body'); }
@@ -162,7 +169,7 @@
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     el.innerHTML = loading('Generating ' + mode + ' (first time takes a bit — it caches after)…');
-    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(outLang());
+    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid());
     if (mode === 'quiz') url += '&n=' + (n || 25);
     apiGet(url).then(function (j) {
       var box = contentEl();
@@ -198,7 +205,7 @@
     var sel = document.getElementById('ai-qn');
     var n = parseInt(sel ? sel.value : 25, 10) || 25;
     el.innerHTML = loading('Building a ' + n + '-question quiz…');
-    apiGet('/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(outLang())).then(function (j) {
+    apiGet('/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(outLang()) + '&uid=' + encodeURIComponent(curUid())).then(function (j) {
       if (j.error && j.error !== 'no_captions') { contentEl().innerHTML = errHtml(j); return; }
       var qs = j.questions || [];
       if (!qs.length) { contentEl().innerHTML = '<div class="ai-muted">Could not generate questions.</div>'; return; }
@@ -315,7 +322,7 @@
     if (state.tab === 'tutor') { renderTutor(); var chat = document.getElementById('ai-chat'); if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; } }
     fetch(BACKEND + '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', history: h.slice(-8) })
+      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), history: h.slice(-8) })
     }).then(function (r) { return r.json(); }).then(function (j) {
       var hist = getHistory();
       hist.push({ role: 'assistant', content: j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)') });
@@ -374,13 +381,18 @@
     var ai = document.getElementById('ai-study-panel');
     var layout = ytLayout();
     var v = currentView();
+    if (v === 'ai' && !isPro()) v = 'course';   // Pro-only: never show AI for free users
     if (wrap) wrap.style.display = (v === 'ai') ? 'none' : '';
     if (ai) ai.style.display = (v === 'ai') ? '' : 'none';
     if (layout) { if (v === 'ai') layout.classList.add('ai-split'); else layout.classList.remove('ai-split'); }
     var mc = document.querySelector('.main-content');       // remove the 1200px cap in AI Study mode
     if (mc) mc.classList.toggle('ai-wide', v === 'ai');
     var t = document.getElementById('ai-view-toggle');
-    if (t) Array.prototype.forEach.call(t.querySelectorAll('button'), function (b) { b.classList.toggle('on', b.dataset.v === v); });
+    if (t) {
+      Array.prototype.forEach.call(t.querySelectorAll('button'), function (b) { b.classList.toggle('on', b.dataset.v === v); });
+      var aiBtn = t.querySelector('button[data-v="ai"]');
+      if (aiBtn) aiBtn.innerHTML = '🎓 AI Study' + (isPro() ? '' : ' 💎');
+    }
   }
 
   // Set up the toggle + AI panel inside the right column, once.
@@ -413,7 +425,14 @@
     panel.appendChild(toggle); panel.appendChild(wrap); panel.appendChild(ai);
 
     Array.prototype.forEach.call(toggle.querySelectorAll('button'), function (b) {
-      b.onclick = function () { localStorage.setItem('aiView', b.dataset.v); applyView(); };
+      b.onclick = function () {
+        if (b.dataset.v === 'ai' && !isPro()) {
+          if (typeof ezLockedMsg === 'function') ezLockedMsg('🎓 AI Study');
+          else if (typeof showToast === 'function') showToast('🎓 AI Study Pro plan mein milta hai.', 'error');
+          return;
+        }
+        localStorage.setItem('aiView', b.dataset.v); applyView();
+      };
     });
     var lang = document.getElementById('ai-lang');
     if (lang) lang.onchange = function () { setLang(lang.value); };
