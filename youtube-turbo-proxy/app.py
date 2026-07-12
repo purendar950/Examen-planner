@@ -316,10 +316,19 @@ def _parse_json3(data):
     return segments
 
 
+def _is_auto_lang(lang):
+    """True when the caller wants automatic language detection."""
+    return (not lang) or str(lang).strip().lower() in ("", "auto", "detect", "any")
+
+
 def _pick_caption_url(raw, lang):
-    """Choose a json3 caption track URL. Prefers manual over auto, and the
-    requested language (then its base code, then en/hi, then anything).
-    Returns (url, chosen_lang, kind) where kind is 'manual'|'auto'|None."""
+    """Choose a json3 caption track URL.
+
+    - lang='auto' (or empty): auto-detect — prefer the video's declared
+      language, then any manual caption, then any auto-caption.
+    - explicit lang: that language (then its base code), then en/hi, then
+      anything available.
+    Prefers manual over auto. Returns (url, chosen_lang, kind)."""
     subs = raw.get("subtitles") or {}
     autos = raw.get("automatic_captions") or {}
 
@@ -332,10 +341,25 @@ def _pick_caption_url(raw, lang):
                 return t["url"]
         return None
 
-    wanted = [lang, (lang or "").split("-")[0], "en", "hi"]
+    if _is_auto_lang(lang):
+        # native language yt-dlp reports for the video, if any
+        native = (raw.get("language") or "").strip()
+        order = []
+        if native:
+            order += [native, native.split("-")[0]]
+        # then whatever the video actually provides (manual first, then auto)
+        order += sorted(subs.keys()) + sorted(autos.keys())
+        order += ["en", "hi"]
+    else:
+        order = [lang, str(lang).split("-")[0], "en", "hi"]
+
+    # de-duplicate while preserving priority order
+    seen = set()
+    wanted = [x for x in order if x and not (x in seen or seen.add(x))]
+
     for src, kind in ((subs, "manual"), (autos, "auto")):
         for lg in wanted:
-            if lg and lg in src:
+            if lg in src:
                 u = json3_url(src[lg])
                 if u:
                     return u, lg, kind
@@ -347,9 +371,10 @@ def _pick_caption_url(raw, lang):
     return None, None, None
 
 
-def _extract_transcript(video_id, lang="en", force=False):
+def _extract_transcript(video_id, lang="auto", force=False):
     """Fetch + parse a video's captions. Reuses the global transcript cache and
-    the extraction semaphore. Tries the android client first, then web."""
+    the extraction semaphore. Tries the android client first, then web.
+    lang='auto' (default) auto-detects the video's caption language."""
     ckey = "%s:%s" % (video_id, lang)
     now = time.time()
     with _transcript_lock:
@@ -388,18 +413,22 @@ def _extract_transcript(video_id, lang="en", force=False):
             except Exception as exc:          # noqa: BLE001
                 log.warning("caption download/parse failed: %s", exc)
 
-        text = " ".join(s["text"] for s in segments)
+        # Full transcript as one clean block (newline-joined so it reads well),
+        # plus a single-line version. Both contain the ENTIRE transcript.
+        text = "\n".join(s["text"] for s in segments)
         data = {
             "id": video_id,
             "title": raw.get("title"),
             "requested_lang": lang,
-            "chosen_lang": chosen_lang,
-            "kind": kind,                     # manual | auto | None
+            "detected_language": raw.get("language"),   # what YouTube says the video is
+            "chosen_lang": chosen_lang,                 # the caption track we used
+            "kind": kind,                               # manual | auto | None
             "languages_manual": sorted((raw.get("subtitles") or {}).keys()),
+            "languages_auto": sorted((raw.get("automatic_captions") or {}).keys()),
             "segment_count": len(segments),
             "char_count": len(text),
-            "segments": segments,
-            "text": text,
+            "segments": segments,                       # full timestamped list
+            "text": text,                               # FULL transcript text
         }
         with _transcript_lock:
             _transcript_cache[ckey] = {"ts": time.time(), "data": data}
@@ -461,7 +490,7 @@ def api_transcript():
     No video/audio is downloaded — captions only."""
     raw_arg = (request.args.get("id") or request.args.get("url")
                or request.args.get("v") or "").strip()
-    lang = (request.args.get("lang") or "en").strip() or "en"
+    lang = (request.args.get("lang") or "auto").strip() or "auto"
     video_id = _parse_video_id(raw_arg)
     if not video_id:
         return jsonify({"error": "missing or invalid ?id "
@@ -503,9 +532,9 @@ _TRANSCRIPT_DEMO_HTML = """<!doctype html>
  .err{background:#ffebe9;color:#82071e;padding:12px;border-radius:8px} .muted{color:#666}
 </style></head><body>
 <h1>YouTube Transcript Demo <span class="muted">(/api/transcript)</span></h1>
-<p class="muted">Paste a YouTube URL or 11-char ID. Captions only — no video download.</p>
+<p class="muted">Paste a YouTube URL or 11-char ID. Language <b>auto</b>-detects (or type en / hi). Captions only — no video download.</p>
 <div><input id="v" placeholder="YouTube URL or 11-char ID">
- <input id="lang" value="en"> <button onclick="go()">Fetch</button></div>
+ <input id="lang" value="auto" title="auto = detect, or en / hi"> <button onclick="go()">Fetch</button></div>
 <div id="out"></div>
 <script>
 async function go(){
@@ -518,12 +547,14 @@ async function go(){
   const r=await fetch('/api/transcript?id='+encodeURIComponent(v)+'&lang='+encodeURIComponent(lang));
   const j=await r.json();
   if(j.error){out.innerHTML='<p class=err><b>'+j.error+'</b><br>'+(j.detail||'')+'</p>';return;}
-  const segs=(j.segments||[]).slice(0,8).map(s=>'<div class=seg><span class=t>'+s.start.toFixed(1)+'s</span> &nbsp; '+s.text+'</div>').join('');
-  out.innerHTML='<h3>'+(j.title||'')+'</h3>'
-   +'<p><b>'+j.segment_count+'</b> segments, <b>'+j.char_count+'</b> chars &nbsp;|&nbsp; lang: '+(j.chosen_lang||'—')+' ('+(j.kind||'none')+')'
+  const esc=t=>(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  const segs=(j.segments||[]).slice(0,15).map(s=>'<div class=seg><span class=t>'+s.start.toFixed(1)+'s</span> &nbsp; '+esc(s.text)+'</div>').join('');
+  out.innerHTML='<h3>'+esc(j.title)+'</h3>'
+   +'<p><b>'+j.segment_count+'</b> segments, <b>'+j.char_count+'</b> chars &nbsp;|&nbsp; '
+   +'detected: <b>'+(j.detected_language||'?')+'</b>, using: <b>'+(j.chosen_lang||'—')+'</b> ('+(j.kind||'none')+')'
    +(j.warning?' &nbsp;⚠️ '+j.warning:'')+'</p>'
-   +(segs?'<h4>First segments</h4>'+segs:'')
-   +'<h4>Full text</h4><pre>'+(j.text||'(empty)').slice(0,4000)+'</pre>';
+   +(segs?'<h4>First 15 segments (of '+j.segment_count+')</h4>'+segs:'')
+   +'<h4>Full transcript ('+j.char_count+' chars)</h4><pre>'+esc(j.text||'(empty)')+'</pre>';
  }catch(e){out.innerHTML='<p class=err>'+e+'</p>';}
 }
 </script></body></html>"""
