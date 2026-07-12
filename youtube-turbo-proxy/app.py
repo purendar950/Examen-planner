@@ -521,6 +521,9 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # key(s) + model. Multiple keys enable automatic failover on limit/error.
 BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
+# Big-context providers process a whole lecture in one call, which can take a
+# while on free tiers — give the request plenty of time. Configurable via env.
+_AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 _study_cache = {}
 _study_lock = threading.Lock()
@@ -636,7 +639,12 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
                 r = requests.post(ai["base_url"],
                                   headers={"Authorization": "Bearer " + key,
                                            "Content-Type": "application/json"},
-                                  json=body, timeout=120)
+                                  json=body, timeout=_AI_TIMEOUT)
+            except requests.Timeout:
+                last = ("timeout after %ss (key %d) — the lecture is long; try a "
+                        "faster model (mistral-medium-3-5 / auto/bynara) or a "
+                        "shorter video" % (_AI_TIMEOUT, ki + 1))
+                break                          # → next key
             except requests.RequestException as exc:
                 last = "network (key %d): %s" % (ki + 1, exc)
                 break                          # → next key
