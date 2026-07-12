@@ -567,6 +567,10 @@ STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
 _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
+# Tutor sends transcript context on EVERY message, so cap it: a full 2-hour
+# lecture (~80k+ chars) makes Bynara slow enough to hit Cloudflare's ~100s 524.
+# ~48k chars (~12k tokens) keeps replies fast. Notes/quiz still use full text.
+_TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "48000"))
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 _study_cache = {}
 _study_lock = threading.Lock()
@@ -693,12 +697,16 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
                 break                          # → next key
             if r.status_code == 200:
                 return r.json()["choices"][0]["message"]["content"]
-            if r.status_code == 429:           # limited — brief retry, else next key
+            if r.status_code == 429:           # rate limited — brief retry, same key
                 last = "429 (key %d): %s" % (ki + 1, r.text[:120])
                 time.sleep(_retry_after_secs(r))
                 continue
+            if 500 <= r.status_code < 600:     # upstream busy/timeout (e.g. CF 524) — retry
+                last = "%d (key %d): upstream timeout/busy" % (r.status_code, ki + 1)
+                time.sleep(4)
+                continue
             last = "%s (key %d): %s" % (r.status_code, ki + 1, r.text[:120])
-            break                              # 401/402/5xx → next key
+            break                              # 401/402/other 4xx → next key
     raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
 
 
@@ -1204,7 +1212,8 @@ def api_tutor():
                         "detail": "No captions found for this video."}), 200
 
     # Big-context providers get the full transcript; Groq gets a condensed version.
-    context = t["text"] if ai.get("big_context") else _condense(t["text"], out_lang, ai)
+    # Cap context so the interactive tutor stays responsive (avoids CF 524).
+    context = (t.get("text") or "")[:_TUTOR_CONTEXT_CHARS]
     sysmsg = (
         "You are an exam-prep AI tutor for the video titled %r. Answer ONLY using "
         "the transcript below. If something isn't covered, say so briefly. The "
