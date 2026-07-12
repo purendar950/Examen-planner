@@ -587,6 +587,24 @@ async function saveStudyAiConfig() {
   } catch(e) { showToast('Failed: ' + e.message); }
 }
 
+/* ── AI Study controls (Regenerate button show/hide) ────────────────────────
+   Saves the showRegenerate flag to config/ai (merge). The browser can't read
+   config/ai directly (Firestore rules block it), so youtube-turbo-proxy surfaces
+   this flag via /api/status and ai-tutor.js uses it to show/hide the button.
+   Default OFF = Regenerate button hidden for everyone. */
+async function saveStudyControls() {
+  const on = !!((document.getElementById('study-show-regen') || {}).checked);
+  try {
+    await db.collection('config').doc('ai').set({
+      showRegenerate: on,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    AI_CONFIG.showRegenerate = on;
+    showToast(on ? '✅ Regenerate button turned ON' : '✅ Regenerate button turned OFF');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
 /* ── AI Study usage limits + grant unlimited ────────────────────────────────
    Saves per-hour/day rate limits and the admin-granted "unlimited" user list to
    Firestore config/aiLimits. The youtube-turbo-proxy reads this: normal users
@@ -818,6 +836,26 @@ function renderTelegram() {
     '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
       (sKeysArr.length ? ('✅ ' + sKeysArr.length + ' key(s) · model: <b>' + esc(sModel) + '</b>')
                        : '⚪ No Bynara key — /api/study will use the Groq key above') +
+    '</div>' +
+    '</div>';
+
+  /* ── AI Study Controls Card — Regenerate button show/hide ── */
+  var showRegen = !!(AI_CONFIG && AI_CONFIG.showRegenerate);
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">🎓 AI Study — Controls</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+      'The <b>↻ Regenerate</b> button (on Notes / Insights / Quiz / Cards) lets users throw away ' +
+      'a saved result and generate a fresh one. It uses AI quota + counts against the rate limit, ' +
+      'so it stays <b>hidden by default</b>. Turn it on only when you want users to be able to regenerate.' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;">' +
+        '<input id="study-show-regen" type="checkbox"' + (showRegen ? ' checked' : '') + '> Show the “↻ Regenerate” button' +
+      '</label>' +
+      '<button class="btn btn-blue" onclick="saveStudyControls()">💾 Save</button>' +
+    '</div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
+      (showRegen ? '🟢 Regenerate button is VISIBLE to users' : '⚪ Regenerate button is HIDDEN (default)') +
     '</div>' +
     '</div>';
 

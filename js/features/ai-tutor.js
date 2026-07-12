@@ -181,9 +181,10 @@
         box.innerHTML = '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>'; return;
       }
       if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); return; }
+      var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="margin-left:auto;padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
       box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
         '<span class="ai-muted">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
-        '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="margin-left:auto;padding:4px 10px;font-size:0.72rem">↻ Regenerate</button></div>' +
+        regenBtn + '</div>' +
         '<div class="ai-scroll"><div class="ai-md">' + mdToHtml(j.content || '') + '</div></div>';
       bindTsLinks(box);
       var rb = document.getElementById('ai-regen');
@@ -195,7 +196,7 @@
     if (!cards.length) { box.innerHTML = '<div class="ai-muted">No flashcards.</div>'; return; }
     box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
       '<span class="ai-muted">Tap a card to flip.</span>' +
-      '<button class="ai-btn sec" id="ai-regen" title="Generate fresh flashcards" style="margin-left:auto;padding:4px 10px;font-size:0.72rem">↻ Regenerate</button></div>' +
+      (_showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate fresh flashcards" style="margin-left:auto;padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '') + '</div>' +
       '<div class="ai-scroll">' + cards.map(function (c) {
         return '<div class="ai-q ai-flip" style="cursor:pointer">' +
           '<div><strong>' + esc(c.front) + '</strong></div>' +
@@ -391,6 +392,9 @@
 
   /* ── server/cache status dot: 🟠 checking · 🔴 offline · 🟢 ready · 🟡 cached ── */
   var _statusVid = null;
+  // Whether the "Regenerate" button is shown — controlled by the admin panel
+  // (config/ai.showRegenerate), surfaced via /api/status. Default false = hidden.
+  var _showRegen = false;
   function setDot(state, label) {
     var d = document.getElementById('ai-status-dot');
     if (d) { d.className = 'ai-dot ' + state; d.title = label; }
@@ -405,6 +409,7 @@
       .then(function (r) { return r.json(); })
       .then(function (j) {
         clearTimeout(to);
+        _showRegen = !!(j && j.showRegenerate);
         if (j && j.ok) {
           if (j.cachedTranscript) setDot('cached', 'Transcript already generated — instant');
           else setDot('ready', 'Server ready — will generate on first use');
