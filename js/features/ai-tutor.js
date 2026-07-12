@@ -124,6 +124,7 @@
       '.ai-md table{border-collapse:collapse;width:100%;margin:.5em 0}',
       '.ai-md th,.ai-md td{border:1px solid var(--border,#2a3140);padding:5px 8px;font-size:.85em;text-align:left}',
       '.ai-ts{color:var(--accent,#00c896);cursor:pointer;font-weight:600;white-space:nowrap}',
+      '.ai-scroll{max-height:60vh;overflow:auto;border:1px solid var(--border,#2a3140);border-radius:10px;padding:12px;background:var(--surface,#1b1f2a)}',
       '.ai-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}',
       '.ai-chip{cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border-radius:999px;padding:5px 10px;font-size:0.74rem}',
       '.ai-chat{max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:8px}',
@@ -166,7 +167,7 @@
       }
       if (mode === 'flashcards') { renderCards(j.cards || [], box); return; }
       box.innerHTML = '<div class="ai-muted" style="margin-bottom:6px">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (j.cached ? ' · cached' : '') + '</div>' +
-        '<div class="ai-md">' + mdToHtml(j.content || '') + '</div>';
+        '<div class="ai-scroll"><div class="ai-md">' + mdToHtml(j.content || '') + '</div></div>';
       bindTsLinks(box);
     }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
   }
@@ -174,11 +175,11 @@
     box = box || contentEl();
     if (!cards.length) { box.innerHTML = '<div class="ai-muted">No flashcards.</div>'; return; }
     box.innerHTML = '<div class="ai-muted" style="margin-bottom:8px">Tap a card to flip.</div>' +
-      cards.map(function (c) {
+      '<div class="ai-scroll">' + cards.map(function (c) {
         return '<div class="ai-q ai-flip" style="cursor:pointer">' +
           '<div><strong>' + esc(c.front) + '</strong></div>' +
           '<div class="ai-flip-bk ai-muted" style="display:none;margin-top:6px">' + esc(c.back) + '</div></div>';
-      }).join('');
+      }).join('') + '</div>';
     Array.prototype.forEach.call(box.querySelectorAll('.ai-flip'), function (card) {
       card.onclick = function () { var bk = card.querySelector('.ai-flip-bk'); bk.style.display = bk.style.display === 'none' ? 'block' : 'none'; };
     });
