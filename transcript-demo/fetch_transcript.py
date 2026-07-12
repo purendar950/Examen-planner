@@ -22,13 +22,23 @@ from yt_dlp import YoutubeDL
 
 
 def _video_id(s: str) -> str:
+    """Extract an 11-char YouTube video ID from any common URL shape.
+
+    Handles: watch?v=ID, youtu.be/ID, /live/ID, /shorts/ID, /embed/ID, /v/ID,
+    and a bare ID. The trailing (?![A-Za-z0-9_-]) boundary makes sure we grab
+    EXACTLY the 11-char id and never a slice of a longer token like ?si=... .
+    """
     s = s.strip()
-    m = re.search(r"(?:v=|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})", s)
-    if m:
-        return m.group(1)
+    # bare 11-char id
     if re.fullmatch(r"[A-Za-z0-9_-]{11}", s):
         return s
-    return s
+    m = re.search(
+        r"(?:v=|/live/|/shorts/|/embed/|/v/|youtu\.be/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])",
+        s,
+    )
+    if m:
+        return m.group(1)
+    return s  # couldn't parse; fetch() validates and errors clearly
 
 
 def _parse_json3(path: str):
@@ -51,6 +61,14 @@ def _parse_json3(path: str):
 
 def fetch(video: str, lang: str = "en"):
     vid = _video_id(video)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{11}", vid):
+        return {
+            "error": "BadVideoId",
+            "message": (
+                f"Could not extract a valid 11-char video ID from: {video!r}. "
+                "Paste a normal watch/live/youtu.be/shorts URL or the bare 11-char ID."
+            ),
+        }
     url = f"https://www.youtube.com/watch?v={vid}"
 
     with tempfile.TemporaryDirectory() as tmp:
