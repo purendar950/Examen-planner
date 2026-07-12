@@ -1157,6 +1157,83 @@ def study_demo():
     return Response(_STUDY_DEMO_HTML, mimetype="text/html")
 
 
+@app.route("/api/tutor", methods=["GET", "POST"])
+def api_tutor():
+    """AI tutor grounded in a video's transcript. Per-user chat — NOT cached.
+    Params (GET query or POST json): id, q (question), out (lang),
+    mode=chat|teach, history=[{role,content}...]."""
+    body = request.get_json(silent=True) or {} if request.method == "POST" else {}
+    raw_arg = (request.args.get("id") or body.get("id") or "").strip()
+    question = (request.args.get("q") or body.get("q") or body.get("question") or "").strip()
+    out_lang = (request.args.get("out") or body.get("out") or "English").strip() or "English"
+    mode = (request.args.get("mode") or body.get("mode") or "chat").strip().lower()
+    history = body.get("history") or []
+
+    video_id = _parse_video_id(raw_arg)
+    if not video_id:
+        return jsonify({"error": "missing or invalid ?id"}), 400
+    if not question and mode != "teach":
+        return jsonify({"error": "missing question"}), 400
+
+    ai = _load_ai_config()
+    if not ai["keys"]:
+        return jsonify({"error": "ai_not_configured",
+                        "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503
+
+    try:
+        t = _extract_transcript(video_id, "auto")
+    except yt_dlp.utils.DownloadError as exc:
+        msg = str(exc)
+        if "confirm you" in msg or "bot" in msg or "Sign in" in msg:
+            if refresh_cookies() and _cookie_source == "firestore":
+                try:
+                    t = _extract_transcript(video_id, "auto", force=True)
+                except Exception:  # noqa: BLE001
+                    return jsonify({"error": "youtube_bot_check",
+                                    "detail": "Bot-gated. Update cookies in admin panel."}), 403
+            else:
+                return jsonify({"error": "youtube_bot_check",
+                                "detail": "Bot-gated. Update cookies in admin panel."}), 403
+        else:
+            return jsonify({"error": "extract_failed", "detail": msg[:200]}), 502
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "server_error", "detail": str(exc)[:200]}), 500
+
+    if not t.get("segments"):
+        return jsonify({"error": "no_captions",
+                        "detail": "No captions found for this video."}), 200
+
+    # Big-context providers get the full transcript; Groq gets a condensed version.
+    context = t["text"] if ai.get("big_context") else _condense(t["text"], out_lang, ai)
+    sysmsg = (
+        "You are an exam-prep AI tutor for the video titled %r. Answer ONLY using "
+        "the transcript below. If something isn't covered, say so briefly. The "
+        "transcript is auto-generated (may be Hindi/Hinglish, no punctuation) \u2014 "
+        "clean it mentally. Cite timestamps as [mm:ss] when pointing to a part. "
+        "Reply ONLY in %s. Be clear and use simple examples.\n\nTRANSCRIPT:\n%s"
+        % (t.get("title") or "this lesson", out_lang, context)
+    )
+    messages = [{"role": "system", "content": sysmsg}]
+    for m in (history or [])[-8:]:
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
+            messages.append({"role": m["role"], "content": str(m["content"])[:2000]})
+    if mode == "teach" and not question:
+        messages.append({"role": "user", "content":
+                         "Teach me this lesson step by step. Explain the first part "
+                         "simply, then ask me ONE check-question. Keep it interactive."})
+    else:
+        messages.append({"role": "user", "content": question})
+
+    try:
+        answer = _ai_chat(messages, ai, max_tokens=1200)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
+
+    return jsonify({"id": video_id, "answer": answer, "mode": mode,
+                    "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
+                    "model": ai["model"], "transcript_lang": t.get("chosen_lang")})
+
+
 @app.get("/api/stream")
 def api_stream():
     video_id = (request.args.get("id") or "").strip()
@@ -1368,7 +1445,8 @@ def index():
         "endpoints": ["/health", "/api/info?id=VIDEOID", "/api/stream?id=VIDEOID&itag=ITAG",
                       "/api/transcript?id=VIDEOID&lang=en", "/transcript-demo",
                       "/api/study?id=VIDEOID&mode=notes&out=English", "/study-demo",
-                      "/send-photo", "/tg-photo?file_id=..."],
+                      "/api/tutor?id=VIDEOID&q=...&out=English", "/send-photo",
+                      "/tg-photo?file_id=..."],
     })
 
 
