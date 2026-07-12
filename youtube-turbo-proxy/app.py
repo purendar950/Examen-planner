@@ -842,20 +842,23 @@ def _gen_notes(transcript, out_lang, ai, head):
              "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
              "- Use a Markdown table when comparing items or listing facts/dates.\n"
              "- Do not wrap the whole answer in code fences.")
-    secs = _chunk_words(transcript, 16000) if ai.get("big_context") \
+    # Smaller sections + capped output per call so a single generation finishes
+    # under Cloudflare's ~100s limit (avoids 524). More calls, but each is fast;
+    # results are cached so a video only pays this once.
+    secs = _chunk_words(transcript, 10000) if ai.get("big_context") \
         else [_condense(transcript, out_lang, ai)]
     if len(secs) == 1:
         return _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + instr + "\n\n" + secs[0]}],
-            ai, max_tokens=(8000 if ai.get("big_context") else 2400))
+            ai, max_tokens=(4000 if ai.get("big_context") else 2400))
     parts = []
     for i, sec in enumerate(secs):
         parts.append(_ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + ("(Part %d of %d \u2014 detailed notes "
               "for THIS part only.) " % (i + 1, len(secs))) + instr + "\n\n" + sec}],
-            ai, max_tokens=6000))
+            ai, max_tokens=3000))
     return "\n\n".join(parts)
 
 
@@ -864,10 +867,11 @@ def _gen_quiz(transcript, out_lang, ai, head, n):
     call), cycling through transcript sections, de-duplicating, so it scales to
     100 and covers the whole lecture."""
     sysmsg = _study_sys(out_lang) + " Output ONLY valid JSON."
-    secs = _chunk_words(transcript, 16000) if ai.get("big_context") \
+    secs = _chunk_words(transcript, 10000) if ai.get("big_context") \
         else [_condense(transcript, out_lang, ai)]
     questions, seen = [], set()
-    BATCH, i, stagnation = 25, 0, 0
+    # smaller batches so each call's output stays small/fast (avoids CF 524)
+    BATCH, i, stagnation = 12, 0, 0
     while len(questions) < n and stagnation <= len(secs):
         sec = secs[i % len(secs)]
         i += 1
@@ -884,7 +888,7 @@ def _gen_quiz(transcript, out_lang, ai, head, n):
               'has exactly 4 options and one correct answer. Return JSON: '
               '{"questions":[{"question":"...","options":["a","b","c","d"],'
               '"answer_index":0,"explanation":"..."}]}.\n\n' % want) + sec}],
-            ai, max_tokens=min(300 + want * 120, 8000), json_mode=True)
+            ai, max_tokens=min(300 + want * 110, 3500), json_mode=True)
         data = _safe_json(raw)
         qs = data.get("questions") if isinstance(data, dict) else data
         added = 0
