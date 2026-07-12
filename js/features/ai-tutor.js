@@ -125,8 +125,10 @@
       '.ai-md th,.ai-md td{border:1px solid var(--border,#2a3140);padding:5px 8px;font-size:.85em;text-align:left}',
       '.ai-ts{color:var(--accent,#00c896);cursor:pointer;font-weight:600;white-space:nowrap}',
       '.ai-scroll{max-height:60vh;overflow:auto;border:1px solid var(--border,#2a3140);border-radius:10px;padding:12px;background:var(--surface,#1b1f2a)}',
-      '.ai-swap{cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border-radius:8px;padding:4px 10px;font-size:0.72rem;font-weight:600;font-family:inherit;white-space:nowrap}',
-      '.ai-study-panel.ai-side{margin-top:0}',
+      '.ai-view-toggle{display:flex;gap:6px;margin-bottom:10px}',
+      '.ai-view-toggle button{flex:1;cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--muted,#8b93a7);border-radius:8px;padding:7px 10px;font-size:0.78rem;font-weight:600;font-family:inherit}',
+      '.ai-view-toggle button.on{background:var(--accent,#00c896);color:#04120d;border-color:var(--accent,#00c896)}',
+      '@media(min-width:861px){.yt-layout.ai-split{grid-template-columns:1fr 1fr}}',
       '.ai-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}',
       '.ai-chip{cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border-radius:999px;padding:5px 10px;font-size:0.74rem}',
       '.ai-chat{max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:8px}',
@@ -353,49 +355,57 @@
     }
   }
   function panelHtml() {
-    return '<div class="ai-head"><span class="ai-title">🎓 AI Study — Notes · Quiz · Cards · Tutor</span>' +
-      '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">' +
-      '<button id="ai-swap-btn" class="ai-swap" title="Show notes beside the video">\u21c4 Beside video</button>' +
-      '<select id="ai-lang" title="Output language">' +
+    return '<div class="ai-head"><span class="ai-title">🎓 AI Study</span>' +
+      '<select id="ai-lang" title="Output language" style="margin-left:auto">' +
       ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
-      '</select></span></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
+      '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
   }
 
-  /* ── swap position: below-video (default) ⇄ beside-video (right column) ── */
+  /* ── right-column: [Course Content | AI Study] toggle + 50/50 split ── */
   function ytLayout() { return document.querySelector('#page-youtube .yt-layout'); }
   function rightCol() { var l = ytLayout(); return l ? (l.querySelector('.yt-panel') || l.children[1]) : null; }
-  function leftAnchor() { return document.getElementById('ss-toolbar') || document.getElementById('yt-speed-bar'); }
-  function posMode() { return localStorage.getItem('aiStudyPos') === 'side' ? 'side' : 'below'; }
-  function applyPosition() {
-    var panel = document.getElementById('ai-study-panel'); if (!panel) return;
-    if (posMode() === 'side') {
-      var rc = rightCol();
-      if (rc && panel.parentNode !== rc) rc.insertBefore(panel, rc.firstChild);
-      panel.classList.add('ai-side');
-    } else {
-      var a = leftAnchor();
-      if (a && a.parentNode && panel.previousElementSibling !== a) a.insertAdjacentElement('afterend', panel);
-      panel.classList.remove('ai-side');
-    }
-    var btn = document.getElementById('ai-swap-btn');
-    if (btn) btn.textContent = posMode() === 'side' ? '\u21c4 Below video' : '\u21c4 Beside video';
+  function currentView() { return localStorage.getItem('aiView') === 'ai' ? 'ai' : 'course'; }
+
+  function applyView() {
+    var wrap = document.getElementById('yt-course-wrap');
+    var ai = document.getElementById('ai-study-panel');
+    var layout = ytLayout();
+    var v = currentView();
+    if (wrap) wrap.style.display = (v === 'ai') ? 'none' : '';
+    if (ai) ai.style.display = (v === 'ai') ? '' : 'none';
+    if (layout) { if (v === 'ai') layout.classList.add('ai-split'); else layout.classList.remove('ai-split'); }
+    var t = document.getElementById('ai-view-toggle');
+    if (t) Array.prototype.forEach.call(t.querySelectorAll('button'), function (b) { b.classList.toggle('on', b.dataset.v === v); });
   }
 
-  function mountPanel() {
-    var anchor = document.getElementById('ss-toolbar') || document.getElementById('yt-speed-bar');
-    if (!anchor || document.getElementById('ai-study-panel')) return;
-    var p = document.createElement('div'); p.id = 'ai-study-panel'; p.className = 'ai-study-panel';
-    p.innerHTML = panelHtml();
-    anchor.insertAdjacentElement('afterend', p);
+  // Set up the toggle + AI panel inside the right column, once.
+  function mountRightColumn() {
+    var panel = rightCol();
+    if (!panel || document.getElementById('ai-view-toggle')) return;
+
+    var toggle = document.createElement('div');
+    toggle.id = 'ai-view-toggle'; toggle.className = 'ai-view-toggle';
+    toggle.innerHTML = '<button data-v="course" class="on">📚 Course Content</button>' +
+      '<button data-v="ai">🎓 AI Study</button>';
+
+    // wrap the existing course-content children so we can show/hide them as one
+    var wrap = document.createElement('div'); wrap.id = 'yt-course-wrap';
+    while (panel.firstChild) wrap.appendChild(panel.firstChild);
+
+    var ai = document.createElement('div');
+    ai.id = 'ai-study-panel'; ai.className = 'ai-study-panel'; ai.style.display = 'none';
+    ai.style.marginTop = '0';
+    ai.innerHTML = panelHtml();
+
+    panel.appendChild(toggle); panel.appendChild(wrap); panel.appendChild(ai);
+
+    Array.prototype.forEach.call(toggle.querySelectorAll('button'), function (b) {
+      b.onclick = function () { localStorage.setItem('aiView', b.dataset.v); applyView(); };
+    });
     var lang = document.getElementById('ai-lang');
     if (lang) lang.onchange = function () { setLang(lang.value); };
-    var swap = document.getElementById('ai-swap-btn');
-    if (swap) swap.onclick = function () {
-      localStorage.setItem('aiStudyPos', posMode() === 'side' ? 'below' : 'side');
-      applyPosition();
-    };
     renderTabs(); renderBody();
-    applyPosition();
+    applyView();
   }
 
   /* ── keep panel present + react to video changes ── */
@@ -403,8 +413,8 @@
   setInterval(function () {
     var page = document.getElementById('page-youtube');
     if (!page || !page.classList.contains('active')) return;
-    mountPanel();
-    applyPosition();   // re-assert placement if the page re-rendered (idempotent)
+    mountRightColumn();
+    applyView();   // idempotent re-assert of visibility + split
     var v = curVid();
     if (v !== _lastVid) { _lastVid = v; if (document.getElementById('ai-body')) { renderTabs(); renderBody(); } }
   }, 800);
