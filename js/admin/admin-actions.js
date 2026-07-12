@@ -453,8 +453,8 @@ async function loadTelegramData() {
   /* Load AI Study usage limits + admin-granted unlimited users (config/aiLimits) */
   try {
     const lSnap = await db.collection('config').doc('aiLimits').get();
-    AI_LIMITS = { unlimited:{}, unlimitedEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, ...(lSnap.exists ? lSnap.data() : {}), loaded: true };
-  } catch(e) { AI_LIMITS = { unlimited:{}, unlimitedEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, loaded: true }; }
+    AI_LIMITS = { unlimited:{}, unlimitedEmails:[], focusUsers:{}, focusEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, ...(lSnap.exists ? lSnap.data() : {}), loaded: true };
+  } catch(e) { AI_LIMITS = { unlimited:{}, unlimitedEmails:[], focusUsers:{}, focusEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, loaded: true }; }
   /* Load every user's full doc to get appState.telegram */
   try {
     const snap = await db.collection('users').get();
@@ -593,14 +593,33 @@ async function saveStudyAiConfig() {
    this flag via /api/status and ai-tutor.js uses it to show/hide the button.
    Default OFF = Regenerate button hidden for everyone. */
 async function saveStudyControls() {
-  const on = !!((document.getElementById('study-show-regen') || {}).checked);
+  const regen = !!((document.getElementById('study-show-regen') || {}).checked);
+  const focus = !!((document.getElementById('study-show-focus') || {}).checked);
+  const emailsRaw = (document.getElementById('study-focus-emails') || {}).value || '';
+  const emails = emailsRaw.split(/[\n,]+/).map(function (e) { return e.trim().toLowerCase(); }).filter(Boolean);
+  const focusUsers = {}, resolved = [], unresolved = [];
+  emails.forEach(function (em) {
+    const u = (typeof USERS !== 'undefined' ? USERS : []).find(function (x) { return (x.p && (x.p.email || '').toLowerCase()) === em; });
+    if (u) { focusUsers[u.id] = true; resolved.push(em); } else { unresolved.push(em); }
+  });
   try {
+    /* global toggles live in config/ai (regenerate + focus box) */
     await db.collection('config').doc('ai').set({
-      showRegenerate: on,
+      showRegenerate: regen,
+      showFocusBox: focus,
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-    AI_CONFIG.showRegenerate = on;
-    showToast(on ? '✅ Regenerate button turned ON' : '✅ Regenerate button turned OFF');
+    /* per-user focus permission lives in config/aiLimits (like the unlimited grant) */
+    await db.collection('config').doc('aiLimits').set({
+      focusUsers: focusUsers,
+      focusEmails: resolved,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    AI_CONFIG.showRegenerate = regen; AI_CONFIG.showFocusBox = focus;
+    AI_LIMITS = Object.assign({}, AI_LIMITS, { focusUsers: focusUsers, focusEmails: resolved });
+    var msg = '✅ AI Study controls saved (focus: ' + resolved.length + ' user(s)).';
+    if (unresolved.length) msg += ' ⚠️ Not found: ' + unresolved.join(', ');
+    showToast(msg);
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }
@@ -840,22 +859,39 @@ function renderTelegram() {
     '</div>';
 
   /* ── AI Study Controls Card — Regenerate button show/hide ── */
-  var showRegen = !!(AI_CONFIG && AI_CONFIG.showRegenerate);
+  var showRegen  = !!(AI_CONFIG && AI_CONFIG.showRegenerate);
+  var showFocus  = !!(AI_CONFIG && AI_CONFIG.showFocusBox);
+  var focusEmails = (AI_LIMITS && Array.isArray(AI_LIMITS.focusEmails)) ? AI_LIMITS.focusEmails.join('\n') : '';
+  var focusCount  = (AI_LIMITS && AI_LIMITS.focusUsers) ? Object.keys(AI_LIMITS.focusUsers).length : 0;
   s += '<div class="card" style="margin-bottom:12px;">' +
     '<h3 style="margin:0 0 4px;">🎓 AI Study — Controls</h3>' +
-    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+    /* Regenerate toggle */
+    '<div class="muted" style="font-size:.74rem;margin-bottom:8px;line-height:1.6;">' +
       'The <b>↻ Regenerate</b> button (on Notes / Insights / Quiz / Cards) lets users throw away ' +
       'a saved result and generate a fresh one. It uses AI quota + counts against the rate limit, ' +
-      'so it stays <b>hidden by default</b>. Turn it on only when you want users to be able to regenerate.' +
+      'so it stays <b>hidden by default</b>.' +
     '</div>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-      '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;">' +
-        '<input id="study-show-regen" type="checkbox"' + (showRegen ? ' checked' : '') + '> Show the “↻ Regenerate” button' +
-      '</label>' +
-      '<button class="btn btn-blue" onclick="saveStudyControls()">💾 Save</button>' +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:4px;">' +
+      '<input id="study-show-regen" type="checkbox"' + (showRegen ? ' checked' : '') + '> Show the “↻ Regenerate” button' +
+    '</label>' +
+    '<div class="muted" style="font-size:.72rem;margin-bottom:12px;">' +
+      (showRegen ? '🟢 Regenerate is VISIBLE to everyone' : '⚪ Regenerate is HIDDEN (default)') +
     '</div>' +
+    '<hr style="border:none;border-top:1px solid var(--border,#ddd);margin:10px 0;">' +
+    /* Focus box toggle + per-user grant */
+    '<div class="muted" style="font-size:.74rem;margin-bottom:8px;line-height:1.6;">' +
+      'The <b>focus box</b> on <b>Quiz &amp; Cards</b> lets a user type what kind of questions/cards they want ' +
+      '(e.g. a topic or type). Hidden by default. Turn it on for <b>everyone</b>, and/or allow it for ' +
+      '<b>specific users</b> below (they get it even when the global switch is off).' +
+    '</div>' +
+    '<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;font-weight:700;cursor:pointer;margin-bottom:8px;">' +
+      '<input id="study-show-focus" type="checkbox"' + (showFocus ? ' checked' : '') + '> Show the focus box for everyone' +
+    '</label>' +
+    '<label style="font-size:.8rem;color:#555;">Allow focus box for these users — one email per line (' + focusCount + ' active)</label>' +
+    '<textarea id="study-focus-emails" placeholder="user1@email.com&#10;user2@email.com" style="width:100%;min-height:60px;font-family:monospace;font-size:.8rem;margin:4px 0 10px;">' + esc(focusEmails) + '</textarea>' +
+    '<button class="btn btn-blue" onclick="saveStudyControls()">💾 Save AI Study controls</button>' +
     '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
-      (showRegen ? '🟢 Regenerate button is VISIBLE to users' : '⚪ Regenerate button is HIDDEN (default)') +
+      (showFocus ? '🟢 Focus box VISIBLE to everyone' : (focusCount ? ('🟡 Focus box hidden globally — allowed for ' + focusCount + ' user(s)') : '⚪ Focus box HIDDEN (default)')) +
     '</div>' +
     '</div>';
 

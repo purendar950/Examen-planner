@@ -638,7 +638,8 @@ def _load_ai_limits():
     now = time.time()
     if _ai_limits["data"] is not None and now - _ai_limits["ts"] < AI_LIMITS_TTL:
         return _ai_limits["data"]
-    data = {"unlimited": {}, "studyPerHour": 15, "tutorPerHour": 20, "tutorPerDay": 80}
+    data = {"unlimited": {}, "focusUsers": {}, "studyPerHour": 15,
+            "tutorPerHour": 20, "tutorPerDay": 80}
     if _fb_db:
         try:
             doc = _fb_db.collection("config").document("aiLimits").get()
@@ -648,6 +649,10 @@ def _load_ai_limits():
                 if isinstance(unl, list):
                     unl = {u: True for u in unl}
                 data["unlimited"] = unl
+                fu = d.get("focusUsers") or {}
+                if isinstance(fu, list):
+                    fu = {u: True for u in fu}
+                data["focusUsers"] = fu
                 for k in ("studyPerHour", "tutorPerHour", "tutorPerDay"):
                     if isinstance(d.get(k), (int, float)):
                         data[k] = int(d[k])
@@ -1289,16 +1294,28 @@ def api_status():
             out["cachedTranscript"] = bool(fs and fs.get("segments"))
         except Exception:  # noqa: BLE001
             pass
-    # UI flag managed by the admin panel (config/ai.showRegenerate). The browser
-    # can't read config/ai directly (Firestore rules block it), so we surface it
-    # here. Default False = Regenerate button hidden for everyone.
+    # UI flags managed by the admin panel. The browser can't read config/ai
+    # directly (Firestore rules block it), so we surface them here.
+    #   showRegenerate : global toggle (config/ai) — Regenerate button. Default off.
+    #   showFocusBox   : global toggle (config/ai) OR per-user grant
+    #                    (config/aiLimits.focusUsers[uid]) — Quiz/Cards focus box.
+    out["showFocusBox"] = False
+    global_focus = False
     if _fb_db:
         try:
             doc = _fb_db.collection("config").document("ai").get()
             if doc.exists:
-                out["showRegenerate"] = bool((doc.to_dict() or {}).get("showRegenerate", False))
+                cfg = doc.to_dict() or {}
+                out["showRegenerate"] = bool(cfg.get("showRegenerate", False))
+                global_focus = bool(cfg.get("showFocusBox", False))
         except Exception:  # noqa: BLE001
             pass
+    uid = (request.args.get("uid") or "").strip()
+    try:
+        granted = bool(uid and _load_ai_limits().get("focusUsers", {}).get(uid))
+    except Exception:  # noqa: BLE001
+        granted = False
+    out["showFocusBox"] = bool(global_focus or granted)
     return jsonify(out)
 
 

@@ -211,6 +211,14 @@
   }
   function cardsFocus() { return ((document.getElementById('ai-cards-focus') || {}).value || '').trim(); }
   function quizFocus() { return ((document.getElementById('ai-quiz-focus') || {}).value || '').trim(); }
+  // The focus boxes are always rendered but shown only when allowed (admin toggle
+  // or per-user grant). Toggling display here avoids re-rendering / wiping a quiz.
+  function applyFocusVisibility() {
+    ['ai-quiz-focus-wrap', 'ai-cards-focus-wrap'].forEach(function (id) {
+      var w = document.getElementById(id);
+      if (w) w.style.display = _showFocus ? '' : 'none';
+    });
+  }
 
   /* ── Quiz engine ── */
   var quiz = { qs: [], idx: 0, correct: 0, wrong: [] };
@@ -375,17 +383,19 @@
       document.getElementById('ai-notes-mode').onchange = function () { showStudy(this.value); };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(document.getElementById('ai-notes-mode').value); };
     } else if (state.tab === 'cards') {
-      b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
-        '<input id="ai-cards-focus" placeholder="Optional: kis topic ke cards? (blank = important)" style="flex:1;min-width:180px;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"> ' +
-        '<button class="ai-btn" id="ai-cards-go">Generate flashcards</button></div><div id="ai-sub" style="margin-top:4px"></div>';
+      b.innerHTML = '<div id="ai-cards-focus-wrap" style="margin-bottom:8px;display:none">' +
+        '<input id="ai-cards-focus" placeholder="Optional: kis topic ke cards? (blank = important)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
+        '<button class="ai-btn" id="ai-cards-go">Generate flashcards</button><div id="ai-sub" style="margin-top:10px"></div>';
       document.getElementById('ai-cards-go').onclick = function () { showStudy('flashcards', null, false, cardsFocus()); };
+      applyFocusVisibility();
     } else if (state.tab === 'quiz') {
       b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">Questions: ' +
         '<select id="ai-qn" class="ai-btn sec" style="padding:6px 8px"><option>15</option><option selected>25</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option>90</option><option>100</option></select> ' +
         '<button class="ai-btn" id="ai-quiz-go">Start quiz</button></div>' +
-        '<div style="margin-bottom:8px"><input id="ai-quiz-focus" placeholder="Optional: kis type/topic ke questions? (blank = important points)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
+        '<div id="ai-quiz-focus-wrap" style="margin-bottom:8px;display:none"><input id="ai-quiz-focus" placeholder="Optional: kis type/topic ke questions? (blank = important points)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
         '<div id="ai-sub"></div>';
       document.getElementById('ai-quiz-go').onclick = function () { startQuiz(); };
+      applyFocusVisibility();
     } else if (state.tab === 'tutor') {
       renderTutor();
     }
@@ -407,6 +417,9 @@
   // Whether the "Regenerate" button is shown — controlled by the admin panel
   // (config/ai.showRegenerate), surfaced via /api/status. Default false = hidden.
   var _showRegen = false;
+  // Whether the Quiz/Cards focus box is shown — global toggle (config/ai.showFocusBox)
+  // OR admin-granted per user (config/aiLimits.focusUsers). Surfaced via /api/status.
+  var _showFocus = false;
   function setDot(state, label) {
     var d = document.getElementById('ai-status-dot');
     if (d) { d.className = 'ai-dot ' + state; d.title = label; }
@@ -417,11 +430,13 @@
     setDot('checking', 'Checking server…');
     var ctrl = ('AbortController' in window) ? new AbortController() : null;
     var to = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
-    fetch(BACKEND + '/api/status?id=' + encodeURIComponent(vid), ctrl ? { signal: ctrl.signal } : {})
+    fetch(BACKEND + '/api/status?id=' + encodeURIComponent(vid) + '&uid=' + encodeURIComponent(curUid()), ctrl ? { signal: ctrl.signal } : {})
       .then(function (r) { return r.json(); })
       .then(function (j) {
         clearTimeout(to);
         _showRegen = !!(j && j.showRegenerate);
+        _showFocus = !!(j && j.showFocusBox);
+        applyFocusVisibility();   // reflect focus-box visibility without wiping any in-progress quiz
         if (j && j.ok) {
           if (j.cachedTranscript) setDot('cached', 'Transcript already generated — instant');
           else setDot('ready', 'Server ready — will generate on first use');
