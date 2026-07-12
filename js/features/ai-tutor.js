@@ -125,6 +125,8 @@
       '.ai-md th,.ai-md td{border:1px solid var(--border,#2a3140);padding:5px 8px;font-size:.85em;text-align:left}',
       '.ai-ts{color:var(--accent,#00c896);cursor:pointer;font-weight:600;white-space:nowrap}',
       '.ai-scroll{max-height:60vh;overflow:auto;border:1px solid var(--border,#2a3140);border-radius:10px;padding:12px;background:var(--surface,#1b1f2a)}',
+      '.ai-swap{cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border-radius:8px;padding:4px 10px;font-size:0.72rem;font-weight:600;font-family:inherit;white-space:nowrap}',
+      '.ai-study-panel.ai-side{margin-top:0}',
       '.ai-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}',
       '.ai-chip{cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border-radius:999px;padding:5px 10px;font-size:0.74rem}',
       '.ai-chat{max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:8px}',
@@ -352,10 +354,33 @@
   }
   function panelHtml() {
     return '<div class="ai-head"><span class="ai-title">🎓 AI Study — Notes · Quiz · Cards · Tutor</span>' +
+      '<span style="margin-left:auto;display:flex;gap:8px;align-items:center">' +
+      '<button id="ai-swap-btn" class="ai-swap" title="Show notes beside the video">\u21c4 Beside video</button>' +
       '<select id="ai-lang" title="Output language">' +
       ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
-      '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
+      '</select></span></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
   }
+
+  /* ── swap position: below-video (default) ⇄ beside-video (right column) ── */
+  function ytLayout() { return document.querySelector('#page-youtube .yt-layout'); }
+  function rightCol() { var l = ytLayout(); return l ? (l.querySelector('.yt-panel') || l.children[1]) : null; }
+  function leftAnchor() { return document.getElementById('ss-toolbar') || document.getElementById('yt-speed-bar'); }
+  function posMode() { return localStorage.getItem('aiStudyPos') === 'side' ? 'side' : 'below'; }
+  function applyPosition() {
+    var panel = document.getElementById('ai-study-panel'); if (!panel) return;
+    if (posMode() === 'side') {
+      var rc = rightCol();
+      if (rc && panel.parentNode !== rc) rc.insertBefore(panel, rc.firstChild);
+      panel.classList.add('ai-side');
+    } else {
+      var a = leftAnchor();
+      if (a && a.parentNode && panel.previousElementSibling !== a) a.insertAdjacentElement('afterend', panel);
+      panel.classList.remove('ai-side');
+    }
+    var btn = document.getElementById('ai-swap-btn');
+    if (btn) btn.textContent = posMode() === 'side' ? '\u21c4 Below video' : '\u21c4 Beside video';
+  }
+
   function mountPanel() {
     var anchor = document.getElementById('ss-toolbar') || document.getElementById('yt-speed-bar');
     if (!anchor || document.getElementById('ai-study-panel')) return;
@@ -364,7 +389,13 @@
     anchor.insertAdjacentElement('afterend', p);
     var lang = document.getElementById('ai-lang');
     if (lang) lang.onchange = function () { setLang(lang.value); };
+    var swap = document.getElementById('ai-swap-btn');
+    if (swap) swap.onclick = function () {
+      localStorage.setItem('aiStudyPos', posMode() === 'side' ? 'below' : 'side');
+      applyPosition();
+    };
     renderTabs(); renderBody();
+    applyPosition();
   }
 
   /* ── keep panel present + react to video changes ── */
@@ -373,6 +404,7 @@
     var page = document.getElementById('page-youtube');
     if (!page || !page.classList.contains('active')) return;
     mountPanel();
+    applyPosition();   // re-assert placement if the page re-rendered (idempotent)
     var v = curVid();
     if (v !== _lastVid) { _lastVid = v; if (document.getElementById('ai-body')) { renderTabs(); renderBody(); } }
   }, 800);
