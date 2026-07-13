@@ -18,9 +18,17 @@
   var BACKEND = (localStorage.getItem('turboBackendUrl')
     || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
   var LANG_KEY = 'aiStudyLang';
+  var MODEL_KEY = 'aiStudyModel';
 
   function outLang() { return localStorage.getItem(LANG_KEY) || 'Hinglish'; }
   function setLang(v) { try { localStorage.setItem(LANG_KEY, v); } catch (e) {} }
+
+  /* User-picked AI model. "" = Auto (proxy uses the admin default). The dropdown
+     is filled from /api/status.studyModels — i.e. ONLY the active provider's
+     models — so any choice the user makes is valid for the configured key. */
+  function outModel() { return localStorage.getItem(MODEL_KEY) || ''; }
+  function setModel(v) { try { localStorage.setItem(MODEL_KEY, v == null ? '' : v); } catch (e) {} }
+  function modelParam() { var m = outModel(); return m ? '&model=' + encodeURIComponent(m) : ''; }
 
   // NOTE: youtube.js declares ytCurrentVideoId with `let`, so it is NOT a
   // window property — must be read as a bare global (same as yt-screenshots.js).
@@ -443,7 +451,7 @@
     var lang = langOverride || outLang();
     var style = (mode === 'notes') ? nbNotesStyle() : '';
     el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
-    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid());
+    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
     if (style === 'mcq') url += '&style=mcq';
     if (focus) url += '&focus=' + encodeURIComponent(focus);
@@ -604,7 +612,7 @@
     var vid = curVid(), bar = document.getElementById('ai-langbar');
     if (!vid || !bar) return;
     var style = (mode === 'notes') ? nbNotesStyle() : '';
-    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + (style === 'mcq' ? '&style=mcq' : '')).then(function (j) {
+    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + (style === 'mcq' ? '&style=mcq' : '') + modelParam()).then(function (j) {
       var bar2 = document.getElementById('ai-langbar'); if (!bar2) return;
       var avail = (j && j.available) || [];
       if (!avail.length) { bar2.innerHTML = ''; return; }
@@ -705,7 +713,7 @@
     var focus = quizFocus();
     var lang = langOverride || outLang();
     el.innerHTML = loading((force ? 'Building a fresh ' : 'Building a ') + n + '-question quiz (' + lang + ')' + (focus ? ' on “' + focus + '”' : '') + '…');
-    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid());
+    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (focus) qurl += '&focus=' + encodeURIComponent(focus);
     if (force) qurl += '&refresh=1';
     apiGet(qurl).then(function (j) {
@@ -829,7 +837,7 @@
     if (state.tab === 'tutor') { renderTutor(); var chat = document.getElementById('ai-chat'); if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; } }
     fetch(BACKEND + '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), history: h.slice(-8) })
+      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), model: outModel(), history: h.slice(-8) })
     }).then(function (r) { return r.json(); }).then(function (j) {
       var hist = getHistory();
       hist.push({ role: 'assistant', content: j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)') });
@@ -898,9 +906,26 @@
       renderTutor();
     }
   }
+  // Fill the model dropdown from the server's list (active provider's models).
+  // Keeps the user's choice if still offered; otherwise falls back to Auto so a
+  // stale pick (e.g. after the admin switches provider) can never break a call.
+  function applyServerModels(list) {
+    var sel = document.getElementById('ai-model');
+    if (!sel) return;
+    var cur = outModel();
+    var opts = [['', 'Auto']];
+    (list || []).forEach(function (m) { if (m) opts.push([String(m), String(m)]); });
+    var valid = opts.some(function (o) { return o[0] === cur; });
+    if (cur && !valid) { setModel(''); cur = ''; }   // stale model → reset to Auto
+    var html = opts.map(function (o) {
+      return '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+    }).join('');
+    if (sel.innerHTML !== html) sel.innerHTML = html;
+  }
   function panelHtml() {
     return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">🎓 AI Study</span>' +
-      '<select id="ai-lang" title="Output language" style="margin-left:auto">' +
+      '<select id="ai-model" title="AI model" style="margin-left:auto"><option value="">Auto</option></select>' +
+      '<select id="ai-lang" title="Output language">' +
       ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
       '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
   }
@@ -934,6 +959,7 @@
         clearTimeout(to);
         _showRegen = !!(j && j.showRegenerate);
         _showFocus = !!(j && j.showFocusBox);
+        if (j) applyServerModels(j.studyModels);   // fill model dropdown with the active provider's models
         applyFocusVisibility();   // reflect focus-box visibility without wiping any in-progress quiz
         if (j && j.ok) {
           if (j.cachedTranscript) setDot('cached', 'Transcript already generated — instant');
@@ -1008,6 +1034,8 @@
     });
     var lang = document.getElementById('ai-lang');
     if (lang) lang.onchange = function () { setLang(lang.value); };
+    var modelSel = document.getElementById('ai-model');
+    if (modelSel) modelSel.onchange = function () { setModel(modelSel.value); };
     var dot = document.getElementById('ai-status-dot');
     if (dot) dot.onclick = function () { _statusVid = null; checkStatus(curVid()); };
     renderTabs(); renderBody();
