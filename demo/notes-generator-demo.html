@@ -178,15 +178,17 @@
     .topbar,.controls,.metatag{display:none}
     .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;padding:0 4mm}
     .page::before{display:none}
-    /* column-fill:auto => fill column 1 fully, then column 2, then next A4 page */
-    body.twocol .notes{column-count:2;column-gap:8mm;column-fill:auto}
+    /* Print is ALWAYS 2-column A4 (regardless of the screen toggle):
+       column-fill:auto => fill column 1 fully, then column 2, then the next A4 page. */
+    .notes{column-count:2;column-gap:8mm;column-fill:auto}
+    .notes .sec{column-span:all}
     .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
     @page{size:A4;margin:10mm 9mm}
   }
 </style>
 </head>
-<body class="twocol">
+<body>
 
   <div class="topbar">
     <span class="brand">📓 AI Notes — Handwritten Style (Live)</span>
@@ -227,8 +229,9 @@
               style="font-family:inherit;cursor:pointer;border:1px solid #cdd6df;background:#eef6ff;color:#075985;border-radius:7px;padding:6px 12px;font-weight:700">🧪 Preview MCQ sample (no server)</button>
     </div>
     <div class="hint">
-      Calls your live server: <code>GET /api/study?mode=notes&style=…</code>. <b>MCQ notes</b> need the updated backend
-      deployed (server currently runs the old prompt). Topic notes + gel-pen styling work now. First run per video ~30–90s; caches after.
+      Calls your live server: <code>GET /api/study?mode=notes&style=…</code>. On screen, notes show in <b>one column</b>
+      so the order is clean (Q1 → Q2 → Q3 …). Use <b>🖨️ Print / PDF</b> for the compact <b>2-column A4 pages</b>
+      (page 1: column-1 → column-2, then page 2 …). First run per video ~30–90s; caches after.
     </div>
     <div class="statusline" id="status"></div>
   </div>
