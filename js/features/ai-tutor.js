@@ -399,7 +399,27 @@
       // ── topper-notebook notes (single column on screen; paper look) ──
       '.ai-nb{background:#fffdf6;border-radius:8px;padding:14px 16px 18px;color:#22303f}',
       '.ai-scroll.nb{background:#fffdf6;padding:0;border-color:#e6dfca}',
-      nbCss('.ai-nb')
+      nbCss('.ai-nb'),
+      /* ── flashcard carousel (tap to flip · swipe left/right) ── */
+      '.ai-fc-stage{perspective:1200px;padding:6px 2px 2px;touch-action:pan-y}',
+      '.ai-fc{position:relative;width:100%;min-height:240px;cursor:pointer;user-select:none;-webkit-user-select:none}',
+      '.ai-fc.slide-l{animation:aifcL .28s ease}.ai-fc.slide-r{animation:aifcR .28s ease}',
+      '@keyframes aifcL{from{transform:translateX(26px);opacity:.35}to{transform:translateX(0);opacity:1}}',
+      '@keyframes aifcR{from{transform:translateX(-26px);opacity:.35}to{transform:translateX(0);opacity:1}}',
+      '.ai-fc-inner{position:relative;width:100%;min-height:240px;transition:transform .5s;transform-style:preserve-3d}',
+      '.ai-fc-inner.flipped{transform:rotateY(180deg)}',
+      '.ai-fc-face{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:22px 18px;border:1px solid var(--border,#2a3140);border-radius:16px;background:var(--surface,#1b1f2a);-webkit-backface-visibility:hidden;backface-visibility:hidden;box-shadow:0 6px 20px rgba(0,0,0,.18)}',
+      '.ai-fc-back{transform:rotateY(180deg);background:linear-gradient(160deg,var(--surface,#1b1f2a),rgba(0,200,150,.10))}',
+      '.ai-fc-tag{position:absolute;top:10px;left:14px;font-size:.6rem;font-weight:800;letter-spacing:.08em;color:var(--muted,#8b93a7)}',
+      '.ai-fc-text{font-size:1.02rem;line-height:1.5;text-align:center;color:var(--text,#e7ecf5);font-weight:600;max-height:170px;overflow:auto}',
+      '.ai-fc-back .ai-fc-text{font-weight:500}',
+      '.ai-fc-hint{position:absolute;bottom:9px;font-size:.6rem;color:var(--muted,#8b93a7);opacity:.7}',
+      '.ai-fc-nav{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:12px}',
+      '.ai-fc-nav button{min-width:54px;font-size:.9rem}',
+      '.ai-fc-nav button:disabled{opacity:.35;cursor:default}',
+      '.ai-fc-dots{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:10px}',
+      '.ai-fc-dot{width:7px;height:7px;border-radius:50%;background:var(--border,#2a3140);transition:background .2s}',
+      '.ai-fc-dot.on{background:var(--accent,#00c896)}'
     ].join('');
     document.head.appendChild(s);
   })();
@@ -450,22 +470,115 @@
       if (rb) rb.onclick = function () { showStudy(mode, n, true); };
     }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
   }
+  // Flashcards as an actual card deck: one card at a time, TAP to flip (3D),
+  // SWIPE left = next / right = previous (also ◀ ▶ buttons + arrow keys).
   function renderCards(cards, box, mode) {
     box = box || contentEl();
     if (!cards.length) { box.innerHTML = '<div class="ai-muted">No flashcards.</div>'; return; }
-    box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
-      '<span class="ai-muted">Tap a card to flip.</span>' +
-      (_showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate fresh flashcards" style="margin-left:auto;padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '') + '</div>' +
-      '<div class="ai-scroll">' + cards.map(function (c) {
-        return '<div class="ai-q ai-flip" style="cursor:pointer">' +
-          '<div><strong>' + esc(c.front) + '</strong></div>' +
-          '<div class="ai-flip-bk ai-muted" style="display:none;margin-top:6px">' + esc(c.back) + '</div></div>';
-      }).join('') + '</div>';
-    Array.prototype.forEach.call(box.querySelectorAll('.ai-flip'), function (card) {
-      card.onclick = function () { var bk = card.querySelector('.ai-flip-bk'); bk.style.display = bk.style.display === 'none' ? 'block' : 'none'; };
-    });
+    var idx = 0;
+
+    var regenBtn = _showRegen
+      ? '<button class="ai-btn sec" id="ai-regen" title="Generate fresh flashcards" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>'
+      : '';
+    box.innerHTML =
+      '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:8px">' +
+        '<span class="ai-muted" style="flex:1">Tap to flip · swipe or ◀ ▶ to move</span>' +
+        '<button class="ai-btn sec" id="ai-fc-shuffle" title="Shuffle" style="padding:4px 10px;font-size:0.72rem">🔀</button>' +
+        regenBtn +
+      '</div>' +
+      '<div class="ai-fc-stage" id="ai-fc-stage">' +
+        '<div class="ai-fc" id="ai-fc">' +
+          '<div class="ai-fc-inner" id="ai-fc-inner">' +
+            '<div class="ai-fc-face ai-fc-front"><div class="ai-fc-tag">FRONT</div><div class="ai-fc-text" id="ai-fc-front"></div><div class="ai-fc-hint">tap to flip</div></div>' +
+            '<div class="ai-fc-face ai-fc-back"><div class="ai-fc-tag">BACK</div><div class="ai-fc-text" id="ai-fc-back"></div><div class="ai-fc-hint">tap to flip</div></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="ai-fc-nav">' +
+        '<button class="ai-btn sec" id="ai-fc-prev" aria-label="Previous card">◀</button>' +
+        '<span class="ai-muted" id="ai-fc-count" style="min-width:66px;text-align:center"></span>' +
+        '<button class="ai-btn sec" id="ai-fc-next" aria-label="Next card">▶</button>' +
+      '</div>' +
+      '<div class="ai-fc-dots" id="ai-fc-dots"></div>';
+
+    var stage = document.getElementById('ai-fc-stage');
+    var cardEl = document.getElementById('ai-fc');
+    var inner = document.getElementById('ai-fc-inner');
+    var frontEl = document.getElementById('ai-fc-front');
+    var backEl = document.getElementById('ai-fc-back');
+    var countEl = document.getElementById('ai-fc-count');
+    var dotsEl = document.getElementById('ai-fc-dots');
+    var prevBtn = document.getElementById('ai-fc-prev');
+    var nextBtn = document.getElementById('ai-fc-next');
+
+    function paintDots() {
+      dotsEl.innerHTML = cards.map(function (_, i) {
+        return '<span class="ai-fc-dot' + (i === idx ? ' on' : '') + '"></span>';
+      }).join('');
+    }
+    function show(newIdx, dir) {
+      if (newIdx < 0 || newIdx >= cards.length) return;
+      idx = newIdx;
+      inner.classList.remove('flipped');            // always land showing the front
+      if (dir) {                                     // slide-in animation
+        cardEl.classList.remove('slide-l', 'slide-r');
+        void cardEl.offsetWidth;                     // reflow so the animation restarts
+        cardEl.classList.add(dir < 0 ? 'slide-l' : 'slide-r');
+      }
+      frontEl.textContent = cards[idx].front || '';
+      backEl.textContent = cards[idx].back || '';
+      countEl.textContent = (idx + 1) + ' / ' + cards.length;
+      prevBtn.disabled = (idx === 0);
+      nextBtn.disabled = (idx === cards.length - 1);
+      paintDots();
+    }
+    function flip() { inner.classList.toggle('flipped'); }
+    function next() { if (idx < cards.length - 1) show(idx + 1, 1); }
+    function prev() { if (idx > 0) show(idx - 1, -1); }
+
+    // TAP to flip — but ignore the click that follows a swipe.
+    var swiped = false;
+    cardEl.addEventListener('click', function () { if (!swiped) flip(); swiped = false; });
+
+    // SWIPE: left → next, right → previous (horizontal beats vertical).
+    var x0 = null, y0 = null;
+    stage.addEventListener('touchstart', function (e) {
+      var t = e.changedTouches[0]; x0 = t.clientX; y0 = t.clientY; swiped = false;
+    }, { passive: true });
+    stage.addEventListener('touchend', function (e) {
+      if (x0 == null) return;
+      var t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0;
+      if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) {
+        swiped = true;
+        if (dx < 0) next(); else prev();
+      }
+      x0 = y0 = null;
+    }, { passive: true });
+
+    prevBtn.onclick = prev;
+    nextBtn.onclick = next;
+    var sh = document.getElementById('ai-fc-shuffle');
+    if (sh) sh.onclick = function () {
+      for (var i = cards.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1)), tmp = cards[i]; cards[i] = cards[j]; cards[j] = tmp;
+      }
+      show(0);
+    };
+
+    // Keyboard: ←/→ navigate, Space/Enter flips. Deduped across re-renders.
+    if (renderCards._key) document.removeEventListener('keydown', renderCards._key);
+    renderCards._key = function (e) {
+      if (state.tab !== 'cards' || !document.getElementById('ai-fc')) return;
+      if (e.key === 'ArrowRight') next();
+      else if (e.key === 'ArrowLeft') prev();
+      else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); flip(); }
+    };
+    document.addEventListener('keydown', renderCards._key);
+
     var rb = document.getElementById('ai-regen');
     if (rb) rb.onclick = function () { showStudy('flashcards', null, true, cardsFocus()); };
+
+    show(0);
   }
   function cardsFocus() { return ((document.getElementById('ai-cards-focus') || {}).value || '').trim(); }
   function quizFocus() { return ((document.getElementById('ai-quiz-focus') || {}).value || '').trim(); }
