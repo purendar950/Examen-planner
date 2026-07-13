@@ -105,6 +105,249 @@
     });
   }
 
+  /* ══════════════════════════════════════════════════════════════════════
+     "Topper notebook" renderer — turns the AI's Markdown notes into the
+     handwritten style (gel-pen emphasis, MCQ cards, Key-Fact / Memory-Trick
+     boxes, chips, tables). Timestamps are preserved as clickable seek links.
+     Used for the on-screen notes AND the PDF (via a shared, scoped CSS builder).
+     ══════════════════════════════════════════════════════════════════════ */
+  // bold -> dark ink (weight only, NOT a bright colour) · figures -> green pen ·
+  // timestamps left intact so linkTs() can turn them into seek links.
+  function nbInline(s) {
+    // Protect timestamps with a DIGIT-FREE placeholder so the figure-highlighter
+    // below can't corrupt them; restore in order, then linkTs() makes them clickable.
+    var ts = [], k = 0;
+    s = s.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, function (m) { ts.push(m); return '\uE000\uE001'; });
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<b class="pen">$1</b>')
+         .replace(/__([^_]+)__/g, '<b class="pen">$1</b>')
+         .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+         .replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/\b(\d[\d.,%\/\u2013-]*(?:st|nd|rd|th)?)\b/g, '<span class="fig">$1</span>');
+    s = s.replace(/\uE000\uE001/g, function () { return ts[k++]; });
+    return s;
+  }
+
+  var NB_KEY = /^\s*(key\s*facts?|important|imp\.?|remember|note|yaad\s*rakh\w*|zaruri|jaruri)\s*[:\-\u2013]/i;
+  var NB_MEM = /^\s*(memory\s*trick|trick|mnemonic|shortcut|tip|exam\s*tip|hack)\s*[:\-\u2013]/i;
+  function nbAfterColon(s) { var i = s.search(/[:\-\u2013]/); return i >= 0 ? s.slice(i + 1).trim() : s; }
+  function nbKeyBox(t) { return '<span class="badge key">\uD83D\uDD11 Key Facts</span><div class="factbox">' + nbInline(esc(nbAfterColon(t))) + '</div>'; }
+  function nbMemBox(t) { return '<span class="badge mem">\uD83E\uDDE0 Memory Trick</span><div class="membox">' + nbInline(esc(nbAfterColon(t))) + '</div>'; }
+  function nbShort(s) { var p = s.replace(/[*_`]/g, '').trim(); return p.length <= 18 && p.indexOf(':') < 0; }
+  function nbEndsColon(s) { return /[:\uFF1A]\s*$/.test(s.replace(/[*_`]/g, '')); }
+
+  function nbUL(items) {
+    // merge "Label:" + a single short value onto one line (value bolded); keep real lists as chips
+    var m2 = [], p;
+    for (p = 0; p < items.length; p++) {
+      var it = items[p], nx = items[p + 1], nn = items[p + 2];
+      if (nbEndsColon(it) && nx != null && nbShort(nx) && !(nn != null && nbShort(nn) && !nbEndsColon(nn))) {
+        m2.push(it.replace(/\s+$/, '') + ' **' + nx.replace(/\*/g, '').trim() + '**'); p++;
+      } else { m2.push(it); }
+    }
+    items = m2;
+    var html = [], run = [], mode = null;
+    function flush() {
+      if (!run.length) return;
+      if (mode === 'chip' && run.length >= 2) {
+        html.push('<div class="chips">' + run.map(function (x) { return '<span class="chip">' + nbInline(esc(x)) + '</span>'; }).join('') + '</div>');
+      } else { html.push('<ul>' + run.map(function (x) { return '<li>' + nbInline(esc(x)) + '</li>'; }).join('') + '</ul>'); }
+      run = []; mode = null;
+    }
+    items.forEach(function (it) {
+      if (NB_KEY.test(it)) { flush(); html.push(nbKeyBox(it)); return; }
+      if (NB_MEM.test(it)) { flush(); html.push(nbMemBox(it)); return; }
+      var want = nbShort(it) ? 'chip' : 'norm';
+      if (mode && mode !== want) flush();
+      mode = want; run.push(it);
+    });
+    flush();
+    return html.join('\n');
+  }
+
+  function nbInner(md) {
+    md = (md || '').replace(/\r/g, '');
+    md = md.replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i, '$1');
+    var lines = md.split('\n'), out = [], i = 0, secN = 0, colorN = 0, ol = false;
+    function closeOl() { if (ol) { out.push('</ol>'); ol = false; } }
+    while (i < lines.length) {
+      var t = lines[i].trim();
+      if (/^\|.*\|$/.test(t) && i + 1 < lines.length && /^\|[\s:|-]+\|$/.test(lines[i + 1].trim())) {
+        closeOl();
+        var head = t.split('|').slice(1, -1).map(function (c) { return '<th>' + nbInline(esc(c.trim())) + '</th>'; }).join('');
+        out.push('<table><thead><tr>' + head + '</tr></thead><tbody>'); i += 2;
+        while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) {
+          var row = lines[i].trim().split('|').slice(1, -1).map(function (c) { return '<td>' + nbInline(esc(c.trim())) + '</td>'; }).join('');
+          out.push('<tr>' + row + '</tr>'); i++;
+        }
+        out.push('</tbody></table>'); continue;
+      }
+      if (t === '---' || t === '***' || t === '___') { closeOl(); out.push('<div class="divider"></div>'); i++; continue; }
+      var h = t.match(/^(#{1,6})\s+(.*)/);
+      if (h) {
+        closeOl();
+        var lv = h[1].length;
+        var htxt = h[2].replace(/^[*#\s]+/, '').replace(/[*#:\s]+$/, '').trim();
+        var txt = nbInline(esc(htxt));
+        if (lv <= 2) { secN++; var c = colorN % 5; colorN++; out.push('<div class="sec c' + c + '"><span class="num">' + secN + '</span>' + txt + '</div>'); }
+        else { out.push('<div class="subsec">' + txt + '</div>'); }
+        i++; continue;
+      }
+      if (/^>\s?/.test(t)) { closeOl(); out.push('<div class="notebox">' + nbInline(esc(t.replace(/^>\s?/, ''))) + '</div>'); i++; continue; }
+      var mo = t.match(/^(\d+)[.)]\s+(.*)/);
+      if (mo) { if (!ol) { out.push('<ol>'); ol = true; } out.push('<li>' + nbInline(esc(mo[2])) + '</li>'); i++; continue; }
+      if (/^[-*+]\s+/.test(t)) {
+        closeOl();
+        var items = [];
+        while (i < lines.length) { var m2 = lines[i].trim().match(/^[-*+]\s+(.*)/); if (!m2) break; items.push(m2[1]); i++; }
+        out.push(nbUL(items)); continue;
+      }
+      if (t === '') { closeOl(); i++; continue; }
+      if (NB_KEY.test(t)) { closeOl(); out.push(nbKeyBox(t)); i++; continue; }
+      if (NB_MEM.test(t)) { closeOl(); out.push(nbMemBox(t)); i++; continue; }
+      closeOl(); out.push('<p>' + nbInline(esc(t)) + '</p>'); i++;
+    }
+    closeOl();
+    return out.join('\n');
+  }
+
+  /* ── MCQ renderer ── */
+  var NB_Q = /^#{0,4}\s*\**\s*(?:Q|Question|Ques|\u092A\u094D\u0930\u0936\u094D\u0928|\u0938\u0935\u093E\u0932)\s*\.?\s*(\d+)\s*[.):\-\u2013]*\s*(.*)$/i;
+  var NB_O = /^[-*+]?\s*\(?([A-Da-d1-4])\)?[.)]\s+(.*)$/;
+  var NB_A = /^\s*(?:[-*+]\s*)?\**\s*(?:answer|ans|\u0909\u0924\u094D\u0924\u0930)\**\s*[:\uFF1A]?\s*\**\s*\(?([A-Da-d1-4])\)?\b(.*)$/i;
+  var NB_EXP = /^\**\s*(?:explanation|explain|\u0935\u094D\u092F\u093E\u0916\u094D\u092F\u093E)\**\s*[:\uFF1A]?\s*(.*)$/i;
+  function nbOptRight(text) { return /[\u2713\u2714]|\(correct\)|\bcorrect\b|\u0938\u0939\u0940/i.test(text); }
+  function nbCleanOpt(text) { return text.replace(/\s*[\u2713\u2714]\s*$/, '').replace(/\s*\(correct\)\s*$/i, '').trim(); }
+  function nbCard(n, q, opts, ans, ansRest, expl) {
+    var hasCorrect = !!ans || opts.some(function (o) { return nbOptRight(o.text); });
+    var body = opts.map(function (o) {
+      var right = (ans && o.k === ans) || nbOptRight(o.text);
+      var cls = right ? ' right' : (hasCorrect ? ' wrong' : '');
+      var txt = nbCleanOpt(o.text);
+      return '<div class="opt' + cls + '"><span class="lbl">' + o.k + '</span> ' + nbInline(esc(txt)) + (right ? ' \u2713' : '') + '</div>';
+    }).join('');
+    var qHtml = '<div class="q-card"><div class="q-head"><span class="qtag">Q' + n + '</span> ' + nbInline(esc(q.replace(/\*+/g, ''))) + '</div>' +
+      (opts.length ? '<div class="q-body">' + body + '</div>' : '') + '</div>';
+    var ansHtml = ans ? '<div class="answer"><span class="ok">\u2705 Answer: <mark class="ans">' + ans + '</mark></span>' +
+      (ansRest ? ' ' + nbInline(esc(ansRest.replace(/^[\s\u2014\-:\uFF1A]+/, ''))) : '') + '</div>' : '';
+    var explHtml = expl.length ? '<div class="explain"><div class="xh">\uD83D\uDCDD Explanation</div>' + nbInner(expl.join('\n')) + '</div>' : '';
+    return '<div class="qkeep">' + qHtml + ansHtml + '</div>' + explHtml;
+  }
+  function nbMCQ(md) {
+    var lines = (md || '').replace(/\r/g, '').replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i, '$1').split('\n');
+    var out = [], i = 0, qn = 0, found = false;
+    while (i < lines.length) {
+      var t = lines[i].trim();
+      var qm = t.match(NB_Q);
+      if (qm) {
+        found = true; qn++;
+        var qtext = qm[2] || ''; i++;
+        var opts = [], ans = '', ansRest = '', expl = [];
+        while (i < lines.length) {
+          var lt = lines[i].trim();
+          if (NB_Q.test(lt)) break;
+          var am = lt.match(NB_A), om = lt.match(NB_O), em = lt.match(NB_EXP);
+          if (am) { ans = am[1].toUpperCase(); ansRest = am[2] || ''; i++; continue; }
+          if (om) { opts.push({ k: om[1].toUpperCase(), text: om[2] }); i++; continue; }
+          if (em) { var er = (em[1] || '').replace(/^\*+/, '').replace(/\*+$/, '').trim(); if (er) expl.push(er); i++; continue; }
+          if (lt === '') { i++; continue; }
+          expl.push(lt); i++;
+        }
+        out.push(nbCard(qn, qtext, opts, ans, ansRest, expl));
+        continue;
+      }
+      var buf = [];
+      while (i < lines.length && !NB_Q.test(lines[i].trim())) { buf.push(lines[i]); i++; }
+      if (buf.join('').trim()) out.push(nbInner(buf.join('\n')));
+    }
+    if (!found) return nbInner(md);
+    return out.join('\n');
+  }
+
+  /* ── promo / junk safety-net (backend prompt already excludes it) ── */
+  var NB_JUNK = [
+    /parmar\s+(sir|academy)/i, /(foundation|revision|new|coaching|demo|upcoming|next|weekend)\s+batch/i,
+    /\btelegram\b/i, /\b(subscribe|do subscribe|like\s*,?\s*share|share\s*&?\s*subscribe)\b/i,
+    /\bnext\s+(session|class|lecture)\b/i, /\b(digital notes|free content)\b/i,
+    /\bpdf(s)?\b.*(link|description|telegram|app|download|share)/i, /academy\s*app|play\s*store|app\s*store|download the app/i,
+    /https?:\/\/|www\./i,
+    /\u092A\u093E\u0930\u094D?\u092E\u0930|\u092A\u0930\u092E\u093E\u0930|\u0905\u0915\u093E\u0926\u092E\u0940|\u0905\u0915\u0948\u0921\u092E\u0940/,
+    /(\u092B\u093E\u0909\u0902\u0921\u0947\u0936\u0928|\u0930\u093F\u0935\u0940\u091C\u0928)\s*\u092C\u0948\u091A/,
+    /\u091F\u0947\u0932\u0940\u0917\u094D\u0930\u093E\u092E|\u0938\u092C\u094D\u0938\u0915\u094D\u0930\u093E\u0907\u092C/,
+    /\u0905\u0917\u0932[\u0940\u093E]\s*(\u0932\u0947\u0915\u094D\u091A\u0930|\u0915\u094D\u0932\u093E\u0938|\u0938\u0947\u0936\u0928)/,
+    /\u0921\u093F\u091C\u093F\u091F\u0932\s*\u0928\u094B\u091F\u094D\u0938|\u092B\u094D\u0930\u0940\s*\u0915\u0902\u091F\u0947\u0902\u091F/
+  ];
+  function nbStrip(md) {
+    var lines = (md || '').replace(/\r/g, '').split('\n'), out = [];
+    for (var i = 0; i < lines.length; i++) {
+      var l = lines[i], tl = l.trim();
+      if (tl && NB_JUNK.some(function (r) { return r.test(l); })) continue;
+      out.push(l);
+    }
+    return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // Build the notebook HTML (no wrapper); linkTs makes timestamps clickable.
+  function nbBuild(content, style) {
+    var clean = nbStrip(content);
+    return linkTs(style === 'mcq' ? nbMCQ(clean) : nbInner(clean));
+  }
+
+  // Shared component styles, scoped to `sc` (used for both .ai-nb screen + .pdf-nb print).
+  function nbCss(sc) {
+    return [
+      sc + '{font-family:"Kalam","Noto Sans Devanagari","Comic Sans MS",cursive;color:#22303f;line-height:1.5}',
+      sc + ' .sec{display:flex;align-items:center;gap:9px;font-weight:700;font-size:1.2rem;margin:14px 0 5px;padding-bottom:5px}',
+      sc + ' .sec:first-child{margin-top:2px}',
+      sc + ' .sec .num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-size:.85rem;color:#fff;flex:none;font-family:system-ui,Arial,sans-serif}',
+      sc + ' .sec.c0{color:#c62828;border-bottom:2.5px solid #c62828}' + sc + ' .sec.c0 .num{background:#c62828}',
+      sc + ' .sec.c1{color:#2e7d32;border-bottom:2.5px solid #2e7d32}' + sc + ' .sec.c1 .num{background:#2e7d32}',
+      sc + ' .sec.c2{color:#1565c0;border-bottom:2.5px solid #1565c0}' + sc + ' .sec.c2 .num{background:#1565c0}',
+      sc + ' .sec.c3{color:#7b1fa2;border-bottom:2.5px solid #7b1fa2}' + sc + ' .sec.c3 .num{background:#7b1fa2}',
+      sc + ' .sec.c4{color:#e65100;border-bottom:2.5px solid #e65100}' + sc + ' .sec.c4 .num{background:#e65100}',
+      sc + ' .subsec{font-weight:700;font-size:1.02rem;color:#37474f;margin:10px 0 3px}',
+      sc + ' .subsec::before{content:"\\270E  ";opacity:.55}',
+      sc + ' p{margin:4px 0}',
+      sc + ' ul,' + sc + ' ol{margin:4px 0 7px;padding-left:4px;list-style:none}',
+      sc + ' ul li{position:relative;padding-left:20px;margin:2.5px 0}',
+      sc + ' ul li::before{content:"\\27a4";position:absolute;left:0;top:2px;color:#2e7d32;font-size:.7rem}',
+      sc + ' ol{counter-reset:li}',
+      sc + ' ol li{position:relative;padding-left:26px;margin:2.5px 0;counter-increment:li}',
+      sc + ' ol li::before{content:counter(li);position:absolute;left:0;top:1px;width:18px;height:18px;border-radius:50%;background:#2f4858;color:#fff;font-size:.66rem;display:flex;align-items:center;justify-content:center;font-family:system-ui,Arial,sans-serif}',
+      sc + ' .chips{display:flex;flex-wrap:wrap;gap:5px 7px;margin:4px 0 8px}',
+      sc + ' .chip{background:rgba(0,0,0,.04);border:1px solid #cfd8dc;border-radius:999px;padding:2px 10px;font-size:.92rem}',
+      sc + ' strong,' + sc + ' b,' + sc + ' .pen{color:#12202f;font-weight:700}',
+      sc + ' .fig{color:#1b7f43;font-weight:600}',
+      sc + ' em{color:#4527a0;font-style:italic}',
+      sc + ' code{background:#eef2f6;padding:1px 5px;border-radius:5px;font-size:.88em;font-family:ui-monospace,monospace}',
+      sc + ' mark{background:transparent}',
+      sc + ' mark.ans{background:#ffe93a;color:#3b2f00;padding:0 5px;border-radius:3px;font-weight:700}',
+      sc + ' .badge{display:inline-flex;align-items:center;gap:6px;font-family:system-ui,Arial,sans-serif;font-size:.66rem;font-weight:700;letter-spacing:.5px;color:#fff;padding:3px 10px;border-radius:6px;text-transform:uppercase;transform:translateY(5px)}',
+      sc + ' .badge.key{background:#2e7d32}' + sc + ' .badge.mem{background:#7b1fa2}',
+      sc + ' .factbox{border:1.5px solid #2e7d32;border-radius:9px;padding:8px 12px;margin:5px 0 10px;background:#f6fff7}',
+      sc + ' .membox{border:2px dashed #7b1fa2;border-radius:9px;padding:8px 12px;margin:5px 0 10px;background:#f3e5f5;color:#4a148c}',
+      sc + ' .notebox{background:#e3f2fd;border-left:4px solid #1565c0;border-radius:7px;padding:8px 12px;margin:6px 0;color:#0d2f52}',
+      sc + ' .q-card{margin:12px 0 4px;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(20,40,60,.08)}',
+      sc + ' .q-head{background:#2f4858;color:#eef4f8;padding:9px 13px;font-size:1rem;font-weight:700;display:flex;gap:9px;align-items:baseline}',
+      sc + ' .q-head .qtag{background:rgba(255,255,255,.18);border-radius:6px;padding:1px 8px;font-size:.74rem;flex:none;font-family:system-ui,Arial,sans-serif}',
+      sc + ' .q-head strong,' + sc + ' .q-head b,' + sc + ' .q-head .pen,' + sc + ' .q-head .fig{color:#fff}',
+      sc + ' .q-body{background:#fbfcfd;border:1px solid #cfd8dc;border-top:none;padding:7px 13px}',
+      sc + ' .opt{display:flex;align-items:baseline;gap:9px;padding:3px 0;font-size:.96rem}',
+      sc + ' .opt .lbl{display:inline-flex;align-items:center;justify-content:center;width:21px;height:21px;border-radius:50%;flex:none;background:#eceff1;color:#37474f;font-size:.72rem;font-weight:700;font-family:system-ui,Arial,sans-serif}',
+      sc + ' .opt.right{color:#1b5e20;font-weight:700}' + sc + ' .opt.right .lbl{background:#2e7d32;color:#fff}',
+      sc + ' .opt.wrong{color:#98a6b3;text-decoration:line-through;text-decoration-color:#d3a5a5}',
+      sc + ' .opt.wrong .lbl{background:#fbe3e3;color:#c0392b;text-decoration:none}' + sc + ' .opt.wrong .fig{color:#98a6b3}',
+      sc + ' .answer{background:#e8f5e9;border-left:4px solid #2e7d32;border-radius:7px;padding:8px 12px;margin:6px 0;color:#1e3a24}',
+      sc + ' .answer .ok{color:#2e7d32;font-weight:700}',
+      sc + ' .explain{margin:4px 0 12px}' + sc + ' .explain .xh{font-weight:700;color:#37474f;font-size:.86rem;margin:3px 0 1px;font-family:system-ui,Arial,sans-serif}',
+      sc + ' table{border-collapse:collapse;width:100%;margin:9px 0 12px;font-size:.9rem;box-shadow:0 2px 8px rgba(20,40,60,.08);border-radius:8px;overflow:hidden}',
+      sc + ' thead th{background:#2e7d32;color:#fff;text-align:left;padding:7px 10px;font-weight:700}',
+      sc + ' tbody td{border:1px solid #dce7df;padding:6px 10px}',
+      sc + ' tbody tr:nth-child(even){background:#f4faf5}',
+      sc + ' .divider{border:none;text-align:center;color:#c0ccd6;letter-spacing:7px;margin:12px 0}' + sc + ' .divider::after{content:"\\2726 \\2726 \\2726"}',
+      sc + ' .ai-ts{color:#1565c0;cursor:pointer;font-weight:700;white-space:nowrap}'
+    ].join('');
+  }
+
   /* ── styles (once) ── */
   (function () {
     if (document.getElementById('ai-study-css')) return;
@@ -152,7 +395,11 @@
       '.ai-opt.correct{border-color:#0a7d33;background:rgba(10,125,51,0.18)}',
       '.ai-opt.wrong{border-color:#a11;background:rgba(170,17,17,0.15)}',
       '.ai-spin{display:inline-block;width:16px;height:16px;border:2px solid var(--border,#2a3140);border-top-color:var(--accent,#00c896);border-radius:50%;animation:aispin .8s linear infinite;vertical-align:middle}',
-      '@keyframes aispin{to{transform:rotate(360deg)}}'
+      '@keyframes aispin{to{transform:rotate(360deg)}}',
+      // ── topper-notebook notes (single column on screen; paper look) ──
+      '.ai-nb{background:#fffdf6;border-radius:8px;padding:14px 16px 18px;color:#22303f}',
+      '.ai-scroll.nb{background:#fffdf6;padding:0;border-color:#e6dfca}',
+      nbCss('.ai-nb')
     ].join('');
     document.head.appendChild(s);
   })();
@@ -166,14 +413,19 @@
 
   var state = { tab: 'notes' };
 
+  // Notes style toggle (Topic vs MCQ) — only meaningful for the "notes" mode.
+  function nbNotesStyle() { var s = document.getElementById('ai-notes-style'); return (s && s.value === 'mcq') ? 'mcq' : 'topic'; }
+
   /* ── Notes / Summary / Insights / Flashcards (from /api/study) ── */
   function showStudy(mode, n, force, focus, langOverride) {
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var lang = langOverride || outLang();
-    el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
+    var style = (mode === 'notes') ? nbNotesStyle() : '';
+    el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid());
     if (mode === 'quiz') url += '&n=' + (n || 25);
+    if (style === 'mcq') url += '&style=mcq';
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
     apiGet(url).then(function (j) {
@@ -186,13 +438,14 @@
       var content = j.content || '';
       var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
       var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
+      var nbHtml = nbBuild(content, style);
       box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-        '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
+        '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
         pdfBtn + regenBtn + '</div>' +
-        '<div class="ai-scroll"><div class="ai-md">' + mdToHtml(content) + '</div></div>';
+        '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
       bindTsLinks(box);
       var pb = document.getElementById('ai-pdf');
-      if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode), '<div class="ai-md">' + mdToHtml(content) + '</div>'); };
+      if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true }); };
       var rb = document.getElementById('ai-regen');
       if (rb) rb.onclick = function () { showStudy(mode, n, true); };
     }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
@@ -237,7 +490,8 @@
   function checkLangs(mode, n, autoShow) {
     var vid = curVid(), bar = document.getElementById('ai-langbar');
     if (!vid || !bar) return;
-    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25)).then(function (j) {
+    var style = (mode === 'notes') ? nbNotesStyle() : '';
+    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + (style === 'mcq' ? '&style=mcq' : '')).then(function (j) {
       var bar2 = document.getElementById('ai-langbar'); if (!bar2) return;
       var avail = (j && j.available) || [];
       if (!avail.length) { bar2.innerHTML = ''; return; }
@@ -275,7 +529,20 @@
     '.pdf-msg.pdf-a{background:#f8fafc;border:1px solid #eef2f6;}' +
     '.pdf-who{font-size:8.5pt;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:3px;}' +
     '.ai-ts,.ai-ts-link{color:#2563eb;font-weight:600;}';
-  function pdfDownload(titleText, innerHtml) {
+  // Notebook PDF: A4, 2 columns (col-1 fills, then col-2, then next page), paper look.
+  function nbPdfCss() {
+    return '@page{size:A4;margin:10mm 9mm}' +
+      '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}' +
+      'body{margin:0;background:#fff}' +
+      '.pdf-title{font-family:"Kalam","Noto Sans Devanagari",system-ui,Arial,sans-serif;font-size:17pt;font-weight:800;margin:0 0 2px;color:#14532d}' +
+      '.pdf-meta{font-family:system-ui,Arial,sans-serif;font-size:8.5pt;color:#64748b;margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid #e2e8f0}' +
+      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:10.5pt;line-height:1.4}' +
+      '.pdf-nb .sec{column-span:all}' +
+      '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb table,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .sec,.pdf-nb .subsec,.pdf-nb .q-card,.pdf-nb .qkeep{break-inside:avoid}' +
+      nbCss('.pdf-nb');
+  }
+  function pdfDownload(titleText, innerHtml, opts) {
+    var nb = !!(opts && opts.notebook);
     var w = window.open('', '_blank');
     if (!w) {
       if (typeof showToast === 'function') showToast('Allow pop-ups to download the PDF', 'error');
@@ -283,22 +550,25 @@
       return;
     }
     var when = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    var css = nb ? nbPdfCss() : PDF_CSS;
+    var bodyClass = nb ? 'pdf-nb' : 'pdf-body';
+    var fontLink = nb ? '<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">' : '';
     var d = w.document;
     d.open();
     d.write('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
-      '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-      '<title>' + esc(titleText) + '</title><style>' + PDF_CSS + '</style></head><body>' +
+      '<meta name="viewport" content="width=device-width,initial-scale=1">' + fontLink +
+      '<title>' + esc(titleText) + '</title><style>' + css + '</style></head><body>' +
       '<div class="pdf-title">' + esc(titleText) + '</div>' +
       '<div class="pdf-meta">' + esc(when) + ' · 🎓 AI Study — StudyPlanner</div>' +
-      '<div class="pdf-body">' + innerHtml + '</div>' +
+      '<div class="' + bodyClass + '">' + innerHtml + '</div>' +
       '</body></html>');
     d.close();
     w.focus();
     // let fonts/layout settle, then open the print → "Save as PDF" dialog
-    setTimeout(function () { try { w.print(); } catch (e) {} }, 400);
+    setTimeout(function () { try { w.print(); } catch (e) {} }, nb ? 700 : 400);
   }
-  function pdfTitleFor(mode) {
-    var label = mode === 'insights' ? 'Key Insights' : (mode === 'summary' ? 'Summary' : 'Notes');
+  function pdfTitleFor(mode, style) {
+    var label = mode === 'insights' ? 'Key Insights' : (mode === 'summary' ? 'Summary' : (style === 'mcq' ? 'Notes (MCQ)' : 'Notes'));
     var t = (curTitle() || 'Video').replace(/\s+/g, ' ').trim();
     return t + ' — ' + label;
   }
@@ -472,17 +742,27 @@
   function renderBody() {
     var b = shellBody(); if (!b) return;
     if (state.tab === 'notes') {
-      b.innerHTML = '<div style="margin-bottom:8px">' +
-        '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select> ' +
+      b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+        '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
+        '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="mcq">❓ MCQ</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate</button></div><div id="ai-langbar"></div><div id="ai-sub"></div>';
-      // switching the dropdown: clear stale output + show which languages are
-      // already available (and auto-open the chosen language if it's cached).
-      document.getElementById('ai-notes-mode').onchange = function () {
+      var modeSel = document.getElementById('ai-notes-mode');
+      var styleSel = document.getElementById('ai-notes-style');
+      // MCQ style only applies to comprehensive notes; hide it for summary/insights.
+      function syncStyleVis() { styleSel.style.display = (modeSel.value === 'notes') ? '' : 'none'; }
+      syncStyleVis();
+      // switching a dropdown: clear stale output + refresh which languages are cached.
+      modeSel.onchange = function () {
         var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
+        syncStyleVis();
         checkLangs(this.value, 25, true);
       };
-      document.getElementById('ai-notes-go').onclick = function () { showStudy(document.getElementById('ai-notes-mode').value); };
-      checkLangs(document.getElementById('ai-notes-mode').value, 25, true);
+      styleSel.onchange = function () {
+        var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
+        checkLangs(modeSel.value, 25, false);
+      };
+      document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
+      checkLangs(modeSel.value, 25, true);
     } else if (state.tab === 'cards') {
       b.innerHTML = '<div id="ai-cards-focus-wrap" style="margin-bottom:8px;display:none">' +
         '<input id="ai-cards-focus" placeholder="Optional: kis topic ke cards? (blank = important)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +

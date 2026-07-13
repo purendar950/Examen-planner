@@ -1334,13 +1334,18 @@ def api_study_langs():
     except (TypeError, ValueError):
         num_q = 25
     num_q = max(1, min(100, num_q))
+    # match /api/study's cache buckets: MCQ notes are stored under their own key
+    style = (request.args.get("style") or "").strip().lower()
+    if mode != "notes" or style not in ("mcq",):
+        style = ""
     ai = _load_ai_config()
     model = ai.get("model") or ""
     if not model:
         return jsonify({"available": []})
     available = []
     for lang in _STUDY_LANGS:
-        fs_id = _fs_doc_id(video_id, mode, lang, model, num_q)
+        fs_id = _fs_doc_id(video_id, mode, lang, model, num_q, style) if style \
+            else _fs_doc_id(video_id, mode, lang, model, num_q)
         try:
             if _fs_get("study", fs_id):
                 available.append(lang)
