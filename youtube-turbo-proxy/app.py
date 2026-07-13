@@ -603,12 +603,24 @@ def _load_ai_config():
     if not keys and os.environ.get("BYNARA_API_KEY"):
         keys = [os.environ["BYNARA_API_KEY"].strip()]
     if keys:
+        # Base URL: admin can point Study AI at any OpenAI-compatible endpoint
+        # (e.g. LongCat: https://api.longcat.chat/openai/v1). Accept either a
+        # base ('.../v1') or a full completions URL. Blank = Bynara default.
+        base = (cfg.get("studyBaseUrl") or "").strip().rstrip("/")
+        if base:
+            base_url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+        else:
+            base_url = BYNARA_URL
+        provider = (cfg.get("studyProvider") or "").strip().lower()
+        if not provider:
+            provider = "bynara" if base_url == BYNARA_URL else "custom"
         return {
-            "base_url": BYNARA_URL,
+            "base_url": base_url,
             "keys": keys,                          # failover across keys
             "model": (cfg.get("studyModel") or "mistral-large").strip(),
             "big_context": True,                   # ~1M ctx — send full transcript
             "tpm": 0,                              # provider-managed limits
+            "provider": provider,
         }
     gkey = (cfg.get("groqApiKey") or os.environ.get("GROQ_API_KEY") or "").strip()
     return {
@@ -618,6 +630,7 @@ def _load_ai_config():
                   or "llama-3.3-70b-versatile").strip(),
         "big_context": False,
         "tpm": int(os.environ.get("GROQ_TPM", "7000")),
+        "provider": "groq",
     }
 
 
@@ -1109,7 +1122,12 @@ def api_study():
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel "
-                                  "(Study AI \u2014 Bynara, or Groq)."}), 503
+                                  "(Study AI \u2014 Bynara / LongCat, or Groq)."}), 503
+    # Optional per-request model override from the AI Study panel dropdown.
+    # Blank = use the admin-configured default (config/ai.studyModel).
+    req_model = (request.args.get("model") or "").strip()[:60]
+    if req_model:
+        ai["model"] = req_model
     model = ai["model"]
 
     # ?refresh=1 (or nocache=1) forces a fresh generation, ignoring BOTH the
@@ -1190,7 +1208,7 @@ def api_study():
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
             "out_lang": out_lang, "model": model,
             "num_questions": num_q if mode == "quiz" else None,
-            "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
+            "provider": ai.get("provider", "ai"),
             "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count"),
@@ -1223,7 +1241,8 @@ def api_study_langs():
         num_q = 25
     num_q = max(1, min(100, num_q))
     ai = _load_ai_config()
-    model = ai.get("model") or ""
+    req_model = (request.args.get("model") or "").strip()[:60]
+    model = req_model or ai.get("model") or ""
     if not model:
         return jsonify({"available": []})
     available = []
@@ -1343,6 +1362,15 @@ def api_status():
                 cfg = doc.to_dict() or {}
                 out["showRegenerate"] = bool(cfg.get("showRegenerate", False))
                 global_focus = bool(cfg.get("showFocusBox", False))
+                # Surface the active provider's model list so the AI Study panel
+                # dropdown stays in sync with the admin config (the browser can't
+                # read config/ai directly). Falls back gracefully if unset.
+                prov = (cfg.get("studyProvider") or "").strip().lower()
+                out["studyProvider"] = prov
+                if prov == "longcat":
+                    out["studyModels"] = ["LongCat-2.0", "LongCat-Flash-Chat", "LongCat-Flash-Lite"]
+                elif prov == "bynara":
+                    out["studyModels"] = ["mistral-large", "mistral-medium-3-5", "tencent-hy3"]
         except Exception:  # noqa: BLE001
             pass
     uid = (request.args.get("uid") or "").strip()
@@ -1376,6 +1404,9 @@ def api_tutor():
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503
+    req_model = (request.args.get("model") or body.get("model") or "").strip()[:60]
+    if req_model:
+        ai["model"] = req_model
 
     uid = (request.args.get("uid") or body.get("uid") or "").strip()
     if not _is_unlimited(uid):
@@ -1436,7 +1467,7 @@ def api_tutor():
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     return jsonify({"id": video_id, "answer": answer, "mode": mode,
-                    "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
+                    "provider": ai.get("provider", "ai"),
                     "model": ai["model"], "transcript_lang": t.get("chosen_lang")})
 
 
