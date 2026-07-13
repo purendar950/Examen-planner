@@ -1361,6 +1361,72 @@ def api_study_langs():
     return jsonify({"available": available, "model": model})
 
 
+# Per-provider endpoints/fields for the admin health check. Mirrors the admin
+# panel's STUDY_PROVIDERS map so "Test all providers" can ping each one.
+STUDY_TEST_PROVIDERS = {
+    "bynara":   {"url": BYNARA_URL,                                    "keyField": "bynaraApiKeys",   "modelField": "bynaraModel",   "def": "mistral-large"},
+    "mistral":  {"url": "https://api.mistral.ai/v1/chat/completions",  "keyField": "mistralApiKeys",  "modelField": "mistralModel",  "def": "mistral-large-latest"},
+    "cerebras": {"url": "https://api.cerebras.ai/v1/chat/completions", "keyField": "cerebrasApiKeys", "modelField": "cerebrasModel", "def": "gpt-oss-120b"},
+}
+
+
+@app.get("/api/study/test")
+def api_study_test():
+    """Health check for the admin AI Study tab. For each configured provider,
+    fire a tiny 1-token chat completion with that provider's saved key+model and
+    report {ok, status, latency, detail} so the admin can see at a glance which
+    providers work / are out of quota / down / discontinued. Cheap but not free,
+    so it's lightly rate-limited per IP."""
+    ip = _client_ip()
+    uid = (request.args.get("uid") or "").strip()
+    if not _is_unlimited(uid) and not _rate_ok("study_test", ip, 20, 3600):
+        return jsonify({"error": "rate_limited",
+                        "detail": "Too many test runs this hour. Try again later."}), 429
+
+    cfg = {}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                cfg = doc.to_dict() or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/ai read failed: %s", exc)
+
+    want = (request.args.get("provider") or "all").strip().lower()
+    results = {}
+    for pid, meta in STUDY_TEST_PROVIDERS.items():
+        if want != "all" and want != pid:
+            continue
+        keys = cfg.get(meta["keyField"])
+        if isinstance(keys, str):
+            keys = re.split(r"[,\n]+", keys)
+        keys = [k.strip() for k in (keys or []) if k and str(k).strip()]
+        model = (cfg.get(meta["modelField"]) or meta["def"]).strip()
+        if not keys:
+            results[pid] = {"configured": False, "ok": False, "detail": "no key set"}
+            continue
+        t0 = time.time()
+        try:
+            r = requests.post(
+                meta["url"],
+                headers={"Authorization": "Bearer " + keys[0], "Content-Type": "application/json"},
+                json={"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
+                timeout=25)
+            dt = int((time.time() - t0) * 1000)
+            results[pid] = {"configured": True, "ok": (r.status_code == 200),
+                            "status": r.status_code, "latency_ms": dt,
+                            "model": model, "keys": len(keys),
+                            "detail": "OK" if r.status_code == 200 else (r.text or "")[:180]}
+        except requests.Timeout:
+            results[pid] = {"configured": True, "ok": False, "status": 0,
+                            "latency_ms": int((time.time() - t0) * 1000),
+                            "model": model, "keys": len(keys), "detail": "timeout (25s)"}
+        except requests.RequestException as exc:
+            results[pid] = {"configured": True, "ok": False, "status": 0,
+                            "model": model, "keys": len(keys), "detail": str(exc)[:180]}
+    return jsonify({"results": results, "checked_at": int(time.time())})
+
+
 _STUDY_DEMO_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Study Demo</title>
