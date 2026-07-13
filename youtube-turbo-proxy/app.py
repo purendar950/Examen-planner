@@ -1383,17 +1383,19 @@ def api_study_langs():
 # Per-provider endpoints/fields for the admin health check. Mirrors the admin
 # panel's STUDY_PROVIDERS map so "Test all providers" can ping each one.
 STUDY_TEST_PROVIDERS = {
-    "bynara":   {"url": BYNARA_URL,                                    "keyField": "bynaraApiKeys",   "modelField": "bynaraModel",   "def": "mistral-large"},
-    "mistral":  {"url": "https://api.mistral.ai/v1/chat/completions",  "keyField": "mistralApiKeys",  "modelField": "mistralModel",  "def": "mistral-large-latest"},
-    "cerebras": {"url": "https://api.cerebras.ai/v1/chat/completions", "keyField": "cerebrasApiKeys", "modelField": "cerebrasModel", "def": "gpt-oss-120b"},
+    "bynara":     {"url": BYNARA_URL,                                        "keyField": "bynaraApiKeys",     "modelField": "bynaraModel",     "def": "mistral-large"},
+    "mistral":    {"url": "https://api.mistral.ai/v1/chat/completions",      "keyField": "mistralApiKeys",    "modelField": "mistralModel",    "def": "mistral-large-latest"},
+    "cerebras":   {"url": "https://api.cerebras.ai/v1/chat/completions",     "keyField": "cerebrasApiKeys",   "modelField": "cerebrasModel",   "def": "gpt-oss-120b"},
+    "openrouter": {"url": "https://openrouter.ai/api/v1/chat/completions",   "keyField": "openrouterApiKeys", "modelField": "openrouterModel", "def": "nvidia/nemotron-3-ultra-550b-a55b:free"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
 # ACTIVE provider's models — so whatever the user picks is always valid.
 STUDY_PROVIDER_MODELS = {
-    "bynara":   ["mistral-large", "mistral-medium-3-5", "tencent-hy3"],
-    "mistral":  ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest", "open-mistral-nemo"],
-    "cerebras": ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
+    "bynara":     ["mistral-large", "mistral-medium-3-5", "tencent-hy3"],
+    "mistral":    ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest", "open-mistral-nemo"],
+    "cerebras":   ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
+    "openrouter": ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "tencent/hy3:free"],
 }
 
 
@@ -1438,7 +1440,7 @@ def _all_study_models(cfg):
     """Every model whose provider has a key configured — for the study panel
     dropdown, so all pickable models actually work."""
     out = []
-    for pid in ("bynara", "mistral", "cerebras"):
+    for pid in ("bynara", "mistral", "cerebras", "openrouter"):
         meta = STUDY_TEST_PROVIDERS.get(pid)
         if meta and _cfg_keys(cfg, meta["keyField"]):
             out.extend(STUDY_PROVIDER_MODELS.get(pid, []))
@@ -1623,10 +1625,11 @@ def api_status():
                 # Grouped by provider (only those with a key) so the dropdown
                 # can label which model belongs to which provider.
                 _groups = []
-                for _pid in ("bynara", "mistral", "cerebras"):
+                _LABELS = {"openrouter": "OpenRouter"}
+                for _pid in ("bynara", "mistral", "cerebras", "openrouter"):
                     _meta = STUDY_TEST_PROVIDERS.get(_pid)
                     if _meta and _cfg_keys(cfg, _meta["keyField"]):
-                        _groups.append({"provider": _pid, "label": _pid.capitalize(),
+                        _groups.append({"provider": _pid, "label": _LABELS.get(_pid, _pid.capitalize()),
                                         "models": STUDY_PROVIDER_MODELS.get(_pid, [])})
                 out["studyModelGroups"] = _groups
         except Exception:  # noqa: BLE001
