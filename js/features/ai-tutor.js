@@ -78,8 +78,36 @@
       return '<a class="ai-ts" data-s="' + secs + '" title="Jump to ' + label + '">\u23e9 ' + label + '</a>';
     });
   }
+  // Models sometimes wrap plain content in LaTeX (e.g. "8 $\rightarrow$ 4").
+  // The notebook renderer has no math engine, so convert the common commands to
+  // Unicode and drop the $…$ delimiters so notes read cleanly (8 → 4).
+  function deLatex(s) {
+    if (s == null) return s;
+    s = String(s)
+      .replace(/\\(?:long)?rightarrow/g, '\u2192')
+      .replace(/\\to(?![a-zA-Z])/g, '\u2192')
+      .replace(/\\(?:long)?leftarrow/g, '\u2190')
+      .replace(/\\leftrightarrow/g, '\u2194')
+      .replace(/\\Rightarrow/g, '\u21d2')
+      .replace(/\\Leftarrow/g, '\u21d0')
+      .replace(/\\times/g, '\u00d7')
+      .replace(/\\div/g, '\u00f7')
+      .replace(/\\pm/g, '\u00b1')
+      .replace(/\\(?:leq|le)(?![a-zA-Z])/g, '\u2264')
+      .replace(/\\(?:geq|ge)(?![a-zA-Z])/g, '\u2265')
+      .replace(/\\(?:neq|ne)(?![a-zA-Z])/g, '\u2260')
+      .replace(/\\approx/g, '\u2248')
+      .replace(/\\cdot/g, '\u00b7')
+      .replace(/\\(?:ldots|cdots|dots)/g, '\u2026')
+      .replace(/\\infty/g, '\u221e')
+      .replace(/\\text\s*\{([^}]*)\}/g, '$1')
+      .replace(/\\([%&_#$])/g, '$1');           // \%, \&, \_, \#, \$ -> literal
+    // strip inline/inline-display math delimiters, keep the inner content
+    s = s.replace(/\$\$?([^$]*?)\$\$?/g, '$1');
+    return s;
+  }
   function mdToHtml(md) {
-    md = esc(md);
+    md = esc(deLatex(md));
     var lines = md.split('\n'), out = [], i = 0, ul = false, ol = false;
     function closeL() { if (ul) { out.push('</ul>'); ul = false; } if (ol) { out.push('</ol>'); ol = false; } }
     while (i < lines.length) {
@@ -296,7 +324,7 @@
 
   // Build the notebook HTML (no wrapper); linkTs makes timestamps clickable.
   function nbBuild(content, style) {
-    var clean = nbStrip(content);
+    var clean = deLatex(nbStrip(content));
     return linkTs(style === 'mcq' ? nbMCQ(clean) : nbInner(clean));
   }
 
