@@ -907,19 +907,30 @@
     }
   }
   // Fill the model dropdown from the server's list (active provider's models).
-  // Keeps the user's choice if still offered; otherwise falls back to Auto so a
-  // stale pick (e.g. after the admin switches provider) can never break a call.
-  function applyServerModels(list) {
+  // Fill the model dropdown with EVERY configured provider's models, grouped by
+  // provider (Auto first). The proxy routes each pick to its own provider's key,
+  // so any model works. A stale pick falls back to Auto so it can't break a call.
+  function applyServerModels(status) {
     var sel = document.getElementById('ai-model');
     if (!sel) return;
     var cur = outModel();
-    var opts = [['', 'Auto']];
-    (list || []).forEach(function (m) { if (m) opts.push([String(m), String(m)]); });
-    var valid = opts.some(function (o) { return o[0] === cur; });
-    if (cur && !valid) { setModel(''); cur = ''; }   // stale model → reset to Auto
-    var html = opts.map(function (o) {
-      return '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
-    }).join('');
+    var groups = (status && status.studyModelGroups) || null;
+    var flat = (status && status.studyModels) || [];
+    var all = [];
+    function opt(m) {
+      m = String(m); all.push(m);
+      return '<option value="' + esc(m) + '"' + (m === cur ? ' selected' : '') + '>' + esc(m) + '</option>';
+    }
+    var html = '<option value=""' + (cur === '' ? ' selected' : '') + '>Auto</option>';
+    if (groups && groups.length) {
+      html += groups.map(function (g) {
+        var body = (g.models || []).map(opt).join('');
+        return body ? ('<optgroup label="' + esc(g.label || g.provider || '') + '">' + body + '</optgroup>') : '';
+      }).join('');
+    } else {
+      html += (flat || []).map(function (m) { return m ? opt(m) : ''; }).join('');
+    }
+    if (cur && all.indexOf(cur) === -1) setModel('');   // stale model → Auto
     if (sel.innerHTML !== html) sel.innerHTML = html;
   }
   function panelHtml() {
@@ -959,7 +970,7 @@
         clearTimeout(to);
         _showRegen = !!(j && j.showRegenerate);
         _showFocus = !!(j && j.showFocusBox);
-        if (j) applyServerModels(j.studyModels);   // fill model dropdown with the active provider's models
+        if (j) applyServerModels(j);   // fill model dropdown with ALL providers' models (grouped)
         applyFocusVisibility();   // reflect focus-box visibility without wiping any in-progress quiz
         if (j && j.ok) {
           if (j.cachedTranscript) setDot('cached', 'Transcript already generated — instant');

@@ -587,14 +587,15 @@ _study_cache = {}
 _study_lock = threading.Lock()
 
 
-def _load_ai_config():
+def _load_ai_config(prefer_model=None):
     """Study AI provider from Firestore config/ai. Returns a dict:
-        {base_url, key, model, big_context, tpm}
+        {base_url, keys, model, big_context, tpm, provider}
 
-    Prefers a generic OpenAI-compatible provider (e.g. Bynara — ~1M context, so
-    full lectures need no chunking) when studyBaseUrl + studyApiKey are set;
-    otherwise falls back to Groq (groqApiKey/model). The key never reaches the
-    browser."""
+    If `prefer_model` is given and it belongs to a configured provider that has
+    a key, THAT provider's key + endpoint are used — so the study panel can list
+    models from ALL providers and any pick routes to the right one. Otherwise
+    uses the active provider (studyApiKeys/studyBaseUrl), else Groq. The key
+    never reaches the browser."""
     cfg = {}
     if _fb_db:
         try:
@@ -603,6 +604,14 @@ def _load_ai_config():
                 cfg = doc.to_dict() or {}
         except Exception as exc:  # noqa: BLE001
             log.warning("config/ai read failed: %s", exc)
+
+    # A specific model was requested → route to its provider's key + endpoint.
+    if prefer_model:
+        pid = _model_provider(prefer_model)
+        if pid:
+            alt = _ai_for_provider(cfg, pid, prefer_model)
+            if alt:
+                return alt
 
     # Bynara key(s): studyApiKeys can be a list or a comma/newline string.
     keys = cfg.get("studyApiKeys")
@@ -628,7 +637,7 @@ def _load_ai_config():
         return {
             "base_url": base_url,
             "keys": keys,                          # failover across keys
-            "model": (cfg.get("studyModel") or "mistral-large").strip(),
+            "model": (prefer_model or cfg.get("studyModel") or "mistral-large").strip(),
             "big_context": True,                   # big ctx — send full transcript
             "tpm": 0,                              # provider-managed limits
             "provider": provider,
@@ -637,7 +646,7 @@ def _load_ai_config():
     return {
         "base_url": GROQ_URL,
         "keys": [gkey] if gkey else [],
-        "model": (cfg.get("model") or os.environ.get("GROQ_MODEL")
+        "model": (prefer_model or cfg.get("model") or os.environ.get("GROQ_MODEL")
                   or "llama-3.3-70b-versatile").strip(),
         "big_context": False,
         "tpm": int(os.environ.get("GROQ_TPM", "7000")),
@@ -1217,17 +1226,15 @@ def api_study():
     if not video_id:
         return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
 
-    ai = _load_ai_config()
+    # Optional per-request model from the study panel dropdown. It may belong to
+    # ANY configured provider — _load_ai_config routes it to that provider's key
+    # + endpoint, so every listed model actually works. Blank = admin default.
+    req_model = (request.args.get("model") or "").strip()[:80]
+    ai = _load_ai_config(req_model or None)
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel "
-                                  "(Study AI \u2014 Bynara, or Groq)."}), 503
-    # Optional per-request model override from the study panel's model dropdown.
-    # Blank = admin-configured default. The dropdown only lists the ACTIVE
-    # provider's models (via /api/status), so any choice works with the key.
-    req_model = (request.args.get("model") or "").strip()[:80]
-    if req_model:
-        ai["model"] = req_model
+                                  "(Study AI \u2014 Bynara / Mistral / Cerebras, or Groq)."}), 503
     model = ai["model"]
 
     # ?refresh=1 (or nocache=1) forces a fresh generation, ignoring BOTH the
@@ -1356,9 +1363,9 @@ def api_study_langs():
     style = (request.args.get("style") or "").strip().lower()
     if mode != "notes" or style not in ("mcq",):
         style = ""
-    ai = _load_ai_config()
     req_model = (request.args.get("model") or "").strip()[:80]
-    model = req_model or ai.get("model") or ""
+    ai = _load_ai_config(req_model or None)
+    model = ai.get("model") or ""
     if not model:
         return jsonify({"available": []})
     available = []
@@ -1388,6 +1395,54 @@ STUDY_PROVIDER_MODELS = {
     "mistral":  ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest", "open-mistral-nemo"],
     "cerebras": ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
 }
+
+
+def _model_provider(model):
+    """Which provider a model id belongs to (None if unknown)."""
+    if not model:
+        return None
+    for pid, models in STUDY_PROVIDER_MODELS.items():
+        if model in models:
+            return pid
+    return None
+
+
+def _cfg_keys(cfg, field):
+    """Read a provider's key list from config (list or comma/newline string)."""
+    keys = cfg.get(field)
+    if isinstance(keys, str):
+        keys = re.split(r"[,\n]+", keys)
+    return [k.strip() for k in (keys or []) if k and str(k).strip()]
+
+
+def _ai_for_provider(cfg, pid, model=None):
+    """Build an _ai_chat config for a specific provider using ITS OWN key(s).
+    Returns None if that provider has no key configured."""
+    meta = STUDY_TEST_PROVIDERS.get(pid)
+    if not meta:
+        return None
+    keys = _cfg_keys(cfg, meta["keyField"])
+    if not keys:
+        return None
+    return {
+        "base_url": meta["url"],
+        "keys": keys,
+        "model": (model or cfg.get(meta["modelField"]) or meta["def"]).strip(),
+        "big_context": True,
+        "tpm": 0,
+        "provider": pid,
+    }
+
+
+def _all_study_models(cfg):
+    """Every model whose provider has a key configured — for the study panel
+    dropdown, so all pickable models actually work."""
+    out = []
+    for pid in ("bynara", "mistral", "cerebras"):
+        meta = STUDY_TEST_PROVIDERS.get(pid)
+        if meta and _cfg_keys(cfg, meta["keyField"]):
+            out.extend(STUDY_PROVIDER_MODELS.get(pid, []))
+    return out
 
 
 @app.get("/api/study/test")
@@ -1556,13 +1611,24 @@ def api_status():
                 # Active provider's model list, so the study panel's model
                 # dropdown offers only valid choices for the configured key.
                 prov = (cfg.get("studyProvider") or "").strip().lower()
-                _models = list(STUDY_PROVIDER_MODELS.get(prov, []))
+                # Expose EVERY model whose provider has a key — the study panel
+                # lists them all and each pick routes to its own provider.
+                _all = _all_study_models(cfg)
                 _saved = (cfg.get("studyModel") or "").strip()
-                if _saved and _saved not in _models:
-                    _models.insert(0, _saved)
+                if _saved and _saved not in _all:
+                    _all.insert(0, _saved)
                 out["studyProvider"] = prov
-                out["studyModels"] = _models
+                out["studyModels"] = _all
                 out["studyModel"] = _saved
+                # Grouped by provider (only those with a key) so the dropdown
+                # can label which model belongs to which provider.
+                _groups = []
+                for _pid in ("bynara", "mistral", "cerebras"):
+                    _meta = STUDY_TEST_PROVIDERS.get(_pid)
+                    if _meta and _cfg_keys(cfg, _meta["keyField"]):
+                        _groups.append({"provider": _pid, "label": _pid.capitalize(),
+                                        "models": STUDY_PROVIDER_MODELS.get(_pid, [])})
+                out["studyModelGroups"] = _groups
         except Exception:  # noqa: BLE001
             pass
     uid = (request.args.get("uid") or "").strip()
@@ -1592,13 +1658,11 @@ def api_tutor():
     if not question and mode != "teach":
         return jsonify({"error": "missing question"}), 400
 
-    ai = _load_ai_config()
+    req_model = (request.args.get("model") or body.get("model") or "").strip()[:80]
+    ai = _load_ai_config(req_model or None)
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503
-    req_model = (request.args.get("model") or body.get("model") or "").strip()[:80]
-    if req_model:
-        ai["model"] = req_model
 
     uid = (request.args.get("uid") or body.get("uid") or "").strip()
     if not _is_unlimited(uid):
