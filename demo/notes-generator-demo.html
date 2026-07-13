@@ -265,7 +265,20 @@
   function calloutMem(t){ return '<span class="badge mem">🧠 Memory Trick</span><div class="membox">'+inline(esc(afterColon(t)))+'</div>'; }
 
   function isShort(s){ var p=s.replace(/[*_`]/g,"").trim(); return p.length<=18 && p.indexOf(":")<0; }
+  function endsColon(s){ return /[:：]\s*$/.test(s.replace(/[*_`]/g,"")); }
   function renderUL(items){
+    // Merge "Label:" + a single short value onto ONE line (value bolded), so the
+    // name/answer sits right after the colon instead of dropping to the next line.
+    // Skip when the colon is followed by a LIST of short values (keep those as chips).
+    var m2=[];
+    for(var p=0;p<items.length;p++){
+      var it=items[p], nx=items[p+1], nn=items[p+2];
+      if(endsColon(it) && nx!=null && isShort(nx) && !(nn!=null && isShort(nn) && !endsColon(nn))){
+        m2.push(it.replace(/\s+$/,"") + " **" + nx.replace(/\*/g,"").trim() + "**");
+        p++;                          // consume the value line
+      } else { m2.push(it); }
+    }
+    items=m2;
     var html=[], run=[], mode=null;
     function flush(){
       if(!run.length) return;
@@ -307,7 +320,10 @@
       var h=t.match(/^(#{1,6})\s+(.*)/);
       if(h){
         closeOl();
-        var lv=h[1].length, txt=inline(esc(h[2].replace(/[:*#]+$/,"").trim()));
+        var lv=h[1].length;
+        // strip surrounding markdown (** ## :) so bold-wrapped headings don't show literal '**'
+        var htxt=h[2].replace(/^[*#\s]+/,"").replace(/[*#:\s]+$/,"").trim();
+        var txt=inline(esc(htxt));
         if(lv<=2){ secN++; var c=colorN%5; colorN++; out.push('<div class="sec c'+c+'"><span class="num">'+secN+'</span>'+txt+'</div>'); }
         else { out.push('<div class="subsec">'+txt+'</div>'); }
         i++; continue;
