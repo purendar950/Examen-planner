@@ -23,10 +23,15 @@ start_pot &
 sleep 4
 
 echo "[start] launching gunicorn on :${PORT:-8080}"
+# --timeout: worker request timeout. Notes/MCQ for a long lecture generate many
+# chunks in ONE request (several minutes total), so 120s was too low and would
+# kill a legit generation (502). Raised + env-tunable. Streaming keeps the
+# upstream (Bynara/Cloudflare) connection alive; this keeps OUR worker alive too.
 exec gunicorn \
     --bind "0.0.0.0:${PORT:-8080}" \
     --workers "${WEB_WORKERS:-1}" \
     --threads "${WEB_THREADS:-4}" \
     --worker-class gthread \
-    --timeout 120 \
+    --timeout "${WEB_TIMEOUT:-600}" \
+    --graceful-timeout "${WEB_GRACEFUL_TIMEOUT:-30}" \
     app:app
