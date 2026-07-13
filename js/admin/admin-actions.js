@@ -575,13 +575,14 @@ async function saveGroqConfig() {
 async function saveStudyAiConfig() {
   const rawKeys = (document.getElementById('study-api-keys') || {}).value || '';
   const model   = (document.getElementById('study-model')   || {}).value || 'mistral-large';
+  const baseUrl = ((document.getElementById('study-base-url') || {}).value || '').trim().replace(/\/+$/, '');
   const keys = rawKeys.split(/[\n,]+/).map(function(k){ return k.trim(); }).filter(Boolean);
   try {
     await db.collection('config').doc('ai').set({
-      studyApiKeys: keys, studyModel: model.trim(),
+      studyApiKeys: keys, studyModel: model.trim(), studyBaseUrl: baseUrl,
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-    AI_CONFIG.studyApiKeys = keys; AI_CONFIG.studyModel = model.trim();
+    AI_CONFIG.studyApiKeys = keys; AI_CONFIG.studyModel = model.trim(); AI_CONFIG.studyBaseUrl = baseUrl;
     showToast('✅ Study AI saved (' + keys.length + ' key' + (keys.length === 1 ? '' : 's') + ')');
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
@@ -782,28 +783,47 @@ function renderAiStudy() {
                  : String(sKeysRaw).split(/[\n,]+/).map(function(k){return k.trim();}).filter(Boolean);
   var sKeysText = sKeysArr.join('\n');
   var sModel = (AI_CONFIG && AI_CONFIG.studyModel) || 'mistral-large';
-  var BYNARA_MODELS = ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3'];
-  if (BYNARA_MODELS.indexOf(sModel) === -1) BYNARA_MODELS.unshift(sModel);
-  var modelOpts = BYNARA_MODELS.map(function(m){
-    return '<option value="' + esc(m) + '"' + (m === sModel ? ' selected' : '') + '>' + esc(m) + '</option>';
+  var sBaseUrl = (AI_CONFIG && AI_CONFIG.studyBaseUrl) || '';
+  /* Models grouped by provider. Base URL below decides which endpoint the proxy
+     hits; pick a matching model. LongCat = OpenAI-compatible, so it works with
+     the same key/keys field. */
+  var STUDY_MODEL_GROUPS = [
+    ['Bynara (OpenAI-compatible)', ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3']],
+    ['LongCat (api.longcat.chat/openai/v1)', ['LongCat-2.0', 'LongCat-Flash-Chat', 'LongCat-Flash-Lite']]
+  ];
+  var knownModels = STUDY_MODEL_GROUPS.reduce(function(a, g){ return a.concat(g[1]); }, []);
+  var groupsHtml = STUDY_MODEL_GROUPS.map(function(g){
+    return '<optgroup label="' + esc(g[0]) + '">' + g[1].map(function(m){
+      return '<option value="' + esc(m) + '"' + (m === sModel ? ' selected' : '') + '>' + esc(m) + '</option>';
+    }).join('') + '</optgroup>';
   }).join('');
+  // keep a custom / renamed model selectable even if it isn't in the known list
+  if (knownModels.indexOf(sModel) === -1) {
+    groupsHtml = '<optgroup label="Custom"><option value="' + esc(sModel) + '" selected>' + esc(sModel) + '</option></optgroup>' + groupsHtml;
+  }
   s += '<div class="card" style="margin-bottom:12px;">' +
-    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz) — Bynara</h3>' +
+    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz)</h3>' +
     '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
-      'Transcript → notes/quiz (<code>/api/study</code>). ~1M context, so poori lecture ek hi call mein. ' +
-      '<b>Ek se zyada key</b> daal sakte ho (har line pe ek) — ek limit/fail ho to agli apne aap use hogi.' +
+      'Transcript → notes/quiz (<code>/api/study</code>). Any OpenAI-compatible provider works — ' +
+      '<b>Bynara</b> (~1M context) or <b>LongCat</b>. <b>Ek se zyada key</b> daal sakte ho (har line pe ek) — ' +
+      'ek limit/fail ho to agli apne aap use hogi. Model + Base URL match karo.' +
     '</div>' +
     '<label style="font-size:.8rem;color:#555;">API key(s) — one per line</label>' +
     '<textarea id="study-api-keys" placeholder="key1&#10;key2&#10;key3" ' +
       'style="width:100%;min-height:72px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(sKeysText) + '</textarea>' +
+    '<label style="font-size:.8rem;color:#555;">Base URL (OpenAI-compatible endpoint) — blank = Bynara default</label>' +
+    '<input id="study-base-url" type="text" placeholder="https://api.longcat.chat/openai/v1" ' +
+      'value="' + esc(sBaseUrl) + '" ' +
+      'style="width:100%;font-family:monospace;font-size:.8rem;margin:4px 0 8px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;">' +
+    '<div class="muted" style="font-size:.7rem;margin:-4px 0 8px;">💡 LongCat: <code>https://api.longcat.chat/openai/v1</code>. Leave blank to keep using Bynara.</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
       '<label style="font-size:.85rem;">Model</label>' +
-      '<select id="study-model" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:200px;">' + modelOpts + '</select>' +
+      '<select id="study-model" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:220px;">' + groupsHtml + '</select>' +
       '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
     '</div>' +
     '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
-      (sKeysArr.length ? ('✅ ' + sKeysArr.length + ' key(s) · model: <b>' + esc(sModel) + '</b>')
-                       : '⚪ No Bynara key — /api/study will use the Groq key from the Telegram tab') +
+      (sKeysArr.length ? ('✅ ' + sKeysArr.length + ' key(s) · model: <b>' + esc(sModel) + '</b>' + (sBaseUrl ? ' · endpoint: <b>' + esc(sBaseUrl) + '</b>' : ' · endpoint: Bynara (default)'))
+                       : '⚪ No key — /api/study will use the Groq key from the Telegram tab') +
     '</div>' +
     '</div>';
 
