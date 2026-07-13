@@ -603,24 +603,12 @@ def _load_ai_config():
     if not keys and os.environ.get("BYNARA_API_KEY"):
         keys = [os.environ["BYNARA_API_KEY"].strip()]
     if keys:
-        # Base URL: admin can point Study AI at any OpenAI-compatible endpoint
-        # (e.g. LongCat: https://api.longcat.chat/openai/v1). Accept either a
-        # base ('.../v1') or a full completions URL. Blank = Bynara default.
-        base = (cfg.get("studyBaseUrl") or "").strip().rstrip("/")
-        if base:
-            base_url = base if base.endswith("/chat/completions") else base + "/chat/completions"
-        else:
-            base_url = BYNARA_URL
-        provider = (cfg.get("studyProvider") or "").strip().lower()
-        if not provider:
-            provider = "bynara" if base_url == BYNARA_URL else "custom"
         return {
-            "base_url": base_url,
+            "base_url": BYNARA_URL,
             "keys": keys,                          # failover across keys
             "model": (cfg.get("studyModel") or "mistral-large").strip(),
             "big_context": True,                   # ~1M ctx — send full transcript
             "tpm": 0,                              # provider-managed limits
-            "provider": provider,
         }
     gkey = (cfg.get("groqApiKey") or os.environ.get("GROQ_API_KEY") or "").strip()
     return {
@@ -630,7 +618,6 @@ def _load_ai_config():
                   or "llama-3.3-70b-versatile").strip(),
         "big_context": False,
         "tpm": int(os.environ.get("GROQ_TPM", "7000")),
-        "provider": "groq",
     }
 
 
@@ -746,79 +733,47 @@ def _retry_after_secs(resp):
     return 10.0
 
 
-# Free LongCat models to fall back to when the chosen model is out of token
-# quota (402) or rate-limited (429). Ordered most-available first. Overridable
-# via env (comma-separated) in case names change.
-_LONGCAT_FALLBACKS = tuple(
-    m.strip() for m in os.environ.get(
-        "LONGCAT_FALLBACK_MODELS", "LongCat-Flash-Chat,LongCat-Flash-Lite"
-    ).split(",") if m.strip()
-)
-
-
 def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
-    """OpenAI-compatible chat call (Groq / Bynara / LongCat). Tries each configured
-    key in turn; a 429 is retried briefly on the same key, other errors fail over
-    to the next key. For LongCat, if the chosen model runs out of quota (402) or is
-    rate-limited (429) on all keys, it automatically retries with the free Flash
-    models so a paid/exhausted model never hard-fails the feature. Paces to TPM
-    only when tpm>0."""
+    """OpenAI-compatible chat call (Groq or Bynara). Tries each configured key in
+    turn: a 429 is retried a couple times on the same key, any other error (or a
+    persistent 429) fails over to the next key. Paces to TPM only when tpm>0."""
+    body = {"model": ai["model"], "messages": messages,
+            "temperature": temperature, "max_tokens": max_tokens}
+    if json_mode:
+        body["response_format"] = {"type": "json_object"}
     keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
     if not keys:
         raise RuntimeError("no AI API key configured")
     est = _est_tokens(messages, max_tokens)
-
-    # Chosen model first, then free fallbacks (LongCat only).
-    models = [ai["model"]]
-    if ai.get("provider") == "longcat":
-        for fb in _LONGCAT_FALLBACKS:
-            if fb and fb != ai["model"] and fb not in models:
-                models.append(fb)
-
     last = "unknown error"
-    for model in models:
-        body = {"model": model, "messages": messages,
-                "temperature": temperature, "max_tokens": max_tokens}
-        if json_mode:
-            body["response_format"] = {"type": "json_object"}
-        out_of_quota = False                   # 402/429 → a different model may help
-        for ki, key in enumerate(keys):
-            for _ in range(3):
-                _ai_pace(est, ai.get("tpm", 0))
-                try:
-                    r = requests.post(ai["base_url"],
-                                      headers={"Authorization": "Bearer " + key,
-                                               "Content-Type": "application/json"},
-                                      json=body, timeout=_AI_TIMEOUT)
-                except requests.Timeout:
-                    last = ("timeout after %ss (model %s, key %d) — try a faster "
-                            "model or a shorter video" % (_AI_TIMEOUT, model, ki + 1))
-                    break                      # → next key
-                except requests.RequestException as exc:
-                    last = "network (model %s, key %d): %s" % (model, ki + 1, exc)
-                    break                      # → next key
-                if r.status_code == 200:
-                    if model != ai["model"]:
-                        ai["used_model"] = model   # record the fallback actually used
-                    return r.json()["choices"][0]["message"]["content"]
-                if r.status_code == 402:       # quota exhausted for THIS model
-                    last = "402 (model %s, key %d): token quota insufficient" % (model, ki + 1)
-                    out_of_quota = True
-                    break                      # next key, then fallback model
-                if r.status_code == 429:       # rate limited — brief retry, same key
-                    last = "429 (model %s, key %d): %s" % (model, ki + 1, r.text[:120])
-                    out_of_quota = True
-                    time.sleep(_retry_after_secs(r))
-                    continue
-                if 500 <= r.status_code < 600:  # upstream busy/timeout (e.g. CF 524) — retry
-                    last = "%d (model %s, key %d): upstream timeout/busy" % (r.status_code, model, ki + 1)
-                    time.sleep(4)
-                    continue
-                last = "%s (model %s, key %d): %s" % (r.status_code, model, ki + 1, r.text[:120])
-                break                          # 401/other 4xx → next key
-        # all keys exhausted for this model; only try a fallback model on quota/rate
-        if not out_of_quota:
-            break                              # non-quota failure — fallback won't help
+    for ki, key in enumerate(keys):
+        for _ in range(3):
+            _ai_pace(est, ai.get("tpm", 0))
+            try:
+                r = requests.post(ai["base_url"],
+                                  headers={"Authorization": "Bearer " + key,
+                                           "Content-Type": "application/json"},
+                                  json=body, timeout=_AI_TIMEOUT)
+            except requests.Timeout:
+                last = ("timeout after %ss (key %d) — the lecture is long; try a "
+                        "faster model (mistral-medium-3-5 / auto/bynara) or a "
+                        "shorter video" % (_AI_TIMEOUT, ki + 1))
+                break                          # → next key
+            except requests.RequestException as exc:
+                last = "network (key %d): %s" % (ki + 1, exc)
+                break                          # → next key
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"]
+            if r.status_code == 429:           # rate limited — brief retry, same key
+                last = "429 (key %d): %s" % (ki + 1, r.text[:120])
+                time.sleep(_retry_after_secs(r))
+                continue
+            if 500 <= r.status_code < 600:     # upstream busy/timeout (e.g. CF 524) — retry
+                last = "%d (key %d): upstream timeout/busy" % (r.status_code, ki + 1)
+                time.sleep(4)
+                continue
+            last = "%s (key %d): %s" % (r.status_code, ki + 1, r.text[:120])
+            break                              # 401/402/other 4xx → next key
     raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
 
 
@@ -1154,12 +1109,7 @@ def api_study():
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel "
-                                  "(Study AI \u2014 Bynara / LongCat, or Groq)."}), 503
-    # Optional per-request model override from the AI Study panel dropdown.
-    # Blank = use the admin-configured default (config/ai.studyModel).
-    req_model = (request.args.get("model") or "").strip()[:60]
-    if req_model:
-        ai["model"] = req_model
+                                  "(Study AI \u2014 Bynara, or Groq)."}), 503
     model = ai["model"]
 
     # ?refresh=1 (or nocache=1) forces a fresh generation, ignoring BOTH the
@@ -1238,9 +1188,9 @@ def api_study():
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
-            "out_lang": out_lang, "model": ai.get("used_model") or model,
+            "out_lang": out_lang, "model": model,
             "num_questions": num_q if mode == "quiz" else None,
-            "provider": ai.get("provider", "ai"),
+            "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
             "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count"),
@@ -1273,8 +1223,7 @@ def api_study_langs():
         num_q = 25
     num_q = max(1, min(100, num_q))
     ai = _load_ai_config()
-    req_model = (request.args.get("model") or "").strip()[:60]
-    model = req_model or ai.get("model") or ""
+    model = ai.get("model") or ""
     if not model:
         return jsonify({"available": []})
     available = []
@@ -1394,15 +1343,6 @@ def api_status():
                 cfg = doc.to_dict() or {}
                 out["showRegenerate"] = bool(cfg.get("showRegenerate", False))
                 global_focus = bool(cfg.get("showFocusBox", False))
-                # Surface the active provider's model list so the AI Study panel
-                # dropdown stays in sync with the admin config (the browser can't
-                # read config/ai directly). Falls back gracefully if unset.
-                prov = (cfg.get("studyProvider") or "").strip().lower()
-                out["studyProvider"] = prov
-                if prov == "longcat":
-                    out["studyModels"] = ["LongCat-2.0", "LongCat-Flash-Chat", "LongCat-Flash-Lite"]
-                elif prov == "bynara":
-                    out["studyModels"] = ["mistral-large", "mistral-medium-3-5", "tencent-hy3"]
         except Exception:  # noqa: BLE001
             pass
     uid = (request.args.get("uid") or "").strip()
@@ -1436,9 +1376,6 @@ def api_tutor():
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503
-    req_model = (request.args.get("model") or body.get("model") or "").strip()[:60]
-    if req_model:
-        ai["model"] = req_model
 
     uid = (request.args.get("uid") or body.get("uid") or "").strip()
     if not _is_unlimited(uid):
@@ -1499,9 +1436,8 @@ def api_tutor():
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     return jsonify({"id": video_id, "answer": answer, "mode": mode,
-                    "provider": ai.get("provider", "ai"),
-                    "model": ai.get("used_model") or ai["model"],
-                    "transcript_lang": t.get("chosen_lang")})
+                    "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
+                    "model": ai["model"], "transcript_lang": t.get("chosen_lang")})
 
 
 @app.get("/api/stream")
