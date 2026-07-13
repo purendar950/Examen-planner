@@ -18,9 +18,32 @@
   var BACKEND = (localStorage.getItem('turboBackendUrl')
     || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
   var LANG_KEY = 'aiStudyLang';
+  var MODEL_KEY = 'aiStudyModel';
 
   function outLang() { return localStorage.getItem(LANG_KEY) || 'Hinglish'; }
   function setLang(v) { try { localStorage.setItem(LANG_KEY, v); } catch (e) {} }
+
+  /* ── AI model selection ─────────────────────────────────────────────────
+     The actual model call happens server-side in youtube-turbo-proxy; the
+     value chosen here is passed as `model=` (studies) / `model` (tutor body)
+     so the proxy can route to it (e.g. LongCat's OpenAI-compatible endpoint).
+     "" = Auto → proxy uses the admin-configured default (config/ai.studyModel),
+     which keeps the previous behaviour unchanged. The list below is the local
+     fallback; if the proxy reports its own list via /api/status.studyModels,
+     that overrides this (see applyServerModels). */
+  var STUDY_MODELS = [
+    ['', 'Auto (server default)'],
+    ['LongCat-2.0', 'LongCat 2.0'],
+    ['LongCat-Flash-Chat', 'LongCat Flash Chat'],
+    ['LongCat-Flash-Lite', 'LongCat Flash Lite'],
+    ['mistral-large', 'Mistral Large'],
+    ['mistral-medium-3-5', 'Mistral Medium 3.5'],
+    ['tencent-hy3', 'Tencent HY3']
+  ];
+  function outModel() { return localStorage.getItem(MODEL_KEY) || ''; }
+  function setModel(v) { try { localStorage.setItem(MODEL_KEY, v == null ? '' : v); } catch (e) {} }
+  // query-string fragment for GET endpoints ('' when Auto so the URL is unchanged)
+  function modelParam() { var m = outModel(); return m ? '&model=' + encodeURIComponent(m) : ''; }
 
   // NOTE: youtube.js declares ytCurrentVideoId with `let`, so it is NOT a
   // window property — must be read as a bare global (same as yt-screenshots.js).
@@ -172,7 +195,7 @@
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var lang = langOverride || outLang();
     el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
-    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid());
+    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
@@ -237,7 +260,7 @@
   function checkLangs(mode, n, autoShow) {
     var vid = curVid(), bar = document.getElementById('ai-langbar');
     if (!vid || !bar) return;
-    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25)).then(function (j) {
+    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + modelParam()).then(function (j) {
       var bar2 = document.getElementById('ai-langbar'); if (!bar2) return;
       var avail = (j && j.available) || [];
       if (!avail.length) { bar2.innerHTML = ''; return; }
@@ -322,7 +345,7 @@
     var focus = quizFocus();
     var lang = langOverride || outLang();
     el.innerHTML = loading((force ? 'Building a fresh ' : 'Building a ') + n + '-question quiz (' + lang + ')' + (focus ? ' on “' + focus + '”' : '') + '…');
-    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid());
+    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (focus) qurl += '&focus=' + encodeURIComponent(focus);
     if (force) qurl += '&refresh=1';
     apiGet(qurl).then(function (j) {
@@ -446,7 +469,7 @@
     if (state.tab === 'tutor') { renderTutor(); var chat = document.getElementById('ai-chat'); if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; } }
     fetch(BACKEND + '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), history: h.slice(-8) })
+      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), model: outModel(), history: h.slice(-8) })
     }).then(function (r) { return r.json(); }).then(function (j) {
       var hist = getHistory();
       hist.push({ role: 'assistant', content: j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)') });
@@ -505,9 +528,37 @@
       renderTutor();
     }
   }
+  function modelSelectHtml() {
+    var cur = outModel();
+    return '<select id="ai-model-sel" title="AI model">' +
+      STUDY_MODELS.map(function (m) {
+        return '<option value="' + esc(m[0]) + '"' + (cur === m[0] ? ' selected' : '') + '>' + esc(m[1]) + '</option>';
+      }).join('') +
+      '</select>';
+  }
+  // Rebuild the model dropdown from a server-provided list (proxy /api/status).
+  // Accepts an array of strings or {id,label} objects; preserves the user's
+  // current choice even if it isn't in the list.
+  function applyServerModels(list) {
+    if (!Array.isArray(list) || !list.length) return;
+    var sel = document.getElementById('ai-model-sel');
+    if (!sel) return;
+    var cur = outModel();
+    var opts = [['', 'Auto (server default)']];
+    list.forEach(function (m) {
+      if (typeof m === 'string') opts.push([m, m]);
+      else if (m && m.id) opts.push([String(m.id), String(m.label || m.id)]);
+    });
+    if (cur && !opts.some(function (o) { return o[0] === cur; })) opts.push([cur, cur]);
+    var next = opts.map(function (o) {
+      return '<option value="' + esc(o[0]) + '"' + (cur === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
+    }).join('');
+    if (sel.innerHTML !== next) sel.innerHTML = next;
+  }
   function panelHtml() {
     return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">🎓 AI Study</span>' +
-      '<select id="ai-lang" title="Output language" style="margin-left:auto">' +
+      modelSelectHtml() +
+      '<select id="ai-lang" title="Output language">' +
       ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
       '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
   }
@@ -541,6 +592,7 @@
         clearTimeout(to);
         _showRegen = !!(j && j.showRegenerate);
         _showFocus = !!(j && j.showFocusBox);
+        if (j) applyServerModels(j.studyModels || j.models);  // let the proxy define the model list (future-proof)
         applyFocusVisibility();   // reflect focus-box visibility without wiping any in-progress quiz
         if (j && j.ok) {
           if (j.cachedTranscript) setDot('cached', 'Transcript already generated — instant');
@@ -615,6 +667,8 @@
     });
     var lang = document.getElementById('ai-lang');
     if (lang) lang.onchange = function () { setLang(lang.value); };
+    var modelSel = document.getElementById('ai-model-sel');
+    if (modelSel) modelSel.onchange = function () { setModel(modelSel.value); };
     var dot = document.getElementById('ai-status-dot');
     if (dot) dot.onclick = function () { _statusVid = null; checkStatus(curVid()); };
     renderTabs(); renderBody();
