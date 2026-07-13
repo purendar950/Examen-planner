@@ -592,7 +592,7 @@
       if (j.warning === 'no_captions' || j.error === 'no_captions') {
         box.innerHTML = '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>'; return;
       }
-      if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); return; }
+      if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); checkLangs('flashcards', 25, false); return; }
       var content = j.content || '';
       var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
       var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
@@ -608,6 +608,9 @@
       if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true }); };
       var rb = document.getElementById('ai-regen');
       if (rb) rb.onclick = function () { showStudy(mode, n, true); };
+      // Refresh the "already generated" bar so the language just made shows up
+      // immediately (it used to only update on tab/mode/language change).
+      checkLangs(mode, n || 25, false);
     }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
   }
   // Flashcards as an actual card deck: one card at a time, TAP to flip (3D),
@@ -868,6 +871,7 @@
       if (!qs.length) { contentEl().innerHTML = '<div class="ai-muted">Could not generate questions.</div>'; return; }
       quiz = { qs: qs, idx: 0, correct: 0, wrong: [] };
       renderQ();
+      checkLangs('quiz', n, false);        // refresh "already generated" bar
     }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
   }
   function renderQ() {
