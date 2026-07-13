@@ -772,6 +772,10 @@ def _read_stream(resp):
     connection stays active and slow models never hit Cloudflare's ~100s 524.
     Also tolerates a non-streamed 200 body (full 'message' object)."""
     out = []
+    # SSE streams rarely send a charset, so requests falls back to ISO-8859-1
+    # and mangles multi-byte UTF-8 (Hindi/Devanagari, emoji, etc.) into mojibake
+    # like "à¤à¥". Force UTF-8 so decode_unicode decodes the stream correctly.
+    resp.encoding = "utf-8"
     for raw in resp.iter_lines(decode_unicode=True):
         if not raw:
             continue
