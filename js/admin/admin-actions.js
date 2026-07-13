@@ -589,6 +589,45 @@ const STUDY_PROVIDERS = {
               note: 'ultra-fast inference', keyUrl: 'https://cloud.cerebras.ai' }
 };
 const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras'];
+/* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
+   provider APIs block direct browser calls (CORS), so the proxy pings them. */
+const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
+  || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+
+/* Friendly label for a failed health-check HTTP status. */
+function studyTestMsg(status) {
+  if (status === 401 || status === 403) return { icon: '❌', text: 'invalid / unauthorized key' };
+  if (status === 402) return { icon: '⚠️', text: 'no quota / payment required' };
+  if (status === 404) return { icon: '⚠️', text: 'not found — model/endpoint may be discontinued' };
+  if (status === 400) return { icon: '⚠️', text: 'bad request — model may be unsupported' };
+  if (status === 429) return { icon: '⏳', text: 'rate limited — try later' };
+  if (status >= 500) return { icon: '🔴', text: 'provider down / server error' };
+  if (!status) return { icon: '🔴', text: 'unreachable / timeout' };
+  return { icon: '⚠️', text: 'error' };
+}
+/* Ping every configured provider via the proxy and show what's working/down. */
+async function testStudyProviders() {
+  var out = document.getElementById('study-test-out');
+  if (out) out.innerHTML = '<span class="muted">⏳ Pinging providers… (up to ~25s each if one is slow)</span>';
+  try {
+    var r = await fetch(STUDY_BACKEND + '/api/study/test');
+    var j = await r.json();
+    if (j && j.error) { if (out) out.innerHTML = '⚠️ ' + esc(j.detail || j.error); return; }
+    var res = (j && j.results) || {};
+    var rows = STUDY_PROVIDER_ORDER.map(function (k) {
+      var d = res[k];
+      var label = (STUDY_PROVIDERS[k] || {}).label || k;
+      if (!d || !d.configured) return '<div>⚪ <b>' + esc(label) + '</b> — no key set</div>';
+      if (d.ok) return '<div>✅ <b>' + esc(label) + '</b> — working · ' + (d.latency_ms || 0) + 'ms · <code>' + esc(d.model || '') + '</code></div>';
+      var m = studyTestMsg(d.status || 0);
+      var extra = d.detail && d.detail !== 'OK' ? (' · <span class="muted">' + esc(String(d.detail).slice(0, 90)) + '</span>') : '';
+      return '<div>' + m.icon + ' <b>' + esc(label) + '</b> — ' + m.text + ' (HTTP ' + (d.status || '—') + ')' + extra + '</div>';
+    }).join('');
+    if (out) out.innerHTML = rows || '<span class="muted">No providers configured.</span>';
+  } catch (e) {
+    if (out) out.innerHTML = '⚠️ Could not reach the proxy: ' + esc(e.message || String(e));
+  }
+}
 
 function splitStudyKeys(raw) {
   return String(raw || '').split(/[\n,]+/).map(function (k) { return k.trim(); }).filter(Boolean);
@@ -974,6 +1013,12 @@ function renderAiStudy() {
       '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
     '</div>' +
     '<div class="muted" style="font-size:.68rem;margin-top:6px;">One model box — it lists the models of the ● ACTIVE provider above.</div>' +
+    /* 🩺 Health check — ping each provider server-side (CORS blocks the browser) */
+    '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+      '<button class="btn btn-gray" onclick="testStudyProviders()">🩺 Test all providers</button>' +
+      '<span class="muted" style="font-size:.68rem;">Pings each saved provider with a tiny call — see what\'s working, out of quota, or down.</span>' +
+    '</div>' +
+    '<div id="study-test-out" class="muted" style="font-size:.74rem;margin-top:8px;line-height:1.8;"></div>' +
     '</div>';
 
   /* ── AI Study Controls Card — Regenerate button + focus box show/hide ── */

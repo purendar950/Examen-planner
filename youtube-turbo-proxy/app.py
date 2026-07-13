@@ -1222,6 +1222,12 @@ def api_study():
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel "
                                   "(Study AI \u2014 Bynara, or Groq)."}), 503
+    # Optional per-request model override from the study panel's model dropdown.
+    # Blank = admin-configured default. The dropdown only lists the ACTIVE
+    # provider's models (via /api/status), so any choice works with the key.
+    req_model = (request.args.get("model") or "").strip()[:80]
+    if req_model:
+        ai["model"] = req_model
     model = ai["model"]
 
     # ?refresh=1 (or nocache=1) forces a fresh generation, ignoring BOTH the
@@ -1351,7 +1357,8 @@ def api_study_langs():
     if mode != "notes" or style not in ("mcq",):
         style = ""
     ai = _load_ai_config()
-    model = ai.get("model") or ""
+    req_model = (request.args.get("model") or "").strip()[:80]
+    model = req_model or ai.get("model") or ""
     if not model:
         return jsonify({"available": []})
     available = []
@@ -1364,6 +1371,80 @@ def api_study_langs():
         except Exception:  # noqa: BLE001
             pass
     return jsonify({"available": available, "model": model})
+
+
+# Per-provider endpoints/fields for the admin health check. Mirrors the admin
+# panel's STUDY_PROVIDERS map so "Test all providers" can ping each one.
+STUDY_TEST_PROVIDERS = {
+    "bynara":   {"url": BYNARA_URL,                                    "keyField": "bynaraApiKeys",   "modelField": "bynaraModel",   "def": "mistral-large"},
+    "mistral":  {"url": "https://api.mistral.ai/v1/chat/completions",  "keyField": "mistralApiKeys",  "modelField": "mistralModel",  "def": "mistral-large-latest"},
+    "cerebras": {"url": "https://api.cerebras.ai/v1/chat/completions", "keyField": "cerebrasApiKeys", "modelField": "cerebrasModel", "def": "gpt-oss-120b"},
+}
+# Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
+# Surfaced via /api/status so the study panel's model dropdown only offers the
+# ACTIVE provider's models — so whatever the user picks is always valid.
+STUDY_PROVIDER_MODELS = {
+    "bynara":   ["mistral-large", "mistral-medium-3-5", "tencent-hy3"],
+    "mistral":  ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest", "open-mistral-nemo"],
+    "cerebras": ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
+}
+
+
+@app.get("/api/study/test")
+def api_study_test():
+    """Health check for the admin AI Study tab. For each configured provider,
+    fire a tiny 1-token chat completion with that provider's saved key+model and
+    report {ok, status, latency, detail} so the admin can see at a glance which
+    providers work / are out of quota / down / discontinued. Cheap but not free,
+    so it's lightly rate-limited per IP."""
+    ip = _client_ip()
+    uid = (request.args.get("uid") or "").strip()
+    if not _is_unlimited(uid) and not _rate_ok("study_test", ip, 20, 3600):
+        return jsonify({"error": "rate_limited",
+                        "detail": "Too many test runs this hour. Try again later."}), 429
+
+    cfg = {}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                cfg = doc.to_dict() or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/ai read failed: %s", exc)
+
+    want = (request.args.get("provider") or "all").strip().lower()
+    results = {}
+    for pid, meta in STUDY_TEST_PROVIDERS.items():
+        if want != "all" and want != pid:
+            continue
+        keys = cfg.get(meta["keyField"])
+        if isinstance(keys, str):
+            keys = re.split(r"[,\n]+", keys)
+        keys = [k.strip() for k in (keys or []) if k and str(k).strip()]
+        model = (cfg.get(meta["modelField"]) or meta["def"]).strip()
+        if not keys:
+            results[pid] = {"configured": False, "ok": False, "detail": "no key set"}
+            continue
+        t0 = time.time()
+        try:
+            r = requests.post(
+                meta["url"],
+                headers={"Authorization": "Bearer " + keys[0], "Content-Type": "application/json"},
+                json={"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
+                timeout=25)
+            dt = int((time.time() - t0) * 1000)
+            results[pid] = {"configured": True, "ok": (r.status_code == 200),
+                            "status": r.status_code, "latency_ms": dt,
+                            "model": model, "keys": len(keys),
+                            "detail": "OK" if r.status_code == 200 else (r.text or "")[:180]}
+        except requests.Timeout:
+            results[pid] = {"configured": True, "ok": False, "status": 0,
+                            "latency_ms": int((time.time() - t0) * 1000),
+                            "model": model, "keys": len(keys), "detail": "timeout (25s)"}
+        except requests.RequestException as exc:
+            results[pid] = {"configured": True, "ok": False, "status": 0,
+                            "model": model, "keys": len(keys), "detail": str(exc)[:180]}
+    return jsonify({"results": results, "checked_at": int(time.time())})
 
 
 _STUDY_DEMO_HTML = """<!doctype html>
@@ -1472,6 +1553,16 @@ def api_status():
                 cfg = doc.to_dict() or {}
                 out["showRegenerate"] = bool(cfg.get("showRegenerate", False))
                 global_focus = bool(cfg.get("showFocusBox", False))
+                # Active provider's model list, so the study panel's model
+                # dropdown offers only valid choices for the configured key.
+                prov = (cfg.get("studyProvider") or "").strip().lower()
+                _models = list(STUDY_PROVIDER_MODELS.get(prov, []))
+                _saved = (cfg.get("studyModel") or "").strip()
+                if _saved and _saved not in _models:
+                    _models.insert(0, _saved)
+                out["studyProvider"] = prov
+                out["studyModels"] = _models
+                out["studyModel"] = _saved
         except Exception:  # noqa: BLE001
             pass
     uid = (request.args.get("uid") or "").strip()
@@ -1505,6 +1596,9 @@ def api_tutor():
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503
+    req_model = (request.args.get("model") or body.get("model") or "").strip()[:80]
+    if req_model:
+        ai["model"] = req_model
 
     uid = (request.args.get("uid") or body.get("uid") or "").strip()
     if not _is_unlimited(uid):
