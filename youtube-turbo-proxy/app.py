@@ -776,7 +776,19 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
                 last = "network (key %d): %s" % (ki + 1, exc)
                 break                          # → next key
             if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"]
+                # Robust extraction: some reasoning models (e.g. Cerebras
+                # gpt-oss) may omit "content" and only return "reasoning".
+                try:
+                    msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+                except (ValueError, KeyError, IndexError, TypeError):
+                    msg = {}
+                content = msg.get("content")
+                if content:
+                    return content
+                # no usable content (e.g. all tokens spent on reasoning) → treat
+                # as a soft failure so failover / retry can kick in
+                last = "empty content (key %d) — model returned no answer" % (ki + 1)
+                break                          # → next key
             if r.status_code == 429:           # rate limited — brief retry, same key
                 last = "429 (key %d): %s" % (ki + 1, r.text[:120])
                 time.sleep(_retry_after_secs(r))
