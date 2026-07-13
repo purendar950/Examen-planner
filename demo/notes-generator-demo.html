@@ -255,6 +255,7 @@
   /* ── strip promo / logistics "junk" (channel ads, links, batches, timings) ──
      Targets ONLY meta/promo patterns, never study facts. Toggleable in the UI. */
   var JUNK_LINE=[
+    // ── English ──
     /parmar\s+(sir|academy)/i,
     /(foundation|revision|new|coaching|demo|upcoming|next|weekend)\s+batch|\bbatch\b\s*(starts|starting|link|join|now)/i,
     /\btelegram\b/i,
@@ -267,9 +268,25 @@
     /academy\s*app|play\s*store|app\s*store|download the app/i,
     /https?:\/\/|www\./i,
     /\b(join|download|follow us|like this video|share this video)\b.*(link|channel|app|telegram|now|below)/i,
-    /^\s*resources?\s*:?\s*$/i
+    /^\s*resources?\s*:?\s*$/i,
+    // ── Hindi / Devanagari (app outputs Hindi & Hinglish too) ──
+    /पार्?मर|परमार|अकादमी|अकैडमी|एकेडमी/,
+    /(फाउंडेशन|फ़ाउंडेशन|रिवीजन|रिविजन|नई|नया|वीकेंड)\s*बैच/,
+    /(मैथ्स|मैथ|गणित|रीजनिंग|साइंस|विज्ञान|इंग्लिश|अंग्रेज़ी|हिंदी)\s*\S*\s*बैच/,
+    /बैच\s*(शुरू|स्टार्ट|लिंक|जॉइन|[:：])/,
+    /टेलीग्राम|टेलिग्राम/,
+    /सब्सक्राइब|सब्स्क्राइब|लाइक\s*(करें|और|एंड)|शेयर\s*(करें|और|एंड)/,
+    /बेल\s*आइकन|घंटी\s*(दबा|आइकन)/,
+    /अगल[ीा]\s*(लेक्चर|क्लास|कक्षा|सेशन|सेसन|वीडियो)/,
+    /डिजिटल\s*नोट्स|फ्री\s*कंटेंट|मुफ्त\s*(में|कंटेंट)/,
+    /(उपलब्ध|शेयर|डाउनलोड).*(ऐप|एप्प|एप|टेलीग्राम|लिंक|डिस्क्रिप्शन)/,
+    /(ऐप|एप्प|एप)\s*(पर|में)\s*(उपलब्ध|मिल)/,
+    /(हिंदी\s*(&|और|एंड)\s*(इंग्लिश|अंग्रेज़ी)|इंग्लिश\s*(&|और|एंड)\s*हिंदी).*उपलब्ध/,
+    /डिस्क्रिप्शन|लिंक\s*(नीचे|डिस्क्रिप्शन|दिया)/,
+    /(टेलीग्राम|जॉइन|सब्सक्राइब).*चैनल|चैनल.*(जॉइन|लिंक|सब्सक्राइब)/,
+    /^\s*(संसाधन|रिसोर्स(ेस)?|पीडीएफ)\s*[:：]?\s*$/
   ];
-  var JUNK_HEAD=/^\s*(resources?|batches?|our\s*classes|classes|social|links?|join\s*us|download|follow|next\s*(session|class))\b/i;
+  var JUNK_HEAD=/^\s*(resources?|batches?|our\s+classes|classes|social|links?|join\s+us|download|follow|next\s+(session|class)|संसाधन|रिसोर्स|सोशल|लिंक|डाउनलोड|फॉलो|बैच|अगल[ीा])/i;
   function isJunkLine(l){ for(var k=0;k<JUNK_LINE.length;k++){ if(JUNK_LINE[k].test(l)) return true; } return false; }
   function stripJunk(md){
     var lines=(md||"").replace(/\r/g,"").split("\n"), out=[], i=0, removed=0;
