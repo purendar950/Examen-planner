@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Study — Follow the Lecture (Demo)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ══════════════════════════════════════════════════════════════════════
+     DEMO — "Follow the lecture" auto-highlight for AI comprehensive notes.
+     Standalone. NOTHING here is wired into the app yet — this mirrors the
+     logic that will go into js/features/ai-tutor.js so the UX can be tested
+     against a MOCK player (play/pause + scrubber = simulated teacher time).
+     ══════════════════════════════════════════════════════════════════════ */
+  :root {
+    --bg:#0e1116; --card:#151a24; --surface:#1b1f2a; --border:#2a3140;
+    --text:#e7ecf5; --muted:#8b93a7; --accent:#00c896;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; }
+  body {
+    background:var(--bg); color:var(--text);
+    font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  .wrap { max-width:1200px; margin:0 auto; padding:16px; }
+  h1.title { font-size:1.1rem; margin:6px 0 2px; }
+  .subtitle { color:var(--muted); font-size:.82rem; margin-bottom:14px; }
+  .note-banner {
+    background:rgba(0,200,150,.08); border:1px dashed var(--accent);
+    border-radius:10px; padding:8px 12px; font-size:.76rem; color:var(--muted);
+    margin-bottom:14px; line-height:1.5;
+  }
+
+  .layout { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  @media (max-width:860px){ .layout{ grid-template-columns:1fr; } }
+
+  /* ── Mock player ── */
+  .player-card { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; position:sticky; top:16px; }
+  .screen {
+    aspect-ratio:16/9; background:#000; position:relative;
+    display:flex; align-items:center; justify-content:center; text-align:center;
+    background-image:radial-gradient(circle at 50% 40%, #1e2a44, #05070c);
+  }
+  .screen .now-teaching {
+    padding:18px 20px; max-width:90%;
+  }
+  .screen .nt-label { font-size:.66rem; letter-spacing:.14em; color:#5fd0b0; text-transform:uppercase; font-weight:800; }
+  .screen .nt-title { font-size:1.35rem; font-weight:800; margin-top:8px; line-height:1.35; }
+  .screen .nt-sub { color:#9fb3c8; font-size:.82rem; margin-top:8px; }
+  .screen .badge-live {
+    position:absolute; top:12px; left:12px; background:#e11d48; color:#fff;
+    font-size:.62rem; font-weight:800; letter-spacing:.1em; padding:3px 8px; border-radius:6px;
+    display:none;
+  }
+  .screen.playing .badge-live { display:inline-block; animation:pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.35;} }
+
+  .controls { padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+  .ctrl-row { display:flex; align-items:center; gap:10px; }
+  .btn {
+    cursor:pointer; border:none; background:var(--accent); color:#04120d;
+    border-radius:8px; padding:8px 14px; font-size:.82rem; font-weight:800; font-family:inherit;
+  }
+  .btn.sec { background:var(--surface); color:var(--text); border:1px solid var(--border); }
+  .btn:hover { filter:brightness(1.06); }
+  .time { font-variant-numeric:tabular-nums; font-size:.82rem; color:var(--muted); min-width:104px; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; width:100%; height:6px; border-radius:99px; background:var(--border); outline:none; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:15px; height:15px; border-radius:50%; background:var(--accent); cursor:pointer; }
+  input[type=range]::-moz-range-thumb{ width:15px; height:15px; border:none; border-radius:50%; background:var(--accent); cursor:pointer; }
+  .speed { margin-left:auto; }
+  select.speed { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:5px 8px; font-size:.76rem; }
+
+  /* ── Notes panel ── */
+  .notes-card { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .notes-head {
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:10px 12px; border-bottom:1px solid var(--border);
+  }
+  .notes-head .h-title { font-weight:800; font-size:.9rem; }
+  .notes-head .h-meta { color:var(--muted); font-size:.72rem; }
+  .follow-toggle {
+    margin-left:auto; display:inline-flex; align-items:center; gap:7px;
+    cursor:pointer; user-select:none; background:var(--surface);
+    border:1px solid var(--border); border-radius:999px; padding:5px 11px; font-size:.76rem; font-weight:700;
+  }
+  .follow-toggle.on { background:var(--accent); color:#04120d; border-color:var(--accent); }
+  .follow-toggle .sw { width:14px; height:14px; border-radius:50%; background:var(--muted); }
+  .follow-toggle.on .sw { background:#04120d; }
+
+  .ai-scroll {
+    position:relative;               /* so offsetTop of blocks is relative here */
+    max-height:70vh; overflow:auto;
+    background:#fffdf6; margin:0; padding:6px 4px;
+  }
+  .ai-nb {
+    font-family:"Kalam","Noto Sans Devanagari","Comic Sans MS",cursive;
+    color:#22303f; line-height:1.5; padding:10px 14px 40px;
+  }
+
+  /* highlightable blocks */
+  .blk { position:relative; border-radius:8px; padding:4px 10px; margin:2px 0; transition:background .3s ease, box-shadow .3s ease; }
+  .blk.active {
+    background:linear-gradient(90deg, rgba(0,200,150,.16), rgba(0,200,150,.03) 70%, transparent);
+    box-shadow:inset 3px 0 0 var(--accent);
+  }
+  .blk.active::after {
+    content:"▶ now"; position:absolute; top:6px; right:8px;
+    font-family:system-ui,Arial,sans-serif; font-size:.58rem; font-weight:800;
+    color:var(--accent); letter-spacing:.06em; opacity:.85;
+  }
+
+  .sec { display:flex; align-items:center; gap:9px; font-weight:700; font-size:1.2rem; margin:6px 0 4px; }
+  .sec .num { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:50%; font-size:.85rem; color:#fff; flex:none; font-family:system-ui,Arial,sans-serif; }
+  .sec.c0{color:#c62828} .sec.c0 .num{background:#c62828}
+  .sec.c1{color:#2e7d32} .sec.c1 .num{background:#2e7d32}
+  .sec.c2{color:#1565c0} .sec.c2 .num{background:#1565c0}
+  .sec.c3{color:#7b1fa2} .sec.c3 .num{background:#7b1fa2}
+  .subsec { font-weight:700; font-size:1.02rem; color:#37474f; margin:2px 0; }
+  p.txt { margin:2px 0; }
+  b, strong { color:#12202f; }
+  .fig { color:#1b7f43; font-weight:600; }
+
+  .badge { display:inline-flex; align-items:center; gap:6px; font-family:system-ui,Arial,sans-serif; font-size:.62rem; font-weight:800; letter-spacing:.5px; color:#fff; padding:3px 10px; border-radius:6px; text-transform:uppercase; }
+  .badge.key{background:#2e7d32} .badge.mem{background:#7b1fa2}
+  .factbox { border:1.5px solid #2e7d32; border-radius:9px; padding:8px 12px; margin:4px 0; background:#f6fff7; }
+  .membox { border:2px dashed #7b1fa2; border-radius:9px; padding:8px 12px; margin:4px 0; background:#f3e5f5; color:#4a148c; }
+  ul { margin:4px 0; padding-left:4px; list-style:none; }
+  ul li { position:relative; padding-left:20px; margin:2px 0; }
+  ul li::before { content:"\27a4"; position:absolute; left:0; top:2px; color:#2e7d32; font-size:.7rem; }
+  table { border-collapse:collapse; width:100%; margin:6px 0; font-size:.9rem; border-radius:8px; overflow:hidden; }
+  thead th { background:#2e7d32; color:#fff; text-align:left; padding:6px 9px; }
+  tbody td { border:1px solid #dce7df; padding:5px 9px; }
+  tbody tr:nth-child(even){ background:#f4faf5; }
+
+  .ai-ts {
+    display:inline-block; color:#1565c0; cursor:pointer; font-weight:700;
+    white-space:nowrap; font-family:system-ui,Arial,sans-serif; font-size:.74rem;
+    background:#e3f2fd; border-radius:5px; padding:0 6px; margin-right:6px;
+  }
+  .ai-ts:hover { background:#bbdefb; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">🎓 AI Study — "Follow the Lecture" (Demo)</h1>
+    <div class="subtitle">Comprehensive notes auto-highlight & scroll to wherever the teacher is. This page uses a MOCK player so you can test without a real video.</div>
+    <div class="note-banner">
+      ▶ Press <b>Play</b> (or drag the scrubber) to simulate the teacher speaking.
+      Turn on <b>🎯 Follow lecture</b> to make the notes highlight + auto-scroll to the current moment.
+      Click any blue timestamp to "seek". Scrolling the notes yourself pauses auto-follow for a few seconds.
+      <br>This is exactly the behaviour that will be added to your comprehensive notes.
+    </div>
+
+    <div class="layout">
+      <!-- ─────────── MOCK PLAYER ─────────── -->
+      <div class="player-card">
+        <div class="screen" id="screen">
+          <span class="badge-live">● LIVE</span>
+          <div class="now-teaching">
+            <div class="nt-label">Teacher is explaining</div>
+            <div class="nt-title" id="nt-title">Press play to begin</div>
+            <div class="nt-sub" id="nt-sub">0:00 — Blitz Lecture 16</div>
+          </div>
+        </div>
+        <div class="controls">
+          <div class="ctrl-row">
+            <button class="btn" id="play-btn">▶ Play</button>
+            <button class="btn sec" id="back-btn">« 10s</button>
+            <button class="btn sec" id="fwd-btn">10s »</button>
+            <span class="time" id="time">0:00 / 8:40</span>
+            <span class="speed">
+              <select class="speed" id="speed">
+                <option value="1">1×</option>
+                <option value="2">2×</option>
+                <option value="4" selected>4× (demo)</option>
+                <option value="8">8×</option>
+              </select>
+            </span>
+          </div>
+          <input type="range" id="seek" min="0" max="520" value="0" step="1">
+        </div>
+      </div>
+
+      <!-- ─────────── NOTES PANEL ─────────── -->
+      <div class="notes-card">
+        <div class="notes-head">
+          <span class="h-title">📝 Comprehensive Notes</span>
+          <span class="h-meta">openrouter · nemotron · cached</span>
+          <span class="follow-toggle" id="follow"><span class="sw"></span> 🎯 Follow lecture</span>
+        </div>
+        <div class="ai-scroll" id="scroll">
+          <div class="ai-nb" id="notes">
+
+            <div class="blk"><div class="sec c0"><span class="num">1</span><span class="ai-ts" data-s="8">0:08</span> Polity — Vice President &amp; Union Executive ⚖️</div></div>
+            <div class="blk"><p class="txt"><span class="ai-ts" data-s="20">0:20</span> The VP is part of the <strong>Union Executive</strong> (Part V) <em>and</em> the Legislature — he is the <strong>ex-officio Chairperson of the Rajya Sabha</strong>.</p></div>
+            <div class="blk"><span class="ai-ts" data-s="46">0:46</span><span class="badge key">🔑 Key Facts</span>
+              <div class="factbox">
+                <ul>
+                  <li><strong>Articles 63–71</strong> — Vice President provisions</li>
+                  <li><strong>Article 72</strong> — Pardoning power of the President</li>
+                  <li><strong>Article 71</strong> — SC has exclusive jurisdiction over President/VP election disputes</li>
+                </ul>
+              </div>
+            </div>
+            <div class="blk"><p class="txt"><span class="ai-ts" data-s="78">1:18</span> Remember: the VP's election is conducted by the <strong>Electoral College</strong> = members of <span class="fig">both</span> Houses of Parliament (elected + nominated).</p></div>
+
+            <div class="blk"><div class="sec c1"><span class="num">2</span><span class="ai-ts" data-s="110">1:50</span> Biology — Vacuoles &amp; Cell Organelles 🧫</div></div>
+            <div class="blk"><p class="txt"><span class="ai-ts" data-s="128">2:08</span> Vacuoles are <strong>larger in plant cells</strong> — occupying <span class="fig">50–90%</span> of cell volume (single, permanent). Animal cells: multiple, smaller, temporary.</p></div>
+            <div class="blk"><span class="ai-ts" data-s="150">2:30</span>
+              <table>
+                <thead><tr><th>Feature</th><th>Plant</th><th>Animal</th></tr></thead>
+                <tbody>
+                  <tr><td>Size</td><td>Large (50–90%)</td><td>Small</td></tr>
+                  <tr><td>Number</td><td>Single</td><td>Multiple</td></tr>
+                  <tr><td>Duration</td><td>Permanent</td><td>Temporary</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="blk"><span class="ai-ts" data-s="188">3:08</span><span class="badge mem">🧠 Memory Trick</span>
+              <div class="membox">🌱 <strong>Meristematic tissue LACKS vacuoles</strong> — but has a prominent nucleus &amp; dense cytoplasm. Frequently repeated fact!</div>
+            </div>
+
+            <div class="blk"><div class="sec c2"><span class="num">3</span><span class="ai-ts" data-s="225">3:45</span> Polity — Constitutional Schedules 📋</div></div>
+            <div class="blk"><p class="txt"><span class="ai-ts" data-s="240">4:00</span> The <strong>Tenth Schedule</strong> deals with <strong>anti-defection provisions</strong> (added by the <span class="fig">52nd</span> Amendment, <span class="fig">1985</span>).</p></div>
+            <div class="blk"><span class="ai-ts" data-s="272">4:32</span><span class="badge key">🔑 Key Facts</span>
+              <div class="factbox">
+                <ul>
+                  <li><strong>2nd</strong> — Salaries &amp; allowances</li>
+                  <li><strong>8th</strong> — <span class="fig">22</span> official languages</li>
+                  <li><strong>9th</strong> — Land reform laws (1st Amendment)</li>
+                  <li><strong>10th</strong> — Anti-defection law</li>
+                </ul>
+              </div>
+            </div>
+            <div class="blk"><div class="subsec"><span class="ai-ts" data-s="310">5:10</span> ✍ Quick recap</div></div>
+            <div class="blk"><p class="txt"><span class="ai-ts" data-s="325">5:25</span> VP → Union Executive + RS Chairman. Vacuoles → bigger in plants. 10th Schedule → anti-defection.</p></div>
+
+            <div class="blk"><div class="sec c3"><span class="num">4</span><span class="ai-ts" data-s="360">6:00</span> Geography — Indian Rivers 🌊</div></div>
+            <div class="blk"><p class="txt"><span class="ai-ts" data-s="378">6:18</span> The <strong>Godavari</strong> is the largest peninsular river — called the <em>Dakshina Ganga</em>. Source: <strong>Trimbak, Nashik</strong>.</p></div>
+            <div class="blk"><p class="txt"><span class="ai-ts" data-s="415">6:55</span> <strong>Narmada</strong> &amp; <strong>Tapi</strong> flow <span class="fig">westward</span> into the Arabian Sea through rift valleys — the exception among peninsular rivers.</p></div>
+            <div class="blk"><span class="ai-ts" data-s="455">7:35</span><span class="badge mem">🧠 Memory Trick</span>
+              <div class="membox">🌊 <strong>"Na-Ta"</strong> flow west (Narmada, Tapi) — everyone else (Godavari, Krishna, Kaveri) flows <strong>east</strong>.</div>
+            </div>
+            <div class="blk"><p class="txt"><span class="ai-ts" data-s="495">8:15</span> That wraps the high-yield revision — revise the boxes once more before the mock. 🎯</p></div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════════
+   Follow-the-lecture engine (demo). Same algorithm intended for ai-tutor.js:
+     • blocks = top-level children of the notes root
+     • each block's start time = the first .ai-ts[data-s] inside it (else it
+       inherits the previous block's start)
+     • active block = the LAST block whose start <= currentTime
+     • when "Follow" is on and not user-scrolling → smooth-scroll it to centre
+   In the real app, currentTime comes from ssGetVideoTimestamp(); here it comes
+   from the mock player below.
+   ══════════════════════════════════════════════════════════════════════════ */
+(function () {
+  var DURATION = 520;                 // 8:40 mock lecture
+  var notesRoot = document.getElementById('notes');
+  var scroller  = document.getElementById('scroll');
+  var blocks    = [];
+
+  function fmt(t){ t=Math.max(0,Math.floor(t)); return Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); }
+
+  // Index blocks + assign each a start time (inherit previous when no timestamp).
+  function indexBlocks(){
+    blocks = [];
+    var kids = notesRoot.children, last = 0;
+    for (var i=0;i<kids.length;i++){
+      var el = kids[i];
+      var ts = el.querySelector('.ai-ts');
+      var start = ts ? (parseInt(ts.getAttribute('data-s'),10) || last) : last;
+      el._start = start; last = start;
+      blocks.push(el);
+    }
+  }
+
+  // Which block is "current" for time t → last block with start <= t.
+  function activeIndexFor(t){
+    var idx = 0;
+    for (var i=0;i<blocks.length;i++){ if (blocks[i]._start <= t) idx = i; else break; }
+    return idx;
+  }
+
+  var lastActive = -1;
+  function highlight(t){
+    var idx = activeIndexFor(t);
+    if (idx === lastActive) return idx;
+    if (blocks[lastActive]) blocks[lastActive].classList.remove('active');
+    blocks[idx].classList.add('active');
+    lastActive = idx;
+    return idx;
+  }
+
+  // Smooth-scroll active block to centre of the notes container only.
+  function scrollToActive(){
+    var el = blocks[lastActive]; if (!el) return;
+    var target = el.offsetTop - (scroller.clientHeight/2) + (el.clientHeight/2);
+    scroller.scrollTo({ top: Math.max(0, target), behavior:'smooth' });
+  }
+
+  /* ── Follow toggle (persisted) ── */
+  var followEl = document.getElementById('follow');
+  var follow = localStorage.getItem('demoFollow') === '1';
+  function renderFollow(){ followEl.classList.toggle('on', follow); }
+  followEl.onclick = function(){
+    follow = !follow; localStorage.setItem('demoFollow', follow?'1':'0'); renderFollow();
+    if (follow) scrollToActive();
+  };
+  renderFollow();
+
+  /* ── Pause auto-scroll briefly when the USER scrolls the notes ── */
+  var userScrollUntil = 0;
+  ['wheel','touchmove'].forEach(function(ev){
+    scroller.addEventListener(ev, function(){ userScrollUntil = Date.now() + 3000; }, {passive:true});
+  });
+
+  /* ── Timestamp click = seek (mirrors ssSeekTo) ── */
+  notesRoot.addEventListener('click', function(e){
+    var a = e.target.closest ? e.target.closest('.ai-ts') : null;
+    if (!a) return;
+    setTime(parseInt(a.getAttribute('data-s'),10) || 0, true);
+  });
+
+  /* ══════════════════ MOCK PLAYER ══════════════════ */
+  var t = 0, playing = false, speed = 4, timer = null;
+  var playBtn = document.getElementById('play-btn');
+  var seek    = document.getElementById('seek');
+  var timeEl  = document.getElementById('time');
+  var speedEl = document.getElementById('speed');
+  var screen  = document.getElementById('screen');
+  var ntTitle = document.getElementById('nt-title');
+  var ntSub   = document.getElementById('nt-sub');
+
+  seek.max = DURATION;
+
+  function currentSectionTitle(){
+    // nearest preceding .sec / .subsec heading text for the "now teaching" panel
+    var el = blocks[lastActive], title = 'Lecture', sub = '';
+    for (var i=lastActive;i>=0;i--){
+      var h = blocks[i].querySelector('.sec, .subsec');
+      if (h){ title = h.textContent.replace(/^\s*\d+\s*/,'').replace(/\d{1,2}:\d{2}/,'').trim(); break; }
+    }
+    return title;
+  }
+
+  function paintNowTeaching(){
+    ntTitle.textContent = currentSectionTitle() || 'Lecture';
+    ntSub.textContent = fmt(t) + ' — Blitz Lecture 16';
+  }
+
+  function refresh(scroll){
+    highlight(t);
+    timeEl.textContent = fmt(t) + ' / ' + fmt(DURATION);
+    seek.value = t;
+    paintNowTeaching();
+    if (scroll && follow && Date.now() > userScrollUntil) scrollToActive();
+  }
+
+  function setTime(v, doScroll){ t = Math.min(DURATION, Math.max(0, v)); refresh(doScroll); }
+
+  function tick(){
+    if (!playing) return;
+    t += 0.2 * speed;
+    if (t >= DURATION){ t = DURATION; pause(); }
+    refresh(true);
+  }
+
+  function play(){
+    if (t >= DURATION) t = 0;
+    playing = true; screen.classList.add('playing'); playBtn.textContent = '⏸ Pause';
+    clearInterval(timer); timer = setInterval(tick, 200);
+  }
+  function pause(){ playing = false; screen.classList.remove('playing'); playBtn.textContent = '▶ Play'; clearInterval(timer); }
+
+  playBtn.onclick = function(){ playing ? pause() : play(); };
+  document.getElementById('back-btn').onclick = function(){ setTime(t-10, true); };
+  document.getElementById('fwd-btn').onclick  = function(){ setTime(t+10, true); };
+  seek.addEventListener('input', function(){ userScrollUntil = Date.now()+3000; setTime(parseFloat(seek.value), true); });
+  speedEl.addEventListener('change', function(){ speed = parseFloat(speedEl.value) || 1; });
+
+  /* ── init ── */
+  indexBlocks();
+  setTime(0, false);
+})();
+</script>
+</body>
+</html>
