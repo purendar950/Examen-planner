@@ -239,6 +239,132 @@ def _fs_set(collection, doc_id, data):
     return False
 
 
+# ---- S3-compatible object storage (Backblaze B2 / Cloudflare R2) -----------
+# Study-material BODIES live here (no 1 MiB/doc limit, cheap, free egress); a
+# tiny INDEX doc stays in Firestore so "which languages exist?" stays a fast
+# key lookup. If the S3_* env vars are absent/broken we transparently fall back
+# to Firestore-only — this feature can never hard-break the app.
+_S3_ENDPOINT = os.environ.get("S3_ENDPOINT_URL", "").strip()
+_S3_REGION   = os.environ.get("S3_REGION", "").strip() or "auto"
+_S3_BUCKET   = os.environ.get("S3_BUCKET", "").strip()
+_S3_KEY      = os.environ.get("S3_ACCESS_KEY_ID", "").strip()
+_S3_SECRET   = os.environ.get("S3_SECRET_ACCESS_KEY", "").strip()
+_s3_client = None
+_s3_init_done = False
+
+
+def _s3_enabled():
+    return bool(_S3_ENDPOINT and _S3_BUCKET and _S3_KEY and _S3_SECRET)
+
+
+def _s3():
+    """Lazily build a boto3 S3 client. Path-style addressing so mixed-case bucket
+    names (e.g. 'StudyPlanners') work; SigV4 as required by B2/R2."""
+    global _s3_client, _s3_init_done
+    if _s3_init_done:
+        return _s3_client
+    _s3_init_done = True
+    if not _s3_enabled():
+        log.info("object storage: S3_* env vars not set — using Firestore-only")
+        return None
+    try:
+        import boto3
+        from botocore.config import Config
+        _s3_client = boto3.client(
+            "s3",
+            endpoint_url=_S3_ENDPOINT,
+            region_name=_S3_REGION,
+            aws_access_key_id=_S3_KEY,
+            aws_secret_access_key=_S3_SECRET,
+            config=Config(signature_version="s3v4",
+                          s3={"addressing_style": "path"},
+                          connect_timeout=5, read_timeout=20,
+                          retries={"max_attempts": 2}),
+        )
+        log.info("object storage ready: bucket=%s endpoint=%s", _S3_BUCKET, _S3_ENDPOINT)
+    except Exception as exc:  # noqa: BLE001
+        log.error("object storage init failed (%s) — using Firestore-only", exc)
+        _s3_client = None
+    return _s3_client
+
+
+def _s3_obj_key(doc_id):
+    return "study/%s.json" % doc_id
+
+
+def _s3_get_json(doc_id):
+    cli = _s3()
+    if not cli:
+        return None
+    try:
+        obj = cli.get_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id))
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        code = ""
+        resp = getattr(exc, "response", None)
+        if isinstance(resp, dict):
+            code = resp.get("Error", {}).get("Code", "")
+        if code not in ("NoSuchKey", "NoSuchBucket", "404"):   # missing object is normal
+            log.warning("object storage get %s failed: %s", doc_id, exc)
+        return None
+
+
+def _s3_put_json(doc_id, data):
+    cli = _s3()
+    if not cli:
+        return False
+    body = json.dumps(data, ensure_ascii=False, default=str).encode("utf-8")
+    last = None
+    for attempt in range(3):
+        try:
+            cli.put_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id), Body=body,
+                           ContentType="application/json; charset=utf-8")
+            return True
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            time.sleep(0.5 * (attempt + 1))
+    log.error("object storage put %s failed after 3 attempts: %s", doc_id, last)
+    return False
+
+
+# Metadata copied into the tiny Firestore index doc (NOT the big body).
+_STUDY_INDEX_FIELDS = ("id", "title", "mode", "style", "out_lang", "model",
+                       "num_questions", "provider", "transcript_lang", "segment_count")
+
+
+def _study_index_doc(data):
+    idx = {k: data.get(k) for k in _STUDY_INDEX_FIELDS}
+    idx["store"] = "b2"
+    idx["savedAt"] = int(time.time())
+    return idx
+
+
+def _study_put(doc_id, data):
+    """Persist generated study material. Body -> object storage (if enabled) with
+    a small index -> Firestore; otherwise the full doc -> Firestore (old
+    behaviour). Returns True on success."""
+    if _s3_enabled() and _s3_put_json(doc_id, data):
+        # small index (metadata only) so the langs check + fetch still work
+        return _fs_set("study", doc_id, _study_index_doc(data))
+    return _fs_set("study", doc_id, data)     # fallback: full doc in Firestore
+
+
+def _study_get(doc_id):
+    """Read study material. Prefers the object-storage body; falls back to
+    Firestore. Old notes stored fully in Firestore are served AND migrated up to
+    object storage on first read (zero-downtime migration)."""
+    idx = _fs_get("study", doc_id)
+    if idx is None:
+        # No index doc — maybe the body exists but the index write once failed.
+        return _s3_get_json(doc_id) if _s3_enabled() else None
+    if idx.get("store") == "b2":
+        return _s3_get_json(doc_id)           # None if the object is truly gone
+    # Old-style FULL doc in Firestore → serve it, and migrate to object storage.
+    if _s3_enabled() and _s3_put_json(doc_id, idx):
+        _fs_set("study", doc_id, _study_index_doc(idx))
+    return idx
+
+
 def _base_ydl_opts():
     opts = {
         "quiet": True,
@@ -1158,6 +1284,7 @@ def health():
         "cached_videos": len(_cache),
         "cached_transcripts": len(_transcript_cache),
         "persistent_cache": bool(_fb_db),   # Firestore-backed (survives restarts)
+        "object_storage": _s3_enabled(),    # study bodies on Backblaze B2 / R2
     })
 
 
@@ -1343,7 +1470,8 @@ def api_study():
                 return jsonify(hit["data"])
 
     # persistent cache: return saved result if this video+mode+lang+count exists
-    fs = None if force else _fs_get("study", fs_id)
+    # (body from object storage, else Firestore; old notes auto-migrate to B2)
+    fs = None if force else _study_get(fs_id)
     if fs:
         fs["cached"] = True
         with _study_lock:
@@ -1407,9 +1535,9 @@ def api_study():
     data.update(result)
     with _study_lock:
         _study_cache[ckey] = {"ts": time.time(), "data": data}
-    # persist for next time (all users); surface whether it actually saved so a
-    # silent Firestore failure is visible instead of "why isn't it cached?".
-    data["persisted"] = _fs_set("study", fs_id, data)
+    # persist for next time (all users): body -> object storage, index -> Firestore
+    # (or Firestore-only if S3 is off). Surface whether it actually saved.
+    data["persisted"] = _study_put(fs_id, data)
     if not data["persisted"]:
         log.warning("study %s NOT persisted (see errors above) — will regenerate next time", fs_id)
     return jsonify(data)
