@@ -35,15 +35,37 @@ function rolloverIncompleteTasks() {
 
     if (!appState.tasks[todayStr]) appState.tasks[todayStr] = [];
     const todayList = appState.tasks[todayStr];
-    /* De-dupe by task IDENTITY (id), never by text. A previous version keyed on
-       lowercased text, which silently DESTROYED a distinct task whenever another
-       task with the same text already sat on today (e.g. a repeated daily task
-       like "Current Affairs" / "Revision" / "PYQ practice"): the straggler was
-       neither kept on its date nor moved forward, so the user's task just
-       vanished. Keying on id only skips a genuine duplicate of the SAME task
-       object (which can only happen if the store was corrupted), so distinct
-       to-dos that happen to share a title are all carried forward. */
-    const existingIds = new Set(todayList.map(t => t.id));
+
+    /* Content signature for a task (chId → videoId → normalised text). Mirrors
+       taskDedupKey() so the sweep recognises the SAME logical task across
+       separate copies. Copies are unavoidable: every regenerating source
+       (study-plan topics, mock/practice slots, Telegram, manual adds) stamps a
+       fresh random id, so two instances of the same task ALWAYS have different
+       ids. Keying purely on id (the previous behaviour) therefore let stale
+       duplicates pile up and roll forward forever. */
+    const sig = t => (typeof taskDedupKey === 'function') ? taskDedupKey(t) : '';
+    const isDoneTask = t =>
+      !!(t.done ||
+         taskStatus(t) === 'done' ||
+         (t.chId && appState.progress && appState.progress[t.chId]?.done));
+
+    /* A task is "finished" if ANY copy of it (same signature) is done anywhere
+       in the store. This is what makes completing a chId-less task — a mock,
+       Telegram, or manual to-do — actually stick: without it, completing one
+       copy left its twins on other dates untouched, so they rolled forward and
+       the "completed" task reappeared in To Do the next day. */
+    const doneSigs = new Set();
+    Object.keys(appState.tasks).forEach(ds => {
+      (appState.tasks[ds] || []).forEach(t => {
+        if (isDoneTask(t)) { const k = sig(t); if (k) doneSigs.add(k); }
+      });
+    });
+
+    /* Track what's already on today so we never drag in a duplicate — both by
+       task id (corrupted exact clone) and by content signature (same logical
+       task). */
+    const existingIds  = new Set(todayList.map(t => t.id));
+    const existingSigs = new Set(todayList.map(sig).filter(Boolean));
 
     let moved = 0;
 
@@ -55,16 +77,31 @@ function rolloverIncompleteTasks() {
 
       const keep = [];
       list.forEach(t => {
-        const isDone =
-          t.done ||
-          taskStatus(t) === 'done' ||
-          (t.chId && appState.progress && appState.progress[t.chId]?.done);
-        if (isDone) { keep.push(t); return; } // completed tasks stay as a dated record
+        if (isDoneTask(t)) { keep.push(t); return; } // completed tasks stay as a dated record
 
-        /* Skip only an exact duplicate of the SAME task (same id) already on
-           today — this drops a corrupted clone without losing the live copy. */
+        const k = sig(t);
+
+        /* Never resurrect a task the user deleted. The rollover sweep used to
+           ignore the deletion tombstone ledger entirely (only the regenerating
+           sources checked it), so a deleted task's still-incomplete twin on an
+           earlier date would quietly roll forward — the "deleted task keeps
+           coming back" bug. Dropping it here (not adding to `keep`) also purges
+           the stale twin from its original date. */
+        if (k && typeof isTaskDeleted === 'function' && isTaskDeleted(k)) return;
+
+        /* A twin of this task is already completed elsewhere → the work is done,
+           so drop this stale duplicate instead of carrying it forward. */
+        if (k && doneSigs.has(k)) return;
+
+        /* Same task id already on today (corrupted clone) → drop it. */
         if (t.id != null && existingIds.has(t.id)) return;
+
+        /* Same logical task (by signature) already on today → drop the dup so
+           identical to-dos don't accumulate day after day. */
+        if (k && existingSigs.has(k)) return;
+
         if (t.id != null) existingIds.add(t.id);
+        if (k) existingSigs.add(k);
 
         /* Carry the task forward, preserving where it came from. */
         t.rolledFrom = t.originalDate || t.rolledFrom || ds;
@@ -75,7 +112,7 @@ function rolloverIncompleteTasks() {
         moved++;
       });
 
-      /* Leave behind only the completed tasks; drop the moved ones. */
+      /* Leave behind only the completed tasks; drop the moved/purged ones. */
       if (keep.length) appState.tasks[ds] = keep;
       else delete appState.tasks[ds];
     });
