@@ -927,9 +927,17 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
                  "THIS question \u2014 do NOT omit anything.\n"
                  "Add '- Key Fact: ...' or '- Memory Trick: ...' bullets whenever "
                  "the teacher gives one.\n"
-                 "Rules: bold (**...**) ONLY key terms; NEVER invent questions, "
-                 "options or answers that are not in the transcript; do not wrap "
-                 "the answer in code fences." + no_promo)
+                 "Rules: phrase EACH question as ONE clear, complete, grammatically "
+                 "correct sentence that makes sense on its own. The transcript is "
+                 "auto-captioned, so CORRECT obvious speech-to-text errors in "
+                 "well-known names, exams, events and terms (e.g. a mis-heard "
+                 "proper noun) so the question reads correctly \u2014 but do NOT change "
+                 "the meaning, do NOT merge two different questions into one, and "
+                 "do NOT invent facts. If a question is too garbled to recover "
+                 "confidently, skip it rather than output nonsense. Bold (**...**) "
+                 "ONLY key terms; NEVER invent questions, options or answers that "
+                 "are not in the transcript; do not wrap the answer in code "
+                 "fences." + no_promo)
     else:
         instr = ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
                  "topic, point, fact, figure, date, name, place, definition, formula "
