@@ -567,10 +567,21 @@ STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
 _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
+# Stream the model response by default: the first tokens arrive within seconds,
+# which keeps the upstream connection alive and PREVENTS Cloudflare's ~100s 524
+# on slow models (mistral-large, Hunyuan, etc.). Set AI_STREAM=0 to disable.
+_AI_STREAM = os.environ.get("AI_STREAM", "1").strip().lower() not in ("0", "false", "no", "off")
 # Tutor sends transcript context on EVERY message, so cap it: a full 2-hour
 # lecture (~80k+ chars) makes Bynara slow enough to hit Cloudflare's ~100s 524.
 # ~48k chars (~12k tokens) keeps replies fast. Notes/quiz still use full text.
 _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "48000"))
+# Notes generation is chunked so EACH AI call stays well under Cloudflare's ~100s
+# limit (prevents 524 upstream timeouts). Smaller chunk + lower output cap = faster
+# per call. MCQ expands more per point, so it uses smaller values. All env-tunable.
+NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "7000"))       # topic notes input chunk
+NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "5000"))  # MCQ input chunk (smaller)
+NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "2400"))         # topic notes output cap/part
+NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "2400"))  # MCQ output cap/part
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 _study_cache = {}
 _study_lock = threading.Lock()
@@ -746,12 +757,43 @@ def _retry_after_secs(resp):
     return 10.0
 
 
+def _read_stream(resp):
+    """Accumulate an OpenAI-compatible chat stream (SSE) into the full text.
+    Streaming means the first tokens arrive within seconds, so the upstream
+    connection stays active and slow models never hit Cloudflare's ~100s 524.
+    Also tolerates a non-streamed 200 body (full 'message' object)."""
+    out = []
+    for raw in resp.iter_lines(decode_unicode=True):
+        if not raw:
+            continue
+        line = raw.strip()
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if line == "[DONE]":
+            break
+        if not line or line[0] != "{":
+            continue
+        try:
+            choice = (json.loads(line).get("choices") or [{}])[0]
+        except Exception:  # noqa: BLE001
+            continue
+        piece = (choice.get("delta") or {}).get("content")
+        if piece is None:                              # non-streamed 200 fallback
+            piece = (choice.get("message") or {}).get("content")
+        if piece:
+            out.append(piece)
+    return "".join(out)
+
+
 def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
-    """OpenAI-compatible chat call (Groq or Bynara). Tries each configured key in
-    turn: a 429 is retried a couple times on the same key, any other error (or a
-    persistent 429) fails over to the next key. Paces to TPM only when tpm>0."""
+    """OpenAI-compatible chat call (Groq or Bynara). STREAMS by default so slow
+    models don't trip Cloudflare's ~100s 524. Tries each configured key in turn: a
+    429 is retried a couple times on the same key, any other error (or a persistent
+    429) fails over to the next key. Paces to TPM only when tpm>0."""
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
+    if _AI_STREAM:
+        body["stream"] = True
     if json_mode:
         body["response_format"] = {"type": "json_object"}
     keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
@@ -766,29 +808,43 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
                 r = requests.post(ai["base_url"],
                                   headers={"Authorization": "Bearer " + key,
                                            "Content-Type": "application/json"},
-                                  json=body, timeout=_AI_TIMEOUT)
+                                  json=body, timeout=_AI_TIMEOUT,
+                                  stream=_AI_STREAM)
             except requests.Timeout:
                 last = ("timeout after %ss (key %d) — the lecture is long; try a "
-                        "faster model (mistral-medium-3-5 / auto/bynara) or a "
-                        "shorter video" % (_AI_TIMEOUT, ki + 1))
+                        "faster model or a shorter video" % (_AI_TIMEOUT, ki + 1))
                 break                          # → next key
             except requests.RequestException as exc:
                 last = "network (key %d): %s" % (ki + 1, exc)
                 break                          # → next key
             if r.status_code == 200:
-                # Robust extraction: some reasoning models (e.g. Cerebras
-                # gpt-oss) may omit "content" and only return "reasoning".
+                if not _AI_STREAM:
+                    # Robust extraction: some reasoning models (e.g. Cerebras
+                    # gpt-oss) may omit "content" and only return "reasoning".
+                    try:
+                        msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+                    except (ValueError, KeyError, IndexError, TypeError):
+                        msg = {}
+                    content = msg.get("content")
+                    if content:
+                        return content
+                    # no usable content (all tokens spent on reasoning) → soft
+                    # failure so failover / retry can kick in
+                    last = "empty content (key %d) — model returned no answer" % (ki + 1)
+                    break                      # → next key
                 try:
-                    msg = (r.json().get("choices") or [{}])[0].get("message") or {}
-                except (ValueError, KeyError, IndexError, TypeError):
-                    msg = {}
-                content = msg.get("content")
-                if content:
-                    return content
-                # no usable content (e.g. all tokens spent on reasoning) → treat
-                # as a soft failure so failover / retry can kick in
-                last = "empty content (key %d) — model returned no answer" % (ki + 1)
-                break                          # → next key
+                    txt = _read_stream(r)      # keeps the connection alive → no 524
+                except Exception as exc:       # noqa: BLE001  (stream interrupted)
+                    last = "stream broke (key %d): %s" % (ki + 1, exc)
+                    time.sleep(3)
+                    continue                   # retry same key
+                finally:
+                    r.close()
+                if txt.strip():
+                    return txt
+                last = "empty stream (key %d)" % (ki + 1)
+                time.sleep(2)
+                continue
             if r.status_code == 429:           # rate limited — brief retry, same key
                 last = "429 (key %d): %s" % (ki + 1, r.text[:120])
                 time.sleep(_retry_after_secs(r))
@@ -857,38 +913,69 @@ def _study_sys(out_lang):
             ". Stay strictly faithful to the transcript — never invent facts.")
 
 
-def _gen_notes(transcript, out_lang, ai, head):
+def _gen_notes(transcript, out_lang, ai, head, style=""):
     """COMPREHENSIVE notes covering the whole transcript. Big-context providers
     process the transcript section-by-section (so nothing gets cut by the output
-    limit); non-big providers use the condensed body."""
+    limit); non-big providers use the condensed body.
+    style='mcq' -> format the notes question-by-question (Question + options +
+    full explanation) for lectures that are solving MCQs; default = topic notes."""
     sysmsg = _study_sys(out_lang)
-    instr = ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
-             "topic, point, fact, figure, date, name, place, definition, formula "
-             "and example mentioned \u2014 do NOT omit or over-summarize any "
-             "information. Keep the lecture's order.\n"
-             "Formatting rules for a clean, readable result:\n"
-             "- Use ## for main sections and ### for sub-sections.\n"
-             "- Use '- ' bullet points for details; nest with indentation.\n"
-             "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
-             "- Use a Markdown table when comparing items or listing facts/dates.\n"
-             "- Do not wrap the whole answer in code fences.")
-    # Smaller sections + capped output per call so a single generation finishes
-    # under Cloudflare's ~100s limit (avoids 524). More calls, but each is fast;
-    # results are cached so a video only pays this once.
-    secs = _chunk_words(transcript, 10000) if ai.get("big_context") \
-        else [_condense(transcript, out_lang, ai)]
+    no_promo = ("\nExclude course promotion, coaching/foundation/revision batch "
+                "names, app/Telegram/PDF/download links, class timings and "
+                "subscribe/like/share reminders (in ANY language) \u2014 keep only "
+                "the academic content.")
+    if style == "mcq":
+        instr = ("The transcript is a lecture SOLVING multiple-choice questions "
+                 "(MCQs). Convert it into COMPLETE Markdown revision notes, ONE "
+                 "question at a time, keeping the lecture's order. For EACH "
+                 "question use EXACTLY this structure:\n"
+                 "### Q<n>. <the full question>\n"
+                 "- A) <option>\n- B) <option>\n- C) <option>\n- D) <option>\n"
+                 "(Include only the options actually stated; mark the CORRECT "
+                 "option by adding ' \u2713' at its end.)\n"
+                 "**Answer:** <letter> \u2014 <one-line reason>\n"
+                 "**Explanation:** then '- ' bullet points with ALL the points, "
+                 "facts, figures, dates, names and reasoning the teacher gave for "
+                 "THIS question \u2014 do NOT omit anything.\n"
+                 "Add '- Key Fact: ...' or '- Memory Trick: ...' bullets whenever "
+                 "the teacher gives one.\n"
+                 "Rules: bold (**...**) ONLY key terms; NEVER invent questions, "
+                 "options or answers that are not in the transcript; do not wrap "
+                 "the answer in code fences." + no_promo)
+    else:
+        instr = ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
+                 "topic, point, fact, figure, date, name, place, definition, formula "
+                 "and example mentioned \u2014 do NOT omit or over-summarize any "
+                 "information. Keep the lecture's order.\n"
+                 "Formatting rules for a clean, readable result:\n"
+                 "- Use ## for main sections and ### for sub-sections.\n"
+                 "- Use '- ' bullet points for details; nest with indentation.\n"
+                 "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
+                 "- Use a Markdown table when comparing items or listing facts/dates.\n"
+                 "- Do not wrap the whole answer in code fences." + no_promo)
+    # SMALL sections + capped output per call so EACH generation finishes well
+    # under Cloudflare's ~100s limit — this is what prevents the 524 upstream
+    # timeout. More calls, but each is fast; results are cached so a video only
+    # pays this once. MCQ expands a lot per point, so it uses even smaller chunks
+    # (and a tighter output cap) than topic notes.
+    if ai.get("big_context"):
+        chunk_chars = NOTES_MCQ_CHUNK if style == "mcq" else NOTES_CHUNK
+        secs = _chunk_words(transcript, chunk_chars)
+    else:
+        secs = [_condense(transcript, out_lang, ai)]
+    part_cap = NOTES_MCQ_CAP if style == "mcq" else NOTES_CAP
     if len(secs) == 1:
         return _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + instr + "\n\n" + secs[0]}],
-            ai, max_tokens=(4000 if ai.get("big_context") else 2400))
+            ai, max_tokens=(part_cap if ai.get("big_context") else 2400))
     parts = []
     for i, sec in enumerate(secs):
         parts.append(_ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + ("(Part %d of %d \u2014 detailed notes "
               "for THIS part only.) " % (i + 1, len(secs))) + instr + "\n\n" + sec}],
-            ai, max_tokens=3000))
+            ai, max_tokens=part_cap))
     return "\n\n".join(parts)
 
 
@@ -937,11 +1024,11 @@ def _gen_quiz(transcript, out_lang, ai, head, n, focus=""):
     return questions[:n]
 
 
-def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus=""):
+def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus="", style=""):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
     if mode == "notes":
-        return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head)}
+        return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head, style=style)}
     if mode == "quiz":
         return {"format": "json",
                 "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions, focus)}
@@ -1150,11 +1237,22 @@ def api_study():
         focus = ""                              # other modes ignore focus
     fkey = re.sub(r"\s+", " ", focus).lower()[:120]
 
-    # keep the cache key IDENTICAL to before when there's no focus, so existing
-    # cached results are still reused; only a non-empty focus gets its own bucket.
+    # ?style=mcq (notes only): format the notes question-by-question instead of
+    # topic notes. Only 'mcq' is a recognised non-default style; everything else
+    # keeps the original topic-notes behaviour (and its existing cache).
+    style = (request.args.get("style") or "").strip().lower()
+    if mode != "notes" or style not in ("mcq",):
+        style = ""
+
+    # keep the cache key IDENTICAL to before when there's no focus/style, so
+    # existing cached results are still reused; focus (quiz/cards) and style
+    # (notes) each get their own bucket and never collide.
     if fkey:
         ckey = "%s:%s:%s:%s:%s::%s" % (video_id, mode, out_lang, model, num_q, fkey)
         fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q, fkey)
+    elif style:
+        ckey = "%s:%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q, style)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q, style)
     else:
         ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q)
         fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q)
@@ -1208,11 +1306,12 @@ def api_study():
     try:
         result = _generate_study(mode, t["text"], out_lang, ai,
                                  title=t.get("title"), num_questions=num_q,
-                                 focus=focus)
+                                 focus=focus, style=style)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
+            "style": style or ("topic" if mode == "notes" else None),
             "out_lang": out_lang, "model": model,
             "num_questions": num_q if mode == "quiz" else None,
             "provider": ai.get("provider", "ai"),
