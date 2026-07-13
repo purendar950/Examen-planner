@@ -907,35 +907,76 @@
     }
   }
   // Fill the model dropdown from the server's list (active provider's models).
-  // Fill the model dropdown with EVERY configured provider's models, grouped by
-  // provider (Auto first). The proxy routes each pick to its own provider's key,
-  // so any model works. A stale pick falls back to Auto so it can't break a call.
+  /* ── Two-step model picker: choose PROVIDER, then its MODEL ──────────────
+     Backend already routes by model name (per provider's key), so this is pure
+     UI. Provider dropdown = Auto + providers that have a key; picking one reveals
+     a second dropdown with just that provider's models. */
+  var _studyGroups = [];         // [{provider,label,models}] from /api/status
+  var _studyDefaultModel = '';   // admin's active model (default when a provider is picked)
+  var STUDY_PROV_ORDER = ['bynara', 'cerebras', 'mistral'];
+
+  function studyGroupFor(pid) {
+    for (var i = 0; i < _studyGroups.length; i++) if (_studyGroups[i].provider === pid) return _studyGroups[i];
+    return null;
+  }
+  function providerOfModel(m) {
+    if (!m) return '';
+    for (var i = 0; i < _studyGroups.length; i++) {
+      if ((_studyGroups[i].models || []).indexOf(m) !== -1) return _studyGroups[i].provider;
+    }
+    return '';
+  }
+  // Populate (and show) the model dropdown for a provider; hidden for Auto.
+  function fillStudyModels(pid, selectModel) {
+    var ms = document.getElementById('ai-model');
+    if (!ms) return;
+    var g = studyGroupFor(pid), models = g ? (g.models || []) : [];
+    if (!pid || !models.length) { ms.style.display = 'none'; ms.innerHTML = ''; return; }
+    ms.innerHTML = models.map(function (m) {
+      return '<option value="' + esc(m) + '"' + (m === selectModel ? ' selected' : '') + '>' + esc(m) + '</option>';
+    }).join('');
+    ms.style.display = '';
+  }
+  // Build the provider dropdown from /api/status, then the model dropdown for
+  // the currently-saved choice. A stale saved model falls back to Auto.
   function applyServerModels(status) {
-    var sel = document.getElementById('ai-model');
-    if (!sel) return;
-    var cur = outModel();
-    var groups = (status && status.studyModelGroups) || null;
-    var flat = (status && status.studyModels) || [];
-    var all = [];
-    function opt(m) {
-      m = String(m); all.push(m);
-      return '<option value="' + esc(m) + '"' + (m === cur ? ' selected' : '') + '>' + esc(m) + '</option>';
-    }
-    var html = '<option value=""' + (cur === '' ? ' selected' : '') + '>Auto</option>';
-    if (groups && groups.length) {
-      html += groups.map(function (g) {
-        var body = (g.models || []).map(opt).join('');
-        return body ? ('<optgroup label="' + esc(g.label || g.provider || '') + '">' + body + '</optgroup>') : '';
+    var ps = document.getElementById('ai-provider');
+    if (!ps) return;
+    var raw = (status && status.studyModelGroups) || [];
+    _studyGroups = raw.slice().sort(function (a, b) {
+      var ia = STUDY_PROV_ORDER.indexOf(a.provider), ib = STUDY_PROV_ORDER.indexOf(b.provider);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    _studyDefaultModel = (status && status.studyModel) || '';
+
+    var savedModel = outModel();
+    var savedProvider = providerOfModel(savedModel);
+    if (savedModel && !savedProvider) { setModel(''); savedModel = ''; }   // stale → Auto
+
+    var provOpts = '<option value=""' + (savedProvider === '' ? ' selected' : '') + '>Auto</option>' +
+      _studyGroups.map(function (g) {
+        return '<option value="' + esc(g.provider) + '"' + (g.provider === savedProvider ? ' selected' : '') +
+          '>' + esc(g.label || g.provider) + '</option>';
       }).join('');
-    } else {
-      html += (flat || []).map(function (m) { return m ? opt(m) : ''; }).join('');
-    }
-    if (cur && all.indexOf(cur) === -1) setModel('');   // stale model → Auto
-    if (sel.innerHTML !== html) sel.innerHTML = html;
+    if (ps.innerHTML !== provOpts) ps.innerHTML = provOpts;
+    fillStudyModels(savedProvider, savedModel);
+  }
+  // Provider changed → default to that provider's admin model (else its first)
+  // and reveal its model dropdown. Auto hides the model dropdown.
+  function onStudyProviderChange() {
+    var ps = document.getElementById('ai-provider');
+    if (!ps) return;
+    var pid = ps.value;
+    if (!pid) { setModel(''); fillStudyModels('', ''); return; }
+    var g = studyGroupFor(pid), models = (g && g.models) || [];
+    var def = (models.indexOf(_studyDefaultModel) !== -1) ? _studyDefaultModel : (models[0] || '');
+    setModel(def);
+    fillStudyModels(pid, def);
   }
   function panelHtml() {
     return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">🎓 AI Study</span>' +
-      '<select id="ai-model" title="AI model" style="margin-left:auto"><option value="">Auto</option></select>' +
+      '<select id="ai-provider" title="AI provider" style="margin-left:auto"><option value="">Auto</option></select>' +
+      '<select id="ai-model" title="AI model" style="display:none"></select>' +
       '<select id="ai-lang" title="Output language">' +
       ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
       '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
@@ -1045,6 +1086,8 @@
     });
     var lang = document.getElementById('ai-lang');
     if (lang) lang.onchange = function () { setLang(lang.value); };
+    var provSel = document.getElementById('ai-provider');
+    if (provSel) provSel.onchange = onStudyProviderChange;
     var modelSel = document.getElementById('ai-model');
     if (modelSel) modelSel.onchange = function () { setModel(modelSel.value); };
     var dot = document.getElementById('ai-status-dot');
