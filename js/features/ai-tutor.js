@@ -455,7 +455,7 @@
      ══════════════════════════════════════════════════════════════════════ */
   var LEC_KEY = 'aiStudyFollow';
   var LEC_TOP_OFFSET = 0.15;          // pin the active block ~15% down from the top
-  var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0;
+  var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0, _lecTsCount = 0;
   function lecOn() { return localStorage.getItem(LEC_KEY) === '1'; }
   function setLecOn(v) { try { localStorage.setItem(LEC_KEY, v ? '1' : '0'); } catch (e) {} }
   function lecClear() {
@@ -465,11 +465,13 @@
   // Each top-level note block's start = first .ai-ts[data-s] inside it; blocks
   // without a timestamp inherit the previous block's start.
   function lecIndex(nb) {
-    _lecBlocks = []; _lecActive = -1;
+    _lecBlocks = []; _lecActive = -1; _lecTsCount = 0;
     var kids = nb.children, last = 0;
     for (var i = 0; i < kids.length; i++) {
       var el = kids[i], ts = el.querySelector('.ai-ts');
-      var start = ts ? (parseInt(ts.getAttribute('data-s'), 10) || last) : last;
+      var s = ts ? parseInt(ts.getAttribute('data-s'), 10) : NaN;
+      var start = isNaN(s) ? last : s;            // inherit previous when no own timestamp
+      if (!isNaN(s)) _lecTsCount++;               // count REAL timestamps present
       el._lecStart = start; last = start;
       _lecBlocks.push(el);
     }
@@ -499,6 +501,7 @@
   function lecTick() {
     if (!lecOn() || state.tab !== 'notes') return;
     if (!_lecScroller || !document.body.contains(_lecScroller) || !_lecBlocks.length) return;
+    if (!_lecTsCount) return;                     // no timestamps → nothing to track (don't jump to last block)
     var t = 0;
     try { if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0; } catch (e) {}
     var changed = lecHighlight(t);
@@ -506,10 +509,13 @@
   }
   function lecPaintBtn(btn) {
     if (!btn) return;
-    var on = lecOn();
+    var na = !_lecTsCount;                         // these notes have no timestamps
+    var on = lecOn() && !na;
     btn.classList.toggle('ai-follow-on', on);
-    btn.title = on ? 'Following the lecture — notes auto-highlight & scroll (tap to stop)'
-                   : 'Auto-highlight & scroll the notes to where the teacher is';
+    btn.style.opacity = na ? '0.55' : '';
+    btn.title = na ? 'These notes have no timestamps, so there is nothing to follow'
+                   : (lecOn() ? 'Following the lecture — notes auto-highlight & scroll (tap to stop)'
+                              : 'Auto-highlight & scroll the notes to where the teacher is');
   }
   // Wire the freshly-rendered notes into the follow engine.
   function lecSetup(box) {
@@ -525,6 +531,10 @@
     if (btn) {
       lecPaintBtn(btn);
       btn.onclick = function () {
+        if (!_lecTsCount) {                        // nothing to follow in these notes
+          if (typeof showToast === 'function') showToast('These notes have no timestamps to follow');
+          return;
+        }
         setLecOn(!lecOn()); lecPaintBtn(btn);
         if (lecOn()) { _lecUserScrollUntil = 0; lecTick(); } else lecClear();
       };
