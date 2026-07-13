@@ -832,21 +832,46 @@ def _study_sys(out_lang):
             ". Stay strictly faithful to the transcript — never invent facts.")
 
 
-def _gen_notes(transcript, out_lang, ai, head):
+def _gen_notes(transcript, out_lang, ai, head, style=""):
     """COMPREHENSIVE notes covering the whole transcript. Big-context providers
     process the transcript section-by-section (so nothing gets cut by the output
-    limit); non-big providers use the condensed body."""
+    limit); non-big providers use the condensed body.
+    style='mcq' -> format the notes question-by-question (Question + options +
+    full explanation) for lectures that are solving MCQs; default = topic notes."""
     sysmsg = _study_sys(out_lang)
-    instr = ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
-             "topic, point, fact, figure, date, name, place, definition, formula "
-             "and example mentioned \u2014 do NOT omit or over-summarize any "
-             "information. Keep the lecture's order.\n"
-             "Formatting rules for a clean, readable result:\n"
-             "- Use ## for main sections and ### for sub-sections.\n"
-             "- Use '- ' bullet points for details; nest with indentation.\n"
-             "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
-             "- Use a Markdown table when comparing items or listing facts/dates.\n"
-             "- Do not wrap the whole answer in code fences.")
+    no_promo = ("\nExclude course promotion, coaching/foundation/revision batch "
+                "names, app/Telegram/PDF/download links, class timings and "
+                "subscribe/like/share reminders (in ANY language) \u2014 keep only "
+                "the academic content.")
+    if style == "mcq":
+        instr = ("The transcript is a lecture SOLVING multiple-choice questions "
+                 "(MCQs). Convert it into COMPLETE Markdown revision notes, ONE "
+                 "question at a time, keeping the lecture's order. For EACH "
+                 "question use EXACTLY this structure:\n"
+                 "### Q<n>. <the full question>\n"
+                 "- A) <option>\n- B) <option>\n- C) <option>\n- D) <option>\n"
+                 "(Include only the options actually stated; mark the CORRECT "
+                 "option by adding ' \u2713' at its end.)\n"
+                 "**Answer:** <letter> \u2014 <one-line reason>\n"
+                 "**Explanation:** then '- ' bullet points with ALL the points, "
+                 "facts, figures, dates, names and reasoning the teacher gave for "
+                 "THIS question \u2014 do NOT omit anything.\n"
+                 "Add '- Key Fact: ...' or '- Memory Trick: ...' bullets whenever "
+                 "the teacher gives one.\n"
+                 "Rules: bold (**...**) ONLY key terms; NEVER invent questions, "
+                 "options or answers that are not in the transcript; do not wrap "
+                 "the answer in code fences." + no_promo)
+    else:
+        instr = ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
+                 "topic, point, fact, figure, date, name, place, definition, formula "
+                 "and example mentioned \u2014 do NOT omit or over-summarize any "
+                 "information. Keep the lecture's order.\n"
+                 "Formatting rules for a clean, readable result:\n"
+                 "- Use ## for main sections and ### for sub-sections.\n"
+                 "- Use '- ' bullet points for details; nest with indentation.\n"
+                 "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
+                 "- Use a Markdown table when comparing items or listing facts/dates.\n"
+                 "- Do not wrap the whole answer in code fences." + no_promo)
     # Smaller sections + capped output per call so a single generation finishes
     # under Cloudflare's ~100s limit (avoids 524). More calls, but each is fast;
     # results are cached so a video only pays this once.
@@ -912,11 +937,11 @@ def _gen_quiz(transcript, out_lang, ai, head, n, focus=""):
     return questions[:n]
 
 
-def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus=""):
+def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus="", style=""):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
     if mode == "notes":
-        return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head)}
+        return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head, style=style)}
     if mode == "quiz":
         return {"format": "json",
                 "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions, focus)}
@@ -1125,11 +1150,22 @@ def api_study():
         focus = ""                              # other modes ignore focus
     fkey = re.sub(r"\s+", " ", focus).lower()[:120]
 
-    # keep the cache key IDENTICAL to before when there's no focus, so existing
-    # cached results are still reused; only a non-empty focus gets its own bucket.
+    # ?style=mcq (notes only): format the notes question-by-question instead of
+    # topic notes. Only 'mcq' is a recognised non-default style; everything else
+    # keeps the original topic-notes behaviour (and its existing cache).
+    style = (request.args.get("style") or "").strip().lower()
+    if mode != "notes" or style not in ("mcq",):
+        style = ""
+
+    # keep the cache key IDENTICAL to before when there's no focus/style, so
+    # existing cached results are still reused; focus (quiz/cards) and style
+    # (notes) each get their own bucket and never collide.
     if fkey:
         ckey = "%s:%s:%s:%s:%s::%s" % (video_id, mode, out_lang, model, num_q, fkey)
         fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q, fkey)
+    elif style:
+        ckey = "%s:%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q, style)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q, style)
     else:
         ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q)
         fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q)
@@ -1183,11 +1219,12 @@ def api_study():
     try:
         result = _generate_study(mode, t["text"], out_lang, ai,
                                  title=t.get("title"), num_questions=num_q,
-                                 focus=focus)
+                                 focus=focus, style=style)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
+            "style": style or ("topic" if mode == "notes" else None),
             "out_lang": out_lang, "model": model,
             "num_questions": num_q if mode == "quiz" else None,
             "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",

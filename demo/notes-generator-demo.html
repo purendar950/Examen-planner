@@ -9,17 +9,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
   /* ══════════════════════════════════════════════════════════════════
-     LIVE DEMO v2 — compact, 2-column, print-optimized handwritten notes.
-     Paste your own YouTube URL -> calls YOUR server + AI -> renders the
-     real generated notes densely so it uses far fewer printed pages.
-     Standalone. Nothing here is wired into the app yet.
+     LIVE DEMO v3 — "gel pen" notebook look (no highlighter wash) +
+     MCQ mode (Question -> options -> full explanation) + compact
+     2-column + promo/junk cleanup. Paste your YouTube URL -> calls
+     YOUR server + AI. Standalone; not wired into the app yet.
      ══════════════════════════════════════════════════════════════════ */
   :root{
     --paper:#fffdf6; --ruled:rgba(58,132,210,.09); --margin-line:#e57373;
     --ink:#22303f; --ink-soft:#4b5a68;
-    --red:#d32f2f; --green:#2e7d32; --green-deep:#1b5e20; --teal-hdr:#2f4858;
-    --blue:#1565c0; --orange:#e65100;
-    --hl-yellow:#fff59d; --hl-amber:#fff1b8; --hl-mint:#d9f6e6; --hl-blue:#dcebff;
+    --red:#c62828; --green:#2e7d32; --green-deep:#1b5e20; --teal-hdr:#2f4858;
+    --blue-pen:#1a3fb0; --green-pen:#1b7f43;
     --purple:#7b1fa2; --purple-soft:#f3e5f5;
     --box-border:#cfd8dc; --shadow:0 6px 22px rgba(20,40,60,.10);
   }
@@ -32,10 +31,10 @@
   .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;
           padding:11px 20px;background:linear-gradient(135deg,#14532d,#166534);
           color:#eafff0;box-shadow:0 2px 10px rgba(0,0,0,.25);flex-wrap:wrap}
-  .topbar .brand{font-weight:700;font-size:1.08rem;letter-spacing:.3px}
+  .topbar .brand{font-weight:700;font-size:1.06rem;letter-spacing:.3px}
   .topbar .spacer{flex:1}
   .topbar button{font-family:inherit;cursor:pointer;border:none;padding:7px 14px;border-radius:999px;
-                 font-size:.86rem;font-weight:700;display:inline-flex;align-items:center;gap:6px}
+                 font-size:.85rem;font-weight:700;display:inline-flex;align-items:center;gap:6px}
   .btn-cols{background:#e0f2fe;color:#075985}
   .btn-print{background:#22c55e;color:#04240f}
   .btn-theme{background:#facc15;color:#3b2f00}
@@ -45,7 +44,7 @@
   .controls{max-width:960px;margin:18px auto 0;background:#fff;border-radius:12px;
             box-shadow:var(--shadow);padding:15px 17px;font-family:system-ui,Arial,sans-serif}
   .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  .controls input[type=text]{flex:1;min-width:240px;font-size:15px;padding:11px 13px;border:1px solid #cdd6df;
+  .controls input[type=text]{flex:1;min-width:220px;font-size:15px;padding:11px 13px;border:1px solid #cdd6df;
             border-radius:9px;font-family:inherit}
   .controls select{font-size:14px;padding:11px 10px;border:1px solid #cdd6df;border-radius:9px;font-family:inherit;background:#fff}
   .controls .go{background:#166534;color:#fff;border:none;font-weight:700;font-size:15px;padding:11px 22px;
@@ -64,35 +63,34 @@
   @keyframes sp{to{transform:rotate(360deg)}}
   .metatag{font-family:system-ui,Arial,sans-serif;font-size:11.5px;color:#64748b;margin:0 auto;max-width:960px;padding:8px 4px 0}
 
-  /* ── Notebook page (denser + smaller left margin) ── */
+  /* ── Notebook page ── */
   .page{max-width:960px;margin:14px auto 40px;background:var(--paper);
         background-image:repeating-linear-gradient(transparent,transparent 27px,var(--ruled) 28px);
         border-radius:6px;box-shadow:var(--shadow);padding:26px 32px 44px 52px;position:relative;overflow:hidden;min-height:120px}
   .page::before{content:"";position:absolute;top:0;bottom:0;left:36px;width:2px;background:var(--margin-line);opacity:.5}
   .page .placeholder{color:#8fa0af;font-size:1.02rem;text-align:center;padding:26px 10px}
 
-  /* ── 2-column flow (default) — the big paper saver ── */
+  /* ── 2-column flow (default) ── */
   .notes{column-gap:30px}
   body.twocol .notes{column-count:2}
   body.twocol .notes .sec{column-span:all}
-  /* keep these blocks intact within a column */
-  .sec,.subsec,.factbox,.membox,.answer,.notebox,table,.chips{break-inside:avoid}
-  .sec,.subsec{break-after:avoid}
+  .sec,.subsec,.factbox,.membox,.answer,.notebox,.q-card,table,.chips{break-inside:avoid}
+  .sec,.subsec,.q-card{break-after:avoid}
 
-  /* ── Rendered note components ── */
+  /* ── Section / sub headings ── */
   .sec{display:flex;align-items:center;gap:9px;font-weight:700;font-size:1.28rem;margin:16px 0 5px;padding-bottom:5px}
   .sec:first-child{margin-top:2px}
   .sec .num{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:50%;
             font-size:.9rem;color:#fff;flex:none;font-family:system-ui,Arial,sans-serif}
   .sec.c0{color:var(--red);border-bottom:2.5px solid var(--red)} .sec.c0 .num{background:var(--red)}
   .sec.c1{color:var(--green);border-bottom:2.5px solid var(--green)} .sec.c1 .num{background:var(--green)}
-  .sec.c2{color:var(--blue);border-bottom:2.5px solid var(--blue)} .sec.c2 .num{background:var(--blue)}
+  .sec.c2{color:#1565c0;border-bottom:2.5px solid #1565c0} .sec.c2 .num{background:#1565c0}
   .sec.c3{color:var(--purple);border-bottom:2.5px solid var(--purple)} .sec.c3 .num{background:var(--purple)}
-  .sec.c4{color:var(--orange);border-bottom:2.5px solid var(--orange)} .sec.c4 .num{background:var(--orange)}
-
+  .sec.c4{color:#e65100;border-bottom:2.5px solid #e65100} .sec.c4 .num{background:#e65100}
   .subsec{font-weight:700;font-size:1.04rem;color:#37474f;margin:10px 0 3px;padding-left:2px}
   .subsec::before{content:"\270E  ";opacity:.55}
 
+  /* ── Lists ── */
   .page p{margin:4px 0}
   .page ul,.page ol{margin:4px 0 7px;padding-left:4px;list-style:none}
   .page ul li{position:relative;padding-left:21px;margin:2.5px 0}
@@ -103,69 +101,80 @@
         background:var(--teal-hdr);color:#fff;font-size:.68rem;display:flex;align-items:center;justify-content:center;
         font-family:system-ui,Arial,sans-serif}
   .page li ul,.page li ol{margin:2px 0}
-
-  /* compact "chips" for runs of very short items (dynasties, names, lists…) */
   .chips{display:flex;flex-wrap:wrap;gap:5px 7px;margin:4px 0 8px;padding-left:2px}
-  .chip{background:rgba(0,0,0,.03);border:1px solid var(--box-border);border-radius:999px;
-        padding:2px 11px;font-size:.94rem;line-height:1.35}
+  .chip{background:rgba(0,0,0,.03);border:1px solid var(--box-border);border-radius:999px;padding:2px 11px;font-size:.94rem;line-height:1.35}
 
-  strong,b{color:#12408a;font-weight:700}                 /* blue "pen" bold, NO background */
-  mark{padding:0 3px;border-radius:3px;background:transparent;color:inherit}
-  mark.mint{background:var(--hl-mint)}                     /* key value / answer */
-  mark.amber{background:var(--hl-amber)}                   /* figures: numbers/dates/% */
-  mark.blue{background:var(--hl-blue)}                     /* definitions */
+  /* ── GEL-PEN emphasis (no highlighter wash) ──
+     bold  -> blue pen text · figures -> green pen text · answer -> ONE yellow highlighter */
+  strong,b,.pen{color:var(--blue-pen);font-weight:700}
+  .fig{color:var(--green-pen);font-weight:700}
   em{color:#4527a0;font-style:italic}
   code{background:#eef2f6;padding:1px 6px;border-radius:5px;font-size:.88em;font-family:ui-monospace,monospace}
+  u,.uline{text-decoration:underline wavy var(--margin-line);text-decoration-thickness:1.4px;text-underline-offset:3px}
+  mark{background:transparent;color:inherit;padding:0}
+  mark.ans{background:#ffe93a;color:#3b2f00;padding:0 5px;border-radius:3px;font-weight:700}   /* the only highlighter */
 
-  /* callout / badge boxes (tighter) */
+  /* ── callout / badge boxes ── */
   .badge{display:inline-flex;align-items:center;gap:6px;font-family:system-ui,Arial,sans-serif;
          font-size:.68rem;font-weight:700;letter-spacing:.5px;color:#fff;padding:3px 10px;border-radius:6px;
          text-transform:uppercase;transform:translateY(5px)}
   .badge.key{background:#2e7d32}
   .badge.mem{background:var(--purple)}
   .factbox{border:1.5px solid var(--green);border-radius:9px;padding:9px 13px;margin:5px 0 10px;background:#f6fff7}
-  .membox{border:2px dashed var(--purple);border-radius:9px;padding:9px 13px;margin:5px 0 10px;
-          background:var(--purple-soft);color:#4a148c}
+  .membox{border:2px dashed var(--purple);border-radius:9px;padding:9px 13px;margin:5px 0 10px;background:var(--purple-soft);color:#4a148c}
+  .notebox{background:#e3f2fd;border-left:4px solid #1565c0;border-radius:7px;padding:8px 12px;margin:6px 0;color:#0d2f52}
+
+  /* ── MCQ question card ── */
+  .q-card{margin:12px 0 4px;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(20,40,60,.08)}
+  .q-head{background:var(--teal-hdr);color:#eef4f8;padding:9px 13px;font-size:1rem;font-weight:700;display:flex;gap:9px;align-items:baseline}
+  .q-head .qtag{background:rgba(255,255,255,.18);border-radius:6px;padding:1px 8px;font-size:.76rem;flex:none;font-family:system-ui,Arial,sans-serif}
+  .q-head strong,.q-head b,.q-head .pen,.q-head .fig{color:#fff}
+  .q-body{background:#fbfcfd;border:1px solid var(--box-border);border-top:none;padding:7px 13px}
+  .opt{display:flex;align-items:baseline;gap:9px;padding:3px 0;font-size:.98rem}
+  .opt .lbl{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;flex:none;
+            background:#eceff1;color:#37474f;font-size:.75rem;font-weight:700;font-family:system-ui,Arial,sans-serif}
+  .opt.right{color:var(--green-deep);font-weight:700}
+  .opt.right .lbl{background:var(--green);color:#fff}
   .answer{background:#e8f5e9;border-left:4px solid var(--green);border-radius:7px;padding:8px 12px;margin:6px 0;color:#1e3a24}
   .answer .ok{color:var(--green);font-weight:700}
-  .notebox{background:#e3f2fd;border-left:4px solid var(--blue);border-radius:7px;padding:8px 12px;margin:6px 0;color:#0d2f52}
+  .explain{margin:4px 0 12px;padding-left:2px}
+  .explain .xh{font-weight:700;color:#37474f;font-size:.88rem;margin:3px 0 1px;font-family:system-ui,Arial,sans-serif}
 
-  /* table (compact) */
-  table{border-collapse:collapse;width:100%;margin:9px 0 12px;font-size:.9rem;
-        box-shadow:0 2px 8px rgba(20,40,60,.08);border-radius:8px;overflow:hidden}
+  /* ── table ── */
+  table{border-collapse:collapse;width:100%;margin:9px 0 12px;font-size:.9rem;box-shadow:0 2px 8px rgba(20,40,60,.08);border-radius:8px;overflow:hidden}
   thead th{background:var(--green);color:#fff;text-align:left;padding:7px 10px;font-weight:700}
   tbody td{border:1px solid #dce7df;padding:6px 10px}
   tbody tr:nth-child(even){background:#f4faf5}
-
   .divider{border:none;text-align:center;color:#c0ccd6;letter-spacing:7px;margin:12px 0;font-size:.95rem}
   .divider::after{content:"\2726 \2726 \2726"}
 
-  /* dark mode */
+  /* ── dark mode ── */
   body.dark{background:#0e1116}
   body.dark .page{--paper:#161b22;--ink:#e6edf3;--ruled:rgba(120,150,190,.08);--box-border:#2b3542;color:#e6edf3;background-color:#161b22}
   body.dark .subsec{color:#c3cdd7}
-  body.dark strong,body.dark b{color:#9cc2ff}
+  body.dark strong,body.dark b,body.dark .pen{color:#9cc2ff}
+  body.dark .fig{color:#7fe0a3}
   body.dark .chip{background:rgba(255,255,255,.05)}
+  body.dark .q-body{background:#1b222c}
+  body.dark .opt .lbl{background:#263140;color:#cdd7e2}
   body.dark .answer{background:#12271a;color:#d5f0dc}
   body.dark .notebox{background:#0e2740;color:#cfe4fb}
   body.dark .factbox{background:#12261a}
   body.dark .membox{background:#241631;color:#e5c6ff}
   body.dark tbody tr:nth-child(even){background:#1b232d} body.dark tbody td{border-color:#2b3542}
-  body.dark mark.mint{background:#124a2c;color:#c9f6da}
-  body.dark mark.amber{background:#6b5d00;color:#fff7c2}
-  body.dark mark.blue{background:#123a5e;color:#cfe4fb}
+  body.dark mark.ans{background:#c9a800;color:#211c00}
   body.dark code{background:#22303f;color:#e6edf3}
   body.dark .controls{background:#161b22;color:#e6edf3}
   body.dark .controls input,body.dark .controls select{background:#0e1116;color:#e6edf3;border-color:#2b3542}
 
-  /* ── Print: dense 2-column, small margins => far fewer pages ── */
+  /* ── print ── */
   @media print{
     body{background:#fff;font-size:10.5pt;line-height:1.35}
     .topbar,.controls,.metatag{display:none}
     .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;padding:0 4mm}
     .page::before{display:none}
     body.twocol .notes{column-count:2;column-gap:8mm}
-    .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec{break-inside:avoid}
+    .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
     @page{size:A4;margin:10mm 9mm}
   }
@@ -189,6 +198,10 @@
         <option value="summary">Summary</option>
         <option value="insights">Key insights</option>
       </select>
+      <select id="style" title="Notes style (notes only)">
+        <option value="topic">📝 Topic notes</option>
+        <option value="mcq">❓ MCQ notes</option>
+      </select>
       <select id="lang" title="Output language">
         <option>Hinglish</option>
         <option>English</option>
@@ -202,11 +215,11 @@
       <label><input type="checkbox" id="fresh"> force fresh (ignore cache)</label>
       &nbsp;·&nbsp; server:
       <input type="text" id="backend" value="https://youtube-turbo-proxy.onrender.com"
-             style="width:330px;font-size:12px;padding:6px 8px;border:1px solid #cdd6df;border-radius:7px">
+             style="width:320px;font-size:12px;padding:6px 8px;border:1px solid #cdd6df;border-radius:7px">
     </div>
     <div class="hint">
-      Calls your live server: <code>GET /api/study?id=…&mode=…&out=…</code>. First call on a video can take
-      ~30–90s (server may be waking up + transcript + AI); it caches after. <b>2-column + compact layout uses far fewer printed pages.</b>
+      Calls your live server: <code>GET /api/study?mode=notes&style=…</code>. <b>MCQ notes</b> need the updated backend
+      deployed (server currently runs the old prompt). Topic notes + gel-pen styling work now. First run per video ~30–90s; caches after.
     </div>
     <div class="statusline" id="status"></div>
   </div>
@@ -214,7 +227,7 @@
   <div class="metatag" id="meta"></div>
 
   <div class="page" id="page">
-    <div class="placeholder">⬆️ Paste a YouTube URL above and hit <b>Generate</b>. Notes render in a compact 2-column topper style (toggle columns / print / dark mode from the top bar).</div>
+    <div class="placeholder">⬆️ Paste a YouTube URL, choose <b>Topic</b> or <b>MCQ</b> notes, and hit <b>Generate</b>.</div>
   </div>
 
 <script>
@@ -222,7 +235,7 @@
   "use strict";
   var $=function(id){return document.getElementById(id);};
 
-  /* ── extract 11-char video id from URL/ID ── */
+  /* ── extract 11-char video id ── */
   function parseId(s){
     s=(s||"").trim();
     if(/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
@@ -232,30 +245,152 @@
     return m?m[1]:"";
   }
 
-  /* ── markdown helpers ── */
+  /* ── markdown inline (gel pen: blue bold, green figures — NO highlighter) ── */
   function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
-  // Restrained, meaningful highlighting (no more "everything yellow"):
-  //  • bold  -> colored bold text, NO background
-  //  • FIRST bold on a line -> soft MINT (the key value / answer)
-  //  • numbers / years / % / dates / scores -> soft AMBER (revision figures)
   function inline(s){
-    var firstBold=true;
-    s=s.replace(/\*\*([^*]+)\*\*/g,function(m,x){
-      if(firstBold){ firstBold=false; return '<strong><mark class="mint">'+x+'</mark></strong>'; }
-      return '<strong>'+x+'</strong>';
-    });
-    s=s.replace(/__([^_]+)__/g,'<strong>$1</strong>');
-    s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>');
-    s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
-    // amber on figures — safe: our only tags are strong/em/code/mark (none contain digits)
-    s=s.replace(/\b(\d[\d.,:%\/\u2013-]*(?:st|nd|rd|th)?)\b/g,'<mark class="amber">$1</mark>');
+    s=s.replace(/\*\*([^*]+)\*\*/g,'<b class="pen">$1</b>')
+       .replace(/__([^_]+)__/g,'<b class="pen">$1</b>')
+       .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>')
+       .replace(/`([^`]+)`/g,'<code>$1</code>');
+    // figures (numbers/years/%/dates) in green pen — no background
+    s=s.replace(/\b(\d[\d.,:%\/\u2013-]*(?:st|nd|rd|th)?)\b/g,'<span class="fig">$1</span>');
     return s;
   }
 
-  /* ── strip promo / logistics "junk" (channel ads, links, batches, timings) ──
-     Targets ONLY meta/promo patterns, never study facts. Toggleable in the UI. */
+  /* ── callouts ── */
+  var KEY_RE=/^\s*(key\s*facts?|important|imp\.?|remember|note|yaad\s*rakh\w*|zaruri|jaruri)\s*[:\-\u2013]/i;
+  var MEM_RE=/^\s*(memory\s*trick|trick|mnemonic|shortcut|tip|exam\s*tip|hack)\s*[:\-\u2013]/i;
+  function afterColon(s){ var idx=s.search(/[:\-\u2013]/); return idx>=0? s.slice(idx+1).trim() : s; }
+  function calloutKey(t){ return '<span class="badge key">🔑 Key Facts</span><div class="factbox">'+inline(esc(afterColon(t)))+'</div>'; }
+  function calloutMem(t){ return '<span class="badge mem">🧠 Memory Trick</span><div class="membox">'+inline(esc(afterColon(t)))+'</div>'; }
+
+  function isShort(s){ var p=s.replace(/[*_`]/g,"").trim(); return p.length<=18 && p.indexOf(":")<0; }
+  function renderUL(items){
+    var html=[], run=[], mode=null;
+    function flush(){
+      if(!run.length) return;
+      if(mode==="chip" && run.length>=2){
+        html.push('<div class="chips">'+run.map(function(x){return '<span class="chip">'+inline(esc(x))+'</span>';}).join('')+'</div>');
+      } else { html.push('<ul>'+run.map(function(x){return '<li>'+inline(esc(x))+'</li>';}).join('')+'</ul>'); }
+      run=[]; mode=null;
+    }
+    items.forEach(function(it){
+      if(KEY_RE.test(it)){ flush(); html.push(calloutKey(it)); return; }
+      if(MEM_RE.test(it)){ flush(); html.push(calloutMem(it)); return; }
+      var want=isShort(it)?"chip":"norm";
+      if(mode && mode!==want) flush();
+      mode=want; run.push(it);
+    });
+    flush();
+    return html.join("\n");
+  }
+
+  /* ── topic-notes renderer (inner = no wrapper) ── */
+  function mdInner(md){
+    md=(md||"").replace(/\r/g,"");
+    md=md.replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,"$1");
+    var lines=md.split("\n"), out=[], i=0, secN=0, colorN=0, ol=false;
+    function closeOl(){ if(ol){out.push("</ol>");ol=false;} }
+    while(i<lines.length){
+      var t=lines[i].trim();
+      if(/^\|.*\|$/.test(t) && i+1<lines.length && /^\|[\s:|-]+\|$/.test(lines[i+1].trim())){
+        closeOl();
+        var head=t.split("|").slice(1,-1).map(function(c){return "<th>"+inline(esc(c.trim()))+"</th>";}).join("");
+        out.push("<table><thead><tr>"+head+"</tr></thead><tbody>"); i+=2;
+        while(i<lines.length && /^\|.*\|$/.test(lines[i].trim())){
+          var row=lines[i].trim().split("|").slice(1,-1).map(function(c){return "<td>"+inline(esc(c.trim()))+"</td>";}).join("");
+          out.push("<tr>"+row+"</tr>"); i++;
+        }
+        out.push("</tbody></table>"); continue;
+      }
+      if(t==="---"||t==="***"||t==="___"){ closeOl(); out.push('<div class="divider"></div>'); i++; continue; }
+      var h=t.match(/^(#{1,6})\s+(.*)/);
+      if(h){
+        closeOl();
+        var lv=h[1].length, txt=inline(esc(h[2].replace(/[:*#]+$/,"").trim()));
+        if(lv<=2){ secN++; var c=colorN%5; colorN++; out.push('<div class="sec c'+c+'"><span class="num">'+secN+'</span>'+txt+'</div>'); }
+        else { out.push('<div class="subsec">'+txt+'</div>'); }
+        i++; continue;
+      }
+      if(/^>\s?/.test(t)){ closeOl(); out.push('<div class="notebox">'+inline(esc(t.replace(/^>\s?/,"")))+'</div>'); i++; continue; }
+      var mo=t.match(/^(\d+)[.)]\s+(.*)/);
+      if(mo){ if(!ol){out.push("<ol>");ol=true;} out.push("<li>"+inline(esc(mo[2]))+"</li>"); i++; continue; }
+      if(/^[-*+]\s+/.test(t)){
+        closeOl();
+        var items=[];
+        while(i<lines.length){ var m2=lines[i].trim().match(/^[-*+]\s+(.*)/); if(!m2) break; items.push(m2[1]); i++; }
+        out.push(renderUL(items)); continue;
+      }
+      if(t===""){ closeOl(); i++; continue; }
+      if(KEY_RE.test(t)){ closeOl(); out.push(calloutKey(t)); i++; continue; }
+      if(MEM_RE.test(t)){ closeOl(); out.push(calloutMem(t)); i++; continue; }
+      closeOl(); out.push("<p>"+inline(esc(t))+"</p>"); i++;
+    }
+    closeOl();
+    return out.join("\n");
+  }
+  function mdToHandwritten(md){ return '<div class="notes">'+mdInner(md)+'</div>'; }
+
+  /* ── MCQ renderer ── */
+  // Question head: "### Q1. …", "Q1) …", "**Q1.** …", or Hindi "प्रश्न 1", "सवाल 1"
+  var Q_RE=/^#{0,4}\s*\**\s*(?:Q|Question|Ques|प्रश्न|सवाल)\s*\.?\s*(\d+)\s*[.):\-\u2013]*\s*(.*)$/i;
+  var O_RE=/^[-*+]?\s*\(?([A-Da-d1-4])\)?[.)]\s+(.*)$/;
+  var A_RE=/^\s*(?:[-*+]\s*)?\**\s*(?:answer|ans|उत्तर|सही\s*उत्तर)\**\s*[:：]?\s*\**\s*\(?([A-Da-d1-4])\)?\b(.*)$/i;
+  var EXP_RE=/^\**\s*(?:explanation|explain|व्याख्या|स्पष्टीकरण)\**\s*[:：]?\s*(.*)$/i;
+
+  function optIsRight(text){ return /[\u2713\u2714]|\(correct\)|\bcorrect\b|सही/i.test(text); }
+  function cleanOpt(text){ return text.replace(/\s*[\u2713\u2714]\s*$/,"").replace(/\s*\(correct\)\s*$/i,"").trim(); }
+
+  function buildCard(n, q, opts, ans, ansRest, expl){
+    var body=opts.map(function(o){
+      var right=(ans && o.k===ans) || optIsRight(o.text);
+      var txt=cleanOpt(o.text);
+      return '<div class="opt'+(right?' right':'')+'"><span class="lbl">'+o.k+'</span> '+inline(esc(txt))+(right?' ✓':'')+'</div>';
+    }).join('');
+    var qHtml='<div class="q-card"><div class="q-head"><span class="qtag">Q'+n+'</span> '+inline(esc(q.replace(/\*+/g,"")))+'</div>'+
+              (opts.length?'<div class="q-body">'+body+'</div>':'')+'</div>';
+    var ansHtml = ans
+      ? '<div class="answer"><span class="ok">✅ Answer: <mark class="ans">'+ans+'</mark></span>'+
+        (ansRest?' '+inline(esc(ansRest.replace(/^[\s\u2014\-:：]+/,""))):'')+'</div>'
+      : '';
+    var explHtml = expl.length ? '<div class="explain"><div class="xh">📝 Explanation</div>'+mdInner(expl.join("\n"))+'</div>' : '';
+    return qHtml+ansHtml+explHtml;
+  }
+
+  function renderMCQ(md){
+    var lines=(md||"").replace(/\r/g,"").replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,"$1").split("\n");
+    var out=[], i=0, qn=0, found=false;
+    while(i<lines.length){
+      var t=lines[i].trim();
+      var qm=t.match(Q_RE);
+      if(qm){
+        found=true; qn++;
+        var qtext=qm[2]||""; i++;
+        var opts=[], ans="", ansRest="", expl=[];
+        while(i<lines.length){
+          var lt=lines[i].trim();
+          if(Q_RE.test(lt)) break;                 // next question
+          var am=lt.match(A_RE), om=lt.match(O_RE), em=lt.match(EXP_RE);
+          if(am){ ans=am[1].toUpperCase(); ansRest=am[2]||""; i++; continue; }
+          if(om){ opts.push({k:om[1].toUpperCase(), text:om[2]}); i++; continue; }
+          if(em){ var er=(em[1]||"").replace(/^\*+/,"").replace(/\*+$/,"").trim(); if(er) expl.push(er); i++; continue; }  // drop bare "Explanation:" label
+          if(lt===""){ i++; continue; }
+          expl.push(lt); i++;
+        }
+        out.push(buildCard(qn, qtext, opts, ans, ansRest, expl));
+        continue;
+      }
+      // non-question content -> normal notebook render
+      var buf=[];
+      while(i<lines.length && !Q_RE.test(lines[i].trim())){ buf.push(lines[i]); i++; }
+      if(buf.join("").trim()) out.push(mdInner(buf.join("\n")));
+    }
+    if(!found) return mdToHandwritten(md);        // no MCQs detected -> topic style
+    return '<div class="notes">'+out.join("\n")+'</div>';
+  }
+
+  /* ── promo / junk cleanup (English + Hindi/Hinglish) ── */
   var JUNK_LINE=[
-    // ── English ──
     /parmar\s+(sir|academy)/i,
     /(foundation|revision|new|coaching|demo|upcoming|next|weekend)\s+batch|\bbatch\b\s*(starts|starting|link|join|now)/i,
     /\btelegram\b/i,
@@ -269,7 +404,6 @@
     /https?:\/\/|www\./i,
     /\b(join|download|follow us|like this video|share this video)\b.*(link|channel|app|telegram|now|below)/i,
     /^\s*resources?\s*:?\s*$/i,
-    // ── Hindi / Devanagari (app outputs Hindi & Hinglish too) ──
     /पार्?मर|परमार|अकादमी|अकैडमी|एकेडमी/,
     /(फाउंडेशन|फ़ाउंडेशन|रिवीजन|रिविजन|नई|नया|वीकेंड)\s*बैच/,
     /(मैथ्स|मैथ|गणित|रीजनिंग|साइंस|विज्ञान|इंग्लिश|अंग्रेज़ी|हिंदी)\s*\S*\s*बैच/,
@@ -293,7 +427,7 @@
     while(i<lines.length){
       var l=lines[i], tl=l.trim();
       var h=tl.match(/^(#{1,6})\s+(.*)/);
-      if(h && (JUNK_HEAD.test(h[2]) || isJunkLine(h[2]))){       // junk heading -> drop whole section
+      if(h && (JUNK_HEAD.test(h[2]) || isJunkLine(h[2]))){
         var lvl=h[1].length; i++; removed++;
         while(i<lines.length){
           var hh=lines[i].trim().match(/^(#{1,6})\s+/);
@@ -309,106 +443,6 @@
     return { text: out.join("\n").replace(/\n{3,}/g,"\n\n").trim(), removed: removed };
   }
 
-  var KEY_RE=/^\s*(key\s*facts?|important|imp\.?|remember|note|yaad\s*rakh\w*|zaruri|jaruri)\s*[:\-\u2013]/i;
-  var MEM_RE=/^\s*(memory\s*trick|trick|mnemonic|shortcut|tip|exam\s*tip|hack)\s*[:\-\u2013]/i;
-  var ANS_RE=/^\s*(answer|ans\.?|correct\s*answer|solution)\s*[:\-\u2013]/i;
-
-  function afterColon(s){ var idx=s.search(/[:\-\u2013]/); return idx>=0? s.slice(idx+1).trim() : s; }
-  function calloutKey(t){ return '<span class="badge key">🔑 Key Facts</span><div class="factbox">'+inline(esc(afterColon(t)))+'</div>'; }
-  function calloutMem(t){ return '<span class="badge mem">🧠 Memory Trick</span><div class="membox">'+inline(esc(afterColon(t)))+'</div>'; }
-  function calloutAns(t){ return '<div class="answer"><span class="ok">✅ Answer:</span> '+inline(esc(afterColon(t)))+'</div>'; }
-
-  // A "short" item (single name/word) -> becomes a compact chip instead of a full row.
-  function isShort(s){ var p=s.replace(/[*_`]/g,"").trim(); return p.length<=18 && p.indexOf(":")<0; }
-
-  // Render a gathered block of unordered items, merging runs of short ones into chips.
-  function renderUL(items){
-    var html=[], run=[], mode=null;
-    function flush(){
-      if(!run.length) return;
-      if(mode==="chip" && run.length>=2){
-        html.push('<div class="chips">'+run.map(function(x){return '<span class="chip">'+inline(esc(x))+'</span>';}).join('')+'</div>');
-      } else {
-        html.push('<ul>'+run.map(function(x){return '<li>'+inline(esc(x))+'</li>';}).join('')+'</ul>');
-      }
-      run=[]; mode=null;
-    }
-    items.forEach(function(it){
-      if(KEY_RE.test(it)){ flush(); html.push(calloutKey(it)); return; }
-      if(MEM_RE.test(it)){ flush(); html.push(calloutMem(it)); return; }
-      if(ANS_RE.test(it)){ flush(); html.push(calloutAns(it)); return; }
-      var want=isShort(it)?"chip":"norm";
-      if(mode && mode!==want) flush();
-      mode=want; run.push(it);
-    });
-    flush();
-    return html.join("\n");
-  }
-
-  function mdToHandwritten(md){
-    md=(md||"").replace(/\r/g,"");
-    md=md.replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,"$1");
-    var lines=md.split("\n"), out=[], i=0, secN=0, colorN=0, ol=false;
-    function closeOl(){ if(ol){out.push("</ol>");ol=false;} }
-
-    while(i<lines.length){
-      var t=lines[i].trim();
-
-      // table
-      if(/^\|.*\|$/.test(t) && i+1<lines.length && /^\|[\s:|-]+\|$/.test(lines[i+1].trim())){
-        closeOl();
-        var head=t.split("|").slice(1,-1).map(function(c){return "<th>"+inline(esc(c.trim()))+"</th>";}).join("");
-        out.push("<table><thead><tr>"+head+"</tr></thead><tbody>"); i+=2;
-        while(i<lines.length && /^\|.*\|$/.test(lines[i].trim())){
-          var row=lines[i].trim().split("|").slice(1,-1).map(function(c){return "<td>"+inline(esc(c.trim()))+"</td>";}).join("");
-          out.push("<tr>"+row+"</tr>"); i++;
-        }
-        out.push("</tbody></table>"); continue;
-      }
-
-      if(t==="---"||t==="***"||t==="___"){ closeOl(); out.push('<div class="divider"></div>'); i++; continue; }
-
-      var h=t.match(/^(#{1,6})\s+(.*)/);
-      if(h){
-        closeOl();
-        var lv=h[1].length, txt=inline(esc(h[2].replace(/[:*#]+$/,"").trim()));
-        if(lv<=2){ secN++; var c=colorN%5; colorN++;
-          out.push('<div class="sec c'+c+'"><span class="num">'+secN+'</span>'+txt+'</div>');
-        } else { out.push('<div class="subsec">'+txt+'</div>'); }
-        i++; continue;
-      }
-
-      if(/^>\s?/.test(t)){ closeOl(); out.push('<div class="notebox">'+inline(esc(t.replace(/^>\s?/,"")))+'</div>'); i++; continue; }
-
-      var mo=t.match(/^(\d+)[.)]\s+(.*)/);
-      if(mo){ if(!ol){out.push("<ol>");ol=true;} out.push("<li>"+inline(esc(mo[2]))+"</li>"); i++; continue; }
-
-      // gather a block of unordered items then render (chips + callouts + bullets)
-      if(/^[-*+]\s+/.test(t)){
-        closeOl();
-        var items=[];
-        while(i<lines.length){
-          var m2=lines[i].trim().match(/^[-*+]\s+(.*)/);
-          if(!m2) break;
-          items.push(m2[1]); i++;
-        }
-        out.push(renderUL(items));
-        continue;
-      }
-
-      if(t===""){ closeOl(); i++; continue; }
-
-      // paragraph-level callouts
-      if(KEY_RE.test(t)){ closeOl(); out.push(calloutKey(t)); i++; continue; }
-      if(MEM_RE.test(t)){ closeOl(); out.push(calloutMem(t)); i++; continue; }
-      if(ANS_RE.test(t)){ closeOl(); out.push(calloutAns(t)); i++; continue; }
-
-      closeOl(); out.push("<p>"+inline(esc(t))+"</p>"); i++;
-    }
-    closeOl();
-    return '<div class="notes">'+out.join("\n")+'</div>';
-  }
-
   /* ── column toggle ── */
   function syncCols(){ $("cols").innerHTML = document.body.classList.contains("twocol") ? "🗂️ 2 Columns" : "📄 1 Column"; }
   $("cols").onclick=function(){ document.body.classList.toggle("twocol"); syncCols(); };
@@ -421,12 +455,13 @@
     var backend=($("backend").value||"").trim().replace(/\/+$/,"");
     var id=parseId($("url").value);
     if(!id){ setStatus("⚠️ Enter a valid YouTube URL or 11-character video ID.",true); return; }
-    var mode=$("mode").value, lang=$("lang").value, fresh=$("fresh").checked;
-    var url=backend+"/api/study?id="+encodeURIComponent(id)+"&mode="+mode+"&out="+encodeURIComponent(lang)+(fresh?"&refresh=1":"");
+    var mode=$("mode").value, style=$("style").value, lang=$("lang").value, fresh=$("fresh").checked;
+    var url=backend+"/api/study?id="+encodeURIComponent(id)+"&mode="+mode+"&out="+encodeURIComponent(lang)+
+            (mode==="notes"&&style==="mcq"?"&style=mcq":"")+(fresh?"&refresh=1":"");
+    var wantMcq = (mode==="notes" && style==="mcq");
 
-    $("go").disabled=true;
-    $("meta").textContent="";
-    setStatus('<span class="spin"></span> Generating <b>'+mode+'</b> ('+lang+') for <code>'+id+'</code>… first run can take ~30–90s.');
+    $("go").disabled=true; $("meta").textContent="";
+    setStatus('<span class="spin"></span> Generating '+(wantMcq?"MCQ ":"")+mode+' ('+lang+') for <code>'+id+'</code>… first run can take ~30–90s.');
     $("page").innerHTML='<div class="placeholder"><span class="spin"></span> Waiting for your server + AI…</div>';
 
     var t0=Date.now();
@@ -439,9 +474,11 @@
       if(!content){ setStatus("⚠️ Empty response from server.",true); return; }
       var removed=0;
       if($("clean").checked){ var cj=stripJunk(content); content=cj.text; removed=cj.removed; }
-      setStatus("✅ Done in "+secs+"s."+(removed?"  ·  🧹 removed "+removed+" promo/junk line"+(removed>1?"s":""):""));
-      $("meta").textContent=(j.provider||"ai")+" · "+(j.model||"")+" · "+(j.cached?"cached copy":"fresh")+" · "+lang;
-      $("page").innerHTML=mdToHandwritten(content);
+      var serverStyle=j.style||"topic";
+      var note = wantMcq && serverStyle!=="mcq" ? "  ·  ⚠️ server returned topic notes (deploy the updated backend for real MCQ)" : "";
+      setStatus("✅ Done in "+secs+"s."+(removed?"  ·  🧹 removed "+removed+" promo line"+(removed>1?"s":""):"")+note);
+      $("meta").textContent=(j.provider||"ai")+" · "+(j.model||"")+" · "+serverStyle+" · "+(j.cached?"cached":"fresh")+" · "+lang;
+      $("page").innerHTML = wantMcq ? renderMCQ(content) : mdToHandwritten(content);
     }).catch(function(e){
       $("go").disabled=false;
       setStatus("❌ Request failed: "+esc(String(e))+". The server may be asleep — try again in a few seconds.",true);
@@ -449,8 +486,13 @@
     });
   }
 
+  // hide the style dropdown for non-notes modes
+  $("mode").onchange=function(){ $("style").style.display = (this.value==="notes") ? "" : "none"; };
   $("go").onclick=generate;
   $("url").addEventListener("keydown",function(e){ if(e.key==="Enter") generate(); });
+
+  // expose renderers for the offline self-test (see below)
+  window.__demo={renderMCQ:renderMCQ, mdToHandwritten:mdToHandwritten, stripJunk:stripJunk};
 })();
 </script>
 </body>
