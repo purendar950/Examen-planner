@@ -136,6 +136,9 @@
             background:#eceff1;color:#37474f;font-size:.75rem;font-weight:700;font-family:system-ui,Arial,sans-serif}
   .opt.right{color:var(--green-deep);font-weight:700}
   .opt.right .lbl{background:var(--green);color:#fff}
+  .opt.wrong{color:#98a6b3;text-decoration:line-through;text-decoration-color:#d3a5a5}   /* solved-MCQ look: cross out wrong options */
+  .opt.wrong .lbl{background:#fbe3e3;color:#c0392b;text-decoration:none}
+  .opt.wrong .fig{color:#98a6b3}
   .answer{background:#e8f5e9;border-left:4px solid var(--green);border-radius:7px;padding:8px 12px;margin:6px 0;color:#1e3a24}
   .answer .ok{color:var(--green);font-weight:700}
   .explain{margin:4px 0 12px;padding-left:2px}
@@ -359,10 +362,13 @@
   function cleanOpt(text){ return text.replace(/\s*[\u2713\u2714]\s*$/,"").replace(/\s*\(correct\)\s*$/i,"").trim(); }
 
   function buildCard(n, q, opts, ans, ansRest, expl){
+    // once we know the correct option, CROSS OUT every other option (real solved-MCQ look)
+    var hasCorrect = !!ans || opts.some(function(o){ return optIsRight(o.text); });
     var body=opts.map(function(o){
       var right=(ans && o.k===ans) || optIsRight(o.text);
+      var cls = right ? ' right' : (hasCorrect ? ' wrong' : '');
       var txt=cleanOpt(o.text);
-      return '<div class="opt'+(right?' right':'')+'"><span class="lbl">'+o.k+'</span> '+inline(esc(txt))+(right?' ✓':'')+'</div>';
+      return '<div class="opt'+cls+'"><span class="lbl">'+o.k+'</span> '+inline(esc(txt))+(right?' ✓':'')+'</div>';
     }).join('');
     var qHtml='<div class="q-card"><div class="q-head"><span class="qtag">Q'+n+'</span> '+inline(esc(q.replace(/\*+/g,"")))+'</div>'+
               (opts.length?'<div class="q-body">'+body+'</div>':'')+'</div>';
