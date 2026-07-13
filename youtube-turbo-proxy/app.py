@@ -603,12 +603,24 @@ def _load_ai_config():
     if not keys and os.environ.get("BYNARA_API_KEY"):
         keys = [os.environ["BYNARA_API_KEY"].strip()]
     if keys:
+        # Base URL: admin can point Study AI at any OpenAI-compatible endpoint
+        # (e.g. Mistral: https://api.mistral.ai/v1). Accept either a base
+        # ('.../v1') or a full completions URL. Blank = Bynara default.
+        base = (cfg.get("studyBaseUrl") or "").strip().rstrip("/")
+        if base:
+            base_url = base if base.endswith("/chat/completions") else base + "/chat/completions"
+        else:
+            base_url = BYNARA_URL
+        provider = (cfg.get("studyProvider") or "").strip().lower()
+        if not provider:
+            provider = "bynara" if base_url == BYNARA_URL else "custom"
         return {
-            "base_url": BYNARA_URL,
+            "base_url": base_url,
             "keys": keys,                          # failover across keys
             "model": (cfg.get("studyModel") or "mistral-large").strip(),
-            "big_context": True,                   # ~1M ctx — send full transcript
+            "big_context": True,                   # big ctx — send full transcript
             "tpm": 0,                              # provider-managed limits
+            "provider": provider,
         }
     gkey = (cfg.get("groqApiKey") or os.environ.get("GROQ_API_KEY") or "").strip()
     return {
@@ -618,6 +630,7 @@ def _load_ai_config():
                   or "llama-3.3-70b-versatile").strip(),
         "big_context": False,
         "tpm": int(os.environ.get("GROQ_TPM", "7000")),
+        "provider": "groq",
     }
 
 
@@ -1190,7 +1203,7 @@ def api_study():
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
             "out_lang": out_lang, "model": model,
             "num_questions": num_q if mode == "quiz" else None,
-            "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
+            "provider": ai.get("provider", "ai"),
             "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count"),
@@ -1436,7 +1449,7 @@ def api_tutor():
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     return jsonify({"id": video_id, "answer": answer, "mode": mode,
-                    "provider": "bynara" if ai["base_url"] == BYNARA_URL else "groq",
+                    "provider": ai.get("provider", "ai"),
                     "model": ai["model"], "transcript_lang": t.get("chosen_lang")})
 
 
