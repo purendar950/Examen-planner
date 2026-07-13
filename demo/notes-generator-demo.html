@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Notes — Handwritten Style Demo (Live)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ══════════════════════════════════════════════════════════════════
+     LIVE DEMO — paste your own YouTube URL, it calls YOUR server
+     (youtube-turbo-proxy) + AI, and renders the real generated notes
+     in the "topper handwritten notes" style.
+     Standalone. Nothing here is wired into the app yet.
+     ══════════════════════════════════════════════════════════════════ */
+  :root{
+    --paper:#fffdf6; --ruled:rgba(58,132,210,.10); --margin-line:#e57373;
+    --ink:#22303f; --ink-soft:#4b5a68;
+    --red:#d32f2f; --green:#2e7d32; --green-deep:#1b5e20; --teal-hdr:#2f4858;
+    --blue:#1565c0; --orange:#e65100;
+    --hl-yellow:#fff59d; --hl-green:#b9f6ca;
+    --purple:#7b1fa2; --purple-soft:#f3e5f5;
+    --box-border:#cfd8dc; --shadow:0 6px 22px rgba(20,40,60,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:'Kalam','Noto Sans Devanagari','Comic Sans MS',cursive;color:var(--ink);
+       background:#e8ecf1;font-size:18px;line-height:1.6;-webkit-font-smoothing:antialiased}
+
+  /* ── Top toolbar ── */
+  .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;
+          padding:12px 22px;background:linear-gradient(135deg,#14532d,#166534);
+          color:#eafff0;box-shadow:0 2px 10px rgba(0,0,0,.25);flex-wrap:wrap}
+  .topbar .brand{font-weight:700;font-size:1.12rem;letter-spacing:.3px}
+  .topbar .spacer{flex:1}
+  .topbar button{font-family:inherit;cursor:pointer;border:none;padding:8px 16px;border-radius:999px;
+                 font-size:.9rem;font-weight:700;display:inline-flex;align-items:center;gap:6px}
+  .btn-print{background:#22c55e;color:#04240f}
+  .btn-theme{background:#facc15;color:#3b2f00}
+  .topbar button:hover{filter:brightness(1.05)}
+
+  /* ── Controls bar ── */
+  .controls{max-width:900px;margin:20px auto 0;background:#fff;border-radius:12px;
+            box-shadow:var(--shadow);padding:16px 18px;font-family:system-ui,Arial,sans-serif}
+  .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .controls input[type=text]{flex:1;min-width:240px;font-size:15px;padding:11px 13px;border:1px solid #cdd6df;
+            border-radius:9px;font-family:inherit}
+  .controls select{font-size:14px;padding:11px 10px;border:1px solid #cdd6df;border-radius:9px;font-family:inherit;background:#fff}
+  .controls .go{background:#166534;color:#fff;border:none;font-weight:700;font-size:15px;padding:11px 22px;
+            border-radius:9px;cursor:pointer;font-family:inherit}
+  .controls .go:hover{background:#14532d}
+  .controls .go:disabled{opacity:.55;cursor:not-allowed}
+  .controls .hint{color:#64748b;font-size:12.5px;margin-top:9px;font-family:system-ui,Arial,sans-serif}
+  .controls .hint code{background:#eef2f6;padding:1px 6px;border-radius:5px}
+  .controls .adv{margin-top:9px;font-size:12.5px;color:#475569}
+  .controls .adv input{width:auto;min-width:0}
+  .statusline{margin-top:10px;font-size:13px;font-family:system-ui,Arial,sans-serif;color:#334155;display:none}
+  .statusline.show{display:block}
+  .statusline.err{color:#b3261e}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:#166534;
+        border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .metatag{font-family:system-ui,Arial,sans-serif;font-size:11.5px;color:#64748b;margin:0 auto 0;max-width:900px;padding:8px 4px 0}
+
+  /* ── Notebook page ── */
+  .page{max-width:900px;margin:16px auto 40px;background:var(--paper);
+        background-image:repeating-linear-gradient(transparent,transparent 33px,var(--ruled) 34px);
+        border-radius:6px;box-shadow:var(--shadow);padding:30px 40px 60px 78px;position:relative;overflow:hidden;min-height:120px}
+  .page::before{content:"";position:absolute;top:0;bottom:0;left:54px;width:2px;background:var(--margin-line);opacity:.55}
+  .page .placeholder{color:#8fa0af;font-size:1.05rem;text-align:center;padding:30px 10px}
+
+  /* ── Rendered note components ── */
+  .sec{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.42rem;margin:26px 0 6px;padding-bottom:6px}
+  .sec .num{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;
+            font-size:.98rem;color:#fff;flex:none;font-family:system-ui,Arial,sans-serif}
+  .sec.c0{color:var(--red);border-bottom:3px solid var(--red)} .sec.c0 .num{background:var(--red)}
+  .sec.c1{color:var(--green);border-bottom:3px solid var(--green)} .sec.c1 .num{background:var(--green)}
+  .sec.c2{color:var(--blue);border-bottom:3px solid var(--blue)} .sec.c2 .num{background:var(--blue)}
+  .sec.c3{color:var(--purple);border-bottom:3px solid var(--purple)} .sec.c3 .num{background:var(--purple)}
+  .sec.c4{color:var(--orange);border-bottom:3px solid var(--orange)} .sec.c4 .num{background:var(--orange)}
+
+  .subsec{font-weight:700;font-size:1.12rem;color:#37474f;margin:16px 0 4px;padding-left:2px}
+  .subsec::before{content:"\270E  ";opacity:.6}
+
+  .page p{margin:7px 0}
+  .page ul,.page ol{margin:6px 0 10px;padding-left:6px;list-style:none}
+  .page ul li{position:relative;padding-left:24px;margin:5px 0}
+  .page ul li::before{content:"\27a4";position:absolute;left:0;top:2px;color:var(--green);font-size:.78rem}
+  .page ol{counter-reset:li}
+  .page ol li{position:relative;padding-left:30px;margin:5px 0;counter-increment:li}
+  .page ol li::before{content:counter(li);position:absolute;left:0;top:0;width:21px;height:21px;border-radius:50%;
+        background:var(--teal-hdr);color:#fff;font-size:.72rem;display:flex;align-items:center;justify-content:center;
+        font-family:system-ui,Arial,sans-serif}
+  .page li ul,.page li ol{margin:3px 0 3px}
+
+  strong,b{color:#0f2a1a;font-weight:700}
+  mark.y{background:var(--hl-yellow);padding:0 3px;border-radius:3px}
+  em{color:#4527a0;font-style:italic}
+  code{background:#eef2f6;padding:1px 6px;border-radius:5px;font-size:.88em;font-family:ui-monospace,monospace}
+
+  /* callout / badge boxes */
+  .badge{display:inline-flex;align-items:center;gap:6px;font-family:system-ui,Arial,sans-serif;
+         font-size:.72rem;font-weight:700;letter-spacing:.6px;color:#fff;padding:4px 12px;border-radius:6px;
+         text-transform:uppercase;transform:translateY(6px)}
+  .badge.key{background:#2e7d32}
+  .badge.mem{background:var(--purple)}
+  .factbox{border:1.5px solid var(--green);border-radius:10px;padding:12px 16px;margin:6px 0 14px;background:#f6fff7}
+  .membox{border:2px dashed var(--purple);border-radius:10px;padding:12px 16px;margin:6px 0 14px;
+          background:var(--purple-soft);color:#4a148c}
+  .answer{background:#e8f5e9;border-left:5px solid var(--green);border-radius:8px;padding:10px 14px;margin:9px 0;color:#1e3a24}
+  .answer .ok{color:var(--green);font-weight:700}
+  .notebox{background:#e3f2fd;border-left:5px solid var(--blue);border-radius:8px;padding:10px 14px;margin:9px 0;color:#0d2f52}
+
+  /* table */
+  table{border-collapse:collapse;width:100%;margin:12px 0 16px;font-size:.94rem;
+        box-shadow:0 2px 8px rgba(20,40,60,.08);border-radius:8px;overflow:hidden}
+  thead th{background:var(--green);color:#fff;text-align:left;padding:9px 12px;font-weight:700}
+  tbody td{border:1px solid #dce7df;padding:8px 12px}
+  tbody tr:nth-child(even){background:#f4faf5}
+
+  hr,.divider{border:none;text-align:center;color:#c0ccd6;letter-spacing:8px;margin:22px 0;font-size:1.05rem}
+  .divider::after{content:"\2726 \2726 \2726"}
+
+  /* dark mode */
+  body.dark{background:#0e1116}
+  body.dark .page{--paper:#161b22;--ink:#e6edf3;--ruled:rgba(120,150,190,.08);--box-border:#2b3542;color:#e6edf3;background-color:#161b22}
+  body.dark .subsec{color:#c3cdd7}
+  body.dark strong,body.dark b{color:#eafff0}
+  body.dark .answer{background:#12271a;color:#d5f0dc}
+  body.dark .notebox{background:#0e2740;color:#cfe4fb}
+  body.dark .factbox{background:#12261a}
+  body.dark .membox{background:#241631;color:#e5c6ff}
+  body.dark tbody tr:nth-child(even){background:#1b232d} body.dark tbody td{border-color:#2b3542}
+  body.dark mark.y{background:#6b5d00;color:#fff7c2}
+  body.dark code{background:#22303f;color:#e6edf3}
+  body.dark .controls{background:#161b22;color:#e6edf3}
+  body.dark .controls input,body.dark .controls select{background:#0e1116;color:#e6edf3;border-color:#2b3542}
+
+  @media print{
+    body{background:#fff;font-size:12pt}
+    .topbar,.controls,.metatag{display:none}
+    .page{box-shadow:none;margin:0;max-width:none;border-radius:0}
+    .factbox,.membox,table,.answer,.notebox,.q-card{page-break-inside:avoid}
+    @page{size:A4;margin:14mm}
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span class="brand">📓 AI Notes — Handwritten Style (Live Demo)</span>
+    <span class="spacer"></span>
+    <button class="btn-print" onclick="window.print()">🖨️ Print / PDF</button>
+    <button class="btn-theme" onclick="document.body.classList.toggle('dark')">🌙 Dark Mode</button>
+  </div>
+
+  <div class="controls">
+    <div class="row">
+      <input id="url" type="text" placeholder="Paste your YouTube URL (or 11-char video ID)…"
+             value="">
+      <select id="mode" title="What to generate">
+        <option value="notes">Comprehensive notes</option>
+        <option value="summary">Summary</option>
+        <option value="insights">Key insights</option>
+      </select>
+      <select id="lang" title="Output language">
+        <option>Hinglish</option>
+        <option>English</option>
+        <option>Hindi</option>
+      </select>
+      <button class="go" id="go">Generate ✨</button>
+    </div>
+    <div class="adv">
+      <label><input type="checkbox" id="fresh"> force fresh (ignore cache)</label>
+      &nbsp;·&nbsp; server:
+      <input type="text" id="backend" value="https://youtube-turbo-proxy.onrender.com"
+             style="width:340px;font-size:12px;padding:6px 8px;border:1px solid #cdd6df;border-radius:7px">
+    </div>
+    <div class="hint">
+      Calls your live server: <code>GET /api/study?id=…&mode=…&out=…</code>. First call on a video can take
+      ~30–90s (server may be waking up + transcript + AI). It caches after, so re-runs are instant.
+    </div>
+    <div class="statusline" id="status"></div>
+  </div>
+
+  <div class="metatag" id="meta"></div>
+
+  <div class="page" id="page">
+    <div class="placeholder">⬆️ Paste a YouTube URL above and hit <b>Generate</b> to see your notes rendered in topper handwritten style.</div>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+  var $=function(id){return document.getElementById(id);};
+
+  /* ── extract 11-char video id from URL/ID ── */
+  function parseId(s){
+    s=(s||"").trim();
+    if(/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+    var m=s.match(/(?:v=|\/shorts\/|youtu\.be\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+    if(m) return m[1];
+    m=s.match(/([A-Za-z0-9_-]{11})(?:[?&].*)?$/);
+    return m?m[1]:"";
+  }
+
+  /* ── tiny markdown helpers ── */
+  function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function inline(s){
+    // bold -> highlighted keyword; italics; code
+    return s.replace(/\*\*([^*]+)\*\*/g,'<strong><mark class="y">$1</mark></strong>')
+            .replace(/__([^_]+)__/g,'<strong><mark class="y">$1</mark></strong>')
+            .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>')
+            .replace(/`([^`]+)`/g,'<code>$1</code>');
+  }
+
+  // Detect special "callout" lines so notes get answer / key-fact / memory boxes.
+  var KEY_RE=/^\s*(key\s*facts?|important|imp\.?|remember|note|yaad\s*rakh\w*|zaruri|jaruri)\s*[:\-\u2013]/i;
+  var MEM_RE=/^\s*(memory\s*trick|trick|mnemonic|shortcut|tip|hack)\s*[:\-\u2013]/i;
+  var ANS_RE=/^\s*(answer|ans\.?|correct\s*answer|solution)\s*[:\-\u2013]/i;
+
+  function mdToHandwritten(md){
+    md=(md||"").replace(/\r/g,"");
+    // strip a single wrapping code-fence if the model added one
+    md=md.replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,"$1");
+    var lines=md.split("\n"), out=[], i=0, secN=0, colorN=0;
+    var ul=false, ol=false;
+    function closeL(){ if(ul){out.push("</ul>");ul=false;} if(ol){out.push("</ol>");ol=false;} }
+
+    while(i<lines.length){
+      var raw=lines[i], t=raw.trim();
+
+      // table
+      if(/^\|.*\|$/.test(t) && i+1<lines.length && /^\|[\s:|-]+\|$/.test(lines[i+1].trim())){
+        closeL();
+        var head=t.split("|").slice(1,-1).map(function(c){return "<th>"+inline(esc(c.trim()))+"</th>";}).join("");
+        out.push("<table><thead><tr>"+head+"</tr></thead><tbody>"); i+=2;
+        while(i<lines.length && /^\|.*\|$/.test(lines[i].trim())){
+          var row=lines[i].trim().split("|").slice(1,-1).map(function(c){return "<td>"+inline(esc(c.trim()))+"</td>";}).join("");
+          out.push("<tr>"+row+"</tr>"); i++;
+        }
+        out.push("</tbody></table>"); continue;
+      }
+
+      // horizontal rule
+      if(t==="---"||t==="***"||t==="___"){ closeL(); out.push('<div class="divider"></div>'); i++; continue; }
+
+      // headings
+      var h=t.match(/^(#{1,6})\s+(.*)/);
+      if(h){
+        closeL();
+        var lv=h[1].length, txt=inline(esc(h[2].replace(/[:*#]+$/,"").trim()));
+        if(lv<=2){ secN++; var c=colorN%5; colorN++;
+          out.push('<div class="sec c'+c+'"><span class="num">'+secN+'</span>'+txt+'</div>');
+        } else {
+          out.push('<div class="subsec">'+txt+'</div>');
+        }
+        i++; continue;
+      }
+
+      // blockquote -> note callout
+      if(/^>\s?/.test(t)){
+        closeL();
+        var qt=inline(esc(t.replace(/^>\s?/,"")));
+        out.push('<div class="notebox">'+qt+'</div>'); i++; continue;
+      }
+
+      // ordered list
+      var mo=t.match(/^(\d+)[.)]\s+(.*)/);
+      if(mo){ if(!ol){closeL();out.push("<ol>");ol=true;} out.push("<li>"+inline(esc(mo[2]))+"</li>"); i++; continue; }
+
+      // unordered list  (also detect callout bullets)
+      var mu=t.match(/^[-*+]\s+(.*)/);
+      if(mu){
+        var item=mu[1];
+        if(KEY_RE.test(item)){ closeL(); out.push(calloutKey(item)); i++; continue; }
+        if(MEM_RE.test(item)){ closeL(); out.push(calloutMem(item)); i++; continue; }
+        if(ANS_RE.test(item)){ closeL(); out.push(calloutAns(item)); i++; continue; }
+        if(!ul){closeL();out.push("<ul>");ul=true;} out.push("<li>"+inline(esc(item))+"</li>"); i++; continue;
+      }
+
+      if(t===""){ closeL(); i++; continue; }
+
+      // paragraph-level callouts
+      if(KEY_RE.test(t)){ closeL(); out.push(calloutKey(t)); i++; continue; }
+      if(MEM_RE.test(t)){ closeL(); out.push(calloutMem(t)); i++; continue; }
+      if(ANS_RE.test(t)){ closeL(); out.push(calloutAns(t)); i++; continue; }
+
+      closeL(); out.push("<p>"+inline(esc(t))+"</p>"); i++;
+    }
+    closeL();
+    return out.join("\n");
+  }
+
+  function afterColon(s){ var idx=s.search(/[:\-\u2013]/); return idx>=0? s.slice(idx+1).trim() : s; }
+  function calloutKey(t){ return '<span class="badge key">🔑 Key Facts</span><div class="factbox">'+inline(esc(afterColon(t)))+'</div>'; }
+  function calloutMem(t){ return '<span class="badge mem">🧠 Memory Trick</span><div class="membox">'+inline(esc(afterColon(t)))+'</div>'; }
+  function calloutAns(t){ return '<div class="answer"><span class="ok">✅ Answer:</span> '+inline(esc(afterColon(t)))+'</div>'; }
+
+  /* ── call the live server ── */
+  function setStatus(msg,isErr){ var s=$("status"); s.className="statusline show"+(isErr?" err":""); s.innerHTML=msg; }
+
+  function generate(){
+    var backend=($("backend").value||"").trim().replace(/\/+$/,"");
+    var id=parseId($("url").value);
+    if(!id){ setStatus("⚠️ Enter a valid YouTube URL or 11-character video ID.",true); return; }
+    var mode=$("mode").value, lang=$("lang").value, fresh=$("fresh").checked;
+    var url=backend+"/api/study?id="+encodeURIComponent(id)+"&mode="+mode+"&out="+encodeURIComponent(lang)+(fresh?"&refresh=1":"");
+
+    $("go").disabled=true;
+    $("meta").textContent="";
+    setStatus('<span class="spin"></span> Generating <b>'+mode+'</b> ('+lang+') for <code>'+id+'</code>… first run can take ~30–90s.');
+    $("page").innerHTML='<div class="placeholder"><span class="spin"></span> Waiting for your server + AI…</div>';
+
+    var t0=Date.now();
+    fetch(url).then(function(r){return r.json();}).then(function(j){
+      $("go").disabled=false;
+      var secs=((Date.now()-t0)/1000).toFixed(1);
+      if(j.error && j.error!=="no_captions"){ setStatus("❌ "+esc(j.error)+(j.detail?" — "+esc(j.detail):""),true); $("page").innerHTML='<div class="placeholder">No notes generated.</div>'; return; }
+      if(j.warning==="no_captions"||j.error==="no_captions"){ setStatus("⚠️ This video has no captions, so notes can't be generated yet.",true); $("page").innerHTML='<div class="placeholder">No captions on this video.</div>'; return; }
+      var content=j.content||"";
+      if(!content){ setStatus("⚠️ Empty response from server.",true); return; }
+      setStatus("✅ Done in "+secs+"s.");
+      $("meta").textContent=(j.provider||"ai")+" · "+(j.model||"")+" · "+(j.cached?"cached copy":"fresh")+" · "+lang;
+      $("page").innerHTML=mdToHandwritten(content);
+    }).catch(function(e){
+      $("go").disabled=false;
+      setStatus("❌ Request failed: "+esc(String(e))+". The server may be asleep — try again in a few seconds.",true);
+      $("page").innerHTML='<div class="placeholder">Request failed.</div>';
+    });
+  }
+
+  $("go").onclick=generate;
+  $("url").addEventListener("keydown",function(e){ if(e.key==="Enter") generate(); });
+})();
+</script>
+</body>
+</html>
