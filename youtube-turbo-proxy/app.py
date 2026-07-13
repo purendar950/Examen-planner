@@ -327,6 +327,18 @@ def _s3_put_json(doc_id, data):
     return False
 
 
+def _s3_delete(doc_id):
+    cli = _s3()
+    if not cli:
+        return False
+    try:
+        cli.delete_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id))   # no-op if absent
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("object storage delete %s failed: %s", doc_id, exc)
+        return False
+
+
 # Metadata copied into the tiny Firestore index doc (NOT the big body).
 _STUDY_INDEX_FIELDS = ("id", "title", "mode", "style", "out_lang", "model",
                        "num_questions", "provider", "transcript_lang", "segment_count")
@@ -1582,6 +1594,96 @@ def api_study_langs():
         except Exception:  # noqa: BLE001
             pass
     return jsonify({"available": available, "model": model})
+
+
+@app.route("/api/admin/study-cleanup", methods=["GET", "POST"])
+def api_study_cleanup():
+    """One-time admin maintenance for the cached 'study' material.
+
+      mode=purge  (default): delete each Firestore study doc AND its B2 object so
+                  notes regenerate fresh — clears stale pre-fix copies (mojibake
+                  Hindi, raw LaTeX, missing timestamps).
+      mode=migrate: move old full-in-Firestore docs up to B2 + slim to an index.
+
+    SAFETY:
+      * Disabled unless the STUDY_CLEANUP_TOKEN env var is set, and the request
+        must pass ?token=<that value>.
+      * Destructive work needs &confirm=1; without it you get a dry-run count.
+      * ?limit=N caps how many docs are processed per call (default 1000).
+    """
+    token_env = os.environ.get("STUDY_CLEANUP_TOKEN", "").strip()
+    token = (request.args.get("token") or "").strip()
+    if not token_env or token != token_env:
+        return jsonify({"error": "forbidden"}), 403
+    if not _fb_db:
+        return jsonify({"error": "no_firestore"}), 500
+
+    mode = (request.args.get("mode") or "purge").strip().lower()
+    confirm = (request.args.get("confirm") or "").lower() in ("1", "true", "yes")
+    try:
+        limit = int(request.args.get("limit") or 1000)
+    except (TypeError, ValueError):
+        limit = 1000
+    limit = max(1, min(5000, limit))
+    coll = _fb_db.collection("study")
+
+    if mode == "purge":
+        if not confirm:                              # dry-run: count only
+            count, last = 0, None
+            while count < limit:
+                q = coll.limit(min(500, limit - count))
+                if last is not None:
+                    q = q.start_after(last)
+                batch = list(q.stream())
+                if not batch:
+                    break
+                count += len(batch)
+                last = batch[-1]
+            return jsonify({"mode": "purge", "confirm": False, "would_delete": count,
+                            "note": "dry-run — add &confirm=1 to actually delete"})
+        purged, more = 0, False
+        while True:
+            if purged >= limit:
+                more = True
+                break
+            batch = list(coll.limit(min(300, limit - purged)).stream())
+            if not batch:
+                break
+            for snap in batch:
+                _s3_delete(snap.id)                  # remove B2 body (no-op if absent)
+                try:
+                    snap.reference.delete()
+                    purged += 1
+                except Exception as exc:             # noqa: BLE001
+                    log.warning("cleanup delete %s failed: %s", snap.id, exc)
+        with _study_lock:
+            _study_cache.clear()                     # drop in-memory copies too
+        return jsonify({"mode": "purge", "confirm": True, "purged": purged,
+                        "more": more, "note": "re-run to continue" if more else "done"})
+
+    if mode == "migrate":
+        scanned, migrated, last = 0, 0, None
+        while scanned < limit:
+            q = coll.limit(min(300, limit - scanned))
+            if last is not None:
+                q = q.start_after(last)
+            batch = list(q.stream())
+            if not batch:
+                break
+            for snap in batch:
+                scanned += 1
+                last = snap
+                data = snap.to_dict() or {}
+                if data.get("store") == "b2":
+                    continue                         # already migrated
+                if confirm and _s3_enabled() and _s3_put_json(snap.id, data):
+                    _fs_set("study", snap.id, _study_index_doc(data))
+                    migrated += 1
+        return jsonify({"mode": "migrate", "confirm": confirm, "scanned": scanned,
+                        "migrated": migrated,
+                        "note": "dry-run — add &confirm=1 to migrate" if not confirm else "done"})
+
+    return jsonify({"error": "bad_mode", "allowed": ["purge", "migrate"]}), 400
 
 
 # Per-provider endpoints/fields for the admin health check. Mirrors the admin
