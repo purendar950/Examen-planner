@@ -571,6 +571,13 @@ _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
 # lecture (~80k+ chars) makes Bynara slow enough to hit Cloudflare's ~100s 524.
 # ~48k chars (~12k tokens) keeps replies fast. Notes/quiz still use full text.
 _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "48000"))
+# Notes generation is chunked so EACH AI call stays well under Cloudflare's ~100s
+# limit (prevents 524 upstream timeouts). Smaller chunk + lower output cap = faster
+# per call. MCQ expands more per point, so it uses smaller values. All env-tunable.
+NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "7000"))       # topic notes input chunk
+NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "5000"))  # MCQ input chunk (smaller)
+NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "2400"))         # topic notes output cap/part
+NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "2400"))  # MCQ output cap/part
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 _study_cache = {}
 _study_lock = threading.Lock()
@@ -872,23 +879,29 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
                  "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
                  "- Use a Markdown table when comparing items or listing facts/dates.\n"
                  "- Do not wrap the whole answer in code fences." + no_promo)
-    # Smaller sections + capped output per call so a single generation finishes
-    # under Cloudflare's ~100s limit (avoids 524). More calls, but each is fast;
-    # results are cached so a video only pays this once.
-    secs = _chunk_words(transcript, 10000) if ai.get("big_context") \
-        else [_condense(transcript, out_lang, ai)]
+    # SMALL sections + capped output per call so EACH generation finishes well
+    # under Cloudflare's ~100s limit — this is what prevents the 524 upstream
+    # timeout. More calls, but each is fast; results are cached so a video only
+    # pays this once. MCQ expands a lot per point, so it uses even smaller chunks
+    # (and a tighter output cap) than topic notes.
+    if ai.get("big_context"):
+        chunk_chars = NOTES_MCQ_CHUNK if style == "mcq" else NOTES_CHUNK
+        secs = _chunk_words(transcript, chunk_chars)
+    else:
+        secs = [_condense(transcript, out_lang, ai)]
+    part_cap = NOTES_MCQ_CAP if style == "mcq" else NOTES_CAP
     if len(secs) == 1:
         return _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + instr + "\n\n" + secs[0]}],
-            ai, max_tokens=(4000 if ai.get("big_context") else 2400))
+            ai, max_tokens=(part_cap if ai.get("big_context") else 2400))
     parts = []
     for i, sec in enumerate(secs):
         parts.append(_ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + ("(Part %d of %d \u2014 detailed notes "
               "for THIS part only.) " % (i + 1, len(secs))) + instr + "\n\n" + sec}],
-            ai, max_tokens=3000))
+            ai, max_tokens=part_cap))
     return "\n\n".join(parts)
 
 
