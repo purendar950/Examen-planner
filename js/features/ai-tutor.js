@@ -408,6 +408,11 @@
       '.ai-nb{background:#fffdf6;border-radius:8px;padding:14px 16px 18px;color:#22303f}',
       '.ai-scroll.nb{background:#fffdf6;padding:0;border-color:#e6dfca}',
       nbCss('.ai-nb'),
+      // ── "Follow the lecture": hide timestamps IN NOTES + highlight the block
+      //    matching the current playback time (works for Topic AND MCQ notes) ──
+      '.ai-nb .ai-ts{display:none}',
+      '.ai-nb>.ai-lec-on{background:rgba(255,214,0,.45);box-shadow:0 0 0 3px rgba(245,168,0,.5);border-radius:6px}',
+      '.ai-btn.ai-follow-on{background:var(--accent,#00c896)!important;color:#04120d!important;border-color:var(--accent,#00c896)!important}',
       /* ── flashcard carousel (tap to flip · swipe left/right) ── */
       '.ai-fc-stage{perspective:1200px;padding:6px 2px 2px;touch-action:pan-y}',
       '.ai-fc{position:relative;width:100%;min-height:240px;cursor:pointer;user-select:none;-webkit-user-select:none}',
@@ -441,6 +446,93 @@
 
   var state = { tab: 'notes' };
 
+  /* ══════════════════════════════════════════════════════════════════════
+     "Follow the lecture" — auto-highlight + scroll the note block matching the
+     current playback time. Works for comprehensive notes in BOTH Topic and MCQ
+     styles (and Summary/Insights) since all render into .ai-nb with inline
+     .ai-ts[data-s] timestamps. Playback time comes from ssGetVideoTimestamp().
+     Off by default; toggled via the 🎯 Follow button in the notes toolbar.
+     ══════════════════════════════════════════════════════════════════════ */
+  var LEC_KEY = 'aiStudyFollow';
+  var LEC_TOP_OFFSET = 0.15;          // pin the active block ~15% down from the top
+  var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0;
+  function lecOn() { return localStorage.getItem(LEC_KEY) === '1'; }
+  function setLecOn(v) { try { localStorage.setItem(LEC_KEY, v ? '1' : '0'); } catch (e) {} }
+  function lecClear() {
+    if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].classList.remove('ai-lec-on');
+    _lecActive = -1;
+  }
+  // Each top-level note block's start = first .ai-ts[data-s] inside it; blocks
+  // without a timestamp inherit the previous block's start.
+  function lecIndex(nb) {
+    _lecBlocks = []; _lecActive = -1;
+    var kids = nb.children, last = 0;
+    for (var i = 0; i < kids.length; i++) {
+      var el = kids[i], ts = el.querySelector('.ai-ts');
+      var start = ts ? (parseInt(ts.getAttribute('data-s'), 10) || last) : last;
+      el._lecStart = start; last = start;
+      _lecBlocks.push(el);
+    }
+  }
+  function lecActiveIndex(t) {
+    var idx = 0;
+    for (var i = 0; i < _lecBlocks.length; i++) { if (_lecBlocks[i]._lecStart <= t) idx = i; else break; }
+    return idx;
+  }
+  // Returns true only when the active block CHANGED (so we scroll just then).
+  function lecHighlight(t) {
+    if (!_lecBlocks.length) return false;
+    var idx = lecActiveIndex(t);
+    if (idx === _lecActive) return false;
+    if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].classList.remove('ai-lec-on');
+    _lecBlocks[idx].classList.add('ai-lec-on');
+    _lecActive = idx;
+    return true;
+  }
+  // Pin the active block near the top of the notes box (no reflow, robust to
+  // offsetParent via getBoundingClientRect).
+  function lecScroll() {
+    var el = _lecBlocks[_lecActive]; if (!el || !_lecScroller) return;
+    var sr = _lecScroller.getBoundingClientRect(), er = el.getBoundingClientRect();
+    _lecScroller.scrollBy({ top: (er.top - sr.top) - (sr.height * LEC_TOP_OFFSET), behavior: 'smooth' });
+  }
+  function lecTick() {
+    if (!lecOn() || state.tab !== 'notes') return;
+    if (!_lecScroller || !document.body.contains(_lecScroller) || !_lecBlocks.length) return;
+    var t = 0;
+    try { if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0; } catch (e) {}
+    var changed = lecHighlight(t);
+    if (changed && Date.now() > _lecUserScrollUntil) lecScroll();
+  }
+  function lecPaintBtn(btn) {
+    if (!btn) return;
+    var on = lecOn();
+    btn.classList.toggle('ai-follow-on', on);
+    btn.title = on ? 'Following the lecture — notes auto-highlight & scroll (tap to stop)'
+                   : 'Auto-highlight & scroll the notes to where the teacher is';
+  }
+  // Wire the freshly-rendered notes into the follow engine.
+  function lecSetup(box) {
+    var nb = box.querySelector('.ai-nb');
+    _lecScroller = box.querySelector('.ai-scroll');
+    if (!nb || !_lecScroller) return;
+    lecIndex(nb);
+    // A manual scroll pauses auto-follow briefly so it never fights the user.
+    ['wheel', 'touchmove'].forEach(function (ev) {
+      _lecScroller.addEventListener(ev, function () { _lecUserScrollUntil = Date.now() + 3000; }, { passive: true });
+    });
+    var btn = document.getElementById('ai-follow');
+    if (btn) {
+      lecPaintBtn(btn);
+      btn.onclick = function () {
+        setLecOn(!lecOn()); lecPaintBtn(btn);
+        if (lecOn()) { _lecUserScrollUntil = 0; lecTick(); } else lecClear();
+      };
+    }
+    if (!_lecTimer) _lecTimer = setInterval(lecTick, 1000);   // single shared poller
+    if (lecOn()) setTimeout(lecTick, 120);
+  }
+
   // Notes style toggle (Topic vs MCQ) — only meaningful for the "notes" mode.
   function nbNotesStyle() { var s = document.getElementById('ai-notes-style'); return (s && s.value === 'mcq') ? 'mcq' : 'topic'; }
 
@@ -465,13 +557,15 @@
       if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); return; }
       var content = j.content || '';
       var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
+      var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
       var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
       var nbHtml = nbBuild(content, style);
       box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
         '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
-        pdfBtn + regenBtn + '</div>' +
+        followBtn + pdfBtn + regenBtn + '</div>' +
         '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
       bindTsLinks(box);
+      lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
       var pb = document.getElementById('ai-pdf');
       if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true }); };
       var rb = document.getElementById('ai-regen');
