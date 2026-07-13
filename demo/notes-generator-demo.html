@@ -219,7 +219,10 @@
       <label><input type="checkbox" id="fresh"> force fresh (ignore cache)</label>
       &nbsp;·&nbsp; server:
       <input type="text" id="backend" value="https://youtube-turbo-proxy.onrender.com"
-             style="width:320px;font-size:12px;padding:6px 8px;border:1px solid #cdd6df;border-radius:7px">
+             style="width:300px;font-size:12px;padding:6px 8px;border:1px solid #cdd6df;border-radius:7px">
+      &nbsp;·&nbsp;
+      <button type="button" id="sample"
+              style="font-family:inherit;cursor:pointer;border:1px solid #cdd6df;background:#eef6ff;color:#075985;border-radius:7px;padding:6px 12px;font-weight:700">🧪 Preview MCQ sample (no server)</button>
     </div>
     <div class="hint">
       Calls your live server: <code>GET /api/study?mode=notes&style=…</code>. <b>MCQ notes</b> need the updated backend
@@ -508,6 +511,44 @@
       $("page").innerHTML='<div class="placeholder">Request failed.</div>';
     });
   }
+
+  // ── built-in MCQ sample so the layout can be checked without deploying the backend ──
+  var SAMPLE_MCQ=[
+    "## Polity — Vice President & Union Executive",
+    "### Q1. Which branch of government is the Vice President of India a part of?",
+    "- A) Legislative only",
+    "- B) Executive only",
+    "- C) Judicial",
+    "- D) Both Executive and Legislative ✓",
+    "**Answer:** D — the VP belongs to the Union Executive AND the Legislature.",
+    "**Explanation:**",
+    "- The VP is part of the **Union Executive** (Part V: President, VP, PM, Council of Ministers).",
+    "- He is the **ex-officio Chairperson** of the Rajya Sabha, so he is also part of the **Legislature**.",
+    "- Key Fact: Articles 63-71 cover the Vice President; Article 71 gives the Supreme Court exclusive jurisdiction over VP election disputes.",
+    "",
+    "## Biology — Vacuoles & Cell Organelles",
+    "### Q2. Which statement is NOT correct regarding vacuoles?",
+    "- A) Vacuoles are generally larger in animal cells than in plant cells ✓",
+    "- B) Plant cell vacuoles are permanent",
+    "- C) Vacuoles store cell sap and maintain turgidity",
+    "- D) Animal cell vacuoles are small and temporary",
+    "**Answer:** A — this is FALSE; vacuoles are actually LARGER in plant cells.",
+    "**Explanation:**",
+    "- Plant cell vacuoles occupy **50-90%** of the cell volume (single, large, permanent).",
+    "- Animal cells have multiple **smaller**, temporary vacuoles.",
+    "",
+    "| Feature | Plant Cell Vacuole | Animal Cell Vacuole |",
+    "| --- | --- | --- |",
+    "| Size | Large (50-90%) | Small |",
+    "| Number | Single | Multiple |",
+    "| Duration | Permanent | Temporary |",
+    "- Memory Trick: Meristematic tissue LACKS vacuoles — prominent nucleus, dense cytoplasm."
+  ].join("\n");
+  $("sample").onclick=function(){
+    $("meta").textContent="sample · MCQ layout preview (no server / AI)";
+    setStatus("🧪 Built-in MCQ sample — this is only to check the layout; real notes come from your server once deployed.");
+    $("page").innerHTML=renderMCQ(SAMPLE_MCQ);
+  };
 
   // hide the style dropdown for non-notes modes
   $("mode").onchange=function(){ $("style").style.display = (this.value==="notes") ? "" : "none"; };
