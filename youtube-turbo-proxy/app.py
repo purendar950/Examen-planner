@@ -919,6 +919,33 @@ def _safe_json(raw):
     return {}
 
 
+def _fmt_mmss(sec):
+    """Seconds -> 'M:SS' (or 'H:MM:SS' past an hour)."""
+    sec = int(round(sec or 0))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    return ("%d:%02d:%02d" % (h, m, s)) if h else ("%d:%02d" % (m, s))
+
+
+def _timestamped_transcript(segments, every=15):
+    """Transcript text with periodic [M:SS] markers so the model can anchor each
+    notes section to a lecture time — this is what powers the 'follow the
+    lecture' highlight in the UI. A marker is emitted on the first line and
+    whenever >= `every` seconds have passed since the previous marker."""
+    lines, last = [], None
+    for s in (segments or []):
+        st = s.get("start") or 0
+        txt = (s.get("text") or "").strip()
+        if not txt:
+            continue
+        if last is None or (st - last) >= every:
+            lines.append("[%s] %s" % (_fmt_mmss(st), txt))
+            last = st
+        else:
+            lines.append(txt)
+    return "\n".join(lines)
+
+
 def _study_sys(out_lang):
     return ("The source is an auto-generated lecture transcript that may be in "
             "Hindi/Hinglish with no punctuation and ASR errors. First mentally "
@@ -939,10 +966,13 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
                 "the academic content.")
     if style == "mcq":
         instr = ("The transcript is a lecture SOLVING multiple-choice questions "
-                 "(MCQs). Convert it into COMPLETE Markdown revision notes, ONE "
+                 "(MCQs) and is annotated with inline timestamps like [M:SS]. "
+                 "Convert it into COMPLETE Markdown revision notes, ONE "
                  "question at a time, keeping the lecture's order. For EACH "
                  "question use EXACTLY this structure:\n"
-                 "### Q<n>. <the full question>\n"
+                 "### Q<n>. (<M:SS>) <the full question>\n"
+                 "(The (M:SS) is the lecture timestamp where this question starts, "
+                 "taken from the nearest preceding [M:SS] marker.)\n"
                  "- A) <option>\n- B) <option>\n- C) <option>\n- D) <option>\n"
                  "(Include only the options actually stated; mark the CORRECT "
                  "option by adding ' \u2713' at its end.)\n"
@@ -965,6 +995,10 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
                  "- Use '- ' bullet points for details; nest with indentation.\n"
                  "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
                  "- Use a Markdown table when comparing items or listing facts/dates.\n"
+                 "- The transcript is annotated with inline timestamps like [M:SS]. "
+                 "START every ## section and ### sub-section heading with the lecture "
+                 "timestamp where that part begins (from the nearest preceding [M:SS] "
+                 "marker), e.g. '## 3:45 Topic name'. Keep it in plain M:SS form.\n"
                  "- Do not wrap the whole answer in code fences." + no_promo)
     # SMALL sections + capped output per call so EACH generation finishes well
     # under Cloudflare's ~100s limit — this is what prevents the 524 upstream
@@ -1320,8 +1354,14 @@ def api_study():
         return jsonify({"error": "no_captions",
                         "detail": "No captions found for this video.",
                         "transcript_lang": t.get("chosen_lang")}), 200
+    # Notes get a TIMESTAMPED transcript so the model can tag each section with a
+    # lecture time (powers the "follow the lecture" highlight). Other modes use
+    # the plain text — timestamps would just be noise for quiz/flashcards/summary.
+    gen_text = t["text"]
+    if mode == "notes":
+        gen_text = _timestamped_transcript(t.get("segments")) or t["text"]
     try:
-        result = _generate_study(mode, t["text"], out_lang, ai,
+        result = _generate_study(mode, gen_text, out_lang, ai,
                                  title=t.get("title"), num_questions=num_q,
                                  focus=focus, style=style)
     except Exception as exc:  # noqa: BLE001
