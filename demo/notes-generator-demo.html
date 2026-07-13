@@ -104,10 +104,11 @@
   .chips{display:flex;flex-wrap:wrap;gap:5px 7px;margin:4px 0 8px;padding-left:2px}
   .chip{background:rgba(0,0,0,.03);border:1px solid var(--box-border);border-radius:999px;padding:2px 11px;font-size:.94rem;line-height:1.35}
 
-  /* ── GEL-PEN emphasis (no highlighter wash) ──
-     bold  -> blue pen text · figures -> green pen text · answer -> ONE yellow highlighter */
-  strong,b,.pen{color:var(--blue-pen);font-weight:700}
-  .fig{color:var(--green-pen);font-weight:700}
+  /* ── emphasis: calm, notebook-like ──
+     bold -> just DARKER INK (heavier weight, NOT a bright colour, so the page
+     doesn't turn blue) · figures -> subtle green · answer -> ONE yellow highlighter */
+  strong,b,.pen{color:#12202f;font-weight:700}
+  .fig{color:var(--green-pen);font-weight:600}
   em{color:#4527a0;font-style:italic}
   code{background:#eef2f6;padding:1px 6px;border-radius:5px;font-size:.88em;font-family:ui-monospace,monospace}
   u,.uline{text-decoration:underline wavy var(--margin-line);text-decoration-thickness:1.4px;text-underline-offset:3px}
@@ -152,7 +153,7 @@
   body.dark{background:#0e1116}
   body.dark .page{--paper:#161b22;--ink:#e6edf3;--ruled:rgba(120,150,190,.08);--box-border:#2b3542;color:#e6edf3;background-color:#161b22}
   body.dark .subsec{color:#c3cdd7}
-  body.dark strong,body.dark b,body.dark .pen{color:#9cc2ff}
+  body.dark strong,body.dark b,body.dark .pen{color:#eef4fb}
   body.dark .fig{color:#7fe0a3}
   body.dark .chip{background:rgba(255,255,255,.05)}
   body.dark .q-body{background:#1b222c}
