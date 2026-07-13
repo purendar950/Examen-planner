@@ -574,13 +574,25 @@
   // Notes style toggle (Topic vs MCQ) — only meaningful for the "notes" mode.
   function nbNotesStyle() { var s = document.getElementById('ai-notes-style'); return (s && s.value === 'mcq') ? 'mcq' : 'topic'; }
 
+  // Known-available languages per mode+style (from checkLangs) — lets us show an
+  // honest "Loading saved…" message when a note already exists instead of
+  // implying a fresh generation. Actual generation only happens on force/refresh.
+  var _availByKey = {};
+  function langCached(mode, style, lang) {
+    var a = _availByKey[mode + '|' + style];
+    return !!(a && a.indexOf(lang) !== -1);
+  }
+
   /* ── Notes / Summary / Insights / Flashcards (from /api/study) ── */
   function showStudy(mode, n, force, focus, langOverride) {
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var lang = langOverride || outLang();
     var style = (mode === 'notes') ? nbNotesStyle() : '';
-    el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
+    var cached = !force && langCached(mode, style, lang);   // already generated → just load it
+    el.innerHTML = loading(cached
+      ? ('Loading saved ' + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')…')
+      : ((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…')));
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
     if (style === 'mcq') url += '&style=mcq';
@@ -750,6 +762,7 @@
     apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + (style === 'mcq' ? '&style=mcq' : '') + modelParam()).then(function (j) {
       var bar2 = document.getElementById('ai-langbar'); if (!bar2) return;
       var avail = (j && j.available) || [];
+      _availByKey[mode + '|' + style] = avail;   // remember for the loading message
       if (!avail.length) { bar2.innerHTML = ''; return; }
       var chosen = outLang();
       var chips = avail.map(function (l) {
