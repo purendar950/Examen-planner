@@ -567,6 +567,10 @@ STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
 _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
+# Stream the model response by default: the first tokens arrive within seconds,
+# which keeps the upstream connection alive and PREVENTS Cloudflare's ~100s 524
+# on slow models (mistral-large, Hunyuan, etc.). Set AI_STREAM=0 to disable.
+_AI_STREAM = os.environ.get("AI_STREAM", "1").strip().lower() not in ("0", "false", "no", "off")
 # Tutor sends transcript context on EVERY message, so cap it: a full 2-hour
 # lecture (~80k+ chars) makes Bynara slow enough to hit Cloudflare's ~100s 524.
 # ~48k chars (~12k tokens) keeps replies fast. Notes/quiz still use full text.
@@ -740,12 +744,43 @@ def _retry_after_secs(resp):
     return 10.0
 
 
+def _read_stream(resp):
+    """Accumulate an OpenAI-compatible chat stream (SSE) into the full text.
+    Streaming means the first tokens arrive within seconds, so the upstream
+    connection stays active and slow models never hit Cloudflare's ~100s 524.
+    Also tolerates a non-streamed 200 body (full 'message' object)."""
+    out = []
+    for raw in resp.iter_lines(decode_unicode=True):
+        if not raw:
+            continue
+        line = raw.strip()
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if line == "[DONE]":
+            break
+        if not line or line[0] != "{":
+            continue
+        try:
+            choice = (json.loads(line).get("choices") or [{}])[0]
+        except Exception:  # noqa: BLE001
+            continue
+        piece = (choice.get("delta") or {}).get("content")
+        if piece is None:                              # non-streamed 200 fallback
+            piece = (choice.get("message") or {}).get("content")
+        if piece:
+            out.append(piece)
+    return "".join(out)
+
+
 def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
-    """OpenAI-compatible chat call (Groq or Bynara). Tries each configured key in
-    turn: a 429 is retried a couple times on the same key, any other error (or a
-    persistent 429) fails over to the next key. Paces to TPM only when tpm>0."""
+    """OpenAI-compatible chat call (Groq or Bynara). STREAMS by default so slow
+    models don't trip Cloudflare's ~100s 524. Tries each configured key in turn: a
+    429 is retried a couple times on the same key, any other error (or a persistent
+    429) fails over to the next key. Paces to TPM only when tpm>0."""
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
+    if _AI_STREAM:
+        body["stream"] = True
     if json_mode:
         body["response_format"] = {"type": "json_object"}
     keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
@@ -760,17 +795,31 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
                 r = requests.post(ai["base_url"],
                                   headers={"Authorization": "Bearer " + key,
                                            "Content-Type": "application/json"},
-                                  json=body, timeout=_AI_TIMEOUT)
+                                  json=body, timeout=_AI_TIMEOUT,
+                                  stream=_AI_STREAM)
             except requests.Timeout:
                 last = ("timeout after %ss (key %d) — the lecture is long; try a "
-                        "faster model (mistral-medium-3-5 / auto/bynara) or a "
-                        "shorter video" % (_AI_TIMEOUT, ki + 1))
+                        "faster model or a shorter video" % (_AI_TIMEOUT, ki + 1))
                 break                          # → next key
             except requests.RequestException as exc:
                 last = "network (key %d): %s" % (ki + 1, exc)
                 break                          # → next key
             if r.status_code == 200:
-                return r.json()["choices"][0]["message"]["content"]
+                if not _AI_STREAM:
+                    return r.json()["choices"][0]["message"]["content"]
+                try:
+                    txt = _read_stream(r)      # keeps the connection alive → no 524
+                except Exception as exc:       # noqa: BLE001  (stream interrupted)
+                    last = "stream broke (key %d): %s" % (ki + 1, exc)
+                    time.sleep(3)
+                    continue                   # retry same key
+                finally:
+                    r.close()
+                if txt.strip():
+                    return txt
+                last = "empty stream (key %d)" % (ki + 1)
+                time.sleep(2)
+                continue
             if r.status_code == 429:           # rate limited — brief retry, same key
                 last = "429 (key %d): %s" % (ki + 1, r.text[:120])
                 time.sleep(_retry_after_secs(r))
