@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Notes — Handwritten Style Demo (Live)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ══════════════════════════════════════════════════════════════════
+     LIVE DEMO v3 — "gel pen" notebook look (no highlighter wash) +
+     MCQ mode (Question -> options -> full explanation) + compact
+     2-column + promo/junk cleanup. Paste your YouTube URL -> calls
+     YOUR server + AI. Standalone; not wired into the app yet.
+     ══════════════════════════════════════════════════════════════════ */
+  :root{
+    --paper:#fffdf6; --ruled:rgba(58,132,210,.09); --margin-line:#e57373;
+    --ink:#22303f; --ink-soft:#4b5a68;
+    --red:#c62828; --green:#2e7d32; --green-deep:#1b5e20; --teal-hdr:#2f4858;
+    --blue-pen:#1a3fb0; --green-pen:#1b7f43;
+    --purple:#7b1fa2; --purple-soft:#f3e5f5;
+    --box-border:#cfd8dc; --shadow:0 6px 22px rgba(20,40,60,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:'Kalam','Noto Sans Devanagari','Comic Sans MS',cursive;color:var(--ink);
+       background:#e8ecf1;font-size:17px;line-height:1.45;-webkit-font-smoothing:antialiased}
+
+  /* ── Top toolbar ── */
+  .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;
+          padding:11px 20px;background:linear-gradient(135deg,#14532d,#166534);
+          color:#eafff0;box-shadow:0 2px 10px rgba(0,0,0,.25);flex-wrap:wrap}
+  .topbar .brand{font-weight:700;font-size:1.06rem;letter-spacing:.3px}
+  .topbar .spacer{flex:1}
+  .topbar button{font-family:inherit;cursor:pointer;border:none;padding:7px 14px;border-radius:999px;
+                 font-size:.85rem;font-weight:700;display:inline-flex;align-items:center;gap:6px}
+  .btn-cols{background:#e0f2fe;color:#075985}
+  .btn-print{background:#22c55e;color:#04240f}
+  .btn-theme{background:#facc15;color:#3b2f00}
+  .topbar button:hover{filter:brightness(1.05)}
+
+  /* ── Controls bar ── */
+  .controls{max-width:960px;margin:18px auto 0;background:#fff;border-radius:12px;
+            box-shadow:var(--shadow);padding:15px 17px;font-family:system-ui,Arial,sans-serif}
+  .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .controls input[type=text]{flex:1;min-width:220px;font-size:15px;padding:11px 13px;border:1px solid #cdd6df;
+            border-radius:9px;font-family:inherit}
+  .controls select{font-size:14px;padding:11px 10px;border:1px solid #cdd6df;border-radius:9px;font-family:inherit;background:#fff}
+  .controls .go{background:#166534;color:#fff;border:none;font-weight:700;font-size:15px;padding:11px 22px;
+            border-radius:9px;cursor:pointer;font-family:inherit}
+  .controls .go:hover{background:#14532d}
+  .controls .go:disabled{opacity:.55;cursor:not-allowed}
+  .controls .hint{color:#64748b;font-size:12.5px;margin-top:9px;font-family:system-ui,Arial,sans-serif}
+  .controls .hint code{background:#eef2f6;padding:1px 6px;border-radius:5px}
+  .controls .adv{margin-top:9px;font-size:12.5px;color:#475569}
+  .controls .adv input{width:auto;min-width:0}
+  .statusline{margin-top:10px;font-size:13px;font-family:system-ui,Arial,sans-serif;color:#334155;display:none}
+  .statusline.show{display:block}
+  .statusline.err{color:#b3261e}
+  .spin{display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:#166534;
+        border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .metatag{font-family:system-ui,Arial,sans-serif;font-size:11.5px;color:#64748b;margin:0 auto;max-width:960px;padding:8px 4px 0}
+
+  /* ── Notebook page ── */
+  .page{max-width:960px;margin:14px auto 40px;background:var(--paper);
+        background-image:repeating-linear-gradient(transparent,transparent 27px,var(--ruled) 28px);
+        border-radius:6px;box-shadow:var(--shadow);padding:26px 32px 44px 52px;position:relative;overflow:hidden;min-height:120px}
+  .page::before{content:"";position:absolute;top:0;bottom:0;left:36px;width:2px;background:var(--margin-line);opacity:.5}
+  .page .placeholder{color:#8fa0af;font-size:1.02rem;text-align:center;padding:26px 10px}
+
+  /* ── 2-column flow (default) ── */
+  .notes{column-gap:30px}
+  body.twocol .notes{column-count:2}
+  body.twocol .notes .sec{column-span:all}
+  .sec,.subsec,.factbox,.membox,.answer,.notebox,.q-card,table,.chips{break-inside:avoid}
+  .sec,.subsec,.q-card{break-after:avoid}
+
+  /* ── Section / sub headings ── */
+  .sec{display:flex;align-items:center;gap:9px;font-weight:700;font-size:1.28rem;margin:16px 0 5px;padding-bottom:5px}
+  .sec:first-child{margin-top:2px}
+  .sec .num{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:50%;
+            font-size:.9rem;color:#fff;flex:none;font-family:system-ui,Arial,sans-serif}
+  .sec.c0{color:var(--red);border-bottom:2.5px solid var(--red)} .sec.c0 .num{background:var(--red)}
+  .sec.c1{color:var(--green);border-bottom:2.5px solid var(--green)} .sec.c1 .num{background:var(--green)}
+  .sec.c2{color:#1565c0;border-bottom:2.5px solid #1565c0} .sec.c2 .num{background:#1565c0}
+  .sec.c3{color:var(--purple);border-bottom:2.5px solid var(--purple)} .sec.c3 .num{background:var(--purple)}
+  .sec.c4{color:#e65100;border-bottom:2.5px solid #e65100} .sec.c4 .num{background:#e65100}
+  .subsec{font-weight:700;font-size:1.04rem;color:#37474f;margin:10px 0 3px;padding-left:2px}
+  .subsec::before{content:"\270E  ";opacity:.55}
+
+  /* ── Lists ── */
+  .page p{margin:4px 0}
+  .page ul,.page ol{margin:4px 0 7px;padding-left:4px;list-style:none}
+  .page ul li{position:relative;padding-left:21px;margin:2.5px 0}
+  .page ul li::before{content:"\27a4";position:absolute;left:0;top:2px;color:var(--green);font-size:.72rem}
+  .page ol{counter-reset:li}
+  .page ol li{position:relative;padding-left:27px;margin:2.5px 0;counter-increment:li}
+  .page ol li::before{content:counter(li);position:absolute;left:0;top:1px;width:19px;height:19px;border-radius:50%;
+        background:var(--teal-hdr);color:#fff;font-size:.68rem;display:flex;align-items:center;justify-content:center;
+        font-family:system-ui,Arial,sans-serif}
+  .page li ul,.page li ol{margin:2px 0}
+  .chips{display:flex;flex-wrap:wrap;gap:5px 7px;margin:4px 0 8px;padding-left:2px}
+  .chip{background:rgba(0,0,0,.03);border:1px solid var(--box-border);border-radius:999px;padding:2px 11px;font-size:.94rem;line-height:1.35}
+
+  /* ── emphasis: calm, notebook-like ──
+     bold -> just DARKER INK (heavier weight, NOT a bright colour, so the page
+     doesn't turn blue) · figures -> subtle green · answer -> ONE yellow highlighter */
+  strong,b,.pen{color:#12202f;font-weight:700}
+  .fig{color:var(--green-pen);font-weight:600}
+  em{color:#4527a0;font-style:italic}
+  code{background:#eef2f6;padding:1px 6px;border-radius:5px;font-size:.88em;font-family:ui-monospace,monospace}
+  u,.uline{text-decoration:underline wavy var(--margin-line);text-decoration-thickness:1.4px;text-underline-offset:3px}
+  mark{background:transparent;color:inherit;padding:0}
+  mark.ans{background:#ffe93a;color:#3b2f00;padding:0 5px;border-radius:3px;font-weight:700}   /* the only highlighter */
+
+  /* ── callout / badge boxes ── */
+  .badge{display:inline-flex;align-items:center;gap:6px;font-family:system-ui,Arial,sans-serif;
+         font-size:.68rem;font-weight:700;letter-spacing:.5px;color:#fff;padding:3px 10px;border-radius:6px;
+         text-transform:uppercase;transform:translateY(5px)}
+  .badge.key{background:#2e7d32}
+  .badge.mem{background:var(--purple)}
+  .factbox{border:1.5px solid var(--green);border-radius:9px;padding:9px 13px;margin:5px 0 10px;background:#f6fff7}
+  .membox{border:2px dashed var(--purple);border-radius:9px;padding:9px 13px;margin:5px 0 10px;background:var(--purple-soft);color:#4a148c}
+  .notebox{background:#e3f2fd;border-left:4px solid #1565c0;border-radius:7px;padding:8px 12px;margin:6px 0;color:#0d2f52}
+
+  /* ── MCQ question card ── */
+  .q-card{margin:12px 0 4px;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(20,40,60,.08)}
+  .q-head{background:var(--teal-hdr);color:#eef4f8;padding:9px 13px;font-size:1rem;font-weight:700;display:flex;gap:9px;align-items:baseline}
+  .q-head .qtag{background:rgba(255,255,255,.18);border-radius:6px;padding:1px 8px;font-size:.76rem;flex:none;font-family:system-ui,Arial,sans-serif}
+  .q-head strong,.q-head b,.q-head .pen,.q-head .fig{color:#fff}
+  .q-body{background:#fbfcfd;border:1px solid var(--box-border);border-top:none;padding:7px 13px}
+  .opt{display:flex;align-items:baseline;gap:9px;padding:3px 0;font-size:.98rem}
+  .opt .lbl{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;flex:none;
+            background:#eceff1;color:#37474f;font-size:.75rem;font-weight:700;font-family:system-ui,Arial,sans-serif}
+  .opt.right{color:var(--green-deep);font-weight:700}
+  .opt.right .lbl{background:var(--green);color:#fff}
+  .opt.wrong{color:#98a6b3;text-decoration:line-through;text-decoration-color:#d3a5a5}   /* solved-MCQ look: cross out wrong options */
+  .opt.wrong .lbl{background:#fbe3e3;color:#c0392b;text-decoration:none}
+  .opt.wrong .fig{color:#98a6b3}
+  .answer{background:#e8f5e9;border-left:4px solid var(--green);border-radius:7px;padding:8px 12px;margin:6px 0;color:#1e3a24}
+  .answer .ok{color:var(--green);font-weight:700}
+  .explain{margin:4px 0 12px;padding-left:2px}
+  .explain .xh{font-weight:700;color:#37474f;font-size:.88rem;margin:3px 0 1px;font-family:system-ui,Arial,sans-serif}
+
+  /* ── table ── */
+  table{border-collapse:collapse;width:100%;margin:9px 0 12px;font-size:.9rem;box-shadow:0 2px 8px rgba(20,40,60,.08);border-radius:8px;overflow:hidden}
+  thead th{background:var(--green);color:#fff;text-align:left;padding:7px 10px;font-weight:700}
+  tbody td{border:1px solid #dce7df;padding:6px 10px}
+  tbody tr:nth-child(even){background:#f4faf5}
+  .divider{border:none;text-align:center;color:#c0ccd6;letter-spacing:7px;margin:12px 0;font-size:.95rem}
+  .divider::after{content:"\2726 \2726 \2726"}
+
+  /* ── dark mode ── */
+  body.dark{background:#0e1116}
+  body.dark .page{--paper:#161b22;--ink:#e6edf3;--ruled:rgba(120,150,190,.08);--box-border:#2b3542;color:#e6edf3;background-color:#161b22}
+  body.dark .subsec{color:#c3cdd7}
+  body.dark strong,body.dark b,body.dark .pen{color:#eef4fb}
+  body.dark .fig{color:#7fe0a3}
+  body.dark .chip{background:rgba(255,255,255,.05)}
+  body.dark .q-body{background:#1b222c}
+  body.dark .opt .lbl{background:#263140;color:#cdd7e2}
+  body.dark .answer{background:#12271a;color:#d5f0dc}
+  body.dark .notebox{background:#0e2740;color:#cfe4fb}
+  body.dark .factbox{background:#12261a}
+  body.dark .membox{background:#241631;color:#e5c6ff}
+  body.dark tbody tr:nth-child(even){background:#1b232d} body.dark tbody td{border-color:#2b3542}
+  body.dark mark.ans{background:#c9a800;color:#211c00}
+  body.dark code{background:#22303f;color:#e6edf3}
+  body.dark .controls{background:#161b22;color:#e6edf3}
+  body.dark .controls input,body.dark .controls select{background:#0e1116;color:#e6edf3;border-color:#2b3542}
+
+  /* ── print ── */
+  @media print{
+    body{background:#fff;font-size:10.5pt;line-height:1.35}
+    .topbar,.controls,.metatag{display:none}
+    .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;padding:0 4mm}
+    .page::before{display:none}
+    body.twocol .notes{column-count:2;column-gap:8mm}
+    .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card{break-inside:avoid}
+    .sec{font-size:12.5pt} .subsec{font-size:11pt}
+    @page{size:A4;margin:10mm 9mm}
+  }
+</style>
+</head>
+<body class="twocol">
+
+  <div class="topbar">
+    <span class="brand">📓 AI Notes — Handwritten Style (Live)</span>
+    <span class="spacer"></span>
+    <button class="btn-cols" id="cols">🗂️ 2 Columns</button>
+    <button class="btn-print" onclick="window.print()">🖨️ Print / PDF</button>
+    <button class="btn-theme" onclick="document.body.classList.toggle('dark')">🌙 Dark Mode</button>
+  </div>
+
+  <div class="controls">
+    <div class="row">
+      <input id="url" type="text" placeholder="Paste your YouTube URL (or 11-char video ID)…" value="">
+      <select id="mode" title="What to generate">
+        <option value="notes">Comprehensive notes</option>
+        <option value="summary">Summary</option>
+        <option value="insights">Key insights</option>
+      </select>
+      <select id="style" title="Notes style (notes only)">
+        <option value="topic">📝 Topic notes</option>
+        <option value="mcq">❓ MCQ notes</option>
+      </select>
+      <select id="lang" title="Output language">
+        <option>Hinglish</option>
+        <option>English</option>
+        <option>Hindi</option>
+      </select>
+      <button class="go" id="go">Generate ✨</button>
+    </div>
+    <div class="adv">
+      <label><input type="checkbox" id="clean" checked> clean junk (promo / links / batches)</label>
+      &nbsp;·&nbsp;
+      <label><input type="checkbox" id="fresh"> force fresh (ignore cache)</label>
+      &nbsp;·&nbsp; server:
+      <input type="text" id="backend" value="https://youtube-turbo-proxy.onrender.com"
+             style="width:300px;font-size:12px;padding:6px 8px;border:1px solid #cdd6df;border-radius:7px">
+      &nbsp;·&nbsp;
+      <button type="button" id="sample"
+              style="font-family:inherit;cursor:pointer;border:1px solid #cdd6df;background:#eef6ff;color:#075985;border-radius:7px;padding:6px 12px;font-weight:700">🧪 Preview MCQ sample (no server)</button>
+    </div>
+    <div class="hint">
+      Calls your live server: <code>GET /api/study?mode=notes&style=…</code>. <b>MCQ notes</b> need the updated backend
+      deployed (server currently runs the old prompt). Topic notes + gel-pen styling work now. First run per video ~30–90s; caches after.
+    </div>
+    <div class="statusline" id="status"></div>
+  </div>
+
+  <div class="metatag" id="meta"></div>
+
+  <div class="page" id="page">
+    <div class="placeholder">⬆️ Paste a YouTube URL, choose <b>Topic</b> or <b>MCQ</b> notes, and hit <b>Generate</b>.</div>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+  var $=function(id){return document.getElementById(id);};
+
+  /* ── extract 11-char video id ── */
+  function parseId(s){
+    s=(s||"").trim();
+    if(/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+    var m=s.match(/(?:v=|\/shorts\/|youtu\.be\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+    if(m) return m[1];
+    m=s.match(/([A-Za-z0-9_-]{11})(?:[?&].*)?$/);
+    return m?m[1]:"";
+  }
+
+  /* ── markdown inline (gel pen: blue bold, green figures — NO highlighter) ── */
+  function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function inline(s){
+    s=s.replace(/\*\*([^*]+)\*\*/g,'<b class="pen">$1</b>')
+       .replace(/__([^_]+)__/g,'<b class="pen">$1</b>')
+       .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>')
+       .replace(/`([^`]+)`/g,'<code>$1</code>');
+    // figures (numbers/years/%/dates) in green pen — no background
+    s=s.replace(/\b(\d[\d.,:%\/\u2013-]*(?:st|nd|rd|th)?)\b/g,'<span class="fig">$1</span>');
+    return s;
+  }
+
+  /* ── callouts ── */
+  var KEY_RE=/^\s*(key\s*facts?|important|imp\.?|remember|note|yaad\s*rakh\w*|zaruri|jaruri)\s*[:\-\u2013]/i;
+  var MEM_RE=/^\s*(memory\s*trick|trick|mnemonic|shortcut|tip|exam\s*tip|hack)\s*[:\-\u2013]/i;
+  function afterColon(s){ var idx=s.search(/[:\-\u2013]/); return idx>=0? s.slice(idx+1).trim() : s; }
+  function calloutKey(t){ return '<span class="badge key">🔑 Key Facts</span><div class="factbox">'+inline(esc(afterColon(t)))+'</div>'; }
+  function calloutMem(t){ return '<span class="badge mem">🧠 Memory Trick</span><div class="membox">'+inline(esc(afterColon(t)))+'</div>'; }
+
+  function isShort(s){ var p=s.replace(/[*_`]/g,"").trim(); return p.length<=18 && p.indexOf(":")<0; }
+  function endsColon(s){ return /[:：]\s*$/.test(s.replace(/[*_`]/g,"")); }
+  function renderUL(items){
+    // Merge "Label:" + a single short value onto ONE line (value bolded), so the
+    // name/answer sits right after the colon instead of dropping to the next line.
+    // Skip when the colon is followed by a LIST of short values (keep those as chips).
+    var m2=[];
+    for(var p=0;p<items.length;p++){
+      var it=items[p], nx=items[p+1], nn=items[p+2];
+      if(endsColon(it) && nx!=null && isShort(nx) && !(nn!=null && isShort(nn) && !endsColon(nn))){
+        m2.push(it.replace(/\s+$/,"") + " **" + nx.replace(/\*/g,"").trim() + "**");
+        p++;                          // consume the value line
+      } else { m2.push(it); }
+    }
+    items=m2;
+    var html=[], run=[], mode=null;
+    function flush(){
+      if(!run.length) return;
+      if(mode==="chip" && run.length>=2){
+        html.push('<div class="chips">'+run.map(function(x){return '<span class="chip">'+inline(esc(x))+'</span>';}).join('')+'</div>');
+      } else { html.push('<ul>'+run.map(function(x){return '<li>'+inline(esc(x))+'</li>';}).join('')+'</ul>'); }
+      run=[]; mode=null;
+    }
+    items.forEach(function(it){
+      if(KEY_RE.test(it)){ flush(); html.push(calloutKey(it)); return; }
+      if(MEM_RE.test(it)){ flush(); html.push(calloutMem(it)); return; }
+      var want=isShort(it)?"chip":"norm";
+      if(mode && mode!==want) flush();
+      mode=want; run.push(it);
+    });
+    flush();
+    return html.join("\n");
+  }
+
+  /* ── topic-notes renderer (inner = no wrapper) ── */
+  function mdInner(md){
+    md=(md||"").replace(/\r/g,"");
+    md=md.replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,"$1");
+    var lines=md.split("\n"), out=[], i=0, secN=0, colorN=0, ol=false;
+    function closeOl(){ if(ol){out.push("</ol>");ol=false;} }
+    while(i<lines.length){
+      var t=lines[i].trim();
+      if(/^\|.*\|$/.test(t) && i+1<lines.length && /^\|[\s:|-]+\|$/.test(lines[i+1].trim())){
+        closeOl();
+        var head=t.split("|").slice(1,-1).map(function(c){return "<th>"+inline(esc(c.trim()))+"</th>";}).join("");
+        out.push("<table><thead><tr>"+head+"</tr></thead><tbody>"); i+=2;
+        while(i<lines.length && /^\|.*\|$/.test(lines[i].trim())){
+          var row=lines[i].trim().split("|").slice(1,-1).map(function(c){return "<td>"+inline(esc(c.trim()))+"</td>";}).join("");
+          out.push("<tr>"+row+"</tr>"); i++;
+        }
+        out.push("</tbody></table>"); continue;
+      }
+      if(t==="---"||t==="***"||t==="___"){ closeOl(); out.push('<div class="divider"></div>'); i++; continue; }
+      var h=t.match(/^(#{1,6})\s+(.*)/);
+      if(h){
+        closeOl();
+        var lv=h[1].length;
+        // strip surrounding markdown (** ## :) so bold-wrapped headings don't show literal '**'
+        var htxt=h[2].replace(/^[*#\s]+/,"").replace(/[*#:\s]+$/,"").trim();
+        var txt=inline(esc(htxt));
+        if(lv<=2){ secN++; var c=colorN%5; colorN++; out.push('<div class="sec c'+c+'"><span class="num">'+secN+'</span>'+txt+'</div>'); }
+        else { out.push('<div class="subsec">'+txt+'</div>'); }
+        i++; continue;
+      }
+      if(/^>\s?/.test(t)){ closeOl(); out.push('<div class="notebox">'+inline(esc(t.replace(/^>\s?/,"")))+'</div>'); i++; continue; }
+      var mo=t.match(/^(\d+)[.)]\s+(.*)/);
+      if(mo){ if(!ol){out.push("<ol>");ol=true;} out.push("<li>"+inline(esc(mo[2]))+"</li>"); i++; continue; }
+      if(/^[-*+]\s+/.test(t)){
+        closeOl();
+        var items=[];
+        while(i<lines.length){ var m2=lines[i].trim().match(/^[-*+]\s+(.*)/); if(!m2) break; items.push(m2[1]); i++; }
+        out.push(renderUL(items)); continue;
+      }
+      if(t===""){ closeOl(); i++; continue; }
+      if(KEY_RE.test(t)){ closeOl(); out.push(calloutKey(t)); i++; continue; }
+      if(MEM_RE.test(t)){ closeOl(); out.push(calloutMem(t)); i++; continue; }
+      closeOl(); out.push("<p>"+inline(esc(t))+"</p>"); i++;
+    }
+    closeOl();
+    return out.join("\n");
+  }
+  function mdToHandwritten(md){ return '<div class="notes">'+mdInner(md)+'</div>'; }
+
+  /* ── MCQ renderer ── */
+  // Question head: "### Q1. …", "Q1) …", "**Q1.** …", or Hindi "प्रश्न 1", "सवाल 1"
+  var Q_RE=/^#{0,4}\s*\**\s*(?:Q|Question|Ques|प्रश्न|सवाल)\s*\.?\s*(\d+)\s*[.):\-\u2013]*\s*(.*)$/i;
+  var O_RE=/^[-*+]?\s*\(?([A-Da-d1-4])\)?[.)]\s+(.*)$/;
+  var A_RE=/^\s*(?:[-*+]\s*)?\**\s*(?:answer|ans|उत्तर|सही\s*उत्तर)\**\s*[:：]?\s*\**\s*\(?([A-Da-d1-4])\)?\b(.*)$/i;
+  var EXP_RE=/^\**\s*(?:explanation|explain|व्याख्या|स्पष्टीकरण)\**\s*[:：]?\s*(.*)$/i;
+
+  function optIsRight(text){ return /[\u2713\u2714]|\(correct\)|\bcorrect\b|सही/i.test(text); }
+  function cleanOpt(text){ return text.replace(/\s*[\u2713\u2714]\s*$/,"").replace(/\s*\(correct\)\s*$/i,"").trim(); }
+
+  function buildCard(n, q, opts, ans, ansRest, expl){
+    // once we know the correct option, CROSS OUT every other option (real solved-MCQ look)
+    var hasCorrect = !!ans || opts.some(function(o){ return optIsRight(o.text); });
+    var body=opts.map(function(o){
+      var right=(ans && o.k===ans) || optIsRight(o.text);
+      var cls = right ? ' right' : (hasCorrect ? ' wrong' : '');
+      var txt=cleanOpt(o.text);
+      return '<div class="opt'+cls+'"><span class="lbl">'+o.k+'</span> '+inline(esc(txt))+(right?' ✓':'')+'</div>';
+    }).join('');
+    var qHtml='<div class="q-card"><div class="q-head"><span class="qtag">Q'+n+'</span> '+inline(esc(q.replace(/\*+/g,"")))+'</div>'+
+              (opts.length?'<div class="q-body">'+body+'</div>':'')+'</div>';
+    var ansHtml = ans
+      ? '<div class="answer"><span class="ok">✅ Answer: <mark class="ans">'+ans+'</mark></span>'+
+        (ansRest?' '+inline(esc(ansRest.replace(/^[\s\u2014\-:：]+/,""))):'')+'</div>'
+      : '';
+    var explHtml = expl.length ? '<div class="explain"><div class="xh">📝 Explanation</div>'+mdInner(expl.join("\n"))+'</div>' : '';
+    return qHtml+ansHtml+explHtml;
+  }
+
+  function renderMCQ(md){
+    var lines=(md||"").replace(/\r/g,"").replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,"$1").split("\n");
+    var out=[], i=0, qn=0, found=false;
+    while(i<lines.length){
+      var t=lines[i].trim();
+      var qm=t.match(Q_RE);
+      if(qm){
+        found=true; qn++;
+        var qtext=qm[2]||""; i++;
+        var opts=[], ans="", ansRest="", expl=[];
+        while(i<lines.length){
+          var lt=lines[i].trim();
+          if(Q_RE.test(lt)) break;                 // next question
+          var am=lt.match(A_RE), om=lt.match(O_RE), em=lt.match(EXP_RE);
+          if(am){ ans=am[1].toUpperCase(); ansRest=am[2]||""; i++; continue; }
+          if(om){ opts.push({k:om[1].toUpperCase(), text:om[2]}); i++; continue; }
+          if(em){ var er=(em[1]||"").replace(/^\*+/,"").replace(/\*+$/,"").trim(); if(er) expl.push(er); i++; continue; }  // drop bare "Explanation:" label
+          if(lt===""){ i++; continue; }
+          expl.push(lt); i++;
+        }
+        out.push(buildCard(qn, qtext, opts, ans, ansRest, expl));
+        continue;
+      }
+      // non-question content -> normal notebook render
+      var buf=[];
+      while(i<lines.length && !Q_RE.test(lines[i].trim())){ buf.push(lines[i]); i++; }
+      if(buf.join("").trim()) out.push(mdInner(buf.join("\n")));
+    }
+    if(!found) return mdToHandwritten(md);        // no MCQs detected -> topic style
+    return '<div class="notes">'+out.join("\n")+'</div>';
+  }
+
+  /* ── promo / junk cleanup (English + Hindi/Hinglish) ── */
+  var JUNK_LINE=[
+    /parmar\s+(sir|academy)/i,
+    /(foundation|revision|new|coaching|demo|upcoming|next|weekend)\s+batch|\bbatch\b\s*(starts|starting|link|join|now)/i,
+    /\btelegram\b/i,
+    /\b(subscribe|do subscribe|like\s*,?\s*share|share\s*&?\s*subscribe)\b/i,
+    /bell\s*icon|press the bell|notification bell/i,
+    /\bnext\s+(session|class|lecture)\b/i,
+    /\b(digital notes|free content)\b/i,
+    /\bpdf(s)?\b.*(link|description|telegram|app|download|share)/i,
+    /(available|shared)\b.*(app|telegram|description|link)/i,
+    /academy\s*app|play\s*store|app\s*store|download the app/i,
+    /https?:\/\/|www\./i,
+    /\b(join|download|follow us|like this video|share this video)\b.*(link|channel|app|telegram|now|below)/i,
+    /^\s*resources?\s*:?\s*$/i,
+    /पार्?मर|परमार|अकादमी|अकैडमी|एकेडमी/,
+    /(फाउंडेशन|फ़ाउंडेशन|रिवीजन|रिविजन|नई|नया|वीकेंड)\s*बैच/,
+    /(मैथ्स|मैथ|गणित|रीजनिंग|साइंस|विज्ञान|इंग्लिश|अंग्रेज़ी|हिंदी)\s*\S*\s*बैच/,
+    /बैच\s*(शुरू|स्टार्ट|लिंक|जॉइन|[:：])/,
+    /टेलीग्राम|टेलिग्राम/,
+    /सब्सक्राइब|सब्स्क्राइब|लाइक\s*(करें|और|एंड)|शेयर\s*(करें|और|एंड)/,
+    /बेल\s*आइकन|घंटी\s*(दबा|आइकन)/,
+    /अगल[ीा]\s*(लेक्चर|क्लास|कक्षा|सेशन|सेसन|वीडियो)/,
+    /डिजिटल\s*नोट्स|फ्री\s*कंटेंट|मुफ्त\s*(में|कंटेंट)/,
+    /(उपलब्ध|शेयर|डाउनलोड).*(ऐप|एप्प|एप|टेलीग्राम|लिंक|डिस्क्रिप्शन)/,
+    /(ऐप|एप्प|एप)\s*(पर|में)\s*(उपलब्ध|मिल)/,
+    /(हिंदी\s*(&|और|एंड)\s*(इंग्लिश|अंग्रेज़ी)|इंग्लिश\s*(&|और|एंड)\s*हिंदी).*उपलब्ध/,
+    /डिस्क्रिप्शन|लिंक\s*(नीचे|डिस्क्रिप्शन|दिया)/,
+    /(टेलीग्राम|जॉइन|सब्सक्राइब).*चैनल|चैनल.*(जॉइन|लिंक|सब्सक्राइब)/,
+    /^\s*(संसाधन|रिसोर्स(ेस)?|पीडीएफ)\s*[:：]?\s*$/
+  ];
+  var JUNK_HEAD=/^\s*(resources?|batches?|our\s+classes|classes|social|links?|join\s+us|download|follow|next\s+(session|class)|संसाधन|रिसोर्स|सोशल|लिंक|डाउनलोड|फॉलो|बैच|अगल[ीा])/i;
+  function isJunkLine(l){ for(var k=0;k<JUNK_LINE.length;k++){ if(JUNK_LINE[k].test(l)) return true; } return false; }
+  function stripJunk(md){
+    var lines=(md||"").replace(/\r/g,"").split("\n"), out=[], i=0, removed=0;
+    while(i<lines.length){
+      var l=lines[i], tl=l.trim();
+      var h=tl.match(/^(#{1,6})\s+(.*)/);
+      if(h && (JUNK_HEAD.test(h[2]) || isJunkLine(h[2]))){
+        var lvl=h[1].length; i++; removed++;
+        while(i<lines.length){
+          var hh=lines[i].trim().match(/^(#{1,6})\s+/);
+          if(hh && hh[1].length<=lvl) break;
+          if(lines[i].trim()!=="") removed++;
+          i++;
+        }
+        continue;
+      }
+      if(tl!=="" && isJunkLine(l)){ removed++; i++; continue; }
+      out.push(l); i++;
+    }
+    return { text: out.join("\n").replace(/\n{3,}/g,"\n\n").trim(), removed: removed };
+  }
+
+  /* ── column toggle ── */
+  function syncCols(){ $("cols").innerHTML = document.body.classList.contains("twocol") ? "🗂️ 2 Columns" : "📄 1 Column"; }
+  $("cols").onclick=function(){ document.body.classList.toggle("twocol"); syncCols(); };
+  syncCols();
+
+  /* ── call the live server ── */
+  function setStatus(msg,isErr){ var s=$("status"); s.className="statusline show"+(isErr?" err":""); s.innerHTML=msg; }
+
+  function generate(){
+    var backend=($("backend").value||"").trim().replace(/\/+$/,"");
+    var id=parseId($("url").value);
+    if(!id){ setStatus("⚠️ Enter a valid YouTube URL or 11-character video ID.",true); return; }
+    var mode=$("mode").value, style=$("style").value, lang=$("lang").value, fresh=$("fresh").checked;
+    var url=backend+"/api/study?id="+encodeURIComponent(id)+"&mode="+mode+"&out="+encodeURIComponent(lang)+
+            (mode==="notes"&&style==="mcq"?"&style=mcq":"")+(fresh?"&refresh=1":"");
+    var wantMcq = (mode==="notes" && style==="mcq");
+
+    $("go").disabled=true; $("meta").textContent="";
+    setStatus('<span class="spin"></span> Generating '+(wantMcq?"MCQ ":"")+mode+' ('+lang+') for <code>'+id+'</code>… first run can take ~30–90s.');
+    $("page").innerHTML='<div class="placeholder"><span class="spin"></span> Waiting for your server + AI…</div>';
+
+    var t0=Date.now();
+    fetch(url).then(function(r){return r.json();}).then(function(j){
+      $("go").disabled=false;
+      var secs=((Date.now()-t0)/1000).toFixed(1);
+      if(j.error && j.error!=="no_captions"){ setStatus("❌ "+esc(j.error)+(j.detail?" — "+esc(j.detail):""),true); $("page").innerHTML='<div class="placeholder">No notes generated.</div>'; return; }
+      if(j.warning==="no_captions"||j.error==="no_captions"){ setStatus("⚠️ This video has no captions, so notes can't be generated yet.",true); $("page").innerHTML='<div class="placeholder">No captions on this video.</div>'; return; }
+      var content=j.content||"";
+      if(!content){ setStatus("⚠️ Empty response from server.",true); return; }
+      var removed=0;
+      if($("clean").checked){ var cj=stripJunk(content); content=cj.text; removed=cj.removed; }
+      var serverStyle=j.style||"topic";
+      var note = wantMcq && serverStyle!=="mcq" ? "  ·  ⚠️ server returned topic notes (deploy the updated backend for real MCQ)" : "";
+      setStatus("✅ Done in "+secs+"s."+(removed?"  ·  🧹 removed "+removed+" promo line"+(removed>1?"s":""):"")+note);
+      $("meta").textContent=(j.provider||"ai")+" · "+(j.model||"")+" · "+serverStyle+" · "+(j.cached?"cached":"fresh")+" · "+lang;
+      $("page").innerHTML = wantMcq ? renderMCQ(content) : mdToHandwritten(content);
+    }).catch(function(e){
+      $("go").disabled=false;
+      setStatus("❌ Request failed: "+esc(String(e))+". The server may be asleep — try again in a few seconds.",true);
+      $("page").innerHTML='<div class="placeholder">Request failed.</div>';
+    });
+  }
+
+  // ── built-in MCQ sample so the layout can be checked without deploying the backend ──
+  var SAMPLE_MCQ=[
+    "## Polity — Vice President & Union Executive",
+    "### Q1. Which branch of government is the Vice President of India a part of?",
+    "- A) Legislative only",
+    "- B) Executive only",
+    "- C) Judicial",
+    "- D) Both Executive and Legislative ✓",
+    "**Answer:** D — the VP belongs to the Union Executive AND the Legislature.",
+    "**Explanation:**",
+    "- The VP is part of the **Union Executive** (Part V: President, VP, PM, Council of Ministers).",
+    "- He is the **ex-officio Chairperson** of the Rajya Sabha, so he is also part of the **Legislature**.",
+    "- Key Fact: Articles 63-71 cover the Vice President; Article 71 gives the Supreme Court exclusive jurisdiction over VP election disputes.",
+    "",
+    "## Biology — Vacuoles & Cell Organelles",
+    "### Q2. Which statement is NOT correct regarding vacuoles?",
+    "- A) Vacuoles are generally larger in animal cells than in plant cells ✓",
+    "- B) Plant cell vacuoles are permanent",
+    "- C) Vacuoles store cell sap and maintain turgidity",
+    "- D) Animal cell vacuoles are small and temporary",
+    "**Answer:** A — this is FALSE; vacuoles are actually LARGER in plant cells.",
+    "**Explanation:**",
+    "- Plant cell vacuoles occupy **50-90%** of the cell volume (single, large, permanent).",
+    "- Animal cells have multiple **smaller**, temporary vacuoles.",
+    "",
+    "| Feature | Plant Cell Vacuole | Animal Cell Vacuole |",
+    "| --- | --- | --- |",
+    "| Size | Large (50-90%) | Small |",
+    "| Number | Single | Multiple |",
+    "| Duration | Permanent | Temporary |",
+    "- Memory Trick: Meristematic tissue LACKS vacuoles — prominent nucleus, dense cytoplasm."
+  ].join("\n");
+  $("sample").onclick=function(){
+    $("meta").textContent="sample · MCQ layout preview (no server / AI)";
+    setStatus("🧪 Built-in MCQ sample — this is only to check the layout; real notes come from your server once deployed.");
+    $("page").innerHTML=renderMCQ(SAMPLE_MCQ);
+  };
+
+  // hide the style dropdown for non-notes modes
+  $("mode").onchange=function(){ $("style").style.display = (this.value==="notes") ? "" : "none"; };
+  $("go").onclick=generate;
+  $("url").addEventListener("keydown",function(e){ if(e.key==="Enter") generate(); });
+
+  // expose renderers for the offline self-test (see below)
+  window.__demo={renderMCQ:renderMCQ, mdToHandwritten:mdToHandwritten, stripJunk:stripJunk};
+})();
+</script>
+</body>
+</html>
