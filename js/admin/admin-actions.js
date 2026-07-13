@@ -578,13 +578,13 @@ async function saveGroqConfig() {
    other; the SELECTED provider is mirrored into studyApiKeys/studyModel/
    studyBaseUrl (the only fields youtube-turbo-proxy reads). */
 const STUDY_PROVIDERS = {
-  bynara:   { label: 'Bynara',   baseUrl: '',                           keyField: 'bynaraApiKeys',   modelField: 'bynaraModel',
+  bynara:   { label: 'Bynara',   host: 'router.bynara.id', baseUrl: '',                           keyField: 'bynaraApiKeys',   modelField: 'bynaraModel',
               models: ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3'], def: 'mistral-large',
               note: '~1M context', keyUrl: '' },
-  mistral:  { label: 'Mistral',  baseUrl: 'https://api.mistral.ai/v1',  keyField: 'mistralApiKeys',  modelField: 'mistralModel',
+  mistral:  { label: 'Mistral',  host: 'api.mistral.ai',   baseUrl: 'https://api.mistral.ai/v1',  keyField: 'mistralApiKeys',  modelField: 'mistralModel',
               models: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest', 'open-mistral-nemo'], def: 'mistral-large-latest',
               note: 'official Mistral API', keyUrl: 'https://console.mistral.ai/api-keys' },
-  cerebras: { label: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', keyField: 'cerebrasApiKeys', modelField: 'cerebrasModel',
+  cerebras: { label: 'Cerebras', host: 'api.cerebras.ai',  baseUrl: 'https://api.cerebras.ai/v1', keyField: 'cerebrasApiKeys', modelField: 'cerebrasModel',
               models: ['gpt-oss-120b', 'zai-glm-4.7', 'gemma-4-31b'], def: 'gpt-oss-120b',
               note: 'ultra-fast inference', keyUrl: 'https://cloud.cerebras.ai' }
 };
@@ -637,44 +637,98 @@ function activeStudyProvider() {
   }
   return 'bynara';
 }
-/* Provider dropdown change → auto-load that provider's saved key(s) + models
-   into the single key box and single model box. */
-function studyProviderChanged() {
-  var pid = ((document.getElementById('study-provider') || {}).value) || 'bynara';
+/* Which provider's radio is currently ticked. */
+function selectedStudyProvider() {
+  var r = document.querySelector('input[name="study-active"]:checked');
+  return (r && STUDY_PROVIDERS[r.value]) ? r.value : 'bynara';
+}
+/* Active radio changed → refresh the single model box to that provider's models
+   and repaint the ● ACTIVE / inactive badges. */
+function studyActiveChanged() {
+  var pid = selectedStudyProvider();
   var p = STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara;
-  var ta = document.getElementById('study-api-keys');
-  if (ta) ta.value = studyKeysFor(pid).join('\n');
   var ms = document.getElementById('study-model');
   if (ms) ms.innerHTML = studyModelOptions(p.models, studyModelFor(pid));
-  var hint = document.getElementById('study-provider-hint');
-  if (hint) hint.innerHTML = studyProviderHint(pid);
+  STUDY_PROVIDER_ORDER.forEach(function (k) {
+    var b = document.getElementById('study-badge-' + k);
+    if (!b) return;
+    var on = (k === pid);
+    b.textContent = on ? '● ACTIVE' : 'inactive';
+    b.style.background = on ? 'var(--accent,#00c896)' : '#e5e7eb';
+    b.style.color = on ? '#04120d' : '#555';
+  });
+}
+/* Paste-a-curl → auto-fill. Extracts the endpoint, Bearer key and model from a
+   pasted curl/API snippet, detects the provider by host, fills that provider's
+   key box, makes it active, and sets the model. User just clicks Save. */
+function parseCurlIntoStudy() {
+  var box = document.getElementById('study-curl');
+  var text = box ? box.value : '';
+  if (!text || !text.trim()) { showToast('Paste a curl / API snippet first'); return; }
+
+  var urlM = text.match(/https?:\/\/[^\s'"\\]+/);
+  var url = urlM ? urlM[0] : '';
+  var keyM = text.match(/[Bb]earer\s+([A-Za-z0-9._~+\/-]{8,})/);
+  var key = keyM ? keyM[1] : '';
+  if (/YOUR|APIKEY_HERE|\$\{|xxxx/i.test(key)) key = '';        // ignore placeholders
+  var modelM = text.match(/["']model["']\s*:\s*["']([^"']+)["']/);
+  var model = modelM ? modelM[1] : '';
+
+  var host = '';
+  try { host = url ? new URL(url).host : ''; } catch (e) { host = ''; }
+  var pid = '';
+  STUDY_PROVIDER_ORDER.forEach(function (k) {
+    if (!pid && STUDY_PROVIDERS[k].host && host.indexOf(STUDY_PROVIDERS[k].host) !== -1) pid = k;
+  });
+  if (!pid) {
+    showToast('⚠️ Unknown host "' + (host || '?') + '". Supported: Mistral, Cerebras, Bynara.');
+    return;
+  }
+  if (key) {
+    var kb = document.getElementById('study-key-' + pid);
+    if (kb) kb.value = key;
+  }
+  var radio = document.querySelector('input[name="study-active"][value="' + pid + '"]');
+  if (radio) radio.checked = true;
+  studyActiveChanged();                                          // refresh model box to this provider
+  if (model) {
+    var ms = document.getElementById('study-model');
+    if (ms) ms.innerHTML = studyModelOptions(STUDY_PROVIDERS[pid].models, model);
+  }
+  if (box) box.value = '';                                       // don't leave the key sitting in two boxes
+  showToast('✅ Detected ' + STUDY_PROVIDERS[pid].label +
+            (key ? ' · key' : ' · (no key found)') + (model ? ' · ' + model : '') + ' — review & Save');
 }
 async function saveStudyAiConfig() {
-  const provider = ((document.getElementById('study-provider') || {}).value) || 'bynara';
+  const provider = selectedStudyProvider();
   const p = STUDY_PROVIDERS[provider] || STUDY_PROVIDERS.bynara;
-  const keys = splitStudyKeys((document.getElementById('study-api-keys') || {}).value);
+  // Read every provider's own key box (so all keys persist), plus the single model box.
+  const allKeys = {};
+  STUDY_PROVIDER_ORDER.forEach(function (k) {
+    allKeys[k] = splitStudyKeys((document.getElementById('study-key-' + k) || {}).value);
+  });
   const model = (((document.getElementById('study-model') || {}).value) || p.def).trim();
-
-  if (!keys.length) {
-    showToast('⚠️ Add at least one ' + p.label + ' API key');
+  const activeKeys = allKeys[provider] || [];
+  if (!activeKeys.length) {
+    showToast('⚠️ Active provider (' + p.label + ') has no key');
   }
-  // Persist this provider's own copy AND mirror it into the active fields the
-  // proxy reads (studyApiKeys / studyModel / studyBaseUrl). Selecting + saving
-  // a provider is what makes it the active one.
+  // Persist every provider's key + the active provider mirror (studyApiKeys /
+  // studyModel / studyBaseUrl) — the only fields youtube-turbo-proxy reads.
   const payload = {
     studyProvider: provider,
-    studyApiKeys: keys, studyModel: model, studyBaseUrl: p.baseUrl,
+    studyApiKeys: activeKeys, studyModel: model, studyBaseUrl: p.baseUrl,
     savedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
-  payload[p.keyField] = keys;
+  STUDY_PROVIDER_ORDER.forEach(function (k) { payload[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
   payload[p.modelField] = model;
   try {
     await db.collection('config').doc('ai').set(payload, { merge: true });
     AI_CONFIG.studyProvider = provider;
-    AI_CONFIG[p.keyField] = keys; AI_CONFIG[p.modelField] = model;
-    AI_CONFIG.studyApiKeys = keys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
+    STUDY_PROVIDER_ORDER.forEach(function (k) { AI_CONFIG[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
+    AI_CONFIG[p.modelField] = model;
+    AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
     showToast('✅ Study AI saved — active: ' + p.label +
-              ' (' + keys.length + ' key' + (keys.length === 1 ? '' : 's') + ')');
+              ' (' + activeKeys.length + ' key' + (activeKeys.length === 1 ? '' : 's') + ')');
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }
@@ -867,45 +921,59 @@ function renderAiStudy() {
     'Keys &amp; models, what users can see, and usage limits.' +
     '</div>';
 
-  /* ── Study AI (Notes/Quiz) Card — one provider dropdown + one key box + one model box.
-     The active provider is auto-selected (saved one, else first with a key). Changing
-     the dropdown auto-loads that provider's saved key/model (studyProviderChanged). ── */
+  /* ── Study AI (Notes/Quiz) Card — a "paste curl" quick-add box, one SEPARATE
+     section per provider (radio + its own key box), and ONE shared model box that
+     tracks the ● ACTIVE provider. Active is auto-selected (saved one, else the
+     first with a key). ── */
   var studyProvider = activeStudyProvider();
-  var sp = STUDY_PROVIDERS[studyProvider] || STUDY_PROVIDERS.bynara;
-  var curKeys = studyKeysFor(studyProvider);
   var curModel = studyModelFor(studyProvider);
-  var providerOpts = STUDY_PROVIDER_ORDER.map(function (k) {
-    return '<option value="' + k + '"' + (k === studyProvider ? ' selected' : '') + '>' + esc(STUDY_PROVIDERS[k].label) + '</option>';
+
+  // One SEPARATE section per provider: an "active" radio + its own API key box.
+  var sectionsHtml = STUDY_PROVIDER_ORDER.map(function (k) {
+    var pp = STUDY_PROVIDERS[k];
+    var on = (k === studyProvider);
+    var keys = studyKeysFor(k);
+    var badgeStyle = on ? 'background:var(--accent,#00c896);color:#04120d;' : 'background:#e5e7eb;color:#555;';
+    var keyLink = pp.keyUrl ? (' · <a href="' + esc(pp.keyUrl) + '" target="_blank">get key</a>') : '';
+    return '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:8px;">' +
+      '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px;flex-wrap:wrap;">' +
+        '<input type="radio" name="study-active" value="' + k + '"' + (on ? ' checked' : '') + ' onchange="studyActiveChanged()">' +
+        '<b style="font-size:.85rem;">' + esc(pp.label) + '</b>' +
+        '<span id="study-badge-' + k + '" style="font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:999px;' + badgeStyle + '">' + (on ? '● ACTIVE' : 'inactive') + '</span>' +
+        '<span class="muted" style="font-size:.66rem;">' + esc(pp.note) +
+          (pp.baseUrl ? ' · <code>' + esc(pp.baseUrl) + '</code>' : ' · Bynara default') + keyLink + '</span>' +
+      '</label>' +
+      '<textarea id="study-key-' + k + '" placeholder="' + esc(pp.label) + ' API key(s) — one per line" ' +
+        'style="width:100%;min-height:52px;font-family:monospace;font-size:.8rem;">' + esc(keys.join('\n')) + '</textarea>' +
+    '</div>';
   }).join('');
 
   s += '<div class="card" style="margin-bottom:12px;">' +
     '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz)</h3>' +
     '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
-      'Transcript → notes/quiz (<code>/api/study</code>). Pick a <b>provider</b> — its saved key &amp; model load ' +
-      'automatically. Whatever you <b>Save</b> here becomes the active provider. <b>Ek se zyada key</b> daal sakte ho ' +
-      '(har line pe ek) — ek limit/fail ho to agli apne aap use hogi.' +
+      'Transcript → notes/quiz (<code>/api/study</code>). Add each provider\'s key in its section and pick which is ' +
+      '<b>● ACTIVE</b>. <b>Ek se zyada key</b> daal sakte ho (har line pe ek) — ek limit/fail ho to agli apne aap use hogi.' +
     '</div>' +
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">' +
-      '<label style="font-size:.85rem;font-weight:700;">Provider</label>' +
-      '<select id="study-provider" onchange="studyProviderChanged()" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;">' + providerOpts + '</select>' +
-      '<span style="font-size:.66rem;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--accent,#00c896);color:#04120d;">● ACTIVE</span>' +
+
+    /* ⚡ Quick add — paste a curl, auto-detect provider + key + model */
+    '<div style="border:1px dashed var(--border);border-radius:10px;padding:10px;margin-bottom:12px;background:rgba(0,200,150,.05);">' +
+      '<label style="font-size:.8rem;font-weight:700;">⚡ Quick add — paste a curl / API snippet</label>' +
+      '<div class="muted" style="font-size:.68rem;margin:2px 0 6px;">Auto-detects the provider, key &amp; model from a pasted <code>curl</code> and fills its section below. Then just Save.</div>' +
+      '<textarea id="study-curl" placeholder="Paste your curl here — Mistral / Cerebras / Bynara" ' +
+        'style="width:100%;min-height:70px;font-family:monospace;font-size:.76rem;margin-bottom:6px;"></textarea>' +
+      '<button class="btn btn-gray" onclick="parseCurlIntoStudy()">✨ Parse &amp; fill</button>' +
     '</div>' +
-    '<label style="font-size:.8rem;color:#555;">API key(s) — one per line</label>' +
-    '<textarea id="study-api-keys" placeholder="key1&#10;key2" ' +
-      'style="width:100%;min-height:66px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(curKeys.join('\n')) + '</textarea>' +
-    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
-      '<label style="font-size:.85rem;">Model</label>' +
+
+    sectionsHtml +
+
+    /* One single model box (shows the ● ACTIVE provider's models) + Save */
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">' +
+      '<label style="font-size:.85rem;font-weight:700;">Model</label>' +
       '<select id="study-model" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:220px;">' +
-        studyModelOptions(sp.models, curModel) + '</select>' +
+        studyModelOptions((STUDY_PROVIDERS[studyProvider] || STUDY_PROVIDERS.bynara).models, curModel) + '</select>' +
       '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
     '</div>' +
-    '<div id="study-provider-hint" class="muted" style="font-size:.7rem;margin-top:6px;">' + studyProviderHint(studyProvider) + '</div>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:6px;">' +
-      (curKeys.length
-        ? ('✅ Active: <b>' + esc(sp.label) + '</b> · ' + curKeys.length + ' key(s) · model: <b>' + esc(curModel) + '</b>')
-        : ('⚪ Active: <b>' + esc(sp.label) + '</b> — no key yet' +
-           (studyProvider === 'bynara' ? ' (/api/study will use the Groq key from the Telegram tab)' : ''))) +
-    '</div>' +
+    '<div class="muted" style="font-size:.68rem;margin-top:6px;">One model box — it lists the models of the ● ACTIVE provider above.</div>' +
     '</div>';
 
   /* ── AI Study Controls Card — Regenerate button + focus box show/hide ── */
