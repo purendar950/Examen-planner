@@ -19,7 +19,7 @@
     --ink:#22303f; --ink-soft:#4b5a68;
     --red:#d32f2f; --green:#2e7d32; --green-deep:#1b5e20; --teal-hdr:#2f4858;
     --blue:#1565c0; --orange:#e65100;
-    --hl-yellow:#fff59d; --hl-green:#b9f6ca;
+    --hl-yellow:#fff59d; --hl-amber:#fff1b8; --hl-mint:#d9f6e6; --hl-blue:#dcebff;
     --purple:#7b1fa2; --purple-soft:#f3e5f5;
     --box-border:#cfd8dc; --shadow:0 6px 22px rgba(20,40,60,.10);
   }
@@ -109,8 +109,11 @@
   .chip{background:rgba(0,0,0,.03);border:1px solid var(--box-border);border-radius:999px;
         padding:2px 11px;font-size:.94rem;line-height:1.35}
 
-  strong,b{color:#0f2a1a;font-weight:700}
-  mark.y{background:var(--hl-yellow);padding:0 3px;border-radius:3px}
+  strong,b{color:#12408a;font-weight:700}                 /* blue "pen" bold, NO background */
+  mark{padding:0 3px;border-radius:3px;background:transparent;color:inherit}
+  mark.mint{background:var(--hl-mint)}                     /* key value / answer */
+  mark.amber{background:var(--hl-amber)}                   /* figures: numbers/dates/% */
+  mark.blue{background:var(--hl-blue)}                     /* definitions */
   em{color:#4527a0;font-style:italic}
   code{background:#eef2f6;padding:1px 6px;border-radius:5px;font-size:.88em;font-family:ui-monospace,monospace}
 
@@ -141,14 +144,16 @@
   body.dark{background:#0e1116}
   body.dark .page{--paper:#161b22;--ink:#e6edf3;--ruled:rgba(120,150,190,.08);--box-border:#2b3542;color:#e6edf3;background-color:#161b22}
   body.dark .subsec{color:#c3cdd7}
-  body.dark strong,body.dark b{color:#eafff0}
+  body.dark strong,body.dark b{color:#9cc2ff}
   body.dark .chip{background:rgba(255,255,255,.05)}
   body.dark .answer{background:#12271a;color:#d5f0dc}
   body.dark .notebox{background:#0e2740;color:#cfe4fb}
   body.dark .factbox{background:#12261a}
   body.dark .membox{background:#241631;color:#e5c6ff}
   body.dark tbody tr:nth-child(even){background:#1b232d} body.dark tbody td{border-color:#2b3542}
-  body.dark mark.y{background:#6b5d00;color:#fff7c2}
+  body.dark mark.mint{background:#124a2c;color:#c9f6da}
+  body.dark mark.amber{background:#6b5d00;color:#fff7c2}
+  body.dark mark.blue{background:#123a5e;color:#cfe4fb}
   body.dark code{background:#22303f;color:#e6edf3}
   body.dark .controls{background:#161b22;color:#e6edf3}
   body.dark .controls input,body.dark .controls select{background:#0e1116;color:#e6edf3;border-color:#2b3542}
@@ -192,6 +197,8 @@
       <button class="go" id="go">Generate ✨</button>
     </div>
     <div class="adv">
+      <label><input type="checkbox" id="clean" checked> clean junk (promo / links / batches)</label>
+      &nbsp;·&nbsp;
       <label><input type="checkbox" id="fresh"> force fresh (ignore cache)</label>
       &nbsp;·&nbsp; server:
       <input type="text" id="backend" value="https://youtube-turbo-proxy.onrender.com"
@@ -227,11 +234,62 @@
 
   /* ── markdown helpers ── */
   function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  // Restrained, meaningful highlighting (no more "everything yellow"):
+  //  • bold  -> colored bold text, NO background
+  //  • FIRST bold on a line -> soft MINT (the key value / answer)
+  //  • numbers / years / % / dates / scores -> soft AMBER (revision figures)
   function inline(s){
-    return s.replace(/\*\*([^*]+)\*\*/g,'<strong><mark class="y">$1</mark></strong>')
-            .replace(/__([^_]+)__/g,'<strong><mark class="y">$1</mark></strong>')
-            .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>')
-            .replace(/`([^`]+)`/g,'<code>$1</code>');
+    var firstBold=true;
+    s=s.replace(/\*\*([^*]+)\*\*/g,function(m,x){
+      if(firstBold){ firstBold=false; return '<strong><mark class="mint">'+x+'</mark></strong>'; }
+      return '<strong>'+x+'</strong>';
+    });
+    s=s.replace(/__([^_]+)__/g,'<strong>$1</strong>');
+    s=s.replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>');
+    s=s.replace(/`([^`]+)`/g,'<code>$1</code>');
+    // amber on figures — safe: our only tags are strong/em/code/mark (none contain digits)
+    s=s.replace(/\b(\d[\d.,:%\/\u2013-]*(?:st|nd|rd|th)?)\b/g,'<mark class="amber">$1</mark>');
+    return s;
+  }
+
+  /* ── strip promo / logistics "junk" (channel ads, links, batches, timings) ──
+     Targets ONLY meta/promo patterns, never study facts. Toggleable in the UI. */
+  var JUNK_LINE=[
+    /parmar\s+(sir|academy)/i,
+    /(foundation|revision|new|coaching|demo|upcoming|next|weekend)\s+batch|\bbatch\b\s*(starts|starting|link|join|now)/i,
+    /\btelegram\b/i,
+    /\b(subscribe|do subscribe|like\s*,?\s*share|share\s*&?\s*subscribe)\b/i,
+    /bell\s*icon|press the bell|notification bell/i,
+    /\bnext\s+(session|class|lecture)\b/i,
+    /\b(digital notes|free content)\b/i,
+    /\bpdf(s)?\b.*(link|description|telegram|app|download|share)/i,
+    /(available|shared)\b.*(app|telegram|description|link)/i,
+    /academy\s*app|play\s*store|app\s*store|download the app/i,
+    /https?:\/\/|www\./i,
+    /\b(join|download|follow us|like this video|share this video)\b.*(link|channel|app|telegram|now|below)/i,
+    /^\s*resources?\s*:?\s*$/i
+  ];
+  var JUNK_HEAD=/^\s*(resources?|batches?|our\s*classes|classes|social|links?|join\s*us|download|follow|next\s*(session|class))\b/i;
+  function isJunkLine(l){ for(var k=0;k<JUNK_LINE.length;k++){ if(JUNK_LINE[k].test(l)) return true; } return false; }
+  function stripJunk(md){
+    var lines=(md||"").replace(/\r/g,"").split("\n"), out=[], i=0, removed=0;
+    while(i<lines.length){
+      var l=lines[i], tl=l.trim();
+      var h=tl.match(/^(#{1,6})\s+(.*)/);
+      if(h && (JUNK_HEAD.test(h[2]) || isJunkLine(h[2]))){       // junk heading -> drop whole section
+        var lvl=h[1].length; i++; removed++;
+        while(i<lines.length){
+          var hh=lines[i].trim().match(/^(#{1,6})\s+/);
+          if(hh && hh[1].length<=lvl) break;
+          if(lines[i].trim()!=="") removed++;
+          i++;
+        }
+        continue;
+      }
+      if(tl!=="" && isJunkLine(l)){ removed++; i++; continue; }
+      out.push(l); i++;
+    }
+    return { text: out.join("\n").replace(/\n{3,}/g,"\n\n").trim(), removed: removed };
   }
 
   var KEY_RE=/^\s*(key\s*facts?|important|imp\.?|remember|note|yaad\s*rakh\w*|zaruri|jaruri)\s*[:\-\u2013]/i;
@@ -362,7 +420,9 @@
       if(j.warning==="no_captions"||j.error==="no_captions"){ setStatus("⚠️ This video has no captions, so notes can't be generated yet.",true); $("page").innerHTML='<div class="placeholder">No captions on this video.</div>'; return; }
       var content=j.content||"";
       if(!content){ setStatus("⚠️ Empty response from server.",true); return; }
-      setStatus("✅ Done in "+secs+"s.");
+      var removed=0;
+      if($("clean").checked){ var cj=stripJunk(content); content=cj.text; removed=cj.removed; }
+      setStatus("✅ Done in "+secs+"s."+(removed?"  ·  🧹 removed "+removed+" promo/junk line"+(removed>1?"s":""):""));
       $("meta").textContent=(j.provider||"ai")+" · "+(j.model||"")+" · "+(j.cached?"cached copy":"fresh")+" · "+lang;
       $("page").innerHTML=mdToHandwritten(content);
     }).catch(function(e){
