@@ -572,17 +572,42 @@ async function saveGroqConfig() {
    config/ai doc (merge) so the proxy reads it via Firebase Admin. Leaving the
    base URL blank makes /api/study fall back to the Groq key above. The key
    lives only in Firestore — never in the codebase. */
+const MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
+function splitStudyKeys(raw) {
+  return String(raw || '').split(/[\n,]+/).map(function (k) { return k.trim(); }).filter(Boolean);
+}
 async function saveStudyAiConfig() {
-  const rawKeys = (document.getElementById('study-api-keys') || {}).value || '';
-  const model   = (document.getElementById('study-model')   || {}).value || 'mistral-large';
-  const keys = rawKeys.split(/[\n,]+/).map(function(k){ return k.trim(); }).filter(Boolean);
+  const provider = ((document.getElementById('study-provider') || {}).value) || 'bynara';
+  const byKeys   = splitStudyKeys((document.getElementById('bynara-api-keys') || {}).value);
+  const byModel  = (((document.getElementById('bynara-model') || {}).value) || 'mistral-large').trim();
+  const msKeys   = splitStudyKeys((document.getElementById('mistral-api-keys') || {}).value);
+  const msModel  = (((document.getElementById('mistral-model') || {}).value) || 'mistral-large-latest').trim();
+
+  // "Active mirror": the fields youtube-turbo-proxy reads (studyApiKeys /
+  // studyModel / studyBaseUrl). We copy the selected provider's values here so
+  // the proxy only needs those three. Both providers' raw configs are kept
+  // separately, so switching never loses the other's keys.
+  const active = (provider === 'mistral')
+    ? { keys: msKeys, model: msModel, baseUrl: MISTRAL_BASE_URL }
+    : { keys: byKeys, model: byModel, baseUrl: '' };
+
+  if (!active.keys.length) {
+    showToast('⚠️ Add at least one ' + (provider === 'mistral' ? 'Mistral' : 'Bynara') + ' API key (or switch provider)');
+  }
   try {
     await db.collection('config').doc('ai').set({
-      studyApiKeys: keys, studyModel: model.trim(),
+      studyProvider: provider,
+      bynaraApiKeys: byKeys,  bynaraModel: byModel,
+      mistralApiKeys: msKeys, mistralModel: msModel,
+      studyApiKeys: active.keys, studyModel: active.model, studyBaseUrl: active.baseUrl,
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-    AI_CONFIG.studyApiKeys = keys; AI_CONFIG.studyModel = model.trim();
-    showToast('✅ Study AI saved (' + keys.length + ' key' + (keys.length === 1 ? '' : 's') + ')');
+    AI_CONFIG.studyProvider = provider;
+    AI_CONFIG.bynaraApiKeys = byKeys;  AI_CONFIG.bynaraModel = byModel;
+    AI_CONFIG.mistralApiKeys = msKeys; AI_CONFIG.mistralModel = msModel;
+    AI_CONFIG.studyApiKeys = active.keys; AI_CONFIG.studyModel = active.model; AI_CONFIG.studyBaseUrl = active.baseUrl;
+    showToast('✅ Study AI saved — active: ' + (provider === 'mistral' ? 'Mistral' : 'Bynara') +
+              ' (' + active.keys.length + ' key' + (active.keys.length === 1 ? '' : 's') + ')');
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }
@@ -775,35 +800,100 @@ function renderAiStudy() {
     'Keys &amp; models, what users can see, and usage limits.' +
     '</div>';
 
-  /* ── Study AI (Notes/Quiz) Card — Bynara: key(s) + model only ── */
-  var sKeysRaw = (AI_CONFIG && AI_CONFIG.studyApiKeys)
-                 || (AI_CONFIG && AI_CONFIG.studyApiKey ? [AI_CONFIG.studyApiKey] : []);
-  var sKeysArr = Array.isArray(sKeysRaw) ? sKeysRaw
-                 : String(sKeysRaw).split(/[\n,]+/).map(function(k){return k.trim();}).filter(Boolean);
-  var sKeysText = sKeysArr.join('\n');
-  var sModel = (AI_CONFIG && AI_CONFIG.studyModel) || 'mistral-large';
+  /* ── Study AI (Notes/Quiz) Card — Bynara + Mistral, pick which is active ── */
+  var studyProvider = (AI_CONFIG && AI_CONFIG.studyProvider) || 'bynara';
+  if (studyProvider !== 'mistral') studyProvider = 'bynara';   // guard stale values
+
+  function toKeyArr(raw) {
+    if (!raw) return [];
+    return Array.isArray(raw) ? raw.filter(Boolean)
+           : String(raw).split(/[\n,]+/).map(function(k){return k.trim();}).filter(Boolean);
+  }
+  function modelOptsHtml(list, sel) {
+    var opts = list.map(function(m){
+      return '<option value="' + esc(m) + '"' + (m === sel ? ' selected' : '') + '>' + esc(m) + '</option>';
+    }).join('');
+    if (list.indexOf(sel) === -1 && sel) {
+      opts = '<option value="' + esc(sel) + '" selected>' + esc(sel) + ' (custom)</option>' + opts;
+    }
+    return opts;
+  }
+  function studyBadge(p) {
+    return '<span style="font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:999px;' +
+      (studyProvider === p ? 'background:var(--accent,#00c896);color:#04120d;' : 'background:#e5e7eb;color:#555;') +
+      '">' + (studyProvider === p ? '● ACTIVE' : 'inactive') + '</span>';
+  }
+
+  /* Bynara config (fall back to legacy studyApiKeys/studyModel so an existing
+     setup keeps working). */
+  var byKeysArr = toKeyArr((AI_CONFIG && AI_CONFIG.bynaraApiKeys)
+                    || (AI_CONFIG && AI_CONFIG.studyApiKeys)
+                    || (AI_CONFIG && AI_CONFIG.studyApiKey));
+  var byModel   = (AI_CONFIG && AI_CONFIG.bynaraModel) || (AI_CONFIG && AI_CONFIG.studyModel) || 'mistral-large';
   var BYNARA_MODELS = ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3'];
-  if (BYNARA_MODELS.indexOf(sModel) === -1) BYNARA_MODELS.unshift(sModel);
-  var modelOpts = BYNARA_MODELS.map(function(m){
-    return '<option value="' + esc(m) + '"' + (m === sModel ? ' selected' : '') + '>' + esc(m) + '</option>';
-  }).join('');
+
+  /* Mistral config (dedicated key field — official Mistral API, OpenAI-compatible). */
+  var msKeysArr = toKeyArr(AI_CONFIG && AI_CONFIG.mistralApiKeys);
+  var msModel   = (AI_CONFIG && AI_CONFIG.mistralModel) || 'mistral-large-latest';
+  var MISTRAL_MODELS = ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest', 'open-mistral-nemo'];
+
   s += '<div class="card" style="margin-bottom:12px;">' +
-    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz) — Bynara</h3>' +
+    '<h3 style="margin:0 0 4px;">📚 Study AI (Notes / Quiz)</h3>' +
     '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
-      'Transcript → notes/quiz (<code>/api/study</code>). ~1M context, so poori lecture ek hi call mein. ' +
-      '<b>Ek se zyada key</b> daal sakte ho (har line pe ek) — ek limit/fail ho to agli apne aap use hogi.' +
+      'Transcript → notes/quiz (<code>/api/study</code>). Configure <b>both</b> providers and pick which is ' +
+      '<b>active</b>. Keys are kept separately, so switching never wipes the other. <b>Ek se zyada key</b> ' +
+      '(har line pe ek) — ek limit/fail ho to agli apne aap use hogi.' +
     '</div>' +
-    '<label style="font-size:.8rem;color:#555;">API key(s) — one per line</label>' +
-    '<textarea id="study-api-keys" placeholder="key1&#10;key2&#10;key3" ' +
-      'style="width:100%;min-height:72px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(sKeysText) + '</textarea>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-      '<label style="font-size:.85rem;">Model</label>' +
-      '<select id="study-model" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:200px;">' + modelOpts + '</select>' +
-      '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
+
+    /* active-provider selector */
+    '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">' +
+      '<label style="font-size:.85rem;font-weight:700;">Active provider</label>' +
+      '<select id="study-provider" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;">' +
+        '<option value="bynara"'  + (studyProvider === 'bynara'  ? ' selected' : '') + '>Bynara</option>' +
+        '<option value="mistral"' + (studyProvider === 'mistral' ? ' selected' : '') + '>Mistral</option>' +
+      '</select>' +
     '</div>' +
+
+    /* Bynara section */
+    '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+        '<b style="font-size:.85rem;">Bynara</b> ' + studyBadge('bynara') +
+        '<span class="muted" style="font-size:.68rem;">~1M context · OpenAI-compatible</span>' +
+      '</div>' +
+      '<label style="font-size:.78rem;color:#555;">Bynara API key(s) — one per line</label>' +
+      '<textarea id="bynara-api-keys" placeholder="key1&#10;key2" ' +
+        'style="width:100%;min-height:60px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(byKeysArr.join('\n')) + '</textarea>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+        '<label style="font-size:.82rem;">Model</label>' +
+        '<select id="bynara-model" style="font-size:.82rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:200px;">' +
+          modelOptsHtml(BYNARA_MODELS, byModel) + '</select>' +
+      '</div>' +
+    '</div>' +
+
+    /* Mistral section (dedicated) */
+    '<div style="border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:10px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+        '<b style="font-size:.85rem;">🌫️ Mistral</b> ' + studyBadge('mistral') +
+        '<span class="muted" style="font-size:.68rem;">endpoint fixed: <code>' + esc(MISTRAL_BASE_URL) + '</code></span>' +
+      '</div>' +
+      '<label style="font-size:.78rem;color:#555;">Mistral API key(s) — one per line (sent as <code>Bearer</code>)</label>' +
+      '<textarea id="mistral-api-keys" placeholder="your-mistral-api-key" ' +
+        'style="width:100%;min-height:60px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(msKeysArr.join('\n')) + '</textarea>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+        '<label style="font-size:.82rem;">Model</label>' +
+        '<select id="mistral-model" style="font-size:.82rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:200px;">' +
+          modelOptsHtml(MISTRAL_MODELS, msModel) + '</select>' +
+      '</div>' +
+      '<div class="muted" style="font-size:.68rem;margin-top:6px;">🔑 Get a key at <a href="https://console.mistral.ai/api-keys" target="_blank">console.mistral.ai/api-keys</a>.</div>' +
+    '</div>' +
+
+    '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
     '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
-      (sKeysArr.length ? ('✅ ' + sKeysArr.length + ' key(s) · model: <b>' + esc(sModel) + '</b>')
-                       : '⚪ No Bynara key — /api/study will use the Groq key from the Telegram tab') +
+      (studyProvider === 'mistral'
+        ? (msKeysArr.length ? ('✅ Active: <b>Mistral</b> · ' + msKeysArr.length + ' key(s) · model: <b>' + esc(msModel) + '</b>')
+                            : '⚠️ Active: <b>Mistral</b> but no Mistral key added')
+        : (byKeysArr.length ? ('✅ Active: <b>Bynara</b> · ' + byKeysArr.length + ' key(s) · model: <b>' + esc(byModel) + '</b>')
+                            : '⚪ Active: <b>Bynara</b> but no key — /api/study will use the Groq key from the Telegram tab')) +
     '</div>' +
     '</div>';
 
