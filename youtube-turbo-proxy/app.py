@@ -819,7 +819,19 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
                 break                          # → next key
             if r.status_code == 200:
                 if not _AI_STREAM:
-                    return r.json()["choices"][0]["message"]["content"]
+                    # Robust extraction: some reasoning models (e.g. Cerebras
+                    # gpt-oss) may omit "content" and only return "reasoning".
+                    try:
+                        msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+                    except (ValueError, KeyError, IndexError, TypeError):
+                        msg = {}
+                    content = msg.get("content")
+                    if content:
+                        return content
+                    # no usable content (all tokens spent on reasoning) → soft
+                    # failure so failover / retry can kick in
+                    last = "empty content (key %d) — model returned no answer" % (ki + 1)
+                    break                      # → next key
                 try:
                     txt = _read_stream(r)      # keeps the connection alive → no 524
                 except Exception as exc:       # noqa: BLE001  (stream interrupted)
