@@ -1462,18 +1462,21 @@ def api_study():
     if mode != "notes" or style not in ("mcq",):
         style = ""
 
-    # keep the cache key IDENTICAL to before when there's no focus/style, so
-    # existing cached results are still reused; focus (quiz/cards) and style
-    # (notes) each get their own bucket and never collide.
+    # Cache key is MODEL-AGNOSTIC: a note is identified by its CONTENT dimensions
+    # (video + mode + language + question-count + focus/style), NOT by which model
+    # made it. So picking a different model for the same video/mode/language reuses
+    # the existing note instead of regenerating a duplicate (saves storage + quota),
+    # and the "available languages" bar shows every language regardless of model.
+    # Use the "Regenerate" button (?refresh=1) to remake it with the chosen model.
     if fkey:
-        ckey = "%s:%s:%s:%s:%s::%s" % (video_id, mode, out_lang, model, num_q, fkey)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q, fkey)
+        ckey = "%s:%s:%s:%s::%s" % (video_id, mode, out_lang, num_q, fkey)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, fkey)
     elif style:
-        ckey = "%s:%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q, style)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q, style)
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, num_q, style)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, style)
     else:
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, model, num_q)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, model, num_q)
+        ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, num_q)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q)
     now = time.time()
     if not force:
         with _study_lock:
@@ -1579,15 +1582,17 @@ def api_study_langs():
     style = (request.args.get("style") or "").strip().lower()
     if mode != "notes" or style not in ("mcq",):
         style = ""
+    # model-agnostic: a language is "available" if a note exists for it, no matter
+    # which model made it (cache key no longer includes the model).
     req_model = (request.args.get("model") or "").strip()[:80]
-    ai = _load_ai_config(req_model or None)
-    model = ai.get("model") or ""
-    if not model:
-        return jsonify({"available": []})
+    try:
+        model = (_load_ai_config(req_model or None) or {}).get("model") or ""
+    except Exception:  # noqa: BLE001
+        model = ""
     available = []
     for lang in _STUDY_LANGS:
-        fs_id = _fs_doc_id(video_id, mode, lang, model, num_q, style) if style \
-            else _fs_doc_id(video_id, mode, lang, model, num_q)
+        fs_id = _fs_doc_id(video_id, mode, lang, num_q, style) if style \
+            else _fs_doc_id(video_id, mode, lang, num_q)
         try:
             if _fs_get("study", fs_id):
                 available.append(lang)
