@@ -1222,6 +1222,12 @@ def api_study():
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel "
                                   "(Study AI \u2014 Bynara, or Groq)."}), 503
+    # Optional per-request model override from the study panel's model dropdown.
+    # Blank = admin-configured default. The dropdown only lists the ACTIVE
+    # provider's models (via /api/status), so any choice works with the key.
+    req_model = (request.args.get("model") or "").strip()[:80]
+    if req_model:
+        ai["model"] = req_model
     model = ai["model"]
 
     # ?refresh=1 (or nocache=1) forces a fresh generation, ignoring BOTH the
@@ -1347,7 +1353,8 @@ def api_study_langs():
         num_q = 25
     num_q = max(1, min(100, num_q))
     ai = _load_ai_config()
-    model = ai.get("model") or ""
+    req_model = (request.args.get("model") or "").strip()[:80]
+    model = req_model or ai.get("model") or ""
     if not model:
         return jsonify({"available": []})
     available = []
@@ -1367,6 +1374,14 @@ STUDY_TEST_PROVIDERS = {
     "bynara":   {"url": BYNARA_URL,                                    "keyField": "bynaraApiKeys",   "modelField": "bynaraModel",   "def": "mistral-large"},
     "mistral":  {"url": "https://api.mistral.ai/v1/chat/completions",  "keyField": "mistralApiKeys",  "modelField": "mistralModel",  "def": "mistral-large-latest"},
     "cerebras": {"url": "https://api.cerebras.ai/v1/chat/completions", "keyField": "cerebrasApiKeys", "modelField": "cerebrasModel", "def": "gpt-oss-120b"},
+}
+# Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
+# Surfaced via /api/status so the study panel's model dropdown only offers the
+# ACTIVE provider's models — so whatever the user picks is always valid.
+STUDY_PROVIDER_MODELS = {
+    "bynara":   ["mistral-large", "mistral-medium-3-5", "tencent-hy3"],
+    "mistral":  ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest", "open-mistral-nemo"],
+    "cerebras": ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
 }
 
 
@@ -1533,6 +1548,16 @@ def api_status():
                 cfg = doc.to_dict() or {}
                 out["showRegenerate"] = bool(cfg.get("showRegenerate", False))
                 global_focus = bool(cfg.get("showFocusBox", False))
+                # Active provider's model list, so the study panel's model
+                # dropdown offers only valid choices for the configured key.
+                prov = (cfg.get("studyProvider") or "").strip().lower()
+                _models = list(STUDY_PROVIDER_MODELS.get(prov, []))
+                _saved = (cfg.get("studyModel") or "").strip()
+                if _saved and _saved not in _models:
+                    _models.insert(0, _saved)
+                out["studyProvider"] = prov
+                out["studyModels"] = _models
+                out["studyModel"] = _saved
         except Exception:  # noqa: BLE001
             pass
     uid = (request.args.get("uid") or "").strip()
@@ -1566,6 +1591,9 @@ def api_tutor():
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503
+    req_model = (request.args.get("model") or body.get("model") or "").strip()[:80]
+    if req_model:
+        ai["model"] = req_model
 
     uid = (request.args.get("uid") or body.get("uid") or "").strip()
     if not _is_unlimited(uid):
