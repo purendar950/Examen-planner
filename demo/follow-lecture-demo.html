@@ -147,7 +147,7 @@
     <div class="subtitle">Comprehensive notes auto-highlight & scroll to wherever the teacher is. This page uses a MOCK player so you can test without a real video.</div>
     <div class="note-banner">
       ▶ Press <b>Play</b> (or drag the scrubber) to simulate the teacher speaking.
-      <b>🎯 Follow lecture</b> is ON — the current note stays highlighted in <b>yellow</b> and centered in the middle as the lecture moves.
+      <b>🎯 Follow lecture</b> is ON — the current note stays highlighted in <b>yellow</b> and pinned near the top as the lecture moves.
       Timestamps are hidden (they still drive the tracking under the hood). Scrolling the notes yourself pauses auto-follow for a few seconds.
       <br>This is exactly the behaviour that will be added to your comprehensive notes.
     </div>
@@ -300,14 +300,17 @@
     return true;
   }
 
-  // Smoothly bring the active block to the MIDDLE of the notes container.
-  // getBoundingClientRect keeps it robust regardless of offsetParent. Called
-  // only when the active block changes → smooth, centered, no jitter.
-  function centerActive(){
+  // Smoothly pin the active block near the TOP of the notes container — offset
+  // ~15% down so one line of prior context stays visible and the very-top edge
+  // never feels cramped. getBoundingClientRect keeps it robust regardless of
+  // offsetParent. Called only when the active block changes → smooth, no jitter.
+  var TOP_OFFSET_RATIO = 0.15;
+  function followScroll(){
     var el = blocks[lastActive]; if (!el) return;
     var sr = scroller.getBoundingClientRect();
     var er = el.getBoundingClientRect();
-    scroller.scrollBy({ top: (er.top - sr.top) - (sr.height / 2) + (er.height / 2), behavior:'smooth' });
+    var offset = sr.height * TOP_OFFSET_RATIO;
+    scroller.scrollBy({ top: (er.top - sr.top) - offset, behavior:'smooth' });
   }
 
   /* ── Follow toggle (persisted) — defaults ON in the demo so it's testable
@@ -317,7 +320,7 @@
   function renderFollow(){ followEl.classList.toggle('on', follow); }
   followEl.onclick = function(){
     follow = !follow; localStorage.setItem('demoFollow', follow?'1':'0'); renderFollow();
-    if (follow) { userScrollUntil = 0; centerActive(); }
+    if (follow) { userScrollUntil = 0; followScroll(); }
   };
   renderFollow();
 
@@ -366,9 +369,9 @@
     timeEl.textContent = fmt(t) + ' / ' + fmt(DURATION);
     seek.value = t;
     paintNowTeaching();
-    // Re-center only when the active block changes (keeps the highlight in the
-    // middle as the lecture moves, without constant micro-scrolling).
-    if (scroll && follow && changed && Date.now() > userScrollUntil) centerActive();
+    // Re-scroll only when the active block changes (keeps the highlight pinned
+    // near the top as the lecture moves, without constant micro-scrolling).
+    if (scroll && follow && changed && Date.now() > userScrollUntil) followScroll();
   }
 
   function setTime(v, doScroll){ t = Math.min(DURATION, Math.max(0, v)); refresh(doScroll); }
@@ -392,7 +395,7 @@
   document.getElementById('fwd-btn').onclick  = function(){ setTime(t+10, true); };
   // Dragging the scrubber is a SEEK, not a manual note-scroll → don't suppress
   // follow; just center the newly-active block.
-  seek.addEventListener('input', function(){ setTime(parseFloat(seek.value), true); if (follow) centerActive(); });
+  seek.addEventListener('input', function(){ setTime(parseFloat(seek.value), true); if (follow) followScroll(); });
   speedEl.addEventListener('change', function(){ speed = parseFloat(speedEl.value) || 1; });
 
   /* ── init ── */
