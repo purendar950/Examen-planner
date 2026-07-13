@@ -762,6 +762,20 @@
       if (autoShow && avail.indexOf(chosen) !== -1) loadLang(mode, n, chosen);
     }).catch(function () {});
   }
+  // Refresh the "already generated" bar for whatever tab is active (used when
+  // the language dropdown changes). Notes/Cards auto-open a cached language;
+  // Quiz only lists it (a quiz should never auto-start).
+  function refreshLangBar(autoShow) {
+    if (state.tab === 'notes') {
+      var m = document.getElementById('ai-notes-mode');
+      checkLangs(m ? m.value : 'notes', 25, !!autoShow);
+    } else if (state.tab === 'cards') {
+      checkLangs('flashcards', 25, !!autoShow);
+    } else if (state.tab === 'quiz') {
+      var qn = document.getElementById('ai-qn');
+      checkLangs('quiz', parseInt(qn && qn.value, 10) || 25, false);
+    }
+  }
 
   /* ── Download as PDF (A4) — client-side print, nothing stored on the server ── */
   var PDF_CSS =
@@ -1217,7 +1231,12 @@
       };
     });
     var lang = document.getElementById('ai-lang');
-    if (lang) lang.onchange = function () { setLang(lang.value); };
+    if (lang) lang.onchange = function () {
+      setLang(lang.value);
+      // Refresh the "already generated" bar for the current tab and, if the
+      // newly-chosen language is already cached, open it instantly (no quota).
+      refreshLangBar(true);
+    };
     var provSel = document.getElementById('ai-provider');
     if (provSel) provSel.onchange = onStudyProviderChange;
     var modelSel = document.getElementById('ai-model');

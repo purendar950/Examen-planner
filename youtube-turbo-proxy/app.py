@@ -202,13 +202,41 @@ def _fs_get(collection, doc_id):
         return None
 
 
+# Firestore hard-caps a single document at 1,048,576 bytes. Stay safely under.
+_FS_MAX_BYTES = 1_000_000
+
+
 def _fs_set(collection, doc_id, data):
+    """Persist a document. Returns True on success, False otherwise.
+
+    Previously this swallowed every error, so generated study material was
+    silently NOT saved (had to be regenerated, and never showed as an "already
+    available" language). Two real causes on the free tier:
+      * transient Firestore errors (DeadlineExceeded / ServiceUnavailable) — now
+        retried a few times with a short backoff, and
+      * a document over Firestore's ~1 MiB limit — now detected and logged
+        loudly instead of failing opaquely.
+    """
     if not _fb_db:
-        return
+        return False
     try:
-        _fb_db.collection(collection).document(doc_id).set(data)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("firestore set %s/%s failed: %s", collection, doc_id, exc)
+        approx = len(json.dumps(data, ensure_ascii=False, default=str).encode("utf-8"))
+    except Exception:  # noqa: BLE001
+        approx = 0
+    if approx and approx > _FS_MAX_BYTES:
+        log.error("firestore set %s/%s SKIPPED: ~%d bytes exceeds Firestore's ~1MiB "
+                  "document limit", collection, doc_id, approx)
+        return False
+    last = None
+    for attempt in range(3):
+        try:
+            _fb_db.collection(collection).document(doc_id).set(data)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            last = exc
+            time.sleep(0.5 * (attempt + 1))
+    log.error("firestore set %s/%s failed after 3 attempts: %s", collection, doc_id, last)
+    return False
 
 
 def _base_ydl_opts():
@@ -1379,7 +1407,11 @@ def api_study():
     data.update(result)
     with _study_lock:
         _study_cache[ckey] = {"ts": time.time(), "data": data}
-    _fs_set("study", fs_id, data)             # persist for next time (all users)
+    # persist for next time (all users); surface whether it actually saved so a
+    # silent Firestore failure is visible instead of "why isn't it cached?".
+    data["persisted"] = _fs_set("study", fs_id, data)
+    if not data["persisted"]:
+        log.warning("study %s NOT persisted (see errors above) — will regenerate next time", fs_id)
     return jsonify(data)
 
 
