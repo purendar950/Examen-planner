@@ -906,20 +906,21 @@
       renderTutor();
     }
   }
-  // Fill the model dropdown from the server's list (active provider's models).
-  // Keeps the user's choice if still offered; otherwise falls back to Auto so a
-  // stale pick (e.g. after the admin switches provider) can never break a call.
-  function applyServerModels(list) {
+  // Show ONLY the model the admin picked as active in the admin panel
+  // (config/ai.studyModel, surfaced via /api/status.studyModel) — not the whole
+  // provider catalogue. Falls back to "Auto" (server default) if none is set.
+  function applyServerModels(status) {
     var sel = document.getElementById('ai-model');
     if (!sel) return;
-    var cur = outModel();
-    var opts = [['', 'Auto']];
-    (list || []).forEach(function (m) { if (m) opts.push([String(m), String(m)]); });
-    var valid = opts.some(function (o) { return o[0] === cur; });
-    if (cur && !valid) { setModel(''); cur = ''; }   // stale model → reset to Auto
-    var html = opts.map(function (o) {
-      return '<option value="' + esc(o[0]) + '"' + (o[0] === cur ? ' selected' : '') + '>' + esc(o[1]) + '</option>';
-    }).join('');
+    var only = (status && status.studyModel) ? String(status.studyModel).trim() : '';
+    var html;
+    if (only) {
+      html = '<option value="' + esc(only) + '" selected>' + esc(only) + '</option>';
+      setModel(only);        // every request uses the admin-selected model
+    } else {
+      html = '<option value="" selected>Auto</option>';
+      setModel('');          // no model set → let the proxy use its default
+    }
     if (sel.innerHTML !== html) sel.innerHTML = html;
   }
   function panelHtml() {
@@ -959,7 +960,7 @@
         clearTimeout(to);
         _showRegen = !!(j && j.showRegenerate);
         _showFocus = !!(j && j.showFocusBox);
-        if (j) applyServerModels(j.studyModels);   // fill model dropdown with the active provider's models
+        if (j) applyServerModels(j);   // show ONLY the admin-selected active model
         applyFocusVisibility();   // reflect focus-box visibility without wiping any in-progress quiz
         if (j && j.ok) {
           if (j.cachedTranscript) setDot('cached', 'Transcript already generated — instant');
