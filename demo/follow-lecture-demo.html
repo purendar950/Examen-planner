@@ -102,15 +102,15 @@
   }
 
   /* highlightable blocks */
-  .blk { position:relative; border-radius:8px; padding:4px 10px; margin:2px 0; transition:background .3s ease, box-shadow .3s ease; }
+  .blk { position:relative; border-radius:6px; padding:4px 10px; margin:2px 0; transition:background .25s ease, box-shadow .25s ease; }
   .blk.active {
-    background:linear-gradient(90deg, rgba(0,200,150,.16), rgba(0,200,150,.03) 70%, transparent);
-    box-shadow:inset 3px 0 0 var(--accent);
+    background:rgba(255,214,0,.55);            /* yellow highlighter */
+    box-shadow:inset 4px 0 0 #f5a800, 0 0 0 1px rgba(245,168,0,.35);
   }
   .blk.active::after {
     content:"▶ now"; position:absolute; top:6px; right:8px;
     font-family:system-ui,Arial,sans-serif; font-size:.58rem; font-weight:800;
-    color:var(--accent); letter-spacing:.06em; opacity:.85;
+    color:#a15c00; letter-spacing:.06em; opacity:.9;
   }
 
   .sec { display:flex; align-items:center; gap:9px; font-weight:700; font-size:1.2rem; margin:6px 0 4px; }
@@ -302,20 +302,34 @@
     return idx;
   }
 
-  // Smooth-scroll active block to centre of the notes container only.
-  function scrollToActive(){
+  // Keep the active block visible inside the notes container. Only scrolls when
+  // the block is (near) out of view — measured with getBoundingClientRect so it
+  // is robust regardless of offsetParent. This is what keeps the highlight
+  // ALWAYS visible without constantly re-centering/jumping.
+  function ensureVisible(force){
     var el = blocks[lastActive]; if (!el) return;
-    var target = el.offsetTop - (scroller.clientHeight/2) + (el.clientHeight/2);
-    scroller.scrollTo({ top: Math.max(0, target), behavior:'smooth' });
+    var sr = scroller.getBoundingClientRect();
+    var er = el.getBoundingClientRect();
+    var margin = 28;
+    if (force) {                                   // center it (used on toggle/seek)
+      scroller.scrollBy({ top: (er.top - sr.top) - (sr.height/2) + (er.height/2), behavior:'smooth' });
+      return;
+    }
+    if (er.top < sr.top + margin) {
+      scroller.scrollBy({ top: er.top - sr.top - margin, behavior:'smooth' });
+    } else if (er.bottom > sr.bottom - margin) {
+      scroller.scrollBy({ top: er.bottom - sr.bottom + margin, behavior:'smooth' });
+    }
   }
 
-  /* ── Follow toggle (persisted) ── */
+  /* ── Follow toggle (persisted) — defaults ON in the demo so it's testable
+        immediately (only stays off if you explicitly turned it off). ── */
   var followEl = document.getElementById('follow');
-  var follow = localStorage.getItem('demoFollow') === '1';
+  var follow = localStorage.getItem('demoFollow') !== '0';
   function renderFollow(){ followEl.classList.toggle('on', follow); }
   followEl.onclick = function(){
     follow = !follow; localStorage.setItem('demoFollow', follow?'1':'0'); renderFollow();
-    if (follow) scrollToActive();
+    if (follow) { userScrollUntil = 0; ensureVisible(true); }
   };
   renderFollow();
 
@@ -329,7 +343,9 @@
   notesRoot.addEventListener('click', function(e){
     var a = e.target.closest ? e.target.closest('.ai-ts') : null;
     if (!a) return;
+    userScrollUntil = 0;                          // a click-seek is not a manual scroll
     setTime(parseInt(a.getAttribute('data-s'),10) || 0, true);
+    if (follow) ensureVisible(true);              // center the seeked block
   });
 
   /* ══════════════════ MOCK PLAYER ══════════════════ */
@@ -364,7 +380,7 @@
     timeEl.textContent = fmt(t) + ' / ' + fmt(DURATION);
     seek.value = t;
     paintNowTeaching();
-    if (scroll && follow && Date.now() > userScrollUntil) scrollToActive();
+    if (scroll && follow && Date.now() > userScrollUntil) ensureVisible();
   }
 
   function setTime(v, doScroll){ t = Math.min(DURATION, Math.max(0, v)); refresh(doScroll); }
@@ -386,7 +402,9 @@
   playBtn.onclick = function(){ playing ? pause() : play(); };
   document.getElementById('back-btn').onclick = function(){ setTime(t-10, true); };
   document.getElementById('fwd-btn').onclick  = function(){ setTime(t+10, true); };
-  seek.addEventListener('input', function(){ userScrollUntil = Date.now()+3000; setTime(parseFloat(seek.value), true); });
+  // Dragging the scrubber is a SEEK, not a manual note-scroll → don't suppress
+  // follow; just center the newly-active block.
+  seek.addEventListener('input', function(){ setTime(parseFloat(seek.value), true); if (follow) ensureVisible(true); });
   speedEl.addEventListener('change', function(){ speed = parseFloat(speedEl.value) || 1; });
 
   /* ── init ── */
