@@ -490,8 +490,14 @@
     setStatus('<span class="spin"></span> Generating '+(wantMcq?"MCQ ":"")+mode+' ('+lang+') for <code>'+id+'</code>… first run can take ~30–90s.');
     $("page").innerHTML='<div class="placeholder"><span class="spin"></span> Waiting for your server + AI…</div>';
 
+    // hard timeout so the UI never hangs forever waiting on a slow/asleep server
+    var ctrl = ('AbortController' in window) ? new AbortController() : null;
+    var TIMEOUT_MS = 240000;   // 4 min
+    var to = setTimeout(function(){ if(ctrl) ctrl.abort(); }, TIMEOUT_MS);
+
     var t0=Date.now();
-    fetch(url).then(function(r){return r.json();}).then(function(j){
+    fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function(r){return r.json();}).then(function(j){
+      clearTimeout(to);
       $("go").disabled=false;
       var secs=((Date.now()-t0)/1000).toFixed(1);
       if(j.error && j.error!=="no_captions"){ setStatus("❌ "+esc(j.error)+(j.detail?" — "+esc(j.detail):""),true); $("page").innerHTML='<div class="placeholder">No notes generated.</div>'; return; }
@@ -506,9 +512,17 @@
       $("meta").textContent=(j.provider||"ai")+" · "+(j.model||"")+" · "+serverStyle+" · "+(j.cached?"cached":"fresh")+" · "+lang;
       $("page").innerHTML = wantMcq ? renderMCQ(content) : mdToHandwritten(content);
     }).catch(function(e){
+      clearTimeout(to);
       $("go").disabled=false;
-      setStatus("❌ Request failed: "+esc(String(e))+". The server may be asleep — try again in a few seconds.",true);
-      $("page").innerHTML='<div class="placeholder">Request failed.</div>';
+      var aborted = e && (e.name==="AbortError");
+      if(aborted){
+        setStatus("⏱️ No response in 4 min — stopped waiting. Likely causes: the server is running the OLD code (no streaming, big chunks) or is asleep, or this is a livestream with no captions. "+
+                  (wantMcq?"MCQ needs the updated backend deployed (PR #245). ":"")+
+                  "Meanwhile try 🧪 Preview MCQ sample, or a normal (non-live) video.", true);
+      } else {
+        setStatus("❌ Request failed: "+esc(String(e))+". The server may be asleep — try again in a few seconds.", true);
+      }
+      $("page").innerHTML='<div class="placeholder">'+(aborted?"Timed out.":"Request failed.")+'</div>';
     });
   }
 
