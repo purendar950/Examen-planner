@@ -748,9 +748,10 @@ _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "48000"))
 # pass (no seams, no cross-chunk repetition, better topic consolidation), and
 # only very long lectures split — into a few big parts instead of many small
 # ones. Output caps are raised to match so single-pass notes aren't truncated.
-# MCQ output is more verbose per point, so it uses smaller values. All env-tunable.
-NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "20000"))      # topic notes input chunk
-NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "8000"))  # MCQ input chunk (smaller)
+# MCQ output is more verbose per point, so it keeps a smaller output cap.
+# All env-tunable.
+NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "30000"))      # topic notes input chunk
+NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "30000"))  # MCQ input chunk
 NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "4000"))         # topic notes output cap/part
 NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "3500"))  # MCQ output cap/part
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
