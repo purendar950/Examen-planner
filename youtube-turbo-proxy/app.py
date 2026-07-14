@@ -741,13 +741,18 @@ _AI_STREAM = os.environ.get("AI_STREAM", "1").strip().lower() not in ("0", "fals
 # lecture (~80k+ chars) makes Bynara slow enough to hit Cloudflare's ~100s 524.
 # ~48k chars (~12k tokens) keeps replies fast. Notes/quiz still use full text.
 _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "48000"))
-# Notes generation is chunked so EACH AI call stays well under Cloudflare's ~100s
-# limit (prevents 524 upstream timeouts). Smaller chunk + lower output cap = faster
-# per call. MCQ expands more per point, so it uses smaller values. All env-tunable.
-NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "7000"))       # topic notes input chunk
-NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "5000"))  # MCQ input chunk (smaller)
-NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "2400"))         # topic notes output cap/part
-NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "2400"))  # MCQ output cap/part
+# Notes generation is chunked ONLY so a single call doesn't run forever. The
+# response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
+# what actually prevents Cloudflare's ~100s 524 (tokens keep the connection
+# alive). So we use LARGE chunks: most lectures now render in a SINGLE coherent
+# pass (no seams, no cross-chunk repetition, better topic consolidation), and
+# only very long lectures split — into a few big parts instead of many small
+# ones. Output caps are raised to match so single-pass notes aren't truncated.
+# MCQ output is more verbose per point, so it uses smaller values. All env-tunable.
+NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "20000"))      # topic notes input chunk
+NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "8000"))  # MCQ input chunk (smaller)
+NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "4000"))         # topic notes output cap/part
+NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "3500"))  # MCQ output cap/part
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 _study_cache = {}
 _study_lock = threading.Lock()
