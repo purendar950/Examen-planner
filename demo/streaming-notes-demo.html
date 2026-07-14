@@ -182,7 +182,10 @@
     .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;background:transparent;padding:0 4mm;position:relative;z-index:1}
     .page::before{display:none}
     .caret{display:none}
-    .notes{column-count:2;column-gap:8mm;column-fill:balance}
+    /* column-fill:auto => fill left column to page bottom, then right, then next
+       page. Chrome mishandles `balance` on multi-page content and leaves the
+       right column empty on every page. */
+    .notes{column-count:2;column-gap:8mm;column-fill:auto}
     .notes .sec{column-span:all}
     .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
