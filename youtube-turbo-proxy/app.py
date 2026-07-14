@@ -2021,6 +2021,8 @@ STUDY_TEST_PROVIDERS = {
     "cerebras":   {"url": "https://api.cerebras.ai/v1/chat/completions",     "keyField": "cerebrasApiKeys",   "modelField": "cerebrasModel",   "def": "gpt-oss-120b"},
     "openrouter": {"url": "https://openrouter.ai/api/v1/chat/completions",   "keyField": "openrouterApiKeys", "modelField": "openrouterModel", "def": "nvidia/nemotron-3-ultra-550b-a55b:free"},
     "nvidia":     {"url": "https://integrate.api.nvidia.com/v1/chat/completions", "keyField": "nvidiaApiKeys",  "modelField": "nvidiaModel",     "def": "deepseek-ai/deepseek-v4-pro"},
+    # Google Gemini via its OpenAI-compatible endpoint (Authorization: Bearer key).
+    "google":     {"url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "keyField": "googleApiKeys", "modelField": "googleModel", "def": "gemini-flash-latest"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
@@ -2031,6 +2033,7 @@ STUDY_PROVIDER_MODELS = {
     "cerebras":   ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
     "openrouter": ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
     "nvidia":     ["deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash", "qwen/qwen3.5-397b-a17b", "nvidia/nemotron-3-nano-30b-a3b", "z-ai/glm-5.2", "minimaxai/minimax-m3"],
+    "google":     ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
 }
 
 
@@ -2094,7 +2097,7 @@ def _all_study_models(cfg):
     dropdown, so all pickable models actually work."""
     eff = _effective_provider_models(cfg)
     out = []
-    for pid in ("bynara", "mistral", "cerebras", "openrouter", "nvidia"):
+    for pid in ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google"):
         meta = STUDY_TEST_PROVIDERS.get(pid)
         if meta and _cfg_keys(cfg, meta["keyField"]):
             out.extend(eff.get(pid, []))
