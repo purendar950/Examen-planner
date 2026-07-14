@@ -1957,9 +1957,9 @@ def api_status():
                 # Grouped by provider (only those with a key) so the dropdown
                 # can label which model belongs to which provider.
                 _groups = []
-                _LABELS = {"openrouter": "OpenRouter"}
+                _LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA"}
                 _eff = _effective_provider_models(cfg)
-                for _pid in ("bynara", "mistral", "cerebras", "openrouter"):
+                for _pid in ("bynara", "mistral", "cerebras", "openrouter", "nvidia"):
                     _meta = STUDY_TEST_PROVIDERS.get(_pid)
                     if _meta and _cfg_keys(cfg, _meta["keyField"]):
                         _groups.append({"provider": _pid, "label": _LABELS.get(_pid, _pid.capitalize()),
