@@ -654,6 +654,70 @@ function studyModelFor(pid) {
   if (!m && pid === 'bynara') m = (AI_CONFIG && AI_CONFIG.studyModel);
   return m || p.def;
 }
+/* Effective model list for a provider: admin override (config/ai.providerModels)
+   if set, else the hardcoded default. */
+function studyModelsFor(pid) {
+  var ov = AI_CONFIG && AI_CONFIG.providerModels && AI_CONFIG.providerModels[pid];
+  if (Array.isArray(ov) && ov.length) return ov.slice();
+  return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
+}
+
+/* ── In-panel model manager (remove / add models per provider) ──────────────
+   Edits a working copy for the ACTIVE provider; "Save models" persists it to
+   config/ai.providerModels (merge), which the proxy reads to build the study
+   panel's dropdown. */
+var _modelsWork = null, _modelsWorkPid = null;
+function _modelsEnsure(pid) {
+  if (_modelsWorkPid !== pid) { _modelsWorkPid = pid; _modelsWork = studyModelsFor(pid); }
+  return _modelsWork;
+}
+function studyModelChipsHtml(pid) {
+  var list = _modelsEnsure(pid);
+  if (!list.length) return '<span class="muted" style="font-size:.72rem;">No models — add one below.</span>';
+  return list.map(function (m, i) {
+    return '<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,0,0,.05);border:1px solid var(--border);border-radius:999px;padding:3px 10px;font-size:.75rem;font-family:monospace;">' +
+      esc(m) + '<a title="Remove" onclick="removeStudyModel(' + i + ')" style="cursor:pointer;color:#c0392b;font-weight:800;">✕</a></span>';
+  }).join('');
+}
+function paintModelsManage() {
+  var pid = selectedStudyProvider();
+  var host = document.getElementById('study-models-manage');
+  if (host) host.innerHTML = studyModelChipsHtml(pid);
+  var lbl = document.getElementById('study-models-pid');
+  if (lbl) lbl.textContent = (STUDY_PROVIDERS[pid] || {}).label || pid;
+  var ms = document.getElementById('study-model');   // keep active-model dropdown in sync
+  if (ms) ms.innerHTML = studyModelOptions(_modelsEnsure(pid), studyModelFor(pid));
+}
+function removeStudyModel(i) {
+  var list = _modelsEnsure(selectedStudyProvider());
+  if (i >= 0 && i < list.length) list.splice(i, 1);
+  paintModelsManage();
+}
+function addStudyModel() {
+  var list = _modelsEnsure(selectedStudyProvider());
+  var inp = document.getElementById('study-model-add');
+  var v = inp ? inp.value.trim() : '';
+  if (!v) { showToast('Type a model id first'); return; }
+  if (list.indexOf(v) !== -1) { showToast('Already in the list'); return; }
+  list.push(v); if (inp) inp.value = '';
+  paintModelsManage();
+}
+async function saveStudyModels() {
+  var pid = selectedStudyProvider();
+  var list = _modelsEnsure(pid).slice();
+  var pm = Object.assign({}, (AI_CONFIG && AI_CONFIG.providerModels) || {});
+  pm[pid] = list;
+  try {
+    await db.collection('config').doc('ai').set({
+      providerModels: pm,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    AI_CONFIG.providerModels = pm;
+    showToast('✅ Models saved for ' + ((STUDY_PROVIDERS[pid] || {}).label || pid) + ' (' + list.length + ')');
+    render();
+  } catch (e) { showToast('Failed: ' + e.message); }
+}
+
 function studyModelOptions(list, sel) {
   var opts = list.map(function (m) {
     return '<option value="' + esc(m) + '"' + (m === sel ? ' selected' : '') + '>' + esc(m) + '</option>';
@@ -688,9 +752,7 @@ function selectedStudyProvider() {
    and repaint the ● ACTIVE / inactive badges. */
 function studyActiveChanged() {
   var pid = selectedStudyProvider();
-  var p = STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara;
-  var ms = document.getElementById('study-model');
-  if (ms) ms.innerHTML = studyModelOptions(p.models, studyModelFor(pid));
+  _modelsWorkPid = null;                 // reload the model editor for the new provider
   STUDY_PROVIDER_ORDER.forEach(function (k) {
     var b = document.getElementById('study-badge-' + k);
     if (!b) return;
@@ -699,6 +761,7 @@ function studyActiveChanged() {
     b.style.background = on ? 'var(--accent,#00c896)' : '#e5e7eb';
     b.style.color = on ? '#04120d' : '#555';
   });
+  paintModelsManage();                   // refreshes the model dropdown + chips
 }
 /* Paste-a-curl → auto-fill. Extracts the endpoint, Bearer key and model from a
    pasted curl/API snippet, detects the provider by host, fills that provider's
@@ -735,7 +798,7 @@ function parseCurlIntoStudy() {
   studyActiveChanged();                                          // refresh model box to this provider
   if (model) {
     var ms = document.getElementById('study-model');
-    if (ms) ms.innerHTML = studyModelOptions(STUDY_PROVIDERS[pid].models, model);
+    if (ms) ms.innerHTML = studyModelOptions(studyModelsFor(pid), model);
   }
   if (box) box.value = '';                                       // don't leave the key sitting in two boxes
   showToast('✅ Detected ' + STUDY_PROVIDERS[pid].label +
@@ -969,6 +1032,7 @@ function renderAiStudy() {
      first with a key). ── */
   var studyProvider = activeStudyProvider();
   var curModel = studyModelFor(studyProvider);
+  _modelsWorkPid = null;                 // model editor reflects freshly-loaded AI_CONFIG
 
   // One SEPARATE section per provider: an "active" radio + its own API key box.
   var sectionsHtml = STUDY_PROVIDER_ORDER.map(function (k) {
@@ -1012,10 +1076,22 @@ function renderAiStudy() {
     '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">' +
       '<label style="font-size:.85rem;font-weight:700;">Model</label>' +
       '<select id="study-model" style="font-size:.85rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;min-width:220px;">' +
-        studyModelOptions((STUDY_PROVIDERS[studyProvider] || STUDY_PROVIDERS.bynara).models, curModel) + '</select>' +
+        studyModelOptions(studyModelsFor(studyProvider), curModel) + '</select>' +
       '<button class="btn btn-blue" onclick="saveStudyAiConfig()">💾 Save Study AI</button>' +
     '</div>' +
     '<div class="muted" style="font-size:.68rem;margin-top:6px;">One model box — it lists the models of the ● ACTIVE provider above.</div>' +
+
+    /* 🧩 Manage models for the ACTIVE provider — remove / add, then Save models */
+    '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);">' +
+      '<label style="font-size:.82rem;font-weight:700;">🧩 Models for <span id="study-models-pid">' + esc((STUDY_PROVIDERS[studyProvider] || {}).label || studyProvider) + '</span> — remove or add</label>' +
+      '<div class="muted" style="font-size:.68rem;margin:2px 0 6px;">Removing a model hides it from the study-panel dropdown for <b>everyone</b>; add a model id to offer it. These apply to the <b>● ACTIVE</b> provider. Click <b>Save models</b> to apply.</div>' +
+      '<div id="study-models-manage" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">' + studyModelChipsHtml(studyProvider) + '</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
+        '<input id="study-model-add" placeholder="add model id, e.g. google/gemma-4-31b-it:free" style="flex:1;min-width:200px;font-family:monospace;font-size:.78rem;padding:6px 8px;border:1px solid var(--border);border-radius:8px;">' +
+        '<button class="btn btn-gray" onclick="addStudyModel()">+ Add</button>' +
+        '<button class="btn btn-blue" onclick="saveStudyModels()">💾 Save models</button>' +
+      '</div>' +
+    '</div>' +
     /* 🩺 Health check — ping each provider server-side (CORS blocks the browser) */
     '<div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
       '<button class="btn btn-gray" onclick="testStudyProviders()">🩺 Test all providers</button>' +

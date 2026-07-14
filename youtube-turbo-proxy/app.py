@@ -773,7 +773,7 @@ def _load_ai_config(prefer_model=None):
 
     # A specific model was requested → route to its provider's key + endpoint.
     if prefer_model:
-        pid = _model_provider(prefer_model)
+        pid = _model_provider(prefer_model, cfg)
         if pid:
             alt = _ai_for_provider(cfg, pid, prefer_model)
             if alt:
@@ -1710,11 +1710,29 @@ STUDY_PROVIDER_MODELS = {
 }
 
 
-def _model_provider(model):
-    """Which provider a model id belongs to (None if unknown)."""
+def _effective_provider_models(cfg):
+    """Per-provider model list. Admin overrides in config/ai.providerModels
+    (managed from the AI Study panel — add/remove models) win over the hardcoded
+    defaults; a missing/empty override falls back to the default list."""
+    overrides = (cfg or {}).get("providerModels") or {}
+    out = {}
+    for pid, default in STUDY_PROVIDER_MODELS.items():
+        ov = overrides.get(pid)
+        if isinstance(ov, list):
+            cleaned = [m.strip() for m in ov if isinstance(m, str) and m.strip()]
+            out[pid] = cleaned if cleaned else list(default)
+        else:
+            out[pid] = list(default)
+    return out
+
+
+def _model_provider(model, cfg=None):
+    """Which provider a model id belongs to (None if unknown). Honours admin
+    model overrides when cfg is supplied, so custom-added models still route."""
     if not model:
         return None
-    for pid, models in STUDY_PROVIDER_MODELS.items():
+    models_map = _effective_provider_models(cfg) if cfg is not None else STUDY_PROVIDER_MODELS
+    for pid, models in models_map.items():
         if model in models:
             return pid
     return None
@@ -1750,11 +1768,12 @@ def _ai_for_provider(cfg, pid, model=None):
 def _all_study_models(cfg):
     """Every model whose provider has a key configured — for the study panel
     dropdown, so all pickable models actually work."""
+    eff = _effective_provider_models(cfg)
     out = []
     for pid in ("bynara", "mistral", "cerebras", "openrouter"):
         meta = STUDY_TEST_PROVIDERS.get(pid)
         if meta and _cfg_keys(cfg, meta["keyField"]):
-            out.extend(STUDY_PROVIDER_MODELS.get(pid, []))
+            out.extend(eff.get(pid, []))
     return out
 
 
@@ -1937,11 +1956,12 @@ def api_status():
                 # can label which model belongs to which provider.
                 _groups = []
                 _LABELS = {"openrouter": "OpenRouter"}
+                _eff = _effective_provider_models(cfg)
                 for _pid in ("bynara", "mistral", "cerebras", "openrouter"):
                     _meta = STUDY_TEST_PROVIDERS.get(_pid)
                     if _meta and _cfg_keys(cfg, _meta["keyField"]):
                         _groups.append({"provider": _pid, "label": _LABELS.get(_pid, _pid.capitalize()),
-                                        "models": STUDY_PROVIDER_MODELS.get(_pid, [])})
+                                        "models": _eff.get(_pid, [])})
                 out["studyModelGroups"] = _groups
         except Exception:  # noqa: BLE001
             pass
