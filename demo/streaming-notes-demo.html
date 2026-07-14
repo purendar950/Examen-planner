@@ -176,7 +176,8 @@
   .pdf-brand .wm-tg{display:none}   /* Telegram handle: PDF only */
   body.dark .pdf-brand{box-shadow:0 6px 22px rgba(0,0,0,.4)}
   @media print{
-    body{background:#fff;font-size:10.5pt;line-height:1.35}
+    html{font-size:18px}                 /* scales rem-based sizes for a larger PDF */
+    body{background:#fff;font-size:12pt;line-height:1.42}
     .topbar,.controls,.metatag{display:none}
     /* transparent bg + z-index so the fixed watermark shows through behind the text */
     .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;background:transparent;padding:0 4mm;position:relative;z-index:1}
@@ -190,8 +191,8 @@
     .notes .sec,.notes .subsec{break-after:avoid}
     .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
-    /* extra bottom margin (11mm) reserves room for the fixed footer bar */
-    @page{margin:5mm 7mm 11mm 7mm}
+    /* 5mm bottom margin; the fixed footer sits INSIDE it (see .pdf-footer). */
+    @page{margin:5mm 7mm}
 
     /* header band (top of page 1): StudyPlanner wordmark + Telegram handle.
        Override the on-screen band sizing (full width, no shadow) for print. */
@@ -207,11 +208,13 @@
       color:#14532d;opacity:.06;letter-spacing:3px;z-index:0;pointer-events:none;
       -webkit-print-color-adjust:exact;print-color-adjust:exact}
 
-    /* footer link bar — repeats on EVERY page (position:fixed) */
+    /* footer link bar — repeats on EVERY page (position:fixed). bottom:-5mm
+       (= -height) drops it into the 5mm bottom margin so it sits BELOW the
+       text instead of overlapping the last lines on each page. */
     .pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;
-      position:fixed;left:0;right:0;bottom:0;height:8mm;z-index:3;
+      position:fixed;left:0;right:0;bottom:-5mm;height:5mm;z-index:3;
       background:linear-gradient(135deg,#14532d,#166534);color:#fff;
-      font-family:system-ui,Arial,sans-serif;font-size:8pt;font-weight:700;
+      font-family:system-ui,Arial,sans-serif;font-size:7.5pt;font-weight:700;
       -webkit-print-color-adjust:exact;print-color-adjust:exact}
     .pdf-footer a{color:#fff;text-decoration:underline}
     .pdf-footer .g{color:#8bffbe}

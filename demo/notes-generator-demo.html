@@ -174,7 +174,8 @@
 
   /* ── print ── */
   @media print{
-    body{background:#fff;font-size:10.5pt;line-height:1.35}
+    html{font-size:18px}                 /* scales rem-based sizes for a larger PDF */
+    body{background:#fff;font-size:12pt;line-height:1.42}
     .topbar,.controls,.metatag{display:none}
     .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;padding:0 4mm}
     .page::before{display:none}

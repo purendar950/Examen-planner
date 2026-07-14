@@ -984,14 +984,18 @@
   function nbPdfCss() {
     // No fixed `size` — adapt to the user's chosen paper (A4 or US Letter) so
     // the 2-column notes aren't clipped at the bottom / scaled on Letter.
-    // Extra bottom margin (11mm) reserves room for the fixed Telegram footer bar.
-    return '@page{margin:5mm 7mm 11mm 7mm}' +
+    // 5mm bottom margin; the fixed footer is seated INSIDE that margin (see
+    // .pdf-footer) so it never overlaps the notes text.
+    // html font-size (18px) scales all rem-based sizes in nbCss (section
+    // headers, chips, options, tables) for a larger, more readable PDF.
+    return '@page{margin:5mm 7mm}' +
       '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}' +
+      'html{font-size:18px}' +
       'body{margin:0;background:#fff}' +
       // content sits above the fixed watermark
       '.pdf-title{font-family:"Kalam","Noto Sans Devanagari",system-ui,Arial,sans-serif;font-size:17pt;font-weight:800;margin:0 0 2px;color:#14532d;position:relative;z-index:1}' +
       '.pdf-meta{font-family:system-ui,Arial,sans-serif;font-size:8.5pt;color:#64748b;margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;position:relative;z-index:1}' +
-      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:10.5pt;line-height:1.4;position:relative;z-index:1}' +
+      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:12pt;line-height:1.42;position:relative;z-index:1}' +
       '.pdf-nb .sec,.pdf-nb .subsec{break-after:avoid}' +
       '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb table,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .sec,.pdf-nb .subsec,.pdf-nb .q-card,.pdf-nb .qkeep{break-inside:avoid}' +
       // ── Telegram / StudyPlanner branding (PDF only) ──
@@ -1002,8 +1006,10 @@
       '.pdf-brand .wm-tg{margin-left:auto;font-size:8.5pt;font-weight:700;color:#d7ffe6}' +
       // faint diagonal watermark — repeats on EVERY page (position:fixed)
       '.pdf-watermark{position:fixed;top:44%;left:-6%;right:-6%;text-align:center;transform:rotate(-27deg);font-family:system-ui,Arial,sans-serif;font-weight:800;font-size:44pt;color:#14532d;opacity:0.06;letter-spacing:3px;z-index:0;pointer-events:none}' +
-      // footer link bar — repeats on EVERY page (position:fixed)
-      '.pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;position:fixed;left:0;right:0;bottom:0;height:8mm;z-index:3;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;font-size:8pt;font-weight:700}' +
+      // footer link bar — repeats on EVERY page (position:fixed). `bottom:-5mm`
+      // (= -height) drops it into the 5mm bottom page margin so it sits BELOW
+      // the notes text instead of overlapping the last lines on each page.
+      '.pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;position:fixed;left:0;right:0;bottom:-5mm;height:5mm;z-index:3;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;font-size:7.5pt;font-weight:700}' +
       '.pdf-footer a{color:#fff;text-decoration:underline}' +
       '.pdf-footer .g{color:#8bffbe}' +
       nbCss('.pdf-nb');
