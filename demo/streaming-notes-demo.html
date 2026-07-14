@@ -163,8 +163,18 @@
   body.dark .controls{background:#161b22;color:#e6edf3}
   body.dark .controls select{background:#0e1116;color:#e6edf3;border-color:#2b3542}
 
-  /* brand / Telegram elements are hidden on screen; shown only when printing */
-  .pdf-brand,.pdf-watermark,.pdf-footer{display:none}
+  /* Watermark + footer link are PDF-only (they promote the channel on the shared file). */
+  .pdf-watermark,.pdf-footer{display:none}
+  /* StudyPlanner header band — shown ON SCREEN and in the PDF. The Telegram handle
+     inside it (.wm-tg) is PDF-only; on screen it shows an "AI Study Notes" subtitle. */
+  .pdf-brand{display:flex;align-items:center;gap:8px;max-width:794px;margin:14px auto 0;padding:8px 14px;
+    border-radius:8px;background:linear-gradient(135deg,#14532d,#166534);color:#fff;
+    font-family:system-ui,Arial,sans-serif;box-shadow:var(--shadow)}
+  .pdf-brand .wm-name{font-weight:800;font-size:1.05rem;letter-spacing:.3px}
+  .pdf-brand .wm-name .g{color:#8bffbe}
+  .pdf-brand .wm-sub{margin-left:auto;font-size:.72rem;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#d7ffe6}
+  .pdf-brand .wm-tg{display:none}   /* Telegram handle: PDF only */
+  body.dark .pdf-brand{box-shadow:0 6px 22px rgba(0,0,0,.4)}
   @media print{
     body{background:#fff;font-size:10.5pt;line-height:1.35}
     .topbar,.controls,.metatag{display:none}
@@ -179,13 +189,13 @@
     /* extra bottom margin (11mm) reserves room for the fixed footer bar */
     @page{margin:5mm 7mm 11mm 7mm}
 
-    /* header band (top of page 1): StudyPlanner wordmark + Telegram handle */
-    .pdf-brand{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 11px;border-radius:6px;
-      background:linear-gradient(135deg,#14532d,#166534);color:#fff;
-      font-family:system-ui,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .pdf-brand .wm-name{font-weight:800;font-size:12.5pt;letter-spacing:.3px}
-    .pdf-brand .wm-name .g{color:#8bffbe}
-    .pdf-brand .wm-tg{margin-left:auto;font-size:8.5pt;font-weight:700;color:#d7ffe6}
+    /* header band (top of page 1): StudyPlanner wordmark + Telegram handle.
+       Override the on-screen band sizing (full width, no shadow) for print. */
+    .pdf-brand{max-width:none;margin:0 0 8px;padding:6px 11px;border-radius:6px;box-shadow:none;
+      -webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .pdf-brand .wm-name{font-size:12.5pt}
+    .pdf-brand .wm-sub{display:none}                                   /* subtitle: screen only */
+    .pdf-brand .wm-tg{display:inline-block;margin-left:auto;font-size:8.5pt;font-weight:700;color:#d7ffe6}
 
     /* diagonal watermark — repeats on EVERY page (position:fixed) */
     .pdf-watermark{display:block;position:fixed;top:44%;left:-6%;right:-6%;text-align:center;
@@ -269,6 +279,7 @@
   <!-- ── Telegram / brand — PRINT ONLY (appears in Save-as-PDF / print, never on screen) ── -->
   <div class="pdf-brand">
     <span class="wm-name">Study<span class="g">Planner</span></span>
+    <span class="wm-sub">AI Study Notes</span>
     <span class="wm-tg">✈️ @StudyPlannerSSC · Join on Telegram for more notes</span>
   </div>
   <div class="pdf-watermark">@StudyPlannerSSC</div>
