@@ -308,6 +308,10 @@
     /parmar\s+(sir|academy)/i, /(foundation|revision|new|coaching|demo|upcoming|next|weekend)\s+batch/i,
     /\btelegram\b/i, /\b(subscribe|do subscribe|like\s*,?\s*share|share\s*&?\s*subscribe)\b/i,
     /\bnext\s+(session|class|lecture)\b/i, /\b(digital notes|free content)\b/i,
+    // lecture-series logistics / scheduling (not exam study content)
+    /\bthis\s+(is|was)\s+the\s+\d+\w*\s+lecture\b/i, /\bthis lecture covers\b/i,
+    /\blecture\s+in\s+the\s+series\b/i, /\b(previous|earlier)\s+topics?\s+(covered|were|discussed|include)/i,
+    /\bupcoming\s+topic\b/i, /\brevision\s+break\b/i, /\bday after tomorrow\b/i,
     /\bpdf(s)?\b.*(link|description|telegram|app|download|share)/i, /academy\s*app|play\s*store|app\s*store|download the app/i,
     /https?:\/\/|www\./i,
     /\u092A\u093E\u0930\u094D?\u092E\u0930|\u092A\u0930\u092E\u093E\u0930|\u0905\u0915\u093E\u0926\u092E\u0940|\u0905\u0915\u0948\u0921\u092E\u0940/,
