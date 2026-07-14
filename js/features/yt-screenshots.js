@@ -77,6 +77,30 @@ function ssGetVideoTimestamp() {
   return 0;
 }
 
+/* Fractional (sub-second) playback time. Same player-detection order as
+   ssGetVideoTimestamp(), but WITHOUT Math.floor() so the "Follow the lecture"
+   engine can track note highlights accurately (whole-second rounding made the
+   highlight lag up to a full second behind the teacher). Screenshot/"Save
+   Moment" bookmarks keep using the integer ssGetVideoTimestamp() above. */
+function ssGetVideoTimestampFloat() {
+  try {
+    if (typeof window.ytTurboActive === 'function' && window.ytTurboActive()) {
+      return window.ytTurboCurrentTime() || 0;
+    }
+  } catch(e) {}
+  try {
+    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getCurrentTime) {
+      return ytPlayer.getCurrentTime() || 0;
+    }
+  } catch(e) {}
+  try {
+    if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getCurrentTime) {
+      return ytoPlayerV2.getCurrentTime() || 0;
+    }
+  } catch(e) {}
+  return 0;
+}
+
 /* Duration of whatever player is actually on screen (Turbo native <video> or
    the YouTube iframe). Used to map a timestamp to the right preview frame. */
 function ssGetVideoDuration() {

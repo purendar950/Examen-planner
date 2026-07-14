@@ -532,6 +532,7 @@
      ══════════════════════════════════════════════════════════════════════ */
   var LEC_KEY = 'aiStudyFollow';
   var LEC_TOP_OFFSET = 0.15;          // pin the active block ~15% down from the top
+  var LEC_POLL_MS = 250;              // poll playback time 4x/sec so the highlight tracks the teacher closely
   var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0, _lecTsCount = 0;
   function lecOn() { return localStorage.getItem(LEC_KEY) === '1'; }
   function setLecOn(v) { try { localStorage.setItem(LEC_KEY, v ? '1' : '0'); } catch (e) {} }
@@ -580,7 +581,10 @@
     if (!_lecScroller || !document.body.contains(_lecScroller) || !_lecBlocks.length) return;
     if (!_lecTsCount) return;                     // no timestamps → nothing to track (don't jump to last block)
     var t = 0;
-    try { if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0; } catch (e) {}
+    try {
+      if (typeof ssGetVideoTimestampFloat === 'function') t = ssGetVideoTimestampFloat() || 0;   // sub-second precision
+      else if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0;         // fallback (whole seconds)
+    } catch (e) {}
     var changed = lecHighlight(t);
     if (changed && Date.now() > _lecUserScrollUntil) lecScroll();
   }
@@ -616,7 +620,7 @@
         if (lecOn()) { _lecUserScrollUntil = 0; lecTick(); } else lecClear();
       };
     }
-    if (!_lecTimer) _lecTimer = setInterval(lecTick, 1000);   // single shared poller
+    if (!_lecTimer) _lecTimer = setInterval(lecTick, LEC_POLL_MS);   // single shared poller (fast + cheap: early-returns when off)
     if (lecOn()) setTimeout(lecTick, 120);
   }
 
