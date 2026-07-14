@@ -189,16 +189,31 @@
 
   <div class="controls">
     <div class="row">
+      <select id="source" title="Content source">
+        <option value="sample">🧪 Sample content</option>
+        <option value="video">🎬 My video (live server)</option>
+      </select>
       <select id="style" title="Notes style">
         <option value="topic">📝 Topic notes</option>
         <option value="mcq">❓ MCQ notes</option>
       </select>
-      <select id="speed" title="Simulated model speed (chunk delay)">
-        <option value="70">🐢 Slow model</option>
+      <select id="speed" title="Render / stream speed (chunk delay)">
+        <option value="70">🐢 Slow</option>
         <option value="35" selected>⚡ Normal</option>
         <option value="12">🚀 Fast</option>
       </select>
       <button class="go" id="go">▶ Generate (stream)</button>
+    </div>
+    <div class="row" id="videorow" style="display:none;margin-top:9px">
+      <input id="url" type="text" placeholder="Paste your YouTube URL or 11-char video ID…"
+             style="flex:1;min-width:220px;font-size:15px;padding:11px 13px;border:1px solid #cdd6df;border-radius:9px;font-family:inherit">
+      <select id="lang" title="Output language"><option>Hinglish</option><option>English</option><option>Hindi</option></select>
+      <label style="font-size:12.5px;color:#475569;display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="fresh"> fresh</label>
+    </div>
+    <div class="row" id="serverrow" style="display:none;margin-top:6px;font-size:12px;color:#475569;align-items:center">
+      <span>server:</span>
+      <input id="backend" type="text" value="https://youtube-turbo-proxy.onrender.com"
+             style="width:320px;max-width:100%;font-size:12px;padding:7px 9px;border:1px solid #cdd6df;border-radius:7px;font-family:inherit">
     </div>
     <div class="bar">
       <span class="save idle" id="save">● Idle</span>
@@ -211,6 +226,10 @@
       <br>In production this maps to: proxy relays the model's <code>stream:true</code> output (SSE) →
       browser renders progressively → proxy writes to the Firestore cache only on a clean finish.
       The renderer &amp; print CSS here are identical to the real AI Study export.
+      <br><b>Test your own video:</b> switch <b>Content source → 🎬 My video (live server)</b>, paste a
+      YouTube URL and hit Generate. It fetches the <b>real</b> notes for that video from your proxy and
+      renders them. (The server still generates the whole thing first, so the first chunk appears only
+      after it responds — true token-streaming is the backend step; the content &amp; layout are 100% real.)
     </div>
   </div>
 
@@ -384,7 +403,7 @@
      Simulates a model streaming tokens. The SAME onChunk/onDone shape is
      what a real fetch(ReadableStream) / SSE reader would call, so wiring
      this to the proxy later is a drop-in replacement of `startStream`. */
-  var _timer=null, _running=false;
+  var _timer=null, _running=false, _fetchCtrl=null;
   function startStream(fullText, opts){
     var tokens=fullText.match(/\S+\s*/g)||[];
     var i=0, acc="", first=true;
@@ -416,47 +435,119 @@
     }
   }
 
-  var t0=0, tFirst=0;
+  var tFirst=0, _liveMode=false;
   function fmt(ms){ return (ms/1000).toFixed(1)+"s"; }
+  function resetBtn(){ goBtn.classList.remove("stop"); goBtn.textContent="▶ Generate (stream)"; }
 
-  function generate(){
-    if(_running){ stopStream(); onStopped(); return; }   // button is acting as Stop
-    var mcq=$("style").value==="mcq";
-    var delay=parseInt($("speed").value,10)||35;
-    var text=mcq?SAMPLE_MCQ:SAMPLE_TOPIC;
+  /* extract an 11-char YouTube id from a URL (watch/shorts/live/embed/youtu.be) or raw id */
+  function parseId(s){
+    s=(s||"").trim();
+    if(/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+    var m=s.match(/(?:v=|\/shorts\/|youtu\.be\/|\/embed\/|\/live\/)([A-Za-z0-9_-]{11})/);
+    if(m) return m[1];
+    m=s.match(/([A-Za-z0-9_-]{11})(?:[?&].*)?$/);
+    return m?m[1]:"";
+  }
 
-    goBtn.classList.add("stop"); goBtn.textContent="⏹ Stop";
-    $("meta").textContent="demo · streaming · "+(mcq?"MCQ":"topic")+" notes";
-    setSave("gen",'<span class="spin"></span> Generating… (not saved yet)');
-    metricEl.textContent="";
-    page.innerHTML='<div class="placeholder"><span class="spin"></span> Connecting to model…</div>';
-    t0=Date.now(); tFirst=0;
-
+  /* progressively render `text` into the notebook (shared by sample + live modes) */
+  function replay(text, mcq, delay, opts){
+    opts=opts||{};
+    var tr=Date.now();
     startStream(text, {
       delay: delay,
-      onFirst: function(){ tFirst=Date.now()-t0; },
+      onFirst: function(){ tFirst=Date.now()-tr; },
       onChunk: function(acc){
         renderInto(acc, mcq, true);
-        metricEl.innerHTML="First chunk in <b>"+fmt(tFirst)+"</b> · streaming… <b>"+acc.length+"</b> chars";
+        metricEl.innerHTML=(opts.prefix||"First chunk <b>"+fmt(tFirst)+"</b> · ")+"rendering… <b>"+acc.length+"</b> chars";
       },
       onDone: function(acc){
-        renderInto(acc, mcq, false);   // no caret when finished
-        goBtn.classList.remove("stop"); goBtn.textContent="▶ Generate (stream)";
-        var total=Date.now()-t0;
-        // ── only NOW would we POST the full result to the server cache ──
-        setSave("saved","✅ Complete — saved to server (cached)");
-        metricEl.innerHTML="First chunk <b>"+fmt(tFirst)+"</b> · full generation <b>"+fmt(total)+"</b> · <b>"+acc.length+"</b> chars cached";
+        renderInto(acc, mcq, false);
+        resetBtn();
+        setSave("saved", opts.doneMsg||"✅ Complete — saved to server (cached)");
+        metricEl.innerHTML=(opts.prefix||"First chunk <b>"+fmt(tFirst)+"</b> · ")+"<b>"+acc.length+"</b> chars"+(opts.doneMetric||" cached");
       }
     });
   }
-  function onStopped(){
-    goBtn.classList.remove("stop"); goBtn.textContent="▶ Generate (stream)";
-    // remove the caret but KEEP the partial content on screen
-    var c=page.querySelector(".caret"); if(c) c.remove();
-    setSave("stopped","⏹ Stopped — partial shown, NOT saved to server");
-    metricEl.innerHTML="Stopped at first-chunk "+(tFirst?"<b>"+fmt(tFirst)+"</b>":"—")+" — nothing was cached.";
+
+  function generate(){
+    // ── button is acting as Stop ──
+    if(_running){                       // a progressive render is running
+      stopStream(); resetBtn();
+      var c=page.querySelector(".caret"); if(c) c.remove();
+      setSave("stopped", _liveMode
+        ? "⏹ Stopped rendering (server may have already cached it)"
+        : "⏹ Stopped — partial shown, NOT saved to server");
+      metricEl.innerHTML="Stopped during render.";
+      return;
+    }
+    if(_fetchCtrl){                     // still waiting on the server
+      try{ _fetchCtrl.abort(); }catch(e){}   // fetch .catch sets the stopped badge
+      return;
+    }
+
+    var mcq=$("style").value==="mcq";
+    var delay=parseInt($("speed").value,10)||35;
+    goBtn.classList.add("stop"); goBtn.textContent="⏹ Stop";
+    metricEl.textContent="";
+    _liveMode=($("source").value==="video");
+
+    if(_liveMode){ fetchLive(mcq, delay); return; }
+
+    // ── sample content (no server) ──
+    $("meta").textContent="demo · streaming · "+(mcq?"MCQ":"topic")+" notes";
+    setSave("gen",'<span class="spin"></span> Generating… (not saved yet)');
+    page.innerHTML='<div class="placeholder"><span class="spin"></span> Connecting to model…</div>';
+    replay(mcq?SAMPLE_MCQ:SAMPLE_TOPIC, mcq, delay, {});
   }
+
+  /* ── LIVE: fetch the REAL notes for a video from the proxy, then replay them.
+     The server generates the whole thing first (no browser token-streaming yet —
+     that's the backend work), so the first chunk appears after the server responds.
+     The content + rendering are 100% real for your video. ── */
+  function fetchLive(mcq, delay){
+    var id=parseId($("url").value);
+    if(!id){ setSave("stopped","⚠️ Enter a valid YouTube URL / 11-char video ID"); resetBtn(); return; }
+    var backend=($("backend").value||"").trim().replace(/\/+$/,"");
+    var lang=$("lang").value, fresh=$("fresh").checked;
+    var url=backend+"/api/study?id="+encodeURIComponent(id)+"&mode=notes&out="+encodeURIComponent(lang)+
+            (mcq?"&style=mcq":"")+(fresh?"&refresh=1":"");
+    $("meta").textContent="live · "+id+" · "+lang;
+    setSave("gen",'<span class="spin"></span> Generating on server… (first run can take ~30–90s)');
+    page.innerHTML='<div class="placeholder"><span class="spin"></span> Asking your server + AI for <code>'+id+'</code>…</div>';
+    var fs=Date.now();
+    _fetchCtrl=('AbortController' in window)? new AbortController():null;
+    var to=setTimeout(function(){ if(_fetchCtrl) _fetchCtrl.abort(); }, 240000);   // 4-min safety
+    fetch(url, _fetchCtrl?{signal:_fetchCtrl.signal}:{}).then(function(r){return r.json();}).then(function(j){
+      clearTimeout(to); _fetchCtrl=null;
+      var serverS=((Date.now()-fs)/1000).toFixed(1);
+      if(j.error && j.error!=="no_captions"){ setSave("stopped","❌ "+esc(j.error)+(j.detail?" — "+esc(j.detail):"")); resetBtn(); page.innerHTML='<div class="placeholder">Server error.</div>'; return; }
+      if(j.warning==="no_captions"||j.error==="no_captions"){ setSave("stopped","⚠️ This video has no captions — can't generate"); resetBtn(); page.innerHTML='<div class="placeholder">No captions on this video.</div>'; return; }
+      var content=j.content||"";
+      if(!content){ setSave("stopped","⚠️ Empty response from server"); resetBtn(); page.innerHTML='<div class="placeholder">Empty response.</div>'; return; }
+      var serverStyle=j.style||"topic";
+      var useMcq=(mcq && serverStyle==="mcq");
+      $("meta").textContent=(j.provider||"ai")+" · "+(j.model||"")+" · "+serverStyle+" · "+(j.cached?"cached":"fresh")+" · "+lang;
+      var mcqWarn=(mcq && serverStyle!=="mcq") ? " · ⚠️ server returned topic notes (MCQ backend not deployed)" : "";
+      replay(content, useMcq, delay, {
+        prefix: "Server <b>"+serverS+"s</b> · ",
+        doneMsg: "✅ Done — real notes for "+id+" ("+(j.cached?"were already cached":"server cached them")+")",
+        doneMetric: " · "+(j.cached?"cached":"freshly generated & cached")+mcqWarn
+      });
+    }).catch(function(e){
+      clearTimeout(to); _fetchCtrl=null; resetBtn();
+      if(e && e.name==="AbortError"){ setSave("stopped","⏹ Stopped — server request cancelled (nothing rendered)"); page.innerHTML='<div class="placeholder">Cancelled.</div>'; }
+      else { setSave("stopped","❌ "+esc(String(e))+" — server may be asleep, try again"); page.innerHTML='<div class="placeholder">Request failed.</div>'; }
+    });
+  }
+
+  // reveal the live-video inputs only when that source is picked
+  $("source").onchange=function(){
+    var v=this.value==="video";
+    $("videorow").style.display=v?"":"none";
+    $("serverrow").style.display=v?"":"none";
+  };
   goBtn.onclick=generate;
+  var _urlIn=$("url"); if(_urlIn) _urlIn.addEventListener("keydown",function(e){ if(e.key==="Enter") generate(); });
 
   /* ══ sample content (stands in for the model output) ══ */
   var SAMPLE_TOPIC=[
