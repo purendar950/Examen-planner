@@ -843,14 +843,20 @@
     '.pdf-msg.pdf-a{background:#f8fafc;border:1px solid #eef2f6;}' +
     '.pdf-who{font-size:8.5pt;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:3px;}' +
     '.ai-ts,.ai-ts-link{color:#2563eb;font-weight:600;}';
-  // Notebook PDF: A4, 2 columns (col-1 fills, then col-2, then next page), paper look.
+  // Notebook PDF: A4, 2 balanced columns, paper look.
+  // NOTE: column-fill is `balance` (not `auto`). Section headers use
+  // `column-span:all`, which resets the column flow after each header. With
+  // `auto`, a short section's content would fill only the LEFT column and leave
+  // the RIGHT one empty (big whitespace gaps — worse for models that emit many
+  // short sections). `balance` spreads each section's content evenly across
+  // both columns regardless of how long it is.
   function nbPdfCss() {
     return '@page{size:A4;margin:10mm 9mm}' +
       '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}' +
       'body{margin:0;background:#fff}' +
       '.pdf-title{font-family:"Kalam","Noto Sans Devanagari",system-ui,Arial,sans-serif;font-size:17pt;font-weight:800;margin:0 0 2px;color:#14532d}' +
       '.pdf-meta{font-family:system-ui,Arial,sans-serif;font-size:8.5pt;color:#64748b;margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid #e2e8f0}' +
-      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:10.5pt;line-height:1.4}' +
+      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:balance;font-size:10.5pt;line-height:1.4}' +
       '.pdf-nb .sec{column-span:all}' +
       '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb table,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .sec,.pdf-nb .subsec,.pdf-nb .q-card,.pdf-nb .qkeep{break-inside:avoid}' +
       nbCss('.pdf-nb');
