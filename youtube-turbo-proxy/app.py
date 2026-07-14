@@ -754,6 +754,15 @@ NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "30000"))      # topic not
 NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "30000"))  # MCQ input chunk
 NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "4000"))         # topic notes output cap/part
 NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "3500"))  # MCQ output cap/part
+# When a model stops because it hit its output-token cap (finish_reason=="length"),
+# the notes would end mid-sentence (seen on smaller models). We detect that and
+# re-prompt the model to CONTINUE from where it stopped, stitching the parts,
+# up to this many times so the notes are never truncated. Env-tunable.
+NOTES_MAX_CONT = int(os.environ.get("NOTES_MAX_CONTINUATIONS", "4"))
+_NOTES_CONTINUE = ("Continue the notes from EXACTLY where you stopped (finish the "
+                   "cut-off line first). Do NOT repeat anything already written, do "
+                   "NOT restart, and do NOT add any intro, heading recap or closing "
+                   "remark \u2014 just carry straight on.")
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 _study_cache = {}
 _study_lock = threading.Lock()
@@ -938,11 +947,13 @@ def _retry_after_secs(resp):
     return 10.0
 
 
-def _read_stream(resp):
+def _read_stream(resp, meta=None):
     """Accumulate an OpenAI-compatible chat stream (SSE) into the full text.
     Streaming means the first tokens arrive within seconds, so the upstream
     connection stays active and slow models never hit Cloudflare's ~100s 524.
-    Also tolerates a non-streamed 200 body (full 'message' object)."""
+    Also tolerates a non-streamed 200 body (full 'message' object).
+    If `meta` (a dict) is passed, meta['finish_reason'] captures the upstream
+    finish_reason so callers can detect output-cap truncation."""
     out = []
     # SSE streams rarely send a charset, so requests falls back to ISO-8859-1
     # and mangles multi-byte UTF-8 (Hindi/Devanagari, emoji, etc.) into mojibake
@@ -962,6 +973,8 @@ def _read_stream(resp):
             choice = (json.loads(line).get("choices") or [{}])[0]
         except Exception:  # noqa: BLE001
             continue
+        if choice.get("finish_reason") and meta is not None:
+            meta["finish_reason"] = choice.get("finish_reason")
         piece = (choice.get("delta") or {}).get("content")
         if piece is None:                              # non-streamed 200 fallback
             piece = (choice.get("message") or {}).get("content")
@@ -970,11 +983,13 @@ def _read_stream(resp):
     return "".join(out)
 
 
-def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
+def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, meta=None):
     """OpenAI-compatible chat call (Groq or Bynara). STREAMS by default so slow
     models don't trip Cloudflare's ~100s 524. Tries each configured key in turn: a
     429 is retried a couple times on the same key, any other error (or a persistent
-    429) fails over to the next key. Paces to TPM only when tpm>0."""
+    429) fails over to the next key. Paces to TPM only when tpm>0.
+    If `meta` (a dict) is passed, meta['finish_reason'] captures the upstream
+    finish_reason ('stop', 'length', ...) so callers can detect truncation."""
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
     if _AI_STREAM:
@@ -1007,9 +1022,12 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
                     # Robust extraction: some reasoning models (e.g. Cerebras
                     # gpt-oss) may omit "content" and only return "reasoning".
                     try:
-                        msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+                        ch0 = (r.json().get("choices") or [{}])[0]
                     except (ValueError, KeyError, IndexError, TypeError):
-                        msg = {}
+                        ch0 = {}
+                    if meta is not None:
+                        meta["finish_reason"] = ch0.get("finish_reason")
+                    msg = ch0.get("message") or {}
                     content = msg.get("content")
                     if content:
                         return content
@@ -1018,7 +1036,7 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
                     last = "empty content (key %d) — model returned no answer" % (ki + 1)
                     break                      # → next key
                 try:
-                    txt = _read_stream(r)      # keeps the connection alive → no 524
+                    txt = _read_stream(r, meta)  # keeps the connection alive → no 524
                 except Exception as exc:       # noqa: BLE001  (stream interrupted)
                     last = "stream broke (key %d): %s" % (ki + 1, exc)
                     time.sleep(3)
@@ -1043,11 +1061,13 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
     raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
 
 
-def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048):
+def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
     """Like _ai_chat but a GENERATOR that YIELDS content pieces as they arrive
     (for the /api/study/stream text endpoint). Key failover only happens BEFORE
     the first piece is yielded — once bytes are on the wire we can't restart
-    without duplicating output, so a mid-stream break just ends the generator."""
+    without duplicating output, so a mid-stream break just ends the generator.
+    If `meta` (a dict) is passed, meta['finish_reason'] is set to the upstream
+    finish_reason ('stop', 'length', ...) so callers can detect truncation."""
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens, "stream": True}
     keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
@@ -1072,6 +1092,8 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048):
             except Exception:  # noqa: BLE001
                 pass
             continue                                    # → next key
+        if meta is not None:
+            meta["finish_reason"] = None
         got_any = False
         try:
             r.encoding = "utf-8"
@@ -1089,6 +1111,8 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048):
                     choice = (json.loads(line).get("choices") or [{}])[0]
                 except Exception:  # noqa: BLE001
                     continue
+                if choice.get("finish_reason") and meta is not None:
+                    meta["finish_reason"] = choice.get("finish_reason")
                 piece = (choice.get("delta") or {}).get("content")
                 if piece is None:                        # non-streamed 200 fallback
                     piece = (choice.get("message") or {}).get("content")
@@ -1109,6 +1133,49 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048):
             return                                       # success
         last = "empty stream (key %d)" % (ki + 1)
     raise RuntimeError("AI stream failed on all %d key(s): %s" % (len(keys), last))
+
+
+def _stream_notes_part(sysmsg, user, ai, max_tokens):
+    """Stream ONE notes part, auto-continuing when the model stops because it hit
+    its output-token cap (finish_reason=='length'). Without this, big single-pass
+    notes on smaller models end mid-sentence. We keep asking the model to carry on
+    from where it stopped (feeding back the tail so it doesn't repeat) and yield
+    the extra pieces, up to NOTES_MAX_CONT times."""
+    msgs = [{"role": "system", "content": sysmsg},
+            {"role": "user", "content": user}]
+    tail = ""
+    for _ in range(NOTES_MAX_CONT + 1):
+        meta = {}
+        produced = False
+        for piece in _ai_chat_stream(msgs, ai, max_tokens=max_tokens, meta=meta):
+            produced = True
+            tail = (tail + piece)[-2400:]     # recent output → continuation anchor
+            yield piece
+        if not produced or meta.get("finish_reason") != "length":
+            return                            # finished naturally (or nothing came)
+        msgs = [{"role": "system", "content": sysmsg},
+                {"role": "user", "content": user},
+                {"role": "assistant", "content": tail},
+                {"role": "user", "content": _NOTES_CONTINUE}]
+
+
+def _chat_notes_complete(sysmsg, user, ai, max_tokens):
+    """Blocking twin of _stream_notes_part: generate notes, auto-continuing on
+    output-cap truncation, and return the stitched full text."""
+    msgs = [{"role": "system", "content": sysmsg},
+            {"role": "user", "content": user}]
+    full = ""
+    for _ in range(NOTES_MAX_CONT + 1):
+        meta = {}
+        part = _ai_chat(msgs, ai, max_tokens=max_tokens, meta=meta) or ""
+        full += part
+        if not part.strip() or meta.get("finish_reason") != "length":
+            break
+        msgs = [{"role": "system", "content": sysmsg},
+                {"role": "user", "content": user},
+                {"role": "assistant", "content": full[-2400:]},
+                {"role": "user", "content": _NOTES_CONTINUE}]
+    return full
 
 
 def _chunk_words(text, size_chars=9000):
@@ -1233,18 +1300,15 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
     instr = _notes_instr(style)
     secs, part_cap = _notes_sections(transcript, out_lang, ai, style)
     if len(secs) == 1:
-        return _ai_chat(
-            [{"role": "system", "content": sysmsg},
-             {"role": "user", "content": head + instr + "\n\n" + secs[0]}],
-            ai, max_tokens=(part_cap if ai.get("big_context") else 2400))
+        return _chat_notes_complete(
+            sysmsg, head + instr + "\n\n" + secs[0], ai,
+            (part_cap if ai.get("big_context") else 2400))
     parts, covered = [], []
     for i, sec in enumerate(secs):
-        part = _ai_chat(
-            [{"role": "system", "content": sysmsg},
-             {"role": "user", "content": head + ("(Part %d of %d \u2014 detailed notes "
-              "for THIS part only.) " % (i + 1, len(secs))) + _covered_note(covered, style)
-              + instr + "\n\n" + sec}],
-            ai, max_tokens=part_cap)
+        user = (head + ("(Part %d of %d \u2014 detailed notes for THIS part only.) "
+                        % (i + 1, len(secs))) + _covered_note(covered, style)
+                + instr + "\n\n" + sec)
+        part = _chat_notes_complete(sysmsg, user, ai, part_cap)
         parts.append(part)
         covered.extend(_extract_note_headings(part))   # so later parts don't repeat these
     return "\n\n".join(parts)
@@ -1338,9 +1402,7 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
                                "only.) " % (i + 1, len(secs))) + _covered_note(covered, style) + instr + "\n\n" + sec
                 mt = part_cap
             buf = []                                  # collect this part to learn its headings
-            for piece in _ai_chat_stream(
-                    [{"role": "system", "content": sysmsg},
-                     {"role": "user", "content": user}], ai, max_tokens=mt):
+            for piece in _stream_notes_part(sysmsg, user, ai, mt):
                 buf.append(piece)
                 yield piece
             if len(secs) > 1:                         # so later parts don't repeat these
