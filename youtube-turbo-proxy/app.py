@@ -983,6 +983,19 @@ def _read_stream(resp, meta=None):
     return "".join(out)
 
 
+def _tune_body_for_provider(body, ai):
+    """Provider-specific request tweaks. Gemini Flash is a THINKING model and
+    Google counts its (invisible) reasoning tokens against max_tokens — with the
+    notes budget it can spend nearly ALL of it thinking and return truncated /
+    partial output (which then also triggers spurious continuation, making the
+    notes look scrambled and not start from the beginning). Turn reasoning off so
+    the whole budget goes to the actual notes. Only applied to Google; other
+    OpenAI-compatible providers never see the field."""
+    if (ai.get("provider") or "").lower() == "google":
+        body["reasoning_effort"] = "none"
+    return body
+
+
 def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, meta=None):
     """OpenAI-compatible chat call (Groq or Bynara). STREAMS by default so slow
     models don't trip Cloudflare's ~100s 524. Tries each configured key in turn: a
@@ -992,6 +1005,7 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
     finish_reason ('stop', 'length', ...) so callers can detect truncation."""
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
+    _tune_body_for_provider(body, ai)
     if _AI_STREAM:
         body["stream"] = True
     if json_mode:
@@ -1070,6 +1084,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
     finish_reason ('stop', 'length', ...) so callers can detect truncation."""
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens, "stream": True}
+    _tune_body_for_provider(body, ai)
     keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
     if not keys:
         raise RuntimeError("no AI API key configured")
