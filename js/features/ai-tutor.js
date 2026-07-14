@@ -1020,7 +1020,13 @@
       '.pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;margin:14px 0 0;padding:7px 11px;border-radius:6px;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;font-size:8.5pt;font-weight:700;position:relative;z-index:1;break-inside:avoid}' +
       '.pdf-footer a{color:#fff;text-decoration:underline}' +
       '.pdf-footer .g{color:#8bffbe}' +
-      nbCss('.pdf-nb');
+      nbCss('.pdf-nb') +
+      // Timestamps drive the on-screen "Follow the lecture" tracking but must NOT
+      // appear in the exported PDF (they'd clutter the start of every heading).
+      // The on-screen notebook hides them via '.ai-nb .ai-ts{display:none}';
+      // mirror that for the '.pdf-nb' scope, since nbCss() only *styles* .ai-ts.
+      // Placed AFTER nbCss('.pdf-nb') so it overrides that rule.
+      '.pdf-nb .ai-ts{display:none}';
   }
   function pdfDownload(titleText, innerHtml, opts) {
     var nb = !!(opts && opts.notebook);
