@@ -1037,6 +1037,74 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False):
     raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
 
 
+def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048):
+    """Like _ai_chat but a GENERATOR that YIELDS content pieces as they arrive
+    (for the /api/study/stream text endpoint). Key failover only happens BEFORE
+    the first piece is yielded — once bytes are on the wire we can't restart
+    without duplicating output, so a mid-stream break just ends the generator."""
+    body = {"model": ai["model"], "messages": messages,
+            "temperature": temperature, "max_tokens": max_tokens, "stream": True}
+    keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
+    if not keys:
+        raise RuntimeError("no AI API key configured")
+    est = _est_tokens(messages, max_tokens)
+    last = "unknown error"
+    for ki, key in enumerate(keys):
+        _ai_pace(est, ai.get("tpm", 0))
+        try:
+            r = requests.post(ai["base_url"],
+                              headers={"Authorization": "Bearer " + key,
+                                       "Content-Type": "application/json"},
+                              json=body, timeout=_AI_TIMEOUT, stream=True)
+        except requests.RequestException as exc:
+            last = "network (key %d): %s" % (ki + 1, exc)
+            continue                                    # → next key
+        if r.status_code != 200:
+            last = "%s (key %d): %s" % (r.status_code, ki + 1, r.text[:120])
+            try:
+                r.close()
+            except Exception:  # noqa: BLE001
+                pass
+            continue                                    # → next key
+        got_any = False
+        try:
+            r.encoding = "utf-8"
+            for raw in r.iter_lines(decode_unicode=True):
+                if not raw:
+                    continue
+                line = raw.strip()
+                if line.startswith("data:"):
+                    line = line[5:].strip()
+                if line == "[DONE]":
+                    break
+                if not line or line[0] != "{":
+                    continue
+                try:
+                    choice = (json.loads(line).get("choices") or [{}])[0]
+                except Exception:  # noqa: BLE001
+                    continue
+                piece = (choice.get("delta") or {}).get("content")
+                if piece is None:                        # non-streamed 200 fallback
+                    piece = (choice.get("message") or {}).get("content")
+                if piece:
+                    got_any = True
+                    yield piece
+        except Exception as exc:  # noqa: BLE001  (stream interrupted)
+            if got_any:
+                return                                   # partial already sent — stop
+            last = "stream broke (key %d): %s" % (ki + 1, exc)
+            continue                                     # nothing sent yet → next key
+        finally:
+            try:
+                r.close()
+            except Exception:  # noqa: BLE001
+                pass
+        if got_any:
+            return                                       # success
+        last = "empty stream (key %d)" % (ki + 1)
+    raise RuntimeError("AI stream failed on all %d key(s): %s" % (len(keys), last))
+
+
 def _chunk_words(text, size_chars=9000):
     words = (text or "").split()
     chunks, cur, n = [], [], 0
@@ -1126,57 +1194,8 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
     style='mcq' -> format the notes question-by-question (Question + options +
     full explanation) for lectures that are solving MCQs; default = topic notes."""
     sysmsg = _study_sys(out_lang)
-    no_promo = ("\nExclude course promotion, coaching/foundation/revision batch "
-                "names, app/Telegram/PDF/download links, class timings and "
-                "subscribe/like/share reminders (in ANY language) \u2014 keep only "
-                "the academic content.")
-    if style == "mcq":
-        instr = ("The transcript is a lecture SOLVING multiple-choice questions "
-                 "(MCQs) and is annotated with inline timestamps like [M:SS]. "
-                 "Convert it into COMPLETE Markdown revision notes, ONE "
-                 "question at a time, keeping the lecture's order. For EACH "
-                 "question use EXACTLY this structure:\n"
-                 "### Q<n>. (<M:SS>) <the full question>\n"
-                 "(The (M:SS) is the lecture timestamp where this question starts, "
-                 "taken from the nearest preceding [M:SS] marker.)\n"
-                 "- A) <option>\n- B) <option>\n- C) <option>\n- D) <option>\n"
-                 "(Include only the options actually stated; mark the CORRECT "
-                 "option by adding ' \u2713' at its end.)\n"
-                 "**Answer:** <letter> \u2014 <one-line reason>\n"
-                 "**Explanation:** then '- ' bullet points with ALL the points, "
-                 "facts, figures, dates, names and reasoning the teacher gave for "
-                 "THIS question \u2014 do NOT omit anything.\n"
-                 "Add '- Key Fact: ...' or '- Memory Trick: ...' bullets whenever "
-                 "the teacher gives one.\n"
-                 "Rules: bold (**...**) ONLY key terms; NEVER invent questions, "
-                 "options or answers that are not in the transcript; do not wrap "
-                 "the answer in code fences." + no_promo)
-    else:
-        instr = ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
-                 "topic, point, fact, figure, date, name, place, definition, formula "
-                 "and example mentioned \u2014 do NOT omit or over-summarize any "
-                 "information. Keep the lecture's order.\n"
-                 "Formatting rules for a clean, readable result:\n"
-                 "- Use ## for main sections and ### for sub-sections.\n"
-                 "- Use '- ' bullet points for details; nest with indentation.\n"
-                 "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
-                 "- Use a Markdown table when comparing items or listing facts/dates.\n"
-                 "- The transcript is annotated with inline timestamps like [M:SS]. "
-                 "START every ## section and ### sub-section heading with the lecture "
-                 "timestamp where that part begins (from the nearest preceding [M:SS] "
-                 "marker), e.g. '## 3:45 Topic name'. Keep it in plain M:SS form.\n"
-                 "- Do not wrap the whole answer in code fences." + no_promo)
-    # SMALL sections + capped output per call so EACH generation finishes well
-    # under Cloudflare's ~100s limit — this is what prevents the 524 upstream
-    # timeout. More calls, but each is fast; results are cached so a video only
-    # pays this once. MCQ expands a lot per point, so it uses even smaller chunks
-    # (and a tighter output cap) than topic notes.
-    if ai.get("big_context"):
-        chunk_chars = NOTES_MCQ_CHUNK if style == "mcq" else NOTES_CHUNK
-        secs = _chunk_words(transcript, chunk_chars)
-    else:
-        secs = [_condense(transcript, out_lang, ai)]
-    part_cap = NOTES_MCQ_CAP if style == "mcq" else NOTES_CAP
+    instr = _notes_instr(style)
+    secs, part_cap = _notes_sections(transcript, out_lang, ai, style)
     if len(secs) == 1:
         return _ai_chat(
             [{"role": "system", "content": sysmsg},
@@ -1190,6 +1209,114 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
               "for THIS part only.) " % (i + 1, len(secs))) + instr + "\n\n" + sec}],
             ai, max_tokens=part_cap))
     return "\n\n".join(parts)
+
+
+def _notes_instr(style=""):
+    """The notes-generation instruction (topic or MCQ). Shared by _gen_notes
+    (blocking) and _stream_study_text (streaming) so the two never drift."""
+    no_promo = ("\nExclude course promotion, coaching/foundation/revision batch "
+                "names, app/Telegram/PDF/download links, class timings and "
+                "subscribe/like/share reminders (in ANY language) \u2014 keep only "
+                "the academic content.")
+    if style == "mcq":
+        return ("The transcript is a lecture SOLVING multiple-choice questions "
+                "(MCQs) and is annotated with inline timestamps like [M:SS]. "
+                "Convert it into COMPLETE Markdown revision notes, ONE "
+                "question at a time, keeping the lecture's order. For EACH "
+                "question use EXACTLY this structure:\n"
+                "### Q<n>. (<M:SS>) <the full question>\n"
+                "(The (M:SS) is the lecture timestamp where this question starts, "
+                "taken from the nearest preceding [M:SS] marker.)\n"
+                "- A) <option>\n- B) <option>\n- C) <option>\n- D) <option>\n"
+                "(Include only the options actually stated; mark the CORRECT "
+                "option by adding ' \u2713' at its end.)\n"
+                "**Answer:** <letter> \u2014 <one-line reason>\n"
+                "**Explanation:** then '- ' bullet points with ALL the points, "
+                "facts, figures, dates, names and reasoning the teacher gave for "
+                "THIS question \u2014 do NOT omit anything.\n"
+                "Add '- Key Fact: ...' or '- Memory Trick: ...' bullets whenever "
+                "the teacher gives one.\n"
+                "Rules: bold (**...**) ONLY key terms; NEVER invent questions, "
+                "options or answers that are not in the transcript; do not wrap "
+                "the answer in code fences." + no_promo)
+    return ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
+            "topic, point, fact, figure, date, name, place, definition, formula "
+            "and example mentioned \u2014 do NOT omit or over-summarize any "
+            "information. Keep the lecture's order.\n"
+            "Formatting rules for a clean, readable result:\n"
+            "- Use ## for main sections and ### for sub-sections.\n"
+            "- Use '- ' bullet points for details; nest with indentation.\n"
+            "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
+            "- Use a Markdown table when comparing items or listing facts/dates.\n"
+            "- The transcript is annotated with inline timestamps like [M:SS]. "
+            "START every ## section and ### sub-section heading with the lecture "
+            "timestamp where that part begins (from the nearest preceding [M:SS] "
+            "marker), e.g. '## 3:45 Topic name'. Keep it in plain M:SS form.\n"
+            "- Do not wrap the whole answer in code fences." + no_promo)
+
+
+def _notes_sections(transcript, out_lang, ai, style=""):
+    """Split the transcript into the section(s) each notes call runs on + the
+    per-call output cap. Big-context providers process section-by-section (small
+    sections keep each call well under Cloudflare's ~100s limit); others use one
+    condensed body. MCQ expands more per point, so it uses smaller chunks/caps."""
+    if ai.get("big_context"):
+        chunk_chars = NOTES_MCQ_CHUNK if style == "mcq" else NOTES_CHUNK
+        secs = _chunk_words(transcript, chunk_chars)
+    else:
+        secs = [_condense(transcript, out_lang, ai)]
+    part_cap = NOTES_MCQ_CAP if style == "mcq" else NOTES_CAP
+    return secs, part_cap
+
+
+def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
+    """Generator yielding markdown content pieces for the TEXT study modes
+    (notes / summary / insights), streamed from the model. Mirrors _generate_study
+    for those modes; quiz/flashcards are NOT streamed (they return structured JSON)."""
+    sysmsg = _study_sys(out_lang)
+    if mode == "notes":
+        instr = _notes_instr(style)
+        secs, part_cap = _notes_sections(transcript, out_lang, ai, style)
+        for i, sec in enumerate(secs):
+            if i:
+                yield "\n\n"                          # separate parts like _gen_notes
+            if len(secs) == 1:
+                user = head + instr + "\n\n" + sec
+                mt = part_cap if ai.get("big_context") else 2400
+            else:
+                user = head + ("(Part %d of %d \u2014 detailed notes for THIS part "
+                               "only.) " % (i + 1, len(secs))) + instr + "\n\n" + sec
+                mt = part_cap
+            for piece in _ai_chat_stream(
+                    [{"role": "system", "content": sysmsg},
+                     {"role": "user", "content": user}], ai, max_tokens=mt):
+                yield piece
+        return
+    body = _condense(transcript, out_lang, ai)
+    if mode == "summary":
+        for piece in _ai_chat_stream(
+                [{"role": "system", "content": sysmsg},
+                 {"role": "user", "content": head + "Write a concise summary as 4-7 "
+                  "bullet points:\n\n" + body}], ai, max_tokens=1000):
+            yield piece
+        return
+    if mode == "insights":
+        for piece in _ai_chat_stream(
+                [{"role": "system", "content": sysmsg},
+                 {"role": "user", "content": head + (
+                     "List ALL the important, exam-relevant KEY INSIGHTS / takeaways "
+                     "from this lecture as bullets. Do NOT miss any important point. "
+                     "Rules:\n"
+                     "- One SHORT bullet per point (use '- '), bold ONLY the keyword "
+                     "or name. No long sentences, no sub-lists, no repetition.\n"
+                     "- Keep each bullet tight so the WHOLE list fits in one reply.\n"
+                     "- CRITICAL: the list MUST be complete \u2014 always finish the "
+                     "final bullet. Never stop in the middle of a line. If space is "
+                     "running out, shorten the bullets rather than cut the list.\n\n"
+                 ) + body}], ai, max_tokens=2500):
+            yield piece
+        return
+    raise ValueError("bad stream mode")
 
 
 def _gen_quiz(transcript, out_lang, ai, head, n, focus=""):
@@ -1556,6 +1683,147 @@ def api_study():
     if not data["persisted"]:
         log.warning("study %s NOT persisted (see errors above) — will regenerate next time", fs_id)
     return jsonify(data)
+
+
+@app.get("/api/study/stream")
+def api_study_stream():
+    """Streaming variant of /api/study for the TEXT modes (notes/summary/insights):
+    relays the model output to the browser as Server-Sent Events so notes render
+    progressively, and caches the full result ONLY when generation finishes cleanly.
+    Shares the SAME cache keys as /api/study (so streamed + blocking reuse each
+    other). Quiz/flashcards are not streamed. The client falls back to /api/study
+    on any error, so this endpoint never has to be the only path."""
+    raw_arg = (request.args.get("id") or request.args.get("url")
+               or request.args.get("v") or "").strip()
+    mode = (request.args.get("mode") or "notes").strip().lower()
+    out_lang = (request.args.get("out") or request.args.get("lang")
+                or "English").strip() or "English"
+    if mode not in ("notes", "summary", "insights"):
+        return jsonify({"error": "bad_mode",
+                        "detail": "streaming supports notes/summary/insights only"}), 400
+    video_id = _parse_video_id(raw_arg)
+    if not video_id:
+        return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
+
+    req_model = (request.args.get("model") or "").strip()[:80]
+    ai = _load_ai_config(req_model or None)
+    if not ai["keys"]:
+        return jsonify({"error": "ai_not_configured",
+                        "detail": "Add an AI key in the admin panel."}), 503
+    model = ai["model"]
+    force = (request.args.get("refresh") or request.args.get("nocache")
+             or "").strip().lower() in ("1", "true", "yes")
+    style = (request.args.get("style") or "").strip().lower()
+    if mode != "notes" or style not in ("mcq",):
+        style = ""
+
+    # Cache key MUST match /api/study (notes/summary/insights have no focus and a
+    # fixed num_q of 25) so a streamed note reuses/populates the same entry.
+    if style:
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, 25, style)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, 25, style)
+    else:
+        ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, 25)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, 25)
+
+    def _sse(event, payload):
+        return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False))
+
+    _sse_headers = {"Cache-Control": "no-cache, no-transform",
+                    "X-Accel-Buffering": "no"}
+
+    # cached? stream it straight back so the client uses ONE code path.
+    now = time.time()
+    cached = None
+    if not force:
+        with _study_lock:
+            hit = _study_cache.get(ckey)
+            if hit and (now - hit["ts"] < STUDY_TTL):
+                cached = hit["data"]
+        if cached is None:
+            fs = _study_get(fs_id)
+            if fs:
+                fs["cached"] = True
+                with _study_lock:
+                    _study_cache[ckey] = {"ts": time.time(), "data": fs}
+                cached = fs
+    if cached is not None:
+        cdata = cached
+
+        def gcache():
+            yield _sse("meta", {"provider": cdata.get("provider", "ai"),
+                                "model": cdata.get("model", ""), "cached": True})
+            yield _sse("chunk", {"t": cdata.get("content", "")})
+            yield _sse("done", {"persisted": True})
+        return Response(stream_with_context(gcache()),
+                        mimetype="text/event-stream", headers=_sse_headers)
+
+    # rate limit only NEW generations
+    uid = (request.args.get("uid") or "").strip()
+    if not _is_unlimited(uid):
+        if not _rate_ok("study", _client_ip(), _load_ai_limits()["studyPerHour"], 3600):
+            return jsonify({"error": "rate_limited",
+                            "detail": "Hourly AI generation limit reached."}), 429
+
+    # transcript must be resolved BEFORE we commit to a 200 stream (so genuine
+    # errors return a normal JSON status the client can fall back on).
+    try:
+        t = _extract_transcript(video_id, "auto")
+    except yt_dlp.utils.DownloadError as exc:
+        msg = str(exc)
+        if "confirm you" in msg or "bot" in msg or "Sign in" in msg:
+            if refresh_cookies() and _cookie_source == "firestore":
+                try:
+                    t = _extract_transcript(video_id, "auto", force=True)
+                except Exception:  # noqa: BLE001
+                    return jsonify({"error": "youtube_bot_check",
+                                    "detail": "Bot-gated. Update cookies."}), 403
+            else:
+                return jsonify({"error": "youtube_bot_check",
+                                "detail": "Bot-gated. Update cookies."}), 403
+        else:
+            return jsonify({"error": "extract_failed", "detail": msg[:200]}), 502
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "server_error", "detail": str(exc)[:200]}), 500
+    if not t.get("segments"):
+        return jsonify({"error": "no_captions",
+                        "detail": "No captions found for this video.",
+                        "transcript_lang": t.get("chosen_lang")}), 200
+
+    gen_text = t["text"]
+    if mode == "notes":
+        gen_text = _timestamped_transcript(t.get("segments")) or t["text"]
+    head = ("Video title: %s\n\n" % t.get("title")) if t.get("title") else ""
+
+    def gen():
+        yield _sse("meta", {"provider": ai.get("provider", "ai"),
+                            "model": model, "cached": False})
+        full = []
+        try:
+            for piece in _stream_study_text(mode, gen_text, out_lang, ai, head, style):
+                full.append(piece)
+                yield _sse("chunk", {"t": piece})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"error": "ai_failed", "detail": str(exc)[:200]})
+            return
+        content = "".join(full)
+        persisted = False
+        if content.strip():
+            data = {"id": video_id, "title": t.get("title"), "mode": mode,
+                    "style": style or ("topic" if mode == "notes" else None),
+                    "out_lang": out_lang, "model": model, "format": "markdown",
+                    "num_questions": None, "provider": ai.get("provider", "ai"),
+                    "keys_available": len(ai["keys"]),
+                    "transcript_lang": t.get("chosen_lang"),
+                    "segment_count": t.get("segment_count"),
+                    "cached": False, "content": content}
+            with _study_lock:
+                _study_cache[ckey] = {"ts": time.time(), "data": data}
+            persisted = _study_put(fs_id, data)     # cache ONLY on clean finish
+        yield _sse("done", {"persisted": persisted})
+
+    return Response(stream_with_context(gen()),
+                    mimetype="text/event-stream", headers=_sse_headers)
 
 
 # Which languages a video's study material (for a given mode) is ALREADY cached

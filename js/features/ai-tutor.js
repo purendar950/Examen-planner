@@ -442,6 +442,9 @@
       '.ai-opt.wrong{border-color:#a11;background:rgba(170,17,17,0.15)}',
       '.ai-spin{display:inline-block;width:16px;height:16px;border:2px solid var(--border,#2a3140);border-top-color:var(--accent,#00c896);border-radius:50%;animation:aispin .8s linear infinite;vertical-align:middle}',
       '@keyframes aispin{to{transform:rotate(360deg)}}',
+      // blinking caret shown at the end of streaming notes while they generate
+      '.ai-caret{display:inline-block;width:8px;height:1em;background:var(--accent,#00c896);vertical-align:-2px;margin-left:2px;border-radius:1px;animation:aiblink 1s steps(2,start) infinite}',
+      '@keyframes aiblink{to{opacity:0}}',
       // ── topper-notebook notes (single column on screen; paper look) ──
       '.ai-nb{background:#fffdf6;border-radius:8px;padding:14px 16px 18px;color:#22303f}',
       '.ai-scroll.nb{background:#fffdf6;padding:0;border-color:#e6dfca}',
@@ -620,20 +623,60 @@
   // Notes style toggle (Topic vs MCQ) — only meaningful for the "notes" mode.
   function nbNotesStyle() { var s = document.getElementById('ai-notes-style'); return (s && s.value === 'mcq') ? 'mcq' : 'topic'; }
 
-  /* ── Notes / Summary / Insights / Flashcards (from /api/study) ── */
+  /* ── Notes / Summary / Insights / Flashcards (from /api/study) ──
+     Text modes (notes/summary/insights) STREAM progressively from
+     /api/study/stream and fall back to the classic /api/study on any error.
+     Flashcards/quiz stay on the one-shot request. */
   function showStudy(mode, n, force, focus, langOverride) {
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var lang = langOverride || outLang();
     var style = (mode === 'notes') ? nbNotesStyle() : '';
     el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
+    var btnId = (mode === 'flashcards') ? 'ai-cards-go' : 'ai-notes-go';
+    var signal = _genStart(btnId);
+    if (mode === 'flashcards' || mode === 'quiz') { studyOnce(mode, n, style, lang, focus, force, signal, btnId); return; }
+    studyStream(mode, n, style, lang, focus, force, signal, btnId);
+  }
+
+  // StudyPlanner header shown at the top of the notes (brand only on screen; the
+  // Telegram handle/watermark/footer live in the PDF export instead).
+  function brandBarHtml() {
+    return '<div class="ai-brandbar"><span class="bn">Study<span class="g">Planner</span></span><span class="bs">AI Study Notes</span></div>';
+  }
+
+  // Final render of a text note from a result-like object {content,provider,model,cached}.
+  // Shared by the streaming and one-shot paths.
+  function renderNotesResult(mode, n, style, j) {
+    var box = contentEl();
+    var content = j.content || '';
+    var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
+    var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
+    var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
+    var nbHtml = nbBuild(content, style);
+    box.innerHTML = brandBarHtml() +
+      '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+      '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
+      followBtn + pdfBtn + regenBtn + '</div>' +
+      '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
+    bindTsLinks(box);
+    lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
+    var pb = document.getElementById('ai-pdf');
+    if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true }); };
+    var rb = document.getElementById('ai-regen');
+    if (rb) rb.onclick = function () { showStudy(mode, n, true); };
+    checkLangs(mode, n || 25, false);
+  }
+
+  // Classic one-shot request — handles flashcards + text modes. Also the fallback
+  // when streaming isn't available/fails. Owns _genEnd for its lifecycle.
+  function studyOnce(mode, n, style, lang, focus, force, signal, btnId) {
+    var vid = curVid();
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
     if (style === 'mcq') url += '&style=mcq';
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
-    var btnId = (mode === 'flashcards') ? 'ai-cards-go' : 'ai-notes-go';
-    var signal = _genStart(btnId);
     apiGet(url, signal).then(function (j) {
       _genEnd(btnId);
       var box = contentEl();
@@ -642,32 +685,81 @@
         box.innerHTML = '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>'; return;
       }
       if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); checkLangs('flashcards', 25, false); return; }
-      var content = j.content || '';
-      var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
-      var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
-      var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
-      var nbHtml = nbBuild(content, style);
-      // StudyPlanner header at the top of the notes (brand only on screen; the
-      // Telegram handle/watermark/footer are added in the PDF export instead).
-      var brandBar = '<div class="ai-brandbar"><span class="bn">Study<span class="g">Planner</span></span><span class="bs">AI Study Notes</span></div>';
-      box.innerHTML = brandBar +
-        '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-        '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
-        followBtn + pdfBtn + regenBtn + '</div>' +
-        '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
-      bindTsLinks(box);
-      lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
-      var pb = document.getElementById('ai-pdf');
-      if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true }); };
-      var rb = document.getElementById('ai-regen');
-      if (rb) rb.onclick = function () { showStudy(mode, n, true); };
-      // Refresh the "already generated" bar so the language just made shows up
-      // immediately (it used to only update on tab/mode/language change).
-      checkLangs(mode, n || 25, false);
+      renderNotesResult(mode, n, style, j);
     }).catch(function (e) {
       _genEnd(btnId);
       if (_isAbort(e)) { contentEl().innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>'; return; }
       contentEl().innerHTML = errHtml({ error: String(e) });
+    });
+  }
+
+  // Progressive streaming for text notes (SSE from /api/study/stream). Renders as
+  // chunks arrive; on ANY non-abort failure it falls back to studyOnce, so this is
+  // never worse than the classic path (e.g. if the proxy/stream isn't available).
+  function studyStream(mode, n, style, lang, focus, force, signal, btnId) {
+    var vid = curVid();
+    var url = BACKEND + '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
+    if (style === 'mcq') url += '&style=mcq';
+    if (force) url += '&refresh=1';
+    var meta = {}, acc = '', gotChunk = false, done = false, lastPaint = 0;
+
+    function paint() {
+      var box = contentEl();
+      box.innerHTML = brandBarHtml() +
+        '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+        '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') + (style === 'mcq' ? ' · MCQ' : '') + ' · streaming…</span></div>' +
+        '<div class="ai-scroll nb"><div class="ai-nb">' + nbBuild(acc, style) + '<span class="ai-caret"></span></div></div>';
+    }
+    function fallback() {
+      if (done) return; done = true;
+      contentEl().innerHTML = loading('Generating ' + mode + ' (' + lang + ')…');
+      studyOnce(mode, n, style, lang, focus, force, signal, btnId);   // owns _genEnd
+    }
+    function finish() {
+      if (done) return;
+      if (!gotChunk || !acc.trim()) { fallback(); return; }   // nothing streamed → fall back
+      done = true;
+      _genEnd(btnId);
+      renderNotesResult(mode, n, style, { content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached });
+    }
+    function handleFrame(frame) {
+      var ev = 'message', data = '';
+      frame.split('\n').forEach(function (ln) {
+        if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
+        else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
+      });
+      if (ev === 'meta') { try { meta = JSON.parse(data) || {}; } catch (e) {} return; }
+      if (ev === 'error') { fallback(); return; }
+      if (ev === 'done') { return; }
+      if (data) {
+        try {
+          var o = JSON.parse(data);
+          if (o && typeof o.t === 'string') {
+            acc += o.t; gotChunk = true;
+            var now = Date.now();
+            if (now - lastPaint > 120) { lastPaint = now; paint(); }
+          }
+        } catch (e) {}
+      }
+    }
+    fetch(url, signal ? { signal: signal } : {}).then(function (r) {
+      if (!r.ok || !r.body || !window.TextDecoder) { throw new Error('nostream'); }
+      var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
+      function pump() {
+        return reader.read().then(function (res) {
+          if (res.done) { finish(); return; }
+          buf += dec.decode(res.value, { stream: true });
+          var frames = buf.split('\n\n');
+          buf = frames.pop();
+          frames.forEach(handleFrame);
+          if (done) { try { reader.cancel(); } catch (e) {} return; }
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function (e) {
+      if (_isAbort(e)) { done = true; _genEnd(btnId); contentEl().innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>'; return; }
+      fallback();   // network / non-ok / no-stream → classic endpoint
     });
   }
   // Flashcards as an actual card deck: one card at a time, TAP to flip (3D),
