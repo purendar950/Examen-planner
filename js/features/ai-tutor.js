@@ -702,13 +702,32 @@
     if (style === 'mcq') url += '&style=mcq';
     if (force) url += '&refresh=1';
     var meta = {}, acc = '', gotChunk = false, done = false, lastPaint = 0;
+    // Progressive render state. We build the shell (brand + meta + scroll) ONCE
+    // and then only refresh the inner .ai-nb per chunk, so the scroll container
+    // survives and its position is preserved. `stick` keeps the newest line (the
+    // caret) in view while the user is at the bottom; if they scroll up to re-read
+    // mid-generation, following pauses until they scroll back down.
+    var built = false, stick = true, scrollEl = null, nbEl = null;
 
     function paint() {
       var box = contentEl();
-      box.innerHTML = brandBarHtml() +
-        '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-        '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') + (style === 'mcq' ? ' · MCQ' : '') + ' · streaming…</span></div>' +
-        '<div class="ai-scroll nb"><div class="ai-nb">' + nbBuild(acc, style) + '<span class="ai-caret"></span></div></div>';
+      if (!built) {
+        box.innerHTML = brandBarHtml() +
+          '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+          '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') + (style === 'mcq' ? ' · MCQ' : '') + ' · streaming…</span></div>' +
+          '<div class="ai-scroll nb"><div class="ai-nb"></div></div>';
+        scrollEl = box.querySelector('.ai-scroll');
+        nbEl = box.querySelector('.ai-nb');
+        if (scrollEl) {
+          scrollEl.addEventListener('scroll', function () {
+            // "at bottom" within a small threshold → keep following
+            stick = (scrollEl.scrollTop + scrollEl.clientHeight) >= (scrollEl.scrollHeight - 40);
+          });
+        }
+        built = true;
+      }
+      if (nbEl) nbEl.innerHTML = nbBuild(acc, style) + '<span class="ai-caret"></span>';
+      if (stick && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;   // follow the writing line
     }
     function fallback() {
       if (done) return; done = true;
