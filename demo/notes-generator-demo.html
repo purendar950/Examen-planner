@@ -180,11 +180,12 @@
     .page::before{display:none}
     /* Print is ALWAYS 2-column (regardless of the screen toggle):
        column-fill:auto => fill the left column to the bottom of the page, then
-       the right column, then the next page. Chrome's print engine mishandles
-       `balance` on multi-page content (with .sec headers using column-span:all)
-       and leaves the entire right column blank on every page. */
+       the right column, then the next page. Headers flow INSIDE the columns (no
+       column-span:all): a full-width spanner fragments the flow and forces both
+       columns to level off before each header, leaving whitespace gaps in the
+       shorter column. break-after:avoid keeps a header with its content. */
     .notes{column-count:2;column-gap:8mm;column-fill:auto}
-    .notes .sec{column-span:all}
+    .notes .sec,.notes .subsec{break-after:avoid}
     .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
     /* No fixed `size` — adapt to the user's paper (A4 or US Letter). */
