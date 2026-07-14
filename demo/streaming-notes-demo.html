@@ -163,17 +163,44 @@
   body.dark .controls{background:#161b22;color:#e6edf3}
   body.dark .controls select{background:#0e1116;color:#e6edf3;border-color:#2b3542}
 
+  /* brand / Telegram elements are hidden on screen; shown only when printing */
+  .pdf-brand,.pdf-watermark,.pdf-footer{display:none}
   @media print{
     body{background:#fff;font-size:10.5pt;line-height:1.35}
     .topbar,.controls,.metatag{display:none}
-    .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;padding:0 4mm}
+    /* transparent bg + z-index so the fixed watermark shows through behind the text */
+    .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;background:transparent;padding:0 4mm;position:relative;z-index:1}
     .page::before{display:none}
     .caret{display:none}
     .notes{column-count:2;column-gap:8mm;column-fill:balance}
     .notes .sec{column-span:all}
     .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
-    @page{margin:5mm 7mm}
+    /* extra bottom margin (11mm) reserves room for the fixed footer bar */
+    @page{margin:5mm 7mm 11mm 7mm}
+
+    /* header band (top of page 1): StudyPlanner wordmark + Telegram handle */
+    .pdf-brand{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 11px;border-radius:6px;
+      background:linear-gradient(135deg,#14532d,#166534);color:#fff;
+      font-family:system-ui,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .pdf-brand .wm-name{font-weight:800;font-size:12.5pt;letter-spacing:.3px}
+    .pdf-brand .wm-name .g{color:#8bffbe}
+    .pdf-brand .wm-tg{margin-left:auto;font-size:8.5pt;font-weight:700;color:#d7ffe6}
+
+    /* diagonal watermark — repeats on EVERY page (position:fixed) */
+    .pdf-watermark{display:block;position:fixed;top:44%;left:-6%;right:-6%;text-align:center;
+      transform:rotate(-27deg);font-family:system-ui,Arial,sans-serif;font-weight:800;font-size:44pt;
+      color:#14532d;opacity:.06;letter-spacing:3px;z-index:0;pointer-events:none;
+      -webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+    /* footer link bar — repeats on EVERY page (position:fixed) */
+    .pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;
+      position:fixed;left:0;right:0;bottom:0;height:8mm;z-index:3;
+      background:linear-gradient(135deg,#14532d,#166534);color:#fff;
+      font-family:system-ui,Arial,sans-serif;font-size:8pt;font-weight:700;
+      -webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .pdf-footer a{color:#fff;text-decoration:underline}
+    .pdf-footer .g{color:#8bffbe}
   }
 </style>
 </head>
@@ -238,6 +265,14 @@
   </div>
 
   <div class="metatag" id="meta"></div>
+
+  <!-- ── Telegram / brand — PRINT ONLY (appears in Save-as-PDF / print, never on screen) ── -->
+  <div class="pdf-brand">
+    <span class="wm-name">Study<span class="g">Planner</span></span>
+    <span class="wm-tg">✈️ @StudyPlannerSSC · Join on Telegram for more notes</span>
+  </div>
+  <div class="pdf-watermark">@StudyPlannerSSC</div>
+  <div class="pdf-footer">✈️ Join <span class="g">StudyPlannerSSC</span> on Telegram → <a href="https://telegram.me/StudyPlannerSSC">t.me/StudyPlannerSSC</a></div>
 
   <div class="page" id="page">
     <div class="placeholder">⬆️ Choose <b>Topic</b> or <b>MCQ</b> and hit <b>Generate (stream)</b> to watch it build live.</div>
