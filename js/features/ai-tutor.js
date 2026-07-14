@@ -828,7 +828,7 @@
   var PDF_CSS =
     // No fixed `size` — adapt to the paper the user picks (A4 or US Letter) so
     // content isn't clipped/scaled when the print target isn't A4.
-    '@page{margin:16mm 14mm;}' +
+    '@page{margin:5mm 7mm;}' +
     '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;}' +
     'body{font-family:"Segoe UI",system-ui,-apple-system,"Noto Sans","Noto Sans Devanagari",Arial,sans-serif;color:#1a1f2b;line-height:1.65;font-size:11.5pt;margin:0;}' +
     '.pdf-title{font-size:19pt;font-weight:800;margin:0 0 2px;color:#0f172a;}' +
@@ -855,7 +855,7 @@
   function nbPdfCss() {
     // No fixed `size` — adapt to the user's chosen paper (A4 or US Letter) so
     // the 2-column notes aren't clipped at the bottom / scaled on Letter.
-    return '@page{margin:10mm 9mm}' +
+    return '@page{margin:5mm 7mm}' +
       '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}' +
       'body{margin:0;background:#fff}' +
       '.pdf-title{font-family:"Kalam","Noto Sans Devanagari",system-ui,Arial,sans-serif;font-size:17pt;font-weight:800;margin:0 0 2px;color:#14532d}' +
