@@ -970,14 +970,17 @@
     '.pdf-who{font-size:8.5pt;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:3px;}' +
     '.ai-ts,.ai-ts-link{color:#2563eb;font-weight:600;}';
   // Notebook PDF: A4/Letter, 2 columns, paper look.
-  // NOTE: column-fill is `auto` (not `balance`). Chrome's print engine mishandles
-  // `balance` on multi-page content: it tries to equalize column heights across
-  // the whole document and — together with the `column-span:all` section headers
-  // that reset the column flow — dumps everything into the LEFT column, leaving
-  // the entire RIGHT column blank on every page. `auto` fills the left column to
-  // the bottom of each page, then the right column, then moves to the next page,
-  // so both columns are used on every page.
-  // Ref: Chrome bug where column-fill:balance leaves the 2nd column empty.
+  // Two-column layout notes:
+  //  • column-fill:auto — fills the left column to the bottom of each page, then
+  //    the right column, then the next page (Chrome mishandles `balance` on
+  //    multi-page content and leaves the right column blank).
+  //  • Section headers do NOT use `column-span:all`. A full-width spanner
+  //    fragments the multicol into isolated segments and forces both columns to
+  //    "level off" before each header — so a section whose left column is taller
+  //    than its right (e.g. a tall table) leaves a whitespace gap in the shorter
+  //    column. Letting headers flow inside the columns keeps one continuous flow
+  //    that fills both columns with no leveling gaps. `break-after:avoid` keeps a
+  //    header from being stranded at the bottom of a column, away from its content.
   function nbPdfCss() {
     // No fixed `size` — adapt to the user's chosen paper (A4 or US Letter) so
     // the 2-column notes aren't clipped at the bottom / scaled on Letter.
@@ -989,7 +992,7 @@
       '.pdf-title{font-family:"Kalam","Noto Sans Devanagari",system-ui,Arial,sans-serif;font-size:17pt;font-weight:800;margin:0 0 2px;color:#14532d;position:relative;z-index:1}' +
       '.pdf-meta{font-family:system-ui,Arial,sans-serif;font-size:8.5pt;color:#64748b;margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;position:relative;z-index:1}' +
       '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:10.5pt;line-height:1.4;position:relative;z-index:1}' +
-      '.pdf-nb .sec{column-span:all}' +
+      '.pdf-nb .sec,.pdf-nb .subsec{break-after:avoid}' +
       '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb table,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .sec,.pdf-nb .subsec,.pdf-nb .q-card,.pdf-nb .qkeep{break-inside:avoid}' +
       // ── Telegram / StudyPlanner branding (PDF only) ──
       // header band (top of page 1): wordmark + Telegram handle

@@ -183,10 +183,11 @@
     .page::before{display:none}
     .caret{display:none}
     /* column-fill:auto => fill left column to page bottom, then right, then next
-       page. Chrome mishandles `balance` on multi-page content and leaves the
-       right column empty on every page. */
+       page. Headers flow INSIDE the columns (no column-span:all) so the flow is
+       continuous and both columns fill with no leveling gaps before each
+       full-width header. break-after:avoid keeps a header with its content. */
     .notes{column-count:2;column-gap:8mm;column-fill:auto}
-    .notes .sec{column-span:all}
+    .notes .sec,.notes .subsec{break-after:avoid}
     .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
     /* extra bottom margin (11mm) reserves room for the fixed footer bar */
