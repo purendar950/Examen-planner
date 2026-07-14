@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Notes — Streaming (Progressive) Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ══════════════════════════════════════════════════════════════════
+     STREAMING DEMO — proves the "show the first chunk immediately, keep
+     generating, save to server only when COMPLETE" idea for Topic + MCQ
+     notes. Standalone; not wired into the app. The notebook renderer +
+     print CSS are copied from notes-generator-demo.html so the on-screen
+     and printed look match the real AI Study export.
+     ══════════════════════════════════════════════════════════════════ */
+  :root{
+    --paper:#fffdf6; --ruled:rgba(58,132,210,.09); --margin-line:#e57373;
+    --ink:#22303f; --ink-soft:#4b5a68;
+    --red:#c62828; --green:#2e7d32; --green-deep:#1b5e20; --teal-hdr:#2f4858;
+    --blue-pen:#1a3fb0; --green-pen:#1b7f43;
+    --purple:#7b1fa2; --purple-soft:#f3e5f5;
+    --box-border:#cfd8dc; --shadow:0 6px 22px rgba(20,40,60,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{font-family:'Kalam','Noto Sans Devanagari','Comic Sans MS',cursive;color:var(--ink);
+       background:#e8ecf1;font-size:17px;line-height:1.45;-webkit-font-smoothing:antialiased}
+
+  .topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:10px;
+          padding:11px 20px;background:linear-gradient(135deg,#14532d,#166534);
+          color:#eafff0;box-shadow:0 2px 10px rgba(0,0,0,.25);flex-wrap:wrap}
+  .topbar .brand{font-weight:700;font-size:1.06rem;letter-spacing:.3px}
+  .topbar .spacer{flex:1}
+  .topbar button{font-family:inherit;cursor:pointer;border:none;padding:7px 14px;border-radius:999px;
+                 font-size:.85rem;font-weight:700;display:inline-flex;align-items:center;gap:6px}
+  .btn-cols{background:#e0f2fe;color:#075985}
+  .btn-print{background:#22c55e;color:#04240f}
+  .btn-theme{background:#facc15;color:#3b2f00}
+  .topbar button:hover{filter:brightness(1.05)}
+
+  .controls{max-width:960px;margin:18px auto 0;background:#fff;border-radius:12px;
+            box-shadow:var(--shadow);padding:15px 17px;font-family:system-ui,Arial,sans-serif}
+  .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .controls select{font-size:14px;padding:11px 10px;border:1px solid #cdd6df;border-radius:9px;font-family:inherit;background:#fff}
+  .controls .go{background:#166534;color:#fff;border:none;font-weight:700;font-size:15px;padding:11px 22px;
+            border-radius:9px;cursor:pointer;font-family:inherit}
+  .controls .go:hover{background:#14532d}
+  .controls .go.stop{background:#e0464b}
+  .controls .hint{color:#64748b;font-size:12.5px;margin-top:9px;font-family:system-ui,Arial,sans-serif;line-height:1.55}
+  .controls .hint code{background:#eef2f6;padding:1px 6px;border-radius:5px}
+
+  /* status + save-state badges */
+  .bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:11px;font-family:system-ui,Arial,sans-serif;font-size:13px}
+  .save{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border-radius:999px;font-weight:700;font-size:12.5px}
+  .save.idle{background:#eef2f6;color:#64748b}
+  .save.gen{background:#fef3c7;color:#92400e}
+  .save.saved{background:#dcfce7;color:#166534}
+  .save.stopped{background:#fee2e2;color:#b3261e}
+  .metric{color:#475569}
+  .metric b{color:#14532d}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid #e5c98a;border-top-color:#92400e;
+        border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .metatag{font-family:system-ui,Arial,sans-serif;font-size:11.5px;color:#64748b;margin:0 auto;max-width:960px;padding:8px 4px 0}
+
+  .page{max-width:794px;margin:14px auto 40px;background:var(--paper);
+        background-image:repeating-linear-gradient(transparent,transparent 27px,var(--ruled) 28px);
+        border-radius:6px;box-shadow:var(--shadow);padding:26px 30px 44px 50px;position:relative;overflow:hidden;min-height:120px}
+  .page::before{content:"";position:absolute;top:0;bottom:0;left:36px;width:2px;background:var(--margin-line);opacity:.5}
+  .page .placeholder{color:#8fa0af;font-size:1.02rem;text-align:center;padding:26px 10px}
+
+  /* streaming caret shown at the end of the growing text */
+  .caret{display:inline-block;width:9px;height:1.05em;background:var(--green);vertical-align:-2px;margin-left:2px;
+         border-radius:1px;animation:blink 1s steps(2,start) infinite}
+  @keyframes blink{to{opacity:0}}
+
+  .notes{column-gap:30px}
+  body.twocol .notes{column-count:2}
+  body.twocol .notes .sec{column-span:all}
+  .sec,.subsec,.factbox,.membox,.answer,.notebox,.q-card,.qkeep,table,.chips{break-inside:avoid}
+  .sec,.subsec,.q-card{break-after:avoid}
+  .qkeep{margin-bottom:2px}
+
+  .sec{display:flex;align-items:center;gap:9px;font-weight:700;font-size:1.28rem;margin:16px 0 5px;padding-bottom:5px}
+  .sec:first-child{margin-top:2px}
+  .sec .num{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:50%;
+            font-size:.9rem;color:#fff;flex:none;font-family:system-ui,Arial,sans-serif}
+  .sec.c0{color:var(--red);border-bottom:2.5px solid var(--red)} .sec.c0 .num{background:var(--red)}
+  .sec.c1{color:var(--green);border-bottom:2.5px solid var(--green)} .sec.c1 .num{background:var(--green)}
+  .sec.c2{color:#1565c0;border-bottom:2.5px solid #1565c0} .sec.c2 .num{background:#1565c0}
+  .sec.c3{color:var(--purple);border-bottom:2.5px solid var(--purple)} .sec.c3 .num{background:var(--purple)}
+  .sec.c4{color:#e65100;border-bottom:2.5px solid #e65100} .sec.c4 .num{background:#e65100}
+  .subsec{font-weight:700;font-size:1.04rem;color:#37474f;margin:10px 0 3px;padding-left:2px}
+  .subsec::before{content:"\270E  ";opacity:.55}
+
+  .page p{margin:4px 0}
+  .page ul,.page ol{margin:4px 0 7px;padding-left:4px;list-style:none}
+  .page ul li{position:relative;padding-left:21px;margin:2.5px 0}
+  .page ul li::before{content:"\27a4";position:absolute;left:0;top:2px;color:var(--green);font-size:.72rem}
+  .page ol{counter-reset:li}
+  .page ol li{position:relative;padding-left:27px;margin:2.5px 0;counter-increment:li}
+  .page ol li::before{content:counter(li);position:absolute;left:0;top:1px;width:19px;height:19px;border-radius:50%;
+        background:var(--teal-hdr);color:#fff;font-size:.68rem;display:flex;align-items:center;justify-content:center;
+        font-family:system-ui,Arial,sans-serif}
+  .chips{display:flex;flex-wrap:wrap;gap:5px 7px;margin:4px 0 8px;padding-left:2px}
+  .chip{background:rgba(0,0,0,.03);border:1px solid var(--box-border);border-radius:999px;padding:2px 11px;font-size:.94rem;line-height:1.35}
+
+  strong,b,.pen{color:#12202f;font-weight:700}
+  .fig{color:var(--green-pen);font-weight:600}
+  em{color:#4527a0;font-style:italic}
+  code{background:#eef2f6;padding:1px 6px;border-radius:5px;font-size:.88em;font-family:ui-monospace,monospace}
+  mark.ans{background:#ffe93a;color:#3b2f00;padding:0 5px;border-radius:3px;font-weight:700}
+
+  .badge{display:inline-flex;align-items:center;gap:6px;font-family:system-ui,Arial,sans-serif;
+         font-size:.68rem;font-weight:700;letter-spacing:.5px;color:#fff;padding:3px 10px;border-radius:6px;
+         text-transform:uppercase;transform:translateY(5px)}
+  .badge.key{background:#2e7d32}
+  .badge.mem{background:var(--purple)}
+  .factbox{border:1.5px solid var(--green);border-radius:9px;padding:9px 13px;margin:5px 0 10px;background:#f6fff7}
+  .membox{border:2px dashed var(--purple);border-radius:9px;padding:9px 13px;margin:5px 0 10px;background:var(--purple-soft);color:#4a148c}
+  .notebox{background:#e3f2fd;border-left:4px solid #1565c0;border-radius:7px;padding:8px 12px;margin:6px 0;color:#0d2f52}
+
+  .q-card{margin:12px 0 4px;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(20,40,60,.08)}
+  .q-head{background:var(--teal-hdr);color:#eef4f8;padding:9px 13px;font-size:1rem;font-weight:700;display:flex;gap:9px;align-items:baseline}
+  .q-head .qtag{background:rgba(255,255,255,.18);border-radius:6px;padding:1px 8px;font-size:.76rem;flex:none;font-family:system-ui,Arial,sans-serif}
+  .q-head strong,.q-head b,.q-head .pen,.q-head .fig{color:#fff}
+  .q-body{background:#fbfcfd;border:1px solid var(--box-border);border-top:none;padding:7px 13px}
+  .opt{display:flex;align-items:baseline;gap:9px;padding:3px 0;font-size:.98rem}
+  .opt .lbl{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;flex:none;
+            background:#eceff1;color:#37474f;font-size:.75rem;font-weight:700;font-family:system-ui,Arial,sans-serif}
+  .opt.right{color:var(--green-deep);font-weight:700}
+  .opt.right .lbl{background:var(--green);color:#fff}
+  .opt.wrong{color:#98a6b3;text-decoration:line-through;text-decoration-color:#d3a5a5}
+  .opt.wrong .lbl{background:#fbe3e3;color:#c0392b;text-decoration:none}
+  .answer{background:#e8f5e9;border-left:4px solid var(--green);border-radius:7px;padding:8px 12px;margin:6px 0;color:#1e3a24}
+  .answer .ok{color:var(--green);font-weight:700}
+  .explain{margin:4px 0 12px;padding-left:2px}
+  .explain .xh{font-weight:700;color:#37474f;font-size:.88rem;margin:3px 0 1px;font-family:system-ui,Arial,sans-serif}
+
+  table{border-collapse:collapse;width:100%;margin:9px 0 12px;font-size:.9rem;box-shadow:0 2px 8px rgba(20,40,60,.08);border-radius:8px;overflow:hidden}
+  thead th{background:var(--green);color:#fff;text-align:left;padding:7px 10px;font-weight:700}
+  tbody td{border:1px solid #dce7df;padding:6px 10px}
+  tbody tr:nth-child(even){background:#f4faf5}
+  .divider{border:none;text-align:center;color:#c0ccd6;letter-spacing:7px;margin:12px 0;font-size:.95rem}
+  .divider::after{content:"\2726 \2726 \2726"}
+
+  body.dark{background:#0e1116}
+  body.dark .page{--paper:#161b22;--ink:#e6edf3;--ruled:rgba(120,150,190,.08);--box-border:#2b3542;color:#e6edf3;background-color:#161b22}
+  body.dark .subsec{color:#c3cdd7}
+  body.dark strong,body.dark b,body.dark .pen{color:#eef4fb}
+  body.dark .fig{color:#7fe0a3}
+  body.dark .q-body{background:#1b222c}
+  body.dark .opt .lbl{background:#263140;color:#cdd7e2}
+  body.dark .answer{background:#12271a;color:#d5f0dc}
+  body.dark .notebox{background:#0e2740;color:#cfe4fb}
+  body.dark .factbox{background:#12261a}
+  body.dark .membox{background:#241631;color:#e5c6ff}
+  body.dark tbody tr:nth-child(even){background:#1b232d} body.dark tbody td{border-color:#2b3542}
+  body.dark mark.ans{background:#c9a800;color:#211c00}
+  body.dark code{background:#22303f;color:#e6edf3}
+  body.dark .controls{background:#161b22;color:#e6edf3}
+  body.dark .controls select{background:#0e1116;color:#e6edf3;border-color:#2b3542}
+
+  @media print{
+    body{background:#fff;font-size:10.5pt;line-height:1.35}
+    .topbar,.controls,.metatag{display:none}
+    .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;padding:0 4mm}
+    .page::before{display:none}
+    .caret{display:none}
+    .notes{column-count:2;column-gap:8mm;column-fill:balance}
+    .notes .sec{column-span:all}
+    .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
+    .sec{font-size:12.5pt} .subsec{font-size:11pt}
+    @page{margin:5mm 7mm}
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <span class="brand">📓 AI Notes — Streaming (Progressive) Demo</span>
+    <span class="spacer"></span>
+    <button class="btn-cols" id="cols">🗂️ 2 Columns</button>
+    <button class="btn-print" onclick="window.print()">🖨️ Print / PDF</button>
+    <button class="btn-theme" onclick="document.body.classList.toggle('dark')">🌙 Dark Mode</button>
+  </div>
+
+  <div class="controls">
+    <div class="row">
+      <select id="style" title="Notes style">
+        <option value="topic">📝 Topic notes</option>
+        <option value="mcq">❓ MCQ notes</option>
+      </select>
+      <select id="speed" title="Simulated model speed (chunk delay)">
+        <option value="70">🐢 Slow model</option>
+        <option value="35" selected>⚡ Normal</option>
+        <option value="12">🚀 Fast</option>
+      </select>
+      <button class="go" id="go">▶ Generate (stream)</button>
+    </div>
+    <div class="bar">
+      <span class="save idle" id="save">● Idle</span>
+      <span class="metric" id="metric"></span>
+    </div>
+    <div class="hint">
+      <b>What this proves:</b> the first chunk paints almost instantly, the notebook keeps filling as tokens
+      arrive, and the result is <b>"saved to server (cached)" only when generation COMPLETES</b>. Press
+      <b>⏹ Stop</b> mid-stream and it shows <b>"stopped — not saved"</b> (nothing gets cached).
+      <br>In production this maps to: proxy relays the model's <code>stream:true</code> output (SSE) →
+      browser renders progressively → proxy writes to the Firestore cache only on a clean finish.
+      The renderer &amp; print CSS here are identical to the real AI Study export.
+    </div>
+  </div>
+
+  <div class="metatag" id="meta"></div>
+
+  <div class="page" id="page">
+    <div class="placeholder">⬆️ Choose <b>Topic</b> or <b>MCQ</b> and hit <b>Generate (stream)</b> to watch it build live.</div>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+  var $=function(id){return document.getElementById(id);};
+
+  /* ══ markdown inline ══ */
+  function esc(s){return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function inline(s){
+    s=s.replace(/\*\*([^*]+)\*\*/g,'<b class="pen">$1</b>')
+       .replace(/__([^_]+)__/g,'<b class="pen">$1</b>')
+       .replace(/(^|[^*])\*([^*\n]+)\*/g,'$1<em>$2</em>')
+       .replace(/`([^`]+)`/g,'<code>$1</code>');
+    s=s.replace(/\b(\d[\d.,:%\/\u2013-]*(?:st|nd|rd|th)?)\b/g,'<span class="fig">$1</span>');
+    return s;
+  }
+
+  var KEY_RE=/^\s*(key\s*facts?|important|imp\.?|remember|note|yaad\s*rakh\w*|zaruri|jaruri)\s*[:\-\u2013]/i;
+  var MEM_RE=/^\s*(memory\s*trick|trick|mnemonic|shortcut|tip|exam\s*tip|hack)\s*[:\-\u2013]/i;
+  function afterColon(s){ var idx=s.search(/[:\-\u2013]/); return idx>=0? s.slice(idx+1).trim() : s; }
+  function calloutKey(t){ return '<span class="badge key">🔑 Key Facts</span><div class="factbox">'+inline(esc(afterColon(t)))+'</div>'; }
+  function calloutMem(t){ return '<span class="badge mem">🧠 Memory Trick</span><div class="membox">'+inline(esc(afterColon(t)))+'</div>'; }
+
+  function isShort(s){ var p=s.replace(/[*_`]/g,"").trim(); return p.length<=18 && p.indexOf(":")<0; }
+  function endsColon(s){ return /[:：]\s*$/.test(s.replace(/[*_`]/g,"")); }
+  function renderUL(items){
+    var m2=[];
+    for(var p=0;p<items.length;p++){
+      var it=items[p], nx=items[p+1], nn=items[p+2];
+      if(endsColon(it) && nx!=null && isShort(nx) && !(nn!=null && isShort(nn) && !endsColon(nn))){
+        m2.push(it.replace(/\s+$/,"") + " **" + nx.replace(/\*/g,"").trim() + "**");
+        p++;
+      } else { m2.push(it); }
+    }
+    items=m2;
+    var html=[], run=[], mode=null;
+    function flush(){
+      if(!run.length) return;
+      if(mode==="chip" && run.length>=2){
+        html.push('<div class="chips">'+run.map(function(x){return '<span class="chip">'+inline(esc(x))+'</span>';}).join('')+'</div>');
+      } else { html.push('<ul>'+run.map(function(x){return '<li>'+inline(esc(x))+'</li>';}).join('')+'</ul>'); }
+      run=[]; mode=null;
+    }
+    items.forEach(function(it){
+      if(KEY_RE.test(it)){ flush(); html.push(calloutKey(it)); return; }
+      if(MEM_RE.test(it)){ flush(); html.push(calloutMem(it)); return; }
+      var want=isShort(it)?"chip":"norm";
+      if(mode && mode!==want) flush();
+      mode=want; run.push(it);
+    });
+    flush();
+    return html.join("\n");
+  }
+
+  function mdInner(md){
+    md=(md||"").replace(/\r/g,"");
+    md=md.replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,"$1");
+    var lines=md.split("\n"), out=[], i=0, secN=0, colorN=0, ol=false;
+    function closeOl(){ if(ol){out.push("</ol>");ol=false;} }
+    while(i<lines.length){
+      var t=lines[i].trim();
+      if(/^\|.*\|$/.test(t) && i+1<lines.length && /^\|[\s:|-]+\|$/.test(lines[i+1].trim())){
+        closeOl();
+        var head=t.split("|").slice(1,-1).map(function(c){return "<th>"+inline(esc(c.trim()))+"</th>";}).join("");
+        out.push("<table><thead><tr>"+head+"</tr></thead><tbody>"); i+=2;
+        while(i<lines.length && /^\|.*\|$/.test(lines[i].trim())){
+          var row=lines[i].trim().split("|").slice(1,-1).map(function(c){return "<td>"+inline(esc(c.trim()))+"</td>";}).join("");
+          out.push("<tr>"+row+"</tr>"); i++;
+        }
+        out.push("</tbody></table>"); continue;
+      }
+      if(t==="---"||t==="***"||t==="___"){ closeOl(); out.push('<div class="divider"></div>'); i++; continue; }
+      var h=t.match(/^(#{1,6})\s+(.*)/);
+      if(h){
+        closeOl();
+        var lv=h[1].length;
+        var htxt=h[2].replace(/^[*#\s]+/,"").replace(/[*#:\s]+$/,"").trim();
+        var txt=inline(esc(htxt));
+        if(lv<=2){ secN++; var c=colorN%5; colorN++; out.push('<div class="sec c'+c+'"><span class="num">'+secN+'</span>'+txt+'</div>'); }
+        else { out.push('<div class="subsec">'+txt+'</div>'); }
+        i++; continue;
+      }
+      if(/^>\s?/.test(t)){ closeOl(); out.push('<div class="notebox">'+inline(esc(t.replace(/^>\s?/,"")))+'</div>'); i++; continue; }
+      var mo=t.match(/^(\d+)[.)]\s+(.*)/);
+      if(mo){ if(!ol){out.push("<ol>");ol=true;} out.push("<li>"+inline(esc(mo[2]))+"</li>"); i++; continue; }
+      if(/^[-*+]\s+/.test(t)){
+        closeOl();
+        var items=[];
+        while(i<lines.length){ var m2=lines[i].trim().match(/^[-*+]\s+(.*)/); if(!m2) break; items.push(m2[1]); i++; }
+        out.push(renderUL(items)); continue;
+      }
+      if(t===""){ closeOl(); i++; continue; }
+      if(KEY_RE.test(t)){ closeOl(); out.push(calloutKey(t)); i++; continue; }
+      if(MEM_RE.test(t)){ closeOl(); out.push(calloutMem(t)); i++; continue; }
+      closeOl(); out.push("<p>"+inline(esc(t))+"</p>"); i++;
+    }
+    closeOl();
+    return out.join("\n");
+  }
+  function mdToHandwritten(md){ return '<div class="notes">'+mdInner(md)+'</div>'; }
+
+  /* ══ MCQ renderer ══ */
+  var Q_RE=/^#{0,4}\s*\**\s*(?:Q|Question|Ques|प्रश्न|सवाल)\s*\.?\s*(\d+)\s*[.):\-\u2013]*\s*(.*)$/i;
+  var O_RE=/^[-*+]?\s*\(?([A-Da-d1-4])\)?[.)]\s+(.*)$/;
+  var A_RE=/^\s*(?:[-*+]\s*)?\**\s*(?:answer|ans|उत्तर|सही\s*उत्तर)\**\s*[:：]?\s*\**\s*\(?([A-Da-d1-4])\)?\b(.*)$/i;
+  var EXP_RE=/^\**\s*(?:explanation|explain|व्याख्या|स्पष्टीकरण)\**\s*[:：]?\s*(.*)$/i;
+  function optIsRight(text){ return /[\u2713\u2714]|\(correct\)|\bcorrect\b|सही/i.test(text); }
+  function cleanOpt(text){ return text.replace(/\s*[\u2713\u2714]\s*$/,"").replace(/\s*\(correct\)\s*$/i,"").trim(); }
+  function buildCard(n, q, opts, ans, ansRest, expl){
+    var hasCorrect = !!ans || opts.some(function(o){ return optIsRight(o.text); });
+    var body=opts.map(function(o){
+      var right=(ans && o.k===ans) || optIsRight(o.text);
+      var cls = right ? ' right' : (hasCorrect ? ' wrong' : '');
+      var txt=cleanOpt(o.text);
+      return '<div class="opt'+cls+'"><span class="lbl">'+o.k+'</span> '+inline(esc(txt))+(right?' ✓':'')+'</div>';
+    }).join('');
+    var qHtml='<div class="q-card"><div class="q-head"><span class="qtag">Q'+n+'</span> '+inline(esc(q.replace(/\*+/g,"")))+'</div>'+
+              (opts.length?'<div class="q-body">'+body+'</div>':'')+'</div>';
+    var ansHtml = ans
+      ? '<div class="answer"><span class="ok">✅ Answer: <mark class="ans">'+ans+'</mark></span>'+
+        (ansRest?' '+inline(esc(ansRest.replace(/^[\s\u2014\-:：]+/,""))):'')+'</div>'
+      : '';
+    var explHtml = expl.length ? '<div class="explain"><div class="xh">📝 Explanation</div>'+mdInner(expl.join("\n"))+'</div>' : '';
+    return '<div class="qkeep">'+qHtml+ansHtml+'</div>'+explHtml;
+  }
+  function renderMCQ(md){
+    var lines=(md||"").replace(/\r/g,"").replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,"$1").split("\n");
+    var out=[], i=0, qn=0, found=false;
+    while(i<lines.length){
+      var t=lines[i].trim();
+      var qm=t.match(Q_RE);
+      if(qm){
+        found=true; qn++;
+        var qtext=qm[2]||""; i++;
+        var opts=[], ans="", ansRest="", expl=[];
+        while(i<lines.length){
+          var lt=lines[i].trim();
+          if(Q_RE.test(lt)) break;
+          var am=lt.match(A_RE), om=lt.match(O_RE), em=lt.match(EXP_RE);
+          if(am){ ans=am[1].toUpperCase(); ansRest=am[2]||""; i++; continue; }
+          if(om){ opts.push({k:om[1].toUpperCase(), text:om[2]}); i++; continue; }
+          if(em){ var er=(em[1]||"").replace(/^\*+/,"").replace(/\*+$/,"").trim(); if(er) expl.push(er); i++; continue; }
+          if(lt===""){ i++; continue; }
+          expl.push(lt); i++;
+        }
+        out.push(buildCard(qn, qtext, opts, ans, ansRest, expl));
+        continue;
+      }
+      var buf=[];
+      while(i<lines.length && !Q_RE.test(lines[i].trim())){ buf.push(lines[i]); i++; }
+      if(buf.join("").trim()) out.push(mdInner(buf.join("\n")));
+    }
+    if(!found) return mdToHandwritten(md);
+    return '<div class="notes">'+out.join("\n")+'</div>';
+  }
+
+  /* ══ column toggle ══ */
+  function syncCols(){ $("cols").innerHTML = document.body.classList.contains("twocol") ? "🗂️ 2 Columns" : "📄 1 Column"; }
+  $("cols").onclick=function(){ document.body.classList.toggle("twocol"); syncCols(); };
+  syncCols();
+
+  /* ══ streaming engine ══════════════════════════════════════════════
+     Simulates a model streaming tokens. The SAME onChunk/onDone shape is
+     what a real fetch(ReadableStream) / SSE reader would call, so wiring
+     this to the proxy later is a drop-in replacement of `startStream`. */
+  var _timer=null, _running=false;
+  function startStream(fullText, opts){
+    var tokens=fullText.match(/\S+\s*/g)||[];
+    var i=0, acc="", first=true;
+    _running=true;
+    function step(){
+      if(!_running) return;
+      var batch=2+Math.floor(Math.random()*4);   // a few tokens per tick
+      for(var b=0;b<batch && i<tokens.length;b++){ acc+=tokens[i++]; }
+      if(first){ first=false; opts.onFirst&&opts.onFirst(); }
+      opts.onChunk(acc);
+      if(i>=tokens.length){ _running=false; opts.onDone(acc); return; }
+      _timer=setTimeout(step, opts.delay);
+    }
+    _timer=setTimeout(step, opts.delay);
+  }
+  function stopStream(){ _running=false; if(_timer) clearTimeout(_timer); }
+
+  /* ══ render + state ══ */
+  var page=$("page"), saveEl=$("save"), metricEl=$("metric"), goBtn=$("go");
+  function setSave(cls, html){ saveEl.className="save "+cls; saveEl.innerHTML=html; }
+  function renderInto(text, mcq, streaming){
+    var html = mcq ? renderMCQ(text) : mdToHandwritten(text);
+    page.innerHTML = html;
+    if(streaming){
+      // append a blinking caret to the very last text node so it reads "still typing"
+      var notes=page.querySelector(".notes")||page;
+      var caret=document.createElement("span"); caret.className="caret";
+      notes.appendChild(caret);
+    }
+  }
+
+  var t0=0, tFirst=0;
+  function fmt(ms){ return (ms/1000).toFixed(1)+"s"; }
+
+  function generate(){
+    if(_running){ stopStream(); onStopped(); return; }   // button is acting as Stop
+    var mcq=$("style").value==="mcq";
+    var delay=parseInt($("speed").value,10)||35;
+    var text=mcq?SAMPLE_MCQ:SAMPLE_TOPIC;
+
+    goBtn.classList.add("stop"); goBtn.textContent="⏹ Stop";
+    $("meta").textContent="demo · streaming · "+(mcq?"MCQ":"topic")+" notes";
+    setSave("gen",'<span class="spin"></span> Generating… (not saved yet)');
+    metricEl.textContent="";
+    page.innerHTML='<div class="placeholder"><span class="spin"></span> Connecting to model…</div>';
+    t0=Date.now(); tFirst=0;
+
+    startStream(text, {
+      delay: delay,
+      onFirst: function(){ tFirst=Date.now()-t0; },
+      onChunk: function(acc){
+        renderInto(acc, mcq, true);
+        metricEl.innerHTML="First chunk in <b>"+fmt(tFirst)+"</b> · streaming… <b>"+acc.length+"</b> chars";
+      },
+      onDone: function(acc){
+        renderInto(acc, mcq, false);   // no caret when finished
+        goBtn.classList.remove("stop"); goBtn.textContent="▶ Generate (stream)";
+        var total=Date.now()-t0;
+        // ── only NOW would we POST the full result to the server cache ──
+        setSave("saved","✅ Complete — saved to server (cached)");
+        metricEl.innerHTML="First chunk <b>"+fmt(tFirst)+"</b> · full generation <b>"+fmt(total)+"</b> · <b>"+acc.length+"</b> chars cached";
+      }
+    });
+  }
+  function onStopped(){
+    goBtn.classList.remove("stop"); goBtn.textContent="▶ Generate (stream)";
+    // remove the caret but KEEP the partial content on screen
+    var c=page.querySelector(".caret"); if(c) c.remove();
+    setSave("stopped","⏹ Stopped — partial shown, NOT saved to server");
+    metricEl.innerHTML="Stopped at first-chunk "+(tFirst?"<b>"+fmt(tFirst)+"</b>":"—")+" — nothing was cached.";
+  }
+  goBtn.onclick=generate;
+
+  /* ══ sample content (stands in for the model output) ══ */
+  var SAMPLE_TOPIC=[
+    "## Awards & Honours 2026 — Overview",
+    "This lecture covers the year's top civilian awards, literary honours and Republic Day highlights for the RRB Group D exam.",
+    "- Focus: **Jnanpith**, **Padma Awards**, **Sahitya Akademi** and **Republic Day tableaux**.",
+    "- Strategy: remember the *category + recipient + a one-line reason*.",
+    "",
+    "## Padma Awards — Hierarchy",
+    "- Padma Vibhushan: India's **2nd highest** civilian award.",
+    "- Padma Bhushan: India's **3rd highest** civilian award.",
+    "- Padma Shri: India's **4th highest** civilian award.",
+    "- Bharat Ratna is the **highest** civilian award, first given in 1954.",
+    "Key Facts: In 2026, a total of 131 Padma awards were conferred — 5 Vibhushan, 13 Bhushan, 113 Shri.",
+    "",
+    "| Category | Recipients |",
+    "| --- | --- |",
+    "| Padma Vibhushan | 5 |",
+    "| Padma Bhushan | 13 |",
+    "| Padma Shri | 113 |",
+    "",
+    "## Jnanpith & Sahitya Akademi",
+    "- The Jnanpith is India's **highest literary honour**, started in 1965.",
+    "- 59th Jnanpith Award was given to **Vinod Kumar Shukla**.",
+    "- The Sahitya Akademi Award is the **second highest** literary award.",
+    "Memory Trick: Jnanpith = *Jaan* (life) of literature → the very top; Sahitya Akademi sits just below it.",
+    "",
+    "## Republic Day 2026 — Best Tableau",
+    "- Best Tableau (States): **Maharashtra** — theme *Ganeshotsav*.",
+    "- Second Place: **Jammu & Kashmir**.",
+    "- Popular Choice (First): **Gujarat**.",
+    "> Tip: Tableau winners are a favourite one-mark question — memorise the top three."
+  ].join("\n");
+
+  var SAMPLE_MCQ=[
+    "## Awards & Honours — Practice MCQs",
+    "### Q1. The Bharat Ratna, India's highest civilian award, was instituted in which year?",
+    "- A) 1950",
+    "- B) 1954 ✓",
+    "- C) 1961",
+    "- D) 1971",
+    "**Answer:** B — Bharat Ratna and the Padma awards were both instituted in 1954.",
+    "**Explanation:**",
+    "- Instituted on **2 January 1954**.",
+    "- Not limited to Indian citizens; a few non-citizens have received it.",
+    "- Key Fact: A maximum of **3** Bharat Ratna awards can be given in a single year.",
+    "",
+    "### Q2. Who was awarded the 59th Jnanpith Award?",
+    "- A) Damodar Mauzo",
+    "- B) Vinod Kumar Shukla ✓",
+    "- C) Nilmani Phookan",
+    "- D) Gulzar",
+    "**Answer:** B — Hindi writer Vinod Kumar Shukla received the 59th Jnanpith.",
+    "**Explanation:**",
+    "- The Jnanpith is India's **highest literary award**, started in **1965**.",
+    "- Given for contributions to Indian literature; carries a cash prize and the *Vagdevi* bronze statue.",
+    "",
+    "### Q3. Which state's tableau won Best Tableau at the Republic Day 2026 parade?",
+    "- A) Gujarat",
+    "- B) Jammu & Kashmir",
+    "- C) Maharashtra ✓",
+    "- D) Kerala",
+    "**Answer:** C — Maharashtra's *Ganeshotsav* tableau was adjudged best.",
+    "**Explanation:**",
+    "- Popular-choice (public vote) first place went to **Gujarat**.",
+    "- Memory Trick: **M**aharashtra = **M**ost cultural theme (Ganeshotsav) → Best Tableau."
+  ].join("\n");
+
+  window.__demo={renderMCQ:renderMCQ, mdToHandwritten:mdToHandwritten, startStream:startStream, stopStream:stopStream};
+})();
+</script>
+</body>
+</html>
