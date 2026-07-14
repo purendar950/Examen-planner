@@ -2133,6 +2133,12 @@ STUDY_PROVIDER_MODELS = {
     "nvidia":     ["deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash", "qwen/qwen3.5-397b-a17b", "nvidia/nemotron-3-nano-30b-a3b", "z-ai/glm-5.2", "minimaxai/minimax-m3"],
     "google":     ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
 }
+# Single source of truth for provider order + display labels, so the flat model
+# list (_all_study_models) and the grouped list (/api/status studyModelGroups)
+# can never drift out of sync (a missing id here made Gemini vanish from the
+# user-side model dropdown even though it worked everywhere else).
+STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google")
+STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini"}
 
 
 def _effective_provider_models(cfg):
@@ -2195,7 +2201,7 @@ def _all_study_models(cfg):
     dropdown, so all pickable models actually work."""
     eff = _effective_provider_models(cfg)
     out = []
-    for pid in ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google"):
+    for pid in STUDY_PROVIDER_IDS:
         meta = STUDY_TEST_PROVIDERS.get(pid)
         if meta and _cfg_keys(cfg, meta["keyField"]):
             out.extend(eff.get(pid, []))
@@ -2380,12 +2386,11 @@ def api_status():
                 # Grouped by provider (only those with a key) so the dropdown
                 # can label which model belongs to which provider.
                 _groups = []
-                _LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA"}
                 _eff = _effective_provider_models(cfg)
-                for _pid in ("bynara", "mistral", "cerebras", "openrouter", "nvidia"):
+                for _pid in STUDY_PROVIDER_IDS:
                     _meta = STUDY_TEST_PROVIDERS.get(_pid)
                     if _meta and _cfg_keys(cfg, _meta["keyField"]):
-                        _groups.append({"provider": _pid, "label": _LABELS.get(_pid, _pid.capitalize()),
+                        _groups.append({"provider": _pid, "label": STUDY_PROVIDER_LABELS.get(_pid, _pid.capitalize()),
                                         "models": _eff.get(_pid, [])})
                 out["studyModelGroups"] = _groups
         except Exception:  # noqa: BLE001
