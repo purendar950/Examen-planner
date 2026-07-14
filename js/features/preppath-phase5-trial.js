@@ -313,7 +313,7 @@ function ezExportPdf(title, bodyHtml) {
   if (!w) { showToast('Popup block ho gaya — PDF export ke liye popups allow karo.', 'error'); return; }
   w.document.write(
     '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + (title || 'StudyPlanner Export') + '</title>' +
-    '<style>@page{margin:10mm;}' +
+    '<style>@page{margin:5mm;}' +
     'body{font-family:Inter,Arial,sans-serif;color:#16202E;padding:0;line-height:1.6;}' +
     'h1{font-size:1.3rem;margin-bottom:4px;}h2{font-size:1rem;margin:18px 0 6px;}' +
     '.muted{color:#64748B;font-size:.85rem;margin-bottom:16px;}' +
