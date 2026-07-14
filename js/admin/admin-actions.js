@@ -592,9 +592,12 @@ const STUDY_PROVIDERS = {
               note: 'free models via OpenRouter', keyUrl: 'https://openrouter.ai/keys' },
   nvidia:   { label: 'NVIDIA', host: 'integrate.api.nvidia.com', baseUrl: 'https://integrate.api.nvidia.com/v1', keyField: 'nvidiaApiKeys', modelField: 'nvidiaModel',
               models: ['deepseek-ai/deepseek-v4-pro', 'deepseek-ai/deepseek-v4-flash', 'qwen/qwen3.5-397b-a17b', 'nvidia/nemotron-3-nano-30b-a3b', 'z-ai/glm-5.2', 'minimaxai/minimax-m3'], def: 'deepseek-ai/deepseek-v4-pro',
-              note: 'NVIDIA NIM (OpenAI-compatible)', keyUrl: 'https://build.nvidia.com' }
+              note: 'NVIDIA NIM (OpenAI-compatible)', keyUrl: 'https://build.nvidia.com' },
+  google:   { label: 'Google Gemini', host: 'generativelanguage.googleapis.com', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyField: 'googleApiKeys', modelField: 'googleModel',
+              models: ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-2.5-flash'], def: 'gemini-flash-latest',
+              note: 'OpenAI-compatible · large context · free tier ~20 req/day', keyUrl: 'https://aistudio.google.com/apikey' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
