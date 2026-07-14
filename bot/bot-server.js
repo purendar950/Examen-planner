@@ -106,7 +106,7 @@ function resolveDate(token) {
 function extractYouTubeIds(text) {
   if (!text) return [];
   const ids = [];
-  const re = /(?:youtube\.com\/(?:watch\?(?:[^ ]*&)?v=|embed\/|shorts\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/g;
+  const re = /(?:youtube\.com\/(?:watch\?(?:[^ ]*&)?v=|embed\/|shorts\/|live\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/g;
   let m;
   while ((m = re.exec(text)) !== null) { if (!ids.includes(m[1])) ids.push(m[1]); }
   return ids;
