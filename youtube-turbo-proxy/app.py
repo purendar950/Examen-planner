@@ -1368,17 +1368,53 @@ def _notes_instr(style=""):
             "- Do not wrap the whole answer in code fences." + no_promo)
 
 
+# Approx context window (in TOKENS) per Study provider. Cerebras models cap low
+# (8192) — they are NOT really big-context — so a big char chunk 400s with
+# "reduce the length". Others (Bynara ~1M, Mistral, NVIDIA, OpenRouter, custom)
+# are large. Override the default via env if needed.
+_PROVIDER_CTX_TOKENS = {"cerebras": 8192}
+_DEFAULT_CTX_TOKENS = int(os.environ.get("STUDY_DEFAULT_CTX_TOKENS", "128000"))
+# Fraction of the context window reserved for the INPUT transcript chunk (the
+# rest covers the instruction + the model's output). Env-tunable.
+_CTX_INPUT_FRAC = float(os.environ.get("STUDY_CTX_INPUT_FRAC", "0.40"))
+
+
+def _model_ctx_tokens(ai):
+    return _PROVIDER_CTX_TOKENS.get((ai.get("provider") or "").lower(), _DEFAULT_CTX_TOKENS)
+
+
+def _chars_per_token(text):
+    """Rough chars-per-token for THIS transcript. Latin script is ~4 chars/token,
+    but Devanagari & other non-ASCII (Hindi/Hinglish transcripts) are ~1.2 — i.e.
+    Hindi packs FAR more tokens into the same character count. Using the real
+    ratio is what stops a fixed char chunk from blowing a small context window."""
+    text = text or ""
+    if not text:
+        return 4.0
+    ascii_ct = sum(1 for c in text if ord(c) < 128)
+    other = len(text) - ascii_ct
+    tokens = (ascii_ct / 4.0) + (other / 1.2)
+    return max(1.0, len(text) / tokens) if tokens else 4.0
+
+
 def _notes_sections(transcript, out_lang, ai, style=""):
     """Split the transcript into the section(s) each notes call runs on + the
-    per-call output cap. Big-context providers process section-by-section (small
-    sections keep each call well under Cloudflare's ~100s limit); others use one
+    per-call output cap. Chunk size adapts to the MODEL'S context window AND the
+    transcript's script (Hindi ≈ 1 token/char), so small-context models (e.g.
+    Cerebras 8192) don't 400 with 'reduce the length'. Big-context providers get
+    the full NOTES_CHUNK (single coherent pass); non-big providers use one
     condensed body. MCQ expands more per point, so it uses smaller chunks/caps."""
-    if ai.get("big_context"):
-        chunk_chars = NOTES_MCQ_CHUNK if style == "mcq" else NOTES_CHUNK
-        secs = _chunk_words(transcript, chunk_chars)
-    else:
-        secs = [_condense(transcript, out_lang, ai)]
     part_cap = NOTES_MCQ_CAP if style == "mcq" else NOTES_CAP
+    if not ai.get("big_context"):
+        return [_condense(transcript, out_lang, ai)], part_cap
+    chunk_chars = NOTES_MCQ_CHUNK if style == "mcq" else NOTES_CHUNK
+    ctx = _model_ctx_tokens(ai)
+    if ctx:
+        in_budget_tokens = int(ctx * _CTX_INPUT_FRAC)          # tokens for the chunk
+        char_budget = int(in_budget_tokens * _chars_per_token(transcript))
+        chunk_chars = min(chunk_chars, max(3000, char_budget))  # never below a floor
+        part_cap = min(part_cap, in_budget_tokens)             # keep output in-context
+    secs = _chunk_words(transcript, chunk_chars)
     return secs, part_cap
 
 
