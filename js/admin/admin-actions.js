@@ -589,9 +589,12 @@ const STUDY_PROVIDERS = {
               note: 'ultra-fast inference', keyUrl: 'https://cloud.cerebras.ai' },
   openrouter: { label: 'OpenRouter', host: 'openrouter.ai', baseUrl: 'https://openrouter.ai/api/v1', keyField: 'openrouterApiKeys', modelField: 'openrouterModel',
               models: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'google/gemma-4-31b-it:free'], def: 'nvidia/nemotron-3-ultra-550b-a55b:free',
-              note: 'free models via OpenRouter', keyUrl: 'https://openrouter.ai/keys' }
+              note: 'free models via OpenRouter', keyUrl: 'https://openrouter.ai/keys' },
+  nvidia:   { label: 'NVIDIA', host: 'integrate.api.nvidia.com', baseUrl: 'https://integrate.api.nvidia.com/v1', keyField: 'nvidiaApiKeys', modelField: 'nvidiaModel',
+              models: ['deepseek-ai/deepseek-v4-pro', 'deepseek-ai/deepseek-v4-flash', 'qwen/qwen3.5-397b-a17b', 'nvidia/nemotron-3-nano-30b-a3b'], def: 'deepseek-ai/deepseek-v4-pro',
+              note: 'NVIDIA NIM (OpenAI-compatible)', keyUrl: 'https://build.nvidia.com' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
@@ -786,7 +789,7 @@ function parseCurlIntoStudy() {
     if (!pid && STUDY_PROVIDERS[k].host && host.indexOf(STUDY_PROVIDERS[k].host) !== -1) pid = k;
   });
   if (!pid) {
-    showToast('⚠️ Unknown host "' + (host || '?') + '". Supported: Mistral, Cerebras, Bynara, OpenRouter.');
+    showToast('⚠️ Unknown host "' + (host || '?') + '". Supported: Mistral, Cerebras, Bynara, OpenRouter, NVIDIA.');
     return;
   }
   if (key) {
@@ -1065,7 +1068,7 @@ function renderAiStudy() {
     '<div style="border:1px dashed var(--border);border-radius:10px;padding:10px;margin-bottom:12px;background:rgba(0,200,150,.05);">' +
       '<label style="font-size:.8rem;font-weight:700;">⚡ Quick add — paste a curl / API snippet</label>' +
       '<div class="muted" style="font-size:.68rem;margin:2px 0 6px;">Auto-detects the provider, key &amp; model from a pasted <code>curl</code> and fills its section below. Then just Save.</div>' +
-      '<textarea id="study-curl" placeholder="Paste your curl here — Mistral / Cerebras / Bynara / OpenRouter" ' +
+      '<textarea id="study-curl" placeholder="Paste your curl here — Mistral / Cerebras / Bynara / OpenRouter / NVIDIA" ' +
         'style="width:100%;min-height:70px;font-family:monospace;font-size:.76rem;margin-bottom:6px;"></textarea>' +
       '<button class="btn btn-gray" onclick="parseCurlIntoStudy()">✨ Parse &amp; fill</button>' +
     '</div>' +
