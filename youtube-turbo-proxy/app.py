@@ -1317,10 +1317,14 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
 def _notes_instr(style=""):
     """The notes-generation instruction (topic or MCQ). Shared by _gen_notes
     (blocking) and _stream_study_text (streaming) so the two never drift."""
-    no_promo = ("\nExclude course promotion, coaching/foundation/revision batch "
-                "names, app/Telegram/PDF/download links, class timings and "
-                "subscribe/like/share reminders (in ANY language) \u2014 keep only "
-                "the academic content.")
+    no_promo = ("\nExclude everything that is NOT the exam subject matter: course/"
+                "coaching promotion, foundation/revision batch names, app/Telegram/"
+                "PDF/download links, class timings, subscribe/like/share reminders, "
+                "AND lecture-series logistics \u2014 which lecture number this is, "
+                "recaps of previous/earlier topics, what the next/upcoming lecture "
+                "will cover, revision breaks/holidays, and any 'today/tomorrow/day "
+                "after tomorrow' or date-based class scheduling. Keep ONLY the "
+                "exam-relevant academic content (in ANY language).")
     if style == "mcq":
         return ("The transcript is a lecture SOLVING multiple-choice questions "
                 "(MCQs) and is annotated with inline timestamps like [M:SS]. "
