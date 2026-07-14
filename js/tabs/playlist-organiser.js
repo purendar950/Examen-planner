@@ -416,13 +416,18 @@ async function ytoLoadPlaylist() {
 
   const lib = ytoLib();
   const existing = lib[plId];
+  const fetchedVideos = videos.map(v => ({ id: v.id, title: v.title, thumb: v.thumb, dur: durMap[v.id] || 0, pub: v.publishedAt || null }));
+  // Keep videos the user manually added to this course — they aren't part of
+  // the source YouTube playlist, so a refetch must not drop them.
+  const fetchedIds = new Set(fetchedVideos.map(v => v.id));
+  const keptManual = (existing?.videos || []).filter(v => v && v.manual && !fetchedIds.has(v.id));
   lib[plId] = {
     id: plId,
     type: 'playlist',
     title: info?.title || existing?.title || 'Playlist',
     channel: info?.channelTitle || existing?.channel || '',
-    thumb: info?.thumb || videos[0]?.thumb || '',
-    videos: videos.map(v => ({ id: v.id, title: v.title, thumb: v.thumb, dur: durMap[v.id] || 0, pub: v.publishedAt || null })),
+    thumb: info?.thumb || fetchedVideos[0]?.thumb || '',
+    videos: fetchedVideos.concat(keptManual),
     watched: existing?.watched || {},
     lastVideo: existing?.lastVideo || null,
     plan: existing?.plan || null,
@@ -481,6 +486,35 @@ async function ytoRefetch(plId) {
     document.getElementById('yto-url-input').value = 'https://www.youtube.com/playlist?list=' + plId;
   }
   await ytoLoadPlaylist();
+  // Backfill real title/duration for any videos still missing them — covers
+  // manually-added /live/ or /watch videos the playlist API doesn't return.
+  const refreshed = ytoLib()[plId];
+  if (refreshed) {
+    const changed = await ytoBackfillVideoMeta(refreshed);
+    if (changed && ytoCurrentPl === plId) ytoRefreshCourse();
+  }
+}
+
+/* Fetch real title / duration / thumbnail for course videos still missing them
+   (manually-added videos, or ones where an earlier fetch failed). Only touches
+   videos with a placeholder "Video N" title or a zero duration, so user-set
+   custom titles are preserved. Returns true if anything changed. */
+async function ytoBackfillVideoMeta(pl) {
+  if (!pl || !Array.isArray(pl.videos)) return false;
+  const need = pl.videos.filter(v =>
+    v && v.id && (!v.dur || !v.title || /^Video\s+\d+$/.test(v.title))
+  );
+  if (!need.length) return false;
+  let changed = false;
+  for (const v of need) {
+    const info = await ytFetchVideoInfo(v.id).catch(() => null);
+    if (!info) continue;
+    if (info.title && (!v.title || /^Video\s+\d+$/.test(v.title))) { v.title = info.title; changed = true; }
+    if (info.duration && !v.dur) { v.dur = info.duration; changed = true; }
+    if (info.thumb && !v.thumb)  { v.thumb = info.thumb; changed = true; }
+  }
+  if (changed) ytoPersist();
+  return changed;
 }
 
 /* ── Course library list ── */
@@ -1053,7 +1087,7 @@ function ytoCloseAddVideoModal() {
   document.getElementById('yto-addvid-overlay').classList.remove('open');
   _ytoAddVideoPlId = null;
 }
-function ytoSaveAddVideo() {
+async function ytoSaveAddVideo() {
   const urlVal = document.getElementById('yto-addvid-url').value.trim();
   const titleVal = document.getElementById('yto-addvid-title').value.trim();
   const errEl = document.getElementById('yto-addvid-err');
@@ -1072,9 +1106,21 @@ function ytoSaveAddVideo() {
     errEl.textContent = 'Ye video already course mein hai.'; errEl.style.display='block'; return;
   }
 
-  const thumb = 'https://i.ytimg.com/vi/' + v.id + '/mqdefault.jpg';
-  const title = titleVal || ('Video ' + (pl.videos.length + 1));
-  pl.videos.push({ id: v.id, title, thumb, dur: 0 });
+  // Auto-fetch the real title / duration / thumbnail. ytValidate accepts any
+  // single-video URL (watch, youtu.be, shorts, embed, /live/), so this covers
+  // live/premiere links too. Falls back gracefully if the API is unavailable.
+  const saveBtn = document.querySelector('#yto-addvid-overlay .btn-modal-save');
+  const origBtn = saveBtn ? saveBtn.innerHTML : '';
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '⏳ Fetching…'; }
+  const info = await ytFetchVideoInfo(v.id).catch(() => null);
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = origBtn; }
+
+  const thumb = info?.thumb || ('https://i.ytimg.com/vi/' + v.id + '/mqdefault.jpg');
+  const title = titleVal || info?.title || ('Video ' + (pl.videos.length + 1));
+  const dur   = info?.duration || 0;
+  // manual:true → a playlist Refresh preserves this video instead of wiping it
+  // (it isn't part of the source YouTube playlist).
+  pl.videos.push({ id: v.id, title, thumb, dur, manual: true });
   ytoPersist();
   const savedPlId = _ytoAddVideoPlId; // capture before close clears it
   ytoCloseAddVideoModal();
