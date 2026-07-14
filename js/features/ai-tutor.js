@@ -984,8 +984,9 @@
   function nbPdfCss() {
     // No fixed `size` — adapt to the user's chosen paper (A4 or US Letter) so
     // the 2-column notes aren't clipped at the bottom / scaled on Letter.
-    // 5mm bottom margin; the fixed footer is seated INSIDE that margin (see
-    // .pdf-footer) so it never overlaps the notes text.
+    // 5mm page margin. The Telegram footer is an in-flow bar at the end of the
+    // notes (see .pdf-footer) rather than a fixed per-page bar, so it can never
+    // overlap the text.
     // html font-size (18px) scales all rem-based sizes in nbCss (section
     // headers, chips, options, tables) for a larger, more readable PDF.
     return '@page{margin:5mm 7mm}' +
@@ -1006,10 +1007,13 @@
       '.pdf-brand .wm-tg{margin-left:auto;font-size:8.5pt;font-weight:700;color:#d7ffe6}' +
       // faint diagonal watermark — repeats on EVERY page (position:fixed)
       '.pdf-watermark{position:fixed;top:44%;left:-6%;right:-6%;text-align:center;transform:rotate(-27deg);font-family:system-ui,Arial,sans-serif;font-weight:800;font-size:44pt;color:#14532d;opacity:0.06;letter-spacing:3px;z-index:0;pointer-events:none}' +
-      // footer link bar — repeats on EVERY page (position:fixed). `bottom:-5mm`
-      // (= -height) drops it into the 5mm bottom page margin so it sits BELOW
-      // the notes text instead of overlapping the last lines on each page.
-      '.pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;position:fixed;left:0;right:0;bottom:-5mm;height:5mm;z-index:3;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;font-size:7.5pt;font-weight:700}' +
+      // footer link bar — rendered ONCE in normal flow at the very end of the
+      // notes (NOT position:fixed). A fixed per-page bar reliably overlapped the
+      // text in Chrome's print engine (it anchors fixed elements to the content
+      // box, so it sat on top of the last/first lines). An in-flow footer can
+      // never overlap; per-page branding is still covered by the diagonal
+      // watermark and the page-1 header band.
+      '.pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;margin:14px 0 0;padding:7px 11px;border-radius:6px;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;font-size:8.5pt;font-weight:700;position:relative;z-index:1;break-inside:avoid}' +
       '.pdf-footer a{color:#fff;text-decoration:underline}' +
       '.pdf-footer .g{color:#8bffbe}' +
       nbCss('.pdf-nb');

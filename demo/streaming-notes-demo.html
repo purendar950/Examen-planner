@@ -191,7 +191,7 @@
     .notes .sec,.notes .subsec{break-after:avoid}
     .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
-    /* 5mm bottom margin; the fixed footer sits INSIDE it (see .pdf-footer). */
+    /* 5mm page margin. The footer is an in-flow bar at the end of the notes. */
     @page{margin:5mm 7mm}
 
     /* header band (top of page 1): StudyPlanner wordmark + Telegram handle.
@@ -208,14 +208,14 @@
       color:#14532d;opacity:.06;letter-spacing:3px;z-index:0;pointer-events:none;
       -webkit-print-color-adjust:exact;print-color-adjust:exact}
 
-    /* footer link bar — repeats on EVERY page (position:fixed). bottom:-5mm
-       (= -height) drops it into the 5mm bottom margin so it sits BELOW the
-       text instead of overlapping the last lines on each page. */
+    /* footer link bar — rendered ONCE in normal flow at the end of the notes
+       (NOT position:fixed). A fixed per-page bar overlapped the text in
+       Chrome's print engine; an in-flow footer can never overlap. */
     .pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;
-      position:fixed;left:0;right:0;bottom:-5mm;height:5mm;z-index:3;
+      margin:14px 0 0;padding:7px 11px;border-radius:6px;
       background:linear-gradient(135deg,#14532d,#166534);color:#fff;
-      font-family:system-ui,Arial,sans-serif;font-size:7.5pt;font-weight:700;
-      -webkit-print-color-adjust:exact;print-color-adjust:exact}
+      font-family:system-ui,Arial,sans-serif;font-size:8.5pt;font-weight:700;
+      break-inside:avoid;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     .pdf-footer a{color:#fff;text-decoration:underline}
     .pdf-footer .g{color:#8bffbe}
   }
