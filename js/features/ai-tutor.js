@@ -399,6 +399,7 @@
       '.ai-body{padding:12px 14px;min-height:60px}',
       '.ai-btn{cursor:pointer;border:none;background:var(--accent,#00c896);color:#04120d;border-radius:8px;padding:8px 14px;font-size:0.8rem;font-weight:700;font-family:inherit}',
       '.ai-btn.sec{background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border:1px solid var(--border,#2a3140)}',
+      '.ai-btn.ai-stop{background:#e0464b;color:#fff}',
       '.ai-muted{color:var(--muted,#8b93a7);font-size:0.8rem}',
       '.ai-md{line-height:1.65;color:var(--text,#e7ecf5);font-size:0.9rem}',
       '.ai-md h1{font-size:1.15rem;margin:.6em 0 .3em;border-bottom:1px solid var(--border,#2a3140);padding-bottom:.2em}',
@@ -470,7 +471,43 @@
     var e = (j && (j.error || j.detail)) || 'Failed';
     return '<div class="ai-muted" style="color:#e06">\u26a0 ' + esc(e) + (j && j.detail && j.error ? ' — ' + esc(j.detail) : '') + '</div>';
   }
-  function apiGet(path) { return fetch(BACKEND + path).then(function (r) { return r.json(); }); }
+  function apiGet(path, signal) { return fetch(BACKEND + path, signal ? { signal: signal } : {}).then(function (r) { return r.json(); }); }
+
+  /* ── Generate ⇄ Stop control ──────────────────────────────────────────────
+     While an AI request is in flight the triggering "Generate" button turns
+     into a "Stop" button that aborts the request (long generations can be
+     cancelled so the user can pick another model and try again). */
+  var _genAbort = null;   // AbortController for the current in-flight generation
+
+  // Turn the given Generate button into a Stop button and return the abort
+  // signal to hand to apiGet(). Safe to call even if the button isn't present.
+  function _genStart(btnId) {
+    if (_genAbort) { try { _genAbort.abort(); } catch (e) {} }
+    var ctrl = ('AbortController' in window) ? new AbortController() : null;
+    _genAbort = ctrl;
+    var btn = document.getElementById(btnId);
+    if (btn) {
+      if (btn._origHtml == null) { btn._origHtml = btn.innerHTML; btn._origClick = btn.onclick; }
+      btn.innerHTML = '\u23f9 Stop';
+      btn.classList.add('ai-stop');
+      btn.onclick = function () { _genStop(); };
+    }
+    return ctrl ? ctrl.signal : undefined;
+  }
+  // User pressed Stop → abort the in-flight request (the .catch handles the UI).
+  function _genStop() { if (_genAbort) { try { _genAbort.abort(); } catch (e) {} } _genAbort = null; }
+  // Restore a Stop button back to its original "Generate" label + handler.
+  function _genEnd(btnId) {
+    _genAbort = null;
+    var btn = document.getElementById(btnId);
+    if (btn && btn._origHtml != null) {
+      btn.innerHTML = btn._origHtml;
+      btn.onclick = btn._origClick || null;
+      btn.classList.remove('ai-stop');
+      btn._origHtml = null; btn._origClick = null;
+    }
+  }
+  function _isAbort(e) { return e && (e.name === 'AbortError' || String(e).indexOf('abort') !== -1); }
 
   var state = { tab: 'notes' };
 
@@ -586,7 +623,10 @@
     if (style === 'mcq') url += '&style=mcq';
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
-    apiGet(url).then(function (j) {
+    var btnId = (mode === 'flashcards') ? 'ai-cards-go' : 'ai-notes-go';
+    var signal = _genStart(btnId);
+    apiGet(url, signal).then(function (j) {
+      _genEnd(btnId);
       var box = contentEl();
       if (j.error && j.error !== 'no_captions') { box.innerHTML = errHtml(j); return; }
       if (j.warning === 'no_captions' || j.error === 'no_captions') {
@@ -611,7 +651,11 @@
       // Refresh the "already generated" bar so the language just made shows up
       // immediately (it used to only update on tab/mode/language change).
       checkLangs(mode, n || 25, false);
-    }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
+    }).catch(function (e) {
+      _genEnd(btnId);
+      if (_isAbort(e)) { contentEl().innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>'; return; }
+      contentEl().innerHTML = errHtml({ error: String(e) });
+    });
   }
   // Flashcards as an actual card deck: one card at a time, TAP to flip (3D),
   // SWIPE left = next / right = previous (also ◀ ▶ buttons + arrow keys).
@@ -865,14 +909,20 @@
     var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (focus) qurl += '&focus=' + encodeURIComponent(focus);
     if (force) qurl += '&refresh=1';
-    apiGet(qurl).then(function (j) {
+    var signal = _genStart('ai-quiz-go');
+    apiGet(qurl, signal).then(function (j) {
+      _genEnd('ai-quiz-go');
       if (j.error && j.error !== 'no_captions') { contentEl().innerHTML = errHtml(j); return; }
       var qs = j.questions || [];
       if (!qs.length) { contentEl().innerHTML = '<div class="ai-muted">Could not generate questions.</div>'; return; }
       quiz = { qs: qs, idx: 0, correct: 0, wrong: [] };
       renderQ();
       checkLangs('quiz', n, false);        // refresh "already generated" bar
-    }).catch(function (e) { contentEl().innerHTML = errHtml({ error: String(e) }); });
+    }).catch(function (e) {
+      _genEnd('ai-quiz-go');
+      if (_isAbort(e)) { contentEl().innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Start quiz again.</div>'; return; }
+      contentEl().innerHTML = errHtml({ error: String(e) });
+    });
   }
   function renderQ() {
     var q = quiz.qs[quiz.idx], el = contentEl();
