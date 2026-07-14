@@ -19,6 +19,10 @@
     || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
   var LANG_KEY = 'aiStudyLang';
   var MODEL_KEY = 'aiStudyModel';
+  // Telegram channel branding shown on the notes (on-screen header) and in the
+  // exported PDF (header handle + watermark + footer link). Single source of truth.
+  var TG_CHANNEL = 'StudyPlannerSSC';
+  var TG_LINK = 'https://telegram.me/StudyPlannerSSC';
 
   function outLang() { return localStorage.getItem(LANG_KEY) || 'Hinglish'; }
   function setLang(v) { try { localStorage.setItem(LANG_KEY, v); } catch (e) {} }
@@ -400,6 +404,11 @@
       '.ai-btn{cursor:pointer;border:none;background:var(--accent,#00c896);color:#04120d;border-radius:8px;padding:8px 14px;font-size:0.8rem;font-weight:700;font-family:inherit}',
       '.ai-btn.sec{background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border:1px solid var(--border,#2a3140)}',
       '.ai-btn.ai-stop{background:#e0464b;color:#fff}',
+      // StudyPlanner header band shown at the top of generated notes (on screen).
+      '.ai-brandbar{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:7px 12px;border-radius:8px;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif}',
+      '.ai-brandbar .bn{font-weight:800;font-size:0.95rem;letter-spacing:0.3px}',
+      '.ai-brandbar .bn .g{color:#8bffbe}',
+      '.ai-brandbar .bs{margin-left:auto;font-size:0.66rem;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:#d7ffe6}',
       '.ai-muted{color:var(--muted,#8b93a7);font-size:0.8rem}',
       '.ai-md{line-height:1.65;color:var(--text,#e7ecf5);font-size:0.9rem}',
       '.ai-md h1{font-size:1.15rem;margin:.6em 0 .3em;border-bottom:1px solid var(--border,#2a3140);padding-bottom:.2em}',
@@ -638,7 +647,11 @@
       var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
       var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
       var nbHtml = nbBuild(content, style);
-      box.innerHTML = '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+      // StudyPlanner header at the top of the notes (brand only on screen; the
+      // Telegram handle/watermark/footer are added in the PDF export instead).
+      var brandBar = '<div class="ai-brandbar"><span class="bn">Study<span class="g">Planner</span></span><span class="bs">AI Study Notes</span></div>';
+      box.innerHTML = brandBar +
+        '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
         '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
         followBtn + pdfBtn + regenBtn + '</div>' +
         '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
@@ -855,14 +868,28 @@
   function nbPdfCss() {
     // No fixed `size` — adapt to the user's chosen paper (A4 or US Letter) so
     // the 2-column notes aren't clipped at the bottom / scaled on Letter.
-    return '@page{margin:5mm 7mm}' +
+    // Extra bottom margin (11mm) reserves room for the fixed Telegram footer bar.
+    return '@page{margin:5mm 7mm 11mm 7mm}' +
       '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}' +
       'body{margin:0;background:#fff}' +
-      '.pdf-title{font-family:"Kalam","Noto Sans Devanagari",system-ui,Arial,sans-serif;font-size:17pt;font-weight:800;margin:0 0 2px;color:#14532d}' +
-      '.pdf-meta{font-family:system-ui,Arial,sans-serif;font-size:8.5pt;color:#64748b;margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid #e2e8f0}' +
-      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:balance;font-size:10.5pt;line-height:1.4}' +
+      // content sits above the fixed watermark
+      '.pdf-title{font-family:"Kalam","Noto Sans Devanagari",system-ui,Arial,sans-serif;font-size:17pt;font-weight:800;margin:0 0 2px;color:#14532d;position:relative;z-index:1}' +
+      '.pdf-meta{font-family:system-ui,Arial,sans-serif;font-size:8.5pt;color:#64748b;margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;position:relative;z-index:1}' +
+      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:balance;font-size:10.5pt;line-height:1.4;position:relative;z-index:1}' +
       '.pdf-nb .sec{column-span:all}' +
       '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb table,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .sec,.pdf-nb .subsec,.pdf-nb .q-card,.pdf-nb .qkeep{break-inside:avoid}' +
+      // ── Telegram / StudyPlanner branding (PDF only) ──
+      // header band (top of page 1): wordmark + Telegram handle
+      '.pdf-brand{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 11px;border-radius:6px;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;position:relative;z-index:1}' +
+      '.pdf-brand .wm-name{font-weight:800;font-size:12.5pt;letter-spacing:0.3px}' +
+      '.pdf-brand .wm-name .g{color:#8bffbe}' +
+      '.pdf-brand .wm-tg{margin-left:auto;font-size:8.5pt;font-weight:700;color:#d7ffe6}' +
+      // faint diagonal watermark — repeats on EVERY page (position:fixed)
+      '.pdf-watermark{position:fixed;top:44%;left:-6%;right:-6%;text-align:center;transform:rotate(-27deg);font-family:system-ui,Arial,sans-serif;font-weight:800;font-size:44pt;color:#14532d;opacity:0.06;letter-spacing:3px;z-index:0;pointer-events:none}' +
+      // footer link bar — repeats on EVERY page (position:fixed)
+      '.pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;position:fixed;left:0;right:0;bottom:0;height:8mm;z-index:3;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;font-size:8pt;font-weight:700}' +
+      '.pdf-footer a{color:#fff;text-decoration:underline}' +
+      '.pdf-footer .g{color:#8bffbe}' +
       nbCss('.pdf-nb');
   }
   function pdfDownload(titleText, innerHtml, opts) {
@@ -877,14 +904,27 @@
     var css = nb ? nbPdfCss() : PDF_CSS;
     var bodyClass = nb ? 'pdf-nb' : 'pdf-body';
     var fontLink = nb ? '<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">' : '';
+    // Telegram/StudyPlanner branding — notebook PDFs only. brandTop = header
+    // band (page 1); wm = per-page watermark; footer = per-page channel link.
+    var brandTop = '', wm = '', footer = '';
+    if (nb) {
+      brandTop = '<div class="pdf-brand"><span class="wm-name">Study<span class="g">Planner</span></span>' +
+        '<span class="wm-tg">\u2708\uFE0F @' + esc(TG_CHANNEL) + ' \u00b7 Join on Telegram for more notes</span></div>';
+      wm = '<div class="pdf-watermark">@' + esc(TG_CHANNEL) + '</div>';
+      footer = '<div class="pdf-footer">\u2708\uFE0F Join <span class="g">' + esc(TG_CHANNEL) + '</span> on Telegram \u2192 ' +
+        '<a href="' + esc(TG_LINK) + '">' + esc(TG_LINK.replace(/^https?:\/\//, '').replace(/^telegram\.me/, 't.me')) + '</a></div>';
+    }
     var d = w.document;
     d.open();
     d.write('<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">' +
       '<meta name="viewport" content="width=device-width,initial-scale=1">' + fontLink +
       '<title>' + esc(titleText) + '</title><style>' + css + '</style></head><body>' +
+      brandTop +
       '<div class="pdf-title">' + esc(titleText) + '</div>' +
       '<div class="pdf-meta">' + esc(when) + ' · 🎓 AI Study — StudyPlanner</div>' +
+      wm +
       '<div class="' + bodyClass + '">' + innerHtml + '</div>' +
+      footer +
       '</body></html>');
     d.close();
     w.focus();
