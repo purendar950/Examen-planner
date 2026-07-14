@@ -1706,7 +1706,7 @@ STUDY_PROVIDER_MODELS = {
     "bynara":     ["mistral-large", "mistral-medium-3-5", "tencent-hy3"],
     "mistral":    ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest", "open-mistral-nemo"],
     "cerebras":   ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
-    "openrouter": ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free", "tencent/hy3:free"],
+    "openrouter": ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
 }
 
 

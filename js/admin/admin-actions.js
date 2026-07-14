@@ -588,7 +588,7 @@ const STUDY_PROVIDERS = {
               models: ['gpt-oss-120b', 'zai-glm-4.7', 'gemma-4-31b'], def: 'gpt-oss-120b',
               note: 'ultra-fast inference', keyUrl: 'https://cloud.cerebras.ai' },
   openrouter: { label: 'OpenRouter', host: 'openrouter.ai', baseUrl: 'https://openrouter.ai/api/v1', keyField: 'openrouterApiKeys', modelField: 'openrouterModel',
-              models: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'google/gemma-4-31b-it:free', 'tencent/hy3:free'], def: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+              models: ['nvidia/nemotron-3-ultra-550b-a55b:free', 'google/gemma-4-31b-it:free'], def: 'nvidia/nemotron-3-ultra-550b-a55b:free',
               note: 'free models via OpenRouter', keyUrl: 'https://openrouter.ai/keys' }
 };
 const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter'];
