@@ -1187,6 +1187,36 @@ def _study_sys(out_lang):
             ". Stay strictly faithful to the transcript — never invent facts.")
 
 
+def _extract_note_headings(md):
+    """Return the ##/### heading texts from a generated notes part. Used to tell
+    the NEXT chunk-call what earlier parts already covered so it doesn't emit the
+    same topic twice (the main cause of duplicated info in long notes)."""
+    heads = []
+    for line in (md or "").splitlines():
+        s = line.strip()
+        if s.startswith("##"):
+            t = s.lstrip("#").strip()
+            if t:
+                heads.append(t)
+    return heads
+
+
+def _covered_note(headings, style=""):
+    """Continuation instruction prepended to every chunk after the first so it
+    won't repeat topics/questions already written in earlier parts. `headings`
+    is the running list of section titles produced so far."""
+    if not headings:
+        return ""
+    shown = headings[-40:]          # cap so the prompt stays small on long lectures
+    label = "questions" if style == "mcq" else "sections/topics"
+    return ("ALREADY WRITTEN in earlier parts of these notes (do NOT repeat any of "
+            "them or restate their facts, names, figures or dates). These notes are "
+            "ONE continuous document — if this part's transcript revisits any of the "
+            "below, SKIP it and output only genuinely NEW " + label + ". Reuse the "
+            "EXACT same spelling for any name/term that also appears above:\n- "
+            + "\n- ".join(shown) + "\n\n")
+
+
 def _gen_notes(transcript, out_lang, ai, head, style=""):
     """COMPREHENSIVE notes covering the whole transcript. Big-context providers
     process the transcript section-by-section (so nothing gets cut by the output
@@ -1201,13 +1231,16 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + instr + "\n\n" + secs[0]}],
             ai, max_tokens=(part_cap if ai.get("big_context") else 2400))
-    parts = []
+    parts, covered = [], []
     for i, sec in enumerate(secs):
-        parts.append(_ai_chat(
+        part = _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + ("(Part %d of %d \u2014 detailed notes "
-              "for THIS part only.) " % (i + 1, len(secs))) + instr + "\n\n" + sec}],
-            ai, max_tokens=part_cap))
+              "for THIS part only.) " % (i + 1, len(secs))) + _covered_note(covered, style)
+              + instr + "\n\n" + sec}],
+            ai, max_tokens=part_cap)
+        parts.append(part)
+        covered.extend(_extract_note_headings(part))   # so later parts don't repeat these
     return "\n\n".join(parts)
 
 
@@ -1238,7 +1271,10 @@ def _notes_instr(style=""):
                 "the teacher gives one.\n"
                 "Rules: bold (**...**) ONLY key terms; NEVER invent questions, "
                 "options or answers that are not in the transcript; do not wrap "
-                "the answer in code fences." + no_promo)
+                "the answer in code fences. Do NOT output the same question "
+                "twice \u2014 if the lecture revisits a question already covered, "
+                "SKIP it and fold any new detail into that question's Explanation "
+                "instead. Use the SAME spelling for a name/term throughout." + no_promo)
     return ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
             "topic, point, fact, figure, date, name, place, definition, formula "
             "and example mentioned \u2014 do NOT omit or over-summarize any "
@@ -1248,6 +1284,13 @@ def _notes_instr(style=""):
             "- Use '- ' bullet points for details; nest with indentation.\n"
             "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
             "- Use a Markdown table when comparing items or listing facts/dates.\n"
+            "- CONSOLIDATE by subject: keep everything about one topic/award/"
+            "person/scheme/event in a SINGLE section. Never create two sections "
+            "for the same subject, and never restate a fact, name, figure or date "
+            "you already wrote \u2014 each point appears exactly ONCE, in the most "
+            "relevant place. If the lecture recaps or repeats something, merge any "
+            "new detail into the existing section instead of repeating it.\n"
+            "- Use the SAME spelling for a given name/term throughout.\n"
             "- The transcript is annotated with inline timestamps like [M:SS]. "
             "START every ## section and ### sub-section heading with the lecture "
             "timestamp where that part begins (from the nearest preceding [M:SS] "
@@ -1277,6 +1320,7 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
     if mode == "notes":
         instr = _notes_instr(style)
         secs, part_cap = _notes_sections(transcript, out_lang, ai, style)
+        covered = []
         for i, sec in enumerate(secs):
             if i:
                 yield "\n\n"                          # separate parts like _gen_notes
@@ -1285,12 +1329,16 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
                 mt = part_cap if ai.get("big_context") else 2400
             else:
                 user = head + ("(Part %d of %d \u2014 detailed notes for THIS part "
-                               "only.) " % (i + 1, len(secs))) + instr + "\n\n" + sec
+                               "only.) " % (i + 1, len(secs))) + _covered_note(covered, style) + instr + "\n\n" + sec
                 mt = part_cap
+            buf = []                                  # collect this part to learn its headings
             for piece in _ai_chat_stream(
                     [{"role": "system", "content": sysmsg},
                      {"role": "user", "content": user}], ai, max_tokens=mt):
+                buf.append(piece)
                 yield piece
+            if len(secs) > 1:                         # so later parts don't repeat these
+                covered.extend(_extract_note_headings("".join(buf)))
         return
     body = _condense(transcript, out_lang, ai)
     if mode == "summary":
