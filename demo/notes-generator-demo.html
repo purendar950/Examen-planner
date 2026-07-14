@@ -178,7 +178,7 @@
     .topbar,.controls,.metatag{display:none}
     .page{box-shadow:none;margin:0;max-width:none;border-radius:0;background-image:none;padding:0 4mm}
     .page::before{display:none}
-    /* Print is ALWAYS 2-column A4 (regardless of the screen toggle):
+    /* Print is ALWAYS 2-column (regardless of the screen toggle):
        column-fill:balance => spread each section's content evenly across both
        columns. (auto left the right column empty for short sections, since
        .sec headers use column-span:all and reset the flow after each header.) */
@@ -186,7 +186,8 @@
     .notes .sec{column-span:all}
     .factbox,.membox,table,.answer,.notebox,.chips,.sec,.subsec,.q-card,.qkeep{break-inside:avoid}
     .sec{font-size:12.5pt} .subsec{font-size:11pt}
-    @page{size:A4;margin:10mm 9mm}
+    /* No fixed `size` — adapt to the user's paper (A4 or US Letter). */
+    @page{margin:10mm 9mm}
   }
 </style>
 </head>
