@@ -197,7 +197,7 @@
         <option value="topic">📝 Topic notes</option>
         <option value="mcq">❓ MCQ notes</option>
       </select>
-      <select id="speed" title="Render / stream speed (chunk delay)">
+      <select id="speed" title="Sample-only: how fast the mock stream is paced (no effect on a real model)">
         <option value="70">🐢 Slow</option>
         <option value="35" selected>⚡ Normal</option>
         <option value="12">🚀 Fast</option>
@@ -206,7 +206,8 @@
     </div>
     <div class="row" id="videorow" style="display:none;margin-top:9px">
       <input id="url" type="text" placeholder="Paste your YouTube URL or 11-char video ID…"
-             style="flex:1;min-width:220px;font-size:15px;padding:11px 13px;border:1px solid #cdd6df;border-radius:9px;font-family:inherit">
+             style="flex:1;min-width:200px;font-size:15px;padding:11px 13px;border:1px solid #cdd6df;border-radius:9px;font-family:inherit">
+      <select id="aimodel" title="AI model (which model generates the notes)"><option value="">🤖 Auto (server default)</option></select>
       <select id="lang" title="Output language"><option>Hinglish</option><option>English</option><option>Hindi</option></select>
       <label style="font-size:12.5px;color:#475569;display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="fresh"> fresh</label>
     </div>
@@ -230,6 +231,9 @@
       YouTube URL and hit Generate. It fetches the <b>real</b> notes for that video from your proxy and
       renders them. (The server still generates the whole thing first, so the first chunk appears only
       after it responds — true token-streaming is the backend step; the content &amp; layout are 100% real.)
+      Pick an <b>🤖 AI model</b> (loaded live from your server's configured providers, or <b>Auto</b>) to
+      compare how different models render. <i>Slow / Normal / Fast only paces the sample mock-stream — it
+      has no effect on a real model, so it's hidden in live mode.</i>
     </div>
   </div>
 
@@ -486,32 +490,32 @@
     }
 
     var mcq=$("style").value==="mcq";
-    var delay=parseInt($("speed").value,10)||35;
     goBtn.classList.add("stop"); goBtn.textContent="⏹ Stop";
     metricEl.textContent="";
     _liveMode=($("source").value==="video");
 
-    if(_liveMode){ fetchLive(mcq, delay); return; }
+    if(_liveMode){ fetchLive(mcq); return; }
 
-    // ── sample content (no server) ──
+    // ── sample content (no server) ── speed only paces this mock stream ──
     $("meta").textContent="demo · streaming · "+(mcq?"MCQ":"topic")+" notes";
     setSave("gen",'<span class="spin"></span> Generating… (not saved yet)');
     page.innerHTML='<div class="placeholder"><span class="spin"></span> Connecting to model…</div>';
-    replay(mcq?SAMPLE_MCQ:SAMPLE_TOPIC, mcq, delay, {});
+    replay(mcq?SAMPLE_MCQ:SAMPLE_TOPIC, mcq, parseInt($("speed").value,10)||35, {});
   }
 
   /* ── LIVE: fetch the REAL notes for a video from the proxy, then replay them.
      The server generates the whole thing first (no browser token-streaming yet —
      that's the backend work), so the first chunk appears after the server responds.
      The content + rendering are 100% real for your video. ── */
-  function fetchLive(mcq, delay){
+  function fetchLive(mcq){
     var id=parseId($("url").value);
     if(!id){ setSave("stopped","⚠️ Enter a valid YouTube URL / 11-char video ID"); resetBtn(); return; }
     var backend=($("backend").value||"").trim().replace(/\/+$/,"");
-    var lang=$("lang").value, fresh=$("fresh").checked;
+    var lang=$("lang").value, fresh=$("fresh").checked, delay=12;   // fast replay of the fetched notes
+    var model=($("aimodel")&&$("aimodel").value)||"";               // which AI model to generate with
     var url=backend+"/api/study?id="+encodeURIComponent(id)+"&mode=notes&out="+encodeURIComponent(lang)+
-            (mcq?"&style=mcq":"")+(fresh?"&refresh=1":"");
-    $("meta").textContent="live · "+id+" · "+lang;
+            (mcq?"&style=mcq":"")+(model?"&model="+encodeURIComponent(model):"")+(fresh?"&refresh=1":"");
+    $("meta").textContent="live · "+id+" · "+lang+(model?" · "+model:"");
     setSave("gen",'<span class="spin"></span> Generating on server… (first run can take ~30–90s)');
     page.innerHTML='<div class="placeholder"><span class="spin"></span> Asking your server + AI for <code>'+id+'</code>…</div>';
     var fs=Date.now();
@@ -541,11 +545,44 @@
   }
 
   // reveal the live-video inputs only when that source is picked
+  var _modelsLoaded=false;
   $("source").onchange=function(){
     var v=this.value==="video";
     $("videorow").style.display=v?"":"none";
     $("serverrow").style.display=v?"":"none";
+    $("speed").style.display=v?"none":"";     // speed only paces the SAMPLE simulation
+    if(v && !_modelsLoaded) loadModels();
   };
+
+  /* Populate the AI-model dropdown from the server's REAL config (/api/status).
+     Only providers that have a key are listed; "Auto" = the admin's active model.
+     The chosen model is sent as &model= so you can compare how each one renders. */
+  function loadModels(){
+    var sel=$("aimodel"); if(!sel) return;
+    var backend=($("backend").value||"").trim().replace(/\/+$/,"");
+    sel.innerHTML='<option value="">🤖 Auto (server default)</option><option value="" disabled>loading models…</option>';
+    fetch(backend+"/api/status").then(function(r){return r.json();}).then(function(j){
+      _modelsLoaded=true;
+      var groups=(j&&j.studyModelGroups)||[], def=(j&&j.studyModel)||"";
+      var html='<option value="">🤖 Auto (server default'+(def?": "+esc(def):"")+')</option>';
+      if(groups.length){
+        groups.forEach(function(g){
+          html+='<optgroup label="'+esc(g.label||g.provider)+'">';
+          (g.models||[]).forEach(function(m){ html+='<option value="'+esc(m)+'">'+esc(m)+'</option>'; });
+          html+='</optgroup>';
+        });
+      } else {
+        var flat=(j&&j.studyModels)||[];
+        if(!flat.length){ html+='<option value="" disabled>no models configured on server</option>'; }
+        flat.forEach(function(m){ html+='<option value="'+esc(m)+'">'+esc(m)+'</option>'; });
+      }
+      sel.innerHTML=html;
+    }).catch(function(){
+      _modelsLoaded=false;
+      sel.innerHTML='<option value="">🤖 Auto (server default)</option><option value="" disabled>⚠️ couldn\'t reach server</option>';
+    });
+  }
+  var _bk=$("backend"); if(_bk) _bk.addEventListener("change",function(){ _modelsLoaded=false; loadModels(); });
   goBtn.onclick=generate;
   var _urlIn=$("url"); if(_urlIn) _urlIn.addEventListener("keydown",function(e){ if(e.key==="Enter") generate(); });
 
