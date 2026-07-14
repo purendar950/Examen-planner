@@ -5,7 +5,7 @@ export function parseYouTubeUrl(input) {
     const playlistId = url.searchParams.get('list');
     if (playlistId) return { type: 'playlist', id: playlistId };
     if (url.hostname.includes('youtu.be')) return { type: 'video', id: url.pathname.slice(1, 12) || null };
-    const videoId = url.searchParams.get('v') || url.pathname.match(/\/(embed|shorts)\/([a-zA-Z0-9_-]{11})/)?.[2];
+    const videoId = url.searchParams.get('v') || url.pathname.match(/\/(embed|shorts|live)\/([a-zA-Z0-9_-]{11})/)?.[2];
     return videoId ? { type: 'video', id: videoId } : { type: null, id: null };
   } catch {
     return { type: null, id: null };
