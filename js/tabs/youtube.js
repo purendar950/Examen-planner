@@ -499,6 +499,12 @@ function ytCacheSet(kind, id, v) {
   }
 }
 
+/* Drop a single cached entry so the next fetch bypasses the 7-day TTL.
+   Used by the course "Refresh" button to force a fresh pull from YouTube. */
+function ytCacheDelete(kind, id) {
+  try { localStorage.removeItem(_ytCacheKey(kind, id)); } catch (e) {}
+}
+
 /* Persistent per-video duration cache (immutable data, no TTL) */
 function ytDurCacheLoad() {
   try { return JSON.parse(localStorage.getItem(YT_DUR_CACHE_KEY) || '{}') || {}; }
@@ -798,7 +804,9 @@ async function ytFetchPlaylistVideos(plId) {
 
   const videos = [];
   let pageToken = '';
-  for (let page = 0; page < 10; page++) {
+  // Up to 40 pages × 50 = 2000 videos. The loop still breaks as soon as there
+  // is no nextPageToken, so smaller playlists cost no extra quota.
+  for (let page = 0; page < 40; page++) {
     const data = await ytApiFetchJson(
       `playlistItems?part=snippet,contentDetails&playlistId=${plId}&maxResults=50` +
       (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '')

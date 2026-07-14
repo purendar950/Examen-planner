@@ -417,10 +417,15 @@ async function ytoLoadPlaylist() {
   const lib = ytoLib();
   const existing = lib[plId];
   const fetchedVideos = videos.map(v => ({ id: v.id, title: v.title, thumb: v.thumb, dur: durMap[v.id] || 0, pub: v.publishedAt || null }));
-  // Keep videos the user manually added to this course — they aren't part of
-  // the source YouTube playlist, so a refetch must not drop them.
+  // Keep any videos already in the course that the source playlist no longer
+  // returns — these are user-added videos (Add Video to section) that aren't
+  // part of the YouTube playlist. Preserving ALL such videos (not just ones
+  // tagged `manual`) means videos added before that flag existed also survive
+  // a Refresh. Mark them so they stay flagged going forward.
   const fetchedIds = new Set(fetchedVideos.map(v => v.id));
-  const keptManual = (existing?.videos || []).filter(v => v && v.manual && !fetchedIds.has(v.id));
+  const keptManual = (existing?.videos || [])
+    .filter(v => v && v.id && !fetchedIds.has(v.id))
+    .map(v => ({ ...v, manual: true }));
   lib[plId] = {
     id: plId,
     type: 'playlist',
@@ -481,8 +486,13 @@ async function ytoLoadSingleVideo(vId) {
 async function ytoRefetch(plId) {
   const pl = ytoLib()[plId];
   if (pl && pl.type === 'video') {
-    document.getElementById('yto-url-input').value = 'https://www.youtube.com/watch?v=' + (pl.videoId || pl.videos?.[0]?.id || '');
+    const vid = pl.videoId || pl.videos?.[0]?.id || '';
+    if (typeof ytCacheDelete === 'function' && vid) ytCacheDelete('vinfo', vid);
+    document.getElementById('yto-url-input').value = 'https://www.youtube.com/watch?v=' + vid;
   } else {
+    // Bust the 7-day cache so a Refresh actually re-pulls the playlist from
+    // YouTube — otherwise newly-added playlist videos never show up.
+    if (typeof ytCacheDelete === 'function') { ytCacheDelete('vids', plId); ytCacheDelete('info', plId); }
     document.getElementById('yto-url-input').value = 'https://www.youtube.com/playlist?list=' + plId;
   }
   await ytoLoadPlaylist();
