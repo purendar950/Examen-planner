@@ -82,31 +82,100 @@
       return '<a class="ai-ts" data-s="' + secs + '" title="Jump to ' + label + '">\u23e9 ' + label + '</a>';
     });
   }
-  // Models sometimes wrap plain content in LaTeX (e.g. "8 $\rightarrow$ 4").
-  // The notebook renderer has no math engine, so convert the common commands to
-  // Unicode and drop the $…$ delimiters so notes read cleanly (8 → 4).
+  // ── LaTeX → readable plain text/Unicode ──
+  // The notebook renderer has no math engine, so instead of showing raw code
+  // like "\frac{16}{11}" or "\[ ... \]" we gracefully degrade LaTeX into
+  // readable Unicode: \frac{a}{b} → (a)/(b), x^2 → x², SI_1 → SI₁, \times → ×,
+  // and math delimiters ($…$, \(…\), \[…\]) are dropped, keeping the content.
+  var _SUP = { '0': '\u2070', '1': '\u00b9', '2': '\u00b2', '3': '\u00b3', '4': '\u2074', '5': '\u2075', '6': '\u2076', '7': '\u2077', '8': '\u2078', '9': '\u2079', '+': '\u207a', '-': '\u207b', '=': '\u207c', '(': '\u207d', ')': '\u207e', 'n': '\u207f', 'i': '\u2071' };
+  var _SUB = { '0': '\u2080', '1': '\u2081', '2': '\u2082', '3': '\u2083', '4': '\u2084', '5': '\u2085', '6': '\u2086', '7': '\u2087', '8': '\u2088', '9': '\u2089', '+': '\u208a', '-': '\u208b', '=': '\u208c', '(': '\u208d', ')': '\u208e' };
+  function _mapChars(str, map) { return String(str).replace(/[\s\S]/g, function (c) { return map[c] || c; }); }
+  // Convert TeX super/subscripts to Unicode where possible; otherwise strip the
+  // braces so nothing ever renders as raw ^{...} / _{...}.
+  function _supsub(s) {
+    return s
+      .replace(/\^\{([^{}]*)\}/g, function (_m, g) { return _mapChars(g, _SUP); })
+      .replace(/_\{([^{}]*)\}/g, function (_m, g) { return _mapChars(g, _SUB); })
+      .replace(/\^([0-9n+\-()i])/g, function (_m, g) { return _SUP[g] || ('^' + g); })
+      .replace(/_([0-9+\-()])/g, function (_m, g) { return _SUB[g] || ('_' + g); });
+  }
   function deLatex(s) {
     if (s == null) return s;
-    s = String(s)
+    s = String(s);
+    // LaTeX line break in aligned math → real newline.
+    s = s.replace(/\\\\(?=\s|$)/g, '\n');
+    // Environment / bookkeeping wrappers that carry no readable text.
+    s = s.replace(/\\begin\s*\{[^{}]*\}(?:\s*\{[^{}]*\})?/g, '')
+         .replace(/\\end\s*\{[^{}]*\}/g, '')
+         .replace(/\\(?:tag|label|ref|eqref)\s*\{[^{}]*\}/g, '');
+    // Sizing / grouping commands with no textual meaning.
+    s = s.replace(/\\(?:left|right|big|Big|bigg|Bigg|displaystyle|limits|,|;|:|!)\s*/g, '');
+    // Super/subscripts first (removes their braces so \frac args stay brace-free).
+    s = _supsub(s);
+    // \frac{a}{b} → (a)/(b); loop to resolve simple nesting.
+    for (var _p = 0; _p < 6; _p++) {
+      var _prev = s;
+      s = s.replace(/\\[dt]?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, '($1)/($2)');
+      if (s === _prev) break;
+    }
+    // \sqrt{x} → √(x)
+    s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, '\u221a($1)');
+    // Operators, arrows, set/logic symbols and Greek letters.
+    s = s
       .replace(/\\(?:long)?rightarrow/g, '\u2192')
       .replace(/\\to(?![a-zA-Z])/g, '\u2192')
       .replace(/\\(?:long)?leftarrow/g, '\u2190')
       .replace(/\\leftrightarrow/g, '\u2194')
       .replace(/\\Rightarrow/g, '\u21d2')
+      .replace(/\\implies/g, '\u21d2')
       .replace(/\\Leftarrow/g, '\u21d0')
+      .replace(/\\iff/g, '\u21d4')
       .replace(/\\times/g, '\u00d7')
       .replace(/\\div/g, '\u00f7')
       .replace(/\\pm/g, '\u00b1')
+      .replace(/\\mp/g, '\u2213')
       .replace(/\\(?:leq|le)(?![a-zA-Z])/g, '\u2264')
       .replace(/\\(?:geq|ge)(?![a-zA-Z])/g, '\u2265')
       .replace(/\\(?:neq|ne)(?![a-zA-Z])/g, '\u2260')
       .replace(/\\approx/g, '\u2248')
+      .replace(/\\equiv/g, '\u2261')
+      .replace(/\\propto/g, '\u221d')
       .replace(/\\cdot/g, '\u00b7')
       .replace(/\\(?:ldots|cdots|dots)/g, '\u2026')
       .replace(/\\infty/g, '\u221e')
-      .replace(/\\text\s*\{([^}]*)\}/g, '$1')
+      .replace(/\\sum/g, '\u03a3')
+      .replace(/\\prod/g, '\u03a0')
+      .replace(/\\int/g, '\u222b')
+      .replace(/\\partial/g, '\u2202')
+      .replace(/\\(?:degree|circ)(?![a-zA-Z])/g, '\u00b0')
+      .replace(/\\angle/g, '\u2220')
+      .replace(/\\perp/g, '\u22a5')
+      .replace(/\\parallel/g, '\u2225')
+      .replace(/\\in(?![a-zA-Z])/g, '\u2208')
+      .replace(/\\notin/g, '\u2209')
+      .replace(/\\cup/g, '\u222a')
+      .replace(/\\cap/g, '\u2229')
+      .replace(/\\subseteq/g, '\u2286')
+      .replace(/\\subset/g, '\u2282')
+      .replace(/\\alpha/g, '\u03b1').replace(/\\beta/g, '\u03b2').replace(/\\gamma/g, '\u03b3')
+      .replace(/\\delta/g, '\u03b4').replace(/\\epsilon/g, '\u03b5').replace(/\\theta/g, '\u03b8')
+      .replace(/\\lambda/g, '\u03bb').replace(/\\mu/g, '\u03bc').replace(/\\pi/g, '\u03c0')
+      .replace(/\\rho/g, '\u03c1').replace(/\\sigma/g, '\u03c3').replace(/\\tau/g, '\u03c4')
+      .replace(/\\phi/g, '\u03c6').replace(/\\omega/g, '\u03c9')
+      .replace(/\\Delta/g, '\u0394').replace(/\\Sigma/g, '\u03a3').replace(/\\Omega/g, '\u03a9')
+      .replace(/\\Theta/g, '\u0398').replace(/\\Pi/g, '\u03a0')
+      .replace(/\\sqrt/g, '\u221a')
+      .replace(/\\text\s*\{([^{}]*)\}/g, '$1')
+      .replace(/\\(?:quad|qquad)/g, '  ')
+      .replace(/\\ /g, ' ')
+      .replace(/\s*&\s*=/g, ' =')                // aligned-math "a &= b" → "a = b"
       .replace(/\\([%&_#$])/g, '$1');           // \%, \&, \_, \#, \$ -> literal
-    // strip inline/inline-display math delimiters, keep the inner content
+    // Any remaining single-argument command → keep its content (graceful).
+    s = s.replace(/\\[a-zA-Z]+\s*\{([^{}]*)\}/g, '$1');
+    // Escaped braces → literal, then drop any leftover lone TeX commands.
+    s = s.replace(/\\([{}])/g, '$1').replace(/\\[a-zA-Z]+/g, '');
+    // Strip math-mode delimiters, keep the inner content.
+    s = s.replace(/\\[()[\]]/g, '');
     s = s.replace(/\$\$?([^$]*?)\$\$?/g, '$1');
     return s;
   }
