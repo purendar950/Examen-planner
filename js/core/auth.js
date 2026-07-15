@@ -533,10 +533,21 @@ if (auth && !_isBadProtocol) {
         if (_localDirty) { try { saveProgressNow(); } catch(e) {} return; }
         const remoteState = snapData?.appState;
         if (!remoteState) return;
+        /* Preserve the tab the user is currently on. A remote snapshot can
+           arrive with a STALE activePage (e.g. the debounced write of the
+           tab the user just opened hasn't committed yet, or another device
+           is on a different tab). Letting it overwrite appState.activePage
+           would (a) drift the persisted value back to 'dashboard' — which the
+           next auto-save then makes permanent — and (b) break "reopen on the
+           last tab". Keep the local tab and never follow a remote tab change. */
+        const _keepActivePage = appState && appState.activePage;
         const localJSON  = JSON.stringify(appState);
         const remoteJSON = JSON.stringify({ ...getDefaultState(), ...remoteState });
         if (localJSON !== remoteJSON) {
           appState = { ...getDefaultState(), ...remoteState };
+          if (typeof isValidPage === 'function' && isValidPage(_keepActivePage)) {
+            appState.activePage = _keepActivePage;
+          }
           if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
           updateDashboard();
           buildSyllabus();
