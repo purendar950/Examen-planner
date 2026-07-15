@@ -22,12 +22,33 @@ async function ezLoadPlans() {
   } catch(e) {}
 }
 
+/* ── Local cache of the plan/profile so a page REFRESH restores Pro status
+   instantly, instead of flashing the free-user UI for the ~400ms it takes to
+   re-fetch the profile from Firestore on every boot. Keyed by uid.
+   The cached copy is still run through ezIsPro()'s expiry/suspend checks, and
+   the live Firestore profile overwrites it the moment it loads / on every
+   onSnapshot — so any staleness is transient and self-correcting. ── */
+function ezProfileCacheKey(uid) { return 'ezProfile:' + uid; }
+function ezCacheProfile(uid, profile) {
+  if (!uid) return;
+  try {
+    if (profile) localStorage.setItem(ezProfileCacheKey(uid), JSON.stringify(profile));
+    else localStorage.removeItem(ezProfileCacheKey(uid));
+  } catch (e) {}
+}
+function ezReadCachedProfile(uid) {
+  if (!uid) return null;
+  try { const c = localStorage.getItem(ezProfileCacheKey(uid)); return c ? JSON.parse(c) : null; }
+  catch (e) { return null; }
+}
+
 async function ezLoadProfile() {
   if (!currentUser || !_fbReady || !db) return;
   try {
     const s = await db.collection('users').doc(currentUser.uid).get();
     EZ_PROFILE = (s.exists && s.data().profile) || {};
   } catch(e) { EZ_PROFILE = {}; }
+  ezCacheProfile(currentUser.uid, EZ_PROFILE);   // refresh local cache for an instant, flash-free restore on the next page load
   try {
     const q = await db.collection('payments').where('uid', '==', currentUser.uid).get();
     const pend = q.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.status === 'pending');
@@ -422,7 +443,17 @@ async function ezSubmitPayment() {
 /* Load plans + profile after login */
 const _loginUserBaseEZ2 = loginUser;
 loginUser = function(email, name, uid, state) {
+  // Restore the last-known plan/profile from localStorage BEFORE the app renders,
+  // so a Pro user is never shown as free during the ~400ms it takes to re-fetch
+  // the profile from Firestore on refresh. ezLoadProfile() overwrites this with
+  // the live copy as soon as it resolves (and onSnapshot keeps it fresh).
+  if (EZ_PROFILE === null) {
+    const cached = ezReadCachedProfile(uid);
+    if (cached) EZ_PROFILE = cached;
+  }
   _loginUserBaseEZ2(email, name, uid, state);
+  // Reflect the restored plan in the top-bar badge right away (safe if null).
+  if (EZ_PROFILE !== null && typeof ezRenderPlanBadge === 'function') { try { ezRenderPlanBadge(); } catch (e) {} }
   setTimeout(function() { ezLoadPlans().then(function() { return ezLoadProfile(); }); }, 400);
 };
 

@@ -517,6 +517,9 @@ if (auth && !_isBadProtocol) {
           const oldPlan = EZ_PROFILE && EZ_PROFILE.plan;
           const oldExpiry = EZ_PROFILE && EZ_PROFILE.planExpiry;
           EZ_PROFILE = newProfile || {};
+          // Keep the local cache in sync so the next refresh restores the
+          // current plan instantly (no free→Pro flash) and stays accurate.
+          if (typeof ezCacheProfile === 'function') { try { ezCacheProfile(user.uid, EZ_PROFILE); } catch(e) {} }
           // Re-apply ALL gates if suspension, plan, or expiry changed so an
           // expired/suspended user immediately loses Pro features (no reload).
           const planChanged = (oldPlan !== EZ_PROFILE.plan) || (oldExpiry !== EZ_PROFILE.planExpiry);
