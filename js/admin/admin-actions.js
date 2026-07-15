@@ -117,7 +117,7 @@ async function saveFreeLimits() {
   const notes = parseInt(document.getElementById('free-notes').value) || 10;
   await db.collection('config').doc('free').set({ mocks, mediaSaves, notes });
   CONFIG.free = { mocks, mediaSaves, notes };
-  showToast('✅ Free limits saved! Pro users get up to 10 playlist/video saves.');
+  showToast('✅ Free limits saved! Pro users get up to 20 playlist/video saves.');
 }
 async function giveTrial(id) {
   const days = parseInt(prompt('Trial kitne din ka dena hai?', '7')) || 0;
