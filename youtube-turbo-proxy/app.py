@@ -2167,6 +2167,8 @@ STUDY_TEST_PROVIDERS = {
     "hcnsec":     {"url": "https://api.hcnsec.cn/v1/chat/completions", "keyField": "hcnsecApiKeys", "modelField": "hcnsecModel", "def": "DeepSeek-V4-Pro"},
     # BluesMinds gateway (OpenAI-compatible, multi-model).
     "bluesminds": {"url": "https://api.bluesminds.com/v1/chat/completions", "keyField": "bluesmindsApiKeys", "modelField": "bluesmindsModel", "def": "gpt-5.2-chat"},
+    # AICampus AI Hub gateway (OpenAI-compatible, multi-model; keys start with sk-hub-).
+    "aicampus":   {"url": "https://ai-hub.aicampus.my/v1/chat/completions", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "def": "minimax-m3"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
@@ -2180,13 +2182,14 @@ STUDY_PROVIDER_MODELS = {
     "google":     ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
     "hcnsec":     ["auto", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "Qwen3.5-397B-A17B", "Qwen3.6-35B-A3B", "MiniMax-M3", "MiniMax-M2.7", "Kimi-K2.6", "glm-5.1"],
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
+    "aicampus":   ["minimax-m3", "kimi-k2.7-code"],
 }
 # Single source of truth for provider order + display labels, so the flat model
 # list (_all_study_models) and the grouped list (/api/status studyModelGroups)
 # can never drift out of sync (a missing id here made Gemini vanish from the
 # user-side model dropdown even though it worked everywhere else).
-STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds")
-STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds"}
+STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus")
+STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus"}
 
 
 def _effective_provider_models(cfg):

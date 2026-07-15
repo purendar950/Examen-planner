@@ -601,9 +601,12 @@ const STUDY_PROVIDERS = {
               note: 'OpenAI-compatible gateway (multi-model)', keyUrl: '' },
   bluesminds: { label: 'BluesMinds', host: 'api.bluesminds.com', baseUrl: 'https://api.bluesminds.com/v1', keyField: 'bluesmindsApiKeys', modelField: 'bluesmindsModel',
               models: ['gpt-5.2-chat', 'gpt-5.6-luna', 'gpt-5-mini', 'gpt-4o', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'], def: 'gpt-5.2-chat',
-              note: 'OpenAI-compatible gateway (multi-model)', keyUrl: '' }
+              note: 'OpenAI-compatible gateway (multi-model)', keyUrl: '' },
+  aicampus: { label: 'AICampus', host: 'ai-hub.aicampus.my', baseUrl: 'https://ai-hub.aicampus.my/v1', keyField: 'aicampusApiKeys', modelField: 'aicampusModel',
+              models: ['minimax-m3', 'kimi-k2.7-code'], def: 'minimax-m3',
+              note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
