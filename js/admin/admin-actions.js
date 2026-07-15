@@ -1579,7 +1579,12 @@ async function markRequest(id, status) {
   html[data-theme="dark"] .topbar,
   html[data-theme="dark"] .tabs { background:#111620; }
   html[data-theme="dark"] .stat,
+  html[data-theme="dark"] .recon-card,
+  html[data-theme="dark"] .recon-stat,
   html[data-theme="dark"] .login-card { background:#161B26; border-color:#1E2535; }
+  html[data-theme="dark"] .recon-stat.warn { border-color:var(--amber); background:rgba(245,158,11,0.12); }
+  html[data-theme="dark"] .recon-stat.bad  { border-color:var(--red);   background:rgba(239,68,68,0.12); }
+  html[data-theme="dark"] .recon-stat.good { border-color:var(--accent); background:rgba(0,200,150,0.12); }
   html[data-theme="dark"] input,
   html[data-theme="dark"] select { background:#111620; color:var(--text); border-color:#1E2535; }
   html[data-theme="dark"] .btn-gray { background:#1E2535; color:#E8EDF5; }`;
