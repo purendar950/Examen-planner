@@ -1006,7 +1006,16 @@
       '.pdf-meta{font-family:system-ui,Arial,sans-serif;font-size:8.5pt;color:#64748b;margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;position:relative;z-index:1}' +
       '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:12pt;line-height:1.42;position:relative;z-index:1}' +
       '.pdf-nb .sec,.pdf-nb .subsec{break-after:avoid}' +
-      '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb table,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .sec,.pdf-nb .subsec,.pdf-nb .q-card,.pdf-nb .qkeep{break-inside:avoid}' +
+      // Keep genuinely small blocks intact, but let the tall blocks (topic
+      // tables + factboxes) SPLIT across columns/pages. A `break-inside:avoid`
+      // table that is taller than the space left in a column gets bumped whole
+      // to the next column, stranding a big gap at the bottom of every page.
+      // Splitting them at row boundaries lets the columns fill to the bottom.
+      '.pdf-nb .membox,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .sec,.pdf-nb .subsec,.pdf-nb .q-card,.pdf-nb .qkeep{break-inside:avoid}' +
+      '.pdf-nb table,.pdf-nb .factbox{break-inside:auto}' +
+      '.pdf-nb thead{display:table-header-group}' +      // repeat header on continuation
+      '.pdf-nb tbody tr{break-inside:avoid}' +            // never split a row mid-way
+
       // ── Telegram / StudyPlanner branding (PDF only) ──
       // header band (top of page 1): wordmark + Telegram handle
       '.pdf-brand{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 11px;border-radius:6px;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;position:relative;z-index:1}' +
@@ -1025,6 +1034,10 @@
       '.pdf-footer a{color:#fff;text-decoration:underline}' +
       '.pdf-footer .g{color:#8bffbe}' +
       nbCss('.pdf-nb') +
+      // A box-shadow wrapping a table renders as a broken/floating shadow when
+      // the table splits across a column or page. Drop it for print (placed
+      // after nbCss so it overrides the on-screen table shadow).
+      '.pdf-nb table{box-shadow:none}' +
       // Timestamps drive the on-screen "Follow the lecture" tracking but must NOT
       // appear in the exported PDF (they'd clutter the start of every heading).
       // The on-screen notebook hides them via '.ai-nb .ai-ts{display:none}';
