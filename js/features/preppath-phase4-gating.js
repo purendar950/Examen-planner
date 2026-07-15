@@ -177,17 +177,17 @@ generateTimetable = function() {
   _genTimetableGate();
 };
 
-/* 5. Playlist Organiser courses → configurable free limit; Pro/trial users can save up to 10 */
+/* 5. Playlist Organiser courses → configurable free limit; Pro/trial users can save up to 20 */
 const _ytoLoadGate = ytoLoadPlaylist;
 ytoLoadPlaylist = async function() {
   const url = (document.getElementById('yto-url-input') || { value: '' }).value.trim();
   const plId = ytExtractPlaylistId(url);
   const lib = ytoLib();
   const existing = plId && lib[plId];
-  const maxSaved = ezIsPro() ? 10 : EZ_FREE_LIMITS.mediaSaves;
+  const maxSaved = ezIsPro() ? 20 : EZ_FREE_LIMITS.mediaSaves;
   if (currentUser && !existing && Object.keys(lib).length >= maxSaved) {
-    if (ezIsPro()) showToast('Pro users max 10 playlists/videos save kar sakte hain. Admin panel se user limit manage karein.', 'error');
-    else ezLockedMsg('Free plan: sirf ' + EZ_FREE_LIMITS.mediaSaves + ' playlists/videos save. Pro mein 10 tak save kar sakte ho');
+    if (ezIsPro()) showToast('Pro users max 20 playlists/videos save kar sakte hain. Admin panel se user limit manage karein.', 'error');
+    else ezLockedMsg('Free plan: sirf ' + EZ_FREE_LIMITS.mediaSaves + ' playlists/videos save. Pro mein 20 tak save kar sakte ho');
     return;
   }
   return _ytoLoadGate();
