@@ -826,6 +826,15 @@ async function saveStudyAiConfig() {
   if (!activeKeys.length) {
     showToast('⚠️ Active provider (' + p.label + ') has no key');
   }
+  // Also persist the model-manager working copy for the ACTIVE provider, so
+  // model add/remove edits aren't lost when saving from THIS button. Previously
+  // only the separate "Save models" button wrote providerModels, so a removed
+  // model reappeared after this button's post-save re-render.
+  var pm = Object.assign({}, (AI_CONFIG && AI_CONFIG.providerModels) || {});
+  var modelsEdited = (_modelsWorkPid === provider && Array.isArray(_modelsWork) &&
+    _modelsWork.join('\u0001') !== studyModelsFor(provider).join('\u0001'));
+  if (modelsEdited) pm[provider] = _modelsWork.slice();
+
   // Persist every provider's key + the active provider mirror (studyApiKeys /
   // studyModel / studyBaseUrl) — the only fields youtube-turbo-proxy reads.
   const payload = {
@@ -835,11 +844,13 @@ async function saveStudyAiConfig() {
   };
   STUDY_PROVIDER_ORDER.forEach(function (k) { payload[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
   payload[p.modelField] = model;
+  if (modelsEdited) payload.providerModels = pm;
   try {
     await db.collection('config').doc('ai').set(payload, { merge: true });
     AI_CONFIG.studyProvider = provider;
     STUDY_PROVIDER_ORDER.forEach(function (k) { AI_CONFIG[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
     AI_CONFIG[p.modelField] = model;
+    if (modelsEdited) AI_CONFIG.providerModels = pm;
     AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
     showToast('✅ Study AI saved — active: ' + p.label +
               ' (' + activeKeys.length + ' key' + (activeKeys.length === 1 ? '' : 's') + ')');
