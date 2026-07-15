@@ -755,10 +755,14 @@ _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "240000"))
 # ones. Output caps are raised to match so single-pass notes aren't truncated.
 # MCQ output is more verbose per point, so it keeps a smaller output cap.
 # All env-tunable.
-NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "30000"))      # topic notes input chunk
-NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "30000"))  # MCQ input chunk
-NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "4000"))         # topic notes output cap/part
-NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "3500"))  # MCQ output cap/part
+# Larger input chunks + output caps => a whole lecture is generated in ONE AI
+# request on big-context models (fewer requests = less quota / rate-limit use;
+# key for free tiers like Gemini's 20 req/day). Small-context models (Cerebras)
+# are auto-clamped down in _notes_sections so they never overflow. All env-tunable.
+NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "60000"))      # topic notes input chunk
+NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "60000"))  # MCQ input chunk
+NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "8000"))         # topic notes output cap/part
+NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "6000"))  # MCQ output cap/part
 # When a model stops because it hit its output-token cap (finish_reason=="length"),
 # the notes would end mid-sentence (seen on smaller models). We detect that and
 # re-prompt the model to CONTINUE from where it stopped, stitching the parts,
@@ -1397,7 +1401,7 @@ def _notes_instr(style=""):
 # "reduce the length". Others (Bynara ~1M, Mistral, NVIDIA, OpenRouter, custom)
 # are large. Override the default via env if needed.
 _PROVIDER_CTX_TOKENS = {"cerebras": 8192}
-_DEFAULT_CTX_TOKENS = int(os.environ.get("STUDY_DEFAULT_CTX_TOKENS", "128000"))
+_DEFAULT_CTX_TOKENS = int(os.environ.get("STUDY_DEFAULT_CTX_TOKENS", "200000"))
 # Fraction of the context window reserved for the INPUT transcript chunk (the
 # rest covers the instruction + the model's output). Env-tunable.
 _CTX_INPUT_FRAC = float(os.environ.get("STUDY_CTX_INPUT_FRAC", "0.40"))
