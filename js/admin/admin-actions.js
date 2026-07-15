@@ -598,9 +598,12 @@ const STUDY_PROVIDERS = {
               note: 'OpenAI-compatible · large context · free tier ~20 req/day', keyUrl: 'https://aistudio.google.com/apikey' },
   hcnsec:   { label: 'HCNSec', host: 'api.hcnsec.cn', baseUrl: 'https://api.hcnsec.cn/v1', keyField: 'hcnsecApiKeys', modelField: 'hcnsecModel',
               models: ['auto', 'DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'Qwen3.5-397B-A17B', 'Qwen3.6-35B-A3B', 'MiniMax-M3', 'MiniMax-M2.7', 'Kimi-K2.6', 'glm-5.1'], def: 'DeepSeek-V4-Pro',
+              note: 'OpenAI-compatible gateway (multi-model)', keyUrl: '' },
+  bluesminds: { label: 'BluesMinds', host: 'api.bluesminds.com', baseUrl: 'https://api.bluesminds.com/v1', keyField: 'bluesmindsApiKeys', modelField: 'bluesmindsModel',
+              models: ['gpt-5.2-chat', 'gpt-5.6-luna', 'gpt-5-mini', 'gpt-4o', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b'], def: 'gpt-5.2-chat',
               note: 'OpenAI-compatible gateway (multi-model)', keyUrl: '' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
