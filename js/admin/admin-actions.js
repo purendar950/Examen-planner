@@ -595,9 +595,12 @@ const STUDY_PROVIDERS = {
               note: 'NVIDIA NIM (OpenAI-compatible)', keyUrl: 'https://build.nvidia.com' },
   google:   { label: 'Google Gemini', host: 'generativelanguage.googleapis.com', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyField: 'googleApiKeys', modelField: 'googleModel',
               models: ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-2.5-flash'], def: 'gemini-flash-latest',
-              note: 'OpenAI-compatible · large context · free tier ~20 req/day', keyUrl: 'https://aistudio.google.com/apikey' }
+              note: 'OpenAI-compatible · large context · free tier ~20 req/day', keyUrl: 'https://aistudio.google.com/apikey' },
+  hcnsec:   { label: 'HCNSec', host: 'api.hcnsec.cn', baseUrl: 'https://api.hcnsec.cn/v1', keyField: 'hcnsecApiKeys', modelField: 'hcnsecModel',
+              models: ['auto', 'DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'Qwen3.5-397B-A17B', 'Qwen3.6-35B-A3B', 'MiniMax-M3', 'MiniMax-M2.7', 'Kimi-K2.6', 'glm-5.1'], def: 'DeepSeek-V4-Pro',
+              note: 'OpenAI-compatible gateway (multi-model)', keyUrl: '' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
