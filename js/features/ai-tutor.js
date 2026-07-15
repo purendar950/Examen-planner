@@ -496,7 +496,7 @@
       '.ai-scroll{max-height:60vh;overflow:auto;border:1px solid var(--border,#2a3140);border-radius:10px;padding:12px;background:var(--surface,#1b1f2a)}',
       '.ai-dot{cursor:pointer;font-size:0.85rem;line-height:1;margin-right:6px}',
       '.ai-dot.checking{color:#f59e0b}.ai-dot.off{color:#ef4444}.ai-dot.ready{color:#22c55e}.ai-dot.cached{color:#eab308}',
-      '.ai-view-toggle{display:flex;gap:6px;margin-bottom:10px}',
+      '.ai-view-toggle{display:flex;gap:6px;margin-bottom:12px;max-width:360px}',
       '.ai-view-toggle button{flex:1;cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--muted,#8b93a7);border-radius:8px;padding:7px 10px;font-size:0.78rem;font-weight:600;font-family:inherit}',
       '.ai-view-toggle button.on{background:var(--accent,#00c896);color:#04120d;border-color:var(--accent,#00c896)}',
       '.main-content.ai-wide{max-width:none!important}',
@@ -604,7 +604,7 @@
      Off by default; toggled via the 🎯 Follow button in the notes toolbar.
      ══════════════════════════════════════════════════════════════════════ */
   var LEC_KEY = 'aiStudyFollow';
-  var LEC_TOP_OFFSET = 0.15;          // pin the active block ~15% down from the top
+  var LEC_TOP_OFFSET = 0.5;           // pin the active block's START in the MIDDLE of the notes box
   var LEC_POLL_MS = 250;              // poll playback time 4x/sec so the highlight tracks the teacher closely
   var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0, _lecTsCount = 0;
   function lecOn() { return localStorage.getItem(LEC_KEY) === '1'; }
@@ -642,8 +642,9 @@
     _lecActive = idx;
     return true;
   }
-  // Pin the active block near the top of the notes box (no reflow, robust to
-  // offsetParent via getBoundingClientRect).
+  // Pin the START of the active block in the MIDDLE of the notes box (no reflow,
+  // robust to offsetParent via getBoundingClientRect). er.top is the block's
+  // start edge, so it lands at LEC_TOP_OFFSET (50%) down the scroller.
   function lecScroll() {
     var el = _lecBlocks[_lecActive]; if (!el || !_lecScroller) return;
     var sr = _lecScroller.getBoundingClientRect(), er = el.getBoundingClientRect();
@@ -1544,7 +1545,14 @@
     ai.style.marginTop = '0';
     ai.innerHTML = panelHtml();
 
-    panel.appendChild(toggle); panel.appendChild(wrap); panel.appendChild(ai);
+    // Place the [Course Content | AI Study] switcher ABOVE the whole two-column
+    // layout (not inside the right column). This keeps the player card (left)
+    // and the panel/notes card (right) top-aligned — otherwise the toggle would
+    // push the right card ~45px lower than the player, so they'd look unaligned.
+    var layout = ytLayout();
+    if (layout && layout.parentNode) layout.parentNode.insertBefore(toggle, layout);
+    else panel.appendChild(toggle);
+    panel.appendChild(wrap); panel.appendChild(ai);
 
     Array.prototype.forEach.call(toggle.querySelectorAll('button'), function (b) {
       b.onclick = function () {
