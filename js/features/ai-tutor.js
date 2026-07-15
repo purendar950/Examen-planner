@@ -1378,6 +1378,7 @@
     } else if (state.tab === 'tutor') {
       renderTutor();
     }
+    alignPlayerToNotes();   // re-align the player after the tab's controls change height
   }
   // Fill the model dropdown from the server's list (active provider's models).
   /* ── Two-step model picker: choose PROVIDER, then its MODEL ──────────────
@@ -1516,6 +1517,43 @@
       var cv = curVid();
       if (cv !== _statusVid) { _statusVid = cv; checkStatus(cv); }
     }
+    alignPlayerToNotes();   // keep the player top-aligned with the notes box (or reset in course view)
+  }
+
+  /* ── Keep the video PLAYER top-aligned with the NOTES box in the wide,
+        side-by-side AI Study view. The AI panel's dropdowns / tabs / Generate /
+        language chips sit above the notes, so we pad the TOP of the left player
+        column to push the player down level with the notes box (#ai-sub). Only
+        active in AI Study on wide screens; reset otherwise. ── */
+  var _alignRO = null;
+  function alignPlayerToNotes() {
+    var layout = ytLayout();
+    var leftCol = layout && layout.children[0];
+    if (!leftCol) return;
+    var wide = !window.matchMedia || window.matchMedia('(min-width:861px)').matches;
+    var active = layout.classList.contains('ai-split') && currentView() === 'ai' && wide;
+    if (!active) { leftCol.style.paddingTop = ''; return; }
+    // anchor = the notes content box (#ai-sub) when a tab has it, else the body.
+    var anchor = document.getElementById('ai-sub') || document.getElementById('ai-body');
+    if (!anchor) { leftCol.style.paddingTop = ''; return; }
+    // leftCol's top edge is the grid-row top (unaffected by its own padding), and
+    // the anchor lives in the OTHER column, so this measurement is stable.
+    var top = anchor.getBoundingClientRect().top - leftCol.getBoundingClientRect().top;
+    leftCol.style.paddingTop = (top > 0 ? Math.round(top) : 0) + 'px';
+  }
+  // Re-align whenever the AI panel's content reflows (tab switch, chips wrap,
+  // notes stream in, etc.) plus on viewport resize.
+  function setupAlignSync() {
+    var ai = document.getElementById('ai-study-panel');
+    if (ai && !_alignRO && typeof ResizeObserver !== 'undefined') {
+      _alignRO = new ResizeObserver(function () { alignPlayerToNotes(); });
+      _alignRO.observe(ai);
+    }
+    if (!setupAlignSync._win) {
+      setupAlignSync._win = true;
+      window.addEventListener('resize', function () { alignPlayerToNotes(); });
+    }
+    alignPlayerToNotes();
   }
 
   // Set up the toggle + AI panel inside the right column, once.
@@ -1579,6 +1617,7 @@
     if (dot) dot.onclick = function () { _statusVid = null; checkStatus(curVid()); };
     renderTabs(); renderBody();
     applyView();
+    setupAlignSync();   // keep player ↔ notes-box top alignment in sync
   }
 
   /* ── keep panel present + react to video changes ── */
