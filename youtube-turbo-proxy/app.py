@@ -740,7 +740,12 @@ _AI_STREAM = os.environ.get("AI_STREAM", "1").strip().lower() not in ("0", "fals
 # Tutor sends transcript context on EVERY message, so cap it: a full 2-hour
 # lecture (~80k+ chars) makes Bynara slow enough to hit Cloudflare's ~100s 524.
 # ~48k chars (~12k tokens) keeps replies fast. Notes/quiz still use full text.
-_TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "48000"))
+# Upper bound (chars) on the transcript context fed to the interactive tutor.
+# The tutor ALSO sizes context to the model's window + transcript script (see
+# _tutor_context_chars) — this is just a safety ceiling. Raised from 48000 so
+# big-context models (Gemini / Bynara / NVIDIA / HCNSec) can use most of the
+# lecture instead of only the first ~48k chars.
+_TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "240000"))
 # Notes generation is chunked ONLY so a single call doesn't run forever. The
 # response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
 # what actually prevents Cloudflare's ~100s 524 (tokens keep the connection
@@ -1414,6 +1419,24 @@ def _chars_per_token(text):
     other = len(text) - ascii_ct
     tokens = (ascii_ct / 4.0) + (other / 1.2)
     return max(1.0, len(text) / tokens) if tokens else 4.0
+
+
+def _tutor_context_chars(ai, text):
+    """How many transcript chars to feed the interactive tutor. Sized to the
+    model's context window AND the transcript's script (Hindi ~1 token/char),
+    reserving room for the chat history + the answer, then clamped to
+    _TUTOR_CONTEXT_CHARS. So big-context models (Gemini/Bynara/NVIDIA/HCNSec) use
+    most of the lecture, while small-context ones (Cerebras 8192) stay safely
+    under their limit instead of 400-ing."""
+    text = text or ""
+    if not text:
+        return 0
+    ctx = _model_ctx_tokens(ai)
+    # Reserve ~5000 tokens: the system wrapper + up to 8 history turns + the
+    # ~1200-token answer. Floor the budget so tiny models still get some context.
+    budget_tokens = max(1500, int(ctx * 0.6) - 5000)
+    cap = int(budget_tokens * _chars_per_token(text))
+    return min(len(text), cap, _TUTOR_CONTEXT_CHARS)
 
 
 def _notes_sections(transcript, out_lang, ai, style=""):
@@ -2481,9 +2504,11 @@ def api_tutor():
         return jsonify({"error": "no_captions",
                         "detail": "No captions found for this video."}), 200
 
-    # Big-context providers get the full transcript; Groq gets a condensed version.
-    # Cap context so the interactive tutor stays responsive (avoids CF 524).
-    context = (t.get("text") or "")[:_TUTOR_CONTEXT_CHARS]
+    # Feed the tutor as much of the transcript as the model's context window
+    # allows (sized to the transcript's script too): big-context models use most
+    # of the lecture, small ones stay under their limit. Streaming keeps the
+    # connection alive so a larger context no longer risks Cloudflare's 524.
+    context = (t.get("text") or "")[:_tutor_context_chars(ai, t.get("text") or "")]
     sysmsg = (
         "You are an exam-prep AI tutor for the video titled %r. Answer ONLY using "
         "the transcript below. If something isn't covered, say so briefly. The "
