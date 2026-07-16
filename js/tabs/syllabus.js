@@ -299,3 +299,21 @@ function applyFilter() {
   });
 }
 
+
+
+/* ══════════════════════════════════════════════
+   Chapters | Exam Pattern sub-tab switch (merged Syllabus tab)
+══════════════════════════════════════════════ */
+function sylSwitchSub(v) {
+  var map = { chapters: 'syl-sub-view-chapters', pattern: 'syl-sub-view-pattern' };
+  Object.keys(map).forEach(function (x) {
+    var view = document.getElementById(map[x]);
+    if (view) view.classList.toggle('active', x === v);
+    var btn = document.getElementById('syl-sub-' + x);
+    if (btn) btn.classList.toggle('active', x === v);
+  });
+  // Refresh exam-pattern content for the current exam when opened.
+  if (v === 'pattern' && typeof updateExamPattern === 'function') {
+    try { updateExamPattern(); } catch (e) {}
+  }
+}

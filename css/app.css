@@ -2764,3 +2764,21 @@ html:not([data-theme="light"]) .topbar {
     .wc-bars { height: 76px; }
     .wc-bar-wrap { height: 56px; }
   }
+
+
+  /* ═══════════════════════════════════════════════
+     MERGED-TAB SUB NAVIGATION
+     Shared sub-tab bar used by pages that fold two
+     former top-level tabs into one:
+       • YouTube  → Watch | Playlist Organiser
+       • Syllabus → Chapters | Exam Pattern
+     (Analysis uses its own scoped .an-subtab styles.)
+  ═══════════════════════════════════════════════ */
+  .mtab-bar { display:inline-flex; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px; gap:4px; margin-bottom:1.3rem; flex-wrap:wrap; }
+  .mtab { padding:9px 18px; border-radius:9px; font-size:0.84rem; font-weight:600; color:var(--muted); cursor:pointer; border:none; background:transparent; transition:all .18s; display:inline-flex; align-items:center; gap:7px; font-family:inherit; }
+  .mtab:hover { color:var(--text); }
+  .mtab.active { background:var(--accent); color:#04130d; box-shadow:0 4px 14px rgba(0,200,150,0.3); }
+  .msubview { display:none; }
+  .msubview.active { display:block; animation:mtabFade .28s ease; }
+  @keyframes mtabFade { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  @media (max-width:560px) { .mtab { padding:8px 13px; font-size:0.78rem; } }

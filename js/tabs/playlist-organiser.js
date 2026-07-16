@@ -1152,9 +1152,8 @@ document.addEventListener('keydown', function(e) {
 const _switchPageV2 = switchPage;
 switchPage = function(page) {
   _switchPageV2(page);
-  if (page === 'yt-organiser') {
-    if (!ytoCurrentPl) ytoRenderLibrary(); else ytoRefreshCourse();
-  }
+  // Playlist Organiser is now a sub-tab inside the YouTube page; its render is
+  // triggered by ytSwitchSub('organiser') (see youtube.js), not by switchPage.
   if (page === 'youtube' && ytoCurrentPl) {
     // Restore course sidebar when returning to YT tab from anywhere
     setTimeout(function() { ytoPopulateYtSidebar(ytoCurrentPl, ytCurrentVideoId || ''); }, 80);
