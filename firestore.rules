@@ -313,6 +313,24 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ── MCQ share tokens (free shareable tests) ──────────
+    // A share is a tiny pointer { videoId, lang, title, by } created by a Pro
+    // user. The doc id IS the unguessable share token, so a free test can only
+    // be opened via a genuine link. `get` only (never `list`) blocks
+    // enumeration of all shares.
+    match /mcqShares/{token} {
+      allow get:  if isLoggedIn();
+      allow list: if isAdmin();
+      allow create: if isLoggedIn()
+        && request.resource.data.by == request.auth.uid
+        && request.resource.data.videoId is string
+        && request.resource.data.videoId.size() > 0
+        && request.resource.data.videoId.size() <= 20
+        // Only a paid (Pro) user may create a share.
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('profile', {}).get('plan', 'free') != 'free';
+      allow update, delete: if isAdmin();
+    }
+
     // ── Default deny ─────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;
