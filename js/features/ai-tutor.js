@@ -731,11 +731,13 @@
     var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
     var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
     var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
+    // Comprehensive MCQ notes → launch every question as a full test in the exam engine.
+    var testBtn = (style === 'mcq') ? '<button class="ai-btn" id="ai-mcq-test" title="Take all these MCQs as a full test (opens the exam engine)" style="padding:4px 10px;font-size:0.72rem">🎯 Take as Test</button>' : '';
     var nbHtml = nbBuild(content, style);
     box.innerHTML = brandBarHtml() +
-      '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+      '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
-      followBtn + pdfBtn + regenBtn + '</div>' +
+      testBtn + followBtn + pdfBtn + regenBtn + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
     bindTsLinks(box);
     lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
@@ -743,6 +745,12 @@
     if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true }); };
     var rb = document.getElementById('ai-regen');
     if (rb) rb.onclick = function () { showStudy(mode, n, true); };
+    var mtb = document.getElementById('ai-mcq-test');
+    if (mtb) mtb.onclick = function () {
+      var qs = parseMcqNotes(content);
+      if (!qs.length) { if (typeof showToast === 'function') showToast('No MCQs found in these notes', 'error'); else alert('No MCQs detected in these notes.'); return; }
+      openInTestEngine(qs, (curTitle() || 'MCQ') + ' \u2014 MCQ Test');
+    };
     checkLangs(mode, n || 25, false);
   }
 
@@ -1167,6 +1175,100 @@
       var body = m.role === 'user' ? '<div>' + esc(m.content) + '</div>' : '<div>' + mdToHtml(m.content) + '</div>';
       return '<div class="pdf-msg pdf-' + (m.role === 'user' ? 'u' : 'a') + '"><div class="pdf-who">' + who + '</div>' + body + '</div>';
     }).join('');
+  }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     "Take as Test" — comprehensive MCQ notes → the REAL exam engine
+     ─────────────────────────────────────────────────────────────────────
+     Parses every MCQ out of the generated MCQ-style notes, maps them to the
+     shape test-engine.html expects, stores them in localStorage, and opens the
+     exam engine IN THE SAME TAB (we save the current URL so the engine's "Back
+     to Video" returns here — the app re-opens on the YouTube tab). One section,
+     +2/−0.5, auto timer (~0.75 min/question).
+     ══════════════════════════════════════════════════════════════════════ */
+  function mcqToEngineQuestions(list) {
+    return (list || []).map(function (q, i) {
+      var ansIdx = (q.answer_index != null) ? q.answer_index
+                 : (q.answer != null ? (parseInt(q.answer, 10) - 1) : 0);
+      if (isNaN(ansIdx) || ansIdx < 0) ansIdx = 0;
+      var obj = {
+        id: 'Q' + (i + 1),
+        question: { en: q.question || '' },
+        answer: String(ansIdx + 1),               // engine uses 1-based answer
+        explanation: { en: q.explanation || '' }
+      };
+      (q.options || []).forEach(function (o, oi) {
+        obj['option_' + (oi + 1)] = (typeof o === 'string') ? o : (o.text || '');
+      });
+      return obj;
+    });
+  }
+  // Parse generated MCQ-style notes (markdown) into structured questions using
+  // the SAME Q/option/answer/explanation regexes as the on-screen MCQ renderer,
+  // so EVERY question the AI produced becomes a quiz question (no fixed count).
+  function parseMcqNotes(md) {
+    var clean = nbStrip(md || '');
+    var lines = clean.replace(/\r/g, '').replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i, '$1').split('\n');
+    var out = [], i = 0;
+    while (i < lines.length) {
+      var qm = lines[i].trim().match(NB_Q);
+      if (!qm) { i++; continue; }
+      var qtext = qm[2] || ''; i++;
+      var opts = [], ansKey = '', expl = [];
+      while (i < lines.length) {
+        var lt = lines[i].trim();
+        if (NB_Q.test(lt)) break;
+        var am = lt.match(NB_A), om = lt.match(NB_O), em = lt.match(NB_EXP);
+        if (am) { ansKey = am[1].toUpperCase(); i++; continue; }
+        if (om) { opts.push({ k: om[1].toUpperCase(), text: om[2] }); i++; continue; }
+        if (em) { var er = (em[1] || '').replace(/^\*+/, '').replace(/\*+$/, '').trim(); if (er) expl.push(er); i++; continue; }
+        if (lt === '') { i++; continue; }
+        expl.push(lt); i++;
+      }
+      var ansIdx = -1;
+      if (ansKey) ansIdx = /^[0-9]$/.test(ansKey) ? (parseInt(ansKey, 10) - 1) : (ansKey.charCodeAt(0) - 65);
+      if (ansIdx < 0) opts.forEach(function (o, oi) { if (nbOptRight(o.text)) ansIdx = oi; });
+      if (ansIdx < 0) ansIdx = 0;
+      if (qtext && opts.length >= 2) {
+        out.push({
+          question: deLatex(qtext.replace(/\*+/g, '')),
+          options: opts.map(function (o) { return deLatex(nbCleanOpt(o.text)); }),
+          answer_index: (ansIdx < opts.length) ? ansIdx : 0,
+          explanation: deLatex(expl.join('\n'))
+        });
+      }
+    }
+    return out;
+  }
+  function openInTestEngine(list, title, opts) {
+    opts = opts || {};
+    var questions = mcqToEngineQuestions(list);
+    if (!questions.length) {
+      if (typeof showToast === 'function') showToast('No questions to convert', 'error'); else alert('No questions to convert.');
+      return;
+    }
+    var id = 'EZ-CUSTOM-' + Date.now();
+    var payload = {
+      id: id,
+      title: title || 'MCQ Test',
+      correct_score:  (opts.correct  != null) ? opts.correct  : 2,
+      negative_score: (opts.negative != null) ? opts.negative : 0.5,
+      time_min: (opts.time_min != null) ? opts.time_min : Math.max(5, Math.ceil(questions.length * 0.75)),
+      sections: {}
+    };
+    payload.sections['MCQ Quiz'] = questions;
+    try {
+      // keep only the latest custom quiz so localStorage doesn't grow forever
+      Object.keys(localStorage).forEach(function (k) { if (k.indexOf('ez_custom_quiz_') === 0) localStorage.removeItem(k); });
+      localStorage.setItem('ez_custom_quiz_' + id, JSON.stringify(payload));
+      localStorage.setItem('ez_custom_quiz', JSON.stringify(payload));       // generic fallback
+      localStorage.setItem('ez_custom_quiz_return', location.href);          // same-tab return target
+      localStorage.removeItem('ezSelectedTopics');
+      localStorage.removeItem('ezMockSize');
+    } catch (e) { alert('Could not store the quiz (browser storage is full).'); return; }
+    // Same-tab navigation. The engine sits at the app root next to app.html.
+    var base = location.pathname.replace(/[^/]*$/, '');
+    location.href = base + 'test-engine.html?id=' + encodeURIComponent(id);
   }
 
   /* ── Quiz engine ── */
