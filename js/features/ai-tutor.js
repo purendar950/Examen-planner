@@ -733,11 +733,13 @@
     var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
     // Comprehensive MCQ notes → launch every question as a full test in the exam engine.
     var testBtn = (style === 'mcq') ? '<button class="ai-btn" id="ai-mcq-test" title="Take all these MCQs as a full test (opens the exam engine)" style="padding:4px 10px;font-size:0.72rem">🎯 Take as Test</button>' : '';
+    // Share a link so others can take the same MCQ test (login required).
+    var shareBtn = (style === 'mcq') ? '<button class="ai-btn sec" id="ai-mcq-share" title="Copy a link so others can take this same MCQ test (they must log in / register)" style="padding:4px 10px;font-size:0.72rem">🔗 Share</button>' : '';
     var nbHtml = nbBuild(content, style);
     box.innerHTML = brandBarHtml() +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
-      testBtn + followBtn + pdfBtn + regenBtn + '</div>' +
+      testBtn + shareBtn + followBtn + pdfBtn + regenBtn + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
     bindTsLinks(box);
     lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
@@ -751,6 +753,8 @@
       if (!qs.length) { if (typeof showToast === 'function') showToast('No MCQs found in these notes', 'error'); else alert('No MCQs detected in these notes.'); return; }
       openInTestEngine(qs, (curTitle() || 'MCQ') + ' \u2014 MCQ Test');
     };
+    var msb = document.getElementById('ai-mcq-share');
+    if (msb) msb.onclick = function () { shareMcqTest(); };
     checkLangs(mode, n || 25, false);
   }
 
@@ -997,7 +1001,7 @@
   // Asks the backend which of Hinglish/English/Hindi are already cached for this
   // video+mode, then renders chips into #ai-langbar. If the user's chosen language
   // is already there and autoShow is on (notes/cards), it opens it directly.
-  function checkLangs(mode, n, autoShow) {
+  function checkLangs(mode, n, autoShow, _retry) {
     var vid = curVid(), bar = document.getElementById('ai-langbar');
     if (!vid || !bar) return;
     var style = (mode === 'notes') ? nbNotesStyle() : '';
@@ -1017,7 +1021,12 @@
       });
       // chosen language already available → show it directly (notes/cards only)
       if (autoShow && avail.indexOf(chosen) !== -1) loadLang(mode, n, chosen);
-    }).catch(function () {});
+    }).catch(function () {
+      // The backend may be cold-starting (Render) or briefly unreachable, which
+      // otherwise leaves already-generated notes/MCQ silently NOT displayed.
+      // Retry once after a short delay so cached content still auto-shows.
+      if (!_retry) setTimeout(function () { checkLangs(mode, n, autoShow, true); }, 2500);
+    });
   }
   // Refresh the "already generated" bar for whatever tab is active (used when
   // the language dropdown changes). Notes/Cards auto-open a cached language;
@@ -1280,6 +1289,36 @@
     // Same-tab navigation. The engine sits at the app root next to app.html.
     var base = location.pathname.replace(/[^/]*$/, '');
     location.href = base + 'test-engine.html?id=' + encodeURIComponent(id);
+  }
+  // Build + copy a shareable link for THIS video's MCQ test. It carries the
+  // video id + language; the recipient's app rebuilds the same quiz from the
+  // Backblaze-cached MCQ notes (no separate storage). Opening app.html requires
+  // login, so a logged-out recipient is sent to login/register automatically.
+  function shareMcqTest() {
+    var vid = curVid();
+    if (!vid) { if (typeof showToast === 'function') showToast('Play the video first', 'error'); else alert('Play the video first.'); return; }
+    var base = location.origin + location.pathname.replace(/[^/]*$/, '');
+    var url = base + 'app.html?mcqshare=' + encodeURIComponent(vid) + '&lang=' + encodeURIComponent(outLang());
+    function done(ok) {
+      if (typeof showToast === 'function') showToast(ok ? '🔗 Share link copied — send it to anyone' : 'Copy failed. Link: ' + url, ok ? 'success' : 'error');
+      else alert((ok ? 'Link copied:\n\n' : 'Copy this link:\n\n') + url);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(function () { done(true); }, function () { done(false); });
+    } else { done(false); }
+  }
+  // Rebuild + open a shared MCQ test from the cached notes for a given video.
+  function openSharedMcq(vid, lang) {
+    if (!vid) return;
+    try { if (typeof showToast === 'function') showToast('Loading shared MCQ test\u2026', 'info'); } catch (e) {}
+    var url = '/api/study?id=' + vid + '&mode=notes&style=mcq&out=' + encodeURIComponent(lang || outLang()) + '&uid=' + encodeURIComponent(curUid());
+    apiGet(url).then(function (j) {
+      if (j && (j.error === 'no_captions' || j.warning === 'no_captions')) { alert('This shared video has no captions.'); return; }
+      if (j && j.error) { alert('Could not load the shared test: ' + j.error); return; }
+      var qs = parseMcqNotes(j.content || '');
+      if (!qs.length) { alert('The shared MCQ test is not available yet (notes not generated).'); return; }
+      openInTestEngine(qs, 'Shared MCQ Test');
+    }).catch(function (e) { alert('Failed to load the shared test: ' + e); });
   }
 
   /* ── Quiz engine ── */
@@ -1743,4 +1782,22 @@
     var v = curVid();
     if (v !== _lastVid) { _lastVid = v; if (document.getElementById('ai-body')) { renderTabs(); renderBody(); } }
   }, 800);
+
+  /* ── Resume a shared MCQ test after login (independent of the active tab) ──
+     app.html / index.html capture ?mcqshare= into localStorage before the auth
+     redirect; once the user is logged in we rebuild the quiz from the cached
+     notes and open the exam engine. */
+  (function () {
+    var tries = 0;
+    var iv = setInterval(function () {
+      if (++tries > 40) { clearInterval(iv); return; }   // ~32s then give up
+      var pend = null;
+      try { pend = JSON.parse(localStorage.getItem('ez_pending_mcqshare') || 'null'); } catch (e) {}
+      if (!pend || !pend.vid) return;
+      if (typeof currentUser === 'undefined' || !currentUser) return;   // wait for login
+      clearInterval(iv);
+      try { localStorage.removeItem('ez_pending_mcqshare'); } catch (e) {}
+      openSharedMcq(pend.vid, pend.lang);
+    }, 800);
+  })();
 })();
