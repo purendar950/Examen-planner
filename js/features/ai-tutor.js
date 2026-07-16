@@ -1206,6 +1206,17 @@
   // Parse generated MCQ-style notes (markdown) into structured questions using
   // the SAME Q/option/answer/explanation regexes as the on-screen MCQ renderer,
   // so EVERY question the AI produced becomes a quiz question (no fixed count).
+  // MCQ notes embed video timestamps like "(11:28)" / "[1:02:03]" (rendered as
+  // clickable "jump to video" links on screen). In a test there's no video, so
+  // strip bracketed timestamps anywhere and a leading bare timestamp.
+  function stripTimestamps(s) {
+    if (!s) return s;
+    return String(s)
+      .replace(/[\[(]\s*\d{1,2}:\d{2}(?::\d{2})?\s*[\])]/g, ' ')          // (11:28) [1:02:03]
+      .replace(/^\s*\d{1,2}:\d{2}(?::\d{2})?\s*[-\u2013\u2014:.)\]]*\s*/, '') // leading "11:28 - "
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
+  }
   function parseMcqNotes(md) {
     var clean = nbStrip(md || '');
     var lines = clean.replace(/\r/g, '').replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i, '$1').split('\n');
@@ -1231,10 +1242,10 @@
       if (ansIdx < 0) ansIdx = 0;
       if (qtext && opts.length >= 2) {
         out.push({
-          question: deLatex(qtext.replace(/\*+/g, '')),
+          question: stripTimestamps(deLatex(qtext.replace(/\*+/g, ''))),
           options: opts.map(function (o) { return deLatex(nbCleanOpt(o.text)); }),
           answer_index: (ansIdx < opts.length) ? ansIdx : 0,
-          explanation: deLatex(expl.join('\n'))
+          explanation: stripTimestamps(deLatex(expl.join('\n')))
         });
       }
     }
