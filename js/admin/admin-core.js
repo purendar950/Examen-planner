@@ -12,7 +12,7 @@ let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = fal
 /* Question-report channel config (Firestore config/reports) — the quiz engine's
    "🚩 Report" button posts here via the proxy. Separate bot/channel from the
    study-planner bot above, so it has its own token + chatId. */
-let REPORT_CONFIG = { botToken: '', chatId: '', channelName: '', inviteLink: '', loaded: false };
+let REPORT_CONFIG = { botToken: '', chatId: '', channelName: '', inviteLink: '', miniAppBot: '', miniAppName: '', loaded: false };
 /* Question reports (Supabase question_reports) + the report currently open in
    the editor. Loaded lazily when the 🚩 Reports tab is opened. */
 let REPORTS = [], REPORTS_LOADED = false, REPORTS_FILTER = 'open', REP_EDITING = null, REP_OPEN_PENDING = null;

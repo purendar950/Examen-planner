@@ -64,6 +64,19 @@
       } catch (e) { console.warn('[question-fix] report threw:', e); return false; }
     },
 
+    /* EDITOR: latest report for a unique_key (quizId_questionId), or null.
+       Used by editor.html to load the reported question's content. */
+    getReportByKey: async function (uKey) {
+      var c = client();
+      if (!c || !uKey) return null;
+      try {
+        var res = await c.from('question_reports').select('*')
+          .eq('unique_key', uKey).order('created_at', { ascending: false }).limit(1);
+        if (res.error) { console.warn('[question-fix] getReportByKey failed:', res.error.message); return null; }
+        return (res.data && res.data[0]) || null;
+      } catch (e) { console.warn('[question-fix] getReportByKey threw:', e); return null; }
+    },
+
     /* ADMIN: list reports (optionally filter by status). Newest first. */
     listReports: async function (status) {
       var c = client();

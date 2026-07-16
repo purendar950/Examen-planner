@@ -448,8 +448,8 @@ async function loadTelegramData() {
   /* Load question-report channel config (config/reports) */
   try {
     const rsnap = await db.collection('config').doc('reports').get();
-    REPORT_CONFIG = { botToken:'', chatId:'', channelName:'', inviteLink:'', ...(rsnap.exists ? rsnap.data() : {}), loaded: true };
-  } catch(e) { REPORT_CONFIG = { botToken:'', chatId:'', channelName:'', inviteLink:'', loaded: true }; }
+    REPORT_CONFIG = { botToken:'', chatId:'', channelName:'', inviteLink:'', miniAppBot:'', miniAppName:'', ...(rsnap.exists ? rsnap.data() : {}), loaded: true };
+  } catch(e) { REPORT_CONFIG = { botToken:'', chatId:'', channelName:'', inviteLink:'', miniAppBot:'', miniAppName:'', loaded: true }; }
   /* Load AI (Groq) auto-schedule config */
   try {
     const aiSnap = await db.collection('config').doc('ai').get();
@@ -515,6 +515,10 @@ async function saveReportConfig() {
   const chatId = chatEl.value.trim();
   const channelName = (nameEl && nameEl.value.trim()) || '';
   const inviteLink  = (linkEl && linkEl.value.trim()) || '';
+  const miniBotEl  = document.getElementById('rep-minibot-input');
+  const miniAppEl  = document.getElementById('rep-miniapp-input');
+  const miniAppBot  = (miniBotEl && miniBotEl.value.trim().replace(/^@/, '')) || '';
+  const miniAppName = (miniAppEl && miniAppEl.value.trim()) || '';
 
   if (token && !/^\d+:/.test(token)) { showToast('⚠️ Valid bot token daalo (format: 123456:ABC-xyz)'); return; }
   if (chatId && !/^-?\d+$/.test(chatId)) { showToast('⚠️ Chat ID numeric hona chahiye (e.g. -1001234567890)'); return; }
@@ -525,12 +529,16 @@ async function saveReportConfig() {
       chatId: chatId,
       channelName: channelName,
       inviteLink: inviteLink,
+      miniAppBot: miniAppBot,
+      miniAppName: miniAppName,
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     REPORT_CONFIG.botToken = token;
     REPORT_CONFIG.chatId = chatId;
     REPORT_CONFIG.channelName = channelName;
     REPORT_CONFIG.inviteLink = inviteLink;
+    REPORT_CONFIG.miniAppBot = miniAppBot;
+    REPORT_CONFIG.miniAppName = miniAppName;
     showToast('✅ Report channel config saved!');
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
@@ -1277,6 +1285,15 @@ function renderTelegram() {
       '<input id="rep-link-input" type="text" placeholder="Invite Link (optional)" ' +
         'value="' + esc(REPORT_CONFIG.inviteLink || '') + '" ' +
         'style="flex:1;min-width:200px;font-size:.82rem;">' +
+    '</div>' +
+    '<div style="margin:10px 0 6px;font-size:.78rem;font-weight:700;color:var(--muted);">📱 Mini App editor (optional — for the "Open in Mini App" button)</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+      '<input id="rep-minibot-input" type="text" placeholder="Mini App bot username (e.g. StudyPlanner_Bot)" ' +
+        'value="' + esc(REPORT_CONFIG.miniAppBot || '') + '" ' +
+        'style="flex:1;min-width:220px;font-size:.82rem;">' +
+      '<input id="rep-miniapp-input" type="text" placeholder="Mini App short name (e.g. editor)" ' +
+        'value="' + esc(REPORT_CONFIG.miniAppName || '') + '" ' +
+        'style="flex:1;min-width:180px;font-size:.82rem;">' +
     '</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
       '<button class="btn btn-blue" onclick="saveReportConfig()">💾 Save Report Channel</button>' +

@@ -2673,22 +2673,24 @@ def _report_rate_limited(key, limit=8, window=60):
 
 
 def _report_config():
-    """Return (botToken, chatId) for question reports from Firestore
-    config/reports. Falls back to env vars REPORT_BOT_TOKEN / REPORT_CHAT_ID."""
-    tok = os.environ.get("REPORT_BOT_TOKEN", "").strip()
-    chat = os.environ.get("REPORT_CHAT_ID", "").strip()
-    if tok and chat:
-        return tok, chat
+    """Return the question-report config dict from Firestore config/reports
+    (botToken, chatId, miniAppBot, miniAppName). Env vars REPORT_BOT_TOKEN /
+    REPORT_CHAT_ID override the token/chat when set."""
+    cfg = {"botToken": "", "chatId": "", "miniAppBot": "", "miniAppName": ""}
     if _fb_db:
         try:
             doc = _fb_db.collection("config").document("reports").get()
             if doc.exists:
                 d = doc.to_dict() or {}
-                tok = tok or (d.get("botToken") or "").strip()
-                chat = chat or str(d.get("chatId") or "").strip()
+                cfg["botToken"]    = (d.get("botToken") or "").strip()
+                cfg["chatId"]      = str(d.get("chatId") or "").strip()
+                cfg["miniAppBot"]  = (d.get("miniAppBot") or "").strip().lstrip("@")
+                cfg["miniAppName"] = (d.get("miniAppName") or "").strip()
         except Exception as exc:  # noqa: BLE001
             log.warning("report config read failed: %s", exc)
-    return tok, chat
+    cfg["botToken"] = os.environ.get("REPORT_BOT_TOKEN", "").strip() or cfg["botToken"]
+    cfg["chatId"]   = os.environ.get("REPORT_CHAT_ID", "").strip() or cfg["chatId"]
+    return cfg
 
 
 def _html_escape(s):
@@ -2715,7 +2717,8 @@ def api_report():
     if _report_rate_limited(rate_key):
         return jsonify({"ok": False, "error": "Too many reports — ek minute baad try karo."}), 429
 
-    token, chat_id = _report_config()
+    cfg = _report_config()
+    token, chat_id = cfg["botToken"], cfg["chatId"]
     if not token or not chat_id:
         return jsonify({"ok": False, "error": "report channel not configured (config/reports)"}), 500
 
@@ -2745,15 +2748,24 @@ def api_report():
         _html_escape(reason), _html_escape(details), _html_escape(report_link),
     )
 
-    data_bundle = "%s:%s" % (q_id, quiz_id)
-    keyboard = [
-        [{"text": "✅ Fixed & Notify", "callback_data": "f:" + data_bundle}],
-        [{"text": "❌ Already Correct", "callback_data": "c:" + data_bundle}],
-    ]
-    # Only add the editor button when we have an https URL (Telegram rejects
-    # non-https button URLs).
+    keyboard = []
+    # 🌐 Open in Chrome — the StudyPlanner editor as a normal browser page.
+    # Telegram rejects non-https button URLs, so only add when https.
     if editor_url.startswith("https://"):
-        keyboard.append([{"text": "🛠 Fix in StudyPlanner Editor", "url": editor_url}])
+        keyboard.append([{"text": "🌐 Open in Chrome", "url": editor_url}])
+
+    # 📱 Open in Mini App — same editor opened inside Telegram. Requires a
+    # Direct-Link Mini App configured on a bot (BotFather) pointing at
+    # editor.html; its bot username + app short name live in config/reports.
+    # The startapp value is base64url("quizId|questionId"), which editor.html
+    # decodes (Telegram limits startapp to [A-Za-z0-9_-], ≤64 chars).
+    mini_bot, mini_app = cfg.get("miniAppBot"), cfg.get("miniAppName")
+    if mini_bot and mini_app:
+        raw = ("%s|%s" % (quiz_id, q_id)).encode("utf-8")
+        start_param = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+        if len(start_param) <= 64:
+            mini_url = "https://t.me/%s/%s?startapp=%s" % (mini_bot, mini_app, start_param)
+            keyboard.append([{"text": "📱 Open in Mini App", "url": mini_url}])
 
     payload = {
         "chat_id": chat_id,
