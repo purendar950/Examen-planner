@@ -5547,8 +5547,38 @@ async function loadQuizData() {
   let TIME_PER_SECTION = 15 * 60;            // default seconds per section
   const SECTION_TIME_MAP = {};               // sectionName -> seconds (from Supabase)
 
+  // ── 🎯 CUSTOM QUIZ (from AI Study "Take as Test" — js/features/ai-tutor.js) ──
+  // The AI Study panel converts its generated MCQs (comprehensive MCQ notes or
+  // the Quiz tab) into this shape and stores it in localStorage, keyed by the
+  // ?id= so multiple custom quizzes never collide. When present we SKIP Supabase
+  // and run these questions through the full engine (sections, timer, palette,
+  // solutions & analysis) exactly like any other test.
+  let CUSTOM_LOADED = false;
+  try {
+    const _customRaw = localStorage.getItem('ez_custom_quiz_' + quizIdParam)
+                    || localStorage.getItem('ez_custom_quiz');
+    if (_customRaw) {
+      const cq = JSON.parse(_customRaw);
+      if (cq && cq.sections && Object.keys(cq.sections).length) {
+        QUIZ_TITLE     = cq.title || QUIZ_TITLE;
+        QUIZ_ID        = cq.id || QUIZ_ID;
+        CORRECT_SCORE  = (cq.correct_score  != null) ? Number(cq.correct_score)  : CORRECT_SCORE;
+        NEGATIVE_SCORE = (cq.negative_score != null) ? Number(cq.negative_score) : NEGATIVE_SCORE;
+        TIME_PER_SECTION = (cq.time_min ? Number(cq.time_min) : 15) * 60;
+        Object.keys(cq.sections).forEach(sec => {
+          (cq.sections[sec] || []).forEach(q => {
+            if (q.correct_score  == null) q.correct_score  = CORRECT_SCORE;
+            if (q.negative_score == null) q.negative_score = NEGATIVE_SCORE;
+          });
+          LOCAL_SECTIONS[sec] = cq.sections[sec];
+        });
+        CUSTOM_LOADED = true;
+      }
+    }
+  } catch (e) { console.warn('Custom quiz load failed:', e); }
+
   // ── 🟢 FETCH FROM SUPABASE (questions + config) ──────────────────────────────
-  if (window.MockAPI && MockAPI.configured && quizIdParam) {
+  if (!CUSTOM_LOADED && window.MockAPI && MockAPI.configured && quizIdParam) {
     try {
       const { test, questions } = await MockAPI.getTest(quizIdParam);
 
