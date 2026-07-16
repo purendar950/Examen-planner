@@ -78,13 +78,14 @@ function anGalleryEmpty(){ return `<div class="an-empty"><div class="em">🗂️
 
 /* ── sub-tab + view switching ── */
 function anSwitchView(v){
-  ['gallery','shots','uploads','schedule'].forEach(x => {
+  ['gallery','shots','uploads','schedule','revision'].forEach(x => {
     const view = document.getElementById('an-view-' + x); if (view) view.classList.toggle('active', x === v);
     const btn  = document.getElementById('an-st-' + x);   if (btn)  btn.classList.toggle('active', x === v);
   });
   if (v === 'schedule') anRenderSchedule();
   else if (v === 'shots') anRenderShots();
   else if (v === 'uploads') anRenderUploads();
+  else if (v === 'revision') { if (typeof renderRevisionQueue === 'function') renderRevisionQueue(); }
 }
 
 /* ════════ 📥 TELEGRAM UPLOADS — file manager (folders/subfolders + move) ════════

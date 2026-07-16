@@ -75,7 +75,7 @@
       <!-- ═══ UP NEXT ═══ -->
       <div class="section-title">Up next</div>
       <div class="dash-grid2">
-        <div class="revision-widget" id="revision-dashboard-widget" onclick="switchPage('revision')" style="cursor:pointer;">
+        <div class="revision-widget" id="revision-dashboard-widget" onclick="switchPage('analysis'); if(typeof anSwitchView==='function') anSwitchView('revision');" style="cursor:pointer;">
           <div class="revision-widget-head">
             <div class="revision-widget-title">🔁 Revision Queue</div>
             <div class="revision-widget-stats">

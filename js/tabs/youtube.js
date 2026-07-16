@@ -98,7 +98,7 @@ function ytSingleVideoManageHtml(id) {
     var isOwn = existingPlId === ('vid_' + id);
     return '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:0.75rem;">' +
       '<div style="color:var(--accent);font-weight:600;margin-bottom:6px;">✓ Saved' + (isOwn ? ' as its own course' : ' in course: ' + escapeHtml(pl ? pl.title : 'Course')) + '</div>' +
-      '<button onclick="switchPage(\'yt-organiser\');ytoOpenCourse(\'' + existingPlId + '\')" style="background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,150,0.3);border-radius:8px;padding:5px 12px;font-size:0.72rem;cursor:pointer;font-weight:600;font-family:var(--font);">📂 Manage in Organiser</button>' +
+      '<button onclick="switchPage(\'youtube\');ytSwitchSub(\'organiser\');ytoOpenCourse(\'' + existingPlId + '\')" style="background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,150,0.3);border-radius:8px;padding:5px 12px;font-size:0.72rem;cursor:pointer;font-weight:600;font-family:var(--font);">📂 Manage in Organiser</button>' +
       '</div>';
   }
 
@@ -129,7 +129,29 @@ async function ytManageSaveAsCourse(id) {
   var box = document.querySelector('#yt-video-list [data-yt-manage]');
   if (box) box.innerHTML = '<div style="color:var(--muted);font-size:0.72rem;">Saving…</div>';
   await ytoLoadSingleVideo(id);
-  switchPage('yt-organiser');
+  switchPage('youtube');
+  ytSwitchSub('organiser');
+}
+
+/* ── Watch | Playlist Organiser sub-tab switch (merged YouTube tab) ── */
+function ytSwitchSub(v) {
+  var map = { watch: 'yt-sub-view-watch', organiser: 'page-yt-organiser' };
+  Object.keys(map).forEach(function (x) {
+    var view = document.getElementById(map[x]);
+    if (view) view.classList.toggle('active', x === v);
+    var btn = document.getElementById('yt-sub-' + x);
+    if (btn) btn.classList.toggle('active', x === v);
+  });
+  if (v === 'organiser') {
+    // Same render the old switchPage('yt-organiser') branch used to trigger.
+    try {
+      if (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl) {
+        if (typeof ytoRefreshCourse === 'function') ytoRefreshCourse();
+      } else if (typeof ytoRenderLibrary === 'function') {
+        ytoRenderLibrary();
+      }
+    } catch (e) {}
+  }
 }
 
 /* "Add to existing course" — append this video into a course chosen from

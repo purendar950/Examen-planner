@@ -278,6 +278,7 @@
     <button class="an-subtab" id="an-st-shots" onclick="anSwitchView('shots')">📸 Screenshots</button>
     <button class="an-subtab" id="an-st-uploads" onclick="anSwitchView('uploads')">📥 Uploads</button>
     <button class="an-subtab" id="an-st-schedule" onclick="anSwitchView('schedule')">📊 Scheduled Analysis</button>
+    <button class="an-subtab" id="an-st-revision" onclick="anSwitchView('revision')">🔁 Revision</button>
   </div>
 
   <!-- GALLERY -->
@@ -471,5 +472,36 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- REVISION (merged from former Revision tab) -->
+  <div class="an-view" id="an-view-revision">
+    <div class="section-title">🔁 Revision Queue</div>
+    <p style="color:var(--muted);font-size:0.85rem;margin-bottom:1.25rem;">
+      Spaced repetition: chapters automatically reschedule based on how well you remember them.
+    </p>
+    <div class="stats-grid" style="margin-bottom:1.25rem;">
+      <div class="stat-card">
+        <div class="stat-icon icon-amber">⏰</div>
+        <div class="stat-val" id="rev-page-due">0</div>
+        <div class="stat-lbl">Due Today</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon icon-blue">📅</div>
+        <div class="stat-val" id="rev-page-week">0</div>
+        <div class="stat-lbl">This Week</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon icon-purple">🏆</div>
+        <div class="stat-val" id="rev-page-mastered">0</div>
+        <div class="stat-lbl">Mastered</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon icon-green">📈</div>
+        <div class="stat-val" id="rev-page-streak">0</div>
+        <div class="stat-lbl">Rev. Streak</div>
+      </div>
+    </div>
+    <div id="revision-queue-list"></div>
   </div>
 </div>

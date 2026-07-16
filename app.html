@@ -153,20 +153,11 @@
     <div class="nav-tab" onclick="switchPage('syllabus')" id="nav-syllabus">
       <span class="tab-icon">📚</span> Syllabus
     </div>
-    <div class="nav-tab" onclick="switchPage('exam-pattern')" id="nav-exam-pattern">
-      <span class="tab-icon">🎯</span> Exam Pattern
-    </div>
     <div class="nav-tab" onclick="switchPage('planner')" id="nav-planner">
       <span class="tab-icon">📅</span> Planner
     </div>
     <div class="nav-tab" onclick="switchPage('youtube')" id="nav-youtube">
       <span class="tab-icon">&#9654;</span> YouTube
-    </div>
-    <div class="nav-tab" onclick="switchPage('yt-organiser')" id="nav-yt-organiser">
-      <span class="tab-icon" style="color:#FF4444;">&#128203;</span> Playlist Organiser
-    </div>
-    <div class="nav-tab" onclick="switchPage('revision')" id="nav-revision">
-      <span class="tab-icon" style="color:#A855F7;">🔁</span> Revision
     </div>
     <div class="nav-tab" onclick="switchPage('analysis')" id="nav-analysis">
       <span class="tab-icon" style="color:#3B82F6;">📈</span> Analysis
@@ -193,21 +184,14 @@
 
     <!-- ═══ DASHBOARD PAGE ═══ -->
     <div data-include="pages/dashboard.html"></div>
-    <!-- ═══ SYLLABUS PAGE ═══ -->
-    <div data-include="pages/syllabus.html"></div>
-    <!-- ═══ EXAM PATTERN PAGE ═══ -->
-    <div data-include="pages/exam-pattern.html"></div>
+    <!-- ═══ SYLLABUS PAGE (includes Exam Pattern sub-tab) ═══ -->
+    <div data-include="pages/syllabus.html?v=20260716a"></div>
     <!-- ═══ PLANNER PAGE ═══ -->
-    <!-- ═══ REVISION PAGE ═══ -->
-    <div data-include="pages/revision.html"></div>
-
     <div data-include="pages/planner.html"></div>
-    <!-- ═══ YOUTUBE PAGE ═══ -->
-    <div data-include="pages/youtube.html?v=20260624b"></div>
-    <!-- ═══ YOUTUBE PLAYLIST ORGANISER PAGE ═══ -->
-    <div data-include="pages/yt-organiser.html"></div>
-    <!-- ═══ ANALYSIS PAGE ═══ -->
-    <div data-include="pages/analysis.html?v=20260711b"></div>
+    <!-- ═══ YOUTUBE PAGE (includes Playlist Organiser sub-tab) ═══ -->
+    <div data-include="pages/youtube.html?v=20260716a"></div>
+    <!-- ═══ ANALYSIS PAGE (includes Revision sub-tab) ═══ -->
+    <div data-include="pages/analysis.html?v=20260716a"></div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->

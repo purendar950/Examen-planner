@@ -54,6 +54,8 @@ function switchPage(page) {
     try { renderPaceTrackerCard(); } catch(e) {} // Feature 5
     try { refreshPlannerBadges(); }       catch(e) {} // refresh phase badge
   }
-  if (targetPage === 'revision') renderRevisionQueue();
+  // Revision moved into Analysis as a sub-tab — it renders via
+  // anSwitchView('revision'); Analysis has its own switchPage hook (analysis.js)
+  // that calls anRender() on open, so nothing extra is needed here.
 }
 
