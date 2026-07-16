@@ -2654,6 +2654,132 @@ def _group_route(chat_id):
     return None
 
 
+# ── Question-report relay ─────────────────────────────────────────────────
+#   The quiz engine's "🚩 Report" button POSTs the report here. We read the
+#   report bot token + channel id from Firestore config/reports (managed in the
+#   admin panel) and post to Telegram server-side, so the token is NEVER
+#   exposed in the browser. Mirrors the /send-photo pattern.
+_report_rate = {}          # user key -> [timestamps]
+_report_rate_lock = threading.Lock()
+
+
+def _report_rate_limited(key, limit=8, window=60):
+    now = time.time()
+    with _report_rate_lock:
+        hits = [t for t in _report_rate.get(key, []) if now - t < window]
+        hits.append(now)
+        _report_rate[key] = hits
+        return len(hits) > limit
+
+
+def _report_config():
+    """Return (botToken, chatId) for question reports from Firestore
+    config/reports. Falls back to env vars REPORT_BOT_TOKEN / REPORT_CHAT_ID."""
+    tok = os.environ.get("REPORT_BOT_TOKEN", "").strip()
+    chat = os.environ.get("REPORT_CHAT_ID", "").strip()
+    if tok and chat:
+        return tok, chat
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("reports").get()
+            if doc.exists:
+                d = doc.to_dict() or {}
+                tok = tok or (d.get("botToken") or "").strip()
+                chat = chat or str(d.get("chatId") or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("report config read failed: %s", exc)
+    return tok, chat
+
+
+def _html_escape(s):
+    return (str(s or "")
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+@app.post("/report")
+def api_report():
+    data = request.get_json(silent=True) or {}
+    reason  = (data.get("reason") or "").strip()
+    details = (data.get("details") or "").strip()
+    quiz_id = (data.get("quizId") or "").strip()
+    q_id    = str(data.get("questionId") or "").strip()
+
+    if not reason or not details:
+        return jsonify({"ok": False, "error": "reason and details required"}), 400
+    if not quiz_id or not q_id:
+        return jsonify({"ok": False, "error": "quizId and questionId required"}), 400
+
+    rate_key = (data.get("userEmail") or request.remote_addr or "anon")
+    if _report_rate_limited(rate_key):
+        return jsonify({"ok": False, "error": "Too many reports — ek minute baad try karo."}), 429
+
+    token, chat_id = _report_config()
+    if not token or not chat_id:
+        return jsonify({"ok": False, "error": "report channel not configured (config/reports)"}), 500
+
+    quiz_title  = data.get("quizTitle") or ""
+    user_name   = data.get("userName") or "Unknown"
+    user_email  = data.get("userEmail") or "Unknown"
+    report_link = data.get("reportLink") or ""
+    path        = (data.get("path") or "").strip()
+
+    # Deep links into the question editor (Chrome + Telegram mini app), mirroring
+    # what the engine used to build client-side.
+    chrome_link = "https://mmh-master-editor.pages.dev/?id=%s&path=%s&qid=%s" % (quiz_id, path, q_id)
+    encoded_path = path.replace("/", "_") if path else "others"
+    mini_link = "http://t.me/MMH_QUESTION_EDITOR_BOT/MMH_MASTER_EDITOR?startapp=%s__%s__%s" % (quiz_id, encoded_path, q_id)
+
+    message = (
+        "<b>🚨 NEW QUESTION REPORT 🚨</b>\n\n"
+        "<b>📌 Quiz:</b> <code>%s</code>\n"
+        "<b>🆔 Q-ID:</b> <code>%s</code>\n"
+        "<b>📝 Title:</b> %s\n"
+        "<b>👤 User:</b> %s\n"
+        "<b>📧 Email:</b> %s\n\n"
+        "<b>🚩 Reason:</b> %s\n"
+        "<b>💬 Details:</b> %s\n\n"
+        "<b>🔗 Link:</b> %s\n\n"
+        "--------------------------\n"
+        "⚡ <i>Submitted via Report Channel</i>"
+    ) % (
+        _html_escape(quiz_id), _html_escape(q_id), _html_escape(quiz_title),
+        _html_escape(user_name), _html_escape(user_email),
+        _html_escape(reason), _html_escape(details), _html_escape(report_link),
+    )
+
+    data_bundle = "%s:%s" % (q_id, quiz_id)
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML",
+        "reply_markup": {
+            "inline_keyboard": [
+                [{"text": "✅ Fixed & Notify", "callback_data": "f:" + data_bundle}],
+                [{"text": "❌ Already Correct", "callback_data": "c:" + data_bundle}],
+                [{"text": "🌐 Open in Chrome", "url": chrome_link}],
+                [{"text": "📱 Open in Mini App", "url": mini_link}],
+            ]
+        },
+    }
+
+    try:
+        r = requests.post(
+            "https://api.telegram.org/bot%s/sendMessage" % token,
+            json=payload,
+            timeout=REQUEST_TIMEOUT,
+        )
+        j = r.json()
+        if not j.get("ok"):
+            return jsonify({"ok": False, "error": j.get("description") or ("HTTP " + str(r.status_code))}), 400
+        log.info("report → %s (quiz=%s q=%s)", chat_id, quiz_id, q_id)
+        return jsonify({"ok": True})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("report relay failed: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)[:200]}), 502
+
+
 @app.post("/send-photo")
 def api_send_photo():
     data = request.get_json(silent=True) or {}

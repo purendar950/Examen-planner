@@ -154,6 +154,18 @@ function getDefaultState() {
 
 function loginUser(email, name, uid, state) {
   currentUser = { email, name, uid };
+
+  /* Bridge identity to the standalone quiz engine (test-engine.html).
+     The engine reads these localStorage keys to tag saved questions and
+     quiz attempts to the right user, so a question saved in the engine
+     shows up on the Saved Questions page here. Same-origin localStorage is
+     shared between app.html and test-engine.html. */
+  try {
+    if (uid)   localStorage.setItem('ez_user_uid', uid);
+    if (email) localStorage.setItem('ez_user_email', email);
+    if (name)  localStorage.setItem('ez_user_name', name);
+  } catch (e) {}
+
   appState = { ...getDefaultState(), ...state };
   if (!appState.progress)  appState.progress  = {};
   if (!appState.tasks)     appState.tasks      = {};
@@ -206,6 +218,14 @@ async function handleLogout() {
   window._ezLoggingOut = true;
 
   if (auth && _fbReady) await auth.signOut().catch(()=>{});
+
+  /* Clear the engine identity bridge so the next user on this device does not
+     inherit the previous user's saved-questions / attempt tagging. */
+  try {
+    localStorage.removeItem('ez_user_uid');
+    localStorage.removeItem('ez_user_email');
+    localStorage.removeItem('ez_user_name');
+  } catch (e) {}
 
   // ── Reset all per-user plan/admin state ──
   if (typeof _ezIsAdminCache !== 'undefined') _ezIsAdminCache = null;

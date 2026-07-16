@@ -46,6 +46,7 @@ function switchPage(page) {
   rememberActivePage(targetPage);
 
   if (targetPage === 'dashboard') updateDashboard();
+  if (targetPage === 'saved' && typeof loadSavedQuestions === 'function') loadSavedQuestions();
   if (targetPage === 'planner') {
     buildPlannerCalendar();
     try { syncRolloverToggle(); }    catch(e) {} // reflect auto-rollover setting

@@ -9,6 +9,10 @@ let USERS = [], PLANS = [], PAYMENTS = [], REQUESTS = [], COUPONS = [], REDEMPTI
 let CONFIG = {}, SETTINGS = { requireApproval: false };
 let DUP = { mobile:{}, fp:{}, ip:{} };
 let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = false;
+/* Question-report channel config (Firestore config/reports) — the quiz engine's
+   "🚩 Report" button posts here via the proxy. Separate bot/channel from the
+   study-planner bot above, so it has its own token + chatId. */
+let REPORT_CONFIG = { botToken: '', chatId: '', channelName: '', inviteLink: '', loaded: false };
 /* AI Study usage limits + admin-granted unlimited users (Firestore config/aiLimits),
    read by youtube-turbo-proxy to rate-limit /api/study + /api/tutor. */
 let AI_LIMITS = { unlimited: {}, unlimitedEmails: [], focusUsers: {}, focusEmails: [], studyPerHour: 15, tutorPerHour: 20, tutorPerDay: 80, loaded: false };

@@ -445,6 +445,11 @@ async function loadTelegramData() {
     const snap = await db.collection('config').doc('telegram').get();
     TG_CONFIG = { ...(snap.exists ? snap.data() : {}), loaded: true };
   } catch(e) { TG_CONFIG = { loaded: true }; }
+  /* Load question-report channel config (config/reports) */
+  try {
+    const rsnap = await db.collection('config').doc('reports').get();
+    REPORT_CONFIG = { botToken:'', chatId:'', channelName:'', inviteLink:'', ...(rsnap.exists ? rsnap.data() : {}), loaded: true };
+  } catch(e) { REPORT_CONFIG = { botToken:'', chatId:'', channelName:'', inviteLink:'', loaded: true }; }
   /* Load AI (Groq) auto-schedule config */
   try {
     const aiSnap = await db.collection('config').doc('ai').get();
@@ -490,6 +495,43 @@ async function saveTgBotToken() {
     await db.collection('config').doc('telegram').set({ botToken: token, savedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
     TG_CONFIG.botToken = token;
     showToast('✅ Bot token saved!');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
+/* Save the QUESTION-REPORT channel config to Firestore (config/reports).
+   The quiz engine's "🚩 Report" button POSTs reports to the proxy /report
+   endpoint, which reads the botToken from here SERVER-SIDE (never exposed to
+   the browser) and posts to the chatId below. Admin-only write per Firestore
+   rules. channelName + inviteLink are display-only conveniences. */
+async function saveReportConfig() {
+  const tokEl  = document.getElementById('rep-token-input');
+  const chatEl = document.getElementById('rep-chatid-input');
+  const nameEl = document.getElementById('rep-name-input');
+  const linkEl = document.getElementById('rep-link-input');
+  if (!tokEl || !chatEl) return;
+
+  const token = tokEl.value.trim();
+  const chatId = chatEl.value.trim();
+  const channelName = (nameEl && nameEl.value.trim()) || '';
+  const inviteLink  = (linkEl && linkEl.value.trim()) || '';
+
+  if (token && !/^\d+:/.test(token)) { showToast('⚠️ Valid bot token daalo (format: 123456:ABC-xyz)'); return; }
+  if (chatId && !/^-?\d+$/.test(chatId)) { showToast('⚠️ Chat ID numeric hona chahiye (e.g. -1001234567890)'); return; }
+
+  try {
+    await db.collection('config').doc('reports').set({
+      botToken: token,
+      chatId: chatId,
+      channelName: channelName,
+      inviteLink: inviteLink,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    REPORT_CONFIG.botToken = token;
+    REPORT_CONFIG.chatId = chatId;
+    REPORT_CONFIG.channelName = channelName;
+    REPORT_CONFIG.inviteLink = inviteLink;
+    showToast('✅ Report channel config saved!');
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }
@@ -1206,6 +1248,46 @@ function renderTelegram() {
     '</div>' +
     '<div id="tg-token-show" class="muted" style="font-size:.72rem;margin-top:4px;">' + (TG_CONFIG.botToken ? '✅ Token saved in Firestore' : '⚠️ Token nahi set hai — Send Now kaam nahi karega') + '</div>' +
     '<div class="muted" style="font-size:.72rem;margin-top:6px;">💡 Token sirf Firestore mein store hoga (config/telegram) — code mein nahi. GitHub Secrets mein bhi alag se add karo daily cron ke liye.</div>' +
+    '</div>';
+
+  /* ── Question Report Channel Card ── */
+  var repTokenSet  = REPORT_CONFIG && REPORT_CONFIG.botToken ? true : false;
+  var repChatSet   = REPORT_CONFIG && REPORT_CONFIG.chatId ? true : false;
+  s += '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">🚩 Question Report Channel</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;line-height:1.6;">' +
+      'Jab user quiz engine mein kisi question pe <b>Report</b> dabata hai, wo report is Telegram channel mein aati hai. ' +
+      'Token sirf server (proxy) padhta hai — browser mein kabhi expose nahi hoga.' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+      '<input id="rep-token-input" type="password" placeholder="Report Bot Token (123456:ABC-xyz)" ' +
+        'value="' + esc(REPORT_CONFIG.botToken || '') + '" ' +
+        'style="flex:1;min-width:240px;font-family:monospace;font-size:.82rem;">' +
+      '<button class="btn btn-gray" onclick="var i=document.getElementById(\'rep-token-input\');i.type=i.type===\'password\'?\'text\':\'password\';">👁 Show/Hide</button>' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+      '<input id="rep-chatid-input" type="text" placeholder="Channel Chat ID (e.g. -1001234567890)" ' +
+        'value="' + esc(REPORT_CONFIG.chatId || '') + '" ' +
+        'style="flex:1;min-width:220px;font-family:monospace;font-size:.82rem;">' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">' +
+      '<input id="rep-name-input" type="text" placeholder="Channel Name (label, optional)" ' +
+        'value="' + esc(REPORT_CONFIG.channelName || '') + '" ' +
+        'style="flex:1;min-width:200px;font-size:.82rem;">' +
+      '<input id="rep-link-input" type="text" placeholder="Invite Link (optional)" ' +
+        'value="' + esc(REPORT_CONFIG.inviteLink || '') + '" ' +
+        'style="flex:1;min-width:200px;font-size:.82rem;">' +
+    '</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
+      '<button class="btn btn-blue" onclick="saveReportConfig()">💾 Save Report Channel</button>' +
+      (REPORT_CONFIG.inviteLink ? '<a class="btn btn-gray" href="' + esc(REPORT_CONFIG.inviteLink) + '" target="_blank">🔗 Open Channel</a>' : '') +
+    '</div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:8px;">' +
+      (repTokenSet ? '✅ Report bot token saved' : '⚠️ Report bot token not set') + ' · ' +
+      (repChatSet ? '✅ Chat ID set' : '⚠️ Chat ID not set') +
+      (REPORT_CONFIG.channelName ? ' · channel: <b>' + esc(REPORT_CONFIG.channelName) + '</b>' : '') + '<br>' +
+      'ℹ️ Stored in Firestore <code>config/reports</code>. Proxy <code>/report</code> endpoint isse padhta hai.' +
+    '</div>' +
     '</div>';
 
   /* ── AI Auto-Schedule (Groq) Card ── */

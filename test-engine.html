@@ -42,6 +42,8 @@
 <!-- 🟢 Supabase: question source + attempt storage (window._supabase, window.MockAPI) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="js/supabase-config.js"></script>
+<!-- 🔖 Saved questions store (Supabase-backed, shared with the app) -->
+<script src="js/saved-questions.js"></script>
 
 <style>
 
@@ -3412,9 +3414,10 @@ async function saveQuestion() {
 
   if (saveBtn.disabled) return;
 
-  // Get current saves from Local Storage
+  // Get current saves from Local Storage (fast UI state; source of truth is Supabase)
   let localSaves = JSON.parse(localStorage.getItem(storageKey) || "{}");
   const isAlreadySaved = localSaves[uniqueKey];
+  const hasStore = window.SavedQuestions && SavedQuestions.available();
 
   // --- CASE A: UNSAVE THE QUESTION ---
   if (isAlreadySaved) {
@@ -3425,10 +3428,11 @@ async function saveQuestion() {
       saveBtn.disabled = true;
       saveBtn.style.opacity = "0.6";
 
-      // 1. Remove from Common Firebase Project
-      await savedDb.ref(`saved_questions/${USER_EMAIL_KEY}/${uniqueKey}`).remove();
+      // 1. Remove from Supabase (cloud, cross-device)
+      const ok = hasStore ? await SavedQuestions.remove(uniqueKey) : true;
+      if (!ok) throw new Error("cloud remove failed");
 
-      // 2. Remove from Local Storage
+      // 2. Remove from Local Storage cache
       delete localSaves[uniqueKey];
       localStorage.setItem(storageKey, JSON.stringify(localSaves));
 
@@ -3451,11 +3455,15 @@ async function saveQuestion() {
     saveBtn.disabled = true;
     saveBtn.style.opacity = "0.6";
 
-    await savedDb.ref(`saved_questions/${USER_EMAIL_KEY}/${uniqueKey}`).set({
-      quiz_id: QUIZ_ID,
-      question_data: q,
-      saved_at: Date.now()
-    });
+    // Persist the full question to Supabase so the app can display it later.
+    const ok = hasStore ? await SavedQuestions.save({
+      testId:       QUIZ_ID,
+      questionId:   q.id,
+      quizTitle:    QUIZ_TITLE,
+      questionData: q
+    }) : false;
+
+    if (!ok) throw new Error("cloud save failed");
 
     localSaves[uniqueKey] = true;
     localStorage.setItem(storageKey, JSON.stringify(localSaves));
@@ -3492,9 +3500,12 @@ function showSavePopup(message) {
     }, 1500); // 1.5 Seconds
   }
 
-  // 🚩 TELEGRAM CONFIG (Replace with your actual data)
-const TG_BOT_TOKEN = "8100840733:AAHixK1uKS16GJPLq3eeNa2UanhfBR6inak"; 
-const TG_CHAT_ID = "-1003993346447"; 
+  // 🚩 REPORTS: sent via the secure server-side proxy (token lives in Firestore
+  // config/reports, managed from the admin panel — never exposed here).
+const REPORT_PROXY_URL = (function(){
+  try { return (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, ''); }
+  catch (e) { return 'https://youtube-turbo-proxy.onrender.com'; }
+})();
 
 // 1. Control Modal Visibility
 function showReportModal() {
@@ -3532,24 +3543,10 @@ async function submitReport() {
   const q = QUESTIONS[current];
   const reportLink = window.location.href; // Captures exact URL including quiz ID
 
-  
   const urlParams = new URLSearchParams(window.location.search);
   const quizIdParam = urlParams.get('id');
-  // 1. Define variables for Deep Links
-  // We use the global QUIZ_ID and GITHUB_PATH defined at the top of your template
-  const reportQuizId = quizIdParam; 
-  const reportPath = GITHUB_PATH; 
-  const reportQId = q.id;
 
-  // 2. Build Deep Links for Editor
-  const chromeEditorLink = `https://mmh-master-editor.pages.dev/?id=${reportQuizId}&path=${reportPath}&qid=${reportQId}`;
-  
-  // Encode path for Telegram (replacing slashes with underscores)
-  const encodedPathForTG = reportPath ? reportPath.replace(/\//g, '_') : "others";
-  const miniAppLink = `http://t.me/MMH_QUESTION_EDITOR_BOT/MMH_MASTER_EDITOR?startapp=${reportQuizId}__${encodedPathForTG}__${reportQId}`;
-  
-
-   // 2. Get User Email and Details
+  // Get User Email
   const profile = typeof getLocalProfile === 'function' ? getLocalProfile() : null;
   const userEmail = profile ? (profile.email || profile.username) : "Unknown User";
 
@@ -3557,55 +3554,38 @@ async function submitReport() {
     submitBtn.disabled = true;
     submitBtn.innerText = "Submitting...";
 
-    // 3. Structured HTML Message (The Edge Function will "read" this)
-    const message = `<b>🚨 NEW QUESTION REPORT 🚨</b>\n\n` +
-                    `<b>📌 Quiz:</b> <code>${QUIZ_ID}</code>\n` +
-                    `<b>🆔 Q-ID:</b> <code>${q.id}</code>\n` +
-                    `<b>📝 Title:</b> ${QUIZ_TITLE}\n` +
-                    `<b>👤 User:</b> ${USER_DISPLAY_NAME}\n` +
-                    `<b>📧 Email:</b> ${userEmail}\n\n` + 
-                    `<b>🚩 Reason:</b> ${finalReason}\n` +
-                    `<b>💬 Details:</b> ${details}\n\n` +
-                    `<b>🔗 Link:</b> ${reportLink}\n\n` +
-                    `<b>🔄 What Changed:</b> \n\n` +
-                    `--------------------------\n` +
-                    `⚡ <i>Submitted via Admin Support Bot</i>`;
-
-    // 4. Compact Data Bundle (STRICTLY for IDs to avoid 64-char limit)
-    const dataBundle = `${q.id}:${QUIZ_ID}`;
-    const url = `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`;
-    
-    // 🔥 FIXED: Added "const response =" here
-    const response = await fetch(url, {
+    // Send to the secure proxy. The proxy reads the report bot token + channel
+    // id from Firestore (config/reports, set in the admin panel) and posts to
+    // Telegram server-side — the token is never present in this page.
+    const response = await fetch(`${REPORT_PROXY_URL}/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chat_id: TG_CHAT_ID,
-        text: message,
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [
-            [ { text: "✅ Fixed & Notify", callback_data: `f:${dataBundle}` } ],
-            [ { text: "❌ Already Correct", callback_data: `c:${dataBundle}` } ],
-            [ { text: "🌐 Open in Chrome", url: chromeEditorLink } ],
-            [ { text: "📱 Open in Mini App", url: miniAppLink } ]
-          ]
-
-        }
+        reason:     finalReason,
+        details:    details,
+        quizId:     QUIZ_ID,
+        questionId: q.id,
+        quizTitle:  QUIZ_TITLE,
+        userName:   USER_DISPLAY_NAME,
+        userEmail:  userEmail,
+        reportLink: reportLink,
+        path:       (typeof GITHUB_PATH !== 'undefined' ? GITHUB_PATH : '')
       })
     });
 
-    if (response.ok) {
-      showSavePopup("✓ Report Submitted Successfully!"); 
+    let ok = response.ok;
+    try { const j = await response.json(); ok = ok && j && j.ok; } catch (e) {}
+
+    if (ok) {
+      showSavePopup("✓ Report Submitted Successfully!");
       hideReportModal();
     } else {
-      throw new Error("Telegram API Error");
+      throw new Error("Report proxy error");
     }
-    
 
   } catch (err) {
     console.error(err);
-    alert("Submission Failed. Check internet or Bot Token.");
+    alert("Submission Failed. Check your internet connection and try again.");
   } finally {
     submitBtn.disabled = false;
     submitBtn.innerText = "Submit Request";
