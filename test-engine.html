@@ -3897,7 +3897,7 @@ sectionalTableHtml += `</table></div></div>`;
       <div class="analysis-container">
         <div style="margin-bottom: 10px;">
           <button class="btn-dash btn-outline" style="width: 100%; background: #ffffff; color: #333; border: 2px solid #333; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="showHomeScreen()">
-            <span style="font-size: 18px;">⬅</span> GO TO ALL TESTS
+            <span style="font-size: 18px;">⬅</span> ${isCustomQuiz() ? 'BACK TO VIDEO' : 'GO TO ALL TESTS'}
           </button>
         </div>
 
@@ -5547,8 +5547,38 @@ async function loadQuizData() {
   let TIME_PER_SECTION = 15 * 60;            // default seconds per section
   const SECTION_TIME_MAP = {};               // sectionName -> seconds (from Supabase)
 
+  // ── 🎯 CUSTOM QUIZ (from AI Study "Take as Test" — js/features/ai-tutor.js) ──
+  // The AI Study panel converts its generated MCQs (comprehensive MCQ notes or
+  // the Quiz tab) into this shape and stores it in localStorage, keyed by the
+  // ?id= so multiple custom quizzes never collide. When present we SKIP Supabase
+  // and run these questions through the full engine (sections, timer, palette,
+  // solutions & analysis) exactly like any other test.
+  let CUSTOM_LOADED = false;
+  try {
+    const _customRaw = localStorage.getItem('ez_custom_quiz_' + quizIdParam)
+                    || localStorage.getItem('ez_custom_quiz');
+    if (_customRaw) {
+      const cq = JSON.parse(_customRaw);
+      if (cq && cq.sections && Object.keys(cq.sections).length) {
+        QUIZ_TITLE     = cq.title || QUIZ_TITLE;
+        QUIZ_ID        = cq.id || QUIZ_ID;
+        CORRECT_SCORE  = (cq.correct_score  != null) ? Number(cq.correct_score)  : CORRECT_SCORE;
+        NEGATIVE_SCORE = (cq.negative_score != null) ? Number(cq.negative_score) : NEGATIVE_SCORE;
+        TIME_PER_SECTION = (cq.time_min ? Number(cq.time_min) : 15) * 60;
+        Object.keys(cq.sections).forEach(sec => {
+          (cq.sections[sec] || []).forEach(q => {
+            if (q.correct_score  == null) q.correct_score  = CORRECT_SCORE;
+            if (q.negative_score == null) q.negative_score = NEGATIVE_SCORE;
+          });
+          LOCAL_SECTIONS[sec] = cq.sections[sec];
+        });
+        CUSTOM_LOADED = true;
+      }
+    }
+  } catch (e) { console.warn('Custom quiz load failed:', e); }
+
   // ── 🟢 FETCH FROM SUPABASE (questions + config) ──────────────────────────────
-  if (window.MockAPI && MockAPI.configured && quizIdParam) {
+  if (!CUSTOM_LOADED && window.MockAPI && MockAPI.configured && quizIdParam) {
     try {
       const { test, questions } = await MockAPI.getTest(quizIdParam);
 
@@ -5900,7 +5930,33 @@ function showQuizPage() {
   });
 }
 
+// A custom quiz (from the AI Study "Take as Test" / MCQ demo) is opened in a NEW
+// TAB and has no place in the topic-picker home. Detect it so "Back / Go to all
+// tests" can return to the app instead of showing the empty Mock Test screen.
+function isCustomQuiz() {
+  try {
+    if (!quizIdParam) return false;
+    if (localStorage.getItem('ez_custom_quiz_' + quizIdParam)) return true;
+    if (quizIdParam.indexOf('EZ-CUSTOM') === 0 && localStorage.getItem('ez_custom_quiz')) return true;
+  } catch (e) {}
+  return false;
+}
+// Return to wherever this tab was opened from (the YouTube tab in the app, or the
+// demo). The engine is launched via window.open, so closing this tab hands focus
+// back. If closing is blocked (tab wasn't script-opened), fall back to navigating.
+function returnToApp() {
+  try { window.close(); } catch (e) {}
+  setTimeout(function () {
+    if (document.hidden) return;   // tab actually closed
+    var ref = document.referrer;
+    if (ref && /^https?:/i.test(ref) && ref.indexOf('test-engine') === -1) window.location.href = ref;
+    else window.location.href = 'index.html';
+  }, 200);
+}
+
 function showHomeScreen() {
+  // Custom quizzes never show the topic picker — go back to the app instead.
+  if (isCustomQuiz()) { returnToApp(); return; }
   // Reset quiz state display
   document.getElementById('welcomeScreen').style.display = 'none';
   if (document.getElementById('mainHeader')) document.getElementById('mainHeader').style.display = 'none';
