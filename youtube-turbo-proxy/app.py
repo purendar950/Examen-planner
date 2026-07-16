@@ -2748,7 +2748,14 @@ def api_report():
         _html_escape(reason), _html_escape(details), _html_escape(report_link),
     )
 
-    keyboard = []
+    # ✅ Fixed & Notify / ❌ Already Correct — resolve the report right from the
+    # channel. These are callback buttons handled by /report-webhook (which
+    # updates the report's status in Supabase). callback_data = "<f|c>:<q>:<quiz>".
+    data_bundle = "%s:%s" % (q_id, quiz_id)
+    keyboard = [
+        [{"text": "✅ Fixed & Notify", "callback_data": ("f:" + data_bundle)[:64]}],
+        [{"text": "❌ Already Correct", "callback_data": ("c:" + data_bundle)[:64]}],
+    ]
     # 🌐 Open in Chrome — the StudyPlanner editor as a normal browser page.
     # Telegram rejects non-https button URLs, so only add when https.
     if editor_url.startswith("https://"):
@@ -2788,6 +2795,86 @@ def api_report():
     except Exception as exc:  # noqa: BLE001
         log.warning("report relay failed: %s", exc)
         return jsonify({"ok": False, "error": str(exc)[:200]}), 502
+
+
+# StudyPlanner Supabase (public anon key — RLS-protected). Used to update a
+# report's status when an admin taps ✅ Fixed / ❌ Already Correct in Telegram.
+REPORT_SUPA_URL  = os.environ.get("REPORT_SUPA_URL", "https://deefmrmmjlknotzpceqp.supabase.co").rstrip("/")
+REPORT_SUPA_ANON = os.environ.get("REPORT_SUPA_ANON",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlZWZtcm1tamxrbm90enBjZXFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMTMwNzMsImV4cCI6MjA5OTc4OTA3M30.53-6HdN8umsqrHsaoSNX-o1VFdJbZdN6_mnYZ1bCN8A")
+
+
+def _update_report_status(quiz_id, q_id, status):
+    """PATCH question_reports.status in Supabase for a quiz+question."""
+    import urllib.parse
+    key = "%s_%s" % (quiz_id, q_id)
+    url = "%s/rest/v1/question_reports?unique_key=eq.%s" % (REPORT_SUPA_URL, urllib.parse.quote(key, safe=""))
+    try:
+        r = requests.patch(url, headers={
+            "apikey": REPORT_SUPA_ANON,
+            "Authorization": "Bearer " + REPORT_SUPA_ANON,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal",
+        }, json={"status": status}, timeout=REQUEST_TIMEOUT)
+        return r.status_code < 300
+    except Exception as exc:  # noqa: BLE001
+        log.warning("report status update failed: %s", exc)
+        return False
+
+
+@app.post("/report-webhook")
+def api_report_webhook():
+    """Telegram webhook for the report bot. Handles the ✅ Fixed / ❌ Already
+    Correct callback buttons: updates the report status in Supabase and
+    acknowledges the tap. Point the report bot's webhook here once:
+      https://api.telegram.org/bot<TOKEN>/setWebhook?url=<proxy>/report-webhook
+    """
+    # Optional shared-secret check (set the same value via setWebhook's
+    # secret_token param and the REPORT_WEBHOOK_SECRET env var).
+    secret = os.environ.get("REPORT_WEBHOOK_SECRET", "").strip()
+    if secret and request.headers.get("X-Telegram-Bot-Api-Secret-Token", "") != secret:
+        return jsonify({"ok": False}), 403
+
+    update = request.get_json(silent=True) or {}
+    cq = update.get("callback_query")
+    if not cq:
+        return jsonify({"ok": True})  # ignore non-callback updates
+
+    token = _report_config()["botToken"]
+    cq_id = cq.get("id")
+    data = cq.get("data") or ""
+    msg = cq.get("message") or {}
+    chat = (msg.get("chat") or {}).get("id")
+    msg_id = msg.get("message_id")
+
+    toast = "Done"
+    try:
+        action, rest = data.split(":", 1)
+        q_id, quiz_id = rest.split(":", 1)
+        if action == "f":
+            _update_report_status(quiz_id, q_id, "fixed"); toast = "✅ Marked as fixed"
+        elif action == "c":
+            _update_report_status(quiz_id, q_id, "dismissed"); toast = "❌ Marked already correct"
+    except Exception:  # noqa: BLE001
+        toast = "Could not process"
+
+    if token and cq_id:
+        try:
+            requests.post("https://api.telegram.org/bot%s/answerCallbackQuery" % token,
+                          json={"callback_query_id": cq_id, "text": toast}, timeout=REQUEST_TIMEOUT)
+        except Exception:  # noqa: BLE001
+            pass
+        # Append the resolution to the message (best-effort; keeps a record).
+        if chat and msg_id and msg.get("text"):
+            try:
+                requests.post("https://api.telegram.org/bot%s/editMessageText" % token,
+                              json={"chat_id": chat, "message_id": msg_id,
+                                    "text": msg.get("text") + "\n\n" + toast + " by admin"},
+                              timeout=REQUEST_TIMEOUT)
+            except Exception:  # noqa: BLE001
+                pass
+
+    return jsonify({"ok": True})
 
 
 @app.post("/send-photo")
