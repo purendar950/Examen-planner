@@ -10,7 +10,11 @@ const legacyDirectories = ['css', 'js', 'pages', 'demo'];
 // would try to bundle its <script src="js/supabase-config.js"> (an optional file
 // that may be absent) and fail the build. Copying keeps it working standalone and
 // makes it reachable at /Examen-planner/test-engine.html in production.
-const legacyFiles = ['PrepPath.png', 'test-engine.html'];
+// editor.html is the standalone StudyPlanner question editor (opened from the
+// Telegram report buttons, in a browser or as a Telegram Mini App). Like
+// test-engine.html it is self-contained (inline JS + CDN + relative legacy js),
+// so it is copied as-is rather than added as a Vite bundle entry.
+const legacyFiles = ['PrepPath.png', 'test-engine.html', 'editor.html'];
 
 function copyLegacyStaticAssets() {
   return {

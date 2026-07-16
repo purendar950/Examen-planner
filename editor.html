@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="robots" content="noindex" />
+<title>StudyPlanner — Question Editor</title>
+
+<!-- Telegram Mini App SDK (no-op / undefined outside Telegram) -->
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<!-- Supabase + shared reports/corrections store -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/question-fix.js"></script>
+
+<style>
+  :root{
+    --bg:#f5f7fa; --card:#ffffff; --text:#1a1a1a; --muted:#6c757d;
+    --border:#e0e0e0; --accent:#0b5ed7; --green:#198754; --red:#dc3545;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Inter",Segoe UI,Roboto,sans-serif;
+    background:var(--bg); color:var(--text); padding:14px; line-height:1.5;
+  }
+  .wrap{max-width:640px; margin:0 auto;}
+  .card{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px;}
+  h1{font-size:1.15rem; margin:0 0 4px;}
+  .sub{font-size:.76rem; color:var(--muted);}
+  .meta{font-size:.74rem; color:var(--muted); margin:6px 0 0;}
+  .reason{font-size:.85rem; margin-top:6px;}
+  .reason b{color:var(--red);}
+  label{display:block; font-weight:700; font-size:.85rem; margin:12px 0 4px;}
+  .langrow{display:flex; gap:8px; flex-wrap:wrap;}
+  .langcol{flex:1; min-width:200px;}
+  .langlbl{font-size:.66rem; color:var(--muted); margin-bottom:2px;}
+  input,textarea,select{
+    width:100%; font-family:inherit; font-size:.9rem; padding:8px 10px;
+    border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text);
+  }
+  textarea{resize:vertical;}
+  .opt{border:1px solid var(--border); border-radius:10px; padding:10px; margin-bottom:10px;}
+  .opt.correct{border-color:rgba(25,135,84,.5); background:rgba(25,135,84,.07);}
+  .opt-h{font-weight:700; font-size:.82rem; margin-bottom:5px;}
+  .btn{
+    display:inline-flex; align-items:center; gap:6px; justify-content:center;
+    padding:11px 16px; border:none; border-radius:10px; font-size:.9rem; font-weight:700;
+    cursor:pointer; font-family:inherit;
+  }
+  .btn-primary{background:var(--green); color:#fff; width:100%;}
+  .btn-primary:disabled{opacity:.6; cursor:default;}
+  .actions{margin-top:16px;}
+  .state{text-align:center; padding:40px 16px; color:var(--muted);}
+  .state.err{color:var(--red);}
+  .toast{
+    position:fixed; left:50%; bottom:22px; transform:translateX(-50%);
+    background:#222; color:#fff; padding:11px 18px; border-radius:10px; font-size:.85rem; z-index:99;
+    box-shadow:0 6px 20px rgba(0,0,0,.25);
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#121212; --card:#1e1e1e; --text:#e8e8e8; --muted:#9aa0a6; --border:#3a3a3a; }
+    input,textarea,select{ background:#2a2a2a; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>🛠 StudyPlanner Question Editor</h1>
+    <div class="sub">Fix a reported question. Your correction is applied to the live quiz for everyone.</div>
+    <div class="meta" id="metaLine"></div>
+    <div class="reason" id="reasonLine"></div>
+  </div>
+  <div id="editor"><div class="state" id="stateBox">Loading question…</div></div>
+</div>
+
+<script>
+(function () {
+  var TG = (window.Telegram && Telegram.WebApp) ? Telegram.WebApp : null;
+  if (TG) { try { TG.ready(); TG.expand(); } catch (e) {} }
+
+  var QUIZ_ID = '', QUESTION_ID = '', REPORT = null, PREFILL = {};
+
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+  function b64urlDecode(s){
+    try{
+      s = String(s).replace(/-/g,'+').replace(/_/g,'/');
+      while (s.length % 4) s += '=';
+      return decodeURIComponent(escape(atob(s)));
+    }catch(e){ return ''; }
+  }
+
+  /* Resolve quiz id + question id from ?quiz=&q= (browser) or the Telegram
+     Mini App start_param (base64url of "quizId|questionId"). */
+  function resolveTarget(){
+    var p = new URLSearchParams(location.search);
+    var quiz = p.get('quiz'), q = p.get('q');
+    if (quiz && q) return { quiz: quiz, q: q };
+    var sp = TG && TG.initDataUnsafe && TG.initDataUnsafe.start_param;
+    if (sp){
+      var dec = b64urlDecode(sp);
+      var parts = (dec || '').split('|');
+      if (parts.length >= 2) return { quiz: parts[0], q: parts.slice(1).join('|') };
+    }
+    // Legacy: ?key=<quizId>_<questionId> (ambiguous if quiz id has underscores)
+    var key = p.get('key');
+    if (key){ var i = key.lastIndexOf('_'); if (i > 0) return { quiz: key.slice(0,i), q: key.slice(i+1) }; }
+    return null;
+  }
+
+  function langText(obj, lang){
+    if (obj == null) return '';
+    if (typeof obj === 'string') return lang === 'en' ? obj : '';
+    return obj[lang] || '';
+  }
+
+  function optionNums(q){
+    var nums = [];
+    for (var n=1; n<=5; n++){
+      var v = q['option_'+n];
+      var val = (v && typeof v === 'object') ? (v.en || v.hi || '') : v;
+      if (val != null && String(val) !== '') nums.push(n);
+    }
+    return nums.length ? nums : [1,2,3,4];
+  }
+
+  function fail(msg){ $('editor').innerHTML = '<div class="state err">⚠️ ' + esc(msg) + '</div>'; }
+  function toast(msg){
+    var t = document.createElement('div'); t.className='toast'; t.textContent=msg;
+    document.body.appendChild(t); setTimeout(function(){ t.remove(); }, 2600);
+  }
+
+  function langInputs(idBase, obj, textarea){
+    var en = esc(langText(obj,'en')), hi = esc(langText(obj,'hi'));
+    function mk(suf, val){
+      return textarea
+        ? '<textarea id="'+idBase+'-'+suf+'" rows="2">'+val+'</textarea>'
+        : '<input id="'+idBase+'-'+suf+'" value="'+val+'">';
+    }
+    return '<div class="langrow">' +
+      '<div class="langcol"><div class="langlbl">English</div>'+mk('en',en)+'</div>' +
+      '<div class="langcol"><div class="langlbl">हिन्दी</div>'+mk('hi',hi)+'</div>' +
+    '</div>';
+  }
+
+  function renderForm(){
+    var q = PREFILL || {};
+    var nums = optionNums(q);
+    var ans = String(q.answer || '');
+
+    var opts = '';
+    nums.forEach(function(n){
+      var isAns = ans === String(n);
+      opts += '<div class="opt'+(isAns?' correct':'')+'">' +
+        '<div class="opt-h">Option '+n+(isAns?' ✅ (correct)':'')+'</div>' +
+        langInputs('opt-'+n, q['option_'+n], false) +
+      '</div>';
+    });
+
+    var ansOpts = nums.map(function(n){ return '<option value="'+n+'"'+(ans===String(n)?' selected':'')+'>Option '+n+'</option>'; }).join('');
+
+    $('editor').innerHTML =
+      '<div class="card">' +
+        '<label>Question</label>' + langInputs('q', q.question, true) +
+        '<label style="margin-top:14px;">Options</label>' + opts +
+        '<label>Correct Answer</label>' +
+        '<select id="ans"><option value="">-- select --</option>'+ansOpts+'</select>' +
+        '<label>Explanation</label>' + langInputs('exp', q.explanation || q.solution_text, true) +
+        '<div class="actions">' +
+          '<button id="saveBtn" class="btn btn-primary">💾 Save Correction</button>' +
+        '</div>' +
+      '</div>';
+
+    $('saveBtn').onclick = save;
+    // Remember the option numbers for save
+    $('editor').dataset.nums = JSON.stringify(nums);
+  }
+
+  function val(id){ var el = $(id); return el ? el.value.trim() : ''; }
+
+  async function save(){
+    var nums = JSON.parse($('editor').dataset.nums || '[1,2,3,4]');
+    var cd = {};
+    cd.question = { en: val('q-en'), hi: val('q-hi') };
+    nums.forEach(function(n){ cd['option_'+n] = { en: val('opt-'+n+'-en'), hi: val('opt-'+n+'-hi') }; });
+    cd.answer = val('ans');
+    cd.explanation = { en: val('exp-en'), hi: val('exp-hi') };
+
+    if (!cd.question.en && !cd.question.hi){ toast('⚠️ Question text is empty'); return; }
+    if (!cd.answer){ toast('⚠️ Select the correct answer'); return; }
+
+    var btn = $('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
+    var who = TG && TG.initDataUnsafe && TG.initDataUnsafe.user
+      ? ('tg:' + (TG.initDataUnsafe.user.username || TG.initDataUnsafe.user.id)) : 'editor';
+
+    var ok = await QuestionFix.saveCorrection(QUIZ_ID, QUESTION_ID, cd, who);
+    if (ok){
+      if (REPORT && REPORT.id) { try { await QuestionFix.setReportStatus(REPORT.id, 'fixed'); } catch(e){} }
+      btn.textContent = '✅ Saved';
+      toast('✅ Correction saved — users will see the fix on next load');
+      if (TG){ try { TG.HapticFeedback && TG.HapticFeedback.notificationOccurred('success'); } catch(e){}
+               setTimeout(function(){ try { TG.close(); } catch(e){} }, 1400); }
+      else { setTimeout(function(){ btn.disabled=false; btn.textContent='💾 Save Correction'; }, 1500); }
+    } else {
+      toast('Save failed — try again'); btn.disabled=false; btn.textContent='💾 Save Correction';
+    }
+  }
+
+  async function init(){
+    if (!window.QuestionFix || !QuestionFix.available()){ fail('Editor could not connect to the database.'); return; }
+    var tgt = resolveTarget();
+    if (!tgt){ fail('No question specified. Open this from a report link.'); return; }
+    QUIZ_ID = tgt.quiz; QUESTION_ID = tgt.q;
+    $('metaLine').innerHTML = 'Quiz <b>'+esc(QUIZ_ID)+'</b> · Q-ID <code>'+esc(QUESTION_ID)+'</code>';
+
+    var uKey = QUIZ_ID + '_' + QUESTION_ID;
+    try{
+      REPORT = await QuestionFix.getReportByKey(uKey);
+    }catch(e){ REPORT = null; }
+
+    // Prefill from the reported question, then overlay any existing correction.
+    PREFILL = (REPORT && REPORT.question_data) ? Object.assign({}, REPORT.question_data) : {};
+    try{
+      var existing = await QuestionFix.getCorrection(QUIZ_ID, QUESTION_ID);
+      if (existing && existing.corrected_data) PREFILL = Object.assign(PREFILL, existing.corrected_data);
+    }catch(e){}
+
+    if (REPORT){
+      $('reasonLine').innerHTML = '🚩 <b>'+esc(REPORT.reason||'')+'</b>' + (REPORT.details ? ' — '+esc(REPORT.details) : '');
+    }
+    if (!REPORT && !Object.keys(PREFILL).length){
+      // No report + no correction: nothing to prefill, but allow manual edit.
+      $('reasonLine').innerHTML = '<span class="sub">No stored report found — you can still enter the corrected question below.</span>';
+    }
+    renderForm();
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+</body>
+</html>

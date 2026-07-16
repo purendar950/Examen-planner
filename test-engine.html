@@ -3552,12 +3552,12 @@ async function submitReport() {
   const profile = typeof getLocalProfile === 'function' ? getLocalProfile() : null;
   const userEmail = profile ? (profile.email || profile.username) : "Unknown User";
 
-  // Deep link to the StudyPlanner admin editor for THIS reported question.
-  // Derived from the engine's own origin so it works on any domain.
+  // Deep link to the StudyPlanner question editor for THIS reported question.
+  // Derived from the engine's own origin so it works on any domain. Used for the
+  // Telegram "🌐 Open in Chrome" button (a normal browser page).
   let editorUrl = "";
   try {
-    const uKey = QUIZ_ID + "_" + q.id;
-    editorUrl = new URL('admin.html?tab=reports&open=' + encodeURIComponent(uKey), window.location.href).href;
+    editorUrl = new URL('editor.html?quiz=' + encodeURIComponent(QUIZ_ID) + '&q=' + encodeURIComponent(q.id), window.location.href).href;
   } catch (e) {}
 
   try {
