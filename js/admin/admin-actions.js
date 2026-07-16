@@ -1690,3 +1690,235 @@ async function markRequest(id, status) {
   try { t = localStorage.getItem('ez_theme') || 'light'; } catch(e) {}
   apply(t);
 })();
+
+
+
+/* ═══════════════════════════════════════════════════════════════
+   🚩 REPORTED QUESTIONS + STUDYPLANNER QUESTION EDITOR
+   Reports live in Supabase (question_reports); fixes are saved to
+   question_corrections and applied by the quiz engine at render time.
+   Backed by window.QuestionFix (js/question-fix.js).
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Load all reports from Supabase (lazy — on first open of the Reports tab). */
+async function loadReportsData() {
+  REPORTS_LOADED = true;
+  if (!window.QuestionFix) { showToast('Reports module not loaded'); render(); return; }
+  try {
+    REPORTS = await QuestionFix.listReports();
+  } catch (e) { REPORTS = []; showToast('Reports load failed: ' + e.message); }
+
+  // If the admin arrived via the Telegram "Fix" deep link, open that report.
+  if (REP_OPEN_PENDING) {
+    const target = REPORTS.find(r => r.unique_key === REP_OPEN_PENDING);
+    REP_OPEN_PENDING = null;
+    if (target) { await repOpenEditor(target); return; }
+  }
+  render();
+}
+
+/* A question field can be a plain string or a { en, hi } object. */
+function repLang(obj, lang) {
+  if (obj == null) return '';
+  if (typeof obj === 'string') return lang === 'en' ? obj : '';
+  return obj[lang] || '';
+}
+
+/* Which option_N fields exist on a question (fallback to 4). */
+function repOptionNums(q) {
+  const nums = [];
+  for (let n = 1; n <= 5; n++) {
+    const v = q['option_' + n];
+    if (v != null && String(typeof v === 'object' ? (v.en || v.hi || '') : v) !== '') nums.push(n);
+  }
+  return nums.length ? nums : [1, 2, 3, 4];
+}
+
+function repSetFilter(f) { REPORTS_FILTER = f; render(); }
+function repCancelEdit() { REP_EDITING = null; render(); }
+
+/* Open the editor for a report — prefill from any existing correction on top
+   of the originally-reported question content. */
+async function repOpenEditor(report) {
+  let prefill = Object.assign({}, report.question_data || {});
+  try {
+    if (window.QuestionFix) {
+      const existing = await QuestionFix.getCorrection(report.quiz_id, report.question_id);
+      if (existing && existing.corrected_data) prefill = Object.assign(prefill, existing.corrected_data);
+    }
+  } catch (e) {}
+  REP_EDITING = Object.assign({}, report, { _prefill: prefill });
+  render();
+}
+function repEdit(id) {
+  const r = REPORTS.find(x => x.id === id);
+  if (r) repOpenEditor(r);
+}
+
+/* Change a report's status (open / fixed / dismissed). */
+async function repSetStatus(id, status) {
+  if (!window.QuestionFix) return;
+  const ok = await QuestionFix.setReportStatus(id, status);
+  if (ok) {
+    const r = REPORTS.find(x => x.id === id);
+    if (r) r.status = status;
+    showToast('Report marked ' + status);
+    render();
+  } else { showToast('Update failed'); }
+}
+
+function repVal(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+
+/* Save the edited question as a correction + mark the report fixed. */
+async function repSaveCorrection() {
+  if (!REP_EDITING || !window.QuestionFix) return;
+  const rep = REP_EDITING;
+  const optNums = repOptionNums(rep._prefill || rep.question_data || {});
+
+  const cd = {};
+  cd.question = { en: repVal('rep-q-en'), hi: repVal('rep-q-hi') };
+  optNums.forEach(n => { cd['option_' + n] = { en: repVal('rep-opt-en-' + n), hi: repVal('rep-opt-hi-' + n) }; });
+  cd.answer = repVal('rep-ans');
+  cd.explanation = { en: repVal('rep-exp-en'), hi: repVal('rep-exp-hi') };
+
+  if (!cd.question.en && !cd.question.hi) { showToast('⚠️ Question text khaali nahi ho sakta'); return; }
+  if (!cd.answer) { showToast('⚠️ Correct answer select karo'); return; }
+
+  const btn = document.getElementById('rep-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  const admin = (firebase.auth().currentUser || {}).email || 'admin';
+  const ok = await QuestionFix.saveCorrection(rep.quiz_id, rep.question_id, cd, admin);
+  if (ok) {
+    await QuestionFix.setReportStatus(rep.id, 'fixed');
+    const r = REPORTS.find(x => x.id === rep.id); if (r) r.status = 'fixed';
+    REP_EDITING = null;
+    showToast('✅ Correction saved — users will see the fix on next load');
+    render();
+  } else {
+    showToast('Save failed — try again');
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Save Correction'; }
+  }
+}
+
+/* ── RENDER ── */
+function renderReports() {
+  if (!REPORTS_LOADED) {
+    return '<div class="card"><div class="muted" style="text-align:center;padding:20px;">⏳ Loading reports…</div></div>';
+  }
+  if (REP_EDITING) return renderReportEditor(REP_EDITING);
+
+  const counts = {
+    all: REPORTS.length,
+    open: REPORTS.filter(r => r.status === 'open').length,
+    fixed: REPORTS.filter(r => r.status === 'fixed').length,
+    dismissed: REPORTS.filter(r => r.status === 'dismissed').length
+  };
+  const rows = REPORTS_FILTER === 'all' ? REPORTS : REPORTS.filter(r => r.status === REPORTS_FILTER);
+
+  const chip = (key, label) =>
+    '<button class="btn ' + (REPORTS_FILTER === key ? 'btn-blue' : 'btn-gray') + '" ' +
+    'onclick="repSetFilter(\'' + key + '\')" style="font-size:.8rem;">' + label + ' (' + counts[key] + ')</button>';
+
+  let s = '<div class="card" style="margin-bottom:12px;">' +
+    '<h3 style="margin:0 0 4px;">🚩 Reported Questions</h3>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:10px;">Users report questions from the quiz engine. Open one to fix it — your correction is applied to the live quiz for everyone.</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+      chip('open', '🟡 Open') + chip('fixed', '✅ Fixed') + chip('dismissed', '🗙 Dismissed') + chip('all', 'All') +
+      '<button class="btn btn-gray" onclick="REPORTS_LOADED=false;loadReportsData();" style="font-size:.8rem;">🔄 Refresh</button>' +
+    '</div></div>';
+
+  if (!rows.length) {
+    s += '<div class="card"><div class="muted" style="text-align:center;padding:24px;">No ' +
+      (REPORTS_FILTER === 'all' ? '' : REPORTS_FILTER + ' ') + 'reports.</div></div>';
+    return s;
+  }
+
+  s += rows.map(function (r) {
+    const q = r.question_data || {};
+    const badge = r.status === 'fixed' ? '<span style="color:var(--accent-dark);font-weight:700;">✅ Fixed</span>'
+      : r.status === 'dismissed' ? '<span style="color:var(--muted);font-weight:700;">🗙 Dismissed</span>'
+      : '<span style="color:var(--amber);font-weight:700;">🟡 Open</span>';
+    return '<div class="card" style="margin-bottom:10px;">' +
+      '<div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;">' +
+        '<div style="flex:1;min-width:240px;">' +
+          '<div style="font-size:.72rem;color:var(--muted);">' + esc(r.quiz_title || r.quiz_id) +
+            ' · Q-ID <code>' + esc(r.question_id) + '</code> · ' + fmtDate(r.created_at) + ' · ' + badge + '</div>' +
+          '<div style="font-weight:700;margin:6px 0;">' + esc(stripTags(repLang(q.question, 'en') || repLang(q.question, 'hi'))).slice(0, 160) + '</div>' +
+          '<div style="font-size:.82rem;"><b style="color:var(--red);">🚩 ' + esc(r.reason || '') + '</b>' +
+            (r.details ? ' — ' + esc(r.details) : '') + '</div>' +
+          '<div style="font-size:.7rem;color:var(--muted);margin-top:4px;">by ' + esc(r.reported_by_email || r.reported_by_name || 'user') + '</div>' +
+        '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:6px;">' +
+          '<button class="btn btn-blue" onclick="repEdit(\'' + r.id + '\')" style="font-size:.78rem;">🛠 Fix / Edit</button>' +
+          (r.status !== 'dismissed' ? '<button class="btn btn-gray" onclick="repSetStatus(\'' + r.id + '\',\'dismissed\')" style="font-size:.78rem;">🗙 Dismiss</button>' : '') +
+          (r.status === 'open' ? '' : '<button class="btn btn-gray" onclick="repSetStatus(\'' + r.id + '\',\'open\')" style="font-size:.78rem;">↩ Reopen</button>') +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+
+  return s;
+}
+
+/* Very small tag stripper for list previews. */
+function stripTags(s) { return String(s == null ? '' : s).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim(); }
+
+/* The StudyPlanner question editor for one reported question. */
+function renderReportEditor(rep) {
+  const q = rep._prefill || rep.question_data || {};
+  const optNums = repOptionNums(q);
+  const ans = String(q.answer || '');
+
+  const langInputs = (idBase, obj, textarea) => {
+    const en = esc(repLang(obj, 'en')), hi = esc(repLang(obj, 'hi'));
+    const mk = (suffix, val, ph) => textarea
+      ? '<textarea id="' + idBase + '-' + suffix + '" rows="2" style="width:100%;font-size:.85rem;padding:8px;border:1px solid var(--border);border-radius:8px;" placeholder="' + ph + '">' + val + '</textarea>'
+      : '<input id="' + idBase + '-' + suffix + '" value="' + val + '" style="width:100%;font-size:.85rem;padding:7px 8px;border:1px solid var(--border);border-radius:8px;" placeholder="' + ph + '">';
+    return '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+      '<div style="flex:1;min-width:200px;"><div style="font-size:.66rem;color:var(--muted);margin-bottom:2px;">English</div>' + mk('en', en, 'English') + '</div>' +
+      '<div style="flex:1;min-width:200px;"><div style="font-size:.66rem;color:var(--muted);margin-bottom:2px;">हिन्दी</div>' + mk('hi', hi, 'हिन्दी') + '</div>' +
+    '</div>';
+  };
+
+  let optsHtml = '';
+  optNums.forEach(n => {
+    const isAns = ans === String(n);
+    optsHtml += '<div style="margin-bottom:10px;padding:10px;border:1px solid ' + (isAns ? 'rgba(25,135,84,.5)' : 'var(--border)') + ';border-radius:8px;background:' + (isAns ? 'rgba(25,135,84,.08)' : 'transparent') + ';">' +
+      '<div style="font-weight:700;font-size:.8rem;margin-bottom:4px;">Option ' + n + (isAns ? ' ✅ (correct)' : '') + '</div>' +
+      langInputs('rep-opt', q['option_' + n], false).replace(/id="rep-opt-en"/, 'id="rep-opt-en-' + n + '"').replace(/id="rep-opt-hi"/, 'id="rep-opt-hi-' + n + '"') +
+    '</div>';
+  });
+
+  const ansOptions = optNums.map(n => '<option value="' + n + '"' + (ans === String(n) ? ' selected' : '') + '>Option ' + n + '</option>').join('');
+
+  return '<div class="card">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">' +
+      '<h3 style="margin:0;">🛠 Fix Question</h3>' +
+      '<button class="btn btn-gray" onclick="repCancelEdit()">← Back to list</button>' +
+    '</div>' +
+    '<div class="muted" style="font-size:.74rem;margin-bottom:12px;">' +
+      'Quiz <b>' + esc(rep.quiz_title || rep.quiz_id) + '</b> · Q-ID <code>' + esc(rep.question_id) + '</code><br>' +
+      '🚩 <b style="color:var(--red);">' + esc(rep.reason || '') + '</b>' + (rep.details ? ' — ' + esc(rep.details) : '') +
+    '</div>' +
+
+    '<label style="font-weight:700;font-size:.85rem;">Question</label>' + langInputs('rep-q', q.question, true) +
+
+    '<div style="margin:14px 0 6px;font-weight:700;font-size:.85rem;">Options</div>' + optsHtml +
+
+    '<div style="margin:10px 0;">' +
+      '<label style="font-weight:700;font-size:.85rem;display:block;margin-bottom:4px;">Correct Answer</label>' +
+      '<select id="rep-ans" style="font-size:.85rem;padding:7px 10px;border:1px solid var(--border);border-radius:8px;">' +
+        '<option value="">-- select --</option>' + ansOptions +
+      '</select>' +
+    '</div>' +
+
+    '<label style="font-weight:700;font-size:.85rem;">Explanation</label>' + langInputs('rep-exp', q.explanation || q.solution_text, true) +
+
+    '<div style="display:flex;gap:8px;margin-top:16px;flex-wrap:wrap;">' +
+      '<button id="rep-save-btn" class="btn btn-green" onclick="repSaveCorrection()" style="font-weight:700;">💾 Save Correction</button>' +
+      '<button class="btn btn-gray" onclick="repCancelEdit()">Cancel</button>' +
+    '</div>' +
+    '<div class="muted" style="font-size:.7rem;margin-top:8px;">Saving stores a correction in Supabase (question_corrections) and marks this report Fixed. The quiz engine overlays it on the question for every user on next load.</div>' +
+  '</div>';
+}

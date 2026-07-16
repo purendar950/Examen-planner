@@ -13,6 +13,9 @@ let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = fal
    "🚩 Report" button posts here via the proxy. Separate bot/channel from the
    study-planner bot above, so it has its own token + chatId. */
 let REPORT_CONFIG = { botToken: '', chatId: '', channelName: '', inviteLink: '', loaded: false };
+/* Question reports (Supabase question_reports) + the report currently open in
+   the editor. Loaded lazily when the 🚩 Reports tab is opened. */
+let REPORTS = [], REPORTS_LOADED = false, REPORTS_FILTER = 'open', REP_EDITING = null, REP_OPEN_PENDING = null;
 /* AI Study usage limits + admin-granted unlimited users (Firestore config/aiLimits),
    read by youtube-turbo-proxy to rate-limit /api/study + /api/tutor. */
 let AI_LIMITS = { unlimited: {}, unlimitedEmails: [], focusUsers: {}, focusEmails: [], studyPerHour: 15, tutorPerHour: 20, tutorPerDay: 80, loaded: false };
@@ -65,7 +68,22 @@ auth.onAuthStateChanged(async (u) => {
   await loadAll();
   render();
   subscribeRealtime();
+  handleReportsDeepLink();
 });
+
+/* Open the 🚩 Reports tab (and a specific report's editor) when the admin
+   arrives via the Telegram "Fix in StudyPlanner Editor" link:
+   admin.html?tab=reports&open=<quizId>_<questionId> */
+function handleReportsDeepLink() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') === 'reports') {
+      const openKey = params.get('open');
+      if (openKey) { REP_OPEN_PENDING = openKey; REPORTS_FILTER = 'all'; }
+      setTab('reports');
+    }
+  } catch (e) {}
+}
 
 /* Unsubscribe helper — call before logout / on logout to stop listeners */
 let _unsubs = [];
@@ -211,6 +229,7 @@ function setTab(t) {
   document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.t === t));
   if (t === 'telegram' && !TG_CONFIG.loaded) loadTelegramData();
   if (t === 'aistudy' && !AI_CONFIG.loaded) loadAiStudyData();
+  if (t === 'reports' && !REPORTS_LOADED) loadReportsData();
   render();
 }
 function render() {
@@ -222,6 +241,9 @@ function render() {
   const newReqs = (REQUESTS || []).filter(r => r.status === 'new').length;
   const cntReqEl = document.getElementById('cnt-requests');
   if (cntReqEl) cntReqEl.textContent = newReqs ? '(' + newReqs + ')' : '';
+  const openReps = (REPORTS || []).filter(r => r.status === 'open').length;
+  const cntRepEl = document.getElementById('cnt-reports');
+  if (cntRepEl) cntRepEl.textContent = openReps ? '(' + openReps + ')' : '';
   const tgEnabled = TG_USERS.filter(u => u.tg.enabled && u.tg.chatId).length;
   const cntTgEl = document.getElementById('cnt-tg');
   if (cntTgEl) cntTgEl.textContent = tgEnabled ? '(' + tgEnabled + ')' : '';
@@ -241,6 +263,7 @@ function render() {
   else if (TAB === 'payouts') c.innerHTML = renderPayouts();
   else if (TAB === 'coupons') c.innerHTML = renderCoupons();
   else if (TAB === 'requests') c.innerHTML = renderRequests();
+  else if (TAB === 'reports') c.innerHTML = renderReports();
   else if (TAB === 'telegram') c.innerHTML = renderTelegram();
   else if (TAB === 'aistudy') c.innerHTML = renderAiStudy();
   else if (TAB === 'settings') c.innerHTML = renderSettings();

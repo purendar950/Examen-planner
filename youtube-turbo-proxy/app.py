@@ -2723,13 +2723,9 @@ def api_report():
     user_name   = data.get("userName") or "Unknown"
     user_email  = data.get("userEmail") or "Unknown"
     report_link = data.get("reportLink") or ""
-    path        = (data.get("path") or "").strip()
-
-    # Deep links into the question editor (Chrome + Telegram mini app), mirroring
-    # what the engine used to build client-side.
-    chrome_link = "https://mmh-master-editor.pages.dev/?id=%s&path=%s&qid=%s" % (quiz_id, path, q_id)
-    encoded_path = path.replace("/", "_") if path else "others"
-    mini_link = "http://t.me/MMH_QUESTION_EDITOR_BOT/MMH_MASTER_EDITOR?startapp=%s__%s__%s" % (quiz_id, encoded_path, q_id)
+    # Deep link into the StudyPlanner admin editor for this exact question
+    # (built by the engine from its own origin: admin.html?tab=reports&open=...).
+    editor_url  = (data.get("editorUrl") or "").strip()
 
     message = (
         "<b>🚨 NEW QUESTION REPORT 🚨</b>\n\n"
@@ -2742,7 +2738,7 @@ def api_report():
         "<b>💬 Details:</b> %s\n\n"
         "<b>🔗 Link:</b> %s\n\n"
         "--------------------------\n"
-        "⚡ <i>Submitted via Report Channel</i>"
+        "⚡ <i>Submitted via StudyPlanner</i>"
     ) % (
         _html_escape(quiz_id), _html_escape(q_id), _html_escape(quiz_title),
         _html_escape(user_name), _html_escape(user_email),
@@ -2750,18 +2746,20 @@ def api_report():
     )
 
     data_bundle = "%s:%s" % (q_id, quiz_id)
+    keyboard = [
+        [{"text": "✅ Fixed & Notify", "callback_data": "f:" + data_bundle}],
+        [{"text": "❌ Already Correct", "callback_data": "c:" + data_bundle}],
+    ]
+    # Only add the editor button when we have an https URL (Telegram rejects
+    # non-https button URLs).
+    if editor_url.startswith("https://"):
+        keyboard.append([{"text": "🛠 Fix in StudyPlanner Editor", "url": editor_url}])
+
     payload = {
         "chat_id": chat_id,
         "text": message,
         "parse_mode": "HTML",
-        "reply_markup": {
-            "inline_keyboard": [
-                [{"text": "✅ Fixed & Notify", "callback_data": "f:" + data_bundle}],
-                [{"text": "❌ Already Correct", "callback_data": "c:" + data_bundle}],
-                [{"text": "🌐 Open in Chrome", "url": chrome_link}],
-                [{"text": "📱 Open in Mini App", "url": mini_link}],
-            ]
-        },
+        "reply_markup": {"inline_keyboard": keyboard},
     }
 
     try:
