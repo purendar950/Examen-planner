@@ -44,6 +44,8 @@
 <script src="js/supabase-config.js"></script>
 <!-- 🔖 Saved questions store (Supabase-backed, shared with the app) -->
 <script src="js/saved-questions.js"></script>
+<!-- 🚩 Question reports + admin corrections (Supabase-backed, shared with admin) -->
+<script src="js/question-fix.js"></script>
 
 <style>
 
@@ -3550,13 +3552,33 @@ async function submitReport() {
   const profile = typeof getLocalProfile === 'function' ? getLocalProfile() : null;
   const userEmail = profile ? (profile.email || profile.username) : "Unknown User";
 
+  // Deep link to the StudyPlanner admin editor for THIS reported question.
+  // Derived from the engine's own origin so it works on any domain.
+  let editorUrl = "";
+  try {
+    const uKey = QUIZ_ID + "_" + q.id;
+    editorUrl = new URL('admin.html?tab=reports&open=' + encodeURIComponent(uKey), window.location.href).href;
+  } catch (e) {}
+
   try {
     submitBtn.disabled = true;
     submitBtn.innerText = "Submitting...";
 
-    // Send to the secure proxy. The proxy reads the report bot token + channel
-    // id from Firestore (config/reports, set in the admin panel) and posts to
-    // Telegram server-side — the token is never present in this page.
+    // 1. Store the reported question in Supabase so it appears in the admin
+    //    panel (with its full content) and can be fixed from there.
+    if (window.QuestionFix && QuestionFix.available()) {
+      try {
+        await QuestionFix.submitReport({
+          reason: finalReason, details, quizId: QUIZ_ID, questionId: q.id,
+          quizTitle: QUIZ_TITLE, userName: USER_DISPLAY_NAME, userEmail,
+          questionData: q, reportLink
+        });
+      } catch (e) { console.warn('report store failed', e); }
+    }
+
+    // 2. Send to the secure proxy. The proxy reads the report bot token +
+    //    channel id from Firestore (config/reports, set in the admin panel) and
+    //    posts to Telegram server-side — the token is never present in this page.
     const response = await fetch(`${REPORT_PROXY_URL}/report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3569,7 +3591,7 @@ async function submitReport() {
         userName:   USER_DISPLAY_NAME,
         userEmail:  userEmail,
         reportLink: reportLink,
-        path:       (typeof GITHUB_PATH !== 'undefined' ? GITHUB_PATH : '')
+        editorUrl:  editorUrl
       })
     });
 
@@ -5633,6 +5655,26 @@ async function loadQuizData() {
       }
     }
   });
+
+  // ── 🛠 Apply admin corrections (StudyPlanner question fixes) ────────────────
+  // Admins fix reported questions in the admin panel; those fixes are stored in
+  // Supabase (question_corrections) keyed by quiz + question id. We overlay them
+  // onto the loaded questions here, so a fix reaches users for ANY quiz source
+  // (AI-generated or mock) without editing the original data.
+  try {
+    if (window.QuestionFix && QuestionFix.available()) {
+      const fixes = await QuestionFix.getCorrectionsForQuiz(QUIZ_ID);
+      if (fixes && Object.keys(fixes).length) {
+        Object.keys(SECTIONS).forEach(sec => {
+          SECTIONS[sec] = SECTIONS[sec].map(qq => {
+            const corr = fixes[String(qq.id)];
+            return corr ? Object.assign({}, qq, corr) : qq;
+          });
+        });
+        console.log('✅ Applied ' + Object.keys(fixes).length + ' question correction(s)');
+      }
+    }
+  } catch (e) { console.warn('Apply corrections failed:', e); }
 
   SECTION_NAMES = Object.keys(SECTIONS);
   QUESTIONS     = SECTIONS[SECTION_NAMES[0]];

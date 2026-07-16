@@ -49,6 +49,7 @@
     <div class="tab" data-t="payouts" onclick="setTab('payouts')">💸 Payouts</div>
     <div class="tab" data-t="coupons" onclick="setTab('coupons')">🎟️ Coupons</div>
     <div class="tab" data-t="requests" onclick="setTab('requests')">&#x1f4a1; Requests <span id="cnt-requests"></span></div>
+    <div class="tab" data-t="reports" onclick="setTab('reports')">🚩 Reports <span id="cnt-reports"></span></div>
     <div class="tab" data-t="settings" onclick="setTab('settings')">&#x2699; Settings</div>
   </div>
   <div class="wrap">
@@ -59,8 +60,11 @@
 
 <script src="js/core/firebase-config.js"></script>
 <script type="module" src="src/main.js"></script>
-<script src="js/admin/admin-core.js?v=20260712c"></script>
+<!-- 🚩 Question reports + corrections (Supabase-backed, shared with the quiz engine) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="js/question-fix.js?v=20260716a"></script>
+<script src="js/admin/admin-core.js?v=20260716a"></script>
 <script src="js/admin/admin-render.js?v=20260703a"></script>
-<script src="js/admin/admin-actions.js?v=20260715f"></script>
+<script src="js/admin/admin-actions.js?v=20260716a"></script>
 </body>
 </html>
