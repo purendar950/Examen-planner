@@ -1,0 +1,51 @@
+<div class="page" id="page-saved">
+  <style>
+  /* ════════ SAVED QUESTIONS TAB — scoped styles (sq- prefix) ════════ */
+  #page-saved .sq-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:1.1rem; }
+  #page-saved .sq-title { margin:0; font-size:1.25rem; font-weight:800; }
+  #page-saved .sq-sub { font-size:.78rem; color:var(--muted); margin-top:2px; }
+  #page-saved .sq-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  #page-saved .sq-select { padding:.45rem .7rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.82rem; max-width:260px; }
+  #page-saved .sq-btn { padding:.45rem .8rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:.82rem; cursor:pointer; font-weight:600; }
+  #page-saved .sq-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+  #page-saved .sq-list { display:flex; flex-direction:column; gap:14px; }
+  #page-saved .sq-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 18px; }
+  #page-saved .sq-card-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
+  #page-saved .sq-quiz { font-size:.72rem; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:.04em; }
+  #page-saved .sq-when { font-size:.68rem; color:var(--muted); margin-top:2px; }
+  #page-saved .sq-remove { background:none; border:1px solid rgba(220,53,69,.4); color:#dc3545; border-radius:8px; padding:.3rem .6rem; font-size:.74rem; cursor:pointer; font-weight:600; white-space:nowrap; }
+  #page-saved .sq-remove:hover { background:rgba(220,53,69,.12); }
+  #page-saved .sq-q { font-size:.95rem; line-height:1.6; margin-bottom:12px; }
+  #page-saved .sq-q img { max-width:90%; max-height:240px; height:auto; display:block; margin:10px auto; border:1px solid var(--border); border-radius:6px; }
+  #page-saved .sq-opts { display:flex; flex-direction:column; gap:7px; margin-bottom:12px; }
+  #page-saved .sq-opt { display:flex; gap:9px; align-items:flex-start; padding:8px 11px; border:1px solid var(--border); border-radius:8px; font-size:.86rem; line-height:1.5; }
+  #page-saved .sq-opt .sq-optnum { font-weight:700; color:var(--muted); flex:0 0 auto; }
+  #page-saved .sq-opt.correct { border-color:rgba(25,135,84,.55); background:rgba(25,135,84,.1); }
+  #page-saved .sq-opt.correct .sq-optnum { color:#198754; }
+  #page-saved .sq-opt img { max-width:160px; max-height:90px; height:auto; border-radius:4px; border:1px solid var(--border); margin-top:6px; display:block; }
+  #page-saved .sq-exp { border-top:1px dashed var(--border); padding-top:10px; font-size:.84rem; line-height:1.6; color:var(--text); }
+  #page-saved .sq-exp-label { font-weight:700; color:#198754; margin-bottom:4px; }
+  #page-saved .sq-empty { text-align:center; padding:48px 20px; color:var(--muted); }
+  #page-saved .sq-empty-icon { font-size:2.4rem; margin-bottom:10px; }
+  #page-saved .sq-empty h3 { margin:0 0 6px; color:var(--text); font-weight:700; }
+  #page-saved .sq-loading { text-align:center; padding:40px; color:var(--muted); }
+  </style>
+
+  <div class="sq-head">
+    <div>
+      <h2 class="sq-title">🔖 Saved Questions</h2>
+      <div class="sq-sub">Questions you bookmarked during mock tests. Review them anytime.</div>
+    </div>
+    <div class="sq-controls">
+      <select class="sq-select" id="sq-filter" onchange="renderSavedQuestions()">
+        <option value="">All quizzes</option>
+      </select>
+      <button class="sq-btn" onclick="loadSavedQuestions(true)">🔄 Refresh</button>
+    </div>
+  </div>
+
+  <div id="sq-content">
+    <div class="sq-loading">Loading your saved questions…</div>
+  </div>
+</div>
