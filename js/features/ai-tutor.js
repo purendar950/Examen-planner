@@ -1297,15 +1297,37 @@
   function shareMcqTest() {
     var vid = curVid();
     if (!vid) { if (typeof showToast === 'function') showToast('Play the video first', 'error'); else alert('Play the video first.'); return; }
-    var base = location.origin + location.pathname.replace(/[^/]*$/, '');
-    var url = base + 'app.html?mcqshare=' + encodeURIComponent(vid) + '&lang=' + encodeURIComponent(outLang());
-    function done(ok) {
-      if (typeof showToast === 'function') showToast(ok ? '🔗 Share link copied — send it to anyone' : 'Copy failed. Link: ' + url, ok ? 'success' : 'error');
-      else alert((ok ? 'Link copied:\n\n' : 'Copy this link:\n\n') + url);
+    // Creating a share is Pro-only (also enforced by Firestore rules).
+    if (typeof isPro === 'function' && !isPro()) {
+      if (typeof ezLockedMsg === 'function') ezLockedMsg('🔗 Share a test');
+      else if (typeof showToast === 'function') showToast('Sharing tests is a Pro feature — upgrade to Pro.', 'error');
+      return;
     }
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(function () { done(true); }, function () { done(false); });
-    } else { done(false); }
+    if (typeof db === 'undefined' || !db) { if (typeof showToast === 'function') showToast('Sign in to create a share link.', 'error'); return; }
+    var btnEl = document.getElementById('ai-mcq-share');
+    if (btnEl) btnEl.disabled = true;
+    // Store only a tiny pointer in Firestore; the doc id IS the unguessable
+    // share token. Notes themselves stay in Backblaze (rebuilt on open).
+    var rec = {
+      videoId: vid,
+      lang: outLang(),
+      title: (curTitle() || 'MCQ Test'),
+      by: (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) ? currentUser.uid : '',
+      createdAt: (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldValue)
+        ? firebase.firestore.FieldValue.serverTimestamp() : Date.now()
+    };
+    db.collection('mcqShares').add(rec).then(function (ref) {
+      var base = location.origin + location.pathname.replace(/[^/]*$/, '');
+      var url = base + 'app.html?t=' + encodeURIComponent(ref.id);
+      function done(ok) {
+        if (typeof showToast === 'function') showToast(ok ? '🔗 Secure share link copied — send it to anyone' : 'Copy this link: ' + url, ok ? 'success' : 'info');
+        else alert((ok ? 'Link copied:\n\n' : 'Copy this link:\n\n') + url);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(function () { done(true); }, function () { done(false); });
+      else done(false);
+    }).catch(function (e) {
+      if (typeof showToast === 'function') showToast('Could not create share link: ' + (e && e.message || e), 'error'); else alert('Could not create share link.');
+    }).then(function () { if (btnEl) btnEl.disabled = false; });
   }
   // Rebuild + open a shared MCQ test from the cached notes for a given video.
   function openSharedMcq(vid, lang) {
@@ -1319,6 +1341,25 @@
       if (!qs.length) { alert('The shared MCQ test is not available yet (notes not generated).'); return; }
       openInTestEngine(qs, 'Shared MCQ Test');
     }).catch(function (e) { alert('Failed to load the shared test: ' + e); });
+  }
+  // Look up a secure share token in Firestore → open that video's MCQ test.
+  function resolveShareToken(token) {
+    if (!token) return;
+    if (typeof db === 'undefined' || !db) { alert('Please sign in to open the shared test.'); return; }
+    if (typeof showToast === 'function') showToast('Opening shared test\u2026', 'info');
+    db.collection('mcqShares').doc(token).get().then(function (snap) {
+      if (!snap || !snap.exists) { alert('This shared test link is invalid or has expired.'); return; }
+      var d = snap.data() || {};
+      if (!d.videoId) { alert('This shared test link is invalid.'); return; }
+      maybeUpsellThenOpen(d.videoId, d.lang);
+    }).catch(function (e) { alert('Could not open the shared test: ' + (e && e.message || e)); });
+  }
+  // Free users get a gentle "upgrade to create your own" nudge, then the test opens.
+  function maybeUpsellThenOpen(vid, lang) {
+    if (typeof isPro === 'function' && !isPro() && typeof showToast === 'function') {
+      showToast('\u2728 This test is free via a shared link. Upgrade to Pro to create your own tests.', 'info');
+    }
+    openSharedMcq(vid, lang);
   }
 
   /* ── Quiz engine ── */
@@ -1791,13 +1832,19 @@
     var tries = 0;
     var iv = setInterval(function () {
       if (++tries > 40) { clearInterval(iv); return; }   // ~32s then give up
-      var pend = null;
-      try { pend = JSON.parse(localStorage.getItem('ez_pending_mcqshare') || 'null'); } catch (e) {}
-      if (!pend || !pend.vid) return;
       if (typeof currentUser === 'undefined' || !currentUser) return;   // wait for login
-      clearInterval(iv);
-      try { localStorage.removeItem('ez_pending_mcqshare'); } catch (e) {}
-      openSharedMcq(pend.vid, pend.lang);
+      var token = null, legacy = null;
+      try { token = localStorage.getItem('ez_pending_share'); } catch (e) {}
+      try { legacy = JSON.parse(localStorage.getItem('ez_pending_mcqshare') || 'null'); } catch (e) {}
+      if (token) {
+        clearInterval(iv);
+        try { localStorage.removeItem('ez_pending_share'); } catch (e) {}
+        resolveShareToken(token);
+      } else if (legacy && legacy.vid) {                 // backward-compat with old raw links
+        clearInterval(iv);
+        try { localStorage.removeItem('ez_pending_mcqshare'); } catch (e) {}
+        maybeUpsellThenOpen(legacy.vid, legacy.lang);
+      }
     }, 800);
   })();
 })();
