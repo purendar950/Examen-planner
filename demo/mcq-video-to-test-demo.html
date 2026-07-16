@@ -37,8 +37,14 @@ input:focus,select:focus{border-color:var(--accent)}
 .hint code{background:rgba(11,94,215,.1);padding:1px 5px;border-radius:4px;font-size:11px}
 .status{font-size:13px;font-weight:700;margin-top:12px;min-height:18px}
 .status.ok{color:var(--success)}.status.err{color:var(--danger)}.status.busy{color:var(--accent)}
+.mini{font-size:11px;color:var(--muted-text);margin-top:4px}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(11,94,215,.3);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:6px}
 @keyframes sp{to{transform:rotate(360deg)}}
+.modes{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.mode-opt{flex:1;min-width:230px;border:1.5px solid var(--card-border);border-radius:10px;padding:12px;cursor:pointer;display:flex;gap:10px;align-items:flex-start;background:var(--input-bg)}
+.mode-opt.sel{border-color:var(--accent);background:var(--detail-bg)}
+.mode-opt input{margin-top:3px}
+.mode-opt .t{font-weight:700;font-size:13px}.mode-opt .d{font-size:11px;color:var(--muted-text);margin-top:2px;line-height:1.5}
 .pv-item{border:1px solid var(--card-border);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:13px}
 .pv-q{font-weight:600;margin-bottom:6px}.pv-opts{display:grid;gap:3px;margin-bottom:6px}
 .pv-opt.correct{color:var(--success);font-weight:700}
@@ -55,23 +61,42 @@ pre.json{background:#0d1117;color:#c9d1d9;border-radius:8px;padding:14px;overflo
 
 <div class="wrap">
   <h1>YouTube video → MCQs → your real Test Engine</h1>
-  <p class="sub">This demo runs the <b>actual</b> flow end-to-end: it calls your live AI backend to generate MCQs from a real YouTube video, then opens them in your real <code>test-engine.html</code> (sections, timer, palette, solutions &amp; analysis). Nothing here is a mini-engine — the “Take as Test” button hands off to the same engine the production change uses.</p>
+  <p class="sub">Runs the <b>actual</b> flow: calls your live AI backend to generate MCQs from a real YouTube video, then opens them in your real <code>test-engine.html</code> (palette, timer, solutions &amp; analysis). Pick the AI model, and choose to build a quiz of <b>all</b> the questions from the comprehensive MCQ notes.</p>
   <div class="flow"><span>1 · YouTube video</span><span>→ 2 · Generate MCQs (your backend)</span><span>→ 3 · Take as Test (real engine)</span></div>
 
   <!-- STEP 1 -->
   <div class="card">
-    <h2><span class="num">1</span> Your YouTube video</h2>
+    <h2><span class="num">1</span> Your YouTube video &amp; options</h2>
     <label>YouTube URL or 11-char video ID</label>
-    <input type="text" id="vidInput" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX  or  XXXXXXXXXXX" spellcheck="false">
-    <div class="row-3">
-      <div><label>Questions</label><select id="qn"><option>10</option><option>15</option><option selected>25</option><option>40</option></select></div>
-      <div><label>Output language</label>
-        <select id="lang"><option>Hinglish</option><option>English</option><option>Hindi</option></select></div>
-      <div><label>Focus topic (optional)</label><input type="text" id="focus" placeholder="e.g. only formulas"></div>
+    <input type="text" id="vidInput" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX  or  XXXXXXXXXXX" spellcheck="false" onblur="loadModels()">
+
+    <label>What to generate</label>
+    <div class="modes">
+      <label class="mode-opt sel" id="modeCard-mcqnotes">
+        <input type="radio" name="srcmode" value="mcqnotes" checked onchange="onMode()">
+        <span><span class="t">📚 Comprehensive MCQ (ALL questions)</span><span class="d">Uses the full MCQ notes the AI writes for the video — every question it produced, no fixed count.</span></span>
+      </label>
+      <label class="mode-opt" id="modeCard-quiz">
+        <input type="radio" name="srcmode" value="quiz" onchange="onMode()">
+        <span><span class="t">🎯 Quiz — fixed count</span><span class="d">Generate a set number of fresh questions.</span></span>
+      </label>
     </div>
+
+    <div class="row-3">
+      <div id="qnWrap" style="display:none"><label>Questions</label><select id="qn"><option>10</option><option>15</option><option selected>25</option><option>40</option></select></div>
+      <div><label>Output language</label>
+        <select id="lang"><option>English</option><option>Hinglish</option><option>Hindi</option></select></div>
+      <div><label>Focus topic (optional)</label><input type="text" id="focus" placeholder="blank = all important points"></div>
+    </div>
+
+    <label>AI model
+      <button class="btn ghost sm" style="float:right;margin-top:-4px" onclick="loadModels()">🔄 Reload models</button>
+    </label>
+    <select id="model"><option value="">Auto (server default)</option></select>
+    <div class="mini" id="modelNote">Loading model list from your backend…</div>
+
     <div class="hint">
-      This calls <code id="apiEcho">/api/study?mode=quiz</code> on your backend — the same endpoint your app uses. Requires the video to have captions.
-      <br>The video does <b>not</b> need to be playing; only its ID is sent.
+      Calls <code id="apiEcho">/api/study</code> on your backend (same endpoint your app uses). The video must have captions. It doesn’t need to be playing — only the ID is sent.
     </div>
     <div class="btn-row">
       <button class="btn" id="genBtn" onclick="generate()">Generate MCQs from video</button>
@@ -109,8 +134,6 @@ pre.json{background:#0d1117;color:#c9d1d9;border-radius:8px;padding:14px;overflo
       <input type="text" id="backend" spellcheck="false">
       <label>Test engine path (relative to this demo)</label>
       <input type="text" id="enginePath" value="../test-engine.html">
-      <label>Model (optional — blank = backend default)</label>
-      <input type="text" id="model" placeholder="leave blank for Auto">
       <div class="hint">Defaults match your app (<code>turboBackendUrl</code> → <code>https://youtube-turbo-proxy.onrender.com</code>). If generation is blocked by CORS from this preview host, host the demo on your own site (same origin your app already uses) and it will work.</div>
     </div>
   </div>
@@ -125,42 +148,117 @@ var GENERATED = [];  // [{question, options[], answer_index, explanation}]
 
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function backend(){return (document.getElementById('backend').value||DEFAULT_BACKEND).replace(/\/+$/,'');}
+function setStatus(id,cls,html){var e=document.getElementById(id);e.className='status '+cls;e.innerHTML=html;}
+function curMode(){var r=document.querySelector('input[name=srcmode]:checked');return r?r.value:'mcqnotes';}
 
-/* Accept a full URL or bare 11-char id */
 function parseVid(s){
   s=(s||'').trim();
-  var m=s.match(/[?&]v=([A-Za-z0-9_-]{11})/) || s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/) || s.match(/embed\/([A-Za-z0-9_-]{11})/) || s.match(/shorts\/([A-Za-z0-9_-]{11})/);
+  var m=s.match(/[?&]v=([A-Za-z0-9_-]{11})/)||s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/)||s.match(/embed\/([A-Za-z0-9_-]{11})/)||s.match(/shorts\/([A-Za-z0-9_-]{11})/);
   if(m) return m[1];
   if(/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
   return '';
 }
 
-function setStatus(id,cls,html){var e=document.getElementById(id);e.className='status '+cls;e.innerHTML=html;}
+function onMode(){
+  var mode=curMode();
+  document.getElementById('modeCard-mcqnotes').classList.toggle('sel',mode==='mcqnotes');
+  document.getElementById('modeCard-quiz').classList.toggle('sel',mode==='quiz');
+  document.getElementById('qnWrap').style.display=(mode==='quiz')?'':'none';
+}
 
-/* STEP 2: call the REAL backend (same request ai-tutor.js builds) */
+/* ── AI MODEL LIST: same source as the app (GET /api/status → studyModelGroups) ── */
+function loadModels(){
+  var vid=parseVid(document.getElementById('vidInput').value)||'';
+  var sel=document.getElementById('model'), note=document.getElementById('modelNote');
+  note.textContent='Loading model list…';
+  fetch(backend()+'/api/status?id='+encodeURIComponent(vid)+'&uid=').then(function(r){return r.json();}).then(function(j){
+    var groups=(j&&j.studyModelGroups)||[];
+    var def=(j&&j.studyModel)||'';
+    var html='<option value="">Auto (server default'+(def?': '+esc(def):'')+')</option>';
+    var count=0;
+    groups.forEach(function(g){
+      var ms=g.models||[]; if(!ms.length) return;
+      count+=ms.length;
+      html+='<optgroup label="'+esc(g.label||g.provider)+'">'+ms.map(function(m){
+        return '<option value="'+esc(m)+'"'+(m===def?' selected':'')+'>'+esc(m)+'</option>';
+      }).join('')+'</optgroup>';
+    });
+    sel.innerHTML=html;
+    note.textContent=count?('✓ '+count+' models from '+groups.length+' provider(s). Default: '+(def||'auto')+'.'):'No model list returned — using Auto.';
+  }).catch(function(e){
+    sel.innerHTML='<option value="">Auto (server default)</option>';
+    note.textContent='Could not load models ('+esc(String(e))+') — using Auto. (Backend may block cross-origin requests from this preview host.)';
+  });
+}
+
+/* ── MCQ-notes parser: mirrors js/features/ai-tutor.js (NB_Q / NB_O / NB_A / NB_EXP) ── */
+var NB_Q=/^#{0,4}\s*\**\s*(?:Q|Question|Ques|\u092A\u094D\u0930\u0936\u094D\u0928|\u0938\u0935\u093E\u0932)\s*\.?\s*(\d+)\s*[.):\-\u2013]*\s*(.*)$/i;
+var NB_O=/^[-*+]?\s*\(?([A-Da-d1-4])\)?[.)]\s+(.*)$/;
+var NB_A=/^\s*(?:[-*+]\s*)?\**\s*(?:answer|ans|\u0909\u0924\u094D\u0924\u0930)\**\s*[:\uFF1A]?\s*\**\s*\(?([A-Da-d1-4])\)?\b(.*)$/i;
+var NB_EXP=/^\**\s*(?:explanation|explain|\u0935\u094D\u092F\u093E\u0916\u094D\u092F\u093E)\**\s*[:\uFF1A]?\s*(.*)$/i;
+function nbOptRight(t){return /[\u2713\u2714]|\(correct\)|\bcorrect\b|\u0938\u0939\u0940/i.test(t);}
+function nbCleanOpt(t){return t.replace(/\s*[\u2713\u2714]\s*$/,'').replace(/\s*\(correct\)\s*$/i,'').trim();}
+function parseMcqNotes(md){
+  var clean=(md||'').replace(/\r/g,'').replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i,'$1');
+  var lines=clean.split('\n'), out=[], i=0;
+  while(i<lines.length){
+    var qm=lines[i].trim().match(NB_Q);
+    if(!qm){i++;continue;}
+    var qtext=qm[2]||''; i++;
+    var opts=[], ansKey='', expl=[];
+    while(i<lines.length){
+      var lt=lines[i].trim();
+      if(NB_Q.test(lt)) break;
+      var am=lt.match(NB_A), om=lt.match(NB_O), em=lt.match(NB_EXP);
+      if(am){ansKey=am[1].toUpperCase();i++;continue;}
+      if(om){opts.push({k:om[1].toUpperCase(),text:om[2]});i++;continue;}
+      if(em){var er=(em[1]||'').replace(/^\*+/,'').replace(/\*+$/,'').trim();if(er)expl.push(er);i++;continue;}
+      if(lt===''){i++;continue;}
+      expl.push(lt);i++;
+    }
+    var ansIdx=-1;
+    if(ansKey) ansIdx=/^[0-9]$/.test(ansKey)?(parseInt(ansKey,10)-1):(ansKey.charCodeAt(0)-65);
+    if(ansIdx<0) opts.forEach(function(o,oi){if(nbOptRight(o.text))ansIdx=oi;});
+    if(ansIdx<0) ansIdx=0;
+    if(qtext&&opts.length>=2){
+      out.push({question:qtext.replace(/\*+/g,'').trim(),options:opts.map(function(o){return nbCleanOpt(o.text);}),answer_index:(ansIdx<opts.length)?ansIdx:0,explanation:expl.join('\n')});
+    }
+  }
+  return out;
+}
+
+/* STEP 2: call the REAL backend */
 function generate(){
   var vid=parseVid(document.getElementById('vidInput').value);
   if(!vid){ setStatus('genStatus','err','⚠ Enter a valid YouTube URL or 11-character video ID.'); return; }
-  var n=parseInt(document.getElementById('qn').value,10)||25;
+  var mode=curMode();
   var lang=document.getElementById('lang').value;
   var focus=document.getElementById('focus').value.trim();
-  var model=document.getElementById('model').value.trim();
-  var url=backend()+'/api/study?id='+vid+'&mode=quiz&n='+n+'&out='+encodeURIComponent(lang)+'&uid=';
+  var model=document.getElementById('model').value;
+  var url;
+  if(mode==='quiz'){
+    var n=parseInt(document.getElementById('qn').value,10)||25;
+    url=backend()+'/api/study?id='+vid+'&mode=quiz&n='+n+'&out='+encodeURIComponent(lang)+'&uid=';
+    document.getElementById('apiEcho').textContent='/api/study?mode=quiz&n='+n;
+  } else {
+    url=backend()+'/api/study?id='+vid+'&mode=notes&style=mcq&out='+encodeURIComponent(lang)+'&uid=';
+    document.getElementById('apiEcho').textContent='/api/study?mode=notes&style=mcq';
+  }
   if(focus) url+='&focus='+encodeURIComponent(focus);
   if(model) url+='&model='+encodeURIComponent(model);
-  document.getElementById('apiEcho').textContent = '/api/study?id='+vid+'&mode=quiz&n='+n;
 
   document.getElementById('genBtn').disabled=true;
-  setStatus('genStatus','busy','<span class="spin"></span> Generating '+n+' questions ('+lang+')… first time on a video can take a while.');
+  setStatus('genStatus','busy','<span class="spin"></span> Generating '+(mode==='quiz'?'quiz':'comprehensive MCQ notes')+' ('+lang+')… first time on a video can take a while.');
   fetch(url).then(function(r){return r.json();}).then(function(j){
     document.getElementById('genBtn').disabled=false;
     if(j.error && j.error!=='no_captions'){ setStatus('genStatus','err','⚠ '+esc(j.error)+(j.detail?' — '+esc(j.detail):'')); return; }
-    if(j.warning==='no_captions'||j.error==='no_captions'){ setStatus('genStatus','err','⚠ This video has no captions — the AI can’t generate questions from it. Try a video with captions.'); return; }
-    var qs=j.questions||[];
-    if(!qs.length){ setStatus('genStatus','err','⚠ Backend returned no questions. Try a different video or model.'); return; }
+    if(j.warning==='no_captions'||j.error==='no_captions'){ setStatus('genStatus','err','⚠ This video has no captions — the AI can’t generate from it. Try a captioned video.'); return; }
+    var qs = (mode==='quiz') ? (j.questions||[]) : parseMcqNotes(j.content||'');
+    if(!qs.length){ setStatus('genStatus','err', mode==='quiz' ? '⚠ Backend returned no questions.' : '⚠ Could not parse any MCQs from the notes. Try Quiz mode or another model.'); return; }
     GENERATED=qs;
-    setStatus('genStatus','ok','✓ Generated '+qs.length+' questions'+(j.cached?' (cached)':'')+'.');
-    document.getElementById('pvMeta').textContent = (j.provider||'ai')+' · '+(j.model||'')+(j.cached?' · cached':' · fresh');
+    var extra = (mode==='mcqnotes') ? ' — ALL questions from the comprehensive MCQ' : '';
+    setStatus('genStatus','ok','✓ Generated '+qs.length+' questions'+(j.cached?' (cached)':'')+extra+'.');
+    document.getElementById('pvMeta').textContent=(j.provider||'ai')+' · '+(j.model||model||'')+(j.cached?' · cached':' · fresh');
     renderPreview();
   }).catch(function(e){
     document.getElementById('genBtn').disabled=false;
@@ -171,7 +269,7 @@ function generate(){
 function renderPreview(){
   document.getElementById('previewCard').style.display='block';
   document.getElementById('runCard').style.display='block';
-  document.getElementById('previewArea').innerHTML = GENERATED.map(function(q,i){
+  document.getElementById('previewArea').innerHTML=GENERATED.map(function(q,i){
     return '<div class="pv-item"><div class="pv-q">Q'+(i+1)+'. '+esc(q.question)+'</div><div class="pv-opts">'+
       (q.options||[]).map(function(o,oi){var c=(q.answer_index===oi);return '<div class="pv-opt'+(c?' correct':'')+'">'+String.fromCharCode(65+oi)+') '+esc(o)+(c?'  ✓':'')+'</div>';}).join('')+
       '</div>'+(q.explanation?'<div class="pv-exp"><b>💡 </b>'+esc(q.explanation)+'</div>':'')+'</div>';
@@ -195,7 +293,7 @@ function buildPayload(){
   if(!t||t<=0) t=Math.max(5,Math.ceil(GENERATED.length*0.75));
   return {
     id:'EZ-CUSTOM-'+Date.now(),
-    title:(document.getElementById('vidInput').value?'Video':'Quiz')+' — MCQ Test',
+    title:(curMode()==='mcqnotes'?'Comprehensive MCQ':'Video Quiz')+' — Test',
     correct_score:parseFloat(document.getElementById('setCorrect').value)||2,
     negative_score:(function(){var n=parseFloat(document.getElementById('setNeg').value);return isNaN(n)?0.5:n;})(),
     time_min:t,
@@ -221,14 +319,17 @@ function takeAsTest(){
   var w=window.open(target,'_blank');
   var note=document.getElementById('handoffNote');
   if(!w){ note.innerHTML='⚠ Pop-up blocked. <a href="'+esc(target)+'" target="_blank">Click here to open the test</a>.'; }
-  else { note.innerHTML='✅ Test opened in a new tab using <code>'+esc(enginePath)+'</code>. It reads the quiz from <code>ez_custom_quiz_'+esc(payload.id)+'</code>.'; }
+  else { note.innerHTML='✅ Test opened in a new tab using <code>'+esc(enginePath)+'</code> (reads <code>ez_custom_quiz_'+esc(payload.id)+'</code>).'; }
 }
 
-/* keep JSON live */
 ['setCorrect','setNeg','setTime'].forEach(function(id){document.addEventListener('input',function(e){if(e.target.id===id&&GENERATED.length)refreshJson();});});
 
 function toggleTheme(){var h=document.documentElement,d=h.getAttribute('data-theme')==='dark';h.setAttribute('data-theme',d?'light':'dark');localStorage.setItem('mmh_theme',d?'light':'dark');document.getElementById('themeBtn').textContent=d?'🌙':'☀️';}
 (function(){if(localStorage.getItem('mmh_theme')==='dark'){document.getElementById('themeBtn').textContent='☀️';}})();
+
+/* init */
+onMode();
+loadModels();
 </script>
 </body>
 </html>
