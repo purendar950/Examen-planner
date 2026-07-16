@@ -6,6 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<!-- Capture a shared MCQ-test link (?mcqshare=) before any auth redirect so it survives login/registration -->
+<script>(function(){try{var q=new URLSearchParams(location.search);var v=q.get('mcqshare');if(v)localStorage.setItem('ez_pending_mcqshare',JSON.stringify({vid:v,lang:q.get('lang')||''}));}catch(e){}})();</script>
 <title>StudyPlanner – Smart Study Planner for SSC/NTPC/GD/IBPS</title>
 <link rel="stylesheet" href="css/app.css?v=20260705e">
 <!-- Handwriting fonts for AI Study "topper notebook" notes (scoped to .ai-nb / PDF) -->

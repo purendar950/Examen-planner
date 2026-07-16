@@ -6,6 +6,8 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<!-- Capture a shared MCQ-test link (?mcqshare=) before login so it survives the auth round-trip -->
+<script>(function(){try{var q=new URLSearchParams(location.search);var v=q.get('mcqshare');if(v)localStorage.setItem('ez_pending_mcqshare',JSON.stringify({vid:v,lang:q.get('lang')||''}));}catch(e){}})();</script>
 <title>StudyPlanner — Smart Study Planner for SSC, Railway, Banking & UPSC</title>
 <meta name="description" content="StudyPlanner — every day, one step closer. Track syllabus, analyse mock tests, organise YouTube courses and follow AI study plans for SSC CGL, RRB NTPC, SSC GD, IBPS PO & UPSC CSE.">
 <link rel="stylesheet" href="css/index.css">
