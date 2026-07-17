@@ -966,6 +966,15 @@ function ytoPlayInYtTab(plId, vid) {
   appState.ytLastVideo.ytoPlId = plId;
   saveProgress();
   setTimeout(function() { ytoPopulateYtSidebar(plId, vid); }, 60);
+  // Bring the player into view. After switching from the Organiser sub-view the
+  // page is often still scrolled down to where the course list was, leaving the
+  // just-revealed Watch player above the viewport — the video looks like it
+  // "didn't open". Match the scroll behaviour of the normal Watch-tab path
+  // (ytPlayFromList) so the player is actually visible.
+  setTimeout(function() {
+    var wrap = document.getElementById('yt-player-wrap');
+    if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 120);
 }
 
 /* ── Fill YouTube tab right-panel with organiser course (syncstudy-style) ── */
