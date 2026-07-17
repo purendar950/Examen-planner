@@ -16,7 +16,15 @@ function buildTelegramDigest() {
     for (let i = 0; i < 7; i++) {
       const d = new Date(start); d.setDate(start.getDate() + i);
       const ds = (typeof fmtDate === 'function') ? fmtDate(d) : d.toISOString().slice(0, 10);
-      const items = (map[ds] || []).filter(it => it.type !== 'spacer');
+      const items = (map[ds] || []).filter(it => {
+        if (it.type === 'spacer') return false;
+        /* Drop topics the user deleted so a regenerating plan doesn't re-add
+           them to the digest (mirrors the planner views' tombstone check). */
+        const ch = it.ch || {};
+        if (typeof isTaskDeleted === 'function' &&
+            isTaskDeleted({ chId: ch.id || '', text: ch.name || '' })) return false;
+        return true;
+      });
       if (!items.length) continue;
       const lines = items.map(it => {
         const ch = it.ch || {};
