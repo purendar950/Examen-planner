@@ -560,79 +560,187 @@ function sqSharedCardHtml(q) {
     + '</div>';
 }
 
-/* Build the Available tab body: the user's OWN generated quizzes (always
-   shown) plus, for Pro users, quizzes grouped under the playlists they added.
-   Video ids shown under a playlist are tracked so they aren't duplicated in
-   the "Your generated quizzes" section. */
-function sqSharedSectionHtml() {
-  const shownVids = {};   // video ids already rendered under a playlist group
+/* Build a video_id → quiz lookup from the synced pool + the local mirror. */
+function sqQuizByVideo() {
+  const byVid = {};
+  _sqShared.forEach(function (q) { if (q && q.video_id) byVid[q.video_id] = q; });
+  // Local mirror fills any gap (e.g. a quiz generated before the cloud sync).
+  sqLoadLocalSharedQuizzes().forEach(function (q) {
+    if (q && q.video_id && !byVid[q.video_id]) byVid[q.video_id] = q;
+  });
+  return byVid;
+}
 
-  /* ── Playlist / community quizzes (Pro) ── */
-  let playlistHtml = '';
-  if (!sqIsPro()) {
-    playlistHtml = '<div class="sq-section-label">📺 Playlist quizzes</div>'
-      + '<div class="sq-lock">💎 <b>Pro feature.</b> Unlock quizzes for the playlists you added — '
-      + 'attempt mocks generated from those videos.</div>';
+/* One video row: title on the left, quiz status/action on the right.
+   Has a quiz → Attempt (or Re-attempt + best score); else → "Quiz not
+   generated" with a shortcut to open the video and generate one. */
+function sqVideoRowHtml(pl, v, idx, q) {
+  const title = escSaved(v.title || ('Video ' + (idx + 1)));
+  let right;
+  if (q) {
+    const n = Number(q.question_count) || (q.quiz_data && q.quiz_data.questions ? q.quiz_data.questions.length : 0);
+    const best = sqBestAttempt('pq_' + v.id);
+    const bestBadge = best ? '<span class="sq-row-best">🏆 ' + best.accuracy + '%</span>' : '';
+    const label = best ? 'Re-attempt' : 'Attempt';
+    right = bestBadge
+      + '<button class="sq-btn sq-btn-primary sq-row-btn" onclick="sqStartSharedQuiz(\'' + escSaved(v.id) + '\')">▶ ' + label + ' · ' + n + ' Q</button>';
   } else {
-    const header = '<div class="sq-section-label">📺 From your playlists</div>';
-    const playlists = sqPlaylists();
+    right = '<span class="sq-row-none">Quiz not generated</span>'
+      + '<button class="sq-mini-btn sq-gen-btn" title="Open this video to generate a quiz" onclick="sqGenerateForVideo(\'' + escSaved(pl.id || '') + '\',\'' + escSaved(v.id) + '\')">＋ Generate</button>';
+  }
+  return '<div class="sq-vrow' + (q ? ' has-quiz' : '') + '">'
+    + '<span class="sq-vnum">' + (idx + 1) + '</span>'
+    + '<span class="sq-vtitle">' + title + '</span>'
+    + '<span class="sq-vright">' + right + '</span>'
+    + '</div>';
+}
 
-    if (!playlists.length) {
-      playlistHtml = header + '<div class="sq-lock">Add a course in <b>YouTube → Playlist Organiser</b>, then generate a mock from any of '
-        + 'its videos (<b>AI Study → Take as Test</b>) — the quiz shows up here under that playlist.</div>';
-    } else {
-      const byVid = {};
-      _sqShared.forEach(function (q) { if (q && q.video_id) byVid[q.video_id] = q; });
+/* One collapsible playlist folder: header (name, quiz-coverage count + bar,
+   refresh) and a body listing every video of the playlist. */
+function sqFolderHtml(pl, byVid, shownVids, idx) {
+  const vids = (pl.videos || []);
+  let ready = 0;
+  const rows = vids.map(function (v, i) {
+    if (!v || !v.id) return '';
+    const q = byVid[v.id];
+    if (q) { shownVids[v.id] = 1; ready++; }
+    return sqVideoRowHtml(pl, v, i, q);
+  }).join('');
+  const total = vids.length;
+  const pct = total ? Math.round(ready / total * 100) : 0;
+  const open = idx === 0 ? ' open' : '';   // first folder expanded by default
+  const plId = escSaved(pl.id || '');
+  const isVideo = pl.type === 'video';
+  const refreshBtn = isVideo ? ''   // single-video courses have nothing to re-pull
+    : '<button class="sq-mini-btn" title="Check the playlist for new videos + quizzes" '
+      + 'onclick="event.stopPropagation(); sqRefreshPlaylist(\'' + plId + '\', this)">🔄</button>';
+  return '<div class="sq-folder' + open + '" data-pl="' + plId + '">'
+    + '<div class="sq-folder-head" onclick="sqToggleFolder(this)">'
+    +   '<span class="sq-folder-chev">▶</span>'
+    +   '<span class="sq-folder-ico">' + (isVideo ? '🎬' : '📁') + '</span>'
+    +   '<span class="sq-folder-name">' + escSaved(pl.title || 'Playlist') + '</span>'
+    +   '<span class="sq-folder-count">' + ready + '/' + total + ' quiz' + (ready === 1 ? '' : 'zes') + '</span>'
+    +   '<div class="sq-folder-bar" title="' + pct + '% of videos have a quiz"><div class="sq-folder-fill" style="width:' + pct + '%"></div></div>'
+    +   refreshBtn
+    + '</div>'
+    + '<div class="sq-folder-body">'
+    +   (rows || '<div class="sq-sub" style="padding:12px 14px;">No videos in this playlist yet. Open it in the Playlist Organiser and refresh.</div>')
+    + '</div>'
+    + '</div>';
+}
 
-      let groupsHtml = '';
-      playlists.forEach(function (pl) {
-        const quizzes = [];
-        (pl.videos || []).forEach(function (v) {
-          if (v && byVid[v.id]) {
-            const q = byVid[v.id];
-            q._videoTitle = v.title || q.title || '';   // prefer the playlist's own video name
-            quizzes.push(q);
-            shownVids[v.id] = 1;
-          }
-        });
-        if (!quizzes.length) return;
-        groupsHtml += '<div class="sq-pl-group">'
-          + '<div class="sq-pl-head"><span class="sq-pl-ico">📺</span>'
-          +   '<span class="sq-pl-name">' + escSaved(pl.title || 'Playlist') + '</span>'
-          +   '<span class="sq-pl-count">' + quizzes.length + ' quiz' + (quizzes.length === 1 ? '' : 'zes') + '</span></div>'
-          + '<div class="sq-qz-grid">' + quizzes.map(sqSharedCardHtml).join('') + '</div>'
-          + '</div>';
-      });
+/* Build the Available tab body: a folder-per-playlist list showing every
+   video and whether it has a quiz (Attempt) or not (Quiz not generated),
+   plus a fallback section for your own quizzes whose video isn't in any
+   added playlist. */
+function sqSharedSectionHtml() {
+  const byVid = sqQuizByVideo();
+  const shownVids = {};
+  const playlists = sqPlaylists();
 
-      if (!groupsHtml) {
-        playlistHtml = header + '<div class="sq-lock">No quizzes yet for the ' + playlists.length + ' playlist'
-          + (playlists.length === 1 ? '' : 's') + ' you added. Generate one from any playlist video '
-          + '(<b>AI Study → Take as Test</b>) and it appears here. '
-          + '<span style="opacity:.75">Cross-device sharing to other learners needs the <code>playlist_quizzes</code> table in Supabase.</span></div>';
-      } else {
-        playlistHtml = header + groupsHtml;
-      }
-    }
+  let html = '<div class="sq-section-label">📺 From your playlists</div>';
+
+  if (!sqIsPro()) {
+    html += '<div class="sq-sub" style="margin:-.35rem 0 .7rem;">💎 <b style="color:var(--text);">Pro</b> unlocks '
+      + 'community quizzes for these videos. Quizzes you generate yourself always show up below.</div>';
   }
 
-  /* ── Your own generated quizzes (always shown) ── */
-  // These are quizzes you generated from any video (mirrored locally at
-  // generation time). Show every one that isn't already listed under a
-  // playlist above, so a quiz never silently vanishes.
+  if (!playlists.length) {
+    html += '<div class="sq-lock">Add a course in <b>YouTube → Playlist Organiser</b>, then generate a mock from any of '
+      + 'its videos (<b>AI Study → Take as Test</b>) — it shows up here under that playlist.</div>';
+  } else {
+    // Newest-added course first (matches the Organiser library order).
+    const ordered = playlists.slice().sort(function (a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
+    ordered.forEach(function (pl, i) { html += sqFolderHtml(pl, byVid, shownVids, i); });
+  }
+
+  /* ── Your own generated quizzes not tied to any added playlist ── */
   let ownCards = '';
   sqLoadLocalSharedQuizzes().forEach(function (q) {
     if (!q || !q.video_id || shownVids[q.video_id]) return;
     ownCards += sqSharedCardHtml(q);
   });
-  let ownHtml = '';
   if (ownCards) {
-    ownHtml = '<div class="sq-section-label">📝 Your generated quizzes</div>'
-      + '<div class="sq-sub" style="margin:-.35rem 0 .55rem;">Quizzes you generated from videos. '
-      + 'Add a video\'s course in <b>YouTube → Playlist Organiser</b> to also group it under that playlist.</div>'
+    html += '<div class="sq-section-label" style="margin-top:22px;">📝 Your generated quizzes</div>'
+      + '<div class="sq-sub" style="margin:-.35rem 0 .55rem;">Quizzes from videos that aren\'t in any added playlist. '
+      + 'Add the video\'s course in <b>YouTube → Playlist Organiser</b> to group it above.</div>'
       + '<div class="sq-qz-grid">' + ownCards + '</div>';
   }
 
-  return playlistHtml + ownHtml;
+  return html;
+}
+
+/* Expand / collapse a playlist folder. */
+function sqToggleFolder(headEl) {
+  const f = headEl.closest('.sq-folder');
+  if (f) f.classList.toggle('open');
+}
+
+/* "Generate" shortcut for a video without a quiz: open it in the YouTube tab
+   so the user can run AI Study → Take as Test to create one. */
+function sqGenerateForVideo(plId, videoId) {
+  try {
+    if (typeof ytoPlay === 'function') ytoPlay(plId, videoId);
+    else if (typeof ytoPlayInYtTab === 'function') ytoPlayInYtTab(plId, videoId);
+    else { if (typeof showToast === 'function') showToast('Open the video in the YouTube tab to generate a quiz', 'info'); return; }
+    if (typeof showToast === 'function') showToast('Opened the video — use AI Study → Take as Test to generate a quiz', 'info');
+  } catch (e) {
+    if (typeof showToast === 'function') showToast('Could not open the video', 'error');
+  }
+}
+
+/* Re-pull a playlist's videos from YouTube (DOM-free, so it works from the
+   Quiz tab) to pick up newly-added videos, preserving watched/manual state.
+   No-op for single-video courses or when the YouTube API isn't available. */
+async function sqRefetchPlaylistVideos(plId) {
+  let lib = null;
+  try { if (typeof ytoLib === 'function') lib = ytoLib(); } catch (e) {}
+  if (!lib) { try { lib = (typeof appState !== 'undefined' && appState) ? appState.ytoLibrary : null; } catch (e) {} }
+  const pl = lib && lib[plId];
+  if (!pl || pl.type === 'video') return false;
+  if (typeof ytFetchPlaylistVideos !== 'function') return false;
+
+  // Bust the 7-day cache so a refresh actually re-pulls from YouTube.
+  try { if (typeof ytCacheDelete === 'function') { ytCacheDelete('vids', plId); ytCacheDelete('info', plId); } } catch (e) {}
+
+  let fetched;
+  try { fetched = await ytFetchPlaylistVideos(plId); } catch (e) { return false; }
+  if (!fetched || !fetched.length) return false;
+
+  let durMap = {};
+  try { if (typeof ytFetchDurations === 'function') durMap = (await ytFetchDurations(fetched)) || {}; } catch (e) {}
+
+  const existingById = {};
+  (pl.videos || []).forEach(function (v) { if (v && v.id) existingById[v.id] = v; });
+  const fetchedIds = {};
+  const merged = fetched.map(function (v) {
+    fetchedIds[v.id] = 1;
+    const ex = existingById[v.id] || {};
+    return { id: v.id, title: v.title || ex.title, thumb: v.thumb || ex.thumb || '', dur: durMap[v.id] || ex.dur || 0, pub: v.publishedAt || ex.pub || null, manual: ex.manual };
+  });
+  // Keep manually-added videos the source playlist no longer returns.
+  const keptManual = (pl.videos || []).filter(function (v) { return v && v.id && !fetchedIds[v.id]; });
+  pl.videos = merged.concat(keptManual);
+
+  try { if (typeof ytoSortVideosOldestFirst === 'function') ytoSortVideosOldestFirst(pl.videos); } catch (e) {}
+  try {
+    if (typeof ytoPersist === 'function') ytoPersist();
+    else localStorage.setItem('yto_lib_v2', JSON.stringify(lib));
+  } catch (e) {}
+  return true;
+}
+
+/* Per-folder refresh button: re-pull playlist videos, re-sync quizzes, repaint. */
+async function sqRefreshPlaylist(plId, btn) {
+  const orig = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  try {
+    await sqRefetchPlaylistVideos(plId);
+    await sqRefreshShared();
+  } catch (e) {}
+  if (btn) { btn.disabled = false; btn.textContent = orig || '🔄'; }
+  sqRenderAvailableView();
+  if (typeof showToast === 'function') showToast('Playlist refreshed', 'success');
 }
 
 /* Convert one engine-format question → an attemptable runner item. */
