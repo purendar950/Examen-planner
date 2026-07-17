@@ -54,7 +54,8 @@ let appState = {
   lastRolloverDate: null,  // guard so the rollover sweep runs once per day
   recurringTasks: [],      // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
   habitsLog: {},           // {dateStr: {ruleId: true/false}} — per-day habit completion
-  deletedTaskKeys: []      // content signatures of deleted regenerable tasks — keeps a deleted plan/mock/video task from re-appearing the next day
+  deletedTaskKeys: [],     // content signatures of deleted regenerable tasks — keeps a deleted plan/mock/video task from re-appearing the next day
+  videoStudyLog: {}        // {dateStr: seconds} — real time spent watching videos in-app, credited to that day's Study Time
 };
 
 let currentFilter = 'all';
