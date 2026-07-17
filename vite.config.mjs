@@ -1,4 +1,5 @@
-import { cpSync, existsSync, mkdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
@@ -48,6 +49,66 @@ function copyLegacyStaticAssets() {
   };
 }
 
+// ── Automated cache-busting ────────────────────────────────────────────────
+// Vite already content-hashes assets that live in its module graph (the
+// `type="module"` entry src/main.js and every <link rel="stylesheet">). But
+// this app also loads ~50 classic `<script src="js/...">` files and its HTML
+// partials via `data-include="pages/*.html"` — neither is seen by Vite, so
+// historically each carried a HAND-TYPED `?v=YYYYMMDDx` token that had to be
+// bumped manually on every edit. Forgetting to bump left browsers/CDN serving
+// a stale cached copy ("I changed it but the URL is the same").
+//
+// This plugin removes that manual step: at build time it rewrites every local
+// js/ and pages/ reference in the emitted HTML to `?v=<contentHash>`, where the
+// hash is the first 8 hex chars of the file's SHA-256. The URL therefore
+// changes if and ONLY if that specific file's bytes change — so unchanged files
+// stay cached (fast for mobile users) and edited files always cache-bust.
+// Source HTML keeps the bare `href="js/..."` / `data-include="pages/..."`; the
+// version is injected only into the built output.
+function contentHashCacheBust() {
+  const hashCache = new Map();
+  const hashFor = (relPath) => {
+    if (hashCache.has(relPath)) return hashCache.get(relPath);
+    let hash = null;
+    try {
+      const bytes = readFileSync(resolve(rootDir, relPath));
+      hash = createHash('sha256').update(bytes).digest('hex').slice(0, 8);
+    } catch {
+      hash = null; // referenced file not on disk → leave unversioned
+    }
+    hashCache.set(relPath, hash);
+    return hash;
+  };
+
+  return {
+    name: 'content-hash-cache-bust',
+    apply: 'build',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        return html.replace(
+          /((?:href|src|data-include)\s*=\s*["'])([^"']+)(["'])/g,
+          (whole, pre, url, post) => {
+            // Skip external / protocol-relative / data URLs and Vite's own
+            // already-hashed bundle output under assets/.
+            if (/^(?:https?:)?\/\//i.test(url) || url.startsWith('data:')) return whole;
+            const path = url.split('?')[0].split('#')[0];
+            // Only bust the two categories Vite can't fingerprint itself.
+            if (!/(?:^|\/)(?:js|pages|css)\/[^?#]+\.(?:js|html|css)$/.test(path)) return whole;
+            // Normalise to a source-relative path by dropping any leading base
+            // prefix (e.g. "/Examen-planner/") or "./" before the js|pages|css dir.
+            const rel = path.replace(/^.*?(?=(?:js|pages|css)\/)/, '');
+            const hash = hashFor(rel);
+            // Rebuild with a clean single ?v=; if the file is missing, emit the
+            // reference without any stale query string.
+            return pre + path + (hash ? '?v=' + hash : '') + post;
+          }
+        );
+      }
+    }
+  };
+}
+
 export default defineConfig({
   // GitHub Pages serves this project from /Examen-planner/, not the domain
   // root. Vite defaults to absolute root-relative asset paths (/assets/...),
@@ -68,5 +129,5 @@ export default defineConfig({
       }
     }
   },
-  plugins: [copyLegacyStaticAssets()]
+  plugins: [contentHashCacheBust(), copyLegacyStaticAssets()]
 });
