@@ -2213,10 +2213,12 @@ body.mode-solution #pauseBtn {
   border-bottom: 1px solid var(--mmh-line);
   box-shadow: 0 1px 6px rgba(0,0,0,.05);
 }
-.mmh-brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 16px; color: var(--mmh-accent); }
+.mmh-brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
+.mmh-brand-study { color: #16a34a; }
+.mmh-brand-planner { color: #16a34a; }
 .mmh-brand-dot {
   width: 26px; height: 26px; border-radius: 50%;
-  background: var(--mmh-accent); color: #fff;
+  background: #16a34a; color: #fff;
   display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;
 }
 .mmh-hamburger {
@@ -2230,46 +2232,21 @@ body.mode-solution #pauseBtn {
 .mmh-top-btn.go { background: var(--mmh-red); color: #fff; }
 .mmh-top-btn.sol { background: var(--mmh-red); color: #fff; }
 .mmh-top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.mmh-topuser {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-weight: 700; font-size: 13px; color: var(--mmh-text);
+  background: rgba(22,163,74,.10); border: 1px solid rgba(22,163,74,.25);
+  padding: 6px 12px; border-radius: 8px; white-space: nowrap;
+}
 .mmh-attempt-select {
   border: 1px solid var(--mmh-accent); background: var(--mmh-accent); color: #fff;
   border-radius: 8px; padding: 8px 12px; font-weight: 700; font-size: 13px;
   cursor: pointer; font-family: inherit;
 }
 
-/* ---- BODY (sidebar + main) ---- */
-.mmh-body { display: flex; flex: 1; align-items: stretch; }
-
-/* ---- SIDEBAR ---- */
-.mmh-sidebar {
-  width: 240px; flex-shrink: 0;
-  background: var(--mmh-sidebar-bg);
-  border-right: 1px solid var(--mmh-line);
-  padding-bottom: 24px;
-}
-.mmh-profile {
-  display: flex; align-items: center; gap: 10px;
-  padding: 16px; border-bottom: 1px solid var(--mmh-line);
-}
-.mmh-profile-avatar {
-  width: 34px; height: 34px; border-radius: 50%;
-  background: var(--mmh-accent); color: #fff;
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-}
-.mmh-profile-name { font-weight: 700; font-size: 15px; color: var(--mmh-text); }
-.mmh-nav { display: flex; flex-direction: column; padding: 8px 0; }
-.mmh-nav-item {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 18px; font-size: 14px; font-weight: 600;
-  color: var(--mmh-muted); cursor: pointer; border: none; background: none;
-  font-family: inherit; text-align: left; width: 100%; transition: background .15s, color .15s;
-}
-.mmh-nav-item:hover { background: rgba(11,94,215,.06); color: var(--mmh-accent); }
-.mmh-nav-item.active { color: var(--mmh-accent); background: rgba(11,94,215,.10); }
-.mmh-nav-item.premium { color: #d97706; }
-.mmh-nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
-
-/* ---- MAIN ---- */
-.mmh-main { flex: 1; min-width: 0; padding: 22px 26px 60px; }
+/* ---- BODY + MAIN (no sidebar) ---- */
+.mmh-body { display: block; flex: 1; }
+.mmh-main { max-width: 1120px; margin: 0 auto; min-width: 0; padding: 22px 26px 60px; }
 .mmh-page-title { font-size: 20px; font-weight: 800; margin: 0 0 20px; color: var(--mmh-text); }
 .mmh-section-head { display: flex; align-items: center; gap: 12px; margin: 26px 0 14px; }
 .mmh-section-head h3 { font-size: 17px; font-weight: 700; margin: 0; color: var(--mmh-text); }
@@ -2362,27 +2339,17 @@ body.mode-solution #pauseBtn {
 }
 .mmh-mini-btn.solid { background: var(--mmh-accent); color: #fff; }
 
-/* ---- sidebar overlay (mobile) ---- */
-.mmh-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.4); z-index: 65; }
-
 @media (max-width: 900px) {
   .mmh-rings { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 820px) {
-  .mmh-hamburger { display: inline-block; }
-  .mmh-sidebar {
-    position: fixed; top: 0; left: 0; bottom: 0; z-index: 70;
-    transform: translateX(-100%); transition: transform .25s ease;
-    box-shadow: 2px 0 16px rgba(0,0,0,.15);
-  }
-  .mmh-analysis.sidebar-open .mmh-sidebar { transform: translateX(0); }
-  .mmh-analysis.sidebar-open .mmh-backdrop { display: block; }
   .mmh-main { padding: 18px 16px 60px; }
 }
 @media (max-width: 560px) {
   .mmh-rings { grid-template-columns: repeat(2, 1fr); }
   .mmh-ring, .mmh-ring svg { width: 108px; height: 108px; }
   .mmh-top-btn.go { display: none; }
+  .mmh-topuser { display: none; }
   .mmh-cmp-row { grid-template-columns: 70px 1fr 62px; gap: 8px; }
 }
 </style>
@@ -4055,39 +4022,20 @@ function buildAnalysisDashboard(d) {
         </div>`).join("")}</div>`
     : `<div class="mmh-empty">No toppers yet — be the first to top this test! 🏆</div>`;
 
-  // Sidebar nav
-  const navItems = [
-    ["home", "Home", "showHomeScreen()", true],
-    ["tests", "Mock Tests", "showHomeScreen()", false],
-    ["live", "Live Mocks", "showHomeScreen()", false],
-    ["premium", "Buy Premium", "", false],
-    ["partner", "Become a Partner", "", false],
-    ["saved", "Saved Questions", "", false],
-    ["privacy", "Privacy Policy", "", false]
-  ].map(([ic, label, fn, active]) =>
-    `<button class="mmh-nav-item ${active ? "active" : ""} ${ic === "premium" ? "premium" : ""}"
-       ${fn ? `onclick="${fn}"` : ""}>${mmhIcon(ic)}<span>${label}</span></button>`
-  ).join("");
-
   return `<div class="mmh-analysis" id="mmhAnalysis">
     <div class="mmh-topbar">
-      <button class="mmh-hamburger" onclick="mmhToggleSidebar()">☰</button>
-      <div class="mmh-brand"><span class="mmh-brand-dot">M</span>Mock Matrix Hub</div>
+      <div class="mmh-brand">
+        <span class="mmh-brand-dot">S</span>
+        <span class="mmh-brand-study">Study</span><span class="mmh-brand-planner">Planner</span>
+      </div>
       <button class="mmh-top-btn go" onclick="showHomeScreen()">Go to Test</button>
       <div class="mmh-top-right">
+        <span class="mmh-topuser">${d.name || "User"}</span>
         <button class="mmh-attempt-select" onclick="loadPreviousAttempts(QUIZ_ID)">Attempt 1 ▾</button>
         <button class="mmh-top-btn sol" onclick="enterSolutionMode()">Solution</button>
       </div>
     </div>
     <div class="mmh-body">
-      <div class="mmh-backdrop" onclick="mmhToggleSidebar()"></div>
-      <aside class="mmh-sidebar">
-        <div class="mmh-profile">
-          <div class="mmh-profile-avatar">${mmhAvatar()}</div>
-          <div class="mmh-profile-name">${d.name || "User"}</div>
-        </div>
-        <nav class="mmh-nav">${navItems}</nav>
-      </aside>
       <main class="mmh-main">
         <h1 class="mmh-page-title">${d.quizTitle || d.quizId}</h1>
 
