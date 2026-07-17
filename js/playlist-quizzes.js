@@ -19,6 +19,7 @@
      .available()              -> bool
      .publish(opts)            -> Promise<bool>   (upsert by video_id)
      .listForVideos(ids[])     -> Promise<row[]>
+     .listForUser(userId)      -> Promise<row[]>  (your own quizzes, any device)
 
    ─── Supabase schema (run once in the SQL editor) ───────────────
    create table if not exists playlist_quizzes (
@@ -111,6 +112,25 @@
         }
       } catch (e) { console.warn('[playlist-quizzes] listForVideos threw:', e); }
       return out;
+    },
+
+    /* Every quiz the given user generated, newest first — regardless of which
+       playlist (or none) the source video belongs to. This is what powers
+       cross-device sync: sign in on any device and the quizzes you made come
+       back. Requires a stable account id (Firebase uid / email); a per-device
+       fallback id would not match across devices. */
+    listForUser: async function (uid) {
+      var c = client();
+      if (!c || !uid) return [];
+      try {
+        var res = await c.from('playlist_quizzes')
+          .select('*')
+          .eq('created_by', String(uid))
+          .order('updated_at', { ascending: false })
+          .limit(200);
+        if (res.error) { console.warn('[playlist-quizzes] listForUser failed:', res.error.message); return []; }
+        return res.data || [];
+      } catch (e) { console.warn('[playlist-quizzes] listForUser threw:', e); return []; }
     }
   };
 

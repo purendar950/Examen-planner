@@ -467,6 +467,42 @@ function sqLoadLocalSharedQuizzes() {
   } catch (e) { return []; }
 }
 
+/* Stable per-account id, written on login by js/core/auth.js. No device-id
+   fallback here on purpose: cross-device sync only works when the same account
+   is signed in, so an anonymous per-device id must not be treated as "me". */
+function sqUserId() {
+  try { return localStorage.getItem('ez_user_uid') || localStorage.getItem('ez_user_email') || null; }
+  catch (e) { return null; }
+}
+
+/* Merge cloud quiz rows into the local mirror (ez_pl_quizzes) so the user's own
+   quizzes persist offline on this device and surface in "Your generated
+   quizzes". Keeps the newest 40 (same cap as generation-time writes). */
+function sqMergeIntoLocalMirror(rows) {
+  if (!rows || !rows.length) return;
+  try {
+    const map = JSON.parse(localStorage.getItem('ez_pl_quizzes') || '{}') || {};
+    rows.forEach(function (q) {
+      if (!q || !q.video_id) return;
+      map[q.video_id] = {
+        video_id:        q.video_id,
+        title:           q.title || 'MCQ Test',
+        question_count:  q.question_count || (q.quiz_data && q.quiz_data.questions ? q.quiz_data.questions.length : 0),
+        quiz_data:       q.quiz_data || { questions: [] },
+        created_by:      q.created_by || null,
+        created_by_name: q.created_by_name || 'You',
+        created_at:      q.created_at || q.updated_at || new Date().toISOString()
+      };
+    });
+    const keys = Object.keys(map);
+    if (keys.length > 40) {
+      keys.sort(function (a, b) { return String(map[b].created_at || '').localeCompare(String(map[a].created_at || '')); })
+          .slice(40).forEach(function (k) { delete map[k]; });
+    }
+    localStorage.setItem('ez_pl_quizzes', JSON.stringify(map));
+  } catch (e) {}
+}
+
 /* Fetch quizzes the user can attempt in the Available tab — always including
    the user's OWN generated quizzes (local mirror, keyed by video id) and, for
    Pro users, the shared Supabase pool for every video across their added
@@ -476,23 +512,33 @@ function sqLoadLocalSharedQuizzes() {
 async function sqRefreshShared() {
   _sqShared = [];
 
-  // Your own generated quizzes — always available to attempt.
-  const local = sqLoadLocalSharedQuizzes();
-
-  // Shared (community) playlist quizzes are Pro-gated and require added playlists.
+  const cloudReady = !!(window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available());
   let supa = [];
-  if (sqIsPro()) {
+
+  // (1) Cross-device sync: pull every quiz THIS account generated (any device),
+  //     then mirror them locally so they persist offline and show up here even
+  //     when the source video isn't inside an added playlist.
+  const myId = sqUserId();
+  if (cloudReady && myId && PlaylistQuizzes.listForUser) {
+    try {
+      const mine = (await PlaylistQuizzes.listForUser(myId)) || [];
+      if (mine.length) { sqMergeIntoLocalMirror(mine); supa = supa.concat(mine); }
+    } catch (e) {}
+  }
+
+  // (2) Shared (community) playlist quizzes are Pro-gated and require added playlists.
+  if (cloudReady && sqIsPro()) {
     const vidSet = {};
     sqPlaylists().forEach(function (pl) { (pl.videos || []).forEach(function (v) { if (v && v.id) vidSet[v.id] = 1; }); });
     const vids = Object.keys(vidSet);
     if (vids.length) {
-      try {
-        if (window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available()) {
-          supa = (await PlaylistQuizzes.listForVideos(vids)) || [];
-        }
-      } catch (e) { supa = []; }
+      try { supa = supa.concat((await PlaylistQuizzes.listForVideos(vids)) || []); } catch (e) {}
     }
   }
+
+  // Your own generated quizzes — always available to attempt. Re-read the local
+  // mirror AFTER the sync above so freshly synced cloud quizzes are included.
+  const local = sqLoadLocalSharedQuizzes();
 
   // Merge by video_id — the shared (Supabase) copy wins over the local mirror.
   const byVid = {};
