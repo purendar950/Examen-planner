@@ -4572,68 +4572,120 @@ function saveAttemptHistory(payload) {
 }
 
 
-// 3. Calculate Rank & Percentile (Enhanced for Sectional Support)
+// 3. Calculate Rank & Percentile — Supabase leaderboard, local fallback
 function getRankAndPercentile(quizId, myScore, myTime, mySubmittedAt) {
-  // ✅ FIX: Guard against null db (standalone/offline mode)
-  if (!db) return Promise.resolve({ rank: 1, percentile: "N/A", total: 1 });
-
-  return db.ref("attempt_history/" + quizId).once("value").then(snapshot => {
-    const data = snapshot.val() || {};
-    let attempts = [];
-
-    // Flatten all attempts
-    Object.values(data).forEach(deviceData => {
-      Object.values(deviceData).forEach(att => attempts.push(att));
-    });
-
-    // Sort: Score DESC, Time ASC
-    attempts.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.timeTaken - b.timeTaken;
-    });
-
-    const total = attempts.length;
-    let rank = total + 1; 
-
-    // Find my rank
+  // Rank me within a flat list of {score, timeTaken} that includes my attempt.
+  const computeRank = (attempts) => {
+    attempts.sort((a, b) => (b.score !== a.score) ? b.score - a.score : (a.timeTaken || 0) - (b.timeTaken || 0));
+    const total = attempts.length || 1;
+    let rank = total;
     for (let i = 0; i < attempts.length; i++) {
-      if (attempts[i].score === myScore &&
-          attempts[i].timeTaken === myTime &&
-          attempts[i].submittedAt === mySubmittedAt) {
-        rank = i + 1;
-        break;
-      }
+      if (myScore > attempts[i].score ||
+         (myScore === attempts[i].score && myTime <= (attempts[i].timeTaken || 0))) { rank = i + 1; break; }
     }
-
-    // Calculate Percentile
-    const below = attempts.filter(a =>
-      a.score < myScore || (a.score === myScore && a.timeTaken > myTime)
-    ).length;
-
+    const below = attempts.filter(a => a.score < myScore || (a.score === myScore && (a.timeTaken || 0) > myTime)).length;
     const percentile = total ? ((below / total) * 100).toFixed(2) : "0.00";
-
     return { rank, percentile, total };
-  }).catch(() => ({ rank: 1, percentile: "N/A", total: 1 })); // ✅ FIX: Network error fallback
+  };
+
+  // Firebase path (only if configured)
+  if (db) {
+    return db.ref("attempt_history/" + quizId).once("value").then(snapshot => {
+      const data = snapshot.val() || {};
+      let attempts = [];
+      Object.values(data).forEach(deviceData => { Object.values(deviceData).forEach(att => attempts.push(att)); });
+      attempts.sort((a, b) => (b.score !== a.score) ? b.score - a.score : a.timeTaken - b.timeTaken);
+      const total = attempts.length;
+      let rank = total + 1;
+      for (let i = 0; i < attempts.length; i++) {
+        if (attempts[i].score === myScore && attempts[i].timeTaken === myTime && attempts[i].submittedAt === mySubmittedAt) { rank = i + 1; break; }
+      }
+      const below = attempts.filter(a => a.score < myScore || (a.score === myScore && a.timeTaken > myTime)).length;
+      const percentile = total ? ((below / total) * 100).toFixed(2) : "0.00";
+      return { rank, percentile, total };
+    }).catch(() => ({ rank: 1, percentile: "N/A", total: 1 }));
+  }
+
+  // Standalone: rank across all users from Supabase, else local attempts.
+  return (async () => {
+    try {
+      if (window.MockAPI && typeof window.MockAPI.getLeaderboard === "function") {
+        const rows = await window.MockAPI.getLeaderboard(quizId, 1000);
+        if (rows && rows.length) {
+          const attempts = rows.map(r => ({ score: r.score || 0, timeTaken: r.time_taken || 0 }));
+          if (!attempts.some(a => a.score === myScore && a.timeTaken === myTime)) attempts.push({ score: myScore, timeTaken: myTime });
+          return computeRank(attempts);
+        }
+      }
+    } catch (e) { console.warn("Supabase rank failed:", e); }
+    // Local fallback (this device)
+    try {
+      const local = await getAllAttempts(quizId);
+      const attempts = (local || []).map(a => ({ score: a.score || 0, timeTaken: a.timeTaken || 0 }));
+      if (!attempts.some(a => a.score === myScore && a.timeTaken === myTime)) attempts.push({ score: myScore, timeTaken: myTime });
+      if (attempts.length) return computeRank(attempts);
+    } catch (e) {}
+    return { rank: 1, percentile: "100.00", total: 1 };
+  })();
 }
 
-// 4. Fetch Top 10 List
+// 4. Fetch Top 10 Toppers — Supabase leaderboard, local fallback
 function getToppersList(quizId) {
-  // ✅ FIX: Guard against null db (standalone/offline mode)
-  if (!db) return Promise.resolve([]);
+  // Firebase path (only if configured)
+  if (db) {
+    return db.ref("quiz_results/" + quizId).once("value").then(snapshot => {
+      const data = snapshot.val();
+      if (!data) return [];
+      let all = Object.values(data);
+      all.sort((a, b) => (b.score !== a.score) ? b.score - a.score : a.timeTaken - b.timeTaken);
+      return all.slice(0, 10);
+    }).catch(() => []);
+  }
 
-  return db.ref("quiz_results/" + quizId).once("value").then(snapshot => {
-    const data = snapshot.val();
-    if (!data) return [];
+  // Standalone: build the leaderboard from Supabase mock_attempts (all users).
+  return (async () => {
+    try {
+      if (window.MockAPI && typeof window.MockAPI.getLeaderboard === "function") {
+        const rows = await window.MockAPI.getLeaderboard(quizId, 300);
+        if (rows && rows.length) {
+          const byUser = {};   // best attempt per user
+          rows.forEach(r => {
+            const key = r.user_id || r.user_name || Math.random();
+            const cur = byUser[key];
+            if (!cur || (r.score || 0) > (cur.score || 0) ||
+               ((r.score || 0) === (cur.score || 0) && (r.time_taken || 0) < (cur.time_taken || 0))) byUser[key] = r;
+          });
+          const list = Object.values(byUser).map(r => ({
+            name: r.user_name || "User",
+            score: r.score || 0,
+            timeTaken: r.time_taken || 0,
+            correct: r.correct || 0,
+            wrong: r.wrong || 0,
+            sections: sectionsFromBreakdown(r.section_breakdown)
+          }));
+          list.sort((a, b) => (b.score !== a.score) ? b.score - a.score : a.timeTaken - b.timeTaken);
+          if (list.length) return list.slice(0, 10);
+        }
+      }
+    } catch (e) { console.warn("Supabase toppers failed:", e); }
 
-    let all = Object.values(data);
-    // Sort: Score High->Low, Time Low->High
-    all.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.timeTaken - b.timeTaken;
-    });
-
-    return all.slice(0, 10);
-  }).catch(() => []); // ✅ FIX: Network error fallback
+    // Fallback: the best local attempt(s) so a topper always shows for a solo user.
+    try {
+      const local = await getAllAttempts(quizId);
+      if (local && local.length) {
+        const best = local.slice().sort((a, b) => (b.score !== a.score) ? b.score - a.score : (a.timeTaken || 0) - (b.timeTaken || 0))[0];
+        return [{
+          name: (typeof USER_DISPLAY_NAME !== "undefined" && USER_DISPLAY_NAME) ? USER_DISPLAY_NAME : "You",
+          score: best.score || 0,
+          timeTaken: best.timeTaken || 0,
+          correct: best.correct || 0,
+          wrong: best.wrong || 0,
+          sections: best.sections || {}
+        }];
+      }
+    } catch (e) {}
+    return [];
+  })();
 }
 
 // 5. Get Topper Stats for Bar Chart (Updated for Sectional scaling)

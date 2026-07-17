@@ -183,6 +183,25 @@
         console.warn('[supabase-config] getAttempts threw:', e);
         return [];
       }
+    },
+
+    /* Read ALL attempts for a test (all users), ranked by score desc then
+       time asc. Powers the Toppers leaderboard + rank/percentile.
+       Returns [] if the table/policy is absent (non-blocking). */
+    getLeaderboard: async function (testId, limit) {
+      try {
+        if (!supa || !testId) return [];
+        var res = await supa.from('mock_attempts').select('*')
+          .eq('test_id', testId)
+          .order('score', { ascending: false })
+          .order('time_taken', { ascending: true })
+          .limit(limit || 300);
+        if (res.error) { console.warn('[supabase-config] getLeaderboard:', res.error.message); return []; }
+        return res.data || [];
+      } catch (e) {
+        console.warn('[supabase-config] getLeaderboard threw:', e);
+        return [];
+      }
     }
   };
 
