@@ -173,6 +173,22 @@
         if (res.error) { console.warn('[quiz-attempts] clear failed:', res.error.message); return false; }
         return true;
       } catch (e) { console.warn('[quiz-attempts] clear threw:', e); return false; }
+    },
+
+    /* Read the current user's attempts on FULL mock / comprehensive-MCQ tests
+       taken in the standalone exam engine (test-engine.html), stored in the
+       shared `mock_attempts` table. The engine tags rows with the same
+       ez_user_uid/email identity the app uses, so filtering by user_id works.
+       Returns raw rows (newest first); [] if the table/policy is absent. */
+    mockAttempts: async function () {
+      var c = client(), uid = userId();
+      if (!c || !uid) return [];
+      try {
+        var res = await c.from('mock_attempts')
+          .select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(50);
+        if (res.error) { console.warn('[quiz-attempts] mockAttempts failed:', res.error.message); return []; }
+        return res.data || [];
+      } catch (e) { console.warn('[quiz-attempts] mockAttempts threw:', e); return []; }
     }
   };
 
