@@ -271,6 +271,92 @@ function sqMapMockRows(rows) {
   });
 }
 
+/* Read exam-engine attempts straight from localStorage. The engine
+   (test-engine.html) ALWAYS records every attempt (via recordLocalAttempt)
+   into a per-quiz key "history_<username>_<quizId>" — regardless of whether
+   the Supabase mock_attempts table exists — and app.html shares the same
+   origin, so these are always available. Each value is an array of:
+     { submittedAt, score, total(=max marks), correct, wrong, timeTaken, sections }
+   We resolve a title from the saved-question rows (they share the quizId as
+   test_id); otherwise we derive a best-effort label from the key. */
+function sqLoadLocalMockAttempts() {
+  const out = [];
+  let ls;
+  try { ls = window.localStorage; } catch (e) { return out; }
+  if (!ls) return out;
+
+  const titleByTest = {};
+  _sqRows.forEach(function (r) { if (r.test_id) titleByTest[r.test_id] = r.quiz_title || r.test_id; });
+  const testIds = Object.keys(titleByTest).sort(function (a, b) { return b.length - a.length; }); // longest first
+
+  for (let i = 0; i < ls.length; i++) {
+    const key = ls.key(i);
+    if (!key || key.indexOf('history_') !== 0) continue;
+    let arr;
+    try { arr = JSON.parse(ls.getItem(key) || '[]'); } catch (e) { continue; }
+    if (!Array.isArray(arr) || !arr.length) continue;
+
+    // Resolve title + scope by matching a known test_id as the key suffix.
+    let title = null, scope = null;
+    for (let t = 0; t < testIds.length; t++) {
+      if (testIds[t] && key.endsWith('_' + testIds[t])) { title = titleByTest[testIds[t]]; scope = testIds[t]; break; }
+    }
+    if (!scope) {
+      const rest = key.slice('history_'.length);
+      const us = rest.indexOf('_');
+      scope = (us >= 0 ? rest.slice(us + 1) : rest) || 'mock';   // best-effort quizId
+      title = scope || 'Mock Test';
+    }
+
+    arr.forEach(function (a) {
+      if (!a || a.submittedAt == null) return;
+      const correct = Number(a.correct) || 0;
+      const wrong = Number(a.wrong) || 0;
+      let totalQ = 0, skip = 0, hasSec = false;
+      if (a.sections && typeof a.sections === 'object') {
+        Object.keys(a.sections).forEach(function (k) {
+          const s = a.sections[k] || {};
+          const c = Number(s.correct) || 0, w = Number(s.wrong) || 0, u = Number(s.unattempted) || 0;
+          totalQ += c + w + u; skip += u; hasSec = true;
+        });
+      }
+      if (!hasSec) totalQ = correct + wrong;
+      const attempted = correct + wrong;
+      const acc = attempted ? Math.round((correct / attempted) * 100) : 0;
+      let atIso; try { atIso = new Date(Number(a.submittedAt)).toISOString(); } catch (e) { atIso = new Date().toISOString(); }
+      out.push({
+        id: 'mockls_' + scope + '_' + a.submittedAt,
+        source: 'mock',
+        scope: scope,
+        title: title || 'Mock Test',
+        at: atIso,
+        score: Number(a.score) || 0,
+        maxScore: Number(a.total) || 0,       // engine stores max marks in `total`
+        correct: correct,
+        wrong: wrong,
+        skip: skip,
+        total: totalQ,
+        accuracy: acc,
+        timeTaken: Number(a.timeTaken) || 0,
+        sectionBreakdown: a.sections || null,
+        items: [], answers: {}
+      });
+    });
+  }
+  return out;
+}
+
+/* Merge local + Supabase mock attempts, deduping the same attempt that may
+   appear in both (matched on scope + score + counts + time). Local wins as it
+   carries the richer per-section data and an exact timestamp. */
+function sqMergeMock(localList, supaList) {
+  const bySig = {};
+  function sig(a) { return [a.scope, a.score, a.maxScore, a.correct, a.wrong, a.timeTaken].join('|'); }
+  (supaList || []).forEach(function (a) { bySig[sig(a)] = a; });
+  (localList || []).forEach(function (a) { bySig[sig(a)] = a; });   // local wins
+  return Object.keys(bySig).map(function (k) { return bySig[k]; });
+}
+
 /* Repopulate the attempt caches: owned quiz attempts (cloud+local) plus the
    read-only exam-engine (mock) attempts, then rebuild the combined list. */
 async function sqRefreshAttempts() {
@@ -285,14 +371,18 @@ async function sqRefreshAttempts() {
   _sqQuizAttempts = sqMergeAttempts(cloud, local).map(function (a) { if (!a.source) a.source = 'quiz'; return a; });
   sqSaveLocalAttempts(_sqQuizAttempts);   // keep the offline mirror fresh (owned only)
 
-  // Read-only attempts from the exam engine (comprehensive MCQ / full mock tests)
-  let mockRows = [];
+  // Read-only attempts from the exam engine (comprehensive MCQ / full mock tests).
+  // Primary source: the per-quiz localStorage history the engine always writes
+  // (works with no backend). Secondary: the Supabase mock_attempts table for
+  // cross-device history when it's set up. The two are merged + deduped.
+  const localMock = sqLoadLocalMockAttempts();
+  let supaMock = [];
   try {
     if (window.QuizAttempts && QuizAttempts.mockAttempts && QuizAttempts.available && QuizAttempts.available()) {
-      mockRows = await QuizAttempts.mockAttempts();
+      supaMock = sqMapMockRows(await QuizAttempts.mockAttempts());
     }
-  } catch (e) { mockRows = []; }
-  _sqMockAttempts = sqMapMockRows(mockRows);
+  } catch (e) { supaMock = []; }
+  _sqMockAttempts = sqMergeMock(localMock, supaMock);
 
   sqRecomputeCombined();
   return _sqAttempts;
