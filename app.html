@@ -9,7 +9,7 @@
 <!-- Capture a shared MCQ-test link (?t=<token>, or legacy ?mcqshare=) before any auth redirect so it survives login/registration -->
 <script>(function(){try{var q=new URLSearchParams(location.search);var t=q.get('t');if(t){localStorage.setItem('ez_pending_share',t);}else{var v=q.get('mcqshare');if(v)localStorage.setItem('ez_pending_mcqshare',JSON.stringify({vid:v,lang:q.get('lang')||''}));}}catch(e){}})();</script>
 <title>StudyPlanner – Smart Study Planner for SSC/NTPC/GD/IBPS</title>
-<link rel="stylesheet" href="css/app.css?v=20260705e">
+<link rel="stylesheet" href="css/app.css">
 <!-- Handwriting fonts for AI Study "topper notebook" notes (scoped to .ai-nb / PDF) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -190,15 +190,15 @@
     <!-- ═══ DASHBOARD PAGE ═══ -->
     <div data-include="pages/dashboard.html"></div>
     <!-- ═══ SYLLABUS PAGE (includes Exam Pattern sub-tab) ═══ -->
-    <div data-include="pages/syllabus.html?v=20260716a"></div>
+    <div data-include="pages/syllabus.html"></div>
     <!-- ═══ PLANNER PAGE ═══ -->
     <div data-include="pages/planner.html"></div>
     <!-- ═══ YOUTUBE PAGE (includes Playlist Organiser sub-tab) ═══ -->
-    <div data-include="pages/youtube.html?v=20260716a"></div>
+    <div data-include="pages/youtube.html"></div>
     <!-- ═══ ANALYSIS PAGE (includes Revision sub-tab) ═══ -->
-    <div data-include="pages/analysis.html?v=20260716a"></div>
+    <div data-include="pages/analysis.html"></div>
     <!-- ═══ QUIZ PAGE (Attempt Quiz + Saved sub-tabs, built from saved questions) ═══ -->
-    <div data-include="pages/saved.html?v=20260717k"></div>
+    <div data-include="pages/saved.html"></div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
@@ -411,43 +411,45 @@
 <script defer src="js/tabs/syllabus.js"></script>
 <!-- planner.js split into 8 cohesive modules (see js/tabs/planner-calendar.js
      header comment) — load order matches original internal section order. -->
-<script defer src="js/tabs/planner-calendar.js?v=20260705c"></script>
-<script defer src="js/tabs/planner-schedule.js?v=20260624c"></script>
-<script defer src="js/tabs/planner-day-view.js?v=20260705e"></script>
-<script defer src="js/tabs/planner-habits.js?v=20260703a"></script>
-<script defer src="js/tabs/planner-rollover.js?v=20260703a"></script>
-<script defer src="js/tabs/planner-tasks-kanban.js?v=20260705c"></script>
-<script defer src="js/tabs/planner-timer.js?v=20260705e"></script>
-<script defer src="js/tabs/planner-focus-timer.js?v=20260705d"></script>
-<script defer src="js/tabs/planner-pomodoro.js?v=20260705d"></script>
-<script defer src="js/tabs/planner-timer-extras.js?v=20260705e"></script>
-<script defer src="js/tabs/planner-scheduled-videos.js?v=20260624c"></script>
-<script defer src="js/tabs/planner-ai-insights.js?v=20260624c"></script>
+<script defer src="js/tabs/planner-calendar.js"></script>
+<script defer src="js/tabs/planner-schedule.js"></script>
+<script defer src="js/tabs/planner-day-view.js"></script>
+<script defer src="js/tabs/planner-habits.js"></script>
+<script defer src="js/tabs/planner-rollover.js"></script>
+<script defer src="js/tabs/planner-tasks-kanban.js"></script>
+<script defer src="js/tabs/planner-timer.js"></script>
+<script defer src="js/tabs/planner-focus-timer.js"></script>
+<script defer src="js/tabs/planner-pomodoro.js"></script>
+<script defer src="js/tabs/planner-timer-extras.js"></script>
+<script defer src="js/tabs/planner-scheduled-videos.js"></script>
+<script defer src="js/tabs/planner-ai-insights.js"></script>
 <script defer src="js/tabs/planner-generator.js"></script>
-<script defer src="js/tabs/plan-wizard.js?v=20260705c"></script>
+<script defer src="js/tabs/plan-wizard.js"></script>
 <script defer src="js/core/exam-switch.js"></script>
-<script defer src="js/tabs/revision.js?v=20260626a"></script>
+<script defer src="js/tabs/revision.js"></script>
 <script defer src="js/features/streak.js"></script>
-<!-- Bump the ?v= number whenever youtube.js / playlist-organiser.js change,
-     so returning browsers fetch the new file instead of a cached copy. -->
-<script defer src="js/tabs/youtube.js?v=20260717c"></script>
-<script defer src="js/tabs/playlist-organiser.js?v=20260717a"></script>
-<script defer src="js/features/yt-screenshots.js?v=20260711a"></script>
+<!-- Cache-busting is automatic: the Vite build appends ?v=<contentHash> to
+     every js/ and pages/ reference (see contentHashCacheBust in vite.config.mjs),
+     so edited files always reload and unchanged files stay cached. Never add a
+     manual ?v= here — it is stripped and replaced by the build. -->
+<script defer src="js/tabs/youtube.js"></script>
+<script defer src="js/tabs/playlist-organiser.js"></script>
+<script defer src="js/features/yt-screenshots.js"></script>
 <!-- mock-tests.js split by responsibility (see mock-tests-render.js header).
      Load order matters: data.js declares the shared const/let that
      scoring.js and render.js read. -->
-<script defer src="js/tabs/mock-tests-data.js?v=20260706a"></script>
-<script defer src="js/tabs/mock-tests-scoring.js?v=20260706a"></script>
-<script defer src="js/tabs/mock-tests-render.js?v=20260706a"></script>
-<script defer src="js/tabs/analysis.js?v=20260711c"></script>
+<script defer src="js/tabs/mock-tests-data.js"></script>
+<script defer src="js/tabs/mock-tests-scoring.js"></script>
+<script defer src="js/tabs/mock-tests-render.js"></script>
+<script defer src="js/tabs/analysis.js"></script>
 <!-- 🔖 Saved Questions (Supabase-backed, shared store with the quiz engine) -->
 <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script defer src="js/saved-questions.js?v=20260716a"></script>
+<script defer src="js/saved-questions.js"></script>
 <!-- 📊 Quiz attempts (Supabase-backed, cross-device history for the Quiz tab) -->
-<script defer src="js/quiz-attempts.js?v=20260717e"></script>
+<script defer src="js/quiz-attempts.js"></script>
 <!-- 📺 Shared playlist quizzes (community mocks, grouped by playlist in the Quiz tab) -->
-<script defer src="js/playlist-quizzes.js?v=20260717k"></script>
-<script defer src="js/tabs/saved-questions.js?v=20260717k"></script>
+<script defer src="js/playlist-quizzes.js"></script>
+<script defer src="js/tabs/saved-questions.js"></script>
 <script defer src="js/tabs/profile.js"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
 <script defer src="js/features/responsive.js"></script>
@@ -461,9 +463,9 @@
      for real 4x speed + native PiP; falls back to the iframe on any failure.
      Must load AFTER youtube.js (wraps ytDoLoad/ytSetSpeed/ytPiP) and after the
      gating file (uses ezIsPro/ezLockedMsg). -->
-<script defer src="js/features/turbo-player.js?v=20260711d"></script>
+<script defer src="js/features/turbo-player.js"></script>
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
-<script defer src="js/features/ai-tutor.js?v=20260717k"></script>
+<script defer src="js/features/ai-tutor.js"></script>
 <script defer src="js/core/theme.js"></script>
 <!-- YouTube IFrame API — deferred; onYouTubeIframeAPIReady fires after load -->
 <script defer src="https://www.youtube.com/iframe_api"></script>
