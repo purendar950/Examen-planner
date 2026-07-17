@@ -68,6 +68,28 @@ function recordStudyLog(dateStr) {
   _ensureStudyLog()[dateStr] = Math.round(plannerDayTotalSeconds(dateStr));
 }
 
+// Credit externally-tracked study seconds (e.g. in-app YouTube watching) to a
+// day's Study Time. Kept in appState.videoStudyLog — separate from per-task
+// timers — so it counts even when the watched video has no matching planner
+// task. Flows into plannerDayTotalSeconds / computeRangeStats automatically.
+function creditVideoWatchTime(seconds, dateStr) {
+  if (typeof appState === 'undefined') return;
+  const secs = Math.round(Number(seconds) || 0);
+  if (secs <= 0) return;
+  const ds = dateStr || ((typeof fmtDate === 'function') ? fmtDate(new Date()) : null);
+  if (!ds) return;
+  if (!appState.videoStudyLog || typeof appState.videoStudyLog !== 'object') appState.videoStudyLog = {};
+  appState.videoStudyLog[ds] = (appState.videoStudyLog[ds] || 0) + secs;
+  // Keep the persistent day snapshot in sync so the weekly chart/history is right.
+  recordStudyLog(ds);
+  try { saveProgress(); } catch (e) {}
+  // Live-refresh the day header total if the credited day is the one on screen.
+  if (typeof selectedPlannerDate !== 'undefined' && ds === selectedPlannerDate &&
+      typeof refreshDayStudyTime === 'function') {
+    try { refreshDayStudyTime(); } catch (e) {}
+  }
+}
+
 // One-time (per load) backfill so history is right even for days logged before
 // this feature: take the max of any existing log value and the live task total.
 function backfillStudyLog() {

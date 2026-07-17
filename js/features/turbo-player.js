@@ -42,6 +42,17 @@
   var turboVid = null;          // current video id playing in Turbo
   var turboVidTitle = '';       // current video title (from /api/info) for saved moments
   var lastSave = 0;
+  var turboWatchAccum = 0;      // real (wall-clock) seconds watched, pending credit to Study Time
+  var turboWatchLastTs = 0;     // Date.now() at the previous timeupdate
+
+  /* Bank accumulated Turbo watch time into today's Study Time (mirrors the
+     iframe player's ytFlushWatchTime). */
+  function flushTurboWatchTime() {
+    if (turboWatchAccum < 1) return;
+    var secs = Math.round(turboWatchAccum);
+    turboWatchAccum = 0;
+    if (typeof creditVideoWatchTime === 'function') creditVideoWatchTime(secs);
+  }
 
   function isPro() {
     return typeof ezIsPro === 'function' ? ezIsPro() : true;
@@ -120,7 +131,15 @@
     });
     v.addEventListener('timeupdate', function () {
       var now = Date.now();
-      if (now - lastSave > 10000) { lastSave = now; saveTurboProgress(); }
+      // Accumulate REAL elapsed watch time (wall-clock) between timeupdate
+      // events while actually playing. Ignore gaps > 5s (paused/seeked/buffered
+      // or the tab was backgrounded) so only genuine playback is credited.
+      if (!v.paused && turboWatchLastTs) {
+        var d = (now - turboWatchLastTs) / 1000;
+        if (d > 0 && d <= 5) turboWatchAccum += d;
+      }
+      turboWatchLastTs = now;
+      if (now - lastSave > 10000) { lastSave = now; saveTurboProgress(); flushTurboWatchTime(); }
       try {
         if (v.duration && v.duration > 0) {
           var pct = Math.round(v.currentTime / v.duration * 100);
@@ -136,7 +155,7 @@
         }
       } catch (e) {}
     });
-    v.addEventListener('pause', saveTurboProgress);
+    v.addEventListener('pause', function () { saveTurboProgress(); turboWatchLastTs = 0; flushTurboWatchTime(); });
     v.addEventListener('enterpictureinpicture', function () {
       showBadge(true);
       // Keep the hidden background YouTube iframe silenced while the native

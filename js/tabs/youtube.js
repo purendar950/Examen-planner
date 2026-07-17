@@ -556,6 +556,8 @@ let ytPlayer = null;
 let ytPlayerReady = false;
 let ytPendingLoad = null;
 let ytProgressTimer = null;
+let ytWatchAccumSecs = 0;   // real (wall-clock) seconds watched, pending credit to Study Time
+let ytWatchLastTs = 0;      // Date.now() at the previous poll tick
 
 window.onYouTubeIframeAPIReady = function() {
   // origin is required to avoid Error 153 on local/Android
@@ -675,11 +677,12 @@ function ytSaveCurrentTime() {
 /* Save playback position when the tab is hidden, closed, or backgrounded
    — covers the "suddenly closed the tab" case so progress isn't lost. */
 (function ytRegisterSaveOnExit() {
+  var onExit = function() { ytSaveCurrentTime(); ytFlushWatchTime(); };
   document.addEventListener('visibilitychange', function() {
-    if (document.hidden) ytSaveCurrentTime();
+    if (document.hidden) onExit();
   });
-  window.addEventListener('pagehide', ytSaveCurrentTime);
-  window.addEventListener('beforeunload', ytSaveCurrentTime);
+  window.addEventListener('pagehide', onExit);
+  window.addEventListener('beforeunload', onExit);
 })();
 
 /* ══════════════════════════════════════════════
@@ -1121,6 +1124,7 @@ let ytPollTicks = 0;
 function ytStartProgressPolling() {
   ytStopProgressPolling();
   ytPollTicks = 0;
+  ytWatchLastTs = Date.now();
   ytProgressTimer = setInterval(function() {
     if (!ytPlayer || !ytPlayerReady || !ytCurrentVideoId) return;
     var dur = 0, cur = 0;
@@ -1128,13 +1132,24 @@ function ytStartProgressPolling() {
     if (!dur || dur < 1) return;
     var pct = Math.round(cur / dur * 100);
 
+    // Accumulate REAL elapsed time (wall-clock) so it can be credited to the
+    // day's Study Time. Wall-clock (not currentTime delta) keeps it correct at
+    // any playback speed and immune to seeks. Ignore jumps > 30s — those mean
+    // the tab was suspended / device asleep, not actual studying.
+    var _now = Date.now();
+    if (ytWatchLastTs) {
+      var _delta = (_now - ytWatchLastTs) / 1000;
+      if (_delta > 0 && _delta <= 30) ytWatchAccumSecs += _delta;
+    }
+    ytWatchLastTs = _now;
+
     // DOM-only: update the "X% watched" label (no appState write, no sync)
     ytUpdateVideoWatchLabel(ytCurrentVideoId, pct);
 
     // Periodic checkpoint: persist the live position once per ~60s so a crash
     // (no pause/close event) loses at most a minute of progress.
     ytPollTicks++;
-    if (ytPollTicks % 12 === 0) ytSaveCurrentTime();
+    if (ytPollTicks % 12 === 0) { ytSaveCurrentTime(); ytFlushWatchTime(); }
 
     // Auto-mark watched at 90%+ (persists once, then stops polling)
     if (pct >= 90) {
@@ -1147,6 +1162,19 @@ function ytStartProgressPolling() {
 /* Stop the polling interval */
 function ytStopProgressPolling() {
   if (ytProgressTimer) { clearInterval(ytProgressTimer); ytProgressTimer = null; }
+  ytWatchLastTs = 0;   // don't count paused/stopped gap on the next tick
+  ytFlushWatchTime();  // bank whatever was watched since the last checkpoint
+}
+
+/* Credit accumulated real watch time into today's Study Time total. Called on
+   the ~60s checkpoint, on pause/end (via ytStopProgressPolling), and on tab
+   hide/close (via ytSaveCurrentTime's exit handlers). Safe to call anytime —
+   no-ops when there's nothing worth crediting. */
+function ytFlushWatchTime() {
+  if (ytWatchAccumSecs < 1) return;
+  var secs = Math.round(ytWatchAccumSecs);
+  ytWatchAccumSecs = 0;
+  if (typeof creditVideoWatchTime === 'function') creditVideoWatchTime(secs);
 }
 
 /* Auto-mark as watched — no toggle, only marks, never unmarks */

@@ -113,7 +113,11 @@ function taskTimerControlHtml(dateStr, t) {
 // Sum of study time across every task on a given day, including the live
 // portion of any task currently running (taskLiveSeconds handles that).
 function plannerDayTotalSeconds(dateStr) {
-  return (appState.tasks[dateStr] || []).reduce((sum, t) => sum + taskLiveSeconds(t), 0);
+  const taskSecs = (appState.tasks[dateStr] || []).reduce((sum, t) => sum + taskLiveSeconds(t), 0);
+  // In-app video watch time is tracked outside the task timers (a video may
+  // have no matching planner task), so fold it in here too.
+  const videoSecs = (appState.videoStudyLog && appState.videoStudyLog[dateStr]) || 0;
+  return taskSecs + videoSecs;
 }
 
 // Compact "1h 23m" / "23m" / "45s" for the day header (distinct from the

@@ -271,6 +271,8 @@ function computeRangeStats(dates) {
     total += tasks.length;
     done += tasks.filter(t=>t.done).length;
     tasks.forEach(t => { studySeconds += liveSecs(t); });
+    // Fold in in-app video watch time credited to this day (Study Time stat).
+    studySeconds += (appState.videoStudyLog && appState.videoStudyLog[ds]) || 0;
   });
   const pct = total ? Math.round(done/total*100) : 0;
   let productivity = 'Keep Going';
