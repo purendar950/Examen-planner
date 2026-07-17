@@ -24,7 +24,9 @@ let _sqLoaded = false;
 let _sqStage = 'shell';        // 'shell' | 'quiz' | 'result'
 let _sqSubview = 'attempt';    // 'attempt' | 'saved'
 let _sqQuiz = null;            // active quiz session (see sqStartQuiz)
-let _sqAttempts = [];          // cached attempt history (cloud+local merge, newest first)
+let _sqAttempts = [];          // combined history for display (quiz + mock), newest first
+let _sqQuizAttempts = [];      // attempts made in THIS tab (localStorage + quiz_attempts cloud)
+let _sqMockAttempts = [];      // read-only attempts from the exam engine (mock_attempts)
 
 /* ── text helpers (mirror the engine's rendering) ── */
 function sqDecode(html) {
@@ -228,8 +230,51 @@ function sqMergeAttempts(cloud, local) {
     .slice(0, 25);
 }
 
-/* Repopulate the _sqAttempts cache from cloud (if available) + local. */
+/* Rebuild the combined (display) list from the owned + mock sub-lists. */
+function sqRecomputeCombined() {
+  const byId = {};
+  _sqMockAttempts.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
+  _sqQuizAttempts.forEach(function (a) { if (a && a.id) byId[a.id] = a; });
+  _sqAttempts = Object.keys(byId).map(function (k) { return byId[k]; })
+    .sort(function (a, b) { return String(b.at || '').localeCompare(String(a.at || '')); })
+    .slice(0, 50);
+}
+
+/* Map raw mock_attempts rows (from the exam engine) → the attempt-record
+   shape the Quiz tab renders. Titles are resolved from the saved-question
+   rows when possible (they share test_id), else fall back to the test id. */
+function sqMapMockRows(rows) {
+  const titleByTest = {};
+  _sqRows.forEach(function (r) { if (r.test_id && !titleByTest[r.test_id]) titleByTest[r.test_id] = r.quiz_title || r.test_id; });
+  return (rows || []).map(function (row) {
+    const correct = Number(row.correct) || 0;
+    const wrong = Number(row.wrong) || 0;
+    const attempted = (row.attempted != null) ? Number(row.attempted) : (correct + wrong);
+    const acc = attempted ? Math.round((correct / attempted) * 100) : 0;
+    return {
+      id: 'mock_' + (row.id != null ? row.id : (row.created_at || Math.random())),
+      source: 'mock',
+      scope: row.test_id || 'all',
+      title: titleByTest[row.test_id] || row.test_id || 'Mock Test',
+      at: row.created_at || new Date().toISOString(),
+      score: Number(row.score) || 0,
+      maxScore: Number(row.max_score) || 0,
+      correct: correct,
+      wrong: wrong,
+      skip: (row.unattempted != null) ? Number(row.unattempted) : 0,
+      total: (row.total_questions != null) ? Number(row.total_questions) : (correct + wrong),
+      accuracy: acc,
+      timeTaken: Number(row.time_taken) || 0,
+      sectionBreakdown: row.section_breakdown || null,
+      items: [], answers: {}
+    };
+  });
+}
+
+/* Repopulate the attempt caches: owned quiz attempts (cloud+local) plus the
+   read-only exam-engine (mock) attempts, then rebuild the combined list. */
 async function sqRefreshAttempts() {
+  // Owned quiz-tab attempts
   const local = sqLoadLocalAttempts();
   let cloud = [];
   try {
@@ -237,19 +282,32 @@ async function sqRefreshAttempts() {
       cloud = await QuizAttempts.list();
     }
   } catch (e) { cloud = []; }
-  _sqAttempts = sqMergeAttempts(cloud, local);
-  sqSaveLocalAttempts(_sqAttempts);   // keep the offline mirror fresh
+  _sqQuizAttempts = sqMergeAttempts(cloud, local).map(function (a) { if (!a.source) a.source = 'quiz'; return a; });
+  sqSaveLocalAttempts(_sqQuizAttempts);   // keep the offline mirror fresh (owned only)
+
+  // Read-only attempts from the exam engine (comprehensive MCQ / full mock tests)
+  let mockRows = [];
+  try {
+    if (window.QuizAttempts && QuizAttempts.mockAttempts && QuizAttempts.available && QuizAttempts.available()) {
+      mockRows = await QuizAttempts.mockAttempts();
+    }
+  } catch (e) { mockRows = []; }
+  _sqMockAttempts = sqMapMockRows(mockRows);
+
+  sqRecomputeCombined();
   return _sqAttempts;
 }
 
-/* Read the cached list (sync) — used by all render/lookup code. */
+/* Read the combined cached list (sync) — used by render + sqOpenAttempt. */
 function sqLoadAttempts() { return _sqAttempts; }
 
-/* Record a new attempt: update cache + local mirror immediately, and push
-   to the cloud in the background (fire-and-forget; local still has it). */
+/* Record a new (this-tab) attempt: update cache + local mirror immediately,
+   and push to the cloud in the background (fire-and-forget). */
 function sqRecordAttempt(rec) {
-  _sqAttempts = [rec].concat(_sqAttempts.filter(function (a) { return a.id !== rec.id; })).slice(0, 25);
-  sqSaveLocalAttempts(_sqAttempts);
+  rec.source = 'quiz';
+  _sqQuizAttempts = [rec].concat(_sqQuizAttempts.filter(function (a) { return a.id !== rec.id; })).slice(0, 25);
+  sqSaveLocalAttempts(_sqQuizAttempts);
+  sqRecomputeCombined();
   try {
     if (window.QuizAttempts && QuizAttempts.available && QuizAttempts.available()) {
       QuizAttempts.save(rec).catch(function () {});
@@ -257,15 +315,18 @@ function sqRecordAttempt(rec) {
   } catch (e) {}
 }
 
+/* Clears only THIS tab's attempts. Exam-engine (mock) results are left intact
+   (they belong to Mock Tests) and reappear after the list rebuilds. */
 async function sqClearAttempts() {
-  if (!confirm('Clear your entire quiz attempt history? This cannot be undone.')) return;
-  _sqAttempts = [];
+  if (!confirm('Clear your quiz attempt history?\n\n(Full mock / comprehensive-MCQ results from the exam engine are kept.)')) return;
+  _sqQuizAttempts = [];
   try { localStorage.removeItem(sqAttemptsKey()); } catch (e) {}
   try {
     if (window.QuizAttempts && QuizAttempts.available && QuizAttempts.available()) {
       await QuizAttempts.clear();
     }
   } catch (e) {}
+  sqRecomputeCombined();
   sqRenderAttemptView();
 }
 
@@ -280,11 +341,14 @@ function sqRenderAttemptView() {
   const totalAttemptable = sqItemsForScope('all').length;
   const attempts = sqLoadAttempts();
 
-  if (!_sqRows.length) {
+  // Full empty state only when there are no saved questions AND no attempts
+  // of any kind (a user may have exam-engine attempts but no saved questions).
+  if (!_sqRows.length && !attempts.length) {
     c.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">📝</div>'
       + '<h3>No quizzes yet</h3>'
       + '<p>While taking a mock test, tap the <b>Save</b> button on any question to bookmark it. '
-      + 'Saved questions become quizzes you can attempt here.</p></div>';
+      + 'Saved questions become quizzes you can attempt here — and any full mock / comprehensive-MCQ '
+      + 'tests you take in the exam engine will show up under <b>Your attempts</b>.</p></div>';
     return;
   }
 
@@ -300,23 +364,29 @@ function sqRenderAttemptView() {
     cards += sqQuizCardHtml(g.testId, g.title, items.length, g.rows.length, sqBestAttempt(g.testId));
   });
 
-  let html = '<div class="sq-section-label">▶ Available quizzes</div>';
-  if (cards) {
-    html += '<div class="sq-qz-grid">' + cards + '</div>';
-  } else {
-    html += '<div class="sq-card" style="margin-bottom:20px;"><b>No attemptable quizzes.</b>'
-      + '<div class="sq-sub" style="margin-top:4px;">Your saved questions don\'t have answer keys yet, '
-      + 'so a quiz can\'t be built from them. You can still review them under the <b>Saved</b> tab.</div></div>';
+  let html = '';
+  // Only show the "Available quizzes" section when the user has saved questions.
+  if (_sqRows.length) {
+    html += '<div class="sq-section-label">▶ Available quizzes</div>';
+    if (cards) {
+      html += '<div class="sq-qz-grid">' + cards + '</div>';
+    } else {
+      html += '<div class="sq-card" style="margin-bottom:20px;"><b>No attemptable quizzes.</b>'
+        + '<div class="sq-sub" style="margin-top:4px;">Your saved questions don\'t have answer keys yet, '
+        + 'so a quiz can\'t be built from them. You can still review them under the <b>Saved</b> tab.</div></div>';
+    }
   }
 
-  // Attempt history
+  // Attempt history (this-tab quiz attempts + exam-engine mock attempts)
+  const mockCount = _sqMockAttempts.length;
   html += '<div class="sq-section-label" style="display:flex;align-items:center;justify-content:space-between;">'
-    + '<span>🕘 Your attempts</span>'
-    + (attempts.length ? '<button class="sq-btn" style="padding:.25rem .6rem;font-size:.72rem;" onclick="sqClearAttempts()">Clear history</button>' : '')
+    + '<span>🕘 Your attempts' + (mockCount ? ' <span class="sq-sub" style="text-transform:none;letter-spacing:0;">(incl. ' + mockCount + ' from the exam engine)</span>' : '') + '</span>'
+    + (_sqQuizAttempts.length ? '<button class="sq-btn" style="padding:.25rem .6rem;font-size:.72rem;" onclick="sqClearAttempts()">Clear history</button>' : '')
     + '</div>';
   if (!attempts.length) {
     html += '<div class="sq-card"><div class="sq-sub">You haven\'t attempted any quiz yet. '
-      + 'Pick a quiz above and press <b>Start</b> — your score &amp; analysis will be saved here.</div></div>';
+      + 'Pick a quiz above and press <b>Start</b> — your score &amp; analysis will be saved here. '
+      + 'Full mock / comprehensive-MCQ tests taken in the exam engine also appear here.</div></div>';
   } else {
     html += '<div class="sq-hist">' + attempts.map(sqHistRowHtml).join('') + '</div>';
   }
@@ -324,9 +394,10 @@ function sqRenderAttemptView() {
   c.innerHTML = html;
 }
 
-/* Best (highest-accuracy) recorded attempt for a scope, or null. */
+/* Best (highest-accuracy) THIS-TAB attempt for a scope, or null. Mock/exam-
+   engine attempts are excluded (they are a different, full-test format). */
 function sqBestAttempt(scope) {
-  const list = sqLoadAttempts().filter(function (a) { return (a.scope || 'all') === scope; });
+  const list = _sqQuizAttempts.filter(function (a) { return (a.scope || 'all') === scope; });
   if (!list.length) return null;
   return list.reduce(function (best, a) { return (a.accuracy > (best ? best.accuracy : -1)) ? a : best; }, null);
 }
@@ -346,9 +417,12 @@ function sqQuizCardHtml(scope, title, attemptable, total, best) {
 
 function sqHistRowHtml(a) {
   const accColor = a.accuracy >= 60 ? '#198754' : a.accuracy >= 35 ? '#ffc107' : '#dc3545';
+  const tag = a.source === 'mock'
+    ? '<span class="sq-hist-tag mock">🧪 Full test</span>'
+    : '<span class="sq-hist-tag">🔖 Saved-Q</span>';
   return '<div class="sq-hist-row" onclick="sqOpenAttempt(\'' + escSaved(a.id) + '\')">'
     + '<div class="sq-hist-main">'
-    +   '<div class="sq-hist-title">' + escSaved(a.title) + '</div>'
+    +   '<div class="sq-hist-title">' + tag + escSaved(a.title) + '</div>'
     +   '<div class="sq-hist-sub">' + sqTimeAgo(a.at) + ' · ' + a.correct + '/' + a.total + ' correct · ⏱ ' + sqFmtTime(a.timeTaken) + '</div>'
     + '</div>'
     + '<div class="sq-hist-score">'
@@ -762,13 +836,19 @@ function sqRenderResult(stats) {
     +     '</div>'
     +   '</div>'
     + '</div>'
-    + '<div class="sq-analysis"><h3>📚 Accuracy by source quiz</h3>' + (byQuizHtml || '<div class="sq-sub">No data.</div>') + '</div>'
+    + '<div class="sq-analysis"><h3>' + (_sqQuiz.fromMock ? '📚 Accuracy by section' : '📚 Accuracy by source quiz') + '</h3>'
+    +   (byQuizHtml || '<div class="sq-sub">No section data available for this attempt.</div>') + '</div>'
     + wrongHtml
-    + '<div class="sq-run-foot" style="justify-content:flex-start;">'
-    +   '<button class="sq-btn sq-btn-primary" onclick="sqViewSolutions()">📖 View solutions &amp; explanations</button>'
-    +   '<button class="sq-btn" onclick="sqRetakeQuiz()">🔁 Retake quiz</button>'
-    +   '<button class="sq-btn" onclick="sqBackToList()">← Back to quizzes</button>'
-    + '</div>';
+    + (_sqQuiz.fromMock
+        ? '<div class="sq-analysis"><div class="sq-sub">This is a full mock / comprehensive-MCQ attempt taken in the exam engine. '
+          + 'Per-question solutions aren\'t stored here — reopen the test in the exam engine for a full question-by-question review.</div></div>'
+          + '<div class="sq-run-foot" style="justify-content:flex-start;">'
+          + '<button class="sq-btn" onclick="sqBackToList()">← Back to quizzes</button></div>'
+        : '<div class="sq-run-foot" style="justify-content:flex-start;">'
+          + '<button class="sq-btn sq-btn-primary" onclick="sqViewSolutions()">📖 View solutions &amp; explanations</button>'
+          + '<button class="sq-btn" onclick="sqRetakeQuiz()">🔁 Retake quiz</button>'
+          + '<button class="sq-btn" onclick="sqBackToList()">← Back to quizzes</button>'
+          + '</div>');
 }
 
 /* Re-enter the runner in read-only "solution" mode to review answers. */
@@ -808,10 +888,44 @@ function sqBackToList() {
   sqSwitchView('attempt');
 }
 
-/* Re-open a saved attempt from history straight into its analysis. */
+/* Normalise a mock_attempts section_breakdown into the {name:{...}} shape the
+   result view's bar chart expects. Handles both array and object forms and
+   is defensive about field names. */
+function sqMockSections(sb) {
+  const out = {};
+  if (!sb) return out;
+  function add(name, s) {
+    s = s || {};
+    const correct = Number(s.correct) || 0;
+    const wrong = Number(s.wrong) || 0;
+    const skip = Number(s.unattempted != null ? s.unattempted : (s.skip || 0)) || 0;
+    let total = Number(s.total != null ? s.total : (s.total_questions != null ? s.total_questions : 0)) || 0;
+    if (!total) total = correct + wrong + skip;
+    out[name || 'Section'] = { total: total, correct: correct, wrong: wrong, skip: skip };
+  }
+  try {
+    if (Array.isArray(sb)) sb.forEach(function (s) { add(s.name || s.section || s.section_name, s); });
+    else if (typeof sb === 'object') Object.keys(sb).forEach(function (k) { add(k, sb[k]); });
+  } catch (e) {}
+  return out;
+}
+
+/* Build a stats object for a read-only exam-engine (mock) attempt. */
+function sqStatsFromMock(rec) {
+  return {
+    total: rec.total, correct: rec.correct, wrong: rec.wrong, skip: rec.skip,
+    score: rec.score, maxScore: rec.maxScore, accuracy: rec.accuracy, timeTaken: rec.timeTaken,
+    byQuiz: sqMockSections(rec.sectionBreakdown), wrongItems: []
+  };
+}
+
+/* Re-open a past attempt from history straight into its analysis. Works for
+   both this-tab quiz attempts (full replay) and exam-engine mock attempts
+   (summary analysis only — per-question solutions aren't stored). */
 function sqOpenAttempt(id) {
   const rec = sqLoadAttempts().filter(function (a) { return a.id === id; })[0];
   if (!rec) { if (typeof showToast === 'function') showToast('Attempt not found', 'error'); return; }
+  const isMock = rec.source === 'mock';
   _sqQuiz = {
     items: rec.items || [],
     scope: rec.scope || 'all',
@@ -819,12 +933,13 @@ function sqOpenAttempt(id) {
     answers: rec.answers || {},
     solutionMode: false,
     fromHistory: true,
+    fromMock: isMock,
     startTime: Date.now(),
     elapsed: rec.timeTaken || 0,
     timerInt: null,
     title: rec.title || 'Quiz'
   };
-  const stats = sqComputeStats(_sqQuiz.items, _sqQuiz.answers, _sqQuiz.elapsed);
+  const stats = isMock ? sqStatsFromMock(rec) : sqComputeStats(_sqQuiz.items, _sqQuiz.answers, _sqQuiz.elapsed);
   _sqQuiz.lastStats = stats;
   sqShowStage('result');
   sqRenderResult(stats);
