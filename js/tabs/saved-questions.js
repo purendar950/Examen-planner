@@ -88,7 +88,16 @@ async function loadSavedQuestions(force) {
 
   // Don't disturb an in-progress quiz/result when the tab is re-opened.
   if (_sqLoaded && !force && _sqStage !== 'shell') return;
-  if (_sqLoaded && !force) { sqRenderShell(); return; }
+  if (_sqLoaded && !force) {
+    // Render instantly from cache, then quietly re-fetch in the background so a
+    // playlist quiz that became available — or a playlist you just added —
+    // shows up automatically, without needing the Refresh button.
+    // (Shared playlist quizzes are Pro-gated inside sqRefreshShared.)
+    sqRenderShell();
+    sqRefreshShared().then(function () { if (_sqStage === 'shell') sqRenderAvailableView(); }).catch(function () {});
+    sqRefreshAttempts().then(function () { if (_sqStage === 'shell') sqRenderAttemptView(); }).catch(function () {});
+    return;
+  }
 
   if (!window.SavedQuestions) {
     attemptEl.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">⚠️</div>'
