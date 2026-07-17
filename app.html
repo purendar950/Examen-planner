@@ -165,7 +165,7 @@
       <span class="tab-icon" style="color:#3B82F6;">📈</span> Analysis
     </div>
     <div class="nav-tab" onclick="switchPage('saved')" id="nav-saved">
-      <span class="tab-icon">🔖</span> Saved
+      <span class="tab-icon">📝</span> Quiz
     </div>
   </div>
 
@@ -197,8 +197,8 @@
     <div data-include="pages/youtube.html?v=20260716a"></div>
     <!-- ═══ ANALYSIS PAGE (includes Revision sub-tab) ═══ -->
     <div data-include="pages/analysis.html?v=20260716a"></div>
-    <!-- ═══ SAVED QUESTIONS PAGE ═══ -->
-    <div data-include="pages/saved.html?v=20260716a"></div>
+    <!-- ═══ QUIZ PAGE (saved questions → attemptable quiz + analysis) ═══ -->
+    <div data-include="pages/saved.html?v=20260717b"></div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
@@ -443,7 +443,7 @@
 <!-- 🔖 Saved Questions (Supabase-backed, shared store with the quiz engine) -->
 <script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script defer src="js/saved-questions.js?v=20260716a"></script>
-<script defer src="js/tabs/saved-questions.js?v=20260716a"></script>
+<script defer src="js/tabs/saved-questions.js?v=20260717b"></script>
 <script defer src="js/tabs/profile.js"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
 <script defer src="js/features/responsive.js"></script>
