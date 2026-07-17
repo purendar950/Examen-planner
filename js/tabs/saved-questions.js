@@ -28,6 +28,7 @@ let _sqAttempts = [];          // combined history for display (quiz + mock), ne
 let _sqQuizAttempts = [];      // attempts made in THIS tab (localStorage + quiz_attempts cloud)
 let _sqMockAttempts = [];      // read-only attempts from the exam engine (mock_attempts)
 let _sqShared = [];            // shared community quizzes for the user's added playlists
+let _sqOpenFolder = null;      // Available tab: playlist id currently drilled into, or null (folder list)
 
 /* ── text helpers (mirror the engine's rendering) ── */
 function sqDecode(html) {
@@ -142,7 +143,7 @@ function sqSwitchView(v) {
     const view = document.getElementById('sq-view-' + x); if (view) view.classList.toggle('active', x === v);
     const btn  = document.getElementById('sq-st-' + x);   if (btn)  btn.classList.toggle('active', x === v);
   });
-  if (v === 'available') sqRenderAvailableView();
+  if (v === 'available') { _sqOpenFolder = null; sqRenderAvailableView(); }   // always start at the folder list
   else if (v === 'attempt') sqRenderAttemptView();
   else sqRenderSavedView();
 }
@@ -595,9 +596,37 @@ function sqVideoRowHtml(pl, v, idx, q) {
     + '</div>';
 }
 
-/* One collapsible playlist folder: header (name, quiz-coverage count + bar,
-   refresh) and a body listing every video of the playlist. */
-function sqFolderHtml(pl, byVid, shownVids, idx) {
+/* Count how many of a playlist's videos already have a quiz. */
+function sqFolderStats(pl, byVid) {
+  const vids = (pl.videos || []);
+  let ready = 0;
+  vids.forEach(function (v) { if (v && v.id && byVid[v.id]) ready++; });
+  return { total: vids.length, ready: ready };
+}
+
+/* Level 1 — a clickable folder card. Clicking drills into the folder
+   (sqOpenFolder) to reveal its videos, like opening a folder in a file
+   browser. Shows name, coverage count + progress bar and a chevron. */
+function sqFolderCardHtml(pl, byVid) {
+  const st = sqFolderStats(pl, byVid);
+  const pct = st.total ? Math.round(st.ready / st.total * 100) : 0;
+  const plId = escSaved(pl.id || '');
+  const isVideo = pl.type === 'video';
+  return '<button type="button" class="sq-folder-card" onclick="sqOpenFolder(\'' + plId + '\')">'
+    + '<span class="sq-folder-ico">' + (isVideo ? '🎬' : '📁') + '</span>'
+    + '<span class="sq-folder-info">'
+    +   '<span class="sq-folder-name">' + escSaved(pl.title || 'Playlist') + '</span>'
+    +   '<span class="sq-folder-sub">' + st.total + ' video' + (st.total === 1 ? '' : 's')
+    +     ' · ' + st.ready + ' with quiz</span>'
+    + '</span>'
+    + '<span class="sq-folder-bar" title="' + pct + '% of videos have a quiz"><span class="sq-folder-fill" style="width:' + pct + '%"></span></span>'
+    + '<span class="sq-folder-arrow">›</span>'
+    + '</button>';
+}
+
+/* Level 2 — the inside of one folder: back link, header (name, coverage,
+   refresh) and every video listed with its Attempt / not-generated status. */
+function sqFolderDetailHtml(pl, byVid, shownVids) {
   const vids = (pl.videos || []);
   let ready = 0;
   const rows = vids.map(function (v, i) {
@@ -608,36 +637,44 @@ function sqFolderHtml(pl, byVid, shownVids, idx) {
   }).join('');
   const total = vids.length;
   const pct = total ? Math.round(ready / total * 100) : 0;
-  const open = idx === 0 ? ' open' : '';   // first folder expanded by default
   const plId = escSaved(pl.id || '');
   const isVideo = pl.type === 'video';
   const refreshBtn = isVideo ? ''   // single-video courses have nothing to re-pull
     : '<button class="sq-mini-btn" title="Check the playlist for new videos + quizzes" '
-      + 'onclick="event.stopPropagation(); sqRefreshPlaylist(\'' + plId + '\', this)">🔄</button>';
-  return '<div class="sq-folder' + open + '" data-pl="' + plId + '">'
-    + '<div class="sq-folder-head" onclick="sqToggleFolder(this)">'
-    +   '<span class="sq-folder-chev">▶</span>'
+      + 'onclick="sqRefreshPlaylist(\'' + plId + '\', this)">🔄 Refresh</button>';
+
+  return '<button type="button" class="sq-back-btn" onclick="sqCloseFolder()">← All playlists</button>'
+    + '<div class="sq-detail-head">'
     +   '<span class="sq-folder-ico">' + (isVideo ? '🎬' : '📁') + '</span>'
     +   '<span class="sq-folder-name">' + escSaved(pl.title || 'Playlist') + '</span>'
     +   '<span class="sq-folder-count">' + ready + '/' + total + ' quiz' + (ready === 1 ? '' : 'zes') + '</span>'
-    +   '<div class="sq-folder-bar" title="' + pct + '% of videos have a quiz"><div class="sq-folder-fill" style="width:' + pct + '%"></div></div>'
     +   refreshBtn
     + '</div>'
+    + '<div class="sq-detail-bar" title="' + pct + '% of videos have a quiz"><span class="sq-folder-fill" style="width:' + pct + '%"></span></div>'
     + '<div class="sq-folder-body">'
     +   (rows || '<div class="sq-sub" style="padding:12px 14px;">No videos in this playlist yet. Open it in the Playlist Organiser and refresh.</div>')
-    + '</div>'
     + '</div>';
 }
 
-/* Build the Available tab body: a folder-per-playlist list showing every
-   video and whether it has a quiz (Attempt) or not (Quiz not generated),
-   plus a fallback section for your own quizzes whose video isn't in any
-   added playlist. */
+/* Build the Available tab body. Two levels:
+     • folder list  — one card per added playlist (+ a fallback section for
+       your own quizzes whose video isn't in any playlist)
+     • folder detail — every video of the drilled-into playlist with its
+       Attempt / "Quiz not generated" status
+   which level renders depends on _sqOpenFolder. */
 function sqSharedSectionHtml() {
   const byVid = sqQuizByVideo();
   const shownVids = {};
   const playlists = sqPlaylists();
 
+  /* ── Level 2: inside a folder ── */
+  if (_sqOpenFolder) {
+    const pl = playlists.filter(function (p) { return p && p.id === _sqOpenFolder; })[0];
+    if (pl) return sqFolderDetailHtml(pl, byVid, shownVids);
+    _sqOpenFolder = null;   // playlist vanished (removed/refreshed) → fall back to the list
+  }
+
+  /* ── Level 1: folder list ── */
   let html = '<div class="sq-section-label">📺 From your playlists</div>';
 
   if (!sqIsPro()) {
@@ -651,7 +688,11 @@ function sqSharedSectionHtml() {
   } else {
     // Newest-added course first (matches the Organiser library order).
     const ordered = playlists.slice().sort(function (a, b) { return (b.addedAt || 0) - (a.addedAt || 0); });
-    ordered.forEach(function (pl, i) { html += sqFolderHtml(pl, byVid, shownVids, i); });
+    html += '<div class="sq-folder-list">';
+    ordered.forEach(function (pl) { html += sqFolderCardHtml(pl, byVid); });
+    html += '</div>';
+    // Mark playlist videos as "shown" so the fallback section only lists orphans.
+    ordered.forEach(function (pl) { (pl.videos || []).forEach(function (v) { if (v && v.id && byVid[v.id]) shownVids[v.id] = 1; }); });
   }
 
   /* ── Your own generated quizzes not tied to any added playlist ── */
@@ -670,10 +711,18 @@ function sqSharedSectionHtml() {
   return html;
 }
 
-/* Expand / collapse a playlist folder. */
-function sqToggleFolder(headEl) {
-  const f = headEl.closest('.sq-folder');
-  if (f) f.classList.toggle('open');
+/* Drill into a playlist folder (show its videos). */
+function sqOpenFolder(plId) {
+  _sqOpenFolder = plId || null;
+  sqRenderAvailableView();
+  const c = document.getElementById('sq-view-available');
+  if (c && c.scrollIntoView) { try { c.scrollIntoView({ block: 'start' }); } catch (e) {} }
+}
+
+/* Go back to the folder list. */
+function sqCloseFolder() {
+  _sqOpenFolder = null;
+  sqRenderAvailableView();
 }
 
 /* "Generate" shortcut for a video without a quiz: open it in the YouTube tab
