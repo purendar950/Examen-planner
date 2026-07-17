@@ -723,6 +723,10 @@
     return '<div class="ai-brandbar"><span class="bn">Study<span class="g">Planner</span></span><span class="bs">AI Study Notes</span></div>';
   }
 
+  // Tracks the last MCQ set auto-published to the Quiz tab (video:count), so
+  // re-renders of the same notes don't republish repeatedly.
+  var _lastAutoQuizSig = '';
+
   // Final render of a text note from a result-like object {content,provider,model,cached}.
   // Shared by the streaming and one-shot paths.
   function renderNotesResult(mode, n, style, j) {
@@ -755,6 +759,22 @@
     };
     var msb = document.getElementById('ai-mcq-share');
     if (msb) msb.onclick = function () { shareMcqTest(); };
+    // As soon as MCQ notes are generated, make them available as a quiz in the
+    // Quiz tab — no "Take as Test" needed. Keyed by the current video; deduped
+    // so re-renders of the same set don't re-publish.
+    if (style === 'mcq') {
+      try {
+        var vidAuto = curVid();
+        if (vidAuto) {
+          var qAuto = mcqToEngineQuestions(parseMcqNotes(content));
+          var sig = vidAuto + ':' + qAuto.length;
+          if (qAuto.length && sig !== _lastAutoQuizSig) {
+            _lastAutoQuizSig = sig;
+            shareGeneratedQuiz(vidAuto, (curTitle() || 'MCQ') + ' \u2014 MCQ Test', qAuto, 2, 0.5);
+          }
+        }
+      } catch (e) {}
+    }
     checkLangs(mode, n || 25, false);
   }
 
@@ -1260,6 +1280,39 @@
     }
     return out;
   }
+  /* Make a generated MCQ set available as a quiz in the Quiz tab, keyed by the
+     source video. Writes a local mirror (so it's available immediately, even
+     without the shared Supabase table) and publishes to the shared pool for
+     Pro users who added a playlist with this video. Returns the publish promise
+     (or null). `questions` must already be in engine format. */
+  function shareGeneratedQuiz(vid, title, questions, correct, negative) {
+    if (!vid || !questions || !questions.length) return null;
+    correct  = (correct  != null) ? correct  : 2;
+    negative = (negative != null) ? negative : 0.5;
+    title = title || 'MCQ Test';
+    try {
+      var mapRaw = localStorage.getItem('ez_pl_quizzes');
+      var map = mapRaw ? (JSON.parse(mapRaw) || {}) : {};
+      map[vid] = {
+        video_id: vid, title: title, question_count: questions.length,
+        quiz_data: { questions: questions, correct_score: correct, negative_score: negative },
+        created_by_name: 'You', created_at: new Date().toISOString()
+      };
+      var keys = Object.keys(map);
+      if (keys.length > 40) {
+        keys.sort(function (a, b) { return String(map[b].created_at || '').localeCompare(String(map[a].created_at || '')); })
+            .slice(40).forEach(function (k) { delete map[k]; });
+      }
+      localStorage.setItem('ez_pl_quizzes', JSON.stringify(map));
+    } catch (e) {}
+    try {
+      if (window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available()) {
+        return PlaylistQuizzes.publish({ videoId: vid, title: title, questions: questions, correct: correct, negative: negative });
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function openInTestEngine(list, title, opts) {
     opts = opts || {};
     var questions = mcqToEngineQuestions(list);
@@ -1296,41 +1349,16 @@
     (function () {
       var vid = '';
       try { vid = (typeof curVid === 'function') ? curVid() : ''; } catch (e) {}
-      // Local mirror (keyed by video id) so the generator sees this quiz under
-      // its playlist in the Quiz tab IMMEDIATELY — even if the shared Supabase
-      // table isn't set up yet.
-      if (vid) {
-        try {
-          var mapRaw = localStorage.getItem('ez_pl_quizzes');
-          var map = mapRaw ? (JSON.parse(mapRaw) || {}) : {};
-          map[vid] = {
-            video_id: vid, title: payload.title,
-            question_count: questions.length,
-            quiz_data: { questions: questions, correct_score: payload.correct_score, negative_score: payload.negative_score },
-            created_by_name: 'You', created_at: new Date().toISOString()
-          };
-          // keep the newest 40 to bound storage
-          var keys = Object.keys(map);
-          if (keys.length > 40) {
-            keys.sort(function (a, b) { return String(map[b].created_at || '').localeCompare(String(map[a].created_at || '')); })
-                .slice(40).forEach(function (k) { delete map[k]; });
-          }
-          localStorage.setItem('ez_pl_quizzes', JSON.stringify(map));
-        } catch (e) {}
-      }
-      if (vid && window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available()) {
-        var pub = PlaylistQuizzes.publish({
-          videoId: vid, title: payload.title, questions: questions,
-          correct: payload.correct_score, negative: payload.negative_score
-        });
-        var go = function () { location.href = engineUrl; };
+      var pub = vid ? shareGeneratedQuiz(vid, payload.title, questions, payload.correct_score, payload.negative_score) : null;
+      var go = function () { location.href = engineUrl; };
+      if (pub && typeof pub.then === 'function') {
         // Navigate as soon as publish settles, or after a 1.2s safety timeout.
         var done = false, once = function () { if (done) return; done = true; go(); };
-        try { Promise.resolve(pub).then(once, once); } catch (e) { once(); }
+        try { pub.then(once, once); } catch (e) { once(); }
         setTimeout(once, 1200);
         return;
       }
-      location.href = engineUrl;
+      go();
     })();
   }
   // Build + copy a shareable link for THIS video's MCQ test. It carries the
