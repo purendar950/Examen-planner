@@ -1288,7 +1288,28 @@
     } catch (e) { alert('Could not store the quiz (browser storage is full).'); return; }
     // Same-tab navigation. The engine sits at the app root next to app.html.
     var base = location.pathname.replace(/[^/]*$/, '');
-    location.href = base + 'test-engine.html?id=' + encodeURIComponent(id);
+    var engineUrl = base + 'test-engine.html?id=' + encodeURIComponent(id);
+    // Publish this generated mock to the shared pool (keyed by the source
+    // video) so any Pro user who added a playlist containing that video sees
+    // it in their Quiz tab. Best-effort; we briefly await so the row is written
+    // before we navigate away, but never block the test on it.
+    (function () {
+      var vid = '';
+      try { vid = (typeof curVid === 'function') ? curVid() : ''; } catch (e) {}
+      if (vid && window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available()) {
+        var pub = PlaylistQuizzes.publish({
+          videoId: vid, title: payload.title, questions: questions,
+          correct: payload.correct_score, negative: payload.negative_score
+        });
+        var go = function () { location.href = engineUrl; };
+        // Navigate as soon as publish settles, or after a 1.2s safety timeout.
+        var done = false, once = function () { if (done) return; done = true; go(); };
+        try { Promise.resolve(pub).then(once, once); } catch (e) { once(); }
+        setTimeout(once, 1200);
+        return;
+      }
+      location.href = engineUrl;
+    })();
   }
   // Build + copy a shareable link for THIS video's MCQ test. It carries the
   // video id + language; the recipient's app rebuilds the same quiz from the
