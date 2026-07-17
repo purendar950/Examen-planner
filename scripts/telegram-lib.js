@@ -77,6 +77,27 @@ function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/* Server-side port of the app's taskDedupKey() (js/tabs/plan-wizard.js): builds
+   the same {chId|videoId|text} signature so the sender can honour the deleted-
+   task tombstone ledger (appState.deletedTaskKeys) and NOT re-surface a task the
+   user deleted. Must stay byte-for-byte in sync with the browser version. */
+function taskDedupKey(t) {
+  if (!t) return '';
+  if (t.chId)    return 'ch:'  + String(t.chId);
+  if (t.videoId) return 'vid:' + String(t.videoId);
+  const txt = (t.text || '').trim().toLowerCase();
+  return txt ? 'txt:' + txt : '';
+}
+
+/* True when a task's signature was tombstoned (deleted by the user). Reads the
+   persisted appState.deletedTaskKeys ledger that the browser writes to Firestore. */
+function isTaskDeleted(appState, task) {
+  const led = (appState && Array.isArray(appState.deletedTaskKeys)) ? appState.deletedTaskKeys : [];
+  if (!led.length) return false;
+  const key = taskDedupKey(task);
+  return !!key && led.includes(key);
+}
+
 /** Label a rolled-forward / overdue task: "from yesterday" or "from earlier · 22 Jun". */
 function rolloverLabel(fromDate, today) {
   if (fromDate === shiftDate(today, -1)) return 'from yesterday';
@@ -143,6 +164,7 @@ function buildTaskSections(appState, today) {
   todayList.forEach(t => {
     if (!t) return;
     if (isDone(t)) { doneCount++; return; }
+    if (isTaskDeleted(appState, t)) return;   // user deleted it — don't re-surface
     if (t.type === 'video' && t.videoId) { pushVideo(t.videoId, t.text, t.url); return; }
     const txt = norm(t.text);
     if (txt) seenText.add(txt);
@@ -160,6 +182,7 @@ function buildTaskSections(appState, today) {
     if (ds >= today || ds < lookbackStart) return;
     (Array.isArray(tasks[ds]) ? tasks[ds] : []).forEach(t => {
       if (!t || isDone(t)) return;
+      if (isTaskDeleted(appState, t)) return;   // user deleted it — don't re-surface
       if (t.type === 'video' && t.videoId) { pushVideo(t.videoId, t.text, t.url); return; }
       const txt = norm(t.text);
       if (!txt || seenText.has(txt)) return;
@@ -170,7 +193,10 @@ function buildTaskSections(appState, today) {
   });
 
   /* 3. Course auto-scheduled videos */
-  scheduledCourseVideos(appState, today).forEach(v => pushVideo(v.id, v.title));
+  scheduledCourseVideos(appState, today).forEach(v => {
+    if (isTaskDeleted(appState, { videoId: v.id })) return;   // user deleted this video task
+    pushVideo(v.id, v.title);
+  });
 
   return { todoLines, videoItems, doneCount };
 }
@@ -180,6 +206,7 @@ module.exports = {
   sendTelegramMessage,
   fmtDM, shiftDate, escHtml, rolloverLabel, capLines,
   scheduledCourseVideos, buildTaskSections,
+  taskDedupKey, isTaskDeleted,
 };
 
 /** Join a section list with a "+N more" cap to respect Telegram's size limit. */
