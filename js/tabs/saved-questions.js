@@ -600,36 +600,10 @@ function sqStartSharedQuiz(videoId) {
 function sqRenderAvailableView() {
   const c = document.getElementById('sq-view-available');
   if (!c) return;
-
-  let html = '';
-
-  // 1) Shared community quizzes, grouped by the playlists the user added.
-  html += sqSharedSectionHtml();
-
-  // 2) Quizzes built from the user's own saved questions.
-  const groups = sqGroupRows();
-  const totalAttemptable = sqItemsForScope('all').length;
-  let cards = '';
-  if (totalAttemptable > 1) {
-    cards += sqQuizCardHtml('all', 'All saved questions', totalAttemptable, _sqRows.length, sqBestAttempt('all'));
-  }
-  groups.forEach(function (g) {
-    const items = g.rows.map(sqToItem).filter(sqIsAttemptable);
-    if (!items.length) return;
-    cards += sqQuizCardHtml(g.testId, g.title, items.length, g.rows.length, sqBestAttempt(g.testId));
-  });
-  if (cards) {
-    html += '<div class="sq-section-label">🔖 From your saved questions</div>'
-      + '<div class="sq-qz-grid">' + cards + '</div>';
-  }
-
-  if (!html) {
-    html = '<div class="sq-empty"><div class="sq-empty-icon">📚</div>'
-      + '<h3>No quizzes available yet</h3>'
-      + '<p>Generate a mock from a video (<b>AI Study → Take as Test</b>) or save questions during a mock test. '
-      + 'Quizzes others generate from playlists you added will appear here too.</p></div>';
-  }
-  c.innerHTML = html;
+  // Available = quizzes from the playlists you added (shared community + your
+  // own generated mocks). Quizzes built from bookmarked questions live under
+  // the "Saved" tab, where they can be reviewed and started.
+  c.innerHTML = sqSharedSectionHtml();
 }
 
 /* ══════════════════════════════════════════════
@@ -714,11 +688,17 @@ function sqRenderSavedView() {
   c.innerHTML = '<div class="sq-section-label">🔖 Saved questions, grouped by quiz</div>'
     + groups.map(function (g, i) {
         const open = i === 0 ? ' open' : '';
+        const attemptable = g.rows.map(sqToItem).filter(sqIsAttemptable).length;
+        const startBtn = attemptable
+          ? '<button class="sq-btn sq-btn-primary" style="padding:.25rem .65rem;font-size:.72rem;white-space:nowrap;" '
+            + 'onclick="event.stopPropagation(); sqStartQuiz(\'' + escSaved(g.testId) + '\')">▶ Start (' + attemptable + ')</button>'
+          : '';
         return '<div class="sq-group' + open + '">'
           + '<div class="sq-group-head" onclick="sqToggleGroup(this)">'
           +   '<span class="sq-group-chev">▶</span>'
           +   '<span class="sq-group-name">' + escSaved(g.title) + '</span>'
           +   '<span class="sq-group-count">' + g.rows.length + ' saved</span>'
+          +   startBtn
           + '</div>'
           + '<div class="sq-group-body"><div class="sq-list">' + g.rows.map(sqCardHtml).join('') + '</div></div>'
           + '</div>';
