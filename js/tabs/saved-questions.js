@@ -1,25 +1,31 @@
 /* ══════════════════════════════════════════════
    QUIZ TAB  (built from Saved Questions)
    Reads the user's bookmarked questions from Supabase (via
-   window.SavedQuestions, defined in js/saved-questions.js) and lets the
-   user (a) review them and (b) attempt them as a quiz, then see a full
-   result + analysis. Questions are saved from the quiz engine
-   (test-engine.html) during mock tests.
+   window.SavedQuestions, defined in js/saved-questions.js).
 
-   Views (toggled by sqShowView):
-     • list   — review saved questions (answers highlighted)
-     • quiz   — attemptable runner (options, palette, timer)
-     • result — score + analysis, with "view solutions" / "retake"
+   The tab has TWO sub-tabs:
+     • Attempt Quiz — available quizzes (grouped by the source mock quiz)
+                      the user can start, plus a history of past attempts.
+     • Saved        — the bookmarked questions themselves, grouped
+                      quiz-wise (answers highlighted) for revision.
+
+   Attempting a quiz opens a runner (options, palette, timer). Submitting
+   shows a result + analysis and records the attempt to localStorage so it
+   appears under "Attempt Quiz" history and can be re-opened later.
+
+   Questions are saved from the quiz engine (test-engine.html) during
+   mock tests. All functions/ids are `sq`-prefixed to avoid clashing with
+   the app's other global handlers.
 ══════════════════════════════════════════════ */
 
 /* Cache of the rows fetched for the current user (raw Supabase rows). */
 let _sqRows = [];
 let _sqLoaded = false;
-let _sqView = 'list';          // 'list' | 'quiz' | 'result'
+let _sqStage = 'shell';        // 'shell' | 'quiz' | 'result'
+let _sqSubview = 'attempt';    // 'attempt' | 'saved'
 let _sqQuiz = null;            // active quiz session (see sqStartQuiz)
 
-/* Decode HTML entities and normalise <br>, mirroring the engine's
-   getLangText() so saved question text renders the same way here. */
+/* ── text helpers (mirror the engine's rendering) ── */
 function sqDecode(html) {
   if (html == null) return '';
   const txt = document.createElement('textarea');
@@ -28,10 +34,6 @@ function sqDecode(html) {
   out = out.replace(/&lt;br\s*\/?&gt;/gi, '<br>').replace(/<br\s*\/?>/gi, '<br>');
   return out;
 }
-
-/* A question field may be a plain string or a { en, hi } object. Prefer
-   English, fall back to Hindi. (The app has no language switcher, so we
-   show English by default — same default the engine uses.) */
 function sqLangText(obj) {
   if (!obj) return '';
   let raw = '';
@@ -39,13 +41,10 @@ function sqLangText(obj) {
   else raw = obj.en || obj.hi || '';
   return sqDecode(raw);
 }
-
-/* **bold** → <strong>, matching applyBoldHighlight() in the engine. */
 function sqBold(html) {
   if (!html || typeof html !== 'string') return html || '';
   return html.replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight:800;">$1</strong>');
 }
-
 function sqRender(text) { return sqBold(sqLangText(text)); }
 
 function sqTimeAgo(iso) {
@@ -60,178 +59,90 @@ function sqTimeAgo(iso) {
   } catch (e) { return ''; }
 }
 
-/* Load saved questions from Supabase. Called by navigation when the tab
-   opens; pass force=true from the Refresh button to re-fetch. */
-async function loadSavedQuestions(force) {
-  const content = document.getElementById('sq-content');
-  if (!content) return;
-
-  // Don't disturb an in-progress quiz/result when the tab is re-opened.
-  if (_sqLoaded && !force && _sqView !== 'list') return;
-  if (_sqLoaded && !force) { renderSavedQuestions(); return; }
-
-  if (!window.SavedQuestions) {
-    content.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">⚠️</div>'
-      + '<h3>Saved questions unavailable</h3>'
-      + '<p>The saved-questions module did not load. Try refreshing the page.</p></div>';
-    return;
-  }
-
-  content.innerHTML = '<div class="sq-loading">Loading your saved questions…</div>';
-  try {
-    _sqRows = await SavedQuestions.list();
-    _sqLoaded = true;
-    sqShowView('list');
-    sqBuildFilter();
-    renderSavedQuestions();
-  } catch (e) {
-    content.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">⚠️</div>'
-      + '<h3>Could not load</h3><p>' + (e && e.message ? e.message : 'Please try again.') + '</p></div>';
-  }
-}
-
-/* Populate the quiz filter dropdown from the loaded rows. */
-function sqBuildFilter() {
-  const sel = document.getElementById('sq-filter');
-  if (!sel) return;
-  const prev = sel.value;
-  const quizzes = {};
-  _sqRows.forEach(r => {
-    const id = r.test_id || '';
-    if (!quizzes[id]) quizzes[id] = r.quiz_title || id;
-  });
-  let html = '<option value="">All quizzes (' + _sqRows.length + ')</option>';
-  Object.keys(quizzes).forEach(id => {
-    html += '<option value="' + escSaved(id) + '">' + escSaved(quizzes[id]) + '</option>';
-  });
-  sel.innerHTML = html;
-  if (prev) sel.value = prev;
-}
-
-/* Minimal HTML-attribute escaper for values we place into markup. */
+/* Minimal HTML escaper for values placed into markup. */
 function escSaved(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-/* Rows currently in scope, based on the filter dropdown. */
-function sqScopedRows() {
-  const filterEl = document.getElementById('sq-filter');
-  const filter = filterEl ? filterEl.value : '';
-  return filter ? _sqRows.filter(r => (r.test_id || '') === filter) : _sqRows;
+function sqFmtTime(secs) {
+  secs = Math.max(0, Math.floor(secs || 0));
+  const m = Math.floor(secs / 60), s = secs % 60;
+  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
 }
 
-/* Toggle which of the three views (list/quiz/result) is visible. */
-function sqShowView(view) {
-  _sqView = view;
-  const head = document.getElementById('sq-head');
-  const list = document.getElementById('sq-content');
-  const quiz = document.getElementById('sq-quiz');
-  const res  = document.getElementById('sq-result');
-  if (head) head.style.display = view === 'list' ? '' : 'none';
-  if (list) list.style.display = view === 'list' ? '' : 'none';
-  if (quiz) quiz.style.display = view === 'quiz' ? '' : 'none';
-  if (res)  res.style.display  = view === 'result' ? '' : 'none';
-  if (view !== 'quiz') {
+/* ══════════════════════════════════════════════
+   LOAD + STAGE / SUB-TAB SWITCHING
+══════════════════════════════════════════════ */
+
+/* Load saved questions from Supabase. Called by navigation when the tab
+   opens; pass force=true from the Refresh button to re-fetch. */
+async function loadSavedQuestions(force) {
+  const attemptEl = document.getElementById('sq-view-attempt');
+  if (!attemptEl) return;
+
+  // Don't disturb an in-progress quiz/result when the tab is re-opened.
+  if (_sqLoaded && !force && _sqStage !== 'shell') return;
+  if (_sqLoaded && !force) { sqRenderShell(); return; }
+
+  if (!window.SavedQuestions) {
+    attemptEl.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">⚠️</div>'
+      + '<h3>Saved questions unavailable</h3>'
+      + '<p>The saved-questions module did not load. Try refreshing the page.</p></div>';
+    return;
+  }
+
+  attemptEl.innerHTML = '<div class="sq-loading">Loading your quizzes…</div>';
+  try {
+    _sqRows = await SavedQuestions.list();
+    _sqLoaded = true;
+    sqShowStage('shell');
+    sqRenderShell();
+  } catch (e) {
+    attemptEl.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">⚠️</div>'
+      + '<h3>Could not load</h3><p>' + (e && e.message ? e.message : 'Please try again.') + '</p></div>';
+  }
+}
+
+/* Toggle between the shell (sub-tabs) and the quiz / result stages. */
+function sqShowStage(stage) {
+  _sqStage = stage;
+  const shell = document.getElementById('sq-shell');
+  const quiz  = document.getElementById('sq-quiz');
+  const res   = document.getElementById('sq-result');
+  if (shell) shell.style.display = stage === 'shell' ? '' : 'none';
+  if (quiz)  quiz.style.display  = stage === 'quiz' ? '' : 'none';
+  if (res)   res.style.display   = stage === 'result' ? '' : 'none';
+  if (stage !== 'quiz') {
     const page = document.getElementById('page-saved');
     if (page) page.classList.remove('sq-solution');
   }
 }
 
-/* ══════════════════════════════════════════════
-   LIST / REVIEW VIEW
-══════════════════════════════════════════════ */
-
-/* Render the (optionally filtered) list of saved questions. */
-function renderSavedQuestions() {
-  const content = document.getElementById('sq-content');
-  if (!content) return;
-
-  const rows = sqScopedRows();
-  const startBtn = document.getElementById('sq-start-btn');
-
-  if (!rows.length) {
-    if (startBtn) startBtn.disabled = true;
-    content.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">🔖</div>'
-      + '<h3>No saved questions yet</h3>'
-      + '<p>While taking a mock test, tap the <b>Save</b> button on any question to bookmark it. '
-      + 'It will appear here so you can revise later — and turn them into a quiz.</p></div>';
-    return;
-  }
-
-  // Only questions with a known answer + 2+ options can be attempted.
-  const attemptable = rows.map(sqToItem).filter(sqIsAttemptable).length;
-  if (startBtn) {
-    startBtn.disabled = attemptable === 0;
-    startBtn.textContent = attemptable ? ('▶ Start Quiz (' + attemptable + ')') : '▶ Start Quiz';
-  }
-
-  const banner = '<div class="sq-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">'
-    + '<div><div style="font-weight:700;">🧠 Ready to test yourself?</div>'
-    + '<div class="sq-sub" style="margin-top:2px;">' + attemptable + ' of ' + rows.length
-    + ' saved question' + (rows.length === 1 ? '' : 's') + ' can be attempted as a quiz.</div></div>'
-    + '<button class="sq-btn sq-btn-primary" onclick="sqStartQuiz()"' + (attemptable ? '' : ' disabled')
-    + '>▶ Start Quiz</button></div>';
-
-  content.innerHTML = banner + '<div class="sq-list">' + rows.map(sqCardHtml).join('') + '</div>';
-}
-
-/* Build the HTML for one saved-question review card (answer highlighted). */
-function sqCardHtml(row) {
-  const q = row.question_data || {};
-  const uKey = escSaved(row.unique_key);
-
-  // Options: option_1..option_5, answer = correct option number
-  const optKeys = ['option_1', 'option_2', 'option_3', 'option_4', 'option_5'];
-  let optsHtml = '';
-  optKeys.forEach((key, idx) => {
-    if (!q[key]) return;
-    const n = idx + 1;
-    const isCorrect = String(q.answer) === String(n);
-    const imgKey = 'option_image_' + n;
-    const img = q[imgKey] ? '<img src="' + escSaved(q[imgKey]) + '" alt="">' : '';
-    optsHtml += '<div class="sq-opt' + (isCorrect ? ' correct' : '') + '">'
-      + '<span class="sq-optnum">' + n + '.</span>'
-      + '<span>' + sqRender(q[key]) + (isCorrect ? '  ✅' : '') + img + '</span></div>';
+/* Switch between the "Attempt Quiz" and "Saved" sub-tabs. */
+function sqSwitchView(v) {
+  _sqSubview = v;
+  ['attempt', 'saved'].forEach(function (x) {
+    const view = document.getElementById('sq-view-' + x); if (view) view.classList.toggle('active', x === v);
+    const btn  = document.getElementById('sq-st-' + x);   if (btn)  btn.classList.toggle('active', x === v);
   });
-
-  const qImg = q.question_image ? '<img src="' + escSaved(q.question_image) + '" alt="">' : '';
-  const explanation = q.explanation || q.solution_text || '';
-  const expHtml = explanation
-    ? '<div class="sq-exp"><div class="sq-exp-label">💡 Explanation</div>' + sqRender(explanation) + '</div>'
-    : '';
-
-  return '<div class="sq-card">'
-    + '<div class="sq-card-top">'
-    +   '<div><div class="sq-quiz">' + escSaved(row.quiz_title || row.test_id || 'Quiz') + '</div>'
-    +   '<div class="sq-when">Saved ' + sqTimeAgo(row.saved_at) + '</div></div>'
-    +   '<button class="sq-remove" onclick="removeSavedQuestion(\'' + uKey + '\')">✕ Remove</button>'
-    + '</div>'
-    + '<div class="sq-q">' + sqRender(q.question) + qImg + '</div>'
-    + '<div class="sq-opts">' + optsHtml + '</div>'
-    + expHtml
-    + '</div>';
+  if (v === 'attempt') sqRenderAttemptView();
+  else sqRenderSavedView();
 }
 
-/* Remove one saved question (cloud + refresh the list). */
-async function removeSavedQuestion(uniqueKey) {
-  if (!window.SavedQuestions) return;
-  if (!confirm('Remove this question from your saved collection?')) return;
-  const ok = await SavedQuestions.remove(uniqueKey);
-  if (ok) {
-    _sqRows = _sqRows.filter(r => r.unique_key !== uniqueKey);
-    sqBuildFilter();
-    renderSavedQuestions();
-    if (typeof showToast === 'function') showToast('Removed from saved questions', 'success');
-  } else {
-    if (typeof showToast === 'function') showToast('Could not remove — try again', 'error');
-    else alert('Could not remove — please try again.');
-  }
+/* Render both sub-tab bodies (called after load / refresh / remove). */
+function sqRenderShell() {
+  sqRenderAttemptView();
+  sqRenderSavedView();
 }
+
+/* renderSavedQuestions is kept as a public alias (navigation + old
+   onclicks may reference it) — re-render whatever is on screen. */
+function renderSavedQuestions() { sqRenderShell(); }
 
 /* ══════════════════════════════════════════════
-   QUIZ ENGINE
+   DATA SHAPING
 ══════════════════════════════════════════════ */
 
 /* Normalise a raw Supabase row into an attemptable quiz item. */
@@ -262,31 +173,244 @@ function sqIsAttemptable(it) {
   return it.options.length >= 2 && it.answer !== '' && a >= 1 && a <= it.options.length;
 }
 
-function sqFmtTime(secs) {
-  secs = Math.max(0, Math.floor(secs || 0));
-  const m = Math.floor(secs / 60), s = secs % 60;
-  return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+/* Group the saved rows by their source quiz (test_id). Returns an ordered
+   array of { testId, title, rows, savedAt }. */
+function sqGroupRows() {
+  const groups = {};
+  _sqRows.forEach(function (r) {
+    const id = r.test_id || '';
+    if (!groups[id]) groups[id] = { testId: id, title: r.quiz_title || id || 'Quiz', rows: [], savedAt: r.saved_at };
+    groups[id].rows.push(r);
+    if (r.saved_at && (!groups[id].savedAt || r.saved_at > groups[id].savedAt)) groups[id].savedAt = r.saved_at;
+  });
+  return Object.keys(groups).map(function (k) { return groups[k]; })
+    .sort(function (a, b) { return (b.savedAt || '').localeCompare(a.savedAt || ''); });
 }
 
-/* Begin a quiz from the questions currently in scope (respects the filter). */
-function sqStartQuiz() {
-  const rows = sqScopedRows();
-  const items = rows.map(sqToItem).filter(sqIsAttemptable);
+/* Attemptable items for a given scope ('' / 'all' = every quiz). */
+function sqItemsForScope(scope) {
+  const rows = (!scope || scope === 'all') ? _sqRows : _sqRows.filter(r => (r.test_id || '') === scope);
+  return rows.map(sqToItem).filter(sqIsAttemptable);
+}
+
+/* ══════════════════════════════════════════════
+   ATTEMPT HISTORY (localStorage, per user)
+══════════════════════════════════════════════ */
+function sqAttemptsKey() {
+  let uid = 'guest';
+  try { if (window.SavedQuestions && SavedQuestions.userId) uid = SavedQuestions.userId() || 'guest'; } catch (e) {}
+  return 'preppath_quiz_attempts_' + uid;
+}
+function sqLoadAttempts() {
+  try { return JSON.parse(localStorage.getItem(sqAttemptsKey()) || '[]') || []; } catch (e) { return []; }
+}
+function sqPersistAttempt(rec) {
+  const list = sqLoadAttempts();
+  list.unshift(rec);
+  try { localStorage.setItem(sqAttemptsKey(), JSON.stringify(list.slice(0, 25))); } catch (e) {}
+}
+function sqClearAttempts() {
+  if (!confirm('Clear your entire quiz attempt history? This cannot be undone.')) return;
+  try { localStorage.removeItem(sqAttemptsKey()); } catch (e) {}
+  sqRenderAttemptView();
+}
+
+/* ══════════════════════════════════════════════
+   ATTEMPT-QUIZ SUB-TAB
+══════════════════════════════════════════════ */
+function sqRenderAttemptView() {
+  const c = document.getElementById('sq-view-attempt');
+  if (!c) return;
+
+  const groups = sqGroupRows();
+  const totalAttemptable = sqItemsForScope('all').length;
+  const attempts = sqLoadAttempts();
+
+  if (!_sqRows.length) {
+    c.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">📝</div>'
+      + '<h3>No quizzes yet</h3>'
+      + '<p>While taking a mock test, tap the <b>Save</b> button on any question to bookmark it. '
+      + 'Saved questions become quizzes you can attempt here.</p></div>';
+    return;
+  }
+
+  // Available quizzes (only groups that have at least one attemptable question).
+  let cards = '';
+  if (totalAttemptable > 1) {
+    const bestAll = sqBestAttempt('all');
+    cards += sqQuizCardHtml('all', 'All saved questions', totalAttemptable, _sqRows.length, bestAll);
+  }
+  groups.forEach(function (g) {
+    const items = g.rows.map(sqToItem).filter(sqIsAttemptable);
+    if (!items.length) return;
+    cards += sqQuizCardHtml(g.testId, g.title, items.length, g.rows.length, sqBestAttempt(g.testId));
+  });
+
+  let html = '<div class="sq-section-label">▶ Available quizzes</div>';
+  if (cards) {
+    html += '<div class="sq-qz-grid">' + cards + '</div>';
+  } else {
+    html += '<div class="sq-card" style="margin-bottom:20px;"><b>No attemptable quizzes.</b>'
+      + '<div class="sq-sub" style="margin-top:4px;">Your saved questions don\'t have answer keys yet, '
+      + 'so a quiz can\'t be built from them. You can still review them under the <b>Saved</b> tab.</div></div>';
+  }
+
+  // Attempt history
+  html += '<div class="sq-section-label" style="display:flex;align-items:center;justify-content:space-between;">'
+    + '<span>🕘 Your attempts</span>'
+    + (attempts.length ? '<button class="sq-btn" style="padding:.25rem .6rem;font-size:.72rem;" onclick="sqClearAttempts()">Clear history</button>' : '')
+    + '</div>';
+  if (!attempts.length) {
+    html += '<div class="sq-card"><div class="sq-sub">You haven\'t attempted any quiz yet. '
+      + 'Pick a quiz above and press <b>Start</b> — your score &amp; analysis will be saved here.</div></div>';
+  } else {
+    html += '<div class="sq-hist">' + attempts.map(sqHistRowHtml).join('') + '</div>';
+  }
+
+  c.innerHTML = html;
+}
+
+/* Best (highest-accuracy) recorded attempt for a scope, or null. */
+function sqBestAttempt(scope) {
+  const list = sqLoadAttempts().filter(function (a) { return (a.scope || 'all') === scope; });
+  if (!list.length) return null;
+  return list.reduce(function (best, a) { return (a.accuracy > (best ? best.accuracy : -1)) ? a : best; }, null);
+}
+
+function sqQuizCardHtml(scope, title, attemptable, total, best) {
+  const bestHtml = best
+    ? '<div class="sq-qz-best">🏆 Best: ' + best.accuracy + '% (' + best.score + ' pts)</div>'
+    : '<div class="sq-sub">Not attempted yet</div>';
+  return '<div class="sq-qz-card">'
+    + '<div class="sq-qz-title">' + escSaved(title) + '</div>'
+    + '<div class="sq-qz-meta"><span>📄 ' + attemptable + ' question' + (attemptable === 1 ? '' : 's')
+    + '</span>' + (total > attemptable ? '<span>(' + (total - attemptable) + ' w/o answer key)</span>' : '') + '</div>'
+    + bestHtml
+    + '<button class="sq-btn sq-btn-primary" onclick="sqStartQuiz(\'' + escSaved(scope) + '\')">▶ Start</button>'
+    + '</div>';
+}
+
+function sqHistRowHtml(a) {
+  const accColor = a.accuracy >= 60 ? '#198754' : a.accuracy >= 35 ? '#ffc107' : '#dc3545';
+  return '<div class="sq-hist-row" onclick="sqOpenAttempt(\'' + escSaved(a.id) + '\')">'
+    + '<div class="sq-hist-main">'
+    +   '<div class="sq-hist-title">' + escSaved(a.title) + '</div>'
+    +   '<div class="sq-hist-sub">' + sqTimeAgo(a.at) + ' · ' + a.correct + '/' + a.total + ' correct · ⏱ ' + sqFmtTime(a.timeTaken) + '</div>'
+    + '</div>'
+    + '<div class="sq-hist-score">'
+    +   '<div class="sq-hist-acc" style="color:' + accColor + '">' + a.accuracy + '%</div>'
+    +   '<div class="sq-hist-pts">' + a.score + '/' + a.maxScore + ' pts</div>'
+    + '</div>'
+    + '</div>';
+}
+
+/* ══════════════════════════════════════════════
+   SAVED SUB-TAB (quiz-wise groups)
+══════════════════════════════════════════════ */
+function sqRenderSavedView() {
+  const c = document.getElementById('sq-view-saved');
+  if (!c) return;
+
+  if (!_sqRows.length) {
+    c.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">🔖</div>'
+      + '<h3>No saved questions yet</h3>'
+      + '<p>While taking a mock test, tap the <b>Save</b> button on any question to bookmark it. '
+      + 'It will appear here — grouped by quiz — so you can revise later.</p></div>';
+    return;
+  }
+
+  const groups = sqGroupRows();
+  c.innerHTML = '<div class="sq-section-label">🔖 Saved questions, grouped by quiz</div>'
+    + groups.map(function (g, i) {
+        const open = i === 0 ? ' open' : '';
+        return '<div class="sq-group' + open + '">'
+          + '<div class="sq-group-head" onclick="sqToggleGroup(this)">'
+          +   '<span class="sq-group-chev">▶</span>'
+          +   '<span class="sq-group-name">' + escSaved(g.title) + '</span>'
+          +   '<span class="sq-group-count">' + g.rows.length + ' saved</span>'
+          + '</div>'
+          + '<div class="sq-group-body"><div class="sq-list">' + g.rows.map(sqCardHtml).join('') + '</div></div>'
+          + '</div>';
+      }).join('');
+}
+
+function sqToggleGroup(headEl) {
+  const g = headEl.closest('.sq-group');
+  if (g) g.classList.toggle('open');
+}
+
+/* Build the HTML for one saved-question review card (answer highlighted). */
+function sqCardHtml(row) {
+  const q = row.question_data || {};
+  const uKey = escSaved(row.unique_key);
+
+  const optKeys = ['option_1', 'option_2', 'option_3', 'option_4', 'option_5'];
+  let optsHtml = '';
+  optKeys.forEach((key, idx) => {
+    if (!q[key]) return;
+    const n = idx + 1;
+    const isCorrect = String(q.answer) === String(n);
+    const imgKey = 'option_image_' + n;
+    const img = q[imgKey] ? '<img src="' + escSaved(q[imgKey]) + '" alt="">' : '';
+    optsHtml += '<div class="sq-opt' + (isCorrect ? ' correct' : '') + '">'
+      + '<span class="sq-optnum">' + n + '.</span>'
+      + '<span>' + sqRender(q[key]) + (isCorrect ? '  ✅' : '') + img + '</span></div>';
+  });
+
+  const qImg = q.question_image ? '<img src="' + escSaved(q.question_image) + '" alt="">' : '';
+  const explanation = q.explanation || q.solution_text || '';
+  const expHtml = explanation
+    ? '<div class="sq-exp"><div class="sq-exp-label">💡 Explanation</div>' + sqRender(explanation) + '</div>'
+    : '';
+
+  return '<div class="sq-card">'
+    + '<div class="sq-card-top">'
+    +   '<div><div class="sq-when">Saved ' + sqTimeAgo(row.saved_at) + '</div></div>'
+    +   '<button class="sq-remove" onclick="removeSavedQuestion(\'' + uKey + '\')">✕ Remove</button>'
+    + '</div>'
+    + '<div class="sq-q">' + sqRender(q.question) + qImg + '</div>'
+    + '<div class="sq-opts">' + optsHtml + '</div>'
+    + expHtml
+    + '</div>';
+}
+
+/* Remove one saved question (cloud + refresh both views). */
+async function removeSavedQuestion(uniqueKey) {
+  if (!window.SavedQuestions) return;
+  if (!confirm('Remove this question from your saved collection?')) return;
+  const ok = await SavedQuestions.remove(uniqueKey);
+  if (ok) {
+    _sqRows = _sqRows.filter(r => r.unique_key !== uniqueKey);
+    sqRenderShell();
+    if (typeof showToast === 'function') showToast('Removed from saved questions', 'success');
+  } else {
+    if (typeof showToast === 'function') showToast('Could not remove — try again', 'error');
+    else alert('Could not remove — please try again.');
+  }
+}
+
+/* ══════════════════════════════════════════════
+   QUIZ ENGINE
+══════════════════════════════════════════════ */
+
+/* Begin a quiz for a scope (a source quiz's test_id, or 'all'). */
+function sqStartQuiz(scope) {
+  const items = sqItemsForScope(scope);
   if (!items.length) {
     if (typeof showToast === 'function') showToast('No attemptable questions in this selection', 'error');
     else alert('These saved questions don\'t have answer keys, so a quiz can\'t be built from them yet.');
     return;
   }
 
-  const filterEl = document.getElementById('sq-filter');
-  const filter = filterEl ? filterEl.value : '';
-  const title = (filter && items[0]) ? items[0].quizTitle : 'Saved Questions Quiz';
+  const title = (!scope || scope === 'all') ? 'All Saved Questions' : items[0].quizTitle;
 
   _sqQuiz = {
     items: items,
+    scope: (!scope ? 'all' : scope),
     cur: 0,
     answers: {},
     solutionMode: false,
+    fromHistory: false,
     startTime: Date.now(),
     elapsed: 0,
     timerInt: null,
@@ -296,7 +420,7 @@ function sqStartQuiz() {
   const page = document.getElementById('page-saved');
   if (page) page.classList.remove('sq-solution');
 
-  sqShowView('quiz');
+  sqShowStage('quiz');
   sqRenderRunner();
   sqStartQuizTimer();
 }
@@ -343,7 +467,7 @@ function sqRenderRunner() {
 function sqStartQuizTimer() {
   if (!_sqQuiz) return;
   clearInterval(_sqQuiz.timerInt);
-  _sqQuiz.startTime = Date.now();
+  _sqQuiz.startTime = Date.now() - (_sqQuiz.elapsed || 0) * 1000;
   const tick = function () {
     if (!_sqQuiz) return;
     _sqQuiz.elapsed = Math.floor((Date.now() - _sqQuiz.startTime) / 1000);
@@ -469,39 +593,59 @@ function sqQuizClear() {
 }
 
 function sqQuizExit() {
-  if (!_sqQuiz) { sqShowView('list'); return; }
-  if (!_sqQuiz.solutionMode && !confirm('Exit the quiz? Your progress will be lost.')) return;
+  if (!_sqQuiz) { sqShowStage('shell'); return; }
+  if (!_sqQuiz.solutionMode && !_sqQuiz.fromHistory && !confirm('Exit the quiz? Your progress will be lost.')) return;
   clearInterval(_sqQuiz.timerInt);
   _sqQuiz = null;
-  sqShowView('list');
-  renderSavedQuestions();
+  sqShowStage('shell');
+  sqSwitchView('attempt');
 }
 
-/* Score the quiz and switch to the analysis view. */
+/* Compute a stats object from items + answers. */
+function sqComputeStats(items, answers, elapsed) {
+  const stats = { total: items.length, correct: 0, wrong: 0, skip: 0, score: 0, maxScore: 0, byQuiz: {}, wrongItems: [] };
+  items.forEach(function (it) {
+    stats.maxScore += Number(it.correct) || 0;
+    const bucket = stats.byQuiz[it.quizTitle] || (stats.byQuiz[it.quizTitle] = { total: 0, correct: 0, wrong: 0, skip: 0 });
+    bucket.total++;
+    const a = answers[it.id];
+    if (!a) { stats.skip++; bucket.skip++; }
+    else if (String(a) === String(it.answer)) { stats.correct++; bucket.correct++; stats.score += Number(it.correct) || 0; }
+    else { stats.wrong++; bucket.wrong++; stats.score -= Number(it.negative) || 0; stats.wrongItems.push(it); }
+  });
+  const attempted = stats.correct + stats.wrong;
+  stats.accuracy = attempted ? Math.round((stats.correct / attempted) * 100) : 0;
+  stats.timeTaken = elapsed || 0;
+  return stats;
+}
+
+/* Score the quiz, record the attempt, and switch to the analysis view. */
 function sqQuizSubmit() {
   if (!_sqQuiz) return;
   if (!_sqQuiz.solutionMode && !confirm('Submit the quiz and see your analysis?')) return;
   clearInterval(_sqQuiz.timerInt);
 
   const q = _sqQuiz;
-  const stats = { total: q.items.length, correct: 0, wrong: 0, skip: 0, score: 0, maxScore: 0, byQuiz: {}, wrongItems: [] };
-
-  q.items.forEach(function (it) {
-    stats.maxScore += Number(it.correct) || 0;
-    const bucket = stats.byQuiz[it.quizTitle] || (stats.byQuiz[it.quizTitle] = { total: 0, correct: 0, wrong: 0, skip: 0 });
-    bucket.total++;
-    const a = q.answers[it.id];
-    if (!a) { stats.skip++; bucket.skip++; }
-    else if (String(a) === String(it.answer)) { stats.correct++; bucket.correct++; stats.score += Number(it.correct) || 0; }
-    else { stats.wrong++; bucket.wrong++; stats.score -= Number(it.negative) || 0; stats.wrongItems.push(it); }
-  });
-
-  const attempted = stats.correct + stats.wrong;
-  stats.accuracy = attempted ? Math.round((stats.correct / attempted) * 100) : 0;
-  stats.timeTaken = q.elapsed;
+  const stats = sqComputeStats(q.items, q.answers, q.elapsed);
   q.lastStats = stats;
 
-  sqShowView('result');
+  // Record the attempt (skip re-recording when reviewing a past attempt).
+  if (!q.fromHistory) {
+    sqPersistAttempt({
+      id: 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      scope: q.scope || 'all',
+      title: q.title,
+      at: new Date().toISOString(),
+      score: stats.score, maxScore: stats.maxScore,
+      correct: stats.correct, wrong: stats.wrong, skip: stats.skip,
+      total: stats.total, accuracy: stats.accuracy, timeTaken: stats.timeTaken,
+      byQuiz: stats.byQuiz,
+      items: q.items,
+      answers: q.answers
+    });
+  }
+
+  sqShowStage('result');
   sqRenderResult(stats);
 }
 
@@ -514,7 +658,6 @@ function sqRenderResult(stats) {
 
   const scoreColor = stats.score >= 0 ? '#198754' : '#dc3545';
 
-  // Per-source-quiz accuracy bars
   let byQuizHtml = '';
   Object.keys(stats.byQuiz).forEach(function (name) {
     const b = stats.byQuiz[name];
@@ -528,7 +671,6 @@ function sqRenderResult(stats) {
       + '</div>';
   });
 
-  // Questions answered incorrectly (weak areas)
   let wrongHtml = '';
   if (stats.wrongItems.length) {
     wrongHtml = '<div class="sq-analysis"><h3>❌ Questions to revise (' + stats.wrongItems.length + ')</h3>'
@@ -547,7 +689,7 @@ function sqRenderResult(stats) {
   c.innerHTML =
       '<div class="sq-head"><div>'
     +   '<h2 class="sq-title">📊 ' + escSaved(_sqQuiz.title) + ' — Result</h2>'
-    +   '<div class="sq-sub">Here\'s how you did on this attempt.</div>'
+    +   '<div class="sq-sub">' + (_sqQuiz.fromHistory ? 'Reviewing a past attempt.' : 'Here\'s how you did on this attempt.') + '</div>'
     + '</div></div>'
     + '<div class="sq-score-grid">'
     +   '<div class="sq-score-cell"><h4>Score</h4><p style="color:' + scoreColor + '">'
@@ -571,7 +713,7 @@ function sqRenderResult(stats) {
     + '<div class="sq-run-foot" style="justify-content:flex-start;">'
     +   '<button class="sq-btn sq-btn-primary" onclick="sqViewSolutions()">📖 View solutions &amp; explanations</button>'
     +   '<button class="sq-btn" onclick="sqRetakeQuiz()">🔁 Retake quiz</button>'
-    +   '<button class="sq-btn" onclick="sqBackToList()">← Back to list</button>'
+    +   '<button class="sq-btn" onclick="sqBackToList()">← Back to quizzes</button>'
     + '</div>';
 }
 
@@ -580,9 +722,10 @@ function sqViewSolutions() {
   if (!_sqQuiz) return;
   _sqQuiz.solutionMode = true;
   _sqQuiz.cur = 0;
+  clearInterval(_sqQuiz.timerInt);
   const page = document.getElementById('page-saved');
   if (page) page.classList.add('sq-solution');
-  sqShowView('quiz');
+  sqShowStage('quiz');
   sqRenderRunner();
   const timer = document.getElementById('sq-timer');
   if (timer) timer.textContent = '📖 Solutions';
@@ -592,27 +735,43 @@ function sqViewSolutions() {
 
 /* Retake the same set of questions from scratch. */
 function sqRetakeQuiz() {
-  if (!_sqQuiz) { sqStartQuiz(); return; }
-  const items = _sqQuiz.items;
+  if (!_sqQuiz) { sqShowStage('shell'); sqSwitchView('attempt'); return; }
+  const items = _sqQuiz.items, scope = _sqQuiz.scope, title = _sqQuiz.title;
   _sqQuiz = {
-    items: items,
-    cur: 0,
-    answers: {},
-    solutionMode: false,
-    startTime: Date.now(),
-    elapsed: 0,
-    timerInt: null,
-    title: _sqQuiz.title
+    items: items, scope: scope, cur: 0, answers: {}, solutionMode: false,
+    fromHistory: false, startTime: Date.now(), elapsed: 0, timerInt: null, title: title
   };
   const page = document.getElementById('page-saved');
   if (page) page.classList.remove('sq-solution');
-  sqShowView('quiz');
+  sqShowStage('quiz');
   sqRenderRunner();
   sqStartQuizTimer();
 }
 
 function sqBackToList() {
   if (_sqQuiz) { clearInterval(_sqQuiz.timerInt); _sqQuiz = null; }
-  sqShowView('list');
-  renderSavedQuestions();
+  sqShowStage('shell');
+  sqSwitchView('attempt');
+}
+
+/* Re-open a saved attempt from history straight into its analysis. */
+function sqOpenAttempt(id) {
+  const rec = sqLoadAttempts().filter(function (a) { return a.id === id; })[0];
+  if (!rec) { if (typeof showToast === 'function') showToast('Attempt not found', 'error'); return; }
+  _sqQuiz = {
+    items: rec.items || [],
+    scope: rec.scope || 'all',
+    cur: 0,
+    answers: rec.answers || {},
+    solutionMode: false,
+    fromHistory: true,
+    startTime: Date.now(),
+    elapsed: rec.timeTaken || 0,
+    timerInt: null,
+    title: rec.title || 'Quiz'
+  };
+  const stats = sqComputeStats(_sqQuiz.items, _sqQuiz.answers, _sqQuiz.elapsed);
+  _sqQuiz.lastStats = stats;
+  sqShowStage('result');
+  sqRenderResult(stats);
 }

@@ -45,6 +45,10 @@ function switchPage(page) {
   navEl.classList.add('active');
   rememberActivePage(targetPage);
 
+  // The exam selector bar is only relevant on the Dashboard — hide it elsewhere.
+  const examBar = document.getElementById('exam-selector-bar');
+  if (examBar) examBar.style.display = (targetPage === 'dashboard') ? 'flex' : 'none';
+
   if (targetPage === 'dashboard') updateDashboard();
   if (targetPage === 'saved' && typeof loadSavedQuestions === 'function') loadSavedQuestions();
   if (targetPage === 'planner') {

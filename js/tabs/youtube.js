@@ -1562,9 +1562,9 @@ function ytModalOutsideClose(e) {
 const _switchPageBase = switchPage;
 switchPage = function(page) {
   _switchPageBase(page);
-  // Hide/show exam selector bar based on page
+  // Exam selector bar is only relevant on the Dashboard — show it there only.
   const examBar = document.getElementById('exam-selector-bar');
-  if (examBar) examBar.style.display = (page==='yt-organiser') ? 'none' : '';
+  if (examBar) examBar.style.display = (page==='dashboard') ? 'flex' : 'none';
   if (page === 'youtube') {
     renderYtSavedList();
     ytLoadNotes();

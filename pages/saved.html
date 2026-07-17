@@ -12,6 +12,13 @@
   #page-saved .sq-btn-primary:hover { filter:brightness(1.05); color:#fff; }
   #page-saved .sq-btn:disabled { opacity:.5; cursor:not-allowed; }
 
+  /* ── sub-tabs ── */
+  #page-saved .sq-subtabs { display:inline-flex; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px; gap:4px; margin-bottom:1.2rem; }
+  #page-saved .sq-subtab { padding:9px 18px; border-radius:9px; font-size:.84rem; font-weight:600; color:var(--muted); cursor:pointer; border:none; background:transparent; transition:all .18s; display:inline-flex; align-items:center; gap:7px; }
+  #page-saved .sq-subtab.active { background:var(--accent); color:#fff; box-shadow:0 4px 14px rgba(0,200,150,.28); }
+  #page-saved .sq-view { display:none; }
+  #page-saved .sq-view.active { display:block; }
+
   #page-saved .sq-list { display:flex; flex-direction:column; gap:14px; }
   #page-saved .sq-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 18px; }
   #page-saved .sq-card-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; }
@@ -33,6 +40,37 @@
   #page-saved .sq-empty-icon { font-size:2.4rem; margin-bottom:10px; }
   #page-saved .sq-empty h3 { margin:0 0 6px; color:var(--text); font-weight:700; }
   #page-saved .sq-loading { text-align:center; padding:40px; color:var(--muted); }
+
+  /* ── Attempt-Quiz view: available quiz cards ── */
+  #page-saved .sq-qz-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:14px; margin-bottom:20px; }
+  #page-saved .sq-qz-card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:15px 16px; display:flex; flex-direction:column; gap:10px; }
+  #page-saved .sq-qz-title { font-weight:700; font-size:.92rem; line-height:1.4; }
+  #page-saved .sq-qz-meta { font-size:.74rem; color:var(--muted); display:flex; flex-wrap:wrap; gap:4px 12px; }
+  #page-saved .sq-qz-best { font-size:.72rem; color:#198754; font-weight:700; }
+  #page-saved .sq-section-label { font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700; margin:0 0 12px; }
+
+  /* ── Attempt history ── */
+  #page-saved .sq-hist { display:flex; flex-direction:column; gap:10px; }
+  #page-saved .sq-hist-row { display:flex; align-items:center; justify-content:space-between; gap:12px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:11px 14px; cursor:pointer; transition:border-color .15s; }
+  #page-saved .sq-hist-row:hover { border-color:var(--accent); }
+  #page-saved .sq-hist-main { min-width:0; }
+  #page-saved .sq-hist-title { font-weight:700; font-size:.86rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #page-saved .sq-hist-sub { font-size:.7rem; color:var(--muted); margin-top:2px; }
+  #page-saved .sq-hist-score { flex:0 0 auto; text-align:right; }
+  #page-saved .sq-hist-acc { font-size:1.05rem; font-weight:800; }
+  #page-saved .sq-hist-pts { font-size:.68rem; color:var(--muted); }
+
+  /* ── Saved view: quiz-wise groups ── */
+  #page-saved .sq-group { background:var(--surface); border:1px solid var(--border); border-radius:12px; margin-bottom:14px; overflow:hidden; }
+  #page-saved .sq-group-head { display:flex; align-items:center; gap:10px; padding:13px 16px; cursor:pointer; user-select:none; }
+  #page-saved .sq-group-head:hover { background:rgba(127,127,127,.05); }
+  #page-saved .sq-group-chev { color:var(--muted); transition:transform .2s; font-size:.7rem; }
+  #page-saved .sq-group.open .sq-group-chev { transform:rotate(90deg); }
+  #page-saved .sq-group-name { flex:1; font-weight:700; font-size:.9rem; }
+  #page-saved .sq-group-count { font-size:.68rem; color:var(--muted); background:var(--card,rgba(127,127,127,.12)); border:1px solid var(--border); padding:2px 9px; border-radius:99px; white-space:nowrap; }
+  #page-saved .sq-group-body { display:none; padding:0 16px 14px; }
+  #page-saved .sq-group.open .sq-group-body { display:block; }
+  #page-saved .sq-group-body .sq-card { background:transparent; border-color:var(--border); }
 
   /* ── Quiz runner ── */
   #page-saved .sq-runbar { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:14px; }
@@ -86,24 +124,32 @@
   #page-saved .sq-acc-big { font-size:2.2rem; font-weight:800; }
   </style>
 
-  <!-- HEADER (list view only) -->
-  <div class="sq-head" id="sq-head">
-    <div>
-      <h2 class="sq-title">📝 Quiz</h2>
-      <div class="sq-sub">Attempt a quiz built from the questions you bookmarked during mock tests, then review your analysis.</div>
+  <!-- SHELL (sub-tabs + list views) — hidden while a quiz/result is showing -->
+  <div id="sq-shell">
+    <div class="sq-head">
+      <div>
+        <h2 class="sq-title">📝 Quiz</h2>
+        <div class="sq-sub">Attempt quizzes built from questions you bookmarked during mock tests, then review your analysis.</div>
+      </div>
+      <div class="sq-controls">
+        <button class="sq-btn" onclick="loadSavedQuestions(true)">🔄 Refresh</button>
+      </div>
     </div>
-    <div class="sq-controls">
-      <select class="sq-select" id="sq-filter" onchange="renderSavedQuestions()">
-        <option value="">All quizzes</option>
-      </select>
-      <button class="sq-btn sq-btn-primary" id="sq-start-btn" onclick="sqStartQuiz()">▶ Start Quiz</button>
-      <button class="sq-btn" onclick="loadSavedQuestions(true)">🔄 Refresh</button>
-    </div>
-  </div>
 
-  <!-- LIST / REVIEW VIEW -->
-  <div id="sq-content">
-    <div class="sq-loading">Loading your saved questions…</div>
+    <div class="sq-subtabs">
+      <button class="sq-subtab active" id="sq-st-attempt" onclick="sqSwitchView('attempt')">▶ Attempt Quiz</button>
+      <button class="sq-subtab" id="sq-st-saved" onclick="sqSwitchView('saved')">🔖 Saved</button>
+    </div>
+
+    <!-- ATTEMPT QUIZ VIEW -->
+    <div class="sq-view active" id="sq-view-attempt">
+      <div class="sq-loading">Loading your quizzes…</div>
+    </div>
+
+    <!-- SAVED VIEW (quiz-wise) -->
+    <div class="sq-view" id="sq-view-saved">
+      <div class="sq-loading">Loading your saved questions…</div>
+    </div>
   </div>
 
   <!-- QUIZ RUNNER VIEW -->
