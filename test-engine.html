@@ -5083,6 +5083,17 @@ function recordLocalAttempt(payload) {
       sections: payload.sections || {}
     });
     localStorage.setItem(QUIZ_HISTORY_KEY, JSON.stringify(arr));
+    // Persist a friendly title for this quiz id so the Quiz tab (app.html) can
+    // show the real name instead of the raw id (e.g. "EZ-CUSTOM-1784271870393")
+    // — the per-quiz custom payload is purged over time, but this map survives.
+    if (QUIZ_ID && QUIZ_TITLE) {
+      let titles = {};
+      try { titles = JSON.parse(localStorage.getItem('ez_quiz_titles') || '{}') || {}; } catch (e) { titles = {}; }
+      if (titles[QUIZ_ID] !== QUIZ_TITLE) {
+        titles[QUIZ_ID] = QUIZ_TITLE;
+        localStorage.setItem('ez_quiz_titles', JSON.stringify(titles));
+      }
+    }
   } catch (e) { console.warn("recordLocalAttempt failed:", e); }
 }
 

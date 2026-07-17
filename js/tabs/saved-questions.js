@@ -254,6 +254,45 @@ function sqRecomputeCombined() {
     .slice(0, 50);
 }
 
+/* Resolve a friendly display name for an exam-engine quiz id. The engine
+   (test-engine.html) records the real title into an "ez_quiz_titles" map on
+   every attempt, and freshly-generated custom quizzes also keep their payload
+   under "ez_custom_quiz_<id>" (plus a generic "ez_custom_quiz" fallback). We
+   try each of these before falling back to the raw id so full-mock / custom
+   attempts never show a bare "EZ-CUSTOM-…" string. */
+function sqFriendlyMockTitle(quizId, fallback) {
+  if (!quizId) return fallback || 'Mock Test';
+  try {
+    const titles = JSON.parse(window.localStorage.getItem('ez_quiz_titles') || '{}');
+    if (titles && titles[quizId]) return titles[quizId];
+  } catch (e) {}
+  try {
+    const raw = window.localStorage.getItem('ez_custom_quiz_' + quizId);
+    if (raw) { const p = JSON.parse(raw); if (p && p.title) return p.title; }
+  } catch (e) {}
+  try {
+    const raw = window.localStorage.getItem('ez_custom_quiz');
+    if (raw) { const p = JSON.parse(raw); if (p && p.id === quizId && p.title) return p.title; }
+  } catch (e) {}
+  return fallback || quizId || 'Mock Test';
+}
+
+/* True when a quiz id can be re-opened in the exam engine — either its custom
+   payload is still cached locally, or a Supabase backend is configured to
+   serve it. Used to decide whether to offer Retake / full-analysis buttons. */
+function sqMockRelaunchable(quizId) {
+  if (!quizId) return false;
+  try {
+    if (window.localStorage.getItem('ez_custom_quiz_' + quizId)) return true;
+    const raw = window.localStorage.getItem('ez_custom_quiz');
+    if (raw) { const p = JSON.parse(raw); if (p && p.id === quizId) return true; }
+  } catch (e) {}
+  // A real (non-custom) quiz id backed by Supabase can always be reloaded.
+  if (String(quizId).indexOf('EZ-CUSTOM') !== 0 &&
+      window.MockAPI && window.MockAPI.configured) return true;
+  return false;
+}
+
 /* Map raw mock_attempts rows (from the exam engine) → the attempt-record
    shape the Quiz tab renders. Titles are resolved from the saved-question
    rows when possible (they share test_id), else fall back to the test id. */
@@ -269,7 +308,7 @@ function sqMapMockRows(rows) {
       id: 'mock_' + (row.id != null ? row.id : (row.created_at || Math.random())),
       source: 'mock',
       scope: row.test_id || 'all',
-      title: titleByTest[row.test_id] || row.test_id || 'Mock Test',
+      title: titleByTest[row.test_id] || sqFriendlyMockTitle(row.test_id, row.test_id || 'Mock Test'),
       at: row.created_at || new Date().toISOString(),
       score: Number(row.score) || 0,
       maxScore: Number(row.max_score) || 0,
@@ -342,7 +381,7 @@ function sqLoadLocalMockAttempts() {
         id: 'mockls_' + scope + '_' + a.submittedAt,
         source: 'mock',
         scope: scope,
-        title: title || 'Mock Test',
+        title: (title && title !== scope) ? title : sqFriendlyMockTitle(scope, title),
         at: atIso,
         score: Number(a.score) || 0,
         maxScore: Number(a.total) || 0,       // engine stores max marks in `total`
@@ -1365,15 +1404,37 @@ function sqRenderResult(stats) {
     +   (byQuizHtml || '<div class="sq-sub">No section data available for this attempt.</div>') + '</div>'
     + wrongHtml
     + (_sqQuiz.fromMock
-        ? '<div class="sq-analysis"><div class="sq-sub">This is a full mock / comprehensive-MCQ attempt taken in the exam engine. '
-          + 'Per-question solutions aren\'t stored here — reopen the test in the exam engine for a full question-by-question review.</div></div>'
-          + '<div class="sq-run-foot" style="justify-content:flex-start;">'
-          + '<button class="sq-btn" onclick="sqBackToList()">← Back to quizzes</button></div>'
+        ? (sqMockRelaunchable(_sqQuiz.scope)
+            ? '<div class="sq-analysis"><div class="sq-sub">This is a full mock / comprehensive-MCQ attempt taken in the exam engine. '
+              + 'Open it there for a full question-by-question review with solutions, or retake it for a fresh attempt.</div></div>'
+              + '<div class="sq-run-foot" style="justify-content:flex-start;">'
+              + '<button class="sq-btn sq-btn-primary" onclick="sqRelaunchMock(\'review\')">📊 View full analysis &amp; solutions</button>'
+              + '<button class="sq-btn" onclick="sqRelaunchMock(\'reattempt\')">🔁 Retake quiz</button>'
+              + '<button class="sq-btn" onclick="sqBackToList()">← Back to quizzes</button></div>'
+            : '<div class="sq-analysis"><div class="sq-sub">This is a full mock / comprehensive-MCQ attempt taken in the exam engine. '
+              + 'Per-question solutions aren\'t stored here — reopen the test in the exam engine for a full question-by-question review.</div></div>'
+              + '<div class="sq-run-foot" style="justify-content:flex-start;">'
+              + '<button class="sq-btn" onclick="sqBackToList()">← Back to quizzes</button></div>')
         : '<div class="sq-run-foot" style="justify-content:flex-start;">'
           + '<button class="sq-btn sq-btn-primary" onclick="sqViewSolutions()">📖 View solutions &amp; explanations</button>'
           + '<button class="sq-btn" onclick="sqRetakeQuiz()">🔁 Retake quiz</button>'
           + '<button class="sq-btn" onclick="sqBackToList()">← Back to quizzes</button>'
           + '</div>');
+}
+
+/* Re-open an exam-engine (mock / comprehensive-MCQ) attempt in test-engine.html.
+   mode='review'   → reload the engine, which auto-restores the saved result and
+                     its full per-question analysis + detailed solutions.
+   mode='reattempt'→ clear the saved result/state and start a fresh attempt. */
+function sqRelaunchMock(mode) {
+  if (!_sqQuiz || !_sqQuiz.scope) return;
+  const id = _sqQuiz.scope;
+  if (mode === 'reattempt' &&
+      !confirm('Retake this test? Your saved result for it will be cleared and you\'ll start fresh.')) return;
+  const base = location.pathname.replace(/[^/]*$/, '');
+  let url = base + 'test-engine.html?id=' + encodeURIComponent(id);
+  if (mode === 'reattempt') url += '&mode=reattempt';
+  location.href = url;
 }
 
 /* Re-enter the runner in read-only "solution" mode to review answers. */
