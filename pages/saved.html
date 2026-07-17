@@ -60,20 +60,27 @@
   #page-saved .sq-lock { background:var(--surface); border:1px dashed var(--border); border-radius:12px; padding:18px; text-align:center; color:var(--muted); margin-bottom:20px; }
   #page-saved .sq-lock b { color:var(--text); }
 
-  /* ── Available: playlist folder list (folder → all videos → per-video status) ── */
-  #page-saved .sq-folder { border:1px solid var(--border); border-radius:12px; margin-bottom:12px; overflow:hidden; background:var(--surface); }
-  #page-saved .sq-folder-head { display:flex; align-items:center; gap:9px; padding:12px 14px; cursor:pointer; user-select:none; }
-  #page-saved .sq-folder-head:hover { background:rgba(127,127,127,.05); }
-  #page-saved .sq-folder-chev { color:var(--muted); font-size:.7rem; transition:transform .2s; flex:0 0 auto; }
-  #page-saved .sq-folder.open .sq-folder-chev { transform:rotate(90deg); }
-  #page-saved .sq-folder-ico { font-size:1.05rem; flex:0 0 auto; }
-  #page-saved .sq-folder-name { font-weight:800; font-size:.92rem; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* ── Available: playlist folder browser (click a folder → open its videos) ── */
+  #page-saved .sq-folder-list { display:flex; flex-direction:column; gap:10px; margin-bottom:20px; }
+  #page-saved .sq-folder-card { width:100%; text-align:left; display:flex; align-items:center; gap:11px; padding:13px 15px; background:var(--surface); border:1px solid var(--border); border-radius:12px; cursor:pointer; font-family:var(--font); transition:border-color .15s, background .15s; }
+  #page-saved .sq-folder-card:hover { border-color:var(--accent); background:rgba(127,127,127,.04); }
+  #page-saved .sq-folder-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  #page-saved .sq-folder-sub { font-size:.72rem; color:var(--muted); }
+  #page-saved .sq-folder-arrow { font-size:1.3rem; color:var(--muted); flex:0 0 auto; line-height:1; }
+  #page-saved .sq-folder-card:hover .sq-folder-arrow { color:var(--accent); }
+  #page-saved .sq-folder-ico { font-size:1.15rem; flex:0 0 auto; }
+  #page-saved .sq-folder-name { font-weight:800; font-size:.92rem; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   #page-saved .sq-folder-count { font-size:.66rem; color:var(--muted); background:var(--card,rgba(127,127,127,.12)); border:1px solid var(--border); padding:2px 8px; border-radius:99px; white-space:nowrap; flex:0 0 auto; }
   #page-saved .sq-folder-bar { width:56px; height:6px; background:rgba(127,127,127,.18); border-radius:99px; overflow:hidden; flex:0 0 auto; }
-  #page-saved .sq-folder-fill { height:100%; background:var(--accent); border-radius:99px; }
-  #page-saved .sq-folder-body { display:none; border-top:1px solid var(--border); }
-  #page-saved .sq-folder.open .sq-folder-body { display:block; }
-  #page-saved .sq-mini-btn { background:var(--surface); border:1px solid var(--border); color:var(--muted); border-radius:8px; padding:4px 9px; font-size:.78rem; cursor:pointer; flex:0 0 auto; font-family:var(--font); }
+  #page-saved .sq-folder-fill { display:block; height:100%; background:var(--accent); border-radius:99px; }
+  /* folder detail (level 2) */
+  #page-saved .sq-back-btn { display:inline-flex; align-items:center; gap:5px; background:none; border:none; color:var(--accent); font-family:var(--font); font-size:.82rem; font-weight:600; cursor:pointer; padding:0 0 12px; }
+  #page-saved .sq-back-btn:hover { text-decoration:underline; }
+  #page-saved .sq-detail-head { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+  #page-saved .sq-detail-head .sq-folder-name { flex:1; font-size:1rem; }
+  #page-saved .sq-detail-bar { height:6px; background:rgba(127,127,127,.18); border-radius:99px; overflow:hidden; margin-bottom:14px; }
+  #page-saved .sq-folder-body { border:1px solid var(--border); border-radius:12px; overflow:hidden; background:var(--surface); }
+  #page-saved .sq-mini-btn { background:var(--surface); border:1px solid var(--border); color:var(--muted); border-radius:8px; padding:5px 11px; font-size:.76rem; cursor:pointer; flex:0 0 auto; font-family:var(--font); white-space:nowrap; }
   #page-saved .sq-mini-btn:hover { border-color:var(--accent); color:var(--accent); }
   #page-saved .sq-mini-btn:disabled { opacity:.5; cursor:not-allowed; }
   #page-saved .sq-vrow { display:flex; align-items:center; gap:10px; padding:9px 14px; border-bottom:1px solid var(--border); }
