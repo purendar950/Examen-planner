@@ -166,6 +166,23 @@
         console.warn('[supabase-config] saveAttempt threw:', e);
         return false;
       }
+    },
+
+    /* Read past attempts for a test (newest first), optionally scoped to a
+       user id. Powers the "Previous Results" / "Attempt N" history view.
+       Returns [] if the table/policy is absent (non-blocking). */
+    getAttempts: async function (testId, userId) {
+      try {
+        if (!supa || !testId) return [];
+        var q = supa.from('mock_attempts').select('*').eq('test_id', testId);
+        if (userId) q = q.eq('user_id', userId);
+        var res = await q.order('created_at', { ascending: false }).limit(50);
+        if (res.error) { console.warn('[supabase-config] getAttempts:', res.error.message); return []; }
+        return res.data || [];
+      } catch (e) {
+        console.warn('[supabase-config] getAttempts threw:', e);
+        return [];
+      }
     }
   };
 
@@ -222,4 +239,5 @@
    create policy "read tests"     on mock_tests     for select using (true);
    create policy "read questions" on mock_questions for select using (true);
    create policy "insert attempts" on mock_attempts for insert with check (true);
+   create policy "read attempts"   on mock_attempts for select using (true);
    ═══════════════════════════════════════════════════════════════ */

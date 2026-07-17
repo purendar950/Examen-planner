@@ -2991,6 +2991,8 @@ let QUIZ_ID = "";
 let QUIZ_STATE_KEY = "";
 let QUIZ_RESULT_KEY = "";
 let QUIZ_RESPONSE_STREAM_KEY = "";
+let QUIZ_HISTORY_KEY = "";        // local per-user attempt history (works offline)
+let _spAttempts = [];             // attempts currently shown in the history list
 let CORRECT_SCORE = 2; // Default, will update
 let NEGATIVE_SCORE = 0.5; // Default, will update
 let TOTAL_TIME_SECONDS = 0;
@@ -4416,6 +4418,10 @@ resBox.querySelectorAll(".bar-section").forEach(sec => {
         firebasePayload 
       }));
 
+      // 📁 Record this attempt into the local history (deduped by submittedAt)
+      // so "Previous Results" / "Attempt N" work even without Firebase.
+      recordLocalAttempt(firebasePayload);
+
       normalizeMathForQuiz(resBox);
       renderMath();
   }; // <--- This closes runUIGeneration
@@ -5004,105 +5010,191 @@ function formatTimeValues(container) {
  
 
 // ===============================
-// ?? HISTORY & ATTEMPT REVIEW
+// 📁 HISTORY & ATTEMPT REVIEW (Firebase-free)
 // ===============================
 
-// Load list of past attempts
-function loadPreviousAttempts(quizId) {
-  const box = document.getElementById("previousAttempts");
-  box.innerHTML = '<div style="text-align:center; padding:20px;">Loading history...</div>';
-  box.style.display = "block";
+// Append an attempt to the local per-user history (deduped by submittedAt),
+// so "Previous Results" / "Attempt N" work even without any backend.
+function recordLocalAttempt(payload) {
+  try {
+    if (!QUIZ_HISTORY_KEY || !payload) return;
+    const arr = JSON.parse(localStorage.getItem(QUIZ_HISTORY_KEY) || "[]");
+    const ts = payload.submittedAt || Date.now();
+    if (arr.some(a => a && a.submittedAt === ts)) return;   // dedupe (handles reloads)
+    arr.push({
+      submittedAt: ts,
+      score: payload.score,
+      total: payload.total,
+      correct: payload.correct,
+      wrong: payload.wrong,
+      timeTaken: payload.timeTaken,
+      sections: payload.sections || {}
+    });
+    localStorage.setItem(QUIZ_HISTORY_KEY, JSON.stringify(arr));
+  } catch (e) { console.warn("recordLocalAttempt failed:", e); }
+}
 
-  // Hide other views
+// Convert a Supabase section_breakdown array to the engine's sections object.
+function sectionsFromBreakdown(breakdown) {
+  const out = {};
+  (breakdown || []).forEach(s => {
+    if (!s || !s.section) return;
+    out[s.section] = {
+      score: s.score || 0,
+      total: s.max || 0,
+      correct: s.correct || 0,
+      wrong: s.wrong || 0,
+      unattempted: s.unattempted || 0,
+      timeTaken: s.time_taken || 0
+    };
+  });
+  return out;
+}
+
+// Gather every attempt for this quiz: local history + Supabase (best-effort),
+// merged and deduped by submittedAt, newest first.
+async function getAllAttempts(quizId) {
+  const map = {};
+  // 1) Local history (always available, works offline)
+  try {
+    const arr = JSON.parse(localStorage.getItem(QUIZ_HISTORY_KEY) || "[]");
+    arr.forEach(a => { if (a && a.submittedAt) map[a.submittedAt] = a; });
+  } catch (e) {}
+  // 1b) Seed from the latest saved result (covers attempts made before this
+  //     feature existed, so at least the most recent one always shows).
+  try {
+    const latest = JSON.parse(localStorage.getItem(QUIZ_RESULT_KEY) || "null");
+    const p = latest && latest.firebasePayload;
+    if (p && p.submittedAt && !map[p.submittedAt]) {
+      map[p.submittedAt] = {
+        submittedAt: p.submittedAt, score: p.score, total: p.total,
+        correct: p.correct, wrong: p.wrong, timeTaken: p.timeTaken,
+        sections: p.sections || {}
+      };
+    }
+  } catch (e) {}
+  // 2) Supabase mock_attempts (cross-device) — optional
+  try {
+    if (window.MockAPI && typeof window.MockAPI.getAttempts === "function") {
+      const uid = (function(){ try { return localStorage.getItem('ez_user_uid') || USER_EMAIL_KEY; } catch(e){ return USER_EMAIL_KEY; } })();
+      const rows = await window.MockAPI.getAttempts(quizId, uid);
+      (rows || []).forEach(r => {
+        const ts = r.created_at ? new Date(r.created_at).getTime() : (r.submittedAt || null);
+        if (!ts || map[ts]) return;   // prefer the richer local record
+        map[ts] = {
+          submittedAt: ts,
+          score: r.score, total: r.max_score,
+          correct: r.correct, wrong: r.wrong,
+          timeTaken: r.time_taken,
+          sections: sectionsFromBreakdown(r.section_breakdown)
+        };
+      });
+    }
+  } catch (e) { console.warn("Supabase getAttempts failed:", e); }
+  return Object.values(map).sort((a, b) => b.submittedAt - a.submittedAt);
+}
+
+// Load and render the list of past attempts.
+async function loadPreviousAttempts(quizId) {
+  const box = document.getElementById("previousAttempts");
+  box.innerHTML = '<div class="analysis-container"><div class="card-dashboard" style="text-align:center;padding:24px;">Loading history…</div></div>';
+  box.style.display = "block";
   document.getElementById("results").style.display = "none";
   document.getElementById("attemptReplay").style.display = "none";
 
-  // USE THE GLOBAL USER_EMAIL_KEY
-  db.ref("attempt_history/" + quizId + "/" + USER_EMAIL_KEY)
-    .once("value")
-    .then(snapshot => {
-      const data = snapshot.val();
-      if (!data) {
-        box.innerHTML = '<div class="card"><p style="text-align:center">No previous attempts found.</p><button class="btn-dash btn-outline" style="width:100%" onclick="restoreLatestResult()">⬅ Back</button></div>';
-        return;
-      }
+  _spAttempts = await getAllAttempts(quizId);
 
-
-      // Sort by date (Newest first)
-      const attempts = Object.values(data).sort((a, b) => b.submittedAt - a.submittedAt);
-
-      let html = `<div class="card-dashboard">
+  if (!_spAttempts.length) {
+    box.innerHTML = `<div class="analysis-container"><div class="card-dashboard" style="text-align:center;">
         <h3 class="section-title">📂 Attempt History</h3>
-        <div style="display:flex; flex-direction:column; gap:10px;">`;
+        <p style="color:var(--muted-text); margin:14px 0;">No previous attempts found for this test yet.</p>
+        <button class="btn-dash btn-outline" style="width:100%" onclick="restoreLatestResult()">⬅ Back to Latest Result</button>
+      </div></div>`;
+    return;
+  }
 
-      attempts.forEach((a, i) => {
-        const date = new Date(a.submittedAt).toLocaleDateString();
-        html += `
-          <div style="background:#f8f9fa; padding:12px; border:1px solid #eee; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
-            <div>
-              <div style="font-weight:700; color:#333;">Attempt ${attempts.length - i}</div>
-              <div style="font-size:12px; color:#666;">${date} • Score: ${a.score}</div>
-            </div>
-            <button class="btn-ghost" onclick='showAttempt(${JSON.stringify(a)})'>View Analysis</button>
-          </div>
-        `;
-      });
+  const rows = _spAttempts.map((a, i) => {
+    const d = new Date(a.submittedAt);
+    const dateStr = isNaN(d.getTime()) ? "—" : d.toLocaleString();
+    const n = _spAttempts.length - i;    // newest = highest number
+    const totalTxt = (a.total != null) ? (" / " + a.total) : "";
+    return `<div style="background:var(--score-item-bg); border:1px solid var(--score-item-border); border-radius:10px; padding:12px 14px; display:flex; justify-content:space-between; align-items:center; gap:10px;">
+        <div>
+          <div style="font-weight:700; color:var(--body-text);">Attempt ${n}</div>
+          <div style="font-size:12px; color:var(--muted-text);">${dateStr} &bull; Score: ${a.score}${totalTxt}</div>
+        </div>
+        <button class="btn-dash btn-solid" style="padding:8px 14px; width:auto;" onclick="showAttemptByIndex(${i})">View Analysis</button>
+      </div>`;
+  }).join("");
 
-      html += `</div><div style="margin-top:15px"><button class="btn-dash btn-outline" style="width:100%" onclick="restoreLatestResult()">⬅ Back to Latest Result</button></div></div>`;
-
-      box.innerHTML = html;
-    });
+  box.innerHTML = `<div class="analysis-container"><div class="card-dashboard">
+      <h3 class="section-title">📂 Attempt History (${_spAttempts.length})</h3>
+      <div style="display:flex; flex-direction:column; gap:10px;">${rows}</div>
+      <div style="margin-top:15px;"><button class="btn-dash btn-outline" style="width:100%" onclick="restoreLatestResult()">⬅ Back to Latest Result</button></div>
+    </div></div>`;
 }
 
-// Render Analysis Dashboard for a Past Attempt
-function showAttempt(attempt) {
+// Render the StudyPlanner analysis dashboard for one stored attempt.
+async function showAttemptByIndex(idx) {
+  const attempt = _spAttempts[idx];
+  if (!attempt) return;
+
   const box = document.getElementById("attemptReplay");
-  box.innerHTML = '<div style="text-align:center; padding:20px;">Loading analysis...</div>';
+  box.innerHTML = '<div class="analysis-container"><div class="card-dashboard" style="text-align:center;padding:24px;">Loading analysis…</div></div>';
   box.style.display = "block";
   document.getElementById("previousAttempts").style.display = "none";
+  document.getElementById("results").style.display = "none";
 
-  // Fetch Rank for this old attempt
-  getRankAndPercentile(QUIZ_ID, attempt.score, attempt.timeTaken, attempt.submittedAt)
-    .then(rankData => {
+  const sections = attempt.sections || {};
+  const sectionNames = Object.keys(sections);
+  const maxScore = (attempt.total != null) ? attempt.total
+                 : sectionNames.reduce((s, n) => s + (sections[n].total || 0), 0);
+  const totalQ = sectionNames.reduce((s, n) => {
+    const sec = sections[n];
+    return s + (sec.total ? (sec.total / (CORRECT_SCORE || 2)) : ((sec.correct||0)+(sec.wrong||0)+(sec.unattempted||0)));
+  }, 0) || (QUESTIONS ? QUESTIONS.length : 0);
+  const attempted = (attempt.correct || 0) + (attempt.wrong || 0);
+  const accuracy = attempted ? ((attempt.correct / attempted) * 100).toFixed(2) : "0.00";
+  const allowedSec = (typeof SECTION_TIMERS !== "undefined")
+    ? Object.values(SECTION_TIMERS).reduce((s, t) => s + t, 0) : 0;
 
-      // Calculate Stats
-      const totalQ = QUESTIONS.length;
-      // Note: We don't have full topper list for past dates easily, so we skip Topper Comparison bars for history
-      // or use current topper data as reference (using current toppers for simplicity)
+  let rankData = { rank: "-", percentile: "N/A", total: "-" };
+  let toppersList = [];
+  try { rankData = await getRankAndPercentile(QUIZ_ID, attempt.score, attempt.timeTaken, attempt.submittedAt); } catch (e) {}
+  try { toppersList = await getToppersList(QUIZ_ID); } catch (e) {}
+  const topperStats = getTopperStatsForComparison(toppersList, totalQ);
 
-      let dashboardHTML = `
-      <div class="analysis-container">
-        <div class="card-dashboard">
-          <div class="info-grid">
-            <div><b>Attempt Date:</b> ${new Date(attempt.submittedAt).toLocaleString()}</div>
-            <div><b>Quiz ID:</b> ${QUIZ_ID}</div>
-          </div>
-        </div>
+  box.innerHTML = buildAnalysisDashboard({
+    name: USER_DISPLAY_NAME,
+    quizId: QUIZ_ID,
+    quizTitle: QUIZ_TITLE + " — Attempt on " + (new Date(attempt.submittedAt).toLocaleString()),
+    rank: rankData.rank, rankTotal: rankData.total, percentile: rankData.percentile,
+    score: attempt.score, maxScore: maxScore,
+    correct: attempt.correct || 0, wrong: attempt.wrong || 0,
+    totalQ: totalQ, attempted: attempted, accuracy: accuracy,
+    timeSec: attempt.timeTaken || 0, allowedSec: allowedSec,
+    sections: sections, sectionNames: sectionNames,
+    topper: topperStats, toppers: toppersList
+  });
 
-        <div class="card-dashboard">
-           <div class="action-grid">
-            <button class="btn-dash btn-outline" onclick="loadPreviousAttempts(QUIZ_ID)">⬅ Back to History</button>
-                <button class="btn-dash btn-outline" onclick="restoreLatestResult()">🏠 Latest Result</button>
-             
-           </div>
-        </div>
+  // Prepend a "Back to History" button inside the dashboard's main column.
+  const main = box.querySelector(".sp-main");
+  if (main) {
+    const back = document.createElement("button");
+    back.className = "sp-mini-btn";
+    back.style.marginBottom = "12px";
+    back.textContent = "⬅ Back to History";
+    back.setAttribute("onclick", "loadPreviousAttempts(QUIZ_ID)");
+    main.insertBefore(back, main.firstChild);
+  }
+  normalizeMathForQuiz(box);
+  renderMath();
+}
 
-        <div class="card-dashboard score-summary">
-          <div class="score-item"><h4>🏆 Rank</h4><p>${rankData.rank} / ${rankData.total}</p></div>
-          <div class="score-item"><h4>📊 Percentile</h4><p>${rankData.percentile}%</p></div>
-          <div class="score-item"><h4>🧮 Score</h4><p>${attempt.score} / ${attempt.total}</p></div>
-          <div class="score-item"><h4>⏱ Time</h4><p>${fmt(attempt.timeTaken)}</p></div>
-        </div>
-
-        <div class="card-dashboard attempt-summary">
-           <div class="attempt-box at-correct">✅ Correct<span>${attempt.correct}</span></div>
-           <div class="attempt-box at-wrong">❌ Wrong<span>${attempt.wrong}</span></div>
-           <div class="attempt-box at-unattempted">🟡 Left<span>${totalQ - (attempt.correct + attempt.wrong)}</span></div>
-        </div>
-      </div>`;
-
-      box.innerHTML = dashboardHTML;
-    });
+// Back-compat: any older inline handler that still calls showAttempt(obj).
+function showAttempt(attempt) {
+  _spAttempts = [attempt];
+  showAttemptByIndex(0);
 }
 
 // ===============================
@@ -5943,6 +6035,7 @@ async function loadQuizData() {
   QUIZ_STATE_KEY           = "state_"  + USER_EMAIL_KEY + "_" + QUIZ_ID;
   QUIZ_RESULT_KEY          = "result_" + USER_EMAIL_KEY + "_" + QUIZ_ID;
   QUIZ_RESPONSE_STREAM_KEY = "stream_" + USER_EMAIL_KEY + "_" + QUIZ_ID;
+  QUIZ_HISTORY_KEY         = "history_" + USER_EMAIL_KEY + "_" + QUIZ_ID;
 
   const secTime = (name) => SECTION_TIME_MAP[name] || TIME_PER_SECTION;
 
