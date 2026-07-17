@@ -24,6 +24,7 @@ let _sqLoaded = false;
 let _sqStage = 'shell';        // 'shell' | 'quiz' | 'result'
 let _sqSubview = 'attempt';    // 'attempt' | 'saved'
 let _sqQuiz = null;            // active quiz session (see sqStartQuiz)
+let _sqAttempts = [];          // cached attempt history (cloud+local merge, newest first)
 
 /* ── text helpers (mirror the engine's rendering) ── */
 function sqDecode(html) {
@@ -97,6 +98,7 @@ async function loadSavedQuestions(force) {
   try {
     _sqRows = await SavedQuestions.list();
     _sqLoaded = true;
+    try { await sqRefreshAttempts(); } catch (e) {}
     sqShowStage('shell');
     sqRenderShell();
   } catch (e) {
@@ -194,24 +196,76 @@ function sqItemsForScope(scope) {
 }
 
 /* ══════════════════════════════════════════════
-   ATTEMPT HISTORY (localStorage, per user)
+   ATTEMPT HISTORY
+   Synced across devices via window.QuizAttempts (Supabase) when the
+   user is signed in, with a localStorage mirror so it also works
+   offline / signed out. `_sqAttempts` is the in-memory cache the
+   render code reads synchronously; sqRefreshAttempts() repopulates it.
 ══════════════════════════════════════════════ */
 function sqAttemptsKey() {
   let uid = 'guest';
-  try { if (window.SavedQuestions && SavedQuestions.userId) uid = SavedQuestions.userId() || 'guest'; } catch (e) {}
+  try {
+    if (window.QuizAttempts && QuizAttempts.userId) uid = QuizAttempts.userId() || 'guest';
+    else if (window.SavedQuestions && SavedQuestions.userId) uid = SavedQuestions.userId() || 'guest';
+  } catch (e) {}
   return 'preppath_quiz_attempts_' + uid;
 }
-function sqLoadAttempts() {
+function sqLoadLocalAttempts() {
   try { return JSON.parse(localStorage.getItem(sqAttemptsKey()) || '[]') || []; } catch (e) { return []; }
 }
-function sqPersistAttempt(rec) {
-  const list = sqLoadAttempts();
-  list.unshift(rec);
-  try { localStorage.setItem(sqAttemptsKey(), JSON.stringify(list.slice(0, 25))); } catch (e) {}
+function sqSaveLocalAttempts(list) {
+  try { localStorage.setItem(sqAttemptsKey(), JSON.stringify((list || []).slice(0, 25))); } catch (e) {}
 }
-function sqClearAttempts() {
+
+/* Merge cloud + local records: dedupe by id (cloud is source of truth),
+   keep local-only attempts (e.g. made offline), newest first, cap 25. */
+function sqMergeAttempts(cloud, local) {
+  const byId = {};
+  (local || []).forEach(function (a) { if (a && a.id) byId[a.id] = a; });
+  (cloud || []).forEach(function (a) { if (a && a.id) byId[a.id] = a; });   // cloud wins
+  return Object.keys(byId).map(function (k) { return byId[k]; })
+    .sort(function (a, b) { return String(b.at || '').localeCompare(String(a.at || '')); })
+    .slice(0, 25);
+}
+
+/* Repopulate the _sqAttempts cache from cloud (if available) + local. */
+async function sqRefreshAttempts() {
+  const local = sqLoadLocalAttempts();
+  let cloud = [];
+  try {
+    if (window.QuizAttempts && QuizAttempts.available && QuizAttempts.available()) {
+      cloud = await QuizAttempts.list();
+    }
+  } catch (e) { cloud = []; }
+  _sqAttempts = sqMergeAttempts(cloud, local);
+  sqSaveLocalAttempts(_sqAttempts);   // keep the offline mirror fresh
+  return _sqAttempts;
+}
+
+/* Read the cached list (sync) — used by all render/lookup code. */
+function sqLoadAttempts() { return _sqAttempts; }
+
+/* Record a new attempt: update cache + local mirror immediately, and push
+   to the cloud in the background (fire-and-forget; local still has it). */
+function sqRecordAttempt(rec) {
+  _sqAttempts = [rec].concat(_sqAttempts.filter(function (a) { return a.id !== rec.id; })).slice(0, 25);
+  sqSaveLocalAttempts(_sqAttempts);
+  try {
+    if (window.QuizAttempts && QuizAttempts.available && QuizAttempts.available()) {
+      QuizAttempts.save(rec).catch(function () {});
+    }
+  } catch (e) {}
+}
+
+async function sqClearAttempts() {
   if (!confirm('Clear your entire quiz attempt history? This cannot be undone.')) return;
+  _sqAttempts = [];
   try { localStorage.removeItem(sqAttemptsKey()); } catch (e) {}
+  try {
+    if (window.QuizAttempts && QuizAttempts.available && QuizAttempts.available()) {
+      await QuizAttempts.clear();
+    }
+  } catch (e) {}
   sqRenderAttemptView();
 }
 
@@ -631,7 +685,7 @@ function sqQuizSubmit() {
 
   // Record the attempt (skip re-recording when reviewing a past attempt).
   if (!q.fromHistory) {
-    sqPersistAttempt({
+    sqRecordAttempt({
       id: 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
       scope: q.scope || 'all',
       title: q.title,
