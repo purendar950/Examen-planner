@@ -467,26 +467,32 @@ function sqLoadLocalSharedQuizzes() {
   } catch (e) { return []; }
 }
 
-/* Fetch shared quizzes for every video across the user's added playlists —
-   merging the local mirror (your own) with the Supabase pool (everyone's). */
+/* Fetch quizzes the user can attempt in the Available tab — always including
+   the user's OWN generated quizzes (local mirror, keyed by video id) and, for
+   Pro users, the shared Supabase pool for every video across their added
+   playlists. The local mirror is included unconditionally so a quiz you just
+   generated never disappears just because its video isn't inside a playlist
+   you added (or you're not Pro). */
 async function sqRefreshShared() {
   _sqShared = [];
-  if (!sqIsPro()) return _sqShared;
-  const playlists = sqPlaylists();
-  if (!playlists.length) return _sqShared;
-  const vidSet = {};
-  playlists.forEach(function (pl) { (pl.videos || []).forEach(function (v) { if (v && v.id) vidSet[v.id] = 1; }); });
-  const vids = Object.keys(vidSet);
-  if (!vids.length) return _sqShared;
 
+  // Your own generated quizzes — always available to attempt.
+  const local = sqLoadLocalSharedQuizzes();
+
+  // Shared (community) playlist quizzes are Pro-gated and require added playlists.
   let supa = [];
-  try {
-    if (window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available()) {
-      supa = (await PlaylistQuizzes.listForVideos(vids)) || [];
+  if (sqIsPro()) {
+    const vidSet = {};
+    sqPlaylists().forEach(function (pl) { (pl.videos || []).forEach(function (v) { if (v && v.id) vidSet[v.id] = 1; }); });
+    const vids = Object.keys(vidSet);
+    if (vids.length) {
+      try {
+        if (window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available()) {
+          supa = (await PlaylistQuizzes.listForVideos(vids)) || [];
+        }
+      } catch (e) { supa = []; }
     }
-  } catch (e) { supa = []; }
-
-  const local = sqLoadLocalSharedQuizzes().filter(function (q) { return vidSet[q.video_id]; });
+  }
 
   // Merge by video_id — the shared (Supabase) copy wins over the local mirror.
   const byVid = {};
@@ -508,52 +514,79 @@ function sqSharedCardHtml(q) {
     + '</div>';
 }
 
-/* Build the "from your playlists" section. Always renders a header + guidance
-   for Pro users, so the section is never silently blank. */
+/* Build the Available tab body: the user's OWN generated quizzes (always
+   shown) plus, for Pro users, quizzes grouped under the playlists they added.
+   Video ids shown under a playlist are tracked so they aren't duplicated in
+   the "Your generated quizzes" section. */
 function sqSharedSectionHtml() {
+  const shownVids = {};   // video ids already rendered under a playlist group
+
+  /* ── Playlist / community quizzes (Pro) ── */
+  let playlistHtml = '';
   if (!sqIsPro()) {
-    return '<div class="sq-section-label">📺 Playlist quizzes</div>'
+    playlistHtml = '<div class="sq-section-label">📺 Playlist quizzes</div>'
       + '<div class="sq-lock">💎 <b>Pro feature.</b> Unlock quizzes for the playlists you added — '
       + 'attempt mocks generated from those videos.</div>';
-  }
+  } else {
+    const header = '<div class="sq-section-label">📺 From your playlists</div>';
+    const playlists = sqPlaylists();
 
-  const header = '<div class="sq-section-label">📺 From your playlists</div>';
-  const playlists = sqPlaylists();
+    if (!playlists.length) {
+      playlistHtml = header + '<div class="sq-lock">Add a course in <b>YouTube → Playlist Organiser</b>, then generate a mock from any of '
+        + 'its videos (<b>AI Study → Take as Test</b>) — the quiz shows up here under that playlist.</div>';
+    } else {
+      const byVid = {};
+      _sqShared.forEach(function (q) { if (q && q.video_id) byVid[q.video_id] = q; });
 
-  if (!playlists.length) {
-    return header + '<div class="sq-lock">Add a course in <b>YouTube → Playlist Organiser</b>, then generate a mock from any of '
-      + 'its videos (<b>AI Study → Take as Test</b>) — the quiz shows up here under that playlist.</div>';
-  }
+      let groupsHtml = '';
+      playlists.forEach(function (pl) {
+        const quizzes = [];
+        (pl.videos || []).forEach(function (v) {
+          if (v && byVid[v.id]) {
+            const q = byVid[v.id];
+            q._videoTitle = v.title || q.title || '';   // prefer the playlist's own video name
+            quizzes.push(q);
+            shownVids[v.id] = 1;
+          }
+        });
+        if (!quizzes.length) return;
+        groupsHtml += '<div class="sq-pl-group">'
+          + '<div class="sq-pl-head"><span class="sq-pl-ico">📺</span>'
+          +   '<span class="sq-pl-name">' + escSaved(pl.title || 'Playlist') + '</span>'
+          +   '<span class="sq-pl-count">' + quizzes.length + ' quiz' + (quizzes.length === 1 ? '' : 'zes') + '</span></div>'
+          + '<div class="sq-qz-grid">' + quizzes.map(sqSharedCardHtml).join('') + '</div>'
+          + '</div>';
+      });
 
-  const byVid = {};
-  _sqShared.forEach(function (q) { if (q && q.video_id) byVid[q.video_id] = q; });
-
-  let groupsHtml = '';
-  playlists.forEach(function (pl) {
-    const quizzes = [];
-    (pl.videos || []).forEach(function (v) {
-      if (v && byVid[v.id]) {
-        const q = byVid[v.id];
-        q._videoTitle = v.title || q.title || '';   // prefer the playlist's own video name
-        quizzes.push(q);
+      if (!groupsHtml) {
+        playlistHtml = header + '<div class="sq-lock">No quizzes yet for the ' + playlists.length + ' playlist'
+          + (playlists.length === 1 ? '' : 's') + ' you added. Generate one from any playlist video '
+          + '(<b>AI Study → Take as Test</b>) and it appears here. '
+          + '<span style="opacity:.75">Cross-device sharing to other learners needs the <code>playlist_quizzes</code> table in Supabase.</span></div>';
+      } else {
+        playlistHtml = header + groupsHtml;
       }
-    });
-    if (!quizzes.length) return;
-    groupsHtml += '<div class="sq-pl-group">'
-      + '<div class="sq-pl-head"><span class="sq-pl-ico">📺</span>'
-      +   '<span class="sq-pl-name">' + escSaved(pl.title || 'Playlist') + '</span>'
-      +   '<span class="sq-pl-count">' + quizzes.length + ' quiz' + (quizzes.length === 1 ? '' : 'zes') + '</span></div>'
-      + '<div class="sq-qz-grid">' + quizzes.map(sqSharedCardHtml).join('') + '</div>'
-      + '</div>';
-  });
-
-  if (!groupsHtml) {
-    return header + '<div class="sq-lock">No quizzes yet for the ' + playlists.length + ' playlist'
-      + (playlists.length === 1 ? '' : 's') + ' you added. Generate one from any playlist video '
-      + '(<b>AI Study → Take as Test</b>) and it appears here. '
-      + '<span style="opacity:.75">Cross-device sharing to other learners needs the <code>playlist_quizzes</code> table in Supabase.</span></div>';
+    }
   }
-  return header + groupsHtml;
+
+  /* ── Your own generated quizzes (always shown) ── */
+  // These are quizzes you generated from any video (mirrored locally at
+  // generation time). Show every one that isn't already listed under a
+  // playlist above, so a quiz never silently vanishes.
+  let ownCards = '';
+  sqLoadLocalSharedQuizzes().forEach(function (q) {
+    if (!q || !q.video_id || shownVids[q.video_id]) return;
+    ownCards += sqSharedCardHtml(q);
+  });
+  let ownHtml = '';
+  if (ownCards) {
+    ownHtml = '<div class="sq-section-label">📝 Your generated quizzes</div>'
+      + '<div class="sq-sub" style="margin:-.35rem 0 .55rem;">Quizzes you generated from videos. '
+      + 'Add a video\'s course in <b>YouTube → Playlist Organiser</b> to also group it under that playlist.</div>'
+      + '<div class="sq-qz-grid">' + ownCards + '</div>';
+  }
+
+  return playlistHtml + ownHtml;
 }
 
 /* Convert one engine-format question → an attemptable runner item. */
@@ -582,7 +615,10 @@ function sqItemFromEngine(eq, quizTitle, idx, correct, negative) {
 
 /* Start a shared community quiz in the in-app runner (records an attempt). */
 function sqStartSharedQuiz(videoId) {
-  const q = _sqShared.filter(function (x) { return x.video_id === videoId; })[0];
+  let q = _sqShared.filter(function (x) { return x.video_id === videoId; })[0];
+  // Fall back to the local mirror in case _sqShared hasn't been refreshed yet
+  // (e.g. a freshly generated quiz clicked before the background refresh runs).
+  if (!q) q = sqLoadLocalSharedQuizzes().filter(function (x) { return x.video_id === videoId; })[0];
   if (!q || !q.quiz_data || !q.quiz_data.questions || !q.quiz_data.questions.length) {
     if (typeof showToast === 'function') showToast('This quiz is unavailable', 'error'); return;
   }
