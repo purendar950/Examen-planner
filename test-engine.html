@@ -1624,7 +1624,7 @@ body.mode-solution #pauseBtn {
     border-radius: 8px;
 }
 
-/* Table Styling for Mock Matrix Hub */
+/* Table Styling for StudyPlanner */
 .table-wrapper table {
     width: 100%;
     border-collapse: collapse;
@@ -2173,34 +2173,34 @@ body.mode-solution #pauseBtn {
 #homeScreen { display: none; }
 
 /* =========================================================
-   MOCK MATRIX HUB — REDESIGNED RESULT / ANALYSIS DASHBOARD
-   (scoped under .mmh-analysis so it never clashes with quiz UI)
+   STUDYPLANNER — REDESIGNED RESULT / ANALYSIS DASHBOARD
+   (scoped under .sp-analysis so it never clashes with quiz UI)
    ========================================================= */
 /* Let the dashboard break out of the padded .container to sit edge-to-edge */
-.container:has(.mmh-analysis) { padding: 0 !important; max-width: none !important; width: 100% !important; overflow: visible !important; }
-#results:has(.mmh-analysis) { padding: 0 !important; min-height: 0 !important; }
+.container:has(.sp-analysis) { padding: 0 !important; max-width: none !important; width: 100% !important; overflow: visible !important; }
+#results:has(.sp-analysis) { padding: 0 !important; min-height: 0 !important; }
 
-.mmh-analysis {
-  --mmh-accent: #0b5ed7;
-  --mmh-you: #2563eb;
-  --mmh-topper: #f59e0b;
-  --mmh-red: #e11d48;
-  --mmh-sidebar-bg: var(--card-bg, #fff);
-  --mmh-main-bg: var(--body-bg, #fff);
-  --mmh-line: var(--border-color, #e5e7eb);
-  --mmh-muted: var(--muted-text, #6b7280);
-  --mmh-text: var(--body-text, #111827);
-  --mmh-track: var(--light-gray, #eef2f7);
+.sp-analysis {
+  --sp-accent: #0b5ed7;
+  --sp-you: #2563eb;
+  --sp-topper: #f59e0b;
+  --sp-red: #e11d48;
+  --sp-sidebar-bg: var(--card-bg, #fff);
+  --sp-main-bg: var(--body-bg, #fff);
+  --sp-line: var(--border-color, #e5e7eb);
+  --sp-muted: var(--muted-text, #6b7280);
+  --sp-text: var(--body-text, #111827);
+  --sp-track: var(--light-gray, #eef2f7);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--mmh-main-bg);
-  color: var(--mmh-text);
+  background: var(--sp-main-bg);
+  color: var(--sp-text);
   font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 /* ---- TOP BAR ---- */
-.mmh-topbar {
+.sp-topbar {
   position: sticky;
   top: 0;
   z-index: 60;
@@ -2208,149 +2208,149 @@ body.mode-solution #pauseBtn {
   align-items: center;
   gap: 12px;
   padding: 10px 16px;
-  background: var(--mmh-sidebar-bg);
-  border-top: 3px solid var(--mmh-accent);
-  border-bottom: 1px solid var(--mmh-line);
+  background: var(--sp-sidebar-bg);
+  border-top: 3px solid var(--sp-accent);
+  border-bottom: 1px solid var(--sp-line);
   box-shadow: 0 1px 6px rgba(0,0,0,.05);
 }
-.mmh-brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
-.mmh-brand-study { color: #16a34a; }
-.mmh-brand-planner { color: #16a34a; }
-.mmh-brand-dot {
+.sp-brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 17px; }
+.sp-brand-study { color: #16a34a; }
+.sp-brand-planner { color: #16a34a; }
+.sp-brand-dot {
   width: 26px; height: 26px; border-radius: 50%;
   background: #16a34a; color: #fff;
   display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0;
 }
-.mmh-hamburger {
+.sp-hamburger {
   display: none; background: none; border: none; cursor: pointer;
-  font-size: 22px; color: var(--mmh-text); padding: 2px 6px;
+  font-size: 22px; color: var(--sp-text); padding: 2px 6px;
 }
-.mmh-top-btn {
+.sp-top-btn {
   border: none; border-radius: 8px; padding: 8px 16px; font-weight: 700;
   font-size: 13px; cursor: pointer; font-family: inherit; white-space: nowrap;
 }
-.mmh-top-btn.go { background: var(--mmh-red); color: #fff; }
-.mmh-top-btn.sol { background: var(--mmh-red); color: #fff; }
-.mmh-top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-.mmh-topuser {
+.sp-top-btn.go { background: var(--sp-red); color: #fff; }
+.sp-top-btn.sol { background: var(--sp-red); color: #fff; }
+.sp-top-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.sp-topuser {
   display: inline-flex; align-items: center; gap: 6px;
-  font-weight: 700; font-size: 13px; color: var(--mmh-text);
+  font-weight: 700; font-size: 13px; color: var(--sp-text);
   background: rgba(22,163,74,.10); border: 1px solid rgba(22,163,74,.25);
   padding: 6px 12px; border-radius: 8px; white-space: nowrap;
 }
-.mmh-attempt-select {
-  border: 1px solid var(--mmh-accent); background: var(--mmh-accent); color: #fff;
+.sp-attempt-select {
+  border: 1px solid var(--sp-accent); background: var(--sp-accent); color: #fff;
   border-radius: 8px; padding: 8px 12px; font-weight: 700; font-size: 13px;
   cursor: pointer; font-family: inherit;
 }
 
 /* ---- BODY + MAIN (no sidebar) ---- */
-.mmh-body { display: block; flex: 1; }
-.mmh-main { max-width: 1120px; margin: 0 auto; min-width: 0; padding: 22px 26px 60px; }
-.mmh-page-title { font-size: 20px; font-weight: 800; margin: 0 0 20px; color: var(--mmh-text); }
-.mmh-section-head { display: flex; align-items: center; gap: 12px; margin: 26px 0 14px; }
-.mmh-section-head h3 { font-size: 17px; font-weight: 700; margin: 0; color: var(--mmh-text); }
-.mmh-cutoff-badge {
-  background: var(--mmh-red); color: #fff; font-size: 11px; font-weight: 700;
+.sp-body { display: block; flex: 1; }
+.sp-main { max-width: 1120px; margin: 0 auto; min-width: 0; padding: 22px 26px 60px; }
+.sp-page-title { font-size: 20px; font-weight: 800; margin: 0 0 20px; color: var(--sp-text); }
+.sp-section-head { display: flex; align-items: center; gap: 12px; margin: 26px 0 14px; }
+.sp-section-head h3 { font-size: 17px; font-weight: 700; margin: 0; color: var(--sp-text); }
+.sp-cutoff-badge {
+  background: var(--sp-red); color: #fff; font-size: 11px; font-weight: 700;
   padding: 3px 10px; border-radius: 5px;
 }
 
 /* ---- RING GAUGES ---- */
-.mmh-rings {
+.sp-rings {
   display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px;
 }
-.mmh-ring-card {
+.sp-ring-card {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 10px 6px;
 }
-.mmh-ring { position: relative; width: 128px; height: 128px; }
-.mmh-ring svg { width: 128px; height: 128px; transform: rotate(-90deg); }
-.mmh-ring-bg { fill: none; stroke: var(--mmh-track); stroke-width: 9; }
-.mmh-ring-fg { fill: none; stroke-width: 9; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
-.mmh-ring-center {
+.sp-ring { position: relative; width: 128px; height: 128px; }
+.sp-ring svg { width: 128px; height: 128px; transform: rotate(-90deg); }
+.sp-ring-bg { fill: none; stroke: var(--sp-track); stroke-width: 9; }
+.sp-ring-fg { fill: none; stroke-width: 9; stroke-linecap: round; transition: stroke-dashoffset 1s ease; }
+.sp-ring-center {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; text-align: center;
 }
-.mmh-ring-big { font-size: 17px; font-weight: 800; color: var(--mmh-text); line-height: 1.1; }
-.mmh-ring-lbl { font-size: 12px; color: var(--mmh-muted); margin-top: 3px; font-weight: 600; }
+.sp-ring-big { font-size: 17px; font-weight: 800; color: var(--sp-text); line-height: 1.1; }
+.sp-ring-lbl { font-size: 12px; color: var(--sp-muted); margin-top: 3px; font-weight: 600; }
 
 /* ---- SECTION-WISE PERFORMANCE ---- */
-.mmh-secperf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
-.mmh-secperf-card {
-  border: 1px solid var(--mmh-line); border-radius: 10px; padding: 16px 18px;
-  background: var(--mmh-sidebar-bg);
+.sp-secperf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.sp-secperf-card {
+  border: 1px solid var(--sp-line); border-radius: 10px; padding: 16px 18px;
+  background: var(--sp-sidebar-bg);
 }
-.mmh-secperf-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; color: var(--mmh-text); }
-.mmh-secperf-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--mmh-muted); margin-bottom: 4px; }
-.mmh-secperf-row b { color: var(--mmh-text); font-weight: 700; }
-.mmh-secperf-bar { height: 5px; background: var(--mmh-track); border-radius: 99px; overflow: hidden; margin-bottom: 12px; }
-.mmh-secperf-bar > div { height: 100%; background: var(--mmh-accent); border-radius: 99px; transition: width 1s ease; }
+.sp-secperf-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; color: var(--sp-text); }
+.sp-secperf-row { display: flex; justify-content: space-between; font-size: 13px; color: var(--sp-muted); margin-bottom: 4px; }
+.sp-secperf-row b { color: var(--sp-text); font-weight: 700; }
+.sp-secperf-bar { height: 5px; background: var(--sp-track); border-radius: 99px; overflow: hidden; margin-bottom: 12px; }
+.sp-secperf-bar > div { height: 100%; background: var(--sp-accent); border-radius: 99px; transition: width 1s ease; }
 
 /* ---- COMPARE WITH TOPPER ---- */
-.mmh-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.mmh-tab {
-  padding: 8px 18px; border-radius: 7px; border: 1px solid var(--mmh-line);
-  background: var(--mmh-sidebar-bg); color: var(--mmh-muted);
+.sp-tabs { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.sp-tab {
+  padding: 8px 18px; border-radius: 7px; border: 1px solid var(--sp-line);
+  background: var(--sp-sidebar-bg); color: var(--sp-muted);
   font-weight: 700; font-size: 13px; cursor: pointer; font-family: inherit;
 }
-.mmh-tab.active { background: var(--mmh-you); color: #fff; border-color: var(--mmh-you); }
-.mmh-legend { display: flex; gap: 20px; margin-bottom: 16px; font-size: 13px; font-weight: 600; color: var(--mmh-text); }
-.mmh-legend span { display: inline-flex; align-items: center; gap: 7px; }
-.mmh-legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
-.mmh-leg-you { background: var(--mmh-you); }
-.mmh-leg-top { background: var(--mmh-topper); }
-.mmh-cmp-pane { display: none; }
-.mmh-cmp-pane.active { display: block; }
-.mmh-cmp-row {
+.sp-tab.active { background: var(--sp-you); color: #fff; border-color: var(--sp-you); }
+.sp-legend { display: flex; gap: 20px; margin-bottom: 16px; font-size: 13px; font-weight: 600; color: var(--sp-text); }
+.sp-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.sp-legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+.sp-leg-you { background: var(--sp-you); }
+.sp-leg-top { background: var(--sp-topper); }
+.sp-cmp-pane { display: none; }
+.sp-cmp-pane.active { display: block; }
+.sp-cmp-row {
   display: grid; grid-template-columns: 90px 1fr 78px; gap: 14px;
   align-items: center; margin-bottom: 16px;
 }
-.mmh-cmp-label { font-size: 13px; font-weight: 700; color: var(--mmh-text); }
-.mmh-cmp-bars { display: flex; flex-direction: column; gap: 6px; }
-.mmh-bar-track { height: 11px; background: var(--mmh-track); border-radius: 99px; overflow: hidden; }
-.mmh-bar { height: 100%; border-radius: 99px; transition: width 1s ease; }
-.mmh-bar.you { background: var(--mmh-you); }
-.mmh-bar.top { background: var(--mmh-topper); }
-.mmh-cmp-vals { display: flex; flex-direction: column; gap: 6px; text-align: right; font-size: 12px; font-weight: 700; }
-.mmh-cmp-vals .v-top { color: var(--mmh-topper); }
+.sp-cmp-label { font-size: 13px; font-weight: 700; color: var(--sp-text); }
+.sp-cmp-bars { display: flex; flex-direction: column; gap: 6px; }
+.sp-bar-track { height: 11px; background: var(--sp-track); border-radius: 99px; overflow: hidden; }
+.sp-bar { height: 100%; border-radius: 99px; transition: width 1s ease; }
+.sp-bar.you { background: var(--sp-you); }
+.sp-bar.top { background: var(--sp-topper); }
+.sp-cmp-vals { display: flex; flex-direction: column; gap: 6px; text-align: right; font-size: 12px; font-weight: 700; }
+.sp-cmp-vals .v-top { color: var(--sp-topper); }
 
 /* ---- TOPPERS ---- */
-.mmh-toppers { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
-.mmh-topper-card {
-  border: 1px solid var(--mmh-line); border-radius: 12px; padding: 16px 10px;
-  text-align: center; background: var(--mmh-sidebar-bg);
+.sp-toppers { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+.sp-topper-card {
+  border: 1px solid var(--sp-line); border-radius: 12px; padding: 16px 10px;
+  text-align: center; background: var(--sp-sidebar-bg);
 }
-.mmh-topper-avatar {
+.sp-topper-avatar {
   width: 46px; height: 46px; border-radius: 50%; margin: 0 auto 10px;
-  background: var(--mmh-you); color: #fff;
+  background: var(--sp-you); color: #fff;
   display: flex; align-items: center; justify-content: center;
 }
-.mmh-topper-rank { font-size: 12px; color: var(--mmh-muted); font-weight: 600; }
-.mmh-topper-name { font-size: 13px; font-weight: 700; color: var(--mmh-text); margin: 2px 0; word-break: break-word; }
-.mmh-topper-score { font-size: 13px; font-weight: 800; color: var(--mmh-text); }
-.mmh-empty { text-align: center; color: var(--mmh-muted); font-size: 13px; padding: 20px; }
+.sp-topper-rank { font-size: 12px; color: var(--sp-muted); font-weight: 600; }
+.sp-topper-name { font-size: 13px; font-weight: 700; color: var(--sp-text); margin: 2px 0; word-break: break-word; }
+.sp-topper-score { font-size: 13px; font-weight: 800; color: var(--sp-text); }
+.sp-empty { text-align: center; color: var(--sp-muted); font-size: 13px; padding: 20px; }
 
 /* ---- misc action bar (keeps reattempt / live-rank reachable) ---- */
-.mmh-mini-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-.mmh-mini-btn {
+.sp-mini-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.sp-mini-btn {
   padding: 8px 14px; border-radius: 7px; font-weight: 700; font-size: 12.5px;
-  cursor: pointer; font-family: inherit; border: 1px solid var(--mmh-accent);
-  background: var(--mmh-sidebar-bg); color: var(--mmh-accent);
+  cursor: pointer; font-family: inherit; border: 1px solid var(--sp-accent);
+  background: var(--sp-sidebar-bg); color: var(--sp-accent);
 }
-.mmh-mini-btn.solid { background: var(--mmh-accent); color: #fff; }
+.sp-mini-btn.solid { background: var(--sp-accent); color: #fff; }
 
 @media (max-width: 900px) {
-  .mmh-rings { grid-template-columns: repeat(3, 1fr); }
+  .sp-rings { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 820px) {
-  .mmh-main { padding: 18px 16px 60px; }
+  .sp-main { padding: 18px 16px 60px; }
 }
 @media (max-width: 560px) {
-  .mmh-rings { grid-template-columns: repeat(2, 1fr); }
-  .mmh-ring, .mmh-ring svg { width: 108px; height: 108px; }
-  .mmh-top-btn.go { display: none; }
-  .mmh-topuser { display: none; }
-  .mmh-cmp-row { grid-template-columns: 70px 1fr 62px; gap: 8px; }
+  .sp-rings { grid-template-columns: repeat(2, 1fr); }
+  .sp-ring, .sp-ring svg { width: 108px; height: 108px; }
+  .sp-top-btn.go { display: none; }
+  .sp-topuser { display: none; }
+  .sp-cmp-row { grid-template-columns: 70px 1fr 62px; gap: 8px; }
 }
 </style>
 
@@ -2385,6 +2385,10 @@ const quizIdLower = quizIdParam.toLowerCase();
 
 // Define these globally using 'var' or 'let' outside any function
 var GITHUB_PATH = ""; 
+// StudyPlanner question-image host. Empty = no remote image lookups.
+// Set to your own base, e.g. "https://raw.githubusercontent.com/<you>/<repo>/main"
+// resolving as `${QUESTION_IMAGE_BASE}/${path}/${quizId}/q-<n>-image<k>.jpg`.
+var QUESTION_IMAGE_BASE = ""; 
 var selectedConfig = null;
 
 // Logic to decide Path and Firebase Project
@@ -3412,7 +3416,7 @@ const pathSegments = (GITHUB_PATH || "ssc/cgl").split('/');
 const imageBasePath = `${pathSegments[0]}/${pathSegments[1]}`;
 
 // 2. Build the dynamic image URL
-const dynamicQImg = `https://raw.githubusercontent.com/mockmatrixhub/mmhimg/main/${imageBasePath}/${baseQuizId}/q-${cleanIdx}-image1.jpg`;
+const dynamicQImg = QUESTION_IMAGE_BASE ? `${QUESTION_IMAGE_BASE}/${imageBasePath}/${baseQuizId}/q-${cleanIdx}-image1.jpg` : "";
 
 
   // Define a stable style: natural width, but capped at 90% wide and 250px tall
@@ -3462,7 +3466,7 @@ if (el("marking")) {
 
     // 🖼️ OPTION IMAGE RENDER
     const optImgKey = `option_image_${optionIndex}`;
-    const dynamicOptImg = `https://raw.githubusercontent.com/mockmatrixhub/mmhimg/main/${imageBasePath}/${baseQuizId}/q-${cleanIdx}-image${optionIndex + 1}.jpg`;
+    const dynamicOptImg = QUESTION_IMAGE_BASE ? `${QUESTION_IMAGE_BASE}/${imageBasePath}/${baseQuizId}/q-${cleanIdx}-image${optionIndex + 1}.jpg` : "";
     
     let optImgHtml = "";
     // Testbook-style: options stay small (max 180px wide) and don't stretch
@@ -3471,7 +3475,7 @@ if (el("marking")) {
     if (q[optImgKey] && q[optImgKey].trim() !== "") {
       // Manual images
       optImgHtml = `<div style="margin-top:8px;"><img src="${q[optImgKey]}" style="${optStyle}"></div>`;
-          } else {
+          } else if (dynamicOptImg) {
       // Dynamic images: hidden until loaded to keep the option box stable
       optImgHtml = `<div style="margin-top:8px;"><img src="${dynamicOptImg}" style="${optStyle} display:none;" onload="this.style.display='block'" onerror="this.style.display='none'"></div>`;
     }
@@ -3514,13 +3518,13 @@ if (el("marking")) {
     }
 
     // Dynamic Logic for Solution Image (image6)
-    const dynamicSolImg = `https://raw.githubusercontent.com/mockmatrixhub/mmhimg/main/${imageBasePath}/${baseQuizId}/q-${cleanIdx}-image6.jpg`;
+    const dynamicSolImg = QUESTION_IMAGE_BASE ? `${QUESTION_IMAGE_BASE}/${imageBasePath}/${baseQuizId}/q-${cleanIdx}-image6.jpg` : "";
 
     let solImgHtml = "";
     if (q.solution_image && q.solution_image.trim() !== "") {
       // Manual images show using qImgStyle (max-height: 250px) instead of 40%
       solImgHtml = `<div style="margin-top:15px; text-align:center;"><img src="${q.solution_image}" style="${qImgStyle}" onerror="this.parentElement.innerHTML='<div style=\'color:red;font-size:13px\'>⚠ Image failed to load</div>'"></div>`;
-          } else {
+          } else if (dynamicSolImg) {
       // Dynamic images show using qImgStyle
       solImgHtml = `<div style="margin-top:15px; text-align:center;"><img src="${dynamicSolImg}" style="${qImgStyle} display:none;" onload="this.style.display='block'" onerror="this.style.display='none'"></div>`;
     } 
@@ -3890,11 +3894,11 @@ async function saveStatusToCloud() {
     }
 }
 // ===============================
-// 🎨 MOCK MATRIX HUB — RESULT DASHBOARD BUILDER
+// 🎨 STUDYPLANNER — RESULT DASHBOARD BUILDER
 // ===============================
 
 // SVG helpers
-function mmhIcon(name) {
+function spIcon(name) {
   const p = {
     home:   '<path d="M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10"/>',
     tests:  '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
@@ -3907,56 +3911,56 @@ function mmhIcon(name) {
   }[name] || '';
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>';
 }
-function mmhAvatar(bg) {
+function spAvatar(bg) {
   return '<svg viewBox="0 0 24 24" width="26" height="26" fill="#fff"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.5 3.6-7 8-7s8 2.5 8 7z"/></svg>';
 }
 
 // Circular ring gauge
-function mmhRing(pct, color, big, label) {
+function spRing(pct, color, big, label) {
   pct = isNaN(pct) ? 0 : Math.max(0, Math.min(100, pct));
   const r = 56, c = 2 * Math.PI * r;
   const off = c * (1 - pct / 100);
-  return `<div class="mmh-ring-card">
-    <div class="mmh-ring">
+  return `<div class="sp-ring-card">
+    <div class="sp-ring">
       <svg viewBox="0 0 128 128">
-        <circle class="mmh-ring-bg" cx="64" cy="64" r="${r}"></circle>
-        <circle class="mmh-ring-fg" cx="64" cy="64" r="${r}" stroke="${color}"
+        <circle class="sp-ring-bg" cx="64" cy="64" r="${r}"></circle>
+        <circle class="sp-ring-fg" cx="64" cy="64" r="${r}" stroke="${color}"
                 stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"></circle>
       </svg>
-      <div class="mmh-ring-center">
-        <div class="mmh-ring-big">${big}</div>
-        <div class="mmh-ring-lbl">${label}</div>
+      <div class="sp-ring-center">
+        <div class="sp-ring-big">${big}</div>
+        <div class="sp-ring-lbl">${label}</div>
       </div>
     </div>
   </div>`;
 }
 
 // One comparison metric (two stacked bars: you / topper)
-function mmhCmpBar(label, youVal, youMax, topVal, topMax, opts = {}) {
+function spCmpBar(label, youVal, youMax, topVal, topMax, opts = {}) {
   const isTime = !!opts.time, unit = opts.unit || "";
   const yPct = youMax > 0 ? Math.min(100, (youVal / youMax) * 100) : 0;
   const tPct = topMax > 0 ? Math.min(100, (topVal / topMax) * 100) : 0;
   const yDisp = isTime ? fmt(youVal) : (youVal + unit);
   const tDisp = isTime ? fmt(topVal) : (topVal + unit);
-  return `<div class="mmh-cmp-row">
-    <div class="mmh-cmp-label">${label}</div>
-    <div class="mmh-cmp-bars">
-      <div class="mmh-bar-track"><div class="mmh-bar you" style="width:${yPct}%"></div></div>
-      <div class="mmh-bar-track"><div class="mmh-bar top" style="width:${tPct}%"></div></div>
+  return `<div class="sp-cmp-row">
+    <div class="sp-cmp-label">${label}</div>
+    <div class="sp-cmp-bars">
+      <div class="sp-bar-track"><div class="sp-bar you" style="width:${yPct}%"></div></div>
+      <div class="sp-bar-track"><div class="sp-bar top" style="width:${tPct}%"></div></div>
     </div>
-    <div class="mmh-cmp-vals"><div class="v-you">${yDisp}</div><div class="v-top">${tDisp}</div></div>
+    <div class="sp-cmp-vals"><div class="v-you">${yDisp}</div><div class="v-top">${tDisp}</div></div>
   </div>`;
 }
 
 // Build a set of comparison bars for a given scope (overall or a section)
-function mmhCmpPaneContent(u, t, qCount, allowedSec) {
+function spCmpPaneContent(u, t, qCount, allowedSec) {
   const uAcc = (u.correct + u.wrong) ? ((u.correct / (u.correct + u.wrong)) * 100).toFixed(2) : "0.00";
   const tAcc = (t.correct + t.wrong) ? ((t.correct / (t.correct + t.wrong)) * 100).toFixed(2) : "0.00";
-  return mmhCmpBar("Score", u.score, u.max || u.total, t.score, u.max || u.total)
-       + mmhCmpBar("Accuracy", uAcc, 100, tAcc, 100, { unit: "%" })
-       + mmhCmpBar("Correct", u.correct, qCount, t.correct, qCount)
-       + mmhCmpBar("Wrong", u.wrong, qCount, t.wrong, qCount)
-       + mmhCmpBar("Time", u.time, allowedSec || u.time || 1, t.time, allowedSec || u.time || 1, { time: true });
+  return spCmpBar("Score", u.score, u.max || u.total, t.score, u.max || u.total)
+       + spCmpBar("Accuracy", uAcc, 100, tAcc, 100, { unit: "%" })
+       + spCmpBar("Correct", u.correct, qCount, t.correct, qCount)
+       + spCmpBar("Wrong", u.wrong, qCount, t.wrong, qCount)
+       + spCmpBar("Time", u.time, allowedSec || u.time || 1, t.time, allowedSec || u.time || 1, { time: true });
 }
 
 // The main builder — used by BOTH submitQuiz and the live-rank refresh
@@ -3965,12 +3969,12 @@ function buildAnalysisDashboard(d) {
   const pct = isNaN(parseFloat(d.percentile)) ? 0 : parseFloat(d.percentile);
 
   // 5 ring gauges
-  const rings = `<div class="mmh-rings">
-    ${mmhRing(pct, "#e11d48", `${d.rank} / ${d.rankTotal}`, "Rank")}
-    ${mmhRing(d.maxScore ? (d.score / d.maxScore) * 100 : 0, "#0b5ed7", `${d.score}/${d.maxScore}`, "Score")}
-    ${mmhRing(d.totalQ ? (d.attempted / d.totalQ) * 100 : 0, "#8b5cf6", `${d.attempted}/${d.totalQ}`, "Attempted")}
-    ${mmhRing(acc, "#10b981", `${d.accuracy} %`, "Accuracy")}
-    ${mmhRing(pct, "#f59e0b", `${d.percentile} %`, "Percentile")}
+  const rings = `<div class="sp-rings">
+    ${spRing(pct, "#e11d48", `${d.rank} / ${d.rankTotal}`, "Rank")}
+    ${spRing(d.maxScore ? (d.score / d.maxScore) * 100 : 0, "#0b5ed7", `${d.score}/${d.maxScore}`, "Score")}
+    ${spRing(d.totalQ ? (d.attempted / d.totalQ) * 100 : 0, "#8b5cf6", `${d.attempted}/${d.totalQ}`, "Attempted")}
+    ${spRing(acc, "#10b981", `${d.accuracy} %`, "Accuracy")}
+    ${spRing(pct, "#f59e0b", `${d.percentile} %`, "Percentile")}
   </div>`;
 
   // Section-wise performance cards
@@ -3979,14 +3983,14 @@ function buildAnalysisDashboard(d) {
     const qn = s.total ? (s.total / (CORRECT_SCORE || 2)) : ((s.correct || 0) + (s.wrong || 0) + (s.unattempted || 0));
     const att = (s.correct || 0) + (s.wrong || 0);
     const sAcc = att ? ((s.correct / att) * 100).toFixed(1) : "0.0";
-    return `<div class="mmh-secperf-card">
-      <div class="mmh-secperf-title">${name.toUpperCase()}</div>
-      <div class="mmh-secperf-row"><span>Score</span><b>${s.score || 0}/${(s.total || 0).toFixed ? (s.total||0).toFixed(1) : s.total || 0}</b></div>
-      <div class="mmh-secperf-bar"><div style="width:${s.total ? Math.max(0,Math.min(100,(s.score/s.total)*100)) : 0}%"></div></div>
-      <div class="mmh-secperf-row"><span>Attempted</span><b>${att} / ${qn}</b></div>
-      <div class="mmh-secperf-bar"><div style="width:${qn ? (att/qn)*100 : 0}%"></div></div>
-      <div class="mmh-secperf-row"><span>Accuracy</span><b>${sAcc}%</b></div>
-      <div class="mmh-secperf-bar"><div style="width:${sAcc}%"></div></div>
+    return `<div class="sp-secperf-card">
+      <div class="sp-secperf-title">${name.toUpperCase()}</div>
+      <div class="sp-secperf-row"><span>Score</span><b>${s.score || 0}/${(s.total || 0).toFixed ? (s.total||0).toFixed(1) : s.total || 0}</b></div>
+      <div class="sp-secperf-bar"><div style="width:${s.total ? Math.max(0,Math.min(100,(s.score/s.total)*100)) : 0}%"></div></div>
+      <div class="sp-secperf-row"><span>Attempted</span><b>${att} / ${qn}</b></div>
+      <div class="sp-secperf-bar"><div style="width:${qn ? (att/qn)*100 : 0}%"></div></div>
+      <div class="sp-secperf-row"><span>Accuracy</span><b>${sAcc}%</b></div>
+      <div class="sp-secperf-bar"><div style="width:${sAcc}%"></div></div>
     </div>`;
   }).join("");
 
@@ -3994,9 +3998,9 @@ function buildAnalysisDashboard(d) {
   const overallU = { score: d.score, max: d.maxScore, correct: d.correct, wrong: d.wrong, time: d.timeSec };
   const overallT = { score: d.topper.score || 0, correct: d.topper.correct || 0, wrong: d.topper.wrong || 0, time: d.topper.time || 0 };
 
-  let tabs = `<button class="mmh-tab active" onclick="mmhSwitchTab(this,'mmh-pane-0')">Overall</button>`;
-  let panes = `<div class="mmh-cmp-pane active" id="mmh-pane-0">
-      ${mmhCmpPaneContent(overallU, overallT, d.totalQ, d.allowedSec)}
+  let tabs = `<button class="sp-tab active" onclick="spSwitchTab(this,'sp-pane-0')">Overall</button>`;
+  let panes = `<div class="sp-cmp-pane active" id="sp-pane-0">
+      ${spCmpPaneContent(overallU, overallT, d.totalQ, d.allowedSec)}
     </div>`;
   d.sectionNames.forEach((name, i) => {
     const s = d.sections[name] || {};
@@ -4006,64 +4010,64 @@ function buildAnalysisDashboard(d) {
     const st = { score: ts.score || 0, correct: ts.correct || 0, wrong: ts.wrong || 0, time: ts.timeTaken || 0 };
     const allowed = (typeof SECTION_TIMERS !== "undefined" && SECTION_TIMERS[name]) || s.timeTaken || 1;
     const label = name.length > 12 ? name.slice(0, 11) + "…" : name;
-    tabs += `<button class="mmh-tab" title="${name}" onclick="mmhSwitchTab(this,'mmh-pane-${i + 1}')">${label}</button>`;
-    panes += `<div class="mmh-cmp-pane" id="mmh-pane-${i + 1}">${mmhCmpPaneContent(su, st, qn, allowed)}</div>`;
+    tabs += `<button class="sp-tab" title="${name}" onclick="spSwitchTab(this,'sp-pane-${i + 1}')">${label}</button>`;
+    panes += `<div class="sp-cmp-pane" id="sp-pane-${i + 1}">${spCmpPaneContent(su, st, qn, allowed)}</div>`;
   });
 
   // Toppers avatar cards
   const ord = ["1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"];
   const toppersHTML = (d.toppers && d.toppers.length)
-    ? `<div class="mmh-toppers">${d.toppers.slice(0, 10).map((t, i) => `
-        <div class="mmh-topper-card">
-          <div class="mmh-topper-avatar">${mmhAvatar()}</div>
-          <div class="mmh-topper-rank">${ord[i] || ("#" + (i + 1))}</div>
-          <div class="mmh-topper-name">${t.name || "—"}</div>
-          <div class="mmh-topper-score">${(typeof t.score === "number") ? t.score.toFixed(2) : t.score}</div>
+    ? `<div class="sp-toppers">${d.toppers.slice(0, 10).map((t, i) => `
+        <div class="sp-topper-card">
+          <div class="sp-topper-avatar">${spAvatar()}</div>
+          <div class="sp-topper-rank">${ord[i] || ("#" + (i + 1))}</div>
+          <div class="sp-topper-name">${t.name || "—"}</div>
+          <div class="sp-topper-score">${(typeof t.score === "number") ? t.score.toFixed(2) : t.score}</div>
         </div>`).join("")}</div>`
-    : `<div class="mmh-empty">No toppers yet — be the first to top this test! 🏆</div>`;
+    : `<div class="sp-empty">No toppers yet — be the first to top this test! 🏆</div>`;
 
-  return `<div class="mmh-analysis" id="mmhAnalysis">
-    <div class="mmh-topbar">
-      <div class="mmh-brand">
-        <span class="mmh-brand-dot">S</span>
-        <span class="mmh-brand-study">Study</span><span class="mmh-brand-planner">Planner</span>
+  return `<div class="sp-analysis" id="spAnalysis">
+    <div class="sp-topbar">
+      <div class="sp-brand">
+        <span class="sp-brand-dot">S</span>
+        <span class="sp-brand-study">Study</span><span class="sp-brand-planner">Planner</span>
       </div>
-      <button class="mmh-top-btn go" onclick="showHomeScreen()">Go to Test</button>
-      <div class="mmh-top-right">
-        <span class="mmh-topuser">${d.name || "User"}</span>
-        <button class="mmh-attempt-select" onclick="loadPreviousAttempts(QUIZ_ID)">Attempt 1 ▾</button>
-        <button class="mmh-top-btn sol" onclick="enterSolutionMode()">Solution</button>
+      <button class="sp-top-btn go" onclick="showHomeScreen()">Go to Test</button>
+      <div class="sp-top-right">
+        <span class="sp-topuser">${d.name || "User"}</span>
+        <button class="sp-attempt-select" onclick="loadPreviousAttempts(QUIZ_ID)">Attempt 1 ▾</button>
+        <button class="sp-top-btn sol" onclick="enterSolutionMode()">Solution</button>
       </div>
     </div>
-    <div class="mmh-body">
-      <main class="mmh-main">
-        <h1 class="mmh-page-title">${d.quizTitle || d.quizId}</h1>
+    <div class="sp-body">
+      <main class="sp-main">
+        <h1 class="sp-page-title">${d.quizTitle || d.quizId}</h1>
 
-        <div class="mmh-mini-actions">
-          <button class="mmh-mini-btn solid" onclick="refreshLatestRankOnDemand(this)">🔄 Get Live Updated Rank</button>
-          <button class="mmh-mini-btn" onclick="reattemptQuiz()">↻ Reattempt</button>
-          <button class="mmh-mini-btn" onclick="enterSolutionMode()">📊 Detailed Solution</button>
-          <button class="mmh-mini-btn" onclick="loadPreviousAttempts(QUIZ_ID)">📁 Previous Results</button>
+        <div class="sp-mini-actions">
+          <button class="sp-mini-btn solid" onclick="refreshLatestRankOnDemand(this)">🔄 Get Live Updated Rank</button>
+          <button class="sp-mini-btn" onclick="reattemptQuiz()">↻ Reattempt</button>
+          <button class="sp-mini-btn" onclick="enterSolutionMode()">📊 Detailed Solution</button>
+          <button class="sp-mini-btn" onclick="loadPreviousAttempts(QUIZ_ID)">📁 Previous Results</button>
         </div>
 
-        <div class="mmh-section-head">
+        <div class="sp-section-head">
           <h3>Overall Performance Summary</h3>
-          <span class="mmh-cutoff-badge">Cut Off: NA</span>
+          <span class="sp-cutoff-badge">Cut Off: NA</span>
         </div>
         ${rings}
 
-        <div class="mmh-section-head"><h3>Section wise performance</h3></div>
-        <div class="mmh-secperf-grid">${secPerf}</div>
+        <div class="sp-section-head"><h3>Section wise performance</h3></div>
+        <div class="sp-secperf-grid">${secPerf}</div>
 
-        <div class="mmh-section-head"><h3>Compare with Topper</h3></div>
-        <div class="mmh-tabs">${tabs}</div>
-        <div class="mmh-legend">
-          <span><i class="mmh-leg-you"></i> You</span>
-          <span><i class="mmh-leg-top"></i> Topper</span>
+        <div class="sp-section-head"><h3>Compare with Topper</h3></div>
+        <div class="sp-tabs">${tabs}</div>
+        <div class="sp-legend">
+          <span><i class="sp-leg-you"></i> You</span>
+          <span><i class="sp-leg-top"></i> Topper</span>
         </div>
-        <div class="mmh-cmp-panes">${panes}</div>
+        <div class="sp-cmp-panes">${panes}</div>
 
-        <div class="mmh-section-head"><h3>Toppers</h3></div>
+        <div class="sp-section-head"><h3>Toppers</h3></div>
         ${toppersHTML}
       </main>
     </div>
@@ -4071,18 +4075,18 @@ function buildAnalysisDashboard(d) {
 }
 
 // Tab switch for Compare with Topper
-function mmhSwitchTab(btn, paneId) {
-  const root = btn.closest(".mmh-analysis") || document;
-  root.querySelectorAll(".mmh-tab").forEach(t => t.classList.remove("active"));
-  root.querySelectorAll(".mmh-cmp-pane").forEach(p => p.classList.remove("active"));
+function spSwitchTab(btn, paneId) {
+  const root = btn.closest(".sp-analysis") || document;
+  root.querySelectorAll(".sp-tab").forEach(t => t.classList.remove("active"));
+  root.querySelectorAll(".sp-cmp-pane").forEach(p => p.classList.remove("active"));
   btn.classList.add("active");
   const pane = root.querySelector("#" + paneId);
   if (pane) pane.classList.add("active");
 }
 
 // Mobile sidebar toggle
-function mmhToggleSidebar() {
-  const a = document.getElementById("mmhAnalysis");
+function spToggleSidebar() {
+  const a = document.getElementById("spAnalysis");
   if (a) a.classList.toggle("sidebar-open");
 }
 
@@ -4356,7 +4360,7 @@ sectionalTableHtml += `</table></div></div>`;
         </div>
       </div>`;
 
-      // 🎨 NEW MOCK MATRIX HUB DASHBOARD (overrides the legacy template above)
+      // 🎨 NEW STUDYPLANNER DASHBOARD (overrides the legacy template above)
       dashboardHTML = buildAnalysisDashboard({
         name: firebasePayload.name,
         quizId: QUIZ_ID,
@@ -4939,7 +4943,7 @@ await db.ref("attempt_history/" + QUIZ_ID + "/" + USER_EMAIL_KEY + "/" + resultD
     const totalAttempted = payload.correct + payload.wrong;
     const accuracy = totalAttempted > 0 ? ((payload.correct / totalAttempted) * 100).toFixed(2) : "0.00";
 
-    // 6. Rebuild the whole Mock Matrix Hub dashboard with the fresh values
+    // 6. Rebuild the whole StudyPlanner dashboard with the fresh values
     const secNames = (SECTION_NAMES && SECTION_NAMES.length > 0) ? SECTION_NAMES : freshNames;
     resultsContainer.innerHTML = buildAnalysisDashboard({
       name: payload.name,
