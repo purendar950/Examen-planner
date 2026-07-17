@@ -102,9 +102,18 @@
     /* Player: padding-bottom 16:9 technique — reliable on all mobile browsers.
        Iframe absolutely fills the box so fullscreen button stays visible */
     .yt-player-wrap { position: relative; width: 100%; max-width: 100%; height: 0; padding-bottom: 56.25%; aspect-ratio: auto; border-radius: 10px; }
-    .yt-player-wrap > div, #yt-player { position: absolute; top: 0; left: 0; width: 100% !important; height: 100% !important; }
+    /* Only the actual video surfaces fill the box. Do NOT use a blanket
+       ".yt-player-wrap > div" here — that also stretched the small decorative
+       overlays (Turbo badge / loading status / "moment saved" flash) to cover
+       the whole player. The Turbo badge sits above the video (z-index 4) with a
+       dark background and no pointer-events, so once stretched it hid the video
+       and swallowed every tap ("something on the video, can't click"). */
+    #yt-player, .yt-player-wrap > #yt-turbo-video { position: absolute; top: 0; left: 0; width: 100% !important; height: 100% !important; }
     .yt-player-wrap iframe, #yt-player iframe { position: absolute; top: 0; left: 0; width: 100% !important; height: 100% !important; z-index: 2; }
     .yt-placeholder { position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 1; }
+    /* Decorative overlays must never be blown up to fill or block the player. */
+    .yt-player-wrap > #yt-turbo-badge { top: 10px !important; left: 10px !important; width: auto !important; height: auto !important; pointer-events: none; }
+    .yt-player-wrap > .ss-fs-flash { width: auto !important; height: auto !important; }
 
     /* Meta bar: title on its own line, buttons wrap below */
     .yt-meta-bar { flex-wrap: wrap; row-gap: 6px; }

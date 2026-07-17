@@ -63,7 +63,10 @@
       '@keyframes tbspin{to{transform:rotate(360deg)}}' +
       '.yt-turbo-toggle{cursor:pointer;border-radius:99px;padding:4px 12px;font-size:0.72rem;font-weight:700;font-family:var(--font);border:1px solid var(--border);background:var(--surface);color:var(--muted);white-space:nowrap;}' +
       '.yt-turbo-toggle.on{border-color:var(--accent,#00c896);background:rgba(0,200,150,0.12);color:var(--accent,#00c896);}' +
-      '.yt-turbo-badge{position:absolute;top:10px;left:10px;z-index:4;background:rgba(0,0,0,0.7);color:var(--accent,#00c896);padding:3px 9px;border-radius:6px;font-size:0.68rem;font-weight:700;display:none;}';
+      /* pointer-events:none — the badge is purely decorative and must never
+         intercept taps on the video/controls beneath it (even if some other
+         rule changes its size on small screens). */
+      '.yt-turbo-badge{position:absolute;top:10px;left:10px;z-index:4;background:rgba(0,0,0,0.7);color:var(--accent,#00c896);padding:3px 9px;border-radius:6px;font-size:0.68rem;font-weight:700;display:none;pointer-events:none;}';
     document.head.appendChild(s);
   })();
 
