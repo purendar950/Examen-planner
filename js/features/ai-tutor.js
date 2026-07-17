@@ -1296,6 +1296,28 @@
     (function () {
       var vid = '';
       try { vid = (typeof curVid === 'function') ? curVid() : ''; } catch (e) {}
+      // Local mirror (keyed by video id) so the generator sees this quiz under
+      // its playlist in the Quiz tab IMMEDIATELY — even if the shared Supabase
+      // table isn't set up yet.
+      if (vid) {
+        try {
+          var mapRaw = localStorage.getItem('ez_pl_quizzes');
+          var map = mapRaw ? (JSON.parse(mapRaw) || {}) : {};
+          map[vid] = {
+            video_id: vid, title: payload.title,
+            question_count: questions.length,
+            quiz_data: { questions: questions, correct_score: payload.correct_score, negative_score: payload.negative_score },
+            created_by_name: 'You', created_at: new Date().toISOString()
+          };
+          // keep the newest 40 to bound storage
+          var keys = Object.keys(map);
+          if (keys.length > 40) {
+            keys.sort(function (a, b) { return String(map[b].created_at || '').localeCompare(String(map[a].created_at || '')); })
+                .slice(40).forEach(function (k) { delete map[k]; });
+          }
+          localStorage.setItem('ez_pl_quizzes', JSON.stringify(map));
+        } catch (e) {}
+      }
       if (vid && window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available()) {
         var pub = PlaylistQuizzes.publish({
           videoId: vid, title: payload.title, questions: questions,
