@@ -22,11 +22,12 @@
 let _sqRows = [];
 let _sqLoaded = false;
 let _sqStage = 'shell';        // 'shell' | 'quiz' | 'result'
-let _sqSubview = 'attempt';    // 'attempt' | 'saved'
+let _sqSubview = 'available';  // 'available' | 'attempt' | 'saved'
 let _sqQuiz = null;            // active quiz session (see sqStartQuiz)
 let _sqAttempts = [];          // combined history for display (quiz + mock), newest first
 let _sqQuizAttempts = [];      // attempts made in THIS tab (localStorage + quiz_attempts cloud)
 let _sqMockAttempts = [];      // read-only attempts from the exam engine (mock_attempts)
+let _sqShared = [];            // shared community quizzes for the user's added playlists
 
 /* ── text helpers (mirror the engine's rendering) ── */
 function sqDecode(html) {
@@ -101,6 +102,7 @@ async function loadSavedQuestions(force) {
     _sqRows = await SavedQuestions.list();
     _sqLoaded = true;
     try { await sqRefreshAttempts(); } catch (e) {}
+    try { await sqRefreshShared(); } catch (e) {}
     sqShowStage('shell');
     sqRenderShell();
   } catch (e) {
@@ -124,19 +126,21 @@ function sqShowStage(stage) {
   }
 }
 
-/* Switch between the "Attempt Quiz" and "Saved" sub-tabs. */
+/* Switch between the "Available", "Attempt Quiz" and "Saved" sub-tabs. */
 function sqSwitchView(v) {
   _sqSubview = v;
-  ['attempt', 'saved'].forEach(function (x) {
+  ['available', 'attempt', 'saved'].forEach(function (x) {
     const view = document.getElementById('sq-view-' + x); if (view) view.classList.toggle('active', x === v);
     const btn  = document.getElementById('sq-st-' + x);   if (btn)  btn.classList.toggle('active', x === v);
   });
-  if (v === 'attempt') sqRenderAttemptView();
+  if (v === 'available') sqRenderAvailableView();
+  else if (v === 'attempt') sqRenderAttemptView();
   else sqRenderSavedView();
 }
 
-/* Render both sub-tab bodies (called after load / refresh / remove). */
+/* Render all sub-tab bodies (called after load / refresh / remove). */
 function sqRenderShell() {
+  sqRenderAvailableView();
   sqRenderAttemptView();
   sqRenderSavedView();
 }
@@ -421,61 +425,183 @@ async function sqClearAttempts() {
 }
 
 /* ══════════════════════════════════════════════
-   ATTEMPT-QUIZ SUB-TAB
+   SHARED (COMMUNITY) PLAYLIST QUIZZES
+   Quizzes anyone generated from a video (AI "Take as Test") show up for
+   Pro users who added a playlist containing that video, grouped under the
+   playlist's name. Keyed by video id; the video→playlist mapping is done
+   here from the user's own Playlist Organiser library (appState.ytoLibrary).
 ══════════════════════════════════════════════ */
-function sqRenderAttemptView() {
-  const c = document.getElementById('sq-view-attempt');
-  if (!c) return;
+function sqIsPro() { try { return (typeof ezIsPro === 'function') ? !!ezIsPro() : true; } catch (e) { return true; } }
 
-  const groups = sqGroupRows();
-  const totalAttemptable = sqItemsForScope('all').length;
-  const attempts = sqLoadAttempts();
+function sqPlaylists() {
+  try {
+    const lib = (typeof appState !== 'undefined' && appState && appState.ytoLibrary) ? appState.ytoLibrary : null;
+    if (!lib) return [];
+    return Object.keys(lib).map(function (k) { return lib[k]; }).filter(Boolean);
+  } catch (e) { return []; }
+}
 
-  // Full empty state only when there are no saved questions AND no attempts
-  // of any kind (a user may have exam-engine attempts but no saved questions).
-  if (!_sqRows.length && !attempts.length) {
-    c.innerHTML = '<div class="sq-empty"><div class="sq-empty-icon">📝</div>'
-      + '<h3>No quizzes yet</h3>'
-      + '<p>While taking a mock test, tap the <b>Save</b> button on any question to bookmark it. '
-      + 'Saved questions become quizzes you can attempt here — and any full mock / comprehensive-MCQ '
-      + 'tests you take in the exam engine will show up under <b>Your attempts</b>.</p></div>';
-    return;
+/* Fetch shared quizzes for every video across the user's added playlists. */
+async function sqRefreshShared() {
+  _sqShared = [];
+  if (!sqIsPro()) return _sqShared;
+  const playlists = sqPlaylists();
+  if (!playlists.length) return _sqShared;
+  const vids = [];
+  playlists.forEach(function (pl) { (pl.videos || []).forEach(function (v) { if (v && v.id) vids.push(v.id); }); });
+  if (!vids.length) return _sqShared;
+  try {
+    if (window.PlaylistQuizzes && PlaylistQuizzes.available && PlaylistQuizzes.available()) {
+      _sqShared = (await PlaylistQuizzes.listForVideos(vids)) || [];
+    }
+  } catch (e) { _sqShared = []; }
+  return _sqShared;
+}
+
+function sqSharedCardHtml(q) {
+  const n = Number(q.question_count) || (q.quiz_data && q.quiz_data.questions ? q.quiz_data.questions.length : 0);
+  const by = q.created_by_name ? '<div class="sq-qz-by">by ' + escSaved(q.created_by_name) + '</div>' : '';
+  return '<div class="sq-qz-card">'
+    + '<div class="sq-qz-title">' + escSaved(q.title || 'MCQ Test') + ' <span class="sq-shared-badge">shared</span></div>'
+    + '<div class="sq-qz-meta"><span>📄 ' + n + ' question' + (n === 1 ? '' : 's') + '</span></div>'
+    + by
+    + '<button class="sq-btn sq-btn-primary" onclick="sqStartSharedQuiz(\'' + escSaved(q.video_id) + '\')">▶ Start</button>'
+    + '</div>';
+}
+
+/* Build the "from your playlists (shared)" section. */
+function sqSharedSectionHtml() {
+  const playlists = sqPlaylists();
+  if (!playlists.length) return '';   // user hasn't added any playlists
+
+  if (!sqIsPro()) {
+    return '<div class="sq-section-label">📺 Playlist quizzes</div>'
+      + '<div class="sq-lock">💎 <b>Pro feature.</b> Unlock community quizzes shared for the playlists you added — '
+      + 'attempt mocks other learners generated from the same videos.</div>';
   }
 
-  // Available quizzes (only groups that have at least one attemptable question).
+  const byVid = {};
+  _sqShared.forEach(function (q) { if (q && q.video_id) byVid[q.video_id] = q; });
+
+  let groupsHtml = '';
+  playlists.forEach(function (pl) {
+    const quizzes = [];
+    (pl.videos || []).forEach(function (v) { if (v && byVid[v.id]) quizzes.push(byVid[v.id]); });
+    if (!quizzes.length) return;
+    groupsHtml += '<div class="sq-pl-group">'
+      + '<div class="sq-pl-head"><span class="sq-pl-ico">📺</span>'
+      +   '<span class="sq-pl-name">' + escSaved(pl.title || 'Playlist') + '</span>'
+      +   '<span class="sq-pl-count">' + quizzes.length + ' quiz' + (quizzes.length === 1 ? '' : 'zes') + '</span></div>'
+      + '<div class="sq-qz-grid">' + quizzes.map(sqSharedCardHtml).join('') + '</div>'
+      + '</div>';
+  });
+
+  if (!groupsHtml) return '';   // playlists added, but nothing shared for them yet
+  return '<div class="sq-section-label">📺 From your playlists (shared)</div>' + groupsHtml;
+}
+
+/* Convert one engine-format question → an attemptable runner item. */
+function sqItemFromEngine(eq, quizTitle, idx, correct, negative) {
+  eq = eq || {};
+  const opts = [];
+  [1, 2, 3, 4, 5].forEach(function (n) {
+    const v = eq['option_' + n];
+    if (v == null || v === '') return;
+    opts.push({ n: n, html: sqRender(v), img: '' });
+  });
+  const uid = (eq.id ? String(eq.id) : Math.random().toString(36).slice(2, 7));
+  return {
+    id: 'pq_' + idx + '_' + uid,
+    testId: 'pq',
+    quizTitle: quizTitle || 'MCQ Test',
+    questionHtml: sqRender(eq.question),
+    qImg: '',
+    options: opts,
+    answer: (eq.answer != null && eq.answer !== '') ? String(eq.answer) : '',
+    explanation: sqRender(eq.explanation),
+    correct: (eq.correct_score != null) ? Number(eq.correct_score) : (correct != null ? correct : 1),
+    negative: (eq.negative_score != null) ? Number(eq.negative_score) : (negative != null ? negative : 0)
+  };
+}
+
+/* Start a shared community quiz in the in-app runner (records an attempt). */
+function sqStartSharedQuiz(videoId) {
+  const q = _sqShared.filter(function (x) { return x.video_id === videoId; })[0];
+  if (!q || !q.quiz_data || !q.quiz_data.questions || !q.quiz_data.questions.length) {
+    if (typeof showToast === 'function') showToast('This quiz is unavailable', 'error'); return;
+  }
+  const correct = Number(q.quiz_data.correct_score) || 1;
+  const negative = Number(q.quiz_data.negative_score) || 0;
+  const title = q.title || 'MCQ Test';
+  const items = q.quiz_data.questions
+    .map(function (eq, i) { return sqItemFromEngine(eq, title, i, correct, negative); })
+    .filter(sqIsAttemptable);
+  if (!items.length) { if (typeof showToast === 'function') showToast('No attemptable questions in this quiz', 'error'); return; }
+  _sqQuiz = {
+    items: items, scope: 'pq_' + videoId, cur: 0, answers: {}, solutionMode: false,
+    fromHistory: false, fromMock: false, startTime: Date.now(), elapsed: 0, timerInt: null, title: title
+  };
+  const page = document.getElementById('page-saved'); if (page) page.classList.remove('sq-solution');
+  sqShowStage('quiz');
+  sqRenderRunner();
+  sqStartQuizTimer();
+}
+
+/* ══════════════════════════════════════════════
+   AVAILABLE SUB-TAB (shared playlist quizzes + your saved-question quizzes)
+══════════════════════════════════════════════ */
+function sqRenderAvailableView() {
+  const c = document.getElementById('sq-view-available');
+  if (!c) return;
+
+  let html = '';
+
+  // 1) Shared community quizzes, grouped by the playlists the user added.
+  html += sqSharedSectionHtml();
+
+  // 2) Quizzes built from the user's own saved questions.
+  const groups = sqGroupRows();
+  const totalAttemptable = sqItemsForScope('all').length;
   let cards = '';
   if (totalAttemptable > 1) {
-    const bestAll = sqBestAttempt('all');
-    cards += sqQuizCardHtml('all', 'All saved questions', totalAttemptable, _sqRows.length, bestAll);
+    cards += sqQuizCardHtml('all', 'All saved questions', totalAttemptable, _sqRows.length, sqBestAttempt('all'));
   }
   groups.forEach(function (g) {
     const items = g.rows.map(sqToItem).filter(sqIsAttemptable);
     if (!items.length) return;
     cards += sqQuizCardHtml(g.testId, g.title, items.length, g.rows.length, sqBestAttempt(g.testId));
   });
-
-  let html = '';
-  // Only show the "Available quizzes" section when the user has saved questions.
-  if (_sqRows.length) {
-    html += '<div class="sq-section-label">▶ Available quizzes</div>';
-    if (cards) {
-      html += '<div class="sq-qz-grid">' + cards + '</div>';
-    } else {
-      html += '<div class="sq-card" style="margin-bottom:20px;"><b>No attemptable quizzes.</b>'
-        + '<div class="sq-sub" style="margin-top:4px;">Your saved questions don\'t have answer keys yet, '
-        + 'so a quiz can\'t be built from them. You can still review them under the <b>Saved</b> tab.</div></div>';
-    }
+  if (cards) {
+    html += '<div class="sq-section-label">🔖 From your saved questions</div>'
+      + '<div class="sq-qz-grid">' + cards + '</div>';
   }
 
-  // Attempt history (this-tab quiz attempts + exam-engine mock attempts)
+  if (!html) {
+    html = '<div class="sq-empty"><div class="sq-empty-icon">📚</div>'
+      + '<h3>No quizzes available yet</h3>'
+      + '<p>Generate a mock from a video (<b>AI Study → Take as Test</b>) or save questions during a mock test. '
+      + 'Quizzes others generate from playlists you added will appear here too.</p></div>';
+  }
+  c.innerHTML = html;
+}
+
+/* ══════════════════════════════════════════════
+   ATTEMPT-QUIZ SUB-TAB (your attempt history)
+══════════════════════════════════════════════ */
+function sqRenderAttemptView() {
+  const c = document.getElementById('sq-view-attempt');
+  if (!c) return;
+
+  const attempts = sqLoadAttempts();
   const mockCount = _sqMockAttempts.length;
-  html += '<div class="sq-section-label" style="display:flex;align-items:center;justify-content:space-between;">'
+
+  let html = '<div class="sq-section-label" style="display:flex;align-items:center;justify-content:space-between;">'
     + '<span>🕘 Your attempts' + (mockCount ? ' <span class="sq-sub" style="text-transform:none;letter-spacing:0;">(incl. ' + mockCount + ' from the exam engine)</span>' : '') + '</span>'
     + (_sqQuizAttempts.length ? '<button class="sq-btn" style="padding:.25rem .6rem;font-size:.72rem;" onclick="sqClearAttempts()">Clear history</button>' : '')
     + '</div>';
   if (!attempts.length) {
     html += '<div class="sq-card"><div class="sq-sub">You haven\'t attempted any quiz yet. '
-      + 'Pick a quiz above and press <b>Start</b> — your score &amp; analysis will be saved here. '
+      + 'Open the <b>Available</b> tab, pick a quiz and press <b>Start</b> — your score &amp; analysis will be saved here. '
       + 'Full mock / comprehensive-MCQ tests taken in the exam engine also appear here.</div></div>';
   } else {
     html += '<div class="sq-hist">' + attempts.map(sqHistRowHtml).join('') + '</div>';

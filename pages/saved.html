@@ -49,6 +49,17 @@
   #page-saved .sq-qz-best { font-size:.72rem; color:#198754; font-weight:700; }
   #page-saved .sq-section-label { font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); font-weight:700; margin:0 0 12px; }
 
+  /* ── Available: playlist groups + shared-quiz cards ── */
+  #page-saved .sq-pl-group { margin-bottom:22px; }
+  #page-saved .sq-pl-head { display:flex; align-items:center; gap:9px; margin-bottom:10px; }
+  #page-saved .sq-pl-ico { font-size:1.05rem; }
+  #page-saved .sq-pl-name { font-weight:800; font-size:.98rem; }
+  #page-saved .sq-pl-count { font-size:.66rem; color:var(--muted); background:var(--card,rgba(127,127,127,.12)); border:1px solid var(--border); padding:2px 8px; border-radius:99px; white-space:nowrap; }
+  #page-saved .sq-qz-by { font-size:.7rem; color:var(--muted); }
+  #page-saved .sq-shared-badge { display:inline-block; font-size:.6rem; font-weight:700; text-transform:uppercase; letter-spacing:.03em; padding:1px 6px; border-radius:5px; background:rgba(168,85,247,.16); color:#A855F7; }
+  #page-saved .sq-lock { background:var(--surface); border:1px dashed var(--border); border-radius:12px; padding:18px; text-align:center; color:var(--muted); margin-bottom:20px; }
+  #page-saved .sq-lock b { color:var(--text); }
+
   /* ── Attempt history ── */
   #page-saved .sq-hist { display:flex; flex-direction:column; gap:10px; }
   #page-saved .sq-hist-row { display:flex; align-items:center; justify-content:space-between; gap:12px; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:11px 14px; cursor:pointer; transition:border-color .15s; }
@@ -139,13 +150,19 @@
     </div>
 
     <div class="sq-subtabs">
-      <button class="sq-subtab active" id="sq-st-attempt" onclick="sqSwitchView('attempt')">▶ Attempt Quiz</button>
+      <button class="sq-subtab active" id="sq-st-available" onclick="sqSwitchView('available')">📚 Available</button>
+      <button class="sq-subtab" id="sq-st-attempt" onclick="sqSwitchView('attempt')">▶ Attempt Quiz</button>
       <button class="sq-subtab" id="sq-st-saved" onclick="sqSwitchView('saved')">🔖 Saved</button>
     </div>
 
-    <!-- ATTEMPT QUIZ VIEW -->
-    <div class="sq-view active" id="sq-view-attempt">
-      <div class="sq-loading">Loading your quizzes…</div>
+    <!-- AVAILABLE VIEW (playlist-wise shared quizzes + your saved-question quizzes) -->
+    <div class="sq-view active" id="sq-view-available">
+      <div class="sq-loading">Loading available quizzes…</div>
+    </div>
+
+    <!-- ATTEMPT QUIZ VIEW (your attempt history) -->
+    <div class="sq-view" id="sq-view-attempt">
+      <div class="sq-loading">Loading your attempts…</div>
     </div>
 
     <!-- SAVED VIEW (quiz-wise) -->

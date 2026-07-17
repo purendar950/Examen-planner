@@ -198,7 +198,7 @@
     <!-- ═══ ANALYSIS PAGE (includes Revision sub-tab) ═══ -->
     <div data-include="pages/analysis.html?v=20260716a"></div>
     <!-- ═══ QUIZ PAGE (Attempt Quiz + Saved sub-tabs, built from saved questions) ═══ -->
-    <div data-include="pages/saved.html?v=20260717e"></div>
+    <div data-include="pages/saved.html?v=20260717g"></div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
@@ -445,7 +445,9 @@
 <script defer src="js/saved-questions.js?v=20260716a"></script>
 <!-- 📊 Quiz attempts (Supabase-backed, cross-device history for the Quiz tab) -->
 <script defer src="js/quiz-attempts.js?v=20260717e"></script>
-<script defer src="js/tabs/saved-questions.js?v=20260717f"></script>
+<!-- 📺 Shared playlist quizzes (community mocks, grouped by playlist in the Quiz tab) -->
+<script defer src="js/playlist-quizzes.js?v=20260717g"></script>
+<script defer src="js/tabs/saved-questions.js?v=20260717g"></script>
 <script defer src="js/tabs/profile.js"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
 <script defer src="js/features/responsive.js"></script>
@@ -461,7 +463,7 @@
      gating file (uses ezIsPro/ezLockedMsg). -->
 <script defer src="js/features/turbo-player.js?v=20260711d"></script>
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
-<script defer src="js/features/ai-tutor.js?v=20260713a"></script>
+<script defer src="js/features/ai-tutor.js?v=20260717g"></script>
 <script defer src="js/core/theme.js"></script>
 <!-- YouTube IFrame API — deferred; onYouTubeIframeAPIReady fires after load -->
 <script defer src="https://www.youtube.com/iframe_api"></script>
