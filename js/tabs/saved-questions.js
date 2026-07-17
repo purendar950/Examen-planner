@@ -580,7 +580,9 @@ function sqVideoRowHtml(pl, v, idx, q) {
   let right;
   if (q) {
     const n = Number(q.question_count) || (q.quiz_data && q.quiz_data.questions ? q.quiz_data.questions.length : 0);
-    const best = sqBestAttempt('pq_' + v.id);
+    // Playlist quizzes now run in the engine (scope EZ-PLQUIZ-<id>); still
+    // honour any legacy in-tab attempt (scope pq_<id>).
+    const best = sqBestMockAttempt('EZ-PLQUIZ-' + v.id) || sqBestAttempt('pq_' + v.id);
     const bestBadge = best ? '<span class="sq-row-best">🏆 ' + best.accuracy + '%</span>' : '';
     const label = best ? 'Re-attempt' : 'Attempt';
     right = bestBadge
@@ -816,7 +818,13 @@ function sqItemFromEngine(eq, quizTitle, idx, correct, negative) {
   };
 }
 
-/* Start a shared community quiz in the in-app runner (records an attempt). */
+/* Launch a generated/community quiz in the REAL exam engine (test-engine.html)
+   — the same engine used for full mock tests, so the timer, navigation,
+   solution review and +/− scoring all match an actual test. The stored
+   quiz_data.questions are already in engine format (built via
+   mcqToEngineQuestions at generation time), so we hand them straight to the
+   engine via the same localStorage handoff that "Take as Test" uses.
+   Same-tab navigation; the engine's Back button returns here. */
 function sqStartSharedQuiz(videoId) {
   let q = _sqShared.filter(function (x) { return x.video_id === videoId; })[0];
   // Fall back to the local mirror in case _sqShared hasn't been refreshed yet
@@ -825,21 +833,39 @@ function sqStartSharedQuiz(videoId) {
   if (!q || !q.quiz_data || !q.quiz_data.questions || !q.quiz_data.questions.length) {
     if (typeof showToast === 'function') showToast('This quiz is unavailable', 'error'); return;
   }
-  const correct = Number(q.quiz_data.correct_score) || 1;
-  const negative = Number(q.quiz_data.negative_score) || 0;
-  const title = q.title || 'MCQ Test';
-  const items = q.quiz_data.questions
-    .map(function (eq, i) { return sqItemFromEngine(eq, title, i, correct, negative); })
-    .filter(sqIsAttemptable);
-  if (!items.length) { if (typeof showToast === 'function') showToast('No attemptable questions in this quiz', 'error'); return; }
-  _sqQuiz = {
-    items: items, scope: 'pq_' + videoId, cur: 0, answers: {}, solutionMode: false,
-    fromHistory: false, fromMock: false, startTime: Date.now(), elapsed: 0, timerInt: null, title: title
+
+  const questions = q.quiz_data.questions;
+  const title     = q.title || 'MCQ Test';
+  const correct   = Number(q.quiz_data.correct_score) || 2;
+  const negative  = (q.quiz_data.negative_score != null) ? Number(q.quiz_data.negative_score) : 0.5;
+  // Stable per-video id so the engine groups re-attempts under one history key
+  // (history_<user>_EZ-PLQUIZ-<videoId>), which feeds the best-score badge.
+  const id = 'EZ-PLQUIZ-' + videoId;
+
+  const payload = {
+    id: id,
+    title: title,
+    correct_score:  correct,
+    negative_score: negative,
+    time_min: Math.max(5, Math.ceil(questions.length * 0.75)),
+    sections: { 'MCQ Quiz': questions }
   };
-  const page = document.getElementById('page-saved'); if (page) page.classList.remove('sq-solution');
-  sqShowStage('quiz');
-  sqRenderRunner();
-  sqStartQuizTimer();
+
+  try {
+    // Keep only the latest custom quiz so localStorage doesn't grow forever.
+    Object.keys(localStorage).forEach(function (k) { if (k.indexOf('ez_custom_quiz_') === 0) localStorage.removeItem(k); });
+    localStorage.setItem('ez_custom_quiz_' + id, JSON.stringify(payload));
+    localStorage.setItem('ez_custom_quiz', JSON.stringify(payload));   // generic fallback
+    localStorage.setItem('ez_custom_quiz_return', location.href);      // same-tab Back target
+    localStorage.removeItem('ezSelectedTopics');
+    localStorage.removeItem('ezMockSize');
+  } catch (e) {
+    if (typeof showToast === 'function') showToast('Could not open the test (browser storage is full)', 'error'); return;
+  }
+
+  // The engine sits at the app root next to app.html.
+  const base = location.pathname.replace(/[^/]*$/, '');
+  location.href = base + 'test-engine.html?id=' + encodeURIComponent(id);
 }
 
 /* ══════════════════════════════════════════════
@@ -883,6 +909,14 @@ function sqRenderAttemptView() {
    engine attempts are excluded (they are a different, full-test format). */
 function sqBestAttempt(scope) {
   const list = _sqQuizAttempts.filter(function (a) { return (a.scope || 'all') === scope; });
+  if (!list.length) return null;
+  return list.reduce(function (best, a) { return (a.accuracy > (best ? best.accuracy : -1)) ? a : best; }, null);
+}
+
+/* Best exam-engine attempt for a scope (quizId), or null. Used for playlist
+   quizzes, which now run in the real engine and record under _sqMockAttempts. */
+function sqBestMockAttempt(scope) {
+  const list = _sqMockAttempts.filter(function (a) { return (a.scope || '') === scope; });
   if (!list.length) return null;
   return list.reduce(function (best, a) { return (a.accuracy > (best ? best.accuracy : -1)) ? a : best; }, null);
 }
