@@ -958,6 +958,10 @@ function ytoPlayInYtTab(plId, vid) {
   var v = pl.videos.find(function(x) { return x.id === vid; }); if (!v) return;
   pl.lastVideo = vid; ytoPersist();
   switchPage('youtube');
+  // Surface the Watch sub-view — switchPage only toggles the top-level page,
+  // not the merged YouTube sub-tabs, so without this the video would load into
+  // the hidden Watch player while the user stays stuck on the Organiser list.
+  if (typeof ytSwitchSub === 'function') ytSwitchSub('watch');
   ytLoadInTab('video', vid, 'https://youtube.com/watch?v=' + vid, v.title);
   appState.ytLastVideo.ytoPlId = plId;
   saveProgress();
