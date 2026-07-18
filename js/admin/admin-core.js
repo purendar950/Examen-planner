@@ -37,7 +37,7 @@ const ADMIN_TABS = {
   plans:      { crumb: 'Plans & pricing',   title: 'Plans & pricing',      description: 'Manage subscriptions, free limits, renewals and payment settings.' },
   coupons:    { crumb: 'Coupons',           title: 'Coupons',             description: 'Create promotions and review usage, discounts and redemptions.' },
   telegram:   { crumb: 'Telegram',          title: 'Telegram automation', description: 'Configure bots, delivery schedules, report channels and connected users.' },
-  aistudy:    { crumb: 'AI Study',          title: 'AI Study controls',   description: 'Manage providers, models, feature controls and usage limits.' },
+  aistudy:    { crumb: 'AI Study',          title: 'AI Study operations', description: 'Operate provider routing, model allocation, feature access and quota controls.' },
   settings:   { crumb: 'Settings',          title: 'System settings',      description: 'Control registration, maintenance, announcements and service health.' }
 };
 
@@ -524,7 +524,9 @@ function render() {
   const tgEnabled = TG_USERS.filter(u => u.tg.enabled && u.tg.chatId).length;
   const cntTgEl = document.getElementById('cnt-tg');
   if (cntTgEl) cntTgEl.textContent = tgEnabled || '';
-  document.getElementById('stats').innerHTML =
+  const stats = document.getElementById('stats');
+  stats.hidden = TAB === 'aistudy';
+  stats.innerHTML =
     '<div class="stat"><b>' + USERS.length + '</b><div>Total users</div></div>' +
     '<div class="stat"><b style="color:var(--amber)">' + pending + '</b><div>Pending requests</div></div>' +
     '<div class="stat"><b style="color:var(--accent-dark)">' + approved + '</b><div>Active users</div></div>' +
