@@ -87,7 +87,7 @@ function rolloverIncompleteTasks() {
            earlier date would quietly roll forward — the "deleted task keeps
            coming back" bug. Dropping it here (not adding to `keep`) also purges
            the stale twin from its original date. */
-        if (k && typeof isTaskDeleted === 'function' && isTaskDeleted(k)) return;
+        if (k && typeof isTaskDeleted === 'function' && isTaskDeleted(t)) return;
 
         /* A twin of this task is already completed elsewhere → the work is done,
            so drop this stale duplicate instead of carrying it forward. */

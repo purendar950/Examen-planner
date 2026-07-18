@@ -195,6 +195,11 @@ function toggleChapter(chId, subId) {
   if (!appState.progress[chId]) appState.progress[chId] = {};
   const wasDone = appState.progress[chId].done;
   appState.progress[chId].done = !wasDone;
+  /* Whole-chapter actions supersede planner part progress. If the chapter is
+     later unmarked, all configured parts should return to the schedule. */
+  delete appState.progress[chId].planPartProgress;
+  delete appState.progress[chId].planCompletedBy;
+  delete appState.progress[chId].planCompletedPartsTotal;
   _cachedRemainingCount = null; // invalidate countdown cache
   if (!wasDone) {
     appState.progress[chId].completedAt = new Date().toISOString();

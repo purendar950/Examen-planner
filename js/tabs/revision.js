@@ -93,6 +93,9 @@ function getTaskChapterRefs() {
         /* Mock tasks are one-off tests, not revisable chapters — never seed them
            into the spaced-repetition pool. */
         if (t.type === 'mock') return;
+        /* Plan-derived tasks revise through their real chapter only after every
+           configured part is complete; never seed a task:<id> duplicate. */
+        if (t.chId) return;
         const chId = taskRevisionId(t.id);
         if (seen.has(chId)) return;
         seen.add(chId);
@@ -130,6 +133,10 @@ function syncTaskRevision(task) {
   /* Mock tasks are one-off tests, not spaced-repetition chapters — keep them
      out of the revision engine entirely (matches getTaskChapterRefs). */
   if (task.type === 'mock') return;
+  /* Study-plan tasks already sync to their real chapter via
+     syncTaskChapterProgress(). Creating a task_<id> revision as well would add
+     a duplicate—and for multipart tasks, would revise an unfinished chapter. */
+  if (task.chId) return;
   const chId = taskRevisionId(task.id);
   const isDone = task.done || task.status === 'done';
   if (isDone) {

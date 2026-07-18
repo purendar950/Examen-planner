@@ -22,7 +22,13 @@ function buildTelegramDigest() {
            them to the digest (mirrors the planner views' tombstone check). */
         const ch = it.ch || {};
         if (typeof isTaskDeleted === 'function' &&
-            isTaskDeleted({ chId: ch.id || '', text: ch.name || '' })) return false;
+            isTaskDeleted({
+              chId: ch.id || '',
+              text: ch.name || '',
+              planPartIndex: Number(it.partIndex) || 0,
+              planTotalParts: Math.max(1, Number(it.totalParts) || 1),
+              planId: it.planId || 'default'
+            })) return false;
         return true;
       });
       if (!items.length) continue;

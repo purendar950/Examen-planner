@@ -1254,13 +1254,11 @@ function toggleTask(dateStr, taskId) {
     /* Mirror onto the course "watched" store so the Scheduled Videos card and
        course progress reflect the completion too. */
     if (typeof syncVideoTaskToWatched === 'function') syncVideoTaskToWatched(task);
-    /* Bridge into the spaced-repetition engine: a completed task becomes a
-       revision-eligible virtual chapter (cleared again if un-completed). */
-    if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
-    /* Bridge to chapter progress: if this task came from the study plan
-       (carries task.chId), mark the underlying chapter done so it stops
-       rescheduling onto the next day. */
+    /* Validate/sync chapter progress before the generic revision bridge; a
+       stale plan-part task may be reset to todo by this call. */
     if (typeof syncTaskChapterProgress === 'function') syncTaskChapterProgress(task);
+    /* Bridge into the spaced-repetition engine after any stale-task reset. */
+    if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
     saveProgress();
     buildPlannerCalendar();
     try { if (typeof renderRevisionWidget === 'function') renderRevisionWidget(); } catch(e) {}
@@ -1281,7 +1279,15 @@ function toggleTask(dateStr, taskId) {
    tombstone, so an intentional re-add always wins. */
 function taskDedupKey(t) {
   if (!t) return '';
-  if (t.chId)    return 'ch:'  + String(t.chId);
+  if (t.chId) {
+    const partIndex = Number(t.planPartIndex) || 0;
+    const totalParts = Math.max(1, Number(t.planTotalParts) || 1);
+    if (partIndex >= 1 && totalParts > 1 && partIndex <= totalParts) {
+      const planPrefix = t.planId ? `plan:${String(t.planId)}:` : '';
+      return `${planPrefix}ch:${String(t.chId)}:part:${partIndex}/${totalParts}`;
+    }
+    return 'ch:' + String(t.chId);
+  }
   if (t.videoId) return 'vid:' + String(t.videoId);
   const txt = (t.text || '').trim().toLowerCase();
   return txt ? 'txt:' + txt : '';
@@ -1306,7 +1312,14 @@ function recordTaskDeletion(t) {
    before and should NOT be auto-recreated. */
 function isTaskDeleted(keyOrTask) {
   const key = (typeof keyOrTask === 'string') ? keyOrTask : taskDedupKey(keyOrTask);
-  return !!key && _deletedTaskLedger().includes(key);
+  const ledger = _deletedTaskLedger();
+  if (!!key && ledger.includes(key)) return true;
+  /* Backward compatibility: before multipart tasks, deleting any chapter task
+     stored ch:<id>. Keep honoring that broader tombstone for existing users. */
+  if (keyOrTask && typeof keyOrTask === 'object' && keyOrTask.chId) {
+    return ledger.includes('ch:' + String(keyOrTask.chId));
+  }
+  return false;
 }
 /* Forget a tombstone — called when the user explicitly (re-)adds the task, so
    an intentional add is never silently suppressed. */
