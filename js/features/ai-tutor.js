@@ -1673,7 +1673,7 @@
      a second dropdown with just that provider's models. */
   var _studyGroups = [];         // [{provider,label,models}] from /api/status
   var _studyDefaultModel = '';   // admin's active model (default when a provider is picked)
-  var STUDY_PROV_ORDER = ['bynara', 'cerebras', 'mistral', 'openrouter', 'nvidia'];
+  var STUDY_PROV_ORDER = ['bynara', 'cerebras', 'mistral', 'openrouter', 'nvidia', 'kiro'];
 
   function studyGroupFor(pid) {
     for (var i = 0; i < _studyGroups.length; i++) if (_studyGroups[i].provider === pid) return _studyGroups[i];
