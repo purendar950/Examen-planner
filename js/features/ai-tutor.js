@@ -1723,7 +1723,42 @@
   /* ── right-column: [Course Content | AI Study] toggle + 60/40 player/panel split ── */
   function ytLayout() { return document.querySelector('#page-youtube .yt-layout'); }
   function rightCol() { var l = ytLayout(); return l ? (l.querySelector('.yt-panel') || l.children[1]) : null; }
-  function currentView() { return localStorage.getItem('aiView') === 'ai' ? 'ai' : 'course'; }
+  var AI_VIEW_STATE_KEY = 'aiViewParallelState';
+  var AI_VIEW_LAYOUT_VERSION = 'parallel-60-40-v1';
+  var _viewMemory = 'ai';
+  var _viewInitialized = false;
+  function persistView(view) {
+    _viewMemory = view === 'course' ? 'course' : 'ai';
+    try {
+      // One atomic record is the source of truth. The legacy key is updated
+      // only for backward compatibility and is never needed to read the view.
+      localStorage.setItem(AI_VIEW_STATE_KEY, JSON.stringify({
+        version: AI_VIEW_LAYOUT_VERSION,
+        view: _viewMemory
+      }));
+      localStorage.setItem('aiView', _viewMemory);
+    } catch (e) {}
+  }
+  function ensureParallelAiDefault() {
+    if (_viewInitialized) return;
+    _viewInitialized = true;
+    try {
+      var saved = JSON.parse(localStorage.getItem(AI_VIEW_STATE_KEY) || 'null');
+      if (saved && saved.version === AI_VIEW_LAYOUT_VERSION &&
+          (saved.view === 'ai' || saved.view === 'course')) {
+        _viewMemory = saved.view;
+        return;
+      }
+    } catch (e) {}
+    // Legacy users enter the redesigned workspace with AI Study selected once,
+    // so note generation is immediately parallel with the video. Subsequent
+    // Course Content choices update the atomic record and remain persisted.
+    persistView('ai');
+  }
+  function currentView() {
+    ensureParallelAiDefault();
+    return _viewMemory;
+  }
 
   /* ── server/cache status dot: 🟠 checking · 🔴 offline · 🟢 ready · 🟡 cached ── */
   var _statusVid = null;
@@ -1838,7 +1873,8 @@
           else if (typeof showToast === 'function') showToast('🎓 AI Study Pro plan mein milta hai.', 'error');
           return;
         }
-        localStorage.setItem('aiView', b.dataset.v); applyView();
+        persistView(b.dataset.v);
+        applyView();
       };
     });
     var lang = document.getElementById('ai-lang');
@@ -1855,6 +1891,7 @@
     var dot = document.getElementById('ai-status-dot');
     if (dot) dot.onclick = function () { _statusVid = null; checkStatus(curVid()); };
     renderTabs(); renderBody();
+    ensureParallelAiDefault();
     applyView();
     setupAlignSync();   // keep player ↔ notes-box top alignment in sync
   }
