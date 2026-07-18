@@ -81,6 +81,12 @@ function childEnv() {
   };
 }
 
+// Run kiro-cli in /tmp so it doesn't read the project directory as context.
+// When run in the kiro-test/ dir, it reads server.js/README as project context
+// and thinks it's a coding assistant, refusing study-note requests or adding
+// unhelpful "I'm a dev agent" preambles. /tmp is empty → no project context.
+const KIRO_CWD = '/tmp';
+
 // kiro-cli emits ANSI color codes even in --no-interactive mode (e.g. a
 // colored "> " prompt marker prefixing the response) -- confirmed by testing.
 // Strip them so the browser gets clean plain text.
@@ -133,7 +139,7 @@ app.post('/api/test-kiro', (req, res) => {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
-      { env: childEnv(), timeout: 120000 },
+      { env: childEnv(), timeout: 120000, cwd: KIRO_CWD },
       (error, stdout, stderr) => {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
@@ -177,7 +183,7 @@ app.post('/api/test-kiro', (req, res) => {
     execFile(
       bin,
       ['settings', 'chat.defaultModel', model],
-      { env: childEnv(), timeout: 10000 },
+      { env: childEnv(), timeout: 10000, cwd: KIRO_CWD },
       (err, stdout, stderr) => {
         if (err) {
           console.error('Failed to set model:', stripAnsi(stderr) || err.message);
@@ -308,7 +314,7 @@ function handleChatCompletions(req, res) {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
-      { env: childEnv(), timeout: 120000 },
+      { env: childEnv(), timeout: 120000, cwd: KIRO_CWD },
       (error, stdout, stderr) => {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
@@ -338,7 +344,7 @@ function handleChatCompletions(req, res) {
     execFile(
       bin,
       ['settings', 'chat.defaultModel', model],
-      { env: childEnv(), timeout: 10000 },
+      { env: childEnv(), timeout: 10000, cwd: KIRO_CWD },
       (err) => {
         if (err) console.error('[chat/completions] Failed to set model:', model);
         runChat();
