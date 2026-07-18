@@ -1511,7 +1511,7 @@ function renderSettings() {
       '<button class="btn btn-gray" onclick="checkTurboBackend()">&#128268; Check Backend</button>' +
       '<span class="muted" style="font-size:0.78rem;">Last updated: <b>' + turboUpdated + '</b>' + (turboBy ? ' by ' + esc(turboBy) : '') + '</span>' +
     '</div>' +
-    '<div id="turbo-backend-status" class="muted" style="font-size:0.78rem;margin-top:6px;"></div>' +
+    '<div id="turbo-backend-status" class="muted" role="status" tabindex="-1" style="font-size:0.78rem;margin-top:6px;"></div>' +
     '<div class="muted" style="font-size:0.72rem;margin-top:6px;">&#128274; Admin-only Firestore (config/turbo). Backend ko <code>FIREBASE_SERVICE_ACCOUNT</code> env var chahiye (bot wala hi) taaki ye padh sake. Code mein kabhi save nahi hota.</div>' +
     '</div>';
   return turboCard +
@@ -1689,6 +1689,11 @@ async function saveTurboCookies() {
 async function checkTurboBackend() {
   var el = document.getElementById('turbo-backend-status');
   var url = (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+  var revealResult = function() {
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
   if (el) el.textContent = '⏳ Checking ' + url + '/health …';
   try {
     var r = await fetch(url + '/health');
@@ -1696,8 +1701,10 @@ async function checkTurboBackend() {
     if (el) el.innerHTML = (d.pot_provider ? '🟢' : '🟡') +
       ' Backend online — cookies: <b>' + (d.cookies ? 'yes' : 'no') + '</b>' +
       ' (source: ' + esc(d.cookie_source || '?') + '), PO-token: ' + (d.pot_provider ? 'yes' : 'no') + '.';
+    revealResult();
   } catch(e) {
     if (el) el.innerHTML = '🔴 Backend not reachable (' + esc(e.message) + '). Free tier wake ho raha ho to ~40s baad retry karo.';
+    revealResult();
   }
 }
 

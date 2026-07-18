@@ -7,6 +7,7 @@ const db = firebase.firestore(), auth = firebase.auth();
 
 let USERS = [], PLANS = [], PAYMENTS = [], REQUESTS = [], COUPONS = [], REDEMPTIONS = [], TAB = 'pending', PAY_FILTER = 'all', PAY_VIEW = 'list'; // 'list' | 'reconcile'
 let ADMIN_READY = false;
+let ADMIN_DATA_HEALTH = { errors: [], lastSuccessfulAt: null, lastAttemptAt: null };
 let CONFIG = {}, SETTINGS = { requireApproval: false };
 let DUP = { mobile:{}, fp:{}, ip:{} };
 let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = false;
@@ -453,6 +454,12 @@ async function loadAll() {
     const sv = await db.collection('config').doc('settings').get();
     SETTINGS = sv.exists ? sv.data() : { requireApproval: false };
   } catch(e) { failed('system settings', e); }
+  const completedAt = new Date();
+  ADMIN_DATA_HEALTH = {
+    errors: errors.slice(),
+    lastAttemptAt: completedAt,
+    lastSuccessfulAt: errors.length ? ADMIN_DATA_HEALTH.lastSuccessfulAt : completedAt
+  };
   return { errors };
 }
 
