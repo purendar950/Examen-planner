@@ -1599,6 +1599,7 @@
   }
   function renderBody() {
     var b = shellBody(); if (!b) return;
+    b.setAttribute('data-ai-tab', state.tab);
     if (state.tab === 'notes') {
       b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
@@ -1807,9 +1808,14 @@
     if (mc) mc.classList.toggle('ai-wide', v === 'ai');
     var t = document.getElementById('ai-view-toggle');
     if (t) {
-      Array.prototype.forEach.call(t.querySelectorAll('button'), function (b) { b.classList.toggle('on', b.dataset.v === v); });
+      Array.prototype.forEach.call(t.querySelectorAll('button'), function (b) {
+        var selected = b.dataset.v === v;
+        b.classList.toggle('on', selected);
+        b.setAttribute('aria-pressed', selected ? 'true' : 'false');
+      });
       var aiBtn = t.querySelector('button[data-v="ai"]');
-      if (aiBtn) aiBtn.innerHTML = '🎓 AI Study' + (isPro() ? '' : ' 💎');
+      var aiBadge = aiBtn && aiBtn.querySelector('.ai-switch-badge');
+      if (aiBadge) aiBadge.textContent = isPro() ? 'AI' : 'PRO';
     }
     // refresh the status dot only when AI Study is shown and the video changed
     if (v === 'ai') {
@@ -1822,17 +1828,77 @@
     alignPlayerToNotes();
   }
 
-  /* Keep both workspace columns aligned to the top. Earlier versions measured
-     the notes box and padded the player column to match it; wrapped AI controls
-     made that padding hundreds of pixels tall on tablets. CSS grid now owns the
-     alignment, so this helper only clears stale inline padding from old sessions. */
+  /* Keep the AI card parallel with the visible video study stage. The matched
+     height runs from the top of the player through whichever playback/capture
+     toolbar is currently visible; generated notes then scroll inside the card.
+     This measures height only — it never pads or moves the player. */
   function alignPlayerToNotes() {
     var layout = ytLayout();
     var leftCol = layout && layout.children[0];
-    if (leftCol) leftCol.style.paddingTop = '';
+    var panel = rightCol();
+    var page = document.getElementById('page-youtube');
+    var watch = document.getElementById('yt-sub-view-watch');
+    if (leftCol) leftCol.style.paddingTop = ''; // clear stale padding from older releases
+    if (!layout || !leftCol || !panel || !page || !page.classList.contains('active') ||
+        page.classList.contains('yt-focus-active') || !watch || !watch.classList.contains('active') ||
+        !layout.classList.contains('ai-split') || window.innerWidth <= 840) {
+      if (layout) layout.style.removeProperty('--yt-parallel-stage-height');
+      return;
+    }
+
+    var player = document.getElementById('yt-player-wrap');
+    if (!player || !player.getClientRects().length || getComputedStyle(player).display === 'none') {
+      layout.style.removeProperty('--yt-parallel-stage-height');
+      return;
+    }
+    var playerRect = player.getBoundingClientRect();
+    if (playerRect.width <= 0 || playerRect.height <= 0) {
+      layout.style.removeProperty('--yt-parallel-stage-height');
+      return;
+    }
+    var bottom = playerRect.bottom;
+    [
+      document.getElementById('yt-meta-bar'),
+      document.getElementById('yt-speed-bar'),
+      leftCol.querySelector('.ss-toolbar')
+    ].forEach(function (el) {
+      if (!el || !el.getClientRects().length || getComputedStyle(el).display === 'none') return;
+      bottom = Math.max(bottom, el.getBoundingClientRect().bottom);
+    });
+    var stageHeight = Math.max(playerRect.height, bottom - playerRect.top);
+    if (stageHeight > 0) layout.style.setProperty('--yt-parallel-stage-height', Math.ceil(stageHeight) + 'px');
+    else layout.style.removeProperty('--yt-parallel-stage-height');
   }
   function setupAlignSync() {
     alignPlayerToNotes();
+    if (setupAlignSync._bound) return;
+    setupAlignSync._bound = true;
+    var resizeTimer = null;
+    function scheduleAlign() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(alignPlayerToNotes, 80);
+    }
+    window.addEventListener('resize', scheduleAlign);
+
+    // Class changes cover Watch ↔ Course Library and Focus mode immediately;
+    // left-column resizing covers injected screenshot controls and player size.
+    if ('MutationObserver' in window) {
+      var mo = new MutationObserver(scheduleAlign);
+      var page = document.getElementById('page-youtube');
+      var watch = document.getElementById('yt-sub-view-watch');
+      if (page) mo.observe(page, { attributes: true, attributeFilter: ['class'] });
+      if (watch) mo.observe(watch, { attributes: true, attributeFilter: ['class'] });
+      setupAlignSync._mutationObserver = mo;
+    }
+    if ('ResizeObserver' in window) {
+      var ro = new ResizeObserver(scheduleAlign);
+      var layout = ytLayout();
+      var leftCol = layout && layout.children[0];
+      var player = document.getElementById('yt-player-wrap');
+      if (leftCol) ro.observe(leftCol);
+      if (player) ro.observe(player);
+      setupAlignSync._resizeObserver = ro;
+    }
   }
 
   // Set up the toggle + AI panel inside the right column, once.
@@ -1850,8 +1916,19 @@
 
     var toggle = document.createElement('div');
     toggle.id = 'ai-view-toggle'; toggle.className = 'ai-view-toggle';
-    toggle.innerHTML = '<button data-v="course" class="on">📚 Course Content</button>' +
-      '<button data-v="ai">🎓 AI Study</button>';
+    toggle.setAttribute('role', 'group');
+    toggle.setAttribute('aria-label', 'Study workspace');
+    toggle.innerHTML =
+      '<button type="button" data-v="course" class="on" aria-pressed="true">' +
+        '<span class="ai-switch-icon" aria-hidden="true">▤</span>' +
+        '<span class="ai-switch-copy"><strong>Course Content</strong><small>Lessons &amp; progress</small></span>' +
+        '<span class="ai-switch-badge">QUEUE</span>' +
+      '</button>' +
+      '<button type="button" data-v="ai" aria-pressed="false">' +
+        '<span class="ai-switch-icon" aria-hidden="true">✦</span>' +
+        '<span class="ai-switch-copy"><strong>AI Study</strong><small>Notes, quiz &amp; tutor</small></span>' +
+        '<span class="ai-switch-badge">AI</span>' +
+      '</button>';
 
     // wrap the existing course-content children so we can show/hide them as one
     var wrap = document.createElement('div'); wrap.id = 'yt-course-wrap';
