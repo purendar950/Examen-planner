@@ -336,3 +336,37 @@ html[data-theme="dark"] a { color:var(--accent); }
   .filter-chips { width:100%; }
   .filter-chips .btn { flex:1; padding-inline:8px; }
 }
+
+
+
+/* Collapsible desktop navigation */
+.sidebar, .admin-main { transition:width .2s ease, margin-left .2s ease; }
+.sidebar-tools { display:flex; align-items:center; gap:7px; margin-bottom:12px; }
+.sidebar-tools .nav-search-wrap { min-width:0; flex:1; margin-bottom:0; }
+.sidebar-collapse-btn { width:38px; height:38px; display:grid; flex:0 0 38px; place-items:center; border:1px solid var(--border); border-radius:9px; background:var(--surface-soft); color:var(--muted); cursor:pointer; transition:background .15s ease, color .15s ease, transform .1s ease; }
+.sidebar-collapse-btn:hover { background:var(--surface-hover); color:var(--text); }
+.sidebar-collapse-btn:active { transform:translateY(1px); }
+.sidebar-collapse-icon { font-size:1.25rem; line-height:1; }
+
+@media (min-width:861px) {
+  body.sidebar-collapsed { --sidebar-width:76px; }
+  body.sidebar-collapsed .sidebar-inner { padding-inline:10px; }
+  body.sidebar-collapsed .sidebar-tools { justify-content:center; }
+  body.sidebar-collapsed .sidebar-tools .nav-search-wrap { display:none; }
+  body.sidebar-collapsed .nav-group { margin-bottom:10px; }
+  body.sidebar-collapsed .nav-group-label { display:none; }
+  body.sidebar-collapsed .tab { position:relative; grid-template-columns:1fr; justify-items:center; min-height:42px; padding:7px 5px; }
+  body.sidebar-collapsed .tab > span:nth-child(2) { display:none; }
+  body.sidebar-collapsed .tab-icon { width:28px; height:28px; font-size:1rem; }
+  body.sidebar-collapsed .nav-count { position:absolute; top:2px; right:1px; min-width:16px; padding:0 4px; font-size:.56rem; box-shadow:0 0 0 2px var(--card); }
+  body.sidebar-collapsed .tab.active { box-shadow:inset 3px 0 var(--accent); }
+  body.sidebar-collapsed .nav-no-results { display:none; }
+  body.sidebar-collapsed .sidebar-footer { justify-content:center; padding:12px 8px; }
+  body.sidebar-collapsed .sidebar-footer div { display:none; }
+}
+
+@media (max-width:860px) {
+  .sidebar-collapse-btn { display:none; }
+  .sidebar-tools { display:block; }
+  .sidebar-tools .nav-search-wrap { margin-bottom:0; }
+}
