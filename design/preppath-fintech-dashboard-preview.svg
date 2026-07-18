@@ -1,0 +1,227 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1200" viewBox="0 0 1920 1200" role="img" aria-labelledby="title desc">
+  <title id="title">PrepPath fintech-inspired dashboard concept</title>
+  <desc id="desc">A desktop and mobile concept showing a modern exam preparation command center with sidebar navigation, exam readiness, daily plan, performance metrics, charts, weak-topic alerts, and mobile bottom navigation.</desc>
+  <defs>
+    <linearGradient id="board" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F5F8F5"/>
+      <stop offset="1" stop-color="#DFE9E2"/>
+    </linearGradient>
+    <linearGradient id="hero" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#103D2C"/>
+      <stop offset="1" stop-color="#075E45"/>
+    </linearGradient>
+    <linearGradient id="lime" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#DFFF80"/>
+      <stop offset="1" stop-color="#B9F33D"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#17382B" flood-opacity="0.14"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#17382B" flood-opacity="0.08"/>
+    </filter>
+    <style>
+      .font { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .ink { fill: #15231C; }
+      .muted { fill: #708078; }
+      .green { fill: #0B6B4F; }
+      .tiny { font-size: 11px; letter-spacing: .5px; }
+      .small { font-size: 13px; }
+      .body { font-size: 15px; }
+      .label { font-size: 13px; font-weight: 650; }
+      .card-title { font-size: 16px; font-weight: 700; }
+      .metric { font-size: 28px; font-weight: 750; }
+      .heading { font-size: 30px; font-weight: 750; letter-spacing: -.8px; }
+      .nav { font-size: 14px; font-weight: 600; }
+      .line-icon { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+    <symbol id="i-home" viewBox="0 0 24 24"><path class="line-icon" d="M3 11.5 12 4l9 7.5M5.5 10v9h13v-9M9.5 19v-5h5v5"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path class="line-icon" d="M4 5.5A3.5 3.5 0 0 1 7.5 2H11v17H7.5A3.5 3.5 0 0 0 4 22V5.5ZM20 5.5A3.5 3.5 0 0 0 16.5 2H13v17h3.5A3.5 3.5 0 0 1 20 22V5.5Z"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><path class="line-icon" d="M5 3v3M19 3v3M3.5 9h17M5 5h14a2 2 0 0 1 2 2v13H3V7a2 2 0 0 1 2-2ZM7 13h3M14 13h3M7 17h3"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><rect class="line-icon" x="3" y="5" width="18" height="14" rx="3"/><path class="line-icon" d="m10 9 5 3-5 3V9Z"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path class="line-icon" d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-quiz" viewBox="0 0 24 24"><path class="line-icon" d="M5 3h14v18H5V3ZM8 8l1.5 1.5L12 7M14 9h2M8 14l1.5 1.5L12 13M14 15h2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle class="line-icon" cx="10.5" cy="10.5" r="6.5"/><path class="line-icon" d="m15.5 15.5 5 5"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path class="line-icon" d="M5 17h14l-1.5-2.5V10a5.5 5.5 0 0 0-11 0v4.5L5 17ZM10 20h4"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle class="line-icon" cx="12" cy="12" r="9"/><path class="line-icon" d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path class="line-icon" d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path class="line-icon" d="M5 12h14M14 7l5 5-5 5"/></symbol>
+  </defs>
+
+  <!-- Concept board -->
+  <rect width="1920" height="1200" fill="url(#board)"/>
+  <circle cx="1785" cy="35" r="210" fill="#C9F563" opacity=".18"/>
+  <circle cx="65" cy="1140" r="220" fill="#0B6B4F" opacity=".07"/>
+  <g class="font">
+    <text x="48" y="48" class="tiny green" font-weight="800">PREPPATH · PRODUCT CONCEPT 01</text>
+    <text x="48" y="78" class="ink" font-size="24" font-weight="750">Modern exam command center</text>
+    <text x="1858" y="66" text-anchor="end" class="small muted">Desktop + mobile preview · Visual direction only</text>
+
+    <!-- Desktop browser -->
+    <g filter="url(#shadow)">
+      <rect x="40" y="105" width="1360" height="1015" rx="26" fill="#F7F9F7"/>
+    </g>
+    <path d="M66 105h1308a26 26 0 0 1 26 26v32H40v-32a26 26 0 0 1 26-26Z" fill="#FFFFFF"/>
+    <circle cx="70" cy="134" r="5" fill="#FF7168"/><circle cx="90" cy="134" r="5" fill="#FFC95C"/><circle cx="110" cy="134" r="5" fill="#65C982"/>
+    <rect x="535" y="122" width="370" height="24" rx="12" fill="#F0F4F1"/>
+    <circle cx="551" cy="134" r="4" fill="#8FA099"/><text x="720" y="138" text-anchor="middle" class="tiny muted">app.preppath.in/dashboard</text>
+
+    <!-- Sidebar -->
+    <rect x="40" y="163" width="246" height="957" fill="#FFFFFF"/>
+    <line x1="286" y1="163" x2="286" y2="1120" stroke="#E5EBE7"/>
+    <g transform="translate(66 192)">
+      <rect width="36" height="36" rx="11" fill="#0B6B4F"/>
+      <path d="M10 25V11h8.5a6 6 0 0 1 0 12H15" fill="none" stroke="#DFFF80" stroke-width="3" stroke-linecap="round"/>
+      <text x="48" y="19" class="ink" font-size="19" font-weight="800">PrepPath</text>
+      <text x="48" y="35" class="tiny muted">Exam planner</text>
+    </g>
+    <g transform="translate(62 254)">
+      <rect width="198" height="58" rx="15" fill="#F1F6F2" stroke="#DDE8E1"/>
+      <circle cx="30" cy="29" r="17" fill="#D9F6E7"/>
+      <text x="30" y="33" text-anchor="middle" class="small green" font-weight="800">C</text>
+      <text x="56" y="24" class="tiny muted">CURRENT EXAM</text>
+      <text x="56" y="43" class="label ink">SSC CGL 2026</text>
+      <path d="m176 27 5 5 5-5" fill="none" stroke="#718078" stroke-width="1.6" stroke-linecap="round"/>
+    </g>
+
+    <text x="66" y="351" class="tiny muted" font-weight="750">OVERVIEW</text>
+    <g transform="translate(54 365)">
+      <rect width="220" height="48" rx="13" fill="#E9F7EF"/>
+      <g color="#0B6B4F"><use href="#i-home" x="16" y="13" width="22" height="22"/></g>
+      <text x="52" y="30" class="nav green">Dashboard</text><rect x="207" y="20" width="5" height="9" rx="3" fill="#0B6B4F"/>
+    </g>
+    <text x="66" y="452" class="tiny muted" font-weight="750">STUDY</text>
+    <g class="nav muted">
+      <g transform="translate(54 466)"><g color="#718078"><use href="#i-book" x="16" y="11" width="22" height="22"/></g><text x="52" y="28">Syllabus</text></g>
+      <g transform="translate(54 514)"><g color="#718078"><use href="#i-calendar" x="16" y="11" width="22" height="22"/></g><text x="52" y="28">Study planner</text><rect x="174" y="11" width="35" height="20" rx="10" fill="#EEF4F0"/><text x="191" y="25" text-anchor="middle" class="tiny green">6</text></g>
+      <g transform="translate(54 562)"><g color="#718078"><use href="#i-play" x="16" y="11" width="22" height="22"/></g><text x="52" y="28">Video library</text></g>
+    </g>
+    <text x="66" y="649" class="tiny muted" font-weight="750">PERFORMANCE</text>
+    <g class="nav muted">
+      <g transform="translate(54 663)"><g color="#718078"><use href="#i-chart" x="16" y="11" width="22" height="22"/></g><text x="52" y="28">Analysis</text></g>
+      <g transform="translate(54 711)"><g color="#718078"><use href="#i-quiz" x="16" y="11" width="22" height="22"/></g><text x="52" y="28">Mock tests</text></g>
+    </g>
+
+    <g transform="translate(62 966)">
+      <rect width="198" height="88" rx="16" fill="#F4F7F5"/>
+      <rect x="14" y="14" width="36" height="36" rx="11" fill="#DFFF80"/>
+      <g color="#17452F"><use href="#i-clock" x="21" y="21" width="22" height="22"/></g>
+      <text x="60" y="28" class="label ink">Focus timer</text><text x="60" y="46" class="tiny muted">Start a study session</text>
+      <text x="14" y="72" class="small green" font-weight="700">25:00 ready</text><g color="#0B6B4F"><use href="#i-arrow" x="164" y="58" width="20" height="20"/></g>
+    </g>
+    <g transform="translate(62 1070)"><circle cx="18" cy="17" r="17" fill="#153E2E"/><text x="18" y="22" text-anchor="middle" font-size="12" fill="#DFFF80" font-weight="800">PS</text><text x="46" y="14" class="label ink">Purendar</text><text x="46" y="31" class="tiny muted">View profile</text><text x="181" y="23" class="muted" font-size="20">⋯</text></g>
+
+    <!-- Desktop topbar -->
+    <rect x="287" y="163" width="1113" height="74" fill="#FFFFFF"/>
+    <line x1="287" y1="237" x2="1400" y2="237" stroke="#E5EBE7"/>
+    <g transform="translate(316 180)">
+      <rect width="268" height="40" rx="12" fill="#F5F7F5" stroke="#E5EBE7"/>
+      <g color="#829088"><use href="#i-search" x="13" y="10" width="20" height="20"/></g><text x="43" y="25" class="small muted">Search topics, plans, videos...</text><rect x="226" y="10" width="28" height="20" rx="6" fill="#FFFFFF"/><text x="240" y="24" text-anchor="middle" class="tiny muted">/</text>
+    </g>
+    <g transform="translate(1081 179)"><rect width="118" height="42" rx="13" fill="#F1F6F2"/><g color="#0B6B4F"><use href="#i-clock" x="13" y="10" width="21" height="21"/></g><text x="43" y="26" class="label green">25:00</text></g>
+    <g transform="translate(1214 179)"><rect width="42" height="42" rx="13" fill="#F5F7F5"/><g color="#506159"><use href="#i-bell" x="10" y="10" width="22" height="22"/></g><circle cx="31" cy="10" r="4" fill="#E45F57"/></g>
+    <g transform="translate(1270 179)"><circle cx="21" cy="21" r="21" fill="#153E2E"/><text x="21" y="26" text-anchor="middle" font-size="13" fill="#DFFF80" font-weight="800">PS</text><path d="m52 18 5 5 5-5" fill="none" stroke="#718078" stroke-width="1.6" stroke-linecap="round"/></g>
+
+    <!-- Main dashboard -->
+    <text x="320" y="287" class="heading ink">Good morning, Purendar</text>
+    <text x="320" y="313" class="body muted">Saturday, 18 July · Your exam is 46 days away</text>
+    <g transform="translate(1204 270)"><rect width="154" height="42" rx="13" fill="#FFFFFF" stroke="#DCE6E0"/><circle cx="22" cy="21" r="6" fill="#C8F263"/><text x="38" y="26" class="label ink">SSC CGL 2026</text></g>
+
+    <!-- Hero -->
+    <g filter="url(#soft)"><rect x="320" y="344" width="633" height="235" rx="24" fill="url(#hero)"/></g>
+    <circle cx="884" cy="386" r="100" fill="#B9F33D" opacity=".08"/><circle cx="929" cy="530" r="125" fill="#FFFFFF" opacity=".03"/>
+    <text x="348" y="379" fill="#BBD4C8" class="tiny" font-weight="750">YOUR EXAM READINESS</text>
+    <text x="348" y="426" fill="#FFFFFF" font-size="40" font-weight="780">72%</text>
+    <text x="431" y="422" fill="#D4E3DB" class="body">On track</text>
+    <rect x="348" y="449" width="290" height="8" rx="4" fill="#FFFFFF" opacity=".14"/><rect x="348" y="449" width="209" height="8" rx="4" fill="#C9F563"/>
+    <text x="348" y="480" fill="#D4E3DB" class="small">18 of 25 priority topics completed</text>
+    <g transform="translate(348 507)"><rect width="191" height="46" rx="14" fill="url(#lime)"/><text x="18" y="29" fill="#123C2A" class="label">Continue today’s plan</text><g color="#123C2A"><use href="#i-arrow" x="158" y="13" width="21" height="21"/></g></g>
+    <g transform="translate(706 368)">
+      <circle cx="92" cy="88" r="67" fill="none" stroke="#FFFFFF" stroke-opacity=".13" stroke-width="13"/>
+      <circle cx="92" cy="88" r="67" fill="none" stroke="#C9F563" stroke-width="13" stroke-linecap="round" stroke-dasharray="303 421" transform="rotate(-90 92 88)"/>
+      <text x="92" y="80" text-anchor="middle" fill="#FFFFFF" font-size="29" font-weight="780">46</text><text x="92" y="104" text-anchor="middle" fill="#BBD4C8" class="tiny">DAYS LEFT</text>
+    </g>
+
+    <!-- Today plan -->
+    <g filter="url(#soft)"><rect x="973" y="344" width="385" height="235" rx="24" fill="#FFFFFF"/></g>
+    <text x="999" y="378" class="card-title ink">Today’s plan</text><text x="1332" y="377" text-anchor="end" class="small green" font-weight="700">2 of 4 done</text>
+    <rect x="999" y="393" width="333" height="5" rx="3" fill="#ECF1EE"/><rect x="999" y="393" width="167" height="5" rx="3" fill="#0B6B4F"/>
+    <g transform="translate(999 417)"><circle cx="13" cy="13" r="13" fill="#DDF4E8"/><g color="#0B6B4F"><use href="#i-check" x="5" y="5" width="16" height="16"/></g><text x="38" y="12" class="label muted" text-decoration="line-through">Indian Polity revision</text><text x="38" y="29" class="tiny muted">30 min · Completed</text></g>
+    <line x1="999" y1="460" x2="1332" y2="460" stroke="#EEF2EF"/>
+    <g transform="translate(999 472)"><circle cx="13" cy="13" r="12" fill="#FFFFFF" stroke="#B7C4BD" stroke-width="2"/><text x="38" y="12" class="label ink">Quantitative aptitude set</text><text x="38" y="29" class="tiny muted">45 min · 20 questions</text><rect x="291" y="2" width="42" height="22" rx="11" fill="#FFF4D8"/><text x="312" y="17" text-anchor="middle" class="tiny" fill="#956616">NEXT</text></g>
+    <line x1="999" y1="515" x2="1332" y2="515" stroke="#EEF2EF"/>
+    <g transform="translate(999 527)"><circle cx="13" cy="13" r="12" fill="#FFFFFF" stroke="#B7C4BD" stroke-width="2"/><text x="38" y="12" class="label ink">English mock section</text><text x="38" y="29" class="tiny muted">25 min · Accuracy target 80%</text></g>
+
+    <!-- KPI cards -->
+    <g>
+      <g filter="url(#soft)"><rect x="320" y="601" width="245" height="125" rx="20" fill="#FFFFFF"/></g>
+      <circle cx="352" cy="633" r="17" fill="#FFF2DA"/><path d="M347 640c-7-9 4-11 2-20 8 6 12 13 5 20 2-6-2-8-3-11-1 5 0 7-4 11Z" fill="#E68A24"/>
+      <text x="380" y="633" class="small muted">Study streak</text><text x="344" y="680" class="metric ink">12 days</text><text x="344" y="705" class="tiny green" font-weight="700">+3 from last week</text>
+      <g filter="url(#soft)"><rect x="582" y="601" width="245" height="125" rx="20" fill="#FFFFFF"/></g>
+      <circle cx="614" cy="633" r="17" fill="#E6F0FF"/><g color="#4378B8"><use href="#i-clock" x="604" y="623" width="20" height="20"/></g>
+      <text x="642" y="633" class="small muted">Study time</text><text x="606" y="680" class="metric ink">8h 40m</text><text x="606" y="705" class="tiny green" font-weight="700">86% of weekly goal</text>
+      <g filter="url(#soft)"><rect x="844" y="601" width="245" height="125" rx="20" fill="#FFFFFF"/></g>
+      <circle cx="876" cy="633" r="17" fill="#E4F7ED"/><g color="#0B6B4F"><use href="#i-book" x="866" y="623" width="20" height="20"/></g>
+      <text x="904" y="633" class="small muted">Syllabus</text><text x="868" y="680" class="metric ink">68%</text><text x="868" y="705" class="tiny muted">142 of 208 topics</text>
+      <g filter="url(#soft)"><rect x="1106" y="601" width="252" height="125" rx="20" fill="#FFFFFF"/></g>
+      <circle cx="1138" cy="633" r="17" fill="#F0E9FF"/><g color="#7557B7"><use href="#i-chart" x="1128" y="623" width="20" height="20"/></g>
+      <text x="1166" y="633" class="small muted">Practice accuracy</text><text x="1130" y="680" class="metric ink">78.4%</text><text x="1130" y="705" class="tiny green" font-weight="700">↑ 5.2% this month</text>
+    </g>
+
+    <!-- Chart -->
+    <g filter="url(#soft)"><rect x="320" y="750" width="660" height="322" rx="22" fill="#FFFFFF"/></g>
+    <text x="346" y="786" class="card-title ink">Weekly performance</text><text x="346" y="808" class="small muted">Study time and practice accuracy</text>
+    <g transform="translate(778 769)"><rect width="84" height="30" rx="10" fill="#EFF5F1"/><text x="42" y="20" text-anchor="middle" class="tiny ink" font-weight="650">7 DAYS</text></g><g transform="translate(872 769)"><rect width="82" height="30" rx="10" fill="#FFFFFF" stroke="#E1E8E4"/><text x="41" y="20" text-anchor="middle" class="tiny muted">30 DAYS</text></g>
+    <g stroke="#EBF0ED" stroke-width="1"><line x1="360" y1="848" x2="944" y2="848"/><line x1="360" y1="900" x2="944" y2="900"/><line x1="360" y1="952" x2="944" y2="952"/><line x1="360" y1="1004" x2="944" y2="1004"/></g>
+    <path d="M374 980 C420 959 445 966 488 928 S568 948 612 901 S692 919 736 875 S814 895 860 850 S915 862 940 834" fill="none" stroke="#0B6B4F" stroke-width="4" stroke-linecap="round"/>
+    <path d="M374 980 C420 959 445 966 488 928 S568 948 612 901 S692 919 736 875 S814 895 860 850 S915 862 940 834 L940 1004 L374 1004Z" fill="#0B6B4F" opacity=".08"/>
+    <g fill="#0B6B4F" stroke="#FFFFFF" stroke-width="3"><circle cx="374" cy="980" r="5"/><circle cx="488" cy="928" r="5"/><circle cx="612" cy="901" r="5"/><circle cx="736" cy="875" r="5"/><circle cx="860" cy="850" r="5"/><circle cx="940" cy="834" r="5"/></g>
+    <g class="tiny muted"><text x="374" y="1032">Mon</text><text x="470" y="1032">Tue</text><text x="567" y="1032">Wed</text><text x="665" y="1032">Thu</text><text x="762" y="1032">Fri</text><text x="859" y="1032">Sat</text><text x="930" y="1032">Sun</text></g>
+
+    <!-- Risk card -->
+    <g filter="url(#soft)"><rect x="1000" y="750" width="358" height="322" rx="22" fill="#FFFFFF"/></g>
+    <text x="1026" y="786" class="card-title ink">Needs attention</text><text x="1332" y="786" text-anchor="end" class="small green" font-weight="700">View analysis</text>
+    <g transform="translate(1026 817)"><rect width="306" height="66" rx="15" fill="#FFF7EE"/><circle cx="30" cy="33" r="18" fill="#FFE7CC"/><text x="30" y="38" text-anchor="middle" font-size="16" fill="#C66B17" font-weight="800">!</text><text x="60" y="27" class="label ink">Geometry</text><text x="60" y="47" class="tiny muted">52% accuracy · Revise 4 topics</text><rect x="245" y="22" width="45" height="22" rx="11" fill="#FFFFFF"/><text x="267" y="37" text-anchor="middle" class="tiny" fill="#A35B1A">HIGH</text></g>
+    <g transform="translate(1026 895)"><rect width="306" height="66" rx="15" fill="#F6F3FF"/><circle cx="30" cy="33" r="18" fill="#E9E0FF"/><text x="30" y="38" text-anchor="middle" font-size="16" fill="#6D52A7" font-weight="800">!</text><text x="60" y="27" class="label ink">Current affairs</text><text x="60" y="47" class="tiny muted">Revision overdue by 2 days</text><rect x="232" y="22" width="58" height="22" rx="11" fill="#FFFFFF"/><text x="261" y="37" text-anchor="middle" class="tiny" fill="#7057A5">REVISE</text></g>
+    <g transform="translate(1026 973)"><rect width="306" height="66" rx="15" fill="#F0F7F3"/><circle cx="30" cy="33" r="18" fill="#DDF3E7"/><g color="#0B6B4F"><use href="#i-calendar" x="20" y="23" width="20" height="20"/></g><text x="60" y="27" class="label ink">Next mock test</text><text x="60" y="47" class="tiny muted">Tomorrow · 10:00 AM · 60 min</text><g color="#0B6B4F"><use href="#i-arrow" x="266" y="23" width="20" height="20"/></g></g>
+
+    <!-- Mobile device -->
+    <text x="1452" y="114" class="tiny green" font-weight="800">MOBILE PRIORITY VIEW</text>
+    <g filter="url(#shadow)"><rect x="1444" y="132" width="416" height="922" rx="52" fill="#17211C"/></g>
+    <rect x="1454" y="142" width="396" height="902" rx="44" fill="#F6F8F6"/>
+    <rect x="1585" y="153" width="134" height="27" rx="14" fill="#17211C"/>
+    <text x="1482" y="176" class="tiny ink" font-weight="750">9:41</text><path d="M1796 163h4v10h-4Zm7-3h4v13h-4Zm7-4h4v17h-4Z" fill="#1B2922"/><rect x="1820" y="160" width="18" height="11" rx="3" fill="none" stroke="#1B2922"/><rect x="1823" y="163" width="11" height="5" rx="1" fill="#1B2922"/>
+    <g transform="translate(1480 198)"><rect width="34" height="34" rx="10" fill="#0B6B4F"/><path d="M9 24V10h8a5 5 0 0 1 0 10h-3" fill="none" stroke="#DFFF80" stroke-width="2.5" stroke-linecap="round"/><text x="45" y="22" class="ink" font-size="18" font-weight="800">PrepPath</text></g>
+    <g transform="translate(1781 194)"><rect width="42" height="42" rx="13" fill="#FFFFFF" stroke="#E4EAE6"/><g color="#506159"><use href="#i-bell" x="10" y="10" width="22" height="22"/></g><circle cx="31" cy="10" r="4" fill="#E45F57"/></g>
+    <text x="1480" y="271" class="ink" font-size="25" font-weight="760">Good morning</text><text x="1480" y="294" class="small muted">46 days until SSC CGL</text>
+
+    <rect x="1480" y="318" width="344" height="205" rx="25" fill="url(#hero)"/>
+    <circle cx="1783" cy="347" r="70" fill="#B9F33D" opacity=".08"/>
+    <text x="1504" y="351" fill="#BCD4C8" class="tiny" font-weight="750">EXAM READINESS</text><text x="1504" y="398" fill="#FFFFFF" font-size="37" font-weight="780">72%</text><rect x="1504" y="418" width="160" height="7" rx="4" fill="#FFFFFF" opacity=".14"/><rect x="1504" y="418" width="115" height="7" rx="4" fill="#C9F563"/><text x="1504" y="449" fill="#D4E3DB" class="small">18 of 25 priorities done</text>
+    <circle cx="1762" cy="391" r="41" fill="none" stroke="#FFFFFF" stroke-opacity=".14" stroke-width="9"/><circle cx="1762" cy="391" r="41" fill="none" stroke="#C9F563" stroke-width="9" stroke-linecap="round" stroke-dasharray="185 258" transform="rotate(-90 1762 391)"/><text x="1762" y="389" text-anchor="middle" fill="#FFFFFF" font-size="20" font-weight="750">46</text><text x="1762" y="406" text-anchor="middle" fill="#BBD4C8" font-size="8">DAYS</text>
+    <rect x="1504" y="468" width="208" height="40" rx="13" fill="url(#lime)"/><text x="1520" y="493" fill="#123C2A" class="label">Continue today’s plan</text><g color="#123C2A"><use href="#i-arrow" x="1681" y="478" width="20" height="20"/></g>
+
+    <text x="1480" y="559" class="card-title ink">Your progress</text><text x="1824" y="559" text-anchor="end" class="small green" font-weight="700">This week</text>
+    <g filter="url(#soft)"><rect x="1480" y="578" width="104" height="99" rx="18" fill="#FFFFFF"/></g><text x="1497" y="608" class="tiny muted">STREAK</text><text x="1497" y="640" class="ink" font-size="22" font-weight="760">12 days</text><text x="1497" y="660" class="tiny green">Personal best</text>
+    <g filter="url(#soft)"><rect x="1599" y="578" width="105" height="99" rx="18" fill="#FFFFFF"/></g><text x="1616" y="608" class="tiny muted">STUDY</text><text x="1616" y="640" class="ink" font-size="22" font-weight="760">8h 40m</text><text x="1616" y="660" class="tiny green">86% goal</text>
+    <g filter="url(#soft)"><rect x="1719" y="578" width="105" height="99" rx="18" fill="#FFFFFF"/></g><text x="1736" y="608" class="tiny muted">ACCURACY</text><text x="1736" y="640" class="ink" font-size="22" font-weight="760">78%</text><text x="1736" y="660" class="tiny green">↑ 5.2%</text>
+
+    <text x="1480" y="720" class="card-title ink">Up next</text><text x="1824" y="720" text-anchor="end" class="small green" font-weight="700">See plan</text>
+    <g filter="url(#soft)"><rect x="1480" y="738" width="344" height="78" rx="19" fill="#FFFFFF"/></g><circle cx="1512" cy="777" r="16" fill="#E3F4EA"/><text x="1512" y="782" text-anchor="middle" class="small green" font-weight="800">1</text><text x="1541" y="770" class="label ink">Quantitative aptitude set</text><text x="1541" y="791" class="tiny muted">45 min · 20 questions</text><rect x="1760" y="765" width="46" height="25" rx="12" fill="#FFF2D6"/><text x="1783" y="782" text-anchor="middle" class="tiny" fill="#956616">NEXT</text>
+    <g filter="url(#soft)"><rect x="1480" y="829" width="344" height="78" rx="19" fill="#FFFFFF"/></g><circle cx="1512" cy="868" r="16" fill="#F0E8FF"/><text x="1512" y="873" text-anchor="middle" class="small" fill="#7557B7" font-weight="800">2</text><text x="1541" y="861" class="label ink">English mock section</text><text x="1541" y="882" class="tiny muted">25 min · Accuracy target 80%</text><g color="#718078"><use href="#i-arrow" x="1781" y="858" width="20" height="20"/></g>
+
+    <!-- Mobile bottom nav -->
+    <path d="M1454 934H1850V1000Q1850 1044 1806 1044H1498Q1454 1044 1454 1000Z" fill="#FFFFFF"/>
+    <line x1="1454" y1="934" x2="1850" y2="934" stroke="#E5EBE7"/>
+    <g transform="translate(1485 951)" color="#0B6B4F"><rect x="-8" y="-4" width="60" height="55" rx="17" fill="#E9F7EF"/><use href="#i-home" x="10" y="3" width="23" height="23"/><text x="21" y="42" text-anchor="middle" class="tiny green" font-weight="700">Home</text></g>
+    <g transform="translate(1560 951)" color="#78877F"><use href="#i-calendar" x="10" y="3" width="23" height="23"/><text x="21" y="42" text-anchor="middle" class="tiny muted">Plan</text></g>
+    <g transform="translate(1635 951)" color="#78877F"><use href="#i-book" x="10" y="3" width="23" height="23"/><text x="21" y="42" text-anchor="middle" class="tiny muted">Study</text></g>
+    <g transform="translate(1710 951)" color="#78877F"><use href="#i-quiz" x="10" y="3" width="23" height="23"/><text x="21" y="42" text-anchor="middle" class="tiny muted">Quiz</text></g>
+    <g transform="translate(1785 951)" color="#78877F"><circle cx="21" cy="14" r="2" fill="currentColor"/><circle cx="14" cy="14" r="2" fill="currentColor"/><circle cx="28" cy="14" r="2" fill="currentColor"/><text x="21" y="42" text-anchor="middle" class="tiny muted">More</text></g>
+    <rect x="1594" y="1025" width="116" height="5" rx="3" fill="#1A2620"/>
+
+    <!-- Board footer -->
+    <g transform="translate(40 1147)"><rect width="1320" height="32" rx="16" fill="#FFFFFF" opacity=".68"/><circle cx="18" cy="16" r="5" fill="#0B6B4F"/><text x="32" y="21" class="small ink" font-weight="650">Design principles:</text><text x="150" y="21" class="small muted">one clear next action · measurable progress · visible risk · calm data density · mobile-first continuity</text></g>
+    <text x="1858" y="1169" text-anchor="end" class="small muted">Standalone preview — no production code changed</text>
+  </g>
+</svg>
