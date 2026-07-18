@@ -3075,29 +3075,36 @@ html:not([data-theme="light"]) .topbar {
 .yto-library-heading > span { color: var(--muted); font-size: .7rem; }
 .yto-course-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: .75rem;
 }
 .yto-course-card {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
   min-width: 0;
+  min-height: 148px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--card);
-  box-shadow: 0 14px 36px -30px rgba(0,0,0,.9);
+  box-shadow: 0 10px 28px -26px rgba(0,0,0,.9);
   cursor: pointer;
   transition: transform .18s, border-color .18s, box-shadow .18s;
 }
 .yto-course-card:hover,
 .yto-course-card:focus-visible {
-  transform: translateY(-3px);
+  transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--accent) 52%, var(--border));
-  box-shadow: 0 20px 44px -28px rgba(0,200,150,.28);
+  box-shadow: 0 14px 34px -28px rgba(0,200,150,.28);
 }
 .yto-course-cover {
   position: relative;
-  aspect-ratio: 16 / 7.5;
+  align-self: start;
+  width: calc(100% - .75rem);
+  aspect-ratio: 16 / 9;
+  margin: .75rem 0 .75rem .75rem;
   overflow: hidden;
+  border-radius: 10px;
   background:
     linear-gradient(135deg, rgba(0,200,150,.15), rgba(59,130,246,.1)),
     var(--surface);
@@ -3115,19 +3122,23 @@ html:not([data-theme="light"]) .topbar {
 .yto-course-percent {
   position: absolute;
   z-index: 1;
-  top: .7rem;
-  padding: .3rem .55rem;
+  padding: .18rem .35rem;
   border: 1px solid rgba(255,255,255,.16);
-  border-radius: 7px;
-  background: rgba(8,12,18,.76);
+  border-radius: 5px;
+  background: rgba(8,12,18,.78);
   color: #fff;
-  font-size: .62rem;
+  font-size: .5rem;
   font-weight: 750;
   backdrop-filter: blur(8px);
 }
-.yto-course-type { left: .7rem; }
-.yto-course-percent { right: .7rem; color: #75f1c8; }
-.yto-course-body { padding: 1rem; }
+.yto-course-type { top: .35rem; left: .35rem; }
+.yto-course-percent { right: .35rem; bottom: .35rem; color: #75f1c8; }
+.yto-course-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: .72rem .78rem;
+}
 .yto-course-topline {
   display: flex;
   align-items: flex-start;
@@ -3138,16 +3149,16 @@ html:not([data-theme="light"]) .topbar {
   overflow: hidden;
   margin: 0;
   color: var(--text);
-  font-size: .9rem;
-  line-height: 1.4;
+  font-size: .8rem;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .yto-course-title-wrap p {
   overflow: hidden;
-  margin-top: .2rem;
+  margin-top: .12rem;
   color: var(--muted);
-  font-size: .68rem;
+  font-size: .62rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3155,12 +3166,12 @@ html:not([data-theme="light"]) .topbar {
 .yto-course-menu summary {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
   color: var(--muted);
   cursor: pointer;
-  font-size: .8rem;
+  font-size: .74rem;
   font-weight: 800;
   list-style: none;
 }
@@ -3200,24 +3211,24 @@ html:not([data-theme="light"]) .topbar {
 .yto-course-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: .35rem .75rem;
-  margin-top: .85rem;
+  gap: .25rem .55rem;
+  margin-top: .48rem;
   color: var(--muted);
 }
-.yto-course-meta span { font-size: .65rem; }
-.yto-card-progress { margin-top: .9rem; }
+.yto-course-meta span { font-size: .58rem; }
+.yto-card-progress { margin-top: .55rem; }
 .yto-card-progress > div:first-child {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: .35rem;
+  margin-bottom: .25rem;
   color: var(--muted);
 }
 .yto-card-progress span,
-.yto-card-progress strong { font-size: .66rem; }
+.yto-card-progress strong { font-size: .58rem; }
 .yto-card-progress strong { color: var(--accent); }
 .yto-card-track {
-  height: 6px;
+  height: 4px;
   overflow: hidden;
   border-radius: 99px;
   background: var(--surface);
@@ -3233,12 +3244,12 @@ html:not([data-theme="light"]) .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: .75rem;
-  margin-top: .9rem;
-  padding-top: .8rem;
+  gap: .55rem;
+  margin-top: auto;
+  padding-top: .55rem;
   border-top: 1px solid var(--border);
 }
-.yto-course-footer > span { color: var(--muted); font-size: .66rem; }
+.yto-course-footer > span { color: var(--muted); font-size: .58rem; }
 .yto-course-footer button,
 .yto-library-empty button,
 .yto-filter-empty button {
@@ -3254,6 +3265,12 @@ html:not([data-theme="light"]) .topbar {
   font-size: .7rem;
   font-weight: 800;
   cursor: pointer;
+}
+.yto-course-footer button {
+  gap: .3rem;
+  padding: .36rem .58rem;
+  border-radius: 7px;
+  font-size: .62rem;
 }
 .yto-course-footer button:hover,
 .yto-library-empty button:hover,
@@ -3384,9 +3401,12 @@ html:not([data-theme="light"]) .topbar {
   .yto-library-overview { grid-template-columns: 1fr 1fr; }
   .yto-overview-icon { width: 30px; height: 30px; }
   .yto-overview-card { gap: .55rem; }
-  .yto-course-cover { aspect-ratio: 16 / 8.5; }
-  .yto-course-body { padding: .85rem; }
-  .yto-course-meta { gap: .3rem .55rem; }
+  .yto-course-card { grid-template-columns: 100px minmax(0, 1fr); min-height: 136px; }
+  .yto-course-cover { width: calc(100% - .6rem); margin: .6rem 0 .6rem .6rem; aspect-ratio: 16 / 9; }
+  .yto-course-body { padding: .62rem; }
+  .yto-course-meta { gap: .2rem .45rem; }
+  .yto-course-footer { gap: .35rem; padding-top: .45rem; }
+  .yto-course-footer button { padding: .34rem .48rem; }
   .yto-referral-earned { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
