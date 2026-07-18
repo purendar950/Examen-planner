@@ -1588,13 +1588,34 @@
 
   /* ── panel shell ── */
   function renderTabs() {
-    var tabs = [['notes', '📝 Notes'], ['quiz', '❓ Quiz'], ['cards', '🃏 Cards'], ['tutor', '💬 Tutor']];
+    var tabs = [
+      ['notes', '📝', 'Notes'],
+      ['quiz', '❓', 'Quiz'],
+      ['cards', '🃏', 'Cards'],
+      ['tutor', '💬', 'Tutor']
+    ];
     var el = document.getElementById('ai-tabs'); if (!el) return;
+    el.setAttribute('role', 'group');
+    el.setAttribute('aria-label', 'AI study mode');
     el.innerHTML = tabs.map(function (t) {
-      return '<span class="ai-tab' + (state.tab === t[0] ? ' on' : '') + '" data-t="' + t[0] + '">' + t[1] + '</span>';
+      var selected = state.tab === t[0];
+      return '<button type="button" class="ai-tab' + (selected ? ' on' : '') + '" data-t="' + t[0] + '" aria-pressed="' + (selected ? 'true' : 'false') + '">' +
+        '<span class="ai-mode-icon" aria-hidden="true">' + t[1] + '</span>' +
+        '<span class="ai-mode-label">' + t[2] + '</span>' +
+      '</button>';
     }).join('');
     Array.prototype.forEach.call(el.querySelectorAll('.ai-tab'), function (b) {
-      b.onclick = function () { state.tab = b.dataset.t; renderTabs(); renderBody(); };
+      b.onclick = function () {
+        state.tab = b.dataset.t;
+        // Keep the existing buttons in place so keyboard focus is preserved.
+        Array.prototype.forEach.call(el.querySelectorAll('.ai-tab'), function (item) {
+          var selected = item.dataset.t === state.tab;
+          item.classList.toggle('on', selected);
+          item.setAttribute('aria-pressed', selected ? 'true' : 'false');
+        });
+        renderBody();
+        b.focus();
+      };
     });
   }
   function renderBody() {
@@ -1866,7 +1887,13 @@
       bottom = Math.max(bottom, el.getBoundingClientRect().bottom);
     });
     var stageHeight = Math.max(playerRect.height, bottom - playerRect.top);
-    if (stageHeight > 0) layout.style.setProperty('--yt-parallel-stage-height', Math.ceil(stageHeight) + 'px');
+    // Give generated notes meaningful reading room below the playback tools.
+    // On the left this space is naturally occupied by Chapter Links, so both
+    // workspace columns remain parallel while the notebook gains ~3–6 extra
+    // visible lines on tablets and substantially more on desktop.
+    var notesExtension = Math.min(220, Math.max(150, Math.round(window.innerHeight * 0.2)));
+    var notesStageHeight = stageHeight + notesExtension;
+    if (notesStageHeight > 0) layout.style.setProperty('--yt-parallel-stage-height', Math.ceil(notesStageHeight) + 'px');
     else layout.style.removeProperty('--yt-parallel-stage-height');
   }
   function setupAlignSync() {
