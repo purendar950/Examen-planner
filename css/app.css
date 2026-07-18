@@ -3885,9 +3885,83 @@ html[data-theme="light"] #page-youtube .ai-view-toggle button[data-v="course"].o
   border-radius: 8px;
   font-size: .62rem;
 }
-#page-youtube .ai-tabs { gap: .3rem; padding: .48rem .65rem; flex-wrap: nowrap; overflow-x: auto; background: var(--yt-soft); scrollbar-width: none; }
-#page-youtube .ai-tabs::-webkit-scrollbar { display: none; }
-#page-youtube .ai-tab { flex: 1 0 auto; min-height: 29px; padding: 0 .55rem; border-radius: 8px; font-size: .63rem; }
+#page-youtube .ai-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: .42rem;
+  padding: .5rem .6rem;
+  overflow: visible;
+  border-bottom: 1px solid var(--border);
+  background: var(--yt-soft);
+}
+#page-youtube .ai-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .38rem;
+  min-width: 0;
+  min-height: 42px;
+  padding: .38rem .42rem;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--card);
+  color: var(--muted);
+  box-shadow: 0 1px 2px rgba(10, 35, 42, .035);
+  cursor: pointer;
+  font-family: var(--font);
+  transition: color .18s, background .18s, border-color .18s, box-shadow .18s, transform .18s;
+}
+#page-youtube .ai-tab:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--border));
+  transform: translateY(-1px);
+}
+#page-youtube .ai-mode-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 25px;
+  height: 25px;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: .68rem;
+  line-height: 1;
+}
+#page-youtube .ai-mode-label {
+  overflow: hidden;
+  color: currentColor;
+  font-size: .62rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-youtube .ai-tab::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  bottom: 4px;
+  left: 8px;
+  height: 2px;
+  border-radius: 99px;
+  background: transparent;
+}
+#page-youtube .ai-tab.on {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 8px 20px rgba(10, 35, 42, .08);
+}
+#page-youtube .ai-tab.on .ai-mode-icon {
+  background: #10221e;
+  color: #dff769;
+}
+#page-youtube .ai-tab.on::after { background: var(--accent); }
+#page-youtube .ai-tab:focus-visible {
+  outline: 3px solid #006f52;
+  outline-offset: 2px;
+}
+html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-color: #63ffd2; }
 #page-youtube .ai-body { min-height: 90px; padding: .62rem .7rem; }
 #page-youtube .ai-body > div:first-child { gap: .35rem !important; }
 #page-youtube .ai-btn { min-height: 30px; padding: .35rem .62rem; border-radius: 8px; font-size: .64rem; }
@@ -4014,6 +4088,7 @@ html[data-theme="light"] #page-youtube .ai-view-toggle button[data-v="course"].o
   #page-youtube .ss-toolbar > button { flex: 1 1 auto; }
   #page-youtube .yt-chapter-empty { grid-template-columns: auto minmax(0, 1fr); }
   #page-youtube .yt-chapter-empty button { grid-column: 1 / -1; width: 100%; }
+  #page-youtube .ai-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #page-youtube .ai-head { grid-template-columns: auto minmax(80px, 1fr) auto; }
   #page-youtube .ai-head select { max-width: none; }
   #page-youtube .ai-head #ai-provider { grid-column: 1 / 3; width: 100%; }
