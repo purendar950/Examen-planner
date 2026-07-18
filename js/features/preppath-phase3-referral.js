@@ -9,15 +9,17 @@ function ezRefLink() {
 
 function ezRenderRefWidget() {
   if (!currentUser) return;
-  // Share & Earn now lives on the Playlist Organiser page (was on Dashboard).
-  const organiser = document.getElementById('page-yt-organiser'); if (!organiser) return;
+  const organiser = document.getElementById('page-yt-organiser');
+  const slot = document.getElementById('yto-referral-slot');
+  if (!organiser || !slot) return;
+
   let w = document.getElementById('ez-ref-widget');
   if (!w) {
     w = document.createElement('div');
     w.id = 'ez-ref-widget';
-    // Place it at the very top of the organiser page, above the input bar.
-    organiser.insertBefore(w, organiser.firstChild);
   }
+  if (w.parentElement !== slot) slot.appendChild(w);
+
   const p = EZ_PROFILE || {};
   const paid = p.refPaidCount || 0;
   const total = p.refTotalCount || 0;
@@ -25,23 +27,34 @@ function ezRenderRefWidget() {
   const paidOut = p.payoutPaidAmount || 0;
   const pct = Math.min(100, Math.round(paid / 20 * 100));
   const link = ezRefLink();
-  w.innerHTML = '<div class="info-card" style="margin-bottom:1.5rem;">' +
-    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">' +
-    '<strong style="font-size:0.9rem;">🔗 Share & Earn — ₹10 per purchase</strong>' +
-    '<span style="font-size:0.7rem;color:var(--muted);">Aapke link se koi paid plan le to aapko ₹10 milta hai</span></div>' +
-    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
-    '<input class="form-input" readonly value="' + escapeHtml(link) + '" id="ez-ref-link" style="flex:1;min-width:200px;font-size:0.75rem;" onclick="this.select()">' +
-    '<button class="btn-modal-save" onclick="ezCopyRef()">📋 Copy</button>' +
-    '<button class="btn-modal-save" style="background:#25D366;color:#fff;" onclick="ezShareWa()">WhatsApp</button></div>' +
-    '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:0.75rem;color:var(--muted);margin-bottom:4px;">' +
-    '<span><strong style="color:var(--text);">' + paid + '/20</strong> paid referrals (' + total + ' joined)</span>' +
-    '<span>Earned <strong style="color:var(--accent);">₹' + earned + '</strong>' + (paidOut ? ' · ₹' + paidOut + ' paid out' : '') + '</span></div>' +
-    '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%;"></div></div>' +
-    '<div style="font-size:0.68rem;color:var(--muted);margin-top:5px;">' +
-    (paid >= 20
-      ? '🎉 Payout unlocked! Admin aapko ₹' + Math.max(0, earned - paidOut) + ' transfer karega.'
-      : '🔓 Payout unlocks at <strong>20 paid referrals</strong> (₹200). Keep sharing!') +
-    '</div></div>';
+  const payoutNote = paid >= 20
+    ? `Payout unlocked. ₹${Math.max(0, earned - paidOut)} is ready for admin transfer.`
+    : `Payout unlocks at 20 paid referrals (₹200).`;
+
+  w.innerHTML = `<details class="yto-referral-card">
+    <summary>
+      <span class="yto-referral-icon" aria-hidden="true">↗</span>
+      <span class="yto-referral-summary">
+        <strong>Share & Earn</strong>
+        <span>${paid}/20 paid referrals · ${total} joined</span>
+      </span>
+      <span class="yto-referral-earned">₹${earned} earned</span>
+      <span class="yto-referral-chevron" aria-hidden="true">▼</span>
+    </summary>
+    <div class="yto-referral-body">
+      <div class="yto-referral-actions">
+        <input readonly value="${escapeHtml(link)}" id="ez-ref-link" aria-label="Your referral link" onclick="this.select()">
+        <button type="button" onclick="ezCopyRef()">Copy link</button>
+        <button type="button" class="whatsapp" onclick="ezShareWa()">WhatsApp</button>
+      </div>
+      <div class="yto-referral-stats">
+        <span><strong>${paid}/20</strong> purchases</span>
+        <span>Earned <strong>₹${earned}</strong>${paidOut ? ` · ₹${paidOut} paid` : ''}</span>
+      </div>
+      <div class="yto-referral-progress" role="progressbar" aria-label="Payout progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
+      <div class="yto-referral-note">₹10 is added when someone buys a plan through your link. ${payoutNote}</div>
+    </div>
+  </details>`;
 }
 
 function ezCopyRef() {

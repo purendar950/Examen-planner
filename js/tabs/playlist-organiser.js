@@ -342,6 +342,7 @@ window.addEventListener('load', () => {
 ══════════════════════════════════════════ */
 let ytoCurrentPl = null;
 let ytoPlayerV2 = null, ytoPlayerV2Ready = false, ytoPendingVid = null;
+let ytoLibraryFilter = 'all';
 
 function ytoLib() {
   if (!appState.ytoLibrary) appState.ytoLibrary = {};
@@ -528,35 +529,158 @@ async function ytoBackfillVideoMeta(pl) {
 }
 
 /* ── Course library list ── */
+function ytoSetLibraryFilter(filter) {
+  ytoLibraryFilter = filter;
+  document.querySelectorAll('.yto-filter-btn').forEach(btn => {
+    const active = btn.dataset.filter === filter;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  ytoRenderLibrary();
+}
+
+function ytoCourseProgress(pl) {
+  const total = pl.videos.length;
+  const done = ytoDoneCount(pl);
+  const ratio = total ? done / total : 0;
+  return { total, done, ratio, pct: Math.round(ratio * 100), complete: total > 0 && done === total };
+}
+
+function ytoHasUnknownRemaining(pl) {
+  return pl.videos.some(v => !pl.watched[v.id] && !v.dur);
+}
+
+function ytoRenderLibraryOverview(entries) {
+  const overview = document.getElementById('yto-library-overview');
+  if (!overview) return;
+  if (!entries.length) { overview.innerHTML = ''; overview.hidden = true; return; }
+
+  const totalVideos = entries.reduce((sum, pl) => sum + pl.videos.length, 0);
+  const doneVideos = entries.reduce((sum, pl) => sum + ytoDoneCount(pl), 0);
+  const remainingSecs = entries.reduce((sum, pl) => sum + ytoRemainingSecs(pl), 0);
+  const hasUnknownRemaining = entries.some(ytoHasUnknownRemaining);
+  const remainingLabel = hasUnknownRemaining
+    ? (remainingSecs ? `${ytoFmtHM(remainingSecs)}+` : 'Unknown')
+    : ytoFmtHM(remainingSecs);
+  const stats = [
+    { icon: '▦', value: entries.length, label: 'Courses', tone: 'green' },
+    { icon: '▶', value: totalVideos, label: 'Total videos', tone: 'blue' },
+    { icon: '✓', value: doneVideos, label: 'Completed', tone: 'purple' },
+    { icon: '◷', value: remainingLabel, label: 'Remaining', tone: 'amber' }
+  ];
+  overview.hidden = false;
+  overview.innerHTML = stats.map(stat => `<div class="yto-overview-card yto-tone-${stat.tone}">
+    <div class="yto-overview-icon" aria-hidden="true">${stat.icon}</div>
+    <div><strong>${stat.value}</strong><span>${stat.label}</span></div>
+  </div>`).join('');
+}
+
 function ytoRenderLibrary() {
   ytoCurrentPl = null;
   const content = document.getElementById('yto-content');
   if (!content) return;
   const s = document.getElementById('yto-stats'); if (s) s.style.display = 'none';
   const t = document.getElementById('yto-toolbar'); if (t) t.style.display = 'none';
-  const entries = Object.values(ytoLib()).sort((a,b) => b.addedAt - a.addedAt);
+  const controls = document.getElementById('yto-library-controls');
+  const referralSlot = document.getElementById('yto-referral-slot');
+  const searchEl = document.getElementById('yto-library-search');
+  const sortEl = document.getElementById('yto-library-sort');
+  const entries = Object.values(ytoLib()).filter(pl => pl && Array.isArray(pl.videos));
+
+  ytoRenderLibraryOverview(entries);
+  if (controls) controls.hidden = !entries.length;
+  if (referralSlot) referralSlot.hidden = false;
+
   if (!entries.length) {
-    content.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div>
-      <p>YouTube playlist ya single video URL paste karo aur Load karo</p>
-      <p style="font-size:0.75rem;margin-top:4px;">Playlist structured course ban jayegi; single video bhi course ki tarah save aur track hogi</p></div>`;
+    content.innerHTML = `<div class="yto-library-empty">
+      <div class="yto-empty-art" aria-hidden="true"><span>▶</span></div>
+      <h3>Build your first course library</h3>
+      <p>Paste a public playlist or video above. PrepPath will keep the content, progress, and study plan together.</p>
+      <button type="button" onclick="document.getElementById('yto-url-input').focus()">Add your first course</button>
+    </div>`;
     return;
   }
-  content.innerHTML = `<div class="section-title">📚 My Courses (${entries.length})</div>
-    <div style="display:grid;gap:10px;">` + entries.map(pl => {
-      const pct = pl.videos.length ? Math.round(ytoDoneCount(pl)/pl.videos.length*100) : 0;
+
+  const query = (searchEl?.value || '').trim().toLowerCase();
+  const sort = sortEl?.value || 'recent';
+  let visible = entries.filter(pl => {
+    const progress = ytoCourseProgress(pl);
+    const matchesSearch = !query || `${pl.title || ''} ${pl.channel || ''}`.toLowerCase().includes(query);
+    const matchesStatus = ytoLibraryFilter === 'all'
+      || (ytoLibraryFilter === 'progress' && progress.done > 0 && !progress.complete)
+      || (ytoLibraryFilter === 'not-started' && progress.done === 0)
+      || (ytoLibraryFilter === 'complete' && progress.complete);
+    return matchesSearch && matchesStatus;
+  });
+
+  visible.sort((a, b) => {
+    if (sort === 'name') return (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' });
+    if (sort === 'progress') return ytoCourseProgress(b).ratio - ytoCourseProgress(a).ratio || (b.addedAt || 0) - (a.addedAt || 0);
+    return (b.addedAt || 0) - (a.addedAt || 0);
+  });
+
+  if (!visible.length) {
+    content.innerHTML = `<div class="yto-filter-empty">
+      <span aria-hidden="true">⌕</span>
+      <h3>No matching courses</h3>
+      <p>Try a different search or progress filter.</p>
+      <button type="button" onclick="document.getElementById('yto-library-search').value='';ytoSetLibraryFilter('all')">Clear filters</button>
+    </div>`;
+    return;
+  }
+
+  content.innerHTML = `<div class="yto-library-heading">
+      <div><span class="yto-eyebrow">My courses</span><h3>${visible.length} ${visible.length === 1 ? 'course' : 'courses'}</h3></div>
+      <span>${entries.length === visible.length ? 'Everything in one place' : `${visible.length} of ${entries.length} shown`}</span>
+    </div>
+    <div class="yto-course-grid">${visible.map(pl => {
+      const progress = ytoCourseProgress(pl);
+      const totalSecs = ytoTotalSecs(pl);
+      const remainingSecs = ytoRemainingSecs(pl);
       const fin = ytoEstimateFinish(pl);
-      return `<div class="info-card" style="display:flex;gap:10px;align-items:center;cursor:pointer;margin-bottom:0;padding:1rem;overflow:hidden;min-width:0;width:100%;max-width:100%;" onclick="ytoOpenCourse('${pl.id}')">
-        <div style="width:72px;height:41px;border-radius:8px;overflow:hidden;background:var(--surface);flex:0 0 auto;">${pl.thumb?`<img src="${pl.thumb}" style="width:100%;height:100%;object-fit:cover;">`:''}</div>
-        <div style="flex:1 1 auto;min-width:0;overflow:hidden;">
-          <div style="font-weight:700;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(pl.title)}</div>
-          <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">${escapeHtml(pl.channel)} · ${pl.videos.length} videos · ${ytoFmtHM(ytoTotalSecs(pl))}${fin?` · 🎯 ~${fin}`:''}</div>
-          <div class="progress-bar" style="margin-top:6px;"><div class="progress-fill" style="width:${pct}%"></div></div>
+      const typeLabel = pl.type === 'video' ? 'Single video' : 'Playlist';
+      const remainingLabel = progress.complete
+        ? 'Course completed'
+        : (ytoHasUnknownRemaining(pl) ? 'Remaining time unavailable' : `${ytoFmtHM(remainingSecs)} remaining`);
+      const primaryLabel = progress.complete ? 'Review course' : (progress.done > 0 ? 'Continue' : 'Start course');
+      return `<article class="yto-course-card" tabindex="0" role="button"
+          aria-label="Open ${escapeHtml(pl.title)}" onclick="ytoOpenCourse('${pl.id}')"
+          onkeydown="if(event.target===event.currentTarget&&(event.key==='Enter'||event.key===' ')){event.preventDefault();ytoOpenCourse('${pl.id}');}">
+        <div class="yto-course-cover">
+          ${pl.thumb ? `<img src="${pl.thumb}" loading="lazy" alt="" onerror="this.style.display='none'">` : ''}
+          <span class="yto-course-type">${pl.type === 'video' ? '▶' : '▤'} ${typeLabel}</span>
+          <span class="yto-course-percent">${progress.pct}%</span>
         </div>
-        <span style="font-size:0.8rem;color:var(--accent);font-weight:700;flex:0 0 auto;">${pct}%</span>
-        <button class="ch-action-btn" style="flex:0 0 auto;" onclick="event.stopPropagation();ytoRename('${pl.id}')" title="Rename">✏️</button>
-        <button class="ch-action-btn" style="flex:0 0 auto;" onclick="event.stopPropagation();ytoDelete('${pl.id}')" title="Delete">🗑</button>
-      </div>`;
-    }).join('') + `</div>`;
+        <div class="yto-course-body">
+          <div class="yto-course-topline">
+            <div class="yto-course-title-wrap">
+              <h3 title="${escapeHtml(pl.title)}">${escapeHtml(pl.title)}</h3>
+              <p>${escapeHtml(pl.channel || 'YouTube course')}</p>
+            </div>
+            <details class="yto-course-menu" onclick="event.stopPropagation()">
+              <summary aria-label="Course actions" title="Course actions">•••</summary>
+              <div>
+                <button type="button" onclick="ytoRename('${pl.id}')"><span>✎</span> Rename</button>
+                <button type="button" class="danger" onclick="ytoDelete('${pl.id}')"><span>⌫</span> Delete</button>
+              </div>
+            </details>
+          </div>
+          <div class="yto-course-meta">
+            <span>▶ ${pl.videos.length} ${pl.videos.length === 1 ? 'video' : 'videos'}</span>
+            <span>◷ ${totalSecs ? ytoFmtHM(totalSecs) : 'Duration unavailable'}</span>
+            ${pl.plan ? `<span>▣ ${fin ? `Finish ~${fin}` : 'Study plan active'}</span>` : ''}
+          </div>
+          <div class="yto-card-progress">
+            <div><span>${progress.done} of ${progress.total} completed</span><strong>${progress.pct}%</strong></div>
+            <div class="yto-card-track"><span style="width:${progress.pct}%"></span></div>
+          </div>
+          <div class="yto-course-footer">
+            <span>${remainingLabel}</span>
+            <button type="button" onclick="event.stopPropagation();ytoOpenCourse('${pl.id}')">${primaryLabel} <span aria-hidden="true">→</span></button>
+          </div>
+        </div>
+      </article>`;
+    }).join('')}</div>`;
 }
 
 function ytoRename(plId) {
@@ -646,6 +770,9 @@ function ytoOpenCourse(plId) {
   ytoPlayerV2 = null; ytoPlayerV2Ready = false; ytoPendingVid = null;
   const s = document.getElementById('yto-stats'); if (s) s.style.display = 'none';
   const t = document.getElementById('yto-toolbar'); if (t) t.style.display = 'none';
+  const overview = document.getElementById('yto-library-overview'); if (overview) overview.hidden = true;
+  const controls = document.getElementById('yto-library-controls'); if (controls) controls.hidden = true;
+  const referralSlot = document.getElementById('yto-referral-slot'); if (referralSlot) referralSlot.hidden = true;
   const content = document.getElementById('yto-content');
   content.innerHTML = `
     <button onclick="ytoRenderLibrary()" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:5px 14px;font-size:0.78rem;cursor:pointer;margin-bottom:0.85rem;font-family:var(--font);">← My Courses</button>
