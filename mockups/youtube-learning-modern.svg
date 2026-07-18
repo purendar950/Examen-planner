@@ -1,0 +1,220 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" fill="none">
+  <defs>
+    <linearGradient id="pageBg" x1="0" y1="0" x2="1440" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#EFF6F4"/>
+    </linearGradient>
+    <linearGradient id="videoBg" x1="58" y1="289" x2="930" y2="770" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14231F"/>
+      <stop offset="0.55" stop-color="#0A1512"/>
+      <stop offset="1" stop-color="#06100D"/>
+    </linearGradient>
+    <linearGradient id="thumbBg" x1="133" y1="360" x2="824" y2="652" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#134E4A"/>
+      <stop offset="0.54" stop-color="#16A085"/>
+      <stop offset="1" stop-color="#F59E0B"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#0F172A" flood-opacity="0.06"/>
+    </filter>
+    <clipPath id="videoClip"><rect x="48" y="287" width="878" height="494" rx="18"/></clipPath>
+  </defs>
+
+  <rect width="1440" height="1024" fill="url(#pageBg)"/>
+
+  <!-- Top application bar -->
+  <rect width="1440" height="72" fill="#FFFFFF"/>
+  <line x1="0" y1="71.5" x2="1440" y2="71.5" stroke="#E2E8F0"/>
+  <g transform="translate(40 20)">
+    <rect width="34" height="34" rx="10" fill="#0F9F7C"/>
+    <path d="M9 11.5L17 7L25 11.5L17 16L9 11.5Z" fill="white"/>
+    <path d="M12 14V21.5C14.7 24 19.3 24 22 21.5V14" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <text x="46" y="22" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="19" font-weight="750">Study</text>
+    <text x="99" y="22" fill="#0F9F7C" font-family="Inter, Arial, sans-serif" font-size="19" font-weight="750">Planner</text>
+  </g>
+  <rect x="187" y="21" width="82" height="30" rx="15" fill="#E7F8F3"/>
+  <text x="228" y="40" text-anchor="middle" fill="#078064" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">SSC CGL</text>
+
+  <g font-family="Inter, Arial, sans-serif" font-size="14" font-weight="600">
+    <text x="354" y="43" fill="#64748B">Dashboard</text>
+    <text x="463" y="43" fill="#64748B">Syllabus</text>
+    <text x="550" y="43" fill="#64748B">Planner</text>
+    <rect x="626" y="12" width="112" height="48" rx="14" fill="#E7F8F3"/>
+    <circle cx="650" cy="36" r="9" fill="#0F9F7C"/>
+    <path d="M648 32.5L654 36L648 39.5V32.5Z" fill="white"/>
+    <text x="668" y="42" fill="#078064">YouTube</text>
+    <text x="766" y="43" fill="#64748B">Mock Tests</text>
+    <text x="868" y="43" fill="#64748B">Analysis</text>
+  </g>
+
+  <rect x="1116" y="20" width="124" height="32" rx="16" fill="#F0FDF9" stroke="#B7EBDD"/>
+  <path d="M1134 31L1139 36L1134 41L1129 36L1134 31Z" fill="#0F9F7C"/>
+  <text x="1150" y="41" fill="#078064" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">Pro 6 months</text>
+  <circle cx="1272" cy="36" r="18" fill="#E7F8F3"/>
+  <text x="1272" y="41" text-anchor="middle" fill="#078064" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700">P</text>
+  <text x="1300" y="41" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="600">Purendar</text>
+  <path d="M1373 33L1379 39L1385 33" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Page heading and URL command bar -->
+  <text x="48" y="120" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="28" font-weight="760">YouTube Learning</text>
+  <text x="48" y="145" fill="#64748B" font-family="Inter, Arial, sans-serif" font-size="14">Watch lectures, organize your course and turn every video into study material.</text>
+  <rect x="1175" y="105" width="217" height="42" rx="12" fill="#FFFFFF" stroke="#D9E2E8"/>
+  <path d="M1195 117V135M1189 123H1201M1189 129H1201" stroke="#0F9F7C" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="1212" y="131" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="650">Playlist organiser</text>
+
+  <g filter="url(#softShadow)">
+    <rect x="48" y="172" width="1344" height="76" rx="16" fill="#FFFFFF"/>
+  </g>
+  <circle cx="78" cy="210" r="17" fill="#FEE2E2"/>
+  <path d="M73 203.5L84 210L73 216.5V203.5Z" fill="#EF4444"/>
+  <text x="107" y="203" fill="#64748B" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="700" letter-spacing="1">YOUTUBE VIDEO URL</text>
+  <text x="107" y="224" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="14">youtube.com/watch?v=7y8Oi5_rfOs</text>
+  <line x1="1028" y1="190" x2="1028" y2="230" stroke="#E2E8F0"/>
+  <rect x="1047" y="188" width="119" height="44" rx="12" fill="#F1F5F9"/>
+  <path d="M1067 201V219M1061 207H1073M1061 213H1073" stroke="#475569" stroke-width="1.6" stroke-linecap="round"/>
+  <text x="1084" y="215" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="650">Add queue</text>
+  <rect x="1177" y="188" width="195" height="44" rx="12" fill="#0F9F7C"/>
+  <path d="M1203 202L1216 210L1203 218V202Z" fill="white"/>
+  <text x="1232" y="215" fill="white" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Start learning</text>
+
+  <!-- Main video card -->
+  <g filter="url(#shadow)">
+    <rect x="48" y="271" width="894" height="695" rx="20" fill="#FFFFFF"/>
+  </g>
+  <rect x="48" y="271" width="894" height="72" rx="20" fill="#FFFFFF"/>
+  <rect x="68" y="291" width="34" height="34" rx="10" fill="#E7F8F3"/>
+  <path d="M78 300H92V318H78V300ZM81 303V315H89V303H81Z" fill="#0F9F7C"/>
+  <text x="116" y="306" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="720">RRP GROUP D 2026 · Current Affairs</text>
+  <text x="116" y="326" fill="#64748B" font-family="Inter, Arial, sans-serif" font-size="12">Parmar Railway · Lesson 8 of 8</text>
+  <rect x="766" y="291" width="154" height="34" rx="10" fill="#F0FDF9"/>
+  <circle cx="785" cy="308" r="8" fill="#0F9F7C"/>
+  <path d="M781 308L784 311L789 305" stroke="white" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="800" y="313" fill="#078064" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">88% completed</text>
+
+  <!-- Video surface -->
+  <g clip-path="url(#videoClip)">
+    <rect x="64" y="343" width="862" height="485" fill="url(#videoBg)"/>
+    <rect x="82" y="363" width="826" height="417" rx="12" fill="url(#thumbBg)"/>
+    <circle cx="200" cy="468" r="104" fill="#0B3B35" fill-opacity="0.55"/>
+    <circle cx="765" cy="575" r="150" fill="#FBBF24" fill-opacity="0.20"/>
+    <path d="M72 699L276 526L421 648L557 506L749 680L920 535V804H72V699Z" fill="#062E2A" fill-opacity="0.75"/>
+    <rect x="121" y="398" width="245" height="38" rx="19" fill="#FFFFFF" fill-opacity="0.92"/>
+    <text x="244" y="423" text-anchor="middle" fill="#0F766E" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="800" letter-spacing="1.4">CURRENT AFFAIRS 2026</text>
+    <text x="121" y="500" fill="white" font-family="Inter, Arial, sans-serif" font-size="52" font-weight="820">BUDGET</text>
+    <text x="121" y="552" fill="white" font-family="Inter, Arial, sans-serif" font-size="52" font-weight="820">SPECIAL</text>
+    <text x="124" y="588" fill="#D1FAE5" font-family="Inter, Arial, sans-serif" font-size="18" font-weight="600">21 important topics in one lecture</text>
+    <rect x="121" y="624" width="182" height="42" rx="12" fill="#F59E0B"/>
+    <text x="212" y="651" text-anchor="middle" fill="#111827" font-family="Inter, Arial, sans-serif" font-size="15" font-weight="800">LESSON 08</text>
+    <circle cx="734" cy="499" r="74" fill="#FFFFFF" fill-opacity="0.95"/>
+    <circle cx="734" cy="499" r="62" fill="#0F9F7C"/>
+    <path d="M716 470L763 499L716 528V470Z" fill="white"/>
+    <rect x="82" y="720" width="826" height="60" fill="#06100D" fill-opacity="0.86"/>
+    <circle cx="111" cy="750" r="15" fill="#FFFFFF" fill-opacity="0.14"/>
+    <path d="M107 743L119 750L107 757V743Z" fill="white"/>
+    <text x="142" y="755" fill="white" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="600">38:42</text>
+    <line x1="195" y1="750" x2="809" y2="750" stroke="#64748B" stroke-width="4" stroke-linecap="round"/>
+    <line x1="195" y1="750" x2="626" y2="750" stroke="#10B981" stroke-width="4" stroke-linecap="round"/>
+    <circle cx="626" cy="750" r="6" fill="#10B981" stroke="white" stroke-width="2"/>
+    <path d="M844 743V757M838 746L844 750L850 746V754L844 750L838 754V746Z" stroke="white" stroke-width="1.5"/>
+    <path d="M874 744H866V752M874 756H882V748" stroke="white" stroke-width="1.7" stroke-linecap="round"/>
+  </g>
+
+  <text x="68" y="855" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="740">RRP GROUP D 2026 | Current Affairs | Budget</text>
+  <text x="68" y="879" fill="#64748B" font-family="Inter, Arial, sans-serif" font-size="13">Continue where you left off · 38:42 of 54:16</text>
+  <rect x="68" y="903" width="122" height="38" rx="11" fill="#0F9F7C"/>
+  <path d="M85 914L96 922L85 930V914Z" fill="white"/>
+  <text x="106" y="927" fill="white" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="700">Resume</text>
+  <rect x="200" y="903" width="122" height="38" rx="11" fill="#F8FAFC" stroke="#DDE5EA"/>
+  <path d="M218 914H232V930L225 926L218 930V914Z" stroke="#475569" stroke-width="1.5" stroke-linejoin="round"/>
+  <text x="241" y="927" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="650">Save moment</text>
+  <rect x="332" y="903" width="92" height="38" rx="11" fill="#F8FAFC" stroke="#DDE5EA"/>
+  <circle cx="350" cy="922" r="7" stroke="#475569" stroke-width="1.5"/>
+  <path d="M347 922L350 925L355 919" stroke="#475569" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="365" y="927" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="650">Focus</text>
+  <rect x="434" y="903" width="74" height="38" rx="11" fill="#F8FAFC" stroke="#DDE5EA"/>
+  <text x="471" y="927" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="650">1.0x</text>
+  <rect x="782" y="903" width="138" height="38" rx="11" fill="#F8FAFC" stroke="#DDE5EA"/>
+  <text x="851" y="927" text-anchor="middle" fill="#334155" font-family="Inter, Arial, sans-serif" font-size="12" font-weight="650">Open in YouTube</text>
+
+  <!-- Right learning workspace -->
+  <g filter="url(#shadow)">
+    <rect x="966" y="271" width="426" height="695" rx="20" fill="#FFFFFF"/>
+  </g>
+  <rect x="982" y="287" width="394" height="48" rx="13" fill="#F1F5F9"/>
+  <rect x="986" y="291" width="192" height="40" rx="10" fill="#FFFFFF" filter="url(#softShadow)"/>
+  <rect x="1006" y="303" width="18" height="16" rx="3" fill="#D1FAE5"/>
+  <path d="M1009 306H1021M1009 310H1018M1009 314H1016" stroke="#0F9F7C" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="1033" y="316" fill="#078064" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="750">Course</text>
+  <circle cx="1213" cy="311" r="9" fill="#E2E8F0"/>
+  <path d="M1210 311L1213 314L1218 308" stroke="#64748B" stroke-width="1.4" stroke-linecap="round"/>
+  <text x="1232" y="316" fill="#64748B" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="650">AI Study</text>
+
+  <text x="990" y="373" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="17" font-weight="740">Course content</text>
+  <text x="990" y="395" fill="#64748B" font-family="Inter, Arial, sans-serif" font-size="12">7 of 8 lessons completed</text>
+  <text x="1356" y="380" text-anchor="end" fill="#078064" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="750">88%</text>
+  <rect x="990" y="410" width="366" height="7" rx="3.5" fill="#E2E8F0"/>
+  <rect x="990" y="410" width="322" height="7" rx="3.5" fill="#0F9F7C"/>
+
+  <rect x="990" y="437" width="366" height="42" rx="11" fill="#F8FAFC" stroke="#E2E8F0"/>
+  <circle cx="1009" cy="458" r="7" stroke="#94A3B8" stroke-width="1.5"/>
+  <path d="M1006 455L1012 461M1012 455L1006 461" stroke="#94A3B8" stroke-width="1.3" stroke-linecap="round"/>
+  <text x="1025" y="463" fill="#94A3B8" font-family="Inter, Arial, sans-serif" font-size="12">Search lessons</text>
+  <path d="M1334 452L1342 460L1350 452" stroke="#64748B" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Lesson rows -->
+  <g font-family="Inter, Arial, sans-serif">
+    <rect x="982" y="494" width="394" height="65" rx="12" fill="#FFFFFF"/>
+    <rect x="995" y="503" width="76" height="47" rx="8" fill="#DCEFEA"/>
+    <text x="1033" y="523" text-anchor="middle" fill="#0F766E" font-size="10" font-weight="800">CURRENT</text>
+    <text x="1033" y="537" text-anchor="middle" fill="#0F172A" font-size="12" font-weight="850">AFFAIRS</text>
+    <text x="1084" y="517" fill="#0F172A" font-size="12" font-weight="700">Introduction &amp; strategy</text>
+    <text x="1084" y="539" fill="#64748B" font-size="11">15:42</text>
+    <circle cx="1342" cy="526" r="10" fill="#D1FAE5"/>
+    <path d="M1338 526L1341 529L1346 523" stroke="#0F9F7C" stroke-width="1.7" stroke-linecap="round"/>
+
+    <line x1="995" y1="569" x2="1360" y2="569" stroke="#EEF2F5"/>
+    <rect x="982" y="577" width="394" height="65" rx="12" fill="#FFFFFF"/>
+    <rect x="995" y="586" width="76" height="47" rx="8" fill="#E0E7FF"/>
+    <text x="1033" y="606" text-anchor="middle" fill="#4338CA" font-size="10" font-weight="800">NATIONAL</text>
+    <text x="1033" y="620" text-anchor="middle" fill="#0F172A" font-size="12" font-weight="850">EVENTS</text>
+    <text x="1084" y="600" fill="#0F172A" font-size="12" font-weight="700">National current affairs</text>
+    <text x="1084" y="622" fill="#64748B" font-size="11">51:30</text>
+    <circle cx="1342" cy="609" r="10" fill="#D1FAE5"/>
+    <path d="M1338 609L1341 612L1346 606" stroke="#0F9F7C" stroke-width="1.7" stroke-linecap="round"/>
+
+    <line x1="995" y1="652" x2="1360" y2="652" stroke="#EEF2F5"/>
+    <rect x="982" y="660" width="394" height="65" rx="12" fill="#FFFFFF"/>
+    <rect x="995" y="669" width="76" height="47" rx="8" fill="#FEF3C7"/>
+    <text x="1033" y="689" text-anchor="middle" fill="#B45309" font-size="10" font-weight="800">ECONOMY</text>
+    <text x="1033" y="703" text-anchor="middle" fill="#0F172A" font-size="12" font-weight="850">2026</text>
+    <text x="1084" y="683" fill="#0F172A" font-size="12" font-weight="700">Economy &amp; banking</text>
+    <text x="1084" y="705" fill="#64748B" font-size="11">48:41</text>
+    <circle cx="1342" cy="692" r="10" fill="#D1FAE5"/>
+    <path d="M1338 692L1341 695L1346 689" stroke="#0F9F7C" stroke-width="1.7" stroke-linecap="round"/>
+
+    <line x1="995" y1="735" x2="1360" y2="735" stroke="#EEF2F5"/>
+    <rect x="982" y="743" width="394" height="78" rx="13" fill="#EAFBF6" stroke="#A7E8D6"/>
+    <rect x="995" y="756" width="76" height="51" rx="8" fill="#0F766E"/>
+    <text x="1033" y="778" text-anchor="middle" fill="#D1FAE5" font-size="10" font-weight="800">BUDGET</text>
+    <text x="1033" y="793" text-anchor="middle" fill="white" font-size="12" font-weight="850">SPECIAL</text>
+    <text x="1084" y="765" fill="#078064" font-size="10" font-weight="800" letter-spacing="0.8">NOW PLAYING</text>
+    <text x="1084" y="786" fill="#0F172A" font-size="12" font-weight="750">Budget special 2026</text>
+    <text x="1084" y="806" fill="#64748B" font-size="11">38:42 / 54:16</text>
+    <circle cx="1342" cy="782" r="11" fill="#0F9F7C"/>
+    <path d="M1338 776L1347 782L1338 788V776Z" fill="white"/>
+  </g>
+
+  <rect x="990" y="844" width="366" height="98" rx="14" fill="#0F172A"/>
+  <circle cx="1018" cy="874" r="14" fill="#0F9F7C"/>
+  <path d="M1012 874H1024M1018 868V880" stroke="white" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="1043" y="871" fill="white" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="720">Turn this lesson into notes</text>
+  <text x="1043" y="892" fill="#94A3B8" font-family="Inter, Arial, sans-serif" font-size="11">Generate notes, quizzes and flashcards.</text>
+  <rect x="1043" y="906" width="131" height="25" rx="8" fill="#0F9F7C"/>
+  <text x="1108" y="923" text-anchor="middle" fill="white" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="700">Open AI Study</text>
+
+  <!-- Bottom note -->
+  <text x="48" y="1002" fill="#94A3B8" font-family="Inter, Arial, sans-serif" font-size="11">Modern layout concept · Desktop / tablet landscape · Application not modified</text>
+</svg>
