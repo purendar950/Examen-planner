@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#123c34">
+  <meta name="description" content="PrepPath interactive exam preparation prototype">
+  <title>PrepPath — Study with direction</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="app" data-theme="light">
+    <a class="skip-link" href="#screen">Skip to content</a>
+    <div id="authExperience"></div>
+    <div id="productExperience" hidden>
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="main-shell">
+        <header id="topbar" class="topbar"></header>
+        <div id="screen" class="screen" tabindex="-1"></div>
+      </main>
+      <nav id="mobileNav" class="mobile-nav" aria-label="Primary navigation"></nav>
+    </div>
+    <div id="modalRoot"></div>
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <div class="prototype-badge" title="Your data stays in this browser">Interactive prototype · Demo data</div>
+  </div>
+  <noscript><p class="noscript">PrepPath needs JavaScript enabled to run this interactive prototype.</p></noscript>
+  <script src="app.js"></script>
+</body>
+</html>
