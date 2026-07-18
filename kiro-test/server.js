@@ -13,7 +13,7 @@ const os = require('os');
 const path = require('path');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public'))); // serves public/index.html
 
 const PORT = process.env.PORT || 3000;
@@ -116,7 +116,7 @@ app.post('/api/test-kiro', (req, res) => {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
-      { env: childEnv(), timeout: 60000 },
+      { env: childEnv(), timeout: 120000 },
       (error, stdout, stderr) => {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
@@ -173,5 +173,109 @@ app.post('/api/test-kiro', (req, res) => {
     runChat();
   }
 });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OpenAI-compatible /v1/chat/completions endpoint.
+   The youtube-turbo-proxy (and any OpenAI-compatible client) sends requests
+   in the standard format: POST /v1/chat/completions with { model, messages }.
+   We translate this into a kiro-cli call and return an OpenAI-shaped response.
+   Also mounted at /chat/completions (no /v1 prefix) for compatibility.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function handleChatCompletions(req, res) {
+  const body = req.body || {};
+  const model = body.model || '';
+  const messages = body.messages || [];
+
+  // Extract the user's prompt from the messages array (take the last user message)
+  let prompt = '';
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      prompt = messages[i].content || '';
+      break;
+    }
+  }
+  // If there's a system message, prepend it as context
+  const systemMsg = messages.find(m => m.role === 'system');
+  if (systemMsg && systemMsg.content) {
+    prompt = systemMsg.content + '\n\n' + prompt;
+  }
+
+  if (!prompt) {
+    return res.status(400).json({
+      error: { message: 'No user message found in messages array', type: 'invalid_request_error' }
+    });
+  }
+
+  const bin = resolveKiroCli();
+
+  function runChat() {
+    execFile(
+      bin,
+      ['chat', '--no-interactive', '--trust-tools=', prompt],
+      { env: childEnv(), timeout: 120000 },
+      (error, stdout, stderr) => {
+        if (error) {
+          const detail = stripAnsi(stderr) || error.message;
+          console.error('[chat/completions]', detail);
+          if (error.code === 'ENOENT') {
+            return res.status(500).json({
+              error: { message: `kiro-cli binary not found (looked at ${bin})`, type: 'server_error' }
+            });
+          }
+          return res.status(500).json({
+            error: { message: detail, type: 'server_error' }
+          });
+        }
+
+        const output = stripAnsi(stdout).trim();
+        const stderrText = stripAnsi(stderr);
+
+        if (!output && /Authentication failed/i.test(stderrText)) {
+          return res.status(401).json({
+            error: { message: 'Authentication failed. KIRO_API_KEY is invalid or expired.', type: 'authentication_error' }
+          });
+        }
+
+        if (!output) {
+          return res.status(502).json({
+            error: { message: stderrText.trim() || 'Empty response from kiro-cli', type: 'server_error' }
+          });
+        }
+
+        // Return an OpenAI-compatible response shape
+        res.json({
+          id: 'kiro-' + Date.now(),
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: model || 'auto',
+          choices: [{
+            index: 0,
+            message: { role: 'assistant', content: output },
+            finish_reason: 'stop'
+          }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+        });
+      }
+    );
+  }
+
+  if (model && model !== 'auto') {
+    execFile(
+      bin,
+      ['settings', 'chat.defaultModel', model],
+      { env: childEnv(), timeout: 10000 },
+      (err) => {
+        if (err) console.error('[chat/completions] Failed to set model:', model);
+        runChat();
+      }
+    );
+  } else {
+    runChat();
+  }
+}
+
+// Mount at both paths — the proxy may use either depending on how baseUrl is configured
+app.post('/v1/chat/completions', handleChatCompletions);
+app.post('/chat/completions', handleChatCompletions);
 
 app.listen(PORT, () => console.log(`Server running: http://localhost:${PORT}`));
