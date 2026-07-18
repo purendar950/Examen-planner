@@ -48,8 +48,9 @@ function planScopedSubjects(cfg) {
        totalDays, endDate, subjectIds }
    No clock times — a simple topic list per day.
 --------------------------------------------------------------------------- */
-function buildPlanSchedule(cfg) {
+function buildPlanSchedule(cfg, planId) {
   cfg = cfg || {};
+  const planKey = planPartProgressKey(planId);
   const subjects = planScopedSubjects(cfg);
   const chConf   = cfg.chapters || {};
   const freqOf   = id => Math.max(1, (cfg.subjectFreq && cfg.subjectFreq[id]) || 1);
@@ -64,7 +65,9 @@ function buildPlanSchedule(cfg) {
      slots (1/N..N/N) followed by `gap` revise slots. */
   const perSubject = subjects.map((sub, idx) => {
     const slots = [];
-    const pending = sub.chapters.filter(c => !appState.progress[c.id]?.done);
+    /* Order every chapter first. Multi-part shape validation happens below,
+       before deciding whether a plan-derived completed chapter stays done. */
+    const pending = sub.chapters;
     /* Study chapters in the user-chosen Order (#). Chapters with a lower
        number come first; ties / blanks keep their original syllabus order. */
     const ordered = pending
@@ -74,13 +77,44 @@ function buildPlanSchedule(cfg) {
     ordered.forEach(ch => {
       const meta = { ...ch, subName: sub.name, color: sub.color, subId: sub.id };
       if (isSingle) {
-        slots.push({ type:'study', ch: meta, part: '' });
+        if (appState.progress[ch.id]?.done) return;
+        slots.push({ type:'study', ch:meta, part:'', partIndex:0, totalParts:1, planId:planKey });
         return;
       }
       const cc   = chConf[ch.id] || {};
       const days = Math.max(1, Number(cc.days) || 3);
       const gap  = Math.max(0, Number(cc.gap)  || 0);
-      for (let i = 0; i < days; i++) slots.push({ type:'study',  ch: meta, part: days>1 ? `(${i+1}/${days})` : '' });
+      const progress = appState.progress[ch.id] || {};
+      if (days === 1 && progress.planPartProgress && progress.planPartProgress[planKey]) {
+        delete progress.planPartProgress[planKey];
+        recalculatePlanDerivedCompletion(progress);
+      }
+      const partState = days > 1 ? getPlanPartProgress(ch.id, planKey, days) : null;
+      /* getPlanPartProgress (or the one-day reset above) invalidates completion
+         from an obsolete day count before this check. */
+      if (progress.done) return;
+      const completedParts = partState ? partState.completed : new Set();
+      const completedDates = partState ? partState.completedDates : {};
+      for (let i = 0; i < days; i++) {
+        const partIndex = i + 1;
+        if (completedParts.has(partIndex)) continue;
+        let notBefore = '';
+        const previousDate = completedDates[partIndex - 1];
+        if (previousDate) {
+          const nextDate = new Date(previousDate + 'T00:00:00');
+          nextDate.setDate(nextDate.getDate() + 1);
+          notBefore = fmtDate(nextDate);
+        }
+        slots.push({
+          type: 'study',
+          ch: meta,
+          part: days > 1 ? `(${partIndex}/${days})` : '',
+          partIndex: days > 1 ? partIndex : 0,
+          totalParts: days,
+          planId: planKey,
+          notBefore
+        });
+      }
       /* Gap days reserve spacing after a chapter, but the actual revision
          reminders now come from the spaced-repetition engine (see
          getPlanScheduleMap), so we add empty spacer slots instead of static
@@ -131,7 +165,12 @@ function buildPlanSchedule(cfg) {
           added++;
         }
       } else {
-        dayItems.push(s.slots[cursor[s.subId]]);
+        const slot = s.slots[cursor[s.subId]];
+        /* Completing 1/N today must not compact 2/N back onto today. The next
+           sequential part becomes eligible tomorrow and naturally appears once
+           the auto-reschedule anchor advances. */
+        if (slot.notBefore && dateStr < slot.notBefore) continue;
+        dayItems.push(slot);
         cursor[s.subId]++;
         placed++;
       }
@@ -165,7 +204,13 @@ function renderTopicListItems(items, emptyMsg) {
        the user can mark them complete straight from the planner — this writes to
        appState.progress (same store the Syllabus tab uses), keeping both in sync. */
     const canCheck = it.type === 'study' && !!ch.id;
-    const isDone = canCheck && !!(appState.progress[ch.id] && appState.progress[ch.id].done);
+    const progress = canCheck ? (appState.progress[ch.id] || {}) : {};
+    const partIndex = Number(it.partIndex) || 0;
+    const totalParts = Math.max(1, Number(it.totalParts) || 1);
+    const itemPlanId = it.planId || 'default';
+    const isMultiPart = partIndex >= 1 && totalParts > 1 && partIndex <= totalParts;
+    const partState = canCheck && isMultiPart ? getPlanPartProgress(ch.id, itemPlanId, totalParts) : null;
+    const isDone = canCheck && (isMultiPart ? partState.completed.has(partIndex) : !!progress.done);
     /* Engine-backed revisions (from the spaced-repetition queue) are clickable:
        clicking opens the rating modal which updates mastery + reschedules. */
     const clickable = isRevise && it.fromEngine && ch.id;
@@ -179,7 +224,7 @@ function renderTopicListItems(items, emptyMsg) {
     /* Leading marker: a clickable check-off box for study topics, otherwise the
        small coloured status dot used by revise/mock rows. */
     const marker = canCheck
-      ? `<div onclick="event.stopPropagation();togglePlanTopicDone('${ch.id}','${ch.subId||''}')" title="${isDone?'Mark as not done':'Mark complete'}" style="width:18px;height:18px;border-radius:5px;border:2px solid ${isDone?'var(--accent)':'var(--border)'};background:${isDone?'var(--accent)':'transparent'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:.72rem;line-height:1;cursor:pointer;flex-shrink:0;">${isDone?'✓':''}</div>`
+      ? `<div onclick="event.stopPropagation();togglePlanTopicDone('${ch.id}','${ch.subId||''}',${partIndex},${totalParts},'${itemPlanId}')" title="${isDone?'Mark as not done':'Mark complete'}" style="width:18px;height:18px;border-radius:5px;border:2px solid ${isDone?'var(--accent)':'var(--border)'};background:${isDone?'var(--accent)':'transparent'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:.72rem;line-height:1;cursor:pointer;flex-shrink:0;">${isDone?'✓':''}</div>`
       : `<div style="width:8px;height:8px;border-radius:50%;background:${accent};flex-shrink:0;"></div>`;
     const nameStyle = `flex:1;font-size:.82rem;${isRevise?'color:#A855F7;':''}${isDone?'color:var(--muted);text-decoration:line-through;':''}`;
     return `
@@ -233,7 +278,7 @@ function renderSyllabusPlan(cfg) {
 
   /* Build the full day-by-day schedule (date -> topic items), running subjects
      in PARALLEL by their frequency. No clock times — just a topic list. */
-  const schedule = buildPlanSchedule(cfg);
+  const schedule = buildPlanSchedule(cfg, window._activePlanId || appState.activePlanId || 'default');
   window._planSchedule = schedule;
   if (currentUser) { appState.planSchedule = schedule.byDate; }
 
@@ -252,7 +297,7 @@ function renderSyllabusPlan(cfg) {
      the spaced-repetition engine appear alongside today's study topics. */
   const todayStr = fmtDate(new Date());
   const todayItems = (getPlanScheduleMap()[todayStr]) || schedule.byDate[todayStr] || [];
-  window._lastPlanQueue = todayItems.filter(it => it.type === 'study').map(it => it.ch);
+  window._lastPlanQueue = todayItems.filter(it => it.type === 'study');
   window._lastPlanType = 'syllabus';
 
   const backlog = detectBacklog();
@@ -581,15 +626,32 @@ function addTimetableToToday() {
       });
     });
   } else {
-    /* syllabus — use queue */
-    queue.forEach(ch => {
-      if (seen.has(ch.id) || existing.has(ch.name)) { seen.add(ch.id); return; }
-      /* Skip a topic the user previously deleted (keyed on chapter id). */
-      if (typeof isTaskDeleted === 'function' && isTaskDeleted({ chId: ch.id || '', text: ch.name })) { seen.add(ch.id); return; }
-      seen.add(ch.id);
-      /* Persist the chapter id so completing this task syncs back to
-         appState.progress (keeps the topic out of tomorrow's schedule). */
-      appState.tasks[todayStr].push({ id: Date.now().toString()+Math.random(), text:ch.name, done:false, priority: ch.diff==='Hard'?'high':'normal', subject: ch.subId||'', chId: ch.id||'' });
+    /* Syllabus — preserve part metadata so completing a task for (1/N) only
+       advances that part instead of completing the entire chapter. */
+    queue.forEach(it => {
+      const ch = it.ch || {};
+      const partIndex = Number(it.partIndex) || 0;
+      const totalParts = Math.max(1, Number(it.totalParts) || 1);
+      const part = it.part || '';
+      const text = ch.name + (part ? ' ' + part : '');
+      const partKey = `${ch.id || ''}|${partIndex}|${totalParts}`;
+      if (seen.has(partKey) || existing.has(text)) { seen.add(partKey); return; }
+      const planId = it.planId || 'default';
+      const taskMeta = { chId: ch.id || '', text, planPartIndex: partIndex, planTotalParts: totalParts, planId };
+      /* Skip only this plan part if the user previously deleted its task. */
+      if (typeof isTaskDeleted === 'function' && isTaskDeleted(taskMeta)) { seen.add(partKey); return; }
+      seen.add(partKey);
+      appState.tasks[todayStr].push({
+        id: Date.now().toString() + Math.random(),
+        text,
+        done: false,
+        priority: ch.diff === 'Hard' ? 'high' : 'normal',
+        subject: ch.subId || '',
+        chId: ch.id || '',
+        planPartIndex: partIndex,
+        planTotalParts: totalParts,
+        planId
+      });
       added++;
     });
   }

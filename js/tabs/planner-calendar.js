@@ -205,7 +205,7 @@ function renderPlannerView() {
   try {
     if ((!window._planSchedule || !window._planSchedule.byDate) && window._planConfig) {
       if (window._planConfig.planType === 'syllabus') {
-        window._planSchedule = buildPlanSchedule(window._planConfig);
+        window._planSchedule = buildPlanSchedule(window._planConfig, window._activePlanId || appState.activePlanId || 'default');
       } else if (window._planConfig.planType === 'mock' && typeof buildMockSchedule === 'function') {
         window._planSchedule = buildMockSchedule(window._planConfig);
       }

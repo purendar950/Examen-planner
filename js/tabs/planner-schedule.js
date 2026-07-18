@@ -11,7 +11,7 @@ function ensurePlanSchedule() {
   try {
     const cfg = window._planConfig;
     if (cfg && cfg.planType === 'syllabus' && typeof buildPlanSchedule === 'function') {
-      window._planSchedule = buildPlanSchedule(cfg);
+      window._planSchedule = buildPlanSchedule(cfg, window._activePlanId || appState.activePlanId || 'default');
       return;
     }
     if (cfg && cfg.planType === 'mock' && typeof buildMockSchedule === 'function') {
@@ -22,9 +22,9 @@ function ensurePlanSchedule() {
 }
 
 /* Build a date->items map for a single plan config (syllabus or mock). */
-function buildScheduleForCfg(cfg) {
+function buildScheduleForCfg(cfg, planId) {
   try {
-    if (cfg && (cfg.planType === 'syllabus' || cfg.planType === 'single') && typeof buildPlanSchedule === 'function') return buildPlanSchedule(cfg).byDate || {};
+    if (cfg && (cfg.planType === 'syllabus' || cfg.planType === 'single') && typeof buildPlanSchedule === 'function') return buildPlanSchedule(cfg, planId).byDate || {};
     if (cfg && cfg.planType === 'mock' && typeof buildMockSchedule === 'function') return buildMockSchedule(cfg).byDate || {};
   } catch(e) {}
   return {};
@@ -103,10 +103,10 @@ function _getPlanStudyMap() {
       ? plansForCurrentExam()
       : (Array.isArray(appState.plans) ? appState.plans : []);
     if (plans.length) {
-      plans.forEach(p => { if (p && p.cfg) merge(buildScheduleForCfg(p.cfg)); });
+      plans.forEach(p => { if (p && p.cfg) merge(buildScheduleForCfg(p.cfg, p.id)); });
     } else if (window._planConfig) {
       /* No saved plans list — fall back to the active config */
-      merge(buildScheduleForCfg(window._planConfig));
+      merge(buildScheduleForCfg(window._planConfig, window._activePlanId || appState.activePlanId || 'default'));
     }
   } catch(e) {}
   /* De-duplicate overlapping topics: if two plans schedule the same chapter
@@ -128,7 +128,7 @@ function _getPlanStudyMap() {
   if (Array.isArray(appState.plans)) return {};
   /* Last-resort fallbacks (only when there is no plans list at all) */
   if (window._planConfig) {
-    const m = buildScheduleForCfg(window._planConfig);
+    const m = buildScheduleForCfg(window._planConfig, window._activePlanId || appState.activePlanId || 'default');
     if (Object.keys(m).length) return m;
   }
   if (window._planSchedule && window._planSchedule.byDate) return window._planSchedule.byDate;

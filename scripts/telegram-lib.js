@@ -83,7 +83,15 @@ function escHtml(s) {
    user deleted. Must stay byte-for-byte in sync with the browser version. */
 function taskDedupKey(t) {
   if (!t) return '';
-  if (t.chId)    return 'ch:'  + String(t.chId);
+  if (t.chId) {
+    const partIndex = Number(t.planPartIndex) || 0;
+    const totalParts = Math.max(1, Number(t.planTotalParts) || 1);
+    if (partIndex >= 1 && totalParts > 1 && partIndex <= totalParts) {
+      const planPrefix = t.planId ? `plan:${String(t.planId)}:` : '';
+      return `${planPrefix}ch:${String(t.chId)}:part:${partIndex}/${totalParts}`;
+    }
+    return 'ch:' + String(t.chId);
+  }
   if (t.videoId) return 'vid:' + String(t.videoId);
   const txt = (t.text || '').trim().toLowerCase();
   return txt ? 'txt:' + txt : '';
@@ -95,7 +103,10 @@ function isTaskDeleted(appState, task) {
   const led = (appState && Array.isArray(appState.deletedTaskKeys)) ? appState.deletedTaskKeys : [];
   if (!led.length) return false;
   const key = taskDedupKey(task);
-  return !!key && led.includes(key);
+  if (!!key && led.includes(key)) return true;
+  /* Honor broad chapter tombstones written by older app versions. */
+  if (task && task.chId) return led.includes('ch:' + String(task.chId));
+  return false;
 }
 
 /** Label a rolled-forward / overdue task: "from yesterday" or "from earlier · 22 Jun". */

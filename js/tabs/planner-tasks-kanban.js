@@ -18,12 +18,14 @@ function setTaskStatus(dateStr, taskId, status) {
   /* Bank any running study session before the status changes, so dragging a
      running card straight to Done (skipping Pause) doesn't lose the time. */
   if (typeof _stopActiveSession === 'function') _stopActiveSession(task);
+  const wasDone = !!task.done;
   task.status = status;
   task.done = (status === 'done');
   syncVideoTaskToWatched(task);
+  /* Validate/sync plan-derived completion first; stale plan-part tasks can be
+     reset to todo before the generic revision bridge observes their status. */
+  if (wasDone !== task.done && typeof syncTaskChapterProgress === 'function') syncTaskChapterProgress(task);
   if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
-  /* Bridge to chapter progress so plan-derived tasks don't re-schedule next day. */
-  if (typeof syncTaskChapterProgress === 'function') syncTaskChapterProgress(task);
   saveProgress();
   buildPlannerCalendar();
   try { if (typeof renderRevisionWidget === 'function') renderRevisionWidget(); } catch(e) {}
@@ -90,24 +92,34 @@ function syncWatchedToVideoTasks(videoId, watched) {
 function syncTaskChapterProgress(task) {
   if (!task || !task.chId) return;
   const chId = task.chId;
-  if (!appState.progress[chId]) appState.progress[chId] = {};
-  const p = appState.progress[chId];
-  const wasDone = !!p.done;
-  const nowDone = !!task.done;
-  if (nowDone === wasDone) return; // no transition — nothing to sync
+  const partIndex = Number(task.planPartIndex) || 0;
+  const totalParts = Math.max(1, Number(task.planTotalParts) || 1);
 
-  p.done = nowDone;
-  try { _cachedRemainingCount = null; } catch (e) {} // invalidate countdown cache
-  if (nowDone) {
-    p.completedAt = new Date().toISOString();
-    if (!p.nextRevisionAt && typeof addDaysISO === 'function') {
-      p.nextRevisionAt = addDaysISO(new Date(), 1);
+  /* New plan tasks carry numbered-part metadata. Legacy tasks have partIndex 0
+     and continue to toggle the whole chapter exactly as before. */
+  if (typeof setPlanTopicProgress === 'function') {
+    const result = setPlanTopicProgress(chId, !!task.done, partIndex, totalParts, task.planId || 'default');
+    if (result.stale) {
+      task.done = false;
+      task.status = 'todo';
+      return;
     }
-    if (typeof updateStreak === 'function') updateStreak();
+    if (!result.changed) return;
+  } else {
+    if (!appState.progress[chId]) appState.progress[chId] = {};
+    const p = appState.progress[chId];
+    if (!!p.done === !!task.done) return;
+    p.done = !!task.done;
+    try { _cachedRemainingCount = null; } catch (e) {}
+    if (p.done) {
+      p.completedAt = new Date().toISOString();
+      if (!p.nextRevisionAt && typeof addDaysISO === 'function') p.nextRevisionAt = addDaysISO(new Date(), 1);
+      if (typeof updateStreak === 'function') updateStreak();
+    }
   }
 
-  /* Refresh the generated timetable so a chapter completed via a task drops out
-     of the active plan immediately (buildPlanSchedule excludes done chapters). */
+  /* Refresh the generated timetable. For a numbered task, only that part drops
+     out; the chapter disappears only after its final part is complete. */
   try {
     if (window._planConfig && window._planConfig.planType && typeof generateTimetable === 'function') {
       generateTimetable();

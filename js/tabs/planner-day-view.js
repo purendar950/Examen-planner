@@ -93,14 +93,27 @@ function addScheduledTopicsToTasks(dateStr) {
     }
     const text = ch.name + (it.part ? ' ' + it.part : '');
     if (existing.has(text)) return;
-    /* Skip a plan topic the user previously deleted (keyed on its chapter id so
-       it stays deleted even though the plan keeps it "pending"). */
-    if (typeof isTaskDeleted === 'function' && isTaskDeleted({ chId: ch.id || '', text })) return;
+    const partIndex = Number(it.partIndex) || 0;
+    const totalParts = Math.max(1, Number(it.totalParts) || 1);
+    const planId = it.planId || 'default';
+    const taskMeta = { chId: ch.id || '', text, planPartIndex: partIndex, planTotalParts: totalParts, planId };
+    /* Skip only this plan part if the user previously deleted its task. */
+    if (typeof isTaskDeleted === 'function' && isTaskDeleted(taskMeta)) return;
     existing.add(text);
-    /* Carry the real chapter id (chId) so completing this task from the task
-       list / Kanban also marks the chapter done in appState.progress — otherwise
-       buildPlanSchedule keeps re-flowing the "completed" topic onto the next day. */
-    appState.tasks[dateStr].push({ id: Date.now().toString()+Math.random(), text, done:false, priority: ch.diff==='Hard'?'high':'normal', subject: ch.subId||'', chId: ch.id||'' });
+    /* Carry both the chapter and numbered part so task completion updates only
+       that part. Legacy/single-day tasks keep partIndex 0 and still toggle the
+       whole chapter as before. */
+    appState.tasks[dateStr].push({
+      id: Date.now().toString() + Math.random(),
+      text,
+      done: false,
+      priority: ch.diff === 'Hard' ? 'high' : 'normal',
+      subject: ch.subId || '',
+      chId: ch.id || '',
+      planPartIndex: partIndex,
+      planTotalParts: totalParts,
+      planId
+    });
     added++;
   });
   if (added) { saveProgress(); buildPlannerCalendar(); showToast(`${added} topics added to ${dateStr}! ✅`, 'success'); }
@@ -113,29 +126,177 @@ function addScheduledTopicsToTasks(dateStr) {
    writes to the same appState.progress store and stays in sync everywhere.
 ══════════════════════════════════════════════ */
 
-/* Toggle a chapter's completed state from inside the planner (check-off box on
-   a scheduled study topic, or the undo box in the Completed card). */
-function togglePlanTopicDone(chId, subId) {
-  if (!chId) return;
+/* Resolve a stable key for per-plan part progress. Saved plans use their id;
+   the fallback keeps older/unsaved single-plan sessions working. */
+function planPartProgressKey(planId) {
+  return String(planId || window._activePlanId || appState.activePlanId || 'default');
+}
+
+/* Return the current configured part count for a saved plan/chapter. A missing
+   saved plan means a task carrying that id is stale and must not alter progress. */
+function configuredPlanPartTotal(planId, chId) {
+  const explicitId = planId && planId !== 'default' ? String(planId) : '';
+  let cfg = null;
+  if (explicitId) {
+    if (!Array.isArray(appState.plans)) return { found:false, total:0 };
+    const plan = appState.plans.find(p => p && String(p.id) === explicitId);
+    if (!plan) return { found:false, total:0 };
+    cfg = plan.cfg || null;
+  } else {
+    cfg = window._planConfig || null;
+  }
+  if (!cfg || (cfg.planType !== 'syllabus' && cfg.planType !== 'single')) return { found:!explicitId, total:0 };
+  if (cfg.scopeSubId || cfg.planType === 'single') return { found:true, total:1 };
+  const cc = (cfg.chapters && cfg.chapters[chId]) || {};
+  return { found:true, total:Math.max(1, Number(cc.days) || 3) };
+}
+
+/* Recompute plan-derived chapter completion without overriding a manual or
+   legacy whole-chapter completion (which has no planCompletedBy marker). */
+function recalculatePlanDerivedCompletion(p) {
+  const entries = p.planPartProgress && typeof p.planPartProgress === 'object'
+    ? Object.entries(p.planPartProgress)
+    : [];
+  const winner = entries.find(([, entry]) => {
+    const total = Number(entry && entry.total) || 0;
+    const completed = Array.isArray(entry && entry.completed) ? new Set(entry.completed.map(Number)) : new Set();
+    return total > 1 && completed.size >= total;
+  });
+  if (winner) {
+    p.done = true;
+    p.planCompletedBy = winner[0];
+    p.planCompletedPartsTotal = Number(winner[1].total);
+  } else if (p.planCompletedBy) {
+    p.done = false;
+    delete p.planCompletedBy;
+    delete p.planCompletedPartsTotal;
+  }
+}
+
+/* Read normalized progress for one plan shape. Editing a plan's day count
+   invalidates only that plan's old part indices and, if necessary, its derived
+   whole-chapter completion. */
+function getPlanPartProgress(chId, planId, totalParts) {
   if (!appState.progress[chId]) appState.progress[chId] = {};
-  const wasDone = appState.progress[chId].done;
-  appState.progress[chId].done = !wasDone;
-  try { _cachedRemainingCount = null; } catch (e) {} // invalidate countdown cache
-  if (!wasDone) {
-    appState.progress[chId].completedAt = new Date().toISOString();
-    if (!appState.progress[chId].nextRevisionAt && typeof addDaysISO === 'function') {
-      appState.progress[chId].nextRevisionAt = addDaysISO(new Date(), 1);
+  const p = appState.progress[chId];
+  const key = planPartProgressKey(planId);
+  const total = Math.max(2, Number(totalParts) || 2);
+  if (!p.planPartProgress || typeof p.planPartProgress !== 'object' || Array.isArray(p.planPartProgress)) {
+    p.planPartProgress = {};
+  }
+  let entry = p.planPartProgress[key];
+  if (entry && Number(entry.total) !== total) {
+    delete p.planPartProgress[key];
+    entry = null;
+    recalculatePlanDerivedCompletion(p);
+  }
+  const completed = new Set(entry && Array.isArray(entry.completed)
+    ? entry.completed.map(Number).filter(n => n >= 1 && n <= total)
+    : []);
+  const completedDates = entry && entry.completedDates && typeof entry.completedDates === 'object'
+    ? { ...entry.completedDates }
+    : {};
+  return { p, key, total, completed, completedDates };
+}
+
+/* Apply a planner completion transition. Multi-day topics persist numbered
+   parts per saved plan and only mark the chapter done after every part is
+   complete. Calls without valid part metadata retain legacy behavior. */
+function setPlanTopicProgress(chId, done, partIndex, totalParts, planId) {
+  if (!chId) return { changed:false, isMultiPart:false, chapterDone:false };
+  if (!appState.progress[chId]) appState.progress[chId] = {};
+  const p = appState.progress[chId];
+  const idx = Number(partIndex) || 0;
+  const total = Math.max(1, Number(totalParts) || 1);
+  const isMultiPart = idx >= 1 && total > 1 && idx <= total;
+  const wasChapterDone = !!p.done;
+  let changed = false;
+  let completedCount = 0;
+
+  if (isMultiPart) {
+    const configured = configuredPlanPartTotal(planId, chId);
+    if (!configured.found || (configured.total > 0 && configured.total !== total)) {
+      return { changed:false, stale:true, isMultiPart:true, chapterDone:!!p.done, completedCount:0, totalParts:total };
+    }
+    const state = getPlanPartProgress(chId, planId, total);
+    const wasPartDone = state.completed.has(idx);
+    if (done) {
+      state.completed.add(idx);
+      const today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
+      state.completedDates[idx] = today;
+    } else {
+      state.completed.delete(idx);
+      delete state.completedDates[idx];
+    }
+    changed = wasPartDone !== !!done;
+    p.planPartProgress[state.key] = {
+      total,
+      completed: Array.from(state.completed).sort((a, b) => a - b),
+      completedDates: state.completedDates
+    };
+    completedCount = state.completed.size;
+    if (completedCount === total) {
+      p.done = true;
+      p.planCompletedBy = state.key;
+      p.planCompletedPartsTotal = total;
+    } else if (p.planCompletedBy === state.key) {
+      p.done = false;
+      delete p.planCompletedBy;
+      delete p.planCompletedPartsTotal;
+      recalculatePlanDerivedCompletion(p);
+    } else if (!wasChapterDone) {
+      p.done = false;
+    }
+  } else {
+    changed = wasChapterDone !== !!done || !!p.planPartProgress;
+    p.done = !!done;
+    /* A manual whole-chapter action supersedes all saved-plan part progress. */
+    delete p.planPartProgress;
+    delete p.planCompletedBy;
+    delete p.planCompletedPartsTotal;
+  }
+
+  if (!wasChapterDone && p.done) {
+    p.completedAt = new Date().toISOString();
+    if (!p.nextRevisionAt && typeof addDaysISO === 'function') {
+      p.nextRevisionAt = addDaysISO(new Date(), 1);
     }
     if (typeof updateStreak === 'function') updateStreak();
+  }
+  try { _cachedRemainingCount = null; } catch (e) {}
+  return { changed, stale:false, isMultiPart, chapterDone:!!p.done, completedCount, totalParts:total };
+}
+
+/* Toggle a scheduled study part, or a whole chapter for legacy/single-day
+   callers and the Completed Topics undo action. */
+function togglePlanTopicDone(chId, subId, partIndex, totalParts, planId) {
+  if (!chId) return;
+  const idx = Number(partIndex) || 0;
+  const total = Math.max(1, Number(totalParts) || 1);
+  const isMultiPart = idx >= 1 && total > 1 && idx <= total;
+  const p = appState.progress[chId] || {};
+  const partState = isMultiPart ? getPlanPartProgress(chId, planId, total) : null;
+  const currentlyDone = isMultiPart ? partState.completed.has(idx) : !!p.done;
+  const result = setPlanTopicProgress(chId, !currentlyDone, idx, total, planId);
+
+  if (result.stale) {
+    showToast('This task belongs to an older plan version. Refresh the plan first.', 'info');
+    return;
+  }
+  if (result.chapterDone) {
     showToast('Topic complete! 🎯 Moved to Completed.', 'success');
+  } else if (result.isMultiPart && !currentlyDone) {
+    const remaining = result.totalParts - result.completedCount;
+    showToast(`Part ${idx}/${total} complete — ${remaining} remaining.`, 'success');
+  } else if (result.isMultiPart) {
+    showToast(`Part ${idx}/${total} moved back to your plan.`, 'info');
   } else {
     showToast('Topic moved back to your plan.', 'info');
   }
   if (typeof saveProgress === 'function') saveProgress();
 
-  /* Refresh planner surfaces: the calendar (→ day view → scheduled + completed
-     cards) and the generated timetable output (so a checked-off topic drops out
-     of the active plan, since buildPlanSchedule excludes done chapters). */
+  /* Refresh planner surfaces so only the completed numbered part drops out;
+     remaining parts stay scheduled until the final one is checked. */
   try { if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar(); } catch (e) {}
   try {
     if (window._planConfig && window._planConfig.planType && typeof generateTimetable === 'function') {
