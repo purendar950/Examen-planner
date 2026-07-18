@@ -6,50 +6,140 @@
 <title>Kiro Key Test</title>
 <style>
   * { box-sizing: border-box; }
-  body { font-family: ui-monospace, monospace; max-width: 560px; margin: 40px auto; padding: 0 16px; }
-  textarea { width: 100%; min-height: 80px; }
-  button { margin-top: 10px; padding: 8px 16px; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { color: #555; margin-bottom: 24px; font-size: 0.95rem; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.9rem; }
+  .field { margin-bottom: 16px; }
+  select { width: 100%; padding: 10px 12px; font-size: 0.95rem; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; appearance: none; background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23667085' stroke-width='1.67' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+  select:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.1); }
+  textarea { width: 100%; min-height: 90px; padding: 10px 12px; font-size: 0.95rem; border: 1px solid #d0d5dd; border-radius: 8px; font-family: inherit; resize: vertical; }
+  textarea:focus { outline: none; border-color: #7c3aed; box-shadow: 0 0 0 3px rgba(124,58,237,0.1); }
+  button { margin-top: 8px; padding: 10px 20px; font-size: 0.95rem; font-weight: 600; border: none; border-radius: 8px; background: #7c3aed; color: #fff; cursor: pointer; transition: background 0.15s; }
+  button:hover { background: #6d28d9; }
   button:disabled { opacity: 0.5; cursor: default; }
-  pre { background: #f2f1ec; padding: 12px; white-space: pre-wrap; word-break: break-word; min-height: 40px; }
-  .err { color: #a3372c; }
+  .model-info { font-size: 0.8rem; color: #667085; margin-top: 4px; }
+  .model-credit { display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; background: #f0e6ff; color: #7c3aed; margin-right: 6px; }
+  pre { background: #f8f8f6; border: 1px solid #e5e5e0; padding: 14px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; min-height: 50px; font-size: 0.9rem; line-height: 1.5; }
+  .err { color: #dc2626; background: #fef2f2; border-color: #fecaca; }
+  #status { margin: 10px 0; font-size: 0.85rem; color: #555; }
+  .status-ok { color: #16a34a; font-weight: 600; }
+  .status-err { color: #dc2626; font-weight: 600; }
 </style>
 </head>
 <body>
-  <h1>Kiro key test</h1>
-  <p>Sends a prompt to the backend, which calls kiro-cli. The key itself stays server-side.</p>
-  <textarea id="prompt">Say hello and confirm you are working.</textarea>
+  <h1>Kiro Key Test</h1>
+  <p class="subtitle">Sends a prompt to the backend, which calls kiro-cli. The key itself stays server-side.</p>
+
+  <div class="field">
+    <label for="model">Model</label>
+    <select id="model">
+      <option value="">Auto (optimal for task)</option>
+      <optgroup label="Anthropic">
+        <option value="claude-sonnet-5">Claude Sonnet 5 — 1.3x credit</option>
+        <option value="claude-opus-4.8">Claude Opus 4.8 — 2.2x credit</option>
+        <option value="claude-opus-4.7">Claude Opus 4.7 — 2.2x credit</option>
+        <option value="claude-opus-4.6">Claude Opus 4.6 — 2.2x credit</option>
+        <option value="claude-sonnet-4.6">Claude Sonnet 4.6 — 1.3x credit</option>
+        <option value="claude-opus-4.5">Claude Opus 4.5 — 2.2x credit</option>
+        <option value="claude-sonnet-4.5">Claude Sonnet 4.5 — 1.3x credit</option>
+        <option value="claude-sonnet-4">Claude Sonnet 4 — 1.3x credit</option>
+        <option value="claude-haiku-4.5">Claude Haiku 4.5 — 0.4x credit</option>
+      </optgroup>
+      <optgroup label="OpenAI">
+        <option value="gpt-5.6-sol">GPT 5.6 Sol — 2.4x credit</option>
+        <option value="gpt-5.6-terra">GPT 5.6 Terra — 1.2x credit</option>
+        <option value="gpt-5.6-luna">GPT 5.6 Luna — 0.6x credit</option>
+      </optgroup>
+      <optgroup label="DeepSeek">
+        <option value="deepseek-3.2">DeepSeek V3.2 — 0.25x credit</option>
+      </optgroup>
+      <optgroup label="MiniMax">
+        <option value="minimax-m2.5">MiniMax M2.5 — 0.25x credit</option>
+        <option value="minimax-m2.1">MiniMax M2.1 — 0.15x credit</option>
+      </optgroup>
+      <optgroup label="Zhipu">
+        <option value="glm-5">GLM 5 — 0.5x credit</option>
+      </optgroup>
+      <optgroup label="Alibaba">
+        <option value="qwen3-coder-next">Qwen3 Coder Next — 0.05x credit</option>
+      </optgroup>
+    </select>
+    <div class="model-info" id="model-info">Models chosen by task for optimal usage and consistent quality</div>
+  </div>
+
+  <div class="field">
+    <label for="prompt">Prompt</label>
+    <textarea id="prompt">Say hello and confirm you are working.</textarea>
+  </div>
+
   <button id="send">Send to Kiro</button>
   <div id="status"></div>
   <pre id="output">Response will appear here.</pre>
+
   <script>
     const btn = document.getElementById('send');
     const promptEl = document.getElementById('prompt');
+    const modelEl = document.getElementById('model');
     const output = document.getElementById('output');
     const status = document.getElementById('status');
+    const modelInfo = document.getElementById('model-info');
+
+    const MODEL_DESCRIPTIONS = {
+      '': 'Models chosen by task for optimal usage and consistent quality',
+      'claude-sonnet-5': 'Experimental preview of Claude Sonnet 5 with 1M context window',
+      'claude-opus-4.8': 'Claude Opus 4.8 model with 1M context window',
+      'claude-opus-4.7': 'Claude Opus 4.7 model with 1M context window',
+      'claude-opus-4.6': 'Claude Opus 4.6 model with 1M context window',
+      'claude-sonnet-4.6': 'Claude Sonnet 4.6 model with 1M context window',
+      'claude-opus-4.5': 'Claude Opus 4.5 model',
+      'claude-sonnet-4.5': 'Claude Sonnet 4.5 model',
+      'claude-sonnet-4': 'Hybrid reasoning and coding for regular use',
+      'claude-haiku-4.5': 'The latest Claude Haiku model',
+      'gpt-5.6-sol': 'Experimental preview of OpenAI GPT 5.6 Sol with 272k context window',
+      'gpt-5.6-terra': 'Experimental preview of OpenAI GPT 5.6 Terra with 272k context window',
+      'gpt-5.6-luna': 'Experimental preview of OpenAI GPT 5.6 Luna with 272k context window',
+      'deepseek-3.2': 'Experimental preview of DeepSeek V3.2',
+      'minimax-m2.5': 'MiniMax M2.5 model',
+      'minimax-m2.1': 'Experimental preview of MiniMax M2.1',
+      'glm-5': 'GLM-5 model',
+      'qwen3-coder-next': 'Experimental preview of Qwen3 Coder Next',
+    };
+
+    modelEl.addEventListener('change', () => {
+      modelInfo.textContent = MODEL_DESCRIPTIONS[modelEl.value] || '';
+    });
+
     btn.addEventListener('click', async () => {
       btn.disabled = true;
       status.textContent = 'Waiting for response...';
+      status.className = '';
       output.textContent = '';
       output.classList.remove('err');
       try {
+        const body = { prompt: promptEl.value };
+        if (modelEl.value) body.model = modelEl.value;
         const res = await fetch('/api/test-kiro', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: promptEl.value })
+          body: JSON.stringify(body)
         });
         const data = await res.json();
         if (data.ok) {
           output.textContent = data.response;
-          status.textContent = 'Success.';
+          status.textContent = 'Success.' + (data.model ? ' (model: ' + data.model + ')' : '');
+          status.className = 'status-ok';
         } else {
           output.textContent = data.error || 'Unknown error.';
           output.classList.add('err');
           status.textContent = 'Request failed.';
+          status.className = 'status-err';
         }
       } catch (err) {
         output.textContent = err.message;
         output.classList.add('err');
         status.textContent = 'Network error.';
+        status.className = 'status-err';
       } finally {
         btn.disabled = false;
       }
