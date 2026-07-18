@@ -499,8 +499,8 @@
       '.ai-view-toggle{display:flex;gap:6px;margin-bottom:10px}',
       '.ai-view-toggle button{flex:1;cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--muted,#8b93a7);border-radius:8px;padding:7px 10px;font-size:0.78rem;font-weight:600;font-family:inherit}',
       '.ai-view-toggle button.on{background:var(--accent,#00c896);color:#04120d;border-color:var(--accent,#00c896)}',
-      '.main-content.ai-wide{max-width:none!important}',
-      '@media(min-width:861px){.yt-layout.ai-split{grid-template-columns:1fr 1fr!important}}',
+      '.main-content.ai-wide{max-width:1500px!important}',
+      '@media(min-width:841px){.yt-layout.ai-split{grid-template-columns:minmax(0,3fr) minmax(0,2fr)!important}}',
       '.ai-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}',
       '.ai-chip{cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border-radius:999px;padding:5px 10px;font-size:0.74rem}',
       '.ai-chat{max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:8px}',
@@ -1712,7 +1712,7 @@
     fillStudyModels(pid, def);
   }
   function panelHtml() {
-    return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">🎓 AI Study</span>' +
+    return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">AI Study</span>' +
       '<select id="ai-provider" title="AI provider" style="margin-left:auto"><option value="">Auto</option></select>' +
       '<select id="ai-model" title="AI model" style="display:none"></select>' +
       '<select id="ai-lang" title="Output language">' +
@@ -1720,7 +1720,7 @@
       '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
   }
 
-  /* ── right-column: [Course Content | AI Study] toggle + 50/50 split ── */
+  /* ── right-column: [Course Content | AI Study] toggle + 60/40 player/panel split ── */
   function ytLayout() { return document.querySelector('#page-youtube .yt-layout'); }
   function rightCol() { var l = ytLayout(); return l ? (l.querySelector('.yt-panel') || l.children[1]) : null; }
   function currentView() { return localStorage.getItem('aiView') === 'ai' ? 'ai' : 'course'; }
@@ -1781,42 +1781,22 @@
       var cv = curVid();
       if (cv !== _statusVid) { _statusVid = cv; checkStatus(cv); }
     }
-    alignPlayerToNotes();   // keep the player top-aligned with the notes box (or reset in course view)
+    // The player and the selected right-hand workspace always share the same
+    // grid-row start. Never add JS-calculated padding: it caused the large
+    // blank area above the player on tablet/desktop when AI controls wrapped.
+    alignPlayerToNotes();
   }
 
-  /* ── Keep the video PLAYER top-aligned with the NOTES box in the wide,
-        side-by-side AI Study view. The AI panel's dropdowns / tabs / Generate /
-        language chips sit above the notes, so we pad the TOP of the left player
-        column to push the player down level with the notes box (#ai-sub). Only
-        active in AI Study on wide screens; reset otherwise. ── */
-  var _alignRO = null;
+  /* Keep both workspace columns aligned to the top. Earlier versions measured
+     the notes box and padded the player column to match it; wrapped AI controls
+     made that padding hundreds of pixels tall on tablets. CSS grid now owns the
+     alignment, so this helper only clears stale inline padding from old sessions. */
   function alignPlayerToNotes() {
     var layout = ytLayout();
     var leftCol = layout && layout.children[0];
-    if (!leftCol) return;
-    var wide = !window.matchMedia || window.matchMedia('(min-width:861px)').matches;
-    var active = layout.classList.contains('ai-split') && currentView() === 'ai' && wide;
-    if (!active) { leftCol.style.paddingTop = ''; return; }
-    // anchor = the notes content box (#ai-sub) when a tab has it, else the body.
-    var anchor = document.getElementById('ai-sub') || document.getElementById('ai-body');
-    if (!anchor) { leftCol.style.paddingTop = ''; return; }
-    // leftCol's top edge is the grid-row top (unaffected by its own padding), and
-    // the anchor lives in the OTHER column, so this measurement is stable.
-    var top = anchor.getBoundingClientRect().top - leftCol.getBoundingClientRect().top;
-    leftCol.style.paddingTop = (top > 0 ? Math.round(top) : 0) + 'px';
+    if (leftCol) leftCol.style.paddingTop = '';
   }
-  // Re-align whenever the AI panel's content reflows (tab switch, chips wrap,
-  // notes stream in, etc.) plus on viewport resize.
   function setupAlignSync() {
-    var ai = document.getElementById('ai-study-panel');
-    if (ai && !_alignRO && typeof ResizeObserver !== 'undefined') {
-      _alignRO = new ResizeObserver(function () { alignPlayerToNotes(); });
-      _alignRO.observe(ai);
-    }
-    if (!setupAlignSync._win) {
-      setupAlignSync._win = true;
-      window.addEventListener('resize', function () { alignPlayerToNotes(); });
-    }
     alignPlayerToNotes();
   }
 

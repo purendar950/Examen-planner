@@ -1,46 +1,56 @@
     <div class="page" id="page-youtube">
-      <div class="mtab-bar">
-        <button class="mtab active" id="yt-sub-watch" onclick="ytSwitchSub('watch')"><span>&#9654;</span> Watch</button>
-        <button class="mtab" id="yt-sub-organiser" onclick="ytSwitchSub('organiser')"><span style="color:#FF4444;">&#128203;</span> Playlist Organiser</button>
-      </div>
+      <header class="yt-workspace-head">
+        <div class="yt-workspace-copy">
+          <span class="yt-workspace-eyebrow">Focused learning workspace</span>
+          <h2><span aria-hidden="true">▶</span> YouTube Study</h2>
+          <p>Watch lectures, organise courses, capture key moments, and turn videos into study material.</p>
+        </div>
+        <div class="mtab-bar yt-workspace-tabs" aria-label="YouTube workspace views">
+          <button class="mtab active" id="yt-sub-watch" onclick="ytSwitchSub('watch')"><span aria-hidden="true">▶</span> Watch</button>
+          <button class="mtab" id="yt-sub-organiser" onclick="ytSwitchSub('organiser')"><span aria-hidden="true">▤</span> Course Library</button>
+        </div>
+      </header>
 
       <!-- ═══ WATCH sub-view ═══ -->
       <div class="msubview active" id="yt-sub-view-watch">
-      <div style="margin-bottom:1.25rem;">
-        <h2 style="margin-bottom:4px;">▶ YouTube Player</h2>
-        <p style="color:var(--muted);font-size:0.82rem;">Playlist ya single video URL paste karo aur seedha yahan dekho. Notes, progress tracking, aur chapter links sab yahan hain.</p>
-      </div>
+      <section class="yt-launch-card" aria-label="Open a YouTube lesson">
+        <label class="yt-launch-label" for="yt-url-input">Start a lesson</label>
+        <div class="yt-input-bar">
+          <span class="yt-input-icon" aria-hidden="true">▶</span>
+          <input type="text" class="yt-url-input" id="yt-url-input"
+            placeholder="Paste a YouTube video or playlist URL"
+            autocomplete="off" inputmode="url"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();ytPlay();}"
+            oninput="ytInputChange(this.value)"
+            onpaste="setTimeout(()=>ytInputChange(document.getElementById('yt-url-input').value),0)">
+          <button class="btn-yt-play" id="yt-play-btn" onclick="ytPlay()" disabled><span aria-hidden="true">▶</span> Play</button>
+        </div>
+        <div class="yt-error-msg" id="yt-err" role="alert"></div>
 
-      <!-- URL input bar -->
-      <div class="yt-input-bar">
-        <input type="text" class="yt-url-input" id="yt-url-input"
-          placeholder="YouTube playlist ya video URL paste karo... (e.g. youtube.com/playlist?list=PL...)"
-          oninput="ytInputChange(this.value)"
-          onpaste="setTimeout(()=>ytInputChange(document.getElementById('yt-url-input').value),0)">
-        <button class="btn-yt-play" id="yt-play-btn" onclick="ytPlay()" disabled>
-          ▶ Play
-        </button>
-      </div>
-      <div class="yt-error-msg" id="yt-err"></div>
+        <!-- Resume Last Video Banner -->
+        <div class="yt-resume-banner" id="yt-resume-banner">
+          <span class="yt-resume-icon" aria-hidden="true">↺</span>
+          <div class="yt-resume-copy">
+            <span>Continue watching</span>
+            <div class="yt-resume-title" id="yt-resume-title">Resume last video</div>
+          </div>
+          <button class="yt-resume-btn" onclick="ytResume()">Resume <span aria-hidden="true">→</span></button>
+          <button class="yt-resume-dismiss" onclick="ytDismissResume()" title="Dismiss" aria-label="Dismiss resume suggestion">×</button>
+        </div>
+      </section>
 
-      <!-- Resume Last Video Banner -->
-      <div class="yt-resume-banner" id="yt-resume-banner">
-        <span style="font-size:1rem;flex-shrink:0;">⏮</span>
-        <div class="yt-resume-title" id="yt-resume-title">Resume last video</div>
-        <button class="yt-resume-btn" onclick="ytResume()">▶ Resume</button>
-        <button class="yt-resume-dismiss" onclick="ytDismissResume()" title="Dismiss">×</button>
-      </div>
       <div class="yt-course-header" id="yt-course-header">
         <div class="yt-course-thumb" id="yt-course-thumb"></div>
         <div class="yt-course-info">
+          <span class="yt-course-kicker">Now studying</span>
           <div class="yt-course-title" id="yt-course-title">Loading...</div>
           <div class="yt-course-sub" id="yt-course-sub"></div>
         </div>
       </div>
 
       <div class="yt-layout">
-        <!-- Left: player + meta + Notes -->
-        <div>
+        <!-- Left: player, controls, and chapter links -->
+        <div class="yt-player-column">
           <div class="yt-player-wrap" id="yt-player-wrap">
             <div class="yt-placeholder" id="yt-placeholder">
               <div class="yt-placeholder-icon">▶</div>
@@ -49,47 +59,75 @@
             <div id="yt-player" style="display:none;width:100%;height:100%;"></div>
           </div>
           <div class="yt-meta-bar" id="yt-meta-bar" style="display:none">
-            <span class="yt-now-title" id="yt-now-title"></span>
-            <div style="display:flex;align-items:center;gap:8px;">
-              <button class="yt-focus-btn" id="yt-focus-btn" onclick="ytToggleFocus()">🎯 Focus Mode</button>
-              <a id="yt-open-link" href="#" target="_blank" rel="noopener" class="yt-open-btn">↗ YouTube</a>
+            <div class="yt-now-playing">
+              <span class="yt-live-dot" aria-hidden="true"></span>
+              <div class="yt-now-copy">
+                <span class="yt-now-label">Now playing</span>
+                <span class="yt-now-title" id="yt-now-title"></span>
+              </div>
+            </div>
+            <div class="yt-meta-actions">
+              <button class="yt-focus-btn" id="yt-focus-btn" onclick="ytToggleFocus()">◎ Focus</button>
+              <a id="yt-open-link" href="#" target="_blank" rel="noopener" class="yt-open-btn">Open YouTube <span aria-hidden="true">↗</span></a>
             </div>
           </div>
-          <!-- Speed Control Bar -->
+          <!-- Playback Control Bar: full range stays available in the select; common speeds remain one tap away. -->
           <div class="yt-speed-bar" id="yt-speed-bar">
-            <span style="font-size:0.7rem;color:var(--muted);font-weight:600;">⚡ Speed:</span>
-            <button class="yt-speed-btn" data-rate="0.5"  onclick="ytSetSpeed(0.5)">0.5x</button>
-            <button class="yt-speed-btn" data-rate="0.75" onclick="ytSetSpeed(0.75)">0.75x</button>
-            <button class="yt-speed-btn active" data-rate="1" onclick="ytSetSpeed(1)">1x</button>
-            <button class="yt-speed-btn" data-rate="1.25" onclick="ytSetSpeed(1.25)">1.25x</button>
-            <button class="yt-speed-btn" data-rate="1.5"  onclick="ytSetSpeed(1.5)">1.5x</button>
-            <button class="yt-speed-btn" data-rate="1.75" onclick="ytSetSpeed(1.75)">1.75x</button>
-            <button class="yt-speed-btn" data-rate="2"    onclick="ytSetSpeed(2)">2x</button>
-            <button class="yt-speed-btn" data-rate="2.25" onclick="ytSetSpeed(2.25)">2.25x</button>
-            <button class="yt-speed-btn" data-rate="2.5"  onclick="ytSetSpeed(2.5)">2.5x</button>
-            <button class="yt-speed-btn" data-rate="2.75" onclick="ytSetSpeed(2.75)">2.75x</button>
-            <button class="yt-speed-btn" data-rate="3"    onclick="ytSetSpeed(3)">3x</button>
-            <button class="yt-pip-btn" onclick="ytPiP()" title="Picture in Picture">📺 PiP</button>
+            <span class="yt-control-label">Playback</span>
+            <label class="yt-speed-select-wrap" for="yt-speed-select">
+              <span aria-hidden="true">⚡</span>
+              <select id="yt-speed-select" class="yt-speed-select" onchange="ytSetSpeed(parseFloat(this.value))" aria-label="Playback speed">
+                <option value="0.5">0.5×</option>
+                <option value="0.75">0.75×</option>
+                <option value="1" selected>1× Normal</option>
+                <option value="1.25">1.25×</option>
+                <option value="1.5">1.5×</option>
+                <option value="1.75">1.75×</option>
+                <option value="2">2×</option>
+                <option value="2.25">2.25×</option>
+                <option value="2.5">2.5×</option>
+                <option value="2.75">2.75×</option>
+                <option value="3">3×</option>
+              </select>
+            </label>
+            <div class="yt-speed-presets" aria-label="Quick playback speeds">
+              <button class="yt-speed-btn" data-rate="0.75" onclick="ytSetSpeed(0.75)">0.75×</button>
+              <button class="yt-speed-btn active" data-rate="1" onclick="ytSetSpeed(1)">1×</button>
+              <button class="yt-speed-btn" data-rate="1.25" onclick="ytSetSpeed(1.25)">1.25×</button>
+              <button class="yt-speed-btn" data-rate="1.5" onclick="ytSetSpeed(1.5)">1.5×</button>
+              <button class="yt-speed-btn" data-rate="2" onclick="ytSetSpeed(2)">2×</button>
+            </div>
+            <button class="yt-pip-btn" onclick="ytPiP()" title="Picture in Picture"><span aria-hidden="true">▣</span> PiP</button>
           </div>
 
-          <!-- Notes panel removed (use the 📂 Gallery for saved moments) -->
+          <!-- Notes panel removed (use the Gallery for saved moments) -->
 
           <!-- Saved chapter links section -->
-          <div class="yt-saved-section" style="margin-top:1.25rem;">
+          <section class="yt-saved-section">
             <div class="yt-saved-header">
-              <div class="section-title" style="margin:0">Chapter Links</div>
-              <span id="yt-saved-count" style="font-size:0.75rem;color:var(--muted)"></span>
+              <div>
+                <span class="yt-section-eyebrow">Quick access</span>
+                <div class="section-title">Chapter Links</div>
+              </div>
+              <span id="yt-saved-count" class="yt-saved-count"></span>
             </div>
             <div class="yt-saved-list" id="yt-saved-list">
-              <div class="yt-panel-empty">Koi bhi chapter mein YouTube link add nahi kiya abhi.<br>Syllabus tab mein chapter ke ▶ button par click karo.</div>
+              <div class="yt-chapter-empty">
+                <span class="yt-chapter-empty-icon" aria-hidden="true">↗</span>
+                <div><strong>No chapter links yet</strong><p>Add a YouTube link to any chapter from the Syllabus page.</p></div>
+                <button type="button" onclick="switchPage('syllabus')">Go to Syllabus</button>
+              </div>
             </div>
-          </div>
+          </section>
         </div>
 
-        <!-- Right: playlist panel -->
-        <div class="yt-panel">
+        <!-- Right: course queue and AI Study workspace -->
+        <aside class="yt-panel" aria-label="Course and AI Study workspace">
           <div class="yt-panel-header">
-            <span class="yt-panel-title">Course Content</span>
+            <div>
+              <span class="yt-panel-eyebrow">Learning queue</span>
+              <span class="yt-panel-title">Course Content</span>
+            </div>
             <span class="yt-panel-count" id="yt-pl-count"></span>
           </div>
           <!-- Sort control -->
@@ -127,7 +165,7 @@
               Single video URL ke liye playlist nahi hoti.
             </div>
           </div>
-        </div>
+        </aside>
       </div>
       </div><!-- /yt-sub-view-watch -->
 

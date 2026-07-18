@@ -333,6 +333,12 @@
         document.querySelectorAll('.yt-speed-btn').forEach(function (b) {
           b.classList.toggle('active', parseFloat(b.dataset.rate) === rate);
         });
+        // The Turbo path bypasses youtube.js, so keep the compact selector in
+        // sync here as well when a quick-preset button changes the rate.
+        var speedSelect = document.getElementById('yt-speed-select');
+        if (speedSelect && Array.prototype.some.call(speedSelect.options, function (o) {
+          return parseFloat(o.value) === rate;
+        })) speedSelect.value = String(rate);
       } else {
         _origYtSetSpeed(rate);
       }
@@ -574,39 +580,40 @@
                       : 'Turn on Turbo for real 4x speed + Picture-in-Picture');
   }
 
-  /* The exact speed options shown in Turbo mode. The YouTube iframe caps at
-     2x, so anything >2 only applies in Turbo. Non-Turbo mode shows the <=2
-     subset. */
-  var TURBO_RATES = ['1', '1.5', '2', '2.25', '2.5', '2.75', '3', '3.25', '3.5', '3.75', '4'];
+  /* Keep every supported rate available in the compact selector. The five
+     common-rate buttons in the markup remain one-tap shortcuts; Turbo-only
+     rates are enabled only while Turbo is on. */
+  var TURBO_RATES = ['2.25', '2.5', '2.75', '3', '3.25', '3.5', '3.75', '4'];
 
   function applySpeedVisibility() {
     var bar = document.getElementById('yt-speed-bar');
     if (!bar) return;
 
-    // Inject any missing Turbo-rate buttons (e.g. 3.25, 3.5, 3.75, 4) before PiP.
-    var pip = bar.querySelector('.yt-pip-btn');
-    TURBO_RATES.forEach(function (r) {
-      if (!bar.querySelector('.yt-speed-btn[data-rate="' + r + '"]')) {
-        var b = document.createElement('button');
-        b.className = 'yt-speed-btn';
-        b.dataset.rate = r;
-        b.textContent = r + 'x';
-        b.setAttribute('onclick', 'ytSetSpeed(' + r + ')');
-        if (pip) bar.insertBefore(b, pip); else bar.appendChild(b);
+    var select = document.getElementById('yt-speed-select');
+    if (select) {
+      TURBO_RATES.forEach(function (r) {
+        var option = Array.prototype.find.call(select.options, function (o) { return o.value === r; });
+        if (!option) {
+          option = document.createElement('option');
+          option.value = r;
+          option.textContent = r + '×' + (parseFloat(r) > 3 ? ' Turbo' : '');
+          select.appendChild(option);
+        }
+        option.disabled = !turboEnabled && parseFloat(r) > 2;
+        option.hidden = !turboEnabled && parseFloat(r) > 2;
+      });
+      if (!turboEnabled && parseFloat(select.value) > 2) {
+        select.value = '2';
+        if (typeof ytSetSpeed === 'function') ytSetSpeed(2);
       }
-    });
+    }
 
-    // Visibility:
-    //  • Turbo ON  → show ONLY the Turbo set (hides 0.5 / 0.75 / 1.25 / 1.75).
-    //  • Turbo OFF → show the iframe-capable set (rate <= 2).
+    // Quick presets always represent the most useful iframe-compatible rates.
+    // Higher Turbo rates stay available from the adjacent selector.
     bar.querySelectorAll('.yt-speed-btn').forEach(function (b) {
-      var rate = b.dataset.rate;
-      var show = turboEnabled ? (TURBO_RATES.indexOf(rate) !== -1) : (parseFloat(rate) <= 2);
-      b.style.display = show ? '' : 'none';
+      b.style.display = parseFloat(b.dataset.rate) <= 2 ? '' : 'none';
     });
 
-    // TG (screenshot) button lives below the Turbo toggle (built in initUI);
-    // only usable in Turbo mode.
     var tgBtn = document.getElementById('yt-turbo-tg');
     if (tgBtn) tgBtn.style.display = turboEnabled ? '' : 'none';
   }

@@ -43,13 +43,13 @@
     .task-input-row select, .task-input-row button { flex: 1; min-width: 0; }
 
     /* YouTube tab */
-    .yt-input-bar { flex-direction: column; }
+    .yt-input-bar { grid-template-columns: auto minmax(0,1fr); }
     .yt-url-input { min-width: 0; width: 100%; }
-    .btn-yt-play { width: 100%; justify-content: center; }
+    .btn-yt-play { grid-column: 1 / -1; width: 100%; justify-content: center; }
     .yt-video-list { max-height: 340px; }
     .yt-fmt-btn { width: 34px; height: 34px; }
     .yt-color-dot { width: 22px; height: 22px; }
-    .yt-speed-bar { overflow-x: auto; flex-wrap: nowrap; padding-bottom: 4px; }
+    .yt-speed-bar { flex-wrap: wrap; }
     .yt-meta-bar { gap: 6px; }
 
     /* Mock tests */
@@ -85,14 +85,14 @@
 (function() {
   const st = document.createElement('style');
   st.textContent = `
-  /* Stack player above Course Content earlier */
-  @media (max-width: 1000px) {
+  /* Keep the two-column study workspace through landscape tablets. */
+  @media (max-width: 840px) {
     .yt-layout { grid-template-columns: 1fr !important; gap: 1rem; }
     .yt-panel { width: 100%; }
   }
   /* Grid children must be allowed to shrink — prevents the player rendering
      wider than the screen and cutting off YouTube's right-side controls */
-  .yt-layout > div { min-width: 0; }
+  .yt-layout > * { min-width: 0; }
   .yt-layout { max-width: 100%; }
 
   @media (max-width: 768px) {
@@ -115,9 +115,10 @@
     .yt-player-wrap > #yt-turbo-badge { top: 10px !important; left: 10px !important; width: auto !important; height: auto !important; pointer-events: none; }
     .yt-player-wrap > .ss-fs-flash { width: auto !important; height: auto !important; }
 
-    /* Meta bar: title on its own line, buttons wrap below */
+    /* Meta bar: title and actions wrap without changing the player position. */
     .yt-meta-bar { flex-wrap: wrap; row-gap: 6px; }
-    .yt-now-title { flex-basis: 100%; white-space: normal; line-height: 1.4; }
+    .yt-now-playing { flex-basis: 100%; }
+    .yt-now-title { white-space: normal; line-height: 1.4; }
 
     /* Banners and headers wrap instead of overflowing */
     .yt-course-header { flex-wrap: wrap; }

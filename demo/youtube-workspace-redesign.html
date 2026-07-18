@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StudyPlanner — YouTube Workspace Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f3f7f9;
+      --surface: #eef4f5;
+      --card: #ffffff;
+      --card-2: #f8fbfb;
+      --border: #dce7e8;
+      --border-strong: #c9d9db;
+      --text: #172226;
+      --muted: #64757b;
+      --soft: #8a999e;
+      --accent: #00bd8b;
+      --accent-strong: #009c73;
+      --accent-soft: #dff8f0;
+      --red: #ef4444;
+      --amber: #f59e0b;
+      --blue: #3b82f6;
+      --shadow: 0 12px 36px rgba(28, 61, 66, .09);
+      --shadow-sm: 0 5px 18px rgba(28, 61, 66, .07);
+      --radius-xl: 22px;
+      --radius-lg: 16px;
+      --radius-md: 12px;
+      --font: "Inter", system-ui, sans-serif;
+    }
+    html[data-theme="dark"] {
+      --bg: #081015;
+      --surface: #101b21;
+      --card: #121f26;
+      --card-2: #17262e;
+      --border: #263840;
+      --border-strong: #344a53;
+      --text: #edf7f5;
+      --muted: #8da0a7;
+      --soft: #6e8188;
+      --accent: #19d3a1;
+      --accent-strong: #46e2b8;
+      --accent-soft: rgba(25, 211, 161, .12);
+      --shadow: 0 18px 48px rgba(0, 0, 0, .28);
+      --shadow-sm: 0 8px 24px rgba(0, 0, 0, .22);
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--bg); color-scheme: light; }
+    html[data-theme="dark"] { color-scheme: dark; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); font-family: var(--font); }
+    button, input, select { font: inherit; }
+    button { color: inherit; }
+    .icon { width: 18px; height: 18px; display: inline-block; vertical-align: middle; }
+    .app-shell { min-height: 100vh; }
+    .topbar {
+      position: sticky; top: 0; z-index: 30;
+      height: 64px; padding: 0 clamp(16px, 3vw, 34px);
+      display: flex; align-items: center; justify-content: space-between;
+      background: color-mix(in srgb, var(--card) 91%, transparent);
+      border-bottom: 1px solid var(--border); backdrop-filter: blur(18px);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--accent); color: #06251c; font-size: 13px; font-weight: 900; }
+    .brand-name { font-weight: 800; letter-spacing: -.04em; white-space: nowrap; }
+    .brand-name span { color: var(--accent-strong); }
+    .exam-chip { padding: 5px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-strong); font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .ghost-icon, .avatar { border: 1px solid var(--border); background: var(--card-2); cursor: pointer; }
+    .ghost-icon { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; }
+    .avatar { width: 36px; height: 36px; border-radius: 50%; color: var(--accent-strong); font-weight: 800; }
+    .nav {
+      height: 50px; padding: 0 clamp(16px, 3vw, 34px);
+      display: flex; align-items: center; gap: 6px; overflow-x: auto;
+      background: var(--card); border-bottom: 1px solid var(--border); scrollbar-width: none;
+    }
+    .nav::-webkit-scrollbar { display: none; }
+    .nav-item { flex: 0 0 auto; padding: 8px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; }
+    .nav-item.active { color: var(--accent-strong); background: var(--accent-soft); }
+    .main { width: min(1440px, 100%); margin: 0 auto; padding: 22px clamp(14px, 2.8vw, 34px) 48px; }
+    .workspace-head { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 14px; }
+    .eyebrow { display: block; margin-bottom: 5px; color: var(--accent-strong); font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(20px, 2vw, 28px); letter-spacing: -.04em; }
+    .workspace-copy p { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .segmented { display: inline-flex; padding: 4px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); }
+    .segmented button { min-height: 34px; padding: 0 15px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; }
+    .segmented button.active { background: var(--card); color: var(--accent-strong); box-shadow: var(--shadow-sm); }
+    .launch-card {
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
+      padding: 10px; margin-bottom: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow-sm);
+    }
+    .launch-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: #ffebe9; color: var(--red); }
+    .launch-card input { width: 100%; height: 38px; padding: 0 4px; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 13px; }
+    .launch-card input::placeholder { color: var(--soft); }
+    .primary-btn { height: 38px; padding: 0 17px; border: 0; border-radius: 10px; background: var(--accent); color: #06251c; cursor: pointer; font-size: 12px; font-weight: 800; }
+    .course-strip {
+      display: flex; align-items: center; gap: 11px; min-width: 0; padding: 9px 12px; margin-bottom: 12px;
+      border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card);
+    }
+    .course-strip img { width: 58px; height: 34px; object-fit: cover; border-radius: 7px; }
+    .course-info { min-width: 0; flex: 1; }
+    .course-info small { display: block; margin-bottom: 2px; color: var(--accent-strong); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    .course-info strong, .course-info span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .course-info strong { font-size: 12px; }
+    .course-info span { margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .progress-pill { flex: 0 0 auto; padding: 6px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent-strong); font-size: 10px; font-weight: 800; }
+    .study-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 14px; align-items: start; }
+    .player-column, .side-panel { min-width: 0; }
+    .player-card { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-xl); background: #050809; box-shadow: var(--shadow); }
+    .video-frame { position: relative; aspect-ratio: 16/9; background: #050809; }
+    .video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .floating-save { position: absolute; right: 12px; bottom: 12px; z-index: 2; padding: 8px 11px; border: 1px solid rgba(255,255,255,.28); border-radius: 9px; background: rgba(6, 16, 20, .76); color: #fff; backdrop-filter: blur(10px); font-size: 10px; font-weight: 700; }
+    .now-bar { display: flex; align-items: center; gap: 12px; padding: 11px 13px; background: var(--card); }
+    .now-title { min-width: 0; flex: 1; }
+    .now-title small { display: block; margin-bottom: 3px; color: var(--accent-strong); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; }
+    .now-title strong { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .inline-actions { display: flex; gap: 6px; }
+    .small-btn { min-height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-2); color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 700; }
+    .small-btn:hover { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 46%, var(--border)); }
+    .control-deck { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 10px; margin-top: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); }
+    .control-label { color: var(--soft); font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .speed-select { height: 30px; padding: 0 28px 0 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-2); color: var(--text); font-size: 10px; font-weight: 700; }
+    .control-divider { width: 1px; height: 22px; background: var(--border); }
+    .tool-btn { min-height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-2); color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 700; }
+    .tool-btn.active { color: var(--accent-strong); border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); background: var(--accent-soft); }
+    .chapter-card { padding: 14px; margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); }
+    .section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .section-head h2 { margin: 0; font-size: 13px; }
+    .empty-links { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 11px; align-items: center; padding: 12px; border: 1px dashed var(--border-strong); border-radius: 11px; background: var(--card-2); }
+    .empty-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; background: var(--accent-soft); color: var(--accent-strong); font-weight: 900; }
+    .empty-links strong { display: block; margin-bottom: 3px; font-size: 11px; }
+    .empty-links p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+    .side-panel { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--shadow); }
+    .panel-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; padding: 6px; border-bottom: 1px solid var(--border); background: var(--card-2); }
+    .panel-switch button { height: 34px; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 800; }
+    .panel-switch button.active { background: var(--card); color: var(--accent-strong); box-shadow: var(--shadow-sm); }
+    .panel-view { display: none; }
+    .panel-view.active { display: block; }
+    .panel-head { padding: 14px; border-bottom: 1px solid var(--border); }
+    .panel-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .panel-head h2 { margin: 0; font-size: 13px; }
+    .count { color: var(--muted); font-size: 10px; }
+    .progress-row { display: flex; justify-content: space-between; gap: 10px; margin-top: 11px; color: var(--muted); font-size: 10px; }
+    .progress-row strong { color: var(--accent-strong); }
+    .track { height: 5px; margin-top: 6px; overflow: hidden; border-radius: 99px; background: var(--surface); }
+    .track span { display: block; width: 88%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #42ddb6); }
+    .queue-tools { display: flex; gap: 7px; padding: 9px 12px; border-bottom: 1px solid var(--border); background: var(--card-2); }
+    .queue-tools input { min-width: 0; flex: 1; height: 30px; padding: 0 9px; border: 1px solid var(--border); border-radius: 8px; outline: 0; background: var(--card); color: var(--text); font-size: 10px; }
+    .queue-tools select { width: 90px; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font-size: 9px; }
+    .video-list { max-height: 540px; overflow: auto; }
+    .video-item { display: grid; grid-template-columns: 21px 62px minmax(0, 1fr) 20px; gap: 9px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
+    .video-item:hover { background: var(--card-2); }
+    .video-item.active { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+    .video-num { color: var(--soft); font-size: 9px; text-align: center; }
+    .video-item img { width: 62px; height: 35px; object-fit: cover; border-radius: 6px; }
+    .video-copy { min-width: 0; }
+    .video-copy strong { display: -webkit-box; overflow: hidden; color: var(--text); font-size: 10px; font-weight: 600; line-height: 1.35; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .video-item.active .video-copy strong { color: var(--accent-strong); }
+    .video-copy span { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; }
+    .check { width: 18px; height: 18px; display: grid; place-items: center; border: 1.5px solid var(--border-strong); border-radius: 5px; color: #063b2c; font-size: 10px; }
+    .check.done { border-color: var(--accent); background: var(--accent); }
+    .ai-settings { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 7px; padding: 11px 12px; border-bottom: 1px solid var(--border); }
+    .status { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 10px; font-weight: 700; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+    .ai-settings select { min-width: 82px; height: 30px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-2); color: var(--text); font-size: 9px; }
+    .ai-tabs { display: flex; gap: 5px; padding: 9px 12px; overflow-x: auto; border-bottom: 1px solid var(--border); scrollbar-width: none; }
+    .ai-tabs::-webkit-scrollbar { display: none; }
+    .ai-tab { flex: 0 0 auto; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--card-2); color: var(--muted); cursor: pointer; font-size: 10px; font-weight: 700; }
+    .ai-tab.active { border-color: var(--accent); background: var(--accent); color: #06251c; }
+    .generate-bar { display: grid; grid-template-columns: 1fr 1fr auto; gap: 7px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    .generate-bar select { min-width: 0; height: 32px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-2); color: var(--text); font-size: 9px; }
+    .generate-bar button { height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--accent); color: #06251c; font-size: 10px; font-weight: 800; }
+    .notes-toolbar { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    .notes-toolbar span { min-width: 0; flex: 1; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .notes-toolbar button { height: 27px; padding: 0 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--card-2); color: var(--muted); font-size: 9px; font-weight: 700; }
+    .notes-paper { max-height: 510px; overflow: auto; padding: 18px 20px 26px 36px; background: repeating-linear-gradient(#fffef8 0, #fffef8 27px, #dbe8f6 28px); color: #223039; font-size: 11px; line-height: 1.75; }
+    .notes-paper h3 { margin: 0 0 10px; color: #bb2b2b; font-size: 17px; font-style: italic; }
+    .notes-paper h4 { margin: 17px 0 5px; color: #117a59; font-size: 12px; }
+    .notes-paper p { margin: 0 0 8px; }
+    .notes-paper strong { color: #0d6f52; }
+    .library-view { display: none; }
+    .library-view.active { display: block; }
+    .library-hero { display: grid; grid-template-columns: .85fr 1.15fr; gap: 22px; align-items: center; padding: 24px; border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border)); border-radius: var(--radius-xl); background: radial-gradient(circle at 8% 12%, var(--accent-soft), transparent 40%), var(--card); box-shadow: var(--shadow); }
+    .library-hero h2 { margin: 0 0 7px; font-size: 24px; letter-spacing: -.04em; }
+    .library-hero p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+    .import-box { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 7px; border: 1px solid var(--border); border-radius: 13px; background: var(--card-2); }
+    .import-box input { min-width: 0; height: 38px; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 12px; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0; }
+    .stat { padding: 15px; border: 1px solid var(--border); border-radius: 14px; background: var(--card); }
+    .stat strong, .stat span { display: block; }
+    .stat strong { font-size: 18px; }
+    .stat span { margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .course-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .course-card { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow-sm); }
+    .course-card img { width: 100%; aspect-ratio: 16/9; object-fit: cover; border-radius: 10px; }
+    .course-card h3 { margin: 3px 0 5px; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .course-card p { margin: 0 0 14px; color: var(--muted); font-size: 10px; }
+    .preview-banner { margin-top: 15px; padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--border)); border-radius: 11px; background: color-mix(in srgb, var(--blue) 8%, var(--card)); color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .hidden { display: none !important; }
+    .focus-mode .topbar, .focus-mode .nav, .focus-mode .workspace-head, .focus-mode .launch-card, .focus-mode .course-strip, .focus-mode .chapter-card { display: none; }
+    .focus-mode .main { width: min(1520px, 100%); padding-top: 18px; }
+    @media (max-width: 1080px) {
+      .study-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 10px; }
+      .video-item { grid-template-columns: 18px 54px minmax(0, 1fr) 18px; gap: 7px; padding: 9px; }
+      .video-item img { width: 54px; height: 31px; }
+      .control-deck { gap: 6px; }
+      .tool-btn { padding: 0 8px; }
+    }
+    @media (max-width: 840px) {
+      .main { padding-top: 16px; }
+      .workspace-head { align-items: flex-start; }
+      .study-grid { grid-template-columns: 1fr; }
+      .side-panel { box-shadow: var(--shadow-sm); }
+      .video-list { max-height: 390px; }
+      .notes-paper { max-height: 460px; }
+      .library-hero { grid-template-columns: 1fr; }
+      .course-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      .topbar { height: 58px; }
+      .brand-name { font-size: 14px; }
+      .exam-chip { display: none; }
+      .nav { height: 46px; padding-inline: 9px; }
+      .nav-item { padding: 7px 9px; font-size: 10px; }
+      .workspace-head { display: block; }
+      .workspace-head .segmented { width: 100%; margin-top: 12px; }
+      .workspace-head .segmented button { flex: 1; }
+      .workspace-copy p { max-width: 44ch; }
+      .launch-card { grid-template-columns: auto minmax(0, 1fr); }
+      .launch-card .primary-btn { grid-column: 1 / -1; width: 100%; }
+      .course-strip { align-items: flex-start; }
+      .progress-pill { display: none; }
+      .now-bar { align-items: flex-start; flex-direction: column; }
+      .inline-actions { width: 100%; }
+      .inline-actions .small-btn { flex: 1; }
+      .control-deck { align-items: stretch; }
+      .control-label, .control-divider { display: none; }
+      .speed-select, .tool-btn { flex: 1 1 calc(33.333% - 6px); min-width: 92px; }
+      .empty-links { grid-template-columns: auto minmax(0, 1fr); }
+      .empty-links .small-btn { grid-column: 1 / -1; width: 100%; }
+      .ai-settings { grid-template-columns: 1fr 1fr; }
+      .status { grid-column: 1 / -1; }
+      .generate-bar { grid-template-columns: 1fr 1fr; }
+      .generate-bar button { grid-column: 1 / -1; }
+      .notes-toolbar span { flex-basis: 100%; }
+      .notes-toolbar { flex-wrap: wrap; }
+      .stats { grid-template-columns: 1fr 1fr; }
+      .course-card { grid-template-columns: 110px minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell" id="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">SP</div>
+        <div class="brand-name">Study<span>Planner</span></div>
+        <span class="exam-chip">SSC CGL</span>
+      </div>
+      <div class="top-actions">
+        <button class="ghost-icon" id="theme-btn" type="button" aria-label="Toggle theme" title="Toggle theme">◐</button>
+        <button class="avatar" type="button" aria-label="Profile">P</button>
+      </div>
+    </header>
+    <nav class="nav" aria-label="Primary navigation">
+      <button class="nav-item">Dashboard</button>
+      <button class="nav-item">Syllabus</button>
+      <button class="nav-item">Planner</button>
+      <button class="nav-item">Mock Tests</button>
+      <button class="nav-item active">YouTube</button>
+      <button class="nav-item">Analysis</button>
+      <button class="nav-item">Quiz</button>
+    </nav>
+
+    <main class="main">
+      <div class="workspace-head">
+        <div class="workspace-copy">
+          <span class="eyebrow">Focused learning workspace</span>
+          <h1>YouTube Study</h1>
+          <p>Watch lectures, organise courses, capture key moments, and turn videos into study material.</p>
+        </div>
+        <div class="segmented" role="tablist" aria-label="YouTube views">
+          <button class="active" id="watch-tab" type="button">Watch</button>
+          <button id="library-tab" type="button">Course Library</button>
+        </div>
+      </div>
+
+      <section id="watch-view">
+        <div class="launch-card">
+          <div class="launch-icon" aria-hidden="true">▶</div>
+          <input value="https://youtube.com/watch?v=7y8Oi5_rfOs" aria-label="YouTube URL">
+          <button class="primary-btn" type="button">Play video</button>
+        </div>
+
+        <div class="course-strip">
+          <img src="https://i.ytimg.com/vi/7y8Oi5_rfOs/mqdefault.jpg" alt="Course thumbnail">
+          <div class="course-info">
+            <small>Now studying</small>
+            <strong>RRB Group D 2026 | Current Affairs Series</strong>
+            <span>Parmar Railway · 8 lessons</span>
+          </div>
+          <span class="progress-pill">88% complete</span>
+        </div>
+
+        <div class="study-grid">
+          <div class="player-column">
+            <div class="player-card">
+              <div class="video-frame">
+                <iframe src="https://www.youtube-nocookie.com/embed/7y8Oi5_rfOs?rel=0&modestbranding=1" title="Current Affairs lecture" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+                <button class="floating-save" type="button">+ Save moment</button>
+              </div>
+              <div class="now-bar">
+                <div class="now-title">
+                  <small>Now playing</small>
+                  <strong>RRB Group D 2026 | Current Affairs | Budget | Parmar Sir</strong>
+                </div>
+                <div class="inline-actions">
+                  <button class="small-btn" id="focus-btn" type="button">Focus</button>
+                  <button class="small-btn" type="button">Open YouTube ↗</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="control-deck" aria-label="Video tools">
+              <span class="control-label">Playback</span>
+              <select class="speed-select" aria-label="Playback speed">
+                <option>0.5×</option><option>0.75×</option><option selected>1× Normal</option><option>1.25×</option><option>1.5×</option><option>1.75×</option><option>2×</option><option>2.5×</option><option>3×</option>
+              </select>
+              <button class="tool-btn active" type="button">Turbo</button>
+              <button class="tool-btn" type="button">PiP</button>
+              <span class="control-divider"></span>
+              <button class="tool-btn" type="button">Save Moment</button>
+              <button class="tool-btn" type="button">Gallery <strong>92</strong></button>
+              <button class="tool-btn" type="button">This Video</button>
+            </div>
+
+            <section class="chapter-card">
+              <div class="section-head">
+                <div><span class="eyebrow">Quick access</span><h2>Chapter Links</h2></div>
+              </div>
+              <div class="empty-links">
+                <div class="empty-icon">↗</div>
+                <div><strong>No chapter links yet</strong><p>Add a YouTube link to any chapter from the Syllabus page.</p></div>
+                <button class="small-btn" type="button">Go to Syllabus</button>
+              </div>
+            </section>
+          </div>
+
+          <aside class="side-panel" aria-label="Course and AI workspace">
+            <div class="panel-switch">
+              <button data-panel="course" type="button">Course Content</button>
+              <button class="active" data-panel="ai" type="button">AI Study</button>
+            </div>
+
+            <section class="panel-view" id="course-panel">
+              <div class="panel-head">
+                <div class="panel-head-row"><h2>Course Content</h2><span class="count">8 videos</span></div>
+                <div class="progress-row"><span><strong>88%</strong> completed</span><span>7 of 8 videos</span></div>
+                <div class="track"><span></span></div>
+              </div>
+              <div class="queue-tools">
+                <input type="search" placeholder="Search lessons" aria-label="Search lessons">
+                <select aria-label="Sort lessons"><option>Oldest</option><option>Playlist</option><option>Newest</option></select>
+              </div>
+              <div class="video-list" id="video-list"></div>
+            </section>
+
+            <section class="panel-view active" id="ai-panel">
+              <div class="ai-settings">
+                <div class="status"><span class="status-dot"></span>AI Study ready</div>
+                <select aria-label="AI provider"><option>Auto model</option><option>Mistral</option><option>Cerebras</option></select>
+                <select aria-label="Output language"><option>Hinglish</option><option>English</option><option>Hindi</option></select>
+              </div>
+              <div class="ai-tabs" role="tablist">
+                <button class="ai-tab active" type="button">Notes</button>
+                <button class="ai-tab" type="button">Quiz</button>
+                <button class="ai-tab" type="button">Cards</button>
+                <button class="ai-tab" type="button">Tutor</button>
+              </div>
+              <div class="generate-bar">
+                <select aria-label="Notes type"><option>Comprehensive</option><option>Summary</option><option>Key insights</option></select>
+                <select aria-label="Notes style"><option>Topic notes</option><option>MCQ notes</option></select>
+                <button type="button">Generate</button>
+              </div>
+              <div class="notes-toolbar">
+                <span>tencent-hy · cached · Hinglish</span>
+                <button type="button">Follow</button>
+                <button type="button">PDF</button>
+                <button type="button">Regenerate</button>
+              </div>
+              <article class="notes-paper">
+                <h3>1. Central Government Schemes</h3>
+                <h4>National Centres of Excellence for Skilling</h4>
+                <p><strong>Union Budget 2025–26:</strong> National Centres of Excellence for Skilling will be set up with global expertise and partnerships.</p>
+                <p><strong>Locations:</strong> Bhubaneswar, Chennai, Hyderabad, Kanpur and Ludhiana.</p>
+                <h4>AGRI Fund</h4>
+                <p>Launched to support startups and rural enterprises with a central scheme worth ₹750 crore.</p>
+                <h4>SPREE 2025</h4>
+                <p>Launched by Employees' State Insurance Corporation to promote registration of employers and employees.</p>
+                <h4>Why it matters</h4>
+                <p>The lecture connects each scheme with the likely exam question pattern and relevant ministry.</p>
+              </article>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section class="library-view" id="library-view">
+        <div class="library-hero">
+          <div><span class="eyebrow">Your learning space</span><h2>Course Library</h2><p>Save a YouTube playlist or video, track progress, and turn long courses into practical study plans.</p></div>
+          <div class="import-box"><input placeholder="Paste playlist or video URL" aria-label="Course URL"><button class="primary-btn" type="button">Import course</button></div>
+        </div>
+        <div class="stats">
+          <div class="stat"><strong>4</strong><span>Courses</span></div>
+          <div class="stat"><strong>62</strong><span>Total videos</span></div>
+          <div class="stat"><strong>39</strong><span>Completed</span></div>
+          <div class="stat"><strong>8h 20m</strong><span>Remaining</span></div>
+        </div>
+        <div class="course-grid">
+          <article class="course-card"><img src="https://i.ytimg.com/vi/7y8Oi5_rfOs/mqdefault.jpg" alt="Course"><div><span class="eyebrow">In progress</span><h3>RRB Group D 2026 Current Affairs</h3><p>Parmar Railway · 8 videos</p><div class="track"><span></span></div></div></article>
+          <article class="course-card"><img src="https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg" alt="Course"><div><span class="eyebrow">Study plan active</span><h3>General Science Complete Course</h3><p>Study Academy · 24 videos</p><div class="track"><span style="width:42%"></span></div></div></article>
+        </div>
+      </section>
+
+      <div class="preview-banner"><strong>Interactive design preview:</strong> switch between Course Content and AI Study, open Course Library, toggle light/dark theme, and test responsive behavior by rotating or resizing your device. Backend actions are intentionally disabled in this visual preview.</div>
+    </main>
+  </div>
+  <script>
+    const videos = [
+      ['Current Affairs Topic 1', '15:42'], ['RRB Group D 2026 | Current Affairs — History', '51:30'],
+      ['RRB Group D 2026 | Current Affairs — Geography', '48:41'], ['RRB Group D 2026 | Current Affairs — Polity', '1:09:20'],
+      ['RRB Group D 2026 | Current Affairs — Science', '1:18:34'], ['RRB Group D 2026 | Current Affairs — Economy', '44:18'],
+      ['RRB Group D 2026 | Current Affairs — Reports', '39:22'], ['RRB Group D 2026 | Current Affairs | Budget', '57:12']
+    ];
+    document.getElementById('video-list').innerHTML = videos.map((video, index) => `
+      <div class="video-item ${index === 7 ? 'active' : ''}">
+        <span class="video-num">${index + 1}</span>
+        <img src="https://i.ytimg.com/vi/7y8Oi5_rfOs/mqdefault.jpg" alt="">
+        <div class="video-copy"><strong>${video[0]}</strong><span>${video[1]}</span></div>
+        <span class="check ${index < 7 ? 'done' : ''}">${index < 7 ? '✓' : ''}</span>
+      </div>`).join('');
+
+    document.querySelectorAll('.panel-switch button').forEach(button => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.panel-switch button').forEach(item => item.classList.toggle('active', item === button));
+        document.getElementById('course-panel').classList.toggle('active', button.dataset.panel === 'course');
+        document.getElementById('ai-panel').classList.toggle('active', button.dataset.panel === 'ai');
+      });
+    });
+    document.querySelectorAll('.ai-tab').forEach(button => {
+      button.addEventListener('click', () => document.querySelectorAll('.ai-tab').forEach(item => item.classList.toggle('active', item === button)));
+    });
+    const watchTab = document.getElementById('watch-tab');
+    const libraryTab = document.getElementById('library-tab');
+    watchTab.addEventListener('click', () => switchMainView('watch'));
+    libraryTab.addEventListener('click', () => switchMainView('library'));
+    function switchMainView(view) {
+      watchTab.classList.toggle('active', view === 'watch');
+      libraryTab.classList.toggle('active', view === 'library');
+      document.getElementById('watch-view').classList.toggle('hidden', view !== 'watch');
+      document.getElementById('library-view').classList.toggle('active', view === 'library');
+    }
+    document.getElementById('theme-btn').addEventListener('click', () => {
+      const root = document.documentElement;
+      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+    });
+    document.getElementById('focus-btn').addEventListener('click', () => {
+      document.getElementById('app-shell').classList.toggle('focus-mode');
+      document.getElementById('focus-btn').textContent = document.getElementById('app-shell').classList.contains('focus-mode') ? 'Exit focus' : 'Focus';
+    });
+  </script>
+</body>
+</html>

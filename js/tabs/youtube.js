@@ -269,8 +269,8 @@ function ytToggleFocus() {
   const btn = document.getElementById('yt-focus-btn');
   page.classList.toggle('yt-focus-active', ytFocusMode);
   btn.classList.toggle('active', ytFocusMode);
-  btn.textContent = ytFocusMode ? '🎯 Focus ON' : '🎯 Focus Mode';
-  if (ytFocusMode) showToast('Focus Mode ON — notes panel hidden 🎯', 'info');
+  btn.textContent = ytFocusMode ? '◎ Focus ON' : '◎ Focus';
+  if (ytFocusMode) showToast('Focus Mode ON — distractions hidden', 'info');
 }
 
 /* ── Tab input live validation ── */
@@ -695,6 +695,10 @@ function ytSetSpeed(rate) {
   }
   document.querySelectorAll('.yt-speed-btn').forEach(b =>
     b.classList.toggle('active', parseFloat(b.dataset.rate) === rate));
+  const speedSelect = document.getElementById('yt-speed-select');
+  if (speedSelect && Array.from(speedSelect.options).some(o => parseFloat(o.value) === rate)) {
+    speedSelect.value = String(rate);
+  }
 }
 
 /* ══════════════════════════════════════════════
@@ -1523,7 +1527,11 @@ function renderYtSavedList() {
 
   if (entries.length === 0) {
     countEl.textContent = '';
-    listEl.innerHTML = '<div class="yt-panel-empty" style="text-align:left;padding:0.85rem 0;font-size:0.82rem">Koi bhi chapter mein YouTube link add nahi kiya abhi.<br>Syllabus tab mein chapter ke <strong style="color:var(--accent)">▶</strong> button par click karo.</div>';
+    listEl.innerHTML = '<div class="yt-chapter-empty">' +
+      '<span class="yt-chapter-empty-icon" aria-hidden="true">↗</span>' +
+      '<div><strong>No chapter links yet</strong><p>Add a YouTube link to any chapter from the Syllabus page.</p></div>' +
+      '<button type="button" onclick="switchPage(\'syllabus\')">Go to Syllabus</button>' +
+      '</div>';
     return;
   }
   countEl.textContent = `${entries.length} chapter${entries.length>1?'s':''} linked`;
