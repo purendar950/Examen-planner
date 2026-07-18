@@ -706,9 +706,13 @@ const STUDY_PROVIDERS = {
               note: 'OpenAI-compatible gateway (multi-model)', keyUrl: '' },
   aicampus: { label: 'AICampus', host: 'ai-hub.aicampus.my', baseUrl: 'https://ai-hub.aicampus.my/v1', keyField: 'aicampusApiKeys', modelField: 'aicampusModel',
               models: ['minimax-m3', 'kimi-k2.7-code'], def: 'minimax-m3',
-              note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' }
+              note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' },
+  kiro:     { label: 'Kiro', host: 'kiro-key-test.onrender.com', baseUrl: 'https://kiro-key-test.onrender.com', keyField: 'kiroApiKeys', modelField: 'kiroModel',
+              models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
+              def: 'auto',
+              note: 'Kiro CLI headless (KIRO_API_KEY server-side) · multi-model', keyUrl: 'https://app.kiro.dev' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'kiro'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
