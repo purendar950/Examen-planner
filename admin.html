@@ -68,11 +68,16 @@
     <div id="nav-backdrop" class="nav-backdrop" onclick="closeAdminNav()" aria-hidden="true"></div>
     <aside class="sidebar" id="admin-navigation" aria-label="Admin navigation">
       <div class="sidebar-inner">
-        <div class="nav-search-wrap">
-          <span class="nav-search-icon" aria-hidden="true">⌕</span>
-          <label class="sr-only" for="admin-nav-search">Find a section</label>
-          <input id="admin-nav-search" class="nav-search" type="search" placeholder="Find a section…" autocomplete="off" oninput="filterAdminNav(this.value)">
-          <kbd>⌘K</kbd>
+        <div class="sidebar-tools">
+          <div class="nav-search-wrap">
+            <span class="nav-search-icon" aria-hidden="true">⌕</span>
+            <label class="sr-only" for="admin-nav-search">Find a section</label>
+            <input id="admin-nav-search" class="nav-search" type="search" placeholder="Find a section…" autocomplete="off" oninput="filterAdminNav(this.value)">
+            <kbd>⌘K</kbd>
+          </div>
+          <button id="sidebar-collapse-btn" class="sidebar-collapse-btn" type="button" onclick="toggleDesktopSidebar()" aria-label="Collapse sidebar" aria-controls="admin-navigation" aria-expanded="true" title="Collapse sidebar">
+            <span class="sidebar-collapse-icon" aria-hidden="true">‹</span>
+          </button>
         </div>
 
         <nav class="tabs">

@@ -143,6 +143,41 @@ async function logoutAdmin() {
 }
 
 function isMobileAdminNav() { return window.matchMedia('(max-width: 860px)').matches; }
+const ADMIN_SIDEBAR_STORAGE_KEY = 'preppath_admin_sidebar_collapsed';
+function syncDesktopSidebar(collapsed) {
+  const isCollapsed = !!collapsed;
+  const button = document.getElementById('sidebar-collapse-btn');
+  document.body.classList.toggle('sidebar-collapsed', isCollapsed);
+  if (button) {
+    const label = isCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    button.setAttribute('aria-expanded', String(!isCollapsed));
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    const icon = button.querySelector('.sidebar-collapse-icon');
+    if (icon) icon.textContent = isCollapsed ? '›' : '‹';
+  }
+  document.querySelectorAll('.tab').forEach(tab => {
+    const label = tab.querySelector('.tab-icon + span');
+    if (label) tab.title = isCollapsed ? label.textContent.trim() : '';
+  });
+}
+function toggleDesktopSidebar(force) {
+  if (isMobileAdminNav()) return;
+  const collapsed = typeof force === 'boolean'
+    ? force
+    : !document.body.classList.contains('sidebar-collapsed');
+  syncDesktopSidebar(collapsed);
+  if (collapsed) {
+    const search = document.getElementById('admin-nav-search');
+    if (search && search.value) { search.value = ''; filterAdminNav(''); }
+  }
+  try { localStorage.setItem(ADMIN_SIDEBAR_STORAGE_KEY, collapsed ? '1' : '0'); } catch(e) {}
+}
+function restoreDesktopSidebar() {
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(ADMIN_SIDEBAR_STORAGE_KEY) === '1'; } catch(e) {}
+  syncDesktopSidebar(collapsed);
+}
 function syncAdminNavMode(open) {
   const sidebar = document.getElementById('admin-navigation');
   const button = document.querySelector('.mobile-menu-btn');
@@ -176,6 +211,7 @@ function toggleAdminNav(force) {
 }
 function closeAdminNav() { toggleAdminNav(false); }
 window.addEventListener('resize', function() { syncAdminNavMode(document.body.classList.contains('admin-nav-open')); });
+restoreDesktopSidebar();
 syncAdminNavMode(false);
 
 function filterAdminNav(value) {
@@ -209,9 +245,12 @@ document.addEventListener('keydown', function(e) {
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && ADMIN_READY) {
     e.preventDefault();
-    if (window.innerWidth <= 860) toggleAdminNav(true);
-    const search = document.getElementById('admin-nav-search');
-    if (search) { search.focus(); search.select(); }
+    if (isMobileAdminNav()) toggleAdminNav(true);
+    else if (document.body.classList.contains('sidebar-collapsed')) toggleDesktopSidebar(false);
+    setTimeout(function() {
+      const search = document.getElementById('admin-nav-search');
+      if (search) { search.focus(); search.select(); }
+    }, 0);
   } else if (!typing && e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey && ADMIN_READY) {
     e.preventDefault(); refreshAdminData();
   } else if (e.key === 'Escape') {
