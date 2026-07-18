@@ -121,10 +121,7 @@ function mockRenderAnalysis() {
     /* ROW 5: Mock comparison table (last 3 attempts, full-width) */
     mockMockComparisonTableHtml(list, tier, totalMax) +
 
-    /* ROW 6: Net marks trend for every section in the selected exam/stage */
-    mockPerSectionMarksTrendHtml(list, tier, weakest) +
-
-    /* ROW 7: Attempt-rate vs hit-rate strategy trends per section */
+    /* ROW 6: Attempt-rate vs hit-rate strategy trends per section */
     mockPerSectionAccuracyTrendHtml(list, tier, weakest);
 }
 
@@ -378,100 +375,6 @@ function mockMockComparisonTableHtml(list, tier, totalMax) {
   '</tr>';
   html += '</tbody></table></div>';
   return html;
-}
-
-/* ── Per-section net marks trend (selected exam/stage marking scheme) ── */
-function mockPerSectionMarksTrendHtml(list, tier, weakest) {
-  if (list.length < 2) {
-    return '<div class="info-card"><h3>📈 Per-section marks trend</h3>' +
-      '<div style="color:var(--muted);font-size:0.85rem;">Add at least 2 mocks to see how marks are changing in every section.</div></div>';
-  }
-
-  const cards = tier.sections.map(s => {
-    const scores = list.map(m => {
-      const value = m.s[s.k] && m.s[s.k].m;
-      return value != null && isFinite(Number(value)) ? Number(value) : 0;
-    });
-    const latest = scores[scores.length - 1];
-    const previous = scores[scores.length - 2];
-    const delta = Math.round((latest - previous) * 100) / 100;
-    const average = Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length * 100) / 100;
-    const best = Math.max.apply(null, scores);
-    const perQ = s.perQ != null ? s.perQ : (tier.perQ != null ? tier.perQ : s.max / s.q);
-    const neg = s.neg != null ? s.neg : tier.neg;
-    const isWeak = weakest && s.k === weakest.k;
-    const deltaColor = delta > 0 ? 'var(--accent)' : (delta < 0 ? 'var(--red)' : 'var(--muted)');
-    const deltaSign = delta > 0 ? '+' : '';
-
-    return '<div class="info-card" style="' + (isWeak ? 'border-color:var(--red);border-width:1.5px;' : '') + 'padding:0.85rem 1rem;">' +
-      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:3px;">' +
-        '<div style="font-weight:700;font-size:0.82rem;line-height:1.35;">' + escapeHtml(s.name) +
-          (isWeak ? ' <span style="color:var(--red);font-size:0.78rem;">⚠</span>' : '') +
-        '</div>' +
-        '<div style="text-align:right;white-space:nowrap;">' +
-          '<span style="font-size:1rem;font-weight:800;color:var(--blue);">' + mockFormatTrendMark(latest) + '</span>' +
-          '<span style="font-size:0.68rem;color:var(--muted);"> / ' + mockFormatTrendMark(s.max) + '</span>' +
-          '<span style="font-size:0.68rem;color:' + deltaColor + ';font-weight:700;margin-left:5px;">' + deltaSign + mockFormatTrendMark(delta) + '</span>' +
-        '</div>' +
-      '</div>' +
-      '<div style="font-size:0.67rem;color:var(--muted);display:flex;gap:9px;flex-wrap:wrap;">' +
-        '<span>Avg <strong style="color:var(--text);">' + mockFormatTrendMark(average) + '</strong></span>' +
-        '<span>Best <strong style="color:var(--accent);">' + mockFormatTrendMark(best) + '</strong></span>' +
-        '<span>Pattern <strong style="color:var(--text);">+' + mockFormatTrendMark(perQ) + ' / −' + mockFormatTrendMark(neg) + '</strong></span>' +
-      '</div>' +
-      mockSectionMarksSvg(scores, s.max) +
-    '</div>';
-  }).join('');
-
-  return '<div class="info-card" style="padding:1rem 1.25rem;">' +
-    '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px;">' +
-      '<h3 style="margin:0;color:var(--blue);">📈 Per-section marks trend</h3>' +
-      '<div style="font-size:0.7rem;color:var(--muted);">Latest net marks <span style="color:var(--blue);font-weight:700;">●</span> · Δ vs previous mock</div>' +
-    '</div>' +
-    '<div style="font-size:0.75rem;color:var(--muted);margin-bottom:10px;">Each chart uses this exam stage’s section maximum and positive/negative marking pattern.</div>' +
-    '<div class="mock-acc-grid">' + cards + '</div>' +
-  '</div>';
-}
-
-function mockFormatTrendMark(value) {
-  const rounded = Math.round(Number(value) * 100) / 100;
-  return Object.is(rounded, -0) ? '0' : String(rounded);
-}
-
-/* Small line SVG scaled to the current exam section's mark range. */
-function mockSectionMarksSvg(scores, sectionMax) {
-  const n = scores.length;
-  if (!n) return '';
-  const W = 280, H = 112, PX = 25, PT = 23, PB = 24;
-  const minObserved = Math.min.apply(null, scores);
-  const maxObserved = Math.max.apply(null, scores);
-  const minY = Math.min(0, Math.floor(minObserved));
-  const maxY = Math.max(1, sectionMax, Math.ceil(maxObserved));
-  const range = maxY - minY || 1;
-  const xs = i => n === 1 ? W / 2 : PX + i * (W - 2 * PX) / (n - 1);
-  const ys = value => PT + (maxY - value) / range * (H - PT - PB);
-  const points = scores.map((value, i) => xs(i) + ',' + ys(value)).join(' ');
-  const rawTicks = minY < 0 ? [minY, 0, maxY / 2, maxY] : [0, maxY / 2, maxY];
-  const ticks = rawTicks.filter((value, i, all) => all.findIndex(other => Math.abs(other - value) < 0.001) === i);
-  const grid = ticks.map(value => {
-    const y = ys(value);
-    const isZero = Math.abs(value) < 0.001;
-    return '<line x1="' + PX + '" y1="' + y + '" x2="' + (W - PX) + '" y2="' + y + '" stroke="' + (isZero ? '#5A6478' : '#1E2535') + '" stroke-width="' + (isZero ? '0.9' : '0.5') + '" stroke-dasharray="2 3"></line>' +
-      '<text x="' + (PX - 4) + '" y="' + (y + 3) + '" text-anchor="end" font-size="8" fill="#5A6478">' + mockFormatTrendMark(value) + '</text>';
-  }).join('');
-  const dots = scores.map((value, i) =>
-    '<circle cx="' + xs(i) + '" cy="' + ys(value) + '" r="3" fill="#3B82F6" stroke="#0A0D12" stroke-width="1"><title>M' + (i + 1) + ': ' + mockFormatTrendMark(value) + ' marks</title></circle>' +
-    (n <= 10 ? '<text x="' + xs(i) + '" y="' + Math.max(10, ys(value) - 7) + '" text-anchor="middle" font-size="8" fill="#E8EDF5">' + mockFormatTrendMark(value) + '</text>' : '')
-  ).join('');
-  const labels = scores.map((value, i) =>
-    (n <= 12 || i % 2 === 0 || i === n - 1 ? '<text x="' + xs(i) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="8" fill="#5A6478">M' + (i + 1) + '</text>' : '')
-  ).join('');
-
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block;margin-top:4px;">' +
-    grid +
-    (n > 1 ? '<polyline points="' + points + '" fill="none" stroke="#3B82F6" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>' : '') +
-    dots + labels +
-  '</svg>';
 }
 
 /* ── Per-section accuracy trend (attempt rate vs hit rate) ── */
