@@ -1202,14 +1202,14 @@ function ssInit() {
     toolbar.id = 'ss-toolbar';
     toolbar.className = 'ss-toolbar';
     toolbar.innerHTML = `
-      <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment — a replayable timestamp + preview frame (tiny, no screenshot stored)">
-        📸 Save Moment
+      <button class="ss-capture-btn" onclick="ssCapture()" title="Save this moment — a replayable timestamp and preview frame">
+        <span aria-hidden="true">＋</span> Save Moment
       </button>
-      <button class="ss-gallery-btn" onclick="ssTogglePanel()" title="Open the full gallery (all videos in this course/playlist)">
-        📂 Gallery <span class="ss-badge" id="ss-badge-count" style="display:none">0</span>
+      <button class="ss-gallery-btn" onclick="ssTogglePanel()" title="Open the full gallery for this course or playlist">
+        Gallery <span class="ss-badge" id="ss-badge-count" style="display:none">0</span>
       </button>
-      <button class="ss-gallery-btn ss-video-gallery-btn" onclick="ssToggleVideoPanel()" title="Show only THIS video's saved moments">
-        🎬 This Video <span class="ss-badge" id="ss-video-badge-count" style="display:none">0</span>
+      <button class="ss-gallery-btn ss-video-gallery-btn" onclick="ssToggleVideoPanel()" title="Show only this video's saved moments">
+        This Video <span class="ss-badge" id="ss-video-badge-count" style="display:none">0</span>
       </button>
     `;
     speedBar.insertAdjacentElement('afterend', toolbar);
