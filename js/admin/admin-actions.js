@@ -726,7 +726,7 @@ function studyTestMsg(status) {
   return { icon: '⚠️', text: 'error' };
 }
 /* Ping every configured provider via the proxy and show what's working/down. */
-async function testStudyProviders() {
+async function testStudyProvidersLegacy() {
   var out = document.getElementById('study-test-out');
   if (out) out.innerHTML = '<span class="muted">⏳ Pinging providers… (up to ~25s each if one is slow)</span>';
   try {
@@ -790,10 +790,9 @@ function _modelsEnsure(pid) {
 }
 function studyModelChipsHtml(pid) {
   var list = _modelsEnsure(pid);
-  if (!list.length) return '<span class="muted" style="font-size:.72rem;">No models — add one below.</span>';
+  if (!list.length) return '<span class="ai-model-empty">No models configured — add one below.</span>';
   return list.map(function (m, i) {
-    return '<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,0,0,.05);border:1px solid var(--border);border-radius:999px;padding:3px 10px;font-size:.75rem;font-family:monospace;">' +
-      esc(m) + '<a title="Remove" onclick="removeStudyModel(' + i + ')" style="cursor:pointer;color:#c0392b;font-weight:800;">✕</a></span>';
+    return '<span class="ai-model-token"><code>' + esc(m) + '</code><button type="button" title="Remove ' + esc(m) + '" aria-label="Remove ' + esc(m) + '" onclick="removeStudyModel(' + i + ')">×</button></span>';
   }).join('');
 }
 function paintModelsManage() {
@@ -867,7 +866,7 @@ function selectedStudyProvider() {
 }
 /* Active radio changed → refresh the single model box to that provider's models
    and repaint the ● ACTIVE / inactive badges. */
-function studyActiveChanged() {
+function studyActiveChangedLegacy() {
   var pid = selectedStudyProvider();
   _modelsWorkPid = null;                 // reload the model editor for the new provider
   STUDY_PROVIDER_ORDER.forEach(function (k) {
@@ -1018,7 +1017,7 @@ async function saveAiLimits() {
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     AI_LIMITS = Object.assign({}, AI_LIMITS, { unlimited: unlimited, unlimitedEmails: resolvedEmails,
-      studyPerHour: isNaN(sph) ? 15 : sph, tutorPerHour: isNaN(tph) ? 20 : tph, tutorPerDay: isNaN(tpd) ? 80 : tpd });
+      studyPerHour: isNaN(sph) ? 15 : Math.max(0, sph), tutorPerHour: isNaN(tph) ? 20 : Math.max(0, tph), tutorPerDay: isNaN(tpd) ? 80 : Math.max(0, tpd) });
     var msg = '✅ AI limits saved. Unlimited: ' + resolvedEmails.length + ' user(s).';
     if (unresolved.length) msg += ' ⚠️ Not found: ' + unresolved.join(', ');
     showToast(msg);
@@ -1136,7 +1135,7 @@ async function loadAiStudyData() {
 /* Render the dedicated 🎓 AI Study admin tab:
    Study AI provider (Bynara keys/model) · AI Study Controls (regenerate + focus
    box) · AI Study Usage Limits (rate limits + unlimited grant). */
-function renderAiStudy() {
+function renderAiStudyLegacy() {
   if (!AI_CONFIG.loaded) return '<div class="muted" style="padding:16px;">Loading AI Study settings…</div>';
   var s = '<div class="muted" style="font-size:.8rem;margin-bottom:12px;line-height:1.6;">' +
     'Everything for the <b>🎓 AI Study</b> feature (transcript → notes / quiz / cards / tutor) in the YouTube tab. ' +
