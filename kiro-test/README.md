@@ -41,7 +41,7 @@ start command:
 | Setting | Value |
 |---|---|
 | **Root Directory** | `kiro-test` |
-| **Build Command** | `curl -fsSL https://cli.kiro.dev/install \| bash && npm install` |
+| **Build Command** | `rm -f ~/.local/bin/kiro-cli ~/.local/bin/kiro-cli-chat ~/.local/bin/kiro-cli-term; curl -fsSL https://cli.kiro.dev/install \| bash && npm install` |
 | **Start Command** | `export PATH="$HOME/.local/bin:$PATH" && node server.js` |
 | **Env Var** | `KIRO_API_KEY` = your real key (Render dashboard only — never in code) |
 
@@ -49,6 +49,19 @@ Render sets `PORT` automatically; `server.js` already reads `process.env.PORT`.
 
 Free tier spins down after 15 min idle (cold start ~30-50s on next request).
 For always-on, use a paid instance type.
+
+### Why the Build Command has a `rm -f` prefix
+
+**Verified bug in Kiro's own install script:** if `kiro-cli` is already
+present at `~/.local/bin/` (e.g. from a previous/retried build on the same
+Render instance), the installer tries to interactively prompt
+`Do you want to replace it? (y/N):` via `/dev/tty`. Render's build shell has
+no TTY, so the script crashes with `main: line 478: /dev/tty: No such device
+or address` and exits with status 1 -- the deploy fails at the build step
+with no `kiro-cli` binary present. The `--force` flag does **not** fix this
+(tested) -- the check in `install_linux()` ignores it. Removing any existing
+binary before running the installer avoids the prompt entirely and was
+confirmed to install cleanly (exit code 0) in this exact scenario.
 
 ## Known kiro-cli quirks (found via testing)
 
