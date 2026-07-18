@@ -1,0 +1,364 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">PrepPath modern fintech-inspired dashboard concept</title>
+  <desc id="desc">A desktop exam preparation dashboard with a dark sidebar, readiness hero, daily plan, key metrics, subject progress, next assessment, and recent activity.</desc>
+  <defs>
+    <linearGradient id="pageBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F8FAFC"/>
+      <stop offset="1" stop-color="#EEF2FF"/>
+    </linearGradient>
+    <linearGradient id="sideBg" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="1" stop-color="#172554"/>
+    </linearGradient>
+    <linearGradient id="heroBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3730A3"/>
+      <stop offset="0.55" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#A5F3FC"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#0F172A" flood-opacity="0.08"/>
+    </filter>
+    <filter id="heroShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#3730A3" flood-opacity="0.22"/>
+    </filter>
+    <style>
+      .font { font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .title { font-size: 28px; font-weight: 760; fill: #0F172A; letter-spacing: -0.5px; }
+      .panel-title { font-size: 16px; font-weight: 720; fill: #0F172A; }
+      .small { font-size: 12px; fill: #64748B; }
+      .micro { font-size: 10px; font-weight: 650; fill: #94A3B8; letter-spacing: 0.8px; }
+      .nav { font-size: 13px; font-weight: 620; fill: #94A3B8; }
+      .nav-active { font-size: 13px; font-weight: 680; fill: #FFFFFF; }
+      .metric { font-size: 25px; font-weight: 760; fill: #0F172A; letter-spacing: -0.4px; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#pageBg)"/>
+  <circle cx="1510" cy="50" r="210" fill="#C7D2FE" opacity="0.18"/>
+  <circle cx="370" cy="960" r="160" fill="#BFDBFE" opacity="0.18"/>
+
+  <!-- Sidebar -->
+  <g filter="url(#shadow)">
+    <rect x="20" y="20" width="236" height="960" rx="25" fill="url(#sideBg)"/>
+  </g>
+  <g class="font">
+    <g transform="translate(44 48)">
+      <rect width="38" height="38" rx="11" fill="#6366F1"/>
+      <path d="M10 13.5 19 9l9 4.5-9 4.5-9-4.5Zm3 3.7V23c3.2 2.6 8.8 2.6 12 0v-5.8L19 20l-6-2.8Z" fill="#FFF"/>
+      <text x="50" y="25" fill="#FFFFFF" font-size="19" font-weight="760" letter-spacing="-0.3">PrepPath</text>
+    </g>
+
+    <g transform="translate(38 112)">
+      <rect width="200" height="76" rx="16" fill="#FFFFFF" opacity="0.07" stroke="#FFFFFF" stroke-opacity="0.10"/>
+      <circle cx="27" cy="38" r="16" fill="#312E81"/>
+      <text x="27" y="42" text-anchor="middle" fill="#C7D2FE" font-size="11" font-weight="750">SSC</text>
+      <text x="54" y="30" fill="#94A3B8" font-size="9" font-weight="650" letter-spacing="0.7">CURRENT EXAM</text>
+      <text x="54" y="49" fill="#FFFFFF" font-size="13" font-weight="680">SSC CGL 2026</text>
+      <path d="m179 34 5 5 5-5" fill="none" stroke="#94A3B8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <text x="44" y="229" class="micro">OVERVIEW</text>
+    <g transform="translate(36 244)">
+      <rect width="204" height="46" rx="13" fill="#4F46E5"/>
+      <rect x="0" width="3" height="46" rx="2" fill="#A5B4FC"/>
+      <g transform="translate(15 13)" fill="none" stroke="#FFF" stroke-width="1.7" stroke-linecap="round">
+        <rect width="19" height="19" rx="5"/>
+        <path d="M5 14V9m4 5V5m5 9v-7"/>
+      </g>
+      <text x="49" y="29" class="nav-active">Dashboard</text>
+    </g>
+    <g transform="translate(51 307)">
+      <path d="M1 3.5A3.5 3.5 0 0 1 4.5 0H17v18H4.5A3.5 3.5 0 0 0 1 21.5v-18Z" fill="none" stroke="#94A3B8" stroke-width="1.7"/>
+      <text x="34" y="15" class="nav">Study plan</text>
+    </g>
+    <g transform="translate(51 355)">
+      <path d="M3 0h15v20H3zM7 5h7M7 9h7M7 13h4" fill="none" stroke="#94A3B8" stroke-width="1.7" stroke-linecap="round"/>
+      <text x="34" y="15" class="nav">Syllabus</text>
+    </g>
+
+    <text x="44" y="422" class="micro">PRACTICE</text>
+    <g transform="translate(51 442)">
+      <circle cx="10" cy="10" r="9" fill="none" stroke="#94A3B8" stroke-width="1.7"/>
+      <path d="m6 10 2.5 2.5L14 7" fill="none" stroke="#94A3B8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="34" y="15" class="nav">Mock tests</text>
+      <rect x="137" y="2" width="29" height="18" rx="9" fill="#312E81"/>
+      <text x="151.5" y="14" text-anchor="middle" fill="#C7D2FE" font-size="9" font-weight="700">12</text>
+    </g>
+    <g transform="translate(51 490)">
+      <path d="M2 3h16v14H2zM6 0v6M14 0v6" fill="none" stroke="#94A3B8" stroke-width="1.7" stroke-linecap="round"/>
+      <text x="34" y="15" class="nav">Revision</text>
+    </g>
+    <g transform="translate(51 538)">
+      <path d="M1 16 6 9l4 4 8-11M14 2h4v4" fill="none" stroke="#94A3B8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="34" y="15" class="nav">Performance</text>
+    </g>
+
+    <g transform="translate(38 780)">
+      <rect width="200" height="82" rx="16" fill="#FFFFFF" opacity="0.06"/>
+      <circle cx="29" cy="28" r="17" fill="#F59E0B" opacity="0.18"/>
+      <path d="M29 16c1.5 5-3 7-3 11 0 2.4 1.5 4.3 3.3 4.3 2.4 0 4.7-2.2 4.7-5.4 0-3-1.7-6.2-5-9.9Z" fill="#FBBF24"/>
+      <text x="56" y="25" fill="#FFFFFF" font-size="12" font-weight="680">14 day streak</text>
+      <text x="56" y="42" fill="#94A3B8" font-size="10">Personal best: 21 days</text>
+      <rect x="18" y="59" width="164" height="5" rx="2.5" fill="#FFFFFF" opacity="0.10"/>
+      <rect x="18" y="59" width="112" height="5" rx="2.5" fill="#F59E0B"/>
+    </g>
+
+    <g transform="translate(38 892)">
+      <circle cx="24" cy="24" r="22" fill="#DBEAFE"/>
+      <text x="24" y="29" text-anchor="middle" fill="#1D4ED8" font-size="13" font-weight="750">PS</text>
+      <text x="58" y="19" fill="#FFFFFF" font-size="12" font-weight="680">Purendar</text>
+      <text x="58" y="36" fill="#94A3B8" font-size="10">Aspirant account</text>
+      <circle cx="181" cy="23" r="2" fill="#64748B"/><circle cx="188" cy="23" r="2" fill="#64748B"/><circle cx="195" cy="23" r="2" fill="#64748B"/>
+    </g>
+  </g>
+
+  <!-- Header -->
+  <g class="font">
+    <text x="292" y="57" class="title">Good morning, Purendar</text>
+    <text x="292" y="79" class="small">Saturday, 18 July 2026 · Your preparation is moving in the right direction.</text>
+
+    <g transform="translate(1220 42)">
+      <rect width="170" height="42" rx="13" fill="#FFFFFF" stroke="#E2E8F0"/>
+      <path d="M17 12v18M12 17h10M12 26h10" fill="none" stroke="#64748B" stroke-width="1.5" stroke-linecap="round"/>
+      <text x="39" y="26" fill="#334155" font-size="12" font-weight="630">Jul 13 – Jul 19</text>
+      <path d="m145 18 5 5 5-5" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(1402 42)">
+      <rect width="42" height="42" rx="13" fill="#FFFFFF" stroke="#E2E8F0"/>
+      <path d="M21 11a7 7 0 0 0-7 7v4l-2 3h18l-2-3v-4a7 7 0 0 0-7-7Zm-3 17a3 3 0 0 0 6 0" fill="none" stroke="#475569" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="30" cy="11" r="4" fill="#EF4444" stroke="#FFF" stroke-width="2"/>
+    </g>
+    <g transform="translate(1456 42)">
+      <rect width="112" height="42" rx="13" fill="#0F172A"/>
+      <path d="M16 13v16M8 21h16" stroke="#FFF" stroke-width="1.8" stroke-linecap="round"/>
+      <text x="35" y="26" fill="#FFF" font-size="12" font-weight="670">Quick add</text>
+    </g>
+  </g>
+
+  <!-- Hero -->
+  <g filter="url(#heroShadow)">
+    <rect x="280" y="110" width="815" height="256" rx="24" fill="url(#heroBg)"/>
+  </g>
+  <circle cx="1060" cy="112" r="110" fill="#FFFFFF" opacity="0.05"/>
+  <circle cx="970" cy="360" r="130" fill="#38BDF8" opacity="0.07"/>
+  <g class="font">
+    <g transform="translate(312 139)">
+      <rect width="117" height="26" rx="13" fill="#FFFFFF" opacity="0.14"/>
+      <circle cx="16" cy="13" r="4" fill="#86EFAC"/>
+      <text x="28" y="17" fill="#E0E7FF" font-size="10" font-weight="700" letter-spacing="0.4">ON TRACK</text>
+    </g>
+    <text x="312" y="204" fill="#FFFFFF" font-size="26" font-weight="760" letter-spacing="-0.4">Your exam readiness is improving</text>
+    <text x="312" y="231" fill="#C7D2FE" font-size="13">You’re 8% ahead of last week. Keep your daily practice consistent.</text>
+
+    <g transform="translate(312 260)">
+      <text y="13" fill="#C7D2FE" font-size="10" font-weight="650" letter-spacing="0.8">NEXT BEST ACTION</text>
+      <text y="39" fill="#FFFFFF" font-size="15" font-weight="680">Complete Quantitative Aptitude revision</text>
+      <rect y="57" width="166" height="39" rx="12" fill="#FFFFFF"/>
+      <text x="18" y="82" fill="#3730A3" font-size="12" font-weight="720">Continue studying</text>
+      <path d="m142 72 6 5-6 5" fill="none" stroke="#4F46E5" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="178" y="57" width="120" height="39" rx="12" fill="#FFFFFF" opacity="0.12" stroke="#FFFFFF" stroke-opacity="0.18"/>
+      <text x="197" y="82" fill="#FFFFFF" font-size="12" font-weight="650">View full plan</text>
+    </g>
+
+    <g transform="translate(885 151)">
+      <circle cx="80" cy="80" r="67" fill="#FFFFFF" opacity="0.09"/>
+      <circle cx="80" cy="80" r="56" fill="none" stroke="#FFFFFF" stroke-opacity="0.16" stroke-width="11"/>
+      <circle cx="80" cy="80" r="56" fill="none" stroke="url(#ring)" stroke-width="11" stroke-linecap="round" stroke-dasharray="252 352" transform="rotate(-90 80 80)"/>
+      <text x="80" y="77" text-anchor="middle" fill="#FFFFFF" font-size="31" font-weight="780">72%</text>
+      <text x="80" y="97" text-anchor="middle" fill="#C7D2FE" font-size="10" font-weight="650" letter-spacing="0.7">READY</text>
+      <g transform="translate(-7 170)">
+        <text x="18" y="13" text-anchor="middle" fill="#FFFFFF" font-size="15" font-weight="730">84</text>
+        <text x="18" y="31" text-anchor="middle" fill="#C7D2FE" font-size="9">Days left</text>
+        <line x1="54" y1="3" x2="54" y2="31" stroke="#FFFFFF" stroke-opacity="0.18"/>
+        <text x="90" y="13" text-anchor="middle" fill="#FFFFFF" font-size="15" font-weight="730">68%</text>
+        <text x="90" y="31" text-anchor="middle" fill="#C7D2FE" font-size="9">Syllabus</text>
+        <line x1="126" y1="3" x2="126" y2="31" stroke="#FFFFFF" stroke-opacity="0.18"/>
+        <text x="162" y="13" text-anchor="middle" fill="#FFFFFF" font-size="15" font-weight="730">14</text>
+        <text x="162" y="31" text-anchor="middle" fill="#C7D2FE" font-size="9">Day streak</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- Today's plan -->
+  <g filter="url(#shadow)"><rect x="1115" y="110" width="453" height="256" rx="24" fill="#FFFFFF"/></g>
+  <g class="font">
+    <text x="1143" y="147" class="panel-title">Today’s plan</text>
+    <text x="1143" y="168" class="small">3 of 5 tasks completed</text>
+    <text x="1538" y="151" text-anchor="end" fill="#4F46E5" font-size="11" font-weight="680">View plan</text>
+    <rect x="1143" y="182" width="397" height="5" rx="2.5" fill="#EEF2F7"/>
+    <rect x="1143" y="182" width="238" height="5" rx="2.5" fill="#4F46E5"/>
+
+    <g transform="translate(1143 204)">
+      <circle cx="14" cy="14" r="13" fill="#DCFCE7"/>
+      <path d="m8 14 4 4 8-9" fill="none" stroke="#16A34A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="40" y="12" fill="#64748B" font-size="12" text-decoration="line-through">Daily current affairs</text>
+      <text x="40" y="29" fill="#94A3B8" font-size="9">20 min · Completed</text>
+      <rect x="332" y="3" width="65" height="22" rx="11" fill="#F0FDF4"/>
+      <text x="364.5" y="17" text-anchor="middle" fill="#16A34A" font-size="9" font-weight="700">DONE</text>
+    </g>
+    <line x1="1143" y1="244" x2="1540" y2="244" stroke="#F1F5F9"/>
+    <g transform="translate(1143 255)">
+      <circle cx="14" cy="14" r="13" fill="#EEF2FF" stroke="#C7D2FE"/>
+      <circle cx="14" cy="14" r="4" fill="#4F46E5"/>
+      <text x="40" y="12" fill="#0F172A" font-size="12" font-weight="640">Quantitative Aptitude</text>
+      <text x="40" y="29" fill="#94A3B8" font-size="9">45 min · Chapter revision</text>
+      <rect x="331" y="3" width="66" height="22" rx="11" fill="#EEF2FF"/>
+      <text x="364" y="17" text-anchor="middle" fill="#4F46E5" font-size="9" font-weight="700">NOW</text>
+    </g>
+    <line x1="1143" y1="295" x2="1540" y2="295" stroke="#F1F5F9"/>
+    <g transform="translate(1143 306)">
+      <circle cx="14" cy="14" r="13" fill="#F8FAFC" stroke="#CBD5E1"/>
+      <text x="40" y="12" fill="#334155" font-size="12" font-weight="620">English mock section</text>
+      <text x="40" y="29" fill="#94A3B8" font-size="9">25 min · 20 questions</text>
+      <text x="397" y="19" text-anchor="end" fill="#94A3B8" font-size="10">6:30 PM</text>
+    </g>
+  </g>
+
+  <!-- Metric cards -->
+  <g class="font">
+    <g filter="url(#shadow)"><rect x="280" y="390" width="308" height="126" rx="20" fill="#FFFFFF"/></g>
+    <g transform="translate(304 411)">
+      <rect width="38" height="38" rx="11" fill="#EEF2FF"/>
+      <path d="M11 26V17m7 9V11m7 15V7" fill="none" stroke="#4F46E5" stroke-width="2" stroke-linecap="round"/>
+      <text x="52" y="12" class="micro">AVERAGE SCORE</text>
+      <text x="52" y="39" class="metric">76.4%</text>
+      <text x="0" y="79" fill="#16A34A" font-size="10" font-weight="680">↑ 6.2%</text>
+      <text x="45" y="79" class="small">from last week</text>
+    </g>
+
+    <g filter="url(#shadow)"><rect x="604" y="390" width="308" height="126" rx="20" fill="#FFFFFF"/></g>
+    <g transform="translate(628 411)">
+      <rect width="38" height="38" rx="11" fill="#ECFDF5"/>
+      <path d="M19 9v10l7 4" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round"/>
+      <circle cx="19" cy="19" r="12" fill="none" stroke="#059669" stroke-width="1.7"/>
+      <text x="52" y="12" class="micro">STUDY TIME</text>
+      <text x="52" y="39" class="metric">18h 40m</text>
+      <text x="0" y="79" fill="#16A34A" font-size="10" font-weight="680">↑ 2h 10m</text>
+      <text x="58" y="79" class="small">this week</text>
+    </g>
+
+    <g filter="url(#shadow)"><rect x="928" y="390" width="308" height="126" rx="20" fill="#FFFFFF"/></g>
+    <g transform="translate(952 411)">
+      <rect width="38" height="38" rx="11" fill="#FFF7ED"/>
+      <path d="M12 10h14v18H12zM16 7v6m6-6v6m-6 5h6m-6 4h4" fill="none" stroke="#EA580C" stroke-width="1.8" stroke-linecap="round"/>
+      <text x="52" y="12" class="micro">MOCK TESTS</text>
+      <text x="52" y="39" class="metric">12</text>
+      <text x="0" y="79" fill="#EA580C" font-size="10" font-weight="680">3 scheduled</text>
+      <text x="66" y="79" class="small">this week</text>
+    </g>
+
+    <g filter="url(#shadow)"><rect x="1252" y="390" width="316" height="126" rx="20" fill="#FFFFFF"/></g>
+    <g transform="translate(1276 411)">
+      <rect width="38" height="38" rx="11" fill="#FDF2F8"/>
+      <path d="M19 8c2 6-4 8-4 13a5 5 0 0 0 10 0c0-4-2-8-6-13Z" fill="none" stroke="#DB2777" stroke-width="1.8"/>
+      <text x="52" y="12" class="micro">CURRENT STREAK</text>
+      <text x="52" y="39" class="metric">14 days</text>
+      <text x="0" y="79" fill="#DB2777" font-size="10" font-weight="680">Best: 21 days</text>
+      <text x="83" y="79" class="small">· Keep going</text>
+    </g>
+  </g>
+
+  <!-- Subject progress -->
+  <g filter="url(#shadow)"><rect x="280" y="540" width="815" height="418" rx="24" fill="#FFFFFF"/></g>
+  <g class="font">
+    <text x="308" y="579" class="panel-title">Subject performance</text>
+    <text x="308" y="600" class="small">Track syllabus coverage and recent test accuracy</text>
+    <g transform="translate(899 561)">
+      <rect width="168" height="36" rx="11" fill="#F8FAFC" stroke="#E2E8F0"/>
+      <text x="15" y="23" fill="#475569" font-size="11" font-weight="620">Last 30 days</text>
+      <path d="m143 15 5 5 5-5" fill="none" stroke="#94A3B8" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+
+    <g transform="translate(308 634)">
+      <circle cx="24" cy="24" r="24" fill="#EEF2FF"/>
+      <text x="24" y="29" text-anchor="middle" fill="#4F46E5" font-size="12" font-weight="740">QA</text>
+      <text x="64" y="18" fill="#0F172A" font-size="13" font-weight="670">Quantitative Aptitude</text>
+      <text x="64" y="38" class="small">68% syllabus · 72% accuracy</text>
+      <rect x="430" y="12" width="272" height="8" rx="4" fill="#EEF2F7"/>
+      <rect x="430" y="12" width="185" height="8" rx="4" fill="#4F46E5"/>
+      <text x="728" y="19" text-anchor="end" fill="#4F46E5" font-size="11" font-weight="720">68%</text>
+      <text x="702" y="40" text-anchor="end" fill="#16A34A" font-size="10" font-weight="670">↑ 4.8%</text>
+    </g>
+    <line x1="308" y1="704" x2="1067" y2="704" stroke="#F1F5F9"/>
+
+    <g transform="translate(308 721)">
+      <circle cx="24" cy="24" r="24" fill="#ECFDF5"/>
+      <text x="24" y="29" text-anchor="middle" fill="#059669" font-size="12" font-weight="740">EN</text>
+      <text x="64" y="18" fill="#0F172A" font-size="13" font-weight="670">English Language</text>
+      <text x="64" y="38" class="small">82% syllabus · 84% accuracy</text>
+      <rect x="430" y="12" width="272" height="8" rx="4" fill="#EEF2F7"/>
+      <rect x="430" y="12" width="223" height="8" rx="4" fill="#10B981"/>
+      <text x="728" y="19" text-anchor="end" fill="#059669" font-size="11" font-weight="720">82%</text>
+      <text x="702" y="40" text-anchor="end" fill="#16A34A" font-size="10" font-weight="670">↑ 2.1%</text>
+    </g>
+    <line x1="308" y1="791" x2="1067" y2="791" stroke="#F1F5F9"/>
+
+    <g transform="translate(308 808)">
+      <circle cx="24" cy="24" r="24" fill="#FFF7ED"/>
+      <text x="24" y="29" text-anchor="middle" fill="#EA580C" font-size="12" font-weight="740">RE</text>
+      <text x="64" y="18" fill="#0F172A" font-size="13" font-weight="670">General Intelligence</text>
+      <text x="64" y="38" class="small">59% syllabus · 66% accuracy</text>
+      <rect x="430" y="12" width="272" height="8" rx="4" fill="#EEF2F7"/>
+      <rect x="430" y="12" width="160" height="8" rx="4" fill="#F59E0B"/>
+      <text x="728" y="19" text-anchor="end" fill="#D97706" font-size="11" font-weight="720">59%</text>
+      <text x="702" y="40" text-anchor="end" fill="#EF4444" font-size="10" font-weight="670">↓ 1.3%</text>
+    </g>
+    <line x1="308" y1="878" x2="1067" y2="878" stroke="#F1F5F9"/>
+
+    <g transform="translate(308 895)">
+      <circle cx="24" cy="24" r="24" fill="#FDF2F8"/>
+      <text x="24" y="29" text-anchor="middle" fill="#DB2777" font-size="12" font-weight="740">GK</text>
+      <text x="64" y="18" fill="#0F172A" font-size="13" font-weight="670">General Awareness</text>
+      <text x="64" y="38" class="small">74% syllabus · 70% accuracy</text>
+      <rect x="430" y="12" width="272" height="8" rx="4" fill="#EEF2F7"/>
+      <rect x="430" y="12" width="201" height="8" rx="4" fill="#EC4899"/>
+      <text x="728" y="19" text-anchor="end" fill="#DB2777" font-size="11" font-weight="720">74%</text>
+      <text x="702" y="40" text-anchor="end" fill="#16A34A" font-size="10" font-weight="670">↑ 3.6%</text>
+    </g>
+  </g>
+
+  <!-- Right lower panels -->
+  <g filter="url(#shadow)"><rect x="1115" y="540" width="453" height="190" rx="24" fill="#FFFFFF"/></g>
+  <g class="font">
+    <text x="1143" y="578" class="panel-title">Next assessment</text>
+    <rect x="1143" y="598" width="397" height="103" rx="16" fill="#F8FAFC" stroke="#E2E8F0"/>
+    <rect x="1161" y="615" width="58" height="68" rx="13" fill="#0F172A"/>
+    <text x="1190" y="638" text-anchor="middle" fill="#94A3B8" font-size="9" font-weight="680" letter-spacing="0.6">JUL</text>
+    <text x="1190" y="666" text-anchor="middle" fill="#FFFFFF" font-size="23" font-weight="760">21</text>
+    <text x="1237" y="626" fill="#0F172A" font-size="13" font-weight="680">SSC CGL Full Mock – 08</text>
+    <text x="1237" y="647" class="small">Tuesday · 10:00 AM · 60 min</text>
+    <rect x="1237" y="661" width="108" height="25" rx="9" fill="#EEF2FF"/>
+    <text x="1291" y="677" text-anchor="middle" fill="#4F46E5" font-size="9" font-weight="720">100 QUESTIONS</text>
+    <rect x="1422" y="654" width="96" height="33" rx="11" fill="#4F46E5"/>
+    <text x="1470" y="675" text-anchor="middle" fill="#FFFFFF" font-size="10" font-weight="680">View details</text>
+  </g>
+
+  <g filter="url(#shadow)"><rect x="1115" y="746" width="453" height="212" rx="24" fill="#FFFFFF"/></g>
+  <g class="font">
+    <text x="1143" y="784" class="panel-title">Needs attention</text>
+    <text x="1538" y="784" text-anchor="end" fill="#4F46E5" font-size="11" font-weight="680">View analysis</text>
+
+    <g transform="translate(1143 806)">
+      <rect width="397" height="55" rx="14" fill="#FFF7ED"/>
+      <circle cx="27" cy="27" r="15" fill="#FFEDD5"/>
+      <path d="M27 18v11m0 5h.01" stroke="#EA580C" stroke-width="2.2" stroke-linecap="round"/>
+      <text x="52" y="23" fill="#9A3412" font-size="11" font-weight="680">Geometry accuracy is below target</text>
+      <text x="52" y="39" fill="#C2410C" font-size="9">58% accuracy · Revise 3 weak concepts</text>
+      <path d="m375 23 5 5-5 5" fill="none" stroke="#EA580C" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+    <g transform="translate(1143 872)">
+      <rect width="397" height="55" rx="14" fill="#FDF2F8"/>
+      <circle cx="27" cy="27" r="15" fill="#FCE7F3"/>
+      <path d="M20 22h14M20 27h10M20 32h7" stroke="#DB2777" stroke-width="1.7" stroke-linecap="round"/>
+      <text x="52" y="23" fill="#9D174D" font-size="11" font-weight="680">6 revision items are due today</text>
+      <text x="52" y="39" fill="#BE185D" font-size="9">Prioritize vocabulary and current affairs</text>
+      <path d="m375 23 5 5-5 5" fill="none" stroke="#DB2777" stroke-width="1.5" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <text x="1570" y="985" text-anchor="end" class="font" fill="#94A3B8" font-size="9">FINTECH-INSPIRED UI CONCEPT · DESKTOP PREVIEW</text>
+</svg>
