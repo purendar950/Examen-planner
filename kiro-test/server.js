@@ -19,6 +19,23 @@ app.use(express.static(path.join(__dirname, 'public'))); // serves public/index.
 const PORT = process.env.PORT || 3000;
 const KIRO_API_KEY = process.env.KIRO_API_KEY;
 
+// Keep-alive: Render free tier spins down after 15min inactivity, causing
+// 30-50s cold starts that exceed the proxy's upstream timeout → 502. This
+// self-ping every 10min keeps the service warm. The /health endpoint is also
+// used by Render's built-in health check.
+app.get('/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
+// Self-ping to prevent free-tier sleep (fires 2min after boot, then every 10min)
+const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+let _keepAliveTimer = null;
+function startKeepAlive() {
+  if (_keepAliveTimer) return;
+  _keepAliveTimer = setInterval(() => {
+    fetch(`${SELF_URL}/health`).catch(() => {});
+  }, 10 * 60 * 1000); // every 10 minutes
+}
+setTimeout(startKeepAlive, 2 * 60 * 1000); // start 2min after boot
+
 if (!KIRO_API_KEY) {
   console.warn('WARNING: KIRO_API_KEY is not set. Add it to a .env file (see .env.example).');
 }
@@ -185,6 +202,7 @@ function handleChatCompletions(req, res) {
   const body = req.body || {};
   const model = body.model || '';
   const messages = body.messages || [];
+  const wantStream = body.stream === true;
 
   // Extract the user's prompt from the messages array (take the last user message)
   let prompt = '';
@@ -207,6 +225,84 @@ function handleChatCompletions(req, res) {
   }
 
   const bin = resolveKiroCli();
+  const completionId = 'kiro-' + Date.now();
+
+  // If streaming is requested, set up SSE headers and send keep-alive comments
+  // every 5s to prevent Cloudflare/Render's intermediary proxies from timing out
+  // (Cloudflare kills connections with no data after ~100s). kiro-cli doesn't
+  // support real token streaming, so we send the full response as one chunk at
+  // the end — but the keep-alive pings keep the connection open during generation.
+  let keepAliveInterval = null;
+  if (wantStream) {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+    // Send a comment every 5 seconds to keep the connection alive
+    keepAliveInterval = setInterval(() => {
+      res.write(': keep-alive\n\n');
+    }, 5000);
+  }
+
+  function sendResult(output) {
+    if (keepAliveInterval) clearInterval(keepAliveInterval);
+    if (wantStream) {
+      // Send the content as a single SSE data chunk in OpenAI streaming format
+      const chunk = {
+        id: completionId,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: model || 'auto',
+        choices: [{
+          index: 0,
+          delta: { role: 'assistant', content: output },
+          finish_reason: null
+        }]
+      };
+      res.write('data: ' + JSON.stringify(chunk) + '\n\n');
+      // Send the final chunk with finish_reason
+      const done = {
+        id: completionId,
+        object: 'chat.completion.chunk',
+        created: Math.floor(Date.now() / 1000),
+        model: model || 'auto',
+        choices: [{
+          index: 0,
+          delta: {},
+          finish_reason: 'stop'
+        }]
+      };
+      res.write('data: ' + JSON.stringify(done) + '\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } else {
+      res.json({
+        id: completionId,
+        object: 'chat.completion',
+        created: Math.floor(Date.now() / 1000),
+        model: model || 'auto',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: output },
+          finish_reason: 'stop'
+        }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
+      });
+    }
+  }
+
+  function sendError(status, message) {
+    if (keepAliveInterval) clearInterval(keepAliveInterval);
+    if (wantStream) {
+      // For streaming errors, send an error event then close
+      res.write('data: ' + JSON.stringify({ error: { message, type: 'server_error' } }) + '\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+    } else {
+      res.status(status).json({ error: { message, type: 'server_error' } });
+    }
+  }
 
   function runChat() {
     execFile(
@@ -217,44 +313,23 @@ function handleChatCompletions(req, res) {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
           console.error('[chat/completions]', detail);
-          if (error.code === 'ENOENT') {
-            return res.status(500).json({
-              error: { message: `kiro-cli binary not found (looked at ${bin})`, type: 'server_error' }
-            });
-          }
-          return res.status(500).json({
-            error: { message: detail, type: 'server_error' }
-          });
+          return sendError(500, error.code === 'ENOENT'
+            ? `kiro-cli binary not found (looked at ${bin})`
+            : detail);
         }
 
         const output = stripAnsi(stdout).trim();
         const stderrText = stripAnsi(stderr);
 
         if (!output && /Authentication failed/i.test(stderrText)) {
-          return res.status(401).json({
-            error: { message: 'Authentication failed. KIRO_API_KEY is invalid or expired.', type: 'authentication_error' }
-          });
+          return sendError(401, 'Authentication failed. KIRO_API_KEY is invalid or expired.');
         }
 
         if (!output) {
-          return res.status(502).json({
-            error: { message: stderrText.trim() || 'Empty response from kiro-cli', type: 'server_error' }
-          });
+          return sendError(502, stderrText.trim() || 'Empty response from kiro-cli');
         }
 
-        // Return an OpenAI-compatible response shape
-        res.json({
-          id: 'kiro-' + Date.now(),
-          object: 'chat.completion',
-          created: Math.floor(Date.now() / 1000),
-          model: model || 'auto',
-          choices: [{
-            index: 0,
-            message: { role: 'assistant', content: output },
-            finish_reason: 'stop'
-          }],
-          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }
-        });
+        sendResult(output);
       }
     );
   }
