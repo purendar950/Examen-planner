@@ -4,66 +4,148 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>StudyPlanner — Admin Panel</title>
-<meta name="robots" content="noindex">
-<link rel="stylesheet" href="css/admin.css">
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PrepPath — Admin Workspace</title>
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="css/admin.css">
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
 </head>
 <body>
 
 <div id="login-screen">
-  <div class="login-card">
-    <h2>🔐 StudyPlanner Admin</h2>
-    <input type="email" id="adm-email" placeholder="Admin email">
-    <input type="password" id="adm-pass" placeholder="Password">
-    <div class="err" id="adm-err"></div>
-    <button class="btn btn-green" style="width:100%;padding:11px;" onclick="adminLoginEmail()">Sign In</button>
-    <button class="btn btn-gray" style="width:100%;padding:11px;margin-top:8px;" onclick="adminLoginGoogle()">Continue with Google</button>
-    <p class="muted" style="margin-top:12px;text-align:center;">Sirf admin account se access milega.</p>
-  </div>
+  <main class="login-card" aria-labelledby="login-title">
+    <div class="login-brand" aria-hidden="true">P</div>
+    <p class="login-eyebrow">Secure workspace</p>
+    <h1 id="login-title">Welcome back</h1>
+    <p class="login-subtitle">Sign in with an approved administrator account to manage PrepPath.</p>
+    <form onsubmit="event.preventDefault();adminLoginEmail();">
+      <label class="field-label" for="adm-email">Admin email</label>
+      <input type="email" id="adm-email" placeholder="admin@example.com" autocomplete="username" required>
+      <label class="field-label" for="adm-pass">Password</label>
+      <input type="password" id="adm-pass" placeholder="Enter your password" autocomplete="current-password" required>
+      <div class="err" id="adm-err" role="alert" aria-live="polite"></div>
+      <button class="btn btn-green login-primary" type="submit">Sign in securely</button>
+    </form>
+    <div class="login-divider"><span>or</span></div>
+    <button class="btn btn-gray login-google" type="button" onclick="adminLoginGoogle()">Continue with Google</button>
+    <p class="login-note">Only accounts listed in the admin access collection can continue.</p>
+  </main>
 </div>
 
 <div id="panel">
-  <div class="topbar">
-    <div class="logo">Study<span>Planner</span> · Admin</div>
-    <div class="row">
-      <span class="muted" id="admin-email"></span>
-      <button class="btn btn-gray" onclick="loadAll().then(render)">↻ Refresh</button>
-      <button class="btn btn-red" onclick="firebase.auth().signOut().then(()=>{_unsubs.forEach(u=>{try{u();}catch(e){}});location.reload();})">Logout</button>
+  <header class="topbar">
+    <div class="topbar-start">
+      <button class="icon-btn mobile-menu-btn" type="button" onclick="toggleAdminNav()" aria-label="Open navigation" aria-controls="admin-navigation" aria-expanded="false">☰</button>
+      <div class="logo-mark" aria-hidden="true">P</div>
+      <div class="brand-lockup">
+        <div class="logo">Prep<span>Path</span></div>
+        <div class="brand-caption">Admin workspace</div>
+      </div>
     </div>
-  </div>
-  <div class="tabs">
-    <div class="tab" data-t="analytics" onclick="setTab('analytics')">📊 Analytics</div>
-    <div class="tab active" data-t="pending" onclick="setTab('pending')">⏳ Pending <span id="cnt-pending"></span></div>
-    <div class="tab" data-t="telegram" onclick="setTab('telegram')">✈️ Telegram <span id="cnt-tg"></span></div>
-    <div class="tab" data-t="aistudy" onclick="setTab('aistudy')">🎓 AI Study</div>
-    <div class="tab" data-t="users" onclick="setTab('users')">👥 Users</div>
-    <div class="tab" data-t="plans" onclick="setTab('plans')">💰 Plans</div>
-    <div class="tab" data-t="payments" onclick="setTab('payments')">🧾 Payments</div>
-    <div class="tab" data-t="referrals" onclick="setTab('referrals')">🔗 Referrals</div>
-    <div class="tab" data-t="payouts" onclick="setTab('payouts')">💸 Payouts</div>
-    <div class="tab" data-t="coupons" onclick="setTab('coupons')">🎟️ Coupons</div>
-    <div class="tab" data-t="requests" onclick="setTab('requests')">&#x1f4a1; Requests <span id="cnt-requests"></span></div>
-    <div class="tab" data-t="reports" onclick="setTab('reports')">🚩 Reports <span id="cnt-reports"></span></div>
-    <div class="tab" data-t="settings" onclick="setTab('settings')">&#x2699; Settings</div>
-  </div>
-  <div class="wrap">
-    <div class="stat-row" id="stats"></div>
-    <div id="content"></div>
+    <div class="topbar-actions row">
+      <div class="sync-status" title="Last successful data refresh">
+        <span class="sync-dot" aria-hidden="true"></span>
+        <span id="last-sync">Ready</span>
+      </div>
+      <button id="admin-refresh-btn" class="btn btn-gray topbar-btn" type="button" onclick="refreshAdminData()" title="Refresh all data (R)">
+        <span class="refresh-icon" aria-hidden="true">↻</span><span class="topbar-btn-label">Refresh</span>
+      </button>
+      <div class="admin-identity" title="Signed-in administrator">
+        <span class="admin-avatar" aria-hidden="true">A</span>
+        <span class="muted" id="admin-email"></span>
+      </div>
+      <button class="btn btn-red topbar-btn" type="button" onclick="logoutAdmin()" title="Sign out">
+        <span aria-hidden="true">↪</span><span class="topbar-btn-label">Logout</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="admin-shell">
+    <div id="nav-backdrop" class="nav-backdrop" onclick="closeAdminNav()" aria-hidden="true"></div>
+    <aside class="sidebar" id="admin-navigation" aria-label="Admin navigation">
+      <div class="sidebar-inner">
+        <div class="nav-search-wrap">
+          <span class="nav-search-icon" aria-hidden="true">⌕</span>
+          <label class="sr-only" for="admin-nav-search">Find a section</label>
+          <input id="admin-nav-search" class="nav-search" type="search" placeholder="Find a section…" autocomplete="off" oninput="filterAdminNav(this.value)">
+          <kbd>⌘K</kbd>
+        </div>
+
+        <nav class="tabs">
+          <div class="nav-group" data-nav-group>
+            <div class="nav-group-label">Overview</div>
+            <button class="tab" type="button" data-t="analytics" data-keywords="dashboard overview insights revenue growth" onclick="setTab('analytics')"><span class="tab-icon">⌂</span><span>Dashboard</span></button>
+          </div>
+
+          <div class="nav-group" data-nav-group>
+            <div class="nav-group-label">Work queue</div>
+            <button class="tab active" type="button" data-t="pending" data-keywords="pending approval registrations review" onclick="setTab('pending')"><span class="tab-icon">◷</span><span>Approvals</span><span class="nav-count" id="cnt-pending"></span></button>
+            <button class="tab" type="button" data-t="payments" data-keywords="payments verify transactions reconciliation money" onclick="setTab('payments')"><span class="tab-icon">₹</span><span>Payments</span><span class="nav-count" id="cnt-payments"></span></button>
+            <button class="tab" type="button" data-t="reports" data-keywords="question reports corrections quiz fixes" onclick="setTab('reports')"><span class="tab-icon">⚑</span><span>Question reports</span><span class="nav-count" id="cnt-reports"></span></button>
+            <button class="tab" type="button" data-t="requests" data-keywords="feature requests feedback bugs" onclick="setTab('requests')"><span class="tab-icon">◇</span><span>User requests</span><span class="nav-count" id="cnt-requests"></span></button>
+          </div>
+
+          <div class="nav-group" data-nav-group>
+            <div class="nav-group-label">People</div>
+            <button class="tab" type="button" data-t="users" data-keywords="users accounts plans trials devices" onclick="setTab('users')"><span class="tab-icon">♙</span><span>Users</span></button>
+            <button class="tab" type="button" data-t="referrals" data-keywords="referrals invite rewards" onclick="setTab('referrals')"><span class="tab-icon">⌁</span><span>Referrals</span></button>
+            <button class="tab" type="button" data-t="payouts" data-keywords="payouts earnings rewards paid" onclick="setTab('payouts')"><span class="tab-icon">↗</span><span>Payouts</span></button>
+          </div>
+
+          <div class="nav-group" data-nav-group>
+            <div class="nav-group-label">Revenue</div>
+            <button class="tab" type="button" data-t="plans" data-keywords="plans pricing upi limits subscription" onclick="setTab('plans')"><span class="tab-icon">▤</span><span>Plans & pricing</span></button>
+            <button class="tab" type="button" data-t="coupons" data-keywords="coupons discounts promo redemptions" onclick="setTab('coupons')"><span class="tab-icon">◇</span><span>Coupons</span></button>
+          </div>
+
+          <div class="nav-group" data-nav-group>
+            <div class="nav-group-label">Automation</div>
+            <button class="tab" type="button" data-t="telegram" data-keywords="telegram bot notifications schedule reports" onclick="setTab('telegram')"><span class="tab-icon">➤</span><span>Telegram</span><span class="nav-count" id="cnt-tg"></span></button>
+            <button class="tab" type="button" data-t="aistudy" data-keywords="ai study providers models limits tutor" onclick="setTab('aistudy')"><span class="tab-icon">✦</span><span>AI Study</span></button>
+          </div>
+
+          <div class="nav-group" data-nav-group>
+            <div class="nav-group-label">System</div>
+            <button class="tab" type="button" data-t="settings" data-keywords="settings maintenance approval announcement turbo security" onclick="setTab('settings')"><span class="tab-icon">⚙</span><span>Settings</span></button>
+          </div>
+          <div id="nav-no-results" class="nav-no-results" hidden>No matching section</div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="status-indicator" aria-hidden="true"></span>
+          <div><strong>Admin access active</strong><span>Protected workspace</span></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="admin-main" id="main-content" tabindex="-1">
+      <div class="page-heading">
+        <div>
+          <div class="breadcrumb"><span>Admin</span><span aria-hidden="true">/</span><strong id="page-breadcrumb">Approvals</strong></div>
+          <h1 id="page-title">Pending approvals</h1>
+          <p id="page-description">Review new and duplicate-device account registrations.</p>
+        </div>
+        <div class="page-actions" id="page-actions">
+          <button class="btn btn-gray" type="button" onclick="refreshAdminData()">↻ Refresh data</button>
+        </div>
+      </div>
+      <div class="wrap">
+        <section class="stat-row" id="stats" aria-label="Account summary"></section>
+        <section id="content" aria-live="polite" aria-busy="false"></section>
+      </div>
+    </main>
   </div>
 </div>
 
 <script src="js/core/firebase-config.js"></script>
 <script type="module" src="src/main.js"></script>
-<!-- 🚩 Question reports + corrections (Supabase-backed, shared with the quiz engine) -->
+<!-- Question reports + corrections (Supabase-backed, shared with the quiz engine) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<!-- Cache-busting (?v=<contentHash>) is injected automatically by the Vite
-     build — see contentHashCacheBust in vite.config.mjs. Do not add manual ?v=. -->
+<!-- Cache-busting is injected automatically by the Vite build. -->
 <script src="js/question-fix.js"></script>
 <script src="js/admin/admin-core.js"></script>
 <script src="js/admin/admin-render.js"></script>

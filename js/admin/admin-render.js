@@ -30,6 +30,26 @@ function avatarColor(str) {
   return 'linear-gradient(135deg,' + a + ',' + b + ')';
 }
 
+function renderAttentionQueue() {
+  const items = [
+    { tab: 'pending', icon: '◷', count: USERS.filter(u => u.p.status === 'pending').length, label: 'Account approvals', hint: 'Review registrations' },
+    { tab: 'payments', icon: '₹', count: PAYMENTS.filter(p => p.status === 'pending').length, label: 'Payment checks', hint: 'Verify transactions' },
+    { tab: 'reports', icon: '⚑', count: (REPORTS || []).filter(r => r.status === 'open').length, label: 'Question reports', hint: 'Correct quiz content' },
+    { tab: 'requests', icon: '◇', count: (REQUESTS || []).filter(r => r.status === 'new').length, label: 'User requests', hint: 'Triage feedback' }
+  ];
+  const total = items.reduce((sum, item) => sum + item.count, 0);
+  return '<div class="attention-panel">' +
+    '<div class="attention-heading"><div><span class="section-eyebrow">Work queue</span><h3>' +
+      (total ? total + ' item' + (total === 1 ? '' : 's') + ' need attention' : 'You are all caught up') +
+    '</h3></div><span class="badge ' + (total ? 'badge-amber' : 'badge-green') + '">' + (total ? 'Action needed' : 'Healthy') + '</span></div>' +
+    '<div class="attention-grid">' + items.map(item =>
+      '<button class="attention-item" type="button" onclick="setTab(\'' + item.tab + '\')">' +
+        '<span class="attention-icon">' + item.icon + '</span><span class="attention-copy"><strong>' + item.label + '</strong><small>' + item.hint + '</small></span>' +
+        '<b class="attention-count">' + item.count + '</b><span class="attention-arrow">→</span>' +
+      '</button>'
+    ).join('') + '</div></div>';
+}
+
 function renderAnalytics() {
   var now = new Date();
   var dayMs = 86400000;
@@ -79,7 +99,7 @@ function renderAnalytics() {
     return '<div class="stat"><b' + (color ? ' style="color:' + color + '"' : '') + '>' + val + '</b><div>' + label + '</div></div>';
   };
 
-  return '<h3>📊 Overview</h3>' +
+  return renderAttentionQueue() + '<h3 class="section-title">Performance overview</h3>' +
     '<div class="stat-row">' +
       stat(total, 'Total users') +
       stat(new1, 'New today', 'var(--accent-dark)') +
@@ -105,29 +125,42 @@ function renderAnalytics() {
 }
 
 function renderPending() {
-  const list = USERS.filter(u => u.p.status === 'pending');
-  if (!list.length) return '<div class="empty">&#127881; Koi pending request nahi hai.</div>';
-  return list.map(u => {
+  const all = USERS.filter(u => u.p.status === 'pending');
+  const query = (typeof PENDING_SEARCH === 'string' ? PENDING_SEARCH : '').toLowerCase().trim();
+  const list = query ? all.filter(u =>
+    (u.p.name || '').toLowerCase().includes(query) ||
+    (u.p.email || '').toLowerCase().includes(query) ||
+    (u.p.mobile || '').toLowerCase().includes(query) ||
+    (u.p.examTarget || '').toLowerCase().includes(query) ||
+    (u.id || '').toLowerCase().includes(query)
+  ) : all;
+  const toolbar = '<div class="queue-toolbar">' +
+    '<div><span class="section-eyebrow">Review queue</span><strong>' + all.length + ' pending account' + (all.length === 1 ? '' : 's') + '</strong></div>' +
+    '<div class="queue-search"><span aria-hidden="true">⌕</span><label class="sr-only" for="pending-search">Search pending accounts</label><input id="pending-search" type="search" value="' + esc(query) + '" placeholder="Search name, email, mobile or exam…" oninput="pendingSearchChanged(this.value)"></div>' +
+  '</div>';
+  if (!all.length) return toolbar + '<div class="empty empty-success"><strong>All caught up</strong><span>There are no account registrations waiting for review.</span></div>';
+  if (!list.length) return toolbar + '<div class="empty"><strong>No matches</strong><span>Try a different name, email, mobile number or exam.</span></div>';
+  return toolbar + list.map(u => {
     const dupBadge = u.p.deviceDuplicate
-      ? '<span class="badge badge-amber" title="Same device fingerprint as an existing account">&#128273; Same Device</span>'
-      : '<span class="badge badge-green">New Device</span>';
+      ? '<span class="badge badge-amber" title="Same device fingerprint as an existing account">Same device</span>'
+      : '<span class="badge badge-green">New device</span>';
     const examBadge = u.p.examTarget
-      ? '<span class="badge badge-blue">' + esc(u.p.examTarget) + '</span>'
+      ? '<span class="badge badge-blue">' + esc(u.p.examTarget.toUpperCase()) + '</span>'
       : '';
-    return '<div class="card"><div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:10px;">' +
-    '<div style="flex:1;min-width:220px;">' +
-    '<strong>' + esc(u.p.name || '?') + '</strong> ' + dupBadge + ' ' + examBadge +
-    '<div class="muted" style="margin-top:3px;font-size:0.8rem;">' + esc(u.p.email || '') + ' &middot; ' + esc(u.p.mobile || '') + ' &middot; ' + fmtDate(u.p.requestedAt) + '</div>' +
+    return '<div class="card pending-card"><div class="pending-card-main">' +
+    '<div class="pending-avatar" style="background:' + avatarColor(u.p.name || u.p.email || u.id) + ';">' + esc(userInitials(u.p.name, u.p.email)) + '</div>' +
+    '<div class="pending-info"><div class="pending-name"><strong>' + esc(u.p.name || 'Unnamed user') + '</strong>' + dupBadge + examBadge + '</div>' +
+    '<div class="uc-email">' + esc(u.p.email || 'No email') + '</div>' +
     userMeta(u) + '</div>' +
-    '<div class="row">' +
-    '<button class="btn btn-green" onclick="approveUser(\'' + u.id + '\')">&#10003; Approve</button>' +
-    '<button class="btn btn-red" onclick="rejectUser(\'' + u.id + '\')">&#10005; Reject</button>' +
+    '<div class="pending-actions">' +
+    '<button class="btn btn-green" onclick="approveUser(\'' + u.id + '\')">✓ Approve</button>' +
+    '<button class="btn btn-red" onclick="rejectUser(\'' + u.id + '\')">✕ Reject</button>' +
     '</div></div></div>';
   }).join('');
 }
 
 function renderUsers() {
-  const search = (document.getElementById('user-search')?.value || '').toLowerCase().trim();
+  const search = (typeof USER_SEARCH === 'string' ? USER_SEARCH : '').toLowerCase().trim();
   const filter = document.getElementById('user-filter')?.value || 'all';
   const exam   = document.getElementById('user-exam')?.value || 'all';
   const sort   = document.getElementById('user-sort')?.value || USER_SORT || 'new';
@@ -165,7 +198,7 @@ function renderUsers() {
   const toolbar = '<div class="card" style="padding:0.75rem 1rem;">' +
     '<div class="row" style="gap:8px;flex-wrap:wrap;">' +
       '<input id="user-search" placeholder="🔍 Search name, email, mobile, UID…" ' +
-             'value="' + esc(search) + '" style="flex:1;min-width:200px;" oninput="USER_PAGE=1;render()">' +
+             'value="' + esc(search) + '" style="flex:1;min-width:200px;" oninput="userSearchChanged(this.value)">' +
       '<select id="user-filter" onchange="USER_PAGE=1;render()">' +
         '<option value="all"'         + (filter==='all'?' selected':'') + '>All (' + totalCount + ')</option>' +
         '<option value="paid"'        + (filter==='paid'?' selected':'') + '>Paid only</option>' +
@@ -184,7 +217,7 @@ function renderUsers() {
         '<option value="expiry"' + (sort==='expiry'?' selected':'') + '>Plan expiry</option>' +
       '</select>' +
       (search || filter !== 'all' || exam !== 'all'
-        ? '<button class="btn btn-gray" onclick="document.getElementById(\'user-search\').value=\'\';document.getElementById(\'user-filter\').value=\'all\';document.getElementById(\'user-exam\').value=\'all\';USER_PAGE=1;render();">↻ Clear</button>'
+        ? '<button class="btn btn-gray" onclick="USER_SEARCH=\'\';document.getElementById(\'user-filter\').value=\'all\';document.getElementById(\'user-exam\').value=\'all\';USER_PAGE=1;render();">↻ Clear</button>'
         : '') +
     '</div>' +
     '<div class="muted" style="margin-top:6px;">Showing <strong>' + list.length + '</strong> of ' + matched + ' matched (' + totalCount + ' total) · Page ' + USER_PAGE + '/' + totalPages + '</div>' +

@@ -19,21 +19,34 @@ async function adminLog(action, targetUid, extra) {
 }
 
 async function approveUser(id) {
-  await db.collection('users').doc(id).update({ 'profile.status': 'approved', 'profile.rejectReason': '', 'profile.approvedAt': firebase.firestore.FieldValue.serverTimestamp() });
-  await adminLog('approve_user', id);
-  await loadAll(); render();
+  try {
+    await db.collection('users').doc(id).update({ 'profile.status': 'approved', 'profile.rejectReason': '', 'profile.approvedAt': firebase.firestore.FieldValue.serverTimestamp() });
+    await adminLog('approve_user', id);
+    await loadAll(); render();
+    showToast('Account approved.');
+  } catch (e) { showToast('Approval failed: ' + (e.message || e), 'error'); }
 }
 async function rejectUser(id) {
-  const reason = prompt('Reject reason (user ko dikhega):') || '';
-  await db.collection('users').doc(id).update({ 'profile.status': 'rejected', 'profile.rejectReason': reason });
-  await adminLog('reject_user', id, { reason });
-  await loadAll(); render();
+  const reason = prompt('Reject reason (the user will see this):');
+  if (reason === null) return;
+  if (!reason.trim()) { showToast('Add a reason before rejecting the account.'); return; }
+  try {
+    await db.collection('users').doc(id).update({ 'profile.status': 'rejected', 'profile.rejectReason': reason.trim() });
+    await adminLog('reject_user', id, { reason: reason.trim() });
+    await loadAll(); render();
+    showToast('Account rejected.');
+  } catch (e) { showToast('Rejection failed: ' + (e.message || e), 'error'); }
 }
 async function suspendUser(id) {
-  const reason = prompt('Suspend reason:') || 'Suspended by admin';
-  await db.collection('users').doc(id).update({ 'profile.status': 'rejected', 'profile.rejectReason': reason });
-  await adminLog('suspend_user', id, { reason });
-  await loadAll(); render();
+  const reason = prompt('Suspend reason:', 'Suspended by admin');
+  if (reason === null) return;
+  if (!reason.trim()) { showToast('Add a reason before suspending the account.'); return; }
+  try {
+    await db.collection('users').doc(id).update({ 'profile.status': 'rejected', 'profile.rejectReason': reason.trim() });
+    await adminLog('suspend_user', id, { reason: reason.trim() });
+    await loadAll(); render();
+    showToast('Account suspended.');
+  } catch (e) { showToast('Suspension failed: ' + (e.message || e), 'error'); }
 }
 
 /* ══ PERMANENT USER DELETE ══
@@ -71,8 +84,32 @@ async function deleteUser(id) {
 /* ══ Users tab view state (pagination + sort) ══ */
 var USER_PAGE = 1;
 var USER_SORT = 'new';
+var USER_SEARCH = '';
 var USERS_PER_PAGE = 20;
+var PENDING_SEARCH = '';
+var REQUEST_FILTER = 'all';
+var _adminFilterTimer = null;
 function userPage(delta) { USER_PAGE = Math.max(1, USER_PAGE + delta); render(); }
+function userSearchChanged(value) {
+  USER_SEARCH = value || '';
+  USER_PAGE = 1;
+  clearTimeout(_adminFilterTimer);
+  _adminFilterTimer = setTimeout(function() {
+    render();
+    const input = document.getElementById('user-search');
+    if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  }, 180);
+}
+function pendingSearchChanged(value) {
+  PENDING_SEARCH = value || '';
+  clearTimeout(_adminFilterTimer);
+  _adminFilterTimer = setTimeout(function() {
+    render();
+    const input = document.getElementById('pending-search');
+    if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  }, 180);
+}
+function setRequestFilter(value) { REQUEST_FILTER = value || 'all'; render(); }
 async function setPlan(id) {
   const sel = document.getElementById('plan-' + id); if (!sel) return;
   if (sel.value === 'free') {
@@ -129,6 +166,7 @@ async function giveTrial(id) {
   showToast('✅ Trial enabled until ' + exp);
 }
 async function clearTrial(id) {
+  if (!confirm('Remove this user\'s trial access?')) return;
   await db.collection('users').doc(id).update({ 'profile.trialExpiry': '', 'profile.trialDays': 0 });
   await adminLog('clear_trial', id);
   await loadAll(); render();
@@ -203,9 +241,14 @@ async function verifyPayment(id) {
 }
 async function declinePayment(id) {
   const p = PAYMENTS.find(x => x.id === id);
-  await db.collection('payments').doc(id).update({ status: 'declined' });
-  await adminLog('decline_payment', p ? p.uid : null, { paymentId: id });
-  await loadAll(); render();
+  const label = p ? ((p.email || p.uid || 'this user') + (p.txnId ? ' · Txn ' + p.txnId : '')) : 'this payment';
+  if (!confirm('Decline payment for ' + label + '?\n\nThe user\'s plan will not be activated.')) return;
+  try {
+    await db.collection('payments').doc(id).update({ status: 'declined' });
+    await adminLog('decline_payment', p ? p.uid : null, { paymentId: id });
+    await loadAll(); render();
+    showToast('Payment declined.');
+  } catch (e) { showToast('Could not decline payment: ' + (e.message || e), 'error'); }
 }
 /* Renew a user's plan from the Expiring Soon section */
 async function renewPlan(uid) {
@@ -423,12 +466,21 @@ function exportRedemptionsCSV() {
 
 /* REQUESTS TAB */
 function renderRequests() {
-  if (!REQUESTS || !REQUESTS.length) return '<div class="empty">&#128161; Abhi koi user request nahi aayi.</div>';
+  if (!REQUESTS || !REQUESTS.length) return '<div class="empty empty-success"><strong>No user requests yet</strong><span>New feedback and content requests will appear here.</span></div>';
   var typeLabels = {feature:'New Feature',exam:'Add New Exam',chapter:'Add Chapter/Topic',youtube:'YouTube Resource',bug:'Bug Report',other:'Other'};
-  return REQUESTS.map(function(r) {
+  var counts = { all: REQUESTS.length, new: 0, done: 0, dismissed: 0 };
+  REQUESTS.forEach(function(r) { if (counts[r.status] != null) counts[r.status]++; });
+  var filter = typeof REQUEST_FILTER === 'string' ? REQUEST_FILTER : 'all';
+  var rows = filter === 'all' ? REQUESTS : REQUESTS.filter(function(r) { return r.status === filter; });
+  var toolbar = '<div class="list-toolbar"><div class="filter-chips" role="group" aria-label="Filter requests by status">' +
+    [['all','All'],['new','New'],['done','Done'],['dismissed','Dismissed']].map(function(item) {
+      return '<button class="btn ' + (filter === item[0] ? 'btn-green' : 'btn-gray') + '" aria-pressed="' + (filter === item[0]) + '" onclick="setRequestFilter(\'' + item[0] + '\')">' + item[1] + ' <span>(' + counts[item[0]] + ')</span></button>';
+    }).join('') + '</div><span class="muted">Newest requests appear first</span></div>';
+  if (!rows.length) return toolbar + '<div class="empty"><strong>No ' + esc(filter) + ' requests</strong><span>Choose another status to see more.</span></div>';
+  return toolbar + rows.map(function(r) {
     var statusBadge = r.status==='new' ? '<span class="badge badge-amber">New</span>' : r.status==='done' ? '<span class="badge badge-green">Done</span>' : '<span class="badge badge-red">Dismissed</span>';
-    return '<div class="card" style="margin-bottom:10px;"><div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;"><div style="flex:1;min-width:220px;"><strong>' + esc(r.name||r.email||r.uid) + '</strong> ' + statusBadge + ' <span class="badge badge-blue">' + esc(typeLabels[r.type]||r.type||'Other') + '</span><div class="muted" style="margin-top:4px;">' + esc(r.email||'') + ' &middot; ' + fmtDate(r.createdAt) + '</div><div style="margin-top:6px;font-size:0.85rem;background:var(--bg);border-radius:8px;padding:8px 12px;border:1px solid var(--border);">' + esc(r.detail||'') + '</div></div>' +
-    (r.status==='new' ? '<div class="row" style="flex-shrink:0;align-items:flex-start;"><button class="btn btn-green" onclick="markRequest(\'' + r.id + '\',\'done\')">&#10003; Mark Done</button><button class="btn btn-red" onclick="markRequest(\'' + r.id + '\',\'dismissed\')">Dismiss</button></div>' : '') +
+    return '<div class="card request-card"><div class="request-layout"><div class="request-content"><div class="request-title"><strong>' + esc(r.name||r.email||r.uid) + '</strong> ' + statusBadge + ' <span class="badge badge-blue">' + esc(typeLabels[r.type]||r.type||'Other') + '</span></div><div class="muted">' + esc(r.email||'') + ' &middot; ' + fmtDate(r.createdAt) + '</div><div class="request-detail">' + esc(r.detail||'') + '</div></div>' +
+    (r.status==='new' ? '<div class="request-actions"><button class="btn btn-green" onclick="markRequest(\'' + r.id + '\',\'done\')">✓ Mark done</button><button class="btn btn-red" onclick="markRequest(\'' + r.id + '\',\'dismissed\')">Dismiss</button></div>' : '') +
     '</div></div>';
   }).join('');
 }
@@ -1540,9 +1592,9 @@ function renderSettings() {
     /* Force logout (placeholder) */
     '<div class="card">' +
     '<h3 style="margin-bottom:0.5rem;">&#128683; Force Logout All Users</h3>' +
-    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.75rem;">Signs every user out of the app on their next request. Use this if you suspect a session/token leak or want to invalidate cached logins after a security update.</p>' +
-    '<button class="btn btn-red" onclick="forceLogoutAll()">&#9888; Force Logout All Users</button>' +
-    '<div class="muted" style="font-size:0.78rem;margin-top:6px;">Requires a deployed Cloud Function (<code>forceLogoutAll</code>) — button will prompt you to deploy it first.</div>' +
+    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.75rem;">Emergency session invalidation is not active yet because the user app does not currently consume a global logout version. Keep this unavailable until client-side enforcement is deployed.</p>' +
+    '<button class="btn btn-red" disabled title="Client-side logout enforcement is not deployed">&#9888; Force Logout Unavailable</button>' +
+    '<div class="muted" style="font-size:0.78rem;margin-top:6px;">To enable this safely, every client must observe <code>forceLogoutVersion</code> and sign out when it changes.</div>' +
     '</div>' +
     '<div class="card" style="margin-top:1rem;">' +
     '<h3 style="margin-bottom:0.5rem;">&#127873; Trial Access</h3>' +

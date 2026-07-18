@@ -6,6 +6,7 @@ firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.firestore(), auth = firebase.auth();
 
 let USERS = [], PLANS = [], PAYMENTS = [], REQUESTS = [], COUPONS = [], REDEMPTIONS = [], TAB = 'pending', PAY_FILTER = 'all', PAY_VIEW = 'list'; // 'list' | 'reconcile'
+let ADMIN_READY = false;
 let CONFIG = {}, SETTINGS = { requireApproval: false };
 let DUP = { mobile:{}, fp:{}, ip:{} };
 let TG_USERS = [], TG_CONFIG = { botToken: '', loaded: false }, TG_SENDING = false;
@@ -23,7 +24,43 @@ let AI_LIMITS = { unlimited: {}, unlimitedEmails: [], focusUsers: {}, focusEmail
    Telegram bot server to parse incoming messages into planner tasks. */
 let AI_CONFIG = { groqApiKey: '', model: 'llama-3.1-8b-instant', enabled: false, loaded: false };
 
-function showToast(msg) { let t=document.getElementById('adm-toast'); if(!t){t=document.createElement('div');t.id='adm-toast';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#222;color:#fff;padding:10px 20px;border-radius:10px;font-size:0.85rem;z-index:999;';document.body.appendChild(t);} t.textContent=msg;t.style.opacity='1';clearTimeout(t._t);t._t=setTimeout(()=>t.style.opacity='0',2500); }
+/* Central metadata keeps navigation labels, page context and deep links in sync. */
+const ADMIN_TABS = {
+  analytics:  { crumb: 'Dashboard',        title: 'Operations dashboard', description: 'Monitor growth, revenue and the work that needs your attention.' },
+  pending:    { crumb: 'Approvals',        title: 'Pending approvals',    description: 'Review new and duplicate-device account registrations.' },
+  payments:   { crumb: 'Payments',         title: 'Payments',            description: 'Verify submissions, detect duplicate transactions and reconcile revenue.' },
+  reports:    { crumb: 'Question reports', title: 'Question reports',     description: 'Review reported questions and publish corrections to the live quiz.' },
+  requests:   { crumb: 'User requests',    title: 'User requests',        description: 'Triage product feedback, content requests and bug reports.' },
+  users:      { crumb: 'Users',            title: 'User management',      description: 'Search accounts, manage access, plans, trials and registered devices.' },
+  referrals:  { crumb: 'Referrals',        title: 'Referral activity',    description: 'Track invitations, paid conversions and suspicious referrals.' },
+  payouts:    { crumb: 'Payouts',          title: 'Referral payouts',     description: 'Review eligibility, outstanding rewards and completed payouts.' },
+  plans:      { crumb: 'Plans & pricing',   title: 'Plans & pricing',      description: 'Manage subscriptions, free limits, renewals and payment settings.' },
+  coupons:    { crumb: 'Coupons',           title: 'Coupons',             description: 'Create promotions and review usage, discounts and redemptions.' },
+  telegram:   { crumb: 'Telegram',          title: 'Telegram automation', description: 'Configure bots, delivery schedules, report channels and connected users.' },
+  aistudy:    { crumb: 'AI Study',          title: 'AI Study controls',   description: 'Manage providers, models, feature controls and usage limits.' },
+  settings:   { crumb: 'Settings',          title: 'System settings',      description: 'Control registration, maintenance, announcements and service health.' }
+};
+
+function showToast(msg, tone) {
+  let t = document.getElementById('adm-toast');
+  if (!t) {
+    t = document.createElement('div');
+    t.id = 'adm-toast';
+    t.setAttribute('role', 'status');
+    t.setAttribute('aria-live', 'polite');
+    t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#172033;color:#fff;padding:11px 18px;border-radius:10px;font-size:0.82rem;z-index:999;';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.dataset.tone = tone || '';
+  t.style.opacity = '1';
+  t.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(t._t);
+  t._t = setTimeout(() => {
+    t.style.opacity = '0';
+    t.style.transform = 'translateX(-50%) translateY(8px)';
+  }, 3000);
+}
 /* Delegates to the canonical escaper in src/shared/domUtils.js (single source
    of truth for the escaping rules) with an identical inline fallback for the
    brief window before the deferred ES module (window.PrepPathModules) loads.
@@ -42,18 +79,163 @@ function esc(s) {
 }
 function fmtDate(ts) { try { const d = ts && ts.toDate ? ts.toDate() : (ts ? new Date(ts) : null); return d ? d.toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '—'; } catch(e){ return '—'; } }
 
+function updateTabChrome() {
+  const meta = ADMIN_TABS[TAB] || ADMIN_TABS.pending;
+  const title = document.getElementById('page-title');
+  const description = document.getElementById('page-description');
+  const crumb = document.getElementById('page-breadcrumb');
+  if (title) title.textContent = meta.title;
+  if (description) description.textContent = meta.description;
+  if (crumb) crumb.textContent = meta.crumb;
+  document.title = meta.crumb + ' — PrepPath Admin';
+  document.querySelectorAll('.tab').forEach(el => {
+    const active = el.dataset.t === TAB;
+    el.classList.toggle('active', active);
+    if (active) el.setAttribute('aria-current', 'page');
+    else el.removeAttribute('aria-current');
+  });
+}
+
+function setLastSync(date) {
+  const el = document.getElementById('last-sync');
+  if (!el) return;
+  const d = date || new Date();
+  el.textContent = 'Updated ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  el.title = d.toLocaleString('en-IN');
+}
+
+async function refreshAdminData() {
+  if (!ADMIN_READY) return;
+  const button = document.getElementById('admin-refresh-btn');
+  const status = document.querySelector('.sync-status');
+  const content = document.getElementById('content');
+  if (button && button.disabled) return;
+  if (button) { button.disabled = true; button.classList.add('is-refreshing'); }
+  if (status) status.classList.add('is-loading');
+  if (content) content.setAttribute('aria-busy', 'true');
+  try {
+    const result = await loadAll();
+    if (TAB === 'telegram') await loadTelegramData();
+    else if (TAB === 'aistudy') await loadAiStudyData();
+    else if (TAB === 'reports') await loadReportsData();
+    render();
+    if (result && result.errors && result.errors.length) {
+      showToast('Partial refresh: using previous data for ' + result.errors.join(', ') + '.', 'error');
+    } else {
+      setLastSync();
+      showToast('Data refreshed successfully.');
+    }
+  } catch (e) {
+    console.error('Admin refresh failed', e);
+    showToast('Refresh failed: ' + (e.message || e), 'error');
+  } finally {
+    if (button) { button.disabled = false; button.classList.remove('is-refreshing'); }
+    if (status) status.classList.remove('is-loading');
+    if (content) content.setAttribute('aria-busy', 'false');
+  }
+}
+
+async function logoutAdmin() {
+  ADMIN_READY = false;
+  _unsubs.forEach(u => { try { u(); } catch(e) {} });
+  _unsubs = [];
+  try { await auth.signOut(); } finally { location.reload(); }
+}
+
+function isMobileAdminNav() { return window.matchMedia('(max-width: 860px)').matches; }
+function syncAdminNavMode(open) {
+  const sidebar = document.getElementById('admin-navigation');
+  const button = document.querySelector('.mobile-menu-btn');
+  const mobile = isMobileAdminNav();
+  const expanded = mobile && !!open;
+  document.body.classList.toggle('admin-nav-open', expanded);
+  if (button) {
+    button.setAttribute('aria-expanded', String(expanded));
+    button.setAttribute('aria-label', expanded ? 'Close navigation' : 'Open navigation');
+  }
+  if (sidebar) {
+    sidebar.inert = mobile && !expanded;
+    sidebar.setAttribute('aria-hidden', String(mobile && !expanded));
+  }
+}
+function toggleAdminNav(force) {
+  const wasOpen = document.body.classList.contains('admin-nav-open');
+  const open = typeof force === 'boolean' ? force : !wasOpen;
+  const sidebar = document.getElementById('admin-navigation');
+  const focusWasInside = sidebar && sidebar.contains(document.activeElement);
+  syncAdminNavMode(open);
+  if (isMobileAdminNav() && open) {
+    setTimeout(function() {
+      const search = document.getElementById('admin-nav-search');
+      if (search) search.focus();
+    }, 0);
+  } else if (focusWasInside) {
+    const button = document.querySelector('.mobile-menu-btn');
+    if (button) button.focus();
+  }
+}
+function closeAdminNav() { toggleAdminNav(false); }
+window.addEventListener('resize', function() { syncAdminNavMode(document.body.classList.contains('admin-nav-open')); });
+syncAdminNavMode(false);
+
+function filterAdminNav(value) {
+  const query = String(value || '').trim().toLowerCase();
+  let visible = 0;
+  document.querySelectorAll('.tab').forEach(tab => {
+    const haystack = (tab.textContent + ' ' + (tab.dataset.keywords || '')).toLowerCase();
+    const show = !query || haystack.includes(query);
+    tab.hidden = !show;
+    if (show) visible++;
+  });
+  document.querySelectorAll('[data-nav-group]').forEach(group => {
+    group.hidden = !Array.from(group.querySelectorAll('.tab')).some(tab => !tab.hidden);
+  });
+  const empty = document.getElementById('nav-no-results');
+  if (empty) empty.hidden = visible > 0;
+}
+
+/* Keyboard access: Cmd/Ctrl+K finds a section; R refreshes outside form fields. */
+document.addEventListener('keydown', function(e) {
+  const target = e.target;
+  const typing = target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+  if (e.key === 'Tab' && document.body.classList.contains('admin-nav-open')) {
+    const sidebar = document.getElementById('admin-navigation');
+    const focusable = sidebar ? Array.from(sidebar.querySelectorAll('button:not([hidden]):not([disabled]), input:not([hidden]):not([disabled]), a[href], select, textarea')).filter(el => el.offsetParent !== null) : [];
+    if (focusable.length) {
+      const first = focusable[0], last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && ADMIN_READY) {
+    e.preventDefault();
+    if (window.innerWidth <= 860) toggleAdminNav(true);
+    const search = document.getElementById('admin-nav-search');
+    if (search) { search.focus(); search.select(); }
+  } else if (!typing && e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.metaKey && ADMIN_READY) {
+    e.preventDefault(); refreshAdminData();
+  } else if (e.key === 'Escape') {
+    closeAdminNav();
+    const search = document.getElementById('admin-nav-search');
+    if (search && search.value) { search.value = ''; filterAdminNav(''); }
+  }
+});
+
 /* ══ AUTH ══ */
 function admErr(m) { const e = document.getElementById('adm-err'); e.textContent = m; e.style.display = 'block'; }
+function clearAdmErr() { const e = document.getElementById('adm-err'); if (e) { e.textContent = ''; e.style.display = 'none'; } }
 async function adminLoginEmail() {
+  clearAdmErr();
   const em = document.getElementById('adm-email').value.trim(), pw = document.getElementById('adm-pass').value;
-  if (!em || !pw) { admErr('Email aur password dono bharo.'); return; }
+  if (!em || !pw) { admErr('Enter both your email and password.'); return; }
   try { await auth.signInWithEmailAndPassword(em, pw); } catch(e) { admErr('Login failed: ' + (e.code || e.message)); }
 }
 async function adminLoginGoogle() {
+  clearAdmErr();
   try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); } catch(e) { admErr('Google login failed: ' + (e.code || e.message)); }
 }
 auth.onAuthStateChanged(async (u) => {
-  if (!u) { document.getElementById('login-screen').style.display = 'flex'; document.getElementById('panel').style.display = 'none'; return; }
+  if (!u) { ADMIN_READY = false; document.getElementById('login-screen').style.display = 'flex'; document.getElementById('panel').style.display = 'none'; return; }
   try {
     const adminDoc = await db.collection('admins').doc(u.uid).get();
     if (!adminDoc.exists) {
@@ -65,8 +247,20 @@ auth.onAuthStateChanged(async (u) => {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('panel').style.display = 'block';
   document.getElementById('admin-email').textContent = u.email;
-  await loadAll();
-  render();
+  const avatar = document.querySelector('.admin-avatar');
+  if (avatar) avatar.textContent = String(u.email || 'A').charAt(0).toUpperCase();
+  const initialLoad = await loadAll();
+  if (!initialLoad.errors.length) setLastSync();
+  else showToast('Some data could not be loaded: ' + initialLoad.errors.join(', ') + '.', 'error');
+  let initialTab = 'pending';
+  try {
+    const requested = new URLSearchParams(window.location.search).get('tab');
+    const remembered = localStorage.getItem('preppath_admin_tab');
+    if (requested && Object.prototype.hasOwnProperty.call(ADMIN_TABS, requested)) initialTab = requested;
+    else if (remembered && Object.prototype.hasOwnProperty.call(ADMIN_TABS, remembered)) initialTab = remembered;
+  } catch(e) {}
+  ADMIN_READY = true;
+  setTab(initialTab, { updateUrl: false, focus: false });
   subscribeRealtime();
   handleReportsDeepLink();
 });
@@ -172,30 +366,55 @@ function rebuildDupIndex() {
 
 /* ══ DATA ══ */
 async function loadAll() {
+  const errors = [];
+  const failed = (name, error) => { errors.push(name); console.warn(name + ' load failed', error); };
   try {
     const us = await db.collection('users').get();
     USERS = us.docs.map(d => ({ id: d.id, p: (d.data().profile || {}) }));
-  } catch(e) { alert('Users load failed — Firestore rules update kiye? ' + e.message); USERS = []; }
-  try { const ps = await db.collection('plans').get(); PLANS = ps.docs.map(d => ({ id: d.id, ...d.data() })); } catch(e) { PLANS = []; }
+  } catch(e) { failed('users', e); }
+  try {
+    const ps = await db.collection('plans').get();
+    PLANS = ps.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch(e) { failed('plans', e); }
   try {
     const pay = await db.collection('payments').get();
     PAYMENTS = pay.docs.map(d => ({ id: d.id, ...d.data() }));
     PAYMENTS.sort((a,b) => ((b.createdAt&&b.createdAt.seconds)||0) - ((a.createdAt&&a.createdAt.seconds)||0));
-  } catch(e) { PAYMENTS = []; }
-  try { const cf = await db.collection('config').doc('payment').get(); CONFIG = cf.exists ? cf.data() : {}; } catch(e) { CONFIG = {}; }
-  try { const ff = await db.collection('config').doc('free').get(); CONFIG.free = ff.exists ? ff.data() : { mocks:5, mediaSaves:2, notes:10 }; } catch(e) { CONFIG.free = { mocks:5, mediaSaves:2, notes:10 }; }
-  try { const tb = await db.collection('config').doc('turbo').get(); CONFIG.turbo = tb.exists ? tb.data() : {}; } catch(e) { CONFIG.turbo = {}; }
-  DUP = { mobile:{}, fp:{}, ip:{} };
-  USERS.forEach(u => {
-    if (u.p.mobile) DUP.mobile[u.p.mobile] = (DUP.mobile[u.p.mobile] || 0) + 1;
-    if (u.p.fp) DUP.fp[u.p.fp] = (DUP.fp[u.p.fp] || 0) + 1;
-    if (u.p.ip) DUP.ip[u.p.ip] = (DUP.ip[u.p.ip] || 0) + 1;
-  });
+  } catch(e) { failed('payments', e); }
+  try {
+    const cf = await db.collection('config').doc('payment').get();
+    CONFIG = { ...(cf.exists ? cf.data() : {}), free: CONFIG.free, turbo: CONFIG.turbo };
+  } catch(e) { failed('payment settings', e); }
+  try {
+    const ff = await db.collection('config').doc('free').get();
+    CONFIG.free = ff.exists ? ff.data() : { mocks:5, mediaSaves:2, notes:10 };
+  } catch(e) { failed('free limits', e); }
+  try {
+    const tb = await db.collection('config').doc('turbo').get();
+    CONFIG.turbo = tb.exists ? tb.data() : {};
+  } catch(e) { failed('turbo settings', e); }
+  rebuildDupIndex();
   await syncReferralStats();
-  try { const rq = await db.collection('requests').get(); REQUESTS = rq.docs.map(d => ({ id: d.id, ...d.data() })); REQUESTS.sort((a,b) => ((b.createdAt&&b.createdAt.seconds)||0) - ((a.createdAt&&a.createdAt.seconds)||0)); } catch(e) { REQUESTS = []; }
-  try { const cp = await db.collection('coupons').get(); COUPONS = cp.docs.map(d => ({ id: d.id, ...d.data() })); COUPONS.sort((a,b) => ((b.createdAt&&b.createdAt.seconds)||0) - ((a.createdAt&&a.createdAt.seconds)||0)); } catch(e) { COUPONS = []; }
-  try { const rd = await db.collection('coupon_redemptions').get(); REDEMPTIONS = rd.docs.map(d => ({ id: d.id, ...d.data() })); REDEMPTIONS.sort((a,b) => ((b.createdAt&&b.createdAt.seconds)||0) - ((a.createdAt&&a.createdAt.seconds)||0)); } catch(e) { REDEMPTIONS = []; }
-  try { const sv = await db.collection('config').doc('settings').get(); SETTINGS = sv.exists ? sv.data() : { requireApproval: false }; } catch(e) { SETTINGS = { requireApproval: false }; }
+  try {
+    const rq = await db.collection('requests').get();
+    REQUESTS = rq.docs.map(d => ({ id: d.id, ...d.data() }));
+    REQUESTS.sort((a,b) => ((b.createdAt&&b.createdAt.seconds)||0) - ((a.createdAt&&a.createdAt.seconds)||0));
+  } catch(e) { failed('requests', e); }
+  try {
+    const cp = await db.collection('coupons').get();
+    COUPONS = cp.docs.map(d => ({ id: d.id, ...d.data() }));
+    COUPONS.sort((a,b) => ((b.createdAt&&b.createdAt.seconds)||0) - ((a.createdAt&&a.createdAt.seconds)||0));
+  } catch(e) { failed('coupons', e); }
+  try {
+    const rd = await db.collection('coupon_redemptions').get();
+    REDEMPTIONS = rd.docs.map(d => ({ id: d.id, ...d.data() }));
+    REDEMPTIONS.sort((a,b) => ((b.createdAt&&b.createdAt.seconds)||0) - ((a.createdAt&&a.createdAt.seconds)||0));
+  } catch(e) { failed('coupon redemptions', e); }
+  try {
+    const sv = await db.collection('config').doc('settings').get();
+    SETTINGS = sv.exists ? sv.data() : { requireApproval: false };
+  } catch(e) { failed('system settings', e); }
+  return { errors };
 }
 
 /* Write referral counters onto each referrer's profile so the app can show
@@ -224,29 +443,48 @@ function flagsFor(u) {
   return f;
 }
 /* ══ RENDER ══ */
-function setTab(t) {
+function setTab(t, options) {
+  if (!Object.prototype.hasOwnProperty.call(ADMIN_TABS, t)) return;
   TAB = t;
-  document.querySelectorAll('.tab').forEach(el => el.classList.toggle('active', el.dataset.t === t));
+  const opts = options || {};
+  updateTabChrome();
+  try { localStorage.setItem('preppath_admin_tab', t); } catch(e) {}
+  if (opts.updateUrl !== false) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', t);
+      if (t !== 'reports') url.searchParams.delete('open');
+      history.replaceState(null, '', url.pathname + url.search + url.hash);
+    } catch(e) {}
+  }
   if (t === 'telegram' && !TG_CONFIG.loaded) loadTelegramData();
   if (t === 'aistudy' && !AI_CONFIG.loaded) loadAiStudyData();
   if (t === 'reports' && !REPORTS_LOADED) loadReportsData();
   render();
+  closeAdminNav();
+  if (opts.focus !== false) {
+    const main = document.getElementById('main-content');
+    if (main) { main.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+  }
 }
 function render() {
+  updateTabChrome();
   const pending = USERS.filter(u => u.p.status === 'pending').length;
   const approved = USERS.filter(u => u.p.status === 'approved' || !u.p.status).length;
   const paid = USERS.filter(u => u.p.plan && u.p.plan !== 'free').length;
   const payPending = PAYMENTS.filter(p => p.status === 'pending').length;
-  document.getElementById('cnt-pending').textContent = pending ? '(' + pending + ')' : '';
+  document.getElementById('cnt-pending').textContent = pending || '';
+  const cntPayEl = document.getElementById('cnt-payments');
+  if (cntPayEl) cntPayEl.textContent = payPending || '';
   const newReqs = (REQUESTS || []).filter(r => r.status === 'new').length;
   const cntReqEl = document.getElementById('cnt-requests');
-  if (cntReqEl) cntReqEl.textContent = newReqs ? '(' + newReqs + ')' : '';
+  if (cntReqEl) cntReqEl.textContent = newReqs || '';
   const openReps = (REPORTS || []).filter(r => r.status === 'open').length;
   const cntRepEl = document.getElementById('cnt-reports');
-  if (cntRepEl) cntRepEl.textContent = openReps ? '(' + openReps + ')' : '';
+  if (cntRepEl) cntRepEl.textContent = openReps || '';
   const tgEnabled = TG_USERS.filter(u => u.tg.enabled && u.tg.chatId).length;
   const cntTgEl = document.getElementById('cnt-tg');
-  if (cntTgEl) cntTgEl.textContent = tgEnabled ? '(' + tgEnabled + ')' : '';
+  if (cntTgEl) cntTgEl.textContent = tgEnabled || '';
   document.getElementById('stats').innerHTML =
     '<div class="stat"><b>' + USERS.length + '</b><div>Total users</div></div>' +
     '<div class="stat"><b style="color:var(--amber)">' + pending + '</b><div>Pending requests</div></div>' +
