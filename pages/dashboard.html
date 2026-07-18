@@ -1,114 +1,175 @@
-    <div class="page active" id="page-dashboard">
+    <div class="page active fintech-dashboard" id="page-dashboard">
 
-      <!-- ═══ FOCUS CARD ═══ -->
-      <div class="dash-focus">
-        <div class="dash-head">
-          <div class="dash-head-l">
-            <div class="dash-eyebrow">🎯 Today's focus</div>
-            <div class="dash-exam" id="dash-exam-title">SSC CGL 2026</div>
-          </div>
-          <div class="dash-greet">
-            <div class="dg-small" id="dash-greeting">Good evening,</div>
-            <div class="dg-name" id="dash-username">Aspirant</div>
-            <div class="dg-sub">Let's get a little closer today.</div>
-          </div>
-          <div class="dash-rank" id="dash-target-rank" style="display:none;"></div>
-          <div class="dash-date">
-            <div class="dd-label">📅 Exam date</div>
-            <div class="dd-val" id="exam-date-label">Set your date</div>
-          </div>
+      <!-- Dashboard introduction -->
+      <section class="fin-page-head" aria-labelledby="fin-dashboard-title">
+        <div>
+          <div class="fin-eyebrow"><span class="fin-live-dot"></span> Preparation overview</div>
+          <h1 id="fin-dashboard-title"><span id="dash-greeting">Good evening,</span> <span id="dash-username">Aspirant</span></h1>
+          <p>Your study portfolio, priorities and progress in one place.</p>
         </div>
+        <div class="fin-head-exam" aria-label="Active exam">
+          <span>Active preparation</span>
+          <strong id="dash-exam-title">SSC CGL 2026</strong>
+        </div>
+      </section>
 
-        <div class="dash-main">
-          <div class="dash-left">
-            <h2 class="dash-h2" id="dash-focus-line">Pick up where you left off</h2>
-            <div class="dash-todo" id="dash-today-list"></div>
-            <button class="dash-btn" onclick="switchPage('syllabus')">Start studying →</button>
-          </div>
-
-          <div class="dash-right">
-            <div class="dash-rings">
-              <div class="ring-stat">
-                <div class="ring">
-                  <svg width="120" height="120" viewBox="0 0 120 120">
-                    <circle class="ring-track" cx="60" cy="60" r="52" stroke-width="9" fill="none"></circle>
-                    <circle class="ring-prog" id="dash-syllabus-ring" cx="60" cy="60" r="52" stroke-width="9" fill="none" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
-                  </svg>
-                  <div class="ring-c"><div class="ring-big" id="dash-syllabus-pct">0%</div><div class="ring-lbl">Syllabus</div></div>
-                </div>
-                <div class="ring-cap"><b id="dash-done-frac">0 / 0</b> done</div>
-              </div>
-
-              <div class="ring-stat">
-                <div class="ring">
-                  <svg width="120" height="120" viewBox="0 0 120 120">
-                    <circle class="ring-amber-track" cx="60" cy="60" r="52" stroke-width="9" fill="none"></circle>
-                    <circle class="ring-amber" cx="60" cy="60" r="52" stroke-width="9" fill="none" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="0"></circle>
-                  </svg>
-                  <div class="ring-c"><div class="ring-big amber" id="cd-days">00</div><div class="ring-lbl">Days left</div></div>
-                </div>
+      <!-- Primary overview: readiness + today's focus -->
+      <section class="fin-hero-grid" aria-label="Preparation health and today's focus">
+        <article class="fin-readiness-card">
+          <div class="fin-card-kicker"><span class="fin-status-dot"></span> Syllabus readiness</div>
+          <div class="fin-readiness-main">
+            <div class="ring fin-score-ring">
+              <svg width="132" height="132" viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="ring-track" cx="60" cy="60" r="52" stroke-width="9" fill="none"></circle>
+                <circle class="ring-prog" id="dash-syllabus-ring" cx="60" cy="60" r="52" stroke-width="9" fill="none" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
+              </svg>
+              <div class="ring-c">
+                <div class="ring-big" id="dash-syllabus-pct">0%</div>
+                <div class="ring-lbl">Covered</div>
               </div>
             </div>
 
-            <label class="dash-datepick" title="Set your exam date">📅
-              <input type="date" class="exam-date-input" id="exam-date-picker" onchange="updateExamDate(this.value)">
+            <div class="fin-readiness-copy">
+              <h2 id="dash-readiness-title">Build your momentum</h2>
+              <p id="dash-readiness-note">Complete today’s priority chapters to move your preparation forward.</p>
+              <div class="fin-readiness-metrics">
+                <div>
+                  <span>Completed</span>
+                  <strong id="dash-done-frac">0 / 0</strong>
+                </div>
+                <div>
+                  <span>Exam in</span>
+                  <strong><b id="cd-days">00</b> days</strong>
+                </div>
+                <div>
+                  <span>Study streak</span>
+                  <strong class="fin-warm">🔥 <b id="streak-count">0</b> days</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="fin-readiness-footer">
+            <div class="fin-exam-date">
+              <span>Exam date</span>
+              <strong id="exam-date-label">Set your date</strong>
+            </div>
+            <label class="dash-datepick" title="Set your exam date">
+              <span aria-hidden="true">Calendar</span>
+              <input type="date" class="exam-date-input" id="exam-date-picker" aria-label="Set exam date" onchange="updateExamDate(this.value)">
             </label>
-            <span class="dash-streak"><span class="streak-fire">🔥</span> <strong id="streak-count">0</strong>-day streak</span>
+            <div class="dash-rank" id="dash-target-rank" style="display:none;"></div>
           </div>
-        </div>
+        </article>
 
-        <!-- merged stats -->
-        <div class="dash-stats">
-          <div class="dstat"><div class="dstat-v" id="stat-total">0</div><div class="dstat-l">Total</div></div>
-          <div class="dstat green"><div class="dstat-v" id="stat-done">0</div><div class="dstat-l">Completed</div></div>
-          <div class="dstat amber"><div class="dstat-v" id="stat-remaining">0</div><div class="dstat-l">Remaining</div></div>
-          <div class="dstat purple"><div class="dstat-v" id="stat-bookmarked">0</div><div class="dstat-l">Bookmarked</div></div>
-        </div>
-      </div>
-
-      <!-- chapters/day hint -->
-      <div class="dash-pace">⚡ Aim for ~<strong id="chapters-per-day">6</strong> chapters/day to finish on time</div>
-
-      <!-- mock-test summary injects/renders here -->
-      <div id="mock-dash-summary"></div>
-
-      <!-- ═══ UP NEXT ═══ -->
-      <div class="section-title">Up next</div>
-      <div class="dash-grid2">
-        <div class="revision-widget" id="revision-dashboard-widget" onclick="switchPage('analysis'); if(typeof anSwitchView==='function') anSwitchView('revision');" style="cursor:pointer;">
-          <div class="revision-widget-head">
-            <div class="revision-widget-title">🔁 Revision Queue</div>
-            <div class="revision-widget-stats">
-              <span>Due: <b id="rev-due-count">0</b></span>
-              <span>This week: <b id="rev-week-count">0</b></span>
-              <span>Mastered: <b id="rev-mastered-count">0</b></span>
+        <article class="fin-focus-card">
+          <div class="fin-card-head">
+            <div>
+              <div class="fin-card-kicker">Today’s allocation</div>
+              <h2 id="dash-focus-line">Pick up where you left off</h2>
             </div>
+            <span class="fin-count-chip" id="dash-focus-count">0 priorities</span>
           </div>
-          <div id="rev-due-preview" style="font-size:0.82rem; color:var(--muted);">Loading...</div>
-        </div>
+          <div class="dash-todo" id="dash-today-list"></div>
+          <div class="fin-focus-footer">
+            <button class="dash-btn" onclick="switchPage('syllabus')">Start next chapter <span aria-hidden="true">→</span></button>
+            <span>One priority from each subject</span>
+          </div>
+        </article>
+      </section>
 
-        <!-- Continue Watching -->
-        <div class="yt-continue-card" id="yt-continue-card" onclick="switchPage('youtube');setTimeout(ytResume,120)"></div>
+      <!-- Key syllabus metrics -->
+      <section class="fin-stat-grid" aria-label="Key syllabus metrics">
+        <article class="fin-stat-card">
+          <div class="fin-stat-top"><span class="fin-stat-icon fin-blue">▦</span><span class="fin-stat-trend">Portfolio</span></div>
+          <strong class="fin-stat-value" id="stat-total">0</strong>
+          <span class="fin-stat-label">Total chapters</span>
+        </article>
+        <article class="fin-stat-card">
+          <div class="fin-stat-top"><span class="fin-stat-icon fin-green">✓</span><span class="fin-stat-trend fin-positive">Covered</span></div>
+          <strong class="fin-stat-value" id="stat-done">0</strong>
+          <span class="fin-stat-label">Completed chapters</span>
+        </article>
+        <article class="fin-stat-card">
+          <div class="fin-stat-top"><span class="fin-stat-icon fin-amber">◷</span><span class="fin-stat-trend fin-warning">Open</span></div>
+          <strong class="fin-stat-value" id="stat-remaining">0</strong>
+          <span class="fin-stat-label">Remaining chapters</span>
+        </article>
+        <article class="fin-stat-card">
+          <div class="fin-stat-top"><span class="fin-stat-icon fin-purple">◇</span><span class="fin-stat-trend">Saved</span></div>
+          <strong class="fin-stat-value" id="stat-bookmarked">0</strong>
+          <span class="fin-stat-label">Bookmarked chapters</span>
+        </article>
+      </section>
+
+      <div class="fin-pace-card">
+        <span class="fin-pace-icon">↗</span>
+        <div><strong>Daily completion target</strong><span>Maintain this pace to finish your current syllabus before the exam.</span></div>
+        <div class="fin-pace-value"><strong id="chapters-per-day">6</strong><span>chapters / day</span></div>
       </div>
 
-      <!-- Analysis snapshot -->
-      <div class="revision-widget" id="analysis-dashboard-widget" onclick="switchPage('analysis')" style="cursor:pointer;margin-bottom:1.25rem;">
-        <div class="revision-widget-head">
-          <div class="revision-widget-title">📈 Analysis</div>
-          <div class="revision-widget-stats">
-            <span>This week: <b id="an-dash-pct">0%</b></span>
-            <span>Streak: <b id="an-dash-streak">0</b></span>
-            <span>Moments: <b id="an-dash-moments">0</b></span>
-          </div>
+      <!-- Immediate study operations -->
+      <section class="fin-section" aria-labelledby="fin-operations-title">
+        <div class="fin-section-head">
+          <div><span class="fin-eyebrow">Priority workspace</span><h2 id="fin-operations-title">Study operations</h2></div>
+          <span>Everything that needs your attention next</span>
         </div>
-        <div id="an-dash-sub" style="font-size:0.82rem; color:var(--muted);">View your schedule analysis &amp; saved video gallery →</div>
-      </div>
 
-      <!-- Subject Progress -->
-      <div class="section-title">Subject-wise Progress</div>
-      <div class="dash-subjects" id="subject-progress-cards"></div>
+        <div class="fin-operations-grid">
+          <article class="fin-action-card revision-widget" id="revision-dashboard-widget" onclick="switchPage('analysis'); if(typeof anSwitchView==='function') anSwitchView('revision');" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" tabindex="0" role="button">
+            <div class="revision-widget-head">
+              <div>
+                <div class="fin-action-icon fin-purple">↻</div>
+                <div class="revision-widget-title">Revision Queue</div>
+              </div>
+              <span class="fin-arrow" aria-hidden="true">↗</span>
+            </div>
+            <div class="revision-widget-stats">
+              <span><b id="rev-due-count">0</b>Due now</span>
+              <span><b id="rev-week-count">0</b>This week</span>
+              <span><b id="rev-mastered-count">0</b>Mastered</span>
+            </div>
+            <div class="fin-action-preview" id="rev-due-preview">Loading your revision portfolio…</div>
+          </article>
 
-      <!-- Recent Activity -->
-      <div class="section-title">Recently Completed</div>
-      <div id="recent-activity-list"></div>
+          <article class="fin-action-card fin-mock-card" id="mock-dash-summary" tabindex="0" role="button"></article>
+
+          <article class="fin-action-card yt-continue-card" id="yt-continue-card" onclick="switchPage('youtube');setTimeout(ytResume,120)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" tabindex="0" role="button"></article>
+        </div>
+      </section>
+
+      <!-- Weekly analysis -->
+      <section class="fin-section" aria-labelledby="fin-analysis-title">
+        <article class="fin-analysis-card" id="analysis-dashboard-widget" onclick="switchPage('analysis')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" tabindex="0" role="button">
+          <div class="fin-analysis-copy">
+            <div class="fin-card-kicker">7-day performance</div>
+            <h2 id="fin-analysis-title">Weekly Analysis</h2>
+            <div id="an-dash-sub">View your schedule analysis and saved video gallery.</div>
+          </div>
+          <div class="fin-analysis-metrics">
+            <div><span>Completion</span><strong id="an-dash-pct">0%</strong></div>
+            <div><span>Consistency</span><strong><b id="an-dash-streak">0</b> days</strong></div>
+            <div><span>Saved moments</span><strong id="an-dash-moments">0</strong></div>
+          </div>
+          <span class="fin-analysis-arrow" aria-hidden="true">→</span>
+        </article>
+      </section>
+
+      <!-- Subject allocation -->
+      <section class="fin-section" aria-labelledby="fin-subjects-title">
+        <div class="fin-section-head">
+          <div><span class="fin-eyebrow">Syllabus allocation</span><h2 id="fin-subjects-title">Subject-wise Progress</h2></div>
+          <button class="fin-text-btn" onclick="switchPage('syllabus')">View full syllabus →</button>
+        </div>
+        <div class="dash-subjects" id="subject-progress-cards"></div>
+      </section>
+
+      <!-- Recent completion activity -->
+      <section class="fin-section" aria-labelledby="fin-recent-title">
+        <div class="fin-section-head">
+          <div><span class="fin-eyebrow">Activity ledger</span><h2 id="fin-recent-title">Recently Completed</h2></div>
+          <span>Your five latest chapter completions</span>
+        </div>
+        <div id="recent-activity-list"></div>
+      </section>
     </div>

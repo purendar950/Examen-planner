@@ -70,56 +70,73 @@ function updateDashboard() {
   if ($('stat-bookmarked')) $('stat-bookmarked').textContent = bookmarked;
   if ($('streak-count')) $('streak-count').textContent = appState.streak || 0;
 
-  // Syllabus ring
+  // Syllabus readiness — the headline is derived only from real completion data.
   if ($('dash-syllabus-pct')) $('dash-syllabus-pct').textContent = pct + '%';
   if ($('dash-done-frac')) $('dash-done-frac').textContent = done + ' / ' + total;
+  const readinessTitle = $('dash-readiness-title');
+  const readinessNote = $('dash-readiness-note');
+  if (readinessTitle) {
+    readinessTitle.textContent = pct >= 100 ? 'Syllabus covered' :
+      pct >= 75 ? 'Ready for the final stretch' :
+      pct >= 40 ? 'Momentum is building' :
+      pct > 0 ? 'Keep compounding progress' : 'Build your momentum';
+  }
+  if (readinessNote) {
+    readinessNote.textContent = pct >= 100
+      ? 'Your coverage is complete. Shift attention to revision and mock performance.'
+      : remaining + ' chapter' + (remaining === 1 ? '' : 's') + ' remain. Complete today’s priorities to improve your coverage.';
+  }
   const ring = $('dash-syllabus-ring');
   if (ring) {
     const C = 326.726;
     ring.style.strokeDashoffset = (C * (1 - pct / 100)).toFixed(1);
   }
 
-  // Today's focus — next incomplete chapters
+  // Today's focus — next incomplete chapter from each active subject.
   const focusLine = $('dash-focus-line');
+  const focusCount = $('dash-focus-count');
   const todoEl = $('dash-today-list');
   if (todoEl) {
-    // one incomplete topic from each subject
     const nextChapters = [];
     for (const sub of subjects) {
       const ch = sub.chapters.find(c => !appState.progress[c.id]?.done);
       if (ch) nextChapters.push({ ch, sub });
     }
+    if (focusCount) focusCount.textContent = nextChapters.length + ' priorit' + (nextChapters.length === 1 ? 'y' : 'ies');
     if (!nextChapters.length) {
-      if (focusLine) focusLine.textContent = 'All caught up — great work! 🎉';
-      todoEl.innerHTML = '<div class="dash-todo-empty">🎉 Syllabus complete. Time to revise & take mock tests!</div>';
+      if (focusLine) focusLine.textContent = 'All caught up — great work!';
+      todoEl.innerHTML = '<div class="dash-todo-empty">Syllabus coverage is complete. Continue with revision and mock tests to protect your progress.</div>';
     } else {
-      if (focusLine) focusLine.textContent = 'Finish these ' + nextChapters.length + ' to stay on track';
-      todoEl.innerHTML = nextChapters.map(x =>
-        '<div class="dash-todo-item" onclick="switchPage(\'syllabus\')">' +
-          '<div class="dash-todo-check"></div>' +
-          '<div class="dash-todo-name">' + escapeHtml(x.ch.name) + '</div>' +
+      if (focusLine) focusLine.textContent = 'Complete these ' + nextChapters.length + ' to stay on track';
+      todoEl.innerHTML = nextChapters.map((x, index) =>
+        '<div class="dash-todo-item" onclick="switchPage(\'syllabus\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" tabindex="0" role="button">' +
+          '<div class="dash-todo-check">' + String(index + 1).padStart(2, '0') + '</div>' +
+          '<div><div class="dash-todo-name">' + escapeHtml(x.ch.name) + '</div>' +
+          '<div class="dash-todo-sub">Next incomplete chapter</div></div>' +
           '<span class="dash-todo-tag" style="background:' + dashTint(x.sub.color, 0.14) + ';color:' + x.sub.color + ';">' + escapeHtml(x.sub.name) + '</span>' +
         '</div>'
       ).join('');
     }
   }
 
-  // Subject progress
+  // Subject allocation cards
   const container = $('subject-progress-cards');
   if (container) {
     container.innerHTML = subjects.map(sub => {
       const t = sub.chapters.length;
       const d = sub.chapters.filter(c => appState.progress[c.id]?.done).length;
       const p = t > 0 ? Math.round(d / t * 100) : 0;
-      return '<div class="dash-subj" onclick="switchPage(\'syllabus\')">' +
+      const next = sub.chapters.find(c => !appState.progress[c.id]?.done);
+      return '<div class="dash-subj" style="--subject-color:' + sub.color + '" onclick="switchPage(\'syllabus\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" tabindex="0" role="button">' +
         '<div class="dash-subj-top">' +
           '<span class="dash-subj-name"><span class="sw" style="background:' + sub.color + ';"></span>' + escapeHtml(sub.name) + '</span>' +
-          '<span class="dash-subj-frac">' + d + ' / ' + t + '</span>' +
+          '<span class="dash-subj-frac">' + d + ' / ' + t + ' chapters</span>' +
         '</div>' +
         '<div class="dash-subj-row">' +
           '<div class="dash-bar"><div style="width:' + p + '%;background:' + sub.color + ';"></div></div>' +
           '<span class="dash-subj-pct" style="color:' + sub.color + ';">' + p + '%</span>' +
         '</div>' +
+        '<div class="dash-subj-next"><span>Next:</span><strong>' + escapeHtml(next ? next.name : 'Syllabus complete') + '</strong><span>Continue →</span></div>' +
       '</div>';
     }).join('');
   }
@@ -132,7 +149,7 @@ function updateDashboard() {
       .sort((a, b) => new Date(appState.progress[b.id].completedAt) - new Date(appState.progress[a.id].completedAt))
       .slice(0, 5);
     if (!completed.length) {
-      recentEl.innerHTML = '<div class="empty-state"><div class="empty-icon">📚</div><p>No chapters completed yet. Start from the Syllabus tab!</p></div>';
+      recentEl.innerHTML = '<div class="empty-state"><div><div class="empty-icon">✓</div><p>No chapters completed yet. Finish a priority to start your activity ledger.</p><button onclick="switchPage(\'syllabus\')">Open syllabus →</button></div></div>';
     } else {
       recentEl.innerHTML = '<div class="dash-recent">' + completed.map(c => {
         const sub = subjects.find(s => s.chapters.some(ch => ch.id === c.id));
@@ -146,29 +163,42 @@ function updateDashboard() {
     }
   }
 
-  // ── Continue Watching card ──
+  // Continue Watching remains visible even before the first video so the
+  // three-card operations grid never collapses or hides the feature.
   const lv = appState.ytLastVideo;
   const contCard = $('yt-continue-card');
   if (lv && lv.id && contCard) {
     const thumb = `https://i.ytimg.com/vi/${lv.id}/mqdefault.jpg`;
-    const badge = lv.type === 'playlist' ? '📋 Playlist' : '▶ Video';
-    contCard.style.display = 'block';
+    const badge = lv.type === 'playlist' ? 'Playlist' : 'Video';
     contCard.innerHTML = `
-      <div style="font-size:0.65rem;text-transform:uppercase;color:var(--muted);letter-spacing:0.08em;margin-bottom:8px;font-weight:700;">▶ Continue Watching</div>
-      <div style="display:flex;align-items:center;gap:11px;">
-        <div style="width:70px;height:44px;border-radius:8px;overflow:hidden;flex-shrink:0;background:var(--surface);">
-          ${thumb ? `<img src="${thumb}" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display='none'" alt="">` : '<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:1.1rem;">▶</div>'}
+      <div class="fin-video-content">
+        <div class="fin-action-title-row">
+          <div class="fin-action-icon fin-green">▶</div>
+          <h3>Continue Watching</h3>
+          <span class="fin-arrow" aria-hidden="true">↗</span>
         </div>
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:0.84rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(lv.title || 'Video')}</div>
-          <div style="font-size:0.7rem;color:var(--muted);margin-top:3px;">${badge}</div>
+        <div class="fin-video-main">
+          <div class="fin-video-thumb">
+            <img src="${thumb}" onerror="this.style.display='none'" alt="">
+            <span class="fin-video-play">▶</span>
+          </div>
+          <div class="fin-video-copy">
+            <strong>${escapeHtml(lv.title || 'Video')}</strong>
+            <span>${badge} · Resume your last session</span>
+          </div>
         </div>
-        <button onclick="event.stopPropagation();switchPage('youtube');setTimeout(ytResume,120)"
-          style="background:var(--accent);color:#04130d;border:none;border-radius:9px;padding:7px 14px;font-size:0.78rem;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0;">
-          ▶ Resume
-        </button>
+        <span class="fin-video-resume">Resume learning →</span>
       </div>`;
   } else if (contCard) {
-    contCard.innerHTML = '<div style="font-size:0.65rem;text-transform:uppercase;color:var(--muted);letter-spacing:0.08em;margin-bottom:8px;font-weight:700;">▶ Continue Watching</div><div style="font-size:0.82rem;color:var(--muted);">No video yet — open the YouTube tab to start a course.</div>';
+    contCard.innerHTML = `
+      <div class="fin-video-content">
+        <div class="fin-action-title-row">
+          <div class="fin-action-icon fin-green">▶</div>
+          <h3>Continue Watching</h3>
+          <span class="fin-arrow" aria-hidden="true">↗</span>
+        </div>
+        <p class="fin-action-muted">Start a course in the YouTube workspace and your latest lesson will appear here.</p>
+        <span class="fin-video-resume">Browse courses →</span>
+      </div>`;
   }
 }

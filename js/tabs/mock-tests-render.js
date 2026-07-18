@@ -646,14 +646,44 @@ function mockUpdateDashSummary() {
     const t = cfg && cfg.tiers[tk];
     (byTier[tk] || []).forEach(m => all.push({ m: m, tier: t ? t.label : tk }));
   });
-  if (!cfg || !all.length) { el.innerHTML = ''; return; }
   all.sort((a, b) => new Date(b.m.date) - new Date(a.m.date));
-  const last = all[0];
-  el.innerHTML = '<div class="streak-bar" style="cursor:pointer;" onclick="switchPage(\'mocks\')">' +
-    '<span>📈</span>' +
-    '<span class="streak-text"><strong>' + all.length + '</strong> mock' + (all.length > 1 ? 's' : '') + ' given</span>' +
-    '<span class="streak-hint">Last: <strong>' + last.m.total + '</strong> · ' + escapeHtml(last.m.name) + ' (' + last.tier + ') →</span>' +
+
+  const title = '<div class="fin-action-title-row">' +
+    '<div class="fin-action-icon fin-blue">↗</div>' +
+    '<h3>Mock Performance</h3>' +
+    '<span class="fin-arrow" aria-hidden="true">↗</span>' +
     '</div>';
+  el.onclick = function() { switchPage('mocks'); };
+  el.onkeydown = function(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      switchPage('mocks');
+    }
+  };
+
+  if (!cfg) {
+    el.innerHTML = '<div class="fin-mock-content">' + title +
+      '<p class="fin-action-muted">Mock tracking is not configured for this exam yet.</p>' +
+      '<span class="fin-action-cta">Open practice workspace →</span></div>';
+    return;
+  }
+
+  if (!all.length) {
+    el.innerHTML = '<div class="fin-mock-content">' + title +
+      '<div class="fin-mock-metrics"><div><span>Mocks given</span><strong>0</strong></div><div><span>Latest score</span><strong>—</strong></div></div>' +
+      '<p class="fin-action-muted">Take your first mock to establish a performance baseline.</p>' +
+      '<span class="fin-action-cta">Start a mock test →</span></div>';
+    return;
+  }
+
+  const last = all[0];
+  el.innerHTML = '<div class="fin-mock-content">' + title +
+    '<div class="fin-mock-metrics">' +
+      '<div><span>Mocks given</span><strong>' + all.length + '</strong></div>' +
+      '<div><span>Latest score</span><strong>' + escapeHtml(String(last.m.total)) + '</strong></div>' +
+    '</div>' +
+    '<p class="fin-action-muted">' + escapeHtml(last.m.name) + ' · ' + escapeHtml(last.tier) + '</p>' +
+    '<span class="fin-action-cta">Review performance →</span></div>';
 }
 
 /* ── Inject Mock Tests UI (nav tab, page, dashboard slot, styles) ── */

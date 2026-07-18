@@ -4098,3 +4098,385 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 @media (prefers-reduced-motion: reduce) {
   #page-youtube * { scroll-behavior: auto !important; }
 }
+
+
+
+/* ═══════════════════════════════════════════════
+   FINTECH DASHBOARD — portfolio-style preparation overview
+   Keeps the existing dashboard data hooks while giving metrics,
+   priorities and study actions a clearer visual hierarchy.
+═══════════════════════════════════════════════ */
+.main-content:has(#page-dashboard.active) { max-width: 1400px; padding: 2rem 2.25rem 4rem; }
+.fintech-dashboard {
+  --fin-panel: color-mix(in srgb, var(--card) 94%, #10221e 6%);
+  --fin-panel-soft: color-mix(in srgb, var(--surface) 88%, transparent);
+  --fin-line: color-mix(in srgb, var(--border) 84%, transparent);
+  --fin-shadow: 0 1px 2px rgba(0,0,0,.24), 0 20px 50px -32px rgba(0,0,0,.72);
+  --fin-lime: #dff769;
+  --fin-warning: #ffc15a;
+  --muted: #a3afc1;
+  --accent: #39dcae;
+  color: var(--text);
+}
+.fintech-dashboard button { font-family: var(--font); }
+.fintech-dashboard strong,
+.fintech-dashboard b { font-variant-numeric: tabular-nums; }
+
+.fin-page-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem;
+  margin-bottom: 1.5rem;
+}
+.fin-eyebrow,
+.fin-card-kicker {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--muted); font-size: .7rem; font-weight: 800;
+  letter-spacing: .1em; text-transform: uppercase;
+}
+.fin-live-dot,
+.fin-status-dot {
+  width: 7px; height: 7px; flex: none; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 0 5px rgba(0,200,150,.09);
+}
+.fin-page-head h1 {
+  margin-top: .55rem; font-size: clamp(1.8rem, 3vw, 2.6rem);
+  line-height: 1.08; letter-spacing: -.045em;
+}
+.fin-page-head h1 #dash-username { color: var(--text); font-size: inherit; }
+.fin-page-head h1 #dash-greeting { color: var(--text); font-size: inherit; font-weight: 500; }
+.fin-page-head p { margin-top: .55rem; color: var(--muted); font-size: .92rem; }
+.fin-head-exam {
+  min-width: 220px; padding: .85rem 1rem;
+  background: var(--fin-panel); border: 1px solid var(--fin-line); border-radius: 14px;
+  box-shadow: var(--fin-shadow); text-align: right;
+}
+.fin-head-exam span,
+.fin-head-exam strong { display: block; }
+.fin-head-exam span { color: var(--muted); font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.fin-head-exam strong { margin-top: 4px; font-size: .9rem; }
+
+.fin-hero-grid {
+  display: grid; grid-template-columns: minmax(0, 1.14fr) minmax(380px, .86fr);
+  gap: 1.15rem; align-items: stretch;
+}
+.fin-readiness-card,
+.fin-focus-card,
+.fin-stat-card,
+.fin-action-card,
+.fin-analysis-card,
+.fin-pace-card,
+.dash-subj,
+.dash-recent,
+.fintech-dashboard .empty-state {
+  border: 1px solid var(--fin-line); box-shadow: var(--fin-shadow);
+}
+.fin-readiness-card {
+  position: relative; overflow: hidden; min-height: 330px; padding: 1.6rem;
+  color: #f3fbf8; background: #10221e; border-color: rgba(143,210,181,.16);
+  border-radius: 24px;
+}
+.fin-readiness-card::before {
+  content: ''; position: absolute; width: 430px; height: 430px; right: -170px; top: -250px;
+  border-radius: 50%; background: radial-gradient(circle, rgba(93,211,161,.25), transparent 68%);
+  pointer-events: none;
+}
+.fin-readiness-card::after {
+  content: ''; position: absolute; width: 260px; height: 260px; left: 28%; bottom: -215px;
+  border-radius: 50%; background: radial-gradient(circle, rgba(223,247,105,.18), transparent 70%);
+  pointer-events: none;
+}
+.fin-readiness-card .fin-card-kicker { position: relative; z-index: 1; color: rgba(235,248,243,.62); }
+.fin-readiness-card .fin-status-dot { background: var(--fin-lime); box-shadow: 0 0 0 5px rgba(223,247,105,.1); }
+.fin-readiness-main {
+  position: relative; z-index: 1; display: grid; grid-template-columns: 148px minmax(0,1fr);
+  align-items: center; gap: 1.75rem; margin-top: 1.5rem;
+}
+.fin-score-ring { width: 132px; height: 132px; }
+.fin-score-ring svg { width: 132px; height: 132px; }
+.fin-readiness-card .ring-track { stroke: rgba(255,255,255,.1); }
+.fin-readiness-card .ring-prog { stroke: var(--fin-lime); filter: drop-shadow(0 0 7px rgba(223,247,105,.25)); }
+.fin-readiness-card .ring-big { color: #fff; font-size: 2.15rem; letter-spacing: -.06em; }
+.fin-readiness-card .ring-lbl { color: rgba(235,248,243,.54); }
+.fin-readiness-copy h2 { font-size: clamp(1.4rem, 2.3vw, 2rem); letter-spacing: -.04em; }
+.fin-readiness-copy > p { max-width: 52ch; margin-top: .55rem; color: rgba(235,248,243,.62); line-height: 1.6; font-size: .84rem; }
+.fin-readiness-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .55rem; margin-top: 1.25rem; }
+.fin-readiness-metrics > div { padding: .75rem .8rem; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.075); border-radius: 12px; }
+.fin-readiness-metrics span,
+.fin-readiness-metrics strong { display: block; }
+.fin-readiness-metrics span { color: rgba(235,248,243,.74); font-size: .63rem; letter-spacing: .05em; text-transform: uppercase; }
+.fin-readiness-metrics strong { margin-top: 4px; color: #f4fbf8; font-size: .85rem; }
+.fin-readiness-metrics .fin-warm { color: #ffca69; }
+.fin-readiness-footer {
+  position: relative; z-index: 1; display: flex; align-items: center; gap: .7rem;
+  margin-top: 1.35rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,.09);
+}
+.fin-exam-date { margin-right: auto; }
+.fin-exam-date span,
+.fin-exam-date strong { display: block; }
+.fin-exam-date span { color: rgba(235,248,243,.74); font-size: .62rem; text-transform: uppercase; letter-spacing: .07em; }
+.fin-exam-date strong { margin-top: 2px; color: #fff; font-size: .84rem; }
+.fin-readiness-card .dash-datepick {
+  padding: .55rem .7rem; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.1);
+}
+.fin-readiness-card .dash-datepick > span { color: rgba(235,248,243,.74); font-size: .65rem; font-weight: 700; text-transform: uppercase; }
+.fin-readiness-card .dash-datepick input { color: #fff; color-scheme: dark; }
+.fin-readiness-card .dash-rank {
+  min-width: 90px; padding: .42rem .65rem; border: 1px solid rgba(223,247,105,.2);
+  border-radius: 10px; color: var(--fin-lime); background: rgba(223,247,105,.07);
+  text-align: left; text-shadow: none; animation: none;
+}
+.fin-readiness-card .dash-rank .dr-label { color: rgba(235,248,243,.74); font-size: .55rem; letter-spacing: .08em; }
+.fin-readiness-card .dash-rank .dr-val { margin-top: 2px; font-size: .72rem; }
+
+.fin-focus-card {
+  display: flex; flex-direction: column; min-height: 330px; padding: 1.45rem;
+  background: var(--fin-panel); border-radius: 24px;
+}
+.fin-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.fin-card-head h2 { margin-top: .45rem; font-size: 1.14rem; line-height: 1.3; letter-spacing: -.02em; }
+.fin-count-chip {
+  flex: none; padding: .38rem .68rem; color: var(--accent); background: var(--accent-dim);
+  border: 1px solid rgba(0,200,150,.18); border-radius: 99px; font-size: .66rem; font-weight: 800;
+}
+.fin-focus-card .dash-todo { gap: 0; margin: 1rem 0 .85rem; border-top: 1px solid var(--fin-line); }
+.fin-focus-card .dash-todo-item {
+  display: grid; grid-template-columns: 28px minmax(0,1fr) auto; gap: .7rem;
+  min-height: 52px; padding: .7rem 0; background: transparent; border: 0; border-bottom: 1px solid var(--fin-line); border-radius: 0;
+}
+.fin-focus-card .dash-todo-item:hover { padding-left: .35rem; transform: none; }
+.fin-focus-card .dash-todo-check {
+  display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--border);
+  border-radius: 7px; color: var(--muted); font-size: .65rem; font-weight: 800; opacity: 1;
+}
+.fin-focus-card .dash-todo-name { font-size: .85rem; }
+.fin-focus-card .dash-todo-sub { margin-top: 2px; color: var(--muted); font-size: .68rem; }
+.fin-focus-card .dash-todo-tag { max-width: 170px; padding: 4px 8px; border-radius: 7px; font-size: .61rem; }
+.fin-focus-card .dash-todo-empty { padding: 1.5rem .25rem; line-height: 1.55; }
+.fin-focus-footer { display: flex; align-items: center; gap: 1rem; margin-top: auto; }
+.fin-focus-footer > span { margin-left: auto; color: var(--muted); font-size: .68rem; }
+.fin-focus-card .dash-btn { min-height: 42px; padding: .7rem 1rem; border-radius: 11px; box-shadow: 0 10px 24px -12px rgba(0,200,150,.75); }
+
+.fin-stat-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .85rem; margin-top: 1rem; }
+.fin-stat-card { padding: 1rem 1.05rem; background: var(--fin-panel); border-radius: 17px; transition: transform .18s, border-color .18s; }
+.fin-stat-card:hover { transform: translateY(-2px); border-color: rgba(0,200,150,.28); }
+.fin-stat-top { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.fin-stat-icon,
+.fin-action-icon {
+  display: grid; width: 34px; height: 34px; place-items: center; border-radius: 10px;
+  font-size: .9rem; font-weight: 800;
+}
+.fin-blue { color: #72a6ff; background: rgba(59,130,246,.12); }
+.fin-green { color: var(--accent); background: var(--accent-dim); }
+.fin-amber { color: var(--amber); background: rgba(245,158,11,.12); }
+.fin-purple { color: #bd7cff; background: rgba(168,85,247,.12); }
+.fin-stat-trend { padding: .25rem .45rem; color: var(--muted); background: var(--surface); border-radius: 7px; font-size: .58rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+.fin-stat-trend.fin-positive { color: var(--accent); background: var(--accent-dim); }
+.fin-stat-trend.fin-warning { color: var(--fin-warning); background: rgba(245,158,11,.1); }
+.fin-stat-value { display: block; margin-top: 1rem; font-size: 1.65rem; line-height: 1; letter-spacing: -.04em; }
+.fin-stat-label { display: block; margin-top: .35rem; color: var(--muted); font-size: .72rem; }
+
+.fin-pace-card {
+  display: flex; align-items: center; gap: .85rem; margin-top: .85rem; padding: .9rem 1rem;
+  background: linear-gradient(90deg, rgba(0,200,150,.08), rgba(0,200,150,.025));
+  border-color: rgba(0,200,150,.16); border-radius: 15px;
+}
+.fin-pace-icon { display: grid; width: 32px; height: 32px; flex: none; place-items: center; color: var(--accent); background: var(--accent-dim); border-radius: 9px; font-weight: 800; }
+.fin-pace-card > div:nth-child(2) { min-width: 0; }
+.fin-pace-card > div:nth-child(2) strong,
+.fin-pace-card > div:nth-child(2) span { display: block; }
+.fin-pace-card > div:nth-child(2) strong { font-size: .8rem; }
+.fin-pace-card > div:nth-child(2) span { margin-top: 2px; color: var(--muted); font-size: .68rem; }
+.fin-pace-value { display: flex; align-items: baseline; gap: 5px; margin-left: auto; white-space: nowrap; }
+.fin-pace-value strong { color: var(--accent); font-size: 1.25rem; }
+.fin-pace-value span { color: var(--muted); font-size: .65rem; }
+
+.fin-section { margin-top: 2rem; }
+.fin-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: .85rem; }
+.fin-section-head h2 { margin-top: .3rem; font-size: 1.1rem; letter-spacing: -.02em; }
+.fin-section-head > span { color: var(--muted); font-size: .7rem; }
+.fin-text-btn { padding: .4rem 0; color: var(--accent); background: none; border: 0; font-size: .72rem; font-weight: 800; cursor: pointer; }
+
+.fin-operations-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .85rem; }
+.fin-action-card,
+.fintech-dashboard .revision-widget,
+.fintech-dashboard .yt-continue-card {
+  display: flex; flex-direction: column; min-height: 205px; margin: 0; padding: 1.1rem;
+  background: var(--fin-panel); border-color: var(--fin-line); border-radius: 18px;
+  cursor: pointer; transition: transform .18s, border-color .18s;
+}
+.fin-action-card:hover,
+.fintech-dashboard .revision-widget:hover,
+.fintech-dashboard .yt-continue-card:hover { transform: translateY(-2px); border-color: rgba(0,200,150,.3); }
+.fintech-dashboard .revision-widget-head { align-items: flex-start; margin: 0 0 1rem; }
+.fintech-dashboard .revision-widget-head > div:first-child { display: flex; align-items: center; gap: .75rem; }
+.fintech-dashboard .revision-widget-title { font-size: .92rem; }
+.fin-arrow { margin-left: auto; color: var(--muted); font-size: .9rem; }
+.fintech-dashboard .revision-widget-stats { display: grid; grid-template-columns: repeat(3,1fr); gap: .45rem; }
+.fintech-dashboard .revision-widget-stats span { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: .59rem; text-transform: uppercase; letter-spacing: .04em; }
+.fintech-dashboard .revision-widget-stats b { color: var(--text); font-size: 1.15rem; }
+.fin-action-preview { margin-top: auto; padding-top: 1rem; color: var(--muted); font-size: .69rem; line-height: 1.55; }
+.fin-action-preview b { color: var(--text); }
+
+.fin-mock-content,
+.fin-video-content { display: flex; flex-direction: column; height: 100%; }
+.fin-action-title-row { display: flex; align-items: center; gap: .75rem; }
+.fin-action-title-row h3 { font-size: .92rem; }
+.fin-action-title-row .fin-arrow { margin-left: auto; }
+.fin-mock-metrics { display: grid; grid-template-columns: repeat(2,1fr); gap: .5rem; margin-top: 1rem; }
+.fin-mock-metrics > div { padding: .7rem; background: var(--fin-panel-soft); border: 1px solid var(--fin-line); border-radius: 11px; }
+.fin-mock-metrics span,
+.fin-mock-metrics strong { display: block; }
+.fin-mock-metrics span { color: var(--muted); font-size: .59rem; text-transform: uppercase; letter-spacing: .04em; }
+.fin-mock-metrics strong { margin-top: 4px; font-size: .9rem; }
+.fin-action-cta { margin-top: auto; padding-top: .9rem; color: var(--accent); font-size: .7rem; font-weight: 800; }
+.fin-action-muted { margin-top: .8rem; color: var(--muted); font-size: .7rem; line-height: 1.55; }
+
+.fintech-dashboard .yt-continue-card { display: flex; }
+.fin-video-main { display: grid; grid-template-columns: 86px minmax(0,1fr); gap: .75rem; margin-top: 1rem; }
+.fin-video-thumb { position: relative; height: 58px; overflow: hidden; background: var(--surface); border-radius: 10px; }
+.fin-video-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.fin-video-play { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; background: rgba(0,0,0,.18); font-size: .8rem; }
+.fin-video-copy { min-width: 0; }
+.fin-video-copy strong { display: -webkit-box; overflow: hidden; color: var(--text); font-size: .78rem; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.fin-video-copy span { display: block; margin-top: 4px; color: var(--muted); font-size: .63rem; }
+.fin-video-resume { display: inline-flex; align-items: center; width: fit-content; margin-top: auto; padding-top: .9rem; color: var(--accent); font-size: .7rem; font-weight: 800; }
+
+.fin-analysis-card {
+  display: grid; grid-template-columns: minmax(220px,1fr) auto 36px; align-items: center; gap: 1.5rem;
+  padding: 1.3rem 1.4rem; background: linear-gradient(120deg, rgba(168,85,247,.08), rgba(0,200,150,.07));
+  border-radius: 18px; cursor: pointer; transition: transform .18s, border-color .18s;
+}
+.fin-analysis-card:hover { transform: translateY(-2px); border-color: rgba(0,200,150,.3); }
+.fin-analysis-copy h2 { margin-top: .4rem; font-size: 1.05rem; }
+.fin-analysis-copy #an-dash-sub { margin-top: .4rem; color: var(--muted); font-size: .7rem; }
+.fin-analysis-metrics { display: grid; grid-template-columns: repeat(3,minmax(110px,1fr)); }
+.fin-analysis-metrics > div { min-width: 120px; padding: .2rem 1.25rem; border-left: 1px solid var(--fin-line); }
+.fin-analysis-metrics span,
+.fin-analysis-metrics strong { display: block; }
+.fin-analysis-metrics span { color: var(--muted); font-size: .6rem; text-transform: uppercase; letter-spacing: .05em; }
+.fin-analysis-metrics strong { margin-top: .35rem; color: var(--text); font-size: 1.15rem; }
+.fin-analysis-metrics > div:first-child strong { color: var(--accent); }
+.fin-analysis-arrow { display: grid; width: 34px; height: 34px; place-items: center; color: var(--accent); background: var(--accent-dim); border-radius: 10px; }
+
+.fintech-dashboard .dash-subjects { grid-template-columns: repeat(2,minmax(0,1fr)); gap: .85rem; margin: 0; }
+.fintech-dashboard .dash-subj { padding: 1.05rem; background: var(--fin-panel); border-radius: 17px; transition: transform .18s, border-color .18s; }
+.fintech-dashboard .dash-subj:hover { transform: translateY(-2px); border-color: var(--subject-color, rgba(0,200,150,.3)); }
+.fintech-dashboard .dash-subj-top { margin-bottom: .9rem; }
+.fintech-dashboard .dash-subj-name { font-size: .82rem; }
+.fintech-dashboard .dash-subj-name .sw { width: 8px; height: 8px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--subject-color) 12%, transparent); }
+.fintech-dashboard .dash-subj-frac { padding: .25rem .45rem; background: var(--surface); border-radius: 7px; font-size: .64rem; }
+.fintech-dashboard .dash-bar { height: 7px; background: var(--surface); }
+.fintech-dashboard .dash-subj-next { display: flex; align-items: center; gap: .5rem; margin-top: .8rem; color: var(--muted); font-size: .66rem; }
+.fintech-dashboard .dash-subj-next strong { min-width: 0; overflow: hidden; color: var(--text); font-size: .68rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.fintech-dashboard .dash-subj-next span:last-child { margin-left: auto; color: var(--accent); font-weight: 800; white-space: nowrap; }
+
+.fintech-dashboard .dash-recent { padding: .2rem 1rem; background: var(--fin-panel); border-radius: 17px; }
+.fintech-dashboard .dash-r { min-height: 58px; }
+.fintech-dashboard .empty-state {
+  display: grid; min-height: 145px; place-items: center; padding: 1.5rem;
+  background: var(--fin-panel); border-radius: 17px; text-align: center;
+}
+.fintech-dashboard .empty-state .empty-icon { display: grid; width: 42px; height: 42px; place-items: center; color: var(--accent); background: var(--accent-dim); border-radius: 12px; font-size: 1rem; }
+.fintech-dashboard .empty-state p { margin-top: .7rem; color: var(--muted); font-size: .76rem; }
+.fintech-dashboard .empty-state button { margin-top: .8rem; padding: .55rem .85rem; color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(0,200,150,.18); border-radius: 9px; font-size: .7rem; font-weight: 800; cursor: pointer; }
+
+html[data-theme="light"] .fintech-dashboard {
+  --fin-panel: #fff;
+  --fin-panel-soft: #f5f8f7;
+  --fin-line: #e0e7e4;
+  --fin-shadow: 0 1px 2px rgba(15,42,35,.04), 0 14px 32px -22px rgba(15,42,35,.22);
+  --muted: #526172;
+  --accent: #087a5a;
+  --fin-warning: #875000;
+}
+html[data-theme="light"] .fin-readiness-card { background: #102c25; }
+html[data-theme="light"] .fin-head-exam,
+html[data-theme="light"] .fin-stat-card,
+html[data-theme="light"] .fin-focus-card,
+html[data-theme="light"] .fin-action-card,
+html[data-theme="light"] .dash-subj,
+html[data-theme="light"] .dash-recent,
+html[data-theme="light"] .fintech-dashboard .empty-state { background: #fff; }
+
+@media (max-width: 1100px) {
+  .main-content:has(#page-dashboard.active) { padding-inline: 1.5rem; }
+  .fin-hero-grid { grid-template-columns: 1fr; }
+  .fin-readiness-card,
+  .fin-focus-card { min-height: 0; }
+  .fin-operations-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .fin-operations-grid > :last-child { grid-column: 1 / -1; min-height: 175px; }
+  .fin-analysis-card { grid-template-columns: 1fr auto; }
+  .fin-analysis-metrics { grid-column: 1 / -1; }
+  .fin-analysis-metrics > div:first-child { border-left: 0; padding-left: 0; }
+  .fin-analysis-arrow { grid-column: 2; grid-row: 1; }
+}
+
+@media (max-width: 720px) {
+  .main-content:has(#page-dashboard.active) { padding: 1.25rem 1rem 4rem; }
+  .fin-page-head { align-items: flex-start; }
+  .fin-page-head h1 { font-size: 1.75rem; }
+  .fin-head-exam { min-width: 180px; }
+  .fin-readiness-main { grid-template-columns: 124px minmax(0,1fr); gap: 1.1rem; }
+  .fin-score-ring,
+  .fin-score-ring svg { width: 116px; height: 116px; }
+  .fin-readiness-metrics { gap: .4rem; }
+  .fin-readiness-metrics > div { padding: .6rem; }
+  .fin-readiness-footer { flex-wrap: wrap; }
+  .fin-exam-date { width: 100%; }
+  .fin-stat-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .fin-operations-grid { grid-template-columns: 1fr; }
+  .fin-operations-grid > :last-child { grid-column: auto; }
+  .fintech-dashboard .dash-subjects { grid-template-columns: 1fr; }
+  .fin-section-head > span { display: none; }
+}
+
+@media (max-width: 520px) {
+  .main-content:has(#page-dashboard.active) { padding-inline: .75rem; }
+  .fin-page-head { display: block; }
+  .fin-page-head p { font-size: .78rem; }
+  .fin-head-exam { margin-top: 1rem; text-align: left; }
+  .fin-readiness-card,
+  .fin-focus-card { padding: 1.15rem; border-radius: 19px; }
+  .fin-readiness-main { grid-template-columns: 1fr; }
+  .fin-readiness-copy h2 { font-size: 1.35rem; }
+  .fin-readiness-metrics { grid-template-columns: 1fr 1fr; }
+  .fin-readiness-metrics > div:first-child { grid-column: 1 / -1; }
+  .fin-readiness-footer { align-items: stretch; }
+  .fin-readiness-card .dash-datepick { width: 100%; justify-content: space-between; }
+  .fin-readiness-card .dash-rank { width: 100%; }
+  .fin-focus-card .dash-todo-item { grid-template-columns: 26px minmax(0,1fr); }
+  .fin-focus-card .dash-todo-tag { grid-column: 2; width: fit-content; max-width: 100%; }
+  .fin-focus-footer { align-items: stretch; flex-direction: column; }
+  .fin-focus-footer > span { margin-left: 0; }
+  .fin-stat-grid { gap: .6rem; }
+  .fin-stat-card { padding: .85rem; }
+  .fin-stat-value { font-size: 1.4rem; }
+  .fin-pace-card { align-items: flex-start; flex-wrap: wrap; }
+  .fin-pace-value { width: 100%; margin-left: 2.9rem; }
+  .fin-analysis-card { display: block; }
+  .fin-analysis-arrow { display: none; }
+  .fin-analysis-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 1rem; }
+  .fin-analysis-metrics > div { min-width: 0; padding: 0 .65rem; }
+  .fin-analysis-metrics > div:first-child { padding-left: 0; }
+  .fin-analysis-metrics strong { font-size: .9rem; }
+}
+
+
+
+@media (prefers-reduced-motion: reduce) {
+  .fintech-dashboard *,
+  .fintech-dashboard *::before,
+  .fintech-dashboard *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+  }
+  .fin-stat-card:hover,
+  .fin-action-card:hover,
+  .fintech-dashboard .revision-widget:hover,
+  .fintech-dashboard .yt-continue-card:hover,
+  .fin-analysis-card:hover,
+  .fintech-dashboard .dash-subj:hover {
+    transform: none;
+  }
+}
