@@ -105,6 +105,9 @@ async function testStudyProviders() {
     var payload = await response.json();
     if (payload && payload.error) throw new Error(payload.detail || payload.error);
     _aiStudyHealth = payload && payload.results ? payload.results : {};
+    // Direct health probe for Kiro provider (bypasses the proxy which doesn't
+    // know about Kiro yet). Hits the /api/diag endpoint on kiro-key-test.
+    await testKiroProviderDirect(_aiStudyHealth);
     _aiStudyLastTested = new Date();
     if (out) out.innerHTML = aiStudyHealthMarkup(_aiStudyHealth);
     aiStudyUpdateProviderHealth(_aiStudyHealth);
@@ -125,6 +128,33 @@ async function testStudyProviders() {
       button.disabled = false;
       button.textContent = 'Run health check';
     });
+  }
+}
+
+/* Direct health probe for the Kiro provider. The main youtube-turbo-proxy
+   doesn't know about Kiro, so we test it client-side via /api/diag which
+   reports binaryExists, apiKeySet, and version without exposing the key. */
+async function testKiroProviderDirect(results) {
+  var kiroKeys = studyKeysFor('kiro');
+  if (!kiroKeys.length) return; // no key configured → leave as "not configured"
+  var kiroBase = (STUDY_PROVIDERS.kiro && STUDY_PROVIDERS.kiro.baseUrl) || 'https://kiro-key-test.onrender.com';
+  var start = Date.now();
+  try {
+    var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var to = ctrl ? setTimeout(function () { ctrl.abort(); }, 25000) : null;
+    var r = await fetch(kiroBase + '/api/diag', ctrl ? { signal: ctrl.signal } : undefined);
+    var j = await r.json();
+    if (to) clearTimeout(to);
+    var latency = Date.now() - start;
+    if (j && j.binaryExists && j.apiKeySet) {
+      results.kiro = { configured: true, ok: true, model: j.version || 'kiro-cli', latency_ms: latency };
+    } else {
+      results.kiro = { configured: true, ok: false, status: 503,
+        detail: !j.binaryExists ? 'kiro-cli binary missing' : 'KIRO_API_KEY not set on server' };
+    }
+  } catch (e) {
+    results.kiro = { configured: true, ok: false, status: 0,
+      detail: e.name === 'AbortError' ? 'Timeout (25s)' : (e.message || 'unreachable') };
   }
 }
 
