@@ -13,7 +13,7 @@ const os = require('os');
 const path = require('path');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public'))); // serves public/index.html
 
 const PORT = process.env.PORT || 3000;
@@ -116,7 +116,7 @@ app.post('/api/test-kiro', (req, res) => {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
-      { env: childEnv(), timeout: 60000 },
+      { env: childEnv(), timeout: 120000 },
       (error, stdout, stderr) => {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
