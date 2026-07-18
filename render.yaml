@@ -21,14 +21,18 @@ services:
     runtime: node
     rootDir: kiro-test
     plan: free
-    # rm -f prefix works around a bug in kiro-cli's installer: if the binary
-    # already exists (e.g. a reused Render build cache), the installer tries to
-    # prompt "replace it? (y/N)" via /dev/tty, which does not exist in Render's
-    # non-interactive build shell, so the script crashes with exit code 1.
-    buildCommand: rm -f ~/.local/bin/kiro-cli ~/.local/bin/kiro-cli-chat ~/.local/bin/kiro-cli-term; curl -fsSL https://cli.kiro.dev/install | bash && npm install
-    # PATH must be re-exported here: Render's build and start steps run in
-    # separate shells, so a PATH export during build does not carry over.
-    startCommand: export PATH="$HOME/.local/bin:$PATH" && node server.js
+    # Render's build and runtime run on SEPARATE filesystems: files installed
+    # outside the project directory during build (the installer's default
+    # $HOME/.local/bin) are discarded before runtime, causing "spawn kiro-cli
+    # ENOENT" (confirmed via /api/diag: binaryExists:false at runtime). Fix:
+    # override HOME so the installer writes into ./vendor/kiro (INSIDE the
+    # project dir), which ships to runtime with the code. `rm -rf` first
+    # guarantees a clean dir, so the installer never hits its interactive
+    # "replace? (y/N)" /dev/tty prompt.
+    buildCommand: rm -rf vendor/kiro && mkdir -p vendor/kiro && curl -fsSL https://cli.kiro.dev/install | HOME="$PWD/vendor/kiro" bash && npm install
+    # Add the vendored bin dir to PATH at runtime. server.js also resolves the
+    # binary relative to __dirname, so this is a belt-and-suspenders measure.
+    startCommand: export PATH="$PWD/vendor/kiro/.local/bin:$HOME/.local/bin:$PATH" && node server.js
     envVars:
       - key: KIRO_API_KEY
         sync: false          # Set this manually in Render dashboard
