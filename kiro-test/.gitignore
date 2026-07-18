@@ -1,0 +1,4 @@
+# Kiro CLI is installed here at build time (see render.yaml). Never commit it.
+vendor/
+node_modules/
+.env

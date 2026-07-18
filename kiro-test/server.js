@@ -28,12 +28,22 @@ if (!KIRO_API_KEY) {
 // processes spawned by execFile, which resolves the program name via PATH only
 // -- that is what caused "spawn kiro-cli ENOENT". So we resolve the binary by
 // absolute path when it exists, and fall back to a bare PATH lookup otherwise.
+//
+// CRITICAL: Render's build and runtime run on SEPARATE filesystems. Anything the
+// build installs OUTSIDE the project directory (e.g. the installer's default
+// $HOME/.local/bin) is discarded before runtime -- confirmed via /api/diag,
+// which showed binaryExists:false with HOME=/opt/render at runtime. The only
+// files that survive to runtime are those inside the deployed project directory.
+// So the build installs kiro-cli into VENDOR_BIN (a folder next to this file,
+// via HOME override), and we resolve it here relative to __dirname.
+const VENDOR_BIN = path.join(__dirname, 'vendor', 'kiro', '.local', 'bin');
 const LOCAL_BIN = path.join(os.homedir(), '.local', 'bin');
 
 function resolveKiroCli() {
   const candidates = [
-    path.join(LOCAL_BIN, 'kiro-cli'),
-    '/opt/render/.local/bin/kiro-cli', // Render's runtime home, in case HOME differs
+    path.join(VENDOR_BIN, 'kiro-cli'), // installed into the project dir at build (persists)
+    path.join(LOCAL_BIN, 'kiro-cli'),  // fallback: default installer location
+    '/opt/render/.local/bin/kiro-cli', // fallback: Render's runtime home
   ];
   for (const c of candidates) {
     try {
@@ -43,10 +53,10 @@ function resolveKiroCli() {
   return 'kiro-cli'; // last resort: rely on PATH
 }
 
-// Ensure ~/.local/bin is on PATH for the spawned process regardless of how the
-// start command was launched.
+// Ensure the vendored bin dir (and ~/.local/bin) is on PATH for the spawned
+// process regardless of how the start command was launched.
 function childEnv() {
-  const extraPath = [LOCAL_BIN, '/opt/render/.local/bin'].join(path.delimiter);
+  const extraPath = [VENDOR_BIN, LOCAL_BIN, '/opt/render/.local/bin'].join(path.delimiter);
   return {
     ...process.env,
     KIRO_API_KEY,
@@ -67,9 +77,10 @@ app.get('/api/diag', (req, res) => {
   const bin = resolveKiroCli();
   const info = {
     home: os.homedir(),
+    vendorBin: VENDOR_BIN,
     localBin: LOCAL_BIN,
     resolvedBinary: bin,
-    binaryExists: bin !== 'kiro-cli' ? true : fs.existsSync(path.join(LOCAL_BIN, 'kiro-cli')),
+    binaryExists: bin !== 'kiro-cli',
     apiKeySet: Boolean(KIRO_API_KEY),
     path: process.env.PATH,
   };
