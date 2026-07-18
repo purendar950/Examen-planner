@@ -500,7 +500,7 @@
       '.ai-view-toggle button{flex:1;cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--muted,#8b93a7);border-radius:8px;padding:7px 10px;font-size:0.78rem;font-weight:600;font-family:inherit}',
       '.ai-view-toggle button.on{background:var(--accent,#00c896);color:#04120d;border-color:var(--accent,#00c896)}',
       '.main-content.ai-wide{max-width:1500px!important}',
-      '@media(min-width:841px){.yt-layout.ai-split{grid-template-columns:minmax(0,1.55fr) minmax(340px,.85fr)!important}}',
+      '@media(min-width:841px){.yt-layout.ai-split{grid-template-columns:minmax(0,3fr) minmax(0,2fr)!important}}',
       '.ai-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}',
       '.ai-chip{cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border-radius:999px;padding:5px 10px;font-size:0.74rem}',
       '.ai-chat{max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:8px}',
@@ -1720,7 +1720,7 @@
       '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
   }
 
-  /* ── right-column: [Course Content | AI Study] toggle + 50/50 split ── */
+  /* ── right-column: [Course Content | AI Study] toggle + 60/40 player/panel split ── */
   function ytLayout() { return document.querySelector('#page-youtube .yt-layout'); }
   function rightCol() { var l = ytLayout(); return l ? (l.querySelector('.yt-panel') || l.children[1]) : null; }
   function currentView() { return localStorage.getItem('aiView') === 'ai' ? 'ai' : 'course'; }

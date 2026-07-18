@@ -3614,7 +3614,7 @@ html[data-theme="light"] #page-youtube .yt-workspace-tabs .mtab.active { color: 
 #page-youtube .yt-layout,
 #page-youtube .yt-layout.ai-split {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(340px, .85fr) !important;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important;
   gap: .9rem;
   align-items: start;
   max-width: 100%;
@@ -3854,7 +3854,7 @@ html[data-theme="light"] #page-youtube .ai-view-toggle button.on { color: #007d5
 
 @media (max-width: 1180px) {
   #page-youtube .yt-layout,
-  #page-youtube .yt-layout.ai-split { grid-template-columns: minmax(0, 1.45fr) minmax(310px, .78fr) !important; gap: .7rem; }
+  #page-youtube .yt-layout.ai-split { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important; gap: .7rem; }
   #page-youtube .ai-head { grid-template-columns: auto minmax(60px, 1fr) auto auto; }
   #page-youtube .ai-head #ai-model { grid-column: 3 / -1; justify-self: end; }
 }
