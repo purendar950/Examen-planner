@@ -3451,6 +3451,9 @@ html:not([data-theme="light"]) #page-youtube {
   --yt-shadow: 0 18px 48px rgba(0, 0, 0, .28);
   --yt-shadow-soft: 0 8px 24px rgba(0, 0, 0, .2);
 }
+/* AI notes need a genuine wide workspace: at the default 1200px shell the
+   40% panel becomes too narrow and every control row wraps. */
+.main-content.ai-wide { max-width: 1500px !important; }
 #page-youtube .yt-workspace-head {
   display: flex;
   align-items: center;
@@ -3754,31 +3757,88 @@ html[data-theme="light"] #page-youtube .yt-workspace-tabs .mtab.active { color: 
   position: relative;
   min-width: 0;
   overflow: hidden;
+  border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--card);
   box-shadow: var(--yt-shadow);
 }
+/* Fintech-style workspace selector: each choice reads like a compact product
+   card instead of a plain tab, while remaining one clear segmented control. */
 #page-youtube .ai-view-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: .3rem;
+  gap: .42rem;
   margin: 0;
-  padding: .35rem;
+  padding: .42rem;
   border-bottom: 1px solid var(--border);
   background: var(--yt-soft);
 }
 #page-youtube .ai-view-toggle button {
-  min-height: 34px;
-  padding: 0 .6rem;
-  border: 0;
-  border-radius: 9px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: .5rem;
+  min-width: 0;
+  min-height: 48px;
+  padding: .42rem .5rem;
+  border: 1px solid transparent;
+  border-radius: 12px;
   background: transparent;
   color: var(--muted);
-  font-size: .68rem;
-  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+  transition: color .18s, background .18s, border-color .18s, box-shadow .18s, transform .18s;
 }
-#page-youtube .ai-view-toggle button.on { background: var(--card); color: var(--accent); box-shadow: var(--yt-shadow-soft); }
-html[data-theme="light"] #page-youtube .ai-view-toggle button.on { color: #007d5b; }
+#page-youtube .ai-view-toggle button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--card) 68%, transparent);
+  transform: translateY(-1px);
+}
+#page-youtube .ai-switch-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: .76rem;
+  font-weight: 900;
+}
+#page-youtube .ai-switch-copy { min-width: 0; }
+#page-youtube .ai-switch-copy strong,
+#page-youtube .ai-switch-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#page-youtube .ai-switch-copy strong { color: currentColor; font-size: .68rem; font-weight: 800; }
+#page-youtube .ai-switch-copy small { margin-top: 2px; color: var(--muted); font-size: .52rem; font-weight: 600; }
+#page-youtube .ai-switch-badge {
+  padding: .16rem .38rem;
+  border-radius: 99px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: .48rem;
+  font-weight: 900;
+  letter-spacing: .07em;
+}
+#page-youtube .ai-view-toggle button.on {
+  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
+  background: var(--card);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(10, 35, 42, .04), 0 8px 22px rgba(10, 35, 42, .07);
+}
+#page-youtube .ai-view-toggle button[data-v="ai"].on .ai-switch-icon {
+  background: #10221e;
+  color: #dff769;
+}
+#page-youtube .ai-view-toggle button[data-v="ai"].on .ai-switch-badge {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+#page-youtube .ai-view-toggle button[data-v="course"].on .ai-switch-icon {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+html[data-theme="light"] #page-youtube .ai-view-toggle button[data-v="ai"].on .ai-switch-badge,
+html[data-theme="light"] #page-youtube .ai-view-toggle button[data-v="course"].on .ai-switch-icon { color: #007d5b; }
 #page-youtube #yt-course-wrap,
 #page-youtube #ai-study-panel { min-width: 0; }
 #page-youtube .yt-panel-header { padding: .8rem .85rem; }
@@ -3842,6 +3902,70 @@ html[data-theme="light"] #page-youtube .ai-view-toggle button.on { color: #007d5
 #page-youtube .ai-scroll.nb { border-color: #e6dfca; }
 #page-youtube .ai-nb { padding: .85rem 1rem 1.1rem; font-size: .78rem; }
 #page-youtube .ai-chat { max-height: 420px; }
+
+/* In AI mode the right card is measured to the same visible study stage as the
+   video + playback tools. Its generated content then scrolls inside that card,
+   keeping both columns genuinely parallel instead of letting notes run far
+   below the video controls. */
+@media (min-width: 841px) {
+  #page-youtube .yt-layout.ai-split > .yt-player-column,
+  #page-youtube .yt-layout.ai-split > .yt-panel { grid-row: 1; align-self: start; }
+  #page-youtube .yt-layout.ai-split > .yt-panel {
+    display: flex;
+    flex-direction: column;
+    height: var(--yt-parallel-stage-height, auto);
+    min-height: 0;
+  }
+  #page-youtube .yt-layout.ai-split .ai-view-toggle,
+  #page-youtube .yt-layout.ai-split .ai-head,
+  #page-youtube .yt-layout.ai-split .ai-tabs { flex: 0 0 auto; }
+  #page-youtube .yt-layout.ai-split #ai-study-panel {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #page-youtube .yt-layout.ai-split .ai-body {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #page-youtube .yt-layout.ai-split #ai-sub {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    flex-direction: column;
+    overflow: auto;
+    scrollbar-gutter: stable;
+  }
+  /* Notes own a dedicated paper scroller; other generated views (quiz/cards)
+     scroll as a whole so their actions and navigation can never be clipped. */
+  #page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="notes"] #ai-sub { overflow: hidden; }
+  #page-youtube .yt-layout.ai-split .ai-scroll {
+    flex: 1 1 auto;
+    min-height: 130px;
+    max-height: none;
+  }
+  #page-youtube .yt-layout.ai-split .ai-chat {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+  }
+  #page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] {
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+  #page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-input-row {
+    position: sticky;
+    bottom: 0;
+    flex: 0 0 auto;
+    padding-top: .4rem;
+    background: var(--card);
+  }
+}
 
 /* Focus keeps playback tools available but removes setup and secondary content. */
 #page-youtube.yt-focus-active .yt-workspace-head,
