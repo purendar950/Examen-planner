@@ -746,6 +746,11 @@ _AI_STREAM = os.environ.get("AI_STREAM", "1").strip().lower() not in ("0", "fals
 # big-context models (Gemini / Bynara / NVIDIA / HCNSec) can use most of the
 # lecture instead of only the first ~48k chars.
 _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "240000"))
+# Max output tokens for a tutor reply. Raised from the old hard-coded 1200 so
+# longer explanations / step-by-step teaching don't get cut off mid-sentence.
+# _tutor_context_chars() reserves room for this so a bigger answer never
+# overflows the model window. Env-tunable.
+_TUTOR_MAX_TOKENS = int(os.environ.get("TUTOR_MAX_TOKENS", "4096"))
 # Notes generation is chunked ONLY so a single call doesn't run forever. The
 # response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
 # what actually prevents Cloudflare's ~100s 524 (tokens keep the connection
@@ -1469,9 +1474,11 @@ def _tutor_context_chars(ai, text):
     if not text:
         return 0
     ctx = _model_ctx_tokens(ai)
-    # Reserve ~5000 tokens: the system wrapper + up to 8 history turns + the
-    # ~1200-token answer. Floor the budget so tiny models still get some context.
-    budget_tokens = max(1500, int(ctx * 0.6) - 5000)
+    # Reserve room for the system wrapper + up to 8 history turns (~3800 tokens)
+    # PLUS the model's max answer size (_TUTOR_MAX_TOKENS), so a longer reply
+    # never overflows the window. Floor the budget so tiny models still get some
+    # context.
+    budget_tokens = max(1500, int(ctx * 0.6) - (_TUTOR_MAX_TOKENS + 3800))
     cap = int(budget_tokens * _chars_per_token(text))
     return min(len(text), cap, _TUTOR_CONTEXT_CHARS)
 
@@ -2526,12 +2533,12 @@ def api_status():
     return jsonify(out)
 
 
-@app.route("/api/tutor", methods=["GET", "POST"])
-def api_tutor():
-    """AI tutor grounded in a video's transcript. Per-user chat — NOT cached.
-    Params (GET query or POST json): id, q (question), out (lang),
-    mode=chat|teach, history=[{role,content}...]."""
-    body = request.get_json(silent=True) or {} if request.method == "POST" else {}
+def _tutor_prepare(body):
+    """Shared setup for the AI tutor endpoints — /api/tutor (blocking) and
+    /api/tutor/stream (SSE). Validates params, enforces rate limits, resolves the
+    transcript and builds the grounded chat `messages`. Returns (err, data) where
+    exactly one is non-None: err is an (payload_dict, status_code) tuple for an
+    early response, data is {messages, ai, video_id, mode, transcript_lang}."""
     raw_arg = (request.args.get("id") or body.get("id") or "").strip()
     question = (request.args.get("q") or body.get("q") or body.get("question") or "").strip()
     out_lang = (request.args.get("out") or body.get("out") or "English").strip() or "English"
@@ -2540,24 +2547,24 @@ def api_tutor():
 
     video_id = _parse_video_id(raw_arg)
     if not video_id:
-        return jsonify({"error": "missing or invalid ?id"}), 400
+        return ({"error": "missing or invalid ?id"}, 400), None
     if not question and mode != "teach":
-        return jsonify({"error": "missing question"}), 400
+        return ({"error": "missing question"}, 400), None
 
     req_model = (request.args.get("model") or body.get("model") or "").strip()[:80]
     req_provider = (request.args.get("provider") or body.get("provider") or "").strip()[:40]
     ai = _load_ai_config(req_model or None, req_provider or None)
     if not ai["keys"]:
-        return jsonify({"error": "ai_not_configured",
-                        "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503
+        return ({"error": "ai_not_configured",
+                 "detail": "Add an AI key in the admin panel (Study AI / Groq)."}, 503), None
 
     uid = (request.args.get("uid") or body.get("uid") or "").strip()
     if not _is_unlimited(uid):
         lims, ip = _load_ai_limits(), _client_ip()
         if (not _rate_ok("tutor_h", ip, lims["tutorPerHour"], 3600)
                 or not _rate_ok("tutor_d", ip, lims["tutorPerDay"], 86400)):
-            return jsonify({"error": "rate_limited",
-                            "detail": "Tutor message limit reached. Try later, or ask the admin for unlimited access."}), 429
+            return ({"error": "rate_limited",
+                     "detail": "Tutor message limit reached. Try later, or ask the admin for unlimited access."}, 429), None
 
     try:
         t = _extract_transcript(video_id, "auto")
@@ -2568,19 +2575,19 @@ def api_tutor():
                 try:
                     t = _extract_transcript(video_id, "auto", force=True)
                 except Exception:  # noqa: BLE001
-                    return jsonify({"error": "youtube_bot_check",
-                                    "detail": "Bot-gated. Update cookies in admin panel."}), 403
+                    return ({"error": "youtube_bot_check",
+                             "detail": "Bot-gated. Update cookies in admin panel."}, 403), None
             else:
-                return jsonify({"error": "youtube_bot_check",
-                                "detail": "Bot-gated. Update cookies in admin panel."}), 403
+                return ({"error": "youtube_bot_check",
+                         "detail": "Bot-gated. Update cookies in admin panel."}, 403), None
         else:
-            return jsonify({"error": "extract_failed", "detail": msg[:200]}), 502
+            return ({"error": "extract_failed", "detail": msg[:200]}, 502), None
     except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": "server_error", "detail": str(exc)[:200]}), 500
+        return ({"error": "server_error", "detail": str(exc)[:200]}, 500), None
 
     if not t.get("segments"):
-        return jsonify({"error": "no_captions",
-                        "detail": "No captions found for this video."}), 200
+        return ({"error": "no_captions",
+                 "detail": "No captions found for this video."}, 200), None
 
     # Feed the tutor as much of the transcript as the model's context window
     # allows (sized to the transcript's script too): big-context models use most
@@ -2606,14 +2613,68 @@ def api_tutor():
     else:
         messages.append({"role": "user", "content": question})
 
+    return None, {"messages": messages, "ai": ai, "video_id": video_id,
+                  "mode": mode, "transcript_lang": t.get("chosen_lang")}
+
+
+@app.route("/api/tutor", methods=["GET", "POST"])
+def api_tutor():
+    """AI tutor grounded in a video's transcript. Per-user chat — NOT cached.
+    Params (GET query or POST json): id, q (question), out (lang),
+    mode=chat|teach, history=[{role,content}...]."""
+    body = request.get_json(silent=True) or {} if request.method == "POST" else {}
+    err, data = _tutor_prepare(body)
+    if err:
+        return jsonify(err[0]), err[1]
+
     try:
-        answer = _ai_chat(messages, ai, max_tokens=1200)
+        answer = _ai_chat(data["messages"], data["ai"], max_tokens=_TUTOR_MAX_TOKENS)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
-    return jsonify({"id": video_id, "answer": answer, "mode": mode,
+    ai = data["ai"]
+    return jsonify({"id": data["video_id"], "answer": answer, "mode": data["mode"],
                     "provider": ai.get("provider", "ai"),
-                    "model": ai["model"], "transcript_lang": t.get("chosen_lang")})
+                    "model": ai["model"], "transcript_lang": data["transcript_lang"]})
+
+
+@app.route("/api/tutor/stream", methods=["GET", "POST"])
+def api_tutor_stream():
+    """Streaming (SSE) variant of /api/tutor: relays the tutor's answer to the
+    browser token-by-token so it types out live, and keeps the connection alive
+    on slow models (no Cloudflare 524). Same params + grounding as /api/tutor;
+    the client falls back to the blocking endpoint on any error."""
+    body = request.get_json(silent=True) or {} if request.method == "POST" else {}
+    err, data = _tutor_prepare(body)
+    if err:
+        return jsonify(err[0]), err[1]
+    ai = data["ai"]
+
+    def _sse(event, payload):
+        return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False))
+
+    _sse_headers = {"Cache-Control": "no-cache, no-transform",
+                    "X-Accel-Buffering": "no"}
+
+    def gen():
+        yield _sse("meta", {"provider": ai.get("provider", "ai"),
+                            "model": ai["model"],
+                            "transcript_lang": data["transcript_lang"]})
+        produced = False
+        try:
+            for piece in _ai_chat_stream(data["messages"], ai, max_tokens=_TUTOR_MAX_TOKENS):
+                produced = True
+                yield _sse("chunk", {"t": piece})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"error": "ai_failed", "detail": str(exc)[:200]})
+            return
+        if not produced:
+            yield _sse("error", {"error": "ai_failed", "detail": "empty response"})
+            return
+        yield _sse("done", {})
+
+    return Response(stream_with_context(gen()),
+                    mimetype="text/event-stream", headers=_sse_headers)
 
 
 @app.get("/api/stream")
