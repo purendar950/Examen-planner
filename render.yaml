@@ -21,6 +21,9 @@ services:
     runtime: node
     rootDir: kiro-test
     plan: free
+    # Health check keeps the free-tier service from sleeping (prevents cold-start
+    # 502 timeouts). Self-ping in server.js provides a secondary keep-alive.
+    healthCheckPath: /health
     # Render's build and runtime run on SEPARATE filesystems: files installed
     # outside the project directory during build (the installer's default
     # $HOME/.local/bin) are discarded before runtime, causing "spawn kiro-cli
@@ -36,3 +39,27 @@ services:
     envVars:
       - key: KIRO_API_KEY
         sync: false          # Set this manually in Render dashboard
+
+  # YouTube Turbo Proxy — yt-dlp + Flask transcript/notes backend that powers
+  # AI Study. Docker service (also carries the bgutil PO-token server + Deno).
+  # Reads AI provider keys + rate limits from Firestore via FIREBASE_SERVICE_ACCOUNT.
+  - type: web
+    name: youtube-turbo-proxy
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    rootDir: youtube-turbo-proxy
+    healthCheckPath: /health
+    envVars:
+      - key: MAX_HEIGHT
+        value: "720"
+      - key: CACHE_TTL
+        value: "18000"
+      # Netscape cookies.txt from a THROWAWAY YouTube account (set in dashboard).
+      - key: YT_COOKIES
+        sync: false
+      # SAME service-account JSON the Telegram bot uses — lets the proxy read
+      # config/ai (provider keys incl. kiroApiKeys) + config/aiLimits from Firestore.
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
