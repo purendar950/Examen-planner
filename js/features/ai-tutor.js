@@ -1545,6 +1545,129 @@
   function clearHistory() {
     try { localStorage.removeItem(chatKey()); } catch (e) {}
   }
+  // The Render tutor backend can deploy independently from GitHub Pages. Older
+  // versions return `{ answer: ... }` without the newer `complete` field. Accept
+  // those responses only when the text has an obvious natural ending; an
+  // explicit `complete: false` from a modern backend always remains authoritative.
+  function legacyTutorMarkdownBalanced(text) {
+    var raw = String(text || ''), stack = [];
+    function isSpace(ch) { return !ch || /\s/.test(ch); }
+    function isPunctuation(ch) { return !!ch && /[!"#$%&'()*+,\-.\/:;<=>?@[\\\]^_`{|}~]/.test(ch); }
+    function pushOpen(ch, size, start) {
+      stack.push({ marker: new Array(size + 1).join(ch), contentStart: start });
+    }
+    for (var i = 0; i < raw.length;) {
+      if (raw.charAt(i) === '\\') { i += 2; continue; }
+      var codeMarker = raw.slice(i, i + 3) === '```' ? '```' : (raw.charAt(i) === '`' ? '`' : '');
+      if (codeMarker) {
+        var codeEnd = raw.indexOf(codeMarker, i + codeMarker.length);
+        if (codeEnd < 0 || !raw.slice(i + codeMarker.length, codeEnd)) return false;
+        i = codeEnd + codeMarker.length; continue;
+      }
+
+      var ch = raw.charAt(i);
+      if (ch !== '*' && ch !== '_' && ch !== '~') { i++; continue; }
+      var runEnd = i + 1;
+      while (runEnd < raw.length && raw.charAt(runEnd) === ch) runEnd++;
+      var runSize = runEnd - i;
+      var lineStart = raw.lastIndexOf('\n', i - 1) + 1;
+      var lineEnd = raw.indexOf('\n', runEnd);
+      if (lineEnd < 0) lineEnd = raw.length;
+      var wholeLine = raw.slice(lineStart, lineEnd).trim();
+      if (wholeLine === '***' || wholeLine === '___' || wholeLine === '---') { i = runEnd; continue; }
+      if (ch === '*' && !raw.slice(lineStart, i).trim() && runSize === 1 &&
+          runEnd < raw.length && /\s/.test(raw.charAt(runEnd))) { i = runEnd; continue; }
+
+      var prev = i > 0 ? raw.charAt(i - 1) : '';
+      var next = runEnd < raw.length ? raw.charAt(runEnd) : '';
+      var leftFlanking = !isSpace(next) && (!isPunctuation(next) || isSpace(prev) || isPunctuation(prev));
+      var rightFlanking = !isSpace(prev) && (!isPunctuation(prev) || isSpace(next) || isPunctuation(next));
+      var canOpen = leftFlanking;
+      var canClose = rightFlanking;
+      if (ch === '_') {
+        canOpen = leftFlanking && (!rightFlanking || isPunctuation(prev));
+        canClose = rightFlanking && (!leftFlanking || isPunctuation(next));
+      }
+      // A single tilde is ordinarily punctuation/math; strikethrough uses `~~`.
+      if (ch === '~' && runSize < 2) { i = runEnd; continue; }
+      // Multi-character formatting runs with whitespace on both sides are not
+      // useful prose; keep uncertain legacy output on the safe retry path.
+      if (runSize >= 2 && !canOpen && !canClose) return false;
+      // Keep common intraword multiplication (`5*6`) literal rather than
+      // treating it as an unclosed emphasis run.
+      if (ch === '*' && runSize === 1 && /[\p{L}\p{N}]/u.test(prev) && /[\p{L}\p{N}]/u.test(next)) {
+        i = runEnd; continue;
+      }
+
+      var remaining = runSize, consumed = 0;
+      if (canClose) {
+        while (stack.length) {
+          var top = stack[stack.length - 1];
+          if (top.marker.charAt(0) !== ch || top.marker.length > remaining) break;
+          stack.pop();
+          var closeAt = i + consumed;
+          var inner = raw.slice(top.contentStart, closeAt);
+          if (!inner || inner !== inner.trim()) return false;
+          consumed += top.marker.length;
+          remaining -= top.marker.length;
+          if (!remaining) break;
+        }
+        // Closing a lower marker before the current stack top is crossed nesting.
+        if (stack.length && stack[stack.length - 1].marker.charAt(0) !== ch) {
+          for (var s = 0; s < stack.length - 1; s++) {
+            if (stack[s].marker.charAt(0) === ch) return false;
+          }
+        }
+      }
+      if (canOpen && remaining) {
+        while (remaining >= 2) {
+          pushOpen(ch, 2, i + consumed + 2); consumed += 2; remaining -= 2;
+        }
+        if (remaining && ch !== '~') {
+          pushOpen(ch, 1, i + consumed + 1); consumed++; remaining--;
+        }
+      }
+      i = runEnd;
+    }
+    return stack.length === 0;
+  }
+  function legacyTutorAnswerLooksComplete(text) {
+    var raw = String(text || '').trim();
+    if (!raw) return false;
+    var markerAt = raw.indexOf('[TUTOR_END]');
+    if (markerAt >= 0) return !!raw.slice(0, markerAt).trim();
+
+    var greeting = raw.toLocaleLowerCase().replace(/[.!?।…]+$/, '').trim();
+    if (['hi', 'hello', 'hey', 'namaste', 'नमस्ते'].indexOf(greeting) >= 0) return true;
+
+    var stack = [], pairs = { ')': '(', ']': '[', '}': '{' };
+    var inlineCode = false, fencedCode = false;
+    for (var i = 0; i < raw.length; i++) {
+      if (raw.slice(i, i + 3) === '```') {
+        fencedCode = !fencedCode; i += 2; continue;
+      }
+      if (!fencedCode && raw.charAt(i) === '`') { inlineCode = !inlineCode; continue; }
+      if (fencedCode || inlineCode) continue;
+      if (raw.charAt(i) === '\\') { i++; continue; }
+      var ch = raw.charAt(i);
+      if (ch === '(' || ch === '[' || ch === '{') stack.push(ch);
+      else if (pairs[ch] && (!stack.length || stack.pop() !== pairs[ch])) return false;
+    }
+    if (fencedCode || inlineCode || stack.length) return false;
+    if (!legacyTutorMarkdownBalanced(raw)) return false;
+
+    var terminal = raw.replace(/(?:\*\*|__|[*_`~])+$/, '').trim();
+    return /[.!?।…]["')\]}]*$/.test(terminal);
+  }
+  function tutorAnswerWithoutMarker(text) {
+    var raw = String(text || '');
+    var markerAt = raw.indexOf('[TUTOR_END]');
+    return (markerAt >= 0 ? raw.slice(0, markerAt) : raw).trim();
+  }
+  function tutorCompletionAccepted(meta, text) {
+    var hasCompletionFlag = !!meta && Object.prototype.hasOwnProperty.call(meta, 'complete');
+    return hasCompletionFlag ? meta.complete === true : legacyTutorAnswerLooksComplete(text);
+  }
   function chatHtml() {
     var h = getHistory();
     var msgs = h.map(function (m) {
@@ -1635,10 +1758,11 @@
         body: JSON.stringify(payload)
       }).then(function (r) { return r.json(); }).then(function (j) {
         if (j.error) { saveAnswer('\u26a0 ' + (j.detail || j.error)); return; }
-        if (j.complete !== true) {
+        var answer = tutorAnswerWithoutMarker(j.answer);
+        if (!tutorCompletionAccepted(j, j.answer)) {
           saveError('Tutor could not finish this answer. Please retry with a more specific question.'); return;
         }
-        saveAnswer(j.answer || '(no answer)');
+        saveAnswer(answer || '(no answer)');
       }).catch(saveError);
     }
 
@@ -1682,8 +1806,10 @@
             if (streamError) throw new Error('server:' + streamError);
             if (!gotChunk) throw new Error('empty stream');
             if (!doneMeta) throw new Error('incomplete stream');
-            if (doneMeta.complete !== true) throw new Error('completion exhausted');
-            saveAnswer(acc); return;
+            if (!tutorCompletionAccepted(doneMeta, acc)) {
+              throw new Error('completion exhausted');
+            }
+            saveAnswer(tutorAnswerWithoutMarker(acc)); return;
           }
           buf += dec.decode(res.value, { stream: true });
           var frames = buf.split('\n\n'); buf = frames.pop(); frames.forEach(frame);
