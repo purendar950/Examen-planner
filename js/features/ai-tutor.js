@@ -1573,15 +1573,26 @@
     if (input) input.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
     var chat = document.getElementById('ai-chat'); if (chat) chat.scrollTop = chat.scrollHeight;
   }
-  function sendTutor(question, mode) {
-    var vid = curVid(); if (!vid) return;
-    var h = getHistory();
-    if (question) h.push({ role: 'user', content: question });
-    saveHistory(h);
-    if (state.tab === 'tutor') { renderTutor(); var chat = document.getElementById('ai-chat'); if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; } }
+  // Build the JSON body shared by the streaming + one-shot tutor calls.
+  function tutorBody(vid, question, mode, histForApi) {
+    return JSON.stringify({
+      id: vid, q: question || '', out: outLang(), mode: mode || 'chat',
+      uid: curUid(), provider: outProvider(), model: outModel(), history: histForApi
+    });
+  }
+
+  // Classic one-shot request — the fallback when streaming isn't available or
+  // fails. The user turn is already pushed + saved by sendTutor; this only adds
+  // the assistant reply. `histForApi` is the trimmed history to send.
+  function sendTutorOnce(vid, question, mode, histForApi) {
+    if (state.tab === 'tutor') {
+      renderTutor();
+      var chat = document.getElementById('ai-chat');
+      if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; }
+    }
     fetch(BACKEND + '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), provider: outProvider(), model: outModel(), history: h.slice(-8) })
+      body: tutorBody(vid, question, mode, histForApi)
     }).then(function (r) { return r.json(); }).then(function (j) {
       var hist = getHistory();
       hist.push({ role: 'assistant', content: j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)') });
@@ -1590,6 +1601,94 @@
     }).catch(function (e) {
       var hist = getHistory(); hist.push({ role: 'assistant', content: '\u26a0 ' + String(e) }); saveHistory(hist);
       if (state.tab === 'tutor') renderTutor();
+    });
+  }
+
+  // Tutor reply STREAMS from /api/tutor/stream (SSE) so it types out live, and
+  // falls back to the one-shot /api/tutor on any error / no-stream / abort — so
+  // this is never worse than the classic path.
+  function sendTutor(question, mode) {
+    var vid = curVid(); if (!vid) return;
+    var h = getHistory();
+    if (question) h.push({ role: 'user', content: question });
+    saveHistory(h);
+    var histForApi = h.slice(-8);
+
+    // Live assistant bubble we grow as chunks arrive (only when the tutor tab is
+    // visible). Starts as a "thinking…" spinner; the first chunk replaces it.
+    var liveEl = null, chat = null;
+    if (state.tab === 'tutor') {
+      renderTutor();
+      chat = document.getElementById('ai-chat');
+      if (chat) {
+        chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a" id="ai-live">' + loading('Tutor soch raha hai…') + '</div>');
+        liveEl = document.getElementById('ai-live');
+        chat.scrollTop = chat.scrollHeight;
+      }
+    }
+
+    var acc = '', gotChunk = false, done = false, lastPaint = 0;
+
+    function paint() {
+      if (!liveEl) return;
+      liveEl.innerHTML = '<div class="ai-md">' + mdToHtml(acc) + '<span class="ai-caret"></span></div>';
+      bindTsLinks(liveEl);
+      if (chat) chat.scrollTop = chat.scrollHeight;
+    }
+    function finishStream() {
+      if (done) return;
+      if (!gotChunk || !acc.trim()) { fallback(); return; }   // nothing streamed → fall back
+      done = true;
+      var hist = getHistory();
+      hist.push({ role: 'assistant', content: acc });
+      saveHistory(hist);
+      if (state.tab === 'tutor') renderTutor();   // replaces the live bubble with the saved turn
+    }
+    function fallback() {
+      if (done) return; done = true;
+      sendTutorOnce(vid, question, mode, histForApi);
+    }
+    function handleFrame(frame) {
+      var ev = 'message', data = '';
+      frame.split('\n').forEach(function (ln) {
+        if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
+        else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
+      });
+      if (ev === 'meta') { return; }
+      if (ev === 'error') { fallback(); return; }
+      if (ev === 'done') { return; }
+      if (data) {
+        try {
+          var o = JSON.parse(data);
+          if (o && typeof o.t === 'string') {
+            acc += o.t; gotChunk = true;
+            var now = Date.now();
+            if (now - lastPaint > 60) { lastPaint = now; paint(); }
+          }
+        } catch (e) {}
+      }
+    }
+
+    fetch(BACKEND + '/api/tutor/stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: tutorBody(vid, question, mode, histForApi)
+    }).then(function (r) {
+      if (!r.ok || !r.body || !window.TextDecoder) { throw new Error('nostream'); }
+      var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
+      function pump() {
+        return reader.read().then(function (res) {
+          if (res.done) { finishStream(); return; }
+          buf += dec.decode(res.value, { stream: true });
+          var frames = buf.split('\n\n');
+          buf = frames.pop();
+          frames.forEach(handleFrame);
+          if (done) { try { reader.cancel(); } catch (e) {} return; }
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function () {
+      fallback();   // network / non-ok / no-stream → classic endpoint
     });
   }
 
