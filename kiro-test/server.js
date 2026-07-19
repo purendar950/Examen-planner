@@ -18,6 +18,12 @@ app.use(express.static(path.join(__dirname, 'public'))); // serves public/index.
 
 const PORT = process.env.PORT || 3000;
 const KIRO_API_KEY = process.env.KIRO_API_KEY;
+// Claude Sonnet 5 is the lowest-credit model in the current Kiro picker that
+// explicitly advertises a 1M context window. Auto may choose a 272k model, so
+// omitted model requests use this explicit default instead.
+const DEFAULT_KIRO_MODEL = process.env.KIRO_DEFAULT_MODEL || 'claude-sonnet-5';
+const TYPEWRITER_INTERVAL_MS = Math.max(5, Number(process.env.KIRO_STREAM_INTERVAL_MS) || 25);
+const TYPEWRITER_MAX_CHUNKS = Math.max(20, Number(process.env.KIRO_STREAM_MAX_CHUNKS) || 240);
 
 // Keep-alive: Render free tier spins down after 15min inactivity, causing
 // 30-50s cold starts that exceed the proxy's upstream timeout → 502. This
@@ -93,6 +99,48 @@ function stripAnsi(s) {
   return (s || '').replace(/\x1b\[[0-9;]*m/g, '');
 }
 
+// kiro-cli buffers its answer until the process exits. Split that completed
+// answer into short word-preserving pieces so OpenAI-compatible SSE clients can
+// still render it progressively instead of receiving one giant final chunk.
+function typewriterChunks(text) {
+  const source = String(text || '');
+  if (!source) return [];
+  const words = source.match(/\S+\s*|\s+/g) || [source];
+  const targetSize = Math.max(12, Math.ceil(source.length / TYPEWRITER_MAX_CHUNKS));
+  const chunks = [];
+  let chunk = '';
+  for (const word of words) {
+    if (chunk && chunk.length + word.length > targetSize) {
+      chunks.push(chunk);
+      chunk = '';
+    }
+    chunk += word;
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks;
+}
+
+// chat.defaultModel is process-global CLI state. Serialize the settings+chat
+// pair so concurrent requests cannot select one model and run another.
+const kiroRequestQueue = [];
+let kiroRequestActive = false;
+function enqueueKiroRequest(job) {
+  kiroRequestQueue.push(job);
+  drainKiroRequestQueue();
+}
+function drainKiroRequestQueue() {
+  if (kiroRequestActive || !kiroRequestQueue.length) return;
+  kiroRequestActive = true;
+  const job = kiroRequestQueue.shift();
+  let released = false;
+  job(() => {
+    if (released) return;
+    released = true;
+    kiroRequestActive = false;
+    setImmediate(drainKiroRequestQueue);
+  });
+}
+
 // Diagnostic endpoint: reports where kiro-cli was found and the runtime env.
 // Safe to expose -- it does NOT reveal the API key value (only whether it is set).
 app.get('/api/diag', (req, res) => {
@@ -116,15 +164,16 @@ app.get('/api/diag', (req, res) => {
 
 app.post('/api/test-kiro', (req, res) => {
   const prompt = (req.body && req.body.prompt) || 'Say hello and confirm you are working.';
-  const model = (req.body && req.body.model) || '';
+  const requestedModel = req.body && req.body.model;
+  const model = typeof requestedModel === 'string' && requestedModel.trim()
+    ? requestedModel.trim()
+    : DEFAULT_KIRO_MODEL;
   const bin = resolveKiroCli();
 
-  // If a model is specified, set it via `kiro-cli settings chat.defaultModel`
-  // before invoking chat. This is the only way to select models in headless
-  // (non-interactive) mode — the /model slash command is unavailable. If no
-  // model is specified (empty string = "Auto"), we skip the settings call and
-  // let kiro-cli use whatever model it deems optimal for the task.
-  function runChat() {
+  // Always set chat.defaultModel before invoking chat. Omitted model requests
+  // use DEFAULT_KIRO_MODEL (Claude Sonnet 5 / 1M context); explicit "auto"
+  // remains available when task-based model selection is preferred.
+  function runChat(release) {
     // --trust-tools= (empty) means no tools are trusted at all -- safest default
     // for a public-facing test endpoint. Tool-using prompts will just be
     // declined/skipped rather than hanging waiting for confirmation input.
@@ -140,6 +189,7 @@ app.post('/api/test-kiro', (req, res) => {
       ['chat', '--no-interactive', '--trust-tools=', prompt],
       { env: childEnv(), timeout: 180000, cwd: KIRO_CWD },
       (error, stdout, stderr) => {
+        release();
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
           console.error(detail);
@@ -177,23 +227,28 @@ app.post('/api/test-kiro', (req, res) => {
     );
   }
 
-  if (model) {
-    // Set the model before running chat
+  // Fail closed if the required model cannot be selected; otherwise a stale
+  // model could run while the response falsely claims the 1M default.
+  enqueueKiroRequest((release) => {
+    if (res.destroyed) { release(); return; }
     execFile(
       bin,
       ['settings', 'chat.defaultModel', model],
       { env: childEnv(), timeout: 10000, cwd: KIRO_CWD },
       (err, stdout, stderr) => {
         if (err) {
-          console.error('Failed to set model:', stripAnsi(stderr) || err.message);
-          // Still try to run chat even if model setting fails — it'll use whatever was last set
+          release();
+          const detail = stripAnsi(stderr) || err.message;
+          console.error('Failed to set model:', detail);
+          return res.status(500).json({
+            ok: false,
+            error: `Failed to select Kiro model "${model}": ${detail}`
+          });
         }
-        runChat();
+        runChat(release);
       }
     );
-  } else {
-    runChat();
-  }
+  });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -205,7 +260,10 @@ app.post('/api/test-kiro', (req, res) => {
    ═══════════════════════════════════════════════════════════════════════════ */
 function handleChatCompletions(req, res) {
   const body = req.body || {};
-  const model = body.model || '';
+  const requestedModel = body.model;
+  const model = typeof requestedModel === 'string' && requestedModel.trim()
+    ? requestedModel.trim()
+    : DEFAULT_KIRO_MODEL;
   const messages = body.messages || [];
   const wantStream = body.stream === true;
 
@@ -233,10 +291,9 @@ function handleChatCompletions(req, res) {
   const completionId = 'kiro-' + Date.now();
 
   // If streaming is requested, set up SSE headers and send keep-alive comments
-  // every 5s to prevent Cloudflare/Render's intermediary proxies from timing out
-  // (Cloudflare kills connections with no data after ~100s). kiro-cli doesn't
-  // support real token streaming, so we send the full response as one chunk at
-  // the end — but the keep-alive pings keep the connection open during generation.
+  // every 5s to prevent intermediary timeouts. kiro-cli buffers its answer in
+  // non-interactive mode; once complete, send it as paced SSE pieces so clients
+  // display a typewriter-style response instead of one full block.
   let keepAliveInterval = null;
   if (wantStream) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -252,53 +309,64 @@ function handleChatCompletions(req, res) {
       id: completionId,
       object: 'chat.completion.chunk',
       created: Math.floor(Date.now() / 1000),
-      model: model || 'auto',
+      model,
       choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
     };
     res.write('data: ' + JSON.stringify(initChunk) + '\n\n');
     // Send a comment every 5 seconds to keep the connection alive
     keepAliveInterval = setInterval(() => {
-      res.write(': keep-alive\n\n');
+      if (!res.destroyed && !res.writableEnded) res.write(': keep-alive\n\n');
     }, 5000);
+    res.on('close', () => {
+      if (keepAliveInterval) clearInterval(keepAliveInterval);
+    });
   }
 
   function sendResult(output) {
     if (keepAliveInterval) clearInterval(keepAliveInterval);
     if (wantStream) {
-      // Send the content as a single SSE data chunk in OpenAI streaming format
-      const chunk = {
-        id: completionId,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: model || 'auto',
-        choices: [{
-          index: 0,
-          delta: { role: 'assistant', content: output },
-          finish_reason: null
-        }]
-      };
-      res.write('data: ' + JSON.stringify(chunk) + '\n\n');
-      // Send the final chunk with finish_reason
-      const done = {
-        id: completionId,
-        object: 'chat.completion.chunk',
-        created: Math.floor(Date.now() / 1000),
-        model: model || 'auto',
-        choices: [{
-          index: 0,
-          delta: {},
-          finish_reason: 'stop'
-        }]
-      };
-      res.write('data: ' + JSON.stringify(done) + '\n\n');
-      res.write('data: [DONE]\n\n');
-      res.end();
+      const pieces = typewriterChunks(output);
+      let index = 0;
+
+      function writeNextPiece() {
+        if (res.destroyed || res.writableEnded) return;
+        if (index < pieces.length) {
+          const chunk = {
+            id: completionId,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model,
+            choices: [{
+              index: 0,
+              delta: { role: 'assistant', content: pieces[index++] },
+              finish_reason: null
+            }]
+          };
+          res.write('data: ' + JSON.stringify(chunk) + '\n\n');
+          if (typeof res.flush === 'function') res.flush();
+          setTimeout(writeNextPiece, TYPEWRITER_INTERVAL_MS);
+          return;
+        }
+
+        const done = {
+          id: completionId,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model,
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }]
+        };
+        res.write('data: ' + JSON.stringify(done) + '\n\n');
+        res.write('data: [DONE]\n\n');
+        res.end();
+      }
+
+      writeNextPiece();
     } else {
       res.json({
         id: completionId,
         object: 'chat.completion',
         created: Math.floor(Date.now() / 1000),
-        model: model || 'auto',
+        model,
         choices: [{
           index: 0,
           message: { role: 'assistant', content: output },
@@ -321,12 +389,13 @@ function handleChatCompletions(req, res) {
     }
   }
 
-  function runChat() {
+  function runChat(release) {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
       { env: childEnv(), timeout: 180000, cwd: KIRO_CWD },
       (error, stdout, stderr) => {
+        release();
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
           console.error('[chat/completions]', detail);
@@ -351,19 +420,23 @@ function handleChatCompletions(req, res) {
     );
   }
 
-  if (model && model !== 'auto') {
+  enqueueKiroRequest((release) => {
+    if (res.destroyed) { release(); return; }
     execFile(
       bin,
       ['settings', 'chat.defaultModel', model],
       { env: childEnv(), timeout: 10000, cwd: KIRO_CWD },
-      (err) => {
-        if (err) console.error('[chat/completions] Failed to set model:', model);
-        runChat();
+      (err, stdout, stderr) => {
+        if (err) {
+          release();
+          const detail = stripAnsi(stderr) || err.message;
+          console.error('[chat/completions] Failed to set model:', model, detail);
+          return sendError(500, `Failed to select Kiro model "${model}": ${detail}`);
+        }
+        runChat(release);
       }
     );
-  } else {
-    runChat();
-  }
+  });
 }
 
 // Mount at both paths — the proxy may use either depending on how baseUrl is configured
