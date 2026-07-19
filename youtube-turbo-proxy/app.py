@@ -2173,8 +2173,6 @@ STUDY_TEST_PROVIDERS = {
     "bluesminds": {"url": "https://api.bluesminds.com/v1/chat/completions", "keyField": "bluesmindsApiKeys", "modelField": "bluesmindsModel", "def": "gpt-5.2-chat"},
     # AICampus AI Hub gateway (OpenAI-compatible, multi-model; keys start with sk-hub-).
     "aicampus":   {"url": "https://ai-hub.aicampus.my/v1/chat/completions", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "def": "minimax-m3"},
-    # Kiro CLI backend (OpenAI-compatible wrapper around kiro-cli headless mode).
-    "kiro":       {"url": "https://kiro-key-test.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
@@ -2189,14 +2187,13 @@ STUDY_PROVIDER_MODELS = {
     "hcnsec":     ["auto", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "Qwen3.5-397B-A17B", "Qwen3.6-35B-A3B", "MiniMax-M3", "MiniMax-M2.7", "Kimi-K2.6", "glm-5.1"],
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "aicampus":   ["minimax-m3", "kimi-k2.7-code"],
-    "kiro":       ["auto", "claude-sonnet-5", "claude-opus-4.8", "claude-opus-4.7", "claude-opus-4.6", "claude-sonnet-4.6", "claude-opus-4.5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next"],
 }
 # Single source of truth for provider order + display labels, so the flat model
 # list (_all_study_models) and the grouped list (/api/status studyModelGroups)
 # can never drift out of sync (a missing id here made Gemini vanish from the
 # user-side model dropdown even though it worked everywhere else).
-STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "kiro")
-STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "kiro": "Kiro"}
+STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus")
+STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus"}
 
 
 def _effective_provider_models(cfg):
@@ -2235,13 +2232,6 @@ def _cfg_keys(cfg, field):
     return [k.strip() for k in (keys or []) if k and str(k).strip()]
 
 
-# Kiro is a kiro-cli subprocess on a free-tier Render box, not a hosted API
-# with genuine large-context capacity. Sending a full raw transcript in one
-# shot overwhelms it (30-60s+ → the connection is killed upstream → 502). Treat
-# it as a normal chunked model so _condense/chunking bounds each request.
-_NOT_BIG_CONTEXT = {"kiro"}
-
-
 def _ai_for_provider(cfg, pid, model=None):
     """Build an _ai_chat config for a specific provider using ITS OWN key(s).
     Returns None if that provider has no key configured."""
@@ -2255,7 +2245,7 @@ def _ai_for_provider(cfg, pid, model=None):
         "base_url": meta["url"],
         "keys": keys,
         "model": (model or cfg.get(meta["modelField"]) or meta["def"]).strip(),
-        "big_context": pid not in _NOT_BIG_CONTEXT,
+        "big_context": True,
         "tpm": 0,
         "provider": pid,
     }

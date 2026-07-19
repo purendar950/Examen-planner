@@ -1673,7 +1673,7 @@
      a second dropdown with just that provider's models. */
   var _studyGroups = [];         // [{provider,label,models}] from /api/status
   var _studyDefaultModel = '';   // admin's active model (default when a provider is picked)
-  var STUDY_PROV_ORDER = ['bynara', 'cerebras', 'mistral', 'openrouter', 'nvidia', 'kiro'];
+  var STUDY_PROV_ORDER = ['bynara', 'cerebras', 'mistral', 'openrouter', 'nvidia'];
 
   function studyGroupFor(pid) {
     for (var i = 0; i < _studyGroups.length; i++) if (_studyGroups[i].provider === pid) return _studyGroups[i];
@@ -1703,17 +1703,6 @@
     var ps = document.getElementById('ai-provider');
     if (!ps) return;
     var raw = (status && status.studyModelGroups) || [];
-    // If the proxy doesn't include Kiro (it's tested directly, not via the
-    // proxy), inject it client-side from the hardcoded STUDY_PROVIDERS list so
-    // users can see and select it in the provider dropdown.
-    var hasKiro = raw.some(function (g) { return g.provider === 'kiro'; });
-    if (!hasKiro) {
-      raw = raw.concat([{
-        provider: 'kiro',
-        label: 'Kiro',
-        models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next']
-      }]);
-    }
     _studyGroups = raw.slice().sort(function (a, b) {
       var ia = STUDY_PROV_ORDER.indexOf(a.provider), ib = STUDY_PROV_ORDER.indexOf(b.provider);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
