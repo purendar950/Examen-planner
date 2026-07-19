@@ -104,6 +104,11 @@ function ezIsPro() {
 // for users who actually have a valid Pro plan/trial.
 function ezGated() { return !!(currentUser && !ezIsPro()); }
 function ezLockedMsg(feature) {
+  if (typeof ezEntitlementDisplayPending === 'function' ? ezEntitlementDisplayPending() : EZ_PROFILE === null) {
+    showToast('Aapka plan check ho raha hai — connection milte hi access update ho jayega.', 'info');
+    try { ezLoadProfile(); } catch(e) {}
+    return;
+  }
   showToast('💎 ' + feature + ' — Pro plan mein milta hai.', 'error');
   setTimeout(ezOpenUpgrade, 600);
 }
@@ -224,10 +229,9 @@ ytSaveNote = function() {
 function ezApplyTelegramLock() {
   const badge = document.getElementById('tg-pro-badge');
   if (!badge) return;
-  // FIX: while EZ_PROFILE is unresolved (null) keep the Pro badge hidden
-  // instead of treating the user as gated — avoids flashing locks on a
-  // fresh free login before the profile loads.
-  if (EZ_PROFILE === null) { badge.style.display = 'none'; return; }
+  // While entitlement is unresolved, keep the Pro badge hidden instead of
+  // presenting a cached Free result as authoritative.
+  if (typeof ezEntitlementDisplayPending === 'function' ? ezEntitlementDisplayPending() : EZ_PROFILE === null) { badge.style.display = 'none'; return; }
   badge.style.display = ezGated() ? 'inline-block' : 'none';
 }
 const _saveTelegramGate = saveTelegramSettings;

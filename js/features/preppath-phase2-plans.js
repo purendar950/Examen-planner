@@ -3,7 +3,8 @@
 ══════════════════════════════════════════════ */
 /* Fallback UPI — used only if admin has not saved one in Admin Panel → Plans → Payment Settings */
 const EZ_UPI_FALLBACK = { upiId: 'yourname@upi', payeeName: 'StudyPlanner' };
-let EZ_PLANS = [], EZ_PROFILE = null, EZ_UPI = null, EZ_PENDING_PAY = null, _ezPickedPlan = null, _ezCoupon = null, _ezFinalAmount = 0;
+let EZ_PLANS = [], EZ_PROFILE = null, EZ_PROFILE_STATUS = 'idle', EZ_PROFILE_UID = null,
+    EZ_UPI = null, EZ_PENDING_PAY = null, _ezPickedPlan = null, _ezCoupon = null, _ezFinalAmount = 0;
 
 async function ezLoadPlans() {
   if (!_fbReady || !db) return;
@@ -42,24 +43,131 @@ function ezReadCachedProfile(uid) {
   catch (e) { return null; }
 }
 
+function ezPrepareProfileForUser(uid) {
+  if (!uid) return;
+  if (EZ_PROFILE_UID === uid && EZ_PROFILE !== null) return;
+  const accountChanged = EZ_PROFILE_UID !== uid;
+  EZ_PROFILE = null;
+  EZ_PROFILE_UID = uid;
+  if (accountChanged) EZ_PENDING_PAY = null;
+  const cached = ezReadCachedProfile(uid);
+  if (cached) {
+    EZ_PROFILE = cached;
+    EZ_PROFILE_STATUS = 'cached';
+  } else {
+    EZ_PROFILE_STATUS = 'loading';
+  }
+  ezRenderEntitlementSurfaces();
+}
+
+/* A cached active Pro result is safe to show optimistically. A cached negative
+   result is not proof the user is still Free—they may have purchased on
+   another device—so keep negative labels pending until Firestore confirms. */
+function ezEntitlementDisplayPending() {
+  if (EZ_PROFILE === null) return true;
+  if (EZ_PROFILE_STATUS === 'ready') return false;
+  try { return !(typeof ezIsPro === 'function' && ezIsPro()); }
+  catch(e) { return true; }
+}
+
+/* Keep every visible entitlement surface in sync. The profile can arrive from
+   the initial auth read, the explicit refresh below, or the real-time listener. */
+function ezRenderEntitlementSurfaces() {
+  try { ezRenderPlanBadge(); } catch(e) {}
+  try { if (typeof updateUserMenuPlan === 'function') updateUserMenuPlan(); } catch(e) {}
+  try {
+    const page = document.getElementById('page-profile');
+    if (page && page.classList.contains('active') && typeof renderProfilePage === 'function') renderProfilePage();
+  } catch(e) {}
+}
+
+/* Adopt profile data only for the active Firebase account. `ready` means the
+   value came from Firestore; `cached` is an optimistic offline/slow-network
+   restore which is replaced as soon as Firestore responds. */
+function ezSetProfileSnapshot(uid, profile, status) {
+  if (!uid) return false;
+  try {
+    const authUid = auth && auth.currentUser && auth.currentUser.uid;
+    if (authUid && authUid !== uid) return false;
+    if (!authUid && currentUser && currentUser.uid && currentUser.uid !== uid) return false;
+  } catch(e) {}
+  EZ_PROFILE = (profile && typeof profile === 'object') ? profile : {};
+  EZ_PROFILE_UID = uid;
+  EZ_PROFILE_STATUS = status || 'ready';
+  if (EZ_PROFILE_STATUS === 'ready') ezCacheProfile(uid, EZ_PROFILE);
+  ezRenderEntitlementSurfaces();
+  return true;
+}
+
+function ezProfileHasActiveServerEntitlement(profile) {
+  if (!profile || typeof profile !== 'object') return false;
+  const today = new Date().toISOString().slice(0, 10);
+  const plan = profile.plan || 'free';
+  const lifetime = String(plan).toLowerCase().includes('lifetime');
+  const paid = plan !== 'free' && (lifetime || (profile.planExpiry && profile.planExpiry >= today));
+  const trial = profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today;
+  return !!(paid || trial);
+}
+
+/* Firestore persistence may return a local snapshot while offline. Such a
+   snapshot is useful as another cache, but is not authoritative. In
+   particular, never let a cached Free snapshot overwrite a still-valid local
+   Pro cache; wait for a server snapshot to confirm any downgrade. */
+function ezSetProfileFromFirestoreSnapshot(uid, snap) {
+  if (!snap) return false;
+  const profile = (snap.exists && snap.data().profile) || {};
+  const fromCache = !!(snap.metadata && snap.metadata.fromCache);
+  if (fromCache && ezProfileHasActiveServerEntitlement(EZ_PROFILE) &&
+      !ezProfileHasActiveServerEntitlement(profile)) {
+    EZ_PROFILE_STATUS = 'cached';
+    ezRenderEntitlementSurfaces();
+    return false;
+  }
+  return ezSetProfileSnapshot(uid, profile, fromCache ? 'cached' : 'ready');
+}
+
+function ezProfileRequestIsCurrent(uid) {
+  try {
+    return !!(uid && currentUser && currentUser.uid === uid &&
+      auth && auth.currentUser && auth.currentUser.uid === uid && EZ_PROFILE_UID === uid);
+  } catch(e) { return false; }
+}
+
 async function ezLoadProfile() {
   if (!currentUser || !_fbReady || !db) return;
+  const uid = currentUser.uid;
+  if (EZ_PROFILE_UID !== uid) ezPrepareProfileForUser(uid);
+  if (!ezProfileRequestIsCurrent(uid)) return;
+  if (EZ_PROFILE === null) {
+    EZ_PROFILE_STATUS = 'loading';
+    ezRenderEntitlementSurfaces();
+  }
   try {
-    const s = await db.collection('users').doc(currentUser.uid).get();
-    EZ_PROFILE = (s.exists && s.data().profile) || {};
-  } catch(e) { EZ_PROFILE = {}; }
-  ezCacheProfile(currentUser.uid, EZ_PROFILE);   // refresh local cache for an instant, flash-free restore on the next page load
+    const s = await db.collection('users').doc(uid).get();
+    if (!ezProfileRequestIsCurrent(uid)) return;
+    ezSetProfileFromFirestoreSnapshot(uid, s);
+    // Entitlement and feature gates must update before the unrelated payments
+    // query below; a slow payment lookup must not leave a confirmed Pro locked.
+    try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+  } catch(e) {
+    if (!ezProfileRequestIsCurrent(uid)) return;
+    // A transient network error must never erase a valid cached Pro profile.
+    // Keep the last known value and let onSnapshot reconcile after reconnect.
+    EZ_PROFILE_STATUS = 'error';
+    ezRenderEntitlementSurfaces();
+  }
   try {
-    const q = await db.collection('payments').where('uid', '==', currentUser.uid).get();
+    const q = await db.collection('payments').where('uid', '==', uid).get();
+    if (!ezProfileRequestIsCurrent(uid)) return;
     const pend = q.docs.map(d => ({ id: d.id, ...d.data() })).filter(p => p.status === 'pending');
     EZ_PENDING_PAY = pend.length ? pend[0] : null;
-  } catch(e) { EZ_PENDING_PAY = null; }
-  ezRenderPlanBadge();
-  // FIX 1: Re-apply ALL gates now that EZ_PROFILE is loaded from Firestore.
-  // Without this, gates installed at loginUser() time all ran with EZ_PROFILE=null
-  // (which makes ezIsPro() return false → ezGated() false → gates OPEN for everyone).
-  // Calling ezRefreshGates() here corrects the gating state once the real plan
-  // data arrives (~400ms after login).
+  } catch(e) {
+    // Preserve an existing pending-payment indicator on transient failures.
+  }
+  ezRenderEntitlementSurfaces();
+  // Re-apply ALL gates now that the authoritative profile is available. A
+  // missing profile remains fail-closed, but is rendered as "Checking plan"
+  // rather than incorrectly labelling the account Free.
   try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
   try { await ezLoadAnnouncement(); } catch(e) {}
 }
@@ -114,8 +222,16 @@ function ezRenderPlanBadge() {
     b = document.createElement('div');
     b.id = 'ez-plan-badge';
     b.style.cssText = 'cursor:pointer;border-radius:99px;padding:4px 12px;font-size:0.72rem;font-weight:700;border:1px solid var(--border);background:var(--surface);color:var(--muted);white-space:nowrap;';
-    b.onclick = ezOpenUpgrade;
+    b.onclick = function() {
+      if (ezEntitlementDisplayPending()) { ezLoadProfile(); return; }
+      ezOpenUpgrade();
+    };
     right.insertBefore(b, right.firstChild);
+  }
+  if (ezEntitlementDisplayPending()) {
+    b.textContent = EZ_PROFILE_STATUS === 'error' ? 'Plan unavailable · Retry' : 'Checking plan…';
+    b.style.color = 'var(--muted)'; b.style.borderColor = 'var(--border)';
+    return;
   }
   const today = new Date().toISOString().slice(0, 10);
   const plan = (EZ_PROFILE && EZ_PROFILE.plan && EZ_PROFILE.plan !== 'free') ? EZ_PROFILE.plan : null;
@@ -149,6 +265,11 @@ function ezRenderPlanBadge() {
 
 function ezOpenUpgrade() {
   if (!currentUser) return;
+  if (ezEntitlementDisplayPending()) {
+    showToast('Plan check ho raha hai — connection milte hi details update ho jayengi.', 'info');
+    try { ezLoadProfile(); } catch(e) {}
+    return;
+  }
   let ov = document.getElementById('ez-upgrade-overlay');
   if (!ov) {
     ov = document.createElement('div');
@@ -443,17 +564,12 @@ async function ezSubmitPayment() {
 /* Load plans + profile after login */
 const _loginUserBaseEZ2 = loginUser;
 loginUser = function(email, name, uid, state) {
-  // Restore the last-known plan/profile from localStorage BEFORE the app renders,
-  // so a Pro user is never shown as free during the ~400ms it takes to re-fetch
-  // the profile from Firestore on refresh. ezLoadProfile() overwrites this with
-  // the live copy as soon as it resolves (and onSnapshot keeps it fresh).
-  if (EZ_PROFILE === null) {
-    const cached = ezReadCachedProfile(uid);
-    if (cached) EZ_PROFILE = cached;
-  }
+  ezPrepareProfileForUser(uid);
   _loginUserBaseEZ2(email, name, uid, state);
-  // Reflect the restored plan in the top-bar badge right away (safe if null).
-  if (EZ_PROFILE !== null && typeof ezRenderPlanBadge === 'function') { try { ezRenderPlanBadge(); } catch (e) {} }
-  setTimeout(function() { ezLoadPlans().then(function() { return ezLoadProfile(); }); }, 400);
+  ezRenderEntitlementSurfaces();
+  // Plan configuration and entitlement are independent. Start both now rather
+  // than delaying the profile behind a timer and three unrelated config reads.
+  try { ezLoadPlans(); } catch(e) {}
+  try { ezLoadProfile(); } catch(e) {}
 };
 

@@ -156,6 +156,11 @@ function getDefaultState() {
 function loginUser(email, name, uid, state) {
   currentUser = { email, name, uid };
 
+  // Keep the loading screen visible until both auth and the initial user
+  // document (including entitlement) have resolved.
+  const authLoading = document.getElementById('auth-loading');
+  if (authLoading) authLoading.style.display = 'none';
+
   /* Bridge identity to the standalone quiz engine (test-engine.html).
      The engine reads these localStorage keys to tag saved questions and
      quiz attempts to the right user, so a question saved in the engine
@@ -230,9 +235,11 @@ async function handleLogout() {
   } catch (e) {}
 
   // ── Reset all per-user plan/admin state ──
-  if (typeof _ezIsAdminCache !== 'undefined') _ezIsAdminCache = null;
-  if (typeof EZ_PROFILE      !== 'undefined') EZ_PROFILE      = null;
-  if (typeof EZ_PENDING_PAY  !== 'undefined') EZ_PENDING_PAY  = null;
+  if (typeof _ezIsAdminCache  !== 'undefined') _ezIsAdminCache  = null;
+  if (typeof EZ_PROFILE       !== 'undefined') EZ_PROFILE       = null;
+  if (typeof EZ_PROFILE_STATUS !== 'undefined') EZ_PROFILE_STATUS = 'idle';
+  if (typeof EZ_PROFILE_UID   !== 'undefined') EZ_PROFILE_UID   = null;
+  if (typeof EZ_PENDING_PAY   !== 'undefined') EZ_PENDING_PAY   = null;
 
   clearInterval(countdownInterval);
   // Redirect to landing page after logout
@@ -240,6 +247,44 @@ async function handleLogout() {
 }
 
 /* ── PROFILE DROPDOWN ── */
+function updateUserMenuPlan() {
+  const planEl = document.getElementById('um-plan');
+  if (!planEl) return;
+  const profilePending = typeof ezEntitlementDisplayPending === 'function'
+    ? ezEntitlementDisplayPending()
+    : (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null);
+  let planText = profilePending
+    ? ((typeof EZ_PROFILE_STATUS !== 'undefined' && EZ_PROFILE_STATUS === 'error') ? 'Plan: Unavailable — retrying' : 'Plan: Checking…')
+    : 'Plan: Free';
+  if (!profilePending && typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {
+    const p = EZ_PROFILE;
+    const today = new Date().toISOString().slice(0, 10);
+    const isLifetimePlan = p.plan && p.plan.toLowerCase().includes('lifetime');
+    if (p.plan && p.plan !== 'free' && isLifetimePlan) {
+      planText = 'Plan: ' + p.plan + ' (Lifetime) ✓';
+    } else if (p.plan && p.plan !== 'free' && p.planExpiry && p.planExpiry >= today) {
+      planText = 'Plan: ' + p.plan + ' · valid till ' + p.planExpiry;
+    } else if (p.plan && p.plan !== 'free' && p.planExpiry && p.planExpiry < today) {
+      planText = 'Plan: ' + p.plan + ' (Expired ' + p.planExpiry + ') ⚠';
+    } else if (p.plan && p.plan !== 'free' && !p.planExpiry) {
+      planText = 'Plan: ' + p.plan + ' (No expiry set — contact admin)';
+    } else if (p.trialSuspended) {
+      planText = 'Trial: Suspended by admin';
+    } else if (typeof ezIsProTrialActive === 'function' && ezIsProTrialActive()) {
+      const daysLeft = typeof ezProTrialDaysLeft === 'function' ? ezProTrialDaysLeft() : '?';
+      planText = 'Trial: Active · ' + daysLeft + ' day' + (daysLeft === 1 ? '' : 's') + ' left';
+    } else if (typeof ezIsTrialActive === 'function' && ezIsTrialActive()) {
+      const aDays = typeof ezGetTrialDaysLeft === 'function' ? ezGetTrialDaysLeft() : '?';
+      planText = 'Trial: Active · ' + aDays + ' day' + (aDays === 1 ? '' : 's') + ' left';
+    } else if (typeof ezProTrialUsed === 'function' && ezProTrialUsed()) {
+      planText = 'Trial: Ended';
+    } else if (p.trialExpiry && p.trialExpiry < today) {
+      planText = 'Trial: Ended';
+    }
+  }
+  planEl.textContent = planText;
+}
+
 function toggleUserMenu(e) {
   if (e) e.stopPropagation();
   const menu = document.getElementById('user-menu-dropdown');
@@ -247,39 +292,7 @@ function toggleUserMenu(e) {
   if (!menu.classList.contains('open')) {
     document.getElementById('um-name').textContent  = currentUser ? currentUser.name : 'User';
     document.getElementById('um-email').textContent = currentUser ? currentUser.email : '';
-    let planText = 'Plan: Free';
-    if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {
-      const p = EZ_PROFILE;
-      const today = new Date().toISOString().slice(0, 10);
-      const isLifetimePlan = p.plan && p.plan.toLowerCase().includes('lifetime');
-      if (p.plan && p.plan !== 'free' && isLifetimePlan) {
-        // FIX 5: Lifetime plan — no expiry required
-        planText = 'Plan: ' + p.plan + ' (Lifetime) ✓';
-      } else if (p.plan && p.plan !== 'free' && p.planExpiry && p.planExpiry >= today) {
-        // Active paid plan with valid expiry date
-        planText = 'Plan: ' + p.plan + ' · valid till ' + p.planExpiry;
-      } else if (p.plan && p.plan !== 'free' && p.planExpiry && p.planExpiry < today) {
-        // Expired paid plan — show clearly so user knows to renew
-        planText = 'Plan: ' + p.plan + ' (Expired ' + p.planExpiry + ') ⚠';
-      } else if (p.plan && p.plan !== 'free' && !p.planExpiry) {
-        // FIX 5: Paid plan set by admin with NO expiry and NOT lifetime → treat as expired
-        planText = 'Plan: ' + p.plan + ' (No expiry set — contact admin)';
-      } else if (p.trialSuspended) {
-        planText = 'Trial: Suspended by admin';
-      } else if (typeof ezIsProTrialActive === 'function' && ezIsProTrialActive()) {
-        const daysLeft = typeof ezProTrialDaysLeft === 'function' ? ezProTrialDaysLeft() : '?';
-        planText = 'Trial: Active · ' + daysLeft + ' day' + (daysLeft === 1 ? '' : 's') + ' left';
-      } else if (typeof ezIsTrialActive === 'function' && ezIsTrialActive()) {
-        // Admin-granted trial from EZ_PROFILE.trialExpiry
-        const aDays = typeof ezGetTrialDaysLeft === 'function' ? ezGetTrialDaysLeft() : '?';
-        planText = 'Trial: Active · ' + aDays + ' day' + (aDays === 1 ? '' : 's') + ' left';
-      } else if (typeof ezProTrialUsed === 'function' && ezProTrialUsed()) {
-        planText = 'Trial: Ended';
-      } else if (p.trialExpiry && p.trialExpiry < today) {
-        planText = 'Trial: Ended';
-      }
-    }
-    document.getElementById('um-plan').textContent = planText;
+    updateUserMenuPlan();
   }
   menu.classList.toggle('open');
 }
@@ -368,6 +381,7 @@ function showAuthError(type, msg) {
 ══════════════════════════════════════════════ */
 let _snapshotUnsub = null;
 let _authInitDone  = false;
+let _authSessionGeneration = 0;
 /* Holds a queued "redirect to login" timer. When onAuthStateChanged reports
    no user we do NOT redirect immediately — we schedule it and cancel it if a
    real session shows up a moment later. This absorbs the brief unauthenticated
@@ -434,10 +448,9 @@ const _authTimeout = setTimeout(() => {
 
 if (auth && !_isBadProtocol) {
   auth.onAuthStateChanged(async (user) => {
+    const authGeneration = ++_authSessionGeneration;
     if (!_authInitDone) {
       clearTimeout(_authTimeout);
-      const overlay = document.getElementById('auth-loading');
-      if (overlay) overlay.style.display = 'none';
       _authInitDone = true;
     }
 
@@ -490,29 +503,89 @@ if (auth && !_isBadProtocol) {
     window._ezLoggingOut = false;
 
     // Just registered — skip auto-login, user must sign in manually
-    if (_justRegistered) return;
+    if (_justRegistered) {
+      const overlay = document.getElementById('auth-loading');
+      if (overlay) overlay.style.display = 'none';
+      return;
+    }
 
-    // Logged in — load Firestore data
-    const name = user.displayName || user.email.split('@')[0];
-    try {
-      const snap = await db.collection('users').doc(user.uid).get();
-      let state  = getDefaultState();
-      if (snap.exists) {
-        const data = snap.data();
-        state = { ...getDefaultState(), ...(data.appState || {}) };
-        if (data.profile?.name) currentUser = { email: user.email, name: data.profile.name, uid: user.uid };
+    // Establish the new account boundary before any network wait. This hides
+    // the previous account and immediately clears/restores UID-keyed
+    // entitlement so a slow switch cannot borrow the old user's Pro access.
+    const accountOverlay = document.getElementById('auth-loading');
+    if (accountOverlay) {
+      accountOverlay.innerHTML = '<div class="yt-loader" style="width:36px;height:36px;border-width:4px;"></div><p>Loading your account...</p>';
+      accountOverlay.style.display = 'flex';
+    }
+    const appEl = document.getElementById('app');
+    if (appEl) appEl.style.display = 'none';
+    try { if (typeof ezPrepareProfileForUser === 'function') ezPrepareProfileForUser(user.uid); } catch(e) {}
+
+    // Logged in — load Firestore data. Keep the app behind the loading overlay
+    // for a bounded interval so the normal path starts with authoritative
+    // entitlement, while a stalled connection can still enter with UID-keyed
+    // cached state and fail-closed gates.
+    let name = user.displayName || user.email.split('@')[0];
+    const isCurrentAuthEvent = function() {
+      return authGeneration === _authSessionGeneration && auth.currentUser && auth.currentUser.uid === user.uid;
+    };
+    const readCachedState = function() {
+      try {
+        const mods = window.PrepPathModules;
+        return mods && typeof mods.createStorageService === 'function'
+          ? mods.createStorageService({ db, auth }).readCache(user.uid, getDefaultState())
+          : (function() {
+              const cached = localStorage.getItem('cache_' + user.uid);
+              return cached ? JSON.parse(cached) : getDefaultState();
+            })();
+      } catch(e) { return getDefaultState(); }
+    };
+    const docResultPromise = db.collection('users').doc(user.uid).get()
+      .then(function(snap) { return { snap: snap }; }, function(error) { return { error: error }; });
+    let initialTimer = null;
+    const firstResult = await Promise.race([
+      docResultPromise,
+      new Promise(function(resolve) {
+        initialTimer = setTimeout(function() { resolve({ timedOut: true }); }, 5000);
+      })
+    ]);
+    if (initialTimer) clearTimeout(initialTimer);
+    if (!isCurrentAuthEvent()) return;
+
+    let state = readCachedState();
+    if (firstResult.snap) {
+      const data = firstResult.snap.exists ? firstResult.snap.data() : {};
+      state = { ...getDefaultState(), ...(data.appState || {}) };
+      if (data.profile?.name) name = data.profile.name;
+      if (typeof ezSetProfileFromFirestoreSnapshot === 'function') {
+        ezSetProfileFromFirestoreSnapshot(user.uid, firstResult.snap);
+      } else if (typeof ezSetProfileSnapshot === 'function') {
+        ezSetProfileSnapshot(user.uid, data.profile || {}, firstResult.snap.metadata?.fromCache ? 'cached' : 'ready');
       }
-      loginUser(user.email, name, user.uid, state);
-    } catch(e) {
-      // Offline — try localStorage cache (via the shared storage module when
-      // available; readCache() only touches localStorage, never Firestore,
-      // so it's safe to call here even though we just failed a Firestore read).
-      const mods = window.PrepPathModules;
-      const state = mods && typeof mods.createStorageService === 'function'
-        ? mods.createStorageService({ db, auth }).readCache(user.uid, getDefaultState())
-        : (function() { const cached = localStorage.getItem('cache_' + user.uid); return cached ? JSON.parse(cached) : getDefaultState(); })();
-      loginUser(user.email, name, user.uid, state);
-      showToast('Offline mode — using cached data 📦', 'info');
+    } else {
+      if (typeof EZ_PROFILE_STATUS !== 'undefined') EZ_PROFILE_STATUS = firstResult.timedOut ? 'loading' : 'error';
+      try { if (typeof ezRenderEntitlementSurfaces === 'function') ezRenderEntitlementSurfaces(); } catch(e) {}
+    }
+
+    loginUser(user.email, name, user.uid, state);
+    if (!firstResult.snap) {
+      showToast(firstResult.timedOut ? 'Slow connection — using cached data while reconnecting.' : 'Offline mode — using cached data 📦', 'info');
+    }
+
+    // If the bounded wait used cache, keep the original read alive. Its result
+    // upgrades entitlement immediately when connectivity recovers; the live
+    // listener below handles subsequent app-state synchronization.
+    if (firstResult.timedOut) {
+      docResultPromise.then(function(lateResult) {
+        if (!lateResult.snap || !isCurrentAuthEvent()) return;
+        const lateData = lateResult.snap.exists ? lateResult.snap.data() : {};
+        if (typeof ezSetProfileFromFirestoreSnapshot === 'function') {
+          ezSetProfileFromFirestoreSnapshot(user.uid, lateResult.snap);
+        } else if (typeof ezSetProfileSnapshot === 'function') {
+          ezSetProfileSnapshot(user.uid, lateData.profile || {}, lateResult.snap.metadata?.fromCache ? 'cached' : 'ready');
+        }
+        try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+      });
     }
 
     // Real-time listener for multi-device sync
@@ -520,8 +593,10 @@ if (auth && !_isBadProtocol) {
     // to prevent the previous user's snapshot from firing on the new session.
     if (_snapshotUnsub) { try { _snapshotUnsub(); } catch(e) {} _snapshotUnsub = null; }
     _snapshotUnsub = db.collection('users').doc(user.uid)
-      .onSnapshot({ includeMetadataChanges: false }, (snap) => {
-        if (!snap.exists || !currentUser || snap.metadata.hasPendingWrites) return;
+      .onSnapshot({ includeMetadataChanges: true }, (snap) => {
+        if (authGeneration !== _authSessionGeneration ||
+            !auth.currentUser || auth.currentUser.uid !== user.uid ||
+            !snap.exists || !currentUser || currentUser.uid !== user.uid || snap.metadata.hasPendingWrites) return;
 
         // ── FIX: Refresh EZ_PROFILE on every snapshot so admin actions
         //    (suspend trial, plan change) take effect immediately without
@@ -538,18 +613,26 @@ if (auth && !_isBadProtocol) {
           const newSuspended = newProfile && newProfile.trialSuspended;
           const oldPlan = EZ_PROFILE && EZ_PROFILE.plan;
           const oldExpiry = EZ_PROFILE && EZ_PROFILE.planExpiry;
-          EZ_PROFILE = newProfile || {};
-          // Keep the local cache in sync so the next refresh restores the
-          // current plan instantly (no free→Pro flash) and stays accurate.
-          if (typeof ezCacheProfile === 'function') { try { ezCacheProfile(user.uid, EZ_PROFILE); } catch(e) {} }
+          const oldTrialExpiry = EZ_PROFILE && EZ_PROFILE.trialExpiry;
+          if (typeof ezSetProfileFromFirestoreSnapshot === 'function') {
+            ezSetProfileFromFirestoreSnapshot(user.uid, snap);
+          } else if (typeof ezSetProfileSnapshot === 'function') {
+            ezSetProfileSnapshot(user.uid, newProfile || {}, snap.metadata?.fromCache ? 'cached' : 'ready');
+          } else {
+            EZ_PROFILE = newProfile || {};
+          }
           // Re-apply ALL gates if suspension, plan, or expiry changed so an
           // expired/suspended user immediately loses Pro features (no reload).
-          const planChanged = (oldPlan !== EZ_PROFILE.plan) || (oldExpiry !== EZ_PROFILE.planExpiry);
+          const planChanged = (oldPlan !== EZ_PROFILE.plan) ||
+            (oldExpiry !== EZ_PROFILE.planExpiry) ||
+            (oldTrialExpiry !== EZ_PROFILE.trialExpiry);
           if (oldSuspended !== newSuspended || planChanged) {
             try { ezRefreshGates(); } catch(e) {}
             if (newSuspended) {
               showToast('ℹ️ Aapka Pro trial admin ne suspend kar diya. Free features active hain.', 'info');
             }
+          } else {
+            try { if (typeof ezRenderEntitlementSurfaces === 'function') ezRenderEntitlementSurfaces(); } catch(e) {}
           }
         }
 
@@ -566,6 +649,10 @@ if (auth && !_isBadProtocol) {
            next auto-save then makes permanent — and (b) break "reopen on the
            last tab". Keep the local tab and never follow a remote tab change. */
         const _keepActivePage = appState && appState.activePage;
+        const localTrialJSON = JSON.stringify({
+          proTrial: appState && appState.proTrial || null,
+          proTrialUsed: !!(appState && appState.proTrialUsed)
+        });
         const localJSON  = JSON.stringify(appState);
         const remoteJSON = JSON.stringify({ ...getDefaultState(), ...remoteState });
         if (localJSON !== remoteJSON) {
@@ -574,6 +661,13 @@ if (auth && !_isBadProtocol) {
             appState.activePage = _keepActivePage;
           }
           if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
+          const remoteTrialJSON = JSON.stringify({
+            proTrial: appState.proTrial || null,
+            proTrialUsed: !!appState.proTrialUsed
+          });
+          if (localTrialJSON !== remoteTrialJSON) {
+            try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+          }
           updateDashboard();
           buildSyllabus();
           /* Keep the Analysis tab in sync with freshly-hydrated remote data.

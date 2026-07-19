@@ -58,7 +58,7 @@ function ezStartProTrial() {
   // trial history. If the profile/appState hasn't loaded yet (offline, mid-load
   // or a cleared cache), granting now could RESET a trial the account already
   // used. EZ_PROFILE is null only during that load window, so wait for it.
-  if (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null) {
+  if (typeof ezEntitlementDisplayPending === 'function' ? ezEntitlementDisplayPending() : (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null)) {
     showToast('Profile load ho raha hai — ek second baad try karo.', 'info'); return;
   }
   if (ezProTrialUsed()) { showToast('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.', 'error'); return; }
@@ -130,8 +130,11 @@ function ezRefreshGates() {
     else if (pid === 'planner' && typeof renderPlannerView === 'function') renderPlannerView();
     else if (pid === 'dashboard' && typeof updateDashboard === 'function') updateDashboard();
   } catch(e) {}
-  /* Refresh the plan badge in the top bar (Upgrade vs 💎 Plan). */
-  try { if (typeof ezRenderPlanBadge === 'function') ezRenderPlanBadge(); } catch(e) {}
+  /* Refresh every entitlement label (top badge, open dropdown, profile page). */
+  try {
+    if (typeof ezRenderEntitlementSurfaces === 'function') ezRenderEntitlementSurfaces();
+    else if (typeof ezRenderPlanBadge === 'function') ezRenderPlanBadge();
+  } catch(e) {}
 }
 
 /* ── Trial expiry watchdog ──
