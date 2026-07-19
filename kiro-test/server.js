@@ -81,6 +81,11 @@ function childEnv() {
   };
 }
 
+// Run kiro-cli in /tmp so it doesn't read the project directory as context.
+// When run in the kiro-test/ dir, it reads server.js/README as project context
+// and thinks it's a coding assistant, refusing study-note requests.
+const KIRO_CWD = '/tmp';
+
 // kiro-cli emits ANSI color codes even in --no-interactive mode (e.g. a
 // colored "> " prompt marker prefixing the response) -- confirmed by testing.
 // Strip them so the browser gets clean plain text.
@@ -102,7 +107,7 @@ app.get('/api/diag', (req, res) => {
     path: process.env.PATH,
   };
 
-  execFile(bin, ['--version'], { env: childEnv(), timeout: 10000 }, (error, stdout, stderr) => {
+  execFile(bin, ['--version'], { env: childEnv(), timeout: 10000, cwd: KIRO_CWD }, (error, stdout, stderr) => {
     info.version = stripAnsi(stdout).trim() || null;
     info.versionError = error ? (stripAnsi(stderr) || error.message) : null;
     res.json(info);
@@ -133,7 +138,7 @@ app.post('/api/test-kiro', (req, res) => {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
-      { env: childEnv(), timeout: 120000 },
+      { env: childEnv(), timeout: 180000, cwd: KIRO_CWD },
       (error, stdout, stderr) => {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
@@ -177,7 +182,7 @@ app.post('/api/test-kiro', (req, res) => {
     execFile(
       bin,
       ['settings', 'chat.defaultModel', model],
-      { env: childEnv(), timeout: 10000 },
+      { env: childEnv(), timeout: 10000, cwd: KIRO_CWD },
       (err, stdout, stderr) => {
         if (err) {
           console.error('Failed to set model:', stripAnsi(stderr) || err.message);
@@ -239,6 +244,18 @@ function handleChatCompletions(req, res) {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
+    // Send an initial role-only chunk immediately — standard OpenAI streaming
+    // behavior. Signals to Render's LB and Cloudflare that the response body has
+    // started (they may not count : comment lines as "first byte"). Without this,
+    // Render's ~30s first-byte timeout kills the connection → proxy gets 502.
+    const initChunk = {
+      id: completionId,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: model || 'auto',
+      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
+    };
+    res.write('data: ' + JSON.stringify(initChunk) + '\n\n');
     // Send a comment every 5 seconds to keep the connection alive
     keepAliveInterval = setInterval(() => {
       res.write(': keep-alive\n\n');
@@ -308,7 +325,7 @@ function handleChatCompletions(req, res) {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
-      { env: childEnv(), timeout: 120000 },
+      { env: childEnv(), timeout: 180000, cwd: KIRO_CWD },
       (error, stdout, stderr) => {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
@@ -338,7 +355,7 @@ function handleChatCompletions(req, res) {
     execFile(
       bin,
       ['settings', 'chat.defaultModel', model],
-      { env: childEnv(), timeout: 10000 },
+      { env: childEnv(), timeout: 10000, cwd: KIRO_CWD },
       (err) => {
         if (err) console.error('[chat/completions] Failed to set model:', model);
         runChat();
