@@ -813,7 +813,7 @@ def _load_ai_config(prefer_model=None, prefer_provider=None):
                 return alt
 
     # With no user override, use the admin's active provider through the same
-    # provider-specific path (important for Kiro's model-specific context size).
+    # provider-specific path (important for Kiro's bounded-context flag).
     active_provider = (cfg.get("studyProvider") or "").strip().lower()
     if not prefer_model and active_provider in STUDY_TEST_PROVIDERS:
         active = _ai_for_provider(cfg, active_provider)
@@ -1413,23 +1413,11 @@ def _notes_instr(style=""):
             "- Do not wrap the whole answer in code fences." + no_promo)
 
 
-# Approximate context windows (tokens). Kiro is model-specific: several Claude
-# models advertise 1M while GPT 5.6 Sol/Terra/Luna advertise 272k. Unknown Kiro
-# and Auto selections stay conservative because Auto does not guarantee a 1M
-# model. The explicit Kiro default is Claude Sonnet 5 (set below in provider
-# metadata), so normal Kiro Study requests use the genuine 1M entry.
-_PROVIDER_CTX_TOKENS = {"cerebras": 8192}
-_KIRO_MODEL_CTX_TOKENS = {
-    "claude-sonnet-5": 1_000_000,
-    "claude-opus-4.8": 1_000_000,
-    "claude-opus-4.7": 1_000_000,
-    "claude-opus-4.6": 1_000_000,
-    "claude-sonnet-4.6": 1_000_000,
-    "gpt-5.6-sol": 272_000,
-    "gpt-5.6-terra": 272_000,
-    "gpt-5.6-luna": 272_000,
-}
-_KIRO_UNKNOWN_CTX_TOKENS = int(os.environ.get("STUDY_KIRO_UNKNOWN_CTX_TOKENS", "8192"))
+# Approx context window (in TOKENS) per Study provider. Cerebras models cap low
+# (8192) — they are NOT really big-context — so a big char chunk 400s with
+# "reduce the length". Others (Bynara ~1M, Mistral, NVIDIA, OpenRouter, custom)
+# are large. Override the default via env if needed.
+_PROVIDER_CTX_TOKENS = {"cerebras": 8192, "kiro": 8192}
 _DEFAULT_CTX_TOKENS = int(os.environ.get("STUDY_DEFAULT_CTX_TOKENS", "200000"))
 # Fraction of the context window reserved for the INPUT transcript chunk (the
 # rest covers the instruction + the model's output). Env-tunable.
@@ -1437,11 +1425,7 @@ _CTX_INPUT_FRAC = float(os.environ.get("STUDY_CTX_INPUT_FRAC", "0.40"))
 
 
 def _model_ctx_tokens(ai):
-    provider = (ai.get("provider") or "").lower()
-    if provider == "kiro":
-        model = (ai.get("model") or "").strip().lower()
-        return _KIRO_MODEL_CTX_TOKENS.get(model, _KIRO_UNKNOWN_CTX_TOKENS)
-    return _PROVIDER_CTX_TOKENS.get(provider, _DEFAULT_CTX_TOKENS)
+    return _PROVIDER_CTX_TOKENS.get((ai.get("provider") or "").lower(), _DEFAULT_CTX_TOKENS)
 
 
 def _chars_per_token(text):
@@ -2210,9 +2194,7 @@ STUDY_TEST_PROVIDERS = {
     # AICampus AI Hub gateway (OpenAI-compatible, multi-model; keys start with sk-hub-).
     "aicampus":   {"url": "https://ai-hub.aicampus.my/v1/chat/completions", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "def": "minimax-m3"},
     # Kiro CLI backend (OpenAI-compatible wrapper around kiro-cli headless mode).
-    # Claude Sonnet 5 is the explicit default because it advertises a 1M context
-    # window; Auto may select GPT 5.6 Sol/Terra/Luna, which are 272k models.
-    "kiro":       {"url": "https://kiro-key-test-xkd3.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "claude-sonnet-5"},
+    "kiro":       {"url": "https://kiro-key-test-xkd3.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
@@ -2273,24 +2255,10 @@ def _cfg_keys(cfg, field):
     return [k.strip() for k in (keys or []) if k and str(k).strip()]
 
 
-# Context handling is model-specific for Kiro. Explicit 1M/272k models can use
-# the large-context path; Auto and unknown models stay conservative.
-_BIG_CONTEXT_MIN_TOKENS = 100_000
-
-
-def _configured_provider_model(cfg, pid):
-    """Return the effective saved/default model for a provider.
-
-    Kiro previously defaulted to ``auto``. Treat that legacy saved default as
-    Claude Sonnet 5 everywhere (runtime, status, and health checks) so clients do
-    not turn it back into an explicit 272k-capable Auto request. Callers can
-    still deliberately request ``model=auto`` as an override.
-    """
-    meta = STUDY_TEST_PROVIDERS.get(pid) or {}
-    model = (cfg.get(meta.get("modelField")) or meta.get("def") or "").strip()
-    if pid == "kiro" and model == "auto":
-        return (meta.get("def") or "claude-sonnet-5").strip()
-    return model
+# Kiro runs a kiro-cli subprocess rather than a hosted large-context model.
+# Condense/chunk transcripts before forwarding them so long lectures do not
+# recreate the previous 413/502 timeout failures.
+_NOT_BIG_CONTEXT = {"kiro"}
 
 
 def _ai_for_provider(cfg, pid, model=None):
@@ -2302,15 +2270,11 @@ def _ai_for_provider(cfg, pid, model=None):
     keys = _cfg_keys(cfg, meta["keyField"])
     if not keys:
         return None
-    configured_model = _configured_provider_model(cfg, pid)
-    selected_model = (model or configured_model).strip()
-    model_config = {"provider": pid, "model": selected_model}
     return {
         "base_url": meta["url"],
         "keys": keys,
-        "model": selected_model,
-        "big_context": (pid != "kiro" or
-                        _model_ctx_tokens(model_config) >= _BIG_CONTEXT_MIN_TOKENS),
+        "model": (model or cfg.get(meta["modelField"]) or meta["def"]).strip(),
+        "big_context": pid not in _NOT_BIG_CONTEXT,
         "tpm": 0,
         "provider": pid,
     }
@@ -2359,7 +2323,7 @@ def api_study_test():
         if isinstance(keys, str):
             keys = re.split(r"[,\n]+", keys)
         keys = [k.strip() for k in (keys or []) if k and str(k).strip()]
-        model = _configured_provider_model(cfg, pid)
+        model = (cfg.get(meta["modelField"]) or meta["def"]).strip()
         if not keys:
             results[pid] = {"configured": False, "ok": False, "detail": "no key set"}
             continue
@@ -2498,8 +2462,6 @@ def api_status():
                 # lists them all and each pick routes to its own provider.
                 _all = _all_study_models(cfg)
                 _saved = (cfg.get("studyModel") or "").strip()
-                if prov in STUDY_TEST_PROVIDERS:
-                    _saved = _configured_provider_model(cfg, prov) or _saved
                 if _saved and _saved not in _all:
                     _all.insert(0, _saved)
                 out["studyProvider"] = prov

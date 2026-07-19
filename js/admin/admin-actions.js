@@ -709,8 +709,8 @@ const STUDY_PROVIDERS = {
               note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' },
   kiro:     { label: 'Kiro', host: 'kiro-key-test-xkd3.onrender.com', baseUrl: 'https://kiro-key-test-xkd3.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
               models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
-              def: 'claude-sonnet-5',
-              note: 'Kiro CLI headless · Claude Sonnet 5 default · 1M context · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' }
+              def: 'auto',
+              note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' }
 };
 const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'kiro'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
@@ -773,9 +773,6 @@ function studyModelFor(pid) {
   var p = STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara;
   var m = (AI_CONFIG && AI_CONFIG[p.modelField]);
   if (!m && pid === 'bynara') m = (AI_CONFIG && AI_CONFIG.studyModel);
-  // Migrate Kiro's former saved Auto default to the explicit 1M model. Auto
-  // remains selectable by users when they deliberately want task-based routing.
-  if (pid === 'kiro' && m === 'auto') m = p.def;
   return m || p.def;
 }
 /* Effective model list for a provider: admin override (config/ai.providerModels)
