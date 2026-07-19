@@ -2235,6 +2235,13 @@ def _cfg_keys(cfg, field):
     return [k.strip() for k in (keys or []) if k and str(k).strip()]
 
 
+# Kiro is a kiro-cli subprocess on a free-tier Render box, not a hosted API
+# with genuine large-context capacity. Sending a full raw transcript in one
+# shot overwhelms it (30-60s+ → the connection is killed upstream → 502). Treat
+# it as a normal chunked model so _condense/chunking bounds each request.
+_NOT_BIG_CONTEXT = {"kiro"}
+
+
 def _ai_for_provider(cfg, pid, model=None):
     """Build an _ai_chat config for a specific provider using ITS OWN key(s).
     Returns None if that provider has no key configured."""
@@ -2248,7 +2255,7 @@ def _ai_for_provider(cfg, pid, model=None):
         "base_url": meta["url"],
         "keys": keys,
         "model": (model or cfg.get(meta["modelField"]) or meta["def"]).strip(),
-        "big_context": True,
+        "big_context": pid not in _NOT_BIG_CONTEXT,
         "tpm": 0,
         "provider": pid,
     }
