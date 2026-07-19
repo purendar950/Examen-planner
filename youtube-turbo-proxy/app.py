@@ -746,6 +746,17 @@ _AI_STREAM = os.environ.get("AI_STREAM", "1").strip().lower() not in ("0", "fals
 # big-context models (Gemini / Bynara / NVIDIA / HCNSec) can use most of the
 # lecture instead of only the first ~48k chars.
 _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "240000"))
+# Tutor answers are intentionally moderate per call so they fit small-context
+# providers. If a provider reaches this cap, `_chat_tutor_complete` continues
+# from the exact cutoff instead of returning a half-finished sentence or table.
+_TUTOR_MAX_TOKENS = int(os.environ.get("TUTOR_MAX_TOKENS", "1200"))
+_TUTOR_MAX_CONT = int(os.environ.get("TUTOR_MAX_CONTINUATIONS", "2"))
+_TUTOR_CONTINUE = (
+    "Continue EXACTLY from where your previous answer stopped. Finish the cut-off "
+    "sentence, bullet, or Markdown table row first, then complete the remaining "
+    "answer concisely. Do NOT repeat prior content, restart, add a new introduction, "
+    "or mention that this is a continuation. End only at a natural complete point."
+)
 # Notes generation is chunked ONLY so a single call doesn't run forever. The
 # response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
 # what actually prevents Cloudflare's ~100s 524 (tokens keep the connection
@@ -1099,6 +1110,36 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
             last = "%s (key %d): %s" % (r.status_code, ki + 1, r.text[:120])
             break                              # 401/402/other 4xx → next key
     raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
+
+
+def _chat_tutor_complete(messages, ai, max_tokens=None):
+    """Generate a tutor answer and continue automatically if the provider stops
+    at its output cap. Returns (stitched_answer, continuation_count). The original
+    transcript-grounded messages remain in every call; only a short answer tail is
+    added as the continuation anchor, keeping small-context providers within the
+    budget reserved by `_tutor_context_chars`."""
+    max_tokens = max_tokens or _TUTOR_MAX_TOKENS
+    original = list(messages)
+    call_messages = original
+    full = ""
+    continuations = 0
+    truncated_reasons = {"length", "max_tokens", "max_output_tokens"}
+
+    for attempt in range(_TUTOR_MAX_CONT + 1):
+        meta = {}
+        part = _ai_chat(call_messages, ai, max_tokens=max_tokens, meta=meta) or ""
+        if not part.strip():
+            break
+        full += part
+        reason = str(meta.get("finish_reason") or "").strip().lower()
+        if reason not in truncated_reasons or attempt >= _TUTOR_MAX_CONT:
+            break
+        continuations += 1
+        call_messages = original + [
+            {"role": "assistant", "content": full[-3000:]},
+            {"role": "user", "content": _TUTOR_CONTINUE},
+        ]
+    return full, continuations
 
 
 def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
@@ -2660,7 +2701,9 @@ def api_tutor():
         "or only the displayed excerpts. The transcript may be auto-generated from "
         "Hindi/Hinglish speech with ASR errors — clean it mentally. Cite available "
         "timestamps as [mm:ss] when pointing to a part. Reply ONLY in %s. Be clear "
-        "and use simple examples.\n\nTIMESTAMPED VIDEO TRANSCRIPT EXCERPTS:\n%s"
+        "and use simple examples. Keep the answer concise enough to complete, and "
+        "never stop midway through a sentence, bullet, section, or table row.\n\n"
+        "TIMESTAMPED VIDEO TRANSCRIPT EXCERPTS:\n%s"
         % (t.get("title") or "this lesson", out_lang, context)
     )
     messages = [{"role": "system", "content": sysmsg}]
@@ -2675,14 +2718,15 @@ def api_tutor():
         messages.append({"role": "user", "content": question})
 
     try:
-        answer = _ai_chat(messages, ai, max_tokens=1200)
+        answer, continuations = _chat_tutor_complete(messages, ai)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     return jsonify({"id": video_id, "answer": answer, "mode": mode,
                     "provider": ai.get("provider", "ai"),
                     "model": ai["model"], "transcript_lang": t.get("chosen_lang"),
-                    "grounding": "transcript_excerpts"})
+                    "grounding": "transcript_excerpts",
+                    "continuations": continuations})
 
 
 @app.get("/api/stream")
