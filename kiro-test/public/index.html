@@ -34,9 +34,9 @@
   <div class="field">
     <label for="model">Model</label>
     <select id="model">
-      <option value="auto">Auto — 1x credit (optimal for task)</option>
+      <option value="">Auto (optimal for task)</option>
       <optgroup label="Anthropic">
-        <option value="claude-sonnet-5" selected>Claude Sonnet 5 — 1.3x credit · 1M context</option>
+        <option value="claude-sonnet-5">Claude Sonnet 5 — 1.3x credit</option>
         <option value="claude-opus-4.8">Claude Opus 4.8 — 2.2x credit</option>
         <option value="claude-opus-4.7">Claude Opus 4.7 — 2.2x credit</option>
         <option value="claude-opus-4.6">Claude Opus 4.6 — 2.2x credit</option>
@@ -65,7 +65,7 @@
         <option value="qwen3-coder-next">Qwen3 Coder Next — 0.05x credit</option>
       </optgroup>
     </select>
-    <div class="model-info" id="model-info">Experimental preview of Claude Sonnet 5 with 1M context window</div>
+    <div class="model-info" id="model-info">Models chosen by task for optimal usage and consistent quality</div>
   </div>
 
   <div class="field">
@@ -84,31 +84,9 @@
     const output = document.getElementById('output');
     const status = document.getElementById('status');
     const modelInfo = document.getElementById('model-info');
-    let typewriterTimer = null;
-
-    function typeResponse(text) {
-      if (typewriterTimer) clearInterval(typewriterTimer);
-      const chars = Array.from(String(text || ''));
-      output.textContent = '';
-      if (!chars.length) return Promise.resolve();
-      // Keep short replies character-like and cap long replies at ~5 seconds.
-      const step = Math.max(1, Math.ceil(chars.length / 240));
-      let index = 0;
-      return new Promise((resolve) => {
-        typewriterTimer = setInterval(() => {
-          output.textContent += chars.slice(index, index + step).join('');
-          index += step;
-          if (index >= chars.length) {
-            clearInterval(typewriterTimer);
-            typewriterTimer = null;
-            resolve();
-          }
-        }, 20);
-      });
-    }
 
     const MODEL_DESCRIPTIONS = {
-      'auto': 'Models chosen by task for optimal usage and consistent quality',
+      '': 'Models chosen by task for optimal usage and consistent quality',
       'claude-sonnet-5': 'Experimental preview of Claude Sonnet 5 with 1M context window',
       'claude-opus-4.8': 'Claude Opus 4.8 model with 1M context window',
       'claude-opus-4.7': 'Claude Opus 4.7 model with 1M context window',
@@ -139,7 +117,8 @@
       output.textContent = '';
       output.classList.remove('err');
       try {
-        const body = { prompt: promptEl.value, model: modelEl.value };
+        const body = { prompt: promptEl.value };
+        if (modelEl.value) body.model = modelEl.value;
         const res = await fetch('/api/test-kiro', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -147,8 +126,7 @@
         });
         const data = await res.json();
         if (data.ok) {
-          status.textContent = 'Displaying response…';
-          await typeResponse(data.response);
+          output.textContent = data.response;
           status.textContent = 'Success.' + (data.model ? ' (model: ' + data.model + ')' : '');
           status.className = 'status-ok';
         } else {
