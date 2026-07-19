@@ -139,7 +139,7 @@ app.post('/api/test-kiro', (req, res) => {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
-      { env: childEnv(), timeout: 120000, cwd: KIRO_CWD },
+      { env: childEnv(), timeout: 180000, cwd: KIRO_CWD },
       (error, stdout, stderr) => {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
@@ -245,6 +245,18 @@ function handleChatCompletions(req, res) {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders();
+    // Send an initial role-only chunk immediately — this is standard OpenAI
+    // streaming behavior and signals to intermediaries (Render LB, Cloudflare)
+    // that the response has started (not just SSE comments). Some proxies treat
+    // data: lines differently from : comment lines for timeout purposes.
+    const initChunk = {
+      id: completionId,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: model || 'auto',
+      choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }]
+    };
+    res.write('data: ' + JSON.stringify(initChunk) + '\n\n');
     // Send a comment every 5 seconds to keep the connection alive
     keepAliveInterval = setInterval(() => {
       res.write(': keep-alive\n\n');
@@ -314,7 +326,7 @@ function handleChatCompletions(req, res) {
     execFile(
       bin,
       ['chat', '--no-interactive', '--trust-tools=', prompt],
-      { env: childEnv(), timeout: 120000, cwd: KIRO_CWD },
+      { env: childEnv(), timeout: 180000, cwd: KIRO_CWD },
       (error, stdout, stderr) => {
         if (error) {
           const detail = stripAnsi(stderr) || error.message;
