@@ -750,15 +750,27 @@ _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "240000"))
 # providers. If a provider reaches this cap, `_chat_tutor_complete` continues
 # from the exact cutoff instead of returning a half-finished sentence or table.
 _TUTOR_MAX_TOKENS = int(os.environ.get("TUTOR_MAX_TOKENS", "1200"))
-_TUTOR_MAX_CONT = int(os.environ.get("TUTOR_MAX_CONTINUATIONS", "3"))
-_TUTOR_COMPLETE = "[TUTOR_COMPLETE]"
+# Big-context providers can safely return a larger first answer, reducing the
+# number of continuation seams for broad "cover the lecture" questions.
+_TUTOR_BIG_MAX_TOKENS = int(os.environ.get("TUTOR_BIG_MAX_TOKENS", "2400"))
+# A long exhaustive answer can need several continuations. Keep a generous but
+# finite guard; the prompt also enforces a concise natural stopping point.
+_TUTOR_MAX_CONT = int(os.environ.get("TUTOR_MAX_CONTINUATIONS", "8"))
+_TUTOR_END = "[TUTOR_END]"
 _TUTOR_CONTINUE = (
     "Inspect the end of your previous answer. If it is already fully complete, "
-    "respond with exactly " + _TUTOR_COMPLETE + ". Otherwise continue EXACTLY "
-    "from where it stopped. Finish the cut-off word, sentence, bullet, Markdown "
-    "table row, or section first, then complete the remaining answer concisely. "
-    "Do NOT repeat prior content, restart, add a new introduction, or mention "
-    "that this is a continuation. End only at a natural complete point."
+    "respond with exactly " + _TUTOR_END + ". Otherwise continue EXACTLY from "
+    "where it stopped. Finish the cut-off word, sentence, bullet, Markdown table "
+    "row, or section first, then complete the remaining answer concisely. Do NOT "
+    "repeat prior content, restart, add a new introduction, or mention that this "
+    "is a continuation. Append exactly " + _TUTOR_END + " only after reaching a "
+    "natural complete point."
+)
+_TUTOR_FINALIZE = (
+    "Finish ONLY the currently incomplete word, sentence, bullet, table row, or "
+    "section, then add a very short conclusion. Use at most 120 words. Close every "
+    "Markdown marker and bracket. Do not introduce another topic or repeat content. "
+    "Append exactly " + _TUTOR_END + " at the end."
 )
 # Notes generation is chunked ONLY so a single call doesn't run forever. The
 # response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
@@ -971,6 +983,16 @@ def _ai_pace(est, tpm):
         _ai_calls.append((time.time(), est))
 
 
+def _sse_event(event, payload):
+    return "event: %s\ndata: %s\n\n" % (
+        event, json.dumps(payload, ensure_ascii=False))
+
+
+_SSE_HEADERS = {"Cache-Control": "no-cache, no-transform",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive"}
+
+
 def _retry_after_secs(resp):
     ra = resp.headers.get("retry-after")
     if ra:
@@ -1171,42 +1193,71 @@ def _tutor_answer_looks_incomplete(text, max_tokens, finish_reason="", stream_do
     return False
 
 
+def _tutor_strip_end_marker(text):
+    """Remove the hidden completion marker wherever it appears. Anything after
+    the marker violates the protocol and is discarded, preventing marker/prose
+    leakage. Symmetric Markdown decoration around the marker is removed too."""
+    text = text or ""
+    idx = text.find(_TUTOR_END)
+    if idx < 0:
+        return text, False
+    prefix = text[:idx]
+    suffix = text[idx + len(_TUTOR_END):]
+    for decoration in ("**", "__", "`", "~~"):
+        if prefix.endswith(decoration) and suffix.lstrip().startswith(decoration):
+            prefix = prefix[:-len(decoration)]
+            break
+    return prefix.rstrip(), True
+
+
+def _tutor_strip_partial_marker(text):
+    """Hide a marker prefix cut by the provider (for example `[TUTOR_`)."""
+    raw = (text or "").rstrip()
+    for size in range(len(_TUTOR_END) - 1, 0, -1):
+        if raw.endswith(_TUTOR_END[:size]):
+            return raw[:-size].rstrip(), True
+    return text, False
+
+
+def _tutor_answer_tokens(ai):
+    return _TUTOR_BIG_MAX_TOKENS if ai.get("big_context") else _TUTOR_MAX_TOKENS
+
+
 def _chat_tutor_complete(messages, ai, max_tokens=None):
     """Generate a tutor answer and continue automatically if the provider stops
     at its output cap. Returns (stitched_answer, continuation_count). The original
     transcript-grounded messages remain in every call; only a short answer tail is
     added as the continuation anchor, keeping small-context providers within the
     budget reserved by `_tutor_context_chars`."""
-    max_tokens = max_tokens or _TUTOR_MAX_TOKENS
+    max_tokens = max_tokens or _tutor_answer_tokens(ai)
     original = list(messages)
     call_messages = original
     full = ""
     continuations = 0
+    complete = False
 
     for attempt in range(_TUTOR_MAX_CONT + 1):
         meta = {}
         part = _ai_chat(call_messages, ai, max_tokens=max_tokens, meta=meta) or ""
-        clean_part = part.strip()
-        if not clean_part:
+        if not part.strip():
             break
-        # A suspected false positive asks the model to return this sentinel. Do
-        # not leak it into the visible tutor answer.
-        if clean_part == _TUTOR_COMPLETE:
+        visible, ended = _tutor_strip_end_marker(part)
+        if not ended:
+            visible, _ = _tutor_strip_partial_marker(visible)
+        full += visible
+        if ended:
+            complete = True
             break
-        full += part
-        incomplete = _tutor_answer_looks_incomplete(
-            full, max_tokens,
-            finish_reason=meta.get("finish_reason"),
-            stream_done=meta.get("stream_done", True),
-        )
-        if not incomplete or attempt >= _TUTOR_MAX_CONT:
+        if attempt >= _TUTOR_MAX_CONT:
             break
         continuations += 1
+        continue_prompt = (_TUTOR_FINALIZE if continuations >= _TUTOR_MAX_CONT
+                           else _TUTOR_CONTINUE)
         call_messages = original + [
             {"role": "assistant", "content": full[-3000:]},
-            {"role": "user", "content": _TUTOR_CONTINUE},
+            {"role": "user", "content": continue_prompt},
         ]
-    return full, continuations
+    return full, continuations, complete
 
 
 def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
@@ -1243,6 +1294,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
             continue                                    # → next key
         if meta is not None:
             meta["finish_reason"] = None
+            meta["stream_done"] = False
         got_any = False
         try:
             r.encoding = "utf-8"
@@ -1253,15 +1305,20 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
                 if line.startswith("data:"):
                     line = line[5:].strip()
                 if line == "[DONE]":
+                    if meta is not None:
+                        meta["stream_done"] = True
                     break
                 if not line or line[0] != "{":
                     continue
                 try:
-                    choice = (json.loads(line).get("choices") or [{}])[0]
+                    payload = json.loads(line)
+                    choice = (payload.get("choices") or [{}])[0]
                 except Exception:  # noqa: BLE001
                     continue
-                if choice.get("finish_reason") and meta is not None:
-                    meta["finish_reason"] = choice.get("finish_reason")
+                reason = (choice.get("finish_reason") or choice.get("stop_reason")
+                          or payload.get("finish_reason") or payload.get("stop_reason"))
+                if reason and meta is not None:
+                    meta["finish_reason"] = reason
                 piece = (choice.get("delta") or {}).get("content")
                 if piece is None:                        # non-streamed 200 fallback
                     piece = (choice.get("message") or {}).get("content")
@@ -1282,6 +1339,89 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
             return                                       # success
         last = "empty stream (key %d)" % (ki + 1)
     raise RuntimeError("AI stream failed on all %d key(s): %s" % (len(keys), last))
+
+
+def _stream_tutor_complete(messages, ai, max_tokens=None):
+    """Yield live tutor text plus final metadata. A hidden end marker is kept in
+    a small rolling buffer, so it never flashes in the UI. Missing markers trigger
+    continuation even when a provider incorrectly reports `stop`. The final repair
+    attempt is fully buffered and emitted only if it closes the response cleanly."""
+    max_tokens = max_tokens or _tutor_answer_tokens(ai)
+    original = list(messages)
+    call_messages = original
+    full = ""
+    continuations = 0
+    complete = False
+    marker_hold = max(64, len(_TUTOR_END) * 2)
+
+    for attempt in range(_TUTOR_MAX_CONT + 1):
+        meta, pieces = {}, []
+        pending = ""
+        emitted_len = 0
+        marker_seen = False
+        final_attempt = attempt >= _TUTOR_MAX_CONT
+        provider_stream = _ai_chat_stream(call_messages, ai,
+                                          max_tokens=max_tokens, meta=meta)
+        for piece in provider_stream:
+            pieces.append(piece)
+            pending += piece
+            marker_visible, marker_seen = _tutor_strip_end_marker(pending)
+            if marker_seen:
+                if marker_visible:
+                    full += marker_visible
+                    yield "chunk", {"t": marker_visible}
+                try:
+                    provider_stream.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                break
+            # Keep the final marker-sized tail private. Buffer the entire final
+            # repair call so malformed output is never committed to the UI.
+            if not final_attempt and len(pending) > marker_hold:
+                visible = pending[:-marker_hold]
+                pending = pending[-marker_hold:]
+                emitted_len += len(visible)
+                full += visible
+                yield "chunk", {"t": visible}
+
+        if marker_seen:
+            complete = True
+            break
+        part = "".join(pieces)
+        if not part.strip():
+            break
+        visible_part, ended = _tutor_strip_end_marker(part)
+        if not ended:
+            visible_part, _ = _tutor_strip_partial_marker(visible_part)
+
+        # Emit only the portion not already released by the rolling buffer.
+        remainder = visible_part[emitted_len:]
+        if ended:
+            if remainder:
+                full += remainder
+                yield "chunk", {"t": remainder}
+            complete = True
+            break
+
+        if final_attempt:
+            # The final repair is accepted only with the explicit hidden marker.
+            # Heuristics must never upgrade markerless text to complete.
+            complete = False
+            break
+
+        if remainder:
+            full += remainder
+            yield "chunk", {"t": remainder}
+        continuations += 1
+        continue_prompt = (_TUTOR_FINALIZE if continuations >= _TUTOR_MAX_CONT
+                           else _TUTOR_CONTINUE)
+        call_messages = original + [
+            {"role": "assistant", "content": full[-3000:]},
+            {"role": "user", "content": continue_prompt},
+        ]
+
+    yield "done", {"continuations": continuations,
+                   "complete": complete, "chars": len(full)}
 
 
 def _stream_notes_part(sysmsg, user, ai, max_tokens):
@@ -2697,8 +2837,11 @@ def api_status():
 
 
 @app.route("/api/tutor", methods=["GET", "POST"])
+@app.route("/api/tutor/stream", methods=["POST"])
 def api_tutor():
     """AI tutor grounded in a video's transcript. Per-user chat — NOT cached.
+    `/api/tutor/stream` returns live Server-Sent Events; `/api/tutor` remains the
+    backward-compatible JSON fallback.
     Params (GET query or POST json): id, q (question), out (lang),
     mode=chat|teach, history=[{role,content}...]."""
     body = request.get_json(silent=True) or {} if request.method == "POST" else {}
@@ -2768,10 +2911,14 @@ def api_tutor():
         "or only the displayed excerpts. The transcript may be auto-generated from "
         "Hindi/Hinglish speech with ASR errors — clean it mentally. Cite available "
         "timestamps as [mm:ss] when pointing to a part. Reply ONLY in %s. Be clear "
-        "and use simple examples. Keep the answer concise enough to complete, and "
-        "never stop midway through a sentence, bullet, section, or table row.\n\n"
-        "TIMESTAMPED VIDEO TRANSCRIPT EXCERPTS:\n%s"
-        % (t.get("title") or "this lesson", out_lang, context)
+        "and use simple examples. For broad questions, give a structured answer in "
+        "at most 1,200 words; prioritize important exam points rather than dumping "
+        "an endless list. If more detail remains, finish the current section cleanly "
+        "and invite the student to ask for the next part. Never stop midway through "
+        "a word, sentence, bullet, section, or table row. At the absolute end of a "
+        "complete answer, append the exact marker %s; it will be hidden from the "
+        "student.\n\nTIMESTAMPED VIDEO TRANSCRIPT EXCERPTS:\n%s"
+        % (t.get("title") or "this lesson", out_lang, _TUTOR_END, context)
     )
     messages = [{"role": "system", "content": sysmsg}]
     for m in (history or [])[-8:]:
@@ -2784,8 +2931,25 @@ def api_tutor():
     else:
         messages.append({"role": "user", "content": question})
 
+    wants_stream = request.path.endswith("/stream")
+    if wants_stream:
+        def tutor_events():
+            yield _sse_event("meta", {"provider": ai.get("provider", "ai"),
+                                      "model": ai["model"],
+                                      "transcript_lang": t.get("chosen_lang"),
+                                      "grounding": "transcript_excerpts"})
+            try:
+                for event, payload in _stream_tutor_complete(messages, ai):
+                    yield _sse_event(event, payload)
+            except Exception as exc:  # noqa: BLE001
+                yield _sse_event("error", {"error": "ai_failed",
+                                           "detail": str(exc)[:200]})
+
+        return Response(stream_with_context(tutor_events()),
+                        mimetype="text/event-stream", headers=_SSE_HEADERS)
+
     try:
-        answer, continuations = _chat_tutor_complete(messages, ai)
+        answer, continuations, complete = _chat_tutor_complete(messages, ai)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
@@ -2793,7 +2957,7 @@ def api_tutor():
                     "provider": ai.get("provider", "ai"),
                     "model": ai["model"], "transcript_lang": t.get("chosen_lang"),
                     "grounding": "transcript_excerpts",
-                    "continuations": continuations})
+                    "continuations": continuations, "complete": complete})
 
 
 @app.get("/api/stream")

@@ -1523,6 +1523,16 @@
   }
 
   /* ── Tutor chat ── */
+  var _tutorBusy = false;
+  function syncTutorBusyUi() {
+    var input = document.getElementById('ai-chat-in'), send = document.getElementById('ai-chat-send');
+    if (input) input.disabled = _tutorBusy;
+    if (send) send.disabled = _tutorBusy;
+    Array.prototype.forEach.call(document.querySelectorAll('.ai-chip'), function (chip) {
+      chip.style.pointerEvents = _tutorBusy ? 'none' : '';
+      chip.style.opacity = _tutorBusy ? '0.45' : '';
+    });
+  }
   // Tutor chat is stored in localStorage (device-local) — NOT Firestore — so it
   // never bloats the synced user document. Capped at 30 messages per video.
   function chatKey() { return 'aiTutorChat_' + curVid(); }
@@ -1571,25 +1581,123 @@
     function go() { var v = input.value.trim(); if (v) { input.value = ''; sendTutor(v); } }
     if (send) send.onclick = go;
     if (input) input.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+    syncTutorBusyUi();
     var chat = document.getElementById('ai-chat'); if (chat) chat.scrollTop = chat.scrollHeight;
   }
   function sendTutor(question, mode) {
-    var vid = curVid(); if (!vid) return;
-    var h = getHistory();
-    if (question) h.push({ role: 'user', content: question });
-    saveHistory(h);
-    if (state.tab === 'tutor') { renderTutor(); var chat = document.getElementById('ai-chat'); if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; } }
-    fetch(BACKEND + '/api/tutor', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), provider: outProvider(), model: outModel(), history: h.slice(-8) })
-    }).then(function (r) { return r.json(); }).then(function (j) {
+    var vid = curVid(); if (!vid || _tutorBusy) return;
+    _tutorBusy = true;
+    // Send only PRIOR turns. Previously the newly-added user question was also
+    // included in history and then appended again by the backend.
+    var prior = getHistory();
+    var payload = { id: vid, q: question || '', out: outLang(), mode: mode || 'chat',
+      uid: curUid(), provider: outProvider(), model: outModel(), history: prior.slice(-8) };
+    if (question) prior.push({ role: 'user', content: question });
+    saveHistory(prior);
+
+    var acc = '', gotChunk = false, finished = false, streamError = null;
+    var fallbackStarted = false;
+    function liveEl() { return document.getElementById('ai-tutor-live'); }
+    function ensureLive() {
+      if (state.tab !== 'tutor') return null;
+      var chat = document.getElementById('ai-chat'); if (!chat) return null;
+      var el = liveEl();
+      if (!el) {
+        chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a" id="ai-tutor-live"><div class="ai-md">' + loading('Tutor soch raha hai…') + '</div></div>');
+        el = liveEl();
+      }
+      return el;
+    }
+    var lastPaint = 0;
+    function paint(force) {
+      var now = Date.now(); if (!force && now - lastPaint < 60) return;
+      lastPaint = now;
+      var el = ensureLive(); if (!el) return;
+      var box = el.querySelector('.ai-md');
+      if (box) box.innerHTML = acc ? (mdToHtml(acc) + '<span class="ai-caret"></span>') : loading('Tutor soch raha hai…');
+      var chat = document.getElementById('ai-chat'); if (chat) chat.scrollTop = chat.scrollHeight;
+    }
+    function saveAnswer(text) {
+      if (finished) return; finished = true; _tutorBusy = false;
       var hist = getHistory();
-      hist.push({ role: 'assistant', content: j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)') });
+      hist.push({ role: 'assistant', content: text || '(no answer)' });
       saveHistory(hist);
       if (state.tab === 'tutor') renderTutor();
+    }
+    function saveError(err) { saveAnswer('\u26a0 ' + String(err || 'Tutor failed')); }
+    function classicFallback() {
+      if (fallbackStarted || finished) return;
+      fallbackStarted = true; acc = ''; gotChunk = false; streamError = null;
+      var el = ensureLive();
+      if (el) { var box = el.querySelector('.ai-md'); if (box) box.innerHTML = loading('Completing answer…'); }
+      fetch(BACKEND + '/api/tutor', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).then(function (r) { return r.json(); }).then(function (j) {
+        if (j.error) { saveAnswer('\u26a0 ' + (j.detail || j.error)); return; }
+        if (j.complete !== true) {
+          saveError('Tutor could not finish this answer. Please retry with a more specific question.'); return;
+        }
+        saveAnswer(j.answer || '(no answer)');
+      }).catch(saveError);
+    }
+
+    if (state.tab === 'tutor') {
+      renderTutor(); ensureLive();
+      var input = document.getElementById('ai-chat-in'), send = document.getElementById('ai-chat-send');
+      if (input) input.disabled = true; if (send) send.disabled = true;
+    }
+    // POST + fetch streaming is used instead of EventSource because tutor input
+    // contains chat history. If streaming is unavailable, fall back to JSON.
+    fetch(BACKEND + '/api/tutor/stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      var ct = (r.headers.get('content-type') || '').toLowerCase();
+      if (!r.ok || ct.indexOf('text/event-stream') < 0) {
+        // A modern backend may return a useful JSON validation/rate-limit error.
+        // An older backend returns non-JSON/404, which falls through to classic.
+        return r.clone().json().then(function (j) {
+          saveAnswer('\u26a0 ' + (j.detail || j.error || ('HTTP ' + r.status)));
+        }).catch(function () { throw new Error('nostream'); });
+      }
+      if (!r.body || !window.TextDecoder) throw new Error('nostream');
+      var reader = r.body.getReader(), dec = new TextDecoder(), buf = '', doneMeta = null;
+      function frame(raw) {
+        var ev = 'message', data = '';
+        raw.split('\n').forEach(function (ln) {
+          if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
+          else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
+        });
+        var obj = {}; try { obj = data ? JSON.parse(data) : {}; } catch (e) {}
+        if (ev === 'chunk' && typeof obj.t === 'string') {
+          acc += obj.t; gotChunk = true; paint(false);
+        } else if (ev === 'done') doneMeta = obj;
+        else if (ev === 'error') streamError = obj.detail || obj.error || 'Tutor stream failed';
+      }
+      function pump() {
+        return reader.read().then(function (res) {
+          if (res.done) {
+            buf += dec.decode(); if (buf.trim()) frame(buf); paint(true);
+            if (streamError) throw new Error('server:' + streamError);
+            if (!gotChunk) throw new Error('empty stream');
+            if (!doneMeta) throw new Error('incomplete stream');
+            if (doneMeta.complete !== true) throw new Error('completion exhausted');
+            saveAnswer(acc); return;
+          }
+          buf += dec.decode(res.value, { stream: true });
+          var frames = buf.split('\n\n'); buf = frames.pop(); frames.forEach(frame);
+          return pump();
+        });
+      }
+      return pump();
     }).catch(function (e) {
-      var hist = getHistory(); hist.push({ role: 'assistant', content: '\u26a0 ' + String(e) }); saveHistory(hist);
-      if (state.tab === 'tutor') renderTutor();
+      if (finished) return;
+      // Explicit backend AI/rate errors are final; retrying would consume another
+      // rate-limit slot. Transport EOF or exhausted completion regenerates once
+      // through the JSON fallback instead of saving malformed visible text.
+      if (streamError) { saveError(streamError); return; }
+      classicFallback();
     });
   }
 
