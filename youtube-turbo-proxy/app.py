@@ -1443,8 +1443,8 @@ def _chars_per_token(text):
 
 
 def _tutor_context_chars(ai, text):
-    """How many transcript chars to feed the interactive tutor. Sized to the
-    model's context window AND the transcript's script (Hindi ~1 token/char),
+    """How many source chars to feed the interactive tutor. Sized to the
+    model's context window AND the source's script (Hindi ~1 token/char),
     reserving room for the chat history + the answer, then clamped to
     _TUTOR_CONTEXT_CHARS. So big-context models (Gemini/Bynara/NVIDIA/HCNSec) use
     most of the lecture, while small-context ones (Cerebras 8192) stay safely
@@ -1458,6 +1458,133 @@ def _tutor_context_chars(ai, text):
     budget_tokens = max(1500, int(ctx * 0.6) - 5000)
     cap = int(budget_tokens * _chars_per_token(text))
     return min(len(text), cap, _TUTOR_CONTEXT_CHARS)
+
+
+_TUTOR_STOP_WORDS = {
+    "about", "and", "are", "can", "does", "explain", "from", "give", "have",
+    "into", "lecture", "lesson", "please", "tell", "that", "the", "this",
+    "topic", "video", "what", "when", "where", "which", "with", "would",
+    "hai", "hain", "kya", "kaise", "ko", "mein", "mujhe", "sir", "batao",
+}
+
+
+def _tutor_query_terms(question):
+    """Useful Unicode-aware words for lightweight, local excerpt retrieval."""
+    words = re.findall(r"[^\W_]+", (question or "").lower(), flags=re.UNICODE)
+    return {w for w in words if len(w) >= 3 and w not in _TUTOR_STOP_WORDS}
+
+
+def _tutor_text_blocks(text, target_chars=700):
+    """Group source lines into compact blocks while preserving timestamp and
+    Markdown heading boundaries. Long caption lines are word-chunked."""
+    blocks, current, current_len = [], [], 0
+    for raw_line in (text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current:
+                blocks.append("\n".join(current))
+                current, current_len = [], 0
+            continue
+        lines = _chunk_words(line, target_chars) if len(line) > target_chars else [line]
+        for part in lines:
+            starts_section = part.startswith("#") or part.startswith("[")
+            if current and (current_len + len(part) + 1 > target_chars
+                            or (starts_section and current_len >= target_chars // 2)):
+                blocks.append("\n".join(current))
+                current, current_len = [], 0
+            current.append(part)
+            current_len += len(part) + 1
+    if current:
+        blocks.append("\n".join(current))
+    return blocks
+
+
+def _tutor_select_context(text, question, char_cap):
+    """Select question-relevant blocks from the WHOLE source instead of taking
+    a prefix. If no useful terms match, sample evenly across the lecture so a
+    small-context model still sees beginning, middle, and end."""
+    text = (text or "").strip()
+    if not text or char_cap <= 0:
+        return ""
+    if len(text) <= char_cap:
+        return text
+
+    blocks = _tutor_text_blocks(text)
+    if not blocks:
+        return text[:char_cap]
+    terms = _tutor_query_terms(question)
+    scored = []
+    for i, block in enumerate(blocks):
+        low = block.lower()
+        score = sum((2 + min(len(term), 12)) * low.count(term) for term in terms)
+        scored.append((score, i))
+
+    # Always reserve candidate slots for whole-lecture coverage. A broad query
+    # term may match every block; putting all matches first would otherwise fill
+    # a small context with the earliest blocks and recreate prefix starvation.
+    ranked_matches = [i for score, i in
+                      sorted(scored, key=lambda item: (-item[0], item[1]))
+                      if score > 0]
+    sample_count = max(3, min(len(blocks), char_cap // 500))
+    if sample_count == 1:
+        spread = [0]
+    else:
+        spread = [round(i * (len(blocks) - 1) / (sample_count - 1))
+                  for i in range(sample_count)]
+
+    candidates = []
+    if ranked_matches:
+        # Best match first, then middle/end coverage before nearby detail. The
+        # beginning remains a later fallback because it is already the part most
+        # likely to have been overrepresented by the old implementation.
+        for idx in [ranked_matches[0]] + spread[1:] + [ranked_matches[0] - 1,
+                                                       ranked_matches[0] + 1] \
+                + spread[:1] + ranked_matches[1:]:
+            if 0 <= idx < len(blocks) and idx not in candidates:
+                candidates.append(idx)
+    else:
+        candidates = list(dict.fromkeys(spread))
+
+    chosen, used = [], 0
+    separator_len = len("\n\n[…]\n\n")
+    for idx in candidates:
+        room = char_cap - used - (separator_len if chosen else 0)
+        if room <= 80:
+            break
+        block = blocks[idx]
+        if len(block) > room:
+            block = block[:room].rsplit(" ", 1)[0] or block[:room]
+        chosen.append((idx, block))
+        used += len(block) + (separator_len if len(chosen) > 1 else 0)
+    chosen.sort(key=lambda item: item[0])
+    return "\n\n[…]\n\n".join(block for _, block in chosen)
+
+
+def _cached_tutor_notes(video_id, out_lang):
+    """Return already-generated comprehensive notes for grounding, preferring
+    the tutor's output language. This never generates new notes or spends quota."""
+    canonical = {lang.lower(): lang for lang in _STUDY_LANGS}
+    langs = []
+    for lang in [out_lang] + list(_STUDY_LANGS):
+        lang = (lang or "").strip()
+        lang = canonical.get(lang.lower(), lang)
+        if lang and lang.lower() not in {item.lower() for item in langs}:
+            langs.append(lang)
+    for lang in langs:
+        # Default topic notes use the legacy no-style key; MCQ notes are a useful
+        # fallback when that is the only complete study material available.
+        for style in ("", "mcq"):
+            fs_id = _fs_doc_id(video_id, "notes", lang, 25, style) if style \
+                else _fs_doc_id(video_id, "notes", lang, 25)
+            try:
+                data = _study_get(fs_id)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("tutor note lookup failed for %s: %s", fs_id, exc)
+                continue
+            content = (data or {}).get("content") or ""
+            if content.strip():
+                return content.strip(), lang
+    return "", ""
 
 
 def _notes_sections(transcript, out_lang, ai, style=""):
@@ -2544,18 +2671,33 @@ def api_tutor():
         return jsonify({"error": "no_captions",
                         "detail": "No captions found for this video."}), 200
 
-    # Feed the tutor as much of the transcript as the model's context window
-    # allows (sized to the transcript's script too): big-context models use most
-    # of the lecture, small ones stay under their limit. Streaming keeps the
-    # connection alive so a larger context no longer risks Cloudflare's 524.
-    context = (t.get("text") or "")[:_tutor_context_chars(ai, t.get("text") or "")]
+    # Prefer already-generated comprehensive notes: they cover the whole lecture,
+    # are denser than raw captions, and may already be in the user's chosen
+    # language. If no notes exist, retrieve timestamped excerpts from across the
+    # entire transcript rather than blindly slicing the opening minutes.
+    notes, notes_lang = _cached_tutor_notes(video_id, out_lang)
+    if notes:
+        source_text = notes
+        grounding = "cached_notes"
+        source_label = ("COMPLETE GENERATED NOTES (%s; selected excerpts may be "
+                        "shown when the model context is small)" % notes_lang)
+    else:
+        source_text = _timestamped_transcript(t.get("segments")) or (t.get("text") or "")
+        grounding = "transcript_excerpts"
+        source_label = ("TIMESTAMPED TRANSCRIPT (relevant excerpts selected from "
+                        "across the complete available transcript)")
+    context_cap = _tutor_context_chars(ai, source_text)
+    context = _tutor_select_context(source_text, question, context_cap)
     sysmsg = (
         "You are an exam-prep AI tutor for the video titled %r. Answer ONLY using "
-        "the transcript below. If something isn't covered, say so briefly. The "
-        "transcript is auto-generated (may be Hindi/Hinglish, no punctuation) \u2014 "
-        "clean it mentally. Cite timestamps as [mm:ss] when pointing to a part. "
-        "Reply ONLY in %s. Be clear and use simple examples.\n\nTRANSCRIPT:\n%s"
-        % (t.get("title") or "this lesson", out_lang, context)
+        "the grounded lecture source below. If a requested detail is absent from "
+        "the provided source, say the current context does not contain enough "
+        "detail; NEVER claim the whole lecture contains only the introduction or "
+        "only the displayed excerpt. The source may be generated from Hindi/"
+        "Hinglish captions with ASR errors — clean it mentally. Cite available "
+        "timestamps as [mm:ss] when pointing to a part. Reply ONLY in %s. Be "
+        "clear and use simple examples.\n\nSOURCE TYPE: %s\n\nLECTURE SOURCE:\n%s"
+        % (t.get("title") or "this lesson", out_lang, source_label, context)
     )
     messages = [{"role": "system", "content": sysmsg}]
     for m in (history or [])[-8:]:
@@ -2575,7 +2717,9 @@ def api_tutor():
 
     return jsonify({"id": video_id, "answer": answer, "mode": mode,
                     "provider": ai.get("provider", "ai"),
-                    "model": ai["model"], "transcript_lang": t.get("chosen_lang")})
+                    "model": ai["model"], "transcript_lang": t.get("chosen_lang"),
+                    "grounding": grounding,
+                    "grounding_lang": notes_lang or t.get("chosen_lang")})
 
 
 @app.get("/api/stream")
