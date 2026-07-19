@@ -750,12 +750,15 @@ _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "240000"))
 # providers. If a provider reaches this cap, `_chat_tutor_complete` continues
 # from the exact cutoff instead of returning a half-finished sentence or table.
 _TUTOR_MAX_TOKENS = int(os.environ.get("TUTOR_MAX_TOKENS", "1200"))
-_TUTOR_MAX_CONT = int(os.environ.get("TUTOR_MAX_CONTINUATIONS", "2"))
+_TUTOR_MAX_CONT = int(os.environ.get("TUTOR_MAX_CONTINUATIONS", "3"))
+_TUTOR_COMPLETE = "[TUTOR_COMPLETE]"
 _TUTOR_CONTINUE = (
-    "Continue EXACTLY from where your previous answer stopped. Finish the cut-off "
-    "sentence, bullet, or Markdown table row first, then complete the remaining "
-    "answer concisely. Do NOT repeat prior content, restart, add a new introduction, "
-    "or mention that this is a continuation. End only at a natural complete point."
+    "Inspect the end of your previous answer. If it is already fully complete, "
+    "respond with exactly " + _TUTOR_COMPLETE + ". Otherwise continue EXACTLY "
+    "from where it stopped. Finish the cut-off word, sentence, bullet, Markdown "
+    "table row, or section first, then complete the remaining answer concisely. "
+    "Do NOT repeat prior content, restart, add a new introduction, or mention "
+    "that this is a continuation. End only at a natural complete point."
 )
 # Notes generation is chunked ONLY so a single call doesn't run forever. The
 # response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
@@ -989,9 +992,12 @@ def _read_stream(resp, meta=None):
     Streaming means the first tokens arrive within seconds, so the upstream
     connection stays active and slow models never hit Cloudflare's ~100s 524.
     Also tolerates a non-streamed 200 body (full 'message' object).
-    If `meta` (a dict) is passed, meta['finish_reason'] captures the upstream
-    finish_reason so callers can detect output-cap truncation."""
+    If `meta` (a dict) is passed, finish metadata is captured so callers can
+    detect output-cap truncation, including providers that use `stop_reason` or
+    end a stream without a final [DONE] marker."""
     out = []
+    if meta is not None:
+        meta["stream_done"] = False
     # SSE streams rarely send a charset, so requests falls back to ISO-8859-1
     # and mangles multi-byte UTF-8 (Hindi/Devanagari, emoji, etc.) into mojibake
     # like "à¤à¥". Force UTF-8 so decode_unicode decodes the stream correctly.
@@ -1003,15 +1009,20 @@ def _read_stream(resp, meta=None):
         if line.startswith("data:"):
             line = line[5:].strip()
         if line == "[DONE]":
+            if meta is not None:
+                meta["stream_done"] = True
             break
         if not line or line[0] != "{":
             continue
         try:
-            choice = (json.loads(line).get("choices") or [{}])[0]
+            payload = json.loads(line)
+            choice = (payload.get("choices") or [{}])[0]
         except Exception:  # noqa: BLE001
             continue
-        if choice.get("finish_reason") and meta is not None:
-            meta["finish_reason"] = choice.get("finish_reason")
+        reason = (choice.get("finish_reason") or choice.get("stop_reason")
+                  or payload.get("finish_reason") or payload.get("stop_reason"))
+        if reason and meta is not None:
+            meta["finish_reason"] = reason
         piece = (choice.get("delta") or {}).get("content")
         if piece is None:                              # non-streamed 200 fallback
             piece = (choice.get("message") or {}).get("content")
@@ -1073,11 +1084,16 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
                     # Robust extraction: some reasoning models (e.g. Cerebras
                     # gpt-oss) may omit "content" and only return "reasoning".
                     try:
-                        ch0 = (r.json().get("choices") or [{}])[0]
+                        payload = r.json()
+                        ch0 = (payload.get("choices") or [{}])[0]
                     except (ValueError, KeyError, IndexError, TypeError):
-                        ch0 = {}
+                        payload, ch0 = {}, {}
                     if meta is not None:
-                        meta["finish_reason"] = ch0.get("finish_reason")
+                        meta["stream_done"] = True
+                        meta["finish_reason"] = (
+                            ch0.get("finish_reason") or ch0.get("stop_reason")
+                            or payload.get("finish_reason") or payload.get("stop_reason")
+                        )
                     msg = ch0.get("message") or {}
                     content = msg.get("content")
                     if content:
@@ -1112,6 +1128,49 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
     raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
 
 
+def _tutor_answer_looks_incomplete(text, max_tokens, finish_reason="", stream_done=True):
+    """Detect likely provider-side truncation even when an OpenAI-compatible
+    router incorrectly reports `stop` (or omits the finish reason). This is
+    deliberately conservative for short answers, but treats long answers that
+    end without sentence punctuation or with unbalanced Markdown/brackets as
+    incomplete. Those are the exact failure shapes seen from Bynara/Mistral."""
+    raw = (text or "").rstrip()
+    if not raw:
+        return False
+    reason = str(finish_reason or "").strip().lower()
+    if reason in {"length", "max_tokens", "max_output_tokens", "token_limit"}:
+        return True
+
+    # Obvious structural cutoffs: "(via **Bharat Vistar", a partial table row,
+    # unclosed code fence, or a dangling heading/list marker.
+    if raw.count("```") % 2 or raw.count("**") % 2:
+        return True
+    for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
+        if raw.count(opening) > raw.count(closing):
+            return True
+    last_line = raw.splitlines()[-1].strip()
+    if last_line.startswith("|") and not last_line.endswith("|"):
+        return True
+    if re.search(r"(?:^|\n)\s*(?:[-*+] |\d+[.)] |#{1,6}\s*)$", raw):
+        return True
+
+    # The tutor prompt requires a naturally completed answer. Therefore an
+    # alphanumeric final fragment (or dangling connective punctuation) is
+    # suspicious at ANY length — Hindi/Hinglish can hit a token cap in far fewer
+    # characters than English. A false positive is cheap and safe because the
+    # continuation prompt returns the hidden completion sentinel.
+    terminal = re.sub(r"(?:\*\*|__|`)+$", "", raw).rstrip()
+    if terminal and re.search(r"[\w,:;/\-–—]$", terminal, flags=re.UNICODE):
+        return True
+
+    # A stream with neither [DONE] nor a finish reason is incomplete transport,
+    # regardless of text length or final punctuation. Verify it unconditionally;
+    # complete providers can answer with the hidden sentinel.
+    if not stream_done and not reason:
+        return True
+    return False
+
+
 def _chat_tutor_complete(messages, ai, max_tokens=None):
     """Generate a tutor answer and continue automatically if the provider stops
     at its output cap. Returns (stitched_answer, continuation_count). The original
@@ -1123,16 +1182,24 @@ def _chat_tutor_complete(messages, ai, max_tokens=None):
     call_messages = original
     full = ""
     continuations = 0
-    truncated_reasons = {"length", "max_tokens", "max_output_tokens"}
 
     for attempt in range(_TUTOR_MAX_CONT + 1):
         meta = {}
         part = _ai_chat(call_messages, ai, max_tokens=max_tokens, meta=meta) or ""
-        if not part.strip():
+        clean_part = part.strip()
+        if not clean_part:
+            break
+        # A suspected false positive asks the model to return this sentinel. Do
+        # not leak it into the visible tutor answer.
+        if clean_part == _TUTOR_COMPLETE:
             break
         full += part
-        reason = str(meta.get("finish_reason") or "").strip().lower()
-        if reason not in truncated_reasons or attempt >= _TUTOR_MAX_CONT:
+        incomplete = _tutor_answer_looks_incomplete(
+            full, max_tokens,
+            finish_reason=meta.get("finish_reason"),
+            stream_done=meta.get("stream_done", True),
+        )
+        if not incomplete or attempt >= _TUTOR_MAX_CONT:
             break
         continuations += 1
         call_messages = original + [
