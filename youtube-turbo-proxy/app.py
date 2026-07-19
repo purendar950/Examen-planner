@@ -1560,33 +1560,6 @@ def _tutor_select_context(text, question, char_cap):
     return "\n\n[…]\n\n".join(block for _, block in chosen)
 
 
-def _cached_tutor_notes(video_id, out_lang):
-    """Return already-generated comprehensive notes for grounding, preferring
-    the tutor's output language. This never generates new notes or spends quota."""
-    canonical = {lang.lower(): lang for lang in _STUDY_LANGS}
-    langs = []
-    for lang in [out_lang] + list(_STUDY_LANGS):
-        lang = (lang or "").strip()
-        lang = canonical.get(lang.lower(), lang)
-        if lang and lang.lower() not in {item.lower() for item in langs}:
-            langs.append(lang)
-    for lang in langs:
-        # Default topic notes use the legacy no-style key; MCQ notes are a useful
-        # fallback when that is the only complete study material available.
-        for style in ("", "mcq"):
-            fs_id = _fs_doc_id(video_id, "notes", lang, 25, style) if style \
-                else _fs_doc_id(video_id, "notes", lang, 25)
-            try:
-                data = _study_get(fs_id)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("tutor note lookup failed for %s: %s", fs_id, exc)
-                continue
-            content = (data or {}).get("content") or ""
-            if content.strip():
-                return content.strip(), lang
-    return "", ""
-
-
 def _notes_sections(transcript, out_lang, ai, style=""):
     """Split the transcript into the section(s) each notes call runs on + the
     per-call output cap. Chunk size adapts to the MODEL'S context window AND the
@@ -2671,33 +2644,24 @@ def api_tutor():
         return jsonify({"error": "no_captions",
                         "detail": "No captions found for this video."}), 200
 
-    # Prefer already-generated comprehensive notes: they cover the whole lecture,
-    # are denser than raw captions, and may already be in the user's chosen
-    # language. If no notes exist, retrieve timestamped excerpts from across the
-    # entire transcript rather than blindly slicing the opening minutes.
-    notes, notes_lang = _cached_tutor_notes(video_id, out_lang)
-    if notes:
-        source_text = notes
-        grounding = "cached_notes"
-        source_label = ("COMPLETE GENERATED NOTES (%s; selected excerpts may be "
-                        "shown when the model context is small)" % notes_lang)
-    else:
-        source_text = _timestamped_transcript(t.get("segments")) or (t.get("text") or "")
-        grounding = "transcript_excerpts"
-        source_label = ("TIMESTAMPED TRANSCRIPT (relevant excerpts selected from "
-                        "across the complete available transcript)")
-    context_cap = _tutor_context_chars(ai, source_text)
-    context = _tutor_select_context(source_text, question, context_cap)
+    # The transcript is the tutor's only source of truth. `_extract_transcript`
+    # reuses the persisted `video:auto` transcript after its first successful
+    # generation, so tutor requests do not depend on generated notes. Add periodic
+    # timestamps, then retrieve relevant excerpts from across the entire transcript
+    # instead of blindly slicing only the opening minutes.
+    transcript_text = _timestamped_transcript(t.get("segments")) or (t.get("text") or "")
+    context_cap = _tutor_context_chars(ai, transcript_text)
+    context = _tutor_select_context(transcript_text, question, context_cap)
     sysmsg = (
         "You are an exam-prep AI tutor for the video titled %r. Answer ONLY using "
-        "the grounded lecture source below. If a requested detail is absent from "
-        "the provided source, say the current context does not contain enough "
-        "detail; NEVER claim the whole lecture contains only the introduction or "
-        "only the displayed excerpt. The source may be generated from Hindi/"
-        "Hinglish captions with ASR errors — clean it mentally. Cite available "
-        "timestamps as [mm:ss] when pointing to a part. Reply ONLY in %s. Be "
-        "clear and use simple examples.\n\nSOURCE TYPE: %s\n\nLECTURE SOURCE:\n%s"
-        % (t.get("title") or "this lesson", out_lang, source_label, context)
+        "the video transcript excerpts below. If a requested detail is absent from "
+        "the provided excerpts, say the current transcript context does not contain "
+        "enough detail; NEVER claim the whole lecture contains only the introduction "
+        "or only the displayed excerpts. The transcript may be auto-generated from "
+        "Hindi/Hinglish speech with ASR errors — clean it mentally. Cite available "
+        "timestamps as [mm:ss] when pointing to a part. Reply ONLY in %s. Be clear "
+        "and use simple examples.\n\nTIMESTAMPED VIDEO TRANSCRIPT EXCERPTS:\n%s"
+        % (t.get("title") or "this lesson", out_lang, context)
     )
     messages = [{"role": "system", "content": sysmsg}]
     for m in (history or [])[-8:]:
@@ -2718,8 +2682,7 @@ def api_tutor():
     return jsonify({"id": video_id, "answer": answer, "mode": mode,
                     "provider": ai.get("provider", "ai"),
                     "model": ai["model"], "transcript_lang": t.get("chosen_lang"),
-                    "grounding": grounding,
-                    "grounding_lang": notes_lang or t.get("chosen_lang")})
+                    "grounding": "transcript_excerpts"})
 
 
 @app.get("/api/stream")
