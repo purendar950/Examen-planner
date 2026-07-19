@@ -6045,6 +6045,10 @@ async function loadQuizData() {
         CORRECT_SCORE  = (cq.correct_score  != null) ? Number(cq.correct_score)  : CORRECT_SCORE;
         NEGATIVE_SCORE = (cq.negative_score != null) ? Number(cq.negative_score) : NEGATIVE_SCORE;
         TIME_PER_SECTION = (cq.time_min ? Number(cq.time_min) : 15) * 60;
+        Object.keys(cq.section_times || {}).forEach(sec => {
+          const minutes = Number(cq.section_times[sec]);
+          if (minutes > 0) SECTION_TIME_MAP[sec] = minutes * 60;
+        });
         Object.keys(cq.sections).forEach(sec => {
           (cq.sections[sec] || []).forEach(q => {
             if (q.correct_score  == null) q.correct_score  = CORRECT_SCORE;

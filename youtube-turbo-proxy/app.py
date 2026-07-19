@@ -31,6 +31,7 @@ import time
 import base64
 import threading
 import logging
+import queue
 
 import requests
 from flask import Flask, request, jsonify, Response, stream_with_context
@@ -777,6 +778,11 @@ NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "60000"))      # topic not
 NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "60000"))  # MCQ input chunk
 NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "8000"))         # topic notes output cap/part
 NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "6000"))  # MCQ output cap/part
+# Complete MCQ banks can be larger than the old interactive-quiz ceiling. 134
+# is the default because long current-affairs lectures commonly need roughly that
+# many questions to cover every distinct fact; callers can request 1..200.
+MCQ_BANK_DEFAULT_QUESTIONS = int(os.environ.get("MCQ_BANK_DEFAULT_QUESTIONS", "134"))
+MAX_QUIZ_QUESTIONS = int(os.environ.get("MAX_QUIZ_QUESTIONS", "200"))
 # When a model stops because it hit its output-token cap (finish_reason=="length"),
 # the notes would end mid-sentence (seen on smaller models). We detect that and
 # re-prompt the model to CONTINUE from where it stopped, stitching the parts,
@@ -1705,12 +1711,54 @@ def _notes_sections(transcript, out_lang, ai, style=""):
     return secs, part_cap
 
 
-def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
+def _stream_study_text(mode, transcript, out_lang, ai, head, style="",
+                       num_questions=25, title=None):
     """Generator yielding markdown content pieces for the TEXT study modes
     (notes / summary / insights), streamed from the model. Mirrors _generate_study
     for those modes; quiz/flashcards are NOT streamed (they return structured JSON)."""
     sysmsg = _study_sys(out_lang)
     if mode == "notes":
+        if style == "mcq":
+            # Emit the header immediately. Generate provider batches on a worker
+            # and emit heartbeat sentinels while a call is in flight, preventing
+            # the browser-facing SSE connection from sitting idle behind proxies.
+            yield _mcq_bank_header(title, num_questions)
+            work = queue.Queue()
+
+            def build_batches():
+                try:
+                    for generated in _iter_quiz_batches(
+                            transcript, out_lang, ai, head,
+                            num_questions, bank=True):
+                        work.put(("batch", generated))
+                except Exception as exc:  # noqa: BLE001
+                    work.put(("error", exc))
+                finally:
+                    work.put(("done", None))
+
+            threading.Thread(target=build_batches, daemon=True).start()
+            state = {"name": None, "number": 0}
+            produced = 0
+            while True:
+                try:
+                    kind, payload = work.get(timeout=15)
+                except queue.Empty:
+                    yield {"heartbeat": True}
+                    continue
+                if kind == "error":
+                    raise payload
+                if kind == "done":
+                    break
+                pieces = []
+                for question in payload:
+                    produced += 1
+                    pieces.append(_format_mcq_question(question, produced, state))
+                yield "\n".join(pieces)
+            if produced < num_questions:
+                yield ("\n> Note: %d source-grounded questions could be produced "
+                       "from the available transcript (requested %d).\n"
+                       % (produced, num_questions))
+            return
         instr = _notes_instr(style)
         secs, part_cap = _notes_sections(transcript, out_lang, ai, style)
         covered = []
@@ -1758,55 +1806,178 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
     raise ValueError("bad stream mode")
 
 
-def _gen_quiz(transcript, out_lang, ai, head, n, focus=""):
-    """Up to `n` MCQs, one per important point. Generated in batches (default 25/
-    call), cycling through transcript sections, de-duplicating, so it scales to
-    100 and covers the whole lecture. `focus` (optional) steers what the questions
-    are about; blank = the most important points across the whole lecture."""
+def _quiz_key(question):
+    """Stable, punctuation-insensitive key used to reject repeated questions."""
+    return re.sub(r"[^\w]+", " ", (question or "").lower(), flags=re.UNICODE).strip()[:180]
+
+
+def _iter_quiz_batches(transcript, out_lang, ai, head, n, focus="", bank=False):
+    """Yield validated, de-duplicated MCQ batches until `n` are collected.
+
+    In bank mode, explanation-only facts become questions too; factual claims
+    still must come from the transcript. Per-call batches keep 100+ question
+    generation within provider output limits.
+    """
     sysmsg = _study_sys(out_lang) + " Output ONLY valid JSON."
-    secs = _chunk_words(transcript, 10000) if ai.get("big_context") \
-        else [_condense(transcript, out_lang, ai)]
+    if bank:
+        # Never condense a complete bank: condensation drops the very figures,
+        # dates and names that should become MCQs. Smaller chunks also fit
+        # limited-context providers and preserve whole-transcript coverage.
+        bank_chunk = 10000 if ai.get("big_context") else 4000
+        secs = _chunk_words(transcript, bank_chunk)
+    else:
+        secs = (_chunk_words(transcript, 10000) if ai.get("big_context")
+                else [_condense(transcript, out_lang, ai)])
     questions, seen = [], set()
     focus_instr = (("IMPORTANT: focus the questions on \u2014 %s. Prioritise this "
                     "topic/type; skip unrelated parts. " % focus) if focus else "")
-    # smaller batches so each call's output stays small/fast (avoids CF 524)
-    BATCH, i, stagnation = 12, 0, 0
-    while len(questions) < n and stagnation <= len(secs):
-        sec = secs[i % len(secs)]
-        i += 1
-        want = min(BATCH, n - len(questions))
+    batch_size = 10 if bank else 12
+    attempts = 0
+    section_index = 0
+    max_attempts = max(len(secs) * 4, ((n + batch_size - 1) // batch_size) * 3)
+    stagnation = 0
+    while (len(questions) < n and attempts < max_attempts
+           and stagnation <= len(secs) * 2):
+        # A source chunk advances only after it contributes valid questions.
+        # Malformed/empty model output therefore retries that same region rather
+        # than silently leaving a hole in whole-lecture coverage.
+        sec = secs[section_index % len(secs)]
+        attempts += 1
+        remaining = n - len(questions)
+        if bank and section_index < len(secs):
+            # Spread the requested total across the entire lecture on pass one,
+            # so the final chunks are not starved when n < chunks * batch_size.
+            remaining_sections = len(secs) - section_index
+            proportional = (remaining + remaining_sections - 1) // remaining_sections
+            want = min(batch_size, remaining, max(1, proportional))
+        else:
+            want = min(batch_size, remaining)
         avoid = ""
         if questions:
-            recent = [q.get("question", "") for q in questions[-40:]]
-            avoid = ("Do NOT repeat or paraphrase these already-asked questions:\n- "
+            recent = [q.get("question", "") for q in questions[-80:]]
+            avoid = ("Do NOT repeat or paraphrase these already-created questions:\n- "
                      + "\n- ".join(recent) + "\n\n")
+        if bank:
+            task = (
+                "Create exactly %d NEW exam-ready MCQs from distinct testable facts "
+                "in this transcript excerpt. Convert explanation-only facts, figures, "
+                "dates, names, constitutional provisions, schemes and definitions into "
+                "questions even when the teacher did not phrase them as questions. "
+                "Stay strictly source-grounded: do not add factual claims absent from "
+                "the transcript. You may create plausible incorrect distractors, but "
+                "the correct answer and explanation must be supported by the source. "
+                "Give exactly 4 concise options, one correct answer, a useful 1-3 "
+                "sentence explanation, and a short thematic section label. Return "
+                "JSON: {\"questions\":[{\"section\":\"...\",\"question\":\"...\","
+                "\"options\":[\"a\",\"b\",\"c\",\"d\"],\"answer_index\":0,"
+                "\"explanation\":\"...\"}]}.\n\n" % want)
+        else:
+            task = (
+                "Generate exactly %d NEW multiple-choice questions on the important "
+                "points below. Each needs exactly 4 options, one correct answer, and "
+                "a concise source-grounded explanation. Return JSON: "
+                "{\"questions\":[{\"section\":\"topic\",\"question\":\"...\","
+                "\"options\":[\"a\",\"b\",\"c\",\"d\"],\"answer_index\":0,"
+                "\"explanation\":\"...\"}]}.\n\n" % want)
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg},
-             {"role": "user", "content": head + focus_instr + avoid + ('Generate %d NEW multiple-'
-              'choice questions on the important points in the content below. Each '
-              'has exactly 4 options and one correct answer. Return JSON: '
-              '{"questions":[{"question":"...","options":["a","b","c","d"],'
-              '"answer_index":0,"explanation":"..."}]}.\n\n' % want) + sec}],
-            ai, max_tokens=min(300 + want * 110, 3500), json_mode=True)
+             {"role": "user", "content": head + focus_instr + avoid + task + sec}],
+            ai, max_tokens=min(500 + want * (150 if bank else 120), 4000),
+            json_mode=True)
         data = _safe_json(raw)
         qs = data.get("questions") if isinstance(data, dict) else data
-        added = 0
+        added = []
         for q in (qs or []):
-            key = (q.get("question") or "").strip().lower()[:80]
-            if key and key not in seen and q.get("options"):
-                seen.add(key)
-                questions.append(q)
-                added += 1
-                if len(questions) >= n:
-                    break
-        stagnation = 0 if added else stagnation + 1
+            if not isinstance(q, dict):
+                continue
+            question = str(q.get("question") or "").strip()
+            options = q.get("options") or []
+            key = _quiz_key(question)
+            try:
+                answer_index = int(q.get("answer_index"))
+            except (TypeError, ValueError):
+                answer_index = -1
+            if (not key or key in seen or len(options) != 4
+                    or not all(str(o).strip() for o in options)
+                    or answer_index not in range(4)):
+                continue
+            clean = {
+                "section": str(q.get("section") or "Core Concepts").strip()[:100],
+                "question": question,
+                "options": [str(o).strip() for o in options],
+                "answer_index": answer_index,
+                "explanation": str(q.get("explanation") or "").strip(),
+            }
+            seen.add(key)
+            questions.append(clean)
+            added.append(clean)
+            if len(questions) >= n or len(added) >= want:
+                break
+        if added:
+            stagnation = 0
+            section_index += 1
+            yield added
+        else:
+            stagnation += 1
+
+
+def _gen_quiz(transcript, out_lang, ai, head, n, focus="", bank=False):
+    questions = []
+    for batch in _iter_quiz_batches(transcript, out_lang, ai, head, n, focus, bank):
+        questions.extend(batch)
     return questions[:n]
+
+
+def _mcq_bank_header(title, count):
+    clean_title = re.sub(r"\s+", " ", (title or "Lecture")).strip()
+    return ("# %s \u2014 Complete MCQ Bank\n"
+            "### %d Questions | 4 Options Each | Full Explanations\n\n---\n\n"
+            % (clean_title, count))
+
+
+def _format_mcq_question(q, number, section_state):
+    """Format one structured item in the Markdown shape consumed by the UI."""
+    section = re.sub(r"\s+", " ", q.get("section") or "Core Concepts").strip()
+    lines = []
+    if section != section_state.get("name"):
+        section_state["number"] = section_state.get("number", 0) + 1
+        section_state["name"] = section
+        lines.append("## SECTION A%d \u2014 %s\n" % (section_state["number"], section))
+    options = q.get("options") or []
+    answer_index = q.get("answer_index", 0)
+    answer_letter = chr(65 + answer_index)
+    lines.append("**Q%d.** %s" % (number, q.get("question") or ""))
+    for i, option in enumerate(options[:4]):
+        lines.append("%s) %s" % (chr(65 + i), option))
+    lines.append("**\u2705 Answer:** %s) %s" %
+                 (answer_letter, options[answer_index] if answer_index < len(options) else ""))
+    explanation = (q.get("explanation") or
+                   "The correct answer follows from the lecture.").strip()
+    lines.append("*Explanation: %s*\n" % explanation)
+    return "\n".join(lines)
+
+
+def _format_mcq_bank(title, questions):
+    state = {"name": None, "number": 0}
+    body = [_format_mcq_question(q, i, state)
+            for i, q in enumerate(questions, 1)]
+    return _mcq_bank_header(title, len(questions)) + "\n".join(body)
+
+
+def _count_mcq_markdown(content):
+    return len(re.findall(r"(?m)^\*\*Q\d+\.\*\*\s+", content or ""))
 
 
 def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus="", style=""):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
     if mode == "notes":
+        if style == "mcq":
+            questions = _gen_quiz(transcript, out_lang, ai, head,
+                                  num_questions, focus, bank=True)
+            return {"format": "markdown",
+                    "content": _format_mcq_bank(title, questions),
+                    "actual_questions": len(questions)}
         return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head, style=style)}
     if mode == "quiz":
         return {"format": "json",
@@ -1986,11 +2157,12 @@ def api_study():
     mode = (request.args.get("mode") or "notes").strip().lower()
     out_lang = (request.args.get("out") or request.args.get("lang")
                 or "English").strip() or "English"
+    raw_num_q = request.args.get("n") or request.args.get("count")
     try:
-        num_q = int(request.args.get("n") or request.args.get("count") or 25)
+        num_q = int(raw_num_q or 25)
     except (TypeError, ValueError):
         num_q = 25
-    num_q = max(1, min(100, num_q))            # cap at 100
+    num_q = max(1, min(MAX_QUIZ_QUESTIONS, num_q))
     if mode not in STUDY_MODES:
         return jsonify({"error": "bad_mode", "detail": "mode must be one of %s" % STUDY_MODES}), 400
     video_id = _parse_video_id(raw_arg)
@@ -2028,6 +2200,8 @@ def api_study():
     style = (request.args.get("style") or "").strip().lower()
     if mode != "notes" or style not in ("mcq",):
         style = ""
+    elif not raw_num_q:
+        num_q = max(1, min(MAX_QUIZ_QUESTIONS, MCQ_BANK_DEFAULT_QUESTIONS))
 
     # Cache key is MODEL-AGNOSTIC: a note is identified by its CONTENT dimensions
     # (video + mode + language + question-count + focus/style), NOT by which model
@@ -2092,11 +2266,11 @@ def api_study():
         return jsonify({"error": "no_captions",
                         "detail": "No captions found for this video.",
                         "transcript_lang": t.get("chosen_lang")}), 200
-    # Notes get a TIMESTAMPED transcript so the model can tag each section with a
-    # lecture time (powers the "follow the lecture" highlight). Other modes use
-    # the plain text — timestamps would just be noise for quiz/flashcards/summary.
+    # Topic notes keep timestamps for Follow mode. Complete MCQ banks use the
+    # clean transcript because their requested output intentionally matches a
+    # printable sectioned question bank without lecture timestamps.
     gen_text = t["text"]
-    if mode == "notes":
+    if mode == "notes" and style != "mcq":
         gen_text = _timestamped_transcript(t.get("segments")) or t["text"]
     try:
         result = _generate_study(mode, gen_text, out_lang, ai,
@@ -2108,13 +2282,24 @@ def api_study():
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
             "style": style or ("topic" if mode == "notes" else None),
             "out_lang": out_lang, "model": model,
-            "num_questions": num_q if mode == "quiz" else None,
+            "num_questions": num_q if mode == "quiz" or style == "mcq" else None,
             "provider": ai.get("provider", "ai"),
             "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count"),
             "cached": False}
     data.update(result)
+    if style == "mcq":
+        actual = int(data.get("actual_questions") or
+                     _count_mcq_markdown(data.get("content")))
+        data["actual_questions"] = actual
+        if actual < num_q:
+            # Return the useful partial bank to this caller, but never let a
+            # requested-count cache bucket permanently masquerade as complete.
+            data["complete"] = False
+            data["persisted"] = False
+            return jsonify(data)
+        data["complete"] = True
     with _study_lock:
         _study_cache[ckey] = {"ts": time.time(), "data": data}
     # persist for next time (all users): body -> object storage, index -> Firestore
@@ -2157,12 +2342,17 @@ def api_study_stream():
     style = (request.args.get("style") or "").strip().lower()
     if mode != "notes" or style not in ("mcq",):
         style = ""
+    raw_num_q = request.args.get("n") or request.args.get("count")
+    try:
+        num_q = int(raw_num_q or (MCQ_BANK_DEFAULT_QUESTIONS if style == "mcq" else 25))
+    except (TypeError, ValueError):
+        num_q = MCQ_BANK_DEFAULT_QUESTIONS if style == "mcq" else 25
+    num_q = max(1, min(MAX_QUIZ_QUESTIONS, num_q))
 
-    # Cache key MUST match /api/study (notes/summary/insights have no focus and a
-    # fixed num_q of 25) so a streamed note reuses/populates the same entry.
+    # Cache key MUST match /api/study for the selected bank size.
     if style:
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, 25, style)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, 25, style)
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, num_q, style)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, style)
     else:
         ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, 25)
         fs_id = _fs_doc_id(video_id, mode, out_lang, 25)
@@ -2232,7 +2422,7 @@ def api_study_stream():
                         "transcript_lang": t.get("chosen_lang")}), 200
 
     gen_text = t["text"]
-    if mode == "notes":
+    if mode == "notes" and style != "mcq":
         gen_text = _timestamped_transcript(t.get("segments")) or t["text"]
     head = ("Video title: %s\n\n" % t.get("title")) if t.get("title") else ""
 
@@ -2241,7 +2431,11 @@ def api_study_stream():
                             "model": model, "cached": False})
         full = []
         try:
-            for piece in _stream_study_text(mode, gen_text, out_lang, ai, head, style):
+            for piece in _stream_study_text(mode, gen_text, out_lang, ai, head,
+                                             style, num_q, t.get("title")):
+                if isinstance(piece, dict) and piece.get("heartbeat"):
+                    yield ": keepalive\n\n"
+                    continue
                 full.append(piece)
                 yield _sse("chunk", {"t": piece})
         except Exception as exc:  # noqa: BLE001
@@ -2249,11 +2443,16 @@ def api_study_stream():
             return
         content = "".join(full)
         persisted = False
-        if content.strip():
+        actual_questions = (_count_mcq_markdown(content) if style == "mcq" else None)
+        complete = bool(content.strip()) and (style != "mcq" or actual_questions >= num_q)
+        if complete:
             data = {"id": video_id, "title": t.get("title"), "mode": mode,
                     "style": style or ("topic" if mode == "notes" else None),
                     "out_lang": out_lang, "model": model, "format": "markdown",
-                    "num_questions": None, "provider": ai.get("provider", "ai"),
+                    "num_questions": num_q if style == "mcq" else None,
+                    "actual_questions": actual_questions,
+                    "complete": True,
+                    "provider": ai.get("provider", "ai"),
                     "keys_available": len(ai["keys"]),
                     "transcript_lang": t.get("chosen_lang"),
                     "segment_count": t.get("segment_count"),
@@ -2261,7 +2460,8 @@ def api_study_stream():
             with _study_lock:
                 _study_cache[ckey] = {"ts": time.time(), "data": data}
             persisted = _study_put(fs_id, data)     # cache ONLY on clean finish
-        yield _sse("done", {"persisted": persisted})
+        yield _sse("done", {"persisted": persisted, "complete": complete,
+                            "actual_questions": actual_questions})
 
     return Response(stream_with_context(gen()),
                     mimetype="text/event-stream", headers=_sse_headers)
@@ -2282,15 +2482,16 @@ def api_study_langs():
     video_id = _parse_video_id(raw_arg)
     if not video_id or mode not in STUDY_MODES:
         return jsonify({"available": []})
-    try:
-        num_q = int(request.args.get("n") or request.args.get("count") or 25)
-    except (TypeError, ValueError):
-        num_q = 25
-    num_q = max(1, min(100, num_q))
-    # match /api/study's cache buckets: MCQ notes are stored under their own key
+    # Match /api/study's cache buckets, including the selected MCQ-bank size.
     style = (request.args.get("style") or "").strip().lower()
     if mode != "notes" or style not in ("mcq",):
         style = ""
+    raw_num_q = request.args.get("n") or request.args.get("count")
+    try:
+        num_q = int(raw_num_q or (MCQ_BANK_DEFAULT_QUESTIONS if style == "mcq" else 25))
+    except (TypeError, ValueError):
+        num_q = MCQ_BANK_DEFAULT_QUESTIONS if style == "mcq" else 25
+    num_q = max(1, min(MAX_QUIZ_QUESTIONS, num_q))
     # model-agnostic: a language is "available" if a note exists for it, no matter
     # which model made it (cache key no longer includes the model).
     req_model = (request.args.get("model") or "").strip()[:80]

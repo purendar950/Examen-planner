@@ -328,8 +328,9 @@
 
   /* ── MCQ renderer ── */
   var NB_Q = /^#{0,4}\s*\**\s*(?:Q|Question|Ques|\u092A\u094D\u0930\u0936\u094D\u0928|\u0938\u0935\u093E\u0932)\s*\.?\s*(\d+)\s*[.):\-\u2013]*\s*(.*)$/i;
+  var NB_SECTION = /^##\s+(?:SECTION\s+[A-Z0-9]+\s*[\u2014\-:]\s*)?(.+)$/i;
   var NB_O = /^[-*+]?\s*\(?([A-Da-d1-4])\)?[.)]\s+(.*)$/;
-  var NB_A = /^\s*(?:[-*+]\s*)?\**\s*(?:answer|ans|\u0909\u0924\u094D\u0924\u0930)\**\s*[:\uFF1A]?\s*\**\s*\(?([A-Da-d1-4])\)?\b(.*)$/i;
+  var NB_A = /^\s*(?:[-*+]\s*)?\**\s*(?:\u2705\s*)?(?:answer|ans|\u0909\u0924\u094D\u0924\u0930)\**\s*[:\uFF1A]?\s*\**\s*\(?([A-Da-d1-4])\)?\b(.*)$/i;
   var NB_EXP = /^\**\s*(?:explanation|explain|\u0935\u094D\u092F\u093E\u0916\u094D\u092F\u093E)\**\s*[:\uFF1A]?\s*(.*)$/i;
   function nbOptRight(text) { return /[\u2713\u2714]|\(correct\)|\bcorrect\b|\u0938\u0939\u0940/i.test(text); }
   function nbCleanOpt(text) { return text.replace(/\s*[\u2713\u2714]\s*$/, '').replace(/\s*\(correct\)\s*$/i, '').trim(); }
@@ -344,7 +345,7 @@
     var qHtml = '<div class="q-card"><div class="q-head"><span class="qtag">Q' + n + '</span> ' + nbInline(esc(q.replace(/\*+/g, ''))) + '</div>' +
       (opts.length ? '<div class="q-body">' + body + '</div>' : '') + '</div>';
     var ansHtml = ans ? '<div class="answer"><span class="ok">\u2705 Answer: <mark class="ans">' + ans + '</mark></span>' +
-      (ansRest ? ' ' + nbInline(esc(ansRest.replace(/^[\s\u2014\-:\uFF1A]+/, ''))) : '') + '</div>' : '';
+      (ansRest ? ' ' + nbInline(esc(ansRest.replace(/^[\s\u2014\-:\uFF1A.)]+/, ''))) : '') + '</div>' : '';
     var explHtml = expl.length ? '<div class="explain"><div class="xh">\uD83D\uDCDD Explanation</div>' + nbInner(expl.join('\n')) + '</div>' : '';
     return '<div class="qkeep">' + qHtml + ansHtml + '</div>' + explHtml;
   }
@@ -360,7 +361,7 @@
         var opts = [], ans = '', ansRest = '', expl = [];
         while (i < lines.length) {
           var lt = lines[i].trim();
-          if (NB_Q.test(lt)) break;
+          if (NB_Q.test(lt) || NB_SECTION.test(lt)) break;
           var am = lt.match(NB_A), om = lt.match(NB_O), em = lt.match(NB_EXP);
           if (am) { ans = am[1].toUpperCase(); ansRest = am[2] || ''; i++; continue; }
           if (om) { opts.push({ k: om[1].toUpperCase(), text: om[2] }); i++; continue; }
@@ -765,7 +766,7 @@
       openInTestEngine(qs, (curTitle() || 'MCQ') + ' \u2014 MCQ Test');
     };
     var msb = document.getElementById('ai-mcq-share');
-    if (msb) msb.onclick = function () { shareMcqTest(); };
+    if (msb) msb.onclick = function () { shareMcqTest(content, n); };
     // As soon as MCQ notes are generated, make them available as a quiz in the
     // Quiz tab — no "Take as Test" needed. Keyed by the current video; deduped
     // so re-renders of the same set don't re-publish.
@@ -790,7 +791,7 @@
   function studyOnce(mode, n, style, lang, focus, force, signal, btnId) {
     var vid = curVid();
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
-    if (mode === 'quiz') url += '&n=' + (n || 25);
+    if (mode === 'quiz' || style === 'mcq') url += '&n=' + (n || (style === 'mcq' ? 134 : 25));
     if (style === 'mcq') url += '&style=mcq';
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
@@ -816,6 +817,7 @@
   function studyStream(mode, n, style, lang, focus, force, signal, btnId) {
     var vid = curVid();
     var url = BACKEND + '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
+    if (style === 'mcq') url += '&n=' + (n || 134);
     if (style === 'mcq') url += '&style=mcq';
     if (force) url += '&refresh=1';
     var meta = {}, acc = '', gotChunk = false, done = false, lastPaint = 0;
@@ -1010,6 +1012,10 @@
   }
   function cardsFocus() { return ((document.getElementById('ai-cards-focus') || {}).value || '').trim(); }
   function quizFocus() { return ((document.getElementById('ai-quiz-focus') || {}).value || '').trim(); }
+  function notesQuestionCount() {
+    var el = document.getElementById('ai-mcq-count');
+    return Math.max(1, Math.min(200, parseInt(el && el.value, 10) || 134));
+  }
   // The focus boxes are always rendered but shown only when allowed (admin toggle
   // or per-user grant). Toggling display here avoids re-rendering / wiping a quiz.
   function applyFocusVisibility() {
@@ -1061,7 +1067,7 @@
   function refreshLangBar(autoShow) {
     if (state.tab === 'notes') {
       var m = document.getElementById('ai-notes-mode');
-      checkLangs(m ? m.value : 'notes', 25, !!autoShow);
+      checkLangs(m ? m.value : 'notes', m && m.value === 'notes' && nbNotesStyle() === 'mcq' ? notesQuestionCount() : 25, !!autoShow);
     } else if (state.tab === 'cards') {
       checkLangs('flashcards', 25, !!autoShow);
     } else if (state.tab === 'quiz') {
@@ -1256,15 +1262,18 @@
   function parseMcqNotes(md) {
     var clean = nbStrip(md || '');
     var lines = clean.replace(/\r/g, '').replace(/^\s*```[a-z]*\n([\s\S]*?)\n```\s*$/i, '$1').split('\n');
-    var out = [], i = 0;
+    var out = [], i = 0, currentSection = 'MCQ Quiz';
     while (i < lines.length) {
-      var qm = lines[i].trim().match(NB_Q);
+      var trimmed = lines[i].trim();
+      var sectionMatch = trimmed.match(NB_SECTION);
+      if (sectionMatch) { currentSection = sectionMatch[1].replace(/\*+/g, '').trim() || 'MCQ Quiz'; i++; continue; }
+      var qm = trimmed.match(NB_Q);
       if (!qm) { i++; continue; }
       var qtext = qm[2] || ''; i++;
       var opts = [], ansKey = '', expl = [];
       while (i < lines.length) {
         var lt = lines[i].trim();
-        if (NB_Q.test(lt)) break;
+        if (NB_Q.test(lt) || NB_SECTION.test(lt)) break;
         var am = lt.match(NB_A), om = lt.match(NB_O), em = lt.match(NB_EXP);
         if (am) { ansKey = am[1].toUpperCase(); i++; continue; }
         if (om) { opts.push({ k: om[1].toUpperCase(), text: om[2] }); i++; continue; }
@@ -1281,7 +1290,8 @@
           question: stripTimestamps(deLatex(qtext.replace(/\*+/g, ''))),
           options: opts.map(function (o) { return deLatex(nbCleanOpt(o.text)); }),
           answer_index: (ansIdx < opts.length) ? ansIdx : 0,
-          explanation: stripTimestamps(deLatex(expl.join('\n')))
+          explanation: stripTimestamps(deLatex(expl.join('\n'))),
+          section: currentSection
         });
       }
     }
@@ -1336,7 +1346,20 @@
       time_min: (opts.time_min != null) ? opts.time_min : Math.max(5, Math.ceil(questions.length * 0.75)),
       sections: {}
     };
-    payload.sections['MCQ Quiz'] = questions;
+    var hasNamedSections = (list || []).some(function (q) { return q && q.section && q.section !== 'MCQ Quiz'; });
+    if (hasNamedSections) {
+      (list || []).forEach(function (q, idx) {
+        var section = (q && q.section) || 'MCQ Quiz';
+        if (!payload.sections[section]) payload.sections[section] = [];
+        if (questions[idx]) payload.sections[section].push(questions[idx]);
+      });
+    } else {
+      payload.sections['MCQ Quiz'] = questions;
+    }
+    payload.section_times = {};
+    Object.keys(payload.sections).forEach(function (section) {
+      payload.section_times[section] = Math.max(1, Math.ceil(payload.sections[section].length * 0.75));
+    });
     try {
       // keep only the latest custom quiz so localStorage doesn't grow forever
       Object.keys(localStorage).forEach(function (k) { if (k.indexOf('ez_custom_quiz_') === 0) localStorage.removeItem(k); });
@@ -1372,7 +1395,7 @@
   // video id + language; the recipient's app rebuilds the same quiz from the
   // Backblaze-cached MCQ notes (no separate storage). Opening app.html requires
   // login, so a logged-out recipient is sent to login/register automatically.
-  function shareMcqTest() {
+  function shareMcqTest(content, requestedCount) {
     var vid = curVid();
     if (!vid) { if (typeof showToast === 'function') showToast('Play the video first', 'error'); else alert('Play the video first.'); return; }
     // Creating a share is Pro-only (also enforced by Firestore rules).
@@ -1390,6 +1413,8 @@
       videoId: vid,
       lang: outLang(),
       title: (curTitle() || 'MCQ Test'),
+      questionCount: Math.max(1, Math.min(200, parseInt(requestedCount, 10) || 134)),
+      actualQuestionCount: parseMcqNotes(content || '').length,
       by: (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) ? currentUser.uid : '',
       createdAt: (typeof firebase !== 'undefined' && firebase.firestore && firebase.firestore.FieldValue)
         ? firebase.firestore.FieldValue.serverTimestamp() : Date.now()
@@ -1408,10 +1433,11 @@
     }).then(function () { if (btnEl) btnEl.disabled = false; });
   }
   // Rebuild + open a shared MCQ test from the cached notes for a given video.
-  function openSharedMcq(vid, lang) {
+  function openSharedMcq(vid, lang, count) {
     if (!vid) return;
     try { if (typeof showToast === 'function') showToast('Loading shared MCQ test\u2026', 'info'); } catch (e) {}
-    var url = '/api/study?id=' + vid + '&mode=notes&style=mcq&out=' + encodeURIComponent(lang || outLang()) + '&uid=' + encodeURIComponent(curUid());
+    var n = Math.max(1, Math.min(200, parseInt(count, 10) || 25));
+    var url = '/api/study?id=' + vid + '&mode=notes&style=mcq&n=' + n + '&out=' + encodeURIComponent(lang || outLang()) + '&uid=' + encodeURIComponent(curUid());
     apiGet(url).then(function (j) {
       if (j && (j.error === 'no_captions' || j.warning === 'no_captions')) { alert('This shared video has no captions.'); return; }
       if (j && j.error) { alert('Could not load the shared test: ' + j.error); return; }
@@ -1429,15 +1455,15 @@
       if (!snap || !snap.exists) { alert('This shared test link is invalid or has expired.'); return; }
       var d = snap.data() || {};
       if (!d.videoId) { alert('This shared test link is invalid.'); return; }
-      maybeUpsellThenOpen(d.videoId, d.lang);
+      maybeUpsellThenOpen(d.videoId, d.lang, d.questionCount);
     }).catch(function (e) { alert('Could not open the shared test: ' + (e && e.message || e)); });
   }
   // Free users get a gentle "upgrade to create your own" nudge, then the test opens.
-  function maybeUpsellThenOpen(vid, lang) {
+  function maybeUpsellThenOpen(vid, lang, count) {
     if (typeof isPro === 'function' && !isPro() && typeof showToast === 'function') {
       showToast('\u2728 This test is free via a shared link. Upgrade to Pro to create your own tests.', 'info');
     }
-    openSharedMcq(vid, lang);
+    openSharedMcq(vid, lang, count);
   }
 
   /* ── Quiz engine ── */
@@ -1631,24 +1657,39 @@
     if (state.tab === 'notes') {
       b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
-        '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="mcq">❓ MCQ</option></select>' +
+        '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="mcq">❓ Complete MCQ Bank</option></select>' +
+        '<label id="ai-mcq-count-wrap" class="ai-muted" style="display:none;align-items:center;gap:4px">Questions ' +
+          '<select id="ai-mcq-count" class="ai-btn sec" style="padding:6px 8px"><option>50</option><option>100</option><option selected>134</option><option>150</option><option>200</option></select></label>' +
         '<button class="ai-btn" id="ai-notes-go">Generate</button></div><div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
       var styleSel = document.getElementById('ai-notes-style');
-      // MCQ style only applies to comprehensive notes; hide it for summary/insights.
-      function syncStyleVis() { styleSel.style.display = (modeSel.value === 'notes') ? '' : 'none'; }
+      var countWrap = document.getElementById('ai-mcq-count-wrap');
+      var countSel = document.getElementById('ai-mcq-count');
+      // MCQ-bank controls only apply to comprehensive notes.
+      function syncStyleVis() {
+        var isNotes = modeSel.value === 'notes';
+        styleSel.style.display = isNotes ? '' : 'none';
+        countWrap.style.display = isNotes && styleSel.value === 'mcq' ? 'inline-flex' : 'none';
+      }
       syncStyleVis();
       // switching a dropdown: clear stale output + refresh which languages are cached.
       modeSel.onchange = function () {
         var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
         syncStyleVis();
-        checkLangs(this.value, 25, true);
+        checkLangs(this.value, this.value === 'notes' && styleSel.value === 'mcq' ? notesQuestionCount() : 25, true);
       };
       styleSel.onchange = function () {
         var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
-        checkLangs(modeSel.value, 25, false);
+        syncStyleVis();
+        checkLangs(modeSel.value, modeSel.value === 'notes' && styleSel.value === 'mcq' ? notesQuestionCount() : 25, false);
       };
-      document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
+      countSel.onchange = function () {
+        var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
+        checkLangs(modeSel.value, notesQuestionCount(), false);
+      };
+      document.getElementById('ai-notes-go').onclick = function () {
+        showStudy(modeSel.value, modeSel.value === 'notes' && styleSel.value === 'mcq' ? notesQuestionCount() : 25);
+      };
       checkLangs(modeSel.value, 25, true);
     } else if (state.tab === 'cards') {
       b.innerHTML = '<div id="ai-cards-focus-wrap" style="margin-bottom:8px;display:none">' +
@@ -1659,7 +1700,7 @@
       checkLangs('flashcards', 25, true);
     } else if (state.tab === 'quiz') {
       b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">Questions: ' +
-        '<select id="ai-qn" class="ai-btn sec" style="padding:6px 8px"><option>15</option><option selected>25</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option>90</option><option>100</option></select> ' +
+        '<select id="ai-qn" class="ai-btn sec" style="padding:6px 8px"><option>15</option><option selected>25</option><option>30</option><option>40</option><option>50</option><option>60</option><option>70</option><option>80</option><option>90</option><option>100</option><option>120</option><option>134</option><option>150</option><option>200</option></select> ' +
         '<button class="ai-btn" id="ai-quiz-go">Start quiz</button></div>' +
         '<div id="ai-quiz-focus-wrap" style="margin-bottom:8px;display:none"><input id="ai-quiz-focus" placeholder="Optional: kis type/topic ke questions? (blank = important points)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
         '<div id="ai-langbar"></div><div id="ai-sub"></div>';
