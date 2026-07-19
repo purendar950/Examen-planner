@@ -777,15 +777,15 @@ _study_cache = {}
 _study_lock = threading.Lock()
 
 
-def _load_ai_config(prefer_model=None):
+def _load_ai_config(prefer_model=None, prefer_provider=None):
     """Study AI provider from Firestore config/ai. Returns a dict:
         {base_url, keys, model, big_context, tpm, provider}
 
-    If `prefer_model` is given and it belongs to a configured provider that has
-    a key, THAT provider's key + endpoint are used — so the study panel can list
-    models from ALL providers and any pick routes to the right one. Otherwise
-    uses the active provider (studyApiKeys/studyBaseUrl), else Groq. The key
-    never reaches the browser."""
+    If `prefer_provider` is supplied, it wins over model-only detection because
+    model IDs such as "auto" can belong to multiple providers. Otherwise, if
+    `prefer_model` belongs to a configured provider with a key, that provider's
+    endpoint is used. With neither override, the active provider is used, then
+    the legacy Study/Bynara fields, then Groq. The key never reaches the browser."""
     cfg = {}
     if _fb_db:
         try:
@@ -795,13 +795,30 @@ def _load_ai_config(prefer_model=None):
         except Exception as exc:  # noqa: BLE001
             log.warning("config/ai read failed: %s", exc)
 
-    # A specific model was requested → route to its provider's key + endpoint.
+    # Prefer the explicitly selected provider. Model IDs such as "auto" and
+    # "gpt-5.6-luna" exist in multiple providers, so model-only routing is
+    # ambiguous and can silently send a Kiro selection to another gateway.
+    prefer_provider = (prefer_provider or "").strip().lower()
+    if prefer_provider in STUDY_TEST_PROVIDERS:
+        alt = _ai_for_provider(cfg, prefer_provider, prefer_model)
+        if alt:
+            return alt
+
+    # Backward compatibility for older clients that only send a model.
     if prefer_model:
         pid = _model_provider(prefer_model, cfg)
         if pid:
             alt = _ai_for_provider(cfg, pid, prefer_model)
             if alt:
                 return alt
+
+    # With no user override, use the admin's active provider through the same
+    # provider-specific path (important for Kiro's bounded-context flag).
+    active_provider = (cfg.get("studyProvider") or "").strip().lower()
+    if not prefer_model and active_provider in STUDY_TEST_PROVIDERS:
+        active = _ai_for_provider(cfg, active_provider)
+        if active:
+            return active
 
     # Bynara key(s): studyApiKeys can be a list or a comma/newline string.
     keys = cfg.get("studyApiKeys")
@@ -1400,7 +1417,7 @@ def _notes_instr(style=""):
 # (8192) — they are NOT really big-context — so a big char chunk 400s with
 # "reduce the length". Others (Bynara ~1M, Mistral, NVIDIA, OpenRouter, custom)
 # are large. Override the default via env if needed.
-_PROVIDER_CTX_TOKENS = {"cerebras": 8192}
+_PROVIDER_CTX_TOKENS = {"cerebras": 8192, "kiro": 8192}
 _DEFAULT_CTX_TOKENS = int(os.environ.get("STUDY_DEFAULT_CTX_TOKENS", "200000"))
 # Fraction of the context window reserved for the INPUT transcript chunk (the
 # rest covers the instruction + the model's output). Env-tunable.
@@ -1760,7 +1777,8 @@ def api_study():
     # ANY configured provider — _load_ai_config routes it to that provider's key
     # + endpoint, so every listed model actually works. Blank = admin default.
     req_model = (request.args.get("model") or "").strip()[:80]
-    ai = _load_ai_config(req_model or None)
+    req_provider = (request.args.get("provider") or "").strip()[:40]
+    ai = _load_ai_config(req_model or None, req_provider or None)
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel "
@@ -1904,7 +1922,8 @@ def api_study_stream():
         return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
 
     req_model = (request.args.get("model") or "").strip()[:80]
-    ai = _load_ai_config(req_model or None)
+    req_provider = (request.args.get("provider") or "").strip()[:40]
+    ai = _load_ai_config(req_model or None, req_provider or None)
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel."}), 503
@@ -2051,8 +2070,9 @@ def api_study_langs():
     # model-agnostic: a language is "available" if a note exists for it, no matter
     # which model made it (cache key no longer includes the model).
     req_model = (request.args.get("model") or "").strip()[:80]
+    req_provider = (request.args.get("provider") or "").strip()[:40]
     try:
-        model = (_load_ai_config(req_model or None) or {}).get("model") or ""
+        model = (_load_ai_config(req_model or None, req_provider or None) or {}).get("model") or ""
     except Exception:  # noqa: BLE001
         model = ""
     available = []
@@ -2173,6 +2193,8 @@ STUDY_TEST_PROVIDERS = {
     "bluesminds": {"url": "https://api.bluesminds.com/v1/chat/completions", "keyField": "bluesmindsApiKeys", "modelField": "bluesmindsModel", "def": "gpt-5.2-chat"},
     # AICampus AI Hub gateway (OpenAI-compatible, multi-model; keys start with sk-hub-).
     "aicampus":   {"url": "https://ai-hub.aicampus.my/v1/chat/completions", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "def": "minimax-m3"},
+    # Kiro CLI backend (OpenAI-compatible wrapper around kiro-cli headless mode).
+    "kiro":       {"url": "https://kiro-key-test-xkd3.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
@@ -2187,13 +2209,14 @@ STUDY_PROVIDER_MODELS = {
     "hcnsec":     ["auto", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "Qwen3.5-397B-A17B", "Qwen3.6-35B-A3B", "MiniMax-M3", "MiniMax-M2.7", "Kimi-K2.6", "glm-5.1"],
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "aicampus":   ["minimax-m3", "kimi-k2.7-code"],
+    "kiro":       ["auto", "claude-sonnet-5", "claude-opus-4.8", "claude-opus-4.7", "claude-opus-4.6", "claude-sonnet-4.6", "claude-opus-4.5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next"],
 }
 # Single source of truth for provider order + display labels, so the flat model
 # list (_all_study_models) and the grouped list (/api/status studyModelGroups)
 # can never drift out of sync (a missing id here made Gemini vanish from the
 # user-side model dropdown even though it worked everywhere else).
-STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus")
-STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus"}
+STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "kiro")
+STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "kiro": "Kiro"}
 
 
 def _effective_provider_models(cfg):
@@ -2232,6 +2255,12 @@ def _cfg_keys(cfg, field):
     return [k.strip() for k in (keys or []) if k and str(k).strip()]
 
 
+# Kiro runs a kiro-cli subprocess rather than a hosted large-context model.
+# Condense/chunk transcripts before forwarding them so long lectures do not
+# recreate the previous 413/502 timeout failures.
+_NOT_BIG_CONTEXT = {"kiro"}
+
+
 def _ai_for_provider(cfg, pid, model=None):
     """Build an _ai_chat config for a specific provider using ITS OWN key(s).
     Returns None if that provider has no key configured."""
@@ -2245,7 +2274,7 @@ def _ai_for_provider(cfg, pid, model=None):
         "base_url": meta["url"],
         "keys": keys,
         "model": (model or cfg.get(meta["modelField"]) or meta["def"]).strip(),
-        "big_context": True,
+        "big_context": pid not in _NOT_BIG_CONTEXT,
         "tpm": 0,
         "provider": pid,
     }
@@ -2478,7 +2507,8 @@ def api_tutor():
         return jsonify({"error": "missing question"}), 400
 
     req_model = (request.args.get("model") or body.get("model") or "").strip()[:80]
-    ai = _load_ai_config(req_model or None)
+    req_provider = (request.args.get("provider") or body.get("provider") or "").strip()[:40]
+    ai = _load_ai_config(req_model or None, req_provider or None)
     if not ai["keys"]:
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel (Study AI / Groq)."}), 503

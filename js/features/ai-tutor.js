@@ -19,6 +19,7 @@
     || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
   var LANG_KEY = 'aiStudyLang';
   var MODEL_KEY = 'aiStudyModel';
+  var PROVIDER_KEY = 'aiStudyProvider';
   // Telegram channel branding shown on the notes (on-screen header) and in the
   // exported PDF (header handle + watermark + footer link). Single source of truth.
   var TG_CHANNEL = 'StudyPlannerSSC';
@@ -32,7 +33,13 @@
      models — so any choice the user makes is valid for the configured key. */
   function outModel() { return localStorage.getItem(MODEL_KEY) || ''; }
   function setModel(v) { try { localStorage.setItem(MODEL_KEY, v == null ? '' : v); } catch (e) {} }
-  function modelParam() { var m = outModel(); return m ? '&model=' + encodeURIComponent(m) : ''; }
+  function outProvider() { return localStorage.getItem(PROVIDER_KEY) || ''; }
+  function setProvider(v) { try { localStorage.setItem(PROVIDER_KEY, v == null ? '' : v); } catch (e) {} }
+  function modelParam() {
+    var m = outModel(), p = outProvider();
+    return (m ? '&model=' + encodeURIComponent(m) : '') +
+      (p ? '&provider=' + encodeURIComponent(p) : '');
+  }
 
   // NOTE: youtube.js declares ytCurrentVideoId with `let`, so it is NOT a
   // window property — must be read as a bare global (same as yt-screenshots.js).
@@ -1574,7 +1581,7 @@
     if (state.tab === 'tutor') { renderTutor(); var chat = document.getElementById('ai-chat'); if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; } }
     fetch(BACKEND + '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), model: outModel(), history: h.slice(-8) })
+      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), provider: outProvider(), model: outModel(), history: h.slice(-8) })
     }).then(function (r) { return r.json(); }).then(function (j) {
       var hist = getHistory();
       hist.push({ role: 'assistant', content: j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)') });
@@ -1673,7 +1680,7 @@
      a second dropdown with just that provider's models. */
   var _studyGroups = [];         // [{provider,label,models}] from /api/status
   var _studyDefaultModel = '';   // admin's active model (default when a provider is picked)
-  var STUDY_PROV_ORDER = ['bynara', 'cerebras', 'mistral', 'openrouter', 'nvidia'];
+  var STUDY_PROV_ORDER = ['bynara', 'cerebras', 'mistral', 'openrouter', 'nvidia', 'kiro'];
 
   function studyGroupFor(pid) {
     for (var i = 0; i < _studyGroups.length; i++) if (_studyGroups[i].provider === pid) return _studyGroups[i];
@@ -1710,7 +1717,12 @@
     _studyDefaultModel = (status && status.studyModel) || '';
 
     var savedModel = outModel();
-    var savedProvider = providerOfModel(savedModel);
+    var savedProvider = outProvider();
+    var savedGroup = studyGroupFor(savedProvider);
+    if (!savedGroup || (savedModel && (savedGroup.models || []).indexOf(savedModel) === -1)) {
+      savedProvider = providerOfModel(savedModel);
+      setProvider(savedProvider);
+    }
     if (savedModel && !savedProvider) { setModel(''); savedModel = ''; }   // stale → Auto
 
     var provOpts = '<option value=""' + (savedProvider === '' ? ' selected' : '') + '>Auto</option>' +
@@ -1727,6 +1739,7 @@
     var ps = document.getElementById('ai-provider');
     if (!ps) return;
     var pid = ps.value;
+    setProvider(pid);
     if (!pid) { setModel(''); fillStudyModels('', ''); return; }
     var g = studyGroupFor(pid), models = (g && g.models) || [];
     var def = (models.indexOf(_studyDefaultModel) !== -1) ? _studyDefaultModel : (models[0] || '');
