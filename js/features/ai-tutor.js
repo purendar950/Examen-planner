@@ -826,8 +826,17 @@
     // caret) in view while the user is at the bottom; if they scroll up to re-read
     // mid-generation, following pauses until they scroll back down.
     var built = false, stick = true, scrollEl = null, nbEl = null;
+    // Repaint bookkeeping. nbBuild() re-parses the WHOLE accumulated buffer
+    // (deLatex + notebook markdown pipeline), so painting the full note on
+    // every chunk is O(n²) and makes the note visibly lag more the longer it
+    // gets. We (a) skip a repaint when no new text arrived, and (b) coalesce
+    // repaints into a single animation frame so bursts of chunks cost one
+    // DOM update, not many.
+    var lastPaintedLen = -1, paintScheduled = false;
+    var _raf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function (cb) { return setTimeout(cb, 16); };
 
     function paint() {
+      paintScheduled = false;
       var box = contentEl();
       if (!built) {
         box.innerHTML = brandBarHtml() +
@@ -844,8 +853,18 @@
         }
         built = true;
       }
+      // Nothing new since the last paint → skip the expensive re-parse.
+      if (acc.length === lastPaintedLen) return;
+      lastPaintedLen = acc.length;
       if (nbEl) nbEl.innerHTML = nbBuild(acc, style) + '<span class="ai-caret"></span>';
       if (stick && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;   // follow the writing line
+    }
+    // Batch repaints: multiple chunks arriving within one frame trigger a
+    // single build+DOM write instead of one per chunk.
+    function schedulePaint() {
+      if (paintScheduled) return;
+      paintScheduled = true;
+      _raf(paint);
     }
     function fallback() {
       if (done) return; done = true;
@@ -874,7 +893,11 @@
           if (o && typeof o.t === 'string') {
             acc += o.t; gotChunk = true;
             var now = Date.now();
-            if (now - lastPaint > 120) { lastPaint = now; paint(); }
+            // Re-parsing the whole buffer gets costlier as the note grows, so
+            // widen the repaint gap for larger notes to keep the UI smooth
+            // (the final, complete render still happens once in finish()).
+            var minGap = acc.length > 12000 ? 500 : (acc.length > 5000 ? 280 : 120);
+            if (now - lastPaint > minGap) { lastPaint = now; schedulePaint(); }
           }
         } catch (e) {}
       }
