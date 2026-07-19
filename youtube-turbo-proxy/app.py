@@ -753,6 +753,11 @@ _TUTOR_MAX_TOKENS = int(os.environ.get("TUTOR_MAX_TOKENS", "1200"))
 # Big-context providers can safely return a larger first answer, reducing the
 # number of continuation seams for broad "cover the lecture" questions.
 _TUTOR_BIG_MAX_TOKENS = int(os.environ.get("TUTOR_BIG_MAX_TOKENS", "2400"))
+# A short, structurally complete first reply can be accepted without the hidden
+# marker. Some providers ignore marker instructions for greetings such as "Hi";
+# requiring it caused nine needless calls followed by a false failure.
+_TUTOR_SAFE_SHORT_CHARS = min(
+    800, max(1, int(os.environ.get("TUTOR_SAFE_SHORT_CHARS", "800"))))
 # A long exhaustive answer can need several continuations. Keep a generous but
 # finite guard; the prompt also enforces a concise natural stopping point.
 _TUTOR_MAX_CONT = int(os.environ.get("TUTOR_MAX_CONTINUATIONS", "8"))
@@ -1050,6 +1055,11 @@ def _read_stream(resp, meta=None):
             piece = (choice.get("message") or {}).get("content")
         if piece:
             out.append(piece)
+    # A provider may omit the literal [DONE] sentinel but close the HTTP body
+    # normally. Normal iterator exhaustion is still completed transport; an
+    # exception escapes this function and is handled as a broken stream.
+    if meta is not None:
+        meta["stream_done"] = True
     return "".join(out)
 
 
@@ -1167,9 +1177,16 @@ def _tutor_answer_looks_incomplete(text, max_tokens, finish_reason="", stream_do
     # unclosed code fence, or a dangling heading/list marker.
     if raw.count("```") % 2 or raw.count("**") % 2:
         return True
-    for opening, closing in (("(", ")"), ("[", "]"), ("{", "}")):
-        if raw.count(opening) > raw.count(closing):
-            return True
+    pairs = {")": "(", "]": "[", "}": "{"}
+    stack = []
+    for char in raw:
+        if char in "([{":
+            stack.append(char)
+        elif char in pairs:
+            if not stack or stack.pop() != pairs[char]:
+                return True
+    if stack:
+        return True
     last_line = raw.splitlines()[-1].strip()
     if last_line.startswith("|") and not last_line.endswith("|"):
         return True
@@ -1181,7 +1198,7 @@ def _tutor_answer_looks_incomplete(text, max_tokens, finish_reason="", stream_do
     # suspicious at ANY length — Hindi/Hinglish can hit a token cap in far fewer
     # characters than English. A false positive is cheap and safe because the
     # continuation prompt returns the hidden completion sentinel.
-    terminal = re.sub(r"(?:\*\*|__|`)+$", "", raw).rstrip()
+    terminal = re.sub(r"(?:\*\*|__|[*_`~])+$", "", raw).rstrip()
     if terminal and re.search(r"[\w,:;/\-–—]$", terminal, flags=re.UNICODE):
         return True
 
@@ -1219,6 +1236,126 @@ def _tutor_strip_partial_marker(text):
     return text, False
 
 
+def _tutor_markdown_delimiters_balanced(text):
+    """Conservative run-aware Markdown validation for markerless short replies.
+    Delimiters must close in stack order, cannot be empty/padded, and Markdown
+    inside inline/fenced code is ignored. Uncertain text uses the strict marker."""
+    text = text or ""
+    stack = []                         # (marker, content_start)
+    i, n = 0, len(text)
+    markers = ("**", "__", "~~", "*", "_", "~")
+    while i < n:
+        if text[i] == "\\":          # escaped character is literal
+            i += 2
+            continue
+        code_marker = "```" if text.startswith("```", i) \
+            else ("`" if text[i] == "`" else "")
+        if code_marker:
+            end = text.find(code_marker, i + len(code_marker))
+            if end < 0 or not text[i + len(code_marker):end]:
+                return False
+            i = end + len(code_marker)
+            continue
+
+        marker = next((m for m in markers if text.startswith(m, i)), "")
+        if not marker:
+            i += 1
+            continue
+        # `* item` at the start of a line is a list bullet, not emphasis.
+        line_prefix = text[text.rfind("\n", 0, i) + 1:i]
+        if marker == "*" and not line_prefix.strip() and i + 1 < n \
+                and text[i + 1].isspace():
+            i += 1
+            continue
+
+        if stack and stack[-1][0] == marker:
+            _, content_start = stack.pop()
+            inner = text[content_start:i]
+            if not inner or inner != inner.strip():
+                return False
+        else:
+            # Encountering an already-open non-top marker is crossed nesting,
+            # e.g. `**__text**__`.
+            if any(open_marker == marker for open_marker, _ in stack):
+                return False
+            stack.append((marker, i + len(marker)))
+        i += len(marker)
+    return not stack
+
+
+def _tutor_mask_markdown_code(text):
+    """Blank code spans before prose-structure checks. Brackets and list-like
+    characters shown as code are examples, not evidence that prose was cut off."""
+    text = text or ""
+    masked = list(text)
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] == "\\":
+            i += 2
+            continue
+        marker = "```" if text.startswith("```", i) \
+            else ("`" if text[i] == "`" else "")
+        if not marker:
+            i += 1
+            continue
+        end = text.find(marker, i + len(marker))
+        if end < 0:
+            return text
+        stop = end + len(marker)
+        masked[i:stop] = " " * (stop - i)
+        i = stop
+    return "".join(masked)
+
+
+def _tutor_short_reply_has_structured_blocks(text):
+    """Keep list, heading, quote, and table-shaped replies on the strict marker
+    protocol. A short first item can look finished while the overall list is not."""
+    lines = (text or "").splitlines()
+    block = re.compile(r"^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s+|\|)")
+    if any(block.match(line) for line in lines):
+        return True
+    return any(line.rstrip().endswith(":") for line in lines[:-1]
+               if line.strip())
+
+
+def _tutor_short_reply_is_complete(text, finish_reason="", stream_done=True):
+    """Accept a concise, clean first reply even if a provider ignores the hidden
+    end-marker instruction. This intentionally applies only below a small size;
+    long lecture answers still require `_TUTOR_END` and guarded continuations."""
+    raw = (text or "").strip()
+    if not raw or len(raw) > _TUTOR_SAFE_SHORT_CHARS:
+        return False
+    reason = str(finish_reason or "").strip().lower()
+    natural_reasons = {"", "stop", "end_turn", "completed", "complete", "eos"}
+    if reason not in natural_reasons:
+        return False
+    if not stream_done:
+        return False
+    # A provider may answer a greeting with one bare word and no punctuation.
+    # Compare the original Unicode text (rather than stripping non-word code
+    # points, which breaks Devanagari combining marks). Markdown delimiters stay
+    # present and therefore malformed forms such as `**Hi` cannot match.
+    greeting = raw.strip().casefold().rstrip(".!?।…").strip()
+    if greeting in {"hi", "hello", "hey", "namaste", "नमस्ते"}:
+        return True
+    # Validate Markdown first, then mask code examples before prose-structure
+    # checks. A literal bracket such as ``Use `)` to close the group.`` is not an
+    # unbalanced sentence, while malformed or unclosed code stays strict.
+    if not _tutor_markdown_delimiters_balanced(raw):
+        return False
+    prose = _tutor_mask_markdown_code(raw)
+    if _tutor_short_reply_has_structured_blocks(prose):
+        return False
+    if _tutor_answer_looks_incomplete(prose, _TUTOR_MAX_TOKENS,
+                                      finish_reason=reason,
+                                      stream_done=stream_done):
+        return False
+    # Allow balanced Markdown/bracket closers after terminal punctuation, but
+    # reject arbitrary trailing markers such as `#`.
+    return bool(re.search(r"[.!?।…](?:[\"')\]}*_`~]*)$", raw,
+                          flags=re.UNICODE))
+
+
 def _tutor_answer_tokens(ai):
     return _TUTOR_BIG_MAX_TOKENS if ai.get("big_context") else _TUTOR_MAX_TOKENS
 
@@ -1242,10 +1379,18 @@ def _chat_tutor_complete(messages, ai, max_tokens=None):
         if not part.strip():
             break
         visible, ended = _tutor_strip_end_marker(part)
+        partial_marker = False
         if not ended:
-            visible, _ = _tutor_strip_partial_marker(visible)
+            visible, partial_marker = _tutor_strip_partial_marker(visible)
         full += visible
         if ended:
+            complete = True
+            break
+        if (attempt == 0 and not partial_marker
+                and _tutor_short_reply_is_complete(
+                    full,
+                    finish_reason=meta.get("finish_reason"),
+                    stream_done=meta.get("stream_done", True))):
             complete = True
             break
         if attempt >= _TUTOR_MAX_CONT:
@@ -1325,6 +1470,10 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
                 if piece:
                     got_any = True
                     yield piece
+            # Normal HTTP EOF is completed transport even if this provider omits
+            # the optional [DONE] sentinel. Exceptions below leave it false.
+            if meta is not None:
+                meta["stream_done"] = True
         except Exception as exc:  # noqa: BLE001  (stream interrupted)
             if got_any:
                 return                                   # partial already sent — stop
@@ -1391,12 +1540,25 @@ def _stream_tutor_complete(messages, ai, max_tokens=None):
         if not part.strip():
             break
         visible_part, ended = _tutor_strip_end_marker(part)
+        partial_marker = False
         if not ended:
-            visible_part, _ = _tutor_strip_partial_marker(visible_part)
+            visible_part, partial_marker = _tutor_strip_partial_marker(visible_part)
 
         # Emit only the portion not already released by the rolling buffer.
         remainder = visible_part[emitted_len:]
         if ended:
+            if remainder:
+                full += remainder
+                yield "chunk", {"t": remainder}
+            complete = True
+            break
+
+        candidate = full + remainder
+        if (attempt == 0 and not partial_marker
+                and _tutor_short_reply_is_complete(
+                    candidate,
+                    finish_reason=meta.get("finish_reason"),
+                    stream_done=meta.get("stream_done", True))):
             if remainder:
                 full += remainder
                 yield "chunk", {"t": remainder}
