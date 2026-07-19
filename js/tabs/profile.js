@@ -60,7 +60,7 @@
     '        <div class="pf-muted" id="pf-member-since"></div>',
     '      </div>',
     '      <div style="text-align:right;">',
-    '        <div class="pf-badge" id="pf-plan-badge">Free</div>',
+    '        <div class="pf-badge" id="pf-plan-badge">Checking…</div>',
     '        <div class="pf-muted" id="pf-plan-sub" style="margin-top:4px;"></div>',
     '      </div>',
     '    </div>',
@@ -167,11 +167,17 @@
     set('pf-member-since', since ? ('Member since ' + since) : '');
 
     /* plan badge — mirrors the ezIsPro()/trial logic, all guarded */
-    var badge = 'Free', sub = 'Upgrade for all Pro features';
+    var profilePending = (typeof ezEntitlementDisplayPending === 'function')
+      ? ezEntitlementDisplayPending()
+      : (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null);
+    var badge = profilePending ? 'Checking…' : 'Free';
+    var sub = profilePending
+      ? ((typeof EZ_PROFILE_STATUS !== 'undefined' && EZ_PROFILE_STATUS === 'error') ? 'Plan unavailable — reconnecting' : 'Confirming your plan')
+      : 'Upgrade for all Pro features';
     try {
-      var prof = (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) ? EZ_PROFILE : {};
+      var prof = (!profilePending && EZ_PROFILE) ? EZ_PROFILE : {};
       var plan = prof.plan || 'free';
-      if (plan !== 'free') {
+      if (!profilePending && plan !== 'free') {
         badge = '💎 ' + plan;
         sub = String(plan).toLowerCase().indexOf('lifetime') > -1 ? 'Lifetime access'
             : (prof.planExpiry ? 'Expires ' + prof.planExpiry : '');
