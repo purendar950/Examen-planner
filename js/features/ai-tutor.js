@@ -1523,16 +1523,6 @@
   }
 
   /* ── Tutor chat ── */
-  var _tutorBusy = false;
-  function syncTutorBusyUi() {
-    var input = document.getElementById('ai-chat-in'), send = document.getElementById('ai-chat-send');
-    if (input) input.disabled = _tutorBusy;
-    if (send) send.disabled = _tutorBusy;
-    Array.prototype.forEach.call(document.querySelectorAll('.ai-chip'), function (chip) {
-      chip.style.pointerEvents = _tutorBusy ? 'none' : '';
-      chip.style.opacity = _tutorBusy ? '0.45' : '';
-    });
-  }
   // Tutor chat is stored in localStorage (device-local) — NOT Firestore — so it
   // never bloats the synced user document. Capped at 30 messages per video.
   function chatKey() { return 'aiTutorChat_' + curVid(); }
@@ -1544,129 +1534,6 @@
   }
   function clearHistory() {
     try { localStorage.removeItem(chatKey()); } catch (e) {}
-  }
-  // The Render tutor backend can deploy independently from GitHub Pages. Older
-  // versions return `{ answer: ... }` without the newer `complete` field. Accept
-  // those responses only when the text has an obvious natural ending; an
-  // explicit `complete: false` from a modern backend always remains authoritative.
-  function legacyTutorMarkdownBalanced(text) {
-    var raw = String(text || ''), stack = [];
-    function isSpace(ch) { return !ch || /\s/.test(ch); }
-    function isPunctuation(ch) { return !!ch && /[!"#$%&'()*+,\-.\/:;<=>?@[\\\]^_`{|}~]/.test(ch); }
-    function pushOpen(ch, size, start) {
-      stack.push({ marker: new Array(size + 1).join(ch), contentStart: start });
-    }
-    for (var i = 0; i < raw.length;) {
-      if (raw.charAt(i) === '\\') { i += 2; continue; }
-      var codeMarker = raw.slice(i, i + 3) === '```' ? '```' : (raw.charAt(i) === '`' ? '`' : '');
-      if (codeMarker) {
-        var codeEnd = raw.indexOf(codeMarker, i + codeMarker.length);
-        if (codeEnd < 0 || !raw.slice(i + codeMarker.length, codeEnd)) return false;
-        i = codeEnd + codeMarker.length; continue;
-      }
-
-      var ch = raw.charAt(i);
-      if (ch !== '*' && ch !== '_' && ch !== '~') { i++; continue; }
-      var runEnd = i + 1;
-      while (runEnd < raw.length && raw.charAt(runEnd) === ch) runEnd++;
-      var runSize = runEnd - i;
-      var lineStart = raw.lastIndexOf('\n', i - 1) + 1;
-      var lineEnd = raw.indexOf('\n', runEnd);
-      if (lineEnd < 0) lineEnd = raw.length;
-      var wholeLine = raw.slice(lineStart, lineEnd).trim();
-      if (wholeLine === '***' || wholeLine === '___' || wholeLine === '---') { i = runEnd; continue; }
-      if (ch === '*' && !raw.slice(lineStart, i).trim() && runSize === 1 &&
-          runEnd < raw.length && /\s/.test(raw.charAt(runEnd))) { i = runEnd; continue; }
-
-      var prev = i > 0 ? raw.charAt(i - 1) : '';
-      var next = runEnd < raw.length ? raw.charAt(runEnd) : '';
-      var leftFlanking = !isSpace(next) && (!isPunctuation(next) || isSpace(prev) || isPunctuation(prev));
-      var rightFlanking = !isSpace(prev) && (!isPunctuation(prev) || isSpace(next) || isPunctuation(next));
-      var canOpen = leftFlanking;
-      var canClose = rightFlanking;
-      if (ch === '_') {
-        canOpen = leftFlanking && (!rightFlanking || isPunctuation(prev));
-        canClose = rightFlanking && (!leftFlanking || isPunctuation(next));
-      }
-      // A single tilde is ordinarily punctuation/math; strikethrough uses `~~`.
-      if (ch === '~' && runSize < 2) { i = runEnd; continue; }
-      // Multi-character formatting runs with whitespace on both sides are not
-      // useful prose; keep uncertain legacy output on the safe retry path.
-      if (runSize >= 2 && !canOpen && !canClose) return false;
-      // Keep common intraword multiplication (`5*6`) literal rather than
-      // treating it as an unclosed emphasis run.
-      if (ch === '*' && runSize === 1 && /[\p{L}\p{N}]/u.test(prev) && /[\p{L}\p{N}]/u.test(next)) {
-        i = runEnd; continue;
-      }
-
-      var remaining = runSize, consumed = 0;
-      if (canClose) {
-        while (stack.length) {
-          var top = stack[stack.length - 1];
-          if (top.marker.charAt(0) !== ch || top.marker.length > remaining) break;
-          stack.pop();
-          var closeAt = i + consumed;
-          var inner = raw.slice(top.contentStart, closeAt);
-          if (!inner || inner !== inner.trim()) return false;
-          consumed += top.marker.length;
-          remaining -= top.marker.length;
-          if (!remaining) break;
-        }
-        // Closing a lower marker before the current stack top is crossed nesting.
-        if (stack.length && stack[stack.length - 1].marker.charAt(0) !== ch) {
-          for (var s = 0; s < stack.length - 1; s++) {
-            if (stack[s].marker.charAt(0) === ch) return false;
-          }
-        }
-      }
-      if (canOpen && remaining) {
-        while (remaining >= 2) {
-          pushOpen(ch, 2, i + consumed + 2); consumed += 2; remaining -= 2;
-        }
-        if (remaining && ch !== '~') {
-          pushOpen(ch, 1, i + consumed + 1); consumed++; remaining--;
-        }
-      }
-      i = runEnd;
-    }
-    return stack.length === 0;
-  }
-  function legacyTutorAnswerLooksComplete(text) {
-    var raw = String(text || '').trim();
-    if (!raw) return false;
-    var markerAt = raw.indexOf('[TUTOR_END]');
-    if (markerAt >= 0) return !!raw.slice(0, markerAt).trim();
-
-    var greeting = raw.toLocaleLowerCase().replace(/[.!?।…]+$/, '').trim();
-    if (['hi', 'hello', 'hey', 'namaste', 'नमस्ते'].indexOf(greeting) >= 0) return true;
-
-    var stack = [], pairs = { ')': '(', ']': '[', '}': '{' };
-    var inlineCode = false, fencedCode = false;
-    for (var i = 0; i < raw.length; i++) {
-      if (raw.slice(i, i + 3) === '```') {
-        fencedCode = !fencedCode; i += 2; continue;
-      }
-      if (!fencedCode && raw.charAt(i) === '`') { inlineCode = !inlineCode; continue; }
-      if (fencedCode || inlineCode) continue;
-      if (raw.charAt(i) === '\\') { i++; continue; }
-      var ch = raw.charAt(i);
-      if (ch === '(' || ch === '[' || ch === '{') stack.push(ch);
-      else if (pairs[ch] && (!stack.length || stack.pop() !== pairs[ch])) return false;
-    }
-    if (fencedCode || inlineCode || stack.length) return false;
-    if (!legacyTutorMarkdownBalanced(raw)) return false;
-
-    var terminal = raw.replace(/(?:\*\*|__|[*_`~])+$/, '').trim();
-    return /[.!?।…]["')\]}]*$/.test(terminal);
-  }
-  function tutorAnswerWithoutMarker(text) {
-    var raw = String(text || '');
-    var markerAt = raw.indexOf('[TUTOR_END]');
-    return (markerAt >= 0 ? raw.slice(0, markerAt) : raw).trim();
-  }
-  function tutorCompletionAccepted(meta, text) {
-    var hasCompletionFlag = !!meta && Object.prototype.hasOwnProperty.call(meta, 'complete');
-    return hasCompletionFlag ? meta.complete === true : legacyTutorAnswerLooksComplete(text);
   }
   function chatHtml() {
     var h = getHistory();
@@ -1704,126 +1571,25 @@
     function go() { var v = input.value.trim(); if (v) { input.value = ''; sendTutor(v); } }
     if (send) send.onclick = go;
     if (input) input.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
-    syncTutorBusyUi();
     var chat = document.getElementById('ai-chat'); if (chat) chat.scrollTop = chat.scrollHeight;
   }
   function sendTutor(question, mode) {
-    var vid = curVid(); if (!vid || _tutorBusy) return;
-    _tutorBusy = true;
-    // Send only PRIOR turns. Previously the newly-added user question was also
-    // included in history and then appended again by the backend.
-    var prior = getHistory();
-    var payload = { id: vid, q: question || '', out: outLang(), mode: mode || 'chat',
-      uid: curUid(), provider: outProvider(), model: outModel(), history: prior.slice(-8) };
-    if (question) prior.push({ role: 'user', content: question });
-    saveHistory(prior);
-
-    var acc = '', gotChunk = false, finished = false, streamError = null;
-    var fallbackStarted = false;
-    function liveEl() { return document.getElementById('ai-tutor-live'); }
-    function ensureLive() {
-      if (state.tab !== 'tutor') return null;
-      var chat = document.getElementById('ai-chat'); if (!chat) return null;
-      var el = liveEl();
-      if (!el) {
-        chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a" id="ai-tutor-live"><div class="ai-md">' + loading('Tutor soch raha hai…') + '</div></div>');
-        el = liveEl();
-      }
-      return el;
-    }
-    var lastPaint = 0;
-    function paint(force) {
-      var now = Date.now(); if (!force && now - lastPaint < 60) return;
-      lastPaint = now;
-      var el = ensureLive(); if (!el) return;
-      var box = el.querySelector('.ai-md');
-      if (box) box.innerHTML = acc ? (mdToHtml(acc) + '<span class="ai-caret"></span>') : loading('Tutor soch raha hai…');
-      var chat = document.getElementById('ai-chat'); if (chat) chat.scrollTop = chat.scrollHeight;
-    }
-    function saveAnswer(text) {
-      if (finished) return; finished = true; _tutorBusy = false;
+    var vid = curVid(); if (!vid) return;
+    var h = getHistory();
+    if (question) h.push({ role: 'user', content: question });
+    saveHistory(h);
+    if (state.tab === 'tutor') { renderTutor(); var chat = document.getElementById('ai-chat'); if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; } }
+    fetch(BACKEND + '/api/tutor', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: vid, q: question || '', out: outLang(), mode: mode || 'chat', uid: curUid(), provider: outProvider(), model: outModel(), history: h.slice(-8) })
+    }).then(function (r) { return r.json(); }).then(function (j) {
       var hist = getHistory();
-      hist.push({ role: 'assistant', content: text || '(no answer)' });
+      hist.push({ role: 'assistant', content: j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)') });
       saveHistory(hist);
       if (state.tab === 'tutor') renderTutor();
-    }
-    function saveError(err) { saveAnswer('\u26a0 ' + String(err || 'Tutor failed')); }
-    function classicFallback() {
-      if (fallbackStarted || finished) return;
-      fallbackStarted = true; acc = ''; gotChunk = false; streamError = null;
-      var el = ensureLive();
-      if (el) { var box = el.querySelector('.ai-md'); if (box) box.innerHTML = loading('Completing answer…'); }
-      fetch(BACKEND + '/api/tutor', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }).then(function (r) { return r.json(); }).then(function (j) {
-        if (j.error) { saveAnswer('\u26a0 ' + (j.detail || j.error)); return; }
-        var answer = tutorAnswerWithoutMarker(j.answer);
-        if (!tutorCompletionAccepted(j, j.answer)) {
-          saveError('Tutor could not finish this answer. Please retry with a more specific question.'); return;
-        }
-        saveAnswer(answer || '(no answer)');
-      }).catch(saveError);
-    }
-
-    if (state.tab === 'tutor') {
-      renderTutor(); ensureLive();
-      var input = document.getElementById('ai-chat-in'), send = document.getElementById('ai-chat-send');
-      if (input) input.disabled = true; if (send) send.disabled = true;
-    }
-    // POST + fetch streaming is used instead of EventSource because tutor input
-    // contains chat history. If streaming is unavailable, fall back to JSON.
-    fetch(BACKEND + '/api/tutor/stream', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-      body: JSON.stringify(payload)
-    }).then(function (r) {
-      var ct = (r.headers.get('content-type') || '').toLowerCase();
-      if (!r.ok || ct.indexOf('text/event-stream') < 0) {
-        // A modern backend may return a useful JSON validation/rate-limit error.
-        // An older backend returns non-JSON/404, which falls through to classic.
-        return r.clone().json().then(function (j) {
-          saveAnswer('\u26a0 ' + (j.detail || j.error || ('HTTP ' + r.status)));
-        }).catch(function () { throw new Error('nostream'); });
-      }
-      if (!r.body || !window.TextDecoder) throw new Error('nostream');
-      var reader = r.body.getReader(), dec = new TextDecoder(), buf = '', doneMeta = null;
-      function frame(raw) {
-        var ev = 'message', data = '';
-        raw.split('\n').forEach(function (ln) {
-          if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
-          else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
-        });
-        var obj = {}; try { obj = data ? JSON.parse(data) : {}; } catch (e) {}
-        if (ev === 'chunk' && typeof obj.t === 'string') {
-          acc += obj.t; gotChunk = true; paint(false);
-        } else if (ev === 'done') doneMeta = obj;
-        else if (ev === 'error') streamError = obj.detail || obj.error || 'Tutor stream failed';
-      }
-      function pump() {
-        return reader.read().then(function (res) {
-          if (res.done) {
-            buf += dec.decode(); if (buf.trim()) frame(buf); paint(true);
-            if (streamError) throw new Error('server:' + streamError);
-            if (!gotChunk) throw new Error('empty stream');
-            if (!doneMeta) throw new Error('incomplete stream');
-            if (!tutorCompletionAccepted(doneMeta, acc)) {
-              throw new Error('completion exhausted');
-            }
-            saveAnswer(tutorAnswerWithoutMarker(acc)); return;
-          }
-          buf += dec.decode(res.value, { stream: true });
-          var frames = buf.split('\n\n'); buf = frames.pop(); frames.forEach(frame);
-          return pump();
-        });
-      }
-      return pump();
     }).catch(function (e) {
-      if (finished) return;
-      // Explicit backend AI/rate errors are final; retrying would consume another
-      // rate-limit slot. Transport EOF or exhausted completion regenerates once
-      // through the JSON fallback instead of saving malformed visible text.
-      if (streamError) { saveError(streamError); return; }
-      classicFallback();
+      var hist = getHistory(); hist.push({ role: 'assistant', content: '\u26a0 ' + String(e) }); saveHistory(hist);
+      if (state.tab === 'tutor') renderTutor();
     });
   }
 

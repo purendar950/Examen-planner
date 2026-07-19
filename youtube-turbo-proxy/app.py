@@ -746,37 +746,6 @@ _AI_STREAM = os.environ.get("AI_STREAM", "1").strip().lower() not in ("0", "fals
 # big-context models (Gemini / Bynara / NVIDIA / HCNSec) can use most of the
 # lecture instead of only the first ~48k chars.
 _TUTOR_CONTEXT_CHARS = int(os.environ.get("TUTOR_CONTEXT_CHARS", "240000"))
-# Tutor answers are intentionally moderate per call so they fit small-context
-# providers. If a provider reaches this cap, `_chat_tutor_complete` continues
-# from the exact cutoff instead of returning a half-finished sentence or table.
-_TUTOR_MAX_TOKENS = int(os.environ.get("TUTOR_MAX_TOKENS", "1200"))
-# Big-context providers can safely return a larger first answer, reducing the
-# number of continuation seams for broad "cover the lecture" questions.
-_TUTOR_BIG_MAX_TOKENS = int(os.environ.get("TUTOR_BIG_MAX_TOKENS", "2400"))
-# A short, structurally complete first reply can be accepted without the hidden
-# marker. Some providers ignore marker instructions for greetings such as "Hi";
-# requiring it caused nine needless calls followed by a false failure.
-_TUTOR_SAFE_SHORT_CHARS = min(
-    800, max(1, int(os.environ.get("TUTOR_SAFE_SHORT_CHARS", "800"))))
-# A long exhaustive answer can need several continuations. Keep a generous but
-# finite guard; the prompt also enforces a concise natural stopping point.
-_TUTOR_MAX_CONT = int(os.environ.get("TUTOR_MAX_CONTINUATIONS", "8"))
-_TUTOR_END = "[TUTOR_END]"
-_TUTOR_CONTINUE = (
-    "Inspect the end of your previous answer. If it is already fully complete, "
-    "respond with exactly " + _TUTOR_END + ". Otherwise continue EXACTLY from "
-    "where it stopped. Finish the cut-off word, sentence, bullet, Markdown table "
-    "row, or section first, then complete the remaining answer concisely. Do NOT "
-    "repeat prior content, restart, add a new introduction, or mention that this "
-    "is a continuation. Append exactly " + _TUTOR_END + " only after reaching a "
-    "natural complete point."
-)
-_TUTOR_FINALIZE = (
-    "Finish ONLY the currently incomplete word, sentence, bullet, table row, or "
-    "section, then add a very short conclusion. Use at most 120 words. Close every "
-    "Markdown marker and bracket. Do not introduce another topic or repeat content. "
-    "Append exactly " + _TUTOR_END + " at the end."
-)
 # Notes generation is chunked ONLY so a single call doesn't run forever. The
 # response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
 # what actually prevents Cloudflare's ~100s 524 (tokens keep the connection
@@ -988,16 +957,6 @@ def _ai_pace(est, tpm):
         _ai_calls.append((time.time(), est))
 
 
-def _sse_event(event, payload):
-    return "event: %s\ndata: %s\n\n" % (
-        event, json.dumps(payload, ensure_ascii=False))
-
-
-_SSE_HEADERS = {"Cache-Control": "no-cache, no-transform",
-                "X-Accel-Buffering": "no",
-                "Connection": "keep-alive"}
-
-
 def _retry_after_secs(resp):
     ra = resp.headers.get("retry-after")
     if ra:
@@ -1019,12 +978,9 @@ def _read_stream(resp, meta=None):
     Streaming means the first tokens arrive within seconds, so the upstream
     connection stays active and slow models never hit Cloudflare's ~100s 524.
     Also tolerates a non-streamed 200 body (full 'message' object).
-    If `meta` (a dict) is passed, finish metadata is captured so callers can
-    detect output-cap truncation, including providers that use `stop_reason` or
-    end a stream without a final [DONE] marker."""
+    If `meta` (a dict) is passed, meta['finish_reason'] captures the upstream
+    finish_reason so callers can detect output-cap truncation."""
     out = []
-    if meta is not None:
-        meta["stream_done"] = False
     # SSE streams rarely send a charset, so requests falls back to ISO-8859-1
     # and mangles multi-byte UTF-8 (Hindi/Devanagari, emoji, etc.) into mojibake
     # like "à¤à¥". Force UTF-8 so decode_unicode decodes the stream correctly.
@@ -1036,30 +992,20 @@ def _read_stream(resp, meta=None):
         if line.startswith("data:"):
             line = line[5:].strip()
         if line == "[DONE]":
-            if meta is not None:
-                meta["stream_done"] = True
             break
         if not line or line[0] != "{":
             continue
         try:
-            payload = json.loads(line)
-            choice = (payload.get("choices") or [{}])[0]
+            choice = (json.loads(line).get("choices") or [{}])[0]
         except Exception:  # noqa: BLE001
             continue
-        reason = (choice.get("finish_reason") or choice.get("stop_reason")
-                  or payload.get("finish_reason") or payload.get("stop_reason"))
-        if reason and meta is not None:
-            meta["finish_reason"] = reason
+        if choice.get("finish_reason") and meta is not None:
+            meta["finish_reason"] = choice.get("finish_reason")
         piece = (choice.get("delta") or {}).get("content")
         if piece is None:                              # non-streamed 200 fallback
             piece = (choice.get("message") or {}).get("content")
         if piece:
             out.append(piece)
-    # A provider may omit the literal [DONE] sentinel but close the HTTP body
-    # normally. Normal iterator exhaustion is still completed transport; an
-    # exception escapes this function and is handled as a broken stream.
-    if meta is not None:
-        meta["stream_done"] = True
     return "".join(out)
 
 
@@ -1116,16 +1062,11 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
                     # Robust extraction: some reasoning models (e.g. Cerebras
                     # gpt-oss) may omit "content" and only return "reasoning".
                     try:
-                        payload = r.json()
-                        ch0 = (payload.get("choices") or [{}])[0]
+                        ch0 = (r.json().get("choices") or [{}])[0]
                     except (ValueError, KeyError, IndexError, TypeError):
-                        payload, ch0 = {}, {}
+                        ch0 = {}
                     if meta is not None:
-                        meta["stream_done"] = True
-                        meta["finish_reason"] = (
-                            ch0.get("finish_reason") or ch0.get("stop_reason")
-                            or payload.get("finish_reason") or payload.get("stop_reason")
-                        )
+                        meta["finish_reason"] = ch0.get("finish_reason")
                     msg = ch0.get("message") or {}
                     content = msg.get("content")
                     if content:
@@ -1158,251 +1099,6 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
             last = "%s (key %d): %s" % (r.status_code, ki + 1, r.text[:120])
             break                              # 401/402/other 4xx → next key
     raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
-
-
-def _tutor_answer_looks_incomplete(text, max_tokens, finish_reason="", stream_done=True):
-    """Detect likely provider-side truncation even when an OpenAI-compatible
-    router incorrectly reports `stop` (or omits the finish reason). This is
-    deliberately conservative for short answers, but treats long answers that
-    end without sentence punctuation or with unbalanced Markdown/brackets as
-    incomplete. Those are the exact failure shapes seen from Bynara/Mistral."""
-    raw = (text or "").rstrip()
-    if not raw:
-        return False
-    reason = str(finish_reason or "").strip().lower()
-    if reason in {"length", "max_tokens", "max_output_tokens", "token_limit"}:
-        return True
-
-    # Obvious structural cutoffs: "(via **Bharat Vistar", a partial table row,
-    # unclosed code fence, or a dangling heading/list marker.
-    if raw.count("```") % 2 or raw.count("**") % 2:
-        return True
-    pairs = {")": "(", "]": "[", "}": "{"}
-    stack = []
-    for char in raw:
-        if char in "([{":
-            stack.append(char)
-        elif char in pairs:
-            if not stack or stack.pop() != pairs[char]:
-                return True
-    if stack:
-        return True
-    last_line = raw.splitlines()[-1].strip()
-    if last_line.startswith("|") and not last_line.endswith("|"):
-        return True
-    if re.search(r"(?:^|\n)\s*(?:[-*+] |\d+[.)] |#{1,6}\s*)$", raw):
-        return True
-
-    # The tutor prompt requires a naturally completed answer. Therefore an
-    # alphanumeric final fragment (or dangling connective punctuation) is
-    # suspicious at ANY length — Hindi/Hinglish can hit a token cap in far fewer
-    # characters than English. A false positive is cheap and safe because the
-    # continuation prompt returns the hidden completion sentinel.
-    terminal = re.sub(r"(?:\*\*|__|[*_`~])+$", "", raw).rstrip()
-    if terminal and re.search(r"[\w,:;/\-–—]$", terminal, flags=re.UNICODE):
-        return True
-
-    # A stream with neither [DONE] nor a finish reason is incomplete transport,
-    # regardless of text length or final punctuation. Verify it unconditionally;
-    # complete providers can answer with the hidden sentinel.
-    if not stream_done and not reason:
-        return True
-    return False
-
-
-def _tutor_strip_end_marker(text):
-    """Remove the hidden completion marker wherever it appears. Anything after
-    the marker violates the protocol and is discarded, preventing marker/prose
-    leakage. Symmetric Markdown decoration around the marker is removed too."""
-    text = text or ""
-    idx = text.find(_TUTOR_END)
-    if idx < 0:
-        return text, False
-    prefix = text[:idx]
-    suffix = text[idx + len(_TUTOR_END):]
-    for decoration in ("**", "__", "`", "~~"):
-        if prefix.endswith(decoration) and suffix.lstrip().startswith(decoration):
-            prefix = prefix[:-len(decoration)]
-            break
-    return prefix.rstrip(), True
-
-
-def _tutor_strip_partial_marker(text):
-    """Hide a marker prefix cut by the provider (for example `[TUTOR_`)."""
-    raw = (text or "").rstrip()
-    for size in range(len(_TUTOR_END) - 1, 0, -1):
-        if raw.endswith(_TUTOR_END[:size]):
-            return raw[:-size].rstrip(), True
-    return text, False
-
-
-def _tutor_markdown_delimiters_balanced(text):
-    """Conservative run-aware Markdown validation for markerless short replies.
-    Delimiters must close in stack order, cannot be empty/padded, and Markdown
-    inside inline/fenced code is ignored. Uncertain text uses the strict marker."""
-    text = text or ""
-    stack = []                         # (marker, content_start)
-    i, n = 0, len(text)
-    markers = ("**", "__", "~~", "*", "_", "~")
-    while i < n:
-        if text[i] == "\\":          # escaped character is literal
-            i += 2
-            continue
-        code_marker = "```" if text.startswith("```", i) \
-            else ("`" if text[i] == "`" else "")
-        if code_marker:
-            end = text.find(code_marker, i + len(code_marker))
-            if end < 0 or not text[i + len(code_marker):end]:
-                return False
-            i = end + len(code_marker)
-            continue
-
-        marker = next((m for m in markers if text.startswith(m, i)), "")
-        if not marker:
-            i += 1
-            continue
-        # `* item` at the start of a line is a list bullet, not emphasis.
-        line_prefix = text[text.rfind("\n", 0, i) + 1:i]
-        if marker == "*" and not line_prefix.strip() and i + 1 < n \
-                and text[i + 1].isspace():
-            i += 1
-            continue
-
-        if stack and stack[-1][0] == marker:
-            _, content_start = stack.pop()
-            inner = text[content_start:i]
-            if not inner or inner != inner.strip():
-                return False
-        else:
-            # Encountering an already-open non-top marker is crossed nesting,
-            # e.g. `**__text**__`.
-            if any(open_marker == marker for open_marker, _ in stack):
-                return False
-            stack.append((marker, i + len(marker)))
-        i += len(marker)
-    return not stack
-
-
-def _tutor_mask_markdown_code(text):
-    """Blank code spans before prose-structure checks. Brackets and list-like
-    characters shown as code are examples, not evidence that prose was cut off."""
-    text = text or ""
-    masked = list(text)
-    i, n = 0, len(text)
-    while i < n:
-        if text[i] == "\\":
-            i += 2
-            continue
-        marker = "```" if text.startswith("```", i) \
-            else ("`" if text[i] == "`" else "")
-        if not marker:
-            i += 1
-            continue
-        end = text.find(marker, i + len(marker))
-        if end < 0:
-            return text
-        stop = end + len(marker)
-        masked[i:stop] = " " * (stop - i)
-        i = stop
-    return "".join(masked)
-
-
-def _tutor_short_reply_has_structured_blocks(text):
-    """Keep list, heading, quote, and table-shaped replies on the strict marker
-    protocol. A short first item can look finished while the overall list is not."""
-    lines = (text or "").splitlines()
-    block = re.compile(r"^\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s+|\|)")
-    if any(block.match(line) for line in lines):
-        return True
-    return any(line.rstrip().endswith(":") for line in lines[:-1]
-               if line.strip())
-
-
-def _tutor_short_reply_is_complete(text, finish_reason="", stream_done=True):
-    """Accept a concise, clean first reply even if a provider ignores the hidden
-    end-marker instruction. This intentionally applies only below a small size;
-    long lecture answers still require `_TUTOR_END` and guarded continuations."""
-    raw = (text or "").strip()
-    if not raw or len(raw) > _TUTOR_SAFE_SHORT_CHARS:
-        return False
-    reason = str(finish_reason or "").strip().lower()
-    natural_reasons = {"", "stop", "end_turn", "completed", "complete", "eos"}
-    if reason not in natural_reasons:
-        return False
-    if not stream_done:
-        return False
-    # A provider may answer a greeting with one bare word and no punctuation.
-    # Compare the original Unicode text (rather than stripping non-word code
-    # points, which breaks Devanagari combining marks). Markdown delimiters stay
-    # present and therefore malformed forms such as `**Hi` cannot match.
-    greeting = raw.strip().casefold().rstrip(".!?।…").strip()
-    if greeting in {"hi", "hello", "hey", "namaste", "नमस्ते"}:
-        return True
-    # Validate Markdown first, then mask code examples before prose-structure
-    # checks. A literal bracket such as ``Use `)` to close the group.`` is not an
-    # unbalanced sentence, while malformed or unclosed code stays strict.
-    if not _tutor_markdown_delimiters_balanced(raw):
-        return False
-    prose = _tutor_mask_markdown_code(raw)
-    if _tutor_short_reply_has_structured_blocks(prose):
-        return False
-    if _tutor_answer_looks_incomplete(prose, _TUTOR_MAX_TOKENS,
-                                      finish_reason=reason,
-                                      stream_done=stream_done):
-        return False
-    # Allow balanced Markdown/bracket closers after terminal punctuation, but
-    # reject arbitrary trailing markers such as `#`.
-    return bool(re.search(r"[.!?।…](?:[\"')\]}*_`~]*)$", raw,
-                          flags=re.UNICODE))
-
-
-def _tutor_answer_tokens(ai):
-    return _TUTOR_BIG_MAX_TOKENS if ai.get("big_context") else _TUTOR_MAX_TOKENS
-
-
-def _chat_tutor_complete(messages, ai, max_tokens=None):
-    """Generate a tutor answer and continue automatically if the provider stops
-    at its output cap. Returns (stitched_answer, continuation_count). The original
-    transcript-grounded messages remain in every call; only a short answer tail is
-    added as the continuation anchor, keeping small-context providers within the
-    budget reserved by `_tutor_context_chars`."""
-    max_tokens = max_tokens or _tutor_answer_tokens(ai)
-    original = list(messages)
-    call_messages = original
-    full = ""
-    continuations = 0
-    complete = False
-
-    for attempt in range(_TUTOR_MAX_CONT + 1):
-        meta = {}
-        part = _ai_chat(call_messages, ai, max_tokens=max_tokens, meta=meta) or ""
-        if not part.strip():
-            break
-        visible, ended = _tutor_strip_end_marker(part)
-        partial_marker = False
-        if not ended:
-            visible, partial_marker = _tutor_strip_partial_marker(visible)
-        full += visible
-        if ended:
-            complete = True
-            break
-        if (attempt == 0 and not partial_marker
-                and _tutor_short_reply_is_complete(
-                    full,
-                    finish_reason=meta.get("finish_reason"),
-                    stream_done=meta.get("stream_done", True))):
-            complete = True
-            break
-        if attempt >= _TUTOR_MAX_CONT:
-            break
-        continuations += 1
-        continue_prompt = (_TUTOR_FINALIZE if continuations >= _TUTOR_MAX_CONT
-                           else _TUTOR_CONTINUE)
-        call_messages = original + [
-            {"role": "assistant", "content": full[-3000:]},
-            {"role": "user", "content": continue_prompt},
-        ]
-    return full, continuations, complete
 
 
 def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
@@ -1439,7 +1135,6 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
             continue                                    # → next key
         if meta is not None:
             meta["finish_reason"] = None
-            meta["stream_done"] = False
         got_any = False
         try:
             r.encoding = "utf-8"
@@ -1450,30 +1145,21 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
                 if line.startswith("data:"):
                     line = line[5:].strip()
                 if line == "[DONE]":
-                    if meta is not None:
-                        meta["stream_done"] = True
                     break
                 if not line or line[0] != "{":
                     continue
                 try:
-                    payload = json.loads(line)
-                    choice = (payload.get("choices") or [{}])[0]
+                    choice = (json.loads(line).get("choices") or [{}])[0]
                 except Exception:  # noqa: BLE001
                     continue
-                reason = (choice.get("finish_reason") or choice.get("stop_reason")
-                          or payload.get("finish_reason") or payload.get("stop_reason"))
-                if reason and meta is not None:
-                    meta["finish_reason"] = reason
+                if choice.get("finish_reason") and meta is not None:
+                    meta["finish_reason"] = choice.get("finish_reason")
                 piece = (choice.get("delta") or {}).get("content")
                 if piece is None:                        # non-streamed 200 fallback
                     piece = (choice.get("message") or {}).get("content")
                 if piece:
                     got_any = True
                     yield piece
-            # Normal HTTP EOF is completed transport even if this provider omits
-            # the optional [DONE] sentinel. Exceptions below leave it false.
-            if meta is not None:
-                meta["stream_done"] = True
         except Exception as exc:  # noqa: BLE001  (stream interrupted)
             if got_any:
                 return                                   # partial already sent — stop
@@ -1488,102 +1174,6 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
             return                                       # success
         last = "empty stream (key %d)" % (ki + 1)
     raise RuntimeError("AI stream failed on all %d key(s): %s" % (len(keys), last))
-
-
-def _stream_tutor_complete(messages, ai, max_tokens=None):
-    """Yield live tutor text plus final metadata. A hidden end marker is kept in
-    a small rolling buffer, so it never flashes in the UI. Missing markers trigger
-    continuation even when a provider incorrectly reports `stop`. The final repair
-    attempt is fully buffered and emitted only if it closes the response cleanly."""
-    max_tokens = max_tokens or _tutor_answer_tokens(ai)
-    original = list(messages)
-    call_messages = original
-    full = ""
-    continuations = 0
-    complete = False
-    marker_hold = max(64, len(_TUTOR_END) * 2)
-
-    for attempt in range(_TUTOR_MAX_CONT + 1):
-        meta, pieces = {}, []
-        pending = ""
-        emitted_len = 0
-        marker_seen = False
-        final_attempt = attempt >= _TUTOR_MAX_CONT
-        provider_stream = _ai_chat_stream(call_messages, ai,
-                                          max_tokens=max_tokens, meta=meta)
-        for piece in provider_stream:
-            pieces.append(piece)
-            pending += piece
-            marker_visible, marker_seen = _tutor_strip_end_marker(pending)
-            if marker_seen:
-                if marker_visible:
-                    full += marker_visible
-                    yield "chunk", {"t": marker_visible}
-                try:
-                    provider_stream.close()
-                except Exception:  # noqa: BLE001
-                    pass
-                break
-            # Keep the final marker-sized tail private. Buffer the entire final
-            # repair call so malformed output is never committed to the UI.
-            if not final_attempt and len(pending) > marker_hold:
-                visible = pending[:-marker_hold]
-                pending = pending[-marker_hold:]
-                emitted_len += len(visible)
-                full += visible
-                yield "chunk", {"t": visible}
-
-        if marker_seen:
-            complete = True
-            break
-        part = "".join(pieces)
-        if not part.strip():
-            break
-        visible_part, ended = _tutor_strip_end_marker(part)
-        partial_marker = False
-        if not ended:
-            visible_part, partial_marker = _tutor_strip_partial_marker(visible_part)
-
-        # Emit only the portion not already released by the rolling buffer.
-        remainder = visible_part[emitted_len:]
-        if ended:
-            if remainder:
-                full += remainder
-                yield "chunk", {"t": remainder}
-            complete = True
-            break
-
-        candidate = full + remainder
-        if (attempt == 0 and not partial_marker
-                and _tutor_short_reply_is_complete(
-                    candidate,
-                    finish_reason=meta.get("finish_reason"),
-                    stream_done=meta.get("stream_done", True))):
-            if remainder:
-                full += remainder
-                yield "chunk", {"t": remainder}
-            complete = True
-            break
-
-        if final_attempt:
-            # The final repair is accepted only with the explicit hidden marker.
-            # Heuristics must never upgrade markerless text to complete.
-            complete = False
-            break
-
-        if remainder:
-            full += remainder
-            yield "chunk", {"t": remainder}
-        continuations += 1
-        continue_prompt = (_TUTOR_FINALIZE if continuations >= _TUTOR_MAX_CONT
-                           else _TUTOR_CONTINUE)
-        call_messages = original + [
-            {"role": "assistant", "content": full[-3000:]},
-            {"role": "user", "content": continue_prompt},
-        ]
-
-    yield "done", {"continuations": continuations,
-                   "complete": complete, "chars": len(full)}
 
 
 def _stream_notes_part(sysmsg, user, ai, max_tokens):
@@ -1853,8 +1443,8 @@ def _chars_per_token(text):
 
 
 def _tutor_context_chars(ai, text):
-    """How many source chars to feed the interactive tutor. Sized to the
-    model's context window AND the source's script (Hindi ~1 token/char),
+    """How many transcript chars to feed the interactive tutor. Sized to the
+    model's context window AND the transcript's script (Hindi ~1 token/char),
     reserving room for the chat history + the answer, then clamped to
     _TUTOR_CONTEXT_CHARS. So big-context models (Gemini/Bynara/NVIDIA/HCNSec) use
     most of the lecture, while small-context ones (Cerebras 8192) stay safely
@@ -1868,106 +1458,6 @@ def _tutor_context_chars(ai, text):
     budget_tokens = max(1500, int(ctx * 0.6) - 5000)
     cap = int(budget_tokens * _chars_per_token(text))
     return min(len(text), cap, _TUTOR_CONTEXT_CHARS)
-
-
-_TUTOR_STOP_WORDS = {
-    "about", "and", "are", "can", "does", "explain", "from", "give", "have",
-    "into", "lecture", "lesson", "please", "tell", "that", "the", "this",
-    "topic", "video", "what", "when", "where", "which", "with", "would",
-    "hai", "hain", "kya", "kaise", "ko", "mein", "mujhe", "sir", "batao",
-}
-
-
-def _tutor_query_terms(question):
-    """Useful Unicode-aware words for lightweight, local excerpt retrieval."""
-    words = re.findall(r"[^\W_]+", (question or "").lower(), flags=re.UNICODE)
-    return {w for w in words if len(w) >= 3 and w not in _TUTOR_STOP_WORDS}
-
-
-def _tutor_text_blocks(text, target_chars=700):
-    """Group source lines into compact blocks while preserving timestamp and
-    Markdown heading boundaries. Long caption lines are word-chunked."""
-    blocks, current, current_len = [], [], 0
-    for raw_line in (text or "").splitlines():
-        line = raw_line.strip()
-        if not line:
-            if current:
-                blocks.append("\n".join(current))
-                current, current_len = [], 0
-            continue
-        lines = _chunk_words(line, target_chars) if len(line) > target_chars else [line]
-        for part in lines:
-            starts_section = part.startswith("#") or part.startswith("[")
-            if current and (current_len + len(part) + 1 > target_chars
-                            or (starts_section and current_len >= target_chars // 2)):
-                blocks.append("\n".join(current))
-                current, current_len = [], 0
-            current.append(part)
-            current_len += len(part) + 1
-    if current:
-        blocks.append("\n".join(current))
-    return blocks
-
-
-def _tutor_select_context(text, question, char_cap):
-    """Select question-relevant blocks from the WHOLE source instead of taking
-    a prefix. If no useful terms match, sample evenly across the lecture so a
-    small-context model still sees beginning, middle, and end."""
-    text = (text or "").strip()
-    if not text or char_cap <= 0:
-        return ""
-    if len(text) <= char_cap:
-        return text
-
-    blocks = _tutor_text_blocks(text)
-    if not blocks:
-        return text[:char_cap]
-    terms = _tutor_query_terms(question)
-    scored = []
-    for i, block in enumerate(blocks):
-        low = block.lower()
-        score = sum((2 + min(len(term), 12)) * low.count(term) for term in terms)
-        scored.append((score, i))
-
-    # Always reserve candidate slots for whole-lecture coverage. A broad query
-    # term may match every block; putting all matches first would otherwise fill
-    # a small context with the earliest blocks and recreate prefix starvation.
-    ranked_matches = [i for score, i in
-                      sorted(scored, key=lambda item: (-item[0], item[1]))
-                      if score > 0]
-    sample_count = max(3, min(len(blocks), char_cap // 500))
-    if sample_count == 1:
-        spread = [0]
-    else:
-        spread = [round(i * (len(blocks) - 1) / (sample_count - 1))
-                  for i in range(sample_count)]
-
-    candidates = []
-    if ranked_matches:
-        # Best match first, then middle/end coverage before nearby detail. The
-        # beginning remains a later fallback because it is already the part most
-        # likely to have been overrepresented by the old implementation.
-        for idx in [ranked_matches[0]] + spread[1:] + [ranked_matches[0] - 1,
-                                                       ranked_matches[0] + 1] \
-                + spread[:1] + ranked_matches[1:]:
-            if 0 <= idx < len(blocks) and idx not in candidates:
-                candidates.append(idx)
-    else:
-        candidates = list(dict.fromkeys(spread))
-
-    chosen, used = [], 0
-    separator_len = len("\n\n[…]\n\n")
-    for idx in candidates:
-        room = char_cap - used - (separator_len if chosen else 0)
-        if room <= 80:
-            break
-        block = blocks[idx]
-        if len(block) > room:
-            block = block[:room].rsplit(" ", 1)[0] or block[:room]
-        chosen.append((idx, block))
-        used += len(block) + (separator_len if len(chosen) > 1 else 0)
-    chosen.sort(key=lambda item: item[0])
-    return "\n\n[…]\n\n".join(block for _, block in chosen)
 
 
 def _notes_sections(transcript, out_lang, ai, style=""):
@@ -2999,11 +2489,8 @@ def api_status():
 
 
 @app.route("/api/tutor", methods=["GET", "POST"])
-@app.route("/api/tutor/stream", methods=["POST"])
 def api_tutor():
     """AI tutor grounded in a video's transcript. Per-user chat — NOT cached.
-    `/api/tutor/stream` returns live Server-Sent Events; `/api/tutor` remains the
-    backward-compatible JSON fallback.
     Params (GET query or POST json): id, q (question), out (lang),
     mode=chat|teach, history=[{role,content}...]."""
     body = request.get_json(silent=True) or {} if request.method == "POST" else {}
@@ -3057,30 +2544,18 @@ def api_tutor():
         return jsonify({"error": "no_captions",
                         "detail": "No captions found for this video."}), 200
 
-    # The transcript is the tutor's only source of truth. `_extract_transcript`
-    # reuses the persisted `video:auto` transcript after its first successful
-    # generation, so tutor requests do not depend on generated notes. Add periodic
-    # timestamps, then retrieve relevant excerpts from across the entire transcript
-    # instead of blindly slicing only the opening minutes.
-    transcript_text = _timestamped_transcript(t.get("segments")) or (t.get("text") or "")
-    context_cap = _tutor_context_chars(ai, transcript_text)
-    context = _tutor_select_context(transcript_text, question, context_cap)
+    # Feed the tutor as much of the transcript as the model's context window
+    # allows (sized to the transcript's script too): big-context models use most
+    # of the lecture, small ones stay under their limit. Streaming keeps the
+    # connection alive so a larger context no longer risks Cloudflare's 524.
+    context = (t.get("text") or "")[:_tutor_context_chars(ai, t.get("text") or "")]
     sysmsg = (
         "You are an exam-prep AI tutor for the video titled %r. Answer ONLY using "
-        "the video transcript excerpts below. If a requested detail is absent from "
-        "the provided excerpts, say the current transcript context does not contain "
-        "enough detail; NEVER claim the whole lecture contains only the introduction "
-        "or only the displayed excerpts. The transcript may be auto-generated from "
-        "Hindi/Hinglish speech with ASR errors — clean it mentally. Cite available "
-        "timestamps as [mm:ss] when pointing to a part. Reply ONLY in %s. Be clear "
-        "and use simple examples. For broad questions, give a structured answer in "
-        "at most 1,200 words; prioritize important exam points rather than dumping "
-        "an endless list. If more detail remains, finish the current section cleanly "
-        "and invite the student to ask for the next part. Never stop midway through "
-        "a word, sentence, bullet, section, or table row. At the absolute end of a "
-        "complete answer, append the exact marker %s; it will be hidden from the "
-        "student.\n\nTIMESTAMPED VIDEO TRANSCRIPT EXCERPTS:\n%s"
-        % (t.get("title") or "this lesson", out_lang, _TUTOR_END, context)
+        "the transcript below. If something isn't covered, say so briefly. The "
+        "transcript is auto-generated (may be Hindi/Hinglish, no punctuation) \u2014 "
+        "clean it mentally. Cite timestamps as [mm:ss] when pointing to a part. "
+        "Reply ONLY in %s. Be clear and use simple examples.\n\nTRANSCRIPT:\n%s"
+        % (t.get("title") or "this lesson", out_lang, context)
     )
     messages = [{"role": "system", "content": sysmsg}]
     for m in (history or [])[-8:]:
@@ -3093,33 +2568,14 @@ def api_tutor():
     else:
         messages.append({"role": "user", "content": question})
 
-    wants_stream = request.path.endswith("/stream")
-    if wants_stream:
-        def tutor_events():
-            yield _sse_event("meta", {"provider": ai.get("provider", "ai"),
-                                      "model": ai["model"],
-                                      "transcript_lang": t.get("chosen_lang"),
-                                      "grounding": "transcript_excerpts"})
-            try:
-                for event, payload in _stream_tutor_complete(messages, ai):
-                    yield _sse_event(event, payload)
-            except Exception as exc:  # noqa: BLE001
-                yield _sse_event("error", {"error": "ai_failed",
-                                           "detail": str(exc)[:200]})
-
-        return Response(stream_with_context(tutor_events()),
-                        mimetype="text/event-stream", headers=_SSE_HEADERS)
-
     try:
-        answer, continuations, complete = _chat_tutor_complete(messages, ai)
+        answer = _ai_chat(messages, ai, max_tokens=1200)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     return jsonify({"id": video_id, "answer": answer, "mode": mode,
                     "provider": ai.get("provider", "ai"),
-                    "model": ai["model"], "transcript_lang": t.get("chosen_lang"),
-                    "grounding": "transcript_excerpts",
-                    "continuations": continuations, "complete": complete})
+                    "model": ai["model"], "transcript_lang": t.get("chosen_lang")})
 
 
 @app.get("/api/stream")
