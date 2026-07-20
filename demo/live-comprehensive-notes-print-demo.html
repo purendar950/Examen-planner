@@ -10,9 +10,21 @@
       --muted: #5e6c64;
       --line: #b7c3bc;
       --soft: #edf3ee;
-      --accent: #245b3e;
-      --accent-dark: #173c2c;
-      --paper: #fff;
+      --accent: #167a55;
+      --accent-dark: #0e5d40;
+      --section-red: #c62828;
+      --section-red-soft: #fff0a8;
+      --section-green: #2e7d32;
+      --section-green-soft: #effaf0;
+      --section-blue: #1565c0;
+      --section-blue-soft: #eef6ff;
+      --section-purple: #7b1fa2;
+      --section-purple-soft: #f7effb;
+      --section-orange: #a94400;
+      --section-orange-soft: #fff4e9;
+      --gold: #f3b900;
+      --gold-soft: #fff5b8;
+      --paper: #fffefa;
       --canvas: #e8ede9;
       --warning: #7a5700;
     }
@@ -114,41 +126,56 @@
       display: flex;
       align-items: baseline;
       gap: 10px;
-      padding: 0 0 8px;
+      padding: 7px 10px;
       border-top: 4px solid var(--accent-dark);
-      border-bottom: 1px solid #aab9b0;
+      border-bottom: 1px solid #8bc3a9;
+      border-radius: 0 0 7px 7px;
+      background: linear-gradient(90deg, #e8fff3, #f3fbff 58%, #fff7df);
       color: var(--ink);
       font-size: .77rem;
     }
-    .document-brand strong { font-size: 1rem; letter-spacing: .01em; }
-    .document-brand span { margin-left: auto; color: var(--muted); font-size: .72rem; font-weight: 700; }
+    .document-brand strong { color: var(--accent-dark); font-size: 1rem; letter-spacing: .01em; }
+    .document-brand span { margin-left: auto; color: #335c7c; font-size: .72rem; font-weight: 750; }
     .document-kicker {
       display: inline-block;
       margin-top: 16px;
-      padding: 3px 7px;
-      border: 1px solid #315542;
-      color: var(--accent-dark);
+      padding: 4px 9px;
+      border: 1px solid #d69a00;
+      border-radius: 4px;
+      background: var(--gold-soft);
+      color: #684800;
+      box-shadow: inset 0 -2px 0 rgba(243, 185, 0, .2);
       font-size: .64rem;
       font-weight: 850;
       letter-spacing: .09em;
       text-transform: uppercase;
     }
-    .document-title { margin: 7px 0 3px; color: #13231a; font-size: clamp(1.25rem, 2.5vw, 1.7rem); line-height: 1.15; }
-    .document-meta { margin: 0 0 16px; padding-bottom: 9px; border-bottom: 1px solid #c4d0c8; color: var(--muted); font-size: .73rem; }
+    .document-title { margin: 7px 0 3px; color: #123e6b; font-size: clamp(1.25rem, 2.5vw, 1.7rem); line-height: 1.15; }
+    .document-meta { margin: 0 0 16px; padding-bottom: 9px; border-bottom: 1px solid #aac7de; color: #365f7f; font-size: .73rem; }
     .print-notes { column-count: 2; column-gap: 38px; column-fill: auto; font-family: "Noto Sans Devanagari", "Segoe UI", Arial, sans-serif; font-size: .87rem; line-height: 1.48; }
     .section, .subsection, .callout, .table-wrap { break-inside: avoid; }
     .section {
+      --section-color: var(--section-red);
+      --section-soft: var(--section-red-soft);
       display: flex;
       align-items: center;
       gap: 7px;
       margin: 14px 0 6px;
-      padding-bottom: 4px;
-      border-bottom: 2px solid var(--accent-dark);
-      color: var(--ink);
+      padding: 5px 7px 4px;
+      border: 1px solid color-mix(in srgb, var(--section-color) 38%, #fff);
+      border-bottom: 2px solid var(--section-color);
+      border-radius: 6px 6px 3px 3px;
+      background: linear-gradient(90deg, var(--section-soft), #fff 78%);
+      color: var(--section-color);
       font-size: 1.03rem;
       font-weight: 850;
       break-after: avoid;
     }
+    .section-color-0 { --section-color: var(--section-red); --section-soft: var(--section-red-soft); }
+    .section-color-1 { --section-color: var(--section-green); --section-soft: var(--section-green-soft); }
+    .section-color-2 { --section-color: var(--section-blue); --section-soft: var(--section-blue-soft); }
+    .section-color-3 { --section-color: var(--section-purple); --section-soft: var(--section-purple-soft); }
+    .section-color-4 { --section-color: var(--section-orange); --section-soft: var(--section-orange-soft); }
     .section:first-child { margin-top: 0; }
     .section-number {
       display: inline-grid;
@@ -156,34 +183,45 @@
       height: 21px;
       flex: none;
       place-items: center;
-      border: 1.5px solid var(--accent-dark);
-      border-radius: 4px;
-      color: var(--accent-dark);
+      border: 1.5px solid var(--section-color);
+      border-radius: 50%;
+      background: var(--section-color);
+      color: #fff;
       font-family: Inter, ui-sans-serif, sans-serif;
       font-size: .64rem;
       font-weight: 850;
     }
-    .subsection { margin: 10px 0 4px; padding-left: 8px; border-left: 3px solid #5b806d; color: #24352c; font-size: .92rem; font-weight: 850; break-after: avoid; }
+    .overview-heading {
+      margin: 0 0 10px;
+      padding: 6px 8px;
+      border-left: 4px solid #d69a00;
+      background: #fff9dc;
+      color: #684800;
+      font-size: 1.02rem;
+      font-weight: 850;
+      break-after: avoid;
+    }
+    .subsection { margin: 10px 0 4px; padding: 3px 7px; border-left: 3px solid #1678b8; background: #f0f8ff; color: #174f7a; font-size: .92rem; font-weight: 850; break-after: avoid; }
     .print-notes p { margin: 4px 0; }
     .print-notes ul, .print-notes ol { margin: 4px 0 8px; padding: 0; list-style: none; }
     .print-notes ul li { position: relative; padding-left: 15px; margin: 3px 0; }
-    .print-notes ul li::before { content: "•"; position: absolute; left: 2px; color: var(--accent-dark); font-size: 1rem; line-height: 1.1; }
+    .print-notes ul li::before { content: "•"; position: absolute; left: 2px; color: #2e7d32; font-size: 1rem; line-height: 1.1; }
     .print-notes ol { counter-reset: notes-list; }
     .print-notes ol li { position: relative; padding-left: 20px; margin: 3px 0; counter-increment: notes-list; }
-    .print-notes ol li::before { content: counter(notes-list); position: absolute; left: 0; top: 2px; display: grid; width: 14px; height: 14px; place-items: center; border: 1px solid #53645b; border-radius: 50%; color: #314239; font-family: Inter, ui-sans-serif, sans-serif; font-size: .58rem; font-weight: 800; }
-    .print-notes strong { color: #101612; font-weight: 800; }
-    .print-notes em { color: #2f4337; }
-    .print-notes code { padding: 1px 3px; background: #f1f3f2; border-radius: 2px; color: #111; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; }
-    .callout { margin: 7px 0 9px; padding: 7px 9px; border: 1px solid #a9bdb0; border-left: 4px solid #245b3e; background: #fff; }
-    .callout.memory { border-color: #b9aabe; border-left-color: #73558a; }
-    .callout-label { display: block; margin-bottom: 2px; color: #315542; font-family: Inter, ui-sans-serif, sans-serif; font-size: .63rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
-    .callout.memory .callout-label { color: #654876; }
-    .table-wrap { margin: 9px 0 11px; overflow: hidden; border: 1px solid #93a59a; }
+    .print-notes ol li::before { content: counter(notes-list); position: absolute; left: 0; top: 2px; display: grid; width: 14px; height: 14px; place-items: center; border: 1px solid #1565c0; border-radius: 50%; background: #eef6ff; color: #12539d; font-family: Inter, ui-sans-serif, sans-serif; font-size: .58rem; font-weight: 800; }
+    .print-notes strong { color: #123e6b; font-weight: 800; }
+    .print-notes em { color: #6a1b9a; }
+    .print-notes code { padding: 1px 3px; border: 1px solid #c9d7e4; background: #eef6ff; border-radius: 2px; color: #173f63; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; }
+    .callout { margin: 7px 0 9px; padding: 7px 9px; border: 1px solid #8fc49a; border-left: 4px solid #2e7d32; background: #effaf0; color: #16451d; }
+    .callout.memory { border-color: #c8a6d7; border-left-color: #7b1fa2; background: #f7effb; color: #512068; }
+    .callout-label { display: block; margin-bottom: 2px; color: #216327; font-family: Inter, ui-sans-serif, sans-serif; font-size: .63rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+    .callout.memory .callout-label { color: #6b198e; }
+    .table-wrap { margin: 9px 0 11px; overflow: hidden; border: 1px solid #4f9d91; border-radius: 4px; }
     table { width: 100%; border-collapse: collapse; font-size: .78rem; line-height: 1.35; }
-    th { padding: 5px 6px; border-bottom: 1.5px solid #315542; background: var(--soft); color: var(--ink); text-align: left; font-weight: 850; }
-    td { padding: 4px 6px; border: 1px solid #c9d3cd; vertical-align: top; }
-    tr:nth-child(even) td { background: #fafcfb; }
-    .divider { height: 1px; margin: 10px 0; border: 0; background: #c5cfca; }
+    th { padding: 5px 6px; border: 1px solid #176c61; background: #18796d; color: #fff; text-align: left; font-weight: 850; }
+    td { padding: 4px 6px; border: 1px solid #b8d6d0; vertical-align: top; }
+    tr:nth-child(even) td { background: #eef9f7; }
+    .divider { height: 2px; margin: 10px 0; border: 0; background: linear-gradient(90deg, #c62828, #f3b900, #2e7d32, #1565c0, #7b1fa2); opacity: .45; }
     .empty { max-width: 560px; margin: 70px auto; padding: 24px; border: 1px dashed #aebdb4; color: #637269; text-align: center; line-height: 1.55; }
     .empty strong { display: block; margin-bottom: 5px; color: #33443a; }
     @media (max-width: 760px) {
@@ -199,12 +237,16 @@
     }
     @media print {
       @page { margin: 8mm 8mm 10mm; }
+      * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       html, body { background: #fff; }
       .app-bar, .controls, .preview-caption { display: none !important; }
       .sheet { max-width: none; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
       .print-notes { column-count: 2; column-gap: 8mm; column-fill: auto; font-size: 10pt; line-height: 1.48; }
       .section { margin: 12pt 0 5pt; font-size: 12pt; }
+      .section-number { background: transparent !important; color: var(--section-color) !important; }
+      .overview-heading { margin: 0 0 8pt; background: transparent; border: 1pt solid #d69a00; border-left-width: 3pt; }
       .subsection { margin: 8pt 0 3pt; font-size: 10.5pt; }
+      th { background: #edf9f7 !important; color: #0c554b !important; }
       .print-notes p { margin: 3pt 0; }
       .print-notes ul, .print-notes ol { margin: 3pt 0 6pt; }
       .print-notes ul li, .print-notes ol li { margin: 2pt 0; }
@@ -313,6 +355,24 @@
 
       function renderMarkdown(markdown) {
         var lines = String(markdown || '').replace(/\r/g, '').split('\n');
+        var headingCounts = {};
+        lines.forEach(function (line) {
+          var match = line.trim().match(/^(#{1,6})\s+/);
+          if (match) headingCounts[match[1].length] = (headingCounts[match[1].length] || 0) + 1;
+        });
+        var levels = Object.keys(headingCounts).map(Number).sort(function (a, b) { return a - b; });
+        var topicLevel = levels.length ? levels[0] : 2;
+        // Some providers return one overall document heading (##), then the real
+        // video topics at ###. Keep that heading unnumbered and rotate colors on
+        // the repeated topic level instead of numbering every markdown heading.
+        if (headingCounts[topicLevel] === 1) {
+          for (var levelIndex = 1; levelIndex < levels.length; levelIndex += 1) {
+            if (headingCounts[levels[levelIndex]] > 1) {
+              topicLevel = levels[levelIndex];
+              break;
+            }
+          }
+        }
         var output = [];
         var index = 0;
         var sectionNumber = 0;
@@ -337,9 +397,11 @@
             closeList();
             var level = heading[1].length;
             var title = heading[2].replace(/^[*#\s]+/, '').replace(/[*#:\s]+$/, '').trim();
-            if (level <= 2) {
+            if (level === topicLevel) {
               sectionNumber += 1;
-              output.push('<h2 class="section"><span class="section-number">' + sectionNumber + '</span><span>' + inline(title) + '</span></h2>');
+              output.push('<h2 class="section section-color-' + ((sectionNumber - 1) % 5) + '"><span class="section-number">' + sectionNumber + '</span><span>' + inline(title) + '</span></h2>');
+            } else if (level < topicLevel) {
+              output.push('<h2 class="overview-heading">' + inline(title) + '</h2>');
             } else {
               output.push('<h3 class="subsection">' + inline(title) + '</h3>');
             }
