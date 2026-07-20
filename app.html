@@ -9,6 +9,10 @@
 <!-- Capture a shared MCQ-test link (?t=<token>, or legacy ?mcqshare=) before any auth redirect so it survives login/registration -->
 <script>(function(){try{var q=new URLSearchParams(location.search);var t=q.get('t');if(t){localStorage.setItem('ez_pending_share',t);}else{var v=q.get('mcqshare');if(v)localStorage.setItem('ez_pending_mcqshare',JSON.stringify({vid:v,lang:q.get('lang')||''}));}}catch(e){}})();</script>
 <title>StudyPlanner – Smart Study Planner for SSC/NTPC/GD/IBPS</title>
+<meta name="theme-color" content="#07110F">
+<link rel="icon" type="image/svg+xml" href="assets/brand/studyplanner-mark.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon.png">
+<link rel="manifest" href="assets/brand/site.webmanifest" vite-ignore>
 <link rel="stylesheet" href="css/app.css">
 <!-- Handwriting fonts for AI Study "topper notebook" notes (scoped to .ai-nb / PDF) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -40,10 +44,10 @@
 <div id="auth-screen">
   <div class="auth-card">
     <div class="auth-logo">
-      <div class="auth-logo-icon">📋</div>
+      <img class="auth-logo-icon" src="assets/brand/studyplanner-mark.svg" alt="" width="42" height="42">
       <div>
-        <div style="font-weight:800;font-size:1.05rem;">Multi-Exam Prep</div>
-        <div style="font-size:0.72rem;color:var(--muted);">SSC CGL · NTPC · GD · IBPS · UPSC · UPPCS · BPSC</div>
+        <div style="font-weight:800;font-size:1.05rem;">Study<span style="color:var(--accent)">Planner</span></div>
+        <div style="font-size:0.72rem;color:var(--muted);">Plan · Focus · Progress</div>
       </div>
     </div>
     <div class="auth-tabs">
@@ -124,6 +128,7 @@
   <!-- TOPBAR -->
   <div class="topbar">
     <div class="topbar-left">
+      <img class="topbar-logo" src="assets/brand/studyplanner-mark.svg" alt="" width="40" height="40">
       <span class="topbar-title">Study<span class="z">Planner</span></span>
       <div class="logo-badge" id="exam-logo-badge">SSC CGL</div>
     </div>

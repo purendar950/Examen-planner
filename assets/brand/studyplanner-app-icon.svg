@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">StudyPlanner app icon</title>
+  <desc id="desc">An S-shaped study path progressing from a blue starting point to a green goal.</desc>
+  <defs>
+    <linearGradient id="background" x1="44" y1="20" x2="468" y2="492" gradientUnits="userSpaceOnUse"><stop stop-color="#12372E"/><stop offset="0.48" stop-color="#091D18"/><stop offset="1" stop-color="#050D0B"/></linearGradient>
+    <radialGradient id="aura" cx="0" cy="0" r="1" gradientTransform="translate(344 132) rotate(126) scale(322)" gradientUnits="userSpaceOnUse"><stop stop-color="#19E3A2" stop-opacity="0.18"/><stop offset="1" stop-color="#19E3A2" stop-opacity="0"/></radialGradient>
+    <linearGradient id="route" x1="132" y1="382" x2="388" y2="125" gradientUnits="userSpaceOnUse"><stop stop-color="#47DFF4"/><stop offset="0.5" stop-color="#20E0BA"/><stop offset="1" stop-color="#19E3A2"/></linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="13" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <rect width="512" height="512" fill="url(#background)"/>
+  <rect width="512" height="512" fill="url(#aura)"/>
+  <path d="M142 375H273C326 375 362 349 362 314C362 279 326 253 273 253H233C181 253 145 227 145 192C145 157 181 131 233 131H345" fill="none" stroke="url(#route)" stroke-width="48" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)"/>
+  <circle cx="142" cy="375" r="31" fill="#47DFF4" stroke="#07110F" stroke-width="12"/>
+  <path d="M345 84L392 131L345 178L298 131Z" fill="#19E3A2" stroke="#D9FFF2" stroke-opacity="0.55" stroke-width="7"/>
+  <circle cx="345" cy="131" r="14" fill="#07110F"/>
+</svg>

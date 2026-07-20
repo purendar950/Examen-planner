@@ -1,4 +1,4 @@
-/* PrepPath Admin — CORE: Firebase init, auth/role gate, data loading, realtime, render dispatcher.
+/* StudyPlanner Admin — CORE: Firebase init, auth/role gate, data loading, realtime, render dispatcher.
    Loaded first (defines db/auth + all shared globals). Split from the original monolithic admin.js. */
 /* ══ CONFIG — admin role stored in Firestore admins/{uid} ══ */
 const FIREBASE_CONFIG = window.PREPPATH_FIREBASE_CONFIG || {};
@@ -88,7 +88,7 @@ function updateTabChrome() {
   if (title) title.textContent = meta.title;
   if (description) description.textContent = meta.description;
   if (crumb) crumb.textContent = meta.crumb;
-  document.title = meta.crumb + ' — PrepPath Admin';
+  document.title = meta.crumb + ' — StudyPlanner Admin';
   document.querySelectorAll('.tab').forEach(el => {
     const active = el.dataset.t === TAB;
     el.classList.toggle('active', active);

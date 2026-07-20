@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 
 const rootDir = resolve(import.meta.dirname);
 const outDir = resolve(rootDir, 'dist');
-const legacyDirectories = ['css', 'js', 'pages', 'demo'];
+const legacyDirectories = ['css', 'js', 'pages', 'demo', 'assets'];
 // test-engine.html is a self-contained page (inline scripts + CDN + relative
 // legacy js). It is copied as-is rather than added as a Vite entry, because Vite
 // would try to bundle its <script src="js/supabase-config.js"> (an optional file
@@ -15,7 +15,7 @@ const legacyDirectories = ['css', 'js', 'pages', 'demo'];
 // Telegram report buttons, in a browser or as a Telegram Mini App). Like
 // test-engine.html it is self-contained (inline JS + CDN + relative legacy js),
 // so it is copied as-is rather than added as a Vite bundle entry.
-const legacyFiles = ['PrepPath.png', 'test-engine.html', 'editor.html'];
+const legacyFiles = ['test-engine.html', 'editor.html'];
 
 function copyLegacyStaticAssets() {
   return {

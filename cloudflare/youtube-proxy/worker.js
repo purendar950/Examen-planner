@@ -1,5 +1,5 @@
 /**
- * Cloudflare Worker — YouTube Data API proxy for PrepPath / Examen-planner.
+ * Cloudflare Worker — YouTube Data API proxy for StudyPlanner / Examen-planner.
  *
  * WHAT IT DOES
  *  - Holds the YouTube Data API key(s) as server-side Secrets — the browser

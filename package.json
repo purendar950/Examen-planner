@@ -2,7 +2,7 @@
   "name": "preppath-web",
   "version": "1.0.0",
   "private": true,
-  "description": "PrepPath web app with Vite-powered frontend migration scaffolding.",
+  "description": "StudyPlanner web app with Vite-powered frontend migration scaffolding.",
   "scripts": {
     "vendor:sync": "node scripts/sync-vendor-assets.mjs",
     "predev": "npm run vendor:sync",

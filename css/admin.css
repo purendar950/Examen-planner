@@ -133,7 +133,7 @@ kbd { padding:2px 6px; border:1px solid var(--border); border-bottom-width:2px; 
 /* Login */
 #login-screen { background:radial-gradient(circle at 15% 10%, rgba(0,200,150,.12), transparent 30%), radial-gradient(circle at 85% 90%, rgba(59,130,246,.09), transparent 28%), var(--bg); }
 .login-card { max-width:420px; padding:2.25rem; border-radius:22px; }
-.login-brand { width:48px; height:48px; display:grid; place-items:center; margin-bottom:1.15rem; border-radius:14px; color:#fff; font-size:1.25rem; font-weight:900; background:linear-gradient(135deg,var(--accent),#10B6A5); box-shadow:0 10px 24px rgba(0,200,150,.24); }
+.login-brand { width:48px; height:48px; display:block; object-fit:contain; margin-bottom:1.15rem; border-radius:14px; filter:drop-shadow(0 10px 20px rgba(0,200,150,.2)); }
 .login-eyebrow { margin-bottom:.25rem; color:var(--accent-dark); font-size:.72rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
 .login-card h1 { margin-bottom:.35rem; font-size:1.55rem; letter-spacing:-.025em; }
 .login-subtitle { margin-bottom:1.35rem; color:var(--muted); font-size:.86rem; }
@@ -152,7 +152,7 @@ kbd { padding:2px 6px; border:1px solid var(--border); border-bottom-width:2px; 
 .topbar { height:var(--topbar-height); padding:0 18px; box-shadow:var(--shadow-sm); }
 .topbar-start, .topbar-actions, .brand-lockup, .admin-identity, .sync-status { display:flex; align-items:center; }
 .topbar-start { gap:10px; min-width:0; }
-.logo-mark { width:34px; height:34px; display:grid; flex:0 0 auto; place-items:center; border-radius:10px; background:linear-gradient(135deg,var(--accent),#0BAE9A); color:#fff; font-weight:900; box-shadow:0 6px 14px rgba(0,200,150,.2); }
+.logo-mark { width:34px; height:34px; display:block; flex:0 0 auto; border-radius:10px; object-fit:contain; filter:drop-shadow(0 6px 12px rgba(0,200,150,.16)); }
 .brand-lockup { align-items:flex-start; flex-direction:column; line-height:1.1; }
 .logo { font-size:.98rem; letter-spacing:-.015em; }
 .brand-caption { margin-top:3px; color:var(--muted); font-size:.62rem; font-weight:600; }

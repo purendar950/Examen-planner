@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">StudyPlanner</title>
+  <desc id="desc">Your smarter path to exam success.</desc>
+  <defs>
+    <linearGradient id="bg" x1="80" y1="20" x2="1120" y2="630" gradientUnits="userSpaceOnUse"><stop stop-color="#102923"/><stop offset="0.5" stop-color="#071713"/><stop offset="1" stop-color="#050D0B"/></linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(930 120) rotate(132) scale(620)" gradientUnits="userSpaceOnUse"><stop stop-color="#19E3A2" stop-opacity="0.22"/><stop offset="1" stop-color="#19E3A2" stop-opacity="0"/></radialGradient>
+    <linearGradient id="route" x1="720" y1="455" x2="1010" y2="166" gradientUnits="userSpaceOnUse"><stop stop-color="#47DFF4"/><stop offset="0.52" stop-color="#20E0BA"/><stop offset="1" stop-color="#19E3A2"/></linearGradient>
+    <pattern id="grid" width="56" height="56" patternUnits="userSpaceOnUse"><path d="M56 0H0V56" fill="none" stroke="#B8FFE6" stroke-opacity="0.035"/></pattern>
+  </defs>
+  <rect width="1200" height="630" rx="40" fill="url(#bg)"/><rect width="1200" height="630" rx="40" fill="url(#glow)"/><rect width="1200" height="630" rx="40" fill="url(#grid)"/>
+  <g transform="translate(76 78)"><rect width="64" height="64" rx="18" fill="#0A1B17" stroke="#9DFFE1" stroke-opacity="0.16"/><path d="M16 47H34C41 47 45 44 45 39.5S41 32 34 32H29C23 32 18 28.5 18 24S23 16.5 29 16.5H44" fill="none" stroke="url(#route)" stroke-width="6" stroke-linecap="round"/><circle cx="16" cy="47" r="4" fill="#47DFF4"/><path d="M44 11L49.5 16.5L44 22L38.5 16.5Z" fill="#19E3A2"/></g>
+  <text x="160" y="121" fill="#F1FBF7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="38" font-weight="800" letter-spacing="-1.5">Study<tspan fill="#19E3A2">Planner</tspan></text>
+  <text x="80" y="275" fill="#F1FBF7" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="66" font-weight="820" letter-spacing="-3">A clear path for every</text>
+  <text x="80" y="350" fill="#19E3A2" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="66" font-weight="820" letter-spacing="-3">serious aspirant.</text>
+  <text x="84" y="415" fill="#9CB0A8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="24">Plan your day. Track your syllabus. Improve every attempt.</text>
+  <g transform="translate(735 115)"><rect width="340" height="390" rx="80" fill="#0A1B17" stroke="#9DFFE1" stroke-opacity="0.12"/><path d="M70 294H204C260 294 296 267 296 232S260 170 204 170H164C110 170 74 143 74 108S110 47 164 47H270" fill="none" stroke="url(#route)" stroke-width="42" stroke-linecap="round"/><circle cx="70" cy="294" r="27" fill="#47DFF4" stroke="#07110F" stroke-width="9"/><path d="M270 8L309 47L270 86L231 47Z" fill="#19E3A2"/><circle cx="270" cy="47" r="12" fill="#07110F"/></g>
+  <text x="84" y="545" fill="#70857D" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17" font-weight="700" letter-spacing="3">PLAN  •  FOCUS  •  PROGRESS</text>
+</svg>

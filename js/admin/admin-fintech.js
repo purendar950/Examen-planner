@@ -1,4 +1,4 @@
-/* PrepPath Admin — FINTECH PRESENTATION LAYER
+/* StudyPlanner Admin — FINTECH PRESENTATION LAYER
    Wraps the existing renderers after they run, preserving every generated ID,
    inline action, filter read and backend contract. Loaded last. */
 

@@ -106,7 +106,7 @@ img { display: block; max-width: 100%; }
 }
 .nav { display: flex; height: 76px; align-items: center; justify-content: space-between; gap: 28px; }
 .brand { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; }
-.brand-art { display: grid; width: 40px; height: 40px; flex: 0 0 auto; border: 1px solid rgba(25, 227, 162, 0.24); border-radius: 11px; background: linear-gradient(135deg, var(--accent), #25d7c0); color: #04120e; font-size: 1rem; font-weight: 900; box-shadow: 0 8px 22px rgba(25, 227, 162, 0.14); place-items: center; }
+.brand-art { display: block; width: 40px; height: 40px; flex: 0 0 auto; border-radius: 11px; object-fit: contain; filter: drop-shadow(0 8px 16px rgba(25, 227, 162, 0.16)); }
 .brand-name { font-size: 1.25rem; font-weight: 850; letter-spacing: -0.045em; }
 .brand-name span { color: var(--accent); }
 .nav-links { display: flex; align-items: center; gap: 34px; margin-left: auto; }
@@ -196,7 +196,7 @@ html[data-theme="light"] .btn-primary { color: #03110d; }
 }
 .dashboard-topbar { display: flex; height: 67px; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(218, 255, 243, 0.08); padding: 0 20px; }
 .dash-brand { display: flex; align-items: center; gap: 10px; }
-.dash-logo { display: grid; width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: #05130f; font-size: 0.8rem; font-weight: 900; place-items: center; }
+.dash-logo { display: block; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 8px; object-fit: contain; }
 .dash-brand div { display: flex; flex-direction: column; line-height: 1.25; }
 .dash-brand strong { font-size: 0.78rem; }
 .dash-brand small { color: #71867e; font-size: 0.55rem; }
@@ -412,7 +412,7 @@ html[data-theme="light"] .feature-card { background: linear-gradient(145deg, #ff
 .cta-motif::before, .cta-motif::after { position: absolute; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 50%; content: ""; }
 .cta-motif::before { inset: -35px; }
 .cta-motif::after { inset: 38px; }
-.cta-motif span { z-index: 2; display: grid; width: 70px; height: 70px; border-radius: 20px; background: rgba(4, 45, 33, 0.2); font-size: 2rem; font-weight: 900; place-items: center; transform: rotate(-7deg); }
+.cta-motif img { z-index: 2; display: block; width: 76px; height: 76px; border-radius: 22px; filter: drop-shadow(0 16px 30px rgba(3, 42, 31, 0.26)); transform: rotate(-7deg); }
 .cta-motif i { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, 0.7); }
 .cta-motif i:nth-child(2) { top: 10px; left: 62px; }
 .cta-motif i:nth-child(3) { right: -3px; bottom: 70px; }
@@ -438,7 +438,7 @@ html[data-theme="light"] .feature-card { background: linear-gradient(145deg, #ff
 .auth-close { position: absolute; top: 14px; right: 14px; z-index: 2; display: grid; width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg-elevated); color: var(--muted); cursor: pointer; font-size: 1.15rem; place-items: center; }
 .auth-close:hover { border-color: var(--border-strong); color: var(--text); }
 .auth-brand { position: relative; display: flex; align-items: center; gap: 11px; margin-bottom: 19px; }
-.auth-brand-mark { display: grid; width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg, var(--accent), #25d7c0); color: #04120e; font-size: 1.08rem; font-weight: 900; place-items: center; }
+.auth-brand-mark { display: block; width: 42px; height: 42px; flex: 0 0 auto; border-radius: 12px; object-fit: contain; filter: drop-shadow(0 8px 18px rgba(25, 227, 162, 0.14)); }
 .auth-brand > div { line-height: 1.2; }
 .auth-logo { font-size: 1.1rem; font-weight: 850; letter-spacing: -0.04em; }
 .auth-logo span { color: var(--accent); }
@@ -518,7 +518,7 @@ html[data-theme="light"] .feature-card { background: linear-gradient(145deg, #ff
   .nav { height: 68px; }
   .nav-links { top: 68px; }
   .brand-name { font-size: 1.12rem; }
-  .brand-art { width: 36px; height: 36px; font-size: 0.9rem; }
+  .brand-art { width: 36px; height: 36px; }
   .nav-actions .btn-primary { display: none; }
   .hero { padding-top: 125px; padding-bottom: 0; }
   .hero-copy h1 { font-size: clamp(2.85rem, 12vw, 4.25rem); }

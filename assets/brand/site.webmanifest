@@ -1,0 +1,24 @@
+{
+  "name": "StudyPlanner",
+  "short_name": "StudyPlanner",
+  "description": "A focused study workspace for competitive-exam aspirants.",
+  "start_url": "../../app.html",
+  "scope": "../../",
+  "display": "standalone",
+  "background_color": "#07110F",
+  "theme_color": "#07110F",
+  "icons": [
+    {
+      "src": "studyplanner-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "studyplanner-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
