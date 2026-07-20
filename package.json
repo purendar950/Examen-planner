@@ -4,12 +4,19 @@
   "private": true,
   "description": "PrepPath web app with Vite-powered frontend migration scaffolding.",
   "scripts": {
+    "vendor:sync": "node scripts/sync-vendor-assets.mjs",
+    "predev": "npm run vendor:sync",
     "dev": "vite --host 0.0.0.0",
+    "prebuild": "npm run vendor:sync",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "check": "node --check js/core/persistence.js && node --check vite.config.mjs"
+    "check": "node --check js/core/persistence.js && node --check scripts/sync-vendor-assets.mjs && node --check vite.config.mjs"
   },
   "devDependencies": {
-    "vite": "^8.1.0"
+    "vite": "8.1.5"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.110.7",
+    "firebase": "12.16.0"
   }
 }

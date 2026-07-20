@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
@@ -39,8 +39,21 @@ function copyLegacyStaticAssets() {
         const from = resolve(rootDir, file);
         const to = resolve(outDir, file);
         if (existsSync(from)) {
+          if (file.endsWith('.html')) {
+            const html = readFileSync(from, 'utf8').replace(
+              /((?:src)\s*=\s*["'])(vendor\/[^"'?]+\.js)(?:\?[^"']*)?(["'])/g,
+              (whole, pre, url, post) => {
+                const vendorFile = resolve(rootDir, 'public', url);
+                if (!existsSync(vendorFile)) return whole;
+                const hash = createHash('sha256').update(readFileSync(vendorFile)).digest('hex').slice(0, 8);
+                return `${pre}${url}?v=${hash}${post}`;
+              }
+            );
+            writeFileSync(to, html);
+          } else {
+            cpSync(from, to, { force: true });
+          }
           console.log(`  ✓ Copying ${file} → dist/${file}`);
-          cpSync(from, to, { force: true });
         }
       });
       
@@ -71,7 +84,10 @@ function contentHashCacheBust() {
     if (hashCache.has(relPath)) return hashCache.get(relPath);
     let hash = null;
     try {
-      const bytes = readFileSync(resolve(rootDir, relPath));
+      const sourcePath = relPath.startsWith('vendor/')
+        ? resolve(rootDir, 'public', relPath)
+        : resolve(rootDir, relPath);
+      const bytes = readFileSync(sourcePath);
       hash = createHash('sha256').update(bytes).digest('hex').slice(0, 8);
     } catch {
       hash = null; // referenced file not on disk → leave unversioned
@@ -94,10 +110,10 @@ function contentHashCacheBust() {
             if (/^(?:https?:)?\/\//i.test(url) || url.startsWith('data:')) return whole;
             const path = url.split('?')[0].split('#')[0];
             // Only bust the two categories Vite can't fingerprint itself.
-            if (!/(?:^|\/)(?:js|pages|css)\/[^?#]+\.(?:js|html|css)$/.test(path)) return whole;
+            if (!/(?:^|\/)(?:js|pages|css|vendor)\/[^?#]+\.(?:js|html|css)$/.test(path)) return whole;
             // Normalise to a source-relative path by dropping any leading base
-            // prefix (e.g. "/Examen-planner/") or "./" before the js|pages|css dir.
-            const rel = path.replace(/^.*?(?=(?:js|pages|css)\/)/, '');
+            // prefix (e.g. "/Examen-planner/") or "./" before the managed dir.
+            const rel = path.replace(/^.*?(?=(?:js|pages|css|vendor)\/)/, '');
             const hash = hashFor(rel);
             // Rebuild with a clean single ?v=; if the file is missing, emit the
             // reference without any stale query string.
