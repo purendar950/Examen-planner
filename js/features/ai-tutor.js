@@ -599,9 +599,10 @@
       nbCss('.ai-nb'),
       // ── "Follow the lecture": hide timestamps IN NOTES + highlight the block
       //    matching the current playback time (works for Topic AND MCQ notes) ──
-      '.ai-nb .ai-ts{display:none}',
-      '.ai-nb>.ai-lec-on{background:rgba(255,214,0,.45);box-shadow:0 0 0 3px rgba(245,168,0,.5);border-radius:6px}',
+      '.ai-nb .ai-lec-ts{display:none}',
+      '.ai-nb>.ai-lec-on{background:rgba(255,214,0,.45);box-shadow:0 0 0 3px rgba(245,168,0,.5);border-radius:6px;transition:background .2s,box-shadow .2s}',
       '.ai-btn.ai-follow-on{background:var(--accent,#00c896)!important;color:#04120d!important;border-color:var(--accent,#00c896)!important}',
+      '.ai-btn#ai-follow:disabled{cursor:not-allowed;filter:saturate(.35)}',
       /* ── flashcard carousel (tap to flip · swipe left/right) ── */
       '.ai-fc-stage{perspective:1200px;padding:6px 2px 2px;touch-action:pan-y}',
       '.ai-fc{position:relative;width:100%;min-height:240px;cursor:pointer;user-select:none;-webkit-user-select:none}',
@@ -675,102 +676,146 @@
   /* ══════════════════════════════════════════════════════════════════════
      "Follow the lecture" — auto-highlight + scroll the note block matching the
      current playback time. Works for comprehensive notes in BOTH Topic and MCQ
-     styles (and Summary/Insights) since all render into .ai-nb with inline
-     .ai-ts[data-s] timestamps. Playback time comes from ssGetVideoTimestamp().
+     styles because those modes render into .ai-nb with inline .ai-ts[data-s]
+     timestamps. Playback time comes from the actually visible video player.
      Off by default; toggled via the 🎯 Follow button in the notes toolbar.
      ══════════════════════════════════════════════════════════════════════ */
   var LEC_KEY = 'aiStudyFollow';
   var LEC_TOP_OFFSET = 0.5;           // pin the active block's START in the MIDDLE of the notes box
   var LEC_POLL_MS = 250;              // poll playback time 4x/sec so the highlight tracks the teacher closely
   var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0, _lecTsCount = 0;
-  function lecOn() { return localStorage.getItem(LEC_KEY) === '1'; }
+  var _lecVideoId = '';
+  function lecOn() { try { return localStorage.getItem(LEC_KEY) === '1'; } catch (e) { return false; } }
   function setLecOn(v) { try { localStorage.setItem(LEC_KEY, v ? '1' : '0'); } catch (e) {} }
+  function lecSetGroupClass(group, on) {
+    if (!group) return;
+    group.elements.forEach(function (el) { el.classList.toggle('ai-lec-on', on); });
+  }
   function lecClear() {
-    if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].classList.remove('ai-lec-on');
+    lecSetGroupClass(_lecBlocks[_lecActive], false);
     _lecActive = -1;
   }
-  // Each top-level note block's start = first .ai-ts[data-s] inside it; blocks
-  // without a timestamp inherit the previous block's start.
+  function lecDetach() {
+    lecClear();
+    _lecBlocks = [];
+    _lecScroller = null;
+    _lecTsCount = 0;
+    _lecVideoId = '';
+  }
+  // Group consecutive top-level note blocks by their nearest preceding real
+  // timestamp. Generated notes normally timestamp headings, while their lists,
+  // tables and explanation blocks inherit that heading. Highlighting the whole
+  // group (rather than only its final child) keeps the complete current topic or
+  // MCQ visibly in sync with the teacher.
+  function lecTimelineAnchor(el) {
+    if (!el) return null;
+    // Only timestamps in renderer-produced section/question headings define the
+    // Follow timeline. Values such as "Ratio 10:20" inside paragraphs or tables
+    // remain ordinary visible links and can never split the active group.
+    var anchor = null;
+    if (el.classList.contains('sec') || el.classList.contains('subsec')) {
+      anchor = el.querySelector('.ai-ts');
+    } else if (el.classList.contains('qkeep')) {
+      anchor = el.querySelector('.q-head .ai-ts');
+    }
+    if (anchor) anchor.classList.add('ai-lec-ts');
+    return anchor;
+  }
   function lecIndex(nb) {
     _lecBlocks = []; _lecActive = -1; _lecTsCount = 0;
-    var kids = nb.children, last = 0;
+    var kids = nb.children, group = null, preamble = [];
     for (var i = 0; i < kids.length; i++) {
-      var el = kids[i], ts = el.querySelector('.ai-ts');
+      var el = kids[i], ts = lecTimelineAnchor(el);
       var s = ts ? parseInt(ts.getAttribute('data-s'), 10) : NaN;
-      var start = isNaN(s) ? last : s;            // inherit previous when no own timestamp
-      if (!isNaN(s)) _lecTsCount++;               // count REAL timestamps present
-      el._lecStart = start; last = start;
-      _lecBlocks.push(el);
+      if (!isNaN(s)) {
+        _lecTsCount++;
+        group = { start: s, elements: [], anchor: el };
+        if (!_lecBlocks.length && preamble.length) group.elements = preamble.splice(0);
+        _lecBlocks.push(group);
+      }
+      if (group) group.elements.push(el);
+      else preamble.push(el);
     }
   }
   function lecActiveIndex(t) {
-    var idx = 0;
-    for (var i = 0; i < _lecBlocks.length; i++) { if (_lecBlocks[i]._lecStart <= t) idx = i; else break; }
+    var idx = -1, bestStart = -1;
+    // Do not assume the model emitted perfectly monotonic headings. Pick the
+    // latest timeline group at or before playback time while preserving DOM
+    // order for equal timestamps.
+    for (var i = 0; i < _lecBlocks.length; i++) {
+      var start = _lecBlocks[i].start;
+      if (start <= t && start >= bestStart) { idx = i; bestStart = start; }
+    }
     return idx;
   }
-  // Returns true only when the active block CHANGED (so we scroll just then).
+  // Returns true only when the active timeline group CHANGED.
   function lecHighlight(t) {
     if (!_lecBlocks.length) return false;
     var idx = lecActiveIndex(t);
     if (idx === _lecActive) return false;
-    if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].classList.remove('ai-lec-on');
-    _lecBlocks[idx].classList.add('ai-lec-on');
+    lecSetGroupClass(_lecBlocks[_lecActive], false);
     _lecActive = idx;
+    lecSetGroupClass(_lecBlocks[_lecActive], true);
     return true;
   }
-  // Pin the START of the active block in the MIDDLE of the notes box (no reflow,
-  // robust to offsetParent via getBoundingClientRect). er.top is the block's
-  // start edge, so it lands at LEC_TOP_OFFSET (50%) down the scroller.
+  // Pin the START of the active group in the middle of the notes box.
   function lecScroll() {
-    var el = _lecBlocks[_lecActive]; if (!el || !_lecScroller) return;
+    var group = _lecBlocks[_lecActive], el = group && group.anchor;
+    if (!el || !_lecScroller) return;
     var sr = _lecScroller.getBoundingClientRect(), er = el.getBoundingClientRect();
     _lecScroller.scrollBy({ top: (er.top - sr.top) - (sr.height * LEC_TOP_OFFSET), behavior: 'smooth' });
   }
   function lecTick() {
-    if (!lecOn() || state.tab !== 'notes') return;
-    if (!_lecScroller || !document.body.contains(_lecScroller) || !_lecBlocks.length) return;
-    if (!_lecTsCount) return;                     // no timestamps → nothing to track (don't jump to last block)
+    if (!lecOn() || state.tab !== 'notes' || document.hidden) return;
+    var page = document.getElementById('page-youtube');
+    var watch = document.getElementById('yt-sub-view-watch');
+    if (!page || !page.classList.contains('active') || page.classList.contains('yt-focus-active') ||
+        !watch || !watch.classList.contains('active') || currentView() !== 'ai') return;
+    if (!_lecScroller || !document.body.contains(_lecScroller) || !_lecBlocks.length || !_lecTsCount) return;
+    if (_lecVideoId && curVid() !== _lecVideoId) { lecClear(); return; }
     var t = 0;
     try {
-      if (typeof ssGetVideoTimestampFloat === 'function') t = ssGetVideoTimestampFloat() || 0;   // sub-second precision
-      else if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0;         // fallback (whole seconds)
+      if (typeof ssGetVideoTimestampFloat === 'function') t = ssGetVideoTimestampFloat() || 0;
+      else if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0;
     } catch (e) {}
     var changed = lecHighlight(t);
     if (changed && Date.now() > _lecUserScrollUntil) lecScroll();
   }
   function lecPaintBtn(btn) {
     if (!btn) return;
-    var na = !_lecTsCount;                         // these notes have no timestamps
+    var na = !_lecTsCount;
     var on = lecOn() && !na;
+    btn.disabled = na;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     btn.classList.toggle('ai-follow-on', on);
     btn.style.opacity = na ? '0.55' : '';
-    btn.title = na ? 'These notes have no timestamps, so there is nothing to follow'
-                   : (lecOn() ? 'Following the lecture — notes auto-highlight & scroll (tap to stop)'
-                              : 'Auto-highlight & scroll the notes to where the teacher is');
+    btn.textContent = na ? '🎯 No timeline' : (on ? '🎯 Following' : '🎯 Follow');
+    btn.title = na ? 'This copy has no timeline. Regenerate it to enable Follow.'
+                   : (on ? 'Following the lecture — notes auto-highlight and scroll (tap to stop)'
+                         : 'Auto-highlight and scroll the notes to where the teacher is');
   }
-  // Wire the freshly-rendered notes into the follow engine.
+  // Wire freshly-rendered comprehensive notes into the Follow engine.
   function lecSetup(box) {
+    lecDetach();
     var nb = box.querySelector('.ai-nb');
     _lecScroller = box.querySelector('.ai-scroll');
     if (!nb || !_lecScroller) return;
+    _lecVideoId = curVid();
     lecIndex(nb);
     // A manual scroll pauses auto-follow briefly so it never fights the user.
-    ['wheel', 'touchmove'].forEach(function (ev) {
+    ['wheel', 'touchmove', 'pointerdown'].forEach(function (ev) {
       _lecScroller.addEventListener(ev, function () { _lecUserScrollUntil = Date.now() + 3000; }, { passive: true });
     });
     var btn = document.getElementById('ai-follow');
     if (btn) {
       lecPaintBtn(btn);
       btn.onclick = function () {
-        if (!_lecTsCount) {                        // nothing to follow in these notes
-          if (typeof showToast === 'function') showToast('These notes have no timestamps to follow');
-          return;
-        }
+        if (!_lecTsCount) return;
         setLecOn(!lecOn()); lecPaintBtn(btn);
         if (lecOn()) { _lecUserScrollUntil = 0; lecTick(); } else lecClear();
       };
     }
-    if (!_lecTimer) _lecTimer = setInterval(lecTick, LEC_POLL_MS);   // single shared poller (fast + cheap: early-returns when off)
+    if (!_lecTimer) _lecTimer = setInterval(lecTick, LEC_POLL_MS);
     if (lecOn()) setTimeout(lecTick, 120);
   }
 
@@ -782,6 +827,7 @@
      /api/study/stream and fall back to the classic /api/study on any error.
      Flashcards/quiz stay on the one-shot request. */
   function showStudy(mode, n, force, focus, langOverride) {
+    lecDetach();
     var vid = curVid(), el = contentEl();
     if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var lang = langOverride || outLang();
@@ -809,7 +855,10 @@
     var box = targetEl || contentEl();
     var content = j.content || '';
     var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Print or save as a hard-copy-ready PDF" style="padding:4px 10px;font-size:0.72rem">📄 Print / PDF</button>';
-    var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
+    // Only comprehensive notes are generated from timestamped transcript source.
+    // Summary and Insights intentionally omit Follow rather than presenting a
+    // control that can never track playback.
+    var followBtn = (mode === 'notes') ? '<button class="ai-btn sec" id="ai-follow" type="button" aria-pressed="false" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>' : '';
     var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
     // Comprehensive MCQ notes → launch every question as a full test in the exam engine.
     var testBtn = (style === 'mcq') ? '<button class="ai-btn" id="ai-mcq-test" title="Take all these MCQs as a full test (opens the exam engine)" style="padding:4px 10px;font-size:0.72rem">🎯 Take as Test</button>' : '';
@@ -822,7 +871,7 @@
       testBtn + shareBtn + followBtn + pdfBtn + regenBtn + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
     bindTsLinks(box);
-    lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
+    if (mode === 'notes') lecSetup(box);
     var pb = document.getElementById('ai-pdf');
     if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true, documentLabel: pdfDocumentLabelFor(mode, style) }); };
     var rb = document.getElementById('ai-regen');
@@ -961,6 +1010,15 @@
       });
       if (ev === 'meta') { try { meta = JSON.parse(data) || {}; } catch (e) {} return; }
       if (ev === 'error') { fallback(); return; }
+      if (ev === 'final') {
+        try {
+          var finalPayload = JSON.parse(data) || {};
+          if (typeof finalPayload.content === 'string') {
+            acc = finalPayload.content; gotChunk = true; streamPainter.schedule();
+          }
+        } catch (e) {}
+        return;
+      }
       if (ev === 'done') { return; }
       if (data) {
         try {
@@ -1931,6 +1989,7 @@
     });
   }
   function renderBody() {
+    lecDetach();
     var b = shellBody(); if (!b) return;
     b.setAttribute('data-ai-tab', state.tab);
     if (state.tab === 'notes') {

@@ -341,7 +341,8 @@ def _s3_delete(doc_id):
 
 # Metadata copied into the tiny Firestore index doc (NOT the big body).
 _STUDY_INDEX_FIELDS = ("id", "title", "mode", "style", "out_lang", "model",
-                       "num_questions", "provider", "transcript_lang", "segment_count")
+                       "num_questions", "provider", "transcript_lang", "segment_count",
+                       "timeline_version")
 
 
 def _study_index_doc(data):
@@ -778,8 +779,33 @@ _NOTES_CONTINUE = ("Continue the notes from EXACTLY where you stopped (finish th
                    "NOT restart, and do NOT add any intro, heading recap or closing "
                    "remark \u2014 just carry straight on.")
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
+# Bump this whenever the notes timeline contract changes. Including it in note
+# cache IDs prevents stale pre-Follow copies (which contain no timestamps) from
+# being served forever, without invalidating summaries, quizzes or flashcards.
+NOTES_TIMELINE_VERSION = "follow-v2"
 _study_cache = {}
 _study_lock = threading.Lock()
+
+
+def _study_cache_identity(video_id, mode, out_lang, num_q, focus_key="", style=""):
+    """Return the in-memory key + persistent ID for one study result.
+
+    Existing non-note identities stay unchanged. Comprehensive notes include a
+    timeline version so every cached copy satisfies the current Follow contract.
+    """
+    if focus_key:
+        ckey = "%s:%s:%s:%s::%s" % (video_id, mode, out_lang, num_q, focus_key)
+        parts = [video_id, mode, out_lang, num_q, focus_key]
+    elif style:
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, num_q, style)
+        parts = [video_id, mode, out_lang, num_q, style]
+    else:
+        ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, num_q)
+        parts = [video_id, mode, out_lang, num_q]
+    if mode == "notes":
+        ckey += ":" + NOTES_TIMELINE_VERSION
+        parts.append(NOTES_TIMELINE_VERSION)
+    return ckey, _fs_doc_id(*parts)
 
 
 def _load_ai_config(prefer_model=None, prefer_provider=None):
@@ -1296,6 +1322,102 @@ def _timestamped_transcript(segments, every=15):
             last = st
         else:
             lines.append(txt)
+    return "\n".join(lines)
+
+
+_NOTE_HEADING_RE = re.compile(r"^\s*#{2,4}\s+\S")
+_NOTE_STAMP = r"\d{1,2}:\d{2}(?::\d{2})?"
+_NOTE_MCQ_PREFIX = r"\s*#{2,4}\s+(?:Q|Question|Ques|प्रश्न|सवाल)\s*\.?\s*\d+\s*[.):\-–]*"
+_NOTE_MCQ_TIME_RE = re.compile(r"^(" + _NOTE_MCQ_PREFIX + r")\s*[\[(]?(" + _NOTE_STAMP + r")[\])]?(?:\s+|$)(.*)$", re.IGNORECASE)
+_NOTE_TOPIC_TIME_RE = re.compile(r"^(\s*#{2,4}\s+)[\[(]?(" + _NOTE_STAMP + r")[\])]?(?:\s+|$)(.*)$")
+_NOTE_MCQ_HEADING_RE = re.compile(r"^(" + _NOTE_MCQ_PREFIX + r")\s*(.*)$", re.IGNORECASE)
+_NOTE_TOPIC_HEADING_RE = re.compile(r"^(\s*#{2,4}\s+)(.*)$")
+_NOTE_WORD_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+_NOTE_MATCH_STOP = {
+    "the", "and", "for", "with", "from", "this", "that", "topic", "question",
+    "notes", "section", "about", "into", "what", "when", "where", "which",
+    "aur", "hai", "hain", "tha", "thi", "mein", "ka", "ki", "ke", "se",
+}
+
+
+def _note_stamp_seconds(stamp):
+    parts = [int(part) for part in stamp.split(":")]
+    return (parts[0] * 60 + parts[1]) if len(parts) == 2 \
+        else (parts[0] * 3600 + parts[1] * 60 + parts[2])
+
+
+def _ensure_note_timestamps(content, segments):
+    """Guarantee a strictly increasing, leading timestamp on every note heading.
+
+    Only the prescribed leading Topic/MCQ position is accepted as a timeline
+    anchor, so academic values such as "Ratio 10:20" cannot be mistaken for
+    playback time. Missing, duplicate, or backward anchors are mapped to the
+    best later transcript segment by heading-keyword overlap, with a monotonic
+    proportional fallback. This makes every persisted Follow timeline usable.
+    """
+    if not content or not segments:
+        return content
+    usable = [(float(s.get("start") or 0), (s.get("text") or "").strip())
+              for s in segments if (s.get("text") or "").strip()]
+    if not usable:
+        return content
+    lines = content.splitlines()
+    heading_indexes = [i for i, line in enumerate(lines) if _NOTE_HEADING_RE.match(line)]
+    if not heading_indexes:
+        return content
+
+    last_seg, last_time = -1, -1
+    total_heads = len(heading_indexes)
+    for pos, line_idx in enumerate(heading_indexes):
+        line = lines[line_idx]
+        time_match = _NOTE_MCQ_TIME_RE.match(line) or _NOTE_TOPIC_TIME_RE.match(line)
+        existing_seconds = _note_stamp_seconds(time_match.group(2)) if time_match else None
+        if existing_seconds is not None and existing_seconds > last_time:
+            while last_seg + 1 < len(usable) and usable[last_seg + 1][0] <= existing_seconds:
+                last_seg += 1
+            last_time = existing_seconds
+            continue
+
+        # Strip only a malformed/duplicate LEADING timeline stamp before matching
+        # keywords. Any later ratio/time value remains ordinary heading content.
+        if time_match:
+            heading_text = time_match.group(3)
+            prefix = time_match.group(1)
+            is_mcq = bool(_NOTE_MCQ_TIME_RE.match(line))
+        else:
+            mcq_heading = _NOTE_MCQ_HEADING_RE.match(line)
+            topic_heading = _NOTE_TOPIC_HEADING_RE.match(line)
+            prefix = (mcq_heading or topic_heading).group(1)
+            heading_text = (mcq_heading or topic_heading).group(2)
+            is_mcq = bool(mcq_heading)
+        clean = re.sub(r"[#*_`\[\]().:!?\-]+", " ", heading_text).lower()
+        words = {word for word in _NOTE_WORD_RE.findall(clean) if word not in _NOTE_MATCH_STOP}
+
+        candidates = [idx for idx in range(last_seg + 1, len(usable))
+                      if usable[idx][0] > last_time]
+        best_idx, best_score = None, 0
+        for seg_idx in candidates:
+            segment_words = set(_NOTE_WORD_RE.findall(usable[seg_idx][1].lower()))
+            score = len(words.intersection(segment_words))
+            if score > best_score:
+                best_idx, best_score = seg_idx, score
+                if score >= min(3, max(1, len(words))):
+                    break
+        if best_idx is None:
+            proportional = int((pos / max(1, total_heads - 1)) * (len(usable) - 1))
+            viable = [idx for idx in candidates if idx >= proportional]
+            best_idx = viable[0] if viable else (candidates[0] if candidates else len(usable) - 1)
+
+        last_seg = max(last_seg, min(best_idx, len(usable) - 1))
+        stamp_seconds = int(round(usable[last_seg][0]))
+        if stamp_seconds <= last_time:
+            stamp_seconds = int(last_time) + 1
+        last_time = stamp_seconds
+        stamp = _fmt_mmss(stamp_seconds)
+        if is_mcq:
+            lines[line_idx] = "%s (%s) %s" % (prefix, stamp, heading_text)
+        else:
+            lines[line_idx] = "%s%s %s" % (prefix, stamp, heading_text)
     return "\n".join(lines)
 
 
@@ -1818,15 +1940,7 @@ def api_study():
     # the existing note instead of regenerating a duplicate (saves storage + quota),
     # and the "available languages" bar shows every language regardless of model.
     # Use the "Regenerate" button (?refresh=1) to remake it with the chosen model.
-    if fkey:
-        ckey = "%s:%s:%s:%s::%s" % (video_id, mode, out_lang, num_q, fkey)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, fkey)
-    elif style:
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, num_q, style)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, style)
-    else:
-        ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, num_q)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q)
+    ckey, fs_id = _study_cache_identity(video_id, mode, out_lang, num_q, fkey, style)
     now = time.time()
     if not force:
         with _study_lock:
@@ -1885,6 +1999,8 @@ def api_study():
         result = _generate_study(mode, gen_text, out_lang, ai,
                                  title=t.get("title"), num_questions=num_q,
                                  focus=focus, style=style)
+        if mode == "notes" and isinstance(result.get("content"), str):
+            result["content"] = _ensure_note_timestamps(result["content"], t.get("segments"))
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
@@ -1896,6 +2012,7 @@ def api_study():
             "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count"),
+            "timeline_version": NOTES_TIMELINE_VERSION if mode == "notes" else None,
             "cached": False}
     data.update(result)
     with _study_lock:
@@ -1943,12 +2060,7 @@ def api_study_stream():
 
     # Cache key MUST match /api/study (notes/summary/insights have no focus and a
     # fixed num_q of 25) so a streamed note reuses/populates the same entry.
-    if style:
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, 25, style)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, 25, style)
-    else:
-        ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, 25)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, 25)
+    ckey, fs_id = _study_cache_identity(video_id, mode, out_lang, 25, "", style)
 
     def _sse(event, payload):
         return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False))
@@ -2031,6 +2143,13 @@ def api_study_stream():
             yield _sse("error", {"error": "ai_failed", "detail": str(exc)[:200]})
             return
         content = "".join(full)
+        if mode == "notes":
+            timeline_content = _ensure_note_timestamps(content, t.get("segments"))
+            if timeline_content != content:
+                content = timeline_content
+                # Streaming stays responsive, then the client atomically swaps
+                # in the guaranteed timeline before its final Follow setup.
+                yield _sse("final", {"content": content})
         persisted = False
         if content.strip():
             data = {"id": video_id, "title": t.get("title"), "mode": mode,
@@ -2040,6 +2159,7 @@ def api_study_stream():
                     "keys_available": len(ai["keys"]),
                     "transcript_lang": t.get("chosen_lang"),
                     "segment_count": t.get("segment_count"),
+                    "timeline_version": NOTES_TIMELINE_VERSION if mode == "notes" else None,
                     "cached": False, "content": content}
             with _study_lock:
                 _study_cache[ckey] = {"ts": time.time(), "data": data}
@@ -2084,8 +2204,7 @@ def api_study_langs():
         model = ""
     available = []
     for lang in _STUDY_LANGS:
-        fs_id = _fs_doc_id(video_id, mode, lang, num_q, style) if style \
-            else _fs_doc_id(video_id, mode, lang, num_q)
+        _ckey, fs_id = _study_cache_identity(video_id, mode, lang, num_q, "", style)
         try:
             if _fs_get("study", fs_id):
                 available.append(lang)

@@ -559,6 +559,33 @@ let ytProgressTimer = null;
 let ytWatchAccumSecs = 0;   // real (wall-clock) seconds watched, pending credit to Study Time
 let ytWatchLastTs = 0;      // Date.now() at the previous poll tick
 
+/* Keep app state aligned with the concrete video loaded inside the iframe.
+   Playlist mode initially stores a playlist placeholder, but Follow, notes,
+   screenshots and progress all need the real item ID—especially after YouTube
+   auto-advances to the next lesson. */
+function ytSyncCurrentVideoFromPlayer() {
+  if (!ytPlayer || !ytPlayer.getVideoData) return '';
+  try {
+    const data = ytPlayer.getVideoData() || {};
+    const id = data.video_id || '';
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return '';
+    const changed = ytCurrentVideoId !== id;
+    ytCurrentVideoId = id;
+    if (data.title) ytCurrentVideoTitle = data.title;
+    const openLink = document.getElementById('yt-open-link');
+    if (openLink) openLink.href = `https://youtube.com/watch?v=${id}`;
+    if (changed) {
+      const titleEl = document.getElementById('yt-now-title');
+      if (titleEl && data.title) titleEl.textContent = data.title;
+      // Native playlist auto-advance does not pass through ytPlayFromList(), so
+      // repaint the sidebar here to move the active row to the real item.
+      if (ytPlaylistVideos.some(function(video) { return video.id === id; })) ytRenderVideoList();
+      try { ytUpdateNotesContext(); } catch (e) {}
+    }
+    return id;
+  } catch (e) { return ''; }
+}
+
 window.onYouTubeIframeAPIReady = function() {
   // origin is required to avoid Error 153 on local/Android
   const _origin = (window.location.origin && window.location.origin !== 'null')
@@ -581,6 +608,7 @@ window.onYouTubeIframeAPIReady = function() {
       },
       onStateChange: function(e) {
         if (e.data === YT.PlayerState.PLAYING)  {
+          ytSyncCurrentVideoFromPlayer();
           // GUARD: While a Picture-in-Picture session is active — either the
           // Document-PiP window (normal mode) or the native <video> PiP (Turbo
           // mode) — the main background iframe must NEVER play. Otherwise the
@@ -1048,7 +1076,7 @@ function ytRenderVideoList() {
       : savedPct > 0
         ? `<div class="yt-video-dur" style="color:var(--accent)">${savedPct}% watched</div>`
         : (dur ? `<div class="yt-video-dur">${dur}</div>` : '');
-    return `<div class="yt-video-item${active?' active':''}" onclick="ytPlayFromList(${idx})">
+    return `<div class="yt-video-item${active?' active':''}" data-video-id="${v.id}" onclick="ytPlayFromList(${idx})">
       <span class="yt-video-num" style="${active?'color:var(--accent);font-weight:700':''}">${idx+1}</span>
       <div class="yt-thumb"><img src="${thumb}" loading="lazy" alt="" onerror="this.parentElement.innerHTML='▶'"></div>
       <div class="yt-video-info">
@@ -1216,10 +1244,11 @@ function ytAutoMarkOnComplete() {
 
 /* Update the per-video "X% watched" label in the sidebar list */
 function ytUpdateVideoWatchLabel(videoId, pct) {
-  // Find the active (currently playing) video item in sidebar
-  var activeItem = document.querySelector('#yt-video-list .yt-video-item.active');
+  // Resolve the concrete video first. The .active class can briefly belong to
+  // the previous item while a native playlist is auto-advancing.
+  var activeItem = document.querySelector('#yt-video-list .yt-video-item[data-video-id="' + videoId + '"]');
+  if (!activeItem) activeItem = document.querySelector('#yt-video-list .yt-video-item.active');
   if (!activeItem) {
-    // Fallback: find by index in plain playlist
     var items = document.querySelectorAll('#yt-video-list .yt-video-item');
     var idx = ytPlaylistVideos.findIndex(function(v) { return v.id === videoId; });
     if (idx >= 0 && items[idx]) activeItem = items[idx];

@@ -41,6 +41,8 @@
   var turboActiveNow = false;   // true while a video is actually playing via Turbo
   var turboVid = null;          // current video id playing in Turbo
   var turboVidTitle = '';       // current video title (from /api/info) for saved moments
+  var turboLoadSeq = 0;         // rejects stale /api/info responses after fast video changes
+  var turboLoadCtrl = null;
   var lastSave = 0;
   var turboWatchAccum = 0;      // real (wall-clock) seconds watched, pending credit to Study Time
   var turboWatchLastTs = 0;     // Date.now() at the previous timeupdate
@@ -61,7 +63,8 @@
   /* Turbo is "active" (controls should target the native video) only when it's
      enabled AND the native video is the thing currently on screen. */
   function turboActive() {
-    return turboActiveNow && turboVideoEl && turboVideoEl.style.display !== 'none';
+    return !!(turboActiveNow && turboVideoEl && turboVideoEl.style.display !== 'none' &&
+      turboVideoEl.getClientRects().length);
   }
 
   /* ── one-time styles ── */
@@ -238,6 +241,8 @@
   /* Hide Turbo video, restore the iframe surface. */
   function deactivateTurbo() {
     turboActiveNow = false;
+    turboLoadSeq++;
+    if (turboLoadCtrl) { try { turboLoadCtrl.abort(); } catch (e) {} turboLoadCtrl = null; }
     showBadge(false);
     status(null);
     if (turboVideoEl) {
@@ -252,11 +257,25 @@
   function turboLoad(id, fallback) {
     var v = ensureVideoEl();
     if (!v) { fallback(); return; }
+    var loadSeq = ++turboLoadSeq;
+    if (turboLoadCtrl) { try { turboLoadCtrl.abort(); } catch (e) {} }
+
+    // Stop and persist the previous native video BEFORE changing turboVid. If a
+    // user switches lessons while Turbo is playing, the old stream must never
+    // continue behind the loading overlay or record progress against the new ID.
+    if (turboActiveNow && turboVid && turboVid !== id) {
+      try { saveTurboProgress(); } catch (e) {}
+      try { flushTurboWatchTime(); } catch (e) {}
+      try { v.pause(); } catch (e) {}
+      v.removeAttribute('src');
+      try { v.load(); } catch (e) {}
+    }
 
     // Pause the iframe player so we never get double audio.
     try { if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo(); } catch (e) {}
 
     turboVid = id;
+    turboVidTitle = '';
     turboActiveNow = true;
     var ph = document.getElementById('yt-placeholder');
     if (ph) ph.style.display = 'none';
@@ -267,12 +286,15 @@
     status('⚡ Turbo: fetching stream… (first load can take ~30–60s if the server was asleep)');
 
     var ctrl = new AbortController();
+    turboLoadCtrl = ctrl;
     var timer = setTimeout(function () { ctrl.abort(); }, 95000);
 
     fetch(TURBO_BACKEND_URL + '/api/info?id=' + encodeURIComponent(id), { signal: ctrl.signal })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         clearTimeout(timer);
+        if (loadSeq !== turboLoadSeq) return;
+        turboLoadCtrl = null;
         if (!res.ok || !res.d || !res.d.formats || !res.d.formats.length) {
           throw new Error((res.d && (res.d.detail || res.d.error)) || 'no stream');
         }
@@ -291,6 +313,8 @@
       })
       .catch(function (err) {
         clearTimeout(timer);
+        if (loadSeq !== turboLoadSeq) return;
+        turboLoadCtrl = null;
         // Silent, graceful fallback to the original iframe player.
         deactivateTurbo();
         if (iframeEl) iframeEl.style.display = 'block';
@@ -565,6 +589,18 @@
   window.ytTurboDuration = function () {
     try { return (turboActive() && turboVideoEl) ? (turboVideoEl.duration || 0) : 0; }
     catch (e) { return 0; }
+  };
+  window.ytTurboVideoId = function () {
+    try { return turboActive() ? (turboVid || '') : ''; }
+    catch (e) { return ''; }
+  };
+  window.ytTurboVideoTitle = function () {
+    try {
+      if (!turboActive()) return '';
+      if (turboVidTitle) return turboVidTitle;
+      var currentId = (typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) ? String(ytCurrentVideoId) : '';
+      return currentId === turboVid && typeof ytCurrentVideoTitle !== 'undefined' ? (ytCurrentVideoTitle || '') : '';
+    } catch (e) { return ''; }
   };
 
   function updateToggleUI() {

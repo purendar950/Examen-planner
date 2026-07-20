@@ -29,6 +29,34 @@ function ssSave() {
 }
 
 /* ── Helpers ── */
+function ssPlayerIsVisible(player) {
+  try {
+    var frame = player && player.getIframe ? player.getIframe() : null;
+    return !!(frame && frame.getClientRects().length && getComputedStyle(frame).display !== 'none');
+  } catch (e) { return false; }
+}
+
+/* Resolve the iframe player that is actually visible. The main YouTube player
+   can continue to exist with a stale time while Course Library/organiser UI is
+   active, so existence alone is not enough. */
+function ssGetActiveIframePlayer() {
+  var main = null, organiser = null;
+  try { if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getCurrentTime) main = ytPlayer; } catch (e) {}
+  try { if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getCurrentTime) organiser = ytoPlayerV2; } catch (e) {}
+  if (ssPlayerIsVisible(main)) return main;
+  if (ssPlayerIsVisible(organiser)) return organiser;
+  // During player startup getIframe() may not be measurable yet. Prefer a
+  // player that can identify a real loaded video, then preserve legacy order.
+  var candidates = [main, organiser];
+  for (var i = 0; i < candidates.length; i++) {
+    try {
+      var data = candidates[i] && candidates[i].getVideoData && candidates[i].getVideoData();
+      if (data && /^[A-Za-z0-9_-]{11}$/.test(data.video_id || '')) return candidates[i];
+    } catch (e) {}
+  }
+  return main || organiser;
+}
+
 function ssGetCurrentContext() {
   // Determine current playlist/video context from the YouTube tab state
   let playlistId = 'general';
@@ -45,8 +73,34 @@ function ssGetCurrentContext() {
     playlistName = lib[ytoCurrentPl]?.title || 'Course';
   }
 
-  if (typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) {
-    videoId = ytCurrentVideoId;
+  // Prefer the live player's identity. This is essential for native playlist
+  // playback, where ytCurrentVideoId can otherwise remain "playlist_<id>" even
+  // after YouTube advances to a concrete video.
+  try {
+    if (typeof window.ytTurboActive === 'function' && window.ytTurboActive() &&
+        typeof window.ytTurboVideoId === 'function') {
+      var turboId = window.ytTurboVideoId();
+      if (/^[A-Za-z0-9_-]{11}$/.test(turboId || '')) {
+        videoId = turboId;
+        if (typeof window.ytTurboVideoTitle === 'function' && window.ytTurboVideoTitle()) {
+          videoName = window.ytTurboVideoTitle();
+        }
+      }
+    }
+  } catch (e) {}
+  if (videoId === 'unknown') {
+    try {
+      var livePlayer = ssGetActiveIframePlayer();
+      var liveData = livePlayer && livePlayer.getVideoData && livePlayer.getVideoData();
+      if (liveData && /^[A-Za-z0-9_-]{11}$/.test(liveData.video_id || '')) {
+        videoId = liveData.video_id;
+        videoName = liveData.title || videoName;
+      }
+    } catch (e) {}
+  }
+  if (videoId === 'unknown' && typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) {
+    var fallbackId = String(ytCurrentVideoId).replace(/^playlist_/, '');
+    if (/^[A-Za-z0-9_-]{11}$/.test(fallbackId)) videoId = fallbackId;
     videoName = (typeof ytCurrentVideoTitle !== 'undefined') ? ytCurrentVideoTitle : 'Video';
   }
 
@@ -62,17 +116,11 @@ function ssGetVideoTimestamp() {
       return Math.floor(window.ytTurboCurrentTime() || 0);
     }
   } catch(e) {}
-  // Try to get current time from YT IFrame API player
+  // Read the iframe player that is actually visible (main Watch player or
+  // organiser), never a hidden stale instance.
   try {
-    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getCurrentTime) {
-      return Math.floor(ytPlayer.getCurrentTime());
-    }
-  } catch(e) {}
-  // Try organiser player
-  try {
-    if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getCurrentTime) {
-      return Math.floor(ytoPlayerV2.getCurrentTime());
-    }
+    var player = ssGetActiveIframePlayer();
+    if (player) return Math.floor(player.getCurrentTime() || 0);
   } catch(e) {}
   return 0;
 }
@@ -89,14 +137,8 @@ function ssGetVideoTimestampFloat() {
     }
   } catch(e) {}
   try {
-    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getCurrentTime) {
-      return ytPlayer.getCurrentTime() || 0;
-    }
-  } catch(e) {}
-  try {
-    if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getCurrentTime) {
-      return ytoPlayerV2.getCurrentTime() || 0;
-    }
+    var player = ssGetActiveIframePlayer();
+    if (player) return player.getCurrentTime() || 0;
   } catch(e) {}
   return 0;
 }
@@ -111,10 +153,8 @@ function ssGetVideoDuration() {
     }
   } catch(e) {}
   try {
-    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getDuration) return ytPlayer.getDuration();
-  } catch(e) {}
-  try {
-    if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getDuration) return ytoPlayerV2.getDuration();
+    var player = ssGetActiveIframePlayer();
+    if (player && player.getDuration) return player.getDuration() || 0;
   } catch(e) {}
   return 0;
 }
