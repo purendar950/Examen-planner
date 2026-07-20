@@ -2091,7 +2091,6 @@
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
         '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="mcq">❓ MCQ</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
-        '<button class="ai-btn sec" id="ai-notes-course" title="Show course content">Course</button>' +
         '<span id="ai-note-actions" class="ai-note-actions" role="group" aria-label="Note actions"></span>' +
         '</div><div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
@@ -2114,11 +2113,8 @@
         checkLangs(modeSel.value, 25, false);
       };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
-      document.getElementById('ai-notes-course').onclick = function () {
-        _cancelActiveStudy();
-        persistView('course');
-        applyView();
-      };
+      // (The old "Course" button is gone — the Course Content / Generate Notes
+      // switcher in the panel header handles returning to the course view.)
       checkLangs(modeSel.value, 25, true);
     } else if (state.tab === 'cards') {
       b.innerHTML = '<div id="ai-cards-focus-wrap" style="margin-bottom:8px;display:none">' +
