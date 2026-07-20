@@ -1778,9 +1778,29 @@
      Backend already routes by model name (per provider's key), so this is pure
      UI. Provider dropdown = Auto + providers that have a key; picking one reveals
      a second dropdown with just that provider's models. */
+  var MODEL_GROUPS_KEY = 'aiStudyModelGroups';
+  var MODEL_DEFAULTS_KEY = 'aiStudyModelDefaults';
   var _studyGroups = [];         // [{provider,label,models}] from /api/status
   var _studyDefaultModel = '';   // admin's active model (default when a provider is picked)
-  var STUDY_PROV_ORDER = ['bynara', 'cerebras', 'mistral', 'openrouter', 'nvidia', 'kiro'];
+  var STUDY_PROV_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'kiro'];
+
+  function cachedStudyModels() {
+    try {
+      return {
+        groups: JSON.parse(localStorage.getItem(MODEL_GROUPS_KEY) || '[]'),
+        provider: localStorage.getItem(MODEL_DEFAULTS_KEY + ':provider') || '',
+        model: localStorage.getItem(MODEL_DEFAULTS_KEY + ':model') || ''
+      };
+    } catch (e) { return { groups: [], provider: '', model: '' }; }
+  }
+  function cacheStudyModels(groups, provider, model) {
+    if (!groups.length) return;
+    try {
+      localStorage.setItem(MODEL_GROUPS_KEY, JSON.stringify(groups));
+      localStorage.setItem(MODEL_DEFAULTS_KEY + ':provider', provider || '');
+      localStorage.setItem(MODEL_DEFAULTS_KEY + ':model', model || '');
+    } catch (e) {}
+  }
 
   function studyGroupFor(pid) {
     for (var i = 0; i < _studyGroups.length; i++) if (_studyGroups[i].provider === pid) return _studyGroups[i];
@@ -1804,21 +1824,37 @@
     }).join('');
     ms.style.display = '';
   }
-  // Build the provider dropdown from /api/status, then the model dropdown for
-  // the currently-saved choice. A stale saved model falls back to Auto.
+  // Build the provider dropdown from /api/status, then show the active provider's
+  // model list by default. A cached server catalogue keeps the picker usable
+  // through short backend outages; stale selections fall back safely.
   function applyServerModels(status) {
     var ps = document.getElementById('ai-provider');
     if (!ps) return;
-    var raw = (status && status.studyModelGroups) || [];
-    _studyGroups = raw.slice().sort(function (a, b) {
+    var cached = cachedStudyModels();
+    var raw = (status && Array.isArray(status.studyModelGroups) && status.studyModelGroups.length)
+      ? status.studyModelGroups : cached.groups;
+    _studyGroups = raw.filter(function (g) {
+      return g && g.provider && Array.isArray(g.models) && g.models.length;
+    }).slice().sort(function (a, b) {
       var ia = STUDY_PROV_ORDER.indexOf(a.provider), ib = STUDY_PROV_ORDER.indexOf(b.provider);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
-    _studyDefaultModel = (status && status.studyModel) || '';
+    _studyDefaultModel = (status && status.studyModel) || cached.model || '';
+    var activeProvider = (status && status.studyProvider) || cached.provider || '';
+    cacheStudyModels(_studyGroups, activeProvider, _studyDefaultModel);
 
     var savedModel = outModel();
     var savedProvider = outProvider();
+    if (!savedProvider && studyGroupFor(activeProvider)) {
+      savedProvider = activeProvider;
+      setProvider(savedProvider);
+    }
     var savedGroup = studyGroupFor(savedProvider);
+    if (!savedModel && savedGroup) {
+      savedModel = (savedGroup.models.indexOf(_studyDefaultModel) !== -1)
+        ? _studyDefaultModel : (savedGroup.models[0] || '');
+      setModel(savedModel);
+    }
     if (!savedGroup || (savedModel && (savedGroup.models || []).indexOf(savedModel) === -1)) {
       savedProvider = providerOfModel(savedModel);
       setProvider(savedProvider);
@@ -1926,7 +1962,11 @@
           else setDot('ready', 'Server ready — will generate on first use');
         } else setDot('off', 'Server error');
       })
-      .catch(function () { clearTimeout(to); setDot('off', 'Server offline / waking up — tap to retry'); });
+      .catch(function () {
+        clearTimeout(to);
+        applyServerModels(null);   // reuse the last known safe server catalogue
+        setDot('off', 'AI server suspended/offline — model list may be cached; tap to retry');
+      });
   }
 
   function applyView() {
