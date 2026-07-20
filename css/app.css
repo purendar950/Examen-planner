@@ -4095,6 +4095,297 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     padding-top: .4rem;
     background: var(--card);
   }
+
+  /* A generated note should read as the panel beside the player, not as a
+     small sheet pushed below several dark toolbars. In desktop Notes mode the
+     whole right card is one continuous paper surface; controls remain usable
+     in compact rows at its top and the notebook continues below them. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage > .yt-panel,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-study-panel,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-body {
+    background: #fffdf6;
+    color: #22303f;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage > .yt-panel {
+    border-color: #e6dfca;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-view-toggle {
+    padding: .28rem .38rem;
+    border-bottom-color: #e6dfca;
+    background: #fffdf6;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-view-toggle button {
+    min-height: 32px;
+    padding: .24rem .38rem;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    gap: .32rem;
+    color: #66727d;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-switch-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 7px;
+    background: #f3eee1;
+    color: #52606c;
+    font-size: .62rem;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-switch-copy strong { font-size: .61rem; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-switch-copy small,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-switch-badge { display: none; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-view-toggle button.on {
+    border-color: #d8cfb9;
+    background: #fff;
+    color: #22303f;
+    box-shadow: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-view-toggle button[data-v="ai"].on .ai-switch-icon {
+    background: #e6f5e9;
+    color: #19683a;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-view-toggle button[data-v="course"].on .ai-switch-icon {
+    background: #fff2c9;
+    color: #8a5a00;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head {
+    gap: .28rem;
+    padding: .36rem .5rem;
+    border-bottom: 1px solid #e6dfca;
+    background: #fffdf6;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head .ai-title { color: #22303f; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head select {
+    min-height: 27px;
+    border-color: #d8cfb9;
+    background: #fff;
+    color: #314150;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tabs {
+    gap: .28rem;
+    padding: .32rem .46rem;
+    border-bottom-color: #e6dfca;
+    background: #f7f1e4;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tab {
+    min-height: 31px;
+    padding: .2rem .28rem;
+    border-color: #dfd6c2;
+    border-radius: 8px;
+    background: #fffdf6;
+    color: #687682;
+    box-shadow: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-mode-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 6px;
+    background: #f3eee1;
+    font-size: .55rem;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-mode-label { font-size: .56rem; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tab.on {
+    border-color: #87bc94;
+    background: #fff;
+    color: #24563a;
+    box-shadow: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tab.on .ai-mode-icon {
+    background: #e6f5e9;
+    color: #19683a;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-body {
+    padding: .38rem .55rem .55rem;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-workspace-intro { display: none; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls { margin-bottom: .32rem; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls .ai-btn.sec,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-meta-bar .ai-btn.sec {
+    border-color: #d8cfb9;
+    background: #fff;
+    color: #314150;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-muted { color: #697681; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-brandbar { margin-bottom: .3rem; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-scroll.nb {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-nb {
+    padding: .45rem .75rem 1rem;
+    background: transparent;
+  }
+
+  /* Put the notebook itself at the top of the right pane. The generate toolbar
+     is anchored at the bottom, so the notes canvas—not a stack of controls—is
+     what sits directly beside the video player. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel {
+    position: relative;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-view-toggle {
+    display: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tabs {
+    position: absolute;
+    right: .5rem;
+    bottom: 3.45rem;
+    left: .5rem;
+    z-index: 3;
+    margin: 0;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border: 1px solid #e0d7c4;
+    border-radius: 9px;
+    box-shadow: 0 4px 12px rgba(44, 53, 60, .08);
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-body {
+    position: relative;
+    display: block;
+    padding: 0;
+    overflow: hidden;
+  }
+  /* Keep provider, model and language selection available without consuming
+     vertical space above the player-aligned notes canvas. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head {
+    position: absolute;
+    top: .5rem;
+    right: .5rem;
+    left: .5rem;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: .3rem;
+    min-height: 27px;
+    padding: .28rem .35rem;
+    overflow-x: auto;
+    border: 1px solid #d8cfb9;
+    border-radius: 9px;
+    background: rgba(255, 253, 246, .96);
+    box-shadow: 0 4px 12px rgba(44, 53, 60, .08);
+    scrollbar-width: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head::-webkit-scrollbar {
+    display: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head .ai-title {
+    flex: 1 0 auto;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head select {
+    flex: 0 0 auto;
+    max-width: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head #ai-model {
+    grid-column: auto;
+    justify-self: auto;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls {
+    position: absolute;
+    right: .5rem;
+    bottom: .5rem;
+    left: .5rem;
+    z-index: 4;
+    flex-wrap: nowrap;
+    margin: 0;
+    padding: .34rem;
+    overflow-x: auto;
+    border: 1px solid #d8cfb9;
+    border-radius: 10px;
+    background: rgba(255, 253, 246, .96);
+    box-shadow: 0 6px 18px rgba(44, 53, 60, .12);
+    scrollbar-width: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls::-webkit-scrollbar {
+    display: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls > * {
+    flex: 0 0 auto;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar {
+    position: absolute;
+    top: 3.1rem;
+    right: .5rem;
+    left: .5rem;
+    z-index: 4;
+    display: block;
+    min-height: 22px;
+    overflow: hidden;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar .ai-muted {
+    display: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar .ai-chips {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: .3rem;
+    margin: 0 !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar .ai-chips::-webkit-scrollbar {
+    display: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar .ai-chip {
+    flex: 0 0 auto;
+    padding: .2rem .42rem;
+    border-color: #d8cfb9;
+    background: #fff;
+    color: #314150;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 5.15rem .5rem 6rem;
+    overflow: hidden;
+    background: #fffdf6;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll {
+    min-height: 0;
+  }
+
+  /* The scrollable paper itself occupies the full right-hand pane. Branding
+     and note actions float over its top edge, so their presence never moves
+     the notes box below the video. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub {
+    padding: 0 0 6rem;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-brandbar {
+    position: absolute;
+    top: 5.15rem;
+    right: .5rem;
+    left: .5rem;
+    z-index: 2;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-meta-bar {
+    position: absolute;
+    top: 7.35rem;
+    right: .5rem;
+    left: .5rem;
+    z-index: 2;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    padding: .1rem 0;
+    scrollbar-width: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-meta-bar::-webkit-scrollbar {
+    display: none;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-meta-bar > * {
+    flex: 0 0 auto;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll {
+    position: absolute;
+    inset: 0 0 6rem;
+    display: block;
+    flex: none;
+    min-height: 0;
+    padding: 9.6rem .5rem 0;
+    overflow: auto;
+    background: #fffdf6;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-nb {
+    min-height: 100%;
+  }
 }
 
 /* Focus keeps playback tools available but removes setup and secondary content. */

@@ -1933,12 +1933,18 @@
   function renderBody() {
     var b = shellBody(); if (!b) return;
     b.setAttribute('data-ai-tab', state.tab);
+    // In the desktop Notes view, the complete right-hand card becomes the
+    // notebook surface. This keeps the visible notes canvas aligned beside
+    // the video instead of making a small paper box begin below the controls.
+    var layout = ytLayout();
+    if (layout) layout.classList.toggle('notes-parallel-stage', state.tab === 'notes');
     if (state.tab === 'notes') {
       b.innerHTML = '<div class="ai-notes-workspace-intro"><span>Generate Notes</span><p>Turn the video playing beside this panel into revision-ready notes.</p></div>' +
         '<div class="ai-notes-controls">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
         '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="mcq">❓ MCQ</option></select>' +
-        '<button class="ai-btn" id="ai-notes-go">Generate Notes</button></div><div id="ai-langbar"></div><div id="ai-sub"></div>';
+        '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
+        '<button class="ai-btn sec" id="ai-notes-course" title="Show course content">Course</button></div><div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
       var styleSel = document.getElementById('ai-notes-style');
       // MCQ style only applies to comprehensive notes; hide it for summary/insights.
@@ -1955,6 +1961,10 @@
         checkLangs(modeSel.value, 25, false);
       };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
+      document.getElementById('ai-notes-course').onclick = function () {
+        persistView('course');
+        applyView();
+      };
       checkLangs(modeSel.value, 25, true);
     } else if (state.tab === 'cards') {
       b.innerHTML = '<div id="ai-cards-focus-wrap" style="margin-bottom:8px;display:none">' +
