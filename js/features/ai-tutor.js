@@ -627,6 +627,33 @@
   })();
 
   function loading(msg) { return '<div class="ai-muted"><span class="ai-spin"></span> ' + esc(msg || 'Working…') + '</div>'; }
+  // A dedicated notebook loading surface keeps the player-aligned Notes pane
+  // calm and useful while captions are being processed. It deliberately avoids
+  // showing raw request text under the floating desktop control rail.
+  function notesLoadingHtml(mode, style, lang, force) {
+    var kind = (style === 'mcq') ? 'MCQ notes' :
+      (mode === 'summary') ? 'summary' : (mode === 'insights') ? 'key insights' : 'notes';
+    var title = force ? 'Creating a fresh set of ' + kind : 'Preparing your ' + kind;
+    return '<div class="ai-notes-loading" role="status" aria-live="polite">' +
+      '<div class="ai-notes-loading-card">' +
+        '<span class="ai-notes-loading-kicker">AI STUDY</span>' +
+        '<span class="ai-notes-loading-orbit" aria-hidden="true"><span></span></span>' +
+        '<strong>' + esc(title) + '</strong>' +
+        '<p>Reviewing the lecture captions in ' + esc(lang || outLang()) + '. You can keep watching while your notebook is prepared.</p>' +
+        '<div class="ai-notes-loading-lines" aria-hidden="true"><i></i><i></i><i></i></div>' +
+      '</div>' +
+    '</div>';
+  }
+  function notesStageMessageHtml(tone, title, copy) {
+    var icon = tone === 'video' ? '▶' : tone === 'captions' ? '◌' : tone === 'stopped' ? 'Ⅱ' : '!';
+    return '<div class="ai-notes-loading ai-notes-message ai-notes-message-' + esc(tone || 'error') + '" role="status">' +
+      '<div class="ai-notes-loading-card">' +
+        '<span class="ai-notes-message-icon" aria-hidden="true">' + icon + '</span>' +
+        '<strong>' + esc(title) + '</strong>' +
+        '<p>' + esc(copy) + '</p>' +
+      '</div>' +
+    '</div>';
+  }
   function errHtml(j) {
     var e = (j && (j.error || j.detail)) || 'Failed';
     return '<div class="ai-muted" style="color:#e06">\u26a0 ' + esc(e) + (j && j.detail && j.error ? ' — ' + esc(j.detail) : '') + '</div>';
@@ -657,6 +684,13 @@
   }
   // User pressed Stop → abort the in-flight request (the .catch handles the UI).
   function _genStop() { if (_genAbort) { try { _genAbort.abort(); } catch (e) {} } _genAbort = null; }
+  // Abort generation when its owning workspace disappears. The request counter
+  // also prevents a late response from rendering into a newly selected tab.
+  function _cancelActiveStudy() {
+    _studyPaintRequest += 1;
+    if (_genAbort) { try { _genAbort.abort(); } catch (e) {} }
+    _genAbort = null;
+  }
   // Restore a Stop button back to its original "Generate" label + handler.
   function _genEnd(btnId) {
     _genAbort = null;
@@ -823,13 +857,23 @@
      Flashcards/quiz stay on the one-shot request. */
   function showStudy(mode, n, force, focus, langOverride) {
     var vid = curVid(), el = contentEl();
-    if (!vid) { el.innerHTML = '<div class="ai-muted">Play a video first.</div>'; return; }
     var lang = langOverride || outLang();
     var style = (mode === 'notes') ? nbNotesStyle() : '';
-    el.innerHTML = loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
+    var isNotebookMode = mode === 'notes' || mode === 'summary' || mode === 'insights';
+    if (!vid) {
+      el.innerHTML = isNotebookMode
+        ? notesStageMessageHtml('video', 'Play a video to create notes', 'Start a lecture, then generate notes from its captions.')
+        : '<div class="ai-muted">Play a video first.</div>';
+      return;
+    }
+    el.innerHTML = isNotebookMode
+      ? notesLoadingHtml(mode, style, lang, force)
+      : loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
     var btnId = (mode === 'flashcards') ? 'ai-cards-go' : 'ai-notes-go';
     var signal = _genStart(btnId);
-    if (mode === 'flashcards' || mode === 'quiz') { studyOnce(mode, n, style, lang, focus, force, signal, btnId); return; }
+    var requestId = _studyPaintRequest;
+    function ownsOutput() { return requestId === _studyPaintRequest && el && el.isConnected && el === contentEl(); }
+    if (mode === 'flashcards' || mode === 'quiz') { studyOnce(mode, n, style, lang, focus, force, signal, btnId, el, ownsOutput); return; }
     studyStream(mode, n, style, lang, focus, force, signal, btnId);
   }
 
@@ -907,9 +951,18 @@
       if (canRender && !canRender()) return;
       _genEnd(btnId);
       var box = targetEl || contentEl();
-      if (j.error && j.error !== 'no_captions') { box.innerHTML = errHtml(j); return; }
+      var isNotebookMode = mode === 'notes' || mode === 'summary' || mode === 'insights';
+      if (j.error && j.error !== 'no_captions') {
+        box.innerHTML = isNotebookMode
+          ? notesStageMessageHtml('error', 'Notes could not be prepared', 'Please try again in a moment or choose another model.')
+          : errHtml(j);
+        return;
+      }
       if (j.warning === 'no_captions' || j.error === 'no_captions') {
-        box.innerHTML = '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>'; return;
+        box.innerHTML = isNotebookMode
+          ? notesStageMessageHtml('captions', 'This lecture has no captions', 'Choose a video with captions, then generate notes again.')
+          : '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>';
+        return;
       }
       if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); checkLangs('flashcards', 25, false); return; }
       if (!j.lang) j.lang = lang;
@@ -918,8 +971,16 @@
       if (canRender && !canRender()) return;
       _genEnd(btnId);
       var box = targetEl || contentEl();
-      if (_isAbort(e)) { box.innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>'; return; }
-      box.innerHTML = errHtml({ error: String(e) });
+      var isNotebookMode = mode === 'notes' || mode === 'summary' || mode === 'insights';
+      if (_isAbort(e)) {
+        box.innerHTML = isNotebookMode
+          ? notesStageMessageHtml('stopped', 'Note generation paused', 'Choose a model or note type, then generate again when you are ready.')
+          : '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>';
+        return;
+      }
+      box.innerHTML = isNotebookMode
+        ? notesStageMessageHtml('error', 'Notes could not be prepared', 'Please try again in a moment or choose another model.')
+        : errHtml({ error: String(e) });
     });
   }
 
@@ -977,7 +1038,7 @@
       streamPainter.cancel();
       done = true;
       if (!ownsStudyTarget() || (signal && signal.aborted)) return;
-      targetEl.innerHTML = loading('Generating ' + mode + ' (' + lang + ')…');
+      targetEl.innerHTML = notesLoadingHtml(mode, style, lang, force);
       studyOnce(mode, n, style, lang, focus, force, signal, btnId, targetEl, ownsStudyTarget);   // owns _genEnd
     }
     function finish() {
@@ -1037,7 +1098,7 @@
         streamPainter.cancel();
         done = true;
         _genEnd(btnId);
-        if (ownsStudyTarget()) targetEl.innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>';
+        if (ownsStudyTarget()) targetEl.innerHTML = notesStageMessageHtml('stopped', 'Note generation paused', 'Choose a model or note type, then generate again when you are ready.');
         return;
       }
       fallback();   // network / non-ok / no-stream → classic endpoint
@@ -1173,22 +1234,30 @@
   // Asks the backend which of Hinglish/English/Hindi are already cached for this
   // video+mode, then renders chips into #ai-langbar. If the user's chosen language
   // is already there and autoShow is on (notes/cards), it opens it directly.
+  var _langCheckRequest = 0;
   function checkLangs(mode, n, autoShow, _retry) {
+    var requestId = ++_langCheckRequest;
     var vid = curVid(), bar = document.getElementById('ai-langbar');
-    if (!vid || !bar) return;
     var style = (mode === 'notes') ? nbNotesStyle() : '';
+    if (!vid || !bar) return;
     apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + (style === 'mcq' ? '&style=mcq' : '') + modelParam()).then(function (j) {
-      var bar2 = document.getElementById('ai-langbar'); if (!bar2) return;
+      // Ignore an older language-cache response after the user has switched a
+      // note type/style, tab, video, or rebuilt the workspace.
+      if (requestId !== _langCheckRequest || curVid() !== vid || bar !== document.getElementById('ai-langbar')) return;
+      if (mode === 'notes') {
+        var modeSel = document.getElementById('ai-notes-mode');
+        if (!modeSel || modeSel.value !== mode || nbNotesStyle() !== style) return;
+      }
       var avail = (j && j.available) || [];
-      if (!avail.length) { bar2.innerHTML = ''; return; }
+      if (!avail.length) { bar.innerHTML = ''; return; }
       var chosen = outLang();
       var chips = avail.map(function (l) {
         return '<span class="ai-chip ai-lang-chip' + (l === chosen ? ' on' : '') + '" data-l="' + esc(l) + '">' +
           (l === chosen ? '✓ ' : '📁 ') + esc(l) + '</span>';
       }).join('');
-      bar2.innerHTML = '<div class="ai-muted" style="font-size:.72rem;margin:2px 0 4px">Already generated — tap to view instantly:</div>' +
+      bar.innerHTML = '<div class="ai-muted" style="font-size:.72rem;margin:2px 0 4px">Already generated — tap to view instantly:</div>' +
         '<div class="ai-chips" style="margin-bottom:8px">' + chips + '</div>';
-      Array.prototype.forEach.call(bar2.querySelectorAll('.ai-lang-chip'), function (c) {
+      Array.prototype.forEach.call(bar.querySelectorAll('.ai-lang-chip'), function (c) {
         c.onclick = function () { loadLang(mode, n, c.dataset.l); };
       });
       // chosen language already available → show it directly (notes/cards only)
@@ -1197,7 +1266,9 @@
       // The backend may be cold-starting (Render) or briefly unreachable, which
       // otherwise leaves already-generated notes/MCQ silently NOT displayed.
       // Retry once after a short delay so cached content still auto-shows.
-      if (!_retry) setTimeout(function () { checkLangs(mode, n, autoShow, true); }, 2500);
+      if (!_retry) setTimeout(function () {
+        if (requestId === _langCheckRequest && bar === document.getElementById('ai-langbar')) checkLangs(mode, n, autoShow, true);
+      }, 2500);
     });
   }
   // Refresh the "already generated" bar for whatever tab is active (used when
@@ -1958,6 +2029,7 @@
     }).join('');
     Array.prototype.forEach.call(el.querySelectorAll('.ai-tab'), function (b) {
       b.onclick = function () {
+        if (state.tab !== b.dataset.t) _cancelActiveStudy();
         state.tab = b.dataset.t;
         // Keep the existing buttons in place so keyboard focus is preserved.
         Array.prototype.forEach.call(el.querySelectorAll('.ai-tab'), function (item) {
@@ -1992,16 +2064,21 @@
       syncStyleVis();
       // switching a dropdown: clear stale output + refresh which languages are cached.
       modeSel.onchange = function () {
+        _cancelActiveStudy();
+        _genEnd('ai-notes-go');
         var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
         syncStyleVis();
         checkLangs(this.value, 25, true);
       };
       styleSel.onchange = function () {
+        _cancelActiveStudy();
+        _genEnd('ai-notes-go');
         var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
         checkLangs(modeSel.value, 25, false);
       };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
       document.getElementById('ai-notes-course').onclick = function () {
+        _cancelActiveStudy();
         persistView('course');
         applyView();
       };
@@ -2540,6 +2617,7 @@
           else if (typeof showToast === 'function') showToast('🎓 AI Study Pro plan mein milta hai.', 'error');
           return;
         }
+        _cancelActiveStudy();
         // The right-hand shortcut is specifically the notes generator, so it
         // always returns to the Notes controls instead of the last quiz/cards/tutor tab.
         if (b.dataset.v === 'ai') {
