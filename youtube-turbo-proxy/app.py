@@ -2201,7 +2201,7 @@ STUDY_TEST_PROVIDERS = {
     # AICampus AI Hub gateway (OpenAI-compatible, multi-model; keys start with sk-hub-).
     "aicampus":   {"url": "https://ai-hub.aicampus.my/v1/chat/completions", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "def": "minimax-m3"},
     # Kiro CLI backend (OpenAI-compatible wrapper around kiro-cli headless mode).
-    "kiro":       {"url": "https://kiro-key-test-xkd3.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
+    "kiro":       {"url": "https://kiro-key-test-s6io.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
