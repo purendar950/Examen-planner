@@ -1196,7 +1196,7 @@
     '.pdf-msg.pdf-a{background:#f8fafc;border:1px solid #eef2f6;}' +
     '.pdf-who{font-size:8.5pt;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:3px;}' +
     '.ai-ts,.ai-ts-link{color:#2563eb;font-weight:600;}';
-  // Notebook PDF: A4/Letter, 2 columns, paper look.
+  // Notebook PDF: fixed A4 hard-copy layout with two-column note flow.
   // Two-column layout notes:
   //  • column-fill:auto — fills the left column to the bottom of each page, then
   //    the right column, then the next page (Chrome mishandles `balance` on
@@ -1209,22 +1209,18 @@
   //    that fills both columns with no leveling gaps. `break-after:avoid` keeps a
   //    header from being stranded at the bottom of a column, away from its content.
   function nbPdfCss() {
-    // No fixed `size` — adapt to the user's chosen paper (A4 or US Letter) so
-    // the 2-column notes aren't clipped at the bottom / scaled on Letter.
-    // 8mm page margins protect content on ordinary home/office printers. The
-    // footer is an in-flow bar at the end of the notes, so it can never overlap
-    // the content.
-    // The print rules below use point-based type sizes so the PDF remains
-    // consistent regardless of browser zoom or selected paper.
-    return '@page{margin:8mm 8mm 10mm}' +
+    // The approved hard-copy format targets A4 explicitly: 5 mm at the top and
+    // bottom, 3 mm at the left and right. The footer stays in normal flow, so it
+    // cannot overlap the final column.
+    // Point-based sizes remain stable regardless of browser zoom.
+    return '@page{size:A4;margin:5mm 3mm}' +
       '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}' +
       'html{font-size:16px}' +
       'body{margin:0;background:#fff}' +
-      // A clean handout header saves ink and remains readable on monochrome
-      // printers, unlike a large filled colour band.
-      '.pdf-kicker{display:inline-block;margin:0 0 4pt;padding:2pt 5pt;border:0.8pt solid #315542;color:#173c2c;font-family:"Segoe UI",Arial,sans-serif;font-size:7pt;font-weight:800;letter-spacing:.09em;text-transform:uppercase}' +
-      '.pdf-title{font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:17pt;line-height:1.16;font-weight:800;margin:0 0 3pt;color:#13231a;position:relative;z-index:1}' +
-      '.pdf-meta{font-family:"Segoe UI",Arial,sans-serif;font-size:8.2pt;color:#5e6c64;margin:0 0 10pt;padding-bottom:6pt;border-bottom:0.8pt solid #aab9b0;position:relative;z-index:1}' +
+      // Colorful but print-safe document header approved in the live demo.
+      '.pdf-kicker{display:inline-block;margin:0 0 4pt;padding:2.5pt 6pt;border:0.8pt solid #d69a00;border-radius:3pt;background:#fff5b8;color:#684800;font-family:"Segoe UI",Arial,sans-serif;font-size:7pt;font-weight:800;letter-spacing:.09em;text-transform:uppercase}' +
+      '.pdf-title{font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:17pt;line-height:1.16;font-weight:800;margin:0 0 3pt;color:#123e6b;position:relative;z-index:1}' +
+      '.pdf-meta{font-family:"Segoe UI",Arial,sans-serif;font-size:8.2pt;color:#365f7f;margin:0 0 8pt;padding-bottom:5pt;border-bottom:0.8pt solid #aac7de;position:relative;z-index:1}' +
       '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:10pt;line-height:1.48;position:relative;z-index:1}' +
       '.pdf-nb .sec,.pdf-nb .subsec{break-after:avoid}' +
       // Keep genuinely small blocks intact, but let the tall blocks (topic
@@ -1237,11 +1233,11 @@
       '.pdf-nb thead{display:table-header-group}' +      // repeat header on continuation
       '.pdf-nb tbody tr{break-inside:avoid}' +            // never split a row mid-way
 
-      // header band (first page): compact wordmark + source handle
-      '.pdf-brand{display:flex;align-items:center;gap:8px;margin:0 0 8pt;padding:0 0 5pt;border-radius:0;border-top:3pt solid #173c2c;border-bottom:0.8pt solid #aab9b0;background:transparent;color:#17211d;font-family:"Segoe UI",Arial,sans-serif;position:relative;z-index:1}' +
-      '.pdf-brand .wm-name{font-weight:850;font-size:11.5pt;letter-spacing:0.2pt}' +
-      '.pdf-brand .wm-name .g{color:#245b3e}' +
-      '.pdf-brand .wm-tg{margin-left:auto;font-size:7.5pt;font-weight:700;color:#5e6c64}' +
+      // Compact colorful first-page brand strip.
+      '.pdf-brand{display:flex;align-items:center;gap:8px;margin:0 0 7pt;padding:5pt 7pt;border-radius:0 0 5pt 5pt;border-top:3pt solid #0e5d40;border-bottom:0.8pt solid #8bc3a9;background:linear-gradient(90deg,#e8fff3,#f3fbff 58%,#fff7df);color:#17211d;font-family:"Segoe UI",Arial,sans-serif;position:relative;z-index:1}' +
+      '.pdf-brand .wm-name{font-weight:850;font-size:11.5pt;letter-spacing:0.2pt;color:#0e5d40}' +
+      '.pdf-brand .wm-name .g{color:#167a55}' +
+      '.pdf-brand .wm-tg{margin-left:auto;font-size:7.5pt;font-weight:700;color:#335c7c}' +
       // A watermark uses ink and can distract from revision notes. The header and
       // footer keep attribution without compromising legibility.
       '.pdf-watermark{display:none}' +
@@ -1256,33 +1252,38 @@
       // black-and-white contrast. These rules intentionally override nbCss()
       // only inside the generated PDF.
       '.pdf-nb{font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:10pt;line-height:1.48;color:#17211d}' +
-      '.pdf-nb .sec{gap:6pt;margin:12pt 0 5pt;padding:0 0 3pt;border-bottom:1.4pt solid #173c2c!important;color:#17211d!important;font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:12pt;font-weight:800;letter-spacing:.005em}' +
-      '.pdf-nb .sec .num{width:18pt;height:18pt;border:1pt solid #173c2c;border-radius:4pt;background:#fff!important;color:#173c2c;font-size:7.5pt;font-weight:800}' +
-      '.pdf-nb .subsec{margin:8pt 0 3pt;padding-left:7pt;border-left:2pt solid #5b806d;color:#24352c;font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:10.5pt;font-weight:800}' +
+      '.pdf-nb .sec{gap:5pt;margin:9pt 0 4pt;padding:3pt 5pt;border:0!important;border-radius:5pt;background:linear-gradient(90deg,#fff0a8,#fff 78%);color:#c62828!important;font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:9.5pt;font-weight:800;letter-spacing:.005em}' +
+      '.pdf-nb .sec.c0{border:0!important;background:linear-gradient(90deg,#fff0a8,#fff 78%);color:#c62828!important}' +
+      '.pdf-nb .sec.c1{border:0!important;background:linear-gradient(90deg,#effaf0,#fff 78%);color:#2e7d32!important}' +
+      '.pdf-nb .sec.c2{border:0!important;background:linear-gradient(90deg,#eef6ff,#fff 78%);color:#1565c0!important}' +
+      '.pdf-nb .sec.c3{border:0!important;background:linear-gradient(90deg,#f7effb,#fff 78%);color:#7b1fa2!important}' +
+      '.pdf-nb .sec.c4{border:0!important;background:linear-gradient(90deg,#fff4e9,#fff 78%);color:#a94400!important}' +
+      '.pdf-nb .sec .num{width:13.5pt;height:13.5pt;border:1pt solid currentColor;border-radius:50%;background:transparent!important;color:inherit!important;font-size:6.5pt;font-weight:800}' +
+      '.pdf-nb .subsec{margin:7pt 0 3pt;padding:2.5pt 5pt;border:0;border-left:2pt solid #1678b8;background:#f0f8ff;color:#174f7a;font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:9.5pt;font-weight:800}' +
       '.pdf-nb .subsec::before{content:""}' +
       '.pdf-nb p{margin:3pt 0}' +
       '.pdf-nb ul,.pdf-nb ol{margin:3pt 0 6pt;padding-left:0}' +
       '.pdf-nb ul li{padding-left:12pt;margin:2pt 0}' +
-      '.pdf-nb ul li::before{content:"•";top:-1pt;color:#173c2c;font-size:11pt}' +
+      '.pdf-nb ul li::before{content:"•";top:-1pt;color:#2e7d32;font-size:11pt}' +
       '.pdf-nb ol li{padding-left:17pt;margin:2pt 0}' +
-      '.pdf-nb ol li::before{top:1pt;width:12pt;height:12pt;border-radius:50%;background:#53645b;color:#fff;font-size:6.5pt}' +
-      '.pdf-nb strong,.pdf-nb b,.pdf-nb .pen,.pdf-nb .fig,.pdf-nb em{color:#111;font-weight:750}' +
-      '.pdf-nb em{font-style:italic}' +
-      '.pdf-nb code{background:#f1f3f2;color:#111;padding:0 3pt;border-radius:2pt}' +
+      '.pdf-nb ol li::before{top:1pt;width:12pt;height:12pt;border:0.7pt solid #1565c0;border-radius:50%;background:#eef6ff;color:#12539d;font-size:6.5pt}' +
+      '.pdf-nb strong,.pdf-nb b,.pdf-nb .pen{color:#123e6b;font-weight:750}' +
+      '.pdf-nb .fig{color:#1b7f43;font-weight:700}' +
+      '.pdf-nb em{color:#6a1b9a;font-style:italic}' +
+      '.pdf-nb code{border:0.6pt solid #c9d7e4;background:#eef6ff;color:#173f63;padding:0 3pt;border-radius:2pt}' +
       '.pdf-nb .chips{gap:3pt;margin:3pt 0 6pt}' +
       '.pdf-nb .chip{background:#f7f9f7;border:0.6pt solid #b7c3bc;border-radius:3pt;padding:1.5pt 5pt;font-size:8.7pt;line-height:1.25}' +
-      '.pdf-nb .badge{position:relative;z-index:1;transform:none;margin:4pt 0 -1pt 5pt;padding:1.5pt 5pt;border:0.8pt solid currentColor;border-radius:3pt;background:#fff!important;color:#173c2c;font-size:6.5pt;letter-spacing:.04em}' +
-      '.pdf-nb .badge.mem{color:#5d3a6e}' +
-      '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb .notebox{margin:2pt 0 7pt;padding:5pt 7pt;border-radius:0;background:#fff;color:#17211d}' +
-      '.pdf-nb .factbox{border:0.8pt solid #a9bdb0;border-left:3pt solid #245b3e}' +
-      '.pdf-nb .membox{border:0.8pt dashed #ab9ab7;border-left:3pt solid #73558a}' +
-      '.pdf-nb .notebox{border:0.8pt solid #a5b8c8;border-left:3pt solid #2c6281}' +
-      '.pdf-nb table{width:100%;margin:7pt 0 9pt;border:0.8pt solid #93a59a;border-radius:0;font-size:8.8pt;line-height:1.35;box-shadow:none}' +
-      '.pdf-nb thead th{padding:4pt 5pt;background:#edf3ee;color:#17211d;border-bottom:1.2pt solid #315542;font-weight:800}' +
-      '.pdf-nb tbody td{padding:3.5pt 5pt;border:0.5pt solid #c9d3cd;vertical-align:top}' +
-      '.pdf-nb tbody tr:nth-child(even){background:#fafcfb}' +
-      '.pdf-nb .divider{height:1pt;margin:8pt 0;border-top:0.6pt solid #c5cfca;color:transparent;letter-spacing:0}' +
-      '.pdf-nb .divider::after{content:""}' +
+      '.pdf-nb .badge{position:relative;z-index:1;transform:none;margin:4pt 0 -1pt 5pt;padding:1.5pt 5pt;border:0.8pt solid currentColor;border-radius:3pt;background:#fff!important;color:#216327;font-size:6.5pt;letter-spacing:.04em}' +
+      '.pdf-nb .badge.mem{color:#6b198e}' +
+      '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb .notebox{margin:2pt 0 7pt;padding:5pt 7pt;border-radius:3pt;color:#17211d}' +
+      '.pdf-nb .factbox{border:0.8pt solid #8fc49a;border-left:3pt solid #2e7d32;background:#effaf0;color:#16451d}' +
+      '.pdf-nb .membox{border:0.8pt solid #c8a6d7;border-left:3pt solid #7b1fa2;background:#f7effb;color:#512068}' +
+      '.pdf-nb .notebox{border:0.8pt solid #a5c8e6;border-left:3pt solid #1565c0;background:#eef6ff;color:#174f7a}' +
+      '.pdf-nb table{width:100%;margin:7pt 0 9pt;border:0.8pt solid #4f9d91;border-radius:3pt;font-size:8.8pt;line-height:1.35;box-shadow:none}' +
+      '.pdf-nb thead th{padding:4pt 5pt;background:#edf9f7;color:#0c554b;border:0.7pt solid #4f9d91;border-bottom:1.2pt solid #176c61;font-weight:800}' +
+      '.pdf-nb tbody td{padding:3.5pt 5pt;border:0.5pt solid #b8d6d0;vertical-align:top}' +
+      '.pdf-nb tbody tr:nth-child(even){background:#eef9f7}' +
+      '.pdf-nb .divider{display:none}' +
       '.pdf-nb .q-card{margin:8pt 0 3pt;border:0.8pt solid #82958a;border-radius:0;box-shadow:none;break-inside:avoid}' +
       '.pdf-nb .q-head{padding:5pt 7pt;background:#edf3ee;color:#17211d;font-size:10pt}' +
       '.pdf-nb .q-head .qtag{padding:1pt 4pt;border:0.8pt solid #315542;border-radius:2pt;background:#fff;color:#173c2c;font-size:6.5pt}' +
