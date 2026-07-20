@@ -4012,6 +4012,10 @@ html[data-theme="light"] #page-youtube .ai-view-toggle button[data-v="course"].o
 }
 html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-color: #63ffd2; }
 #page-youtube .ai-body { min-height: 90px; padding: .62rem .7rem; }
+#page-youtube .ai-notes-workspace-intro { margin: 0 0 .55rem; }
+#page-youtube .ai-notes-workspace-intro span { display: block; color: var(--text); font-size: .72rem; font-weight: 850; }
+#page-youtube .ai-notes-workspace-intro p { margin: .16rem 0 0; color: var(--muted); font-size: .62rem; line-height: 1.45; }
+#page-youtube .ai-notes-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-bottom: .55rem; }
 #page-youtube .ai-body > div:first-child { gap: .35rem !important; }
 #page-youtube .ai-btn { min-height: 30px; padding: .35rem .62rem; border-radius: 8px; font-size: .64rem; }
 #page-youtube .ai-chip { padding: .3rem .55rem; font-size: .61rem; }

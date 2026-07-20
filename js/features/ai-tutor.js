@@ -1934,10 +1934,11 @@
     var b = shellBody(); if (!b) return;
     b.setAttribute('data-ai-tab', state.tab);
     if (state.tab === 'notes') {
-      b.innerHTML = '<div style="margin-bottom:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+      b.innerHTML = '<div class="ai-notes-workspace-intro"><span>Generate Notes</span><p>Turn the video playing beside this panel into revision-ready notes.</p></div>' +
+        '<div class="ai-notes-controls">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
         '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="mcq">❓ MCQ</option></select>' +
-        '<button class="ai-btn" id="ai-notes-go">Generate</button></div><div id="ai-langbar"></div><div id="ai-sub"></div>';
+        '<button class="ai-btn" id="ai-notes-go">Generate Notes</button></div><div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
       var styleSel = document.getElementById('ai-notes-style');
       // MCQ style only applies to comprehensive notes; hide it for summary/insights.
@@ -2088,7 +2089,7 @@
     fillStudyModels(pid, def);
   }
   function panelHtml() {
-    return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">AI Study</span>' +
+    return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">Generate Notes</span>' +
       '<select id="ai-provider" title="AI provider" style="margin-left:auto"><option value="">Auto</option></select>' +
       '<select id="ai-model" title="AI model" style="display:none"></select>' +
       '<select id="ai-lang" title="Output language">' +
@@ -2100,7 +2101,7 @@
   function ytLayout() { return document.querySelector('#page-youtube .yt-layout'); }
   function rightCol() { var l = ytLayout(); return l ? l.querySelector('.yt-panel') : null; }
   var AI_VIEW_STATE_KEY = 'aiViewParallelState';
-  var AI_VIEW_LAYOUT_VERSION = 'parallel-60-40-v1';
+  var AI_VIEW_LAYOUT_VERSION = 'parallel-notes-60-40-v2';
   var YT_PANE_STATE_KEY = 'ytStudyPaneSplit';
   var YT_PANE_LAYOUT_VERSION = 'resizable-v1';
   var YT_PANE_DEFAULT_SHARE = 60;
@@ -2456,7 +2457,7 @@
     var toggle = document.createElement('div');
     toggle.id = 'ai-view-toggle'; toggle.className = 'ai-view-toggle';
     toggle.setAttribute('role', 'group');
-    toggle.setAttribute('aria-label', 'Study workspace');
+    toggle.setAttribute('aria-label', 'Course content or Generate Notes workspace');
     toggle.innerHTML =
       '<button type="button" data-v="course" class="on" aria-pressed="true">' +
         '<span class="ai-switch-icon" aria-hidden="true">▤</span>' +
@@ -2465,8 +2466,8 @@
       '</button>' +
       '<button type="button" data-v="ai" aria-pressed="false">' +
         '<span class="ai-switch-icon" aria-hidden="true">✦</span>' +
-        '<span class="ai-switch-copy"><strong>AI Study</strong><small>Notes, quiz &amp; tutor</small></span>' +
-        '<span class="ai-switch-badge">AI</span>' +
+        '<span class="ai-switch-copy"><strong>Generate Notes</strong><small>Turn this video into notes</small></span>' +
+        '<span class="ai-switch-badge">NOTES</span>' +
       '</button>';
 
     // wrap the existing course-content children so we can show/hide them as one
@@ -2488,6 +2489,13 @@
           if (typeof ezLockedMsg === 'function') ezLockedMsg('🎓 AI Study');
           else if (typeof showToast === 'function') showToast('🎓 AI Study Pro plan mein milta hai.', 'error');
           return;
+        }
+        // The right-hand shortcut is specifically the notes generator, so it
+        // always returns to the Notes controls instead of the last quiz/cards/tutor tab.
+        if (b.dataset.v === 'ai') {
+          state.tab = 'notes';
+          renderTabs();
+          renderBody();
         }
         persistView(b.dataset.v);
         applyView();
