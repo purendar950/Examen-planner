@@ -239,6 +239,26 @@ def _fs_set(collection, doc_id, data):
     return False
 
 
+def _fs_create(collection, doc_id, data):
+    """Create a missing document without overwriting a concurrent/newer value.
+
+    Used only to repair an orphaned object-storage body after a successful read.
+    Firestore's atomic create precondition makes the repair safe even when an
+    earlier `_fs_get` returned None because of a transient read failure.
+    """
+    if not _fb_db:
+        return False
+    try:
+        _fb_db.collection(collection).document(doc_id).create(data)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        # AlreadyExists is expected if another request repaired the index first,
+        # or if the preceding read failed while the document actually existed.
+        log.info("firestore create-if-missing %s/%s skipped: %s",
+                 collection, doc_id, exc)
+        return False
+
+
 # ---- S3-compatible object storage (Backblaze B2 / Cloudflare R2) -----------
 # Study-material BODIES live here (no 1 MiB/doc limit, cheap, free egress); a
 # tiny INDEX doc stays in Firestore so "which languages exist?" stays a fast
@@ -309,6 +329,24 @@ def _s3_get_json(doc_id):
         return None
 
 
+def _s3_exists(doc_id):
+    """Check for a stored body without downloading the potentially large note."""
+    cli = _s3()
+    if not cli:
+        return False
+    try:
+        cli.head_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        code = ""
+        resp = getattr(exc, "response", None)
+        if isinstance(resp, dict):
+            code = resp.get("Error", {}).get("Code", "")
+        if code not in ("NoSuchKey", "NoSuchBucket", "404", "NotFound"):
+            log.warning("object storage head %s failed: %s", doc_id, exc)
+        return False
+
+
 def _s3_put_json(doc_id, data):
     cli = _s3()
     if not cli:
@@ -368,13 +406,31 @@ def _study_get(doc_id):
     idx = _fs_get("study", doc_id)
     if idx is None:
         # No index doc — maybe the body exists but the index write once failed.
-        return _s3_get_json(doc_id) if _s3_enabled() else None
+        body = _s3_get_json(doc_id) if _s3_enabled() else None
+        if body is not None:
+            # Heal the split write without replacing a newer/concurrent index.
+            # Serving the B2 body must not depend on this best-effort repair.
+            _fs_create("study", doc_id, _study_index_doc(body))
+        return body
     if idx.get("store") == "b2":
         return _s3_get_json(doc_id)           # None if the object is truly gone
     # Old-style FULL doc in Firestore → serve it, and migrate to object storage.
     if _s3_enabled() and _s3_put_json(doc_id, idx):
         _fs_set("study", doc_id, _study_index_doc(idx))
     return idx
+
+
+def _study_exists(doc_id):
+    """Return whether a saved note exists, including orphaned B2 bodies.
+
+    A B2 upload and its Firestore index are separate writes. If the upload wins
+    but the index write fails, checking Firestore alone hides a valid saved note
+    from `/api/study/langs`, so the frontend never requests it. Use a cheap HEAD
+    request for that uncommon path; `_study_get` repairs the index after loading.
+    """
+    if _fs_get("study", doc_id):
+        return True
+    return _s3_exists(doc_id) if _s3_enabled() else False
 
 
 def _base_ydl_opts():
@@ -2087,7 +2143,10 @@ def api_study_langs():
         fs_id = _fs_doc_id(video_id, mode, lang, num_q, style) if style \
             else _fs_doc_id(video_id, mode, lang, num_q)
         try:
-            if _fs_get("study", fs_id):
+            # Firestore is only the fast index. Also detect a B2 body whose index
+            # write failed, otherwise a successfully saved note stays invisible
+            # and the frontend never makes the request that could load it.
+            if _study_exists(fs_id):
                 available.append(lang)
         except Exception:  # noqa: BLE001
             pass
