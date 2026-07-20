@@ -682,30 +682,55 @@
   var LEC_KEY = 'aiStudyFollow';
   var LEC_TOP_OFFSET = 0.5;           // pin the active block's START in the MIDDLE of the notes box
   var LEC_POLL_MS = 250;              // poll playback time 4x/sec so the highlight tracks the teacher closely
-  var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0, _lecTsCount = 0;
+  var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0, _lecTsCount = 0, _lecNeedsResync = false;
   function lecOn() { return localStorage.getItem(LEC_KEY) === '1'; }
   function setLecOn(v) { try { localStorage.setItem(LEC_KEY, v ? '1' : '0'); } catch (e) {} }
   function lecClear() {
-    if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].classList.remove('ai-lec-on');
+    if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].el.classList.remove('ai-lec-on');
     _lecActive = -1;
+    _lecNeedsResync = false;
   }
-  // Each top-level note block's start = first .ai-ts[data-s] inside it; blocks
-  // without a timestamp inherit the previous block's start.
+  /* Build a timeline from real timestamp anchors only. The old implementation
+     assigned 0:00 to every untimestamped block before the first marker, which
+     meant a video at 0:17 could select the LAST pre-timestamp section (the
+     symptom in the screenshot). A 0:00 fallback now points only to the first
+     notebook block; every later cue points to the block that actually owns it. */
   function lecIndex(nb) {
-    _lecBlocks = []; _lecActive = -1; _lecTsCount = 0;
-    var kids = nb.children, last = 0;
+    _lecBlocks = []; _lecActive = -1; _lecTsCount = 0; _lecNeedsResync = false;
+    var kids = nb.children, cues = [];
     for (var i = 0; i < kids.length; i++) {
-      var el = kids[i], ts = el.querySelector('.ai-ts');
-      var s = ts ? parseInt(ts.getAttribute('data-s'), 10) : NaN;
-      var start = isNaN(s) ? last : s;            // inherit previous when no own timestamp
-      if (!isNaN(s)) _lecTsCount++;               // count REAL timestamps present
-      el._lecStart = start; last = start;
-      _lecBlocks.push(el);
+      var el = kids[i], anchors = el.querySelectorAll('.ai-ts');
+      for (var j = 0; j < anchors.length; j++) {
+        var s = parseInt(anchors[j].getAttribute('data-s'), 10);
+        if (!isNaN(s)) cues.push({ el: el, start: s, order: cues.length });
+      }
+    }
+    cues.sort(function (a, b) { return a.start - b.start || a.order - b.order; });
+    // Multiple markers in the same block at the same time are one cue.
+    for (var k = 0; k < cues.length; k++) {
+      var prev = _lecBlocks[_lecBlocks.length - 1];
+      if (!prev || prev.start !== cues[k].start || prev.el !== cues[k].el) {
+        _lecBlocks.push({ el: cues[k].el, start: cues[k].start });
+      }
+    }
+    _lecTsCount = _lecBlocks.length;
+    // If the earliest cue belongs to a later note block—even when it says
+    // 0:00—keep the opening block as the timeline start. This prevents a
+    // duplicated/late 0:00 marker from jumping straight to a later topic.
+    if (kids.length && (!_lecBlocks.length || _lecBlocks[0].el !== kids[0])) {
+      _lecBlocks.unshift({ el: kids[0], start: 0 });
     }
   }
   function lecActiveIndex(t) {
-    var idx = 0;
-    for (var i = 0; i < _lecBlocks.length; i++) { if (_lecBlocks[i]._lecStart <= t) idx = i; else break; }
+    var idx = 0, activeStart = _lecBlocks[0] ? _lecBlocks[0].start : 0;
+    for (var i = 0; i < _lecBlocks.length; i++) {
+      // Keep the FIRST note at a shared timestamp. This avoids an unrelated
+      // later section winning when generated notes repeat a 0:00 marker.
+      if (_lecBlocks[i].start <= t && _lecBlocks[i].start > activeStart) {
+        idx = i;
+        activeStart = _lecBlocks[i].start;
+      }
+    }
     return idx;
   }
   // Returns true only when the active block CHANGED (so we scroll just then).
@@ -713,40 +738,54 @@
     if (!_lecBlocks.length) return false;
     var idx = lecActiveIndex(t);
     if (idx === _lecActive) return false;
-    if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].classList.remove('ai-lec-on');
-    _lecBlocks[idx].classList.add('ai-lec-on');
+    if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].el.classList.remove('ai-lec-on');
+    _lecBlocks[idx].el.classList.add('ai-lec-on');
     _lecActive = idx;
     return true;
   }
-  // Pin the START of the active block in the MIDDLE of the notes box (no reflow,
-  // robust to offsetParent via getBoundingClientRect). er.top is the block's
-  // start edge, so it lands at LEC_TOP_OFFSET (50%) down the scroller.
+  // Pin the START of the active block in the MIDDLE of the notes box. A direct,
+  // clamped scroll target is more reliable than repeated scrollBy() calls when
+  // the desktop notes canvas uses overlay control lanes.
   function lecScroll() {
-    var el = _lecBlocks[_lecActive]; if (!el || !_lecScroller) return;
-    var sr = _lecScroller.getBoundingClientRect(), er = el.getBoundingClientRect();
-    _lecScroller.scrollBy({ top: (er.top - sr.top) - (sr.height * LEC_TOP_OFFSET), behavior: 'smooth' });
+    var cue = _lecBlocks[_lecActive]; if (!cue || !_lecScroller) return;
+    var sr = _lecScroller.getBoundingClientRect(), er = cue.el.getBoundingClientRect();
+    var desired = _lecScroller.scrollTop + (er.top - sr.top) - (sr.height * LEC_TOP_OFFSET);
+    var max = Math.max(0, _lecScroller.scrollHeight - _lecScroller.clientHeight);
+    desired = Math.max(0, Math.min(max, desired));
+    _lecScroller.scrollTo({ top: desired, behavior: 'smooth' });
+  }
+  function lecManualPause() {
+    _lecUserScrollUntil = Date.now() + 3000;
+    _lecNeedsResync = true;
   }
   function lecTick() {
     if (!lecOn() || state.tab !== 'notes') return;
     if (!_lecScroller || !document.body.contains(_lecScroller) || !_lecBlocks.length) return;
-    if (!_lecTsCount) return;                     // no timestamps → nothing to track (don't jump to last block)
+    if (!_lecTsCount) return;                     // no timestamps → nothing to track
     var t = 0;
     try {
       if (typeof ssGetVideoTimestampFloat === 'function') t = ssGetVideoTimestampFloat() || 0;   // sub-second precision
       else if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0;         // fallback (whole seconds)
     } catch (e) {}
     var changed = lecHighlight(t);
-    if (changed && Date.now() > _lecUserScrollUntil) lecScroll();
+    // After a student reads elsewhere, return to the active note after the
+    // grace period even if playback has not crossed another timestamp yet.
+    if ((changed || _lecNeedsResync) && Date.now() > _lecUserScrollUntil) {
+      _lecNeedsResync = false;
+      lecScroll();
+    }
   }
   function lecPaintBtn(btn) {
     if (!btn) return;
     var na = !_lecTsCount;                         // these notes have no timestamps
     var on = lecOn() && !na;
     btn.classList.toggle('ai-follow-on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.textContent = on ? '🎯 Following' : '🎯 Follow';
     btn.style.opacity = na ? '0.55' : '';
     btn.title = na ? 'These notes have no timestamps, so there is nothing to follow'
-                   : (lecOn() ? 'Following the lecture — notes auto-highlight & scroll (tap to stop)'
-                              : 'Auto-highlight & scroll the notes to where the teacher is');
+                   : (on ? 'Following the lecture — tap to pause'
+                         : 'Auto-highlight and scroll notes to the lecture');
   }
   // Wire the freshly-rendered notes into the follow engine.
   function lecSetup(box) {
@@ -754,9 +793,10 @@
     _lecScroller = box.querySelector('.ai-scroll');
     if (!nb || !_lecScroller) return;
     lecIndex(nb);
-    // A manual scroll pauses auto-follow briefly so it never fights the user.
-    ['wheel', 'touchmove'].forEach(function (ev) {
-      _lecScroller.addEventListener(ev, function () { _lecUserScrollUntil = Date.now() + 3000; }, { passive: true });
+    // A student may scroll by wheel, touch, scrollbar drag, or keyboard. Pause
+    // briefly for all of those inputs, then lecTick() recenters the same cue.
+    ['wheel', 'touchmove', 'touchstart', 'pointerdown', 'keydown'].forEach(function (ev) {
+      _lecScroller.addEventListener(ev, lecManualPause, { passive: true });
     });
     var btn = document.getElementById('ai-follow');
     if (btn) {
