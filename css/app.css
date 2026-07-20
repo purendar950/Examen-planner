@@ -4029,7 +4029,7 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
    relocated from the in-notes meta-bar onto the Generate controls line. On
    desktop the slot dissolves (display:contents) so its buttons flow as part of
    the wrapping controls row beside Generate/Course. */
-#page-youtube .ai-note-actions { display: contents; }
+#page-youtube .ai-note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
 #page-youtube .ai-note-actions:empty { display: none; }
 #page-youtube .ai-notes-controls .ai-btn#ai-follow,
 #page-youtube .ai-notes-controls .ai-btn#ai-pdf,
@@ -4403,6 +4403,18 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls > * {
     flex: 0 0 auto;
+  }
+  /* Keep the note-type select → Generate button together on one line; let the
+     type select absorb any slack so those three never wrap among themselves. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls > #ai-notes-mode {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  /* The action buttons (Following · Print/PDF · Regenerate) drop onto their own
+     full-width line directly beneath the generate row. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls > .ai-note-actions {
+    flex: 1 0 100%;
+    margin-top: .12rem;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar {
     position: static;
@@ -4826,7 +4838,7 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
   #page-youtube .ai-study-panel.notes-tab-active .ai-notes-controls {
     order: 2;
     display: grid;
-    grid-template-columns: minmax(0, 1.45fr) minmax(62px, .8fr) minmax(102px, 1fr) auto;
+    grid-template-columns: minmax(0, 1.6fr) minmax(60px, .85fr) minmax(96px, 1fr);
     align-items: center;
     gap: .25rem;
     margin: 0 .7rem;
