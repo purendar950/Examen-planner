@@ -818,7 +818,7 @@
     var nbHtml = nbBuild(content, style);
     box.innerHTML = brandBarHtml() +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
-      '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + '</span>' +
+      '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + (j.lang ? ' · ' + esc(j.lang) : '') + '</span>' +
       testBtn + shareBtn + followBtn + pdfBtn + regenBtn + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
     bindTsLinks(box);
@@ -872,6 +872,7 @@
         box.innerHTML = '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>'; return;
       }
       if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); checkLangs('flashcards', 25, false); return; }
+      if (!j.lang) j.lang = lang;
       renderNotesResult(mode, n, style, j, box);
     }).catch(function (e) {
       if (canRender && !canRender()) return;
@@ -913,7 +914,7 @@
       if (!built) {
         box.innerHTML = brandBarHtml() +
           '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-          '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') + (style === 'mcq' ? ' · MCQ' : '') + ' · streaming…</span></div>' +
+          '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (lang ? ' · ' + esc(lang) : '') + ' · streaming…</span></div>' +
           '<div class="ai-scroll nb"><div class="ai-nb"></div></div>';
         scrollEl = box.querySelector('.ai-scroll');
         nbEl = box.querySelector('.ai-nb');
@@ -950,7 +951,7 @@
       streamPainter.cancel();
       done = true;
       _genEnd(btnId);
-      renderNotesResult(mode, n, style, { content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached }, targetEl);
+      renderNotesResult(mode, n, style, { content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached, lang: (meta.lang || lang) }, targetEl);
     }
     function handleFrame(frame) {
       var ev = 'message', data = '';
