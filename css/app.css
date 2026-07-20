@@ -4156,6 +4156,16 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
   #page-youtube .yt-layout.ai-split .ai-view-toggle,
   #page-youtube .yt-layout.ai-split .ai-head,
   #page-youtube .yt-layout.ai-split .ai-tabs { flex: 0 0 auto; }
+  /* Pin the tab bar (Notes · Quiz · Cards · Tutor) to the bottom of the panel
+     for EVERY tab — not just Notes. The header stays on top, the body fills the
+     middle, and the tabs are ordered last so they always sit at the bottom. */
+  #page-youtube .yt-layout.ai-split .ai-head { order: 1; }
+  #page-youtube .yt-layout.ai-split .ai-body { order: 2; }
+  #page-youtube .yt-layout.ai-split .ai-tabs {
+    order: 3;
+    border-top: 1px solid var(--border);
+    border-bottom: 0;
+  }
   #page-youtube .yt-layout.ai-split #ai-study-panel {
     display: flex;
     flex: 1 1 auto;
