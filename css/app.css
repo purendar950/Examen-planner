@@ -4025,6 +4025,21 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 #page-youtube .ai-meta-bar { gap: .3rem !important; }
 #page-youtube .ai-meta-bar .ai-muted { min-width: 100px; font-size: .58rem; }
 #page-youtube .ai-meta-bar .ai-btn { min-height: 27px; padding: .22rem .45rem !important; font-size: .58rem !important; }
+/* Note-action buttons (Follow · Print/PDF · Regenerate · Take as Test · Share)
+   relocated from the in-notes meta-bar onto the Generate controls line. On
+   desktop the slot dissolves (display:contents) so its buttons flow as part of
+   the wrapping controls row beside Generate/Course. */
+#page-youtube .ai-note-actions { display: contents; }
+#page-youtube .ai-note-actions:empty { display: none; }
+#page-youtube .ai-notes-controls .ai-btn#ai-follow,
+#page-youtube .ai-notes-controls .ai-btn#ai-pdf,
+#page-youtube .ai-notes-controls .ai-btn#ai-regen,
+#page-youtube .ai-notes-controls .ai-btn#ai-mcq-test,
+#page-youtube .ai-notes-controls .ai-btn#ai-mcq-share {
+  min-height: 27px;
+  padding: .22rem .5rem !important;
+  font-size: .58rem !important;
+}
 #page-youtube .ai-scroll { max-height: min(62vh, 680px); border-radius: 10px; }
 #page-youtube .ai-scroll.nb { border-color: #e6dfca; }
 #page-youtube .ai-nb { padding: .85rem 1rem 1.1rem; font-size: .78rem; }
@@ -4821,6 +4836,16 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     background: transparent;
     box-shadow: none;
   }
+  /* The mobile controls row is a fixed 4-column grid, so the relocated action
+     buttons sit on their own full-width row directly beneath it. */
+  #page-youtube .ai-study-panel.notes-tab-active .ai-note-actions {
+    display: flex;
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
+    gap: .3rem;
+    margin: .12rem 0 0;
+  }
+  #page-youtube .ai-study-panel.notes-tab-active .ai-note-actions:empty { display: none; }
   #page-youtube .ai-study-panel.notes-tab-active .ai-notes-controls > * {
     min-width: 0;
     min-height: 34px;

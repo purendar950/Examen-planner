@@ -873,6 +873,10 @@
     el.innerHTML = isNotebookMode
       ? notesLoadingHtml(mode, style, lang, force)
       : loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
+    // Clear any note-action buttons parked on the controls line from a previous
+    // render; the new result re-populates the slot when it finishes.
+    var _naSlot = document.getElementById('ai-note-actions');
+    if (_naSlot) _naSlot.innerHTML = '';
     var btnId = (mode === 'flashcards') ? 'ai-cards-go' : 'ai-notes-go';
     var signal = _genStart(btnId);
     var requestId = _studyPaintRequest;
@@ -890,6 +894,24 @@
         ? '<button type="button" class="ai-note-actions-toggle bs" id="ai-note-actions-toggle" aria-expanded="false" title="Show note actions">AI Study Notes</button>'
         : '<span class="bs">AI Study Notes</span>';
     return '<div class="ai-brandbar' + (isStreaming ? ' ai-brandbar-streaming' : '') + '"><span class="bn">Study <span class="g">Planner</span></span>' + label + '</div>';
+  }
+
+  // Move the note-action buttons (Follow · Print/PDF · Regenerate · Take as
+  // Test · Share) out of the in-notes meta-bar and onto the Generate controls
+  // line, so they sit beside "Generate Notes / Course" instead of taking their
+  // own row inside the notes. The buttons keep their bound click handlers when
+  // moved. Falls back to leaving them in place if the slot isn't present (e.g.
+  // the Quiz/Cards tabs, which have no notes controls row).
+  function relocateNoteActions(box) {
+    var slot = document.getElementById('ai-note-actions');
+    if (!slot || !box) return;
+    var meta = box.querySelector('.ai-meta-bar');
+    if (!meta) return;
+    slot.innerHTML = '';
+    var btns = meta.querySelectorAll('.ai-btn');
+    for (var i = 0; i < btns.length; i++) slot.appendChild(btns[i]);
+    // Mark the meta-bar so CSS can hide it when only the muted caption remains.
+    meta.classList.toggle('ai-meta-bar-bare', !meta.querySelector('.ai-btn'));
   }
 
   // Tracks the last MCQ set auto-published to the Quiz tab (video:count), so
@@ -933,6 +955,7 @@
     };
     var msb = document.getElementById('ai-mcq-share');
     if (msb) msb.onclick = function () { shareMcqTest(); };
+    relocateNoteActions(box);         // lift the action buttons onto the Generate controls line
     // As soon as MCQ notes are generated, make them available as a quiz in the
     // Quiz tab — no "Take as Test" needed. Keyed by the current video; deduped
     // so re-renders of the same set don't re-publish.
@@ -2072,7 +2095,9 @@
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
         '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="mcq">❓ MCQ</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
-        '<button class="ai-btn sec" id="ai-notes-course" title="Show course content">Course</button></div><div id="ai-langbar"></div><div id="ai-sub"></div>';
+        '<button class="ai-btn sec" id="ai-notes-course" title="Show course content">Course</button>' +
+        '<span id="ai-note-actions" class="ai-note-actions" role="group" aria-label="Note actions"></span>' +
+        '</div><div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
       var styleSel = document.getElementById('ai-notes-style');
       // MCQ style only applies to comprehensive notes; hide it for summary/insights.
