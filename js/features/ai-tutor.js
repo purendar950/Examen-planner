@@ -879,8 +879,11 @@
 
   // StudyPlanner header shown at the top of the notes (brand only on screen; the
   // Telegram handle/watermark/footer live in the PDF export instead).
-  function brandBarHtml() {
-    return '<div class="ai-brandbar"><span class="bn">Study<span class="g">Planner</span></span><span class="bs">AI Study Notes</span></div>';
+  function brandBarHtml(withActions) {
+    var label = withActions
+      ? '<button type="button" class="ai-note-actions-toggle bs" id="ai-note-actions-toggle" aria-expanded="false" title="Show note actions">AI Study Notes</button>'
+      : '<span class="bs">AI Study Notes</span>';
+    return '<div class="ai-brandbar"><span class="bn">Study <span class="g">Planner</span></span>' + label + '</div>';
   }
 
   // Tracks the last MCQ set auto-published to the Quiz tab (video:count), so
@@ -900,11 +903,16 @@
     // Share a link so others can take the same MCQ test (login required).
     var shareBtn = (style === 'mcq') ? '<button class="ai-btn sec" id="ai-mcq-share" title="Copy a link so others can take this same MCQ test (they must log in / register)" style="padding:4px 10px;font-size:0.72rem">🔗 Share</button>' : '';
     var nbHtml = nbBuild(content, style);
-    box.innerHTML = brandBarHtml() +
+    box.innerHTML = brandBarHtml(true) +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + (j.lang ? ' · ' + esc(j.lang) : '') + '</span>' +
       testBtn + shareBtn + followBtn + pdfBtn + regenBtn + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
+    var noteTools = box.querySelector('#ai-note-actions-toggle');
+    if (noteTools) noteTools.onclick = function () {
+      var open = box.classList.toggle('ai-note-actions-open');
+      noteTools.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
     bindTsLinks(box);
     lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
     var pb = document.getElementById('ai-pdf');
@@ -2050,6 +2058,8 @@
     // the video instead of making a small paper box begin below the controls.
     var layout = ytLayout();
     if (layout) layout.classList.toggle('notes-parallel-stage', state.tab === 'notes');
+    var studyPanel = document.getElementById('ai-study-panel');
+    if (studyPanel) studyPanel.classList.toggle('notes-tab-active', state.tab === 'notes');
     if (state.tab === 'notes') {
       b.innerHTML = '<div class="ai-notes-workspace-intro"><span>Generate Notes</span><p>Turn the video playing beside this panel into revision-ready notes.</p></div>' +
         '<div class="ai-notes-controls">' +
@@ -2216,7 +2226,7 @@
     fillStudyModels(pid, def);
   }
   function panelHtml() {
-    return '<div class="ai-head"><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">Generate Notes</span>' +
+    return '<div class="ai-head"><button type="button" class="ai-mobile-back" id="ai-notes-back" aria-label="Back to course content" title="Back to course content">←</button><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">Generate Notes</span>' +
       '<select id="ai-provider" title="AI provider" style="margin-left:auto"><option value="">Auto</option></select>' +
       '<select id="ai-model" title="AI model" style="display:none"></select>' +
       '<select id="ai-lang" title="Output language">' +
@@ -2313,7 +2323,10 @@
     var v = currentView();
     if (v === 'ai' && !isPro()) v = 'course';   // Pro-only: never show AI for free users
     if (wrap) wrap.style.display = (v === 'ai') ? 'none' : '';
-    if (ai) ai.style.display = (v === 'ai') ? '' : 'none';
+    if (ai) {
+      ai.style.display = (v === 'ai') ? '' : 'none';
+      ai.classList.toggle('notes-tab-active', v === 'ai' && state.tab === 'notes');
+    }
     if (layout) { if (v === 'ai') layout.classList.add('ai-split'); else layout.classList.remove('ai-split'); }
     var mc = document.querySelector('.main-content');       // remove the 1200px cap in AI Study mode
     if (mc) mc.classList.toggle('ai-wide', v === 'ai');
@@ -2642,6 +2655,12 @@
     if (modelSel) modelSel.onchange = function () { setModel(modelSel.value); };
     var dot = document.getElementById('ai-status-dot');
     if (dot) dot.onclick = function () { _statusVid = null; checkStatus(curVid()); };
+    var notesBack = document.getElementById('ai-notes-back');
+    if (notesBack) notesBack.onclick = function () {
+      _cancelActiveStudy();
+      persistView('course');
+      applyView();
+    };
     renderTabs(); renderBody();
     ensureParallelAiDefault();
     applyView();
