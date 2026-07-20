@@ -16,7 +16,7 @@
   'use strict';
 
   var BACKEND = (localStorage.getItem('turboBackendUrl')
-    || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+    || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
   var LANG_KEY = 'aiStudyLang';
   var MODEL_KEY = 'aiStudyModel';
   var PROVIDER_KEY = 'aiStudyProvider';

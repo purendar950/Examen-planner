@@ -25,7 +25,7 @@
   /* Your deployed Render backend. Override at runtime with:
      localStorage.setItem('turboBackendUrl', 'https://your-service.onrender.com') */
   var TURBO_BACKEND_URL = (localStorage.getItem('turboBackendUrl')
-    || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+    || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
 
   /* Where the Turbo screenshot is POSTed. It goes to the SAME backend that
      streams the video (the proxy exposes /send-photo, which relays to Telegram
