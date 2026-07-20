@@ -4307,51 +4307,41 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     background: transparent;
   }
 
-  /* Put the notebook itself at the top of the right pane. The generate toolbar
-     is anchored at the bottom, so the notes canvas—not a stack of controls—is
-     what sits directly beside the video player. */
+  /* Clean top-to-bottom flow for the desktop Notes workspace:
+       ① Course / AI Study switcher as a small header on top
+       ② provider · model · language dropdown row
+       ③ generate controls (note type · style · Generate · Course) — upper
+       ④ the notes paper fills the middle and scrolls internally
+       ⑤ the Notes · Quiz · Cards · Tutor tabs stay pinned at the bottom
+     This replaces the earlier floating-overlay layout so nothing is crammed
+     against the bottom edge and the controls sit in a clearer place. */
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel {
     position: relative;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
+  /* ① Show the workspace switcher as the header (it is a sibling above the
+     panel, so it naturally sits at the very top of the right column). */
   #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-view-toggle {
-    display: none;
+    display: grid;
   }
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tabs {
-    position: absolute;
-    right: .5rem;
-    bottom: 3.45rem;
-    left: .5rem;
-    z-index: 3;
-    margin: 0;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    border: 1px solid #e0d7c4;
-    border-radius: 9px;
-    box-shadow: 0 4px 12px rgba(44, 53, 60, .08);
-  }
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-body {
-    position: relative;
-    display: block;
-    padding: 0;
-    overflow: hidden;
-  }
-  /* Keep provider, model and language selection available without consuming
-     vertical space above the player-aligned notes canvas. */
+  /* ② Dropdown row just under the header — stays in normal flow. */
   #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head {
-    position: absolute;
-    top: .5rem;
-    right: .5rem;
-    left: .5rem;
-    z-index: 4;
+    position: static;
+    order: 1;
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: .3rem;
     min-height: 27px;
-    padding: .28rem .35rem;
+    padding: .34rem .5rem;
     overflow-x: auto;
-    border: 1px solid #d8cfb9;
-    border-radius: 9px;
-    background: rgba(255, 253, 246, .96);
-    box-shadow: 0 4px 12px rgba(44, 53, 60, .08);
+    border: 0;
+    border-bottom: 1px solid #e6dfca;
+    border-radius: 0;
+    background: #fffdf6;
+    box-shadow: none;
     scrollbar-width: none;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head::-webkit-scrollbar {
@@ -4368,37 +4358,48 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     grid-column: auto;
     justify-self: auto;
   }
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls {
-    position: absolute;
-    right: .5rem;
-    bottom: .5rem;
-    left: .5rem;
-    z-index: 4;
-    flex-wrap: nowrap;
-    margin: 0;
-    padding: .34rem;
-    overflow-x: auto;
-    border: 1px solid #d8cfb9;
-    border-radius: 10px;
-    background: rgba(255, 253, 246, .96);
-    box-shadow: 0 6px 18px rgba(44, 53, 60, .12);
-    scrollbar-width: none;
+  /* Body grows to fill the space between the head and the bottom tab bar,
+     stacking the controls, language chips and notes paper in order. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-body {
+    position: relative;
+    order: 2;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    padding: .5rem;
+    overflow: hidden;
   }
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls::-webkit-scrollbar {
-    display: none;
+  /* ③ Generate controls in the upper position (top of the body). */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls {
+    position: static;
+    order: 1;
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .35rem;
+    margin: 0 0 .45rem;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls > * {
     flex: 0 0 auto;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar {
-    position: absolute;
-    top: 3.1rem;
-    right: .5rem;
-    left: .5rem;
-    z-index: 4;
+    position: static;
+    order: 2;
+    flex: 0 0 auto;
     display: block;
-    min-height: 22px;
+    min-height: 0;
+    margin: 0 0 .4rem;
     overflow: hidden;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar:empty {
+    display: none;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar .ai-muted {
     display: none;
@@ -4421,62 +4422,39 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     background: #fff;
     color: #314150;
   }
+  /* ④ The notes paper fills the rest of the body and scrolls internally. */
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub {
-    position: absolute;
-    inset: 0;
+    position: relative;
+    order: 3;
+    inset: auto;
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
-    padding: 5.15rem .5rem 6rem;
+    padding: 0;
     overflow: hidden;
-    background: #fffdf6;
-  }
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll {
-    min-height: 0;
+    background: transparent;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub > .ai-notes-loading {
     flex: 1 1 auto;
     min-height: 0;
-    margin: 5.15rem .5rem 0;
+    margin: 0;
     padding: .6rem;
     border-radius: 14px;
     background: radial-gradient(circle at 50% 18%, rgba(201, 232, 204, .35), transparent 38%), #fffdf6;
   }
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head,
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tabs,
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls {
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-  }
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll::-webkit-scrollbar { width: 8px; }
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll::-webkit-scrollbar-thumb {
-    border: 2px solid #fffdf6;
-    border-radius: 99px;
-    background: #d4decf;
-  }
-
-  /* The scrollable paper itself occupies the full right-hand pane. Branding
-     and note actions float over its top edge, so their presence never moves
-     the notes box below the video. */
-  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub {
-    padding: 0 0 6rem;
-  }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-brandbar {
-    position: absolute;
-    top: 5.15rem;
-    right: .5rem;
-    left: .5rem;
-    z-index: 2;
+    position: static;
+    flex: 0 0 auto;
+    margin: 0 0 .4rem;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-meta-bar {
-    position: absolute;
-    top: 7.35rem;
-    right: .5rem;
-    left: .5rem;
-    z-index: 2;
+    position: static;
+    flex: 0 0 auto;
     flex-wrap: nowrap !important;
-    overflow-x: auto;
+    margin: 0 0 .35rem;
     padding: .1rem 0;
+    overflow-x: auto;
     scrollbar-width: none;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-meta-bar::-webkit-scrollbar {
@@ -4486,17 +4464,37 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     flex: 0 0 auto;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll {
-    position: absolute;
-    inset: 0 0 6rem;
+    position: relative;
+    inset: auto;
     display: block;
-    flex: none;
+    flex: 1 1 auto;
     min-height: 0;
-    padding: 9.6rem .5rem 0;
+    padding: 0 .1rem;
     overflow: auto;
-    background: #fffdf6;
+    background: transparent;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll::-webkit-scrollbar { width: 8px; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll::-webkit-scrollbar-thumb {
+    border: 2px solid #fffdf6;
+    border-radius: 99px;
+    background: #d4decf;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-nb {
-    min-height: 100%;
+    min-height: 0;
+  }
+  /* ⑤ Notes · Quiz · Cards · Tutor tabs pinned to the bottom of the panel. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tabs {
+    position: static;
+    order: 3;
+    flex: 0 0 auto;
+    margin: 0;
+    padding: .4rem .5rem;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border: 0;
+    border-top: 1px solid #e0d7c4;
+    border-radius: 0;
+    box-shadow: 0 -2px 10px rgba(44, 53, 60, .05);
+    background: #f7f1e4;
   }
 }
 
@@ -4642,7 +4640,7 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
   #page-youtube .ai-study-panel.notes-tab-active .ai-notes-workspace-intro { display: none; }
   #page-youtube .ai-study-panel.notes-tab-active #ai-langbar,
   #page-youtube .ai-study-panel.notes-tab-active #ai-sub {
-    order: 2;
+    order: 3;
   }
   #page-youtube .ai-study-panel.notes-tab-active #ai-langbar {
     flex: 0 0 auto;
@@ -4768,11 +4766,11 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
   }
 
   #page-youtube .ai-study-panel.notes-tab-active .ai-tabs {
-    order: 3;
+    order: 4;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: .18rem;
-    margin: 0 .7rem .28rem;
-    padding: .28rem;
+    margin: 0 .7rem;
+    padding: .28rem .28rem calc(.28rem + env(safe-area-inset-bottom));
     border: 1px solid #e4dcc8;
     border-radius: 12px;
     background: #fffdf6;
@@ -4810,14 +4808,15 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
   #page-youtube .ai-study-panel.notes-tab-active .ai-tab.on .ai-mode-label { color: #176942; }
 
   #page-youtube .ai-study-panel.notes-tab-active .ai-notes-controls {
-    order: 4;
+    order: 2;
     display: grid;
     grid-template-columns: minmax(0, 1.45fr) minmax(62px, .8fr) minmax(102px, 1fr) auto;
     align-items: center;
     gap: .25rem;
     margin: 0 .7rem;
-    padding: .18rem 0 calc(.42rem + env(safe-area-inset-bottom));
+    padding: .42rem 0;
     border: 0;
+    border-bottom: 1px solid #ece5d3;
     background: transparent;
     box-shadow: none;
   }
