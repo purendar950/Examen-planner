@@ -221,6 +221,73 @@
     });
   }
 
+  var _studyPaintRequest = 0, _tutorTurnRequest = 0;
+
+  // Coalesce expensive full-buffer streaming renders. Only one timer/frame may
+  // be pending, every chunk leaves a trailing repaint queued, and callers can
+  // cancel pending work before a final render replaces the streaming DOM.
+  function makeStreamPaintScheduler(baseInterval, getLength, repaint) {
+    var timer = 0, frame = 0, queued = false, stopped = false;
+    var lastPaint = 0, lastPaintedLength = -1, lastRenderCost = 0;
+    var clock = (window.performance && typeof window.performance.now === 'function')
+      ? function () { return window.performance.now(); }
+      : function () { return Date.now(); };
+    var requestFrame = window.requestAnimationFrame
+      ? window.requestAnimationFrame.bind(window)
+      : function (cb) { return setTimeout(cb, 16); };
+    var cancelFrame = window.cancelAnimationFrame
+      ? window.cancelAnimationFrame.bind(window)
+      : clearTimeout;
+
+    function intervalFor(length) {
+      var interval = baseInterval;
+      if (length > 5000) interval = 500;
+      else if (length > 2000) interval = 280;
+      else if (length > 500) interval = Math.max(interval, 120);
+      // Complex markdown can be costly even when character count is modest.
+      // Leave breathing room proportional to the previous render duration.
+      return Math.max(interval, Math.min(500, Math.ceil(lastRenderCost * 4)));
+    }
+
+    function runPaint() {
+      frame = 0;
+      queued = false;
+      if (stopped) return;
+
+      var length = getLength();
+      if (length === lastPaintedLength) return;
+
+      var started = clock();
+      if (repaint() === false) return;
+      lastPaintedLength = length;
+      lastPaint = clock();
+      lastRenderCost = lastPaint - started;
+    }
+
+    function schedule() {
+      if (stopped || queued) return;
+      queued = true;
+
+      var wait = Math.max(0, intervalFor(getLength()) - (clock() - lastPaint));
+      timer = setTimeout(function () {
+        timer = 0;
+        if (stopped) { queued = false; return; }
+        frame = requestFrame(runPaint);
+      }, wait);
+    }
+
+    function cancel() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      if (frame) cancelFrame(frame);
+      timer = 0;
+      frame = 0;
+      queued = false;
+    }
+
+    return { schedule: schedule, cancel: cancel };
+  }
+
   /* ══════════════════════════════════════════════════════════════════════
      "Topper notebook" renderer — turns the AI's Markdown notes into the
      handwritten style (gel-pen emphasis, MCQ cards, Key-Fact / Memory-Trick
@@ -575,6 +642,7 @@
   // Turn the given Generate button into a Stop button and return the abort
   // signal to hand to apiGet(). Safe to call even if the button isn't present.
   function _genStart(btnId) {
+    _studyPaintRequest += 1;
     if (_genAbort) { try { _genAbort.abort(); } catch (e) {} }
     var ctrl = ('AbortController' in window) ? new AbortController() : null;
     _genAbort = ctrl;
@@ -737,8 +805,8 @@
 
   // Final render of a text note from a result-like object {content,provider,model,cached}.
   // Shared by the streaming and one-shot paths.
-  function renderNotesResult(mode, n, style, j) {
-    var box = contentEl();
+  function renderNotesResult(mode, n, style, j, targetEl) {
+    var box = targetEl || contentEl();
     var content = j.content || '';
     var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
     var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
@@ -788,7 +856,7 @@
 
   // Classic one-shot request — handles flashcards + text modes. Also the fallback
   // when streaming isn't available/fails. Owns _genEnd for its lifecycle.
-  function studyOnce(mode, n, style, lang, focus, force, signal, btnId) {
+  function studyOnce(mode, n, style, lang, focus, force, signal, btnId, targetEl, canRender) {
     var vid = curVid();
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
@@ -796,18 +864,21 @@
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
     apiGet(url, signal).then(function (j) {
+      if (canRender && !canRender()) return;
       _genEnd(btnId);
-      var box = contentEl();
+      var box = targetEl || contentEl();
       if (j.error && j.error !== 'no_captions') { box.innerHTML = errHtml(j); return; }
       if (j.warning === 'no_captions' || j.error === 'no_captions') {
         box.innerHTML = '<div class="ai-muted">No captions on this video — can\'t generate yet.</div>'; return;
       }
       if (mode === 'flashcards') { renderCards(j.cards || [], box, mode); checkLangs('flashcards', 25, false); return; }
-      renderNotesResult(mode, n, style, j);
+      renderNotesResult(mode, n, style, j, box);
     }).catch(function (e) {
+      if (canRender && !canRender()) return;
       _genEnd(btnId);
-      if (_isAbort(e)) { contentEl().innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>'; return; }
-      contentEl().innerHTML = errHtml({ error: String(e) });
+      var box = targetEl || contentEl();
+      if (_isAbort(e)) { box.innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>'; return; }
+      box.innerHTML = errHtml({ error: String(e) });
     });
   }
 
@@ -819,7 +890,8 @@
     var url = BACKEND + '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
     if (style === 'mcq') url += '&style=mcq';
     if (force) url += '&refresh=1';
-    var meta = {}, acc = '', gotChunk = false, done = false, lastPaint = 0;
+    var meta = {}, acc = '', gotChunk = false, done = false;
+    var targetEl = contentEl(), paintRequest = _studyPaintRequest;
     // Progressive render state. We build the shell (brand + meta + scroll) ONCE
     // and then only refresh the inner .ai-nb per chunk, so the scroll container
     // survives and its position is preserved. `stick` keeps the newest line (the
@@ -827,8 +899,17 @@
     // mid-generation, following pauses until they scroll back down.
     var built = false, stick = true, scrollEl = null, nbEl = null;
 
+    function ownsStudyTarget() {
+      return paintRequest === _studyPaintRequest && targetEl && targetEl.isConnected &&
+        targetEl === contentEl() && curVid() === vid;
+    }
     function paint() {
-      var box = contentEl();
+      if (!ownsStudyTarget() || (signal && signal.aborted) ||
+          (built && (!nbEl || !nbEl.isConnected))) {
+        streamPainter.cancel();
+        return false;
+      }
+      var box = targetEl;
       if (!built) {
         box.innerHTML = brandBarHtml() +
           '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
@@ -844,20 +925,32 @@
         }
         built = true;
       }
-      if (nbEl) nbEl.innerHTML = nbBuild(acc, style) + '<span class="ai-caret"></span>';
+      if (!nbEl || !nbEl.isConnected) return false;
+      nbEl.innerHTML = nbBuild(acc, style) + '<span class="ai-caret"></span>';
       if (stick && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;   // follow the writing line
+      return true;
     }
+    var streamPainter = makeStreamPaintScheduler(120, function () { return acc.length; }, paint);
     function fallback() {
-      if (done) return; done = true;
-      contentEl().innerHTML = loading('Generating ' + mode + ' (' + lang + ')…');
-      studyOnce(mode, n, style, lang, focus, force, signal, btnId);   // owns _genEnd
+      if (done) return;
+      streamPainter.cancel();
+      done = true;
+      if (!ownsStudyTarget() || (signal && signal.aborted)) return;
+      targetEl.innerHTML = loading('Generating ' + mode + ' (' + lang + ')…');
+      studyOnce(mode, n, style, lang, focus, force, signal, btnId, targetEl, ownsStudyTarget);   // owns _genEnd
     }
     function finish() {
       if (done) return;
+      if (!ownsStudyTarget() || (signal && signal.aborted)) {
+        streamPainter.cancel();
+        done = true;
+        return;
+      }
       if (!gotChunk || !acc.trim()) { fallback(); return; }   // nothing streamed → fall back
+      streamPainter.cancel();
       done = true;
       _genEnd(btnId);
-      renderNotesResult(mode, n, style, { content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached });
+      renderNotesResult(mode, n, style, { content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached }, targetEl);
     }
     function handleFrame(frame) {
       var ev = 'message', data = '';
@@ -873,8 +966,7 @@
           var o = JSON.parse(data);
           if (o && typeof o.t === 'string') {
             acc += o.t; gotChunk = true;
-            var now = Date.now();
-            if (now - lastPaint > 120) { lastPaint = now; paint(); }
+            streamPainter.schedule();
           }
         } catch (e) {}
       }
@@ -895,7 +987,18 @@
       }
       return pump();
     }).catch(function (e) {
-      if (_isAbort(e)) { done = true; _genEnd(btnId); contentEl().innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>'; return; }
+      if (paintRequest !== _studyPaintRequest) {
+        streamPainter.cancel();
+        done = true;
+        return;
+      }
+      if (_isAbort(e)) {
+        streamPainter.cancel();
+        done = true;
+        _genEnd(btnId);
+        if (ownsStudyTarget()) targetEl.innerHTML = '<div class="ai-muted">\u23f9 Stopped. Pick another model above and Generate again.</div>';
+        return;
+      }
       fallback();   // network / non-ok / no-stream → classic endpoint
     });
   }
@@ -1205,7 +1308,7 @@
     return t + ' — ' + label;
   }
   function tutorChatPdfHtml() {
-    var h = getHistory();
+    var h = getHistory().filter(function (m) { return !m.pending; });
     if (!h.length) return '<p>No chat yet.</p>';
     return h.map(function (m) {
       var who = m.role === 'user' ? 'You' : 'AI Tutor';
@@ -1526,28 +1629,44 @@
   /* ── Tutor chat ── */
   // Tutor chat is stored in localStorage (device-local) — NOT Firestore — so it
   // never bloats the synced user document. Capped at 30 messages per video.
-  function chatKey() { return 'aiTutorChat_' + curVid(); }
-  function getHistory() {
-    try { var raw = localStorage.getItem(chatKey()); return raw ? JSON.parse(raw) : []; } catch (e) { return []; }
+  function chatKey(videoId) { return 'aiTutorChat_' + (videoId || curVid()); }
+  function getHistory(key) {
+    try { var raw = localStorage.getItem(key || chatKey()); return raw ? JSON.parse(raw) : []; } catch (e) { return []; }
   }
-  function saveHistory(h) {
-    try { localStorage.setItem(chatKey(), JSON.stringify(h.slice(-30))); } catch (e) {}
+  function saveHistory(h, key) {
+    try { localStorage.setItem(key || chatKey(), JSON.stringify(h.slice(-30))); } catch (e) {}
+  }
+  function saveTutorAnswer(key, turnId, content) {
+    var hist = getHistory(key), answerAt = -1, userAt = -1;
+    for (var i = 0; i < hist.length; i++) {
+      if (hist[i].turnId === turnId && hist[i].role === 'user') userAt = i;
+      if (hist[i].turnId === turnId && hist[i].role === 'assistant') answerAt = i;
+    }
+    var answer = { role: 'assistant', content: content, turnId: turnId };
+    if (answerAt >= 0) hist[answerAt] = answer;
+    else if (userAt >= 0) hist.splice(userAt + 1, 0, answer);
+    else hist.push(answer);
+    saveHistory(hist, key);
   }
   function clearHistory() {
     try { localStorage.removeItem(chatKey()); } catch (e) {}
   }
   function chatHtml() {
     var h = getHistory();
+    var visible = h.filter(function (m) { return !m.pending; });
     var msgs = h.map(function (m) {
+      if (m.pending) {
+        return '<div class="ai-msg a" data-ai-turn="' + esc(m.turnId) + '">' + loading('Tutor soch raha hai…') + '</div>';
+      }
       return '<div class="ai-msg ' + (m.role === 'user' ? 'u' : 'a') + '">' +
         (m.role === 'user' ? esc(m.content) : '<div class="ai-md">' + mdToHtml(m.content) + '</div>') + '</div>';
     }).join('');
-    var clearBar = h.length
+    var clearBar = visible.length
       ? '<div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:4px">' +
           '<button class="ai-btn sec" id="ai-tutor-pdf" title="Download chat as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>' +
           '<button class="ai-btn sec" id="ai-clear" style="padding:4px 10px;font-size:0.72rem">🗑 Clear chat</button></div>'
       : '';
-    return clearBar + '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted">Ask a doubt about this video, ya "Teach me" dabao.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span></div>') + '</div>' +
+    return clearBar + '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted ai-chat-empty">Ask a doubt about this video, ya "Teach me" dabao.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span></div>') + '</div>' +
       '<div class="ai-chips">' +
       '<span class="ai-chip" data-q="Is video ko simple example se samjhao">Explain simpler</span>' +
       '<span class="ai-chip" data-q="Ek real example do is topic ka">Give example</span>' +
@@ -1582,26 +1701,42 @@
     });
   }
 
+  function paintTutorBubble(el, content, streaming) {
+    if (!el || !el.isConnected) return false;
+    el.innerHTML = '<div class="ai-md">' + mdToHtml(content) + (streaming ? '<span class="ai-caret"></span>' : '') + '</div>';
+    bindTsLinks(el);
+    return true;
+  }
+  function findTutorBubble(historyKey, turnId, preferred) {
+    if (preferred && preferred.isConnected) return preferred;
+    if (state.tab !== 'tutor' || chatKey() !== historyKey) return null;
+    var chat = document.getElementById('ai-chat');
+    return chat ? chat.querySelector('[data-ai-turn="' + turnId + '"]') : null;
+  }
+  function finishTutorBubble(historyKey, turnId, preferred, content) {
+    var bubble = findTutorBubble(historyKey, turnId, preferred);
+    paintTutorBubble(bubble, content, false);
+    if (state.tab === 'tutor' && chatKey() === historyKey) {
+      var hasPending = getHistory(historyKey).some(function (m) { return m.pending; });
+      if (!hasPending && !document.getElementById('ai-clear')) renderTutor();
+    }
+  }
+
   // Classic one-shot request — the fallback when streaming isn't available or
   // fails. The user turn is already pushed + saved by sendTutor; this only adds
   // the assistant reply. `histForApi` is the trimmed history to send.
-  function sendTutorOnce(vid, question, mode, histForApi) {
-    if (state.tab === 'tutor') {
-      renderTutor();
-      var chat = document.getElementById('ai-chat');
-      if (chat) { chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a">' + loading('Tutor soch raha hai…') + '</div>'); chat.scrollTop = chat.scrollHeight; }
-    }
+  function sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl) {
     fetch(BACKEND + '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: tutorBody(vid, question, mode, histForApi)
     }).then(function (r) { return r.json(); }).then(function (j) {
-      var hist = getHistory();
-      hist.push({ role: 'assistant', content: j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)') });
-      saveHistory(hist);
-      if (state.tab === 'tutor') renderTutor();
+      var answer = j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)');
+      saveTutorAnswer(historyKey, turnId, answer);
+      finishTutorBubble(historyKey, turnId, liveEl, answer);
     }).catch(function (e) {
-      var hist = getHistory(); hist.push({ role: 'assistant', content: '\u26a0 ' + String(e) }); saveHistory(hist);
-      if (state.tab === 'tutor') renderTutor();
+      var answer = '\u26a0 ' + String(e);
+      saveTutorAnswer(historyKey, turnId, answer);
+      finishTutorBubble(historyKey, turnId, liveEl, answer);
     });
   }
 
@@ -1610,44 +1745,63 @@
   // this is never worse than the classic path.
   function sendTutor(question, mode) {
     var vid = curVid(); if (!vid) return;
-    var h = getHistory();
-    if (question) h.push({ role: 'user', content: question });
-    saveHistory(h);
-    var histForApi = h.slice(-8);
+    var historyKey = chatKey(vid);
+    var turnId = 'turn_' + Date.now() + '_' + (++_tutorTurnRequest);
+    var h = getHistory(historyKey);
+    if (question) h.push({ role: 'user', content: question, turnId: turnId });
+    h.push({ role: 'assistant', content: '', turnId: turnId, pending: true });
+    saveHistory(h, historyKey);
+    var histForApi = h.filter(function (m) { return !m.pending; }).slice(-8).map(function (m) { return { role: m.role, content: m.content }; });
 
     // Live assistant bubble we grow as chunks arrive (only when the tutor tab is
     // visible). Starts as a "thinking…" spinner; the first chunk replaces it.
     var liveEl = null, chat = null;
-    if (state.tab === 'tutor') {
-      renderTutor();
+    if (state.tab === 'tutor' && chatKey() === historyKey) {
       chat = document.getElementById('ai-chat');
+      var renderedFromHistory = false;
+      var emptyState = chat && chat.querySelector('.ai-chat-empty');
+      if (!chat || emptyState) {
+        renderTutor();
+        chat = document.getElementById('ai-chat');
+        renderedFromHistory = true;
+      }
       if (chat) {
-        chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a" id="ai-live">' + loading('Tutor soch raha hai…') + '</div>');
-        liveEl = document.getElementById('ai-live');
+        if (renderedFromHistory) {
+          liveEl = findTutorBubble(historyKey, turnId, null);
+        } else {
+          if (question) chat.insertAdjacentHTML('beforeend', '<div class="ai-msg u">' + esc(question) + '</div>');
+          chat.insertAdjacentHTML('beforeend', '<div class="ai-msg a" data-ai-turn="' + esc(turnId) + '">' + loading('Tutor soch raha hai…') + '</div>');
+          liveEl = chat.lastElementChild;
+        }
         chat.scrollTop = chat.scrollHeight;
       }
     }
 
-    var acc = '', gotChunk = false, done = false, lastPaint = 0;
+    var acc = '', gotChunk = false, done = false;
 
     function paint() {
-      if (!liveEl) return;
-      liveEl.innerHTML = '<div class="ai-md">' + mdToHtml(acc) + '<span class="ai-caret"></span></div>';
-      bindTsLinks(liveEl);
-      if (chat) chat.scrollTop = chat.scrollHeight;
+      liveEl = findTutorBubble(historyKey, turnId, liveEl);
+      if (!paintTutorBubble(liveEl, acc, true)) {
+        streamPainter.cancel();
+        return false;
+      }
+      if (chat && chat.isConnected) chat.scrollTop = chat.scrollHeight;
+      return true;
     }
+    var streamPainter = makeStreamPaintScheduler(60, function () { return acc.length; }, paint);
     function finishStream() {
       if (done) return;
       if (!gotChunk || !acc.trim()) { fallback(); return; }   // nothing streamed → fall back
+      streamPainter.cancel();
       done = true;
-      var hist = getHistory();
-      hist.push({ role: 'assistant', content: acc });
-      saveHistory(hist);
-      if (state.tab === 'tutor') renderTutor();   // replaces the live bubble with the saved turn
+      saveTutorAnswer(historyKey, turnId, acc);
+      finishTutorBubble(historyKey, turnId, liveEl, acc);
     }
     function fallback() {
-      if (done) return; done = true;
-      sendTutorOnce(vid, question, mode, histForApi);
+      if (done) return;
+      streamPainter.cancel();
+      done = true;
+      sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl);
     }
     function handleFrame(frame) {
       var ev = 'message', data = '';
@@ -1663,8 +1817,7 @@
           var o = JSON.parse(data);
           if (o && typeof o.t === 'string') {
             acc += o.t; gotChunk = true;
-            var now = Date.now();
-            if (now - lastPaint > 60) { lastPaint = now; paint(); }
+            streamPainter.schedule();
           }
         } catch (e) {}
       }
