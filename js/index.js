@@ -24,25 +24,38 @@ if (fbReady) {
 }
 
 /* ══ MODAL CONTROLS ══ */
+var lastAuthTrigger = null;
 function openAuth(tab) {
-  document.getElementById('auth-overlay').classList.add('open');
+  var overlay = document.getElementById('auth-overlay');
+  lastAuthTrigger = document.activeElement;
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
   authTab(tab || 'login');
   document.body.style.overflow = 'hidden';
   setTimeout(function(){ var f = document.getElementById(tab === 'register' ? 'r-name' : 'l-email'); if (f) f.focus(); }, 120);
 }
 function closeAuth() {
-  document.getElementById('auth-overlay').classList.remove('open');
+  var overlay = document.getElementById('auth-overlay');
+  if (!overlay || !overlay.classList.contains('open')) return;
+  overlay.classList.remove('open');
+  overlay.setAttribute('aria-hidden', 'true');
   document.body.style.overflow = '';
+  if (lastAuthTrigger && typeof lastAuthTrigger.focus === 'function') lastAuthTrigger.focus();
 }
 function authTab(tab) {
   var isReg = tab === 'register';
-  document.getElementById('lt-login').classList.toggle('active', !isReg);
-  document.getElementById('lt-register').classList.toggle('active', isReg);
+  var loginTab = document.getElementById('lt-login');
+  var registerTab = document.getElementById('lt-register');
+  loginTab.classList.toggle('active', !isReg);
+  registerTab.classList.toggle('active', isReg);
+  loginTab.setAttribute('aria-selected', String(!isReg));
+  registerTab.setAttribute('aria-selected', String(isReg));
   document.getElementById('pane-login').classList.toggle('active', !isReg);
   document.getElementById('pane-register').classList.toggle('active', isReg);
   document.getElementById('auth-sub').textContent = isReg
-    ? 'Create your free account to get started.'
-    : 'Welcome back — sign in to continue.';
+    ? 'Create your free account and begin your path.'
+    : 'Welcome back—sign in to continue.';
+  clearMsgs();
 }
 function showErr(id, msg) { var e = document.getElementById(id); if (e) { e.textContent = msg; e.style.display = 'block'; } }
 function showMsg(id, msg) { var e = document.getElementById(id); if (e) { e.textContent = msg; e.style.display = 'block'; } }
@@ -170,12 +183,113 @@ async function doGoogle() {
   function apply(t) {
     document.documentElement.dataset.theme = t;
     try { localStorage.setItem('ez_theme', t); } catch(e) {}
+    var themeColor = document.querySelector('meta[name="theme-color"]');
+    if (themeColor) themeColor.setAttribute('content', t === 'dark' ? '#07110f' : '#f4f8f6');
     var b = document.getElementById('ez-theme-btn');
-    if (b) b.textContent = t === 'dark' ? '☀️' : '🌙';
+    if (b) {
+      var nextTheme = t === 'dark' ? 'light' : 'dark';
+      b.textContent = t === 'dark' ? '☀️' : '🌙';
+      b.setAttribute('aria-label', 'Switch to ' + nextTheme + ' theme');
+      b.title = 'Switch to ' + nextTheme + ' theme';
+    }
   }
   var t = 'dark';
   try { t = localStorage.getItem('ez_theme') || 'dark'; } catch(e) {}
   apply(t);
   var btn = document.getElementById('ez-theme-btn');
   if (btn) btn.onclick = function(){ apply(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); };
+})();
+
+
+
+/* ══ LANDING PAGE INTERACTIONS ══ */
+(function() {
+  document.documentElement.classList.add('js-ready');
+
+  var header = document.querySelector('.site-header');
+  var menuButton = document.getElementById('menu-toggle');
+  var navLinks = document.getElementById('nav-links');
+
+  function updateHeader() {
+    if (header) header.classList.toggle('scrolled', window.scrollY > 18);
+  }
+
+  function closeMenu() {
+    if (!menuButton || !header) return;
+    menuButton.setAttribute('aria-expanded', 'false');
+    menuButton.setAttribute('aria-label', 'Open navigation');
+    header.classList.remove('menu-open');
+  }
+  window.closeLandingMenu = closeMenu;
+
+  if (menuButton && header) {
+    menuButton.addEventListener('click', function() {
+      var willOpen = menuButton.getAttribute('aria-expanded') !== 'true';
+      menuButton.setAttribute('aria-expanded', String(willOpen));
+      menuButton.setAttribute('aria-label', willOpen ? 'Close navigation' : 'Open navigation');
+      header.classList.toggle('menu-open', willOpen);
+    });
+  }
+
+  if (navLinks) {
+    navLinks.querySelectorAll('a').forEach(function(link) {
+      link.addEventListener('click', closeMenu);
+    });
+  }
+
+  window.addEventListener('scroll', updateHeader, { passive: true });
+  window.addEventListener('resize', function() {
+    if (window.innerWidth > 960) closeMenu();
+  });
+  updateHeader();
+
+  var year = document.getElementById('current-year');
+  if (year) year.textContent = String(new Date().getFullYear());
+
+  var reveals = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window) {
+    var revealObserver = new IntersectionObserver(function(entries, observer) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    reveals.forEach(function(element) { revealObserver.observe(element); });
+  } else {
+    reveals.forEach(function(element) { element.classList.add('is-visible'); });
+  }
+
+  ['l-email', 'l-pass'].forEach(function(id) {
+    var field = document.getElementById(id);
+    if (field) field.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') doLogin();
+    });
+  });
+  ['r-name', 'r-email', 'r-mobile', 'r-exam', 'r-pass'].forEach(function(id) {
+    var field = document.getElementById(id);
+    if (field) field.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter') doRegister();
+    });
+  });
+
+  var overlay = document.getElementById('auth-overlay');
+  if (overlay) {
+    overlay.addEventListener('keydown', function(event) {
+      if (event.key !== 'Tab') return;
+      var focusable = Array.from(overlay.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled])'))
+        .filter(function(element) { return element.offsetParent !== null; });
+      if (!focusable.length) return;
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+  }
 })();
