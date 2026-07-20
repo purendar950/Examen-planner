@@ -37,3 +37,24 @@ services:
       # config/ai + config/aiLimits from Firestore.
       - key: FIREBASE_SERVICE_ACCOUNT
         sync: false
+
+  # Kiro API Key Test — standalone tool that verifies a KIRO_API_KEY works via
+  # kiro-cli headless mode (server.js in kiro-test/). Personal testing tool,
+  # not part of AI Study. Unauthenticated — anyone with the URL can spend Kiro
+  # credits, so keep the URL private (or add a shared-secret check).
+  #
+  # NOTE: the "rm -f ..." prefix in buildCommand is REQUIRED — without it the
+  # kiro-cli installer hits an interactive y/N prompt on redeploys (no TTY on
+  # Render) and the build fails. The "export PATH=..." in startCommand is also
+  # required because Render runs build and start in separate shells.
+  - type: web
+    name: kiro-key-test
+    runtime: node
+    rootDir: kiro-test
+    plan: free
+    buildCommand: "rm -f ~/.local/bin/kiro-cli ~/.local/bin/kiro-cli-chat ~/.local/bin/kiro-cli-term; curl -fsSL https://cli.kiro.dev/install | bash && npm install"
+    startCommand: 'export PATH="$HOME/.local/bin:$PATH" && node server.js'
+    envVars:
+      # Your Kiro API key (ksk_...). Set manually in the Render dashboard.
+      - key: KIRO_API_KEY
+        sync: false
