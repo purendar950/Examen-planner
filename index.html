@@ -11,8 +11,18 @@
 <title>StudyPlanner — Your Smarter Path to Exam Success</title>
 <meta name="description" content="StudyPlanner is an all-in-one study workspace built by SSC aspirant Purendar Chauhan. Plan each day, track your syllabus, organise lectures and learn from every mock test.">
 <meta name="theme-color" content="#07110f">
+<meta name="application-name" content="StudyPlanner">
+<link rel="icon" type="image/svg+xml" href="assets/brand/studyplanner-mark.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon.png">
+<link rel="manifest" href="assets/brand/site.webmanifest" vite-ignore>
 <meta property="og:title" content="StudyPlanner — Every day, one step closer">
 <meta property="og:description" content="A focused study system for SSC, Railway, Banking and Civil Services aspirants.">
+<meta property="og:image" content="https://purendar950.github.io/Examen-planner/assets/brand/studyplanner-social.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="StudyPlanner — a clear path for every serious aspirant">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://purendar950.github.io/Examen-planner/assets/brand/studyplanner-social.png">
 <link rel="stylesheet" href="css/index.css">
 <script src="vendor/firebase-app-compat.js"></script>
 <script src="vendor/firebase-auth-compat.js"></script>
@@ -24,7 +34,7 @@
 <header class="site-header" id="top">
   <nav class="nav container-wide" aria-label="Main navigation">
     <a class="brand" href="#top" aria-label="StudyPlanner home">
-      <span class="brand-art" aria-hidden="true">S</span>
+      <img class="brand-art" src="assets/brand/studyplanner-mark.svg" alt="" width="40" height="40">
       <span class="brand-name">Study<span>Planner</span></span>
     </a>
 
@@ -79,7 +89,7 @@
         <div class="dashboard-card" aria-hidden="true">
           <div class="dashboard-topbar">
             <div class="dash-brand">
-              <span class="dash-logo">S</span>
+              <img class="dash-logo" src="assets/brand/studyplanner-mark.svg" alt="" width="28" height="28">
               <div><strong>StudyPlanner</strong><small>My study workspace</small></div>
             </div>
             <div class="dash-avatar">PC</div>
@@ -307,7 +317,7 @@
           <button class="btn btn-outline-light btn-large" type="button" onclick="openAuth('login')">I already have an account</button>
         </div>
       </div>
-      <div class="cta-motif" aria-hidden="true"><span>S</span><i></i><i></i><i></i></div>
+      <div class="cta-motif" aria-hidden="true"><img src="assets/brand/studyplanner-mark.svg" alt=""><i></i><i></i><i></i></div>
     </div>
   </section>
 </main>
@@ -336,7 +346,7 @@
   <div class="auth-modal">
     <button class="auth-close" type="button" onclick="closeAuth()" title="Close" aria-label="Close authentication dialog">×</button>
     <div class="auth-brand">
-      <span class="auth-brand-mark">S</span>
+      <img class="auth-brand-mark" src="assets/brand/studyplanner-mark.svg" alt="" width="42" height="42">
       <div><div class="auth-logo" id="auth-title">Study<span>Planner</span></div><small>Every day, one step closer.</small></div>
     </div>
     <div class="auth-sub" id="auth-sub">Welcome back—sign in to continue.</div>

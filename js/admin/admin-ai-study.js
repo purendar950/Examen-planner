@@ -1,4 +1,4 @@
-/* PrepPath Admin — AI Study command center.
+/* StudyPlanner Admin — AI Study command center.
    Presentation-only module: preserves the existing Firestore fields, DOM IDs
    and global action handlers while providing a dedicated operations UI.
    Loaded after admin-actions.js. */

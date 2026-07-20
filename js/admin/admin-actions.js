@@ -1,4 +1,4 @@
-/* PrepPath Admin — ACTIONS: audit log, approve/reject/plan/trial/payment/coupon/telegram/settings handlers,
+/* StudyPlanner Admin — ACTIONS: audit log, approve/reject/plan/trial/payment/coupon/telegram/settings handlers,
    plus coupon/request/telegram/settings render helpers and the theme-toggle IIFE.
    Depends on globals from admin-core.js + admin-render.js; must load last. */
 /* ══ ACTIONS ══ */
@@ -458,7 +458,7 @@ function exportRedemptionsCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'preppath-redemptions-' + new Date().toISOString().slice(0,10) + '.csv';
+  a.download = 'studyplanner-redemptions-' + new Date().toISOString().slice(0,10) + '.csv';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   showToast('\u2705 Exported ' + REDEMPTIONS.length + ' redemptions');

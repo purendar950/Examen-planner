@@ -595,7 +595,7 @@ function ytoRenderLibrary() {
     content.innerHTML = `<div class="yto-library-empty">
       <div class="yto-empty-art" aria-hidden="true"><span>▶</span></div>
       <h3>Build your first course library</h3>
-      <p>Paste a public playlist or video above. PrepPath will keep the content, progress, and study plan together.</p>
+      <p>Paste a public playlist or video above. StudyPlanner will keep the content, progress, and study plan together.</p>
       <button type="button" onclick="document.getElementById('yto-url-input').focus()">Add your first course</button>
     </div>`;
     return;

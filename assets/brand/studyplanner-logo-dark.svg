@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 88" role="img" aria-labelledby="title desc">
+  <title id="title">StudyPlanner</title>
+  <desc id="desc">StudyPlanner logo for light backgrounds. Plan, focus, progress.</desc>
+  <defs>
+    <linearGradient id="tile" x1="8" y1="4" x2="56" y2="60" gradientUnits="userSpaceOnUse"><stop stop-color="#102923"/><stop offset="0.55" stop-color="#081713"/><stop offset="1" stop-color="#07110F"/></linearGradient>
+    <linearGradient id="route" x1="16" y1="48" x2="48" y2="14" gradientUnits="userSpaceOnUse"><stop stop-color="#47DFF4"/><stop offset="0.52" stop-color="#20E0BA"/><stop offset="1" stop-color="#19E3A2"/></linearGradient>
+  </defs>
+  <g transform="translate(8 12)">
+    <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#tile)"/><rect x="2.5" y="2.5" width="59" height="59" rx="17.5" fill="none" stroke="#9DFFE1" stroke-opacity="0.16"/>
+    <path d="M18 47H34.5C41.1 47 45.5 43.8 45.5 39.5C45.5 35.1 41.1 31.8 34.5 31.8H29.5C23 31.8 18.5 28.5 18.5 24.2C18.5 19.8 23 16.5 29.5 16.5H43.5" fill="none" stroke="url(#route)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="18" cy="47" r="4" fill="#47DFF4" stroke="#07110F" stroke-width="1.5"/><path d="M43.5 10.8L49.2 16.5L43.5 22.2L37.8 16.5Z" fill="#19E3A2"/><circle cx="43.5" cy="16.5" r="1.7" fill="#07110F"/>
+  </g>
+  <text x="88" y="47" fill="#0D211B" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="36" font-weight="800" letter-spacing="-1.5">Study<tspan fill="#007A57">Planner</tspan></text>
+  <text x="90" y="68" fill="#526A61" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="10.5" font-weight="700" letter-spacing="2.1">PLAN  •  FOCUS  •  PROGRESS</text>
+</svg>

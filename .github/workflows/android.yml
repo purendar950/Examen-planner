@@ -8,6 +8,7 @@ on:
       - 'css/**'
       - 'js/**'
       - 'pages/**'
+      - 'assets/**'
       - 'package.json'
       - 'package-lock.json'
       - 'scripts/sync-vendor-assets.mjs'
@@ -55,7 +56,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: preppath-debug-apk
+          name: studyplanner-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
