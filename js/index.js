@@ -40,6 +40,7 @@ function closeAuth() {
   overlay.classList.remove('open');
   overlay.setAttribute('aria-hidden', 'true');
   document.body.style.overflow = '';
+  clearLandingPlanIntent();
   if (lastAuthTrigger && typeof lastAuthTrigger.focus === 'function') lastAuthTrigger.focus();
 }
 function authTab(tab) {
@@ -177,6 +178,25 @@ async function doGoogle() {
     }
   } catch(e) {}
 })();
+
+/* Keep a short-lived pricing choice through authentication and hand it to
+   the app in this browser tab only. */
+function clearLandingPlanIntent() {
+  try { sessionStorage.removeItem('ez_pending_plan'); } catch(e) {}
+  try { localStorage.removeItem('ez_pending_plan'); } catch(e) {} // clear legacy intent
+}
+function selectLandingPlan(plan) {
+  clearLandingPlanIntent();
+  if (plan === 'pro') {
+    try {
+      sessionStorage.setItem('ez_pending_plan', JSON.stringify({
+        type: 'pro_trial',
+        createdAt: Date.now()
+      }));
+    } catch(e) {}
+  }
+  openAuth('register');
+}
 
 /* ══ THEME (synced via ez_theme, dark default) ══ */
 (function() {

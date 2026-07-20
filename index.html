@@ -35,18 +35,19 @@
     <div class="nav-links" id="nav-links">
       <a href="#features">Product</a>
       <a href="#how-it-works">How it works</a>
+      <a href="#pricing">Pricing</a>
       <a href="#story">Our story</a>
       <a href="#exams">Exams</a>
       <div class="nav-mobile-actions">
         <button class="btn btn-secondary" type="button" onclick="closeLandingMenu();openAuth('login')">Log in</button>
-        <button class="btn btn-primary" type="button" onclick="closeLandingMenu();openAuth('register')">Start for free <span aria-hidden="true">→</span></button>
+        <button class="btn btn-primary" type="button" onclick="closeLandingMenu();selectLandingPlan('free')">Start for free <span aria-hidden="true">→</span></button>
       </div>
     </div>
 
     <div class="nav-actions">
       <button class="theme-toggle" id="ez-theme-btn" type="button" title="Switch theme" aria-label="Switch theme">☀️</button>
       <button class="btn btn-secondary desktop-login" type="button" onclick="openAuth('login')">Log in</button>
-      <button class="btn btn-primary" type="button" onclick="openAuth('register')">Start for free <span aria-hidden="true">→</span></button>
+      <button class="btn btn-primary" type="button" onclick="selectLandingPlan('free')">Start for free <span aria-hidden="true">→</span></button>
     </div>
   </nav>
 </header>
@@ -62,7 +63,7 @@
         <h1>The study system I needed while <span>preparing for SSC.</span></h1>
         <p class="hero-lead">I was losing time between scattered plans, lectures and mock-test mistakes. So I built StudyPlanner—one calm workspace that helps every aspirant know exactly what to study next.</p>
         <div class="hero-actions">
-          <button class="btn btn-primary btn-large" type="button" onclick="openAuth('register')">Build my study plan <span aria-hidden="true">→</span></button>
+          <button class="btn btn-primary btn-large" type="button" onclick="selectLandingPlan('free')">Build my study plan <span aria-hidden="true">→</span></button>
           <a class="btn btn-secondary btn-large" href="#features">Explore the product</a>
         </div>
         <div class="trust-row" aria-label="Product benefits">
@@ -178,13 +179,89 @@
         <div class="eyebrow"><span class="eyebrow-dot"></span> Less setup. More studying.</div>
         <h2>From overwhelmed to organised in three steps.</h2>
         <p>StudyPlanner keeps the system simple enough to use every day—even when preparation gets difficult.</p>
-        <button class="btn btn-primary btn-large" type="button" onclick="openAuth('register')">Create your free workspace <span aria-hidden="true">→</span></button>
+        <button class="btn btn-primary btn-large" type="button" onclick="selectLandingPlan('free')">Create your free workspace <span aria-hidden="true">→</span></button>
       </div>
       <ol class="steps-list">
         <li class="reveal"><span>01</span><div><h3>Choose your target</h3><p>Select your exam and organise the subjects that matter for your preparation.</p></div></li>
         <li class="reveal"><span>02</span><div><h3>Build your path</h3><p>Add your syllabus, lectures and available study time to create a practical routine.</p></div></li>
         <li class="reveal"><span>03</span><div><h3>Study, review, improve</h3><p>Complete today’s work, analyse your mocks and let your progress guide tomorrow.</p></div></li>
       </ol>
+    </div>
+  </section>
+
+  <section class="pricing-section section-shell" id="pricing">
+    <div class="container-wide">
+      <div class="section-heading reveal">
+        <div class="eyebrow"><span class="eyebrow-dot"></span> Choose your access</div>
+        <h2>Start free. Go Pro when you need <span>more power.</span></h2>
+        <p>Use the complete StudyPlanner workspace for free. Upgrade when advanced planning, analysis and automation can move your preparation further.</p>
+      </div>
+
+      <div class="pricing-grid">
+        <article class="price-card reveal">
+          <div class="price-card-head">
+            <div><span class="plan-label">FREE</span><h3>Build your routine</h3></div>
+            <span class="plan-icon" aria-hidden="true">S</span>
+          </div>
+          <div class="plan-price"><strong>₹0</strong><span>forever</span></div>
+          <p class="plan-summary">Everything you need to organise daily preparation and begin tracking real progress.</p>
+          <ul class="plan-features">
+            <li><i>✓</i><span>Every app page and every exam available to browse</span></li>
+            <li><i>✓</i><span>Daily planner and syllabus editing for your target exam</span></li>
+            <li><i>✓</i><span>Limited mock-test saves for tracking attempts</span></li>
+            <li><i>✓</i><span>Limited video notes, saved courses and chapter links</span></li>
+            <li><i>✓</i><span>Limited saved video moments</span></li>
+            <li class="muted-feature"><i>—</i><span>Advanced analysis and automation</span></li>
+          </ul>
+          <button class="btn btn-secondary btn-large plan-button" type="button" onclick="selectLandingPlan('free')">Start with Free <span aria-hidden="true">→</span></button>
+          <small class="plan-note">No payment required</small>
+        </article>
+
+        <article class="price-card price-card-pro reveal">
+          <div class="popular-label">MOST CAPABLE</div>
+          <div class="price-card-head">
+            <div><span class="plan-label">PRO</span><h3>Accelerate your preparation</h3></div>
+            <span class="plan-icon pro-icon" aria-hidden="true">◆</span>
+          </div>
+          <div class="plan-price plan-price-dynamic"><strong>Flexible plans</strong><span>live price and duration shown in app</span></div>
+          <p class="plan-summary">Unlock deeper planning, unlimited core study records and tools that turn progress into next actions.</p>
+          <ul class="plan-features">
+            <li><i>✓</i><span>Manage syllabus progress across all exam tracks</span></li>
+            <li><i>✓</i><span>Unlimited mock saves with trends and weak-area analysis</span></li>
+            <li><i>✓</i><span>Weekly, monthly and three-month planner views</span></li>
+            <li><i>✓</i><span>AI study plan with automatic rescheduling</span></li>
+            <li><i>✓</i><span>Daily plan delivery through Telegram</span></li>
+            <li><i>✓</i><span>Study-plan and saved video-note PDF export</span></li>
+          </ul>
+          <button class="btn btn-primary btn-large plan-button" type="button" onclick="selectLandingPlan('pro')">Try Pro for 3 days <span aria-hidden="true">→</span></button>
+          <small class="plan-note">One trial per account · No payment needed for trial</small>
+        </article>
+      </div>
+
+      <div class="plan-comparison reveal">
+        <div class="comparison-heading"><div><span>FEATURE COMPARISON</span><h3>Know exactly what you get</h3></div><p>Usage limits are managed by StudyPlanner and the current values are shown inside your account.</p></div>
+        <p class="comparison-scroll-hint">Scroll sideways to compare all columns →</p>
+        <div class="comparison-scroll" tabindex="0" role="region" aria-label="Scrollable Free and Pro feature comparison">
+          <table>
+            <thead><tr><th>Capability</th><th>Free</th><th class="pro-column">Pro</th></tr></thead>
+            <tbody>
+              <tr><td>App pages</td><td><span class="table-check">✓</span> Full access</td><td class="pro-column"><span class="table-check">✓</span> Full access</td></tr>
+              <tr><td>Exam syllabus</td><td>Browse all; edit target exam</td><td class="pro-column">Manage all exams</td></tr>
+              <tr><td>Mock-test records</td><td>Limited saves</td><td class="pro-column">Unlimited + analysis</td></tr>
+              <tr><td>Video notes</td><td>Limited saves</td><td class="pro-column">Unlimited</td></tr>
+              <tr><td>Saved courses and links</td><td>Limited library</td><td class="pro-column">Expanded libraries</td></tr>
+              <tr><td>Planner views</td><td>Daily</td><td class="pro-column">Day, week, month and 3-month</td></tr>
+              <tr><td>Mock analysis, AI plan and study-plan/video-note PDF export</td><td><span class="table-dash">—</span></td><td class="pro-column"><span class="table-check">✓</span> Included</td></tr>
+              <tr><td>Automatic Telegram daily plan</td><td><span class="table-dash">—</span></td><td class="pro-column"><span class="table-check">✓</span> Included</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="pricing-footnote reveal">
+        <span aria-hidden="true">i</span>
+        <p><strong>How Pro purchase works:</strong> Sign in to see the current plans and duration, pay securely through UPI, then submit your transaction for verification. Your account shows the payment status until access is activated.</p>
+      </div>
     </div>
   </section>
 
@@ -226,7 +303,7 @@
         <h2>One clear path.<br>One stronger attempt.</h2>
         <p>Build a preparation system you can return to every day.</p>
         <div class="cta-actions">
-          <button class="btn btn-light btn-large" type="button" onclick="openAuth('register')">Get started free <span aria-hidden="true">→</span></button>
+          <button class="btn btn-light btn-large" type="button" onclick="selectLandingPlan('free')">Get started free <span aria-hidden="true">→</span></button>
           <button class="btn btn-outline-light btn-large" type="button" onclick="openAuth('login')">I already have an account</button>
         </div>
       </div>
@@ -246,9 +323,9 @@
       <span>Built with purpose in India by an aspirant.</span>
     </div>
     <div class="footer-links">
-      <div><strong>Product</strong><a href="#features">Features</a><a href="#how-it-works">How it works</a><a href="#exams">Supported exams</a></div>
+      <div><strong>Product</strong><a href="#features">Features</a><a href="#how-it-works">How it works</a><a href="#pricing">Free vs Pro</a><a href="#exams">Supported exams</a></div>
       <div><strong>Company</strong><a href="#story">Founder story</a><a href="#top">About StudyPlanner</a></div>
-      <div><strong>Account</strong><button type="button" onclick="openAuth('login')">Log in</button><button type="button" onclick="openAuth('register')">Create account</button></div>
+      <div><strong>Account</strong><button type="button" onclick="openAuth('login')">Log in</button><button type="button" onclick="selectLandingPlan('free')">Create account</button></div>
     </div>
   </div>
   <div class="container-wide footer-bottom"><span>© <span id="current-year">2026</span> StudyPlanner. All rights reserved.</span><span>Made for focused minds.</span></div>

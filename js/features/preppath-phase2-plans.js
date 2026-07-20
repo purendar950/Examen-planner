@@ -3,12 +3,19 @@
 ══════════════════════════════════════════════ */
 /* Fallback UPI — used only if admin has not saved one in Admin Panel → Plans → Payment Settings */
 const EZ_UPI_FALLBACK = { upiId: 'yourname@upi', payeeName: 'StudyPlanner' };
-let EZ_PLANS = [], EZ_PROFILE = null, EZ_PROFILE_STATUS = 'idle', EZ_PROFILE_UID = null,
+let EZ_PLANS = [], EZ_PLANS_STATUS = 'idle', EZ_PROFILE = null, EZ_PROFILE_STATUS = 'idle', EZ_PROFILE_UID = null,
     EZ_UPI = null, EZ_PENDING_PAY = null, _ezPickedPlan = null, _ezCoupon = null, _ezFinalAmount = 0;
 
 async function ezLoadPlans() {
-  if (!_fbReady || !db) return;
-  try { const s = await db.collection('plans').get(); EZ_PLANS = s.docs.map(d => ({ id: d.id, ...d.data() })); } catch(e) {}
+  if (!_fbReady || !db) { EZ_PLANS_STATUS = 'error'; return; }
+  EZ_PLANS_STATUS = 'loading';
+  try {
+    const s = await db.collection('plans').get();
+    EZ_PLANS = s.docs.map(d => ({ id: d.id, ...d.data() }));
+    EZ_PLANS_STATUS = 'ready';
+  } catch(e) {
+    EZ_PLANS_STATUS = 'error';
+  }
   try { const c = await db.collection('config').doc('payment').get(); EZ_UPI = c.exists ? c.data() : null; } catch(e) {}
   try {
     const fl = await db.collection('config').doc('free').get();
@@ -96,6 +103,7 @@ function ezSetProfileSnapshot(uid, profile, status) {
   EZ_PROFILE_STATUS = status || 'ready';
   if (EZ_PROFILE_STATUS === 'ready') ezCacheProfile(uid, EZ_PROFILE);
   ezRenderEntitlementSurfaces();
+  try { setTimeout(ezOpenPendingLandingPlan, 0); } catch(e) {}
   return true;
 }
 
@@ -353,7 +361,7 @@ function ezFreeProCompareHtml() {
       '</div>';
   } else if (currentUser && typeof ezIsPro === 'function' && !ezIsPro() && !ezProTrialUsed()) {
     // No plan, no trial used yet — offer free trial
-    trialBtn = '<button class="btn-modal-save" style="width:100%;margin-top:12px;" onclick="ezStartProTrial()">🎁 Start 3-day free Pro trial</button>' +
+    trialBtn = '<button id="ez-start-trial-btn" class="btn-modal-save" style="width:100%;margin-top:12px;" onclick="ezStartProTrial()">🎁 Start 3-day free Pro trial</button>' +
       '<div style="font-size:.68rem;color:var(--muted);text-align:center;margin-top:4px;">No payment needed — ek baar hi milta hai.</div>';
   } else if (typeof ezIsProTrialActive === 'function' && ezIsProTrialActive()) {
     // FIX 7b: Trial active — show countdown
@@ -561,15 +569,125 @@ async function ezSubmitPayment() {
   }
 }
 
+/* Resume a short-lived Pro-trial choice made on the public pricing page.
+   The intent is tab-scoped, expires quickly, waits for authoritative profile
+   data, and never auto-starts a trial—the user still confirms in the modal. */
+const EZ_LANDING_PLAN_INTENT_TTL = 15 * 60 * 1000;
+let _ezLandingPlanTimer = null;
+let _ezLandingPlanReadyAt = 0;
+let _ezLandingPlanRetryCount = 0;
+
+function ezClearPendingLandingPlan() {
+  try { sessionStorage.removeItem('ez_pending_plan'); } catch(e) {}
+  try { localStorage.removeItem('ez_pending_plan'); } catch(e) {} // legacy cleanup
+}
+
+function ezReadPendingLandingPlan() {
+  let raw = null;
+  try { raw = sessionStorage.getItem('ez_pending_plan'); } catch(e) {}
+  if (!raw) return null;
+  try {
+    const intent = JSON.parse(raw);
+    const age = Date.now() - Number(intent.createdAt || 0);
+    if (intent.type !== 'pro_trial' || age < 0 || age > EZ_LANDING_PLAN_INTENT_TTL) {
+      ezClearPendingLandingPlan();
+      return null;
+    }
+    return intent;
+  } catch(e) {
+    ezClearPendingLandingPlan();
+    return null;
+  }
+}
+
+function ezSchedulePendingLandingPlan(delay) {
+  if (_ezLandingPlanTimer) clearTimeout(_ezLandingPlanTimer);
+  _ezLandingPlanTimer = setTimeout(ezOpenPendingLandingPlan, Math.max(0, delay || 0));
+}
+
+function ezOpenPendingLandingPlan() {
+  _ezLandingPlanTimer = null;
+  const intent = ezReadPendingLandingPlan();
+  if (!intent || !currentUser) return;
+
+  /* Only an authoritative server profile may consume this intent. A cached
+     entitlement can be stale after an admin suspension or cross-device change. */
+  if (EZ_PROFILE_STATUS !== 'ready' ||
+      (typeof ezEntitlementDisplayPending === 'function' && ezEntitlementDisplayPending())) {
+    ezSchedulePendingLandingPlan(500);
+    return;
+  }
+  if (typeof ezIsPro === 'function' && ezIsPro()) {
+    ezClearPendingLandingPlan();
+    return;
+  }
+
+  /* Paid plans are runtime Firestore data. Retry transient failures before
+     opening the modal; after two retries, still allow the no-payment trial
+     offer to open while the modal explains that paid plans are unavailable. */
+  if (EZ_PLANS_STATUS === 'loading' || EZ_PLANS_STATUS === 'idle') {
+    ezSchedulePendingLandingPlan(500);
+    return;
+  }
+  if (EZ_PLANS_STATUS === 'error' && _ezLandingPlanRetryCount < 2) {
+    _ezLandingPlanRetryCount += 1;
+    Promise.resolve(ezLoadPlans()).finally(function() {
+      ezSchedulePendingLandingPlan(500);
+    });
+    return;
+  }
+
+  /* New accounts open the study-profile wizard 1.2s after login. Wait past
+     that launch window and, if it opens, until the user finishes or closes it. */
+  const waitForLaunch = _ezLandingPlanReadyAt - Date.now();
+  if (waitForLaunch > 0) {
+    ezSchedulePendingLandingPlan(waitForLaunch);
+    return;
+  }
+  const onboarding = document.getElementById('sp-modal-overlay');
+  const onboardingOpen = onboarding && (
+    onboarding.classList.contains('open') ||
+    window.getComputedStyle(onboarding).display !== 'none'
+  );
+  if (onboardingOpen) {
+    ezSchedulePendingLandingPlan(500);
+    return;
+  }
+
+  try { ezOpenUpgrade(); } catch(e) { ezSchedulePendingLandingPlan(750); return; }
+  const upgrade = document.getElementById('ez-upgrade-overlay');
+  if (!upgrade || !upgrade.classList.contains('open')) {
+    ezSchedulePendingLandingPlan(750);
+    return;
+  }
+
+  ezClearPendingLandingPlan();
+  setTimeout(function() {
+    const trialButton = document.getElementById('ez-start-trial-btn');
+    if (trialButton) {
+      trialButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      trialButton.focus({ preventScroll: true });
+    }
+  }, 120);
+}
+
 /* Load plans + profile after login */
 const _loginUserBaseEZ2 = loginUser;
 loginUser = function(email, name, uid, state) {
   ezPrepareProfileForUser(uid);
   _loginUserBaseEZ2(email, name, uid, state);
   ezRenderEntitlementSurfaces();
+  if (ezReadPendingLandingPlan()) {
+    _ezLandingPlanReadyAt = Date.now() + 1600;
+    _ezLandingPlanRetryCount = 0;
+  }
   // Plan configuration and entitlement are independent. Start both now rather
   // than delaying the profile behind a timer and three unrelated config reads.
-  try { ezLoadPlans(); } catch(e) {}
-  try { ezLoadProfile(); } catch(e) {}
+  var plansLoad;
+  var profileLoad;
+  try { plansLoad = ezLoadPlans(); } catch(e) { plansLoad = Promise.reject(e); }
+  try { profileLoad = ezLoadProfile(); } catch(e) { profileLoad = Promise.reject(e); }
+  Promise.allSettled([Promise.resolve(plansLoad), Promise.resolve(profileLoad)])
+    .then(function() { ezSchedulePendingLandingPlan(0); });
 };
 
