@@ -2262,6 +2262,21 @@ def _cfg_keys(cfg, field):
     return [k.strip() for k in (keys or []) if k and str(k).strip()]
 
 
+def _configured_provider_keys(cfg, pid):
+    """Return keys that can actually route a provider. Bynara supports the
+    legacy active-provider mirrors and environment fallback used by generation,
+    so status/model discovery must recognize those same sources."""
+    meta = STUDY_TEST_PROVIDERS.get(pid)
+    keys = _cfg_keys(cfg, meta["keyField"]) if meta else []
+    if pid == "bynara" and not keys:
+        keys = _cfg_keys(cfg, "studyApiKeys")
+        if not keys and cfg.get("studyApiKey"):
+            keys = [str(cfg["studyApiKey"]).strip()]
+        if not keys and os.environ.get("BYNARA_API_KEY"):
+            keys = [os.environ["BYNARA_API_KEY"].strip()]
+    return [key for key in keys if key]
+
+
 # Kiro runs a kiro-cli subprocess rather than a hosted large-context model.
 # Condense/chunk transcripts before forwarding them so long lectures do not
 # recreate the previous 413/502 timeout failures.
@@ -2274,7 +2289,7 @@ def _ai_for_provider(cfg, pid, model=None):
     meta = STUDY_TEST_PROVIDERS.get(pid)
     if not meta:
         return None
-    keys = _cfg_keys(cfg, meta["keyField"])
+    keys = _configured_provider_keys(cfg, pid)
     if not keys:
         return None
     return {
@@ -2294,7 +2309,7 @@ def _all_study_models(cfg):
     out = []
     for pid in STUDY_PROVIDER_IDS:
         meta = STUDY_TEST_PROVIDERS.get(pid)
-        if meta and _cfg_keys(cfg, meta["keyField"]):
+        if meta and _configured_provider_keys(cfg, pid):
             out.extend(eff.get(pid, []))
     return out
 
@@ -2326,10 +2341,7 @@ def api_study_test():
     for pid, meta in STUDY_TEST_PROVIDERS.items():
         if want != "all" and want != pid:
             continue
-        keys = cfg.get(meta["keyField"])
-        if isinstance(keys, str):
-            keys = re.split(r"[,\n]+", keys)
-        keys = [k.strip() for k in (keys or []) if k and str(k).strip()]
+        keys = _configured_provider_keys(cfg, pid)
         model = (cfg.get(meta["modelField"]) or meta["def"]).strip()
         if not keys:
             results[pid] = {"configured": False, "ok": False, "detail": "no key set"}
@@ -2465,6 +2477,8 @@ def api_status():
                 # Active provider's model list, so the study panel's model
                 # dropdown offers only valid choices for the configured key.
                 prov = (cfg.get("studyProvider") or "").strip().lower()
+                if not prov and _configured_provider_keys(cfg, "bynara"):
+                    prov = "bynara"
                 # Expose EVERY model whose provider has a key — the study panel
                 # lists them all and each pick routes to its own provider.
                 _all = _all_study_models(cfg)
@@ -2480,7 +2494,7 @@ def api_status():
                 _eff = _effective_provider_models(cfg)
                 for _pid in STUDY_PROVIDER_IDS:
                     _meta = STUDY_TEST_PROVIDERS.get(_pid)
-                    if _meta and _cfg_keys(cfg, _meta["keyField"]):
+                    if _meta and _configured_provider_keys(cfg, _pid):
                         _groups.append({"provider": _pid, "label": STUDY_PROVIDER_LABELS.get(_pid, _pid.capitalize()),
                                         "models": _eff.get(_pid, [])})
                 out["studyModelGroups"] = _groups
