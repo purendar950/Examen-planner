@@ -716,7 +716,7 @@ const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nv
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
-  || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+  || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
 
 /* Friendly label for a failed health-check HTTP status. */
 function studyTestMsg(status) {
@@ -1692,7 +1692,7 @@ async function saveTurboCookies() {
    localStorage.setItem('turboBackendUrl', '<url>'). */
 async function checkTurboBackend() {
   var el = document.getElementById('turbo-backend-status');
-  var url = (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+  var url = (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
   var revealResult = function() {
     if (!el) return;
     el.focus({ preventScroll: true });

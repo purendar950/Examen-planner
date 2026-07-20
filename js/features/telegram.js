@@ -179,7 +179,7 @@ function resolveTelegramTaskSubjects() {
 
 /* Base URL of the proxy that streams Telegram-hosted images (/tg-photo). */
 function tgProxyBase() {
-  return (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
+  return (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
 }
 
 /* The "Telegram Uploads" store: a flat tree the user organises in the Uploads

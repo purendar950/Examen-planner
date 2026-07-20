@@ -98,7 +98,7 @@ function anUpSave(){ if (typeof saveProgress === 'function') saveProgress(); }
 function anUpChildFolders(pid){ const u = anUp(); return Object.values(u.folders).filter(f => (f.parentId||null) === (pid||null)); }
 function anUpImagesIn(pid){ const u = anUp(); return u.images.filter(im => (im.folderId||null) === (pid||null)); }
 function anUpFolderById(id){ return id ? (anUp().folders[id] || null) : null; }
-function anUpImgUrl(im){ return im.imageUrl || ((typeof tgProxyBase === 'function' ? tgProxyBase() : 'https://youtube-turbo-proxy.onrender.com') + '/tg-photo?file_id=' + encodeURIComponent(im.tgFileId||'')); }
+function anUpImgUrl(im){ return im.imageUrl || ((typeof tgProxyBase === 'function' ? tgProxyBase() : 'https://youtube-turbo-proxy-gej4.onrender.com') + '/tg-photo?file_id=' + encodeURIComponent(im.tgFileId||'')); }
 
 function anUpNewFolder(){
   const name = (prompt('New folder name:') || '').trim();
