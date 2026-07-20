@@ -8,13 +8,11 @@
 <meta http-equiv="Expires" content="0">
 <!-- Capture a shared MCQ-test link (?t=<token>, or legacy ?mcqshare=) before login so it survives the auth round-trip -->
 <script>(function(){try{var q=new URLSearchParams(location.search);var t=q.get('t');if(t){localStorage.setItem('ez_pending_share',t);}else{var v=q.get('mcqshare');if(v)localStorage.setItem('ez_pending_mcqshare',JSON.stringify({vid:v,lang:q.get('lang')||''}));}}catch(e){}})();</script>
-<title>PrepPath — Your Smarter Path to Exam Success</title>
-<meta name="description" content="PrepPath is an all-in-one study workspace built by SSC aspirant Purendar Chauhan. Plan each day, track your syllabus, organise lectures and learn from every mock test.">
+<title>StudyPlanner — Your Smarter Path to Exam Success</title>
+<meta name="description" content="StudyPlanner is an all-in-one study workspace built by SSC aspirant Purendar Chauhan. Plan each day, track your syllabus, organise lectures and learn from every mock test.">
 <meta name="theme-color" content="#07110f">
-<meta property="og:title" content="PrepPath — Every day, one step closer">
+<meta property="og:title" content="StudyPlanner — Every day, one step closer">
 <meta property="og:description" content="A focused study system for SSC, Railway, Banking and Civil Services aspirants.">
-<meta property="og:image" content="PrepPath.png">
-<link rel="icon" type="image/png" href="PrepPath.png">
 <link rel="stylesheet" href="css/index.css">
 <script src="vendor/firebase-app-compat.js"></script>
 <script src="vendor/firebase-auth-compat.js"></script>
@@ -25,9 +23,9 @@
 
 <header class="site-header" id="top">
   <nav class="nav container-wide" aria-label="Main navigation">
-    <a class="brand" href="#top" aria-label="PrepPath home">
-      <span class="brand-art" aria-hidden="true"><img src="PrepPath.png" alt=""></span>
-      <span class="brand-name">Prep<span>Path</span></span>
+    <a class="brand" href="#top" aria-label="StudyPlanner home">
+      <span class="brand-art" aria-hidden="true">S</span>
+      <span class="brand-name">Study<span>Planner</span></span>
     </a>
 
     <button class="menu-toggle" id="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Open navigation">
@@ -62,7 +60,7 @@
       <div class="hero-copy reveal">
         <div class="eyebrow"><span class="eyebrow-dot"></span> Built by Purendar Chauhan · SSC aspirant</div>
         <h1>The study system I needed while <span>preparing for SSC.</span></h1>
-        <p class="hero-lead">I was losing time between scattered plans, lectures and mock-test mistakes. So I built PrepPath—one calm workspace that helps every aspirant know exactly what to study next.</p>
+        <p class="hero-lead">I was losing time between scattered plans, lectures and mock-test mistakes. So I built StudyPlanner—one calm workspace that helps every aspirant know exactly what to study next.</p>
         <div class="hero-actions">
           <button class="btn btn-primary btn-large" type="button" onclick="openAuth('register')">Build my study plan <span aria-hidden="true">→</span></button>
           <a class="btn btn-secondary btn-large" href="#features">Explore the product</a>
@@ -74,14 +72,14 @@
         </div>
       </div>
 
-      <div class="product-stage reveal" role="img" aria-label="Illustration of a PrepPath workspace with a daily study plan, weekly activity and syllabus progress">
+      <div class="product-stage reveal" role="img" aria-label="Illustration of a StudyPlanner workspace with a daily study plan, weekly activity and syllabus progress">
         <div class="stage-orbit orbit-one" aria-hidden="true"></div>
         <div class="stage-orbit orbit-two" aria-hidden="true"></div>
         <div class="dashboard-card" aria-hidden="true">
           <div class="dashboard-topbar">
             <div class="dash-brand">
-              <span class="dash-logo">P</span>
-              <div><strong>PrepPath</strong><small>My study workspace</small></div>
+              <span class="dash-logo">S</span>
+              <div><strong>StudyPlanner</strong><small>My study workspace</small></div>
             </div>
             <div class="dash-avatar">PC</div>
           </div>
@@ -179,7 +177,7 @@
       <div class="workflow-copy reveal">
         <div class="eyebrow"><span class="eyebrow-dot"></span> Less setup. More studying.</div>
         <h2>From overwhelmed to organised in three steps.</h2>
-        <p>PrepPath keeps the system simple enough to use every day—even when preparation gets difficult.</p>
+        <p>StudyPlanner keeps the system simple enough to use every day—even when preparation gets difficult.</p>
         <button class="btn btn-primary btn-large" type="button" onclick="openAuth('register')">Create your free workspace <span aria-hidden="true">→</span></button>
       </div>
       <ol class="steps-list">
@@ -198,11 +196,11 @@
         <div class="founder-label"><span>FOUNDER & FELLOW ASPIRANT</span><strong>Purendar Chauhan</strong></div>
       </div>
       <div class="story-copy">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> Why I built PrepPath</div>
+        <div class="eyebrow"><span class="eyebrow-dot"></span> Why I built StudyPlanner</div>
         <h2>I was preparing for SSC and facing the same problems every aspirant knows.</h2>
         <p>Plans were spread across notebooks, lectures were hard to track, and mock-test mistakes rarely became a clear next action. The hardest part was not finding more content—it was staying organised and consistent.</p>
-        <p>That struggle became the idea for PrepPath: one honest, practical workspace built around how aspirants actually study. I am building the tool I needed myself, so every student can spend less energy managing preparation and more energy making progress.</p>
-        <div class="founder-signoff"><strong>Purendar Chauhan</strong><span>Developer of PrepPath · SSC Aspirant</span></div>
+        <p>That struggle became the idea for StudyPlanner: one honest, practical workspace built around how aspirants actually study. I am building the tool I needed myself, so every student can spend less energy managing preparation and more energy making progress.</p>
+        <div class="founder-signoff"><strong>Purendar Chauhan</strong><span>Developer of StudyPlanner · SSC Aspirant</span></div>
       </div>
     </div>
   </section>
@@ -232,7 +230,7 @@
           <button class="btn btn-outline-light btn-large" type="button" onclick="openAuth('login')">I already have an account</button>
         </div>
       </div>
-      <div class="cta-motif" aria-hidden="true"><span>P</span><i></i><i></i><i></i></div>
+      <div class="cta-motif" aria-hidden="true"><span>S</span><i></i><i></i><i></i></div>
     </div>
   </section>
 </main>
@@ -240,20 +238,20 @@
 <footer class="site-footer">
   <div class="container-wide footer-main">
     <div class="footer-brand">
-      <a class="brand" href="#top" aria-label="PrepPath home">
-        <span class="brand-art" aria-hidden="true"><img src="PrepPath.png" alt=""></span>
-        <span class="brand-name">Prep<span>Path</span></span>
+      <a class="brand" href="#top" aria-label="StudyPlanner home">
+        <span class="brand-art" aria-hidden="true">S</span>
+        <span class="brand-name">Study<span>Planner</span></span>
       </a>
       <p>Every day, one step closer.</p>
       <span>Built with purpose in India by an aspirant.</span>
     </div>
     <div class="footer-links">
       <div><strong>Product</strong><a href="#features">Features</a><a href="#how-it-works">How it works</a><a href="#exams">Supported exams</a></div>
-      <div><strong>Company</strong><a href="#story">Founder story</a><a href="#top">About PrepPath</a></div>
+      <div><strong>Company</strong><a href="#story">Founder story</a><a href="#top">About StudyPlanner</a></div>
       <div><strong>Account</strong><button type="button" onclick="openAuth('login')">Log in</button><button type="button" onclick="openAuth('register')">Create account</button></div>
     </div>
   </div>
-  <div class="container-wide footer-bottom"><span>© <span id="current-year">2026</span> PrepPath. All rights reserved.</span><span>Made for focused minds.</span></div>
+  <div class="container-wide footer-bottom"><span>© <span id="current-year">2026</span> StudyPlanner. All rights reserved.</span><span>Made for focused minds.</span></div>
 </footer>
 
 <!-- Authentication modal: IDs and handlers are shared with js/index.js -->
@@ -261,8 +259,8 @@
   <div class="auth-modal">
     <button class="auth-close" type="button" onclick="closeAuth()" title="Close" aria-label="Close authentication dialog">×</button>
     <div class="auth-brand">
-      <span class="auth-brand-mark">P</span>
-      <div><div class="auth-logo" id="auth-title">Prep<span>Path</span></div><small>Every day, one step closer.</small></div>
+      <span class="auth-brand-mark">S</span>
+      <div><div class="auth-logo" id="auth-title">Study<span>Planner</span></div><small>Every day, one step closer.</small></div>
     </div>
     <div class="auth-sub" id="auth-sub">Welcome back—sign in to continue.</div>
 
@@ -291,7 +289,7 @@
       <div class="auth-field"><label for="r-mobile">Mobile</label><input type="tel" id="r-mobile" inputmode="numeric" maxlength="10" placeholder="10-digit mobile" autocomplete="tel"></div>
       <div class="auth-field"><label for="r-exam">Target exam</label><select id="r-exam"><option value="">Select your exam...</option><option value="cgl">SSC CGL</option><option value="ntpc">RRB NTPC</option><option value="gd">SSC GD</option><option value="ibps">IBPS PO</option><option value="upsc">UPSC CSE</option><option value="uppcs">UPPCS</option><option value="bpsc">BPSC</option></select></div>
       <div class="auth-field"><label for="r-pass">Password</label><input type="password" id="r-pass" placeholder="Minimum 6 characters" autocomplete="new-password"></div>
-      <p class="auth-consent">Your details are used to create and securely sync your PrepPath account.</p>
+      <p class="auth-consent">Your details are used to create and securely sync your StudyPlanner account.</p>
       <button class="auth-btn" id="r-btn" type="button" onclick="doRegister()">Create account <span aria-hidden="true">→</span></button>
       <div class="auth-err" id="r-err" role="alert"></div>
       <div class="auth-msg" id="r-msg" role="status"></div>
