@@ -408,7 +408,10 @@
       var txt = nbCleanOpt(o.text);
       return '<div class="opt' + cls + '"><span class="lbl">' + o.k + '</span> ' + nbInline(esc(txt)) + (right ? ' \u2713' : '') + '</div>';
     }).join('');
-    var qHtml = '<div class="q-card"><div class="q-head"><span class="qtag">Q' + n + '</span> ' + nbInline(esc(q.replace(/\*+/g, ''))) + '</div>' +
+    // Keep all prompt fragments in one flex child. nbInline() wraps figures (for
+    // example, 300 and 697) in spans; without this wrapper each fragment becomes
+    // its own flex item and a long question can be laid out in broken columns.
+    var qHtml = '<div class="q-card"><div class="q-head"><span class="qtag">Q' + n + '</span><span class="q-text">' + nbInline(esc(q.replace(/\*+/g, ''))) + '</span></div>' +
       (opts.length ? '<div class="q-body">' + body + '</div>' : '') + '</div>';
     var ansHtml = ans ? '<div class="answer"><span class="ok">\u2705 Answer: <mark class="ans">' + ans + '</mark></span>' +
       (ansRest ? ' ' + nbInline(esc(ansRest.replace(/^[\s\u2014\-:\uFF1A]+/, ''))) : '') + '</div>' : '';
@@ -516,6 +519,7 @@
       sc + ' .q-card{margin:12px 0 4px;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(20,40,60,.08)}',
       sc + ' .q-head{background:#2f4858;color:#eef4f8;padding:9px 13px;font-size:1rem;font-weight:700;display:flex;gap:9px;align-items:baseline}',
       sc + ' .q-head .qtag{background:rgba(255,255,255,.18);border-radius:6px;padding:1px 8px;font-size:.74rem;flex:none;font-family:system-ui,Arial,sans-serif}',
+      sc + ' .q-head .q-text{min-width:0;flex:1;overflow-wrap:anywhere}',
       sc + ' .q-head strong,' + sc + ' .q-head b,' + sc + ' .q-head .pen,' + sc + ' .q-head .fig{color:#fff}',
       sc + ' .q-head .fig{white-space:nowrap}',
       sc + ' .q-body{background:#fbfcfd;border:1px solid #cfd8dc;border-top:none;padding:7px 13px}',
