@@ -4443,10 +4443,11 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     border-radius: 14px;
     background: radial-gradient(circle at 50% 18%, rgba(201, 232, 204, .35), transparent 38%), #fffdf6;
   }
+  /* Green "Study Planner / AI Study Notes" bar removed from the desktop notes
+     view — its actions already live in the meta-bar row directly below it, and
+     the workspace header above makes the branding redundant here. */
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-brandbar {
-    position: static;
-    flex: 0 0 auto;
-    margin: 0 0 .4rem;
+    display: none;
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-meta-bar {
     position: static;
