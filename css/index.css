@@ -1,4 +1,4 @@
-/* PrepPath public landing page */
+/* StudyPlanner public landing page */
 :root {
   --accent: #19e3a2;
   --accent-strong: #00bd83;
@@ -106,8 +106,7 @@ img { display: block; max-width: 100%; }
 }
 .nav { display: flex; height: 76px; align-items: center; justify-content: space-between; gap: 28px; }
 .brand { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 8px; }
-.brand-art { position: relative; display: block; width: 40px; height: 40px; overflow: hidden; border-radius: 11px; background: #020b09; }
-.brand-art img { position: absolute; top: -70px; left: -32px; width: 180px; max-width: none; height: 180px; }
+.brand-art { display: grid; width: 40px; height: 40px; flex: 0 0 auto; border: 1px solid rgba(25, 227, 162, 0.24); border-radius: 11px; background: linear-gradient(135deg, var(--accent), #25d7c0); color: #04120e; font-size: 1rem; font-weight: 900; box-shadow: 0 8px 22px rgba(25, 227, 162, 0.14); place-items: center; }
 .brand-name { font-size: 1.25rem; font-weight: 850; letter-spacing: -0.045em; }
 .brand-name span { color: var(--accent); }
 .nav-links { display: flex; align-items: center; gap: 34px; margin-left: auto; }
@@ -468,8 +467,7 @@ html[data-theme="light"] .feature-card { background: linear-gradient(145deg, #ff
   .nav { height: 68px; }
   .nav-links { top: 68px; }
   .brand-name { font-size: 1.12rem; }
-  .brand-art { width: 36px; height: 36px; }
-  .brand-art img { top: -63px; left: -29px; width: 162px; height: 162px; }
+  .brand-art { width: 36px; height: 36px; font-size: 0.9rem; }
   .nav-actions .btn-primary { display: none; }
   .hero { padding-top: 125px; padding-bottom: 0; }
   .hero-copy h1 { font-size: clamp(2.85rem, 12vw, 4.25rem); }
