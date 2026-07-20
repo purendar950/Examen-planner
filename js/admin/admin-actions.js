@@ -707,12 +707,15 @@ const STUDY_PROVIDERS = {
   aicampus: { label: 'AICampus', host: 'ai-hub.aicampus.my', baseUrl: 'https://ai-hub.aicampus.my/v1', keyField: 'aicampusApiKeys', modelField: 'aicampusModel',
               models: ['minimax-m3', 'kimi-k2.7-code'], def: 'minimax-m3',
               note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' },
+  agentrouter: { label: 'AgentRouter', host: 'agentrouter.org', baseUrl: 'https://agentrouter.org/v1', keyField: 'agentrouterApiKeys', modelField: 'agentrouterModel',
+              models: ['claude-sonnet-4-5-20250929', 'claude-opus-4-20250514', 'claude-3-7-sonnet-20250219', 'claude-haiku-4-5-20251001', 'gpt-5.1', 'gpt-5', 'gemini-3-pro-preview', 'deepseek-v3.2', 'deepseek-v3.1', 'deepseek-r1-0528', 'glm-4.6', 'glm-4.5', 'kimi-k2-thinking'], def: 'claude-sonnet-4-5-20250929',
+              note: 'OpenAI-compatible gateway · Claude/GPT/Gemini/DeepSeek/GLM/Kimi', keyUrl: 'https://agentrouter.org' },
   kiro:     { label: 'Kiro', host: 'kiro-key-test-xkd3.onrender.com', baseUrl: 'https://kiro-key-test-xkd3.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
               models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
               def: 'auto',
               note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'kiro'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'agentrouter', 'kiro'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
