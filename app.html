@@ -21,10 +21,10 @@
      and all app scripts below are also deferred, so firebase.* globals
      are guaranteed ready before firebase.js / auth.js run.
      ═══════════════════════════════════════════════════════════ -->
-<script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-<script defer src="https://www.gstatic.com/firebasejs/10.7.1/firebase-storage-compat.js"></script>
+<script defer src="vendor/firebase-app-compat.js"></script>
+<script defer src="vendor/firebase-auth-compat.js"></script>
+<script defer src="vendor/firebase-firestore-compat.js"></script>
+<script defer src="vendor/firebase-storage-compat.js"></script>
 </head>
 <body>
 
@@ -443,7 +443,7 @@
 <script defer src="js/tabs/mock-tests-render.js"></script>
 <script defer src="js/tabs/analysis.js"></script>
 <!-- 🔖 Saved Questions (Supabase-backed, shared store with the quiz engine) -->
-<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script defer src="vendor/supabase.js"></script>
 <script defer src="js/saved-questions.js"></script>
 <!-- 📊 Quiz attempts (Supabase-backed, cross-device history for the Quiz tab) -->
 <script defer src="js/quiz-attempts.js"></script>

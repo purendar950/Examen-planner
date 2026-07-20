@@ -11,9 +11,17 @@ plugins {
 def webRoot = rootProject.file('..')              // repo root (one level above /android)
 def bundledWww = file('src/main/assets/www')
 
+tasks.register('syncWebVendorAssets', Exec) {
+    description = 'Builds package-managed Firebase and Supabase browser assets.'
+    group = 'build'
+    workingDir webRoot
+    commandLine 'npm', 'run', 'vendor:sync'
+}
+
 tasks.register('copyWebAssets', Copy) {
     description = 'Copies the StudyPlanner web app into the Android assets folder.'
     group = 'build'
+    dependsOn 'syncWebVendorAssets'
     into bundledWww
     from(webRoot) {
         include 'index.html'
@@ -23,6 +31,9 @@ tasks.register('copyWebAssets', Copy) {
         include 'js/**'
         include 'src/**'
         include 'pages/**'
+    }
+    from(new File(webRoot, 'public')) {
+        include 'vendor/**'
     }
 }
 
