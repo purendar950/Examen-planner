@@ -808,7 +808,7 @@
   function renderNotesResult(mode, n, style, j, targetEl) {
     var box = targetEl || contentEl();
     var content = j.content || '';
-    var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Download as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>';
+    var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Print or save as a hard-copy-ready PDF" style="padding:4px 10px;font-size:0.72rem">📄 Print / PDF</button>';
     var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
     var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
     // Comprehensive MCQ notes → launch every question as a full test in the exam engine.
@@ -824,7 +824,7 @@
     bindTsLinks(box);
     lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
     var pb = document.getElementById('ai-pdf');
-    if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true }); };
+    if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true, documentLabel: pdfDocumentLabelFor(mode, style) }); };
     var rb = document.getElementById('ai-regen');
     if (rb) rb.onclick = function () { showStudy(mode, n, true); };
     var mtb = document.getElementById('ai-mcq-test');
@@ -1196,7 +1196,7 @@
     '.pdf-msg.pdf-a{background:#f8fafc;border:1px solid #eef2f6;}' +
     '.pdf-who{font-size:8.5pt;font-weight:800;text-transform:uppercase;letter-spacing:.5px;color:#64748b;margin-bottom:3px;}' +
     '.ai-ts,.ai-ts-link{color:#2563eb;font-weight:600;}';
-  // Notebook PDF: A4/Letter, 2 columns, paper look.
+  // Notebook PDF: fixed A4 hard-copy layout with two-column note flow.
   // Two-column layout notes:
   //  • column-fill:auto — fills the left column to the bottom of each page, then
   //    the right column, then the next page (Chrome mishandles `balance` on
@@ -1209,21 +1209,19 @@
   //    that fills both columns with no leveling gaps. `break-after:avoid` keeps a
   //    header from being stranded at the bottom of a column, away from its content.
   function nbPdfCss() {
-    // No fixed `size` — adapt to the user's chosen paper (A4 or US Letter) so
-    // the 2-column notes aren't clipped at the bottom / scaled on Letter.
-    // 5mm page margin. The Telegram footer is an in-flow bar at the end of the
-    // notes (see .pdf-footer) rather than a fixed per-page bar, so it can never
-    // overlap the text.
-    // html font-size (18px) scales all rem-based sizes in nbCss (section
-    // headers, chips, options, tables) for a larger, more readable PDF.
-    return '@page{margin:5mm 7mm}' +
+    // The approved hard-copy format targets A4 explicitly: 5 mm at the top and
+    // bottom, 3 mm at the left and right. The footer stays in normal flow, so it
+    // cannot overlap the final column.
+    // Point-based sizes remain stable regardless of browser zoom.
+    return '@page{size:A4;margin:5mm 3mm}' +
       '*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}' +
-      'html{font-size:18px}' +
+      'html{font-size:16px}' +
       'body{margin:0;background:#fff}' +
-      // content sits above the fixed watermark
-      '.pdf-title{font-family:"Kalam","Noto Sans Devanagari",system-ui,Arial,sans-serif;font-size:17pt;font-weight:800;margin:0 0 2px;color:#14532d;position:relative;z-index:1}' +
-      '.pdf-meta{font-family:system-ui,Arial,sans-serif;font-size:8.5pt;color:#64748b;margin:0 0 9px;padding-bottom:6px;border-bottom:2px solid #e2e8f0;position:relative;z-index:1}' +
-      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:12pt;line-height:1.42;position:relative;z-index:1}' +
+      // Colorful but print-safe document header approved in the live demo.
+      '.pdf-kicker{display:inline-block;margin:0 0 4pt;padding:2.5pt 6pt;border:0.8pt solid #d69a00;border-radius:3pt;background:#fff5b8;color:#684800;font-family:"Segoe UI",Arial,sans-serif;font-size:7pt;font-weight:800;letter-spacing:.09em;text-transform:uppercase}' +
+      '.pdf-title{font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:17pt;line-height:1.16;font-weight:800;margin:0 0 3pt;color:#123e6b;position:relative;z-index:1}' +
+      '.pdf-meta{font-family:"Segoe UI",Arial,sans-serif;font-size:8.2pt;color:#365f7f;margin:0 0 8pt;padding-bottom:5pt;border-bottom:0.8pt solid #aac7de;position:relative;z-index:1}' +
+      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:10pt;line-height:1.48;position:relative;z-index:1}' +
       '.pdf-nb .sec,.pdf-nb .subsec{break-after:avoid}' +
       // Keep genuinely small blocks intact, but let the tall blocks (topic
       // tables + factboxes) SPLIT across columns/pages. A `break-inside:avoid`
@@ -1235,24 +1233,69 @@
       '.pdf-nb thead{display:table-header-group}' +      // repeat header on continuation
       '.pdf-nb tbody tr{break-inside:avoid}' +            // never split a row mid-way
 
-      // ── Telegram / StudyPlanner branding (PDF only) ──
-      // header band (top of page 1): wordmark + Telegram handle
-      '.pdf-brand{display:flex;align-items:center;gap:8px;margin:0 0 8px;padding:6px 11px;border-radius:6px;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;position:relative;z-index:1}' +
-      '.pdf-brand .wm-name{font-weight:800;font-size:12.5pt;letter-spacing:0.3px}' +
-      '.pdf-brand .wm-name .g{color:#8bffbe}' +
-      '.pdf-brand .wm-tg{margin-left:auto;font-size:8.5pt;font-weight:700;color:#d7ffe6}' +
-      // faint diagonal watermark — repeats on EVERY page (position:fixed)
-      '.pdf-watermark{position:fixed;top:44%;left:-6%;right:-6%;text-align:center;transform:rotate(-27deg);font-family:system-ui,Arial,sans-serif;font-weight:800;font-size:44pt;color:#14532d;opacity:0.06;letter-spacing:3px;z-index:0;pointer-events:none}' +
-      // footer link bar — rendered ONCE in normal flow at the very end of the
-      // notes (NOT position:fixed). A fixed per-page bar reliably overlapped the
-      // text in Chrome's print engine (it anchors fixed elements to the content
-      // box, so it sat on top of the last/first lines). An in-flow footer can
-      // never overlap; per-page branding is still covered by the diagonal
-      // watermark and the page-1 header band.
-      '.pdf-footer{display:flex;align-items:center;justify-content:center;gap:6px;margin:14px 0 0;padding:7px 11px;border-radius:6px;background:linear-gradient(135deg,#14532d,#166534);color:#fff;font-family:system-ui,Arial,sans-serif;font-size:8.5pt;font-weight:700;position:relative;z-index:1;break-inside:avoid}' +
-      '.pdf-footer a{color:#fff;text-decoration:underline}' +
-      '.pdf-footer .g{color:#8bffbe}' +
+      // Compact colorful first-page brand strip.
+      '.pdf-brand{display:flex;align-items:center;gap:8px;margin:0 0 7pt;padding:5pt 7pt;border-radius:0 0 5pt 5pt;border-top:3pt solid #0e5d40;border-bottom:0.8pt solid #8bc3a9;background:linear-gradient(90deg,#e8fff3,#f3fbff 58%,#fff7df);color:#17211d;font-family:"Segoe UI",Arial,sans-serif;position:relative;z-index:1}' +
+      '.pdf-brand .wm-name{font-weight:850;font-size:11.5pt;letter-spacing:0.2pt;color:#0e5d40}' +
+      '.pdf-brand .wm-name .g{color:#167a55}' +
+      '.pdf-brand .wm-tg{margin-left:auto;font-size:7.5pt;font-weight:700;color:#335c7c}' +
+      // A watermark uses ink and can distract from revision notes. The header and
+      // footer keep attribution without compromising legibility.
+      '.pdf-watermark{display:none}' +
+      // Footer stays in normal flow so it can never overlap the final column.
+      '.pdf-footer{display:flex;align-items:center;justify-content:center;gap:4pt;margin:12pt 0 0;padding:5pt 0 0;border-radius:0;border-top:0.8pt solid #aab9b0;background:transparent;color:#5e6c64;font-family:"Segoe UI",Arial,sans-serif;font-size:7.5pt;font-weight:700;position:relative;z-index:1;break-inside:avoid}' +
+      '.pdf-footer a{color:#245b3e;text-decoration:underline}' +
+      '.pdf-footer .g{color:#245b3e}' +
       nbCss('.pdf-nb') +
+      // ── Dedicated hard-copy treatment ───────────────────────────────────
+      // The notebook styling is attractive on screen, but physical pages need
+      // calmer typography, lower ink coverage, stronger hierarchy and reliable
+      // black-and-white contrast. These rules intentionally override nbCss()
+      // only inside the generated PDF.
+      '.pdf-nb{font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:10pt;line-height:1.48;color:#17211d}' +
+      '.pdf-nb .sec{gap:5pt;margin:9pt 0 4pt;padding:3pt 5pt;border:0!important;border-radius:5pt;background:linear-gradient(90deg,#fff0a8,#fff 78%);color:#c62828!important;font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:9.5pt;font-weight:800;letter-spacing:.005em}' +
+      '.pdf-nb .sec.c0{border:0!important;background:linear-gradient(90deg,#fff0a8,#fff 78%);color:#c62828!important}' +
+      '.pdf-nb .sec.c1{border:0!important;background:linear-gradient(90deg,#effaf0,#fff 78%);color:#2e7d32!important}' +
+      '.pdf-nb .sec.c2{border:0!important;background:linear-gradient(90deg,#eef6ff,#fff 78%);color:#1565c0!important}' +
+      '.pdf-nb .sec.c3{border:0!important;background:linear-gradient(90deg,#f7effb,#fff 78%);color:#7b1fa2!important}' +
+      '.pdf-nb .sec.c4{border:0!important;background:linear-gradient(90deg,#fff4e9,#fff 78%);color:#a94400!important}' +
+      '.pdf-nb .sec .num{width:13.5pt;height:13.5pt;border:1pt solid currentColor;border-radius:50%;background:transparent!important;color:inherit!important;font-size:6.5pt;font-weight:800}' +
+      '.pdf-nb .subsec{margin:7pt 0 3pt;padding:2.5pt 5pt;border:0;border-left:2pt solid #1678b8;background:#f0f8ff;color:#174f7a;font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:9.5pt;font-weight:800}' +
+      '.pdf-nb .subsec::before{content:""}' +
+      '.pdf-nb p{margin:3pt 0}' +
+      '.pdf-nb ul,.pdf-nb ol{margin:3pt 0 6pt;padding-left:0}' +
+      '.pdf-nb ul li{padding-left:12pt;margin:2pt 0}' +
+      '.pdf-nb ul li::before{content:"•";top:-1pt;color:#2e7d32;font-size:11pt}' +
+      '.pdf-nb ol li{padding-left:17pt;margin:2pt 0}' +
+      '.pdf-nb ol li::before{top:1pt;width:12pt;height:12pt;border:0.7pt solid #1565c0;border-radius:50%;background:#eef6ff;color:#12539d;font-size:6.5pt}' +
+      '.pdf-nb strong,.pdf-nb b,.pdf-nb .pen{color:#123e6b;font-weight:750}' +
+      '.pdf-nb .fig{color:#1b7f43;font-weight:700}' +
+      '.pdf-nb em{color:#6a1b9a;font-style:italic}' +
+      '.pdf-nb code{border:0.6pt solid #c9d7e4;background:#eef6ff;color:#173f63;padding:0 3pt;border-radius:2pt}' +
+      '.pdf-nb .chips{gap:3pt;margin:3pt 0 6pt}' +
+      '.pdf-nb .chip{background:#f7f9f7;border:0.6pt solid #b7c3bc;border-radius:3pt;padding:1.5pt 5pt;font-size:8.7pt;line-height:1.25}' +
+      '.pdf-nb .badge{position:relative;z-index:1;transform:none;margin:4pt 0 -1pt 5pt;padding:1.5pt 5pt;border:0.8pt solid currentColor;border-radius:3pt;background:#fff!important;color:#216327;font-size:6.5pt;letter-spacing:.04em}' +
+      '.pdf-nb .badge.mem{color:#6b198e}' +
+      '.pdf-nb .factbox,.pdf-nb .membox,.pdf-nb .notebox{margin:2pt 0 7pt;padding:5pt 7pt;border-radius:3pt;color:#17211d}' +
+      '.pdf-nb .factbox{border:0.8pt solid #8fc49a;border-left:3pt solid #2e7d32;background:#effaf0;color:#16451d}' +
+      '.pdf-nb .membox{border:0.8pt solid #c8a6d7;border-left:3pt solid #7b1fa2;background:#f7effb;color:#512068}' +
+      '.pdf-nb .notebox{border:0.8pt solid #a5c8e6;border-left:3pt solid #1565c0;background:#eef6ff;color:#174f7a}' +
+      '.pdf-nb table{width:100%;margin:7pt 0 9pt;border:0.8pt solid #4f9d91;border-radius:3pt;font-size:8.8pt;line-height:1.35;box-shadow:none}' +
+      '.pdf-nb thead th{padding:4pt 5pt;background:#edf9f7;color:#0c554b;border:0.7pt solid #4f9d91;border-bottom:1.2pt solid #176c61;font-weight:800}' +
+      '.pdf-nb tbody td{padding:3.5pt 5pt;border:0.5pt solid #b8d6d0;vertical-align:top}' +
+      '.pdf-nb tbody tr:nth-child(even){background:#eef9f7}' +
+      '.pdf-nb .divider{display:none}' +
+      '.pdf-nb .q-card{margin:8pt 0 3pt;border:0.8pt solid #82958a;border-radius:0;box-shadow:none;break-inside:avoid}' +
+      '.pdf-nb .q-head{padding:5pt 7pt;background:#edf3ee;color:#17211d;font-size:10pt}' +
+      '.pdf-nb .q-head .qtag{padding:1pt 4pt;border:0.8pt solid #315542;border-radius:2pt;background:#fff;color:#173c2c;font-size:6.5pt}' +
+      '.pdf-nb .q-head strong,.pdf-nb .q-head b,.pdf-nb .q-head .pen,.pdf-nb .q-head .fig{color:#17211d}' +
+      '.pdf-nb .q-body{padding:4pt 7pt;border:0;background:#fff}' +
+      '.pdf-nb .opt{padding:1.5pt 0;font-size:9pt}' +
+      '.pdf-nb .opt .lbl{width:13pt;height:13pt;background:#edf0ee;color:#17211d;font-size:6.5pt}' +
+      '.pdf-nb .opt.right{color:#17211d}.pdf-nb .opt.right .lbl{background:#fff;color:#173c2c;border:0.8pt solid #315542}' +
+      '.pdf-nb .opt.wrong{color:#4b4b4b;text-decoration:none}.pdf-nb .opt.wrong .lbl{background:#fff;color:#4b4b4b;border:0.5pt solid #8d8d8d}' +
+      '.pdf-nb .answer{border:0.8pt solid #a9bdb0;border-left:3pt solid #245b3e;background:#fff;color:#17211d}' +
+      '.pdf-nb .answer .ok{color:#17211d}.pdf-nb mark.ans{background:#f2edb3;color:#111;padding:0 3pt;border-radius:0}' +
+      '.pdf-nb .explain{margin:3pt 0 8pt}.pdf-nb .explain .xh{font-size:8pt;color:#425148}' +
       // A box-shadow wrapping a table renders as a broken/floating shadow when
       // the table splits across a column or page. Drop it for print (placed
       // after nbCss so it overrides the on-screen table shadow).
@@ -1273,9 +1316,10 @@
       return;
     }
     var when = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    var docLabel = nb ? ((opts && opts.documentLabel) || 'Video Study Notes') : '';
     var css = nb ? nbPdfCss() : PDF_CSS;
     var bodyClass = nb ? 'pdf-nb' : 'pdf-body';
-    var fontLink = nb ? '<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">' : '';
+    var fontLink = nb ? '<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">' : '';
     // Telegram/StudyPlanner branding — notebook PDFs only. brandTop = header
     // band (page 1); wm = per-page watermark; footer = per-page channel link.
     var brandTop = '', wm = '', footer = '';
@@ -1292,6 +1336,7 @@
       '<meta name="viewport" content="width=device-width,initial-scale=1">' + fontLink +
       '<title>' + esc(titleText) + '</title><style>' + css + '</style></head><body>' +
       brandTop +
+      (docLabel ? '<div class="pdf-kicker">' + esc(docLabel) + '</div>' : '') +
       '<div class="pdf-title">' + esc(titleText) + '</div>' +
       '<div class="pdf-meta">' + esc(when) + ' · 🎓 AI Study — StudyPlanner</div>' +
       wm +
@@ -1302,6 +1347,12 @@
     w.focus();
     // let fonts/layout settle, then open the print → "Save as PDF" dialog
     setTimeout(function () { try { w.print(); } catch (e) {} }, nb ? 700 : 400);
+  }
+  function pdfDocumentLabelFor(mode, style) {
+    if (style === 'mcq') return 'MCQ Practice Notes';
+    if (mode === 'summary') return 'Video Summary';
+    if (mode === 'insights') return 'Key Insights';
+    return 'Comprehensive Notes';
   }
   function pdfTitleFor(mode, style) {
     var label = mode === 'insights' ? 'Key Insights' : (mode === 'summary' ? 'Summary' : (style === 'mcq' ? 'Notes (MCQ)' : 'Notes'));
