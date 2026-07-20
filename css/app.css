@@ -4117,7 +4117,9 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 @keyframes ai-notes-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) {
   #page-youtube .ai-notes-loading-orbit,
-  #page-youtube .ai-notes-loading-lines i { animation: none; }
+  #page-youtube .ai-notes-loading-lines i,
+  #page-youtube .ai-live-writing i,
+  #page-youtube .ai-caret { animation: none; }
 }
 
 /* In AI mode the right card is measured to the same visible study stage as the
@@ -4532,6 +4534,29 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
   font: inherit;
   cursor: pointer;
 }
+#page-youtube .ai-live-writing {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  gap: .32rem;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 800;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+#page-youtube .ai-live-writing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: ai-live-writing-pulse 1.05s ease-out infinite;
+}
+@keyframes ai-live-writing-pulse {
+  0% { transform: scale(.8); box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+  75%, 100% { transform: scale(1); box-shadow: 0 0 0 6px transparent; opacity: .72; }
+}
 
 /* Mobile Notes matches the focused notebook in the reference: a compact setup
    header, a readable paper stage, then persistent study tabs and actions. */
@@ -4671,12 +4696,23 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     font-weight: 850;
   }
   #page-youtube .ai-study-panel.notes-tab-active #ai-sub .ai-brandbar .g { color: #f4fbdb; }
-  #page-youtube .ai-study-panel.notes-tab-active #ai-sub .ai-brandbar .bs {
+  #page-youtube .ai-study-panel.notes-tab-active #ai-sub .ai-brandbar .bs,
+  #page-youtube .ai-study-panel.notes-tab-active #ai-sub .ai-live-writing {
     color: #e5f7dd;
     font-size: .54rem;
     font-weight: 800;
     letter-spacing: .07em;
     text-transform: uppercase;
+  }
+  #page-youtube .ai-study-panel.notes-tab-active #ai-sub .ai-brandbar-streaming {
+    background: linear-gradient(90deg, #075f2a, #0c7d43);
+  }
+  #page-youtube .ai-study-panel.notes-tab-active #ai-sub .ai-nb .ai-caret {
+    width: 3px;
+    height: 1.05em;
+    margin-left: 3px;
+    background: #08733a;
+    box-shadow: 0 0 0 2px rgba(8, 115, 58, .12);
   }
   #page-youtube .ai-study-panel.notes-tab-active #ai-sub .ai-note-actions-toggle:focus-visible {
     outline: 2px solid #f4fbdb;

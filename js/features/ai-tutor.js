@@ -879,11 +879,13 @@
 
   // StudyPlanner header shown at the top of the notes (brand only on screen; the
   // Telegram handle/watermark/footer live in the PDF export instead).
-  function brandBarHtml(withActions) {
-    var label = withActions
-      ? '<button type="button" class="ai-note-actions-toggle bs" id="ai-note-actions-toggle" aria-expanded="false" title="Show note actions">AI Study Notes</button>'
-      : '<span class="bs">AI Study Notes</span>';
-    return '<div class="ai-brandbar"><span class="bn">Study <span class="g">Planner</span></span>' + label + '</div>';
+  function brandBarHtml(withActions, isStreaming) {
+    var label = isStreaming
+      ? '<span class="ai-live-writing" role="status" aria-live="polite"><i aria-hidden="true"></i> Writing live</span>'
+      : withActions
+        ? '<button type="button" class="ai-note-actions-toggle bs" id="ai-note-actions-toggle" aria-expanded="false" title="Show note actions">AI Study Notes</button>'
+        : '<span class="bs">AI Study Notes</span>';
+    return '<div class="ai-brandbar' + (isStreaming ? ' ai-brandbar-streaming' : '') + '"><span class="bn">Study <span class="g">Planner</span></span>' + label + '</div>';
   }
 
   // Tracks the last MCQ set auto-published to the Quiz tab (video:count), so
@@ -1021,7 +1023,7 @@
       }
       var box = targetEl;
       if (!built) {
-        box.innerHTML = brandBarHtml() +
+        box.innerHTML = brandBarHtml(false, true) +
           '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
           '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (lang ? ' · ' + esc(lang) : '') + ' · streaming…</span></div>' +
           '<div class="ai-scroll nb"><div class="ai-nb"></div></div>';
