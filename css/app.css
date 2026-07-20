@@ -4030,6 +4030,96 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 #page-youtube .ai-nb { padding: .85rem 1rem 1.1rem; font-size: .78rem; }
 #page-youtube .ai-chat { max-height: 420px; }
 
+/* Purpose-built loading state for the notes notebook. The full card keeps a
+   waiting state visually intentional instead of leaving a raw status string
+   at the edge of the paper. */
+#page-youtube .ai-notes-loading {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  padding: 1rem;
+}
+#page-youtube .ai-notes-loading-card {
+  width: min(100%, 290px);
+  padding: 1rem 1.1rem 1.05rem;
+  border: 1px solid #e2d9c5;
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(255,255,255,.98), rgba(250,246,236,.98));
+  box-shadow: 0 12px 30px rgba(41, 56, 66, .08);
+  color: #25333d;
+  text-align: center;
+}
+#page-youtube .ai-notes-loading-kicker {
+  display: block;
+  margin-bottom: .42rem;
+  color: #62816b;
+  font-size: .55rem;
+  font-weight: 850;
+  letter-spacing: .14em;
+}
+#page-youtube .ai-notes-loading-orbit {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin: 0 auto .58rem;
+  place-items: center;
+  border: 2px solid #d5e8d8;
+  border-top-color: #25824b;
+  border-radius: 50%;
+  animation: ai-notes-orbit .9s linear infinite;
+}
+#page-youtube .ai-notes-loading-orbit span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #b7d75d;
+}
+#page-youtube .ai-notes-loading-card strong {
+  display: block;
+  color: #233c2d;
+  font-size: .8rem;
+  letter-spacing: -.01em;
+}
+#page-youtube .ai-notes-loading-card p {
+  margin: .35rem 0 .78rem;
+  color: #708078;
+  font-size: .64rem;
+  line-height: 1.5;
+}
+#page-youtube .ai-notes-loading-lines { display: grid; gap: .28rem; }
+#page-youtube .ai-notes-loading-lines i {
+  display: block;
+  height: 6px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, #edf1e9 20%, #f8faf5 45%, #edf1e9 70%);
+  background-size: 200% 100%;
+  animation: ai-notes-shimmer 1.5s ease-in-out infinite;
+}
+#page-youtube .ai-notes-loading-lines i:nth-child(2) { width: 82%; justify-self: center; animation-delay: .12s; }
+#page-youtube .ai-notes-loading-lines i:nth-child(3) { width: 62%; justify-self: center; animation-delay: .24s; }
+#page-youtube .ai-notes-message-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  margin: 0 auto .58rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef4ed;
+  color: #417351;
+  font-size: .9rem;
+  font-weight: 850;
+}
+#page-youtube .ai-notes-message .ai-notes-loading-card p { margin-bottom: 0; }
+#page-youtube .ai-notes-message-captions .ai-notes-message-icon { background: #fff4d8; color: #92641b; }
+#page-youtube .ai-notes-message-stopped .ai-notes-message-icon { background: #eef0f3; color: #5f6e7c; }
+#page-youtube .ai-notes-message-error .ai-notes-message-icon { background: #fbe9e8; color: #b44f47; }
+@keyframes ai-notes-orbit { to { transform: rotate(360deg); } }
+@keyframes ai-notes-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  #page-youtube .ai-notes-loading-orbit,
+  #page-youtube .ai-notes-loading-lines i { animation: none; }
+}
+
 /* In AI mode the right card is measured to the same visible study stage as the
    video + playback tools. Its generated content then scrolls inside that card,
    keeping both columns genuinely parallel instead of letting notes run far
@@ -4341,6 +4431,26 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
   }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll {
     min-height: 0;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub > .ai-notes-loading {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 5.15rem .5rem 0;
+    padding: .6rem;
+    border-radius: 14px;
+    background: radial-gradient(circle at 50% 18%, rgba(201, 232, 204, .35), transparent 38%), #fffdf6;
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-tabs,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-notes-controls {
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll::-webkit-scrollbar { width: 8px; }
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-scroll::-webkit-scrollbar-thumb {
+    border: 2px solid #fffdf6;
+    border-radius: 99px;
+    background: #d4decf;
   }
 
   /* The scrollable paper itself occupies the full right-hand pane. Branding
