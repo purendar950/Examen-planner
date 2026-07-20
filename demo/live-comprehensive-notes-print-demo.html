@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live Comprehensive Notes Print Preview</title>
+  <style>
+    :root {
+      --ink: #17211d;
+      --muted: #5e6c64;
+      --line: #b7c3bc;
+      --soft: #edf3ee;
+      --accent: #245b3e;
+      --accent-dark: #173c2c;
+      --paper: #fff;
+      --canvas: #e8ede9;
+      --warning: #7a5700;
+    }
+    * { box-sizing: border-box; }
+    html { background: var(--canvas); }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    .app-bar {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 56px;
+      padding: 10px 18px;
+      background: #10221e;
+      color: #f4fbf8;
+      box-shadow: 0 2px 14px rgba(11, 31, 23, .24);
+    }
+    .app-bar strong { font-size: .94rem; }
+    .app-bar small { color: #b9cbc1; font-size: .72rem; }
+    .app-bar .spacer { flex: 1; }
+    .button {
+      min-height: 34px;
+      padding: 8px 12px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: #42c78b;
+      color: #092116;
+      font-size: .8rem;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .button:hover { filter: brightness(1.04); }
+    .button.secondary { border-color: #456457; background: transparent; color: #e4f1e9; }
+    .button:disabled { cursor: wait; opacity: .65; }
+    .controls {
+      max-width: 1120px;
+      margin: 18px auto 0;
+      padding: 16px;
+      border: 1px solid #d5dfd8;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 12px 30px rgba(24, 46, 34, .08);
+    }
+    .controls h1 { margin: 0; font-size: 1.08rem; }
+    .controls p { margin: 6px 0 14px; color: var(--muted); font-size: .83rem; line-height: 1.5; }
+    .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) 150px auto; gap: 9px; align-items: end; }
+    .field { display: grid; gap: 5px; min-width: 0; }
+    .field label, .option-row { color: #405047; font-size: .71rem; font-weight: 800; letter-spacing: .025em; }
+    .field input, .field select {
+      width: 100%;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid #bac8c0;
+      border-radius: 7px;
+      color: var(--ink);
+      background: #fff;
+      font-size: .86rem;
+    }
+    .advanced { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; margin-top: 12px; }
+    .advanced .field { min-width: min(100%, 340px); flex: 1 1 300px; }
+    .option-row { display: flex; align-items: center; gap: 7px; min-height: 38px; font-weight: 650; letter-spacing: 0; }
+    .option-row input { width: 15px; height: 15px; accent-color: var(--accent); }
+    .status {
+      min-height: 20px;
+      margin-top: 12px;
+      color: #476157;
+      font-size: .78rem;
+      line-height: 1.45;
+    }
+    .status.error { color: #a12828; }
+    .status.loading { color: #775a12; }
+    .preview-caption {
+      max-width: 1120px;
+      margin: 18px auto 8px;
+      color: #5c6c63;
+      font-size: .72rem;
+      font-weight: 750;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .sheet {
+      position: relative;
+      max-width: 1120px;
+      min-height: 520px;
+      margin: 0 auto 42px;
+      padding: 36px 42px 38px;
+      background: var(--paper);
+      box-shadow: 0 12px 36px rgba(24, 46, 34, .14);
+    }
+    .document-brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 0 0 8px;
+      border-top: 4px solid var(--accent-dark);
+      border-bottom: 1px solid #aab9b0;
+      color: var(--ink);
+      font-size: .77rem;
+    }
+    .document-brand strong { font-size: 1rem; letter-spacing: .01em; }
+    .document-brand span { margin-left: auto; color: var(--muted); font-size: .72rem; font-weight: 700; }
+    .document-kicker {
+      display: inline-block;
+      margin-top: 16px;
+      padding: 3px 7px;
+      border: 1px solid #315542;
+      color: var(--accent-dark);
+      font-size: .64rem;
+      font-weight: 850;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+    }
+    .document-title { margin: 7px 0 3px; color: #13231a; font-size: clamp(1.25rem, 2.5vw, 1.7rem); line-height: 1.15; }
+    .document-meta { margin: 0 0 16px; padding-bottom: 9px; border-bottom: 1px solid #c4d0c8; color: var(--muted); font-size: .73rem; }
+    .print-notes { column-count: 2; column-gap: 38px; column-fill: auto; font-family: "Noto Sans Devanagari", "Segoe UI", Arial, sans-serif; font-size: .87rem; line-height: 1.48; }
+    .section, .subsection, .callout, .table-wrap { break-inside: avoid; }
+    .section {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin: 14px 0 6px;
+      padding-bottom: 4px;
+      border-bottom: 2px solid var(--accent-dark);
+      color: var(--ink);
+      font-size: 1.03rem;
+      font-weight: 850;
+      break-after: avoid;
+    }
+    .section:first-child { margin-top: 0; }
+    .section-number {
+      display: inline-grid;
+      width: 21px;
+      height: 21px;
+      flex: none;
+      place-items: center;
+      border: 1.5px solid var(--accent-dark);
+      border-radius: 4px;
+      color: var(--accent-dark);
+      font-family: Inter, ui-sans-serif, sans-serif;
+      font-size: .64rem;
+      font-weight: 850;
+    }
+    .subsection { margin: 10px 0 4px; padding-left: 8px; border-left: 3px solid #5b806d; color: #24352c; font-size: .92rem; font-weight: 850; break-after: avoid; }
+    .print-notes p { margin: 4px 0; }
+    .print-notes ul, .print-notes ol { margin: 4px 0 8px; padding: 0; list-style: none; }
+    .print-notes ul li { position: relative; padding-left: 15px; margin: 3px 0; }
+    .print-notes ul li::before { content: "•"; position: absolute; left: 2px; color: var(--accent-dark); font-size: 1rem; line-height: 1.1; }
+    .print-notes ol { counter-reset: notes-list; }
+    .print-notes ol li { position: relative; padding-left: 20px; margin: 3px 0; counter-increment: notes-list; }
+    .print-notes ol li::before { content: counter(notes-list); position: absolute; left: 0; top: 2px; display: grid; width: 14px; height: 14px; place-items: center; border: 1px solid #53645b; border-radius: 50%; color: #314239; font-family: Inter, ui-sans-serif, sans-serif; font-size: .58rem; font-weight: 800; }
+    .print-notes strong { color: #101612; font-weight: 800; }
+    .print-notes em { color: #2f4337; }
+    .print-notes code { padding: 1px 3px; background: #f1f3f2; border-radius: 2px; color: #111; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .88em; }
+    .callout { margin: 7px 0 9px; padding: 7px 9px; border: 1px solid #a9bdb0; border-left: 4px solid #245b3e; background: #fff; }
+    .callout.memory { border-color: #b9aabe; border-left-color: #73558a; }
+    .callout-label { display: block; margin-bottom: 2px; color: #315542; font-family: Inter, ui-sans-serif, sans-serif; font-size: .63rem; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+    .callout.memory .callout-label { color: #654876; }
+    .table-wrap { margin: 9px 0 11px; overflow: hidden; border: 1px solid #93a59a; }
+    table { width: 100%; border-collapse: collapse; font-size: .78rem; line-height: 1.35; }
+    th { padding: 5px 6px; border-bottom: 1.5px solid #315542; background: var(--soft); color: var(--ink); text-align: left; font-weight: 850; }
+    td { padding: 4px 6px; border: 1px solid #c9d3cd; vertical-align: top; }
+    tr:nth-child(even) td { background: #fafcfb; }
+    .divider { height: 1px; margin: 10px 0; border: 0; background: #c5cfca; }
+    .empty { max-width: 560px; margin: 70px auto; padding: 24px; border: 1px dashed #aebdb4; color: #637269; text-align: center; line-height: 1.55; }
+    .empty strong { display: block; margin-bottom: 5px; color: #33443a; }
+    @media (max-width: 760px) {
+      .app-bar { padding: 9px 12px; }
+      .app-bar small { display: none; }
+      .controls, .preview-caption { margin-right: 12px; margin-left: 12px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .form-grid .button { width: 100%; }
+      .sheet { margin-right: 0; margin-left: 0; padding: 24px 18px 28px; }
+      .document-brand { align-items: flex-start; flex-direction: column; gap: 3px; }
+      .document-brand span { margin-left: 0; }
+      .print-notes { column-count: 1; }
+    }
+    @media print {
+      @page { margin: 8mm 8mm 10mm; }
+      html, body { background: #fff; }
+      .app-bar, .controls, .preview-caption { display: none !important; }
+      .sheet { max-width: none; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+      .print-notes { column-count: 2; column-gap: 8mm; column-fill: auto; font-size: 10pt; line-height: 1.48; }
+      .section { margin: 12pt 0 5pt; font-size: 12pt; }
+      .subsection { margin: 8pt 0 3pt; font-size: 10.5pt; }
+      .print-notes p { margin: 3pt 0; }
+      .print-notes ul, .print-notes ol { margin: 3pt 0 6pt; }
+      .print-notes ul li, .print-notes ol li { margin: 2pt 0; }
+      .callout { margin: 2pt 0 7pt; padding: 5pt 7pt; }
+      .table-wrap { margin: 7pt 0 9pt; }
+      table { font-size: 8.8pt; }
+      th { padding: 4pt 5pt; }
+      td { padding: 3.5pt 5pt; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-bar">
+    <div><strong>StudyPlanner</strong> <small>Live comprehensive-notes print preview</small></div>
+    <div class="spacer"></div>
+    <button class="button secondary" type="button" id="print">Print / Save PDF</button>
+  </header>
+
+  <main>
+    <section class="controls" aria-labelledby="demo-title">
+      <h1 id="demo-title">Test the hard-copy design with real video notes</h1>
+      <p>This demo calls the same live AI endpoint as the app, always requests <strong>Comprehensive Notes</strong>, and renders the returned output as a printable two-column study handout. A verified Parmar SSC lecture is prefilled; replace it with the exact video from your app to test that output. This page does not change the production app.</p>
+      <div class="form-grid">
+        <div class="field">
+          <label for="video-url">YouTube video URL or 11-character video ID</label>
+          <input id="video-url" type="text" autocomplete="off" value="cv-T-0xkizI" placeholder="Paste the exact video that generated the notes in your app">
+        </div>
+        <div class="field">
+          <label for="language">Output language</label>
+          <select id="language">
+            <option>Hinglish</option>
+            <option selected>English</option>
+            <option>Hindi</option>
+          </select>
+        </div>
+        <button class="button" type="button" id="generate">Generate live notes</button>
+      </div>
+      <div class="advanced">
+        <label class="option-row"><input id="fresh" type="checkbox"> Request a fresh copy instead of a cached result</label>
+        <div class="field">
+          <label for="backend">AI study backend</label>
+          <input id="backend" type="url" value="https://youtube-turbo-proxy-gej4.onrender.com">
+        </div>
+      </div>
+      <div class="status" id="status" role="status">Paste the same video URL you are watching, then generate its actual Comprehensive Notes.</div>
+    </section>
+
+    <div class="preview-caption">Hard-copy preview — live content only</div>
+    <article class="sheet" id="sheet">
+      <div class="empty"><strong>No live notes loaded yet</strong>Paste a YouTube link above to generate actual Comprehensive Notes and inspect their print layout before approving any production change.</div>
+    </article>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+      var $ = function (id) { return document.getElementById(id); };
+      var current = { id: '', language: 'English', generatedAt: '' };
+
+      function escapeHtml(value) {
+        return String(value == null ? '' : value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
+
+      function parseVideoId(value) {
+        value = String(value || '').trim();
+        if (/^[A-Za-z0-9_-]{11}$/.test(value)) return value;
+        var match = value.match(/(?:v=|youtu\.be\/|\/embed\/|\/shorts\/|\/live\/)([A-Za-z0-9_-]{11})/);
+        if (match) return match[1];
+        match = value.match(/([A-Za-z0-9_-]{11})(?:[?&].*)?$/);
+        return match ? match[1] : '';
+      }
+
+      function inline(markdown) {
+        return escapeHtml(markdown)
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+          .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+          .replace(/`([^`]+)`/g, '<code>$1</code>');
+      }
+
+      var keyPattern = /^\s*(key\s*facts?|important|imp\.?|remember|note|yaad\s*rakh\w*|zaruri|jaruri)\s*[:\-–]/i;
+      var memoryPattern = /^\s*(memory\s*trick|trick|mnemonic|shortcut|tip|exam\s*tip|hack)\s*[:\-–]/i;
+      function callout(text, kind) {
+        var body = text.slice(text.search(/[:\-–]/) + 1).trim() || text;
+        var memory = kind === 'memory';
+        return '<aside class="callout' + (memory ? ' memory' : '') + '"><span class="callout-label">' + (memory ? 'Memory aid' : 'Key fact') + '</span>' + inline(body) + '</aside>';
+      }
+
+      function renderTable(lines, start) {
+        var heading = lines[start].trim().split('|').slice(1, -1);
+        var index = start + 2;
+        var rows = [];
+        while (index < lines.length && /^\|.*\|$/.test(lines[index].trim())) {
+          rows.push(lines[index].trim().split('|').slice(1, -1));
+          index += 1;
+        }
+        var head = heading.map(function (cell) { return '<th>' + inline(cell.trim()) + '</th>'; }).join('');
+        var body = rows.map(function (row) {
+          return '<tr>' + row.map(function (cell) { return '<td>' + inline(cell.trim()) + '</td>'; }).join('') + '</tr>';
+        }).join('');
+        return { html: '<div class="table-wrap"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>', next: index };
+      }
+
+      function renderMarkdown(markdown) {
+        var lines = String(markdown || '').replace(/\r/g, '').split('\n');
+        var output = [];
+        var index = 0;
+        var sectionNumber = 0;
+        var list = null;
+        function closeList() {
+          if (list) output.push('</' + list + '>');
+          list = null;
+        }
+        while (index < lines.length) {
+          var raw = lines[index];
+          var text = raw.trim();
+          if (/^\|.*\|$/.test(text) && index + 1 < lines.length && /^\|[\s:|-]+\|$/.test(lines[index + 1].trim())) {
+            closeList();
+            var table = renderTable(lines, index);
+            output.push(table.html);
+            index = table.next;
+            continue;
+          }
+          if (/^(---|\*\*\*|___)$/.test(text)) { closeList(); output.push('<hr class="divider">'); index += 1; continue; }
+          var heading = text.match(/^(#{1,6})\s+(.*)$/);
+          if (heading) {
+            closeList();
+            var level = heading[1].length;
+            var title = heading[2].replace(/^[*#\s]+/, '').replace(/[*#:\s]+$/, '').trim();
+            if (level <= 2) {
+              sectionNumber += 1;
+              output.push('<h2 class="section"><span class="section-number">' + sectionNumber + '</span><span>' + inline(title) + '</span></h2>');
+            } else {
+              output.push('<h3 class="subsection">' + inline(title) + '</h3>');
+            }
+            index += 1;
+            continue;
+          }
+          if (keyPattern.test(text)) { closeList(); output.push(callout(text, 'key')); index += 1; continue; }
+          if (memoryPattern.test(text)) { closeList(); output.push(callout(text, 'memory')); index += 1; continue; }
+          var ordered = text.match(/^(\d+)[.)]\s+(.*)$/);
+          if (ordered) {
+            if (list !== 'ol') { closeList(); output.push('<ol>'); list = 'ol'; }
+            output.push('<li>' + inline(ordered[2]) + '</li>');
+            index += 1;
+            continue;
+          }
+          var bullet = text.match(/^[-*+]\s+(.*)$/);
+          if (bullet) {
+            if (list !== 'ul') { closeList(); output.push('<ul>'); list = 'ul'; }
+            output.push('<li>' + inline(bullet[1]) + '</li>');
+            index += 1;
+            continue;
+          }
+          if (!text) { closeList(); index += 1; continue; }
+          closeList();
+          output.push('<p>' + inline(text) + '</p>');
+          index += 1;
+        }
+        closeList();
+        return output.join('');
+      }
+
+      function renderDocument(content, response) {
+        var today = new Date();
+        var dateText = today.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        current.generatedAt = dateText;
+        var source = response.cached ? 'Cached live result' : 'Fresh live result';
+        var title = String(response.title || 'Video study handout').replace(/\s+/g, ' ').trim();
+        $('sheet').innerHTML =
+          '<div class="document-brand"><strong>StudyPlanner</strong><span>AI video notes · print test</span></div>' +
+          '<div class="document-kicker">Comprehensive Notes</div>' +
+          '<h1 class="document-title">' + escapeHtml(title) + '</h1>' +
+          '<p class="document-meta">Video ID: ' + escapeHtml(current.id) + ' · ' + escapeHtml(current.language) + ' · ' + escapeHtml(dateText) + ' · ' + escapeHtml(source) + '</p>' +
+          '<section class="print-notes">' + renderMarkdown(content) + '</section>';
+      }
+
+      function setStatus(message, type) {
+        var status = $('status');
+        status.textContent = message;
+        status.className = 'status' + (type ? ' ' + type : '');
+      }
+
+      function generate() {
+        var id = parseVideoId($('video-url').value);
+        if (!id) {
+          setStatus('Enter a valid YouTube URL or 11-character video ID.', 'error');
+          return;
+        }
+        var backend = String($('backend').value || '').trim().replace(/\/+$/, '');
+        if (!/^https:\/\//i.test(backend)) {
+          setStatus('Enter a valid HTTPS backend URL.', 'error');
+          return;
+        }
+        current.id = id;
+        current.language = $('language').value;
+        var url = backend + '/api/study?id=' + encodeURIComponent(id) + '&mode=notes&out=' + encodeURIComponent(current.language);
+        if ($('fresh').checked) url += '&refresh=1';
+        var button = $('generate');
+        button.disabled = true;
+        setStatus('Requesting actual Comprehensive Notes from the live AI service. The first request can take up to a few minutes.', 'loading');
+        $('sheet').innerHTML = '<div class="empty"><strong>Generating live notes</strong>The preview will populate only with the response returned for this video.</div>';
+        var controller = 'AbortController' in window ? new AbortController() : null;
+        var timer = window.setTimeout(function () { if (controller) controller.abort(); }, 240000);
+        var started = Date.now();
+        fetch(url, controller ? { signal: controller.signal } : {}).then(function (result) {
+          if (!result.ok) throw new Error('The AI service returned HTTP ' + result.status + '.');
+          return result.json();
+        }).then(function (response) {
+          window.clearTimeout(timer);
+          if (response.error || response.warning === 'no_captions') {
+            throw new Error(response.detail || response.error || 'This video has no usable captions.');
+          }
+          if (!response.content || !String(response.content).trim()) throw new Error('The AI service returned no note content.');
+          renderDocument(response.content, response);
+          var seconds = ((Date.now() - started) / 1000).toFixed(1);
+          setStatus('Live Comprehensive Notes loaded in ' + seconds + ' seconds. Review this page, then use Print / Save PDF to inspect the hard-copy result.');
+        }).catch(function (error) {
+          window.clearTimeout(timer);
+          var isTimeout = error && error.name === 'AbortError';
+          setStatus(isTimeout ? 'The live request exceeded four minutes. Try a video with captions or retry after the backend wakes up.' : String(error && error.message ? error.message : error), 'error');
+          $('sheet').innerHTML = '<div class="empty"><strong>Live notes were not loaded</strong>Use the exact video URL from your app. The demo will not show a fake sample because this page is meant to test real AI output.</div>';
+        }).finally(function () {
+          button.disabled = false;
+        });
+      }
+
+      $('generate').addEventListener('click', generate);
+      $('video-url').addEventListener('keydown', function (event) { if (event.key === 'Enter') generate(); });
+      $('print').addEventListener('click', function () { window.print(); });
+    })();
+  </script>
+</body>
+</html>
