@@ -575,7 +575,7 @@
       '.ai-view-toggle button{flex:1;cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--muted,#8b93a7);border-radius:8px;padding:7px 10px;font-size:0.78rem;font-weight:600;font-family:inherit}',
       '.ai-view-toggle button.on{background:var(--accent,#00c896);color:#04120d;border-color:var(--accent,#00c896)}',
       '.main-content.ai-wide{max-width:1500px!important}',
-      '@media(min-width:841px){.yt-layout.ai-split{grid-template-columns:minmax(0,3fr) minmax(0,2fr)!important}}',
+      '@media(min-width:841px){.yt-layout.ai-split{grid-template-columns:minmax(0,var(--yt-player-size,3fr)) 24px minmax(0,var(--yt-study-size,2fr))!important}}',
       '.ai-chips{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0}',
       '.ai-chip{cursor:pointer;border:1px solid var(--border,#2a3140);background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border-radius:999px;padding:5px 10px;font-size:0.74rem}',
       '.ai-chat{max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:8px}',
@@ -2098,9 +2098,13 @@
 
   /* ── right-column: [Course Content | AI Study] toggle + 60/40 player/panel split ── */
   function ytLayout() { return document.querySelector('#page-youtube .yt-layout'); }
-  function rightCol() { var l = ytLayout(); return l ? (l.querySelector('.yt-panel') || l.children[1]) : null; }
+  function rightCol() { var l = ytLayout(); return l ? l.querySelector('.yt-panel') : null; }
   var AI_VIEW_STATE_KEY = 'aiViewParallelState';
   var AI_VIEW_LAYOUT_VERSION = 'parallel-60-40-v1';
+  var YT_PANE_STATE_KEY = 'ytStudyPaneSplit';
+  var YT_PANE_LAYOUT_VERSION = 'resizable-v1';
+  var YT_PANE_DEFAULT_SHARE = 60;
+  var _ytPanePreferredShare = YT_PANE_DEFAULT_SHARE;
   var _viewMemory = 'ai';
   var _viewInitialized = false;
   function persistView(view) {
@@ -2286,10 +2290,160 @@
     }
   }
 
+  /* Tablet/desktop pane resizing. The divider is intentionally disabled at the
+     existing 840px mobile breakpoint, where the workspace remains stacked. */
+  function setupPaneResize() {
+    var layout = ytLayout();
+    var divider = document.getElementById('yt-pane-divider');
+    if (!layout || !divider || divider._paneResizeBound) return;
+    divider._paneResizeBound = true;
+
+    try {
+      var saved = JSON.parse(localStorage.getItem(YT_PANE_STATE_KEY) || 'null');
+      var savedShare = saved && Number(saved.playerShare);
+      if (saved && saved.version === YT_PANE_LAYOUT_VERSION && isFinite(savedShare) &&
+          savedShare >= 20 && savedShare <= 80) {
+        _ytPanePreferredShare = savedShare;
+      }
+    } catch (e) {}
+
+    var currentShare = YT_PANE_DEFAULT_SHARE;
+    var dragging = false;
+    var activePointerId = null;
+    var resizeFrame = null;
+    var alignFrame = null;
+
+    function isResizableWidth() { return window.innerWidth > 840; }
+    function paneBounds() {
+      var rect = layout.getBoundingClientRect();
+      var styles = getComputedStyle(layout);
+      var gap = parseFloat(styles.columnGap) || 0;
+      var dividerWidth = divider.getBoundingClientRect().width || 24;
+      var usable = Math.max(1, rect.width - dividerWidth - (gap * 2));
+      // Keep both tools usable on tablets while allowing a much wider range on
+      // desktops. Percentage caps guarantee a valid range in narrow shells.
+      var minPlayerPx = Math.min(340, usable * 0.44);
+      var minStudyPx = Math.min(300, usable * 0.40);
+      return {
+        rect: rect,
+        gap: gap,
+        dividerWidth: dividerWidth,
+        usable: usable,
+        min: (minPlayerPx / usable) * 100,
+        max: 100 - ((minStudyPx / usable) * 100)
+      };
+    }
+    function schedulePaneAlign() {
+      if (alignFrame) cancelAnimationFrame(alignFrame);
+      alignFrame = requestAnimationFrame(function () {
+        alignFrame = null;
+        alignPlayerToNotes();
+      });
+    }
+    function persistPaneShare(share) {
+      _ytPanePreferredShare = share;
+      try {
+        localStorage.setItem(YT_PANE_STATE_KEY, JSON.stringify({
+          version: YT_PANE_LAYOUT_VERSION,
+          playerShare: Math.round(share * 100) / 100
+        }));
+      } catch (e) {}
+    }
+    function applyPaneShare(share, shouldPersist) {
+      if (!isResizableWidth()) {
+        layout.classList.remove('is-resizing');
+        layout.style.removeProperty('--yt-player-size');
+        layout.style.removeProperty('--yt-study-size');
+        divider.setAttribute('aria-hidden', 'true');
+        divider.setAttribute('tabindex', '-1');
+        return currentShare;
+      }
+      var bounds = paneBounds();
+      var next = Math.max(bounds.min, Math.min(bounds.max, Number(share) || YT_PANE_DEFAULT_SHARE));
+      currentShare = next;
+      layout.style.setProperty('--yt-player-size', next.toFixed(2) + 'fr');
+      layout.style.setProperty('--yt-study-size', (100 - next).toFixed(2) + 'fr');
+      divider.removeAttribute('aria-hidden');
+      divider.setAttribute('tabindex', '0');
+      divider.setAttribute('aria-valuemin', bounds.min.toFixed(1));
+      divider.setAttribute('aria-valuemax', bounds.max.toFixed(1));
+      divider.setAttribute('aria-valuenow', next.toFixed(1));
+      divider.setAttribute('aria-valuetext', 'YouTube ' + Math.round(next) + '%, study panel ' + Math.round(100 - next) + '%');
+      if (shouldPersist) persistPaneShare(next);
+      schedulePaneAlign();
+      return next;
+    }
+    function shareFromPointer(clientX) {
+      var bounds = paneBounds();
+      var leftWidth = clientX - bounds.rect.left - bounds.gap - (bounds.dividerWidth / 2);
+      return (leftWidth / bounds.usable) * 100;
+    }
+    function finishDrag(e) {
+      if (!dragging) return;
+      if (e && activePointerId !== null && typeof e.pointerId === 'number' && e.pointerId !== activePointerId) return;
+      dragging = false;
+      layout.classList.remove('is-resizing');
+      persistPaneShare(currentShare);
+      if (activePointerId !== null && divider.hasPointerCapture && divider.hasPointerCapture(activePointerId)) {
+        try { divider.releasePointerCapture(activePointerId); } catch (err) {}
+      }
+      activePointerId = null;
+      schedulePaneAlign();
+      if (e && e.cancelable) e.preventDefault();
+    }
+
+    divider.addEventListener('pointerdown', function (e) {
+      if (dragging || !isResizableWidth() || e.isPrimary === false || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      dragging = true;
+      activePointerId = e.pointerId;
+      layout.classList.add('is-resizing');
+      try { divider.setPointerCapture(e.pointerId); } catch (err) {}
+      applyPaneShare(shareFromPointer(e.clientX), false);
+      if (e.cancelable) e.preventDefault();
+    });
+    divider.addEventListener('pointermove', function (e) {
+      if (!dragging || (activePointerId !== null && e.pointerId !== activePointerId)) return;
+      applyPaneShare(shareFromPointer(e.clientX), false);
+      if (e.cancelable) e.preventDefault();
+    });
+    window.addEventListener('pointerup', finishDrag);
+    window.addEventListener('pointercancel', finishDrag);
+    divider.addEventListener('lostpointercapture', finishDrag);
+    divider.addEventListener('dblclick', function () { applyPaneShare(YT_PANE_DEFAULT_SHARE, true); });
+    divider.addEventListener('keydown', function (e) {
+      if (!isResizableWidth()) return;
+      var bounds = paneBounds();
+      var step = e.shiftKey ? 5 : 2;
+      var next = currentShare;
+      if (e.key === 'ArrowLeft') next -= step;
+      else if (e.key === 'ArrowRight') next += step;
+      else if (e.key === 'Home') next = bounds.min;
+      else if (e.key === 'End') next = bounds.max;
+      else return;
+      e.preventDefault();
+      applyPaneShare(next, true);
+    });
+    window.addEventListener('resize', function () {
+      if (resizeFrame) cancelAnimationFrame(resizeFrame);
+      resizeFrame = requestAnimationFrame(function () {
+        resizeFrame = null;
+        if (!isResizableWidth()) {
+          dragging = false;
+          activePointerId = null;
+        }
+        applyPaneShare(_ytPanePreferredShare, false);
+      });
+    });
+
+    applyPaneShare(_ytPanePreferredShare, false);
+  }
+
   // Set up the toggle + AI panel inside the right column, once.
   function mountRightColumn() {
     var panel = rightCol();
-    if (!panel || document.getElementById('ai-view-toggle')) return;
+    if (!panel) return;
+    setupPaneResize();
+    if (document.getElementById('ai-view-toggle')) return;
 
     // one-time: reclaim Firestore space from the old appState-based chat store
     try {
