@@ -34,15 +34,15 @@ curl -X POST http://localhost:3000/api/test-kiro \
 
 ## Deploy on Render
 
-Render's Build Command and Start Command run in **separate shells**, so a
-`PATH` export in the build step does not carry over. Export it again in the
-start command:
+The repo already defines this service in the root `render.yaml`, so the easiest
+path is to deploy via a **Blueprint** (it fills in the settings below for you).
+If you set it up manually instead, use these exact values:
 
 | Setting | Value |
 |---|---|
 | **Root Directory** | `kiro-test` |
-| **Build Command** | `rm -f ~/.local/bin/kiro-cli ~/.local/bin/kiro-cli-chat ~/.local/bin/kiro-cli-term; curl -fsSL https://cli.kiro.dev/install \| bash && npm install` |
-| **Start Command** | `export PATH="$HOME/.local/bin:$PATH" && node server.js` |
+| **Build Command** | `rm -rf vendor && mkdir -p vendor/kiro && env HOME="$PWD/vendor/kiro" bash -c 'curl -fsSL https://cli.kiro.dev/install \| bash' && npm install` |
+| **Start Command** | `node server.js` |
 | **Env Var** | `KIRO_API_KEY` = your real key (Render dashboard only — never in code) |
 
 Render sets `PORT` automatically; `server.js` already reads `process.env.PORT`.
@@ -50,18 +50,25 @@ Render sets `PORT` automatically; `server.js` already reads `process.env.PORT`.
 Free tier spins down after 15 min idle (cold start ~30-50s on next request).
 For always-on, use a paid instance type.
 
-### Why the Build Command has a `rm -f` prefix
+### Why the Build Command overrides `HOME`
 
-**Verified bug in Kiro's own install script:** if `kiro-cli` is already
-present at `~/.local/bin/` (e.g. from a previous/retried build on the same
-Render instance), the installer tries to interactively prompt
-`Do you want to replace it? (y/N):` via `/dev/tty`. Render's build shell has
-no TTY, so the script crashes with `main: line 478: /dev/tty: No such device
-or address` and exits with status 1 -- the deploy fails at the build step
-with no `kiro-cli` binary present. The `--force` flag does **not** fix this
-(tested) -- the check in `install_linux()` ignores it. Removing any existing
-binary before running the installer avoids the prompt entirely and was
-confirmed to install cleanly (exit code 0) in this exact scenario.
+**Render's build and runtime run on SEPARATE filesystems.** The `kiro-cli`
+installer defaults to `$HOME/.local/bin` (i.e. `/opt/render/.local/bin`), which
+is **discarded before runtime** — confirmed via `/api/diag`, which showed
+`binaryExists:false` with `HOME=/opt/render`. Only files written INSIDE the
+deployed project directory survive to runtime.
+
+So the build overrides `HOME` to `$PWD/vendor/kiro`, which makes the installer
+write the binary to `kiro-test/vendor/kiro/.local/bin/kiro-cli` — inside the
+project dir. `server.js` resolves that exact absolute path (see `VENDOR_BIN`).
+`HOME` is scoped to just the install step (via `env HOME=...`) so it doesn't
+disturb `npm install`. The `rm -rf vendor` prefix guarantees a clean install
+each build and sidesteps the installer's interactive replace prompt (which has
+no TTY on Render and would otherwise fail the build).
+
+Because the binary lives at an absolute path that `server.js` resolves directly
+(and `childEnv()` also adds the vendor dir to `PATH`), the start command no
+longer needs a `PATH` export.
 
 ## Known kiro-cli quirks (found via testing)
 
