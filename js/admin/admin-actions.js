@@ -710,9 +710,17 @@ const STUDY_PROVIDERS = {
   kiro:     { label: 'Kiro', host: 'kiro-key-test-s6io.onrender.com', baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
               models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
               def: 'auto',
-              note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' }
+              note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' },
+  // OmniRoute — self-hosted OpenAI-compatible AI gateway (one endpoint, many
+  // providers). Default baseUrl is the LOCAL address; to run against a remote
+  // proxy, point config/ai.omnirouteBaseUrl at a Cloudflare/ngrok tunnel URL
+  // (the proxy honours that override — see _provider_base_url in app.py). The
+  // model list is a starter set; use OmniRoute's /v1/models for exact IDs.
+  omniroute: { label: 'OmniRoute', host: 'localhost:20128', baseUrl: 'http://localhost:20128/v1', keyField: 'omnirouteApiKeys', modelField: 'omnirouteModel',
+              models: ['auto', 'gpt-4o-mini', 'gpt-4o', 'claude-sonnet-4', 'gemini-2.5-flash', 'deepseek-v3'], def: 'auto',
+              note: 'Self-hosted gateway · set omnirouteBaseUrl to a tunnel URL for a remote proxy', keyUrl: '' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'kiro'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'kiro', 'omniroute'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')

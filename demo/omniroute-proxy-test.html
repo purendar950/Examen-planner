@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniRoute Integration Test (via Proxy) — StudyPlanner</title>
+<style>
+  :root {
+    --bg:#0f131b; --card:#151a24; --surface:#1b1f2a; --border:#2a3140;
+    --text:#e7ecf5; --muted:#8b93a7; --accent:#00c896; --danger:#e0464b; --warn:#f59e0b;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif; line-height:1.5; }
+  .wrap { max-width:920px; margin:0 auto; padding:24px 16px 60px; }
+  header h1 { margin:0 0 4px; font-size:1.4rem; }
+  header p { margin:0 0 18px; color:var(--muted); font-size:0.9rem; }
+  .badge { display:inline-block; background:var(--surface); border:1px solid var(--border);
+    color:var(--accent); border-radius:999px; padding:2px 10px; font-size:0.7rem;
+    font-weight:700; letter-spacing:0.4px; text-transform:uppercase; margin-bottom:10px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:16px; margin-bottom:16px; }
+  .card h2 { margin:0 0 12px; font-size:0.95rem; }
+  label { display:block; font-size:0.78rem; color:var(--muted); margin:10px 0 4px; font-weight:600; }
+  input { width:100%; background:var(--surface); color:var(--text); border:1px solid var(--border);
+    border-radius:8px; padding:9px 11px; font-size:0.85rem; font-family:inherit; }
+  .hint { font-size:0.72rem; color:var(--muted); margin-top:4px; }
+  .btnbar { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; align-items:center; }
+  button { cursor:pointer; border:none; background:var(--accent); color:#04120d;
+    border-radius:8px; padding:10px 18px; font-size:0.85rem; font-weight:700; font-family:inherit; }
+  button.sec { background:var(--surface); color:var(--text); border:1px solid var(--border); }
+  button:disabled { opacity:0.5; cursor:default; }
+  .status { font-size:0.8rem; padding:8px 12px; border-radius:8px; margin-bottom:12px; display:none; }
+  .status.show { display:block; }
+  .status.ok { background:rgba(0,200,150,0.12); border:1px solid var(--accent); color:var(--accent); }
+  .status.err { background:rgba(224,70,75,0.12); border:1px solid var(--danger); color:#ff9ea1; }
+  .status.info { background:rgba(245,158,11,0.10); border:1px solid var(--warn); color:#ffd68a; }
+  table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+  th,td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+  th { color:var(--muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.4px; }
+  td.p { font-weight:700; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:999px; font-size:0.72rem; font-weight:700; }
+  .pill.ok { background:rgba(0,200,150,0.15); color:var(--accent); }
+  .pill.bad { background:rgba(224,70,75,0.15); color:#ff9ea1; }
+  .pill.na { background:var(--surface); color:var(--muted); border:1px solid var(--border); }
+  tr.hl td { background:rgba(0,200,150,0.06); }
+  .spin { display:inline-block; width:14px; height:14px; border:2px solid var(--border);
+    border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite;
+    vertical-align:middle; margin-right:6px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  pre.raw { background:#0b0e14; border:1px solid var(--border); border-radius:8px; padding:12px;
+    overflow:auto; max-height:300px; font-size:0.74rem; color:#b8c2d8; margin:8px 0 0; }
+  details { margin-top:10px; } summary { cursor:pointer; color:var(--muted); font-size:0.78rem; }
+  code { background:var(--surface); padding:1px 5px; border-radius:4px; font-size:0.85em; }
+  ol { margin:6px 0 0; padding-left:20px; font-size:0.82rem; color:var(--muted); }
+  ol li { margin:3px 0; } ol code { color:var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="badge">End-to-End Integration Test</span>
+    <h1>OmniRoute — Test via Proxy</h1>
+    <p>
+      This calls your proxy's <code>/api/study/test</code> endpoint, which pings each configured
+      provider server-side using its saved key + model. It exercises the exact code just added:
+      <code>STUDY_TEST_PROVIDERS["omniroute"]</code> and <code>_provider_base_url()</code> in
+      <code>app.py</code>. For the raw gateway (no proxy), use <code>omnirouter-demo.html</code> instead.
+    </p>
+  </header>
+
+  <div id="status" class="status"></div>
+
+  <div class="card">
+    <h2>Proxy</h2>
+    <label for="proxy">Proxy base URL</label>
+    <input id="proxy" placeholder="https://youtube-turbo-proxy-gej4.onrender.com" autocomplete="off" spellcheck="false">
+    <div class="hint">
+      Deployed default is the Render URL. For a <strong>locally-run</strong> proxy use e.g.
+      <code>http://localhost:5000</code>. The proxy reaches OmniRoute at whatever
+      <code>omnirouteBaseUrl</code> (or the localhost default) is set in <code>config/ai</code>.
+    </div>
+    <label for="uid">uid (optional — set to an unlimited/admin uid to bypass rate limit)</label>
+    <input id="uid" placeholder="(leave blank for normal rate-limited test)" autocomplete="off" spellcheck="false">
+
+    <div class="btnbar">
+      <button id="testOmni" type="button">Test OmniRoute</button>
+      <button class="sec" id="testAll" type="button">Test all providers</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Result</h2>
+    <div id="result"><span style="color:var(--muted)">Run a test to see provider health here.</span></div>
+    <details>
+      <summary>Raw JSON</summary>
+      <pre class="raw" id="raw">—</pre>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Before this passes, make sure…</h2>
+    <ol>
+      <li>OmniRoute is running and reachable <em>from the proxy</em> (localhost only works if the proxy runs on the same machine; otherwise set <code>omnirouteBaseUrl</code> to a Cloudflare/ngrok tunnel URL).</li>
+      <li>In Admin → AI Study → <strong>OmniRoute</strong>, a valid key is saved to <code>omnirouteApiKeys</code> and a real model to <code>omnirouteModel</code>.</li>
+      <li>A green <span class="pill ok">ok</span> for <code>omniroute</code> below = the integration works end-to-end.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var LS = 'omnirouteProxyTest';
+
+  try {
+    var saved = JSON.parse(localStorage.getItem(LS) || '{}');
+    if (saved.proxy) $('proxy').value = saved.proxy;
+    if (saved.uid) $('uid').value = saved.uid;
+  } catch (e) {}
+  if (!$('proxy').value) $('proxy').value = 'https://youtube-turbo-proxy-gej4.onrender.com';
+
+  function save() {
+    try { localStorage.setItem(LS, JSON.stringify({ proxy: $('proxy').value, uid: $('uid').value })); } catch (e) {}
+  }
+  $('proxy').addEventListener('input', save);
+  $('uid').addEventListener('input', save);
+
+  function setStatus(kind, msg) { var e = $('status'); e.className = 'status show ' + kind; e.innerHTML = msg; }
+  function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function base() { return ($('proxy').value || '').trim().replace(/\/+$/, ''); }
+
+  function statusText(row) {
+    if (!row.configured) return { cls:'na', text:'no key' };
+    if (row.ok) return { cls:'ok', text:'ok' };
+    var s = row.status;
+    if (s === 401 || s === 403) return { cls:'bad', text:'unauthorized' };
+    if (s === 402) return { cls:'bad', text:'no quota' };
+    if (s === 404) return { cls:'bad', text:'model/endpoint 404' };
+    if (s === 0)   return { cls:'bad', text:'unreachable' };
+    return { cls:'bad', text:'fail ' + (s || '') };
+  }
+
+  function render(results, highlight) {
+    var ids = Object.keys(results);
+    if (!ids.length) { $('result').innerHTML = '<span style="color:var(--muted)">No providers returned.</span>'; return; }
+    // Put the highlighted provider first.
+    ids.sort(function (a, b) { return (a === highlight ? -1 : b === highlight ? 1 : 0); });
+    var rows = ids.map(function (pid) {
+      var r = results[pid], st = statusText(r);
+      var hl = (pid === highlight) ? ' class="hl"' : '';
+      return '<tr' + hl + '>' +
+        '<td class="p">' + esc(pid) + '</td>' +
+        '<td><span class="pill ' + st.cls + '">' + st.text + '</span></td>' +
+        '<td>' + esc(r.model || '—') + '</td>' +
+        '<td>' + (r.latency_ms != null ? r.latency_ms + ' ms' : '—') + '</td>' +
+        '<td>' + (r.keys != null ? r.keys : '—') + '</td>' +
+        '<td>' + esc((r.detail || '').slice(0, 160)) + '</td>' +
+      '</tr>';
+    }).join('');
+    $('result').innerHTML =
+      '<table><thead><tr><th>Provider</th><th>Status</th><th>Model</th><th>Latency</th><th>Keys</th><th>Detail</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table>';
+  }
+
+  function run(provider) {
+    save();
+    if (!base()) { setStatus('err', 'Enter the proxy base URL first.'); return; }
+    var btns = [$('testOmni'), $('testAll')];
+    btns.forEach(function (b) { b.disabled = true; });
+    $('result').innerHTML = '<span class="spin"></span> Pinging ' + (provider === 'all' ? 'all providers' : 'OmniRoute') + ' via proxy…';
+    setStatus('info', 'Requesting… server-side pings can take a few seconds per provider.');
+
+    var url = base() + '/api/study/test?provider=' + encodeURIComponent(provider);
+    var uid = ($('uid').value || '').trim();
+    if (uid) url += '&uid=' + encodeURIComponent(uid);
+
+    fetch(url, { method: 'GET' })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          var j; try { j = JSON.parse(t); } catch (e) { j = null; }
+          $('raw').textContent = JSON.stringify(j || t, null, 2);
+          if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + (j && (j.detail || j.error) || t.slice(0, 200)));
+          return j;
+        });
+      })
+      .then(function (j) {
+        var results = (j && j.results) || {};
+        render(results, provider === 'all' ? 'omniroute' : provider);
+        var omni = results.omniroute;
+        if (omni && omni.ok) {
+          setStatus('ok', '✅ OmniRoute is working through the proxy (' + (omni.latency_ms || '?') + ' ms, model ' + esc(omni.model || '?') + ').');
+        } else if (omni && !omni.configured) {
+          setStatus('info', '⚠ OmniRoute has no key set in config/ai. Save a key in Admin → AI Study → OmniRoute, then re-test.');
+        } else if (omni) {
+          setStatus('err', '❌ OmniRoute reachable check failed: ' + esc(omni.detail || ('status ' + omni.status)) +
+            '<br><span class="hint">If detail mentions connection/refused, the proxy can\'t reach OmniRoute — set omnirouteBaseUrl to a tunnel URL (or run the proxy locally).</span>');
+        } else {
+          setStatus('info', 'Done. (OmniRoute not in results — check the provider filter.)');
+        }
+      })
+      .catch(function (e) {
+        var msg = String(e && (e.message || e));
+        setStatus('err', '❌ ' + esc(msg) +
+          '<br><span class="hint">A CORS/Failed-to-fetch error here usually means the proxy URL is wrong or the proxy is down. This endpoint is a normal GET, so a reachable proxy should respond.</span>');
+        $('result').innerHTML = '<span style="color:#ff9ea1">Request failed — see status above.</span>';
+      })
+      .finally(function () { btns.forEach(function (b) { b.disabled = false; }); });
+  }
+
+  $('testOmni').addEventListener('click', function () { run('omniroute'); });
+  $('testAll').addEventListener('click', function () { run('all'); });
+})();
+</script>
+</body>
+</html>
