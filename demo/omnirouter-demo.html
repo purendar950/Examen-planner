@@ -102,19 +102,31 @@
 
   <div class="card">
     <h2>1 · Connection</h2>
+    <label for="gatewayPreset">Gateway</label>
+    <select id="gatewayPreset">
+      <option value="omniroute-local">OmniRoute Local — localhost:20128</option>
+      <option value="omniroute-cloud">OmniRoute Cloud / HTTPS tunnel</option>
+      <option value="openrouter">OpenRouter — direct</option>
+      <option value="custom">Custom OpenAI-compatible endpoint</option>
+    </select>
+    <div class="hint">Choose the service that issued your API key. OmniRoute and OpenRouter keys are not interchangeable.</div>
+
     <label for="baseUrl">Base URL (OpenAI-compatible root, ending in <code>/v1</code>)</label>
-    <input id="baseUrl" placeholder="https://openrouter.ai/api/v1" autocomplete="off" spellcheck="false">
-    <div class="hint">
-      The demo calls <code>{baseUrl}/chat/completions</code> and <code>{baseUrl}/models</code>.
-      Examples: <code>https://openrouter.ai/api/v1</code>, or your OmniRouter/OmniRoute gateway root.
+    <input id="baseUrl" placeholder="http://localhost:20128/v1" autocomplete="off" spellcheck="false">
+    <div class="hint" id="baseHint">
+      Local OmniRoute endpoint: <code>http://localhost:20128/v1</code>. The demo calls
+      <code>{baseUrl}/models</code> and <code>{baseUrl}/chat/completions</code>.
     </div>
 
     <div class="row">
       <div>
         <label for="apiKey">API Key</label>
-        <input id="apiKey" type="text" placeholder="sk-or-v1-..." spellcheck="false"
-               autocomplete="off" name="omnirouter_test_key" data-lpignore="true" data-1p-ignore data-form-type="other">
-        <div class="hint">Type/paste it manually — don't use a saved-password autofill. Stored only in this browser's localStorage; sent as <code>Authorization: Bearer</code>.</div>
+        <input id="apiKey" type="password" placeholder="Paste the key issued by the selected gateway" spellcheck="false"
+               autocomplete="new-password" name="omnirouter_test_key" data-lpignore="true" data-1p-ignore data-form-type="other">
+        <div class="btnbar" style="margin-top:6px">
+          <label class="toggle"><input type="checkbox" id="showKey"> Show key</label>
+        </div>
+        <div class="hint">Paste it manually. The key is kept only in memory for this page and is not saved to localStorage.</div>
         <div id="mismatch" style="display:none;font-size:0.75rem;color:var(--warn);border:1px solid var(--warn);border-radius:6px;padding:7px 9px;margin-top:8px;"></div>
       </div>
       <div>
@@ -176,28 +188,39 @@
 (function () {
   'use strict';
 
-  var LS = 'omnirouterDemoConfig';
+  var LS = 'omnirouterDemoConfigV2';
   var $ = function (id) { return document.getElementById(id); };
   var abortCtrl = null;
 
-  var fields = ['baseUrl', 'apiKey', 'model', 'system', 'prompt', 'temperature', 'maxTokens', 'timeout'];
+  // API keys are deliberately excluded: secrets must not persist in localStorage.
+  var fields = ['baseUrl', 'model', 'system', 'prompt', 'temperature', 'maxTokens', 'timeout'];
 
   function loadConfig() {
+    var cfg = {};
     try {
-      var cfg = JSON.parse(localStorage.getItem(LS) || '{}');
+      cfg = JSON.parse(localStorage.getItem(LS) || '{}');
       fields.forEach(function (f) { if (cfg[f] != null && $(f)) $(f).value = cfg[f]; });
       if (cfg.stream != null) $('stream').checked = !!cfg.stream;
+      if (cfg.gatewayPreset) $('gatewayPreset').value = cfg.gatewayPreset;
     } catch (e) {}
-    if (!$('baseUrl').value) $('baseUrl').value = 'https://openrouter.ai/api/v1';
+    // OmniRoute is the purpose of this demo. New sessions default to its local
+    // endpoint rather than accidentally sending an OmniRoute token to OpenRouter.
+    if (!cfg.gatewayPreset) $('gatewayPreset').value = 'omniroute-local';
+    applyPreset(false);
   }
   function saveConfig() {
     var cfg = {};
     fields.forEach(function (f) { if ($(f)) cfg[f] = $(f).value; });
+    cfg.gatewayPreset = $('gatewayPreset').value;
     cfg.stream = $('stream').checked;
     try { localStorage.setItem(LS, JSON.stringify(cfg)); } catch (e) {}
   }
   fields.forEach(function (f) { if ($(f)) $(f).addEventListener('input', saveConfig); });
   $('stream').addEventListener('change', saveConfig);
+  $('gatewayPreset').addEventListener('change', function () { applyPreset(true); });
+  $('showKey').addEventListener('change', function () {
+    $('apiKey').type = this.checked ? 'text' : 'password';
+  });
   ['baseUrl', 'apiKey'].forEach(function (f) { if ($(f)) $(f).addEventListener('input', checkMismatch); });
 
   function setStatus(kind, msg) {
@@ -208,49 +231,88 @@
   function clearStatus() { $('status').className = 'status'; }
 
   function base() { return ($('baseUrl').value || '').trim().replace(/\/+$/, ''); }
+  function isOpenRouterHost(value) {
+    return /(?:^|\/\/|\.)openrouter\.ai(?:[:\/]|$)/.test(String(value || '').toLowerCase());
+  }
+  function isLocalHttp(value) {
+    return /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(String(value || ''));
+  }
+
+  function applyPreset(resetUrl) {
+    var preset = $('gatewayPreset').value;
+    var hints = {
+      'omniroute-local': 'Local OmniRoute endpoint. This only works when this demo is also opened from an HTTP/local page—not from an HTTPS preview.',
+      'omniroute-cloud': 'Paste the public <strong>HTTPS</strong> endpoint shown by OmniRoute Cloud or your Cloudflare/ngrok tunnel, ending in <code>/v1</code>.',
+      'openrouter': 'Direct OpenRouter endpoint. This requires an OpenRouter-issued key beginning with <code>sk-or-v1-</code>.',
+      'custom': 'Paste an OpenAI-compatible base URL ending in <code>/v1</code>.'
+    };
+    if (resetUrl || !$('baseUrl').value) {
+      if (preset === 'omniroute-local') $('baseUrl').value = 'http://localhost:20128/v1';
+      else if (preset === 'openrouter') $('baseUrl').value = 'https://openrouter.ai/api/v1';
+      else $('baseUrl').value = '';
+    }
+    $('baseUrl').placeholder = preset === 'omniroute-local' ? 'http://localhost:20128/v1' :
+      (preset === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://your-public-gateway.example/v1');
+    $('baseHint').innerHTML = hints[preset] + ' The demo calls <code>{baseUrl}/models</code> and <code>{baseUrl}/chat/completions</code>.';
+    saveConfig();
+    checkMismatch();
+  }
+
   function headers() {
     var h = { 'Content-Type': 'application/json' };
     var key = ($('apiKey').value || '').trim();
     if (key) h['Authorization'] = 'Bearer ' + key;
-    // OpenRouter-friendly (optional) attribution headers; harmless for other gateways.
-    h['HTTP-Referer'] = location.origin || 'https://studyplanner.local';
-    h['X-Title'] = 'StudyPlanner OmniRouter Demo';
+    // These optional attribution headers are OpenRouter-specific. Avoid sending
+    // them to local/custom gateways because they can make CORS preflights fail.
+    if (isOpenRouterHost(base())) {
+      h['HTTP-Referer'] = location.origin || 'https://studyplanner.local';
+      h['X-Title'] = 'StudyPlanner OmniRouter Demo';
+    }
     return h;
   }
 
-  function requireBase() {
-    if (!base()) { setStatus('err', 'Please enter a Base URL first.'); return false; }
-    return true;
+  function connectionIssue(requireKey) {
+    var b = base();
+    var key = ($('apiKey').value || '').trim();
+    if (!b) return 'Enter the gateway Base URL first.';
+    try { new URL(b); } catch (e) { return 'The Base URL is not a valid URL.'; }
+    if (location.protocol === 'https:' && /^http:\/\//i.test(b)) {
+      return 'This page is HTTPS, so the browser will block the HTTP gateway as mixed content. ' +
+        'Choose “OmniRoute Cloud / HTTPS tunnel” and paste its HTTPS URL, or serve this demo locally over HTTP.';
+    }
+    if (requireKey && !key) return 'Paste the API key issued by the selected gateway.';
+    if (key) {
+      var openRouterKey = /^sk-or-/i.test(key);
+      if (isOpenRouterHost(b) && !openRouterKey) {
+        return 'This is not an OpenRouter key. Choose OmniRoute Local/Cloud and use the OmniRoute endpoint; tokens only work with the service that issued them.';
+      }
+      if (!isOpenRouterHost(b) && openRouterKey) {
+        return 'This is an OpenRouter key, but the URL is not OpenRouter. Choose the OpenRouter preset or use the key issued by this gateway.';
+      }
+    }
+    return '';
   }
 
-  // ── Warn when the endpoint and the key clearly belong to different services.
-  // A token only authenticates against the service that issued it, so e.g. an
-  // OmniRoute token (sk-...) sent to openrouter.ai returns a confusing 401.
+  function validateConnection() {
+    var issue = connectionIssue(true);
+    if (!issue) return true;
+    setStatus('err', '❌ ' + issue);
+    checkMismatch();
+    return false;
+  }
+
+  // Show configuration problems live and block the request until corrected.
   function checkMismatch() {
     var el = $('mismatch');
     if (!el) return;
-    var b = base().toLowerCase();
-    var key = ($('apiKey').value || '').trim();
-    var msg = '';
-    if (b && key) {
-      var isOpenRouterHost = /(?:^|\/\/|\.)openrouter\.ai(?:[:\/]|$)/.test(b);
-      var isOpenRouterKey = /^sk-or-/i.test(key);
-      if (isOpenRouterHost && !isOpenRouterKey) {
-        msg = '⚠ This key does not look like an OpenRouter key (those start with <code>sk-or-v1-</code>). ' +
-              'If it is an OmniRoute token, change the Base URL to your OmniRoute gateway ' +
-              '(e.g. <code>http://localhost:20128/v1</code>) — a token only works against the service that issued it.';
-      } else if (!isOpenRouterHost && isOpenRouterKey) {
-        msg = '⚠ This looks like an OpenRouter key (<code>sk-or-…</code>) but the Base URL is not openrouter.ai. ' +
-              'Set the Base URL to <code>https://openrouter.ai/api/v1</code> to use it.';
-      }
-    }
-    el.style.display = msg ? 'block' : 'none';
-    el.innerHTML = msg;
+    var issue = connectionIssue(false);
+    el.style.display = issue ? 'block' : 'none';
+    el.innerHTML = issue ? '⚠ ' + issue : '';
   }
 
   // ── List models: verifies key + endpoint ──
   $('listModelsBtn').addEventListener('click', function () {
-    if (!requireBase()) return;
+    if (!validateConnection()) return;
     var btn = this;
     btn.disabled = true; btn.textContent = 'Listing…';
     clearStatus();
@@ -313,11 +375,7 @@
   });
 
   $('sendBtn').addEventListener('click', function () {
-    if (!requireBase()) return;
-    if (!($('apiKey').value || '').trim()) {
-      setStatus('err', 'Please enter your API key. A blank key is what triggers OpenRouter\'s "Missing Authentication header" 401 — if the box looks filled, click into it and re-paste the key (browser autofill can hide the value from the page).');
-      return;
-    }
+    if (!validateConnection()) return;
     if (!($('model').value || '').trim()) { setStatus('err', 'Please enter a Model.'); return; }
     if (!($('prompt').value || '').trim()) { setStatus('err', 'Please enter a user message.'); return; }
     clearStatus();
