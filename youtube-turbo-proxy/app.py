@@ -2275,6 +2275,13 @@ STUDY_TEST_PROVIDERS = {
     "aicampus":   {"url": "https://ai-hub.aicampus.my/v1/chat/completions", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "def": "minimax-m3"},
     # Kiro CLI backend (OpenAI-compatible wrapper around kiro-cli headless mode).
     "kiro":       {"url": "https://kiro-key-test-s6io.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
+    # OmniRoute — self-hosted OpenAI-compatible AI gateway (one endpoint, many
+    # providers). The URL is overridable at runtime via config/ai.omnirouteBaseUrl
+    # (see _provider_base_url) so a LOCAL address (http://localhost:20128/v1) or a
+    # public TUNNEL (Cloudflare / ngrok) can be used without a code change — the
+    # Render-hosted proxy cannot reach localhost, so a tunnel URL is required in
+    # production while localhost works for a locally-run proxy.
+    "omniroute":  {"url": "http://localhost:20128/v1/chat/completions", "keyField": "omnirouteApiKeys", "modelField": "omnirouteModel", "def": "auto", "baseField": "omnirouteBaseUrl"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
@@ -2290,13 +2297,18 @@ STUDY_PROVIDER_MODELS = {
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "aicampus":   ["minimax-m3", "kimi-k2.7-code"],
     "kiro":       ["auto", "claude-sonnet-5", "claude-opus-4.8", "claude-opus-4.7", "claude-opus-4.6", "claude-sonnet-4.6", "claude-opus-4.5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next"],
+    # Starter list only — OmniRoute's real catalogue depends on which providers
+    # you enable in it. Add the exact model IDs from OmniRoute's own /v1/models
+    # (the AI Study model manager, or the demo's "List models" button, surfaces
+    # them). "auto" lets OmniRoute pick when its smart routing is enabled.
+    "omniroute":  ["auto", "gpt-4o-mini", "gpt-4o", "claude-sonnet-4", "gemini-2.5-flash", "deepseek-v3"],
 }
 # Single source of truth for provider order + display labels, so the flat model
 # list (_all_study_models) and the grouped list (/api/status studyModelGroups)
 # can never drift out of sync (a missing id here made Gemini vanish from the
 # user-side model dropdown even though it worked everywhere else).
-STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "kiro")
-STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "kiro": "Kiro"}
+STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "kiro", "omniroute")
+STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "kiro": "Kiro", "omniroute": "OmniRoute"}
 
 
 def _effective_provider_models(cfg):
@@ -2356,6 +2368,21 @@ def _configured_provider_keys(cfg, pid):
 _NOT_BIG_CONTEXT = {"kiro"}
 
 
+def _provider_base_url(cfg, pid, meta):
+    """Chat-completions URL for a provider. A provider whose meta declares a
+    'baseField' (currently OmniRoute) can be repointed at runtime from
+    config/ai — e.g. a LOCAL gateway (http://localhost:20128/v1) during local
+    development, or a public TUNNEL URL (Cloudflare / ngrok) in production —
+    without any code change. Accepts either an OpenAI-style base ('.../v1') or a
+    full '.../chat/completions' URL. Falls back to the hardcoded default."""
+    base_field = meta.get("baseField")
+    if base_field:
+        base = str((cfg or {}).get(base_field) or "").strip().rstrip("/")
+        if base:
+            return base if base.endswith("/chat/completions") else base + "/chat/completions"
+    return meta["url"]
+
+
 def _ai_for_provider(cfg, pid, model=None):
     """Build an _ai_chat config for a specific provider using ITS OWN key(s).
     Returns None if that provider has no key configured."""
@@ -2366,7 +2393,7 @@ def _ai_for_provider(cfg, pid, model=None):
     if not keys:
         return None
     return {
-        "base_url": meta["url"],
+        "base_url": _provider_base_url(cfg, pid, meta),
         "keys": keys,
         "model": (model or cfg.get(meta["modelField"]) or meta["def"]).strip(),
         "big_context": pid not in _NOT_BIG_CONTEXT,
@@ -2422,7 +2449,7 @@ def api_study_test():
         t0 = time.time()
         try:
             r = requests.post(
-                meta["url"],
+                _provider_base_url(cfg, pid, meta),
                 headers={"Authorization": "Bearer " + keys[0], "Content-Type": "application/json"},
                 json={"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
                 timeout=25)

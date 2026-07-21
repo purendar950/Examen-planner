@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniRouter Test Demo — StudyPlanner</title>
+<style>
+  :root {
+    --bg: #0f131b;
+    --card: #151a24;
+    --surface: #1b1f2a;
+    --border: #2a3140;
+    --text: #e7ecf5;
+    --muted: #8b93a7;
+    --accent: #00c896;
+    --danger: #e0464b;
+    --warn: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 24px 16px 60px; }
+  header h1 { margin: 0 0 4px; font-size: 1.4rem; }
+  header p { margin: 0 0 20px; color: var(--muted); font-size: 0.9rem; }
+  header .badge {
+    display: inline-block; background: var(--surface); border: 1px solid var(--border);
+    color: var(--accent); border-radius: 999px; padding: 2px 10px; font-size: 0.7rem;
+    font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 10px;
+  }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 0.95rem; }
+  label { display: block; font-size: 0.78rem; color: var(--muted); margin: 10px 0 4px; font-weight: 600; }
+  input, select, textarea {
+    width: 100%; background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px;
+    font-size: 0.85rem; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 680px) { .row, .row3 { grid-template-columns: 1fr; } }
+  .hint { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+  .btnbar { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+  button {
+    cursor: pointer; border: none; background: var(--accent); color: #04120d;
+    border-radius: 8px; padding: 10px 18px; font-size: 0.85rem; font-weight: 700;
+    font-family: inherit;
+  }
+  button.sec { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .toggle { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--muted); }
+  .toggle input { width: auto; }
+  .status { font-size: 0.8rem; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; display: none; }
+  .status.show { display: block; }
+  .status.ok { background: rgba(0,200,150,0.12); border: 1px solid var(--accent); color: var(--accent); }
+  .status.err { background: rgba(224,70,75,0.12); border: 1px solid var(--danger); color: #ff9ea1; }
+  .status.info { background: rgba(245,158,11,0.10); border: 1px solid var(--warn); color: #ffd68a; }
+  .out {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px; min-height: 80px; white-space: pre-wrap; word-break: break-word;
+    font-size: 0.9rem;
+  }
+  .meta { font-size: 0.72rem; color: var(--muted); margin-bottom: 8px; }
+  pre.raw {
+    background: #0b0e14; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; overflow: auto; max-height: 320px; font-size: 0.74rem;
+    color: #b8c2d8; margin: 8px 0 0;
+  }
+  .spin {
+    display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite;
+    vertical-align: middle; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .caret { display: inline-block; width: 7px; height: 1em; background: var(--accent);
+    vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(2,start) infinite; }
+  @keyframes blink { to { opacity: 0; } }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); font-size: 0.78rem; }
+  code { background: var(--surface); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="badge">Integration Test Harness</span>
+    <h1>OmniRouter Test Demo</h1>
+    <p>
+      Standalone test bench for an <strong>OpenAI-compatible</strong> LLM gateway (OmniRouter / OpenRouter-style).
+      Verify a base URL + API key + model here <em>before</em> wiring it into
+      <code>youtube-turbo-proxy/app.py</code> and the admin panel. Nothing here touches your real code.
+    </p>
+  </header>
+
+  <div id="status" class="status"></div>
+
+  <div class="card">
+    <h2>1 · Connection</h2>
+    <label for="gatewayPreset">Gateway</label>
+    <select id="gatewayPreset">
+      <option value="omniroute-local">OmniRoute Local — localhost:20128</option>
+      <option value="omniroute-cloud">OmniRoute Cloud / HTTPS tunnel</option>
+      <option value="openrouter">OpenRouter — direct</option>
+      <option value="custom">Custom OpenAI-compatible endpoint</option>
+    </select>
+    <div class="hint">Choose the service that issued your API key. OmniRoute and OpenRouter keys are not interchangeable.</div>
+
+    <label for="baseUrl">Base URL (OpenAI-compatible root, ending in <code>/v1</code>)</label>
+    <input id="baseUrl" placeholder="http://localhost:20128/v1" autocomplete="off" spellcheck="false">
+    <div class="hint" id="baseHint">
+      Local OmniRoute endpoint: <code>http://localhost:20128/v1</code>. The demo calls
+      <code>{baseUrl}/models</code> and <code>{baseUrl}/chat/completions</code>.
+    </div>
+    <div class="hint" id="localDocsHint" style="display:none">
+      Local-only fallback: <a href="http://localhost:20128/api/docs" target="_blank" rel="noreferrer" style="color:var(--accent)">open OmniRoute API documentation</a> on the same device. A public HTTPS demo cannot access a local HTTP service.
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="apiKey">API Key</label>
+        <input id="apiKey" type="password" placeholder="Paste the key issued by the selected gateway" spellcheck="false"
+               autocomplete="new-password" name="omnirouter_test_key" data-lpignore="true" data-1p-ignore data-form-type="other">
+        <div class="btnbar" style="margin-top:6px">
+          <label class="toggle"><input type="checkbox" id="showKey"> Show key</label>
+        </div>
+        <div class="hint">Paste it manually. The key is kept only in memory for this page and is not saved to localStorage.</div>
+        <div id="mismatch" style="display:none;font-size:0.75rem;color:var(--warn);border:1px solid var(--warn);border-radius:6px;padding:7px 9px;margin-top:8px;"></div>
+      </div>
+      <div>
+        <label for="model">Model</label>
+        <input id="model" placeholder="e.g. openai/gpt-4o-mini" autocomplete="off" spellcheck="false" list="modelList">
+        <datalist id="modelList"></datalist>
+        <div class="hint">Type it, or click "List models" to populate suggestions.</div>
+      </div>
+    </div>
+
+    <div class="btnbar">
+      <button class="sec" id="listModelsBtn" type="button">List models</button>
+      <span class="hint">Verifies the key + base URL by fetching the model catalogue.</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Chat request</h2>
+    <label for="system">System prompt (optional)</label>
+    <textarea id="system" placeholder="You are a helpful study assistant.">You are a helpful study assistant for exam preparation. Answer concisely.</textarea>
+
+    <label for="prompt">User message</label>
+    <textarea id="prompt" placeholder="Ask something...">Give me 3 quick tips to memorize formulas for a math exam.</textarea>
+
+    <div class="row3">
+      <div>
+        <label for="temperature">Temperature</label>
+        <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.7">
+      </div>
+      <div>
+        <label for="maxTokens">Max tokens</label>
+        <input id="maxTokens" type="number" min="1" step="16" value="512">
+      </div>
+      <div>
+        <label for="timeout">Timeout (s)</label>
+        <input id="timeout" type="number" min="5" step="5" value="60">
+      </div>
+    </div>
+
+    <div class="btnbar">
+      <label class="toggle"><input type="checkbox" id="stream" checked> Stream (SSE)</label>
+      <button id="sendBtn" type="button">Send request</button>
+      <button class="sec" id="stopBtn" type="button" disabled>Stop</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3 · Response</h2>
+    <div class="meta" id="respMeta">No request sent yet.</div>
+    <div class="out" id="output"><span style="color:var(--muted)">The model's reply will appear here.</span></div>
+    <details>
+      <summary>Raw payload / debug</summary>
+      <pre class="raw" id="raw">—</pre>
+    </details>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var LS = 'omnirouterDemoConfigV3';
+  var $ = function (id) { return document.getElementById(id); };
+  var abortCtrl = null;
+
+  // API keys are deliberately excluded: secrets must not persist in localStorage.
+  var fields = ['baseUrl', 'model', 'system', 'prompt', 'temperature', 'maxTokens', 'timeout'];
+
+  function loadConfig() {
+    var cfg = {};
+    try {
+      cfg = JSON.parse(localStorage.getItem(LS) || '{}');
+      fields.forEach(function (f) { if (cfg[f] != null && $(f)) $(f).value = cfg[f]; });
+      if (cfg.stream != null) $('stream').checked = !!cfg.stream;
+      if (cfg.gatewayPreset) $('gatewayPreset').value = cfg.gatewayPreset;
+    } catch (e) {}
+
+    // A remote HTTPS page cannot call an HTTP loopback endpoint. Do not carry
+    // an old local preset/URL into the hosted demo; it would only trigger the
+    // browser's mixed-content block before OmniRoute receives any request.
+    var hosted = location.protocol === 'https:';
+    var staleLocalConfig = $('gatewayPreset').value === 'omniroute-local' || isLocalHttp($('baseUrl').value);
+    if (hosted && staleLocalConfig) {
+      $('gatewayPreset').value = 'omniroute-cloud';
+      $('baseUrl').value = '';
+    } else if (!cfg.gatewayPreset) {
+      $('gatewayPreset').value = 'omniroute-local';
+    }
+    if (!$('model').value && $('gatewayPreset').value.indexOf('omniroute-') === 0) $('model').value = 'auto';
+    applyPreset(false);
+
+    if (hosted && $('gatewayPreset').value === 'omniroute-cloud') {
+      setStatus('info', 'This online demo needs a public <strong>HTTPS</strong> OmniRoute URL. Paste the <code>https://…/v1</code> URL from an active ngrok/Cloudflare/Tailscale tunnel, then paste a newly generated OmniRoute API key.');
+    }
+  }
+  function saveConfig() {
+    var cfg = {};
+    fields.forEach(function (f) { if ($(f)) cfg[f] = $(f).value; });
+    cfg.gatewayPreset = $('gatewayPreset').value;
+    cfg.stream = $('stream').checked;
+    try { localStorage.setItem(LS, JSON.stringify(cfg)); } catch (e) {}
+  }
+  fields.forEach(function (f) { if ($(f)) $(f).addEventListener('input', saveConfig); });
+  $('stream').addEventListener('change', saveConfig);
+  $('gatewayPreset').addEventListener('change', function () { applyPreset(true); });
+  $('showKey').addEventListener('change', function () {
+    $('apiKey').type = this.checked ? 'text' : 'password';
+  });
+  ['baseUrl', 'apiKey'].forEach(function (f) { if ($(f)) $(f).addEventListener('input', checkMismatch); });
+
+  function setStatus(kind, msg) {
+    var el = $('status');
+    el.className = 'status show ' + kind;
+    el.innerHTML = msg;
+  }
+  function clearStatus() { $('status').className = 'status'; }
+
+  function base() { return ($('baseUrl').value || '').trim().replace(/\/+$/, ''); }
+  function isOpenRouterHost(value) {
+    return /(?:^|\/\/|\.)openrouter\.ai(?:[:\/]|$)/.test(String(value || '').toLowerCase());
+  }
+  function isLocalHttp(value) {
+    return /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(String(value || ''));
+  }
+
+  function applyPreset(resetUrl) {
+    var preset = $('gatewayPreset').value;
+    var hints = {
+      'omniroute-local': 'Local OmniRoute endpoint. This only works when this demo is also opened from an HTTP/local page—not from an HTTPS preview.',
+      'omniroute-cloud': 'Paste the public <strong>HTTPS</strong> endpoint shown by OmniRoute Cloud or your Cloudflare/ngrok tunnel, ending in <code>/v1</code>.',
+      'openrouter': 'Direct OpenRouter endpoint. This requires an OpenRouter-issued key beginning with <code>sk-or-v1-</code>.',
+      'custom': 'Paste an OpenAI-compatible base URL ending in <code>/v1</code>.'
+    };
+    if (resetUrl || !$('baseUrl').value) {
+      if (preset === 'omniroute-local') $('baseUrl').value = 'http://localhost:20128/v1';
+      else if (preset === 'openrouter') $('baseUrl').value = 'https://openrouter.ai/api/v1';
+      else $('baseUrl').value = '';
+    }
+    $('baseUrl').placeholder = preset === 'omniroute-local' ? 'http://localhost:20128/v1' :
+      (preset === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://your-public-gateway.example/v1');
+    $('baseHint').innerHTML = hints[preset] + ' The demo calls <code>{baseUrl}/models</code> and <code>{baseUrl}/chat/completions</code>.';
+    $('localDocsHint').style.display = (location.protocol === 'https:' && preset === 'omniroute-cloud') ? 'block' : 'none';
+    saveConfig();
+    checkMismatch();
+  }
+
+  function headers() {
+    var h = { 'Content-Type': 'application/json' };
+    var key = ($('apiKey').value || '').trim();
+    if (key) h['Authorization'] = 'Bearer ' + key;
+    // These optional attribution headers are OpenRouter-specific. Avoid sending
+    // them to local/custom gateways because they can make CORS preflights fail.
+    if (isOpenRouterHost(base())) {
+      h['HTTP-Referer'] = location.origin || 'https://studyplanner.local';
+      h['X-Title'] = 'StudyPlanner OmniRouter Demo';
+    }
+    return h;
+  }
+
+  function connectionIssue(requireKey) {
+    var b = base();
+    var key = ($('apiKey').value || '').trim();
+    if (!b) return 'Enter the gateway Base URL first.';
+    try { new URL(b); } catch (e) { return 'The Base URL is not a valid URL.'; }
+    if (location.protocol === 'https:' && /^http:\/\//i.test(b)) {
+      return 'This page is HTTPS, so the browser will block the HTTP gateway as mixed content. ' +
+        'Choose “OmniRoute Cloud / HTTPS tunnel” and paste its HTTPS URL, or serve this demo locally over HTTP.';
+    }
+    if (requireKey && !key) return 'Paste the API key issued by the selected gateway.';
+    if (key) {
+      var openRouterKey = /^sk-or-/i.test(key);
+      if (isOpenRouterHost(b) && !openRouterKey) {
+        return 'This is not an OpenRouter key. Choose OmniRoute Local/Cloud and use the OmniRoute endpoint; tokens only work with the service that issued them.';
+      }
+      if (!isOpenRouterHost(b) && openRouterKey) {
+        return 'This is an OpenRouter key, but the URL is not OpenRouter. Choose the OpenRouter preset or use the key issued by this gateway.';
+      }
+    }
+    return '';
+  }
+
+  function validateConnection() {
+    var issue = connectionIssue(true);
+    if (!issue) return true;
+    setStatus('err', '❌ ' + issue);
+    checkMismatch();
+    return false;
+  }
+
+  // Show configuration problems live and block the request until corrected.
+  function checkMismatch() {
+    var el = $('mismatch');
+    if (!el) return;
+    var issue = connectionIssue(false);
+    el.style.display = issue ? 'block' : 'none';
+    el.innerHTML = issue ? '⚠ ' + issue : '';
+  }
+
+  // ── List models: verifies key + endpoint ──
+  $('listModelsBtn').addEventListener('click', function () {
+    if (!validateConnection()) return;
+    var btn = this;
+    btn.disabled = true; btn.textContent = 'Listing…';
+    clearStatus();
+    fetch(base() + '/models', { headers: headers() })
+      .then(function (r) {
+        return r.text().then(function (t) {
+          var j; try { j = JSON.parse(t); } catch (e) { j = null; }
+          if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + (j && (j.error && (j.error.message || j.error) || j.message) || t.slice(0, 300)));
+          return j;
+        });
+      })
+      .then(function (j) {
+        var list = (j && (j.data || j.models || j)) || [];
+        if (!Array.isArray(list)) list = [];
+        var ids = list.map(function (m) { return (typeof m === 'string') ? m : (m.id || m.name); }).filter(Boolean);
+        var dl = $('modelList');
+        dl.innerHTML = ids.slice(0, 300).map(function (id) { return '<option value="' + id.replace(/"/g, '&quot;') + '">'; }).join('');
+        $('raw').textContent = JSON.stringify(j, null, 2);
+        setStatus('ok', '✅ Connection OK — ' + ids.length + ' model(s) available. Suggestions loaded into the Model box.');
+        if (!$('model').value && ids.length) $('model').value = ids[0];
+        saveConfig();
+      })
+      .catch(function (e) {
+        setStatus('err', '❌ Could not list models: ' + escapeHtml(String(e.message || e)) +
+          '<br><span class="hint">Some gateways block <code>/models</code> from the browser (CORS) even when chat works. Try "Send request" directly.</span>');
+      })
+      .finally(function () { btn.disabled = false; btn.textContent = 'List models'; });
+  });
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function buildMessages() {
+    var msgs = [];
+    var sys = ($('system').value || '').trim();
+    if (sys) msgs.push({ role: 'system', content: sys });
+    msgs.push({ role: 'user', content: ($('prompt').value || '').trim() });
+    return msgs;
+  }
+
+  function buildBody(stream) {
+    return {
+      model: ($('model').value || '').trim(),
+      messages: buildMessages(),
+      temperature: parseFloat($('temperature').value) || 0,
+      max_tokens: parseInt($('maxTokens').value, 10) || 512,
+      stream: !!stream
+    };
+  }
+
+  function setBusy(busy) {
+    $('sendBtn').disabled = busy;
+    $('stopBtn').disabled = !busy;
+    $('listModelsBtn').disabled = busy;
+  }
+
+  $('stopBtn').addEventListener('click', function () {
+    if (abortCtrl) { try { abortCtrl.abort(); } catch (e) {} }
+  });
+
+  $('sendBtn').addEventListener('click', function () {
+    if (!validateConnection()) return;
+    if (!($('model').value || '').trim()) { setStatus('err', 'Please enter a Model.'); return; }
+    if (!($('prompt').value || '').trim()) { setStatus('err', 'Please enter a user message.'); return; }
+    clearStatus();
+    var stream = $('stream').checked;
+    var body = buildBody(stream);
+    $('raw').textContent = JSON.stringify({ request: { url: base() + '/chat/completions', body: body } }, null, 2);
+    $('output').innerHTML = '<span class="spin"></span> Contacting gateway…';
+    $('respMeta').textContent = (stream ? 'Streaming' : 'Non-streaming') + ' request in progress…';
+    setBusy(true);
+
+    abortCtrl = ('AbortController' in window) ? new AbortController() : null;
+    var timeoutMs = (parseInt($('timeout').value, 10) || 60) * 1000;
+    var timer = abortCtrl ? setTimeout(function () { abortCtrl.abort('timeout'); }, timeoutMs) : null;
+    var started = Date.now();
+
+    var fetchOpts = { method: 'POST', headers: headers(), body: JSON.stringify(body) };
+    if (abortCtrl) fetchOpts.signal = abortCtrl.signal;
+
+    if (stream) {
+      runStream(fetchOpts, started, timer);
+    } else {
+      runOnce(fetchOpts, started, timer);
+    }
+  });
+
+  function finish(timer) {
+    if (timer) clearTimeout(timer);
+    setBusy(false);
+    abortCtrl = null;
+  }
+
+  function runOnce(fetchOpts, started, timer) {
+    fetch(base() + '/chat/completions', fetchOpts)
+      .then(function (r) {
+        return r.text().then(function (t) {
+          var j; try { j = JSON.parse(t); } catch (e) { j = null; }
+          $('raw').textContent = JSON.stringify(j || t, null, 2);
+          if (!r.ok) throw new Error('HTTP ' + r.status + ' — ' + (j && (j.error && (j.error.message || j.error) || j.message) || t.slice(0, 400)));
+          return j;
+        });
+      })
+      .then(function (j) {
+        var content = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content || '(empty response)';
+        $('output').textContent = content;
+        var ms = Date.now() - started;
+        var usage = j && j.usage ? (' · ' + (j.usage.total_tokens || '?') + ' tokens') : '';
+        var mdl = j && j.model ? (' · ' + j.model) : '';
+        setStatus('ok', '✅ Response received in ' + ms + ' ms.');
+        $('respMeta').textContent = 'Done in ' + ms + ' ms' + mdl + usage;
+      })
+      .catch(function (e) { handleErr(e); })
+      .finally(function () { finish(timer); });
+  }
+
+  function runStream(fetchOpts, started, timer) {
+    var acc = '', gotChunk = false;
+    fetch(base() + '/chat/completions', fetchOpts)
+      .then(function (r) {
+        if (!r.ok || !r.body || !window.TextDecoder) {
+          // Non-OK or no streaming support → surface the body as an error.
+          return r.text().then(function (t) {
+            var j; try { j = JSON.parse(t); } catch (e) { j = null; }
+            $('raw').textContent = JSON.stringify(j || t, null, 2);
+            throw new Error('HTTP ' + r.status + ' — ' + (j && (j.error && (j.error.message || j.error) || j.message) || t.slice(0, 400)));
+          });
+        }
+        var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
+        $('output').innerHTML = '';
+        function paint() { $('output').innerHTML = escapeHtml(acc) + '<span class="caret"></span>'; }
+        function handleFrame(frame) {
+          frame.split('\n').forEach(function (ln) {
+            ln = ln.trim();
+            if (ln.indexOf('data:') !== 0) return;
+            var data = ln.slice(5).trim();
+            if (data === '[DONE]') return;
+            try {
+              var o = JSON.parse(data);
+              var delta = o.choices && o.choices[0] && (o.choices[0].delta || o.choices[0].message);
+              var piece = delta && (delta.content != null ? delta.content : '');
+              if (piece) { acc += piece; gotChunk = true; paint(); }
+            } catch (e) { /* keep-alive or partial frame */ }
+          });
+        }
+        function pump() {
+          return reader.read().then(function (res) {
+            if (res.done) return;
+            buf += dec.decode(res.value, { stream: true });
+            var frames = buf.split('\n\n');
+            buf = frames.pop();
+            frames.forEach(handleFrame);
+            return pump();
+          });
+        }
+        return pump().then(function () {
+          var ms = Date.now() - started;
+          $('output').textContent = acc || '(empty stream)';
+          if (gotChunk) {
+            setStatus('ok', '✅ Streamed ' + acc.length + ' chars in ' + ms + ' ms.');
+            $('respMeta').textContent = 'Streamed · done in ' + ms + ' ms';
+          } else {
+            setStatus('info', '⚠ Stream ended with no content. Check the raw payload — the gateway may not support SSE for this model.');
+            $('respMeta').textContent = 'Stream ended empty in ' + ms + ' ms';
+          }
+        });
+      })
+      .catch(function (e) { handleErr(e); })
+      .finally(function () { finish(timer); });
+  }
+
+  function handleErr(e) {
+    var msg = String(e && (e.message || e));
+    if (msg === 'timeout' || /abort/i.test(msg)) {
+      setStatus('info', '⏹ Request stopped/timed out.');
+      $('respMeta').textContent = 'Stopped';
+      if (($('output').textContent || '').trim() === '' || $('output').querySelector('.spin')) {
+        $('output').innerHTML = '<span style="color:var(--muted)">No content received before stop/timeout.</span>';
+      }
+      return;
+    }
+    setStatus('err', '❌ ' + escapeHtml(msg) +
+      '<br><span class="hint">If this is a CORS error, the gateway is blocking direct browser calls — that\'s expected. Your real integration goes through the server-side proxy (app.py), which has no CORS restriction. This demo just confirms the URL/key/model shape.</span>');
+    $('output').innerHTML = '<span style="color:#ff9ea1">Request failed — see status above and the raw panel.</span>';
+    $('respMeta').textContent = 'Failed';
+  }
+
+  loadConfig();
+  checkMismatch();
+})();
+</script>
+</body>
+</html>
