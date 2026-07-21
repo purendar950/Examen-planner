@@ -15,49 +15,96 @@
   h2 { margin:0 0 8px; font-size:1rem; } ol { padding-left:21px; color:var(--muted); margin:8px 0; } li { margin:8px 0; }
   button, .bookmarklet { display:inline-block; border:0; border-radius:8px; padding:10px 15px; background:var(--accent); color:#04120d; cursor:pointer; text-decoration:none; font:700 14px inherit; }
   button:disabled { opacity:.6; cursor:default; }
-  textarea { width:100%; min-height:145px; margin-top:12px; padding:10px; resize:vertical; border:1px solid var(--border); border-radius:8px; background:#0b0e14; color:#b8c2d8; font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; }
+  textarea { width:100%; min-height:180px; margin-top:12px; padding:10px; resize:vertical; border:1px solid var(--border); border-radius:8px; background:#0b0e14; color:#b8c2d8; font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; }
   .status { min-height:22px; margin-top:10px; color:var(--muted); font-size:13px; } .status.ok { color:var(--accent); } .status.err { color:#ff9ea1; }
   .note { border-left:3px solid var(--warn); background:rgba(245,158,11,.08); padding:10px 12px; border-radius:4px; color:#ffd68a; font-size:13px; }
-  a { color:var(--accent); } code { background:var(--surface); padding:1px 5px; border-radius:4px; color:var(--text); }
+  .hint { color:var(--muted); font-size:13px; margin-top:10px; } a { color:var(--accent); } code { background:var(--surface); padding:1px 5px; border-radius:4px; color:var(--text); }
 </style>
 </head>
 <body>
 <main>
-  <span class="badge">Same-origin local test</span>
+  <span class="badge">Local same-origin diagnostic</span>
   <h1>OmniRoute Local Tester</h1>
-  <p>This is the browser-safe alternative to the hosted demo. The generated bookmarklet runs <strong>inside your local OmniRoute dashboard</strong>, so its request is <code>http://localhost:20128</code> → <code>http://localhost:20128</code>. No HTTPS-to-HTTP mixed-content request occurs.</p>
+  <p>This bookmarklet must run from the local OmniRoute dashboard. It first probes the local health endpoint, then sends a real OpenAI-compatible chat request. It displays the page origin and target URLs so a browser/network failure can be diagnosed accurately.</p>
 
   <div class="card">
     <h2>Install once</h2>
     <ol>
       <li>Click <strong>Copy bookmarklet</strong>.</li>
-      <li>Create any browser bookmark, edit it, and replace its URL with the copied text. Name it <strong>Test OmniRoute Local</strong>.</li>
-      <li>Open your local <a href="http://localhost:20128/dashboard/endpoint" target="_blank" rel="noreferrer">OmniRoute Endpoints dashboard</a> on the same device.</li>
-      <li>Open the <strong>Test OmniRoute Local</strong> bookmark. Enter a newly generated OmniRoute API key, model <code>auto</code>, and your prompt.</li>
+      <li>Create a browser bookmark, edit it, and paste the copied value as its URL. Name it <strong>Test OmniRoute Local</strong>.</li>
+      <li>On the same device, open <a href="http://localhost:20128/dashboard/endpoint" target="_blank" rel="noreferrer">http://localhost:20128/dashboard/endpoint</a>.</li>
+      <li>Only from that local dashboard tab, open the saved <strong>Test OmniRoute Local</strong> bookmark.</li>
     </ol>
     <button id="copy" type="button">Copy bookmarklet</button>
     <a id="bookmarkLink" class="bookmarklet" href="#" title="Drag this link to your bookmarks bar on desktop">Test OmniRoute Local</a>
-    <div class="hint">Desktop: drag <strong>Test OmniRoute Local</strong> to the bookmarks bar. Mobile: use <strong>Copy bookmarklet</strong>, then paste it into a bookmark's URL.</div>
+    <div class="hint">Desktop: drag the green bookmark link to the bookmarks bar. Mobile: copy the bookmarklet, then paste it into a bookmark’s URL field. Do not tap the green link on this HTTPS helper page.</div>
     <div class="status" id="status" aria-live="polite"></div>
     <textarea id="code" readonly aria-label="Bookmarklet code"></textarea>
   </div>
 
-  <div class="note"><strong>Why this works:</strong> it calls the relative path <code>/v1/chat/completions</code> from the local OmniRoute dashboard itself. Do not run this bookmark from the HTTPS GitHub preview page—run it only after you have navigated to <code>http://localhost:20128/dashboard/endpoint</code>.</div>
-
-  <div class="card">
-    <h2>What the tester does</h2>
-    <p>It uses <code>Authorization: Bearer &lt;your API key&gt;</code>, sends an OpenAI-compatible non-streaming chat request, and displays the HTTP status plus raw JSON in a closable overlay. It does not persist the key, write settings, or put the key in a URL.</p>
-  </div>
+  <div class="note"><strong>Expected first result:</strong> <code>Same-origin health probe returned HTTP 200</code> (or another HTTP status). If it instead says <code>LOCAL NETWORK PROBE FAILED</code>, copy the diagnostic panel text but never share your API key.</div>
 </main>
 <script>
 (function () {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
 
-  // This code executes only when the saved bookmark is selected on OmniRoute's
-  // own local dashboard. Its relative fetch keeps the test same-origin.
-  var bookmarklet = "javascript:(async()=>{const k=prompt('OmniRoute API key (not saved)');if(!k)return;const m=prompt('Model','auto')||'auto',q=prompt('Prompt','Give me three concise study tips.');if(!q)return;const o=document.createElement('pre');o.style.cssText='position:fixed;z-index:2147483647;inset:5%;margin:0;padding:18px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#0b0e14;color:#e7ecf5;border:2px solid #00c896;border-radius:12px;font:13px/1.5 ui-monospace,monospace;box-shadow:0 16px 60px #000;cursor:pointer';o.textContent='Sending request…\\n\\nTap/click this panel to close.';o.title='Tap/click to close';o.onclick=()=>o.remove();document.body.append(o);try{const r=await fetch('/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+k,'Content-Type':'application/json'},body:JSON.stringify({model:m,messages:[{role:'user',content:q}],stream:false})}),t=await r.text();let b=t;try{b=JSON.stringify(JSON.parse(t),null,2)}catch(e){}o.textContent='HTTP '+r.status+' '+r.statusText+'\\n\\n'+b+'\\n\\nTap/click this panel to close.'}catch(e){o.textContent='Request failed before OmniRoute returned a response.\\n\\n'+String(e)+'\\n\\nTap/click this panel to close.'}})()";
+  // Serialized into a javascript: bookmark. It has no dependencies on this helper page.
+  async function localTester() {
+    var host = location.hostname;
+    var correctHost = /^(localhost|127\.0\.0\.1|::1|\[::1\])$/i.test(host);
+    var correctPort = location.port === '20128';
+    var origin = location.origin;
+    var healthUrl = origin + '/api/monitoring/health';
+    var chatUrl = origin + '/v1/chat/completions';
+    var panel = document.createElement('pre');
 
+    panel.style.cssText = 'position:fixed;z-index:2147483647;inset:5%;margin:0;padding:18px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#0b0e14;color:#e7ecf5;border:2px solid #00c896;border-radius:12px;font:13px/1.5 ui-monospace,monospace;box-shadow:0 16px 60px #000;cursor:pointer';
+    panel.title = 'Tap/click to close';
+    panel.onclick = function () { panel.remove(); };
+    document.body.append(panel);
+
+    if (!correctHost || !correctPort) {
+      panel.textContent = 'STOP — this bookmark must run from the local OmniRoute dashboard.\n\nCurrent page: ' + location.href + '\nCurrent origin: ' + origin + '\n\nOpen exactly: http://localhost:20128/dashboard/endpoint\nThen run this saved bookmark from that tab.\n\nTap/click this panel to close.';
+      return;
+    }
+
+    panel.textContent = 'Checking same-origin OmniRoute connectivity…\n\nCurrent origin: ' + origin + '\nHealth probe: ' + healthUrl;
+    try {
+      var health = await fetch(healthUrl, { method: 'GET', mode: 'same-origin', credentials: 'same-origin', cache: 'no-store' });
+      var healthText = await health.text();
+      panel.textContent = 'Same-origin health probe returned HTTP ' + health.status + ' ' + health.statusText + '\n\nCurrent origin: ' + origin + '\nChat target: ' + chatUrl + '\n\nNow enter the request details in the prompts.';
+      if (!health.ok) panel.textContent += '\n\nHealth response (first 500 chars):\n' + healthText.slice(0, 500);
+    } catch (error) {
+      panel.textContent = 'LOCAL NETWORK PROBE FAILED — OmniRoute did not return a browser response.\n\nCurrent page: ' + location.href + '\nCurrent origin: ' + origin + '\nHealth target: ' + healthUrl + '\nError: ' + String(error) + '\n\nThis is not an API-key or model error. Reload the exact local dashboard URL, confirm OmniRoute is still running, then run the saved bookmark from that local tab only.\n\nTap/click this panel to close.';
+      return;
+    }
+
+    var key = prompt('OmniRoute API key (not saved)');
+    if (!key) { panel.remove(); return; }
+    var model = prompt('Model', 'auto') || 'auto';
+    var promptText = prompt('Prompt', 'Give me three concise study tips.');
+    if (!promptText) { panel.remove(); return; }
+
+    panel.textContent = 'Sending chat request…\n\nCurrent origin: ' + origin + '\nChat target: ' + chatUrl + '\nModel: ' + model;
+    try {
+      var response = await fetch(chatUrl, {
+        method: 'POST',
+        mode: 'same-origin',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: model, messages: [{ role: 'user', content: promptText }], stream: false })
+      });
+      var responseText = await response.text();
+      try { responseText = JSON.stringify(JSON.parse(responseText), null, 2); } catch (ignore) {}
+      panel.textContent = 'CHAT RESPONSE — HTTP ' + response.status + ' ' + response.statusText + '\n\nCurrent origin: ' + origin + '\nChat target: ' + chatUrl + '\n\n' + responseText + '\n\nTap/click this panel to close.';
+    } catch (error) {
+      panel.textContent = 'CHAT NETWORK REQUEST FAILED\n\nCurrent page: ' + location.href + '\nCurrent origin: ' + origin + '\nChat target: ' + chatUrl + '\nError: ' + String(error) + '\n\nThe health probe succeeded, so copy this full panel text and share it. Do not share your API key.\n\nTap/click this panel to close.';
+    }
+  }
+
+  var bookmarklet = 'javascript:(' + localTester.toString() + ')()';
   $('code').value = bookmarklet;
   $('bookmarkLink').href = bookmarklet;
 
@@ -66,19 +113,20 @@
     el.className = 'status ' + kind;
     el.textContent = text;
   }
-  function fallbackCopy(text) {
+  function fallbackCopy() {
     var field = $('code');
-    field.focus(); field.select();
-    try { return document.execCommand('copy'); } catch (e) { return false; }
+    field.focus();
+    field.select();
+    try { return document.execCommand('copy'); } catch (error) { return false; }
   }
   $('copy').addEventListener('click', function () {
-    var done = function (ok) {
-      setStatus(ok ? 'ok' : 'err', ok ? 'Copied. Save it as a bookmark, then run it from the local OmniRoute dashboard.' : 'Copy was blocked. Select all text in the box and copy it manually.');
-    };
+    function done(ok) {
+      setStatus(ok ? 'ok' : 'err', ok ? 'Copied. Save it as a bookmark, then run it only from the local OmniRoute dashboard tab.' : 'Copy was blocked. Select all text in the box and copy it manually.');
+    }
     if (navigator.clipboard && location.protocol === 'https:') {
-      navigator.clipboard.writeText(bookmarklet).then(function () { done(true); }, function () { done(fallbackCopy(bookmarklet)); });
+      navigator.clipboard.writeText(bookmarklet).then(function () { done(true); }, function () { done(fallbackCopy()); });
     } else {
-      done(fallbackCopy(bookmarklet));
+      done(fallbackCopy());
     }
   });
 })();
