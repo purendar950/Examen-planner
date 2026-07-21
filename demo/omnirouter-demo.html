@@ -117,6 +117,9 @@
       Local OmniRoute endpoint: <code>http://localhost:20128/v1</code>. The demo calls
       <code>{baseUrl}/models</code> and <code>{baseUrl}/chat/completions</code>.
     </div>
+    <div class="hint" id="localDocsHint" style="display:none">
+      Local-only fallback: <a href="http://localhost:20128/api/docs" target="_blank" rel="noreferrer" style="color:var(--accent)">open OmniRoute API documentation</a> on the same device. A public HTTPS demo cannot access a local HTTP service.
+    </div>
 
     <div class="row">
       <div>
@@ -188,7 +191,7 @@
 (function () {
   'use strict';
 
-  var LS = 'omnirouterDemoConfigV2';
+  var LS = 'omnirouterDemoConfigV3';
   var $ = function (id) { return document.getElementById(id); };
   var abortCtrl = null;
 
@@ -203,10 +206,24 @@
       if (cfg.stream != null) $('stream').checked = !!cfg.stream;
       if (cfg.gatewayPreset) $('gatewayPreset').value = cfg.gatewayPreset;
     } catch (e) {}
-    // OmniRoute is the purpose of this demo. New sessions default to its local
-    // endpoint rather than accidentally sending an OmniRoute token to OpenRouter.
-    if (!cfg.gatewayPreset) $('gatewayPreset').value = 'omniroute-local';
+
+    // A remote HTTPS page cannot call an HTTP loopback endpoint. Do not carry
+    // an old local preset/URL into the hosted demo; it would only trigger the
+    // browser's mixed-content block before OmniRoute receives any request.
+    var hosted = location.protocol === 'https:';
+    var staleLocalConfig = $('gatewayPreset').value === 'omniroute-local' || isLocalHttp($('baseUrl').value);
+    if (hosted && staleLocalConfig) {
+      $('gatewayPreset').value = 'omniroute-cloud';
+      $('baseUrl').value = '';
+    } else if (!cfg.gatewayPreset) {
+      $('gatewayPreset').value = 'omniroute-local';
+    }
+    if (!$('model').value && $('gatewayPreset').value.indexOf('omniroute-') === 0) $('model').value = 'auto';
     applyPreset(false);
+
+    if (hosted && $('gatewayPreset').value === 'omniroute-cloud') {
+      setStatus('info', 'This online demo needs a public <strong>HTTPS</strong> OmniRoute URL. Paste the <code>https://…/v1</code> URL from an active ngrok/Cloudflare/Tailscale tunnel, then paste a newly generated OmniRoute API key.');
+    }
   }
   function saveConfig() {
     var cfg = {};
@@ -254,6 +271,7 @@
     $('baseUrl').placeholder = preset === 'omniroute-local' ? 'http://localhost:20128/v1' :
       (preset === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://your-public-gateway.example/v1');
     $('baseHint').innerHTML = hints[preset] + ' The demo calls <code>{baseUrl}/models</code> and <code>{baseUrl}/chat/completions</code>.';
+    $('localDocsHint').style.display = (location.protocol === 'https:' && preset === 'omniroute-cloud') ? 'block' : 'none';
     saveConfig();
     checkMismatch();
   }
