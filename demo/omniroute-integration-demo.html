@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A safe, standalone browser demo for testing an OmniRoute OpenAI-compatible gateway.">
+  <title>StudyPlanner · OmniRoute integration demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f4f8f7;
+      --surface: #ffffff;
+      --surface-muted: #f8fbfa;
+      --ink: #172b27;
+      --muted: #61736e;
+      --border: #d8e4e0;
+      --accent: #078967;
+      --accent-dark: #056d52;
+      --accent-soft: #dff6ee;
+      --danger: #bf3f46;
+      --danger-soft: #fff0f1;
+      --warning: #9b6200;
+      --warning-soft: #fff7e5;
+      --shadow: 0 18px 45px rgba(19, 61, 49, .08);
+      --radius: 18px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: radial-gradient(circle at 0 0, #e4f8f0 0, transparent 31rem), var(--page); color: var(--ink); }
+    button, input, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    .shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 36px 0 52px; }
+    .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent-dark); font-size: .73rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: clamp(1.75rem, 4vw, 2.7rem); letter-spacing: -.05em; line-height: 1.05; }
+    .hero p:not(.eyebrow) { max-width: 700px; margin: 12px 0 0; color: var(--muted); line-height: 1.65; }
+    .demo-badge { flex: none; display: inline-flex; align-items: center; gap: 7px; padding: 8px 11px; border: 1px solid #bde8d8; border-radius: 99px; background: var(--accent-soft); color: var(--accent-dark); font-size: .78rem; font-weight: 800; white-space: nowrap; }
+    .demo-badge::before { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); content: ""; }
+    .notice { display: flex; gap: 11px; margin-bottom: 20px; padding: 13px 15px; border: 1px solid #f1d998; border-radius: 13px; background: var(--warning-soft); color: #684509; font-size: .88rem; line-height: 1.55; }
+    .notice strong { color: #533804; }
+    .layout { display: grid; grid-template-columns: minmax(270px, .84fr) minmax(0, 1.5fr); gap: 20px; align-items: start; }
+    .card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 20px 20px 0; }
+    .card h2 { margin: 0; font-size: 1rem; letter-spacing: -.02em; }
+    .card-head p { margin: 5px 0 0; color: var(--muted); font-size: .8rem; line-height: 1.45; }
+    .connection-form { padding: 18px 20px 20px; }
+    label { display: block; margin-bottom: 6px; color: #466158; font-size: .76rem; font-weight: 800; }
+    .field { margin-top: 14px; }
+    input, textarea, select { width: 100%; border: 1px solid var(--border); border-radius: 10px; outline: 0; background: var(--surface-muted); color: var(--ink); }
+    input, select { height: 41px; padding: 0 11px; }
+    textarea { min-height: 132px; padding: 11px; resize: vertical; line-height: 1.55; }
+    input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(7, 137, 103, .13); }
+    .help { display: block; margin-top: 6px; color: var(--muted); font-size: .72rem; line-height: 1.45; }
+    .remote-consent { display: flex; align-items: flex-start; gap: 8px; margin-top: 13px; color: #466158; font-size: .73rem; line-height: 1.45; }
+    .remote-consent input { width: 15px; height: 15px; flex: none; margin: 1px 0 0; padding: 0; accent-color: var(--accent); }
+    .help code, .endpoint { overflow-wrap: anywhere; }
+    .button-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+    .button { min-height: 38px; padding: 0 13px; border: 1px solid transparent; border-radius: 9px; background: var(--accent); color: #fff; font-size: .8rem; font-weight: 800; }
+    .button:hover:not(:disabled) { background: var(--accent-dark); }
+    .button.secondary { border-color: var(--border); background: var(--surface); color: var(--ink); }
+    .button.secondary:hover:not(:disabled) { border-color: #a7c7bc; background: var(--surface-muted); }
+    .button:disabled { cursor: wait; opacity: .65; }
+    .state { display: flex; align-items: flex-start; gap: 9px; margin: 0 20px 20px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-muted); color: var(--muted); font-size: .78rem; line-height: 1.45; }
+    .state::before { flex: none; width: 8px; height: 8px; margin-top: .22rem; border-radius: 50%; background: #97aaa4; content: ""; }
+    .state.success { border-color: #b8e5d4; background: #eefbf6; color: #21624d; }
+    .state.success::before { background: var(--accent); }
+    .state.error { border-color: #f1c3c6; background: var(--danger-soft); color: #96353b; }
+    .state.error::before { background: var(--danger); }
+    .state.loading::before { background: var(--warning); animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: .3; } }
+    .test-card { overflow: hidden; }
+    .test-main { padding: 18px 20px 20px; }
+    .chat-label { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .char-count { color: var(--muted); font-size: .7rem; font-weight: 600; }
+    .controls { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 12px; margin-top: 14px; }
+    .result { margin-top: 18px; }
+    .result-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .result h3 { margin: 0; font-size: .82rem; }
+    .result-meta { color: var(--muted); font-size: .71rem; text-align: right; }
+    .output { min-height: 156px; max-height: 460px; overflow: auto; margin: 8px 0 0; padding: 14px; border: 1px solid var(--border); border-radius: 11px; background: #10201c; color: #e3f7ee; font: .79rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .output.empty { display: grid; place-items: center; border-style: dashed; background: var(--surface-muted); color: var(--muted); font-family: inherit; text-align: center; }
+    details { border-top: 1px solid var(--border); background: var(--surface-muted); }
+    summary { padding: 13px 20px; color: #426057; cursor: pointer; font-size: .78rem; font-weight: 800; }
+    .details-content { padding: 0 20px 20px; }
+    pre { margin: 0; padding: 12px; overflow: auto; border-radius: 10px; background: #10201c; color: #e3f7ee; font: .72rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .footer-note { margin: 18px 0 0; color: var(--muted); font-size: .72rem; line-height: 1.5; }
+    .footer-note a { color: var(--accent-dark); font-weight: 700; }
+    @media (max-width: 820px) { .layout { grid-template-columns: 1fr; } .hero { display: block; } .demo-badge { margin-top: 14px; } }
+    @media (max-width: 530px) { .shell { width: min(100% - 22px, 1180px); padding-top: 22px; } .controls { grid-template-columns: 1fr; } .button-row .button { flex: 1; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">Standalone test page · no app changes</p>
+        <h1>Try OmniRoute with StudyPlanner</h1>
+        <p>Use this browser-only demo to send one OpenAI-compatible chat request through your local OmniRoute gateway before connecting it to a StudyPlanner feature.</p>
+      </div>
+      <span class="demo-badge">Test environment</span>
+    </header>
+
+    <aside class="notice" aria-label="Security notice">
+      <span aria-hidden="true">⚠</span>
+      <span><strong>Use a disposable test key only.</strong> The key stays only in this form while the page is open; it is never stored, logged, or committed. A production integration should call OmniRoute from a protected server-side endpoint, not directly from browser code.</span>
+    </aside>
+
+    <section class="layout">
+      <aside class="card" aria-labelledby="connection-title">
+        <div class="card-head">
+          <div>
+            <h2 id="connection-title">1. OmniRoute connection</h2>
+            <p>Point the demo to the same machine where OmniRoute is running.</p>
+          </div>
+        </div>
+        <form class="connection-form" id="connection-form">
+          <div class="field">
+            <label for="endpoint">API base URL</label>
+            <input id="endpoint" name="endpoint" type="url" value="http://localhost:20128/v1" autocomplete="url" spellcheck="false" required>
+            <span class="help">Expected local value: <code>http://localhost:20128/v1</code></span>
+          </div>
+          <div class="field">
+            <label for="api-key">API key <span aria-label="optional">(optional)</span></label>
+            <input id="api-key" name="api-key" type="password" placeholder="Paste a temporary OmniRoute endpoint key" autocomplete="off" spellcheck="false">
+            <span class="help">If <code>REQUIRE_API_KEY</code> is enabled in OmniRoute, add an endpoint key from its dashboard.</span>
+          </div>
+          <label class="remote-consent" for="remote-confirm">
+            <input id="remote-confirm" type="checkbox">
+            <span>I confirm that a non-local endpoint is a trusted HTTPS OmniRoute gateway. Local <code>localhost</code> testing does not need this confirmation.</span>
+          </label>
+          <div class="button-row">
+            <button class="button secondary" id="check-button" type="button">Check connection</button>
+            <button class="button secondary" id="load-models-button" type="button">Load models</button>
+          </div>
+        </form>
+        <div class="state" id="connection-state" role="status" aria-live="polite">Not connected. Check that OmniRoute is running at the URL above.</div>
+      </aside>
+
+      <section class="card test-card" aria-labelledby="test-title">
+        <div class="card-head">
+          <div>
+            <h2 id="test-title">2. Send a test completion</h2>
+            <p>This sends <code>POST /chat/completions</code> with <code>stream: false</code>.</p>
+          </div>
+        </div>
+        <div class="test-main">
+          <div class="controls">
+            <div>
+              <label for="model">Model or OmniRoute combo</label>
+              <input id="model" list="model-options" value="if/kimi-k2-thinking" placeholder="for example: your-study-combo" autocomplete="off" spellcheck="false" required>
+              <datalist id="model-options"></datalist>
+            </div>
+            <div>
+              <label for="temperature">Temperature</label>
+              <select id="temperature">
+                <option value="0">0 · precise</option>
+                <option value="0.2" selected>0.2 · focused</option>
+                <option value="0.7">0.7 · creative</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <div class="chat-label"><label for="prompt">Test prompt</label><span class="char-count" id="char-count">0 characters</span></div>
+            <textarea id="prompt" maxlength="6000" spellcheck="true">Create three concise revision questions with answers about the water cycle. Format the response as a numbered list suitable for a study planner.</textarea>
+          </div>
+          <div class="button-row">
+            <button class="button" id="send-button" type="button">Send test request</button>
+            <button class="button secondary" id="copy-output-button" type="button" disabled>Copy response</button>
+            <button class="button secondary" id="reset-button" type="button">Reset demo</button>
+          </div>
+          <section class="result" aria-labelledby="result-title">
+            <div class="result-head">
+              <h3 id="result-title">Gateway response</h3>
+              <span class="result-meta" id="result-meta">Waiting for a request</span>
+            </div>
+            <output class="output empty" id="output" aria-live="polite">Your model response will appear here.</output>
+          </section>
+        </div>
+        <details>
+          <summary>Show the generated request and safe cURL template</summary>
+          <div class="details-content">
+            <pre id="request-preview">Configure the connection and prompt to preview the request.</pre>
+          </div>
+        </details>
+      </section>
+    </section>
+
+    <p class="footer-note">If a request is blocked by CORS, run this page from a local HTTP server on your development machine, configure OmniRoute to permit that origin, or use a server-side proxy. Do not expose your OmniRoute API key in a public GitHub Pages site. OmniRoute’s <a href="https://github.com/diegosouzapw/OmniRoute" target="_blank" rel="noreferrer">official documentation</a> describes its OpenAI-compatible <code>/v1</code> interface.</p>
+  </main>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const elements = {
+        endpoint: document.getElementById('endpoint'),
+        apiKey: document.getElementById('api-key'),
+        remoteConfirm: document.getElementById('remote-confirm'),
+        checkButton: document.getElementById('check-button'),
+        loadModelsButton: document.getElementById('load-models-button'),
+        connectionState: document.getElementById('connection-state'),
+        model: document.getElementById('model'),
+        modelOptions: document.getElementById('model-options'),
+        temperature: document.getElementById('temperature'),
+        prompt: document.getElementById('prompt'),
+        charCount: document.getElementById('char-count'),
+        sendButton: document.getElementById('send-button'),
+        copyOutputButton: document.getElementById('copy-output-button'),
+        resetButton: document.getElementById('reset-button'),
+        output: document.getElementById('output'),
+        resultMeta: document.getElementById('result-meta'),
+        requestPreview: document.getElementById('request-preview')
+      };
+      const initialPrompt = elements.prompt.value;
+      const activeControllers = new Set();
+      let lastResponse = '';
+      let resetVersion = 0;
+
+      const normaliseEndpoint = () => {
+        const value = elements.endpoint.value.trim();
+        if (!value) throw new Error('Enter an OmniRoute API base URL first.');
+        let url;
+        try {
+          url = new URL(value);
+        } catch {
+          throw new Error('Enter a complete HTTP(S) API base URL, for example http://localhost:20128/v1.');
+        }
+        const isLocalGateway = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+        if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Only HTTP(S) OmniRoute endpoints are supported.');
+        if (url.username || url.password) throw new Error('Do not place credentials in the API base URL. Use the API key field instead.');
+        if (url.protocol !== 'https:' && !isLocalGateway) throw new Error('For safety, remote OmniRoute endpoints must use HTTPS. HTTP is allowed only for localhost.');
+        if (!isLocalGateway && !elements.remoteConfirm.checked) throw new Error('Confirm that this remote HTTPS endpoint is trusted before sending your prompt or API key.');
+        if (url.search || url.hash) throw new Error('The API base URL must not contain a query string or fragment.');
+        url.pathname = url.pathname.replace(/\/+$/, '');
+        return url.toString().replace(/\/$/, '');
+      };
+      const endpointUrl = (path) => `${normaliseEndpoint()}${path}`;
+      const headers = () => {
+        const requestHeaders = { Accept: 'application/json' };
+        const key = elements.apiKey.value.trim();
+        if (key) requestHeaders.Authorization = `Bearer ${key}`;
+        return requestHeaders;
+      };
+      const messageForError = (error) => {
+        if (error.name === 'AbortError') return 'The request was cancelled or timed out after 30 seconds.';
+        if (error instanceof TypeError) return 'The browser could not reach OmniRoute. Confirm the URL, that the local gateway is running, and that CORS permits this demo page.';
+        return error.message || 'An unexpected request error occurred.';
+      };
+      const setConnectionState = (message, type = '') => {
+        elements.connectionState.className = `state ${type}`.trim();
+        elements.connectionState.textContent = message;
+      };
+      const setBusy = (button, isBusy, busyText) => {
+        if (isBusy) {
+          button.dataset.label = button.textContent;
+          button.textContent = busyText;
+        } else {
+          button.textContent = button.dataset.label || button.textContent;
+        }
+        button.disabled = isBusy;
+      };
+      const safeJson = (value) => JSON.stringify(value, null, 2);
+      const shellQuote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+      const requestBody = () => ({
+        model: elements.model.value.trim(),
+        messages: [
+          { role: 'system', content: 'You are a precise study-planning assistant. Keep answers concise and use only the requested format.' },
+          { role: 'user', content: elements.prompt.value.trim() }
+        ],
+        temperature: Number(elements.temperature.value),
+        stream: false
+      });
+      const updatePreview = () => {
+        const body = requestBody();
+        try {
+          const url = endpointUrl('/chat/completions');
+          const hasKey = Boolean(elements.apiKey.value.trim());
+          const curl = [
+            `curl -X POST ${shellQuote(url)}`,
+            `  -H ${shellQuote('Content-Type: application/json')}`,
+            ...(hasKey ? [`  -H ${shellQuote('Authorization: Bearer YOUR_TEST_KEY')}`] : []),
+            `  -d ${shellQuote(JSON.stringify(body))}`
+          ].join(' \\\n');
+          const previewHeaders = { Accept: 'application/json', 'Content-Type': 'application/json' };
+          if (hasKey) previewHeaders.Authorization = 'Bearer YOUR_TEST_KEY';
+          elements.requestPreview.textContent = `${safeJson({ url, headers: previewHeaders, body })}\n\nSafe cURL template — replace YOUR_TEST_KEY locally; this page never writes your actual key into the preview:\n${curl}`;
+        } catch (error) {
+          elements.requestPreview.textContent = `Fix the connection URL to preview the request.\n\n${messageForError(error)}`;
+        }
+      };
+      const updateCharCount = () => {
+        elements.charCount.textContent = `${elements.prompt.value.length.toLocaleString()} characters`;
+        updatePreview();
+      };
+      const fetchWithTimeout = async (url, options) => {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 30000);
+        activeControllers.add(controller);
+        try {
+          return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+          activeControllers.delete(controller);
+          window.clearTimeout(timer);
+        }
+      };
+      const parseResponse = async (response) => {
+        const raw = await response.text();
+        try { return raw ? JSON.parse(raw) : {}; } catch { return { raw }; }
+      };
+      const reportHttpError = (response, data) => {
+        const detail = data?.error?.message || data?.message || data?.error || data?.raw || response.statusText;
+        return `OmniRoute returned ${response.status}: ${detail}`;
+      };
+      const setOutput = (message, isError = false) => {
+        elements.output.classList.remove('empty');
+        elements.output.textContent = message;
+        if (isError) elements.output.style.color = '#ffb6ba';
+        else elements.output.style.color = '';
+      };
+      const routeHeaders = (response) => {
+        const collected = [];
+        ['x-request-id', 'x-omniroute-model', 'x-omniroute-provider', 'x-ratelimit-remaining-requests'].forEach((name) => {
+          const value = response.headers.get(name);
+          if (value) collected.push(`${name}: ${value}`);
+        });
+        return collected;
+      };
+
+      async function checkConnection(loadModels = false) {
+        const button = loadModels ? elements.loadModelsButton : elements.checkButton;
+        const version = resetVersion;
+        setBusy(button, true, loadModels ? 'Loading…' : 'Checking…');
+        try {
+          const modelsUrl = endpointUrl('/models');
+          setConnectionState(`Contacting ${modelsUrl}…`, 'loading');
+          const response = await fetchWithTimeout(modelsUrl, { method: 'GET', headers: headers() });
+          const data = await parseResponse(response);
+          if (version !== resetVersion) return;
+          if (!response.ok) throw new Error(reportHttpError(response, data));
+          if (!Array.isArray(data.data)) throw new Error('The /models response is not OpenAI-compatible: expected a JSON object with a data array.');
+          const models = data.data;
+          const modelIds = models
+            .map((model) => typeof model === 'string' ? model : model?.id)
+            .filter((model) => typeof model === 'string' && model.trim());
+          if (modelIds.length !== models.length) throw new Error('The /models response contains an entry without a usable model id.');
+          if (loadModels) {
+            const options = modelIds.map((model) => {
+              const option = document.createElement('option');
+              option.value = model;
+              return option;
+            });
+            elements.modelOptions.replaceChildren(...options);
+          }
+          const message = `Connected to an OpenAI-compatible OmniRoute endpoint. ${models.length} model${models.length === 1 ? '' : 's'} available${loadModels ? ' and added to the model selector' : ''}.`;
+          setConnectionState(message, 'success');
+        } catch (error) {
+          if (version === resetVersion) setConnectionState(messageForError(error), 'error');
+        } finally {
+          if (version === resetVersion) setBusy(button, false);
+        }
+      }
+
+      async function sendCompletion() {
+        const body = requestBody();
+        const version = resetVersion;
+        let chatUrl;
+        try {
+          chatUrl = endpointUrl('/chat/completions');
+        } catch (error) {
+          setOutput(messageForError(error), true);
+          return;
+        }
+        if (!body.model || !body.messages[1].content) {
+          setOutput('Add a model/combo and a prompt before sending a request.', true);
+          return;
+        }
+        setBusy(elements.sendButton, true, 'Sending…');
+        elements.copyOutputButton.disabled = true;
+        elements.resultMeta.textContent = 'Request in progress…';
+        setOutput('Waiting for OmniRoute…');
+        const startedAt = performance.now();
+        try {
+          const response = await fetchWithTimeout(chatUrl, {
+            method: 'POST',
+            headers: { ...headers(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          });
+          const data = await parseResponse(response);
+          if (version !== resetVersion) return;
+          const duration = Math.round(performance.now() - startedAt);
+          const headerInfo = routeHeaders(response);
+          if (!response.ok) throw new Error(reportHttpError(response, data));
+          const content = data?.choices?.[0]?.message?.content;
+          if (!Array.isArray(data?.choices) || typeof content !== 'string') {
+            throw new Error('The /chat/completions response is not OpenAI-compatible: expected choices[0].message.content.');
+          }
+          const displayResponse = content.trim() || '(The model returned an empty response.)';
+          lastResponse = displayResponse;
+          setOutput(displayResponse);
+          const usage = data?.usage?.total_tokens ? ` · ${data.usage.total_tokens.toLocaleString()} tokens` : '';
+          elements.resultMeta.textContent = `${response.status} · ${duration.toLocaleString()} ms${usage}${headerInfo.length ? ` · ${headerInfo.join(' · ')}` : ''}`;
+          elements.copyOutputButton.disabled = false;
+          setConnectionState('Request succeeded. OmniRoute accepted the OpenAI-compatible completion request.', 'success');
+        } catch (error) {
+          if (version !== resetVersion) return;
+          const duration = Math.round(performance.now() - startedAt);
+          lastResponse = '';
+          setOutput(messageForError(error), true);
+          elements.resultMeta.textContent = `Failed after ${duration.toLocaleString()} ms`;
+          setConnectionState(messageForError(error), 'error');
+        } finally {
+          if (version === resetVersion) setBusy(elements.sendButton, false);
+        }
+      }
+
+      elements.checkButton.addEventListener('click', () => checkConnection(false));
+      elements.loadModelsButton.addEventListener('click', () => checkConnection(true));
+      elements.sendButton.addEventListener('click', sendCompletion);
+      elements.prompt.addEventListener('input', updateCharCount);
+      [elements.endpoint, elements.apiKey, elements.model, elements.temperature].forEach((element) => element.addEventListener('input', updatePreview));
+      elements.remoteConfirm.addEventListener('change', updatePreview);
+      elements.copyOutputButton.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(lastResponse);
+          elements.copyOutputButton.textContent = 'Copied';
+          window.setTimeout(() => { elements.copyOutputButton.textContent = 'Copy response'; }, 1600);
+        } catch {
+          setConnectionState('Your browser did not allow clipboard access. Select and copy the response manually.', 'error');
+        }
+      });
+      elements.resetButton.addEventListener('click', () => {
+        resetVersion += 1;
+        activeControllers.forEach((controller) => controller.abort());
+        elements.checkButton.disabled = false;
+        elements.loadModelsButton.disabled = false;
+        elements.sendButton.disabled = false;
+        elements.endpoint.value = 'http://localhost:20128/v1';
+        elements.apiKey.value = '';
+        elements.remoteConfirm.checked = false;
+        elements.model.value = 'if/kimi-k2-thinking';
+        elements.temperature.value = '0.2';
+        elements.prompt.value = initialPrompt;
+        elements.modelOptions.replaceChildren();
+        lastResponse = '';
+        elements.copyOutputButton.disabled = true;
+        elements.output.className = 'output empty';
+        elements.output.style.color = '';
+        elements.output.textContent = 'Your model response will appear here.';
+        elements.resultMeta.textContent = 'Waiting for a request';
+        setConnectionState('Demo reset. No API key is retained.', '');
+        updateCharCount();
+      });
+      updateCharCount();
+    })();
+  </script>
+</body>
+</html>
