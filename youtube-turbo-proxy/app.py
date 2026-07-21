@@ -834,6 +834,12 @@ _NOTES_CONTINUE = ("Continue the notes from EXACTLY where you stopped (finish th
                    "NOT restart, and do NOT add any intro, heading recap or closing "
                    "remark \u2014 just carry straight on.")
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
+# Version the MCQ-notes cache independently. The previous prompt could only
+# extract questions already stated in a transcript, so it cached conversational
+# refusals for normal explanatory lectures. A new cache namespace makes every
+# MCQ request use the corrected generation contract without needing to purge
+# otherwise-valid study material.
+_MCQ_CACHE_STYLE = "mcq-v2"
 _study_cache = {}
 _study_lock = threading.Lock()
 
@@ -1428,29 +1434,31 @@ def _notes_instr(style=""):
                 "after tomorrow' or date-based class scheduling. Keep ONLY the "
                 "exam-relevant academic content (in ANY language).")
     if style == "mcq":
-        return ("The transcript is a lecture SOLVING multiple-choice questions "
-                "(MCQs) and is annotated with inline timestamps like [M:SS]. "
-                "Convert it into COMPLETE Markdown revision notes, ONE "
-                "question at a time, keeping the lecture's order. For EACH "
-                "question use EXACTLY this structure:\n"
-                "### Q<n>. (<M:SS>) <the full question>\n"
-                "(The (M:SS) is the lecture timestamp where this question starts, "
-                "taken from the nearest preceding [M:SS] marker.)\n"
+        return ("The source is an explanatory lecture transcript, not necessarily a "
+                "lecture that already asks or solves MCQs. Create a self-contained "
+                "MCQ practice set from its exam-relevant content. The transcript is "
+                "annotated with inline timestamps like [M:SS]. NEVER say that there "
+                "are no questions to extract, NEVER ask the user what to do, and do "
+                "not output a preamble or a conversational reply.\n"
+                "Create useful questions from the concepts, facts, definitions, "
+                "figures, dates, names, comparisons and reasoning in the lecture. "
+                "Keep their source order and aim for 10-25 questions when the "
+                "material supports it; produce fewer only when the source is truly "
+                "too short. The correct answer and explanation MUST be grounded in "
+                "the transcript. You MAY write plausible distractor options needed "
+                "for assessment, but never present an unsupported claim as correct.\n"
+                "For EACH question use EXACTLY this parseable Markdown structure:\n"
+                "### Q<n>. (<M:SS>) <clear full question>\n"
+                "(Use the nearest preceding [M:SS] marker for the timestamp.)\n"
                 "- A) <option>\n- B) <option>\n- C) <option>\n- D) <option>\n"
-                "(Include only the options actually stated; mark the CORRECT "
-                "option by adding ' \u2713' at its end.)\n"
+                "(Use exactly four options. Mark the correct option by adding "
+                "' \u2713' at its end.)\n"
                 "**Answer:** <letter> \u2014 <one-line reason>\n"
-                "**Explanation:** then '- ' bullet points with ALL the points, "
-                "facts, figures, dates, names and reasoning the teacher gave for "
-                "THIS question \u2014 do NOT omit anything.\n"
-                "Add '- Key Fact: ...' or '- Memory Trick: ...' bullets whenever "
-                "the teacher gives one.\n"
-                "Rules: bold (**...**) ONLY key terms; NEVER invent questions, "
-                "options or answers that are not in the transcript; do not wrap "
-                "the answer in code fences. Do NOT output the same question "
-                "twice \u2014 if the lecture revisits a question already covered, "
-                "SKIP it and fold any new detail into that question's Explanation "
-                "instead. Use the SAME spelling for a name/term throughout." + no_promo)
+                "**Explanation:**\n- <concise supporting point>\n"
+                "Add '- Key Fact: ...' or '- Memory Trick: ...' when useful.\n"
+                "Rules: bold (**...**) ONLY key terms; do not wrap the answer in "
+                "code fences; do not repeat or paraphrase a question already "
+                "written; use the SAME spelling for a name/term throughout." + no_promo)
     return ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
             "topic, point, fact, figure, date, name, place, definition, formula "
             "and example mentioned \u2014 do NOT omit or over-summarize any "
@@ -1878,8 +1886,11 @@ def api_study():
         ckey = "%s:%s:%s:%s::%s" % (video_id, mode, out_lang, num_q, fkey)
         fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, fkey)
     elif style:
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, num_q, style)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, style)
+        # MCQ prompts are versioned so cached responses produced by the retired
+        # "extract existing questions" contract are never served again.
+        cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, num_q, cache_style)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, cache_style)
     else:
         ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, num_q)
         fs_id = _fs_doc_id(video_id, mode, out_lang, num_q)
@@ -2000,8 +2011,10 @@ def api_study_stream():
     # Cache key MUST match /api/study (notes/summary/insights have no focus and a
     # fixed num_q of 25) so a streamed note reuses/populates the same entry.
     if style:
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, 25, style)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, 25, style)
+        # Match /api/study's versioned MCQ cache namespace.
+        cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, 25, cache_style)
+        fs_id = _fs_doc_id(video_id, mode, out_lang, 25, cache_style)
     else:
         ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, 25)
         fs_id = _fs_doc_id(video_id, mode, out_lang, 25)
@@ -2139,8 +2152,9 @@ def api_study_langs():
     except Exception:  # noqa: BLE001
         model = ""
     available = []
+    cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
     for lang in _STUDY_LANGS:
-        fs_id = _fs_doc_id(video_id, mode, lang, num_q, style) if style \
+        fs_id = _fs_doc_id(video_id, mode, lang, num_q, cache_style) if cache_style \
             else _fs_doc_id(video_id, mode, lang, num_q)
         try:
             # Firestore is only the fast index. Also detect a B2 body whose index
