@@ -13,7 +13,7 @@
   h1 { margin:8px 0 6px; font-size:1.55rem; } p { color:var(--muted); margin:6px 0 16px; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin:14px 0; }
   h2 { margin:0 0 8px; font-size:1rem; } ol { padding-left:21px; color:var(--muted); margin:8px 0; } li { margin:8px 0; }
-  button { border:0; border-radius:8px; padding:10px 15px; background:var(--accent); color:#04120d; cursor:pointer; font:700 14px inherit; }
+  button, .bookmarklet { display:inline-block; border:0; border-radius:8px; padding:10px 15px; background:var(--accent); color:#04120d; cursor:pointer; text-decoration:none; font:700 14px inherit; }
   button:disabled { opacity:.6; cursor:default; }
   textarea { width:100%; min-height:145px; margin-top:12px; padding:10px; resize:vertical; border:1px solid var(--border); border-radius:8px; background:#0b0e14; color:#b8c2d8; font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; }
   .status { min-height:22px; margin-top:10px; color:var(--muted); font-size:13px; } .status.ok { color:var(--accent); } .status.err { color:#ff9ea1; }
@@ -36,6 +36,8 @@
       <li>Open the <strong>Test OmniRoute Local</strong> bookmark. Enter a newly generated OmniRoute API key, model <code>auto</code>, and your prompt.</li>
     </ol>
     <button id="copy" type="button">Copy bookmarklet</button>
+    <a id="bookmarkLink" class="bookmarklet" href="#" title="Drag this link to your bookmarks bar on desktop">Test OmniRoute Local</a>
+    <div class="hint">Desktop: drag <strong>Test OmniRoute Local</strong> to the bookmarks bar. Mobile: use <strong>Copy bookmarklet</strong>, then paste it into a bookmark's URL.</div>
     <div class="status" id="status" aria-live="polite"></div>
     <textarea id="code" readonly aria-label="Bookmarklet code"></textarea>
   </div>
@@ -57,6 +59,7 @@
   var bookmarklet = "javascript:(async()=>{const k=prompt('OmniRoute API key (not saved)');if(!k)return;const m=prompt('Model','auto')||'auto',q=prompt('Prompt','Give me three concise study tips.');if(!q)return;const o=document.createElement('pre');o.style.cssText='position:fixed;z-index:2147483647;inset:5%;margin:0;padding:18px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#0b0e14;color:#e7ecf5;border:2px solid #00c896;border-radius:12px;font:13px/1.5 ui-monospace,monospace;box-shadow:0 16px 60px #000;cursor:pointer';o.textContent='Sending request…\\n\\nTap/click this panel to close.';o.title='Tap/click to close';o.onclick=()=>o.remove();document.body.append(o);try{const r=await fetch('/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+k,'Content-Type':'application/json'},body:JSON.stringify({model:m,messages:[{role:'user',content:q}],stream:false})}),t=await r.text();let b=t;try{b=JSON.stringify(JSON.parse(t),null,2)}catch(e){}o.textContent='HTTP '+r.status+' '+r.statusText+'\\n\\n'+b+'\\n\\nTap/click this panel to close.'}catch(e){o.textContent='Request failed before OmniRoute returned a response.\\n\\n'+String(e)+'\\n\\nTap/click this panel to close.'}})()";
 
   $('code').value = bookmarklet;
+  $('bookmarkLink').href = bookmarklet;
 
   function setStatus(kind, text) {
     var el = $('status');
