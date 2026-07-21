@@ -112,8 +112,9 @@
     <div class="row">
       <div>
         <label for="apiKey">API Key</label>
-        <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false">
-        <div class="hint">Stored only in this browser's localStorage. Sent as <code>Authorization: Bearer</code>.</div>
+        <input id="apiKey" type="text" placeholder="sk-or-v1-..." spellcheck="false"
+               autocomplete="off" name="omnirouter_test_key" data-lpignore="true" data-1p-ignore data-form-type="other">
+        <div class="hint">Type/paste it manually — don't use a saved-password autofill. Stored only in this browser's localStorage; sent as <code>Authorization: Bearer</code>.</div>
       </div>
       <div>
         <label for="model">Model</label>
@@ -286,6 +287,10 @@
 
   $('sendBtn').addEventListener('click', function () {
     if (!requireBase()) return;
+    if (!($('apiKey').value || '').trim()) {
+      setStatus('err', 'Please enter your API key. A blank key is what triggers OpenRouter\'s "Missing Authentication header" 401 — if the box looks filled, click into it and re-paste the key (browser autofill can hide the value from the page).');
+      return;
+    }
     if (!($('model').value || '').trim()) { setStatus('err', 'Please enter a Model.'); return; }
     if (!($('prompt').value || '').trim()) { setStatus('err', 'Please enter a user message.'); return; }
     clearStatus();
