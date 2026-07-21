@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniRoute Local Tester Bookmarklet</title>
+<style>
+  :root { --bg:#0f131b; --card:#151a24; --surface:#1b1f2a; --border:#2a3140; --text:#e7ecf5; --muted:#8b93a7; --accent:#00c896; --warn:#f59e0b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,"Segoe UI",Arial,sans-serif; }
+  main { max-width:780px; margin:0 auto; padding:28px 16px 56px; }
+  .badge { display:inline-block; padding:3px 9px; border:1px solid var(--border); border-radius:999px; color:var(--accent); font-size:11px; font-weight:700; letter-spacing:.4px; text-transform:uppercase; }
+  h1 { margin:8px 0 6px; font-size:1.55rem; } p { color:var(--muted); margin:6px 0 16px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin:14px 0; }
+  h2 { margin:0 0 8px; font-size:1rem; } ol { padding-left:21px; color:var(--muted); margin:8px 0; } li { margin:8px 0; }
+  button { border:0; border-radius:8px; padding:10px 15px; background:var(--accent); color:#04120d; cursor:pointer; font:700 14px inherit; }
+  button:disabled { opacity:.6; cursor:default; }
+  textarea { width:100%; min-height:145px; margin-top:12px; padding:10px; resize:vertical; border:1px solid var(--border); border-radius:8px; background:#0b0e14; color:#b8c2d8; font:11px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; }
+  .status { min-height:22px; margin-top:10px; color:var(--muted); font-size:13px; } .status.ok { color:var(--accent); } .status.err { color:#ff9ea1; }
+  .note { border-left:3px solid var(--warn); background:rgba(245,158,11,.08); padding:10px 12px; border-radius:4px; color:#ffd68a; font-size:13px; }
+  a { color:var(--accent); } code { background:var(--surface); padding:1px 5px; border-radius:4px; color:var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <span class="badge">Same-origin local test</span>
+  <h1>OmniRoute Local Tester</h1>
+  <p>This is the browser-safe alternative to the hosted demo. The generated bookmarklet runs <strong>inside your local OmniRoute dashboard</strong>, so its request is <code>http://localhost:20128</code> → <code>http://localhost:20128</code>. No HTTPS-to-HTTP mixed-content request occurs.</p>
+
+  <div class="card">
+    <h2>Install once</h2>
+    <ol>
+      <li>Click <strong>Copy bookmarklet</strong>.</li>
+      <li>Create any browser bookmark, edit it, and replace its URL with the copied text. Name it <strong>Test OmniRoute Local</strong>.</li>
+      <li>Open your local <a href="http://localhost:20128/dashboard/endpoint" target="_blank" rel="noreferrer">OmniRoute Endpoints dashboard</a> on the same device.</li>
+      <li>Open the <strong>Test OmniRoute Local</strong> bookmark. Enter a newly generated OmniRoute API key, model <code>auto</code>, and your prompt.</li>
+    </ol>
+    <button id="copy" type="button">Copy bookmarklet</button>
+    <div class="status" id="status" aria-live="polite"></div>
+    <textarea id="code" readonly aria-label="Bookmarklet code"></textarea>
+  </div>
+
+  <div class="note"><strong>Why this works:</strong> it calls the relative path <code>/v1/chat/completions</code> from the local OmniRoute dashboard itself. Do not run this bookmark from the HTTPS GitHub preview page—run it only after you have navigated to <code>http://localhost:20128/dashboard/endpoint</code>.</div>
+
+  <div class="card">
+    <h2>What the tester does</h2>
+    <p>It uses <code>Authorization: Bearer &lt;your API key&gt;</code>, sends an OpenAI-compatible non-streaming chat request, and displays the HTTP status plus raw JSON in a closable overlay. It does not persist the key, write settings, or put the key in a URL.</p>
+  </div>
+</main>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+
+  // This code executes only when the saved bookmark is selected on OmniRoute's
+  // own local dashboard. Its relative fetch keeps the test same-origin.
+  var bookmarklet = "javascript:(async()=>{const k=prompt('OmniRoute API key (not saved)');if(!k)return;const m=prompt('Model','auto')||'auto',q=prompt('Prompt','Give me three concise study tips.');if(!q)return;const o=document.createElement('pre');o.style.cssText='position:fixed;z-index:2147483647;inset:5%;margin:0;padding:18px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#0b0e14;color:#e7ecf5;border:2px solid #00c896;border-radius:12px;font:13px/1.5 ui-monospace,monospace;box-shadow:0 16px 60px #000;cursor:pointer';o.textContent='Sending request…\\n\\nTap/click this panel to close.';o.title='Tap/click to close';o.onclick=()=>o.remove();document.body.append(o);try{const r=await fetch('/v1/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+k,'Content-Type':'application/json'},body:JSON.stringify({model:m,messages:[{role:'user',content:q}],stream:false})}),t=await r.text();let b=t;try{b=JSON.stringify(JSON.parse(t),null,2)}catch(e){}o.textContent='HTTP '+r.status+' '+r.statusText+'\\n\\n'+b+'\\n\\nTap/click this panel to close.'}catch(e){o.textContent='Request failed before OmniRoute returned a response.\\n\\n'+String(e)+'\\n\\nTap/click this panel to close.'}})()";
+
+  $('code').value = bookmarklet;
+
+  function setStatus(kind, text) {
+    var el = $('status');
+    el.className = 'status ' + kind;
+    el.textContent = text;
+  }
+  function fallbackCopy(text) {
+    var field = $('code');
+    field.focus(); field.select();
+    try { return document.execCommand('copy'); } catch (e) { return false; }
+  }
+  $('copy').addEventListener('click', function () {
+    var done = function (ok) {
+      setStatus(ok ? 'ok' : 'err', ok ? 'Copied. Save it as a bookmark, then run it from the local OmniRoute dashboard.' : 'Copy was blocked. Select all text in the box and copy it manually.');
+    };
+    if (navigator.clipboard && location.protocol === 'https:') {
+      navigator.clipboard.writeText(bookmarklet).then(function () { done(true); }, function () { done(fallbackCopy(bookmarklet)); });
+    } else {
+      done(fallbackCopy(bookmarklet));
+    }
+  });
+})();
+</script>
+</body>
+</html>
