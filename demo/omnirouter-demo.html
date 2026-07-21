@@ -115,6 +115,7 @@
         <input id="apiKey" type="text" placeholder="sk-or-v1-..." spellcheck="false"
                autocomplete="off" name="omnirouter_test_key" data-lpignore="true" data-1p-ignore data-form-type="other">
         <div class="hint">Type/paste it manually — don't use a saved-password autofill. Stored only in this browser's localStorage; sent as <code>Authorization: Bearer</code>.</div>
+        <div id="mismatch" style="display:none;font-size:0.75rem;color:var(--warn);border:1px solid var(--warn);border-radius:6px;padding:7px 9px;margin-top:8px;"></div>
       </div>
       <div>
         <label for="model">Model</label>
@@ -197,6 +198,7 @@
   }
   fields.forEach(function (f) { if ($(f)) $(f).addEventListener('input', saveConfig); });
   $('stream').addEventListener('change', saveConfig);
+  ['baseUrl', 'apiKey'].forEach(function (f) { if ($(f)) $(f).addEventListener('input', checkMismatch); });
 
   function setStatus(kind, msg) {
     var el = $('status');
@@ -219,6 +221,31 @@
   function requireBase() {
     if (!base()) { setStatus('err', 'Please enter a Base URL first.'); return false; }
     return true;
+  }
+
+  // ── Warn when the endpoint and the key clearly belong to different services.
+  // A token only authenticates against the service that issued it, so e.g. an
+  // OmniRoute token (sk-...) sent to openrouter.ai returns a confusing 401.
+  function checkMismatch() {
+    var el = $('mismatch');
+    if (!el) return;
+    var b = base().toLowerCase();
+    var key = ($('apiKey').value || '').trim();
+    var msg = '';
+    if (b && key) {
+      var isOpenRouterHost = /(?:^|\/\/|\.)openrouter\.ai(?:[:\/]|$)/.test(b);
+      var isOpenRouterKey = /^sk-or-/i.test(key);
+      if (isOpenRouterHost && !isOpenRouterKey) {
+        msg = '⚠ This key does not look like an OpenRouter key (those start with <code>sk-or-v1-</code>). ' +
+              'If it is an OmniRoute token, change the Base URL to your OmniRoute gateway ' +
+              '(e.g. <code>http://localhost:20128/v1</code>) — a token only works against the service that issued it.';
+      } else if (!isOpenRouterHost && isOpenRouterKey) {
+        msg = '⚠ This looks like an OpenRouter key (<code>sk-or-…</code>) but the Base URL is not openrouter.ai. ' +
+              'Set the Base URL to <code>https://openrouter.ai/api/v1</code> to use it.';
+      }
+    }
+    el.style.display = msg ? 'block' : 'none';
+    el.innerHTML = msg;
   }
 
   // ── List models: verifies key + endpoint ──
@@ -417,6 +444,7 @@
   }
 
   loadConfig();
+  checkMismatch();
 })();
 </script>
 </body>
