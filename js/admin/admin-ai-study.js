@@ -206,6 +206,58 @@ function aiStudyProviderCard(pid, activePid) {
   '</article>';
 }
 
+function aiStudyFreeModelSyncTime(value) {
+  if (!value) return 'Not run yet';
+  var date = null;
+  try {
+    if (typeof value.toDate === 'function') date = value.toDate();
+    else if (typeof value.seconds === 'number') date = new Date(value.seconds * 1000);
+    else date = new Date(value);
+  } catch (e) { date = null; }
+  if (!date || isNaN(date.getTime())) return 'Not run yet';
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+  }).format(date);
+}
+
+function aiStudyFreeModelRefreshMarkup() {
+  var enabled = dailyFreeModelProviders();
+  var available = STUDY_FREE_MODEL_REFRESH_PROVIDERS.filter(function (pid) { return enabled.indexOf(pid) === -1; });
+  var options = available.length
+    ? available.map(function (pid) {
+      return '<option value="' + esc(pid) + '">' + esc((STUDY_PROVIDERS[pid] || {}).label || pid) + '</option>';
+    }).join('')
+    : '<option value="">All supported catalogs are enabled</option>';
+  var rows = enabled.length ? enabled.map(function (pid) {
+    var provider = STUDY_PROVIDERS[pid] || {};
+    var status = freeModelSyncStatusFor(pid);
+    var state = status.state === 'success' ? 'success' : (status.state === 'error' ? 'error' : 'idle');
+    var statusLabel = state === 'success' ? 'Healthy' : (state === 'error' ? 'Needs attention' : 'Waiting for first run');
+    var lastLabel = state === 'success' ? 'Last successful refresh' : 'Last refresh attempt';
+    var lastAt = state === 'success' ? status.lastSuccessAt : status.lastAttemptAt;
+    var activity = state === 'success'
+      ? '+' + (status.added || 0) + ' added · −' + (status.removed || 0) + ' removed'
+      : (status.lastError || 'The daily workflow will preserve current models until a verified catalog is available.');
+    var replacement = status.activeModelReplaced
+      ? '<span class="ai-free-refresh-note">Active model moved to <code>' + esc(status.activeModelReplaced) + '</code>.</span>'
+      : '';
+    return '<article class="ai-free-refresh-provider">' +
+      '<div class="ai-free-refresh-provider-main">' +
+        '<span class="ai-provider-monogram ai-provider-monogram--small">' + esc(aiStudyProviderInitials(provider.label || pid)) + '</span>' +
+        '<div><strong>' + esc(provider.label || pid) + '</strong><small>' + studyModelsFor(pid).length + ' auto-managed model' + (studyModelsFor(pid).length === 1 ? '' : 's') + ' · ' + esc(lastLabel) + ': ' + esc(aiStudyFreeModelSyncTime(lastAt)) + '</small></div>' +
+      '</div>' +
+      '<div class="ai-free-refresh-provider-state"><span class="ai-status-pill is-' + state + '"><i></i>' + statusLabel + '</span><span>' + esc(activity) + '</span>' + replacement + '</div>' +
+      '<button class="ai-free-refresh-remove" type="button" onclick="removeDailyFreeModelProvider(\'' + esc(pid) + '\')" aria-label="Remove ' + esc(provider.label || pid) + ' from daily refresh">Remove</button>' +
+    '</article>';
+  }).join('') : '<div class="ai-free-refresh-empty"><strong>No provider is scheduled yet.</strong><span>Add a provider below to replace its free-model list once per day after a verified catalog fetch.</span></div>';
+
+  return '<section id="ai-free-model-refresh" class="ai-panel ai-anchor-section">' +
+    '<div class="ai-panel-heading"><div><span class="ai-panel-eyebrow">Automated catalog</span><h3>Daily free-model refresh</h3><p>Add supported providers to one list. Each daily run replaces only their verified free-model catalog: new free models are added and removed ones disappear. A failed, invalid or empty catalog never deletes your current models.</p></div><button class="ai-btn ai-btn-soft" type="button" onclick="syncDailyFreeModels(this)"' + (enabled.length ? '' : ' disabled') + '>Refresh now</button></div>' +
+    '<div class="ai-free-refresh-list">' + rows + '</div>' +
+    '<div class="ai-free-refresh-add"><div><label for="daily-free-model-provider">Add provider to daily refresh</label><span>Only providers with a documented free-model pricing catalog are available. Other providers remain manual.</span></div><div><select id="daily-free-model-provider"' + (available.length ? '' : ' disabled') + '>' + options + '</select><button class="ai-btn ai-btn-secondary" type="button" onclick="addDailyFreeModelProvider()"' + (available.length ? '' : ' disabled') + '>Add provider</button></div></div>' +
+  '</section>';
+}
+
 function renderAiStudy() {
   if (!AI_CONFIG.loaded || !AI_LIMITS.loaded) {
     return '<div class="ai-loading-shell" aria-live="polite"><span class="ai-button-spinner"></span><div><strong>Loading AI operations</strong><span>Fetching providers, models and policy controls…</span></div></div>';
@@ -258,6 +310,7 @@ function renderAiStudy() {
     '<nav class="ai-section-nav" aria-label="AI Study sections">' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-providers\')">Provider portfolio</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-routing\')">Routing & models</button>' +
+      '<button type="button" onclick="aiStudyScrollTo(\'ai-free-model-refresh\')">Free-model refresh</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-health\')">Network health</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-policy\')">Access policy</button>' +
     '</nav>' +
@@ -281,6 +334,8 @@ function renderAiStudy() {
         '<div class="ai-import-actions"><span>Credentials are moved to the matching vault field.</span><button class="ai-btn ai-btn-secondary" type="button" onclick="parseCurlIntoStudy()">Parse & fill</button></div>' +
       '</section>' +
     '</div>' +
+
+    aiStudyFreeModelRefreshMarkup() +
 
     '<section id="ai-health" class="ai-panel ai-anchor-section">' +
       '<div class="ai-panel-heading"><div><span class="ai-panel-eyebrow">Network health</span><h3>Provider diagnostics</h3><p>Run server-side probes for availability, latency, quota and model compatibility.</p></div><div class="ai-heading-actions"><span id="ai-health-time">' + esc(lastTested) + '</span><button class="ai-btn ai-btn-soft" type="button" data-ai-health-button onclick="testStudyProviders()">Run health check</button></div></div>' +
