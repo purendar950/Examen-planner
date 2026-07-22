@@ -1190,7 +1190,7 @@
       provider: initial.provider || 'ai', model: initial.model || '', cached: !!initial.cached,
       lang: initial.out_lang || lang
     };
-    var acc = initial.content || '', done = false, built = false, stick = true, scrollEl = null, nbEl = null;
+    var acc = initial.content || '', done = false, built = false, stick = true, scrollEl = null, nbEl = null, metaEl = null;
     var reconnectTimer = 0;
 
     function ownsStudyTarget() {
@@ -1199,6 +1199,13 @@
     function ownsJobUi() {
       return ownsStudyTarget() && _activeStudyJobId === job.jobId && _genControlsStudyJob;
     }
+    function liveMetaText() {
+      return (meta.provider || 'ai') + ' · ' + (meta.model || '') +
+        (style === 'mcq' ? ' · MCQ' : '') + (meta.lang ? ' · ' + meta.lang : '') + ' · writing safely…';
+    }
+    function refreshLiveMeta() {
+      if (metaEl) metaEl.textContent = liveMetaText();
+    }
     function paint() {
       if (!ownsStudyTarget() || (signal && signal.aborted) || (built && (!nbEl || !nbEl.isConnected))) {
         streamPainter.cancel(); return false;
@@ -1206,9 +1213,9 @@
       if (!built) {
         targetEl.innerHTML = brandBarHtml(false, true) +
           '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-          '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') +
-          (style === 'mcq' ? ' · MCQ' : '') + (meta.lang ? ' · ' + esc(meta.lang) : '') + ' · writing safely…</span></div>' +
+          '<span class="ai-muted ai-live-meta" style="flex:1">' + esc(liveMetaText()) + '</span></div>' +
           '<div class="ai-scroll nb"><div class="ai-nb"></div></div>';
+        metaEl = targetEl.querySelector('.ai-live-meta');
         scrollEl = targetEl.querySelector('.ai-scroll');
         nbEl = targetEl.querySelector('.ai-nb');
         if (scrollEl) scrollEl.addEventListener('scroll', function () {
@@ -1269,6 +1276,7 @@
         meta.provider = obj.provider || meta.provider; meta.model = obj.model || meta.model;
         meta.cached = obj.cached != null ? !!obj.cached : meta.cached;
         meta.lang = obj.out_lang || obj.lang || meta.lang;
+        refreshLiveMeta();
         return;
       }
       if (ev === 'chunk' && typeof obj.t === 'string') { acc += obj.t; streamPainter.schedule(); return; }
@@ -1356,11 +1364,18 @@
     // survives and its position is preserved. `stick` keeps the newest line (the
     // caret) in view while the user is at the bottom; if they scroll up to re-read
     // mid-generation, following pauses until they scroll back down.
-    var built = false, stick = true, scrollEl = null, nbEl = null;
+    var built = false, stick = true, scrollEl = null, nbEl = null, metaEl = null;
 
     function ownsStudyTarget() {
       return paintRequest === _studyPaintRequest && targetEl && targetEl.isConnected &&
         targetEl === contentEl() && curVid() === vid;
+    }
+    function liveMetaText() {
+      return (meta.provider || 'ai') + ' · ' + (meta.model || '') +
+        (style === 'mcq' ? ' · MCQ' : '') + (lang ? ' · ' + lang : '') + ' · streaming…';
+    }
+    function refreshLiveMeta() {
+      if (metaEl) metaEl.textContent = liveMetaText();
     }
     function paint() {
       if (!ownsStudyTarget() || (signal && signal.aborted) ||
@@ -1372,8 +1387,9 @@
       if (!built) {
         box.innerHTML = brandBarHtml(false, true) +
           '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-          '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (lang ? ' · ' + esc(lang) : '') + ' · streaming…</span></div>' +
+          '<span class="ai-muted ai-live-meta" style="flex:1">' + esc(liveMetaText()) + '</span></div>' +
           '<div class="ai-scroll nb"><div class="ai-nb"></div></div>';
+        metaEl = box.querySelector('.ai-live-meta');
         scrollEl = box.querySelector('.ai-scroll');
         nbEl = box.querySelector('.ai-nb');
         if (scrollEl) {
@@ -1417,7 +1433,11 @@
         if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
         else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
       });
-      if (ev === 'meta') { try { meta = JSON.parse(data) || {}; } catch (e) {} return; }
+      if (ev === 'meta') {
+        try { meta = JSON.parse(data) || {}; } catch (e) {}
+        refreshLiveMeta();
+        return;
+      }
       if (ev === 'error') { fallback(); return; }
       if (ev === 'done') { return; }
       if (data) {
@@ -2476,7 +2496,7 @@
   var MODEL_DEFAULTS_KEY = 'aiStudyModelDefaults';
   var _studyGroups = [];         // [{provider,label,models}] from /api/status
   var _studyDefaultModel = '';   // admin's active model (default when a provider is picked)
-  var STUDY_PROV_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'kiro'];
+  var STUDY_PROV_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro'];
 
   function cachedStudyModels() {
     try {
@@ -2549,9 +2569,14 @@
         ? _studyDefaultModel : (savedGroup.models[0] || '');
       setModel(savedModel);
     }
-    if (!savedGroup || (savedModel && (savedGroup.models || []).indexOf(savedModel) === -1)) {
+    if (!savedGroup) {
       savedProvider = providerOfModel(savedModel);
       setProvider(savedProvider);
+    } else if (savedModel && (savedGroup.models || []).indexOf(savedModel) === -1) {
+      // Keep the selected provider when a catalog policy retires a saved model
+      // (for example OmniRoute's legacy route variants), then use its default.
+      savedModel = savedGroup.models[0] || '';
+      setModel(savedModel);
     }
     if (savedModel && !savedProvider) { setModel(''); savedModel = ''; }   // stale → Auto
 

@@ -797,7 +797,10 @@ STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
 # OmniRoute's JSON fallback waits for a whole completion rather than receiving
 # token heartbeats, so cap it separately to keep stopped jobs from lingering.
-_OMNIROUTE_FALLBACK_TIMEOUT = min(_AI_TIMEOUT, 45)  # seconds
+_OMNIROUTE_FALLBACK_TIMEOUT = min(_AI_TIMEOUT, 45)  # total seconds
+# Read in short intervals so a stopped job can be observed while also enforcing
+# the total fallback deadline when an upstream keeps slowly sending bytes.
+_OMNIROUTE_FALLBACK_READ_TIMEOUT = min(_OMNIROUTE_FALLBACK_TIMEOUT, 5)  # seconds
 # Stream the model response by default: the first tokens arrive within seconds,
 # which keeps the upstream connection alive and PREVENTS Cloudflare's ~100s 524
 # on slow models (mistral-large, Hunyuan, etc.). Set AI_STREAM=0 to disable.
@@ -1058,10 +1061,14 @@ def _load_ai_config(prefer_model=None, prefer_provider=None):
         provider = (cfg.get("studyProvider") or "").strip().lower()
         if not provider:
             provider = "bynara" if base_url == BYNARA_URL else "custom"
+        # Older Admin saves mirror the active provider into generic Study fields.
+        # Do not let a retired OmniRoute route in those legacy mirrors bypass
+        # the provider-specific `auto` policy above.
+        model = "auto" if provider == "omniroute" else (prefer_model or cfg.get("studyModel") or "mistral-large").strip()
         return {
             "base_url": base_url,
             "keys": keys,                          # failover across keys
-            "model": (prefer_model or cfg.get("studyModel") or "mistral-large").strip(),
+            "model": model,
             "big_context": True,                   # big ctx — send full transcript
             "tpm": 0,                              # provider-managed limits
             "provider": provider,
@@ -1190,7 +1197,7 @@ def _retry_after_secs(resp):
     return 10.0
 
 
-def _read_stream(resp, meta=None):
+def _read_stream(resp, meta=None, ai=None):
     """Accumulate an OpenAI-compatible chat stream (SSE) into the full text.
     Streaming means the first tokens arrive within seconds, so the upstream
     connection stays active and slow models never hit Cloudflare's ~100s 524.
@@ -1213,7 +1220,9 @@ def _read_stream(resp, meta=None):
         if not line or line[0] != "{":
             continue
         try:
-            choice = (json.loads(line).get("choices") or [{}])[0]
+            payload = json.loads(line)
+            _record_resolved_route_payload(ai or {}, payload)
+            choice = (payload.get("choices") or [{}])[0]
         except Exception:  # noqa: BLE001
             continue
         if choice.get("finish_reason") and meta is not None:
@@ -1249,16 +1258,30 @@ def _ai_headers(ai, key):
     return headers
 
 
-def _record_resolved_route(ai, response):
-    """Capture OmniRoute's actual serving route for cached output and UI metadata."""
+def _record_resolved_route_values(ai, model=None, provider=None):
+    """Persist OmniRoute's concrete route without changing other providers."""
     if (ai.get("provider") or "").lower() != "omniroute":
         return
-    model = response.headers.get("x-omniroute-model") or response.headers.get("x-model")
-    provider = response.headers.get("x-omniroute-provider") or response.headers.get("x-provider")
     if model:
-        ai["resolved_model"] = model
+        ai["resolved_model"] = str(model)
     if provider:
-        ai["resolved_provider"] = provider
+        ai["resolved_provider"] = str(provider)
+
+
+def _record_resolved_route(ai, response):
+    """Capture OmniRoute's actual serving route from response headers."""
+    _record_resolved_route_values(
+        ai,
+        response.headers.get("x-omniroute-model") or response.headers.get("x-model"),
+        response.headers.get("x-omniroute-provider") or response.headers.get("x-provider"),
+    )
+
+
+def _record_resolved_route_payload(ai, payload):
+    """Capture the route OmniRoute embeds in successful SSE completion frames."""
+    if not isinstance(payload, dict):
+        return
+    _record_resolved_route_values(ai, payload.get("model"), payload.get("provider"))
 
 
 def _ai_display_model(ai):
@@ -1266,7 +1289,12 @@ def _ai_display_model(ai):
 
 
 def _ai_display_provider(ai):
-    return ai.get("resolved_provider") or ai.get("provider", "ai")
+    resolved = ai.get("resolved_provider")
+    if resolved:
+        return resolved
+    if (ai.get("provider") or "").lower() == "omniroute":
+        return "OmniRoute"
+    return ai.get("provider", "ai")
 
 
 def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, meta=None):
@@ -1309,7 +1337,12 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
                     # Robust extraction: some reasoning models (e.g. Cerebras
                     # gpt-oss) may omit "content" and only return "reasoning".
                     try:
-                        ch0 = (r.json().get("choices") or [{}])[0]
+                        payload = r.json()
+                        _record_resolved_route_payload(ai, payload)
+                        choices = payload.get("choices") if isinstance(payload, dict) else []
+                        ch0 = (choices or [{}])[0]
+                        if not isinstance(ch0, dict):
+                            ch0 = {}
                     except (ValueError, KeyError, IndexError, TypeError):
                         ch0 = {}
                     if meta is not None:
@@ -1323,7 +1356,7 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
                     last = "empty content (key %d) — model returned no answer" % (ki + 1)
                     break                      # → next key
                 try:
-                    txt = _read_stream(r, meta)  # keeps the connection alive → no 524
+                    txt = _read_stream(r, meta, ai)  # keeps the connection alive → no 524
                 except Exception as exc:       # noqa: BLE001  (stream interrupted)
                     last = "stream broke (key %d): %s" % (ki + 1, exc)
                     time.sleep(3)
@@ -1401,7 +1434,9 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                 if not line or line[0] != "{":
                     continue
                 try:
-                    choice = (json.loads(line).get("choices") or [{}])[0]
+                    payload = json.loads(line)
+                    _record_resolved_route_payload(ai, payload)
+                    choice = (payload.get("choices") or [{}])[0]
                 except Exception:  # noqa: BLE001
                     continue
                 if choice.get("finish_reason") and meta is not None:
@@ -1438,28 +1473,49 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                 return
             fallback_body = dict(body)
             fallback_body["stream"] = False
+            deadline = time.monotonic() + _OMNIROUTE_FALLBACK_TIMEOUT
             try:
                 fallback = requests.post(
-                    ai["base_url"], headers=_ai_headers(ai, key),
-                    json=fallback_body, timeout=_OMNIROUTE_FALLBACK_TIMEOUT)
+                    ai["base_url"], headers=_ai_headers(ai, key), json=fallback_body,
+                    timeout=_OMNIROUTE_FALLBACK_READ_TIMEOUT, stream=True)
             except requests.RequestException as exc:
                 last = "empty stream (key %d); non-stream fallback failed: %s" % (ki + 1, exc)
                 continue
             try:
                 if fallback.status_code != 200:
-                    last = "empty stream (key %d); fallback %s: %s" % (
-                        ki + 1, fallback.status_code, fallback.text[:120])
+                    last = "empty stream (key %d); fallback HTTP %s" % (ki + 1, fallback.status_code)
                     continue
                 if cancel_event is not None and cancel_event.is_set():
                     return
                 _record_resolved_route(ai, fallback)
+                chunks = []
+                expired = False
                 try:
-                    payload = fallback.json()
+                    for chunk in fallback.iter_content(chunk_size=8192):
+                        if cancel_event is not None and cancel_event.is_set():
+                            return
+                        if time.monotonic() > deadline:
+                            last = "empty stream (key %d); fallback exceeded %ss" % (
+                                ki + 1, _OMNIROUTE_FALLBACK_TIMEOUT)
+                            expired = True
+                            break
+                        if chunk:
+                            chunks.append(chunk)
+                except requests.RequestException as exc:
+                    last = "empty stream (key %d); fallback stream broke: %s" % (ki + 1, exc)
+                    continue
+                if expired:
+                    continue
+                if cancel_event is not None and cancel_event.is_set():
+                    return
+                try:
+                    payload = json.loads(b"".join(chunks).decode("utf-8"))
+                    _record_resolved_route_payload(ai, payload)
                     choices = payload.get("choices") if isinstance(payload, dict) else []
                     choice = (choices or [{}])[0]
                     if not isinstance(choice, dict):
                         choice = {}
-                except (ValueError, KeyError, IndexError, TypeError):
+                except (ValueError, KeyError, IndexError, TypeError, UnicodeDecodeError):
                     choice = {}
                 if meta is not None:
                     meta["finish_reason"] = choice.get("finish_reason")
@@ -2459,6 +2515,11 @@ def _run_study_job(job_id):
                 _set_study_job_terminal(job, "stopped")
                 return
             with _study_jobs_lock:
+                # OmniRoute receives the concrete route in upstream response
+                # headers before its first content piece. Publish it with that
+                # first job snapshot so the live notes caption is accurate.
+                job["model"] = _ai_display_model(job["ai"])
+                job["provider"] = _ai_display_provider(job["ai"])
                 job["content"] += piece
                 job["updated_at"] = int(time.time())
             _study_job_persist(job)
@@ -2836,7 +2897,9 @@ STUDY_PROVIDER_MODELS = {
     "hcnsec":     ["auto", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "Qwen3.5-397B-A17B", "Qwen3.6-35B-A3B", "MiniMax-M3", "MiniMax-M2.7", "Kimi-K2.6", "glm-5.1"],
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "aicampus":   ["minimax-m3", "kimi-k2.7-code"],
-    "omniroute":  ["auto", "auto/best-chat", "auto/fast", "auto/cheap", "auto/best-reasoning"],
+    # OmniRoute chooses the concrete upstream model/provider; `auto` is the
+    # sole stable client-facing route.
+    "omniroute":  ["auto"],
     "kiro":       ["auto", "claude-sonnet-5", "claude-opus-4.8", "claude-opus-4.7", "claude-opus-4.6", "claude-sonnet-4.6", "claude-opus-4.5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next"],
 }
 # Single source of truth for provider order + display labels, so the flat model
@@ -2854,6 +2917,12 @@ def _effective_provider_models(cfg):
     overrides = (cfg or {}).get("providerModels") or {}
     out = {}
     for pid, default in STUDY_PROVIDER_MODELS.items():
+        # OmniRoute's router—not Admin overrides or stale browser selections—
+        # chooses its concrete upstream. Its single supported client route is
+        # deliberately always `auto`.
+        if pid == "omniroute":
+            out[pid] = ["auto"]
+            continue
         ov = overrides.get(pid)
         if isinstance(ov, list):
             cleaned = [m.strip() for m in ov if isinstance(m, str) and m.strip()]
@@ -3333,7 +3402,7 @@ def api_study_test():
         if want != "all" and want != pid:
             continue
         keys = _configured_provider_keys(cfg, pid)
-        model = (cfg.get(meta["modelField"]) or meta["def"]).strip()
+        model = "auto" if pid == "omniroute" else (cfg.get(meta["modelField"]) or meta["def"]).strip()
         if not keys:
             results[pid] = {"configured": False, "ok": False, "detail": "no key set"}
             continue
@@ -3500,7 +3569,7 @@ def api_status():
                 # Expose EVERY model whose provider has a key — the study panel
                 # lists them all and each pick routes to its own provider.
                 _all = _all_study_models(cfg)
-                _saved = (cfg.get("studyModel") or "").strip()
+                _saved = "auto" if prov == "omniroute" else (cfg.get("studyModel") or "").strip()
                 if _saved and _saved not in _all:
                     _all.insert(0, _saved)
                 out["studyProvider"] = prov

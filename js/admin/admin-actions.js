@@ -708,8 +708,8 @@ const STUDY_PROVIDERS = {
               models: ['minimax-m3', 'kimi-k2.7-code'], def: 'minimax-m3',
               note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' },
   omniroute: { label: 'OmniRoute', host: 'squeak-earthly-obliged.ngrok-free.dev', baseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1', keyField: 'omnirouteApiKeys', modelField: 'omnirouteModel',
-              models: ['auto', 'auto/best-chat', 'auto/fast', 'auto/cheap', 'auto/best-reasoning'], def: 'auto',
-              note: 'ngrok Dev Domain · auto-route + provider failover', keyUrl: '' },
+              models: ['auto'], def: 'auto',
+              note: 'ngrok Dev Domain · automatic provider/model routing', keyUrl: '' },
   kiro:     { label: 'Kiro', host: 'kiro-key-test-s6io.onrender.com', baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
               models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
               def: 'auto',
@@ -773,6 +773,7 @@ function studyKeysFor(pid) {
          : String(raw).split(/[\n,]+/).map(function (k) { return k.trim(); }).filter(Boolean);
 }
 function studyModelFor(pid) {
+  if (pid === 'omniroute') return 'auto';
   var p = STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara;
   var m = (AI_CONFIG && AI_CONFIG[p.modelField]);
   if (!m && pid === 'bynara') m = (AI_CONFIG && AI_CONFIG.studyModel);
@@ -781,6 +782,9 @@ function studyModelFor(pid) {
 /* Effective model list for a provider: admin override (config/ai.providerModels)
    if set, else the hardcoded default. */
 function studyModelsFor(pid) {
+  // OmniRoute owns its provider/model choice. Keep the admin control to its
+  // stable `auto` route even if an older config contains retired policies.
+  if (pid === 'omniroute') return ['auto'];
   var ov = AI_CONFIG && AI_CONFIG.providerModels && AI_CONFIG.providerModels[pid];
   if (Array.isArray(ov) && ov.length) return ov.slice();
   return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
@@ -929,11 +933,13 @@ function paintModelsManage() {
   if (ms) ms.innerHTML = studyModelOptions(_modelsEnsure(pid), studyModelFor(pid));
 }
 function removeStudyModel(i) {
+  if (selectedStudyProvider() === 'omniroute') { showToast('OmniRoute always uses its automatic route.'); return; }
   var list = _modelsEnsure(selectedStudyProvider());
   if (i >= 0 && i < list.length) list.splice(i, 1);
   paintModelsManage();
 }
 function addStudyModel() {
+  if (selectedStudyProvider() === 'omniroute') { showToast('OmniRoute always uses its automatic route.'); return; }
   var list = _modelsEnsure(selectedStudyProvider());
   var inp = document.getElementById('study-model-add');
   var v = inp ? inp.value.trim() : '';
@@ -944,7 +950,7 @@ function addStudyModel() {
 }
 async function saveStudyModels() {
   var pid = selectedStudyProvider();
-  var list = _modelsEnsure(pid).slice();
+  var list = pid === 'omniroute' ? ['auto'] : _modelsEnsure(pid).slice();
   var pm = Object.assign({}, (AI_CONFIG && AI_CONFIG.providerModels) || {});
   pm[pid] = list;
   try {
@@ -1036,7 +1042,7 @@ function parseCurlIntoStudy() {
   var radio = document.querySelector('input[name="study-active"][value="' + pid + '"]');
   if (radio) radio.checked = true;
   studyActiveChanged();                                          // refresh model box to this provider
-  if (model) {
+  if (model && pid !== 'omniroute') {
     var ms = document.getElementById('study-model');
     if (ms) ms.innerHTML = studyModelOptions(studyModelsFor(pid), model);
   }
@@ -1052,7 +1058,7 @@ async function saveStudyAiConfig() {
   STUDY_PROVIDER_ORDER.forEach(function (k) {
     allKeys[k] = splitStudyKeys((document.getElementById('study-key-' + k) || {}).value);
   });
-  const model = (((document.getElementById('study-model') || {}).value) || p.def).trim();
+  const model = provider === 'omniroute' ? 'auto' : (((document.getElementById('study-model') || {}).value) || p.def).trim();
   const activeKeys = allKeys[provider] || [];
   if (!activeKeys.length) {
     showToast('⚠️ Active provider (' + p.label + ') has no key');
