@@ -801,6 +801,11 @@ _OMNIROUTE_FALLBACK_TIMEOUT = min(_AI_TIMEOUT, 45)  # total seconds
 # Read in short intervals so a stopped job can be observed while also enforcing
 # the total fallback deadline when an upstream keeps slowly sending bytes.
 _OMNIROUTE_FALLBACK_READ_TIMEOUT = min(_OMNIROUTE_FALLBACK_TIMEOUT, 5)  # seconds
+# OmniRoute rides a free ngrok tunnel that can go offline (ngrok answers an
+# offline endpoint with HTTP 404). When OmniRoute yields nothing at all, study
+# generation may fail over to at most this many alternate configured providers
+# so a downed tunnel no longer hard-fails notes/quiz/summary generation.
+_OMNIROUTE_FALLBACK_MAX = int(os.environ.get("OMNIROUTE_FALLBACK_MAX", "3"))
 # Stream the model response by default: the first tokens arrive within seconds,
 # which keeps the upstream connection alive and PREVENTS Cloudflare's ~100s 524
 # on slow models (mistral-large, Hunyuan, etc.). Set AI_STREAM=0 to disable.
@@ -1298,6 +1303,27 @@ def _ai_display_provider(ai):
 
 
 def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, meta=None):
+    """Blocking OpenAI-compatible chat with OmniRoute-scoped failover.
+
+    When the chosen provider is OmniRoute and it fails on all of its keys
+    (offline tunnel/404, 5xx, network, timeout, or empty content), retry the
+    request on the next configured provider carried on ai['fallbacks']. Nothing
+    has been returned to the caller yet, so this can never duplicate output.
+    Every other provider keeps its exact single-provider behavior."""
+    chain = [ai]
+    if (ai.get("provider") or "").lower() == "omniroute":
+        chain += [f for f in (ai.get("fallbacks") or []) if f and f.get("keys")]
+    last = "unknown error"
+    for cur in chain:
+        try:
+            return _chat_one_provider(messages, cur, temperature, max_tokens,
+                                      json_mode, meta)
+        except RuntimeError as exc:
+            last = str(exc)
+    raise RuntimeError("AI failed on all %d provider(s): %s" % (len(chain), last))
+
+
+def _chat_one_provider(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, meta=None):
     """OpenAI-compatible chat call (Groq or Bynara). STREAMS by default so slow
     models don't trip Cloudflare's ~100s 524. Tries each configured key in turn: a
     429 is retried a couple times on the same key, any other error (or a persistent
@@ -1388,13 +1414,45 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
     the first piece is yielded — once bytes are on the wire we can't restart
     without duplicating output, so a mid-stream break just ends the generator.
     If `meta` (a dict) is passed, meta['finish_reason'] is set to the upstream
-    finish_reason ('stop', 'length', ...) so callers can detect truncation."""
+    finish_reason ('stop', 'length', ...) so callers can detect truncation.
+
+    OmniRoute-scoped resilience: OmniRoute rides a free ngrok tunnel that can go
+    offline (ngrok answers an offline endpoint with HTTP 404). When the chosen
+    provider is OmniRoute and it yields NOTHING (offline/404, 5xx, network,
+    timeout, or an empty stream), generation transparently fails over to the
+    next configured provider carried on ai['fallbacks'] — but only before any
+    token has streamed, so text is never duplicated. Every other provider keeps
+    its exact single-provider behavior (no fallback chain is attached)."""
+    chain = [ai]
+    if (ai.get("provider") or "").lower() == "omniroute":
+        chain += [f for f in (ai.get("fallbacks") or []) if f and f.get("keys")]
+    last = "unknown error"
+    for cur in chain:
+        if cancel_event is not None and cancel_event.is_set():
+            return
+        result = {"produced": False, "last": last}
+        for piece in _stream_one_provider(messages, cur, temperature, max_tokens,
+                                          meta, cancel_event, result):
+            yield piece
+        if result["produced"]:
+            return                                       # success (or partial already sent)
+        last = result["last"]
+    raise RuntimeError("AI stream failed on all %d provider(s): %s" % (len(chain), last))
+
+
+def _stream_one_provider(messages, ai, temperature, max_tokens, meta,
+                         cancel_event, result):
+    """Attempt ONE provider config (all of its keys) as a generator. Sets
+    result['produced']=True the moment the first piece is yielded; on total
+    failure sets result['last'] to the final error string. Mirrors the original
+    per-provider streaming logic, including OmniRoute's non-stream fallback."""
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens, "stream": True}
     _tune_body_for_provider(body, ai)
     keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
     if not keys:
-        raise RuntimeError("no AI API key configured")
+        result["last"] = "no AI API key configured"
+        return
     est = _est_tokens(messages, max_tokens)
     last = "unknown error"
     for ki, key in enumerate(keys):
@@ -1446,6 +1504,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                     piece = (choice.get("message") or {}).get("content")
                 if piece:
                     got_any = True
+                    result["produced"] = True
                     yield piece
         except Exception as exc:  # noqa: BLE001  (stream interrupted)
             if got_any:
@@ -1524,6 +1583,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                 if content:
                     if cancel_event is not None and cancel_event.is_set():
                         return
+                    result["produced"] = True
                     yield content
                     return
                 last = "empty stream and content (key %d)" % (ki + 1)
@@ -1534,7 +1594,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                     pass
             continue
         last = "empty stream (key %d)" % (ki + 1)
-    raise RuntimeError("AI stream failed on all %d key(s): %s" % (len(keys), last))
+    result["last"] = last
 
 
 def _stream_notes_part(sysmsg, user, ai, max_tokens, cancel_event=None):
@@ -3352,7 +3412,7 @@ def _ai_for_provider(cfg, pid, model=None):
         # clients with an old dropdown cached while a catalog refresh completes.
         log.warning("Replacing unavailable %s model %s with the current catalog default", pid, selected_model)
         selected_model = allowed_models[0] if allowed_models else meta["def"]
-    return {
+    ai = {
         "base_url": meta["url"],
         "keys": keys,
         "model": selected_model,
@@ -3360,6 +3420,43 @@ def _ai_for_provider(cfg, pid, model=None):
         "tpm": 0,
         "provider": pid,
     }
+    if pid == "omniroute":
+        # OmniRoute's tunnel can be offline; carry an ordered list of alternate
+        # providers so generation can fail over instead of hard-failing. Scoped
+        # to OmniRoute only — no other provider gets a fallback chain.
+        ai["fallbacks"] = _fallback_ai_configs(cfg, pid)
+    return ai
+
+
+def _fallback_ai_configs(cfg, primary_provider):
+    """Ordered alternate provider configs to try if OmniRoute yields nothing.
+
+    Never includes OmniRoute itself (or the primary), and only providers that
+    actually have a usable key. The admin's active provider is preferred first,
+    then the standard provider order. Capped at _OMNIROUTE_FALLBACK_MAX so a
+    downed tunnel adds bounded latency before generation succeeds elsewhere."""
+    primary_provider = (primary_provider or "").strip().lower()
+    skip = {primary_provider, "omniroute"}
+    order = []
+    active = (cfg.get("studyProvider") or "").strip().lower()
+    if active and active not in skip:
+        order.append(active)
+    for pid in STUDY_PROVIDER_IDS:
+        if pid not in skip and pid not in order:
+            order.append(pid)
+    out, seen = [], set()
+    for pid in order:
+        alt = _ai_for_provider(cfg, pid)          # None when the provider has no key
+        if not alt or not alt.get("keys"):
+            continue
+        sig = (alt.get("base_url"), alt.get("model"))
+        if sig in seen:
+            continue
+        seen.add(sig)
+        out.append(alt)
+        if len(out) >= _OMNIROUTE_FALLBACK_MAX:
+            break
+    return out
 
 
 def _all_study_models(cfg):
