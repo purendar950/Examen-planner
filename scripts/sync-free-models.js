@@ -1,13 +1,13 @@
 /*
- * Daily free-model catalog refresh
- * --------------------------------
- * Reads config/ai.dailyFreeModelProviders and replaces ONLY those providers'
- * config/ai.providerModels entries after a complete, non-empty catalog fetch.
- * A failed, malformed, or unexpectedly empty response never removes models.
+ * Daily model catalog refresh
+ * ---------------------------
+ * Admins maintain two mutually-exclusive provider lists in config/ai:
+ *   dailyFreeModelProviders — verified zero-price models only
+ *   dailyAllModelProviders  — every current text/chat model, free and paid
  *
- * Supported catalogs are deliberately limited to providers with a documented,
- * machine-readable pricing catalog. Add adapters only after verifying their
- * pricing metadata is reliable enough to decide whether a model is free.
+ * A selected provider's providerModels entry is replaced only after a complete,
+ * non-empty catalog fetch. Failed, malformed, timed-out, or empty responses
+ * record an error but never remove the previous model list.
  */
 
 const admin = require('firebase-admin');
@@ -20,6 +20,23 @@ const REFRESHABLE_PROVIDERS = {
     catalogUrl: 'https://openrouter.ai/api/v1/models',
   },
 };
+
+const CATALOG_MODES = {
+  free: {
+    providerField: 'dailyFreeModelProviders',
+    statusField: 'dailyFreeModelSyncStatus',
+    label: 'verified free',
+  },
+  all: {
+    providerField: 'dailyAllModelProviders',
+    statusField: 'dailyAllModelSyncStatus',
+    label: 'free and paid',
+  },
+};
+
+function catalogMode(mode) {
+  return CATALOG_MODES[mode] || CATALOG_MODES.free;
+}
 
 function configuredKeys(config, field) {
   const raw = config && config[field];
@@ -34,8 +51,12 @@ function isZeroPrice(value) {
   return Number.isFinite(number) && number === 0;
 }
 
+function hasModelId(model) {
+  return !!(model && typeof model.id === 'string' && model.id.trim());
+}
+
 function isFreeOpenRouterModel(model) {
-  if (!model || typeof model.id !== 'string' || !model.id.trim()) return false;
+  if (!hasModelId(model)) return false;
   const pricing = model.pricing;
   if (!pricing || typeof pricing !== 'object') return false;
 
@@ -45,18 +66,24 @@ function isFreeOpenRouterModel(model) {
   return !Object.prototype.hasOwnProperty.call(pricing, 'request') || isZeroPrice(pricing.request);
 }
 
-async function fetchOpenRouterFreeModels(config, fetchImpl) {
+async function fetchOpenRouterModels(config, fetchImpl, mode = 'free') {
   const provider = REFRESHABLE_PROVIDERS.openrouter;
   const keys = configuredKeys(config, provider.keyField);
+  const modeInfo = catalogMode(mode);
   if (!keys.length) {
-    throw new Error('OpenRouter needs an API key before its free-model catalog can be refreshed.');
+    throw new Error('OpenRouter needs an API key before its ' + modeInfo.label + ' catalog can be refreshed.');
   }
 
+  const params = new URLSearchParams({ output_modalities: 'text' });
+  if (mode === 'free') {
+    params.set('max_price', '0');
+    params.set('max_output_price', '0');
+  }
   const timeoutController = new AbortController();
   const timeout = setTimeout(() => timeoutController.abort(), 20_000);
   let response;
   try {
-    response = await fetchImpl(provider.catalogUrl + '?max_price=0&max_output_price=0', {
+    response = await fetchImpl(provider.catalogUrl + '?' + params.toString(), {
       headers: {
         Authorization: 'Bearer ' + keys[0],
         Accept: 'application/json',
@@ -87,18 +114,22 @@ async function fetchOpenRouterFreeModels(config, fetchImpl) {
   }
 
   const models = [...new Set(payload.data
-    .filter(isFreeOpenRouterModel)
+    .filter(mode === 'free' ? isFreeOpenRouterModel : hasModelId)
     .map((model) => model.id.trim()))].sort((left, right) => left.localeCompare(right));
 
   if (!models.length) {
-    throw new Error('OpenRouter catalog returned no verified free text models; existing models were preserved.');
+    throw new Error('OpenRouter catalog returned no ' + modeInfo.label + ' text models; existing models were preserved.');
   }
   return models;
 }
 
-async function fetchCatalog(providerId, config, fetchImpl) {
-  if (providerId === 'openrouter') return fetchOpenRouterFreeModels(config, fetchImpl);
-  throw new Error('Automatic free-model discovery is not supported for this provider.');
+function fetchOpenRouterFreeModels(config, fetchImpl) {
+  return fetchOpenRouterModels(config, fetchImpl, 'free');
+}
+
+function fetchCatalog(providerId, config, fetchImpl, mode = 'free') {
+  if (providerId === 'openrouter') return fetchOpenRouterModels(config, fetchImpl, mode);
+  throw new Error('Automatic model discovery is not supported for this provider.');
 }
 
 function cleanModelList(value) {
@@ -107,35 +138,47 @@ function cleanModelList(value) {
     : [];
 }
 
-function configuredProviderList(config) {
-  const listed = Array.isArray(config && config.dailyFreeModelProviders)
-    ? config.dailyFreeModelProviders
+function configuredProviderList(config, mode = 'free') {
+  const listed = Array.isArray(config && config[catalogMode(mode).providerField])
+    ? config[catalogMode(mode).providerField]
     : [];
   return [...new Set(listed.map((provider) => String(provider || '').trim().toLowerCase()).filter(Boolean))];
 }
 
-async function syncFreeModels({ db, fetchImpl = global.fetch, providerIds } = {}) {
+function catalogSelections(config, providerIds) {
+  // providerIds is retained as a free-only test/compatibility override.
+  if (providerIds) return providerIds.map((providerId) => ({ providerId, mode: 'free' }));
+
+  const freeProviders = configuredProviderList(config, 'free');
+  const freeSet = new Set(freeProviders);
+  const allProviders = configuredProviderList(config, 'all').filter((providerId) => !freeSet.has(providerId));
+  return freeProviders.map((providerId) => ({ providerId, mode: 'free' }))
+    .concat(allProviders.map((providerId) => ({ providerId, mode: 'all' })));
+}
+
+async function syncModelCatalogs({ db, fetchImpl = global.fetch, providerIds } = {}) {
   if (!db) throw new Error('Firestore database is required.');
   if (typeof fetchImpl !== 'function') throw new Error('A fetch implementation is required.');
 
   const configRef = db.collection('config').doc('ai');
   const initialSnapshot = await configRef.get();
   const initialConfig = initialSnapshot.exists ? (initialSnapshot.data() || {}) : {};
-  const selected = providerIds || configuredProviderList(initialConfig);
+  const selected = catalogSelections(initialConfig, providerIds);
   if (!selected.length) return { selected: [], results: {}, changed: false };
 
   const results = {};
   const catalogs = {};
-  for (const providerId of selected) {
+  for (const selection of selected) {
+    const { providerId, mode } = selection;
     if (!REFRESHABLE_PROVIDERS[providerId]) {
-      results[providerId] = { ok: false, error: 'Automatic free-model discovery is not supported for this provider.' };
+      results[providerId] = { ok: false, mode, error: 'Automatic model discovery is not supported for this provider.' };
       continue;
     }
     try {
-      catalogs[providerId] = await fetchCatalog(providerId, initialConfig, fetchImpl);
-      results[providerId] = { ok: true, modelCount: catalogs[providerId].length };
+      catalogs[providerId] = await fetchCatalog(providerId, initialConfig, fetchImpl, mode);
+      results[providerId] = { ok: true, mode, modelCount: catalogs[providerId].length };
     } catch (error) {
-      results[providerId] = { ok: false, error: error && error.message ? error.message : String(error) };
+      results[providerId] = { ok: false, mode, error: error && error.message ? error.message : String(error) };
     }
   }
 
@@ -143,17 +186,24 @@ async function syncFreeModels({ db, fetchImpl = global.fetch, providerIds } = {}
   await db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(configRef);
     const config = snapshot.exists ? (snapshot.data() || {}) : {};
-    const stillSelected = new Set(configuredProviderList(config));
     const providerModels = Object.assign({}, config.providerModels || {});
-    const statuses = Object.assign({}, config.dailyFreeModelSyncStatus || {});
+    const statuses = {};
+    Object.keys(CATALOG_MODES).forEach((mode) => {
+      statuses[mode] = Object.assign({}, config[CATALOG_MODES[mode].statusField] || {});
+    });
     const updates = {};
 
-    selected.forEach((providerId) => {
-      if (!stillSelected.has(providerId)) return;
-      const priorStatus = Object.assign({}, statuses[providerId] || {});
+    selected.forEach((selection) => {
+      const { providerId, mode } = selection;
+      if (!configuredProviderList(config, mode).includes(providerId)) return;
+      // If a stale config manually contains a provider in both lists, the
+      // free-only list wins and prevents the all-model refresh from overwriting it.
+      if (mode === 'all' && configuredProviderList(config, 'free').includes(providerId)) return;
+
+      const priorStatus = Object.assign({}, statuses[mode][providerId] || {});
       const result = results[providerId];
       if (!result || !result.ok) {
-        statuses[providerId] = Object.assign(priorStatus, {
+        statuses[mode][providerId] = Object.assign(priorStatus, {
           state: 'error',
           lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
           lastError: (result && result.error) || 'Catalog refresh failed.',
@@ -182,7 +232,7 @@ async function syncFreeModels({ db, fetchImpl = global.fetch, providerIds } = {}
         updates.studyModel = replacementModel;
       }
 
-      statuses[providerId] = {
+      statuses[mode][providerId] = {
         state: 'success',
         lastAttemptAt: admin.firestore.FieldValue.serverTimestamp(),
         lastSuccessAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -200,13 +250,20 @@ async function syncFreeModels({ db, fetchImpl = global.fetch, providerIds } = {}
       changed = true;
     });
 
-    transaction.set(configRef, Object.assign({
-      providerModels,
-      dailyFreeModelSyncStatus: statuses,
-    }, updates), { merge: true });
+    const statusUpdates = {};
+    Object.keys(CATALOG_MODES).forEach((mode) => {
+      statusUpdates[CATALOG_MODES[mode].statusField] = statuses[mode];
+    });
+    transaction.set(configRef, Object.assign({ providerModels }, statusUpdates, updates), { merge: true });
   });
 
-  return { selected, results, changed };
+  return { selected: selected.map((selection) => selection.providerId), results, changed };
+}
+
+// Compatibility name for existing callers/tests; it now synchronizes both
+// configured lists when no providerIds override is supplied.
+function syncFreeModels(options) {
+  return syncModelCatalogs(options);
 }
 
 function loadServiceAccount() {
@@ -223,18 +280,18 @@ async function main() {
     throw new Error('FIREBASE_SERVICE_ACCOUNT is incomplete (project_id and private_key are required).');
   }
   admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
-  const outcome = await syncFreeModels({ db: admin.firestore() });
+  const outcome = await syncModelCatalogs({ db: admin.firestore() });
 
   if (!outcome.selected.length) {
-    console.log('No providers are enabled for daily free-model refresh. Nothing to do.');
+    console.log('No providers are enabled for model catalog refresh. Nothing to do.');
     return;
   }
   Object.entries(outcome.results).forEach(([providerId, result]) => {
     if (result.ok) {
-      console.log('✓ ' + providerId + ': ' + result.modelCount + ' free models (+' + result.added + ', -' + result.removed + ')' +
+      console.log('✓ ' + providerId + ' (' + catalogMode(result.mode).label + '): ' + result.modelCount + ' models (+' + result.added + ', -' + result.removed + ')' +
         (result.activeModelReplaced ? '; active model moved to ' + result.activeModelReplaced : ''));
     } else {
-      console.error('✗ ' + providerId + ': ' + result.error);
+      console.error('✗ ' + providerId + ' (' + catalogMode(result.mode).label + '): ' + result.error);
     }
   });
   const failures = Object.values(outcome.results).filter((result) => !result.ok);
@@ -243,15 +300,19 @@ async function main() {
 
 if (require.main === module) {
   main().catch((error) => {
-    console.error('Free-model refresh failed:', error.message || error);
+    console.error('Model catalog refresh failed:', error.message || error);
     process.exitCode = 1;
   });
 }
 
 module.exports = {
+  CATALOG_MODES,
   REFRESHABLE_PROVIDERS,
+  catalogSelections,
   configuredProviderList,
   fetchOpenRouterFreeModels,
+  fetchOpenRouterModels,
   isFreeOpenRouterModel,
   syncFreeModels,
+  syncModelCatalogs,
 };

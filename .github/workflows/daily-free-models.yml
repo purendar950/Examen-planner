@@ -1,4 +1,4 @@
-name: Daily Free Model Refresh
+name: Daily Model Catalog Refresh
 
 on:
   schedule:

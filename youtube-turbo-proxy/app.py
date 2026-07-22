@@ -2366,13 +2366,43 @@ FREE_MODEL_REFRESH_PROVIDERS = {
     },
 }
 _free_model_sync_lock = threading.Lock()
+MODEL_CATALOG_REFRESH_MODES = {
+    "free": {
+        "provider_field": "dailyFreeModelProviders",
+        "status_field": "dailyFreeModelSyncStatus",
+        "label": "verified free",
+    },
+    "all": {
+        "provider_field": "dailyAllModelProviders",
+        "status_field": "dailyAllModelSyncStatus",
+        "label": "free and paid",
+    },
+}
 
 
-def _free_refresh_provider_ids(cfg):
-    raw = (cfg or {}).get("dailyFreeModelProviders") or []
+def _model_catalog_refresh_mode(mode):
+    return MODEL_CATALOG_REFRESH_MODES.get(mode, MODEL_CATALOG_REFRESH_MODES["free"])
+
+
+def _model_catalog_provider_ids(cfg, mode="free"):
+    raw = (cfg or {}).get(_model_catalog_refresh_mode(mode)["provider_field"]) or []
     if not isinstance(raw, list):
         return []
     return list(dict.fromkeys(str(pid).strip().lower() for pid in raw if str(pid).strip()))
+
+
+def _free_refresh_provider_ids(cfg):
+    """Compatibility helper for the original free-only refresh path."""
+    return _model_catalog_provider_ids(cfg, "free")
+
+
+def _model_catalog_refresh_selections(cfg):
+    # Free-only takes precedence if a stale external edit puts a provider in
+    # both lists, so competing refreshes can never overwrite each other.
+    free = _model_catalog_provider_ids(cfg, "free")
+    free_set = set(free)
+    all_models = [pid for pid in _model_catalog_provider_ids(cfg, "all") if pid not in free_set]
+    return [(pid, "free") for pid in free] + [(pid, "all") for pid in all_models]
 
 
 def _clean_model_ids(models):
@@ -2391,17 +2421,24 @@ def _zero_price(value):
         return False
 
 
-def _fetch_openrouter_free_models(cfg):
-    """Fetch only catalog entries with zero input/output (and request, if
-    supplied) pricing. A malformed or empty catalog raises so callers preserve
-    the previous admin-approved model list."""
+def _fetch_openrouter_models(cfg, mode="free"):
+    """Fetch OpenRouter text/chat models for the requested catalog mode.
+
+    Free mode accepts only explicitly zero-priced entries. All mode deliberately
+    keeps every available text model regardless of price, so paid models are
+    available to administrators who have an OpenRouter-funded account.
+    """
     keys = _configured_provider_keys(cfg, "openrouter")
+    mode_info = _model_catalog_refresh_mode(mode)
     if not keys:
-        raise RuntimeError("OpenRouter needs an API key before its free-model catalog can be refreshed.")
+        raise RuntimeError("OpenRouter needs an API key before its %s catalog can be refreshed." % mode_info["label"])
+    params = {"output_modalities": "text"}
+    if mode == "free":
+        params.update({"max_price": "0", "max_output_price": "0"})
     try:
         response = requests.get(
             FREE_MODEL_REFRESH_PROVIDERS["openrouter"]["catalog_url"],
-            params={"max_price": "0", "max_output_price": "0"},
+            params=params,
             headers={"Authorization": "Bearer " + keys[0], "Accept": "application/json"},
             timeout=20,
         )
@@ -2424,55 +2461,62 @@ def _fetch_openrouter_free_models(cfg):
         if not isinstance(item, dict):
             continue
         model_id = str(item.get("id") or "").strip()
-        pricing = item.get("pricing") or {}
-        if not model_id or not isinstance(pricing, dict):
+        if not model_id:
             continue
-        if not (_zero_price(pricing.get("prompt")) and _zero_price(pricing.get("completion"))):
-            continue
-        if "request" in pricing and not _zero_price(pricing.get("request")):
-            continue
+        if mode == "free":
+            pricing = item.get("pricing") or {}
+            if not isinstance(pricing, dict):
+                continue
+            if not (_zero_price(pricing.get("prompt")) and _zero_price(pricing.get("completion"))):
+                continue
+            if "request" in pricing and not _zero_price(pricing.get("request")):
+                continue
         models.append(model_id)
     models = sorted(set(models))
     if not models:
-        raise RuntimeError("OpenRouter catalog returned no verified free models; existing models were preserved.")
+        raise RuntimeError("OpenRouter catalog returned no %s text models; existing models were preserved." % mode_info["label"])
     return models
 
 
-def _fetch_free_model_catalog(provider_id, cfg):
+def _fetch_openrouter_free_models(cfg):
+    return _fetch_openrouter_models(cfg, "free")
+
+
+def _fetch_model_catalog(provider_id, cfg, mode="free"):
     if provider_id == "openrouter":
-        return _fetch_openrouter_free_models(cfg)
-    raise RuntimeError("Automatic free-model discovery is not supported for this provider.")
+        return _fetch_openrouter_models(cfg, mode)
+    raise RuntimeError("Automatic model discovery is not supported for this provider.")
 
 
-def _sync_free_model_catalogs():
-    """Refresh configured providers and write only successful catalogs.
+def _sync_model_catalogs():
+    """Refresh free-only and full provider catalogs without cross-overwrites.
 
-    Network discovery happens before the Firestore transaction. The transaction
-    then re-reads config/ai, retains manual/unselected providers, and applies a
-    complete replacement only for providers that are still selected. Failed or
-    empty catalog attempts update their error status but cannot wipe models.
+    The two lists are mutually exclusive in the admin UI. Free mode also wins
+    defensively if an external edit puts a provider in both Firestore fields.
+    Every successful, non-empty catalog replaces only that provider's model
+    list; completed failures record status while preserving existing models.
     """
     if not _fb_db:
         raise RuntimeError("Firestore is not configured on this service.")
     config_ref = _fb_db.collection("config").document("ai")
     initial = config_ref.get()
     initial_cfg = initial.to_dict() if initial.exists else {}
-    selected = _free_refresh_provider_ids(initial_cfg)
+    selected = _model_catalog_refresh_selections(initial_cfg)
     if not selected:
         return {"selected": [], "results": {}, "changed": False}
 
     catalogs, results = {}, {}
-    for pid in selected:
+    for pid, mode in selected:
         if pid not in FREE_MODEL_REFRESH_PROVIDERS:
-            results[pid] = {"ok": False, "error": "Automatic free-model discovery is not supported for this provider."}
+            results[pid] = {"ok": False, "mode": mode, "error": "Automatic model discovery is not supported for this provider."}
             continue
         try:
-            models = _fetch_free_model_catalog(pid, initial_cfg)
+            models = _fetch_model_catalog(pid, initial_cfg, mode)
             catalogs[pid] = models
-            results[pid] = {"ok": True, "modelCount": len(models)}
+            results[pid] = {"ok": True, "mode": mode, "modelCount": len(models)}
         except Exception as exc:  # noqa: BLE001
-            log.warning("Free-model catalog refresh failed for %s: %s", pid, exc)
-            results[pid] = {"ok": False, "error": str(exc)[:240]}
+            log.warning("%s model catalog refresh failed for %s: %s", mode, pid, exc)
+            results[pid] = {"ok": False, "mode": mode, "error": str(exc)[:240]}
 
     from firebase_admin import firestore
     changed = False
@@ -2482,23 +2526,27 @@ def _sync_free_model_catalogs():
         nonlocal changed
         snap = config_ref.get(transaction=transaction)
         cfg = snap.to_dict() if snap.exists else {}
-        still_selected = set(_free_refresh_provider_ids(cfg))
         provider_models = dict(cfg.get("providerModels") or {})
-        statuses = dict(cfg.get("dailyFreeModelSyncStatus") or {})
+        statuses = {
+            mode: dict(cfg.get(info["status_field"]) or {})
+            for mode, info in MODEL_CATALOG_REFRESH_MODES.items()
+        }
         updates = {}
 
-        for pid in selected:
-            if pid not in still_selected:
+        for pid, mode in selected:
+            if pid not in _model_catalog_provider_ids(cfg, mode):
+                continue
+            if mode == "all" and pid in _model_catalog_provider_ids(cfg, "free"):
                 continue
             result = results.get(pid) or {"ok": False, "error": "Catalog refresh failed."}
-            old_status = dict(statuses.get(pid) or {})
+            old_status = dict(statuses[mode].get(pid) or {})
             if not result.get("ok"):
                 old_status.update({
                     "state": "error",
                     "lastAttemptAt": firestore.SERVER_TIMESTAMP,
                     "lastError": result.get("error") or "Catalog refresh failed.",
                 })
-                statuses[pid] = old_status
+                statuses[mode][pid] = old_status
                 continue
 
             previous = _clean_model_ids(provider_models.get(pid))
@@ -2519,7 +2567,7 @@ def _sync_free_model_catalogs():
                 replacement = next_models[0]
                 updates["studyModel"] = replacement
 
-            statuses[pid] = {
+            statuses[mode][pid] = {
                 "state": "success",
                 "lastAttemptAt": firestore.SERVER_TIMESTAMP,
                 "lastSuccessAt": firestore.SERVER_TIMESTAMP,
@@ -2536,14 +2584,19 @@ def _sync_free_model_catalogs():
             })
             changed = True
 
-        transaction.set(config_ref, {
-            "providerModels": provider_models,
-            "dailyFreeModelSyncStatus": statuses,
-            **updates,
-        }, merge=True)
+        status_updates = {
+            info["status_field"]: statuses[mode]
+            for mode, info in MODEL_CATALOG_REFRESH_MODES.items()
+        }
+        transaction.set(config_ref, {"providerModels": provider_models, **status_updates, **updates}, merge=True)
 
     apply(_fb_db.transaction())
-    return {"selected": selected, "results": results, "changed": changed}
+    return {"selected": [pid for pid, _mode in selected], "results": results, "changed": changed}
+
+
+def _sync_free_model_catalogs():
+    """Compatibility name for callers from before the full-catalog list."""
+    return _sync_model_catalogs()
 
 
 def _admin_uid_from_bearer_token():
@@ -2665,14 +2718,13 @@ def api_study_test():
     return jsonify({"results": results, "checked_at": int(time.time())})
 
 
-@app.post("/api/admin/free-models/sync")
-def api_admin_free_models_sync():
-    """Run an on-demand catalog refresh for the admin command center.
+@app.post("/api/admin/model-catalogs/sync")
+@app.post("/api/admin/free-models/sync")  # Backward-compatible URL for deployed admin pages.
+def api_admin_model_catalogs_sync():
+    """Run free-only and full-model catalog refreshes for the admin panel.
 
-    The browser supplies the signed-in Firebase user's ID token; this service
-    validates it and also requires admins/{uid} to exist before it can read
-    provider keys or replace model lists. The daily GitHub Action uses the same
-    catalog rules independently with the service account.
+    The browser supplies a Firebase ID token; the service validates it and also
+    requires admins/{uid} before reading provider keys or replacing model lists.
     """
     if not _fb_db:
         return jsonify({"error": "firestore_unavailable", "detail": "This service has no Firebase Admin configuration."}), 503
@@ -2681,9 +2733,9 @@ def api_admin_free_models_sync():
     if not _free_model_sync_lock.acquire(blocking=False):
         return jsonify({"error": "sync_in_progress", "detail": "A free-model refresh is already running."}), 409
     try:
-        result = _sync_free_model_catalogs()
+        result = _sync_model_catalogs()
     except Exception as exc:  # noqa: BLE001
-        log.exception("Manual free-model sync failed")
+        log.exception("Manual model catalog sync failed")
         return jsonify({"error": "sync_failed", "detail": str(exc)[:240]}), 502
     finally:
         _free_model_sync_lock.release()
