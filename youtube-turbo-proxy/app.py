@@ -786,6 +786,11 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Bynara: OpenAI-compatible, ~1M context. URL is fixed so the admin only sets
 # key(s) + model. Multiple keys enable automatic failover on limit/error.
 BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
+# OmniRoute is exposed through the account's persistent ngrok Dev Domain.
+# The browser never calls this URL directly; all traffic is routed through this
+# proxy so credentials, rate limits, transcript caching, and audit metadata stay
+# server-side. ngrok's browser-warning bypass is applied by _ai_headers().
+OMNIROUTE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions"
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
@@ -1231,6 +1236,36 @@ def _tune_body_for_provider(body, ai):
     return body
 
 
+def _ai_headers(ai, key):
+    """Build upstream headers without exposing provider-specific behavior to clients."""
+    headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
+    if (ai.get("provider") or "").lower() == "omniroute":
+        # The stable Dev Domain remains protected by ngrok's free-plan browser
+        # interstitial unless this trusted server-to-server request opts out.
+        headers["ngrok-skip-browser-warning"] = "true"
+    return headers
+
+
+def _record_resolved_route(ai, response):
+    """Capture OmniRoute's actual serving route for cached output and UI metadata."""
+    if (ai.get("provider") or "").lower() != "omniroute":
+        return
+    model = response.headers.get("x-omniroute-model") or response.headers.get("x-model")
+    provider = response.headers.get("x-omniroute-provider") or response.headers.get("x-provider")
+    if model:
+        ai["resolved_model"] = model
+    if provider:
+        ai["resolved_provider"] = provider
+
+
+def _ai_display_model(ai):
+    return ai.get("resolved_model") or ai.get("model", "")
+
+
+def _ai_display_provider(ai):
+    return ai.get("resolved_provider") or ai.get("provider", "ai")
+
+
 def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, meta=None):
     """OpenAI-compatible chat call (Groq or Bynara). STREAMS by default so slow
     models don't trip Cloudflare's ~100s 524. Tries each configured key in turn: a
@@ -1255,8 +1290,7 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
             _ai_pace(est, ai.get("tpm", 0))
             try:
                 r = requests.post(ai["base_url"],
-                                  headers={"Authorization": "Bearer " + key,
-                                           "Content-Type": "application/json"},
+                                  headers=_ai_headers(ai, key),
                                   json=body, timeout=_AI_TIMEOUT,
                                   stream=_AI_STREAM)
             except requests.Timeout:
@@ -1267,6 +1301,7 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
                 last = "network (key %d): %s" % (ki + 1, exc)
                 break                          # → next key
             if r.status_code == 200:
+                _record_resolved_route(ai, r)
                 if not _AI_STREAM:
                     # Robust extraction: some reasoning models (e.g. Cerebras
                     # gpt-oss) may omit "content" and only return "reasoning".
@@ -1332,8 +1367,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
         _ai_pace(est, ai.get("tpm", 0))
         try:
             r = requests.post(ai["base_url"],
-                              headers={"Authorization": "Bearer " + key,
-                                       "Content-Type": "application/json"},
+                              headers=_ai_headers(ai, key),
                               json=body, timeout=_AI_TIMEOUT, stream=True)
         except requests.RequestException as exc:
             last = "network (key %d): %s" % (ki + 1, exc)
@@ -1345,6 +1379,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
             except Exception:  # noqa: BLE001
                 pass
             continue                                    # → next key
+        _record_resolved_route(ai, r)
         if meta is not None:
             meta["finish_reason"] = None
         got_any = False
@@ -2115,9 +2150,9 @@ def api_study():
 
     data = {"id": video_id, "title": t.get("title"), "mode": mode,
             "style": style or ("topic" if mode == "notes" else None),
-            "out_lang": out_lang, "model": model,
+            "out_lang": out_lang, "model": _ai_display_model(ai),
             "num_questions": num_q if mode == "quiz" else None,
-            "provider": ai.get("provider", "ai"),
+            "provider": _ai_display_provider(ai),
             "keys_available": len(ai["keys"]),
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count"),
@@ -2247,11 +2282,21 @@ def api_study_stream():
     head = ("Video title: %s\n\n" % t.get("title")) if t.get("title") else ""
 
     def gen():
-        yield _sse("meta", {"provider": ai.get("provider", "ai"),
-                            "model": model, "cached": False})
+        initial_provider = _ai_display_provider(ai)
+        initial_model = _ai_display_model(ai)
+        yield _sse("meta", {"provider": initial_provider,
+                            "model": initial_model, "cached": False})
+        resolved_meta_sent = False
         full = []
         try:
             for piece in _stream_study_text(mode, gen_text, out_lang, ai, head, style):
+                if not resolved_meta_sent:
+                    resolved_provider = _ai_display_provider(ai)
+                    resolved_model = _ai_display_model(ai)
+                    if (resolved_provider, resolved_model) != (initial_provider, initial_model):
+                        yield _sse("meta", {"provider": resolved_provider,
+                                            "model": resolved_model, "cached": False})
+                    resolved_meta_sent = True
                 full.append(piece)
                 yield _sse("chunk", {"t": piece})
         except Exception as exc:  # noqa: BLE001
@@ -2262,8 +2307,8 @@ def api_study_stream():
         if content.strip():
             data = {"id": video_id, "title": t.get("title"), "mode": mode,
                     "style": style or ("topic" if mode == "notes" else None),
-                    "out_lang": out_lang, "model": model, "format": "markdown",
-                    "num_questions": None, "provider": ai.get("provider", "ai"),
+                    "out_lang": out_lang, "model": _ai_display_model(ai), "format": "markdown",
+                    "num_questions": None, "provider": _ai_display_provider(ai),
                     "keys_available": len(ai["keys"]),
                     "transcript_lang": t.get("chosen_lang"),
                     "segment_count": t.get("segment_count"),
@@ -2367,6 +2412,11 @@ def _run_study_job(job_id):
             return
         with _study_jobs_lock:
             content = job["content"]
+            # OmniRoute resolves `auto` to a concrete model/provider only after
+            # its upstream response begins; expose that durable result to job
+            # snapshots and cache consumers.
+            job["model"] = _ai_display_model(job["ai"])
+            job["provider"] = _ai_display_provider(job["ai"])
         if not content.strip():
             _set_study_job_terminal(job, "failed", "The AI returned an empty response. Please try again.")
             return
@@ -2712,6 +2762,8 @@ STUDY_TEST_PROVIDERS = {
     "bluesminds": {"url": "https://api.bluesminds.com/v1/chat/completions", "keyField": "bluesmindsApiKeys", "modelField": "bluesmindsModel", "def": "gpt-5.2-chat"},
     # AICampus AI Hub gateway (OpenAI-compatible, multi-model; keys start with sk-hub-).
     "aicampus":   {"url": "https://ai-hub.aicampus.my/v1/chat/completions", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "def": "minimax-m3"},
+    # OmniRoute through the stable ngrok Dev Domain (OpenAI-compatible router).
+    "omniroute":  {"url": OMNIROUTE_URL, "keyField": "omnirouteApiKeys", "modelField": "omnirouteModel", "def": "auto"},
     # Kiro CLI backend (OpenAI-compatible wrapper around kiro-cli headless mode).
     "kiro":       {"url": "https://kiro-key-test-s6io.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
 }
@@ -2728,14 +2780,15 @@ STUDY_PROVIDER_MODELS = {
     "hcnsec":     ["auto", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "Qwen3.5-397B-A17B", "Qwen3.6-35B-A3B", "MiniMax-M3", "MiniMax-M2.7", "Kimi-K2.6", "glm-5.1"],
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "aicampus":   ["minimax-m3", "kimi-k2.7-code"],
+    "omniroute":  ["auto", "auto/best-chat", "auto/fast", "auto/cheap", "auto/best-reasoning"],
     "kiro":       ["auto", "claude-sonnet-5", "claude-opus-4.8", "claude-opus-4.7", "claude-opus-4.6", "claude-sonnet-4.6", "claude-opus-4.5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next"],
 }
 # Single source of truth for provider order + display labels, so the flat model
 # list (_all_study_models) and the grouped list (/api/status studyModelGroups)
 # can never drift out of sync (a missing id here made Gemini vanish from the
 # user-side model dropdown even though it worked everywhere else).
-STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "kiro")
-STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "kiro": "Kiro"}
+STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "omniroute", "kiro")
+STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "omniroute": "OmniRoute", "kiro": "Kiro"}
 
 
 def _effective_provider_models(cfg):
@@ -3232,7 +3285,7 @@ def api_study_test():
         try:
             r = requests.post(
                 meta["url"],
-                headers={"Authorization": "Bearer " + keys[0], "Content-Type": "application/json"},
+                headers=_ai_headers({"provider": pid}, keys[0]),
                 json={"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
                 timeout=25)
             dt = int((time.time() - t0) * 1000)
@@ -3519,8 +3572,8 @@ def api_tutor():
 
     ai = data["ai"]
     return jsonify({"id": data["video_id"], "answer": answer, "mode": data["mode"],
-                    "provider": ai.get("provider", "ai"),
-                    "model": ai["model"], "transcript_lang": data["transcript_lang"]})
+                    "provider": _ai_display_provider(ai),
+                    "model": _ai_display_model(ai), "transcript_lang": data["transcript_lang"]})
 
 
 @app.route("/api/tutor/stream", methods=["GET", "POST"])
@@ -3542,12 +3595,23 @@ def api_tutor_stream():
                     "X-Accel-Buffering": "no"}
 
     def gen():
-        yield _sse("meta", {"provider": ai.get("provider", "ai"),
-                            "model": ai["model"],
+        initial_provider = _ai_display_provider(ai)
+        initial_model = _ai_display_model(ai)
+        yield _sse("meta", {"provider": initial_provider,
+                            "model": initial_model,
                             "transcript_lang": data["transcript_lang"]})
+        resolved_meta_sent = False
         produced = False
         try:
             for piece in _ai_chat_stream(data["messages"], ai, max_tokens=_TUTOR_MAX_TOKENS):
+                if not resolved_meta_sent:
+                    resolved_provider = _ai_display_provider(ai)
+                    resolved_model = _ai_display_model(ai)
+                    if (resolved_provider, resolved_model) != (initial_provider, initial_model):
+                        yield _sse("meta", {"provider": resolved_provider,
+                                            "model": resolved_model,
+                                            "transcript_lang": data["transcript_lang"]})
+                    resolved_meta_sent = True
                 produced = True
                 yield _sse("chunk", {"t": piece})
         except Exception as exc:  # noqa: BLE001

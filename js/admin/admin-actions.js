@@ -707,12 +707,15 @@ const STUDY_PROVIDERS = {
   aicampus: { label: 'AICampus', host: 'ai-hub.aicampus.my', baseUrl: 'https://ai-hub.aicampus.my/v1', keyField: 'aicampusApiKeys', modelField: 'aicampusModel',
               models: ['minimax-m3', 'kimi-k2.7-code'], def: 'minimax-m3',
               note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' },
+  omniroute: { label: 'OmniRoute', host: 'squeak-earthly-obliged.ngrok-free.dev', baseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1', keyField: 'omnirouteApiKeys', modelField: 'omnirouteModel',
+              models: ['auto', 'auto/best-chat', 'auto/fast', 'auto/cheap', 'auto/best-reasoning'], def: 'auto',
+              note: 'ngrok Dev Domain · auto-route + provider failover', keyUrl: '' },
   kiro:     { label: 'Kiro', host: 'kiro-key-test-s6io.onrender.com', baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
               models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
               def: 'auto',
               note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'kiro'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
@@ -786,7 +789,10 @@ function studyModelsFor(pid) {
 /* Daily catalog refresh supports every Study AI provider. Free-only refreshes
    remain conservative in the scheduler: a provider must return verifiable
    zero-price metadata before its catalog can replace the existing model list. */
-const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.slice();
+// OmniRoute's live catalog is intentionally not auto-synced: it is a routed
+// multi-provider catalog whose availability can change while a route is live.
+// Its approved model list is managed explicitly in this Admin screen.
+const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.filter(function (pid) { return pid !== 'omniroute'; });
 const STUDY_FREE_MODEL_REFRESH_PROVIDERS = STUDY_CATALOG_REFRESH_PROVIDERS;
 const STUDY_MODEL_CATALOG_CONFIG = {
   free: { providerField: 'dailyFreeModelProviders', statusField: 'dailyFreeModelSyncStatus', label: 'free-model' },
@@ -1020,7 +1026,7 @@ function parseCurlIntoStudy() {
     if (!pid && STUDY_PROVIDERS[k].host && host.indexOf(STUDY_PROVIDERS[k].host) !== -1) pid = k;
   });
   if (!pid) {
-    showToast('⚠️ Unknown host "' + (host || '?') + '". Supported: Mistral, Cerebras, Bynara, OpenRouter, NVIDIA.');
+    showToast('⚠️ Unknown host "' + (host || '?') + '". Supported: OmniRoute, Mistral, Cerebras, Bynara, OpenRouter, NVIDIA.');
     return;
   }
   if (key) {
