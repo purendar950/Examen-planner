@@ -224,17 +224,17 @@ function aiStudyModelCatalogRefreshMarkup(mode) {
   var info = mode === 'all'
     ? {
       panelId: 'ai-all-model-refresh', eyebrow: 'Complete catalog', heading: 'Daily free & paid model refresh',
-      description: 'Add a provider here to fetch every currently available text/chat model, including free and paid models. Your provider account and its billing rules still apply. A verified catalog replaces only this provider\'s model list; failed, invalid or empty responses keep the current list.',
+      description: 'Add any configured provider here to fetch every currently available text/chat model, including free and paid models. Your provider account and its billing rules still apply. A verified catalog replaces only this provider\'s model list; failed, invalid or empty responses keep the current list.',
       addLabel: 'Add provider to full-model refresh',
-      availability: 'Supported providers return every available text/chat model. A provider can be in only one refresh list; adding it here moves it from the free-only list.',
+      availability: 'All configured Study AI providers are available. A provider can be in only one refresh list; adding it here moves it from the free-only list.',
       empty: 'Add a provider below to replace its model list once per day with all currently available free and paid text/chat models.'
     }
     : {
       panelId: 'ai-free-model-refresh', eyebrow: 'Automated catalog', heading: 'Daily free-model refresh',
-      description: 'Add supported providers to one list. Each daily run replaces only their verified free-model catalog: new free models are added and removed ones disappear. A failed, invalid or empty catalog never deletes your current models.',
+      description: 'Add any configured provider here. Each daily run replaces only models whose live catalog proves zero request, input and output pricing; new free models are added and removed ones disappear. Providers without machine-readable pricing keep their current models and report that the free catalog cannot be verified.',
       addLabel: 'Add provider to free-model refresh',
-      availability: 'Only providers with a documented free-model pricing catalog are available. A provider can be in only one refresh list; adding it here moves it from the full-model list.',
-      empty: 'Add a provider below to replace its free-model list once per day after a verified catalog fetch.'
+      availability: 'All configured Study AI providers are available. A provider can be in only one refresh list; adding it here moves it from the full-model list.',
+      empty: 'Add a provider below to replace its verified zero-price model list once per day after a catalog fetch.'
     };
   var enabled = dailyModelCatalogProviders(mode);
   var other = dailyModelCatalogProviders(mode === 'all' ? 'free' : 'all');

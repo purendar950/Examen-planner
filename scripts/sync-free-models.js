@@ -2,22 +2,99 @@
  * Daily model catalog refresh
  * ---------------------------
  * Admins maintain two mutually-exclusive provider lists in config/ai:
- *   dailyFreeModelProviders — verified zero-price models only
+ *   dailyFreeModelProviders — models whose catalog exposes zero-price metadata
  *   dailyAllModelProviders  — every current text/chat model, free and paid
  *
- * A selected provider's providerModels entry is replaced only after a complete,
- * non-empty catalog fetch. Failed, malformed, timed-out, or empty responses
- * record an error but never remove the previous model list.
+ * Every Study AI provider is eligible for the full-catalog refresh. The
+ * free-only refresh is deliberately conservative: it writes models only when
+ * the provider's live catalog proves that input, output, and any request price
+ * are zero. Failed, malformed, timed-out, or empty responses record an error
+ * but never remove the previous model list.
  */
 
 const admin = require('firebase-admin');
 
 const REFRESHABLE_PROVIDERS = {
+  bynara: {
+    label: 'Bynara',
+    keyField: 'bynaraApiKeys',
+    legacyKeyFields: ['studyApiKeys', 'studyApiKey'],
+    modelField: 'bynaraModel',
+    catalogUrl: 'https://router.bynara.id/v1/models',
+    catalogFormat: 'openai',
+    chatIdMarkers: ['mistral', 'tencent', 'qwen', 'deepseek', 'glm', 'kimi', 'minimax', 'gemma', 'llama'],
+  },
+  mistral: {
+    label: 'Mistral',
+    keyField: 'mistralApiKeys',
+    modelField: 'mistralModel',
+    catalogUrl: 'https://api.mistral.ai/v1/models',
+    catalogFormat: 'openai',
+    chatIdMarkers: ['mistral', 'codestral', 'ministral', 'devstral', 'pixtral'],
+  },
+  cerebras: {
+    label: 'Cerebras',
+    keyField: 'cerebrasApiKeys',
+    modelField: 'cerebrasModel',
+    catalogUrl: 'https://api.cerebras.ai/v1/models',
+    catalogFormat: 'openai',
+    chatIdMarkers: ['gpt-oss', 'zai', 'gemma', 'llama', 'qwen'],
+  },
   openrouter: {
     label: 'OpenRouter',
     keyField: 'openrouterApiKeys',
     modelField: 'openrouterModel',
     catalogUrl: 'https://openrouter.ai/api/v1/models',
+    catalogFormat: 'openai',
+    serverSideCatalogFilters: true,
+    chatIdMarkers: ['gpt', 'claude', 'gemini', 'mistral', 'qwen', 'llama', 'deepseek', 'gemma', 'nemotron', 'glm', 'minimax', 'kimi', 'cohere', 'command', 'grok', 'tencent', 'z-ai'],
+  },
+  nvidia: {
+    label: 'NVIDIA',
+    keyField: 'nvidiaApiKeys',
+    modelField: 'nvidiaModel',
+    catalogUrl: 'https://integrate.api.nvidia.com/v1/models',
+    catalogFormat: 'openai',
+    chatIdMarkers: ['deepseek', 'qwen', 'nemotron', 'glm', 'minimax', 'llama', 'mistral', 'gemma', 'kimi'],
+  },
+  google: {
+    label: 'Google Gemini',
+    keyField: 'googleApiKeys',
+    modelField: 'googleModel',
+    catalogUrl: 'https://generativelanguage.googleapis.com/v1beta/models',
+    catalogFormat: 'gemini',
+  },
+  hcnsec: {
+    label: 'HCNSec',
+    keyField: 'hcnsecApiKeys',
+    modelField: 'hcnsecModel',
+    catalogUrl: 'https://api.hcnsec.cn/v1/models',
+    catalogFormat: 'openai',
+    chatIdMarkers: ['deepseek', 'qwen', 'nemotron', 'glm', 'minimax', 'llama', 'mistral', 'gemma', 'kimi'],
+  },
+  bluesminds: {
+    label: 'BluesMinds',
+    keyField: 'bluesmindsApiKeys',
+    modelField: 'bluesmindsModel',
+    catalogUrl: 'https://api.bluesminds.com/v1/models',
+    catalogFormat: 'openai',
+    chatIdMarkers: ['gpt', 'claude', 'gemini', 'deepseek', 'qwen', 'mistral', 'gemma', 'llama', 'minimax', 'kimi', 'glm'],
+  },
+  aicampus: {
+    label: 'AICampus',
+    keyField: 'aicampusApiKeys',
+    modelField: 'aicampusModel',
+    catalogUrl: 'https://ai-hub.aicampus.my/v1/models',
+    catalogFormat: 'openai',
+    chatIdMarkers: ['minimax', 'kimi', 'deepseek', 'qwen', 'glm', 'llama', 'mistral', 'gemma'],
+  },
+  kiro: {
+    label: 'Kiro',
+    keyField: 'kiroApiKeys',
+    modelField: 'kiroModel',
+    catalogUrl: 'https://kiro-key-test-s6io.onrender.com/v1/models',
+    catalogFormat: 'openai',
+    chatIdMarkers: ['auto', 'claude', 'gpt', 'deepseek', 'minimax', 'glm', 'qwen', 'mistral', 'gemma', 'llama', 'kimi'],
   },
 };
 
@@ -44,6 +121,16 @@ function configuredKeys(config, field) {
   return values.map((value) => String(value || '').trim()).filter(Boolean);
 }
 
+function providerKeys(config, provider) {
+  const primary = configuredKeys(config, provider.keyField);
+  if (primary.length) return primary;
+  const legacy = Array.isArray(provider.legacyKeyFields)
+    ? provider.legacyKeyFields.flatMap((field) => configuredKeys(config, field))
+    : [];
+  if (legacy.length || provider.keyField !== 'bynaraApiKeys') return legacy;
+  return String(process.env.BYNARA_API_KEY || '').trim() ? [String(process.env.BYNARA_API_KEY).trim()] : [];
+}
+
 function isZeroPrice(value) {
   if ((typeof value !== 'string' && typeof value !== 'number') ||
       (typeof value === 'string' && !value.trim())) return false;
@@ -55,72 +142,175 @@ function hasModelId(model) {
   return !!(model && typeof model.id === 'string' && model.id.trim());
 }
 
+function modelId(model, gemini = false) {
+  if (!model || typeof model !== 'object') return '';
+  const rawId = gemini ? model.name : model.id;
+  return typeof rawId === 'string' ? rawId.trim().replace(/^models\//, '') : '';
+}
+
+function isTextChatModelId(provider, id) {
+  const value = String(id || '').toLowerCase();
+  if (!value) return false;
+  // Gemini's native generateContent capability is checked separately below.
+  // Every other catalog uses a positive provider-specific language-model
+  // family allow-list, including OpenRouter after its server-side filter.
+  const nonChatMarkers = ['embedding', 'embed', 'transcrib', 'speech', 'whisper', 'tts', 'audio', 'moderation', 'rerank', 'dall', 'image', 'imagen', 'stable-diffusion', 'midjourney', 'flux'];
+  if (nonChatMarkers.some((marker) => value.includes(marker))) return false;
+  if (provider.catalogFormat === 'gemini') return true;
+  return Array.isArray(provider.chatIdMarkers) && provider.chatIdMarkers
+    .some((marker) => value.includes(marker));
+}
+
 function isFreeOpenRouterModel(model) {
-  if (!hasModelId(model)) return false;
+  return hasModelId(model) && isVerifiedFreeModel(model);
+}
+
+function isVerifiedFreeModel(model) {
+  if (!model || typeof model !== 'object') return false;
   const pricing = model.pricing;
   if (!pricing || typeof pricing !== 'object') return false;
 
-  // A model is free only when OpenRouter reports zero input and output price.
-  // If request-level pricing is present, it must also be zero.
-  if (!isZeroPrice(pricing.prompt) || !isZeroPrice(pricing.completion)) return false;
+  // OpenAI-compatible catalogs do not standardize the price-key names. Accept
+  // the two common input/output pairs, but require both directions to be zero.
+  const input = Object.prototype.hasOwnProperty.call(pricing, 'prompt') ? pricing.prompt : pricing.input;
+  const output = Object.prototype.hasOwnProperty.call(pricing, 'completion') ? pricing.completion : pricing.output;
+  if (!isZeroPrice(input) || !isZeroPrice(output)) return false;
   return !Object.prototype.hasOwnProperty.call(pricing, 'request') || isZeroPrice(pricing.request);
 }
 
-async function fetchOpenRouterModels(config, fetchImpl, mode = 'free') {
-  const provider = REFRESHABLE_PROVIDERS.openrouter;
-  const keys = configuredKeys(config, provider.keyField);
-  const modeInfo = catalogMode(mode);
-  if (!keys.length) {
-    throw new Error('OpenRouter needs an API key before its ' + modeInfo.label + ' catalog can be refreshed.');
-  }
+function requestHeaders(provider, key) {
+  const headers = { Accept: 'application/json' };
+  if (provider.catalogFormat === 'gemini') headers['x-goog-api-key'] = key;
+  else headers.Authorization = 'Bearer ' + key;
+  return headers;
+}
 
-  const params = new URLSearchParams({ output_modalities: 'text' });
-  if (mode === 'free') {
-    params.set('max_price', '0');
-    params.set('max_output_price', '0');
-  }
+async function fetchCatalogJson(provider, url, key, fetchImpl) {
   const timeoutController = new AbortController();
   const timeout = setTimeout(() => timeoutController.abort(), 20_000);
   let response;
   try {
-    response = await fetchImpl(provider.catalogUrl + '?' + params.toString(), {
-      headers: {
-        Authorization: 'Bearer ' + keys[0],
-        Accept: 'application/json',
-      },
+    response = await fetchImpl(url, {
+      headers: requestHeaders(provider, key),
       signal: timeoutController.signal,
     });
   } catch (error) {
     if (timeoutController.signal.aborted) {
-      throw new Error('OpenRouter catalog timed out after 20 seconds.');
+      throw new Error(provider.label + ' catalog timed out after 20 seconds.');
     }
     throw error;
   } finally {
     clearTimeout(timeout);
   }
+
   if (!response.ok) {
     const detail = (await response.text()).replace(/\s+/g, ' ').slice(0, 180);
-    throw new Error('OpenRouter catalog returned HTTP ' + response.status + (detail ? ': ' + detail : ''));
+    throw new Error(provider.label + ' catalog returned HTTP ' + response.status + (detail ? ': ' + detail : ''));
   }
-
-  let payload;
   try {
-    payload = await response.json();
+    return await response.json();
   } catch (error) {
-    throw new Error('OpenRouter catalog did not return valid JSON.');
+    throw new Error(provider.label + ' catalog did not return valid JSON.');
   }
+}
+
+function normalizedModelIds(provider, models, predicate) {
+  const gemini = provider.catalogFormat === 'gemini';
+  return [...new Set(models
+    .filter(predicate)
+    .map((model) => modelId(model, gemini))
+    .filter(Boolean))].sort((left, right) => left.localeCompare(right));
+}
+
+function allModelPredicate(provider, model) {
+  const id = modelId(model, provider.catalogFormat === 'gemini');
+  if (!isTextChatModelId(provider, id)) return false;
+  if (provider.catalogFormat !== 'gemini') return true;
+  // Gemini exposes models for other APIs too. Restrict its native catalog to
+  // models that can serve the text-generation route used by this application.
+  const methods = model && model.supportedGenerationMethods;
+  return Array.isArray(methods) && methods.includes('generateContent');
+}
+
+function freeModelPredicate(provider, model) {
+  if (!allModelPredicate(provider, model)) return false;
+  return provider.serverSideCatalogFilters
+    ? isFreeOpenRouterModel(model)
+    : isVerifiedFreeModel(model);
+}
+
+function catalogModelsFromOpenAiPayload(provider, payload, mode) {
   if (!payload || !Array.isArray(payload.data)) {
-    throw new Error('OpenRouter catalog response is missing its model list.');
+    throw new Error(provider.label + ' catalog response is missing its model list.');
+  }
+  return normalizedModelIds(provider, payload.data, mode === 'free'
+    ? (model) => freeModelPredicate(provider, model)
+    : (model) => allModelPredicate(provider, model));
+}
+
+async function fetchOpenAiModels(provider, config, fetchImpl, mode = 'free') {
+  const keys = providerKeys(config, provider);
+  const modeInfo = catalogMode(mode);
+  if (!keys.length) {
+    throw new Error(provider.label + ' needs an API key before its ' + modeInfo.label + ' catalog can be refreshed.');
   }
 
-  const models = [...new Set(payload.data
-    .filter(mode === 'free' ? isFreeOpenRouterModel : hasModelId)
-    .map((model) => model.id.trim()))].sort((left, right) => left.localeCompare(right));
-
+  const params = new URLSearchParams();
+  // OpenRouter is the only catalog that documents server-side price and text
+  // modality filters. Other OpenAI-compatible APIs receive the standard
+  // documented /models request and are filtered from their response instead.
+  if (provider.serverSideCatalogFilters) {
+    params.set('output_modalities', 'text');
+    if (mode === 'free') {
+      params.set('max_price', '0');
+      params.set('max_output_price', '0');
+    }
+  }
+  const url = provider.catalogUrl + (params.size ? '?' + params.toString() : '');
+  const payload = await fetchCatalogJson(provider, url, keys[0], fetchImpl);
+  const models = catalogModelsFromOpenAiPayload(provider, payload, mode);
   if (!models.length) {
-    throw new Error('OpenRouter catalog returned no ' + modeInfo.label + ' text models; existing models were preserved.');
+    throw new Error(provider.label + ' catalog returned no ' + modeInfo.label + ' text models; existing models were preserved.');
   }
   return models;
+}
+
+async function fetchGoogleModels(config, fetchImpl, mode = 'free') {
+  const provider = REFRESHABLE_PROVIDERS.google;
+  const keys = providerKeys(config, provider);
+  const modeInfo = catalogMode(mode);
+  if (!keys.length) {
+    throw new Error(provider.label + ' needs an API key before its ' + modeInfo.label + ' catalog can be refreshed.');
+  }
+
+  const records = [];
+  let pageToken = '';
+  let pageCount = 0;
+  do {
+    if (pageCount++ >= 20) {
+      throw new Error(provider.label + ' catalog exceeded 20 pages; existing models were preserved.');
+    }
+    const params = new URLSearchParams({ pageSize: '1000' });
+    if (pageToken) params.set('pageToken', pageToken);
+    const payload = await fetchCatalogJson(provider, provider.catalogUrl + '?' + params.toString(), keys[0], fetchImpl);
+    if (!payload || !Array.isArray(payload.models)) {
+      throw new Error(provider.label + ' catalog response is missing its model list.');
+    }
+    records.push(...payload.models);
+    pageToken = typeof payload.nextPageToken === 'string' ? payload.nextPageToken : '';
+  } while (pageToken);
+
+  const models = normalizedModelIds(provider, records, mode === 'free'
+    ? (model) => freeModelPredicate(provider, model)
+    : (model) => allModelPredicate(provider, model));
+  if (!models.length) {
+    throw new Error(provider.label + ' catalog returned no ' + modeInfo.label + ' text models; existing models were preserved.');
+  }
+  return models;
+}
+
+function fetchOpenRouterModels(config, fetchImpl, mode = 'free') {
+  return fetchOpenAiModels(REFRESHABLE_PROVIDERS.openrouter, config, fetchImpl, mode);
 }
 
 function fetchOpenRouterFreeModels(config, fetchImpl) {
@@ -128,8 +318,10 @@ function fetchOpenRouterFreeModels(config, fetchImpl) {
 }
 
 function fetchCatalog(providerId, config, fetchImpl, mode = 'free') {
-  if (providerId === 'openrouter') return fetchOpenRouterModels(config, fetchImpl, mode);
-  throw new Error('Automatic model discovery is not supported for this provider.');
+  const provider = REFRESHABLE_PROVIDERS[providerId];
+  if (!provider) throw new Error('Automatic model discovery is not supported for this provider.');
+  if (provider.catalogFormat === 'gemini') return fetchGoogleModels(config, fetchImpl, mode);
+  return fetchOpenAiModels(provider, config, fetchImpl, mode);
 }
 
 function cleanModelList(value) {
@@ -310,9 +502,13 @@ module.exports = {
   REFRESHABLE_PROVIDERS,
   catalogSelections,
   configuredProviderList,
+  fetchCatalog,
+  fetchGoogleModels,
+  fetchOpenAiModels,
   fetchOpenRouterFreeModels,
   fetchOpenRouterModels,
   isFreeOpenRouterModel,
+  isVerifiedFreeModel,
   syncFreeModels,
   syncModelCatalogs,
 };
