@@ -1421,6 +1421,51 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                 pass
         if got_any:
             return                                       # success
+        # Some OmniRoute auto-routes return a valid JSON completion for the
+        # same request but an SSE response containing only [DONE]. Retry only
+        # that empty-stream case without streaming, before declaring the key
+        # unusable. No bytes have reached the browser yet, so this cannot
+        # duplicate generated text.
+        if (ai.get("provider") or "").lower() == "omniroute":
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            fallback_body = dict(body)
+            fallback_body["stream"] = False
+            try:
+                fallback = requests.post(
+                    ai["base_url"], headers=_ai_headers(ai, key),
+                    json=fallback_body, timeout=_AI_TIMEOUT)
+            except requests.RequestException as exc:
+                last = "empty stream (key %d); non-stream fallback failed: %s" % (ki + 1, exc)
+                continue
+            try:
+                if fallback.status_code != 200:
+                    last = "empty stream (key %d); fallback %s: %s" % (
+                        ki + 1, fallback.status_code, fallback.text[:120])
+                    continue
+                _record_resolved_route(ai, fallback)
+                try:
+                    payload = fallback.json()
+                    choices = payload.get("choices") if isinstance(payload, dict) else []
+                    choice = (choices or [{}])[0]
+                    if not isinstance(choice, dict):
+                        choice = {}
+                except (ValueError, KeyError, IndexError, TypeError):
+                    choice = {}
+                if meta is not None:
+                    meta["finish_reason"] = choice.get("finish_reason")
+                message = choice.get("message") or {}
+                content = message.get("content") if isinstance(message, dict) else None
+                if content:
+                    yield content
+                    return
+                last = "empty stream and content (key %d)" % (ki + 1)
+            finally:
+                try:
+                    fallback.close()
+                except Exception:  # noqa: BLE001
+                    pass
+            continue
         last = "empty stream (key %d)" % (ki + 1)
     raise RuntimeError("AI stream failed on all %d key(s): %s" % (len(keys), last))
 
