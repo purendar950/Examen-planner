@@ -88,6 +88,19 @@
     font-family: var(--font);
   }
   .form-input:focus { border-color: var(--accent); }
+  /* Password show/hide toggle */
+  .pw-wrap { position: relative; }
+  .pw-wrap .form-input { padding-right: 3.8rem; }
+  .pw-toggle {
+    position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+    border: 0; background: none; padding: 4px 6px;
+    color: var(--accent); cursor: pointer;
+    font-family: var(--font); font-size: 0.68rem; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; line-height: 1;
+    border-radius: 6px;
+  }
+  .pw-toggle:hover { color: var(--text); }
+  .pw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .btn-primary {
     width: 100%; padding: 0.85rem;
     background: var(--accent); color: #000;

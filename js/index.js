@@ -294,6 +294,21 @@ function selectLandingPlan(plan) {
     });
   });
 
+  // Password visibility toggles. The field stays hidden until the user opts to
+  // reveal it, and only a click on the toggle changes that state.
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pw-toggle]'), function(btn) {
+    var input = document.getElementById(btn.getAttribute('data-pw-toggle'));
+    if (!input) return;
+    btn.addEventListener('click', function() {
+      var reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      btn.textContent = reveal ? 'Hide' : 'Show';
+      btn.setAttribute('aria-pressed', reveal ? 'true' : 'false');
+      btn.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+      input.focus();
+    });
+  });
+
   var overlay = document.getElementById('auth-overlay');
   if (overlay) {
     overlay.addEventListener('keydown', function(event) {
