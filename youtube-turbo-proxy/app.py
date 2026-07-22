@@ -795,6 +795,9 @@ STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
 _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
+# OmniRoute's JSON fallback waits for a whole completion rather than receiving
+# token heartbeats, so cap it separately to keep stopped jobs from lingering.
+_OMNIROUTE_FALLBACK_TIMEOUT = min(_AI_TIMEOUT, 45)  # seconds
 # Stream the model response by default: the first tokens arrive within seconds,
 # which keeps the upstream connection alive and PREVENTS Cloudflare's ~100s 524
 # on slow models (mistral-large, Hunyuan, etc.). Set AI_STREAM=0 to disable.
@@ -1438,7 +1441,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
             try:
                 fallback = requests.post(
                     ai["base_url"], headers=_ai_headers(ai, key),
-                    json=fallback_body, timeout=_AI_TIMEOUT)
+                    json=fallback_body, timeout=_OMNIROUTE_FALLBACK_TIMEOUT)
             except requests.RequestException as exc:
                 last = "empty stream (key %d); non-stream fallback failed: %s" % (ki + 1, exc)
                 continue
@@ -1447,6 +1450,8 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                     last = "empty stream (key %d); fallback %s: %s" % (
                         ki + 1, fallback.status_code, fallback.text[:120])
                     continue
+                if cancel_event is not None and cancel_event.is_set():
+                    return
                 _record_resolved_route(ai, fallback)
                 try:
                     payload = fallback.json()
@@ -1461,6 +1466,8 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                 message = choice.get("message") or {}
                 content = message.get("content") if isinstance(message, dict) else None
                 if content:
+                    if cancel_event is not None and cancel_event.is_set():
+                        return
                     yield content
                     return
                 last = "empty stream and content (key %d)" % (ki + 1)
