@@ -2912,13 +2912,12 @@ STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google
 # OmniRoute aggregates many AI providers behind one OpenAI-compatible endpoint;
 # every model ID is namespaced `provider/model`. We surface it in the student
 # picker as: (1) its `auto/*` smart-routing aliases (curated, self-failover), and
-# (2) a per-sub-provider list of concrete models — but ONLY the sub-providers that
-# currently respond, verified by a cached background health-ping, so students are
-# never offered a provider whose upstream is down.
+# (2) a per-sub-provider list of concrete models for EVERY provider added on
+# OmniRoute (deduped twin prefixes, media removed) — mirroring the OmniRoute
+# dashboard. Down upstreams are caught at generation time by the OmniRoute-scoped
+# provider failover, never hidden from the picker.
 OMNIROUTE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
 _OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))       # /models list cache
-_OMNIROUTE_VERIFY_TTL = int(os.environ.get("OMNIROUTE_VERIFY_TTL", "1800"))      # working-provider cache
-_OMNIROUTE_VERIFY_TIMEOUT = int(os.environ.get("OMNIROUTE_VERIFY_TIMEOUT", "8"))  # per-ping seconds
 # Each aggregator alias appears under two prefixes; drop the twin (keep the more
 # descriptive name). Also drop non-chat (image/video) providers and modifiers.
 _OMNIROUTE_DROP_PREFIXES = {
@@ -2938,9 +2937,6 @@ _OMNIROUTE_PROVIDER_LABELS = {
 
 _omniroute_models_cache = {"ts": 0.0, "ids": []}
 _omniroute_models_lock = threading.Lock()
-_omniroute_verify_cache = {"ts": 0.0, "providers": None, "flat": None}
-_omniroute_verify_lock = threading.Lock()
-_omniroute_verify_running = {"flag": False}
 
 
 def _omniroute_fetch_model_ids():
@@ -3003,92 +2999,28 @@ def _omniroute_grouped_candidates():
             for pid in sorted(groups, key=lambda k: (-len(groups[k]), k))]
 
 
-def _omniroute_ping(model, key):
-    """True if OmniRoute answers a tiny completion for `model` (provider up)."""
-    headers = {"Authorization": "Bearer " + (key or "omniroute-free"),
-               "Content-Type": "application/json", "ngrok-skip-browser-warning": "true"}
-    body = {"model": model, "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 1, "stream": False}
-    try:
-        r = requests.post(OMNIROUTE_URL, headers=headers, json=body,
-                          timeout=_OMNIROUTE_VERIFY_TIMEOUT)
-        return r.status_code == 200
-    except Exception:  # noqa: BLE001
-        return False
-
-
 def _omniroute_auto_group():
     return {"id": "auto", "label": "Auto (smart routing)", "models": _omniroute_auto_models()}
 
 
-def _omniroute_refresh_verified(key):
-    """Ping one representative model per candidate sub-provider (concurrently)
-    and cache only the providers that respond. `Auto` is always kept first."""
-    import concurrent.futures
-    auto = _omniroute_auto_group()
-    providers = [auto]
-    flat = list(auto["models"])
-    candidates = _omniroute_grouped_candidates()
-    if candidates:
-        working = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
-            futs = {ex.submit(_omniroute_ping, g["models"][0], key): g for g in candidates}
-            for fut in concurrent.futures.as_completed(futs):
-                try:
-                    if fut.result():
-                        working.append(futs[fut])
-                except Exception:  # noqa: BLE001
-                    pass
-        order = {g["id"]: i for i, g in enumerate(candidates)}   # restore stable order
-        for g in sorted(working, key=lambda g: order.get(g["id"], 999)):
-            providers.append(g)
-            flat.extend(g["models"])
-    _omniroute_verify_cache["providers"] = providers
-    _omniroute_verify_cache["flat"] = flat
-    _omniroute_verify_cache["ts"] = time.time()
+def _omniroute_providers():
+    """Every OmniRoute sub-provider the account has added (`Auto` first), taken
+    live from /v1/models. No health filtering — all added providers are shown so
+    the student picker mirrors the OmniRoute dashboard. A provider whose upstream
+    is momentarily down is still handled at generation time by the OmniRoute-
+    scoped provider failover, so it is surfaced rather than hidden."""
+    return [_omniroute_auto_group()] + _omniroute_grouped_candidates()
 
 
-def _omniroute_maybe_refresh_verified(key):
-    """Trigger a background verification refresh when the cache is stale, without
-    ever blocking the caller. The first-ever call seeds `Auto` instantly so the
-    picker is usable immediately while the health-pings run."""
-    now = time.time()
-    if _omniroute_verify_cache["providers"] is not None and \
-            now - _omniroute_verify_cache["ts"] < _OMNIROUTE_VERIFY_TTL:
-        return
-    if _omniroute_verify_running["flag"]:
-        return
-    with _omniroute_verify_lock:
-        if _omniroute_verify_running["flag"]:
-            return
-        if _omniroute_verify_cache["providers"] is not None and \
-                time.time() - _omniroute_verify_cache["ts"] < _OMNIROUTE_VERIFY_TTL:
-            return
-        if _omniroute_verify_cache["providers"] is None:   # seed Auto now
-            auto = _omniroute_auto_group()
-            _omniroute_verify_cache["providers"] = [auto]
-            _omniroute_verify_cache["flat"] = list(auto["models"])
-        _omniroute_verify_running["flag"] = True
-
-    def _run():
-        try:
-            _omniroute_refresh_verified(key)
-        finally:
-            _omniroute_verify_running["flag"] = False
-    threading.Thread(target=_run, daemon=True).start()
-
-
-def _omniroute_verified_providers(key=None):
-    """Cached list of verified-working OmniRoute sub-providers (`Auto` first)."""
-    _omniroute_maybe_refresh_verified(key)
-    return list(_omniroute_verify_cache["providers"] or [_omniroute_auto_group()])
-
-
-def _omniroute_verified_flat():
-    """Every currently-offered OmniRoute model ID (for validation/forwarding).
-    Falls back to the auto routes before the first verification completes."""
-    flat = _omniroute_verify_cache["flat"]
-    return list(flat) if flat else _omniroute_auto_models()
+def _omniroute_flat_models():
+    """Flat list of every offered OmniRoute model ID (validation/forwarding)."""
+    out, seen = [], set()
+    for g in _omniroute_providers():
+        for m in (g.get("models") or []):
+            if m not in seen:
+                seen.add(m)
+                out.append(m)
+    return out or ["auto"]
 
 
 def _effective_provider_models(cfg):
@@ -3103,7 +3035,7 @@ def _effective_provider_models(cfg):
         # concrete model from currently-verified sub-providers, so any pick made
         # in the sub-provider box validates and is forwarded as-is.
         if pid == "omniroute":
-            out[pid] = _omniroute_verified_flat()
+            out[pid] = _omniroute_flat_models()
             continue
         ov = overrides.get(pid)
         if isinstance(ov, list):
@@ -3772,9 +3704,8 @@ def api_status():
                 # each with that provider's concrete models. Only built when an
                 # OmniRoute key is configured; the verification runs in the
                 # background so this call never blocks.
-                _okeys = _configured_provider_keys(cfg, "omniroute")
-                if _okeys:
-                    out["omnirouteProviders"] = _omniroute_verified_providers(_okeys[0])
+                if _configured_provider_keys(cfg, "omniroute"):
+                    out["omnirouteProviders"] = _omniroute_providers()
         except Exception:  # noqa: BLE001
             pass
     uid = (request.args.get("uid") or "").strip()
