@@ -31,6 +31,7 @@ import time
 import base64
 import threading
 import logging
+import secrets
 
 import requests
 from flask import Flask, request, jsonify, Response, stream_with_context
@@ -843,6 +844,143 @@ _MCQ_CACHE_STYLE = "mcq-v2"
 _study_cache = {}
 _study_lock = threading.Lock()
 
+# ---- resumable text-generation jobs --------------------------------------
+# A browser SSE request is deliberately *not* the owner of generation. The job
+# lives in the proxy process and keeps producing text when a tab reloads or its
+# stream reconnects. The browser holds only an unguessable job id, which lets it
+# reconnect and pick up from the exact character offset it had already rendered.
+STUDY_JOB_TTL = int(os.environ.get("STUDY_JOB_TTL", str(6 * 3600)))
+STUDY_JOB_PERSIST_SEC = float(os.environ.get("STUDY_JOB_PERSIST_SEC", "5"))
+_study_jobs = {}
+_study_jobs_lock = threading.RLock()
+# A Stop can arrive while the create request is still in flight. Keep a short
+# server-side tombstone so a late POST with that same opaque id cannot start it.
+_study_job_stop_tombstones = {}
+
+
+def _study_job_public(job):
+    """Return only reconnect-safe job data (never provider keys or thread state)."""
+    return {
+        "jobId": job.get("id"),
+        "status": job.get("status"),
+        "mode": job.get("mode"),
+        "style": job.get("style") or ("topic" if job.get("mode") == "notes" else None),
+        "out_lang": job.get("out_lang"),
+        "provider": job.get("provider", "ai"),
+        "model": job.get("model", ""),
+        "title": job.get("title"),
+        "transcript_lang": job.get("transcript_lang"),
+        "segment_count": job.get("segment_count"),
+        "cached": bool(job.get("cached")),
+        "persisted": bool(job.get("persisted")),
+        "createdAt": job.get("created_at"),
+        "updatedAt": job.get("updated_at"),
+        # Configure a Firestore TTL policy on this field for `study_jobs` to
+        # prune terminal checkpoints without an application-side sweep.
+        "expiresAt": job.get("expires_at"),
+        "content": job.get("content", ""),
+        "error": job.get("error", ""),
+    }
+
+
+def _study_job_persist(job, force=False):
+    """Checkpoint a job occasionally, plus on every terminal transition.
+
+    The in-process copy keeps a running job alive across a browser refresh. The
+    Firestore checkpoint preserves the generated portion for inspection/recovery
+    after a proxy restart when Firebase is configured. Writes are throttled so
+    streamed tokens do not turn into a Firestore write per chunk.
+    """
+    now = time.time()
+    with _study_jobs_lock:
+        if not force and now - job.get("last_persist_at", 0) < STUDY_JOB_PERSIST_SEC:
+            return False
+        job["last_persist_at"] = now
+        doc = _study_job_public(job)
+    return _fs_set("study_jobs", job["id"], doc)
+
+
+def _get_study_job(job_id):
+    with _study_jobs_lock:
+        job = _study_jobs.get(job_id)
+        if job:
+            return job
+    # A completed/stopped checkpoint can still be displayed after a proxy
+    # restart. A running process cannot safely be resurrected without a durable
+    # worker queue, so surface it as interrupted rather than pretending it runs.
+    saved = _fs_get("study_jobs", job_id)
+    if not saved:
+        return None
+    status = saved.get("status")
+    if status in ("queued", "running"):
+        status = "failed"
+        saved["status"] = status
+        saved["error"] = "Generation was interrupted because the AI proxy restarted. Please generate again."
+        saved["updatedAt"] = int(time.time())
+        _fs_set("study_jobs", job_id, saved)
+    job = {
+        "id": job_id,
+        "status": status,
+        "mode": saved.get("mode"),
+        "style": saved.get("style") if saved.get("style") != "topic" else "",
+        "out_lang": saved.get("out_lang"),
+        "provider": saved.get("provider", "ai"),
+        "model": saved.get("model", ""),
+        "title": saved.get("title"),
+        "transcript_lang": saved.get("transcript_lang"),
+        "segment_count": saved.get("segment_count"),
+        "cached": bool(saved.get("cached")),
+        "persisted": bool(saved.get("persisted")),
+        "created_at": saved.get("createdAt") or int(time.time()),
+        "updated_at": saved.get("updatedAt") or int(time.time()),
+        "expires_at": saved.get("expiresAt") or int(time.time() + STUDY_JOB_TTL),
+        "content": saved.get("content", ""),
+        "error": saved.get("error", ""),
+        "cancel_event": threading.Event(),
+        "last_persist_at": time.time(),
+    }
+    with _study_jobs_lock:
+        return _study_jobs.setdefault(job_id, job)
+
+
+def _cleanup_study_jobs():
+    """Keep completed in-memory jobs bounded; persisted records use their TTL."""
+    cutoff = time.time() - STUDY_JOB_TTL
+    with _study_jobs_lock:
+        stale = [jid for jid, job in _study_jobs.items()
+                 if job.get("status") in ("completed", "stopped", "failed")
+                 and job.get("updated_at", 0) < cutoff]
+        for jid in stale:
+            _study_jobs.pop(jid, None)
+        stale_stops = [jid for jid, expiry in _study_job_stop_tombstones.items()
+                       if expiry < time.time()]
+        for jid in stale_stops:
+            _study_job_stop_tombstones.pop(jid, None)
+
+
+def _valid_study_job_id(value):
+    return bool(value and re.fullmatch(r"[A-Za-z0-9_-]{20,80}", value))
+
+
+def _study_job_was_stopped(job_id):
+    with _study_jobs_lock:
+        return _study_job_stop_tombstones.get(job_id, 0) >= time.time()
+
+
+def _remember_study_job_stop(job_id):
+    with _study_jobs_lock:
+        _study_job_stop_tombstones[job_id] = time.time() + 300
+
+
+def _study_text_cache_keys(video_id, mode, out_lang, style):
+    """Return the exact text-mode cache keys shared with /api/study/stream."""
+    if style:
+        cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
+        return ("%s:%s:%s:%s:%s" % (video_id, mode, out_lang, 25, cache_style),
+                _fs_doc_id(video_id, mode, out_lang, 25, cache_style))
+    return ("%s:%s:%s:%s" % (video_id, mode, out_lang, 25),
+            _fs_doc_id(video_id, mode, out_lang, 25))
+
 
 def _load_ai_config(prefer_model=None, prefer_provider=None):
     """Study AI provider from Firestore config/ai. Returns a dict:
@@ -1168,7 +1306,8 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, me
     raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
 
 
-def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
+def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
+                    cancel_event=None):
     """Like _ai_chat but a GENERATOR that YIELDS content pieces as they arrive
     (for the /api/study/stream text endpoint). Key failover only happens BEFORE
     the first piece is yielded — once bytes are on the wire we can't restart
@@ -1184,6 +1323,8 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
     est = _est_tokens(messages, max_tokens)
     last = "unknown error"
     for ki, key in enumerate(keys):
+        if cancel_event is not None and cancel_event.is_set():
+            return
         _ai_pace(est, ai.get("tpm", 0))
         try:
             r = requests.post(ai["base_url"],
@@ -1206,6 +1347,8 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
         try:
             r.encoding = "utf-8"
             for raw in r.iter_lines(decode_unicode=True):
+                if cancel_event is not None and cancel_event.is_set():
+                    return
                 if not raw:
                     continue
                 line = raw.strip()
@@ -1243,7 +1386,7 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None):
     raise RuntimeError("AI stream failed on all %d key(s): %s" % (len(keys), last))
 
 
-def _stream_notes_part(sysmsg, user, ai, max_tokens):
+def _stream_notes_part(sysmsg, user, ai, max_tokens, cancel_event=None):
     """Stream ONE notes part, auto-continuing when the model stops because it hit
     its output-token cap (finish_reason=='length'). Without this, big single-pass
     notes on smaller models end mid-sentence. We keep asking the model to carry on
@@ -1253,9 +1396,14 @@ def _stream_notes_part(sysmsg, user, ai, max_tokens):
             {"role": "user", "content": user}]
     tail = ""
     for _ in range(NOTES_MAX_CONT + 1):
+        if cancel_event is not None and cancel_event.is_set():
+            return
         meta = {}
         produced = False
-        for piece in _ai_chat_stream(msgs, ai, max_tokens=max_tokens, meta=meta):
+        for piece in _ai_chat_stream(msgs, ai, max_tokens=max_tokens, meta=meta,
+                                     cancel_event=cancel_event):
+            if cancel_event is not None and cancel_event.is_set():
+                return
             produced = True
             tail = (tail + piece)[-2400:]     # recent output → continuation anchor
             yield piece
@@ -1552,7 +1700,7 @@ def _notes_sections(transcript, out_lang, ai, style=""):
     return secs, part_cap
 
 
-def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
+def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_event=None):
     """Generator yielding markdown content pieces for the TEXT study modes
     (notes / summary / insights), streamed from the model. Mirrors _generate_study
     for those modes; quiz/flashcards are NOT streamed (they return structured JSON)."""
@@ -1562,6 +1710,8 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
         secs, part_cap = _notes_sections(transcript, out_lang, ai, style)
         covered = []
         for i, sec in enumerate(secs):
+            if cancel_event is not None and cancel_event.is_set():
+                return
             if i:
                 yield "\n\n"                          # separate parts like _gen_notes
             if len(secs) == 1:
@@ -1572,7 +1722,9 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
                                "only.) " % (i + 1, len(secs))) + _covered_note(covered, style) + instr + "\n\n" + sec
                 mt = part_cap
             buf = []                                  # collect this part to learn its headings
-            for piece in _stream_notes_part(sysmsg, user, ai, mt):
+            for piece in _stream_notes_part(sysmsg, user, ai, mt, cancel_event=cancel_event):
+                if cancel_event is not None and cancel_event.is_set():
+                    return
                 buf.append(piece)
                 yield piece
             if len(secs) > 1:                         # so later parts don't repeat these
@@ -1583,7 +1735,8 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
         for piece in _ai_chat_stream(
                 [{"role": "system", "content": sysmsg},
                  {"role": "user", "content": head + "Write a concise summary as 4-7 "
-                  "bullet points:\n\n" + body}], ai, max_tokens=1000):
+                  "bullet points:\n\n" + body}], ai, max_tokens=1000,
+                cancel_event=cancel_event):
             yield piece
         return
     if mode == "insights":
@@ -1599,7 +1752,8 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style=""):
                      "- CRITICAL: the list MUST be complete \u2014 always finish the "
                      "final bullet. Never stop in the middle of a line. If space is "
                      "running out, shorten the bullets rather than cut the list.\n\n"
-                 ) + body}], ai, max_tokens=2500):
+                 ) + body}], ai, max_tokens=2500,
+                cancel_event=cancel_event):
             yield piece
         return
     raise ValueError("bad stream mode")
@@ -2117,6 +2271,287 @@ def api_study_stream():
 
     return Response(stream_with_context(gen()),
                     mimetype="text/event-stream", headers=_sse_headers)
+
+
+# ── Persistent browser-reconnectable text-generation jobs ──────────────────
+def _job_force(value):
+    return str(value or "").strip().lower() in ("1", "true", "yes")
+
+
+def _study_job_cached_result(ckey, fs_id, force):
+    """Find a text result exactly as the legacy streaming endpoint would."""
+    if force:
+        return None
+    now = time.time()
+    with _study_lock:
+        hit = _study_cache.get(ckey)
+        if hit and now - hit["ts"] < STUDY_TTL:
+            return hit["data"]
+    saved = _study_get(fs_id)
+    if saved:
+        saved["cached"] = True
+        with _study_lock:
+            _study_cache[ckey] = {"ts": time.time(), "data": saved}
+    return saved
+
+
+def _study_job_stop_requested(job):
+    return job.get("cancel_event") is not None and job["cancel_event"].is_set()
+
+
+def _set_study_job_terminal(job, status, error=""):
+    with _study_jobs_lock:
+        # An explicit Stop always wins over a late upstream failure/completion.
+        if job.get("status") == "stopped" and status != "stopped":
+            return
+        job["status"] = status
+        job["error"] = error or ""
+        job["updated_at"] = int(time.time())
+    _study_job_persist(job, force=True)
+
+
+def _run_study_job(job_id):
+    """Generate independently of any browser request/stream connection."""
+    job = _get_study_job(job_id)
+    if not job:
+        return
+    with _study_jobs_lock:
+        if _study_job_stop_requested(job):
+            job["status"] = "stopped"
+            job["updated_at"] = int(time.time())
+        else:
+            job["status"] = "running"
+            job["updated_at"] = int(time.time())
+    _study_job_persist(job, force=True)
+    if _study_job_stop_requested(job):
+        _study_job_persist(job, force=True)
+        return
+
+    try:
+        t = _extract_transcript(job["video_id"], "auto")
+        if _study_job_stop_requested(job):
+            _set_study_job_terminal(job, "stopped")
+            return
+        if not t.get("segments"):
+            _set_study_job_terminal(job, "failed", "No captions found for this video.")
+            return
+
+        gen_text = t["text"]
+        if job["mode"] == "notes":
+            gen_text = _timestamped_transcript(t.get("segments")) or t["text"]
+        head = ("Video title: %s\n\n" % t.get("title")) if t.get("title") else ""
+        with _study_jobs_lock:
+            job["title"] = t.get("title")
+            job["transcript_lang"] = t.get("chosen_lang")
+            job["segment_count"] = t.get("segment_count")
+            job["updated_at"] = int(time.time())
+        _study_job_persist(job, force=True)
+
+        for piece in _stream_study_text(job["mode"], gen_text, job["out_lang"],
+                                         job["ai"], head, job["style"],
+                                         cancel_event=job["cancel_event"]):
+            if _study_job_stop_requested(job):
+                _set_study_job_terminal(job, "stopped")
+                return
+            with _study_jobs_lock:
+                job["content"] += piece
+                job["updated_at"] = int(time.time())
+            _study_job_persist(job)
+
+        if _study_job_stop_requested(job):
+            _set_study_job_terminal(job, "stopped")
+            return
+        with _study_jobs_lock:
+            content = job["content"]
+        if not content.strip():
+            _set_study_job_terminal(job, "failed", "The AI returned an empty response. Please try again.")
+            return
+
+        data = {"id": job["video_id"], "title": job.get("title"), "mode": job["mode"],
+                "style": job["style"] or ("topic" if job["mode"] == "notes" else None),
+                "out_lang": job["out_lang"], "model": job["model"], "format": "markdown",
+                "num_questions": None, "provider": job["provider"],
+                "keys_available": len(job["ai"].get("keys") or []),
+                "transcript_lang": job.get("transcript_lang"),
+                "segment_count": job.get("segment_count"), "cached": False,
+                "content": content}
+        with _study_lock:
+            _study_cache[job["ckey"]] = {"ts": time.time(), "data": data}
+        persisted = _study_put(job["fs_id"], data)
+        with _study_jobs_lock:
+            job["persisted"] = persisted
+            job["status"] = "completed"
+            job["updated_at"] = int(time.time())
+        _study_job_persist(job, force=True)
+    except Exception as exc:  # noqa: BLE001
+        log.exception("study job %s failed", job_id)
+        if _study_job_stop_requested(job):
+            _set_study_job_terminal(job, "stopped")
+        else:
+            _set_study_job_terminal(job, "failed", str(exc)[:200])
+
+
+def _new_study_job_id(value):
+    value = (value or "").strip()
+    if _valid_study_job_id(value):
+        return value
+    return secrets.token_urlsafe(24)
+
+
+@app.post("/api/study/jobs")
+def api_study_jobs_start():
+    """Create (or return) a server-owned text job. Safe to retry after reload."""
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "bad_request"}), 400
+    job_id = _new_study_job_id(payload.get("jobId"))
+    existing = _get_study_job(job_id)
+    if existing:
+        return jsonify(_study_job_public(existing))
+
+    raw_arg = str(payload.get("id") or payload.get("url") or payload.get("v") or "").strip()
+    video_id = _parse_video_id(raw_arg)
+    mode = str(payload.get("mode") or "notes").strip().lower()
+    out_lang = str(payload.get("out") or payload.get("lang") or "English").strip() or "English"
+    style = str(payload.get("style") or "").strip().lower()
+    if mode not in ("notes", "summary", "insights"):
+        return jsonify({"error": "bad_mode", "detail": "jobs support notes, summary and insights"}), 400
+    if not video_id:
+        return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
+    if mode != "notes" or style not in ("mcq",):
+        style = ""
+
+    was_stopped = _study_job_was_stopped(job_id)
+    ai = _load_ai_config(str(payload.get("model") or "").strip()[:80] or None,
+                         str(payload.get("provider") or "").strip()[:40] or None)
+    if not ai["keys"] and not was_stopped:
+        return jsonify({"error": "ai_not_configured", "detail": "Add an AI key in the admin panel."}), 503
+    force = _job_force(payload.get("refresh") or payload.get("nocache"))
+    ckey, fs_id = _study_text_cache_keys(video_id, mode, out_lang, style)
+    cached = _study_job_cached_result(ckey, fs_id, force)
+    now = int(time.time())
+    job = {
+        "id": job_id, "video_id": video_id, "mode": mode, "style": style,
+        "out_lang": out_lang, "provider": ai.get("provider", "ai"), "model": ai["model"],
+        "ai": ai, "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
+        "cached": bool(cached), "persisted": bool(cached), "title": None,
+        "transcript_lang": None, "segment_count": None, "error": "",
+        "created_at": now, "updated_at": now, "expires_at": now + STUDY_JOB_TTL,
+        "cancel_event": threading.Event(), "last_persist_at": 0,
+    }
+    if was_stopped:
+        job.update({"status": "stopped", "error": "Stopped before generation began."})
+    elif cached:
+        job.update({
+            "status": "completed", "content": cached.get("content", ""),
+            "title": cached.get("title"), "provider": cached.get("provider", job["provider"]),
+            "model": cached.get("model", job["model"]),
+            "transcript_lang": cached.get("transcript_lang"),
+            "segment_count": cached.get("segment_count"),
+        })
+    else:
+        uid = str(payload.get("uid") or "").strip()
+        if not _is_unlimited(uid) and not _rate_ok("study", _client_ip(), _load_ai_limits()["studyPerHour"], 3600):
+            return jsonify({"error": "rate_limited", "detail": "Hourly AI generation limit reached."}), 429
+
+    _cleanup_study_jobs()
+    with _study_jobs_lock:
+        raced = _study_jobs.get(job_id)
+        if raced:
+            return jsonify(_study_job_public(raced))
+        # DELETE may have arrived after the first tombstone check but while this
+        # POST was validating configuration/cache/rate limits. Recheck while we
+        # claim the id so Stop-before-create is atomic from the caller's view.
+        if _study_job_stop_tombstones.get(job_id, 0) >= time.time():
+            job.update({"status": "stopped", "error": "Stopped before generation began."})
+        _study_jobs[job_id] = job
+    # Cached results already live in the shared `study` cache; do not duplicate
+    # their whole body in a per-viewer job checkpoint. Running jobs alone are
+    # checkpointed for refresh/recovery.
+    if job["status"] == "queued":
+        _study_job_persist(job, force=True)
+        worker = threading.Thread(target=_run_study_job, args=(job_id,), daemon=True,
+                                  name="study-job-" + job_id[:10])
+        with _study_jobs_lock:
+            job["thread"] = worker
+        worker.start()
+    return jsonify(_study_job_public(job)), (202 if job["status"] == "queued" else 200)
+
+
+@app.get("/api/study/jobs/<job_id>")
+def api_study_job(job_id):
+    job = _get_study_job(job_id)
+    if not job:
+        return jsonify({"error": "job_not_found"}), 404
+    return jsonify(_study_job_public(job))
+
+
+@app.delete("/api/study/jobs/<job_id>")
+def api_study_job_stop(job_id):
+    job = _get_study_job(job_id)
+    if not job:
+        if not _valid_study_job_id(job_id):
+            return jsonify({"error": "job_not_found"}), 404
+        # A valid opaque id may belong to a POST that is still in flight. Record
+        # the cancellation first; a late creator sees this tombstone and returns
+        # a stopped job instead of starting an AI worker.
+        _remember_study_job_stop(job_id)
+        return jsonify({"jobId": job_id, "status": "stopped"})
+    with _study_jobs_lock:
+        if job.get("status") in ("queued", "running"):
+            _remember_study_job_stop(job_id)
+            job["cancel_event"].set()
+            job["status"] = "stopped"
+            job["updated_at"] = int(time.time())
+    _study_job_persist(job, force=True)
+    return jsonify(_study_job_public(job))
+
+
+@app.get("/api/study/jobs/<job_id>/stream")
+def api_study_job_stream(job_id):
+    """Return one replay snapshot; the client reconnects while a job is running."""
+    job = _get_study_job(job_id)
+    if not job:
+        return jsonify({"error": "job_not_found"}), 404
+    try:
+        # Cursor is UTF-8 bytes, not JS's UTF-16 `string.length`. This keeps
+        # replay exact for emoji and every other non-BMP character.
+        cursor = max(0, int(request.args.get("offset") or 0))
+    except (TypeError, ValueError):
+        cursor = 0
+
+    def sse(event, payload):
+        return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False))
+
+    def follow():
+        nonlocal cursor
+        # This is intentionally a bounded snapshot, not a connection held until
+        # completion. The browser reconnects shortly after it drains, which keeps
+        # every Gunicorn thread available for Start/Stop control requests.
+        meta = _study_job_public(job)
+        meta.pop("content", None)       # replay is sent only as a `chunk`
+        yield sse("meta", meta)
+        with _study_jobs_lock:
+            content = job.get("content", "")
+            status = job.get("status")
+            error = job.get("error", "")
+            persisted = bool(job.get("persisted"))
+        encoded = content.encode("utf-8")
+        if cursor > len(encoded):
+            cursor = 0
+        if len(encoded) > cursor:
+            # The cursor was issued by the client from a fully-decoded string,
+            # so it is a UTF-8 character boundary. Replacement is defensive.
+            yield sse("chunk", {"t": encoded[cursor:].decode("utf-8", errors="replace")})
+        if status == "completed":
+            yield sse("done", {"persisted": persisted})
+        elif status == "stopped":
+            yield sse("stopped", {})
+        elif status == "failed":
+            yield sse("error", {"error": "ai_failed", "detail": error or "Generation failed."})
+
+    return Response(stream_with_context(follow()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
 
 
 # Which languages a video's study material (for a given mode) is ALREADY cached

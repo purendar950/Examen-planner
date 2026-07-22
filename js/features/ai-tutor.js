@@ -669,11 +669,48 @@
      into a "Stop" button that aborts the request (long generations can be
      cancelled so the user can pick another model and try again). */
   var _genAbort = null;   // AbortController for the current in-flight generation
+  var _genUserStopped = false;
+  var _genControlsStudyJob = false;
+  var _activeStudyJobId = '';
+  var STUDY_JOB_KEY = 'aiStudyActiveTextJobV1';
+
+  // Text generation is owned by the proxy, not by this page. Keep only the
+  // opaque id + harmless request metadata locally so a reload can reconnect.
+  function readStudyJob() {
+    try { var raw = localStorage.getItem(STUDY_JOB_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+  }
+  function saveStudyJob(job) {
+    if (!job || !job.jobId) return;
+    _activeStudyJobId = job.jobId;
+    try { localStorage.setItem(STUDY_JOB_KEY, JSON.stringify(job)); } catch (e) {}
+  }
+  function clearStudyJob(jobId) {
+    var saved = readStudyJob();
+    if (!jobId || (saved && saved.jobId === jobId)) {
+      try { localStorage.removeItem(STUDY_JOB_KEY); } catch (e) {}
+    }
+    if (!jobId || _activeStudyJobId === jobId) _activeStudyJobId = '';
+  }
+  function utf8Length(text) {
+    text = String(text || '');
+    try { return new TextEncoder().encode(text).length; } catch (e) { return unescape(encodeURIComponent(text)).length; }
+  }
+  function newStudyJobId() {
+    var bytes, i, out = '';
+    try {
+      bytes = new Uint8Array(24);
+      window.crypto.getRandomValues(bytes);
+      for (i = 0; i < bytes.length; i++) out += ('0' + bytes[i].toString(16)).slice(-2);
+      return out;
+    } catch (e) { return 'study_' + Date.now() + '_' + Math.random().toString(36).slice(2); }
+  }
 
   // Turn the given Generate button into a Stop button and return the abort
   // signal to hand to apiGet(). Safe to call even if the button isn't present.
   function _genStart(btnId) {
     _studyPaintRequest += 1;
+    _genUserStopped = false;
+    _genControlsStudyJob = false;
     if (_genAbort) { try { _genAbort.abort(); } catch (e) {} }
     var ctrl = ('AbortController' in window) ? new AbortController() : null;
     _genAbort = ctrl;
@@ -686,18 +723,88 @@
     }
     return ctrl ? ctrl.signal : undefined;
   }
-  // User pressed Stop → abort the in-flight request (the .catch handles the UI).
-  function _genStop() { if (_genAbort) { try { _genAbort.abort(); } catch (e) {} } _genAbort = null; }
-  // Abort generation when its owning workspace disappears. The request counter
-  // also prevents a late response from rendering into a newly selected tab.
+  // Stop is the only operation that cancels a server-side text job. Closing or
+  // refreshing the page merely aborts this browser's stream; generation stays on.
+  function finishStoppedStudyJob(jobId) {
+    // A late acknowledgement from an older, detached job must never take the
+    // Stop control away from whichever job is currently visible.
+    if (_activeStudyJobId !== jobId) return;
+    clearStudyJob(jobId);
+    _genEnd('ai-notes-go');
+    var targetEl = contentEl();
+    if (state.tab === 'notes' && targetEl && targetEl.isConnected) {
+      targetEl.innerHTML = notesStageMessageHtml('stopped', 'Note generation stopped', 'Generate again whenever you are ready.');
+    }
+  }
+  function finishCompletedStudyJob(jobId, result) {
+    if (_activeStudyJobId !== jobId) return;
+    var saved = readStudyJob() || {};
+    clearStudyJob(jobId);
+    _genEnd('ai-notes-go');
+    var targetEl = contentEl();
+    if (state.tab === 'notes' && targetEl && targetEl.isConnected && result && result.content) {
+      renderNotesResult(saved.mode || result.mode || 'notes', saved.n || 25, saved.style || '', {
+        content: result.content, provider: result.provider, model: result.model,
+        cached: !!result.cached, lang: result.out_lang || saved.lang || outLang()
+      }, targetEl);
+    }
+  }
+  function finishFailedStudyJob(jobId, result) {
+    if (_activeStudyJobId !== jobId) return;
+    clearStudyJob(jobId);
+    _genEnd('ai-notes-go');
+    var targetEl = contentEl();
+    if (state.tab === 'notes' && targetEl && targetEl.isConnected) {
+      targetEl.innerHTML = notesStageMessageHtml('error', 'Notes could not be prepared', (result && (result.error || result.detail)) || 'Generation failed.');
+    }
+  }
+  function requestStudyJobStop(jobId, attempt) {
+    if (_activeStudyJobId !== jobId) return;
+    fetch(BACKEND + '/api/study/jobs/' + encodeURIComponent(jobId), { method: 'DELETE' })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error((res.data && res.data.error) || 'stop_not_confirmed');
+        if (res.data.status === 'stopped') { finishStoppedStudyJob(jobId); return; }
+        // Stop can race an already-terminal job. Reconcile its true state instead
+        // of leaving the panel stuck on a temporary “Stopping” message.
+        if (res.data.status === 'completed') { finishCompletedStudyJob(jobId, res.data); return; }
+        if (res.data.status === 'failed') { finishFailedStudyJob(jobId, res.data); return; }
+        throw new Error('stop_not_confirmed');
+      }).catch(function () {
+        // Keep retrying while this is still the active job. The saved
+        // `stopRequested` flag makes the intent survive a refresh as well.
+        if (_activeStudyJobId === jobId) {
+          var delay = Math.min(8000, 800 * Math.pow(2, Math.min(attempt, 3)));
+          setTimeout(function () { requestStudyJobStop(jobId, attempt + 1); }, delay);
+        }
+      });
+  }
+  function _genStop() {
+    _genUserStopped = true;
+    var saved = readStudyJob();
+    var jobId = _genControlsStudyJob && (_activeStudyJobId || (saved && saved.jobId));
+    if (jobId) {
+      if (saved && saved.jobId === jobId) { saved.stopRequested = true; saveStudyJob(saved); }
+      var targetEl = contentEl();
+      if (targetEl && targetEl.isConnected) targetEl.innerHTML = notesStageMessageHtml('stopped', 'Stopping note generation', 'Waiting for the AI proxy to confirm cancellation…');
+      requestStudyJobStop(jobId, 0);
+    }
+    if (_genAbort) { try { _genAbort.abort(); } catch (e) {} }
+    _genAbort = null;
+  }
+  // Workspace changes detach the visible stream only. They intentionally never
+  // call DELETE: a note keeps generating until the student explicitly presses Stop.
   function _cancelActiveStudy() {
     _studyPaintRequest += 1;
+    _genUserStopped = false;
+    _genControlsStudyJob = false;
     if (_genAbort) { try { _genAbort.abort(); } catch (e) {} }
     _genAbort = null;
   }
   // Restore a Stop button back to its original "Generate" label + handler.
   function _genEnd(btnId) {
     _genAbort = null;
+    _genControlsStudyJob = false;
     var btn = document.getElementById(btnId);
     if (btn && btn._origHtml != null) {
       btn.innerHTML = btn._origHtml;
@@ -882,7 +989,7 @@
     var requestId = _studyPaintRequest;
     function ownsOutput() { return requestId === _studyPaintRequest && el && el.isConnected && el === contentEl(); }
     if (mode === 'flashcards' || mode === 'quiz') { studyOnce(mode, n, style, lang, focus, force, signal, btnId, el, ownsOutput); return; }
-    studyStream(mode, n, style, lang, focus, force, signal, btnId);
+    studyJobStart(mode, n, style, lang, focus, force, signal, btnId, el, ownsOutput);
   }
 
   // StudyPlanner header shown at the top of the notes (brand only on screen; the
@@ -1021,7 +1128,220 @@
     });
   }
 
-  // Progressive streaming for text notes (SSE from /api/study/stream). Renders as
+  // A refresh-safe text-generation path. The POST creates a server-owned job;
+  // the SSE connection only observes it, so browser navigation never aborts the
+  // AI request. A client-generated opaque id makes a reload during the POST safe
+  // too: retrying the same id returns the original job instead of duplicating it.
+  function studyJobStart(mode, n, style, lang, focus, force, signal, btnId, targetEl, canRender, resumeJob) {
+    var vid = curVid();
+    var job = resumeJob || {
+      jobId: newStudyJobId(), videoId: vid, mode: mode, n: n || 25, style: style || '',
+      lang: lang, focus: focus || '', force: !!force
+    };
+    _genControlsStudyJob = true;
+    saveStudyJob(job);                 // persist BEFORE POST, not after it returns
+    function jobRequestError(r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        j = j || {}; j._httpStatus = r.status;
+        if (!j.error) j.error = 'job_api_unavailable';
+        throw j;
+      });
+    }
+    fetch(BACKEND + '/api/study/jobs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: signal,
+      body: JSON.stringify({
+        jobId: job.jobId, id: vid, mode: mode, out: lang, uid: curUid(),
+        model: outModel(), provider: outProvider(), style: style || '', refresh: force ? 1 : 0
+      })
+    }).then(function (r) { return r.ok ? r.json() : jobRequestError(r); }).then(function (created) {
+      if (created && created.jobId) {
+        job.jobId = created.jobId;
+        saveStudyJob(job);
+      }
+      if (canRender && !canRender()) return;
+      studyJobStream(mode, n, style, lang, job, created || {}, signal, btnId, targetEl, canRender);
+    }).catch(function (e) {
+      if (canRender && !canRender()) return;
+      if (_isAbort(e)) {
+        if (_genUserStopped && targetEl && targetEl.isConnected) {
+          targetEl.innerHTML = notesStageMessageHtml('stopped', 'Stopping note generation', 'Waiting for the AI proxy to confirm cancellation…');
+        }
+        return;
+      }
+      // During a staggered deploy an older proxy may not have job endpoints
+      // yet. Retain the existing stream as a compatibility fallback only then.
+      if (e && e._httpStatus === 404 && !resumeJob) {
+        clearStudyJob(job.jobId);
+        studyStream(mode, n, style, lang, focus, force, signal, btnId);
+        return;
+      }
+      clearStudyJob(job.jobId);
+      _genEnd(btnId);
+      var detail = (e && (e.detail || e.error)) || 'Could not start note generation.';
+      if (targetEl && targetEl.isConnected) targetEl.innerHTML = notesStageMessageHtml('error', 'Notes could not be prepared', detail);
+    });
+  }
+
+  // Attach to a job from the exact UTF-8 byte offset of `acc`. The backend replays only
+  // the missing tail before following future chunks, so reconnects cannot repeat
+  // or lose text even when a refresh happens while the model is writing.
+  function studyJobStream(mode, n, style, lang, job, initial, signal, btnId, targetEl, canRender) {
+    var meta = {
+      provider: initial.provider || 'ai', model: initial.model || '', cached: !!initial.cached,
+      lang: initial.out_lang || lang
+    };
+    var acc = initial.content || '', done = false, built = false, stick = true, scrollEl = null, nbEl = null;
+    var reconnectTimer = 0;
+
+    function ownsStudyTarget() {
+      return (!canRender || canRender()) && targetEl && targetEl.isConnected && targetEl === contentEl();
+    }
+    function ownsJobUi() {
+      return ownsStudyTarget() && _activeStudyJobId === job.jobId && _genControlsStudyJob;
+    }
+    function paint() {
+      if (!ownsStudyTarget() || (signal && signal.aborted) || (built && (!nbEl || !nbEl.isConnected))) {
+        streamPainter.cancel(); return false;
+      }
+      if (!built) {
+        targetEl.innerHTML = brandBarHtml(false, true) +
+          '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
+          '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' + esc(meta.model || '') +
+          (style === 'mcq' ? ' · MCQ' : '') + (meta.lang ? ' · ' + esc(meta.lang) : '') + ' · writing safely…</span></div>' +
+          '<div class="ai-scroll nb"><div class="ai-nb"></div></div>';
+        scrollEl = targetEl.querySelector('.ai-scroll');
+        nbEl = targetEl.querySelector('.ai-nb');
+        if (scrollEl) scrollEl.addEventListener('scroll', function () {
+          stick = (scrollEl.scrollTop + scrollEl.clientHeight) >= (scrollEl.scrollHeight - 40);
+        });
+        built = true;
+      }
+      if (!nbEl || !nbEl.isConnected) return false;
+      nbEl.innerHTML = nbBuild(acc, style) + '<span class="ai-caret"></span>';
+      if (stick && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
+      return true;
+    }
+    var streamPainter = makeStreamPaintScheduler(120, function () { return acc.length; }, paint);
+    if (acc) streamPainter.schedule();
+
+    function endAsComplete() {
+      if (done) return;
+      done = true; clearTimeout(reconnectTimer); streamPainter.cancel();
+      var ownsUi = ownsJobUi();
+      clearStudyJob(job.jobId);
+      if (ownsUi) {
+        _genEnd(btnId);
+        renderNotesResult(mode, n, style, {
+          content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached, lang: meta.lang || lang
+        }, targetEl);
+      }
+    }
+    function endAsStopped() {
+      if (done) return;
+      done = true; clearTimeout(reconnectTimer); streamPainter.cancel();
+      var ownsUi = ownsJobUi();
+      clearStudyJob(job.jobId);
+      if (ownsUi) {
+        _genEnd(btnId);
+        targetEl.innerHTML = notesStageMessageHtml('stopped', 'Note generation stopped', 'Generate again whenever you are ready.');
+      }
+    }
+    function endAsError(payload) {
+      if (done) return;
+      done = true; clearTimeout(reconnectTimer); streamPainter.cancel();
+      var ownsUi = ownsJobUi();
+      clearStudyJob(job.jobId);
+      var detail = (payload && (payload.detail || payload.error)) || 'Please try again in a moment.';
+      if (ownsUi) {
+        _genEnd(btnId);
+        targetEl.innerHTML = notesStageMessageHtml('error', 'Notes could not be prepared', detail);
+      }
+    }
+    function handleFrame(frame) {
+      var ev = 'message', data = '';
+      frame.split('\n').forEach(function (ln) {
+        if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
+        else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
+      });
+      var obj = {};
+      if (data) { try { obj = JSON.parse(data) || {}; } catch (e) { obj = {}; } }
+      if (ev === 'meta') {
+        meta.provider = obj.provider || meta.provider; meta.model = obj.model || meta.model;
+        meta.cached = obj.cached != null ? !!obj.cached : meta.cached;
+        meta.lang = obj.out_lang || obj.lang || meta.lang;
+        return;
+      }
+      if (ev === 'chunk' && typeof obj.t === 'string') { acc += obj.t; streamPainter.schedule(); return; }
+      if (ev === 'done') { endAsComplete(); return; }
+      if (ev === 'stopped') { endAsStopped(); return; }
+      if (ev === 'error') { endAsError(obj); }
+    }
+    function connect() {
+      if (done || (signal && signal.aborted) || !ownsStudyTarget()) return;
+      fetch(BACKEND + '/api/study/jobs/' + encodeURIComponent(job.jobId) + '/stream?offset=' + encodeURIComponent(utf8Length(acc)),
+        signal ? { signal: signal } : {}).then(function (r) {
+        if (r.ok && r.body && window.TextDecoder) return r;
+        return r.json().catch(function () { return {}; }).then(function (j) { j._httpStatus = r.status; throw j; });
+      }).then(function (r) {
+        var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
+        function pump() {
+          return reader.read().then(function (res) {
+            if (res.done) { if (!done) scheduleReconnect(); return; }
+            buf += dec.decode(res.value, { stream: true });
+            var frames = buf.split('\n\n'); buf = frames.pop();
+            frames.forEach(handleFrame);
+            if (done) { try { reader.cancel(); } catch (e) {} return; }
+            return pump();
+          });
+        }
+        return pump();
+      }).catch(function (e) {
+        if (done) return;
+        if (_isAbort(e)) {
+          // Stop waits for an acknowledged DELETE; navigation merely detaches the
+          // viewer. Neither path should let this stale stream alter a newer job.
+          return;
+        }
+        if (e && e._httpStatus === 404) { endAsError({ detail: 'This note job is no longer available. Please generate again.' }); return; }
+        scheduleReconnect();
+      });
+    }
+    function scheduleReconnect() {
+      if (done || (signal && signal.aborted) || !ownsStudyTarget()) return;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connect, 900);
+    }
+    connect();
+  }
+
+  // Restore an in-flight text job after a full page reload. The POST is
+  // idempotent because the client saved its opaque job id before the first call.
+  function resumeActiveStudyJob() {
+    var job = readStudyJob();
+    if (!job || state.tab !== 'notes' || job.videoId !== curVid()) return;
+    var targetEl = contentEl(); if (!targetEl) return;
+    var modeSel = document.getElementById('ai-notes-mode');
+    var styleSel = document.getElementById('ai-notes-style');
+    if (modeSel && ['notes', 'summary', 'insights'].indexOf(job.mode) !== -1) modeSel.value = job.mode;
+    if (styleSel) { styleSel.value = job.style === 'mcq' ? 'mcq' : 'topic'; styleSel.style.display = job.mode === 'notes' ? '' : 'none'; }
+    if (job.stopRequested) {
+      _genStart('ai-notes-go');
+      _genControlsStudyJob = true;
+      _genUserStopped = true;
+      targetEl.innerHTML = notesStageMessageHtml('stopped', 'Stopping note generation', 'Waiting for the AI proxy to confirm cancellation…');
+      saveStudyJob(job);
+      requestStudyJobStop(job.jobId, 0);
+      return;
+    }
+    targetEl.innerHTML = notesLoadingHtml(job.mode, job.style, job.lang, false);
+    var signal = _genStart('ai-notes-go');
+    var requestId = _studyPaintRequest;
+    function ownsOutput() { return requestId === _studyPaintRequest && targetEl.isConnected && targetEl === contentEl(); }
+    studyJobStart(job.mode, job.n || 25, job.style || '', job.lang || outLang(), job.focus || '', !!job.force,
+                  signal, 'ai-notes-go', targetEl, ownsOutput, job);
+  }
+
+  // Progressive streaming for text notes (legacy SSE from /api/study/stream).
   // chunks arrive; on ANY non-abort failure it falls back to studyOnce, so this is
   // never worse than the classic path (e.g. if the proxy/stream isn't available).
   function studyStream(mode, n, style, lang, focus, force, signal, btnId) {
@@ -2119,7 +2439,11 @@
       document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
       // (The old "Course" button is gone — the Course Content / Generate Notes
       // switcher in the panel header handles returning to the course view.)
-      checkLangs(modeSel.value, 25, true);
+      // A saved job takes precedence over auto-opening a completed language cache:
+      // it either reconnects to the live result or renders its completed payload.
+      var pendingStudyJob = readStudyJob();
+      checkLangs(modeSel.value, 25, !pendingStudyJob);
+      if (pendingStudyJob) setTimeout(resumeActiveStudyJob, 0);
     } else if (state.tab === 'cards') {
       b.innerHTML = '<div id="ai-cards-focus-wrap" style="margin-bottom:8px;display:none">' +
         '<input id="ai-cards-focus" placeholder="Optional: kis topic ke cards? (blank = important)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
