@@ -2969,57 +2969,186 @@ STUDY_PROVIDER_MODELS = {
 STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "omniroute", "kiro")
 STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "omniroute": "OmniRoute", "kiro": "Kiro"}
 
-# OmniRoute exposes a large multi-provider catalog, but only its `auto/*` routing
-# aliases are safe client-facing choices: OmniRoute itself picks the concrete
-# upstream and internally fails over between providers/models for them. We list
-# those live from /v1/models (plus the bare `auto` default) so the study picker
-# always reflects OmniRoute's current routes without hardcoding a stale list.
+# OmniRoute aggregates many AI providers behind one OpenAI-compatible endpoint;
+# every model ID is namespaced `provider/model`. We surface it in the student
+# picker as: (1) its `auto/*` smart-routing aliases (curated, self-failover), and
+# (2) a per-sub-provider list of concrete models — but ONLY the sub-providers that
+# currently respond, verified by a cached background health-ping, so students are
+# never offered a provider whose upstream is down.
 OMNIROUTE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
-_OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))  # seconds
-_omniroute_models_cache = {"ts": 0.0, "data": ["auto"]}
+_OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))       # /models list cache
+_OMNIROUTE_VERIFY_TTL = int(os.environ.get("OMNIROUTE_VERIFY_TTL", "1800"))      # working-provider cache
+_OMNIROUTE_VERIFY_TIMEOUT = int(os.environ.get("OMNIROUTE_VERIFY_TIMEOUT", "8"))  # per-ping seconds
+# Each aggregator alias appears under two prefixes; drop the twin (keep the more
+# descriptive name). Also drop non-chat (image/video) providers and modifiers.
+_OMNIROUTE_DROP_PREFIXES = {
+    "lma", "pol", "cx", "t3-web", "kc", "kmc", "gweb", "zw", "cf", "zmf",
+    "lc", "mcode", "af", "veoaifree-web", "no-think",
+}
+_OMNIROUTE_MEDIA_PREFIXES = {"veo-free", "veoaifree-web"}   # video/image → break notes
+_OMNIROUTE_PROVIDER_LABELS = {
+    "openrouter": "OpenRouter", "nvidia": "NVIDIA", "mistral": "Mistral",
+    "aug": "Augment", "codex": "Codex", "kilocode": "KiloCode",
+    "kimi-coding": "Kimi Coding", "gemini-web": "Gemini Web", "zai-web": "Z.AI Web",
+    "cloudflare-ai": "Cloudflare AI", "zenmux-free": "ZenMux", "longcat": "LongCat",
+    "mimocode": "MiMo Code", "api-airforce": "API Airforce", "lmarena": "LMArena",
+    "pollinations": "Pollinations", "t3chat": "T3 Chat", "ddgw": "DuckDuckGo",
+    "oc": "OpenCode", "agentrouter": "AgentRouter", "pepper": "Pepper", "tllm": "TypingMind",
+}
+
+_omniroute_models_cache = {"ts": 0.0, "ids": []}
 _omniroute_models_lock = threading.Lock()
+_omniroute_verify_cache = {"ts": 0.0, "providers": None, "flat": None}
+_omniroute_verify_lock = threading.Lock()
+_omniroute_verify_running = {"flag": False}
+
+
+def _omniroute_fetch_model_ids():
+    """All model IDs from OmniRoute /v1/models, cached (_OMNIROUTE_MODELS_TTL).
+    Serves the last-good list if the tunnel is offline (ngrok 404) and schedules
+    a quick retry, so callers never break."""
+    now = time.time()
+    if _omniroute_models_cache["ids"] and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+        return list(_omniroute_models_cache["ids"])
+    with _omniroute_models_lock:
+        now = time.time()
+        if _omniroute_models_cache["ids"] and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+            return list(_omniroute_models_cache["ids"])
+        try:
+            r = requests.get(OMNIROUTE_MODELS_URL,
+                             headers={"ngrok-skip-browser-warning": "true"}, timeout=8)
+            if r.status_code == 200:
+                data = (r.json() or {}).get("data") or []
+                ids = [str(m.get("id", "")) for m in data if isinstance(m, dict) and m.get("id")]
+                if ids:
+                    _omniroute_models_cache["ids"] = ids
+                    _omniroute_models_cache["ts"] = now
+                    return list(ids)
+            log.warning("OmniRoute /models refresh: HTTP %s", r.status_code)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("OmniRoute /models refresh failed: %s", exc)
+        _omniroute_models_cache["ts"] = now - max(0, _OMNIROUTE_MODELS_TTL - 60)
+        return list(_omniroute_models_cache["ids"])
 
 
 def _omniroute_auto_models():
-    """Live list of OmniRoute's `auto/*` routing aliases, with the bare `auto`
-    default first. Cached for _OMNIROUTE_MODELS_TTL seconds. If the tunnel is
-    offline (ngrok 404) or the fetch fails, the last good cache is served (and a
-    quick retry is scheduled), so the picker never breaks — it just may lag the
-    live catalog briefly. Only `auto/*` routes are exposed because they carry
-    OmniRoute's own failover; concrete per-provider models are intentionally not
-    surfaced here."""
+    """Bare `auto` + all `auto/*` routing aliases (curated, self-failover)."""
+    ids = _omniroute_fetch_model_ids()
+    models, seen = ["auto"], {"auto"}
+    for mid in ids:
+        if mid.startswith("auto/") and mid not in seen:
+            seen.add(mid)
+            models.append(mid)
+    return models
+
+
+def _omniroute_provider_label(pid):
+    return _OMNIROUTE_PROVIDER_LABELS.get(pid, pid.replace("-", " ").title())
+
+
+def _omniroute_grouped_candidates():
+    """Concrete sub-providers (prefix before the first '/') and their models,
+    excluding `auto/*`, duplicate aliases, media providers and un-prefixed IDs.
+    Ordered by model count desc. Returns [{id, label, models}] (unverified)."""
+    ids = _omniroute_fetch_model_ids()
+    groups = {}
+    for mid in ids:
+        if "/" not in mid or mid.startswith("auto/"):
+            continue
+        pid = mid.split("/")[0]
+        if pid in _OMNIROUTE_DROP_PREFIXES or pid in _OMNIROUTE_MEDIA_PREFIXES:
+            continue
+        groups.setdefault(pid, []).append(mid)
+    return [{"id": pid, "label": _omniroute_provider_label(pid), "models": groups[pid]}
+            for pid in sorted(groups, key=lambda k: (-len(groups[k]), k))]
+
+
+def _omniroute_ping(model, key):
+    """True if OmniRoute answers a tiny completion for `model` (provider up)."""
+    headers = {"Authorization": "Bearer " + (key or "omniroute-free"),
+               "Content-Type": "application/json", "ngrok-skip-browser-warning": "true"}
+    body = {"model": model, "messages": [{"role": "user", "content": "hi"}],
+            "max_tokens": 1, "stream": False}
+    try:
+        r = requests.post(OMNIROUTE_URL, headers=headers, json=body,
+                          timeout=_OMNIROUTE_VERIFY_TIMEOUT)
+        return r.status_code == 200
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _omniroute_auto_group():
+    return {"id": "auto", "label": "Auto (smart routing)", "models": _omniroute_auto_models()}
+
+
+def _omniroute_refresh_verified(key):
+    """Ping one representative model per candidate sub-provider (concurrently)
+    and cache only the providers that respond. `Auto` is always kept first."""
+    import concurrent.futures
+    auto = _omniroute_auto_group()
+    providers = [auto]
+    flat = list(auto["models"])
+    candidates = _omniroute_grouped_candidates()
+    if candidates:
+        working = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            futs = {ex.submit(_omniroute_ping, g["models"][0], key): g for g in candidates}
+            for fut in concurrent.futures.as_completed(futs):
+                try:
+                    if fut.result():
+                        working.append(futs[fut])
+                except Exception:  # noqa: BLE001
+                    pass
+        order = {g["id"]: i for i, g in enumerate(candidates)}   # restore stable order
+        for g in sorted(working, key=lambda g: order.get(g["id"], 999)):
+            providers.append(g)
+            flat.extend(g["models"])
+    _omniroute_verify_cache["providers"] = providers
+    _omniroute_verify_cache["flat"] = flat
+    _omniroute_verify_cache["ts"] = time.time()
+
+
+def _omniroute_maybe_refresh_verified(key):
+    """Trigger a background verification refresh when the cache is stale, without
+    ever blocking the caller. The first-ever call seeds `Auto` instantly so the
+    picker is usable immediately while the health-pings run."""
     now = time.time()
-    if _omniroute_models_cache["data"] and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
-        return list(_omniroute_models_cache["data"])
-    with _omniroute_models_lock:
-        now = time.time()
-        if _omniroute_models_cache["data"] and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
-            return list(_omniroute_models_cache["data"])
+    if _omniroute_verify_cache["providers"] is not None and \
+            now - _omniroute_verify_cache["ts"] < _OMNIROUTE_VERIFY_TTL:
+        return
+    if _omniroute_verify_running["flag"]:
+        return
+    with _omniroute_verify_lock:
+        if _omniroute_verify_running["flag"]:
+            return
+        if _omniroute_verify_cache["providers"] is not None and \
+                time.time() - _omniroute_verify_cache["ts"] < _OMNIROUTE_VERIFY_TTL:
+            return
+        if _omniroute_verify_cache["providers"] is None:   # seed Auto now
+            auto = _omniroute_auto_group()
+            _omniroute_verify_cache["providers"] = [auto]
+            _omniroute_verify_cache["flat"] = list(auto["models"])
+        _omniroute_verify_running["flag"] = True
+
+    def _run():
         try:
-            r = requests.get(OMNIROUTE_MODELS_URL,
-                             headers={"ngrok-skip-browser-warning": "true"},
-                             timeout=8)
-            if r.status_code == 200:
-                data = (r.json() or {}).get("data") or []
-                models, seen = ["auto"], {"auto"}
-                for m in data:
-                    mid = str(m.get("id", "")) if isinstance(m, dict) else ""
-                    if mid.startswith("auto/") and mid not in seen:
-                        seen.add(mid)
-                        models.append(mid)
-                if len(models) > 1:                       # got real routes
-                    _omniroute_models_cache["data"] = models
-                    _omniroute_models_cache["ts"] = now
-                    return list(models)
-                log.warning("OmniRoute /models returned no auto/* routes")
-            else:
-                log.warning("OmniRoute /models refresh: HTTP %s", r.status_code)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("OmniRoute /models refresh failed: %s", exc)
-        # Serve the last good cache but retry again in ~60s instead of hammering
-        # a downed tunnel on every request.
-        _omniroute_models_cache["ts"] = now - max(0, _OMNIROUTE_MODELS_TTL - 60)
-        return list(_omniroute_models_cache["data"] or ["auto"])
+            _omniroute_refresh_verified(key)
+        finally:
+            _omniroute_verify_running["flag"] = False
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _omniroute_verified_providers(key=None):
+    """Cached list of verified-working OmniRoute sub-providers (`Auto` first)."""
+    _omniroute_maybe_refresh_verified(key)
+    return list(_omniroute_verify_cache["providers"] or [_omniroute_auto_group()])
+
+
+def _omniroute_verified_flat():
+    """Every currently-offered OmniRoute model ID (for validation/forwarding).
+    Falls back to the auto routes before the first verification completes."""
+    flat = _omniroute_verify_cache["flat"]
+    return list(flat) if flat else _omniroute_auto_models()
 
 
 def _effective_provider_models(cfg):
@@ -3030,10 +3159,11 @@ def _effective_provider_models(cfg):
     out = {}
     for pid, default in STUDY_PROVIDER_MODELS.items():
         # OmniRoute's router—not Admin overrides or stale browser selections—
-        # owns its route list. Expose its live `auto/*` routing aliases (plus the
-        # bare `auto` default); each one carries OmniRoute's internal failover.
+        # owns its route list. Its flat list = the `auto/*` aliases plus every
+        # concrete model from currently-verified sub-providers, so any pick made
+        # in the sub-provider box validates and is forwarded as-is.
         if pid == "omniroute":
-            out[pid] = _omniroute_auto_models()
+            out[pid] = _omniroute_verified_flat()
             continue
         ov = overrides.get(pid)
         if isinstance(ov, list):
@@ -3734,6 +3864,14 @@ def api_status():
                         _groups.append({"provider": _pid, "label": STUDY_PROVIDER_LABELS.get(_pid, _pid.capitalize()),
                                         "models": _eff.get(_pid, [])})
                 out["studyModelGroups"] = _groups
+                # OmniRoute gets a dedicated sub-provider picker on the student
+                # side: expose its verified-working sub-providers (Auto first),
+                # each with that provider's concrete models. Only built when an
+                # OmniRoute key is configured; the verification runs in the
+                # background so this call never blocks.
+                _okeys = _configured_provider_keys(cfg, "omniroute")
+                if _okeys:
+                    out["omnirouteProviders"] = _omniroute_verified_providers(_okeys[0])
         except Exception:  # noqa: BLE001
             pass
     uid = (request.args.get("uid") or "").strip()

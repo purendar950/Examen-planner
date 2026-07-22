@@ -2527,6 +2527,85 @@
     }
     return '';
   }
+
+  /* ── OmniRoute sub-provider box ──────────────────────────────────────────
+     OmniRoute aggregates many providers behind one endpoint. When it is the
+     chosen provider we reveal a SECOND selector (#ai-omni-provider) listing the
+     verified-working sub-providers from /api/status.omnirouteProviders; picking
+     one fills #ai-model with just that sub-provider's models. The model sent to
+     the backend is still the full `sub/model` id, so no routing change needed. */
+  var OMNI_GROUPS_KEY = 'aiStudyOmniProviders';
+  var OMNI_SUB_KEY = 'aiStudyOmniSub';
+  var _omniProviders = [];       // [{id,label,models}] from /api/status (verified)
+  function cachedOmniProviders() {
+    try { return JSON.parse(localStorage.getItem(OMNI_GROUPS_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function cacheOmniProviders(list) {
+    if (!list || !list.length) return;
+    try { localStorage.setItem(OMNI_GROUPS_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+  function outOmniSub() { try { return localStorage.getItem(OMNI_SUB_KEY) || ''; } catch (e) { return ''; } }
+  function setOmniSub(v) { try { localStorage.setItem(OMNI_SUB_KEY, v == null ? '' : v); } catch (e) {} }
+  function omniSubGroupFor(id) {
+    for (var i = 0; i < _omniProviders.length; i++) if (_omniProviders[i].id === id) return _omniProviders[i];
+    return null;
+  }
+  function omniSubOfModel(m) {
+    if (!m) return '';
+    for (var i = 0; i < _omniProviders.length; i++) {
+      if ((_omniProviders[i].models || []).indexOf(m) !== -1) return _omniProviders[i].id;
+    }
+    return '';
+  }
+  function showOmniProviderBox(show) {
+    var el = document.getElementById('ai-omni-provider');
+    if (el) el.style.display = (show && _omniProviders.length) ? '' : 'none';
+  }
+  function fillOmniProviderBox(selectSub) {
+    var el = document.getElementById('ai-omni-provider');
+    if (!el) return;
+    el.innerHTML = _omniProviders.map(function (g) {
+      return '<option value="' + esc(g.id) + '"' + (g.id === selectSub ? ' selected' : '') +
+        '>' + esc(g.label || g.id) + '</option>';
+    }).join('');
+  }
+  // Fill #ai-model from a single OmniRoute sub-provider's models.
+  function fillOmniModels(subId, selectModel) {
+    var ms = document.getElementById('ai-model');
+    if (!ms) return;
+    var g = omniSubGroupFor(subId), models = g ? (g.models || []) : [];
+    if (!models.length) { ms.style.display = 'none'; ms.innerHTML = ''; return; }
+    ms.innerHTML = models.map(function (m) {
+      return '<option value="' + esc(m) + '"' + (m === selectModel ? ' selected' : '') + '>' + esc(m) + '</option>';
+    }).join('');
+    ms.style.display = '';
+  }
+  // Show OmniRoute's sub-provider + model dropdowns for a given saved model.
+  function applyOmniSelection(savedModel) {
+    var sub = savedModel ? omniSubOfModel(savedModel) : '';
+    if (!sub) sub = outOmniSub() || 'auto';
+    if (!omniSubGroupFor(sub)) sub = (_omniProviders[0] && _omniProviders[0].id) || 'auto';
+    setOmniSub(sub);
+    var models = (omniSubGroupFor(sub) || {}).models || [];
+    if (!savedModel || models.indexOf(savedModel) === -1) {
+      savedModel = models[0] || 'auto';
+    }
+    setModel(savedModel);
+    showOmniProviderBox(true);
+    fillOmniProviderBox(sub);
+    fillOmniModels(sub, savedModel);
+  }
+  // OmniRoute sub-provider changed → default to its first model.
+  function onOmniProviderChange() {
+    var el = document.getElementById('ai-omni-provider');
+    if (!el) return;
+    var sub = el.value;
+    setOmniSub(sub);
+    var models = (omniSubGroupFor(sub) || {}).models || [];
+    var def = models[0] || 'auto';
+    setModel(def);
+    fillOmniModels(sub, def);
+  }
   // Populate (and show) the model dropdown for a provider; hidden for Auto.
   function fillStudyModels(pid, selectModel) {
     var ms = document.getElementById('ai-model');
@@ -2557,6 +2636,14 @@
     var activeProvider = (status && status.studyProvider) || cached.provider || '';
     cacheStudyModels(_studyGroups, activeProvider, _studyDefaultModel);
 
+    // OmniRoute's verified sub-providers (Auto first) for the dedicated box.
+    var omniRaw = (status && Array.isArray(status.omnirouteProviders) && status.omnirouteProviders.length)
+      ? status.omnirouteProviders : cachedOmniProviders();
+    _omniProviders = (omniRaw || []).filter(function (g) {
+      return g && g.id && Array.isArray(g.models) && g.models.length;
+    });
+    cacheOmniProviders(_omniProviders);
+
     var savedModel = outModel();
     var savedProvider = outProvider();
     if (!savedProvider && studyGroupFor(activeProvider)) {
@@ -2586,7 +2673,12 @@
           '>' + esc(g.label || g.provider) + '</option>';
       }).join('');
     if (ps.innerHTML !== provOpts) ps.innerHTML = provOpts;
-    fillStudyModels(savedProvider, savedModel);
+    if (savedProvider === 'omniroute' && _omniProviders.length) {
+      applyOmniSelection(savedModel);
+    } else {
+      showOmniProviderBox(false);
+      fillStudyModels(savedProvider, savedModel);
+    }
   }
   // Provider changed → default to that provider's admin model (else its first)
   // and reveal its model dropdown. Auto hides the model dropdown.
@@ -2595,6 +2687,13 @@
     if (!ps) return;
     var pid = ps.value;
     setProvider(pid);
+    if (pid === 'omniroute' && _omniProviders.length) {
+      // Reveal the sub-provider box; default its selection to Auto (or the
+      // remembered sub) and show that sub-provider's models.
+      applyOmniSelection('');
+      return;
+    }
+    showOmniProviderBox(false);
     if (!pid) { setModel(''); fillStudyModels('', ''); return; }
     var g = studyGroupFor(pid), models = (g && g.models) || [];
     var def = (models.indexOf(_studyDefaultModel) !== -1) ? _studyDefaultModel : (models[0] || '');
@@ -2604,6 +2703,7 @@
   function panelHtml() {
     return '<div class="ai-head"><button type="button" class="ai-mobile-back" id="ai-notes-back" aria-label="Back to course content" title="Back to course content">←</button><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">Generate Notes</span>' +
       '<select id="ai-provider" title="AI provider" style="margin-left:auto"><option value="">Auto</option></select>' +
+      '<select id="ai-omni-provider" title="OmniRoute provider" style="display:none"></select>' +
       '<select id="ai-model" title="AI model" style="display:none"></select>' +
       '<select id="ai-lang" title="Output language">' +
       ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
@@ -3027,6 +3127,8 @@
     };
     var provSel = document.getElementById('ai-provider');
     if (provSel) provSel.onchange = onStudyProviderChange;
+    var omniSel = document.getElementById('ai-omni-provider');
+    if (omniSel) omniSel.onchange = onOmniProviderChange;
     var modelSel = document.getElementById('ai-model');
     if (modelSel) modelSel.onchange = function () { setModel(modelSel.value); };
     var dot = document.getElementById('ai-status-dot');
