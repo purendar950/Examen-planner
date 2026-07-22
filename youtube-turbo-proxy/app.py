@@ -1009,13 +1009,17 @@ def _load_ai_config(prefer_model=None, prefer_provider=None):
         if alt:
             return alt
 
-    # Backward compatibility for older clients that only send a model.
+    # Backward compatibility for older clients that only send a model. Unknown
+    # or recently removed models are deliberately ignored instead of being sent
+    # to the legacy fallback below, where they could bypass a refreshed catalog.
     if prefer_model:
         pid = _model_provider(prefer_model, cfg)
         if pid:
             alt = _ai_for_provider(cfg, pid, prefer_model)
             if alt:
                 return alt
+        log.warning("Ignoring unavailable client-requested study model: %s", prefer_model)
+        prefer_model = None
 
     # With no user override, use the admin's active provider through the same
     # provider-specific path (important for Kiro's bounded-context flag).
@@ -2785,6 +2789,219 @@ def _configured_provider_keys(cfg, pid):
     return [key for key in keys if key]
 
 
+# Providers eligible for automatic model refresh. Keep this deliberately small:
+# an adapter is allowed only when the provider offers a documented catalog with
+# reliable pricing metadata. All other provider model lists stay admin-managed.
+FREE_MODEL_REFRESH_PROVIDERS = {
+    "openrouter": {
+        "label": "OpenRouter",
+        "catalog_url": "https://openrouter.ai/api/v1/models",
+        "keyField": "openrouterApiKeys",
+        "modelField": "openrouterModel",
+    },
+}
+_free_model_sync_lock = threading.Lock()
+
+
+def _free_refresh_provider_ids(cfg):
+    raw = (cfg or {}).get("dailyFreeModelProviders") or []
+    if not isinstance(raw, list):
+        return []
+    return list(dict.fromkeys(str(pid).strip().lower() for pid in raw if str(pid).strip()))
+
+
+def _clean_model_ids(models):
+    if not isinstance(models, list):
+        return []
+    return list(dict.fromkeys(str(model).strip() for model in models if str(model).strip()))
+
+
+def _zero_price(value):
+    # Do not coerce missing, blank, or boolean pricing metadata to zero.
+    if value is None or isinstance(value, bool) or (isinstance(value, str) and not value.strip()):
+        return False
+    try:
+        return float(value) == 0.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _fetch_openrouter_free_models(cfg):
+    """Fetch only catalog entries with zero input/output (and request, if
+    supplied) pricing. A malformed or empty catalog raises so callers preserve
+    the previous admin-approved model list."""
+    keys = _configured_provider_keys(cfg, "openrouter")
+    if not keys:
+        raise RuntimeError("OpenRouter needs an API key before its free-model catalog can be refreshed.")
+    try:
+        response = requests.get(
+            FREE_MODEL_REFRESH_PROVIDERS["openrouter"]["catalog_url"],
+            params={"max_price": "0", "max_output_price": "0"},
+            headers={"Authorization": "Bearer " + keys[0], "Accept": "application/json"},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError("OpenRouter catalog request failed: " + str(exc)[:160]) from exc
+    if response.status_code != 200:
+        detail = (response.text or "").replace("\n", " ").strip()[:180]
+        raise RuntimeError("OpenRouter catalog returned HTTP %s%s" % (
+            response.status_code, (": " + detail) if detail else ""))
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise RuntimeError("OpenRouter catalog did not return valid JSON.") from exc
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        raise RuntimeError("OpenRouter catalog response is missing its model list.")
+
+    models = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("id") or "").strip()
+        pricing = item.get("pricing") or {}
+        if not model_id or not isinstance(pricing, dict):
+            continue
+        if not (_zero_price(pricing.get("prompt")) and _zero_price(pricing.get("completion"))):
+            continue
+        if "request" in pricing and not _zero_price(pricing.get("request")):
+            continue
+        models.append(model_id)
+    models = sorted(set(models))
+    if not models:
+        raise RuntimeError("OpenRouter catalog returned no verified free models; existing models were preserved.")
+    return models
+
+
+def _fetch_free_model_catalog(provider_id, cfg):
+    if provider_id == "openrouter":
+        return _fetch_openrouter_free_models(cfg)
+    raise RuntimeError("Automatic free-model discovery is not supported for this provider.")
+
+
+def _sync_free_model_catalogs():
+    """Refresh configured providers and write only successful catalogs.
+
+    Network discovery happens before the Firestore transaction. The transaction
+    then re-reads config/ai, retains manual/unselected providers, and applies a
+    complete replacement only for providers that are still selected. Failed or
+    empty catalog attempts update their error status but cannot wipe models.
+    """
+    if not _fb_db:
+        raise RuntimeError("Firestore is not configured on this service.")
+    config_ref = _fb_db.collection("config").document("ai")
+    initial = config_ref.get()
+    initial_cfg = initial.to_dict() if initial.exists else {}
+    selected = _free_refresh_provider_ids(initial_cfg)
+    if not selected:
+        return {"selected": [], "results": {}, "changed": False}
+
+    catalogs, results = {}, {}
+    for pid in selected:
+        if pid not in FREE_MODEL_REFRESH_PROVIDERS:
+            results[pid] = {"ok": False, "error": "Automatic free-model discovery is not supported for this provider."}
+            continue
+        try:
+            models = _fetch_free_model_catalog(pid, initial_cfg)
+            catalogs[pid] = models
+            results[pid] = {"ok": True, "modelCount": len(models)}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Free-model catalog refresh failed for %s: %s", pid, exc)
+            results[pid] = {"ok": False, "error": str(exc)[:240]}
+
+    from firebase_admin import firestore
+    changed = False
+
+    @firestore.transactional
+    def apply(transaction):
+        nonlocal changed
+        snap = config_ref.get(transaction=transaction)
+        cfg = snap.to_dict() if snap.exists else {}
+        still_selected = set(_free_refresh_provider_ids(cfg))
+        provider_models = dict(cfg.get("providerModels") or {})
+        statuses = dict(cfg.get("dailyFreeModelSyncStatus") or {})
+        updates = {}
+
+        for pid in selected:
+            if pid not in still_selected:
+                continue
+            result = results.get(pid) or {"ok": False, "error": "Catalog refresh failed."}
+            old_status = dict(statuses.get(pid) or {})
+            if not result.get("ok"):
+                old_status.update({
+                    "state": "error",
+                    "lastAttemptAt": firestore.SERVER_TIMESTAMP,
+                    "lastError": result.get("error") or "Catalog refresh failed.",
+                })
+                statuses[pid] = old_status
+                continue
+
+            previous = _clean_model_ids(provider_models.get(pid))
+            next_models = catalogs[pid]
+            previous_set, next_set = set(previous), set(next_models)
+            added = [model for model in next_models if model not in previous_set]
+            removed = [model for model in previous if model not in next_set]
+            provider_models[pid] = next_models
+
+            provider = FREE_MODEL_REFRESH_PROVIDERS[pid]
+            replacement = ""
+            provider_model = str(cfg.get(provider["modelField"]) or "").strip()
+            if provider_model and provider_model not in next_set:
+                replacement = next_models[0]
+                updates[provider["modelField"]] = replacement
+            study_model = str(cfg.get("studyModel") or "").strip()
+            if str(cfg.get("studyProvider") or "").strip().lower() == pid and study_model and study_model not in next_set:
+                replacement = next_models[0]
+                updates["studyModel"] = replacement
+
+            statuses[pid] = {
+                "state": "success",
+                "lastAttemptAt": firestore.SERVER_TIMESTAMP,
+                "lastSuccessAt": firestore.SERVER_TIMESTAMP,
+                "lastError": "",
+                "added": len(added),
+                "removed": len(removed),
+                "modelCount": len(next_models),
+                "activeModelReplaced": replacement,
+            }
+            results[pid].update({
+                "added": len(added),
+                "removed": len(removed),
+                "activeModelReplaced": replacement,
+            })
+            changed = True
+
+        transaction.set(config_ref, {
+            "providerModels": provider_models,
+            "dailyFreeModelSyncStatus": statuses,
+            **updates,
+        }, merge=True)
+
+    apply(_fb_db.transaction())
+    return {"selected": selected, "results": results, "changed": changed}
+
+
+def _admin_uid_from_bearer_token():
+    """Validate a Firebase ID token and require a matching admins/{uid} doc."""
+    if not _fb_db:
+        return None
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return None
+    token = header[7:].strip()
+    if not token:
+        return None
+    try:
+        from firebase_admin import auth
+        uid = str((auth.verify_id_token(token) or {}).get("uid") or "").strip()
+        if not uid:
+            return None
+        return uid if _fb_db.collection("admins").document(uid).get().exists else None
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Rejected free-model sync authorization: %s", exc)
+        return None
+
+
 # Kiro runs a kiro-cli subprocess rather than a hosted large-context model.
 # Condense/chunk transcripts before forwarding them so long lectures do not
 # recreate the previous 413/502 timeout failures.
@@ -2800,10 +3017,17 @@ def _ai_for_provider(cfg, pid, model=None):
     keys = _configured_provider_keys(cfg, pid)
     if not keys:
         return None
+    selected_model = (model or cfg.get(meta["modelField"]) or meta["def"]).strip()
+    allowed_models = _effective_provider_models(cfg).get(pid, [])
+    if selected_model not in allowed_models:
+        # Never forward a stale/deselected model ID. This is also defensive for
+        # clients with an old dropdown cached while a catalog refresh completes.
+        log.warning("Replacing unavailable %s model %s with the current catalog default", pid, selected_model)
+        selected_model = allowed_models[0] if allowed_models else meta["def"]
     return {
         "base_url": meta["url"],
         "keys": keys,
-        "model": (model or cfg.get(meta["modelField"]) or meta["def"]).strip(),
+        "model": selected_model,
         "big_context": pid not in _NOT_BIG_CONTEXT,
         "tpm": 0,
         "provider": pid,
@@ -2874,6 +3098,34 @@ def api_study_test():
             results[pid] = {"configured": True, "ok": False, "status": 0,
                             "model": model, "keys": len(keys), "detail": str(exc)[:180]}
     return jsonify({"results": results, "checked_at": int(time.time())})
+
+
+@app.post("/api/admin/free-models/sync")
+def api_admin_free_models_sync():
+    """Run an on-demand catalog refresh for the admin command center.
+
+    The browser supplies the signed-in Firebase user's ID token; this service
+    validates it and also requires admins/{uid} to exist before it can read
+    provider keys or replace model lists. The daily GitHub Action uses the same
+    catalog rules independently with the service account.
+    """
+    if not _fb_db:
+        return jsonify({"error": "firestore_unavailable", "detail": "This service has no Firebase Admin configuration."}), 503
+    if not _admin_uid_from_bearer_token():
+        return jsonify({"error": "forbidden", "detail": "An authenticated admin account is required."}), 403
+    if not _free_model_sync_lock.acquire(blocking=False):
+        return jsonify({"error": "sync_in_progress", "detail": "A free-model refresh is already running."}), 409
+    try:
+        result = _sync_free_model_catalogs()
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Manual free-model sync failed")
+        return jsonify({"error": "sync_failed", "detail": str(exc)[:240]}), 502
+    finally:
+        _free_model_sync_lock.release()
+
+    failures = [entry for entry in result.get("results", {}).values() if not entry.get("ok")]
+    status = 502 if result.get("selected") and len(failures) == len(result["selected"]) else 200
+    return jsonify({"ok": status == 200, **result}), status
 
 
 _STUDY_DEMO_HTML = """<!doctype html>

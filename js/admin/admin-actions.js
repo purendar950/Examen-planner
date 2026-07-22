@@ -783,6 +783,79 @@ function studyModelsFor(pid) {
   return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
 }
 
+/* Daily free-model refresh is intentionally an admin-maintained provider list,
+   not a switch on every provider card. Only providers with a documented,
+   machine-readable free pricing catalog are selectable; every other provider
+   remains in the normal manual model manager above. */
+const STUDY_FREE_MODEL_REFRESH_PROVIDERS = ['openrouter'];
+function dailyFreeModelProviders() {
+  var saved = (AI_CONFIG && AI_CONFIG.dailyFreeModelProviders) || [];
+  if (!Array.isArray(saved)) return [];
+  return saved.map(function (pid) { return String(pid || '').trim().toLowerCase(); })
+    .filter(function (pid, index, all) { return STUDY_FREE_MODEL_REFRESH_PROVIDERS.indexOf(pid) !== -1 && all.indexOf(pid) === index; });
+}
+function freeModelSyncStatusFor(pid) {
+  var statuses = AI_CONFIG && AI_CONFIG.dailyFreeModelSyncStatus;
+  return (statuses && statuses[pid]) || {};
+}
+async function saveDailyFreeModelProviders(ids) {
+  var providers = ids.filter(function (pid, index, all) {
+    return STUDY_FREE_MODEL_REFRESH_PROVIDERS.indexOf(pid) !== -1 && all.indexOf(pid) === index;
+  });
+  await db.collection('config').doc('ai').set({
+    dailyFreeModelProviders: providers,
+    savedAt: firebase.firestore.FieldValue.serverTimestamp()
+  }, { merge: true });
+  AI_CONFIG.dailyFreeModelProviders = providers;
+}
+async function addDailyFreeModelProvider() {
+  var input = document.getElementById('daily-free-model-provider');
+  var pid = input ? input.value : '';
+  if (STUDY_FREE_MODEL_REFRESH_PROVIDERS.indexOf(pid) === -1) {
+    showToast('No additional provider with a verified free-model catalog is available yet.');
+    return;
+  }
+  var providers = dailyFreeModelProviders();
+  if (providers.indexOf(pid) !== -1) { showToast('This provider is already refreshed daily.'); return; }
+  try {
+    await saveDailyFreeModelProviders(providers.concat(pid));
+    showToast('✅ ' + ((STUDY_PROVIDERS[pid] || {}).label || pid) + ' will refresh free models daily.');
+    render();
+  } catch (e) { showToast('Could not save the refresh list: ' + e.message, 'error'); }
+}
+async function removeDailyFreeModelProvider(pid) {
+  var provider = (STUDY_PROVIDERS[pid] || {}).label || pid;
+  try {
+    await saveDailyFreeModelProviders(dailyFreeModelProviders().filter(function (entry) { return entry !== pid; }));
+    showToast('Daily refresh disabled for ' + provider + '. Existing models were kept.');
+    render();
+  } catch (e) { showToast('Could not update the refresh list: ' + e.message, 'error'); }
+}
+async function syncDailyFreeModels(button) {
+  if (!auth.currentUser) { showToast('Sign in again before running a refresh.', 'error'); return; }
+  if (button) { button.disabled = true; button.innerHTML = '<span class="ai-button-spinner"></span> Refreshing'; }
+  try {
+    var token = await auth.currentUser.getIdToken();
+    var response = await fetch(STUDY_BACKEND + '/api/admin/free-models/sync', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    var payload = await response.json().catch(function () { return {}; });
+    await loadAiStudyData();
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.detail || payload.error || ('Refresh failed (HTTP ' + response.status + ')'));
+    }
+    var failures = Object.keys(payload.results || {}).filter(function (pid) { return !payload.results[pid].ok; });
+    showToast(failures.length
+      ? 'Refresh completed with issues: ' + failures.join(', ') + '.'
+      : '✅ Free-model catalog refreshed.');
+  } catch (e) {
+    showToast('Free-model refresh failed: ' + (e.message || String(e)), 'error');
+  } finally {
+    if (button && document.body.contains(button)) { button.disabled = false; button.textContent = 'Refresh now'; }
+  }
+}
+
 /* ── In-panel model manager (remove / add models per provider) ──────────────
    Edits a working copy for the ACTIVE provider; "Save models" persists it to
    config/ai.providerModels (merge), which the proxy reads to build the study
