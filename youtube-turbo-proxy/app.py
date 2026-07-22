@@ -2789,16 +2789,20 @@ def _configured_provider_keys(cfg, pid):
     return [key for key in keys if key]
 
 
-# Providers eligible for automatic model refresh. Keep this deliberately small:
-# an adapter is allowed only when the provider offers a documented catalog with
-# reliable pricing metadata. All other provider model lists stay admin-managed.
-FREE_MODEL_REFRESH_PROVIDERS = {
-    "openrouter": {
-        "label": "OpenRouter",
-        "catalog_url": "https://openrouter.ai/api/v1/models",
-        "keyField": "openrouterApiKeys",
-        "modelField": "openrouterModel",
-    },
+# All Study AI providers can refresh their full text/chat catalog. Free-only
+# refreshes fail closed: the live response must explicitly prove zero input,
+# output, and (when present) request pricing before it can replace a model list.
+MODEL_CATALOG_REFRESH_PROVIDERS = {
+    "bynara": {"label": "Bynara", "catalog_url": "https://router.bynara.id/v1/models", "keyField": "bynaraApiKeys", "modelField": "bynaraModel", "catalog_format": "openai", "chat_id_markers": ("mistral", "tencent", "qwen", "deepseek", "glm", "kimi", "minimax", "gemma", "llama")},
+    "mistral": {"label": "Mistral", "catalog_url": "https://api.mistral.ai/v1/models", "keyField": "mistralApiKeys", "modelField": "mistralModel", "catalog_format": "openai", "chat_id_markers": ("mistral", "codestral", "ministral", "devstral", "pixtral")},
+    "cerebras": {"label": "Cerebras", "catalog_url": "https://api.cerebras.ai/v1/models", "keyField": "cerebrasApiKeys", "modelField": "cerebrasModel", "catalog_format": "openai", "chat_id_markers": ("gpt-oss", "zai", "gemma", "llama", "qwen")},
+    "openrouter": {"label": "OpenRouter", "catalog_url": "https://openrouter.ai/api/v1/models", "keyField": "openrouterApiKeys", "modelField": "openrouterModel", "catalog_format": "openai", "server_filters": True, "chat_id_markers": ("gpt", "claude", "gemini", "mistral", "qwen", "llama", "deepseek", "gemma", "nemotron", "glm", "minimax", "kimi", "cohere", "command", "grok", "tencent", "z-ai")},
+    "nvidia": {"label": "NVIDIA", "catalog_url": "https://integrate.api.nvidia.com/v1/models", "keyField": "nvidiaApiKeys", "modelField": "nvidiaModel", "catalog_format": "openai", "chat_id_markers": ("deepseek", "qwen", "nemotron", "glm", "minimax", "llama", "mistral", "gemma", "kimi")},
+    "google": {"label": "Google Gemini", "catalog_url": "https://generativelanguage.googleapis.com/v1beta/models", "keyField": "googleApiKeys", "modelField": "googleModel", "catalog_format": "gemini"},
+    "hcnsec": {"label": "HCNSec", "catalog_url": "https://api.hcnsec.cn/v1/models", "keyField": "hcnsecApiKeys", "modelField": "hcnsecModel", "catalog_format": "openai", "chat_id_markers": ("deepseek", "qwen", "nemotron", "glm", "minimax", "llama", "mistral", "gemma", "kimi")},
+    "bluesminds": {"label": "BluesMinds", "catalog_url": "https://api.bluesminds.com/v1/models", "keyField": "bluesmindsApiKeys", "modelField": "bluesmindsModel", "catalog_format": "openai", "chat_id_markers": ("gpt", "claude", "gemini", "deepseek", "qwen", "mistral", "gemma", "llama", "minimax", "kimi", "glm")},
+    "aicampus": {"label": "AICampus", "catalog_url": "https://ai-hub.aicampus.my/v1/models", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "catalog_format": "openai", "chat_id_markers": ("minimax", "kimi", "deepseek", "qwen", "glm", "llama", "mistral", "gemma")},
+    "kiro": {"label": "Kiro", "catalog_url": "https://kiro-key-test-s6io.onrender.com/v1/models", "keyField": "kiroApiKeys", "modelField": "kiroModel", "catalog_format": "openai", "chat_id_markers": ("auto", "claude", "gpt", "deepseek", "minimax", "glm", "qwen", "mistral", "gemma", "llama", "kimi")},
 }
 _free_model_sync_lock = threading.Lock()
 MODEL_CATALOG_REFRESH_MODES = {
@@ -2856,61 +2860,151 @@ def _zero_price(value):
         return False
 
 
-def _fetch_openrouter_models(cfg, mode="free"):
-    """Fetch OpenRouter text/chat models for the requested catalog mode.
+def _catalog_model_id(item, gemini=False):
+    """Return a documented model identifier, never coercing malformed values."""
+    if not isinstance(item, dict):
+        return ""
+    key = "name" if gemini else "id"
+    value = item.get(key)
+    if not isinstance(value, str):
+        return ""
+    model_id = value.strip()
+    if gemini:
+        model_id = model_id.removeprefix("models/")
+    return model_id
 
-    Free mode accepts only explicitly zero-priced entries. All mode deliberately
-    keeps every available text model regardless of price, so paid models are
-    available to administrators who have an OpenRouter-funded account.
+
+def _is_text_chat_model_id(provider, model_id):
+    """Accept only sources with a positive text/chat capability signal.
+
+    OpenRouter's server-side modality filter and Gemini's generateContent
+    capability establish the primary signal. Every provider additionally uses
+    a positive language-model family allow-list, so an unexpected response
+    record cannot replace the stored catalog.
     """
-    keys = _configured_provider_keys(cfg, "openrouter")
-    mode_info = _model_catalog_refresh_mode(mode)
-    if not keys:
-        raise RuntimeError("OpenRouter needs an API key before its %s catalog can be refreshed." % mode_info["label"])
-    params = {"output_modalities": "text"}
-    if mode == "free":
-        params.update({"max_price": "0", "max_output_price": "0"})
+    lowered = model_id.lower()
+    if not model_id:
+        return False
+    non_chat_markers = ("embedding", "embed", "transcrib", "speech", "whisper", "tts", "audio", "moderation", "rerank", "dall", "image", "imagen", "stable-diffusion", "midjourney", "flux")
+    if any(marker in lowered for marker in non_chat_markers):
+        return False
+    if provider["catalog_format"] == "gemini":
+        return True
+    return any(marker in lowered for marker in provider.get("chat_id_markers", ()))
+
+
+def _has_verified_zero_pricing(item):
+    if not isinstance(item, dict):
+        return False
+    pricing = item.get("pricing")
+    if not isinstance(pricing, dict):
+        return False
+    input_price = pricing.get("prompt") if "prompt" in pricing else pricing.get("input")
+    output_price = pricing.get("completion") if "completion" in pricing else pricing.get("output")
+    if not (_zero_price(input_price) and _zero_price(output_price)):
+        return False
+    return "request" not in pricing or _zero_price(pricing.get("request"))
+
+
+def _catalog_headers(provider, key):
+    headers = {"Accept": "application/json"}
+    if provider["catalog_format"] == "gemini":
+        headers["x-goog-api-key"] = key
+    else:
+        headers["Authorization"] = "Bearer " + key
+    return headers
+
+
+def _fetch_catalog_json(provider, url, key, params=None):
     try:
-        response = requests.get(
-            FREE_MODEL_REFRESH_PROVIDERS["openrouter"]["catalog_url"],
-            params=params,
-            headers={"Authorization": "Bearer " + keys[0], "Accept": "application/json"},
-            timeout=20,
-        )
+        response = requests.get(url, params=params, headers=_catalog_headers(provider, key), timeout=20)
     except requests.RequestException as exc:
-        raise RuntimeError("OpenRouter catalog request failed: " + str(exc)[:160]) from exc
+        raise RuntimeError("%s catalog request failed: %s" % (provider["label"], str(exc)[:160])) from exc
     if response.status_code != 200:
         detail = (response.text or "").replace("\n", " ").strip()[:180]
-        raise RuntimeError("OpenRouter catalog returned HTTP %s%s" % (
-            response.status_code, (": " + detail) if detail else ""))
+        raise RuntimeError("%s catalog returned HTTP %s%s" % (
+            provider["label"], response.status_code, (": " + detail) if detail else ""))
     try:
-        payload = response.json()
+        return response.json()
     except ValueError as exc:
-        raise RuntimeError("OpenRouter catalog did not return valid JSON.") from exc
+        raise RuntimeError("%s catalog did not return valid JSON." % provider["label"]) from exc
+
+
+def _openai_catalog_models(provider, payload, mode):
     data = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(data, list):
-        raise RuntimeError("OpenRouter catalog response is missing its model list.")
-
+        raise RuntimeError("%s catalog response is missing its model list." % provider["label"])
     models = []
     for item in data:
-        if not isinstance(item, dict):
+        model_id = _catalog_model_id(item)
+        if not _is_text_chat_model_id(provider, model_id):
             continue
-        model_id = str(item.get("id") or "").strip()
-        if not model_id:
+        if mode == "free" and not _has_verified_zero_pricing(item):
             continue
+        models.append(model_id)
+    return sorted(set(models))
+
+
+def _fetch_openai_catalog(provider_id, cfg, mode="free"):
+    provider = MODEL_CATALOG_REFRESH_PROVIDERS[provider_id]
+    keys = _configured_provider_keys(cfg, provider_id)
+    mode_info = _model_catalog_refresh_mode(mode)
+    if not keys:
+        raise RuntimeError("%s needs an API key before its %s catalog can be refreshed." % (provider["label"], mode_info["label"]))
+    params = {}
+    if provider.get("server_filters"):
+        params["output_modalities"] = "text"
         if mode == "free":
-            pricing = item.get("pricing") or {}
-            if not isinstance(pricing, dict):
-                continue
-            if not (_zero_price(pricing.get("prompt")) and _zero_price(pricing.get("completion"))):
-                continue
-            if "request" in pricing and not _zero_price(pricing.get("request")):
-                continue
+            params.update({"max_price": "0", "max_output_price": "0"})
+    payload = _fetch_catalog_json(provider, provider["catalog_url"], keys[0], params=params)
+    models = _openai_catalog_models(provider, payload, mode)
+    if not models:
+        raise RuntimeError("%s catalog returned no %s text models; existing models were preserved." % (provider["label"], mode_info["label"]))
+    return models
+
+
+def _fetch_google_catalog(cfg, mode="free"):
+    provider_id = "google"
+    provider = MODEL_CATALOG_REFRESH_PROVIDERS[provider_id]
+    keys = _configured_provider_keys(cfg, provider_id)
+    mode_info = _model_catalog_refresh_mode(mode)
+    if not keys:
+        raise RuntimeError("%s needs an API key before its %s catalog can be refreshed." % (provider["label"], mode_info["label"]))
+
+    records, page_token, page_count = [], "", 0
+    while True:
+        if page_count >= 20:
+            raise RuntimeError("%s catalog exceeded 20 pages; existing models were preserved." % provider["label"])
+        page_count += 1
+        params = {"pageSize": "1000"}
+        if page_token:
+            params["pageToken"] = page_token
+        payload = _fetch_catalog_json(provider, provider["catalog_url"], keys[0], params=params)
+        data = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            raise RuntimeError("%s catalog response is missing its model list." % provider["label"])
+        records.extend(data)
+        page_token = payload.get("nextPageToken") if isinstance(payload, dict) and isinstance(payload.get("nextPageToken"), str) else ""
+        if not page_token:
+            break
+
+    models = []
+    for item in records:
+        model_id = _catalog_model_id(item, gemini=True)
+        methods = item.get("supportedGenerationMethods") if isinstance(item, dict) else None
+        if not _is_text_chat_model_id(provider, model_id) or not isinstance(methods, list) or "generateContent" not in methods:
+            continue
+        if mode == "free" and not _has_verified_zero_pricing(item):
+            continue
         models.append(model_id)
     models = sorted(set(models))
     if not models:
-        raise RuntimeError("OpenRouter catalog returned no %s text models; existing models were preserved." % mode_info["label"])
+        raise RuntimeError("%s catalog returned no %s text models; existing models were preserved." % (provider["label"], mode_info["label"]))
     return models
+
+
+def _fetch_openrouter_models(cfg, mode="free"):
+    return _fetch_openai_catalog("openrouter", cfg, mode)
 
 
 def _fetch_openrouter_free_models(cfg):
@@ -2918,9 +3012,12 @@ def _fetch_openrouter_free_models(cfg):
 
 
 def _fetch_model_catalog(provider_id, cfg, mode="free"):
-    if provider_id == "openrouter":
-        return _fetch_openrouter_models(cfg, mode)
-    raise RuntimeError("Automatic model discovery is not supported for this provider.")
+    provider = MODEL_CATALOG_REFRESH_PROVIDERS.get(provider_id)
+    if not provider:
+        raise RuntimeError("Automatic model discovery is not supported for this provider.")
+    if provider["catalog_format"] == "gemini":
+        return _fetch_google_catalog(cfg, mode)
+    return _fetch_openai_catalog(provider_id, cfg, mode)
 
 
 def _sync_model_catalogs():
@@ -2942,7 +3039,7 @@ def _sync_model_catalogs():
 
     catalogs, results = {}, {}
     for pid, mode in selected:
-        if pid not in FREE_MODEL_REFRESH_PROVIDERS:
+        if pid not in MODEL_CATALOG_REFRESH_PROVIDERS:
             results[pid] = {"ok": False, "mode": mode, "error": "Automatic model discovery is not supported for this provider."}
             continue
         try:
@@ -2991,7 +3088,7 @@ def _sync_model_catalogs():
             removed = [model for model in previous if model not in next_set]
             provider_models[pid] = next_models
 
-            provider = FREE_MODEL_REFRESH_PROVIDERS[pid]
+            provider = MODEL_CATALOG_REFRESH_PROVIDERS[pid]
             replacement = ""
             provider_model = str(cfg.get(provider["modelField"]) or "").strip()
             if provider_model and provider_model not in next_set:

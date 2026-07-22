@@ -783,10 +783,10 @@ function studyModelsFor(pid) {
   return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
 }
 
-/* Daily catalog refresh uses two separate, mutually-exclusive lists: verified
-   free models, or every currently listed text/chat model (free and paid). Only
-   providers with a documented machine-readable catalog are selectable. */
-const STUDY_CATALOG_REFRESH_PROVIDERS = ['openrouter'];
+/* Daily catalog refresh supports every Study AI provider. Free-only refreshes
+   remain conservative in the scheduler: a provider must return verifiable
+   zero-price metadata before its catalog can replace the existing model list. */
+const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.slice();
 const STUDY_FREE_MODEL_REFRESH_PROVIDERS = STUDY_CATALOG_REFRESH_PROVIDERS;
 const STUDY_MODEL_CATALOG_CONFIG = {
   free: { providerField: 'dailyFreeModelProviders', statusField: 'dailyFreeModelSyncStatus', label: 'free-model' },
@@ -832,7 +832,7 @@ async function addDailyModelCatalogProvider(mode) {
   var input = document.getElementById('daily-' + mode + '-model-provider');
   var pid = input ? input.value : '';
   if (STUDY_CATALOG_REFRESH_PROVIDERS.indexOf(pid) === -1) {
-    showToast('No additional provider with a documented model catalog is available yet.');
+    showToast('This provider is not available for catalog refresh.');
     return;
   }
   var free = dailyFreeModelProviders();
