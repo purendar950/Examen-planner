@@ -1413,7 +1413,11 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
             if got_any:
                 return                                   # partial already sent — stop
             last = "stream broke (key %d): %s" % (ki + 1, exc)
-            continue                                     # nothing sent yet → next key
+            # OmniRoute can close an otherwise-successful SSE response before
+            # yielding its first token. Fall through to its non-stream fallback
+            # below; other providers retain their normal next-key failover.
+            if (ai.get("provider") or "").lower() != "omniroute":
+                continue
         finally:
             try:
                 r.close()
@@ -1422,10 +1426,10 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
         if got_any:
             return                                       # success
         # Some OmniRoute auto-routes return a valid JSON completion for the
-        # same request but an SSE response containing only [DONE]. Retry only
-        # that empty-stream case without streaming, before declaring the key
-        # unusable. No bytes have reached the browser yet, so this cannot
-        # duplicate generated text.
+        # same request but an SSE response containing only [DONE], or close
+        # before yielding a token. Retry only those no-output cases without
+        # streaming, before declaring the key unusable. No bytes have reached
+        # the browser yet, so this cannot duplicate generated text.
         if (ai.get("provider") or "").lower() == "omniroute":
             if cancel_event is not None and cancel_event.is_set():
                 return
