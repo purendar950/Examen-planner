@@ -783,60 +783,100 @@ function studyModelsFor(pid) {
   return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
 }
 
-/* Daily free-model refresh is intentionally an admin-maintained provider list,
-   not a switch on every provider card. Only providers with a documented,
-   machine-readable free pricing catalog are selectable; every other provider
-   remains in the normal manual model manager above. */
-const STUDY_FREE_MODEL_REFRESH_PROVIDERS = ['openrouter'];
-function dailyFreeModelProviders() {
-  var saved = (AI_CONFIG && AI_CONFIG.dailyFreeModelProviders) || [];
+/* Daily catalog refresh uses two separate, mutually-exclusive lists: verified
+   free models, or every currently listed text/chat model (free and paid). Only
+   providers with a documented machine-readable catalog are selectable. */
+const STUDY_CATALOG_REFRESH_PROVIDERS = ['openrouter'];
+const STUDY_FREE_MODEL_REFRESH_PROVIDERS = STUDY_CATALOG_REFRESH_PROVIDERS;
+const STUDY_MODEL_CATALOG_CONFIG = {
+  free: { providerField: 'dailyFreeModelProviders', statusField: 'dailyFreeModelSyncStatus', label: 'free-model' },
+  all: { providerField: 'dailyAllModelProviders', statusField: 'dailyAllModelSyncStatus', label: 'full-model' }
+};
+function modelCatalogConfig(mode) {
+  return STUDY_MODEL_CATALOG_CONFIG[mode] || STUDY_MODEL_CATALOG_CONFIG.free;
+}
+function dailyModelCatalogProviders(mode) {
+  var saved = (AI_CONFIG && AI_CONFIG[modelCatalogConfig(mode).providerField]) || [];
   if (!Array.isArray(saved)) return [];
   return saved.map(function (pid) { return String(pid || '').trim().toLowerCase(); })
-    .filter(function (pid, index, all) { return STUDY_FREE_MODEL_REFRESH_PROVIDERS.indexOf(pid) !== -1 && all.indexOf(pid) === index; });
+    .filter(function (pid, index, all) { return STUDY_CATALOG_REFRESH_PROVIDERS.indexOf(pid) !== -1 && all.indexOf(pid) === index; });
 }
-function freeModelSyncStatusFor(pid) {
-  var statuses = AI_CONFIG && AI_CONFIG.dailyFreeModelSyncStatus;
+function dailyFreeModelProviders() { return dailyModelCatalogProviders('free'); }
+function dailyAllModelProviders() { return dailyModelCatalogProviders('all'); }
+function modelCatalogSyncStatusFor(mode, pid) {
+  var statuses = AI_CONFIG && AI_CONFIG[modelCatalogConfig(mode).statusField];
   return (statuses && statuses[pid]) || {};
 }
-async function saveDailyFreeModelProviders(ids) {
-  var providers = ids.filter(function (pid, index, all) {
-    return STUDY_FREE_MODEL_REFRESH_PROVIDERS.indexOf(pid) !== -1 && all.indexOf(pid) === index;
+function freeModelSyncStatusFor(pid) { return modelCatalogSyncStatusFor('free', pid); }
+function allModelSyncStatusFor(pid) { return modelCatalogSyncStatusFor('all', pid); }
+function normalizedRefreshProviderIds(ids) {
+  return ids.filter(function (pid, index, all) {
+    return STUDY_CATALOG_REFRESH_PROVIDERS.indexOf(pid) !== -1 && all.indexOf(pid) === index;
   });
+}
+async function saveDailyModelCatalogLists(freeIds, allIds) {
+  var free = normalizedRefreshProviderIds(freeIds);
+  var all = normalizedRefreshProviderIds(allIds).filter(function (pid) { return free.indexOf(pid) === -1; });
   await db.collection('config').doc('ai').set({
-    dailyFreeModelProviders: providers,
+    dailyFreeModelProviders: free,
+    dailyAllModelProviders: all,
     savedAt: firebase.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
-  AI_CONFIG.dailyFreeModelProviders = providers;
+  AI_CONFIG.dailyFreeModelProviders = free;
+  AI_CONFIG.dailyAllModelProviders = all;
 }
-async function addDailyFreeModelProvider() {
-  var input = document.getElementById('daily-free-model-provider');
+async function saveDailyFreeModelProviders(ids) {
+  return saveDailyModelCatalogLists(ids, dailyAllModelProviders());
+}
+async function addDailyModelCatalogProvider(mode) {
+  var input = document.getElementById('daily-' + mode + '-model-provider');
   var pid = input ? input.value : '';
-  if (STUDY_FREE_MODEL_REFRESH_PROVIDERS.indexOf(pid) === -1) {
-    showToast('No additional provider with a verified free-model catalog is available yet.');
+  if (STUDY_CATALOG_REFRESH_PROVIDERS.indexOf(pid) === -1) {
+    showToast('No additional provider with a documented model catalog is available yet.');
     return;
   }
-  var providers = dailyFreeModelProviders();
-  if (providers.indexOf(pid) !== -1) { showToast('This provider is already refreshed daily.'); return; }
+  var free = dailyFreeModelProviders();
+  var all = dailyAllModelProviders();
+  var target = mode === 'all' ? all : free;
+  var other = mode === 'all' ? free : all;
+  if (target.indexOf(pid) !== -1) { showToast('This provider is already in the ' + modelCatalogConfig(mode).label + ' refresh list.'); return; }
+  var moved = other.indexOf(pid) !== -1;
+  if (mode === 'all') {
+    free = free.filter(function (entry) { return entry !== pid; });
+    all = all.concat(pid);
+  } else {
+    all = all.filter(function (entry) { return entry !== pid; });
+    free = free.concat(pid);
+  }
   try {
-    await saveDailyFreeModelProviders(providers.concat(pid));
-    showToast('✅ ' + ((STUDY_PROVIDERS[pid] || {}).label || pid) + ' will refresh free models daily.');
+    await saveDailyModelCatalogLists(free, all);
+    var label = (STUDY_PROVIDERS[pid] || {}).label || pid;
+    showToast('✅ ' + label + (moved ? ' moved to the ' : ' added to the ') + modelCatalogConfig(mode).label + ' refresh list.');
     render();
   } catch (e) { showToast('Could not save the refresh list: ' + e.message, 'error'); }
 }
-async function removeDailyFreeModelProvider(pid) {
+async function addDailyFreeModelProvider() { return addDailyModelCatalogProvider('free'); }
+async function addDailyAllModelProvider() { return addDailyModelCatalogProvider('all'); }
+async function removeDailyModelCatalogProvider(mode, pid) {
   var provider = (STUDY_PROVIDERS[pid] || {}).label || pid;
+  var free = dailyFreeModelProviders();
+  var all = dailyAllModelProviders();
+  if (mode === 'all') all = all.filter(function (entry) { return entry !== pid; });
+  else free = free.filter(function (entry) { return entry !== pid; });
   try {
-    await saveDailyFreeModelProviders(dailyFreeModelProviders().filter(function (entry) { return entry !== pid; }));
-    showToast('Daily refresh disabled for ' + provider + '. Existing models were kept.');
+    await saveDailyModelCatalogLists(free, all);
+    showToast(modelCatalogConfig(mode).label + ' refresh disabled for ' + provider + '. Existing models were kept.');
     render();
   } catch (e) { showToast('Could not update the refresh list: ' + e.message, 'error'); }
 }
-async function syncDailyFreeModels(button) {
+async function removeDailyFreeModelProvider(pid) { return removeDailyModelCatalogProvider('free', pid); }
+async function removeDailyAllModelProvider(pid) { return removeDailyModelCatalogProvider('all', pid); }
+async function syncDailyModelCatalogs(button) {
   if (!auth.currentUser) { showToast('Sign in again before running a refresh.', 'error'); return; }
   if (button) { button.disabled = true; button.innerHTML = '<span class="ai-button-spinner"></span> Refreshing'; }
   try {
     var token = await auth.currentUser.getIdToken();
-    var response = await fetch(STUDY_BACKEND + '/api/admin/free-models/sync', {
+    var response = await fetch(STUDY_BACKEND + '/api/admin/model-catalogs/sync', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token }
     });
@@ -847,14 +887,15 @@ async function syncDailyFreeModels(button) {
     }
     var failures = Object.keys(payload.results || {}).filter(function (pid) { return !payload.results[pid].ok; });
     showToast(failures.length
-      ? 'Refresh completed with issues: ' + failures.join(', ') + '.'
-      : '✅ Free-model catalog refreshed.');
+      ? 'Catalog refresh completed with issues: ' + failures.join(', ') + '.'
+      : '✅ Model catalogs refreshed.');
   } catch (e) {
-    showToast('Free-model refresh failed: ' + (e.message || String(e)), 'error');
+    showToast('Model catalog refresh failed: ' + (e.message || String(e)), 'error');
   } finally {
     if (button && document.body.contains(button)) { button.disabled = false; button.textContent = 'Refresh now'; }
   }
 }
+async function syncDailyFreeModels(button) { return syncDailyModelCatalogs(button); }
 
 /* ── In-panel model manager (remove / add models per provider) ──────────────
    Edits a working copy for the ACTIVE provider; "Save models" persists it to
