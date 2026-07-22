@@ -2909,6 +2909,58 @@ STUDY_PROVIDER_MODELS = {
 STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "omniroute", "kiro")
 STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "omniroute": "OmniRoute", "kiro": "Kiro"}
 
+# OmniRoute exposes a large multi-provider catalog, but only its `auto/*` routing
+# aliases are safe client-facing choices: OmniRoute itself picks the concrete
+# upstream and internally fails over between providers/models for them. We list
+# those live from /v1/models (plus the bare `auto` default) so the study picker
+# always reflects OmniRoute's current routes without hardcoding a stale list.
+OMNIROUTE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
+_OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))  # seconds
+_omniroute_models_cache = {"ts": 0.0, "data": ["auto"]}
+_omniroute_models_lock = threading.Lock()
+
+
+def _omniroute_auto_models():
+    """Live list of OmniRoute's `auto/*` routing aliases, with the bare `auto`
+    default first. Cached for _OMNIROUTE_MODELS_TTL seconds. If the tunnel is
+    offline (ngrok 404) or the fetch fails, the last good cache is served (and a
+    quick retry is scheduled), so the picker never breaks — it just may lag the
+    live catalog briefly. Only `auto/*` routes are exposed because they carry
+    OmniRoute's own failover; concrete per-provider models are intentionally not
+    surfaced here."""
+    now = time.time()
+    if _omniroute_models_cache["data"] and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+        return list(_omniroute_models_cache["data"])
+    with _omniroute_models_lock:
+        now = time.time()
+        if _omniroute_models_cache["data"] and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+            return list(_omniroute_models_cache["data"])
+        try:
+            r = requests.get(OMNIROUTE_MODELS_URL,
+                             headers={"ngrok-skip-browser-warning": "true"},
+                             timeout=8)
+            if r.status_code == 200:
+                data = (r.json() or {}).get("data") or []
+                models, seen = ["auto"], {"auto"}
+                for m in data:
+                    mid = str(m.get("id", "")) if isinstance(m, dict) else ""
+                    if mid.startswith("auto/") and mid not in seen:
+                        seen.add(mid)
+                        models.append(mid)
+                if len(models) > 1:                       # got real routes
+                    _omniroute_models_cache["data"] = models
+                    _omniroute_models_cache["ts"] = now
+                    return list(models)
+                log.warning("OmniRoute /models returned no auto/* routes")
+            else:
+                log.warning("OmniRoute /models refresh: HTTP %s", r.status_code)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("OmniRoute /models refresh failed: %s", exc)
+        # Serve the last good cache but retry again in ~60s instead of hammering
+        # a downed tunnel on every request.
+        _omniroute_models_cache["ts"] = now - max(0, _OMNIROUTE_MODELS_TTL - 60)
+        return list(_omniroute_models_cache["data"] or ["auto"])
+
 
 def _effective_provider_models(cfg):
     """Per-provider model list. Admin overrides in config/ai.providerModels
@@ -2918,10 +2970,10 @@ def _effective_provider_models(cfg):
     out = {}
     for pid, default in STUDY_PROVIDER_MODELS.items():
         # OmniRoute's router—not Admin overrides or stale browser selections—
-        # chooses its concrete upstream. Its single supported client route is
-        # deliberately always `auto`.
+        # owns its route list. Expose its live `auto/*` routing aliases (plus the
+        # bare `auto` default); each one carries OmniRoute's internal failover.
         if pid == "omniroute":
-            out[pid] = ["auto"]
+            out[pid] = _omniroute_auto_models()
             continue
         ov = overrides.get(pid)
         if isinstance(ov, list):
