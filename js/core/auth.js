@@ -706,3 +706,30 @@ if (auth && !_isBadProtocol) {
   }
 }
 
+
+
+/* ── Password visibility toggles ──
+   The password field stays masked until the user chooses to reveal it; only a
+   click on the toggle flips it. Bound once the auth DOM is present. */
+function initPasswordToggles() {
+  const toggles = document.querySelectorAll('[data-pw-toggle]');
+  Array.prototype.forEach.call(toggles, function(btn) {
+    if (btn._pwBound) return;
+    btn._pwBound = true;
+    const input = document.getElementById(btn.getAttribute('data-pw-toggle'));
+    if (!input) return;
+    btn.addEventListener('click', function() {
+      const reveal = input.type === 'password';
+      input.type = reveal ? 'text' : 'password';
+      btn.textContent = reveal ? 'Hide' : 'Show';
+      btn.setAttribute('aria-pressed', reveal ? 'true' : 'false');
+      btn.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+      input.focus();
+    });
+  });
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initPasswordToggles);
+} else {
+  initPasswordToggles();
+}

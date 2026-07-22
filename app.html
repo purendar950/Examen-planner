@@ -63,7 +63,7 @@
       </div>
       <div class="form-group">
         <label class="form-label">Password</label>
-        <input class="form-input" type="password" id="login-pass" placeholder="••••••••">
+        <div class="pw-wrap"><input class="form-input" type="password" id="login-pass" placeholder="••••••••"><button type="button" class="pw-toggle" data-pw-toggle="login-pass" aria-pressed="false" aria-label="Show password">Show</button></div>
       </div>
       <div class="auth-error" id="login-error">Invalid email or password.</div>
       <div style="text-align:right;margin-bottom:0.5rem;">
@@ -84,7 +84,7 @@
       </div>
       <div class="form-group">
         <label class="form-label">Password</label>
-        <input class="form-input" type="password" id="reg-pass" placeholder="Min. 6 characters">
+        <div class="pw-wrap"><input class="form-input" type="password" id="reg-pass" placeholder="Min. 6 characters"><button type="button" class="pw-toggle" data-pw-toggle="reg-pass" aria-pressed="false" aria-label="Show password">Show</button></div>
       </div>
       <div class="auth-error" id="reg-error"></div>
       <button class="btn-primary" id="btn-register" onclick="handleRegister()" style="margin-top:0.5rem;">Create Account →</button>

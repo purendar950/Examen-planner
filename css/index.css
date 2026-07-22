@@ -454,6 +454,12 @@ html[data-theme="light"] .feature-card { background: linear-gradient(145deg, #ff
 .auth-field input, .auth-field select { width: 100%; border: 1px solid var(--border); border-radius: 10px; outline: 0; background: var(--bg-elevated); color: var(--text); padding: 0.75rem 0.86rem; font-size: 0.82rem; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
 .auth-field input::placeholder { color: var(--muted); opacity: 0.75; }
 .auth-field input:focus, .auth-field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* Password show/hide toggle */
+.pw-wrap { position: relative; }
+.auth-field .pw-wrap input { padding-right: 3.6rem; }
+.pw-toggle { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); border: 0; background: none; padding: 4px 6px; color: var(--accent); cursor: pointer; font-size: 0.66rem; font-weight: 750; text-transform: uppercase; letter-spacing: 0.04em; line-height: 1; border-radius: 6px; }
+.pw-toggle:hover { color: var(--text); }
+.pw-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .auth-forgot { display: block; margin: -3px 0 11px auto; border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 0.68rem; }
 .auth-consent { margin: -2px 0 12px; color: var(--muted); font-size: 0.61rem; line-height: 1.5; }
 .auth-btn { display: flex; width: 100%; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 10px; background: linear-gradient(135deg, var(--accent), #25d7c0); color: #04120e; cursor: pointer; padding: 0.78rem; font-size: 0.82rem; font-weight: 820; }
