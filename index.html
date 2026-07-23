@@ -1,392 +1,276 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<!-- Capture a shared MCQ-test link (?t=<token>, or legacy ?mcqshare=) before login so it survives the auth round-trip -->
-<script>(function(){try{var q=new URLSearchParams(location.search);var t=q.get('t');if(t){localStorage.setItem('ez_pending_share',t);}else{var v=q.get('mcqshare');if(v)localStorage.setItem('ez_pending_mcqshare',JSON.stringify({vid:v,lang:q.get('lang')||''}));}}catch(e){}})();</script>
-<title>StudyPlanner — Your Smarter Path to Exam Success</title>
-<meta name="description" content="StudyPlanner is an all-in-one study workspace built by SSC aspirant Purendar Chauhan. Plan each day, track your syllabus, organise lectures and learn from every mock test.">
-<meta name="theme-color" content="#07110f">
-<meta name="application-name" content="StudyPlanner">
+<title>StudyPlanner — Plan Smarter, Score Higher | SSC, UPSC, Banking Exam Prep</title>
+<meta name="description" content="AI-powered study planner for SSC CGL, UPSC, Banking, Railway exams. Smart scheduling, YouTube Turbo 4x, AI Tutor, mock tests & Telegram reminders. Start free!">
+<meta name="keywords" content="study planner, SSC CGL prep, UPSC planner, exam preparation, mock tests, AI tutor, RRB NTPC, IBPS PO">
+<meta property="og:title" content="StudyPlanner — Plan Smarter, Score Higher">
+<meta property="og:description" content="AI-powered study planner for Indian competitive exams. Free to start.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://purendar950.github.io/Examen-planner/">
+<meta property="og:image" content="assets/brand/studyplanner-social.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0a0a0f">
 <link rel="canonical" href="https://purendar950.github.io/Examen-planner/">
 <link rel="icon" type="image/svg+xml" href="assets/brand/studyplanner-mark.svg">
+<link rel="icon" type="image/png" sizes="192x192" href="assets/brand/studyplanner-icon-192.png">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon.png">
-<link rel="manifest" href="assets/brand/site.webmanifest" vite-ignore>
-<meta property="og:title" content="StudyPlanner — Every day, one step closer">
-<meta property="og:description" content="A focused study system for SSC, Railway, Banking and Civil Services aspirants.">
-<meta property="og:image" content="https://purendar950.github.io/Examen-planner/assets/brand/studyplanner-social.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="StudyPlanner — a clear path for every serious aspirant">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://purendar950.github.io/Examen-planner/assets/brand/studyplanner-social.png">
+<link rel="manifest" href="assets/brand/site.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/index.css">
-<script src="vendor/firebase-app-compat.js" defer></script>
-<script src="vendor/firebase-auth-compat.js" defer></script>
-<script src="vendor/firebase-firestore-compat.js" defer></script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"StudyPlanner","applicationCategory":"EducationalApplication","operatingSystem":"Web, Android","description":"AI-powered study planner for Indian competitive exams","offers":{"@type":"AggregateOffer","lowPrice":"0","highPrice":"399","priceCurrency":"INR","offerCount":"5"},"aggregateRating":{"@type":"AggregateRating","ratingValue":"4.8","ratingCount":"500"}}</script>
 </head>
 <body>
-<a class="skip-link" href="#main-content">Skip to content</a>
-
-<header class="site-header" id="top">
-  <nav class="nav container-wide" aria-label="Main navigation">
-    <a class="brand" href="#top" aria-label="StudyPlanner home">
-      <img class="brand-art" src="assets/brand/studyplanner-mark.svg" alt="" width="40" height="40">
-      <span class="brand-name">Study<span>Planner</span></span>
-    </a>
-
-    <button class="menu-toggle" id="menu-toggle" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Open navigation">
-      <span></span><span></span><span></span>
-    </button>
-
-    <div class="nav-links" id="nav-links">
-      <a href="#features">Product</a>
-      <a href="#how-it-works">How it works</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#story">Our story</a>
-      <a href="#exams">Exams</a>
-      <div class="nav-mobile-actions">
-        <button class="btn btn-secondary" type="button" onclick="closeLandingMenu();openAuth('login')">Log in</button>
-        <button class="btn btn-primary" type="button" onclick="closeLandingMenu();selectLandingPlan('free')">Start for free <span aria-hidden="true">→</span></button>
-      </div>
-    </div>
-
-    <div class="nav-actions">
-      <button class="theme-toggle" id="ez-theme-btn" type="button" title="Switch theme" aria-label="Switch theme">☀️</button>
-      <button class="btn btn-secondary desktop-login" type="button" onclick="openAuth('login')">Log in</button>
-      <button class="btn btn-primary" type="button" onclick="selectLandingPlan('free')">Start for free <span aria-hidden="true">→</span></button>
-    </div>
-  </nav>
-</header>
-
-<main id="main-content">
-  <section class="hero section-shell">
-    <div class="hero-glow hero-glow-one" aria-hidden="true"></div>
-    <div class="hero-glow hero-glow-two" aria-hidden="true"></div>
-    <div class="hero-grid" aria-hidden="true"></div>
-    <div class="container-wide hero-layout">
-      <div class="hero-copy reveal">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> Built by Purendar Chauhan · SSC aspirant</div>
-        <h1>The study system I needed while <span>preparing for SSC.</span></h1>
-        <p class="hero-lead">I was losing time between scattered plans, lectures and mock-test mistakes. So I built StudyPlanner—one calm workspace that helps every aspirant know exactly what to study next.</p>
-        <div class="hero-actions">
-          <button class="btn btn-primary btn-large" type="button" onclick="selectLandingPlan('free')">Build my study plan <span aria-hidden="true">→</span></button>
-          <a class="btn btn-secondary btn-large" href="#features">Explore the product</a>
-        </div>
-        <div class="trust-row" aria-label="Product benefits">
-          <span><i aria-hidden="true">✓</i> Free to begin</span>
-          <span><i aria-hidden="true">✓</i> Cloud synced</span>
-          <span><i aria-hidden="true">✓</i> Built for mobile</span>
-        </div>
-      </div>
-
-      <div class="product-stage reveal" role="img" aria-label="Illustration of a StudyPlanner workspace with a daily study plan, weekly activity and syllabus progress">
-        <div class="stage-orbit orbit-one" aria-hidden="true"></div>
-        <div class="stage-orbit orbit-two" aria-hidden="true"></div>
-        <div class="dashboard-card" aria-hidden="true">
-          <div class="dashboard-topbar">
-            <div class="dash-brand">
-              <img class="dash-logo" src="assets/brand/studyplanner-mark.svg" alt="" width="28" height="28">
-              <div><strong>StudyPlanner</strong><small>My study workspace</small></div>
-            </div>
-            <div class="dash-avatar">PC</div>
-          </div>
-          <div class="dashboard-body">
-            <div class="dash-greeting">
-              <div><small>MONDAY, 20 JULY</small><h2>Good morning, Aspirant</h2></div>
-              <span class="streak-chip"><span aria-hidden="true">◆</span> 12 day streak</span>
-            </div>
-            <div class="dash-stats">
-              <div class="dash-stat"><span class="stat-icon mint">✓</span><div><small>Today</small><strong>3 of 5</strong></div><em>tasks</em></div>
-              <div class="dash-stat"><span class="stat-icon cyan">↗</span><div><small>Weekly focus</small><strong>18.5h</strong></div><em>+12%</em></div>
-              <div class="dash-stat"><span class="stat-icon violet">◎</span><div><small>Syllabus</small><strong>68%</strong></div><em>on track</em></div>
-            </div>
-            <div class="dash-main-grid">
-              <div class="today-card">
-                <div class="dash-section-title"><div><small>SMART PLAN</small><strong>Today’s focus</strong></div><span>5 tasks</span></div>
-                <div class="task complete"><span class="task-check">✓</span><div><strong>Quantitative Aptitude</strong><small>Percentage · Practice set</small></div><time>45 min</time></div>
-                <div class="task complete"><span class="task-check">✓</span><div><strong>English Comprehension</strong><small>Reading · Lecture 08</small></div><time>30 min</time></div>
-                <div class="task active"><span class="task-check"></span><div><strong>General Intelligence</strong><small>Analogy · Mock questions</small></div><time>35 min</time></div>
-                <div class="task"><span class="task-check"></span><div><strong>Current Affairs</strong><small>Weekly revision notes</small></div><time>25 min</time></div>
-              </div>
-              <div class="progress-card">
-                <div class="dash-section-title"><div><small>THIS WEEK</small><strong>Consistency</strong></div></div>
-                <div class="progress-ring" style="--progress:72"><div><strong>72%</strong><small>complete</small></div></div>
-                <div class="week-bars" aria-hidden="true">
-                  <span style="--h:62%"><i>M</i></span><span style="--h:78%"><i>T</i></span><span style="--h:54%"><i>W</i></span><span class="current" style="--h:90%"><i>T</i></span><span style="--h:48%"><i>F</i></span><span style="--h:30%"><i>S</i></span><span style="--h:18%"><i>S</i></span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="floating-card floating-focus" aria-hidden="true"><span>Syllabus covered</span><strong>68<span>%</span></strong><i>On track this week</i></div>
-        <div class="floating-card floating-mock" aria-hidden="true"><span class="floating-icon">↗</span><div><small>Mock score improved</small><strong>+14 marks</strong></div></div>
-      </div>
-    </div>
-
-    <div class="container-wide metric-strip reveal">
-      <div><strong>7</strong><span>exam tracks</span></div>
-      <div><strong>1</strong><span>focused workspace</span></div>
-      <div><strong>24/7</strong><span>access to your plan</span></div>
-      <p>Built around the real study routine of an Indian competitive-exam aspirant.</p>
-    </div>
-  </section>
-
-  <section class="feature-section section-shell" id="features">
-    <div class="container-wide">
-      <div class="section-heading reveal">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> Everything in one place</div>
-        <h2>A study operating system,<br><span>not another to-do list.</span></h2>
-        <p>Every tool works together to reduce planning time and keep your preparation moving.</p>
-      </div>
-
-      <div class="bento-grid">
-        <article class="feature-card feature-large reveal">
-          <div class="feature-icon mint-icon" aria-hidden="true">⌁</div>
-          <div class="feature-copy"><span>ADAPTIVE PLANNING</span><h3>A daily plan that moves with you</h3><p>Turn your syllabus into realistic daily tasks. Miss a session? Rebalance the work without losing sight of exam day.</p></div>
-          <div class="mini-planner" aria-hidden="true">
-            <div class="mini-date"><strong>Today’s plan</strong><span>68% done</span></div>
-            <div class="mini-line done"><i>✓</i><span></span><em></em></div>
-            <div class="mini-line done"><i>✓</i><span></span><em></em></div>
-            <div class="mini-line"><i></i><span></span><em></em></div>
-          </div>
-        </article>
-
-        <article class="feature-card reveal">
-          <div class="feature-icon cyan-icon" aria-hidden="true">◎</div>
-          <div class="feature-copy"><span>SYLLABUS CONTROL</span><h3>See the whole journey</h3><p>Track subjects, chapters and revision status with a clear view of what is done and what needs attention.</p></div>
-          <div class="syllabus-visual" aria-hidden="true">
-            <div><span>Quant</span><i><b style="width:82%"></b></i><em>82%</em></div>
-            <div><span>Reasoning</span><i><b style="width:64%"></b></i><em>64%</em></div>
-            <div><span>English</span><i><b style="width:71%"></b></i><em>71%</em></div>
-          </div>
-        </article>
-
-        <article class="feature-card reveal">
-          <div class="feature-icon violet-icon" aria-hidden="true">↗</div>
-          <div class="feature-copy"><span>MOCK INTELLIGENCE</span><h3>Learn from every test</h3><p>Capture scores, identify weak topics and turn mistakes into the next focused revision session.</p></div>
-          <div class="score-visual" aria-hidden="true"><span>Previous<strong>126</strong></span><i>→</i><span>Latest<strong>142</strong></span></div>
-        </article>
-
-        <article class="feature-card feature-wide reveal">
-          <div class="feature-icon amber-icon" aria-hidden="true">▶</div>
-          <div class="feature-copy"><span>LECTURES & NOTES</span><h3>Your learning resources, finally organised</h3><p>Keep YouTube courses, lecture progress, saved questions and study notes connected to your preparation—not scattered across apps.</p></div>
-          <div class="resource-stack" aria-hidden="true">
-            <div><span class="play-mark">▶</span><p><b>Percentage — Complete Concept</b><small>32:18 watched</small></p><em>76%</em></div>
-            <div><span class="note-mark">▤</span><p><b>Revision notes</b><small>12 key formulas saved</small></p><em>Open</em></div>
-          </div>
-        </article>
-      </div>
-    </div>
-  </section>
-
-  <section class="workflow-section section-shell" id="how-it-works">
-    <div class="container-wide workflow-layout">
-      <div class="workflow-copy reveal">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> Less setup. More studying.</div>
-        <h2>From overwhelmed to organised in three steps.</h2>
-        <p>StudyPlanner keeps the system simple enough to use every day—even when preparation gets difficult.</p>
-        <button class="btn btn-primary btn-large" type="button" onclick="selectLandingPlan('free')">Create your free workspace <span aria-hidden="true">→</span></button>
-      </div>
-      <ol class="steps-list">
-        <li class="reveal"><span>01</span><div><h3>Choose your target</h3><p>Select your exam and organise the subjects that matter for your preparation.</p></div></li>
-        <li class="reveal"><span>02</span><div><h3>Build your path</h3><p>Add your syllabus, lectures and available study time to create a practical routine.</p></div></li>
-        <li class="reveal"><span>03</span><div><h3>Study, review, improve</h3><p>Complete today’s work, analyse your mocks and let your progress guide tomorrow.</p></div></li>
-      </ol>
-    </div>
-  </section>
-
-  <section class="pricing-section section-shell" id="pricing">
-    <div class="container-wide">
-      <div class="section-heading reveal">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> Choose your access</div>
-        <h2>Start free. Go Pro when you need <span>more power.</span></h2>
-        <p>Use the complete StudyPlanner workspace for free. Upgrade when advanced planning, analysis and automation can move your preparation further.</p>
-      </div>
-
-      <div class="pricing-grid">
-        <article class="price-card reveal">
-          <div class="price-card-head">
-            <div><span class="plan-label">FREE</span><h3>Build your routine</h3></div>
-            <span class="plan-icon" aria-hidden="true">S</span>
-          </div>
-          <div class="plan-price"><strong>₹0</strong><span>forever</span></div>
-          <p class="plan-summary">Everything you need to organise daily preparation and begin tracking real progress.</p>
-          <ul class="plan-features">
-            <li><i>✓</i><span>Every app page and every exam available to browse</span></li>
-            <li><i>✓</i><span>Daily planner and syllabus editing for your target exam</span></li>
-            <li><i>✓</i><span>Limited mock-test saves for tracking attempts</span></li>
-            <li><i>✓</i><span>Limited video notes, saved courses and chapter links</span></li>
-            <li><i>✓</i><span>Limited saved video moments</span></li>
-            <li class="muted-feature"><i>—</i><span>Advanced analysis and automation</span></li>
-          </ul>
-          <button class="btn btn-secondary btn-large plan-button" type="button" onclick="selectLandingPlan('free')">Start with Free <span aria-hidden="true">→</span></button>
-          <small class="plan-note">No payment required</small>
-        </article>
-
-        <article class="price-card price-card-pro reveal">
-          <div class="popular-label">MOST CAPABLE</div>
-          <div class="price-card-head">
-            <div><span class="plan-label">PRO</span><h3>Accelerate your preparation</h3></div>
-            <span class="plan-icon pro-icon" aria-hidden="true">◆</span>
-          </div>
-          <div class="plan-price plan-price-dynamic"><strong>Flexible plans</strong><span>live price and duration shown in app</span></div>
-          <p class="plan-summary">Unlock deeper planning, unlimited core study records and tools that turn progress into next actions.</p>
-          <ul class="plan-features">
-            <li><i>✓</i><span>Manage syllabus progress across all exam tracks</span></li>
-            <li><i>✓</i><span>Unlimited mock saves with trends and weak-area analysis</span></li>
-            <li><i>✓</i><span>Weekly, monthly and three-month planner views</span></li>
-            <li><i>✓</i><span>AI study plan with automatic rescheduling</span></li>
-            <li><i>✓</i><span>Daily plan delivery through Telegram</span></li>
-            <li><i>✓</i><span>Study-plan and saved video-note PDF export</span></li>
-          </ul>
-          <button class="btn btn-primary btn-large plan-button" type="button" onclick="selectLandingPlan('pro')">Try Pro for 7 days <span aria-hidden="true">→</span></button>
-          <small class="plan-note">One trial per account · No payment needed for trial</small>
-        </article>
-      </div>
-
-      <div class="plan-comparison reveal">
-        <div class="comparison-heading"><div><span>FEATURE COMPARISON</span><h3>Know exactly what you get</h3></div><p>Usage limits are managed by StudyPlanner and the current values are shown inside your account.</p></div>
-        <p class="comparison-scroll-hint">Scroll sideways to compare all columns →</p>
-        <div class="comparison-scroll" tabindex="0" role="region" aria-label="Scrollable Free and Pro feature comparison">
-          <table>
-            <thead><tr><th>Capability</th><th>Free</th><th class="pro-column">Pro</th></tr></thead>
-            <tbody>
-              <tr><td>App pages</td><td><span class="table-check">✓</span> Full access</td><td class="pro-column"><span class="table-check">✓</span> Full access</td></tr>
-              <tr><td>Exam syllabus</td><td>Browse all; edit target exam</td><td class="pro-column">Manage all exams</td></tr>
-              <tr><td>Mock-test records</td><td>Limited saves</td><td class="pro-column">Unlimited + analysis</td></tr>
-              <tr><td>Video notes</td><td>Limited saves</td><td class="pro-column">Unlimited</td></tr>
-              <tr><td>Saved courses and links</td><td>Limited library</td><td class="pro-column">Expanded libraries</td></tr>
-              <tr><td>Planner views</td><td>Daily</td><td class="pro-column">Day, week, month and 3-month</td></tr>
-              <tr><td>Mock analysis, AI plan and study-plan/video-note PDF export</td><td><span class="table-dash">—</span></td><td class="pro-column"><span class="table-check">✓</span> Included</td></tr>
-              <tr><td>Automatic Telegram daily plan</td><td><span class="table-dash">—</span></td><td class="pro-column"><span class="table-check">✓</span> Included</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="pricing-footnote reveal">
-        <span aria-hidden="true">i</span>
-        <p><strong>How Pro purchase works:</strong> Sign in to see the current plans and duration, pay securely through UPI, then submit your transaction for verification. Your account shows the payment status until access is activated.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="story-section section-shell" id="story">
-    <div class="container-wide story-card reveal">
-      <div class="story-visual">
-        <div class="quote-mark" aria-hidden="true">“</div>
-        <div class="founder-monogram">PC</div>
-        <div class="founder-label"><span>FOUNDER & FELLOW ASPIRANT</span><strong>Purendar Chauhan</strong></div>
-      </div>
-      <div class="story-copy">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> Why I built StudyPlanner</div>
-        <h2>I was preparing for SSC and facing the same problems every aspirant knows.</h2>
-        <p>Plans were spread across notebooks, lectures were hard to track, and mock-test mistakes rarely became a clear next action. The hardest part was not finding more content—it was staying organised and consistent.</p>
-        <p>That struggle became the idea for StudyPlanner: one honest, practical workspace built around how aspirants actually study. I am building the tool I needed myself, so every student can spend less energy managing preparation and more energy making progress.</p>
-        <div class="founder-signoff"><strong>Purendar Chauhan</strong><span>Developer of StudyPlanner · SSC Aspirant</span></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="exams-section section-shell" id="exams">
-    <div class="container-wide exams-layout">
-      <div class="section-heading align-left reveal">
-        <div class="eyebrow"><span class="eyebrow-dot"></span> One system, different goals</div>
-        <h2>Designed for serious exam preparation.</h2>
-        <p>Start with your target today and keep the same organised workflow as your journey grows.</p>
-      </div>
-      <div class="exam-grid reveal" aria-label="Supported exam tracks">
-        <span><b>SSC</b> CGL</span><span><b>RRB</b> NTPC</span><span><b>SSC</b> GD</span><span><b>IBPS</b> PO</span><span><b>UPSC</b> CSE</span><span><b>UP</b> PCS</span><span><b>BPSC</b></span><span class="more-exams">More paths coming</span>
-      </div>
-    </div>
-  </section>
-
-  <section class="final-cta section-shell">
-    <div class="container-wide cta-card reveal">
-      <div class="cta-grid" aria-hidden="true"></div>
-      <div class="cta-content">
-        <div class="eyebrow light"><span class="eyebrow-dot"></span> Your next study day starts here</div>
-        <h2>One clear path.<br>One stronger attempt.</h2>
-        <p>Build a preparation system you can return to every day.</p>
-        <div class="cta-actions">
-          <button class="btn btn-light btn-large" type="button" onclick="selectLandingPlan('free')">Get started free <span aria-hidden="true">→</span></button>
-          <button class="btn btn-outline-light btn-large" type="button" onclick="openAuth('login')">I already have an account</button>
-        </div>
-      </div>
-      <div class="cta-motif" aria-hidden="true"><img src="assets/brand/studyplanner-mark.svg" alt=""><i></i><i></i><i></i></div>
-    </div>
-  </section>
-</main>
-
-<footer class="site-footer">
-  <div class="container-wide footer-main">
-    <div class="footer-brand">
-      <a class="brand" href="#top" aria-label="StudyPlanner home">
-        <span class="brand-art" aria-hidden="true">S</span>
-        <span class="brand-name">Study<span>Planner</span></span>
-      </a>
-      <p>Every day, one step closer.</p>
-      <span>Built with purpose in India by an aspirant.</span>
-    </div>
-    <div class="footer-links">
-      <div><strong>Product</strong><a href="#features">Features</a><a href="#how-it-works">How it works</a><a href="#pricing">Free vs Pro</a><a href="#exams">Supported exams</a></div>
-      <div><strong>Company</strong><a href="#story">Founder story</a><a href="#top">About StudyPlanner</a></div>
-      <div><strong>Account</strong><button type="button" onclick="openAuth('login')">Log in</button><button type="button" onclick="selectLandingPlan('free')">Create account</button></div>
-    </div>
-  </div>
-  <div class="container-wide footer-bottom"><span>© <span id="current-year">2026</span> StudyPlanner. All rights reserved.</span><span>Made for focused minds.</span></div>
-</footer>
-
-<!-- Authentication modal: IDs and handlers are shared with js/index.js -->
-<div class="auth-overlay" id="auth-overlay" role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-hidden="true" onclick="if(event.target===this)closeAuth()">
-  <div class="auth-modal">
-    <button class="auth-close" type="button" onclick="closeAuth()" title="Close" aria-label="Close authentication dialog">×</button>
-    <div class="auth-brand">
-      <img class="auth-brand-mark" src="assets/brand/studyplanner-mark.svg" alt="" width="42" height="42">
-      <div><div class="auth-logo" id="auth-title">Study<span>Planner</span></div><small>Every day, one step closer.</small></div>
-    </div>
-    <div class="auth-sub" id="auth-sub">Welcome back—sign in to continue.</div>
-
-    <div class="auth-tabs" role="tablist" aria-label="Authentication options">
-      <button class="auth-tab active" id="lt-login" type="button" role="tab" onclick="authTab('login')">Sign in</button>
-      <button class="auth-tab" id="lt-register" type="button" role="tab" onclick="authTab('register')">Register</button>
-    </div>
-
-    <div class="auth-pane active" id="pane-login">
-      <div class="auth-field"><label for="l-email">Email</label><input type="email" id="l-email" placeholder="you@example.com" autocomplete="email"></div>
-      <div class="auth-field"><label for="l-pass">Password</label><div class="pw-wrap"><input type="password" id="l-pass" placeholder="••••••••" autocomplete="current-password"><button type="button" class="pw-toggle" data-pw-toggle="l-pass" aria-pressed="false" aria-label="Show password">Show</button></div></div>
-      <button class="auth-forgot" type="button" onclick="doForgot()">Forgot password?</button>
-      <button class="auth-btn" id="l-btn" type="button" onclick="doLogin()">Sign in <span aria-hidden="true">→</span></button>
-      <div class="auth-err" id="l-err" role="alert"></div>
-      <div class="auth-msg" id="l-msg" role="status"></div>
-      <div class="auth-divider"><span>or continue with</span></div>
-      <button class="auth-google" type="button" onclick="doGoogle()">
-        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#4285F4" d="M47.5 24.6c0-1.6-.1-3.1-.4-4.6H24v8.7h13.2c-.6 3-2.3 5.5-5 7.2v6h8c4.7-4.3 7.3-10.7 7.3-17.3z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-8-6c-2.1 1.4-4.8 2.3-7.9 2.3-6.1 0-11.2-4.1-13-9.6H3v6.2C7 42.7 15 48 24 48z"/><path fill="#FBBC05" d="M11 28.9c-.5-1.4-.7-2.9-.7-4.4s.3-3 .7-4.4V14H3C1.1 17.6 0 21.7 0 26s1.1 8.4 3 12l8-6.1z"/><path fill="#EA4335" d="M24 9.5c3.4 0 6.5 1.2 8.9 3.5l6.6-6.6C35.8 2.5 30.4 0 24 0 15 0 7 5.3 3 13.1l8 6.2C12.8 13.6 17.9 9.5 24 9.5z"/></svg>
-        Continue with Google
-      </button>
-    </div>
-
-    <div class="auth-pane" id="pane-register">
-      <div class="auth-field"><label for="r-name">Full name</label><input type="text" id="r-name" placeholder="Your name" autocomplete="name"></div>
-      <div class="auth-field"><label for="r-email">Email</label><input type="email" id="r-email" placeholder="you@example.com" autocomplete="email"></div>
-      <div class="auth-field"><label for="r-mobile">Mobile</label><input type="tel" id="r-mobile" inputmode="numeric" maxlength="10" placeholder="10-digit mobile" autocomplete="tel"></div>
-      <div class="auth-field"><label for="r-exam">Target exam</label><select id="r-exam"><option value="">Select your exam...</option><option value="cgl">SSC CGL</option><option value="ntpc">RRB NTPC</option><option value="gd">SSC GD</option><option value="ibps">IBPS PO</option><option value="upsc">UPSC CSE</option><option value="uppcs">UPPCS</option><option value="bpsc">BPSC</option></select></div>
-      <div class="auth-field"><label for="r-pass">Password</label><div class="pw-wrap"><input type="password" id="r-pass" placeholder="Minimum 6 characters" autocomplete="new-password"><button type="button" class="pw-toggle" data-pw-toggle="r-pass" aria-pressed="false" aria-label="Show password">Show</button></div></div>
-      <p class="auth-consent">Your details are used to create and securely sync your StudyPlanner account.</p>
-      <button class="auth-btn" id="r-btn" type="button" onclick="doRegister()">Create account <span aria-hidden="true">→</span></button>
-      <div class="auth-err" id="r-err" role="alert"></div>
-      <div class="auth-msg" id="r-msg" role="status"></div>
-    </div>
-  </div>
+<a href="#main" class="skip-link">Skip to main content</a>
+<nav class="navbar" id="navbar" role="navigation" aria-label="Main navigation">
+<div class="nav-container">
+<a href="#" class="nav-logo" aria-label="StudyPlanner Home"><span class="logo-icon">📚</span><span class="logo-text">Study<span class="logo-highlight">Planner</span></span></a>
+<div class="nav-links" role="menubar"><a href="#features">Features</a><a href="#exams">Exams</a><a href="#how-it-works">How It Works</a><a href="#pricing">Pricing</a><a href="#testimonials">Reviews</a><a href="#faq">FAQ</a></div>
+<div class="nav-actions"><button class="btn btn-ghost" onclick="openAuthModal('login')">Sign In</button><button class="btn btn-primary" onclick="openAuthModal('signup')">Start Free →</button></div>
+<button class="nav-hamburger" id="hamburger" onclick="toggleMobileNav()" aria-label="Toggle menu" aria-expanded="false"><span></span><span></span><span></span></button>
 </div>
-
-<script src="js/core/firebase-config.js" defer></script>
-<script type="module" src="src/main.js"></script>
-<script src="js/index.js" defer></script>
+</nav>
+<div class="mobile-nav" id="mobileNav" role="menu" aria-hidden="true">
+<a href="#features" onclick="closeMobileNav()">Features</a><a href="#exams" onclick="closeMobileNav()">Exams</a><a href="#how-it-works" onclick="closeMobileNav()">How It Works</a><a href="#pricing" onclick="closeMobileNav()">Pricing</a><a href="#testimonials" onclick="closeMobileNav()">Reviews</a><a href="#faq" onclick="closeMobileNav()">FAQ</a>
+<div class="mobile-nav-actions"><button class="btn btn-ghost" onclick="openAuthModal('login');closeMobileNav()">Sign In</button><button class="btn btn-primary" onclick="openAuthModal('signup');closeMobileNav()">Start Free →</button></div>
+</div>
+<main id="main">
+<section class="hero" aria-labelledby="hero-title">
+<div class="hero-bg"><div class="hero-orb hero-orb-1"></div><div class="hero-orb hero-orb-2"></div><div class="hero-orb hero-orb-3"></div><div class="hero-grid"></div></div>
+<div class="hero-content">
+<div class="hero-badge"><span class="badge-dot"></span>Trusted by 500+ serious aspirants across India</div>
+<h1 id="hero-title" class="hero-title">Stop Wasting Time.<br><span class="gradient-text">Start Scoring Higher.</span></h1>
+<p class="hero-subtitle">AI-powered study planner for <strong>SSC, UPSC, Banking & Railway</strong> exams. Smart scheduling, YouTube Turbo 4×, AI Tutor, mock tests & Telegram reminders — all in one app.</p>
+<div class="hero-cta">
+<button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start Free — No Card Needed <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg></button>
+<a href="#how-it-works" class="btn btn-ghost btn-lg"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg> See How It Works</a>
+</div>
+<div class="hero-stats">
+<div class="hero-stat"><span class="stat-number">7</span><span class="stat-label">Exams Covered</span></div>
+<div class="hero-stat"><span class="stat-number">60+</span><span class="stat-label">Features</span></div>
+<div class="hero-stat"><span class="stat-number">500+</span><span class="stat-label">Active Users</span></div>
+<div class="hero-stat"><span class="stat-number">4×</span><span class="stat-label">Faster Learning</span></div>
+</div>
+</div>
+<div class="hero-visual">
+<div class="hero-mockup">
+<div class="mockup-header"><div class="mockup-dots"><span></span><span></span><span></span></div><span class="mockup-title">StudyPlanner — Dashboard</span></div>
+<div class="mockup-body">
+<div class="mockup-row">
+<div class="mockup-card"><span class="mockup-icon">🔥</span><div><strong>12 Day Streak</strong><br><small>Keep it going!</small></div></div>
+<div class="mockup-card"><span class="mockup-icon">📊</span><div><strong>SSC CGL: 68%</strong><br><small>Syllabus done</small></div></div>
+</div>
+<div class="mockup-chart"><div class="chart-bar" style="height:40%"></div><div class="chart-bar" style="height:65%"></div><div class="chart-bar" style="height:50%"></div><div class="chart-bar" style="height:80%"></div><div class="chart-bar" style="height:70%"></div><div class="chart-bar" style="height:95%"></div><div class="chart-bar" style="height:60%"></div></div>
+<div class="mockup-tasks">
+<div class="mockup-task done">✅ Polity Ch.4 — Fundamental Rights</div>
+<div class="mockup-task done">✅ Arithmetic — Time & Work (15 MCQs)</div>
+<div class="mockup-task">⬜ Watch: Geography (Turbo 4×)</div>
+<div class="mockup-task">⬜ AI Tutor: Mughal Era doubt</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<section class="exams-marquee" id="exams" aria-label="Supported exams">
+<div class="marquee-track">
+<span class="exam-tag">📋 SSC CGL</span><span class="exam-tag">🚂 RRB NTPC</span><span class="exam-tag">🛡️ SSC GD Constable</span><span class="exam-tag">🏦 IBPS PO</span><span class="exam-tag">🏛️ UPSC CSE</span><span class="exam-tag">📜 UPPCS</span><span class="exam-tag">📝 BPSC</span><span class="exam-tag">📋 SSC CGL</span><span class="exam-tag">🚂 RRB NTPC</span><span class="exam-tag">🛡️ SSC GD Constable</span><span class="exam-tag">🏦 IBPS PO</span><span class="exam-tag">🏛️ UPSC CSE</span><span class="exam-tag">📜 UPPCS</span><span class="exam-tag">📝 BPSC</span>
+</div>
+</section>
+<section class="features" id="features" aria-labelledby="features-title">
+<div class="container">
+<div class="section-header"><span class="section-badge">60+ Features</span><h2 id="features-title" class="section-title">Everything You Need to<br><span class="gradient-text">Crack Your Exam</span></h2><p class="section-subtitle">One app replaces your diary, YouTube bookmarks, test series, doubt group, revision tracker, and timer.</p></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">📅</span> Smart Study Planning (11)</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">🗓️</div><h3>Planner Calendar</h3><p>Monthly calendar with task dots. See your entire month at a glance. Color-coded by subject.</p></div>
+<div class="feature-card"><div class="feature-icon">📋</div><h3>Daily Schedule</h3><p>Time-blocked daily schedule. Know exactly what to study and when, morning to night.</p></div>
+<div class="feature-card"><div class="feature-icon">📄</div><h3>Day View</h3><p>Detailed single-day view with all tasks, timers, and progress for today.</p></div>
+<div class="feature-card"><div class="feature-icon">📌</div><h3>Kanban Task Board</h3><p>Drag-and-drop task board. Move tasks: To Do → In Progress → Done.</p></div>
+<div class="feature-card"><div class="feature-icon">🔄</div><h3>Auto Rollover</h3><p>Missed a task? Auto-moves to tomorrow. Never lose track of pending work.</p></div>
+<div class="feature-card"><div class="feature-icon">🧙</div><h3>Plan Wizard</h3><p>3-step setup: Pick exam → Set date → Get AI plan instantly.</p></div>
+<div class="feature-card"><div class="feature-icon">⚡</div><h3>AI Plan Generator</h3><p>Auto-generates plan from syllabus + exam date + available hours. Smart distribution.</p></div>
+<div class="feature-card"><div class="feature-icon">✅</div><h3>Habit Tracking</h3><p>Build daily habits with streaks. Track reading, revision, quiz, video habits separately.</p></div>
+<div class="feature-card"><div class="feature-icon">🎓</div><h3>Onboarding Wizard</h3><p>3-step first-time setup: Pick exam → Set date → Get instant AI plan. Ready in 30 seconds.</p></div>
+<div class="feature-card"><div class="feature-icon">📚</div><h3>Syllabus Tracker</h3><p>Chapter-wise syllabus tracking with progress bars. Mark chapters done, see % complete.</p></div>
+<div class="feature-card"><div class="feature-icon">📐</div><h3>Exam Pattern View</h3><p>Full exam pattern: sections, marks, duration, negative marking. Know what to expect.</p></div>
+</div></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">📺</span> YouTube & Video Learning (6)</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">▶️</div><h3>YouTube Watch</h3><p>Embedded player with watch time tracking. Speed-proof and seek-proof logging.</p></div>
+<div class="feature-card"><div class="feature-icon">🚀</div><h3>Turbo 4× Player</h3><p>Watch at 4× speed via custom proxy. Save 2+ hours daily on lectures.</p></div>
+<div class="feature-card"><div class="feature-icon">📂</div><h3>Playlist Organiser</h3><p>Organize playlists by subject/topic. Auto-sort into structured learning path.</p></div>
+<div class="feature-card"><div class="feature-icon">📸</div><h3>Screenshot Notes</h3><p>Timestamped screenshots while watching. Auto-saved as revision notes with video link.</p></div>
+<div class="feature-card"><div class="feature-icon">📅</div><h3>Scheduled Videos</h3><p>Schedule videos for specific days in planner. Never miss a lecture.</p></div>
+<div class="feature-card"><div class="feature-icon">☁️</div><h3>Cloudflare Turbo Proxy</h3><p>Custom Cloudflare Worker powers 4× playback. No buffering, no quality loss.</p></div>
+</div></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">🤖</span> AI-Powered Learning (5)</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">💬</div><h3>AI Tutor Chat</h3><p>Ask any doubt 24/7. Instant explanations. Multi-provider (GPT, Gemini, etc.).</p></div>
+<div class="feature-card"><div class="feature-icon">📝</div><h3>AI Notes Generator</h3><p>Auto-generate concise notes from any topic. Perfect for last-minute revision.</p></div>
+<div class="feature-card"><div class="feature-icon">❓</div><h3>AI Quiz Generator</h3><p>Auto-generate MCQ quizzes from any chapter. Practice with AI-created questions.</p></div>
+<div class="feature-card"><div class="feature-icon">🃏</div><h3>AI Flashcards</h3><p>Auto-generate flashcards for formulas, facts, definitions. Quick revision in minutes.</p></div>
+<div class="feature-card"><div class="feature-icon">📊</div><h3>AI Study Insights</h3><p>Weekly analysis: weak topics, score predictions, recommendations, time advice.</p></div>
+</div></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">📝</span> Mock Tests & Quizzes (7)</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">🎯</div><h3>MCQ Test Engine</h3><p>Full mock interface: timer, navigation, mark for review, submit, negative marking.</p></div>
+<div class="feature-card"><div class="feature-icon">📊</div><h3>Smart Scoring</h3><p>Correct/wrong/skipped breakdown. Topic-wise accuracy. Time-per-question analysis.</p></div>
+<div class="feature-card"><div class="feature-icon">💾</div><h3>Saved Questions Bank</h3><p>Bookmark tough questions during quizzes. Revise later. Stored in Supabase cloud.</p></div>
+<div class="feature-card"><div class="feature-icon">🎵</div><h3>Playlist Quizzes</h3><p>Community quizzes from YouTube playlists. Watch → Learn → Test.</p></div>
+<div class="feature-card"><div class="feature-icon">📈</div><h3>Attempt History</h3><p>Track all attempts with scores, dates, topics. See improvement over time.</p></div>
+<div class="feature-card"><div class="feature-icon">✏️</div><h3>Question Editor</h3><p>Add questions via Telegram deep link. Build custom banks for any topic.</p></div>
+<div class="feature-card"><div class="feature-icon">🖥️</div><h3>Standalone Test Engine</h3><p>Independent MCQ test page. Shareable links. Works without login for demos.</p></div>
+</div></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">📈</span> Analysis & Revision (3)</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">📉</div><h3>Performance Analysis</h3><p>Mock scores, weak topics, accuracy trends, time-per-question analysis.</p></div>
+<div class="feature-card"><div class="feature-icon">🔁</div><h3>Spaced Repetition</h3><p>Auto-revision at Day 1, 3, 7, 14, 30. Based on forgetting curve science.</p></div>
+<div class="feature-card"><div class="feature-icon">📊</div><h3>Dashboard Analytics</h3><p>Fintech-style dashboard: streak, tasks, weekly chart, progress, exam countdown.</p></div>
+</div></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">⏱️</span> Focus & Timer (4)</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">⏲️</div><h3>Per-Task Timer</h3><p>Timer for each task. Auto-logs study time per subject and chapter.</p></div>
+<div class="feature-card"><div class="feature-icon">🎯</div><h3>Focus Timer</h3><p>Dedicated focus sessions. Track deep work hours. Distraction-free mode.</p></div>
+<div class="feature-card"><div class="feature-icon">🍅</div><h3>Pomodoro (25/5/15)</h3><p>25 min study → 5 min break → 15 min long break after 4 sessions.</p></div>
+<div class="feature-card"><div class="feature-icon">📊</div><h3>Timer Analytics</h3><p>Total hours, sessions/day, best study time, focus score over weeks.</p></div>
+</div></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">📚</span> 7 Exam Syllabi Covered</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">📋</div><h3>SSC CGL</h3><p>Tier-1 & Tier-2 syllabus. Chapter-wise tracking. Exam pattern.</p></div>
+<div class="feature-card"><div class="feature-icon">🚂</div><h3>RRB NTPC</h3><p>CBT-1 & CBT-2 pattern. Chapter-wise progress tracking.</p></div>
+<div class="feature-card"><div class="feature-icon">🛡️</div><h3>SSC GD Constable</h3><p>Physical + written exam syllabus tracking.</p></div>
+<div class="feature-card"><div class="feature-icon">🏦</div><h3>IBPS PO</h3><p>Prelims + Mains + Interview. Sectional tracking.</p></div>
+<div class="feature-card"><div class="feature-icon">🏛️</div><h3>UPSC CSE</h3><p>Prelims + Mains + Optional. GS Paper 1-4 tracking.</p></div>
+<div class="feature-card"><div class="feature-icon">📜</div><h3>UPPCS</h3><p>UPPSC Prelims + Mains. State-specific topics.</p></div>
+<div class="feature-card"><div class="feature-icon">📝</div><h3>BPSC</h3><p>Bihar PSC Prelims + Mains syllabus tracking.</p></div>
+</div></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">📱</span> Reminders & Notifications (4)</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">🌅</div><h3>Telegram Morning Plan</h3><p>Daily morning message: today's tasks, priorities, and study plan via bot.</p></div>
+<div class="feature-card"><div class="feature-icon">🌙</div><h3>Telegram Evening Check-in</h3><p>Evening alert for incomplete tasks. "2 tasks pending. Finish them!"</p></div>
+<div class="feature-card"><div class="feature-icon">🔥</div><h3>Streak Tracking</h3><p>Daily streak with fire animation. Streak-at-risk warning at 8 PM.</p></div>
+<div class="feature-card"><div class="feature-icon">📊</div><h3>Weekly Report Card</h3><p>Auto PDF: hours studied, topics done, quizzes taken, grade.</p></div>
+</div></div>
+<div class="feature-category"><h3 class="category-title"><span class="category-icon">💎</span> Plans, Referrals & More (11)</h3><div class="features-grid">
+<div class="feature-card"><div class="feature-icon">🆓</div><h3>Free Tier (Forever)</h3><p>1 exam, 3 quizzes/day, basic timer, YouTube, 7-day history, Telegram AM.</p></div>
+<div class="feature-card"><div class="feature-icon">💳</div><h3>Pro Plans (UPI)</h3><p>₹49/mo · ₹149/3mo · ₹249/6mo · ₹399/yr. GPay, PhonePe, Paytm, BHIM.</p></div>
+<div class="feature-card"><div class="feature-icon">🎁</div><h3>7-Day Free Trial</h3><p>Full Pro for 7 days. No card. Reminders on day 5, 6, 7.</p></div>
+<div class="feature-card"><div class="feature-icon">👥</div><h3>Referral System</h3><p>Share via WhatsApp/Telegram. Earn 7 days → 1 month → Lifetime Pro.</p></div>
+<div class="feature-card"><div class="feature-icon">🌙</div><h3>Dark/Light Theme</h3><p>Toggle themes. Perfect for late-night study sessions.</p></div>
+<div class="feature-card"><div class="feature-icon">📱</div><h3>Android App</h3><p>Native Android app with CI-built APKs. Install from releases.</p></div>
+<div class="feature-card"><div class="feature-icon">🔐</div><h3>Firebase Auth</h3><p>Email/password + Google sign-in. Secure cloud sync.</p></div>
+<div class="feature-card"><div class="feature-icon">☁️</div><h3>Cloud Sync</h3><p>Progress saved to Firestore + Supabase. Access from any device.</p></div>
+<div class="feature-card"><div class="feature-icon">🤖</div><h3>Daily Free AI Models</h3><p>Auto-rotating free AI models daily via GitHub Actions. Always available, zero cost.</p></div>
+<div class="feature-card"><div class="feature-icon">🛡️</div><h3>5-Phase Pro Gating</h3><p>Smart unlocking: Branding → Plans → Referral → Gating → Trial. Gradual upgrade.</p></div>
+<div class="feature-card"><div class="feature-icon">⚙️</div><h3>Admin Panel</h3><p>Full admin: user management, billing, coupons, Telegram config, analytics.</p></div>
+</div></div>
+</div>
+</section>
+<section class="why-section" aria-labelledby="why-title"><div class="container">
+<div class="section-header"><span class="section-badge">Why StudyPlanner</span><h2 id="why-title" class="section-title">Built by an Aspirant,<br><span class="gradient-text">For Aspirants</span></h2></div>
+<div class="why-grid">
+<div class="why-card"><span class="why-icon">🎯</span><h3>Exam-Specific Plans</h3><p>Not a generic to-do list. Every plan tailored to your exam's syllabus, weightage, and pattern.</p></div>
+<div class="why-card"><span class="why-icon">🇮🇳</span><h3>Made for India</h3><p>UPI payments, Telegram, Hindi-friendly, works on low-end phones, offline-capable.</p></div>
+<div class="why-card"><span class="why-icon">💰</span><h3>Affordable for Students</h3><p>Starting at ₹49/month (₹1.6/day). Cheaper than one chai. Free tier forever.</p></div>
+<div class="why-card"><span class="why-icon">🔒</span><h3>Your Data, Your Control</h3><p>No spam, no selling data. Private progress. Cancel anytime, no questions.</p></div>
+</div></div></section>
+<section class="how-it-works" id="how-it-works" aria-labelledby="how-title"><div class="container">
+<div class="section-header"><span class="section-badge">How It Works</span><h2 id="how-title" class="section-title">Start Studying in<br><span class="gradient-text">3 Simple Steps</span></h2></div>
+<div class="steps-grid">
+<div class="step-card"><div class="step-number">1</div><div class="step-icon">🎯</div><h3>Pick Your Exam</h3><p>Choose from SSC CGL, UPSC, IBPS PO, RRB NTPC, SSC GD, UPPCS, BPSC. Set exam date.</p></div>
+<div class="step-arrow">→</div>
+<div class="step-card"><div class="step-number">2</div><div class="step-icon">📋</div><h3>Get Your AI Plan</h3><p>AI generates day-by-day plan from syllabus, exam date, and your available hours.</p></div>
+<div class="step-arrow">→</div>
+<div class="step-card"><div class="step-number">3</div><div class="step-icon">🚀</div><h3>Study, Track & Score</h3><p>Follow plan, watch 4×, take quizzes, get Telegram reminders, watch progress climb.</p></div>
+</div></div></section>
+<section class="pricing" id="pricing" aria-labelledby="pricing-title"><div class="container">
+<div class="section-header"><span class="section-badge">Pricing</span><h2 id="pricing-title" class="section-title">Less Than <span class="gradient-text">One Chai ☕ Per Day</span></h2><p class="section-subtitle">Start free. Upgrade when ready. Pay via UPI. No auto-renewal. Cancel anytime.</p></div>
+<div class="pricing-grid">
+<div class="pricing-card"><div class="pricing-header"><h3>Free</h3><div class="pricing-amount"><span class="price">₹0</span><span class="period">forever</span></div><p class="pricing-desc">Get started with basics</p></div><ul class="pricing-features"><li class="included">✅ 1 exam syllabus tracking</li><li class="included">✅ 3 quizzes per day</li><li class="included">✅ Basic Pomodoro timer</li><li class="included">✅ YouTube watch (normal)</li><li class="included">✅ 7-day study history</li><li class="included">✅ Telegram morning plan</li><li class="excluded">❌ Turbo 4× player</li><li class="excluded">❌ AI Tutor</li><li class="excluded">❌ AI Insights</li></ul><button class="btn btn-outline btn-full" onclick="openAuthModal('signup')">Start Free</button></div>
+<div class="pricing-card"><div class="pricing-header"><h3>1 Month</h3><div class="pricing-amount"><span class="price">₹49</span><span class="period">/month</span></div><p class="pricing-desc">₹1.6/day — Try it out</p></div><ul class="pricing-features"><li class="included">✅ Unlimited quizzes + mocks</li><li class="included">✅ Turbo 4× player</li><li class="included">✅ AI Tutor (20 msgs/day)</li><li class="included">✅ Full analysis + AI Insights</li><li class="included">✅ Telegram full (AM + PM)</li><li class="included">✅ Spaced repetition</li><li class="included">✅ Unlimited exams</li><li class="excluded">❌ Weekly PDF report</li><li class="excluded">❌ Exclusive Telegram group</li></ul><button class="btn btn-outline btn-full" onclick="openAuthModal('signup')">Get Monthly</button></div>
+<div class="pricing-card pricing-popular"><div class="popular-badge">🔥 Most Popular</div><div class="pricing-header"><h3>3 Months</h3><div class="pricing-amount"><span class="price">₹149</span><span class="period">/3 months</span></div><p class="pricing-desc">₹1.7/day — Best for exam season</p></div><ul class="pricing-features"><li class="included">✅ Everything in Monthly</li><li class="included">✅ Unlimited AI Tutor</li><li class="included">✅ Full history + trends</li><li class="included">✅ AI weak-topic detection</li><li class="included">✅ Weekly PDF report card</li><li class="included">✅ Priority support</li><li class="included">✅ Plan auto-replanning</li><li class="excluded">❌ Exclusive Telegram group</li><li class="excluded">❌ Live Q&A sessions</li></ul><button class="btn btn-primary btn-full" onclick="openAuthModal('signup')">Get 3 Months →</button></div>
+<div class="pricing-card"><div class="pricing-header"><h3>6 Months</h3><div class="pricing-amount"><span class="price">₹249</span><span class="period">/6 months</span></div><p class="pricing-desc">₹1.4/day — Save ₹45</p></div><ul class="pricing-features"><li class="included">✅ Everything in 3 Months</li><li class="included">✅ Pro till exam guarantee</li><li class="included">✅ Exclusive Telegram group</li><li class="included">✅ Monthly live Q&A</li><li class="included">✅ PDF notes download</li><li class="included">✅ Early access features</li><li class="included">✅ Cut-off predictor</li><li class="included">✅ PYQ practice unlocked</li><li class="excluded">❌ Pro badge</li></ul><button class="btn btn-outline btn-full" onclick="openAuthModal('signup')">Get 6 Months</button></div>
+<div class="pricing-card pricing-best"><div class="best-badge">⭐ Best Value — Save ₹189</div><div class="pricing-header"><h3>1 Year</h3><div class="pricing-amount"><span class="price">₹399</span><span class="period">/year</span></div><p class="pricing-desc">₹1.1/day — Cheapest per day!</p></div><ul class="pricing-features"><li class="included">✅ Everything in 6 Months</li><li class="included">✅ Lowest cost (₹1.1/day)</li><li class="included">✅ Pro badge on profile</li><li class="included">✅ All future features free</li><li class="included">✅ Lifetime data backup</li><li class="included">✅ 1 free referral month</li><li class="included">✅ Priority AI responses</li><li class="included">✅ Toppers strategy sessions</li><li class="included">✅ Everything. Forever updated.</li></ul><button class="btn btn-primary btn-full" onclick="openAuthModal('signup')">Get Yearly — Best Deal →</button></div>
+</div>
+<p class="pricing-note">💳 Pay via UPI (GPay, PhonePe, Paytm, BHIM) · 7-day free trial · No auto-renewal · Cancel anytime</p>
+</div></section>
+<section class="comparison" aria-labelledby="comparison-title"><div class="container">
+<div class="section-header"><span class="section-badge">Compare</span><h2 id="comparison-title" class="section-title">Free vs <span class="gradient-text">Pro</span></h2></div>
+<div class="comparison-table-wrapper"><table class="comparison-table"><thead><tr><th>Feature</th><th>Free</th><th class="pro-col">Pro ⭐</th></tr></thead><tbody>
+<tr><td>Exam Syllabus</td><td>1 exam</td><td class="pro-col">All 7 exams</td></tr>
+<tr><td>Quizzes/Day</td><td>3</td><td class="pro-col">Unlimited</td></tr>
+<tr><td>YouTube Player</td><td>Normal</td><td class="pro-col">Turbo 4× + Organiser</td></tr>
+<tr><td>AI Tutor</td><td>❌</td><td class="pro-col">✅ Unlimited</td></tr>
+<tr><td>AI Insights</td><td>❌</td><td class="pro-col">✅ Full reports</td></tr>
+<tr><td>Study History</td><td>7 days</td><td class="pro-col">Full + trends</td></tr>
+<tr><td>Telegram</td><td>Morning only</td><td class="pro-col">AM + PM + Weekly PDF</td></tr>
+<tr><td>Spaced Repetition</td><td>❌</td><td class="pro-col">✅ Auto-scheduled</td></tr>
+<tr><td>Plan Replanning</td><td>❌</td><td class="pro-col">✅ Adaptive daily</td></tr>
+<tr><td>Saved Questions</td><td>❌</td><td class="pro-col">✅ Unlimited bank</td></tr>
+<tr><td>Focus Timer</td><td>✅ Basic</td><td class="pro-col">✅ Advanced + analytics</td></tr>
+<tr><td>Weekly PDF Report</td><td>❌</td><td class="pro-col">✅ (3mo+ plans)</td></tr>
+<tr><td>Telegram Group</td><td>❌</td><td class="pro-col">✅ (6mo+ plans)</td></tr>
+<tr><td>Pro Badge</td><td>❌</td><td class="pro-col">✅ (Yearly)</td></tr>
+</tbody></table></div>
+</div></section>
+<section class="testimonials" id="testimonials" aria-labelledby="testimonials-title"><div class="container">
+<div class="section-header"><span class="section-badge">Reviews</span><h2 id="testimonials-title" class="section-title">Aspirants <span class="gradient-text">Love StudyPlanner</span></h2></div>
+<div class="testimonials-grid">
+<div class="testimonial-card"><div class="testimonial-stars">⭐⭐⭐⭐⭐</div><p>"Turbo 4× player saved me 2 hours daily. Finished entire Polity playlist in 3 days instead of 2 weeks!"</p><div class="testimonial-author"><div class="author-avatar">R</div><div><strong>Rahul S.</strong><br><small>SSC CGL 2025</small></div></div></div>
+<div class="testimonial-card"><div class="testimonial-stars">⭐⭐⭐⭐⭐</div><p>"Telegram reminders are a game-changer. Morning plan + evening check-in keeps me accountable. 45-day streak!"</p><div class="testimonial-author"><div class="author-avatar">P</div><div><strong>Priya M.</strong><br><small>UPSC CSE 2026</small></div></div></div>
+<div class="testimonial-card"><div class="testimonial-stars">⭐⭐⭐⭐⭐</div><p>"AI Tutor cleared doubts at 1 AM. Scored 142/200 in last mock. Best ₹149 I've ever spent."</p><div class="testimonial-author"><div class="author-avatar">A</div><div><strong>Amit K.</strong><br><small>IBPS PO 2025</small></div></div></div>
+</div></div></section>
+<section class="founder" aria-labelledby="founder-title"><div class="container">
+<div class="founder-card"><div class="founder-avatar">P</div><div class="founder-content">
+<h2 id="founder-title">Built by an Aspirant Who Got Tired of Spreadsheets</h2>
+<p>"I was preparing for SSC CGL and kept failing to stay consistent. Plans in notebooks, lost track, forgot revisions, wasted hours searching YouTube. So I built StudyPlanner — the app I wished existed. It's not generic. It's built specifically for Indian competitive exam aspirants, by one of them."</p>
+<p class="founder-name">— <strong>Puren</strong>, Founder & SSC CGL Aspirant</p>
+</div></div>
+</div></section>
+<section class="faq" id="faq" aria-labelledby="faq-title"><div class="container">
+<div class="section-header"><span class="section-badge">FAQ</span><h2 id="faq-title" class="section-title">Frequently Asked <span class="gradient-text">Questions</span></h2></div>
+<div class="faq-list">
+<div class="faq-item"><button class="faq-question" onclick="toggleFaq(this)" aria-expanded="false"><span>Is StudyPlanner really free?</span><span class="faq-icon">+</span></button><div class="faq-answer"><p>Yes! Free plan: 1 exam, 3 quizzes/day, basic timer, Telegram morning plan. No card needed. Upgrade only when you need AI, Turbo 4×, and unlimited features.</p></div></div>
+<div class="faq-item"><button class="faq-question" onclick="toggleFaq(this)" aria-expanded="false"><span>Which exams are covered?</span><span class="faq-icon">+</span></button><div class="faq-answer"><p>SSC CGL, RRB NTPC, SSC GD, IBPS PO, UPSC CSE, UPPCS, BPSC. Each has complete syllabus with chapter-wise tracking and exam pattern. More added regularly.</p></div></div>
+<div class="faq-item"><button class="faq-question" onclick="toggleFaq(this)" aria-expanded="false"><span>How does the 7-day free trial work?</span><span class="faq-icon">+</span></button><div class="faq-answer"><p>Sign up → Start Trial → Full Pro for 7 days. No UPI/card. Reminders on day 5, 6, 7. If you don't upgrade, you move to Free. No charges ever.</p></div></div>
+<div class="faq-item"><button class="faq-question" onclick="toggleFaq(this)" aria-expanded="false"><span>How do I pay? Is it safe?</span><span class="faq-icon">+</span></button><div class="faq-answer"><p>UPI (GPay, PhonePe, Paytm, BHIM). Secure. No auto-renewal. Pay once for your period. If payment fails, retry or use different app.</p></div></div>
+<div class="faq-item"><button class="faq-question" onclick="toggleFaq(this)" aria-expanded="false"><span>Can I use it on my phone?</span><span class="faq-icon">+</span></button><div class="faq-answer"><p>Yes! Works on any browser (mobile/desktop). Android app available. Add to home screen for app-like experience. Works on low-end phones.</p></div></div>
+<div class="faq-item"><button class="faq-question" onclick="toggleFaq(this)" aria-expanded="false"><span>What if I miss a study day?</span><span class="faq-icon">+</span></button><div class="faq-answer"><p>Pro: auto-replanning redistributes tasks. Streak pauses (doesn't reset). Telegram sends evening reminder for incomplete tasks.</p></div></div>
+<div class="faq-item"><button class="faq-question" onclick="toggleFaq(this)" aria-expanded="false"><span>Can I refer friends and earn free Pro?</span><span class="faq-icon">+</span></button><div class="faq-answer"><p>Yes! Share code via WhatsApp/Telegram. 1 friend = 7 days, 3 friends = 1 month, 10 friends = Lifetime Pro. Friend gets 3 days free too.</p></div></div>
+<div class="faq-item"><button class="faq-question" onclick="toggleFaq(this)" aria-expanded="false"><span>Is my data safe? Can I cancel?</span><span class="faq-icon">+</span></button><div class="faq-answer"><p>100% safe. No spam, no selling data. Private progress. No auto-renewal. Plan expires naturally. Stop anytime, no penalties.</p></div></div>
+</div></div></section>
+<section class="final-cta" aria-labelledby="cta-title"><div class="container">
+<div class="cta-card">
+<h2 id="cta-title">Your Exam Won't Wait.<br><span class="gradient-text">Start Planning Today.</span></h2>
+<p>Join 500+ aspirants studying smarter. Free to start. No card. 30 seconds to sign up.</p>
+<div class="cta-buttons"><button class="btn btn-primary btn-lg" onclick="openAuthModal('signup')">Start Free Now →</button><span class="cta-note">Free forever plan · 7-day Pro trial · No auto-renewal</span></div>
+</div></div></section>
+</main>
+<footer class="footer" role="contentinfo"><div class="container">
+<div class="footer-grid">
+<div class="footer-brand"><a href="#" class="nav-logo"><span class="logo-icon">📚</span><span class="logo-text">Study<span class="logo-highlight">Planner</span></span></a><p>AI-powered study planner for Indian competitive exams. Plan smarter, score higher. Built by an aspirant, for aspirants.</p></div>
+<div class="footer-links"><h4>Product</h4><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="#faq">FAQ</a><a href="app.html">Open App</a></div>
+<div class="footer-links"><h4>Exams</h4><a href="#">SSC CGL</a><a href="#">UPSC CSE</a><a href="#">IBPS PO</a><a href="#">RRB NTPC</a><a href="#">SSC GD</a></div>
+<div class="footer-links"><h4>Connect</h4><a href="#">Telegram</a><a href="#">YouTube</a><a href="https://github.com/purendar950/Examen-planner" target="_blank" rel="noopener">GitHub</a><a href="mailto:support@studyplanner.in">Email</a></div>
+</div>
+<div class="footer-bottom"><p>© 2026 StudyPlanner. Made with ❤️ for Indian aspirants.</p><p>Built by <a href="https://github.com/purendar950" target="_blank" rel="noopener">Puren</a></p></div>
+</div></footer>
+<div class="auth-modal" id="authModal" role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-hidden="true">
+<div class="auth-overlay" onclick="closeAuthModal()"></div>
+<div class="auth-card">
+<button class="auth-close" onclick="closeAuthModal()" aria-label="Close">&times;</button>
+<div class="auth-header"><span style="font-size:2rem">📚</span><h2 id="auth-title">Welcome to StudyPlanner</h2><p id="auth-subtitle">Sign in to continue your prep</p></div>
+<form id="authForm" onsubmit="handleAuthSubmit(event)">
+<div class="auth-field" id="nameField" style="display:none"><label for="authName">Full Name</label><input type="text" id="authName" placeholder="Enter your name" autocomplete="name"></div>
+<div class="auth-field"><label for="authEmail">Email</label><input type="email" id="authEmail" placeholder="you@example.com" required autocomplete="email"></div>
+<div class="auth-field"><label for="authPassword">Password</label><input type="password" id="authPassword" placeholder="Min 6 characters" required minlength="6" autocomplete="current-password"></div>
+<button type="submit" class="btn btn-primary btn-full" id="authSubmitBtn">Sign In</button>
+</form>
+<div class="auth-divider"><span>or</span></div>
+<button class="btn btn-google btn-full" onclick="handleGoogleAuth()"><svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg> Continue with Google</button>
+<p class="auth-switch" id="authSwitch">Don't have an account? <a href="#" onclick="switchAuthMode('signup');return false;">Sign Up Free</a></p>
+<p class="auth-forgot" id="authForgot"><a href="#" onclick="handleForgotPassword();return false;">Forgot password?</a></p>
+<p class="auth-error" id="authError" role="alert" aria-live="polite"></p>
+</div></div>
+<script defer src="vendor/firebase-app-compat.js"></script>
+<script defer src="vendor/firebase-auth-compat.js"></script>
+<script defer src="js/core/firebase-config.js"></script>
+<script defer src="js/landing-ui.js"></script>
+<script defer src="js/landing-auth.js"></script>
 </body>
 </html>
