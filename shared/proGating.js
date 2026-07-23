@@ -20,9 +20,9 @@
  *      Lifetime plans (name contains "lifetime") never expire.
  *   2. profile.trialExpiry is set (admin-granted trial, admin-only-writable
  *      field so it's trusted), not suspended, and not yet expired.
- *   3. appState.proTrial (self-serve 3-day trial, stored in user-writable
+ *   3. appState.proTrial (self-serve 7-day trial, stored in user-writable
  *      appState) is active, not suspended, and its claimed expiry does not
- *      exceed startedAt + 4 days (3 days + 1 grace day) — a tamper guard
+ *      exceed startedAt + 8 days (7 days + 1 grace day) — a tamper guard
  *      against a user hand-editing their trial expiry in Firestore/localStorage.
  * ─────────────────────────────────────────────────────────────────────────────
  */
@@ -69,7 +69,7 @@ function isProUser(userData, today) {
     const startedAt = new Date(trial.startedAt);
     if (isNaN(startedAt.getTime())) return false;             // unparseable: deny
     if (startedAt.getTime() > Date.now() + 86400000) return false; // future-dated: deny
-    const maxExpiry = new Date(startedAt.getTime() + 4 * 86400000); // 3 days + 1 grace
+    const maxExpiry = new Date(startedAt.getTime() + 8 * 86400000); // 7 days + 1 grace
     const claimedExpiry = new Date(trial.expiry + 'T23:59:59');
     if (claimedExpiry > maxExpiry) return false;              // stretched expiry: deny
     return true;

@@ -1,11 +1,11 @@
 /* ══════════════════════════════════════════════
    PREPPATH PHASE 5 — 7-DAY TRIAL, WEEKLY/MONTHLY GATING, PDF EXPORT
-   NOTE: the 3-day trial is stored in appState.proTrial because Firestore
+   NOTE: the 7-day trial is stored in appState.proTrial because Firestore
    rules make profile.trialExpiry admin-only. appState is user-writable and
    syncs via saveProgress().
 ══════════════════════════════════════════════ */
 
-/* ── Self-serve 3-day Pro trial (stored in appState) ──
+/* ── Self-serve 7-day Pro trial (stored in appState) ──
    The tamper-guard logic in ezIsProTrialActive() below is mirrored
    server-side in shared/proGating.js (used by the bot + daily Telegram
    sender). Keep both in sync if you change the trial rules. ── */
@@ -31,7 +31,7 @@ function ezIsProTrialActive() {
   var startedAt = new Date(trial.startedAt);
   if (isNaN(startedAt.getTime())) return false;               // unparseable — deny
   if (startedAt.getTime() > Date.now() + 86400000) return false; // future-dated — deny
-  var maxAllowedExpiry = new Date(startedAt.getTime() + 4 * 86400000); // 3 days + 1 grace
+  var maxAllowedExpiry = new Date(startedAt.getTime() + 8 * 86400000); // 7 days + 1 grace
   var claimedExpiry = new Date(exp + 'T23:59:59');
   if (claimedExpiry > maxAllowedExpiry) return false;         // Tampered expiry — deny
   return claimedExpiry >= new Date();
@@ -64,8 +64,8 @@ function ezStartProTrial() {
   if (ezProTrialUsed()) { showToast('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.', 'error'); return; }
   if (typeof ezIsPro === 'function' && ezIsPro()) { showToast('Aap already Pro ho 🎉', 'info'); return; }
   var today = new Date();
-  var exp = new Date(today.getTime() + 3 * 86400000);
-  appState.proTrial = { startedAt: today.toISOString(), expiry: exp.toISOString().slice(0, 10), days: 3 };
+  var exp = new Date(today.getTime() + 7 * 86400000);
+  appState.proTrial = { startedAt: today.toISOString(), expiry: exp.toISOString().slice(0, 10), days: 7 };
   appState.proTrialUsed = true; // durable flag — survives even if proTrial obj is cleared
   try { saveProgress(); } catch(e) {}
   // Best-effort: also stamp the profile doc so the "used" marker survives an
@@ -78,7 +78,7 @@ function ezStartProTrial() {
         .catch(function() {});
     }
   } catch(e) {}
-  showToast('🎉 3-din ka Pro trial shuru! Saare Pro features unlock.', 'success');
+  showToast('🎉 7-din ka Pro trial shuru! Saare Pro features unlock.', 'success');
   try { var ov = document.getElementById('ez-upgrade-overlay'); if (ov) ov.classList.remove('open'); } catch(e) {}
   // FIX 8: Use ezRefreshGates() instead of calling individual lock functions —
   // it re-applies ALL gates, re-renders the active page, and updates the plan badge.

@@ -321,7 +321,7 @@ function ezRenderUpgrade() {
     });
     inner += '</div>';
   }
-  /* ── Free vs Pro comparison + self-serve 3-day trial ── */
+  /* ── Free vs Pro comparison + self-serve 7-day trial ── */
   inner += ezFreeProCompareHtml();
   inner += '<div id="ez-pay-step" style="display:none;margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem;"></div>';
   inner += '<div class="modal-actions" style="margin-top:1rem;"><button class="btn-modal-cancel" onclick="document.getElementById(\'ez-upgrade-overlay\').classList.remove(\'open\')">Close</button></div>';
@@ -330,7 +330,7 @@ function ezRenderUpgrade() {
 }
 
 /* Free vs Pro feature comparison shown inside the upgrade modal, plus a
-   one-time 3-day trial CTA. */
+   one-time 7-day trial CTA. */
 function ezFreeProCompareHtml() {
   var rows = [
     ['App access', 'Full app — every page unlocked', 'Full app, no usage limits + advanced tools'],
@@ -361,7 +361,7 @@ function ezFreeProCompareHtml() {
       '</div>';
   } else if (currentUser && typeof ezIsPro === 'function' && !ezIsPro() && !ezProTrialUsed()) {
     // No plan, no trial used yet — offer free trial
-    trialBtn = '<button id="ez-start-trial-btn" class="btn-modal-save" style="width:100%;margin-top:12px;" onclick="ezStartProTrial()">🎁 Start 3-day free Pro trial</button>' +
+    trialBtn = '<button id="ez-start-trial-btn" class="btn-modal-save" style="width:100%;margin-top:12px;" onclick="ezStartProTrial()">🎁 Start 7-day free Pro trial</button>' +
       '<div style="font-size:.68rem;color:var(--muted);text-align:center;margin-top:4px;">No payment needed — ek baar hi milta hai.</div>';
   } else if (typeof ezIsProTrialActive === 'function' && ezIsProTrialActive()) {
     // FIX 7b: Trial active — show countdown
