@@ -50,9 +50,16 @@ app = Flask(__name__)
 _DEFAULT_ALLOWED_ORIGINS = ("https://examzen.in", "https://www.examzen.in",
                             "https://purendar950.github.io",
                             "https://appassets.androidengine", "http://localhost:5173")
-ALLOWED_ORIGINS = tuple(origin.strip().rstrip("/") for origin in
-                        os.environ.get("ALLOWED_ORIGINS", ",".join(_DEFAULT_ALLOWED_ORIGINS)).split(",")
-                        if origin.strip())
+# The built-in production origins are ALWAYS allowed. ALLOWED_ORIGINS
+# (comma-separated) only ADDS further origins — it never replaces the defaults,
+# so a stale/misconfigured env value can no longer silently drop the live site's
+# own origin (which previously broke all AI features on GitHub Pages). Never a
+# wildcard.
+_env_allowed_origins = [origin.strip().rstrip("/") for origin in
+                        os.environ.get("ALLOWED_ORIGINS", "").split(",")
+                        if origin.strip()]
+ALLOWED_ORIGINS = tuple(dict.fromkeys(
+    [origin.rstrip("/") for origin in _DEFAULT_ALLOWED_ORIGINS] + _env_allowed_origins))
 CORS(app, origins=ALLOWED_ORIGINS, methods=["GET", "POST", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type"])
 MAX_TELEGRAM_IMAGE_BYTES = int(os.environ.get("MAX_TELEGRAM_IMAGE_BYTES", str(8 * 1024 * 1024)))
