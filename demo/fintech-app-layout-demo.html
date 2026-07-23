@@ -97,13 +97,20 @@
     .nav button:nth-child(6) .nav-icon::before { width:12px; height:4px; border-radius:99px; box-shadow:0 4px 0 currentColor, 0 -4px 0 currentColor; }
     #themeToggle::after { width:12px; height:12px; border-radius:50% 0 50% 50%; transform:rotate(-45deg); }
     #notice::after { width:9px; height:9px; border-radius:50%; box-shadow:0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
+    /* Text-led controls prevent missing glyphs from distracting from the study data. */
+    .brand-mark, .nav-icon, .stat-icon, .streak-top > span:last-child, .exam-chevron { display:none !important; }
+    .nav button { padding-left:12px; }
+    .stat-top { justify-content:flex-end; }
+    #themeToggle, #notice { width:auto; min-width:0; padding:0 12px; font-size:0; }
+    #themeToggle::after { content:"Theme"; width:auto; height:auto; border:0; border-radius:0; background:transparent; transform:none; color:var(--ink); font-size:10px; font-weight:750; }
+    #notice::after { content:"Alerts"; width:auto; height:auto; border:0; border-radius:0; background:transparent; box-shadow:none; color:var(--ink); font-size:10px; font-weight:750; }
   </style>
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">SP</span>StudyPlanner</div>
-      <button class="exam-switch" id="examSwitch"><span class="exam-dot">CGL</span><span><strong>SSC CGL 2026</strong><small>Tier 1 preparation</small></span><span>⌄</span></button>
+      <button class="exam-switch" id="examSwitch"><span class="exam-dot">CGL</span><span><strong>SSC CGL 2026</strong><small>Tier 1 preparation</small></span><span class="exam-chevron" aria-hidden="true"></span></button>
       <div class="nav-caption">Workspace</div>
       <nav class="nav" aria-label="Primary navigation">
         <button class="active"><span class="nav-icon">O</span>Overview</button>
@@ -116,7 +123,7 @@
       <div class="sidebar-bottom"><div class="streak"><div class="streak-top"><span>12 day streak</span><span>+</span></div><p>Strong consistency this week</p><div class="week"><i class="done">M</i><i class="done">T</i><i class="done">W</i><i class="done">T</i><i class="done">F</i><i>S</i><i>S</i></div></div></div>
     </aside>
     <main class="main">
-      <header class="topbar"><div class="topbar-title"><strong id="pageTitle">Overview</strong><span id="pageSubtitle">Your focused study command center</span></div><div class="top-actions"><button class="icon-btn" id="themeToggle" aria-label="Toggle color theme">T</button><button class="icon-btn" id="notice" aria-label="Notifications">!</button><span class="avatar">AS</span><button class="primary-btn" id="focus">▷ Start focus session</button></div></header>
+      <header class="topbar"><div class="topbar-title"><strong id="pageTitle">Overview</strong><span id="pageSubtitle">Your focused study command center</span></div><div class="top-actions"><button class="icon-btn" id="themeToggle" aria-label="Toggle color theme">T</button><button class="icon-btn" id="notice" aria-label="Notifications">!</button><span class="avatar">AS</span><button class="primary-btn" id="focus">Start focus session</button></div></header>
       <div class="content">
         <section class="welcome"><div><h1>Good morning, Arjun.</h1><p>Your preparation is moving in the right direction. Keep today focused.</p></div><div class="range"><button class="active">Today</button><button>Week</button><button>Month</button></div></section>
         <section class="hero"><article class="readiness"><div class="eyebrow">Preparation health</div><div class="readiness-main"><div class="ring"><div class="score"><strong>76</strong><span>Readiness score</span></div></div><div><h2>You’re on track</h2><p>Your score improved by 4 points this week. Strengthen geometry and current affairs to reach the next level.</p><div class="hero-metrics"><div class="metric"><span>Exam in</span><strong>84 days</strong></div><div class="metric"><span>Weekly gain</span><strong class="em">+4.2%</strong></div><div class="metric"><span>Target</span><strong>85 score</strong></div></div></div></div></article><article class="focus-card"><div class="card-head"><div><h2>Today’s focus</h2><p>3 tasks · 2h 25m planned</p></div><button class="text-btn">Open plan</button></div><label class="task"><input class="check" type="checkbox" checked><span><strong>Number System</strong><small>Quantitative aptitude · Practice</small></span><b class="time">45 min</b></label><label class="task"><input class="check" type="checkbox"><span><strong>Indian Polity</strong><small>General awareness · Revision</small></span><b class="time">60 min</b></label><label class="task"><input class="check" type="checkbox"><span><strong>Mock Test #08</strong><small>Full syllabus · Timed test</small></span><b class="time">40 min</b></label><div class="progress-row"><div class="track"><div class="fill" id="focusProgress"></div></div><b id="focusCount">1 of 3</b></div></article></section>
