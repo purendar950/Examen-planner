@@ -708,7 +708,9 @@ function mockUpdateDashSummary() {
   const plannerTab = document.getElementById('nav-planner');
   if (plannerTab && !document.getElementById('nav-mocks')) {
     plannerTab.insertAdjacentHTML('afterend',
-      '<div class="nav-tab" id="nav-mocks" onclick="switchPage(\'mocks\')"><span class="tab-icon">📈</span> Mock Tests</div>');
+      '<div class="nav-tab" id="nav-mocks" onclick="switchPage(\'mocks\')" title="Mock Tests">' +
+      '<span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V4"></path><path d="M4 20h16"></path><path d="m8 15 3-4 3 2 4-6"></path></svg></span>' +
+      '<span class="nav-tab-label"> Mock Tests</span></div>');
   }
   const mc = document.querySelector('.main-content');
   if (mc && !document.getElementById('page-mocks')) {
