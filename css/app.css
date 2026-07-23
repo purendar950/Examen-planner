@@ -3888,8 +3888,8 @@ html[data-theme="light"] #page-youtube .yt-workspace-tabs .mtab.active { color: 
   box-shadow: 0 1px 2px rgba(10, 35, 42, .04), 0 8px 22px rgba(10, 35, 42, .07);
 }
 #page-youtube .ai-view-toggle button[data-v="ai"].on .ai-switch-icon {
-  background: #10221e;
-  color: #dff769;
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 #page-youtube .ai-view-toggle button[data-v="ai"].on .ai-switch-badge {
   background: var(--accent-dim);
@@ -4015,8 +4015,8 @@ html[data-theme="light"] #page-youtube .ai-view-toggle button[data-v="course"].o
   box-shadow: 0 8px 20px rgba(10, 35, 42, .08);
 }
 #page-youtube .ai-tab.on .ai-mode-icon {
-  background: #10221e;
-  color: #dff769;
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 #page-youtube .ai-tab.on::after { background: var(--accent); }
 #page-youtube .ai-tab:focus-visible {
@@ -4956,14 +4956,11 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 ═══════════════════════════════════════════════ */
 .main-content:has(#page-dashboard.active) { max-width: 1400px; padding: 2rem 2.25rem 4rem; }
 .fintech-dashboard {
-  --fin-panel: color-mix(in srgb, var(--card) 94%, #10221e 6%);
+  --fin-panel: var(--card);
   --fin-panel-soft: color-mix(in srgb, var(--surface) 88%, transparent);
   --fin-line: color-mix(in srgb, var(--border) 84%, transparent);
   --fin-shadow: 0 1px 2px rgba(0,0,0,.24), 0 20px 50px -32px rgba(0,0,0,.72);
-  --fin-lime: #dff769;
   --fin-warning: #ffc15a;
-  --muted: #a3afc1;
-  --accent: #39dcae;
   color: var(--text);
 }
 .fintech-dashboard button { font-family: var(--font); }
@@ -5019,60 +5016,55 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 }
 .fin-readiness-card {
   position: relative; overflow: hidden; min-height: 330px; padding: 1.6rem;
-  color: #f3fbf8; background: #10221e; border-color: rgba(143,210,181,.16);
+  background: var(--fin-panel); border-color: var(--fin-line);
   border-radius: 24px;
 }
 .fin-readiness-card::before {
   content: ''; position: absolute; width: 430px; height: 430px; right: -170px; top: -250px;
-  border-radius: 50%; background: radial-gradient(circle, rgba(93,211,161,.25), transparent 68%);
+  border-radius: 50%; background: radial-gradient(circle, var(--accent-dim), transparent 68%);
   pointer-events: none;
 }
-.fin-readiness-card::after {
-  content: ''; position: absolute; width: 260px; height: 260px; left: 28%; bottom: -215px;
-  border-radius: 50%; background: radial-gradient(circle, rgba(223,247,105,.18), transparent 70%);
-  pointer-events: none;
-}
-.fin-readiness-card .fin-card-kicker { position: relative; z-index: 1; color: rgba(235,248,243,.62); }
-.fin-readiness-card .fin-status-dot { background: var(--fin-lime); box-shadow: 0 0 0 5px rgba(223,247,105,.1); }
+.fin-readiness-card .fin-card-kicker { position: relative; z-index: 1; color: var(--muted); }
+.fin-readiness-card .fin-status-dot { background: var(--accent); box-shadow: 0 0 0 5px var(--accent-dim); }
 .fin-readiness-main {
   position: relative; z-index: 1; display: grid; grid-template-columns: 148px minmax(0,1fr);
   align-items: center; gap: 1.75rem; margin-top: 1.5rem;
 }
 .fin-score-ring { width: 132px; height: 132px; }
 .fin-score-ring svg { width: 132px; height: 132px; }
-.fin-readiness-card .ring-track { stroke: rgba(255,255,255,.1); }
-.fin-readiness-card .ring-prog { stroke: var(--fin-lime); filter: drop-shadow(0 0 7px rgba(223,247,105,.25)); }
-.fin-readiness-card .ring-big { color: #fff; font-size: 2.15rem; letter-spacing: -.06em; }
-.fin-readiness-card .ring-lbl { color: rgba(235,248,243,.54); }
+.fin-readiness-card .ring-track { stroke: var(--fin-line); }
+.fin-readiness-card .ring-prog { stroke: var(--accent); filter: drop-shadow(0 0 7px var(--accent-dim)); }
+.fin-readiness-card .ring-big { color: var(--text); font-size: 2.15rem; letter-spacing: -.06em; }
+.fin-readiness-card .ring-lbl { color: var(--muted); }
 .fin-readiness-copy h2 { font-size: clamp(1.4rem, 2.3vw, 2rem); letter-spacing: -.04em; }
-.fin-readiness-copy > p { max-width: 52ch; margin-top: .55rem; color: rgba(235,248,243,.62); line-height: 1.6; font-size: .84rem; }
+.fin-readiness-copy > p { max-width: 52ch; margin-top: .55rem; color: var(--muted); line-height: 1.6; font-size: .84rem; }
 .fin-readiness-metrics { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .55rem; margin-top: 1.25rem; }
-.fin-readiness-metrics > div { padding: .75rem .8rem; background: rgba(255,255,255,.055); border: 1px solid rgba(255,255,255,.075); border-radius: 12px; }
+.fin-readiness-metrics > div { padding: .75rem .8rem; background: var(--fin-panel-soft); border: 1px solid var(--fin-line); border-radius: 12px; }
 .fin-readiness-metrics span,
 .fin-readiness-metrics strong { display: block; }
-.fin-readiness-metrics span { color: rgba(235,248,243,.74); font-size: .63rem; letter-spacing: .05em; text-transform: uppercase; }
-.fin-readiness-metrics strong { margin-top: 4px; color: #f4fbf8; font-size: .85rem; }
-.fin-readiness-metrics .fin-warm { color: #ffca69; }
+.fin-readiness-metrics span { color: var(--muted); font-size: .63rem; letter-spacing: .05em; text-transform: uppercase; }
+.fin-readiness-metrics strong { margin-top: 4px; color: var(--text); font-size: .85rem; }
+.fin-readiness-metrics .fin-warm { color: var(--fin-warning); }
 .fin-readiness-footer {
   position: relative; z-index: 1; display: flex; align-items: center; gap: .7rem;
-  margin-top: 1.35rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,.09);
+  margin-top: 1.35rem; padding-top: 1rem; border-top: 1px solid var(--fin-line);
 }
 .fin-exam-date { margin-right: auto; }
 .fin-exam-date span,
 .fin-exam-date strong { display: block; }
-.fin-exam-date span { color: rgba(235,248,243,.74); font-size: .62rem; text-transform: uppercase; letter-spacing: .07em; }
-.fin-exam-date strong { margin-top: 2px; color: #fff; font-size: .84rem; }
+.fin-exam-date span { color: var(--muted); font-size: .62rem; text-transform: uppercase; letter-spacing: .07em; }
+.fin-exam-date strong { margin-top: 2px; color: var(--text); font-size: .84rem; }
 .fin-readiness-card .dash-datepick {
-  padding: .55rem .7rem; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.1);
+  padding: .55rem .7rem; background: var(--fin-panel-soft); border-color: var(--fin-line);
 }
-.fin-readiness-card .dash-datepick > span { color: rgba(235,248,243,.74); font-size: .65rem; font-weight: 700; text-transform: uppercase; }
-.fin-readiness-card .dash-datepick input { color: #fff; color-scheme: dark; }
+.fin-readiness-card .dash-datepick > span { color: var(--muted); font-size: .65rem; font-weight: 700; text-transform: uppercase; }
+.fin-readiness-card .dash-datepick input { color: var(--text); }
 .fin-readiness-card .dash-rank {
-  min-width: 90px; padding: .42rem .65rem; border: 1px solid rgba(223,247,105,.2);
-  border-radius: 10px; color: var(--fin-lime); background: rgba(223,247,105,.07);
+  min-width: 90px; padding: .42rem .65rem; border: 1px solid rgba(0,200,150,.2);
+  border-radius: 10px; color: var(--accent); background: var(--accent-dim);
   text-align: left; text-shadow: none; animation: none;
 }
-.fin-readiness-card .dash-rank .dr-label { color: rgba(235,248,243,.74); font-size: .55rem; letter-spacing: .08em; }
+.fin-readiness-card .dash-rank .dr-label { color: var(--muted); font-size: .55rem; letter-spacing: .08em; }
 .fin-readiness-card .dash-rank .dr-val { margin-top: 2px; font-size: .72rem; }
 
 .fin-focus-card {
@@ -5228,22 +5220,9 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 .fintech-dashboard .empty-state button { margin-top: .8rem; padding: .55rem .85rem; color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(0,200,150,.18); border-radius: 9px; font-size: .7rem; font-weight: 800; cursor: pointer; }
 
 html[data-theme="light"] .fintech-dashboard {
-  --fin-panel: #fff;
-  --fin-panel-soft: #f5f8f7;
-  --fin-line: #e0e7e4;
   --fin-shadow: 0 1px 2px rgba(15,42,35,.04), 0 14px 32px -22px rgba(15,42,35,.22);
-  --muted: #526172;
-  --accent: #087a5a;
   --fin-warning: #875000;
 }
-html[data-theme="light"] .fin-readiness-card { background: #102c25; }
-html[data-theme="light"] .fin-head-exam,
-html[data-theme="light"] .fin-stat-card,
-html[data-theme="light"] .fin-focus-card,
-html[data-theme="light"] .fin-action-card,
-html[data-theme="light"] .dash-subj,
-html[data-theme="light"] .dash-recent,
-html[data-theme="light"] .fintech-dashboard .empty-state { background: #fff; }
 
 @media (max-width: 1100px) {
   .main-content:has(#page-dashboard.active) { padding-inline: 1.5rem; }
