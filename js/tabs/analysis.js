@@ -98,7 +98,9 @@ function anUpSave(){ if (typeof saveProgress === 'function') saveProgress(); }
 function anUpChildFolders(pid){ const u = anUp(); return Object.values(u.folders).filter(f => (f.parentId||null) === (pid||null)); }
 function anUpImagesIn(pid){ const u = anUp(); return u.images.filter(im => (im.folderId||null) === (pid||null)); }
 function anUpFolderById(id){ return id ? (anUp().folders[id] || null) : null; }
-function anUpImgUrl(im){ return im.imageUrl || ((typeof tgProxyBase === 'function' ? tgProxyBase() : 'https://youtube-turbo-proxy-gej4.onrender.com') + '/tg-photo?file_id=' + encodeURIComponent(im.tgFileId||'')); }
+function anUpImgTag(im, style){
+  return '<img data-tg-file-id="' + anEsc(im.tgFileId || '') + '" alt=""' + (style ? ' style="' + style + '"' : '') + '>';
+}
 
 function anUpNewFolder(){
   const name = (prompt('New folder name:') || '').trim();
@@ -144,9 +146,9 @@ function anUpOpenImage(imgId){
   }
   ov.innerHTML =
     '<button title="Close" onclick="document.getElementById(\'an-up-lightbox\').remove()" style="position:absolute;top:14px;right:16px;background:rgba(255,255,255,.15);border:none;color:#fff;font-size:1.1rem;width:40px;height:40px;border-radius:50%;cursor:pointer;">✕</button>' +
-    '<img src="' + anUpImgUrl(im) + '" alt="" style="max-width:100%;max-height:82vh;object-fit:contain;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.5);">' +
-    (im.caption ? '<div style="color:#e2e8f0;font-size:.85rem;max-width:90%;text-align:center;">' + anEsc(im.caption) + '</div>' : '') +
-    '<a href="' + anUpImgUrl(im) + '" target="_blank" rel="noreferrer" style="color:#8ab4ff;font-size:.76rem;">Open original ↗</a>';
+    anUpImgTag(im, 'max-width:100%;max-height:82vh;object-fit:contain;border-radius:10px;box-shadow:0 8px 40px rgba(0,0,0,.5);') +
+    (im.caption ? '<div style="color:#e2e8f0;font-size:.85rem;max-width:90%;text-align:center;">' + anEsc(im.caption) + '</div>' : '');
+  if (typeof tgHydrateImages === 'function') tgHydrateImages(ov);
 }
 
 /* Move-to-folder picker: lists Root + every folder (indented) as buttons. */
@@ -240,7 +242,7 @@ function anRenderUploads(){
   if (imgs.length){
     html += `<div class="an-label">Images</div><div class="an-grid">${imgs.map(im => `
       <div class="an-chip">
-        <div class="mt" onclick="anUpOpenImage('${im.id}')" style="cursor:pointer;"><img src="${anUpImgUrl(im)}" loading="lazy" alt=""><div class="an-play"><span>🔍</span></div></div>
+        <div class="mt" onclick="anUpOpenImage('${im.id}')" style="cursor:pointer;">${anUpImgTag(im)}<div class="an-play"><span>🔍</span></div></div>
         <div class="ml" style="justify-content:space-between;">
           <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${anEsc((im.caption||'Image').slice(0,26))}</span>
           <span style="display:flex;gap:4px;flex-shrink:0;">
@@ -255,6 +257,7 @@ function anRenderUploads(){
     html += `<div class="an-empty"><div class="em">📂</div><div>This folder is empty. Add a subfolder or move images here.</div></div>`;
   }
   body.innerHTML = html;
+  if (typeof tgHydrateImages === 'function') tgHydrateImages(body);
 }
 
 /* ── 📸 Turbo Screenshots sub-tab — SAME folder structure as the Gallery
@@ -333,6 +336,7 @@ function anRenderShots(){
     const items = anShotItems(v);
     body.innerHTML = items.length ? `<div class="an-grid">${items.map(it => anMomentChip(anNormItem(it, anShotsNav.vId, v))).join('')}</div>`
       : `<div class="an-empty"><div class="em">📭</div><div>No screenshots in this video.</div></div>`;
+    if (typeof tgHydrateImages === 'function') tgHydrateImages(body);
   }
 }
 
@@ -496,10 +500,14 @@ function anNormItem(it, vId, v){
   const vid = it.videoId || String(vId).replace('playlist_','');
   return { id: it.id, type: it.type||'screenshot', timeLabel: it.timeLabel||anMsToLabel(it.timestamp),
     img: it.dataUrl||it.imageUrl||('https://i.ytimg.com/vi/'+vid+'/hqdefault.jpg'),
+    tgFileId: it.tgFileId || '',
     label: it.label||it.note||'', videoTitle: it.videoTitle||v.name };
 }
 function anMomentChip(it){
-  return `<div class="an-chip" onclick="anOpenMoment('${it.id}')"><div class="mt"><img src="${it.img}" alt="">
+  const image = it.tgFileId
+    ? '<img data-tg-file-id="' + anEsc(it.tgFileId) + '" alt="">'
+    : '<img src="' + anEsc(it.img) + '" alt="">';
+  return `<div class="an-chip" onclick="anOpenMoment('${it.id}')"><div class="mt">${image}
     <span class="an-time">${anEsc(it.timeLabel)}</span><div class="an-play"><span>▶</span></div></div>
     <div class="ml"><span class="an-dot" style="background:${AN_TYPE_COLOR[it.type]||'var(--accent)'}"></span>${anEsc((it.label||it.videoTitle||'').slice(0,38))}${(it.label||'').length>38?'…':''}</div></div>`;
 }
@@ -1319,15 +1327,8 @@ function anRender(){
   setTimeout(() => { const f = document.querySelector('#page-analysis .an-folder'); if (f) f.classList.add('open'); }, 40);
 }
 
-/* ── hook into switchPage so the tab renders when opened ── */
-(function(){
-  if (typeof switchPage !== 'function') return;
-  const _anBase = switchPage;
-  switchPage = function(page){
-    _anBase(page);
-    if (page === 'analysis') anRender();
-  };
-})();
+/* ── Render when the core navigation activates Analysis ── */
+onPageActivated('analysis', function () { anRender(); });
 
 /* ════════ DASHBOARD SNAPSHOT WIDGET ════════ */
 /* Fills the #analysis-dashboard-widget card on the Dashboard with a quick

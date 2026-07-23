@@ -182,6 +182,60 @@ function tgProxyBase() {
   return (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
 }
 
+/* Telegram media is protected by Firebase identity, so <img src> cannot fetch
+   it directly. Fetch the file with an Authorization header, then attach a
+   short-lived object URL to the image element instead. */
+function tgHydrateImage(img, fileId) {
+  if (!img || !fileId || img.dataset.tgLoading) return;
+  img.dataset.tgLoading = '1';
+  var attempts = 0;
+
+  function load() {
+    attempts += 1;
+    var retryPending = false;
+    getFirebaseIdToken().then(function (token) {
+      return fetch(tgProxyBase() + '/tg-photo?file_id=' + encodeURIComponent(fileId), {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+    }).then(function (response) {
+      if (!response.ok) {
+        var error = new Error('photo unavailable');
+        error.status = response.status;
+        throw error;
+      }
+      return response.blob();
+    }).then(function (blob) {
+      if (!img.isConnected) return;
+      var objectUrl = URL.createObjectURL(blob);
+      var oldUrl = img.dataset.tgObjectUrl;
+      if (oldUrl) URL.revokeObjectURL(oldUrl);
+      img.dataset.tgObjectUrl = objectUrl;
+      img.src = objectUrl;
+    }).catch(function (error) {
+      // Firestore may not yet contain a just-sent file ID when the UI paints.
+      // Retry that short replication race only; authorization and other failures
+      // should remain visible immediately instead of masking a real problem.
+      if (error && error.status === 404 && attempts < 3 && img.isConnected) {
+        retryPending = true;
+        setTimeout(load, attempts * 350);
+        return;
+      }
+      if (img.isConnected) img.alt = 'Telegram photo unavailable';
+    }).then(function () {
+      if (!retryPending) delete img.dataset.tgLoading;
+    });
+  }
+
+  load();
+}
+
+function tgHydrateImages(root) {
+  if (!root) return;
+  root.querySelectorAll('img[data-tg-file-id]').forEach(function (img) {
+    tgHydrateImage(img, img.dataset.tgFileId);
+  });
+}
+
 /* The "Telegram Uploads" store: a flat tree the user organises in the Uploads
    tab. folders keyed by id ({id,name,parentId}); images carry a folderId
    (null = root). Only the Telegram file_id is stored — never image bytes. */
@@ -203,8 +257,7 @@ function addTgUploadImage(item) {
       tgFileId: item.tgFileId,
       caption: item.caption || '',
       createdAt: item.createdAt || new Date().toISOString(),
-      folderId: null,                                   // arrives at root
-      imageUrl: tgProxyBase() + '/tg-photo?file_id=' + encodeURIComponent(item.tgFileId)
+      folderId: null                                   // arrives at root
     });
     return true;
   } catch (e) { return false; }
@@ -231,8 +284,7 @@ function migrateTelegramUploads() {
               tgFileId: it.tgFileId,
               caption: it.label || it.videoTitle || '',
               createdAt: it.createdAt || new Date().toISOString(),
-              folderId: null,
-              imageUrl: it.imageUrl || (tgProxyBase() + '/tg-photo?file_id=' + encodeURIComponent(it.tgFileId))
+              folderId: null
             });
             moved++;
           }

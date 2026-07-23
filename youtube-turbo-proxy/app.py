@@ -29,9 +29,12 @@ Reliability notes:
 import os
 import time
 import base64
+import hashlib
+import hmac
 import threading
 import logging
 import secrets
+from datetime import datetime, timedelta, timezone
 
 import requests
 from flask import Flask, request, jsonify, Response, stream_with_context
@@ -42,7 +45,16 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("turbo-proxy")
 
 app = Flask(__name__)
-CORS(app)  # allow the static frontend (GitHub Pages) to call us
+# Browser clients are restricted to the app origins. Add additional deployments
+# through ALLOWED_ORIGINS (comma-separated); never fall back to a wildcard.
+_DEFAULT_ALLOWED_ORIGINS = ("https://examzen.in", "https://www.examzen.in",
+                            "https://appassets.androidengine", "http://localhost:5173")
+ALLOWED_ORIGINS = tuple(origin.strip().rstrip("/") for origin in
+                        os.environ.get("ALLOWED_ORIGINS", ",".join(_DEFAULT_ALLOWED_ORIGINS)).split(",")
+                        if origin.strip())
+CORS(app, origins=ALLOWED_ORIGINS, methods=["GET", "POST", "DELETE", "OPTIONS"],
+     allow_headers=["Authorization", "Content-Type"])
+MAX_TELEGRAM_IMAGE_BYTES = int(os.environ.get("MAX_TELEGRAM_IMAGE_BYTES", str(8 * 1024 * 1024)))
 
 # ------------------------------------------------------------------ config
 import shutil
@@ -157,6 +169,93 @@ def _cookie_refresh_loop():
 
 
 _init_firebase()
+
+
+# ---- verified user identity / entitlement ---------------------------------
+def _require_firebase_user():
+    """Return a verified Firebase identity or a JSON-safe error tuple.
+
+    The browser must never be allowed to select a UID in a query/body field:
+    entitlement, quotas, Telegram ownership, and job ownership all derive from
+    this verified token instead.
+    """
+    if not _fb_db:
+        return None, ({"error": "auth_unavailable", "detail": "Firebase Admin is not configured."}, 503)
+    header = request.headers.get("Authorization", "")
+    if not header.startswith("Bearer "):
+        return None, ({"error": "unauthorized", "detail": "A Firebase ID token is required."}, 401)
+    token = header[7:].strip()
+    if not token:
+        return None, ({"error": "unauthorized", "detail": "A Firebase ID token is required."}, 401)
+    try:
+        from firebase_admin import auth as firebase_auth
+        decoded = firebase_auth.verify_id_token(token)
+    except Exception as exc:  # noqa: BLE001
+        log.info("Firebase token verification failed: %s", exc)
+        return None, ({"error": "unauthorized", "detail": "Invalid or expired Firebase ID token."}, 401)
+    uid = str(decoded.get("uid") or "").strip()
+    if not uid:
+        return None, ({"error": "unauthorized", "detail": "Firebase token has no user ID."}, 401)
+    return {"uid": uid, "claims": decoded}, None
+
+
+def _active_pro_entitlement(user_data):
+    """Server-side mirror of the plan/trial rules used by the web app."""
+    profile = (user_data or {}).get("profile") or {}
+    today = datetime.now(timezone.utc).date()
+    plan = str(profile.get("plan") or "").strip().lower()
+    if plan and plan != "free":
+        if "lifetime" in plan:
+            return True
+        expiry = str(profile.get("planExpiry") or "")
+        if expiry:
+            try:
+                if datetime.strptime(expiry, "%Y-%m-%d").date() >= today:
+                    return True
+            except ValueError:
+                pass
+    trial_expiry = str(profile.get("trialExpiry") or "")
+    if trial_expiry and not profile.get("trialSuspended"):
+        try:
+            if datetime.strptime(trial_expiry, "%Y-%m-%d").date() >= today:
+                return True
+        except ValueError:
+            pass
+
+    trial = ((user_data or {}).get("appState") or {}).get("proTrial") or {}
+    if profile.get("trialSuspended") or not trial.get("startedAt") or not trial.get("expiry"):
+        return False
+    try:
+        started = datetime.fromisoformat(str(trial["startedAt"]).replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        expiry = datetime.strptime(str(trial["expiry"]), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return (started <= datetime.now(timezone.utc) + timedelta(days=1)
+                and expiry <= started + timedelta(days=8)
+                and expiry.date() >= today)
+    except (TypeError, ValueError):
+        return False
+
+
+def _verified_user_record(require_pro=False):
+    identity, err = _require_firebase_user()
+    if err:
+        return None, err
+    try:
+        snap = _fb_db.collection("users").document(identity["uid"]).get()
+        data = snap.to_dict() if snap.exists else {}
+        is_admin = _fb_db.collection("admins").document(identity["uid"]).get().exists
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Could not load Firebase user %s: %s", identity["uid"], exc)
+        return None, ({"error": "auth_unavailable", "detail": "Could not verify account access."}, 503)
+    identity["data"] = data or {}
+    identity["is_admin"] = is_admin
+    identity["is_pro"] = bool(is_admin or _active_pro_entitlement(data))
+    if require_pro and not identity["is_pro"]:
+        return None, ({"error": "pro_required", "detail": "This feature requires an active Pro plan or trial."}, 403)
+    return identity, None
+
+
 refresh_cookies()
 # Background refresh so admin-panel cookie updates land without a redeploy.
 if _fb_db:
@@ -913,6 +1012,9 @@ def _study_job_persist(job, force=False):
             return False
         job["last_persist_at"] = now
         doc = _study_job_public(job)
+        # Owner is persisted for authorization after a proxy restart but is not
+        # exposed in the browser response shape.
+        doc["_owner_uid"] = job.get("owner_uid", "")
     return _fs_set("study_jobs", job["id"], doc)
 
 
@@ -936,6 +1038,7 @@ def _get_study_job(job_id):
         _fs_set("study_jobs", job_id, saved)
     job = {
         "id": job_id,
+        "owner_uid": str(saved.get("_owner_uid") or ""),
         "status": status,
         "mode": saved.get("mode"),
         "style": saved.get("style") if saved.get("style") != "topic" else "",
@@ -2193,6 +2296,10 @@ def transcript_demo():
 def api_study():
     """Transcript -> study material via Groq (key from config/ai).
     ?id=VIDEOID (or url/v) &mode=summary|insights|notes|quiz|flashcards &out=English"""
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    uid = user["uid"]
     raw_arg = (request.args.get("id") or request.args.get("url")
                or request.args.get("v") or "").strip()
     mode = (request.args.get("mode") or "notes").strip().lower()
@@ -2276,10 +2383,10 @@ def api_study():
         return jsonify(fs)
 
     # rate limit only NEW generations (cached hits above are free). Skip for
-    # admin-granted unlimited users.
-    uid = (request.args.get("uid") or "").strip()
+    # admin-granted unlimited users. Identity is verified above, never supplied
+    # by a query parameter.
     if not _is_unlimited(uid):
-        if not _rate_ok("study", _client_ip(), _load_ai_limits()["studyPerHour"], 3600):
+        if not _rate_ok("study", uid, _load_ai_limits()["studyPerHour"], 3600):
             return jsonify({"error": "rate_limited",
                             "detail": "Hourly AI generation limit reached. Try later, or ask the admin for unlimited access."}), 429
 
@@ -2348,6 +2455,10 @@ def api_study_stream():
     Shares the SAME cache keys as /api/study (so streamed + blocking reuse each
     other). Quiz/flashcards are not streamed. The client falls back to /api/study
     on any error, so this endpoint never has to be the only path."""
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    uid = user["uid"]
     raw_arg = (request.args.get("id") or request.args.get("url")
                or request.args.get("v") or "").strip()
     mode = (request.args.get("mode") or "notes").strip().lower()
@@ -2416,10 +2527,9 @@ def api_study_stream():
         return Response(stream_with_context(gcache()),
                         mimetype="text/event-stream", headers=_sse_headers)
 
-    # rate limit only NEW generations
-    uid = (request.args.get("uid") or "").strip()
+    # rate limit only NEW generations; uid comes from the verified token.
     if not _is_unlimited(uid):
-        if not _rate_ok("study", _client_ip(), _load_ai_limits()["studyPerHour"], 3600):
+        if not _rate_ok("study", uid, _load_ai_limits()["studyPerHour"], 3600):
             return jsonify({"error": "rate_limited",
                             "detail": "Hourly AI generation limit reached."}), 429
 
@@ -2632,12 +2742,18 @@ def _new_study_job_id(value):
 @app.post("/api/study/jobs")
 def api_study_jobs_start():
     """Create (or return) a server-owned text job. Safe to retry after reload."""
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    uid = user["uid"]
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return jsonify({"error": "bad_request"}), 400
     job_id = _new_study_job_id(payload.get("jobId"))
     existing = _get_study_job(job_id)
     if existing:
+        if existing.get("owner_uid") != uid:
+            return jsonify({"error": "job_not_found"}), 404
         return jsonify(_study_job_public(existing))
 
     raw_arg = str(payload.get("id") or payload.get("url") or payload.get("v") or "").strip()
@@ -2662,7 +2778,7 @@ def api_study_jobs_start():
     cached = _study_job_cached_result(ckey, fs_id, force)
     now = int(time.time())
     job = {
-        "id": job_id, "video_id": video_id, "mode": mode, "style": style,
+        "id": job_id, "owner_uid": uid, "video_id": video_id, "mode": mode, "style": style,
         "out_lang": out_lang, "provider": ai.get("provider", "ai"), "model": ai["model"],
         "ai": ai, "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
         "cached": bool(cached), "persisted": bool(cached), "title": None,
@@ -2681,14 +2797,15 @@ def api_study_jobs_start():
             "segment_count": cached.get("segment_count"),
         })
     else:
-        uid = str(payload.get("uid") or "").strip()
-        if not _is_unlimited(uid) and not _rate_ok("study", _client_ip(), _load_ai_limits()["studyPerHour"], 3600):
+        if not _is_unlimited(uid) and not _rate_ok("study", uid, _load_ai_limits()["studyPerHour"], 3600):
             return jsonify({"error": "rate_limited", "detail": "Hourly AI generation limit reached."}), 429
 
     _cleanup_study_jobs()
     with _study_jobs_lock:
         raced = _study_jobs.get(job_id)
         if raced:
+            if raced.get("owner_uid") != uid:
+                return jsonify({"error": "job_not_found"}), 404
             return jsonify(_study_job_public(raced))
         # DELETE may have arrived after the first tombstone check but while this
         # POST was validating configuration/cache/rate limits. Recheck while we
@@ -2711,23 +2828,28 @@ def api_study_jobs_start():
 
 @app.get("/api/study/jobs/<job_id>")
 def api_study_job(job_id):
+    user, err = _verified_user_record()
+    if err:
+        return jsonify(err[0]), err[1]
     job = _get_study_job(job_id)
-    if not job:
+    if not job or job.get("owner_uid") != user["uid"]:
         return jsonify({"error": "job_not_found"}), 404
     return jsonify(_study_job_public(job))
 
 
 @app.delete("/api/study/jobs/<job_id>")
 def api_study_job_stop(job_id):
+    user, err = _verified_user_record()
+    if err:
+        return jsonify(err[0]), err[1]
     job = _get_study_job(job_id)
     if not job:
-        if not _valid_study_job_id(job_id):
-            return jsonify({"error": "job_not_found"}), 404
-        # A valid opaque id may belong to a POST that is still in flight. Record
-        # the cancellation first; a late creator sees this tombstone and returns
-        # a stopped job instead of starting an AI worker.
-        _remember_study_job_stop(job_id)
-        return jsonify({"jobId": job_id, "status": "stopped"})
+        # Do not create a cancellation tombstone for an ID that this verified
+        # user did not create; otherwise an attacker can pre-cancel another
+        # user's future job ID.
+        return jsonify({"error": "job_not_found"}), 404
+    if job.get("owner_uid") != user["uid"]:
+        return jsonify({"error": "job_not_found"}), 404
     with _study_jobs_lock:
         if job.get("status") in ("queued", "running"):
             _remember_study_job_stop(job_id)
@@ -2741,8 +2863,11 @@ def api_study_job_stop(job_id):
 @app.get("/api/study/jobs/<job_id>/stream")
 def api_study_job_stream(job_id):
     """Return one replay snapshot; the client reconnects while a job is running."""
+    user, err = _verified_user_record()
+    if err:
+        return jsonify(err[0]), err[1]
     job = _get_study_job(job_id)
-    if not job:
+    if not job or job.get("owner_uid") != user["uid"]:
         return jsonify({"error": "job_not_found"}), 404
     try:
         # Cursor is UTF-8 bytes, not JS's UTF-16 `string.length`. This keeps
@@ -2794,6 +2919,9 @@ _STUDY_LANGS = ("Hinglish", "English", "Hindi")
 
 @app.get("/api/study/langs")
 def api_study_langs():
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
     raw_arg = (request.args.get("id") or request.args.get("url")
                or request.args.get("v") or "").strip()
     mode = (request.args.get("mode") or "notes").strip().lower()
@@ -3659,10 +3787,14 @@ def api_study_test():
     fire a tiny 1-token chat completion with that provider's saved key+model and
     report {ok, status, latency, detail} so the admin can see at a glance which
     providers work / are out of quota / down / discontinued. Cheap but not free,
-    so it's lightly rate-limited per IP."""
-    ip = _client_ip()
-    uid = (request.args.get("uid") or "").strip()
-    if not _is_unlimited(uid) and not _rate_ok("study_test", ip, 20, 3600):
+    so it is available only to verified admins and rate-limited per admin."""
+    user, err = _verified_user_record()
+    if err:
+        return jsonify(err[0]), err[1]
+    if not user["is_admin"]:
+        return jsonify({"error": "forbidden"}), 403
+    uid = user["uid"]
+    if not _rate_ok("study_test", uid, 20, 3600):
         return jsonify({"error": "rate_limited",
                         "detail": "Too many test runs this hour. Try again later."}), 429
 
@@ -3815,6 +3947,9 @@ def api_status():
     """Cheap status check for the AI Study dot. Only reads Firestore (no YouTube,
     no AI, no quota). A successful response means the server is up; cachedTranscript
     tells the UI whether this video is already generated (yellow) or not (green)."""
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
     raw_arg = (request.args.get("id") or request.args.get("v")
                or request.args.get("url") or "").strip()
     video_id = _parse_video_id(raw_arg)
@@ -3874,16 +4009,16 @@ def api_status():
                     out["omnirouteProviders"] = _omniroute_verified_providers(_okeys[0])
         except Exception:  # noqa: BLE001
             pass
-    uid = (request.args.get("uid") or "").strip()
+    uid = user["uid"]
     try:
-        granted = bool(uid and _load_ai_limits().get("focusUsers", {}).get(uid))
+        granted = bool(_load_ai_limits().get("focusUsers", {}).get(uid))
     except Exception:  # noqa: BLE001
         granted = False
     out["showFocusBox"] = bool(global_focus or granted)
     return jsonify(out)
 
 
-def _tutor_prepare(body):
+def _tutor_prepare(body, user):
     """Shared setup for the AI tutor endpoints — /api/tutor (blocking) and
     /api/tutor/stream (SSE). Validates params, enforces rate limits, resolves the
     transcript and builds the grounded chat `messages`. Returns (err, data) where
@@ -3908,13 +4043,18 @@ def _tutor_prepare(body):
         return ({"error": "ai_not_configured",
                  "detail": "Add an AI key in the admin panel (Study AI / Groq)."}, 503), None
 
-    uid = (request.args.get("uid") or body.get("uid") or "").strip()
+    # Quotas are keyed to the verified account, not a caller-provided UID or a
+    # spoofable X-Forwarded-For header. Free accounts get the same five-message
+    # daily experience as the UI; Pro accounts use the configured server caps.
+    uid = user["uid"]
     if not _is_unlimited(uid):
-        lims, ip = _load_ai_limits(), _client_ip()
-        if (not _rate_ok("tutor_h", ip, lims["tutorPerHour"], 3600)
-                or not _rate_ok("tutor_d", ip, lims["tutorPerDay"], 86400)):
+        lims = _load_ai_limits()
+        daily_limit = lims["tutorPerDay"] if user.get("is_pro") else min(5, lims["tutorPerDay"])
+        hourly_limit = lims["tutorPerHour"] if user.get("is_pro") else min(5, lims["tutorPerHour"])
+        if (not _rate_ok("tutor_h", uid, hourly_limit, 3600)
+                or not _rate_ok("tutor_d", uid, daily_limit, 86400)):
             return ({"error": "rate_limited",
-                     "detail": "Tutor message limit reached. Try later, or ask the admin for unlimited access."}, 429), None
+                     "detail": "Tutor message limit reached. Try later, or upgrade for higher limits."}, 429), None
 
     try:
         t = _extract_transcript(video_id, "auto")
@@ -3972,8 +4112,11 @@ def api_tutor():
     """AI tutor grounded in a video's transcript. Per-user chat — NOT cached.
     Params (GET query or POST json): id, q (question), out (lang),
     mode=chat|teach, history=[{role,content}...]."""
+    user, auth_err = _verified_user_record()
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
     body = request.get_json(silent=True) or {} if request.method == "POST" else {}
-    err, data = _tutor_prepare(body)
+    err, data = _tutor_prepare(body, user)
     if err:
         return jsonify(err[0]), err[1]
 
@@ -3994,8 +4137,11 @@ def api_tutor_stream():
     browser token-by-token so it types out live, and keeps the connection alive
     on slow models (no Cloudflare 524). Same params + grounding as /api/tutor;
     the client falls back to the blocking endpoint on any error."""
+    user, auth_err = _verified_user_record()
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
     body = request.get_json(silent=True) or {} if request.method == "POST" else {}
-    err, data = _tutor_prepare(body)
+    err, data = _tutor_prepare(body, user)
     if err:
         return jsonify(err[0]), err[1]
     ai = data["ai"]
@@ -4073,18 +4219,18 @@ def api_stream():
         finally:
             upstream.close()
 
+    origin = request.headers.get("Origin", "").rstrip("/")
     resp_headers = {
         "Accept-Ranges": "bytes",
         "Content-Type": upstream.headers.get("Content-Type", "video/mp4"),
         "Cache-Control": "no-store",
-        # Explicit CORS on the STREAMED response. flask-cors' after_request
-        # normally covers this, but streamed Response objects can bypass it in
-        # some setups — and without an Access-Control-Allow-Origin header the
-        # browser marks a crossorigin <video> as "tainted", which makes
-        # canvas.toDataURL() throw. The Turbo screenshot feature draws this
-        # <video> onto a canvas, so this header is what keeps capture working.
-        "Access-Control-Allow-Origin": "*",
     }
+    # Streamed responses can bypass flask-cors' normal after-request handling.
+    # Reflect only configured browser origins so canvas capture keeps working
+    # without making the byte proxy cross-origin public.
+    if origin in ALLOWED_ORIGINS:
+        resp_headers["Access-Control-Allow-Origin"] = origin
+        resp_headers["Vary"] = "Origin"
     for h in ("Content-Length", "Content-Range"):
         if h in upstream.headers:
             resp_headers[h] = upstream.headers[h]
@@ -4142,6 +4288,150 @@ def _group_route(chat_id):
     except Exception as exc:  # noqa: BLE001
         log.warning("group route read failed: %s", exc)
     return None
+
+
+def _telegram_chat_for_user(user):
+    """Read the authenticated user's configured Telegram destination."""
+    telegram = ((user.get("data") or {}).get("appState") or {}).get("telegram") or {}
+    chat_id = str(telegram.get("chatId") or "").strip()
+    return chat_id if re.fullmatch(r"-?\d+", chat_id) else ""
+
+
+def _telegram_media_doc_id(uid, file_id):
+    """Stable safe ID for one account's opaque Telegram file reference."""
+    return hashlib.sha256((uid + "\n" + file_id).encode("utf-8")).hexdigest()
+
+
+def _telegram_media_signing_secret():
+    explicit = os.environ.get("TELEGRAM_MEDIA_SIGNING_SECRET", "").strip()
+    if explicit:
+        return explicit
+    try:
+        service_account = json.loads(os.environ.get("FIREBASE_SERVICE_ACCOUNT", "") or "{}")
+        private_key = str(service_account.get("private_key") or "").strip()
+        if private_key:
+            return private_key
+    except (TypeError, ValueError):
+        pass
+    return _telegram_token()
+
+
+def _telegram_media_signature(uid, file_id):
+    secret = _telegram_media_signing_secret()
+    if not secret:
+        return ""
+    message = (uid + "\n" + file_id).encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+def _remember_telegram_file_owner(uid, file_id, source):
+    """Create an immutable server-owned Telegram media ownership record.
+
+    Browser-writable user state is deliberately never used as authorization for
+    `/tg-photo`: a user could otherwise copy someone else's opaque file ID into
+    their document.  Both trusted upload relays write this collection instead.
+    """
+    signature = _telegram_media_signature(uid, file_id)
+    if not _fb_db or not uid or not file_id or not signature:
+        return False
+    ref = _fb_db.collection("telegram_media_owners").document(_telegram_media_doc_id(uid, file_id))
+    try:
+        from firebase_admin import firestore
+        ref.create({
+            "ownerUid": uid,
+            "fileId": file_id,
+            "source": source,
+            "signature": signature,
+            "createdAt": firestore.SERVER_TIMESTAMP,
+        })
+        return True
+    except Exception as exc:  # noqa: BLE001
+        # Repeated delivery of the same Telegram object is safe only when the
+        # existing immutable record is the exact file for the same account.
+        try:
+            existing = ref.get()
+            data = existing.to_dict() if existing.exists else {}
+            return bool(data and data.get("ownerUid") == uid and data.get("fileId") == file_id
+                        and hmac.compare_digest(str(data.get("signature") or ""), signature))
+        except Exception:  # noqa: BLE001
+            log.warning("telegram media ownership write failed: %s", exc)
+            return False
+
+
+def _user_owns_telegram_file(user, file_id):
+    """Check the trusted media-owner record rather than mutable user data."""
+    if not _fb_db or not file_id:
+        return False
+    try:
+        snap = _fb_db.collection("telegram_media_owners").document(
+            _telegram_media_doc_id(user.get("uid") or "", file_id)).get()
+        data = snap.to_dict() if snap.exists else {}
+        expected = _telegram_media_signature(user.get("uid") or "", file_id)
+        supplied = str(data.get("signature") or "")
+        return bool(expected and data and data.get("ownerUid") == user.get("uid")
+                    and data.get("fileId") == file_id
+                    and hmac.compare_digest(supplied, expected))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("telegram media ownership lookup failed: %s", exc)
+        return False
+
+
+def _legacy_telegram_file_ids(value, found=None):
+    """Collect only explicit legacy `tgFileId` fields from a user snapshot."""
+    found = found if found is not None else set()
+    if isinstance(value, dict):
+        file_id = value.get("tgFileId")
+        if isinstance(file_id, str) and file_id.strip():
+            found.add(file_id.strip())
+        for child in value.values():
+            _legacy_telegram_file_ids(child, found)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            _legacy_telegram_file_ids(child, found)
+    return found
+
+
+def _backfill_legacy_telegram_media_owners():
+    """One-time trusted migration for media saved before ownership records.
+
+    The completion marker is HMAC-authenticated so a browser cannot suppress
+    the migration by writing a forged marker. Once complete, newly added values
+    in mutable user documents are never adopted; only trusted relays can add
+    ownership records. Startup fails if any reference cannot be signed, keeping
+    strict enforcement from serving a partially migrated gallery.
+    """
+    if not _fb_db or not _telegram_token():
+        return
+    marker_ref = _fb_db.collection("server_migrations").document("telegram_media_owners_v1")
+    marker_signature = _telegram_media_signature("__migration__", "telegram_media_owners_v1")
+    marker = marker_ref.get()
+    marker_data = marker.to_dict() if marker.exists else {}
+    if marker_signature and hmac.compare_digest(
+            str(marker_data.get("signature") or ""), marker_signature):
+        return
+
+    migrated = 0
+    failures = 0
+    for user_snap in _fb_db.collection("users").stream():
+        for file_id in _legacy_telegram_file_ids(user_snap.to_dict() or {}):
+            if _remember_telegram_file_owner(user_snap.id, file_id, "legacy-backfill"):
+                migrated += 1
+            else:
+                failures += 1
+    if failures:
+        raise RuntimeError("Telegram media ownership migration failed for %d references" % failures)
+
+    from firebase_admin import firestore
+    marker_ref.set({
+        "signature": marker_signature,
+        "completedAt": firestore.SERVER_TIMESTAMP,
+        "recordsProcessed": migrated,
+    })
+    log.info("Telegram media ownership migration complete (%d references)", migrated)
+
+
+# Complete the legacy backfill before the web server begins accepting requests.
+_backfill_legacy_telegram_media_owners()
 
 
 # ── Question-report relay ─────────────────────────────────────────────────
@@ -4369,14 +4659,19 @@ def api_report_webhook():
 
 @app.post("/send-photo")
 def api_send_photo():
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
     data = request.get_json(silent=True) or {}
-    chat_id = str(data.get("chatId") or "").strip()
+    chat_id = _telegram_chat_for_user(user)
     image_b64 = data.get("imageBase64") or ""
     caption = (data.get("caption") or "")[:1024]
 
-    if not chat_id or not image_b64:
-        return jsonify({"ok": False, "error": "chatId and imageBase64 required"}), 400
-    if _photo_rate_limited(chat_id):
+    if not chat_id:
+        return jsonify({"ok": False, "error": "Connect a Telegram chat in your profile first."}), 400
+    if not image_b64:
+        return jsonify({"ok": False, "error": "imageBase64 required"}), 400
+    if _photo_rate_limited(user["uid"]):
         return jsonify({"ok": False, "error": "Too many screenshots — ek minute baad try karo."}), 429
 
     token = _telegram_token()
@@ -4384,11 +4679,16 @@ def api_send_photo():
         return jsonify({"ok": False, "error": "bot token not configured (config/telegram.botToken)"}), 500
 
     try:
-        img = base64.b64decode(image_b64)
+        img = base64.b64decode(image_b64, validate=True)
     except Exception:  # noqa: BLE001
         return jsonify({"ok": False, "error": "bad base64 image"}), 400
     if not img:
         return jsonify({"ok": False, "error": "empty image"}), 400
+    if len(img) > MAX_TELEGRAM_IMAGE_BYTES:
+        return jsonify({"ok": False, "error": "image too large"}), 413
+    if not (img.startswith(b"\xff\xd8\xff") or img.startswith(b"\x89PNG\r\n\x1a\n")
+            or img.startswith(b"RIFF") and img[8:12] == b"WEBP"):
+        return jsonify({"ok": False, "error": "unsupported image format"}), 400
 
     # Route to the user's group "📸 Images" topic if they ran /setup, else DM.
     payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
@@ -4412,6 +4712,11 @@ def api_send_photo():
         # /tg-photo. Telegram hosts the actual image, permanently.
         photos = ((j.get("result") or {}).get("photo") or [])
         file_id = photos[-1].get("file_id", "") if photos else ""
+        # Do not hand a browser a retrievable file reference until the trusted
+        # owner mapping exists. The photo was delivered even if this write fails.
+        if file_id and not _remember_telegram_file_owner(user["uid"], file_id, "turbo-relay"):
+            log.error("send-photo delivered but could not persist media owner for uid=%s", user["uid"])
+            file_id = ""
         log.info("send-photo → %s (%d bytes, file_id=%s)", payload["chat_id"], len(img), file_id[:12])
         return jsonify({"ok": True, "fileId": file_id})
     except Exception as exc:  # noqa: BLE001
@@ -4421,12 +4726,15 @@ def api_send_photo():
 
 @app.get("/tg-photo")
 def api_tg_photo():
-    """Stream a Telegram-hosted photo by file_id so the app can display saved
-    moments without storing any image bytes. Resolves file_id → file_path via
-    getFile, then proxies the download (token stays server-side)."""
+    """Stream a Telegram-hosted photo only to its authenticated Pro owner."""
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
     file_id = (request.args.get("file_id") or "").strip()
     if not file_id:
         return jsonify({"error": "need ?file_id"}), 400
+    if not _user_owns_telegram_file(user, file_id):
+        return jsonify({"error": "photo_not_found"}), 404
     token = _telegram_token()
     if not token:
         return jsonify({"error": "bot token not configured"}), 500
@@ -4455,11 +4763,17 @@ def api_tg_photo():
 
         ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else "jpg"
         ctype = "image/png" if ext == "png" else ("image/webp" if ext == "webp" else "image/jpeg")
-        return Response(stream_with_context(generate()), headers={
+        response = Response(stream_with_context(generate()), headers={
             "Content-Type": ctype,
-            "Cache-Control": "public, max-age=86400",   # browser caches repeat views
-            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "private, max-age=3600",
         })
+        # Flask-CORS normally adds this in after_request; set it directly too
+        # because this endpoint returns a streaming response.
+        origin = (request.headers.get("Origin") or "").rstrip("/")
+        if origin in ALLOWED_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+        return response
     except Exception as exc:  # noqa: BLE001
         log.warning("tg-photo failed: %s", exc)
         return jsonify({"error": str(exc)[:200]}), 502

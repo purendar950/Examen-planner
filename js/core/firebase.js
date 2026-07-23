@@ -101,6 +101,16 @@ if (_configFilled) {
   });
 }
 
+/* ── Authenticated backend requests ──
+   Protected services verify this Firebase ID token server-side. Keep token
+   acquisition here so feature modules never fall back to caller-supplied UIDs. */
+async function getFirebaseIdToken(forceRefresh) {
+  if (!_fbReady || !auth || !auth.currentUser) {
+    throw new Error('Please sign in to use this feature.');
+  }
+  return auth.currentUser.getIdToken(!!forceRefresh);
+}
+
 /* ── Sync indicator helper ── */
 function setSyncStatus(state, label) {
   const ind = document.getElementById('sync-indicator');

@@ -1279,17 +1279,12 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') ytoCloseAddVideoModal();
 });
 
-/* ── When a course is opened, also push video list into YouTube tab sidebar ── */
-const _switchPageV2 = switchPage;
-switchPage = function(page) {
-  _switchPageV2(page);
-  // Playlist Organiser is now a sub-tab inside the YouTube page; its render is
-  // triggered by ytSwitchSub('organiser') (see youtube.js), not by switchPage.
-  if (page === 'youtube' && ytoCurrentPl) {
-    // Restore course sidebar when returning to YT tab from anywhere
+/* Restore the course sidebar after the YouTube tab becomes active. */
+onPageActivated('youtube', function () {
+  if (ytoCurrentPl) {
     setTimeout(function() { ytoPopulateYtSidebar(ytoCurrentPl, ytCurrentVideoId || ''); }, 80);
   }
-};
+});
 
 /* UPSC exam switching support */
 const _origSwitchExam = window.switchExam || function(){};

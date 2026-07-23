@@ -255,8 +255,7 @@ function rateLimited(chatId) {
   return arr.length > 15;
 }
 
-/* ── Photo rate limit: max 6 screenshots / chat / minute (uploads are heavy
-   and the /send-photo endpoint is unauthenticated, like /send). ──────────── */
+/* ── Photo rate limit: max 6 screenshots / authenticated user / minute ───── */
 const _photoRate = new Map();
 function photoRateLimited(chatId) {
   const now = Date.now();
@@ -542,6 +541,11 @@ bot.on('photo', async (msg) => {
     if (!largest || !largest.file_id) return;
 
     const admin = global._fbAdmin;
+    if (!await rememberTelegramMediaOwner(user.uid, largest.file_id, 'bot-upload')) {
+      console.error(`Could not record Telegram media owner for uid:${user.uid}`);
+      bot.sendMessage(chatId, '⚠️ Image receive ho gayi, lekin gallery mein safely save nahi ho saki. Dobara bhejo.').catch(() => {});
+      return;
+    }
     await db.collection('users').doc(user.uid).set({
       telegramInbox: admin.firestore.FieldValue.arrayUnion({
         id: 'img_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
@@ -570,13 +574,106 @@ bot.on('polling_error', (err) => {
    HTTP Server (health check + /send proxy)
    ════════════════════════════════════════════════════════════════════════════ */
 const PORT = process.env.PORT || 3000;
+const ALLOWED_ORIGINS = new Set((process.env.ALLOWED_ORIGINS ||
+  'https://examzen.in,https://www.examzen.in,https://appassets.androidengine,http://localhost:5173')
+  .split(',').map(origin => origin.trim().replace(/\/$/, '')).filter(Boolean));
+const MAX_RELAY_BODY_BYTES = 12 * 1024 * 1024;
+
+function setCors(req, res) {
+  const origin = String(req.headers.origin || '').replace(/\/$/, '');
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+  }
+  return !origin || ALLOWED_ORIGINS.has(origin);
+}
+
+function sendJson(res, status, body) {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
+async function requireFirebaseUser(req) {
+  if (!db || !global._fbAdmin) throw Object.assign(new Error('authentication unavailable'), { status: 503 });
+  const header = String(req.headers.authorization || '');
+  if (!header.startsWith('Bearer ')) throw Object.assign(new Error('Firebase ID token required'), { status: 401 });
+  try {
+    const decoded = await global._fbAdmin.auth().verifyIdToken(header.slice(7).trim());
+    if (!decoded || !decoded.uid) throw new Error('missing uid');
+    return decoded;
+  } catch (err) {
+    throw Object.assign(new Error('invalid or expired Firebase ID token'), { status: 401 });
+  }
+}
+
+function telegramChatForUserData(userData) {
+  const telegram = ((userData || {}).appState || {}).telegram;
+  const chatId = telegram && String(telegram.chatId || '').trim();
+  return /^-?\d+$/.test(chatId || '') ? chatId : '';
+}
+
+async function proRelayUser(uid) {
+  const snap = await db.collection('users').doc(uid).get();
+  const data = snap.exists ? (snap.data() || {}) : {};
+  if (!await isAdminUid(uid) && !isProUser(data, todayIST())) {
+    throw Object.assign(new Error('This screenshot feature requires an active Pro plan or trial'), { status: 403 });
+  }
+  return data;
+}
+
+function telegramMediaDocId(uid, fileId) {
+  return require('crypto').createHash('sha256').update(uid + '\n' + fileId).digest('hex');
+}
+
+function telegramMediaSigningSecret() {
+  const explicit = String(process.env.TELEGRAM_MEDIA_SIGNING_SECRET || '').trim();
+  if (explicit) return explicit;
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT || '{}');
+    if (serviceAccount.private_key) return String(serviceAccount.private_key);
+  } catch (error) { /* use the bot token fallback */ }
+  return String(TOKEN || '');
+}
+
+function telegramMediaSignature(uid, fileId) {
+  const secret = telegramMediaSigningSecret();
+  return require('crypto').createHmac('sha256', secret).update(uid + '\n' + fileId).digest('hex');
+}
+
+async function rememberTelegramMediaOwner(uid, fileId, source) {
+  if (!db || !uid || !fileId) return false;
+  const ref = db.collection('telegram_media_owners').doc(telegramMediaDocId(uid, fileId));
+  const signature = telegramMediaSignature(uid, fileId);
+  try {
+    await ref.create({
+      ownerUid: uid,
+      fileId,
+      source,
+      signature,
+      createdAt: global._fbAdmin.firestore.FieldValue.serverTimestamp()
+    });
+    return true;
+  } catch (error) {
+    try {
+      const existing = await ref.get();
+      const data = existing.exists ? (existing.data() || {}) : {};
+      return data.ownerUid === uid && data.fileId === fileId && data.signature === signature;
+    } catch (readError) {
+      console.error('telegram media ownership write failed:', error.message);
+      return false;
+    }
+  }
+}
 
 const server = http.createServer((req, res) => {
 
-  /* CORS headers — allow admin.html on GitHub Pages to call this */
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  const corsAllowed = setCors(req, res);
+  if (req.headers.origin && !corsAllowed) {
+    sendJson(res, 403, { ok: false, error: 'origin not allowed' });
+    return;
+  }
 
   /* Preflight */
   if (req.method === 'OPTIONS') {
@@ -595,11 +692,28 @@ const server = http.createServer((req, res) => {
   /* ── POST /send — proxy Telegram sendMessage ── */
   if (req.method === 'POST' && req.url === '/send') {
     let body = '';
-    req.on('data', chunk => { body += chunk; });
+    let bodyBytes = 0;
+    let aborted = false;
+    req.on('data', chunk => {
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_RELAY_BODY_BYTES) {
+        aborted = true;
+        sendJson(res, 413, { ok: false, error: 'request too large' });
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', async () => {
+      if (aborted) return;
       try {
+        const actor = await requireFirebaseUser(req);
+        if (!await isAdminUid(actor.uid)) throw Object.assign(new Error('admin access required'), { status: 403 });
         const { chatId, text } = JSON.parse(body);
-        if (!chatId || !text) throw new Error('chatId and text are required');
+        if (!/^-?\d+$/.test(String(chatId || '')) || typeof text !== 'string' || !text.trim()) {
+          throw Object.assign(new Error('numeric chatId and text are required'), { status: 400 });
+        }
+        if (text.length > 4096) throw Object.assign(new Error('message too long'), { status: 400 });
 
         const tgUrl = `https://api.telegram.org/bot${TOKEN}/sendMessage`;
         const payload = JSON.stringify({
@@ -636,18 +750,15 @@ const server = http.createServer((req, res) => {
         }
       } catch (e) {
         console.error('❌ /send error:', e.message);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: e.message }));
+        sendJson(res, e.status || 500, { ok: false, error: e.message });
       }
     });
     return;
   }
 
-  /* ── POST /send-photo — relay a Turbo screenshot to a Telegram chat ──
-     Body: JSON { chatId, imageBase64, caption }. The browser captures the
-     current Turbo <video> frame to a JPEG and base64-encodes it; we decode it
-     to a Buffer and hand it to node-telegram-bot-api's sendPhoto (which does
-     the multipart upload to Telegram for us). */
+  /* ── POST /send-photo — relay a Turbo screenshot for a Pro account ──
+     Body: JSON { imageBase64, caption }. The destination is derived from the
+     verified Firebase account; no browser-supplied chat ID is accepted. */
   if (req.method === 'POST' && req.url === '/send-photo') {
     let body = '';
     let aborted = false;
@@ -665,17 +776,28 @@ const server = http.createServer((req, res) => {
     req.on('end', async () => {
       if (aborted) return;
       try {
-        const { chatId, imageBase64, caption } = JSON.parse(body);
-        if (!chatId || !imageBase64) throw new Error('chatId and imageBase64 are required');
+        const actor = await requireFirebaseUser(req);
+        const relayUser = await proRelayUser(actor.uid);
+        const { imageBase64, caption } = JSON.parse(body);
+        const chatId = telegramChatForUserData(relayUser);
+        if (!chatId) throw Object.assign(new Error('Connect a Telegram chat in your profile first'), { status: 400 });
+        if (typeof imageBase64 !== 'string' || !imageBase64) {
+          throw Object.assign(new Error('imageBase64 is required'), { status: 400 });
+        }
 
-        if (photoRateLimited(chatId)) {
+        if (photoRateLimited(actor.uid)) {
           res.writeHead(429, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ ok: false, error: 'Too many screenshots — ek minute baad try karo.' }));
           return;
         }
 
         const buffer = Buffer.from(imageBase64, 'base64');
-        if (!buffer.length) throw new Error('empty image');
+        if (!buffer.length) throw Object.assign(new Error('empty image'), { status: 400 });
+        if (buffer.length > 8 * 1024 * 1024) throw Object.assign(new Error('image too large'), { status: 413 });
+        const isImage = (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) ||
+          buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) ||
+          (buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP');
+        if (!isImage) throw Object.assign(new Error('unsupported image format'), { status: 400 });
 
         /* Destination: if this user ran /setup in a group, route the screenshot
            to that group's "📸 Images" topic; otherwise fall back to their DM. */
@@ -692,21 +814,26 @@ const server = http.createServer((req, res) => {
           } catch (e) { /* fall back to DM on any lookup error */ }
         }
 
-        await bot.sendPhoto(
+        const sent = await bot.sendPhoto(
           target,
           buffer,
           opts,
           { filename: 'turbo-frame.jpg', contentType: 'image/jpeg' }
         );
+        const photos = (sent && sent.photo) || [];
+        let fileId = photos.length ? String(photos[photos.length - 1].file_id || '') : '';
+        if (fileId && !await rememberTelegramMediaOwner(actor.uid, fileId, 'bot-relay')) {
+          console.error(`Photo delivered but could not record media owner for uid:${actor.uid}`);
+          fileId = '';
+        }
 
         console.log(`✅ /send-photo → ${target === chatId ? 'DM' : 'group ' + target + ' topic ' + opts.message_thread_id} (from chatId:${chatId}, ${buffer.length} bytes)`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
+        res.end(JSON.stringify({ ok: true, fileId }));
       } catch (e) {
         const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
         console.error('❌ /send-photo error:', errMsg);
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: errMsg }));
+        sendJson(res, e.status || 400, { ok: false, error: errMsg });
       }
     });
     return;

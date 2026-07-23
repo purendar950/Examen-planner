@@ -335,6 +335,20 @@ saveTelegramSettings = function() {
 /* 10. AI Tutor messages → max 5/day free (was ungated).
    Wraps `sendTutor` from js/features/ai-tutor.js (the function the
    chat Send button + the suggestion chips call). */
+function ezShowTutorLimitPreview(maxFree) {
+  const el = document.getElementById('tutor-chat') ||
+             document.getElementById('ai-tutor-messages') ||
+             document.querySelector('.tutor-messages');
+  if (el) {
+    ezBlurPreview(el, {
+      title: 'AI Tutor — Daily Limit Reached',
+      desc: 'Free plan: ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor with priority responses.',
+      height: 'md', icon: '🤖', previewType: 'aitutor'
+    });
+  } else {
+    ezLockedMsg('Free plan: max ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor');
+  }
+}
 const _aiTutorSendGate = typeof sendTutor === 'function' ? sendTutor : null;
 if (_aiTutorSendGate) {
   sendTutor = function() {
@@ -344,12 +358,12 @@ if (_aiTutorSendGate) {
       const count = parseInt(localStorage.getItem(key) || '0', 10);
       const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
       if (count >= maxFree) {
-        ezLockedMsg('Free plan: max ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor');
+        ezShowTutorLimitPreview(maxFree);
         return;
       }
       try { localStorage.setItem(key, String(count + 1)); } catch(e) {}
     }
-    _aiTutorSendGate.apply(this, arguments);
+    return _aiTutorSendGate.apply(this, arguments);
   };
 }
 
@@ -442,13 +456,10 @@ function ezApplyPageLock() {
     tab.title = '';
   });
 }
-const _switchPageGate = switchPage;
-switchPage = function(page) {
-  // FIX: free users can open every page now — only specific features
-  // inside each page stay Pro-gated (see gate list in the comment above).
-  _switchPageGate(page);
-  try { ezApplyPageLock(); } catch(e) {}
-};
+onPageActivated('*', function () {
+  // Free users can open every page; individual features enforce plan access.
+  try { ezApplyPageLock(); } catch (e) {}
+});
 
 /* Apply exam lock after profile loads */
 const _ezLoadProfileBase4 = ezLoadProfile;
@@ -724,13 +735,10 @@ function ezBlurPreview(containerEl, options) {
       previewType: 'turbo'
     });
   }
-  // Re-blur whenever a YouTube page is rendered or turbo is toggled
-  if (typeof switchPage === 'function') {
-    var _sp = switchPage;
-    switchPage = function (page) {
-      _sp.apply(this, arguments);
-      try { if (page === 'youtube' || page === 'yt-organiser') setTimeout(_blurTurboSurface, 300); } catch (e) {}
-    };
+  // Re-blur whenever YouTube surfaces become active.
+  if (typeof onPageActivated === 'function') {
+    onPageActivated('youtube', function () { setTimeout(_blurTurboSurface, 300); });
+    onPageActivated('yt-organiser', function () { setTimeout(_blurTurboSurface, 300); });
   }
   if (typeof ytToggleTurbo === 'function') {
     var _origT = ytToggleTurbo;
@@ -747,38 +755,7 @@ function ezBlurPreview(containerEl, options) {
   window.addEventListener('load', function () { setTimeout(_blurTurboSurface, 1500); });
 })();
 
-/* 10b. AI Tutor over-limit → blur the chat surface for free users. */
-(function () {
-  if (typeof sendTutor !== 'function') return;
-  var _orig = sendTutor;
-  sendTutor = function () {
-    if (typeof ezGated === 'function' && ezGated()) {
-      var today = new Date().toISOString().split('T')[0];
-      var key = 'sp_ai_tutor_' + today;
-      var count = parseInt(localStorage.getItem(key) || '0', 10);
-      var maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
-      if (count >= maxFree) {
-        var el = document.getElementById('tutor-chat') ||
-                 document.getElementById('ai-tutor-messages') ||
-                 document.querySelector('.tutor-messages');
-        if (el) {
-          ezBlurPreview(el, {
-            title: 'AI Tutor — Daily Limit Reached',
-            desc: 'Free plan: ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor with priority responses.',
-            height: 'md',
-            icon: '🤖',
-            previewType: 'aitutor'
-          });
-        } else {
-          ezLockedMsg('Free plan: max ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor');
-        }
-        return;
-      }
-      try { localStorage.setItem(key, String(count + 1)); } catch (e) {}
-    }
-    _orig.apply(this, arguments);
-  };
-})();
+/* AI Tutor quota/preview is handled by the single sendTutor gate above. */
 
 /* PDF Export buttons → blur/disable with 💎 lock icon. */
 function ezBlurPdfButtons() {

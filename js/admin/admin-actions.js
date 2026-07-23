@@ -737,7 +737,10 @@ async function testStudyProvidersLegacy() {
   var out = document.getElementById('study-test-out');
   if (out) out.innerHTML = '<span class="muted">⏳ Pinging providers… (up to ~25s each if one is slow)</span>';
   try {
-    var r = await fetch(STUDY_BACKEND + '/api/study/test');
+    var token = await auth.currentUser.getIdToken();
+    var r = await fetch(STUDY_BACKEND + '/api/study/test', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
     var j = await r.json();
     if (j && j.error) { if (out) out.innerHTML = '⚠️ ' + esc(j.detail || j.error); return; }
     var res = (j && j.results) || {};
@@ -1172,10 +1175,12 @@ function buildTgMessage(name, digest) {
 const RENDER_BOT_URL = 'https://examen-planner-2.onrender.com';
 
 /* Send a message to one user via Render bot proxy (avoids browser CORS block) */
-async function tgSendOne(chatId, text, token) {
+async function tgSendOne(chatId, text) {
+  if (!auth.currentUser) throw new Error('Admin sign-in required');
+  const idToken = await auth.currentUser.getIdToken();
   const res = await fetch(RENDER_BOT_URL + '/send', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + idToken },
     body: JSON.stringify({ chatId, text })
   });
   const data = await res.json();

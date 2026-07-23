@@ -723,12 +723,11 @@ function mockUpdateDashSummary() {
   }
 })();
 
-/* ── Hook into navigation / exam switching / dashboard ── */
-const _switchPageMocks = switchPage;
-switchPage = function(page) {
-  _switchPageMocks(page);
-  if (page === 'mocks') { mockEditId = null; mockRenderPage(); }
-};
+/* ── Render mocks when the core navigation activates the page ── */
+onPageActivated('mocks', function () {
+  mockEditId = null;
+  mockRenderPage();
+});
 
 const _switchExamMocks = switchExam;
 switchExam = function(examId) {

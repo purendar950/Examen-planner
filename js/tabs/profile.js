@@ -267,15 +267,10 @@
   };
 
   /* Re-render whenever navigation lands on the profile page (covers
-     restoreActivePage() after reload too). Same wrap pattern as the
-     phase files. */
-  if (typeof switchPage === 'function') {
-    var _switchPageBase = switchPage;
-    switchPage = function (page) {
-      _switchPageBase(page);
-      if (page === 'profile') { try { renderProfilePage(); } catch (e) {} }
-    };
-  }
+     restoreActivePage() after reload too). */
+  onPageActivated('profile', function () {
+    try { renderProfilePage(); } catch (e) {}
+  });
 
   /* ── actions ── */
   window.pfToggleNameEdit = function () {
