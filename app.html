@@ -161,8 +161,14 @@
     <div class="shell-brand">
       <img class="shell-brand-mark" src="assets/brand/studyplanner-mark.svg" alt="" width="38" height="38">
       <span class="shell-brand-text">Study<span>Planner</span></span>
-      <label for="shell-sidebar-collapse" class="shell-collapse-toggle" title="Collapse sidebar" aria-label="Toggle sidebar width">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16"></path><path d="m14 10-2 2 2 2"></path></svg>
+    </div>
+    <div class="shell-sidebar-controls">
+      <label class="shell-sidebar-search" aria-label="Search navigation">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+        <input id="shell-nav-search" type="search" placeholder="Search" autocomplete="off">
+      </label>
+      <label for="shell-sidebar-collapse" class="shell-collapse-toggle" title="Collapse sidebar" aria-label="Collapse sidebar" role="button" tabindex="0">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m13 7-5 5 5 5"></path><path d="m18 7-5 5 5 5"></path></svg>
       </label>
     </div>
     <div class="shell-nav-label">Workspace</div>
@@ -190,16 +196,48 @@
     </div>
   </nav>
   <script>
-    // Persists the desktop sidebar collapse choice across reloads. The visual
-    // collapse itself is pure CSS (checkbox + :has()) — this script never
-    // has to run for the toggle to work, only for the choice to "stick".
+    // Persist the desktop sidebar state, keep the chevron control accessible,
+    // and provide the compact navigation search shown beside it.
     (function () {
       var cb = document.getElementById('shell-sidebar-collapse');
-      if (!cb) return;
+      var toggle = document.querySelector('.shell-collapse-toggle');
+      var search = document.getElementById('shell-nav-search');
+      if (!cb || !toggle) return;
+
+      function setTabVisibility(query) {
+        var normalized = (query || '').trim().toLowerCase();
+        document.querySelectorAll('.nav-tabs .nav-tab').forEach(function (tab) {
+          var label = (tab.getAttribute('title') || tab.textContent || '').toLowerCase();
+          tab.hidden = normalized && label.indexOf(normalized) === -1;
+        });
+      }
+
+      function syncCollapseControl() {
+        var collapsed = cb.checked;
+        var label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+        toggle.title = label;
+        toggle.setAttribute('aria-label', label);
+        toggle.setAttribute('aria-pressed', collapsed ? 'true' : 'false');
+        if (collapsed && search) {
+          search.value = '';
+          setTabVisibility('');
+        }
+      }
+
       try { if (localStorage.getItem('ez_sidebar_collapsed') === '1') cb.checked = true; } catch (e) {}
+      syncCollapseControl();
+
       cb.addEventListener('change', function () {
         try { localStorage.setItem('ez_sidebar_collapsed', cb.checked ? '1' : '0'); } catch (e) {}
+        syncCollapseControl();
       });
+      toggle.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+      });
+      if (search) search.addEventListener('input', function () { setTabVisibility(search.value); });
     })();
   </script>
 
