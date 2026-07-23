@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f4f7f6">
+  <title>StudyPlanner — Modern Fintech App Layout</title>
+  <style>
+    :root {
+      --bg: #f3f6f5;
+      --panel: #fff;
+      --panel-soft: #f8faf9;
+      --ink: #13221e;
+      --muted: #6e7e78;
+      --line: #e1e9e5;
+      --green: #087456;
+      --green-dark: #0d2d24;
+      --green-soft: #e6f4ee;
+      --lime: #dff76a;
+      --blue: #5577e8;
+      --amber: #e59828;
+      --shadow: 0 16px 40px -28px rgba(12, 55, 40, .42);
+      --sidebar: 255px;
+    }
+    [data-theme="dark"] { --bg:#0d1412; --panel:#14201c; --panel-soft:#192720; --ink:#eef6f1; --muted:#99aaa3; --line:#293a33; --green:#57c99d; --green-dark:#102d24; --green-soft:#193b2e; --shadow:0 20px 48px -28px rgba(0,0,0,.7); }
+    * { box-sizing: border-box; }
+    body { min-width:320px; margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing:antialiased; }
+    button { font:inherit; }
+    button:focus-visible { outline:3px solid rgba(8,116,86,.3); outline-offset:2px; }
+    .shell { min-height:100vh; }
+    .sidebar { position:fixed; inset:0 auto 0 0; z-index:3; display:flex; flex-direction:column; width:var(--sidebar); padding:24px 16px 18px; background:var(--panel); border-right:1px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:11px; padding:0 10px 26px; font-size:18px; font-weight:800; letter-spacing:-.6px; }
+    .brand-mark { display:grid; width:35px; height:35px; place-items:center; border-radius:11px; background:var(--green-dark); color:var(--lime); font-size:19px; box-shadow:0 7px 16px rgba(12,44,34,.16); }
+    .exam-switch { display:flex; align-items:center; gap:10px; width:100%; margin-bottom:24px; padding:10px; color:var(--ink); background:var(--panel-soft); border:1px solid var(--line); border-radius:14px; text-align:left; cursor:pointer; }
+    .exam-dot { display:grid; width:34px; height:34px; place-items:center; color:#fff; background:var(--green); border-radius:10px; font-size:10px; font-weight:850; }
+    .exam-switch span { display:block; } .exam-switch strong { flex:1; font-size:12px; } .exam-switch small { display:block; margin-top:1px; color:var(--muted); font-size:10px; }
+    .nav-caption { padding:0 12px 7px; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
+    .nav { display:grid; gap:4px; }
+    .nav button { display:flex; align-items:center; gap:11px; width:100%; padding:10px 12px; color:var(--muted); background:transparent; border:0; border-radius:11px; text-align:left; cursor:pointer; transition:.18s; }
+    .nav button:hover { color:var(--ink); background:var(--panel-soft); transform:translateX(2px); }
+    .nav button.active { color:var(--green); background:var(--green-soft); font-weight:800; }
+    .nav-icon { display:grid; width:20px; place-items:center; font-size:16px; } .badge { margin-left:auto; padding:2px 7px; border-radius:99px; color:var(--green); background:var(--panel); font-size:10px; font-weight:800; }
+    .sidebar-bottom { margin-top:auto; }
+    .streak { padding:15px; color:#f4fbf7; background:var(--green-dark); border-radius:17px; }
+    .streak-top { display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:800; } .streak p { margin:4px 0 11px; color:rgba(244,251,247,.65); font-size:10px; }
+    .week { display:flex; justify-content:space-between; } .week i { display:grid; width:20px; height:20px; place-items:center; background:rgba(255,255,255,.11); border-radius:50%; color:rgba(255,255,255,.55); font-size:8px; font-style:normal; } .week i.done { background:var(--lime); color:var(--green-dark); }
+    .main { min-height:100vh; margin-left:var(--sidebar); }
+    .topbar { position:sticky; top:0; z-index:2; display:flex; justify-content:space-between; align-items:center; min-height:74px; padding:0 34px; background:color-mix(in srgb, var(--bg) 88%, transparent); border-bottom:1px solid color-mix(in srgb, var(--line) 82%, transparent); backdrop-filter:blur(18px); }
+    .topbar-title strong { display:block; font-size:17px; letter-spacing:-.3px; } .topbar-title span { display:block; margin-top:2px; color:var(--muted); font-size:10px; }
+    .top-actions { display:flex; align-items:center; gap:9px; }
+    .icon-btn, .primary-btn { display:inline-flex; align-items:center; justify-content:center; border:0; cursor:pointer; transition:.16s; }
+    .icon-btn:hover, .primary-btn:hover { transform:translateY(-1px); } .icon-btn { width:39px; height:39px; color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:11px; }
+    .avatar { display:grid; width:36px; height:36px; place-items:center; color:#fff; background:linear-gradient(145deg,#235c4b,#77b89c); border-radius:50%; font-size:11px; font-weight:800; }
+    .primary-btn { gap:7px; min-height:40px; padding:0 14px; color:#fff; background:var(--green); border-radius:11px; box-shadow:0 9px 18px rgba(8,116,86,.18); font-size:11px; font-weight:800; }
+    .content { width:min(1440px,100%); margin:0 auto; padding:30px 34px 90px; }
+    .welcome { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:20px; } .welcome h1 { margin:0; font-size:clamp(25px,3vw,36px); letter-spacing:-1.2px; line-height:1.15; } .welcome p { margin:7px 0 0; color:var(--muted); font-size:12px; }
+    .range { display:flex; gap:4px; padding:4px; background:var(--panel); border:1px solid var(--line); border-radius:12px; } .range button { padding:6px 11px; border:0; border-radius:8px; color:var(--muted); background:transparent; font-size:10px; font-weight:700; cursor:pointer; } .range button.active { color:#fff; background:var(--green-dark); }
+    .hero { display:grid; grid-template-columns:minmax(0,1.28fr) minmax(300px,.72fr); gap:17px; }
+    .readiness { position:relative; min-height:280px; overflow:hidden; padding:25px; color:#f2fbf7; background:var(--green-dark); border-radius:24px; box-shadow:0 30px 65px rgba(7,40,28,.2); } .readiness:before { content:""; position:absolute; top:-190px; right:-110px; width:380px; height:380px; border-radius:50%; background:radial-gradient(circle,rgba(128,222,176,.29),transparent 67%); } .readiness:after { content:""; position:absolute; bottom:-160px; left:36%; width:210px; height:210px; border-radius:50%; background:radial-gradient(circle,rgba(223,247,106,.19),transparent 70%); }
+    .eyebrow { position:relative; z-index:1; display:flex; align-items:center; gap:7px; color:rgba(242,251,247,.64); font-size:9px; font-weight:850; letter-spacing:.1em; text-transform:uppercase; } .eyebrow:before { content:""; width:6px; height:6px; border-radius:50%; background:var(--lime); box-shadow:0 0 0 4px rgba(223,247,106,.12); }
+    .readiness-main { position:relative; z-index:1; display:grid; grid-template-columns:140px minmax(0,1fr); align-items:center; gap:25px; margin-top:19px; } .ring { display:grid; width:140px; height:140px; place-items:center; background:conic-gradient(var(--lime) 0 76%,rgba(255,255,255,.1) 76%); border-radius:50%; } .ring:before { content:""; position:absolute; width:122px; height:122px; background:var(--green-dark); border-radius:50%; } .score { position:relative; text-align:center; } .score strong { display:block; font-size:35px; letter-spacing:-1.8px; } .score span { display:block; margin-top:5px; color:rgba(242,251,247,.6); font-size:9px; }
+    .readiness h2 { margin:0; font-size:23px; letter-spacing:-.6px; } .readiness p { max-width:440px; margin:7px 0 16px; color:rgba(242,251,247,.63); font-size:11px; } .hero-metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; } .metric { padding:10px 11px; background:rgba(255,255,255,.065); border:1px solid rgba(255,255,255,.08); border-radius:11px; } .metric span,.metric strong { display:block; } .metric span { color:rgba(242,251,247,.52); font-size:8px; letter-spacing:.05em; text-transform:uppercase; } .metric strong { margin-top:3px; font-size:13px; } .metric strong.em { color:#9be9c3; }
+    .focus-card, .stat, .panel { background:var(--panel); border:1px solid var(--line); box-shadow:var(--shadow); } .focus-card { padding:20px; border-radius:24px; } .card-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; } .card-head h2 { margin:0; font-size:14px; letter-spacing:-.2px; } .card-head p { margin:3px 0 0; color:var(--muted); font-size:9px; } .text-btn { padding:2px; color:var(--green); background:transparent; border:0; font-size:9px; font-weight:800; cursor:pointer; }
+    .task { display:grid; grid-template-columns:28px minmax(0,1fr) auto; align-items:center; gap:9px; padding:12px 0; border-bottom:1px solid var(--line); } .task:last-of-type { border-bottom:0; } .check { width:18px; height:18px; margin-left:6px; appearance:none; border:1.5px solid var(--line); border-radius:6px; cursor:pointer; } .check:checked { background:var(--green); border-color:var(--green); } .check:checked:after { content:"✓"; display:block; color:#fff; text-align:center; font-size:12px; line-height:15px; } .task strong,.task small { display:block; } .task strong { font-size:10px; } .task small { margin-top:2px; color:var(--muted); font-size:8px; } .check:checked + span strong { color:var(--muted); text-decoration:line-through; } .time { padding:4px 7px; color:var(--muted); background:var(--panel-soft); border-radius:7px; font-size:8px; }
+    .progress-row { display:flex; align-items:center; gap:10px; margin-top:11px; } .track { height:6px; flex:1; overflow:hidden; background:var(--panel-soft); border-radius:99px; } .fill { width:33%; height:100%; background:var(--green); border-radius:inherit; transition:.25s; } .progress-row b { font-size:9px; }
+    .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:13px; margin-top:17px; } .stat { padding:16px; border-radius:18px; } .stat-top { display:flex; align-items:center; justify-content:space-between; } .stat-icon { display:grid; width:31px; height:31px; place-items:center; color:var(--green); background:var(--green-soft); border-radius:10px; } .trend { padding:3px 6px; color:var(--green); background:var(--green-soft); border-radius:6px; font-size:8px; font-weight:800; } .trend.amber { color:var(--amber); background:#fff4df; } .stat h3 { margin:14px 0 2px; font-size:22px; letter-spacing:-.7px; } .stat p { margin:0; color:var(--muted); font-size:9px; }
+    .bottom-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(290px,.75fr); gap:17px; margin-top:17px; } .stack { display:grid; gap:17px; align-content:start; } .panel { padding:20px; border-radius:18px; }
+    .bar-chart { display:flex; align-items:end; gap:12px; height:170px; margin-top:20px; padding:0 6px 22px; border-bottom:1px dashed var(--line); } .bar-group { display:grid; grid-template-columns:1fr 1fr; gap:3px; flex:1; align-items:end; height:145px; position:relative; } .bar { height:var(--h); background:var(--line); border-radius:5px 5px 2px 2px; } .bar.actual { background:var(--green); } .bar-group small { position:absolute; top:153px; width:100%; color:var(--muted); text-align:center; font-size:8px; }
+    .subjects { display:grid; gap:16px; margin-top:18px; } .subject { display:grid; grid-template-columns:minmax(105px,1fr) minmax(100px,1.7fr) 33px; align-items:center; gap:12px; font-size:9px; font-weight:700; } .subject-name { display:flex; align-items:center; gap:8px; } .dot { width:8px; height:8px; border-radius:50%; background:var(--c); } .subject .track { height:6px; } .subject .fill { width:var(--p); background:var(--c); }
+    .attention { padding:0; overflow:hidden; } .attention .card-head { padding:20px 20px 15px; } .attention-item { display:flex; align-items:center; gap:11px; padding:12px 20px; border-top:1px solid var(--line); cursor:pointer; } .level { width:3px; height:35px; background:#d95c5c; border-radius:99px; } .level.mid { background:var(--amber); } .attention-item span { flex:1; } .attention-item strong,.attention-item small { display:block; } .attention-item strong { font-size:10px; } .attention-item small { margin-top:2px; color:var(--muted); font-size:8px; } .risk { flex:0 0 auto !important; color:#d95c5c; font-size:9px; font-weight:800; } .risk.mid { color:var(--amber); }
+    .toast { position:fixed; left:50%; bottom:28px; z-index:10; padding:11px 15px; color:#fff; background:var(--green-dark); border-radius:12px; box-shadow:var(--shadow); font-size:11px; transform:translate(-50%,100px); opacity:0; transition:.25s; } .toast.show { transform:translate(-50%,0); opacity:1; }
+    @media(max-width:1040px) { :root { --sidebar:215px; } .content,.topbar { padding-inline:24px; } .hero,.bottom-grid { grid-template-columns:1fr; } }
+    @media(max-width:780px) { :root { --sidebar:0px; } .sidebar { display:none; } .main { margin-left:0; } .topbar { min-height:64px; padding:0 16px; } .top-actions .primary-btn { display:none; } .content { padding:20px 16px 90px; } .range { display:none; } .readiness-main { grid-template-columns:112px minmax(0,1fr); gap:17px; } .ring { width:112px; height:112px; } .ring:before { width:94px; height:94px; } .score strong { font-size:29px; } .stats { grid-template-columns:1fr 1fr; } }
+    @media(max-width:520px) { .welcome { display:block; } .welcome p { max-width:290px; } .readiness { padding:19px; } .readiness-main { grid-template-columns:1fr; } .hero-metrics { gap:5px; } .metric { padding:8px; } .bottom-grid { margin-top:13px; } .panel,.focus-card { padding:16px; } }
+    /* The concept uses pure CSS marks rather than a platform-specific icon font. */
+    .brand-mark { font-size:0; }
+    .brand-mark::before, .brand-mark::after { content:""; position:absolute; display:block; background:var(--lime); border-radius:99px; }
+    .brand-mark::before { width:7px; height:21px; transform:rotate(36deg); }
+    .brand-mark::after { width:6px; height:12px; transform:translate(6px,4px) rotate(36deg); opacity:.72; }
+    .nav-icon { font-size:0; }
+    .nav-icon::before { content:""; display:block; width:8px; height:8px; background:currentColor; border-radius:3px; opacity:.7; }
+    .nav button.active .nav-icon::before { opacity:1; box-shadow:0 0 0 4px color-mix(in srgb, currentColor 14%, transparent); }
+    .nav button:nth-child(3) .nav-icon::before, .nav button:nth-child(6) .nav-icon::before { border-radius:50%; }
+    .stat-icon { font-size:0; }
+    .stat-icon::before { content:""; width:10px; height:10px; display:block; background:currentColor; border-radius:50%; }
+    #themeToggle, #notice { font-size:0; }
+    #themeToggle::after { content:""; width:12px; height:12px; display:block; background:currentColor; border-radius:50%; }
+    #notice::after { content:""; width:10px; height:10px; display:block; background:currentColor; border-radius:50%; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">SP</span>StudyPlanner</div>
+      <button class="exam-switch" id="examSwitch"><span class="exam-dot">CGL</span><span><strong>SSC CGL 2026</strong><small>Tier 1 preparation</small></span><span>⌄</span></button>
+      <div class="nav-caption">Workspace</div>
+      <nav class="nav" aria-label="Primary navigation">
+        <button class="active"><span class="nav-icon">O</span>Overview</button>
+        <button><span class="nav-icon">P</span>Study plan<span class="badge">4</span></button>
+        <button><span class="nav-icon">S</span>Syllabus</button>
+        <button><span class="nav-icon">L</span>Lectures</button>
+        <button><span class="nav-icon">Q</span>Practice &amp; tests</button>
+        <button><span class="nav-icon">A</span>Performance</button>
+      </nav>
+      <div class="sidebar-bottom"><div class="streak"><div class="streak-top"><span>12 day streak</span><span>+</span></div><p>Strong consistency this week</p><div class="week"><i class="done">M</i><i class="done">T</i><i class="done">W</i><i class="done">T</i><i class="done">F</i><i>S</i><i>S</i></div></div></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div class="topbar-title"><strong id="pageTitle">Overview</strong><span id="pageSubtitle">Your focused study command center</span></div><div class="top-actions"><button class="icon-btn" id="themeToggle" aria-label="Toggle color theme">T</button><button class="icon-btn" id="notice" aria-label="Notifications">!</button><span class="avatar">AS</span><button class="primary-btn" id="focus">▷ Start focus session</button></div></header>
+      <div class="content">
+        <section class="welcome"><div><h1>Good morning, Arjun.</h1><p>Your preparation is moving in the right direction. Keep today focused.</p></div><div class="range"><button class="active">Today</button><button>Week</button><button>Month</button></div></section>
+        <section class="hero"><article class="readiness"><div class="eyebrow">Preparation health</div><div class="readiness-main"><div class="ring"><div class="score"><strong>76</strong><span>Readiness score</span></div></div><div><h2>You’re on track</h2><p>Your score improved by 4 points this week. Strengthen geometry and current affairs to reach the next level.</p><div class="hero-metrics"><div class="metric"><span>Exam in</span><strong>84 days</strong></div><div class="metric"><span>Weekly gain</span><strong class="em">+4.2%</strong></div><div class="metric"><span>Target</span><strong>85 score</strong></div></div></div></div></article><article class="focus-card"><div class="card-head"><div><h2>Today’s focus</h2><p>3 tasks · 2h 25m planned</p></div><button class="text-btn">Open plan</button></div><label class="task"><input class="check" type="checkbox" checked><span><strong>Number System</strong><small>Quantitative aptitude · Practice</small></span><b class="time">45 min</b></label><label class="task"><input class="check" type="checkbox"><span><strong>Indian Polity</strong><small>General awareness · Revision</small></span><b class="time">60 min</b></label><label class="task"><input class="check" type="checkbox"><span><strong>Mock Test #08</strong><small>Full syllabus · Timed test</small></span><b class="time">40 min</b></label><div class="progress-row"><div class="track"><div class="fill" id="focusProgress"></div></div><b id="focusCount">1 of 3</b></div></article></section>
+        <section class="stats"><article class="stat"><div class="stat-top"><span class="stat-icon">H</span><span class="trend">+12%</span></div><h3>18.5h</h3><p>Study time this week</p></article><article class="stat"><div class="stat-top"><span class="stat-icon">T</span><span class="trend">+6.4%</span></div><h3>78%</h3><p>Average test accuracy</p></article><article class="stat"><div class="stat-top"><span class="stat-icon">C</span><span class="trend">+14</span></div><h3>142</h3><p>Topics completed</p></article><article class="stat"><div class="stat-top"><span class="stat-icon">R</span><span class="trend amber">7 due</span></div><h3>24</h3><p>Items in revision queue</p></article></section>
+        <section class="bottom-grid"><div class="stack"><article class="panel"><div class="card-head"><div><h2>Study investment</h2><p>Focused hours compared with your daily target</p></div><button class="text-btn">View detail</button></div><div class="bar-chart"><div class="bar-group"><i class="bar actual" style="--h:63%"></i><i class="bar" style="--h:67%"></i><small>Mon</small></div><div class="bar-group"><i class="bar actual" style="--h:48%"></i><i class="bar" style="--h:67%"></i><small>Tue</small></div><div class="bar-group"><i class="bar actual" style="--h:77%"></i><i class="bar" style="--h:67%"></i><small>Wed</small></div><div class="bar-group"><i class="bar actual" style="--h:58%"></i><i class="bar" style="--h:67%"></i><small>Thu</small></div><div class="bar-group"><i class="bar actual" style="--h:88%"></i><i class="bar" style="--h:67%"></i><small>Fri</small></div><div class="bar-group"><i class="bar actual" style="--h:34%"></i><i class="bar" style="--h:67%"></i><small>Sat</small></div><div class="bar-group"><i class="bar actual" style="--h:8%"></i><i class="bar" style="--h:50%"></i><small>Sun</small></div></div></article><article class="panel"><div class="card-head"><div><h2>Subject allocation</h2><p>Coverage across your SSC CGL syllabus</p></div><button class="text-btn">View syllabus</button></div><div class="subjects"><div class="subject" style="--c:#178766;--p:84%"><span class="subject-name"><i class="dot"></i>Quantitative aptitude</span><span class="track"><i class="fill"></i></span><b>84%</b></div><div class="subject" style="--c:#5579df;--p:72%"><span class="subject-name"><i class="dot"></i>General intelligence</span><span class="track"><i class="fill"></i></span><b>72%</b></div><div class="subject" style="--c:#e79224;--p:61%"><span class="subject-name"><i class="dot"></i>General awareness</span><span class="track"><i class="fill"></i></span><b>61%</b></div><div class="subject" style="--c:#a06ad3;--p:79%"><span class="subject-name"><i class="dot"></i>English comprehension</span><span class="track"><i class="fill"></i></span><b>79%</b></div></div></article></div><div class="stack"><article class="panel attention"><div class="card-head"><div><h2>Needs attention</h2><p>Priority topics based on recent performance</p></div><button class="text-btn">View all</button></div><div class="attention-item"><i class="level"></i><span><strong>Geometry</strong><small>3 tests below target</small></span><b class="risk">54%</b>›</div><div class="attention-item"><i class="level"></i><span><strong>Current Affairs</strong><small>12 revisions overdue</small></span><b class="risk">58%</b>›</div><div class="attention-item"><i class="level mid"></i><span><strong>Idioms &amp; Phrases</strong><small>Accuracy trending down</small></span><b class="risk mid">67%</b>›</div></article><article class="panel"><div class="card-head"><div><h2>Next assessment</h2><p>SSC CGL Mock Test #08 · 60 min</p></div><button class="text-btn">Review</button></div><p style="margin:18px 0 0;color:var(--muted);font-size:11px">A calmer, finance-grade information hierarchy keeps the next important choice visible without competing with the dashboard.</p></article></div></section>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast">Preview interaction</div>
+  <script>
+    const toast = document.getElementById('toast'); let toastTimeout;
+    const notify = message => { toast.textContent = message; toast.classList.add('show'); clearTimeout(toastTimeout); toastTimeout = setTimeout(() => toast.classList.remove('show'), 2200); };
+    document.getElementById('themeToggle').addEventListener('click', () => { const dark = document.documentElement.dataset.theme === 'dark'; document.documentElement.dataset.theme = dark ? '' : 'dark'; notify(`${dark ? 'Light' : 'Dark'} theme enabled`); });
+    document.querySelectorAll('.range button').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.range button').forEach(item => item.classList.remove('active')); button.classList.add('active'); notify(`${button.textContent} portfolio selected`); }));
+    document.querySelectorAll('.nav button').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.nav button').forEach(item => item.classList.remove('active')); button.classList.add('active'); document.getElementById('pageTitle').textContent = button.textContent.replace(/\d|New/g, '').trim(); notify(`${document.getElementById('pageTitle').textContent} workspace preview`); }));
+    const checks = [...document.querySelectorAll('.check')]; const renderTasks = () => { const complete = checks.filter(item => item.checked).length; document.getElementById('focusProgress').style.width = `${complete / checks.length * 100}%`; document.getElementById('focusCount').textContent = `${complete} of ${checks.length}`; if (complete === checks.length) notify('Today’s focus is complete'); }; checks.forEach(check => check.addEventListener('change', renderTasks));
+    document.getElementById('focus').addEventListener('click', () => notify('Focus session ready')); document.getElementById('notice').addEventListener('click', () => notify('You have 2 study reminders')); document.getElementById('examSwitch').addEventListener('click', () => notify('Exam switcher preview'));
+  </script>
+</body>
+</html>
