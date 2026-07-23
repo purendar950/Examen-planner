@@ -404,6 +404,15 @@ const _isBadProtocol = (_protocol === 'content:' || _protocol === 'file:');
 
 /* ── 5-SECOND HARD TIMEOUT ──
    Agar Firebase 5s mein respond na kare, loading screen hatao ── */
+// If we have the cross-page "just signed in" hint from a sibling page, give
+// Firebase extra time to rehydrate the session from IndexedDB. A cold cache
+// or low-end phone can easily take 8-10s on first restore.
+let _hardTimeoutMs = 5000;
+try {
+  const _raw2 = sessionStorage.getItem('sp_justSignedIn');
+  const _n2 = _raw2 ? parseInt(_raw2, 10) : 0;
+  if (_n2 && (Date.now() - _n2) < 5 * 60 * 1000) _hardTimeoutMs = 15000;
+} catch (e) { /* no-op */ }
 const _authTimeout = setTimeout(() => {
   if (!_authInitDone) {
     _authInitDone = true;
@@ -420,6 +429,9 @@ const _authTimeout = setTimeout(() => {
       // bounce to the login page if Firebase still reports nobody signed in.
       setTimeout(function() {
         if (auth && auth.currentUser) { location.reload(); return; }
+        // Clear the cross-page hint so a future bounce doesn't keep us in
+        // the extended-grace mode.
+        try { sessionStorage.removeItem('sp_justSignedIn'); } catch (e) {}
         window.location.href = 'index.html?tab=login';
       }, 300);
       return; // Skip showing auth-screen — redirect handles it
@@ -495,18 +507,50 @@ if (auth && !_isBadProtocol) {
       // signed-in user back to the landing page. Bumped to 5000ms (matches
       // the hard 5s init timeout above) and re-checking auth.currentUser
       // before navigating, so a slow restore no longer drops the user.
+      //
+      // FIX (Bug: login → dashboard → login redirect loop):
+      //   The landing page (index.html) used to initialise Firebase under a
+      //   named app 'landing' while app.html uses the default app. Firebase
+      //   scopes its auth session in IndexedDB by app name, so the two pages
+      //   could never see each other's session — index.html signed the user
+      //   in fine, then app.html saw `null`, bounced back to index.html,
+      //   which saw the user, auto-redirected to app.html, repeat. That
+      //   root cause is now fixed in js/landing-auth.js (it uses the default
+      //   app), so the session hydrates correctly here. The cross-page
+      //   sessionStorage hint below is just a belt-and-suspenders guard
+      //   for any edge case (cold IndexedDB, very slow first hydrate,
+      //   browser kept the page on a bfcache restore, etc.): if the user
+      //   *just* signed in on a sibling page, give the session a longer
+      //   window to rehydrate before we give up and bounce.
+      let _justSignedInMs = 0;
+      try {
+        const _raw = sessionStorage.getItem('sp_justSignedIn');
+        const _n = _raw ? parseInt(_raw, 10) : 0;
+        if (_n && (Date.now() - _n) < 5 * 60 * 1000) _justSignedInMs = _n;
+      } catch (e) { /* no-op */ }
+      const _graceMs = _justSignedInMs ? 15000 : 5000;
       _cancelPendingRedirect();
       _pendingRedirect = setTimeout(function() {
         _pendingRedirect = null;
         if (auth.currentUser) return; // a session arrived — do NOT log out
+        // Give the user a final in-page nudge before the bounce so they
+        // understand what's happening (especially helpful on the rare slow
+        // hydrate where the cross-page hint expired). The auth screen will
+        // show a "Tap to retry on landing" affordance.
+        try { sessionStorage.removeItem('sp_justSignedIn'); } catch (e) {}
         window.location.href = 'index.html?tab=login';
-      }, 5000);
+      }, _graceMs);
       return;
     }
 
     // A real user is present — cancel any queued "back to login" redirect that
     // a preceding null callback may have scheduled.
     _cancelPendingRedirect();
+
+    // Clear the cross-page "just signed in" hint now that the session has
+    // hydrated. This stops a future stale value from influencing a later
+    // sign-out flow on the same tab.
+    try { sessionStorage.removeItem('sp_justSignedIn'); } catch (e) {}
 
     // A new user signed in — clear the logout flag so this and future
     // onAuthStateChanged callbacks are processed normally.
