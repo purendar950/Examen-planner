@@ -21,10 +21,18 @@ async function ezLoadPlans() {
     const fl = await db.collection('config').doc('free').get();
     if (fl.exists) {
       const fd = fl.data();
+      // CHANGED (free-tier-hook): preserve any new fields the Admin Panel
+      // wrote, fall back to local defaults for anything missing. Old fields
+      // (mocks/mediaSaves/notes) keep their existing semantics.
       EZ_FREE_LIMITS = {
-        mocks:      (fd.mocks      > 0 ? fd.mocks      : 5),
-        mediaSaves: (fd.mediaSaves > 0 ? fd.mediaSaves : 2),
-        notes:      (fd.notes      > 0 ? fd.notes      : 10)
+        mocks:               (fd.mocks               != null && fd.mocks               > 0 ? fd.mocks               : 5),
+        mocksPerDay:         (fd.mocksPerDay         != null && fd.mocksPerDay         > 0 ? fd.mocksPerDay         : 3),
+        mediaSaves:          (fd.mediaSaves          != null && fd.mediaSaves          > 0 ? fd.mediaSaves          : 3),
+        notes:               (fd.notes               != null && fd.notes               > 0 ? fd.notes               : 10),
+        aiTutorPerDay:       (fd.aiTutorPerDay       != null && fd.aiTutorPerDay       > 0 ? fd.aiTutorPerDay       : 5),
+        aiTimetablePerWeek:  (fd.aiTimetablePerWeek  != null && fd.aiTimetablePerWeek  > 0 ? fd.aiTimetablePerWeek  : 1),
+        telegramMorning:     (fd.telegramMorning !== false),
+        telegramEvening:     !!fd.telegramEvening
       };
     }
   } catch(e) {}
@@ -332,14 +340,27 @@ function ezRenderUpgrade() {
 /* Free vs Pro feature comparison shown inside the upgrade modal, plus a
    one-time 7-day trial CTA. */
 function ezFreeProCompareHtml() {
+  // CHANGED (free-tier-hook): rebalanced rows to match the new gating matrix.
+  // Free users get: 3 mocks/day, basic analysis, 5 AI tutor msgs/day, 1 AI
+  // timetable/week, morning Telegram, 3 playlists, 10 notes. Pro keeps
+  // everything unlimited plus Turbo 4x, Spaced Repetition, AI Insights, PDF.
+  var mocksPerDay = EZ_FREE_LIMITS.mocksPerDay || 3;
+  var aiTutorPerDay = EZ_FREE_LIMITS.aiTutorPerDay || 5;
+  var aiTimetablePerWeek = EZ_FREE_LIMITS.aiTimetablePerWeek || 1;
   var rows = [
     ['App access', 'Full app — every page unlocked', 'Full app, no usage limits + advanced tools'],
-    ['Exams', '1 (your target)', 'All exams + switching'],
-    ['Mock tests — saves & analysis', 'Up to ' + EZ_FREE_LIMITS.mocks + ' saves, no analysis', 'Unlimited saves + full analysis (trends, weak areas, percentile)'],
-    ['Video notes & saved playlists', 'Up to ' + EZ_FREE_LIMITS.notes + ' notes · ' + EZ_FREE_LIMITS.mediaSaves + ' playlists/links', 'Unlimited notes · up to 10 playlists/links'],
+    ['Exams', 'View all exams (read-only)', 'All exams + full editing + switching'],
+    ['Quizzes / Mocks per day', 'Up to ' + mocksPerDay + '/day', 'Unlimited'],
+    ['Mock saves (lifetime)', 'Up to ' + EZ_FREE_LIMITS.mocks + ' total', 'Unlimited saves'],
+    ['Mock analysis', 'Basic (score + correct/wrong)', 'Full (trends, weak areas, percentile)'],
+    ['AI Tutor', aiTutorPerDay + ' messages/day', 'Unlimited AI Tutor'],
+    ['AI Timetable', aiTimetablePerWeek + ' generation/week', 'Unlimited + auto-reschedule'],
+    ['YouTube Turbo 4×', '—', '✓ Watch lectures at 4× speed'],
+    ['Video notes & playlists', EZ_FREE_LIMITS.notes + ' notes · ' + EZ_FREE_LIMITS.mediaSaves + ' playlists/links', 'Unlimited notes · 20 playlists · 10 links'],
+    ['Telegram reminders', 'Morning plan only', 'Morning + Evening + Weekly PDF report'],
+    ['Spaced Repetition', '—', '✓ Auto-scheduled revision (1, 3, 7, 14, 30 days)'],
+    ['AI Study Insights', '—', '✓ Weak topics + score prediction'],
     ['Weekly / Monthly planner view', '—', '✓'],
-    ['AI study plan + auto-reschedule', '—', '✓'],
-    ['Auto daily plan on Telegram', '—', '✓'],
     ['PDF export (plans / notes)', '—', '✓']
   ];
   var body = rows.map(function(r) {

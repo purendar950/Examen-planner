@@ -51,7 +51,16 @@
   });
 })();
 
-let EZ_FREE_LIMITS = { mocks: 5, mediaSaves: 2, notes: 10 }; // loaded from Firestore config/free
+let EZ_FREE_LIMITS = {
+  mocks: 5,                // total mock saves (keep) — global cap so free users still see value in saving
+  mocksPerDay: 3,          // NEW: daily cap on NEW mock saves (was unlimited) — creates daily habit
+  mediaSaves: 3,           // CHANGED: 2 → 3 playlists/links (more generous)
+  notes: 10,               // keep
+  aiTutorPerDay: 5,        // NEW: AI Tutor messages/day — let them experience AI value
+  aiTimetablePerWeek: 1,   // NEW: AI timetable generations/week — let them taste the magic
+  telegramMorning: true,   // NEW: free gets morning plan
+  telegramEvening: false   // NEW: evening check-in + weekly report is Pro
+}; // loaded from Firestore config/free
 
 function ezGetTrialDaysLeft() {
   if (!EZ_PROFILE || !EZ_PROFILE.trialExpiry) return 0;
@@ -139,48 +148,99 @@ function ezApplyExamLock() {
   document.querySelectorAll('.exam-select-btn').forEach(b => { b.style.opacity = ''; b.title = ''; });
 }
 
-/* 2. Mock saves → max 5 free (existing saves never deleted, only new blocked) */
+/* 2. Mock saves → max 5 free (existing saves never deleted, only new blocked)
+   ADDED (free-tier-hook): free users can only SAVE up to 3 NEW mocks per day
+   (in addition to the global 5 cap). Daily counter resets at midnight local.
+   Pro/trial users skip both checks. */
 const _mockSaveGate = mockSave;
 mockSave = function() {
   if (ezGated() && !mockEditId) {
+    // Global cap first
     let count = 0;
     const mk = appState.mocks || {};
     Object.keys(mk).forEach(ex => Object.keys(mk[ex] || {}).forEach(tk => { count += (mk[ex][tk] || []).length; }));
     if (count >= EZ_FREE_LIMITS.mocks) { ezLockedMsg('Free plan: max ' + EZ_FREE_LIMITS.mocks + ' mock saves. Unlimited saves'); return; }
+    // NEW: per-day cap (only on new saves, not edits)
+    const today = new Date().toISOString().split('T')[0];
+    const dayKey = 'sp_mock_saves_' + today;
+    const dayCount = parseInt(localStorage.getItem(dayKey) || '0', 10);
+    const maxPerDay = EZ_FREE_LIMITS.mocksPerDay || 3;
+    if (dayCount >= maxPerDay) {
+      ezLockedMsg('Free plan: max ' + maxPerDay + ' mock saves/day. Pro: unlimited saves');
+      return;
+    }
+    try { localStorage.setItem(dayKey, String(dayCount + 1)); } catch(e) {}
   }
   _mockSaveGate();
 };
 
-/* 3. Mock analysis charts → Pro (blurred preview + upgrade CTA) */
+/* 3. Mock analysis → Free gets BASIC (score + correct/wrong + per-mock summary),
+   Pro gets FULL (trends, weak areas, percentile, charts).
+   CHANGED (free-tier-hook): instead of blurring the entire analysis, we let
+   the basic score card render fully and only blur the ADVANCED sections
+   (.trend-chart, .weak-topics, .percentile-section). Free users SEE the value
+   of the analysis, then get nudged to upgrade for the deep insights. */
 const _mockAnalysisGate = mockRenderAnalysis;
 mockRenderAnalysis = function() {
   _mockAnalysisGate();
-  if (!ezGated()) return;
+  if (!ezGated()) return; // Pro: full analysis, no overlay
+
   const el = document.getElementById('mock-analysis');
   if (!el || !el.innerHTML.trim()) return;
-  el.style.position = 'relative';
-  const ov = document.createElement('div');
-  ov.style.cssText = 'position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,0.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:12px;text-align:center;padding:1.25rem;';
-  ov.innerHTML = '<div style="font-size:2.2rem;">💎</div>' +
-    '<div style="font-weight:800;color:#fff;">Mock Test Analysis — Pro feature</div>' +
-    '<div style="font-size:0.8rem;color:rgba(255,255,255,0.75);max-width:300px;">Score trend chart, accuracy % aur weakest section insights Pro plan mein milte hain.</div>' +
-    '<button class="btn-modal-save" onclick="ezOpenUpgrade()">💎 Upgrade to Pro</button>';
-  el.appendChild(ov);
+
+  // Free users: show basic score but blur advanced charts
+  const advancedSections = el.querySelectorAll('.trend-chart, .weak-topics, .percentile-section, [data-pro="advanced"]');
+  advancedSections.forEach(function (section) {
+    if (section.querySelector('.pro-blur-overlay')) return; // already wrapped
+    section.style.position = 'relative';
+    const ov = document.createElement('div');
+    ov.className = 'pro-blur-overlay';
+    ov.style.cssText = 'position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:rgba(0,0,0,0.45);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-radius:12px;text-align:center;padding:1rem;';
+    ov.innerHTML = '<div style="font-size:1.5rem;">💎</div>' +
+      '<div style="font-size:0.75rem;color:rgba(255,255,255,0.8);max-width:240px;">Trends, weak areas & percentile — Pro</div>' +
+      '<button class="btn-modal-save" style="font-size:0.75rem;padding:6px 14px;" onclick="ezOpenUpgrade()">Upgrade</button>';
+    section.appendChild(ov);
+  });
 };
 
-/* 4. AI Timetable → Pro */
+/* 4. AI Timetable → Free gets 1 generation/week; Pro gets unlimited + auto-reschedule.
+   CHANGED (free-tier-hook): was fully Pro, now free users can generate the
+   timetable ONCE per ISO week. The counter resets every Monday (ISO week
+   boundary). Pro users skip the check. */
 const _genTimetableGate = generateTimetable;
 generateTimetable = function() {
   if (ezGated()) {
-    const c = document.getElementById('timetable-container');
-    if (c) c.innerHTML = '<div class="info-card" style="text-align:center;"><div style="font-size:2.2rem;">💎</div>' +
-      '<div style="font-weight:800;margin:6px 0;">AI Timetable — Pro feature</div>' +
-      '<div style="font-size:0.8rem;color:var(--muted);">Daily chapter-wise plan jo miss hone par auto-reschedule hota hai — Pro mein milta hai.</div>' +
-      '<button class="btn-modal-save" style="margin-top:12px;" onclick="ezOpenUpgrade()">💎 Upgrade to Pro</button></div>';
-    return;
+    const weekKey = 'sp_timetable_week_' + ezIsoWeekKey();
+    const count = parseInt(localStorage.getItem(weekKey) || '0', 10);
+    const maxFree = EZ_FREE_LIMITS.aiTimetablePerWeek || 1;
+
+    if (count >= maxFree) {
+      const c = document.getElementById('timetable-container');
+      if (c) c.innerHTML = '<div class="info-card" style="text-align:center;">' +
+        '<div style="font-size:2.2rem;">💎</div>' +
+        '<div style="font-weight:800;margin:6px 0;">AI Timetable — Weekly limit reached</div>' +
+        '<div style="font-size:0.8rem;color:var(--muted);">Free plan: ' + maxFree + ' generation/week. Pro: unlimited + auto-reschedule on missed days.</div>' +
+        '<button class="btn-modal-save" style="margin-top:12px;" onclick="ezOpenUpgrade()">💎 Upgrade to Pro</button></div>';
+      return;
+    }
+    try { localStorage.setItem(weekKey, String(count + 1)); } catch(e) {}
   }
   _genTimetableGate();
 };
+
+/* ISO-week helper used by the AI Timetable gate. Returns e.g. "2026_W30".
+   Using ISO 8601 week numbering so all users hit the same boundary. */
+function ezIsoWeekKey() {
+  const d = new Date();
+  // Copy date so don't modify original
+  const target = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  // Thursday in current week decides the year
+  const dayNum = (target.getUTCDay() + 6) % 7; // Mon=0, Sun=6
+  target.setUTCDate(target.getUTCDate() - dayNum + 3);
+  const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((target - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+  return target.getUTCFullYear() + '_W' + (week < 10 ? '0' + week : week);
+}
 
 /* 5. Playlist Organiser courses → configurable free limit; Pro/trial users can save up to 20 */
 const _ytoLoadGate = ytoLoadPlaylist;
@@ -223,27 +283,137 @@ ytSaveNote = function() {
   _ytSaveNoteGate();
 };
 
-/* 8. Daily Telegram auto-send → Pro only (the actual sending also re-checks
-   plan status server-side in scripts/send-telegram.js; this just stops free
-   users from turning it on / gives them a clear upgrade nudge). */
+/* 8. Daily Telegram auto-send → Free gets MORNING only; Pro gets morning + evening + weekly report.
+   CHANGED (free-tier-hook): free users can now enable Telegram (morning plan only).
+   The actual sending still re-checks plan status server-side in scripts/send-telegram.js.
+   If/when an evening toggle is added to the UI (#tg-evening-enabled), it stays Pro-gated. */
 function ezApplyTelegramLock() {
   const badge = document.getElementById('tg-pro-badge');
   if (!badge) return;
   // While entitlement is unresolved, keep the Pro badge hidden instead of
   // presenting a cached Free result as authoritative.
   if (typeof ezEntitlementDisplayPending === 'function' ? ezEntitlementDisplayPending() : EZ_PROFILE === null) { badge.style.display = 'none'; return; }
-  badge.style.display = ezGated() ? 'inline-block' : 'none';
+  // Morning plan is free for all logged-in users — hide the Pro badge
+  badge.style.display = 'none';
+
+  // If the UI ever adds an evening toggle, lock it for free users with a 💎 Pro pill
+  const eveningToggle = document.getElementById('tg-evening-enabled');
+  if (eveningToggle && ezGated()) {
+    eveningToggle.disabled = true;
+    eveningToggle.title = 'Evening check-in — Pro feature';
+    if (!eveningToggle.parentElement.querySelector('.tg-pro-lock')) {
+      const lock = document.createElement('span');
+      lock.className = 'tg-pro-lock';
+      lock.style.cssText = 'font-size:0.7rem;color:var(--accent);margin-left:6px;font-weight:700;';
+      lock.textContent = '💎 Pro';
+      eveningToggle.parentElement.appendChild(lock);
+    }
+  }
 }
 const _saveTelegramGate = saveTelegramSettings;
 saveTelegramSettings = function() {
-  const onEl = document.getElementById('tg-enabled');
-  if (ezGated() && onEl && onEl.checked) {
-    onEl.checked = false;
-    ezLockedMsg('Daily Telegram plan auto-send');
+  const eveningEl = document.getElementById('tg-evening-enabled');
+  // If a free user somehow has evening enabled (e.g. old cached UI), force it off and nudge
+  if (ezGated() && eveningEl && eveningEl.checked) {
+    eveningEl.checked = false;
+    ezLockedMsg('Evening Telegram check-in + Weekly report');
     return;
   }
+  // Morning is free for everyone — let the original save handler run
   _saveTelegramGate();
 };
+
+/* ─────────────────────────────────────────────────────────────
+   free-tier-hook: NEW GATES (10–14)
+   These gate previously-ungated Pro features so the upgrade nudge
+   has a clear, visible place. Each gate:
+     - lets the function run unmodified for Pro/trial users
+     - shows a soft "💎 Pro feature" toast + opens upgrade modal for free users
+     - is fail-open if the function doesn't exist yet (early-load guard)
+   ───────────────────────────────────────────────────────────── */
+
+/* 10. AI Tutor messages → max 5/day free (was ungated).
+   Wraps `sendTutor` from js/features/ai-tutor.js (the function the
+   chat Send button + the suggestion chips call). */
+const _aiTutorSendGate = typeof sendTutor === 'function' ? sendTutor : null;
+if (_aiTutorSendGate) {
+  sendTutor = function() {
+    if (ezGated()) {
+      const today = new Date().toISOString().split('T')[0];
+      const key = 'sp_ai_tutor_' + today;
+      const count = parseInt(localStorage.getItem(key) || '0', 10);
+      const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
+      if (count >= maxFree) {
+        ezLockedMsg('Free plan: max ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor');
+        return;
+      }
+      try { localStorage.setItem(key, String(count + 1)); } catch(e) {}
+    }
+    _aiTutorSendGate.apply(this, arguments);
+  };
+}
+
+/* 11. Turbo 4× Player → Pro only.
+   Wraps `ytToggleTurbo` from js/features/turbo-player.js. The function
+   already shows its own ezLockedMsg, but we replace it with our
+   hook so the upgrade modal opens after the toast. */
+const _turboPlayGate = typeof ytToggleTurbo === 'function' ? ytToggleTurbo : null;
+if (_turboPlayGate) {
+  ytToggleTurbo = function() {
+    if (ezGated()) {
+      ezLockedMsg('Turbo 4× Player — watch lectures 4× faster');
+      return;
+    }
+    _turboPlayGate.apply(this, arguments);
+  };
+}
+
+/* 12. AI Study Insights → Pro only.
+   Wraps `aiGetSmartInsights` from js/tabs/planner-ai-insights.js. */
+const _aiInsightsGate = typeof aiGetSmartInsights === 'function' ? aiGetSmartInsights : null;
+if (_aiInsightsGate) {
+  aiGetSmartInsights = function() {
+    if (ezGated()) {
+      const el = document.getElementById('ai-insights-container') ||
+                 document.querySelector('[data-tab="ai-insights"]');
+      if (el) {
+        el.innerHTML = '<div style="text-align:center;padding:2rem;">' +
+          '<div style="font-size:2.2rem;">💎</div>' +
+          '<div style="font-weight:800;margin:8px 0;">AI Study Insights — Pro feature</div>' +
+          '<div style="font-size:0.8rem;color:var(--muted);max-width:300px;margin:0 auto;">' +
+          'Weak topics, score predictions, study recommendations — Pro plan mein milta hai.</div>' +
+          '<button class="btn-modal-save" style="margin-top:12px;" onclick="ezOpenUpgrade()">💎 Upgrade to Pro</button>' +
+          '</div>';
+      }
+      return null;
+    }
+    return _aiInsightsGate.apply(this, arguments);
+  };
+}
+
+/* 13. Spaced Repetition / Revision queue → Pro only.
+   Wraps `renderRevisionQueue` from js/tabs/revision.js. */
+const _revisionGate = typeof renderRevisionQueue === 'function' ? renderRevisionQueue : null;
+if (_revisionGate) {
+  renderRevisionQueue = function() {
+    if (ezGated()) {
+      const el = document.getElementById('revision-container') ||
+                 document.getElementById('revision-queue') ||
+                 document.querySelector('[data-tab="revision"]');
+      if (el) {
+        el.innerHTML = '<div style="text-align:center;padding:2rem;">' +
+          '<div style="font-size:2.2rem;">💎</div>' +
+          '<div style="font-weight:800;margin:8px 0;">Spaced Repetition — Pro feature</div>' +
+          '<div style="font-size:0.8rem;color:var(--muted);max-width:300px;margin:0 auto;">' +
+          'Auto-scheduled revision at Day 1, 3, 7, 14, 30 based on the forgetting curve. Pro plan mein milta hai.</div>' +
+          '<button class="btn-modal-save" style="margin-top:12px;" onclick="ezOpenUpgrade()">💎 Upgrade to Pro</button>' +
+          '</div>';
+      }
+      return;
+    }
+    _revisionGate.apply(this, arguments);
+  };
+}
 
 /* 9. FIX: this used to lock free users to the Syllabus tab only — every
    other page (Dashboard, Exam Pattern, Planner, YouTube, Playlist
