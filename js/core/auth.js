@@ -485,12 +485,22 @@ if (auth && !_isBadProtocol) {
       // if that callback is delayed, the currentUser guard here aborts the
       // redirect. A genuinely logged-out visitor stays null and is redirected
       // after the grace period as before.
+      //
+      // FIX (Bug: "stays on landing page after login"): the previous 1500ms
+      // grace was too short. When a user signs in on index.html and we
+      // immediately navigate to app.html, the new page's Firebase instance
+      // has to re-initialise from scratch and rehydrate the session from
+      // IndexedDB. On slow networks / cold IndexedDB this can easily take
+      // 2–4 seconds, so the 1500ms timer fired and bounced a freshly
+      // signed-in user back to the landing page. Bumped to 5000ms (matches
+      // the hard 5s init timeout above) and re-checking auth.currentUser
+      // before navigating, so a slow restore no longer drops the user.
       _cancelPendingRedirect();
       _pendingRedirect = setTimeout(function() {
         _pendingRedirect = null;
         if (auth.currentUser) return; // a session arrived — do NOT log out
         window.location.href = 'index.html?tab=login';
-      }, 1500);
+      }, 5000);
       return;
     }
 
