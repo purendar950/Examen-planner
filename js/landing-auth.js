@@ -119,6 +119,8 @@
     if (!auth) {
       // Firebase scripts probably failed to load — still send the user to the
       // app so they can sign in there (which has its own auth flow).
+      // Close the modal first so it doesn't get stuck open during navigation.
+      window.closeAuthModal();
       window.location.href = 'app.html';
       return;
     }
@@ -136,7 +138,18 @@
         return cred.user.updateProfile({ displayName: name.trim() });
       }
     })
-    .then(function () { window.location.href = 'app.html'; })
+    .then(function () {
+      // Sign-in succeeded. Close the modal so the user doesn't see a stuck
+      // spinner, then navigate to the app. The auth state is already persisted
+      // to Firebase's local persistence (IndexedDB) by the time the
+      // signInWithEmailAndPassword promise resolves, so app.html will find
+      // the session on load.
+      window.closeAuthModal();
+      // Use replace() so the back button doesn't bring the user back to a
+      // post-login landing page with stale form state.
+      try { window.location.replace('app.html'); }
+      catch (navErr) { window.location.href = 'app.html'; }
+    })
     .catch(function (err) {
       submitInFlight = false;
       setBusy(false);
@@ -147,13 +160,17 @@
   window.handleGoogleAuth = function () {
     if (submitInFlight) return;
     var auth = getFirebaseAuth();
-    if (!auth) { window.location.href = 'app.html'; return; }
+    if (!auth) { window.closeAuthModal(); window.location.href = 'app.html'; return; }
     submitInFlight = true;
     setBusy(true);
     setError('');
     var provider = new firebase.auth.GoogleAuthProvider();
     auth.signInWithPopup(provider)
-      .then(function () { window.location.href = 'app.html'; })
+      .then(function () {
+        window.closeAuthModal();
+        try { window.location.replace('app.html'); }
+        catch (navErr) { window.location.href = 'app.html'; }
+      })
       .catch(function (err) {
         submitInFlight = false;
         setBusy(false);
@@ -219,18 +236,37 @@
     if (ref) localStorage.setItem('sp_pending_referral_code', ref);
   } catch (e) { /* no-op */ }
 
-  // ── If user is already signed in, show "Go to app" in nav ──────────────
+  // ── If user is already signed in, swap nav + auto-redirect to app ──────
+  // FIX (Bug: "stays on landing page after login"): previously we only swapped
+  // the nav buttons and waited for the user to click again. If the user had
+  // just been bounced back here by app.html's auth guard (e.g. the 1500ms
+  // grace period expired before the session restored), the modal was already
+  // closed and the only path to the app was a second click. Now we
+  // auto-redirect to app.html the moment we confirm the user is signed in,
+  // so a stale landing-page bounce is self-healing.
   function maybeSwapNavForSignedInUser() {
     try {
       var auth = getFirebaseAuth();
       if (!auth) return;
       auth.onAuthStateChanged(function (user) {
         if (!user) return;
+        // Swap the nav buttons for clarity during the brief redirect window.
         var actions = document.querySelector('.nav-actions');
-        if (!actions) return;
-        actions.innerHTML =
-          '<a class="btn btn-ghost" href="app.html">Open App</a>' +
-          '<button class="btn btn-primary" onclick="window.location.href=\'app.html\'">Dashboard →</button>';
+        if (actions) {
+          actions.innerHTML =
+            '<a class="btn btn-ghost" href="app.html">Open App</a>' +
+            '<button class="btn btn-primary" onclick="window.location.href=\'app.html\'">Dashboard →</button>';
+        }
+        var mobileActions = document.querySelector('.mobile-nav-actions');
+        if (mobileActions) {
+          mobileActions.innerHTML =
+            '<a class="btn btn-ghost" href="app.html" onclick="closeMobileNav()">Open App</a>' +
+            '<button class="btn btn-primary" onclick="window.location.href=\'app.html\';closeMobileNav()">Dashboard →</button>';
+        }
+        // Auto-redirect to the app. Use replace() so the user can't hit
+        // Back and land on the marketing page while signed in.
+        try { window.location.replace('app.html'); }
+        catch (navErr) { window.location.href = 'app.html'; }
       });
     } catch (e) { /* no-op */ }
   }
@@ -239,5 +275,53 @@
     document.addEventListener('DOMContentLoaded', function () { setTimeout(maybeSwapNavForSignedInUser, 50); });
   } else {
     setTimeout(maybeSwapNavForSignedInUser, 50);
+  }
+
+  // ── Auto-open auth modal when arriving with ?tab=login or ?signup ──────
+  // FIX (Bug: redirect-back from app.html): app.html bounces logged-out
+  // visitors here with `?tab=login`. Previously the query string was ignored
+  // and the user just saw the marketing page with no modal — looking like
+  // "stuck on the landing page". Now we open the modal automatically so the
+  // re-login flow picks up where it left off.
+  function maybeAutoOpenFromQuery() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var tab = (params.get('tab') || '').toLowerCase();
+      var mode = null;
+      if (tab === 'login' || tab === 'signin') mode = 'login';
+      else if (tab === 'signup' || tab === 'register') mode = 'signup';
+      if (!mode) return;
+      // Only auto-open if Firebase has had a chance to initialise. If the
+      // user is already signed in, the maybeSwapNavForSignedInUser listener
+      // above will redirect them away instead of opening a useless modal.
+      var openIt = function () {
+        if (typeof window.openAuthModal === 'function') window.openAuthModal(mode);
+      };
+      var auth = getFirebaseAuth();
+      if (auth && auth.currentUser) return; // signed in → redirect will fire
+      if (auth) {
+        var unsub = auth.onAuthStateChanged(function (user) {
+          if (user) { try { unsub(); } catch (e) {} return; }
+          openIt();
+          try { unsub(); } catch (e) {}
+        });
+        // Safety net: if onAuthStateChanged never fires (e.g. Firebase still
+        // loading the session), open the modal anyway after a short delay
+        // so the user isn't left staring at the marketing page.
+        setTimeout(function () { openIt(); }, 400);
+      } else {
+        // Firebase not initialised yet — try again shortly, then give up
+        // and just open the modal so the user has something to interact with.
+        setTimeout(function () {
+          if (!getFirebaseAuth()) openIt();
+          else setTimeout(openIt, 200);
+        }, 200);
+      }
+    } catch (e) { /* no-op */ }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(maybeAutoOpenFromQuery, 20); });
+  } else {
+    setTimeout(maybeAutoOpenFromQuery, 20);
   }
 })();
