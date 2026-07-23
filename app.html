@@ -441,8 +441,8 @@
      APP SCRIPTS — split from the original monolithic js/app.js.
      These are CLASSIC scripts and MUST stay in this exact order:
      core → data → tabs → features. The order preserves shared state,
-     global handler functions, and the switchPage/switchExam/updateDashboard
-     monkey-patch layering that later files rely on.
+     global handler functions, and the page-activation registration order that
+     later files rely on.
      ═══════════════════════════════════════════════════════════════ -->
 <!-- ═══════════════════════════════════════════════════════════════
      Every script below uses `defer`: the browser downloads them in

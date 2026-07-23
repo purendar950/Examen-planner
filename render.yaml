@@ -11,6 +11,12 @@ services:
     envVars:
       - key: TELEGRAM_BOT_TOKEN
         sync: false          # Set this manually in Render dashboard
+      # Required to verify browser Firebase ID tokens and authorize relay calls.
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      # Comma-separated browser origins permitted to call relay endpoints.
+      - key: ALLOWED_ORIGINS
+        value: "https://examzen.in,https://www.examzen.in,https://appassets.androidengine"
       - key: NODE_ENV
         value: production
 
@@ -37,6 +43,10 @@ services:
       # config/ai + config/aiLimits from Firestore.
       - key: FIREBASE_SERVICE_ACCOUNT
         sync: false
+      - key: ALLOWED_ORIGINS
+        value: "https://examzen.in,https://www.examzen.in,https://appassets.androidengine"
+      - key: MAX_TELEGRAM_IMAGE_BYTES
+        value: "8388608"
 
   # Kiro API Key Test — standalone tool that verifies a KIRO_API_KEY works via
   # kiro-cli headless mode (server.js in kiro-test/). Personal testing tool,

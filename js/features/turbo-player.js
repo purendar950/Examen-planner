@@ -401,13 +401,8 @@
       return;
     }
 
-    /* Destination = the user's own connected Telegram chat. */
-    var chatId = '';
-    try { chatId = (appState && appState.telegram && appState.telegram.chatId) ? String(appState.telegram.chatId).trim() : ''; } catch (e) {}
-    if (!chatId) {
-      if (typeof showToast === 'function') showToast('Pehle Telegram connect karo: Profile → Daily Plan on Telegram.', 'error');
-      return;
-    }
+    /* The server resolves the destination from the verified Firebase identity.
+       Never accept a browser-provided Telegram chat ID. */
     if (!TELEGRAM_BOT_URL) {
       if (typeof showToast === 'function') showToast('Bot URL set nahi hai (telegramBotUrl).', 'error');
       return;
@@ -440,10 +435,12 @@
     if (btn) { btn.disabled = true; btn.dataset.busy = '1'; }
     if (typeof showToast === 'function') showToast('📤 Telegram par bhej rahe hain…', 'info');
 
-    fetch(TELEGRAM_BOT_URL + '/send-photo', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chatId: chatId, imageBase64: base64, caption: caption })
+    getFirebaseIdToken().then(function (token) {
+      return fetch(TELEGRAM_BOT_URL + '/send-photo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ imageBase64: base64, caption: caption })
+      });
     })
       .then(function (r) { return r.json().catch(function () { return { ok: r.ok }; }); })
       .then(function (res) {
@@ -507,8 +504,8 @@
         number: num,
         timestamp: ts,
         timeLabel: turboFmtTs(ts),
-        // Real captured frame, served from Telegram via the proxy (no bytes stored here).
-        imageUrl: TURBO_BACKEND_URL + '/tg-photo?file_id=' + encodeURIComponent(fileId),
+        // Telegram's opaque file reference is kept; the app retrieves it with
+        // a Firebase-authenticated request when rendering the thumbnail.
         tgFileId: fileId,
         videoId: vid,
         videoTitle: vname,
@@ -653,12 +650,8 @@
   }
 
   // Init when the YouTube page opens (markup is injected via include-loader).
-  if (typeof switchPage === 'function') {
-    var _origSwitchPageTurbo = switchPage;
-    switchPage = function (page) {
-      _origSwitchPageTurbo(page);
-      if (page === 'youtube') setTimeout(initUI, 60);
-    };
+  if (typeof onPageActivated === 'function') {
+    onPageActivated('youtube', function () { setTimeout(initUI, 60); });
   }
   window.addEventListener('load', function () { setTimeout(initUI, 800); });
 })();

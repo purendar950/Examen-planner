@@ -1316,18 +1316,10 @@ function ssInit() {
   if (document.getElementById('yt-speed-bar')) {
     ssInit();
   }
-  // Hook into page switch to init when YouTube or Notes tab activates
-  const origSwitchPage = window.switchPage;
-  if (origSwitchPage) {
-    window.switchPage = function(page) {
-      origSwitchPage(page);
-      if (page === 'youtube') {
-        setTimeout(ssInit, 100);
-      }
-      if (page === 'notes') {
-        setTimeout(ssRenderNotesPage, 50);
-      }
-    };
+  // Initialize when the relevant page becomes active.
+  if (typeof onPageActivated === 'function') {
+    onPageActivated('youtube', function () { setTimeout(ssInit, 100); });
+    onPageActivated('notes', function () { setTimeout(ssRenderNotesPage, 50); });
   }
   // Fallback: init on DOMContentLoaded / load
   window.addEventListener('load', function() {

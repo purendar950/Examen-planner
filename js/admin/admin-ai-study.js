@@ -101,7 +101,12 @@ async function testStudyProviders() {
   var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   var timeout = controller ? setTimeout(function () { controller.abort(); }, 240000) : null;
   try {
-    var response = await fetch(STUDY_BACKEND + '/api/study/test', controller ? { signal: controller.signal } : undefined);
+    var adminUser = auth && auth.currentUser;
+    if (!adminUser) throw new Error('Admin session expired. Sign in again.');
+    var idToken = await adminUser.getIdToken();
+    var fetchOptions = { headers: { Authorization: 'Bearer ' + idToken } };
+    if (controller) fetchOptions.signal = controller.signal;
+    var response = await fetch(STUDY_BACKEND + '/api/study/test', fetchOptions);
     var payload = await response.json();
     if (payload && payload.error) throw new Error(payload.detail || payload.error);
     _aiStudyHealth = payload && payload.results ? payload.results : {};

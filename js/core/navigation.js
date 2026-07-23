@@ -3,6 +3,30 @@
 ══════════════════════════════════════════════ */
 const DEFAULT_ACTIVE_PAGE = 'dashboard';
 
+/* Modules register post-navigation work here instead of overwriting the global
+   switchPage function. Callbacks run in registration order after the core page
+   has been made active, so independently loaded classic scripts stay isolated. */
+const _pageActivationListeners = new Map();
+function onPageActivated(page, listener) {
+  if (typeof listener !== 'function') return function() {};
+  const key = page || '*';
+  const listeners = _pageActivationListeners.get(key) || [];
+  listeners.push(listener);
+  _pageActivationListeners.set(key, listeners);
+  return function unsubscribePageActivation() {
+    const current = _pageActivationListeners.get(key) || [];
+    const index = current.indexOf(listener);
+    if (index >= 0) current.splice(index, 1);
+  };
+}
+function _emitPageActivated(page) {
+  const listeners = (_pageActivationListeners.get(page) || [])
+    .concat(_pageActivationListeners.get('*') || []);
+  listeners.forEach(function (listener) {
+    try { listener(page); } catch (error) { console.error('Page activation listener failed:', error); }
+  });
+}
+
 function isValidPage(page) {
   return !!(page && document.getElementById('page-' + page) && document.getElementById('nav-' + page));
 }
@@ -60,7 +84,8 @@ function switchPage(page) {
     try { refreshPlannerBadges(); }       catch(e) {} // refresh phase badge
   }
   // Revision moved into Analysis as a sub-tab — it renders via
-  // anSwitchView('revision'); Analysis has its own switchPage hook (analysis.js)
-  // that calls anRender() on open, so nothing extra is needed here.
+  // anSwitchView('revision'); Analysis has its own activation listener that
+  // calls anRender() on open, so nothing extra is needed here.
+  _emitPageActivated(targetPage);
 }
 

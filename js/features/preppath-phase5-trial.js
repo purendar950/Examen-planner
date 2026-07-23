@@ -835,15 +835,9 @@ function ezShowDashboardTrialCTA() {
     window.addEventListener('focus', function () { setTimeout(enhancedTrialCheck, 500); });
   }
 
-  // Show dashboard CTA whenever the user lands on the dashboard.
-  if (typeof switchPage === 'function') {
-    var _switchPageTrial = switchPage;
-    switchPage = function (page) {
-      var result;
-      try { result = _switchPageTrial.apply(this, arguments); } catch(e) { result = undefined; }
-      if (page === 'dashboard') setTimeout(ezShowDashboardTrialCTA, 300);
-      return result;
-    };
+  // Show dashboard CTA whenever the dashboard becomes active.
+  if (typeof onPageActivated === 'function') {
+    onPageActivated('dashboard', function () { setTimeout(ezShowDashboardTrialCTA, 300); });
   }
 })();
 

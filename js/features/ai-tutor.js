@@ -662,7 +662,18 @@
     var e = (j && (j.error || j.detail)) || 'Failed';
     return '<div class="ai-muted" style="color:#e06">\u26a0 ' + esc(e) + (j && j.detail && j.error ? ' — ' + esc(j.detail) : '') + '</div>';
   }
-  function apiGet(path, signal) { return fetch(BACKEND + path, signal ? { signal: signal } : {}).then(function (r) { return r.json(); }); }
+  // Backend identity comes exclusively from the Firebase ID token. Never send
+  // a UID as an entitlement signal: a caller can forge it.
+  function backendAuthFetch(path, options) {
+    options = options || {};
+    return getFirebaseIdToken().then(function (token) {
+      var headers = Object.assign({}, options.headers || {}, { Authorization: 'Bearer ' + token });
+      return fetch(BACKEND + path, Object.assign({}, options, { headers: headers }));
+    });
+  }
+  function apiGet(path, signal) {
+    return backendAuthFetch(path, signal ? { signal: signal } : {}).then(function (r) { return r.json(); });
+  }
 
   /* ── Generate ⇄ Stop control ──────────────────────────────────────────────
      While an AI request is in flight the triggering "Generate" button turns
@@ -760,7 +771,7 @@
   }
   function requestStudyJobStop(jobId, attempt) {
     if (_activeStudyJobId !== jobId) return;
-    fetch(BACKEND + '/api/study/jobs/' + encodeURIComponent(jobId), { method: 'DELETE' })
+    backendAuthFetch('/api/study/jobs/' + encodeURIComponent(jobId), { method: 'DELETE' })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, data: j || {} }; }); })
       .then(function (res) {
         if (!res.ok) throw new Error((res.data && res.data.error) || 'stop_not_confirmed');
@@ -1086,7 +1097,7 @@
   // when streaming isn't available/fails. Owns _genEnd for its lifecycle.
   function studyOnce(mode, n, style, lang, focus, force, signal, btnId, targetEl, canRender) {
     var vid = curVid();
-    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
+    var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
     if (style === 'mcq') url += '&style=mcq';
     if (focus) url += '&focus=' + encodeURIComponent(focus);
@@ -1147,10 +1158,10 @@
         throw j;
       });
     }
-    fetch(BACKEND + '/api/study/jobs', {
+    backendAuthFetch('/api/study/jobs', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: signal,
       body: JSON.stringify({
-        jobId: job.jobId, id: vid, mode: mode, out: lang, uid: curUid(),
+        jobId: job.jobId, id: vid, mode: mode, out: lang,
         model: outModel(), provider: outProvider(), style: style || '', refresh: force ? 1 : 0
       })
     }).then(function (r) { return r.ok ? r.json() : jobRequestError(r); }).then(function (created) {
@@ -1286,7 +1297,7 @@
     }
     function connect() {
       if (done || (signal && signal.aborted) || !ownsStudyTarget()) return;
-      fetch(BACKEND + '/api/study/jobs/' + encodeURIComponent(job.jobId) + '/stream?offset=' + encodeURIComponent(utf8Length(acc)),
+      backendAuthFetch('/api/study/jobs/' + encodeURIComponent(job.jobId) + '/stream?offset=' + encodeURIComponent(utf8Length(acc)),
         signal ? { signal: signal } : {}).then(function (r) {
         if (r.ok && r.body && window.TextDecoder) return r;
         return r.json().catch(function () { return {}; }).then(function (j) { j._httpStatus = r.status; throw j; });
@@ -1354,7 +1365,7 @@
   // never worse than the classic path (e.g. if the proxy/stream isn't available).
   function studyStream(mode, n, style, lang, focus, force, signal, btnId) {
     var vid = curVid();
-    var url = BACKEND + '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
+    var url = '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     if (style === 'mcq') url += '&style=mcq';
     if (force) url += '&refresh=1';
     var meta = {}, acc = '', gotChunk = false, done = false;
@@ -1450,7 +1461,7 @@
         } catch (e) {}
       }
     }
-    fetch(url, signal ? { signal: signal } : {}).then(function (r) {
+    backendAuthFetch(url, signal ? { signal: signal } : {}).then(function (r) {
       if (!r.ok || !r.body || !window.TextDecoder) { throw new Error('nostream'); }
       var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
       function pump() {
@@ -2055,7 +2066,7 @@
   function openSharedMcq(vid, lang) {
     if (!vid) return;
     try { if (typeof showToast === 'function') showToast('Loading shared MCQ test\u2026', 'info'); } catch (e) {}
-    var url = '/api/study?id=' + vid + '&mode=notes&style=mcq&out=' + encodeURIComponent(lang || outLang()) + '&uid=' + encodeURIComponent(curUid());
+    var url = '/api/study?id=' + vid + '&mode=notes&style=mcq&out=' + encodeURIComponent(lang || outLang());
     apiGet(url).then(function (j) {
       if (j && (j.error === 'no_captions' || j.warning === 'no_captions')) { alert('This shared video has no captions.'); return; }
       if (j && j.error) { alert('Could not load the shared test: ' + j.error); return; }
@@ -2094,7 +2105,7 @@
     var focus = quizFocus();
     var lang = langOverride || outLang();
     el.innerHTML = loading((force ? 'Building a fresh ' : 'Building a ') + n + '-question quiz (' + lang + ')' + (focus ? ' on “' + focus + '”' : '') + '…');
-    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(lang) + '&uid=' + encodeURIComponent(curUid()) + modelParam();
+    var qurl = '/api/study?id=' + vid + '&mode=quiz&n=' + n + '&out=' + encodeURIComponent(lang) + modelParam();
     if (focus) qurl += '&focus=' + encodeURIComponent(focus);
     if (force) qurl += '&refresh=1';
     var signal = _genStart('ai-quiz-go');
@@ -2237,7 +2248,7 @@
   function tutorBody(vid, question, mode, histForApi) {
     return JSON.stringify({
       id: vid, q: question || '', out: outLang(), mode: mode || 'chat',
-      uid: curUid(), provider: outProvider(), model: outModel(), history: histForApi
+      provider: outProvider(), model: outModel(), history: histForApi
     });
   }
 
@@ -2266,7 +2277,7 @@
   // fails. The user turn is already pushed + saved by sendTutor; this only adds
   // the assistant reply. `histForApi` is the trimmed history to send.
   function sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl) {
-    fetch(BACKEND + '/api/tutor', {
+    backendAuthFetch('/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: tutorBody(vid, question, mode, histForApi)
     }).then(function (r) { return r.json(); }).then(function (j) {
@@ -2363,7 +2374,7 @@
       }
     }
 
-    fetch(BACKEND + '/api/tutor/stream', {
+    backendAuthFetch('/api/tutor/stream', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: tutorBody(vid, question, mode, histForApi)
     }).then(function (r) {
@@ -2772,7 +2783,7 @@
     setDot('checking', 'Checking server…');
     var ctrl = ('AbortController' in window) ? new AbortController() : null;
     var to = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
-    fetch(BACKEND + '/api/status?id=' + encodeURIComponent(vid) + '&uid=' + encodeURIComponent(curUid()), ctrl ? { signal: ctrl.signal } : {})
+    backendAuthFetch('/api/status?id=' + encodeURIComponent(vid), ctrl ? { signal: ctrl.signal } : {})
       .then(function (r) { return r.json(); })
       .then(function (j) {
         clearTimeout(to);

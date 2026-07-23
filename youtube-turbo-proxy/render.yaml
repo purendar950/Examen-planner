@@ -21,3 +21,7 @@ services:
       # let admins manage cookies from the admin panel (Firestore config/turbo).
       - key: FIREBASE_SERVICE_ACCOUNT
         sync: false
+      - key: ALLOWED_ORIGINS
+        value: "https://examzen.in,https://www.examzen.in,https://appassets.androidengine"
+      - key: MAX_TELEGRAM_IMAGE_BYTES
+        value: "8388608"

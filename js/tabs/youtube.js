@@ -1594,20 +1594,13 @@ function ytModalOutsideClose(e) {
   if (e.target === document.getElementById('yt-fullmodal-overlay')) ytModalClose();
 }
 
-/* ── Patch switchPage to render YouTube saved list on tab open ── */
-const _switchPageBase = switchPage;
-switchPage = function(page) {
-  _switchPageBase(page);
-  // Exam selector bar is only relevant on the Dashboard — show it there only.
-  const examBar = document.getElementById('exam-selector-bar');
-  if (examBar) examBar.style.display = (page==='dashboard') ? 'flex' : 'none';
-  if (page === 'youtube') {
-    renderYtSavedList();
-    ytLoadNotes();
-    ytUpdateNotesContext();
-    ytShowResumeBanner();
-  }
-};
+/* Render YouTube state after the core navigation completes. */
+onPageActivated('youtube', function () {
+  renderYtSavedList();
+  ytLoadNotes();
+  ytUpdateNotesContext();
+  ytShowResumeBanner();
+});
 
 /* ── ESC closes modals ── */
 document.addEventListener('keydown', e => {

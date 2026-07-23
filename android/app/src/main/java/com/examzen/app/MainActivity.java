@@ -64,8 +64,11 @@ public class MainActivity extends AppCompatActivity {
                 .addPathHandler("/", new WebViewAssetLoader.AssetsPathHandler(this))
                 .build();
 
-        // Allow Chrome DevTools inspection (chrome://inspect). Harmless in release.
-        WebView.setWebContentsDebuggingEnabled(true);
+        // DevTools are available only in debug builds; exposing them in a
+        // release WebView lets locally connected devices inspect app content.
+        if (BuildConfig.DEBUG) {
+            WebView.setWebContentsDebuggingEnabled(true);
+        }
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
