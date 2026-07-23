@@ -27,18 +27,39 @@
   function getFirebaseAuth() {
     if (typeof firebase === 'undefined' || !firebase.auth) return null;
     try {
-      // Initialize app only if it hasn't been initialized already.
-      // The shared config is loaded by js/core/firebase-config.js and exposed
-      // on window.PREPPATH_FIREBASE_CONFIG. Fall back to the global `firebase`
-      // default if a different page has already initialized it.
+      // FIX (Bug: login → dashboard → login redirect loop):
+      //   The landing page (index.html), the app shell (app.html), the admin
+      //   panel (admin.html), the standalone test engine, and the question
+      //   editor all need to share ONE Firebase Auth session. Firebase stores
+      //   that session in IndexedDB keyed by the app NAME, so any mismatch
+      //   in the app name across pages produces two completely separate
+      //   auth namespaces — a sign-in on one page is invisible to the others.
+      //
+      //   The app/admin/test-engine/editor pages all use the default
+      //   (unnamed) app via `firebase.initializeApp(cfg)`. If THIS page
+      //   initialises under a *named* app (e.g. 'landing'), the session it
+      //   persists lives in a different IndexedDB store and app.html's
+      //   onAuthStateChanged callback will always report `null` — which
+      //   in turn triggers app.html's 5-second "no user, bounce back to
+      //   index.html" timer, and the user gets stuck in a redirect loop
+      //   (login → dashboard → login → dashboard …).
+      //
+      //   So initialise under the DEFAULT app, matching the rest of the
+      //   codebase. This is safe because js/landing-auth.js is only loaded
+      //   by index.html, so there is no other code path on this page that
+      //   has already claimed the default app. We still wrap the call in
+      //   try/catch in case a future refactor starts sharing scripts.
       var cfg = window.PREPPATH_FIREBASE_CONFIG;
       try {
-        if (cfg) firebase.initializeApp(cfg, 'landing');
+        if (cfg && (!firebase.apps || firebase.apps.length === 0)) {
+          firebase.initializeApp(cfg);
+        }
       } catch (e) {
-        // App already exists under the same name — fine, reuse it.
+        // Default app already exists from another loader on this page —
+        // that's fine, reuse it.
         if (!/already exists/i.test(String(e && e.message))) throw e;
       }
-      return firebase.app('landing').auth();
+      return firebase.auth();
     } catch (e) {
       console.error('Firebase init failed:', e);
       return null;
@@ -145,6 +166,13 @@
       // signInWithEmailAndPassword promise resolves, so app.html will find
       // the session on load.
       window.closeAuthModal();
+      // Belt-and-suspenders: leave a same-origin hint so app.html's auth
+      // listener knows a fresh sign-in just happened on a sibling page. The
+      // listener bumps its no-user grace period when it sees this flag, so
+      // a slow IndexedDB rehydrate on app.html (cold cache, low-end phone,
+      // 2-3s session restore) can no longer bounce a freshly signed-in
+      // user back to the landing page mid-hydration.
+      try { sessionStorage.setItem('sp_justSignedIn', String(Date.now())); } catch (e) {}
       // Use replace() so the back button doesn't bring the user back to a
       // post-login landing page with stale form state.
       try { window.location.replace('app.html'); }
@@ -168,6 +196,9 @@
     auth.signInWithPopup(provider)
       .then(function () {
         window.closeAuthModal();
+        // Same cross-page hint as the email/password path — see
+        // handleAuthSubmit() for why this matters.
+        try { sessionStorage.setItem('sp_justSignedIn', String(Date.now())); } catch (e) {}
         try { window.location.replace('app.html'); }
         catch (navErr) { window.location.href = 'app.html'; }
       })
