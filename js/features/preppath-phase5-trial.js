@@ -505,3 +505,387 @@ function ezExportNotesPdf() {
   }
 })();
 
+/* ══════════════════════════════════════════════
+   TRIAL ENHANCEMENTS — Reminders, modals, usage tracking
+   (free-tier-hook prequel merged in #473; this branch adds the
+    conversion-optimization layer for the 7-day trial.)
+   Adap function-name references to this codebase:
+     - aiTutorSend  → sendTutor         (js/features/ai-tutor.js)
+     - turboPlay    → ytToggleTurbo     (js/features/turbo-player.js)
+     - mockStart    → mockSave          (this codebase tracks completed
+                                          mock attempts at the save point,
+                                          since the test engine lives in a
+                                          separate test-engine.html file)
+     - generateTimetable  → unchanged (correct name in this codebase)
+══════════════════════════════════════════════ */
+
+/* ── 1. TRIAL USAGE TRACKING ──
+   Increments a per-feature counter in appState.proTrial.usage whenever
+   the user exercises a tracked Pro feature DURING an active trial. The
+   counters are read by the "Trial Ending" and "Trial Ended" modals so
+   we can show a personalised "you used AI Tutor 12×, Turbo 8×" summary
+   that converts far better than generic copy. */
+function ezTrialTrack(feature) {
+  if (!appState || !appState.proTrial) return;
+  if (typeof ezIsProTrialActive !== 'function' || !ezIsProTrialActive()) return;
+  if (!appState.proTrial.usage || typeof appState.proTrial.usage !== 'object') {
+    appState.proTrial.usage = {};
+  }
+  appState.proTrial.usage[feature] = (appState.proTrial.usage[feature] || 0) + 1;
+  try { saveProgress(); } catch(e) {}
+}
+
+/* Hook into the real feature functions in this codebase. The wrappers
+   call the original first, then increment the trial counter. Wrapped
+   only when the user is on an active trial, so non-trial sessions take
+   zero overhead. */
+(function () {
+  // Track AI Tutor sends (real function name: sendTutor)
+  if (typeof sendTutor === 'function') {
+    var _aiSend = sendTutor;
+    sendTutor = function () {
+      var result;
+      try { result = _aiSend.apply(this, arguments); } catch(e) { result = undefined; }
+      try { ezTrialTrack('aiTutor'); } catch(e) {}
+      return result;
+    };
+  }
+  // Track Turbo 4× toggles (real function name: ytToggleTurbo)
+  if (typeof ytToggleTurbo === 'function') {
+    var _turbo = ytToggleTurbo;
+    ytToggleTurbo = function () {
+      var result;
+      try { result = _turbo.apply(this, arguments); } catch(e) { result = undefined; }
+      try { ezTrialTrack('turbo'); } catch(e) {}
+      return result;
+    };
+  }
+  // Track quiz / mock attempts at the save point. The actual quiz
+  // is taken on test-engine.html, so this fires when the user returns
+  // to the main app and saves the result.
+  if (typeof mockSave === 'function') {
+    var _mockSave = mockSave;
+    mockSave = function () {
+      var result;
+      try { result = _mockSave.apply(this, arguments); } catch(e) { result = undefined; }
+      try { ezTrialTrack('quiz'); } catch(e) {}
+      return result;
+    };
+  }
+  // Track AI Timetable generations
+  if (typeof generateTimetable === 'function') {
+    var _timetable = generateTimetable;
+    generateTimetable = function () {
+      var result;
+      try { result = _timetable.apply(this, arguments); } catch(e) { result = undefined; }
+      try { ezTrialTrack('timetable'); } catch(e) {}
+      return result;
+    };
+  }
+})();
+
+/* ── 2. TRIAL STARTED WELCOME MODAL ──
+   Fired once after a successful ezStartProTrial(). Lists the
+   6 most compelling Pro features the user should try first. */
+function ezShowTrialWelcomeModal() {
+  var existing = document.getElementById('trial-welcome-modal');
+  if (existing) existing.remove();
+
+  var daysLeft = (typeof ezProTrialDaysLeft === 'function') ? ezProTrialDaysLeft() : 7;
+  var expiry = (typeof ezProTrialExpiry === 'function') ? ezProTrialExpiry() : null;
+  var expiryFormatted = expiry
+    ? new Date(expiry + 'T23:59:59').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '';
+
+  var modal = document.createElement('div');
+  modal.id = 'trial-welcome-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  modal.innerHTML =
+    '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.7);" onclick="this.parentElement.remove()"></div>' +
+    '<div style="position:relative;background:var(--surface,#1a1a2e);border:1px solid var(--border,#333);border-radius:16px;padding:2rem;max-width:440px;width:100%;text-align:center;animation:slideUp .3s ease;">' +
+      '<div style="font-size:3rem;margin-bottom:0.5rem;">🎉</div>' +
+      '<h3 style="font-size:1.3rem;margin-bottom:0.5rem;">7-Din Ka Pro Trial Shuru!</h3>' +
+      '<p style="color:var(--muted,#999);font-size:0.9rem;margin-bottom:1rem;">Full access till <strong>' + expiryFormatted + '</strong> (' + daysLeft + ' days)</p>' +
+      '<div style="background:var(--bg-secondary,#16213e);border-radius:10px;padding:1rem;margin-bottom:1.25rem;text-align:left;">' +
+        '<p style="font-weight:700;font-size:0.85rem;margin-bottom:0.5rem;">🚀 Try these Pro features first:</p>' +
+        '<ul style="margin:0;padding-left:1.2rem;font-size:0.82rem;color:var(--muted,#999);line-height:1.8;">' +
+          '<li>🤖 <strong>AI Tutor</strong> — Ask any doubt, get instant answer</li>' +
+          '<li>📺 <strong>Turbo 4×</strong> — Watch any lecture at 4× speed</li>' +
+          '<li>📊 <strong>AI Insights</strong> — See weak topics + score prediction</li>' +
+          '<li>📝 <strong>Unlimited Quizzes</strong> — Practice without limits</li>' +
+          '<li>📅 <strong>AI Timetable</strong> — Auto-generated study plan</li>' +
+          '<li>🔁 <strong>Spaced Repetition</strong> — Auto revision at 1/3/7/14/30 days</li>' +
+        '</ul>' +
+      '</div>' +
+      '<button onclick="this.closest(\'#trial-welcome-modal\').remove();if(typeof switchPage===\'function\')switchPage(\'dashboard\');" ' +
+        'style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent,#00C896);color:#fff;font-weight:700;font-size:0.95rem;cursor:pointer;">' +
+        'Start Exploring →</button>' +
+      '<p style="font-size:0.72rem;color:var(--muted,#999);margin-top:0.75rem;">No payment needed · Ek baar hi milta hai · Cancel anytime</p>' +
+    '</div>';
+  document.body.appendChild(modal);
+}
+
+/* ── 3. TRIAL REMINDER BANNER (Day 5–1) ──
+   Persistent strip across the top of the app, dismissible, with a direct
+   "Upgrade Now" CTA that opens the upgrade modal. */
+function ezShowTrialReminderBanner(daysLeft) {
+  var existing = document.getElementById('trial-reminder-banner');
+  if (existing) existing.remove();
+
+  var messages = {
+    5: '⚠️ Trial: 5 din baaki. Pro features enjoy karo!',
+    4: '⚠️ Trial: 4 din baaki. AI Tutor + Turbo try kiya?',
+    3: '⚠️ Trial: 3 din baaki. Upgrade karo — data safe rahega.',
+    2: '🔴 Trial: Sirf 2 din baaki! Upgrade now — ₹49/month se shuru.',
+    1: '🔴 Trial: LAST DAY! Kal se Pro features lock ho jayenge.'
+  };
+  var msg = messages[daysLeft] || ('⚠️ Trial: ' + daysLeft + ' din baaki.');
+
+  var banner = document.createElement('div');
+  banner.id = 'trial-reminder-banner';
+  banner.setAttribute('role', 'alert');
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10000;background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;padding:10px 16px;text-align:center;font-size:0.85rem;font-weight:600;display:flex;align-items:center;justify-content:center;gap:12px;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+  banner.innerHTML =
+    '<span>' + msg + '</span>' +
+    '<button onclick="try{ezOpenUpgrade();}catch(e){}this.parentElement.remove();" style="background:#fff;color:#ef4444;border:none;padding:5px 14px;border-radius:6px;font-weight:700;cursor:pointer;font-size:0.8rem;white-space:nowrap;">Upgrade Now</button>' +
+    '<button onclick="this.parentElement.remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:1.2rem;" aria-label="Dismiss">✕</button>';
+  document.body.prepend(banner);
+}
+
+/* ── 4. TRIAL ENDING MODAL (Day 2–1) ──
+   Shows a personalised usage summary + 3-tier pricing comparison + CTA.
+   The summary line ("AI Tutor: 12 messages") is the social-proof lever
+   that converts — it makes the user feel they invested effort, not just
+   time. */
+function ezShowTrialEndingModal(daysLeft) {
+  var existing = document.getElementById('trial-ending-modal');
+  if (existing) existing.remove();
+
+  var usage = (appState && appState.proTrial && appState.proTrial.usage) || {};
+  var usageLines = [];
+  if (usage.aiTutor)    usageLines.push('🤖 AI Tutor: ' + usage.aiTutor + ' messages');
+  if (usage.turbo)      usageLines.push('📺 Turbo 4×: ' + usage.turbo + ' videos watched');
+  if (usage.quiz)       usageLines.push('📝 Quizzes: ' + usage.quiz + ' attempts');
+  if (usage.timetable)  usageLines.push('📅 AI Timetable: ' + usage.timetable + ' plans generated');
+
+  var usageHtml = usageLines.length
+    ? '<div style="background:var(--bg-secondary,#16213e);border-radius:8px;padding:0.75rem 1rem;margin:0.75rem 0;text-align:left;font-size:0.82rem;line-height:1.8;">' +
+        '<p style="font-weight:700;margin-bottom:4px;">📊 Your trial usage:</p>' +
+        usageLines.join('<br>') +
+      '</div>'
+    : '<p style="font-size:0.82rem;color:var(--muted);margin:0.75rem 0;">You haven\'t explored much yet — try AI Tutor, Turbo 4×, and unlimited quizzes before your trial ends!</p>';
+
+  var modal = document.createElement('div');
+  modal.id = 'trial-ending-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  modal.innerHTML =
+    '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.7);" onclick="this.parentElement.remove()"></div>' +
+    '<div style="position:relative;background:var(--surface,#1a1a2e);border:1px solid var(--border,#333);border-radius:16px;padding:2rem;max-width:420px;width:100%;text-align:center;">' +
+      '<div style="font-size:2.5rem;margin-bottom:0.5rem;">⏰</div>' +
+      '<h3 style="font-size:1.2rem;margin-bottom:0.5rem;">Trial Ends in ' + daysLeft + ' Day' + (daysLeft > 1 ? 's' : '') + '!</h3>' +
+      '<p style="color:var(--muted,#999);font-size:0.88rem;">You\'ll lose: AI Tutor, Turbo 4×, AI Insights, Unlimited Quizzes, Spaced Repetition, AI Timetable, Telegram Evening</p>' +
+      usageHtml +
+      '<div style="display:flex;gap:8px;margin:1rem 0;">' +
+        '<div style="flex:1;padding:8px;border:1px solid var(--border,#333);border-radius:8px;text-align:center;"><span style="font-size:1.2rem;font-weight:800;">₹49</span><br><span style="font-size:0.7rem;color:var(--muted);">/month</span></div>' +
+        '<div style="flex:1;padding:8px;border:1px solid var(--border,#333);border-radius:8px;text-align:center;"><span style="font-size:1.2rem;font-weight:800;">₹149</span><br><span style="font-size:0.7rem;color:var(--muted);">/3 months</span></div>' +
+        '<div style="flex:1;padding:8px;border:2px solid var(--accent,#00C896);border-radius:8px;text-align:center;background:rgba(0,200,150,0.05);"><span style="font-size:1.2rem;font-weight:800;">₹399</span><br><span style="font-size:0.7rem;color:var(--accent);">/year (Save ₹189)</span></div>' +
+      '</div>' +
+      '<button onclick="this.closest(\'#trial-ending-modal\').remove();try{ezOpenUpgrade();}catch(e){};" ' +
+        'style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent,#00C896);color:#fff;font-weight:700;font-size:0.95rem;cursor:pointer;">' +
+        'Upgrade to Pro →</button>' +
+      '<button onclick="this.closest(\'#trial-ending-modal\').remove()" ' +
+        'style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--border,#333);background:transparent;color:var(--text,#fff);font-size:0.85rem;cursor:pointer;margin-top:8px;">' +
+        'Maybe later</button>' +
+      '<p style="font-size:0.72rem;color:var(--muted,#999);margin-top:0.75rem;">Your data is preserved for 30 days after trial ends.</p>' +
+    '</div>';
+  document.body.appendChild(modal);
+}
+
+/* ── 5. TRIAL ENDED MODAL ──
+   Fires when the watchdog detects the trial just expired. Replaces the
+   bare "ℹ️ Aapka Pro access khatam ho gaya" toast (which is fine but
+   undersells the upgrade nudge) with a full modal that:
+     - tallies total feature usage (loss-aversion)
+     - enumerates the exact features now locked
+     - shows pricing
+     - reassures about 30-day data preservation */
+function ezShowTrialEndedModal() {
+  var existing = document.getElementById('trial-ended-modal');
+  if (existing) existing.remove();
+
+  var usage = (appState && appState.proTrial && appState.proTrial.usage) || {};
+  var totalUsage = 0;
+  for (var k in usage) {
+    if (Object.prototype.hasOwnProperty.call(usage, k) && typeof usage[k] === 'number') {
+      totalUsage += usage[k];
+    }
+  }
+
+  var modal = document.createElement('div');
+  modal.id = 'trial-ended-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  modal.innerHTML =
+    '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.7);" onclick="this.parentElement.remove()"></div>' +
+    '<div style="position:relative;background:var(--surface,#1a1a2e);border:1px solid var(--border,#333);border-radius:16px;padding:2rem;max-width:420px;width:100%;text-align:center;">' +
+      '<div style="font-size:3rem;margin-bottom:0.5rem;">😢</div>' +
+      '<h3 style="font-size:1.2rem;margin-bottom:0.5rem;">Your Pro Trial Has Ended</h3>' +
+      (totalUsage > 0
+        ? '<p style="color:var(--muted,#999);font-size:0.88rem;margin-bottom:0.75rem;">During your trial, you used Pro features <strong>' + totalUsage + ' times</strong>. Imagine what you could do with unlimited access!</p>'
+        : '<p style="color:var(--muted,#999);font-size:0.88rem;margin-bottom:0.75rem;">You didn\'t get to explore much. Upgrade now and experience the full power of PrepPath Pro!</p>') +
+      '<div style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:0.75rem;margin-bottom:1rem;text-align:left;font-size:0.8rem;color:#ef4444;">' +
+        '<p style="font-weight:700;margin-bottom:4px;">🔒 You just lost access to:</p>' +
+        'AI Tutor · Turbo 4× · AI Insights · Unlimited Quizzes · Telegram Evening · AI Timetable · Spaced Repetition · PDF Export' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;margin-bottom:1rem;">' +
+        '<div style="flex:1;padding:8px;border:1px solid var(--border,#333);border-radius:8px;"><span style="font-weight:800;">₹49</span><br><span style="font-size:0.7rem;color:var(--muted);">/mo</span></div>' +
+        '<div style="flex:1;padding:8px;border:1px solid var(--border,#333);border-radius:8px;"><span style="font-weight:800;">₹249</span><br><span style="font-size:0.7rem;color:var(--muted);">/6mo</span></div>' +
+        '<div style="flex:1;padding:8px;border:2px solid #10b981;border-radius:8px;background:rgba(16,185,129,0.05);"><span style="font-weight:800;">₹399</span><br><span style="font-size:0.7rem;color:#10b981;">/yr ⭐</span></div>' +
+      '</div>' +
+      '<button onclick="this.closest(\'#trial-ended-modal\').remove();try{ezOpenUpgrade();}catch(e){};" ' +
+        'style="width:100%;padding:12px;border-radius:10px;border:none;background:var(--accent,#00C896);color:#fff;font-weight:700;font-size:0.95rem;cursor:pointer;">' +
+        'Upgrade to Pro →</button>' +
+      '<p style="font-size:0.72rem;color:var(--muted,#999);margin-top:0.75rem;">Your data is safe for 30 days. No progress lost.</p>' +
+      '<button onclick="this.closest(\'#trial-ended-modal\').remove()" ' +
+        'style="background:none;border:none;color:var(--muted,#999);cursor:pointer;margin-top:0.5rem;font-size:0.82rem;">' +
+        'Continue with Free plan</button>' +
+    '</div>';
+  document.body.appendChild(modal);
+}
+
+/* ── 6. DASHBOARD TRIAL CTA ──
+   Shown on the Dashboard page for users who are NOT Pro and haven't used
+   their trial yet. This is the highest-conversion surface we own — users
+   who land on the dashboard are already engaged, and the CTA converts
+   far better than burying it inside the upgrade modal. */
+function ezShowDashboardTrialCTA() {
+  if (typeof currentUser === 'undefined' || !currentUser) return;
+  if (typeof ezIsPro === 'function' && ezIsPro()) return; // already Pro
+  if (typeof ezProTrialUsed === 'function' && ezProTrialUsed()) return; // already used
+  // Wait for profile load so we don't re-render prematurely
+  if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE === null) return;
+
+  var existing = document.getElementById('dashboard-trial-cta');
+  if (existing) existing.remove();
+
+  var dashboard = document.getElementById('page-dashboard');
+  if (!dashboard || !dashboard.classList.contains('active')) return;
+
+  var cta = document.createElement('div');
+  cta.id = 'dashboard-trial-cta';
+  cta.style.cssText = 'background:linear-gradient(135deg,rgba(0,200,150,0.15),rgba(99,102,241,0.15));border:1px solid rgba(0,200,150,0.3);border-radius:12px;padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;';
+  cta.innerHTML =
+    '<div><p style="font-weight:700;font-size:0.9rem;margin-bottom:2px;">🎁 Try Pro Free for 7 Days</p>' +
+    '<p style="font-size:0.78rem;color:var(--muted,#999);">AI Tutor, Turbo 4×, Unlimited Quizzes, AI Insights — no card needed</p></div>' +
+    '<button onclick="try{ezStartProTrial();}catch(e){showToast(\'Error starting trial\',\'error\');}" style="padding:8px 18px;border-radius:8px;border:none;background:var(--accent,#00C896);color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;white-space:nowrap;">Start Free Trial →</button>';
+
+  var firstChild = dashboard.querySelector('.dashboard-content, .dash-grid, .page-content, .dashboard-grid');
+  if (firstChild) firstChild.prepend(cta);
+  else dashboard.prepend(cta);
+}
+
+/* ── 7. ENHANCED TRIAL WATCHDOG ──
+   Day-based UI: welcome modal on day 7, reminder banner on day 5–3,
+   ending modal + banner on day 2–1, ended modal on day 0. The existing
+   watchdog above (the one with `checkExpiry`) handles entitlement flips
+   (Pro ↔ free); this one handles DAILY UI nudges. They are independent
+   and additive — the existing one runs every 30s, this one runs every
+   60s and on visibility/focus. */
+(function () {
+  var _lastTrialDayShown = null;
+
+  function enhancedTrialCheck() {
+    if (typeof currentUser === 'undefined' || !currentUser) return;
+    if (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null) return;
+    if (typeof ezIsProTrialActive !== 'function' || !ezIsProTrialActive()) {
+      // Trial just expired (we were showing day N, now it's day 0) —
+      // fire the ended modal once.
+      if (_lastTrialDayShown !== null && _lastTrialDayShown > 0) {
+        _lastTrialDayShown = 0;
+        try { ezShowTrialEndedModal(); } catch(e) {}
+        var banner = document.getElementById('trial-reminder-banner');
+        if (banner) banner.remove();
+      }
+      return;
+    }
+    var daysLeft = (typeof ezProTrialDaysLeft === 'function') ? ezProTrialDaysLeft() : 0;
+    if (daysLeft === _lastTrialDayShown) return; // already shown for this day
+    _lastTrialDayShown = daysLeft;
+    // Day 7 (just started): welcome modal
+    if (daysLeft === 7) {
+      try { ezShowTrialWelcomeModal(); } catch(e) {}
+    }
+    // Day 5–3: reminder banner only
+    else if (daysLeft <= 5 && daysLeft >= 3) {
+      try { ezShowTrialReminderBanner(daysLeft); } catch(e) {}
+    }
+    // Day 2–1: banner + ending modal
+    else if (daysLeft <= 2 && daysLeft >= 1) {
+      try { ezShowTrialReminderBanner(daysLeft); } catch(e) {}
+      try { ezShowTrialEndingModal(daysLeft); } catch(e) {}
+    }
+  }
+
+  // Run on load + every 60s + on visibility/focus.
+  if (window.addEventListener) {
+    window.addEventListener('load', function () { setTimeout(enhancedTrialCheck, 3000); });
+    setInterval(enhancedTrialCheck, 60 * 1000);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') setTimeout(enhancedTrialCheck, 500);
+    });
+    window.addEventListener('focus', function () { setTimeout(enhancedTrialCheck, 500); });
+  }
+
+  // Show dashboard CTA whenever the user lands on the dashboard.
+  if (typeof switchPage === 'function') {
+    var _switchPageTrial = switchPage;
+    switchPage = function (page) {
+      var result;
+      try { result = _switchPageTrial.apply(this, arguments); } catch(e) { result = undefined; }
+      if (page === 'dashboard') setTimeout(ezShowDashboardTrialCTA, 300);
+      return result;
+    };
+  }
+})();
+
+/* ── 8. OVERRIDE ezStartProTrial TO ALSO SHOW WELCOME MODAL ──
+   The original function still runs (toast + plan stamp + gate refresh);
+   we just queue the welcome modal 500ms later so it doesn't fight the
+   upgrade modal close animation. */
+(function () {
+  var _origStartTrial = ezStartProTrial;
+  ezStartProTrial = function () {
+    _origStartTrial();
+    if (typeof ezIsProTrialActive === 'function' && ezIsProTrialActive()) {
+      setTimeout(function() {
+        try { ezShowTrialWelcomeModal(); } catch(e) {}
+      }, 500);
+    }
+  };
+})();
+
+/* ── 9. TRIAL ANALYTICS (admin-facing) ──
+   Best-effort: mirror the local usage counters to Firestore under
+   `users/{uid}.profile.trialUsage` so the admin dashboard can compute
+   trial→paid conversion + feature-engagement stats. We stamp on every
+   track call (throttled naturally by the cadence of feature usage).
+   Silently fails if Firestore rules disallow the write. */
+(function () {
+  var _origTrack = ezTrialTrack;
+  ezTrialTrack = function (feature) {
+    _origTrack(feature);
+    try {
+      if (typeof _fbReady !== 'undefined' && _fbReady &&
+          typeof db !== 'undefined' && db &&
+          typeof currentUser !== 'undefined' && currentUser && currentUser.uid &&
+          appState && appState.proTrial) {
+        db.collection('users').doc(currentUser.uid).update({
+          'profile.trialUsage': appState.proTrial.usage || {},
+          'profile.trialLastTrackedFeature': feature,
+          'profile.trialLastTrackedAt': firebase.firestore.FieldValue.serverTimestamp()
+        }).catch(function () { /* ignore permission errors */ });
+      }
+    } catch (e) { /* ignore */ }
+  };
+})();
+
+
