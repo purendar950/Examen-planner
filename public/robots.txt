@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /app.html
+Disallow: /admin.html
+Disallow: /pages/
+
+Sitemap: https://purendar950.github.io/Examen-planner/sitemap.xml
