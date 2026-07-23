@@ -5464,7 +5464,31 @@ html[data-theme="light"] .fintech-dashboard {
 .shell-sidebar-status { display: none; }
 
 @media (min-width: 901px) {
-  :root { --shell-sidebar-width: 252px; }
+  :root { --shell-sidebar-width: 252px; --shell-sidebar-width-collapsed: 72px; }
+
+  /* Collapsed rail: driven by a hidden checkbox + label (no JS required for
+     the visual effect itself). #app:has(...) re-defines the width variable
+     that .nav-tabs/.topbar/#exam-selector-bar/.main-content already read,
+     so every offset below updates together. */
+  #app:has(#shell-sidebar-collapse:checked) { --shell-sidebar-width: var(--shell-sidebar-width-collapsed); }
+
+  .shell-collapse-input { position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none; }
+  .shell-collapse-toggle {
+    display: grid;
+    flex: 0 0 auto;
+    width: 28px;
+    height: 28px;
+    margin-left: auto;
+    place-items: center;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color .15s, background .15s, border-color .15s;
+  }
+  .shell-collapse-toggle:hover { color: var(--accent); background: var(--accent-dim); border-color: rgba(0, 200, 150, .2); }
+  .shell-collapse-toggle svg { width: 15px; height: 15px; }
 
   #app {
     min-height: 100vh;
@@ -5485,11 +5509,13 @@ html[data-theme="light"] .fintech-dashboard {
     min-height: 100vh;
     gap: 4px;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 24px 16px 18px;
     background: color-mix(in srgb, var(--surface) 96%, var(--bg));
     border: 0;
     border-right: 1px solid var(--border);
     box-shadow: 16px 0 38px -34px rgba(0, 0, 0, .55);
+    transition: width .18s ease, padding .18s ease;
   }
 
   .shell-brand {
@@ -5519,9 +5545,12 @@ html[data-theme="light"] .fintech-dashboard {
     font-weight: 800;
     letter-spacing: .12em;
     text-transform: uppercase;
+    white-space: nowrap;
   }
 
   .nav-tab {
+    display: flex;
+    align-items: center;
     width: 100%;
     min-height: 42px;
     padding: .68rem .78rem;
@@ -5530,14 +5559,17 @@ html[data-theme="light"] .fintech-dashboard {
     color: var(--muted);
     font-size: .82rem;
     font-weight: 600;
+    white-space: nowrap;
   }
   .nav-tab .tab-icon {
     display: grid;
     width: 20px;
     height: 20px;
+    flex: 0 0 auto;
     place-items: center;
     font-size: .9rem;
   }
+  .nav-tab-label { overflow: hidden; }
   .nav-tab.active {
     color: var(--accent);
     background: var(--accent-dim);
@@ -5571,8 +5603,20 @@ html[data-theme="light"] .fintech-dashboard {
   }
   .shell-sidebar-status strong,
   .shell-sidebar-status span:not(.shell-status-dot) { display: block; }
-  .shell-sidebar-status strong { color: var(--text); font-size: .68rem; }
-  .shell-sidebar-status span:not(.shell-status-dot) { margin-top: 2px; font-size: .58rem; }
+  .shell-sidebar-status strong { color: var(--text); font-size: .68rem; white-space: nowrap; }
+  .shell-sidebar-status span:not(.shell-status-dot) { margin-top: 2px; font-size: .58rem; white-space: nowrap; }
+
+  /* ── Collapsed state: icons-only rail, brand mark + status dot remain ── */
+  .nav-tabs:has(#shell-sidebar-collapse:checked) { padding-inline: 10px; align-items: center; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-brand { justify-content: center; padding-inline: 0; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-brand-text,
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-nav-label,
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .nav-tab-label,
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-text { display: none; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-collapse-toggle { margin-left: 0; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .nav-tab { justify-content: center; width: 44px; padding: .68rem; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-status { justify-content: center; padding: .6rem; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-collapse-toggle svg { transform: rotate(180deg); }
 
   /* Minimal command header — profile, sync, and focus remain immediately available. */
   .topbar {
@@ -5584,6 +5628,7 @@ html[data-theme="light"] .fintech-dashboard {
     border-bottom-color: color-mix(in srgb, var(--border) 80%, transparent);
     backdrop-filter: blur(20px) saturate(1.25);
     -webkit-backdrop-filter: blur(20px) saturate(1.25);
+    transition: margin-left .18s ease;
   }
   .topbar-left { display: none; }
   .topbar::before {
@@ -5601,6 +5646,7 @@ html[data-theme="light"] .fintech-dashboard {
     padding: .7rem 2.25rem !important;
     background: color-mix(in srgb, var(--surface) 94%, var(--bg)) !important;
     border-bottom-color: color-mix(in srgb, var(--border) 82%, transparent) !important;
+    transition: margin-left .18s ease;
   }
   #app .main-content,
   #app .main-content:has(#page-dashboard.active) {
@@ -5608,6 +5654,7 @@ html[data-theme="light"] .fintech-dashboard {
     max-width: none;
     margin: 0 0 0 var(--shell-sidebar-width);
     padding: 2rem 2.25rem 4rem;
+    transition: margin-left .18s ease;
   }
   #app .main-content > .page { max-width: 1400px; margin: 0 auto; }
   #app .main-content > #page-dashboard { max-width: 1400px; }
