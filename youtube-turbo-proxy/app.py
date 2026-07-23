@@ -48,6 +48,7 @@ app = Flask(__name__)
 # Browser clients are restricted to the app origins. Add additional deployments
 # through ALLOWED_ORIGINS (comma-separated); never fall back to a wildcard.
 _DEFAULT_ALLOWED_ORIGINS = ("https://examzen.in", "https://www.examzen.in",
+                            "https://purendar950.github.io",
                             "https://appassets.androidengine", "http://localhost:5173")
 ALLOWED_ORIGINS = tuple(origin.strip().rstrip("/") for origin in
                         os.environ.get("ALLOWED_ORIGINS", ",".join(_DEFAULT_ALLOWED_ORIGINS)).split(",")
