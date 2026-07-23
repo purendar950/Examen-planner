@@ -459,3 +459,568 @@ ezLoadProfile = async function() {
   ezApplyPageLock();
 };
 
+
+
+/* ══════════════════════════════════════════════
+   PRO FEATURE BLUR PREVIEW SYSTEM
+   Shows actual content blurred with a Pro overlay
+   instead of hard-locking it. User sees the value
+   → wants to upgrade.
+   ══════════════════════════════════════════════ */
+
+/* Generate realistic fake preview content so the user
+   sees what they'd get with Pro. Pure DOM string — no
+   dependency on real data. */
+function ezGeneratePreviewContent(previewType) {
+  var previews = {
+    insights:
+      '<div style="padding:1rem;">' +
+        '<div style="font-weight:700;margin-bottom:12px;">📊 Your AI Study Report</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:12px;border-radius:8px;"><div style="font-size:1.2rem;font-weight:800;color:#ef4444;">Time & Work</div><div style="font-size:0.75rem;color:var(--muted,#999);">Weakest topic — 42% accuracy</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:12px;border-radius:8px;"><div style="font-size:1.2rem;font-weight:800;color:#10b981;">Polity</div><div style="font-size:0.75rem;color:var(--muted,#999);">Strongest — 89% accuracy</div></div>' +
+        '</div>' +
+        '<div style="background:var(--bg-secondary,#16213e);padding:12px;border-radius:8px;">' +
+          '<div style="font-weight:600;margin-bottom:6px;">🎯 Predicted Score: 142-156/200</div>' +
+          '<div style="height:8px;background:var(--bg-primary,#0a0a0f);border-radius:4px;overflow:hidden;"><div style="height:100%;width:71%;background:linear-gradient(90deg,#6366f1,#a855f7);border-radius:4px;"></div></div>' +
+          '<div style="font-size:0.75rem;color:var(--muted,#999);margin-top:4px;">Based on last 5 mock tests</div>' +
+        '</div>' +
+      '</div>',
+
+    revision:
+      '<div style="padding:1rem;">' +
+        '<div style="font-weight:700;margin-bottom:12px;">🔁 Revision Schedule (Auto-generated)</div>' +
+        '<div style="display:flex;flex-direction:column;gap:8px;">' +
+          '<div style="display:flex;align-items:center;gap:10px;background:var(--bg-secondary,#16213e);padding:10px;border-radius:8px;"><span style="color:#ef4444;font-weight:700;">TODAY</span><span>Polity Ch.4 — Fundamental Rights (Day 7 review)</span></div>' +
+          '<div style="display:flex;align-items:center;gap:10px;background:var(--bg-secondary,#16213e);padding:10px;border-radius:8px;"><span style="color:#f59e0b;font-weight:700;">Tomorrow</span><span>Arithmetic — Time & Work (Day 3 review)</span></div>' +
+          '<div style="display:flex;align-items:center;gap:10px;background:var(--bg-secondary,#16213e);padding:10px;border-radius:8px;"><span style="color:#6366f1;font-weight:700;">Day 3</span><span>Geography — Indian Rivers (Day 14 review)</span></div>' +
+          '<div style="display:flex;align-items:center;gap:10px;background:var(--bg-secondary,#16213e);padding:10px;border-radius:8px;"><span style="color:var(--muted,#999);font-weight:700;">Day 5</span><span>History — Mughal Era (Day 30 review)</span></div>' +
+        '</div>' +
+      '</div>',
+
+    timetable:
+      '<div style="padding:1rem;">' +
+        '<div style="font-weight:700;margin-bottom:12px;">📅 AI-Generated Study Plan (This Week)</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px;font-size:0.7rem;">' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;"><div style="font-weight:700;">Mon</div><div style="margin-top:4px;">Polity<br>Ch.5</div><div style="color:#10b981;">2h</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;"><div style="font-weight:700;">Tue</div><div style="margin-top:4px;">Maths<br>T&W</div><div style="color:#10b981;">3h</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;"><div style="font-weight:700;">Wed</div><div style="margin-top:4px;">Geo<br>Rivers</div><div style="color:#10b981;">2h</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;"><div style="font-weight:700;">Thu</div><div style="margin-top:4px;">History<br>Mughal</div><div style="color:#10b981;">2h</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;"><div style="font-weight:700;">Fri</div><div style="margin-top:4px;">Mock<br>Test</div><div style="color:#f59e0b;">1.5h</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;"><div style="font-weight:700;">Sat</div><div style="margin-top:4px;">Revision<br>Week</div><div style="color:#6366f1;">3h</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;"><div style="font-weight:700;">Sun</div><div style="margin-top:4px;">Rest<br>+ Light</div><div style="color:var(--muted,#999);">1h</div></div>' +
+        '</div>' +
+      '</div>',
+
+    turbo:
+      '<div style="padding:1rem;text-align:center;">' +
+        '<div style="font-size:3rem;margin-bottom:8px;">📺</div>' +
+        '<div style="font-weight:700;margin-bottom:6px;">Turbo 4× Player</div>' +
+        '<div style="display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;">' +
+          '<span style="background:var(--bg-secondary,#16213e);padding:4px 10px;border-radius:4px;font-size:0.8rem;">1×</span>' +
+          '<span style="background:var(--bg-secondary,#16213e);padding:4px 10px;border-radius:4px;font-size:0.8rem;">1.5×</span>' +
+          '<span style="background:var(--bg-secondary,#16213e);padding:4px 10px;border-radius:4px;font-size:0.8rem;">2×</span>' +
+          '<span style="background:linear-gradient(135deg,#6366f1,#a855f7);padding:4px 10px;border-radius:4px;font-size:0.8rem;font-weight:700;color:#fff;">4× ⚡</span>' +
+        '</div>' +
+        '<div style="font-size:0.8rem;color:var(--muted,#999);">Watch a 2-hour lecture in just 30 minutes</div>' +
+        '<div style="margin-top:8px;height:6px;background:var(--bg-secondary,#16213e);border-radius:3px;overflow:hidden;"><div style="height:100%;width:75%;background:linear-gradient(90deg,#6366f1,#a855f7);"></div></div>' +
+        '<div style="font-size:0.7rem;color:var(--muted,#999);margin-top:4px;">1:30:00 / 2:00:00 at 4× speed</div>' +
+      '</div>',
+
+    weekly:
+      '<div style="padding:1rem;">' +
+        '<div style="font-weight:700;margin-bottom:12px;">📅 Weekly Overview — Week 23</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">' +
+          '<div style="background:rgba(16,185,129,0.15);padding:8px;border-radius:6px;text-align:center;font-size:0.7rem;"><div>Mon</div><div style="font-weight:700;color:#10b981;">4/5 ✓</div></div>' +
+          '<div style="background:rgba(16,185,129,0.15);padding:8px;border-radius:6px;text-align:center;font-size:0.7rem;"><div>Tue</div><div style="font-weight:700;color:#10b981;">5/5 ✓</div></div>' +
+          '<div style="background:rgba(245,158,11,0.15);padding:8px;border-radius:6px;text-align:center;font-size:0.7rem;"><div>Wed</div><div style="font-weight:700;color:#f59e0b;">3/5</div></div>' +
+          '<div style="background:rgba(239,68,68,0.15);padding:8px;border-radius:6px;text-align:center;font-size:0.7rem;"><div>Thu</div><div style="font-weight:700;color:#ef4444;">1/5</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;font-size:0.7rem;"><div>Fri</div><div style="color:var(--muted,#999);">—</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;font-size:0.7rem;"><div>Sat</div><div style="color:var(--muted,#999);">—</div></div>' +
+          '<div style="background:var(--bg-secondary,#16213e);padding:8px;border-radius:6px;text-align:center;font-size:0.7rem;"><div>Sun</div><div style="color:var(--muted,#999);">—</div></div>' +
+        '</div>' +
+      '</div>',
+
+    aitutor:
+      '<div style="padding:1rem;">' +
+        '<div style="font-weight:700;margin-bottom:12px;">🤖 AI Tutor — Live</div>' +
+        '<div style="background:var(--bg-secondary,#16213e);padding:12px;border-radius:8px;margin-bottom:8px;">' +
+          '<div style="font-size:0.7rem;color:var(--muted,#999);margin-bottom:4px;">You asked:</div>' +
+          '<div>Explain Article 370 with examples</div>' +
+        '</div>' +
+        '<div style="background:linear-gradient(135deg,rgba(99,102,241,0.1),rgba(168,85,247,0.1));padding:12px;border-radius:8px;border:1px solid rgba(99,102,241,0.3);">' +
+          '<div style="font-size:0.7rem;color:#a78bfa;margin-bottom:4px;">🤖 AI Tutor:</div>' +
+          '<div style="font-size:0.85rem;">Article 370 granted special autonomous status to Jammu & Kashmir...</div>' +
+        '</div>' +
+      '</div>',
+
+    generic:
+      '<div style="padding:1.5rem;text-align:center;">' +
+        '<div style="display:flex;gap:8px;justify-content:center;margin-bottom:12px;">' +
+          '<div style="width:60px;height:8px;background:var(--bg-secondary,#16213e);border-radius:4px;"></div>' +
+          '<div style="width:40px;height:8px;background:var(--bg-secondary,#16213e);border-radius:4px;"></div>' +
+          '<div style="width:80px;height:8px;background:var(--bg-secondary,#16213e);border-radius:4px;"></div>' +
+        '</div>' +
+        '<div style="width:80%;height:8px;background:var(--bg-secondary,#16213e);border-radius:4px;margin:0 auto 8px;"></div>' +
+        '<div style="width:60%;height:8px;background:var(--bg-secondary,#16213e);border-radius:4px;margin:0 auto 8px;"></div>' +
+        '<div style="width:70%;height:8px;background:var(--bg-secondary,#16213e);border-radius:4px;margin:0 auto;"></div>' +
+      '</div>'
+  };
+  return previews[previewType] || previews.generic;
+}
+
+/**
+ * ezBlurPreview(containerEl, options)
+ * Wraps existing content in a blur container with a Pro overlay.
+ *
+ * @param {HTMLElement} containerEl
+ * @param {Object} options
+ * @param {string} options.title
+ * @param {string} options.desc
+ * @param {string} options.height 'sm' | 'md' | 'lg' | 'xl'
+ * @param {boolean} options.partial  If true, fade bottom instead of blurring
+ * @param {string} options.icon
+ * @param {string} options.previewType  Which fake-content block to use
+ */
+function ezBlurPreview(containerEl, options) {
+  if (!containerEl) return;
+  if (typeof ezIsPro === 'function' && ezIsPro()) return; // Pro: no blur
+  if (typeof ezGated === 'function' && !ezGated()) return; // Not logged in: no blur
+  if (containerEl.querySelector('.pro-blur-overlay')) return; // already wrapped
+
+  var opts = options || {};
+  var title = opts.title || 'Pro Feature';
+  var desc = opts.desc || 'Upgrade to Pro to unlock this feature.';
+  var height = opts.height || 'md';
+  var icon = opts.icon || '💎';
+  var partial = !!opts.partial;
+  var previewType = opts.previewType || 'generic';
+
+  var existingContent = containerEl.innerHTML;
+  if (!existingContent || !existingContent.trim()) {
+    existingContent = ezGeneratePreviewContent(previewType);
+  }
+
+  containerEl.innerHTML =
+    '<div class="pro-blur-container pro-blur-h-' + height + (partial ? ' pro-blur-partial' : '') + '">' +
+      '<div class="pro-blur-content">' + existingContent + '</div>' +
+      '<div class="pro-blur-overlay">' +
+        '<div class="pro-lock-icon">' + icon + '</div>' +
+        '<div class="pro-lock-title">' + title + '</div>' +
+        '<div class="pro-lock-desc">' + desc + '</div>' +
+        '<button class="pro-lock-btn" type="button" onclick="ezOpenUpgrade()">💎 Upgrade to Pro</button>' +
+        '<div class="pro-lock-price">Starting at ₹49/month · 7-day free trial</div>' +
+      '</div>' +
+    '</div>';
+}
+
+/* ══════════════════════════════════════════════
+   UPGRADE EXISTING GATES → BLUR PREVIEWS
+   Keep the toast/limit logic; just wrap the
+   container in a blur with realistic preview
+   instead of showing a hard "💎 Pro feature" wall.
+   ══════════════════════════════════════════════ */
+
+/* 12b. AI Study Insights → blur with score-prediction preview.
+   Override the hard-lock innerHTML set in gate #12 with a blur preview. */
+(function () {
+  var _orig12 = aiGetSmartInsights;
+  if (typeof _orig12 !== 'function') return;
+  aiGetSmartInsights = function () {
+    if (typeof ezGated === 'function' && ezGated()) {
+      var el = document.getElementById('ai-insights-container') ||
+               document.querySelector('[data-tab="ai-insights"]') ||
+               document.getElementById('planner-ai-insights');
+      if (el) {
+        el.innerHTML = '<div class="pro-blur-h-lg" style="position:relative;"></div>';
+        ezBlurPreview(el.firstChild, {
+          title: 'AI Study Insights',
+          desc: 'Weak topics, score predictions, study recommendations, and time allocation advice — powered by AI.',
+          height: 'lg',
+          icon: '📊',
+          previewType: 'insights'
+        });
+      }
+      return null;
+    }
+    return _orig12.apply(this, arguments);
+  };
+})();
+
+/* 13b. Spaced Repetition → blur with revision-schedule preview. */
+(function () {
+  var _orig13 = renderRevisionQueue;
+  if (typeof _orig13 !== 'function') return;
+  renderRevisionQueue = function () {
+    if (typeof ezGated === 'function' && ezGated()) {
+      var el = document.getElementById('revision-container') ||
+               document.getElementById('revision-queue') ||
+               document.querySelector('[data-tab="revision"]');
+      if (el) {
+        el.innerHTML = '<div class="pro-blur-h-lg" style="position:relative;"></div>';
+        ezBlurPreview(el.firstChild, {
+          title: 'Spaced Repetition Revision',
+          desc: 'Auto-scheduled revision at Day 1, 3, 7, 14, 30 based on forgetting-curve science. Never forget a topic again.',
+          height: 'lg',
+          icon: '🔁',
+          previewType: 'revision'
+        });
+      }
+      return;
+    }
+    _orig13.apply(this, arguments);
+  };
+})();
+
+/* 4b. AI Timetable weekly-limit wall → blur with weekly-plan preview.
+   The free user already gets 1 generation/week; the BLUR fires only
+   when the weekly cap is hit (i.e. after the free generation). */
+(function () {
+  var _orig4 = generateTimetable;
+  if (typeof _orig4 !== 'function') return;
+  generateTimetable = function () {
+    if (typeof ezGated === 'function' && ezGated()) {
+      var weekKey = 'sp_timetable_week_' + ezIsoWeekKey();
+      var count = parseInt(localStorage.getItem(weekKey) || '0', 10);
+      var maxFree = EZ_FREE_LIMITS.aiTimetablePerWeek || 1;
+      if (count >= maxFree) {
+        var c = document.getElementById('timetable-container');
+        if (c) {
+          c.innerHTML = '<div class="pro-blur-h-lg" style="position:relative;"></div>';
+          ezBlurPreview(c.firstChild, {
+            title: 'AI Timetable — Weekly Limit Reached',
+            desc: 'Free plan: ' + maxFree + ' generation/week. Pro: unlimited + auto-reschedule on missed days.',
+            height: 'lg',
+            icon: '📅',
+            previewType: 'timetable'
+          });
+        }
+        return;
+      }
+      try { localStorage.setItem(weekKey, String(count + 1)); } catch (e) {}
+    }
+    _orig4.apply(this, arguments);
+  };
+})();
+
+/* 11b. Turbo 4× → show the player UI blurred for free users.
+   Free users still get a "Turbo not available" toast on toggle, but
+   the player surface itself is rendered as a preview so they can
+   see what they'd unlock. */
+(function () {
+  function _blurTurboSurface() {
+    if (typeof ezGated === 'function' && !ezGated()) return;
+    var surfaces = document.querySelectorAll(
+      '.yt-turbo-toggle, .turbo-section, [data-turbo="speed-selector"], #turbo-speed-buttons'
+    );
+    if (!surfaces.length) return;
+    var surface = surfaces[0].parentElement;
+    if (!surface || surface.querySelector('.pro-blur-overlay')) return;
+    ezBlurPreview(surface, {
+      title: 'Turbo 4× Player',
+      desc: 'Watch any YouTube lecture at 4× speed. A 2-hour video finishes in 30 minutes. Save 14+ hours per week.',
+      height: 'md',
+      icon: '🚀',
+      previewType: 'turbo'
+    });
+  }
+  // Re-blur whenever a YouTube page is rendered or turbo is toggled
+  if (typeof switchPage === 'function') {
+    var _sp = switchPage;
+    switchPage = function (page) {
+      _sp.apply(this, arguments);
+      try { if (page === 'youtube' || page === 'yt-organiser') setTimeout(_blurTurboSurface, 300); } catch (e) {}
+    };
+  }
+  if (typeof ytToggleTurbo === 'function') {
+    var _origT = ytToggleTurbo;
+    ytToggleTurbo = function () {
+      if (typeof ezGated === 'function' && ezGated()) {
+        ezLockedMsg('Turbo 4× Player — watch lectures 4× faster');
+        try { _blurTurboSurface(); } catch (e) {}
+        return;
+      }
+      _origT.apply(this, arguments);
+    };
+  }
+  // Also fire on load
+  window.addEventListener('load', function () { setTimeout(_blurTurboSurface, 1500); });
+})();
+
+/* 10b. AI Tutor over-limit → blur the chat surface for free users. */
+(function () {
+  if (typeof sendTutor !== 'function') return;
+  var _orig = sendTutor;
+  sendTutor = function () {
+    if (typeof ezGated === 'function' && ezGated()) {
+      var today = new Date().toISOString().split('T')[0];
+      var key = 'sp_ai_tutor_' + today;
+      var count = parseInt(localStorage.getItem(key) || '0', 10);
+      var maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
+      if (count >= maxFree) {
+        var el = document.getElementById('tutor-chat') ||
+                 document.getElementById('ai-tutor-messages') ||
+                 document.querySelector('.tutor-messages');
+        if (el) {
+          ezBlurPreview(el, {
+            title: 'AI Tutor — Daily Limit Reached',
+            desc: 'Free plan: ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor with priority responses.',
+            height: 'md',
+            icon: '🤖',
+            previewType: 'aitutor'
+          });
+        } else {
+          ezLockedMsg('Free plan: max ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor');
+        }
+        return;
+      }
+      try { localStorage.setItem(key, String(count + 1)); } catch (e) {}
+    }
+    _orig.apply(this, arguments);
+  };
+})();
+
+/* PDF Export buttons → blur/disable with 💎 lock icon. */
+function ezBlurPdfButtons() {
+  if (typeof ezGated === 'function' && !ezGated()) return;
+  var pdfBtns = document.querySelectorAll(
+    '[onclick*="exportPdf"], [onclick*="downloadPdf"], [onclick*="ezExportPdf"], .btn-pdf-export'
+  );
+  pdfBtns.forEach(function (btn) {
+    if (btn.dataset.proBlurred) return;
+    btn.dataset.proBlurred = '1';
+    btn.style.position = 'relative';
+    btn.style.opacity = '0.5';
+    btn.style.pointerEvents = 'none';
+    var lock = document.createElement('span');
+    lock.style.cssText = 'position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:0.8rem;';
+    lock.textContent = '💎';
+    btn.appendChild(lock);
+    btn.title = 'PDF Export — Pro feature';
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      ezLockedMsg('PDF Export — download plans, notes & reports');
+    }, true);
+  });
+}
+
+/* Hook PDF blur into the existing gate refresh. */
+(function () {
+  if (typeof ezRefreshGates !== 'function') return;
+  var _orig = ezRefreshGates;
+  ezRefreshGates = function () {
+    _orig.apply(this, arguments);
+    setTimeout(ezBlurPdfButtons, 500);
+  };
+})();
+
+/* ══════════════════════════════════════════════
+   COMMUNITY EXCLUSIVITY — PRO PERKS & STATUS
+   Make Pro feel like a club, not just features.
+   ══════════════════════════════════════════════ */
+
+/* C1. PRO BADGE IN TOPBAR — shows plan + "since" date for Pro users,
+   trial days for trialing users, "Free Plan" for free. The existing
+   ezRenderPlanBadge in phase2-plans.js handles the basic version;
+   this one extends it with the "since" date and click → upgrade. */
+function ezRenderProStatusBadge() {
+  var existing = document.getElementById('pro-status-badge');
+  if (existing) existing.remove();
+
+  if (typeof currentUser === 'undefined' || !currentUser) return;
+
+  var right = document.querySelector('.topbar-right');
+  if (!right) return;
+
+  var isPro = (typeof ezIsPro === 'function') ? ezIsPro() : false;
+  var p = (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) ? EZ_PROFILE : {};
+
+  var badge = document.createElement('div');
+  badge.id = 'pro-status-badge';
+
+  if (isPro) {
+    var planLabel = p.plan === 'pro_annual' ? 'Yearly' :
+                    p.plan === 'pro_halfyearly' ? '6 Months' :
+                    p.plan === 'pro_quarterly' ? '3 Months' :
+                    p.plan === 'pro_monthly' ? 'Monthly' :
+                    p.plan === 'referral' ? 'Referral' :
+                    p.plan === 'referral_welcome' ? 'Welcome' : 'Pro';
+    var since = p.paidAt ? new Date(p.paidAt).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' }) : '';
+    badge.style.cssText = 'background:linear-gradient(135deg,rgba(99,102,241,0.15),rgba(168,85,247,0.15));border:1px solid rgba(99,102,241,0.3);color:#a78bfa;';
+    badge.innerHTML = '👑 Pro' + (since ? ' · since ' + since : '');
+    badge.title = planLabel + ' plan' + (p.planExpiry ? ' · Expires: ' + p.planExpiry : '');
+  } else if (typeof ezIsProTrialActive === 'function' && ezIsProTrialActive()) {
+    var daysLeft = (typeof ezProTrialDaysLeft === 'function') ? ezProTrialDaysLeft() : 0;
+    badge.style.cssText = 'background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.3);color:#f59e0b;';
+    badge.innerHTML = '⏳ Trial: ' + daysLeft + 'd left';
+    badge.title = 'Pro trial active — click to upgrade';
+  } else {
+    badge.style.cssText = 'background:var(--bg-secondary);border:1px solid var(--border);color:var(--muted);';
+    badge.innerHTML = '🆓 Free Plan';
+    badge.title = 'Click to upgrade to Pro';
+  }
+
+  badge.onclick = function () {
+    try { ezOpenUpgrade(); } catch (e) {}
+  };
+
+  // Insert next to the existing plan badge (which is at position 0)
+  var existingBadge = document.getElementById('ez-plan-badge');
+  if (existingBadge && existingBadge.parentElement) {
+    existingBadge.parentElement.insertBefore(badge, existingBadge.nextSibling);
+  } else {
+    right.insertBefore(badge, right.firstChild);
+  }
+}
+
+/* C2. PRO EXCLUSIVE WIDGET — Dashboard widget showing perks.
+   Pro users see 4 unlocked perk tiles + motivational line.
+   Free users see 4 locked perk tiles + "Unlock all" button. */
+function ezRenderProExclusiveWidget() {
+  if (typeof currentUser === 'undefined' || !currentUser) return;
+
+  var dashboard = document.getElementById('page-dashboard');
+  if (!dashboard) return;
+
+  var existing = document.getElementById('pro-exclusive-widget');
+  if (existing) existing.remove();
+
+  var isPro = (typeof ezIsPro === 'function') ? ezIsPro() : false;
+
+  var widget = document.createElement('div');
+  widget.id = 'pro-exclusive-widget';
+  widget.className = 'pro-exclusive-widget';
+
+  if (isPro) {
+    widget.style.background = 'linear-gradient(135deg,rgba(99,102,241,0.1),rgba(168,85,247,0.1))';
+    widget.style.border = '1px solid rgba(99,102,241,0.25)';
+    widget.innerHTML =
+      '<h4 style="margin:0 0 0.75rem;font-size:0.95rem;">👑 Pro Member Perks</h4>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.8rem;">' +
+        '<a href="#" onclick="try{ezOpenTelegramGroup()}catch(e){}return false;" style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-secondary);border-radius:8px;color:var(--text);text-decoration:none;">' +
+          '<span>💬</span><span>Exclusive Telegram Group</span></a>' +
+        '<a href="#" onclick="try{ezOpenLiveQA()}catch(e){}return false;" style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-secondary);border-radius:8px;color:var(--text);text-decoration:none;">' +
+          '<span>📺</span><span>Monthly Live Q&A</span></a>' +
+        '<a href="#" onclick="try{ezOpenPdfNotes()}catch(e){}return false;" style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-secondary);border-radius:8px;color:var(--text);text-decoration:none;">' +
+          '<span>📄</span><span>PDF Notes Download</span></a>' +
+        '<a href="#" onclick="try{ezOpenEarlyAccess()}catch(e){}return false;" style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-secondary);border-radius:8px;color:var(--text);text-decoration:none;">' +
+          '<span>🚀</span><span>Early Access Features</span></a>' +
+      '</div>' +
+      '<div style="margin-top:0.75rem;padding:8px 12px;background:rgba(16,185,129,0.1);border-radius:8px;font-size:0.75rem;color:#10b981;text-align:center;">' +
+        '🎯 You\'re in the top 15% of active aspirants. Keep going!' +
+      '</div>';
+  } else {
+    widget.style.background = 'var(--bg-secondary)';
+    widget.style.border = '1px solid var(--border)';
+    widget.innerHTML =
+      '<h4 style="margin:0 0 0.75rem;font-size:0.95rem;">👑 Pro Member Perks <span style="font-size:0.7rem;color:var(--muted);font-weight:400;">(locked)</span></h4>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:0.8rem;opacity:0.6;">' +
+        '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-primary);border-radius:8px;"><span>💬</span><span>Exclusive Telegram Group</span><span style="margin-left:auto;">🔒</span></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-primary);border-radius:8px;"><span>📺</span><span>Monthly Live Q&amp;A</span><span style="margin-left:auto;">🔒</span></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-primary);border-radius:8px;"><span>📄</span><span>PDF Notes Download</span><span style="margin-left:auto;">🔒</span></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg-primary);border-radius:8px;"><span>🚀</span><span>Early Access Features</span><span style="margin-left:auto;">🔒</span></div>' +
+      '</div>' +
+      '<button onclick="try{ezOpenUpgrade()}catch(e){}" type="button" style="width:100%;margin-top:0.75rem;padding:10px;border-radius:8px;border:none;background:linear-gradient(135deg,#6366f1,#a855f7);color:#fff;font-weight:700;font-size:0.85rem;cursor:pointer;font-family:inherit;">' +
+        '💎 Unlock All Pro Perks — ₹49/mo</button>';
+  }
+
+  // Try common dashboard content containers in order of preference
+  var dashContent = dashboard.querySelector('.dashboard-content, .dash-grid, .fin-hero-grid, .page-content');
+  if (dashContent) {
+    dashContent.appendChild(widget);
+  } else {
+    dashboard.appendChild(widget);
+  }
+}
+
+/* C3. PRO EXCLUSIVE ACTIONS — link out to Telegram group, Live Q&A, etc. */
+function ezOpenTelegramGroup() {
+  var groupLink = 'https://t.me/studyplanner_pro';
+  if (typeof db !== 'undefined' && db) {
+    db.collection('config').doc('pro').get().then(function (doc) {
+      if (doc.exists && doc.data().telegramGroupLink) groupLink = doc.data().telegramGroupLink;
+      window.open(groupLink, '_blank', 'noopener');
+    }).catch(function () { window.open(groupLink, '_blank', 'noopener'); });
+  } else {
+    window.open(groupLink, '_blank', 'noopener');
+  }
+}
+
+function ezOpenLiveQA() {
+  var qaLink = 'https://youtube.com/@studyplanner/live';
+  if (typeof db !== 'undefined' && db) {
+    db.collection('config').doc('pro').get().then(function (doc) {
+      if (doc.exists && doc.data().liveQALink) qaLink = doc.data().liveQALink;
+      window.open(qaLink, '_blank', 'noopener');
+    }).catch(function () { window.open(qaLink, '_blank', 'noopener'); });
+  } else {
+    window.open(qaLink, '_blank', 'noopener');
+  }
+}
+
+function ezOpenPdfNotes() {
+  if (typeof switchPage === 'function') switchPage('notes');
+  if (typeof showToast === 'function') showToast('📄 PDF export is enabled for Pro members. Look for the download button.', 'success');
+}
+
+function ezOpenEarlyAccess() {
+  var existing = document.getElementById('early-access-modal');
+  if (existing) existing.remove();
+
+  var modal = document.createElement('div');
+  modal.id = 'early-access-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;padding:1rem;';
+  modal.innerHTML =
+    '<div style="position:absolute;inset:0;background:rgba(0,0,0,0.7);" onclick="this.parentElement.remove()"></div>' +
+    '<div style="position:relative;background:var(--surface,#1a1a2e);border:1px solid var(--border,#333);border-radius:16px;padding:2rem;max-width:400px;width:100%;">' +
+      '<h3 style="margin-bottom:1rem;">🚀 Early Access — Coming Soon</h3>' +
+      '<div style="display:flex;flex-direction:column;gap:10px;font-size:0.85rem;">' +
+        '<div style="padding:10px;background:var(--bg-secondary);border-radius:8px;display:flex;align-items:center;gap:10px;"><span>🧠</span><span>AI Weakness Report (Weekly PDF)</span><span style="margin-left:auto;font-size:0.7rem;color:#f59e0b;">Beta</span></div>' +
+        '<div style="padding:10px;background:var(--bg-secondary);border-radius:8px;display:flex;align-items:center;gap:10px;"><span>🎯</span><span>Cut-off Predictor</span><span style="margin-left:auto;font-size:0.7rem;color:#6366f1;">Soon</span></div>' +
+        '<div style="padding:10px;background:var(--bg-secondary);border-radius:8px;display:flex;align-items:center;gap:10px;"><span>👥</span><span>Study Buddy Matching</span><span style="margin-left:auto;font-size:0.7rem;color:#6366f1;">Soon</span></div>' +
+        '<div style="padding:10px;background:var(--bg-secondary);border-radius:8px;display:flex;align-items:center;gap:10px;"><span>📱</span><span>Offline Mode (PWA)</span><span style="margin-left:auto;font-size:0.7rem;color:#6366f1;">Soon</span></div>' +
+      '</div>' +
+      '<p style="font-size:0.75rem;color:var(--muted);margin-top:1rem;text-align:center;">Pro members get these features 1-2 weeks before free users.</p>' +
+      '<button onclick="this.closest(\'#early-access-modal\').remove()" type="button" style="width:100%;margin-top:0.75rem;padding:10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;font-family:inherit;">Close</button>' +
+    '</div>';
+  document.body.appendChild(modal);
+}
+
+/* C4. PRIORITY AI FLAG — Pro users get faster/longer AI responses.
+   Returns { priority, maxTokens, label } for the AI Tutor call site
+   to consume. Free users get normal priority + 800 tokens; Pro gets
+   high priority + 2000 tokens. */
+function ezGetAIPriority() {
+  if (typeof ezIsPro === 'function' && ezIsPro()) {
+    return { priority: 'high', maxTokens: 2000, label: '⚡ Priority' };
+  }
+  return { priority: 'normal', maxTokens: 800, label: '' };
+}
+
+/* C5. RENDER ALL PRO STATUS ELEMENTS — topbar badge + dashboard widget. */
+function ezRenderProStatus() {
+  try { ezRenderProStatusBadge(); } catch (e) {}
+  try { ezRenderProExclusiveWidget(); } catch (e) {}
+}
+
+/* Hook into profile load + dashboard render so the badge & widget
+   re-render whenever plan state might have changed. */
+(function () {
+  if (typeof ezLoadProfile === 'function') {
+    var _origLP = ezLoadProfile;
+    ezLoadProfile = async function () {
+      await _origLP.apply(this, arguments);
+      try { ezRenderProStatus(); } catch (e) {}
+    };
+  }
+  if (typeof updateDashboard === 'function') {
+    var _origUD = updateDashboard;
+    updateDashboard = function () {
+      _origUD.apply(this, arguments);
+      if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE) {
+        try { ezRenderProStatus(); } catch (e) {}
+      }
+    };
+  }
+})();
