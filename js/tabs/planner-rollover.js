@@ -118,10 +118,58 @@ function rolloverIncompleteTasks() {
     });
 
     appState.lastRolloverDate = todayStr;
-    if (moved && typeof saveProgress === 'function') saveProgress();
+    /* Persist even when nothing moved so the once-per-day guard is durable
+       across reloads (previously it only saved when moved>0, so the guard could
+       be lost and the sweep re-run needlessly). */
+    if (typeof saveProgress === 'function') saveProgress();
     return moved;
   } catch (e) { return 0; }
 }
+
+/* Re-run the once-per-day sweep when the calendar day has advanced since it last
+   ran, and refresh the planner/dashboard if anything moved. Safe to call often:
+   it is a cheap no-op when today was already swept, auto-rollover is off, or no
+   user is signed in. This is what makes the carry-forward happen for an app left
+   open across midnight (Android/PWA/long-lived tab) — initApp() only runs the
+   sweep once per page load, so without this a new day was never picked up until a
+   full reload. */
+function maybeRolloverForNewDay() {
+  try {
+    if (typeof appState === 'undefined' || !appState) return 0;
+    if (typeof currentUser === 'undefined' || !currentUser) return 0;
+    if (appState.autoRolloverTasks === false) return 0;
+    if (appState.lastRolloverDate === fmtDate(new Date())) return 0;
+    const moved = rolloverIncompleteTasks();
+    if (moved) {
+      try { if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar(); } catch (e) {}
+      try { if (typeof updateDashboard === 'function') updateDashboard(); } catch (e) {}
+      try {
+        if (typeof showToast === 'function') {
+          showToast('\u23f3 ' + moved + ' unfinished task' + (moved !== 1 ? 's' : '') + ' moved to today.', 'info');
+        }
+      } catch (e) {}
+    }
+    return moved;
+  } catch (e) { return 0; }
+}
+
+/* Drive maybeRolloverForNewDay() from a light day-change watchdog + tab
+   focus/visibility, and re-check whenever the planner is opened. Registered once
+   at load; the callbacks run after all modules are ready. */
+(function initRolloverWatchdog() {
+  try { setInterval(maybeRolloverForNewDay, 60 * 1000); } catch (e) {}
+  try {
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) maybeRolloverForNewDay();
+    });
+  } catch (e) {}
+  try { window.addEventListener('focus', maybeRolloverForNewDay); } catch (e) {}
+  try {
+    if (typeof onPageActivated === 'function') {
+      onPageActivated('planner', maybeRolloverForNewDay);
+    }
+  } catch (e) {}
+})();
 
 /* Settings toggle handler — enable/disable auto-rollover. When turned back on,
    reset the daily guard so the sweep can run immediately. */
