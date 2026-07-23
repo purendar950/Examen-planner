@@ -5328,3 +5328,147 @@ html[data-theme="light"] .fintech-dashboard .empty-state { background: #fff; }
     transform: none;
   }
 }
+
+
+/* ══════════════════════════════════════════════
+   PRO FEATURE BLUR PREVIEW SYSTEM
+   Shows actual content blurred with a Pro overlay
+   ══════════════════════════════════════════════ */
+
+/* Blur container — wraps the actual content */
+.pro-blur-container {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+/* The actual content underneath (rendered but blurred) */
+.pro-blur-content {
+  filter: blur(8px);
+  user-select: none;
+  pointer-events: none;
+  opacity: 0.7;
+  transform: scale(1.02);
+}
+
+/* Overlay on top of blurred content */
+.pro-blur-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(10, 10, 15, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  border-radius: inherit;
+  text-align: center;
+  padding: 1.5rem;
+}
+
+.pro-blur-overlay .pro-lock-icon {
+  font-size: 2.5rem;
+  animation: proPulse 2s ease-in-out infinite;
+}
+
+@keyframes proPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.pro-blur-overlay .pro-lock-title {
+  font-size: 1rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.pro-blur-overlay .pro-lock-desc {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.7);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+.pro-blur-overlay .pro-lock-btn {
+  margin-top: 8px;
+  padding: 10px 24px;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(135deg, #6366f1, #a855f7);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  font-family: inherit;
+}
+
+.pro-blur-overlay .pro-lock-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+}
+
+.pro-blur-overlay .pro-lock-price {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 4px;
+}
+
+/* Partial blur — show top portion, fade out bottom */
+.pro-blur-partial .pro-blur-content {
+  filter: none;
+  opacity: 1;
+  pointer-events: auto;
+  user-select: auto;
+  transform: none;
+  position: relative;
+}
+
+.pro-blur-partial .pro-blur-content::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60%;
+  background: linear-gradient(to bottom, transparent, var(--bg-primary, #0a0a0f));
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* Feature-specific blur heights */
+.pro-blur-h-sm { min-height: 120px; }
+.pro-blur-h-md { min-height: 200px; }
+.pro-blur-h-lg { min-height: 300px; }
+.pro-blur-h-xl { min-height: 400px; }
+
+/* Pro status badge (topbar) */
+#pro-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 100px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+#pro-status-badge:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* Pro exclusive widget on dashboard */
+.pro-exclusive-widget {
+  background: var(--surface, #1a1a2e);
+  border: 1px solid var(--border, #333);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin: 1rem 0;
+}
