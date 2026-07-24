@@ -591,7 +591,7 @@ function mockCaptureDraft() {
     : null;
 }
 
-function mockRenderPage() {
+function mockRenderPage(resetDraft) {
   const page = document.getElementById('page-mocks'); if (!page) return;
   const cfg = mockExamCfg();
   const exam = ALL_EXAMS[currentExam];
@@ -599,8 +599,11 @@ function mockRenderPage() {
     page.innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><p>Is exam ke liye mock config available nahi hai.</p></div>';
     return;
   }
-  /* Preserve any unsaved input from the form we're about to replace. */
-  mockCaptureDraft();
+  /* Preserve any unsaved input from the form we're about to replace — UNLESS the
+     caller wants a clean form (e.g. right after a successful save), in which case
+     re-capturing the still-populated DOM would defeat the reset. */
+  if (resetDraft) { mockDraft = null; }
+  else { mockCaptureDraft(); }
   const tk = mockTierKey();
   const tier = cfg.tiers[tk];
   const totalMax = tier.sections.reduce((t, s) => t + s.max, 0);
