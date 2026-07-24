@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#07110F">
+  <title>OpenCode Planner Test — StudyPlanner</title>
+  <link rel="icon" type="image/svg+xml" href="assets/brand/studyplanner-mark.svg">
+  <script src="vendor/firebase-app-compat.js"></script>
+  <script src="vendor/firebase-auth-compat.js"></script>
+  <script src="vendor/firebase-firestore-compat.js"></script>
+  <style>
+    :root { --accent:#00c896; --accent-dark:#08785b; --bg:#f4f7f9; --card:#fff; --text:#172033; --muted:#637083; --border:#dce4eb; --danger:#ba1a1a; --danger-bg:#fff0ef; --info-bg:#eefaf6; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; padding:24px 16px 48px; background:radial-gradient(circle at 15% 5%, rgba(0,200,150,.12), transparent 28%), var(--bg); color:var(--text); font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif; line-height:1.5; }
+    main { width:min(100%, 860px); margin:0 auto; }
+    header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:20px; }
+    .brand { display:flex; gap:12px; align-items:center; }
+    .brand img { width:42px; height:42px; border-radius:12px; }
+    h1 { margin:0; font-size:1.4rem; letter-spacing:-.02em; }
+    .eyebrow { margin:0 0 2px; color:var(--accent-dark); font-size:.7rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; }
+    .sub { margin:4px 0 0; color:var(--muted); font-size:.9rem; }
+    .card { margin-top:16px; padding:20px; border:1px solid var(--border); border-radius:16px; background:var(--card); box-shadow:0 12px 32px rgba(19,34,51,.07); }
+    .notice { margin:0; padding:12px 14px; border:1px solid #bcebdd; border-radius:10px; background:var(--info-bg); color:#075a43; font-size:.84rem; }
+    .status { margin:16px 0 0; padding:12px 14px; border-radius:10px; font-size:.85rem; white-space:pre-wrap; }
+    .status[hidden] { display:none; }
+    .status.error { border:1px solid #f1b5b0; background:var(--danger-bg); color:var(--danger); }
+    .status.waiting { border:1px solid #b7d7ff; background:#f0f7ff; color:#174c82; }
+    .status.ready { border:1px solid #bcebdd; background:var(--info-bg); color:#075a43; }
+    label { display:block; margin:18px 0 7px; font-size:.82rem; font-weight:750; }
+    textarea { width:100%; min-height:190px; resize:vertical; padding:12px; border:1px solid var(--border); border-radius:10px; background:#fff; color:var(--text); font:inherit; line-height:1.5; outline:none; }
+    textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(0,200,150,.14); }
+    .form-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:12px; }
+    .hint { color:var(--muted); font-size:.75rem; }
+    button, .back { display:inline-flex; align-items:center; justify-content:center; min-height:38px; border:0; border-radius:9px; padding:8px 14px; color:#fff; background:var(--accent-dark); font:inherit; font-size:.84rem; font-weight:750; text-decoration:none; cursor:pointer; }
+    button:hover, .back:hover { background:#065d48; }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .back { background:#e9eef3; color:var(--text); }
+    .back:hover { background:#dce5ed; }
+    #planner[hidden], #answer-card[hidden] { display:none; }
+    #answer { margin:0; max-height:560px; overflow:auto; padding:16px; border-radius:10px; background:#101720; color:#e9f0f7; font:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.82rem; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .meta { margin:0 0 10px; color:var(--muted); font-size:.77rem; }
+    @media (max-width:600px) { body { padding-top:16px; } header { align-items:stretch; flex-direction:column; } .back { width:fit-content; } .form-footer { align-items:flex-start; flex-direction:column; } button { width:100%; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand">
+        <img src="assets/brand/studyplanner-mark.svg" alt="">
+        <div>
+          <p class="eyebrow">Admin-only tool</p>
+          <h1>OpenCode Planner Test</h1>
+          <p class="sub">Send one plan-only request to the secured OpenCode proxy.</p>
+        </div>
+      </div>
+      <a class="back" href="admin.html">← Admin workspace</a>
+    </header>
+
+    <section class="card" aria-live="polite">
+      <p class="notice">This page requires the same signed-in Firebase administrator account as the Admin workspace. It sends only your prompt and a Firebase ID token to the StudyPlanner proxy; OpenCode credentials, model configuration, and workspace path remain on the server.</p>
+      <div id="access-status" class="status waiting">Checking administrator access…</div>
+
+      <form id="planner" hidden>
+        <label for="prompt">Planning request</label>
+        <textarea id="prompt" maxlength="8000" autocomplete="off" spellcheck="false" placeholder="Example: Give a step-by-step plan to add an export button to the admin dashboard. Do not make any changes."></textarea>
+        <div class="form-footer">
+          <span id="counter" class="hint">0 / 8,000 characters</span>
+          <button id="submit" type="submit">Generate plan</button>
+        </div>
+      </form>
+    </section>
+
+    <section id="answer-card" class="card" hidden>
+      <p id="answer-meta" class="meta"></p>
+      <pre id="answer"></pre>
+    </section>
+  </main>
+
+  <script src="js/core/firebase-config.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      var config = window.PREPPATH_FIREBASE_CONFIG || {};
+      var accessStatus = document.getElementById('access-status');
+      var planner = document.getElementById('planner');
+      var prompt = document.getElementById('prompt');
+      var submit = document.getElementById('submit');
+      var counter = document.getElementById('counter');
+      var answerCard = document.getElementById('answer-card');
+      var answer = document.getElementById('answer');
+      var answerMeta = document.getElementById('answer-meta');
+      var backend = (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
+      var currentAdmin = null;
+
+      function setStatus(message, tone) {
+        accessStatus.textContent = message;
+        accessStatus.className = 'status ' + (tone || 'waiting');
+        accessStatus.hidden = false;
+      }
+
+      function setBusy(busy) {
+        submit.disabled = busy;
+        submit.textContent = busy ? 'Generating plan…' : 'Generate plan';
+      }
+
+      function showAnswer(payload) {
+        answer.textContent = payload.answer || '';
+        var details = [];
+        if (payload.provider) details.push('Provider: ' + payload.provider);
+        if (payload.model) details.push('Model: ' + payload.model);
+        answerMeta.textContent = details.length ? details.join(' · ') : 'OpenCode plan response';
+        answerCard.hidden = false;
+      }
+
+      function updateCounter() {
+        counter.textContent = prompt.value.length + ' / 8,000 characters';
+      }
+
+      if (!window.firebase || !Object.keys(config).length) {
+        setStatus('Firebase configuration could not be loaded. Return to the Admin workspace and try again.', 'error');
+        return;
+      }
+
+      try {
+        if (!firebase.apps.length) firebase.initializeApp(config);
+      } catch (error) {
+        setStatus('Firebase could not start: ' + (error.message || String(error)), 'error');
+        return;
+      }
+      var auth = firebase.auth();
+      var db = firebase.firestore();
+
+      auth.onAuthStateChanged(async function (user) {
+        planner.hidden = true;
+        answerCard.hidden = true;
+        currentAdmin = null;
+        if (!user) {
+          setStatus('Sign in with an administrator account in the Admin workspace, then return to this page.', 'error');
+          return;
+        }
+        setStatus('Checking administrator access…', 'waiting');
+        try {
+          var adminDoc = await db.collection('admins').doc(user.uid).get();
+          if (!adminDoc.exists) {
+            setStatus('This signed-in account is not an administrator.', 'error');
+            return;
+          }
+          currentAdmin = user;
+          setStatus('Administrator access confirmed. OpenCode will return a plan only; tools are disabled.', 'ready');
+          planner.hidden = false;
+        } catch (error) {
+          setStatus('Could not verify administrator access. Return to the Admin workspace and sign in again.', 'error');
+        }
+      });
+
+      prompt.addEventListener('input', updateCounter);
+      planner.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        var text = prompt.value.trim();
+        if (!currentAdmin) {
+          setStatus('Administrator access is required. Please sign in again.', 'error');
+          return;
+        }
+        if (!text) {
+          setStatus('Enter a planning request first.', 'error');
+          prompt.focus();
+          return;
+        }
+        answerCard.hidden = true;
+        setBusy(true);
+        setStatus('OpenCode is preparing the plan. This can take up to the configured server timeout.', 'waiting');
+        try {
+          var token = await currentAdmin.getIdToken();
+          var response = await fetch(backend + '/api/admin/opencode/plan', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: text })
+          });
+          var payload = await response.json().catch(function () { return {}; });
+          if (!response.ok || !payload.answer) {
+            throw new Error(payload.detail || payload.error || ('Request failed (HTTP ' + response.status + ')'));
+          }
+          setStatus('Plan generated successfully. The temporary OpenCode session was cleaned up by the proxy.', 'ready');
+          showAnswer(payload);
+        } catch (error) {
+          setStatus('OpenCode test failed: ' + (error.message || String(error)), 'error');
+        } finally {
+          setBusy(false);
+        }
+      });
+      updateCounter();
+    }());
+  </script>
+</body>
+</html>

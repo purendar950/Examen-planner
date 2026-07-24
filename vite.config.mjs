@@ -141,7 +141,8 @@ export default defineConfig({
         index: resolve(rootDir, 'index.html'),
         app: resolve(rootDir, 'app.html'),
         admin: resolve(rootDir, 'admin.html'),
-        ytProxyDemo: resolve(rootDir, 'yt-proxy-demo.html')
+        ytProxyDemo: resolve(rootDir, 'yt-proxy-demo.html'),
+        opencodeDemo: resolve(rootDir, 'opencode-demo.html')
       }
     }
   },
