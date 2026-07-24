@@ -916,6 +916,22 @@ _OPENCODE_PLAN_DISABLED_TOOLS = {
     # list cannot safely cover custom/MCP tools added to that service.
     "*": False,
 }
+# OpenCode Zen's public catalog is the source of truth for temporary free-model
+# availability. Keep an explicit model ID as a server-side fallback, but when
+# enabled for the `opencode` provider refresh this list periodically and choose
+# an available free model without a Render redeploy.
+_OPENCODE_ZEN_MODELS_URL = "https://opencode.ai/zen/v1/models"
+_OPENCODE_FREE_MODEL_REFRESH_SEC = max(300, min(
+    int(os.environ.get("OPENCODE_FREE_MODEL_REFRESH_SEC", "3600")), 86400))
+_OPENCODE_FREE_MODEL_PREFERENCE = tuple(
+    model.strip() for model in os.environ.get(
+        "OPENCODE_FREE_MODEL_PREFERENCE",
+        "deepseek-v4-flash-free,mimo-v2.5-free,ling-3.0-flash-free,"
+        "nemotron-3-ultra-free,laguna-s-2.1-free,north-mini-code-free,big-pickle",
+    ).split(",") if model.strip()
+)
+_opencode_free_model_cache = {"checked_at": 0.0, "model": ""}
+_opencode_free_model_lock = threading.Lock()
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
@@ -1293,20 +1309,70 @@ class _OpenCodePlanError(RuntimeError):
         self.upstream_status = upstream_status
 
 
+def _opencode_auto_free_model_enabled(provider_id):
+    """Whether this server should resolve the current OpenCode Zen free model."""
+    configured = os.environ.get("OPENCODE_AUTO_FREE_MODEL", "").strip().lower()
+    return (str(provider_id or "").strip().lower() == "opencode"
+            and configured in ("1", "true", "yes", "on"))
+
+
+def _opencode_current_free_model():
+    """Return a cached, presently-listed Zen free model, if one is available.
+
+    The catalog intentionally contains only model IDs, not pricing or account
+    entitlement metadata. Selection is therefore restricted to the explicit
+    operator-controlled free-model preference list. A failed refresh keeps a
+    configured static model usable rather than making a planner depend on a
+    public catalog request.
+    """
+    now = time.time()
+    with _opencode_free_model_lock:
+        cached = _opencode_free_model_cache
+        if now - cached["checked_at"] < _OPENCODE_FREE_MODEL_REFRESH_SEC:
+            return cached["model"] or None
+        selected = ""
+        try:
+            response = requests.get(
+                _OPENCODE_ZEN_MODELS_URL,
+                headers={"Accept": "application/json"},
+                timeout=min(_OPENCODE_TIMEOUT, 5),
+            )
+            response.raise_for_status()
+            payload = response.json()
+            entries = payload.get("data") if isinstance(payload, dict) else []
+            available = {
+                str(entry.get("id") or "").strip()
+                for entry in (entries or []) if isinstance(entry, dict)
+            }
+            for model_id in _OPENCODE_FREE_MODEL_PREFERENCE:
+                if model_id in available:
+                    selected = model_id
+                    break
+            if selected:
+                log.info("OpenCode Zen free-model refresh selected %s", selected)
+            else:
+                log.warning("OpenCode Zen model catalog contained no supported free model")
+        except (requests.RequestException, ValueError, TypeError) as exc:
+            log.warning("OpenCode Zen free-model refresh failed (%s)", type(exc).__name__)
+        cached["checked_at"] = now
+        cached["model"] = selected
+        return selected or None
+
+
 def _opencode_config():
     """Read and validate server-only OpenCode configuration.
 
     The browser must not control the target server, model, provider, or
-    directory. Requiring all of them also avoids accidentally creating a
-    session in OpenCode's default working directory.
+    directory. A static configured model remains the fallback whenever the
+    optional OpenCode Zen catalog is unavailable or changes its free roster.
     """
     server_url = os.environ.get("OPENCODE_SERVER_URL", "").strip().rstrip("/")
     password = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
     provider_id = os.environ.get("OPENCODE_PROVIDER_ID", "").strip()
-    model_id = os.environ.get("OPENCODE_MODEL_ID", "").strip()
+    fallback_model_id = os.environ.get("OPENCODE_MODEL_ID", "").strip()
     directory = os.environ.get("OPENCODE_DIRECTORY", "").strip()
     username = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode").strip() or "opencode"
-    if not all((server_url, password, provider_id, model_id, directory)):
+    if not all((server_url, password, provider_id, directory)):
         return None
 
     parsed = urlparse(server_url)
@@ -1316,6 +1382,15 @@ def _opencode_config():
             or parsed.password or parsed.query or parsed.fragment):
         log.warning("OpenCode configuration requires an HTTPS server URL without embedded credentials")
         return None
+
+    auto_free_model = _opencode_auto_free_model_enabled(provider_id)
+    selected_free_model = _opencode_current_free_model() if auto_free_model else None
+    model_id = selected_free_model or fallback_model_id
+    if not model_id:
+        log.warning("OpenCode has no configured fallback model and no free Zen model is available")
+        return None
+    if auto_free_model and not selected_free_model:
+        log.info("OpenCode Zen catalog unavailable; using configured fallback model %s", model_id)
     return {
         "server_url": server_url,
         "username": username,
@@ -4137,17 +4212,18 @@ def api_admin_opencode_plan():
             "detail": "The planning prompt must not exceed %d characters." % _OPENCODE_PLAN_MAX_PROMPT_CHARS,
         }), 400
 
+    if not _rate_ok("opencode_plan", user["uid"], 10, 3600):
+        return jsonify({
+            "error": "rate_limited",
+            "detail": "Too many OpenCode planning requests this hour. Try again later.",
+        }), 429
+
     config = _opencode_config()
     if not config:
         return jsonify({
             "error": "opencode_not_configured",
             "detail": "OpenCode planning is not configured on this service.",
         }), 503
-    if not _rate_ok("opencode_plan", user["uid"], 10, 3600):
-        return jsonify({
-            "error": "rate_limited",
-            "detail": "Too many OpenCode planning requests this hour. Try again later.",
-        }), 429
 
     try:
         answer = _opencode_plan(prompt, config)
