@@ -713,9 +713,16 @@ const STUDY_PROVIDERS = {
   kiro:     { label: 'Kiro', host: 'kiro-key-test-s6io.onrender.com', baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
               models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
               def: 'auto',
-              note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' }
+              note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' },
+  // OpenCode Zen is env-managed on the proxy (Basic Auth + auto free model).
+  // It has no browser key/model field: enable it with OPENCODE_STUDY_ENABLED
+  // on youtube-turbo-proxy. The card is read-only and its live model is shown
+  // from the health check.
+  opencode: { label: 'OpenCode Zen', host: 'server-managed', baseUrl: '', keyField: '', modelField: '',
+              models: [], def: '', envManaged: true,
+              note: 'Server-managed · free Zen model auto-selected · no key needed (set OPENCODE_STUDY_ENABLED=true on the proxy)', keyUrl: '' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro', 'opencode'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
@@ -766,6 +773,7 @@ function splitStudyKeys(raw) {
    studyApiKey fields so an existing setup keeps working). */
 function studyKeysFor(pid) {
   var p = STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara;
+  if (!p.keyField) return [];   // env-managed provider — no browser-held key
   var raw = (AI_CONFIG && AI_CONFIG[p.keyField]);
   if ((!raw || (Array.isArray(raw) && !raw.length)) && pid === 'bynara') {
     raw = (AI_CONFIG && AI_CONFIG.studyApiKeys)
@@ -777,9 +785,32 @@ function studyKeysFor(pid) {
 }
 function studyModelFor(pid) {
   var p = STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara;
+  if (p.envManaged) return studyEnvManagedModel(pid) || 'auto-selected free model';
   var m = (AI_CONFIG && AI_CONFIG[p.modelField]);
   if (!m && pid === 'bynara') m = (AI_CONFIG && AI_CONFIG.studyModel);
   return m || p.def;
+}
+/* Live model for an env-managed provider (e.g. OpenCode). The proxy resolves
+   it server-side; the admin panel surfaces it from the last health check. */
+function studyEnvManagedModel(pid) {
+  try {
+    var h = (typeof _aiStudyHealth !== 'undefined' && _aiStudyHealth) ? _aiStudyHealth[pid] : null;
+    return (h && h.model) ? String(h.model) : '';
+  } catch (e) { return ''; }
+}
+/* True when a provider is usable. Env-managed providers report availability
+   through the health check (server env), not a browser-held key. */
+function studyProviderConfigured(pid) {
+  var p = STUDY_PROVIDERS[pid] || {};
+  if (p.envManaged) {
+    try {
+      var h = (typeof _aiStudyHealth !== 'undefined' && _aiStudyHealth) ? _aiStudyHealth[pid] : null;
+      // Before the first health check we optimistically show it as available so
+      // the admin can select it; the health pill reflects the true live state.
+      return h ? !!h.configured : true;
+    } catch (e) { return true; }
+  }
+  return studyKeysFor(pid).length > 0;
 }
 /* Effective model list for a provider: admin override (config/ai.providerModels)
    if set, else the hardcoded default. */
@@ -788,6 +819,12 @@ function studyModelsFor(pid) {
   // Here (admin) we show a static list of its `auto/*` routing aliases; admin
   // model overrides deliberately do not apply to OmniRoute.
   if (pid === 'omniroute') return ((STUDY_PROVIDERS.omniroute || {}).models || ['auto']).slice();
+  // Env-managed providers (OpenCode) resolve their model server-side; expose
+  // the live one from the health check, else an empty list.
+  if ((STUDY_PROVIDERS[pid] || {}).envManaged) {
+    var m = studyEnvManagedModel(pid);
+    return m ? [m] : [];
+  }
   var ov = AI_CONFIG && AI_CONFIG.providerModels && AI_CONFIG.providerModels[pid];
   if (Array.isArray(ov) && ov.length) return ov.slice();
   return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
@@ -799,7 +836,7 @@ function studyModelsFor(pid) {
 // OmniRoute's live catalog is intentionally not auto-synced: it is a routed
 // multi-provider catalog whose availability can change while a route is live.
 // Its approved model list is managed explicitly in this Admin screen.
-const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.filter(function (pid) { return pid !== 'omniroute'; });
+const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.filter(function (pid) { return pid !== 'omniroute' && !(STUDY_PROVIDERS[pid] || {}).envManaged; });
 const STUDY_FREE_MODEL_REFRESH_PROVIDERS = STUDY_CATALOG_REFRESH_PROVIDERS;
 const STUDY_MODEL_CATALOG_CONFIG = {
   free: { providerField: 'dailyFreeModelProviders', statusField: 'dailyFreeModelSyncStatus', label: 'free-model' },
@@ -937,12 +974,14 @@ function paintModelsManage() {
 }
 function removeStudyModel(i) {
   if (selectedStudyProvider() === 'omniroute') { showToast('OmniRoute always uses its automatic route.'); return; }
+  if ((STUDY_PROVIDERS[selectedStudyProvider()] || {}).envManaged) { showToast('OpenCode Zen selects its free model automatically on the server.'); return; }
   var list = _modelsEnsure(selectedStudyProvider());
   if (i >= 0 && i < list.length) list.splice(i, 1);
   paintModelsManage();
 }
 function addStudyModel() {
   if (selectedStudyProvider() === 'omniroute') { showToast('OmniRoute always uses its automatic route.'); return; }
+  if ((STUDY_PROVIDERS[selectedStudyProvider()] || {}).envManaged) { showToast('OpenCode Zen selects its free model automatically on the server.'); return; }
   var list = _modelsEnsure(selectedStudyProvider());
   var inp = document.getElementById('study-model-add');
   var v = inp ? inp.value.trim() : '';
@@ -953,6 +992,7 @@ function addStudyModel() {
 }
 async function saveStudyModels() {
   var pid = selectedStudyProvider();
+  if ((STUDY_PROVIDERS[pid] || {}).envManaged) { showToast('OpenCode Zen selects its free model automatically on the server — nothing to save here.'); return; }
   var list = pid === 'omniroute' ? ['auto'] : _modelsEnsure(pid).slice();
   var pm = Object.assign({}, (AI_CONFIG && AI_CONFIG.providerModels) || {});
   pm[pid] = list;
@@ -1056,33 +1096,59 @@ function parseCurlIntoStudy() {
 async function saveStudyAiConfig() {
   const provider = selectedStudyProvider();
   const p = STUDY_PROVIDERS[provider] || STUDY_PROVIDERS.bynara;
-  // Read every provider's own key box (so all keys persist), plus the single model box.
+  // Read every provider's own key box (so all keys persist). Env-managed
+  // providers (OpenCode) have no key box, so they are skipped.
   const allKeys = {};
   STUDY_PROVIDER_ORDER.forEach(function (k) {
+    if (!STUDY_PROVIDERS[k].keyField) return;   // env-managed — no browser key
     allKeys[k] = splitStudyKeys((document.getElementById('study-key-' + k) || {}).value);
   });
-  const model = provider === 'omniroute' ? 'auto' : (((document.getElementById('study-model') || {}).value) || p.def).trim();
+  const model = (provider === 'omniroute' || p.envManaged)
+    ? (p.envManaged ? '' : 'auto')
+    : (((document.getElementById('study-model') || {}).value) || p.def).trim();
   const activeKeys = allKeys[provider] || [];
-  if (!activeKeys.length) {
+  if (!p.envManaged && !activeKeys.length) {
     showToast('⚠️ Active provider (' + p.label + ') has no key');
   }
-  // Persist every provider's key + the active provider mirror (studyApiKeys /
-  // studyModel / studyBaseUrl) — the only fields youtube-turbo-proxy reads.
+  // Persist every provider's key. For a key-based active provider, also mirror
+  // studyApiKeys/studyModel/studyBaseUrl (the legacy fields the proxy reads).
+  // For an env-managed active provider, only studyProvider changes — the proxy
+  // resolves its credentials + model from server environment variables.
   const payload = {
     studyProvider: provider,
-    studyApiKeys: activeKeys, studyModel: model, studyBaseUrl: p.baseUrl,
     savedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
-  STUDY_PROVIDER_ORDER.forEach(function (k) { payload[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
-  payload[p.modelField] = model;
+  STUDY_PROVIDER_ORDER.forEach(function (k) {
+    var kf = STUDY_PROVIDERS[k].keyField;
+    if (kf) payload[kf] = allKeys[k];
+  });
+  if (p.envManaged) {
+    // Clear the legacy active-provider mirror so a stale key-based route from a
+    // previously selected provider cannot shadow the env-managed transport.
+    payload.studyApiKeys = [];
+    payload.studyBaseUrl = '';
+  } else {
+    payload.studyApiKeys = activeKeys;
+    payload.studyModel = model;
+    payload.studyBaseUrl = p.baseUrl;
+    if (p.modelField) payload[p.modelField] = model;
+  }
   try {
     await db.collection('config').doc('ai').set(payload, { merge: true });
     AI_CONFIG.studyProvider = provider;
-    STUDY_PROVIDER_ORDER.forEach(function (k) { AI_CONFIG[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
-    AI_CONFIG[p.modelField] = model;
-    AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
-    showToast('✅ Study AI saved — active: ' + p.label +
-              ' (' + activeKeys.length + ' key' + (activeKeys.length === 1 ? '' : 's') + ')');
+    STUDY_PROVIDER_ORDER.forEach(function (k) {
+      var kf = STUDY_PROVIDERS[k].keyField;
+      if (kf) AI_CONFIG[kf] = allKeys[k];
+    });
+    if (p.envManaged) {
+      AI_CONFIG.studyApiKeys = []; AI_CONFIG.studyBaseUrl = '';
+      showToast('✅ Study AI saved — active: ' + p.label + ' (server-managed, no key needed)');
+    } else {
+      AI_CONFIG[p.modelField] = model;
+      AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
+      showToast('✅ Study AI saved — active: ' + p.label +
+                ' (' + activeKeys.length + ' key' + (activeKeys.length === 1 ? '' : 's') + ')');
+    }
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }

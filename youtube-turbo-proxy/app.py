@@ -4452,6 +4452,28 @@ def api_study_test():
         except requests.RequestException as exc:
             results[pid] = {"configured": True, "ok": False, "status": 0,
                             "model": model, "keys": len(keys), "detail": str(exc)[:180]}
+
+    # OpenCode is env-managed (not in STUDY_TEST_PROVIDERS and has no Firestore
+    # key), so report its server-side availability separately for the admin
+    # panel. Credentials are never returned; only the resolved free model ID.
+    if want in ("all", "opencode"):
+        if not _opencode_study_enabled():
+            results["opencode"] = {
+                "configured": False, "ok": False, "keys": 0,
+                "detail": "Set OPENCODE_STUDY_ENABLED=true on the proxy to enable."}
+        else:
+            oc = _opencode_config()
+            if oc:
+                results["opencode"] = {
+                    "configured": True, "ok": True, "status": 200, "keys": 0,
+                    "model": oc["model_id"],
+                    "detail": "Server-managed (env) \u2014 free Zen model auto-selected."}
+            else:
+                results["opencode"] = {
+                    "configured": False, "ok": False, "keys": 0,
+                    "detail": "Enabled, but the OpenCode server URL, credentials, "
+                              "directory, or model is incomplete."}
+
     return jsonify({"results": results, "checked_at": int(time.time())})
 
 

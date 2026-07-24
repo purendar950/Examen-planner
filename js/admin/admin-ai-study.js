@@ -12,7 +12,7 @@ function aiStudyProviderInitials(label) {
 }
 
 function aiStudyConfiguredProviderCount() {
-  return STUDY_PROVIDER_ORDER.filter(function (pid) { return studyKeysFor(pid).length > 0; }).length;
+  return STUDY_PROVIDER_ORDER.filter(function (pid) { return studyProviderConfigured(pid); }).length;
 }
 
 function aiStudyTotalKeyCount() {
@@ -141,7 +141,7 @@ function studyActiveChanged() {
   STUDY_PROVIDER_ORDER.forEach(function (key) {
     var live = key === persistedPid;
     var pending = dirty && key === selectedPid;
-    var configured = studyKeysFor(key).length > 0;
+    var configured = studyProviderConfigured(key);
     var badge = document.getElementById('study-badge-' + key);
     var card = document.getElementById('study-provider-card-' + key);
     if (badge) {
@@ -178,17 +178,32 @@ function studyActiveChanged() {
 
 function aiStudyProviderCard(pid, activePid) {
   var provider = STUDY_PROVIDERS[pid];
+  var envManaged = !!provider.envManaged;
   var keys = studyKeysFor(pid);
   var models = studyModelsFor(pid);
   var active = pid === activePid;
-  var configured = keys.length > 0;
+  var configured = studyProviderConfigured(pid);
   var stateClass = active ? 'is-active' : (configured ? 'is-ready' : 'is-empty');
   var stateText = active ? 'Live route' : (configured ? 'Standby' : 'Setup');
-  var endpoint = provider.baseUrl || 'Managed by Bynara';
+  var endpoint = envManaged ? 'Server environment (proxy)' : (provider.baseUrl || 'Managed by Bynara');
   var health = aiStudyHealthState(pid);
   var keyLink = provider.keyUrl
     ? '<a class="ai-provider-link" href="' + esc(provider.keyUrl) + '" target="_blank" rel="noopener">Get API key ↗</a>'
-    : '<span class="ai-provider-link is-muted">Private endpoint</span>';
+    : '<span class="ai-provider-link is-muted">' + (envManaged ? 'Server-managed' : 'Private endpoint') + '</span>';
+
+  // Env-managed providers (OpenCode) have no browser-held key. Instead of a key
+  // textarea, show a read-only note explaining the credentials live on the proxy.
+  var credentialsBlock = envManaged
+    ? '<div class="ai-secret-label"><label>API credentials</label></div>' +
+      '<div class="ai-provider-envnote" style="font-size:.82rem;opacity:.8;padding:6px 8px;border:1px dashed var(--border,#334);border-radius:8px">' +
+        'No key needed here. Set <code>OPENCODE_STUDY_ENABLED=true</code> (plus the OpenCode server URL, credentials and directory) on the youtube-turbo-proxy service. Run the health check to confirm it is live.' +
+      '</div>'
+    : '<div class="ai-secret-label"><label for="study-key-' + pid + '">API credentials</label><button type="button" onclick="toggleStudyKeyVisibility(\'' + pid + '\',this)" aria-pressed="false" aria-label="Show ' + esc(provider.label) + ' API keys">Show</button></div>' +
+      '<textarea id="study-key-' + pid + '" class="ai-secret-field" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="One API key per line">' + esc(keys.join('\n')) + '</textarea>';
+
+  var metricsLead = envManaged
+    ? '<span><b>env</b> managed</span>'
+    : '<span><b>' + keys.length + '</b> key' + (keys.length === 1 ? '' : 's') + '</span>';
 
   return '<article id="study-provider-card-' + pid + '" class="ai-provider-card' + (active ? ' is-active' : '') + '">' +
     '<div class="ai-provider-card-head">' +
@@ -200,13 +215,12 @@ function aiStudyProviderCard(pid, activePid) {
       '<span id="study-badge-' + pid + '" class="ai-provider-state ' + stateClass + '"><i></i>' + stateText + '</span>' +
     '</div>' +
     '<div class="ai-provider-metrics">' +
-      '<span><b>' + keys.length + '</b> key' + (keys.length === 1 ? '' : 's') + '</span>' +
+      metricsLead +
       '<span><b>' + models.length + '</b> models</span>' +
       '<span id="study-health-' + pid + '" class="ai-provider-health is-' + health.state + '"><i></i>' + health.label + '</span>' +
     '</div>' +
     '<div class="ai-provider-endpoint" title="' + esc(endpoint) + '"><span>Endpoint</span><code>' + esc(endpoint.replace(/^https?:\/\//, '')) + '</code></div>' +
-    '<div class="ai-secret-label"><label for="study-key-' + pid + '">API credentials</label><button type="button" onclick="toggleStudyKeyVisibility(\'' + pid + '\',this)" aria-pressed="false" aria-label="Show ' + esc(provider.label) + ' API keys">Show</button></div>' +
-    '<textarea id="study-key-' + pid + '" class="ai-secret-field" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="One API key per line">' + esc(keys.join('\n')) + '</textarea>' +
+    credentialsBlock +
     '<div class="ai-provider-card-foot"><span>' + esc(provider.note) + '</span>' + keyLink + '</div>' +
   '</article>';
 }
