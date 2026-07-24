@@ -949,16 +949,19 @@ _opencode_server_model_lock = threading.Lock()
 # confirm that Render is serving the diagnostic-aware Study AI proxy revision.
 _OPENCODE_STUDY_PROTOCOL = "server-catalog-cold-start-retry-v1"
 # A separately deployed OpenCode server (for example on a free tier that sleeps
-# when idle) commonly answers the FIRST request after inactivity with a
-# transient 502/503/504 from its router, or briefly refuses/does not answer the
+# when idle, restarts, or is briefly OOM-killed) commonly answers requests with
+# a transient 502/503/504 from its router, or refuses/does not answer the
 # connection while it boots. Session creation happens before any model is used,
-# so give it a few bounded retries with backoff to let the service wake instead
-# of failing immediately. A genuinely broken service still fails after retries.
+# so a failure here is a service window, not a model problem. Retry with a
+# linear backoff long enough to ride out a typical free-tier restart/cold-start
+# (defaults span roughly 30s across 5 attempts); a genuinely broken service
+# still fails after the retries are exhausted. Both counts are env-tunable so an
+# operator can widen the window without a code change.
 _OPENCODE_SESSION_RETRY_STATUSES = (502, 503, 504)
 _OPENCODE_SESSION_MAX_ATTEMPTS = max(1, min(
-    int(os.environ.get("OPENCODE_SESSION_MAX_ATTEMPTS", "3")), 6))
+    int(os.environ.get("OPENCODE_SESSION_MAX_ATTEMPTS", "5")), 10))
 _OPENCODE_SESSION_RETRY_BACKOFF = max(0.5, min(
-    float(os.environ.get("OPENCODE_SESSION_RETRY_BACKOFF", "2.0")), 10.0))
+    float(os.environ.get("OPENCODE_SESSION_RETRY_BACKOFF", "3.0")), 15.0))
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
