@@ -895,12 +895,19 @@ async function syncDailyModelCatalogs(button) {
     });
     var payload = await response.json().catch(function () { return {}; });
     await loadAiStudyData();
-    if (!response.ok || !payload.ok) {
-      throw new Error(payload.detail || payload.error || ('Refresh failed (HTTP ' + response.status + ')'));
-    }
     var failures = Object.keys(payload.results || {}).filter(function (pid) { return !payload.results[pid].ok; });
+    var failureDetails = failures.map(function (pid) {
+      var result = payload.results[pid] || {};
+      var label = (STUDY_PROVIDERS[pid] || {}).label || pid;
+      return label + ': ' + (result.error || 'catalog refresh failed');
+    });
+    if (!response.ok || !payload.ok) {
+      throw new Error(failureDetails.length
+        ? failureDetails.join('; ')
+        : (payload.detail || payload.error || ('Refresh failed (HTTP ' + response.status + ')')));
+    }
     showToast(failures.length
-      ? 'Catalog refresh completed with issues: ' + failures.join(', ') + '.'
+      ? 'Catalog refresh completed with issues: ' + failureDetails.join('; ')
       : '✅ Model catalogs refreshed.');
   } catch (e) {
     showToast('Model catalog refresh failed: ' + (e.message || String(e)), 'error');

@@ -4711,12 +4711,12 @@ def _catalog_model_id(item, gemini=False):
 
 
 def _is_text_chat_model_id(provider, model_id):
-    """Accept only sources with a positive text/chat capability signal.
+    """Accept IDs with a conservative text/chat capability signal.
 
-    OpenRouter's server-side modality filter and Gemini's generateContent
-    capability establish the primary signal. Every provider additionally uses
-    a positive language-model family allow-list, so an unexpected response
-    record cannot replace the stored catalog.
+    Gemini's generateContent capability is checked by its catalog parser.
+    OpenAI-compatible providers without structured capability metadata use a
+    positive model-family allow-list; OpenRouter is handled separately from its
+    machine-readable architecture fields.
     """
     lowered = model_id.lower()
     if not model_id:
@@ -4727,6 +4727,35 @@ def _is_text_chat_model_id(provider, model_id):
     if provider["catalog_format"] == "gemini":
         return True
     return any(marker in lowered for marker in provider.get("chat_id_markers", ()))
+
+
+def _is_text_chat_catalog_item(provider, item):
+    """Use structured capabilities when a catalog provides them.
+
+    OpenRouter's architecture metadata is stable across model-family launches,
+    unlike an ID allow-list. Requiring text input and text-only output keeps
+    audio/image generation records out while admitting new chat model families.
+    """
+    model_id = _catalog_model_id(item)
+    if not model_id:
+        return False
+    lowered = model_id.lower()
+    non_chat_markers = ("embedding", "embed", "transcrib", "speech", "whisper", "tts", "audio", "moderation", "rerank", "dall", "image", "imagen", "stable-diffusion", "midjourney", "flux")
+    if any(marker in lowered for marker in non_chat_markers):
+        return False
+    if not provider.get("server_filters"):
+        return _is_text_chat_model_id(provider, model_id)
+
+    architecture = item.get("architecture") if isinstance(item, dict) else None
+    inputs = architecture.get("input_modalities") if isinstance(architecture, dict) else None
+    outputs = architecture.get("output_modalities") if isinstance(architecture, dict) else None
+    return (
+        isinstance(inputs, list)
+        and "text" in inputs
+        and isinstance(outputs, list)
+        and bool(outputs)
+        and all(modality == "text" for modality in outputs)
+    )
 
 
 def _has_verified_zero_pricing(item):
@@ -4773,7 +4802,7 @@ def _openai_catalog_models(provider, payload, mode):
     models = []
     for item in data:
         model_id = _catalog_model_id(item)
-        if not _is_text_chat_model_id(provider, model_id):
+        if not _is_text_chat_catalog_item(provider, item):
             continue
         if mode == "free" and not _has_verified_zero_pricing(item):
             continue
