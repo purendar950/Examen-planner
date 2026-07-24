@@ -947,7 +947,7 @@ _opencode_server_model_cache = {
 _opencode_server_model_lock = threading.Lock()
 # Exposed only through /health. This fixed, non-sensitive marker lets operators
 # confirm that Render is serving the diagnostic-aware Study AI proxy revision.
-_OPENCODE_STUDY_PROTOCOL = "server-catalog-cold-start-retry-v1"
+_OPENCODE_STUDY_PROTOCOL = "server-catalog-empty-reply-poll-v1"
 # A separately deployed OpenCode server (for example on a free tier that sleeps
 # when idle, restarts, or is briefly OOM-killed) commonly answers requests with
 # a transient 502/503/504 from its router, or refuses/does not answer the
@@ -962,6 +962,15 @@ _OPENCODE_SESSION_MAX_ATTEMPTS = max(1, min(
     int(os.environ.get("OPENCODE_SESSION_MAX_ATTEMPTS", "5")), 10))
 _OPENCODE_SESSION_RETRY_BACKOFF = max(0.5, min(
     float(os.environ.get("OPENCODE_SESSION_RETRY_BACKOFF", "3.0")), 15.0))
+# OpenCode may return from message creation before the assistant reply has
+# finished generating (or a slow free model may still be streaming), so the very
+# first read of the reply can legitimately contain no text yet. Poll a bounded
+# number of times for the reply, stopping early once the message reports
+# completion or an error, before treating the response as empty.
+_OPENCODE_REPLY_POLL_ATTEMPTS = max(1, min(
+    int(os.environ.get("OPENCODE_REPLY_POLL_ATTEMPTS", "6")), 30))
+_OPENCODE_REPLY_POLL_INTERVAL = max(0.25, min(
+    float(os.environ.get("OPENCODE_REPLY_POLL_INTERVAL", "1.5")), 10.0))
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
@@ -1825,17 +1834,57 @@ def _opencode_send_study_message(session_id, messages, config, json_mode=False,
     )
 
 
-def _opencode_assistant_text(session_id, message_id, config, study=False):
-    """Read assistant text from old single-message or current list endpoints."""
-    session_path = "%s/session/%s/message" % (config["server_url"], quote(session_id, safe=""))
-    stage = "study message retrieval" if study else "message retrieval"
+def _opencode_part_types(parts):
+    """Ordered, de-duplicated list of part type names (never their content)."""
+    types = []
+    for part in (parts or []):
+        if isinstance(part, dict):
+            name = str(part.get("type") or "").strip()
+            if name:
+                types.append(name)
+    return tuple(dict.fromkeys(types))
+
+
+def _opencode_message_error(info):
+    """A short, safe error label from an assistant message, or '' if none.
+
+    Only the error name/type is returned — never a provider/response body, which
+    can carry account or upstream details.
+    """
+    if not isinstance(info, dict):
+        return ""
+    err = info.get("error")
+    if isinstance(err, dict):
+        return str(err.get("name") or err.get("type") or "error")[:60]
+    if isinstance(err, str) and err.strip():
+        return "error"
+    return ""
+
+
+def _opencode_message_completed(info):
+    """Whether the assistant message reports it has finished generating."""
+    if not isinstance(info, dict):
+        return False
+    time_info = info.get("time")
+    if isinstance(time_info, dict) and time_info.get("completed"):
+        return True
+    return bool(info.get("finish") or info.get("completed"))
+
+
+def _opencode_fetch_assistant(session_path, message_id, config, stage):
+    """Return (text, info, part_types) for the target assistant message.
+
+    Tries the old per-message endpoint first, then falls back to the message
+    list used by recent OpenCode versions. Returns ("", None, ()) when the
+    message is not present yet so the caller can poll again.
+    """
     try:
         single = _opencode_json_request(
             "GET", session_path + "/" + quote(message_id, safe=""), config,
             stage, expected_type=dict)
-        answer = _opencode_text_parts(single.get("parts"))
-        if answer:
-            return answer
+        parts = single.get("parts")
+        info = single.get("info") if isinstance(single.get("info"), dict) else single
+        return _opencode_text_parts(parts), info, _opencode_part_types(parts)
     except _OpenCodePlanError as exc:
         # Recent OpenCode versions expose GET /message as a list instead of a
         # per-message endpoint. Any other failure is real and must be surfaced.
@@ -1852,14 +1901,63 @@ def _opencode_assistant_text(session_id, message_id, config, study=False):
             continue
         if message_id and str(info.get("id") or "") != message_id:
             continue
-        answer = _opencode_text_parts(entry.get("parts"))
+        parts = entry.get("parts")
+        return _opencode_text_parts(parts), info, _opencode_part_types(parts)
+    return "", None, ()
+
+
+def _opencode_assistant_text(session_id, message_id, config, study=False,
+                             cancel_event=None):
+    """Read assistant text, tolerating an asynchronous / slow completion.
+
+    OpenCode can return from message creation before the reply has finished
+    generating, and a slow free model may still be streaming, so the first read
+    can legitimately contain no text. Poll a bounded number of times, stopping
+    early once the message reports completion or an error. Never logs or returns
+    upstream response bodies — only fixed labels, part TYPE names, and an error
+    name are used for diagnostics.
+    """
+    session_path = "%s/session/%s/message" % (config["server_url"], quote(session_id, safe=""))
+    stage = "study message retrieval" if study else "message retrieval"
+    attempts = _OPENCODE_REPLY_POLL_ATTEMPTS
+    last_types = ()
+    last_error = ""
+    finished = False
+    for attempt in range(attempts):
+        answer, info, part_types = _opencode_fetch_assistant(
+            session_path, message_id, config, stage)
         if answer:
             return answer
-    raise _OpenCodePlanError(
-        "opencode_empty_response",
-        "OpenCode returned an empty Study AI response." if study
-        else "OpenCode returned an empty planning response.",
-        stage=stage)
+        if part_types:
+            last_types = part_types
+        error_label = _opencode_message_error(info)
+        if error_label:
+            last_error = error_label
+        finished = _opencode_message_completed(info)
+        # No point polling once the model has finished (or errored) with no text.
+        if finished or last_error:
+            break
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        if attempt < attempts - 1:
+            _opencode_sleep_unless_cancelled(_OPENCODE_REPLY_POLL_INTERVAL, cancel_event)
+
+    if last_types or last_error:
+        log.warning("OpenCode %s produced no text (parts=%s, error=%s, model=%s)",
+                    stage, ",".join(last_types) or "none", last_error or "none",
+                    config.get("model_id", ""))
+
+    if last_error:
+        detail = ("OpenCode's model returned an error instead of an answer "
+                  "(it may be rate limited or unavailable). Please try again "
+                  "shortly or pick another model.")
+    elif finished:
+        detail = ("OpenCode's model finished without returning any text. "
+                  "Please try again or select a different model.")
+    else:
+        detail = ("OpenCode returned an empty Study AI response." if study
+                  else "OpenCode returned an empty planning response.")
+    raise _OpenCodePlanError("opencode_empty_response", detail, stage=stage)
 
 
 def _opencode_abort_session(session_id, config):
@@ -2009,7 +2107,8 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
         if cancel_event is not None and cancel_event.is_set():
             return ""
 
-        answer = _opencode_assistant_text(session_id, message_id, config, study=True)
+        answer = _opencode_assistant_text(session_id, message_id, config, study=True,
+                                           cancel_event=cancel_event)
         if cancel_event is not None and cancel_event.is_set():
             return ""
         if not answer:
