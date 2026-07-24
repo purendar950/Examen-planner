@@ -35,6 +35,7 @@ import threading
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote, urlparse
 
 import requests
 from flask import Flask, request, jsonify, Response, stream_with_context
@@ -898,6 +899,24 @@ BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
 # proxy so credentials, rate limits, transcript caching, and audit metadata stay
 # server-side. ngrok's browser-warning bypass is applied by _ai_headers().
 OMNIROUTE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions"
+
+# OpenCode is intentionally isolated from the student-facing Study AI provider
+# list. It runs in a separate, Basic-Auth-protected service and can only be
+# reached through the admin-only planning endpoint below. Its credentials and
+# workspace path are server-side environment variables, never Firestore data or
+# browser inputs.
+_OPENCODE_TIMEOUT = max(5, min(int(os.environ.get("OPENCODE_TIMEOUT", "90")), 300))
+# Cleanup is deliberately short and retried so it cannot hold the browser
+# request open for another full generation timeout after a successful plan.
+_OPENCODE_CLEANUP_TIMEOUT = min(_OPENCODE_TIMEOUT, 5)
+_OPENCODE_PLAN_MAX_PROMPT_CHARS = 8_000
+_OPENCODE_PLAN_DISABLED_TOOLS = {
+    # Pin the separately deployed OpenCode image to a release that enforces
+    # wildcard tool denials. This must remain deny-by-default: a fixed named
+    # list cannot safely cover custom/MCP tools added to that service.
+    "*": False,
+}
+
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
@@ -1261,6 +1280,224 @@ def _rate_ok(bucket, key, limit, window):
         hits.append(now)
         b[key] = hits
         return True
+
+
+class _OpenCodePlanError(RuntimeError):
+    """A client-safe failure from the isolated OpenCode planning service."""
+
+    def __init__(self, code, detail, status=502, upstream_status=None):
+        super().__init__(detail)
+        self.code = code
+        self.detail = detail
+        self.status = status
+        self.upstream_status = upstream_status
+
+
+def _opencode_config():
+    """Read and validate server-only OpenCode configuration.
+
+    The browser must not control the target server, model, provider, or
+    directory. Requiring all of them also avoids accidentally creating a
+    session in OpenCode's default working directory.
+    """
+    server_url = os.environ.get("OPENCODE_SERVER_URL", "").strip().rstrip("/")
+    password = os.environ.get("OPENCODE_SERVER_PASSWORD", "")
+    provider_id = os.environ.get("OPENCODE_PROVIDER_ID", "").strip()
+    model_id = os.environ.get("OPENCODE_MODEL_ID", "").strip()
+    directory = os.environ.get("OPENCODE_DIRECTORY", "").strip()
+    username = os.environ.get("OPENCODE_SERVER_USERNAME", "opencode").strip() or "opencode"
+    if not all((server_url, password, provider_id, model_id, directory)):
+        return None
+
+    parsed = urlparse(server_url)
+    # Do not accept an embedded username/password URL. Basic auth is supplied
+    # only from the dedicated server environment variables below.
+    if (parsed.scheme != "https" or not parsed.netloc or parsed.username
+            or parsed.password or parsed.query or parsed.fragment):
+        log.warning("OpenCode configuration requires an HTTPS server URL without embedded credentials")
+        return None
+    return {
+        "server_url": server_url,
+        "username": username,
+        "password": password,
+        "provider_id": provider_id,
+        "model_id": model_id,
+        "directory": directory,
+    }
+
+
+def _opencode_json_request(method, url, config, stage, payload=None, expected_type=dict):
+    """Call OpenCode without returning or logging upstream body/credentials."""
+    try:
+        response = requests.request(
+            method,
+            url,
+            auth=(config["username"], config["password"]),
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            # OpenCode uses this server-owned directory to scope every request.
+            params={"directory": config["directory"]},
+            json=payload,
+            timeout=_OPENCODE_TIMEOUT,
+        )
+    except requests.Timeout as exc:
+        log.warning("OpenCode %s timed out (%s)", stage, type(exc).__name__)
+        raise _OpenCodePlanError(
+            "opencode_timeout", "OpenCode did not respond before the request timed out.") from exc
+    except requests.RequestException as exc:
+        log.warning("OpenCode %s request failed (%s)", stage, type(exc).__name__)
+        raise _OpenCodePlanError(
+            "opencode_unavailable", "OpenCode is temporarily unavailable.") from exc
+
+    if not 200 <= response.status_code < 300:
+        log.warning("OpenCode %s returned HTTP %s", stage, response.status_code)
+        raise _OpenCodePlanError(
+            "opencode_upstream_error", "OpenCode could not complete the planning request.",
+            upstream_status=response.status_code)
+    try:
+        data = response.json()
+    except ValueError as exc:
+        log.warning("OpenCode %s returned a non-JSON response", stage)
+        raise _OpenCodePlanError(
+            "opencode_upstream_error", "OpenCode returned an invalid response.") from exc
+    if not isinstance(data, expected_type):
+        log.warning("OpenCode %s returned an unexpected JSON response", stage)
+        raise _OpenCodePlanError(
+            "opencode_upstream_error", "OpenCode returned an invalid response.")
+    return data
+
+
+def _opencode_text_parts(parts):
+    """Extract only text parts from an OpenCode assistant message."""
+    return "".join(
+        str(part.get("text") or "")
+        for part in (parts or [])
+        if isinstance(part, dict) and part.get("type") == "text"
+    ).strip()
+
+
+def _opencode_send_plan_message(session_id, prompt, config):
+    """Send a no-tools request using the pinned OpenCode server API contract."""
+    url = "%s/session/%s/message" % (config["server_url"], quote(session_id, safe=""))
+    prompt_text = ("Provide analysis and an implementation plan only. Do not execute commands, "
+                   "read files, edit files, or claim that you performed actions.\n\n"
+                   "Administrator request:\n" + prompt)
+    return _opencode_json_request(
+        "POST",
+        url,
+        config,
+        "message creation",
+        {
+            "parts": [{"type": "text", "text": prompt_text}],
+            "model": {"providerID": config["provider_id"], "modelID": config["model_id"]},
+            "agent": "plan",
+            "tools": dict(_OPENCODE_PLAN_DISABLED_TOOLS),
+        },
+    )
+
+
+def _opencode_assistant_text(session_id, message_id, config):
+    """Read assistant text from old single-message or current list endpoints."""
+    session_path = "%s/session/%s/message" % (config["server_url"], quote(session_id, safe=""))
+    try:
+        single = _opencode_json_request(
+            "GET", session_path + "/" + quote(message_id, safe=""), config,
+            "message retrieval", expected_type=dict)
+        answer = _opencode_text_parts(single.get("parts"))
+        if answer:
+            return answer
+    except _OpenCodePlanError as exc:
+        # Recent OpenCode versions expose GET /message as a list instead of a
+        # per-message endpoint. Any other failure is real and must be surfaced.
+        if exc.upstream_status not in (404, 405):
+            raise
+
+    messages = _opencode_json_request(
+        "GET", session_path, config, "message list", expected_type=list)
+    for entry in reversed(messages):
+        if not isinstance(entry, dict):
+            continue
+        info = entry.get("info") if isinstance(entry.get("info"), dict) else {}
+        if info.get("role") != "assistant":
+            continue
+        if message_id and str(info.get("id") or "") != message_id:
+            continue
+        answer = _opencode_text_parts(entry.get("parts"))
+        if answer:
+            return answer
+    raise _OpenCodePlanError(
+        "opencode_empty_response", "OpenCode returned an empty planning response.")
+
+
+def _opencode_cleanup_session(session_id, config):
+    """Abort if needed and make bounded best-effort attempts to delete a session."""
+    url = "%s/session/%s" % (config["server_url"], quote(session_id, safe=""))
+    request_options = {
+        "auth": (config["username"], config["password"]),
+        "params": {"directory": config["directory"]},
+        "timeout": _OPENCODE_CLEANUP_TIMEOUT,
+    }
+    for attempt in range(2):
+        try:
+            response = requests.delete(url, **request_options)
+            # A 404 after a timeout can mean the first delete actually won.
+            if 200 <= response.status_code < 300 or response.status_code == 404:
+                return
+            log.warning("OpenCode session cleanup attempt %d returned HTTP %s",
+                        attempt + 1, response.status_code)
+        except requests.RequestException as exc:
+            log.warning("OpenCode session cleanup attempt %d failed (%s)",
+                        attempt + 1, type(exc).__name__)
+
+        if attempt == 0:
+            # A stalled completion should not continue after its owning browser
+            # request has finished. Abort is safe to attempt even if the prior
+            # delete may have succeeded but its response was lost.
+            try:
+                abort = requests.post(url + "/abort", **request_options)
+                if not 200 <= abort.status_code < 300 and abort.status_code != 404:
+                    log.warning("OpenCode session abort returned HTTP %s", abort.status_code)
+            except requests.RequestException as exc:
+                log.warning("OpenCode session abort failed (%s)", type(exc).__name__)
+    log.warning("OpenCode session cleanup incomplete after retry")
+
+
+def _opencode_plan(prompt, config):
+    """Run a one-off, no-tools OpenCode *plan* session and then delete it."""
+    session_id = ""
+    try:
+        session = _opencode_json_request(
+            "POST",
+            config["server_url"] + "/session",
+            config,
+            "session creation",
+            {"title": "ExamZen admin planning request"},
+        )
+        session_id = str(session.get("id") or "").strip()
+        if not session_id:
+            log.warning("OpenCode session creation response did not include an ID")
+            raise _OpenCodePlanError(
+                "opencode_upstream_error", "OpenCode returned an invalid session response.")
+
+        # The text is deliberately framed as analysis-only. The enforced plan
+        # mode/agent plus deny-by-default tool map prevents the request from
+        # reading, editing, or executing anything in the OpenCode container.
+        message = _opencode_send_plan_message(session_id, prompt, config)
+        message_info = message.get("info") if isinstance(message.get("info"), dict) else {}
+        message_id = str(message_info.get("id") or message.get("id") or "").strip()
+        if not message_id:
+            log.warning("OpenCode message creation response did not include an ID")
+            raise _OpenCodePlanError(
+                "opencode_upstream_error", "OpenCode returned an invalid message response.")
+
+        answer = _opencode_assistant_text(session_id, message_id, config)
+        if not answer:
+            log.warning("OpenCode message retrieval returned no text parts")
+            raise _OpenCodePlanError(
+                "opencode_empty_response", "OpenCode returned an empty planning response.")
+        return answer
+    finally:
+        if session_id:
+            _opencode_cleanup_session(session_id, config)
 
 
 def _is_unlimited(uid):
@@ -3872,6 +4109,63 @@ def api_admin_model_catalogs_sync():
     failures = [entry for entry in result.get("results", {}).values() if not entry.get("ok")]
     status = 502 if result.get("selected") and len(failures) == len(result["selected"]) else 200
     return jsonify({"ok": status == 200, **result}), status
+
+
+@app.post("/api/admin/opencode/plan")
+def api_admin_opencode_plan():
+    """Ask the separately deployed OpenCode service for an admin-only plan.
+
+    This endpoint deliberately is not part of the student AI provider picker:
+    the client supplies only a bounded text request, while credentials, model,
+    and workspace directory remain fixed on the proxy server.
+    """
+    user, err = _verified_user_record()
+    if err:
+        return jsonify(err[0]), err[1]
+    if not user["is_admin"]:
+        return jsonify({"error": "forbidden", "detail": "An authenticated admin account is required."}), 403
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("prompt"), str):
+        return jsonify({"error": "invalid_request", "detail": "A text prompt is required."}), 400
+    prompt = body["prompt"].strip()
+    if not prompt:
+        return jsonify({"error": "invalid_request", "detail": "A text prompt is required."}), 400
+    if len(prompt) > _OPENCODE_PLAN_MAX_PROMPT_CHARS:
+        return jsonify({
+            "error": "prompt_too_long",
+            "detail": "The planning prompt must not exceed %d characters." % _OPENCODE_PLAN_MAX_PROMPT_CHARS,
+        }), 400
+
+    config = _opencode_config()
+    if not config:
+        return jsonify({
+            "error": "opencode_not_configured",
+            "detail": "OpenCode planning is not configured on this service.",
+        }), 503
+    if not _rate_ok("opencode_plan", user["uid"], 10, 3600):
+        return jsonify({
+            "error": "rate_limited",
+            "detail": "Too many OpenCode planning requests this hour. Try again later.",
+        }), 429
+
+    try:
+        answer = _opencode_plan(prompt, config)
+    except _OpenCodePlanError as exc:
+        return jsonify({"error": exc.code, "detail": exc.detail}), exc.status
+    except Exception as exc:  # noqa: BLE001
+        # Do not leak an upstream response, configured URL, or credentials.
+        log.exception("Unexpected OpenCode planning failure (%s)", type(exc).__name__)
+        return jsonify({
+            "error": "opencode_upstream_error",
+            "detail": "OpenCode could not complete the planning request.",
+        }), 502
+
+    return jsonify({
+        "answer": answer,
+        "provider": config["provider_id"],
+        "model": config["model_id"],
+    })
 
 
 _STUDY_DEMO_HTML = """<!doctype html>
