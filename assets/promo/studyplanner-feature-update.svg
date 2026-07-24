@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080" viewBox="0 0 1080 1080" role="img" aria-labelledby="title desc">
+  <title id="title">StudyPlanner major feature update promotional poster</title>
+  <desc id="desc">A square promotional graphic presenting eight StudyPlanner features for exam preparation.</desc>
+  <defs>
+    <linearGradient id="bg" x1="80" y1="0" x2="1010" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#102923"/><stop offset="0.48" stop-color="#071713"/><stop offset="1" stop-color="#050D0B"/>
+    </linearGradient>
+    <radialGradient id="glowA" cx="0" cy="0" r="1" gradientTransform="translate(905 140) rotate(126) scale(620 500)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#19E3A2" stop-opacity=".24"/><stop offset="1" stop-color="#19E3A2" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowB" cx="0" cy="0" r="1" gradientTransform="translate(100 860) rotate(-28) scale(500 420)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#47DFF4" stop-opacity=".16"/><stop offset="1" stop-color="#47DFF4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="accent" x1="0" y1="1" x2="1" y2="0"><stop stop-color="#47DFF4"/><stop offset=".55" stop-color="#20E0BA"/><stop offset="1" stop-color="#19E3A2"/></linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#14251F"/><stop offset="1" stop-color="#0A1512"/></linearGradient>
+    <linearGradient id="badge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#1CE8AB"/><stop offset="1" stop-color="#00A977"/></linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="13" stdDeviation="14" flood-color="#000" flood-opacity=".34"/></filter>
+    <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="18"/></filter>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse"><path d="M44 0H0V44" fill="none" stroke="#B8FFE6" stroke-opacity=".025"/></pattern>
+    <style>
+      text{font-family:Inter,Segoe UI,Arial,sans-serif}.caps{letter-spacing:2px}.muted{fill:#8EA39B}.white{fill:#F1FBF7}.green{fill:#19E3A2}.cyan{fill:#47DFF4}.card-title{fill:#EAF8F3;font-size:21px;font-weight:800}.card-copy{fill:#82978F;font-size:13px;font-weight:500}.ui-label{fill:#9CB0A8;font-size:11px;font-weight:700}.ui-value{fill:#F1FBF7;font-size:16px;font-weight:800}.tiny{fill:#70857D;font-size:9px;font-weight:600}
+    </style>
+  </defs>
+
+  <rect width="1080" height="1080" fill="url(#bg)"/>
+  <rect width="1080" height="1080" fill="url(#glowA)"/>
+  <rect width="1080" height="1080" fill="url(#glowB)"/>
+  <rect width="1080" height="1080" fill="url(#grid)"/>
+  <circle cx="960" cy="300" r="155" fill="#19E3A2" opacity=".035"/><circle cx="108" cy="420" r="170" fill="#47DFF4" opacity=".025"/>
+
+  <!-- brand -->
+  <g transform="translate(54 43)">
+    <rect width="62" height="62" rx="18" fill="#091814" stroke="#9DFFE1" stroke-opacity=".17"/>
+    <path d="M16 46H33C40 46 44 43 44 39S40 32 33 32H28C22 32 18 28 18 24S22 17 28 17H43" fill="none" stroke="url(#accent)" stroke-width="6" stroke-linecap="round"/>
+    <circle cx="16" cy="46" r="4" fill="#47DFF4"/><path d="M43 11L49 17L43 23L37 17Z" fill="#19E3A2"/>
+    <text x="77" y="35" class="white" font-size="31" font-weight="850" letter-spacing="-1.2">Study<tspan class="green">Planner</tspan></text>
+    <text x="79" y="54" fill="#70857D" font-size="9.5" font-weight="800" letter-spacing="2.2">PLAN  •  FOCUS  •  PROGRESS</text>
+  </g>
+
+  <!-- update pill -->
+  <g transform="translate(390 44)" filter="url(#shadow)">
+    <rect width="360" height="56" rx="28" fill="#0C201A" stroke="#2CF0B5" stroke-opacity=".3"/>
+    <circle cx="31" cy="28" r="16" fill="#19E3A2" opacity=".16"/>
+    <path d="M22 29h18M31 20v18" stroke="#19E3A2" stroke-width="3" stroke-linecap="round"/>
+    <text x="58" y="35" class="white caps" font-size="16" font-weight="850">MAJOR FEATURE UPDATE</text>
+  </g>
+
+  <!-- free badge -->
+  <g transform="translate(879 38)" filter="url(#shadow)">
+    <circle cx="71" cy="71" r="66" fill="#06110E" stroke="#31EAB3" stroke-width="2"/>
+    <circle cx="71" cy="71" r="58" fill="url(#badge)"/>
+    <circle cx="71" cy="71" r="51" fill="none" stroke="#D9FFF2" stroke-opacity=".55" stroke-width="1.5" stroke-dasharray="4 5"/>
+    <text x="71" y="54" fill="#062019" font-size="13" font-weight="900" text-anchor="middle" letter-spacing="1.7">FREE TO</text>
+    <text x="71" y="81" fill="#FFFFFF" font-size="29" font-weight="950" text-anchor="middle" letter-spacing="-.8">START</text>
+    <text x="71" y="100" fill="#073327" font-size="10" font-weight="850" text-anchor="middle" letter-spacing="1.2">NO CARD NEEDED</text>
+  </g>
+
+  <!-- headline -->
+  <text x="540" y="174" class="white" font-size="63" font-weight="900" text-anchor="middle" letter-spacing="-3.2">PLAN SMARTER.</text>
+  <text x="540" y="239" fill="url(#accent)" font-size="63" font-weight="900" text-anchor="middle" letter-spacing="-3.2">SCORE HIGHER.</text>
+  <path d="M240 274H390M690 274H840" stroke="#527069" stroke-width="1.4"/>
+  <text x="540" y="281" fill="#A8BBB4" font-size="15" font-weight="750" text-anchor="middle" letter-spacing="2.2">YOUR ENTIRE PREPARATION. ONE INTELLIGENT WORKSPACE.</text>
+
+  <!-- floating timer mini-widget -->
+  <g transform="translate(51 131) rotate(-4 112 76)" filter="url(#shadow)">
+    <rect width="222" height="134" rx="22" fill="#0B1916" stroke="#47DFF4" stroke-opacity=".4"/>
+    <text x="20" y="29" class="cyan caps" font-size="10" font-weight="850">FOCUS SESSION</text>
+    <circle cx="67" cy="80" r="35" fill="none" stroke="#203A34" stroke-width="8"/><path d="M67 45a35 35 0 1 1-29 55" fill="none" stroke="url(#accent)" stroke-width="8" stroke-linecap="round"/>
+    <text x="67" y="85" class="white" font-size="17" font-weight="850" text-anchor="middle">24:38</text>
+    <text x="119" y="67" class="white" font-size="15" font-weight="800">Deep Work</text><text x="119" y="89" class="muted" font-size="11">No distractions</text>
+    <rect x="119" y="102" width="75" height="18" rx="9" fill="#19E3A2" opacity=".13"/><text x="156" y="115" class="green" font-size="9" font-weight="800" text-anchor="middle">IN PROGRESS</text>
+  </g>
+
+  <!-- row 1 cards -->
+  <g transform="translate(42 326)" filter="url(#shadow)">
+    <rect width="238" height="283" rx="24" fill="url(#card)" stroke="#2A5147"/>
+    <circle cx="31" cy="32" r="18" fill="#47DFF4" opacity=".14"/><path d="M22 37v-9M31 37V22M40 37V27" stroke="#47DFF4" stroke-width="3" stroke-linecap="round"/>
+    <text x="58" y="38" class="card-title">Dashboard</text><text x="20" y="67" class="card-copy">See today’s prep at a glance.</text>
+    <rect x="17" y="84" width="204" height="175" rx="17" fill="#07110F" stroke="#193129"/>
+    <text x="32" y="108" class="ui-label">WEEKLY PROGRESS</text><text x="191" y="108" class="green" font-size="11" font-weight="850" text-anchor="end">+18%</text>
+    <path d="M32 214H205M32 182H205M32 150H205" stroke="#203A34" stroke-width="1" stroke-dasharray="3 4"/>
+    <path d="M37 219L63 199L89 205L116 163L142 176L169 133L198 118" fill="none" stroke="url(#accent)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M37 219L63 199L89 205L116 163L142 176L169 133L198 118V233H37Z" fill="#19E3A2" opacity=".08"/>
+    <circle cx="198" cy="118" r="5" fill="#19E3A2"/><text x="32" y="247" class="tiny">7-day completion trend</text>
+  </g>
+
+  <g transform="translate(294 326)" filter="url(#shadow)">
+    <rect width="238" height="283" rx="24" fill="url(#card)" stroke="#2A5147"/>
+    <circle cx="31" cy="32" r="18" fill="#A855F7" opacity=".16"/><path d="M23 35l5-8 5 5 7-10" fill="none" stroke="#C084FC" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="40" cy="22" r="2.5" fill="#C084FC"/>
+    <text x="58" y="38" class="card-title">AI Insights</text><text x="20" y="67" class="card-copy">Know what to improve next.</text>
+    <rect x="17" y="84" width="204" height="175" rx="17" fill="#07110F" stroke="#2B1F38"/>
+    <text x="32" y="108" class="ui-label">SMART RECOMMENDATION</text>
+    <rect x="31" y="123" width="176" height="51" rx="12" fill="#A855F7" opacity=".1"/><circle cx="49" cy="148" r="9" fill="#C084FC" opacity=".85"/><path d="M45 148h8M49 144v8" stroke="#07110F" stroke-width="2"/>
+    <text x="66" y="143" class="white" font-size="11" font-weight="750">Revise Algebra today</text><text x="66" y="159" class="tiny">Accuracy dropped 12%</text>
+    <text x="32" y="199" class="ui-label">READINESS SCORE</text><rect x="32" y="211" width="171" height="9" rx="5" fill="#23302C"/><rect x="32" y="211" width="126" height="9" rx="5" fill="url(#accent)"/><text x="203" y="238" class="green" font-size="19" font-weight="900" text-anchor="end">74%</text><text x="32" y="239" class="tiny">On track for this week</text>
+  </g>
+
+  <g transform="translate(546 326)" filter="url(#shadow)">
+    <rect width="238" height="283" rx="24" fill="url(#card)" stroke="#2A5147"/>
+    <circle cx="31" cy="32" r="18" fill="#19E3A2" opacity=".14"/><circle cx="31" cy="32" r="10" fill="none" stroke="#19E3A2" stroke-width="2.5"/><path d="M31 26v7l5 3" stroke="#19E3A2" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="58" y="38" class="card-title">Focus Timer</text><text x="20" y="67" class="card-copy">Turn study time into deep work.</text>
+    <rect x="17" y="84" width="204" height="175" rx="17" fill="#07110F" stroke="#193129"/>
+    <circle cx="119" cy="163" r="54" fill="none" stroke="#203A34" stroke-width="11"/><path d="M119 109a54 54 0 1 1-49 77" fill="none" stroke="url(#accent)" stroke-width="11" stroke-linecap="round"/>
+    <text x="119" y="160" class="white" font-size="26" font-weight="900" text-anchor="middle">42:16</text><text x="119" y="181" class="muted" font-size="10" font-weight="700" text-anchor="middle">FOCUSING</text>
+    <rect x="76" y="226" width="86" height="21" rx="11" fill="#19E3A2" opacity=".13"/><text x="119" y="241" class="green" font-size="10" font-weight="850" text-anchor="middle">SESSION 3 OF 4</text>
+  </g>
+
+  <g transform="translate(798 326)" filter="url(#shadow)">
+    <rect width="238" height="283" rx="24" fill="url(#card)" stroke="#2A5147"/>
+    <circle cx="31" cy="32" r="18" fill="#F59E0B" opacity=".16"/><path d="M23 24h16v16H23zM27 20v7M35 20v7" fill="none" stroke="#FBBF24" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="58" y="38" class="card-title">Syllabus</text><text x="20" y="67" class="card-copy">Finish every topic with clarity.</text>
+    <rect x="17" y="84" width="204" height="175" rx="17" fill="#07110F" stroke="#3A2C16"/>
+    <text x="32" y="108" class="ui-label">SSC CGL • TIER I</text><text x="203" y="108" fill="#FBBF24" font-size="11" font-weight="850" text-anchor="end">68%</text>
+    <text x="32" y="139" class="white" font-size="11" font-weight="700">Quantitative Aptitude</text><rect x="32" y="148" width="171" height="8" rx="4" fill="#252E2B"/><rect x="32" y="148" width="133" height="8" rx="4" fill="#47DFF4"/>
+    <text x="32" y="181" class="white" font-size="11" font-weight="700">Reasoning</text><rect x="32" y="190" width="171" height="8" rx="4" fill="#252E2B"/><rect x="32" y="190" width="151" height="8" rx="4" fill="#19E3A2"/>
+    <text x="32" y="223" class="white" font-size="11" font-weight="700">English</text><rect x="32" y="232" width="171" height="8" rx="4" fill="#252E2B"/><rect x="32" y="232" width="98" height="8" rx="4" fill="#F59E0B"/>
+  </g>
+
+  <!-- row 2 cards -->
+  <g transform="translate(42 626)" filter="url(#shadow)">
+    <rect width="238" height="283" rx="24" fill="url(#card)" stroke="#2A5147"/>
+    <circle cx="31" cy="32" r="18" fill="#3B82F6" opacity=".16"/><path d="M23 38l4-7 5 4 8-12" fill="none" stroke="#60A5FA" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="58" y="38" class="card-title">AI Plan</text><text x="20" y="67" class="card-copy">Get a schedule built around you.</text>
+    <rect x="17" y="84" width="204" height="175" rx="17" fill="#07110F" stroke="#1D304B"/>
+    <text x="32" y="108" class="ui-label">TODAY’S SMART PLAN</text>
+    <g transform="translate(31 122)"><rect width="176" height="31" rx="9" fill="#13231E"/><circle cx="15" cy="15" r="7" fill="#19E3A2" opacity=".18"/><path d="M12 15l2 2 4-5" fill="none" stroke="#19E3A2" stroke-width="1.8"/><text x="30" y="19" class="white" font-size="10" font-weight="700">Revise Percentage</text><text x="162" y="19" class="tiny" text-anchor="end">30m</text></g>
+    <g transform="translate(31 160)"><rect width="176" height="31" rx="9" fill="#13231E"/><circle cx="15" cy="15" r="7" fill="#47DFF4" opacity=".18"/><path d="M12 15l2 2 4-5" fill="none" stroke="#47DFF4" stroke-width="1.8"/><text x="30" y="19" class="white" font-size="10" font-weight="700">Reasoning Mock</text><text x="162" y="19" class="tiny" text-anchor="end">45m</text></g>
+    <g transform="translate(31 198)"><rect width="176" height="31" rx="9" fill="#13231E"/><circle cx="15" cy="15" r="7" fill="#F59E0B" opacity=".18"/><path d="M12 15l2 2 4-5" fill="none" stroke="#F59E0B" stroke-width="1.8"/><text x="30" y="19" class="white" font-size="10" font-weight="700">English Lecture</text><text x="162" y="19" class="tiny" text-anchor="end">60m</text></g>
+    <text x="32" y="246" class="tiny">Balanced for your exam date</text>
+  </g>
+
+  <g transform="translate(294 626)" filter="url(#shadow)">
+    <rect width="238" height="283" rx="24" fill="url(#card)" stroke="#2A5147"/>
+    <circle cx="31" cy="32" r="18" fill="#EF4444" opacity=".16"/><path d="M24 39V27M31 39V22M38 39V30" stroke="#F87171" stroke-width="3" stroke-linecap="round"/>
+    <text x="58" y="38" class="card-title">Mock Analysis</text><text x="20" y="67" class="card-copy">Turn every attempt into progress.</text>
+    <rect x="17" y="84" width="204" height="175" rx="17" fill="#07110F" stroke="#3C2020"/>
+    <text x="32" y="108" class="ui-label">LATEST MOCK</text><text x="203" y="108" class="green" font-size="11" font-weight="850" text-anchor="end">RANK 42</text>
+    <circle cx="74" cy="169" r="41" fill="none" stroke="#20322C" stroke-width="10"/><path d="M74 128a41 41 0 1 1-37 58" fill="none" stroke="#19E3A2" stroke-width="10" stroke-linecap="round"/><text x="74" y="174" class="white" font-size="22" font-weight="900" text-anchor="middle">82%</text>
+    <circle cx="136" cy="139" r="5" fill="#19E3A2"/><text x="148" y="143" class="white" font-size="10" font-weight="700">41 correct</text><circle cx="136" cy="168" r="5" fill="#EF4444"/><text x="148" y="172" class="white" font-size="10" font-weight="700">6 wrong</text><circle cx="136" cy="197" r="5" fill="#526A61"/><text x="148" y="201" class="white" font-size="10" font-weight="700">3 skipped</text>
+    <text x="32" y="242" class="tiny">Accuracy • speed • weak topics</text>
+  </g>
+
+  <g transform="translate(546 626)" filter="url(#shadow)">
+    <rect width="238" height="283" rx="24" fill="url(#card)" stroke="#2A5147"/>
+    <circle cx="31" cy="32" r="18" fill="#A855F7" opacity=".16"/><path d="M23 31a8 8 0 1 1 3 6M23 31v7h7" fill="none" stroke="#C084FC" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="58" y="38" class="card-title">Smart Revision</text><text x="20" y="67" class="card-copy">Remember more with less effort.</text>
+    <rect x="17" y="84" width="204" height="175" rx="17" fill="#07110F" stroke="#2B1F38"/>
+    <text x="32" y="108" class="ui-label">SPACED REVISION</text>
+    <path d="M39 137H197" stroke="#263B34" stroke-width="3" stroke-linecap="round"/>
+    <g fill="#19E3A2"><circle cx="42" cy="137" r="8"/><circle cx="78" cy="137" r="8"/><circle cx="116" cy="137" r="8"/></g><g fill="#283E37" stroke="#587269"><circle cx="157" cy="137" r="8"/><circle cx="195" cy="137" r="8"/></g>
+    <g class="tiny" text-anchor="middle"><text x="42" y="161">D1</text><text x="78" y="161">D3</text><text x="116" y="161">D7</text><text x="157" y="161">D14</text><text x="195" y="161">D30</text></g>
+    <rect x="31" y="181" width="176" height="51" rx="12" fill="#A855F7" opacity=".1"/><text x="45" y="202" class="white" font-size="11" font-weight="750">Next: Indian Polity</text><text x="45" y="219" class="tiny">Due today • 12 flashcards</text><rect x="164" y="194" width="30" height="24" rx="8" fill="#C084FC" opacity=".25"/><text x="179" y="211" fill="#D8B4FE" font-size="10" font-weight="900" text-anchor="middle">GO</text>
+    <text x="32" y="247" class="tiny">Automatic review schedule</text>
+  </g>
+
+  <g transform="translate(798 626)" filter="url(#shadow)">
+    <rect width="238" height="283" rx="24" fill="url(#card)" stroke="#2A5147"/>
+    <circle cx="31" cy="32" r="18" fill="#229ED9" opacity=".17"/><path d="M21 31l20-8-5 18-7-6-5 4z" fill="none" stroke="#5CC8F2" stroke-width="2.5" stroke-linejoin="round"/>
+    <text x="58" y="38" class="card-title">Telegram Plan</text><text x="20" y="67" class="card-copy">Your daily schedule, delivered.</text>
+    <rect x="17" y="84" width="204" height="175" rx="17" fill="#07110F" stroke="#173242"/>
+    <text x="32" y="108" class="ui-label">TODAY • 7:00 AM</text>
+    <path d="M32 124h112a13 13 0 0 1 13 13v61a13 13 0 0 1-13 13H32z" fill="#13394A"/>
+    <text x="43" y="145" fill="#DDF6FF" font-size="10" font-weight="800">Good morning, Aspirant!</text><text x="43" y="164" fill="#A8CEDC" font-size="9">Your focused plan is ready:</text><text x="43" y="183" fill="#DDF6FF" font-size="9">1. Algebra revision • 30m</text><text x="43" y="199" fill="#DDF6FF" font-size="9">2. English mock • 45m</text>
+    <circle cx="182" cy="188" r="22" fill="#229ED9"/><path d="M171 188l22-9-6 20-7-7-5 4z" fill="#fff"/>
+    <text x="32" y="241" class="tiny">Never miss today’s priorities</text>
+  </g>
+
+  <!-- footer -->
+  <g transform="translate(42 935)">
+    <rect width="996" height="102" rx="27" fill="#091713" stroke="#29483F"/>
+    <g transform="translate(24 20)"><circle cx="30" cy="30" r="28" fill="#19E3A2" opacity=".13"/><path d="M18 31l8 8 17-19" fill="none" stroke="#19E3A2" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/><text x="72" y="25" class="white" font-size="15" font-weight="850">START FREE TODAY</text><text x="72" y="48" class="muted" font-size="12" font-weight="600">Plan. Focus. Progress.</text></g>
+    <path d="M300 22v58M596 22v58" stroke="#29483F"/>
+    <g transform="translate(333 21)"><circle cx="28" cy="29" r="27" fill="#47DFF4" opacity=".12"/><path d="M18 35l8-13 7 9 7-15" fill="none" stroke="#47DFF4" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><text x="68" y="24" class="white" font-size="15" font-weight="850">STUDY WITH CLARITY</text><text x="68" y="47" class="muted" font-size="12">One workspace. Zero chaos.</text></g>
+    <g transform="translate(626 18)"><rect x="0" y="0" width="338" height="66" rx="20" fill="url(#badge)"/><text x="169" y="28" fill="#062019" font-size="12" font-weight="850" text-anchor="middle" letter-spacing="1.8">READY TO LEVEL UP?</text><text x="169" y="51" fill="#FFFFFF" font-size="20" font-weight="900" text-anchor="middle">OPEN STUDYPLANNER  →</text></g>
+  </g>
+</svg>
