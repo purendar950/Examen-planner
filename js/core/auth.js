@@ -216,15 +216,52 @@ function loginUser(email, name, uid, state) {
 }
 
 async function handleLogout() {
-  await saveProgressNow(); // Final flush before logout
-  currentUser = null;
-  if (_snapshotUnsub) { _snapshotUnsub(); _snapshotUnsub = null; }
-
-  // Mark that we are intentionally logging out so onAuthStateChanged(!user)
-  // does not race with a new login attempt on the same page load.
+  if (window._ezLoggingOut) return;
   window._ezLoggingOut = true;
 
-  if (auth && _fbReady) await auth.signOut().catch(()=>{});
+  // Give immediate feedback instead of leaving the open dashboard looking
+  // interactive while the Firebase session is being revoked.
+  const overlay = document.getElementById('auth-loading');
+  if (overlay) {
+    overlay.innerHTML = '<div class="yt-loader" style="width:36px;height:36px;border-width:4px;"></div><p>Signing out...</p>';
+    overlay.style.display = 'flex';
+  }
+  const menu = document.getElementById('user-menu-dropdown');
+  if (menu) menu.classList.remove('open');
+
+  /* Persist the final state to the UID-keyed local cache synchronously, then
+     give Firestore a short acknowledgement window before revoking Firebase
+     credentials. If the network is slow/offline, the durable pending marker
+     replays this exact UID cache on the next login instead of hanging logout
+     or allowing an older cloud snapshot to overwrite the last edit. */
+  if (currentUser && currentUser.uid) {
+    const logoutUid = currentUser.uid;
+    try { clearTimeout(_saveDebounce); } catch (e) {}
+    try { localStorage.setItem('cache_' + logoutUid, JSON.stringify(appState)); } catch (e) {}
+    try { if (typeof _markPendingSync === 'function') _markPendingSync(logoutUid); } catch (e) {}
+    try {
+      const finalSave = Promise.resolve(saveProgressNow());
+      await Promise.race([
+        finalSave,
+        new Promise(function(resolve) { setTimeout(resolve, 1000); })
+      ]);
+    } catch (e) {}
+  }
+
+  // Redirecting before signOut completes can make the landing page see the
+  // old session and immediately send the user back here.
+  if (auth && _fbReady) {
+    try {
+      await auth.signOut();
+    } catch (e) {
+      window._ezLoggingOut = false;
+      if (overlay) overlay.style.display = 'none';
+      showToast('Could not sign out. Check your connection and try again.', 'error');
+      return;
+    }
+  }
+  if (_snapshotUnsub) { try { _snapshotUnsub(); } catch(e) {} _snapshotUnsub = null; }
+  currentUser = null;
 
   /* Clear the engine identity bridge so the next user on this device does not
      inherit the previous user's saved-questions / attempt tagging. */
@@ -240,10 +277,11 @@ async function handleLogout() {
   if (typeof EZ_PROFILE_STATUS !== 'undefined') EZ_PROFILE_STATUS = 'idle';
   if (typeof EZ_PROFILE_UID   !== 'undefined') EZ_PROFILE_UID   = null;
   if (typeof EZ_PENDING_PAY   !== 'undefined') EZ_PENDING_PAY   = null;
+  window._ezEntitlementPendingUid = null;
 
   clearInterval(countdownInterval);
-  // Redirect to landing page after logout
-  window.location.href = 'index.html';
+  // replace() prevents Back from reopening a stale authenticated dashboard.
+  window.location.replace('index.html?loggedOut=1');
 }
 
 /* ── PROFILE DROPDOWN ── */
@@ -563,9 +601,9 @@ if (auth && !_isBadProtocol) {
       return;
     }
 
-    // Establish the new account boundary before any network wait. This hides
-    // the previous account and immediately clears/restores UID-keyed
-    // entitlement so a slow switch cannot borrow the old user's Pro access.
+    // Establish the new account boundary before any network wait. Entitlement
+    // remains UID-keyed/fail-closed, but app data can now render from its own
+    // UID-keyed cache without waiting for a Firestore round trip.
     const accountOverlay = document.getElementById('auth-loading');
     if (accountOverlay) {
       accountOverlay.innerHTML = '<div class="yt-loader" style="width:36px;height:36px;border-width:4px;"></div><p>Loading your account...</p>';
@@ -573,103 +611,150 @@ if (auth && !_isBadProtocol) {
     }
     const appEl = document.getElementById('app');
     if (appEl) appEl.style.display = 'none';
+    window._ezEntitlementPendingUid = user.uid;
     try { if (typeof ezPrepareProfileForUser === 'function') ezPrepareProfileForUser(user.uid); } catch(e) {}
 
-    // Logged in — load Firestore data. Keep the app behind the loading overlay
-    // for a bounded interval so the normal path starts with authoritative
-    // entitlement, while a stalled connection can still enter with UID-keyed
-    // cached state and fail-closed gates.
     let name = user.displayName || user.email.split('@')[0];
+    let appStarted = false;
+    let liveServerSnapshotSeen = false;
     const isCurrentAuthEvent = function() {
       return authGeneration === _authSessionGeneration && auth.currentUser && auth.currentUser.uid === user.uid;
     };
     const readCachedState = function() {
       try {
         const mods = window.PrepPathModules;
-        return mods && typeof mods.createStorageService === 'function'
-          ? mods.createStorageService({ db, auth }).readCache(user.uid, getDefaultState())
-          : (function() {
-              const cached = localStorage.getItem('cache_' + user.uid);
-              return cached ? JSON.parse(cached) : getDefaultState();
-            })();
-      } catch(e) { return getDefaultState(); }
+        if (mods && typeof mods.createStorageService === 'function') {
+          return mods.createStorageService({ db, auth }).readCache(user.uid, null);
+        }
+        const cached = localStorage.getItem('cache_' + user.uid);
+        return cached ? JSON.parse(cached) : null;
+      } catch(e) { return null; }
     };
+    const writeCachedState = function(state) {
+      try {
+        const mods = window.PrepPathModules;
+        if (mods && typeof mods.createStorageService === 'function') {
+          mods.createStorageService({ db, auth }).writeCache(user.uid, state);
+        } else {
+          localStorage.setItem('cache_' + user.uid, JSON.stringify(state));
+        }
+      } catch(e) {}
+    };
+    const waitForAppScripts = async function() {
+      if (typeof initApp === 'function' && typeof ezSetProfileFromFirestoreSnapshot === 'function') return;
+      await new Promise(function(resolve) {
+        if (document.readyState === 'complete') { resolve(); return; }
+        document.addEventListener('DOMContentLoaded', resolve, { once: true });
+      });
+    };
+    const startApp = async function(state) {
+      if (appStarted || !isCurrentAuthEvent()) return false;
+      // auth.js is loaded before several functions used by initApp(). On a hot
+      // Firebase/cache restore the auth callback can win that race, so wait
+      // only for deferred scripts—not for the network—before rendering.
+      await waitForAppScripts();
+      if (appStarted || !isCurrentAuthEvent()) return false;
+      loginUser(user.email, name, user.uid, state || getDefaultState());
+      appStarted = true;
+      // A previous sign-out/offline close may have preserved newer local data
+      // that Firestore did not acknowledge. Replay it before accepting remote
+      // appState so an older cloud document cannot overwrite the UID cache.
+      if (typeof hasPendingSync === 'function' && hasPendingSync(user.uid)) {
+        if (typeof _localDirty !== 'undefined') _localDirty = true;
+        try { saveProgressNow(); } catch(e) {}
+      }
+      return true;
+    };
+    const updateRenderedName = function(nextName) {
+      if (!nextName) return;
+      name = nextName;
+      if (!appStarted || !currentUser || currentUser.uid !== user.uid) return;
+      currentUser.name = nextName;
+      const display = document.getElementById('user-name-display');
+      const avatar = document.getElementById('user-avatar-text');
+      if (display) display.textContent = nextName.split(' ')[0];
+      if (avatar) avatar.textContent = nextName.charAt(0).toUpperCase();
+    };
+    const reconcileRemoteState = function(remoteState) {
+      if (!remoteState || !appStarted || !isCurrentAuthEvent()) return;
+      // Never overwrite edits that have not yet reached Firestore.
+      if (typeof _localDirty !== 'undefined' && _localDirty) return;
+      const keepActivePage = appState && appState.activePage;
+      const hydrated = { ...getDefaultState(), ...remoteState };
+      if (typeof isValidPage === 'function' && isValidPage(keepActivePage)) {
+        hydrated.activePage = keepActivePage;
+      }
+      writeCachedState(hydrated);
+      if (JSON.stringify(appState) === JSON.stringify(hydrated)) return;
+      appState = hydrated;
+      if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
+      try { updateDashboard(); } catch(e) {}
+      try { buildSyllabus(); } catch(e) {}
+      try {
+        const anPg = document.getElementById('page-analysis');
+        if (typeof anRender === 'function' && anPg && anPg.classList.contains('active')) anRender();
+      } catch(e) {}
+      try {
+        if (typeof setSyncStatus === 'function') {
+          setSyncStatus('saved', '📱 Synced');
+          setTimeout(() => setSyncStatus('', ''), 3000);
+        }
+      } catch(e) {}
+    };
+    const applyInitialSnapshot = async function(snap) {
+      if (!snap || !isCurrentAuthEvent() || liveServerSnapshotSeen) return;
+      await waitForAppScripts();
+      if (!isCurrentAuthEvent() || liveServerSnapshotSeen) return;
+      const data = snap.exists ? snap.data() : {};
+      if (data.profile?.name) updateRenderedName(data.profile.name);
+      if (typeof ezSetProfileFromFirestoreSnapshot === 'function') {
+        ezSetProfileFromFirestoreSnapshot(user.uid, snap, 'initial');
+      } else if (typeof ezSetProfileSnapshot === 'function') {
+        ezSetProfileSnapshot(user.uid, data.profile || {}, snap.metadata?.fromCache ? 'cached' : 'ready');
+      }
+      const remoteState = { ...getDefaultState(), ...(data.appState || {}) };
+      if (!appStarted) {
+        writeCachedState(remoteState);
+        await startApp(remoteState);
+      } else {
+        reconcileRemoteState(data.appState);
+      }
+      try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+    };
+
+    const cachedState = readCachedState();
+    if (cachedState) {
+      // Repeat login/session restore: show the dashboard immediately from the
+      // matching user's cache. Firestore refresh continues in the background.
+      await startApp({ ...getDefaultState(), ...cachedState });
+    }
+
     const docResultPromise = db.collection('users').doc(user.uid).get()
       .then(function(snap) { return { snap: snap }; }, function(error) { return { error: error }; });
-    let initialTimer = null;
-    const firstResult = await Promise.race([
-      docResultPromise,
-      new Promise(function(resolve) {
-        initialTimer = setTimeout(function() { resolve({ timedOut: true }); }, 5000);
-      })
-    ]);
-    if (initialTimer) clearTimeout(initialTimer);
-    if (!isCurrentAuthEvent()) return;
 
-    let state = readCachedState();
-    if (firstResult.snap) {
-      const data = firstResult.snap.exists ? firstResult.snap.data() : {};
-      state = { ...getDefaultState(), ...(data.appState || {}) };
-      if (data.profile?.name) name = data.profile.name;
-      if (typeof ezSetProfileFromFirestoreSnapshot === 'function') {
-        ezSetProfileFromFirestoreSnapshot(user.uid, firstResult.snap);
-      } else if (typeof ezSetProfileSnapshot === 'function') {
-        ezSetProfileSnapshot(user.uid, data.profile || {}, firstResult.snap.metadata?.fromCache ? 'cached' : 'ready');
-      }
-    } else {
-      if (typeof EZ_PROFILE_STATUS !== 'undefined') EZ_PROFILE_STATUS = firstResult.timedOut ? 'loading' : 'error';
-      try { if (typeof ezRenderEntitlementSurfaces === 'function') ezRenderEntitlementSurfaces(); } catch(e) {}
-    }
-
-    loginUser(user.email, name, user.uid, state);
-    if (!firstResult.snap) {
-      showToast(firstResult.timedOut ? 'Slow connection — using cached data while reconnecting.' : 'Offline mode — using cached data 📦', 'info');
-    }
-
-    // If the bounded wait used cache, keep the original read alive. Its result
-    // upgrades entitlement immediately when connectivity recovers; the live
-    // listener below handles subsequent app-state synchronization.
-    if (firstResult.timedOut) {
-      docResultPromise.then(function(lateResult) {
-        if (!lateResult.snap || !isCurrentAuthEvent()) return;
-        const lateData = lateResult.snap.exists ? lateResult.snap.data() : {};
-        if (typeof ezSetProfileFromFirestoreSnapshot === 'function') {
-          ezSetProfileFromFirestoreSnapshot(user.uid, lateResult.snap);
-        } else if (typeof ezSetProfileSnapshot === 'function') {
-          ezSetProfileSnapshot(user.uid, lateData.profile || {}, lateResult.snap.metadata?.fromCache ? 'cached' : 'ready');
-        }
-        /* ── FIX (incognito / cold first load): hydrate the MAIN app data too.
-           In a private window there is no local cache and Firestore offline
-           persistence is unavailable, so the 5s bounded wait above falls back to
-           EMPTY default state. Previously the late authoritative read only
-           upgraded entitlement, leaving the user's study data blank until the
-           live listener happened to deliver it — which is exactly the "no data
-           in incognito" report. Reconcile appState here as well, using the same
-           guards as the live listener: never clobber unsaved local edits, keep
-           the current tab, and only re-render when the data actually differs. */
-        try {
-          const remoteState = lateData.appState;
-          if (remoteState && !_localDirty) {
-            const _keepActivePage = appState && appState.activePage;
-            const hydrated = { ...getDefaultState(), ...remoteState };
-            if (typeof isValidPage === 'function' && isValidPage(_keepActivePage)) {
-              hydrated.activePage = _keepActivePage;
-            }
-            if (JSON.stringify(appState) !== JSON.stringify(hydrated)) {
-              appState = hydrated;
-              if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
-              try { updateDashboard(); } catch(e) {}
-              try { buildSyllabus(); } catch(e) {}
-              try {
-                const anPg = document.getElementById('page-analysis');
-                if (typeof anRender === 'function' && anPg && anPg.classList.contains('active')) anRender();
-              } catch(e) {}
-              try { if (typeof setSyncStatus === 'function') { setSyncStatus('saved', '📱 Synced'); setTimeout(() => setSyncStatus('', ''), 3000); } } catch(e) {}
-            }
-          }
-        } catch(e) {}
-        try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+    if (appStarted) {
+      // Do not put the loading overlay back while refreshing cached data.
+      docResultPromise.then(function(result) {
+        if (result.snap) return applyInitialSnapshot(result.snap);
+        if (!isCurrentAuthEvent()) return;
+        if (typeof EZ_PROFILE_STATUS !== 'undefined') EZ_PROFILE_STATUS = 'error';
+        try { if (typeof ezRenderEntitlementSurfaces === 'function') ezRenderEntitlementSurfaces(); } catch(e) {}
       });
+    } else {
+      // First login/incognito has no trusted local state. Wait for the initial
+      // Firestore result before initApp can run rollover/auto-save; rendering
+      // defaults early could otherwise overwrite existing cloud progress.
+      const firstResult = await docResultPromise;
+      if (!isCurrentAuthEvent()) return;
+
+      if (firstResult.snap) {
+        await applyInitialSnapshot(firstResult.snap);
+      } else {
+        if (typeof EZ_PROFILE_STATUS !== 'undefined') EZ_PROFILE_STATUS = 'error';
+        try { if (typeof ezRenderEntitlementSurfaces === 'function') ezRenderEntitlementSurfaces(); } catch(e) {}
+        await startApp(getDefaultState());
+        showToast('Offline mode — using local data 📦', 'info');
+      }
     }
 
     // Real-time listener for multi-device sync
@@ -681,6 +766,7 @@ if (auth && !_isBadProtocol) {
         if (authGeneration !== _authSessionGeneration ||
             !auth.currentUser || auth.currentUser.uid !== user.uid ||
             !snap.exists || !currentUser || currentUser.uid !== user.uid || snap.metadata.hasPendingWrites) return;
+        if (!snap.metadata.fromCache) liveServerSnapshotSeen = true;
 
         // ── FIX: Refresh EZ_PROFILE on every snapshot so admin actions
         //    (suspend trial, plan change) take effect immediately without
@@ -699,7 +785,7 @@ if (auth && !_isBadProtocol) {
           const oldExpiry = EZ_PROFILE && EZ_PROFILE.planExpiry;
           const oldTrialExpiry = EZ_PROFILE && EZ_PROFILE.trialExpiry;
           if (typeof ezSetProfileFromFirestoreSnapshot === 'function') {
-            ezSetProfileFromFirestoreSnapshot(user.uid, snap);
+            ezSetProfileFromFirestoreSnapshot(user.uid, snap, 'live');
           } else if (typeof ezSetProfileSnapshot === 'function') {
             ezSetProfileSnapshot(user.uid, newProfile || {}, snap.metadata?.fromCache ? 'cached' : 'ready');
           } else {
