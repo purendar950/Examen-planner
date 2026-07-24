@@ -638,6 +638,36 @@ if (auth && !_isBadProtocol) {
         } else if (typeof ezSetProfileSnapshot === 'function') {
           ezSetProfileSnapshot(user.uid, lateData.profile || {}, lateResult.snap.metadata?.fromCache ? 'cached' : 'ready');
         }
+        /* ── FIX (incognito / cold first load): hydrate the MAIN app data too.
+           In a private window there is no local cache and Firestore offline
+           persistence is unavailable, so the 5s bounded wait above falls back to
+           EMPTY default state. Previously the late authoritative read only
+           upgraded entitlement, leaving the user's study data blank until the
+           live listener happened to deliver it — which is exactly the "no data
+           in incognito" report. Reconcile appState here as well, using the same
+           guards as the live listener: never clobber unsaved local edits, keep
+           the current tab, and only re-render when the data actually differs. */
+        try {
+          const remoteState = lateData.appState;
+          if (remoteState && !_localDirty) {
+            const _keepActivePage = appState && appState.activePage;
+            const hydrated = { ...getDefaultState(), ...remoteState };
+            if (typeof isValidPage === 'function' && isValidPage(_keepActivePage)) {
+              hydrated.activePage = _keepActivePage;
+            }
+            if (JSON.stringify(appState) !== JSON.stringify(hydrated)) {
+              appState = hydrated;
+              if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
+              try { updateDashboard(); } catch(e) {}
+              try { buildSyllabus(); } catch(e) {}
+              try {
+                const anPg = document.getElementById('page-analysis');
+                if (typeof anRender === 'function' && anPg && anPg.classList.contains('active')) anRender();
+              } catch(e) {}
+              try { if (typeof setSyncStatus === 'function') { setSyncStatus('saved', '📱 Synced'); setTimeout(() => setSyncStatus('', ''), 3000); } } catch(e) {}
+            }
+          }
+        } catch(e) {}
         try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
       });
     }
