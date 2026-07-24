@@ -941,8 +941,13 @@ _opencode_free_model_lock = threading.Lock()
 # `models` is None until provider discovery works. An empty list is distinct:
 # it means the configured OpenCode provider exists but currently exposes no
 # models we can safely offer.
-_opencode_server_model_cache = {"key": "", "checked_at": 0.0, "models": None}
+_opencode_server_model_cache = {
+    "key": "", "checked_at": 0.0, "models": None, "generation": 0,
+}
 _opencode_server_model_lock = threading.Lock()
+# Exposed only through /health. This fixed, non-sensitive marker lets operators
+# confirm that Render is serving the diagnostic-aware Study AI proxy revision.
+_OPENCODE_STUDY_PROTOCOL = "server-catalog-diagnostics-v1"
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
@@ -1473,6 +1478,10 @@ def _opencode_current_server_models(config):
                 and now - cached["checked_at"] < _OPENCODE_SERVER_MODEL_REFRESH_SEC):
             return None if cached["models"] is None else list(cached["models"])
         previous = cached["models"] if cached["key"] == cache_key else None
+        # Each concurrent discovery receives a monotonically increasing token.
+        # A slower request must not overwrite a newer authoritative result.
+        cached["generation"] = int(cached.get("generation") or 0) + 1
+        generation = cached["generation"]
 
     # Do not hold the shared cache lock across network I/O. A slow or down
     # OpenCode service must not serialize every status or generation setup.
@@ -1485,9 +1494,12 @@ def _opencode_current_server_models(config):
         discovered = _opencode_model_ids_from_provider_catalog(
             payload, config["provider_id"])
         if discovered is None:
+            # A successful endpoint response that does not identify the
+            # configured provider is authoritative: do not surface models that
+            # this OpenCode runtime cannot prove it can route.
             log.warning("OpenCode provider discovery did not include configured provider %s",
                         config["provider_id"])
-            models = None
+            models = []
         else:
             models = discovered
             log.info("OpenCode provider discovery found %d model(s) for %s",
@@ -1499,7 +1511,17 @@ def _opencode_current_server_models(config):
                     exc.upstream_status or "none", exc.stage or "unknown")
 
     with _opencode_server_model_lock:
-        _opencode_server_model_cache.update({
+        cached = _opencode_server_model_cache
+        if cached.get("generation") != generation:
+            # A newer request already refreshed this exact configuration. Use
+            # its result instead of letting a late failure restore stale models.
+            if cached["key"] == cache_key:
+                latest = cached["models"]
+                return None if latest is None else list(latest)
+            # Environment configuration changed while this request was in
+            # flight; never cache a result for the old target.
+            return None if models is None else list(models)
+        cached.update({
             "key": cache_key,
             "checked_at": time.time(),
             "models": models,
@@ -1549,10 +1571,12 @@ def _opencode_config():
     # what it can actually route for its configured account and project. The
     # latter is authoritative when the endpoint is available.
     server_model_ids = _opencode_current_server_models(base_config)
+    fallback_model_allowed = server_model_ids is None
     if server_model_ids is not None:
         server_models = set(server_model_ids)
+        fallback_model_allowed = fallback_model_id in server_models
         candidates = [model_id for model_id in candidates if model_id in server_models]
-        if not candidates and fallback_model_id in server_models:
+        if not candidates and fallback_model_allowed:
             candidates = [fallback_model_id]
         if not candidates:
             log.warning("OpenCode provider %s exposes none of the configured Zen/free fallback models",
@@ -1571,12 +1595,44 @@ def _opencode_config():
         "allowed_model_ids": candidates,
         "model_id": model_id,
         "fallback_model_id": fallback_model_id,
+        # Never retry a model that a successful runtime catalog omitted.
+        "fallback_model_allowed": fallback_model_allowed,
     }
+
+
+def _opencode_stage_label(stage):
+    """Return a fixed, client-safe label for an OpenCode API stage."""
+    labels = {
+        "provider model discovery": "checking the OpenCode model catalog",
+        "study session creation": "starting the Study AI session",
+        "study message creation": "starting Study AI generation",
+        "study message retrieval": "reading the Study AI response",
+        "message retrieval": "reading the Study AI response",
+        "message list": "reading the Study AI response",
+        "session creation": "starting the planning session",
+        "message creation": "starting the planning request",
+    }
+    return labels.get(stage, "contacting OpenCode")
+
+
+def _opencode_failure_detail(stage, status):
+    """Describe an upstream failure without exposing upstream response bodies."""
+    activity = _opencode_stage_label(stage)
+    if stage == "study message creation" and status in (400, 404, 422):
+        return "OpenCode rejected the selected model while starting Study AI (HTTP %s)." % status
+    if status in (401, 403):
+        return "OpenCode authentication was rejected while %s (HTTP %s)." % (activity, status)
+    if status == 429:
+        return "OpenCode is rate limited while %s. Please try again shortly (HTTP 429)." % activity
+    if 500 <= status < 600:
+        return "OpenCode failed while %s (HTTP %s). Please try again shortly." % (activity, status)
+    return "OpenCode rejected the request while %s (HTTP %s)." % (activity, status)
 
 
 def _opencode_json_request(method, url, config, stage, payload=None, expected_type=dict,
                            timeout=None):
     """Call OpenCode without returning or logging upstream body/credentials."""
+    activity = _opencode_stage_label(stage)
     try:
         response = requests.request(
             method,
@@ -1591,12 +1647,12 @@ def _opencode_json_request(method, url, config, stage, payload=None, expected_ty
     except requests.Timeout as exc:
         log.warning("OpenCode %s timed out (%s)", stage, type(exc).__name__)
         raise _OpenCodePlanError(
-            "opencode_timeout", "OpenCode did not respond before the request timed out.",
+            "opencode_timeout", "OpenCode did not respond while %s." % activity,
             stage=stage) from exc
     except requests.RequestException as exc:
         log.warning("OpenCode %s request failed (%s)", stage, type(exc).__name__)
         raise _OpenCodePlanError(
-            "opencode_unavailable", "OpenCode is temporarily unavailable.",
+            "opencode_unavailable", "OpenCode is temporarily unavailable while %s." % activity,
             stage=stage) from exc
 
     if not 200 <= response.status_code < 300:
@@ -1605,25 +1661,20 @@ def _opencode_json_request(method, url, config, stage, payload=None, expected_ty
         log.warning("OpenCode %s returned HTTP %s (provider=%s, model=%s)",
                     stage, response.status_code, config.get("provider_id", ""),
                     config.get("model_id", ""))
-        detail = "OpenCode could not complete the planning request."
-        if (stage == "study message creation"
-                and response.status_code in (400, 404, 422)):
-            detail = ("OpenCode rejected the selected model while starting Study AI "
-                      "(HTTP %s)." % response.status_code)
         raise _OpenCodePlanError(
-            "opencode_upstream_error", detail, upstream_status=response.status_code,
-            stage=stage)
+            "opencode_upstream_error", _opencode_failure_detail(stage, response.status_code),
+            upstream_status=response.status_code, stage=stage)
     try:
         data = response.json()
     except ValueError as exc:
         log.warning("OpenCode %s returned a non-JSON response", stage)
         raise _OpenCodePlanError(
-            "opencode_upstream_error", "OpenCode returned an invalid response.",
+            "opencode_upstream_error", "OpenCode returned an invalid response while %s." % activity,
             stage=stage) from exc
     if not isinstance(data, expected_type):
         log.warning("OpenCode %s returned an unexpected JSON response", stage)
         raise _OpenCodePlanError(
-            "opencode_upstream_error", "OpenCode returned an invalid response.",
+            "opencode_upstream_error", "OpenCode returned an invalid response while %s." % activity,
             stage=stage)
     return data
 
@@ -1716,13 +1767,14 @@ def _opencode_send_study_message(session_id, messages, config, json_mode=False,
     )
 
 
-def _opencode_assistant_text(session_id, message_id, config):
+def _opencode_assistant_text(session_id, message_id, config, study=False):
     """Read assistant text from old single-message or current list endpoints."""
     session_path = "%s/session/%s/message" % (config["server_url"], quote(session_id, safe=""))
+    stage = "study message retrieval" if study else "message retrieval"
     try:
         single = _opencode_json_request(
             "GET", session_path + "/" + quote(message_id, safe=""), config,
-            "message retrieval", expected_type=dict)
+            stage, expected_type=dict)
         answer = _opencode_text_parts(single.get("parts"))
         if answer:
             return answer
@@ -1746,7 +1798,10 @@ def _opencode_assistant_text(session_id, message_id, config):
         if answer:
             return answer
     raise _OpenCodePlanError(
-        "opencode_empty_response", "OpenCode returned an empty planning response.")
+        "opencode_empty_response",
+        "OpenCode returned an empty Study AI response." if study
+        else "OpenCode returned an empty planning response.",
+        stage=stage)
 
 
 def _opencode_abort_session(session_id, config):
@@ -1901,7 +1956,7 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
         if cancel_event is not None and cancel_event.is_set():
             return ""
 
-        answer = _opencode_assistant_text(session_id, message_id, config)
+        answer = _opencode_assistant_text(session_id, message_id, config, study=True)
         if cancel_event is not None and cancel_event.is_set():
             return ""
         if not answer:
@@ -1917,7 +1972,8 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
             _opencode_cleanup_session(session_id, config)
 
     fallback_model_id = str(config.get("fallback_model_id") or "").strip()
-    if (allow_model_fallback and fallback_model_id
+    if (allow_model_fallback and config.get("fallback_model_allowed", True)
+            and fallback_model_id
             and fallback_model_id != config.get("model_id")
             and failure.stage == "study message creation"
             and failure.upstream_status in (400, 404, 422)):
@@ -2916,6 +2972,8 @@ def health():
         "cached_transcripts": len(_transcript_cache),
         "persistent_cache": bool(_fb_db),   # Firestore-backed (survives restarts)
         "object_storage": _s3_enabled(),    # study bodies on Backblaze B2 / R2
+        # Non-sensitive marker for verifying the deployed OpenCode Study code.
+        "opencode_study_protocol": _OPENCODE_STUDY_PROTOCOL,
     })
 
 
