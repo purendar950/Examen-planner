@@ -39,6 +39,14 @@
   var turboEnabled = localStorage.getItem('turboEnabled') === '1';
   var turboVideoEl = null;      // the native <video>
   var turboActiveNow = false;   // true while a video is actually playing via Turbo
+  var turboInlineHome = null;   // original player-wrap position while docked in Notes Focus
+  var turboInlineContainer = null;
+  var turboPipBlocked = false;  // runtime rejection: offer in-app mini-player instead
+  var turboLoadSeq = 0;         // identity guard for overlapping async loads
+  var turboLoadController = null;
+  var turboPendingLoad = null;  // {seq,id,resume,iframe,fallback}
+  var turboPhase = turboEnabled ? 'idle' : 'off'; // off | idle | loading | ready | unavailable
+  var turboFailure = '';
   var turboVid = null;          // current video id playing in Turbo
   var turboVidTitle = '';       // current video title (from /api/info) for saved moments
   var lastSave = 0;
@@ -63,6 +71,72 @@
   function turboActive() {
     return turboActiveNow && turboVideoEl && turboVideoEl.style.display !== 'none';
   }
+
+  /* Public lifecycle snapshot used by Notes Focus Mode. Keeping this read-only
+     avoids coupling the notes UI to Turbo's private DOM or asynchronous fetch
+     details. Every meaningful transition emits examzen:turbo-state. */
+  function turboPipSupported() {
+    return !!(!turboPipBlocked && turboVideoEl && typeof turboVideoEl.requestPictureInPicture === 'function' &&
+      document.pictureInPictureEnabled !== false);
+  }
+  function turboState() {
+    return {
+      enabled: !!turboEnabled,
+      active: !!turboActive(),
+      phase: turboPhase,
+      failure: turboFailure,
+      videoId: turboVid || '',
+      singleVideo: !!currentSingleVideoId(),
+      pipSupported: turboPipSupported(),
+      pipActive: !!(turboVideoEl && document.pictureInPictureElement === turboVideoEl),
+      inlineActive: !!(turboInlineContainer && turboVideoEl && turboVideoEl.parentNode === turboInlineContainer),
+      pro: !!isPro()
+    };
+  }
+  function emitTurboState() {
+    var detail = turboState();
+    try {
+      window.dispatchEvent(new CustomEvent('examzen:turbo-state', { detail: detail }));
+    } catch (e) {
+      try {
+        var event = document.createEvent('CustomEvent');
+        event.initCustomEvent('examzen:turbo-state', false, false, detail);
+        window.dispatchEvent(event);
+      } catch (ignored) {}
+    }
+  }
+  window.ytTurboGetState = turboState;
+
+  function restoreTurboInline(emit) {
+    if (!turboVideoEl || !turboInlineContainer) return false;
+    var home = turboInlineHome;
+    turboInlineContainer = null;
+    turboInlineHome = null;
+    turboVideoEl.classList.remove('yt-turbo-inline');
+    if (home && home.parent && home.parent.isConnected) {
+      if (home.next && home.next.parentNode === home.parent) home.parent.insertBefore(turboVideoEl, home.next);
+      else home.parent.appendChild(turboVideoEl);
+    }
+    if (emit !== false) emitTurboState();
+    return true;
+  }
+
+  /* In browsers/WebViews without native PiP, Focus Mode can dock the SAME
+     playing video element above the notes. Reparenting (rather than cloning)
+     preserves currentTime, playbackRate, progress and Follow synchronization. */
+  window.ytTurboMountInline = function (container) {
+    if (!container || !turboActive() || turboPhase !== 'ready') return false;
+    if (turboInlineContainer === container && turboVideoEl.parentNode === container) return true;
+    restoreTurboInline(false);
+    turboInlineHome = { parent: turboVideoEl.parentNode, next: turboVideoEl.nextSibling };
+    turboInlineContainer = container;
+    container.appendChild(turboVideoEl);
+    turboVideoEl.classList.add('yt-turbo-inline');
+    turboVideoEl.style.display = 'block';
+    emitTurboState();
+    return true;
+  };
+  window.ytTurboRestoreInline = function () { return restoreTurboInline(true); };
 
   /* ── one-time styles ── */
   (function injectCss() {
@@ -115,20 +189,6 @@
     }
 
     // progress + resume + auto-mark (mirrors the iframe player's behaviour)
-    v.addEventListener('loadedmetadata', function () {
-      try {
-        var s = (typeof ytResumeSeconds === 'function') ? ytResumeSeconds(turboVid) : 0;
-        if (s > 0) v.currentTime = s;
-      } catch (e) {}
-      // Re-assert the chosen speed — the browser resets playbackRate to
-      // defaultPlaybackRate on every new stream load, which otherwise makes
-      // Turbo play at 1x even though a higher speed was selected.
-      try {
-        var r = (typeof ytSpeedCurrent === 'number' && ytSpeedCurrent > 0) ? ytSpeedCurrent : 1;
-        v.defaultPlaybackRate = r;
-        v.playbackRate = r;
-      } catch (e) {}
-    });
     v.addEventListener('timeupdate', function () {
       var now = Date.now();
       // Accumulate REAL elapsed watch time (wall-clock) between timeupdate
@@ -171,6 +231,7 @@
       // (which the youtube.js guard re-pauses) — leaving the PiP video stuck
       // paused. Routing these actions to the native video lets it resume.
       setPipMediaSession(true);
+      emitTurboState();
     });
     v.addEventListener('leavepictureinpicture', function () {
       showBadge(false);
@@ -178,8 +239,46 @@
       // Release the media-session handlers so normal playback controls behave
       // as before once we're out of PiP.
       setPipMediaSession(false);
+      emitTurboState();
     });
     return v;
+  }
+
+  /* A fresh media element is created for every asynchronous Turbo load. These
+     playback listeners are deliberately separate from load-completion events:
+     a candidate cannot affect global state until its own immutable closure wins
+     the sequence guard and promotes it to turboVideoEl. */
+  function bindTurboRuntimeEvents(v) {
+    v.addEventListener('timeupdate', function () {
+      var now = Date.now();
+      if (!v.paused && turboWatchLastTs) {
+        var d = (now - turboWatchLastTs) / 1000;
+        if (d > 0 && d <= 5) turboWatchAccum += d;
+      }
+      turboWatchLastTs = now;
+      if (now - lastSave > 10000) { lastSave = now; saveTurboProgress(); flushTurboWatchTime(); }
+      try {
+        if (v.duration && v.duration > 0) {
+          var pct = Math.round(v.currentTime / v.duration * 100);
+          if (typeof ytUpdateVideoWatchLabel === 'function' && turboVid) ytUpdateVideoWatchLabel(turboVid, pct);
+          if (pct >= 90 && typeof ytAutoMarkOnComplete === 'function') ytAutoMarkOnComplete();
+        }
+      } catch (e) {}
+    });
+    v.addEventListener('pause', function () { saveTurboProgress(); turboWatchLastTs = 0; flushTurboWatchTime(); });
+    v.addEventListener('enterpictureinpicture', function () {
+      showBadge(true);
+      window.ytPipBlockMain = true;
+      try { if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo(); } catch (e) {}
+      setPipMediaSession(true);
+      emitTurboState();
+    });
+    v.addEventListener('leavepictureinpicture', function () {
+      showBadge(false);
+      window.ytPipBlockMain = false;
+      setPipMediaSession(false);
+      emitTurboState();
+    });
   }
 
   function showBadge(on) {
@@ -235,69 +334,212 @@
     } catch (e) {}
   }
 
-  /* Hide Turbo video, restore the iframe surface. */
-  function deactivateTurbo() {
+  /* Hide Turbo video, cancel any preparation, restore the iframe surface. */
+  function deactivateTurbo(nextPhase, failure) {
+    turboLoadSeq += 1;                // invalidate every pending callback/event
+    if (turboLoadController) {
+      try { turboLoadController.abort(); } catch (e) {}
+    }
+    if (turboPendingLoad) {
+      clearTimeout(turboPendingLoad.mediaTimer);
+      var pendingCandidate = turboPendingLoad.candidate;
+      if (pendingCandidate && pendingCandidate !== turboVideoEl) {
+        pendingCandidate.removeAttribute('src');
+        try { pendingCandidate.load(); } catch (e) {}
+        if (pendingCandidate.parentNode) pendingCandidate.parentNode.removeChild(pendingCandidate);
+      }
+    }
+    turboLoadController = null;
+    turboPendingLoad = null;
+    restoreTurboInline(false);
     turboActiveNow = false;
+    turboPhase = nextPhase || (turboEnabled ? 'idle' : 'off');
+    turboFailure = failure || '';
     showBadge(false);
     status(null);
     if (turboVideoEl) {
       try { turboVideoEl.pause(); } catch (e) {}
       turboVideoEl.removeAttribute('src');
+      delete turboVideoEl.dataset.turboLoadSeq;
       try { turboVideoEl.load(); } catch (e) {}
       turboVideoEl.style.display = 'none';
     }
+    emitTurboState();
   }
 
-  /* ── core: play a video through the backend, fall back on any failure ── */
+  function turboResumePoint(id) {
+    // Switching the SAME currently-playing video to Turbo must preserve the
+    // exact live position, not a progress snapshot last saved up to 10s ago.
+    try {
+      if (turboActive() && turboVid === id && turboVideoEl) return turboVideoEl.currentTime || 0;
+    } catch (e) {}
+    try {
+      var currentId = (typeof ytCurrentVideoId !== 'undefined') ? String(ytCurrentVideoId || '') : '';
+      if (currentId === id && typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getCurrentTime) {
+        return ytPlayer.getCurrentTime() || 0;
+      }
+    } catch (e) {}
+    try { return (typeof ytResumeSeconds === 'function') ? (ytResumeSeconds(id) || 0) : 0; }
+    catch (e) { return 0; }
+  }
+
+  function failTurboLoad(seq, reason) {
+    var pending = turboPendingLoad;
+    if (!pending || pending.seq !== seq || seq !== turboLoadSeq) return;
+    clearTimeout(pending.mediaTimer);
+    var id = pending.id;
+    var resume = pending.resume;
+    var iframeEl = pending.iframe;
+    var fallback = pending.fallback;
+    var candidate = pending.candidate;
+    if (candidate && candidate !== turboVideoEl) {
+      try { candidate.pause(); } catch (e) {}
+      candidate.removeAttribute('src');
+      try { candidate.load(); } catch (e) {}
+      if (candidate.parentNode) candidate.parentNode.removeChild(candidate);
+    }
+    turboPendingLoad = null;
+    turboLoadController = null;
+    deactivateTurbo('unavailable', reason || 'stream-unavailable');
+    if (iframeEl) iframeEl.style.display = 'block';
+    if (typeof showToast === 'function') {
+      showToast('⚡ Turbo is video ke liye available nahi — normal player use kar rahe hain.', 'info');
+    }
+    var resumedExistingIframe = false;
+    try {
+      var data = (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getVideoData) ? ytPlayer.getVideoData() : null;
+      if (data && data.video_id === id) {
+        if (ytPlayer.seekTo) ytPlayer.seekTo(resume, true);
+        if (ytPlayer.playVideo) ytPlayer.playVideo();
+        resumedExistingIframe = true;
+      }
+    } catch (e) {}
+    if (!resumedExistingIframe && typeof fallback === 'function') fallback();
+  }
+
+  /* ── core: prepare a video through the backend, then atomically activate it ── */
   function turboLoad(id, fallback) {
     var v = ensureVideoEl();
     if (!v) { fallback(); return; }
 
-    // Pause the iframe player so we never get double audio.
+    var resume = turboResumePoint(id);
+    var seq = ++turboLoadSeq;
+    if (turboLoadController) {
+      try { turboLoadController.abort(); } catch (e) {}
+    }
+    if (turboPendingLoad) {
+      clearTimeout(turboPendingLoad.mediaTimer);
+      var oldCandidate = turboPendingLoad.candidate;
+      if (oldCandidate && oldCandidate !== v) {
+        oldCandidate.removeAttribute('src');
+        try { oldCandidate.load(); } catch (e) {}
+        if (oldCandidate.parentNode) oldCandidate.parentNode.removeChild(oldCandidate);
+      }
+    }
+    restoreTurboInline(false);
+    try { v.pause(); } catch (e) {}
+    v.removeAttribute('src');
+    try { v.load(); } catch (e) {}
+    v.style.display = 'none';
+
+    // Pause—but keep—the iframe as the active timestamp source during proxy
+    // wake-up. Focus/Follow therefore hold the exact current cue until Turbo is
+    // genuinely ready, rather than jumping to the native element's 0:00.
     try { if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.pauseVideo) ytPlayer.pauseVideo(); } catch (e) {}
 
     turboVid = id;
-    turboActiveNow = true;
+    turboActiveNow = false;
+    turboPipBlocked = false;
+    turboPhase = 'loading';
+    turboFailure = '';
     var ph = document.getElementById('yt-placeholder');
     if (ph) ph.style.display = 'none';
     var iframeEl = document.getElementById('yt-player');
-    if (iframeEl) iframeEl.style.display = 'none';
-    v.style.display = 'block';
-    showBadge(true);
+    if (iframeEl) iframeEl.style.display = 'block';
+    showBadge(false);
     status('⚡ Turbo: fetching stream… (first load can take ~30–60s if the server was asleep)');
 
     var ctrl = new AbortController();
-    var timer = setTimeout(function () { ctrl.abort(); }, 95000);
+    turboLoadController = ctrl;
+    turboPendingLoad = { seq: seq, id: id, resume: resume, iframe: iframeEl, fallback: fallback };
+    emitTurboState();
+    var timer = setTimeout(function () { if (seq === turboLoadSeq) ctrl.abort(); }, 95000);
 
     fetch(TURBO_BACKEND_URL + '/api/info?id=' + encodeURIComponent(id), { signal: ctrl.signal })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         clearTimeout(timer);
+        if (seq !== turboLoadSeq || !turboPendingLoad || turboPendingLoad.seq !== seq) return;
         if (!res.ok || !res.d || !res.d.formats || !res.d.formats.length) {
           throw new Error((res.d && (res.d.detail || res.d.error)) || 'no stream');
         }
         turboVidTitle = (res.d && res.d.title) || turboVidTitle;
         var f = res.d.formats[0];              // highest single-file quality
         var current = (typeof ytSpeedCurrent !== 'undefined') ? ytSpeedCurrent : 1;
-        v.src = TURBO_BACKEND_URL + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
+        var streamUrl = TURBO_BACKEND_URL + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
+        // Each asynchronous load owns a fresh media element. Event closures now
+        // carry immutable seq/id/source identity, so an old queued media event
+        // cannot observe mutable state from—and corrupt—a newer request.
+        var candidate = v.cloneNode(false);
+        candidate.removeAttribute('src');
+        candidate.dataset.turboLoadSeq = String(seq);
+        candidate.style.display = 'none';
+        bindTurboRuntimeEvents(candidate);
+        turboPendingLoad.src = streamUrl;
+        turboPendingLoad.candidate = candidate;
+        candidate.addEventListener('loadedmetadata', function () {
+          var pending = turboPendingLoad;
+          if (!pending || pending.candidate !== candidate || pending.seq !== seq ||
+              seq !== turboLoadSeq || pending.id !== id || pending.src !== streamUrl) return;
+          try { if (pending.resume > 0) candidate.currentTime = pending.resume; } catch (e) {}
+          candidate.defaultPlaybackRate = current || 1;
+          candidate.playbackRate = current || 1;
+          var oldVideo = turboVideoEl;
+          try { if (oldVideo) oldVideo.pause(); } catch (e) {}
+          if (oldVideo && oldVideo.parentNode) oldVideo.parentNode.removeChild(oldVideo);
+          var wrap = document.getElementById('yt-player-wrap');
+          var anchor = document.getElementById('yt-turbo-badge') || document.getElementById('yt-turbo-status');
+          if (!wrap) { failTurboLoad(seq, 'player-unavailable'); return; }
+          if (anchor && anchor.parentNode === wrap) wrap.insertBefore(candidate, anchor);
+          else wrap.appendChild(candidate);
+          turboVideoEl = candidate;
+          turboActiveNow = true;
+          turboPhase = 'ready';
+          turboFailure = '';
+          if (pending.iframe) pending.iframe.style.display = 'none';
+          candidate.style.display = 'block';
+          status(null);
+          clearTimeout(pending.mediaTimer);
+          turboPendingLoad = null;
+          turboLoadController = null;
+          var play = candidate.play();
+          if (play && play.catch) play.catch(function () {});
+          emitTurboState();
+        }, { once: true });
+        candidate.addEventListener('error', function () {
+          var pending = turboPendingLoad;
+          if (pending && pending.candidate === candidate && pending.seq === seq && seq === turboLoadSeq) {
+            failTurboLoad(seq, 'stream-error');
+          }
+        }, { once: true });
+        candidate.src = streamUrl;
         // Set BOTH rates: on a fresh stream the browser resets playbackRate to
         // defaultPlaybackRate, so without setting defaultPlaybackRate too, Turbo
         // reverts to 1x (the "still slow after changing speed" bug).
-        v.defaultPlaybackRate = current || 1;
-        v.playbackRate = current || 1;
-        status(null);
-        var p = v.play();
-        if (p && p.catch) p.catch(function () {});
+        candidate.defaultPlaybackRate = current || 1;
+        candidate.playbackRate = current || 1;
+        status('⚡ Turbo: stream found — preparing video…');
+        turboPendingLoad.mediaTimer = setTimeout(function () {
+          failTurboLoad(seq, 'stream-timeout');
+        }, 45000);
+        candidate.load();
       })
       .catch(function (err) {
         clearTimeout(timer);
-        // Silent, graceful fallback to the original iframe player.
-        deactivateTurbo();
-        if (iframeEl) iframeEl.style.display = 'block';
-        if (typeof showToast === 'function') {
-          showToast('⚡ Turbo is video ke liye available nahi — normal player use kar rahe hain.', 'info');
-        }
-        fallback();
+        // A superseded request is expected to abort; it must never deactivate
+        // or fall back over a newer successful load.
+        if (seq !== turboLoadSeq || !turboPendingLoad || turboPendingLoad.seq !== seq) return;
+        failTurboLoad(seq, err && err.name === 'AbortError' ? 'timeout' : 'stream-unavailable');
       });
   }
 
@@ -349,16 +591,11 @@
     var _origYtPiP = ytPiP;
     ytPiP = function () {
       if (turboActive()) {
-        try {
-          if (document.pictureInPictureElement) { document.exitPictureInPicture(); return; }
-          if (turboVideoEl.paused) turboVideoEl.play();
-          turboVideoEl.requestPictureInPicture();
-        } catch (e) {
-          if (typeof showToast === 'function') showToast('PiP is browser mein supported nahi.', 'error');
-        }
-      } else {
-        _origYtPiP();
+        return window.ytTurboOpenPiP().catch(function () {
+          if (typeof showToast === 'function') showToast('PiP is not supported here. Try Chrome or Edge on desktop.', 'error');
+        });
       }
+      return _origYtPiP();
     };
   }
 
@@ -529,9 +766,12 @@
       return;
     }
     turboEnabled = !turboEnabled;
+    turboPhase = turboEnabled ? 'idle' : 'off';
+    turboFailure = '';
     localStorage.setItem('turboEnabled', turboEnabled ? '1' : '0');
     updateToggleUI();
     applySpeedVisibility();
+    emitTurboState();
     if (typeof showToast === 'function') {
       showToast(turboEnabled ? '⚡ Turbo ON — up to 4x speed + PiP' : 'Turbo OFF — normal player', turboEnabled ? 'success' : 'info');
     }
@@ -546,6 +786,96 @@
     }
   }
   window.ytToggleTurbo = ytToggleTurbo;
+
+  function currentSingleVideoId() {
+    var cur = '';
+    try { if (typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) cur = String(ytCurrentVideoId); } catch (e) {}
+    // Keep the existing product contract: a loaded playlist stays on the
+    // original YouTube player. Switching it to a detached native stream would
+    // break queue progression and auto-next semantics.
+    if (cur.indexOf('playlist_') === 0) return '';
+    if (!cur) {
+      try {
+        if (typeof ssGetCurrentContext === 'function') {
+          var context = ssGetCurrentContext();
+          if (context && context.videoId) cur = String(context.videoId);
+        }
+      } catch (e) {}
+    }
+    cur = cur.replace('playlist_', '');
+    return /^[A-Za-z0-9_-]{11}$/.test(cur) ? cur : '';
+  }
+
+  /* One-way preparation action for Notes Focus Mode. Unlike ytToggleTurbo this
+     can never turn Turbo off by accident. It begins the potentially slow proxy
+     wake-up and returns immediately; callers observe examzen:turbo-state and
+     expose a separate Open PiP click once loadedmetadata marks the video ready. */
+  window.ytTurboStart = function () {
+    if (!isPro()) {
+      turboPhase = 'unavailable';
+      turboFailure = 'pro-required';
+      emitTurboState();
+      if (typeof ezLockedMsg === 'function') ezLockedMsg('⚡ Turbo Player (4x speed + Picture-in-Picture)');
+      return false;
+    }
+    var cur = currentSingleVideoId();
+    if (!cur) {
+      var playlistLoaded = false;
+      try { playlistLoaded = typeof ytCurrentVideoId !== 'undefined' && String(ytCurrentVideoId || '').indexOf('playlist_') === 0; } catch (e) {}
+      turboPhase = 'unavailable';
+      turboFailure = playlistLoaded ? 'playlist' : 'no-video';
+      emitTurboState();
+      if (typeof showToast === 'function') {
+        showToast(playlistLoaded ? 'Turbo supports individual videos only. Regular playlist playback is unchanged.'
+                                 : 'Play an individual video before starting Turbo.', 'info');
+      }
+      return false;
+    }
+    if (turboActive() && turboPhase === 'ready' && turboVid === cur) {
+      emitTurboState();
+      return true;
+    }
+    turboEnabled = true;
+    turboPhase = 'loading';
+    turboFailure = '';
+    localStorage.setItem('turboEnabled', '1');
+    updateToggleUI();
+    applySpeedVisibility();
+    emitTurboState();
+    if (typeof ytDoLoad === 'function') ytDoLoad('video', cur);
+    return true;
+  };
+
+  /* Promise-returning native PiP action. It must be called directly from the
+     student's SECOND click after Turbo is ready; automatically entering PiP at
+     the end of a fetch would lose browser user activation and be rejected. */
+  window.ytTurboOpenPiP = function () {
+    if (!turboActive() || turboPhase !== 'ready') {
+      return Promise.reject(new Error('turbo-not-ready'));
+    }
+    if (!turboPipSupported()) return Promise.reject(new Error('pip-unsupported'));
+    try {
+      if (document.pictureInPictureElement === turboVideoEl) {
+        return Promise.resolve(document.exitPictureInPicture());
+      }
+      if (turboVideoEl.paused) {
+        var play = turboVideoEl.play();
+        if (play && play.catch) play.catch(function () {});
+      }
+      return Promise.resolve(turboVideoEl.requestPictureInPicture()).catch(function (err) {
+        // Some WebViews expose the method but reject every request. Remember
+        // that runtime result so Focus Mode immediately offers its inline mini
+        // player instead of trapping the student in a failing retry loop.
+        turboPipBlocked = true;
+        emitTurboState();
+        throw err;
+      });
+    } catch (e) {
+      turboPipBlocked = true;
+      emitTurboState();
+      return Promise.reject(e);
+    }
+  };
 
   /* ── Expose Turbo playback state to other modules ──
      Save Moment (yt-screenshots.js) must read the ACTUAL playback time from the
@@ -647,6 +977,7 @@
     ensureVideoEl();
     updateToggleUI();
     applySpeedVisibility();
+    emitTurboState();
   }
 
   // Init when the YouTube page opens (markup is injected via include-loader).

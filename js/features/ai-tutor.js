@@ -937,11 +937,30 @@
     var on = lecOn() && !na;
     btn.classList.toggle('ai-follow-on', on);
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    btn.textContent = on ? '🎯 Following' : '🎯 Follow';
-    btn.style.opacity = na ? '0.55' : '';
-    btn.title = na ? 'These notes have no timestamps, so there is nothing to follow'
+    btn.disabled = na;
+    btn.textContent = na ? '🎯 Follow unavailable' : (on ? '🎯 Following' : '🎯 Follow');
+    btn.title = na ? 'These notes have no timestamps. Regenerate timestamped notes to use Follow.'
                    : (on ? 'Following the lecture — tap to pause'
                          : 'Auto-highlight and scroll notes to the lecture');
+  }
+  function lecPaintButtons(box) {
+    var scope = box || document;
+    Array.prototype.forEach.call(scope.querySelectorAll('#ai-follow, [data-ai-follow-control]'), lecPaintBtn);
+  }
+  function lecToggle() {
+    if (!_lecTsCount) {
+      if (typeof showToast === 'function') showToast('Follow unavailable — regenerate notes with timestamps.', 'info');
+      return;
+    }
+    setLecOn(!lecOn());
+    lecPaintButtons(document);
+    if (lecOn()) { _lecUserScrollUntil = 0; lecTick(); } else lecClear();
+  }
+  function lecBindButton(btn) {
+    if (!btn || btn.dataset.followBound === '1') return;
+    btn.dataset.followBound = '1';
+    btn.onclick = lecToggle;
+    lecPaintBtn(btn);
   }
   // Wire the freshly-rendered notes into the follow engine.
   function lecSetup(box) {
@@ -954,18 +973,11 @@
     ['wheel', 'touchmove', 'touchstart', 'pointerdown', 'keydown'].forEach(function (ev) {
       _lecScroller.addEventListener(ev, lecManualPause, { passive: true });
     });
-    var btn = document.getElementById('ai-follow');
-    if (btn) {
-      lecPaintBtn(btn);
-      btn.onclick = function () {
-        if (!_lecTsCount) {                        // nothing to follow in these notes
-          if (typeof showToast === 'function') showToast('These notes have no timestamps to follow');
-          return;
-        }
-        setLecOn(!lecOn()); lecPaintBtn(btn);
-        if (lecOn()) { _lecUserScrollUntil = 0; lecTick(); } else lecClear();
-      };
-    }
+    Array.prototype.forEach.call(box.querySelectorAll('#ai-follow, [data-ai-follow-control]'), lecBindButton);
+    // The standard Follow button is relocated outside #ai-sub after rendering,
+    // so bind it explicitly as well. Both controls always paint from one source
+    // of truth and never run separate timers.
+    lecBindButton(document.getElementById('ai-follow'));
     if (!_lecTimer) _lecTimer = setInterval(lecTick, LEC_POLL_MS);   // single shared poller (fast + cheap: early-returns when off)
     if (lecOn()) setTimeout(lecTick, 120);
   }
@@ -1032,6 +1044,356 @@
     meta.classList.toggle('ai-meta-bar-bare', !meta.querySelector('.ai-btn'));
   }
 
+  /* ── Notes Focus Mode ────────────────────────────────────────────────────
+     This is deliberately an app-level full-viewport layer rather than the
+     browser Fullscreen API. Native fullscreen and Picture-in-Picture compete
+     on several browsers; a fixed layer keeps PiP available while giving us
+     deterministic Escape/Back, focus, scroll and safe-area behaviour. The
+     ORIGINAL note DOM moves visually but is never cloned, so timestamp links
+     and the Follow engine keep their existing references. */
+  var _notesFocus = null;
+  var _notesFocusReturn = null;       // lets browser Forward restore the modal entry
+  var _notesFocusToken = 0;
+
+  function notesFocusToolbarHtml() {
+    return '<div class="ai-focus-toolbar" role="toolbar" aria-label="Notes Focus Mode controls">' +
+      '<div class="ai-focus-heading">' +
+        '<button type="button" class="ai-focus-control ai-focus-close" id="ai-focus-close" aria-label="Exit Notes Focus Mode" title="Exit Focus Mode (Esc)">←</button>' +
+        '<span class="ai-focus-title"><strong>Notes Focus</strong><small id="ai-focus-video-title">' + esc(curTitle()) + '</small></span>' +
+      '</div>' +
+      '<div class="ai-focus-actions">' +
+        '<span class="ai-focus-time" id="ai-focus-time" aria-label="Current video time">0:00</span>' +
+        '<button type="button" class="ai-focus-control ai-focus-video" id="ai-focus-video" data-action="start" aria-live="polite">⚡ Start Turbo</button>' +
+        '<button type="button" class="ai-focus-control" id="ai-focus-follow" data-ai-follow-control aria-pressed="false">🎯 Follow</button>' +
+        '<button type="button" class="ai-focus-control" id="ai-focus-pdf" title="Print or save notes as PDF">📄 PDF</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="ai-focus-mini-video" id="ai-focus-mini-video" hidden>' +
+      '<button type="button" class="ai-focus-mini-close" id="ai-focus-mini-close" aria-label="Hide floating video" title="Hide floating video">×</button>' +
+    '</div>';
+  }
+
+  function notesFocusTimeLabel(seconds) {
+    seconds = Math.max(0, Math.floor(Number(seconds) || 0));
+    var h = Math.floor(seconds / 3600);
+    var m = Math.floor((seconds % 3600) / 60);
+    var s = seconds % 60;
+    var pad = function (n) { return n < 10 ? '0' + n : String(n); };
+    return h ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
+  }
+
+  function notesFocusCurrentTime() {
+    try {
+      if (typeof ssGetVideoTimestampFloat === 'function') return ssGetVideoTimestampFloat() || 0;
+      if (typeof ssGetVideoTimestamp === 'function') return ssGetVideoTimestamp() || 0;
+    } catch (e) {}
+    return 0;
+  }
+
+  function notesFocusTurboState() {
+    try {
+      if (typeof window.ytTurboGetState === 'function') return window.ytTurboGetState() || {};
+    } catch (e) {}
+    return {};
+  }
+
+  function notesFocusPaintVideoAction() {
+    if (!_notesFocus || !_notesFocus.box) return;
+    var btn = _notesFocus.box.querySelector('#ai-focus-video');
+    if (!btn) return;
+    var stateNow = notesFocusTurboState();
+    var action = 'start', label = '⚡ Start Turbo', title = 'Prepare the native Turbo video, then open Picture-in-Picture';
+    var disabled = false, phase = stateNow.phase || 'idle';
+    if (!isPro()) {
+      action = 'locked'; label = '⚡ Turbo · Pro'; title = 'Turbo Picture-in-Picture is a Pro feature'; phase = 'locked';
+    } else if (!curVid()) {
+      action = 'none'; label = '▶ Play a video first'; title = 'Start an individual video before using Picture-in-Picture'; disabled = true; phase = 'no-video';
+    } else if (typeof window.ytTurboGetState !== 'function') {
+      action = 'regular'; label = '▣ Open PiP'; title = 'Open the current video in Picture-in-Picture'; phase = 'regular';
+    } else if (stateNow.singleVideo === false) {
+      if ('documentPictureInPicture' in window && typeof ytPiP === 'function') {
+        action = 'regular'; label = '▣ Playlist PiP'; title = 'Turbo supports individual videos only; open the regular playlist video window'; phase = 'regular';
+      } else {
+        action = 'none'; label = '▣ Playlist PiP unavailable'; title = 'Turbo supports individual videos only, and regular PiP is unavailable here'; disabled = true; phase = 'unsupported';
+      }
+    } else if (stateNow.pipActive) {
+      action = 'pip'; label = '▣ Close PiP'; title = 'Close the floating Turbo video'; phase = 'pip';
+    } else if (stateNow.inlineActive) {
+      action = 'mini-hide'; label = '▣ Hide mini video'; title = 'Return the Turbo video to the player'; phase = 'mini';
+    } else if (stateNow.phase === 'loading') {
+      action = 'none'; label = '◌ Preparing Turbo…'; title = 'The video proxy is waking up. Keep reading; this can take up to a minute.'; disabled = true; phase = 'loading';
+    } else if (stateNow.active && stateNow.phase === 'ready') {
+      if (stateNow.pipSupported) {
+        action = 'pip'; label = '▣ Open PiP'; title = 'Float the Turbo video above your notes'; phase = 'ready';
+      } else {
+        action = 'mini'; label = '▣ Show mini video'; title = 'Picture-in-Picture is unavailable here; float the Turbo video inside Notes Focus instead'; phase = 'mini-ready';
+      }
+    } else if (stateNow.phase === 'unavailable') {
+      if (stateNow.failure === 'pro-required') {
+        action = 'locked'; label = '⚡ Turbo · Pro'; title = 'Turbo Picture-in-Picture is a Pro feature'; phase = 'locked';
+      } else if ('documentPictureInPicture' in window && typeof ytPiP === 'function') {
+        action = 'regular'; label = '▣ Try regular PiP'; title = 'Turbo is unavailable for this video; try the regular desktop video window'; phase = 'fallback';
+      } else {
+        action = 'start'; label = '↻ Retry Turbo'; title = 'Turbo was unavailable. Retry the video stream.'; phase = 'unavailable';
+      }
+    }
+    var ariaLabel = label.replace(/[⚡▣◌▶↻]/g, '').trim() + '. ' + title;
+    if (btn.dataset.action === action && btn.dataset.phase === phase && btn.disabled === disabled &&
+        btn.textContent === label && btn.title === title && btn.getAttribute('aria-label') === ariaLabel) return;
+    btn.dataset.action = action;
+    btn.dataset.phase = phase;
+    btn.disabled = disabled;
+    btn.textContent = label;
+    btn.title = title;
+    btn.setAttribute('aria-label', ariaLabel);
+  }
+
+  function notesFocusVideoAction() {
+    if (!_notesFocus) return;
+    var btn = _notesFocus.box.querySelector('#ai-focus-video');
+    var action = btn ? btn.dataset.action : '';
+    if (action === 'locked') {
+      if (typeof ezLockedMsg === 'function') ezLockedMsg('⚡ Turbo Player (4x speed + Picture-in-Picture)');
+      else if (typeof showToast === 'function') showToast('Turbo Picture-in-Picture is available on Pro.', 'info');
+      return;
+    }
+    if (action === 'start') {
+      if (typeof window.ytTurboStart === 'function') window.ytTurboStart();
+      notesFocusPaintVideoAction();
+      return;
+    }
+    if (action === 'regular') {
+      if (typeof ytPiP === 'function') ytPiP();
+      return;
+    }
+    if (action === 'mini') {
+      var dock = _notesFocus.box.querySelector('#ai-focus-mini-video');
+      if (dock && typeof window.ytTurboMountInline === 'function' && window.ytTurboMountInline(dock)) {
+        dock.hidden = false;
+        _notesFocus.box.classList.add('ai-focus-mini-open');
+        notesFocusPaintVideoAction();
+      } else if (typeof showToast === 'function') showToast('The Turbo video is not ready yet.', 'info');
+      return;
+    }
+    if (action === 'mini-hide') {
+      if (typeof window.ytTurboRestoreInline === 'function') window.ytTurboRestoreInline();
+      var mini = _notesFocus.box.querySelector('#ai-focus-mini-video');
+      if (mini) mini.hidden = true;
+      _notesFocus.box.classList.remove('ai-focus-mini-open');
+      notesFocusPaintVideoAction();
+      return;
+    }
+    if (action === 'pip' && typeof window.ytTurboOpenPiP === 'function') {
+      window.ytTurboOpenPiP().catch(function (err) {
+        if (typeof showToast === 'function') {
+          var unsupported = err && err.message === 'pip-unsupported';
+          showToast(unsupported ? 'Picture-in-Picture is not supported here.' : 'Could not open Picture-in-Picture. Try again.', 'error');
+        }
+        notesFocusPaintVideoAction();
+      });
+    }
+  }
+
+  function notesFocusTick() {
+    if (!_notesFocus) return;
+    if (!_notesFocus.box || !_notesFocus.box.isConnected) {
+      requestNotesFocusClose(false);
+      return;
+    }
+    var time = _notesFocus.box.querySelector('#ai-focus-time');
+    if (time) time.textContent = notesFocusTimeLabel(notesFocusCurrentTime());
+    var title = _notesFocus.box.querySelector('#ai-focus-video-title');
+    if (title) title.textContent = curTitle();
+    notesFocusPaintVideoAction();
+  }
+
+  function notesFocusFocusable(box) {
+    if (!box) return [];
+    return Array.prototype.filter.call(box.querySelectorAll(
+      'button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),video[controls],[tabindex]:not([tabindex="-1"])'
+    ), function (el) { return el.getClientRects().length > 0 && el.getAttribute('aria-hidden') !== 'true'; });
+  }
+
+  function notesFocusInertBackground(box) {
+    var records = [];
+    var branch = box;
+    while (branch && branch !== document.body && branch.parentElement) {
+      Array.prototype.forEach.call(branch.parentElement.children, function (sibling) {
+        if (sibling === branch || /^(SCRIPT|STYLE|LINK)$/.test(sibling.tagName)) return;
+        records.push({
+          el: sibling,
+          hadInert: sibling.hasAttribute('inert'),
+          ariaHidden: sibling.getAttribute('aria-hidden')
+        });
+        sibling.setAttribute('inert', '');
+        sibling.setAttribute('aria-hidden', 'true');
+      });
+      branch = branch.parentElement;
+    }
+    return records;
+  }
+
+  function notesFocusRestoreBackground(records) {
+    (records || []).forEach(function (record) {
+      if (!record.el || !record.el.isConnected) return;
+      if (!record.hadInert) record.el.removeAttribute('inert');
+      if (record.ariaHidden == null) record.el.removeAttribute('aria-hidden');
+      else record.el.setAttribute('aria-hidden', record.ariaHidden);
+    });
+  }
+
+  function finishNotesFocusClose(restoreFocus) {
+    var active = _notesFocus;
+    if (!active) return;
+    _notesFocusReturn = { box: active.box, trigger: active.trigger };
+    _notesFocus = null;
+    clearInterval(active.clock);
+    clearTimeout(active.closeTimer);
+    if (typeof window.ytTurboRestoreInline === 'function') window.ytTurboRestoreInline();
+    var scroller = active.box && active.box.querySelector('.ai-scroll');
+    var currentScroll = scroller ? scroller.scrollTop : active.scrollTop;
+    if (active.box) {
+      active.box.classList.remove('ai-notes-focus', 'ai-focus-mini-open');
+      var mini = active.box.querySelector('#ai-focus-mini-video');
+      if (mini) mini.hidden = true;
+      if (active.oldRole == null) active.box.removeAttribute('role');
+      else active.box.setAttribute('role', active.oldRole);
+      if (active.oldModal == null) active.box.removeAttribute('aria-modal');
+      else active.box.setAttribute('aria-modal', active.oldModal);
+      if (active.oldLabel == null) active.box.removeAttribute('aria-label');
+      else active.box.setAttribute('aria-label', active.oldLabel);
+    }
+    notesFocusRestoreBackground(active.inerted);
+    document.body.classList.remove('ai-notes-focus-open');
+    // Layout constraints change when the fixed layer closes. Restore the exact
+    // reading position after that reflow rather than jumping to the note start.
+    requestAnimationFrame(function () {
+      if (scroller && scroller.isConnected) scroller.scrollTop = currentScroll;
+      alignPlayerToNotes();
+      if (restoreFocus !== false && active.trigger && active.trigger.isConnected) active.trigger.focus();
+    });
+  }
+
+  function requestNotesFocusClose(restoreFocus) {
+    if (!_notesFocus || _notesFocus.closing) return;
+    _notesFocus.restoreFocus = restoreFocus !== false;
+    var marker = history.state && history.state.aiNotesFocus;
+    if (_notesFocus.historyPushed && marker === _notesFocus.token) {
+      _notesFocus.closing = true;
+      var close = _notesFocus.box && _notesFocus.box.querySelector('#ai-focus-close');
+      if (close) close.disabled = true;
+      history.back();                 // popstate performs the actual close
+      // Embedded WebViews occasionally suppress popstate during a lifecycle
+      // transition. Bound the wait so the modal can never become permanent.
+      var active = _notesFocus;
+      active.closeTimer = setTimeout(function () {
+        if (_notesFocus !== active) return;
+        var currentMarker = history.state && history.state.aiNotesFocus;
+        if (currentMarker !== active.token) {
+          finishNotesFocusClose(active.restoreFocus);
+          return;
+        }
+        // The history traversal itself did not happen. Re-enable Exit so the
+        // student can retry; never tear down directly and leave a dead entry.
+        active.closing = false;
+        var retryClose = active.box && active.box.querySelector('#ai-focus-close');
+        if (retryClose) retryClose.disabled = false;
+      }, 800);
+      return;
+    }
+    finishNotesFocusClose(restoreFocus !== false);
+  }
+
+  function openNotesFocus(box, trigger, options) {
+    options = options || {};
+    if (!box || !box.querySelector('.ai-nb')) return;
+    // A second open request must close the existing synthetic history entry
+    // first; direct teardown would leave an indistinguishable dead Back step.
+    if (_notesFocus) { requestNotesFocusClose(false); return; }
+    var scroller = box.querySelector('.ai-scroll');
+    var token = options.historyToken || ('notes-focus-' + (++_notesFocusToken) + '-' + Date.now());
+    _notesFocus = {
+      box: box,
+      trigger: trigger || document.activeElement,
+      token: token,
+      scrollTop: scroller ? scroller.scrollTop : 0,
+      oldRole: box.getAttribute('role'),
+      oldModal: box.getAttribute('aria-modal'),
+      oldLabel: box.getAttribute('aria-label'),
+      historyPushed: !!options.fromHistory,
+      closing: false,
+      restoreFocus: true,
+      closeTimer: 0,
+      inerted: [],
+      clock: 0
+    };
+    _notesFocusReturn = { box: box, trigger: trigger || document.activeElement };
+    box.classList.remove('ai-note-actions-open');
+    box.classList.add('ai-notes-focus');
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-label', 'Notes Focus Mode');
+    document.body.classList.add('ai-notes-focus-open');
+    var initialClose = box.querySelector('#ai-focus-close');
+    if (initialClose) initialClose.focus();
+    _notesFocus.inerted = notesFocusInertBackground(box);
+    if (!options.fromHistory) {
+      try {
+        var baseState = (history.state && typeof history.state === 'object') ? history.state : {};
+        history.pushState(Object.assign({}, baseState, { aiNotesFocus: token }), '', location.href);
+        _notesFocus.historyPushed = true;
+      } catch (e) {}
+    }
+    notesFocusTick();
+    _notesFocus.clock = setInterval(notesFocusTick, 500);
+    requestAnimationFrame(function () {
+      var close = box.querySelector('#ai-focus-close');
+      if (close) close.focus();
+      if (scroller) scroller.scrollTop = _notesFocus ? _notesFocus.scrollTop : scroller.scrollTop;
+    });
+  }
+
+  window.addEventListener('popstate', function (event) {
+    if (_notesFocus) {
+      finishNotesFocusClose(_notesFocus.restoreFocus !== false);
+      return;
+    }
+    // Forward navigation to the synthetic modal entry should restore the same
+    // Focus view, not consume a no-op history step.
+    var token = event.state && event.state.aiNotesFocus;
+    var page = document.getElementById('page-youtube');
+    if (token && _notesFocusReturn && _notesFocusReturn.box && _notesFocusReturn.box.isConnected &&
+        _notesFocusReturn.box.querySelector('.ai-nb') && page && page.classList.contains('active')) {
+      openNotesFocus(_notesFocusReturn.box, _notesFocusReturn.trigger, {
+        fromHistory: true,
+        historyToken: token
+      });
+    }
+  });
+  window.addEventListener('examzen:turbo-state', function () {
+    if (_notesFocus) notesFocusPaintVideoAction();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (!_notesFocus) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      requestNotesFocusClose();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    var focusable = notesFocusFocusable(_notesFocus.box);
+    if (!focusable.length) { e.preventDefault(); return; }
+    var first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
+  document.addEventListener('focusin', function (e) {
+    if (!_notesFocus || !_notesFocus.box || _notesFocus.box.contains(e.target)) return;
+    var focusable = notesFocusFocusable(_notesFocus.box);
+    var target = focusable[0] || _notesFocus.box;
+    target.focus();
+  });
+
   // Tracks the last MCQ set auto-published to the Quiz tab (video:count), so
   // re-renders of the same notes don't republish repeatedly.
   var _lastAutoQuizSig = '';
@@ -1042,17 +1404,18 @@
     var box = targetEl || contentEl();
     var content = j.content || '';
     var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Print or save as a hard-copy-ready PDF" style="padding:4px 10px;font-size:0.72rem">📄 Print / PDF</button>';
-    var followBtn = '<button class="ai-btn sec" id="ai-follow" style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
+    var focusBtn = '<button class="ai-btn sec" id="ai-notes-focus" title="Read notes in Focus Mode" style="padding:4px 10px;font-size:0.72rem">⛶ Focus</button>';
+    var followBtn = '<button class="ai-btn sec" id="ai-follow" data-ai-follow-control style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
     var regenBtn = _showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '';
     // Comprehensive MCQ notes → launch every question as a full test in the exam engine.
     var testBtn = (style === 'mcq') ? '<button class="ai-btn" id="ai-mcq-test" title="Take all these MCQs as a full test (opens the exam engine)" style="padding:4px 10px;font-size:0.72rem">🎯 Take as Test</button>' : '';
     // Share a link so others can take the same MCQ test (login required).
     var shareBtn = (style === 'mcq') ? '<button class="ai-btn sec" id="ai-mcq-share" title="Copy a link so others can take this same MCQ test (they must log in / register)" style="padding:4px 10px;font-size:0.72rem">🔗 Share</button>' : '';
     var nbHtml = nbBuild(content, style);
-    box.innerHTML = brandBarHtml(true) +
+    box.innerHTML = notesFocusToolbarHtml() + brandBarHtml(true) +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + (j.lang ? ' · ' + esc(j.lang) : '') + '</span>' +
-      testBtn + shareBtn + followBtn + pdfBtn + regenBtn + '</div>' +
+      testBtn + shareBtn + focusBtn + followBtn + pdfBtn + regenBtn + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
     var noteTools = box.querySelector('#ai-note-actions-toggle');
     if (noteTools) noteTools.onclick = function () {
@@ -1062,7 +1425,21 @@
     bindTsLinks(box);
     lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
     var pb = document.getElementById('ai-pdf');
-    if (pb) pb.onclick = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true, documentLabel: pdfDocumentLabelFor(mode, style) }); };
+    var printNotes = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true, documentLabel: pdfDocumentLabelFor(mode, style) }); };
+    if (pb) pb.onclick = printNotes;
+    var focusPdf = box.querySelector('#ai-focus-pdf');
+    if (focusPdf) focusPdf.onclick = printNotes;
+    var focusClose = box.querySelector('#ai-focus-close');
+    if (focusClose) focusClose.onclick = requestNotesFocusClose;
+    var focusVideo = box.querySelector('#ai-focus-video');
+    if (focusVideo) focusVideo.onclick = notesFocusVideoAction;
+    var miniClose = box.querySelector('#ai-focus-mini-close');
+    if (miniClose) miniClose.onclick = function () {
+      if (focusVideo) focusVideo.dataset.action = 'mini-hide';
+      notesFocusVideoAction();
+    };
+    var focusOpen = document.getElementById('ai-notes-focus');
+    if (focusOpen) focusOpen.onclick = function () { openNotesFocus(box, focusOpen); };
     var rb = document.getElementById('ai-regen');
     if (rb) rb.onclick = function () { showStudy(mode, n, true); };
     var mtb = document.getElementById('ai-mcq-test');
