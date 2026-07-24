@@ -947,7 +947,7 @@ _opencode_server_model_cache = {
 _opencode_server_model_lock = threading.Lock()
 # Exposed only through /health. This fixed, non-sensitive marker lets operators
 # confirm that Render is serving the diagnostic-aware Study AI proxy revision.
-_OPENCODE_STUDY_PROTOCOL = "server-catalog-bounded-retry-v1"
+_OPENCODE_STUDY_PROTOCOL = "server-catalog-nonblocking-stop-v1"
 # A separately deployed OpenCode server (for example on a free tier that sleeps
 # when idle, restarts, or is briefly OOM-killed) commonly answers requests with
 # a transient 502/503/504 from its router, or refuses/does not answer the
@@ -3827,9 +3827,16 @@ def api_study_job_stop(job_id):
             should_abort = True
     if should_abort:
         # OpenCode is a blocking session transport. Abort its active session so
-        # Stop releases upstream compute immediately instead of waiting for the
-        # per-request timeout; cleanup in the worker still deletes the session.
-        _opencode_abort_active(job.get("ai"))
+        # Stop releases upstream compute promptly. Do this OFF the request
+        # thread: the cancel_event + "stopped" status set above are the source
+        # of truth, and the abort is a best-effort network call to a separately
+        # deployed server that may be slow or unreachable. Running it inline made
+        # the browser's Stop hang on "waiting for the AI proxy to confirm
+        # cancellation" whenever that server was down, so it must never gate the
+        # acknowledgement. The worker's own cleanup still deletes the session.
+        ai = job.get("ai")
+        threading.Thread(target=_opencode_abort_active, args=(ai,), daemon=True,
+                         name="opencode-abort-" + job_id[:10]).start()
     _study_job_persist(job, force=True)
     return jsonify(_study_job_public(job))
 
