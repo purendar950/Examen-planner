@@ -231,8 +231,17 @@ function isPlanFreeModel(model) {
   });
 }
 
+function hasFreeIdSuffix(id) {
+  // OpenRouter-style free markers embedded in the model id.
+  const value = String(id || '').toLowerCase();
+  return value.endsWith(':free') || value.endsWith('-free');
+}
+
 function isFreeCatalogModel(provider, model) {
   if (!hasModelId(model)) return false;
+  // Mirrors gateways such as OmniRoute: free id suffix, then verified zero
+  // price, then (router-style providers) an explicit Free-plan/tier signal.
+  if (hasFreeIdSuffix(modelId(model, provider.catalogFormat === 'gemini'))) return true;
   if (isVerifiedFreeModel(model)) return true;
   return !!provider.freePlanCatalog && isPlanFreeModel(model);
 }

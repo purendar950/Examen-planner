@@ -947,7 +947,7 @@ _opencode_server_model_cache = {
 _opencode_server_model_lock = threading.Lock()
 # Exposed only through /health. This fixed, non-sensitive marker lets operators
 # confirm that Render is serving the diagnostic-aware Study AI proxy revision.
-_OPENCODE_STUDY_PROTOCOL = "server-catalog-nonblocking-stop-promptasync-stream-freeplan-v3"
+_OPENCODE_STUDY_PROTOCOL = "server-catalog-nonblocking-stop-promptasync-stream-freeplan-freesuffix-v4"
 # A separately deployed OpenCode server (for example on a free tier that sleeps
 # when idle, restarts, or is briefly OOM-killed) commonly answers requests with
 # a transient 502/503/504 from its router, or refuses/does not answer the
@@ -4821,9 +4821,19 @@ def _is_plan_free_model(item):
     return False
 
 
+def _has_free_id_suffix(model_id):
+    """OpenRouter-style free markers embedded in the model id (`:free`/`-free`)."""
+    lowered = str(model_id or "").lower()
+    return lowered.endswith(":free") or lowered.endswith("-free")
+
+
 def _catalog_model_is_free(provider, item):
-    """A model is free when its price is a verified zero, or (for router-style
-    providers) when the catalog carries an explicit Free-plan/tier signal."""
+    """A model is free when its id carries a free marker (`:free`/`-free`), its
+    price is a verified zero, or (for router-style providers) when the catalog
+    exposes an explicit Free-plan/tier signal. Mirrors how gateways such as
+    OmniRoute classify free models (suffix + zero price + curated list)."""
+    if _has_free_id_suffix(_catalog_model_id(item)):
+        return True
     if _has_verified_zero_pricing(item):
         return True
     return bool(provider.get("free_plan_metadata")) and _is_plan_free_model(item)
