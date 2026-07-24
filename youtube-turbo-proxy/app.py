@@ -924,6 +924,11 @@ _OPENCODE_PLAN_DISABLED_TOOLS = {
 _OPENCODE_ZEN_MODELS_URL = "https://opencode.ai/zen/v1/models"
 _OPENCODE_FREE_MODEL_REFRESH_SEC = max(300, min(
     int(os.environ.get("OPENCODE_FREE_MODEL_REFRESH_SEC", "3600")), 86400))
+# The public Zen catalog is not the same thing as the separately deployed
+# OpenCode server's configured runtime catalog. Refresh the latter too, so the
+# browser is offered only models that both catalogues agree are usable.
+_OPENCODE_SERVER_MODEL_REFRESH_SEC = max(60, min(
+    int(os.environ.get("OPENCODE_SERVER_MODEL_REFRESH_SEC", "300")), 3600))
 _OPENCODE_FREE_MODEL_PREFERENCE = tuple(
     model.strip() for model in os.environ.get(
         "OPENCODE_FREE_MODEL_PREFERENCE",
@@ -933,6 +938,11 @@ _OPENCODE_FREE_MODEL_PREFERENCE = tuple(
 )
 _opencode_free_model_cache = {"checked_at": 0.0, "models": []}
 _opencode_free_model_lock = threading.Lock()
+# `models` is None until provider discovery works. An empty list is distinct:
+# it means the configured OpenCode provider exists but currently exposes no
+# models we can safely offer.
+_opencode_server_model_cache = {"key": "", "checked_at": 0.0, "models": None}
+_opencode_server_model_lock = threading.Lock()
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
@@ -1318,12 +1328,15 @@ def _rate_ok(bucket, key, limit, window):
 class _OpenCodePlanError(RuntimeError):
     """A client-safe failure from the isolated OpenCode planning service."""
 
-    def __init__(self, code, detail, status=502, upstream_status=None):
+    def __init__(self, code, detail, status=502, upstream_status=None, stage=""):
         super().__init__(detail)
         self.code = code
         self.detail = detail
         self.status = status
         self.upstream_status = upstream_status
+        # Stage is deliberately a fixed local label (never an upstream response
+        # body) so it is safe to use for retry decisions and diagnostics.
+        self.stage = stage
 
 
 def _opencode_study_enabled():
@@ -1389,6 +1402,111 @@ def _opencode_current_free_models():
         return list(selected)
 
 
+def _opencode_model_ids_from_provider_catalog(payload, provider_id):
+    """Extract one provider's model IDs from OpenCode's `/provider` response.
+
+    OpenCode server releases have returned both a top-level list and a wrapper
+    object, while a provider's `models` can be an ID-keyed map or a list. Parse
+    only documented identifiers and fail closed when the configured provider is
+    absent or the response shape is not recognizable.
+    """
+    providers = []
+    if isinstance(payload, list):
+        providers = payload
+    elif isinstance(payload, dict):
+        for key in ("providers", "data", "all"):
+            if isinstance(payload.get(key), list):
+                providers = payload[key]
+                break
+        if not providers and isinstance(payload.get(provider_id), dict):
+            direct = dict(payload[provider_id])
+            direct.setdefault("id", provider_id)
+            providers = [direct]
+
+    for provider in providers:
+        if not isinstance(provider, dict):
+            continue
+        current_id = str(
+            provider.get("id") or provider.get("providerID") or provider.get("provider_id") or ""
+        ).strip()
+        if current_id != provider_id:
+            continue
+        raw_models = provider.get("models")
+        if isinstance(raw_models, dict):
+            # OpenCode's current provider response uses a map keyed by model ID.
+            return list(dict.fromkeys(
+                str(model_id).strip() for model_id in raw_models
+                if isinstance(model_id, str) and model_id.strip()
+            ))
+        if isinstance(raw_models, list):
+            ids = []
+            for model in raw_models:
+                if isinstance(model, str):
+                    model_id = model.strip()
+                elif isinstance(model, dict):
+                    model_id = str(
+                        model.get("id") or model.get("modelID") or model.get("model_id") or ""
+                    ).strip()
+                else:
+                    model_id = ""
+                if model_id:
+                    ids.append(model_id)
+            return list(dict.fromkeys(ids))
+        # The provider was present but has no usable model collection. Do not
+        # fall back to a public catalog that this server did not confirm.
+        return []
+    return None
+
+
+def _opencode_current_server_models(config):
+    """Return models advertised by the configured OpenCode server, if known.
+
+    Failure to reach an older or temporarily unavailable provider endpoint does
+    not disable the existing static fallback. A successful discovery, however,
+    is authoritative: models absent from it cannot be sent by the browser.
+    """
+    cache_key = "\n".join((config["server_url"], config["provider_id"], config["directory"]))
+    now = time.time()
+    with _opencode_server_model_lock:
+        cached = _opencode_server_model_cache
+        if (cached["key"] == cache_key
+                and now - cached["checked_at"] < _OPENCODE_SERVER_MODEL_REFRESH_SEC):
+            return None if cached["models"] is None else list(cached["models"])
+        previous = cached["models"] if cached["key"] == cache_key else None
+
+    # Do not hold the shared cache lock across network I/O. A slow or down
+    # OpenCode service must not serialize every status or generation setup.
+    models = previous
+    try:
+        payload = _opencode_json_request(
+            "GET", config["server_url"] + "/provider", config,
+            "provider model discovery", expected_type=(dict, list),
+            timeout=min(_OPENCODE_TIMEOUT, 5))
+        discovered = _opencode_model_ids_from_provider_catalog(
+            payload, config["provider_id"])
+        if discovered is None:
+            log.warning("OpenCode provider discovery did not include configured provider %s",
+                        config["provider_id"])
+            models = None
+        else:
+            models = discovered
+            log.info("OpenCode provider discovery found %d model(s) for %s",
+                     len(models), config["provider_id"])
+    except _OpenCodePlanError as exc:
+        # Status, stage, provider and model IDs are safe operational
+        # diagnostics; never log the upstream body or authentication data.
+        log.warning("OpenCode provider discovery unavailable (HTTP %s, stage=%s)",
+                    exc.upstream_status or "none", exc.stage or "unknown")
+
+    with _opencode_server_model_lock:
+        _opencode_server_model_cache.update({
+            "key": cache_key,
+            "checked_at": time.time(),
+            "models": models,
+        })
+    return None if models is None else list(models)
+
+
 def _opencode_config():
     """Read and validate server-only OpenCode configuration.
 
@@ -1413,29 +1531,51 @@ def _opencode_config():
         log.warning("OpenCode configuration requires an HTTPS server URL without embedded credentials")
         return None
 
-    auto_free_model = _opencode_auto_free_model_enabled(provider_id)
-    free_model_ids = _opencode_current_free_models() if auto_free_model else []
-    model_id = free_model_ids[0] if free_model_ids else fallback_model_id
-    if not model_id:
-        log.warning("OpenCode has no configured fallback model and no free Zen model is available")
-        return None
-    if auto_free_model and not free_model_ids:
-        log.info("OpenCode Zen catalog unavailable; using configured fallback model %s", model_id)
-    return {
+    base_config = {
         "server_url": server_url,
         "username": username,
         "password": password,
         "provider_id": provider_id,
-        # Only these model IDs may be requested by a browser. They come from
-        # the server-side free allowlist intersected with Zen's live catalog;
-        # the static fallback is exposed only when that catalog is unavailable.
-        "allowed_model_ids": free_model_ids or [model_id],
-        "model_id": model_id,
         "directory": directory,
+    }
+    auto_free_model = _opencode_auto_free_model_enabled(provider_id)
+    free_model_ids = _opencode_current_free_models() if auto_free_model else []
+    candidates = free_model_ids or ([fallback_model_id] if fallback_model_id else [])
+    if not candidates:
+        log.warning("OpenCode has no configured fallback model and no free Zen model is available")
+        return None
+
+    # The public Zen catalog says what may be free; the OpenCode server says
+    # what it can actually route for its configured account and project. The
+    # latter is authoritative when the endpoint is available.
+    server_model_ids = _opencode_current_server_models(base_config)
+    if server_model_ids is not None:
+        server_models = set(server_model_ids)
+        candidates = [model_id for model_id in candidates if model_id in server_models]
+        if not candidates and fallback_model_id in server_models:
+            candidates = [fallback_model_id]
+        if not candidates:
+            log.warning("OpenCode provider %s exposes none of the configured Zen/free fallback models",
+                        provider_id)
+            return None
+
+    model_id = candidates[0]
+    if auto_free_model and not free_model_ids:
+        log.info("OpenCode Zen catalog unavailable; using configured fallback model %s", model_id)
+    return {
+        **base_config,
+        # Only these IDs can be requested by a browser. When provider discovery
+        # succeeds this is the intersection of the server-owned Zen allowlist
+        # and the actual OpenCode runtime catalog; otherwise the static fallback
+        # preserves the previously working configuration.
+        "allowed_model_ids": candidates,
+        "model_id": model_id,
+        "fallback_model_id": fallback_model_id,
     }
 
 
-def _opencode_json_request(method, url, config, stage, payload=None, expected_type=dict):
+def _opencode_json_request(method, url, config, stage, payload=None, expected_type=dict,
+                           timeout=None):
     """Call OpenCode without returning or logging upstream body/credentials."""
     try:
         response = requests.request(
@@ -1446,32 +1586,45 @@ def _opencode_json_request(method, url, config, stage, payload=None, expected_ty
             # OpenCode uses this server-owned directory to scope every request.
             params={"directory": config["directory"]},
             json=payload,
-            timeout=_OPENCODE_TIMEOUT,
+            timeout=timeout or _OPENCODE_TIMEOUT,
         )
     except requests.Timeout as exc:
         log.warning("OpenCode %s timed out (%s)", stage, type(exc).__name__)
         raise _OpenCodePlanError(
-            "opencode_timeout", "OpenCode did not respond before the request timed out.") from exc
+            "opencode_timeout", "OpenCode did not respond before the request timed out.",
+            stage=stage) from exc
     except requests.RequestException as exc:
         log.warning("OpenCode %s request failed (%s)", stage, type(exc).__name__)
         raise _OpenCodePlanError(
-            "opencode_unavailable", "OpenCode is temporarily unavailable.") from exc
+            "opencode_unavailable", "OpenCode is temporarily unavailable.",
+            stage=stage) from exc
 
     if not 200 <= response.status_code < 300:
-        log.warning("OpenCode %s returned HTTP %s", stage, response.status_code)
+        # Model IDs and HTTP statuses are safe diagnostics. Intentionally omit
+        # upstream bodies because they can include provider/account details.
+        log.warning("OpenCode %s returned HTTP %s (provider=%s, model=%s)",
+                    stage, response.status_code, config.get("provider_id", ""),
+                    config.get("model_id", ""))
+        detail = "OpenCode could not complete the planning request."
+        if (stage == "study message creation"
+                and response.status_code in (400, 404, 422)):
+            detail = ("OpenCode rejected the selected model while starting Study AI "
+                      "(HTTP %s)." % response.status_code)
         raise _OpenCodePlanError(
-            "opencode_upstream_error", "OpenCode could not complete the planning request.",
-            upstream_status=response.status_code)
+            "opencode_upstream_error", detail, upstream_status=response.status_code,
+            stage=stage)
     try:
         data = response.json()
     except ValueError as exc:
         log.warning("OpenCode %s returned a non-JSON response", stage)
         raise _OpenCodePlanError(
-            "opencode_upstream_error", "OpenCode returned an invalid response.") from exc
+            "opencode_upstream_error", "OpenCode returned an invalid response.",
+            stage=stage) from exc
     if not isinstance(data, expected_type):
         log.warning("OpenCode %s returned an unexpected JSON response", stage)
         raise _OpenCodePlanError(
-            "opencode_upstream_error", "OpenCode returned an invalid response.")
+            "opencode_upstream_error", "OpenCode returned an invalid response.",
+            stage=stage)
     return data
 
 
@@ -1705,12 +1858,15 @@ def _opencode_abort_active(ai):
 
 
 def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
-                   cancel_event=None):
+                   cancel_event=None, allow_model_fallback=True):
     """Run one isolated, no-tools OpenCode session for normal Study AI.
 
     OpenCode's session endpoint is blocking rather than OpenAI SSE-compatible.
     Cancellation is checked around each blocking stage; the finally block always
-    deletes (and, on cleanup trouble, aborts) the temporary session.
+    deletes (and, on cleanup trouble, aborts) the temporary session. If a server
+    cannot list providers (for example, an older deployment), a selected Zen
+    model rejected at message creation gets one bounded retry using the operator
+    configured fallback model.
     """
     config = ai.get("opencode_config") or {}
     if not config:
@@ -1719,6 +1875,7 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
         return ""
 
     session_id = ""
+    failure = None
     try:
         session = _opencode_json_request(
             "POST", config["server_url"] + "/session", config,
@@ -1726,7 +1883,8 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
         session_id = str(session.get("id") or "").strip()
         if not session_id:
             raise _OpenCodePlanError(
-                "opencode_upstream_error", "OpenCode returned an invalid session response.")
+                "opencode_upstream_error", "OpenCode returned an invalid session response.",
+                stage="study session creation")
         _opencode_set_active_session(ai, session_id)
         if cancel_event is not None and cancel_event.is_set():
             return ""
@@ -1738,7 +1896,8 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
         message_id = str(message_info.get("id") or message.get("id") or "").strip()
         if not message_id:
             raise _OpenCodePlanError(
-                "opencode_upstream_error", "OpenCode returned an invalid message response.")
+                "opencode_upstream_error", "OpenCode returned an invalid message response.",
+                stage="study message creation")
         if cancel_event is not None and cancel_event.is_set():
             return ""
 
@@ -1747,12 +1906,36 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
             return ""
         if not answer:
             raise _OpenCodePlanError(
-                "opencode_empty_response", "OpenCode returned an empty Study AI response.")
+                "opencode_empty_response", "OpenCode returned an empty Study AI response.",
+                stage="study message retrieval")
         return answer
+    except _OpenCodePlanError as exc:
+        failure = exc
     finally:
         if session_id:
             _opencode_set_active_session(ai, "")
             _opencode_cleanup_session(session_id, config)
+
+    fallback_model_id = str(config.get("fallback_model_id") or "").strip()
+    if (allow_model_fallback and fallback_model_id
+            and fallback_model_id != config.get("model_id")
+            and failure.stage == "study message creation"
+            and failure.upstream_status in (400, 404, 422)):
+        # A model mismatch can occur only on separately deployed/older servers
+        # that could not answer `/provider`. Retry once, after cleanup, with the
+        # fixed operator fallback rather than another browser-selected value.
+        log.warning("OpenCode rejected model %s at study message creation (HTTP %s); retrying fallback %s",
+                    config.get("model_id", ""), failure.upstream_status, fallback_model_id)
+        fallback_config = dict(config)
+        fallback_config["model_id"] = fallback_model_id
+        # Mutate the job-local config so all subsequent metadata and retries
+        # truthfully report the model that completed the generation.
+        ai["model"] = fallback_model_id
+        ai["opencode_config"] = fallback_config
+        return _opencode_chat(
+            messages, ai, max_tokens=max_tokens, json_mode=json_mode,
+            cancel_event=cancel_event, allow_model_fallback=False)
+    raise failure
 
 
 def _is_unlimited(uid):
