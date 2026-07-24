@@ -308,6 +308,23 @@ function freeModelPredicate(provider, model) {
   return isFreeCatalogModel(provider, model);
 }
 
+function catalogSampleFields(data) {
+  // Compact, non-sensitive dump of the first catalog item so operators can see
+  // exactly which fields (and values) a provider returns.
+  for (const item of data) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const parts = Object.keys(item).map((key) => {
+      const value = item[key];
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'object' && !Array.isArray(value)) return key + '{' + Object.keys(value).slice(0, 6).join(',') + '}';
+      if (Array.isArray(value)) return key + '[' + value.slice(0, 4).filter((x) => typeof x !== 'object').map((x) => String(x).slice(0, 16)).join(',') + ']';
+      return key + '=' + String(value).slice(0, 24);
+    }).filter(Boolean);
+    return (parts.join('; ').slice(0, 200)) || 'no fields';
+  }
+  return 'no object rows';
+}
+
 function catalogModelsFromOpenAiPayload(provider, payload, mode) {
   if (!payload || !Array.isArray(payload.data)) {
     throw new Error(provider.label + ' catalog response is missing its model list.');
@@ -316,13 +333,9 @@ function catalogModelsFromOpenAiPayload(provider, payload, mode) {
     ? (model) => freeModelPredicate(provider, model)
     : (model) => allModelPredicate(provider, model));
   if (mode === 'free' && !models.length && provider.freePlanCatalog) {
-    const seen = new Set();
-    payload.data.forEach((item) => {
-      if (item && typeof item === 'object') Object.keys(item).forEach((key) => seen.add(String(key)));
-    });
-    const fields = [...seen].sort().join(', ').slice(0, 180) || 'none';
-    throw new Error(provider.label + ' catalog exposed no zero price or Free-plan signal (fields seen: ' + fields +
-      '). Confirm which field marks Free-plan models, or add this provider to the free & paid list.');
+    throw new Error(provider.label + ' free refresh found no zero-price or Free-plan model. Sample model: ' +
+      catalogSampleFields(payload.data) +
+      '. Reply with which field marks Free-plan models, or keep this provider on the free & paid list.');
   }
   return models;
 }

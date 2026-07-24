@@ -4882,13 +4882,31 @@ def _openai_catalog_models(provider, payload, mode):
             continue
         models.append(model_id)
     if mode == "free" and not models and provider.get("free_plan_metadata"):
-        fields = ", ".join(sorted(seen_keys))[:180] or "none"
         raise RuntimeError(
-            "%s catalog exposed no zero price or Free-plan signal (fields seen: %s). "
-            "Confirm which field marks Free-plan models, or add this provider to the free & paid list."
-            % (provider["label"], fields)
+            "%s free refresh found no zero-price or Free-plan model. Sample model: %s. "
+            "Reply with which field marks Free-plan models, or keep this provider on the free & paid list."
+            % (provider["label"], _catalog_sample_fields(data))
         )
     return sorted(set(models))
+
+
+def _catalog_sample_fields(data):
+    """Compact, non-sensitive dump of the first catalog item so operators can
+    see exactly which fields (and values) a provider returns."""
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        parts = []
+        for key, value in item.items():
+            if isinstance(value, (str, int, float, bool)):
+                parts.append("%s=%s" % (key, str(value)[:24]))
+            elif isinstance(value, dict):
+                parts.append("%s{%s}" % (key, ",".join(list(value.keys())[:6])))
+            elif isinstance(value, list):
+                inner = ",".join(str(x)[:16] for x in value[:4] if isinstance(x, (str, int, float)))
+                parts.append("%s[%s]" % (key, inner))
+        return "; ".join(parts)[:200] or "no fields"
+    return "no object rows"
 
 
 def _fetch_openai_catalog(provider_id, cfg, mode="free"):
