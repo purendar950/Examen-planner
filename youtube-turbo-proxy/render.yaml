@@ -25,3 +25,20 @@ services:
         value: "https://examzen.in,https://www.examzen.in,https://appassets.androidengine"
       - key: MAX_TELEGRAM_IMAGE_BYTES
         value: "8388608"
+      # Admin-only OpenCode planner. Keep this service URL, Basic Auth password,
+      # and workspace path in Render secrets. The model is server-controlled;
+      # only its non-sensitive label is returned to an authenticated admin.
+      - key: OPENCODE_SERVER_URL
+        sync: false
+      - key: OPENCODE_SERVER_USERNAME
+        sync: false
+      - key: OPENCODE_SERVER_PASSWORD
+        sync: false
+      - key: OPENCODE_PROVIDER_ID
+        sync: false
+      - key: OPENCODE_MODEL_ID
+        sync: false
+      - key: OPENCODE_DIRECTORY
+        sync: false
+      - key: OPENCODE_TIMEOUT
+        value: "90"
