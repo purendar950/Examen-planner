@@ -4,6 +4,19 @@
 let _saveDebounce = null;
 let _lastSavedJSON = '';
 let _localDirty = false; // true when there are local edits not yet written to Firestore
+function _pendingSyncKey(uid) { return 'pending_sync_' + uid; }
+function _markPendingSync(uid) {
+  if (!uid) return;
+  try { localStorage.setItem(_pendingSyncKey(uid), '1'); } catch(e) {}
+}
+function _clearPendingSync(uid) {
+  if (!uid) return;
+  try { localStorage.removeItem(_pendingSyncKey(uid)); } catch(e) {}
+}
+function hasPendingSync(uid) {
+  if (!uid) return false;
+  try { return localStorage.getItem(_pendingSyncKey(uid)) === '1'; } catch(e) { return false; }
+}
 
 /* ── Storage backend ──
    Cache read/write + the Firestore save call are delegated to the shared
@@ -30,6 +43,7 @@ function saveProgress() {
   try { if (appState.telegram && appState.telegram.enabled) refreshTelegramDigest(); } catch(e) {}
 
   _localDirty = true;
+  _markPendingSync(currentUser.uid);
   // Immediate localStorage cache (always)
   const svc = _storageService();
   if (svc) svc.writeCache(currentUser.uid, appState);
@@ -47,26 +61,48 @@ function saveProgress() {
 
 async function saveProgressNow() {
   if (!currentUser || !_fbReady || !db) return;
+  const saveUid = currentUser.uid;
   const json = JSON.stringify(appState);
-  if (json === _lastSavedJSON) { _localDirty = false; setSyncStatus('', ''); return; } // Nothing changed
+  const stateToSave = JSON.parse(json);
+  if (json === _lastSavedJSON) {
+    _localDirty = false;
+    _clearPendingSync(saveUid);
+    setSyncStatus('', '');
+    return;
+  } // Nothing changed
 
   try {
     const svc = _storageService();
     if (svc) {
-      await svc.saveUserState(currentUser.uid, appState);
+      await svc.saveUserState(saveUid, stateToSave);
     } else {
-      await db.collection('users').doc(currentUser.uid).set({
-        appState,
+      await db.collection('users').doc(saveUid).set({
+        appState: stateToSave,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     }
 
     _lastSavedJSON = json;
-    _localDirty = false;
+    if (currentUser && currentUser.uid !== saveUid) {
+      // This account is no longer active. Its write succeeded, but must not
+      // mutate the new account's in-memory dirty flag.
+      _clearPendingSync(saveUid);
+    } else if (currentUser && JSON.stringify(appState) !== json) {
+      // Edits made while this write was in flight are still pending. Never let
+      // an older completion clear their durable marker; queue the newest state.
+      _localDirty = true;
+      _markPendingSync(saveUid);
+      clearTimeout(_saveDebounce);
+      _saveDebounce = setTimeout(() => saveProgressNow(), 250);
+    } else {
+      _localDirty = false;
+      _clearPendingSync(saveUid);
+    }
     setSyncStatus('saved', '☁ Saved');
     setTimeout(() => setSyncStatus('', ''), 2500);
   } catch(e) {
-    _localDirty = true;
+    if (!currentUser || currentUser.uid === saveUid) _localDirty = true;
+    _markPendingSync(saveUid);
     setSyncStatus('error', '⚠ Sync failed');
     setTimeout(() => setSyncStatus('', ''), 4000);
   }

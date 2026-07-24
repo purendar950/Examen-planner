@@ -80,6 +80,9 @@ function ezIsTrialActive() {
    (Node/CommonJS, can't be imported into this classic <script> file). If you
    change the rules here, mirror the change in shared/proGating.js too. */
 function ezIsPro() {
+  // App data may render from a UID-keyed local cache, but paid access remains
+  // closed until Firestore confirms this exact account from the server.
+  if (currentUser && window._ezEntitlementPendingUid === currentUser.uid) return false;
   if (_ezIsAdminCache === true) return true; // admin = always pro
   if (!EZ_PROFILE) return false;
   const today = new Date().toISOString().slice(0, 10);

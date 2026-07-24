@@ -7,6 +7,8 @@ const db = firebase.firestore(), auth = firebase.auth();
 
 let USERS = [], PLANS = [], PAYMENTS = [], REQUESTS = [], COUPONS = [], REDEMPTIONS = [], TAB = 'pending', PAY_FILTER = 'all', PAY_VIEW = 'list'; // 'list' | 'reconcile'
 let ADMIN_READY = false;
+let _adminLogoutInFlight = false;
+let _adminAuthGeneration = 0;
 let ADMIN_DATA_HEALTH = { errors: [], lastSuccessfulAt: null, lastAttemptAt: null };
 let CONFIG = {}, SETTINGS = { requireApproval: false };
 let DUP = { mobile:{}, fp:{}, ip:{} };
@@ -137,10 +139,35 @@ async function refreshAdminData() {
 }
 
 async function logoutAdmin() {
+  if (_adminLogoutInFlight) return;
+  _adminLogoutInFlight = true;
   ADMIN_READY = false;
-  _unsubs.forEach(u => { try { u(); } catch(e) {} });
-  _unsubs = [];
-  try { await auth.signOut(); } finally { location.reload(); }
+
+  // Swap to the signed-out UI immediately; no full-page reload is needed.
+  const panel = document.getElementById('panel');
+  const loginScreen = document.getElementById('login-screen');
+  if (panel) panel.style.display = 'none';
+  if (loginScreen) loginScreen.style.display = 'flex';
+  clearAdmErr();
+
+  try {
+    await auth.signOut();
+    _unsubs.forEach(u => { try { u(); } catch(e) {} });
+    _unsubs = [];
+    const email = document.getElementById('adm-email');
+    const password = document.getElementById('adm-pass');
+    if (email) email.value = '';
+    if (password) password.value = '';
+  } catch (e) {
+    // Keep the authenticated panel usable if Firebase could not revoke the
+    // session; pretending logout succeeded would be misleading and unsafe.
+    ADMIN_READY = true;
+    if (loginScreen) loginScreen.style.display = 'none';
+    if (panel) panel.style.display = 'block';
+    showToast('Sign out failed: ' + (e.message || e), 'error');
+  } finally {
+    _adminLogoutInFlight = false;
+  }
 }
 
 function isMobileAdminNav() { return window.matchMedia('(max-width: 860px)').matches; }
@@ -275,6 +302,9 @@ async function adminLoginGoogle() {
   try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); } catch(e) { admErr('Google login failed: ' + (e.code || e.message)); }
 }
 auth.onAuthStateChanged(async (u) => {
+  const authGeneration = ++_adminAuthGeneration;
+  const isCurrentAdminAuth = () => authGeneration === _adminAuthGeneration &&
+    !!u && !!auth.currentUser && auth.currentUser.uid === u.uid;
   if (!u) { ADMIN_READY = false; document.getElementById('login-screen').style.display = 'flex'; document.getElementById('panel').style.display = 'none'; return; }
   try {
     const adminDoc = await db.collection('admins').doc(u.uid).get();
@@ -284,12 +314,14 @@ auth.onAuthStateChanged(async (u) => {
       return;
     }
   } catch(e) { await auth.signOut(); admErr('Access denied — could not verify admin access.'); return; }
+  if (!isCurrentAdminAuth()) return;
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('panel').style.display = 'block';
   document.getElementById('admin-email').textContent = u.email;
   const avatar = document.querySelector('.admin-avatar');
   if (avatar) avatar.textContent = String(u.email || 'A').charAt(0).toUpperCase();
   const initialLoad = await loadAll();
+  if (!isCurrentAdminAuth()) return;
   if (!initialLoad.errors.length) setLastSync();
   else showToast('Some data could not be loaded: ' + initialLoad.errors.join(', ') + '.', 'error');
   let initialTab = 'pending';

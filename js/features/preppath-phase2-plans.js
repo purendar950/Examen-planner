@@ -4,7 +4,7 @@
 /* Fallback UPI — used only if admin has not saved one in Admin Panel → Plans → Payment Settings */
 const EZ_UPI_FALLBACK = { upiId: 'yourname@upi', payeeName: 'StudyPlanner' };
 let EZ_PLANS = [], EZ_PLANS_STATUS = 'idle', EZ_PROFILE = null, EZ_PROFILE_STATUS = 'idle', EZ_PROFILE_UID = null,
-    EZ_UPI = null, EZ_PENDING_PAY = null, _ezPickedPlan = null, _ezCoupon = null, _ezFinalAmount = 0;
+    EZ_PROFILE_LIVE_UID = null, EZ_UPI = null, EZ_PENDING_PAY = null, _ezPickedPlan = null, _ezCoupon = null, _ezFinalAmount = 0;
 
 async function ezLoadPlans() {
   if (!_fbReady || !db) { EZ_PLANS_STATUS = 'error'; return; }
@@ -64,7 +64,10 @@ function ezPrepareProfileForUser(uid) {
   const accountChanged = EZ_PROFILE_UID !== uid;
   EZ_PROFILE = null;
   EZ_PROFILE_UID = uid;
-  if (accountChanged) EZ_PENDING_PAY = null;
+  if (accountChanged) {
+    EZ_PENDING_PAY = null;
+    EZ_PROFILE_LIVE_UID = null;
+  }
   const cached = ezReadCachedProfile(uid);
   if (cached) {
     EZ_PROFILE = cached;
@@ -80,6 +83,7 @@ function ezPrepareProfileForUser(uid) {
    another device—so keep negative labels pending until Firestore confirms. */
 function ezEntitlementDisplayPending() {
   if (EZ_PROFILE === null) return true;
+  if (window._ezEntitlementPendingUid && window._ezEntitlementPendingUid === EZ_PROFILE_UID) return true;
   if (EZ_PROFILE_STATUS === 'ready') return false;
   try { return !(typeof ezIsPro === 'function' && ezIsPro()); }
   catch(e) { return true; }
@@ -129,10 +133,19 @@ function ezProfileHasActiveServerEntitlement(profile) {
    snapshot is useful as another cache, but is not authoritative. In
    particular, never let a cached Free snapshot overwrite a still-valid local
    Pro cache; wait for a server snapshot to confirm any downgrade. */
-function ezSetProfileFromFirestoreSnapshot(uid, snap) {
+function ezSetProfileFromFirestoreSnapshot(uid, snap, source) {
   if (!snap) return false;
   const profile = (snap.exists && snap.data().profile) || {};
   const fromCache = !!(snap.metadata && snap.metadata.fromCache);
+  if (!fromCache) {
+    if (source === 'live') EZ_PROFILE_LIVE_UID = uid;
+    else if (EZ_PROFILE_LIVE_UID === uid) return false;
+  }
+  // Cache-first app rendering must not make cached Pro entitlement actionable.
+  // Only a server-backed snapshot may open paid gates for this Firebase UID.
+  if (!fromCache && window._ezEntitlementPendingUid === uid) {
+    window._ezEntitlementPendingUid = null;
+  }
   if (fromCache && ezProfileHasActiveServerEntitlement(EZ_PROFILE) &&
       !ezProfileHasActiveServerEntitlement(profile)) {
     EZ_PROFILE_STATUS = 'cached';
@@ -161,7 +174,7 @@ async function ezLoadProfile() {
   try {
     const s = await db.collection('users').doc(uid).get();
     if (!ezProfileRequestIsCurrent(uid)) return;
-    ezSetProfileFromFirestoreSnapshot(uid, s);
+    ezSetProfileFromFirestoreSnapshot(uid, s, 'profile-load');
     // Entitlement and feature gates must update before the unrelated payments
     // query below; a slow payment lookup must not leave a confirmed Pro locked.
     try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
