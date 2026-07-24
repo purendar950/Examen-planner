@@ -148,17 +148,37 @@ function modelId(model, gemini = false) {
   return typeof rawId === 'string' ? rawId.trim().replace(/^models\//, '') : '';
 }
 
+function hasNonChatModelMarker(id) {
+  const value = String(id || '').toLowerCase();
+  const markers = ['embedding', 'embed', 'transcrib', 'speech', 'whisper', 'tts', 'audio', 'moderation', 'rerank', 'dall', 'image', 'imagen', 'stable-diffusion', 'midjourney', 'flux'];
+  return markers.some((marker) => value.includes(marker));
+}
+
 function isTextChatModelId(provider, id) {
   const value = String(id || '').toLowerCase();
-  if (!value) return false;
+  if (!value || hasNonChatModelMarker(value)) return false;
   // Gemini's native generateContent capability is checked separately below.
-  // Every other catalog uses a positive provider-specific language-model
-  // family allow-list, including OpenRouter after its server-side filter.
-  const nonChatMarkers = ['embedding', 'embed', 'transcrib', 'speech', 'whisper', 'tts', 'audio', 'moderation', 'rerank', 'dall', 'image', 'imagen', 'stable-diffusion', 'midjourney', 'flux'];
-  if (nonChatMarkers.some((marker) => value.includes(marker))) return false;
+  // Catalogs without structured capability metadata use a conservative,
+  // provider-specific language-model family allow-list.
   if (provider.catalogFormat === 'gemini') return true;
   return Array.isArray(provider.chatIdMarkers) && provider.chatIdMarkers
     .some((marker) => value.includes(marker));
+}
+
+function isTextChatCatalogModel(provider, model) {
+  const id = modelId(model, provider.catalogFormat === 'gemini');
+  if (!id || hasNonChatModelMarker(id)) return false;
+  if (!provider.serverSideCatalogFilters) return isTextChatModelId(provider, id);
+
+  // OpenRouter publishes machine-readable architecture metadata. Use that
+  // instead of a model-family allow-list so newly released families appear
+  // automatically, while audio/image-generation records remain excluded.
+  const architecture = model && model.architecture;
+  const inputs = architecture && architecture.input_modalities;
+  const outputs = architecture && architecture.output_modalities;
+  return Array.isArray(inputs) && inputs.includes('text') &&
+    Array.isArray(outputs) && outputs.length > 0 &&
+    outputs.every((modality) => modality === 'text');
 }
 
 function isFreeOpenRouterModel(model) {
@@ -223,8 +243,7 @@ function normalizedModelIds(provider, models, predicate) {
 }
 
 function allModelPredicate(provider, model) {
-  const id = modelId(model, provider.catalogFormat === 'gemini');
-  if (!isTextChatModelId(provider, id)) return false;
+  if (!isTextChatCatalogModel(provider, model)) return false;
   if (provider.catalogFormat !== 'gemini') return true;
   // Gemini exposes models for other APIs too. Restrict its native catalog to
   // models that can serve the text-generation route used by this application.
