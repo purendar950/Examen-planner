@@ -22,6 +22,8 @@ const REFRESHABLE_PROVIDERS = {
     modelField: 'bynaraModel',
     catalogUrl: 'https://router.bynara.id/v1/models',
     catalogFormat: 'openai',
+    permissiveTextChat: true,
+    freePlanCatalog: true,
     chatIdMarkers: ['mistral', 'tencent', 'qwen', 'deepseek', 'glm', 'kimi', 'minimax', 'gemma', 'llama'],
   },
   mistral: {
@@ -168,21 +170,71 @@ function isTextChatModelId(provider, id) {
 function isTextChatCatalogModel(provider, model) {
   const id = modelId(model, provider.catalogFormat === 'gemini');
   if (!id || hasNonChatModelMarker(id)) return false;
-  if (!provider.serverSideCatalogFilters) return isTextChatModelId(provider, id);
 
-  // OpenRouter publishes machine-readable architecture metadata. Use that
-  // instead of a model-family allow-list so newly released families appear
-  // automatically, while audio/image-generation records remain excluded.
-  const architecture = model && model.architecture;
-  const inputs = architecture && architecture.input_modalities;
-  const outputs = architecture && architecture.output_modalities;
-  return Array.isArray(inputs) && inputs.includes('text') &&
-    Array.isArray(outputs) && outputs.length > 0 &&
-    outputs.every((modality) => modality === 'text');
+  if (provider.serverSideCatalogFilters) {
+    // OpenRouter publishes machine-readable architecture metadata. Use that
+    // instead of a model-family allow-list so newly released families appear
+    // automatically, while audio/image-generation records remain excluded.
+    const architecture = model && model.architecture;
+    const inputs = architecture && architecture.input_modalities;
+    const outputs = architecture && architecture.output_modalities;
+    return Array.isArray(inputs) && inputs.includes('text') &&
+      Array.isArray(outputs) && outputs.length > 0 &&
+      outputs.every((modality) => modality === 'text');
+  }
+
+  // Router-style aggregators host many families under one catalog, so a fixed
+  // family allow-list drops legitimate new chat models. When enabled, accept
+  // any id that is not a known non-chat (embedding/audio/image) model.
+  if (provider.permissiveTextChat) return true;
+  return isTextChatModelId(provider, id);
 }
 
-function isFreeOpenRouterModel(model) {
-  return hasModelId(model) && isVerifiedFreeModel(model);
+// Normalized field names (letters/digits only) that commonly carry a plan or
+// access tier on router-style catalogs.
+const PLAN_FREE_SCALAR_KEYS = ['access', 'tier', 'plan', 'plantype', 'pricingtier', 'category', 'group', 'visibility', 'scope', 'availability', 'minplan', 'requiredplan', 'billing'];
+const PLAN_FREE_ARRAY_KEYS = ['tags', 'categories', 'plans', 'tiers', 'groups', 'labels', 'accesslevels'];
+const PLAN_FREE_NESTED_KEYS = ['plan', 'tier', 'pricing', 'access'];
+const PLAN_FREE_BOOL_KEYS = ['isfree', 'free', 'freeplan'];
+
+function normToken(value) {
+  if (value === null || value === undefined || typeof value === 'boolean') return '';
+  return String(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function tokenIsFreePlan(value) {
+  // "free for paid" normalizes to "freeforpaid" (contains "paid") and is
+  // rejected, so limited-time promos requiring a balance never count as free.
+  const token = normToken(value);
+  if (!token || token.includes('paid') || token.includes('promo')) return false;
+  return token === 'free' || token.startsWith('free');
+}
+
+function isPlanFreeModel(model) {
+  if (!model || typeof model !== 'object') return false;
+  return Object.keys(model).some((key) => {
+    const normKey = normToken(key);
+    const value = model[key];
+    if (typeof value === 'boolean') return value && PLAN_FREE_BOOL_KEYS.includes(normKey);
+    if (typeof value === 'string' || typeof value === 'number') {
+      return PLAN_FREE_SCALAR_KEYS.includes(normKey) && tokenIsFreePlan(value);
+    }
+    if (Array.isArray(value)) {
+      return PLAN_FREE_ARRAY_KEYS.includes(normKey) &&
+        value.some((entry) => (typeof entry === 'string' || typeof entry === 'number') && tokenIsFreePlan(entry));
+    }
+    if (value && typeof value === 'object') {
+      return PLAN_FREE_NESTED_KEYS.includes(normKey) &&
+        ['name', 'slug', 'id', 'type', 'tier', 'level'].some((sub) => tokenIsFreePlan(value[sub]));
+    }
+    return false;
+  });
+}
+
+function isFreeCatalogModel(provider, model) {
+  if (!hasModelId(model)) return false;
+  if (isVerifiedFreeModel(model)) return true;
+  return !!provider.freePlanCatalog && isPlanFreeModel(model);
 }
 
 function isVerifiedFreeModel(model) {
@@ -253,18 +305,26 @@ function allModelPredicate(provider, model) {
 
 function freeModelPredicate(provider, model) {
   if (!allModelPredicate(provider, model)) return false;
-  return provider.serverSideCatalogFilters
-    ? isFreeOpenRouterModel(model)
-    : isVerifiedFreeModel(model);
+  return isFreeCatalogModel(provider, model);
 }
 
 function catalogModelsFromOpenAiPayload(provider, payload, mode) {
   if (!payload || !Array.isArray(payload.data)) {
     throw new Error(provider.label + ' catalog response is missing its model list.');
   }
-  return normalizedModelIds(provider, payload.data, mode === 'free'
+  const models = normalizedModelIds(provider, payload.data, mode === 'free'
     ? (model) => freeModelPredicate(provider, model)
     : (model) => allModelPredicate(provider, model));
+  if (mode === 'free' && !models.length && provider.freePlanCatalog) {
+    const seen = new Set();
+    payload.data.forEach((item) => {
+      if (item && typeof item === 'object') Object.keys(item).forEach((key) => seen.add(String(key)));
+    });
+    const fields = [...seen].sort().join(', ').slice(0, 180) || 'none';
+    throw new Error(provider.label + ' catalog exposed no zero price or Free-plan signal (fields seen: ' + fields +
+      '). Confirm which field marks Free-plan models, or add this provider to the free & paid list.');
+  }
+  return models;
 }
 
 async function fetchOpenAiModels(provider, config, fetchImpl, mode = 'free') {
@@ -526,7 +586,11 @@ module.exports = {
   fetchOpenAiModels,
   fetchOpenRouterFreeModels,
   fetchOpenRouterModels,
-  isFreeOpenRouterModel,
+  catalogModelsFromOpenAiPayload,
+  freeModelPredicate,
+  isFreeCatalogModel,
+  isPlanFreeModel,
+  isTextChatCatalogModel,
   isVerifiedFreeModel,
   syncFreeModels,
   syncModelCatalogs,

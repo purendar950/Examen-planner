@@ -947,7 +947,7 @@ _opencode_server_model_cache = {
 _opencode_server_model_lock = threading.Lock()
 # Exposed only through /health. This fixed, non-sensitive marker lets operators
 # confirm that Render is serving the diagnostic-aware Study AI proxy revision.
-_OPENCODE_STUDY_PROTOCOL = "server-catalog-nonblocking-stop-promptasync-stream-v2"
+_OPENCODE_STUDY_PROTOCOL = "server-catalog-nonblocking-stop-promptasync-stream-freeplan-v3"
 # A separately deployed OpenCode server (for example on a free tier that sleeps
 # when idle, restarts, or is briefly OOM-killed) commonly answers requests with
 # a transient 502/503/504 from its router, or refuses/does not answer the
@@ -4629,7 +4629,7 @@ def _ai_key_count(ai):
 # refreshes fail closed: the live response must explicitly prove zero input,
 # output, and (when present) request pricing before it can replace a model list.
 MODEL_CATALOG_REFRESH_PROVIDERS = {
-    "bynara": {"label": "Bynara", "catalog_url": "https://router.bynara.id/v1/models", "keyField": "bynaraApiKeys", "modelField": "bynaraModel", "catalog_format": "openai", "chat_id_markers": ("mistral", "tencent", "qwen", "deepseek", "glm", "kimi", "minimax", "gemma", "llama")},
+    "bynara": {"label": "Bynara", "catalog_url": "https://router.bynara.id/v1/models", "keyField": "bynaraApiKeys", "modelField": "bynaraModel", "catalog_format": "openai", "permissive_text_chat": True, "free_plan_metadata": True, "chat_id_markers": ("mistral", "tencent", "qwen", "deepseek", "glm", "kimi", "minimax", "gemma", "llama")},
     "mistral": {"label": "Mistral", "catalog_url": "https://api.mistral.ai/v1/models", "keyField": "mistralApiKeys", "modelField": "mistralModel", "catalog_format": "openai", "chat_id_markers": ("mistral", "codestral", "ministral", "devstral", "pixtral")},
     "cerebras": {"label": "Cerebras", "catalog_url": "https://api.cerebras.ai/v1/models", "keyField": "cerebrasApiKeys", "modelField": "cerebrasModel", "catalog_format": "openai", "chat_id_markers": ("gpt-oss", "zai", "gemma", "llama", "qwen")},
     "openrouter": {"label": "OpenRouter", "catalog_url": "https://openrouter.ai/api/v1/models", "keyField": "openrouterApiKeys", "modelField": "openrouterModel", "catalog_format": "openai", "server_filters": True, "chat_id_markers": ("gpt", "claude", "gemini", "mistral", "qwen", "llama", "deepseek", "gemma", "nemotron", "glm", "minimax", "kimi", "cohere", "command", "grok", "tencent", "z-ai")},
@@ -4743,19 +4743,90 @@ def _is_text_chat_catalog_item(provider, item):
     non_chat_markers = ("embedding", "embed", "transcrib", "speech", "whisper", "tts", "audio", "moderation", "rerank", "dall", "image", "imagen", "stable-diffusion", "midjourney", "flux")
     if any(marker in lowered for marker in non_chat_markers):
         return False
-    if not provider.get("server_filters"):
-        return _is_text_chat_model_id(provider, model_id)
+    if provider.get("server_filters"):
+        architecture = item.get("architecture") if isinstance(item, dict) else None
+        inputs = architecture.get("input_modalities") if isinstance(architecture, dict) else None
+        outputs = architecture.get("output_modalities") if isinstance(architecture, dict) else None
+        return (
+            isinstance(inputs, list)
+            and "text" in inputs
+            and isinstance(outputs, list)
+            and bool(outputs)
+            and all(modality == "text" for modality in outputs)
+        )
 
-    architecture = item.get("architecture") if isinstance(item, dict) else None
-    inputs = architecture.get("input_modalities") if isinstance(architecture, dict) else None
-    outputs = architecture.get("output_modalities") if isinstance(architecture, dict) else None
-    return (
-        isinstance(inputs, list)
-        and "text" in inputs
-        and isinstance(outputs, list)
-        and bool(outputs)
-        and all(modality == "text" for modality in outputs)
-    )
+    # Router-style aggregators expose many model families under one key, so a
+    # fixed family allow-list drops legitimate new chat models. When a provider
+    # opts into permissive detection, accept every id that is not a known
+    # non-chat (embedding/audio/image) model.
+    if provider.get("permissive_text_chat"):
+        return True
+    return _is_text_chat_model_id(provider, model_id)
+
+
+# Normalized field names (letters/digits only) that commonly carry a plan or
+# access tier on router-style catalogs. Values are compared with the same
+# normalization so "Free", "free_plan", and "freeTier" all match.
+_PLAN_FREE_SCALAR_KEYS = (
+    "access", "tier", "plan", "plantype", "pricingtier", "category", "group",
+    "visibility", "scope", "availability", "minplan", "requiredplan", "billing",
+)
+_PLAN_FREE_ARRAY_KEYS = (
+    "tags", "categories", "plans", "tiers", "groups", "labels", "accesslevels",
+)
+_PLAN_FREE_NESTED_KEYS = ("plan", "tier", "pricing", "access")
+_PLAN_FREE_BOOL_KEYS = ("isfree", "free", "freeplan")
+
+
+def _norm_token(value):
+    if value is None or isinstance(value, bool):
+        return ""
+    return "".join(ch for ch in str(value).lower() if ch.isalnum())
+
+
+def _token_is_free_plan(value):
+    """True only for an explicit free-plan signal, never a paid/promo tier.
+
+    "free for paid" normalizes to "freeforpaid" (contains "paid") and is
+    rejected, so limited-time promos requiring a balance never count as free.
+    """
+    token = _norm_token(value)
+    if not token or "paid" in token or "promo" in token:
+        return False
+    return token == "free" or token.startswith("free")
+
+
+def _is_plan_free_model(item):
+    """Detect Free-plan models from schema-agnostic access/tier metadata."""
+    if not isinstance(item, dict):
+        return False
+    for key, value in item.items():
+        norm_key = _norm_token(key)
+        if isinstance(value, bool):
+            if value and norm_key in _PLAN_FREE_BOOL_KEYS:
+                return True
+        elif isinstance(value, (str, int, float)):
+            if norm_key in _PLAN_FREE_SCALAR_KEYS and _token_is_free_plan(value):
+                return True
+        elif isinstance(value, list):
+            if norm_key in _PLAN_FREE_ARRAY_KEYS and any(
+                _token_is_free_plan(entry) for entry in value if isinstance(entry, (str, int, float))
+            ):
+                return True
+        elif isinstance(value, dict):
+            if norm_key in _PLAN_FREE_NESTED_KEYS and any(
+                _token_is_free_plan(value.get(sub)) for sub in ("name", "slug", "id", "type", "tier", "level")
+            ):
+                return True
+    return False
+
+
+def _catalog_model_is_free(provider, item):
+    """A model is free when its price is a verified zero, or (for router-style
+    providers) when the catalog carries an explicit Free-plan/tier signal."""
+    if _has_verified_zero_pricing(item):
+        return True
+    return bool(provider.get("free_plan_metadata")) and _is_plan_free_model(item)
 
 
 def _has_verified_zero_pricing(item):
@@ -4800,13 +4871,23 @@ def _openai_catalog_models(provider, payload, mode):
     if not isinstance(data, list):
         raise RuntimeError("%s catalog response is missing its model list." % provider["label"])
     models = []
+    seen_keys = set()
     for item in data:
+        if isinstance(item, dict):
+            seen_keys.update(str(key) for key in item.keys())
         model_id = _catalog_model_id(item)
         if not _is_text_chat_catalog_item(provider, item):
             continue
-        if mode == "free" and not _has_verified_zero_pricing(item):
+        if mode == "free" and not _catalog_model_is_free(provider, item):
             continue
         models.append(model_id)
+    if mode == "free" and not models and provider.get("free_plan_metadata"):
+        fields = ", ".join(sorted(seen_keys))[:180] or "none"
+        raise RuntimeError(
+            "%s catalog exposed no zero price or Free-plan signal (fields seen: %s). "
+            "Confirm which field marks Free-plan models, or add this provider to the free & paid list."
+            % (provider["label"], fields)
+        )
     return sorted(set(models))
 
 
