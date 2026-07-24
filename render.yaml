@@ -69,6 +69,10 @@ services:
         value: "true"
       - key: OPENCODE_FREE_MODEL_REFRESH_SEC
         value: "3600"
+      # Check the configured OpenCode server's provider catalog every five
+      # minutes. Only models it confirms are exposed in the Study picker.
+      - key: OPENCODE_SERVER_MODEL_REFRESH_SEC
+        value: "300"
       - key: OPENCODE_FREE_MODEL_PREFERENCE
         value: "deepseek-v4-flash-free,mimo-v2.5-free,ling-3.0-flash-free,nemotron-3-ultra-free,laguna-s-2.1-free,north-mini-code-free,big-pickle"
       # Allow authenticated Study AI users to select OpenCode. Credentials stay
