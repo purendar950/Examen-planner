@@ -947,7 +947,18 @@ _opencode_server_model_cache = {
 _opencode_server_model_lock = threading.Lock()
 # Exposed only through /health. This fixed, non-sensitive marker lets operators
 # confirm that Render is serving the diagnostic-aware Study AI proxy revision.
-_OPENCODE_STUDY_PROTOCOL = "server-catalog-diagnostics-v1"
+_OPENCODE_STUDY_PROTOCOL = "server-catalog-cold-start-retry-v1"
+# A separately deployed OpenCode server (for example on a free tier that sleeps
+# when idle) commonly answers the FIRST request after inactivity with a
+# transient 502/503/504 from its router, or briefly refuses/does not answer the
+# connection while it boots. Session creation happens before any model is used,
+# so give it a few bounded retries with backoff to let the service wake instead
+# of failing immediately. A genuinely broken service still fails after retries.
+_OPENCODE_SESSION_RETRY_STATUSES = (502, 503, 504)
+_OPENCODE_SESSION_MAX_ATTEMPTS = max(1, min(
+    int(os.environ.get("OPENCODE_SESSION_MAX_ATTEMPTS", "3")), 6))
+_OPENCODE_SESSION_RETRY_BACKOFF = max(0.5, min(
+    float(os.environ.get("OPENCODE_SESSION_RETRY_BACKOFF", "2.0")), 10.0))
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
@@ -1679,6 +1690,50 @@ def _opencode_json_request(method, url, config, stage, payload=None, expected_ty
     return data
 
 
+def _opencode_sleep_unless_cancelled(seconds, cancel_event):
+    """Sleep in short slices so a stopped job stops waiting between retries."""
+    deadline = time.time() + max(0.0, seconds)
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return
+        if cancel_event is not None and cancel_event.is_set():
+            return
+        time.sleep(min(0.25, remaining))
+
+
+def _opencode_create_session(config, title, stage, cancel_event=None):
+    """Create an OpenCode session, tolerating a cold-starting backend.
+
+    Session creation carries no model, so a failure here is a service/router
+    problem, not a model problem. A sleeping free tier typically answers the
+    first post-idle request with a transient 502/503/504 (or a brief connection
+    error) while it boots, so retry a bounded number of times with backoff. A
+    persistently broken service still surfaces its safe diagnostic after the
+    retries are exhausted.
+    """
+    attempts = _OPENCODE_SESSION_MAX_ATTEMPTS
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return _opencode_json_request(
+                "POST", config["server_url"] + "/session", config, stage,
+                {"title": title})
+        except _OpenCodePlanError as exc:
+            last_error = exc
+            transient = (exc.upstream_status in _OPENCODE_SESSION_RETRY_STATUSES
+                         or exc.code in ("opencode_timeout", "opencode_unavailable"))
+            cancelled = cancel_event is not None and cancel_event.is_set()
+            if not transient or cancelled or attempt == attempts - 1:
+                raise
+            delay = _OPENCODE_SESSION_RETRY_BACKOFF * (attempt + 1)
+            log.info("OpenCode %s transient failure (status=%s); waking retry %d/%d after %.1fs",
+                     stage, exc.upstream_status or exc.code, attempt + 1,
+                     attempts - 1, delay)
+            _opencode_sleep_unless_cancelled(delay, cancel_event)
+    raise last_error
+
+
 def _opencode_text_parts(parts):
     """Extract only text parts from an OpenCode assistant message."""
     return "".join(
@@ -1854,13 +1909,8 @@ def _opencode_plan(prompt, config):
     """Run a one-off, no-tools OpenCode *plan* session and then delete it."""
     session_id = ""
     try:
-        session = _opencode_json_request(
-            "POST",
-            config["server_url"] + "/session",
-            config,
-            "session creation",
-            {"title": "ExamZen admin planning request"},
-        )
+        session = _opencode_create_session(
+            config, "ExamZen admin planning request", "session creation")
         session_id = str(session.get("id") or "").strip()
         if not session_id:
             log.warning("OpenCode session creation response did not include an ID")
@@ -1932,9 +1982,9 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
     session_id = ""
     failure = None
     try:
-        session = _opencode_json_request(
-            "POST", config["server_url"] + "/session", config,
-            "study session creation", {"title": "ExamZen Study AI"})
+        session = _opencode_create_session(
+            config, "ExamZen Study AI", "study session creation",
+            cancel_event=cancel_event)
         session_id = str(session.get("id") or "").strip()
         if not session_id:
             raise _OpenCodePlanError(
