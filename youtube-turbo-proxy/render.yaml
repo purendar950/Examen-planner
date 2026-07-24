@@ -40,5 +40,14 @@ services:
         sync: false
       - key: OPENCODE_DIRECTORY
         sync: false
+      # OpenCode Zen optional automatic temporary-free-model selector. It reads
+      # the public Zen catalog hourly and uses OPENCODE_MODEL_ID only as a
+      # fallback when no supported free model is listed.
+      - key: OPENCODE_AUTO_FREE_MODEL
+        value: "true"
+      - key: OPENCODE_FREE_MODEL_REFRESH_SEC
+        value: "3600"
+      - key: OPENCODE_FREE_MODEL_PREFERENCE
+        value: "deepseek-v4-flash-free,mimo-v2.5-free,ling-3.0-flash-free,nemotron-3-ultra-free,laguna-s-2.1-free,north-mini-code-free,big-pickle"
       - key: OPENCODE_TIMEOUT
         value: "90"
