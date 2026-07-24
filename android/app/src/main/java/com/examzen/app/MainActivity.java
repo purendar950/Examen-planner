@@ -1,5 +1,6 @@
 package com.examzen.app;
 
+import com.examzen.app.BuildConfig;
 import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.net.Uri;
