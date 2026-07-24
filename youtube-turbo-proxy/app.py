@@ -947,7 +947,7 @@ _opencode_server_model_cache = {
 _opencode_server_model_lock = threading.Lock()
 # Exposed only through /health. This fixed, non-sensitive marker lets operators
 # confirm that Render is serving the diagnostic-aware Study AI proxy revision.
-_OPENCODE_STUDY_PROTOCOL = "server-catalog-nonblocking-stop-v1"
+_OPENCODE_STUDY_PROTOCOL = "server-catalog-nonblocking-stop-promptasync-stream-v2"
 # A separately deployed OpenCode server (for example on a free tier that sleeps
 # when idle, restarts, or is briefly OOM-killed) commonly answers requests with
 # a transient 502/503/504 from its router, or refuses/does not answer the
@@ -982,6 +982,18 @@ _OPENCODE_REPLY_POLL_ATTEMPTS = max(1, min(
     int(os.environ.get("OPENCODE_REPLY_POLL_ATTEMPTS", "6")), 30))
 _OPENCODE_REPLY_POLL_INTERVAL = max(0.25, min(
     float(os.environ.get("OPENCODE_REPLY_POLL_INTERVAL", "1.5")), 10.0))
+# Poll-based streaming for the OpenCode transport: the blocking POST /message
+# only returns once generation is finished, so it can never stream. Sending via
+# the non-blocking POST /prompt_async instead lets us poll GET /message while
+# the model writes and forward the growing text as deltas. Generation now
+# happens WHILE we poll, so this is bounded by a wall-clock deadline rather than
+# a fixed attempt count. A short interval keeps the stream feeling live without
+# hammering a small free-tier backend.
+_OPENCODE_STREAM_POLL_INTERVAL = max(0.4, min(
+    float(os.environ.get("OPENCODE_STREAM_POLL_INTERVAL", "1.2")), 10.0))
+_OPENCODE_STREAM_DEADLINE = max(
+    _OPENCODE_TIMEOUT,
+    min(int(os.environ.get("OPENCODE_STREAM_DEADLINE", str(_OPENCODE_TIMEOUT))), 600))
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
@@ -1853,6 +1865,57 @@ def _opencode_send_study_message(session_id, messages, config, json_mode=False,
     )
 
 
+def _opencode_send_study_prompt_async(session_id, messages, config, json_mode=False,
+                                      max_tokens=2048):
+    """Start a Study AI reply WITHOUT blocking on generation (HTTP 204).
+
+    Uses the same plan-agent, no-tools contract as _opencode_send_study_message
+    but returns as soon as the reply is queued, so the caller can poll the
+    growing assistant text and stream it. Cannot use _opencode_json_request
+    because a 204 has no JSON body. Raises _OpenCodePlanError on failure; an
+    upstream_status of 404/405 means the server lacks prompt_async and the caller
+    should fall back to the blocking send. Never logs or returns upstream
+    bodies/credentials.
+    """
+    url = "%s/session/%s/prompt_async" % (config["server_url"], quote(session_id, safe=""))
+    stage = "study message creation"
+    activity = _opencode_stage_label(stage)
+    payload = {
+        "parts": [{"type": "text", "text": _opencode_study_prompt(
+            messages, json_mode=json_mode, max_tokens=max_tokens)}],
+        "model": {"providerID": config["provider_id"], "modelID": config["model_id"]},
+        "agent": "plan",
+        "tools": dict(_OPENCODE_PLAN_DISABLED_TOOLS),
+    }
+    try:
+        response = requests.post(
+            url,
+            auth=(config["username"], config["password"]),
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            params={"directory": config["directory"]},
+            json=payload,
+            timeout=_OPENCODE_SESSION_TIMEOUT,
+        )
+    except requests.Timeout as exc:
+        log.warning("OpenCode %s timed out (%s)", stage, type(exc).__name__)
+        raise _OpenCodePlanError(
+            "opencode_timeout", "OpenCode did not respond while %s." % activity,
+            stage=stage) from exc
+    except requests.RequestException as exc:
+        log.warning("OpenCode %s request failed (%s)", stage, type(exc).__name__)
+        raise _OpenCodePlanError(
+            "opencode_unavailable", "OpenCode is temporarily unavailable while %s." % activity,
+            stage=stage) from exc
+    if not 200 <= response.status_code < 300:
+        log.warning("OpenCode %s returned HTTP %s (provider=%s, model=%s)",
+                    stage, response.status_code, config.get("provider_id", ""),
+                    config.get("model_id", ""))
+        raise _OpenCodePlanError(
+            "opencode_upstream_error", _opencode_failure_detail(stage, response.status_code),
+            upstream_status=response.status_code, stage=stage)
+    return True
+
+
 def _opencode_part_types(parts):
     """Ordered, de-duplicated list of part type names (never their content)."""
     types = []
@@ -1966,6 +2029,92 @@ def _opencode_assistant_text(session_id, message_id, config, study=False,
                     stage, ",".join(last_types) or "none", last_error or "none",
                     config.get("model_id", ""))
 
+    if last_error:
+        detail = ("OpenCode's model returned an error instead of an answer "
+                  "(it may be rate limited or unavailable). Please try again "
+                  "shortly or pick another model.")
+    elif finished:
+        detail = ("OpenCode's model finished without returning any text. "
+                  "Please try again or select a different model.")
+    else:
+        detail = ("OpenCode returned an empty Study AI response." if study
+                  else "OpenCode returned an empty planning response.")
+    raise _OpenCodePlanError("opencode_empty_response", detail, stage=stage)
+
+
+def _opencode_latest_assistant(session_path, message_id, config, stage):
+    """Return (text, info, part_types) for the target — or, when message_id is
+    empty, the most recent — assistant message from the session message LIST.
+
+    Poll-based streaming pairs with the non-blocking prompt_async send, which
+    does not return the assistant message id, so the newest assistant entry is
+    used. Returns ("", None, ()) when no assistant message exists yet so the
+    caller keeps polling. Never logs or returns upstream response bodies.
+    """
+    messages = _opencode_json_request(
+        "GET", session_path, config, stage, expected_type=list)
+    for entry in reversed(messages):
+        if not isinstance(entry, dict):
+            continue
+        info = entry.get("info") if isinstance(entry.get("info"), dict) else {}
+        if info.get("role") != "assistant":
+            continue
+        if message_id and str(info.get("id") or "") != message_id:
+            continue
+        parts = entry.get("parts")
+        return _opencode_text_parts(parts), info, _opencode_part_types(parts)
+    return "", None, ()
+
+
+def _opencode_stream_assistant_text(session_id, message_id, config, study=False,
+                                    cancel_event=None):
+    """Generator that YIELDS assistant text deltas as an OpenCode reply grows.
+
+    Used with the non-blocking prompt_async send: generation happens WHILE we
+    poll, so each poll re-reads the assistant message and yields only the newly
+    appended text. Bounded by a wall-clock deadline (generation time, not a
+    fixed attempt count) and stops early on completion, error, or cancellation.
+    Mirrors _opencode_assistant_text's safe diagnostics and, if NO text is ever
+    produced, raises the same _OpenCodePlanError so callers behave identically to
+    the blocking reader. Once any delta has been yielded a trailing error or a
+    clean finish simply ends the stream (bytes are already on the wire).
+    """
+    session_path = "%s/session/%s/message" % (config["server_url"], quote(session_id, safe=""))
+    stage = "study message retrieval" if study else "message retrieval"
+    deadline = time.time() + _OPENCODE_STREAM_DEADLINE
+    emitted = 0
+    last_types = ()
+    last_error = ""
+    finished = False
+    while True:
+        answer, info, part_types = _opencode_latest_assistant(
+            session_path, message_id, config, stage)
+        if answer and len(answer) > emitted:
+            yield answer[emitted:]
+            emitted = len(answer)
+        if part_types:
+            last_types = part_types
+        error_label = _opencode_message_error(info)
+        if error_label:
+            last_error = error_label
+        finished = _opencode_message_completed(info)
+        # Stop once the reply is done (or errored). With text already emitted the
+        # generator just ends; with none, the error handling below runs.
+        if finished or last_error:
+            break
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        if time.time() >= deadline:
+            break
+        _opencode_sleep_unless_cancelled(_OPENCODE_STREAM_POLL_INTERVAL, cancel_event)
+
+    if emitted:
+        return
+
+    if last_types or last_error:
+        log.warning("OpenCode %s produced no text (parts=%s, error=%s, model=%s)",
+                    stage, ",".join(last_types) or "none", last_error or "none",
+                    config.get("model_id", ""))
     if last_error:
         detail = ("OpenCode's model returned an error instead of an answer "
                   "(it may be rate limited or unavailable). Please try again "
@@ -2163,6 +2312,126 @@ def _opencode_chat(messages, ai, max_tokens=2048, json_mode=False,
             messages, ai, max_tokens=max_tokens, json_mode=json_mode,
             cancel_event=cancel_event, allow_model_fallback=False)
     raise failure
+
+
+def _opencode_stream_once(messages, ai, config, max_tokens, json_mode, cancel_event):
+    """Run ONE isolated Study AI session and YIELD text deltas as it generates.
+
+    Prefers the non-blocking prompt_async send so the reply can be streamed via
+    _opencode_stream_assistant_text. Servers that predate prompt_async answer it
+    with 404/405; those transparently fall back to the original blocking send +
+    single final chunk, so behaviour is never worse than before. The finally
+    block always clears the active session and deletes (aborting if needed) the
+    temporary session, exactly like the blocking _opencode_chat.
+    """
+    session_id = ""
+    try:
+        if cancel_event is not None and cancel_event.is_set():
+            return
+        session = _opencode_create_session(
+            config, "ExamZen Study AI", "study session creation",
+            cancel_event=cancel_event)
+        session_id = str(session.get("id") or "").strip()
+        if not session_id:
+            raise _OpenCodePlanError(
+                "opencode_upstream_error", "OpenCode returned an invalid session response.",
+                stage="study session creation")
+        _opencode_set_active_session(ai, session_id)
+        if cancel_event is not None and cancel_event.is_set():
+            return
+
+        stream_supported = True
+        try:
+            _opencode_send_study_prompt_async(
+                session_id, messages, config, json_mode=json_mode, max_tokens=max_tokens)
+        except _OpenCodePlanError as exc:
+            # Only a missing endpoint means "no streaming here"; every other
+            # failure (model rejection, auth, rate limit) is real and must
+            # surface so the model-fallback wrapper can act on it.
+            if exc.upstream_status in (404, 405):
+                stream_supported = False
+            else:
+                raise
+        if cancel_event is not None and cancel_event.is_set():
+            return
+
+        if stream_supported:
+            for piece in _opencode_stream_assistant_text(
+                    session_id, "", config, study=True, cancel_event=cancel_event):
+                yield piece
+            return
+
+        # Older server: keep the pre-streaming contract (block, then emit once).
+        message = _opencode_send_study_message(
+            session_id, messages, config, json_mode=json_mode, max_tokens=max_tokens)
+        message_info = message.get("info") if isinstance(message.get("info"), dict) else {}
+        message_id = str(message_info.get("id") or message.get("id") or "").strip()
+        if not message_id:
+            raise _OpenCodePlanError(
+                "opencode_upstream_error", "OpenCode returned an invalid message response.",
+                stage="study message creation")
+        if cancel_event is not None and cancel_event.is_set():
+            return
+        answer = _opencode_assistant_text(
+            session_id, message_id, config, study=True, cancel_event=cancel_event)
+        if cancel_event is not None and cancel_event.is_set():
+            return
+        if answer:
+            yield answer
+    finally:
+        if session_id:
+            _opencode_set_active_session(ai, "")
+            _opencode_cleanup_session(session_id, config)
+
+
+def _opencode_chat_stream(messages, ai, max_tokens=2048, json_mode=False,
+                          cancel_event=None):
+    """Streaming twin of _opencode_chat: yields Study AI text as it is written.
+
+    Applies the SAME one-shot model fallback as _opencode_chat (an operator
+    fallback model when a browser-selected Zen model is rejected at message
+    creation), but only before the first delta is yielded — once bytes are on
+    the wire a restart would duplicate output, so a later break just ends the
+    stream.
+    """
+    config = ai.get("opencode_config") or {}
+    if not config:
+        raise RuntimeError("OpenCode Study AI is not configured")
+    if cancel_event is not None and cancel_event.is_set():
+        return
+
+    produced = False
+    failure = None
+    try:
+        for piece in _opencode_stream_once(
+                messages, ai, config, max_tokens, json_mode, cancel_event):
+            produced = True
+            yield piece
+    except _OpenCodePlanError as exc:
+        if produced:
+            raise  # text already streamed; cannot safely restart on a fallback
+        failure = exc
+    if failure is None:
+        return
+
+    fallback_model_id = str(config.get("fallback_model_id") or "").strip()
+    if not (config.get("fallback_model_allowed", True)
+            and fallback_model_id
+            and fallback_model_id != config.get("model_id")
+            and failure.stage == "study message creation"
+            and failure.upstream_status in (400, 404, 422)):
+        raise failure
+    log.warning("OpenCode rejected model %s at study message creation (HTTP %s); retrying fallback %s",
+                config.get("model_id", ""), failure.upstream_status, fallback_model_id)
+    fallback_config = dict(config)
+    fallback_config["model_id"] = fallback_model_id
+    # Mutate the job-local config so metadata truthfully reports the model that
+    # completed the generation, mirroring _opencode_chat.
+    ai["model"] = fallback_model_id
+    ai["opencode_config"] = fallback_config
+    for piece in _opencode_stream_once(
+            messages, ai, fallback_config, max_tokens, json_mode, cancel_event):
+        yield piece
 
 
 def _is_unlimited(uid):
@@ -2458,18 +2727,21 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
     if ai.get("transport") == "opencode":
         if cancel_event is not None and cancel_event.is_set():
             return
-        answer = _opencode_chat(
-            messages, ai, max_tokens=max_tokens, cancel_event=cancel_event)
+        # OpenCode's blocking POST /message can't stream, so _opencode_chat_stream
+        # sends via the non-blocking prompt_async and forwards the reply as it is
+        # written (falling back to a single final chunk on older servers). It
+        # raises on a truly empty reply, matching the previous behaviour.
+        produced = False
+        for piece in _opencode_chat_stream(
+                messages, ai, max_tokens=max_tokens, cancel_event=cancel_event):
+            produced = True
+            yield piece
         if cancel_event is not None and cancel_event.is_set():
             return
-        if not answer:
+        if not produced:
             raise RuntimeError("OpenCode returned an empty Study AI response")
         if meta is not None:
             meta["finish_reason"] = "stop"
-        # OpenCode has no token-SSE adapter. Yielding one final piece preserves
-        # the existing resumable job and rendering contracts without pretending
-        # that its blocking session API streams tokens.
-        yield answer
         return
 
     chain = [ai]
@@ -2480,14 +2752,16 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
         if cancel_event is not None and cancel_event.is_set():
             return
         if cur.get("transport") == "opencode":
-            answer = _opencode_chat(
-                messages, cur, max_tokens=max_tokens, cancel_event=cancel_event)
+            produced = False
+            for piece in _opencode_chat_stream(
+                    messages, cur, max_tokens=max_tokens, cancel_event=cancel_event):
+                produced = True
+                yield piece
             if cancel_event is not None and cancel_event.is_set():
                 return
-            if answer:
+            if produced:
                 if meta is not None:
                     meta["finish_reason"] = "stop"
-                yield answer
                 return
             last = "OpenCode returned an empty Study AI response"
             continue
