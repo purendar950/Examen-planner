@@ -947,7 +947,7 @@ _opencode_server_model_cache = {
 _opencode_server_model_lock = threading.Lock()
 # Exposed only through /health. This fixed, non-sensitive marker lets operators
 # confirm that Render is serving the diagnostic-aware Study AI proxy revision.
-_OPENCODE_STUDY_PROTOCOL = "server-catalog-empty-reply-poll-v1"
+_OPENCODE_STUDY_PROTOCOL = "server-catalog-bounded-retry-v1"
 # A separately deployed OpenCode server (for example on a free tier that sleeps
 # when idle, restarts, or is briefly OOM-killed) commonly answers requests with
 # a transient 502/503/504 from its router, or refuses/does not answer the
@@ -962,6 +962,17 @@ _OPENCODE_SESSION_MAX_ATTEMPTS = max(1, min(
     int(os.environ.get("OPENCODE_SESSION_MAX_ATTEMPTS", "5")), 10))
 _OPENCODE_SESSION_RETRY_BACKOFF = max(0.5, min(
     float(os.environ.get("OPENCODE_SESSION_RETRY_BACKOFF", "3.0")), 15.0))
+# Session creation is a lightweight call (no model runs yet), so it must fail
+# fast when the backend is down instead of holding a worker for the full
+# generation timeout. A short PER-ATTEMPT timeout lets a hung connection be
+# retried quickly, and a total wall-clock DEADLINE caps the whole retry loop so
+# a persistently unreachable server can never tie up a worker for minutes (which
+# would starve other requests, including /health). Both are env-tunable.
+_OPENCODE_SESSION_TIMEOUT = max(3, min(
+    int(os.environ.get("OPENCODE_SESSION_TIMEOUT", "15")), _OPENCODE_TIMEOUT))
+_OPENCODE_SESSION_TOTAL_DEADLINE = max(
+    _OPENCODE_SESSION_TIMEOUT,
+    min(int(os.environ.get("OPENCODE_SESSION_TOTAL_DEADLINE", "60")), 240))
 # OpenCode may return from message creation before the assistant reply has
 # finished generating (or a slow free model may still be streaming), so the very
 # first read of the reply can legitimately contain no text yet. Poll a bounded
@@ -1722,15 +1733,19 @@ def _opencode_create_session(config, title, stage, cancel_event=None):
     first post-idle request with a transient 502/503/504 (or a brief connection
     error) while it boots, so retry a bounded number of times with backoff. A
     persistently broken service still surfaces its safe diagnostic after the
-    retries are exhausted.
+    retries are exhausted. Each attempt uses a short timeout and the whole loop
+    is bounded by a total deadline, so an unreachable backend fails within a
+    bounded time instead of holding the worker for minutes (which would starve
+    other requests, including /health).
     """
     attempts = _OPENCODE_SESSION_MAX_ATTEMPTS
+    deadline = time.time() + _OPENCODE_SESSION_TOTAL_DEADLINE
     last_error = None
     for attempt in range(attempts):
         try:
             return _opencode_json_request(
                 "POST", config["server_url"] + "/session", config, stage,
-                {"title": title})
+                {"title": title}, timeout=_OPENCODE_SESSION_TIMEOUT)
         except _OpenCodePlanError as exc:
             last_error = exc
             transient = (exc.upstream_status in _OPENCODE_SESSION_RETRY_STATUSES
@@ -1739,6 +1754,10 @@ def _opencode_create_session(config, title, stage, cancel_event=None):
             if not transient or cancelled or attempt == attempts - 1:
                 raise
             delay = _OPENCODE_SESSION_RETRY_BACKOFF * (attempt + 1)
+            # Never begin a new (slow) attempt once the total budget would be
+            # exceeded; surface the failure now instead of hanging the worker.
+            if time.time() + delay >= deadline:
+                raise
             log.info("OpenCode %s transient failure (status=%s); waking retry %d/%d after %.1fs",
                      stage, exc.upstream_status or exc.code, attempt + 1,
                      attempts - 1, delay)
