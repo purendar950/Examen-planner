@@ -83,6 +83,18 @@ let mockEditId  = null;
 let mockWeakSel = [];   // chapter ids tagged as weak in the add/edit form
 let mockSavedOpen = false; // Saved Mocks card collapsed by default
 
+/* ── Unsaved add-form draft ──
+   The Mock page form is rebuilt from scratch (page.innerHTML) every time the
+   tab is (re)activated or the exam/tier changes. Without this, anything typed
+   but not yet saved would be wiped when the user switches tabs and comes back.
+   mockDraft holds the last known unsaved input; mockRenderedExam/Tier/EditId
+   record what the form DOM currently represents so the draft is only restored
+   into a matching, non-editing add form. */
+let mockDraft         = null;
+let mockRenderedExam  = null;
+let mockRenderedTier  = null;
+let mockRenderedEditId = null;
+
 function mockExamCfg() { return MOCK_EXAMS[currentExam] || null; }
 
 function mockTierKey() {

@@ -565,6 +565,32 @@ function mockRenderSaved() {
   }).join('');
 }
 
+/* Read whatever is currently typed into the add-form and stash it in mockDraft
+   so it survives the next page.innerHTML rebuild (tab switch, exam/tier change,
+   analysis refresh, etc.). Only the "Add Mock" form produces a draft — an open
+   "Edit Mock" form reflects already-saved data, not an unsaved draft. */
+function mockCaptureDraft() {
+  if (mockRenderedEditId) return;                 // form was an edit form, not the add-draft
+  const nameEl = document.getElementById('mock-name');
+  if (!nameEl || mockRenderedExam == null || mockRenderedTier == null) return;
+  const cfg = MOCK_EXAMS[mockRenderedExam];
+  const tier = cfg && cfg.tiers[mockRenderedTier];
+  if (!tier) return;
+  const val = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+  const secs = {};
+  let hasAny = !!(nameEl.value && nameEl.value.trim());
+  tier.sections.forEach(s => {
+    const c = val('mock-c-' + s.k), w = val('mock-w-' + s.k), m = val('mock-m-' + s.k);
+    if (c !== '' || w !== '' || m !== '') hasAny = true;
+    secs[s.k] = { c: c, w: w, m: m };
+  });
+  const weak = Array.isArray(mockWeakSel) ? mockWeakSel.slice() : [];
+  if (weak.length) hasAny = true;
+  mockDraft = hasAny
+    ? { exam: mockRenderedExam, tier: mockRenderedTier, name: nameEl.value, date: val('mock-date'), secs: secs, weak: weak }
+    : null;
+}
+
 function mockRenderPage() {
   const page = document.getElementById('page-mocks'); if (!page) return;
   const cfg = mockExamCfg();
@@ -573,6 +599,8 @@ function mockRenderPage() {
     page.innerHTML = '<div class="empty-state"><div class="empty-icon">📈</div><p>Is exam ke liye mock config available nahi hai.</p></div>';
     return;
   }
+  /* Preserve any unsaved input from the form we're about to replace. */
+  mockCaptureDraft();
   const tk = mockTierKey();
   const tier = cfg.tiers[tk];
   const totalMax = tier.sections.reduce((t, s) => t + s.max, 0);
@@ -581,8 +609,15 @@ function mockRenderPage() {
     '<button class="exam-select-btn' + (k === tk ? ' active' : '') + '" onclick="mockSetTier(\'' + k + '\')">' + cfg.tiers[k].label + '</button>'
   ).join(' ');
   const editing = mockEditId ? mockList().find(m => m.id === mockEditId) : null;
-  mockWeakSel = (editing && Array.isArray(editing.weakTopics)) ? editing.weakTopics.slice() : [];
+  /* Restore the unsaved draft only into a fresh Add form for the same exam+tier
+     it was captured from. */
+  const draft = (!editing && mockDraft && mockDraft.exam === currentExam && mockDraft.tier === tk) ? mockDraft : null;
+  mockWeakSel = (editing && Array.isArray(editing.weakTopics)) ? editing.weakTopics.slice()
+              : (draft && Array.isArray(draft.weak)) ? draft.weak.slice()
+              : [];
   const today = new Date().toISOString().slice(0, 10);
+  const draftName = editing ? editing.name : (draft ? draft.name : '');
+  const draftDate = editing ? editing.date : (draft && draft.date ? draft.date : today);
   page.innerHTML =
     '<div class="section-title">📈 ' + exam.fullName + ' — Mock Test Analysis</div>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:1.1rem;">' +
@@ -594,19 +629,23 @@ function mockRenderPage() {
     '<div class="info-card">' +
     '<h3>' + (editing ? '✏️ Edit Mock' : '➕ Add Mock Result') + '</h3>' +
     '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:1rem;">' +
-    '<input class="task-input" id="mock-name" placeholder="Mock name / platform (e.g. Testbook Mock 14)" value="' + (editing ? escapeHtml(editing.name).replace(/"/g, '&quot;') : '') + '" style="flex:2;min-width:200px;">' +
-    '<input class="task-input" type="date" id="mock-date" value="' + (editing ? editing.date : today) + '" style="flex:0 0 auto;min-width:150px;">' +
+    '<input class="task-input" id="mock-name" placeholder="Mock name / platform (e.g. Testbook Mock 14)" value="' + escapeHtml(draftName || '').replace(/"/g, '&quot;') + '" style="flex:2;min-width:200px;">' +
+    '<input class="task-input" type="date" id="mock-date" value="' + escapeHtml(draftDate || today) + '" style="flex:0 0 auto;min-width:150px;">' +
     '</div>' +
     '<div class="table-wrap"><table>' +
     '<tr><th>Section</th><th>Max</th><th>Correct</th><th>Wrong</th><th>Marks *</th></tr>' +
     tier.sections.map(s => {
       const v = editing ? (editing.s[s.k] || {}) : {};
+      const d = draft ? (draft.secs[s.k] || {}) : {};
+      const cVal = editing ? (v.c != null ? v.c : '') : (d.c != null ? d.c : '');
+      const wVal = editing ? (v.w != null ? v.w : '') : (d.w != null ? d.w : '');
+      const mVal = editing ? (v.m != null ? v.m : '') : (d.m != null ? d.m : '');
       return '<tr>' +
         '<td>' + escapeHtml(s.name) + ' <span style="color:var(--muted);font-size:0.7rem;">(' + s.q + ' Qs)</span></td>' +
         '<td>' + s.max + '</td>' +
-        '<td><input class="task-input mock-inp" type="number" min="0" max="' + s.q + '" id="mock-c-' + s.k + '" value="' + (v.c != null ? v.c : '') + '" placeholder="–" oninput="mockAutoCalc(\'' + s.k + '\')"></td>' +
-        '<td><input class="task-input mock-inp" type="number" min="0" max="' + s.q + '" id="mock-w-' + s.k + '" value="' + (v.w != null ? v.w : '') + '" placeholder="–" oninput="mockAutoCalc(\'' + s.k + '\')"></td>' +
-        '<td><input class="task-input mock-inp" type="number" step="0.01" id="mock-m-' + s.k + '" value="' + (v.m != null ? v.m : '') + '" placeholder="0"></td>' +
+        '<td><input class="task-input mock-inp" type="number" min="0" max="' + s.q + '" id="mock-c-' + s.k + '" value="' + escapeHtml(String(cVal)) + '" placeholder="–" oninput="mockAutoCalc(\'' + s.k + '\')"></td>' +
+        '<td><input class="task-input mock-inp" type="number" min="0" max="' + s.q + '" id="mock-w-' + s.k + '" value="' + escapeHtml(String(wVal)) + '" placeholder="–" oninput="mockAutoCalc(\'' + s.k + '\')"></td>' +
+        '<td><input class="task-input mock-inp" type="number" step="0.01" id="mock-m-' + s.k + '" value="' + escapeHtml(String(mVal)) + '" placeholder="0"></td>' +
         '</tr>';
     }).join('') +
     '</table></div>' +
@@ -633,6 +672,11 @@ function mockRenderPage() {
     '</div>' +
     '<div id="mock-saved-list" style="display:' + (mockSavedOpen ? 'block' : 'none') + ';padding:0 1rem 1rem;"></div>' +
     '</div>';
+  /* Record what the freshly-built form represents so the next mockCaptureDraft()
+     tags any unsaved input with the correct exam/tier and skips edit forms. */
+  mockRenderedExam = currentExam;
+  mockRenderedTier = tk;
+  mockRenderedEditId = mockEditId;
   mockRenderAnalysis();
   mockRenderSaved();
 }
