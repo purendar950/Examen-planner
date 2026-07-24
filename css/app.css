@@ -4044,6 +4044,7 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
    the wrapping controls row beside Generate/Course. */
 #page-youtube .ai-note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
 #page-youtube .ai-note-actions:empty { display: none; }
+#page-youtube .ai-notes-controls .ai-btn#ai-notes-focus,
 #page-youtube .ai-notes-controls .ai-btn#ai-follow,
 #page-youtube .ai-notes-controls .ai-btn#ai-pdf,
 #page-youtube .ai-notes-controls .ai-btn#ai-regen,
@@ -4945,6 +4946,246 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 }
 @media (prefers-reduced-motion: reduce) {
   #page-youtube * { scroll-behavior: auto !important; }
+}
+
+/* ═══════════════════════════════════════════════
+   NOTES FOCUS MODE
+   Full-viewport app layer (not browser Fullscreen) so native/document PiP can
+   remain available. The original notebook DOM stays mounted: Follow, timestamp
+   links and scroll position therefore retain one source of truth.
+═══════════════════════════════════════════════ */
+body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: none; }
+#page-youtube .ai-focus-toolbar { display: none; }
+#page-youtube #ai-sub.ai-notes-focus {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483000 !important;
+  display: flex !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  background:
+    radial-gradient(circle at 50% -20%, rgba(181, 218, 176, .28), transparent 42%),
+    #f5f0e4 !important;
+  color: #17231d;
+  isolation: isolate;
+}
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  min-height: 58px;
+  padding: max(.55rem, env(safe-area-inset-top)) max(.75rem, env(safe-area-inset-right)) .55rem max(.75rem, env(safe-area-inset-left));
+  border-bottom: 1px solid #ded6c2;
+  background: rgba(255, 253, 246, .96);
+  box-shadow: 0 8px 28px rgba(42, 55, 45, .09);
+  backdrop-filter: blur(14px);
+}
+#page-youtube .ai-focus-heading,
+#page-youtube .ai-focus-actions { display: flex; min-width: 0; align-items: center; gap: .5rem; }
+#page-youtube .ai-focus-title { display: grid; min-width: 0; line-height: 1.15; }
+#page-youtube .ai-focus-title strong { color: #17231d; font-size: .84rem; font-weight: 850; }
+#page-youtube .ai-focus-title small {
+  max-width: min(42vw, 440px);
+  margin-top: .16rem;
+  overflow: hidden;
+  color: #6b776f;
+  font-size: .59rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-youtube .ai-focus-control {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: .3rem;
+  padding: .38rem .65rem;
+  border: 1px solid #d5cdb8;
+  border-radius: 9px;
+  background: #fffdf6;
+  color: #2f4037;
+  font-family: inherit;
+  font-size: .65rem;
+  font-weight: 780;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#page-youtube .ai-focus-control:hover { border-color: #8eb69a; background: #eef7eb; }
+#page-youtube .ai-focus-control:focus-visible {
+  outline: 3px solid #08733a;
+  outline-offset: 2px;
+}
+#page-youtube .ai-focus-control:disabled { opacity: .55; cursor: not-allowed; }
+#page-youtube .ai-focus-close { width: 36px; padding: 0; font-size: 1.05rem; }
+#page-youtube .ai-focus-control.ai-follow-on {
+  border-color: #08733a;
+  background: #dff5e6;
+  color: #075b2d;
+}
+#page-youtube .ai-focus-video[data-phase="ready"],
+#page-youtube .ai-focus-video[data-phase="pip"],
+#page-youtube .ai-focus-video[data-phase="mini"] {
+  border-color: #08733a;
+  background: #08733a;
+  color: #fff;
+}
+#page-youtube .ai-focus-video[data-phase="mini-ready"] {
+  border-color: #4a7986;
+  background: #e7f4f6;
+  color: #245563;
+}
+#page-youtube .ai-focus-video[data-phase="loading"] {
+  border-color: #d6b968;
+  background: #fff7da;
+  color: #745711;
+}
+#page-youtube .ai-focus-video[data-phase="fallback"],
+#page-youtube .ai-focus-video[data-phase="unavailable"] {
+  border-color: #d9a15b;
+  background: #fff4e4;
+  color: #744818;
+}
+#page-youtube .ai-focus-video[data-phase="locked"]::after {
+  content: "◆";
+  margin-left: .12rem;
+  color: #b78a24;
+  font-size: .48rem;
+}
+#page-youtube .ai-focus-time {
+  min-width: 4.25rem;
+  padding: .34rem .55rem;
+  border-radius: 8px;
+  background: #edf2e9;
+  color: #405148;
+  font-size: .66rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  text-align: center;
+}
+/* The Focus toolbar replaces all in-panel chrome while active. */
+#page-youtube #ai-sub.ai-notes-focus > .ai-brandbar,
+#page-youtube #ai-sub.ai-notes-focus > .ai-meta-bar { display: none !important; }
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-mini-video {
+  position: absolute;
+  right: max(1rem, env(safe-area-inset-right));
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  z-index: 8;
+  width: min(42vw, 430px);
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 14px;
+  background: #000;
+  box-shadow: 0 18px 52px rgba(0,0,0,.36);
+}
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-mini-video[hidden] { display: none !important; }
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-mini-video #yt-turbo-video.yt-turbo-inline {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+#page-youtube .ai-focus-mini-close {
+  position: absolute;
+  top: .42rem;
+  right: .42rem;
+  z-index: 3;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.42);
+  border-radius: 50%;
+  background: rgba(0,0,0,.68);
+  color: #fff;
+  font: 700 1rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+#page-youtube .ai-focus-mini-close:focus-visible { outline: 3px solid #63ffd2; outline-offset: 2px; }
+#page-youtube #ai-sub.ai-notes-focus.ai-focus-mini-open > .ai-scroll { padding-bottom: min(30vw, 280px); }
+#page-youtube #ai-sub.ai-notes-focus > .ai-scroll,
+#page-youtube #ai-sub.ai-notes-focus > .ai-scroll.nb {
+  display: block;
+  flex: 1 1 auto;
+  width: min(100%, 960px);
+  min-height: 0;
+  height: auto;
+  max-height: none !important;
+  margin: 0 auto;
+  padding: clamp(1rem, 2.4vw, 2rem) clamp(1rem, 4vw, 3.2rem) max(2rem, env(safe-area-inset-bottom));
+  overflow: auto !important;
+  border: 0;
+  border-right: 1px solid rgba(218, 208, 187, .72);
+  border-left: 1px solid rgba(218, 208, 187, .72);
+  border-radius: 0;
+  background: #fffdf6 !important;
+  box-shadow: 0 0 38px rgba(49, 59, 51, .08);
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+#page-youtube #ai-sub.ai-notes-focus .ai-nb {
+  width: min(100%, 820px);
+  margin: 0 auto;
+  padding: 0 0 3rem !important;
+  background: transparent !important;
+  color: #17231d;
+  font-size: clamp(.84rem, 1.3vw, 1rem);
+  line-height: 1.62;
+}
+
+@media (max-width: 700px) {
+  #page-youtube #ai-sub.ai-notes-focus .ai-focus-toolbar {
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: .42rem;
+    min-height: 0;
+    padding-bottom: .48rem;
+  }
+  #page-youtube .ai-focus-heading { flex: 1 1 100%; }
+  #page-youtube .ai-focus-title { flex: 1 1 auto; }
+  #page-youtube .ai-focus-title small { max-width: calc(100vw - 5.5rem); }
+  #page-youtube .ai-focus-actions {
+    width: 100%;
+    gap: .35rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  #page-youtube .ai-focus-actions::-webkit-scrollbar { display: none; }
+  #page-youtube .ai-focus-actions > * { flex: 0 0 auto; }
+  #page-youtube .ai-focus-actions .ai-focus-control { flex: 1 0 auto; }
+  #page-youtube #ai-sub.ai-notes-focus .ai-focus-mini-video {
+    right: max(.5rem, env(safe-area-inset-right));
+    bottom: max(.5rem, env(safe-area-inset-bottom));
+    width: min(calc(100vw - 1rem), 420px);
+    border-radius: 11px;
+  }
+  #page-youtube #ai-sub.ai-notes-focus.ai-focus-mini-open > .ai-scroll { padding-bottom: min(58vw, 255px); }
+  #page-youtube #ai-sub.ai-notes-focus > .ai-scroll,
+  #page-youtube #ai-sub.ai-notes-focus > .ai-scroll.nb {
+    width: 100%;
+    padding: 1rem max(.85rem, env(safe-area-inset-right)) max(1.5rem, env(safe-area-inset-bottom)) max(.85rem, env(safe-area-inset-left));
+    border: 0;
+    box-shadow: none;
+  }
+  #page-youtube #ai-sub.ai-notes-focus .ai-nb { font-size: .84rem; line-height: 1.52; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #page-youtube #ai-sub.ai-notes-focus * { scroll-behavior: auto !important; }
 }
 
 
