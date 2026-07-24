@@ -919,8 +919,8 @@ _OPENCODE_PLAN_DISABLED_TOOLS = {
 }
 # OpenCode Zen's public catalog is the source of truth for temporary free-model
 # availability. Keep an explicit model ID as a server-side fallback, but when
-# enabled for the `opencode` provider refresh this list periodically and choose
-# an available free model without a Render redeploy.
+# enabled for the `opencode` provider refresh the approved free-model list
+# periodically so students can select every currently available free model.
 _OPENCODE_ZEN_MODELS_URL = "https://opencode.ai/zen/v1/models"
 _OPENCODE_FREE_MODEL_REFRESH_SEC = max(300, min(
     int(os.environ.get("OPENCODE_FREE_MODEL_REFRESH_SEC", "3600")), 86400))
@@ -931,7 +931,7 @@ _OPENCODE_FREE_MODEL_PREFERENCE = tuple(
         "nemotron-3-ultra-free,laguna-s-2.1-free,north-mini-code-free,big-pickle",
     ).split(",") if model.strip()
 )
-_opencode_free_model_cache = {"checked_at": 0.0, "model": ""}
+_opencode_free_model_cache = {"checked_at": 0.0, "models": []}
 _opencode_free_model_lock = threading.Lock()
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
@@ -1346,21 +1346,21 @@ def _opencode_auto_free_model_enabled(provider_id):
             and configured in ("1", "true", "yes", "on"))
 
 
-def _opencode_current_free_model():
-    """Return a cached, presently-listed Zen free model, if one is available.
+def _opencode_current_free_models():
+    """Return cached, presently-listed, operator-approved Zen free models.
 
-    The catalog intentionally contains only model IDs, not pricing or account
-    entitlement metadata. Selection is therefore restricted to the explicit
-    operator-controlled free-model preference list. A failed refresh keeps a
-    configured static model usable rather than making a planner depend on a
-    public catalog request.
+    Zen's public catalog exposes IDs but not pricing or account-entitlement
+    metadata. We therefore offer only IDs in the explicit server-side allowlist
+    (`OPENCODE_FREE_MODEL_PREFERENCE`) that are also present in the live
+    catalog. The ordered first item remains the automatic/default selection;
+    the rest are safe user-selectable choices.
     """
     now = time.time()
     with _opencode_free_model_lock:
         cached = _opencode_free_model_cache
         if now - cached["checked_at"] < _OPENCODE_FREE_MODEL_REFRESH_SEC:
-            return cached["model"] or None
-        selected = ""
+            return list(cached["models"])
+        selected = []
         try:
             response = requests.get(
                 _OPENCODE_ZEN_MODELS_URL,
@@ -1374,19 +1374,19 @@ def _opencode_current_free_model():
                 str(entry.get("id") or "").strip()
                 for entry in (entries or []) if isinstance(entry, dict)
             }
-            for model_id in _OPENCODE_FREE_MODEL_PREFERENCE:
-                if model_id in available:
-                    selected = model_id
-                    break
+            selected = [
+                model_id for model_id in _OPENCODE_FREE_MODEL_PREFERENCE
+                if model_id in available
+            ]
             if selected:
-                log.info("OpenCode Zen free-model refresh selected %s", selected)
+                log.info("OpenCode Zen free-model refresh found %s", ", ".join(selected))
             else:
-                log.warning("OpenCode Zen model catalog contained no supported free model")
+                log.warning("OpenCode Zen model catalog contained no supported free models")
         except (requests.RequestException, ValueError, TypeError) as exc:
             log.warning("OpenCode Zen free-model refresh failed (%s)", type(exc).__name__)
         cached["checked_at"] = now
-        cached["model"] = selected
-        return selected or None
+        cached["models"] = selected
+        return list(selected)
 
 
 def _opencode_config():
@@ -1414,18 +1414,22 @@ def _opencode_config():
         return None
 
     auto_free_model = _opencode_auto_free_model_enabled(provider_id)
-    selected_free_model = _opencode_current_free_model() if auto_free_model else None
-    model_id = selected_free_model or fallback_model_id
+    free_model_ids = _opencode_current_free_models() if auto_free_model else []
+    model_id = free_model_ids[0] if free_model_ids else fallback_model_id
     if not model_id:
         log.warning("OpenCode has no configured fallback model and no free Zen model is available")
         return None
-    if auto_free_model and not selected_free_model:
+    if auto_free_model and not free_model_ids:
         log.info("OpenCode Zen catalog unavailable; using configured fallback model %s", model_id)
     return {
         "server_url": server_url,
         "username": username,
         "password": password,
         "provider_id": provider_id,
+        # Only these model IDs may be requested by a browser. They come from
+        # the server-side free allowlist intersected with Zen's live catalog;
+        # the static fallback is exposed only when that catalog is unavailable.
+        "allowed_model_ids": free_model_ids or [model_id],
         "model_id": model_id,
         "directory": directory,
     }
@@ -3846,11 +3850,12 @@ def _effective_provider_models(cfg):
     overrides = (cfg or {}).get("providerModels") or {}
     out = {}
     for pid, default in STUDY_PROVIDER_MODELS.items():
-        # OpenCode's model is selected from the live Zen free catalogue and is
-        # never controlled by Firestore or a stale browser value.
+        # OpenCode offers every server-approved free Zen model currently in its
+        # public catalog. Model IDs are never read from Firestore or accepted
+        # unless present in this list.
         if pid == "opencode":
             opencode = _opencode_config() if _opencode_study_enabled() else None
-            out[pid] = [opencode["model_id"]] if opencode else []
+            out[pid] = list(opencode.get("allowed_model_ids") or [opencode["model_id"]]) if opencode else []
             continue
         # OmniRoute's router—not Admin overrides or stale browser selections—
         # owns its route list. Its flat list = the `auto/*` aliases plus every
@@ -4303,10 +4308,16 @@ def _opencode_study_ai(model=None):
     config = _opencode_config()
     if not config:
         return None
-    selected_model = config["model_id"]
-    if model and model != selected_model:
-        log.info("Replacing stale OpenCode model selection %s with %s",
+    allowed_models = config.get("allowed_model_ids") or [config["model_id"]]
+    selected_model = model if model in allowed_models else config["model_id"]
+    if model and model not in allowed_models:
+        log.info("Replacing unavailable OpenCode model selection %s with %s",
                  model, selected_model)
+    # Preserve the browser-selected safe model through the OpenCode transport;
+    # only the destination, credentials, directory, and tool policy stay fixed
+    # server-side.
+    config = dict(config)
+    config["model_id"] = selected_model
     return {
         "transport": "opencode",
         "provider": "opencode",
