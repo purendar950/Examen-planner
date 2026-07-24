@@ -71,6 +71,12 @@ services:
         value: "3600"
       - key: OPENCODE_FREE_MODEL_PREFERENCE
         value: "deepseek-v4-flash-free,mimo-v2.5-free,ling-3.0-flash-free,nemotron-3-ultra-free,laguna-s-2.1-free,north-mini-code-free,big-pickle"
+      # Allow authenticated Study AI users to select OpenCode. Credentials stay
+      # server-only and every request uses the fixed directory with all tools off.
+      - key: OPENCODE_STUDY_ENABLED
+        value: "true"
+      - key: OPENCODE_STUDY_MAX_PROMPT_CHARS
+        value: "120000"
       - key: OPENCODE_TIMEOUT
         value: "90"
 
