@@ -26,20 +26,25 @@ function mockSave() {
   const tier = cfg.tiers[mockTierKey()];
   const name = document.getElementById('mock-name').value.trim() || ('Mock ' + (mockList().length + 1));
   const date = document.getElementById('mock-date').value || new Date().toISOString().slice(0, 10);
-  const s = {}; let total = 0;
+  const s = {}; let total = 0; let anyFilled = false;
   for (const sec of tier.sections) {
     const m = parseFloat(document.getElementById('mock-m-' + sec.k).value);
     const c = parseFloat(document.getElementById('mock-c-' + sec.k).value);
     const w = parseFloat(document.getElementById('mock-w-' + sec.k).value);
-    if (isNaN(m)) { showToast('"' + sec.name + '" ke marks bharo (ya Correct/Wrong se auto-calc hoga).', 'error'); return; }
-    if (m > sec.max) { showToast('"' + sec.name + '" ke max marks ' + sec.max + ' hain.', 'error'); return; }
+    /* A blank section is allowed and simply counts as 0 — previously one empty
+       Marks field aborted the ENTIRE save, so partially-filled mocks silently
+       never saved. Only genuinely out-of-range values block the save now. */
+    if (!isNaN(m) || !isNaN(c) || !isNaN(w)) anyFilled = true;
+    const mv = isNaN(m) ? 0 : m;
+    if (mv > sec.max) { showToast('"' + sec.name + '" ke max marks ' + sec.max + ' hain.', 'error'); return; }
     if (!isNaN(c) && c > sec.q) { showToast('"' + sec.name + '" mein sirf ' + sec.q + ' questions hain.', 'error'); return; }
     if (!isNaN(c) && !isNaN(w) && (c + w) > sec.q) { showToast('"' + sec.name + '": attempted (' + (c + w) + ') total questions (' + sec.q + ') se zyada nahi ho sakte.', 'error'); return; }
-    s[sec.k] = { m: Math.round(m * 100) / 100 };
+    s[sec.k] = { m: Math.round(mv * 100) / 100 };
     if (!isNaN(c)) s[sec.k].c = c;
     if (!isNaN(w)) s[sec.k].w = w;
-    total += m;
+    total += mv;
   }
+  if (!anyFilled) { showToast('Kam se kam ek section ke marks (ya Correct/Wrong) bharo.', 'error'); return; }
   total = Math.round(total * 100) / 100;
   const list = mockList();
   if (mockEditId) {
@@ -51,6 +56,10 @@ function mockSave() {
     list.push({ id: Date.now().toString(), name, date, s, total, weakTopics: mockWeakSel.slice() });
     showToast('Mock saved! Total: ' + total + ' 🎯', 'success');
   }
+  /* The mock is now persisted, so discard the unsaved-input draft and reset the
+     weak-topic selection before the form is rebuilt empty. */
+  mockDraft = null;
+  mockWeakSel = [];
   saveProgress();
   mockRenderPage();
   mockUpdateDashSummary();
