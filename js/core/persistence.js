@@ -59,6 +59,37 @@ function saveProgress() {
   _saveDebounce = setTimeout(() => saveProgressNow(), 2000);
 }
 
+/* Firestore rejects any single document larger than 1 MiB (1,048,576 bytes).
+   Because the WHOLE appState is stored in one users/{uid} document, a heavy
+   account (large ytoLibrary / focusMarks / ytNotes) can cross that ceiling —
+   after which EVERY write throws and sync fails permanently. Warn well before
+   the hard limit so the failure is understandable and actionable. */
+const FIRESTORE_DOC_LIMIT = 1048576;      // hard limit enforced by Firestore
+const FIRESTORE_DOC_WARN  = 900 * 1024;   // ~900 KiB — warn before we hit it
+
+function _docByteSize(json) {
+  try {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(json).length;
+  } catch (e) {}
+  // Fallback: UTF-8 byte estimate without TextEncoder
+  try { return unescape(encodeURIComponent(json)).length; } catch (e) { return json.length; }
+}
+
+/* Translate a raw Firestore/network error into a short, human message so the
+   real cause is visible instead of a generic "Sync failed". */
+function _describeSyncError(e) {
+  const code = e && e.code ? String(e.code) : '';
+  const msg  = e && e.message ? String(e.message) : '';
+  if (code === 'permission-denied')                 return 'permission denied (check Firestore rules / sign-in)';
+  if (code === 'unauthenticated')                   return 'not signed in — re-login and retry';
+  if (code === 'resource-exhausted')                return 'Firestore quota exceeded';
+  if (code === 'unavailable' || code === 'deadline-exceeded' || /network|offline|failed to fetch/i.test(msg))
+                                                    return 'network offline — will retry';
+  if (code === 'invalid-argument' || /longer than|maximum|1048487|1 MiB/i.test(msg))
+                                                    return 'data too large for one Firestore document (1 MiB limit)';
+  return code || msg || 'unknown error';
+}
+
 async function saveProgressNow() {
   if (!currentUser || !_fbReady || !db) return;
   const saveUid = currentUser.uid;
@@ -70,6 +101,27 @@ async function saveProgressNow() {
     setSyncStatus('', '');
     return;
   } // Nothing changed
+
+  /* Pre-flight size guard. If the serialized state is over the Firestore
+     per-document limit, the write is guaranteed to fail — so surface a
+     specific, actionable message instead of a silent retry loop. The local
+     cache write in saveProgress() already preserved the data on this device. */
+  const bytes = _docByteSize(json);
+  if (bytes >= FIRESTORE_DOC_LIMIT) {
+    _localDirty = true;
+    _markPendingSync(saveUid);
+    console.error('[sync] appState is ' + bytes + ' bytes — exceeds Firestore\'s 1 MiB'
+      + ' per-document limit, so cloud sync cannot complete. Saved locally only.'
+      + ' Trim large data (playlists / handwritten Focus marks / video notes).');
+    setSyncStatus('error', '⚠ Data too large to sync');
+    setTimeout(() => setSyncStatus('', ''), 6000);
+    return;
+  }
+  if (bytes >= FIRESTORE_DOC_WARN) {
+    console.warn('[sync] appState is ' + bytes + ' bytes (~'
+      + Math.round(bytes / 1024) + ' KiB), approaching Firestore\'s 1 MiB'
+      + ' per-document limit. Sync will fail once it is exceeded.');
+  }
 
   try {
     const svc = _storageService();
@@ -103,6 +155,10 @@ async function saveProgressNow() {
   } catch(e) {
     if (!currentUser || currentUser.uid === saveUid) _localDirty = true;
     _markPendingSync(saveUid);
+    /* Log the real cause — previously the error was swallowed, which made
+       every sync failure impossible to diagnose from the console. */
+    const reason = _describeSyncError(e);
+    console.error('[sync] Firestore write failed: ' + reason, e);
     setSyncStatus('error', '⚠ Sync failed');
     setTimeout(() => setSyncStatus('', ''), 4000);
   }
