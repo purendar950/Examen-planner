@@ -724,7 +724,7 @@ function sqSharedSectionHtml() {
   }
 
   if (!playlists.length) {
-    html += '<div class="sq-lock">Add a course in <b>YouTube → Playlist Organiser</b>, then generate a mock from any of '
+    html += '<div class="sq-lock">Add a course from <b>Course Library</b> in the sidebar, then generate a mock from any of '
       + 'its videos (<b>AI Study → Take as Test</b>) — it shows up here under that playlist.</div>';
   } else {
     // Newest-added course first (matches the Organiser library order).
@@ -745,7 +745,7 @@ function sqSharedSectionHtml() {
   if (ownCards) {
     html += '<div class="sq-section-label" style="margin-top:22px;">📝 Your generated quizzes</div>'
       + '<div class="sq-sub" style="margin:-.35rem 0 .55rem;">Quizzes from videos that aren\'t in any added playlist. '
-      + 'Add the video\'s course in <b>YouTube → Playlist Organiser</b> to group it above.</div>'
+      + 'Add the video\'s course from <b>Course Library</b> in the sidebar to group it above.</div>'
       + '<div class="sq-qz-grid">' + ownCards + '</div>';
   }
 

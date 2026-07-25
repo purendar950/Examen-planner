@@ -351,6 +351,7 @@ function ytoLib() {
 
 function ytoPersist() {
   try { localStorage.setItem('yto_lib_v2', JSON.stringify(appState.ytoLibrary || {})); } catch(e) {}
+  ytoRenderMainSidebar();
   saveProgress(); // syncs to Firestore
 }
 
@@ -367,6 +368,86 @@ function ytoLoad() {
       if (cached && Object.keys(cached).length) appState.ytoLibrary = cached;
     } catch(e) {}
   }
+  ytoRenderMainSidebar();
+  ytoRenderLibrary();
+}
+
+/* ── Desktop navigation: YouTube-style saved playlist shortcuts ── */
+function ytoRenderMainSidebar() {
+  const section = document.getElementById('shell-playlist-section');
+  const list = document.getElementById('shell-playlist-list');
+  if (!section || !list) return;
+
+  const playlists = Object.values(ytoLib())
+    .filter(pl => pl && pl.id && pl.type !== 'video' && Array.isArray(pl.videos))
+    .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+
+  section.hidden = playlists.length === 0;
+  list.replaceChildren();
+
+  playlists.forEach(pl => {
+    const total = pl.videos.length;
+    const done = pl.videos.filter(video => pl.watched && pl.watched[video.id]).length;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'shell-playlist-item';
+    button.dataset.playlistId = pl.id;
+    button.title = `${pl.title || 'Playlist'} · ${total} ${total === 1 ? 'video' : 'videos'}`;
+    button.setAttribute('aria-label', `Open playlist ${pl.title || 'Playlist'}`);
+    button.addEventListener('click', () => ytoOpenSidebarPlaylist(pl.id));
+
+    const thumb = document.createElement('span');
+    thumb.className = 'shell-playlist-thumb';
+    thumb.setAttribute('aria-hidden', 'true');
+    if (pl.thumb) {
+      const image = document.createElement('img');
+      image.src = pl.thumb;
+      image.alt = '';
+      image.loading = 'lazy';
+      image.addEventListener('error', () => { image.remove(); thumb.textContent = '▶'; });
+      thumb.appendChild(image);
+    } else {
+      thumb.textContent = '▶';
+    }
+
+    const copy = document.createElement('span');
+    copy.className = 'shell-playlist-copy';
+    const title = document.createElement('span');
+    title.className = 'shell-playlist-title';
+    title.textContent = pl.title || 'Playlist';
+    const meta = document.createElement('span');
+    meta.className = 'shell-playlist-meta';
+    meta.textContent = done ? `${done}/${total} completed` : `${total} ${total === 1 ? 'video' : 'videos'}`;
+    copy.append(title, meta);
+    button.append(thumb, copy);
+    list.appendChild(button);
+  });
+
+  const navSearch = document.getElementById('shell-nav-search');
+  if (typeof window.shellFilterNavigation === 'function') {
+    window.shellFilterNavigation(navSearch ? navSearch.value : '');
+  }
+  ytoSyncMainSidebarSelection();
+}
+
+function ytoSyncMainSidebarSelection() {
+  const libraryActive = document.getElementById('nav-yt-organiser')?.classList.contains('active');
+  document.querySelectorAll('.shell-playlist-item').forEach(button => {
+    const isCurrent = Boolean(libraryActive && button.dataset.playlistId === ytoCurrentPl);
+    button.classList.toggle('active', isCurrent);
+    if (isCurrent) button.setAttribute('aria-current', 'page');
+    else button.removeAttribute('aria-current');
+  });
+}
+
+function ytoOpenSidebarPlaylist(plId) {
+  if (!ytoLib()[plId]) { ytoRenderMainSidebar(); return; }
+  switchPage('yt-organiser');
+  ytoOpenCourse(plId);
+}
+
+function ytoOpenSidebarLibrary() {
+  switchPage('yt-organiser');
   ytoRenderLibrary();
 }
 
@@ -577,6 +658,7 @@ function ytoRenderLibraryOverview(entries) {
 
 function ytoRenderLibrary() {
   ytoCurrentPl = null;
+  ytoRenderMainSidebar();
   const content = document.getElementById('yto-content');
   if (!content) return;
   const s = document.getElementById('yto-stats'); if (s) s.style.display = 'none';
@@ -767,6 +849,7 @@ function ytoOpenCourse(plId) {
   const pl = ytoLib()[plId];
   if (!pl) { ytoRenderLibrary(); return; }
   ytoCurrentPl = plId;
+  ytoRenderMainSidebar();
   ytoPlayerV2 = null; ytoPlayerV2Ready = false; ytoPendingVid = null;
   const s = document.getElementById('yto-stats'); if (s) s.style.display = 'none';
   const t = document.getElementById('yto-toolbar'); if (t) t.style.display = 'none';
@@ -1085,10 +1168,6 @@ function ytoPlayInYtTab(plId, vid) {
   var v = pl.videos.find(function(x) { return x.id === vid; }); if (!v) return;
   pl.lastVideo = vid; ytoPersist();
   switchPage('youtube');
-  // Surface the Watch sub-view — switchPage only toggles the top-level page,
-  // not the merged YouTube sub-tabs, so without this the video would load into
-  // the hidden Watch player while the user stays stuck on the Organiser list.
-  if (typeof ytSwitchSub === 'function') ytSwitchSub('watch');
   ytLoadInTab('video', vid, 'https://youtube.com/watch?v=' + vid, v.title);
   appState.ytLastVideo.ytoPlId = plId;
   saveProgress();
@@ -1279,7 +1358,20 @@ document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') ytoCloseAddVideoModal();
 });
 
-/* Restore the course sidebar after the YouTube tab becomes active. */
+/* Keep playlist selection accurate when the user enters or leaves Course Library. */
+onPageActivated('*', function () { ytoSyncMainSidebarSelection(); });
+
+/* Render the standalone Course Library whenever its sidebar destination opens. */
+onPageActivated('yt-organiser', function () {
+  if (ytoCurrentPl && ytoLib()[ytoCurrentPl]) {
+    if (document.getElementById('yto-course-head')) ytoRefreshCourse();
+    else ytoOpenCourse(ytoCurrentPl);
+  } else {
+    ytoRenderLibrary();
+  }
+});
+
+/* Restore the course queue after the YouTube tab becomes active. */
 onPageActivated('youtube', function () {
   if (ytoCurrentPl) {
     setTimeout(function() { ytoPopulateYtSidebar(ytoCurrentPl, ytCurrentVideoId || ''); }, 80);

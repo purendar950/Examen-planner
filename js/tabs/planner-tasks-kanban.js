@@ -53,6 +53,9 @@ function setCourseVideoWatched(plId, videoId, watched) {
   if (!appState.ytWatched) appState.ytWatched = {};
   if (!appState.ytWatched[plId]) appState.ytWatched[plId] = {};
   if (watched) appState.ytWatched[plId][videoId] = true; else delete appState.ytWatched[plId][videoId];
+  if (typeof ytoRenderMainSidebar === 'function') {
+    try { ytoRenderMainSidebar(); } catch (e) {}
+  }
 }
 
 /* Planner video task → watched store. */
