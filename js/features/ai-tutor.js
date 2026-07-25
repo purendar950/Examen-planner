@@ -2919,12 +2919,12 @@
   /* ── OmniRoute sub-provider box ──────────────────────────────────────────
      OmniRoute aggregates many providers behind one endpoint. When it is the
      chosen provider we reveal a SECOND selector (#ai-omni-provider) listing the
-     verified-working sub-providers from /api/status.omnirouteProviders; picking
-     one fills #ai-model with just that sub-provider's models. The model sent to
-     the backend is still the full `sub/model` id, so no routing change needed. */
+     complete text/chat sub-provider catalog from /api/status.omnirouteProviders;
+     picking one fills #ai-model with just that sub-provider's models. The model
+     sent to the backend is still the full `sub/model` id, so no routing change needed. */
   var OMNI_GROUPS_KEY = 'aiStudyOmniProviders';
   var OMNI_SUB_KEY = 'aiStudyOmniSub';
-  var _omniProviders = [];       // [{id,label,models}] from /api/status (verified)
+  var _omniProviders = [];       // [{id,label,models}] from the live catalog
   function cachedOmniProviders() {
     try { return JSON.parse(localStorage.getItem(OMNI_GROUPS_KEY) || '[]'); } catch (e) { return []; }
   }
@@ -3020,17 +3020,40 @@
       var ia = STUDY_PROV_ORDER.indexOf(a.provider), ib = STUDY_PROV_ORDER.indexOf(b.provider);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
     });
+    // A cold proxy whose catalog request fails can only validate the Auto
+    // fallback. Render that safe server response now, but preserve any cached
+    // concrete OmniRoute group for the next successful/live status refresh.
+    var omniCatalogUnavailable = status && status.omnirouteCatalogAvailable === false;
+    var cachedOmniStudy = null;
+    (cached.groups || []).forEach(function (g) {
+      if (g && g.provider === 'omniroute') cachedOmniStudy = g;
+    });
+    var cachedOmniModels = cachedOmniStudy ? (cachedOmniStudy.models || []) : [];
+    var cachedHasConcreteModels = cachedOmniModels.some(function (model) {
+      return model !== 'auto' && model.indexOf('auto/') !== 0;
+    });
     _studyDefaultModel = (status && status.studyModel) || cached.model || '';
     var activeProvider = (status && status.studyProvider) || cached.provider || '';
-    cacheStudyModels(_studyGroups, activeProvider, _studyDefaultModel);
+    var groupsToCache = _studyGroups;
+    if (omniCatalogUnavailable && cachedHasConcreteModels) {
+      groupsToCache = _studyGroups.map(function (group) {
+        return group.provider === 'omniroute' ? cachedOmniStudy : group;
+      });
+    }
+    cacheStudyModels(groupsToCache, activeProvider, _studyDefaultModel);
 
-    // OmniRoute's verified sub-providers (Auto first) for the dedicated box.
-    var omniRaw = (status && Array.isArray(status.omnirouteProviders) && status.omnirouteProviders.length)
-      ? status.omnirouteProviders : cachedOmniProviders();
+    // OmniRoute's complete sub-provider catalog (Auto first) for its dedicated box.
+    var serverOmni = (status && Array.isArray(status.omnirouteProviders))
+      ? status.omnirouteProviders : [];
+    var cachedOmni = cachedOmniProviders();
+    var omniRaw = serverOmni.length ? serverOmni : cachedOmni;
     _omniProviders = (omniRaw || []).filter(function (g) {
       return g && g.id && Array.isArray(g.models) && g.models.length;
     });
-    cacheOmniProviders(_omniProviders);
+    // Do not replace a last-good concrete cache with a cold-start Auto-only
+    // fallback. The UI still renders the fallback because it is the only set
+    // this backend process can currently validate.
+    if (!omniCatalogUnavailable) cacheOmniProviders(_omniProviders);
 
     var savedModel = outModel();
     var savedProvider = outProvider();
