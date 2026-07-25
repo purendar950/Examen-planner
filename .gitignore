@@ -6,5 +6,6 @@ dist/
 !.env.example
 public/vendor/
 
+
 # Firestore rules are managed directly in the Firebase console, not in the repo
 firestore.rules
