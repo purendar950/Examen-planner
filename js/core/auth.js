@@ -133,9 +133,8 @@ function getDefaultState() {
     progress: {}, tasks: {},
     examDate: getDefaultExamDate(), selectedExam: 'cgl', activePage: 'dashboard', examDates: {}, streak: 0,
     lastStudyDate: null, ytLinks: {}, ytNotes: [],
-    // Shared note text is stored separately in Firestore; links and ink stay
-    // private in this user-owned appState document.
-    sharedNoteIds: {}, noteMarks: {},
+    // Private drafts written from the AI Notes Focus view.
+    focusNotes: {},
     ytLastVideo: null, ytPlaylists: {}, ytWatched: {},
     ytOrganiser: null, ytoLibrary: {}, ytVidProgress: {},
     studyProfile: null,  // Feature 3 – set via Study Profile modal
@@ -180,8 +179,7 @@ function loginUser(email, name, uid, state) {
   if (!appState.tasks)     appState.tasks      = {};
   if (!appState.ytLinks)   appState.ytLinks    = {};
   if (!appState.ytNotes)   appState.ytNotes    = [];
-  if (!appState.sharedNoteIds || typeof appState.sharedNoteIds !== 'object') appState.sharedNoteIds = {};
-  if (!appState.noteMarks || typeof appState.noteMarks !== 'object') appState.noteMarks = {};
+  if (!appState.focusNotes || typeof appState.focusNotes !== 'object') appState.focusNotes = {};
   if (!appState.ytWatched) appState.ytWatched  = {};
   if (!appState.plans)     appState.plans      = [];
   if (!appState.recurringTasks) appState.recurringTasks = [];
@@ -728,7 +726,7 @@ if (auth && !_isBadProtocol) {
       writeCachedState(hydrated);
       if (JSON.stringify(appState) === JSON.stringify(hydrated)) return;
       appState = hydrated;
-      try { if (typeof nfRefreshPrivateMarksAfterStateSync === 'function') nfRefreshPrivateMarksAfterStateSync(); } catch(e) {}
+      try { if (typeof notesFocusRefreshPrivateDraft === 'function') notesFocusRefreshPrivateDraft(); } catch(e) {}
       if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
       try { if (typeof ytoRenderMainSidebar === 'function') ytoRenderMainSidebar(); } catch(e) {}
       try { updateDashboard(); } catch(e) {}
@@ -875,7 +873,7 @@ if (auth && !_isBadProtocol) {
         const remoteJSON = JSON.stringify({ ...getDefaultState(), ...remoteState });
         if (localJSON !== remoteJSON) {
           appState = { ...getDefaultState(), ...remoteState };
-          try { if (typeof nfRefreshPrivateMarksAfterStateSync === 'function') nfRefreshPrivateMarksAfterStateSync(); } catch(e) {}
+          try { if (typeof notesFocusRefreshPrivateDraft === 'function') notesFocusRefreshPrivateDraft(); } catch(e) {}
           if (typeof isValidPage === 'function' && isValidPage(_keepActivePage)) {
             appState.activePage = _keepActivePage;
           }

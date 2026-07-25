@@ -15,16 +15,31 @@
    4. Left sidebar → Build → Firestore Database → "Create database"
       → "Start in production mode" → Select region "asia-south1" → Enable
 
-   5. Firestore Rules — `firestore.rules` is versioned with this project.
-      Deploy the exact file with:
-      `firebase deploy --only firestore --project <project-id>`
-      It includes the shared-note ownership rules and browser-admin access
-      checks. Do not replace it with an older console-only rule snippet.
-      If deploying through the console, copy the complete contents of
-      `firestore.rules` into the Firestore Rules tab, then Publish.
-
-      NOTE: For same-device detection, create this Firestore index:
-      Collection: users | Field: profile.fp (Ascending) | Query scope: Collection
+   5. Firestore → Rules tab mein ye paste karo:
+      ─────────────────────────────────────────
+      rules_version = '2';
+      service cloud.firestore {
+        match /databases/{database}/documents {
+          match /users/{userId} {
+            allow read, write: if request.auth != null
+                               && request.auth.uid == userId;
+          }
+          // User suggestions/requests (write-only for auth users)
+          match /requests/{docId} {
+            allow create: if request.auth != null;
+            allow read, update, delete: if false; // admin only via SDK
+          }
+          // App-wide config read by users (approval toggle, limits)
+          match /config/{docId} {
+            allow read: if request.auth != null;
+            allow write: if false; // admin only via SDK
+          }
+          // NOTE: For same-device detection to work, create a Firestore index:
+          // Collection: users | Field: profile.fp (Ascending) | Query scope: Collection
+        }
+      }
+      ─────────────────────────────────────────
+      → "Publish" karo
 
    6. Project Settings (⚙️ gear icon) → "Your apps" section
       → "</>" (Web) icon click karo → App nickname dalo → Register app

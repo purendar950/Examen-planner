@@ -43,10 +43,9 @@ let appState = {
   lastStudyDate: null,
   ytLinks: {},
   ytNotes: [],
-  // Shared note text is stored in Firestore notes/{noteId}; these ids and all
-  // drawing marks remain private in the signed-in user's own appState.
-  sharedNoteIds: {}, // source key (for example video:<videoId>) -> shared note id
-  noteMarks: {},     // noteId -> private normalized pen/highlighter strokes
+  // Private notes written while the AI Notes Focus view is open, keyed by
+  // the generated note source. They persist only in this student's appState.
+  focusNotes: {},
   ytLastVideo: null,
   ytPlaylists: {},
   ytWatched: {},  // plId -> {videoId: true}

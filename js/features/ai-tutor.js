@@ -1054,6 +1054,96 @@
   var _notesFocus = null;
   var _notesFocusReturn = null;       // lets browser Forward restore the modal entry
   var _notesFocusToken = 0;
+  // Keep private text comfortably below Firestore's per-user document limit.
+  var NOTES_FOCUS_PRIVATE_NOTE_LIMIT = 12000;
+  var NOTES_FOCUS_PRIVATE_NOTE_SLOTS = 30;
+
+  /* Personal drafts belong to the signed-in student's appState only. They are
+     intentionally separate from generated AI content and never shared. */
+  function notesFocusDraftStore() {
+    if (typeof appState === 'undefined' || !appState) return null;
+    if (!appState.focusNotes || typeof appState.focusNotes !== 'object') appState.focusNotes = {};
+    return appState.focusNotes;
+  }
+
+  function notesFocusDraftKey(box) {
+    return (box && box.dataset && box.dataset.focusNoteKey) || ('video:' + (curVid() || 'untitled'));
+  }
+
+  function notesFocusDraftValue(box) {
+    var drafts = notesFocusDraftStore();
+    if (!drafts) return '';
+    var entry = drafts[notesFocusDraftKey(box)];
+    return typeof entry === 'string' ? entry : String(entry && entry.text || '');
+  }
+
+  function notesFocusSaveDraft(box, value) {
+    var drafts = notesFocusDraftStore();
+    if (!drafts) return;
+    var key = notesFocusDraftKey(box);
+    var text = String(value || '').slice(0, NOTES_FOCUS_PRIVATE_NOTE_LIMIT);
+    if (text.trim()) {
+      drafts[key] = { text: text, updatedAt: Date.now() };
+    } else {
+      delete drafts[key];
+    }
+    var keys = Object.keys(drafts);
+    if (keys.length > NOTES_FOCUS_PRIVATE_NOTE_SLOTS) {
+      keys.sort(function (a, b) {
+        return Number(drafts[a] && drafts[a].updatedAt) - Number(drafts[b] && drafts[b].updatedAt);
+      });
+      while (keys.length > NOTES_FOCUS_PRIVATE_NOTE_SLOTS) delete drafts[keys.shift()];
+    }
+    try { if (typeof saveProgress === 'function') saveProgress(); } catch (e) {}
+  }
+
+  function notesFocusClosePrivateDraft(box) {
+    if (!box) return;
+    var panel = box.querySelector('#ai-focus-private-notes');
+    var toggle = box.querySelector('#ai-focus-private-notes-toggle');
+    if (panel) panel.hidden = true;
+    if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    box.classList.remove('ai-focus-private-notes-open');
+  }
+
+  function notesFocusTogglePrivateDraft(box, forceOpen) {
+    if (!box) return;
+    var panel = box.querySelector('#ai-focus-private-notes');
+    var toggle = box.querySelector('#ai-focus-private-notes-toggle');
+    var input = box.querySelector('#ai-focus-private-notes-input');
+    if (!panel || !toggle || !input) return;
+    var open = typeof forceOpen === 'boolean' ? forceOpen : panel.hidden;
+    panel.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    box.classList.toggle('ai-focus-private-notes-open', open);
+    if (open) {
+      input.value = notesFocusDraftValue(box);
+      requestAnimationFrame(function () { input.focus(); });
+    }
+  }
+
+  function notesFocusSetupPrivateDraft(box) {
+    if (!box) return;
+    var toggle = box.querySelector('#ai-focus-private-notes-toggle');
+    var close = box.querySelector('#ai-focus-private-notes-close');
+    var input = box.querySelector('#ai-focus-private-notes-input');
+    if (!toggle || !close || !input) return;
+    input.value = notesFocusDraftValue(box);
+    toggle.onclick = function () { notesFocusTogglePrivateDraft(box); };
+    close.onclick = function () { notesFocusClosePrivateDraft(box); };
+    input.oninput = function () { notesFocusSaveDraft(box, input.value); };
+  }
+
+  // Called by auth.js only after accepting a clean remote appState snapshot.
+  function notesFocusRefreshPrivateDraft() {
+    if (!_notesFocus || !_notesFocus.box) return;
+    var input = _notesFocus.box.querySelector('#ai-focus-private-notes-input');
+    if (!input || document.activeElement === input) return;
+    input.value = notesFocusDraftValue(_notesFocus.box);
+  }
+  // auth.js loads before this self-contained feature module, so expose only
+  // the refresh hook it invokes after a remote state replacement.
+  window.notesFocusRefreshPrivateDraft = notesFocusRefreshPrivateDraft;
 
   function notesFocusToolbarHtml() {
     return '<div class="ai-focus-toolbar" role="toolbar" aria-label="Notes Focus Mode controls">' +
@@ -1065,9 +1155,15 @@
         '<span class="ai-focus-time" id="ai-focus-time" aria-label="Current video time">0:00</span>' +
         '<button type="button" class="ai-focus-control ai-focus-video" id="ai-focus-video" data-action="start" aria-live="polite">⚡ Start Turbo</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-follow" data-ai-follow-control aria-pressed="false">🎯 Follow</button>' +
+        '<button type="button" class="ai-focus-control" id="ai-focus-private-notes-toggle" aria-expanded="false" title="Write your private notes while reading">📝 My notes</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-pdf" title="Print or save notes as PDF">📄 PDF</button>' +
       '</div>' +
     '</div>' +
+    '<aside class="ai-focus-private-notes" id="ai-focus-private-notes" aria-label="Your private notes" hidden>' +
+      '<div class="ai-focus-private-notes-head"><span><strong>My notes</strong><small>Private to your account</small></span><button type="button" id="ai-focus-private-notes-close" aria-label="Close private notes" title="Close private notes">×</button></div>' +
+      '<textarea id="ai-focus-private-notes-input" maxlength="12000" spellcheck="true" placeholder="Write your points, doubts, or revision notes here…"></textarea>' +
+      '<p>Saved automatically with your study progress.</p>' +
+    '</aside>' +
     '<div class="ai-focus-mini-video" id="ai-focus-mini-video" hidden>' +
       '<button type="button" class="ai-focus-mini-close" id="ai-focus-mini-close" aria-label="Hide floating video" title="Hide floating video">×</button>' +
     '</div>';
@@ -1250,6 +1346,7 @@
     clearInterval(active.clock);
     clearTimeout(active.closeTimer);
     if (typeof window.ytTurboRestoreInline === 'function') window.ytTurboRestoreInline();
+    notesFocusClosePrivateDraft(active.box);
     var scroller = active.box && active.box.querySelector('.ai-scroll');
     var currentScroll = scroller ? scroller.scrollTop : active.scrollTop;
     if (active.box) {
@@ -1330,6 +1427,7 @@
     _notesFocusReturn = { box: box, trigger: trigger || document.activeElement };
     box.classList.remove('ai-note-actions-open');
     box.classList.add('ai-notes-focus');
+    notesFocusSetupPrivateDraft(box);
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-label', 'Notes Focus Mode');
@@ -1377,6 +1475,11 @@
     if (!_notesFocus) return;
     if (e.key === 'Escape') {
       e.preventDefault();
+      var privateNotes = _notesFocus.box && _notesFocus.box.querySelector('#ai-focus-private-notes');
+      if (privateNotes && !privateNotes.hidden) {
+        notesFocusClosePrivateDraft(_notesFocus.box);
+        return;
+      }
       requestNotesFocusClose();
       return;
     }
@@ -1403,6 +1506,9 @@
   function renderNotesResult(mode, n, style, j, targetEl) {
     var box = targetEl || contentEl();
     var content = j.content || '';
+    // One personal scratchpad per video + generated-notes style. It stays in
+    // appState and never changes the AI note text or creates a shared document.
+    box.dataset.focusNoteKey = ['video', curVid() || 'untitled', mode || 'notes', style || 'topic'].join(':');
     var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Print or save as a hard-copy-ready PDF" style="padding:4px 10px;font-size:0.72rem">📄 Print / PDF</button>';
     var focusBtn = '<button class="ai-btn sec" id="ai-notes-focus" title="Read notes in Focus Mode" style="padding:4px 10px;font-size:0.72rem">⛶ Focus</button>';
     var followBtn = '<button class="ai-btn sec" id="ai-follow" data-ai-follow-control style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>';
@@ -1411,12 +1517,11 @@
     var testBtn = (style === 'mcq') ? '<button class="ai-btn" id="ai-mcq-test" title="Take all these MCQs as a full test (opens the exam engine)" style="padding:4px 10px;font-size:0.72rem">🎯 Take as Test</button>' : '';
     // Share a link so others can take the same MCQ test (login required).
     var shareBtn = (style === 'mcq') ? '<button class="ai-btn sec" id="ai-mcq-share" title="Copy a link so others can take this same MCQ test (they must log in / register)" style="padding:4px 10px;font-size:0.72rem">🔗 Share</button>' : '';
-    var sharedNoteBtn = '<button class="ai-btn sec" id="ai-shared-note" title="Open shared text with your own private pen and highlighter marks" style="padding:4px 10px;font-size:0.72rem">📝 Shared note</button>';
     var nbHtml = nbBuild(content, style);
     box.innerHTML = notesFocusToolbarHtml() + brandBarHtml(true) +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + (j.lang ? ' · ' + esc(j.lang) : '') + '</span>' +
-      testBtn + shareBtn + sharedNoteBtn + focusBtn + followBtn + pdfBtn + regenBtn + '</div>' +
+      testBtn + shareBtn + focusBtn + followBtn + pdfBtn + regenBtn + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
     var noteTools = box.querySelector('#ai-note-actions-toggle');
     if (noteTools) noteTools.onclick = function () {
@@ -1439,19 +1544,9 @@
       if (focusVideo) focusVideo.dataset.action = 'mini-hide';
       notesFocusVideoAction();
     };
+    notesFocusSetupPrivateDraft(box);
     var focusOpen = document.getElementById('ai-notes-focus');
     if (focusOpen) focusOpen.onclick = function () { openNotesFocus(box, focusOpen); };
-    var sharedNoteOpen = document.getElementById('ai-shared-note');
-    if (sharedNoteOpen) sharedNoteOpen.onclick = function () {
-      if (typeof nfOpenForCurrentVideo !== 'function') {
-        if (typeof showToast === 'function') showToast('Shared note feature load nahi hui. Page reload karke try karo.', 'error');
-        return;
-      }
-      nfOpenForCurrentVideo({
-        title: (curTitle() || 'Lecture') + ' — Shared notes',
-        content: content
-      });
-    };
     var rb = document.getElementById('ai-regen');
     if (rb) rb.onclick = function () { showStudy(mode, n, true); };
     var mtb = document.getElementById('ai-mcq-test');

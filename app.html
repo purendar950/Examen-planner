@@ -13,7 +13,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/brand/studyplanner-mark.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon.png">
 <link rel="manifest" href="assets/brand/site.webmanifest" vite-ignore>
-<link rel="stylesheet" href="css/app.css?v=20260724b">
+<link rel="stylesheet" href="css/app.css?v=20260725a">
 <!-- Handwriting fonts for AI Study "topper notebook" notes (scoped to .ai-nb / PDF) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -290,9 +290,6 @@
     <div data-include="pages/saved.html"></div>
   </div><!-- /main-content -->
 
-  <!-- Global shared-note focus surface (loaded before its feature scripts). -->
-  <div data-include="pages/note-focus.html"></div>
-
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
   <div class="ch-link-modal-overlay" id="sp-modal-overlay" onclick="spOutsideClose(event)" style="z-index:10002;">
     <div class="ch-link-modal ezw-modal" style="max-width:480px;max-height:92vh;overflow-y:auto;">
@@ -557,11 +554,7 @@
      gating file (uses ezIsPro/ezLockedMsg). -->
 <script defer src="js/features/turbo-player.js?v=20260724b"></script>
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
-<script defer src="js/features/ai-tutor.js?v=20260724b"></script>
-<!-- Shared note text uses Firestore; ink is private appState data. Load after
-     the AI and YouTube feature APIs that provide video/PiP context. -->
-<script defer src="js/features/notes-shared.js"></script>
-<script defer src="js/features/note-focus.js"></script>
+<script defer src="js/features/ai-tutor.js?v=20260725a"></script>
 <script defer src="js/core/theme.js"></script>
 <!-- YouTube IFrame API — deferred; onYouTubeIframeAPIReady fires after load -->
 <script defer src="https://www.youtube.com/iframe_api"></script>
