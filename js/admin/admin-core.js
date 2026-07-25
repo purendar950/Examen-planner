@@ -366,7 +366,7 @@ function subscribeRealtime() {
         let added = 0, removed = 0, changed = 0;
         snap.docChanges().forEach(change => {
           const data = change.doc.data();
-          const u = { id: change.doc.id, p: (data.profile || {}) };
+          const u = normalizeUserDoc(change.doc.id, data);
           const idx = USERS.findIndex(x => x.id === u.id);
           if (change.type === 'added') { if (idx < 0) { USERS.push(u); added++; } }
           else if (change.type === 'modified') { if (idx >= 0) USERS[idx] = u; else USERS.push(u); changed++; }
@@ -427,6 +427,29 @@ function subscribeRealtime() {
   } catch(e) { console.warn('subscribe requests failed', e); }
 }
 
+function normalizeUserDoc(id, rawData) {
+  const data = rawData || {};
+  const sourceProfile = data.profile && typeof data.profile === 'object' ? data.profile : {};
+  const p = { ...sourceProfile };
+
+  // Support documents created by older builds that stored identity fields at
+  // the document root instead of under profile.
+  if (!p.name) p.name = data.name || data.displayName || '';
+  if (!p.email) p.email = data.email || data.authEmail || '';
+  if (!p.mobile) p.mobile = data.mobile || data.phone || '';
+  if (!p.examTarget) p.examTarget = data.examTarget || data.exam || '';
+  if (!p.createdAt) p.createdAt = data.createdAt || data.joinedAt || data.registeredAt || null;
+  if (!p.requestedAt) p.requestedAt = data.requestedAt || null;
+  if (!p.ip) p.ip = data.ip || data.lastIp || '';
+  if (!p.fp) p.fp = data.fp || data.fingerprint || '';
+
+  return {
+    id,
+    p,
+    profileIncomplete: !p.name || !p.email || !(p.createdAt || p.requestedAt)
+  };
+}
+
 function rebuildDupIndex() {
   DUP = { mobile:{}, fp:{}, ip:{} };
   USERS.forEach(u => {
@@ -442,7 +465,7 @@ async function loadAll() {
   const failed = (name, error) => { errors.push(name); console.warn(name + ' load failed', error); };
   try {
     const us = await db.collection('users').get();
-    USERS = us.docs.map(d => ({ id: d.id, p: (d.data().profile || {}) }));
+    USERS = us.docs.map(d => normalizeUserDoc(d.id, d.data()));
   } catch(e) { failed('users', e); }
   try {
     const ps = await db.collection('plans').get();

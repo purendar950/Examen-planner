@@ -16,6 +16,16 @@ function userInitials(name, email) {
   return src.substring(0, 2).toUpperCase();
 }
 
+function userDisplayName(u) {
+  if (u.p.name) return u.p.name;
+  if (u.p.email) return u.p.email.split('@')[0];
+  return 'Profile incomplete';
+}
+
+function userIdentityLine(u) {
+  return u.p.email || ('Email unavailable · UID ' + u.id);
+}
+
 /* Deterministic avatar background gradient from a string. */
 function avatarColor(str) {
   const palette = [
@@ -147,10 +157,13 @@ function renderPending() {
     const examBadge = u.p.examTarget
       ? '<span class="badge badge-blue">' + esc(u.p.examTarget.toUpperCase()) + '</span>'
       : '';
+    const incompleteBadge = u.profileIncomplete
+      ? '<span class="badge badge-amber" title="This legacy account has not yet synced all profile fields">Profile incomplete</span>'
+      : '';
     return '<div class="card pending-card"><div class="pending-card-main">' +
     '<div class="pending-avatar" style="background:' + avatarColor(u.p.name || u.p.email || u.id) + ';">' + esc(userInitials(u.p.name, u.p.email)) + '</div>' +
-    '<div class="pending-info"><div class="pending-name"><strong>' + esc(u.p.name || 'Unnamed user') + '</strong>' + dupBadge + examBadge + '</div>' +
-    '<div class="uc-email">' + esc(u.p.email || 'No email') + '</div>' +
+    '<div class="pending-info"><div class="pending-name"><strong>' + esc(userDisplayName(u)) + '</strong>' + incompleteBadge + dupBadge + examBadge + '</div>' +
+    '<div class="uc-email">' + esc(userIdentityLine(u)) + '</div>' +
     userMeta(u) + '</div>' +
     '<div class="pending-actions">' +
     '<button class="btn btn-green" onclick="approveUser(\'' + u.id + '\')">✓ Approve</button>' +
@@ -240,6 +253,7 @@ function renderUsers() {
       ? '<span class="badge badge-blue">⭐ ' + esc(u.p.plan) + (u.p.planExpiry ? ' · till ' + esc(u.p.planExpiry) : '') + '</span>'
       : '<span class="badge badge-green">Free</span>';
     const badges = planBadge +
+      (u.profileIncomplete ? ' <span class="badge badge-amber" title="Identity or join date is missing from this legacy profile">Profile incomplete</span>' : '') +
       (suspended ? ' <span class="badge badge-red">⏸ Suspended</span>' : '') +
       (trialSuspended ? ' <span class="badge badge-red">Trial Suspended</span>' : '') +
       (u.p.trialExpiry && !trialSuspended ? ' <span class="badge badge-amber">🎁 Trial</span>' : '');
@@ -264,8 +278,8 @@ function renderUsers() {
       '<div class="uc-top">' +
         '<div class="uc-avatar" style="background:' + avatarColor(u.p.name || u.p.email || u.id) + ';">' + esc(userInitials(u.p.name, u.p.email)) + '</div>' +
         '<div class="uc-info">' +
-          '<div class="uc-name">' + esc(u.p.name || 'Unnamed user') + '</div>' +
-          '<div class="uc-email">' + esc(u.p.email || '') + '</div>' +
+          '<div class="uc-name">' + esc(userDisplayName(u)) + '</div>' +
+          '<div class="uc-email">' + esc(userIdentityLine(u)) + '</div>' +
           '<div class="uc-badges">' + badges + '</div>' +
         '</div>' +
       '</div>' +
