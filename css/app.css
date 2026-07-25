@@ -3768,6 +3768,57 @@ html[data-theme="light"] #page-youtube .yt-workspace-tabs .mtab.active { color: 
   align-items: center !important;
   gap: .3rem !important;
 }
+/* The generic Pro preview normally needs a card-sized surface. Turbo lives in
+   the compact playback toolbar, so render its locked state as a single pill
+   instead of a 200px-tall overlay squeezed to the button's width. */
+#page-youtube #yt-turbo-controls:has(> .pro-blur-container) {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+#page-youtube #yt-turbo-controls > .pro-blur-container {
+  flex: 0 1 190px;
+  width: 190px;
+  max-width: 100%;
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--purple) 38%, var(--border));
+  border-radius: 8px;
+}
+#page-youtube #yt-turbo-controls > .pro-blur-container > .pro-blur-content {
+  height: 30px;
+  overflow: hidden;
+}
+#page-youtube #yt-turbo-controls > .pro-blur-container > .pro-blur-overlay {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: .35rem;
+  padding: .2rem .38rem;
+  background: color-mix(in srgb, var(--card) 92%, rgba(99, 102, 241, .2));
+}
+#page-youtube #yt-turbo-controls .pro-lock-icon {
+  flex: 0 0 auto;
+  font-size: .72rem;
+  animation: none;
+}
+#page-youtube #yt-turbo-controls .pro-lock-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: .62rem;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-youtube #yt-turbo-controls .pro-lock-desc,
+#page-youtube #yt-turbo-controls .pro-lock-price { display: none; }
+#page-youtube #yt-turbo-controls .pro-lock-btn {
+  flex: 0 0 auto;
+  min-height: 22px;
+  margin: 0 0 0 auto;
+  padding: 0 .5rem;
+  border-radius: 6px;
+  font-size: .56rem;
+  line-height: 1;
+  white-space: nowrap;
+}
 #page-youtube .yt-turbo-toggle {
   min-height: 30px;
   padding: 0 .68rem;
