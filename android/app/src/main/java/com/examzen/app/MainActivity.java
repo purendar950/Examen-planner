@@ -18,6 +18,8 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.webkit.WebViewAssetLoader;
 
+import com.examzen.app.BuildConfig;
+
 /**
  * Thin native shell around the PrepPath web app.
  *
