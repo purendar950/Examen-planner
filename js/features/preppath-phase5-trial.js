@@ -135,6 +135,15 @@ function ezRefreshGates() {
     if (typeof ezRenderEntitlementSurfaces === 'function') ezRenderEntitlementSurfaces();
     else if (typeof ezRenderPlanBadge === 'function') ezRenderPlanBadge();
   } catch(e) {}
+  /* Re-evaluate the Turbo 4× player's Pro blur. The overlay can get applied
+     while EZ_PROFILE is still loading (fail-closed default); once the profile
+     confirms Pro this clears the stale "Upgrade to Pro" overlay. Slight delay
+     so it settles after turbo-player.js's own initUI timers. */
+  try {
+    if (typeof window._blurTurboSurface === 'function') {
+      setTimeout(window._blurTurboSurface, 300);
+    }
+  } catch(e) {}
 }
 
 /* ── Trial expiry watchdog ──

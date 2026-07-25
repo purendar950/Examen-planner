@@ -979,6 +979,9 @@
     applySpeedVisibility();
     emitTurboState();
   }
+  // Exposed so the gating layer can rebuild the toggle after clearing a stale
+  // Pro-blur overlay (see _blurTurboSurface in preppath-phase4-gating.js).
+  window.ytTurboInitUI = initUI;
 
   // Init when the YouTube page opens (markup is injected via include-loader).
   if (typeof onPageActivated === 'function') {
