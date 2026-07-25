@@ -103,7 +103,23 @@ async function saveProgressNow() {
   } catch(e) {
     if (!currentUser || currentUser.uid === saveUid) _localDirty = true;
     _markPendingSync(saveUid);
-    setSyncStatus('error', '⚠ Sync failed');
+    // Surface the real cause. This catch previously swallowed the error, which
+    // made "⚠ Sync failed" impossible to diagnose. Log the Firestore error code,
+    // message and the approximate document size (Firestore rejects docs > 1 MiB).
+    const _code = (e && e.code) || '';
+    const _docKB = Math.round(json.length / 1024);
+    try {
+      console.error('[sync] Firestore save failed — code:', _code || '(none)',
+        '| message:', (e && e.message) || String(e),
+        '| approx doc size:', _docKB + ' KB', e);
+    } catch (_) {}
+    // Give the user a more specific hint based on the error class.
+    let _label = '⚠ Sync failed';
+    if (_code === 'permission-denied') _label = '⚠ Sync blocked (permissions)';
+    else if (_code === 'unauthenticated') _label = '⚠ Sign in again to sync';
+    else if (_code === 'resource-exhausted' || _docKB > 1024) _label = '⚠ Data too large to sync';
+    else if (_code === 'unavailable' || (typeof navigator !== 'undefined' && navigator.onLine === false)) _label = '⚠ Offline — will retry';
+    setSyncStatus('error', _label);
     setTimeout(() => setSyncStatus('', ''), 4000);
   }
 }
