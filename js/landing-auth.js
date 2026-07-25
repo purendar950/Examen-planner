@@ -66,6 +66,57 @@
     }
   }
 
+  /* Keep Firebase Auth and Firestore identity in sync. The admin dashboard
+     reads users/{uid}.profile; Auth alone cannot be queried from browser code.
+     Older landing-page signups therefore appeared as "Unnamed user". */
+  function ensureBasicUserProfile(user, suppliedName) {
+    if (!user || typeof firebase === 'undefined' || !firebase.firestore) return Promise.resolve();
+    var firestore;
+    try { firestore = firebase.firestore(); }
+    catch (e) { return Promise.resolve(); }
+
+    var ref = firestore.collection('users').doc(user.uid);
+    return firestore.runTransaction(function (tx) {
+      return tx.get(ref).then(function (snap) {
+        var data = snap.exists ? (snap.data() || {}) : {};
+        var profile = data.profile || {};
+        var patch = {};
+        var email = (user.email || '').trim();
+        var name = (suppliedName || user.displayName || '').trim();
+
+        if (!profile.name && name) patch.name = name;
+        if (!profile.email && email) patch.email = email;
+        if (!profile.createdAt) {
+          var creationTime = user.metadata && user.metadata.creationTime;
+          var created = creationTime ? new Date(creationTime) : null;
+          if (created && !isNaN(created.getTime())) {
+            patch.createdAt = firebase.firestore.Timestamp.fromDate(created);
+          }
+        }
+        if (!profile.provider && user.providerData && user.providerData[0]) {
+          patch.provider = user.providerData[0].providerId || '';
+        }
+
+        if (Object.keys(patch).length) tx.set(ref, { profile: patch }, { merge: true });
+      });
+    }).catch(function (e) {
+      // Authentication should still succeed if profile repair is temporarily
+      // unavailable; app.html repeats the repair after session hydration.
+      console.warn('Could not sync basic user profile:', e && (e.message || e));
+    });
+  }
+
+  function syncProfileBeforeNavigation(user, suppliedName, waitForWrite) {
+    var repair = ensureBasicUserProfile(user, suppliedName);
+    if (!waitForWrite) return Promise.resolve();
+    // A new-account write gets a brief chance to finish, but slow/offline
+    // Firestore must never prevent navigation; app.html repeats the repair.
+    return Promise.race([
+      repair,
+      new Promise(function (resolve) { setTimeout(resolve, 1500); })
+    ]);
+  }
+
   // ── Modal control ──────────────────────────────────────────────────────
   function updateUI() {
     var isSignup = authMode === 'signup';
@@ -150,14 +201,24 @@
     setBusy(true);
     setError('');
 
-    var p = authMode === 'signup'
+    var isSignup = authMode === 'signup';
+    var signedInUser = null;
+    var p = isSignup
       ? auth.createUserWithEmailAndPassword(email, pass)
       : auth.signInWithEmailAndPassword(email, pass);
 
     p.then(function (cred) {
-      if (authMode === 'signup' && cred && cred.user && name.trim()) {
-        return cred.user.updateProfile({ displayName: name.trim() });
+      signedInUser = cred && cred.user;
+      if (isSignup && signedInUser && name.trim()) {
+        return signedInUser.updateProfile({ displayName: name.trim() }).catch(function (e) {
+          // The Auth account already exists. Continue to Firestore sync and
+          // navigation; the supplied signup name is still persisted there.
+          console.warn('Could not update Auth display name:', e && (e.message || e));
+        });
       }
+    })
+    .then(function () {
+      return syncProfileBeforeNavigation(signedInUser, isSignup ? name.trim() : '', isSignup);
     })
     .then(function () {
       // Sign-in succeeded. Close the modal so the user doesn't see a stuck
@@ -194,13 +255,16 @@
     setError('');
     var provider = new firebase.auth.GoogleAuthProvider();
     auth.signInWithPopup(provider)
-      .then(function () {
-        window.closeAuthModal();
-        // Same cross-page hint as the email/password path — see
-        // handleAuthSubmit() for why this matters.
-        try { sessionStorage.setItem('sp_justSignedIn', String(Date.now())); } catch (e) {}
-        try { window.location.replace('app.html'); }
-        catch (navErr) { window.location.href = 'app.html'; }
+      .then(function (result) {
+        var isNewUser = !!(result && result.additionalUserInfo && result.additionalUserInfo.isNewUser);
+        return syncProfileBeforeNavigation(result && result.user, '', isNewUser).then(function () {
+          window.closeAuthModal();
+          // Same cross-page hint as the email/password path — see
+          // handleAuthSubmit() for why this matters.
+          try { sessionStorage.setItem('sp_justSignedIn', String(Date.now())); } catch (e) {}
+          try { window.location.replace('app.html'); }
+          catch (navErr) { window.location.href = 'app.html'; }
+        });
       })
       .catch(function (err) {
         submitInFlight = false;
@@ -280,7 +344,7 @@
       var auth = getFirebaseAuth();
       if (!auth) return;
       auth.onAuthStateChanged(function (user) {
-        if (!user) return;
+        if (!user || submitInFlight) return;
         // Swap the nav buttons for clarity during the brief redirect window.
         var actions = document.querySelector('.nav-actions');
         if (actions) {

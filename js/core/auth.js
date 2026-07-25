@@ -413,6 +413,42 @@ function showAuthError(type, msg) {
   if (el) { el.textContent = msg; el.style.display = 'block'; }
 }
 
+/* Recover the basic identity for accounts that were created by an older
+   Auth-only signup path. Admin screens read Firestore, while email and account
+   creation time otherwise exist only in Firebase Auth. Rich registration
+   fields are never overwritten by this repair. */
+function repairBasicUserProfile(user) {
+  if (!user || !db) return Promise.resolve(false);
+  const ref = db.collection('users').doc(user.uid);
+  return db.runTransaction((tx) => tx.get(ref).then((snap) => {
+    const data = snap.exists ? (snap.data() || {}) : {};
+    const profile = data.profile || {};
+    const patch = {};
+    const email = (user.email || '').trim();
+    const name = (user.displayName || '').trim();
+
+    if (!profile.name && name) patch.name = name;
+    if (!profile.email && email) patch.email = email;
+    if (!profile.createdAt) {
+      const rawCreationTime = user.metadata && user.metadata.creationTime;
+      const created = rawCreationTime ? new Date(rawCreationTime) : null;
+      if (created && !Number.isNaN(created.getTime())) {
+        patch.createdAt = firebase.firestore.Timestamp.fromDate(created);
+      }
+    }
+    if (!profile.provider && user.providerData && user.providerData[0]) {
+      patch.provider = user.providerData[0].providerId || '';
+    }
+
+    if (!Object.keys(patch).length) return false;
+    tx.set(ref, { profile: patch }, { merge: true });
+    return true;
+  })).catch((e) => {
+    console.warn('Basic profile repair failed:', e && (e.message || e));
+    return false;
+  });
+}
+
 /* ══════════════════════════════════════════════
    FIREBASE AUTH STATE LISTENER
    — Handles persistent login + session restore
@@ -614,7 +650,7 @@ if (auth && !_isBadProtocol) {
     window._ezEntitlementPendingUid = user.uid;
     try { if (typeof ezPrepareProfileForUser === 'function') ezPrepareProfileForUser(user.uid); } catch(e) {}
 
-    let name = user.displayName || user.email.split('@')[0];
+    let name = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
     let appStarted = false;
     let liveServerSnapshotSeen = false;
     const isCurrentAuthEvent = function() {
@@ -707,7 +743,12 @@ if (auth && !_isBadProtocol) {
       await waitForAppScripts();
       if (!isCurrentAuthEvent() || liveServerSnapshotSeen) return;
       const data = snap.exists ? snap.data() : {};
-      if (data.profile?.name) updateRenderedName(data.profile.name);
+      const existingProfile = data.profile || {};
+      if (existingProfile.name) updateRenderedName(existingProfile.name);
+      // Do not delay app startup on this best-effort repair. The merged write
+      // triggers the live listener and makes identity/join data visible to the
+      // admin dashboard without touching appState or richer profile fields.
+      repairBasicUserProfile(user);
       if (typeof ezSetProfileFromFirestoreSnapshot === 'function') {
         ezSetProfileFromFirestoreSnapshot(user.uid, snap, 'initial');
       } else if (typeof ezSetProfileSnapshot === 'function') {
