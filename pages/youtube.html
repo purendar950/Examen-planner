@@ -3,16 +3,11 @@
         <div class="yt-workspace-copy">
           <span class="yt-workspace-eyebrow">Focused learning workspace</span>
           <h2><span aria-hidden="true">▶</span> YouTube Study</h2>
-          <p>Watch lectures, organise courses, capture key moments, and turn videos into study material.</p>
-        </div>
-        <div class="mtab-bar yt-workspace-tabs" aria-label="YouTube workspace views">
-          <button class="mtab active" id="yt-sub-watch" onclick="ytSwitchSub('watch')"><span aria-hidden="true">▶</span> Watch</button>
-          <button class="mtab" id="yt-sub-organiser" onclick="ytSwitchSub('organiser')"><span aria-hidden="true">▤</span> Course Library</button>
+          <p>Watch lectures, capture key moments, and turn videos into study material.</p>
         </div>
       </header>
 
-      <!-- ═══ WATCH sub-view ═══ -->
-      <div class="msubview active" id="yt-sub-view-watch">
+      <div class="active" id="yt-sub-view-watch">
       <section class="yt-launch-card" aria-label="Open a YouTube lesson">
         <label class="yt-launch-label" for="yt-url-input">Start a lesson</label>
         <div class="yt-input-bar">
@@ -170,9 +165,10 @@
         </aside>
       </div>
       </div><!-- /yt-sub-view-watch -->
+    </div><!-- /page-youtube -->
 
-      <!-- ═══ PLAYLIST ORGANISER sub-view (merged from former Playlist Organiser tab) ═══ -->
-      <div class="msubview" id="page-yt-organiser">
+    <!-- ═══ STANDALONE COURSE LIBRARY PAGE ═══ -->
+    <div class="page" id="page-yt-organiser">
         <div class="yto-library-shell">
           <section class="yto-import-hero" aria-labelledby="yto-library-title">
             <div class="yto-import-copy">
@@ -231,6 +227,5 @@
 
           <div id="yto-referral-slot" class="yto-referral-slot"></div>
         </div>
-      </div><!-- /page-yt-organiser -->
-    </div>
+    </div><!-- /page-yt-organiser -->
 

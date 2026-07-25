@@ -184,12 +184,22 @@
     <div class="nav-tab" onclick="switchPage('youtube')" id="nav-youtube" title="YouTube">
       <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="4"></rect><path d="m10 9 5 3-5 3z" fill="currentColor" stroke="none"></path></svg></span><span class="nav-tab-label"> YouTube</span>
     </div>
+    <div class="nav-tab" onclick="switchPage('yt-organiser')" id="nav-yt-organiser" title="Course Library">
+      <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17.5H6.5A2.5 2.5 0 0 0 4 23z"></path><path d="M4 5.5V20.5M8 7h8M8 11h8M8 15h5"></path></svg></span><span class="nav-tab-label"> Course Library</span>
+    </div>
     <div class="nav-tab" onclick="switchPage('analysis')" id="nav-analysis" title="Analysis">
       <span class="tab-icon" style="color:#3B82F6;" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V4M4 20h16"></path><path d="m7 15 4-4 3 2 4-6"></path></svg></span><span class="nav-tab-label"> Analysis</span>
     </div>
     <div class="nav-tab" onclick="switchPage('saved')" id="nav-saved" title="Quiz">
       <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h10l3 3v15H7z"></path><path d="M17 3v4h4M10 12h7M10 16h5"></path></svg></span><span class="nav-tab-label"> Quiz</span>
     </div>
+    <section class="shell-playlist-section" id="shell-playlist-section" aria-labelledby="shell-playlist-label" hidden>
+      <div class="shell-playlist-heading">
+        <span id="shell-playlist-label">Playlists</span>
+        <button type="button" onclick="ytoOpenSidebarLibrary()" title="View all playlists" aria-label="View all playlists">View all</button>
+      </div>
+      <div class="shell-playlist-list" id="shell-playlist-list"></div>
+    </section>
     <div class="shell-sidebar-status">
       <span class="shell-status-dot" aria-hidden="true"></span>
       <div class="shell-status-text"><strong>Preparation workspace</strong><span>Progress synced to cloud</span></div>
@@ -206,11 +216,18 @@
 
       function setTabVisibility(query) {
         var normalized = (query || '').trim().toLowerCase();
-        document.querySelectorAll('.nav-tabs .nav-tab').forEach(function (tab) {
-          var label = (tab.getAttribute('title') || tab.textContent || '').toLowerCase();
-          tab.hidden = normalized && label.indexOf(normalized) === -1;
+        document.querySelectorAll('.nav-tabs .nav-tab, .nav-tabs .shell-playlist-item').forEach(function (item) {
+          var label = (item.getAttribute('title') || item.textContent || '').toLowerCase();
+          item.hidden = Boolean(normalized && label.indexOf(normalized) === -1);
         });
+        var playlistSection = document.getElementById('shell-playlist-section');
+        if (playlistSection) {
+          var playlistItems = Array.from(playlistSection.querySelectorAll('.shell-playlist-item'));
+          var hasVisiblePlaylist = playlistItems.some(function (item) { return !item.hidden; });
+          playlistSection.classList.toggle('search-empty', Boolean(normalized && !hasVisiblePlaylist));
+        }
       }
+      window.shellFilterNavigation = setTabVisibility;
 
       function syncCollapseControl() {
         var collapsed = cb.checked;
@@ -265,7 +282,7 @@
     <div data-include="pages/syllabus.html"></div>
     <!-- ═══ PLANNER PAGE ═══ -->
     <div data-include="pages/planner.html"></div>
-    <!-- ═══ YOUTUBE PAGE (includes Playlist Organiser sub-tab) ═══ -->
+    <!-- ═══ YOUTUBE WATCH + STANDALONE COURSE LIBRARY PAGES ═══ -->
     <div data-include="pages/youtube.html"></div>
     <!-- ═══ ANALYSIS PAGE (includes Revision sub-tab) ═══ -->
     <div data-include="pages/analysis.html"></div>

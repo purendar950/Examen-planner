@@ -688,6 +688,7 @@ if (auth && !_isBadProtocol) {
       if (JSON.stringify(appState) === JSON.stringify(hydrated)) return;
       appState = hydrated;
       if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
+      try { if (typeof ytoRenderMainSidebar === 'function') ytoRenderMainSidebar(); } catch(e) {}
       try { updateDashboard(); } catch(e) {}
       try { buildSyllabus(); } catch(e) {}
       try {
@@ -831,6 +832,7 @@ if (auth && !_isBadProtocol) {
             appState.activePage = _keepActivePage;
           }
           if (appState.ytOrganiser && appState.ytOrganiser.videos) ytoState = appState.ytOrganiser;
+          try { if (typeof ytoRenderMainSidebar === 'function') ytoRenderMainSidebar(); } catch(e) {}
           const remoteTrialJSON = JSON.stringify({
             proTrial: appState.proTrial || null,
             proTrialUsed: !!appState.proTrialUsed

@@ -98,7 +98,7 @@ function ytSingleVideoManageHtml(id) {
     var isOwn = existingPlId === ('vid_' + id);
     return '<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:0.75rem;">' +
       '<div style="color:var(--accent);font-weight:600;margin-bottom:6px;">✓ Saved' + (isOwn ? ' as its own course' : ' in course: ' + escapeHtml(pl ? pl.title : 'Course')) + '</div>' +
-      '<button onclick="switchPage(\'youtube\');ytSwitchSub(\'organiser\');ytoOpenCourse(\'' + existingPlId + '\')" style="background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,150,0.3);border-radius:8px;padding:5px 12px;font-size:0.72rem;cursor:pointer;font-weight:600;font-family:var(--font);">📂 Manage in Organiser</button>' +
+      '<button onclick="switchPage(\'yt-organiser\');ytoOpenCourse(\'' + existingPlId + '\')" style="background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,150,0.3);border-radius:8px;padding:5px 12px;font-size:0.72rem;cursor:pointer;font-weight:600;font-family:var(--font);">📂 Open Course Library</button>' +
       '</div>';
   }
 
@@ -121,37 +121,19 @@ function ytSingleVideoManageHtml(id) {
     '</div>';
 }
 
-/* "Save as own course" — reuses Organiser's single-video save path, then
-   jumps to the Organiser tab so the user immediately sees it saved/tracked
-   (matches how "Manage in Organiser" behaves once a video is already saved). */
+/* "Save as own course" — reuses Course Library's single-video save path,
+   then opens the standalone library so the saved course is immediately visible. */
 async function ytManageSaveAsCourse(id) {
-  if (typeof ytoLoadSingleVideo !== 'function') { showToast('Playlist Organiser load nahi hua.', 'error'); return; }
+  if (typeof ytoLoadSingleVideo !== 'function') { showToast('Course Library load nahi hui.', 'error'); return; }
   var box = document.querySelector('#yt-video-list [data-yt-manage]');
   if (box) box.innerHTML = '<div style="color:var(--muted);font-size:0.72rem;">Saving…</div>';
   await ytoLoadSingleVideo(id);
-  switchPage('youtube');
-  ytSwitchSub('organiser');
+  switchPage('yt-organiser');
 }
 
-/* ── Watch | Playlist Organiser sub-tab switch (merged YouTube tab) ── */
+/* Backward-compatible route for older callers and cached inline actions. */
 function ytSwitchSub(v) {
-  var map = { watch: 'yt-sub-view-watch', organiser: 'page-yt-organiser' };
-  Object.keys(map).forEach(function (x) {
-    var view = document.getElementById(map[x]);
-    if (view) view.classList.toggle('active', x === v);
-    var btn = document.getElementById('yt-sub-' + x);
-    if (btn) btn.classList.toggle('active', x === v);
-  });
-  if (v === 'organiser') {
-    // Same render the old switchPage('yt-organiser') branch used to trigger.
-    try {
-      if (typeof ytoCurrentPl !== 'undefined' && ytoCurrentPl) {
-        if (typeof ytoRefreshCourse === 'function') ytoRefreshCourse();
-      } else if (typeof ytoRenderLibrary === 'function') {
-        ytoRenderLibrary();
-      }
-    } catch (e) {}
-  }
+  switchPage(v === 'organiser' ? 'yt-organiser' : 'youtube');
 }
 
 /* "Add to existing course" — append this video into a course chosen from
@@ -196,6 +178,7 @@ function ytResume() {
   } else {
     ytoCurrentPl = null;           // plain single video, no organiser sidebar
   }
+  if (typeof ytoRenderMainSidebar === 'function') ytoRenderMainSidebar();
 
   const url = lv.url || (lv.type === 'playlist'
     ? `https://youtube.com/playlist?list=${lv.id}`
@@ -294,6 +277,11 @@ function ytPlay() {
   const url = document.getElementById('yt-url-input').value;
   const v = ytValidate(url);
   if (v.err) { document.getElementById('yt-err').textContent = v.err; document.getElementById('yt-err').classList.add('show'); return; }
+  // A pasted URL is plain Watch mode, not the organiser course that may have
+  // been open previously. Clear that context so the sidebar selection and
+  // course queue do not imply the new URL belongs to the old playlist.
+  if (typeof ytoCurrentPl !== 'undefined') ytoCurrentPl = null;
+  if (typeof ytoSyncMainSidebarSelection === 'function') ytoSyncMainSidebarSelection();
   ytLoadInTab(v.type, v.id, url, v.type === 'playlist' ? 'Playlist' : 'Video');
 }
 
