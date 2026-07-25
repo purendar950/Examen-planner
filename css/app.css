@@ -6178,3 +6178,105 @@ html[data-theme="light"] .fintech-dashboard {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+
+/* ── Notes Focus: private note-making pad ─────────────────────────────── */
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-private-notes {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #fffdf6;
+  border-left: 1px solid #ded6c2;
+  color: #17231d;
+}
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-private-notes[hidden] { display: none !important; }
+#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  grid-template-rows: auto minmax(0, 1fr);
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open .ai-focus-toolbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open > .ai-scroll,
+#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open > .ai-scroll.nb {
+  grid-column: 1;
+  grid-row: 2;
+  width: 100%;
+  margin: 0;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open .ai-focus-private-notes {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+}
+#page-youtube .ai-focus-private-notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .9rem 1rem;
+  border-bottom: 1px solid #e4dcc8;
+  background: #fffaf0;
+}
+#page-youtube .ai-focus-private-notes-head span { display: grid; gap: .12rem; }
+#page-youtube .ai-focus-private-notes-head strong { font-size: .78rem; color: #17231d; }
+#page-youtube .ai-focus-private-notes-head small { color: #6b776f; font-size: .61rem; font-weight: 650; }
+#page-youtube .ai-focus-private-notes-head button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #d5cdb8;
+  border-radius: 8px;
+  background: #fffdf6;
+  color: #405148;
+  font: 800 1rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+#page-youtube .ai-focus-private-notes-head button:hover { border-color: #8eb69a; background: #eef7eb; }
+#page-youtube .ai-focus-private-notes-head button:focus-visible { outline: 3px solid #08733a; outline-offset: 2px; }
+#page-youtube #ai-focus-private-notes-input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 1rem;
+  background: repeating-linear-gradient(to bottom, #fffdf6 0, #fffdf6 30px, #e8e0cd 31px);
+  color: #25352c;
+  font: 500 .88rem/1.72 var(--font);
+}
+#page-youtube #ai-focus-private-notes-input::placeholder { color: #8b958f; }
+#page-youtube .ai-focus-private-notes > p {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: .65rem 1rem max(.7rem, env(safe-area-inset-bottom));
+  border-top: 1px solid #e4dcc8;
+  color: #6b776f;
+  font-size: .61rem;
+  font-weight: 650;
+}
+
+@media (max-width: 700px) {
+  #page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open { display: flex !important; }
+  #page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open > .ai-scroll,
+  #page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open > .ai-scroll.nb { width: 100%; }
+  #page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open .ai-focus-private-notes {
+    position: absolute;
+    z-index: 12;
+    top: 105px;
+    right: .5rem;
+    bottom: .5rem;
+    left: .5rem;
+    display: flex;
+    border: 1px solid #d5cdb8;
+    border-radius: 13px;
+    box-shadow: 0 18px 46px rgba(39, 51, 42, .24);
+  }
+}
