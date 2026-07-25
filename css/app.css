@@ -6246,7 +6246,14 @@ html[data-theme="light"] .fintech-dashboard {
 #page-youtube .ai-focus-mark-done:focus-visible,
 #page-youtube .ai-focus-mark-color:focus-visible { outline: 3px solid #08733a; outline-offset: 2px; }
 #page-youtube .ai-focus-control.ai-focus-control-active { border-color: #08733a; background: #dff5e6; color: #075b2d; }
-#page-youtube #ai-sub.ai-notes-focus .ai-nb { position: relative; }
+#page-youtube #ai-sub.ai-notes-focus .ai-nb {
+  position: relative;
+  isolation: isolate;
+  /* Keep the reading surface opaque while Turbo prepares in the background.
+     Otherwise a fixed native-video surface can show through this intentionally
+     transparent notebook and look like the note itself became black. */
+  background: #fffdf6 !important;
+}
 #page-youtube #ai-sub.ai-notes-focus .ai-focus-marks-canvas {
   position: absolute;
   z-index: 5;
