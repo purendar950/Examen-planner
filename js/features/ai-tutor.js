@@ -1123,10 +1123,25 @@
     try { if (typeof saveProgress === 'function') saveProgress(); } catch (e) {}
   }
 
+  // Focus notes can be very tall on tablets. Keep their canvas below browser
+  // texture and memory limits so an annotation layer never replaces notes with
+  // an opaque black surface.
+  var NOTES_FOCUS_MARK_MAX_PIXELS = 8000000;
+  var NOTES_FOCUS_MARK_MAX_DIMENSION = 4096;
+  function notesFocusMarkDpr(width, height) {
+    var deviceDpr = Math.max(1, Math.min(Number(window.devicePixelRatio) || 1, 1.5));
+    var pixelBudgetDpr = Math.sqrt(NOTES_FOCUS_MARK_MAX_PIXELS / Math.max(1, width * height));
+    var dimensionDpr = Math.min(NOTES_FOCUS_MARK_MAX_DIMENSION / width, NOTES_FOCUS_MARK_MAX_DIMENSION / height);
+    return Math.min(deviceDpr, pixelBudgetDpr, dimensionDpr);
+  }
+
   function notesFocusMarkDimensions(state) {
     var canvas = state && state.canvas;
     if (!canvas) return { width: 1, height: 1 };
-    return { width: Math.max(1, canvas.width / state.dpr), height: Math.max(1, canvas.height / state.dpr) };
+    return {
+      width: Math.max(1, state.width || canvas.width / state.dpr),
+      height: Math.max(1, state.height || canvas.height / state.dpr)
+    };
   }
 
   function notesFocusDrawStroke(state, stroke, start) {
@@ -1138,7 +1153,10 @@
     if (!point) return;
     ctx.save();
     ctx.globalAlpha = stroke.tool === 'highlight' ? .38 : 1;
-    ctx.globalCompositeOperation = stroke.tool === 'highlight' ? 'multiply' : 'source-over';
+    // `multiply` can force a full-height off-screen compositing layer on some
+    // mobile GPUs. A translucent source-over stroke preserves the highlight
+    // appearance without turning the annotation canvas opaque black.
+    ctx.globalCompositeOperation = 'source-over';
     ctx.strokeStyle = stroke.color;
     ctx.lineWidth = Math.max(2, Number(stroke.width) * Math.min(size.width, size.height));
     ctx.lineJoin = 'round';
@@ -1170,11 +1188,22 @@
     if (!state || !state.canvas || !state.notebook) return;
     var width = Math.max(1, state.notebook.scrollWidth, state.notebook.clientWidth);
     var height = Math.max(1, state.notebook.scrollHeight, state.notebook.clientHeight);
-    state.canvas.width = Math.round(width * state.dpr);
-    state.canvas.height = Math.round(height * state.dpr);
+    var dpr = notesFocusMarkDpr(width, height);
+    var pixelWidth = Math.max(1, Math.floor(width * dpr));
+    var pixelHeight = Math.max(1, Math.floor(height * dpr));
+    if (state.canvas.width === pixelWidth && state.canvas.height === pixelHeight &&
+        state.width === width && state.height === height && state.dpr === dpr) return;
+    state.dpr = dpr;
+    state.width = width;
+    state.height = height;
+    state.canvas.width = pixelWidth;
+    state.canvas.height = pixelHeight;
     state.canvas.style.width = width + 'px';
     state.canvas.style.height = height + 'px';
-    state.ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    state.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Explicitly clear after a backing-store resize so a browser GPU fallback
+    // cannot retain an opaque frame over the notebook.
+    state.ctx.clearRect(0, 0, width, height);
     notesFocusRedrawMarks(box);
   }
 
@@ -1323,8 +1352,8 @@
     canvas.setAttribute('aria-label', 'Private notes drawing canvas');
     notebook.appendChild(canvas);
     var state = box._notesFocusMarks = {
-      canvas: canvas, ctx: canvas.getContext('2d'), notebook: notebook,
-      dpr: window.devicePixelRatio || 1, tool: 'move', color: NOTES_FOCUS_MARK_COLORS[0],
+      canvas: canvas, ctx: canvas.getContext('2d', { alpha: true }), notebook: notebook,
+      dpr: 1, width: 0, height: 0, tool: 'move', color: NOTES_FOCUS_MARK_COLORS[0],
       current: null, drawing: false, redo: [], observer: null
     };
     canvas.onpointerdown = function (event) {
