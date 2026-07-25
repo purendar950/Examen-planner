@@ -1135,13 +1135,16 @@
   }
 
   // Cap the backing store for a long generated notebook. Without a budget,
-  // a full-height high-DPR canvas can consume hundreds of MB on a tablet and
-  // make every pen/highlighter segment stall while it is composited.
-  var NOTES_FOCUS_MARK_MAX_PIXELS = 12000000;
+  // a full-height high-DPR canvas can consume hundreds of MB on a tablet,
+  // stall every stroke, and — past a browser texture limit — fail entirely
+  // and paint the notebook-sized surface solid black.
+  var NOTES_FOCUS_MARK_MAX_PIXELS = 8000000;
+  var NOTES_FOCUS_MARK_MAX_DIMENSION = 4096;
   function notesFocusMarkDpr(width, height) {
     var deviceDpr = Math.max(1, Math.min(Number(window.devicePixelRatio) || 1, 1.5));
     var budgetDpr = Math.sqrt(NOTES_FOCUS_MARK_MAX_PIXELS / Math.max(1, width * height));
-    return Math.min(deviceDpr, budgetDpr);
+    var dimensionDpr = Math.min(NOTES_FOCUS_MARK_MAX_DIMENSION / width, NOTES_FOCUS_MARK_MAX_DIMENSION / height);
+    return Math.min(deviceDpr, budgetDpr, dimensionDpr);
   }
 
   function notesFocusMarkDimensions(state) {
@@ -1162,7 +1165,10 @@
     if (!point) return;
     ctx.save();
     ctx.globalAlpha = stroke.tool === 'highlight' ? .38 : 1;
-    ctx.globalCompositeOperation = stroke.tool === 'highlight' ? 'multiply' : 'source-over';
+    // `multiply` can force a full-height off-screen compositing layer on some
+    // mobile GPUs, which fails and leaves the notebook covered in solid black.
+    // A translucent source-over stroke looks the same over the light note.
+    ctx.globalCompositeOperation = 'source-over';
     ctx.strokeStyle = stroke.color;
     ctx.lineWidth = Math.max(2, Number(stroke.width) * Math.min(size.width, size.height));
     ctx.lineJoin = 'round';
@@ -1207,6 +1213,9 @@
     state.canvas.style.width = width + 'px';
     state.canvas.style.height = height + 'px';
     state.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Explicitly clear after a backing-store resize so a browser GPU fallback
+    // cannot retain an opaque frame over the notebook.
+    state.ctx.clearRect(0, 0, width, height);
     notesFocusRedrawMarks(box);
   }
 
@@ -1400,10 +1409,14 @@
     canvas.setAttribute('aria-label', 'Private notes drawing canvas');
     notebook.appendChild(canvas);
     var state = box._notesFocusMarks = {
-      canvas: canvas, ctx: canvas.getContext('2d'), notebook: notebook,
+      // An explicit alpha context keeps the surface transparent; some Android
+      // GPUs otherwise fall back to an opaque black canvas when a native Turbo
+      // video initializes alongside the notebook.
+      canvas: canvas, ctx: canvas.getContext('2d', { alpha: true }), notebook: notebook,
       dpr: 1, width: 0, height: 0, tool: 'move', color: NOTES_FOCUS_MARK_COLORS[0],
       current: null, drawing: false, redo: [], observer: null,
-      scroller: null, scrollHandler: null, canvasRect: null, pendingPoints: [], paintFrame: 0
+      scroller: null, scrollHandler: null, canvasRect: null, pendingPoints: [], paintFrame: 0,
+      turboLoading: false
     };
     state.scroller = notebook.closest ? notebook.closest('.ai-scroll') : box.querySelector('.ai-scroll');
     if (state.scroller) {
@@ -1537,11 +1550,28 @@
     return {};
   }
 
+  function notesFocusSetTurboCanvasLoading(box, loading) {
+    var state = notesFocusMarkState(box);
+    if (!state || !state.canvas || !state.ctx) return;
+    loading = !!loading;
+    if (state.turboLoading === loading) return;
+    state.turboLoading = loading;
+    box.classList.toggle('ai-focus-turbo-loading', loading);
+    if (loading) return;
+    // Turbo preparation can make a tablet GPU discard this canvas surface.
+    // Recreate a transparent backing store before revealing saved marks,
+    // rather than exposing the opaque black fallback frame.
+    state.canvas.width = state.canvas.width;
+    state.ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    notesFocusRedrawMarks(box);
+  }
+
   function notesFocusPaintVideoAction() {
     if (!_notesFocus || !_notesFocus.box) return;
     var btn = _notesFocus.box.querySelector('#ai-focus-video');
     if (!btn) return;
     var stateNow = notesFocusTurboState();
+    notesFocusSetTurboCanvasLoading(_notesFocus.box, stateNow.phase === 'loading');
     var action = 'start', label = '⚡ Start Turbo', title = 'Prepare the native Turbo video, then open Picture-in-Picture';
     var disabled = false, phase = stateNow.phase || 'idle';
     if (!isPro()) {
@@ -1695,7 +1725,7 @@
     var scroller = active.box && active.box.querySelector('.ai-scroll');
     var currentScroll = scroller ? scroller.scrollTop : active.scrollTop;
     if (active.box) {
-      active.box.classList.remove('ai-notes-focus', 'ai-focus-mini-open');
+      active.box.classList.remove('ai-notes-focus', 'ai-focus-mini-open', 'ai-focus-turbo-loading');
       var mini = active.box.querySelector('#ai-focus-mini-video');
       if (mini) mini.hidden = true;
       if (active.oldRole == null) active.box.removeAttribute('role');
