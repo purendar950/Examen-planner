@@ -1411,11 +1411,12 @@
     var testBtn = (style === 'mcq') ? '<button class="ai-btn" id="ai-mcq-test" title="Take all these MCQs as a full test (opens the exam engine)" style="padding:4px 10px;font-size:0.72rem">🎯 Take as Test</button>' : '';
     // Share a link so others can take the same MCQ test (login required).
     var shareBtn = (style === 'mcq') ? '<button class="ai-btn sec" id="ai-mcq-share" title="Copy a link so others can take this same MCQ test (they must log in / register)" style="padding:4px 10px;font-size:0.72rem">🔗 Share</button>' : '';
+    var sharedNoteBtn = '<button class="ai-btn sec" id="ai-shared-note" title="Open shared text with your own private pen and highlighter marks" style="padding:4px 10px;font-size:0.72rem">📝 Shared note</button>';
     var nbHtml = nbBuild(content, style);
     box.innerHTML = notesFocusToolbarHtml() + brandBarHtml(true) +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + (j.lang ? ' · ' + esc(j.lang) : '') + '</span>' +
-      testBtn + shareBtn + focusBtn + followBtn + pdfBtn + regenBtn + '</div>' +
+      testBtn + shareBtn + sharedNoteBtn + focusBtn + followBtn + pdfBtn + regenBtn + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
     var noteTools = box.querySelector('#ai-note-actions-toggle');
     if (noteTools) noteTools.onclick = function () {
@@ -1440,6 +1441,17 @@
     };
     var focusOpen = document.getElementById('ai-notes-focus');
     if (focusOpen) focusOpen.onclick = function () { openNotesFocus(box, focusOpen); };
+    var sharedNoteOpen = document.getElementById('ai-shared-note');
+    if (sharedNoteOpen) sharedNoteOpen.onclick = function () {
+      if (typeof nfOpenForCurrentVideo !== 'function') {
+        if (typeof showToast === 'function') showToast('Shared note feature load nahi hui. Page reload karke try karo.', 'error');
+        return;
+      }
+      nfOpenForCurrentVideo({
+        title: (curTitle() || 'Lecture') + ' — Shared notes',
+        content: content
+      });
+    };
     var rb = document.getElementById('ai-regen');
     if (rb) rb.onclick = function () { showStudy(mode, n, true); };
     var mtb = document.getElementById('ai-mcq-test');
