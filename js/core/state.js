@@ -43,9 +43,9 @@ let appState = {
   lastStudyDate: null,
   ytLinks: {},
   ytNotes: [],
-  // Private notes written while the AI Notes Focus view is open, keyed by
-  // the generated note source. They persist only in this student's appState.
-  focusNotes: {},
+  // Private handwriting and highlighter strokes drawn in AI Notes Focus.
+  // Keyed by generated note source and saved only in this student's appState.
+  focusMarks: {},
   ytLastVideo: null,
   ytPlaylists: {},
   ytWatched: {},  // plId -> {videoId: true}

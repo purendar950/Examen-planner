@@ -1054,96 +1054,341 @@
   var _notesFocus = null;
   var _notesFocusReturn = null;       // lets browser Forward restore the modal entry
   var _notesFocusToken = 0;
-  // Keep private text comfortably below Firestore's per-user document limit.
-  var NOTES_FOCUS_PRIVATE_NOTE_LIMIT = 12000;
-  var NOTES_FOCUS_PRIVATE_NOTE_SLOTS = 30;
+  // Private annotation data is bounded to keep each user's Firestore appState
+  // document comfortably below its size limit. Strokes are normalized, so they
+  // stay aligned with the notebook on different screen sizes.
+  var NOTES_FOCUS_MARK_STROKE_LIMIT = 30;
+  var NOTES_FOCUS_MARK_POINT_LIMIT = 160;
+  var NOTES_FOCUS_MARK_SLOT_LIMIT = 10;
+  var NOTES_FOCUS_MARK_TOTAL_POINT_LIMIT = 12000;
+  var NOTES_FOCUS_MARK_COLORS = ['#ef4444', '#f59e0b', '#00a85a', '#3b82f6', '#a855f7'];
 
-  /* Personal drafts belong to the signed-in student's appState only. They are
-     intentionally separate from generated AI content and never shared. */
-  function notesFocusDraftStore() {
+  function notesFocusMarksStore() {
     if (typeof appState === 'undefined' || !appState) return null;
-    if (!appState.focusNotes || typeof appState.focusNotes !== 'object') appState.focusNotes = {};
-    return appState.focusNotes;
+    if (!appState.focusMarks || typeof appState.focusMarks !== 'object') appState.focusMarks = {};
+    return appState.focusMarks;
   }
 
   function notesFocusDraftKey(box) {
     return (box && box.dataset && box.dataset.focusNoteKey) || ('video:' + (curVid() || 'untitled'));
   }
 
-  function notesFocusDraftValue(box) {
-    var drafts = notesFocusDraftStore();
-    if (!drafts) return '';
-    var entry = drafts[notesFocusDraftKey(box)];
-    return typeof entry === 'string' ? entry : String(entry && entry.text || '');
+  function notesFocusMarkEntry(box, create) {
+    var store = notesFocusMarksStore();
+    if (!store) return null;
+    var key = notesFocusDraftKey(box);
+    var entry = store[key];
+    if (!entry && create) entry = store[key] = { strokes: [], updatedAt: Date.now() };
+    if (Array.isArray(entry)) entry = store[key] = { strokes: entry, updatedAt: Date.now() };
+    if (entry && !Array.isArray(entry.strokes)) entry.strokes = [];
+    return entry || null;
   }
 
-  function notesFocusSaveDraft(box, value) {
-    var drafts = notesFocusDraftStore();
-    if (!drafts) return;
-    var key = notesFocusDraftKey(box);
-    var text = String(value || '').slice(0, NOTES_FOCUS_PRIVATE_NOTE_LIMIT);
-    if (text.trim()) {
-      drafts[key] = { text: text, updatedAt: Date.now() };
-    } else {
-      delete drafts[key];
+  function notesFocusMarkState(box) {
+    if (!box) return null;
+    return box._notesFocusMarks || null;
+  }
+
+  function notesFocusSaveMarks(box) {
+    var store = notesFocusMarksStore();
+    var entry = notesFocusMarkEntry(box, true);
+    if (!store || !entry) return;
+    if (entry.strokes.length > NOTES_FOCUS_MARK_STROKE_LIMIT) {
+      entry.strokes.splice(0, entry.strokes.length - NOTES_FOCUS_MARK_STROKE_LIMIT);
     }
-    var keys = Object.keys(drafts);
-    if (keys.length > NOTES_FOCUS_PRIVATE_NOTE_SLOTS) {
-      keys.sort(function (a, b) {
-        return Number(drafts[a] && drafts[a].updatedAt) - Number(drafts[b] && drafts[b].updatedAt);
-      });
-      while (keys.length > NOTES_FOCUS_PRIVATE_NOTE_SLOTS) delete drafts[keys.shift()];
+    entry.updatedAt = Date.now();
+    var keys = Object.keys(store).sort(function (a, b) {
+      return Number(store[a] && store[a].updatedAt) - Number(store[b] && store[b].updatedAt);
+    });
+    while (keys.length > NOTES_FOCUS_MARK_SLOT_LIMIT) delete store[keys.shift()];
+    var totalPoints = 0;
+    Object.keys(store).forEach(function (key) {
+      var strokes = store[key] && store[key].strokes || [];
+      strokes.forEach(function (stroke) { totalPoints += (stroke.points || []).length; });
+    });
+    while (totalPoints > NOTES_FOCUS_MARK_TOTAL_POINT_LIMIT) {
+      var oldestKey = Object.keys(store).sort(function (a, b) {
+        return Number(store[a] && store[a].updatedAt) - Number(store[b] && store[b].updatedAt);
+      })[0];
+      var oldest = oldestKey && store[oldestKey];
+      if (!oldest || !oldest.strokes || !oldest.strokes.length) {
+        if (oldestKey) delete store[oldestKey];
+        else break;
+        continue;
+      }
+      totalPoints -= (oldest.strokes[0].points || []).length;
+      oldest.strokes.shift();
+      if (!oldest.strokes.length) delete store[oldestKey];
     }
     try { if (typeof saveProgress === 'function') saveProgress(); } catch (e) {}
   }
 
-  function notesFocusClosePrivateDraft(box) {
-    if (!box) return;
-    var panel = box.querySelector('#ai-focus-private-notes');
-    var toggle = box.querySelector('#ai-focus-private-notes-toggle');
-    if (panel) panel.hidden = true;
-    if (toggle) toggle.setAttribute('aria-expanded', 'false');
-    box.classList.remove('ai-focus-private-notes-open');
+  function notesFocusMarkDimensions(state) {
+    var canvas = state && state.canvas;
+    if (!canvas) return { width: 1, height: 1 };
+    return { width: Math.max(1, canvas.width / state.dpr), height: Math.max(1, canvas.height / state.dpr) };
   }
 
-  function notesFocusTogglePrivateDraft(box, forceOpen) {
-    if (!box) return;
-    var panel = box.querySelector('#ai-focus-private-notes');
-    var toggle = box.querySelector('#ai-focus-private-notes-toggle');
-    var input = box.querySelector('#ai-focus-private-notes-input');
-    if (!panel || !toggle || !input) return;
-    var open = typeof forceOpen === 'boolean' ? forceOpen : panel.hidden;
-    panel.hidden = !open;
+  function notesFocusDrawStroke(state, stroke, start) {
+    if (!state || !state.ctx || !stroke || !stroke.points || !stroke.points.length) return;
+    var size = notesFocusMarkDimensions(state);
+    var ctx = state.ctx;
+    var from = Math.max(0, Number(start) || 0);
+    var point = stroke.points[from];
+    if (!point) return;
+    ctx.save();
+    ctx.globalAlpha = stroke.tool === 'highlight' ? .38 : 1;
+    ctx.globalCompositeOperation = stroke.tool === 'highlight' ? 'multiply' : 'source-over';
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = Math.max(2, Number(stroke.width) * Math.min(size.width, size.height));
+    ctx.lineJoin = 'round';
+    ctx.lineCap = stroke.tool === 'highlight' ? 'butt' : 'round';
+    ctx.beginPath();
+    ctx.moveTo(point[0] * size.width, point[1] * size.height);
+    for (var i = from + 1; i < stroke.points.length; i++) {
+      ctx.lineTo(stroke.points[i][0] * size.width, stroke.points[i][1] * size.height);
+    }
+    if (stroke.points.length === 1) ctx.lineTo(point[0] * size.width + .1, point[1] * size.height + .1);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function notesFocusRedrawMarks(box) {
+    var state = notesFocusMarkState(box);
+    if (!state || !state.ctx || !state.canvas) return;
+    var size = notesFocusMarkDimensions(state);
+    state.ctx.clearRect(0, 0, size.width, size.height);
+    var entry = notesFocusMarkEntry(box, false);
+    var strokes = entry && entry.strokes || [];
+    for (var i = 0; i < strokes.length; i++) if (strokes[i].tool === 'highlight') notesFocusDrawStroke(state, strokes[i]);
+    for (var j = 0; j < strokes.length; j++) if (strokes[j].tool !== 'highlight') notesFocusDrawStroke(state, strokes[j]);
+    if (state.current && state.current.tool !== 'eraser') notesFocusDrawStroke(state, state.current);
+  }
+
+  function notesFocusResizeMarks(box) {
+    var state = notesFocusMarkState(box);
+    if (!state || !state.canvas || !state.notebook) return;
+    var width = Math.max(1, state.notebook.scrollWidth, state.notebook.clientWidth);
+    var height = Math.max(1, state.notebook.scrollHeight, state.notebook.clientHeight);
+    state.canvas.width = Math.round(width * state.dpr);
+    state.canvas.height = Math.round(height * state.dpr);
+    state.canvas.style.width = width + 'px';
+    state.canvas.style.height = height + 'px';
+    state.ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    notesFocusRedrawMarks(box);
+  }
+
+  function notesFocusPoint(event, state) {
+    var rect = state.canvas.getBoundingClientRect();
+    return [
+      Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))),
+      Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)))
+    ];
+  }
+
+  function notesFocusSetMarkTool(box, tool) {
+    var state = notesFocusMarkState(box);
+    if (!state) return;
+    state.tool = tool || 'move';
+    state.canvas.style.pointerEvents = state.tool === 'move' ? 'none' : 'auto';
+    state.canvas.style.cursor = state.tool === 'eraser' ? 'cell' : state.tool === 'highlight' ? 'text' : 'crosshair';
+    Array.prototype.forEach.call(box.querySelectorAll('[data-focus-mark-tool]'), function (button) {
+      var selected = button.dataset.focusMarkTool === state.tool;
+      button.classList.toggle('is-active', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+  }
+
+  function notesFocusSetMarkColor(box, color) {
+    var state = notesFocusMarkState(box);
+    if (!state) return;
+    state.color = color;
+    Array.prototype.forEach.call(box.querySelectorAll('[data-focus-mark-color]'), function (button) {
+      var selected = button.dataset.focusMarkColor === color;
+      button.classList.toggle('is-active', selected);
+      button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+  }
+
+  function notesFocusEraseMarks(box, path) {
+    var entry = notesFocusMarkEntry(box, false);
+    var state = notesFocusMarkState(box);
+    if (!entry || !state || !entry.strokes.length) return;
+    var removed = [], kept = [];
+    for (var i = 0; i < entry.strokes.length; i++) {
+      var stroke = entry.strokes[i], hit = false;
+      for (var p = 0; p < stroke.points.length && !hit; p++) {
+        for (var q = 0; q < path.length; q++) {
+          var dx = stroke.points[p][0] - path[q][0];
+          var dy = stroke.points[p][1] - path[q][1];
+          if ((dx * dx) + (dy * dy) <= .0007) { hit = true; break; }
+        }
+      }
+      if (hit) removed.push(stroke); else kept.push(stroke);
+    }
+    if (!removed.length) return;
+    entry.strokes = kept;
+    state.redo = state.redo.concat(removed);
+    notesFocusSaveMarks(box);
+  }
+
+  function notesFocusCommitMark(box) {
+    var state = notesFocusMarkState(box);
+    if (!state || !state.current) return;
+    var stroke = state.current;
+    state.current = null;
+    if (stroke.tool === 'eraser') {
+      notesFocusEraseMarks(box, stroke.points);
+    } else {
+      var entry = notesFocusMarkEntry(box, true);
+      entry.strokes.push(stroke);
+      state.redo = [];
+      notesFocusSaveMarks(box);
+    }
+    notesFocusRedrawMarks(box);
+  }
+
+  function notesFocusUndoMark(box) {
+    var state = notesFocusMarkState(box), entry = notesFocusMarkEntry(box, false);
+    if (!state || !entry || !entry.strokes.length) return;
+    state.redo.push(entry.strokes.pop());
+    notesFocusSaveMarks(box);
+    notesFocusRedrawMarks(box);
+  }
+
+  function notesFocusRedoMark(box) {
+    var state = notesFocusMarkState(box), entry = notesFocusMarkEntry(box, true);
+    if (!state || !entry || !state.redo.length) return;
+    entry.strokes.push(state.redo.pop());
+    notesFocusSaveMarks(box);
+    notesFocusRedrawMarks(box);
+  }
+
+  function notesFocusClearMarks(box) {
+    var state = notesFocusMarkState(box), entry = notesFocusMarkEntry(box, false);
+    if (!state || !entry || !entry.strokes.length) return;
+    if (!window.confirm('Clear all of your private pen and highlighter marks?')) return;
+    state.redo = state.redo.concat(entry.strokes);
+    entry.strokes = [];
+    notesFocusSaveMarks(box);
+    notesFocusRedrawMarks(box);
+  }
+
+  function notesFocusToggleAnnotations(box, forceOpen) {
+    var state = notesFocusMarkState(box);
+    var bar = box && box.querySelector('#ai-focus-annotation-bar');
+    var toggle = box && box.querySelector('#ai-focus-annotations-toggle');
+    if (!state || !bar || !toggle) return;
+    var open = typeof forceOpen === 'boolean' ? forceOpen : bar.hidden;
+    bar.hidden = !open;
     toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-    box.classList.toggle('ai-focus-private-notes-open', open);
+    toggle.classList.toggle('ai-focus-control-active', open);
+    box.classList.toggle('ai-focus-annotations-open', open);
+    notesFocusSetMarkTool(box, open ? (state.tool === 'move' ? 'pen' : state.tool) : 'move');
     if (open) {
-      input.value = notesFocusDraftValue(box);
-      requestAnimationFrame(function () { input.focus(); });
+      var pen = box.querySelector('[data-focus-mark-tool="pen"]');
+      if (pen) pen.focus();
     }
   }
 
-  function notesFocusSetupPrivateDraft(box) {
-    if (!box) return;
-    var toggle = box.querySelector('#ai-focus-private-notes-toggle');
-    var close = box.querySelector('#ai-focus-private-notes-close');
-    var input = box.querySelector('#ai-focus-private-notes-input');
-    if (!toggle || !close || !input) return;
-    input.value = notesFocusDraftValue(box);
-    toggle.onclick = function () { notesFocusTogglePrivateDraft(box); };
-    close.onclick = function () { notesFocusClosePrivateDraft(box); };
-    input.oninput = function () { notesFocusSaveDraft(box, input.value); };
+  function notesFocusSetupAnnotations(box) {
+    if (!box || !box.querySelector('.ai-nb')) return;
+    var toggle = box.querySelector('#ai-focus-annotations-toggle');
+    var bar = box.querySelector('#ai-focus-annotation-bar');
+    if (!toggle || !bar) return;
+    toggle.onclick = function () { notesFocusToggleAnnotations(box); };
+    Array.prototype.forEach.call(box.querySelectorAll('[data-focus-mark-tool]'), function (button) {
+      button.onclick = function () { notesFocusSetMarkTool(box, button.dataset.focusMarkTool); };
+    });
+    Array.prototype.forEach.call(box.querySelectorAll('[data-focus-mark-color]'), function (button) {
+      button.onclick = function () { notesFocusSetMarkColor(box, button.dataset.focusMarkColor); };
+    });
+    var undo = box.querySelector('#ai-focus-mark-undo');
+    var redo = box.querySelector('#ai-focus-mark-redo');
+    var clear = box.querySelector('#ai-focus-mark-clear');
+    var done = box.querySelector('#ai-focus-mark-done');
+    if (undo) undo.onclick = function () { notesFocusUndoMark(box); };
+    if (redo) redo.onclick = function () { notesFocusRedoMark(box); };
+    if (clear) clear.onclick = function () { notesFocusClearMarks(box); };
+    if (done) done.onclick = function () { notesFocusToggleAnnotations(box, false); };
   }
 
-  // Called by auth.js only after accepting a clean remote appState snapshot.
-  function notesFocusRefreshPrivateDraft() {
-    if (!_notesFocus || !_notesFocus.box) return;
-    var input = _notesFocus.box.querySelector('#ai-focus-private-notes-input');
-    if (!input || document.activeElement === input) return;
-    input.value = notesFocusDraftValue(_notesFocus.box);
+  function notesFocusMountMarkCanvas(box) {
+    if (!box || notesFocusMarkState(box)) return;
+    var notebook = box.querySelector('.ai-nb');
+    if (!notebook) return;
+    var canvas = document.createElement('canvas');
+    canvas.id = 'ai-focus-marks-canvas';
+    canvas.className = 'ai-focus-marks-canvas';
+    canvas.setAttribute('aria-label', 'Private notes drawing canvas');
+    notebook.appendChild(canvas);
+    var state = box._notesFocusMarks = {
+      canvas: canvas, ctx: canvas.getContext('2d'), notebook: notebook,
+      dpr: window.devicePixelRatio || 1, tool: 'move', color: NOTES_FOCUS_MARK_COLORS[0],
+      current: null, drawing: false, redo: [], observer: null
+    };
+    canvas.onpointerdown = function (event) {
+      if (state.tool === 'move') return;
+      event.preventDefault();
+      state.drawing = true;
+      try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
+      state.current = {
+        tool: state.tool, color: state.color,
+        width: state.tool === 'highlight' ? .022 : .0055,
+        points: [notesFocusPoint(event, state)], createdAt: Date.now(),
+        videoTime: notesFocusCurrentTime()
+      };
+    };
+    canvas.onpointermove = function (event) {
+      if (!state.drawing || !state.current) return;
+      var point = notesFocusPoint(event, state);
+      var last = state.current.points[state.current.points.length - 1];
+      var dx = point[0] - last[0], dy = point[1] - last[1];
+      if ((dx * dx) + (dy * dy) < .000006 || state.current.points.length >= NOTES_FOCUS_MARK_POINT_LIMIT) return;
+      state.current.points.push(point);
+      if (state.current.tool !== 'eraser') notesFocusDrawStroke(state, state.current, state.current.points.length - 2);
+    };
+    canvas.onpointerup = canvas.onpointercancel = function (event) {
+      if (!state.drawing) return;
+      state.drawing = false;
+      try { canvas.releasePointerCapture(event.pointerId); } catch (e) {}
+      notesFocusCommitMark(box);
+    };
+    if (typeof ResizeObserver === 'function') {
+      state.observer = new ResizeObserver(function () { notesFocusResizeMarks(box); });
+      state.observer.observe(notebook);
+    }
+    notesFocusResizeMarks(box);
+    notesFocusSetMarkColor(box, state.color);
+    notesFocusSetMarkTool(box, 'move');
   }
-  // auth.js loads before this self-contained feature module, so expose only
-  // the refresh hook it invokes after a remote state replacement.
-  window.notesFocusRefreshPrivateDraft = notesFocusRefreshPrivateDraft;
+
+  function notesFocusDestroyMarkCanvas(box) {
+    var state = notesFocusMarkState(box);
+    if (!state) return;
+    if (state.drawing) notesFocusCommitMark(box);
+    if (state.observer) state.observer.disconnect();
+    if (state.canvas && state.canvas.parentNode) state.canvas.parentNode.removeChild(state.canvas);
+    delete box._notesFocusMarks;
+  }
+
+  function notesFocusFlushMarkOnExit() {
+    if (!_notesFocus || !_notesFocus.box) return;
+    var state = notesFocusMarkState(_notesFocus.box);
+    if (state && state.drawing) notesFocusCommitMark(_notesFocus.box);
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') notesFocusFlushMarkOnExit();
+  });
+  window.addEventListener('pagehide', notesFocusFlushMarkOnExit);
+
+  // Called by auth.js only after accepting a clean remote appState snapshot.
+  function notesFocusRefreshPrivateMarks() {
+    if (!_notesFocus || !_notesFocus.box) return;
+    var state = notesFocusMarkState(_notesFocus.box);
+    if (state && !state.drawing) notesFocusRedrawMarks(_notesFocus.box);
+  }
+  window.notesFocusRefreshPrivateMarks = notesFocusRefreshPrivateMarks;
 
   function notesFocusToolbarHtml() {
     return '<div class="ai-focus-toolbar" role="toolbar" aria-label="Notes Focus Mode controls">' +
@@ -1155,15 +1400,30 @@
         '<span class="ai-focus-time" id="ai-focus-time" aria-label="Current video time">0:00</span>' +
         '<button type="button" class="ai-focus-control ai-focus-video" id="ai-focus-video" data-action="start" aria-live="polite">⚡ Start Turbo</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-follow" data-ai-follow-control aria-pressed="false">🎯 Follow</button>' +
-        '<button type="button" class="ai-focus-control" id="ai-focus-private-notes-toggle" aria-expanded="false" title="Write your private notes while reading">📝 My notes</button>' +
+        '<button type="button" class="ai-focus-control" id="ai-focus-annotations-toggle" aria-expanded="false" title="Write and highlight privately on these notes">🖍 My notes</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-pdf" title="Print or save notes as PDF">📄 PDF</button>' +
       '</div>' +
     '</div>' +
-    '<aside class="ai-focus-private-notes" id="ai-focus-private-notes" aria-label="Your private notes" hidden>' +
-      '<div class="ai-focus-private-notes-head"><span><strong>My notes</strong><small>Private to your account</small></span><button type="button" id="ai-focus-private-notes-close" aria-label="Close private notes" title="Close private notes">×</button></div>' +
-      '<textarea id="ai-focus-private-notes-input" maxlength="12000" spellcheck="true" placeholder="Write your points, doubts, or revision notes here…"></textarea>' +
-      '<p>Saved automatically with your study progress.</p>' +
-    '</aside>' +
+    '<div class="ai-focus-annotation-bar" id="ai-focus-annotation-bar" role="toolbar" aria-label="Private note tools" hidden>' +
+      '<span class="ai-focus-annotation-label">Private notes</span>' +
+      '<button type="button" class="ai-focus-mark-tool" data-focus-mark-tool="move" aria-pressed="true" title="Scroll and select note text">✋ Scroll</button>' +
+      '<button type="button" class="ai-focus-mark-tool" data-focus-mark-tool="pen" aria-pressed="false" title="Write private notes by hand">✏️ Pen</button>' +
+      '<button type="button" class="ai-focus-mark-tool" data-focus-mark-tool="highlight" aria-pressed="false" title="Highlight generated notes">🖍 Highlight</button>' +
+      '<button type="button" class="ai-focus-mark-tool" data-focus-mark-tool="eraser" aria-pressed="false" title="Erase a private mark">⌫ Eraser</button>' +
+      '<span class="ai-focus-mark-divider" aria-hidden="true"></span>' +
+      '<span class="ai-focus-mark-colors" aria-label="Annotation color">' +
+        '<button type="button" class="ai-focus-mark-color" data-focus-mark-color="#ef4444" aria-label="Red" title="Red" style="--mark-color:#ef4444"></button>' +
+        '<button type="button" class="ai-focus-mark-color" data-focus-mark-color="#f59e0b" aria-label="Orange" title="Orange" style="--mark-color:#f59e0b"></button>' +
+        '<button type="button" class="ai-focus-mark-color" data-focus-mark-color="#00a85a" aria-label="Green" title="Green" style="--mark-color:#00a85a"></button>' +
+        '<button type="button" class="ai-focus-mark-color" data-focus-mark-color="#3b82f6" aria-label="Blue" title="Blue" style="--mark-color:#3b82f6"></button>' +
+        '<button type="button" class="ai-focus-mark-color" data-focus-mark-color="#a855f7" aria-label="Purple" title="Purple" style="--mark-color:#a855f7"></button>' +
+      '</span>' +
+      '<span class="ai-focus-mark-divider" aria-hidden="true"></span>' +
+      '<button type="button" class="ai-focus-mark-action" id="ai-focus-mark-undo" title="Undo last mark">↶</button>' +
+      '<button type="button" class="ai-focus-mark-action" id="ai-focus-mark-redo" title="Redo mark">↷</button>' +
+      '<button type="button" class="ai-focus-mark-action" id="ai-focus-mark-clear" title="Clear all private marks">🗑 Clear</button>' +
+      '<button type="button" class="ai-focus-mark-done" id="ai-focus-mark-done">Done</button>' +
+    '</div>' +
     '<div class="ai-focus-mini-video" id="ai-focus-mini-video" hidden>' +
       '<button type="button" class="ai-focus-mini-close" id="ai-focus-mini-close" aria-label="Hide floating video" title="Hide floating video">×</button>' +
     '</div>';
@@ -1346,7 +1606,8 @@
     clearInterval(active.clock);
     clearTimeout(active.closeTimer);
     if (typeof window.ytTurboRestoreInline === 'function') window.ytTurboRestoreInline();
-    notesFocusClosePrivateDraft(active.box);
+    notesFocusToggleAnnotations(active.box, false);
+    notesFocusDestroyMarkCanvas(active.box);
     var scroller = active.box && active.box.querySelector('.ai-scroll');
     var currentScroll = scroller ? scroller.scrollTop : active.scrollTop;
     if (active.box) {
@@ -1427,7 +1688,8 @@
     _notesFocusReturn = { box: box, trigger: trigger || document.activeElement };
     box.classList.remove('ai-note-actions-open');
     box.classList.add('ai-notes-focus');
-    notesFocusSetupPrivateDraft(box);
+    notesFocusSetupAnnotations(box);
+    notesFocusMountMarkCanvas(box);
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-modal', 'true');
     box.setAttribute('aria-label', 'Notes Focus Mode');
@@ -1475,9 +1737,9 @@
     if (!_notesFocus) return;
     if (e.key === 'Escape') {
       e.preventDefault();
-      var privateNotes = _notesFocus.box && _notesFocus.box.querySelector('#ai-focus-private-notes');
-      if (privateNotes && !privateNotes.hidden) {
-        notesFocusClosePrivateDraft(_notesFocus.box);
+      var annotationBar = _notesFocus.box && _notesFocus.box.querySelector('#ai-focus-annotation-bar');
+      if (annotationBar && !annotationBar.hidden) {
+        notesFocusToggleAnnotations(_notesFocus.box, false);
         return;
       }
       requestNotesFocusClose();
@@ -1506,8 +1768,8 @@
   function renderNotesResult(mode, n, style, j, targetEl) {
     var box = targetEl || contentEl();
     var content = j.content || '';
-    // One personal scratchpad per video + generated-notes style. It stays in
-    // appState and never changes the AI note text or creates a shared document.
+    // One private annotation layer per video + generated-notes style. Strokes
+    // stay in this student's appState and never create a shared document.
     box.dataset.focusNoteKey = ['video', curVid() || 'untitled', mode || 'notes', style || 'topic'].join(':');
     var pdfBtn = '<button class="ai-btn sec" id="ai-pdf" title="Print or save as a hard-copy-ready PDF" style="padding:4px 10px;font-size:0.72rem">📄 Print / PDF</button>';
     var focusBtn = '<button class="ai-btn sec" id="ai-notes-focus" title="Read notes in Focus Mode" style="padding:4px 10px;font-size:0.72rem">⛶ Focus</button>';
@@ -1544,7 +1806,7 @@
       if (focusVideo) focusVideo.dataset.action = 'mini-hide';
       notesFocusVideoAction();
     };
-    notesFocusSetupPrivateDraft(box);
+    notesFocusSetupAnnotations(box);
     var focusOpen = document.getElementById('ai-notes-focus');
     if (focusOpen) focusOpen.onclick = function () { openNotesFocus(box, focusOpen); };
     var rb = document.getElementById('ai-regen');
