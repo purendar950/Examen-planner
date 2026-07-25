@@ -1058,7 +1058,12 @@
   // document comfortably below its size limit. Strokes are normalized, so they
   // stay aligned with the notebook on different screen sizes.
   var NOTES_FOCUS_MARK_STROKE_LIMIT = 30;
-  var NOTES_FOCUS_MARK_POINT_LIMIT = 160;
+  // Retain enough samples for small pen details and long highlighter sweeps.
+  // Overall storage remains bounded by NOTES_FOCUS_MARK_TOTAL_POINT_LIMIT.
+  var NOTES_FOCUS_MARK_POINT_LIMIT = 480;
+  // Erasing only needs a sampled path; keeping this smaller bounds hit tests.
+  var NOTES_FOCUS_MARK_ERASER_POINT_LIMIT = 120;
+  var NOTES_FOCUS_MARK_MIN_POINT_DISTANCE = .75;
   var NOTES_FOCUS_MARK_SLOT_LIMIT = 10;
   var NOTES_FOCUS_MARK_TOTAL_POINT_LIMIT = 12000;
   var NOTES_FOCUS_MARK_COLORS = ['#ef4444', '#f59e0b', '#00a85a', '#3b82f6', '#a855f7'];
@@ -1092,15 +1097,22 @@
   function notesFocusSaveMarks(box) {
     var store = notesFocusMarksStore();
     var entry = notesFocusMarkEntry(box, true);
-    if (!store || !entry) return;
+    if (!store || !entry) return false;
+    var currentKey = notesFocusDraftKey(box);
+    var currentChanged = false;
     if (entry.strokes.length > NOTES_FOCUS_MARK_STROKE_LIMIT) {
       entry.strokes.splice(0, entry.strokes.length - NOTES_FOCUS_MARK_STROKE_LIMIT);
+      currentChanged = true;
     }
     entry.updatedAt = Date.now();
     var keys = Object.keys(store).sort(function (a, b) {
       return Number(store[a] && store[a].updatedAt) - Number(store[b] && store[b].updatedAt);
     });
-    while (keys.length > NOTES_FOCUS_MARK_SLOT_LIMIT) delete store[keys.shift()];
+    while (keys.length > NOTES_FOCUS_MARK_SLOT_LIMIT) {
+      var discardedKey = keys.shift();
+      if (discardedKey === currentKey) currentChanged = true;
+      delete store[discardedKey];
+    }
     var totalPoints = 0;
     Object.keys(store).forEach(function (key) {
       var strokes = store[key] && store[key].strokes || [];
@@ -1112,20 +1124,24 @@
       })[0];
       var oldest = oldestKey && store[oldestKey];
       if (!oldest || !oldest.strokes || !oldest.strokes.length) {
-        if (oldestKey) delete store[oldestKey];
-        else break;
+        if (oldestKey) {
+          if (oldestKey === currentKey) currentChanged = true;
+          delete store[oldestKey];
+        } else break;
         continue;
       }
       totalPoints -= (oldest.strokes[0].points || []).length;
+      if (oldestKey === currentKey) currentChanged = true;
       oldest.strokes.shift();
       if (!oldest.strokes.length) delete store[oldestKey];
     }
     try { if (typeof saveProgress === 'function') saveProgress(); } catch (e) {}
+    return currentChanged;
   }
 
   // Focus notes can be very tall on tablets. Keep their canvas below browser
-  // texture and memory limits so an annotation layer never replaces notes with
-  // an opaque black surface.
+  // texture and memory limits so an annotation layer stays transparent when
+  // Turbo starts using the GPU.
   var NOTES_FOCUS_MARK_MAX_PIXELS = 8000000;
   var NOTES_FOCUS_MARK_MAX_DIMENSION = 4096;
   function notesFocusMarkDpr(width, height) {
@@ -1191,8 +1207,8 @@
     var dpr = notesFocusMarkDpr(width, height);
     var pixelWidth = Math.max(1, Math.floor(width * dpr));
     var pixelHeight = Math.max(1, Math.floor(height * dpr));
-    if (state.canvas.width === pixelWidth && state.canvas.height === pixelHeight &&
-        state.width === width && state.height === height && state.dpr === dpr) return;
+    state.canvasRect = null;
+    if (state.canvas.width === pixelWidth && state.canvas.height === pixelHeight && state.width === width && state.height === height && state.dpr === dpr) return;
     state.dpr = dpr;
     state.width = width;
     state.height = height;
@@ -1208,11 +1224,81 @@
   }
 
   function notesFocusPoint(event, state) {
-    var rect = state.canvas.getBoundingClientRect();
+    var rect = state.canvasRect || (state.canvasRect = state.canvas.getBoundingClientRect());
     return [
       Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))),
       Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)))
     ];
+  }
+
+  function notesFocusMarkPointDistanceSquared(state, point, last) {
+    var size = notesFocusMarkDimensions(state);
+    var dx = (point[0] - last[0]) * size.width;
+    var dy = (point[1] - last[1]) * size.height;
+    return (dx * dx) + (dy * dy);
+  }
+
+  // Pointer events can arrive much faster than the display refresh rate. Keep
+  // every coalesced sample for smooth saved strokes, but paint at most once per
+  // frame so input handling never competes with rendering.
+  function notesFocusFlushMarkPoints(state) {
+    if (!state || !state.current || !state.pendingPoints || !state.pendingPoints.length) return;
+    var stroke = state.current;
+    var pending = state.pendingPoints;
+    state.pendingPoints = [];
+    var start = stroke.points.length - 1;
+    var minimumDistanceSquared = NOTES_FOCUS_MARK_MIN_POINT_DISTANCE * NOTES_FOCUS_MARK_MIN_POINT_DISTANCE;
+    for (var i = 0; i < pending.length; i++) {
+      var point = pending[i];
+      var last = stroke.points[stroke.points.length - 1];
+      // Points are stored normalized so annotations resize with the note, but
+      // sampling has to be measured in CSS pixels. Comparing normalized Y
+      // values on a very tall notebook previously dropped dozens of pixels of
+      // vertical pen movement and made handwriting appear to trail or jump.
+      if (notesFocusMarkPointDistanceSquared(state, point, last) >= minimumDistanceSquared) stroke.points.push(point);
+    }
+    if (stroke.points.length > start + 1 && stroke.tool !== 'eraser') notesFocusDrawStroke(state, stroke, start);
+  }
+
+  function notesFocusQueueMarkPoints(event, state, terminalOnly) {
+    if (!state || !state.current) return;
+    var samples = null;
+    if (terminalOnly) {
+      state.pendingPoints.push(notesFocusPoint(event, state));
+    } else {
+      try { samples = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : null; } catch (e) {}
+      if (samples && samples.length) {
+        for (var i = 0; i < samples.length; i++) state.pendingPoints.push(notesFocusPoint(samples[i], state));
+      } else {
+        state.pendingPoints.push(notesFocusPoint(event, state));
+      }
+    }
+    if (state.paintFrame) return;
+    state.paintFrame = requestAnimationFrame(function () {
+      state.paintFrame = 0;
+      notesFocusFlushMarkPoints(state);
+    });
+  }
+
+  function notesFocusFlushQueuedMarkPoints(state) {
+    if (!state) return;
+    if (state.paintFrame) {
+      cancelAnimationFrame(state.paintFrame);
+      state.paintFrame = 0;
+    }
+    notesFocusFlushMarkPoints(state);
+  }
+
+  function notesFocusLimitMarkStroke(stroke, pointLimit) {
+    var limit = Math.max(2, Number(pointLimit) || NOTES_FOCUS_MARK_POINT_LIMIT);
+    if (!stroke || !stroke.points || stroke.points.length <= limit) return;
+    var original = stroke.points;
+    var limited = [original[0]];
+    var lastIndex = original.length - 1;
+    var divisor = limit - 1;
+    for (var i = 1; i < divisor; i++) limited.push(original[Math.round((i * lastIndex) / divisor)]);
+    limited.push(original[lastIndex]);
+    stroke.points = limited;
   }
 
   function notesFocusSetMarkTool(box, tool) {
@@ -1264,17 +1350,21 @@
   function notesFocusCommitMark(box) {
     var state = notesFocusMarkState(box);
     if (!state || !state.current) return;
+    notesFocusFlushQueuedMarkPoints(state);
     var stroke = state.current;
     state.current = null;
+    var needsRedraw = stroke.tool === 'eraser' || stroke.tool === 'highlight' || stroke.points.length === 1;
     if (stroke.tool === 'eraser') {
+      notesFocusLimitMarkStroke(stroke, NOTES_FOCUS_MARK_ERASER_POINT_LIMIT);
       notesFocusEraseMarks(box, stroke.points);
     } else {
+      notesFocusLimitMarkStroke(stroke);
       var entry = notesFocusMarkEntry(box, true);
       entry.strokes.push(stroke);
       state.redo = [];
-      notesFocusSaveMarks(box);
+      if (notesFocusSaveMarks(box)) needsRedraw = true;
     }
-    notesFocusRedrawMarks(box);
+    if (needsRedraw) notesFocusRedrawMarks(box);
   }
 
   function notesFocusUndoMark(box) {
@@ -1352,14 +1442,36 @@
     canvas.setAttribute('aria-label', 'Private notes drawing canvas');
     notebook.appendChild(canvas);
     var state = box._notesFocusMarks = {
+      // Avoid desynchronized canvas contexts here: on Android they can turn
+      // opaque when a native Turbo video initializes alongside the notebook.
       canvas: canvas, ctx: canvas.getContext('2d', { alpha: true }), notebook: notebook,
       dpr: 1, width: 0, height: 0, tool: 'move', color: NOTES_FOCUS_MARK_COLORS[0],
-      current: null, drawing: false, redo: [], observer: null
+      current: null, drawing: false, pointerId: null, hasRawPointerUpdates: false, redo: [], observer: null,
+      scroller: null, scrollHandler: null, canvasRect: null, pendingPoints: [], paintFrame: 0,
+      turboLoading: false
     };
+    state.scroller = notebook.closest ? notebook.closest('.ai-scroll') : box.querySelector('.ai-scroll');
+    if (state.scroller) {
+      state.scrollHandler = function () { state.canvasRect = null; };
+      state.scroller.addEventListener('scroll', state.scrollHandler, { passive: true });
+    }
+    function queuePointerMove(event, isRawUpdate) {
+      if (!state.drawing || !state.current || event.pointerId !== state.pointerId) return;
+      if (isRawUpdate) state.hasRawPointerUpdates = true;
+      // Chromium may replay raw samples inside pointermove's coalesced list.
+      // Once raw updates are available, use that higher-fidelity stream only.
+      if (!isRawUpdate && state.hasRawPointerUpdates) return;
+      if (event.cancelable) event.preventDefault();
+      notesFocusQueueMarkPoints(event, state);
+    }
     canvas.onpointerdown = function (event) {
-      if (state.tool === 'move') return;
+      if (state.tool === 'move' || state.drawing || event.isPrimary === false) return;
       event.preventDefault();
+      state.canvasRect = null;
+      state.pendingPoints = [];
+      state.hasRawPointerUpdates = false;
       state.drawing = true;
+      state.pointerId = event.pointerId;
       try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       state.current = {
         tool: state.tool, color: state.color,
@@ -1367,21 +1479,23 @@
         points: [notesFocusPoint(event, state)], createdAt: Date.now(),
         videoTime: notesFocusCurrentTime()
       };
+      if (state.current.tool !== 'eraser') notesFocusDrawStroke(state, state.current);
     };
-    canvas.onpointermove = function (event) {
-      if (!state.drawing || !state.current) return;
-      var point = notesFocusPoint(event, state);
-      var last = state.current.points[state.current.points.length - 1];
-      var dx = point[0] - last[0], dy = point[1] - last[1];
-      if ((dx * dx) + (dy * dy) < .000006 || state.current.points.length >= NOTES_FOCUS_MARK_POINT_LIMIT) return;
-      state.current.points.push(point);
-      if (state.current.tool !== 'eraser') notesFocusDrawStroke(state, state.current, state.current.points.length - 2);
-    };
+    canvas.onpointermove = function (event) { queuePointerMove(event, false); };
+    // Chromium exposes raw pointer updates between regular pointermove events.
+    // They improve stylus/touch fidelity, while the rAF painter still bounds
+    // rendering work to the display's refresh rate.
+    canvas.addEventListener('pointerrawupdate', function (event) { queuePointerMove(event, true); }, { passive: false });
     canvas.onpointerup = canvas.onpointercancel = function (event) {
-      if (!state.drawing) return;
+      if (!state.drawing || event.pointerId !== state.pointerId) return;
+      // Raw updates already delivered the in-between samples. Avoid replaying
+      // them from pointerup's coalesced list; retain only the release point.
+      notesFocusQueueMarkPoints(event, state, state.hasRawPointerUpdates);
       state.drawing = false;
       try { canvas.releasePointerCapture(event.pointerId); } catch (e) {}
       notesFocusCommitMark(box);
+      state.pointerId = null;
+      state.canvasRect = null;
     };
     if (typeof ResizeObserver === 'function') {
       state.observer = new ResizeObserver(function () { notesFocusResizeMarks(box); });
@@ -1397,6 +1511,7 @@
     if (!state) return;
     if (state.drawing) notesFocusCommitMark(box);
     if (state.observer) state.observer.disconnect();
+    if (state.scroller && state.scrollHandler) state.scroller.removeEventListener('scroll', state.scrollHandler);
     if (state.canvas && state.canvas.parentNode) state.canvas.parentNode.removeChild(state.canvas);
     delete box._notesFocusMarks;
   }
@@ -1404,7 +1519,12 @@
   function notesFocusFlushMarkOnExit() {
     if (!_notesFocus || !_notesFocus.box) return;
     var state = notesFocusMarkState(_notesFocus.box);
-    if (state && state.drawing) notesFocusCommitMark(_notesFocus.box);
+    if (!state || !state.drawing) return;
+    state.drawing = false;
+    try { if (state.pointerId !== null) state.canvas.releasePointerCapture(state.pointerId); } catch (e) {}
+    notesFocusCommitMark(_notesFocus.box);
+    state.pointerId = null;
+    state.canvasRect = null;
   }
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') notesFocusFlushMarkOnExit();
@@ -1482,11 +1602,28 @@
     return {};
   }
 
+  function notesFocusSetTurboCanvasLoading(box, loading) {
+    var state = notesFocusMarkState(box);
+    if (!state || !state.canvas || !state.ctx) return;
+    loading = !!loading;
+    if (state.turboLoading === loading) return;
+    state.turboLoading = loading;
+    box.classList.toggle('ai-focus-turbo-loading', loading);
+    if (loading) return;
+    // A native video preparation can make a tablet GPU discard the canvas
+    // surface. Recreate a transparent backing store before revealing saved
+    // marks, rather than exposing the opaque black fallback frame.
+    state.canvas.width = state.canvas.width;
+    state.ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    notesFocusRedrawMarks(box);
+  }
+
   function notesFocusPaintVideoAction() {
     if (!_notesFocus || !_notesFocus.box) return;
     var btn = _notesFocus.box.querySelector('#ai-focus-video');
     if (!btn) return;
     var stateNow = notesFocusTurboState();
+    notesFocusSetTurboCanvasLoading(_notesFocus.box, stateNow.phase === 'loading');
     var action = 'start', label = '⚡ Start Turbo', title = 'Prepare the native Turbo video, then open Picture-in-Picture';
     var disabled = false, phase = stateNow.phase || 'idle';
     if (!isPro()) {
@@ -1640,7 +1777,7 @@
     var scroller = active.box && active.box.querySelector('.ai-scroll');
     var currentScroll = scroller ? scroller.scrollTop : active.scrollTop;
     if (active.box) {
-      active.box.classList.remove('ai-notes-focus', 'ai-focus-mini-open');
+      active.box.classList.remove('ai-notes-focus', 'ai-focus-mini-open', 'ai-focus-turbo-loading');
       var mini = active.box.querySelector('#ai-focus-mini-video');
       if (mini) mini.hidden = true;
       if (active.oldRole == null) active.box.removeAttribute('role');

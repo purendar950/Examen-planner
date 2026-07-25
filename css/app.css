@@ -6264,6 +6264,11 @@ html[data-theme="light"] .fintech-dashboard {
   pointer-events: none;
   user-select: none;
 }
+/* Prevent an Android GPU canvas fallback from covering the notebook while the
+   native Turbo video is preparing in the background. */
+#page-youtube #ai-sub.ai-notes-focus.ai-focus-turbo-loading .ai-focus-marks-canvas {
+  visibility: hidden;
+}
 
 @media (max-width: 700px) {
   #page-youtube #ai-sub.ai-notes-focus .ai-focus-annotation-bar { gap: .34rem; min-height: 42px; padding-top: .38rem; padding-bottom: .38rem; }
