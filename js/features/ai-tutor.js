@@ -1092,15 +1092,22 @@
   function notesFocusSaveMarks(box) {
     var store = notesFocusMarksStore();
     var entry = notesFocusMarkEntry(box, true);
-    if (!store || !entry) return;
+    if (!store || !entry) return false;
+    var currentKey = notesFocusDraftKey(box);
+    var currentChanged = false;
     if (entry.strokes.length > NOTES_FOCUS_MARK_STROKE_LIMIT) {
       entry.strokes.splice(0, entry.strokes.length - NOTES_FOCUS_MARK_STROKE_LIMIT);
+      currentChanged = true;
     }
     entry.updatedAt = Date.now();
     var keys = Object.keys(store).sort(function (a, b) {
       return Number(store[a] && store[a].updatedAt) - Number(store[b] && store[b].updatedAt);
     });
-    while (keys.length > NOTES_FOCUS_MARK_SLOT_LIMIT) delete store[keys.shift()];
+    while (keys.length > NOTES_FOCUS_MARK_SLOT_LIMIT) {
+      var discardedKey = keys.shift();
+      if (discardedKey === currentKey) currentChanged = true;
+      delete store[discardedKey];
+    }
     var totalPoints = 0;
     Object.keys(store).forEach(function (key) {
       var strokes = store[key] && store[key].strokes || [];
@@ -1112,21 +1119,38 @@
       })[0];
       var oldest = oldestKey && store[oldestKey];
       if (!oldest || !oldest.strokes || !oldest.strokes.length) {
-        if (oldestKey) delete store[oldestKey];
-        else break;
+        if (oldestKey) {
+          if (oldestKey === currentKey) currentChanged = true;
+          delete store[oldestKey];
+        } else break;
         continue;
       }
       totalPoints -= (oldest.strokes[0].points || []).length;
+      if (oldestKey === currentKey) currentChanged = true;
       oldest.strokes.shift();
       if (!oldest.strokes.length) delete store[oldestKey];
     }
     try { if (typeof saveProgress === 'function') saveProgress(); } catch (e) {}
+    return currentChanged;
+  }
+
+  // Cap the backing store for a long generated notebook. Without a budget,
+  // a full-height high-DPR canvas can consume hundreds of MB on a tablet and
+  // make every pen/highlighter segment stall while it is composited.
+  var NOTES_FOCUS_MARK_MAX_PIXELS = 12000000;
+  function notesFocusMarkDpr(width, height) {
+    var deviceDpr = Math.max(1, Math.min(Number(window.devicePixelRatio) || 1, 1.5));
+    var budgetDpr = Math.sqrt(NOTES_FOCUS_MARK_MAX_PIXELS / Math.max(1, width * height));
+    return Math.min(deviceDpr, budgetDpr);
   }
 
   function notesFocusMarkDimensions(state) {
     var canvas = state && state.canvas;
     if (!canvas) return { width: 1, height: 1 };
-    return { width: Math.max(1, canvas.width / state.dpr), height: Math.max(1, canvas.height / state.dpr) };
+    return {
+      width: Math.max(1, state.width || canvas.width / state.dpr),
+      height: Math.max(1, state.height || canvas.height / state.dpr)
+    };
   }
 
   function notesFocusDrawStroke(state, stroke, start) {
@@ -1170,20 +1194,71 @@
     if (!state || !state.canvas || !state.notebook) return;
     var width = Math.max(1, state.notebook.scrollWidth, state.notebook.clientWidth);
     var height = Math.max(1, state.notebook.scrollHeight, state.notebook.clientHeight);
-    state.canvas.width = Math.round(width * state.dpr);
-    state.canvas.height = Math.round(height * state.dpr);
+    var dpr = notesFocusMarkDpr(width, height);
+    var pixelWidth = Math.max(1, Math.floor(width * dpr));
+    var pixelHeight = Math.max(1, Math.floor(height * dpr));
+    state.canvasRect = null;
+    if (state.canvas.width === pixelWidth && state.canvas.height === pixelHeight && state.width === width && state.height === height && state.dpr === dpr) return;
+    state.dpr = dpr;
+    state.width = width;
+    state.height = height;
+    state.canvas.width = pixelWidth;
+    state.canvas.height = pixelHeight;
     state.canvas.style.width = width + 'px';
     state.canvas.style.height = height + 'px';
-    state.ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+    state.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     notesFocusRedrawMarks(box);
   }
 
   function notesFocusPoint(event, state) {
-    var rect = state.canvas.getBoundingClientRect();
+    var rect = state.canvasRect || (state.canvasRect = state.canvas.getBoundingClientRect());
     return [
       Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(1, rect.width))),
       Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(1, rect.height)))
     ];
+  }
+
+  // Pointer events can arrive much faster than the display refresh rate. Keep
+  // every coalesced sample for smooth saved strokes, but paint at most once per
+  // frame so input handling never competes with rendering.
+  function notesFocusFlushMarkPoints(state) {
+    if (!state || !state.current || !state.pendingPoints || !state.pendingPoints.length) return;
+    var stroke = state.current;
+    var pending = state.pendingPoints;
+    state.pendingPoints = [];
+    var start = stroke.points.length - 1;
+    for (var i = 0; i < pending.length && stroke.points.length < NOTES_FOCUS_MARK_POINT_LIMIT; i++) {
+      var point = pending[i];
+      var last = stroke.points[stroke.points.length - 1];
+      var dx = point[0] - last[0], dy = point[1] - last[1];
+      if ((dx * dx) + (dy * dy) >= .000006) stroke.points.push(point);
+    }
+    if (stroke.points.length > start + 1 && stroke.tool !== 'eraser') notesFocusDrawStroke(state, stroke, start);
+  }
+
+  function notesFocusQueueMarkPoints(event, state) {
+    if (!state || !state.current || state.current.points.length >= NOTES_FOCUS_MARK_POINT_LIMIT) return;
+    var samples = null;
+    try { samples = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : null; } catch (e) {}
+    if (samples && samples.length) {
+      for (var i = 0; i < samples.length; i++) state.pendingPoints.push(notesFocusPoint(samples[i], state));
+    } else {
+      state.pendingPoints.push(notesFocusPoint(event, state));
+    }
+    if (state.paintFrame) return;
+    state.paintFrame = requestAnimationFrame(function () {
+      state.paintFrame = 0;
+      notesFocusFlushMarkPoints(state);
+    });
+  }
+
+  function notesFocusFlushQueuedMarkPoints(state) {
+    if (!state) return;
+    if (state.paintFrame) {
+      cancelAnimationFrame(state.paintFrame);
+      state.paintFrame = 0;
+    }
+    notesFocusFlushMarkPoints(state);
   }
 
   function notesFocusSetMarkTool(box, tool) {
@@ -1235,17 +1310,19 @@
   function notesFocusCommitMark(box) {
     var state = notesFocusMarkState(box);
     if (!state || !state.current) return;
+    notesFocusFlushQueuedMarkPoints(state);
     var stroke = state.current;
     state.current = null;
+    var needsRedraw = stroke.tool === 'eraser' || stroke.tool === 'highlight' || stroke.points.length === 1;
     if (stroke.tool === 'eraser') {
       notesFocusEraseMarks(box, stroke.points);
     } else {
       var entry = notesFocusMarkEntry(box, true);
       entry.strokes.push(stroke);
       state.redo = [];
-      notesFocusSaveMarks(box);
+      if (notesFocusSaveMarks(box)) needsRedraw = true;
     }
-    notesFocusRedrawMarks(box);
+    if (needsRedraw) notesFocusRedrawMarks(box);
   }
 
   function notesFocusUndoMark(box) {
@@ -1324,12 +1401,20 @@
     notebook.appendChild(canvas);
     var state = box._notesFocusMarks = {
       canvas: canvas, ctx: canvas.getContext('2d'), notebook: notebook,
-      dpr: window.devicePixelRatio || 1, tool: 'move', color: NOTES_FOCUS_MARK_COLORS[0],
-      current: null, drawing: false, redo: [], observer: null
+      dpr: 1, width: 0, height: 0, tool: 'move', color: NOTES_FOCUS_MARK_COLORS[0],
+      current: null, drawing: false, redo: [], observer: null,
+      scroller: null, scrollHandler: null, canvasRect: null, pendingPoints: [], paintFrame: 0
     };
+    state.scroller = notebook.closest ? notebook.closest('.ai-scroll') : box.querySelector('.ai-scroll');
+    if (state.scroller) {
+      state.scrollHandler = function () { state.canvasRect = null; };
+      state.scroller.addEventListener('scroll', state.scrollHandler, { passive: true });
+    }
     canvas.onpointerdown = function (event) {
       if (state.tool === 'move') return;
       event.preventDefault();
+      state.canvasRect = null;
+      state.pendingPoints = [];
       state.drawing = true;
       try { canvas.setPointerCapture(event.pointerId); } catch (e) {}
       state.current = {
@@ -1341,18 +1426,16 @@
     };
     canvas.onpointermove = function (event) {
       if (!state.drawing || !state.current) return;
-      var point = notesFocusPoint(event, state);
-      var last = state.current.points[state.current.points.length - 1];
-      var dx = point[0] - last[0], dy = point[1] - last[1];
-      if ((dx * dx) + (dy * dy) < .000006 || state.current.points.length >= NOTES_FOCUS_MARK_POINT_LIMIT) return;
-      state.current.points.push(point);
-      if (state.current.tool !== 'eraser') notesFocusDrawStroke(state, state.current, state.current.points.length - 2);
+      event.preventDefault();
+      notesFocusQueueMarkPoints(event, state);
     };
     canvas.onpointerup = canvas.onpointercancel = function (event) {
       if (!state.drawing) return;
+      notesFocusQueueMarkPoints(event, state);
       state.drawing = false;
       try { canvas.releasePointerCapture(event.pointerId); } catch (e) {}
       notesFocusCommitMark(box);
+      state.canvasRect = null;
     };
     if (typeof ResizeObserver === 'function') {
       state.observer = new ResizeObserver(function () { notesFocusResizeMarks(box); });
@@ -1368,6 +1451,7 @@
     if (!state) return;
     if (state.drawing) notesFocusCommitMark(box);
     if (state.observer) state.observer.disconnect();
+    if (state.scroller && state.scrollHandler) state.scroller.removeEventListener('scroll', state.scrollHandler);
     if (state.canvas && state.canvas.parentNode) state.canvas.parentNode.removeChild(state.canvas);
     delete box._notesFocusMarks;
   }
