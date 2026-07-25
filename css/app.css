@@ -5012,6 +5012,7 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
   inset: 0 !important;
   z-index: 2147483000 !important;
   display: flex !important;
+  flex-direction: column !important;
   width: 100vw !important;
   height: 100vh !important;
   height: 100dvh !important;
@@ -6180,103 +6181,90 @@ html[data-theme="light"] .fintech-dashboard {
 }
 
 
-/* ── Notes Focus: private note-making pad ─────────────────────────────── */
-#page-youtube #ai-sub.ai-notes-focus .ai-focus-private-notes {
-  display: none;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: #fffdf6;
-  border-left: 1px solid #ded6c2;
-  color: #17231d;
-}
-#page-youtube #ai-sub.ai-notes-focus .ai-focus-private-notes[hidden] { display: none !important; }
-#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open {
-  display: grid !important;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
-  grid-template-rows: auto minmax(0, 1fr);
-}
-#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open .ai-focus-toolbar {
-  grid-column: 1 / -1;
-  grid-row: 1;
-}
-#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open > .ai-scroll,
-#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open > .ai-scroll.nb {
-  grid-column: 1;
-  grid-row: 2;
-  width: 100%;
-  margin: 0;
-}
-#page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open .ai-focus-private-notes {
-  grid-column: 2;
-  grid-row: 2;
+/* ── Notes Focus: private handwriting, highlighting and markup ─────────── */
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-annotation-bar {
   display: flex;
-  flex-direction: column;
-}
-#page-youtube .ai-focus-private-notes-head {
-  display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  justify-content: space-between;
-  gap: .75rem;
-  padding: .9rem 1rem;
-  border-bottom: 1px solid #e4dcc8;
+  gap: .42rem;
+  min-height: 46px;
+  padding: .48rem max(.75rem, env(safe-area-inset-right)) .48rem max(.75rem, env(safe-area-inset-left));
+  overflow-x: auto;
+  border-bottom: 1px solid #ded6c2;
   background: #fffaf0;
+  color: #2f4037;
+  scrollbar-width: thin;
 }
-#page-youtube .ai-focus-private-notes-head span { display: grid; gap: .12rem; }
-#page-youtube .ai-focus-private-notes-head strong { font-size: .78rem; color: #17231d; }
-#page-youtube .ai-focus-private-notes-head small { color: #6b776f; font-size: .61rem; font-weight: 650; }
-#page-youtube .ai-focus-private-notes-head button {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  place-items: center;
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-annotation-bar[hidden] { display: none !important; }
+#page-youtube .ai-focus-annotation-label {
+  flex: 0 0 auto;
+  margin-right: .15rem;
+  color: #405148;
+  font-size: .64rem;
+  font-weight: 850;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+#page-youtube .ai-focus-mark-tool,
+#page-youtube .ai-focus-mark-action,
+#page-youtube .ai-focus-mark-done {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: .32rem .54rem;
   border: 1px solid #d5cdb8;
   border-radius: 8px;
   background: #fffdf6;
   color: #405148;
-  font: 800 1rem/1 system-ui, sans-serif;
+  font: 750 .63rem/1 var(--font);
+  white-space: nowrap;
   cursor: pointer;
 }
-#page-youtube .ai-focus-private-notes-head button:hover { border-color: #8eb69a; background: #eef7eb; }
-#page-youtube .ai-focus-private-notes-head button:focus-visible { outline: 3px solid #08733a; outline-offset: 2px; }
-#page-youtube #ai-focus-private-notes-input {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-  resize: none;
-  border: 0;
-  outline: 0;
-  padding: 1rem;
-  background: repeating-linear-gradient(to bottom, #fffdf6 0, #fffdf6 30px, #e8e0cd 31px);
-  color: #25352c;
-  font: 500 .88rem/1.72 var(--font);
+#page-youtube .ai-focus-mark-tool:hover,
+#page-youtube .ai-focus-mark-action:hover,
+#page-youtube .ai-focus-mark-done:hover { border-color: #8eb69a; background: #eef7eb; }
+#page-youtube .ai-focus-mark-tool.is-active {
+  border-color: #08733a;
+  background: #08733a;
+  color: #fff;
 }
-#page-youtube #ai-focus-private-notes-input::placeholder { color: #8b958f; }
-#page-youtube .ai-focus-private-notes > p {
-  flex: 0 0 auto;
-  margin: 0;
-  padding: .65rem 1rem max(.7rem, env(safe-area-inset-bottom));
-  border-top: 1px solid #e4dcc8;
-  color: #6b776f;
-  font-size: .61rem;
-  font-weight: 650;
+#page-youtube .ai-focus-mark-action { min-width: 30px; padding: .32rem; font-size: .84rem; }
+#page-youtube .ai-focus-mark-done { margin-left: auto; border-color: #08733a; color: #075b2d; }
+#page-youtube .ai-focus-mark-divider { flex: 0 0 1px; width: 1px; height: 22px; background: #ded6c2; }
+#page-youtube .ai-focus-mark-colors { display: inline-flex; flex: 0 0 auto; align-items: center; gap: .28rem; }
+#page-youtube .ai-focus-mark-color {
+  width: 21px;
+  height: 21px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  background: var(--mark-color);
+  cursor: pointer;
+}
+#page-youtube .ai-focus-mark-color.is-active { border-color: #17231d; box-shadow: 0 0 0 2px #fffaf0; }
+#page-youtube .ai-focus-mark-tool:focus-visible,
+#page-youtube .ai-focus-mark-action:focus-visible,
+#page-youtube .ai-focus-mark-done:focus-visible,
+#page-youtube .ai-focus-mark-color:focus-visible { outline: 3px solid #08733a; outline-offset: 2px; }
+#page-youtube .ai-focus-control.ai-focus-control-active { border-color: #08733a; background: #dff5e6; color: #075b2d; }
+#page-youtube #ai-sub.ai-notes-focus .ai-nb { position: relative; }
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-marks-canvas {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  left: 0;
+  display: block;
+  touch-action: none;
+  pointer-events: none;
+  user-select: none;
 }
 
 @media (max-width: 700px) {
-  #page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open { display: flex !important; }
-  #page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open > .ai-scroll,
-  #page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open > .ai-scroll.nb { width: 100%; }
-  #page-youtube #ai-sub.ai-notes-focus.ai-focus-private-notes-open .ai-focus-private-notes {
-    position: absolute;
-    z-index: 12;
-    top: 105px;
-    right: .5rem;
-    bottom: .5rem;
-    left: .5rem;
-    display: flex;
-    border: 1px solid #d5cdb8;
-    border-radius: 13px;
-    box-shadow: 0 18px 46px rgba(39, 51, 42, .24);
-  }
+  #page-youtube #ai-sub.ai-notes-focus .ai-focus-annotation-bar { gap: .34rem; min-height: 42px; padding-top: .38rem; padding-bottom: .38rem; }
+  #page-youtube .ai-focus-annotation-label { display: none; }
+  #page-youtube .ai-focus-mark-tool,
+  #page-youtube .ai-focus-mark-action,
+  #page-youtube .ai-focus-mark-done { min-height: 29px; padding: .3rem .46rem; font-size: .61rem; }
+  #page-youtube .ai-focus-mark-action { min-width: 29px; padding: .3rem; }
+  #page-youtube .ai-focus-mark-color { width: 20px; height: 20px; }
+  #page-youtube .ai-focus-mark-divider { margin: 0 .06rem; }
 }
