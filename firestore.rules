@@ -1,0 +1,126 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Browser admin access is granted only by an existing admins/{uid} document.
+    // Service-account jobs continue to bypass these client rules through Admin SDK.
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Each student owns their complete app state, including private note marks
+    // and shared-note links. Browser admins can manage account profiles.
+    match /users/{userId} {
+      allow read, write: if (signedIn() && request.auth.uid == userId) || isAdmin();
+    }
+
+    // A user can only verify their own admin role document; role assignment is
+    // deliberately left to trusted server tooling or the Firebase console.
+    match /admins/{userId} {
+      allow get: if signedIn() && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
+    }
+
+    // User suggestions and support requests can be submitted by signed-in
+    // users; browser admins may review and update them.
+    match /requests/{docId} {
+      allow create: if signedIn();
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Only public, browser-consumed configuration is readable by students.
+    // Sensitive operational documents such as config/telegram and config/ai
+    // remain admin-only while the browser admin UI can maintain every config.
+    match /config/{docId} {
+      allow read: if isAdmin()
+                  || (signedIn()
+                      && docId in ['payment', 'free', 'pro', 'settings', 'youtube', 'turbo']);
+      allow write: if isAdmin();
+    }
+
+    // Plans and coupon definitions are visible to authenticated students but
+    // are maintained exclusively by browser admins.
+    match /plans/{planId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /coupons/{couponCode} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // A student can submit and view only their own payment request. Admins
+    // handle verification and status changes.
+    match /payments/{paymentId} {
+      allow create: if signedIn()
+                    && request.resource.data.uid == request.auth.uid;
+      allow read: if isAdmin()
+                  || (signedIn() && resource.data.uid == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    // Coupon redemptions are auditable user submissions; coupon counters are
+    // never client-writable (the UI already treats that increment as best effort).
+    match /coupon_redemptions/{redemptionId} {
+      allow create: if signedIn()
+                    && request.resource.data.uid == request.auth.uid;
+      allow read: if isAdmin()
+                  || (signedIn() && resource.data.uid == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /admin_logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /referrals/{referralId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Referral device records are created by the newly signed-in account and
+    // are otherwise immutable to browser clients.
+    match /referral_devices/{deviceId} {
+      allow get: if signedIn();
+      allow create: if signedIn()
+                    && request.resource.data.userId == request.auth.uid;
+      allow list, update, delete: if isAdmin();
+    }
+
+    match /referral_log/{logId} {
+      allow create: if signedIn()
+                    && request.resource.data.referee == request.auth.uid;
+      allow read, update, delete: if isAdmin();
+    }
+
+    // Shared MCQ links are readable to signed-in recipients. A creator may
+    // delete their own link; admins can moderate all links.
+    match /mcqShares/{shareId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+                    && request.resource.data.by == request.auth.uid;
+      allow update, delete: if isAdmin()
+                            || (signedIn() && resource.data.by == request.auth.uid);
+    }
+
+    // Shared note text is readable by every authenticated student. Only its
+    // creator may modify or remove it, and ownership cannot be transferred.
+    // Private pen/highlighter data never enters this collection: it remains
+    // inside that user's /users/{uid}.appState.noteMarks document field.
+    match /notes/{noteId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+                    && request.resource.data.createdBy == request.auth.uid;
+      allow update: if signedIn()
+                    && resource.data.createdBy == request.auth.uid
+                    && request.resource.data.createdBy == resource.data.createdBy;
+      allow delete: if signedIn()
+                    && resource.data.createdBy == request.auth.uid;
+    }
+  }
+}

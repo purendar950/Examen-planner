@@ -1,0 +1,33 @@
+name: Deploy Firestore rules
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: Firebase project ID to receive the versioned firestore.rules
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Firestore policy
+    runs-on: ubuntu-latest
+    environment: firebase-production
+    env:
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Verify deployment credential
+        run: |
+          if [ -z "$FIREBASE_TOKEN" ]; then
+            echo "Set the FIREBASE_TOKEN secret on the firebase-production environment before deploying." >&2
+            exit 1
+          fi
+
+      - name: Deploy versioned Firestore rules
+        run: npx --yes firebase-tools@latest deploy --only firestore --project "${{ inputs.project_id }}" --non-interactive
