@@ -1,0 +1,142 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function owns(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function validUserCreate(userId) {
+      let profile = request.resource.data.profile;
+      let appState = request.resource.data.appState;
+      return owns(userId)
+        && request.resource.data.keys().hasOnly(['profile', 'appState', 'updatedAt'])
+        && profile is map
+        && appState is map
+        && !appState.keys().hasAny(['proTrial', 'proTrialUsed'])
+        && (!('email' in profile) || profile.email == request.auth.token.email)
+        && (!('plan' in profile) || profile.plan == 'free')
+        && (!('status' in profile) || profile.status == 'approved')
+        && !profile.keys().hasAny([
+          'planId', 'planExpiry', 'trialExpiry', 'trialExpiresAt',
+          'trialSuspended', 'trialSource', 'proTrialUsed', 'proTrialStartedAt',
+          'rejectReason', 'approvedAt', 'refTotalCount', 'refPaidCount',
+          'referralDaysEarned', 'lastReferralBonus', 'lastReferralDate'
+        ]);
+    }
+
+    function validUserUpdate(userId) {
+      let documentFields = request.resource.data.diff(resource.data).affectedKeys();
+      let previousProfile = resource.data.get('profile', {});
+      let profileFields = request.resource.data.profile
+        .diff(previousProfile).affectedKeys();
+      let previousAppState = resource.data.get('appState', {});
+      let nextAppState = request.resource.data.get('appState', {});
+      return owns(userId)
+        && previousProfile.get('status', 'approved') == 'approved'
+        && request.resource.data.profile is map
+        && previousProfile is map
+        && previousAppState is map
+        && nextAppState is map
+        && nextAppState.get('proTrial', null) == previousAppState.get('proTrial', null)
+        && nextAppState.get('proTrialUsed', false) == previousAppState.get('proTrialUsed', false)
+        && documentFields.hasOnly(['appState', 'updatedAt', 'profile', 'telegramInbox'])
+        && profileFields.hasOnly([
+          'name', 'email', 'mobile', 'examTarget', 'targetYear',
+          'prepLevel', 'prepMode', 'targetScore', 'provider', 'createdAt',
+          'requestedAt', 'referredBy', 'fp', 'ip', 'deviceDuplicate',
+          'couponsUsed'
+        ])
+        && (!('email' in request.resource.data.profile)
+          || request.resource.data.profile.email == request.auth.token.email);
+    }
+
+    // A student's planner is private to that Firebase UID. Administrators may
+    // access users only after their UID is present in the admins collection.
+    match /users/{userId} {
+      allow read: if owns(userId) || isAdmin();
+      allow create: if validUserCreate(userId) || isAdmin();
+      allow update: if validUserUpdate(userId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // A signed-in account can only discover its own admin role document.
+    // Admin membership changes remain server/console operations.
+    match /admins/{userId} {
+      allow get: if owns(userId);
+      allow list, create, update, delete: if false;
+    }
+
+    match /plans/{planId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Only non-secret runtime configuration is exposed to normal users.
+    // Bot tokens, AI keys, report credentials and proxy settings remain admin-only.
+    match /config/{configId} {
+      allow read: if isAdmin()
+        || (signedIn() && configId in ['payment', 'free', 'settings', 'pro', 'youtube']);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.planId is string
+        && exists(/databases/$(database)/documents/plans/$(request.resource.data.planId))
+        && request.resource.data.planName
+          == get(/databases/$(database)/documents/plans/$(request.resource.data.planId)).data.name
+        && request.resource.data.originalAmount
+          == get(/databases/$(database)/documents/plans/$(request.resource.data.planId)).data.price;
+      allow update, delete: if isAdmin();
+    }
+
+    match /coupons/{couponId} {
+      allow get: if signedIn();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /coupon_redemptions/{redemptionId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.uid == request.auth.uid);
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isAdmin();
+    }
+
+    match /requests/{requestId} {
+      allow create: if signedIn()
+        && request.resource.data.uid == request.auth.uid;
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /referrals/{referralId} {
+      allow read, create, update, delete: if isAdmin();
+    }
+
+    match /admin_logs/{logId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    // telegram_links, telegram_link_challenges, telegram_groups,
+    // telegram_media_owners and every other unlisted collection are server-
+    // owned. Firebase Admin SDK bypasses rules; browser clients are denied.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

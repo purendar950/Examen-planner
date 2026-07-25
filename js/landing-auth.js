@@ -189,11 +189,8 @@
 
     var auth = getFirebaseAuth();
     if (!auth) {
-      // Firebase scripts probably failed to load — still send the user to the
-      // app so they can sign in there (which has its own auth flow).
-      // Close the modal first so it doesn't get stuck open during navigation.
-      window.closeAuthModal();
-      window.location.href = 'app.html';
+      setError('Secure authentication is temporarily unavailable. Please try again later.');
+      setBusy(false);
       return;
     }
 
@@ -249,7 +246,11 @@
   window.handleGoogleAuth = function () {
     if (submitInFlight) return;
     var auth = getFirebaseAuth();
-    if (!auth) { window.closeAuthModal(); window.location.href = 'app.html'; return; }
+    if (!auth) {
+      setError('Secure authentication is temporarily unavailable. Please try again later.');
+      setBusy(false);
+      return;
+    }
     submitInFlight = true;
     setBusy(true);
     setError('');

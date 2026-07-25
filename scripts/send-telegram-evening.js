@@ -64,6 +64,16 @@ function sendTelegramMessage(chatId, text) {
   return _sendTelegramMessage(BOT_TOKEN, chatId, text);
 }
 
+async function verifiedTelegramChat(uid, claimedChatId) {
+  const chatId = String(claimedChatId || '').trim();
+  if (!/^-?\d+$/.test(chatId)) return '';
+  const link = await db.collection('telegram_links').doc(chatId).get();
+  const data = link.exists ? (link.data() || {}) : {};
+  return data.verified === true
+    && data.method === 'challenge-v1'
+    && String(data.uid || '') === String(uid) ? chatId : '';
+}
+
 /* ── Pro check ──────────────────────────────────────────────────────────────
    Same gate as the morning digest (shared/proGating.js) — the evening
    check-in is part of the same Pro Telegram feature, not a separate one. */
@@ -172,6 +182,13 @@ async function main() {
       continue;
     }
 
+    const verifiedChatId = await verifiedTelegramChat(doc.id, tg.chatId);
+    if (!verifiedChatId) {
+      skipped++;
+      console.log(`  🔒 Skipped (Telegram ownership not verified) → ${doc.id}`);
+      continue;
+    }
+
     const aState = data.appState || {};
     const name   = (data.profile && data.profile.name)
                     ? data.profile.name.split(' ')[0]
@@ -181,12 +198,12 @@ async function main() {
     if (!built.hasContent) { noContent++; continue; } /* nothing tracked today — don't nag */
 
     try {
-      await sendTelegramMessage(tg.chatId, built.text);
+      await sendTelegramMessage(verifiedChatId, built.text);
       sent++;
-      console.log(`  ✅ Sent → ${doc.id} (${name}) chat:${tg.chatId}`);
+      console.log(`  ✅ Sent → ${doc.id} (${name}) chat:${verifiedChatId}`);
     } catch (e) {
       if (e.skip) {
-        console.log(`  ⚠️  Skipped (blocked/not found) → ${doc.id} chat:${tg.chatId}: ${e.message}`);
+        console.log(`  ⚠️  Skipped (blocked/not found) → ${doc.id} chat:${verifiedChatId}: ${e.message}`);
         skipped++;
       } else {
         failed++;

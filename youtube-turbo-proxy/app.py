@@ -5813,10 +5813,22 @@ def _group_route(chat_id):
 
 
 def _telegram_chat_for_user(user):
-    """Read the authenticated user's configured Telegram destination."""
+    """Return only a challenge-verified destination for this Firebase UID."""
     telegram = ((user.get("data") or {}).get("appState") or {}).get("telegram") or {}
     chat_id = str(telegram.get("chatId") or "").strip()
-    return chat_id if re.fullmatch(r"-?\d+", chat_id) else ""
+    uid = str(user.get("uid") or "").strip()
+    if not _fb_db or not uid or not re.fullmatch(r"-?\d+", chat_id):
+        return ""
+    try:
+        link = _fb_db.collection("telegram_links").document(chat_id).get()
+        data = (link.to_dict() or {}) if link.exists else {}
+        if (data.get("verified") is True
+                and data.get("method") == "challenge-v1"
+                and str(data.get("uid") or "") == uid):
+            return chat_id
+    except Exception as exc:  # noqa: BLE001
+        log.warning("verified Telegram link lookup failed: %s", exc)
+    return ""
 
 
 def _telegram_media_doc_id(uid, file_id):
@@ -6190,7 +6202,7 @@ def api_send_photo():
     caption = (data.get("caption") or "")[:1024]
 
     if not chat_id:
-        return jsonify({"ok": False, "error": "Connect a Telegram chat in your profile first."}), 400
+        return jsonify({"ok": False, "error": "Securely link this Telegram chat in your profile first."}), 400
     if not image_b64:
         return jsonify({"ok": False, "error": "imageBase64 required"}), 400
     if _photo_rate_limited(user["uid"]):

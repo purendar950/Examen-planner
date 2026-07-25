@@ -49,74 +49,119 @@ function refreshTelegramDigest() {
   appState.telegram.digest = buildTelegramDigest();
 }
 
+/* Secure link API hosted by the Telegram bot service. The browser authenticates
+   with a Firebase ID token; raw Firebase UIDs are never placed in bot URLs. */
+const TELEGRAM_BOT_USERNAME = 'SSCplannerbot';
+const TELEGRAM_LINK_BACKEND_URL = 'https://examen-planner-2.onrender.com';
+
+async function telegramLinkApi(path, payload) {
+  const idToken = await getFirebaseIdToken();
+  const response = await fetch(TELEGRAM_LINK_BACKEND_URL + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + idToken },
+    body: JSON.stringify(payload || {})
+  });
+  const data = await response.json().catch(function() { return {}; });
+  if (!response.ok || !data.ok) throw new Error(data.error || 'Telegram linking failed');
+  return data;
+}
+
+async function isTelegramLinkVerified(chatId) {
+  if (!/^-?\d+$/.test(String(chatId || ''))) return false;
+  const result = await telegramLinkApi('/telegram-link/status', { chatId: String(chatId) });
+  return result.verified === true;
+}
+
 /* Save the Telegram settings from the Study Profile modal. */
-function saveTelegramSettings() {
+async function saveTelegramSettings() {
   if (!appState.telegram) appState.telegram = { chatId:'', username:'', enabled:false, digest:null };
   const chatEl   = document.getElementById('tg-chatid');
   const onEl     = document.getElementById('tg-enabled');
   const statusEl = document.getElementById('tg-status-msg');
-  if (chatEl) appState.telegram.chatId = (chatEl.value || '').trim();
-  if (onEl)   appState.telegram.enabled = !!onEl.checked;
+  const nextChatId = (chatEl && chatEl.value || '').trim();
+  const nextEnabled = !!(onEl && onEl.checked);
 
-  /* Warn if enabled but no chat ID */
-  if (appState.telegram.enabled && !appState.telegram.chatId) {
-    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '⚠️ Pehle Chat ID daalo — "Step 1: Bot kholo" dabao ya @userinfobot se ID lo.'; }
-    if (typeof showToast === 'function') showToast('⚠️ Chat ID missing! Pehle bot se ya @userinfobot se ID lo.', 'info');
+  if (nextEnabled && !nextChatId) {
+    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '⚠️ Pehle secure Connect Telegram flow complete karke Chat ID daalo.'; }
+    if (typeof showToast === 'function') showToast('⚠️ Telegram secure link missing.', 'info');
     return;
   }
 
+  if (nextEnabled) {
+    if (statusEl) { statusEl.style.color = 'var(--muted)'; statusEl.textContent = '⏳ Verifying secure Telegram link...'; }
+    try {
+      if (!await isTelegramLinkVerified(nextChatId)) {
+        if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '❌ This Chat ID is not securely linked to your account. Connect Telegram again.'; }
+        if (typeof showToast === 'function') showToast('Telegram ownership could not be verified.', 'error');
+        return;
+      }
+    } catch (error) {
+      if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '❌ Verification failed: ' + error.message; }
+      return;
+    }
+  }
+
+  appState.telegram.chatId = nextChatId;
+  appState.telegram.enabled = nextEnabled;
   refreshTelegramDigest();
   saveProgress();
 
-  const ok = appState.telegram.enabled && appState.telegram.chatId;
+  const ok = nextEnabled && nextChatId;
   if (statusEl) {
     statusEl.style.color = ok ? '#27ae60' : 'var(--muted)';
     statusEl.textContent = ok
-      ? '✅ Saved! Kal subah 6 AM IST pe message aayega.'
-      : appState.telegram.enabled ? '' : '🔕 Telegram notifications OFF.';
+      ? '✅ Securely linked and saved! Kal subah 6 AM IST pe message aayega.'
+      : '🔕 Telegram notifications OFF.';
   }
   if (typeof showToast === 'function') {
-    showToast(appState.telegram.enabled
-      ? (appState.telegram.chatId ? '📩 Daily Telegram plan ON ✅' : '⚠️ Chat ID daalo pehle')
-      : '🔕 Telegram daily plan OFF', ok ? 'success' : 'info');
+    showToast(ok ? '📩 Secure Telegram daily plan ON ✅' : '🔕 Telegram daily plan OFF', ok ? 'success' : 'info');
   }
 }
 
-/* Open the bot so the user can press Start; payload carries their uid. */
-const TELEGRAM_BOT_USERNAME = 'SSCplannerbot'; /* Connect button opens https://t.me/SSCplannerbot */
-function connectTelegram() {
-  const uid = (currentUser && currentUser.uid) ? currentUser.uid : '';
-  const url = 'https://t.me/' + TELEGRAM_BOT_USERNAME + (uid ? '?start=' + encodeURIComponent(uid) : '');
-  window.open(url, '_blank');
-  /* After opening, show guidance so user knows what to do next */
-  setTimeout(function() {
-    const msg = document.getElementById('tg-status-msg');
-    if (msg) {
-      msg.style.color = '#229ED9';
-      msg.textContent = '✅ Bot khul gaya! "Start" dabao → bot apna Chat ID reply karega → woh ID oopar paste karo.';
+/* Create a one-time challenge while authenticated, then open the bot. */
+async function connectTelegram() {
+  const popup = window.open('about:blank', '_blank');
+  if (popup) popup.opener = null;
+  const statusEl = document.getElementById('tg-status-msg');
+  if (statusEl) { statusEl.style.color = 'var(--muted)'; statusEl.textContent = '⏳ Creating secure Telegram link...'; }
+  try {
+    const result = await telegramLinkApi('/telegram-link/start');
+    if (popup) popup.location.replace(result.url);
+    else window.open(result.url, '_blank', 'noopener');
+    if (statusEl) {
+      statusEl.style.color = '#229ED9';
+      statusEl.textContent = '✅ Bot khul gaya! Start dabao → secure link complete hoga → Chat ID copy karke yahan paste karo.';
     }
-    if (typeof showToast === 'function') {
-      showToast('Bot open hua! Start dabao → Chat ID copy karo → yahan paste karo 👆', 'info');
-    }
-  }, 800);
+    if (typeof showToast === 'function') showToast('Telegram secure link expires in 10 minutes.', 'info');
+  } catch (error) {
+    if (popup) popup.close();
+    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '❌ ' + error.message; }
+    if (typeof showToast === 'function') showToast('Could not start secure Telegram linking.', 'error');
+  }
 }
 
-/* Verify that the entered chat ID looks valid and test-ping it */
+/* Verify that the entered chat ID is linked to this Firebase account. */
 async function verifyTelegramChatId() {
   const chatEl = document.getElementById('tg-chatid');
   const statusEl = document.getElementById('tg-status-msg');
   const chatId = (chatEl && chatEl.value || '').trim();
   if (!chatId || !/^-?\d+$/.test(chatId)) {
     if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '⚠️ Valid numeric Chat ID daalo (e.g. 987654321)'; }
-    return;
+    return false;
   }
-  if (statusEl) { statusEl.style.color = 'var(--muted)'; statusEl.textContent = '⏳ Testing...'; }
+  if (statusEl) { statusEl.style.color = 'var(--muted)'; statusEl.textContent = '⏳ Verifying ownership...'; }
   try {
-    const token = null; /* Bot token is only in GitHub Secrets — we can't test-send from browser */
-    /* Without token in browser we just validate format and show success */
-    if (statusEl) { statusEl.style.color = '#27ae60'; statusEl.textContent = '✅ Chat ID format sahi hai! Save karo aur GitHub Actions se test karo.'; }
+    const verified = await isTelegramLinkVerified(chatId);
+    if (statusEl) {
+      statusEl.style.color = verified ? '#27ae60' : '#e74c3c';
+      statusEl.textContent = verified
+        ? '✅ Telegram ownership verified. Notifications can be enabled safely.'
+        : '❌ Not linked to this account. Connect Telegram again and press Start.';
+    }
+    return verified;
   } catch(e) {
     if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '❌ Error: ' + e.message; }
+    return false;
   }
 }
 

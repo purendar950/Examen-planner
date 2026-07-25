@@ -63,6 +63,18 @@ function sendTelegramMessage(chatId, text) {
   return _sendTelegramMessage(BOT_TOKEN, chatId, text);
 }
 
+/** Accept a destination only when the Telegram account completed the one-time
+ *  linking challenge for this exact Firebase UID. */
+async function verifiedTelegramChat(uid, claimedChatId) {
+  const chatId = String(claimedChatId || '').trim();
+  if (!/^-?\d+$/.test(chatId)) return '';
+  const link = await db.collection('telegram_links').doc(chatId).get();
+  const data = link.exists ? (link.data() || {}) : {};
+  return data.verified === true
+    && data.method === 'challenge-v1'
+    && String(data.uid || '') === String(uid) ? chatId : '';
+}
+
 /* ── Pro check ──────────────────────────────────────────────────────────────
    Delegated to shared/proGating.js — the single source of truth for
    server-side Pro/trial gating, also used by bot/bot-server.js. Auto
@@ -183,6 +195,13 @@ async function main() {
       continue;
     }
 
+    const verifiedChatId = await verifiedTelegramChat(doc.id, tg.chatId);
+    if (!verifiedChatId) {
+      skipped++;
+      console.log(`  🔒 Skipped (Telegram ownership not verified) → ${doc.id}`);
+      continue;
+    }
+
     /* Read today's digest entry (study topics + revisions, browser-built) and
        assemble the full message (topics + to-do + videos) at send time so the
        to-do list, videos, and rolled-over items are always accurate. */
@@ -197,12 +216,12 @@ async function main() {
     if (!built.hasContent) noDigest++;
 
     try {
-      await sendTelegramMessage(tg.chatId, built.text);
+      await sendTelegramMessage(verifiedChatId, built.text);
       sent++;
-      console.log(`  ✅ Sent → ${doc.id} (${name}) chat:${tg.chatId}`);
+      console.log(`  ✅ Sent → ${doc.id} (${name}) chat:${verifiedChatId}`);
     } catch (e) {
       if (e.skip) {
-        console.log(`  ⚠️  Skipped (blocked/not found) → ${doc.id} chat:${tg.chatId}: ${e.message}`);
+        console.log(`  ⚠️  Skipped (blocked/not found) → ${doc.id} chat:${verifiedChatId}: ${e.message}`);
         skipped++;
       } else {
         failed++;

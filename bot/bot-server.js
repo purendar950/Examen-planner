@@ -8,9 +8,12 @@
  *      planner To-Do list (via the user doc's `telegramInbox` field).
  *
  * Routes:
- *   GET  /            → health check
- *   POST /send        → proxy: sends a Telegram message server-side (CORS-safe)
- *   POST /send-photo  → proxy: relays a Turbo screenshot (base64 JPEG) via sendPhoto;
+ *   GET  /                       → health check
+ *   POST /telegram-link/start    → create Firebase-authenticated one-time link
+ *   POST /telegram-link/status   → verify chat ownership for signed-in user
+ *   POST /trial/start            → issue one trusted self-serve Pro trial
+ *   POST /send                   → admin-only Telegram message relay
+ *   POST /send-photo             → authenticated Pro screenshot relay;
  *                       routed to the user's group "📸 Images" topic if they ran
  *                       /setup, else to their private DM.
  *
@@ -32,6 +35,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 const http        = require('http');
 const https       = require('https');
+const crypto      = require('crypto');
 const { isProUser } = require('../shared/proGating');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -137,24 +141,107 @@ async function getAiConfig() {
   } catch (e) { return { enabled: false }; }
 }
 
-/** Find the connected user (uid + data) for a Telegram chat ID. */
+/** Find the connected user from the server-owned verified link. */
 async function findUserByChatId(chatId) {
   if (!db) return null;
   const cid = String(chatId);
-  /* Primary: users who pasted their chat ID in the app (source of truth). */
-  try {
-    const q = await db.collection('users').where('appState.telegram.chatId', '==', cid).limit(1).get();
-    if (!q.empty) { const d = q.docs[0]; return { uid: d.id, data: d.data() || {} }; }
-  } catch (e) { console.warn('⚠️  chatId query failed:', e.message); }
-  /* Fallback: the /start auto-link map. */
   try {
     const link = await db.collection('telegram_links').doc(cid).get();
-    if (link.exists && link.data().uid) {
-      const u = await db.collection('users').doc(link.data().uid).get();
-      if (u.exists) return { uid: u.id, data: u.data() || {} };
-    }
-  } catch (e) {}
+    const linkData = link.exists ? (link.data() || {}) : {};
+    const uid = linkData.verified === true && linkData.method === 'challenge-v1'
+      ? String(linkData.uid || '') : '';
+    if (!uid) return null;
+    const user = await db.collection('users').doc(uid).get();
+    if (user.exists) return { uid: user.id, data: user.data() || {} };
+  } catch (e) { console.warn('⚠️  verified Telegram link lookup failed:', e.message); }
   return null;
+}
+
+const TELEGRAM_LINK_TTL_MS = 10 * 60 * 1000;
+function telegramLinkChallengeId(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+async function createTelegramLinkChallenge(uid) {
+  if (!db || !global._fbAdmin || !uid) throw Object.assign(new Error('linking unavailable'), { status: 503 });
+  const token = crypto.randomBytes(24).toString('base64url');
+  await db.collection('telegram_link_challenges').doc(telegramLinkChallengeId(token)).set({
+    uid,
+    createdAt: global._fbAdmin.firestore.FieldValue.serverTimestamp(),
+    expiresAt: global._fbAdmin.firestore.Timestamp.fromMillis(Date.now() + TELEGRAM_LINK_TTL_MS)
+  });
+  return token;
+}
+
+async function consumeTelegramLinkChallenge(token, msg) {
+  const isPrivateOwnerChat = msg && msg.chat && msg.chat.type === 'private'
+    && msg.from && String(msg.from.id) === String(msg.chat.id);
+  if (!db || !global._fbAdmin || !isPrivateOwnerChat
+      || !/^[A-Za-z0-9_-]{32}$/.test(String(token || ''))) return null;
+  const challengeRef = db.collection('telegram_link_challenges').doc(telegramLinkChallengeId(token));
+  const chatId = String(msg.chat.id);
+  return db.runTransaction(async (tx) => {
+    const challenge = await tx.get(challengeRef);
+    if (!challenge.exists) return null;
+    const challengeData = challenge.data() || {};
+    const expiresAt = challengeData.expiresAt && challengeData.expiresAt.toMillis
+      ? challengeData.expiresAt.toMillis() : 0;
+    const uid = String(challengeData.uid || '');
+    if (!uid || expiresAt < Date.now()) {
+      tx.delete(challengeRef);
+      return null;
+    }
+    tx.set(db.collection('telegram_links').doc(chatId), {
+      uid,
+      username: (msg.from && msg.from.username) || '',
+      verified: true,
+      method: 'challenge-v1',
+      linkedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp()
+    });
+    tx.delete(challengeRef);
+    return uid;
+  });
+}
+
+async function verifiedTelegramChatForUid(uid, claimedChatId) {
+  const chatId = String(claimedChatId || '').trim();
+  if (!db || !uid || !/^-?\d+$/.test(chatId)) return '';
+  const link = await db.collection('telegram_links').doc(chatId).get();
+  const data = link.exists ? (link.data() || {}) : {};
+  return data.verified === true
+    && data.method === 'challenge-v1'
+    && String(data.uid || '') === String(uid) ? chatId : '';
+}
+
+async function issueSelfServeTrial(uid) {
+  if (!db || !global._fbAdmin || !uid) throw Object.assign(new Error('trial service unavailable'), { status: 503 });
+  const userRef = db.collection('users').doc(uid);
+  const now = new Date();
+  const expiresAtMs = now.getTime() + 7 * 86400000;
+  const expiry = new Date(expiresAtMs).toISOString().slice(0, 10);
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(userRef);
+    if (!snap.exists) throw Object.assign(new Error('user profile not found'), { status: 404 });
+    const data = snap.data() || {};
+    const profile = data.profile || {};
+    const appState = data.appState || {};
+    if ((profile.plan && profile.plan !== 'free') || profile.trialExpiry || profile.trialExpiresAt) {
+      throw Object.assign(new Error('This account already has Pro access or used its trial.'), { status: 409 });
+    }
+    if (profile.proTrialUsed || (appState.proTrial && appState.proTrial.startedAt) || appState.proTrialUsed) {
+      throw Object.assign(new Error('The free trial has already been used on this account.'), { status: 409 });
+    }
+    tx.set(userRef, {
+      profile: {
+        proTrialUsed: true,
+        proTrialStartedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp(),
+        trialExpiresAt: global._fbAdmin.firestore.Timestamp.fromMillis(expiresAtMs),
+        trialExpiry: expiry,
+        trialSource: 'self-serve-v1'
+      }
+    }, { merge: true });
+  });
+  return { startedAt: now.toISOString(), expiresAt: new Date(expiresAtMs).toISOString(), expiry, days: 7 };
 }
 
 /**
@@ -269,35 +356,38 @@ function photoRateLimited(chatId) {
    COMMAND HANDLERS
    ════════════════════════════════════════════════════════════════════════════ */
 
-/* ── /start handler — also auto-links the chat ID to the uid if provided ──── */
-bot.onText(/^\/start(?:\s+(.+))?$/, (msg, match) => {
+/* ── /start handler — consumes a one-time app-issued linking challenge ──── */
+bot.onText(/^\/start(?:\s+(.+))?$/, async (msg, match) => {
   const chatId = msg.chat.id;
   const name   = msg.from.first_name || 'Student';
-  const uid    = match && match[1] ? match[1].trim() : '';
+  const token  = match && match[1] ? match[1].trim() : '';
+  let linkedUid = null;
 
-  /* Best-effort reverse-link so the bot can find this user later. */
-  if (uid && db) {
-    db.collection('telegram_links').doc(String(chatId))
-      .set({ uid, username: msg.from.username || '', linkedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp() }, { merge: true })
-      .catch(e => console.warn('telegram_links write failed:', e.message));
+  if (token) {
+    try { linkedUid = await consumeTelegramLinkChallenge(token, msg); }
+    catch (error) { console.warn('Telegram link challenge failed:', error.message); }
   }
 
-  const aiLine = db
+  const linkLine = linkedUid
+    ? '✅ <b>Telegram securely linked to your StudyPlanner account.</b>\n\n'
+    : token
+      ? '⚠️ <b>This secure link is invalid or expired.</b> App mein Connect Telegram dobara dabao.\n\n'
+      : '🔒 Securely connect karne ke liye StudyPlanner app mein <b>Connect Telegram</b> dabao.\n\n';
+  const aiLine = linkedUid
     ? '\n\n🧠 <b>Naya!</b> Ab tum mujhe apna aaj ka task ya YouTube link bhej sakte ho — ' +
       'main use tumhare planner ki To-Do list mein add kar dunga (subject auto-detect karke).'
     : '';
 
   const text =
     `👋 Namaste <b>${name}</b>!\n\n` +
-    `✅ Bot se successfully connect ho gaye!\n\n` +
+    linkLine +
     `📋 <b>Tumhara Telegram Chat ID:</b>\n` +
     `<code>${chatId}</code>\n\n` +
-    `👆 Upar wala number <b>copy karo</b> aur StudyPlanner app mein:\n` +
-    `<b>Profile → Daily Plan on Telegram → Chat ID field</b> mein paste karo, toggle ON karo, Save karo.\n\n` +
-    `📚 Phir roz <b>6:00 AM IST</b> pe aaj ka study plan yahan milega!` +
+    `👆 Is number ko StudyPlanner ke Chat ID field mein paste karke notifications ON aur Save karo.\n\n` +
+    (linkedUid ? `📚 Phir roz <b>6:00 AM IST</b> pe aaj ka study plan yahan milega!` : '') +
     aiLine;
   bot.sendMessage(chatId, text, { parse_mode: 'HTML' })
-    .then(() => console.log(`✅ Sent chat ID to ${chatId} (${name})`))
+    .then(() => console.log(`${linkedUid ? '✅ Linked and replied' : 'ℹ️ Replied'} to chat ${chatId} (${name})`))
     .catch(err => console.error(`❌ sendMessage error for ${chatId}:`, err.message));
 });
 
@@ -608,7 +698,7 @@ async function requireFirebaseUser(req) {
   }
 }
 
-function telegramChatForUserData(userData) {
+function telegramChatClaimForUserData(userData) {
   const telegram = ((userData || {}).appState || {}).telegram;
   const chatId = telegram && String(telegram.chatId || '').trim();
   return /^-?\d+$/.test(chatId || '') ? chatId : '';
@@ -624,7 +714,7 @@ async function proRelayUser(uid) {
 }
 
 function telegramMediaDocId(uid, fileId) {
-  return require('crypto').createHash('sha256').update(uid + '\n' + fileId).digest('hex');
+  return crypto.createHash('sha256').update(uid + '\n' + fileId).digest('hex');
 }
 
 function telegramMediaSigningSecret() {
@@ -639,7 +729,7 @@ function telegramMediaSigningSecret() {
 
 function telegramMediaSignature(uid, fileId) {
   const secret = telegramMediaSigningSecret();
-  return require('crypto').createHmac('sha256', secret).update(uid + '\n' + fileId).digest('hex');
+  return crypto.createHmac('sha256', secret).update(uid + '\n' + fileId).digest('hex');
 }
 
 async function rememberTelegramMediaOwner(uid, fileId, source) {
@@ -686,6 +776,64 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('StudyPlanner Bot is alive 🤖');
+    return;
+  }
+
+  /* ── Secure Telegram account linking ──────────────────────────────────
+     Firebase-authenticated browser creates a short-lived random challenge;
+     only the Telegram account that sends that challenge back to this bot can
+     create the server-owned chatId → UID mapping. */
+  if (req.method === 'POST' && (
+    req.url === '/telegram-link/start'
+    || req.url === '/telegram-link/status'
+    || req.url === '/trial/start'
+  )) {
+    let body = '';
+    let bodyBytes = 0;
+    let aborted = false;
+    req.on('data', chunk => {
+      bodyBytes += chunk.length;
+      if (bodyBytes > 4096) {
+        aborted = true;
+        sendJson(res, 413, { ok: false, error: 'request too large' });
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
+    req.on('end', async () => {
+      if (aborted) return;
+      try {
+        const actor = await requireFirebaseUser(req);
+        if (req.url === '/trial/start') {
+          if (rateLimited('trial:' + actor.uid)) {
+            throw Object.assign(new Error('Too many trial attempts. Try again in a minute.'), { status: 429 });
+          }
+          const trial = await issueSelfServeTrial(actor.uid);
+          sendJson(res, 200, { ok: true, trial });
+          return;
+        }
+        if (req.url === '/telegram-link/start') {
+          if (rateLimited('link:' + actor.uid)) {
+            throw Object.assign(new Error('Too many link attempts. Try again in a minute.'), { status: 429 });
+          }
+          const token = await createTelegramLinkChallenge(actor.uid);
+          sendJson(res, 200, {
+            ok: true,
+            url: `https://t.me/SSCplannerbot?start=${encodeURIComponent(token)}`,
+            expiresInSeconds: TELEGRAM_LINK_TTL_MS / 1000
+          });
+          return;
+        }
+
+        const payload = body ? JSON.parse(body) : {};
+        const chatId = String(payload.chatId || '').trim();
+        const verified = !!(await verifiedTelegramChatForUid(actor.uid, chatId));
+        sendJson(res, 200, { ok: true, verified });
+      } catch (error) {
+        sendJson(res, error.status || 400, { ok: false, error: error.message || 'linking failed' });
+      }
+    });
     return;
   }
 
@@ -779,8 +927,9 @@ const server = http.createServer((req, res) => {
         const actor = await requireFirebaseUser(req);
         const relayUser = await proRelayUser(actor.uid);
         const { imageBase64, caption } = JSON.parse(body);
-        const chatId = telegramChatForUserData(relayUser);
-        if (!chatId) throw Object.assign(new Error('Connect a Telegram chat in your profile first'), { status: 400 });
+        const claimedChatId = telegramChatClaimForUserData(relayUser);
+        const chatId = await verifiedTelegramChatForUid(actor.uid, claimedChatId);
+        if (!chatId) throw Object.assign(new Error('Securely link this Telegram chat in your profile first'), { status: 400 });
         if (typeof imageBase64 !== 'string' || !imageBase64) {
           throw Object.assign(new Error('imageBase64 is required'), { status: 400 });
         }

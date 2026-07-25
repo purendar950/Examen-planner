@@ -25,19 +25,12 @@ handleRegister = async function() {
   const fp = ezFingerprint();
   const ip = await ezGetIp();
 
-  /* ── localStorage-only fallback (no Firebase) ── */
-  if (!_fbReady) {
-    const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-    if (users[email]) { showAuthError('reg', 'Email already registered.'); btn.disabled = false; btn.textContent = 'Create Account →'; return; }
-    const deviceUsed = Object.values(users).some(u => u.profile && u.profile.fp === fp);
-    // FIX: approve regardless of device; deviceDuplicate is only an admin flag.
-    const regStatus  = 'approved';
-    users[email] = { name, password: btoa(pass), uid: email, state: getDefaultState(),
-      profile: { name, email, mobile, examTarget: examT, status: regStatus, plan: 'free', fp, ip, deviceDuplicate: deviceUsed } };
-    localStorage.setItem('ssc_users', JSON.stringify(users));
+  /* Authentication fails closed if Firebase is unavailable. Local-only
+     accounts previously stored recoverable passwords and full schedules in
+     localStorage, so they are intentionally no longer supported. */
+  if (!_fbReady || !auth || !db) {
+    showAuthError('reg', 'Secure registration is temporarily unavailable. Please try again later.');
     btn.disabled = false; btn.textContent = 'Create Account →';
-    _afterRegisterRedirect(email);
-    _ezShowRegBanner(regStatus);
     return;
   }
 
@@ -113,19 +106,19 @@ loginUser = function(email, name, uid, state) {
 
 async function ezCheckApproval(uid, email) {
   if (await ezIsAdmin(uid)) return; // Firestore admins/{uid} role check
+  if (!_fbReady || !db) {
+    ezShowGate('unavailable', 'Secure account verification is temporarily unavailable.');
+    return;
+  }
   let status = 'approved', reason = '';
-  if (_fbReady && db) {
-    try {
-      const snap = await db.collection('users').doc(uid).get();
-      const p = (snap.exists && snap.data().profile) || {};
-      status = p.status || 'approved'; // existing users without status stay approved
-      reason = p.rejectReason || '';
-    } catch(e) { return; }
-  } else {
-    try {
-      const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-      status = (users[email] && users[email].profile && users[email].profile.status) || 'approved';
-    } catch(e) { return; }
+  try {
+    const snap = await db.collection('users').doc(uid).get();
+    const p = (snap.exists && snap.data().profile) || {};
+    status = p.status || 'approved'; // existing users without status stay approved
+    reason = p.rejectReason || '';
+  } catch(e) {
+    ezShowGate('unavailable', 'Could not verify account access. Reconnect and sign in again.');
+    return;
   }
   const old = document.getElementById('ez-gate');
   if (status === 'approved') { if (old) old.remove(); return; }
@@ -141,12 +134,15 @@ function ezShowGate(status, reason) {
     document.body.appendChild(ov);
   }
   const pending = status === 'pending';
+  const unavailable = status === 'unavailable';
   ov.innerHTML = '<div style="max-width:420px;width:100%;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:2rem;text-align:center;">' +
-    '<div style="font-size:2.5rem;margin-bottom:0.75rem;">' + (pending ? '⏳' : '🚫') + '</div>' +
-    '<h2 style="margin-bottom:0.5rem;">' + (pending ? 'Approval Pending' : 'Access Denied') + '</h2>' +
+    '<div style="font-size:2.5rem;margin-bottom:0.75rem;">' + (pending ? '⏳' : unavailable ? '🔒' : '🚫') + '</div>' +
+    '<h2 style="margin-bottom:0.5rem;">' + (pending ? 'Approval Pending' : unavailable ? 'Verification unavailable' : 'Access Denied') + '</h2>' +
     '<p style="color:var(--muted);line-height:1.7;margin-bottom:1.5rem;font-size:0.875rem;">' +
     (pending
       ? 'Aapki request admin ke paas pahunch gayi hai. Approval milte hi aap StudyPlanner use kar paoge. Thodi der baad dobara login karke check karo.'
+      : unavailable
+      ? escapeHtml(reason || 'Secure account verification failed. Reconnect and try again.')
       : 'Aapki request approve nahi hui.' + (reason ? '<br><br><strong>Reason:</strong> ' + escapeHtml(reason) : '')) +
     '</p>' +
     '<button onclick="ezGateLogout()" style="background:var(--accent);color:#000;border:none;border-radius:8px;padding:0.7rem 1.6rem;font-weight:700;cursor:pointer;font-family:var(--font);">← Logout</button>' +

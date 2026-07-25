@@ -231,12 +231,17 @@ async function verifyPayment(id) {
     }
   }
   const pl = PLANS.find(x => x.id === p.planId);
+  if (!pl) {
+    showToast('Payment blocked: submitted plan is missing or invalid.', 'error');
+    await adminLog('reject_invalid_payment_plan', p.uid, { paymentId: id, submittedPlanId: p.planId || '', submittedPlanName: p.planName || '' });
+    return;
+  }
   await db.collection('payments').doc(id).update({ status: 'verified', verifiedAt: firebase.firestore.FieldValue.serverTimestamp() });
   if (p.uid) {
-    const exp = new Date(Date.now() + ((pl && pl.days) || 30) * 86400000).toISOString().slice(0, 10);
-    await db.collection('users').doc(p.uid).update({ 'profile.plan': (pl && pl.name) || p.planName || 'Pro', 'profile.planId': p.planId || '', 'profile.planExpiry': exp });
+    const exp = new Date(Date.now() + (pl.days || 30) * 86400000).toISOString().slice(0, 10);
+    await db.collection('users').doc(p.uid).update({ 'profile.plan': pl.name, 'profile.planId': pl.id, 'profile.planExpiry': exp });
   }
-  await adminLog('verify_payment', p.uid, { paymentId: id, txnId: p.txnId, plan: (pl && pl.name) || p.planName, amount: p.amount });
+  await adminLog('verify_payment', p.uid, { paymentId: id, txnId: p.txnId, plan: pl.name, amount: p.amount });
   await loadAll(); render();
 }
 async function declinePayment(id) {

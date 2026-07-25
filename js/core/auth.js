@@ -17,15 +17,11 @@ async function handleLogin() {
   btn.disabled = true; btn.textContent = 'Signing in...';
   document.getElementById('login-error').style.display = 'none';
 
-  if (!_fbReady) {
-    // localStorage fallback
-    const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-    if (!users[email] || users[email].password !== btoa(pass)) {
-      showAuthError('login', 'Invalid email or password.');
-      btn.disabled = false; btn.textContent = 'Sign In →';
-      return;
-    }
-    loginUser(email, users[email].name, users[email].uid || email, users[email].state || {});
+  if (!_fbReady || !auth) {
+    // Authentication must fail closed. The removed legacy fallback stored
+    // recoverable passwords and complete schedules in localStorage.
+    showAuthError('login', 'Secure sign-in is temporarily unavailable. Please check your connection and try again.');
+    btn.disabled = false; btn.textContent = 'Sign In →';
     return;
   }
 
@@ -80,15 +76,11 @@ async function handleRegister() {
   btn.disabled = true; btn.textContent = 'Creating account...';
   document.getElementById('reg-error').style.display = 'none';
 
-  if (!_fbReady) {
-    // localStorage fallback
-    const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-    if (users[email]) { showAuthError('reg', 'Email already registered.'); btn.disabled=false; btn.textContent='Create Account →'; return; }
-    users[email] = { name, password: btoa(pass), uid: email, state: getDefaultState() };
-    localStorage.setItem('ssc_users', JSON.stringify(users));
+  if (!_fbReady || !auth || !db) {
+    // Never create local-only accounts: they cannot be authenticated securely
+    // and the former fallback exposed passwords and schedules to same-origin JS.
+    showAuthError('reg', 'Secure registration is temporarily unavailable. Please try again later.');
     btn.disabled = false; btn.textContent = 'Create Account →';
-    _afterRegisterRedirect(email);
-    _ezShowRegBanner(regStatus);
     return;
   }
 
@@ -223,32 +215,52 @@ async function handleLogout() {
   window._ezLoggingOut = true;
 
   // Give immediate feedback instead of leaving the open dashboard looking
-  // interactive while the Firebase session is being revoked.
+  // interactive while the final sync and Firebase sign-out complete.
   const overlay = document.getElementById('auth-loading');
   if (overlay) {
-    overlay.innerHTML = '<div class="yt-loader" style="width:36px;height:36px;border-width:4px;"></div><p>Signing out...</p>';
+    overlay.innerHTML = '<div class="yt-loader" style="width:36px;height:36px;border-width:4px;"></div><p>Securing your data and signing out...</p>';
     overlay.style.display = 'flex';
   }
   const menu = document.getElementById('user-menu-dropdown');
   if (menu) menu.classList.remove('open');
 
-  /* Persist the final state to the UID-keyed local cache synchronously, then
-     give Firestore a short acknowledgement window before revoking Firebase
-     credentials. If the network is slow/offline, the durable pending marker
-     replays this exact UID cache on the next login instead of hanging logout
-     or allowing an older cloud snapshot to overwrite the last edit. */
-  if (currentUser && currentUser.uid) {
-    const logoutUid = currentUser.uid;
+  const logoutUid = currentUser && currentUser.uid;
+  // Freeze the user's state at the instant logout begins. The overlay prevents
+  // further user edits; background timers/snapshots after this point are not
+  // part of the logout transaction and cannot invalidate its save receipt.
+  let logoutStateJSON = null;
+  try { if (logoutUid) logoutStateJSON = JSON.stringify(appState); } catch (e) {}
+  let finalSaveConfirmed = !logoutUid;
+
+  /* Keep the cache only while the account is signed in. Before logout, require
+     either a completed cloud save or explicit consent to discard unsynced
+     edits. This prevents a silent data loss while guaranteeing that a signed-
+     out shared device does not retain the previous student's schedule. */
+  if (logoutUid) {
     try { clearTimeout(_saveDebounce); } catch (e) {}
-    try { localStorage.setItem('cache_' + logoutUid, JSON.stringify(appState)); } catch (e) {}
+    try { localStorage.setItem('cache_' + logoutUid, logoutStateJSON || JSON.stringify(appState)); } catch (e) {}
     try { if (typeof _markPendingSync === 'function') _markPendingSync(logoutUid); } catch (e) {}
     try {
-      const finalSave = Promise.resolve(saveProgressNow());
-      await Promise.race([
-        finalSave,
-        new Promise(function(resolve) { setTimeout(resolve, 1000); })
+      finalSaveConfirmed = await Promise.race([
+        saveProgressNow(logoutStateJSON),
+        new Promise(function(resolve) { setTimeout(function() { resolve(false); }, 4000); })
       ]);
-    } catch (e) {}
+    } catch (e) {
+      finalSaveConfirmed = false;
+    }
+
+    if (!finalSaveConfirmed) {
+      const discard = window.confirm(
+        'Your latest changes could not be confirmed in the cloud.\n\n' +
+        'Choose OK to discard unsynced local changes and sign out securely, or Cancel to stay signed in and retry later.'
+      );
+      if (!discard) {
+        window._ezLoggingOut = false;
+        if (overlay) overlay.style.display = 'none';
+        showToast('Sign-out cancelled. Reconnect and try again after sync completes.', 'info');
+        return;
+      }
+    }
   }
 
   // Redirecting before signOut completes can make the landing page see the
@@ -266,9 +278,15 @@ async function handleLogout() {
   if (_snapshotUnsub) { try { _snapshotUnsub(); } catch(e) {} _snapshotUnsub = null; }
   currentUser = null;
 
-  /* Clear the engine identity bridge so the next user on this device does not
-     inherit the previous user's saved-questions / attempt tagging. */
+  /* Remove all application-managed identity, schedule, and pending-sync data
+     for this account. Firebase Auth remains the only credential store. */
   try {
+    if (typeof clearLocalUserData === 'function') clearLocalUserData(logoutUid);
+    else if (logoutUid) {
+      localStorage.removeItem('cache_' + logoutUid);
+      localStorage.removeItem('pending_sync_' + logoutUid);
+    }
+    localStorage.removeItem('ssc_users');
     localStorage.removeItem('ez_user_uid');
     localStorage.removeItem('ez_user_email');
     localStorage.removeItem('ez_user_name');
@@ -610,6 +628,16 @@ if (auth && !_isBadProtocol) {
       _pendingRedirect = setTimeout(function() {
         _pendingRedirect = null;
         if (auth.currentUser) return; // a session arrived — do NOT log out
+        // The null state persisted through the full grace period, so this is a
+        // real auth-boundary transition (remote revocation/direct sign-out),
+        // not the brief hydration null handled above. Remove the old account's
+        // local schedule before redirecting a shared device to login.
+        try {
+          if (currentUser && currentUser.uid && typeof clearLocalUserData === 'function') {
+            clearLocalUserData(currentUser.uid);
+          }
+        } catch (e) {}
+        currentUser = null;
         // Give the user a final in-page nudge before the bounce so they
         // understand what's happening (especially helpful on the rare slow
         // hydrate where the cross-page hint expired). The auth screen will

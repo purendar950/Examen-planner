@@ -18,18 +18,24 @@
  * A user is Pro if ANY of:
  *   1. profile.plan is a paid plan (not "free") and not expired.
  *      Lifetime plans (name contains "lifetime") never expire.
- *   2. profile.trialExpiry is set (admin-granted trial, admin-only-writable
- *      field so it's trusted), not suspended, and not yet expired.
- *   3. appState.proTrial (self-serve 7-day trial, stored in user-writable
- *      appState) is active, not suspended, and its claimed expiry does not
- *      exceed startedAt + 8 days (7 days + 1 grace day) — a tamper guard
- *      against a user hand-editing their trial expiry in Firestore/localStorage.
+ *   2. profile.trialExpiry is set by trusted server/admin code, not suspended,
+ *      and not yet expired. Self-serve trials are issued through /trial/start.
+ *   3. A legacy appState.proTrial is accepted only until its original expiry,
+ *      with strict date bounds; current Firestore rules make it immutable.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
 /** True if a plan name should be treated as never-expiring. */
 function isLifetimePlan(planName) {
   return !!(planName && String(planName).toLowerCase().includes('lifetime'));
+}
+
+function timestampMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
 }
 
 /**
@@ -51,7 +57,11 @@ function isProUser(userData, today) {
     if (profile.planExpiry && profile.planExpiry >= today) return true;
   }
 
-  /* 2. Admin-granted trial — admin-only-writable field, trusted as-is. */
+  /* 2. Trusted profile trial (admin grant or authenticated /trial/start).
+     Self-serve issuance uses an absolute timestamp; date-only admin grants
+     retain the caller-provided calendar semantics for compatibility. */
+  const trustedTrialExpiry = timestampMillis(profile.trialExpiresAt);
+  if (trustedTrialExpiry && !profile.trialSuspended && trustedTrialExpiry >= Date.now()) return true;
   if (profile.trialExpiry && !profile.trialSuspended && profile.trialExpiry >= today) return true;
 
   /* 3. Self-serve trial in user-writable appState — guard against tampering.

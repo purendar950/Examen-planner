@@ -3,6 +3,7 @@
 ══════════════════════════════════════════════ */
 let _saveDebounce = null;
 let _lastSavedJSON = '';
+let _lastSavedUid = null;
 let _localDirty = false; // true when there are local edits not yet written to Firestore
 function _pendingSyncKey(uid) { return 'pending_sync_' + uid; }
 function _markPendingSync(uid) {
@@ -16,6 +17,18 @@ function _clearPendingSync(uid) {
 function hasPendingSync(uid) {
   if (!uid) return false;
   try { return localStorage.getItem(_pendingSyncKey(uid)) === '1'; } catch(e) { return false; }
+}
+
+/* Remove all application-managed schedule data for one signed-out account.
+   Keeping this in the persistence layer makes the account boundary explicit
+   and prevents a later shared-device user (or ordinary same-origin page) from
+   reading the previous student's cached planner. */
+function clearLocalUserData(uid) {
+  if (!uid) return;
+  try {
+    localStorage.removeItem('cache_' + uid);
+    localStorage.removeItem(_pendingSyncKey(uid));
+  } catch (e) {}
 }
 
 /* ── Storage backend ──
@@ -90,17 +103,18 @@ function _describeSyncError(e) {
   return code || msg || 'unknown error';
 }
 
-async function saveProgressNow() {
-  if (!currentUser || !_fbReady || !db) return;
+async function saveProgressNow(fixedStateJSON) {
+  if (!currentUser || !_fbReady || !db) return false;
   const saveUid = currentUser.uid;
-  const json = JSON.stringify(appState);
+  const hasFixedSnapshot = typeof fixedStateJSON === 'string';
+  const json = hasFixedSnapshot ? fixedStateJSON : JSON.stringify(appState);
   const stateToSave = JSON.parse(json);
-  if (json === _lastSavedJSON) {
+  if (_lastSavedUid === saveUid && json === _lastSavedJSON) {
     _localDirty = false;
     _clearPendingSync(saveUid);
     setSyncStatus('', '');
-    return;
-  } // Nothing changed
+    return true;
+  } // Nothing changed for this exact account
 
   /* Pre-flight size guard. If the serialized state is over the Firestore
      per-document limit, the write is guaranteed to fail — so surface a
@@ -115,7 +129,7 @@ async function saveProgressNow() {
       + ' Trim large data (playlists / handwritten Focus marks / video notes).');
     setSyncStatus('error', '⚠ Data too large to sync');
     setTimeout(() => setSyncStatus('', ''), 6000);
-    return;
+    return false;
   }
   if (bytes >= FIRESTORE_DOC_WARN) {
     console.warn('[sync] appState is ' + bytes + ' bytes (~'
@@ -135,23 +149,28 @@ async function saveProgressNow() {
     }
 
     _lastSavedJSON = json;
+    _lastSavedUid = saveUid;
     if (currentUser && currentUser.uid !== saveUid) {
       // This account is no longer active. Its write succeeded, but must not
       // mutate the new account's in-memory dirty flag.
       _clearPendingSync(saveUid);
-    } else if (currentUser && JSON.stringify(appState) !== json) {
+    } else if (!hasFixedSnapshot && currentUser && JSON.stringify(appState) !== json) {
       // Edits made while this write was in flight are still pending. Never let
-      // an older completion clear their durable marker; queue the newest state.
+      // an older completion clear their durable marker; queue the newest state
+      // and report that the exact current revision is not yet durable.
       _localDirty = true;
       _markPendingSync(saveUid);
       clearTimeout(_saveDebounce);
       _saveDebounce = setTimeout(() => saveProgressNow(), 250);
+      setSyncStatus('saving', '⏳ Saving latest changes...');
+      return false;
     } else {
       _localDirty = false;
       _clearPendingSync(saveUid);
     }
     setSyncStatus('saved', '☁ Saved');
     setTimeout(() => setSyncStatus('', ''), 2500);
+    return true;
   } catch(e) {
     if (!currentUser || currentUser.uid === saveUid) _localDirty = true;
     _markPendingSync(saveUid);
@@ -161,6 +180,7 @@ async function saveProgressNow() {
     console.error('[sync] Firestore write failed: ' + reason, e);
     setSyncStatus('error', '⚠ Sync failed');
     setTimeout(() => setSyncStatus('', ''), 4000);
+    return false;
   }
 }
 

@@ -1,16 +1,25 @@
 /* ══════════════════════════════════════════════
    PREPPATH PHASE 5 — 7-DAY TRIAL, WEEKLY/MONTHLY GATING, PDF EXPORT
-   NOTE: the 7-day trial is stored in appState.proTrial because Firestore
-   rules make profile.trialExpiry admin-only. appState is user-writable and
-   syncs via saveProgress().
+   Self-serve trials are issued by the authenticated backend into protected
+   profile fields. Legacy appState trials remain readable until they expire,
+   but the browser can no longer create or reset entitlement state.
 ══════════════════════════════════════════════ */
 
-/* ── Self-serve 7-day Pro trial (stored in appState) ──
-   The tamper-guard logic in ezIsProTrialActive() below is mirrored
-   server-side in shared/proGating.js (used by the bot + daily Telegram
-   sender). Keep both in sync if you change the trial rules. ── */
+/* ── Self-serve 7-day Pro trial ── */
 function ezProTrialExpiry() {
+  if (typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE && EZ_PROFILE.trialExpiry) return EZ_PROFILE.trialExpiry;
   return (appState && appState.proTrial && appState.proTrial.expiry) ? appState.proTrial.expiry : null;
+}
+function ezTrialExpiresAtMillis() {
+  var value = typeof EZ_PROFILE !== 'undefined' && EZ_PROFILE && EZ_PROFILE.trialExpiresAt;
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  var parsed = new Date(value).getTime();
+  return isNaN(parsed) ? 0 : parsed;
+}
+function ezTodayIST() {
+  return new Date(Date.now() + (5 * 60 + 30) * 60000).toISOString().slice(0, 10);
 }
 function ezIsProTrialActive() {
   // If profile hasn't loaded from Firestore yet, deny trial access.
@@ -19,6 +28,11 @@ function ezIsProTrialActive() {
   // Admin can suspend any trial by setting profile.trialSuspended = true
   // (admin-only writable field). Blocks access immediately on next snapshot.
   if (EZ_PROFILE.trialSuspended) return false;
+  // Backend-issued self-serve trial uses an absolute server timestamp.
+  var trustedExpiryMs = ezTrialExpiresAtMillis();
+  if (trustedExpiryMs) return trustedExpiryMs >= Date.now();
+  // Legacy/admin date-only grants use the same IST calendar as backend gates.
+  if (EZ_PROFILE.trialExpiry) return EZ_PROFILE.trialExpiry >= ezTodayIST();
   var exp = ezProTrialExpiry();
   if (!exp) return false;
   // FIX (Bug 3) + SECURITY FIX: Tamper guard — mirrors shared/proGating.js.
@@ -48,41 +62,49 @@ function ezProTrialUsed() {
   return false;
 }
 function ezProTrialDaysLeft() {
+  var trustedExpiryMs = ezTrialExpiresAtMillis();
+  if (trustedExpiryMs) return Math.max(0, Math.ceil((trustedExpiryMs - Date.now()) / 86400000));
   var exp = ezProTrialExpiry();
   if (!exp) return 0;
-  return Math.max(0, Math.ceil((new Date(exp + 'T23:59:59') - new Date()) / 86400000));
+  return Math.max(0, Math.ceil((new Date(exp + 'T23:59:59+05:30') - new Date()) / 86400000));
 }
-function ezStartProTrial() {
+async function ezStartProTrial() {
   if (!currentUser) { showToast('Pehle account banao/login karo.', 'error'); return; }
-  // Once per account: don't grant until we authoritatively know this account's
-  // trial history. If the profile/appState hasn't loaded yet (offline, mid-load
-  // or a cleared cache), granting now could RESET a trial the account already
-  // used. EZ_PROFILE is null only during that load window, so wait for it.
   if (typeof ezEntitlementDisplayPending === 'function' ? ezEntitlementDisplayPending() : (typeof EZ_PROFILE === 'undefined' || EZ_PROFILE === null)) {
     showToast('Profile load ho raha hai — ek second baad try karo.', 'info'); return;
   }
   if (ezProTrialUsed()) { showToast('Free trial pehle hi use ho chuka hai — ek account pe ek hi baar milta hai.', 'error'); return; }
   if (typeof ezIsPro === 'function' && ezIsPro()) { showToast('Aap already Pro ho 🎉', 'info'); return; }
-  var today = new Date();
-  var exp = new Date(today.getTime() + 7 * 86400000);
-  appState.proTrial = { startedAt: today.toISOString(), expiry: exp.toISOString().slice(0, 10), days: 7 };
-  appState.proTrialUsed = true; // durable flag — survives even if proTrial obj is cleared
-  try { saveProgress(); } catch(e) {}
-  // Best-effort: also stamp the profile doc so the "used" marker survives an
-  // appState reset/clear on another device. Silently ignored if Firestore
-  // rules disallow the profile write — the appState flag still enforces it.
+
+  var btn = document.getElementById('ez-start-trial-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting secure trial...'; }
   try {
-    if (_fbReady && db && currentUser && currentUser.uid) {
-      db.collection('users').doc(currentUser.uid)
-        .update({ 'profile.proTrialUsed': true, 'profile.proTrialStartedAt': appState.proTrial.startedAt })
-        .catch(function() {});
+    var backend = 'https://examen-planner-2.onrender.com';
+    var idToken = await getFirebaseIdToken(true);
+    var response = await fetch(backend + '/trial/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + idToken },
+      body: '{}'
+    });
+    var result = await response.json().catch(function() { return {}; });
+    if (!response.ok || !result.ok || !result.trial) throw new Error(result.error || 'Could not start trial');
+
+    // Do not grant browser entitlement from an HTTP payload. Re-read the
+    // protected Firestore profile from the server and use that authoritative
+    // document—the same state consumed by backend Pro gates.
+    var profileSnap = await db.collection('users').doc(currentUser.uid).get({ source: 'server' });
+    var trustedProfile = profileSnap.exists ? ((profileSnap.data() || {}).profile || {}) : {};
+    if (!trustedProfile.proTrialUsed || !trustedProfile.trialExpiresAt) {
+      throw new Error('Trial was issued but could not be verified. Refresh and try again.');
     }
-  } catch(e) {}
-  showToast('🎉 7-din ka Pro trial shuru! Saare Pro features unlock.', 'success');
-  try { var ov = document.getElementById('ez-upgrade-overlay'); if (ov) ov.classList.remove('open'); } catch(e) {}
-  // FIX 8: Use ezRefreshGates() instead of calling individual lock functions —
-  // it re-applies ALL gates, re-renders the active page, and updates the plan badge.
-  try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+    EZ_PROFILE = trustedProfile;
+    showToast('🎉 7-din ka Pro trial shuru! Saare Pro features unlock.', 'success');
+    try { var ov = document.getElementById('ez-upgrade-overlay'); if (ov) ov.classList.remove('open'); } catch(e) {}
+    try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
+  } catch (error) {
+    showToast(error.message || 'Trial start failed. Please try again.', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🎁 Start 7-day free Pro trial'; }
+  }
 }
 
 /* Extend ezIsPro to also honor the self-serve trial (without losing the
