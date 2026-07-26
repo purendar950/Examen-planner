@@ -153,6 +153,35 @@ function _syncErrorLabel(e) {
   return short ? '⚠ Sync failed (' + short + ')' : '⚠ Sync failed';
 }
 
+/* Firestore rejects any array whose elements are themselves arrays
+   ("Nested arrays are not supported"). AI Notes Focus stores each stroke
+   point as a plain [x, y] pair (see notesFocusPoint() in ai-tutor.js), so
+   focusMarks.<key>.strokes[].points is Array<[number, number]> — a direct
+   nested array. The moment any stroke exists, EVERY write of the whole
+   appState document throws a silent invalid-argument, so sync fails
+   permanently (not just for handwriting — for everything, since it's all
+   one document). This produces a Firestore-safe clone (points as {x, y}
+   objects) for the write only; the in-memory/local-cache state that the
+   canvas code indexes as points[i][0]/points[i][1] is left untouched. */
+function _firestoreSafeFocusMarks(focusMarks) {
+  if (!focusMarks || typeof focusMarks !== 'object') return focusMarks;
+  const out = {};
+  for (const key in focusMarks) {
+    const entry = focusMarks[key];
+    if (!entry || !Array.isArray(entry.strokes)) { out[key] = entry; continue; }
+    out[key] = Object.assign({}, entry, {
+      strokes: entry.strokes.map(function(s) {
+        return Object.assign({}, s, {
+          points: Array.isArray(s.points)
+            ? s.points.map(function(p) { return Array.isArray(p) ? { x: p[0], y: p[1] } : p; })
+            : s.points
+        });
+      })
+    });
+  }
+  return out;
+}
+
 async function saveProgressNow() {
   if (!currentUser) return;
   const saveUid = currentUser.uid;
@@ -213,11 +242,16 @@ async function saveProgressNow() {
 
   try {
     const svc = _storageService();
+    // Only the Firestore write needs the sanitized shape — local cache/queue
+    // writes above already used stateToSave as-is.
+    const firestorePayload = Object.assign({}, stateToSave, {
+      focusMarks: _firestoreSafeFocusMarks(stateToSave.focusMarks)
+    });
     if (svc) {
-      await svc.saveUserState(saveUid, stateToSave);
+      await svc.saveUserState(saveUid, firestorePayload);
     } else {
       await db.collection('users').doc(saveUid).set({
-        appState: stateToSave,
+        appState: firestorePayload,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       }, { merge: true });
     }
