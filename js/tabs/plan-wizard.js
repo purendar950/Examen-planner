@@ -42,7 +42,9 @@ function openPlanWizard() {
   /* Default practice subjects to all */
   if (!PW_STATE.practice.subjects.length) PW_STATE.practice.subjects = subs.map(s => s.id);
 
-  document.getElementById('plan-wizard-overlay').classList.add('open');
+  const overlay = document.getElementById('plan-wizard-overlay');
+  if (window.StudyPlannerDialog) window.StudyPlannerDialog.open(overlay);
+  else overlay.classList.add('open');
   pwGoToStep(1);
   pwRenderSyllabusSubTabs();
   pwRenderSyllabusSubjectPane();
@@ -65,14 +67,18 @@ function openSinglePlanForSubject(subId) {
   if (subId && subs.some(s => s.id === subId)) PW_STATE.syllabus.subId = subId;
   /* Reflect the choice in the Step-1 type grid. */
   document.querySelectorAll('#pw-type-grid .plan-type-card').forEach(c => {
-    c.classList.toggle('selected', c.dataset.type === 'single');
+    const selected = c.dataset.type === 'single';
+    c.classList.toggle('selected', selected);
+    c.setAttribute('aria-checked', selected ? 'true' : 'false');
   });
   /* Type + subject are chosen — jump straight to the config step. */
   pwGoToStep(2);
 }
 
 function closePlanWizard() {
-  document.getElementById('plan-wizard-overlay').classList.remove('open');
+  const overlay = document.getElementById('plan-wizard-overlay');
+  if (window.StudyPlannerDialog) window.StudyPlannerDialog.close(overlay);
+  else overlay.classList.remove('open');
   /* Drop any in-progress edit so the next wizard run creates a fresh plan. */
   if (PW_STATE) PW_STATE._editingId = null;
 }
@@ -83,12 +89,7 @@ function planWizardOutsideClose(e) {
      The wizard closes only via the × button (closePlanWizard) or the Escape key. */
 }
 
-/* Allow Escape to close the wizard (keyboard-friendly, still deliberate). */
-document.addEventListener('keydown', function(e) {
-  if (e.key !== 'Escape') return;
-  const ov = document.getElementById('plan-wizard-overlay');
-  if (ov && ov.classList.contains('open')) closePlanWizard();
-});
+/* Escape handling and focus trapping are provided by StudyPlannerDialog. */
 
 /* Sync DOM inputs ←→ state (when opening wizard) */
 function pwSyncInputsFromState() {
@@ -142,6 +143,8 @@ function pwGoToStep(n) {
     const s = Number(el.dataset.step);
     el.classList.toggle('active', s === n);
     el.classList.toggle('done',   s <  n);
+    if (s === n) el.setAttribute('aria-current', 'step');
+    else el.removeAttribute('aria-current');
   });
   document.querySelectorAll('.plan-step-pane').forEach(el => el.classList.remove('active'));
   if (n === 1) document.getElementById('pw-step-1').classList.add('active');
@@ -150,8 +153,8 @@ function pwGoToStep(n) {
   /* Footer */
   document.getElementById('pw-btn-back').style.visibility = n === 1 ? 'hidden' : 'visible';
   const next = document.getElementById('pw-btn-next');
-  if (n === 3) next.textContent = '🚀 Generate';
-  else         next.textContent = 'Next →';
+  if (n === 3) next.textContent = 'Generate plan';
+  else         next.textContent = 'Continue';
   pwUpdateFooter();
 }
 
@@ -220,8 +223,11 @@ function pwNext() {
 /* ── Step 1: Plan type selection ── */
 function pwSelectType(type, el) {
   PW_STATE.type = type;
-  document.querySelectorAll('#pw-type-grid .plan-type-card').forEach(c => c.classList.remove('selected'));
-  if (el) el.classList.add('selected');
+  document.querySelectorAll('#pw-type-grid .plan-type-card').forEach(c => {
+    const selected = c === el;
+    c.classList.toggle('selected', selected);
+    c.setAttribute('aria-checked', selected ? 'true' : 'false');
+  });
   pwUpdateFooter();
 }
 

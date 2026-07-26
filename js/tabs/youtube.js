@@ -1456,12 +1456,19 @@ function chLinkOpen(chId, chName) {
   document.getElementById('ch-link-input').value = existing ? existing.url : '';
   document.getElementById('ch-link-err').classList.remove('show');
   document.getElementById('ch-link-remove-btn').style.display = existing ? 'block' : 'none';
-  document.getElementById('ch-link-overlay').classList.add('open');
-  setTimeout(() => document.getElementById('ch-link-input').focus(), 80);
+  const overlay = document.getElementById('ch-link-overlay');
+  if (window.StudyPlannerDialog) {
+    window.StudyPlannerDialog.open(overlay, { initialFocus: '#ch-link-input' });
+  } else {
+    overlay.classList.add('open');
+    setTimeout(() => document.getElementById('ch-link-input').focus(), 80);
+  }
 }
 
 function chLinkClose() {
-  document.getElementById('ch-link-overlay').classList.remove('open');
+  const overlay = document.getElementById('ch-link-overlay');
+  if (window.StudyPlannerDialog) window.StudyPlannerDialog.close(overlay);
+  else overlay.classList.remove('open');
   chLinkCurrentId = null; chLinkCurrentName = null;
 }
 

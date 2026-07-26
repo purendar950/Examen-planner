@@ -10,9 +10,11 @@
     "prebuild": "npm run vendor:sync",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "check": "node --check js/core/persistence.js && node --check scripts/sync-vendor-assets.mjs && node --check vite.config.mjs"
+    "check": "node --check js/core/auth.js && node --check js/core/dialog.js && node --check js/core/offline.js && node --check js/core/persistence.js && node --check js/planner-enhance.js && node --check js/tabs/plan-wizard.js && node --check js/tabs/youtube.js && node --check src/shared/offlineStore.js && node --check src/shared/storageService.js && node --check scripts/sync-vendor-assets.mjs && node --check vite.config.mjs"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3",
     "vite": "8.1.5"
   },
   "dependencies": {
