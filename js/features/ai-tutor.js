@@ -2030,6 +2030,27 @@
         saveStudyJob(job);
       }
       if (canRender && !canRender()) return;
+      // Cache hit: the POST above already ran the cache lookup and returned
+      // the finished note in `created`. Opening the SSE stream anyway would
+      // just re-run a full auth/entitlement check and a job lookup for
+      // content we already have in hand, doubling round trips on every
+      // "already available" note. Render immediately instead.
+      if (created && created.status === 'completed' && !created.error) {
+        clearStudyJob(job.jobId);
+        _genEnd(btnId);
+        renderNotesResult(mode, n, style, {
+          content: created.content || '', provider: created.provider || 'ai',
+          model: created.model || '', cached: !!created.cached,
+          lang: created.out_lang || lang
+        }, targetEl);
+        return;
+      }
+      if (created && created.status === 'stopped') {
+        clearStudyJob(job.jobId);
+        _genEnd(btnId);
+        targetEl.innerHTML = notesStageMessageHtml('stopped', 'Note generation stopped', 'Generate again whenever you are ready.');
+        return;
+      }
       studyJobStream(mode, n, style, lang, job, created || {}, signal, btnId, targetEl, canRender);
     }).catch(function (e) {
       if (canRender && !canRender()) return;
