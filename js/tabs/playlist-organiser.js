@@ -963,14 +963,17 @@ function ytoToggleWatch(plId, vid) {
 }
 
 /* ── ytoPlay → redirects to YouTube tab (no inline player needed) ── */
-function ytoPlay(plId, vid) {
-  ytoPlayInYtTab(plId, vid);
+function ytoPlay(plId, vid, loadOptions) {
+  ytoPlayInYtTab(plId, vid, loadOptions);
 }
 
 function ytoResumeCourse() {
   const pl = ytoLib()[ytoCurrentPl]; if (!pl) return;
-  if (pl.lastVideo) ytoPlay(pl.id, pl.lastVideo);
-  else { const first = pl.videos.find(v => !pl.watched[v.id]) || pl.videos[0]; if (first) ytoPlay(pl.id, first.id); }
+  if (pl.lastVideo) ytoPlay(pl.id, pl.lastVideo, { forceNormal: true });
+  else {
+    const first = pl.videos.find(v => !pl.watched[v.id]) || pl.videos[0];
+    if (first) ytoPlay(pl.id, first.id);
+  }
 }
 
 function ytoSpeed(rate) {
@@ -1163,12 +1166,12 @@ function ytoSavePlan() {
 }
 
 /* ── Play video from organiser → switch to YouTube tab + populate sidebar ── */
-function ytoPlayInYtTab(plId, vid) {
+function ytoPlayInYtTab(plId, vid, loadOptions) {
   var pl = ytoLib()[plId]; if (!pl) return;
   var v = pl.videos.find(function(x) { return x.id === vid; }); if (!v) return;
   pl.lastVideo = vid; ytoPersist();
   switchPage('youtube');
-  ytLoadInTab('video', vid, 'https://youtube.com/watch?v=' + vid, v.title);
+  ytLoadInTab('video', vid, 'https://youtube.com/watch?v=' + vid, v.title, loadOptions);
   appState.ytLastVideo.ytoPlId = plId;
   saveProgress();
   setTimeout(function() { ytoPopulateYtSidebar(plId, vid); }, 60);

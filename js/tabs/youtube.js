@@ -186,7 +186,7 @@ function ytResume() {
   document.getElementById('yt-url-input').value = url;
   document.getElementById('yt-err').classList.remove('show');
   document.getElementById('yt-play-btn').disabled = false;
-  ytLoadInTab(lv.type, lv.id, url, lv.title);
+  ytLoadInTab(lv.type, lv.id, url, lv.title, { forceNormal: true });
 
   // Restore full organiser course sidebar after load
   if (resolvedPlId) {
@@ -285,7 +285,7 @@ function ytPlay() {
   ytLoadInTab(v.type, v.id, url, v.type === 'playlist' ? 'Playlist' : 'Video');
 }
 
-function ytLoadInTab(type, id, originalUrl, label) {
+function ytLoadInTab(type, id, originalUrl, label, loadOptions) {
   const metaBar = document.getElementById('yt-meta-bar');
   const titleEl = document.getElementById('yt-now-title');
   const openLink = document.getElementById('yt-open-link');
@@ -295,8 +295,9 @@ function ytLoadInTab(type, id, originalUrl, label) {
   metaBar.style.display = 'flex';
   document.getElementById('yt-speed-bar').classList.add('show');
 
-  // Load using IFrame API
-  ytDoLoad(type, id);
+  // Load using IFrame API. Resume actions can explicitly bypass the sticky
+  // Turbo preference without changing how pasted URLs or video clicks behave.
+  ytDoLoad(type, id, loadOptions);
 
   // Track current video
   if (type === 'video') {
@@ -543,6 +544,18 @@ function ytClearCache() {
 let ytPlayer = null;
 let ytPlayerReady = false;
 let ytPendingLoad = null;
+
+/* Cancel a deferred normal-player load when a newer Turbo action supersedes
+   it. A direct fallback iframe must be navigated away before removal because
+   display:none alone does not stop its autoplaying audio. */
+function ytCancelPendingLoad() {
+  ytPendingLoad = null;
+  const fallbackFrame = document.querySelector('#yt-player iframe[data-yt-direct-fallback]');
+  if (!fallbackFrame) return;
+  try { fallbackFrame.src = 'about:blank'; } catch (e) {}
+  try { fallbackFrame.remove(); } catch (e) {}
+}
+
 let ytProgressTimer = null;
 let ytWatchAccumSecs = 0;   // real (wall-clock) seconds watched, pending credit to Study Time
 let ytWatchLastTs = 0;      // Date.now() at the previous poll tick
@@ -564,7 +577,7 @@ window.onYouTubeIframeAPIReady = function() {
         ytPlayerReady = true;
         if (ytPendingLoad) {
           const p = ytPendingLoad; ytPendingLoad = null;
-          ytDoLoad(p.type, p.id);
+          ytDoLoad(p.type, p.id, p.loadOptions);
         }
       },
       onStateChange: function(e) {
@@ -602,7 +615,7 @@ window.onYouTubeIframeAPIReady = function() {
   });
 };
 
-function ytDoLoad(type, id) {
+function ytDoLoad(type, id, loadOptions) {
   const playerEl = document.getElementById('yt-player');
   playerEl.style.display = 'block';
   document.getElementById('yt-placeholder').style.display = 'none';
@@ -610,10 +623,13 @@ function ytDoLoad(type, id) {
   try { document.getElementById('yt-player-wrap')?.classList.add('ss-has-video'); } catch (e) {}
 
   if (!ytPlayer || !ytPlayerReady) {
-    ytPendingLoad = { type, id };
+    ytPendingLoad = { type, id, loadOptions };
     // Fallback: inject iframe directly if API not ready
     if (typeof YT === 'undefined') {
-      playerEl.innerHTML = `<iframe src="${ytBuildEmbedUrl(type, id)}" style="width:100%;height:100%;border:none;display:block;" allow="autoplay;encrypted-media;fullscreen" allowfullscreen></iframe>`;
+      let fallbackUrl = ytBuildEmbedUrl(type, id);
+      const fallbackStart = type === 'video' ? ytResumeSeconds(id) : 0;
+      if (fallbackStart > 0) fallbackUrl += '&start=' + fallbackStart;
+      playerEl.innerHTML = `<iframe data-yt-direct-fallback src="${fallbackUrl}" style="width:100%;height:100%;border:none;display:block;" allow="autoplay;encrypted-media;fullscreen" allowfullscreen></iframe>`;
     }
     return;
   }

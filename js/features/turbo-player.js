@@ -37,6 +37,9 @@
     || TURBO_BACKEND_URL).replace(/\/+$/, '');
 
   var turboEnabled = localStorage.getItem('turboEnabled') === '1';
+  // A Resume action always opens the normal iframe for the current load, while
+  // retaining the user's sticky Turbo preference for later non-resume videos.
+  var turboNormalOverride = false;
   var turboVideoEl = null;      // the native <video>
   var turboActiveNow = false;   // true while a video is actually playing via Turbo
   var turboInlineHome = null;   // original player-wrap position while docked in Notes Focus
@@ -66,6 +69,10 @@
     return typeof ezIsPro === 'function' ? ezIsPro() : true;
   }
 
+  function turboSelected() {
+    return turboEnabled && !turboNormalOverride;
+  }
+
   /* Turbo is "active" (controls should target the native video) only when it's
      enabled AND the native video is the thing currently on screen. */
   function turboActive() {
@@ -81,7 +88,7 @@
   }
   function turboState() {
     return {
-      enabled: !!turboEnabled,
+      enabled: !!turboSelected(),
       active: !!turboActive(),
       phase: turboPhase,
       failure: turboFailure,
@@ -353,7 +360,7 @@
     turboPendingLoad = null;
     restoreTurboInline(false);
     turboActiveNow = false;
-    turboPhase = nextPhase || (turboEnabled ? 'idle' : 'off');
+    turboPhase = nextPhase || (turboSelected() ? 'idle' : 'off');
     turboFailure = failure || '';
     showBadge(false);
     status(null);
@@ -553,12 +560,34 @@
 
   if (typeof ytDoLoad === 'function') {
     var _origYtDoLoad = ytDoLoad;
-    ytDoLoad = function (type, id) {
+    ytDoLoad = function (type, id, loadOptions) {
+      var forceNormal = !!(loadOptions && loadOptions.forceNormal);
+      if (forceNormal) {
+        turboNormalOverride = true;
+        deactivateTurbo('off');
+        updateToggleUI();
+        applySpeedVisibility();
+        _origYtDoLoad(type, id, loadOptions);
+        return;
+      }
+
+      if (turboNormalOverride) {
+        turboNormalOverride = false;
+        updateToggleUI();
+        applySpeedVisibility();
+      }
       if (turboEnabled && type === 'video' && isPro() && typeof id === 'string' && id.length === 11) {
-        turboLoad(id, function () { _origYtDoLoad(type, id); });
+        // A newer Turbo action supersedes any iframe load deferred while the
+        // YouTube API was unavailable. Cancel its direct autoplaying fallback
+        // as well, otherwise hidden normal-player audio can continue behind Turbo.
+        try {
+          if (typeof ytCancelPendingLoad === 'function') ytCancelPendingLoad();
+          else if (typeof ytPendingLoad !== 'undefined') ytPendingLoad = null;
+        } catch (e) {}
+        turboLoad(id, function () { _origYtDoLoad(type, id, loadOptions); });
       } else {
         deactivateTurbo();
-        _origYtDoLoad(type, id);
+        _origYtDoLoad(type, id, loadOptions);
       }
     };
   }
@@ -765,7 +794,14 @@
       else if (typeof showToast === 'function') showToast('⚡ Turbo Pro plan mein milta hai.', 'error');
       return;
     }
-    turboEnabled = !turboEnabled;
+    if (turboNormalOverride) {
+      // Resume deliberately selected the normal player for this load. The
+      // first Turbo click should activate Turbo, not toggle the saved setting off.
+      turboNormalOverride = false;
+      turboEnabled = true;
+    } else {
+      turboEnabled = !turboEnabled;
+    }
     turboPhase = turboEnabled ? 'idle' : 'off';
     turboFailure = '';
     localStorage.setItem('turboEnabled', turboEnabled ? '1' : '0');
@@ -835,6 +871,7 @@
       emitTurboState();
       return true;
     }
+    turboNormalOverride = false;
     turboEnabled = true;
     turboPhase = 'loading';
     turboFailure = '';
@@ -898,13 +935,15 @@
     var btn = document.getElementById('yt-turbo-toggle');
     if (!btn) return;
     var pro = isPro();
-    btn.classList.toggle('on', turboEnabled && pro);
+    var selected = turboSelected();
+    btn.classList.toggle('on', selected && pro);
     btn.textContent = !pro ? '⚡ Turbo 💎'
-      : (turboEnabled ? '⚡ Turbo ON' : '⚡ Turbo');
+      : (selected ? '⚡ Turbo ON' : (turboNormalOverride ? '⚡ Use Turbo' : '⚡ Turbo'));
     btn.title = !pro
       ? 'Turbo (4x speed + PiP) — Pro feature'
-      : (turboEnabled ? 'Turbo ON — playing via your server at up to 4x. Click to turn off.'
-                      : 'Turn on Turbo for real 4x speed + Picture-in-Picture');
+      : (selected ? 'Turbo ON — playing via your server at up to 4x. Click to turn off.'
+                  : (turboNormalOverride ? 'Resume opened in the normal YouTube player. Click to use Turbo for this video.'
+                                         : 'Turn on Turbo for real 4x speed + Picture-in-Picture'));
   }
 
   /* Keep every supported rate available in the compact selector. The five
@@ -916,6 +955,7 @@
     var bar = document.getElementById('yt-speed-bar');
     if (!bar) return;
 
+    var selected = turboSelected();
     var select = document.getElementById('yt-speed-select');
     if (select) {
       TURBO_RATES.forEach(function (r) {
@@ -926,10 +966,10 @@
           option.textContent = r + '×' + (parseFloat(r) > 3 ? ' Turbo' : '');
           select.appendChild(option);
         }
-        option.disabled = !turboEnabled && parseFloat(r) > 2;
-        option.hidden = !turboEnabled && parseFloat(r) > 2;
+        option.disabled = !selected && parseFloat(r) > 2;
+        option.hidden = !selected && parseFloat(r) > 2;
       });
-      if (!turboEnabled && parseFloat(select.value) > 2) {
+      if (!selected && parseFloat(select.value) > 2) {
         select.value = '2';
         if (typeof ytSetSpeed === 'function') ytSetSpeed(2);
       }
@@ -942,7 +982,7 @@
     });
 
     var tgBtn = document.getElementById('yt-turbo-tg');
-    if (tgBtn) tgBtn.style.display = turboEnabled ? '' : 'none';
+    if (tgBtn) tgBtn.style.display = selected ? '' : 'none';
   }
 
   function initUI() {
