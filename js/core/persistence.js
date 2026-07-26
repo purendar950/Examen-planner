@@ -131,6 +131,21 @@ function _describeSyncError(e) {
   return code || msg || 'unknown error';
 }
 
+/* Short, user-facing status label for the sync indicator. Complements the
+   detailed console reason from _describeSyncError() by telling the user (not
+   just the console) which class of failure occurred. */
+function _syncErrorLabel(e) {
+  const code = e && e.code ? String(e.code) : '';
+  const msg  = e && e.message ? String(e.message) : '';
+  if (code === 'permission-denied')  return '⚠ Sync blocked (permissions)';
+  if (code === 'unauthenticated')    return '⚠ Sign in again to sync';
+  if (code === 'resource-exhausted' || /longer than|maximum|1048487|1 MiB/i.test(msg))
+                                     return '⚠ Data too large to sync';
+  if (code === 'unavailable' || code === 'deadline-exceeded' || /network|offline|failed to fetch/i.test(msg))
+                                     return '⚠ Offline — will retry';
+  return '⚠ Sync failed';
+}
+
 async function saveProgressNow() {
   if (!currentUser) return;
   const saveUid = currentUser.uid;
@@ -226,9 +241,9 @@ async function saveProgressNow() {
     const reason = _describeSyncError(e);
     console.error('[sync] Firestore write failed: ' + reason, e);
     if (navigator.onLine === false || reason.indexOf('network offline') !== -1) {
-      setSyncStatus('offline', 'Offline — saved on device');
+      setSyncStatus('offline', 'Offline — saved on device; will retry');
     } else {
-      setSyncStatus('error', 'Sync failed — retry queued');
+      setSyncStatus('error', _syncErrorLabel(e));
       setTimeout(() => setSyncStatus('', ''), 4000);
     }
   }
