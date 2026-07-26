@@ -119,6 +119,11 @@ function ezRefreshGates() {
     }
   } catch(e) {}
   try { if (typeof updateDashboard === 'function') updateDashboard(); } catch(e) {}
+  /* Remove any pro-blur overlay (e.g. Turbo 4× Player) that was applied while
+     entitlement was still pending. youtube/yt-organiser pages aren't in the
+     per-page rebuild list below, so without this they'd stay locked for the
+     rest of the session even after the user is confirmed Pro. */
+  try { if (typeof ezUnblurAllProSurfaces === 'function') ezUnblurAllProSurfaces(); } catch(e) {}
   /* Re-render the CURRENTLY ACTIVE page so Pro-only surfaces rendered while
      Pro (mock analysis charts, AI timetable, syllabus marks) immediately
      reflect free-tier gating without a reload. */

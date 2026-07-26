@@ -628,6 +628,27 @@ function ezBlurPreview(containerEl, options) {
     '</div>';
 }
 
+/* Surfaces like the Turbo 4× player are blurred once (on page load /
+   activation) by calling ezBlurPreview() at a point where the entitlement
+   check may still be "pending" (server hasn't confirmed Pro yet — see
+   _ezEntitlementPendingUid in preppath-phase2-plans.js). Unlike syllabus /
+   mocks / planner / dashboard, the youtube/yt-organiser pages are never
+   fully re-rendered from ezRefreshGates(), so if the blur was applied while
+   pending and the user turns out to be Pro, the overlay is stuck forever for
+   the rest of the session even though every other entitlement surface (the
+   plan badge, etc.) has already updated to show Pro.
+   Call this from ezRefreshGates() so any blur applied under a stale/pending
+   check is removed the moment entitlement is confirmed, without needing a
+   full page reload. Safe to call anytime: it's a no-op while still gated. */
+function ezUnblurAllProSurfaces() {
+  if (typeof ezGated === 'function' && ezGated()) return; // still gated, leave locked
+  document.querySelectorAll('.pro-blur-container').forEach(function (wrapper) {
+    var content = wrapper.querySelector('.pro-blur-content');
+    var parent = wrapper.parentElement;
+    if (content && parent) parent.innerHTML = content.innerHTML;
+  });
+}
+
 /* ══════════════════════════════════════════════
    UPGRADE EXISTING GATES → BLUR PREVIEWS
    Keep the toast/limit logic; just wrap the
