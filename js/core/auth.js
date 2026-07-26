@@ -180,6 +180,19 @@ function loginUser(email, name, uid, state) {
   if (!appState.ytLinks)   appState.ytLinks    = {};
   if (!appState.ytNotes)   appState.ytNotes    = [];
   if (!appState.focusMarks || typeof appState.focusMarks !== 'object') appState.focusMarks = {};
+  // Firestore-bound saves store stroke points as {x, y} objects (Firestore
+  // rejects arrays-of-arrays); normalize back to [x, y] pairs here so the
+  // canvas code (points[i][0]/[1]) works the same regardless of source —
+  // cloud doc, local cache, or an older array-shaped record from before
+  // this fix.
+  Object.keys(appState.focusMarks).forEach(function(key) {
+    const entry = appState.focusMarks[key];
+    if (!entry || !Array.isArray(entry.strokes)) return;
+    entry.strokes.forEach(function(s) {
+      if (!Array.isArray(s.points)) return;
+      s.points = s.points.map(function(p) { return Array.isArray(p) ? p : [p.x, p.y]; });
+    });
+  });
   if (!appState.ytWatched) appState.ytWatched  = {};
   if (!appState.plans)     appState.plans      = [];
   if (!appState.recurringTasks) appState.recurringTasks = [];
