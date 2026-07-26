@@ -143,7 +143,14 @@ function _syncErrorLabel(e) {
                                      return '⚠ Data too large to sync';
   if (code === 'unavailable' || code === 'deadline-exceeded' || /network|offline|failed to fetch/i.test(msg))
                                      return '⚠ Offline — will retry';
-  return '⚠ Sync failed';
+  /* Unclassified error — most often an extension/firewall blocking the
+     Firestore request (net::ERR_BLOCKED_BY_CLIENT and similar don't carry a
+     Firestore .code and don't match the network/offline wording above), a
+     stuck IndexedDB persistence lock from another tab, or a genuine bug.
+     Surface the raw code/message right in the pill instead of a bare
+     "Sync failed" so this is diagnosable without opening DevTools. */
+  const short = code || (msg ? msg.slice(0, 40) : '');
+  return short ? '⚠ Sync failed (' + short + ')' : '⚠ Sync failed';
 }
 
 async function saveProgressNow() {
