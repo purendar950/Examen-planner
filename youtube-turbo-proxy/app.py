@@ -246,14 +246,38 @@ def _active_pro_entitlement(user_data):
         return False
 
 
+# A single "load a note" round trip from the browser is actually two requests
+# (POST /api/study/jobs, then GET .../stream), and each one independently calls
+# _verified_user_record — meaning the users/{uid} + admins/{uid} Firestore reads
+# below ran TWICE per note view, even for a fully cached note that never
+# touches the AI model. Cache the result briefly per uid so those reads are
+# shared across a request burst instead of duplicated. TTL is short enough
+# that a plan/admin change still lands within seconds.
+_USER_RECORD_TTL = 20
+_user_record_cache = {}
+_user_record_cache_lock = threading.Lock()
+
+
+def _cached_user_data_and_admin(uid):
+    now = time.time()
+    with _user_record_cache_lock:
+        hit = _user_record_cache.get(uid)
+        if hit and now - hit[0] < _USER_RECORD_TTL:
+            return hit[1], hit[2]
+    snap = _fb_db.collection("users").document(uid).get()
+    data = snap.to_dict() if snap.exists else {}
+    is_admin = _fb_db.collection("admins").document(uid).get().exists
+    with _user_record_cache_lock:
+        _user_record_cache[uid] = (now, data, is_admin)
+    return data, is_admin
+
+
 def _verified_user_record(require_pro=False):
     identity, err = _require_firebase_user()
     if err:
         return None, err
     try:
-        snap = _fb_db.collection("users").document(identity["uid"]).get()
-        data = snap.to_dict() if snap.exists else {}
-        is_admin = _fb_db.collection("admins").document(identity["uid"]).get().exists
+        data, is_admin = _cached_user_data_and_admin(identity["uid"])
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not load Firebase user %s: %s", identity["uid"], exc)
         return None, ({"error": "auth_unavailable", "detail": "Could not verify account access."}, 503)
