@@ -4,17 +4,46 @@
 let _saveDebounce = null;
 let _lastSavedJSON = '';
 let _localDirty = false; // true when there are local edits not yet written to Firestore
+const _pendingSyncMemory = new Set();
 function _pendingSyncKey(uid) { return 'pending_sync_' + uid; }
-function _markPendingSync(uid) {
+function _markPendingSync(uid, state) {
   if (!uid) return;
+  _pendingSyncMemory.add(uid);
   try { localStorage.setItem(_pendingSyncKey(uid), '1'); } catch(e) {}
+  const svc = _storageService();
+  if (svc && typeof svc.queueSync === 'function') {
+    Promise.resolve(svc.queueSync(uid, state || appState)).catch(function(error) {
+      console.warn('[sync] Could not persist the IndexedDB replay queue', error);
+    });
+  }
 }
 function _clearPendingSync(uid) {
   if (!uid) return;
-  try { localStorage.removeItem(_pendingSyncKey(uid)); } catch(e) {}
+  _pendingSyncMemory.delete(uid);
+  const svc = _storageService();
+  if (svc && typeof svc.clearPendingSync === 'function') {
+    Promise.resolve(svc.clearPendingSync(uid)).then(function(cleared) {
+      if (!cleared) _pendingSyncMemory.add(uid);
+    }).catch(function(error) {
+      _pendingSyncMemory.add(uid);
+      console.warn('[sync] Could not clear the IndexedDB replay queue', error);
+    });
+  } else {
+    try { localStorage.removeItem(_pendingSyncKey(uid)); } catch(e) {}
+  }
 }
-function hasPendingSync(uid) {
+async function hasPendingSync(uid) {
   if (!uid) return false;
+  if (_pendingSyncMemory.has(uid)) return true;
+  const svc = _storageService();
+  if (svc && typeof svc.hasPendingSync === 'function') {
+    try {
+      if (await svc.hasPendingSync(uid)) {
+        _pendingSyncMemory.add(uid);
+        return true;
+      }
+    } catch(e) {}
+  }
   try { return localStorage.getItem(_pendingSyncKey(uid)) === '1'; } catch(e) { return false; }
 }
 
@@ -43,13 +72,25 @@ function saveProgress() {
   try { if (appState.telegram && appState.telegram.enabled) refreshTelegramDigest(); } catch(e) {}
 
   _localDirty = true;
-  _markPendingSync(currentUser.uid);
-  // Immediate localStorage cache (always)
+  _markPendingSync(currentUser.uid, appState);
+  // IndexedDB is the durable cache; localStorage remains a compatibility mirror.
   const svc = _storageService();
-  if (svc) svc.writeCache(currentUser.uid, appState);
-  else localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState));
+  if (svc) {
+    Promise.resolve(svc.writeCache(currentUser.uid, appState)).catch(function(error) {
+      console.warn('[sync] IndexedDB state write failed', error);
+    });
+  } else {
+    try {
+      const cacheRevision = Date.now();
+      localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState));
+      localStorage.setItem('cache_meta_' + currentUser.uid, String(cacheRevision));
+    } catch(e) {}
+  }
 
-  if (!_fbReady || !db) return;
+  if (!_fbReady || !db || navigator.onLine === false) {
+    setSyncStatus('offline', 'Offline — saved on device');
+    return;
+  }
 
   // Show saving indicator
   setSyncStatus('saving', '⏳ Saving...');
@@ -91,10 +132,35 @@ function _describeSyncError(e) {
 }
 
 async function saveProgressNow() {
-  if (!currentUser || !_fbReady || !db) return;
+  if (!currentUser) return;
   const saveUid = currentUser.uid;
   const json = JSON.stringify(appState);
   const stateToSave = JSON.parse(json);
+
+  // Always refresh the app-owned cache and latest-state replay record before a
+  // cloud attempt. This makes saveProgressNow safe when called directly by the
+  // 30-second timer, reconnect handler, or page-exit flush.
+  const localService = _storageService();
+  if (localService) {
+    await Promise.allSettled([
+      localService.writeCache(saveUid, stateToSave),
+      localService.queueSync(saveUid, stateToSave)
+    ]);
+  } else {
+    try {
+      const cacheRevision = Date.now();
+      localStorage.setItem('cache_' + saveUid, json);
+      localStorage.setItem('cache_meta_' + saveUid, String(cacheRevision));
+    } catch(e) {}
+  }
+  _pendingSyncMemory.add(saveUid);
+  try { localStorage.setItem(_pendingSyncKey(saveUid), '1'); } catch(e) {}
+
+  if (!_fbReady || !db || navigator.onLine === false) {
+    _localDirty = true;
+    setSyncStatus('offline', 'Offline — saved on device');
+    return;
+  }
   if (json === _lastSavedJSON) {
     _localDirty = false;
     _clearPendingSync(saveUid);
@@ -109,7 +175,7 @@ async function saveProgressNow() {
   const bytes = _docByteSize(json);
   if (bytes >= FIRESTORE_DOC_LIMIT) {
     _localDirty = true;
-    _markPendingSync(saveUid);
+    _markPendingSync(saveUid, stateToSave);
     console.error('[sync] appState is ' + bytes + ' bytes — exceeds Firestore\'s 1 MiB'
       + ' per-document limit, so cloud sync cannot complete. Saved locally only.'
       + ' Trim large data (playlists / handwritten Focus marks / video notes).');
@@ -143,7 +209,7 @@ async function saveProgressNow() {
       // Edits made while this write was in flight are still pending. Never let
       // an older completion clear their durable marker; queue the newest state.
       _localDirty = true;
-      _markPendingSync(saveUid);
+      _markPendingSync(saveUid, JSON.parse(JSON.stringify(appState)));
       clearTimeout(_saveDebounce);
       _saveDebounce = setTimeout(() => saveProgressNow(), 250);
     } else {
@@ -154,13 +220,17 @@ async function saveProgressNow() {
     setTimeout(() => setSyncStatus('', ''), 2500);
   } catch(e) {
     if (!currentUser || currentUser.uid === saveUid) _localDirty = true;
-    _markPendingSync(saveUid);
+    _markPendingSync(saveUid, stateToSave);
     /* Log the real cause — previously the error was swallowed, which made
        every sync failure impossible to diagnose from the console. */
     const reason = _describeSyncError(e);
     console.error('[sync] Firestore write failed: ' + reason, e);
-    setSyncStatus('error', '⚠ Sync failed');
-    setTimeout(() => setSyncStatus('', ''), 4000);
+    if (navigator.onLine === false || reason.indexOf('network offline') !== -1) {
+      setSyncStatus('offline', 'Offline — saved on device');
+    } else {
+      setSyncStatus('error', 'Sync failed — retry queued');
+      setTimeout(() => setSyncStatus('', ''), 4000);
+    }
   }
 }
 
@@ -173,12 +243,14 @@ setInterval(() => { if (currentUser) saveProgressNow(); }, 30000);
    exit-ish event so nothing is lost. */
 function flushSaveOnExit() {
   if (!currentUser) return;
-  /* Always refresh the local cache synchronously (survives reload offline).
-     Uses localStorage directly (not _storageService().writeCache, which is
-     equivalent but adds an extra property-lookup) — this handler runs on
-     pagehide/beforeunload where every millisecond before the tab is killed
-     matters, so keep it the most direct call possible. */
-  try { localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState)); } catch(e) {}
+  /* Always refresh the synchronous compatibility mirror and its revision.
+     The matching timestamp lets startup prefer this final page-exit snapshot
+     when an asynchronous IndexedDB transaction was terminated mid-commit. */
+  try {
+    const exitRevision = Date.now();
+    localStorage.setItem('cache_' + currentUser.uid, JSON.stringify(appState));
+    localStorage.setItem('cache_meta_' + currentUser.uid, String(exitRevision));
+  } catch(e) {}
   /* Cancel the debounce and write to Firestore immediately. */
   try { clearTimeout(_saveDebounce); } catch(e) {}
   try { saveProgressNow(); } catch(e) {}

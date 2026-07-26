@@ -240,8 +240,12 @@ async function handleLogout() {
   if (currentUser && currentUser.uid) {
     const logoutUid = currentUser.uid;
     try { clearTimeout(_saveDebounce); } catch (e) {}
-    try { localStorage.setItem('cache_' + logoutUid, JSON.stringify(appState)); } catch (e) {}
-    try { if (typeof _markPendingSync === 'function') _markPendingSync(logoutUid); } catch (e) {}
+    try {
+      const logoutRevision = Date.now();
+      localStorage.setItem('cache_' + logoutUid, JSON.stringify(appState));
+      localStorage.setItem('cache_meta_' + logoutUid, String(logoutRevision));
+    } catch (e) {}
+    try { if (typeof _markPendingSync === 'function') _markPendingSync(logoutUid, appState); } catch (e) {}
     try {
       const finalSave = Promise.resolve(saveProgressNow());
       await Promise.race([
@@ -656,28 +660,46 @@ if (auth && !_isBadProtocol) {
     let name = user.displayName || (user.email ? user.email.split('@')[0] : 'User');
     let appStarted = false;
     let liveServerSnapshotSeen = false;
+    let suppressInitialRemoteState = false;
     const isCurrentAuthEvent = function() {
       return authGeneration === _authSessionGeneration && auth.currentUser && auth.currentUser.uid === user.uid;
     };
-    const readCachedState = function() {
+    const waitForStorageModule = async function() {
+      if (window.PrepPathModules?.createStorageService) return window.PrepPathModules;
+      await Promise.race([
+        new Promise(function(resolve) {
+          window.addEventListener('preppath:modules-ready', resolve, { once: true });
+        }),
+        new Promise(function(resolve) { setTimeout(resolve, 750); })
+      ]);
+      return window.PrepPathModules || null;
+    };
+    const readCachedState = async function() {
       try {
-        const mods = window.PrepPathModules;
+        const mods = await waitForStorageModule();
         if (mods && typeof mods.createStorageService === 'function') {
-          return mods.createStorageService({ db, auth }).readCache(user.uid, null);
+          const svc = mods.createStorageService({ db, auth });
+          // A queued snapshot is the newest local truth after an offline close.
+          // Prefer it over both the regular cache and an older cloud snapshot.
+          const queued = await svc.getQueuedState(user.uid, null);
+          if (queued) return queued;
+          return await svc.readCache(user.uid, null);
         }
         const cached = localStorage.getItem('cache_' + user.uid);
         return cached ? JSON.parse(cached) : null;
       } catch(e) { return null; }
     };
-    const writeCachedState = function(state) {
+    const writeCachedState = async function(state) {
       try {
-        const mods = window.PrepPathModules;
+        const mods = await waitForStorageModule();
         if (mods && typeof mods.createStorageService === 'function') {
-          mods.createStorageService({ db, auth }).writeCache(user.uid, state);
-        } else {
-          localStorage.setItem('cache_' + user.uid, JSON.stringify(state));
+          return await mods.createStorageService({ db, auth }).writeCache(user.uid, state);
         }
-      } catch(e) {}
+        const cacheRevision = Date.now();
+        localStorage.setItem('cache_' + user.uid, JSON.stringify(state));
+        localStorage.setItem('cache_meta_' + user.uid, String(cacheRevision));
+        return true;
+      } catch(e) { return false; }
     };
     const waitForAppScripts = async function() {
       if (typeof initApp === 'function' && typeof ezSetProfileFromFirestoreSnapshot === 'function') return;
@@ -698,9 +720,26 @@ if (auth && !_isBadProtocol) {
       // A previous sign-out/offline close may have preserved newer local data
       // that Firestore did not acknowledge. Replay it before accepting remote
       // appState so an older cloud document cannot overwrite the UID cache.
-      if (typeof hasPendingSync === 'function' && hasPendingSync(user.uid)) {
+      if (typeof hasPendingSync === 'function' && await hasPendingSync(user.uid)) {
         if (typeof _localDirty !== 'undefined') _localDirty = true;
-        try { saveProgressNow(); } catch(e) {}
+        const replayPromise = Promise.resolve().then(function() { return saveProgressNow(); });
+        const replaySettled = await Promise.race([
+          replayPromise.then(function() { return true; }, function() { return true; }),
+          new Promise(function(resolve) { setTimeout(function() { resolve(false); }, 2500); })
+        ]);
+        if (!replaySettled) {
+          // Do not hold account/profile hydration behind a Firestore write that
+          // can remain pending while the browser reports a false-positive
+          // online state. The initial get may have started against older cloud
+          // data, so suppress only its appState; the live listener reconciles
+          // after this queued write eventually succeeds.
+          suppressInitialRemoteState = true;
+          if (typeof _localDirty !== 'undefined') _localDirty = true;
+          try { if (typeof _markPendingSync === 'function') _markPendingSync(user.uid, appState); } catch(e) {}
+          replayPromise.catch(function(error) {
+            console.warn('[sync] Background login replay failed', error);
+          });
+        }
       }
       return true;
     };
@@ -723,7 +762,7 @@ if (auth && !_isBadProtocol) {
       if (typeof isValidPage === 'function' && isValidPage(keepActivePage)) {
         hydrated.activePage = keepActivePage;
       }
-      writeCachedState(hydrated);
+      void writeCachedState(hydrated);
       if (JSON.stringify(appState) === JSON.stringify(hydrated)) return;
       appState = hydrated;
       try { if (typeof notesFocusRefreshPrivateMarks === 'function') notesFocusRefreshPrivateMarks(); } catch(e) {}
@@ -760,15 +799,15 @@ if (auth && !_isBadProtocol) {
       }
       const remoteState = { ...getDefaultState(), ...(data.appState || {}) };
       if (!appStarted) {
-        writeCachedState(remoteState);
+        await writeCachedState(remoteState);
         await startApp(remoteState);
-      } else {
+      } else if (!suppressInitialRemoteState) {
         reconcileRemoteState(data.appState);
       }
       try { if (typeof ezRefreshGates === 'function') ezRefreshGates(); } catch(e) {}
     };
 
-    const cachedState = readCachedState();
+    const cachedState = await readCachedState();
     if (cachedState) {
       // Repeat login/session restore: show the dashboard immediately from the
       // matching user's cache. Firestore refresh continues in the background.

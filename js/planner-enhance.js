@@ -118,8 +118,11 @@ function openStudyProfileModal(startStep) {
     if (e) e.checked = !!tg.enabled;
   } catch(e) {}
 
-  overlay.style.display = 'flex';
-  overlay.classList.add('open');
+  if (window.StudyPlannerDialog) {
+    window.StudyPlannerDialog.open(overlay);
+  } else {
+    overlay.classList.add('open');
+  }
   ezwGoStep(typeof startStep === 'number' ? startStep : 1);
 }
 
@@ -128,7 +131,9 @@ function openOnboardingWizard() { openStudyProfileModal(1); }
 
 function closeStudyProfileModal() {
   const overlay = document.getElementById('sp-modal-overlay');
-  if (overlay) { overlay.style.display = 'none'; overlay.classList.remove('open'); }
+  if (!overlay) return;
+  if (window.StudyPlannerDialog) window.StudyPlannerDialog.close(overlay);
+  else overlay.classList.remove('open');
 }
 
 function spOutsideClose(e) {
@@ -137,9 +142,9 @@ function spOutsideClose(e) {
 
 /* ── Wizard navigation ── */
 const EZW_STEP_META = {
-  1: { label: 'Step 1 of 3', sub: 'Choose Exam',  title: '🎯 Choose Your Exam' },
-  2: { label: 'Step 2 of 3', sub: 'Preparation',  title: '🎯 Your Preparation' },
-  3: { label: 'Step 3 of 3', sub: 'Schedule',     title: '🎯 Schedule & Reminders' }
+  1: { label: 'Step 1 of 3', sub: 'Choose Exam',  title: 'Choose Your Exam' },
+  2: { label: 'Step 2 of 3', sub: 'Preparation',  title: 'Your Preparation' },
+  3: { label: 'Step 3 of 3', sub: 'Schedule',     title: 'Schedule & Reminders' }
 };
 
 function ezwGoStep(n) {
@@ -163,7 +168,7 @@ function ezwGoStep(n) {
   const nextBtn = document.getElementById('ezw-next-btn');
   if (backBtn) backBtn.style.display = ezwStep === 1 ? 'none' : '';
   if (skipBtn) skipBtn.style.display = ezwStep === 1 ? '' : 'none';
-  if (nextBtn) nextBtn.textContent = ezwStep === 3 ? 'Finish Setup 🚀' : 'Next →';
+  if (nextBtn) nextBtn.textContent = ezwStep === 3 ? 'Finish setup' : 'Continue';
 }
 
 function ezwBack() { if (ezwStep > 1) ezwGoStep(ezwStep - 1); }

@@ -133,7 +133,8 @@
       <div class="logo-badge" id="exam-logo-badge">SSC CGL</div>
     </div>
     <div class="topbar-right">
-      <div class="sync-indicator" id="sync-indicator">
+      <button type="button" class="pwa-install-button" id="pwa-install-button" hidden>Install app</button>
+      <div class="sync-indicator" id="sync-indicator" aria-live="polite">
         <div class="sync-dot"></div>
         <span id="sync-label"></span>
       </div>
@@ -260,16 +261,16 @@
 
 
   <!-- EXAM SELECTOR BAR -->
-  <div id="exam-selector-bar" style="background:var(--surface);border-bottom:1px solid var(--border);padding:0.6rem 1.5rem;display:flex;align-items:center;gap:12px;">
-    <span style="font-size:0.72rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.08em;white-space:nowrap;flex:0 0 auto;">Exam:</span>
-    <div class="exam-pills-scroll" style="display:flex;gap:6px;flex:1;min-width:0;overflow-x:auto;">
+  <div id="exam-selector-bar" class="exam-selector-bar">
+    <span class="exam-selector-label">Exam</span>
+    <div class="exam-pills-scroll">
       <button class="exam-select-btn active" onclick="switchExam('cgl')" id="examBtn-cgl">SSC CGL</button>
       <button class="exam-select-btn" onclick="switchExam('ntpc')" id="examBtn-ntpc">RRB NTPC</button>
       <button class="exam-select-btn" onclick="switchExam('gd')" id="examBtn-gd">SSC GD</button>
       <button class="exam-select-btn" onclick="switchExam('ibps')" id="examBtn-ibps">IBPS PO</button>
-      <button class="exam-select-btn" onclick="switchExam('upsc')" id="examBtn-upsc" style="background:linear-gradient(135deg,rgba(168,85,247,0.15),rgba(168,85,247,0.05));border-color:rgba(168,85,247,0.4);color:#A855F7;">UPSC CSE</button>
-      <button class="exam-select-btn" onclick="switchExam('uppcs')" id="examBtn-uppcs" style="background:linear-gradient(135deg,rgba(234,88,12,0.15),rgba(234,88,12,0.05));border-color:rgba(234,88,12,0.4);color:#EA580C;">UPPCS</button>
-      <button class="exam-select-btn" onclick="switchExam('bpsc')" id="examBtn-bpsc" style="background:linear-gradient(135deg,rgba(8,145,178,0.15),rgba(8,145,178,0.05));border-color:rgba(8,145,178,0.4);color:#0891B2;">BPSC</button>
+      <button class="exam-select-btn exam-select-upsc" onclick="switchExam('upsc')" id="examBtn-upsc">UPSC CSE</button>
+      <button class="exam-select-btn exam-select-uppcs" onclick="switchExam('uppcs')" id="examBtn-uppcs">UPPCS</button>
+      <button class="exam-select-btn exam-select-bpsc" onclick="switchExam('bpsc')" id="examBtn-bpsc">BPSC</button>
     </div>
   </div>
 
@@ -291,15 +292,20 @@
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
-  <div class="ch-link-modal-overlay" id="sp-modal-overlay" onclick="spOutsideClose(event)" style="z-index:10002;">
-    <div class="ch-link-modal ezw-modal" style="max-width:480px;max-height:92vh;overflow-y:auto;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.55rem;">
-        <h3 style="margin:0;" id="ezw-title">🎯 Quick Setup</h3>
-        <button onclick="closeStudyProfileModal()" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;">×</button>
+  <div class="ch-link-modal-overlay sp-dialog-overlay sp-dialog-overlay-high" id="sp-modal-overlay" onclick="spOutsideClose(event)" aria-hidden="true">
+    <div class="ch-link-modal ezw-modal sp-dialog-content sp-dialog-md sp-dialog-scroll" role="dialog" aria-modal="true" aria-labelledby="ezw-title" aria-describedby="ezw-dialog-description" tabindex="-1">
+      <div class="sp-dialog-header">
+        <div>
+          <h3 class="sp-dialog-title" id="ezw-title">Quick Setup</h3>
+          <p class="sp-dialog-description" id="ezw-dialog-description">Personalize your exam plan, schedule, and reminders.</p>
+        </div>
+        <button type="button" class="sp-dialog-close" data-dialog-close onclick="closeStudyProfileModal()" aria-label="Close setup dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+        </button>
       </div>
 
       <!-- Progress -->
-      <div style="display:flex;align-items:center;justify-content:space-between;font-size:.72rem;color:var(--muted);margin-bottom:6px;">
+      <div class="sp-dialog-progress-meta">
         <span id="ezw-step-label">Step 1 of 3</span>
         <span id="ezw-step-sub">Choose Exam</span>
       </div>
@@ -412,21 +418,28 @@
       </div>
 
       <!-- Footer navigation -->
-      <div class="modal-actions" style="margin-top:1.1rem;">
+      <div class="modal-actions sp-dialog-footer">
         <button class="btn-modal-cancel" id="ezw-skip-btn" onclick="closeStudyProfileModal()">Skip for now</button>
-        <button class="btn-modal-cancel" id="ezw-back-btn" onclick="ezwBack()" style="display:none;">← Back</button>
-        <button class="btn-modal-save" id="ezw-next-btn" onclick="ezwNext()">Next →</button>
+        <button class="btn-modal-cancel" id="ezw-back-btn" onclick="ezwBack()" style="display:none;">Back</button>
+        <button class="btn-modal-save" id="ezw-next-btn" onclick="ezwNext()">Continue</button>
       </div>
     </div>
   </div>
 
   <!-- ═══ CHAPTER LINK MODAL ═══ -->
-  <div class="ch-link-modal-overlay" id="ch-link-overlay" onclick="chLinkOutsideClose(event)">
-    <div class="ch-link-modal">
-      <h3>▶ Chapter YouTube Link</h3>
-      <div class="modal-sub" id="ch-link-chname"></div>
-      <label>YouTube Playlist ya Video URL:</label>
-      <input type="text" id="ch-link-input" placeholder="https://youtube.com/playlist?list=PL... ya video URL">
+  <div class="ch-link-modal-overlay sp-dialog-overlay" id="ch-link-overlay" onclick="chLinkOutsideClose(event)" aria-hidden="true">
+    <div class="ch-link-modal sp-dialog-content sp-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="ch-link-title" aria-describedby="ch-link-chname" tabindex="-1">
+      <div class="sp-dialog-header">
+        <div>
+          <h3 class="sp-dialog-title" id="ch-link-title">Chapter video link</h3>
+          <div class="modal-sub sp-dialog-description" id="ch-link-chname"></div>
+        </div>
+        <button type="button" class="sp-dialog-close" data-dialog-close onclick="chLinkClose()" aria-label="Close video link dialog">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+        </button>
+      </div>
+      <label for="ch-link-input">YouTube playlist or video URL</label>
+      <input type="url" id="ch-link-input" autocomplete="url" placeholder="https://youtube.com/playlist?list=PL...">
       <div class="modal-err" id="ch-link-err"></div>
       <div class="modal-actions">
         <button class="btn-modal-remove" id="ch-link-remove-btn" onclick="chLinkRemove()" style="display:none">🗑 Remove Link</button>
@@ -491,6 +504,8 @@
 <script defer src="js/core/ui-helpers.js"></script>
 <script defer src="js/core/auth.js"></script>
 <script defer src="js/core/persistence.js"></script>
+<script defer src="js/core/offline.js"></script>
+<script defer src="js/core/dialog.js"></script>
 <script defer src="js/features/telegram.js"></script>
 <script defer src="js/core/app-init.js"></script>
 <script defer src="js/core/navigation.js"></script>
@@ -561,11 +576,16 @@
 <script defer src="js/planner-enhance.js"></script>
 
 <!-- ═══ PLAN WIZARD (3-step modal) ═══ -->
-<div class="plan-wizard-overlay" id="plan-wizard-overlay" onclick="planWizardOutsideClose(event)">
-  <div class="plan-wizard" onclick="event.stopPropagation()">
-    <div class="plan-wizard-header">
-      <div class="plan-wizard-title">🗓️ Generate Plan</div>
-      <button class="plan-wizard-close" onclick="closePlanWizard()" title="Close">×</button>
+<div class="plan-wizard-overlay sp-dialog-overlay sp-dialog-overlay-high" id="plan-wizard-overlay" onclick="planWizardOutsideClose(event)" aria-hidden="true">
+  <div class="plan-wizard sp-dialog-content sp-dialog-lg" role="dialog" aria-modal="true" aria-labelledby="plan-wizard-title" aria-describedby="plan-wizard-description" tabindex="-1" onclick="event.stopPropagation()">
+    <div class="plan-wizard-header sp-dialog-header">
+      <div>
+        <div class="plan-wizard-title sp-dialog-title" id="plan-wizard-title">Generate a study plan</div>
+        <p class="sp-dialog-description" id="plan-wizard-description">Configure a realistic plan around your exam, subjects, and available time.</p>
+      </div>
+      <button type="button" class="plan-wizard-close sp-dialog-close" data-dialog-close onclick="closePlanWizard()" title="Close" aria-label="Close plan wizard">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+      </button>
     </div>
 
     <!-- Stepper -->
@@ -589,31 +609,31 @@
       <div class="plan-step-pane active" id="pw-step-1">
         <h3>What kind of plan do you need?</h3>
         <p class="pane-sub">Pick one — you can re-run the wizard anytime to switch.</p>
-        <div class="plan-type-grid" id="pw-type-grid">
-          <div class="plan-type-card" data-type="syllabus" onclick="pwSelectType('syllabus', this)">
-            <div class="ptc-icon">📚</div>
-            <div>
-              <div class="ptc-title">Syllabus Study</div>
-              <div class="ptc-sub">Still covering topics chapter by chapter — set days, target % per subject.</div>
-            </div>
-            <div class="ptc-check">✓</div>
-          </div>
-          <div class="plan-type-card" data-type="mock" onclick="pwSelectType('mock', this)">
-            <div class="ptc-icon">📝</div>
-            <div>
-              <div class="ptc-title">Mock Test Schedule</div>
-              <div class="ptc-sub">Full mocks + subject tests — 7-day rotation.</div>
-            </div>
-            <div class="ptc-check">✓</div>
-          </div>
-          <div class="plan-type-card" data-type="single" onclick="pwSelectType('single', this)">
-            <div class="ptc-icon">🎯</div>
-            <div>
-              <div class="ptc-title">Single Subject</div>
-              <div class="ptc-sub">Deep-focus on one subject's full syllabus — chapter by chapter.</div>
-            </div>
-            <div class="ptc-check">✓</div>
-          </div>
+        <div class="plan-type-grid" id="pw-type-grid" role="radiogroup" aria-label="Plan type">
+          <button type="button" class="plan-type-card" data-type="syllabus" role="radio" aria-checked="false" onclick="pwSelectType('syllabus', this)">
+            <span class="ptc-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17.5H6.5A2.5 2.5 0 0 0 4 23z"></path><path d="M4 5.5V20.5M8 7h8M8 11h8"></path></svg></span>
+            <span>
+              <span class="ptc-title">Syllabus Study</span>
+              <span class="ptc-sub">Cover topics chapter by chapter with a daily pace.</span>
+            </span>
+            <span class="ptc-check" aria-hidden="true">✓</span>
+          </button>
+          <button type="button" class="plan-type-card" data-type="mock" role="radio" aria-checked="false" onclick="pwSelectType('mock', this)">
+            <span class="ptc-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v15H5V6h3z"></path><path d="M9 12h6M9 16h4"></path></svg></span>
+            <span>
+              <span class="ptc-title">Mock Test Schedule</span>
+              <span class="ptc-sub">Build a weekly rotation of full and subject tests.</span>
+            </span>
+            <span class="ptc-check" aria-hidden="true">✓</span>
+          </button>
+          <button type="button" class="plan-type-card" data-type="single" role="radio" aria-checked="false" onclick="pwSelectType('single', this)">
+            <span class="ptc-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M22 12h-3M12 22v-3M2 12h3"></path></svg></span>
+            <span>
+              <span class="ptc-title">Single Subject</span>
+              <span class="ptc-sub">Deep-focus on one subject, chapter by chapter.</span>
+            </span>
+            <span class="ptc-check" aria-hidden="true">✓</span>
+          </button>
         </div>
       </div>
 
@@ -672,10 +692,10 @@
       </div>
     </div>
 
-    <div class="plan-wizard-footer">
-      <button class="wizard-btn wizard-btn-ghost" id="pw-btn-back" onclick="pwBack()" style="visibility:hidden;">← Back</button>
+    <div class="plan-wizard-footer sp-dialog-footer">
+      <button class="wizard-btn wizard-btn-ghost" id="pw-btn-back" onclick="pwBack()" style="visibility:hidden;">Back</button>
       <div class="wizard-summary" id="pw-footer-summary">Pick a plan type to continue.</div>
-      <button class="wizard-btn wizard-btn-primary" id="pw-btn-next" onclick="pwNext()" disabled>Next →</button>
+      <button class="wizard-btn wizard-btn-primary" id="pw-btn-next" onclick="pwNext()" disabled>Continue</button>
     </div>
   </div>
 </div>
