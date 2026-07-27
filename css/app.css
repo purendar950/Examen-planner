@@ -1609,7 +1609,8 @@
   /* ══════════════════ SYNC INDICATOR ══════════════════ */
   .sync-indicator {
     font-size:0.68rem; color:var(--muted); display:flex;
-    align-items:center; gap:4px; transition:color 0.3s; white-space:nowrap;
+    align-items:center; gap:4px; transition:color 0.3s, min-width 0.3s; white-space:nowrap;
+    min-width: 106px; /* reserve space for "⏳ Saving..." to prevent layout shift */
   }
   .sync-indicator.saving { color:var(--amber); }
   .sync-indicator.saved  { color:var(--accent); }
@@ -6337,9 +6338,11 @@ body {
 .pwa-install-button:hover { transform: translateY(-1px); border-color: var(--accent); background: var(--accent-dim); }
 .sync-indicator {
   min-height: 30px;
+  min-width: 106px; /* reserve space to prevent topbar layout shift on sync */
   padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 999px;
+  transition: color 0.3s, background 0.3s, border-color 0.3s;
 }
 .sync-indicator.offline {
   color: var(--amber);
