@@ -26,6 +26,9 @@ let AI_LIMITS = { unlimited: {}, unlimitedEmails: [], focusUsers: {}, focusEmail
 /* AI auto-schedule (Groq) config — stored in Firestore config/ai, read by the
    Telegram bot server to parse incoming messages into planner tasks. */
 let AI_CONFIG = { groqApiKey: '', model: 'llama-3.1-8b-instant', enabled: false, loaded: false };
+/* YouTube DNS adblock resolver entries — stored in Firestore config/dnsAdblock.
+   Admin can add/edit/remove platforms from the Settings tab. */
+let DNS_CONFIG = { platforms: [], enabled: true, loaded: false };
 
 /* Central metadata keeps navigation labels, page context and deep links in sync. */
 const ADMIN_TABS = {
@@ -509,6 +512,10 @@ async function loadAll() {
     const sv = await db.collection('config').doc('settings').get();
     SETTINGS = sv.exists ? sv.data() : { requireApproval: false };
   } catch(e) { failed('system settings', e); }
+  try {
+    const dns = await db.collection('config').doc('dnsAdblock').get();
+    DNS_CONFIG = dns.exists ? { platforms: dns.data().platforms || [], enabled: dns.data().enabled !== false, loaded: true } : { platforms: [], enabled: true, loaded: true };
+  } catch(e) { failed('DNS adblock config', e); }
   const completedAt = new Date();
   ADMIN_DATA_HEALTH = {
     errors: errors.slice(),
@@ -561,12 +568,20 @@ function setTab(t, options) {
   if (t === 'telegram' && !TG_CONFIG.loaded) loadTelegramData();
   if (t === 'aistudy' && !AI_CONFIG.loaded) loadAiStudyData();
   if (t === 'reports' && !REPORTS_LOADED) loadReportsData();
+  if (t === 'dnsAdblock' && !DNS_CONFIG.loaded) loadDnsAdblockData();
   render();
   closeAdminNav();
   if (opts.focus !== false) {
     const main = document.getElementById('main-content');
     if (main) { main.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: 'smooth' }); }
   }
+}
+async function loadDnsAdblockData() {
+  try {
+    const dns = await db.collection('config').doc('dnsAdblock').get();
+    DNS_CONFIG = dns.exists ? { platforms: dns.data().platforms || [], enabled: dns.data().enabled !== false, loaded: true } : { platforms: [], enabled: true, loaded: true };
+  } catch(e) { console.warn('DNS adblock load failed', e); }
+  render();
 }
 function render() {
   updateTabChrome();
@@ -608,4 +623,5 @@ function render() {
   else if (TAB === 'telegram') c.innerHTML = renderTelegram();
   else if (TAB === 'aistudy') c.innerHTML = renderAiStudy();
   else if (TAB === 'settings') c.innerHTML = renderSettings();
+  else if (TAB === 'dnsAdblock') c.innerHTML = renderDnsAdblock();
 }
