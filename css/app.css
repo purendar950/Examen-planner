@@ -153,7 +153,7 @@
   .topbar-title .z { color: var(--accent); }
   /* Brand accent stays readable on the near-white light theme */
   html[data-theme="light"] .topbar-title .z { color: #008f66; }
-  .topbar-right { display: flex; align-items: center; gap: 1rem; min-width: 0; }
+  .topbar-right { display: flex; align-items: center; gap: 1rem; min-width: 0; justify-content: flex-end; }
 
   /* Phones: the topbar-right cluster (trial badge, request, theme, user chip)
      can be wider than the screen — let it scroll horizontally instead of
@@ -162,7 +162,7 @@
   @media (max-width: 600px) {
     .topbar-right { gap: 8px; overflow-x: auto; overflow-y: visible; -ms-overflow-style: none; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
     .topbar-right::-webkit-scrollbar { height: 0; display: none; }
-    .topbar-right > * { flex-shrink: 0; }
+    .topbar-right > :not(.sync-indicator) { flex-shrink: 0; }
     .user-menu-dropdown { position: fixed; top: 58px; right: 10px; left: auto; }
     /* Collapse the user chip to just the avatar so the crowded topbar fits
        (full name + email remain inside the dropdown) */
@@ -6340,6 +6340,22 @@ body {
   padding: 0 9px;
   border: 1px solid transparent;
   border-radius: 999px;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Collapse the sync pill when label is empty so it consumes zero space. */
+.sync-indicator:has(#sync-label:empty) {
+  padding: 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+/* Graceful text truncation inside the indicator. */
+#sync-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .sync-indicator.offline {
   color: var(--amber);
