@@ -715,8 +715,8 @@ const STUDY_PROVIDERS = {
               def: 'auto',
               note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' },
   stolencompute: { label: 'StolenCompute', host: 'stolencompute.com', baseUrl: 'https://stolencompute.com', keyField: 'stolencomputeApiKeys', modelField: 'stolencomputeModel',
-              models: ['auto'], def: 'auto',
-              note: 'Free anonymous AI pool · session-based · no API key required', keyUrl: '' }
+              models: ['nemotron-3-ultra:cloud', 'glm-5.2:cloud', 'kimi-k2.6:cloud', 'kimi-k2.7-code:cloud', 'deepseek-v4-pro:cloud'], def: 'nemotron-3-ultra:cloud',
+              note: 'Free anonymous AI pool · session-based · no API key required. Cloud models (reliable) shown by default; full live catalog appears once /api/models loads.', keyUrl: '' }
 };
 const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro', 'stolencompute'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
@@ -797,9 +797,11 @@ function studyModelsFor(pid) {
   // model overrides deliberately do not apply to OmniRoute.
   if (pid === 'omniroute') return ((STUDY_PROVIDERS.omniroute || {}).models || ['auto']).slice();
   // StolenCompute's catalog is the live /api/models list served by the proxy
-  // (cached server-side). Show just the stable "auto" alias here; the student
-  // picker surfaces the full live list via /api/status.studyModelGroups.
-  if (pid === 'stolencompute') return ((STUDY_PROVIDERS.stolencompute || {}).models || ['auto']).slice();
+  // (cached server-side). The admin card shows the 5 reliable cloud models
+  // from STUDY_PROVIDERS.stolencompute.models; the student picker surfaces
+  // the full live list via /api/status.studyModelGroups. `auto` is NEVER
+  // offered — StolenCompute rejects it with HTTP 404 on /api/session.
+  if (pid === 'stolencompute') return ((STUDY_PROVIDERS.stolencompute || {}).models || []).slice();
   var ov = AI_CONFIG && AI_CONFIG.providerModels && AI_CONFIG.providerModels[pid];
   if (Array.isArray(ov) && ov.length) return ov.slice();
   return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
