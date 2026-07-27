@@ -940,7 +940,13 @@ STOLENCOMPUTE_REROLL_URL = STOLENCOMPUTE_BASE + "/api/reroll"
 # responsive without surfacing retired hosts.
 _STOLENCOMPUTE_MODELS_TTL = max(60, min(int(os.environ.get("STOLENCOMPUTE_MODELS_TTL", "600")), 3600))
 _STOLENCOMPUTE_TIMEOUT = max(10, min(int(os.environ.get("STOLENCOMPUTE_TIMEOUT", "120")), 300))
-_STOLENCOMPUTE_SESSION_TTL = max(30, min(int(os.environ.get("STOLENCOMPUTE_SESSION_TTL", "180")), 600))
+# StolenCompute sessions expire after ~90-120s of inactivity (live testing
+# showed a session created at T=0 still worked at T=90s but returned
+# HTTP 400 {"error":"no active session"} at T=120s). The previous 180s TTL
+# served stale tokens for the last ~60-90s, causing chat calls to 400.
+# 60s keeps us safely inside the upstream's idle window while still letting
+# back-to-back note-generation requests reuse the same session.
+_STOLENCOMPUTE_SESSION_TTL = max(15, min(int(os.environ.get("STOLENCOMPUTE_SESSION_TTL", "60")), 120))
 # StolenCompute's pool assigns a random host on each POST /api/session. Live
 # testing shows ~30% of those assignments hit a dead/busy upstream and the
 # server returns HTTP 500 {"error":"server error"} even for the most-reliable
@@ -5592,6 +5598,19 @@ def _stolencompute_chat_once(messages, ai, token=None):
         # a freshly-minted session.
         _stolencompute_invalidate_session_token(token)
         raise RuntimeError("StolenCompute session rejected (HTTP %d)" % r.status_code)
+    if r.status_code == 400:
+        # HTTP 400 from StolenCompute almost always means {"error":"no active
+        # session"} — the token is missing, malformed, or expired. Live testing
+        # confirmed this for empty tokens, garbage tokens, AND sessions that
+        # have been idle for >90-120s (the upstream idle timeout). Treat it as
+        # session-rejected so the caller invalidates and re-creates the session.
+        body = (r.text or "")[:180]
+        if "no active session" in body.lower() or "session" in body.lower():
+            _stolencompute_invalidate_session_token(token)
+            raise RuntimeError("StolenCompute session rejected (HTTP 400: %s)" % body)
+        # A 400 that doesn't mention "session" is a real bad-request — surface
+        # it without retrying (e.g. malformed messages array).
+        raise RuntimeError("StolenCompute chat HTTP 400: %s" % body)
     if r.status_code in (500, 502, 503, 504):
         # Chosen host is dead/busy. Caller should reroll (reassign host) and
         # retry — DO NOT invalidate the session token; reroll keeps it valid.
@@ -5615,8 +5634,9 @@ def _stolencompute_chat(messages, ai, max_tokens=2048, json_mode=False,
     """Blocking chat via the StolenCompute session protocol.
 
     Resilience strategy (handles StolenCompute's ~30% session-assignment and
-    mid-chat host-death failure rate):
-      1. Try the cached session token. On 401/403/404/410 (token rejected),
+    mid-chat host-death failure rate, plus the ~90-120s idle-timeout):
+      1. Try the cached session token. On 401/403/404/410 (token rejected)
+         OR HTTP 400 with "no active session" (idle-timeout / missing token),
          invalidate the cache and re-create the session once.
       2. On 500/502/503/504 (upstream host dead), call POST /api/reroll to
          reassign the session to a different host, then retry the chat. Up to
