@@ -713,9 +713,12 @@ const STUDY_PROVIDERS = {
   kiro:     { label: 'Kiro', host: 'kiro-key-test-s6io.onrender.com', baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
               models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
               def: 'auto',
-              note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' }
+              note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' },
+  stolencompute: { label: 'StolenCompute', host: 'stolencompute.com', baseUrl: 'https://stolencompute.com', keyField: 'stolencomputeApiKeys', modelField: 'stolencomputeModel',
+              models: ['auto'], def: 'auto',
+              note: 'Free anonymous AI pool · session-based · no API key required', keyUrl: '' }
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro', 'stolencompute'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
@@ -765,6 +768,11 @@ function splitStudyKeys(raw) {
 /* Saved key(s) for a provider (Bynara falls back to the legacy studyApiKeys/
    studyApiKey fields so an existing setup keeps working). */
 function studyKeysFor(pid) {
+  // StolenCompute is a free, anonymous, session-based pool — no API key. We
+  // return a sentinel so the admin UI marks the provider card as "configured"
+  // (Standby/Live) instead of "Setup" (which would require a key field). The
+  // sentinel is never written to Firestore or sent to the upstream service.
+  if (pid === 'stolencompute') return ['(no key required — free anonymous pool)'];
   var p = STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara;
   var raw = (AI_CONFIG && AI_CONFIG[p.keyField]);
   if ((!raw || (Array.isArray(raw) && !raw.length)) && pid === 'bynara') {
@@ -788,6 +796,10 @@ function studyModelsFor(pid) {
   // Here (admin) we show a static list of its `auto/*` routing aliases; admin
   // model overrides deliberately do not apply to OmniRoute.
   if (pid === 'omniroute') return ((STUDY_PROVIDERS.omniroute || {}).models || ['auto']).slice();
+  // StolenCompute's catalog is the live /api/models list served by the proxy
+  // (cached server-side). Show just the stable "auto" alias here; the student
+  // picker surfaces the full live list via /api/status.studyModelGroups.
+  if (pid === 'stolencompute') return ((STUDY_PROVIDERS.stolencompute || {}).models || ['auto']).slice();
   var ov = AI_CONFIG && AI_CONFIG.providerModels && AI_CONFIG.providerModels[pid];
   if (Array.isArray(ov) && ov.length) return ov.slice();
   return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
@@ -799,7 +811,11 @@ function studyModelsFor(pid) {
 // OmniRoute's live catalog is intentionally not auto-synced: it is a routed
 // multi-provider catalog whose availability can change while a route is live.
 // Its approved model list is managed explicitly in this Admin screen.
-const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.filter(function (pid) { return pid !== 'omniroute'; });
+// StolenCompute is likewise excluded: it has no API key, and the proxy already
+// refreshes its /api/models catalog every STOLENCOMPUTE_MODELS_TTL seconds, so
+// a daily Firestore-based refresh would duplicate that work without the
+// zero-price metadata the free-model refresh requires.
+const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.filter(function (pid) { return pid !== 'omniroute' && pid !== 'stolencompute'; });
 const STUDY_FREE_MODEL_REFRESH_PROVIDERS = STUDY_CATALOG_REFRESH_PROVIDERS;
 const STUDY_MODEL_CATALOG_CONFIG = {
   free: { providerField: 'dailyFreeModelProviders', statusField: 'dailyFreeModelSyncStatus', label: 'free-model' },
@@ -1042,7 +1058,7 @@ function parseCurlIntoStudy() {
     if (!pid && STUDY_PROVIDERS[k].host && host.indexOf(STUDY_PROVIDERS[k].host) !== -1) pid = k;
   });
   if (!pid) {
-    showToast('⚠️ Unknown host "' + (host || '?') + '". Supported: OmniRoute, Mistral, Cerebras, Bynara, OpenRouter, NVIDIA.');
+    showToast('⚠️ Unknown host "' + (host || '?') + '". Supported: OmniRoute, Mistral, Cerebras, Bynara, OpenRouter, NVIDIA, StolenCompute.');
     return;
   }
   if (key) {
@@ -1070,7 +1086,10 @@ async function saveStudyAiConfig() {
   });
   const model = provider === 'omniroute' ? 'auto' : (((document.getElementById('study-model') || {}).value) || p.def).trim();
   const activeKeys = allKeys[provider] || [];
-  if (!activeKeys.length) {
+  // StolenCompute is a free, anonymous, keyless pool — the user-typed key box
+  // is intentionally empty. Skip the "no key" warning so saving succeeds
+  // without surfacing a misleading toast.
+  if (!activeKeys.length && provider !== 'stolencompute') {
     showToast('⚠️ Active provider (' + p.label + ') has no key');
   }
   // Persist every provider's key + the active provider mirror (studyApiKeys /
@@ -1088,8 +1107,14 @@ async function saveStudyAiConfig() {
     STUDY_PROVIDER_ORDER.forEach(function (k) { AI_CONFIG[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
     AI_CONFIG[p.modelField] = model;
     AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
-    showToast('✅ Study AI saved — active: ' + p.label +
-              ' (' + activeKeys.length + ' key' + (activeKeys.length === 1 ? '' : 's') + ')');
+    // StolenCompute is keyless; tailor the success toast so "0 keys" doesn't
+    // read as a failure to the operator.
+    if (provider === 'stolencompute') {
+      showToast('✅ Study AI saved — active: ' + p.label + ' (free anonymous pool, no key required)');
+    } else {
+      showToast('✅ Study AI saved — active: ' + p.label +
+                ' (' + activeKeys.length + ' key' + (activeKeys.length === 1 ? '' : 's') + ')');
+    }
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
 }

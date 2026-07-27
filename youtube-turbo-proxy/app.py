@@ -924,6 +924,34 @@ BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
 # server-side. ngrok's browser-warning bypass is applied by _ai_headers().
 OMNIROUTE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions"
 
+# StolenCompute is a free, anonymous, session-based AI pool. Unlike every other
+# provider here it has NO API key and uses a create-session-then-chat protocol
+# instead of OpenAI's stateless /chat/completions. Browser clients must use a
+# CORS proxy; this server-side integration calls the endpoints directly, so no
+# proxy is needed. See docs/stolencompute/api-tester.html for the contract.
+STOLENCOMPUTE_BASE = "https://stolencompute.com"
+STOLENCOMPUTE_MODELS_URL = STOLENCOMPUTE_BASE + "/api/models"
+STOLENCOMPUTE_SESSION_URL = STOLENCOMPUTE_BASE + "/api/session"
+STOLENCOMPUTE_CHAT_URL = STOLENCOMPUTE_BASE + "/api/chat"
+STOLENCOMPUTE_REROLL_URL = STOLENCOMPUTE_BASE + "/api/reroll"
+# Sessions are short-lived; pick a conservative TTL so a stale token from a
+# previous request does not poison a new one. The upstream pool rotates hosts
+# frequently, so caching the live model catalog for ~10 min keeps /api/status
+# responsive without surfacing retired hosts.
+_STOLENCOMPUTE_MODELS_TTL = max(60, min(int(os.environ.get("STOLENCOMPUTE_MODELS_TTL", "600")), 3600))
+_STOLENCOMPUTE_TIMEOUT = max(10, min(int(os.environ.get("STOLENCOMPUTE_TIMEOUT", "120")), 300))
+_STOLENCOMPUTE_SESSION_TTL = max(30, min(int(os.environ.get("STOLENCOMPUTE_SESSION_TTL", "180")), 600))
+_stolencompute_models_cache = {"ts": 0.0, "data": None}
+_stolencompute_models_lock = threading.Lock()
+# A small stable fallback list so the provider can be selected even before the
+# first live /api/models fetch succeeds (cold start, network blip, etc.). Real
+# model IDs are surfaced via /api/status once the cache warms up.
+_STOLENCOMPUTE_FALLBACK_MODELS = ["auto"]
+# Per-session token cache keyed by model id so we don't pay the create-session
+# round-trip on every chat call. Tokens are evicted by TTL or on a chat error.
+_stolencompute_session_cache = {}  # {model: {"token": str, "ts": float}}
+_stolencompute_session_lock = threading.Lock()
+
 # OpenCode runs as a separately deployed, Basic-Auth-protected service. It is
 # available to the admin planner and, only when OPENCODE_STUDY_ENABLED is true,
 # as a server-managed Study AI transport. Credentials, provider/model resolution,
@@ -2617,6 +2645,8 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False,
 
     OpenCode uses its Basic-Auth session API and is never sent through the
     Bearer-token /chat/completions path used by the other providers.
+    StolenCompute uses an anonymous create-session-then-chat protocol and is
+    likewise never sent through the OpenAI-compatible path.
     """
     if ai.get("transport") == "opencode":
         answer = _opencode_chat(
@@ -2625,6 +2655,10 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False,
         if meta is not None and answer:
             meta["finish_reason"] = "stop"
         return answer
+    if ai.get("transport") == "stolencompute":
+        return _stolencompute_chat(
+            messages, ai, max_tokens=max_tokens, json_mode=json_mode,
+            meta=meta, cancel_event=cancel_event)
 
     chain = [ai]
     if (ai.get("provider") or "").lower() == "omniroute":
@@ -2641,6 +2675,10 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False,
                 if answer:
                     return answer
                 raise RuntimeError("OpenCode returned an empty Study AI response")
+            if cur.get("transport") == "stolencompute":
+                return _stolencompute_chat(
+                    messages, cur, max_tokens=max_tokens, json_mode=json_mode,
+                    meta=meta, cancel_event=cancel_event)
             return _chat_one_provider(messages, cur, temperature, max_tokens,
                                       json_mode, meta)
         except RuntimeError as exc:
@@ -2767,6 +2805,23 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
         if meta is not None:
             meta["finish_reason"] = "stop"
         return
+    if ai.get("transport") == "stolencompute":
+        # StolenCompute returns the full reply in one JSON payload; yield it as
+        # a single chunk. Re-raise on failure so the caller can surface the
+        # error (no fallback chain is attached, matching OmniRoute's contract).
+        produced = False
+        for piece in _stolencompute_chat_stream(
+                messages, ai, max_tokens=max_tokens, meta=meta,
+                cancel_event=cancel_event):
+            produced = True
+            yield piece
+        if cancel_event is not None and cancel_event.is_set():
+            return
+        if not produced:
+            raise RuntimeError("StolenCompute returned an empty Study AI response")
+        if meta is not None:
+            meta["finish_reason"] = "stop"
+        return
 
     chain = [ai]
     if (ai.get("provider") or "").lower() == "omniroute":
@@ -2788,6 +2843,21 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
                     meta["finish_reason"] = "stop"
                 return
             last = "OpenCode returned an empty Study AI response"
+            continue
+        if cur.get("transport") == "stolencompute":
+            produced = False
+            for piece in _stolencompute_chat_stream(
+                    messages, cur, max_tokens=max_tokens, meta=meta,
+                    cancel_event=cancel_event):
+                produced = True
+                yield piece
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            if produced:
+                if meta is not None:
+                    meta["finish_reason"] = "stop"
+                return
+            last = "StolenCompute returned an empty Study AI response"
             continue
         result = {"produced": False, "last": last}
         for piece in _stream_one_provider(messages, cur, temperature, max_tokens,
@@ -4350,6 +4420,11 @@ STUDY_TEST_PROVIDERS = {
     "omniroute":  {"url": OMNIROUTE_URL, "keyField": "omnirouteApiKeys", "modelField": "omnirouteModel", "def": "auto"},
     # Kiro CLI backend (OpenAI-compatible wrapper around kiro-cli headless mode).
     "kiro":       {"url": "https://kiro-key-test-s6io.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
+    # StolenCompute is session-based and keyless, so url/keyField are unused by
+    # the OpenAI-style health check (see api_study_test special-case). They are
+    # kept here so STUDY_TEST_PROVIDERS remains the single source of truth for
+    # provider metadata; the modelField/def let /api/status resolve a default.
+    "stolencompute": {"url": STOLENCOMPUTE_CHAT_URL, "keyField": "stolencomputeApiKeys", "modelField": "stolencomputeModel", "def": "auto"},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
@@ -4368,6 +4443,11 @@ STUDY_PROVIDER_MODELS = {
     # sole stable client-facing route.
     "omniroute":  ["auto"],
     "kiro":       ["auto", "claude-sonnet-5", "claude-opus-4.8", "claude-opus-4.7", "claude-opus-4.6", "claude-sonnet-4.6", "claude-opus-4.5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next"],
+    # StolenCompute publishes a live /api/models catalog; the placeholder "auto"
+    # is always available so users can pick the provider before the first
+    # catalog fetch lands. The real list is merged in by
+    # _effective_provider_models() (see _stolencompute_models_live()).
+    "stolencompute": ["auto"],
     # Resolved dynamically from the server-owned OpenCode Zen configuration.
     "opencode":   [],
 }
@@ -4375,8 +4455,8 @@ STUDY_PROVIDER_MODELS = {
 # list (_all_study_models) and the grouped list (/api/status studyModelGroups)
 # can never drift out of sync (a missing id here made Gemini vanish from the
 # user-side model dropdown even though it worked everywhere else).
-STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "omniroute", "kiro", "opencode")
-STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "omniroute": "OmniRoute", "kiro": "Kiro", "opencode": "OpenCode Zen"}
+STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "omniroute", "kiro", "stolencompute", "opencode")
+STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "omniroute": "OmniRoute", "kiro": "Kiro", "stolencompute": "StolenCompute", "opencode": "OpenCode Zen"}
 
 # OmniRoute aggregates many AI providers behind one OpenAI-compatible endpoint;
 # every text/chat model ID is namespaced `provider/model`. The student picker
@@ -4593,6 +4673,13 @@ def _effective_provider_models(cfg):
         if pid == "omniroute":
             out[pid] = _omniroute_catalog_flat()
             continue
+        # StolenCompute publishes a live /api/models catalog that already
+        # reflects which pool hosts are currently online. Admin overrides are
+        # ignored for the same reason as OmniRoute: stale overrides would hide
+        # newly added upstream models and pin users to retired ones.
+        if pid == "stolencompute":
+            out[pid] = _stolencompute_models_live()
+            continue
         ov = overrides.get(pid)
         if isinstance(ov, list):
             cleaned = [m.strip() for m in ov if isinstance(m, str) and m.strip()]
@@ -4627,7 +4714,13 @@ def _configured_provider_keys(cfg, pid):
 
     OpenCode is intentionally excluded: its Basic Auth credentials are read only
     from server environment variables and checked by _provider_configured().
+    StolenCompute is similarly excluded: it is a free, anonymous, session-based
+    pool with no API key at all, and is always considered configured.
     """
+    if pid == "stolencompute":
+        # Sentinel so callers that count keys see "1 key"; the value is never
+        # sent to StolenCompute (its chat path is _stolencompute_chat()).
+        return ["stolencompute-anonymous"]
     meta = STUDY_TEST_PROVIDERS.get(pid)
     keys = _cfg_keys(cfg, meta["keyField"]) if meta else []
     if pid == "bynara" and not keys:
@@ -4643,6 +4736,10 @@ def _provider_configured(cfg, pid):
     """True when a provider can serve Study AI without exposing credentials."""
     if pid == "opencode":
         return bool(_opencode_study_enabled() and _opencode_config())
+    if pid == "stolencompute":
+        # Free, anonymous, keyless pool — always available. Whether the upstream
+        # is actually reachable is reported by the health check, not by this flag.
+        return True
     return bool(_configured_provider_keys(cfg, pid))
 
 
@@ -4651,12 +4748,15 @@ def _ai_configured(ai):
         return False
     if ai.get("transport") == "opencode":
         return bool(ai.get("opencode_config"))
+    if ai.get("transport") == "stolencompute":
+        # Free, anonymous, keyless pool — always "configured" when selected.
+        return True
     return bool(ai.get("keys") or ai.get("key"))
 
 
 def _ai_key_count(ai):
     """Public-safe count; server-managed transports intentionally report zero."""
-    if not ai or ai.get("transport") == "opencode":
+    if not ai or ai.get("transport") in ("opencode", "stolencompute"):
         return 0
     return len(ai.get("keys") or ([ai["key"]] if ai.get("key") else []))
 
@@ -5187,14 +5287,248 @@ def _opencode_study_ai(model=None):
     }
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# StolenCompute transport — free, anonymous, session-based AI pool.
+# Unlike OpenAI-compatible providers, StolenCompute requires a two-step
+# protocol: POST /api/session {model} → {session}, then POST /api/chat
+# {session, messages} → {reply}. No API key. Sessions are short-lived, so we
+# cache one token per model id for _STOLENCOMPUTE_SESSION_TTL seconds and
+# retry once with a fresh session if the cached token is rejected.
+# ──────────────────────────────────────────────────────────────────────────
+
+def _stolencompute_models_live():
+    """Fetch the live /api/models catalog (cached for _STOLENCOMPUTE_MODELS_TTL).
+
+    Returns the list of model id strings (deduped, sorted). On any failure
+    returns _STOLENCOMPUTE_FALLBACK_MODELS so the provider stays selectable
+    even when the upstream is briefly unreachable.
+    """
+    now = time.time()
+    cached = _stolencompute_models_cache
+    if cached["data"] is not None and now - cached["ts"] < _STOLENCOMPUTE_MODELS_TTL:
+        return cached["data"]
+    with _stolencompute_models_lock:
+        # Re-check inside the lock so only one thread pays the fetch cost.
+        cached = _stolencompute_models_cache
+        if cached["data"] is not None and now - cached["ts"] < _STOLENCOMPUTE_MODELS_TTL:
+            return cached["data"]
+        try:
+            r = requests.get(STOLENCOMPUTE_MODELS_URL, timeout=_STOLENCOMPUTE_TIMEOUT)
+            if r.status_code != 200:
+                raise RuntimeError("HTTP %d" % r.status_code)
+            payload = r.json()
+            if not isinstance(payload, list):
+                raise RuntimeError("unexpected payload type: %s" % type(payload).__name__)
+            ids = []
+            seen = set()
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                mid = str(entry.get("model") or "").strip()
+                if mid and mid not in seen:
+                    seen.add(mid)
+                    ids.append(mid)
+            if not ids:
+                raise RuntimeError("empty model list")
+            ids = sorted(ids)
+            # Always keep `auto` first so the default dropdown option is stable.
+            if "auto" in ids:
+                ids.remove("auto")
+            ids = ["auto"] + ids
+            _stolencompute_models_cache["data"] = ids
+            _stolencompute_models_cache["ts"] = now
+            return ids
+        except Exception as exc:  # noqa: BLE001
+            log.warning("StolenCompute model catalog fetch failed: %s", exc)
+            # Keep the previous cache (if any) so a transient blip doesn't wipe
+            # the picker; only fall back when there is no cache at all.
+            if _stolencompute_models_cache["data"] is None:
+                _stolencompute_models_cache["data"] = list(_STOLENCOMPUTE_FALLBACK_MODELS)
+                _stolencompute_models_cache["ts"] = now
+            return _stolencompute_models_cache["data"]
+
+
+def _stolencompute_ai(cfg, model=None):
+    """Build a StolenCompute transport config. `cfg` is accepted for API
+    symmetry with _ai_for_provider but unused — StolenCompute has no key."""
+    meta = STUDY_TEST_PROVIDERS.get("stolencompute", {})
+    selected_model = (model or (cfg or {}).get(meta.get("modelField", "stolencomputeModel"))
+                      or meta.get("def", "auto")).strip() or "auto"
+    allowed = _effective_provider_models(cfg).get("stolencompute", [])
+    if allowed and selected_model not in allowed:
+        log.warning("Replacing unavailable StolenCompute model %s with the catalog default", selected_model)
+        selected_model = allowed[0] if allowed else "auto"
+    return {
+        "transport": "stolencompute",
+        "provider": "stolencompute",
+        "base_url": STOLENCOMPUTE_BASE,
+        "model": selected_model,
+        # No keys — anonymous pool. Keep the field for parity with other configs
+        # so generic code that reads ai["keys"] doesn't KeyError.
+        "keys": [],
+        "big_context": True,           # pool hosts large-context models
+        "tpm": 0,
+    }
+
+
+def _stolencompute_create_session(model):
+    """POST /api/session → {session, model, pool}. Returns the session token
+    string, or raises RuntimeError on any failure."""
+    try:
+        r = requests.post(
+            STOLENCOMPUTE_SESSION_URL,
+            json={"model": model},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=_STOLENCOMPUTE_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError("StolenCompute session network error: %s" % exc)
+    if r.status_code != 200:
+        raise RuntimeError("StolenCompute session HTTP %d: %s" % (r.status_code, (r.text or "")[:180]))
+    try:
+        payload = r.json()
+    except ValueError:
+        raise RuntimeError("StolenCompute session returned non-JSON response")
+    token = (payload or {}).get("session")
+    if not token:
+        # The upstream returns {"error": ...} on failure; surface it.
+        err = (payload or {}).get("error") or "no session token in response"
+        raise RuntimeError("StolenCompute session error: %s" % err)
+    return str(token)
+
+
+def _stolencompute_session_for(model):
+    """Return a cached session token for `model`, refreshing it when stale.
+
+    StolenCompute sessions are pooled per model id and expire after
+    _STOLENCOMPUTE_SESSION_TTL seconds. The cache is keyed by model so a user
+    switching models doesn't reuse a session bound to a different upstream.
+    """
+    now = time.time()
+    with _stolencompute_session_lock:
+        entry = _stolencompute_session_cache.get(model)
+        if entry and now - entry["ts"] < _STOLENCOMPUTE_SESSION_TTL:
+            return entry["token"]
+    # Drop the lock during the network call so concurrent chats on the same
+    # model don't serialize behind a single create-session round-trip.
+    token = _stolencompute_create_session(model)
+    with _stolencompute_session_lock:
+        _stolencompute_session_cache[model] = {"token": token, "ts": now}
+    return token
+
+
+def _stolencompute_invalidate_session(model):
+    """Drop the cached session for `model` so the next chat mints a fresh one."""
+    with _stolencompute_session_lock:
+        _stolencompute_session_cache.pop(model, None)
+
+
+def _stolencompute_chat_once(messages, ai):
+    """One POST /api/chat attempt. Returns the reply text. Raises RuntimeError
+    on any failure (caller decides whether to retry with a new session)."""
+    model = ai.get("model") or "auto"
+    token = _stolencompute_session_for(model)
+    # StolenCompute accepts the same {role, content} shape OpenAI uses, so we
+    # can forward messages verbatim. Strip any OpenAI-only fields defensively.
+    clean_messages = [
+        {"role": str(m.get("role") or "user"),
+         "content": str(m.get("content") or "")}
+        for m in (messages or [])
+        if isinstance(m, dict) and m.get("content") is not None
+    ]
+    try:
+        r = requests.post(
+            STOLENCOMPUTE_CHAT_URL,
+            json={"session": token, "messages": clean_messages},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=_STOLENCOMPUTE_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError("StolenCompute chat network error: %s" % exc)
+    if r.status_code in (401, 403, 404, 410):
+        # Session token rejected/expired — invalidate and let caller retry once.
+        _stolencompute_invalidate_session(model)
+        raise RuntimeError("StolenCompute session rejected (HTTP %d)" % r.status_code)
+    if r.status_code != 200:
+        raise RuntimeError("StolenCompute chat HTTP %d: %s" % (r.status_code, (r.text or "")[:180]))
+    try:
+        payload = r.json()
+    except ValueError:
+        raise RuntimeError("StolenCompute chat returned non-JSON response")
+    reply = (payload or {}).get("reply")
+    if not reply:
+        err = (payload or {}).get("error") or "empty reply"
+        raise RuntimeError("StolenCompute chat error: %s" % err)
+    return str(reply)
+
+
+def _stolencompute_chat(messages, ai, max_tokens=2048, json_mode=False,
+                        meta=None, cancel_event=None):
+    """Blocking chat via the StolenCompute session protocol.
+
+    Retries once with a fresh session if the cached token is rejected. The
+    `max_tokens` and `json_mode` parameters are accepted for API parity with
+    _ai_chat() but are not forwarded — StolenCompute's /api/chat does not
+    expose them, and the upstream pool decides its own response length.
+    """
+    if cancel_event is not None and cancel_event.is_set():
+        raise RuntimeError("cancelled before StolenCompute chat")
+    last = "unknown error"
+    for attempt in (1, 2):
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("cancelled during StolenCompute chat")
+        try:
+            reply = _stolencompute_chat_once(messages, ai)
+            if meta is not None:
+                meta["finish_reason"] = "stop"
+            return reply
+        except RuntimeError as exc:
+            last = str(exc)
+            # Only retry once, and only when the failure looks session-related
+            # (the invalidate helper already ran in _stolencompute_chat_once).
+            if attempt == 2 or "session" not in last.lower():
+                break
+            time.sleep(1)
+    raise RuntimeError("StolenCompute chat failed: %s" % last)
+
+
+def _stolencompute_chat_stream(messages, ai, max_tokens=2048, meta=None,
+                               cancel_event=None):
+    """Streaming variant of _stolencompute_chat.
+
+    StolenCompute's /api/chat returns the full reply in one JSON payload (no
+    SSE/token streaming), so this generator yields the complete reply as a
+    single chunk once it arrives. The interface still matches _ai_chat_stream
+    so the /api/study/stream text endpoint can drive it transparently.
+    """
+    if cancel_event is not None and cancel_event.is_set():
+        return
+    try:
+        reply = _stolencompute_chat(messages, ai, max_tokens=max_tokens,
+                                    meta=meta, cancel_event=cancel_event)
+    except RuntimeError:
+        # Re-raise so _ai_chat_stream's failover path can react (though
+        # StolenCompute has no fallback chain, mirroring OmniRoute).
+        raise
+    if reply:
+        yield reply
+    else:
+        raise RuntimeError("StolenCompute returned an empty Study AI response")
+
+
 def _ai_for_provider(cfg, pid, model=None):
     """Build an _ai_chat config for a specific provider.
 
     OpenAI-compatible providers use their own Firestore keys. OpenCode is a
     distinct env-managed Basic-Auth transport and never receives a fake key.
+    StolenCompute is a free, anonymous, session-based pool with no key — its
+    config carries transport="stolencompute" so _ai_chat() / _ai_chat_stream()
+    dispatch to the session-based chat path instead of /chat/completions.
     """
     if pid == "opencode":
         return _opencode_study_ai(model)
+    if pid == "stolencompute":
+        return _stolencompute_ai(cfg, model)
     meta = STUDY_TEST_PROVIDERS.get(pid)
     if not meta:
         return None
@@ -5295,6 +5629,40 @@ def api_study_test():
     results = {}
     for pid, meta in STUDY_TEST_PROVIDERS.items():
         if want != "all" and want != pid:
+            continue
+        # StolenCompute is a keyless, session-based pool — it cannot be pinged
+        # via the OpenAI /chat/completions shape used by every other provider.
+        # Run a real create-session → chat round-trip and report the latency.
+        if pid == "stolencompute":
+            model = (cfg.get(meta["modelField"]) or meta["def"]).strip()
+            t0 = time.time()
+            try:
+                ai = _stolencompute_ai(cfg, model)
+                reply = _stolencompute_chat(
+                    [{"role": "user", "content": "ping"}], ai, max_tokens=1)
+                dt = int((time.time() - t0) * 1000)
+                results[pid] = {
+                    "configured": True,
+                    "ok": bool(reply),
+                    "status": 200 if reply else 502,
+                    "latency_ms": dt,
+                    "model": model,
+                    "keys": 0,           # anonymous pool
+                    "detail": "OK" if reply else "empty reply",
+                }
+            except RuntimeError as exc:
+                results[pid] = {
+                    "configured": True, "ok": False, "status": 0,
+                    "latency_ms": int((time.time() - t0) * 1000),
+                    "model": model, "keys": 0,
+                    "detail": str(exc)[:180],
+                }
+            except Exception as exc:  # noqa: BLE001
+                results[pid] = {
+                    "configured": True, "ok": False, "status": 0,
+                    "model": model, "keys": 0,
+                    "detail": str(exc)[:180],
+                }
             continue
         keys = _configured_provider_keys(cfg, pid)
         model = "auto" if pid == "omniroute" else (cfg.get(meta["modelField"]) or meta["def"]).strip()
