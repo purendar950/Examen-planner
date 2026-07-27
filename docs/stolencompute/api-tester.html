@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StolenCompute API Tester</title>
+  <style>
+    * { box-sizing: border-box; font-family: system-ui, sans-serif; }
+    body { max-width: 900px; margin: 0 auto; padding: 20px; background: #0a0d0b; color: #e8e8e8; }
+    h1 { color: #56B4E9; border-bottom: 1px solid #222; padding-bottom: 10px; }
+    .panel { background: #111; border: 1px solid #222; border-radius: 8px; padding: 16px; margin: 16px 0; }
+    .panel h2 { margin-top: 0; color: #009E73; font-size: 1.1rem; }
+    button { background: #1a1a1a; color: #e8e8e8; border: 1px solid #333; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin: 4px; }
+    button:hover { background: #2a2a2a; border-color: #56B4E9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    input, select, textarea { background: #0a0a0a; color: #e8e8e8; border: 1px solid #333; padding: 8px; border-radius: 4px; width: 100%; margin: 4px 0; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .log { background: #050505; border: 1px solid #222; border-radius: 4px; padding: 12px; max-height: 300px; overflow: auto; font-family: monospace; font-size: 0.85rem; white-space: pre-wrap; }
+    .log .req { color: #F0E442; }
+    .log .res { color: #009E73; }
+    .log .err { color: #D55E00; }
+    .log .info { color: #56B4E9; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { border: 1px solid #222; padding: 6px 8px; text-align: left; }
+    th { background: #1a1a1a; color: #56B4E9; }
+    tr:nth-child(even) { background: #111; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; background: #2a2a2a; }
+    .badge-cloud { background: #56B4E9; color: #000; }
+    .badge-local { background: #009E73; color: #000; }
+    .status { display: inline-block; padding: 4px 8px; border-radius: 3px; font-size: 0.8rem; margin-left: 10px; }
+    .status.ok { background: #009E73; color: #fff; }
+    .status.err { background: #D55E00; color: #fff; }
+  </style>
+</head>
+<body>
+  <h1>StolenCompute API Tester <span id="status" class="status err">CORS: Blocked</span></h1>
+  <p style="color:#888;font-size:0.9rem">Reference client for the StolenCompute session-based chat protocol. Kept in the repo so the contract (models / session / chat / reroll / stats / active) is documented alongside the integration in <code>youtube-turbo-proxy/app.py</code>.</p>
+
+  <div class="panel">
+    <h2>Proxy Config</h2>
+    <div class="row">
+      <input type="text" id="cors-proxy" placeholder="CORS Proxy URL (e.g. https://corsproxy.io/?)" style="flex:1" value="https://corsproxy.io/?">
+      <button id="btn-test-proxy">Test Proxy</button>
+    </div>
+    <div id="proxy-out" class="log"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Models (/api/models)</h2>
+    <div class="row">
+      <button id="btn-models">Fetch Models</button>
+      <span id="models-count" class="badge"></span>
+    </div>
+    <table id="models-table"><thead><tr><th>Model</th><th>Size</th><th>Hosts</th><th>Last Seen</th></tr></thead><tbody></tbody></table>
+  </div>
+
+  <div class="panel">
+    <h2>Stats (/api/stats)</h2>
+    <button id="btn-stats">Fetch Stats</button>
+    <div id="stats-out" class="log"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Active Sessions (/api/active)</h2>
+    <button id="btn-active">Fetch Active</button>
+    <div id="active-out" class="log"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Create Session (/api/session)</h2>
+    <div class="row">
+      <select id="session-model" style="flex:1"></select>
+      <button id="btn-session">Create Session</button>
+    </div>
+    <div id="session-out" class="log"></div>
+  </div>
+
+  <div class="panel" id="chat-panel" style="display:none">
+    <h2>Chat (/api/chat)</h2>
+    <div class="row">
+      <input type="text" id="chat-session" placeholder="Session token" readonly style="flex:1">
+      <button id="btn-reroll">Reroll Host</button>
+    </div>
+    <div id="chat-history" class="log" style="max-height:250px"></div>
+    <div class="row">
+      <textarea id="chat-input" rows="2" placeholder="Message..."></textarea>
+    </div>
+    <button id="btn-chat">Send</button>
+    <div id="chat-out" class="log" style="max-height:150px"></div>
+  </div>
+
+<script>
+/* StolenCompute session-based chat protocol.
+   - GET  /api/models         -> [{model, size, hosts, seen}]
+   - POST /api/session  {model}            -> {session, model, pool}
+   - POST /api/chat     {session, messages} -> {reply}
+   - POST /api/reroll   {session}           -> reroll host
+   - GET  /api/stats / /api/active          -> diagnostics
+   No API key required (free anonymous pool). Browser calls need a CORS proxy;
+   the backend integration in app.py calls these endpoints server-side, so it
+   skips the proxy entirely. */
+const STOLEN = 'https://stolencompute.com';
+let currentSession = null;
+let corsProxy = 'https://corsproxy.io/?';
+
+function log(el, msg, cls='') {
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function apiUrl(path) {
+  return corsProxy + encodeURIComponent(STOLEN + path);
+}
+
+async function fetchJson(url, opts={}) {
+  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  return res.json();
+}
+
+function setStatus(ok) {
+  const s = document.getElementById('status');
+  s.textContent = ok ? 'CORS: Working' : 'CORS: Blocked';
+  s.className = 'status ' + (ok ? 'ok' : 'err');
+}
+
+document.getElementById('btn-test-proxy').onclick = async () => {
+  corsProxy = document.getElementById('cors-proxy').value.trim();
+  const out = document.getElementById('proxy-out');
+  out.innerHTML = '';
+  log(out, 'Testing proxy: ' + corsProxy + STOLEN + '/api/models', 'info');
+  try {
+    const data = await fetchJson(apiUrl('/api/models'));
+    log(out, 'Success! Got ' + data.length + ' models', 'res');
+    setStatus(true);
+  } catch (e) {
+    log(out, 'Error: ' + e, 'err');
+    setStatus(false);
+  }
+};
+
+document.getElementById('btn-models').onclick = async () => {
+  const btn = document.getElementById('btn-models');
+  btn.disabled = true;
+  const tbody = document.querySelector('#models-table tbody');
+  tbody.innerHTML = '';
+  try {
+    const data = await fetchJson(apiUrl('/api/models'));
+    document.getElementById('models-count').textContent = data.length + ' models';
+    data.forEach(m => {
+      const tr = document.createElement('tr');
+      const isCloud = m.model.includes(':cloud');
+      tr.innerHTML = `<td>${m.model}</td><td><span class="badge ${isCloud?'badge-cloud':'badge-local'}">${m.size}</span></td><td>${m.hosts}</td><td>${m.seen}</td>`;
+      tr.onclick = () => {
+        document.getElementById('session-model').value = m.model;
+        document.getElementById('session-model').dispatchEvent(new Event('change'));
+      };
+      tbody.appendChild(tr);
+    });
+    const sel = document.getElementById('session-model');
+    sel.innerHTML = '<option value="">-- select model --</option>' + data.map(m => `<option value="${m.model}">${m.model} (${m.size}, ${m.hosts} hosts)</option>`).join('');
+  } catch (e) { log(tbody, 'Error: ' + e, 'err'); }
+  btn.disabled = false;
+};
+
+document.getElementById('btn-stats').onclick = async () => {
+  const out = document.getElementById('stats-out');
+  out.innerHTML = '';
+  try {
+    const data = await fetchJson(apiUrl('/api/stats'));
+    log(out, JSON.stringify(data, null, 2), 'res');
+  } catch (e) { log(out, 'Error: ' + e, 'err'); }
+};
+
+document.getElementById('btn-active').onclick = async () => {
+  const out = document.getElementById('active-out');
+  out.innerHTML = '';
+  try {
+    const data = await fetchJson(apiUrl('/api/active'));
+    log(out, 'Active sessions: ' + data.active, 'res');
+  } catch (e) { log(out, 'Error: ' + e, 'err'); }
+};
+
+document.getElementById('btn-session').onclick = async () => {
+  const model = document.getElementById('session-model').value;
+  const out = document.getElementById('session-out');
+  out.innerHTML = '';
+  if (!model) return log(out, 'Select a model first', 'err');
+  log(out, 'Creating session for ' + model + '...', 'info');
+  try {
+    const data = await fetchJson(apiUrl('/api/session'), { method: 'POST', body: JSON.stringify({ model }) });
+    if (data.error) throw new Error(data.error);
+    currentSession = data.session;
+    log(out, 'Session: ' + data.session, 'res');
+    log(out, 'Model: ' + data.model, 'info');
+    log(out, 'Pool: ' + data.pool + ' hosts', 'info');
+    document.getElementById('chat-session').value = data.session;
+    document.getElementById('chat-panel').style.display = 'block';
+    document.getElementById('chat-history').innerHTML = '';
+  } catch (e) { log(out, 'Error: ' + e, 'err'); }
+};
+
+document.getElementById('btn-reroll').onclick = async () => {
+  const out = document.getElementById('chat-out');
+  out.innerHTML = '';
+  if (!currentSession) return log(out, 'No active session', 'err');
+  log(out, 'Rerolling...', 'info');
+  try {
+    const data = await fetchJson(apiUrl('/api/reroll'), { method: 'POST', body: JSON.stringify({ session: currentSession }) });
+    log(out, JSON.stringify(data), 'res');
+  } catch (e) { log(out, 'Error: ' + e, 'err'); }
+};
+
+document.getElementById('btn-chat').onclick = async () => {
+  const input = document.getElementById('chat-input');
+  const history = document.getElementById('chat-history');
+  const out = document.getElementById('chat-out');
+  out.innerHTML = '';
+  const text = input.value.trim();
+  if (!text || !currentSession) return;
+  input.value = '';
+  log(history, 'You: ' + text, 'req');
+  log(out, 'Sending...', 'info');
+  try {
+    const data = await fetchJson(apiUrl('/api/chat'), {
+      method: 'POST',
+      body: JSON.stringify({ session: currentSession, messages: [{ role: 'user', content: text }] })
+    });
+    if (data.error) throw new Error(data.error);
+    log(history, 'Model: ' + data.reply, 'res');
+    log(out, 'Reply received', 'res');
+  } catch (e) { log(history, 'Error: ' + e, 'err'); log(out, 'Error: ' + e, 'err'); }
+};
+
+document.getElementById('chat-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); document.getElementById('btn-chat').click(); }
+});
+
+document.getElementById('btn-test-proxy').click();
+</script>
+</body>
+</html>
