@@ -941,12 +941,37 @@ STOLENCOMPUTE_REROLL_URL = STOLENCOMPUTE_BASE + "/api/reroll"
 _STOLENCOMPUTE_MODELS_TTL = max(60, min(int(os.environ.get("STOLENCOMPUTE_MODELS_TTL", "600")), 3600))
 _STOLENCOMPUTE_TIMEOUT = max(10, min(int(os.environ.get("STOLENCOMPUTE_TIMEOUT", "120")), 300))
 _STOLENCOMPUTE_SESSION_TTL = max(30, min(int(os.environ.get("STOLENCOMPUTE_SESSION_TTL", "180")), 600))
+# StolenCompute's pool assigns a random host on each POST /api/session. Live
+# testing shows ~30% of those assignments hit a dead/busy upstream and the
+# server returns HTTP 500 {"error":"server error"} even for the most-reliable
+# cloud model. Retrying immediately almost always succeeds, so we retry the
+# session-create call a few times with short backoff before giving up.
+_STOLENCOMPUTE_SESSION_MAX_ATTEMPTS = max(1, min(int(os.environ.get("STOLENCOMPUTE_SESSION_MAX_ATTEMPTS", "5")), 10))
+_STOLENCOMPUTE_SESSION_BACKOFF_SEC = max(0.1, min(float(os.environ.get("STOLENCOMPUTE_SESSION_BACKOFF_SEC", "0.5")), 5.0))
+# Same flakiness applies to /api/chat (the chosen host can die mid-conversation).
+# The upstream documents POST /api/reroll {session} as the recovery path: it
+# reassigns the session to a different host. We reroll up to N times before
+# surfacing the error to the user.
+_STOLENCOMPUTE_CHAT_MAX_REROLLS = max(0, min(int(os.environ.get("STOLENCOMPUTE_CHAT_MAX_REROLLS", "3")), 5))
 _stolencompute_models_cache = {"ts": 0.0, "data": None}
 _stolencompute_models_lock = threading.Lock()
-# A small stable fallback list so the provider can be selected even before the
-# first live /api/models fetch succeeds (cold start, network blip, etc.). Real
-# model IDs are surfaced via /api/status once the cache warms up.
-_STOLENCOMPUTE_FALLBACK_MODELS = ["auto"]
+# Stable fallback list used before the first live /api/models fetch lands and
+# whenever the upstream catalog is briefly unreachable. `auto` is intentionally
+# NOT in this list: StolenCompute rejects it with HTTP 404 "unknown model" on
+# /api/session. The fallback is ordered by reliability — cloud models (the
+# `:cloud` suffix) are backed by many hosts and rarely 500; local models depend
+# on a single community host and can vanish at any moment.
+_STOLENCOMPUTE_FALLBACK_MODELS = [
+    "nemotron-3-ultra:cloud",   # 33 hosts, 550b — most reliable
+    "glm-5.2:cloud",            # 21 hosts, 756b
+    "kimi-k2.6:cloud",          # 19 hosts, 1T
+    "kimi-k2.7-code:cloud",     # 13 hosts, 1T
+    "deepseek-v4-pro:cloud",    # 2 hosts, 685B
+]
+# Default model used when the admin has not picked one. Must be a real model id
+# (NOT "auto") — see comment above. Picked from the fallback list so the
+# default works even when the live catalog is unreachable.
+_STOLENCOMPUTE_DEFAULT_MODEL = _STOLENCOMPUTE_FALLBACK_MODELS[0]
 # Per-session token cache keyed by model id so we don't pay the create-session
 # round-trip on every chat call. Tokens are evicted by TTL or on a chat error.
 _stolencompute_session_cache = {}  # {model: {"token": str, "ts": float}}
@@ -4424,7 +4449,9 @@ STUDY_TEST_PROVIDERS = {
     # the OpenAI-style health check (see api_study_test special-case). They are
     # kept here so STUDY_TEST_PROVIDERS remains the single source of truth for
     # provider metadata; the modelField/def let /api/status resolve a default.
-    "stolencompute": {"url": STOLENCOMPUTE_CHAT_URL, "keyField": "stolencomputeApiKeys", "modelField": "stolencomputeModel", "def": "auto"},
+    # `def` is intentionally a real cloud model, NOT "auto" — StolenCompute
+    # rejects "auto" with HTTP 404 on /api/session.
+    "stolencompute": {"url": STOLENCOMPUTE_CHAT_URL, "keyField": "stolencomputeApiKeys", "modelField": "stolencomputeModel", "def": _STOLENCOMPUTE_DEFAULT_MODEL},
 }
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
@@ -4443,11 +4470,12 @@ STUDY_PROVIDER_MODELS = {
     # sole stable client-facing route.
     "omniroute":  ["auto"],
     "kiro":       ["auto", "claude-sonnet-5", "claude-opus-4.8", "claude-opus-4.7", "claude-opus-4.6", "claude-sonnet-4.6", "claude-opus-4.5", "claude-sonnet-4.5", "claude-sonnet-4", "claude-haiku-4.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "deepseek-3.2", "minimax-m2.5", "minimax-m2.1", "glm-5", "qwen3-coder-next"],
-    # StolenCompute publishes a live /api/models catalog; the placeholder "auto"
-    # is always available so users can pick the provider before the first
-    # catalog fetch lands. The real list is merged in by
-    # _effective_provider_models() (see _stolencompute_models_live()).
-    "stolencompute": ["auto"],
+    # StolenCompute publishes a live /api/models catalog; this placeholder is
+    # only used as a last-resort fallback before the first live fetch lands.
+    # The real list (cloud models first, then local) is merged in by
+    # _effective_provider_models() via _stolencompute_models_live().
+    # `auto` is intentionally absent — see _STOLENCOMPUTE_FALLBACK_MODELS.
+    "stolencompute": list(_STOLENCOMPUTE_FALLBACK_MODELS),
     # Resolved dynamically from the server-owned OpenCode Zen configuration.
     "opencode":   [],
 }
@@ -5299,9 +5327,14 @@ def _opencode_study_ai(model=None):
 def _stolencompute_models_live():
     """Fetch the live /api/models catalog (cached for _STOLENCOMPUTE_MODELS_TTL).
 
-    Returns the list of model id strings (deduped, sorted). On any failure
-    returns _STOLENCOMPUTE_FALLBACK_MODELS so the provider stays selectable
-    even when the upstream is briefly unreachable.
+    Returns the list of model id strings, ordered by reliability: cloud models
+    (the `:cloud` suffix, backed by many hosts) first, then local
+    community-hosted models sorted by host count. `auto` is filtered out —
+    StolenCompute rejects it with HTTP 404 on /api/session, so showing it in
+    the picker would let users select a model that can never start a session.
+
+    On any fetch failure returns _STOLENCOMPUTE_FALLBACK_MODELS so the provider
+    stays selectable even when the upstream is briefly unreachable.
     """
     now = time.time()
     cached = _stolencompute_models_cache
@@ -5319,22 +5352,36 @@ def _stolencompute_models_live():
             payload = r.json()
             if not isinstance(payload, list):
                 raise RuntimeError("unexpected payload type: %s" % type(payload).__name__)
-            ids = []
-            seen = set()
+            # Deduplicate by model id while keeping the max host count we saw.
+            seen = {}
             for entry in payload:
                 if not isinstance(entry, dict):
                     continue
                 mid = str(entry.get("model") or "").strip()
-                if mid and mid not in seen:
-                    seen.add(mid)
-                    ids.append(mid)
-            if not ids:
+                if not mid or mid == "auto":   # `auto` is rejected by /api/session
+                    continue
+                hosts = entry.get("hosts")
+                try:
+                    hosts = int(hosts) if hosts is not None else 0
+                except (TypeError, ValueError):
+                    hosts = 0
+                if mid not in seen or hosts > seen[mid]:
+                    seen[mid] = hosts
+            if not seen:
                 raise RuntimeError("empty model list")
-            ids = sorted(ids)
-            # Always keep `auto` first so the default dropdown option is stable.
-            if "auto" in ids:
-                ids.remove("auto")
-            ids = ["auto"] + ids
+            # Cloud models first (sorted by host count desc), then local models
+            # by host count desc. This puts the most-reliable options at the
+            # top of the picker so users don't accidentally pick a single-host
+            # local model that 500s whenever its host goes offline.
+            cloud = sorted(
+                [(mid, h) for mid, h in seen.items() if mid.endswith(":cloud")],
+                key=lambda kv: (-kv[1], kv[0]),
+            )
+            local = sorted(
+                [(mid, h) for mid, h in seen.items() if not mid.endswith(":cloud")],
+                key=lambda kv: (-kv[1], kv[0]),
+            )
+            ids = [mid for mid, _ in cloud] + [mid for mid, _ in local]
             _stolencompute_models_cache["data"] = ids
             _stolencompute_models_cache["ts"] = now
             return ids
@@ -5350,14 +5397,23 @@ def _stolencompute_models_live():
 
 def _stolencompute_ai(cfg, model=None):
     """Build a StolenCompute transport config. `cfg` is accepted for API
-    symmetry with _ai_for_provider but unused — StolenCompute has no key."""
+    symmetry with _ai_for_provider but unused — StolenCompute has no key.
+
+    Never returns model='auto': StolenCompute rejects `auto` with HTTP 404 on
+    /api/session. If the caller asks for `auto` (e.g. an old admin selection
+    from before this fix), it's silently swapped to _STOLENCOMPUTE_DEFAULT_MODEL
+    — the most-reliable cloud model — so the request still succeeds."""
     meta = STUDY_TEST_PROVIDERS.get("stolencompute", {})
     selected_model = (model or (cfg or {}).get(meta.get("modelField", "stolencomputeModel"))
-                      or meta.get("def", "auto")).strip() or "auto"
+                      or meta.get("def") or _STOLENCOMPUTE_DEFAULT_MODEL).strip()
+    if not selected_model or selected_model == "auto":
+        # `auto` is not a real StolenCompute route — replace it before it can
+        # reach _stolencompute_create_session() and 404.
+        selected_model = _STOLENCOMPUTE_DEFAULT_MODEL
     allowed = _effective_provider_models(cfg).get("stolencompute", [])
     if allowed and selected_model not in allowed:
         log.warning("Replacing unavailable StolenCompute model %s with the catalog default", selected_model)
-        selected_model = allowed[0] if allowed else "auto"
+        selected_model = allowed[0] if allowed else _STOLENCOMPUTE_DEFAULT_MODEL
     return {
         "transport": "stolencompute",
         "provider": "stolencompute",
@@ -5371,9 +5427,12 @@ def _stolencompute_ai(cfg, model=None):
     }
 
 
-def _stolencompute_create_session(model):
-    """POST /api/session → {session, model, pool}. Returns the session token
-    string, or raises RuntimeError on any failure."""
+def _stolencompute_create_session_once(model):
+    """Single POST /api/session attempt. Returns the session token string, or
+    raises RuntimeError with a status-coded message so the caller can decide
+    whether to retry. HTTP 500/502/503/504 and network errors are transient
+    (the pool assigned a dead host); HTTP 404 means the model id is invalid
+    and retrying won't help."""
     try:
         r = requests.post(
             STOLENCOMPUTE_SESSION_URL,
@@ -5384,17 +5443,65 @@ def _stolencompute_create_session(model):
     except requests.RequestException as exc:
         raise RuntimeError("StolenCompute session network error: %s" % exc)
     if r.status_code != 200:
-        raise RuntimeError("StolenCompute session HTTP %d: %s" % (r.status_code, (r.text or "")[:180]))
+        # Tag the error with the status code so the retry loop can decide.
+        raise RuntimeError("StolenCompute session HTTP %d: %s"
+                           % (r.status_code, (r.text or "")[:180]))
     try:
         payload = r.json()
     except ValueError:
         raise RuntimeError("StolenCompute session returned non-JSON response")
     token = (payload or {}).get("session")
     if not token:
-        # The upstream returns {"error": ...} on failure; surface it.
         err = (payload or {}).get("error") or "no session token in response"
         raise RuntimeError("StolenCompute session error: %s" % err)
     return str(token)
+
+
+def _stolencompute_is_transient_session_error(msg):
+    """True when a session-create failure is worth retrying (host assignment
+    flakiness, network blip, upstream 5xx). False for hard failures like 404
+    (unknown model) where retrying cannot help."""
+    s = (msg or "").lower()
+    if "network error" in s:
+        return True
+    if "non-json" in s:
+        return True
+    # 5xx and 429 are transient; 4xx (401/403/404) are not.
+    import re as _re
+    m = _re.search(r"http (\d{3})", s)
+    if m:
+        code = int(m.group(1))
+        return code >= 500 or code == 429
+    return False
+
+
+def _stolencompute_create_session(model):
+    """POST /api/session → {session, model, pool}, with retries.
+
+    StolenCompute's pool assigns a random host on each session creation. Live
+    testing shows ~30% of assignments hit a dead/busy upstream and the server
+    returns HTTP 500 {"error":"server error"} — even for the most-reliable
+    cloud model. Retrying immediately almost always succeeds, so we retry up
+    to _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS times with short backoff.
+
+    Returns the session token string, or raises RuntimeError on persistent
+    failure."""
+    last = "unknown error"
+    for attempt in range(1, _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS + 1):
+        try:
+            return _stolencompute_create_session_once(model)
+        except RuntimeError as exc:
+            last = str(exc)
+            if attempt == _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS:
+                break
+            if not _stolencompute_is_transient_session_error(last):
+                # Hard failure (e.g. HTTP 404 unknown model) — don't waste
+                # retries; let the caller surface the error to the user.
+                break
+            # Exponential backoff capped at 2s. Keeps the retry loop responsive
+            # under load while giving a flaky upstream a moment to recover.
+            time.sleep(min(_STOLENCOMPUTE_SESSION_BACKOFF_SEC * attempt, 2.0))
+    raise RuntimeError(last)
 
 
 def _stolencompute_session_for(model):
@@ -5417,17 +5524,52 @@ def _stolencompute_session_for(model):
     return token
 
 
+def _stolencompute_reroll_session(token):
+    """POST /api/reroll {session} → reassign the session to a different host.
+
+    StolenCompute documents this as the recovery path when the chosen host
+    dies mid-conversation (chat returns HTTP 500). The same session token
+    remains valid after a reroll, so callers don't need to invalidate the
+    cache. Returns True on success, False on any failure (caller falls back
+    to creating a fresh session)."""
+    try:
+        r = requests.post(
+            STOLENCOMPUTE_REROLL_URL,
+            json={"session": token},
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=min(_STOLENCOMPUTE_TIMEOUT, 30),
+        )
+    except requests.RequestException:
+        return False
+    return r.status_code == 200
+
+
 def _stolencompute_invalidate_session(model):
     """Drop the cached session for `model` so the next chat mints a fresh one."""
     with _stolencompute_session_lock:
         _stolencompute_session_cache.pop(model, None)
 
 
-def _stolencompute_chat_once(messages, ai):
+def _stolencompute_invalidate_session_token(token):
+    """Drop the cache entry whose token matches `token` (used after a reroll
+    fails and we want to force-create a fresh session on the next call)."""
+    with _stolencompute_session_lock:
+        for model, entry in list(_stolencompute_session_cache.items()):
+            if entry.get("token") == token:
+                _stolencompute_session_cache.pop(model, None)
+                return
+
+
+def _stolencompute_chat_once(messages, ai, token=None):
     """One POST /api/chat attempt. Returns the reply text. Raises RuntimeError
-    on any failure (caller decides whether to retry with a new session)."""
-    model = ai.get("model") or "auto"
-    token = _stolencompute_session_for(model)
+    on any failure (caller decides whether to retry / reroll / re-create).
+
+    If `token` is supplied, uses it directly (skipping the cache lookup) so
+    the retry loop can reroll the same session without minting a new one.
+    """
+    model = ai.get("model") or _STOLENCOMPUTE_DEFAULT_MODEL
+    if token is None:
+        token = _stolencompute_session_for(model)
     # StolenCompute accepts the same {role, content} shape OpenAI uses, so we
     # can forward messages verbatim. Strip any OpenAI-only fields defensively.
     clean_messages = [
@@ -5446,9 +5588,15 @@ def _stolencompute_chat_once(messages, ai):
     except requests.RequestException as exc:
         raise RuntimeError("StolenCompute chat network error: %s" % exc)
     if r.status_code in (401, 403, 404, 410):
-        # Session token rejected/expired — invalidate and let caller retry once.
-        _stolencompute_invalidate_session(model)
+        # Session token rejected/expired — invalidate and let caller retry with
+        # a freshly-minted session.
+        _stolencompute_invalidate_session_token(token)
         raise RuntimeError("StolenCompute session rejected (HTTP %d)" % r.status_code)
+    if r.status_code in (500, 502, 503, 504):
+        # Chosen host is dead/busy. Caller should reroll (reassign host) and
+        # retry — DO NOT invalidate the session token; reroll keeps it valid.
+        raise RuntimeError("StolenCompute chat upstream HTTP %d: %s"
+                           % (r.status_code, (r.text or "")[:180]))
     if r.status_code != 200:
         raise RuntimeError("StolenCompute chat HTTP %d: %s" % (r.status_code, (r.text or "")[:180]))
     try:
@@ -5466,29 +5614,79 @@ def _stolencompute_chat(messages, ai, max_tokens=2048, json_mode=False,
                         meta=None, cancel_event=None):
     """Blocking chat via the StolenCompute session protocol.
 
-    Retries once with a fresh session if the cached token is rejected. The
-    `max_tokens` and `json_mode` parameters are accepted for API parity with
-    _ai_chat() but are not forwarded — StolenCompute's /api/chat does not
-    expose them, and the upstream pool decides its own response length.
+    Resilience strategy (handles StolenCompute's ~30% session-assignment and
+    mid-chat host-death failure rate):
+      1. Try the cached session token. On 401/403/404/410 (token rejected),
+         invalidate the cache and re-create the session once.
+      2. On 500/502/503/504 (upstream host dead), call POST /api/reroll to
+         reassign the session to a different host, then retry the chat. Up to
+         _STOLENCOMPUTE_CHAT_MAX_REROLLS reroll attempts.
+      3. If rerolls are exhausted, fall back to creating a fresh session and
+         retrying once more (covers the case where the session itself is bad).
+      4. Network errors and non-JSON responses trigger a single re-create.
+
+    The `max_tokens` and `json_mode` parameters are accepted for API parity
+    with _ai_chat() but are not forwarded — StolenCompute's /api/chat does
+    not expose them; the upstream pool decides its own response length.
     """
     if cancel_event is not None and cancel_event.is_set():
         raise RuntimeError("cancelled before StolenCompute chat")
     last = "unknown error"
-    for attempt in (1, 2):
+    model = ai.get("model") or _STOLENCOMPUTE_DEFAULT_MODEL
+    token = None             # None → _stolencompute_chat_once reads the cache
+    re_created = False       # only re-create the session once per call
+    rerolls_left = _STOLENCOMPUTE_CHAT_MAX_REROLLS
+    attempts = 0
+    max_attempts = 1 + 1 + _STOLENCOMPUTE_CHAT_MAX_REROLLS + 1  # initial + re-create + rerolls + final
+    while attempts < max_attempts:
+        attempts += 1
         if cancel_event is not None and cancel_event.is_set():
             raise RuntimeError("cancelled during StolenCompute chat")
         try:
-            reply = _stolencompute_chat_once(messages, ai)
+            reply = _stolencompute_chat_once(messages, ai, token=token)
             if meta is not None:
                 meta["finish_reason"] = "stop"
             return reply
         except RuntimeError as exc:
             last = str(exc)
-            # Only retry once, and only when the failure looks session-related
-            # (the invalidate helper already ran in _stolencompute_chat_once).
-            if attempt == 2 or "session" not in last.lower():
-                break
-            time.sleep(1)
+            low = last.lower()
+            if "session rejected" in low:
+                # 401/403/404/410 — token is bad. Re-create the session once.
+                if re_created:
+                    break
+                _stolencompute_invalidate_session(model)
+                token = None
+                re_created = True
+                continue
+            if "upstream http" in low and rerolls_left > 0:
+                # 5xx — host is dead. Reroll (reassign host) and retry with the
+                # SAME token (reroll keeps the session valid).
+                rerolls_left -= 1
+                if token is None:
+                    # We don't yet have a token handle to reroll — materialize
+                    # one from the cache so we can reroll it.
+                    token = _stolencompute_session_for(model)
+                if _stolencompute_reroll_session(token):
+                    time.sleep(0.3)   # brief pause so the new host can warm up
+                    continue
+                # Reroll failed — fall through to re-create.
+                if re_created:
+                    break
+                _stolencompute_invalidate_session(model)
+                token = None
+                re_created = True
+                continue
+            if "network error" in low or "non-json" in low:
+                # Transient — one re-create is the safest recovery.
+                if re_created:
+                    break
+                _stolencompute_invalidate_session(model)
+                token = None
+                re_created = True
+                continue
+            # Any other error (chat HTTP 4xx other than session-rejected, empty
+            # reply, etc.) is not retryable.
+            break
     raise RuntimeError("StolenCompute chat failed: %s" % last)
 
 
