@@ -2139,3 +2139,183 @@ function renderReportEditor(rep) {
     '<div class="muted" style="font-size:.7rem;margin-top:8px;">Saving stores a correction in Supabase (question_corrections) and marks this report Fixed. The quiz engine overlays it on the question for every user on next load.</div>' +
   '</div>';
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   YouTube DNS AdBlock Management
+   CRUD for DNS resolver entries stored in Firestore config/dnsAdblock
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderDnsAdblock() {
+  const platforms = DNS_CONFIG.platforms || [];
+  const enabled = DNS_CONFIG.enabled !== false;
+
+  let rows = '';
+  if (platforms.length === 0) {
+    rows = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--muted)">No DNS resolvers configured yet. Add your first one below.</td></tr>';
+  } else {
+    platforms.forEach(function(p, i) {
+      rows += '<tr>' +
+        '<td><b>' + esc(p.platform || 'Unknown') + '</b></td>' +
+        '<td style="font-family:monospace;font-size:0.82rem">' + esc(p.resolverId || '') + '</td>' +
+        '<td style="font-family:monospace;font-size:0.78rem;max-width:260px;word-break:break-all">' + esc(p.dohUrl || '') + '</td>' +
+        '<td style="font-family:monospace;font-size:0.78rem">' + esc(p.dotHost || '') + '</td>' +
+        '<td>' + (p.updatedAt ? fmtDate(p.updatedAt) : '—') + '</td>' +
+        '<td class="row-actions">' +
+          '<button class="btn btn-gray" type="button" onclick="editDnsPlatform(' + i + ')">Edit</button> ' +
+          '<button class="btn btn-red" type="button" onclick="deleteDnsPlatform(' + i + ')">Delete</button>' +
+        '</td>' +
+      '</tr>';
+    });
+  }
+
+  return '' +
+  '<div class="card" style="margin-bottom:16px">' +
+    '<h3 style="margin:0 0 6px">&#128737; YouTube DNS AdBlock — ControlD Resolvers</h3>' +
+    '<p style="margin:0 0 12px;color:var(--muted);font-size:0.88rem">Manage DNS resolver endpoints per platform. Users can look up the correct settings from here. Data stored in Firestore <code>config/dnsAdblock</code>.</p>' +
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">' +
+      '<label style="display:flex;align-items:center;gap:6px;cursor:pointer">' +
+        '<input type="checkbox" id="dns-global-toggle" ' + (enabled ? 'checked' : '') + ' onchange="toggleDnsGlobal(this.checked)"> ' +
+        '<span>DNS AdBlock <b>' + (enabled ? 'Enabled' : 'Disabled') + '</b></span>' +
+      '</label>' +
+    '</div>' +
+    (enabled ? '' : '<p style="color:var(--red);margin-bottom:12px">&#9888; DNS AdBlock is disabled. Toggle it on to make resolver entries visible to users.</p>') +
+  '</div>' +
+
+  '<div class="card" style="margin-bottom:16px">' +
+    '<div style="overflow-x:auto">' +
+      '<table class="data-table" style="width:100%">' +
+        '<thead><tr>' +
+          '<th>Platform</th><th>Resolver ID</th><th>DoH URL</th><th>DoT / DoQ Host</th><th>Updated</th><th>Actions</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+      '</table>' +
+    '</div>' +
+  '</div>' +
+
+  '<div class="card" id="dns-add-card">' +
+    '<h3 style="margin:0 0 12px" id="dns-form-title">&#10133; Add New DNS Resolver</h3>' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+      '<label class="field-label">Platform' +
+        '<select id="dns-platform" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card-bg);color:var(--fg)">' +
+          '<option value="Android">Android</option>' +
+          '<option value="iOS">iOS</option>' +
+          '<option value="Chrome">Chrome</option>' +
+          '<option value="Windows">Windows</option>' +
+          '<option value="Android TV">Android TV</option>' +
+          '<option value="Router">Router</option>' +
+          '<option value="macOS">macOS</option>' +
+          '<option value="Linux">Linux</option>' +
+          '<option value="Other">Other</option>' +
+        '</select>' +
+      '</label>' +
+      '<label class="field-label">Resolver ID' +
+        '<input type="text" id="dns-resolver-id" placeholder="e.g. ja7ydfe7fx" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card-bg);color:var(--fg)">' +
+      '</label>' +
+      '<label class="field-label">DNS-over-HTTPS (DoH)' +
+        '<input type="text" id="dns-doh-url" placeholder="https://dns.controld.com/ja7ydfe7fx" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card-bg);color:var(--fg)">' +
+      '</label>' +
+      '<label class="field-label">DNS-over-TLS / DoQ Host' +
+        '<input type="text" id="dns-dot-host" placeholder="ja7ydfe7fx.dns.controld.com" style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card-bg);color:var(--fg)">' +
+      '</label>' +
+    '</div>' +
+    '<div style="margin-top:12px;display:flex;gap:8px">' +
+      '<button class="btn btn-green" type="button" onclick="saveDnsPlatform()" id="dns-save-btn">&#128190; Save DNS Entry</button>' +
+      '<button class="btn btn-gray" type="button" onclick="resetDnsForm()" id="dns-cancel-btn" style="display:none">Cancel Edit</button>' +
+    '</div>' +
+    '<input type="hidden" id="dns-edit-index" value="-1">' +
+  '</div>';
+}
+
+function resetDnsForm() {
+  document.getElementById('dns-platform').value = 'Android';
+  document.getElementById('dns-resolver-id').value = '';
+  document.getElementById('dns-doh-url').value = '';
+  document.getElementById('dns-dot-host').value = '';
+  document.getElementById('dns-edit-index').value = '-1';
+  document.getElementById('dns-form-title').innerHTML = '&#10133; Add New DNS Resolver';
+  document.getElementById('dns-save-btn').innerHTML = '&#128190; Save DNS Entry';
+  document.getElementById('dns-cancel-btn').style.display = 'none';
+}
+
+function editDnsPlatform(index) {
+  const p = DNS_CONFIG.platforms[index];
+  if (!p) return;
+  document.getElementById('dns-platform').value = p.platform || 'Android';
+  document.getElementById('dns-resolver-id').value = p.resolverId || '';
+  document.getElementById('dns-doh-url').value = p.dohUrl || '';
+  document.getElementById('dns-dot-host').value = p.dotHost || '';
+  document.getElementById('dns-edit-index').value = String(index);
+  document.getElementById('dns-form-title').innerHTML = '&#9998; Edit DNS Resolver — ' + esc(p.platform);
+  document.getElementById('dns-save-btn').innerHTML = '&#128190; Update DNS Entry';
+  document.getElementById('dns-cancel-btn').style.display = 'inline-block';
+  document.getElementById('dns-add-card').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function deleteDnsPlatform(index) {
+  const p = DNS_CONFIG.platforms[index];
+  if (!p) return;
+  if (!confirm('Delete DNS resolver for ' + p.platform + '? This cannot be undone.')) return;
+  DNS_CONFIG.platforms.splice(index, 1);
+  try {
+    await db.collection('config').doc('dnsAdblock').set({
+      platforms: DNS_CONFIG.platforms,
+      enabled: DNS_CONFIG.enabled
+    }, { merge: true });
+    showToast('DNS resolver for ' + p.platform + ' deleted.');
+    render();
+  } catch(e) {
+    showToast('Delete failed: ' + e.message, 'error');
+  }
+}
+
+async function saveDnsPlatform() {
+  const platform = document.getElementById('dns-platform').value.trim();
+  const resolverId = document.getElementById('dns-resolver-id').value.trim();
+  const dohUrl = document.getElementById('dns-doh-url').value.trim();
+  const dotHost = document.getElementById('dns-dot-host').value.trim();
+  const editIndex = parseInt(document.getElementById('dns-edit-index').value, 10);
+
+  if (!platform) { showToast('Platform is required.', 'error'); return; }
+  if (!resolverId) { showToast('Resolver ID is required.', 'error'); return; }
+  if (!dohUrl) { showToast('DoH URL is required.', 'error'); return; }
+
+  const entry = {
+    platform: platform,
+    resolverId: resolverId,
+    dohUrl: dohUrl,
+    dotHost: dotHost || '',
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+
+  if (editIndex >= 0 && editIndex < DNS_CONFIG.platforms.length) {
+    DNS_CONFIG.platforms[editIndex] = entry;
+    showToast('DNS resolver for ' + platform + ' updated.');
+  } else {
+    DNS_CONFIG.platforms.push(entry);
+    showToast('DNS resolver for ' + platform + ' added.');
+  }
+
+  try {
+    await db.collection('config').doc('dnsAdblock').set({
+      platforms: DNS_CONFIG.platforms,
+      enabled: DNS_CONFIG.enabled
+    }, { merge: true });
+    resetDnsForm();
+    render();
+  } catch(e) {
+    showToast('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function toggleDnsGlobal(checked) {
+  DNS_CONFIG.enabled = !!checked;
+  try {
+    await db.collection('config').doc('dnsAdblock').set({
+      platforms: DNS_CONFIG.platforms,
+      enabled: DNS_CONFIG.enabled
+    }, { merge: true });
+    showToast(checked ? 'DNS AdBlock enabled.' : 'DNS AdBlock disabled.');
+    render();
+  } catch(e) {
+    showToast('Toggle failed: ' + e.message, 'error');
+  }
+}
