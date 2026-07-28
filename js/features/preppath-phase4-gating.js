@@ -744,12 +744,29 @@ function ezUnblurAllProSurfaces() {
    see what they'd unlock. */
 (function () {
   function _blurTurboSurface() {
-    if (typeof ezGated === 'function' && !ezGated()) return;
+    var controls = document.getElementById('yt-turbo-controls');
+    var gated = (typeof ezGated === 'function') ? ezGated() : false;
+
+    // Pro (or logged-out): make sure no stale blur overlay is left behind.
+    // The blur may have been applied during the brief window where EZ_PROFILE
+    // was still loading (ezIsPro() === false ⇒ ezGated() === true). Once the
+    // profile confirms Pro, ezRefreshGates() re-runs this and we MUST remove
+    // the overlay — otherwise a paying Pro user stays stuck on "Upgrade to Pro".
+    if (!gated) {
+      if (controls && controls.querySelector('.pro-blur-container')) {
+        controls.remove();                                   // drop blurred wrapper
+        if (typeof window.ytTurboInitUI === 'function') {
+          try { window.ytTurboInitUI(); } catch (e) {}       // rebuild clean controls
+        }
+      }
+      return;
+    }
+
     var surfaces = document.querySelectorAll(
       '.yt-turbo-toggle, .turbo-section, [data-turbo="speed-selector"], #turbo-speed-buttons'
     );
     if (!surfaces.length) return;
-    var surface = surfaces[0].parentElement;
+    var surface = controls || surfaces[0].parentElement;
     if (!surface || surface.querySelector('.pro-blur-overlay')) return;
     ezBlurPreview(surface, {
       title: 'Turbo 4× Player',
@@ -759,6 +776,8 @@ function ezUnblurAllProSurfaces() {
       previewType: 'turbo'
     });
   }
+  // Exposed so ezRefreshGates() can re-run it once the Pro profile resolves.
+  window._blurTurboSurface = _blurTurboSurface;
   // Re-blur whenever YouTube surfaces become active.
   if (typeof onPageActivated === 'function') {
     onPageActivated('youtube', function () { setTimeout(_blurTurboSurface, 300); });
