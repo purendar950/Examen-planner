@@ -959,6 +959,30 @@ _STOLENCOMPUTE_SESSION_BACKOFF_SEC = max(0.1, min(float(os.environ.get("STOLENCO
 # reassigns the session to a different host. We reroll up to N times before
 # surfacing the error to the user.
 _STOLENCOMPUTE_CHAT_MAX_REROLLS = max(0, min(int(os.environ.get("STOLENCOMPUTE_CHAT_MAX_REROLLS", "3")), 5))
+# How many times _stolencompute_chat() will re-create a session on a
+# "session rejected" error (HTTP 400/401/403/404/410). Live testing during a
+# StolenCompute platform outage showed fresh sessions 400-ing immediately on
+# the first chat call — the previous "re-create once" logic surfaced that as a
+# hard failure. Allowing multiple re-creations with model fallback (below)
+# recovers from both transient host-assignment failures AND single-model pool
+# deaths.
+_STOLENCOMPUTE_CHAT_MAX_RECREATES = max(1, min(int(os.environ.get("STOLENCOMPUTE_CHAT_MAX_RECREATES", "3")), 6))
+# When a model's pool is consistently dead, try the next model in the fallback
+# list. Each re-create attempt advances to the next model so a single dead
+# cloud-model pool doesn't kill the whole request.
+_STOLENCOMPUTE_CHAT_MODEL_FALLBACK = bool(os.environ.get("STOLENCOMPUTE_CHAT_MODEL_FALLBACK", "1") not in ("0", "false", "False", ""))
+# Short backoff between re-create attempts so we don't hammer StolenCompute
+# during an outage. Capped at 3s.
+_STOLENCOMPUTE_CHAT_RECREATE_BACKOFF_SEC = max(0.2, min(float(os.environ.get("STOLENCOMPUTE_CHAT_RECREATE_BACKOFF_SEC", "0.8")), 3.0))
+# Per-model session-create budget INSIDE the chat retry loop. Smaller than
+# _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS so a dead model fails fast and the loop
+# can advance to the next cloud model in the fallback chain.
+_STOLENCOMPUTE_CHAT_PER_MODEL_SESSION_ATTEMPTS = max(1, min(int(os.environ.get("STOLENCOMPUTE_CHAT_PER_MODEL_SESSION_ATTEMPTS", "2")), _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS))
+# Outage detection: if /api/active reports {"active": 0}, StolenCompute is down.
+STOLENCOMPUTE_ACTIVE_URL = STOLENCOMPUTE_BASE + "/api/active"
+_STOLENCOMPUTE_OUTAGE_CACHE_TTL = max(30, min(int(os.environ.get("STOLENCOMPUTE_OUTAGE_CACHE_TTL", "180")), 600))
+_stolencompute_outage_cache = {"ts": 0.0, "is_down": None}
+_stolencompute_outage_lock = threading.Lock()
 _stolencompute_models_cache = {"ts": 0.0, "data": None}
 _stolencompute_models_lock = threading.Lock()
 # Stable fallback list used before the first live /api/models fetch lands and
@@ -5481,24 +5505,33 @@ def _stolencompute_is_transient_session_error(msg):
     return False
 
 
-def _stolencompute_create_session(model):
+def _stolencompute_create_session(model, max_attempts=None):
     """POST /api/session → {session, model, pool}, with retries.
 
     StolenCompute's pool assigns a random host on each session creation. Live
     testing shows ~30% of assignments hit a dead/busy upstream and the server
     returns HTTP 500 {"error":"server error"} — even for the most-reliable
     cloud model. Retrying immediately almost always succeeds, so we retry up
-    to _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS times with short backoff.
+    to `max_attempts` times (default _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS) with
+    short backoff.
+
+    The `max_attempts` override lets the chat retry loop use a smaller budget
+    per model so it can fall back to the next cloud model faster when one
+    model's entire pool is dead (live-confirmed: nemotron-3-ultra:cloud
+    returned 0/10 successes during a partial outage while other models still
+    worked occasionally).
 
     Returns the session token string, or raises RuntimeError on persistent
     failure."""
+    budget = max_attempts if max_attempts is not None else _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS
+    budget = max(1, min(budget, _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS))
     last = "unknown error"
-    for attempt in range(1, _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS + 1):
+    for attempt in range(1, budget + 1):
         try:
             return _stolencompute_create_session_once(model)
         except RuntimeError as exc:
             last = str(exc)
-            if attempt == _STOLENCOMPUTE_SESSION_MAX_ATTEMPTS:
+            if attempt == budget:
                 break
             if not _stolencompute_is_transient_session_error(last):
                 # Hard failure (e.g. HTTP 404 unknown model) — don't waste
@@ -5510,12 +5543,16 @@ def _stolencompute_create_session(model):
     raise RuntimeError(last)
 
 
-def _stolencompute_session_for(model):
+def _stolencompute_session_for(model, max_attempts=None):
     """Return a cached session token for `model`, refreshing it when stale.
 
     StolenCompute sessions are pooled per model id and expire after
     _STOLENCOMPUTE_SESSION_TTL seconds. The cache is keyed by model so a user
     switching models doesn't reuse a session bound to a different upstream.
+
+    `max_attempts` is forwarded to _stolencompute_create_session(); use a
+    smaller value when calling from the chat retry loop so a dead model fails
+    fast and the loop can fall back to the next cloud model.
     """
     now = time.time()
     with _stolencompute_session_lock:
@@ -5524,7 +5561,7 @@ def _stolencompute_session_for(model):
             return entry["token"]
     # Drop the lock during the network call so concurrent chats on the same
     # model don't serialize behind a single create-session round-trip.
-    token = _stolencompute_create_session(model)
+    token = _stolencompute_create_session(model, max_attempts=max_attempts)
     with _stolencompute_session_lock:
         _stolencompute_session_cache[model] = {"token": token, "ts": now}
     return token
@@ -5566,16 +5603,19 @@ def _stolencompute_invalidate_session_token(token):
                 return
 
 
-def _stolencompute_chat_once(messages, ai, token=None):
+def _stolencompute_chat_once(messages, ai, token=None, max_session_attempts=None):
     """One POST /api/chat attempt. Returns the reply text. Raises RuntimeError
     on any failure (caller decides whether to retry / reroll / re-create).
 
     If `token` is supplied, uses it directly (skipping the cache lookup) so
     the retry loop can reroll the same session without minting a new one.
+    `max_session_attempts` is forwarded to _stolencompute_session_for() so the
+    chat retry loop can use a smaller per-model budget (fail-fast on a dead
+    model → fall back to the next cloud model).
     """
     model = ai.get("model") or _STOLENCOMPUTE_DEFAULT_MODEL
     if token is None:
-        token = _stolencompute_session_for(model)
+        token = _stolencompute_session_for(model, max_attempts=max_session_attempts)
     # StolenCompute accepts the same {role, content} shape OpenAI uses, so we
     # can forward messages verbatim. Strip any OpenAI-only fields defensively.
     clean_messages = [
@@ -5629,21 +5669,88 @@ def _stolencompute_chat_once(messages, ai, token=None):
     return str(reply)
 
 
+def _stolencompute_is_platform_down(force_refresh=False):
+    """Quick outage check via GET /api/active.
+
+    StolenCompute's /api/active returns {"active": N} where N is the number of
+    currently-active sessions across the entire platform. During a full outage
+    N is 0 (live-confirmed: a stress test during an outage showed every single
+    session-create + chat call failing, and /api/active reported 0). When that
+    happens, no amount of retrying will help — we surface a clear error so the
+    user knows to switch providers or wait.
+
+    Result is cached for _STOLENCOMPUTE_OUTAGE_CACHE_TTL seconds (default 180s)
+    so we don't poll the endpoint on every chat call. `force_refresh` bypasses
+    the cache for the admin health-check path.
+    """
+    now = time.time()
+    cached = _stolencompute_outage_cache
+    if not force_refresh and cached["is_down"] is not None \
+            and now - cached["ts"] < _STOLENCOMPUTE_OUTAGE_CACHE_TTL:
+        return cached["is_down"]
+    with _stolencompute_outage_lock:
+        cached = _stolencompute_outage_cache
+        if not force_refresh and cached["is_down"] is not None \
+                and now - cached["ts"] < _STOLENCOMPUTE_OUTAGE_CACHE_TTL:
+            return cached["is_down"]
+        is_down = False
+        try:
+            r = requests.get(STOLENCOMPUTE_ACTIVE_URL, timeout=10)
+            if r.status_code == 200:
+                payload = r.json() or {}
+                active = payload.get("active")
+                if isinstance(active, (int, float)) and active == 0:
+                    is_down = True
+        except Exception as exc:  # noqa: BLE001
+            # If the outage-check endpoint itself is unreachable, assume the
+            # platform is up (don't false-positive an outage from a transient
+            # network blip on the check call). The chat retry loop will surface
+            # the real error if StolenCompute is genuinely down.
+            log.debug("StolenCompute /api/active check failed: %s", exc)
+            is_down = False
+        _stolencompute_outage_cache["is_down"] = is_down
+        _stolencompute_outage_cache["ts"] = now
+        return is_down
+
+
+def _stolencompute_fallback_model_list(preferred):
+    """Ordered list of models to try when `preferred` fails repeatedly.
+
+    Always starts with the user's preferred model (so we don't silently switch
+    away from an admin-selected model on the first hiccup), then appends the
+    other cloud fallback models in reliability order. De-duplicated.
+    """
+    out = []
+    seen = set()
+    for m in [preferred] + list(_STOLENCOMPUTE_FALLBACK_MODELS):
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
 def _stolencompute_chat(messages, ai, max_tokens=2048, json_mode=False,
                         meta=None, cancel_event=None):
     """Blocking chat via the StolenCompute session protocol.
 
     Resilience strategy (handles StolenCompute's ~30% session-assignment and
-    mid-chat host-death failure rate, plus the ~90-120s idle-timeout):
+    mid-chat host-death failure rate, the ~90-120s idle-timeout, AND full
+    platform outages):
       1. Try the cached session token. On 401/403/404/410 (token rejected)
          OR HTTP 400 with "no active session" (idle-timeout / missing token),
-         invalidate the cache and re-create the session once.
+         invalidate the cache and re-create the session. Up to
+         _STOLENCOMPUTE_CHAT_MAX_RECREATES re-creates, advancing to the next
+         cloud model in the fallback list each time so a single dead pool
+         doesn't kill the request.
       2. On 500/502/503/504 (upstream host dead), call POST /api/reroll to
          reassign the session to a different host, then retry the chat. Up to
          _STOLENCOMPUTE_CHAT_MAX_REROLLS reroll attempts.
-      3. If rerolls are exhausted, fall back to creating a fresh session and
-         retrying once more (covers the case where the session itself is bad).
-      4. Network errors and non-JSON responses trigger a single re-create.
+      3. Network errors and non-JSON responses trigger a re-create (counted
+         against the same _STOLENCOMPUTE_CHAT_MAX_RECREATES budget).
+      4. After exhausting all re-creates, do one final platform-outage check
+         via /api/active. If StolenCompute reports 0 active sessions, surface
+         a clear "platform is down" error instead of the raw 400/500 body —
+         the user can then switch providers or wait.
 
     The `max_tokens` and `json_mode` parameters are accepted for API parity
     with _ai_chat() but are not forwarded — StolenCompute's /api/chat does
@@ -5651,19 +5758,45 @@ def _stolencompute_chat(messages, ai, max_tokens=2048, json_mode=False,
     """
     if cancel_event is not None and cancel_event.is_set():
         raise RuntimeError("cancelled before StolenCompute chat")
+
+    # Cheap fast-path outage check (cached). If StolenCompute reports 0 active
+    # sessions platform-wide, fail fast with a clear message instead of burning
+    # through 5+ retry attempts that will all fail.
+    if _stolencompute_is_platform_down():
+        raise RuntimeError(
+            "StolenCompute is currently unavailable (platform reports 0 active "
+            "sessions). Please try a different AI provider or retry in a few minutes."
+        )
+
     last = "unknown error"
-    model = ai.get("model") or _STOLENCOMPUTE_DEFAULT_MODEL
+    original_model = ai.get("model") or _STOLENCOMPUTE_DEFAULT_MODEL
+    # Build the model fallback chain: user's selection first, then the other
+    # reliable cloud models in order. Each re-create advances to the next entry.
+    fallback_models = _stolencompute_fallback_model_list(original_model) \
+        if _STOLENCOMPUTE_CHAT_MODEL_FALLBACK else [original_model]
+    model_idx = 0
+    current_model = fallback_models[0]
+    # Use a per-iteration copy of `ai` so we can swap the model without mutating
+    # the caller's config (which may be shared with other concurrent calls).
+    ai_local = dict(ai)
+    ai_local["model"] = current_model
+
     token = None             # None → _stolencompute_chat_once reads the cache
-    re_created = False       # only re-create the session once per call
+    recreates_left = _STOLENCOMPUTE_CHAT_MAX_RECREATES
     rerolls_left = _STOLENCOMPUTE_CHAT_MAX_REROLLS
     attempts = 0
-    max_attempts = 1 + 1 + _STOLENCOMPUTE_CHAT_MAX_REROLLS + 1  # initial + re-create + rerolls + final
+    # Cap total attempts so a pathological loop can't run forever. Worst case:
+    # 1 initial + (recreates_left × (1 reroll-attempt + 1 recreate)) + 1 final.
+    max_attempts = 1 + (recreates_left * 2) + 1 + 1
     while attempts < max_attempts:
         attempts += 1
         if cancel_event is not None and cancel_event.is_set():
             raise RuntimeError("cancelled during StolenCompute chat")
         try:
-            reply = _stolencompute_chat_once(messages, ai, token=token)
+            reply = _stolencompute_chat_once(
+                messages, ai_local, token=token,
+                max_session_attempts=_STOLENCOMPUTE_CHAT_PER_MODEL_SESSION_ATTEMPTS,
+            )
             if meta is not None:
                 meta["finish_reason"] = "stop"
             return reply
@@ -5671,42 +5804,97 @@ def _stolencompute_chat(messages, ai, max_tokens=2048, json_mode=False,
             last = str(exc)
             low = last.lower()
             if "session rejected" in low:
-                # 401/403/404/410 — token is bad. Re-create the session once.
-                if re_created:
+                # 400/401/403/404/410 — token is bad or the model's pool is dead.
+                # Invalidate, advance to the next fallback model, and re-create.
+                if recreates_left <= 0:
                     break
-                _stolencompute_invalidate_session(model)
+                _stolencompute_invalidate_session(current_model)
                 token = None
-                re_created = True
+                recreates_left -= 1
+                # Advance to the next model in the fallback chain (wraps around
+                # if we've tried them all — gives each model a second chance
+                # since StolenCompute's pool assignment is random).
+                if _STOLENCOMPUTE_CHAT_MODEL_FALLBACK and len(fallback_models) > 1:
+                    model_idx = (model_idx + 1) % len(fallback_models)
+                    new_model = fallback_models[model_idx]
+                    if new_model != current_model:
+                        log.info("StolenCompute: falling back from %s to %s after session rejection",
+                                 current_model, new_model)
+                        current_model = new_model
+                        ai_local["model"] = current_model
+                # Reset the reroll budget for the new model.
+                rerolls_left = _STOLENCOMPUTE_CHAT_MAX_REROLLS
+                time.sleep(_STOLENCOMPUTE_CHAT_RECREATE_BACKOFF_SEC)
+                continue
+            if "session http" in low:
+                # Session-create itself failed (after its own internal retries).
+                # This usually means the current model's pool is completely dead.
+                if recreates_left <= 0:
+                    break
+                _stolencompute_invalidate_session(current_model)
+                token = None
+                recreates_left -= 1
+                if _STOLENCOMPUTE_CHAT_MODEL_FALLBACK and len(fallback_models) > 1:
+                    model_idx = (model_idx + 1) % len(fallback_models)
+                    new_model = fallback_models[model_idx]
+                    if new_model != current_model:
+                        log.info("StolenCompute: falling back from %s to %s after session-create failure",
+                                 current_model, new_model)
+                        current_model = new_model
+                        ai_local["model"] = current_model
+                rerolls_left = _STOLENCOMPUTE_CHAT_MAX_REROLLS
+                time.sleep(_STOLENCOMPUTE_CHAT_RECREATE_BACKOFF_SEC)
                 continue
             if "upstream http" in low and rerolls_left > 0:
                 # 5xx — host is dead. Reroll (reassign host) and retry with the
                 # SAME token (reroll keeps the session valid).
                 rerolls_left -= 1
                 if token is None:
-                    # We don't yet have a token handle to reroll — materialize
-                    # one from the cache so we can reroll it.
-                    token = _stolencompute_session_for(model)
+                    token = _stolencompute_session_for(
+                        current_model,
+                        max_attempts=_STOLENCOMPUTE_CHAT_PER_MODEL_SESSION_ATTEMPTS,
+                    )
                 if _stolencompute_reroll_session(token):
-                    time.sleep(0.3)   # brief pause so the new host can warm up
+                    time.sleep(0.3)
                     continue
                 # Reroll failed — fall through to re-create.
-                if re_created:
+                if recreates_left <= 0:
                     break
-                _stolencompute_invalidate_session(model)
+                _stolencompute_invalidate_session(current_model)
                 token = None
-                re_created = True
+                recreates_left -= 1
+                if _STOLENCOMPUTE_CHAT_MODEL_FALLBACK and len(fallback_models) > 1:
+                    model_idx = (model_idx + 1) % len(fallback_models)
+                    new_model = fallback_models[model_idx]
+                    if new_model != current_model:
+                        log.info("StolenCompute: falling back from %s to %s after reroll failure",
+                                 current_model, new_model)
+                        current_model = new_model
+                        ai_local["model"] = current_model
+                rerolls_left = _STOLENCOMPUTE_CHAT_MAX_REROLLS
+                time.sleep(_STOLENCOMPUTE_CHAT_RECREATE_BACKOFF_SEC)
                 continue
             if "network error" in low or "non-json" in low:
-                # Transient — one re-create is the safest recovery.
-                if re_created:
+                # Transient — re-create is the safest recovery.
+                if recreates_left <= 0:
                     break
-                _stolencompute_invalidate_session(model)
+                _stolencompute_invalidate_session(current_model)
                 token = None
-                re_created = True
+                recreates_left -= 1
+                time.sleep(_STOLENCOMPUTE_CHAT_RECREATE_BACKOFF_SEC)
                 continue
-            # Any other error (chat HTTP 4xx other than session-rejected, empty
-            # reply, etc.) is not retryable.
+            # Any other error is not retryable.
             break
+
+    # All retries exhausted. Do a final platform-outage check (force refresh).
+    # If StolenCompute is down platform-wide, the clear "unavailable" message
+    # is much more actionable than "HTTP 400: no active session".
+    if _stolencompute_is_platform_down(force_refresh=True):
+        raise RuntimeError(
+            "StolenCompute is currently unavailable (platform reports 0 active "
+            "sessions after %d attempts). Please try a different AI provider or "
+            "retry in a few minutes." % attempts
+        )
     raise RuntimeError("StolenCompute chat failed: %s" % last)
 
 
