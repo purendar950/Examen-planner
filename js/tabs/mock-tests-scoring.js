@@ -61,7 +61,7 @@ function mockSave() {
   mockDraft = null;
   mockWeakSel = [];
   saveProgress();
-  mockRenderPage();
+  mockRenderPage(true);   // reset: rebuild an empty form, don't re-capture the just-saved inputs
   mockUpdateDashSummary();
 }
 
