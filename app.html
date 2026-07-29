@@ -568,8 +568,12 @@
      Must load AFTER youtube.js (wraps ytDoLoad/ytSetSpeed/ytPiP) and after the
      gating file (uses ezIsPro/ezLockedMsg). -->
 <script defer src="js/features/turbo-player.js?v=20260724b"></script>
+<!-- 🧠 Tutor memory (Supabase-backed, cross-session + cross-model) — must load
+     AFTER vendor/supabase.js (line ~550) and js/core/firebase.js (uses
+     getFirebaseIdToken) and BEFORE ai-tutor.js, which reads window.TutorMemory. -->
+<script defer src="js/features/tutor-memory.js"></script>
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
-<script defer src="js/features/ai-tutor.js?v=20260725b"></script>
+<script defer src="js/features/ai-tutor.js?v=20260725c"></script>
 <script defer src="js/core/theme.js"></script>
 <!-- YouTube IFrame API — deferred; onYouTubeIframeAPIReady fires after load -->
 <script defer src="https://www.youtube.com/iframe_api"></script>

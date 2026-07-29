@@ -3129,7 +3129,12 @@
   function tutorBody(vid, question, mode, histForApi) {
     return JSON.stringify({
       id: vid, q: question || '', out: outLang(), mode: mode || 'chat',
-      provider: outProvider(), model: outModel(), history: histForApi
+      provider: outProvider(), model: outModel(), history: histForApi,
+      // Cross-session student memory (see js/features/tutor-memory.js) —
+      // works no matter which provider/model answers, since it's injected
+      // fresh into the prompt server-side on every call rather than living
+      // inside any one model.
+      memory: (window.TutorMemory && window.TutorMemory.contextText()) || ''
     });
   }
 
@@ -3151,6 +3156,15 @@
     if (state.tab === 'tutor' && chatKey() === historyKey) {
       var hasPending = getHistory(historyKey).some(function (m) { return m.pending; });
       if (!hasPending && !document.getElementById('ai-clear')) renderTutor();
+    }
+    // Update the student's cross-session memory every couple of exchanges —
+    // not on every single message, so this stays one extra AI call every few
+    // turns rather than doubling the cost of every tutor reply.
+    if (window.TutorMemory) {
+      var full = getHistory(historyKey).filter(function (m) { return !m.pending; });
+      if (full.length && full.length % 4 === 0) {
+        window.TutorMemory.refresh(full.map(function (m) { return { role: m.role, content: m.content }; }));
+      }
     }
   }
 

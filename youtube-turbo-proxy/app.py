@@ -6349,6 +6349,11 @@ def _tutor_prepare(body, user):
     out_lang = (request.args.get("out") or body.get("out") or "English").strip() or "English"
     mode = (request.args.get("mode") or body.get("mode") or "chat").strip().lower()
     history = body.get("history") or []
+    # Cross-session student memory (weak/strong topics, last-session summary),
+    # built by /api/tutor/memory-update and stored client-side in Supabase. Sent
+    # on every request so it works no matter which AI provider/model answers.
+    # Capped defensively — this is untrusted client input.
+    student_memory = str(body.get("memory") or "").strip()[:1500]
 
     video_id = _parse_video_id(raw_arg)
     if not video_id:
@@ -6409,9 +6414,16 @@ def _tutor_prepare(body, user):
         "the transcript below. If something isn't covered, say so briefly. The "
         "transcript is auto-generated (may be Hindi/Hinglish, no punctuation) \u2014 "
         "clean it mentally. Cite timestamps as [mm:ss] when pointing to a part. "
-        "Reply ONLY in %s. Be clear and use simple examples.\n\nTRANSCRIPT:\n%s"
-        % (t.get("title") or "this lesson", out_lang, context)
+        "Reply ONLY in %s. Be clear and use simple examples."
+        % (t.get("title") or "this lesson", out_lang)
     )
+    if student_memory:
+        sysmsg += (
+            "\n\nWHAT YOU KNOW ABOUT THIS STUDENT (from past sessions across "
+            "videos \u2014 adapt your explanations to this, don't just repeat it "
+            "back verbatim):\n%s" % student_memory
+        )
+    sysmsg += "\n\nTRANSCRIPT:\n%s" % context
     messages = [{"role": "system", "content": sysmsg}]
     for m in (history or [])[-8:]:
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
@@ -6449,6 +6461,68 @@ def api_tutor():
     return jsonify({"id": data["video_id"], "answer": answer, "mode": data["mode"],
                     "provider": _ai_display_provider(ai),
                     "model": _ai_display_model(ai), "transcript_lang": data["transcript_lang"]})
+
+
+@app.route("/api/tutor/memory-update", methods=["POST"])  
+def api_tutor_memory_update():
+    """Summarize a tutor chat into a compact, structured memory profile that the
+    client stores in Supabase (student_memory table) and re-sends as `memory` on
+    every future /api/tutor call. The memory lives in the client's own database,
+    not in any provider's context — so it survives a provider/model switch, and
+    works the same way regardless of which AI is answering that day.
+    Body: {history:[{role,content}...], existing:{...}|null}."""
+    user, auth_err = _verified_user_record()
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    body = request.get_json(silent=True) or {}
+    history = body.get("history") or []
+    existing = body.get("existing") if isinstance(body.get("existing"), dict) else {}
+    if not history:
+        return jsonify({"error": "missing history"}), 400
+
+    ai = _load_ai_config(None, None)
+    if not _ai_configured(ai):
+        return jsonify({"error": "ai_not_configured"}), 503
+
+    convo_lines = []
+    for m in history[-16:]:
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
+            convo_lines.append("%s: %s" % (m["role"], str(m["content"])[:500]))
+    convo_text = "\n".join(convo_lines)[:6000]
+
+    sysmsg = (
+        "You maintain a compact JSON memory profile of an exam-prep student, "
+        "updated after each tutoring session. Merge the NEW conversation below "
+        "into the EXISTING profile \u2014 keep it short, keep old facts that still "
+        "apply, drop ones the new conversation contradicts or resolves. "
+        "Reply with ONLY a JSON object, no prose, no markdown fences, matching "
+        "exactly this shape: "
+        '{"weak_topics": [string], "strong_topics": [string], '
+        '"preferred_language": string, "last_summary": string}. '
+        "Keep each array under 8 items and last_summary under 200 characters."
+    )
+    messages = [
+        {"role": "system", "content": sysmsg},
+        {"role": "user", "content": "EXISTING PROFILE:\n%s\n\nNEW CONVERSATION:\n%s"
+                                     % (json.dumps(existing)[:1000], convo_text)}
+    ]
+    try:
+        raw = _ai_chat(messages, ai, temperature=0.2, max_tokens=400, json_mode=True)
+        memory = json.loads(raw)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "memory_failed", "detail": str(exc)[:200]}), 502
+
+    # Defensive shape/size clamp before this goes back to the client → Supabase.
+    def _arr(v):
+        return [str(x)[:80] for x in v][:8] if isinstance(v, list) else []
+    memory = {
+        "weak_topics": _arr(memory.get("weak_topics")),
+        "strong_topics": _arr(memory.get("strong_topics")),
+        "preferred_language": str(memory.get("preferred_language")
+                                   or existing.get("preferred_language") or "Hinglish")[:40],
+        "last_summary": str(memory.get("last_summary") or "")[:200],
+    }
+    return jsonify({"memory": memory})
 
 
 @app.route("/api/tutor/stream", methods=["GET", "POST"])
