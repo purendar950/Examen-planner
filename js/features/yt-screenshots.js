@@ -2,17 +2,17 @@
    YOUTUBE VIDEO SCREENSHOT & NOTES FOLDER SYSTEM
    ──────────────────────────────────────────────────────────────────────────
    Features:
-   - Screen-capture screenshot of just the YouTube video frame
-   - YouTube thumbnail-based screenshot (fallback when screen share denied)
+   - Smart visual bookmarks with YouTube frame preview (no base64)
+   - Turbo screenshots sent to Telegram (only file_id stored)
    - Timestamp bookmarks with clickable seek
-   - Auto folder structure: Playlist → Video → Screenshot_N / Bookmark_N
-   - Gallery side-panel with tree view
-   - Delete items, numbered screenshots, download support
-   - Persists in appState.ytScreenshots → Firestore + localStorage
+   - Auto folder structure: Playlist → Video → Moment_N / Bookmark_N
+   - Gallery side-panel with tree view + grid view
+   - Delete items, numbered moments, download support
+   - Persists lightweight metadata in appState.ytScreenshots → Firestore
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* ── State ── */
-let ssState = null; // { folders: { [playlistId]: { name, videos: { [videoId]: { name, items: [] } } } } }
+let ssState = null;
 let ssPanelOpen = false;
 
 function ssGetState() {
@@ -26,6 +26,44 @@ function ssGetState() {
 function ssSave() {
   appState.ytScreenshots = ssState;
   saveProgress();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LEGACY MIGRATION — one-time purge of base64 dataUrl fields
+   ─────────────────────────────────────────────────────────────
+   Before the YouTube-frame-URL optimization, screenshots stored the
+   entire image as a base64 dataUrl — a single moment could be
+   100-500 KB.  Users who saved moments before that change still
+   carry those blobs in their appState, which is the #1 cause of
+   Firestore 1 MiB sync failures.
+
+   This runs once per session, replaces every legacy dataUrl with
+   the equivalent YouTube CDN frame URL (derived from videoId +
+   timestamp already on the item), and saves so the slimmed state
+   syncs immediately.  Future loads find zero dataUrl fields. ════════════ */
+var _ssLegacyMigrated = false;
+function ssMigrateLegacy() {
+  if (_ssLegacyMigrated) return;
+  _ssLegacyMigrated = true;
+  var state = ssGetState();
+  var dirty = false;
+  Object.keys(state.folders || {}).forEach(function(plId) {
+    var folder = state.folders[plId];
+    Object.keys(folder.videos || {}).forEach(function(vId) {
+      var vf = folder.videos[vId];
+      (vf.items || []).forEach(function(item) {
+        if (item.dataUrl) {
+          item.imageUrl = ssFrameUrl(item.videoId || '', item.timestamp || 0, 0);
+          delete item.dataUrl;
+          dirty = true;
+        }
+      });
+    });
+  });
+  if (dirty) {
+    console.log('[ss] Migrated legacy base64 screenshots → YouTube frame URLs.');
+    ssSave();
+  }
 }
 
 /* ── Helpers ── */
@@ -423,13 +461,21 @@ function ssFrameUrl(videoId, timestamp, duration) {
    branding. Used by every render path. */
 function ssPreviewUrl(item) {
   if (!item) return '';
-  var src = item.dataUrl || item.imageUrl || '';
+  /* tgFileId moments: the actual screenshot lives on Telegram.
+     We cannot inline the URL directly (needs Firebase-auth fetch), so
+     return the YouTube frame as a fast-loading fallback.  The gallery
+     render path adds data-tg-file-id attributes that tgHydrateImages()
+     upgrades to the real Telegram photo after hydration. */
+  if (item.tgFileId && item.videoId) {
+    return 'https://i.ytimg.com/vi/' + item.videoId + '/hq2.jpg';
+  }
+  var src = item.imageUrl || '';
   if (src) {
     // Legacy moments saved with the cover image → swap to a real frame.
     src = src.replace(/\/(hqdefault|default|mqdefault|sddefault|maxresdefault)\.jpg/, '/hq2.jpg');
     return src;
   }
-  // Moment saved without any image (moment-only era) → derive from videoId.
+  // Derive from videoId as last resort.
   if (item.videoId) return 'https://i.ytimg.com/vi/' + item.videoId + '/hq2.jpg';
   return '';
 }
@@ -620,17 +666,53 @@ function ssDownload(playlistId, videoId, itemId) {
   const state = ssGetState();
   const folder = state.folders[playlistId];
   if (!folder || !folder.videos[videoId]) return;
-  const item = folder.videos[videoId].items.find(i => i.id === itemId);
-  var src = item ? (item.dataUrl || item.imageUrl) : null;
+  const item = folder.videos[videoId].items.find(function(i) { return i.id === itemId; });
+  if (!item) { showToast('Item not found.', 'error'); return; }
+
+  var src = item.imageUrl || '';
+  /* tgFileId items: fetch the real Telegram photo via the authenticated proxy. */
+  if (item.tgFileId) {
+    src = '';
+    if (typeof TURBO_PROXY !== 'undefined' && TURBO_PROXY) {
+      src = TURBO_PROXY + '/telegram/photo?file_id=' + encodeURIComponent(item.tgFileId);
+    }
+    if (!src) { showToast('Turbo proxy URL not configured — cannot download Telegram screenshot.', 'error'); return; }
+    getFirebaseIdToken().then(function(token) {
+      return fetch(src, { headers: { Authorization: 'Bearer ' + token } });
+    }).then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    }).then(function(blob) {
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = item.label + '_' + item.timeLabel.replace(/:/g, '-') + '.jpg';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }).catch(function() {
+      showToast('Download failed — try again.', 'error');
+    });
+    return;
+  }
+
   if (!src) { showToast('No image to download.', 'error'); return; }
 
-  const link = document.createElement('a');
-  link.href = src;
-  link.download = `${item.label}_${item.timeLabel.replace(/:/g,'-')}.jpg`;
-  link.target = '_blank';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
+  /* YouTube thumbnail URLs block cross-origin downloads.
+     Fetch through a CORS proxy or open in new tab. */
+  try {
+    var a = document.createElement('a');
+    a.href = src;
+    a.download = item.label + '_' + item.timeLabel.replace(/:/g, '-') + '.jpg';
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch(e) {
+    window.open(src, '_blank');
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -718,25 +800,33 @@ function ssRenderVideoGallery() {
   vf.items.forEach(item => {
     const isBookmark = item.type === 'bookmark';
     const icon = isBookmark ? '🔖' : '🎯';
-    const timeText = isBookmark ? `⏱ ${item.timeLabel}` : `▶ ${item.timeLabel} — tap to replay`;
-    const previewUrl = isBookmark ? '' : ssPreviewUrl(item);
-    const thumb = previewUrl
-      ? `<div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})"><img src="${previewUrl}" alt="${escapeHtml(item.label)}" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${item.videoId||''}/hqdefault.jpg';"></div>`
-      : '';
-    html += `<div class="ss-item ${isBookmark ? 'ss-item-bookmark' : 'ss-item-screenshot'}" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
-      ${thumb}
-      <div class="ss-item-info">
-        <div class="ss-item-label">${icon} ${escapeHtml(item.label)}</div>
-        <div class="ss-item-time">${timeText}</div>
-        ${item.note ? `<div class="ss-item-note">${escapeHtml(item.note)}</div>` : ''}
-      </div>
-      <div class="ss-item-actions">
-        <button onclick="event.stopPropagation();ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
-      </div>
-    </div>`;
+    const timeText = isBookmark ? '⏱ ' + item.timeLabel : '▶ ' + item.timeLabel + ' — tap to replay';
+    const thumb = isBookmark ? '' : '<div class="ss-item-thumb" onclick="ssOpenMoment(\''+plId+'\',\''+vId+'\','+item.timestamp+')">' + ssImgTag(item) + '</div>';
+    html += '<div class="ss-item ' + (isBookmark ? 'ss-item-bookmark' : 'ss-item-screenshot') + '" onclick="ssOpenMoment(\''+plId+'\',\''+vId+'\','+item.timestamp+')">' +
+      thumb +
+      '<div class="ss-item-info">' +
+        '<div class="ss-item-label">' + icon + ' ' + escapeHtml(item.label) + '</div>' +
+        '<div class="ss-item-time">' + timeText + '</div>' +
+        (item.note ? '<div class="ss-item-note">' + escapeHtml(item.note) + '</div>' : '') +
+      '</div>' +
+      '<div class="ss-item-actions">' +
+        '<button onclick="event.stopPropagation();ssDeleteItem(\''+plId+'\',\''+vId+'\',\''+item.id+'\')" title="Delete">🗑</button>' +
+      '</div>' +
+    '</div>';
   });
   html += '</div>';
   container.innerHTML = html;
+  if (typeof tgHydrateImages === 'function') tgHydrateImages(container);
+}
+
+/* Build an <img> tag string for a moment's thumbnail.  For tgFileId items
+   the YouTube frame loads instantly, then tgHydrateImages() upgrades it to
+   the real Telegram screenshot once the auth'd fetch completes. */
+function ssImgTag(item, extraAttrs) {
+  var src = ssPreviewUrl(item);
+  var tgAttr = item.tgFileId ? ' data-tg-file-id="' + escapeHtml(item.tgFileId) + '"' : '';
+  var fallback = 'https://i.ytimg.com/vi/' + (item.videoId || '') + '/hqdefault.jpg';
+  return '<img src="' + src + '" alt="' + escapeHtml(item.label || '') + '"' + tgAttr + (extraAttrs || '') + ' loading="lazy" onerror="this.onerror=null;this.src=\'' + fallback + '\';">';
 }
 
 function ssUpdateBadge() {
@@ -821,22 +911,19 @@ function ssRenderGallery() {
            Bookmarks stay image-less (pure timestamp notes). */
         const isBookmark = item.type === 'bookmark';
         const icon = isBookmark ? '🔖' : '🎯';
-        const timeText = isBookmark ? `⏱ ${item.timeLabel}` : `▶ ${item.timeLabel} — tap to replay`;
-        const previewUrl = isBookmark ? '' : ssPreviewUrl(item);
-        const thumb = previewUrl
-          ? `<div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})"><img src="${previewUrl}" alt="${escapeHtml(item.label)}" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${item.videoId||''}/hqdefault.jpg';"></div>`
-          : '';
-        html += `<div class="ss-item ${isBookmark ? 'ss-item-bookmark' : 'ss-item-screenshot'}" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
-          ${thumb}
-          <div class="ss-item-info">
-            <div class="ss-item-label">${icon} ${escapeHtml(item.label)}</div>
-            <div class="ss-item-time">${timeText}</div>
-            ${item.note ? `<div class="ss-item-note">${escapeHtml(item.note)}</div>` : ''}
-          </div>
-          <div class="ss-item-actions">
-            <button onclick="event.stopPropagation();ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
-          </div>
-        </div>`;
+        const timeText = isBookmark ? '⏱ ' + item.timeLabel : '▶ ' + item.timeLabel + ' — tap to replay';
+        const thumb = isBookmark ? '' : '<div class="ss-item-thumb" onclick="ssOpenMoment(\''+plId+'\',\''+vId+'\','+item.timestamp+')">' + ssImgTag(item) + '</div>';
+        html += '<div class="ss-item ' + (isBookmark ? 'ss-item-bookmark' : 'ss-item-screenshot') + '" onclick="ssOpenMoment(\''+plId+'\',\''+vId+'\','+item.timestamp+')">' +
+          thumb +
+          '<div class="ss-item-info">' +
+            '<div class="ss-item-label">' + icon + ' ' + escapeHtml(item.label) + '</div>' +
+            '<div class="ss-item-time">' + timeText + '</div>' +
+            (item.note ? '<div class="ss-item-note">' + escapeHtml(item.note) + '</div>' : '') +
+          '</div>' +
+          '<div class="ss-item-actions">' +
+            '<button onclick="event.stopPropagation();ssDeleteItem(\''+plId+'\',\''+vId+'\',\''+item.id+'\')" title="Delete">🗑</button>' +
+          '</div>' +
+        '</div>';
       });
 
       html += `</div></div>`; // close ss-folder-children + ss-video-group
@@ -846,6 +933,7 @@ function ssRenderGallery() {
   });
 
   container.innerHTML = html;
+  if (typeof tgHydrateImages === 'function') tgHydrateImages(container);
 }
 
 /* ── Toggle folder expand/collapse ── */
@@ -864,15 +952,23 @@ function ssToggleFolder(headerEl) {
 /* ── Screenshot Preview Modal ── */
 function ssPreview(plId, vId, itemId) {
   const state = ssGetState();
-  const item = state.folders[plId]?.videos[vId]?.items.find(i => i.id === itemId);
+  const item = state.folders[plId] && state.folders[plId].videos[vId]
+    ? state.folders[plId].videos[vId].items.find(function(i) { return i.id === itemId; })
+    : null;
   if (!item) return;
-  var src = item.dataUrl || item.imageUrl;
+  var src = item.imageUrl || '';
+  if (!src && item.videoId) src = 'https://i.ytimg.com/vi/' + item.videoId + '/hq2.jpg';
   if (!src) return;
 
   const overlay = document.getElementById('ss-preview-overlay');
   const img = document.getElementById('ss-preview-img');
   const info = document.getElementById('ss-preview-info');
+  img.removeAttribute('data-tg-file-id');
   img.src = src;
+  if (item.tgFileId) {
+    img.dataset.tgFileId = item.tgFileId;
+    if (typeof tgHydrateImage === 'function') tgHydrateImage(img, item.tgFileId);
+  }
   info.textContent = `${item.label} — ${item.timeLabel}`;
   overlay.classList.add('open');
 }
@@ -1086,23 +1182,20 @@ function ssRenderNotesTree(container, folderKeys, typeFilter) {
         </div>
         <div class="ss-folder-children ss-items-list">`;
 
-      filteredItems.forEach(item => {
+      filteredItems.forEach(function(item) {
         if (item.type === 'screenshot') {
-          var imgSrc2 = ssPreviewUrl(item);
-          var thumb2 = imgSrc2
-            ? `<div class="ss-item-thumb" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})"><img src="${imgSrc2}" alt="${escapeHtml(item.label)}" loading="lazy" onerror="this.onerror=null;this.src='https://i.ytimg.com/vi/${item.videoId||''}/hqdefault.jpg';"></div>`
-            : '';
-          html += `<div class="ss-item ss-item-screenshot ss-page-item">
-            ${thumb2}
-            <div class="ss-item-info">
-              <div class="ss-item-label">🎯 ${escapeHtml(item.label)}</div>
-              <div class="ss-item-time" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">▶ ${item.timeLabel} — tap to replay</div>
-              <div class="ss-item-date">${new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
-            </div>
-            <div class="ss-item-actions">
-              <button onclick="ssDeleteItem('${plId}','${vId}','${item.id}')" title="Delete">🗑</button>
-            </div>
-          </div>`;
+          var thumb2 = '<div class="ss-item-thumb" onclick="ssOpenMoment(\''+plId+'\',\''+vId+'\','+item.timestamp+')">' + ssImgTag(item) + '</div>';
+          html += '<div class="ss-item ss-item-screenshot ss-page-item">' +
+            thumb2 +
+            '<div class="ss-item-info">' +
+              '<div class="ss-item-label">🎯 ' + escapeHtml(item.label) + '</div>' +
+              '<div class="ss-item-time" onclick="ssOpenMoment(\''+plId+'\',\''+vId+'\','+item.timestamp+')">▶ ' + item.timeLabel + ' — tap to replay</div>' +
+              '<div class="ss-item-date">' + new Date(item.createdAt).toLocaleString('en-IN', {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) + '</div>' +
+            '</div>' +
+            '<div class="ss-item-actions">' +
+              '<button onclick="ssDeleteItem(\''+plId+'\',\''+vId+'\',\''+item.id+'\')" title="Delete">🗑</button>' +
+            '</div>' +
+          '</div>';
         } else {
           html += `<div class="ss-item ss-item-bookmark ss-page-item" onclick="ssOpenMoment('${plId}','${vId}',${item.timestamp})">
             <div class="ss-item-info">
