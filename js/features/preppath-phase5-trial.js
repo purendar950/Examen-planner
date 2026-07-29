@@ -6,16 +6,35 @@
 ══════════════════════════════════════════════ */
 
 /* ── Self-serve 7-day Pro trial (stored in appState) ──
-   Delegates to shared/proGating.js (window.PrepPathProGating) for all
-   tamper-guard logic — the SAME code that powers the server-side bot
-   and Telegram scripts. Single source of truth. ── */
+   The tamper-guard logic in ezIsProTrialActive() below is mirrored
+   server-side in shared/proGating.js (used by the bot + daily Telegram
+   sender). Keep both in sync if you change the trial rules. ── */
 function ezProTrialExpiry() {
   return (appState && appState.proTrial && appState.proTrial.expiry) ? appState.proTrial.expiry : null;
 }
 function ezIsProTrialActive() {
-  var G = window.PrepPathProGating;
-  if (!G) return false;
-  return G.isSelfServeTrialActive(EZ_PROFILE, appState);
+  // If profile hasn't loaded from Firestore yet, deny trial access.
+  // This prevents the 400ms race window where free users bypass gating.
+  if (EZ_PROFILE === null) return false;
+  // Admin can suspend any trial by setting profile.trialSuspended = true
+  // (admin-only writable field). Blocks access immediately on next snapshot.
+  if (EZ_PROFILE.trialSuspended) return false;
+  var exp = ezProTrialExpiry();
+  if (!exp) return false;
+  // FIX (Bug 3) + SECURITY FIX: Tamper guard — mirrors shared/proGating.js.
+  // A trial with no startedAt, an unparseable startedAt, a future-dated
+  // startedAt, or an expiry beyond startedAt + 4 days is denied. The old
+  // guard skipped entirely when startedAt was missing and never checked
+  // that startedAt is in the past, so hand-edited trials could pass.
+  var trial = appState && appState.proTrial;
+  if (!trial || !trial.startedAt) return false;               // no start marker — deny
+  var startedAt = new Date(trial.startedAt);
+  if (isNaN(startedAt.getTime())) return false;               // unparseable — deny
+  if (startedAt.getTime() > Date.now() + 86400000) return false; // future-dated — deny
+  var maxAllowedExpiry = new Date(startedAt.getTime() + 8 * 86400000); // 7 days + 1 grace
+  var claimedExpiry = new Date(exp + 'T23:59:59');
+  if (claimedExpiry > maxAllowedExpiry) return false;         // Tampered expiry — deny
+  return claimedExpiry >= new Date();
 }
 function ezProTrialUsed() {
   // Once per account: the trial counts as USED if ANY durable marker says so.
@@ -29,8 +48,9 @@ function ezProTrialUsed() {
   return false;
 }
 function ezProTrialDaysLeft() {
-  var G = window.PrepPathProGating;
-  return G ? G.selfServeTrialDaysLeft(appState) : 0;
+  var exp = ezProTrialExpiry();
+  if (!exp) return 0;
+  return Math.max(0, Math.ceil((new Date(exp + 'T23:59:59') - new Date()) / 86400000));
 }
 function ezStartProTrial() {
   if (!currentUser) { showToast('Pehle account banao/login karo.', 'error'); return; }
