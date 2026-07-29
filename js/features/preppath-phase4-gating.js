@@ -63,48 +63,25 @@ let EZ_FREE_LIMITS = {
 }; // loaded from Firestore config/free
 
 function ezGetTrialDaysLeft() {
-  if (!EZ_PROFILE || !EZ_PROFILE.trialExpiry) return 0;
-  const expiry = new Date(EZ_PROFILE.trialExpiry + 'T23:59:59');
-  const today = new Date();
-  return Math.max(0, Math.ceil((expiry - today) / 86400000));
+  var G = window.PrepPathProGating;
+  return G ? G.adminTrialDaysLeft(EZ_PROFILE) : 0;
 }
 
 function ezIsTrialActive() {
-  if (EZ_PROFILE === null) return false; // profile not loaded yet
-  if (EZ_PROFILE.trialSuspended) return false;
-  return ezGetTrialDaysLeft() > 0;
+  var G = window.PrepPathProGating;
+  return G ? G.isAdminTrialActive(EZ_PROFILE) : false;
 }
 
-/* Client-side Pro/trial gate. The two server-side jobs (bot/bot-server.js
-   and scripts/send-telegram.js) run the SAME rules via shared/proGating.js
-   (Node/CommonJS, can't be imported into this classic <script> file). If you
-   change the rules here, mirror the change in shared/proGating.js too. */
+/* Client-side Pro/trial gate — delegates to shared/proGating.js (the single
+   source of truth that also powers bot/bot-server.js and the Telegram scripts).
+   loaded via <script> in app.html BEFORE this file. */
 function ezIsPro() {
-  // App data may render from a UID-keyed local cache, but paid access remains
-  // closed until Firestore confirms this exact account from the server.
-  if (currentUser && window._ezEntitlementPendingUid === currentUser.uid) return false;
-  if (_ezIsAdminCache === true) return true; // admin = always pro
-  if (!EZ_PROFILE) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  // FIX (Bug 3): Strict plan expiry check — an expired plan must NOT grant Pro access.
-  // planExpiry is a YYYY-MM-DD string; compare as string (ISO date sort = lexicographic sort).
-  // FIX 4: Plans without a planExpiry are ONLY active if they are 'lifetime' plans.
-  //        Any other plan (monthly/quarterly/annual) requires a valid non-expired planExpiry.
-  //        This prevents admin accidentally setting plan='pro' with no expiry date, giving
-  //        the user permanent free Pro access.
-  const planName = EZ_PROFILE.plan || 'free';
-  const isLifetime = planName.toLowerCase().includes('lifetime');
-  const planActive = !!(planName && planName !== 'free' && (
-    isLifetime
-      ? true                                          // lifetime: no expiry needed
-      : (EZ_PROFILE.planExpiry && EZ_PROFILE.planExpiry >= today)  // others: must have valid expiry
-  ));
-  // FIX (Bug 3): Also check admin-granted trial from EZ_PROFILE (separate from self-serve trial).
-  // If admin set trialExpiry AND it has not expired, it counts as Pro.
-  const adminTrialActive = !!(EZ_PROFILE.trialExpiry &&
-    !EZ_PROFILE.trialSuspended &&
-    EZ_PROFILE.trialExpiry >= today);
-  return !!(planActive || adminTrialActive || ezIsTrialActive());
+  var G = window.PrepPathProGating;
+  if (!G) return false;
+  return G.isPro({
+    entitlementPending: currentUser && window._ezEntitlementPendingUid === currentUser.uid,
+    isAdmin: _ezIsAdminCache === true
+  });
 }
 /* Gating applies only to real logged-in free users */
 // FIX 6: ezGated() returns true (gated/restricted) for any logged-in user
