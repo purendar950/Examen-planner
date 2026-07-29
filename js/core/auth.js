@@ -1,6 +1,17 @@
 /* ══════════════════════════════════════════════
    AUTH FUNCTIONS — FIREBASE
 ══════════════════════════════════════════════ */
+
+/* ── PASSWORD HASHING (localStorage fallback only) ──
+   Uses SHA-256 via Web Crypto API — irreversible, unlike btoa().
+   Legacy btoa() passwords are auto-migrated on first successful login. */
+async function _hashPassword(password) {
+  const encoded = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 function switchAuthTab(tab) {
   document.getElementById('tab-login').classList.toggle('active', tab==='login');
   document.getElementById('tab-register').classList.toggle('active', tab==='register');
@@ -20,10 +31,22 @@ async function handleLogin() {
   if (!_fbReady) {
     // localStorage fallback
     const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
-    if (!users[email] || users[email].password !== btoa(pass)) {
+    if (!users[email]) {
       showAuthError('login', 'Invalid email or password.');
       btn.disabled = false; btn.textContent = 'Sign In →';
       return;
+    }
+    const stored = users[email].password;
+    const hashed = await _hashPassword(pass);
+    if (stored !== hashed && stored !== btoa(pass)) {
+      showAuthError('login', 'Invalid email or password.');
+      btn.disabled = false; btn.textContent = 'Sign In →';
+      return;
+    }
+    // Auto-migrate legacy btoa() password to SHA-256 on successful login
+    if (stored === btoa(pass) && stored !== hashed) {
+      users[email].password = hashed;
+      localStorage.setItem('ssc_users', JSON.stringify(users));
     }
     loginUser(email, users[email].name, users[email].uid || email, users[email].state || {});
     return;
@@ -84,7 +107,8 @@ async function handleRegister() {
     // localStorage fallback
     const users = JSON.parse(localStorage.getItem('ssc_users') || '{}');
     if (users[email]) { showAuthError('reg', 'Email already registered.'); btn.disabled=false; btn.textContent='Create Account →'; return; }
-    users[email] = { name, password: btoa(pass), uid: email, state: getDefaultState() };
+    const hashed = await _hashPassword(pass);
+    users[email] = { name, password: hashed, uid: email, state: getDefaultState() };
     localStorage.setItem('ssc_users', JSON.stringify(users));
     btn.disabled = false; btn.textContent = 'Create Account →';
     _afterRegisterRedirect(email);
