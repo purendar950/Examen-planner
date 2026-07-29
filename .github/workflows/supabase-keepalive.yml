@@ -1,0 +1,45 @@
+name: Supabase Keep-Alive
+
+# Supabase pauses Free Plan projects after ~7 days with no real database
+# activity. Twice a week is a comfortable buffer inside that window. This
+# touches student_memory (a plain SELECT), which is enough to count as
+# activity and reset the clock — see supabase/student_memory.sql.
+
+on:
+  schedule:
+    - cron: '0 3 * * 0,3'   # Sun & Wed, 03:00 UTC — well inside the 7-day window
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Validate secrets
+        run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "❌ SUPABASE_URL secret is not set!"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "❌ SUPABASE_ANON_KEY secret is not set!"
+            exit 1
+          fi
+          echo "✅ Both secrets present"
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+
+      - name: Touch the database
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          curl -sf -X GET "$SUPABASE_URL/rest/v1/student_memory?select=student_id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -o /dev/null -w "HTTP %{http_code}\n"
