@@ -6465,18 +6465,19 @@ def api_tutor():
 
 @app.route("/api/tutor/memory-update", methods=["POST"])  
 def api_tutor_memory_update():
-    """Summarize a tutor chat into a compact, structured memory profile that the
-    client stores in Supabase (student_memory table) and re-sends as `memory` on
-    every future /api/tutor call. The memory lives in the client's own database,
-    not in any provider's context — so it survives a provider/model switch, and
-    works the same way regardless of which AI is answering that day.
-    Body: {history:[{role,content}...], existing:{...}|null}."""
+    """Enhanced memory update: extracts rich structured profile from a tutor
+    conversation — topic mastery with confidence scores, mistakes, learning
+    style preferences, and a session summary. Returns separate objects for
+    each table so the client can save them independently.
+    Body: {history:[{role,content}...], existing:{memory:{...},preferences:{...}}, video_id?}"""
     user, auth_err = _verified_user_record()
     if auth_err:
         return jsonify(auth_err[0]), auth_err[1]
     body = request.get_json(silent=True) or {}
     history = body.get("history") or []
-    existing = body.get("existing") if isinstance(body.get("existing"), dict) else {}
+    existing_mem = (body.get("existing") or {}).get("memory") if isinstance(body.get("existing"), dict) else {}
+    existing_prefs = (body.get("existing") or {}).get("preferences") if isinstance(body.get("existing"), dict) else {}
+    video_id = str(body.get("video_id") or "")[:20]
     if not history:
         return jsonify({"error": "missing history"}), 400
 
@@ -6489,40 +6490,144 @@ def api_tutor_memory_update():
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
             convo_lines.append("%s: %s" % (m["role"], str(m["content"])[:500]))
     convo_text = "\n".join(convo_lines)[:6000]
+    existing_json = json.dumps({"memory": existing_mem, "preferences": existing_prefs})[:1500]
 
     sysmsg = (
-        "You maintain a compact JSON memory profile of an exam-prep student, "
-        "updated after each tutoring session. Merge the NEW conversation below "
-        "into the EXISTING profile \u2014 keep it short, keep old facts that still "
-        "apply, drop ones the new conversation contradicts or resolves. "
-        "Reply with ONLY a JSON object, no prose, no markdown fences, matching "
-        "exactly this shape: "
-        '{"weak_topics": [string], "strong_topics": [string], '
-        '"preferred_language": string, "last_summary": string}. '
-        "Keep each array under 8 items and last_summary under 200 characters."
+        "You are a student-memory profiler for an exam-prep AI tutor. Analyze the "
+        "NEW CONVERSATION below and the EXISTING PROFILE, then output a SINGLE JSON "
+        "object with exactly these keys (no prose, no markdown fences):\n\n"
+        "{\n"
+        '  "memory": {\n'
+        '    "weak_topics": [string, ...],       // topics the student struggled with (max 8)\n'
+        '    "strong_topics": [string, ...],     // topics the student demonstrated solid understanding (max 8)\n'
+        '    "preferred_language": string,       // e.g. "Hinglish", "English", "Hindi"\n'
+        '    "past_summaries": [{\n'
+        '      "date": string,                    // ISO date\n'
+        '      "video_id": string,                // video studied (or empty)\n'
+        '      "summary": string                  // one-line session summary (max 200 chars)\n'
+        '    }, ...]                                // merge with existing, keep last 5\n'
+        '  },\n'
+        '  "mastery": [\n'
+        '    {"topic": string, "confidence": float}, ...  // 0.0=clueless, 0.5=learning, 1.0=confident. Max 12 topics.\n'
+        '  ],\n'
+        '  "session": {\n'
+        '    "video_id": string,                  // video studied this session\n'
+        '    "summary": string,                   // what was studied (max 200 chars)\n'
+        '    "topics_covered": [string, ...],     // topics in this session (max 6)\n'
+        '    "mistakes": [\n'
+        '      {"topic": string, "mistake": string, "correction": string}, ...\n'
+        '    ]                                      // specific mistakes + corrections (max 5)\n'
+        '  },\n'
+        '  "preferences": {\n'
+        '    "learning_style": string,            // examples | analogies | step-by-step | concise | balanced\n'
+        '    "explanation_depth": string,         // simple | moderate | detailed\n'
+        '    "pace": string                       // slow | normal | fast\n'
+        '  }\n'
+        '}\n\n'
+        "RULES:\n"
+        "- Merge the NEW conversation INTO the existing profile — keep old facts that still apply, "
+        "update confidence scores based on new evidence, drop resolved items.\n"
+        "- For mastery confidence: if a student asked a basic question on a topic they previously "
+        "knew well, LOWER confidence. If they answered/understood correctly, RAISE it.\n"
+        "- Detect mistakes: when the student said something wrong or misunderstood, record the "
+        "specific mistake AND the correction the tutor gave.\n"
+        "- Detect learning style from clues like 'give me an example', 'explain step by step', "
+        "'keep it short', 'go slow'. Update only if the new conversation has clear signals.\n"
+        "- past_summaries: prepend the new session summary, keep total at most 5 entries.\n"
+        "- video_id in session: use the one provided (" + (video_id or "none") + ") or infer from context."
     )
     messages = [
         {"role": "system", "content": sysmsg},
         {"role": "user", "content": "EXISTING PROFILE:\n%s\n\nNEW CONVERSATION:\n%s"
-                                     % (json.dumps(existing)[:1000], convo_text)}
+                                     % (existing_json, convo_text)}
     ]
     try:
-        raw = _ai_chat(messages, ai, temperature=0.2, max_tokens=400, json_mode=True)
-        memory = json.loads(raw)
+        raw = _ai_chat(messages, ai, temperature=0.2, max_tokens=800, json_mode=True)
+        result = json.loads(raw)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "memory_failed", "detail": str(exc)[:200]}), 502
 
-    # Defensive shape/size clamp before this goes back to the client → Supabase.
-    def _arr(v):
-        return [str(x)[:80] for x in v][:8] if isinstance(v, list) else []
+    # ── Defensive clamping ──
+    def _arr(v, max_len=8, item_max=80):
+        return [str(x)[:item_max] for x in v][:max_len] if isinstance(v, list) else []
+
+    def _clamp_float(v, lo=0.0, hi=1.0):
+        try: return max(lo, min(hi, float(v)))
+        except (TypeError, ValueError): return 0.5
+
+    # memory
     memory = {
-        "weak_topics": _arr(memory.get("weak_topics")),
-        "strong_topics": _arr(memory.get("strong_topics")),
-        "preferred_language": str(memory.get("preferred_language")
-                                   or existing.get("preferred_language") or "Hinglish")[:40],
-        "last_summary": str(memory.get("last_summary") or "")[:200],
+        "weak_topics": _arr(result.get("memory", {}).get("weak_topics")),
+        "strong_topics": _arr(result.get("memory", {}).get("strong_topics")),
+        "preferred_language": str(
+            result.get("memory", {}).get("preferred_language")
+            or existing_mem.get("preferred_language") or "Hinglish")[:40],
+        "past_summaries": _arr(
+            result.get("memory", {}).get("past_summaries"), max_len=5, item_max=200),
     }
-    return jsonify({"memory": memory})
+    # Ensure past_summaries entries are valid
+    memory["past_summaries"] = [
+        s if isinstance(s, dict) else {"summary": str(s)[:200]}
+        for s in memory["past_summaries"]
+    ][:5]
+
+    # session
+    sess = result.get("session") or {}
+    session = {
+        "video_id": str(sess.get("video_id") or video_id or "")[:20],
+        "summary": str(sess.get("summary") or "")[:200],
+        "topics_covered": _arr(sess.get("topics_covered"), max_len=6),
+        "message_count": len(history),
+    }
+    # Clamp mistakes
+    raw_mistakes = sess.get("mistakes") or []
+    mistakes = []
+    for m in raw_mistakes[:5]:
+        if isinstance(m, dict):
+            mistakes.append({
+                "topic": str(m.get("topic", ""))[:80],
+                "mistake": str(m.get("mistake", ""))[:200],
+                "correction": str(m.get("correction", ""))[:200],
+            })
+    session["mistakes"] = mistakes
+
+    # mastery
+    raw_mastery = result.get("mastery") or []
+    mastery = []
+    for m in raw_mastery[:12]:
+        if isinstance(m, dict) and m.get("topic"):
+            mastery.append({
+                "topic": str(m["topic"])[:80],
+                "confidence": _clamp_float(m.get("confidence")),
+                "attempts": 1,
+            })
+
+    # preferences
+    raw_prefs = result.get("preferences") or {}
+    valid_styles = ("examples", "analogies", "step-by-step", "concise", "balanced")
+    valid_depths = ("simple", "moderate", "detailed")
+    valid_paces = ("slow", "normal", "fast")
+    preferences = {
+        "learning_style": str(raw_prefs.get("learning_style")
+                               or existing_prefs.get("learning_style") or "balanced")[:20],
+        "explanation_depth": str(raw_prefs.get("explanation_depth")
+                                  or existing_prefs.get("explanation_depth") or "moderate")[:20],
+        "pace": str(raw_prefs.get("pace")
+                    or existing_prefs.get("pace") or "normal")[:10],
+    }
+    if preferences["learning_style"] not in valid_styles:
+        preferences["learning_style"] = existing_prefs.get("learning_style") or "balanced"
+    if preferences["explanation_depth"] not in valid_depths:
+        preferences["explanation_depth"] = existing_prefs.get("explanation_depth") or "moderate"
+    if preferences["pace"] not in valid_paces:
+        preferences["pace"] = existing_prefs.get("pace") or "normal"
+
+    return jsonify({
+        "memory": memory,
+        "session": session,
+        "mastery": mastery,
+        "preferences": preferences,
+    })
 
 
 @app.route("/api/tutor/stream", methods=["GET", "POST"])

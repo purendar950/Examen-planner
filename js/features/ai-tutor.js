@@ -3157,13 +3157,32 @@
       var hasPending = getHistory(historyKey).some(function (m) { return m.pending; });
       if (!hasPending && !document.getElementById('ai-clear')) renderTutor();
     }
-    // Update the student's cross-session memory every couple of exchanges —
-    // not on every single message, so this stays one extra AI call every few
-    // turns rather than doubling the cost of every tutor reply.
+    // Update the student's cross-session memory with smarter triggers:
+    //   1. Every 4 exchanges (baseline)
+    //   2. On topic change (detected by comparing question keywords)
+    //   3. On confusion signals ("I don't understand", "again", "confused")
     if (window.TutorMemory) {
       var full = getHistory(historyKey).filter(function (m) { return !m.pending; });
-      if (full.length && full.length % 4 === 0) {
-        window.TutorMemory.refresh(full.map(function (m) { return { role: m.role, content: m.content }; }));
+      var shouldRefresh = false;
+      // Baseline: every 4 messages
+      if (full.length && full.length % 4 === 0) shouldRefresh = true;
+      // Topic change detection
+      if (full.length >= 4 && window.TutorMemory.detectTopicChange(
+        full.map(function (m) { return { role: m.role, content: m.content }; })
+      )) shouldRefresh = true;
+      // Confusion / mistake signals in the last user message
+      var lastUser = '';
+      for (var i = full.length - 1; i >= 0; i--) {
+        if (full[i].role === 'user') { lastUser = (full[i].content || '').toLowerCase(); break; }
+      }
+      if (/don'?t understand|confused|again|wrong|mistake|didn'?t get|not clear|what do you mean/i.test(lastUser)) {
+        shouldRefresh = true;
+      }
+      if (shouldRefresh) {
+        window.TutorMemory.refresh(
+          full.map(function (m) { return { role: m.role, content: m.content }; }),
+          curVid()
+        );
       }
     }
   }

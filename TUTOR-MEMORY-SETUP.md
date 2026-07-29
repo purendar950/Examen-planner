@@ -1,88 +1,73 @@
-# AI Tutor Memory — Setup
+# AI Tutor Memory v2 — Setup
 
-Gives the AI Tutor (YouTube tab) a small persistent memory of each student —
-weak/strong topics, preferred language, a one-line summary of the last
-session — that survives across devices AND across AI provider/model
-switches, because it lives in Supabase, not inside any model.
+Enhanced persistent memory for the AI Tutor with **5 intelligence layers**:
+
+| Layer | What it tracks | Table |
+|-------|---------------|-------|
+| Topics | Weak/strong topics + past summaries (last 5) | `student_memory` |
+| Confidence | Per-topic 0–1 mastery score | `student_topic_mastery` |
+| Mistakes | Specific mistakes + corrections | `student_sessions.mistakes` |
+| Sessions | Per-video session summaries + topics covered | `student_sessions` |
+| Learning Style | Detected style (examples/step-by-step/...), depth, pace | `student_preferences` |
 
 ```
 Student asks tutor a question → answered as normal (unchanged)
-Every ~2 exchanges           → chat sent to /api/tutor/memory-update
-                                → AI folds it into a compact JSON profile
-                                → saved to Supabase `student_memory`
-Every tutor question         → profile fetched from Supabase
-                                → sent as `memory` on the request
-                                → folded into the tutor's system prompt
+Trigger: every 4 messages OR topic change OR confusion signal
+  → chat sent to /api/tutor/memory-update (enhanced)
+    → AI extracts: topics, confidence, mistakes, learning style, summary
+    → saved to 4 Supabase tables independently
+Every tutor question
+  → all 4 tables fetched in parallel, merged into rich context
+  → injected into system prompt (weak/strong topics, confidence %, past mistakes,
+    session summaries, learning style, pace)
 ```
 
 ## 1. Run the SQL migration
 
-Open the SQL editor of the **dedicated** project created for this feature
-(project ref `aqxglvtndssjkqluvzpl`) — kept separate on purpose from the
-project already used by `js/supabase-config.js` / `js/saved-questions.js` /
-`js/quiz-attempts.js` (`deefmrmmjlknotzpceqp`).
+Open the SQL editor of the **dedicated** project
+(project ref `aqxglvtndssjkqluvzpl`).
 
-Paste and run `supabase/student_memory.sql`.
-
-> **Note on privacy:** this table uses the same permissive-RLS pattern as
-> `mock_attempts` / `quiz_attempts` in the other project (there's no
-> Supabase Auth session to check — StudyPlanner logs in with Firebase), so
-> it's protected by this project's anon key + needing a specific student's
-> uid, not by real per-row isolation. Being a separate project means a leak
-> here can't touch your mock-tests/quiz data, but it doesn't add isolation
-> on its own. The SQL file has a longer comment on tightening this later
-> via the `/api/tutor/memory-update` endpoint (it already verifies the
-> Firebase ID token — it could write with a service_role key instead of
-> letting the client upsert directly).
+Paste and run `supabase/student_memory.sql`. This is **additive** — if you
+already ran the v1 SQL, the existing `student_memory` table and data are
+preserved (the `last_summary` column is automatically migrated into
+`past_summaries`). The 3 new tables (`student_topic_mastery`,
+`student_sessions`, `student_preferences`) are created fresh.
 
 ## 2. Deploy the backend change
 
-`youtube-turbo-proxy/app.py` has two changes:
+`youtube-turbo-proxy/app.py` — the `/api/tutor/memory-update` endpoint now
+returns 4 separate objects (`memory`, `session`, `mastery`, `preferences`)
+instead of 1, so the client can save each to its own table. No new env vars
+needed — reuses the existing AI config.
 
-- `_tutor_prepare()` now accepts an optional `memory` field and folds it
-  into the tutor's system prompt.
-- A new `POST /api/tutor/memory-update` endpoint summarizes a chat into
-  the JSON profile, reusing whatever Study AI / Groq key is already
-  configured in the admin panel — no new key to add.
-
-No new environment variables needed. Push to `main` and let your existing
-Render deploy (`youtube-turbo-proxy/render.yaml`) redeploy it as usual.
+Push to `main` and let Render redeploy.
 
 ## 3. Deploy the frontend change
 
-New file `js/features/tutor-memory.js`, loaded in `app.html` right after
-`vendor/supabase.js` and before `ai-tutor.js`. `ai-tutor.js` itself has two
-small edits: it now sends `memory` on every tutor request, and refreshes
-memory every couple of exchanges. Push to `main` as usual (`static.yml`
-handles the GitHub Pages build; Android/`turbo-proxy-image` workflows are
-untouched by this change).
+- `js/features/tutor-memory.js` — rewritten: loads 4 tables in parallel,
+  builds rich context (confidence %, mistakes, multi-session summaries,
+  learning style), saves each response object to its table.
+- `js/features/ai-tutor.js` — smarter refresh triggers: every 4 messages,
+  on topic change (keyword comparison), and on confusion signals
+  ("I don't understand", "confused", "wrong", "again").
+- `app.html` — cache-bust versions bumped.
 
-## 4. Keep the Supabase project awake
+## 4. GitHub secrets for keep-alive
 
-Supabase pauses free-tier projects after 7 days with no real database
-activity. `.github/workflows/supabase-keepalive.yml` pings `student_memory`
-twice a week to prevent that. Add these two repo secrets (**Settings →
-Secrets and variables → Actions**):
-
-- `SUPABASE_URL` = `https://aqxglvtndssjkqluvzpl.supabase.co`
-- `SUPABASE_ANON_KEY` = the same anon key now hardcoded in
-  `js/features/tutor-memory.js` (it's meant to be public — safe to reuse
-  here)
-
-No GitHub personal access token is needed anywhere in this setup — the
-workflow only needs the two secrets above. This is a **second** keep-alive
-target from the one you might already be running for the other project —
-if you ever add memory storage to `deefmrmmjlknotzpceqp` too, that one
-needs its own separate ping, since Supabase tracks inactivity per project.
+Already set up from v1 (`SUPABASE_URL`, `SUPABASE_ANON_KEY`). The
+`.github/workflows/supabase-keepalive.yml` workflow now touches
+`student_memory` which keeps the project awake — no changes needed.
 
 ## 5. Test it
 
-1. Open a video, ask the tutor a few questions across 2–3 exchanges.
-2. Check the Supabase table editor → `student_memory` — a row should
-   appear for your uid after the 4th message in a chat.
-3. Start a **new** chat (different video, or clear + reopen) — the tutor's
-   very first reply should already reflect what it "knows" about you,
-   without you repeating anything.
-4. Switch the provider/model in the admin panel and repeat step 3 — memory
-   should still show up, since it's injected fresh on every call rather
-   than living inside any one model.
+1. Open a video, ask the tutor questions across 2–3 exchanges.
+2. Check Supabase table editor:
+   - `student_memory` — row with weak/strong topics + past_summaries array
+   - `student_topic_mastery` — rows with confidence scores per topic
+   - `student_sessions` — row with summary, topics_covered, mistakes
+   - `student_preferences` — row with learning_style, explanation_depth, pace
+3. Start a **new** chat — the tutor should reference past sessions, adapt
+   to your learning style, and warn about past mistakes.
+4. Switch provider/model — memory persists (it's in your database, not the model).
+5. Say something wrong then get corrected — next session the tutor should
+   remember your specific mistake.
