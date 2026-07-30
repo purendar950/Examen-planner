@@ -36,7 +36,12 @@
   var TELEGRAM_BOT_URL = (localStorage.getItem('telegramBotUrl')
     || TURBO_BACKEND_URL).replace(/\/+$/, '');
 
-  var turboEnabled = localStorage.getItem('turboEnabled') === '1';
+  // Turbo is OFF by default on every page load (session-only toggle).
+  // The design doc says: "Default player = the original YouTube iframe.
+  // Untouched."  Persisting the enabled state caused every video start,
+  // resume, and playlist-next to route through Turbo, which is not the
+  // intended default behaviour.
+  var turboEnabled = false;
   var turboVideoEl = null;      // the native <video>
   var turboActiveNow = false;   // true while a video is actually playing via Turbo
   var turboInlineHome = null;   // original player-wrap position while docked in Notes Focus
@@ -768,7 +773,9 @@
     turboEnabled = !turboEnabled;
     turboPhase = turboEnabled ? 'idle' : 'off';
     turboFailure = '';
-    localStorage.setItem('turboEnabled', turboEnabled ? '1' : '0');
+    // Intentionally NOT persisted — Turbo resets to OFF on every page
+    // load so normal YouTube is always the default player.
+    // localStorage.setItem('turboEnabled', turboEnabled ? '1' : '0');
     updateToggleUI();
     applySpeedVisibility();
     emitTurboState();
@@ -835,10 +842,13 @@
       emitTurboState();
       return true;
     }
+    // Activate Turbo in MEMORY only — do NOT persist to localStorage.
+    // This prevents Notes Focus Mode from permanently flipping the default
+    // player to Turbo for all future video loads. The user must explicitly
+    // toggle the ⚡ Turbo button to persist the preference.
     turboEnabled = true;
     turboPhase = 'loading';
     turboFailure = '';
-    localStorage.setItem('turboEnabled', '1');
     updateToggleUI();
     applySpeedVisibility();
     emitTurboState();
