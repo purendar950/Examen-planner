@@ -3334,7 +3334,11 @@ def _notes_instr(style=""):
             "or references something visual — do NOT add them gratuitously.\n"
             "- A lecture about science, geography, biology, economics, history "
             "maps, or any subject with diagrams/charts should typically have "
-            "MULTIPLE image blocks throughout the notes.\n")
+            "MULTIPLE image blocks throughout the notes.\n"
+            "- IMPORTANT: write the description in ENGLISH even if the notes are "
+            "in another language — this is used to search for the actual image. "
+            "Use concise, specific English keywords, e.g. '[DIAGRAM: Coulomb's "
+            "force between two charges diagram]' not a full sentence.\n")
         return ("Create COMPREHENSIVE study notes in clean Markdown with visual "
                 "aids. Cover EVERY topic, point, fact, figure, date, name, place, "
                 "definition, formula and example mentioned — do NOT omit or "
@@ -3884,6 +3888,43 @@ def api_study():
     if not data["persisted"]:
         log.warning("study %s NOT persisted (see errors above) — will regenerate next time", fs_id)
     return jsonify(data)
+
+
+@app.get("/api/img")
+def api_image():
+    """Resolve an image description to a real image URL using Wikipedia/Wikimedia.
+    Free, no API key needed. Used by the Topic+Images note style to show
+    actual images instead of text-only placeholder blocks.
+    ?q=search+query  — returns {url, alt} or {url: null}."""
+    q = (request.args.get("q") or "").strip()
+    if not q or len(q) < 3:
+        return jsonify({"url": None})
+    try:
+        # 1) Search Wikipedia for the most relevant article
+        sr = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "query", "list": "search", "srsearch": q,
+                    "srlimit": 3, "format": "json"},
+            timeout=6)
+        results = sr.json().get("query", {}).get("search", [])
+        if not results:
+            return jsonify({"url": None})
+        # 2) Try to get a thumbnail from the top matching articles
+        titles = "|".join(r["title"] for r in results[:3])
+        pg = requests.get(
+            "https://en.wikipedia.org/w/api.php",
+            params={"action": "query", "titles": titles,
+                    "prop": "pageimages", "format": "json",
+                    "pithumbsize": 800},
+            timeout=6)
+        pages = pg.json().get("query", {}).get("pages", {})
+        for pid, page in sorted(pages.items(), key=lambda x: int(x[0])):
+            if int(pid) > 0 and page.get("thumbnail", {}).get("source"):
+                return jsonify({"url": page["thumbnail"]["source"],
+                                "alt": page.get("title", "")})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("api_image failed for q=%r: %s", q, exc)
+    return jsonify({"url": None})
 
 
 @app.get("/api/study/stream")
