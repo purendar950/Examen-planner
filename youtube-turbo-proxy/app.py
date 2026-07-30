@@ -3890,28 +3890,63 @@ def api_study():
     return jsonify(data)
 
 
+# Session for Wikimedia / Wikipedia API calls (requires a polite User-Agent).
+_WIKI_SESSION = requests.Session()
+_WIKI_SESSION.headers.update({
+    "User-Agent": "ExamenPlanner/1.0 (https://github.com/purendar950/Examen-planner; study-notes image resolver)"
+})
+
+
 @app.get("/api/img")
 def api_image():
-    """Resolve an image description to a real image URL using Wikipedia/Wikimedia.
-    Free, no API key needed. Used by the Topic+Images note style to show
-    actual images instead of text-only placeholder blocks.
+    """Resolve an image description to a real image URL.
+    Tries Wikimedia Commons first (millions of educational diagrams), then
+    Wikipedia article thumbnails.  Free, no API key needed.
     ?q=search+query  — returns {url, alt} or {url: null}."""
     q = (request.args.get("q") or "").strip()
     if not q or len(q) < 3:
         return jsonify({"url": None})
-    try:
-        # 1) Search Wikipedia for the most relevant article
-        sr = requests.get(
+
+    def _commons_img(search_q):
+        """Search Wikimedia Commons (File namespace) for a matching image."""
+        sr = _WIKI_SESSION.get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={"action": "query", "list": "search",
+                    "srsearch": search_q, "srnamespace": "6",
+                    "srlimit": 3, "srsort": "relevance",
+                    "format": "json"},
+            timeout=8)
+        for hit in sr.json().get("query", {}).get("search", []):
+            title = hit["title"]
+            ir = _WIKI_SESSION.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={"action": "query", "titles": title,
+                        "prop": "imageinfo", "iiprop": "url|size",
+                        "format": "json"},
+                timeout=8)
+            pages = ir.json().get("query", {}).get("pages", {})
+            for pid, page in pages.items():
+                if int(pid) > 0 and page.get("imageinfo"):
+                    info = page["imageinfo"][0]
+                    if (info.get("width", 0) >= 100 and
+                            info.get("height", 0) >= 100):
+                        return {"url": info["url"],
+                                "alt": page.get("title", "")}
+        return None
+
+    def _wiki_thumb(search_q):
+        """Fallback: Wikipedia article thumbnail."""
+        sr = _WIKI_SESSION.get(
             "https://en.wikipedia.org/w/api.php",
-            params={"action": "query", "list": "search", "srsearch": q,
-                    "srlimit": 3, "format": "json"},
+            params={"action": "query", "list": "search",
+                    "srsearch": search_q, "srlimit": 3,
+                    "format": "json"},
             timeout=6)
         results = sr.json().get("query", {}).get("search", [])
         if not results:
-            return jsonify({"url": None})
-        # 2) Try to get a thumbnail from the top matching articles
+            return None
         titles = "|".join(r["title"] for r in results[:3])
-        pg = requests.get(
+        pg = _WIKI_SESSION.get(
             "https://en.wikipedia.org/w/api.php",
             params={"action": "query", "titles": titles,
                     "prop": "pageimages", "format": "json",
@@ -3920,10 +3955,40 @@ def api_image():
         pages = pg.json().get("query", {}).get("pages", {})
         for pid, page in sorted(pages.items(), key=lambda x: int(x[0])):
             if int(pid) > 0 and page.get("thumbnail", {}).get("source"):
-                return jsonify({"url": page["thumbnail"]["source"],
-                                "alt": page.get("title", "")})
+                return {"url": page["thumbnail"]["source"],
+                        "alt": page.get("title", "")}
+        return None
+
+    # Build search queries — always try English first, append topic keywords
+    queries = [q]
+    # If query looks non-Latin, also try with generic English topic keywords
+    has_latin = any(c.isascii() and c.isalpha() for c in q)
+    if not has_latin:
+        queries.append(q + " diagram")
+        queries.append(q + " educational illustration")
+    # Always try with extra keywords for better Commons results
+    if "diagram" not in q.lower():
+        queries.append(q + " diagram")
+    if "illustration" not in q.lower():
+        queries.append(q + " illustration")
+
+    for sq in queries:
+        try:
+            result = _commons_img(sq)
+            if result:
+                return jsonify(result)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("api_image commons failed for q=%r sq=%r: %s", q, sq, exc)
+            break  # network error — don't retry
+
+    # Fallback: Wikipedia article thumbnail
+    try:
+        result = _wiki_thumb(queries[0])
+        if result:
+            return jsonify(result)
     except Exception as exc:  # noqa: BLE001
-        log.warning("api_image failed for q=%r: %s", q, exc)
+        log.warning("api_image wiki failed for q=%r: %s", q, exc)
+
     return jsonify({"url": None})
 
 

@@ -488,12 +488,16 @@
     var q = (text || '').replace(/<[^>]*>/g, '').trim();
     var googleLink = 'https://www.google.com/search?q=' + encodeURIComponent(q + ' diagram educational') + '&tbm=isch';
     return '<div class="nb-img-block" data-img-q="' + esc(q) + '">' +
-      '<div class="nb-img-loading">' +
-        '<div class="nb-img-icon">🖼</div>' +
-        '<div class="nb-img-content">' + nbInline(esc(text)) + '</div>' +
-      '</div>' +
-      '<div class="nb-img-fallback" style="display:none">' +
+      '<div class="nb-img-placeholder">' +
+        '<div class="nb-img-ph-top">' +
+          '<div class="nb-img-icon">🖼</div>' +
+          '<div class="nb-img-content">' + nbInline(esc(text)) + '</div>' +
+        '</div>' +
         '<a href="' + googleLink + '" target="_blank" rel="noopener" class="nb-img-search-link">🔍 Search on Google Images</a>' +
+      '</div>' +
+      '<div class="nb-img-real-wrap" style="display:none">' +
+        '<img class="nb-img-real" alt="' + esc(q) + '">' +
+        '<div class="nb-img-caption">' + nbInline(esc(text)) + '</div>' +
       '</div>' +
     '</div>';
   }
@@ -504,7 +508,6 @@
     if (!container) return;
     var blocks = container.querySelectorAll('.nb-img-block[data-img-q]');
     if (!blocks.length) return;
-    var fetched = 0;
     for (var i = 0; i < blocks.length; i++) {
       (function (block) {
         var q = block.getAttribute('data-img-q');
@@ -513,39 +516,26 @@
           .then(function (r) { return r.json(); })
           .then(function (data) {
             if (data && data.url) {
-              var img = document.createElement('img');
-              img.src = data.url;
-              img.alt = data.alt || q;
-              img.className = 'nb-img-real';
-              img.loading = 'lazy';
-              img.onerror = function () {
-                // Image failed to load — show fallback Google link
-                var loading = block.querySelector('.nb-img-loading');
-                var fallback = block.querySelector('.nb-img-fallback');
-                if (loading) loading.style.display = 'none';
-                if (fallback) fallback.style.display = 'block';
-                img.remove();
-              };
-              img.onload = function () {
-                var loading = block.querySelector('.nb-img-loading');
-                if (loading) loading.style.display = 'none';
-              };
-              block.insertBefore(img, block.firstChild);
-            } else {
-              // No image found — show Google search fallback
-              var loading = block.querySelector('.nb-img-loading');
-              var fallback = block.querySelector('.nb-img-fallback');
-              if (loading) loading.style.display = 'none';
-              if (fallback) fallback.style.display = 'block';
+              var wrap = block.querySelector('.nb-img-real-wrap');
+              var img = wrap ? wrap.querySelector('img') : null;
+              if (img) {
+                img.src = data.url;
+                img.onload = function () {
+                  var ph = block.querySelector('.nb-img-placeholder');
+                  if (ph) ph.style.display = 'none';
+                  if (wrap) wrap.style.display = 'block';
+                };
+                img.onerror = function () {
+                  // Image failed to load — keep showing placeholder + Google link
+                  img.src = '';
+                };
+              }
             }
+            // If no URL, placeholder + Google link stay visible (no action needed)
           })
           .catch(function () {
-            var loading = block.querySelector('.nb-img-loading');
-            var fallback = block.querySelector('.nb-img-fallback');
-            if (loading) loading.style.display = 'none';
-            if (fallback) fallback.style.display = 'block';
+            /* network error — placeholder stays visible */
           });
-        fetched++;
       })(blocks[i]);
     }
   }
@@ -620,10 +610,12 @@
       sc + ' .nb-img-icon{font-size:1.4rem;flex:none;width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:rgba(103,58,183,.1);border-radius:8px}',
       sc + ' .nb-img-content{flex:1;font-size:.92rem;line-height:1.55;color:#37474f}',
       sc + ' .nb-img-content b,' + sc + ' .nb-img-content .pen{color:#4a148c}',
-      sc + ' .nb-img-loading{display:flex;gap:10px;align-items:flex-start}',
-      sc + ' .nb-img-real{width:100%;max-height:320px;object-fit:contain;border-radius:8px;background:#fff}',
-      sc + ' .nb-img-fallback{text-align:center}',
-      sc + ' .nb-img-search-link{display:inline-flex;align-items:center;gap:6px;color:#5c6bc0;text-decoration:none;font-size:.88rem;padding:6px 14px;border:1.5px solid #9fa8da;border-radius:8px;background:#fff;transition:background .15s}',
+      sc + ' .nb-img-ph-top{display:flex;gap:10px;align-items:flex-start}',
+      sc + ' .nb-img-placeholder{display:flex;flex-direction:column;gap:8px}',
+      sc + ' .nb-img-real-wrap{display:flex;flex-direction:column;gap:4px}',
+      sc + ' .nb-img-real{width:100%;max-height:340px;object-fit:contain;border-radius:8px;background:#fff}',
+      sc + ' .nb-img-caption{font-size:.82rem;color:#5c6bc0;font-style:italic;padding:0 2px}',
+      sc + ' .nb-img-search-link{display:inline-flex;align-items:center;gap:6px;color:#5c6bc0;text-decoration:none;font-size:.85rem;padding:5px 12px;border:1.5px solid #9fa8da;border-radius:8px;background:#fff;transition:background .15s;align-self:flex-start}',
       sc + ' .nb-img-search-link:hover{background:#e8eaf6}',
       sc + ' .q-card{margin:12px 0 4px;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(20,40,60,.08)}',
       sc + ' .q-head{background:#2f4858;color:#eef4f8;padding:9px 13px;font-size:1rem;font-weight:700;display:flex;gap:9px;align-items:baseline}',
