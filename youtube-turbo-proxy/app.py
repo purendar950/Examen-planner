@@ -3308,6 +3308,55 @@ def _notes_instr(style=""):
                 "Rules: bold (**...**) ONLY key terms; do not wrap the answer in "
                 "code fences; do not repeat or paraphrase a question already "
                 "written; use the SAME spelling for a name/term throughout." + no_promo)
+    if style == "topic+images":
+        img_instr = (
+            "\nIMAGE / DIAGRAM PLACEMENT RULES (critical):\n"
+            "Wherever the lecture DESCRIBES, REFERENCES, or EXPLAINS something "
+            "visual — a diagram, map, chart, graph, table, flowchart, cycle, "
+            "structure, labelled figure, timeline, or illustration — insert a "
+            "dedicated image block on its OWN line in EXACTLY this format:\n"
+            "  [IMAGE: Brief description of the visual]\n"
+            "  [DIAGRAM: Brief description of the diagram]\n"
+            "  [FIGURE: Brief description of the figure]\n"
+            "  [CHART: Brief description of the chart/graph]\n"
+            "  [ILLUSTRATION: Brief description of the illustration]\n"
+            "Choose the most specific tag: DIAGRAM for scientific/technical "
+            "diagrams, FIGURE for labelled figures and structures, CHART for "
+            "graphs and data charts, ILLUSTRATION for process flows and "
+            "schematic drawings, IMAGE for general visuals.\n"
+            "Rules:\n"
+            "- Place the image block RIGHT BEFORE or RIGHT AFTER the related "
+            "content (never in the middle of a sentence or bullet list).\n"
+            "- Each image block must be on its own line with no other text.\n"
+            "- Include a concise but descriptive caption so the reader knows "
+            "what the visual shows.\n"
+            "- Insert image blocks ONLY where the lecture genuinely describes "
+            "or references something visual — do NOT add them gratuitously.\n"
+            "- A lecture about science, geography, biology, economics, history "
+            "maps, or any subject with diagrams/charts should typically have "
+            "MULTIPLE image blocks throughout the notes.\n")
+        return ("Create COMPREHENSIVE study notes in clean Markdown with visual "
+                "aids. Cover EVERY topic, point, fact, figure, date, name, place, "
+                "definition, formula and example mentioned — do NOT omit or "
+                "over-summarize any information. Keep the lecture's order.\n"
+                "Formatting rules for a clean, readable result:\n"
+                "- Use ## for main sections and ### for sub-sections.\n"
+                "- Use '- ' bullet points for details; nest with indentation.\n"
+                "- Bold (**...**) ONLY key terms/keywords, not whole sentences.\n"
+                "- Use a Markdown table when comparing items or listing facts/dates.\n"
+                "- CONSOLIDATE by subject: keep everything about one topic/award/"
+                "person/scheme/event in a SINGLE section. Never create two sections "
+                "for the same subject, and never restate a fact, name, figure or date "
+                "you already wrote — each point appears exactly ONCE, in the most "
+                "relevant place. If the lecture recaps or repeats something, merge any "
+                "new detail into the existing section instead of repeating it.\n"
+                "- Use the SAME spelling for a given name/term throughout.\n"
+                "- The transcript is annotated with inline timestamps like [M:SS]. "
+                "START every ## section and ### sub-section heading with the lecture "
+                "timestamp where that part begins (from the nearest preceding [M:SS] "
+                "marker), e.g. '## 3:45 Topic name'. Keep it in plain M:SS form.\n"
+                "- Do not wrap the whole answer in code fences."
+                + img_instr + no_promo)
     return ("Create COMPREHENSIVE study notes in clean Markdown. Cover EVERY "
             "topic, point, fact, figure, date, name, place, definition, formula "
             "and example mentioned \u2014 do NOT omit or over-summarize any "
@@ -3731,11 +3780,11 @@ def api_study():
         focus = ""                              # other modes ignore focus
     fkey = re.sub(r"\s+", " ", focus).lower()[:120]
 
-    # ?style=mcq (notes only): format the notes question-by-question instead of
-    # topic notes. Only 'mcq' is a recognised non-default style; everything else
-    # keeps the original topic-notes behaviour (and its existing cache).
+    # ?style=mcq|topic+images (notes only): format notes by style.
+    # Only 'mcq' and 'topic+images' are recognised non-default styles;
+    # everything else keeps the original topic-notes behaviour.
     style = (request.args.get("style") or "").strip().lower()
-    if mode != "notes" or style not in ("mcq",):
+    if mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
 
     # Cache key is MODEL-AGNOSTIC: a note is identified by its CONTENT dimensions
@@ -3871,7 +3920,7 @@ def api_study_stream():
     force = (request.args.get("refresh") or request.args.get("nocache")
              or "").strip().lower() in ("1", "true", "yes")
     style = (request.args.get("style") or "").strip().lower()
-    if mode != "notes" or style not in ("mcq",):
+    if mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
 
     # Cache key MUST match /api/study (notes/summary/insights have no focus and a
@@ -4155,7 +4204,7 @@ def api_study_jobs_start():
         return jsonify({"error": "bad_mode", "detail": "jobs support notes, summary and insights"}), 400
     if not video_id:
         return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
-    if mode != "notes" or style not in ("mcq",):
+    if mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
 
     was_stopped = _study_job_was_stopped(job_id)
@@ -4339,7 +4388,7 @@ def api_study_langs():
     num_q = max(1, min(100, num_q))
     # match /api/study's cache buckets: MCQ notes are stored under their own key
     style = (request.args.get("style") or "").strip().lower()
-    if mode != "notes" or style not in ("mcq",):
+    if mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
     # model-agnostic: a language is "available" if a note exists for it, no matter
     # which model made it (cache key no longer includes the model).
