@@ -477,9 +477,47 @@
   }
 
   // Build the notebook HTML (no wrapper); linkTs makes timestamps clickable.
+  // ── Image description block renderer ──
+  // The backend sends image descriptions as:
+  //   [IMAGE: A flowchart showing X → Y → Z]
+  //   [DIAGRAM: A labelled diagram of the human heart]
+  //   [FIGURE: A table comparing properties]
+  // We render these as distinct visual blocks with an icon and styled container.
+  var NB_IMG = /^\[\s*(IMAGE|DIAGRAM|FIGURE|CHART|ILLUSTRATION)\s*:\s*([\s\S]*?)\s*\]$/i;
+  function nbImgBlock(text) {
+    return '<div class="nb-img-block"><div class="nb-img-icon">🖼</div><div class="nb-img-content">' + nbInline(esc(text)) + '</div></div>';
+  }
+
   function nbBuild(content, style) {
     var clean = deLatex(nbStrip(content));
-    return linkTs(style === 'mcq' ? nbMCQ(clean) : nbInner(clean));
+    if (style === 'mcq') return linkTs(nbMCQ(clean));
+    if (style === 'topic+images') return linkTs(nbTopicImages(clean));
+    return linkTs(nbInner(clean));
+  }
+  // Topic+Images renderer: same as topic (nbInner) but also renders
+  // [IMAGE: ...], [DIAGRAM: ...], [FIGURE: ...] blocks as visual cards.
+  function nbTopicImages(md) {
+    var lines = (md || '').replace(/\r/g, '').split('\n');
+    var out = [], i = 0;
+    while (i < lines.length) {
+      var t = lines[i].trim();
+      var imgMatch = t.match(NB_IMG);
+      if (imgMatch) {
+        out.push(nbImgBlock(imgMatch[2]));
+        i++;
+        // Also consume any immediately following blank line after the image block
+        while (i < lines.length && lines[i].trim() === '') i++;
+        continue;
+      }
+      // Non-image lines: accumulate and render through nbInner in chunks
+      var buf = [];
+      while (i < lines.length && !lines[i].trim().match(NB_IMG)) {
+        buf.push(lines[i]);
+        i++;
+      }
+      if (buf.join('').trim()) out.push(nbInner(buf.join('\n')));
+    }
+    return out.join('\n');
   }
 
   // Shared component styles, scoped to `sc` (used for both .ai-nb screen + .pdf-nb print).
@@ -516,6 +554,10 @@
       sc + ' .factbox{border:1.5px solid #2e7d32;border-radius:9px;padding:8px 12px;margin:5px 0 10px;background:#f6fff7}',
       sc + ' .membox{border:2px dashed #7b1fa2;border-radius:9px;padding:8px 12px;margin:5px 0 10px;background:#f3e5f5;color:#4a148c}',
       sc + ' .notebox{background:#e3f2fd;border-left:4px solid #1565c0;border-radius:7px;padding:8px 12px;margin:6px 0;color:#0d2f52}',
+      sc + ' .nb-img-block{background:linear-gradient(135deg,#f3f0ff 0%,#ede7f6 100%);border:1.5px solid #b39ddb;border-radius:10px;padding:10px 12px;margin:10px 0;display:flex;gap:10px;align-items:flex-start}',
+      sc + ' .nb-img-icon{font-size:1.4rem;flex:none;width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:rgba(103,58,183,.1);border-radius:8px}',
+      sc + ' .nb-img-content{flex:1;font-size:.92rem;line-height:1.55;color:#37474f}',
+      sc + ' .nb-img-content b,' + sc + ' .nb-img-content .pen{color:#4a148c}',
       sc + ' .q-card{margin:12px 0 4px;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(20,40,60,.08)}',
       sc + ' .q-head{background:#2f4858;color:#eef4f8;padding:9px 13px;font-size:1rem;font-weight:700;display:flex;gap:9px;align-items:baseline}',
       sc + ' .q-head .qtag{background:rgba(255,255,255,.18);border-radius:6px;padding:1px 8px;font-size:.74rem;flex:none;font-family:system-ui,Arial,sans-serif}',
@@ -982,8 +1024,15 @@
     if (lecOn()) setTimeout(lecTick, 120);
   }
 
-  // Notes style toggle (Topic vs MCQ) — only meaningful for the "notes" mode.
-  function nbNotesStyle() { var s = document.getElementById('ai-notes-style'); return (s && s.value === 'mcq') ? 'mcq' : 'topic'; }
+  // Notes style toggle (Topic vs Topic+Images vs MCQ) — only meaningful for the "notes" mode.
+  function nbNotesStyle() {
+    var s = document.getElementById('ai-notes-style');
+    if (!s) return 'topic';
+    var v = s.value;
+    if (v === 'mcq') return 'mcq';
+    if (v === 'topic+images') return 'topic+images';
+    return 'topic';
+  }
 
   /* ── Notes / Summary / Insights / Flashcards (from /api/study) ──
      Text modes (notes/summary/insights) STREAM progressively from
@@ -1960,6 +2009,7 @@
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
     if (style === 'mcq') url += '&style=mcq';
+    else if (style === 'topic+images') url += '&style=topic+images';
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
     apiGet(url, signal).then(function (j) {
@@ -2022,7 +2072,8 @@
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: signal,
       body: JSON.stringify({
         jobId: job.jobId, id: vid, mode: mode, out: lang,
-        model: outModel(), provider: outProvider(), style: style || '', refresh: force ? 1 : 0
+        model: outModel(), provider: outProvider(), style: style || '',
+        focus: job.focus || '', refresh: force ? 1 : 0
       })
     }).then(function (r) { return r.ok ? r.json() : jobRequestError(r); }).then(function (created) {
       if (created && created.jobId) {
@@ -2223,7 +2274,10 @@
     var modeSel = document.getElementById('ai-notes-mode');
     var styleSel = document.getElementById('ai-notes-style');
     if (modeSel && ['notes', 'summary', 'insights'].indexOf(job.mode) !== -1) modeSel.value = job.mode;
-    if (styleSel) { styleSel.value = job.style === 'mcq' ? 'mcq' : 'topic'; styleSel.style.display = job.mode === 'notes' ? '' : 'none'; }
+    if (styleSel) {
+      var sv = (job.style === 'mcq') ? 'mcq' : (job.style === 'topic+images') ? 'topic+images' : 'topic';
+      styleSel.value = sv; styleSel.style.display = job.mode === 'notes' ? '' : 'none';
+    }
     if (job.stopRequested) {
       _genStart('ai-notes-go');
       _genControlsStudyJob = true;
@@ -2248,6 +2302,7 @@
     var vid = curVid();
     var url = '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     if (style === 'mcq') url += '&style=mcq';
+    else if (style === 'topic+images') url += '&style=topic+images';
     if (force) url += '&refresh=1';
     var meta = {}, acc = '', gotChunk = false, done = false;
     var targetEl = contentEl(), paintRequest = _studyPaintRequest;
@@ -2509,7 +2564,7 @@
     var vid = curVid(), bar = document.getElementById('ai-langbar');
     var style = (mode === 'notes') ? nbNotesStyle() : '';
     if (!vid || !bar) return;
-    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + (style === 'mcq' ? '&style=mcq' : '') + modelParam()).then(function (j) {
+    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + ((style === 'mcq' || style === 'topic+images') ? '&style=' + encodeURIComponent(style) : '') + modelParam()).then(function (j) {
       // Ignore an older language-cache response after the user has switched a
       // note type/style, tab, video, or rebuilt the workspace.
       if (requestId !== _langCheckRequest || curVid() !== vid || bar !== document.getElementById('ai-langbar')) return;
@@ -2730,6 +2785,7 @@
   }
   function pdfDocumentLabelFor(mode, style) {
     if (style === 'mcq') return 'MCQ Practice Notes';
+    if (style === 'topic+images') return 'Topic + Images Notes';
     if (mode === 'summary') return 'Video Summary';
     if (mode === 'insights') return 'Key Insights';
     return 'Comprehensive Notes';
@@ -3358,7 +3414,7 @@
       b.innerHTML = '<div class="ai-notes-workspace-intro"><span>Generate Notes</span><p>Turn the video playing beside this panel into revision-ready notes.</p></div>' +
         '<div class="ai-notes-controls">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
-        '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="mcq">❓ MCQ</option></select>' +
+        '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="topic+images">🖼 Topic + Images</option><option value="mcq">❓ MCQ</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
         '<span id="ai-note-actions" class="ai-note-actions" role="group" aria-label="Note actions"></span>' +
         '</div><div id="ai-langbar"></div><div id="ai-sub"></div>';
