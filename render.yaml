@@ -81,8 +81,22 @@ services:
         value: "true"
       - key: OPENCODE_STUDY_MAX_PROMPT_CHARS
         value: "120000"
+      # Generation-capable timeouts for the OpenCode Study AI transport. 90s
+      # routinely truncated Zen free models on long notes; poll settings above
+      # their old 6x1.5s (=9s) so cold-start replies are no longer mis-tagged
+      # as empty.
       - key: OPENCODE_TIMEOUT
-        value: "90"
+        value: "240"
+      - key: OPENCODE_STREAM_DEADLINE
+        value: "600"
+      - key: OPENCODE_STREAM_POLL_INTERVAL
+        value: "0.8"
+      - key: OPENCODE_REPLY_POLL_ATTEMPTS
+        value: "15"
+      - key: OPENCODE_REPLY_POLL_INTERVAL
+        value: "2.0"
+      - key: OPENCODE_SESSION_MAX_ATTEMPTS
+        value: "8"
 
   # Kiro API Key Test — standalone tool that verifies a KIRO_API_KEY works via
   # kiro-cli headless mode (server.js in kiro-test/). Personal testing tool,
