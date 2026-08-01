@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Simple "shelf with house" mark for the home-room concept -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- shelf plank -->
+    <path
+        android:fillColor="#C89C6B"
+        android:pathData="M20,66 L88,66 L88,74 L20,74 Z" />
+    <!-- house body -->
+    <path
+        android:fillColor="#F4E4C1"
+        android:pathData="M38,44 L70,44 L70,66 L38,66 Z" />
+    <!-- roof -->
+    <path
+        android:fillColor="#E06A4E"
+        android:pathData="M32,46 L54,26 L76,46 Z" />
+    <!-- door -->
+    <path
+        android:fillColor="#7A4A2B"
+        android:pathData="M48,52 L60,52 L60,66 L48,66 Z" />
+</vector>
