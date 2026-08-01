@@ -1011,7 +1011,9 @@ _stolencompute_session_lock = threading.Lock()
 # available to the admin planner and, only when OPENCODE_STUDY_ENABLED is true,
 # as a server-managed Study AI transport. Credentials, provider/model resolution,
 # workspace path, and tool permissions remain server-side.
-_OPENCODE_TIMEOUT = max(5, min(int(os.environ.get("OPENCODE_TIMEOUT", "90")), 300))
+# Default raised 90 -> 240s. A cold Zen free model commonly takes 30-60s to
+# first token and streams slowly; 90s routinely truncated long Study AI notes.
+_OPENCODE_TIMEOUT = max(5, min(int(os.environ.get("OPENCODE_TIMEOUT", "240")), 300))
 # Cleanup is deliberately short and retried so it cannot hold the browser
 # request open for another full generation timeout after a successful request.
 _OPENCODE_CLEANUP_TIMEOUT = min(_OPENCODE_TIMEOUT, 5)
@@ -1066,7 +1068,7 @@ _OPENCODE_STUDY_PROTOCOL = "server-catalog-nonblocking-stop-promptasync-stream-f
 # operator can widen the window without a code change.
 _OPENCODE_SESSION_RETRY_STATUSES = (502, 503, 504)
 _OPENCODE_SESSION_MAX_ATTEMPTS = max(1, min(
-    int(os.environ.get("OPENCODE_SESSION_MAX_ATTEMPTS", "5")), 10))
+    int(os.environ.get("OPENCODE_SESSION_MAX_ATTEMPTS", "8")), 10))
 _OPENCODE_SESSION_RETRY_BACKOFF = max(0.5, min(
     float(os.environ.get("OPENCODE_SESSION_RETRY_BACKOFF", "3.0")), 15.0))
 # Session creation is a lightweight call (no model runs yet), so it must fail
@@ -1085,10 +1087,13 @@ _OPENCODE_SESSION_TOTAL_DEADLINE = max(
 # first read of the reply can legitimately contain no text yet. Poll a bounded
 # number of times for the reply, stopping early once the message reports
 # completion or an error, before treating the response as empty.
+# Defaults raised 6*1.5s(=9s) -> 15*2.0s(=30s). Cold/queueing Zen free models
+# often produce their first visible text part only after 10-25s; 9s returned
+# "OpenCode returned an empty Study AI response" for replies that were coming.
 _OPENCODE_REPLY_POLL_ATTEMPTS = max(1, min(
-    int(os.environ.get("OPENCODE_REPLY_POLL_ATTEMPTS", "6")), 30))
+    int(os.environ.get("OPENCODE_REPLY_POLL_ATTEMPTS", "15")), 30))
 _OPENCODE_REPLY_POLL_INTERVAL = max(0.25, min(
-    float(os.environ.get("OPENCODE_REPLY_POLL_INTERVAL", "1.5")), 10.0))
+    float(os.environ.get("OPENCODE_REPLY_POLL_INTERVAL", "2.0")), 10.0))
 # Poll-based streaming for the OpenCode transport: the blocking POST /message
 # only returns once generation is finished, so it can never stream. Sending via
 # the non-blocking POST /prompt_async instead lets us poll GET /message while
@@ -1097,10 +1102,13 @@ _OPENCODE_REPLY_POLL_INTERVAL = max(0.25, min(
 # a fixed attempt count. A short interval keeps the stream feeling live without
 # hammering a small free-tier backend.
 _OPENCODE_STREAM_POLL_INTERVAL = max(0.4, min(
-    float(os.environ.get("OPENCODE_STREAM_POLL_INTERVAL", "1.2")), 10.0))
+    float(os.environ.get("OPENCODE_STREAM_POLL_INTERVAL", "0.8")), 10.0))
+# Stream deadline defaults to 600s rather than OPENCODE_TIMEOUT. Notes generation
+# on a cold free-tier Zen model legitimately runs 3-8 minutes; previously the
+# deadline equalled OPENCODE_TIMEOUT (90s) so streaming notes were cut mid-way.
 _OPENCODE_STREAM_DEADLINE = max(
     _OPENCODE_TIMEOUT,
-    min(int(os.environ.get("OPENCODE_STREAM_DEADLINE", str(_OPENCODE_TIMEOUT))), 600))
+    min(int(os.environ.get("OPENCODE_STREAM_DEADLINE", "600")), 600))
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
 # Big-context providers process a whole lecture in one call, which can take a
@@ -1891,6 +1899,51 @@ def _opencode_text_parts(parts):
         for part in (parts or [])
         if isinstance(part, dict) and part.get("type") == "text"
     ).strip()
+
+
+# OpenCode's session API never reports finish_reason=length, and its default
+# "Plan" agent tends to stop after a concise outline-style answer. That makes
+# the notes auto-continuation in _chat_notes_complete/_stream_notes_part never
+# fire. Instead of guessing truncation from text shape (fragile), we flag the
+# turn as truncated ONLY when (a) the prompt we sent was one of the Study
+# notes/summary instructions (detected by a marker phrase the server itself
+# injects) AND (b) the reply is shorter than a realistic finished document.
+# Normal chat/tutor answers pass through 'stop' unchanged.
+_OPENCODE_NOTES_MIN_CHARS = 1200   # below this, a notes turn is treated as cut
+
+
+def _opencode_turn_was_notes(messages):
+    """Whether the outgoing prompt was a Study-AI document-generation request.
+
+    The notes/summary/insights instructions all contain the marker phrase
+    'COMPREHENSIVE' (notes) or 'KEY INSIGHTS' (insights) or spell out a fixed
+    bullet shape. We use those injected markers rather than parsing content so
+    this survives prompt edits. Used solely to decide whether a short OpenCode
+    reply should be treated as a truncation (and continued) vs a real answer.
+    """
+    for m in (messages or []):
+        c = str(m.get("content") or "")
+        if ("COMPREHENSIVE study notes" in c or "MCQ practice set" in c
+                or "KEY INSIGHTS" in c):
+            return True
+    return False
+
+
+def _opencode_looks_truncated(messages, text):
+    """True only for a notes-family prompt whose reply is suspiciously short.
+
+    Conservative by design: only prompts we KNOW are document generation, and
+    only replies under the floor, are flagged. False positives here would merely
+    trigger one extra continuation pass; false negatives cost us truncated notes.
+    """
+    if not _opencode_turn_was_notes(messages):
+        return False
+    # An empty reply means hard failure (handled upstream as opencode_empty_response);
+    # 'truncated' is reserved for a PARTIAL notes document that got at least some
+    # content out. A short-but-nonempty notes turn is what the plan agent produces.
+    if not (text or "").strip():
+        return False
+    return len((text or "").strip()) < _OPENCODE_NOTES_MIN_CHARS
 
 
 def _opencode_send_plan_message(session_id, prompt, config):
@@ -2707,8 +2760,12 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False,
         answer = _opencode_chat(
             messages, ai, max_tokens=max_tokens, json_mode=json_mode,
             cancel_event=cancel_event)
+        # OpenCode never reports finish_reason=length. For notes-family prompts we
+        # conservatively treat a suspiciously-short reply as a truncation so the
+        # caller's continuation loop (_NOTES_CONTINUE) still fires.
         if meta is not None and answer:
-            meta["finish_reason"] = "stop"
+            meta["finish_reason"] = (
+                "length" if _opencode_looks_truncated(messages, answer) else "stop")
         return answer
     if ai.get("transport") == "stolencompute":
         return _stolencompute_chat(
@@ -2726,7 +2783,8 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False,
                     messages, cur, max_tokens=max_tokens, json_mode=json_mode,
                     cancel_event=cancel_event)
                 if meta is not None and answer:
-                    meta["finish_reason"] = "stop"
+                    meta["finish_reason"] = (
+                        "length" if _opencode_looks_truncated(messages, answer) else "stop")
                 if answer:
                     return answer
                 raise RuntimeError("OpenCode returned an empty Study AI response")
@@ -2849,16 +2907,19 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
         # written (falling back to a single final chunk on older servers). It
         # raises on a truly empty reply, matching the previous behaviour.
         produced = False
+        _oc_buf = []
         for piece in _opencode_chat_stream(
                 messages, ai, max_tokens=max_tokens, cancel_event=cancel_event):
             produced = True
+            _oc_buf.append(piece)
             yield piece
         if cancel_event is not None and cancel_event.is_set():
             return
         if not produced:
             raise RuntimeError("OpenCode returned an empty Study AI response")
         if meta is not None:
-            meta["finish_reason"] = "stop"
+            meta["finish_reason"] = (
+                "length" if _opencode_looks_truncated(messages, "".join(_oc_buf)) else "stop")
         return
     if ai.get("transport") == "stolencompute":
         # StolenCompute returns the full reply in one JSON payload; yield it as
@@ -2887,15 +2948,18 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
             return
         if cur.get("transport") == "opencode":
             produced = False
+            _oc_buf = []
             for piece in _opencode_chat_stream(
                     messages, cur, max_tokens=max_tokens, cancel_event=cancel_event):
                 produced = True
+                _oc_buf.append(piece)
                 yield piece
             if cancel_event is not None and cancel_event.is_set():
                 return
             if produced:
                 if meta is not None:
-                    meta["finish_reason"] = "stop"
+                    meta["finish_reason"] = (
+                        "length" if _opencode_looks_truncated(messages, "".join(_oc_buf)) else "stop")
                 return
             last = "OpenCode returned an empty Study AI response"
             continue
@@ -5386,7 +5450,11 @@ def _opencode_study_ai(model=None):
         "transport": "opencode",
         "provider": "opencode",
         "model": selected_model,
-        "big_context": False,
+        # OpenCode Zen models (deepseek-v4, mimo-v2.5, nemotron-3-ultra, …) are
+        # large-context. Mark the transport big-context so _notes_sections()
+        # chunks long transcripts through the existing big-context path instead
+        # of the flat-prompt middle-clip in _opencode_study_prompt().
+        "big_context": True,
         "tpm": 0,
         "opencode_config": config,
         "_session_lock": threading.Lock(),
