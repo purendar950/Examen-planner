@@ -190,31 +190,15 @@ function aiStudyProviderCard(pid, activePid) {
     ? '<a class="ai-provider-link" href="' + esc(provider.keyUrl) + '" target="_blank" rel="noopener">Get API key ↗</a>'
     : '<span class="ai-provider-link is-muted">Private endpoint</span>';
 
-  // StolenCompute is a free, anonymous, session-based pool — no API key. The
-  // metrics row, credentials box, and key count are all hidden/replaced with a
-  // short banner so the operator doesn't think they need to paste a key.
-  var isKeyless = pid === 'stolencompute';
-  var metricsRow = isKeyless
-    ? '<div class="ai-provider-metrics">' +
-        '<span><b>0</b> keys required</span>' +
-        '<span><b>' + models.length + '</b> models</span>' +
-        '<span id="study-health-' + pid + '" class="ai-provider-health is-' + health.state + '"><i></i>' + health.label + '</span>' +
-      '</div>'
-    : '<div class="ai-provider-metrics">' +
+  var metricsRow = '<div class="ai-provider-metrics">' +
         '<span><b>' + keys.length + '</b> key' + (keys.length === 1 ? '' : 's') + '</span>' +
         '<span><b>' + models.length + '</b> models</span>' +
         '<span id="study-health-' + pid + '" class="ai-provider-health is-' + health.state + '"><i></i>' + health.label + '</span>' +
       '</div>';
-  var credentialsBox = isKeyless
-    ? '<div class="ai-secret-label"><label>No API key needed</label></div>' +
-      '<div id="study-key-' + pid + '" class="ai-secret-field ai-secret-field--keyless" readonly disabled>' +
-        '<span class="ai-keyless-note">Free anonymous pool · the proxy creates a fresh session automatically on each request. ' +
-        'See <a href="docs/stolencompute/api-tester.html" target="_blank" rel="noopener">protocol reference</a>.</span>' +
-      '</div>'
-    : '<div class="ai-secret-label"><label for="study-key-' + pid + '">API credentials</label><button type="button" onclick="toggleStudyKeyVisibility(\'' + pid + '\',this)" aria-pressed="false" aria-label="Show ' + esc(provider.label) + ' API keys">Show</button></div>' +
+  var credentialsBox = '<div class="ai-secret-label"><label for="study-key-' + pid + '">API credentials</label><button type="button" onclick="toggleStudyKeyVisibility(\'' + pid + '\',this)" aria-pressed="false" aria-label="Show ' + esc(provider.label) + ' API keys">Show</button></div>' +
       '<textarea id="study-key-' + pid + '" class="ai-secret-field" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="One API key per line">' + esc(keys.join('\n')) + '</textarea>';
 
-  return '<article id="study-provider-card-' + pid + '" class="ai-provider-card' + (active ? ' is-active' : '') + '"' + (isKeyless ? ' data-keyless="true"' : '') + '>' +
+  return '<article id="study-provider-card-' + pid + '" class="ai-provider-card' + (active ? ' is-active' : '') + '">' +
     '<div class="ai-provider-card-head">' +
       '<label class="ai-provider-choice">' +
         '<input type="radio" name="study-active" value="' + pid + '"' + (active ? ' checked' : '') + ' onchange="studyActiveChanged()">' +

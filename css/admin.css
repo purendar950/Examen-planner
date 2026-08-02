@@ -555,13 +555,6 @@ html[data-theme="dark"] a { color:var(--accent); }
 .ai-secret-label button { padding:2px 5px; border:0; background:transparent; color:var(--ai-blue); font-size:.59rem; font-weight:750; cursor:pointer; }
 .ai-secret-field { width:100%; min-height:62px; resize:vertical; padding:8px 9px; border-color:var(--ai-line); background:var(--ai-soft); font-family:monospace; font-size:.67rem; line-height:1.5; -webkit-text-security:disc; }
 .ai-secret-field.is-revealed { -webkit-text-security:none; }
-/* Keyless providers (e.g. StolenCompute) — replaces the textarea with an
-   informational banner so the operator doesn't think they need to paste a key. */
-.ai-secret-field--keyless { display:flex; align-items:center; min-height:62px; padding:10px 12px; border-style:dashed; -webkit-text-security:none; font-family:inherit; font-size:.7rem; line-height:1.45; }
-.ai-keyless-note { color:var(--muted); }
-.ai-keyless-note a { color:var(--ai-blue); font-weight:700; text-decoration:none; }
-.ai-keyless-note a:hover { text-decoration:underline; }
-.ai-provider-card[data-keyless="true"] .ai-provider-metrics span:first-child b { color:var(--ai-green, #12B981); }
 .ai-provider-card-foot { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-top:7px; }
 .ai-provider-card-foot > span { color:var(--muted); font-size:.57rem; line-height:1.35; }
 .ai-provider-link { flex:0 0 auto; color:var(--ai-blue); font-size:.57rem; font-weight:700; text-decoration:none; }
