@@ -3760,6 +3760,29 @@
 
   /* ── server/cache status dot: 🟠 checking · 🔴 offline · 🟢 ready · 🟡 cached ── */
   var _statusVid = null;
+  // A cold proxy can briefly miss OmniRoute's live catalog and return only the
+  // safe Auto group. /api/status still succeeds in that case, so retry after
+  // the backend's 30s negative-cache window instead of leaving the picker
+  // incomplete until the user changes video or manually taps the status dot.
+  var _omniCatalogRetryTimer = null;
+  var _omniCatalogRetryAttempts = 0;
+  var OMNI_CATALOG_RETRY_MS = 32000;
+  var OMNI_CATALOG_RETRY_MAX = 2;
+  function clearOmniCatalogRetry(resetAttempts) {
+    if (_omniCatalogRetryTimer) clearTimeout(_omniCatalogRetryTimer);
+    _omniCatalogRetryTimer = null;
+    if (resetAttempts) _omniCatalogRetryAttempts = 0;
+  }
+  function scheduleOmniCatalogRetry(vid) {
+    if (_omniCatalogRetryTimer || _omniCatalogRetryAttempts >= OMNI_CATALOG_RETRY_MAX) return;
+    _omniCatalogRetryAttempts++;
+    _omniCatalogRetryTimer = setTimeout(function () {
+      _omniCatalogRetryTimer = null;
+      if (vid === curVid() && outProvider() === 'omniroute' && document.getElementById('ai-status-dot')) {
+        checkStatus(vid, true);
+      }
+    }, OMNI_CATALOG_RETRY_MS);
+  }
   // Whether the "Regenerate" button is shown — controlled by the admin panel
   // (config/ai.showRegenerate), surfaced via /api/status. Default false = hidden.
   var _showRegen = false;
@@ -3770,8 +3793,9 @@
     var d = document.getElementById('ai-status-dot');
     if (d) { d.className = 'ai-dot ' + state; d.title = label; }
   }
-  function checkStatus(vid) {
+  function checkStatus(vid, isOmniRetry) {
     if (!document.getElementById('ai-status-dot')) return;
+    if (!isOmniRetry) clearOmniCatalogRetry(true);
     if (!vid) { setDot('off', 'No video playing'); return; }
     setDot('checking', 'Checking server…');
     var ctrl = ('AbortController' in window) ? new AbortController() : null;
@@ -3784,6 +3808,11 @@
         _showFocus = !!(j && j.showFocusBox);
         if (j) applyServerModels(j);   // fill model dropdown with ALL providers' models (grouped)
         applyFocusVisibility();   // reflect focus-box visibility without wiping any in-progress quiz
+        if (j && j.omnirouteCatalogAvailable === false && outProvider() === 'omniroute') {
+          scheduleOmniCatalogRetry(vid);
+        } else if (j && j.omnirouteCatalogAvailable !== false) {
+          clearOmniCatalogRetry(true);
+        }
         if (j && j.ok) {
           if (j.cachedTranscript) setDot('cached', 'Transcript already generated — instant');
           else setDot('ready', 'Server ready — will generate on first use');
