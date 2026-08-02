@@ -197,13 +197,9 @@
     <div class="nav-tab" onclick="switchPage('saved')" id="nav-saved" title="Quiz">
       <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h10l3 3v15H7z"></path><path d="M17 3v4h4M10 12h7M10 16h5"></path></svg></span><span class="nav-tab-label"> Quiz</span>
     </div>
-    <section class="shell-playlist-section" id="shell-playlist-section" aria-labelledby="shell-playlist-label" hidden>
-      <div class="shell-playlist-heading">
-        <span id="shell-playlist-label">Playlists</span>
-        <button type="button" onclick="ytoOpenSidebarLibrary()" title="View all playlists" aria-label="View all playlists">View all</button>
-      </div>
-      <div class="shell-playlist-list" id="shell-playlist-list"></div>
-    </section>
+    <!-- Saved courses are not listed in the rail: the library grows without a
+         bound and pushed the navigation and the account dock off screen.
+         Course Library above is the single entry point. -->
     <!-- Account dock: on desktop the topbar utility cluster (plan badge, request,
          install, sync, theme) and the account chip are relocated here by
          js/core/sidebar-dock.js so the rail ends in one status card. -->
@@ -223,16 +219,10 @@
 
       function setTabVisibility(query) {
         var normalized = (query || '').trim().toLowerCase();
-        document.querySelectorAll('.nav-tabs .nav-tab, .nav-tabs .shell-playlist-item').forEach(function (item) {
+        document.querySelectorAll('.nav-tabs .nav-tab').forEach(function (item) {
           var label = (item.getAttribute('title') || item.textContent || '').toLowerCase();
           item.hidden = Boolean(normalized && label.indexOf(normalized) === -1);
         });
-        var playlistSection = document.getElementById('shell-playlist-section');
-        if (playlistSection) {
-          var playlistItems = Array.from(playlistSection.querySelectorAll('.shell-playlist-item'));
-          var hasVisiblePlaylist = playlistItems.some(function (item) { return !item.hidden; });
-          playlistSection.classList.toggle('search-empty', Boolean(normalized && !hasVisiblePlaylist));
-        }
       }
       window.shellFilterNavigation = setTabVisibility;
 
