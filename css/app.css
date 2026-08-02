@@ -6138,7 +6138,6 @@ html[data-theme="light"] .fintech-dashboard {
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-nav-label,
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-playlist-section,
   .nav-tabs:has(#shell-sidebar-collapse:checked) .nav-tab-label,
-  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-text,
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-search { display: none; }
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-controls {
     justify-content: center;
@@ -6152,7 +6151,25 @@ html[data-theme="light"] .fintech-dashboard {
     border-color: rgba(0, 200, 150, .22);
   }
   .nav-tabs:has(#shell-sidebar-collapse:checked) .nav-tab { justify-content: center; width: 44px; padding: .68rem; }
-  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-status { justify-content: center; padding: .6rem; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-status {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    gap: 9px;
+    padding: .7rem .45rem;
+  }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-dot { margin-top: 0; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-text { display: block; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-text strong {
+    font-size: .54rem;
+    line-height: 1;
+    letter-spacing: .09em;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    white-space: nowrap;
+  }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-text span { display: none; }
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-collapse-toggle svg { transform: rotate(180deg); }
 
   /* Minimal command header — profile, sync, and focus remain immediately available. */
