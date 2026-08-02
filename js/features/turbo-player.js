@@ -899,6 +899,10 @@
     try { return (turboActive() && turboVideoEl) ? (turboVideoEl.currentTime || 0) : 0; }
     catch (e) { return 0; }
   };
+  window.ytTurboPlaying = function () {
+    try { return !!(turboActive() && turboVideoEl && !turboVideoEl.paused && !turboVideoEl.ended); }
+    catch (e) { return false; }
+  };
   window.ytTurboDuration = function () {
     try { return (turboActive() && turboVideoEl) ? (turboVideoEl.duration || 0) : 0; }
     catch (e) { return 0; }

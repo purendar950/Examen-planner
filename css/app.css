@@ -5117,6 +5117,11 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
   background: #dff5e6;
   color: #075b2d;
 }
+#page-youtube .ai-focus-control.ai-follow-reading {
+  border-color: #d0a12d;
+  background: #fff3c7;
+  color: #694b05;
+}
 #page-youtube .ai-focus-video[data-phase="ready"],
 #page-youtube .ai-focus-video[data-phase="pip"],
 #page-youtube .ai-focus-video[data-phase="mini"] {

@@ -139,6 +139,28 @@ function ssGetVideoTimestampFloat() {
   return 0;
 }
 
+/* Whether the player supplying ssGetVideoTimestampFloat() is actively playing.
+   Follow uses this to update highlights on paused seeks without moving the
+   student's notebook until playback resumes. */
+function ssIsVideoPlaying() {
+  try {
+    if (typeof window.ytTurboActive === 'function' && window.ytTurboActive()) {
+      return typeof window.ytTurboPlaying === 'function' && window.ytTurboPlaying();
+    }
+  } catch(e) {}
+  try {
+    if (typeof ytPlayer !== 'undefined' && ytPlayer && ytPlayer.getPlayerState) {
+      return ytPlayer.getPlayerState() === 1;       // YT.PlayerState.PLAYING
+    }
+  } catch(e) {}
+  try {
+    if (typeof ytoPlayerV2 !== 'undefined' && ytoPlayerV2 && ytoPlayerV2.getPlayerState) {
+      return ytoPlayerV2.getPlayerState() === 1;
+    }
+  } catch(e) {}
+  return false;
+}
+
 /* Duration of whatever player is actually on screen (Turbo native <video> or
    the YouTube iframe). Used to map a timestamp to the right preview frame. */
 function ssGetVideoDuration() {
