@@ -648,6 +648,7 @@
       '.ai-nb .ai-ts{display:none}',
       '.ai-nb>.ai-lec-on{background:rgba(255,214,0,.45);box-shadow:0 0 0 3px rgba(245,168,0,.5);border-radius:6px}',
       '.ai-btn.ai-follow-on{background:var(--accent,#00c896)!important;color:#04120d!important;border-color:var(--accent,#00c896)!important}',
+      '.ai-btn.ai-follow-reading{background:#fff1bf!important;color:#6b4b00!important;border-color:#d6a82d!important}',
       /* ── flashcard carousel (tap to flip · swipe left/right) ── */
       '.ai-fc-stage{perspective:1200px;padding:6px 2px 2px;touch-action:pan-y}',
       '.ai-fc{position:relative;width:100%;min-height:240px;cursor:pointer;user-select:none;-webkit-user-select:none}',
@@ -878,15 +879,39 @@
      Off by default; toggled via the 🎯 Follow button in the notes toolbar.
      ══════════════════════════════════════════════════════════════════════ */
   var LEC_KEY = 'aiStudyFollow';
-  var LEC_TOP_OFFSET = 0.5;           // pin the active block's START in the MIDDLE of the notes box
+  // Soft follow keeps the active note's start inside this comfortable viewport
+  // band. It moves only to the nearest edge instead of pinning every cue to one
+  // fixed point, so students can keep nearby context above and below.
+  var LEC_SAFE_TOP = 0.15;
+  var LEC_SAFE_BOTTOM = 0.75;
+  var LEC_RESUME_OFFSET = 0.25;
+  var LEC_SCROLL_SETTLE_MS = 180;
+  var LEC_PROGRAMMATIC_SCROLL_MS = 900;
   var LEC_POLL_MS = 250;              // poll playback time 4x/sec so the highlight tracks the teacher closely
-  var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecUserScrollUntil = 0, _lecTsCount = 0, _lecNeedsResync = false;
+  var _lecTimer = null, _lecBlocks = [], _lecScroller = null, _lecActive = -1, _lecTsCount = 0;
+  var _lecReading = false, _lecPendingPlacement = false, _lecResumePending = false, _lecManualUntil = 0;
+  var _lecScrollSettleTimer = null, _lecProgrammaticUntil = 0;
+  var _lecPointerActive = false, _lecPointerIds = Object.create(null), _lecPointerCount = 0;
+  var _lecPointerScroller = null, _lecPointerEndBound = false;
   function lecOn() { return localStorage.getItem(LEC_KEY) === '1'; }
   function setLecOn(v) { try { localStorage.setItem(LEC_KEY, v ? '1' : '0'); } catch (e) {} }
+  function lecResetInteraction() {
+    if (_lecScrollSettleTimer) clearTimeout(_lecScrollSettleTimer);
+    _lecScrollSettleTimer = null;
+    _lecReading = false;
+    _lecPendingPlacement = false;
+    _lecResumePending = false;
+    _lecManualUntil = 0;
+    _lecProgrammaticUntil = 0;
+    _lecPointerActive = false;
+    _lecPointerIds = Object.create(null);
+    _lecPointerCount = 0;
+    _lecPointerScroller = null;
+  }
   function lecClear() {
     if (_lecBlocks[_lecActive]) _lecBlocks[_lecActive].el.classList.remove('ai-lec-on');
     _lecActive = -1;
-    _lecNeedsResync = false;
+    lecResetInteraction();
   }
   /* Build a timeline from real timestamp anchors only. The old implementation
      assigned 0:00 to every untimestamped block before the first marker, which
@@ -894,7 +919,8 @@
      symptom in the screenshot). A 0:00 fallback now points only to the first
      notebook block; every later cue points to the block that actually owns it. */
   function lecIndex(nb) {
-    _lecBlocks = []; _lecActive = -1; _lecTsCount = 0; _lecNeedsResync = false;
+    _lecBlocks = []; _lecActive = -1; _lecTsCount = 0;
+    lecResetInteraction();
     var kids = nb.children, cues = [];
     for (var i = 0; i < kids.length; i++) {
       var el = kids[i], anchors = el.querySelectorAll('.ai-ts');
@@ -941,62 +967,188 @@
     _lecActive = idx;
     return true;
   }
-  // Pin the START of the active block in the MIDDLE of the notes box. A direct,
-  // clamped scroll target is more reliable than repeated scrollBy() calls when
-  // the desktop notes canvas uses overlay control lanes.
-  function lecScroll() {
-    var cue = _lecBlocks[_lecActive]; if (!cue || !_lecScroller) return;
+  function lecPlaybackTime() {
+    var t = 0;
+    try {
+      if (typeof ssGetVideoTimestampFloat === 'function') t = ssGetVideoTimestampFloat() || 0;
+      else if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0;
+    } catch (e) {}
+    return t;
+  }
+  function lecCueVisible() {
+    var cue = _lecBlocks[_lecActive];
+    if (!cue || !_lecScroller) return false;
     var sr = _lecScroller.getBoundingClientRect(), er = cue.el.getBoundingClientRect();
-    var desired = _lecScroller.scrollTop + (er.top - sr.top) - (sr.height * LEC_TOP_OFFSET);
+    return er.bottom > sr.top + 8 && er.top < sr.bottom - 8;
+  }
+  // Move only when the active block's START leaves the safe band. Resume uses a
+  // predictable upper-quarter anchor once, then returns to nearest-edge moves.
+  function lecScroll(resume) {
+    var cue = _lecBlocks[_lecActive];
+    if (!cue || !_lecScroller || (_lecReading && !resume)) return false;
+    var sr = _lecScroller.getBoundingClientRect(), er = cue.el.getBoundingClientRect();
+    var desired = _lecScroller.scrollTop;
+    if (resume) {
+      desired += er.top - (sr.top + sr.height * LEC_RESUME_OFFSET);
+    } else {
+      var safeTop = sr.top + sr.height * LEC_SAFE_TOP;
+      var safeBottom = sr.top + sr.height * LEC_SAFE_BOTTOM;
+      if (er.top < safeTop) desired += er.top - safeTop;
+      else if (er.top > safeBottom) desired += er.top - safeBottom;
+      else return false;
+    }
     var max = Math.max(0, _lecScroller.scrollHeight - _lecScroller.clientHeight);
     desired = Math.max(0, Math.min(max, desired));
+    if (Math.abs(desired - _lecScroller.scrollTop) < 2) return false;
+    _lecProgrammaticUntil = Date.now() + LEC_PROGRAMMATIC_SCROLL_MS;
     _lecScroller.scrollTo({ top: desired, behavior: 'smooth' });
+    return true;
   }
-  function lecManualPause() {
-    _lecUserScrollUntil = Date.now() + 3000;
-    _lecNeedsResync = true;
+  function lecSetReading(reading) {
+    reading = !!reading;
+    if (_lecReading === reading) return;
+    _lecReading = reading;
+    lecPaintButtons(document);
+  }
+  function lecManualSettled(scroller) {
+    if (scroller !== _lecScroller || !lecOn()) return;
+    if (_lecScrollSettleTimer) clearTimeout(_lecScrollSettleTimer);
+    if (_lecPointerActive) {
+      // A held scrollbar/thumb, touch, selection, or annotation gesture owns
+      // the notebook until pointerup/cancel—not just for a fixed timeout.
+      _lecManualUntil = Infinity;
+      _lecScrollSettleTimer = null;
+      return;
+    }
+    _lecManualUntil = Date.now() + LEC_SCROLL_SETTLE_MS;
+    _lecScrollSettleTimer = setTimeout(function () {
+      _lecScrollSettleTimer = null;
+      if (scroller !== _lecScroller || !lecOn() || _lecActive < 0 || _lecPointerActive) return;
+      // Refresh the cue before classifying the student's position; playback can
+      // cross a timestamp between the last 250ms poll and this settle callback.
+      if (lecHighlight(lecPlaybackTime())) _lecPendingPlacement = true;
+      var reading = !lecCueVisible();
+      // Manually returning to the live cue resumes soft follow from exactly the
+      // position the student chose rather than applying an old pending move.
+      if (!reading && _lecReading) _lecPendingPlacement = false;
+      lecSetReading(reading);
+    }, LEC_SCROLL_SETTLE_MS);
+  }
+  function lecPointerStart(scroller, e) {
+    if (!lecOn() || scroller !== _lecScroller) return;
+    if (_lecScrollSettleTimer) clearTimeout(_lecScrollSettleTimer);
+    _lecScrollSettleTimer = null;
+    var pointerId = e && e.pointerId != null ? String(e.pointerId) : 'default';
+    if (!Object.prototype.hasOwnProperty.call(_lecPointerIds, pointerId)) {
+      _lecPointerIds[pointerId] = true;
+      _lecPointerCount++;
+    }
+    _lecPointerActive = _lecPointerCount > 0;
+    _lecPointerScroller = scroller;
+    _lecManualUntil = Infinity;
+    _lecProgrammaticUntil = 0;
+  }
+  function lecPointerEnd(e) {
+    if (!_lecPointerActive) return;
+    var pointerId = e && e.pointerId != null ? String(e.pointerId) : 'default';
+    if (!Object.prototype.hasOwnProperty.call(_lecPointerIds, pointerId)) return;
+    delete _lecPointerIds[pointerId];
+    _lecPointerCount = Math.max(0, _lecPointerCount - 1);
+    if (_lecPointerCount) return;
+    var scroller = _lecPointerScroller;
+    _lecPointerActive = false;
+    _lecPointerScroller = null;
+    if (_lecResumePending && lecOn() && _lecReading) {
+      _lecResumePending = false;
+      lecResume();
+    } else if (scroller === _lecScroller) {
+      lecManualSettled(scroller);
+    }
+  }
+  function lecBindPointerEnd() {
+    if (_lecPointerEndBound) return;
+    _lecPointerEndBound = true;
+    window.addEventListener('pointerup', lecPointerEnd, { passive: true });
+    window.addEventListener('pointercancel', lecPointerEnd, { passive: true });
+  }
+  function lecManualInput(scroller, e) {
+    if (!lecOn() || scroller !== _lecScroller) return;
+    if (e && e.type === 'keydown' &&
+        ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].indexOf(e.key) === -1) return;
+    // A real user gesture always wins over an in-progress smooth scroll.
+    _lecProgrammaticUntil = 0;
+    lecManualSettled(scroller);
   }
   function lecTick() {
     if (!lecOn() || state.tab !== 'notes') return;
     if (!_lecScroller || !document.body.contains(_lecScroller) || !_lecBlocks.length) return;
     if (!_lecTsCount) return;                     // no timestamps → nothing to track
-    var t = 0;
-    try {
-      if (typeof ssGetVideoTimestampFloat === 'function') t = ssGetVideoTimestampFloat() || 0;   // sub-second precision
-      else if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0;         // fallback (whole seconds)
-    } catch (e) {}
-    var changed = lecHighlight(t);
-    // After a student reads elsewhere, return to the active note after the
-    // grace period even if playback has not crossed another timestamp yet.
-    if ((changed || _lecNeedsResync) && Date.now() > _lecUserScrollUntil) {
-      _lecNeedsResync = false;
-      lecScroll();
+    var changed = lecHighlight(lecPlaybackTime());
+    if (changed) _lecPendingPlacement = true;
+    // Highlight paused/seeked cues immediately, but move the notebook only
+    // during active playback (or via the explicit Resume action). A cue crossed
+    // during manual scrolling remains pending and is placed after input settles.
+    if (_lecPendingPlacement && !_lecReading && Date.now() > _lecManualUntil &&
+        (typeof ssIsVideoPlaying !== 'function' || ssIsVideoPlaying())) {
+      _lecPendingPlacement = false;
+      lecScroll(false);
     }
   }
   function lecPaintBtn(btn) {
     if (!btn) return;
     var na = !_lecTsCount;                         // these notes have no timestamps
     var on = lecOn() && !na;
-    btn.classList.toggle('ai-follow-on', on);
+    var reading = on && _lecReading;
+    btn.classList.toggle('ai-follow-on', on && !reading);
+    btn.classList.toggle('ai-follow-reading', reading);
+    // Follow remains enabled while the student reads elsewhere; automatic
+    // movement alone is suspended until Resume is activated.
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.setAttribute('data-follow-state', reading ? 'reading' : (on ? 'following' : 'off'));
     btn.disabled = na;
-    btn.textContent = na ? '🎯 Follow unavailable' : (on ? '🎯 Following' : '🎯 Follow');
-    btn.title = na ? 'These notes have no timestamps. Regenerate timestamped notes to use Follow.'
-                   : (on ? 'Following the lecture — tap to pause'
-                         : 'Auto-highlight and scroll notes to the lecture');
+    btn.textContent = na ? '🎯 Follow unavailable' :
+      (reading ? '🎯 Resume follow' : (on ? '🎯 Following' : '🎯 Follow'));
+    btn.title = na ? 'These notes have no timestamps. Regenerate timestamped notes to use Follow.' :
+      (reading ? 'You are reading elsewhere — return to the current lecture note' :
+       (on ? 'Soft-following the lecture — scroll freely or tap to pause' :
+             'Auto-highlight and softly follow notes with the lecture'));
   }
   function lecPaintButtons(box) {
     var scope = box || document;
     Array.prototype.forEach.call(scope.querySelectorAll('#ai-follow, [data-ai-follow-control]'), lecPaintBtn);
+  }
+  function lecResume() {
+    // If another finger/stylus still owns the notebook, remember the request and
+    // apply it only after the final pointer is released.
+    if (_lecPointerActive) {
+      _lecResumePending = true;
+      return;
+    }
+    _lecResumePending = false;
+    lecSetReading(false);
+    _lecPendingPlacement = false;
+    _lecManualUntil = 0;
+    lecHighlight(lecPlaybackTime());
+    lecScroll(true);
+    lecPaintButtons(document);
   }
   function lecToggle() {
     if (!_lecTsCount) {
       if (typeof showToast === 'function') showToast('Follow unavailable — regenerate notes with timestamps.', 'info');
       return;
     }
-    setLecOn(!lecOn());
+    if (lecOn() && _lecReading) {
+      lecResume();
+      return;
+    }
+    if (lecOn()) {
+      setLecOn(false);
+      lecClear();
+    } else {
+      setLecOn(true);
+      lecResume();
+    }
     lecPaintButtons(document);
-    if (lecOn()) { _lecUserScrollUntil = 0; lecTick(); } else lecClear();
   }
   function lecBindButton(btn) {
     if (!btn || btn.dataset.followBound === '1') return;
@@ -1010,11 +1162,20 @@
     _lecScroller = box.querySelector('.ai-scroll');
     if (!nb || !_lecScroller) return;
     lecIndex(nb);
-    // A student may scroll by wheel, touch, scrollbar drag, or keyboard. Pause
-    // briefly for all of those inputs, then lecTick() recenters the same cue.
-    ['wheel', 'touchmove', 'touchstart', 'pointerdown', 'keydown'].forEach(function (ev) {
-      _lecScroller.addEventListener(ev, lecManualPause, { passive: true });
+    var scroller = _lecScroller;
+    // Wheel/touch/keyboard gestures and native scroll events all preserve the
+    // student's chosen reading position. Programmatic soft-scroll events are
+    // ignored so they cannot accidentally switch the control to Resume.
+    ['wheel', 'touchmove'].forEach(function (ev) {
+      scroller.addEventListener(ev, function (e) { lecManualInput(scroller, e); }, { passive: true });
     });
+    scroller.addEventListener('pointerdown', function (e) { lecPointerStart(scroller, e); }, { passive: true });
+    lecBindPointerEnd();
+    scroller.addEventListener('keydown', function (e) { lecManualInput(scroller, e); });
+    scroller.addEventListener('scroll', function () {
+      if (Date.now() < _lecProgrammaticUntil) return;
+      lecManualSettled(scroller);
+    }, { passive: true });
     Array.prototype.forEach.call(box.querySelectorAll('#ai-follow, [data-ai-follow-control]'), lecBindButton);
     // The standard Follow button is relocated outside #ai-sub after rendering,
     // so bind it explicitly as well. Both controls always paint from one source
