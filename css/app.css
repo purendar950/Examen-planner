@@ -5906,7 +5906,13 @@ html[data-theme="light"] .fintech-dashboard {
     display: flex;
     flex-direction: column;
     width: var(--shell-sidebar-width);
-    min-height: 100vh;
+    /* Never use 100vh here: Chrome on Android reports it as the toolbar-hidden
+       height, so the rail grew taller than the visible area and its bottom (the
+       account dock) was clipped with no way to scroll to it. 100dvh tracks the
+       visible area, and --shell-vh is the measured window.innerHeight that
+       js/core/sidebar-dock.js keeps in sync for older engines. */
+    height: 100dvh;
+    height: var(--shell-vh, 100dvh);
     gap: 4px;
     /* The rail itself never scrolls — .shell-nav-scroll does. That keeps the
        brand, the search box and the account dock permanently on screen. */
