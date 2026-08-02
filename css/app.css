@@ -166,7 +166,7 @@
     .user-menu-dropdown { position: fixed; top: 58px; right: 10px; left: auto; }
     /* Collapse the user chip to just the avatar so the crowded topbar fits
        (full name + email remain inside the dropdown) */
-    #user-name-display { display: none; }
+    .user-chip .user-chip-copy { display: none; }
   }
 
   .user-chip {
@@ -178,6 +178,11 @@
     cursor: pointer; transition: border-color 0.2s;
   }
   .user-chip:hover { border-color: var(--accent); color: var(--text); }
+  /* The chip copy is a single column so the sidebar dock can stack name + email;
+     in the topbar only the name shows. */
+  .user-chip-copy { display: inline-flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+  .user-chip-email { display: none; }
+  .user-chip-caret { flex-shrink: 0; font-size: 0.7rem; }
   .user-menu-dropdown {
     display: none;
     position: absolute; top: calc(100% + 8px); right: 0;
@@ -5794,7 +5799,7 @@ html[data-theme="light"] .fintech-dashboard {
 .shell-sidebar-controls,
 .shell-nav-label,
 .shell-playlist-section,
-.shell-sidebar-status { display: none; }
+.shell-sidebar-dock { display: none; }
 
 @media (min-width: 901px) {
   :root { --shell-sidebar-width: 252px; --shell-sidebar-width-collapsed: 72px; }
@@ -6093,42 +6098,93 @@ html[data-theme="light"] .fintech-dashboard {
     line-height: 1.2;
   }
 
-  .shell-sidebar-status {
+  /* ── Account dock: one card holding the plan/utility tray and the account row.
+     The tray hosts the relocated `.topbar-right` node, so anything a feature
+     module injects there (plan badge, Pro badge, 💡 Request, Install app, sync
+     pill, theme toggle) lands inside this box automatically. ── */
+  .shell-sidebar-dock {
     display: flex;
-    align-items: flex-start;
-    gap: 9px;
-    margin: auto 4px 0;
-    padding: .8rem;
-    color: var(--muted);
-    background: linear-gradient(140deg, var(--accent-dim), rgba(0, 200, 150, .025));
-    border: 1px solid rgba(0, 200, 150, .15);
-    border-radius: 14px;
+    flex-direction: column;
+    gap: 8px;
+    margin: auto 2px 0;
+    padding: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
   }
-  .shell-status-dot {
-    width: 8px;
-    height: 8px;
-    flex: 0 0 auto;
-    margin-top: .22rem;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 4px rgba(0, 200, 150, .09);
+  /* Defensive: if the relocation never ran, the empty card must not show. */
+  .shell-sidebar-dock:not(:has(.topbar-right)) { display: none; }
+  .shell-dock-tray:empty,
+  .shell-dock-account:empty { display: none; }
+  .shell-dock-tray > .topbar-right {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 2px 2px 0;
   }
-  .shell-status-text { min-width: 0; }
-  .shell-sidebar-status strong,
-  .shell-sidebar-status span:not(.shell-status-dot) { display: block; }
-  .shell-sidebar-status strong {
+  .shell-dock-tray > .topbar-right > * { max-width: 100%; }
+  .shell-dock-tray #ez-plan-badge,
+  .shell-dock-tray #pro-status-badge,
+  .shell-dock-tray #ez-req-fab,
+  .shell-dock-tray .pwa-install-button {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .shell-dock-tray .pwa-install-button { min-height: 30px; font-size: .66rem; }
+  .shell-dock-tray .sync-indicator { flex: 0 1 auto; font-size: .68rem; }
+  .shell-dock-tray #ez-theme-btn { margin-left: auto; }
+
+  /* Account row — avatar, name, email and the menu caret, opening upward. */
+  .shell-dock-account { padding-top: 8px; border-top: 1px solid var(--border); }
+  .shell-dock-account .user-chip {
+    width: 100%;
+    gap: 10px;
+    padding: 7px 9px;
+    background: color-mix(in srgb, var(--surface) 82%, var(--card));
+    border-radius: 12px;
+  }
+  .shell-dock-account .user-avatar {
+    width: 30px;
+    height: 30px;
+    font-size: .74rem;
+  }
+  .shell-dock-account .user-chip-copy {
+    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .shell-dock-account #user-name-display,
+  .shell-dock-account .user-chip-email {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .shell-dock-account #user-name-display {
     color: var(--text);
-    font-size: .64rem;
+    font-size: .76rem;
+    font-weight: 700;
     line-height: 1.3;
-    letter-spacing: .045em;
-    text-transform: uppercase;
-    white-space: normal;
   }
-  .shell-sidebar-status span:not(.shell-status-dot) {
-    margin-top: 4px;
-    font-size: .58rem;
+  .shell-dock-account .user-chip-email {
+    color: var(--muted);
+    font-size: .61rem;
     line-height: 1.3;
-    white-space: normal;
+  }
+  .shell-dock-account .user-chip-caret { flex: 0 0 auto; }
+  .shell-dock-account .user-menu-dropdown {
+    top: auto;
+    right: 0;
+    bottom: calc(100% + 10px);
+    left: 0;
+    min-width: 0;
   }
 
   /* ── Collapsed state: icons-only rail, brand mark + prominent expand control remain ── */
@@ -6151,25 +6207,33 @@ html[data-theme="light"] .fintech-dashboard {
     border-color: rgba(0, 200, 150, .22);
   }
   .nav-tabs:has(#shell-sidebar-collapse:checked) .nav-tab { justify-content: center; width: 44px; padding: .68rem; }
-  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-status {
+
+  /* Collapsed rail: the dock keeps only the two controls that read as icons —
+     theme toggle and the account avatar. Everything else waits for expand. */
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-dock {
+    width: 48px;
+    gap: 6px;
+    padding: 6px;
+    border-radius: 14px;
+  }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-dock-tray > .topbar-right {
     flex-direction: column;
-    align-items: center;
+    padding: 0;
+  }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-dock-tray > .topbar-right > *:not(#ez-theme-btn) { display: none; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-dock-tray #ez-theme-btn { margin: 0 auto; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-dock-account .user-chip {
     justify-content: center;
-    width: 44px;
-    gap: 9px;
-    padding: .7rem .45rem;
+    padding: 3px;
   }
-  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-dot { margin-top: 0; }
-  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-text { display: block; }
-  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-text strong {
-    font-size: .54rem;
-    line-height: 1;
-    letter-spacing: .09em;
-    writing-mode: vertical-rl;
-    transform: rotate(180deg);
-    white-space: nowrap;
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-dock-account .user-chip-copy,
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-dock-account .user-chip-caret { display: none; }
+  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-dock-account .user-menu-dropdown {
+    right: auto;
+    bottom: 0;
+    left: calc(100% + 10px);
+    min-width: 210px;
   }
-  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-status-text span { display: none; }
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-collapse-toggle svg { transform: rotate(180deg); }
 
   /* Minimal command header — profile, sync, and focus remain immediately available. */
@@ -6187,6 +6251,11 @@ html[data-theme="light"] .fintech-dashboard {
   .topbar-left { display: none; }
   .topbar-right { margin-left: auto; }
   .topbar::before { content: none; }
+  /* Once the utility cluster lives in the rail dock the desktop header has no
+     content left — drop the empty strip instead of leaving a blank bar. */
+  #app:has(#shell-dock-tray > .topbar-right) .topbar { display: none; }
+  /* The planner rail no longer needs to clear a fixed header. */
+  #app:has(#shell-dock-tray > .topbar-right) .planner-sidebar { top: 24px; }
 
   /* Every page now begins inside the main workspace column. */
   #exam-selector-bar {
@@ -6227,7 +6296,7 @@ html[data-theme="light"] .fintech-dashboard {
   .shell-sidebar-controls,
   .shell-nav-label,
   .shell-playlist-section,
-  .shell-sidebar-status { display: none !important; }
+  .shell-sidebar-dock { display: none !important; }
 }
 
 
@@ -6435,11 +6504,10 @@ body {
   border-color: rgba(59, 130, 246, .22);
   cursor: pointer;
 }
-.shell-sidebar-status.is-offline {
-  background: linear-gradient(140deg, rgba(245, 158, 11, .11), rgba(245, 158, 11, .025));
-  border-color: rgba(245, 158, 11, .22);
+.shell-sidebar-dock.is-offline {
+  border-color: rgba(245, 158, 11, .28);
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, .08);
 }
-.shell-sidebar-status.is-offline .shell-status-dot { background: var(--amber); box-shadow: 0 0 0 4px rgba(245, 158, 11, .1); }
 
 /* Exam context bar — semantic classes replace brittle inline declarations. */
 #exam-selector-bar.exam-selector-bar {

@@ -14,10 +14,9 @@
       if (text) text.textContent = label || '';
     }
 
-    var shellStatus = document.querySelector('.shell-sidebar-status');
-    var shellCopy = shellStatus && shellStatus.querySelector('.shell-status-text span');
+    // The rail dock carries the same offline cue as the sync pill it contains.
+    var shellStatus = document.getElementById('shell-sidebar-dock');
     if (shellStatus) shellStatus.classList.toggle('is-offline', state === 'offline');
-    if (shellCopy) shellCopy.textContent = state === 'offline' ? 'Progress saved on this device' : 'Progress synced to cloud';
   }
 
   function showUpdateReady(worker) {
