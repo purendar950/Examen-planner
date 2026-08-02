@@ -140,8 +140,11 @@
       </div>
       <div class="user-chip" onclick="toggleUserMenu(event)">
         <div class="user-avatar" id="user-avatar-text">A</div>
-        <span id="user-name-display">User</span>
-        <span style="font-size:0.7rem;">▾</span>
+        <span class="user-chip-copy">
+          <span id="user-name-display">User</span>
+          <span class="user-chip-email" id="user-chip-email"></span>
+        </span>
+        <span class="user-chip-caret" aria-hidden="true">▾</span>
         <div class="user-menu-dropdown" id="user-menu-dropdown">
           <div class="um-name" id="um-name">User</div>
           <div class="um-email" id="um-email"></div>
@@ -201,9 +204,12 @@
       </div>
       <div class="shell-playlist-list" id="shell-playlist-list"></div>
     </section>
-    <div class="shell-sidebar-status" aria-label="Preparation command center" title="Preparation command center">
-      <span class="shell-status-dot" aria-hidden="true"></span>
-      <div class="shell-status-text"><strong>Preparation command center</strong><span>Progress synced to cloud</span></div>
+    <!-- Account dock: on desktop the topbar utility cluster (plan badge, request,
+         install, sync, theme) and the account chip are relocated here by
+         js/core/sidebar-dock.js so the rail ends in one status card. -->
+    <div class="shell-sidebar-dock" id="shell-sidebar-dock">
+      <div class="shell-dock-tray" id="shell-dock-tray"></div>
+      <div class="shell-dock-account" id="shell-dock-account"></div>
     </div>
   </nav>
   <script>
@@ -575,6 +581,9 @@
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
 <script defer src="js/features/ai-tutor.js?v=20260729a"></script>
 <script defer src="js/core/theme.js"></script>
+<!-- Relocates the topbar utility cluster + account chip into the sidebar dock
+     on desktop — loads after theme.js so the theme button is already present. -->
+<script defer src="js/core/sidebar-dock.js"></script>
 <!-- YouTube IFrame API — deferred; onYouTubeIframeAPIReady fires after load -->
 <script defer src="https://www.youtube.com/iframe_api"></script>
 <script defer src="js/planner-enhance.js"></script>
