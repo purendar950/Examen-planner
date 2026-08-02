@@ -3695,8 +3695,16 @@
       // Reveal the sub-provider box; default its selection to Auto (or the
       // remembered sub) and show that sub-provider's models.
       applyOmniSelection('');
+      // The last status response may have arrived while another provider was
+      // selected. Recheck immediately on entry so an Auto-only cold fallback
+      // cannot remain stuck without a retry timer.
+      if (_omniCatalogUnavailable) checkStatus(curVid());
       return;
     }
+    // Retry state is provider-scoped. Leaving OmniRoute cancels its pending
+    // timer without forgetting that the last catalog response was unavailable;
+    // re-entering above performs a fresh check.
+    clearOmniCatalogRetry(true);
     showOmniProviderBox(false);
     if (!pid) { setModel(''); fillStudyModels('', ''); return; }
     var g = studyGroupFor(pid), models = (g && g.models) || [];
@@ -3766,6 +3774,8 @@
   // incomplete until the user changes video or manually taps the status dot.
   var _omniCatalogRetryTimer = null;
   var _omniCatalogRetryAttempts = 0;
+  var _omniCatalogUnavailable = false;
+  var _statusRequestSeq = 0;
   var OMNI_CATALOG_RETRY_MS = 32000;
   var OMNI_CATALOG_RETRY_MAX = 2;
   function clearOmniCatalogRetry(resetAttempts) {
@@ -3774,11 +3784,13 @@
     if (resetAttempts) _omniCatalogRetryAttempts = 0;
   }
   function scheduleOmniCatalogRetry(vid) {
-    if (_omniCatalogRetryTimer || _omniCatalogRetryAttempts >= OMNI_CATALOG_RETRY_MAX) return;
-    _omniCatalogRetryAttempts++;
+    if (!vid || _omniCatalogRetryTimer || _omniCatalogRetryAttempts >= OMNI_CATALOG_RETRY_MAX) return;
     _omniCatalogRetryTimer = setTimeout(function () {
       _omniCatalogRetryTimer = null;
       if (vid === curVid() && outProvider() === 'omniroute' && document.getElementById('ai-status-dot')) {
+        // Count an attempt only when its request is actually sent. Switching
+        // provider/video while waiting cannot consume the bounded retry budget.
+        _omniCatalogRetryAttempts++;
         checkStatus(vid, true);
       }
     }, OMNI_CATALOG_RETRY_MS);
@@ -3795,8 +3807,12 @@
   }
   function checkStatus(vid, isOmniRetry) {
     if (!document.getElementById('ai-status-dot')) return;
+    // Only the newest status request may update the global picker/retry state.
+    // This prevents a slow response for the previous video from monopolizing
+    // the current video's retry timer or replacing its provider catalog.
+    var requestSeq = ++_statusRequestSeq;
     if (!isOmniRetry) clearOmniCatalogRetry(true);
-    if (!vid) { setDot('off', 'No video playing'); return; }
+    if (!vid) { _omniCatalogUnavailable = false; setDot('off', 'No video playing'); return; }
     setDot('checking', 'Checking server…');
     var ctrl = ('AbortController' in window) ? new AbortController() : null;
     var to = setTimeout(function () { if (ctrl) ctrl.abort(); }, 15000);
@@ -3804,13 +3820,15 @@
       .then(function (r) { return r.json(); })
       .then(function (j) {
         clearTimeout(to);
+        if (requestSeq !== _statusRequestSeq || vid !== curVid()) return;
         _showRegen = !!(j && j.showRegenerate);
         _showFocus = !!(j && j.showFocusBox);
         if (j) applyServerModels(j);   // fill model dropdown with ALL providers' models (grouped)
         applyFocusVisibility();   // reflect focus-box visibility without wiping any in-progress quiz
-        if (j && j.omnirouteCatalogAvailable === false && outProvider() === 'omniroute') {
-          scheduleOmniCatalogRetry(vid);
-        } else if (j && j.omnirouteCatalogAvailable !== false) {
+        _omniCatalogUnavailable = !!(j && j.omnirouteCatalogAvailable === false);
+        if (_omniCatalogUnavailable) {
+          if (outProvider() === 'omniroute') scheduleOmniCatalogRetry(vid);
+        } else {
           clearOmniCatalogRetry(true);
         }
         if (j && j.ok) {
@@ -3820,6 +3838,7 @@
       })
       .catch(function () {
         clearTimeout(to);
+        if (requestSeq !== _statusRequestSeq || vid !== curVid()) return;
         applyServerModels(null);   // reuse the last known safe server catalogue
         setDot('off', 'AI server suspended/offline — model list may be cached; tap to retry');
       });
