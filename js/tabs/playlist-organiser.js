@@ -372,7 +372,13 @@ function ytoLoad() {
   ytoRenderLibrary();
 }
 
-/* ── Desktop navigation: YouTube-style saved playlist shortcuts ── */
+/* ── Desktop navigation: YouTube-style saved playlist shortcuts ──
+   Only the newest few courses stay pinned in the rail. The rest fold behind a
+   "Show N more" toggle so a large library can never push the nav items and the
+   account dock out of view. The folded tail is still reachable through the rail
+   search box and the "View all" link. */
+const YTO_SIDEBAR_VISIBLE = 4;
+
 function ytoRenderMainSidebar() {
   const section = document.getElementById('shell-playlist-section');
   const list = document.getElementById('shell-playlist-list');
@@ -385,13 +391,14 @@ function ytoRenderMainSidebar() {
   section.hidden = playlists.length === 0;
   list.replaceChildren();
 
-  playlists.forEach(pl => {
+  playlists.forEach((pl, index) => {
     const total = pl.videos.length;
     const done = pl.videos.filter(video => pl.watched && pl.watched[video.id]).length;
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'shell-playlist-item';
     button.dataset.playlistId = pl.id;
+    if (index >= YTO_SIDEBAR_VISIBLE) button.classList.add('is-overflow');
     button.title = `${pl.title || 'Playlist'} · ${total} ${total === 1 ? 'video' : 'videos'}`;
     button.setAttribute('aria-label', `Open playlist ${pl.title || 'Playlist'}`);
     button.addEventListener('click', () => ytoOpenSidebarPlaylist(pl.id));
@@ -423,21 +430,65 @@ function ytoRenderMainSidebar() {
     list.appendChild(button);
   });
 
+  // The toggle lives outside the scrollable list so it stays reachable, and is
+  // created once — list.replaceChildren() above only clears the items.
+  let more = document.getElementById('shell-playlist-more');
+  if (!more) {
+    more = document.createElement('button');
+    more.type = 'button';
+    more.id = 'shell-playlist-more';
+    more.className = 'shell-playlist-more';
+    more.addEventListener('click', () => {
+      section.classList.toggle('is-expanded');
+      ytoSyncSidebarOverflow();
+    });
+    section.appendChild(more);
+  }
+
+  ytoSyncSidebarOverflow();
+  ytoSyncMainSidebarSelection();
+}
+
+/* Relabel the fold toggle and re-apply rail visibility. */
+function ytoSyncSidebarOverflow() {
+  const section = document.getElementById('shell-playlist-section');
+  const list = document.getElementById('shell-playlist-list');
+  const more = document.getElementById('shell-playlist-more');
+  if (!section || !list) return;
+
+  if (more) {
+    const folded = list.querySelectorAll('.shell-playlist-item.is-overflow').length;
+    const expanded = section.classList.contains('is-expanded');
+    more.hidden = folded === 0;
+    more.textContent = expanded ? 'Show less' : `Show ${folded} more`;
+    more.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    if (folded === 0) section.classList.remove('is-expanded');
+  }
+
   const navSearch = document.getElementById('shell-nav-search');
   if (typeof window.shellFilterNavigation === 'function') {
     window.shellFilterNavigation(navSearch ? navSearch.value : '');
   }
-  ytoSyncMainSidebarSelection();
 }
 
 function ytoSyncMainSidebarSelection() {
   const libraryActive = document.getElementById('nav-yt-organiser')?.classList.contains('active');
+  let promoted = null;
   document.querySelectorAll('.shell-playlist-item').forEach(button => {
     const isCurrent = Boolean(libraryActive && button.dataset.playlistId === ytoCurrentPl);
     button.classList.toggle('active', isCurrent);
     if (isCurrent) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
+    // The open course is always pinned, even if it sat in the folded tail.
+    if (isCurrent && button.classList.contains('is-overflow')) {
+      button.classList.remove('is-overflow');
+      promoted = button;
+    }
   });
+  if (promoted) {
+    ytoSyncSidebarOverflow();
+    try { promoted.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+  }
 }
 
 function ytoOpenSidebarPlaylist(plId) {

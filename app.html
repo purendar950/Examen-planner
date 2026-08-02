@@ -223,15 +223,21 @@
 
       function setTabVisibility(query) {
         var normalized = (query || '').trim().toLowerCase();
+        var playlistSection = document.getElementById('shell-playlist-section');
+        var expanded = Boolean(playlistSection && playlistSection.classList.contains('is-expanded'));
         document.querySelectorAll('.nav-tabs .nav-tab, .nav-tabs .shell-playlist-item').forEach(function (item) {
           var label = (item.getAttribute('title') || item.textContent || '').toLowerCase();
-          item.hidden = Boolean(normalized && label.indexOf(normalized) === -1);
+          var matches = !normalized || label.indexOf(normalized) !== -1;
+          // Playlists past the pinned few stay folded until expanded or searched for.
+          var folded = !normalized && !expanded && item.classList.contains('is-overflow');
+          item.hidden = !matches || folded;
         });
-        var playlistSection = document.getElementById('shell-playlist-section');
         if (playlistSection) {
           var playlistItems = Array.from(playlistSection.querySelectorAll('.shell-playlist-item'));
           var hasVisiblePlaylist = playlistItems.some(function (item) { return !item.hidden; });
           playlistSection.classList.toggle('search-empty', Boolean(normalized && !hasVisiblePlaylist));
+          // While searching every match is already listed, so the fold toggle would lie.
+          playlistSection.classList.toggle('is-searching', Boolean(normalized));
         }
       }
       window.shellFilterNavigation = setTabVisibility;

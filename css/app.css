@@ -5948,6 +5948,7 @@ html[data-theme="light"] .fintech-dashboard {
 
   .nav-tab {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
     width: 100%;
     min-height: 42px;
@@ -5974,6 +5975,11 @@ html[data-theme="light"] .fintech-dashboard {
     border-color: rgba(0, 200, 150, .16);
     box-shadow: none;
   }
+  /* Leftover from the old horizontal tab bar: Course Library carried a red
+     underline, which reads as a stray line across the vertical rail. The red
+     YouTube icon already carries that cue. */
+  .nav-tab[onclick*="yt-organiser"] { border-bottom-color: transparent !important; }
+  .nav-tab[onclick*="yt-organiser"].active { border-bottom-color: rgba(0, 200, 150, .16) !important; }
   .nav-tab:hover:not(.active) {
     color: var(--text);
     background: color-mix(in srgb, var(--surface) 70%, var(--card));
@@ -5982,9 +5988,12 @@ html[data-theme="light"] .fintech-dashboard {
 
   .shell-playlist-section:not([hidden]) {
     display: flex;
-    flex: 0 0 auto;
+    /* Shrinkable so a large library scrolls inside the list instead of pushing
+       the nav items and the account dock past the bottom of the rail. */
+    flex: 0 1 auto;
     flex-direction: column;
     min-width: 0;
+    min-height: 0;
     margin-top: 14px;
     padding-top: 14px;
     border-top: 1px solid var(--border);
@@ -6020,10 +6029,44 @@ html[data-theme="light"] .fintech-dashboard {
   }
   .shell-playlist-list {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     gap: 3px;
     min-width: 0;
+    /* The only scroll region in the rail: bounded above so a big library cannot
+       take over, and floored so it never collapses to nothing. */
+    min-height: 92px;
+    max-height: min(40vh, 350px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
   }
+  .shell-playlist-list::-webkit-scrollbar { width: 4px; }
+  .shell-playlist-list::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--border); }
+
+  /* Fold toggle for the courses beyond the pinned few. */
+  .shell-playlist-more {
+    flex: 0 0 auto;
+    margin: 6px 2px 0;
+    padding: 6px 8px;
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    color: var(--muted);
+    background: transparent;
+    font: 700 .62rem/1.2 var(--font);
+    text-align: center;
+    cursor: pointer;
+    transition: color .15s, border-color .15s;
+  }
+  .shell-playlist-more:hover,
+  .shell-playlist-more:focus-visible {
+    color: var(--accent);
+    border-color: rgba(0, 200, 150, .35);
+    outline: none;
+  }
+  .shell-playlist-more[hidden],
+  .shell-playlist-section.is-searching .shell-playlist-more { display: none; }
   .shell-playlist-item {
     display: flex;
     align-items: center;
@@ -6103,15 +6146,29 @@ html[data-theme="light"] .fintech-dashboard {
      module injects there (plan badge, Pro badge, 💡 Request, Install app, sync
      pill, theme toggle) lands inside this box automatically. ── */
   .shell-sidebar-dock {
+    /* Sticky so the account row and plan controls stay reachable even when the
+       rail itself has to scroll on short viewports. */
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
     display: flex;
+    flex: 0 0 auto;
     flex-direction: column;
-    gap: 8px;
+    gap: 7px;
     margin: auto 2px 0;
-    padding: 8px;
+    padding: 7px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 16px;
     box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+  }
+  /* Opaque backdrop so nav items scroll behind the pinned dock, not through it. */
+  .shell-sidebar-dock::before {
+    content: '';
+    position: absolute;
+    inset: -12px -8px -20px;
+    z-index: -1;
+    background: color-mix(in srgb, var(--surface) 96%, var(--bg));
   }
   /* Defensive: if the relocation never ran, the empty card must not show. */
   .shell-sidebar-dock:not(:has(.topbar-right)) { display: none; }
@@ -6137,23 +6194,26 @@ html[data-theme="light"] .fintech-dashboard {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .shell-dock-tray .pwa-install-button { min-height: 30px; font-size: .66rem; }
+  .shell-dock-tray .pwa-install-button { min-height: 28px; padding: 5px 10px; font-size: .65rem; }
   .shell-dock-tray .sync-indicator { flex: 0 1 auto; font-size: .68rem; }
-  .shell-dock-tray #ez-theme-btn { margin-left: auto; }
+  /* Idle sync pill would otherwise hold a whole row of the dock for one dot. */
+  .shell-dock-tray .sync-indicator:has(#sync-label:empty) { display: none; }
+  /* Pack the tray left so a wrapped theme toggle never floats alone on the right. */
+  .shell-dock-tray #ez-theme-btn { margin: 0; }
 
   /* Account row — avatar, name, email and the menu caret, opening upward. */
-  .shell-dock-account { padding-top: 8px; border-top: 1px solid var(--border); }
+  .shell-dock-account { padding-top: 7px; border-top: 1px solid var(--border); }
   .shell-dock-account .user-chip {
     width: 100%;
-    gap: 10px;
-    padding: 7px 9px;
+    gap: 9px;
+    padding: 6px 8px;
     background: color-mix(in srgb, var(--surface) 82%, var(--card));
     border-radius: 12px;
   }
   .shell-dock-account .user-avatar {
-    width: 30px;
-    height: 30px;
-    font-size: .74rem;
+    width: 28px;
+    height: 28px;
+    font-size: .72rem;
   }
   .shell-dock-account .user-chip-copy {
     display: block;
