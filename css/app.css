@@ -5799,6 +5799,9 @@ html[data-theme="light"] .fintech-dashboard {
 .shell-sidebar-controls,
 .shell-nav-label,
 .shell-sidebar-dock { display: none; }
+/* Mobile keeps the horizontal tab strip: the wrapper must not become a row of
+   its own, so it is erased from layout and the tabs stay direct flex children. */
+.shell-nav-scroll { display: contents; }
 
 @media (min-width: 901px) {
   :root { --shell-sidebar-width: 252px; --shell-sidebar-width-collapsed: 72px; }
@@ -5905,8 +5908,9 @@ html[data-theme="light"] .fintech-dashboard {
     width: var(--shell-sidebar-width);
     min-height: 100vh;
     gap: 4px;
-    overflow-y: auto;
-    overflow-x: hidden;
+    /* The rail itself never scrolls — .shell-nav-scroll does. That keeps the
+       brand, the search box and the account dock permanently on screen. */
+    overflow: hidden;
     padding: 24px 16px 18px;
     background: color-mix(in srgb, var(--surface) 96%, var(--bg));
     border: 0;
@@ -5944,6 +5948,21 @@ html[data-theme="light"] .fintech-dashboard {
     text-transform: uppercase;
     white-space: nowrap;
   }
+
+  /* Only the navigation list scrolls. */
+  .shell-nav-scroll {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  .shell-nav-scroll::-webkit-scrollbar { width: 4px; }
+  .shell-nav-scroll::-webkit-scrollbar-thumb { border-radius: 4px; background: var(--border); }
 
   .nav-tab {
     display: flex;
@@ -5990,29 +6009,18 @@ html[data-theme="light"] .fintech-dashboard {
      module injects there (plan badge, Pro badge, 💡 Request, Install app, sync
      pill, theme toggle) lands inside this box automatically. ── */
   .shell-sidebar-dock {
-    /* Sticky so the plan controls and account row stay reachable on short
-       viewports, where the navigation list itself has to scroll. */
-    position: sticky;
-    bottom: 0;
-    z-index: 1;
+    /* Never shrinks and never scrolls away: it is a fixed-size flex item below
+       the scrolling navigation list. */
     display: flex;
     flex: 0 0 auto;
     flex-direction: column;
     gap: 7px;
-    margin: auto 2px 0;
+    margin: 12px 2px 0;
     padding: 7px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 16px;
     box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
-  }
-  /* Opaque backdrop so nav items scroll behind the pinned dock, not through it. */
-  .shell-sidebar-dock::before {
-    content: '';
-    position: absolute;
-    inset: -12px -8px -20px;
-    z-index: -1;
-    background: color-mix(in srgb, var(--surface) 96%, var(--bg));
   }
   /* Defensive: if the relocation never ran, the empty card must not show. */
   .shell-sidebar-dock:not(:has(.topbar-right)) { display: none; }
@@ -6030,11 +6038,15 @@ html[data-theme="light"] .fintech-dashboard {
     padding: 2px 2px 0;
   }
   .shell-dock-tray > .topbar-right > * { max-width: 100%; }
+  /* Compact the injected pills (several carry inline styles, hence !important)
+     so the tray needs two or three rows instead of five in a 200px column. */
   .shell-dock-tray #ez-plan-badge,
   .shell-dock-tray #pro-status-badge,
   .shell-dock-tray #ez-req-fab,
   .shell-dock-tray .pwa-install-button {
     overflow: hidden;
+    padding: 4px 9px !important;
+    font-size: .64rem !important;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -6042,8 +6054,9 @@ html[data-theme="light"] .fintech-dashboard {
   .shell-dock-tray .sync-indicator { flex: 0 1 auto; font-size: .68rem; }
   /* An idle sync pill would otherwise hold a whole row of the dock for one dot. */
   .shell-dock-tray .sync-indicator:has(#sync-label:empty) { display: none; }
-  /* Pack the tray left so a wrapped theme toggle never floats alone on the right. */
-  .shell-dock-tray #ez-theme-btn { margin: 0; }
+  /* Lead with the theme toggle: as a 34px square it shares the first row with
+     the plan badges, instead of wrapping onto a row of its own at the end. */
+  .shell-dock-tray #ez-theme-btn { order: -1; margin: 0; }
 
   /* Account row — avatar, name, email and the menu caret, opening upward. */
   .shell-dock-account { padding-top: 7px; border-top: 1px solid var(--border); }
