@@ -372,79 +372,15 @@ function ytoLoad() {
   ytoRenderLibrary();
 }
 
-/* ── Desktop navigation: YouTube-style saved playlist shortcuts ── */
-function ytoRenderMainSidebar() {
-  const section = document.getElementById('shell-playlist-section');
-  const list = document.getElementById('shell-playlist-list');
-  if (!section || !list) return;
+/* ── Desktop navigation ──
+   Saved courses are deliberately NOT mirrored into the workspace rail. The
+   library is unbounded, so listing it there pushed the navigation items and the
+   account dock off screen. Course Library is the single entry point.
+   These two functions stay as no-ops because the YouTube, planner and auth
+   modules call them on every library change. */
+function ytoRenderMainSidebar() { /* rail no longer lists saved courses */ }
 
-  const playlists = Object.values(ytoLib())
-    .filter(pl => pl && pl.id && pl.type !== 'video' && Array.isArray(pl.videos))
-    .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
-
-  section.hidden = playlists.length === 0;
-  list.replaceChildren();
-
-  playlists.forEach(pl => {
-    const total = pl.videos.length;
-    const done = pl.videos.filter(video => pl.watched && pl.watched[video.id]).length;
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'shell-playlist-item';
-    button.dataset.playlistId = pl.id;
-    button.title = `${pl.title || 'Playlist'} · ${total} ${total === 1 ? 'video' : 'videos'}`;
-    button.setAttribute('aria-label', `Open playlist ${pl.title || 'Playlist'}`);
-    button.addEventListener('click', () => ytoOpenSidebarPlaylist(pl.id));
-
-    const thumb = document.createElement('span');
-    thumb.className = 'shell-playlist-thumb';
-    thumb.setAttribute('aria-hidden', 'true');
-    if (pl.thumb) {
-      const image = document.createElement('img');
-      image.src = pl.thumb;
-      image.alt = '';
-      image.loading = 'lazy';
-      image.addEventListener('error', () => { image.remove(); thumb.textContent = '▶'; });
-      thumb.appendChild(image);
-    } else {
-      thumb.textContent = '▶';
-    }
-
-    const copy = document.createElement('span');
-    copy.className = 'shell-playlist-copy';
-    const title = document.createElement('span');
-    title.className = 'shell-playlist-title';
-    title.textContent = pl.title || 'Playlist';
-    const meta = document.createElement('span');
-    meta.className = 'shell-playlist-meta';
-    meta.textContent = done ? `${done}/${total} completed` : `${total} ${total === 1 ? 'video' : 'videos'}`;
-    copy.append(title, meta);
-    button.append(thumb, copy);
-    list.appendChild(button);
-  });
-
-  const navSearch = document.getElementById('shell-nav-search');
-  if (typeof window.shellFilterNavigation === 'function') {
-    window.shellFilterNavigation(navSearch ? navSearch.value : '');
-  }
-  ytoSyncMainSidebarSelection();
-}
-
-function ytoSyncMainSidebarSelection() {
-  const libraryActive = document.getElementById('nav-yt-organiser')?.classList.contains('active');
-  document.querySelectorAll('.shell-playlist-item').forEach(button => {
-    const isCurrent = Boolean(libraryActive && button.dataset.playlistId === ytoCurrentPl);
-    button.classList.toggle('active', isCurrent);
-    if (isCurrent) button.setAttribute('aria-current', 'page');
-    else button.removeAttribute('aria-current');
-  });
-}
-
-function ytoOpenSidebarPlaylist(plId) {
-  if (!ytoLib()[plId]) { ytoRenderMainSidebar(); return; }
-  switchPage('yt-organiser');
-  ytoOpenCourse(plId);
-}
+function ytoSyncMainSidebarSelection() { /* nothing to highlight in the rail */ }
 
 function ytoOpenSidebarLibrary() {
   switchPage('yt-organiser');

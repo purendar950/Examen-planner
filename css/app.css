@@ -5798,7 +5798,6 @@ html[data-theme="light"] .fintech-dashboard {
 .shell-brand,
 .shell-sidebar-controls,
 .shell-nav-label,
-.shell-playlist-section,
 .shell-sidebar-dock { display: none; }
 
 @media (min-width: 901px) {
@@ -5948,6 +5947,7 @@ html[data-theme="light"] .fintech-dashboard {
 
   .nav-tab {
     display: flex;
+    flex: 0 0 auto;
     align-items: center;
     width: 100%;
     min-height: 42px;
@@ -5974,128 +5974,15 @@ html[data-theme="light"] .fintech-dashboard {
     border-color: rgba(0, 200, 150, .16);
     box-shadow: none;
   }
+  /* Leftover from the old horizontal tab bar: Course Library carried a red
+     underline, which reads as a stray red line across the vertical rail. The
+     red YouTube icon already carries that cue. */
+  .nav-tab[onclick*="yt-organiser"] { border-bottom-color: transparent !important; }
+  .nav-tab[onclick*="yt-organiser"].active { border-bottom-color: rgba(0, 200, 150, .16) !important; }
   .nav-tab:hover:not(.active) {
     color: var(--text);
     background: color-mix(in srgb, var(--surface) 70%, var(--card));
     transform: translateX(2px);
-  }
-
-  .shell-playlist-section:not([hidden]) {
-    display: flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    min-width: 0;
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid var(--border);
-  }
-  .shell-playlist-section.search-empty { display: none; }
-  .shell-playlist-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 0 10px 7px;
-    color: var(--muted);
-    font-size: .63rem;
-    font-weight: 800;
-    letter-spacing: .12em;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-  .shell-playlist-heading button {
-    padding: 2px 0;
-    border: 0;
-    color: var(--muted);
-    background: transparent;
-    font: 700 .58rem/1 var(--font);
-    letter-spacing: 0;
-    text-transform: none;
-    cursor: pointer;
-  }
-  .shell-playlist-heading button:hover,
-  .shell-playlist-heading button:focus-visible {
-    color: var(--accent);
-    outline: none;
-  }
-  .shell-playlist-list {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-  }
-  .shell-playlist-item {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    width: 100%;
-    min-width: 0;
-    min-height: 42px;
-    padding: 6px 8px;
-    border: 1px solid transparent;
-    border-radius: 10px;
-    color: var(--muted);
-    background: transparent;
-    font-family: var(--font);
-    text-align: left;
-    cursor: pointer;
-    transition: color .15s, background .15s, border-color .15s, transform .15s;
-  }
-  .shell-playlist-item[hidden] { display: none; }
-  .shell-playlist-item:hover,
-  .shell-playlist-item:focus-visible {
-    color: var(--text);
-    background: color-mix(in srgb, var(--surface) 70%, var(--card));
-    outline: none;
-    transform: translateX(2px);
-  }
-  #nav-yt-organiser.active ~ .shell-playlist-section .shell-playlist-item.active {
-    color: var(--accent);
-    background: var(--accent-dim);
-    border-color: rgba(0, 200, 150, .16);
-  }
-  .shell-playlist-thumb {
-    position: relative;
-    display: grid;
-    flex: 0 0 auto;
-    width: 36px;
-    aspect-ratio: 16 / 9;
-    place-items: center;
-    overflow: hidden;
-    border-radius: 5px;
-    color: #fff;
-    background: linear-gradient(135deg, #ff4b3e, #d71920);
-    font-size: .55rem;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
-  }
-  .shell-playlist-thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .shell-playlist-copy {
-    display: block;
-    min-width: 0;
-    overflow: hidden;
-  }
-  .shell-playlist-title,
-  .shell-playlist-meta {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .shell-playlist-title {
-    color: currentColor;
-    font-size: .72rem;
-    font-weight: 700;
-    line-height: 1.25;
-  }
-  .shell-playlist-meta {
-    margin-top: 2px;
-    color: var(--muted);
-    font-size: .58rem;
-    line-height: 1.2;
   }
 
   /* ── Account dock: one card holding the plan/utility tray and the account row.
@@ -6103,15 +5990,29 @@ html[data-theme="light"] .fintech-dashboard {
      module injects there (plan badge, Pro badge, 💡 Request, Install app, sync
      pill, theme toggle) lands inside this box automatically. ── */
   .shell-sidebar-dock {
+    /* Sticky so the plan controls and account row stay reachable on short
+       viewports, where the navigation list itself has to scroll. */
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
     display: flex;
+    flex: 0 0 auto;
     flex-direction: column;
-    gap: 8px;
+    gap: 7px;
     margin: auto 2px 0;
-    padding: 8px;
+    padding: 7px;
     background: var(--card);
     border: 1px solid var(--border);
     border-radius: 16px;
     box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+  }
+  /* Opaque backdrop so nav items scroll behind the pinned dock, not through it. */
+  .shell-sidebar-dock::before {
+    content: '';
+    position: absolute;
+    inset: -12px -8px -20px;
+    z-index: -1;
+    background: color-mix(in srgb, var(--surface) 96%, var(--bg));
   }
   /* Defensive: if the relocation never ran, the empty card must not show. */
   .shell-sidebar-dock:not(:has(.topbar-right)) { display: none; }
@@ -6137,23 +6038,26 @@ html[data-theme="light"] .fintech-dashboard {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .shell-dock-tray .pwa-install-button { min-height: 30px; font-size: .66rem; }
+  .shell-dock-tray .pwa-install-button { min-height: 28px; padding: 5px 10px; font-size: .65rem; }
   .shell-dock-tray .sync-indicator { flex: 0 1 auto; font-size: .68rem; }
-  .shell-dock-tray #ez-theme-btn { margin-left: auto; }
+  /* An idle sync pill would otherwise hold a whole row of the dock for one dot. */
+  .shell-dock-tray .sync-indicator:has(#sync-label:empty) { display: none; }
+  /* Pack the tray left so a wrapped theme toggle never floats alone on the right. */
+  .shell-dock-tray #ez-theme-btn { margin: 0; }
 
   /* Account row — avatar, name, email and the menu caret, opening upward. */
-  .shell-dock-account { padding-top: 8px; border-top: 1px solid var(--border); }
+  .shell-dock-account { padding-top: 7px; border-top: 1px solid var(--border); }
   .shell-dock-account .user-chip {
     width: 100%;
-    gap: 10px;
-    padding: 7px 9px;
+    gap: 9px;
+    padding: 6px 8px;
     background: color-mix(in srgb, var(--surface) 82%, var(--card));
     border-radius: 12px;
   }
   .shell-dock-account .user-avatar {
-    width: 30px;
-    height: 30px;
-    font-size: .74rem;
+    width: 28px;
+    height: 28px;
+    font-size: .72rem;
   }
   .shell-dock-account .user-chip-copy {
     display: block;
@@ -6192,7 +6096,6 @@ html[data-theme="light"] .fintech-dashboard {
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-brand { justify-content: center; padding: 0 0 16px; }
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-brand-text,
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-nav-label,
-  .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-playlist-section,
   .nav-tabs:has(#shell-sidebar-collapse:checked) .nav-tab-label,
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-search { display: none; }
   .nav-tabs:has(#shell-sidebar-collapse:checked) .shell-sidebar-controls {
@@ -6295,7 +6198,6 @@ html[data-theme="light"] .fintech-dashboard {
   .shell-brand,
   .shell-sidebar-controls,
   .shell-nav-label,
-  .shell-playlist-section,
   .shell-sidebar-dock { display: none !important; }
 }
 
