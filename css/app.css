@@ -1087,6 +1087,37 @@
     border: 1px solid var(--border);
   }
   .yt-player-wrap iframe { width: 100%; height: 100%; border: none; display: block; }
+
+  /* Tap-to-play overlay (auto-restore after page refresh) */
+  .yt-tap-resume {
+    position: absolute; inset: 0; z-index: 5;
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    padding: 1.5rem; text-align: center; cursor: pointer;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    animation: ytTapFade 0.2s ease;
+  }
+  .yt-tap-resume.show { display: flex; }
+  @keyframes ytTapFade { from { opacity: 0; } to { opacity: 1; } }
+  .yt-tap-resume-play {
+    width: 64px; height: 64px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; color: #000; padding-left: 4px;
+    background: var(--accent); box-shadow: 0 4px 20px rgba(0, 200, 150, 0.5);
+    transition: transform 0.15s;
+  }
+  .yt-tap-resume:hover .yt-tap-resume-play,
+  .yt-tap-resume:focus-visible .yt-tap-resume-play { transform: scale(1.08); }
+  .yt-tap-resume-copy { display: flex; flex-direction: column; gap: 3px; }
+  .yt-tap-resume-title {
+    font-size: 0.95rem; font-weight: 700; color: #fff;
+    max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .yt-tap-resume-sub { font-size: 0.78rem; color: rgba(255, 255, 255, 0.75); }
+
   .yt-placeholder {
     display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 12px; color: var(--muted);
