@@ -6095,7 +6095,7 @@ html[data-theme="light"] .fintech-dashboard {
 
   .shell-sidebar-status {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 9px;
     margin: auto 4px 0;
     padding: .8rem;
@@ -6108,14 +6108,28 @@ html[data-theme="light"] .fintech-dashboard {
     width: 8px;
     height: 8px;
     flex: 0 0 auto;
+    margin-top: .22rem;
     border-radius: 50%;
     background: var(--accent);
     box-shadow: 0 0 0 4px rgba(0, 200, 150, .09);
   }
+  .shell-status-text { min-width: 0; }
   .shell-sidebar-status strong,
   .shell-sidebar-status span:not(.shell-status-dot) { display: block; }
-  .shell-sidebar-status strong { color: var(--text); font-size: .68rem; white-space: nowrap; }
-  .shell-sidebar-status span:not(.shell-status-dot) { margin-top: 2px; font-size: .58rem; white-space: nowrap; }
+  .shell-sidebar-status strong {
+    color: var(--text);
+    font-size: .64rem;
+    line-height: 1.3;
+    letter-spacing: .045em;
+    text-transform: uppercase;
+    white-space: normal;
+  }
+  .shell-sidebar-status span:not(.shell-status-dot) {
+    margin-top: 4px;
+    font-size: .58rem;
+    line-height: 1.3;
+    white-space: normal;
+  }
 
   /* ── Collapsed state: icons-only rail, brand mark + prominent expand control remain ── */
   .nav-tabs:has(#shell-sidebar-collapse:checked) { padding-inline: 10px; align-items: center; }
@@ -6154,14 +6168,8 @@ html[data-theme="light"] .fintech-dashboard {
     transition: margin-left .18s ease;
   }
   .topbar-left { display: none; }
-  .topbar::before {
-    content: 'Preparation command center';
-    color: var(--muted);
-    font-size: .67rem;
-    font-weight: 800;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-  }
+  .topbar-right { margin-left: auto; }
+  .topbar::before { content: none; }
 
   /* Every page now begins inside the main workspace column. */
   #exam-selector-bar {
@@ -6181,6 +6189,12 @@ html[data-theme="light"] .fintech-dashboard {
   }
   #app .main-content > .page { max-width: 1400px; margin: 0 auto; }
   #app .main-content > #page-dashboard { max-width: 1400px; }
+
+  /* YouTube is a dense two-pane workspace: reclaim the decorative gutters and
+     header height without changing spacing on the rest of the application. */
+  #app:has(#page-youtube.active) .topbar { height: 62px; }
+  #app .main-content:has(#page-youtube.active) { padding: 1rem 1.25rem 3rem; }
+  #app .main-content > #page-youtube { max-width: none; }
 }
 
 @media (min-width: 901px) and (max-width: 1140px) {
