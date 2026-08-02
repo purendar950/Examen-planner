@@ -163,9 +163,20 @@ function ytRefreshSingleVideoManage(id) {
   if (box) box.innerHTML = ytSingleVideoManageHtml(id);
 }
 
+/* Manual "Resume" button on the banner — reload the last video and play it
+   (the click itself is the user gesture that satisfies autoplay policy). */
 function ytResume() {
+  ytResumeLoad(false);
+}
+
+/* Shared loader for the last-watched video, used by both the Resume button
+   and the automatic restore-after-refresh path.
+   @param {boolean} autoRestore  true = auto-restore on page load: cue the video
+     at the saved position and show a tap-to-play overlay instead of autoplaying.
+   @returns {boolean} true if a last video existed and load was kicked off. */
+function ytResumeLoad(autoRestore) {
   const lv = appState.ytLastVideo;
-  if (!lv) return;
+  if (!lv || !lv.id) return false;
 
   // Resolve organiser context:
   // 1. Explicit ytoPlId (new saves) → use it directly
@@ -183,17 +194,76 @@ function ytResume() {
   const url = lv.url || (lv.type === 'playlist'
     ? `https://youtube.com/playlist?list=${lv.id}`
     : `https://youtube.com/watch?v=${lv.id}`);
-  document.getElementById('yt-url-input').value = url;
-  document.getElementById('yt-err').classList.remove('show');
-  document.getElementById('yt-play-btn').disabled = false;
+  const urlInput = document.getElementById('yt-url-input');
+  if (urlInput) urlInput.value = url;
+  const errEl = document.getElementById('yt-err');
+  if (errEl) errEl.classList.remove('show');
+  const playBtn = document.getElementById('yt-play-btn');
+  if (playBtn) playBtn.disabled = false;
+
+  // Tell ytDoLoad to cue (no autoplay) when auto-restoring.
+  if (autoRestore) ytAutoCueNext = true;
   ytLoadInTab(lv.type, lv.id, url, lv.title);
 
   // Restore full organiser course sidebar after load
   if (resolvedPlId) {
     setTimeout(function() { ytoPopulateYtSidebar(resolvedPlId, lv.id); }, 80);
   }
-  document.getElementById('yt-resume-banner').classList.remove('show');
-  showToast('Resuming: ' + (lv.title || lv.id) + ' ▶', 'success');
+
+  const banner = document.getElementById('yt-resume-banner');
+  if (banner) banner.classList.remove('show');
+
+  if (autoRestore) {
+    // Video is now shown at the saved spot; prompt for the single tap that
+    // browser autoplay rules require after a fresh page load.
+    let secs = 0;
+    if (lv.type === 'video') { try { secs = ytResumeSeconds(lv.id); } catch (e) {} }
+    ytShowTapToPlay(lv.title || lv.id, secs);
+  } else {
+    showToast('Resuming: ' + (lv.title || lv.id) + ' ▶', 'success');
+  }
+  return true;
+}
+
+/* On opening the YouTube tab after a refresh/close, bring the last video back
+   into the player automatically (once per page load) instead of only showing
+   the manual resume banner. Never interrupts a video that is already loaded. */
+function ytMaybeAutoRestore() {
+  if (ytAutoRestoreDone) { ytShowResumeBanner(); return; }
+  ytAutoRestoreDone = true;
+
+  const lv = appState.ytLastVideo;
+  const nothingLoaded = !ytCurrentVideoId;   // fresh page → no live player yet
+  if (lv && lv.id && nothingLoaded) {
+    const ok = ytResumeLoad(true);
+    if (!ok) ytShowResumeBanner();
+  } else {
+    ytShowResumeBanner();
+  }
+}
+
+/* Tap-to-play overlay shown over the player after an auto-restore. */
+function ytShowTapToPlay(title, secs) {
+  const ov = document.getElementById('yt-tap-resume');
+  if (!ov) return;
+  const ttl = document.getElementById('yt-tap-resume-title');
+  if (ttl) ttl.textContent = title ? ('▶ ' + title) : 'Continue watching';
+  const sub = document.getElementById('yt-tap-resume-sub');
+  if (sub) sub.textContent = (secs && secs > 5)
+    ? ('Tap to resume from ' + ytFormatDuration(secs))
+    : 'Tap to play';
+  ov.classList.add('show');
+}
+
+function ytHideTapToPlay() {
+  const ov = document.getElementById('yt-tap-resume');
+  if (ov) ov.classList.remove('show');
+}
+
+/* User tapped the overlay — this gesture lets the browser start playback. */
+function ytTapResume() {
+  ytHideTapToPlay();
+  try { if (ytPlayer && ytPlayer.playVideo) ytPlayer.playVideo(); } catch (e) {}
 }
 
 function ytDismissResume() {
@@ -544,6 +614,13 @@ let ytPlayer = null;
 let ytPlayerReady = false;
 let ytPendingLoad = null;
 let ytProgressTimer = null;
+// When true, the NEXT ytDoLoad() cues the video (loads at the saved position
+// WITHOUT autoplaying) instead of loading+playing. Used for auto-restore after
+// a page refresh, where the browser would block autoplay-with-sound anyway.
+let ytAutoCueNext = false;
+// Auto-restore of the last video runs at most once per page load, so navigating
+// back to the tab during normal use never interrupts what is already playing.
+let ytAutoRestoreDone = false;
 let ytWatchAccumSecs = 0;   // real (wall-clock) seconds watched, pending credit to Study Time
 let ytWatchLastTs = 0;      // Date.now() at the previous poll tick
 
@@ -569,6 +646,7 @@ window.onYouTubeIframeAPIReady = function() {
       },
       onStateChange: function(e) {
         if (e.data === YT.PlayerState.PLAYING)  {
+          ytHideTapToPlay();   // playback started — remove the resume overlay
           // GUARD: While a Picture-in-Picture session is active — either the
           // Document-PiP window (normal mode) or the native <video> PiP (Turbo
           // mode) — the main background iframe must NEVER play. Otherwise the
@@ -617,11 +695,20 @@ function ytDoLoad(type, id) {
     }
     return;
   }
+  // Consume the auto-cue flag: cue = load at position but do NOT autoplay.
+  const cue = ytAutoCueNext; ytAutoCueNext = false;
+
   if (type === 'playlist') {
-    ytPlayer.loadPlaylist({ listType: 'playlist', list: id, index: 0 });
+    if (cue) ytPlayer.cuePlaylist({ listType: 'playlist', list: id, index: 0 });
+    else     ytPlayer.loadPlaylist({ listType: 'playlist', list: id, index: 0 });
   } else {
     const start = ytResumeSeconds(id);
-    if (start > 0) {
+    if (cue) {
+      // Auto-restore after refresh/close: show the video ready at the saved
+      // spot. A tap-to-play overlay (shown by ytResumeLoad) starts playback,
+      // because browsers block sound-on autoplay without a user gesture.
+      ytPlayer.cueVideoById({ videoId: id, startSeconds: start > 0 ? start : 0 });
+    } else if (start > 0) {
       ytPlayer.loadVideoById({ videoId: id, startSeconds: start });
       showToast('▶ Resuming from ' + ytFormatDuration(start), 'info');
     } else {
@@ -1594,7 +1681,7 @@ onPageActivated('youtube', function () {
   renderYtSavedList();
   ytLoadNotes();
   ytUpdateNotesContext();
-  ytShowResumeBanner();
+  ytMaybeAutoRestore();
 });
 
 /* ── ESC closes modals ── */

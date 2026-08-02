@@ -52,6 +52,17 @@
               <p>URL paste karo aur Play karo, ya neeche Chapter Links se koi video open karo</p>
             </div>
             <div id="yt-player" style="display:none;width:100%;height:100%;"></div>
+            <!-- Tap-to-play overlay: shown after auto-restore on refresh, since
+                 browsers block sound-on autoplay without a user gesture. -->
+            <div class="yt-tap-resume" id="yt-tap-resume" role="button" tabindex="0"
+                 onclick="ytTapResume()"
+                 onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();ytTapResume();}">
+              <div class="yt-tap-resume-play" aria-hidden="true">▶</div>
+              <div class="yt-tap-resume-copy">
+                <span class="yt-tap-resume-title" id="yt-tap-resume-title">Continue watching</span>
+                <span class="yt-tap-resume-sub" id="yt-tap-resume-sub">Tap to resume</span>
+              </div>
+            </div>
           </div>
           <div class="yt-meta-bar" id="yt-meta-bar" style="display:none">
             <div class="yt-now-playing">
