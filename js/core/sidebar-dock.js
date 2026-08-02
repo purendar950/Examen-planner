@@ -44,6 +44,15 @@
     }
   }
 
+  /* The rail is sized from the measured viewport rather than 100vh: on Chrome
+     for Android 100vh is the toolbar-hidden height, which made the rail taller
+     than the screen and pushed the dock out of sight. */
+  function syncRailHeight() {
+    var height = window.innerHeight;
+    if (!height || height < 1) return;
+    document.documentElement.style.setProperty('--shell-vh', height + 'px');
+  }
+
   /* The dock shows the signed-in email under the name (the topbar chip has no
      room for it), mirroring whatever the account menu already renders. */
   function syncAccountCopy() {
@@ -59,8 +68,16 @@
   window.ezSyncDockAccount = syncAccountCopy;
 
   function start() {
+    syncRailHeight();
     placeDock();
     syncAccountCopy();
+
+    // Android Chrome resizes the viewport whenever the toolbar slides in or out.
+    window.addEventListener('resize', syncRailHeight);
+    window.addEventListener('orientationchange', syncRailHeight);
+    if (window.visualViewport && window.visualViewport.addEventListener) {
+      window.visualViewport.addEventListener('resize', syncRailHeight);
+    }
 
     try {
       var mql = window.matchMedia(DESKTOP_QUERY);
