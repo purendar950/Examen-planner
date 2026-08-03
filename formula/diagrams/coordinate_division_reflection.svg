@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 410" role="img" aria-labelledby="title desc">
+  <title id="title">Internal and external section division with coordinate reflection</title>
+  <desc id="desc">Three coordinate panels show a point dividing a segment internally, a point dividing it externally, and a point reflected across a line.</desc>
+  <rect width="960" height="410" rx="24" fill="#f8fafc"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a">
+    <g transform="translate(25 30)">
+      <rect width="285" height="345" rx="18" fill="#eff6ff" stroke="#bfdbfe" stroke-width="3"/>
+      <path d="M35 275 H255 M55 310 V50" stroke="#94a3b8" stroke-width="3"/>
+      <path d="M75 245 L240 105" stroke="#2563eb" stroke-width="5"/><circle cx="75" cy="245" r="7" fill="#0f172a"/><circle cx="240" cy="105" r="7" fill="#0f172a"/><circle cx="174" cy="161" r="8" fill="#f97316"/>
+      <text x="61" y="269" font-size="20" font-weight="700">A</text><text x="245" y="100" font-size="20" font-weight="700">B</text><text x="182" y="157" font-size="20" font-weight="700">P</text>
+      <text x="45" y="35" font-size="20" font-weight="800">Internal division</text><text x="63" y="331" font-size="17" fill="#475569">A — m — P — n — B</text>
+    </g>
+    <g transform="translate(337 30)">
+      <rect width="285" height="345" rx="18" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="3"/>
+      <path d="M30 275 H260 M55 310 V50" stroke="#94a3b8" stroke-width="3"/>
+      <path d="M75 230 L190 140 L250 93" stroke="#16a34a" stroke-width="5"/><path d="M190 140 L250 93" stroke="#16a34a" stroke-width="5" stroke-dasharray="9 7"/>
+      <circle cx="75" cy="230" r="7" fill="#0f172a"/><circle cx="190" cy="140" r="7" fill="#0f172a"/><circle cx="250" cy="93" r="8" fill="#f97316"/>
+      <text x="60" y="254" font-size="20" font-weight="700">A</text><text x="174" y="133" font-size="20" font-weight="700">B</text><text x="254" y="89" font-size="20" font-weight="700">P</text>
+      <text x="45" y="35" font-size="20" font-weight="800">External division</text><text x="69" y="331" font-size="17" fill="#475569">P lies outside AB</text>
+    </g>
+    <g transform="translate(649 30)">
+      <rect width="285" height="345" rx="18" fill="#faf5ff" stroke="#e9d5ff" stroke-width="3"/>
+      <path d="M30 275 H260 M55 310 V50" stroke="#94a3b8" stroke-width="3"/>
+      <path d="M35 280 L245 70" stroke="#7c3aed" stroke-width="4"/>
+      <circle cx="108" cy="85" r="8" fill="#2563eb"/><circle cx="225" cy="202" r="8" fill="#f97316"/>
+      <path d="M108 85 L225 202" stroke="#dc2626" stroke-width="3" stroke-dasharray="9 7"/><path d="M158 143 L172 157 L186 143" fill="none" stroke="#dc2626" stroke-width="3"/>
+      <text x="82" y="78" font-size="20" font-weight="700">P</text><text x="232" y="220" font-size="20" font-weight="700">P′</text><text x="176" y="105" font-size="18" fill="#7c3aed">mirror line</text>
+      <text x="80" y="35" font-size="20" font-weight="800">Reflection</text><text x="54" y="331" font-size="17" fill="#475569">equal perpendicular distances</text>
+    </g>
+  </g>
+</svg>

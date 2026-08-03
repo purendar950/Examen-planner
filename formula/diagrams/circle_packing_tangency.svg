@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 430" role="img" aria-labelledby="title desc">
+  <title id="title">Circle tangency and packing configurations</title>
+  <desc id="desc">Four panels show externally tangent circles, two equal circles in a square, a small circle between four equal circles, and a tight rope around equal circles.</desc>
+  <rect width="1000" height="430" rx="24" fill="#f8fafc"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a">
+    <g transform="translate(24 28)">
+      <rect width="220" height="360" rx="18" fill="#eff6ff" stroke="#bfdbfe" stroke-width="3"/>
+      <circle cx="76" cy="145" r="52" fill="#dbeafe" stroke="#2563eb" stroke-width="4"/><circle cx="165" cy="145" r="37" fill="#dcfce7" stroke="#16a34a" stroke-width="4"/>
+      <path d="M76 145 H165" stroke="#f97316" stroke-width="4"/><circle cx="128" cy="145" r="5" fill="#dc2626"/>
+      <text x="63" y="137" font-size="20" font-weight="700">R</text><text x="157" y="137" font-size="19" font-weight="700">r</text>
+      <text x="27" y="236" font-size="18" font-weight="800">External tangency</text><text x="43" y="268" font-size="18" fill="#475569">centres = R + r</text>
+    </g>
+    <g transform="translate(268 28)">
+      <rect width="220" height="360" rx="18" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="3"/>
+      <rect x="25" y="52" width="170" height="170" fill="#dcfce7" fill-opacity=".45" stroke="#16a34a" stroke-width="4"/>
+      <circle cx="78" cy="137" r="52" fill="#cffafe" stroke="#0891b2" stroke-width="4"/><circle cx="142" cy="137" r="52" fill="#dbeafe" stroke="#2563eb" stroke-width="4"/>
+      <text x="36" y="260" font-size="18" font-weight="800">Two circles in square</text><text x="50" y="292" font-size="18" fill="#475569">touch sides + each other</text>
+    </g>
+    <g transform="translate(512 28)">
+      <rect width="220" height="360" rx="18" fill="#faf5ff" stroke="#e9d5ff" stroke-width="3"/>
+      <circle cx="78" cy="105" r="55" fill="#ede9fe" stroke="#7c3aed" stroke-width="4"/><circle cx="142" cy="105" r="55" fill="#ede9fe" stroke="#7c3aed" stroke-width="4"/>
+      <circle cx="78" cy="169" r="55" fill="#ede9fe" stroke="#7c3aed" stroke-width="4"/><circle cx="142" cy="169" r="55" fill="#ede9fe" stroke="#7c3aed" stroke-width="4"/>
+      <circle cx="110" cy="137" r="13" fill="#fef3c7" stroke="#d97706" stroke-width="4"/>
+      <text x="34" y="260" font-size="18" font-weight="800">Gap between four</text><text x="40" y="292" font-size="18" fill="#475569">smallest radius shown</text>
+    </g>
+    <g transform="translate(756 28)">
+      <rect width="220" height="360" rx="18" fill="#fff7ed" stroke="#fed7aa" stroke-width="3"/>
+      <circle cx="60" cy="140" r="42" fill="#ffedd5" stroke="#ea580c" stroke-width="4"/><circle cx="110" cy="140" r="42" fill="#ffedd5" stroke="#ea580c" stroke-width="4"/><circle cx="160" cy="140" r="42" fill="#ffedd5" stroke="#ea580c" stroke-width="4"/>
+      <path d="M60 98 H160 A42 42 0 0 1 160 182 H60 A42 42 0 0 1 60 98" fill="none" stroke="#0f766e" stroke-width="6"/>
+      <text x="43" y="260" font-size="18" font-weight="800">Rope around circles</text><text x="26" y="292" font-size="18" fill="#475569">curves + straight gaps</text>
+    </g>
+  </g>
+</svg>

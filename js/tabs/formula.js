@@ -177,7 +177,7 @@
         resizeFrame();
       }, 120);
     });
-    frame.src = 'formula/index.html?v=3';
+    frame.src = 'formula/index.html?v=4';
   }
 
   if (typeof onPageActivated === 'function') {

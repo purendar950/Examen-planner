@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 400" role="img" aria-labelledby="title desc">
+  <title id="title">Sphere and hemispherical shell cross-sections</title>
+  <desc id="desc">Two panels show a hollow sphere and a hollow hemisphere in cross-section with outer radius R, inner radius r, and shell thickness.</desc>
+  <rect width="820" height="400" rx="24" fill="#f8fafc"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a">
+    <g transform="translate(35 30)">
+      <rect width="350" height="335" rx="18" fill="#eff6ff" stroke="#bfdbfe" stroke-width="3"/>
+      <circle cx="175" cy="158" r="112" fill="#dbeafe" stroke="#2563eb" stroke-width="5"/><circle cx="175" cy="158" r="66" fill="#f8fafc" stroke="#0891b2" stroke-width="4"/>
+      <path d="M175 158 H287 M175 158 H241" stroke="#f97316" stroke-width="4"/>
+      <text x="247" y="148" font-size="22" font-weight="700">R</text><text x="205" y="181" font-size="22" font-weight="700">r</text>
+      <text x="175" y="300" text-anchor="middle" font-size="21" font-weight="800">Spherical shell</text>
+    </g>
+    <g transform="translate(435 30)">
+      <rect width="350" height="335" rx="18" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="3"/>
+      <path d="M55 215 A120 120 0 0 1 295 215 L245 215 A70 70 0 0 0 105 215 Z" fill="#dcfce7" stroke="#16a34a" stroke-width="5"/>
+      <path d="M55 215 H295 M105 215 H245" stroke="#0f766e" stroke-width="4"/>
+      <path d="M175 215 L260 130 M175 215 L225 165" stroke="#f97316" stroke-width="4"/>
+      <text x="231" y="133" font-size="22" font-weight="700">R</text><text x="211" y="180" font-size="22" font-weight="700">r</text>
+      <text x="175" y="300" text-anchor="middle" font-size="21" font-weight="800">Hemispherical shell</text>
+    </g>
+  </g>
+</svg>

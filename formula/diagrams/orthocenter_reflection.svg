@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 500" role="img" aria-labelledby="title desc">
+  <title id="title">Orthocenter reflection property</title>
+  <desc id="desc">An acute triangle with circumcircle shows orthocenter H, three altitudes, and the reflections of H across the sides lying on the circumcircle.</desc>
+  <rect width="820" height="500" rx="24" fill="#f8fafc"/>
+  <circle cx="360" cy="260" r="206" fill="#eff6ff" stroke="#2563eb" stroke-width="5"/>
+  <path d="M360 54 L155 350 L565 350 Z" fill="#fef3c7" fill-opacity=".5" stroke="#d97706" stroke-width="5"/>
+  <path d="M360 54 V350 M155 350 L487 163 M565 350 L233 163" fill="none" stroke="#7c3aed" stroke-width="3.5" stroke-dasharray="10 8"/>
+  <circle cx="360" cy="173" r="8" fill="#dc2626"/>
+  <circle cx="360" cy="466" r="8" fill="#16a34a"/>
+  <circle cx="168" cy="185" r="8" fill="#16a34a"/>
+  <circle cx="552" cy="185" r="8" fill="#16a34a"/>
+  <path d="M360 173 V466 M360 173 L168 185 M360 173 L552 185" stroke="#f97316" stroke-width="2.5" stroke-dasharray="7 7"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a" font-weight="700">
+    <text x="373" y="170" font-size="23" fill="#dc2626">H</text>
+    <text x="373" y="474" font-size="21" fill="#15803d">Hₐ</text>
+    <text x="122" y="181" font-size="21" fill="#15803d">Hᵦ</text>
+    <text x="567" y="181" font-size="21" fill="#15803d">H𝒸</text>
+    <text x="615" y="165" font-size="23" fill="#7c3aed">Reflect H</text>
+    <text x="615" y="199" font-size="18" fill="#475569">across any side:</text>
+    <text x="615" y="228" font-size="18" fill="#475569">the image lies on</text>
+    <text x="615" y="257" font-size="18" fill="#475569">the circumcircle.</text>
+  </g>
+</svg>
