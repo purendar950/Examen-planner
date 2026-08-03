@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Cylinder construction, hollow section, and longest rod</title>
+  <desc id="desc">Three panels show a rectangular sheet rolled into a cylinder, a hollow cylinder cross-section with radii R and r, and the longest diagonal rod inside a cylinder.</desc>
+  <rect width="960" height="420" rx="24" fill="#f8fafc"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a">
+    <g transform="translate(25 28)">
+      <rect width="285" height="360" rx="18" fill="#eff6ff" stroke="#bfdbfe" stroke-width="3"/>
+      <rect x="35" y="70" width="105" height="185" fill="#dbeafe" stroke="#2563eb" stroke-width="4"/><path d="M153 105 C190 70 230 75 244 105" fill="none" stroke="#f97316" stroke-width="5" marker-end="url(#arrow)"/>
+      <ellipse cx="214" cy="139" rx="42" ry="14" fill="#bfdbfe" stroke="#2563eb" stroke-width="4"/><path d="M172 139 V263 M256 139 V263" stroke="#2563eb" stroke-width="4"/><ellipse cx="214" cy="263" rx="42" ry="14" fill="#dbeafe" stroke="#2563eb" stroke-width="4"/>
+      <text x="34" y="45" font-size="20" font-weight="800">Sheet → cylinder</text><text x="43" y="291" font-size="17" fill="#475569">one side = h</text><text x="43" y="316" font-size="17" fill="#475569">other = 2πr</text>
+    </g>
+    <g transform="translate(337 28)">
+      <rect width="285" height="360" rx="18" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="3"/>
+      <ellipse cx="142" cy="100" rx="88" ry="30" fill="#dcfce7" stroke="#16a34a" stroke-width="4"/><ellipse cx="142" cy="100" rx="45" ry="15" fill="#f8fafc" stroke="#0891b2" stroke-width="4"/><path d="M54 100 V265 M230 100 V265 M97 100 V265 M187 100 V265" stroke="#16a34a" stroke-width="4"/><ellipse cx="142" cy="265" rx="88" ry="30" fill="#dcfce7" stroke="#16a34a" stroke-width="4"/><ellipse cx="142" cy="265" rx="45" ry="15" fill="#f8fafc" stroke="#0891b2" stroke-width="4"/>
+      <path d="M142 100 H230 M142 100 H187" stroke="#f97316" stroke-width="3"/><text x="199" y="92" font-size="20" font-weight="700">R</text><text x="162" y="124" font-size="20" font-weight="700">r</text>
+      <text x="65" y="45" font-size="20" font-weight="800">Hollow cylinder</text><text x="48" y="326" font-size="17" fill="#475569">material ∝ (R² − r²)h</text>
+    </g>
+    <g transform="translate(649 28)">
+      <rect width="285" height="360" rx="18" fill="#faf5ff" stroke="#e9d5ff" stroke-width="3"/>
+      <ellipse cx="142" cy="90" rx="82" ry="27" fill="#ede9fe" stroke="#7c3aed" stroke-width="4"/><path d="M60 90 V270 M224 90 V270" stroke="#7c3aed" stroke-width="4"/><ellipse cx="142" cy="270" rx="82" ry="27" fill="#ede9fe" stroke="#7c3aed" stroke-width="4"/>
+      <path d="M60 90 L224 270" stroke="#dc2626" stroke-width="6"/><path d="M60 90 H224" stroke="#f97316" stroke-width="3" stroke-dasharray="8 6"/><text x="124" y="81" font-size="19" font-weight="700">2r</text><text x="231" y="188" font-size="19" font-weight="700">h</text>
+      <text x="77" y="45" font-size="20" font-weight="800">Longest rod</text><text x="49" y="326" font-size="17" fill="#475569">√(4r² + h²)</text>
+    </g>
+  </g>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0 0 L9 3 L0 6 Z" fill="#f97316"/></marker></defs>
+</svg>

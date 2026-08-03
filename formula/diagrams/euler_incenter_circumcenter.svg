@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420" role="img" aria-labelledby="title desc">
+  <title id="title">Euler distance between circumcenter and incenter</title>
+  <desc id="desc">A triangle is shown inside its circumcircle with circumcenter O, incenter I, circumradius R, inradius r, and the distance OI highlighted.</desc>
+  <rect width="800" height="420" rx="24" fill="#f8fafc"/>
+  <circle cx="330" cy="218" r="176" fill="#eff6ff" stroke="#2563eb" stroke-width="5"/>
+  <path d="M330 42 L158 267 L470 342 Z" fill="#fef3c7" fill-opacity=".55" stroke="#d97706" stroke-width="5"/>
+  <circle cx="330" cy="218" r="7" fill="#2563eb"/>
+  <circle cx="306" cy="251" r="58" fill="#dcfce7" fill-opacity=".62" stroke="#16a34a" stroke-width="4"/>
+  <circle cx="306" cy="251" r="7" fill="#16a34a"/>
+  <path d="M330 218 L306 251" stroke="#f97316" stroke-width="6"/>
+  <path d="M330 218 L330 42" stroke="#2563eb" stroke-width="3" stroke-dasharray="9 7"/>
+  <path d="M306 251 L306 309" stroke="#16a34a" stroke-width="3"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a" font-weight="700">
+    <text x="341" y="215" font-size="22" fill="#2563eb">O</text>
+    <text x="278" y="247" font-size="22" fill="#15803d">I</text>
+    <text x="314" y="239" font-size="20" fill="#f97316">d</text>
+    <text x="343" y="129" font-size="22" fill="#2563eb">R</text>
+    <text x="315" y="286" font-size="22" fill="#15803d">r</text>
+    <text x="535" y="155" font-size="27" fill="#7c3aed">OI² = R(R − 2r)</text>
+    <text x="535" y="194" font-size="20" fill="#475569">d = OI</text>
+    <text x="535" y="232" font-size="18" fill="#475569">O and I coincide only</text>
+    <text x="535" y="258" font-size="18" fill="#475569">for an equilateral triangle.</text>
+  </g>
+</svg>

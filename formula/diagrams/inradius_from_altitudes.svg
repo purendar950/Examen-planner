@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420" role="img" aria-labelledby="title desc">
+  <title id="title">Triangle inradius related to its three altitudes</title>
+  <desc id="desc">A triangle contains an incircle with radius r. Dashed perpendiculars label the three altitudes h1, h2, and h3 used in the reciprocal inradius relation.</desc>
+  <rect width="800" height="420" rx="24" fill="#f8fafc"/>
+  <path d="M390 48 L95 350 L705 350 Z" fill="#dbeafe" fill-opacity=".55" stroke="#2563eb" stroke-width="5"/>
+  <circle cx="392" cy="244" r="102" fill="#dcfce7" fill-opacity=".58" stroke="#16a34a" stroke-width="5"/>
+  <circle cx="392" cy="244" r="7" fill="#0f172a"/>
+  <path d="M392 244 V350" stroke="#f97316" stroke-width="5"/>
+  <path d="M390 48 V350 M95 350 L540 181 M705 350 L240 198" fill="none" stroke="#7c3aed" stroke-width="3.5" stroke-dasharray="10 8"/>
+  <path d="M382 340 H402 V350 M528 185 L535 204 L553 197 M229 203 L239 220 L256 210" fill="none" stroke="#7c3aed" stroke-width="3"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a" font-weight="700">
+    <text x="408" y="300" font-size="25" fill="#f97316">r</text>
+    <text x="402" y="238" font-size="22">I</text>
+    <text x="415" y="136" font-size="22" fill="#7c3aed">h₁</text>
+    <text x="495" y="218" font-size="22" fill="#7c3aed">h₂</text>
+    <text x="265" y="222" font-size="22" fill="#7c3aed">h₃</text>
+    <text x="96" y="47" font-size="25" fill="#0f766e">1/r = 1/h₁ + 1/h₂ + 1/h₃</text>
+    <text x="96" y="80" font-size="18" fill="#475569">Each altitude uses the same triangle area</text>
+  </g>
+</svg>
