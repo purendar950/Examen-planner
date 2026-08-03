@@ -1208,6 +1208,7 @@
       el.innerHTML = isNotebookMode
         ? notesStageMessageHtml('video', 'Play a video to create notes', 'Start a lecture, then generate notes from its captions.')
         : '<div class="ai-muted">Play a video first.</div>';
+      setSetupCollapsed(false);       // nothing was generated — leave the controls reachable
       return;
     }
     el.innerHTML = isNotebookMode
@@ -1242,6 +1243,30 @@
   // own row inside the notes. The buttons keep their bound click handlers when
   // moved. Falls back to leaving them in place if the slot isn't present (e.g.
   // the Quiz/Cards tabs, which have no notes controls row).
+  /* ── Notes setup disclosure ──────────────────────────────────────────────
+     The rows above the notebook used to stay expanded forever: the
+     provider/model/language selects plus mode/style/Generate — roughly 150px
+     of chrome that is only needed while setting a note UP. Because the panel's
+     height is pinned to the player column (--yt-parallel-stage-height), every
+     pixel reclaimed here becomes a visible line of notes rather than a taller
+     card. So once a result is on screen the setup controls tuck behind the
+     "Setup" button, and they come back on demand or for the next note.
+     The hiding itself is CSS and desktop-only: the mobile notebook already has
+     its own single-line head and bottom-popover pattern. */
+  function isSetupCollapsed() {
+    var p = document.getElementById('ai-study-panel');
+    return !!(p && p.classList.contains('ai-setup-collapsed'));
+  }
+  function setSetupCollapsed(collapsed) {
+    var p = document.getElementById('ai-study-panel');
+    if (p) p.classList.toggle('ai-setup-collapsed', !!collapsed);
+    var b = document.getElementById('ai-setup-toggle');
+    if (b) {
+      b.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      b.title = collapsed ? 'Show the notes setup controls' : 'Hide the notes setup controls';
+    }
+  }
+
   function relocateNoteActions(box) {
     var slot = document.getElementById('ai-note-actions');
     if (!slot || !box) return;
@@ -2144,6 +2169,13 @@
     var msb = document.getElementById('ai-mcq-share');
     if (msb) msb.onclick = function () { shareMcqTest(); };
     relocateNoteActions(box);         // lift the action buttons onto the Generate controls line
+    // The "provider · model · cached · language" caption repeats what the head
+    // selects already show, so CSS hides the bare meta-bar on desktop. Keep the
+    // exact provider/model/freshness reachable as a tooltip on the panel title.
+    var capEl = box.querySelector('.ai-meta-bar .ai-muted');
+    var headTitle = document.querySelector('#ai-study-panel .ai-head .ai-title');
+    if (capEl && headTitle) headTitle.title = capEl.textContent;
+    setSetupCollapsed(true);          // notes are on screen — hand their space to the paper
     // As soon as MCQ notes are generated, make them available as a quiz in the
     // Quiz tab — no "Take as Test" needed. Keyed by the current video; deduped
     // so re-renders of the same set don't re-publish.
@@ -3599,6 +3631,10 @@
         checkLangs(modeSel.value, 25, false);
       };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
+      // A freshly built body has no notes yet, so the setup controls start open.
+      setSetupCollapsed(false);
+      var setupBtn = document.getElementById('ai-setup-toggle');
+      if (setupBtn) setupBtn.onclick = function () { setSetupCollapsed(!isSetupCollapsed()); };
       // (The old "Course" button is gone — the Course Content / Generate Notes
       // switcher in the panel header handles returning to the course view.)
       // A saved job takes precedence over auto-opening a completed language cache:
@@ -3875,6 +3911,12 @@
   }
   function panelHtml() {
     return '<div class="ai-head"><button type="button" class="ai-mobile-back" id="ai-notes-back" aria-label="Back to course content" title="Back to course content">←</button><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">Generate Notes</span>' +
+      // Reveals/hides the setup controls (these selects plus mode/style/
+      // Generate). It lives in the head rather than the controls row because
+      // the head is a single-line scroller with room to spare, while the
+      // controls row wraps to a third line on a narrow panel. Notes-only:
+      // CSS hides it on the Quiz/Cards/Tutor tabs and on mobile.
+      '<button type="button" class="ai-btn sec ai-setup-toggle" id="ai-setup-toggle" aria-expanded="true" title="Hide the notes setup controls">\u2699 Setup</button>' +
       '<select id="ai-provider" title="AI provider" style="margin-left:auto"><option value="">Auto</option></select>' +
       '<select id="ai-omni-provider" title="OmniRoute provider" style="display:none"></select>' +
       '<select id="ai-model" title="AI model" style="display:none"></select>' +
