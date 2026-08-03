@@ -33,9 +33,19 @@
       '--ez-formula-muted:' + palette.muted + ';' +
       '--ez-formula-accent:#00C896;' +
       '--ez-formula-soft:' + palette.soft + ';' +
+      '--bg:' + palette.bg + ';' +
+      '--card:' + palette.card + ';' +
+      '--accent:#00C896;' +
+      '--accent2:#34D6AE;' +
+      '--text:' + palette.text + ';' +
+      '--muted:' + palette.muted + ';' +
+      '--border:' + palette.border + ';' +
     '}' +
     'html{background:var(--ez-formula-bg)!important;color:var(--ez-formula-text)!important;color-scheme:' + theme + ';}' +
     'body{background:var(--ez-formula-bg)!important;color:var(--ez-formula-text)!important;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif!important;}' +
+    '.topnav{background:' + (theme === 'dark' ? 'rgba(10,13,18,.94)' : 'rgba(255,255,255,.94)') + '!important;border-color:var(--ez-formula-border)!important;}' +
+    'body :is(.chapter-card-title,.section-card-title,.formula-card-title,.chapter-card-count,.formula-search-title,.formula-result-title){color:var(--ez-formula-text)!important;}' +
+    'body :is(.topbar,.crumb,.formula-card-note,.formula-search-help,.formula-search-status){color:var(--ez-formula-muted)!important;}' +
     'body :is(h1,h2,h3,h4,h5,h6,strong,b){color:var(--ez-formula-text)!important;}' +
     'body :is(p,small,label,li,td,th){color:var(--ez-formula-text);}' +
     'body a{color:var(--ez-formula-accent)!important;}' +
