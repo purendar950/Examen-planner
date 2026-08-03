@@ -125,6 +125,52 @@ img.diagram{max-width:100%;border-radius:8px;margin:8px 0;box-shadow:0 2px 8px r
   .topnav{margin:-12px -12px 12px;padding:8px 12px}
 }
 </style>
+
+<style>
+/* Fast formula search — scoped to the standalone library */
+.formula-search{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;margin:16px 0 20px;box-shadow:0 4px 18px rgba(0,0,0,.06)}
+.formula-search-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}
+.formula-search-title{font-size:1rem;font-weight:800;color:var(--text)}
+.formula-search-help{color:var(--muted);font-size:.78rem;margin-top:2px}
+.formula-search-count{flex:0 0 auto;background:rgba(0,200,150,.11);border:1px solid rgba(0,200,150,.24);border-radius:999px;color:var(--accent);font-size:.72rem;font-weight:800;padding:4px 9px}
+.formula-search-fields{display:grid;grid-template-columns:minmax(220px,1.6fr) minmax(150px,.8fr) minmax(150px,.8fr) auto;gap:10px;align-items:end}
+.formula-search-field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.formula-search-field label{color:var(--muted);font-size:.68rem;font-weight:800;letter-spacing:.05em;text-transform:uppercase}
+.formula-search-input-wrap{position:relative}
+.formula-search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:.9rem;pointer-events:none}
+.formula-search :is(input,select){width:100%;height:40px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--text);font:inherit;font-size:.84rem;padding:0 11px;outline:none;transition:border-color .15s,box-shadow .15s}
+.formula-search input{padding-left:34px}
+.formula-search :is(input,select):focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,200,150,.13)}
+.formula-search :is(input,select):disabled{cursor:not-allowed;opacity:.55}
+.formula-search-clear{height:40px;background:var(--bg);border:1px solid var(--border);border-radius:9px;color:var(--muted);cursor:pointer;font-size:.78rem;font-weight:800;padding:0 14px;transition:border-color .15s,color .15s}
+.formula-search-clear:hover{border-color:var(--accent);color:var(--accent)}
+.formula-search-status{display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:.78rem;margin-top:12px;min-height:20px}
+.formula-search-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px}
+.formula-search-result{display:block;width:100%;min-width:0;text-align:left;background:var(--bg);border:1px solid var(--border);border-radius:11px;color:var(--text);cursor:pointer;padding:12px;transition:transform .15s,border-color .15s,box-shadow .15s}
+.formula-search-result:hover{transform:translateY(-1px);border-color:var(--accent);box-shadow:0 6px 16px rgba(0,0,0,.08)}
+.formula-result-title{display:block;color:var(--text);font-size:.86rem;font-weight:800;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.formula-result-meta{display:block;color:var(--accent);font-size:.68rem;font-weight:800;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.formula-result-snippet{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;color:var(--muted);font-size:.73rem;line-height:1.45;margin-top:6px}
+.formula-search-empty{grid-column:1/-1;text-align:center;background:var(--bg);border:1px dashed var(--border);border-radius:11px;color:var(--muted);font-size:.82rem;padding:24px}
+.formula-card.formula-search-target{animation:formulaTarget 1.8s ease;box-shadow:0 0 0 3px rgba(0,200,150,.22),0 12px 28px rgba(0,0,0,.12)}
+@keyframes formulaTarget{0%,45%{border-color:var(--accent)}100%{border-color:var(--border)}}
+@media (max-width:780px){
+  .formula-search-fields{grid-template-columns:1fr 1fr}
+  .formula-search-field:first-child{grid-column:1/-1}
+  .formula-search-clear{width:100%}
+}
+@media (max-width:520px){
+  .formula-search{padding:13px;margin-top:12px}
+  .formula-search-head{align-items:center}
+  .formula-search-fields{grid-template-columns:1fr}
+  .formula-search-field:first-child{grid-column:auto}
+  .formula-search-results{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  .formula-search-result,.formula-search :is(input,select),.formula-search-clear{transition:none}
+  .formula-card.formula-search-target{animation:none}
+}
+</style>
 </head>
 <body>
 
@@ -136,6 +182,36 @@ img.diagram{max-width:100%;border-radius:8px;margin:8px 0;box-shadow:0 2px 8px r
 <div id="home" class="view active">
 <h1>📐 Calc Master — All Formulas (Free)</h1>
 <div class="topbar">Extracted from public Supabase API · 20 chapters · 84 topics · 907 formulas · For personal study only</div>
+
+<div class="formula-search" id="formulaSearchPanel" role="search" aria-label="Search formula library">
+  <div class="formula-search-head">
+    <div>
+      <div class="formula-search-title">Find the right formula</div>
+      <div class="formula-search-help">Search formula names, equations, notes, or study tricks.</div>
+    </div>
+    <span class="formula-search-count">907 formulas</span>
+  </div>
+  <div class="formula-search-fields">
+    <div class="formula-search-field">
+      <label for="formulaSearchInput">Search</label>
+      <div class="formula-search-input-wrap">
+        <span class="formula-search-icon" aria-hidden="true">⌕</span>
+        <input id="formulaSearchInput" type="search" autocomplete="off" placeholder="e.g. compound interest, triangle area…">
+      </div>
+    </div>
+    <div class="formula-search-field">
+      <label for="formulaChapterFilter">Chapter</label>
+      <select id="formulaChapterFilter"><option value="">All chapters</option></select>
+    </div>
+    <div class="formula-search-field">
+      <label for="formulaTopicFilter">Topic</label>
+      <select id="formulaTopicFilter" disabled><option value="">All topics</option></select>
+    </div>
+    <button class="formula-search-clear" id="formulaSearchClear" type="button">Clear</button>
+  </div>
+  <div class="formula-search-status" id="formulaSearchStatus" aria-live="polite">Browse chapters below or start typing to search.</div>
+  <div class="formula-search-results" id="formulaSearchResults" hidden></div>
+</div>
 <div class="chapter-grid">
 
     <div class="chapter-card card" onclick="location.hash='#ch-6'">
@@ -9856,6 +9932,222 @@ M834 80h400000v40h-400000z'/></svg></span></span></span><span class="vlist-s">�
   var chapterTitles = {"6": "Geometry (Triangles)", "19": "Geometry ( Circles)", "27": "Coordinate Geometry", "2": "Percentage & Profit-Loss", "10": "Number System", "5": "Time, Speed & Distance", "3": "Simple & Compound Interest", "1": "Trigonometry", "7": "Algebra", "8": "Problems on Ages", "9": "Average", "4": "Ratio & Proportion", "11": "LCM & HCF", "12": "Surds & Indices", "13": "Probability", "14": "Permutations & Combinations", "15": "Race Problems", "24": "Mensuration 2D", "16": "Mensuration", "21": "Time and Work"};
   var sectionTitles = {"16": "Basic Ratio", "78": "Basics ( Time and Work)", "57": "Race Basics", "77": "Cylinder", "60": "Triangles", "63": "Circles ( Page 1)", "1": "Basic Ratios", "20": "Basic Formulas", "84": "Triangles General", "29": "Algebraic Identities", "33": "Core Formulas", "90": "Basic Formulas", "36": "Basic Average", "7": "Basic Percentage", "39": "Types of Numbers", "43": "HCF Methods", "47": "Laws of Indices", "50": "Basic Probability", "12": "Simple Interest", "53": "Factorial & Basics", "44": "LCM Methods", "30": "Special Identities", "8": "Percentage Change", "34": "Ratio Based Ages", "58": "Race Tricks", "59": "Compound Formulae", "79": "IMPORTANT", "41": "Remainders", "64": "Circles (Page-2)", "51": "Compound Events", "61": "Triangles (Centres)", "13": "Compound Interest", "37": "Weighted Average", "17": "Proportion", "48": "Surds", "85": "Triangles Special", "2": "Standard Angles", "21": "Trains", "91": "Area, co linearity", "54": "Permutations", "81": "Cone", "92": "Lines and Slope", "3": "Pythagorean Identities", "9": "Profit & Loss", "18": "Mixture & Alligation", "22": "Boats & Streams", "35": "SSC Tricks", "38": "Average Shortcuts", "45": "HCF-LCM Relation", "49": "SSC Tricks", "52": "Cards & Dice", "55": "Combinations", "62": "Triangles (Misc.)", "66": "Circles (Page - 3)", "42": "Factors", "67": "Identities ( 3 Variables )", "75": "Simple Interest ( hindi)", "80": "Advanced concepts", "82": "Cube and Cuboid", "87": "Circle, sector, segment", "40": "Unit Digit", "68": "Special Results", "88": "Rectangle square Path", "83": "Sphere and Hemisphere", "23": "Time & Work", "4": "Max & Min Values", "19": "Partnership", "69": "Triangles ( Hindi )", "76": "Compound Interest ( hindi)", "11": "Profit & Loss (Adv.)", "56": "SSC Applications", "46": "Word Problems", "10": "Discount & MP", "31": "Linear Equations", "32": "Quadratic Equations", "70": "Tri Centres ( Hindi)", "89": "Trapezium, Rhom, Parallelogram", "24": "Pipes & Cisterns", "5": "Heights & Distances", "6": "SSC Special Tricks", "72": "Per change ( hindi)", "71": "Tri (Misc) Hindi", "74": "Discount  ( Hindi)", "73": "Profit and Loss"};
 
+  var pendingFormulaId = '';
+  var formulaIndex = [];
+
+  function cleanText(node) {
+    return node ? node.textContent.replace(/\s+/g, ' ').trim() : '';
+  }
+
+  function truncateText(value, max) {
+    if (!value || value.length <= max) return value || '';
+    return value.slice(0, max - 1).trim() + '…';
+  }
+
+  function revealPendingFormula() {
+    if (!pendingFormulaId) return;
+    var target = document.getElementById(pendingFormulaId);
+    pendingFormulaId = '';
+    if (!target) return;
+    document.querySelectorAll('.formula-search-target').forEach(function(card) {
+      card.classList.remove('formula-search-target');
+    });
+    target.classList.add('formula-search-target');
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(function() {
+      target.classList.remove('formula-search-target');
+    }, 2200);
+  }
+
+  function initFormulaSearch() {
+    var panel = document.getElementById('formulaSearchPanel');
+    var input = document.getElementById('formulaSearchInput');
+    var chapterFilter = document.getElementById('formulaChapterFilter');
+    var topicFilter = document.getElementById('formulaTopicFilter');
+    var clearButton = document.getElementById('formulaSearchClear');
+    var status = document.getElementById('formulaSearchStatus');
+    var results = document.getElementById('formulaSearchResults');
+    var chapterGrid = document.querySelector('#home .chapter-grid');
+    var homeHint = document.querySelector('#home > p');
+    if (!panel || !input || !chapterFilter || !topicFilter || !results) return;
+
+    var sectionChapterMap = {};
+    var chapterOrder = [];
+
+    document.querySelectorAll('#home .chapter-card').forEach(function(card) {
+      var match = (card.getAttribute('onclick') || '').match(/#(ch-\d+)/);
+      if (match) chapterOrder.push(match[1]);
+    });
+
+    document.querySelectorAll('.view[id^="ch-"]').forEach(function(chapterView) {
+      chapterView.querySelectorAll('.section-card').forEach(function(card) {
+        var match = (card.getAttribute('onclick') || '').match(/#(sec-\d+)/);
+        if (match) sectionChapterMap[match[1]] = chapterView.id;
+      });
+    });
+
+    document.querySelectorAll('.view[id^="sec-"]').forEach(function(sectionView) {
+      var sectionId = sectionView.id;
+      var chapterId = sectionChapterMap[sectionId] || '';
+      var chapterName = chapterTitles[chapterId.slice(3)] || 'Formula library';
+      var topicName = sectionTitles[sectionId.slice(4)] || 'Topic';
+
+      sectionView.querySelectorAll('.formula-card').forEach(function(card, position) {
+        var title = cleanText(card.querySelector('.formula-card-title')) || 'Formula ' + (position + 1);
+        var note = cleanText(card.querySelector('.formula-card-note'));
+        var trick = cleanText(card.querySelector('.formula-card-trick'));
+        var formulaText = cleanText(card.querySelector('.formula-card-formula'));
+        var cardId = 'formula-' + sectionId.slice(4) + '-' + (position + 1);
+        card.id = cardId;
+        formulaIndex.push({
+          cardId: cardId,
+          sectionId: sectionId,
+          chapterId: chapterId,
+          chapterName: chapterName,
+          topicName: topicName,
+          title: title,
+          snippet: note || trick || formulaText,
+          searchText: [chapterName, topicName, title, formulaText, note, trick].join(' ').toLocaleLowerCase()
+        });
+      });
+    });
+
+    chapterOrder.forEach(function(chapterId) {
+      var option = document.createElement('option');
+      option.value = chapterId;
+      option.textContent = chapterTitles[chapterId.slice(3)] || chapterId;
+      chapterFilter.appendChild(option);
+    });
+
+    function availableTopics(chapterId) {
+      var topics = [];
+      Object.keys(sectionChapterMap).forEach(function(sectionId) {
+        if (!chapterId || sectionChapterMap[sectionId] === chapterId) {
+          topics.push({ id: sectionId, name: sectionTitles[sectionId.slice(4)] || 'Topic' });
+        }
+      });
+      topics.sort(function(a, b) { return a.name.localeCompare(b.name); });
+      return topics;
+    }
+
+    function updateTopicOptions() {
+      var selected = topicFilter.value;
+      var topics = availableTopics(chapterFilter.value);
+      topicFilter.innerHTML = '<option value="">All topics</option>';
+      topics.forEach(function(topic) {
+        var option = document.createElement('option');
+        option.value = topic.id;
+        option.textContent = topic.name;
+        topicFilter.appendChild(option);
+      });
+      topicFilter.disabled = topics.length === 0;
+      if (topics.some(function(topic) { return topic.id === selected; })) {
+        topicFilter.value = selected;
+      }
+    }
+
+    function setBrowseVisible(visible) {
+      if (chapterGrid) chapterGrid.style.display = visible ? '' : 'none';
+      if (homeHint) homeHint.style.display = visible ? '' : 'none';
+    }
+
+    function runSearch() {
+      var query = input.value.trim().toLocaleLowerCase();
+      var terms = query.split(/\s+/).filter(Boolean);
+      var chapterId = chapterFilter.value;
+      var sectionId = topicFilter.value;
+      var active = terms.length > 0 || chapterId || sectionId;
+
+      if (!active) {
+        results.hidden = true;
+        results.textContent = '';
+        status.textContent = 'Browse chapters below or start typing to search.';
+        setBrowseVisible(true);
+        return;
+      }
+
+      var matches = formulaIndex.filter(function(item) {
+        if (chapterId && item.chapterId !== chapterId) return false;
+        if (sectionId && item.sectionId !== sectionId) return false;
+        return terms.every(function(term) { return item.searchText.indexOf(term) !== -1; });
+      });
+
+      setBrowseVisible(false);
+      results.hidden = false;
+      results.textContent = '';
+
+      if (!matches.length) {
+        status.textContent = 'No matching formulas';
+        var empty = document.createElement('div');
+        empty.className = 'formula-search-empty';
+        empty.textContent = 'No formulas matched. Try fewer words or clear a filter.';
+        results.appendChild(empty);
+        return;
+      }
+
+      var limit = 80;
+      var shown = matches.slice(0, limit);
+      status.textContent = matches.length + (matches.length === 1 ? ' formula found' : ' formulas found') +
+        (matches.length > limit ? ' · showing first ' + limit : '');
+      var fragment = document.createDocumentFragment();
+
+      shown.forEach(function(item) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'formula-search-result';
+        button.dataset.formulaId = item.cardId;
+        button.innerHTML = '<span class="formula-result-title"></span>' +
+          '<span class="formula-result-meta"></span>' +
+          '<span class="formula-result-snippet"></span>';
+        button.querySelector('.formula-result-title').textContent = truncateText(item.title, 90);
+        button.querySelector('.formula-result-meta').textContent = item.chapterName + ' › ' + item.topicName;
+        button.querySelector('.formula-result-snippet').textContent = truncateText(item.snippet, 180);
+        fragment.appendChild(button);
+      });
+      results.appendChild(fragment);
+    }
+
+    var searchTimer = 0;
+    input.addEventListener('input', function() {
+      window.clearTimeout(searchTimer);
+      searchTimer = window.setTimeout(runSearch, 100);
+    });
+    chapterFilter.addEventListener('change', function() {
+      updateTopicOptions();
+      runSearch();
+    });
+    topicFilter.addEventListener('change', runSearch);
+    clearButton.addEventListener('click', function() {
+      input.value = '';
+      chapterFilter.value = '';
+      updateTopicOptions();
+      topicFilter.value = '';
+      runSearch();
+      input.focus();
+    });
+    results.addEventListener('click', function(event) {
+      var button = event.target.closest('.formula-search-result');
+      if (!button) return;
+      var item = formulaIndex.find(function(entry) { return entry.cardId === button.dataset.formulaId; });
+      if (!item) return;
+      pendingFormulaId = item.cardId;
+      if (location.hash === '#' + item.sectionId) {
+        show(item.sectionId, false);
+      } else {
+        location.hash = '#' + item.sectionId;
+      }
+    });
+    document.addEventListener('keydown', function(event) {
+      if (event.key === '/' && !/input|select|textarea/i.test(document.activeElement.tagName)) {
+        event.preventDefault();
+        if (!document.getElementById('home').classList.contains('active')) location.hash = '#home';
+        input.focus();
+      }
+    });
+
+    updateTopicOptions();
+  }
+
   function show(id, push) {
     if (push) {
       stack.push(id);
@@ -9879,6 +10171,7 @@ M834 80h400000v40h-400000z'/></svg></span></span></span><span class="vlist-s">�
       backBtn.style.visibility = 'visible';
     }
     window.scrollTo(0, 0);
+    if (pendingFormulaId) window.setTimeout(revealPendingFormula, 80);
   }
 
   function route() {
@@ -9895,6 +10188,7 @@ M834 80h400000v40h-400000z'/></svg></span></span></span><span class="vlist-s">�
     route();
   };
 
+  initFormulaSearch();
   window.addEventListener('hashchange', route);
   route();
 })();
