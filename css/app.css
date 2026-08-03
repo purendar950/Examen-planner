@@ -7417,3 +7417,80 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 #page-youtube .ai-switch-icon { width: 27px; height: 27px; border-radius: 9px; }
 #page-youtube .ai-switch-copy strong { font-size: .67rem; }
 #page-youtube .ai-switch-badge { padding: .14rem .32rem; font-size: .45rem; }
+
+
+/* ═══════════════════════════════════════════════
+   NOTES PANEL — COMPACT CHROME
+   The Generate Notes view stacked six control rows above the paper (~310px).
+   The panel's height is pinned to the player column via
+   --yt-parallel-stage-height, so that chrome was taken straight out of the
+   readable notes area rather than making the card taller. Everything below is
+   desktop-only (min-width:841px): the mobile notebook already has its own
+   single-line head, hidden view-toggle and bottom-popover meta bar.
+═══════════════════════════════════════════════ */
+@media (min-width: 841px) {
+  /* NOTE: the head is deliberately left wrapping. It is styled as a horizontal
+     scroller (overflow-x:auto + hidden scrollbar, app.css ~4458) and inherits
+     flex-wrap:wrap from the JS-injected base sheet (ai-tutor.js:591), so the
+     selects break onto a second line. Forcing nowrap does shave ~32px, but it
+     pushes the model and language selects off-screen behind a scrollbar that is
+     hidden — unreachable controls. The collapse below removes those rows
+     entirely while reading, so the second line now only ever appears while the
+     user has Setup deliberately open, which is exactly when they need it. */
+
+  /* ── Row 6: the "provider · model · cached · language" caption.
+     relocateNoteActions() already tags the bar .ai-meta-bar-bare once only the
+     muted caption is left — its own comment says "so CSS can hide it" — but the
+     rule was never written. The text now lives on the panel title's tooltip. ── */
+  /* !important is required: renderNotesResult() writes the bar with an inline
+     style="display:flex" (ai-tutor.js:2107), which would otherwise win. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-sub .ai-meta-bar.ai-meta-bar-bare {
+    display: none !important;
+  }
+  #page-youtube .ai-head .ai-title[title] { cursor: help; }
+
+  /* ── Row 5: a single cached language that is also the selected one states
+     nothing and cannot be clicked through to anything. Keep the chip row only
+     when there is another language to switch to. ── */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-langbar:has(.ai-chips > .ai-chip:only-child.on) {
+    display: none;
+  }
+
+  /* ── Rows 2-3: setup controls collapse once a result is on screen. ── */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed .ai-head select,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed #ai-notes-mode,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed #ai-notes-style,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed #ai-notes-go {
+    display: none !important;
+  }
+
+  /* With setup collapsed the action buttons share the row with the Setup
+     toggle. While setup is EXPANDED they keep their own full-width line
+     (app.css ~4528): letting them flow next to mode/style/Generate made the
+     row wrap to three lines on a narrow panel — worse than the dedicated line. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed .ai-notes-controls > .ai-note-actions {
+    flex: 0 1 auto;
+    margin-top: 0;
+  }
+}
+
+/* Setup toggle — a compact head control sitting just after the panel title. */
+#page-youtube .ai-head .ai-btn#ai-setup-toggle {
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: .16rem .48rem !important;
+  font-size: .57rem !important;
+  font-weight: 800;
+  white-space: nowrap;
+}
+#page-youtube .ai-head .ai-btn#ai-setup-toggle[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+/* Only the Notes tab has setup controls to disclose. */
+#page-youtube #ai-study-panel:not(.notes-tab-active) #ai-setup-toggle { display: none; }
+/* Mobile keeps every control visible, so the disclosure would be a dead button. */
+@media (max-width: 840px) {
+  #page-youtube #ai-setup-toggle { display: none !important; }
+}
