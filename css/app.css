@@ -7456,6 +7456,19 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
     display: none;
   }
 
+  /* Pin the Setup toggle to one position: immediately after the panel title.
+     .ai-title is flex: 1 0 auto (app.css ~4478), and the selects each carry
+     margin-left:auto from the injected base sheet. Auto margins absorb free
+     space before flex-grow, so with setup EXPANDED the selects held the slack
+     and the button sat by the title — but COLLAPSED hides those selects, the
+     title grew instead, and the button was shoved to the right edge: it moved
+     95px at a 400px panel and 292px at 550px. Anchoring it to a non-growing
+     title keeps it in the same place in both states and at every width. */
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage .ai-head .ai-title {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
   /* ── Rows 2-3: setup controls collapse once a result is on screen. ── */
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed .ai-head select,
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed #ai-notes-mode,
