@@ -1,0 +1,29 @@
+<div class="page" id="page-formula">
+  <style>
+  /* ════════ CALCULATION & FORMULA TAB — scoped styles (pf- prefix) ════════ */
+  #page-formula .pf-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:1.1rem; }
+  #page-formula .pf-title { margin:0; font-size:1.25rem; font-weight:800; display:flex; align-items:center; gap:8px; }
+  #page-formula .pf-sub { font-size:.78rem; color:var(--muted); margin-top:2px; }
+  #page-formula .pf-btn { padding:.5rem .85rem; background:var(--surface); border:1px solid var(--border); border-radius:9px; color:var(--text); font-size:.82rem; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:border-color .18s, color .18s; }
+  #page-formula .pf-btn:hover { border-color:var(--accent); color:var(--accent); }
+  #page-formula .pf-frame-wrap { position:relative; width:100%; }
+  #page-formula .pf-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; font-size:.88rem; color:var(--muted); background:var(--surface); border:1px solid var(--border); border-radius:12px; z-index:1; }
+  #page-formula iframe.pf-frame { width:100%; height:72vh; min-height:480px; border:1px solid var(--border); border-radius:12px; background:#fff; display:block; }
+  @media (max-width:600px) {
+    #page-formula iframe.pf-frame { height:78vh; min-height:420px; }
+  }
+  </style>
+
+  <div class="pf-head">
+    <div>
+      <h2 class="pf-title">📐 Calculation &amp; Formula</h2>
+      <p class="pf-sub">907 formulas · 20 chapters · 84 topics · free for all</p>
+    </div>
+    <a class="pf-btn" href="formula/index.html" target="_blank" rel="noopener">Open full page ↗</a>
+  </div>
+
+  <div class="pf-frame-wrap">
+    <div class="pf-loading" id="pf-loading">⏳ Loading formulas…</div>
+    <iframe class="pf-frame" id="formula-frame" title="Calculation and Formula" loading="lazy"></iframe>
+  </div>
+</div>

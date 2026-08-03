@@ -201,6 +201,9 @@
       <div class="nav-tab" onclick="switchPage('saved')" id="nav-saved" title="Quiz">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3h10l3 3v15H7z"></path><path d="M17 3v4h4M10 12h7M10 16h5"></path></svg></span><span class="nav-tab-label"> Quiz</span>
       </div>
+      <div class="nav-tab" onclick="switchPage('formula')" id="nav-formula" title="Calculation & Formula">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 7V5a1 1 0 0 0-1-1H6.5a.5.5 0 0 0-.4.8l7.8 9.2a1 1 0 0 1 0 1.2l-7.8 9.2a.5.5 0 0 0 .4.8H17a1 1 0 0 0 1-1v-2"></path></svg></span><span class="nav-tab-label"> Formula</span>
+      </div>
     </div>
     <!-- Saved courses are not listed in the rail: the library grows without a
          bound and pushed the navigation and the account dock off screen.
@@ -290,6 +293,8 @@
     <div data-include="pages/analysis.html"></div>
     <!-- ═══ QUIZ PAGE (Attempt Quiz + Saved sub-tabs, built from saved questions) ═══ -->
     <div data-include="pages/saved.html"></div>
+    <!-- ═══ CALCULATION & FORMULA PAGE (lazy-loaded formula/index.html in an iframe) ═══ -->
+    <div data-include="pages/formula.html"></div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
@@ -556,6 +561,7 @@
 <script defer src="js/playlist-quizzes.js"></script>
 <script defer src="js/tabs/saved-questions.js"></script>
 <script defer src="js/tabs/profile.js"></script>
+<script defer src="js/tabs/formula.js"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
 <script defer src="js/features/responsive.js"></script>
 <script defer src="js/features/preppath-branding.js"></script>

@@ -6,7 +6,7 @@ import tailwindcss from '@tailwindcss/vite';
 
 const rootDir = resolve(import.meta.dirname);
 const outDir = resolve(rootDir, 'dist');
-const legacyDirectories = ['css', 'js', 'pages', 'demo', 'assets'];
+const legacyDirectories = ['css', 'js', 'pages', 'demo', 'assets', 'formula'];
 // test-engine.html is a self-contained page (inline scripts + CDN + relative
 // legacy js). It is copied as-is rather than added as a Vite entry, because Vite
 // would try to bundle its <script src="js/supabase-config.js"> (an optional file
