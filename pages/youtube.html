@@ -1,15 +1,36 @@
     <div class="page" id="page-youtube">
       <header class="yt-workspace-head">
-        <div class="yt-workspace-copy">
-          <span class="yt-workspace-eyebrow">Focused learning workspace</span>
-          <h2><span aria-hidden="true">▶</span> YouTube Study</h2>
-          <p>Watch lectures, capture key moments, and turn videos into study material.</p>
+        <div class="yt-workspace-lead">
+          <span class="yt-workspace-badge" aria-hidden="true">▶</span>
+          <div class="yt-workspace-copy">
+            <span class="yt-workspace-eyebrow">Focused learning workspace</span>
+            <h2>YouTube Study</h2>
+            <p>Watch lectures, capture key moments, and turn videos into study material.</p>
+          </div>
         </div>
+        <ol class="yt-flow" aria-label="How the YouTube workspace works">
+          <li>
+            <span class="yt-flow-num" aria-hidden="true">1</span>
+            <span class="yt-flow-copy"><strong>Paste a link</strong><small>Video or playlist</small></span>
+          </li>
+          <li>
+            <span class="yt-flow-num" aria-hidden="true">2</span>
+            <span class="yt-flow-copy"><strong>Watch &amp; save</strong><small>Moments &amp; speed</small></span>
+          </li>
+          <li>
+            <span class="yt-flow-num" aria-hidden="true">3</span>
+            <span class="yt-flow-copy"><strong>Generate</strong><small>Notes · quiz · cards</small></span>
+          </li>
+        </ol>
       </header>
 
       <div class="active" id="yt-sub-view-watch">
+      <div class="yt-setup-row">
       <section class="yt-launch-card" aria-label="Open a YouTube lesson">
-        <label class="yt-launch-label" for="yt-url-input">Start a lesson</label>
+        <div class="yt-launch-top">
+          <label class="yt-launch-label" for="yt-url-input">Start a lesson</label>
+          <span class="yt-launch-hint">Playlists load their full queue</span>
+        </div>
         <div class="yt-input-bar">
           <span class="yt-input-icon" aria-hidden="true">▶</span>
           <input type="text" class="yt-url-input" id="yt-url-input"
@@ -42,14 +63,16 @@
           <div class="yt-course-sub" id="yt-course-sub"></div>
         </div>
       </div>
+      </div><!-- /yt-setup-row -->
 
       <div class="yt-layout">
         <!-- Left: player, controls, and chapter links -->
         <div class="yt-player-column">
           <div class="yt-player-wrap" id="yt-player-wrap">
             <div class="yt-placeholder" id="yt-placeholder">
-              <div class="yt-placeholder-icon">▶</div>
-              <p>URL paste karo aur Play karo, ya neeche Chapter Links se koi video open karo</p>
+              <div class="yt-placeholder-icon" aria-hidden="true">▶</div>
+              <strong class="yt-placeholder-title">Ready when you are</strong>
+              <p>URL paste karke Play karo, ya neeche Chapter Links se koi video open karo.</p>
             </div>
             <div id="yt-player" style="display:none;width:100%;height:100%;"></div>
             <!-- Tap-to-play overlay: shown after auto-restore on refresh, since
@@ -64,6 +87,10 @@
               </div>
             </div>
           </div>
+          <!-- Player console: the now-playing row, playback tools and the
+               injected Save Moment toolbar share one surface that stays docked
+               to the video instead of three separate floating bars. -->
+          <div class="yt-console" id="yt-console">
           <div class="yt-meta-bar" id="yt-meta-bar" style="display:none">
             <div class="yt-now-playing">
               <span class="yt-live-dot" aria-hidden="true"></span>
@@ -105,6 +132,9 @@
             </div>
             <button class="yt-pip-btn" onclick="ytPiP()" title="Picture in Picture"><span aria-hidden="true">▣</span> PiP</button>
           </div>
+          <!-- #ss-toolbar (Save Moment / Gallery / This Video) is injected here
+               by yt-screenshots.js as the next sibling of #yt-speed-bar. -->
+          </div><!-- /yt-console -->
 
           <!-- Notes panel removed (use the Gallery for saved moments) -->
 

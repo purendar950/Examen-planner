@@ -6782,3 +6782,638 @@ body.sp-dialog-open { overflow: hidden; }
   .sp-dialog-overlay.open,
   .sp-dialog-overlay.open .sp-dialog-content { animation: none; opacity: 1; transform: none; }
 }
+
+
+/* ═══════════════════════════════════════════════
+   YOUTUBE STUDY — VISUAL REFRESH (v2)
+   Appended last so it wins the cascade. Purely presentational: every id, class
+   and DOM hook used by youtube.js / yt-screenshots.js / turbo-player.js /
+   ai-tutor.js is preserved. The headline change is the player console — the
+   now-playing row, playback tools and the injected Save Moment toolbar now
+   share one surface docked to the video instead of three floating bars.
+═══════════════════════════════════════════════ */
+#page-youtube {
+  --yt-hairline: color-mix(in srgb, var(--border) 75%, transparent);
+  --yt-ring: color-mix(in srgb, var(--accent) 20%, transparent);
+  --yt-red: #ff3b30;
+  --yt-radius-lg: 18px;
+}
+
+/* ── Workspace header ── */
+#page-youtube .yt-workspace-head {
+  align-items: flex-end;
+  gap: 1.1rem;
+  margin-bottom: .9rem;
+  padding-bottom: .85rem;
+  border-bottom: 1px solid var(--yt-hairline);
+}
+#page-youtube .yt-workspace-lead {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  min-width: 0;
+}
+#page-youtube .yt-workspace-badge {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  padding-left: 3px;
+  border: 1px solid color-mix(in srgb, var(--yt-red) 30%, transparent);
+  border-radius: 15px;
+  background: linear-gradient(158deg, color-mix(in srgb, var(--yt-red) 24%, transparent), color-mix(in srgb, var(--yt-red) 6%, transparent));
+  color: #ff5247;
+  font-size: .95rem;
+  box-shadow: 0 12px 26px -16px color-mix(in srgb, var(--yt-red) 85%, transparent);
+}
+#page-youtube .yt-workspace-copy h2 {
+  margin: .18rem 0 0;
+  font-size: clamp(1.2rem, 2vw, 1.6rem);
+  font-weight: 750;
+}
+#page-youtube .yt-workspace-copy p { margin-top: .22rem; font-size: .75rem; }
+
+/* Three-step orientation strip — fills the previously empty header gutter. */
+#page-youtube .yt-flow {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 0;
+  margin: 0;
+  padding: .3rem;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: var(--yt-soft);
+  box-shadow: var(--yt-shadow-soft);
+  list-style: none;
+}
+#page-youtube .yt-flow li {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .28rem .68rem;
+}
+#page-youtube .yt-flow li + li { border-left: 1px solid var(--yt-hairline); }
+#page-youtube .yt-flow-num {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  border-radius: 7px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: .58rem;
+  font-weight: 900;
+}
+html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
+#page-youtube .yt-flow-copy { display: block; min-width: 0; }
+#page-youtube .yt-flow-copy strong {
+  display: block;
+  color: var(--text);
+  font-size: .64rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+#page-youtube .yt-flow-copy small {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: .53rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+/* ── Setup row: lesson launcher and the active course sit side by side ── */
+#page-youtube .yt-setup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: .7rem;
+  margin-bottom: .85rem;
+}
+#page-youtube .yt-setup-row > .yt-launch-card,
+#page-youtube .yt-setup-row > .yt-course-header { margin-bottom: 0; }
+@media (min-width: 981px) {
+  #page-youtube .yt-setup-row:has(> .yt-course-header.show) {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 32%);
+    align-items: stretch;
+  }
+}
+
+/* ── Lesson launcher ── */
+#page-youtube .yt-launch-card {
+  position: relative;
+  overflow: hidden;
+  padding: .8rem .85rem .85rem;
+  border-radius: var(--yt-radius-lg);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 4%, transparent), transparent 60%),
+    var(--card);
+}
+#page-youtube .yt-launch-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent), transparent);
+  opacity: .75;
+}
+#page-youtube .yt-launch-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6rem;
+  margin: 0 .1rem .48rem;
+}
+#page-youtube .yt-launch-label { margin: 0; }
+#page-youtube .yt-launch-hint {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: .6rem;
+  font-weight: 650;
+}
+#page-youtube .yt-input-bar {
+  padding: .34rem;
+  border-radius: 14px;
+  transition: border-color .18s, box-shadow .18s, background .18s;
+}
+#page-youtube .yt-input-bar:hover { border-color: color-mix(in srgb, var(--accent) 24%, var(--border)); }
+#page-youtube .yt-input-bar:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px var(--yt-ring);
+}
+#page-youtube .yt-input-icon {
+  width: 34px;
+  height: 34px;
+  padding-left: 2px;
+  border: 1px solid color-mix(in srgb, var(--yt-red) 26%, transparent);
+  border-radius: 11px;
+  background: linear-gradient(158deg, color-mix(in srgb, var(--yt-red) 24%, transparent), color-mix(in srgb, var(--yt-red) 7%, transparent));
+  color: #ff5247;
+  font-size: .66rem;
+}
+#page-youtube .yt-url-input {
+  padding: .62rem .2rem;
+  font-size: .82rem;
+  letter-spacing: -.005em;
+}
+#page-youtube .yt-url-input::placeholder { color: var(--muted); }
+#page-youtube .btn-yt-play {
+  min-height: 38px;
+  padding: 0 1.15rem;
+  border: 0;
+  border-radius: 11px;
+  background: var(--grad-accent);
+  color: #04170f;
+  font-size: .77rem;
+  font-weight: 800;
+  box-shadow: 0 12px 24px -14px rgba(0, 200, 150, .95);
+  transition: filter .18s, transform .18s, box-shadow .18s, background .18s, opacity .18s;
+}
+#page-youtube .btn-yt-play:hover:not(:disabled) {
+  background: var(--grad-accent);
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 16px 30px -14px rgba(0, 200, 150, 1);
+}
+#page-youtube .btn-yt-play:active:not(:disabled) { transform: translateY(0); }
+#page-youtube .btn-yt-play:disabled {
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted);
+  box-shadow: none;
+  opacity: 1;
+}
+#page-youtube .yt-error-msg { margin: .55rem .2rem 0; font-size: .7rem; font-weight: 650; }
+#page-youtube .yt-resume-banner { border-radius: 13px; }
+#page-youtube .yt-resume-btn {
+  border-radius: 9px;
+  background: var(--grad-accent);
+  font-weight: 800;
+  box-shadow: 0 10px 20px -12px rgba(0, 200, 150, .9);
+  transition: filter .18s, transform .18s;
+}
+#page-youtube .yt-resume-btn:hover { filter: brightness(1.07); transform: translateY(-1px); }
+
+/* ── Now studying ── */
+#page-youtube .yt-course-header {
+  position: relative;
+  gap: .7rem;
+  overflow: hidden;
+  padding: .62rem .8rem .62rem .9rem;
+  border-radius: 16px;
+  background: var(--card);
+}
+#page-youtube .yt-course-header::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--grad-accent);
+}
+#page-youtube .yt-course-thumb {
+  width: 64px;
+  height: 38px;
+  border-radius: 9px;
+  box-shadow: 0 8px 18px -10px rgba(0, 0, 0, .7);
+}
+#page-youtube .yt-course-title { font-size: .8rem; font-weight: 750; }
+
+/* ── Player ── */
+#page-youtube .yt-player-wrap {
+  border: 1px solid color-mix(in srgb, var(--border) 88%, #000);
+  border-radius: var(--yt-radius-lg);
+  box-shadow: 0 28px 60px -34px rgba(0, 0, 0, .9), var(--yt-shadow);
+}
+/* Squared bottom edge only while the console is actually mounted below. */
+#page-youtube .yt-player-column:has(.yt-console > .ss-toolbar) .yt-player-wrap,
+#page-youtube .yt-player-column:has(.yt-console > #yt-speed-bar.show) .yt-player-wrap,
+#page-youtube .yt-player-column:has(.yt-console > #yt-meta-bar[style*="flex"]) .yt-player-wrap {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+#page-youtube .yt-placeholder { gap: 10px; }
+#page-youtube .yt-placeholder-icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  padding-left: 4px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 50%;
+  background: rgba(0, 200, 150, .1);
+  color: var(--accent);
+  font-size: 1.25rem;
+  opacity: 1;
+  box-shadow: 0 0 0 10px rgba(0, 200, 150, .04);
+}
+#page-youtube .yt-placeholder-title {
+  color: #eef3f8;
+  font-size: .84rem;
+  font-weight: 750;
+  letter-spacing: -.01em;
+}
+#page-youtube .yt-placeholder p {
+  max-width: 310px;
+  color: rgba(232, 237, 245, .58);
+  font-size: .74rem;
+  line-height: 1.55;
+}
+
+/* ── Player console (now playing · playback · moments) ── */
+#page-youtube .yt-console { display: none; }
+#page-youtube .yt-console:has(> .ss-toolbar),
+#page-youtube .yt-console:has(> #yt-speed-bar.show),
+#page-youtube .yt-console:has(> #yt-meta-bar[style*="flex"]) {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-top: 0;
+  border-radius: 0 0 var(--yt-radius-lg) var(--yt-radius-lg);
+  background: var(--card);
+  box-shadow: var(--yt-shadow-soft);
+}
+#page-youtube .yt-console > #yt-meta-bar,
+#page-youtube .yt-console > #yt-speed-bar,
+#page-youtube .yt-console > .ss-toolbar {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+#page-youtube .yt-console > #yt-meta-bar { padding: .68rem .85rem; }
+#page-youtube .yt-console > #yt-speed-bar { padding: .55rem .85rem; }
+#page-youtube .yt-console > .ss-toolbar {
+  gap: .4rem;
+  padding: .55rem .85rem;
+  background: color-mix(in srgb, var(--surface) 60%, var(--card));
+}
+/* Hairlines only appear between rows that are genuinely visible together. */
+#page-youtube .yt-console > #yt-speed-bar.show { border-top: 1px solid var(--yt-hairline); }
+#page-youtube .yt-console:has(> #yt-speed-bar.show) > .ss-toolbar { border-top: 1px solid var(--yt-hairline); }
+
+#page-youtube .yt-now-label { font-size: .55rem; }
+#page-youtube .yt-now-title { font-size: .78rem; font-weight: 700; }
+#page-youtube .yt-live-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  animation: yt-live-pulse 2.1s ease-out infinite;
+}
+@keyframes yt-live-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  70%  { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+#page-youtube .yt-focus-btn,
+#page-youtube .yt-open-btn {
+  min-height: 32px;
+  padding: 0 .8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: .67rem;
+  font-weight: 750;
+  text-decoration: none;
+  transition: color .18s, background .18s, border-color .18s, transform .18s;
+}
+#page-youtube .yt-focus-btn:hover,
+#page-youtube .yt-open-btn:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+#page-youtube .yt-focus-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* Playback row: the quick speeds read as one segmented control. */
+#page-youtube .yt-control-label { flex: 0 0 auto; font-size: .55rem; }
+#page-youtube .yt-speed-select-wrap {
+  min-height: 32px;
+  border-radius: 10px;
+  transition: border-color .18s, box-shadow .18s;
+}
+#page-youtube .yt-speed-select-wrap:hover { border-color: color-mix(in srgb, var(--accent) 34%, var(--border)); }
+#page-youtube .yt-speed-select-wrap:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--yt-ring);
+}
+#page-youtube .yt-speed-presets {
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--yt-hairline);
+  border-radius: 11px;
+  background: var(--surface);
+}
+#page-youtube .yt-speed-btn {
+  min-height: 26px;
+  padding: 0 .58rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font-size: .63rem;
+  font-weight: 750;
+  transition: color .16s, background .16s, box-shadow .16s;
+}
+#page-youtube .yt-speed-btn:hover:not(.active) {
+  background: color-mix(in srgb, var(--card) 82%, transparent);
+  color: var(--text);
+}
+#page-youtube .yt-speed-btn.active {
+  background: var(--accent);
+  color: #04170f;
+  box-shadow: 0 6px 14px -8px rgba(0, 200, 150, .95);
+}
+#page-youtube .yt-pip-btn {
+  min-height: 32px;
+  margin-left: auto;
+  padding: 0 .78rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: .65rem;
+  font-weight: 750;
+  transition: color .18s, background .18s, border-color .18s;
+}
+#page-youtube .yt-pip-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+#page-youtube .yt-turbo-toggle { min-height: 32px; border-radius: 10px; font-weight: 750; }
+
+/* Moments row */
+#page-youtube .yt-console > .ss-toolbar::before {
+  content: "Moments";
+  flex: 0 0 auto;
+  margin-right: .1rem;
+  color: var(--muted);
+  font-size: .55rem;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+#page-youtube .ss-capture-btn,
+#page-youtube .ss-gallery-btn {
+  min-height: 32px;
+  padding: 0 .8rem;
+  border-radius: 10px;
+  font-size: .66rem;
+  font-weight: 750;
+  transition: color .18s, background .18s, border-color .18s, transform .18s;
+}
+#page-youtube .ss-capture-btn {
+  border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 800;
+}
+#page-youtube .ss-capture-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+#page-youtube .ss-gallery-btn { background: var(--card); }
+#page-youtube .ss-gallery-btn:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--blue) 45%, var(--border));
+  background: rgba(59, 130, 246, .1);
+  color: var(--blue);
+}
+#page-youtube .ss-badge {
+  min-width: 17px;
+  padding: 0 4px;
+  border-radius: 99px;
+  font-size: .55rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+/* ── Chapter links ── */
+#page-youtube .yt-saved-section {
+  margin-top: .85rem;
+  padding: .95rem;
+  border-radius: var(--yt-radius-lg);
+  box-shadow: var(--yt-shadow-soft);
+}
+#page-youtube .yt-saved-header .section-title { font-size: .82rem; font-weight: 750; }
+#page-youtube .yt-saved-count {
+  padding: .2rem .5rem;
+  border: 1px solid var(--yt-hairline);
+  border-radius: 99px;
+  background: var(--surface);
+  font-size: .62rem;
+  font-weight: 750;
+}
+#page-youtube .yt-saved-count:empty { display: none; }
+#page-youtube .yt-saved-item {
+  padding: .62rem .7rem;
+  border-radius: 13px;
+  background: var(--yt-soft);
+  transition: border-color .18s, background .18s, transform .18s, box-shadow .18s;
+}
+#page-youtube .yt-saved-item:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  box-shadow: var(--yt-shadow-soft);
+}
+#page-youtube .yt-saved-name { font-size: .76rem; font-weight: 650; }
+#page-youtube .yt-saved-sub { font-size: .64rem; }
+#page-youtube .yt-saved-play {
+  padding: .34rem .72rem;
+  border-radius: 9px;
+  font-size: .68rem;
+  font-weight: 750;
+}
+#page-youtube .yt-saved-del { width: 26px; height: 26px; border-radius: 8px; }
+#page-youtube .yt-chapter-empty { padding: .85rem; border-radius: 14px; }
+#page-youtube .yt-chapter-empty-icon { width: 38px; height: 38px; border-radius: 12px; font-size: .8rem; }
+#page-youtube .yt-chapter-empty strong { font-size: .72rem; }
+#page-youtube .yt-chapter-empty button {
+  border-radius: 9px;
+  transition: background .18s, border-color .18s, transform .18s;
+}
+#page-youtube .yt-chapter-empty button:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+/* ── Study panel ── */
+#page-youtube .yt-panel { border-radius: 20px; }
+#page-youtube .yt-panel-header {
+  padding: .85rem .95rem;
+  border-bottom: 1px solid var(--yt-hairline);
+}
+#page-youtube .yt-panel-title { font-size: .82rem; font-weight: 750; }
+#page-youtube .yt-panel-count {
+  border: 1px solid var(--yt-hairline);
+  font-weight: 750;
+}
+#page-youtube .yt-panel-count:empty { display: none; }
+#page-youtube .ai-view-toggle button.on {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18), 0 12px 26px -16px rgba(0, 200, 150, .6);
+}
+#page-youtube .yt-pl-progress-bar {
+  height: 5px;
+  border-radius: 99px;
+  background: var(--surface);
+}
+#page-youtube .yt-pl-progress-fill {
+  border-radius: 99px;
+  background: var(--grad-accent);
+  transition: width .45s cubic-bezier(.4, 0, .2, 1);
+}
+#page-youtube .yt-duration-row { border-top: 1px solid var(--yt-hairline); }
+#page-youtube .yt-duration-input {
+  min-height: 28px;
+  border-radius: 8px;
+  font-size: .68rem;
+}
+#page-youtube .yt-dur-set-btn {
+  min-height: 28px;
+  border-radius: 8px;
+  font-size: .66rem;
+  font-weight: 750;
+}
+#page-youtube .yt-remaining-badge { border-radius: 99px; font-size: .64rem; }
+#page-youtube .yt-video-item {
+  border-bottom: 1px solid var(--yt-hairline);
+  transition: background .16s, box-shadow .16s;
+}
+#page-youtube .yt-video-item:hover { background: var(--yt-soft); }
+#page-youtube .yt-video-item.active {
+  border-left: 0;
+  background: linear-gradient(90deg, var(--accent-dim), transparent 70%);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+#page-youtube .yt-thumb { border-radius: 8px; }
+#page-youtube .yt-video-title { font-weight: 600; }
+#page-youtube .yt-video-list::-webkit-scrollbar,
+#page-youtube .ai-scroll::-webkit-scrollbar { width: 6px; }
+#page-youtube .yt-video-list::-webkit-scrollbar-thumb,
+#page-youtube .ai-scroll::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--accent) 26%, var(--border));
+}
+#page-youtube .yt-video-list::-webkit-scrollbar-thumb:hover,
+#page-youtube .ai-scroll::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+#page-youtube .ai-tab.on { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+
+/* ── Responsive ── */
+@media (max-width: 1180px) {
+  #page-youtube .yt-flow { display: none; }
+}
+@media (max-width: 840px) {
+  #page-youtube { --yt-radius-lg: 14px; }
+}
+@media (max-width: 600px) {
+  #page-youtube .yt-workspace-head { padding-bottom: .7rem; }
+  #page-youtube .yt-workspace-badge { width: 38px; height: 38px; border-radius: 12px; }
+  #page-youtube .yt-launch-hint { display: none; }
+  #page-youtube .yt-console > #yt-meta-bar,
+  #page-youtube .yt-console > #yt-speed-bar,
+  #page-youtube .yt-console > .ss-toolbar { padding-left: .7rem; padding-right: .7rem; }
+  #page-youtube .yt-console > .ss-toolbar::before { display: none; }
+  #page-youtube .yt-speed-presets { order: 5; flex-basis: 100%; }
+  #page-youtube .yt-pip-btn { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #page-youtube .yt-live-dot { animation: none; }
+  #page-youtube .btn-yt-play:hover:not(:disabled),
+  #page-youtube .yt-resume-btn:hover,
+  #page-youtube .yt-focus-btn:hover,
+  #page-youtube .yt-open-btn:hover,
+  #page-youtube .yt-saved-item:hover,
+  #page-youtube .yt-chapter-empty button:hover,
+  #page-youtube .ss-capture-btn:hover,
+  #page-youtube .ss-gallery-btn:hover { transform: none; }
+  #page-youtube .yt-pl-progress-fill { transition: none; }
+}
+
+
+/* Focus mode also collapses the (now wrapped) setup row. */
+#page-youtube.yt-focus-active .yt-setup-row { display: none !important; }
+
+/* Safety net for engines without :has() — the console and its playback tools
+   must never disappear, so fall back to a permanently docked surface. */
+@supports not selector(:has(*)) {
+  #page-youtube .yt-console {
+    display: block;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-top: 0;
+    border-radius: 0 0 var(--yt-radius-lg) var(--yt-radius-lg);
+    background: var(--card);
+    box-shadow: var(--yt-shadow-soft);
+  }
+  #page-youtube .yt-player-wrap {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+}
+
+
+/* The workspace switcher had to truncate "Generate Notes" at the default 40%
+   panel width. Reclaiming a few pixels from the icon, gap and badge lets both
+   labels render in full without changing the segmented-control design. */
+#page-youtube .ai-view-toggle button {
+  grid-template-columns: 27px minmax(0, 1fr) auto;
+  gap: .42rem;
+  padding: .42rem .45rem;
+}
+#page-youtube .ai-switch-icon { width: 27px; height: 27px; border-radius: 9px; }
+#page-youtube .ai-switch-copy strong { font-size: .67rem; }
+#page-youtube .ai-switch-badge { padding: .14rem .32rem; font-size: .45rem; }
