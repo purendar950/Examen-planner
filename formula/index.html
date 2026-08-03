@@ -170,6 +170,27 @@ img.diagram{max-width:100%;border-radius:8px;margin:8px 0;box-shadow:0 2px 8px r
   .formula-search-result,.formula-search :is(input,select),.formula-search-clear{transition:none}
   .formula-card.formula-search-target{animation:none}
 }
+
+/* Correct, compact rendering for triangle classification by side lengths */
+.triangle-type-formula{display:grid;gap:10px}
+.triangle-type-key{display:flex;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:.78rem;font-weight:700}
+.triangle-type-key .triangle-math{color:var(--text)}
+.triangle-type-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.triangle-type-case{display:grid;gap:6px;min-width:0;padding:11px 9px;border:1px solid var(--border);border-radius:10px;text-align:center;background:var(--card)}
+.triangle-type-label{font-size:.7rem;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
+.triangle-type-case--acute{border-color:rgba(16,185,129,.38);background:rgba(16,185,129,.08)}
+.triangle-type-case--acute .triangle-type-label{color:#10B981}
+.triangle-type-case--right{border-color:rgba(59,130,246,.38);background:rgba(59,130,246,.08)}
+.triangle-type-case--right .triangle-type-label{color:#3B82F6}
+.triangle-type-case--obtuse{border-color:rgba(249,115,22,.38);background:rgba(249,115,22,.08)}
+.triangle-type-case--obtuse .triangle-type-label{color:#F97316}
+.triangle-math{display:block;color:var(--text);font-family:KaTeX_Main,"Times New Roman",serif;font-size:1.05rem;font-weight:700;line-height:1.4;white-space:nowrap}
+.triangle-math sup{position:relative;top:-.05em;font-size:.62em;line-height:0}
+.formula-card-trick .triangle-math{display:inline;font-size:.92rem}
+@media (max-width:520px){
+  .triangle-type-grid{grid-template-columns:1fr}
+  .triangle-type-case{grid-template-columns:72px 1fr;align-items:center;text-align:left}
+}
 </style>
 </head>
 <body>
@@ -9944,6 +9965,38 @@ M834 80h400000v40h-400000z'/></svg></span></span></span><span class="vlist-s">â€
     return value.slice(0, max - 1).trim() + 'â€¦';
   }
 
+  function enhanceTriangleTypeFormula() {
+    var diagram = document.querySelector('img.diagram[src$="0093_right__obtuse.jpg"]');
+    var card = diagram && diagram.closest('.formula-card');
+    if (!card) return;
+
+    var formula = card.querySelector('.formula-card-formula');
+    var trick = card.querySelector('.formula-card-trick');
+    if (!formula) return;
+
+    formula.classList.add('triangle-type-formula');
+    formula.innerHTML =
+      '<div class="triangle-type-key">Use <span class="triangle-math">c</span> as the longest side</div>' +
+      '<div class="triangle-type-grid" role="list" aria-label="Triangle classification formulas">' +
+        '<div class="triangle-type-case triangle-type-case--acute" role="listitem">' +
+          '<span class="triangle-type-label">Acute</span>' +
+          '<span class="triangle-math" aria-label="c squared is less than a squared plus b squared">c<sup>2</sup> &lt; a<sup>2</sup> + b<sup>2</sup></span>' +
+        '</div>' +
+        '<div class="triangle-type-case triangle-type-case--right" role="listitem">' +
+          '<span class="triangle-type-label">Right</span>' +
+          '<span class="triangle-math" aria-label="c squared equals a squared plus b squared">c<sup>2</sup> = a<sup>2</sup> + b<sup>2</sup></span>' +
+        '</div>' +
+        '<div class="triangle-type-case triangle-type-case--obtuse" role="listitem">' +
+          '<span class="triangle-type-label">Obtuse</span>' +
+          '<span class="triangle-math" aria-label="c squared is greater than a squared plus b squared">c<sup>2</sup> &gt; a<sup>2</sup> + b<sup>2</sup></span>' +
+        '</div>' +
+      '</div>';
+
+    if (trick) {
+      trick.innerHTML = '<strong>Quick check:</strong> compare <span class="triangle-math">c<sup>2</sup></span> with <span class="triangle-math">a<sup>2</sup> + b<sup>2</sup></span>.';
+    }
+  }
+
   function revealPendingFormula() {
     if (!pendingFormulaId) return;
     var target = document.getElementById(pendingFormulaId);
@@ -10188,6 +10241,7 @@ M834 80h400000v40h-400000z'/></svg></span></span></span><span class="vlist-s">â€
     route();
   };
 
+  enhanceTriangleTypeFormula();
   initFormulaSearch();
   window.addEventListener('hashchange', route);
   route();
