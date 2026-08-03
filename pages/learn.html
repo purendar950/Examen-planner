@@ -1,0 +1,29 @@
+<div class="page" id="page-learn">
+  <style>
+  /* ════════ LEARN MODE TAB — scoped styles (pl- prefix) ════════ */
+  #page-learn .pl-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:1.1rem; }
+  #page-learn .pl-title { margin:0; font-size:1.25rem; font-weight:800; display:flex; align-items:center; gap:8px; }
+  #page-learn .pl-sub { font-size:.78rem; color:var(--muted); margin-top:2px; }
+  #page-learn .pl-btn { padding:.5rem .85rem; background:var(--surface); border:1px solid var(--border); border-radius:9px; color:var(--text); font-size:.82rem; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:border-color .18s, color .18s; }
+  #page-learn .pl-btn:hover { border-color:var(--accent); color:var(--accent); }
+  #page-learn .pl-frame-wrap { position:relative; width:100%; }
+  #page-learn .pl-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; font-size:.88rem; color:var(--muted); background:var(--surface); border:1px solid var(--border); border-radius:12px; z-index:1; }
+  #page-learn iframe.pl-frame { width:100%; height:72vh; min-height:480px; border:1px solid var(--border); border-radius:12px; background:#fff; display:block; }
+  @media (max-width:600px) {
+    #page-learn iframe.pl-frame { height:78vh; min-height:420px; }
+  }
+  </style>
+
+  <div class="pl-head">
+    <div>
+      <h2 class="pl-title">🧠 Learn Mode</h2>
+      <p class="pl-sub">Tables · Squares · Cubes · Percentages · Triplets · Roots · Powers · Primes · Interest · free for all</p>
+    </div>
+    <a class="pl-btn" href="learn/index.html" target="_blank" rel="noopener">Open full page ↗</a>
+  </div>
+
+  <div class="pl-frame-wrap">
+    <div class="pl-loading" id="pl-loading">⏳ Loading learn mode…</div>
+    <iframe class="pl-frame" id="learn-frame" title="Learn Mode" loading="lazy"></iframe>
+  </div>
+</div>

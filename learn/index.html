@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Calc Master — Learn Mode (Free)</title>
+<style>
+:root { --accent:#16a34a; --accent2:#0d9488; --bg:#f3f6f4; --card:#fff; --text:#1e293b; --muted:#64748b; --border:#e2e8f0; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); }
+.topnav { position:sticky; top:0; z-index:10; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; padding:12px 14px; box-shadow:0 2px 10px rgba(0,0,0,.15); }
+.topnav .crumb { font-weight:700; font-size:.95rem; }
+.wrap { max-width:1000px; margin:0 auto; padding:14px; }
+h1 { font-size:1.3rem; margin:14px 4px 4px; }
+.sub { color:var(--muted); font-size:.82rem; margin:0 4px 14px; line-height:1.5; }
+.cats { position:sticky; top:52px; z-index:9; display:flex; gap:8px; overflow-x:auto; padding:8px 2px 10px; background:var(--bg); }
+.cat-btn { flex:0 0 auto; display:flex; flex-direction:column; align-items:flex-start; gap:1px; background:var(--card); border:1px solid var(--border); border-radius:12px; padding:8px 12px; cursor:pointer; min-width:96px; box-shadow:0 1px 3px rgba(0,0,0,.06); transition:all .15s; font-family:inherit; }
+.cat-btn .ci { font-size:1.15rem; }
+.cat-btn .ct { font-weight:700; font-size:.8rem; color:var(--text); }
+.cat-btn .cs { font-size:.64rem; color:var(--muted); }
+.cat-btn.active { border-color:var(--accent); background:var(--accent); }
+.cat-btn.active .ct, .cat-btn.active .cs { color:#fff; }
+.view { display:none; }
+.view.active { display:block; animation:in .22s ease; }
+@keyframes in { from { opacity:0; transform:translateY(6px); } }
+.view h2 { font-size:1.15rem; margin:16px 4px 2px; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.view h2 small { color:var(--muted); font-weight:600; font-size:.78rem; }
+.group { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px; margin:12px 0; }
+.group h3 { font-size:.9rem; margin-bottom:10px; color:var(--accent2); }
+.group h3 em { font-weight:600; color:var(--muted); font-style:normal; font-size:.75rem; }
+.cells { display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:6px; }
+.cells .cell { background:#f8fafc; border:1px solid var(--border); border-radius:9px; padding:7px 10px; display:flex; justify-content:space-between; gap:8px; font-size:.83rem; }
+.cells .cell b { font-weight:700; }
+.cells .cell span { color:var(--muted); }
+.cells.pct .cell b { color:var(--accent2); }
+.cells.roots .cell b { color:#7c3aed; }
+.cells.triplets .cell b { color:#2563eb; }
+.tbl-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:10px; }
+.tbl-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:10px 12px; }
+.tbl-card h3 { font-size:.85rem; color:var(--accent); margin-bottom:6px; }
+.tbl-card .row { font-size:.8rem; padding:2px 0; border-bottom:1px dashed var(--border); }
+.tbl-card .row:last-child { border-bottom:none; }
+.chips { display:flex; flex-wrap:wrap; gap:6px; }
+.chip { background:#f8fafc; border:1px solid var(--border); border-radius:999px; padding:4px 10px; font-size:.8rem; font-weight:600; }
+table.ci { width:100%; border-collapse:collapse; font-size:.85rem; }
+table.ci th, table.ci td { padding:6px 8px; text-align:center; border-bottom:1px solid var(--border); }
+table.ci th { background:#f0fdf4; color:var(--accent); }
+table.ci tr:nth-child(even) td { background:#f8fafc; }
+footer { text-align:center; color:var(--muted); font-size:.72rem; padding:18px 10px 30px; }
+</style>
+</head>
+<body>
+<nav class="topnav"><span class="crumb">📖 Learn Mode — Calc Master (Free)</span></nav>
+<div class="wrap">
+<h1>🧠 Learn Mode <span style="color:var(--muted);font-size:.9rem;">· Tables · Squares · Cubes · % · Triplets · Roots · Powers · Primes · CI</span></h1>
+<p class="sub">All 9 memorization sections from Calc Master — free for all. 200 table rows · 120 squares · 50 cubes · 59 % conversions · 32 triplets · 62 primes.</p>
+<div class="cats">
+<button class="cat-btn" data-view="v-tables" onclick="showView('v-tables')"><span class="ci">📗</span><span class="ct">Tables</span><span class="cs">1–20</span></button>
+<button class="cat-btn" data-view="v-squares" onclick="showView('v-squares')"><span class="ci">🔲</span><span class="ct">Squares</span><span class="cs">1–120</span></button>
+<button class="cat-btn" data-view="v-cubes" onclick="showView('v-cubes')"><span class="ci">🧊</span><span class="ct">Cubes</span><span class="cs">1–50</span></button>
+<button class="cat-btn" data-view="v-pct" onclick="showView('v-pct')"><span class="ci">💯</span><span class="ct">%→Fraction</span><span class="cs">59</span></button>
+<button class="cat-btn" data-view="v-triplets" onclick="showView('v-triplets')"><span class="ci">🔺</span><span class="ct">Triplets</span><span class="cs">32</span></button>
+<button class="cat-btn" data-view="v-roots" onclick="showView('v-roots')"><span class="ci">🌱</span><span class="ct">Roots</span><span class="cs">√1–√10</span></button>
+<button class="cat-btn" data-view="v-powers" onclick="showView('v-powers')"><span class="ci">🚀</span><span class="ct">Powers</span><span class="cs">2,3,4,5,9</span></button>
+<button class="cat-btn" data-view="v-primes" onclick="showView('v-primes')"><span class="ci">🔢</span><span class="ct">Primes</span><span class="cs">1–300</span></button>
+<button class="cat-btn" data-view="v-ci" onclick="showView('v-ci')"><span class="ci">💰</span><span class="ct">Compound Int.</span><span class="cs">2–5 yrs</span></button>
+</div>
+<div class="view" id="v-tables">
+<h2>📗 Multiplication Tables <small>1 to 20</small></h2>
+<p class="sub">Learn tables 1–20, each multiplied 1–10. Practice daily for fast calculation.</p>
+<div class="tbl-grid"><div class="tbl-card"><h3>Table of 1</h3><div class="row"><span>1 × 1 = 1</span></div>
+<div class="row"><span>1 × 2 = 2</span></div>
+<div class="row"><span>1 × 3 = 3</span></div>
+<div class="row"><span>1 × 4 = 4</span></div>
+<div class="row"><span>1 × 5 = 5</span></div>
+<div class="row"><span>1 × 6 = 6</span></div>
+<div class="row"><span>1 × 7 = 7</span></div>
+<div class="row"><span>1 × 8 = 8</span></div>
+<div class="row"><span>1 × 9 = 9</span></div>
+<div class="row"><span>1 × 10 = 10</span></div></div>
+<div class="tbl-card"><h3>Table of 2</h3><div class="row"><span>2 × 1 = 2</span></div>
+<div class="row"><span>2 × 2 = 4</span></div>
+<div class="row"><span>2 × 3 = 6</span></div>
+<div class="row"><span>2 × 4 = 8</span></div>
+<div class="row"><span>2 × 5 = 10</span></div>
+<div class="row"><span>2 × 6 = 12</span></div>
+<div class="row"><span>2 × 7 = 14</span></div>
+<div class="row"><span>2 × 8 = 16</span></div>
+<div class="row"><span>2 × 9 = 18</span></div>
+<div class="row"><span>2 × 10 = 20</span></div></div>
+<div class="tbl-card"><h3>Table of 3</h3><div class="row"><span>3 × 1 = 3</span></div>
+<div class="row"><span>3 × 2 = 6</span></div>
+<div class="row"><span>3 × 3 = 9</span></div>
+<div class="row"><span>3 × 4 = 12</span></div>
+<div class="row"><span>3 × 5 = 15</span></div>
+<div class="row"><span>3 × 6 = 18</span></div>
+<div class="row"><span>3 × 7 = 21</span></div>
+<div class="row"><span>3 × 8 = 24</span></div>
+<div class="row"><span>3 × 9 = 27</span></div>
+<div class="row"><span>3 × 10 = 30</span></div></div>
+<div class="tbl-card"><h3>Table of 4</h3><div class="row"><span>4 × 1 = 4</span></div>
+<div class="row"><span>4 × 2 = 8</span></div>
+<div class="row"><span>4 × 3 = 12</span></div>
+<div class="row"><span>4 × 4 = 16</span></div>
+<div class="row"><span>4 × 5 = 20</span></div>
+<div class="row"><span>4 × 6 = 24</span></div>
+<div class="row"><span>4 × 7 = 28</span></div>
+<div class="row"><span>4 × 8 = 32</span></div>
+<div class="row"><span>4 × 9 = 36</span></div>
+<div class="row"><span>4 × 10 = 40</span></div></div>
+<div class="tbl-card"><h3>Table of 5</h3><div class="row"><span>5 × 1 = 5</span></div>
+<div class="row"><span>5 × 2 = 10</span></div>
+<div class="row"><span>5 × 3 = 15</span></div>
+<div class="row"><span>5 × 4 = 20</span></div>
+<div class="row"><span>5 × 5 = 25</span></div>
+<div class="row"><span>5 × 6 = 30</span></div>
+<div class="row"><span>5 × 7 = 35</span></div>
+<div class="row"><span>5 × 8 = 40</span></div>
+<div class="row"><span>5 × 9 = 45</span></div>
+<div class="row"><span>5 × 10 = 50</span></div></div>
+<div class="tbl-card"><h3>Table of 6</h3><div class="row"><span>6 × 1 = 6</span></div>
+<div class="row"><span>6 × 2 = 12</span></div>
+<div class="row"><span>6 × 3 = 18</span></div>
+<div class="row"><span>6 × 4 = 24</span></div>
+<div class="row"><span>6 × 5 = 30</span></div>
+<div class="row"><span>6 × 6 = 36</span></div>
+<div class="row"><span>6 × 7 = 42</span></div>
+<div class="row"><span>6 × 8 = 48</span></div>
+<div class="row"><span>6 × 9 = 54</span></div>
+<div class="row"><span>6 × 10 = 60</span></div></div>
+<div class="tbl-card"><h3>Table of 7</h3><div class="row"><span>7 × 1 = 7</span></div>
+<div class="row"><span>7 × 2 = 14</span></div>
+<div class="row"><span>7 × 3 = 21</span></div>
+<div class="row"><span>7 × 4 = 28</span></div>
+<div class="row"><span>7 × 5 = 35</span></div>
+<div class="row"><span>7 × 6 = 42</span></div>
+<div class="row"><span>7 × 7 = 49</span></div>
+<div class="row"><span>7 × 8 = 56</span></div>
+<div class="row"><span>7 × 9 = 63</span></div>
+<div class="row"><span>7 × 10 = 70</span></div></div>
+<div class="tbl-card"><h3>Table of 8</h3><div class="row"><span>8 × 1 = 8</span></div>
+<div class="row"><span>8 × 2 = 16</span></div>
+<div class="row"><span>8 × 3 = 24</span></div>
+<div class="row"><span>8 × 4 = 32</span></div>
+<div class="row"><span>8 × 5 = 40</span></div>
+<div class="row"><span>8 × 6 = 48</span></div>
+<div class="row"><span>8 × 7 = 56</span></div>
+<div class="row"><span>8 × 8 = 64</span></div>
+<div class="row"><span>8 × 9 = 72</span></div>
+<div class="row"><span>8 × 10 = 80</span></div></div>
+<div class="tbl-card"><h3>Table of 9</h3><div class="row"><span>9 × 1 = 9</span></div>
+<div class="row"><span>9 × 2 = 18</span></div>
+<div class="row"><span>9 × 3 = 27</span></div>
+<div class="row"><span>9 × 4 = 36</span></div>
+<div class="row"><span>9 × 5 = 45</span></div>
+<div class="row"><span>9 × 6 = 54</span></div>
+<div class="row"><span>9 × 7 = 63</span></div>
+<div class="row"><span>9 × 8 = 72</span></div>
+<div class="row"><span>9 × 9 = 81</span></div>
+<div class="row"><span>9 × 10 = 90</span></div></div>
+<div class="tbl-card"><h3>Table of 10</h3><div class="row"><span>10 × 1 = 10</span></div>
+<div class="row"><span>10 × 2 = 20</span></div>
+<div class="row"><span>10 × 3 = 30</span></div>
+<div class="row"><span>10 × 4 = 40</span></div>
+<div class="row"><span>10 × 5 = 50</span></div>
+<div class="row"><span>10 × 6 = 60</span></div>
+<div class="row"><span>10 × 7 = 70</span></div>
+<div class="row"><span>10 × 8 = 80</span></div>
+<div class="row"><span>10 × 9 = 90</span></div>
+<div class="row"><span>10 × 10 = 100</span></div></div>
+<div class="tbl-card"><h3>Table of 11</h3><div class="row"><span>11 × 1 = 11</span></div>
+<div class="row"><span>11 × 2 = 22</span></div>
+<div class="row"><span>11 × 3 = 33</span></div>
+<div class="row"><span>11 × 4 = 44</span></div>
+<div class="row"><span>11 × 5 = 55</span></div>
+<div class="row"><span>11 × 6 = 66</span></div>
+<div class="row"><span>11 × 7 = 77</span></div>
+<div class="row"><span>11 × 8 = 88</span></div>
+<div class="row"><span>11 × 9 = 99</span></div>
+<div class="row"><span>11 × 10 = 110</span></div></div>
+<div class="tbl-card"><h3>Table of 12</h3><div class="row"><span>12 × 1 = 12</span></div>
+<div class="row"><span>12 × 2 = 24</span></div>
+<div class="row"><span>12 × 3 = 36</span></div>
+<div class="row"><span>12 × 4 = 48</span></div>
+<div class="row"><span>12 × 5 = 60</span></div>
+<div class="row"><span>12 × 6 = 72</span></div>
+<div class="row"><span>12 × 7 = 84</span></div>
+<div class="row"><span>12 × 8 = 96</span></div>
+<div class="row"><span>12 × 9 = 108</span></div>
+<div class="row"><span>12 × 10 = 120</span></div></div>
+<div class="tbl-card"><h3>Table of 13</h3><div class="row"><span>13 × 1 = 13</span></div>
+<div class="row"><span>13 × 2 = 26</span></div>
+<div class="row"><span>13 × 3 = 39</span></div>
+<div class="row"><span>13 × 4 = 52</span></div>
+<div class="row"><span>13 × 5 = 65</span></div>
+<div class="row"><span>13 × 6 = 78</span></div>
+<div class="row"><span>13 × 7 = 91</span></div>
+<div class="row"><span>13 × 8 = 104</span></div>
+<div class="row"><span>13 × 9 = 117</span></div>
+<div class="row"><span>13 × 10 = 130</span></div></div>
+<div class="tbl-card"><h3>Table of 14</h3><div class="row"><span>14 × 1 = 14</span></div>
+<div class="row"><span>14 × 2 = 28</span></div>
+<div class="row"><span>14 × 3 = 42</span></div>
+<div class="row"><span>14 × 4 = 56</span></div>
+<div class="row"><span>14 × 5 = 70</span></div>
+<div class="row"><span>14 × 6 = 84</span></div>
+<div class="row"><span>14 × 7 = 98</span></div>
+<div class="row"><span>14 × 8 = 112</span></div>
+<div class="row"><span>14 × 9 = 126</span></div>
+<div class="row"><span>14 × 10 = 140</span></div></div>
+<div class="tbl-card"><h3>Table of 15</h3><div class="row"><span>15 × 1 = 15</span></div>
+<div class="row"><span>15 × 2 = 30</span></div>
+<div class="row"><span>15 × 3 = 45</span></div>
+<div class="row"><span>15 × 4 = 60</span></div>
+<div class="row"><span>15 × 5 = 75</span></div>
+<div class="row"><span>15 × 6 = 90</span></div>
+<div class="row"><span>15 × 7 = 105</span></div>
+<div class="row"><span>15 × 8 = 120</span></div>
+<div class="row"><span>15 × 9 = 135</span></div>
+<div class="row"><span>15 × 10 = 150</span></div></div>
+<div class="tbl-card"><h3>Table of 16</h3><div class="row"><span>16 × 1 = 16</span></div>
+<div class="row"><span>16 × 2 = 32</span></div>
+<div class="row"><span>16 × 3 = 48</span></div>
+<div class="row"><span>16 × 4 = 64</span></div>
+<div class="row"><span>16 × 5 = 80</span></div>
+<div class="row"><span>16 × 6 = 96</span></div>
+<div class="row"><span>16 × 7 = 112</span></div>
+<div class="row"><span>16 × 8 = 128</span></div>
+<div class="row"><span>16 × 9 = 144</span></div>
+<div class="row"><span>16 × 10 = 160</span></div></div>
+<div class="tbl-card"><h3>Table of 17</h3><div class="row"><span>17 × 1 = 17</span></div>
+<div class="row"><span>17 × 2 = 34</span></div>
+<div class="row"><span>17 × 3 = 51</span></div>
+<div class="row"><span>17 × 4 = 68</span></div>
+<div class="row"><span>17 × 5 = 85</span></div>
+<div class="row"><span>17 × 6 = 102</span></div>
+<div class="row"><span>17 × 7 = 119</span></div>
+<div class="row"><span>17 × 8 = 136</span></div>
+<div class="row"><span>17 × 9 = 153</span></div>
+<div class="row"><span>17 × 10 = 170</span></div></div>
+<div class="tbl-card"><h3>Table of 18</h3><div class="row"><span>18 × 1 = 18</span></div>
+<div class="row"><span>18 × 2 = 36</span></div>
+<div class="row"><span>18 × 3 = 54</span></div>
+<div class="row"><span>18 × 4 = 72</span></div>
+<div class="row"><span>18 × 5 = 90</span></div>
+<div class="row"><span>18 × 6 = 108</span></div>
+<div class="row"><span>18 × 7 = 126</span></div>
+<div class="row"><span>18 × 8 = 144</span></div>
+<div class="row"><span>18 × 9 = 162</span></div>
+<div class="row"><span>18 × 10 = 180</span></div></div>
+<div class="tbl-card"><h3>Table of 19</h3><div class="row"><span>19 × 1 = 19</span></div>
+<div class="row"><span>19 × 2 = 38</span></div>
+<div class="row"><span>19 × 3 = 57</span></div>
+<div class="row"><span>19 × 4 = 76</span></div>
+<div class="row"><span>19 × 5 = 95</span></div>
+<div class="row"><span>19 × 6 = 114</span></div>
+<div class="row"><span>19 × 7 = 133</span></div>
+<div class="row"><span>19 × 8 = 152</span></div>
+<div class="row"><span>19 × 9 = 171</span></div>
+<div class="row"><span>19 × 10 = 190</span></div></div>
+<div class="tbl-card"><h3>Table of 20</h3><div class="row"><span>20 × 1 = 20</span></div>
+<div class="row"><span>20 × 2 = 40</span></div>
+<div class="row"><span>20 × 3 = 60</span></div>
+<div class="row"><span>20 × 4 = 80</span></div>
+<div class="row"><span>20 × 5 = 100</span></div>
+<div class="row"><span>20 × 6 = 120</span></div>
+<div class="row"><span>20 × 7 = 140</span></div>
+<div class="row"><span>20 × 8 = 160</span></div>
+<div class="row"><span>20 × 9 = 180</span></div>
+<div class="row"><span>20 × 10 = 200</span></div></div>
+</div></div>
+<div class="view" id="v-squares">
+<h2>🔲 Squares <small>1² to 120²</small></h2>
+<p class="sub">Perfect squares from 1 to 120 — memorize for quick multiplication.</p>
+<div class="group"><h3>1–15</h3><div class="cells"><div class="cell"><b>1²</b><span>1</span></div>
+<div class="cell"><b>2²</b><span>4</span></div>
+<div class="cell"><b>3²</b><span>9</span></div>
+<div class="cell"><b>4²</b><span>16</span></div>
+<div class="cell"><b>5²</b><span>25</span></div>
+<div class="cell"><b>6²</b><span>36</span></div>
+<div class="cell"><b>7²</b><span>49</span></div>
+<div class="cell"><b>8²</b><span>64</span></div>
+<div class="cell"><b>9²</b><span>81</span></div>
+<div class="cell"><b>10²</b><span>100</span></div>
+<div class="cell"><b>11²</b><span>121</span></div>
+<div class="cell"><b>12²</b><span>144</span></div>
+<div class="cell"><b>13²</b><span>169</span></div>
+<div class="cell"><b>14²</b><span>196</span></div>
+<div class="cell"><b>15²</b><span>225</span></div></div></div>
+<div class="group"><h3>16–30</h3><div class="cells"><div class="cell"><b>16²</b><span>256</span></div>
+<div class="cell"><b>17²</b><span>289</span></div>
+<div class="cell"><b>18²</b><span>324</span></div>
+<div class="cell"><b>19²</b><span>361</span></div>
+<div class="cell"><b>20²</b><span>400</span></div>
+<div class="cell"><b>21²</b><span>441</span></div>
+<div class="cell"><b>22²</b><span>484</span></div>
+<div class="cell"><b>23²</b><span>529</span></div>
+<div class="cell"><b>24²</b><span>576</span></div>
+<div class="cell"><b>25²</b><span>625</span></div>
+<div class="cell"><b>26²</b><span>676</span></div>
+<div class="cell"><b>27²</b><span>729</span></div>
+<div class="cell"><b>28²</b><span>784</span></div>
+<div class="cell"><b>29²</b><span>841</span></div>
+<div class="cell"><b>30²</b><span>900</span></div></div></div>
+<div class="group"><h3>31–45</h3><div class="cells"><div class="cell"><b>31²</b><span>961</span></div>
+<div class="cell"><b>32²</b><span>1,024</span></div>
+<div class="cell"><b>33²</b><span>1,089</span></div>
+<div class="cell"><b>34²</b><span>1,156</span></div>
+<div class="cell"><b>35²</b><span>1,225</span></div>
+<div class="cell"><b>36²</b><span>1,296</span></div>
+<div class="cell"><b>37²</b><span>1,369</span></div>
+<div class="cell"><b>38²</b><span>1,444</span></div>
+<div class="cell"><b>39²</b><span>1,521</span></div>
+<div class="cell"><b>40²</b><span>1,600</span></div>
+<div class="cell"><b>41²</b><span>1,681</span></div>
+<div class="cell"><b>42²</b><span>1,764</span></div>
+<div class="cell"><b>43²</b><span>1,849</span></div>
+<div class="cell"><b>44²</b><span>1,936</span></div>
+<div class="cell"><b>45²</b><span>2,025</span></div></div></div>
+<div class="group"><h3>46–60</h3><div class="cells"><div class="cell"><b>46²</b><span>2,116</span></div>
+<div class="cell"><b>47²</b><span>2,209</span></div>
+<div class="cell"><b>48²</b><span>2,304</span></div>
+<div class="cell"><b>49²</b><span>2,401</span></div>
+<div class="cell"><b>50²</b><span>2,500</span></div>
+<div class="cell"><b>51²</b><span>2,601</span></div>
+<div class="cell"><b>52²</b><span>2,704</span></div>
+<div class="cell"><b>53²</b><span>2,809</span></div>
+<div class="cell"><b>54²</b><span>2,916</span></div>
+<div class="cell"><b>55²</b><span>3,025</span></div>
+<div class="cell"><b>56²</b><span>3,136</span></div>
+<div class="cell"><b>57²</b><span>3,249</span></div>
+<div class="cell"><b>58²</b><span>3,364</span></div>
+<div class="cell"><b>59²</b><span>3,481</span></div>
+<div class="cell"><b>60²</b><span>3,600</span></div></div></div>
+<div class="group"><h3>61–75</h3><div class="cells"><div class="cell"><b>61²</b><span>3,721</span></div>
+<div class="cell"><b>62²</b><span>3,844</span></div>
+<div class="cell"><b>63²</b><span>3,969</span></div>
+<div class="cell"><b>64²</b><span>4,096</span></div>
+<div class="cell"><b>65²</b><span>4,225</span></div>
+<div class="cell"><b>66²</b><span>4,356</span></div>
+<div class="cell"><b>67²</b><span>4,489</span></div>
+<div class="cell"><b>68²</b><span>4,624</span></div>
+<div class="cell"><b>69²</b><span>4,761</span></div>
+<div class="cell"><b>70²</b><span>4,900</span></div>
+<div class="cell"><b>71²</b><span>5,041</span></div>
+<div class="cell"><b>72²</b><span>5,184</span></div>
+<div class="cell"><b>73²</b><span>5,329</span></div>
+<div class="cell"><b>74²</b><span>5,476</span></div>
+<div class="cell"><b>75²</b><span>5,625</span></div></div></div>
+<div class="group"><h3>76–90</h3><div class="cells"><div class="cell"><b>76²</b><span>5,776</span></div>
+<div class="cell"><b>77²</b><span>5,929</span></div>
+<div class="cell"><b>78²</b><span>6,084</span></div>
+<div class="cell"><b>79²</b><span>6,241</span></div>
+<div class="cell"><b>80²</b><span>6,400</span></div>
+<div class="cell"><b>81²</b><span>6,561</span></div>
+<div class="cell"><b>82²</b><span>6,724</span></div>
+<div class="cell"><b>83²</b><span>6,889</span></div>
+<div class="cell"><b>84²</b><span>7,056</span></div>
+<div class="cell"><b>85²</b><span>7,225</span></div>
+<div class="cell"><b>86²</b><span>7,396</span></div>
+<div class="cell"><b>87²</b><span>7,569</span></div>
+<div class="cell"><b>88²</b><span>7,744</span></div>
+<div class="cell"><b>89²</b><span>7,921</span></div>
+<div class="cell"><b>90²</b><span>8,100</span></div></div></div>
+<div class="group"><h3>91–105</h3><div class="cells"><div class="cell"><b>91²</b><span>8,281</span></div>
+<div class="cell"><b>92²</b><span>8,464</span></div>
+<div class="cell"><b>93²</b><span>8,649</span></div>
+<div class="cell"><b>94²</b><span>8,836</span></div>
+<div class="cell"><b>95²</b><span>9,025</span></div>
+<div class="cell"><b>96²</b><span>9,216</span></div>
+<div class="cell"><b>97²</b><span>9,409</span></div>
+<div class="cell"><b>98²</b><span>9,604</span></div>
+<div class="cell"><b>99²</b><span>9,801</span></div>
+<div class="cell"><b>100²</b><span>10,000</span></div>
+<div class="cell"><b>101²</b><span>10,201</span></div>
+<div class="cell"><b>102²</b><span>10,404</span></div>
+<div class="cell"><b>103²</b><span>10,609</span></div>
+<div class="cell"><b>104²</b><span>10,816</span></div>
+<div class="cell"><b>105²</b><span>11,025</span></div></div></div>
+<div class="group"><h3>106–120</h3><div class="cells"><div class="cell"><b>106²</b><span>11,236</span></div>
+<div class="cell"><b>107²</b><span>11,449</span></div>
+<div class="cell"><b>108²</b><span>11,664</span></div>
+<div class="cell"><b>109²</b><span>11,881</span></div>
+<div class="cell"><b>110²</b><span>12,100</span></div>
+<div class="cell"><b>111²</b><span>12,321</span></div>
+<div class="cell"><b>112²</b><span>12,544</span></div>
+<div class="cell"><b>113²</b><span>12,769</span></div>
+<div class="cell"><b>114²</b><span>12,996</span></div>
+<div class="cell"><b>115²</b><span>13,225</span></div>
+<div class="cell"><b>116²</b><span>13,456</span></div>
+<div class="cell"><b>117²</b><span>13,689</span></div>
+<div class="cell"><b>118²</b><span>13,924</span></div>
+<div class="cell"><b>119²</b><span>14,161</span></div>
+<div class="cell"><b>120²</b><span>14,400</span></div></div></div>
+</div>
+<div class="view" id="v-cubes">
+<h2>🧊 Cubes <small>1³ to 50³</small></h2>
+<p class="sub">Perfect cubes from 1 to 50.</p>
+<div class="group"><h3>1–10</h3><div class="cells"><div class="cell"><b>1³</b><span>1</span></div>
+<div class="cell"><b>2³</b><span>8</span></div>
+<div class="cell"><b>3³</b><span>27</span></div>
+<div class="cell"><b>4³</b><span>64</span></div>
+<div class="cell"><b>5³</b><span>125</span></div>
+<div class="cell"><b>6³</b><span>216</span></div>
+<div class="cell"><b>7³</b><span>343</span></div>
+<div class="cell"><b>8³</b><span>512</span></div>
+<div class="cell"><b>9³</b><span>729</span></div>
+<div class="cell"><b>10³</b><span>1,000</span></div></div></div>
+<div class="group"><h3>11–20</h3><div class="cells"><div class="cell"><b>11³</b><span>1,331</span></div>
+<div class="cell"><b>12³</b><span>1,728</span></div>
+<div class="cell"><b>13³</b><span>2,197</span></div>
+<div class="cell"><b>14³</b><span>2,744</span></div>
+<div class="cell"><b>15³</b><span>3,375</span></div>
+<div class="cell"><b>16³</b><span>4,096</span></div>
+<div class="cell"><b>17³</b><span>4,913</span></div>
+<div class="cell"><b>18³</b><span>5,832</span></div>
+<div class="cell"><b>19³</b><span>6,859</span></div>
+<div class="cell"><b>20³</b><span>8,000</span></div></div></div>
+<div class="group"><h3>21–30</h3><div class="cells"><div class="cell"><b>21³</b><span>9,261</span></div>
+<div class="cell"><b>22³</b><span>10,648</span></div>
+<div class="cell"><b>23³</b><span>12,167</span></div>
+<div class="cell"><b>24³</b><span>13,824</span></div>
+<div class="cell"><b>25³</b><span>15,625</span></div>
+<div class="cell"><b>26³</b><span>17,576</span></div>
+<div class="cell"><b>27³</b><span>19,683</span></div>
+<div class="cell"><b>28³</b><span>21,952</span></div>
+<div class="cell"><b>29³</b><span>24,389</span></div>
+<div class="cell"><b>30³</b><span>27,000</span></div></div></div>
+<div class="group"><h3>31–40</h3><div class="cells"><div class="cell"><b>31³</b><span>29,791</span></div>
+<div class="cell"><b>32³</b><span>32,768</span></div>
+<div class="cell"><b>33³</b><span>35,937</span></div>
+<div class="cell"><b>34³</b><span>39,304</span></div>
+<div class="cell"><b>35³</b><span>42,875</span></div>
+<div class="cell"><b>36³</b><span>46,656</span></div>
+<div class="cell"><b>37³</b><span>50,653</span></div>
+<div class="cell"><b>38³</b><span>54,872</span></div>
+<div class="cell"><b>39³</b><span>59,319</span></div>
+<div class="cell"><b>40³</b><span>64,000</span></div></div></div>
+<div class="group"><h3>41–50</h3><div class="cells"><div class="cell"><b>41³</b><span>68,921</span></div>
+<div class="cell"><b>42³</b><span>74,088</span></div>
+<div class="cell"><b>43³</b><span>79,507</span></div>
+<div class="cell"><b>44³</b><span>85,184</span></div>
+<div class="cell"><b>45³</b><span>91,125</span></div>
+<div class="cell"><b>46³</b><span>97,336</span></div>
+<div class="cell"><b>47³</b><span>103,823</span></div>
+<div class="cell"><b>48³</b><span>110,592</span></div>
+<div class="cell"><b>49³</b><span>117,649</span></div>
+<div class="cell"><b>50³</b><span>125,000</span></div></div></div>
+</div>
+<div class="view" id="v-pct">
+<h2>💯 Percentage ↔ Fractions</h2>
+<p class="sub">Common fraction→percentage conversions used in SSC/Banking fast maths.</p>
+<div class="cells pct"><div class="cell"><b>1</b><span>100%</span></div>
+<div class="cell"><b>1/2</b><span>50%</span></div>
+<div class="cell"><b>1/3</b><span>33.33% or 33 ⅓%</span></div>
+<div class="cell"><b>2/3</b><span>66.66% or 66 ⅔%</span></div>
+<div class="cell"><b>1/4</b><span>25%</span></div>
+<div class="cell"><b>2/4</b><span>3/4</span></div>
+<div class="cell"><b>1/5</b><span>20%</span></div>
+<div class="cell"><b>2/5</b><span>40%</span></div>
+<div class="cell"><b>3/5</b><span>60%</span></div>
+<div class="cell"><b>4/5</b><span>80%</span></div>
+<div class="cell"><b>1/6</b><span>16.66% or 16 ⅔%</span></div>
+<div class="cell"><b>2/6</b><span>3/6</span></div>
+<div class="cell"><b>4/6</b><span>5/6</span></div>
+<div class="cell"><b>1/7</b><span>14.28% or 14 2/7%</span></div>
+<div class="cell"><b>2/7</b><span>28.57% or 28 4/7%</span></div>
+<div class="cell"><b>3/7</b><span>42.84% or 42 6/7%</span></div>
+<div class="cell"><b>4/7</b><span>57.14% or 57 1/7%</span></div>
+<div class="cell"><b>5/7</b><span>71.42% or 71 3/7%</span></div>
+<div class="cell"><b>6/7</b><span>85.71% or 85 5/7%</span></div>
+<div class="cell"><b>1/8</b><span>12.5% or 12 ½%</span></div>
+<div class="cell"><b>2/8</b><span>3/8</span></div>
+<div class="cell"><b>4/8</b><span>5/8</span></div>
+<div class="cell"><b>6/8</b><span>7/8</span></div>
+<div class="cell"><b>1/9</b><span>11.11% or 11 ⅑%</span></div>
+<div class="cell"><b>2/9</b><span>22.22% or 22 2/9%</span></div>
+<div class="cell"><b>3/9</b><span>4/9</span></div>
+<div class="cell"><b>5/9</b><span>55.55% or 55 5/9%</span></div>
+<div class="cell"><b>6/9</b><span>7/9</span></div>
+<div class="cell"><b>8/9</b><span>88.88% or 88 8/9%</span></div>
+<div class="cell"><b>1/10</b><span>10%</span></div>
+<div class="cell"><b>1/11</b><span>9.09% or 9 1/11%</span></div>
+<div class="cell"><b>2/11</b><span>18.18% or 18 2/11%</span></div>
+<div class="cell"><b>3/11</b><span>27.27% or 27 3/11%</span></div>
+<div class="cell"><b>4/11</b><span>36.36% or 36 4/11%</span></div>
+<div class="cell"><b>5/11</b><span>45.45% or 45 5/11%</span></div>
+<div class="cell"><b>6/11</b><span>54.54% or 54 6/11%</span></div>
+<div class="cell"><b>7/11</b><span>63.63% or 63 7/11%</span></div>
+<div class="cell"><b>8/11</b><span>72.72% or 72 8/11%</span></div>
+<div class="cell"><b>9/11</b><span>81.81% or 81 9/11%</span></div>
+<div class="cell"><b>10/11</b><span>90.90% or 90 10/11%</span></div>
+<div class="cell"><b>1/12</b><span>8.33% or 8 ⅓%</span></div>
+<div class="cell"><b>7/12</b><span>58.33% or 58 ⅓%</span></div>
+<div class="cell"><b>1/13</b><span>7.69%</span></div>
+<div class="cell"><b>1/14</b><span>7.14% or 7 1/7%</span></div>
+<div class="cell"><b>1/15</b><span>6.66% or 6 ⅔%</span></div>
+<div class="cell"><b>2/15</b><span>13.33% or 13 ⅓%</span></div>
+<div class="cell"><b>4/15</b><span>26.66% or 26 ⅔%</span></div>
+<div class="cell"><b>1/16</b><span>6.25% or 6 ¼%</span></div>
+<div class="cell"><b>3/16</b><span>18.75% or 18 ¾%</span></div>
+<div class="cell"><b>5/16</b><span>31.25% or 31 ¼%</span></div>
+<div class="cell"><b>7/16</b><span>43.75% or 43 ¾%</span></div>
+<div class="cell"><b>9/16</b><span>56.25% or 56 ¼%</span></div>
+<div class="cell"><b>1/17</b><span>5.88%</span></div>
+<div class="cell"><b>1/18</b><span>5.55% or 5 5/9%</span></div>
+<div class="cell"><b>1/19</b><span>5.26%</span></div>
+<div class="cell"><b>1/20</b><span>5%</span></div>
+<div class="cell"><b>1/24</b><span>4.16% or 4 1/6%</span></div>
+<div class="cell"><b>1/30</b><span>3.33% or 3 ⅓%</span></div>
+<div class="cell"><b>1/40</b><span>2.5% or 2 ½%</span></div></div></div>
+<div class="view" id="v-triplets">
+<h2>🔺 Pythagorean Triplets <small>c ≤ 200</small></h2>
+<p class="sub">All primitive triplets (a² + b² = c², a&lt;b&lt;c).</p>
+<div class="cells triplets"><div class="cell"><b>(3, 4, 5)</b><span>3²+4² = 5²</span></div>
+<div class="cell"><b>(5, 12, 13)</b><span>5²+12² = 13²</span></div>
+<div class="cell"><b>(8, 15, 17)</b><span>8²+15² = 17²</span></div>
+<div class="cell"><b>(7, 24, 25)</b><span>7²+24² = 25²</span></div>
+<div class="cell"><b>(20, 21, 29)</b><span>20²+21² = 29²</span></div>
+<div class="cell"><b>(12, 35, 37)</b><span>12²+35² = 37²</span></div>
+<div class="cell"><b>(9, 40, 41)</b><span>9²+40² = 41²</span></div>
+<div class="cell"><b>(28, 45, 53)</b><span>28²+45² = 53²</span></div>
+<div class="cell"><b>(11, 60, 61)</b><span>11²+60² = 61²</span></div>
+<div class="cell"><b>(33, 56, 65)</b><span>33²+56² = 65²</span></div>
+<div class="cell"><b>(16, 63, 65)</b><span>16²+63² = 65²</span></div>
+<div class="cell"><b>(48, 55, 73)</b><span>48²+55² = 73²</span></div>
+<div class="cell"><b>(36, 77, 85)</b><span>36²+77² = 85²</span></div>
+<div class="cell"><b>(13, 84, 85)</b><span>13²+84² = 85²</span></div>
+<div class="cell"><b>(39, 80, 89)</b><span>39²+80² = 89²</span></div>
+<div class="cell"><b>(65, 72, 97)</b><span>65²+72² = 97²</span></div>
+<div class="cell"><b>(20, 99, 101)</b><span>20²+99² = 101²</span></div>
+<div class="cell"><b>(60, 91, 109)</b><span>60²+91² = 109²</span></div>
+<div class="cell"><b>(15, 112, 113)</b><span>15²+112² = 113²</span></div>
+<div class="cell"><b>(44, 117, 125)</b><span>44²+117² = 125²</span></div>
+<div class="cell"><b>(88, 105, 137)</b><span>88²+105² = 137²</span></div>
+<div class="cell"><b>(24, 143, 145)</b><span>24²+143² = 145²</span></div>
+<div class="cell"><b>(17, 144, 145)</b><span>17²+144² = 145²</span></div>
+<div class="cell"><b>(51, 140, 149)</b><span>51²+140² = 149²</span></div>
+<div class="cell"><b>(85, 132, 157)</b><span>85²+132² = 157²</span></div>
+<div class="cell"><b>(119, 120, 169)</b><span>119²+120² = 169²</span></div>
+<div class="cell"><b>(52, 165, 173)</b><span>52²+165² = 173²</span></div>
+<div class="cell"><b>(19, 180, 181)</b><span>19²+180² = 181²</span></div>
+<div class="cell"><b>(104, 153, 185)</b><span>104²+153² = 185²</span></div>
+<div class="cell"><b>(57, 176, 185)</b><span>57²+176² = 185²</span></div>
+<div class="cell"><b>(95, 168, 193)</b><span>95²+168² = 193²</span></div>
+<div class="cell"><b>(28, 195, 197)</b><span>28²+195² = 197²</span></div></div></div>
+<div class="view" id="v-roots">
+<h2>🌱 Square Roots <small>√1 to √10</small></h2>
+<p class="sub">Memorize these root values — they appear in almost every exam.</p>
+<div class="cells roots"><div class="cell"><b>√1</b><span>1</span></div>
+<div class="cell"><b>√2</b><span>1.414</span></div>
+<div class="cell"><b>√3</b><span>1.732</span></div>
+<div class="cell"><b>√4</b><span>2</span></div>
+<div class="cell"><b>√5</b><span>2.236</span></div>
+<div class="cell"><b>√6</b><span>2.449 = 2.45</span></div>
+<div class="cell"><b>√7</b><span>2.645 = 2.65</span></div>
+<div class="cell"><b>√8</b><span>2.828</span></div>
+<div class="cell"><b>√9</b><span>3</span></div>
+<div class="cell"><b>√10</b><span>3.162</span></div></div></div>
+<div class="view" id="v-powers">
+<h2>🚀 Higher Powers</h2>
+<p class="sub">Powers of 2, 3, 4, 5 and 9 up to power 10.</p>
+<div class="group"><h3>Powers of 2</h3><div class="cells"><div class="cell"><b>2^1</b><span>2</span></div>
+<div class="cell"><b>2^2</b><span>4</span></div>
+<div class="cell"><b>2^3</b><span>8</span></div>
+<div class="cell"><b>2^4</b><span>16</span></div>
+<div class="cell"><b>2^5</b><span>32</span></div>
+<div class="cell"><b>2^6</b><span>64</span></div>
+<div class="cell"><b>2^7</b><span>128</span></div>
+<div class="cell"><b>2^8</b><span>256</span></div>
+<div class="cell"><b>2^9</b><span>512</span></div>
+<div class="cell"><b>2^10</b><span>1024</span></div></div></div>
+<div class="group"><h3>Powers of 3</h3><div class="cells"><div class="cell"><b>3^1</b><span>3</span></div>
+<div class="cell"><b>3^2</b><span>9</span></div>
+<div class="cell"><b>3^3</b><span>27</span></div>
+<div class="cell"><b>3^4</b><span>81</span></div>
+<div class="cell"><b>3^5</b><span>243</span></div>
+<div class="cell"><b>3^6</b><span>729</span></div>
+<div class="cell"><b>3^7</b><span>2187</span></div>
+<div class="cell"><b>3^8</b><span>6561</span></div>
+<div class="cell"><b>3^9</b><span>19683</span></div>
+<div class="cell"><b>3^10</b><span>59049</span></div></div></div>
+<div class="group"><h3>Powers of 4</h3><div class="cells"><div class="cell"><b>4^1</b><span>4</span></div>
+<div class="cell"><b>4^2</b><span>16</span></div>
+<div class="cell"><b>4^3</b><span>64</span></div>
+<div class="cell"><b>4^4</b><span>256</span></div>
+<div class="cell"><b>4^5</b><span>1024</span></div>
+<div class="cell"><b>4^6</b><span>4096</span></div>
+<div class="cell"><b>4^7</b><span>16384</span></div>
+<div class="cell"><b>4^8</b><span>65536</span></div>
+<div class="cell"><b>4^9</b><span>262144</span></div>
+<div class="cell"><b>4^10</b><span>1048576</span></div></div></div>
+<div class="group"><h3>Powers of 5</h3><div class="cells"><div class="cell"><b>5^1</b><span>5</span></div>
+<div class="cell"><b>5^2</b><span>25</span></div>
+<div class="cell"><b>5^3</b><span>125</span></div>
+<div class="cell"><b>5^4</b><span>625</span></div>
+<div class="cell"><b>5^5</b><span>3125</span></div>
+<div class="cell"><b>5^6</b><span>15625</span></div>
+<div class="cell"><b>5^7</b><span>78125</span></div>
+<div class="cell"><b>5^8</b><span>390625</span></div>
+<div class="cell"><b>5^9</b><span>1953125</span></div>
+<div class="cell"><b>5^10</b><span>9765625</span></div></div></div>
+<div class="group"><h3>Powers of 9</h3><div class="cells"><div class="cell"><b>9^1</b><span>9</span></div>
+<div class="cell"><b>9^2</b><span>81</span></div>
+<div class="cell"><b>9^3</b><span>729</span></div>
+<div class="cell"><b>9^4</b><span>6561</span></div>
+<div class="cell"><b>9^5</b><span>59049</span></div>
+<div class="cell"><b>9^6</b><span>531441</span></div>
+<div class="cell"><b>9^7</b><span>4782969</span></div>
+<div class="cell"><b>9^8</b><span>43046721</span></div>
+<div class="cell"><b>9^9</b><span>387420489</span></div>
+<div class="cell"><b>9^10</b><span>3486784401</span></div></div></div>
+</div>
+<div class="view" id="v-primes">
+<h2>🔢 Prime Numbers <small>1 to 300</small></h2>
+<p class="sub">Total primes: 62. Memorize for number-system questions.</p>
+<div class="group"><h3>1–100 <em>(25 primes)</em></h3><div class="chips"><span class="chip">2</span>
+<span class="chip">3</span>
+<span class="chip">5</span>
+<span class="chip">7</span>
+<span class="chip">11</span>
+<span class="chip">13</span>
+<span class="chip">17</span>
+<span class="chip">19</span>
+<span class="chip">23</span>
+<span class="chip">29</span>
+<span class="chip">31</span>
+<span class="chip">37</span>
+<span class="chip">41</span>
+<span class="chip">43</span>
+<span class="chip">47</span>
+<span class="chip">53</span>
+<span class="chip">59</span>
+<span class="chip">61</span>
+<span class="chip">67</span>
+<span class="chip">71</span>
+<span class="chip">73</span>
+<span class="chip">79</span>
+<span class="chip">83</span>
+<span class="chip">89</span>
+<span class="chip">97</span></div></div>
+<div class="group"><h3>101–200 <em>(21 primes)</em></h3><div class="chips"><span class="chip">101</span>
+<span class="chip">103</span>
+<span class="chip">107</span>
+<span class="chip">109</span>
+<span class="chip">113</span>
+<span class="chip">127</span>
+<span class="chip">131</span>
+<span class="chip">137</span>
+<span class="chip">139</span>
+<span class="chip">149</span>
+<span class="chip">151</span>
+<span class="chip">157</span>
+<span class="chip">163</span>
+<span class="chip">167</span>
+<span class="chip">173</span>
+<span class="chip">179</span>
+<span class="chip">181</span>
+<span class="chip">191</span>
+<span class="chip">193</span>
+<span class="chip">197</span>
+<span class="chip">199</span></div></div>
+<div class="group"><h3>201–300 <em>(16 primes)</em></h3><div class="chips"><span class="chip">211</span>
+<span class="chip">223</span>
+<span class="chip">227</span>
+<span class="chip">229</span>
+<span class="chip">233</span>
+<span class="chip">239</span>
+<span class="chip">241</span>
+<span class="chip">251</span>
+<span class="chip">257</span>
+<span class="chip">263</span>
+<span class="chip">269</span>
+<span class="chip">271</span>
+<span class="chip">277</span>
+<span class="chip">281</span>
+<span class="chip">283</span>
+<span class="chip">293</span></div></div>
+</div>
+<div class="view" id="v-ci">
+<h2>💰 Compound Interest Table <small>per ₹100</small></h2>
+<p class="sub">SI% = Simple Interest %, CI% = Compound Interest % on ₹100 over n years.</p>
+<div class="group"><h3>2 Years</h3><table class="ci"><thead><tr><th>Rate</th><th>SI %</th><th>CI %</th></tr></thead><tbody><tr><td>2%</td><td>4%</td><td>4.04%</td></tr><tr><td>3%</td><td>6%</td><td>6.09%</td></tr><tr><td>4%</td><td>8%</td><td>8.16%</td></tr><tr><td>5%</td><td>10%</td><td>10.25%</td></tr><tr><td>6%</td><td>12%</td><td>12.36%</td></tr><tr><td>7%</td><td>14%</td><td>14.49%</td></tr><tr><td>8%</td><td>16%</td><td>16.64%</td></tr><tr><td>9%</td><td>18%</td><td>18.81%</td></tr><tr><td>10%</td><td>20%</td><td>21%</td></tr><tr><td>11%</td><td>22%</td><td>23.21%</td></tr><tr><td>12%</td><td>24%</td><td>25.44%</td></tr><tr><td>15%</td><td>30%</td><td>32.25%</td></tr><tr><td>20%</td><td>40%</td><td>44%</td></tr><tr><td>25%</td><td>50%</td><td>56.25%</td></tr><tr><td>30%</td><td>60%</td><td>69%</td></tr></tbody></table></div>
+<div class="group"><h3>3 Years</h3><table class="ci"><thead><tr><th>Rate</th><th>SI %</th><th>CI %</th></tr></thead><tbody><tr><td>2%</td><td>6%</td><td>6.12%</td></tr><tr><td>3%</td><td>9%</td><td>9.27%</td></tr><tr><td>4%</td><td>12%</td><td>12.49%</td></tr><tr><td>5%</td><td>15%</td><td>15.76%</td></tr><tr><td>6%</td><td>18%</td><td>19.1%</td></tr><tr><td>7%</td><td>21%</td><td>22.5%</td></tr><tr><td>8%</td><td>24%</td><td>25.97%</td></tr><tr><td>9%</td><td>27%</td><td>29.5%</td></tr><tr><td>10%</td><td>30%</td><td>33.1%</td></tr><tr><td>11%</td><td>33%</td><td>36.76%</td></tr><tr><td>12%</td><td>36%</td><td>40.49%</td></tr><tr><td>15%</td><td>45%</td><td>52.09%</td></tr><tr><td>20%</td><td>60%</td><td>72.8%</td></tr><tr><td>25%</td><td>75%</td><td>95.31%</td></tr><tr><td>30%</td><td>90%</td><td>119.7%</td></tr></tbody></table></div>
+<div class="group"><h3>4 Years</h3><table class="ci"><thead><tr><th>Rate</th><th>SI %</th><th>CI %</th></tr></thead><tbody><tr><td>2%</td><td>8%</td><td>8.24%</td></tr><tr><td>3%</td><td>12%</td><td>12.55%</td></tr><tr><td>4%</td><td>16%</td><td>16.99%</td></tr><tr><td>5%</td><td>20%</td><td>21.55%</td></tr><tr><td>6%</td><td>24%</td><td>26.25%</td></tr><tr><td>7%</td><td>28%</td><td>31.08%</td></tr><tr><td>8%</td><td>32%</td><td>36.05%</td></tr><tr><td>9%</td><td>36%</td><td>41.16%</td></tr><tr><td>10%</td><td>40%</td><td>46.41%</td></tr><tr><td>11%</td><td>44%</td><td>51.81%</td></tr><tr><td>12%</td><td>48%</td><td>57.35%</td></tr><tr><td>15%</td><td>60%</td><td>74.9%</td></tr><tr><td>20%</td><td>80%</td><td>107.36%</td></tr><tr><td>25%</td><td>100%</td><td>144.14%</td></tr><tr><td>30%</td><td>120%</td><td>185.61%</td></tr></tbody></table></div>
+<div class="group"><h3>5 Years</h3><table class="ci"><thead><tr><th>Rate</th><th>SI %</th><th>CI %</th></tr></thead><tbody><tr><td>2%</td><td>10%</td><td>10.41%</td></tr><tr><td>3%</td><td>15%</td><td>15.93%</td></tr><tr><td>4%</td><td>20%</td><td>21.67%</td></tr><tr><td>5%</td><td>25%</td><td>27.63%</td></tr><tr><td>6%</td><td>30%</td><td>33.82%</td></tr><tr><td>7%</td><td>35%</td><td>40.26%</td></tr><tr><td>8%</td><td>40%</td><td>46.93%</td></tr><tr><td>9%</td><td>45%</td><td>53.86%</td></tr><tr><td>10%</td><td>50%</td><td>61.05%</td></tr><tr><td>11%</td><td>55%</td><td>68.51%</td></tr><tr><td>12%</td><td>60%</td><td>76.23%</td></tr><tr><td>15%</td><td>75%</td><td>101.14%</td></tr><tr><td>20%</td><td>100%</td><td>148.83%</td></tr><tr><td>25%</td><td>125%</td><td>205.18%</td></tr><tr><td>30%</td><td>150%</td><td>271.29%</td></tr></tbody></table></div>
+</div>
+<footer>Extracted from Calc Master (com.rsdeveloper.calcmaster) Learn Mode · for personal study</footer>
+</div>
+<script>
+function showView(id) {
+  document.querySelectorAll('.view').forEach(function(v){ v.classList.remove('active'); });
+  document.querySelectorAll('.cat-btn').forEach(function(b){ b.classList.remove('active'); });
+  var v = document.getElementById(id);
+  if (v) v.classList.add('active');
+  document.querySelectorAll('.cat-btn').forEach(function(b){
+    if (b.getAttribute('data-view') === id) b.classList.add('active');
+  });
+  window.scrollTo(0,0);
+}
+showView('v-tables');
+</script>
+</body>
+</html>
