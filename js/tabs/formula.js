@@ -19,6 +19,72 @@
     return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   }
 
+  function getColorfulCardStyles(theme) {
+    var accents = theme === 'dark'
+      ? ['#34D399', '#60A5FA', '#A78BFA', '#FB7185', '#FBBF24', '#22D3EE']
+      : ['#047857', '#1D4ED8', '#6D28D9', '#BE123C', '#B45309', '#0E7490'];
+    var rgbValues = ['52,211,153', '96,165,250', '167,139,250', '251,113,133', '251,191,36', '34,211,238'];
+    var tintAlpha = theme === 'dark' ? '.14' : '.08';
+    var borderAlpha = theme === 'dark' ? '.34' : '.24';
+    var iconAlpha = theme === 'dark' ? '.16' : '.10';
+    var rules = '';
+
+    accents.forEach(function (accent, index) {
+      var position = index + 1;
+      rules +=
+        'body .chapter-card:nth-child(6n+' + position + '),' +
+        'body .section-card:nth-child(6n+' + position + '),' +
+        'body .formula-card:nth-child(6n+' + position + '){' +
+          '--ez-card-accent:' + accent + ';' +
+          '--ez-card-rgb:' + rgbValues[index] + ';' +
+        '}';
+    });
+
+    return rules +
+      'body :is(.chapter-card,.section-card,.formula-card){' +
+        'position:relative;overflow:hidden;' +
+        'background:linear-gradient(135deg,rgba(var(--ez-card-rgb),'+ tintAlpha +'),transparent 62%),var(--ez-formula-card)!important;' +
+        'border-color:rgba(var(--ez-card-rgb),'+ borderAlpha +')!important;' +
+        'box-shadow:0 8px 22px rgba(0,0,0,' + (theme === 'dark' ? '.18' : '.07') + ')!important;' +
+      '}' +
+      'body :is(.chapter-card,.section-card,.formula-card)::before{' +
+        'content:"";position:absolute;inset:0 auto 0 0;width:3px;background:var(--ez-card-accent);opacity:.92;' +
+      '}' +
+      'body :is(.chapter-card,.section-card){transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease!important;}' +
+      'body :is(.chapter-card,.section-card):hover{' +
+        'transform:translateY(-3px);border-color:var(--ez-card-accent)!important;' +
+        'box-shadow:0 14px 30px rgba(var(--ez-card-rgb),' + (theme === 'dark' ? '.18' : '.14') + ')!important;' +
+      '}' +
+      'body .chapter-card .chapter-icon{' +
+        'display:inline-grid;place-items:center;min-width:36px;height:36px;padding:0 8px;margin-right:10px;' +
+        'background:rgba(var(--ez-card-rgb),'+ iconAlpha +')!important;' +
+        'border:1px solid rgba(var(--ez-card-rgb),'+ borderAlpha +');border-radius:10px;' +
+        'color:var(--ez-card-accent)!important;font-weight:800;' +
+      '}' +
+      'body :is(.chapter-card,.section-card) .go-arrow{color:var(--ez-card-accent)!important;}' +
+      'body .chapter-card .tag{' +
+        'background:rgba(var(--ez-card-rgb),'+ iconAlpha +')!important;' +
+        'border:1px solid rgba(var(--ez-card-rgb),'+ borderAlpha +')!important;' +
+        'color:var(--ez-card-accent)!important;' +
+      '}' +
+      'body .formula-card .formula-card-formula{' +
+        'background:linear-gradient(135deg,rgba(var(--ez-card-rgb),'+ iconAlpha +'),transparent 75%),var(--ez-formula-surface)!important;' +
+        'border-left-color:var(--ez-card-accent)!important;' +
+      '}' +
+      'body .formula-card .formula-card-trick{' +
+        'background:rgba(var(--ez-card-rgb),'+ iconAlpha +')!important;' +
+        'border-color:rgba(var(--ez-card-rgb),'+ borderAlpha +')!important;' +
+        'color:var(--ez-formula-text)!important;' +
+      '}' +
+      'body .formula-card .formula-card-title{color:var(--ez-card-accent)!important;}' +
+      'body .formula-card .formula-card-title :is(.katex,.katex *){color:var(--ez-card-accent)!important;border-color:var(--ez-card-accent)!important;}' +
+      'body .formula-card .katex-display{' +
+        'background:linear-gradient(135deg,rgba(var(--ez-card-rgb),'+ iconAlpha +'),transparent 72%),var(--ez-formula-surface)!important;' +
+        'border-left-color:var(--ez-card-accent)!important;' +
+      '}' +
+      '@media (prefers-reduced-motion:reduce){body :is(.chapter-card,.section-card){transition:none!important;}}';
+  }
+
   function getThemeStyles(theme) {
     var palette = theme === 'dark'
       ? { bg: '#0A0D12', surface: '#111620', card: '#161B26', border: '#1E2535', text: '#EAF0F7', muted: '#9BA7B8', soft: 'rgba(0,200,150,.10)' }
@@ -59,7 +125,8 @@
     'body :is(article,section,div)[class*="formula"],body :is(article,section,div)[class*="equation"],body :is(article,section,div)[class*="calculation"],body :is(article,section,div)[class*="result"],body :is(article,section,div)[class*="card"],body :is(article,section,div)[class*="panel"]{background-color:var(--ez-formula-card)!important;border-color:var(--ez-formula-border)!important;color:var(--ez-formula-text)!important;}' +
     'body :is(.katex,mjx-container){color:var(--ez-formula-text)!important;}' +
     'body :is(.katex-display,mjx-container[display="true"]){display:block;overflow-x:auto;background:linear-gradient(135deg,var(--ez-formula-soft),transparent 62%),var(--ez-formula-surface)!important;border:1px solid var(--ez-formula-border)!important;border-left:3px solid var(--ez-formula-accent)!important;border-radius:10px!important;margin:1rem 0!important;padding:.8rem 1rem!important;color:var(--ez-formula-text)!important;}' +
-    'body img{border-radius:8px;}';
+    'body img{border-radius:8px;}' +
+    getColorfulCardStyles(theme);
   }
 
   function applyFormulaTheme() {
