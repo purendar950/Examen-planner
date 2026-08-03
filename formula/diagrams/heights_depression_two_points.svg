@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" role="img" aria-labelledby="title desc">
+  <title id="title">Angles of elevation and depression</title>
+  <desc id="desc">A tower of height h viewed from two points at distances x and x plus d, showing elevation angles alpha and beta and the horizontal line of depression.</desc>
+  <rect width="760" height="360" rx="24" fill="#f8fafc"/>
+  <path d="M45 300 H715" stroke="#64748b" stroke-width="4"/>
+  <rect x="115" y="62" width="54" height="238" rx="5" fill="#cbd5e1" stroke="#334155" stroke-width="4"/>
+  <path d="M142 62 H690" stroke="#94a3b8" stroke-width="3" stroke-dasharray="10 9"/>
+  <path d="M142 62 L390 300 M142 62 L660 300" stroke="#0f766e" stroke-width="5"/>
+  <path d="M343 300 A48 48 0 0 1 356 267 M604 300 A58 58 0 0 1 619 259" fill="none" stroke="#f97316" stroke-width="5"/>
+  <path d="M640 62 A50 50 0 0 1 646 85" fill="none" stroke="#8b5cf6" stroke-width="5"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a" font-weight="700">
+    <text x="74" y="190" font-size="26">h</text>
+    <text x="253" y="327" font-size="23">x</text>
+    <text x="510" y="327" font-size="23">d</text>
+    <text x="350" y="284" font-size="24" fill="#f97316">α</text>
+    <text x="614" y="282" font-size="24" fill="#f97316">β</text>
+    <text x="648" y="104" font-size="22" fill="#8b5cf6">β</text>
+  </g>
+  <g font-family="Inter,Arial,sans-serif" fill="#475569" font-size="18">
+    <text x="185" y="49">horizontal through tower top</text>
+    <text x="546" y="135">angle of depression</text>
+    <text x="305" y="240">near observer</text>
+    <text x="577" y="238">far observer</text>
+  </g>
+</svg>
