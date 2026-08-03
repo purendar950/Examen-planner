@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" role="img" aria-labelledby="title desc">
+  <title id="title">Squares inscribed in a circle and semicircle</title>
+  <desc id="desc">Three panels show a square inside a circle, a circle inside a square, and a square inside a semicircle with key radius and diagonal relationships.</desc>
+  <rect width="900" height="360" rx="24" fill="#f8fafc"/>
+  <g transform="translate(35 35)">
+    <rect width="250" height="290" rx="18" fill="#eff6ff" stroke="#bfdbfe" stroke-width="3"/>
+    <circle cx="125" cy="125" r="88" fill="none" stroke="#2563eb" stroke-width="5"/>
+    <rect x="63" y="63" width="124" height="124" fill="#fef3c7" fill-opacity=".8" stroke="#d97706" stroke-width="5" transform="rotate(45 125 125)"/>
+    <path d="M63 187 L187 63" stroke="#f97316" stroke-width="4"/>
+    <text x="38" y="245" font-family="Inter,Arial" font-size="20" font-weight="800" fill="#0f172a">Square in circle</text>
+    <text x="48" y="272" font-family="Inter,Arial" font-size="17" fill="#475569">diagonal = 2r</text>
+  </g>
+  <g transform="translate(325 35)">
+    <rect width="250" height="290" rx="18" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="3"/>
+    <rect x="37" y="37" width="176" height="176" fill="#dcfce7" stroke="#16a34a" stroke-width="5"/>
+    <circle cx="125" cy="125" r="88" fill="#cffafe" fill-opacity=".7" stroke="#0891b2" stroke-width="5"/>
+    <path d="M125 125 H213" stroke="#f97316" stroke-width="4"/>
+    <text x="39" y="245" font-family="Inter,Arial" font-size="20" font-weight="800" fill="#0f172a">Circle in square</text>
+    <text x="62" y="272" font-family="Inter,Arial" font-size="17" fill="#475569">side = 2r</text>
+  </g>
+  <g transform="translate(615 35)">
+    <rect width="250" height="290" rx="18" fill="#faf5ff" stroke="#e9d5ff" stroke-width="3"/>
+    <path d="M30 190 A95 95 0 0 1 220 190" fill="#ede9fe" stroke="#7c3aed" stroke-width="5"/>
+    <path d="M30 190 H220" stroke="#7c3aed" stroke-width="5"/>
+    <rect x="82" y="95" width="86" height="95" fill="#fef3c7" fill-opacity=".85" stroke="#d97706" stroke-width="5"/>
+    <path d="M125 190 L168 95" stroke="#f97316" stroke-width="4"/>
+    <text x="31" y="245" font-family="Inter,Arial" font-size="20" font-weight="800" fill="#0f172a">Square in semicircle</text>
+    <text x="46" y="272" font-family="Inter,Arial" font-size="17" fill="#475569">corner lies on arc</text>
+  </g>
+</svg>

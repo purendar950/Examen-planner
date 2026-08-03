@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" role="img" aria-labelledby="title desc">
+  <title id="title">Right triangle trigonometric ratios</title>
+  <desc id="desc">A right triangle labels perpendicular P, base B, hypotenuse H, angle theta, and the six trigonometric ratios.</desc>
+  <rect width="720" height="360" rx="24" fill="#f8fafc"/>
+  <g stroke="#0f766e" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M70 280 L70 72 L352 280 Z"/>
+    <path d="M70 250 H100 V280" stroke-width="4"/>
+    <path d="M292 280 A60 60 0 0 0 273 237" stroke="#f97316" stroke-width="5"/>
+  </g>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a">
+    <text x="38" y="180" font-size="26" font-weight="700">P</text>
+    <text x="200" y="318" font-size="26" font-weight="700">B</text>
+    <text x="214" y="155" font-size="26" font-weight="700">H</text>
+    <text x="285" y="255" font-size="27" font-weight="800" fill="#f97316">θ</text>
+    <text x="408" y="76" font-size="24" font-weight="800" fill="#0f766e">Basic ratios</text>
+    <text x="408" y="120" font-size="22">sin θ = P / H</text>
+    <text x="408" y="158" font-size="22">cos θ = B / H</text>
+    <text x="408" y="196" font-size="22">tan θ = P / B</text>
+    <text x="408" y="242" font-size="19" fill="#475569">cosec θ = H/P</text>
+    <text x="408" y="274" font-size="19" fill="#475569">sec θ = H/B</text>
+    <text x="408" y="306" font-size="19" fill="#475569">cot θ = B/P</text>
+  </g>
+</svg>

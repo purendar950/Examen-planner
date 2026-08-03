@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" role="img" aria-labelledby="title desc">
+  <title id="title">Minor and major segments of a circle</title>
+  <desc id="desc">A circle with center O, radii to chord endpoints A and B, central angle theta, and labeled minor and major segments.</desc>
+  <rect width="720" height="360" rx="24" fill="#f8fafc"/>
+  <circle cx="260" cy="180" r="132" fill="#dbeafe" stroke="#2563eb" stroke-width="5"/>
+  <path d="M151 255 Q260 320 369 255 L151 255" fill="#fb923c" fill-opacity=".75"/>
+  <path d="M151 255 A132 132 0 1 1 369 255 Q260 320 151 255" fill="#60a5fa" fill-opacity=".28"/>
+  <path d="M260 180 L151 255 M260 180 L369 255 M151 255 H369" stroke="#0f172a" stroke-width="4" fill="none"/>
+  <path d="M227 203 A40 40 0 0 1 293 203" stroke="#8b5cf6" stroke-width="5" fill="none"/>
+  <g font-family="Inter,Arial,sans-serif" fill="#0f172a" font-weight="700">
+    <text x="247" y="174" font-size="22">O</text>
+    <text x="127" y="278" font-size="22">A</text>
+    <text x="376" y="278" font-size="22">B</text>
+    <text x="249" y="220" font-size="24" fill="#8b5cf6">θ</text>
+    <text x="210" y="288" font-size="20">minor segment</text>
+    <text x="205" y="96" font-size="22" fill="#1d4ed8">major segment</text>
+    <text x="455" y="118" font-size="22" fill="#2563eb">sector AOB</text>
+    <text x="455" y="158" font-size="21">segment area</text>
+    <text x="455" y="194" font-size="20" fill="#475569">= sector area</text>
+    <text x="455" y="226" font-size="20" fill="#475569">− triangle area</text>
+  </g>
+</svg>
