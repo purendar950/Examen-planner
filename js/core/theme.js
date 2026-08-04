@@ -4,6 +4,7 @@
 function ezApplyTheme(t) {
   document.documentElement.dataset.theme = t;
   try { localStorage.setItem('ez_theme', t); } catch(e) {}
+  window.dispatchEvent(new CustomEvent('ez-theme-change', { detail: { theme: t } }));
   const b = document.getElementById('ez-theme-btn');
   if (b) { b.textContent = t === 'light' ? '🌙' : '☀️'; b.title = t === 'light' ? 'Switch to dark theme' : 'Switch to light theme'; }
 }
