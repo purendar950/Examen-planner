@@ -42,6 +42,40 @@
   ];
   var VALID_QUIZ_IDS = new Set(QUIZ_CHOICES.map(function (entry) { return entry[0]; }));
 
+  /* Which settings each question type actually reads. Normalized settings hold
+     every key (unused ones carry difficulty fallbacks), so merging presets must
+     consult this map or one preset's fallback would overwrite another's real
+     range. Types absent from the map read no settings. */
+  var QUIZ_SETTING_KEYS = {
+    addition: ['digits'], subtraction: ['digits'],
+    mult1: ['multFrom', 'multTo', 'multiplierFrom', 'multiplierTo'],
+    mult2: ['multFrom', 'multTo', 'multiplierFrom', 'multiplierTo'],
+    mult3: ['multFrom', 'multTo', 'multiplierFrom', 'multiplierTo'],
+    tablewrite: ['multFrom', 'multTo', 'multiplierFrom', 'multiplierTo'],
+    mult2d: ['mult2Min', 'mult2Max'],
+    mult3d: ['mult3Min', 'mult3Max', 'mult3ByMin', 'mult3ByMax'],
+    squares: ['sqMin', 'sqMax'], sqroots: ['sqMin', 'sqMax'],
+    cubes: ['cubeMin', 'cubeMax'], cuberoots: ['cubeMin', 'cubeMax'],
+    primeinrange: ['primeMax'], isprime: ['primeMax'],
+    ci_si: ['ciYears'], ci_ci: ['ciYears']
+  };
+  /* The lower end of a range pair. When two presets both own a key, ranges are
+     widened rather than one silently winning: lows take the minimum, everything
+     else takes the maximum. */
+  var COMBINE_LOW_KEYS = {
+    multFrom: true, multiplierFrom: true, mult2Min: true, mult3Min: true,
+    mult3ByMin: true, sqMin: true, cubeMin: true
+  };
+  function settingKeysFor(quizIds) {
+    var keys = [];
+    (quizIds || []).forEach(function (id) {
+      (QUIZ_SETTING_KEYS[id] || []).forEach(function (key) {
+        if (keys.indexOf(key) < 0) keys.push(key);
+      });
+    });
+    return keys;
+  }
+
   /* Ready-made presets shown on the dashboard. `rangeFields` are rendered as
      inputs on the card itself, so the range is chosen before starting without
      having to save a copy first. */
@@ -119,11 +153,6 @@
        re-attached afterwards. */
     var preset = normalizePreset(template, true);
     preset.rangeFields = Array.isArray(template.rangeFields) ? template.rangeFields : [];
-    /* Which settings this preset actually governs. Normalized settings contain
-       every key (unused ones hold difficulty fallbacks), so combining presets
-       must copy only the owned keys or one preset's fallbacks would silently
-       overwrite another's real range. */
-    preset.settingKeys = template.settings ? Object.keys(template.settings) : [];
     return preset;
   });
 
@@ -793,9 +822,21 @@
     persistState();
     clearTemplateSaveStatesSoon();
   }
+  /* Selection spans both grids, so a quick preset and a saved preset can be
+     merged together. Kept in dashboard order so the merged name is predictable
+     rather than depending on click order. */
+  function combinablePresets() {
+    return TEMPLATE_PRESETS.concat(state.presets);
+  }
   function selectedTemplates() {
-    /* Kept in dashboard order so the merged name reads predictably. */
-    return TEMPLATE_PRESETS.filter(function (preset) { return combineSelection[preset.id]; });
+    return combinablePresets().filter(function (preset) { return combineSelection[preset.id]; });
+  }
+  function pruneCombineSelection() {
+    var known = Object.create(null);
+    combinablePresets().forEach(function (preset) { known[preset.id] = true; });
+    Object.keys(combineSelection).forEach(function (id) {
+      if (!known[id]) delete combineSelection[id];
+    });
   }
   function combinedName(presets) {
     var joined = presets.map(function (preset) { return preset.name; }).join(' + ');
@@ -809,12 +850,22 @@
     var quizIds = [];
     var questionCount = 0;
     var timerMinutes = 0;
+    var weights = {};
     presets.forEach(function (preset) {
       var typed = templateRangeDrafts[preset.id] || {};
-      (preset.settingKeys || []).forEach(function (key) {
-        settings[key] = typed[key] != null ? typed[key] : preset.settings[key];
+      settingKeysFor(preset.quizIds).forEach(function (key) {
+        var value = typed[key] != null ? typed[key] : preset.settings[key];
+        if (!(key in settings)) settings[key] = value;
+        /* Two presets can legitimately own the same key (two saved presets that
+           both practise squares). Widen to cover both instead of letting the
+           later one win, which would make the result depend on click order. */
+        else settings[key] = COMBINE_LOW_KEYS[key] ? Math.min(settings[key], value) : Math.max(settings[key], value);
       });
-      preset.quizIds.forEach(function (id) { if (quizIds.indexOf(id) < 0) quizIds.push(id); });
+      preset.quizIds.forEach(function (id) {
+        if (quizIds.indexOf(id) < 0) quizIds.push(id);
+        var weight = preset.weights && preset.weights[id] ? preset.weights[id] : 1;
+        weights[id] = Math.max(weights[id] || 1, weight);
+      });
       questionCount += preset.questionCount;
       timerMinutes = Math.max(timerMinutes, preset.timerMinutes);
     });
@@ -828,30 +879,39 @@
       difficulty: 'custom',
       timerMinutes: timerMinutes,
       quizIds: quizIds,
-      allowHints: true,
-      allowSkip: true,
-      shuffle: true,
-      retryWrong: 'immediate',
+      weights: weights,
+      /* A rule the sources agree on is kept; otherwise the stricter one wins. */
+      allowHints: presets.every(function (preset) { return preset.allowHints; }),
+      allowSkip: presets.every(function (preset) { return preset.allowSkip; }),
+      shuffle: presets.every(function (preset) { return preset.shuffle; }),
+      retryWrong: presets[0].retryWrong,
       settings: settings
     }, false);
   }
-  function renderCombineBar() {
-    var bar = element('quickCombineBar');
+  /* Each section shows a bar only when it holds part of the selection, but the
+     buttons always act on the whole selection. */
+  function renderCombineBars() {
+    renderCombineBar('quick', TEMPLATE_PRESETS);
+    renderCombineBar('my', state.presets);
+  }
+  function renderCombineBar(prefix, sectionPresets) {
+    var bar = element(prefix + 'CombineBar');
     if (!bar) return;
+    var inSection = sectionPresets.some(function (preset) { return combineSelection[preset.id]; });
+    bar.hidden = !inSection;
+    if (!inSection) return;
     var presets = selectedTemplates();
-    bar.hidden = presets.length === 0;
-    if (!presets.length) return;
     var enough = presets.length >= 2;
     var combined = enough ? buildCombinedPreset(presets) : null;
-    element('quickCombineCount').textContent = presets.length === 1
+    element(prefix + 'CombineCount').textContent = presets.length === 1
       ? '1 preset selected'
       : presets.length + ' presets selected · ' + combinedName(presets);
-    element('quickCombineDetail').textContent = enough
+    element(prefix + 'CombineDetail').textContent = enough
       ? combined.quizIds.length + ' question types · ' + combined.questionCount + ' questions'
       : 'Tick at least one more preset to combine.';
-    element('quickCombineStart').disabled = !enough;
-    element('quickCombineSave').disabled = !enough;
-    var status = element('quickCombineStatus');
+    element(prefix + 'CombineStart').disabled = !enough;
+    element(prefix + 'CombineSave').disabled = !enough;
+    var status = element(prefix + 'CombineStatus');
     status.textContent = combineStatus ? combineStatus.message : '';
     status.className = 'preset-send-status' + (combineStatus ? ' ' + combineStatus.status : '');
   }
@@ -865,7 +925,7 @@
     if (presets.length < 2) return;
     if (state.presets.length >= MAX_PRESETS) {
       combineStatus = { status: 'error', message: 'Preset limit reached (' + MAX_PRESETS + '). Delete one first.' };
-      renderCombineBar();
+      renderCombineBars();
       return;
     }
     var combined = buildCombinedPreset(presets);
@@ -892,12 +952,12 @@
     card.className = 'preset-card';
     card.style.setProperty('--preset-color', preset.color);
     var recent = state.history.find(function (entry) { return entry.presetId === preset.id; });
-    /* Templates use the badge slot for the combine checkbox; saved presets keep
-       the Daily badge there. */
-    var dailyBadge = template
-      ? '<label class="preset-combine-toggle"><input type="checkbox" data-combine' + (combineSelection[preset.id] ? ' checked' : '') +
-        ' aria-label="Select ' + escapeHtml(preset.name) + ' for combining"><span>Combine</span></label>'
-      : (state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : '');
+    /* Both grids can be combined from, so every card carries the checkbox. Saved
+       presets keep the Daily badge above it. */
+    var dailyBadge = '<div class="preset-card-flags">' +
+      (state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : '') +
+      '<label class="preset-combine-toggle"><input type="checkbox" data-combine' + (combineSelection[preset.id] ? ' checked' : '') +
+      ' aria-label="Select ' + escapeHtml(preset.name) + ' for combining"><span>Combine</span></label></div>';
     var rangeFields = template && Array.isArray(preset.rangeFields) ? preset.rangeFields : [];
     var rangeMarkup = rangeFields.length
       ? '<div class="preset-range-fields">' + rangeFields.map(function (field) {
@@ -926,18 +986,18 @@
     card.querySelector('[data-action="start"]').onclick = function () {
       startPreset(presetWithCardRanges(preset, card, rangeFields));
     };
+    if (combineSelection[preset.id]) card.classList.add('combine-selected');
+    var combineToggle = card.querySelector('[data-combine]');
+    if (combineToggle) {
+      combineToggle.addEventListener('change', function () {
+        if (combineToggle.checked) combineSelection[preset.id] = true;
+        else delete combineSelection[preset.id];
+        card.classList.toggle('combine-selected', combineToggle.checked);
+        combineStatus = null;
+        renderCombineBars();
+      });
+    }
     if (template) {
-      if (combineSelection[preset.id]) card.classList.add('combine-selected');
-      var combineToggle = card.querySelector('[data-combine]');
-      if (combineToggle) {
-        combineToggle.addEventListener('change', function () {
-          if (combineToggle.checked) combineSelection[preset.id] = true;
-          else delete combineSelection[preset.id];
-          card.classList.toggle('combine-selected', combineToggle.checked);
-          combineStatus = null;
-          renderCombineBar();
-        });
-      }
       rangeFields.forEach(function (field) {
         var input = card.querySelector('[data-range-key="' + field.key + '"]');
         if (input) input.addEventListener('input', function () { rememberCardRanges(preset.id, card, rangeFields); });
@@ -997,6 +1057,7 @@
     container.innerHTML = '<div class="preset-stat"><strong>' + calculateStreak() + '</strong><span>Day streak</span></div><div class="preset-stat"><strong>' + sessions + '</strong><span>Sessions</span></div><div class="preset-stat"><strong>' + average + '%</strong><span>Avg accuracy</span></div>';
   }
   function renderPresetGrids() {
+    pruneCombineSelection();
     var mine = element('myPresetGrid');
     var quick = element('quickPresetGrid');
     if (!mine || !quick) return;
@@ -1005,7 +1066,7 @@
     else state.presets.forEach(function (preset) { mine.appendChild(createCard(preset, false)); });
     quick.innerHTML = '';
     TEMPLATE_PRESETS.forEach(function (preset) { quick.appendChild(createCard(preset, true)); });
-    renderCombineBar();
+    renderCombineBars();
   }
   function renderHistory() {
     var section = element('presetHistorySection');
@@ -1533,9 +1594,11 @@
       if (difficulty !== 'custom') setOtherRangeInputs(normalizeSettings(difficultySettings(difficulty), difficulty));
       updateTableMode();
     });
-    element('quickCombineStart').onclick = startCombined;
-    element('quickCombineSave').onclick = saveCombined;
-    element('quickCombineClear').onclick = clearCombineSelection;
+    ['quick', 'my'].forEach(function (prefix) {
+      element(prefix + 'CombineStart').onclick = startCombined;
+      element(prefix + 'CombineSave').onclick = saveCombined;
+      element(prefix + 'CombineClear').onclick = clearCombineSelection;
+    });
     element('clearHistoryBtn').onclick = clearHistory;
     window.addEventListener('message', receiveParentState);
     /* A Telegram launch authorizes itself and starts the requested preset;

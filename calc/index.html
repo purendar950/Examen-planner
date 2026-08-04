@@ -274,6 +274,7 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 .preset-combine-toggle input{accent-color:var(--accent);margin:0;}
 .preset-combine-toggle:has(input:checked){border-color:var(--accent);color:var(--accent);background:var(--accent-dim);}
 .preset-card.combine-selected{border-color:var(--accent);}
+.preset-card-flags{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:0 0 auto;}
 .preset-range-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:6px;}
 .preset-range-fields label{display:grid;gap:3px;font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
 .preset-range-fields input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text);padding:7px 6px;font-size:12px;font-weight:700;text-align:center;outline:none;}
@@ -348,8 +349,23 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 
     <section class="preset-section" aria-labelledby="myPresetsTitle">
       <div class="preset-section-head">
-        <h2 id="myPresetsTitle">My Presets</h2>
+        <div>
+          <h2 id="myPresetsTitle">My Presets</h2>
+          <p class="preset-muted">Tick two or more to merge them into a single preset.</p>
+        </div>
         <button type="button" class="preset-btn primary" id="createPresetBtn">+ Create Preset</button>
+      </div>
+      <div class="preset-combine" id="myCombineBar" hidden>
+        <div class="preset-combine-copy">
+          <strong id="myCombineCount"></strong>
+          <span class="preset-muted" id="myCombineDetail"></span>
+        </div>
+        <div class="preset-actions">
+          <button type="button" class="preset-btn primary" id="myCombineStart">Start merged</button>
+          <button type="button" class="preset-btn" id="myCombineSave">+ Save merged preset</button>
+          <button type="button" class="preset-btn" id="myCombineClear">Clear</button>
+        </div>
+        <span class="preset-send-status" id="myCombineStatus" role="status"></span>
       </div>
       <div class="preset-grid" id="myPresetGrid"></div>
     </section>
