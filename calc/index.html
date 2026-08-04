@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StudyPlanner - Maths App</title>
+<style>
+:root{
+  --bg:#3a3a3a;
+  --pink-out:#FF7597;  --pink-in:#FDD6E1;
+  --green-out:#A7D468; --green-in:#E4F3D2;
+  --yellow-out:#FFE45C;--yellow-in:#FFF6C6;
+  --cyan-out:#6BDCE8;  --cyan-in:#D7F7FA;
+  --purple-out:#DBA9E6;--purple-in:#F5E5F9;
+  --blue-out:#84C6F7;  --blue-in:#E2F1FD;
+  --ink:#26282f;
+  --muted:#c9c9c9;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+html,body{background:var(--bg)}
+body{color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+button{font-family:inherit;cursor:pointer;border:none;outline:none;background:none}
+input{font-family:inherit}
+.page{max-width:520px;margin:0 auto;min-height:100vh;padding-bottom:40px;display:none}
+.page.active{display:block}
+
+/* ===== HEADER ===== */
+.hdr{position:relative;background:var(--yellow-out);border-radius:0 0 34px 34px;padding:34px 58px 26px;text-align:center}
+.hdr h1{font-size:23px;font-weight:800;color:var(--ink)}
+.hdr-back{position:absolute;left:14px;top:22px;width:38px;height:38px;border-radius:50%;background:rgba(0,0,0,.14);color:var(--ink);font-size:20px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.hdr-back:active{background:rgba(0,0,0,.24)}
+
+/* quiz header variant */
+.hdr-quizouter{padding:0}
+.hdr-quiz{display:flex;align-items:center;gap:8px;padding:28px 14px 24px 60px}
+.pill{border-radius:999px;padding:13px 18px;font-weight:800;font-size:13px;letter-spacing:.4px;color:var(--ink);text-transform:uppercase;text-align:center;flex-shrink:0}
+.pill-hint{background:var(--pink-out);border:2px solid #d6336c}
+.pill-sound{background:var(--green-out);border:2px solid #558b2f}
+.scorepill{flex:1;background:rgba(0,0,0,.32);color:#eaeaea;border-radius:999px;padding:10px 8px;font-size:11px;font-weight:700;text-align:center;line-height:1.35;min-width:0}
+.scorepill b{display:block;font-size:17px;color:#7dffb0}
+
+/* ===== STACK CARDS (home + category items) ===== */
+.stack{padding:22px 16px 8px;display:flex;flex-direction:column;gap:18px}
+.scard{border-radius:26px;padding:22px 16px 18px;text-align:center;width:100%;display:block;box-shadow:0 5px 14px rgba(0,0,0,.22)}
+.scard .pillbox{border-radius:18px;padding:16px 12px;font-size:22px;font-weight:800;color:var(--ink);min-height:26px;display:flex;align-items:center;justify-content:center;white-space:pre-line;line-height:1.4}
+.scard .stitle{margin-top:12px;font-size:16px;font-weight:600;color:var(--ink)}
+.scard:active{transform:scale(.98)}
+
+.c-pink{background:var(--pink-out)}     .c-pink .pillbox{background:var(--pink-in)}
+.c-green{background:var(--green-out)}   .c-green .pillbox{background:var(--green-in)}
+.c-yellow{background:var(--yellow-out)} .c-yellow .pillbox{background:var(--yellow-in)}
+.c-cyan{background:var(--cyan-out)}     .c-cyan .pillbox{background:var(--cyan-in)}
+.c-purple{background:var(--purple-out)} .c-purple .pillbox{background:var(--purple-in)}
+.c-blue{background:var(--blue-out)}     .c-blue .pillbox{background:var(--blue-in)}
+
+/* ===== CONFIG PANELS ===== */
+.cfgwrap{padding:20px 16px 0}
+.cfgcard{background:var(--purple-out);border-radius:20px;padding:18px 20px;box-shadow:0 5px 14px rgba(0,0,0,.22)}
+.cfg-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.cfg-row + .cfg-row{margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.4)}
+.cfg-label{font-size:16px;font-weight:700;color:var(--ink)}
+.selwrap{position:relative;display:inline-flex;align-items:center;gap:20px;padding-right:4px}
+.selwrap select{appearance:none;-webkit-appearance:none;background:transparent;border:none;font-size:17px;font-weight:800;color:var(--ink);padding-right:18px}
+.selwrap::after{content:"";position:absolute;right:0;top:50%;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:7px solid var(--ink);transform:translateY(-30%)}
+.rangeline{display:flex;align-items:baseline;justify-content:center;gap:10px;font-size:18px;font-weight:700;flex-wrap:wrap}
+.uinput{width:50px;background:transparent;border:none;border-bottom:2px solid #6a1b9a;text-align:center;font-size:19px;font-weight:800;color:var(--ink);padding:2px 0}
+.uinput:focus{outline:none;border-color:#4a148c}
+.expsup{font-size:12px;position:relative;top:-9px;font-weight:800}
+.binput{width:52px;background:#fff;border:none;border-radius:10px;text-align:center;font-size:16px;font-weight:800;color:var(--ink);padding:8px 4px}
+
+/* ===== QUESTION CARD ===== */
+.qwrap{padding:4px 16px 0}
+.qtitle{font-size:13px;color:var(--muted);text-align:center;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:12px 6px 10px}
+.qcard{background:var(--purple-out);border-radius:30px;padding:56px 18px;text-align:center;min-height:150px;display:flex;align-items:center;justify-content:center;box-shadow:0 5px 14px rgba(0,0,0,.22)}
+.qline{font-size:32px;font-weight:800;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;word-break:break-word}
+.qnum{color:#e0316b}
+.qop{color:var(--ink)}
+.qsup{font-size:.5em;position:relative;top:-.9em;color:#e0316b}
+.ansbox{display:inline-block;min-width:24px;padding:0 4px 3px;color:#2979ff;font-weight:800;border-bottom:3px solid #2979ff}
+.ansbox.ok{color:#2e7d32;border-color:#2e7d32}
+.ansbox.bad{color:#e53935;border-color:#e53935;animation:shake .3s}
+@keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+#feedback{height:26px;font-size:16px;font-weight:700;text-align:center;margin-top:10px}
+#feedback .ok{color:#7dffb0}
+#feedback .bad{color:#ff8a80}
+
+/* ===== KEYPAD ===== */
+#keypad{padding:16px 14px 6px}
+.kp-grid{display:grid;gap:9px}
+.kp-4col{grid-template-columns:repeat(4,1fr)}
+.kp-2col{grid-template-columns:repeat(2,1fr);gap:14px}
+.kb-yn{min-height:92px;font-size:26px;border-radius:22px}
+.kb{border-radius:18px;font-size:26px;font-weight:800;color:var(--ink);display:flex;align-items:center;justify-content:center;min-height:62px;padding:6px 4px;text-align:center;line-height:1.15}
+.kb:active{filter:brightness(.9)}
+.kp-6col{grid-template-columns:repeat(6,1fr);gap:7px}
+.kb-alpha{border-radius:12px;font-size:16px;font-weight:800;color:#fff;min-height:44px;display:flex;align-items:center;justify-content:center}
+.kb-alpha:active{filter:brightness(.9)}
+.kb-alpha-del{grid-column:1/7;background:#e53935;font-size:15px;min-height:48px;color:#fff}
+
+/* ===== CHART SCREEN ===== */
+.chartcard{margin:20px 16px 0;background:var(--purple-out);border-radius:24px;padding:14px 10px;max-height:74vh;overflow-y:auto;box-shadow:0 5px 14px rgba(0,0,0,.22)}
+.chartrow{background:rgba(255,255,255,.55);border-radius:12px;padding:12px 14px;font-size:17px;font-weight:700;color:var(--ink);text-align:center;margin:8px}
+.chartgroup{font-size:14px;font-weight:800;color:#4a148c;margin:16px 10px 2px;text-align:left}
+.chartgroup:first-child{margin-top:2px}
+
+/* ===== MULTIPLICATION CHART (table picker + display) ===== */
+.mcwrap{padding:26px 16px 0}
+.mccard{background:var(--purple-out);border-radius:22px;padding:26px 20px;display:flex;align-items:center;justify-content:center;gap:14px;font-size:19px;font-weight:700;color:var(--ink);box-shadow:0 5px 14px rgba(0,0,0,.22)}
+.mcinput{width:64px;background:transparent;border:none;border-bottom:3px solid #2979ff;text-align:center;font-size:26px;font-weight:800;color:#2979ff;padding:2px 0}
+.mcinput:focus{outline:none}
+.mcstart{margin-top:20px;width:100%;background:var(--pink-out);border-radius:22px;padding:22px;font-size:22px;font-weight:800;color:var(--ink);text-align:center;box-shadow:0 5px 14px rgba(0,0,0,.22)}
+.mcstart:active{transform:scale(.98)}
+.mcchartwrap{padding:22px 16px 8px}
+.chartrow2{border-radius:20px;padding:20px 16px;font-size:23px;font-weight:800;color:var(--ink);text-align:center;margin-bottom:14px;box-shadow:0 3px 8px rgba(0,0,0,.18)}
+.cr-yellow{background:var(--yellow-out)}
+.cr-cyan{background:var(--cyan-out)}
+
+/* ===== HIGHER POWERS ===== */
+.hpwrap{padding:20px 16px 18px}
+.hpcard{background:var(--purple-out);border-radius:22px;padding:20px 18px;margin-bottom:18px;box-shadow:0 5px 14px rgba(0,0,0,.22)}
+.hpcard h3{font-size:20px;font-weight:800;color:var(--ink);margin-bottom:12px}
+.hprow{font-size:21px;font-weight:700;color:var(--ink);padding:7px 0;border-bottom:1px solid rgba(255,255,255,.35)}
+.hprow:last-child{border-bottom:none}
+.hprow sup{font-size:.6em;position:relative;top:-.7em}
+.hptabs{display:flex;justify-content:space-around;padding:14px 10px 20px;border-top:1px solid rgba(255,255,255,.1);margin-top:6px}
+.hptab{color:#999;font-weight:700;font-size:13px;text-align:center;padding-bottom:8px;border-bottom:3px solid transparent;flex:1}
+.hptab.active{color:var(--purple-out);border-color:var(--purple-out)}
+.hpquizbtn{display:block;width:calc(100% - 32px);margin:18px 16px 0;background:var(--pink-out);border-radius:22px;padding:18px;font-size:19px;font-weight:800;color:var(--ink);text-align:center;box-shadow:0 5px 14px rgba(0,0,0,.22)}
+.hpquizbtn:active{transform:scale(.98)}
+
+@media(max-width:400px){
+  .qline{font-size:26px}
+  .kp-6col{grid-template-columns:repeat(5,1fr)}
+  .kb-alpha-del{grid-column:1/6}
+  .scard .pillbox{font-size:19px}
+  .chartrow2{font-size:19px;padding:16px 12px}
+  .mcinput{font-size:22px}
+}
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<div class="page active" id="home">
+  <div class="hdr"><h1><span style="color:#fff">Study</span><span style="color:#2e7d32">Planner</span> - Maths App</h1></div>
+  <div class="stack" id="homeList"></div>
+</div>
+
+<!-- CATEGORY -->
+<div class="page" id="category">
+  <div class="hdr">
+    <button class="hdr-back" id="catBack">&#8249;</button>
+    <h1 id="catTitle"></h1>
+  </div>
+  <div class="cfgwrap" id="catCfg"></div>
+  <div class="stack" id="catItems"></div>
+</div>
+
+<!-- CHART -->
+<div class="page" id="chart">
+  <div class="hdr">
+    <button class="hdr-back" id="chartBack">&#8249;</button>
+    <h1 id="chartTitle"></h1>
+  </div>
+  <div class="chartcard" id="chartBody"></div>
+</div>
+
+<!-- HIGHER POWERS -->
+<div class="page" id="higherPowers">
+  <div class="hdr">
+    <button class="hdr-back" id="hpBack">&#8249;</button>
+    <h1>Higher Powers</h1>
+  </div>
+  <div class="hpwrap" id="hpBody"></div>
+  <button class="hpquizbtn" id="hpQuizBtn">Start Quiz →</button>
+  <div class="hptabs" id="hpTabs"></div>
+</div>
+
+<!-- MULTIPLICATION CHART: table picker -->
+<div class="page" id="mcIntro">
+  <div class="hdr">
+    <button class="hdr-back" id="mcIntroBack">&#8249;</button>
+    <h1>Multiplication Chart</h1>
+  </div>
+  <div class="mcwrap">
+    <div class="mccard">
+      <span>Table of :</span>
+      <input class="mcinput" type="number" id="mcTableInput" inputmode="numeric" value="2">
+    </div>
+    <button class="mcstart" id="mcStartBtn">Start</button>
+  </div>
+</div>
+
+<!-- MULTIPLICATION CHART: full table display -->
+<div class="page" id="mcChart">
+  <div class="hdr">
+    <button class="hdr-back" id="mcChartBack">&#8249;</button>
+    <h1>Multiplication Tables Chart</h1>
+  </div>
+  <div class="mcchartwrap" id="mcChartBody"></div>
+</div>
+
+<!-- QUIZ -->
+<div class="page" id="quiz">
+  <div class="hdr hdr-quizouter">
+    <button class="hdr-back" id="quizBack">&#8249;</button>
+    <div class="hdr-quiz">
+      <button id="hintbtn" class="pill pill-hint">Hint</button>
+      <div class="scorepill"><b id="score">0</b>Q #<span id="count">0</span></div>
+      <button id="soundbtn" class="pill pill-sound">Sound On</button>
+    </div>
+  </div>
+  <div class="qwrap">
+    <div class="qtitle" id="qtitle"></div>
+    <div class="qcard"><div class="qline" id="qline"></div></div>
+    <div id="feedback"></div>
+  </div>
+  <div id="keypad"></div>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+
+/* ---------- reference data ---------- */
+const DEGREES=["0°","30°","45°","60°","90°"];
+const TRIG={
+  Sin:["0","1/2","1/√2","√3/2","1"],
+  Cos:["1","√3/2","1/√2","1/2","0"],
+  Tan:["0","1/√3","1","√3","Not Defined"],
+  Cot:["Not Defined","√3","1","1/√3","0"],
+  Cosec:["Not Defined","2","√2","2/√3","1"],
+  Sec:["1","2/√3","√2","2","Not Defined"]
+};
+const TRIG_NAMES=["Sin","Cos","Tan","Cosec","Sec","Cot"];
+const TRIPLES=[[3,4,5],[5,12,13],[8,15,17],[7,24,25],[20,21,29],[12,35,37],[9,40,41],[28,45,53],[11,60,61],[33,56,65],[16,63,65],[48,55,73],[36,77,85],[13,84,85],[39,80,89],[65,72,97],[20,99,101],[60,91,109],[15,112,113],[44,117,125],[88,105,137],[24,143,145],[17,144,145],[51,140,149],[85,132,157],[119,120,169],[52,165,173],[19,180,181],[104,153,185],[57,176,185],[95,168,193],[28,195,197]];
+const PCT=[["100","1/1"],["50","1/2"],["33.33","1/3","33 1/3"],["66.66","2/3","66 2/3"],["25","1/4"],["50","2/4"],["75","3/4"],["20","1/5"],["40","2/5"],["60","3/5"],["80","4/5"],["16.66","1/6","16 2/3"],["33.33","2/6","33 1/3"],["50","3/6"],["66.67","4/6","66 2/3"],["83.33","5/6","83 1/3"],["14.28","1/7","14 2/7"],["28.57","2/7","28 4/7"],["42.84","3/7","42 6/7"],["57.14","4/7","57 1/7"],["71.42","5/7","71 3/7"],["85.71","6/7","85 5/7"],["12.5","1/8","12 1/2"],["25","2/8"],["37.5","3/8","37 1/2"],["50","4/8"],["62.5","5/8","62 1/2"],["75","6/8"],["87.5","7/8","87 1/2"],["11.11","1/9","11 1/9"],["22.22","2/9","22 2/9"],["33.33","3/9","33 1/3"],["44.44","4/9","44 4/9"],["55.55","5/9","55 5/9"],["66.67","6/9","66 2/3"],["77.78","7/9","77 7/9"],["88.88","8/9","88 8/9"],["10","1/10"],["9.09","1/11","9 1/11"],["18.18","2/11","18 2/11"],["27.27","3/11","27 3/11"],["36.36","4/11","36 4/11"],["45.45","5/11","45 5/11"],["54.54","6/11","54 6/11"],["63.63","7/11","63 7/11"],["72.72","8/11","72 8/11"],["81.81","9/11","81 9/11"],["90.90","10/11","90 10/11"],["8.33","1/12","8 1/3"],["58.33","7/12","58 1/3"],["7.69","1/13","7 9/13"],["7.14","1/14","7 1/7"],["6.66","1/15","6 2/3"],["13.33","2/15","13 1/3"],["26.66","4/15","26 2/3"],["6.25","1/16","6 1/4"],["18.75","3/16","18 3/4"],["31.25","5/16","31 1/4"],["43.75","7/16","43 3/4"],["56.25","9/16","56 1/4"],["5.88","1/17","5 15/17"],["5.55","1/18","5 5/9"],["5.26","1/19","5 5/19"],["5","1/20"],["4.16","1/24","4 1/6"],["3.33","1/30","3 1/3"],["2.5","1/40","2 1/2"]];
+/* Compound Interest reference — Rate / SI% / CI% for 2–5 Years (verified against (1+r)^n−1) */
+const CI_DATA={
+ 2:[{r:2,si:4,ci:4.04},{r:3,si:6,ci:6.09},{r:4,si:8,ci:8.16},{r:5,si:10,ci:10.25},{r:6,si:12,ci:12.36},{r:7,si:14,ci:14.49},{r:8,si:16,ci:16.64},{r:9,si:18,ci:18.81},{r:10,si:20,ci:21},{r:11,si:22,ci:23.21},{r:12,si:24,ci:25.44},{r:15,si:30,ci:32.25},{r:20,si:40,ci:44},{r:25,si:50,ci:56.25},{r:30,si:60,ci:69}],
+ 3:[{r:2,si:6,ci:6.12},{r:3,si:9,ci:9.27},{r:4,si:12,ci:12.49},{r:5,si:15,ci:15.76},{r:6,si:18,ci:19.1},{r:7,si:21,ci:22.5},{r:8,si:24,ci:25.97},{r:9,si:27,ci:29.5},{r:10,si:30,ci:33.1},{r:11,si:33,ci:36.76},{r:12,si:36,ci:40.49},{r:15,si:45,ci:52.09},{r:20,si:60,ci:72.8},{r:25,si:75,ci:95.31},{r:30,si:90,ci:119.7}],
+ 4:[{r:2,si:8,ci:8.24},{r:3,si:12,ci:12.55},{r:4,si:16,ci:16.99},{r:5,si:20,ci:21.55},{r:6,si:24,ci:26.25},{r:7,si:28,ci:31.08},{r:8,si:32,ci:36.05},{r:9,si:36,ci:41.16},{r:10,si:40,ci:46.41},{r:11,si:44,ci:51.81},{r:12,si:48,ci:57.35},{r:15,si:60,ci:74.9},{r:20,si:80,ci:107.36},{r:25,si:100,ci:144.14},{r:30,si:120,ci:185.61}],
+ 5:[{r:2,si:10,ci:10.41},{r:3,si:15,ci:15.93},{r:4,si:20,ci:21.67},{r:5,si:25,ci:27.63},{r:6,si:30,ci:33.82},{r:7,si:35,ci:40.26},{r:8,si:40,ci:46.93},{r:9,si:45,ci:53.86},{r:10,si:50,ci:61.05},{r:11,si:55,ci:68.51},{r:12,si:60,ci:76.23},{r:15,si:75,ci:101.14},{r:20,si:100,ci:148.83},{r:25,si:125,ci:205.18},{r:30,si:150,ci:271.29}]
+};
+/* Prime numbers 1–300 — verified via sieve of Eratosthenes (62 primes total) */
+const PRIMES=[2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79,83,89,97,101,103,107,109,113,127,131,137,139,149,151,157,163,167,173,179,181,191,193,197,199,211,223,227,229,233,239,241,251,257,263,269,271,277,281,283,293];
+const A2Z=["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z"];
+const Z2A=[...A2Z].reverse();
+const ri=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
+const digitRanges={1:[1,9],2:[1,99],3:[1,999],4:[1,9999]};
+
+const DIGIT_COLORS=['#FF80AB','#AED581','#FFF176','#B2EBF2','#E1BEE7','#BBDEFB','#FF80AB','#AED581','#FFF176','#B2EBF2'];
+const ALPHA_COLORS={A:'#FF80AB',B:'#AED581',C:'#FFF176',D:'#B2EBF2',E:'#E1BEE7',F:'#4caf50',G:'#B2EBF2',H:'#E1BEE7',I:'#BBDEFB',J:'#FF80AB',K:'#ff8f00',L:'#AED581',M:'#B2EBF2',N:'#FFF176',O:'#E1BEE7',P:'#6d4c41',Q:'#BBDEFB',R:'#FF80AB',S:'#AED581',T:'#FFF176',U:'#8bc34a',V:'#B2EBF2',W:'#E1BEE7',X:'#BBDEFB',Y:'#FF80AB',Z:'#607d8b'};
+
+/* ---------- categories shown on Home ---------- */
+const CATEGORIES=[
+ {id:'addsub',title:'Addition Subtraction',sample:'21 + 4 = ?',subtitle:'Addition & Subtraction',color:'pink',configType:'digits',
+  items:[
+   {kind:'quiz',quizId:'addition',sample:'+',subtitle:'Addition',color:'pink'},
+   {kind:'quiz',quizId:'subtraction',sample:'−',subtitle:'Subtraction',color:'green'}
+  ]},
+ {id:'multtables',title:'Multiplication Tables',sample:'2 × 2 = ?',subtitle:'Multiplication Tables',color:'green',configType:'ranges2',
+  items:[
+   {kind:'quiz',quizId:'mult1',sample:'2 × 2 = ?',subtitle:'Type - 1',color:'pink'},
+   {kind:'quiz',quizId:'mult2',sample:'2 × ? = 4',subtitle:'Type - 2',color:'green'},
+   {kind:'quiz',quizId:'mult3',sample:'? × ? = 4',subtitle:'Type - 3',color:'cyan'},
+   {kind:'chart',chartId:'multtables',sample:'2 × 1 = 2\n2 × 2 = 4\n2 × 3 = 6',subtitle:'Tables Chart',color:'yellow'}
+  ]},
+ {id:'squares',title:'Squares',sample:'x²',subtitle:'Squares',color:'yellow',configType:'rangeExp',exp:'2',
+  items:[
+   {kind:'quiz',quizId:'squares',sample:'2² = ?',subtitle:'Start Practice',color:'pink'},
+   {kind:'chart',chartId:'squares',sample:'2² = 4\n3² = 9\n4² = 16',subtitle:'View Chart',color:'yellow'}
+  ]},
+ {id:'sqroots',title:'Square Roots',sample:'√4',subtitle:'Square Roots',color:'cyan',configType:'range',
+  items:[
+   {kind:'quiz',quizId:'sqroots',sample:'√4 = ?',subtitle:'Start Practice',color:'pink'},
+   {kind:'chart',chartId:'sqroots',sample:'√4 = 2\n√9 = 3\n√16 = 4',subtitle:'View Chart',color:'yellow'}
+  ]},
+ {id:'cubes',title:'Cubes',sample:'x³',subtitle:'Cubes',color:'purple',configType:'rangeExp',exp:'3',
+  items:[
+   {kind:'quiz',quizId:'cubes',sample:'2³ = ?',subtitle:'Start Practice',color:'pink'},
+   {kind:'chart',chartId:'cubes',sample:'2³ = 8\n3³ = 27\n4³ = 64',subtitle:'View Chart',color:'yellow'}
+  ]},
+ {id:'cuberoots',title:'Cube Roots',sample:'³√27',subtitle:'Cube Roots',color:'blue',configType:'range',
+  items:[
+   {kind:'quiz',quizId:'cuberoots',sample:'³√27 = ?',subtitle:'Start Practice',color:'pink'},
+   {kind:'chart',chartId:'cuberoots',sample:'³√8 = 2\n³√27 = 3\n³√64 = 4',subtitle:'View Chart',color:'yellow'}
+  ]},
+ {id:'trig',title:'Trigonometric Ratios',sample:'Sin 30° = 1/2',subtitle:'Trigonometric Ratios',color:'pink',configType:null,
+  items:[
+   {kind:'quiz',quizId:'trig',sample:'Sin 30° = ?',subtitle:'Start Practice',color:'pink'},
+   {kind:'chart',chartId:'trig',sample:'Sin 30° = 1/2\nCos 30° = √3/2\nTan 30° = 1/√3',subtitle:'View Chart',color:'yellow'}
+  ]},
+ {id:'pyth',title:'Pythagorean Triples',sample:'3, 4, 5',subtitle:'Pythagorean Triples',color:'green',configType:null,
+  items:[
+   {kind:'quiz',quizId:'pyth',sample:'3, 4, ?',subtitle:'Start Practice',color:'pink'},
+   {kind:'chart',chartId:'pyth',sample:'3, 4, 5\n6, 8, 10\n9, 12, 15',subtitle:'View Chart',color:'yellow'}
+  ]},
+ {id:'percentage',title:'Percentages',sample:'25% of 200 = ?',subtitle:'Percentages',color:'yellow',configType:null,
+  items:[
+   {kind:'quiz',quizId:'pctfrac',sample:'12.5% = 1/8',subtitle:'Fraction Form',color:'pink'},
+   {kind:'chart',chartId:'pctfrac',sample:'1/2 = 50%\n1/3 = 33.33%\n1/4 = 25%',subtitle:'Fraction Form · View All',color:'cyan'},
+   {kind:'quiz',quizId:'pctnum',sample:'25% of 200 = ?',subtitle:'Of a Number',color:'green'}
+  ]},
+ {id:'compoundint',title:'Compound Interest',sample:'10% = CI 21%',subtitle:'Compound Interest',color:'purple',configType:'years',
+  items:[
+   {kind:'quiz',quizId:'ci_si',sample:'10% (2Y) = ?',subtitle:'SI % Practice',color:'pink'},
+   {kind:'quiz',quizId:'ci_ci',sample:'10% (2Y) = ?',subtitle:'CI % Practice',color:'green'},
+   {kind:'chart',chartId:'ci',sample:'2% = SI 4%, CI 4.04%\n3% = SI 6%, CI 6.09%',subtitle:'View Chart (2–5 Yrs)',color:'yellow'}
+  ]},
+ {id:'primes',title:'Prime Numbers',sample:'2, 3, 5, 7...',subtitle:'Prime Numbers',color:'blue',configType:'range',capMax:300,
+  items:[
+   {kind:'quiz',quizId:'primeinrange',sample:'21–40: 23, 29...',subtitle:'List Primes in Range',color:'green'},
+   {kind:'quiz',quizId:'isprime',sample:'17 — Prime? YES',subtitle:'Is it Prime?',color:'cyan'},
+   {kind:'chart',chartId:'primes',sample:'2  3  5  7  11\n13 17 19 23 29',subtitle:'View Chart',color:'yellow'}
+  ]},
+ {id:'alphabet',title:'Alphabets Number',sample:'A = ? (1)',subtitle:'Alphabets Number',color:'cyan',configType:null,
+  items:[
+   {kind:'quiz',quizId:'astr1',sample:'A = ? (1)',subtitle:'Straight Type - 1',color:'pink'},
+   {kind:'quiz',quizId:'astr2',sample:'(A) ? = 1',subtitle:'Straight Type - 2',color:'green'},
+   {kind:'quiz',quizId:'arev1',sample:'A = ? (26)',subtitle:'Reverse Type - 1',color:'yellow'},
+   {kind:'quiz',quizId:'arev2',sample:'(A) ? = 26',subtitle:'Reverse Type - 2',color:'cyan'}
+  ]}
+];
+
+/* ---------- quiz engines ---------- */
+const QUIZZES={
+ addition:{keypad:'num',configKey:'addsub',
+  gen(s){const[a,b]=digitRanges[s.digits];const x=ri(a,b),y=ri(a,b);return{q:[x,y],ans:String(x+y)};}},
+ subtraction:{keypad:'sub',configKey:'addsub',
+  gen(s){const[a,b]=digitRanges[s.digits];const x=ri(a,b),y=ri(a,b);return{q:[x,y],ans:String(x-y)};}},
+ mult1:{keypad:'num',configKey:'multtables',
+  gen(s){const x=ri(s.f1,s.f2),y=ri(s.t1,s.t2);return{q:[x,y],ans:String(x*y)};}},
+ mult2:{keypad:'num',configKey:'multtables',
+  gen(s){const x=ri(s.f1,s.f2),y=ri(s.t1,s.t2);return{q:[x,'×','?',x*y],ans:String(y),hint:y};}},
+ mult3:{keypad:'num',configKey:'multtables',
+  gen(s){const x=ri(s.f1,s.f2),y=ri(s.t1,s.t2);return{q:[x,y,x*y],ans:[String(x),String(y)],fields:2,hint:`${x} and ${y}`};}},
+ squares:{keypad:'num',configKey:'squares',
+  gen(s){const x=ri(s.r1,s.r2);return{q:[x],ans:String(x*x),hint:x*x};}},
+ sqroots:{keypad:'num',configKey:'sqroots',
+  gen(s){const x=ri(s.r1,s.r2);return{q:[x*x],ans:String(x),hint:x};}},
+ cubes:{keypad:'num',configKey:'cubes',
+  gen(s){const x=ri(s.r1,s.r2);return{q:[x],ans:String(x**3),hint:x**3};}},
+ cuberoots:{keypad:'num',configKey:'cuberoots',
+  gen(s){const x=ri(s.r1,s.r2);return{q:[x**3],ans:String(x),hint:x};}},
+ trig:{keypad:'trig',configKey:null,
+  gen(){const n=ri(1,6),d=ri(0,4);const name=TRIG_NAMES[n-1];return{q:[name,DEGREES[d]],ans:TRIG[name][d],hint:TRIG[name][d]};}},
+ pyth:{keypad:'num',configKey:null,
+  gen(){const t=TRIPLES[ri(0,TRIPLES.length-1)];const side=ri(1,3);const q=t.slice();q[side-1]='?';return{q,ans:String(t[side-1]),hint:t[side-1]};}},
+ pctfrac:{keypad:'frac',configKey:null,
+  gen(){const[p,f]=PCT[ri(0,PCT.length-1)];return{q:[p],ans:f,hint:f};}},
+ pctnum:{keypad:'num',configKey:null,
+  gen(){const base=ri(1,999),pct=ri(2,99);const val=base*pct/100;return{q:[pct,base],ans:val,exact:false,hint:val.toFixed(2).replace(/\.?0+$/,"")};}},
+ ci_si:{keypad:'num',configKey:'compoundint',
+  gen(s){const y=s.years;const row=CI_DATA[y][ri(0,CI_DATA[y].length-1)];return{q:[row.r,y],ans:String(row.si),numeric:true,hint:row.si};}},
+ ci_ci:{keypad:'dec',configKey:'compoundint',
+  gen(s){const y=s.years;const row=CI_DATA[y][ri(0,CI_DATA[y].length-1)];return{q:[row.r,y],ans:String(row.ci),numeric:true,hint:row.ci};}},
+ primeinrange:{keypad:'num',configKey:'primes',
+  gen(s){
+   let lo=Math.max(1,Math.min(s.r1,s.r2)),hi=Math.min(300,Math.max(s.r1,s.r2));
+   if(hi<lo)hi=lo;
+   let list=PRIMES.filter(p=>p>=lo&&p<=hi);
+   if(!list.length){lo=1;hi=100;list=PRIMES.filter(p=>p<=100);}
+   const ans=list.map(String);
+   return{q:[lo,hi],ans,fields:ans.length,listMode:true,hint:ans.join(", ")};
+  }},
+ isprime:{keypad:'yesno',configKey:'primes',
+  gen(s){
+   let lo=Math.max(1,Math.min(s.r1,s.r2)),hi=Math.min(300,Math.max(s.r1,s.r2));
+   if(hi<lo)hi=lo;
+   const candidates=[];
+   for(let n=lo;n<=hi;n++){
+    const trivialComposite=(n!==2&&n%2===0)||(n!==5&&n%5===0);
+    if(!trivialComposite)candidates.push(n);
+   }
+   const n=candidates.length?candidates[ri(0,candidates.length-1)]:ri(lo,hi);
+   const isP=PRIMES.includes(n);
+   return{q:[n],ans:isP?"YES":"NO",hint:isP?"Yes, prime":"No, not prime"};
+  }},
+ astr1:{keypad:'num',configKey:null,
+  gen(){const i=ri(0,25);return{q:[A2Z[i]],ans:String(i+1),hint:i+1};}},
+ astr2:{keypad:'alpha',configKey:null,
+  gen(){const i=ri(0,25);return{q:[String(i+1)],ans:A2Z[i],hint:A2Z[i]};}},
+ arev1:{keypad:'num',configKey:null,
+  gen(){const i=ri(0,25);return{q:[Z2A[i]],ans:String(i+1),hint:i+1};}},
+ arev2:{keypad:'alpha',configKey:null,
+  gen(){const i=ri(0,25);return{q:[String(i+1)],ans:Z2A[i],hint:Z2A[i]};}},
+ higherpow:{keypad:'num',configKey:null,
+  gen(){
+   const pool=[];
+   Object.values(HIGHER_POWERS).forEach(tab=>tab.groups.forEach(g=>pool.push(g)));
+   const g=pool[ri(0,pool.length-1)],e=ri(1,g.max),val=Math.pow(g.base,e);
+   return{q:[g.base,e],ans:String(val),hint:val};
+  }}
+};
+
+const QUIZ_TITLES={addition:'Addition',subtraction:'Subtraction',mult1:'Multiplication · Type 1',mult2:'Multiplication · Type 2',mult3:'Multiplication · Type 3',squares:'Squares',sqroots:'Square Roots',cubes:'Cubes',cuberoots:'Cube Roots',trig:'Trigonometric Ratios',pyth:'Pythagorean Triples',pctfrac:'Percentage → Fraction',pctnum:'Percentage of a Number',ci_si:'Compound Interest · SI %',ci_ci:'Compound Interest · CI %',primeinrange:'List Primes in Range',isprime:'Is it Prime?',astr1:'Alphabet Position',astr2:'Alphabet Letter',arev1:'Alphabet Reverse Position',arev2:'Alphabet Reverse Letter',higherpow:'Higher Powers'};
+
+let catSettings={
+ addsub:{digits:2},
+ multtables:{f1:2,f2:9,t1:1,t2:10},
+ squares:{r1:2,r2:25},
+ sqroots:{r1:2,r2:25},
+ cubes:{r1:2,r2:25},
+ cuberoots:{r1:2,r2:25},
+ compoundint:{years:2},
+ primes:{r1:1,r2:100}
+};
+
+/* ---------- screen switching ---------- */
+function show(id){document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));$(id).classList.add("active");window.scrollTo(0,0);}
+
+/* ---------- stack card builder ---------- */
+function cardEl(colorName,sampleHTML,subtitle,onClick){
+  const b=document.createElement("button");
+  b.className=`scard c-${colorName}`;
+  b.innerHTML=`<div class="pillbox">${sampleHTML}</div><div class="stitle">${subtitle}</div>`;
+  b.onclick=onClick;
+  return b;
+}
+
+/* ---------- HOME ---------- */
+function renderHome(){
+  const list=$("homeList");list.innerHTML="";
+  CATEGORIES.forEach(cat=>{
+    list.appendChild(cardEl(cat.color,cat.sample,cat.subtitle,()=>openCategory(cat.id)));
+  });
+  list.appendChild(cardEl('purple','2<sup>1</sup> = 2<br>3<sup>2</sup> = 9<br>5<sup>3</sup> = 125','Higher Powers',openHigherPowers));
+}
+
+/* ---------- HIGHER POWERS ---------- */
+const HIGHER_POWERS={
+ p2: {label:'Powers of 2',groups:[{base:2,max:12}]},
+ p34:{label:'3 & 4',        groups:[{base:3,max:6},{base:4,max:5}]},
+ p59:{label:'5 & 9',        groups:[{base:5,max:6},{base:9,max:4}]},
+ p678:{label:'6, 7 & 8',    groups:[{base:6,max:5},{base:7,max:4},{base:8,max:4}]}
+};
+const HP_ORDER=['p2','p34','p59','p678'];
+let hpTab='p2';
+
+function renderHigherPowers(){
+  const body=$("hpBody");body.innerHTML="";
+  HIGHER_POWERS[hpTab].groups.forEach(g=>{
+    const card=document.createElement("div");card.className="hpcard";
+    let html=`<h3>Powers of ${g.base}</h3>`;
+    for(let e=1;e<=g.max;e++)html+=`<div class="hprow">${g.base}<sup>${e}</sup> = ${Math.pow(g.base,e)}</div>`;
+    card.innerHTML=html;
+    body.appendChild(card);
+  });
+  const tabs=$("hpTabs");tabs.innerHTML="";
+  HP_ORDER.forEach(key=>{
+    const b=document.createElement("button");
+    b.className="hptab"+(key===hpTab?" active":"");
+    b.textContent=HIGHER_POWERS[key].label;
+    b.onclick=()=>{hpTab=key;renderHigherPowers();};
+    tabs.appendChild(b);
+  });
+}
+function openHigherPowers(){hpTab="p2";renderHigherPowers();show("higherPowers");}
+$("hpBack").onclick=()=>show("home");
+$("hpQuizBtn").onclick=()=>openQuiz("higherpow","higherPowers");
+
+/* ---------- CATEGORY ---------- */
+function openCategory(id){
+  const cat=CATEGORIES.find(c=>c.id===id);if(!cat)return;
+  $("catTitle").textContent=cat.title;
+  renderCfg(cat);
+  const list=$("catItems");list.innerHTML="";
+  cat.items.forEach(item=>{
+    if(item.kind==="quiz"){
+      list.appendChild(cardEl(item.color,item.sample,item.subtitle,()=>openQuiz(item.quizId)));
+    }else if(item.kind==="chart"&&item.chartId==="multtables"){
+      list.appendChild(cardEl(item.color,item.sample.replace(/\n/g,"<br>"),item.subtitle,()=>openMultChartIntro()));
+    }else{
+      list.appendChild(cardEl(item.color,item.sample.replace(/\n/g,"<br>"),item.subtitle,()=>openChart(item.chartId,cat.title+" — "+item.subtitle)));
+    }
+  });
+  show("category");
+}
+$("catBack").onclick=()=>show("home");
+
+function renderCfg(cat){
+  const wrap=$("catCfg");wrap.innerHTML="";
+  if(!cat.configType){wrap.style.display="none";return;}
+  wrap.style.display="block";
+  const s=catSettings[cat.id];
+  const card=document.createElement("div");card.className="cfgcard";
+  if(cat.configType==="digits"){
+    card.innerHTML=`<div class="cfg-row"><span class="cfg-label">Number of Digits</span><span class="selwrap"><select id="digitsSel">${[1,2,3,4].map(d=>`<option value="${d}"${d===s.digits?" selected":""}>${d}</option>`).join("")}</select></span></div>`;
+    wrap.appendChild(card);
+    $("digitsSel").onchange=e=>{s.digits=parseInt(e.target.value,10);};
+  }else if(cat.configType==="range"){
+    const capAttr=cat.capMax?` max="${cat.capMax}" min="1"`:"";
+    card.innerHTML=`<div class="rangeline">From <input class="uinput" type="number" id="r1in" value="${s.r1}"${capAttr}> To <input class="uinput" type="number" id="r2in" value="${s.r2}"${capAttr}></div>`;
+    wrap.appendChild(card);
+    const clamp=v=>cat.capMax?Math.max(1,Math.min(cat.capMax,v)):v;
+    $("r1in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.r1=clamp(v);};
+    $("r2in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.r2=clamp(v);};
+  }else if(cat.configType==="rangeExp"){
+    card.innerHTML=`<div class="rangeline">From <input class="uinput" type="number" id="r1in" value="${s.r1}"><sup class="expsup">${cat.exp}</sup> To <input class="uinput" type="number" id="r2in" value="${s.r2}"><sup class="expsup">${cat.exp}</sup></div>`;
+    wrap.appendChild(card);
+    $("r1in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.r1=v;};
+    $("r2in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.r2=v;};
+  }else if(cat.configType==="years"){
+    card.innerHTML=`<div class="cfg-row"><span class="cfg-label">Years</span><span class="selwrap"><select id="yearsSel">${[2,3,4,5].map(y=>`<option value="${y}"${y===s.years?" selected":""}>${y}</option>`).join("")}</select></span></div>`;
+    wrap.appendChild(card);
+    $("yearsSel").onchange=e=>{s.years=parseInt(e.target.value,10);};
+  }else if(cat.configType==="ranges2"){
+    card.innerHTML=`
+     <div class="cfg-row"><span class="cfg-label">From :</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" id="f1in" value="${s.f1}"> to <input class="binput" type="number" id="f2in" value="${s.f2}"></span></div>
+     <div class="cfg-row"><span class="cfg-label">Multiplied By :</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" id="t1in" value="${s.t1}"> to <input class="binput" type="number" id="t2in" value="${s.t2}"></span></div>`;
+    wrap.appendChild(card);
+    $("f1in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.f1=v;};
+    $("f2in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.f2=v;};
+    $("t1in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.t1=v;};
+    $("t2in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.t2=v;};
+  }
+}
+
+/* ---------- CHART ---------- */
+function openChart(chartId,title){
+  $("chartTitle").textContent=title;
+  const rows=buildChartRows(chartId);
+  const body=$("chartBody");body.innerHTML="";
+  rows.forEach(r=>{
+    if(r.group){const g=document.createElement("div");g.className="chartgroup";g.textContent=r.group;body.appendChild(g);}
+    else{const d=document.createElement("div");d.className="chartrow";d.textContent=r.text;body.appendChild(d);}
+  });
+  show("chart");
+}
+$("chartBack").onclick=()=>show("category");
+
+function buildChartRows(id){
+  const rows=[];
+  if(id==="squares"){const s=catSettings.squares;for(let x=s.r1;x<=s.r2;x++)rows.push({text:`${x}² = ${x*x}`});}
+  else if(id==="sqroots"){const s=catSettings.sqroots;for(let x=s.r1;x<=s.r2;x++)rows.push({text:`√${x*x} = ${x}`});}
+  else if(id==="cubes"){const s=catSettings.cubes;for(let x=s.r1;x<=s.r2;x++)rows.push({text:`${x}³ = ${x**3}`});}
+  else if(id==="cuberoots"){const s=catSettings.cuberoots;for(let x=s.r1;x<=s.r2;x++)rows.push({text:`³√${x**3} = ${x}`});}
+  else if(id==="multtables"){const s=catSettings.multtables;for(let f=s.f1;f<=s.f2;f++){rows.push({group:`Table of ${f}`});for(let t=s.t1;t<=s.t2;t++)rows.push({text:`${f} × ${t} = ${f*t}`});}}
+  else if(id==="trig"){TRIG_NAMES.forEach(name=>{rows.push({group:name});DEGREES.forEach((d,i)=>rows.push({text:`${name} ${d} = ${TRIG[name][i]}`}));});}
+  else if(id==="pyth"){TRIPLES.forEach(t=>rows.push({text:t.join(", ")}));}
+  else if(id==="ci"){[2,3,4,5].forEach(y=>{rows.push({group:`${y} Years`});CI_DATA[y].forEach(row=>rows.push({text:`${row.r}% = SI ${row.si}%, CI ${row.ci}%`}));});}
+  else if(id==="primes"){
+    const cs=catSettings.primes;
+    const lo=Math.max(1,Math.min(cs.r1,cs.r2)),hi=Math.min(300,Math.max(cs.r1,cs.r2));
+    const chunk=PRIMES.filter(p=>p>=lo&&p<=hi);
+    rows.push({group:`${lo}–${hi} (${chunk.length} primes)`});
+    if(!chunk.length)rows.push({text:"No primes in this range"});
+    for(let i=0;i<chunk.length;i+=8)rows.push({text:chunk.slice(i,i+8).join("  ")});
+  }
+  else if(id==="pctfrac"){PCT.forEach(([p,f,m])=>rows.push({text:m?`${f} = ${p}% (${m}%)`:`${f} = ${p}%`}));}
+  return rows;
+}
+
+/* ---------- MULTIPLICATION CHART (table picker + display) ---------- */
+function openMultChartIntro(){
+  const s=catSettings.multtables;
+  $("mcTableInput").value=s.f1;
+  show("mcIntro");
+}
+$("mcIntroBack").onclick=()=>show("category");
+$("mcChartBack").onclick=()=>show("mcIntro");
+$("mcStartBtn").onclick=()=>{
+  const n=parseInt($("mcTableInput").value,10);
+  if(isNaN(n))return;
+  renderMultChart(n);
+};
+$("mcTableInput").addEventListener("keydown",e=>{
+  if(e.key==="Enter"){e.preventDefault();$("mcStartBtn").click();}
+});
+function renderMultChart(n){
+  const s=catSettings.multtables;
+  const t1=Math.min(s.t1,s.t2),t2=Math.max(s.t1,s.t2);
+  const body=$("mcChartBody");body.innerHTML="";
+  let i=0;
+  for(let t=t1;t<=t2;t++){
+    const row=document.createElement("div");
+    row.className="chartrow2 "+(i%2===0?"cr-yellow":"cr-cyan");
+    row.textContent=`${n} × ${t} = ${n*t}`;
+    body.appendChild(row);
+    i++;
+  }
+  show("mcChart");
+}
+
+/* ---------- QUIZ ---------- */
+let cur=null,curQuizId=null,inputs=[""],field=0,score=0,qcount=0,soundOn=true,busy=false,quizReturn="category";
+
+function openQuiz(quizId,returnTo){
+  curQuizId=quizId;score=0;qcount=0;cur=null;inputs=[""];field=0;busy=false;
+  quizReturn=returnTo||"category";
+  $("qtitle").textContent=QUIZ_TITLES[quizId]||"";
+  $("score").textContent=score;
+  buildKeypad(QUIZZES[quizId]);
+  nextQ();
+  show("quiz");
+}
+$("quizBack").onclick=()=>show(quizReturn);
+
+function nextQ(){
+  const def=QUIZZES[curQuizId];if(!def)return;
+  const s=def.configKey?catSettings[def.configKey]:{};
+  cur=def.gen(s);inputs=[""];field=0;qcount++;
+  $("count").textContent=qcount;$("feedback").textContent="";renderQ();
+}
+
+function numSpan(v){return `<span class="qnum">${v}</span>`;}
+function opSpan(v){return `<span class="qop">${v}</span>`;}
+function supSpan(v){return `<sup class="qsup">${v}</sup>`;}
+function ansSpan(i){const v=inputs[i]||"";return `<span class="ansbox" data-i="${i}">${v||"&nbsp;"}</span>`;}
+
+function questionHTML(id){
+  switch(id){
+    case"addition":return `${numSpan(cur.q[0])} ${opSpan("+")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"subtraction":return `${numSpan(cur.q[0])} ${opSpan("−")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"mult1":return `${numSpan(cur.q[0])} ${opSpan("×")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"mult2":return `${numSpan(cur.q[0])} ${opSpan("×")} ${ansSpan(0)} ${opSpan("=")} ${numSpan(cur.q[3])}`;
+    case"mult3":return `${ansSpan(0)} ${opSpan("×")} ${ansSpan(1)} ${opSpan("=")} ${numSpan(cur.q[2])}`;
+    case"squares":return `${numSpan(cur.q[0])}${supSpan("2")} ${opSpan("=")} ${ansSpan(0)}`;
+    case"sqroots":return `${opSpan("√")}${numSpan(cur.q[0])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"cubes":return `${numSpan(cur.q[0])}${supSpan("3")} ${opSpan("=")} ${ansSpan(0)}`;
+    case"cuberoots":return `${supSpan("3")}${opSpan("√")}${numSpan(cur.q[0])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"trig":return `${numSpan(cur.q[0])} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"pyth":return cur.q.map(v=>v==="?"?ansSpan(0):numSpan(v)).join(` ${opSpan(",")} `);
+    case"pctfrac":return `${numSpan(cur.q[0])}${opSpan("%")} ${opSpan("=")} ${ansSpan(0)}`;
+    case"pctnum":return `${numSpan(cur.q[0])}${opSpan("%")} ${opSpan("of")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"ci_si":return `${numSpan(cur.q[0])}${opSpan("%")} ${opSpan("(")}${numSpan(cur.q[1])}${opSpan("Y) SI =")} ${ansSpan(0)}${opSpan("%")}`;
+    case"ci_ci":return `${numSpan(cur.q[0])}${opSpan("%")} ${opSpan("(")}${numSpan(cur.q[1])}${opSpan("Y) CI =")} ${ansSpan(0)}${opSpan("%")}`;
+    case"primeinrange":{const boxes=cur.ans.map((_,i)=>ansSpan(i)).join(` ${opSpan(",")} `);return `${opSpan("Primes in")} ${numSpan(cur.q[0])}${opSpan("–")}${numSpan(cur.q[1])}${opSpan(":")} ${boxes}`;}
+    case"isprime":return `${opSpan("Is")} ${numSpan(cur.q[0])} ${opSpan("a Prime?")} ${ansSpan(0)}`;
+    case"higherpow":return `${numSpan(cur.q[0])}${supSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"astr1":case"arev1":return `${numSpan(cur.q[0])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"astr2":case"arev2":return `${ansSpan(0)} ${opSpan("=")} ${numSpan(cur.q[0])}`;
+    default:return"";
+  }
+}
+function renderQ(){if(!cur)return;$("qline").innerHTML=questionHTML(curQuizId);}
+
+function flash(ok,idx){
+  const sel=idx!=null?`.ansbox[data-i="${idx}"]`:".ansbox";
+  const box=$("qline").querySelector(sel)||$("qline").querySelector(".ansbox");
+  if(box){box.classList.remove("ok","bad");void box.offsetWidth;box.classList.add(ok?"ok":"bad");}
+  $("feedback").innerHTML=ok?'<span class="ok">✔ Correct!</span>':'<span class="bad">✖ Try again</span>';
+}
+
+function doDel(){
+  if(busy)return;
+  if(inputs[field]&&inputs[field].length){inputs[field]=inputs[field].slice(0,-1);}
+  else if(field>0){field--;if(inputs[field]&&inputs[field].length)inputs[field]=inputs[field].slice(0,-1);}
+  renderQ();
+}
+
+function check(def){
+  if(busy)return;
+  if(cur.fields>1&&cur.listMode){
+    const target=cur.ans[field],inp=inputs[field]||"";
+    if(!inp)return;
+    if(inp===target){
+      if(field===cur.fields-1){onCorrect(def,field);return;}
+      field++;renderQ();return;
+    }
+    if(inp.length>=target.length)flash(false,field);
+    return;
+  }
+  if(cur.fields>1){
+    const a=inputs[0]||"",b=inputs[1]||"";
+    if(field===0){
+      if(!a)return;
+      if(a===String(cur.q[0])||a===String(cur.q[1])){field=1;renderQ();return;}
+      const maxLen=Math.max(String(cur.q[0]).length,String(cur.q[1]).length);
+      if(a.length>=maxLen)flash(false,0);
+      return;
+    }
+    if(!b)return;
+    const target=(a===String(cur.q[0]))?cur.q[1]:cur.q[0];
+    if(b===String(target)){onCorrect(def);return;}
+    if(b.length>=String(target).length)flash(false,1);
+    return;
+  }
+  const a=cur.ans,inp=inputs[0]||"";
+  if(!inp)return;
+  if(cur.exact===false){
+    const v=parseFloat(inp);
+    if(!isNaN(v)&&v>=Math.floor(a)&&v<=Math.ceil(a)){onCorrect(def);return;}
+    const threshold=String(Math.floor(a)).length;
+    if(inp.length>=threshold)flash(false,0);
+    return;
+  }
+  if(cur.numeric){
+    const v=parseFloat(inp);
+    if(!isNaN(v)&&Math.abs(v-parseFloat(a))<0.005){onCorrect(def);return;}
+    if(inp.replace(/^-/,"").replace(".","").length>=a.replace("-","").replace(".","").length)flash(false,0);
+    return;
+  }
+  if(inp===a){onCorrect(def);return;}
+  if(inp.length>=a.length)flash(false,0);
+}
+function onCorrect(def,idx){
+  if(idx===undefined)idx=cur.fields>1?1:0;
+  busy=true;flash(true,idx);beep();score++;$("score").textContent=score;
+  setTimeout(()=>{busy=false;nextQ();},450);
+}
+function checkYesNo(val,def){
+  if(busy)return;
+  if(val===cur.ans){onCorrect(def,0);return;}
+  busy=true;
+  flash(false,0);
+  setTimeout(()=>{busy=false;inputs[0]="";renderQ();},600);
+}
+$("hintbtn").onclick=()=>{
+  if(!cur||busy)return;
+  const h=cur.hint!==undefined?cur.hint:cur.ans;
+  $("feedback").innerHTML=`<span style="color:#ffd54f">Hint: ${h}</span>`;
+};
+$("soundbtn").onclick=function(){soundOn=!soundOn;this.textContent=soundOn?"Sound On":"Sound Off";};
+
+/* ---------- keypad builder ---------- */
+function buildKeypad(def){
+  const keypad=$("keypad");keypad.innerHTML="";
+  const press=txt=>{if(busy)return;inputs[field]=(inputs[field]||"")+txt;renderQ();check(def);};
+  const kb=(label,bg,col,row,colSpan,rowSpan,fn,small)=>{
+    const b=document.createElement("button");b.className="kb";
+    b.textContent=label;b.style.background=bg;
+    if(small)b.style.fontSize="15px";
+    b.style.gridColumn=col+(colSpan?"/"+(col+colSpan):"");
+    b.style.gridRow=row+(rowSpan?"/"+(row+rowSpan):"");
+    b.onclick=fn;keypad.appendChild(b);
+  };
+  const digits=()=>{for(let r=0;r<3;r++)for(let c=0;c<3;c++){const d=r*3+c+1;kb(String(d),DIGIT_COLORS[d-1],c+1,r+1,1,1,()=>press(String(d)));}};
+  const numpad=(extraBtn,extraBg,extraLabel)=>{
+    keypad.className="kp-grid kp-4col";
+    digits();
+    kb("DEL","#E1BEE7",4,1,1,3,doDel);
+    const zeroSpan=extraBtn?2:3;
+    kb("0",DIGIT_COLORS[9],1,4,zeroSpan,1,()=>press("0"));
+    if(extraBtn)kb(extraLabel,extraBg,zeroSpan+1,4,4-zeroSpan,1,extraBtn);
+  };
+  if(def.keypad==="num")numpad(null,null,null);
+  else if(def.keypad==="sub")numpad(()=>press("-"),"#FFE45C","−");
+  else if(def.keypad==="dec")numpad(()=>press("."),"#B2EBF2",".");
+  else if(def.keypad==="trig"){
+    keypad.className="kp-grid kp-4col";
+    digits();
+    kb("DEL","#E1BEE7",4,1,1,3,doDel);
+    kb("0",DIGIT_COLORS[9],1,4,1,1,()=>press("0"));
+    kb("√","#E1BEE7",2,4,1,1,()=>press("√"));
+    kb("/","#BBDEFB",3,4,1,1,()=>press("/"));
+    kb("NOT DEFINED","#90CAF9",4,4,1,1,()=>press("Not Defined"),true);
+  }else if(def.keypad==="yesno"){
+    keypad.className="kp-grid kp-2col";
+    const mk=(label,bg,val)=>{
+      const b=document.createElement("button");b.className="kb kb-yn";
+      b.textContent=label;b.style.background=bg;
+      b.onclick=()=>{if(busy)return;inputs[0]=val;renderQ();checkYesNo(val,def);};
+      keypad.appendChild(b);
+    };
+    mk("YES","#A7D468","YES");mk("NO","#FF7597","NO");
+  }else if(def.keypad==="frac"){
+    keypad.className="kp-grid kp-4col";
+    digits();
+    kb("DEL","#E1BEE7",4,1,1,3,doDel);
+    kb("0",DIGIT_COLORS[9],1,4,1,1,()=>press("0"));
+    kb("/","#FF80AB",2,4,1,1,()=>press("/"));
+    kb("%","#DBA9E6",3,4,2,1,()=>press("%"));
+  }else{
+    keypad.className="kp-grid kp-6col";
+    A2Z.forEach(l=>{
+      const b=document.createElement("button");b.className="kb-alpha";
+      b.textContent=l;b.style.background=ALPHA_COLORS[l];
+      b.onclick=()=>press(l);keypad.appendChild(b);
+    });
+    const delBtn=document.createElement("button");
+    delBtn.className="kb-alpha kb-alpha-del";delBtn.textContent="DEL";
+    delBtn.onclick=doDel;keypad.appendChild(delBtn);
+  }
+}
+
+/* ---------- sound ---------- */
+let actx=null;
+function beep(){if(!soundOn)return;try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();const o=actx.createOscillator(),g=actx.createGain();o.connect(g);g.connect(actx.destination);o.frequency.value=880;o.type="sine";g.gain.setValueAtTime(.0001,actx.currentTime);g.gain.exponentialRampToValueAtTime(.25,actx.currentTime+.01);g.gain.exponentialRampToValueAtTime(.0001,actx.currentTime+.18);o.start();o.stop(actx.currentTime+.2);}catch(e){}}
+
+/* ---------- physical keyboard support ---------- */
+document.addEventListener("keydown",e=>{
+  if(!$("quiz").classList.contains("active"))return;
+  if(busy)return;
+  const def=QUIZZES[curQuizId];if(!def||!cur)return;
+  if(/^[0-9]$/.test(e.key)){inputs[field]=(inputs[field]||"")+e.key;renderQ();check(def);}
+  else if(e.key==="/"&&(def.keypad==="trig"||def.keypad==="frac")){inputs[field]=(inputs[field]||"")+"/";renderQ();check(def);}
+  else if(e.key==="-"&&def.keypad==="sub"){inputs[field]=(inputs[field]||"")+"-";renderQ();check(def);}
+  else if(e.key==="."&&def.keypad==="dec"){inputs[field]=(inputs[field]||"")+".";renderQ();check(def);}
+  else if(e.key==="Backspace"){doDel();}
+  else if(def.keypad==="yesno"&&/^[yn]$/i.test(e.key)){const val=e.key.toLowerCase()==="y"?"YES":"NO";inputs[0]=val;renderQ();checkYesNo(val,def);}
+  else if(/^[a-zA-Z]$/.test(e.key)&&def.keypad==="alpha"){inputs[field]=(inputs[field]||"")+e.key.toUpperCase();renderQ();check(def);}
+});
+
+renderHome();
+show("home");
+</script>
+</body>
+</html>

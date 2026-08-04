@@ -204,8 +204,8 @@
       <div class="nav-tab" onclick="switchPage('formula')" id="nav-formula" title="Calculation & Formula">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 7V5a1 1 0 0 0-1-1H6.5a.5.5 0 0 0-.4.8l7.8 9.2a1 1 0 0 1 0 1.2l-7.8 9.2a.5.5 0 0 0 .4.8H17a1 1 0 0 0 1-1v-2"></path></svg></span><span class="nav-tab-label"> Formula</span>
       </div>
-      <div class="nav-tab" onclick="switchPage('learn')" id="nav-learn" title="Learn Mode">
-        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 4 2 9l10 5 8-4v6h2V9z"></path><path d="M6 11.5V16c0 1.5 2.7 3 6 3s6-1.5 6-3v-4.5l-6 3z"></path></svg></span><span class="nav-tab-label"> Learn</span>
+      <div class="nav-tab" onclick="switchPage('calc')" id="nav-calc" title="Calculation Practice">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"></rect><path d="M8 6h8M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"></path></svg></span><span class="nav-tab-label"> Calculation Practice</span>
       </div>
     </div>
     <!-- Saved courses are not listed in the rail: the library grows without a
@@ -298,8 +298,8 @@
     <div data-include="pages/saved.html"></div>
     <!-- ═══ CALCULATION & FORMULA PAGE (lazy-loaded formula/index.html in an iframe) ═══ -->
     <div data-include="pages/formula.html"></div>
-    <!-- ═══ LEARN MODE PAGE (lazy-loaded learn/index.html in an iframe) ═══ -->
-    <div data-include="pages/learn.html"></div>
+    <!-- ═══ CALCULATION PRACTICE PAGE (lazy-loaded calc/index.html in an iframe) ═══ -->
+    <div data-include="pages/calc.html"></div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
@@ -567,7 +567,7 @@
 <script defer src="js/tabs/saved-questions.js"></script>
 <script defer src="js/tabs/profile.js"></script>
 <script defer src="js/tabs/formula.js?v=7"></script>
-<script defer src="js/tabs/learn.js?v=5"></script>
+<script defer src="js/tabs/calc.js?v=1"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
 <script defer src="js/features/responsive.js"></script>
 <script defer src="js/features/preppath-branding.js"></script>

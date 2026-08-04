@@ -1,0 +1,29 @@
+<div class="page" id="page-calc">
+  <style>
+  /* ════════ CALCULATION PRACTICE TAB — scoped styles (cp- prefix) ════════ */
+  #page-calc .cp-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; margin-bottom:1.1rem; }
+  #page-calc .cp-title { margin:0; font-size:1.25rem; font-weight:800; display:flex; align-items:center; gap:8px; }
+  #page-calc .cp-sub { font-size:.78rem; color:var(--muted); margin-top:2px; }
+  #page-calc .cp-btn { padding:.5rem .85rem; background:var(--surface); border:1px solid var(--border); border-radius:9px; color:var(--text); font-size:.82rem; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:border-color .18s, color .18s; }
+  #page-calc .cp-btn:hover { border-color:var(--accent); color:var(--accent); }
+  #page-calc .cp-frame-wrap { position:relative; width:100%; }
+  #page-calc .cp-loading { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; gap:10px; font-size:.88rem; color:var(--muted); background:var(--surface); border:1px solid var(--border); border-radius:12px; z-index:1; }
+  #page-calc iframe.cp-frame { width:100%; height:78vh; min-height:520px; border:1px solid var(--border); border-radius:12px; background:#fff; display:block; }
+  @media (max-width:600px) {
+    #page-calc iframe.cp-frame { height:84vh; min-height:480px; }
+  }
+  </style>
+
+  <div class="cp-head">
+    <div>
+      <h2 class="cp-title">🧮 Calculation Practice</h2>
+      <p class="cp-sub">Addition · Subtraction · Multiplication · Squares · Roots · Cubes · Trigonometry · Percentages · Alphabets · Pythagorean triples</p>
+    </div>
+    <a class="cp-btn" href="calc/index.html" target="_blank" rel="noopener">Open full page ↗</a>
+  </div>
+
+  <div class="cp-frame-wrap">
+    <div class="cp-loading" id="cp-loading">⏳ Loading calculation practice…</div>
+    <iframe class="cp-frame" id="calc-frame" title="Calculation Practice" loading="lazy"></iframe>
+  </div>
+</div>
