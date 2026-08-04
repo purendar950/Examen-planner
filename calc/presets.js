@@ -728,7 +728,7 @@
     if (uses(['squares', 'sqroots'])) tags.push('Sq base ' + values.sqMin + '–' + values.sqMax);
     if (uses(['cubes', 'cuberoots'])) tags.push('Cube base ' + values.cubeMin + '–' + values.cubeMax);
     if (uses(['ci_si', 'ci_ci'])) tags.push(values.ciYears + ' years');
-    tags.push(preset.quizIds.length + ' types');
+    tags.push(preset.quizIds.length + (preset.quizIds.length === 1 ? ' type' : ' types'));
     return tags;
   }
   function presetSendPending(presetId) {
@@ -907,7 +907,7 @@
       ? '1 preset selected'
       : presets.length + ' presets selected · ' + combinedName(presets);
     element(prefix + 'CombineDetail').textContent = enough
-      ? combined.quizIds.length + ' question types · ' + combined.questionCount + ' questions'
+      ? combined.quizIds.length + (combined.quizIds.length === 1 ? ' question type · ' : ' question types · ') + combined.questionCount + ' questions'
       : 'Tick at least one more preset to combine.';
     element(prefix + 'CombineStart').disabled = !enough;
     element(prefix + 'CombineSave').disabled = !enough;
@@ -952,12 +952,12 @@
     card.className = 'preset-card';
     card.style.setProperty('--preset-color', preset.color);
     var recent = state.history.find(function (entry) { return entry.presetId === preset.id; });
-    /* Both grids can be combined from, so every card carries the checkbox. Saved
-       presets keep the Daily badge above it. */
-    var dailyBadge = '<div class="preset-card-flags">' +
-      (state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : '') +
-      '<label class="preset-combine-toggle"><input type="checkbox" data-combine' + (combineSelection[preset.id] ? ' checked' : '') +
-      ' aria-label="Select ' + escapeHtml(preset.name) + ' for combining"><span>Combine</span></label></div>';
+    var dailyBadge = state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : '';
+    /* Lives in the wrapping actions row rather than the title row: a fixed-width
+       control up there squeezed long preset names into a few pixels. */
+    var combineMarkup = '<label class="preset-combine-toggle"><input type="checkbox" data-combine' +
+      (combineSelection[preset.id] ? ' checked' : '') +
+      ' aria-label="Select ' + escapeHtml(preset.name) + ' for combining"><span>Combine</span></label>';
     var rangeFields = template && Array.isArray(preset.rangeFields) ? preset.rangeFields : [];
     var rangeMarkup = rangeFields.length
       ? '<div class="preset-range-fields">' + rangeFields.map(function (field) {
@@ -982,7 +982,8 @@
       : '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="send"' + pendingDisabled + '>Send to Telegram</button><button type="button" class="preset-btn" data-action="edit"' + pendingDisabled + '>Edit</button><button type="button" class="preset-btn" data-action="duplicate">Duplicate</button><button type="button" class="preset-btn" data-action="schedule"' + pendingDisabled + '>Schedule</button><button type="button" class="preset-btn" data-action="reset"' + pendingDisabled + '>Reset</button><button type="button" class="preset-btn danger" data-action="delete"' + pendingDisabled + '>Delete</button>';
     card.innerHTML =
       '<div class="preset-card-top"><div class="preset-icon">' + escapeHtml(preset.icon) + '</div><div class="preset-card-title"><h3>' + escapeHtml(preset.name) + '</h3><p>' + escapeHtml(preset.description || (recent ? 'Last score ' + accuracy(recent) + '%' : 'Ready to practice')) + '</p></div>' + dailyBadge + '</div>' +
-      '<div class="preset-tags">' + tags + '</div>' + rangeMarkup + '<div class="preset-actions">' + actions + sendStatus + '</div>';
+      '<div class="preset-tags">' + tags + '</div>' + rangeMarkup +
+      '<div class="preset-actions">' + combineMarkup + actions + sendStatus + '</div>';
     card.querySelector('[data-action="start"]').onclick = function () {
       startPreset(presetWithCardRanges(preset, card, rangeFields));
     };
