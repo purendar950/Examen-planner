@@ -1188,19 +1188,10 @@ function calculationDifficultyDefaults(level) {
 
 /* The full practice configuration the engine needs, clamped to the same bounds
    the web app enforces so a tampered stored document cannot widen ranges. */
-function sanitizeCalculationPracticeConfig(raw) {
-  raw = raw && typeof raw === 'object' ? raw : {};
-  const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
-  const rawWeights = raw.weights && typeof raw.weights === 'object' ? raw.weights : {};
-  const difficulty = ['easy', 'standard', 'exam', 'custom'].includes(raw.difficulty) ? raw.difficulty : 'standard';
+/* Shared by the preset and by each of its parts, which carry their own ranges. */
+function sanitizeCalculationSettings(raw, difficulty) {
+  const settings = raw && typeof raw === 'object' ? raw : {};
   const fallback = calculationDifficultyDefaults(difficulty === 'custom' ? 'standard' : difficulty);
-  let quizIds = Array.isArray(raw.quizIds)
-    ? Array.from(new Set(raw.quizIds.map(id => String(id || '').slice(0, 32)).filter(id => CALC_QUIZ_IDS.has(id))))
-    : [];
-  if (!quizIds.length) quizIds = ['addition', 'subtraction', 'mult1'];
-  const weights = {};
-  quizIds.forEach(id => { weights[id] = boundedInteger(rawWeights[id], 1, 10, 1); });
-
   /* Presets saved before squares and cubes were given separate base ranges
      carry a single rangeMin/rangeMax, which seeds both. */
   const legacyBaseLow = settings.sqMin == null && settings.cubeMin == null ? settings.rangeMin : null;
@@ -1228,6 +1219,66 @@ function sanitizeCalculationPracticeConfig(raw) {
     1, 100, fallback.cubeMin, fallback.cubeMax);
 
   return {
+    digits: boundedInteger(settings.digits, 1, 4, fallback.digits),
+    sqMin,
+    sqMax,
+    cubeMin,
+    cubeMax,
+    multFrom,
+    multTo,
+    multiplierFrom,
+    multiplierTo,
+    mult2Min,
+    mult2Max,
+    mult3Min,
+    mult3Max,
+    mult3ByMin,
+    mult3ByMax,
+    primeMax: boundedInteger(settings.primeMax, 10, 300, fallback.primeMax),
+    ciYears: boundedInteger(settings.ciYears, 2, 5, fallback.ciYears)
+  };
+}
+
+/* Parts of a combined preset, each practised as its own block. Dropped unless
+   they still cover exactly the preset's question types, matching the browser. */
+function sanitizeCalculationSegments(raw, difficulty, quizIds) {
+  if (!Array.isArray(raw)) return [];
+  const segments = raw.slice(0, 8).map(segment => {
+    segment = segment && typeof segment === 'object' ? segment : {};
+    const ids = Array.isArray(segment.quizIds)
+      ? Array.from(new Set(segment.quizIds.map(id => String(id || '').slice(0, 32)).filter(id => CALC_QUIZ_IDS.has(id))))
+      : [];
+    if (!ids.length) return null;
+    const weights = {};
+    const rawWeights = segment.weights && typeof segment.weights === 'object' ? segment.weights : {};
+    ids.forEach(id => { weights[id] = boundedInteger(rawWeights[id], 1, 10, 1); });
+    return {
+      name: String(segment.name || 'Part').trim().slice(0, 40) || 'Part',
+      quizIds: ids,
+      weights,
+      share: boundedInteger(segment.share, 1, 50, 10),
+      settings: sanitizeCalculationSettings(segment.settings, difficulty)
+    };
+  }).filter(Boolean);
+  const covered = [];
+  segments.forEach(segment => segment.quizIds.forEach(id => { if (!covered.includes(id)) covered.push(id); }));
+  if (segments.length < 2 || covered.length !== quizIds.length || covered.some(id => !quizIds.includes(id))) return [];
+  return segments;
+}
+
+function sanitizeCalculationPracticeConfig(raw) {
+  raw = raw && typeof raw === 'object' ? raw : {};
+  const rawWeights = raw.weights && typeof raw.weights === 'object' ? raw.weights : {};
+  const difficulty = ['easy', 'standard', 'exam', 'custom'].includes(raw.difficulty) ? raw.difficulty : 'standard';
+  let quizIds = Array.isArray(raw.quizIds)
+    ? Array.from(new Set(raw.quizIds.map(id => String(id || '').slice(0, 32)).filter(id => CALC_QUIZ_IDS.has(id))))
+    : [];
+  if (!quizIds.length) quizIds = ['addition', 'subtraction', 'mult1'];
+  const weights = {};
+  quizIds.forEach(id => { weights[id] = boundedInteger(rawWeights[id], 1, 10, 1); });
+  const segments = sanitizeCalculationSegments(raw.segments, difficulty, quizIds);
+
+  return {
     id: String(raw.id || '').slice(0, 80),
     name: String(raw.name || 'Calculation Practice').trim().slice(0, 40) || 'Calculation Practice',
     icon: String(raw.icon || '🧮').slice(0, 4),
@@ -1242,25 +1293,9 @@ function sanitizeCalculationPracticeConfig(raw) {
     allowSkip: raw.allowSkip !== false,
     shuffle: raw.shuffle !== false,
     retryWrong: ['immediate', 'end', 'none'].includes(raw.retryWrong) ? raw.retryWrong : 'immediate',
-    settings: {
-      digits: boundedInteger(settings.digits, 1, 4, fallback.digits),
-      sqMin,
-      sqMax,
-      cubeMin,
-      cubeMax,
-      multFrom,
-      multTo,
-      multiplierFrom,
-      multiplierTo,
-      mult2Min,
-      mult2Max,
-      mult3Min,
-      mult3Max,
-      mult3ByMin,
-      mult3ByMax,
-      primeMax: boundedInteger(settings.primeMax, 10, 300, fallback.primeMax),
-      ciYears: boundedInteger(settings.ciYears, 2, 5, fallback.ciYears)
-    }
+    segments,
+    sequential: segments.length >= 2 && raw.sequential !== false,
+    settings: sanitizeCalculationSettings(raw.settings, difficulty)
   };
 }
 

@@ -9,6 +9,7 @@
   var DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   var editingPresetId = null;
   var editingTemplateId = null;
+  var editingSegments = [];
   var state;
   var activeSession = null;
   var lastResult = null;
@@ -293,6 +294,27 @@
     };
   }
 
+  /* A combined preset keeps its sources as "parts" so it can be practised one
+     part at a time. Each part carries its own question types and ranges, which
+     is what lets two parts drill the same type over different ranges. */
+  function normalizeSegments(raw, difficulty) {
+    if (!Array.isArray(raw)) return [];
+    return raw.slice(0, 8).map(function (segment) {
+      segment = segment && typeof segment === 'object' ? segment : {};
+      var quizIds = Array.isArray(segment.quizIds)
+        ? Array.from(new Set(segment.quizIds.filter(function (id) { return VALID_QUIZ_IDS.has(id); })))
+        : [];
+      if (!quizIds.length) return null;
+      return {
+        name: String(segment.name || 'Part').trim().slice(0, 40) || 'Part',
+        quizIds: quizIds,
+        weights: normalizeWeights(segment.weights, quizIds),
+        /* Relative size; the preset's total question count is split by share. */
+        share: clamp(segment.share, 1, 50, 10),
+        settings: normalizeSettings(segment.settings, difficulty)
+      };
+    }).filter(Boolean);
+  }
   function normalizePreset(raw, template) {
     raw = raw && typeof raw === 'object' ? raw : {};
     var difficulty = ['easy', 'standard', 'exam', 'custom'].includes(raw.difficulty) ? raw.difficulty : 'standard';
@@ -302,6 +324,16 @@
     var days = Array.isArray(raw.days) ? raw.days.map(Number).filter(function (day) { return day >= 0 && day <= 6; }) : [1, 2, 3, 4, 5, 6, 0];
     days = Array.from(new Set(days));
     if (!days.length) days = [1, 2, 3, 4, 5, 6, 0];
+    /* Parts are dropped unless they still cover exactly the selected question
+       types. Editing the type list otherwise leaves parts that practise the
+       wrong thing, or a new type that never gets asked. */
+    var segments = normalizeSegments(raw.segments, difficulty);
+    var covered = [];
+    segments.forEach(function (segment) {
+      segment.quizIds.forEach(function (id) { if (covered.indexOf(id) < 0) covered.push(id); });
+    });
+    if (segments.length < 2 || covered.length !== quizIds.length ||
+      covered.some(function (id) { return quizIds.indexOf(id) < 0; })) segments = [];
     return {
       id: String(raw.id || uniqueId(template ? 'template' : 'preset')).slice(0, 80),
       name: String(raw.name || 'My Practice').trim().slice(0, 40) || 'My Practice',
@@ -318,6 +350,8 @@
       shuffle: raw.shuffle !== false,
       retryWrong: ['immediate', 'end', 'none'].includes(raw.retryWrong) ? raw.retryWrong : 'immediate',
       settings: normalizeSettings(raw.settings, difficulty),
+      segments: segments,
+      sequential: segments.length >= 2 && raw.sequential !== false,
       dailyEnabled: raw.dailyEnabled === true,
       dailyTime: validTime(raw.dailyTime) ? raw.dailyTime : '07:00',
       days: days,
@@ -419,7 +453,9 @@
 
   function applyPresetSettings(preset) {
     settingsBackup = clone(catSettings);
-    var values = preset.settings;
+    applySettingsValues(preset.settings);
+  }
+  function applySettingsValues(values) {
     catSettings.addsub = { digits: values.digits };
     catSettings.multtables = { f1: values.multFrom, f2: values.multTo, t1: values.multiplierFrom, t2: values.multiplierTo };
     catSettings.mult2d = { r1: values.mult2Min, r2: values.mult2Max };
@@ -443,22 +479,48 @@
     }
     return items;
   }
-  function buildQueue(preset) {
-    var ids = preset.quizIds.slice();
-    var totalWeight = ids.reduce(function (sum, id) { return sum + preset.weights[id]; }, 0);
-    var allocation = ids.map(function (id, order) {
-      var exact = preset.questionCount * preset.weights[id] / totalWeight;
-      return { id: id, count: Math.floor(exact), remainder: exact - Math.floor(exact), order: order };
+  /* Split `total` across `items` in proportion to their weight, using largest
+     remainders so the counts always add up to exactly `total`. */
+  function distribute(total, items, weightOf) {
+    var totalWeight = items.reduce(function (sum, item) { return sum + weightOf(item); }, 0);
+    if (!totalWeight) return items.map(function (item) { return { item: item, count: 0 }; });
+    var allocation = items.map(function (item, order) {
+      var exact = total * weightOf(item) / totalWeight;
+      return { item: item, count: Math.floor(exact), remainder: exact - Math.floor(exact), order: order };
     });
-    var assigned = allocation.reduce(function (sum, item) { return sum + item.count; }, 0);
+    var assigned = allocation.reduce(function (sum, entry) { return sum + entry.count; }, 0);
     allocation.slice().sort(function (left, right) {
       return right.remainder - left.remainder || left.order - right.order;
-    }).slice(0, preset.questionCount - assigned).forEach(function (item) { item.count++; });
+    }).slice(0, total - assigned).forEach(function (entry) { entry.count++; });
+    return allocation;
+  }
+  function buildQueue(preset) {
+    /* Combined presets run one part at a time: every question of part 1, then
+       part 2, and so on. Shuffling, when on, only reorders within a part so the
+       parts themselves stay in order. */
+    if (preset.sequential && preset.segments.length >= 2) {
+      var sequentialQueue = [];
+      distribute(preset.questionCount, preset.segments, function (segment) { return segment.share; })
+        .forEach(function (entry, segmentIndex) {
+          if (entry.count <= 0) return;
+          var block = [];
+          distribute(entry.count, entry.item.quizIds, function (id) { return entry.item.weights[id]; })
+            .forEach(function (byType) {
+              for (var i = 0; i < byType.count; i++) {
+                block.push({ quizId: byType.item, question: null, isReview: false, segmentIndex: segmentIndex });
+              }
+            });
+          if (preset.shuffle) shuffle(block);
+          sequentialQueue = sequentialQueue.concat(block);
+        });
+      if (sequentialQueue.length) return sequentialQueue;
+    }
+    var allocation = distribute(preset.questionCount, preset.quizIds.slice(), function (id) { return preset.weights[id]; });
     var queue = [];
     while (queue.length < preset.questionCount) {
       var added = false;
-      allocation.forEach(function (item) {
-        if (item.count > 0) { queue.push({ quizId: item.id, question: null, isReview: false }); item.count--; added = true; }
+      allocation.forEach(function (entry) {
+        if (entry.count > 0) { queue.push({ quizId: entry.item, question: null, isReview: false }); entry.count--; added = true; }
       });
       if (!added) break;
     }
@@ -504,9 +566,24 @@
     stopSession(true);
     return true;
   }
+  function currentSegment() {
+    if (!activeSession) return null;
+    var entry = activeSession.queue[activeSession.index];
+    if (!entry || entry.segmentIndex == null) return null;
+    return activeSession.preset.segments[entry.segmentIndex] || null;
+  }
+  /* Called right before each question is generated, so a part's own ranges are
+     in place for its whole block. */
+  function syncSegmentSettings() {
+    var segment = currentSegment();
+    if (!segment || activeSession.appliedSegment === segment) return;
+    applySettingsValues(segment.settings);
+    activeSession.appliedSegment = segment;
+  }
   function nextQuizId() {
     if (!activeSession) return '';
     var entry = activeSession.queue[activeSession.index];
+    syncSegmentSettings();
     return entry ? entry.quizId : '';
   }
   function questionSnapshot() {
@@ -615,7 +692,11 @@
       return;
     }
     meta.classList.add('active');
-    name.textContent = activeSession.preset.name + ' · ' + (activeSession.index + 1) + '/' + activeSession.queue.length;
+    var segment = currentSegment();
+    var partLabel = segment
+      ? segment.name + ' (part ' + (activeSession.queue[activeSession.index].segmentIndex + 1) + '/' + activeSession.preset.segments.length + ') · '
+      : '';
+    name.textContent = activeSession.preset.name + ' · ' + partLabel + (activeSession.index + 1) + '/' + activeSession.queue.length;
     hint.style.display = activeSession.preset.allowHints ? '' : 'none';
     skip.classList.toggle('active', activeSession.preset.allowSkip);
     updateTimer();
@@ -729,6 +810,9 @@
     if (uses(['cubes', 'cuberoots'])) tags.push('Cube base ' + values.cubeMin + '–' + values.cubeMax);
     if (uses(['ci_si', 'ci_ci'])) tags.push(values.ciYears + ' years');
     tags.push(preset.quizIds.length + (preset.quizIds.length === 1 ? ' type' : ' types'));
+    if (preset.segments.length >= 2) {
+      tags.push(preset.segments.length + ' parts' + (preset.sequential ? ' in order' : ' mixed'));
+    }
     return tags;
   }
   function presetSendPending(presetId) {
@@ -885,7 +969,21 @@
       allowSkip: presets.every(function (preset) { return preset.allowSkip; }),
       shuffle: presets.every(function (preset) { return preset.shuffle; }),
       retryWrong: presets[0].retryWrong,
-      settings: settings
+      settings: settings,
+      /* Each source becomes a part, keeping its own types, weights and ranges so
+         it can be practised as its own block. */
+      segments: presets.map(function (preset) {
+        var typed = templateRangeDrafts[preset.id] || {};
+        var partSettings = {};
+        settingKeysFor(preset.quizIds).forEach(function (key) {
+          partSettings[key] = typed[key] != null ? typed[key] : preset.settings[key];
+        });
+        return {
+          name: preset.name, quizIds: preset.quizIds.slice(), weights: preset.weights,
+          share: preset.questionCount, settings: partSettings
+        };
+      }),
+      sequential: true
     }, false);
   }
   /* Each section shows a bar only when it holds part of the selection, but the
@@ -907,7 +1005,8 @@
       ? '1 preset selected'
       : presets.length + ' presets selected · ' + combinedName(presets);
     element(prefix + 'CombineDetail').textContent = enough
-      ? combined.quizIds.length + (combined.quizIds.length === 1 ? ' question type · ' : ' question types · ') + combined.questionCount + ' questions'
+      ? combined.questionCount + ' questions · played one part at a time: ' +
+        combined.segments.map(function (segment) { return segment.name; }).join(' → ')
       : 'Tick at least one more preset to combine.';
     element(prefix + 'CombineStart').disabled = !enough;
     element(prefix + 'CombineSave').disabled = !enough;
@@ -1174,6 +1273,14 @@
     element('presetAllowSkip').checked = preset.allowSkip;
     element('presetShuffle').checked = preset.shuffle;
     element('presetRetryWrong').value = preset.retryWrong;
+    /* Parts only exist on a combined preset, so the control is hidden otherwise. */
+    editingSegments = preset.segments.slice();
+    element('presetSequentialRow').hidden = editingSegments.length < 2;
+    element('presetSequential').checked = preset.sequential;
+    if (editingSegments.length >= 2) {
+      element('presetSequentialNote').textContent = 'Order: ' +
+        editingSegments.map(function (segment) { return segment.name; }).join(' → ');
+    }
     element('presetDailyEnabled').checked = makeDaily || preset.dailyEnabled || state.dailyPresetId === preset.id;
     element('presetDailyTime').value = preset.dailyTime;
     element('presetTelegramEnabled').checked = preset.reminder.telegramEnabled;
@@ -1271,6 +1378,8 @@
       shuffle: element('presetShuffle').checked,
       retryWrong: element('presetRetryWrong').value,
       settings: rawSettings,
+      segments: editingSegments,
+      sequential: element('presetSequential').checked,
       dailyEnabled: element('presetDailyEnabled').checked,
       dailyTime: element('presetDailyTime').value,
       days: selectedDays,
