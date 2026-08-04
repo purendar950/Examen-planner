@@ -24,6 +24,7 @@
   var QUIZ_CHOICES = [
     ['addition', 'Addition'], ['subtraction', 'Subtraction'],
     ['mult1', 'Multiplication · Answer'], ['mult2', 'Multiplication · Missing factor'], ['mult3', 'Multiplication · Two factors'],
+    ['tablewrite', 'Writing table'], ['mult2d', 'Two-digit multiplication'], ['div3d', 'Three-digit division'],
     ['squares', 'Squares'], ['sqroots', 'Square roots'], ['cubes', 'Cubes'], ['cuberoots', 'Cube roots'], ['higherpow', 'Higher powers'],
     ['pctfrac', 'Percentage → fraction'], ['pctnum', 'Percentage of a number'],
     ['trig', 'Trigonometric ratios'], ['pyth', 'Pythagorean triples'],
@@ -33,38 +34,75 @@
   ];
   var VALID_QUIZ_IDS = new Set(QUIZ_CHOICES.map(function (entry) { return entry[0]; }));
 
-  var SUGGESTED_PRESETS = [
+  /* Ready-made presets shown on the dashboard. `rangeFields` are rendered as
+     inputs on the card itself, so the range is chosen before starting without
+     having to save a copy first. */
+  var TEMPLATE_PRESETS = [
     {
-      id: 'suggested-daily-mixed', name: 'Daily Mixed 10', icon: '🎯', color: '#00C896',
-      description: 'A balanced everyday calculation workout.', questionCount: 10, difficulty: 'standard', timerMinutes: 0,
-      quizIds: ['addition', 'subtraction', 'mult1', 'squares', 'sqroots', 'pctnum'], allowHints: true, allowSkip: true, shuffle: true
+      id: 'template-writing-table', name: 'Writing Table', icon: '🧮', color: '#00C896',
+      description: 'Write out a full table, row by row.', questionCount: 5, difficulty: 'custom', timerMinutes: 0,
+      quizIds: ['tablewrite'], allowHints: true, allowSkip: true, shuffle: true,
+      settings: { multFrom: 2, multTo: 12, multiplierFrom: 1, multiplierTo: 10 },
+      rangeFields: [
+        { key: 'multFrom', label: 'Tables from', min: 1, max: 100 },
+        { key: 'multTo', label: 'Tables to', min: 1, max: 100 }
+      ]
     },
     {
-      id: 'suggested-speed-maths', name: 'Speed Maths 20', icon: '⚡', color: '#F59E0B',
-      description: 'Fast arithmetic under a 10-minute timer.', questionCount: 20, difficulty: 'standard', timerMinutes: 10,
-      quizIds: ['addition', 'subtraction', 'mult1', 'mult2', 'squares'], allowHints: false, allowSkip: true, shuffle: true
+      id: 'template-two-digit-mult', name: 'Two-Digit Multiplication', icon: '⚡', color: '#F59E0B',
+      description: 'Multiply any two two-digit numbers.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
+      quizIds: ['mult2d'], allowHints: true, allowSkip: true, shuffle: true,
+      settings: { mult2Min: 10, mult2Max: 99 },
+      rangeFields: [
+        { key: 'mult2Min', label: 'From', min: 10, max: 99 },
+        { key: 'mult2Max', label: 'To', min: 10, max: 99 }
+      ]
     },
     {
-      id: 'suggested-exam-drill', name: 'SSC / RRB Drill', icon: '🏆', color: '#3B82F6',
-      description: 'Exam-focused roots, powers, percentages, and tables.', questionCount: 15, difficulty: 'exam', timerMinutes: 10,
-      quizIds: ['mult1', 'sqroots', 'cuberoots', 'higherpow', 'pctfrac', 'pctnum', 'pyth'], allowHints: true, allowSkip: true, shuffle: true
+      id: 'template-three-digit-div', name: 'Three-Digit Division', icon: '📈', color: '#3B82F6',
+      description: 'Divide a three-digit number exactly.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
+      quizIds: ['div3d'], allowHints: true, allowSkip: true, shuffle: true,
+      settings: { divMin: 100, divMax: 999, divisorMin: 2, divisorMax: 12 },
+      rangeFields: [
+        { key: 'divMin', label: 'Dividend from', min: 100, max: 999 },
+        { key: 'divMax', label: 'Dividend to', min: 100, max: 999 },
+        { key: 'divisorMin', label: 'Divisor from', min: 2, max: 99 },
+        { key: 'divisorMax', label: 'Divisor to', min: 2, max: 99 }
+      ]
     },
     {
-      id: 'suggested-tables', name: 'Tables Master', icon: '🧮', color: '#A855F7',
-      description: 'Build multiplication recall in every format.', questionCount: 10, difficulty: 'standard', timerMinutes: 5,
-      quizIds: ['mult1', 'mult2', 'mult3'], allowHints: true, allowSkip: true, shuffle: true
+      id: 'template-squares-cubes', name: 'Squares & Cubes', icon: '🏆', color: '#A855F7',
+      description: 'Squares and cubes across your own range.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
+      quizIds: ['squares', 'cubes'], allowHints: true, allowSkip: true, shuffle: true,
+      settings: { rangeMin: 2, rangeMax: 30 },
+      rangeFields: [
+        { key: 'rangeMin', label: 'Base from', min: 1, max: 100 },
+        { key: 'rangeMax', label: 'Base to', min: 2, max: 100 }
+      ]
     },
     {
-      id: 'suggested-powers', name: 'Powers & Roots', icon: '📈', color: '#EF476F',
-      description: 'Squares, cubes, roots, and higher powers.', questionCount: 10, difficulty: 'standard', timerMinutes: 0,
-      quizIds: ['squares', 'sqroots', 'cubes', 'cuberoots', 'higherpow'], allowHints: true, allowSkip: true, shuffle: true
+      id: 'template-compound-interest-3y', name: 'Compound Interest · 3 Years', icon: '📈', color: '#14B8A6',
+      description: 'SI % and CI % for a three-year rate.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
+      quizIds: ['ci_si', 'ci_ci'], allowHints: true, allowSkip: true, shuffle: true,
+      settings: { ciYears: 3 }
     },
     {
-      id: 'suggested-percentage', name: 'Percentage Booster', icon: '🧠', color: '#14B8A6',
-      description: 'Fractions, percentages, and interest recall.', questionCount: 10, difficulty: 'standard', timerMinutes: 0,
-      quizIds: ['pctfrac', 'pctnum', 'ci_si', 'ci_ci'], allowHints: true, allowSkip: true, shuffle: true
+      id: 'template-fraction-form', name: 'Fraction Form', icon: '🎯', color: '#EF476F',
+      description: 'Turn a percentage into its fraction.', questionCount: 10, difficulty: 'standard', timerMinutes: 0,
+      quizIds: ['pctfrac'], allowHints: true, allowSkip: true, shuffle: true
+    },
+    {
+      id: 'template-pythagorean-triples', name: 'Pythagorean Triples', icon: '🧠', color: '#3B82F6',
+      description: 'Recall the missing side of a triple.', questionCount: 10, difficulty: 'standard', timerMinutes: 0,
+      quizIds: ['pyth'], allowHints: true, allowSkip: true, shuffle: true
     }
-  ].map(function (preset) { return normalizePreset(preset, true); });
+  ].map(function (template) {
+    /* normalizePreset only keeps known preset keys, so the card metadata is
+       re-attached afterwards. */
+    var preset = normalizePreset(template, true);
+    preset.rangeFields = Array.isArray(template.rangeFields) ? template.rangeFields : [];
+    return preset;
+  });
 
   state = loadLocalState();
 
@@ -108,12 +146,21 @@
 
   function difficultySettings(level) {
     if (level === 'easy') {
-      return { digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10, primeMax: 50, ciYears: 2 };
+      return {
+        digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
+        mult2Min: 10, mult2Max: 30, divMin: 100, divMax: 400, divisorMin: 2, divisorMax: 9, primeMax: 50, ciYears: 2
+      };
     }
     if (level === 'exam') {
-      return { digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20, primeMax: 300, ciYears: 3 };
+      return {
+        digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20,
+        mult2Min: 10, mult2Max: 99, divMin: 100, divMax: 999, divisorMin: 7, divisorMax: 25, primeMax: 300, ciYears: 3
+      };
     }
-    return { digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10, primeMax: 100, ciYears: 2 };
+    return {
+      digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
+      mult2Min: 10, mult2Max: 99, divMin: 100, divMax: 999, divisorMin: 2, divisorMax: 12, primeMax: 100, ciYears: 2
+    };
   }
 
   function normalizeSettings(raw, difficulty) {
@@ -128,6 +175,14 @@
     var multiplierFrom = clamp(raw.multiplierFrom, 1, 100, fallback.multiplierFrom);
     var multiplierTo = clamp(raw.multiplierTo, 1, 100, fallback.multiplierTo);
     if (multiplierTo < multiplierFrom) { var multiplierSwap = multiplierFrom; multiplierFrom = multiplierTo; multiplierTo = multiplierSwap; }
+    var orderedPair = function (rawLow, rawHigh, min, max, fallbackLow, fallbackHigh) {
+      var low = clamp(rawLow, min, max, fallbackLow);
+      var high = clamp(rawHigh, min, max, fallbackHigh);
+      return high < low ? [high, low] : [low, high];
+    };
+    var twoDigit = orderedPair(raw.mult2Min, raw.mult2Max, 10, 99, fallback.mult2Min, fallback.mult2Max);
+    var dividend = orderedPair(raw.divMin, raw.divMax, 100, 999, fallback.divMin, fallback.divMax);
+    var divisor = orderedPair(raw.divisorMin, raw.divisorMax, 2, 99, fallback.divisorMin, fallback.divisorMax);
     return {
       digits: clamp(raw.digits, 1, 4, fallback.digits),
       rangeMin: min,
@@ -136,6 +191,12 @@
       multTo: multTo,
       multiplierFrom: multiplierFrom,
       multiplierTo: multiplierTo,
+      mult2Min: twoDigit[0],
+      mult2Max: twoDigit[1],
+      divMin: dividend[0],
+      divMax: dividend[1],
+      divisorMin: divisor[0],
+      divisorMax: divisor[1],
       primeMax: clamp(raw.primeMax, 10, 300, fallback.primeMax),
       ciYears: clamp(raw.ciYears, 2, 5, fallback.ciYears)
     };
@@ -167,7 +228,7 @@
     };
   }
 
-  function normalizePreset(raw, suggested) {
+  function normalizePreset(raw, template) {
     raw = raw && typeof raw === 'object' ? raw : {};
     var difficulty = ['easy', 'standard', 'exam', 'custom'].includes(raw.difficulty) ? raw.difficulty : 'standard';
     var quizIds = Array.isArray(raw.quizIds) ? raw.quizIds.filter(function (id) { return VALID_QUIZ_IDS.has(id); }) : [];
@@ -177,7 +238,7 @@
     days = Array.from(new Set(days));
     if (!days.length) days = [1, 2, 3, 4, 5, 6, 0];
     return {
-      id: String(raw.id || uniqueId(suggested ? 'suggested' : 'preset')).slice(0, 80),
+      id: String(raw.id || uniqueId(template ? 'template' : 'preset')).slice(0, 80),
       name: String(raw.name || 'My Practice').trim().slice(0, 40) || 'My Practice',
       icon: String(raw.icon || '🧮').slice(0, 4),
       color: /^#[0-9a-f]{6}$/i.test(raw.color || '') ? raw.color : '#00C896',
@@ -196,7 +257,7 @@
       dailyTime: validTime(raw.dailyTime) ? raw.dailyTime : '07:00',
       days: days,
       reminder: normalizeReminder(raw.reminder),
-      sourceTemplateId: raw.sourceTemplateId ? String(raw.sourceTemplateId).slice(0, 80) : (suggested ? String(raw.id || '') : ''),
+      sourceTemplateId: raw.sourceTemplateId ? String(raw.sourceTemplateId).slice(0, 80) : (template ? String(raw.id || '') : ''),
       createdAt: raw.createdAt || new Date().toISOString(),
       updatedAt: raw.updatedAt || new Date().toISOString()
     };
@@ -296,6 +357,8 @@
     var values = preset.settings;
     catSettings.addsub = { digits: values.digits };
     catSettings.multtables = { f1: values.multFrom, f2: values.multTo, t1: values.multiplierFrom, t2: values.multiplierTo };
+    catSettings.mult2d = { r1: values.mult2Min, r2: values.mult2Max };
+    catSettings.div3d = { f1: values.divMin, f2: values.divMax, t1: values.divisorMin, t2: values.divisorMax };
     catSettings.squares = { r1: values.rangeMin, r2: values.rangeMax };
     catSettings.sqroots = { r1: values.rangeMin, r2: values.rangeMax };
     catSettings.cubes = { r1: values.rangeMin, r2: values.rangeMax };
@@ -583,16 +646,22 @@
     if (element('resultHomeBtn')) element('resultHomeBtn').onclick = function () { renderDashboard(); show('home'); };
   }
 
-  function getTemplate(id) { return SUGGESTED_PRESETS.find(function (preset) { return preset.id === id; }); }
+  function getTemplate(id) { return TEMPLATE_PRESETS.find(function (preset) { return preset.id === id; }); }
   function getPreset(id) { return state.presets.find(function (preset) { return preset.id === id; }); }
   function presetTags(preset) {
+    var values = preset.settings;
+    var uses = function (ids) {
+      return preset.quizIds.some(function (id) { return ids.indexOf(id) >= 0; });
+    };
     var tags = [preset.questionCount + ' questions', preset.difficulty === 'exam' ? 'Exam' : preset.difficulty.charAt(0).toUpperCase() + preset.difficulty.slice(1)];
     if (preset.timerMinutes) tags.push(preset.timerMinutes + ' min');
-    if (preset.quizIds.some(function (id) { return id === 'mult1' || id === 'mult2' || id === 'mult3'; })) {
-      tags.push(preset.settings.multFrom === preset.settings.multTo
-        ? 'Table ' + preset.settings.multFrom
-        : 'Tables ' + preset.settings.multFrom + '–' + preset.settings.multTo);
+    if (uses(['mult1', 'mult2', 'mult3', 'tablewrite'])) {
+      tags.push(values.multFrom === values.multTo ? 'Table ' + values.multFrom : 'Tables ' + values.multFrom + '–' + values.multTo);
     }
+    if (uses(['mult2d'])) tags.push('2-digit ' + values.mult2Min + '–' + values.mult2Max);
+    if (uses(['div3d'])) tags.push(values.divMin + '–' + values.divMax + ' ÷ ' + values.divisorMin + '–' + values.divisorMax);
+    if (uses(['squares', 'cubes', 'sqroots', 'cuberoots'])) tags.push('Base ' + values.rangeMin + '–' + values.rangeMax);
+    if (uses(['ci_si', 'ci_ci'])) tags.push(values.ciYears + ' years');
     tags.push(preset.quizIds.length + ' types');
     return tags;
   }
@@ -627,28 +696,58 @@
     };
     renderPresetGrids();
   }
-  function createCard(preset, suggested) {
+  /* Range values typed into a template card, keyed by settings field. */
+  function cardRangeValues(card, rangeFields) {
+    var values = {};
+    rangeFields.forEach(function (field) {
+      var input = card.querySelector('[data-range-key="' + field.key + '"]');
+      if (input) values[field.key] = clamp(input.value, field.min, field.max, field.min);
+    });
+    return values;
+  }
+  function presetWithCardRanges(preset, card, rangeFields) {
+    if (!rangeFields.length) return preset;
+    var draft = clone(preset);
+    delete draft.rangeFields;
+    draft.settings = Object.assign({}, draft.settings, cardRangeValues(card, rangeFields));
+    return normalizePreset(draft, false);
+  }
+  function createCard(preset, template) {
     var card = document.createElement('article');
     card.className = 'preset-card';
     card.style.setProperty('--preset-color', preset.color);
     var recent = state.history.find(function (entry) { return entry.presetId === preset.id; });
-    var dailyBadge = state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : (suggested ? '<span class="preset-badge">Suggested</span>' : '');
+    var dailyBadge = state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : (template ? '<span class="preset-badge">Preset</span>' : '');
+    var rangeFields = template && Array.isArray(preset.rangeFields) ? preset.rangeFields : [];
+    var rangeMarkup = rangeFields.length
+      ? '<div class="preset-range-fields">' + rangeFields.map(function (field) {
+        return '<label>' + escapeHtml(field.label) +
+          '<input type="number" data-range-key="' + escapeHtml(field.key) + '" min="' + field.min + '" max="' + field.max +
+          '" value="' + clamp(preset.settings[field.key], field.min, field.max, field.min) + '"></label>';
+      }).join('') + '</div>'
+      : '';
     var tags = presetTags(preset).map(function (tag) { return '<span class="preset-tag">' + escapeHtml(tag) + '</span>'; }).join('');
     var sendState = presetSendStates[preset.id] || null;
     var sendPending = !!(sendState && sendState.status === 'pending');
     var pendingDisabled = sendPending ? ' disabled' : '';
-    var sendStatus = !suggested && sendState
+    var sendStatus = !template && sendState
       ? '<span class="preset-send-status ' + escapeHtml(sendState.status) + '" data-send-status role="status">' + escapeHtml(sendState.message) + '</span>'
       : '';
-    var actions = suggested
+    var actions = template
       ? '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="customize">Customize & Save</button>'
       : '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="send"' + pendingDisabled + '>Send to Telegram</button><button type="button" class="preset-btn" data-action="edit"' + pendingDisabled + '>Edit</button><button type="button" class="preset-btn" data-action="duplicate">Duplicate</button><button type="button" class="preset-btn" data-action="schedule"' + pendingDisabled + '>Schedule</button><button type="button" class="preset-btn" data-action="reset"' + pendingDisabled + '>Reset</button><button type="button" class="preset-btn danger" data-action="delete"' + pendingDisabled + '>Delete</button>';
     card.innerHTML =
       '<div class="preset-card-top"><div class="preset-icon">' + escapeHtml(preset.icon) + '</div><div class="preset-card-title"><h3>' + escapeHtml(preset.name) + '</h3><p>' + escapeHtml(preset.description || (recent ? 'Last score ' + accuracy(recent) + '%' : 'Ready to practice')) + '</p></div>' + dailyBadge + '</div>' +
-      '<div class="preset-tags">' + tags + '</div><div class="preset-actions">' + actions + sendStatus + '</div>';
-    card.querySelector('[data-action="start"]').onclick = function () { startPreset(preset); };
-    if (suggested) {
-      card.querySelector('[data-action="customize"]').onclick = function () { openEditor(null, preset.id); };
+      '<div class="preset-tags">' + tags + '</div>' + rangeMarkup + '<div class="preset-actions">' + actions + sendStatus + '</div>';
+    card.querySelector('[data-action="start"]').onclick = function () {
+      startPreset(presetWithCardRanges(preset, card, rangeFields));
+    };
+    if (template) {
+      /* Carry the ranges typed on the card into the editor, so switching to a
+         saved copy does not silently discard them. */
+      card.querySelector('[data-action="customize"]').onclick = function () {
+        openEditor(null, preset.id, false, cardRangeValues(card, rangeFields));
+      };
     } else {
       card.querySelector('[data-action="send"]').onclick = function () { requestPresetSend(preset.id); };
       card.querySelector('[data-action="edit"]').onclick = function () { openEditor(preset.id); };
@@ -674,8 +773,8 @@
     if (!container) return;
     var preset = getPreset(state.dailyPresetId);
     if (!preset) {
-      var recommended = SUGGESTED_PRESETS[0];
-      container.innerHTML = '<div><div class="preset-eyebrow">Recommended daily practice</div><h2>' + escapeHtml(recommended.icon + ' ' + recommended.name) + '</h2><p class="preset-muted">Build a consistent habit with ten balanced questions.</p></div><div class="preset-actions"><button type="button" class="preset-btn primary" id="dailyStartRecommended">Start now</button><button type="button" class="preset-btn" id="dailyCustomizeRecommended">Customize</button></div>';
+      var recommended = TEMPLATE_PRESETS[0];
+      container.innerHTML = '<div><div class="preset-eyebrow">Recommended daily practice</div><h2>' + escapeHtml(recommended.icon + ' ' + recommended.name) + '</h2><p class="preset-muted">' + escapeHtml(recommended.description + ' Pick a preset below to make it your own.') + '</p></div><div class="preset-actions"><button type="button" class="preset-btn primary" id="dailyStartRecommended">Start now</button><button type="button" class="preset-btn" id="dailyCustomizeRecommended">Customize</button></div>';
       element('dailyStartRecommended').onclick = function () { startPreset(recommended); };
       element('dailyCustomizeRecommended').onclick = function () { openEditor(null, recommended.id, true); };
       return;
@@ -696,13 +795,13 @@
   }
   function renderPresetGrids() {
     var mine = element('myPresetGrid');
-    var suggested = element('suggestedPresetGrid');
-    if (!mine || !suggested) return;
+    var quick = element('quickPresetGrid');
+    if (!mine || !quick) return;
     mine.innerHTML = '';
-    if (!state.presets.length) mine.innerHTML = '<div class="preset-empty">No custom presets yet. Create one or customize a suggested preset.</div>';
+    if (!state.presets.length) mine.innerHTML = '<div class="preset-empty">No custom presets yet. Create one or customize a quick preset below.</div>';
     else state.presets.forEach(function (preset) { mine.appendChild(createCard(preset, false)); });
-    suggested.innerHTML = '';
-    SUGGESTED_PRESETS.forEach(function (preset) { suggested.appendChild(createCard(preset, true)); });
+    quick.innerHTML = '';
+    TEMPLATE_PRESETS.forEach(function (preset) { quick.appendChild(createCard(preset, true)); });
   }
   function renderHistory() {
     var section = element('presetHistorySection');
@@ -760,6 +859,12 @@
     element('presetDigits').value = settings.digits;
     element('presetRangeMin').value = settings.rangeMin;
     element('presetRangeMax').value = settings.rangeMax;
+    element('presetMult2Min').value = settings.mult2Min;
+    element('presetMult2Max').value = settings.mult2Max;
+    element('presetDivMin').value = settings.divMin;
+    element('presetDivMax').value = settings.divMax;
+    element('presetDivisorMin').value = settings.divisorMin;
+    element('presetDivisorMax').value = settings.divisorMax;
     element('presetPrimeMax').value = settings.primeMax;
     element('presetCiYears').value = settings.ciYears;
   }
@@ -784,10 +889,6 @@
     var multiplierLow = Math.min(multiplierFrom, multiplierTo);
     var multiplierHigh = Math.max(multiplierFrom, multiplierTo);
     element('presetTablePreview').textContent = (low === high ? 'Table ' + low : 'Tables ' + low + '–' + high) + ' · ×' + multiplierLow + ' to ×' + multiplierHigh;
-  }
-  function updateRangeDisabled() {
-    var custom = element('presetDifficulty').value === 'custom';
-    element('presetRangePanel').querySelectorAll('[data-custom-range]').forEach(function (input) { input.disabled = !custom; });
   }
   function editorSourcePreset() {
     if (editingPresetId) return getPreset(editingPresetId);
@@ -816,7 +917,6 @@
     renderQuizChoices(preset.quizIds, preset.weights);
     renderDays(preset.days);
     updateTableMode();
-    updateRangeDisabled();
   }
   function genericPreset() {
     return normalizePreset({
@@ -825,13 +925,16 @@
       retryWrong: 'immediate', reminder: { telegramEnabled: false, reminderMinutes: 0, snoozeMinutes: 10, maxSnoozes: 2 }
     }, false);
   }
-  function openEditor(presetId, templateId, makeDaily) {
+  function openEditor(presetId, templateId, makeDaily, settingsOverride) {
     if (presetId && presetSendPending(presetId)) return;
     editingPresetId = presetId || null;
     editingTemplateId = templateId || null;
     var source = presetId ? getPreset(presetId) : templateId ? getTemplate(templateId) : genericPreset();
     if (!source) return;
     var draft = normalizePreset(clone(source), false);
+    if (settingsOverride) {
+      draft.settings = normalizeSettings(Object.assign({}, draft.settings, settingsOverride), draft.difficulty);
+    }
     if (!presetId) {
       draft.id = uniqueId('preset');
       draft.sourceTemplateId = templateId || '';
@@ -854,13 +957,21 @@
   }
   function readEditorPreset() {
     var difficulty = element('presetDifficulty').value;
-    var rawSettings = difficulty === 'custom' ? {
+    /* Every range input is editable, so the form is always the source of truth.
+       Difficulty only pre-fills the inputs when it changes. */
+    var rawSettings = {
       digits: element('presetDigits').value,
       rangeMin: element('presetRangeMin').value,
       rangeMax: element('presetRangeMax').value,
+      mult2Min: element('presetMult2Min').value,
+      mult2Max: element('presetMult2Max').value,
+      divMin: element('presetDivMin').value,
+      divMax: element('presetDivMax').value,
+      divisorMin: element('presetDivisorMin').value,
+      divisorMax: element('presetDivisorMax').value,
       primeMax: element('presetPrimeMax').value,
       ciYears: element('presetCiYears').value
-    } : difficultySettings(difficulty);
+    };
     rawSettings.multFrom = element('presetMultFrom').value;
     rawSettings.multTo = element('presetTableMode').value === 'single' ? element('presetMultFrom').value : element('presetMultTo').value;
     rawSettings.multiplierFrom = element('presetMultiplierFrom').value;
@@ -1211,8 +1322,7 @@
     });
     element('presetDifficulty').addEventListener('change', function () {
       var difficulty = this.value;
-      if (difficulty !== 'custom') setOtherRangeInputs(difficultySettings(difficulty));
-      updateRangeDisabled();
+      if (difficulty !== 'custom') setOtherRangeInputs(normalizeSettings(difficultySettings(difficulty), difficulty));
       updateTableMode();
     });
     element('clearHistoryBtn').onclick = clearHistory;

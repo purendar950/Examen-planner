@@ -83,6 +83,10 @@ input{font-family:inherit}
 .ansbox{display:inline-block;min-width:24px;padding:0 4px 3px;color:#2979ff;font-weight:800;border-bottom:3px solid #2979ff}
 .ansbox.ok{color:#2e7d32;border-color:#2e7d32}
 .ansbox.bad{color:#e53935;border-color:#e53935;animation:shake .3s}
+.ansbox.active{background:rgba(41,121,255,.15);border-radius:5px 5px 0 0}
+/* multi-line questions (e.g. writing out a whole table) stack one row per line */
+.qline.qline-rows{flex-direction:column;align-items:center;gap:8px;font-size:23px}
+.qline .qrow{display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
 @keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 #feedback{height:26px;font-size:16px;font-weight:700;text-align:center;margin-top:10px}
 #feedback .ok{color:#7dffb0}
@@ -261,6 +265,10 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 .preset-badge{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);background:var(--accent-dim);border-radius:99px;padding:4px 7px;white-space:nowrap;}
 .preset-tags{display:flex;flex-wrap:wrap;gap:5px;}
 .preset-tag{font-size:10px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:4px 7px;border-radius:99px;}
+.preset-range-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:6px;}
+.preset-range-fields label{display:grid;gap:3px;font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.preset-range-fields input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text);padding:7px 6px;font-size:12px;font-weight:700;text-align:center;outline:none;}
+.preset-range-fields input:focus{border-color:var(--accent);}
 .preset-actions{display:flex;flex-wrap:wrap;gap:7px;}
 .preset-btn{border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:12px;font-weight:700;padding:8px 11px;display:inline-flex;align-items:center;justify-content:center;gap:5px;transition:border-color .18s,color .18s,background .18s;}
 .preset-btn:hover{border-color:var(--accent);color:var(--accent);}
@@ -303,7 +311,7 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 @media(prefers-reduced-motion:reduce){.mini-spinner{animation-duration:2.4s}}
 .result-wrap{max-width:680px;margin:16px auto 0;display:grid;gap:14px;}.result-card{padding:24px;text-align:center;background:linear-gradient(145deg,var(--accent-dim),transparent 58%),var(--card);}.result-mark{width:64px;height:64px;border-radius:18px;display:grid;place-items:center;margin:0 auto 13px;background:var(--accent-dim);border:1px solid rgba(0,200,150,.35);font-size:30px;}.result-card h2{font-size:22px;color:var(--text);}.result-card>p{font-size:12px;color:var(--muted);margin-top:5px;}.result-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:18px;}.result-stat{padding:12px 6px;background:var(--surface);border:1px solid var(--border);border-radius:9px;}.result-stat strong{display:block;font-size:18px;color:var(--text);}.result-stat span{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}.result-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:18px;}
 
-@media(max-width:640px){.page{padding:12px 12px 26px}.hdr{padding:16px 50px}.hdr h1{font-size:17px}.stack{grid-template-columns:1fr;gap:10px}.scard{min-height:108px}.scard .pillbox{min-height:48px;font-size:18px}.qcard{padding:26px 14px}.qline{font-size:25px}.chartcard{max-height:64vh}.preset-hero{grid-template-columns:1fr}.preset-daily{align-items:flex-start;flex-direction:column}.preset-grid{grid-template-columns:1fr}.preset-form-grid{grid-template-columns:1fr}.preset-field.full{grid-column:auto}.preset-quiz-grid{grid-template-columns:1fr 1fr}.preset-history-row{grid-template-columns:minmax(0,1fr) auto}.preset-history-time{display:none}.result-stats{grid-template-columns:repeat(2,1fr)}.hdr-quiz{padding-left:48px;flex-wrap:wrap}.preset-session-meta{order:5;width:100%;justify-content:center}.preset-editor-actions{justify-content:stretch}.preset-editor-actions .preset-btn{flex:1}}
+@media(max-width:640px){.page{padding:12px 12px 26px}.hdr{padding:16px 50px}.hdr h1{font-size:17px}.stack{grid-template-columns:1fr;gap:10px}.scard{min-height:108px}.scard .pillbox{min-height:48px;font-size:18px}.qcard{padding:26px 14px}.qline{font-size:25px}.qline.qline-rows{font-size:19px;gap:6px}.chartcard{max-height:64vh}.preset-hero{grid-template-columns:1fr}.preset-daily{align-items:flex-start;flex-direction:column}.preset-grid{grid-template-columns:1fr}.preset-form-grid{grid-template-columns:1fr}.preset-field.full{grid-column:auto}.preset-quiz-grid{grid-template-columns:1fr 1fr}.preset-history-row{grid-template-columns:minmax(0,1fr) auto}.preset-history-time{display:none}.result-stats{grid-template-columns:repeat(2,1fr)}.hdr-quiz{padding-left:48px;flex-wrap:wrap}.preset-session-meta{order:5;width:100%;justify-content:center}.preset-editor-actions{justify-content:stretch}.preset-editor-actions .preset-btn{flex:1}}
 @media(max-width:420px){.preset-quiz-grid{grid-template-columns:1fr}.preset-summary{grid-template-columns:repeat(3,1fr)}.preset-card{padding:13px}.preset-days{gap:4px}.preset-day span{width:34px}.pill{padding:8px 9px}.scorepill{max-width:82px}}
 </style>
 </head>
@@ -337,12 +345,12 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
       <div class="preset-grid" id="myPresetGrid"></div>
     </section>
 
-    <section class="preset-section" aria-labelledby="suggestedPresetsTitle">
+    <section class="preset-section" aria-labelledby="quickPresetsTitle">
       <div class="preset-section-head">
-        <h2 id="suggestedPresetsTitle">Suggested Presets</h2>
-        <span class="preset-muted">Start instantly or customize a copy</span>
+        <h2 id="quickPresetsTitle">Quick Presets</h2>
+        <span class="preset-muted">Choose your range, then start — or save a customized copy</span>
       </div>
-      <div class="preset-grid" id="suggestedPresetGrid"></div>
+      <div class="preset-grid" id="quickPresetGrid"></div>
     </section>
 
     <section class="preset-section" id="presetHistorySection" aria-labelledby="presetHistoryTitle">
@@ -414,7 +422,7 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 
     <section class="preset-panel" id="presetTablesPanel">
       <h2>Multiplication tables</h2>
-      <p class="preset-panel-note">Choose <strong>Single table</strong> for “table of 2”, or <strong>Table range</strong> for “tables 2 to 4”. These controls remain editable at every difficulty.</p>
+      <p class="preset-panel-note">Choose <strong>Single table</strong> for “table of 2”, or <strong>Table range</strong> for “tables 2 to 4”. Writing Table and every multiplication type use these ranges.</p>
       <div class="preset-form-grid">
         <div class="preset-field"><label for="presetTableMode">Table selection</label><select class="preset-select" id="presetTableMode"><option value="single">Single table</option><option value="range">Table range</option></select></div>
         <div class="preset-field"><label for="presetMultFrom" id="presetMultFromLabel">Table number</label><input class="preset-input" id="presetMultFrom" type="number" min="1" max="100" value="2"></div>
@@ -427,13 +435,19 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 
     <section class="preset-panel" id="presetRangePanel">
       <h2>Other number ranges</h2>
-      <p class="preset-panel-note">Difficulty fills these automatically. Choose Custom ranges to edit them.</p>
+      <p class="preset-panel-note">Picking a difficulty fills these in for you — every value stays editable.</p>
       <div class="preset-form-grid">
-        <div class="preset-field"><label for="presetDigits">Addition/subtraction digits</label><input class="preset-input" id="presetDigits" data-custom-range type="number" min="1" max="4" value="2"></div>
-        <div class="preset-field"><label for="presetRangeMin">Powers/roots from</label><input class="preset-input" id="presetRangeMin" data-custom-range type="number" min="1" max="100" value="2"></div>
-        <div class="preset-field"><label for="presetRangeMax">Powers/roots to</label><input class="preset-input" id="presetRangeMax" data-custom-range type="number" min="2" max="100" value="25"></div>
-        <div class="preset-field"><label for="presetPrimeMax">Prime range maximum</label><input class="preset-input" id="presetPrimeMax" data-custom-range type="number" min="10" max="300" value="100"></div>
-        <div class="preset-field"><label for="presetCiYears">Compound-interest years</label><select class="preset-select" id="presetCiYears" data-custom-range><option value="2">2 years</option><option value="3">3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></div>
+        <div class="preset-field"><label for="presetDigits">Addition/subtraction digits</label><input class="preset-input" id="presetDigits" type="number" min="1" max="4" value="2"></div>
+        <div class="preset-field"><label for="presetRangeMin">Squares/cubes/roots from</label><input class="preset-input" id="presetRangeMin" type="number" min="1" max="100" value="2"></div>
+        <div class="preset-field"><label for="presetRangeMax">Squares/cubes/roots to</label><input class="preset-input" id="presetRangeMax" type="number" min="2" max="100" value="25"></div>
+        <div class="preset-field"><label for="presetMult2Min">Two-digit multiplication from</label><input class="preset-input" id="presetMult2Min" type="number" min="10" max="99" value="10"></div>
+        <div class="preset-field"><label for="presetMult2Max">Two-digit multiplication to</label><input class="preset-input" id="presetMult2Max" type="number" min="10" max="99" value="99"></div>
+        <div class="preset-field"><label for="presetDivMin">Division dividend from</label><input class="preset-input" id="presetDivMin" type="number" min="100" max="999" value="100"></div>
+        <div class="preset-field"><label for="presetDivMax">Division dividend to</label><input class="preset-input" id="presetDivMax" type="number" min="100" max="999" value="999"></div>
+        <div class="preset-field"><label for="presetDivisorMin">Divisor from</label><input class="preset-input" id="presetDivisorMin" type="number" min="2" max="99" value="2"></div>
+        <div class="preset-field"><label for="presetDivisorMax">Divisor to</label><input class="preset-input" id="presetDivisorMax" type="number" min="2" max="99" value="12"></div>
+        <div class="preset-field"><label for="presetPrimeMax">Prime range maximum</label><input class="preset-input" id="presetPrimeMax" type="number" min="10" max="300" value="100"></div>
+        <div class="preset-field"><label for="presetCiYears">Compound-interest years</label><select class="preset-select" id="presetCiYears"><option value="2">2 years</option><option value="3">3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></div>
       </div>
     </section>
 
@@ -605,7 +619,16 @@ const CATEGORIES=[
    {kind:'quiz',quizId:'mult1',sample:'2 × 2 = ?',subtitle:'Type - 1',color:'pink'},
    {kind:'quiz',quizId:'mult2',sample:'2 × ? = 4',subtitle:'Type - 2',color:'green'},
    {kind:'quiz',quizId:'mult3',sample:'? × ? = 4',subtitle:'Type - 3',color:'cyan'},
+   {kind:'quiz',quizId:'tablewrite',sample:'2 × 1 = ?<br>2 × 2 = ?<br>2 × 3 = ?',subtitle:'Writing Table',color:'purple'},
    {kind:'chart',chartId:'multtables',sample:'2 × 1 = 2\n2 × 2 = 4\n2 × 3 = 6',subtitle:'Tables Chart',color:'yellow'}
+  ]},
+ {id:'mult2d',title:'Two-Digit Multiplication',sample:'24 × 37 = ?',subtitle:'Two-Digit Multiplication',color:'cyan',configType:'range',capMin:10,capMax:99,
+  items:[
+   {kind:'quiz',quizId:'mult2d',sample:'24 × 37 = ?',subtitle:'Start Practice',color:'pink'}
+  ]},
+ {id:'div3d',title:'Three-Digit Division',sample:'384 ÷ 8 = ?',subtitle:'Three-Digit Division',color:'blue',configType:'ranges2',configLabels:['Dividend :','Divisor :'],configBounds:[[100,999],[2,99]],
+  items:[
+   {kind:'quiz',quizId:'div3d',sample:'384 ÷ 8 = ?',subtitle:'Start Practice',color:'pink'}
   ]},
  {id:'squares',title:'Squares',sample:'x²',subtitle:'Squares',color:'yellow',configType:'rangeExp',exp:'2',
   items:[
@@ -676,6 +699,36 @@ const QUIZZES={
   gen(s){const x=ri(Math.min(s.f1,s.f2),Math.max(s.f1,s.f2)),y=ri(Math.min(s.t1,s.t2),Math.max(s.t1,s.t2));return{q:[x,'×','?',x*y],ans:String(y),hint:y};}},
  mult3:{keypad:'num',configKey:'multtables',
   gen(s){const x=ri(Math.min(s.f1,s.f2),Math.max(s.f1,s.f2)),y=ri(Math.min(s.t1,s.t2),Math.max(s.t1,s.t2));return{q:[x,y,x*y],ans:[String(x),String(y)],fields:2,hint:`${x} and ${y}`};}},
+ /* Write out a whole table: one answer box per row, filled top to bottom. */
+ tablewrite:{keypad:'num',configKey:'multtables',
+  gen(s){
+   const n=ri(Math.min(s.f1,s.f2),Math.max(s.f1,s.f2));
+   const t1=Math.min(s.t1,s.t2);
+   /* A table longer than 12 rows would not fit on one screen. */
+   const t2=Math.min(Math.max(s.t1,s.t2),t1+11);
+   const ans=[];
+   for(let t=t1;t<=t2;t++)ans.push(String(n*t));
+   return{q:[n,t1,t2],ans,fields:ans.length,listMode:true,stepHint:true,rows:true};
+  }},
+ mult2d:{keypad:'num',configKey:'mult2d',
+  gen(s){
+   const lo=Math.max(10,Math.min(s.r1,s.r2)),hi=Math.max(lo,Math.min(99,Math.max(s.r1,s.r2)));
+   const x=ri(lo,hi),y=ri(lo,hi);
+   return{q:[x,y],ans:String(x*y),hint:x*y};
+  }},
+ div3d:{keypad:'num',configKey:'div3d',
+  gen(s){
+   let lo=Math.max(100,Math.min(s.f1,s.f2)),hi=Math.min(999,Math.max(s.f1,s.f2));
+   if(hi<lo)hi=lo;
+   const d1=Math.max(2,Math.min(99,Math.min(s.t1,s.t2))),d2=Math.max(d1,Math.min(99,Math.max(s.t1,s.t2)));
+   /* Keep the quotient whole: only divisors with a multiple inside the dividend range qualify. */
+   const usable=[];
+   for(let d=d1;d<=d2;d++)if(Math.floor(hi/d)>=Math.ceil(lo/d))usable.push(d);
+   const d=usable.length?usable[ri(0,usable.length-1)]:2;
+   const qlo=Math.max(1,Math.ceil(lo/d)),qhi=Math.max(qlo,Math.floor(hi/d));
+   const quotient=ri(qlo,qhi);
+   return{q:[quotient*d,d],ans:String(quotient),hint:quotient};
+  }},
  squares:{keypad:'num',configKey:'squares',
   gen(s){const x=ri(s.r1,s.r2);return{q:[x],ans:String(x*x),hint:x*x};}},
  sqroots:{keypad:'num',configKey:'sqroots',
@@ -735,11 +788,13 @@ const QUIZZES={
   }}
 };
 
-const QUIZ_TITLES={addition:'Addition',subtraction:'Subtraction',mult1:'Multiplication · Type 1',mult2:'Multiplication · Type 2',mult3:'Multiplication · Type 3',squares:'Squares',sqroots:'Square Roots',cubes:'Cubes',cuberoots:'Cube Roots',trig:'Trigonometric Ratios',pyth:'Pythagorean Triples',pctfrac:'Percentage → Fraction',pctnum:'Percentage of a Number',ci_si:'Compound Interest · SI %',ci_ci:'Compound Interest · CI %',primeinrange:'List Primes in Range',isprime:'Is it Prime?',astr1:'Alphabet Position',astr2:'Alphabet Letter',arev1:'Alphabet Reverse Position',arev2:'Alphabet Reverse Letter',higherpow:'Higher Powers'};
+const QUIZ_TITLES={addition:'Addition',subtraction:'Subtraction',mult1:'Multiplication · Type 1',mult2:'Multiplication · Type 2',mult3:'Multiplication · Type 3',tablewrite:'Writing Table',mult2d:'Two-Digit Multiplication',div3d:'Three-Digit Division',squares:'Squares',sqroots:'Square Roots',cubes:'Cubes',cuberoots:'Cube Roots',trig:'Trigonometric Ratios',pyth:'Pythagorean Triples',pctfrac:'Percentage → Fraction',pctnum:'Percentage of a Number',ci_si:'Compound Interest · SI %',ci_ci:'Compound Interest · CI %',primeinrange:'List Primes in Range',isprime:'Is it Prime?',astr1:'Alphabet Position',astr2:'Alphabet Letter',arev1:'Alphabet Reverse Position',arev2:'Alphabet Reverse Letter',higherpow:'Higher Powers'};
 
 let catSettings={
  addsub:{digits:2},
  multtables:{f1:2,f2:9,t1:1,t2:10},
+ mult2d:{r1:10,r2:99},
+ div3d:{f1:100,f2:999,t1:2,t2:12},
  squares:{r1:2,r2:25},
  sqroots:{r1:2,r2:25},
  cubes:{r1:2,r2:25},
@@ -831,10 +886,11 @@ function renderCfg(cat){
     wrap.appendChild(card);
     $("digitsSel").onchange=e=>{s.digits=parseInt(e.target.value,10);};
   }else if(cat.configType==="range"){
-    const capAttr=cat.capMax?` max="${cat.capMax}" min="1"`:"";
+    const capMin=cat.capMin||1;
+    const capAttr=cat.capMax?` max="${cat.capMax}" min="${capMin}"`:"";
     card.innerHTML=`<div class="rangeline">From <input class="uinput" type="number" id="r1in" value="${s.r1}"${capAttr}> To <input class="uinput" type="number" id="r2in" value="${s.r2}"${capAttr}></div>`;
     wrap.appendChild(card);
-    const clamp=v=>cat.capMax?Math.max(1,Math.min(cat.capMax,v)):v;
+    const clamp=v=>cat.capMax?Math.max(capMin,Math.min(cat.capMax,v)):v;
     $("r1in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.r1=clamp(v);};
     $("r2in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.r2=clamp(v);};
   }else if(cat.configType==="rangeExp"){
@@ -847,14 +903,17 @@ function renderCfg(cat){
     wrap.appendChild(card);
     $("yearsSel").onchange=e=>{s.years=parseInt(e.target.value,10);};
   }else if(cat.configType==="ranges2"){
-    card.innerHTML=`
-     <div class="cfg-row"><span class="cfg-label">Tables :</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" min="1" max="100" id="f1in" value="${s.f1}"> to <input class="binput" type="number" min="1" max="100" id="f2in" value="${s.f2}"></span></div>
-     <div class="cfg-row"><span class="cfg-label">Multiply :</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" min="1" max="100" id="t1in" value="${s.t1}"> to <input class="binput" type="number" min="1" max="100" id="t2in" value="${s.t2}"></span></div>`;
+    const labels=cat.configLabels||["Tables :","Multiply :"];
+    const bounds=cat.configBounds||[[1,100],[1,100]];
+    const pair=(label,b,idA,idB,valA,valB)=>
+     `<div class="cfg-row"><span class="cfg-label">${label}</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" min="${b[0]}" max="${b[1]}" id="${idA}" value="${valA}"> to <input class="binput" type="number" min="${b[0]}" max="${b[1]}" id="${idB}" value="${valB}"></span></div>`;
+    card.innerHTML=pair(labels[0],bounds[0],"f1in","f2in",s.f1,s.f2)+pair(labels[1],bounds[1],"t1in","t2in",s.t1,s.t2);
     wrap.appendChild(card);
-    $("f1in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.f1=v;};
-    $("f2in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.f2=v;};
-    $("t1in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.t1=v;};
-    $("t2in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.t2=v;};
+    const bind=(id,key,b)=>{$(id).oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s[key]=Math.max(b[0],Math.min(b[1],v));};};
+    bind("f1in","f1",bounds[0]);
+    bind("f2in","f2",bounds[0]);
+    bind("t1in","t1",bounds[1]);
+    bind("t2in","t2",bounds[1]);
   }
 }
 
@@ -963,15 +1022,17 @@ function nextQ(){
 function numSpan(v){return `<span class="qnum">${v}</span>`;}
 function opSpan(v){return `<span class="qop">${v}</span>`;}
 function supSpan(v){return `<sup class="qsup">${v}</sup>`;}
-function ansSpan(i){const v=inputs[i]||"";return `<span class="ansbox" data-i="${i}">${v||"&nbsp;"}</span>`;}
+function ansSpan(i){const v=inputs[i]||"";return `<span class="ansbox${i===field?" active":""}" data-i="${i}">${v||"&nbsp;"}</span>`;}
 
 function questionHTML(id){
   switch(id){
     case"addition":return `${numSpan(cur.q[0])} ${opSpan("+")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
     case"subtraction":return `${numSpan(cur.q[0])} ${opSpan("−")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
-    case"mult1":return `${numSpan(cur.q[0])} ${opSpan("×")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"mult1":case"mult2d":return `${numSpan(cur.q[0])} ${opSpan("×")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
     case"mult2":return `${numSpan(cur.q[0])} ${opSpan("×")} ${ansSpan(0)} ${opSpan("=")} ${numSpan(cur.q[3])}`;
     case"mult3":return `${ansSpan(0)} ${opSpan("×")} ${ansSpan(1)} ${opSpan("=")} ${numSpan(cur.q[2])}`;
+    case"div3d":return `${numSpan(cur.q[0])} ${opSpan("÷")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"tablewrite":{const n=cur.q[0],from=cur.q[1];return cur.ans.map((_,i)=>`<span class="qrow">${numSpan(n)} ${opSpan("×")} ${numSpan(from+i)} ${opSpan("=")} ${ansSpan(i)}</span>`).join("");}
     case"squares":return `${numSpan(cur.q[0])}${supSpan("2")} ${opSpan("=")} ${ansSpan(0)}`;
     case"sqroots":return `${opSpan("√")}${numSpan(cur.q[0])} ${opSpan("=")} ${ansSpan(0)}`;
     case"cubes":return `${numSpan(cur.q[0])}${supSpan("3")} ${opSpan("=")} ${ansSpan(0)}`;
@@ -990,7 +1051,12 @@ function questionHTML(id){
     default:return"";
   }
 }
-function renderQ(){if(!cur)return;$("qline").innerHTML=questionHTML(curQuizId);}
+function renderQ(){
+  if(!cur)return;
+  const line=$("qline");
+  line.className="qline"+(cur.rows?" qline-rows":"");
+  line.innerHTML=questionHTML(curQuizId);
+}
 
 function flash(ok,idx){
   const wrongAction=!ok&&window.CalcPresets&&typeof window.CalcPresets.onWrong==="function"?window.CalcPresets.onWrong():null;
@@ -1081,7 +1147,8 @@ function checkYesNo(val,def){
 $("hintbtn").onclick=()=>{
   if(!cur||busy)return;
   if(window.CalcPresets&&typeof window.CalcPresets.onHint==="function"&&!window.CalcPresets.onHint())return;
-  const h=cur.hint!==undefined?cur.hint:cur.ans;
+  /* Step-by-step questions hint only the row being filled in, not the whole answer. */
+  const h=cur.stepHint&&Array.isArray(cur.ans)?cur.ans[field]:(cur.hint!==undefined?cur.hint:cur.ans);
   $("feedback").innerHTML=`<span style="color:#ffd54f">Hint: ${h}</span>`;
 };
 $("skipbtn").onclick=()=>{if(window.CalcPresets&&typeof window.CalcPresets.skipQuestion==="function")window.CalcPresets.skipQuestion();};
@@ -1169,6 +1236,6 @@ document.addEventListener("keydown",e=>{
 renderHome();
 show("home");
 </script>
-<script src="presets.js?v=6"></script>
+<script src="presets.js?v=7"></script>
 </body>
 </html>
