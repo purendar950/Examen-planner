@@ -26,6 +26,11 @@ if (!serviceAccount.project_id || !serviceAccount.private_key) {
 
 admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
 const db = admin.firestore();
+/* Where the app is reachable in a browser. GitHub Pages serves it from a
+   repository sub-path, so the reminder's "Start Practice" deep link needs the
+   full base URL. Override with APP_BASE_URL when the deployment moves. */
+const APP_BASE_URL = String(process.env.APP_BASE_URL || 'https://purendar950.github.io/Examen-planner')
+  .trim().replace(/\/+$/, '');
 const IST_OFFSET_MS = 330 * 60000;
 const DUE_WINDOW_MS = 3 * 60 * 60000;
 const RETRY_DELAY_MS = 15 * 60000;
@@ -115,7 +120,7 @@ async function sendMessage(chatId, preset, deliveryDocId) {
   const reminder = preset.reminder || {};
   const snoozeMinutes = [5, 10, 15, 30, 60].includes(Number(reminder.snoozeMinutes)) ? Number(reminder.snoozeMinutes) : 10;
   const maxSnoozes = [0, 1, 2, 3, 5].includes(Number(reminder.maxSnoozes)) ? Number(reminder.maxSnoozes) : 2;
-  const practiceUrl = `https://examzen.in/app.html?open=calc&preset=${encodeURIComponent(preset.id)}`;
+  const practiceUrl = `${APP_BASE_URL}/app.html?open=calc&preset=${encodeURIComponent(preset.id)}`;
   const rows = [[{ text: '▶ Start Practice', url: practiceUrl }]];
   if (maxSnoozes > 0) rows.push([{ text: `⏰ Snooze ${snoozeMinutes}m`, callback_data: `calc_snooze:${deliveryDocId}` }]);
   const tableDetail = preset.hasTables

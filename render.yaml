@@ -15,8 +15,16 @@ services:
       - key: FIREBASE_SERVICE_ACCOUNT
         sync: false
       # Comma-separated browser origins permitted to call relay endpoints.
+      # The service's built-in defaults are always allowed; this only ADDS to
+      # them, so the live GitHub Pages origin can never be dropped by a stale
+      # value (that is what broke "Send to Telegram" with "Failed to fetch").
       - key: ALLOWED_ORIGINS
-        value: "https://examzen.in,https://www.examzen.in,https://appassets.androidengine"
+        value: "https://examzen.in,https://www.examzen.in,https://purendar950.github.io,https://appassets.androidengine"
+      # Fallback base URL for Telegram deep links when the caller's origin is
+      # unknown (Android WebView). Browser callers use their own allow-listed
+      # base automatically.
+      - key: APP_BASE_URL
+        value: "https://purendar950.github.io/Examen-planner"
       - key: NODE_ENV
         value: production
 
@@ -44,7 +52,7 @@ services:
       - key: FIREBASE_SERVICE_ACCOUNT
         sync: false
       - key: ALLOWED_ORIGINS
-        value: "https://examzen.in,https://www.examzen.in,https://appassets.androidengine"
+        value: "https://examzen.in,https://www.examzen.in,https://purendar950.github.io,https://appassets.androidengine"
       - key: MAX_TELEGRAM_IMAGE_BYTES
         value: "8388608"
 

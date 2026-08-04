@@ -622,9 +622,86 @@ bot.on('polling_error', (err) => {
    HTTP Server (health check + /send proxy)
    ════════════════════════════════════════════════════════════════════════════ */
 const PORT = process.env.PORT || 3000;
-const ALLOWED_ORIGINS = new Set((process.env.ALLOWED_ORIGINS ||
-  'https://examzen.in,https://www.examzen.in,https://appassets.androidengine,http://localhost:5173')
-  .split(',').map(origin => origin.trim().replace(/\/$/, '')).filter(Boolean));
+/* The built-in production origins are ALWAYS allowed. ALLOWED_ORIGINS
+   (comma-separated) only ADDS further origins — it never replaces the defaults,
+   so a stale/misconfigured env value can no longer silently drop the live
+   site's own origin. That is exactly what broke "Send to Telegram" from the
+   GitHub Pages deployment: the preflight was answered 403 without CORS
+   headers, which the browser surfaces only as "Failed to fetch".
+   Mirrors youtube-turbo-proxy/app.py. Never a wildcard. */
+const DEFAULT_ALLOWED_ORIGINS = [
+  'https://examzen.in',
+  'https://www.examzen.in',
+  'https://purendar950.github.io',   // GitHub Pages deployment
+  'https://appassets.androidengine', // Android WebView
+  'http://localhost:5173'
+];
+const ALLOWED_ORIGINS = new Set(DEFAULT_ALLOWED_ORIGINS
+  .concat(String(process.env.ALLOWED_ORIGINS || '').split(','))
+  .map(origin => origin.trim().replace(/\/$/, ''))
+  .filter(Boolean));
+
+/* Where the app is reachable in a browser, per origin. GitHub Pages serves the
+   app from a repository sub-path, so the deep link needs the full base — not
+   just the origin. APP_BASE_URLS (comma-separated absolute URLs) adds or
+   overrides bases; APP_BASE_URL sets the fallback used when the caller's origin
+   is unknown (for example the Android WebView or the scheduled worker). */
+const DEFAULT_APP_BASE_URLS = [
+  'https://purendar950.github.io/Examen-planner',
+  'https://examzen.in',
+  'https://www.examzen.in',
+  'http://localhost:5173/Examen-planner' // vite.config.mjs serves under this base
+];
+
+/* A deep link is only useful if it is an absolute http(s) URL, so reject
+   anything else instead of emitting a button Telegram will refuse or that
+   opens nothing. Returns '' when the value cannot be used. */
+function normalizeAppBaseUrl(value) {
+  const candidate = String(value == null ? '' : value).trim().replace(/\/+$/, '');
+  if (!candidate) return '';
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+    return candidate;
+  } catch (error) {
+    return '';
+  }
+}
+
+const APP_BASE_URLS = new Map();
+DEFAULT_APP_BASE_URLS
+  .concat(String(process.env.APP_BASE_URLS || '').split(','))
+  .filter(entry => String(entry || '').trim())
+  .forEach(entry => {
+    const base = normalizeAppBaseUrl(entry);
+    if (!base) {
+      console.warn(`⚠️  Ignoring malformed APP_BASE_URLS entry: ${String(entry).trim()}`);
+      return;
+    }
+    APP_BASE_URLS.set(new URL(base).origin, base);
+  });
+
+const FALLBACK_APP_BASE_URL = normalizeAppBaseUrl(process.env.APP_BASE_URL)
+  || normalizeAppBaseUrl(DEFAULT_APP_BASE_URLS[0]);
+if (process.env.APP_BASE_URL && !normalizeAppBaseUrl(process.env.APP_BASE_URL)) {
+  console.warn(`⚠️  APP_BASE_URL is not an absolute http(s) URL — using ${FALLBACK_APP_BASE_URL} for deep links.`);
+}
+
+/* Only an already allow-listed origin can select its base, so the delivered
+   deep link can never be pointed at an attacker-supplied host. */
+function appBaseUrlForRequest(req) {
+  const origin = String((req && req.headers && req.headers.origin) || '').replace(/\/$/, '');
+  if (origin && ALLOWED_ORIGINS.has(origin) && APP_BASE_URLS.has(origin)) return APP_BASE_URLS.get(origin);
+  return FALLBACK_APP_BASE_URL;
+}
+
+/* Surface the resolved routing once at boot: an allow-listed origin with no
+   base of its own silently receives the fallback link, which is easy to miss
+   when a new deployment origin is added to only one of the two lists. */
+const _originsWithoutBase = Array.from(ALLOWED_ORIGINS).filter(origin => !APP_BASE_URLS.has(origin));
+console.log(`🔗 Deep-link bases: ${Array.from(APP_BASE_URLS.values()).join(', ')} · fallback ${FALLBACK_APP_BASE_URL}`
+  + (_originsWithoutBase.length ? ` · using fallback for ${_originsWithoutBase.join(', ')}` : ''));
+
 const MAX_RELAY_BODY_BYTES = 12 * 1024 * 1024;
 
 function setCors(req, res) {
@@ -845,7 +922,7 @@ async function claimCalculationPresetRequest(uid, presetId, requestId, presetFin
   }
 }
 
-async function sendCalculationPresetForUser(uid, presetId, requestId, presetFingerprint) {
+async function sendCalculationPresetForUser(uid, presetId, requestId, presetFingerprint, appBaseUrl) {
   const userSnapshot = await db.collection('users').doc(uid).get();
   if (!userSnapshot.exists) throw Object.assign(new Error('User profile not found.'), { status: 404 });
   const userData = userSnapshot.data() || {};
@@ -880,7 +957,8 @@ async function sendCalculationPresetForUser(uid, presetId, requestId, presetFing
   if (claim.duplicate) return { duplicate: true };
 
   const preset = sanitizeCalculationPreset(rawPreset);
-  const practiceUrl = `https://examzen.in/app.html?open=calc&preset=${encodeURIComponent(preset.id)}`;
+  const practiceBase = String(appBaseUrl || FALLBACK_APP_BASE_URL).replace(/\/+$/, '');
+  const practiceUrl = `${practiceBase}/app.html?open=calc&preset=${encodeURIComponent(preset.id)}`;
   let sent;
   try {
     sent = await bot.sendMessage(chatId, calculationPresetText(preset), {
@@ -973,7 +1051,8 @@ const server = http.createServer((req, res) => {
           throw Object.assign(new Error('valid presetId, requestId, and presetFingerprint are required'), { status: 400 });
         }
         await enforceCalculationPresetRateLimit(actor.uid);
-        const result = await sendCalculationPresetForUser(actor.uid, presetId, requestId, presetFingerprint);
+        const result = await sendCalculationPresetForUser(
+          actor.uid, presetId, requestId, presetFingerprint, appBaseUrlForRequest(req));
         sendJson(res, 200, { ok: true, duplicate: result.duplicate === true });
       } catch (error) {
         console.error('❌ /send-calculation-preset error:', error.message);

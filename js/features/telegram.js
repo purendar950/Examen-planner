@@ -141,9 +141,10 @@ async function sendCalculationPresetNow(presetId, requestId, expectedUid, preset
   if (!auth.currentUser || (expectedUid && auth.currentUser.uid !== expectedUid)) {
     throw new Error('Your signed-in account changed. Send again from the current account.');
   }
+  const backendUrl = telegramBotBaseUrl();
   let response;
   try {
-    response = await fetch(telegramBotBaseUrl() + '/send-calculation-preset', {
+    response = await fetch(backendUrl + '/send-calculation-preset', {
       method: 'POST',
       headers: {
         'Authorization': 'Bearer ' + token,
@@ -152,8 +153,18 @@ async function sendCalculationPresetNow(presetId, requestId, expectedUid, preset
       body: JSON.stringify({ presetId, requestId, presetFingerprint })
     });
   } catch (fetchError) {
-    fetchError.retrySameRequest = true;
-    throw fetchError;
+    /* A rejected fetch carries no status: the request never completed. The
+       browser reports blocked CORS, a sleeping/unreachable host, and a dropped
+       connection identically ("Failed to fetch"), so name the host and the
+       likely causes instead of surfacing that opaque message. Reusing the same
+       request ID keeps the retry idempotent. */
+    let host = backendUrl;
+    try { host = new URL(backendUrl).host; } catch (error) { /* keep the raw value */ }
+    const error = new Error('Could not reach the Telegram service at ' + host
+      + '. It may be starting up or blocking this site — wait a few seconds and press Send to Telegram again.');
+    error.cause = fetchError;
+    error.retrySameRequest = true;
+    throw error;
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.ok !== true) {
