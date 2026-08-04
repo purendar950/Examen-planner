@@ -101,6 +101,27 @@
     };
   }
 
+  function canonicalPresetJson(value) {
+    if (Array.isArray(value)) {
+      return '[' + value.map(canonicalPresetJson).join(',') + ']';
+    }
+    if (value && typeof value === 'object') {
+      return '{' + Object.keys(value).sort().map(function (key) {
+        return JSON.stringify(key) + ':' + canonicalPresetJson(value[key]);
+      }).join(',') + '}';
+    }
+    return JSON.stringify(value);
+  }
+
+  async function calculationPresetFingerprint(preset) {
+    if (!window.crypto || !window.crypto.subtle || typeof TextEncoder === 'undefined') {
+      throw new Error('Secure preset verification is unavailable. Reload StudyPlanner over HTTPS and try again.');
+    }
+    var bytes = new TextEncoder().encode(canonicalPresetJson(preset));
+    var digest = await window.crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest)).map(function (byte) { return byte.toString(16).padStart(2, '0'); }).join('');
+  }
+
   function sanitizeHistory(raw) {
     raw = raw && typeof raw === 'object' ? raw : {};
     return {
@@ -246,22 +267,27 @@
       try {
         if (typeof appState === 'undefined' || !appState) throw new Error('Calculation presets are not ready yet.');
         var currentCalcState = sanitizeCalcState(appState.calculationPractice || defaultCalcState());
-        if (!currentCalcState.presets.some(function (preset) { return preset.id === presetId; })) {
+        var requestedPreset = currentCalcState.presets.find(function (preset) { return preset.id === presetId; });
+        if (!requestedPreset) {
           throw new Error('Save this preset before sending it to Telegram.');
         }
         if (navigator.onLine === false) throw new Error('You are offline. Reconnect before sending.');
         if (!requestUid) throw new Error('Sign in before sending to Telegram.');
         if (typeof saveProgressNow !== 'function') throw new Error('Cloud sync is not ready yet.');
         await saveProgressNow();
-        if (navigator.onLine === false || (typeof _localDirty !== 'undefined' && _localDirty)) {
-          throw new Error('Preset could not sync to the cloud. Reconnect and try again.');
+        if (navigator.onLine === false) {
+          throw new Error('You are offline. Reconnect before sending.');
         }
+        var latestCalcState = sanitizeCalcState(appState.calculationPractice || defaultCalcState());
+        requestedPreset = latestCalcState.presets.find(function (preset) { return preset.id === presetId; });
+        if (!requestedPreset) throw new Error('This preset was deleted before it could be sent.');
+        var presetFingerprint = await calculationPresetFingerprint(requestedPreset);
         if (typeof currentUser === 'undefined' || !currentUser || String(currentUser.uid || '') !== requestUid || currentCalcSessionKey() !== requestSessionKey) {
           syncCalcState();
           throw new Error('Your signed-in account changed. Send again from the current account.');
         }
         if (typeof sendCalculationPresetNow !== 'function') throw new Error('Telegram delivery is not ready. Reload and try again.');
-        await sendCalculationPresetNow(presetId, requestId, requestUid);
+        await sendCalculationPresetNow(presetId, requestId, requestUid, presetFingerprint);
         postPresetSendResult(frame, presetId, requestId, requestSessionKey, { ok: true });
       } catch (error) {
         postPresetSendResult(frame, presetId, requestId, requestSessionKey, {
@@ -303,7 +329,7 @@
       syncCalcState();
       setTimeout(syncCalcDeepLink, 0);
     });
-    frame.src = 'calc/index.html?v=3';
+    frame.src = 'calc/index.html?v=4';
   }
 
   if (typeof onPageActivated === 'function') onPageActivated('calc', loadCalc);

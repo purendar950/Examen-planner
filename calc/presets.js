@@ -567,10 +567,13 @@
     tags.push(preset.quizIds.length + ' types');
     return tags;
   }
+  function presetSendPending(presetId) {
+    return !!(presetSendStates[presetId] && presetSendStates[presetId].status === 'pending');
+  }
   function requestPresetSend(presetId) {
     var preset = getPreset(presetId);
     var current = presetSendStates[presetId];
-    if (!preset || (current && current.status === 'pending')) return;
+    if (!preset || presetSendPending(presetId)) return;
     var requestId = current && current.status === 'error' && current.retrySameRequest
       ? current.requestId
       : uniqueId('send');
@@ -603,12 +606,14 @@
     var dailyBadge = state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : (suggested ? '<span class="preset-badge">Suggested</span>' : '');
     var tags = presetTags(preset).map(function (tag) { return '<span class="preset-tag">' + escapeHtml(tag) + '</span>'; }).join('');
     var sendState = presetSendStates[preset.id] || null;
+    var sendPending = !!(sendState && sendState.status === 'pending');
+    var pendingDisabled = sendPending ? ' disabled' : '';
     var sendStatus = !suggested && sendState
       ? '<span class="preset-send-status ' + escapeHtml(sendState.status) + '" data-send-status role="status">' + escapeHtml(sendState.message) + '</span>'
       : '';
     var actions = suggested
       ? '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="customize">Customize & Save</button>'
-      : '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="send"' + (sendState && sendState.status === 'pending' ? ' disabled' : '') + '>Send to Telegram</button><button type="button" class="preset-btn" data-action="edit">Edit</button><button type="button" class="preset-btn" data-action="duplicate">Duplicate</button><button type="button" class="preset-btn" data-action="schedule">Schedule</button><button type="button" class="preset-btn" data-action="reset">Reset</button><button type="button" class="preset-btn danger" data-action="delete">Delete</button>';
+      : '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="send"' + pendingDisabled + '>Send to Telegram</button><button type="button" class="preset-btn" data-action="edit"' + pendingDisabled + '>Edit</button><button type="button" class="preset-btn" data-action="duplicate">Duplicate</button><button type="button" class="preset-btn" data-action="schedule"' + pendingDisabled + '>Schedule</button><button type="button" class="preset-btn" data-action="reset"' + pendingDisabled + '>Reset</button><button type="button" class="preset-btn danger" data-action="delete"' + pendingDisabled + '>Delete</button>';
     card.innerHTML =
       '<div class="preset-card-top"><div class="preset-icon">' + escapeHtml(preset.icon) + '</div><div class="preset-card-title"><h3>' + escapeHtml(preset.name) + '</h3><p>' + escapeHtml(preset.description || (recent ? 'Last score ' + accuracy(recent) + '%' : 'Ready to practice')) + '</p></div>' + dailyBadge + '</div>' +
       '<div class="preset-tags">' + tags + '</div><div class="preset-actions">' + actions + sendStatus + '</div>';
@@ -647,8 +652,9 @@
       return;
     }
     var completedToday = state.history.some(function (entry) { return entry.presetId === preset.id && entry.date === localDateKey() && entry.reason === 'completed'; });
+    var editDisabled = presetSendPending(preset.id) ? ' disabled' : '';
     var daysText = preset.days.length === 7 ? 'Every day' : preset.days.map(function (day) { return DAY_LABELS[day]; }).join(', ');
-    container.innerHTML = '<div><div class="preset-eyebrow">' + (completedToday ? 'Completed today' : 'Your daily practice') + '</div><h2>' + escapeHtml(preset.icon + ' ' + preset.name) + '</h2><p class="preset-muted">' + escapeHtml(daysText + ' · ' + formatTimeLabel(preset.dailyTime) + ' · ' + preset.questionCount + ' questions') + '</p></div><div class="preset-actions"><button type="button" class="preset-btn primary" id="dailyStartBtn">' + (completedToday ? 'Practice again' : 'Start daily practice') + '</button><button type="button" class="preset-btn" id="dailyEditBtn">Edit</button></div>';
+    container.innerHTML = '<div><div class="preset-eyebrow">' + (completedToday ? 'Completed today' : 'Your daily practice') + '</div><h2>' + escapeHtml(preset.icon + ' ' + preset.name) + '</h2><p class="preset-muted">' + escapeHtml(daysText + ' · ' + formatTimeLabel(preset.dailyTime) + ' · ' + preset.questionCount + ' questions') + '</p></div><div class="preset-actions"><button type="button" class="preset-btn primary" id="dailyStartBtn">' + (completedToday ? 'Practice again' : 'Start daily practice') + '</button><button type="button" class="preset-btn" id="dailyEditBtn"' + editDisabled + '>Edit</button></div>';
     element('dailyStartBtn').onclick = function () { startPreset(preset); };
     element('dailyEditBtn').onclick = function () { openEditor(preset.id); };
   }
@@ -791,6 +797,7 @@
     }, false);
   }
   function openEditor(presetId, templateId, makeDaily) {
+    if (presetId && presetSendPending(presetId)) return;
     editingPresetId = presetId || null;
     editingTemplateId = templateId || null;
     var source = presetId ? getPreset(presetId) : templateId ? getTemplate(templateId) : genericPreset();
@@ -910,6 +917,7 @@
     populateEditor(draft, false);
   }
   function resetPreset(id) {
+    if (presetSendPending(id)) return;
     var original = getPreset(id);
     if (!original || !window.confirm('Restore defaults for "' + original.name + '"? Practice history will be kept.')) return;
     var template = getTemplate(original.sourceTemplateId);
@@ -937,6 +945,7 @@
     persistState();
   }
   function deletePreset(id) {
+    if (presetSendPending(id)) return;
     var preset = getPreset(id);
     if (!preset || !window.confirm('Delete "' + preset.name + '"? Practice history will be kept.')) return;
     state.presets = state.presets.filter(function (item) { return item.id !== id; });
