@@ -780,6 +780,18 @@ function sanitizeCalculationPreset(raw) {
   };
 }
 
+function canonicalPresetJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalPresetJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalPresetJson(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function calculationPresetFingerprint(preset) {
+  return crypto.createHash('sha256').update(canonicalPresetJson(preset)).digest('hex');
+}
+
 function calculationPresetText(preset) {
   const difficulty = preset.difficulty === 'exam'
     ? 'Exam'
@@ -797,13 +809,14 @@ function calculationPresetRequestRef(uid, requestId) {
   return db.collection('calculationPresetSendRequests').doc(id);
 }
 
-async function claimCalculationPresetRequest(uid, presetId, requestId) {
+async function claimCalculationPresetRequest(uid, presetId, requestId, presetFingerprint) {
   const ref = calculationPresetRequestRef(uid, requestId);
   try {
     await ref.create({
       uid,
       presetId,
       requestId,
+      presetFingerprint,
       status: 'sending',
       createdAt: global._fbAdmin.firestore.FieldValue.serverTimestamp(),
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
@@ -812,23 +825,27 @@ async function claimCalculationPresetRequest(uid, presetId, requestId) {
   } catch (error) {
     const existing = await ref.get();
     const data = existing.exists ? (existing.data() || {}) : {};
-    if (data.uid === uid && data.requestId === requestId && data.presetId === presetId && data.status === 'sent') {
+    const sameRequest = data.uid === uid && data.requestId === requestId && data.presetId === presetId && data.presetFingerprint === presetFingerprint;
+    if (sameRequest && data.status === 'sent') {
       return { ref, duplicate: true };
     }
     if (existing.exists) {
-      const failed = data.status === 'failed';
-      throw Object.assign(new Error(failed
-        ? 'That send attempt failed. Press Send to Telegram again to retry.'
-        : 'This preset send is already being processed. Check Telegram before trying a new send.'), {
+      const failed = sameRequest && data.status === 'failed';
+      const changed = !sameRequest;
+      throw Object.assign(new Error(changed
+        ? 'This preset changed after the send started. Press Send to Telegram again for the new version.'
+        : failed
+          ? 'That send attempt failed. Press Send to Telegram again to retry.'
+          : 'This preset send is already being processed. Check Telegram before trying a new send.'), {
         status: 409,
-        retryWithNewRequest: failed
+        retryWithNewRequest: changed || failed
       });
     }
     throw error;
   }
 }
 
-async function sendCalculationPresetForUser(uid, presetId, requestId) {
+async function sendCalculationPresetForUser(uid, presetId, requestId, presetFingerprint) {
   const userSnapshot = await db.collection('users').doc(uid).get();
   if (!userSnapshot.exists) throw Object.assign(new Error('User profile not found.'), { status: 404 });
   const userData = userSnapshot.data() || {};
@@ -853,7 +870,13 @@ async function sendCalculationPresetForUser(uid, presetId, requestId) {
   const rawPreset = presets.find(preset => preset && preset.id === presetId);
   if (!rawPreset) throw Object.assign(new Error('Saved preset not found. Sync it and try again.'), { status: 404 });
 
-  const claim = await claimCalculationPresetRequest(uid, presetId, requestId);
+  if (calculationPresetFingerprint(rawPreset) !== presetFingerprint) {
+    throw Object.assign(new Error('This preset is still syncing. Wait a moment and press Send to Telegram again.'), {
+      status: 409,
+      retryWithNewRequest: false
+    });
+  }
+  const claim = await claimCalculationPresetRequest(uid, presetId, requestId, presetFingerprint);
   if (claim.duplicate) return { duplicate: true };
 
   const preset = sanitizeCalculationPreset(rawPreset);
@@ -943,11 +966,14 @@ const server = http.createServer((req, res) => {
         catch (parseError) { throw Object.assign(new Error('valid JSON body required'), { status: 400 }); }
         const presetId = typeof parsed.presetId === 'string' ? parsed.presetId : '';
         const requestId = typeof parsed.requestId === 'string' ? parsed.requestId : '';
-        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(presetId) || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$/.test(requestId)) {
-          throw Object.assign(new Error('valid presetId and requestId are required'), { status: 400 });
+        const presetFingerprint = typeof parsed.presetFingerprint === 'string' ? parsed.presetFingerprint : '';
+        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(presetId) ||
+            !/^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$/.test(requestId) ||
+            !/^[a-f0-9]{64}$/.test(presetFingerprint)) {
+          throw Object.assign(new Error('valid presetId, requestId, and presetFingerprint are required'), { status: 400 });
         }
         await enforceCalculationPresetRateLimit(actor.uid);
-        const result = await sendCalculationPresetForUser(actor.uid, presetId, requestId);
+        const result = await sendCalculationPresetForUser(actor.uid, presetId, requestId, presetFingerprint);
         sendJson(res, 200, { ok: true, duplicate: result.duplicate === true });
       } catch (error) {
         console.error('❌ /send-calculation-preset error:', error.message);

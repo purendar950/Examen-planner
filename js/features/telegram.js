@@ -130,7 +130,10 @@ function telegramBotBaseUrl() {
 /* Send one saved Calculation Practice preset immediately. The backend derives
    the account, private chat, entitlement, and preset from the verified token;
    the browser sends only bounded identifiers. */
-async function sendCalculationPresetNow(presetId, requestId, expectedUid) {
+async function sendCalculationPresetNow(presetId, requestId, expectedUid, presetFingerprint) {
+  if (!/^[a-f0-9]{64}$/.test(String(presetFingerprint || ''))) {
+    throw new Error('Preset verification failed. Reload and try again.');
+  }
   if (typeof auth === 'undefined' || !auth || !auth.currentUser || (expectedUid && auth.currentUser.uid !== expectedUid)) {
     throw new Error('Your signed-in account changed. Send again from the current account.');
   }
@@ -146,7 +149,7 @@ async function sendCalculationPresetNow(presetId, requestId, expectedUid) {
         'Authorization': 'Bearer ' + token,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ presetId, requestId })
+      body: JSON.stringify({ presetId, requestId, presetFingerprint })
     });
   } catch (fetchError) {
     fetchError.retrySameRequest = true;
