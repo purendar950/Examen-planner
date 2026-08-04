@@ -15,6 +15,11 @@
   var timerHandle = null;
   var settingsBackup = null;
   var presetSendStates = Object.create(null);
+  /* Ranges typed on a quick preset card, and the transient "added" confirmation,
+     both keyed by template id. Neither is persisted. */
+  var templateRangeDrafts = Object.create(null);
+  var templateSaveStates = Object.create(null);
+  var templateSaveTimer = null;
   var parentSessionKey = '';
   /* Telegram Mini App mode: the practice is launched from a Telegram message
      and the account is proven by Telegram's signed initData, because Google
@@ -24,7 +29,7 @@
   var QUIZ_CHOICES = [
     ['addition', 'Addition'], ['subtraction', 'Subtraction'],
     ['mult1', 'Multiplication · Answer'], ['mult2', 'Multiplication · Missing factor'], ['mult3', 'Multiplication · Two factors'],
-    ['tablewrite', 'Writing table'], ['mult2d', 'Two-digit multiplication'], ['div3d', 'Three-digit division'],
+    ['tablewrite', 'Writing table'], ['mult2d', 'Two-digit multiplication'], ['mult3d', 'Three-digit multiplication'],
     ['squares', 'Squares'], ['sqroots', 'Square roots'], ['cubes', 'Cubes'], ['cuberoots', 'Cube roots'], ['higherpow', 'Higher powers'],
     ['pctfrac', 'Percentage → fraction'], ['pctnum', 'Percentage of a number'],
     ['trig', 'Trigonometric ratios'], ['pyth', 'Pythagorean triples'],
@@ -59,15 +64,15 @@
       ]
     },
     {
-      id: 'template-three-digit-div', name: 'Three-Digit Division', icon: '📈', color: '#3B82F6',
-      description: 'Divide a three-digit number exactly.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
-      quizIds: ['div3d'], allowHints: true, allowSkip: true, shuffle: true,
-      settings: { divMin: 100, divMax: 999, divisorMin: 2, divisorMax: 12 },
+      id: 'template-three-digit-mult', name: 'Three-Digit Multiplication', icon: '📈', color: '#3B82F6',
+      description: 'Multiply a three-digit number.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
+      quizIds: ['mult3d'], allowHints: true, allowSkip: true, shuffle: true,
+      settings: { mult3Min: 100, mult3Max: 999, mult3ByMin: 100, mult3ByMax: 999 },
       rangeFields: [
-        { key: 'divMin', label: 'Dividend from', min: 100, max: 999 },
-        { key: 'divMax', label: 'Dividend to', min: 100, max: 999 },
-        { key: 'divisorMin', label: 'Divisor from', min: 2, max: 99 },
-        { key: 'divisorMax', label: 'Divisor to', min: 2, max: 99 }
+        { key: 'mult3Min', label: 'From', min: 100, max: 999 },
+        { key: 'mult3Max', label: 'To', min: 100, max: 999 },
+        { key: 'mult3ByMin', label: 'By from', min: 2, max: 999 },
+        { key: 'mult3ByMax', label: 'By to', min: 2, max: 999 }
       ]
     },
     {
@@ -148,18 +153,18 @@
     if (level === 'easy') {
       return {
         digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
-        mult2Min: 10, mult2Max: 30, divMin: 100, divMax: 400, divisorMin: 2, divisorMax: 9, primeMax: 50, ciYears: 2
+        mult2Min: 10, mult2Max: 30, mult3Min: 100, mult3Max: 400, mult3ByMin: 2, mult3ByMax: 9, primeMax: 50, ciYears: 2
       };
     }
     if (level === 'exam') {
       return {
         digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20,
-        mult2Min: 10, mult2Max: 99, divMin: 100, divMax: 999, divisorMin: 7, divisorMax: 25, primeMax: 300, ciYears: 3
+        mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 11, mult3ByMax: 99, primeMax: 300, ciYears: 3
       };
     }
     return {
       digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
-      mult2Min: 10, mult2Max: 99, divMin: 100, divMax: 999, divisorMin: 2, divisorMax: 12, primeMax: 100, ciYears: 2
+      mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 2, mult3ByMax: 12, primeMax: 100, ciYears: 2
     };
   }
 
@@ -181,8 +186,8 @@
       return high < low ? [high, low] : [low, high];
     };
     var twoDigit = orderedPair(raw.mult2Min, raw.mult2Max, 10, 99, fallback.mult2Min, fallback.mult2Max);
-    var dividend = orderedPair(raw.divMin, raw.divMax, 100, 999, fallback.divMin, fallback.divMax);
-    var divisor = orderedPair(raw.divisorMin, raw.divisorMax, 2, 99, fallback.divisorMin, fallback.divisorMax);
+    var threeDigit = orderedPair(raw.mult3Min, raw.mult3Max, 100, 999, fallback.mult3Min, fallback.mult3Max);
+    var threeDigitBy = orderedPair(raw.mult3ByMin, raw.mult3ByMax, 2, 999, fallback.mult3ByMin, fallback.mult3ByMax);
     return {
       digits: clamp(raw.digits, 1, 4, fallback.digits),
       rangeMin: min,
@@ -193,10 +198,10 @@
       multiplierTo: multiplierTo,
       mult2Min: twoDigit[0],
       mult2Max: twoDigit[1],
-      divMin: dividend[0],
-      divMax: dividend[1],
-      divisorMin: divisor[0],
-      divisorMax: divisor[1],
+      mult3Min: threeDigit[0],
+      mult3Max: threeDigit[1],
+      mult3ByMin: threeDigitBy[0],
+      mult3ByMax: threeDigitBy[1],
       primeMax: clamp(raw.primeMax, 10, 300, fallback.primeMax),
       ciYears: clamp(raw.ciYears, 2, 5, fallback.ciYears)
     };
@@ -358,7 +363,7 @@
     catSettings.addsub = { digits: values.digits };
     catSettings.multtables = { f1: values.multFrom, f2: values.multTo, t1: values.multiplierFrom, t2: values.multiplierTo };
     catSettings.mult2d = { r1: values.mult2Min, r2: values.mult2Max };
-    catSettings.div3d = { f1: values.divMin, f2: values.divMax, t1: values.divisorMin, t2: values.divisorMax };
+    catSettings.mult3d = { f1: values.mult3Min, f2: values.mult3Max, t1: values.mult3ByMin, t2: values.mult3ByMax };
     catSettings.squares = { r1: values.rangeMin, r2: values.rangeMax };
     catSettings.sqroots = { r1: values.rangeMin, r2: values.rangeMax };
     catSettings.cubes = { r1: values.rangeMin, r2: values.rangeMax };
@@ -659,7 +664,7 @@
       tags.push(values.multFrom === values.multTo ? 'Table ' + values.multFrom : 'Tables ' + values.multFrom + '–' + values.multTo);
     }
     if (uses(['mult2d'])) tags.push('2-digit ' + values.mult2Min + '–' + values.mult2Max);
-    if (uses(['div3d'])) tags.push(values.divMin + '–' + values.divMax + ' ÷ ' + values.divisorMin + '–' + values.divisorMax);
+    if (uses(['mult3d'])) tags.push(values.mult3Min + '–' + values.mult3Max + ' × ' + values.mult3ByMin + '–' + values.mult3ByMax);
     if (uses(['squares', 'cubes', 'sqroots', 'cuberoots'])) tags.push('Base ' + values.rangeMin + '–' + values.rangeMax);
     if (uses(['ci_si', 'ci_ci'])) tags.push(values.ciYears + ' years');
     tags.push(preset.quizIds.length + ' types');
@@ -705,12 +710,64 @@
     });
     return values;
   }
+  /* Saving or finishing a session re-renders the grid, which would rebuild the
+     cards with their factory ranges. Remembering what was typed keeps the
+     chosen range on screen. */
+  function rememberCardRanges(templateId, card, rangeFields) {
+    templateRangeDrafts[templateId] = cardRangeValues(card, rangeFields);
+  }
+  function cardRangeValue(preset, field) {
+    var draft = templateRangeDrafts[preset.id];
+    var raw = draft && draft[field.key] != null ? draft[field.key] : preset.settings[field.key];
+    return clamp(raw, field.min, field.max, field.min);
+  }
   function presetWithCardRanges(preset, card, rangeFields) {
     if (!rangeFields.length) return preset;
     var draft = clone(preset);
     delete draft.rangeFields;
     draft.settings = Object.assign({}, draft.settings, cardRangeValues(card, rangeFields));
     return normalizePreset(draft, false);
+  }
+  function uniquePresetName(name) {
+    var taken = function (candidate) {
+      return state.presets.some(function (preset) { return preset.name === candidate; });
+    };
+    if (!taken(name)) return name;
+    for (var suffix = 2; suffix <= MAX_PRESETS + 1; suffix++) {
+      var candidate = (name + ' ' + suffix).slice(0, 40);
+      if (!taken(candidate)) return candidate;
+    }
+    return name;
+  }
+  /* One-click copy of a quick preset into My Presets, using the ranges currently
+     shown on the card. */
+  function saveTemplateAsPreset(preset, card, rangeFields) {
+    if (state.presets.length >= MAX_PRESETS) {
+      templateSaveStates[preset.id] = { status: 'error', message: 'Preset limit reached (' + MAX_PRESETS + '). Delete one first.' };
+      renderPresetGrids();
+      clearTemplateSaveStatesSoon();
+      return;
+    }
+    var draft = clone(presetWithCardRanges(preset, card, rangeFields));
+    delete draft.rangeFields;
+    draft.id = uniqueId('preset');
+    draft.sourceTemplateId = preset.id;
+    draft.name = uniquePresetName(preset.name);
+    draft.dailyEnabled = false;
+    draft.reminder.telegramEnabled = false;
+    draft.createdAt = draft.updatedAt = new Date().toISOString();
+    state.presets.unshift(normalizePreset(draft, false));
+    templateSaveStates[preset.id] = { status: 'success', message: 'Added to My Presets as “' + draft.name + '” ✓' };
+    persistState();
+    clearTemplateSaveStatesSoon();
+  }
+  function clearTemplateSaveStatesSoon() {
+    if (templateSaveTimer) clearTimeout(templateSaveTimer);
+    templateSaveTimer = setTimeout(function () {
+      templateSaveTimer = null;
+      templateSaveStates = Object.create(null);
+      renderPresetGrids();
+    }, 5000);
   }
   function createCard(preset, template) {
     var card = document.createElement('article');
@@ -723,18 +780,22 @@
       ? '<div class="preset-range-fields">' + rangeFields.map(function (field) {
         return '<label>' + escapeHtml(field.label) +
           '<input type="number" data-range-key="' + escapeHtml(field.key) + '" min="' + field.min + '" max="' + field.max +
-          '" value="' + clamp(preset.settings[field.key], field.min, field.max, field.min) + '"></label>';
+          '" value="' + cardRangeValue(preset, field) + '"></label>';
       }).join('') + '</div>'
       : '';
     var tags = presetTags(preset).map(function (tag) { return '<span class="preset-tag">' + escapeHtml(tag) + '</span>'; }).join('');
     var sendState = presetSendStates[preset.id] || null;
     var sendPending = !!(sendState && sendState.status === 'pending');
     var pendingDisabled = sendPending ? ' disabled' : '';
+    var saveState = template ? templateSaveStates[preset.id] : null;
     var sendStatus = !template && sendState
       ? '<span class="preset-send-status ' + escapeHtml(sendState.status) + '" data-send-status role="status">' + escapeHtml(sendState.message) + '</span>'
       : '';
+    if (saveState) {
+      sendStatus = '<span class="preset-send-status ' + escapeHtml(saveState.status) + '" role="status">' + escapeHtml(saveState.message) + '</span>';
+    }
     var actions = template
-      ? '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="customize">Customize & Save</button>'
+      ? '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="save">+ Add to My Presets</button><button type="button" class="preset-btn" data-action="customize">Customize</button>'
       : '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="send"' + pendingDisabled + '>Send to Telegram</button><button type="button" class="preset-btn" data-action="edit"' + pendingDisabled + '>Edit</button><button type="button" class="preset-btn" data-action="duplicate">Duplicate</button><button type="button" class="preset-btn" data-action="schedule"' + pendingDisabled + '>Schedule</button><button type="button" class="preset-btn" data-action="reset"' + pendingDisabled + '>Reset</button><button type="button" class="preset-btn danger" data-action="delete"' + pendingDisabled + '>Delete</button>';
     card.innerHTML =
       '<div class="preset-card-top"><div class="preset-icon">' + escapeHtml(preset.icon) + '</div><div class="preset-card-title"><h3>' + escapeHtml(preset.name) + '</h3><p>' + escapeHtml(preset.description || (recent ? 'Last score ' + accuracy(recent) + '%' : 'Ready to practice')) + '</p></div>' + dailyBadge + '</div>' +
@@ -743,6 +804,14 @@
       startPreset(presetWithCardRanges(preset, card, rangeFields));
     };
     if (template) {
+      rangeFields.forEach(function (field) {
+        var input = card.querySelector('[data-range-key="' + field.key + '"]');
+        if (input) input.addEventListener('input', function () { rememberCardRanges(preset.id, card, rangeFields); });
+      });
+      /* Save straight into My Presets with the ranges shown on the card. */
+      card.querySelector('[data-action="save"]').onclick = function () {
+        saveTemplateAsPreset(preset, card, rangeFields);
+      };
       /* Carry the ranges typed on the card into the editor, so switching to a
          saved copy does not silently discard them. */
       card.querySelector('[data-action="customize"]').onclick = function () {
@@ -861,10 +930,10 @@
     element('presetRangeMax').value = settings.rangeMax;
     element('presetMult2Min').value = settings.mult2Min;
     element('presetMult2Max').value = settings.mult2Max;
-    element('presetDivMin').value = settings.divMin;
-    element('presetDivMax').value = settings.divMax;
-    element('presetDivisorMin').value = settings.divisorMin;
-    element('presetDivisorMax').value = settings.divisorMax;
+    element('presetMult3Min').value = settings.mult3Min;
+    element('presetMult3Max').value = settings.mult3Max;
+    element('presetMult3ByMin').value = settings.mult3ByMin;
+    element('presetMult3ByMax').value = settings.mult3ByMax;
     element('presetPrimeMax').value = settings.primeMax;
     element('presetCiYears').value = settings.ciYears;
   }
@@ -965,10 +1034,10 @@
       rangeMax: element('presetRangeMax').value,
       mult2Min: element('presetMult2Min').value,
       mult2Max: element('presetMult2Max').value,
-      divMin: element('presetDivMin').value,
-      divMax: element('presetDivMax').value,
-      divisorMin: element('presetDivisorMin').value,
-      divisorMax: element('presetDivisorMax').value,
+      mult3Min: element('presetMult3Min').value,
+      mult3Max: element('presetMult3Max').value,
+      mult3ByMin: element('presetMult3ByMin').value,
+      mult3ByMax: element('presetMult3ByMax').value,
       primeMax: element('presetPrimeMax').value,
       ciYears: element('presetCiYears').value
     };
