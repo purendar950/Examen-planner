@@ -120,9 +120,19 @@ async function sendMessage(chatId, preset, deliveryDocId) {
   const reminder = preset.reminder || {};
   const snoozeMinutes = [5, 10, 15, 30, 60].includes(Number(reminder.snoozeMinutes)) ? Number(reminder.snoozeMinutes) : 10;
   const maxSnoozes = [0, 1, 2, 3, 5].includes(Number(reminder.maxSnoozes)) ? Number(reminder.maxSnoozes) : 2;
-  const practiceUrl = `${APP_BASE_URL}/app.html?open=calc&preset=${encodeURIComponent(preset.id)}`;
-  const rows = [[{ text: '▶ Start Practice', url: practiceUrl }]];
-  if (maxSnoozes > 0) rows.push([{ text: `⏰ Snooze ${snoozeMinutes}m`, callback_data: `calc_snooze:${deliveryDocId}` }]);
+  const encodedPreset = encodeURIComponent(preset.id);
+  /* Telegram only accepts a Mini App button over HTTPS, and only in the private
+     chats these reminders target. The plain URL button always stays as a
+     fallback for clients that cannot open Mini Apps. */
+  const buildRows = (browserOnly) => {
+    const rows = [];
+    if (!browserOnly && /^https:\/\//i.test(APP_BASE_URL)) {
+      rows.push([{ text: '▶ Practice here', web_app: { url: `${APP_BASE_URL}/calc/index.html?tgpreset=${encodedPreset}` } }]);
+    }
+    rows.push([{ text: '🌐 Open in browser', url: `${APP_BASE_URL}/app.html?open=calc&preset=${encodedPreset}` }]);
+    if (maxSnoozes > 0) rows.push([{ text: `⏰ Snooze ${snoozeMinutes}m`, callback_data: `calc_snooze:${deliveryDocId}` }]);
+    return rows;
+  };
   const tableDetail = preset.hasTables
     ? `\n${preset.multFrom === preset.multTo ? `Table ${preset.multFrom}` : `Tables ${preset.multFrom}–${preset.multTo}`} · ×${preset.multiplierFrom} to ×${preset.multiplierTo}`
     : '';
@@ -131,20 +141,31 @@ async function sendMessage(chatId, preset, deliveryDocId) {
     `${escHtml(preset.icon || '🎯')} <b>${escHtml(preset.name || 'Daily Practice')}</b>\n` +
     `${clamp(preset.questionCount, 3, 50, 10)} questions · ${escHtml(preset.difficulty || 'standard')}${tableDetail}\n\n` +
     'Your scheduled practice is ready.';
-  const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: rows }
-    })
-  });
-  const body = await response.json().catch(() => ({}));
+  const post = async (rows) => {
+    const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: rows }
+      })
+    });
+    const body = await response.json().catch(() => ({}));
+    return { status: response.status, body };
+  };
+
+  let { status, body } = await post(buildRows(false));
+  /* A Mini App button Telegram refuses would fail the whole reminder, so retry
+     once with the plain URL keyboard rather than losing the delivery. */
+  if (!body.ok && body.error_code === 400 && /BUTTON|WEB_?APP|url invalid/i.test(body.description || '')) {
+    console.warn(`⚠️ Telegram refused the Mini App button (${body.description}) — retrying with the browser link.`);
+    ({ status, body } = await post(buildRows(true)));
+  }
   if (!body.ok) {
-    const error = new Error(body.description || `Telegram API error ${body.error_code || response.status}`);
+    const error = new Error(body.description || `Telegram API error ${body.error_code || status}`);
     error.skip = body.error_code === 403 || (body.error_code === 400 && /chat not found/i.test(body.description || ''));
     throw error;
   }

@@ -329,8 +329,12 @@
       syncCalcState();
       setTimeout(syncCalcDeepLink, 0);
     });
-    frame.src = 'calc/index.html?v=4';
+    frame.src = 'calc/index.html?v=6';
   }
+
+  /* Lets other modules refresh the embedded practice tab, e.g. after Telegram
+     Mini App results are merged into history. */
+  window.ezSyncCalcState = syncCalcState;
 
   if (typeof onPageActivated === 'function') onPageActivated('calc', loadCalc);
   window.addEventListener('ez-theme-change', syncCalcTheme);

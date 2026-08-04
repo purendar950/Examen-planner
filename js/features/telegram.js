@@ -358,6 +358,101 @@ function migrateTelegramUploads() {
   } catch (e) { return 0; }
 }
 
+/* ══════════════════════════════════════════════
+   TELEGRAM MINI APP → CALCULATION PRACTICE HISTORY
+   Practice finished inside Telegram is queued by the bot in a SEPARATE
+   top-level `calculationAttemptInbox` array (never inside appState, so the
+   browser's full-appState save cannot clobber it — same reasoning as
+   telegramInbox). Here we merge those attempts into the practice history,
+   stamping the LOCAL day so streaks and "completed today" match the device,
+   then clear the inbox.
+══════════════════════════════════════════════ */
+function drainCalculationAttempts(snapData) {
+  try {
+    const inbox = snapData && snapData.calculationAttemptInbox;
+    if (!Array.isArray(inbox) || !inbox.length) return;
+
+    if (!appState.calculationPractice || typeof appState.calculationPractice !== 'object') {
+      appState.calculationPractice = { version: 2, presets: [], dailyPresetId: '', history: [] };
+    }
+    const practice = appState.calculationPractice;
+    if (!Array.isArray(practice.history)) practice.history = [];
+
+    const clamp = (value, min, max, fallback) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+    };
+    if (!Array.isArray(appState.calculationProcessedAttemptIds)) appState.calculationProcessedAttemptIds = [];
+    const processed = appState.calculationProcessedAttemptIds;
+    const known = new Set(processed.concat(practice.history.map(entry => entry && entry.id)).filter(Boolean));
+    const newlyProcessed = [];
+    let added = 0;
+
+    inbox.forEach(attempt => {
+      if (!attempt || typeof attempt !== 'object') return;
+      const id = String(attempt.id || '');
+      if (!id || known.has(id)) return;
+      known.add(id);
+      newlyProcessed.push(id);
+      /* The bot cannot know the user's timezone, so the day key is derived here
+         from the server's completion time in local time. */
+      const completed = new Date(attempt.completedAt || Date.now());
+      const when = isNaN(completed.getTime()) ? new Date() : completed;
+      const total = clamp(attempt.total, 1, 50, 10);
+      practice.history.unshift({
+        id: id.slice(0, 80),
+        presetId: String(attempt.presetId || '').slice(0, 80),
+        presetName: String(attempt.presetName || 'Practice').slice(0, 40),
+        date: (typeof fmtDate === 'function') ? fmtDate(when) : when.toISOString().slice(0, 10),
+        completedAt: when.toISOString(),
+        total,
+        answered: clamp(attempt.answered, 0, total, 0),
+        firstTryCorrect: clamp(attempt.firstTryCorrect, 0, total, 0),
+        wrongAttempts: clamp(attempt.wrongAttempts, 0, 500, 0),
+        hintsUsed: clamp(attempt.hintsUsed, 0, total, 0),
+        skipped: clamp(attempt.skipped, 0, total, 0),
+        durationSec: clamp(attempt.durationSec, 0, 86400, 0),
+        reason: attempt.reason === 'time' ? 'time' : 'completed',
+        mistakeQuizIds: Array.isArray(attempt.mistakeQuizIds)
+          ? attempt.mistakeQuizIds.map(quizId => String(quizId || '').slice(0, 32)).slice(0, 20)
+          : [],
+        presetSnapshot: null
+      });
+      added++;
+    });
+
+    if (!added) return;
+    practice.history = practice.history.slice(0, 60);
+
+    /* Remember what was merged. History is capped at 60 and can be cleared by
+       the user, so it cannot serve as the dedupe record on its own — without
+       this ledger a lingering inbox entry would reappear later (same reasoning
+       as telegramProcessedIds). */
+    appState.calculationProcessedAttemptIds =
+      processed.concat(newlyProcessed).slice(-200);
+
+    const saveUid = currentUser && currentUser.uid;
+    /* Clear the inbox only AFTER the history write commits. Clearing first would
+       lose the attempt entirely if the save failed (document too large, rules
+       rejection, tab closed mid-flush); re-merging is id-deduped, so the
+       opposite order is a harmless retry. */
+    const flush = (typeof saveProgressNow === 'function')
+      ? saveProgressNow()
+      : Promise.resolve((typeof saveProgress === 'function') && saveProgress());
+    Promise.resolve(flush).then(() => {
+      const stored = typeof _localDirty === 'undefined' || !_localDirty;
+      if (!stored || !db || !currentUser || currentUser.uid !== saveUid) return;
+      return db.collection('users').doc(saveUid).update({ calculationAttemptInbox: [] });
+    }).catch(() => { /* left in the inbox on purpose; the next snapshot retries */ });
+
+    /* Refresh the embedded practice tab if it is already loaded. */
+    try { if (typeof window.ezSyncCalcState === 'function') window.ezSyncCalcState(); } catch (e) {}
+    if (typeof showToast === 'function') {
+      showToast('🧮 ' + added + ' Telegram practice result' + (added > 1 ? 's' : '') + ' added to your history.', 'success');
+    }
+  } catch (e) {}
+}
+
 /* Drain the telegramInbox array from a Firestore user-doc snapshot into the
    planner. Safe to call on every snapshot — it no-ops when the inbox is empty
    and clears the inbox after merging so items are processed exactly once. */
