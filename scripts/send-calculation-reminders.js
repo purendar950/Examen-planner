@@ -56,12 +56,25 @@ function deliveryId(uid, presetId, practiceDate) {
 }
 function presetSnapshot(preset) {
   const reminder = preset && preset.reminder && typeof preset.reminder === 'object' ? preset.reminder : {};
+  const settings = preset && preset.settings && typeof preset.settings === 'object' ? preset.settings : {};
+  let multFrom = clamp(settings.multFrom, 1, 100, 2);
+  let multTo = clamp(settings.multTo, 1, 100, 9);
+  let multiplierFrom = clamp(settings.multiplierFrom, 1, 100, 1);
+  let multiplierTo = clamp(settings.multiplierTo, 1, 100, 10);
+  if (multTo < multFrom) [multFrom, multTo] = [multTo, multFrom];
+  if (multiplierTo < multiplierFrom) [multiplierFrom, multiplierTo] = [multiplierTo, multiplierFrom];
+  const quizIds = Array.isArray(preset && preset.quizIds) ? preset.quizIds : [];
   return {
     id: String((preset && preset.id) || '').slice(0, 80),
     name: String((preset && preset.name) || 'Daily Practice').slice(0, 40),
     icon: String((preset && preset.icon) || '🎯').slice(0, 4),
     questionCount: clamp(preset && preset.questionCount, 3, 50, 10),
     difficulty: ['easy', 'standard', 'exam', 'custom'].includes(preset && preset.difficulty) ? preset.difficulty : 'standard',
+    hasTables: quizIds.some(id => id === 'mult1' || id === 'mult2' || id === 'mult3'),
+    multFrom,
+    multTo,
+    multiplierFrom,
+    multiplierTo,
     reminder: {
       snoozeMinutes: [5, 10, 15, 30, 60].includes(Number(reminder.snoozeMinutes)) ? Number(reminder.snoozeMinutes) : 10,
       maxSnoozes: [0, 1, 2, 3, 5].includes(Number(reminder.maxSnoozes)) ? Number(reminder.maxSnoozes) : 2
@@ -105,10 +118,13 @@ async function sendMessage(chatId, preset, deliveryDocId) {
   const practiceUrl = `https://examzen.in/app.html?open=calc&preset=${encodeURIComponent(preset.id)}`;
   const rows = [[{ text: '▶ Start Practice', url: practiceUrl }]];
   if (maxSnoozes > 0) rows.push([{ text: `⏰ Snooze ${snoozeMinutes}m`, callback_data: `calc_snooze:${deliveryDocId}` }]);
+  const tableDetail = preset.hasTables
+    ? `\n${preset.multFrom === preset.multTo ? `Table ${preset.multFrom}` : `Tables ${preset.multFrom}–${preset.multTo}`} · ×${preset.multiplierFrom} to ×${preset.multiplierTo}`
+    : '';
   const text =
     `🧮 <b>Calculation Practice</b>\n` +
     `${escHtml(preset.icon || '🎯')} <b>${escHtml(preset.name || 'Daily Practice')}</b>\n` +
-    `${clamp(preset.questionCount, 3, 50, 10)} questions · ${escHtml(preset.difficulty || 'standard')}\n\n` +
+    `${clamp(preset.questionCount, 3, 50, 10)} questions · ${escHtml(preset.difficulty || 'standard')}${tableDetail}\n\n` +
     'Your scheduled practice is ready.';
   const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: 'POST',
@@ -230,10 +246,29 @@ async function processPendingDeliveries(nowMs, counters) {
   }
 }
 
+async function cleanupExpiredInstantSendRequests(nowMs) {
+  try {
+    const snapshot = await db.collection('calculationPresetSendRequests')
+      .where('expiresAt', '<=', admin.firestore.Timestamp.fromMillis(nowMs))
+      .limit(500)
+      .get();
+    if (snapshot.empty) return;
+    const batch = db.batch();
+    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
+    console.log(`Cleaned ${snapshot.size} expired instant-send request(s).`);
+  } catch (error) {
+    // Cleanup must never block scheduled practice delivery.
+    console.error(`⚠️ Instant-send cleanup failed: ${error.message}`);
+  }
+}
+
 async function main() {
   const nowMs = Date.now();
   const today = dateKeyFromWallMs(nowMs + IST_OFFSET_MS);
   const counters = { sent: 0, skipped: 0, failed: 0 };
+
+  await cleanupExpiredInstantSendRequests(nowMs);
 
   // Snoozes/retries are driven by their persisted delivery snapshot. They do
   // not disappear if a user edits or deletes the source preset afterwards.

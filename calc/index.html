@@ -276,7 +276,7 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 .preset-panel h2{font-size:15px;color:var(--text);}.preset-panel-note{font-size:11px;color:var(--muted);margin-top:-8px;}
 .preset-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
 .preset-field{display:grid;gap:6px;}.preset-field.full{grid-column:1/-1;}.preset-field label,.preset-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
-.preset-input,.preset-select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 11px;font-size:13px;outline:none;}.preset-input:focus,.preset-select:focus{border-color:var(--accent);}
+.preset-input,.preset-select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px 11px;font-size:13px;outline:none;}.preset-input:focus,.preset-select:focus{border-color:var(--accent);}.preset-range-preview{padding:10px 12px;border:1px solid rgba(0,200,150,.3);border-radius:8px;background:var(--accent-dim);color:var(--text);font-size:12px;font-weight:700;}.preset-send-status{width:100%;font-size:10px;color:var(--muted);}.preset-send-status.success{color:var(--accent);}.preset-send-status.error{color:#FCA5A5;}.preset-btn:disabled{opacity:.55;cursor:not-allowed;}
 .preset-quiz-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px;}
 .preset-check{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;}.preset-check:has(input[type="checkbox"]:checked){border-color:var(--accent);background:var(--accent-dim);}.preset-check-main{display:flex;align-items:center;gap:9px;min-width:0;cursor:pointer;}.preset-check-main input{accent-color:var(--accent);}.preset-weight{display:grid;grid-template-columns:auto 42px;align-items:center;gap:5px;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.04em;}.preset-weight input{width:42px;padding:6px 4px;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;}.preset-weight input:disabled{opacity:.4;cursor:not-allowed;}
 .preset-switch-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:11px 0;border-top:1px solid var(--border);}.preset-switch-row:first-of-type{border-top:0;}.preset-switch-copy strong{display:block;font-size:13px;color:var(--text);}.preset-switch-copy small{font-size:11px;color:var(--muted);}
@@ -388,18 +388,28 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
       <div class="preset-quiz-grid" id="presetQuizGrid"></div>
     </section>
 
+    <section class="preset-panel" id="presetTablesPanel">
+      <h2>Multiplication tables</h2>
+      <p class="preset-panel-note">Choose <strong>Single table</strong> for “table of 2”, or <strong>Table range</strong> for “tables 2 to 4”. These controls remain editable at every difficulty.</p>
+      <div class="preset-form-grid">
+        <div class="preset-field"><label for="presetTableMode">Table selection</label><select class="preset-select" id="presetTableMode"><option value="single">Single table</option><option value="range">Table range</option></select></div>
+        <div class="preset-field"><label for="presetMultFrom" id="presetMultFromLabel">Table number</label><input class="preset-input" id="presetMultFrom" type="number" min="1" max="100" value="2"></div>
+        <div class="preset-field" id="presetMultToField"><label for="presetMultTo">Tables to</label><input class="preset-input" id="presetMultTo" type="number" min="1" max="100" value="9"></div>
+        <div class="preset-field"><label for="presetMultiplierFrom">Multiply from</label><input class="preset-input" id="presetMultiplierFrom" type="number" min="1" max="100" value="1"></div>
+        <div class="preset-field"><label for="presetMultiplierTo">Multiply to</label><input class="preset-input" id="presetMultiplierTo" type="number" min="1" max="100" value="10"></div>
+        <div class="preset-field full"><div class="preset-range-preview" id="presetTablePreview" aria-live="polite"></div></div>
+      </div>
+    </section>
+
     <section class="preset-panel" id="presetRangePanel">
-      <h2>Number ranges</h2>
+      <h2>Other number ranges</h2>
       <p class="preset-panel-note">Difficulty fills these automatically. Choose Custom ranges to edit them.</p>
       <div class="preset-form-grid">
-        <div class="preset-field"><label for="presetDigits">Addition/subtraction digits</label><input class="preset-input" id="presetDigits" type="number" min="1" max="4" value="2"></div>
-        <div class="preset-field"><label for="presetRangeMin">Powers/roots from</label><input class="preset-input" id="presetRangeMin" type="number" min="1" max="100" value="2"></div>
-        <div class="preset-field"><label for="presetRangeMax">Powers/roots to</label><input class="preset-input" id="presetRangeMax" type="number" min="2" max="100" value="25"></div>
-        <div class="preset-field"><label for="presetMultFrom">Tables from</label><input class="preset-input" id="presetMultFrom" type="number" min="1" max="100" value="2"></div>
-        <div class="preset-field"><label for="presetMultTo">Tables to</label><input class="preset-input" id="presetMultTo" type="number" min="1" max="100" value="9"></div>
-        <div class="preset-field"><label for="presetMultiplierTo">Multiply up to</label><input class="preset-input" id="presetMultiplierTo" type="number" min="2" max="100" value="10"></div>
-        <div class="preset-field"><label for="presetPrimeMax">Prime range maximum</label><input class="preset-input" id="presetPrimeMax" type="number" min="10" max="300" value="100"></div>
-        <div class="preset-field"><label for="presetCiYears">Compound-interest years</label><select class="preset-select" id="presetCiYears"><option value="2">2 years</option><option value="3">3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></div>
+        <div class="preset-field"><label for="presetDigits">Addition/subtraction digits</label><input class="preset-input" id="presetDigits" data-custom-range type="number" min="1" max="4" value="2"></div>
+        <div class="preset-field"><label for="presetRangeMin">Powers/roots from</label><input class="preset-input" id="presetRangeMin" data-custom-range type="number" min="1" max="100" value="2"></div>
+        <div class="preset-field"><label for="presetRangeMax">Powers/roots to</label><input class="preset-input" id="presetRangeMax" data-custom-range type="number" min="2" max="100" value="25"></div>
+        <div class="preset-field"><label for="presetPrimeMax">Prime range maximum</label><input class="preset-input" id="presetPrimeMax" data-custom-range type="number" min="10" max="300" value="100"></div>
+        <div class="preset-field"><label for="presetCiYears">Compound-interest years</label><select class="preset-select" id="presetCiYears" data-custom-range><option value="2">2 years</option><option value="3">3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></div>
       </div>
     </section>
 
@@ -637,11 +647,11 @@ const QUIZZES={
  subtraction:{keypad:'sub',configKey:'addsub',
   gen(s){const[a,b]=digitRanges[s.digits];const x=ri(a,b),y=ri(a,b);return{q:[x,y],ans:String(x-y)};}},
  mult1:{keypad:'num',configKey:'multtables',
-  gen(s){const x=ri(s.f1,s.f2),y=ri(s.t1,s.t2);return{q:[x,y],ans:String(x*y)};}},
+  gen(s){const x=ri(Math.min(s.f1,s.f2),Math.max(s.f1,s.f2)),y=ri(Math.min(s.t1,s.t2),Math.max(s.t1,s.t2));return{q:[x,y],ans:String(x*y)};}},
  mult2:{keypad:'num',configKey:'multtables',
-  gen(s){const x=ri(s.f1,s.f2),y=ri(s.t1,s.t2);return{q:[x,'×','?',x*y],ans:String(y),hint:y};}},
+  gen(s){const x=ri(Math.min(s.f1,s.f2),Math.max(s.f1,s.f2)),y=ri(Math.min(s.t1,s.t2),Math.max(s.t1,s.t2));return{q:[x,'×','?',x*y],ans:String(y),hint:y};}},
  mult3:{keypad:'num',configKey:'multtables',
-  gen(s){const x=ri(s.f1,s.f2),y=ri(s.t1,s.t2);return{q:[x,y,x*y],ans:[String(x),String(y)],fields:2,hint:`${x} and ${y}`};}},
+  gen(s){const x=ri(Math.min(s.f1,s.f2),Math.max(s.f1,s.f2)),y=ri(Math.min(s.t1,s.t2),Math.max(s.t1,s.t2));return{q:[x,y,x*y],ans:[String(x),String(y)],fields:2,hint:`${x} and ${y}`};}},
  squares:{keypad:'num',configKey:'squares',
   gen(s){const x=ri(s.r1,s.r2);return{q:[x],ans:String(x*x),hint:x*x};}},
  sqroots:{keypad:'num',configKey:'sqroots',
@@ -814,8 +824,8 @@ function renderCfg(cat){
     $("yearsSel").onchange=e=>{s.years=parseInt(e.target.value,10);};
   }else if(cat.configType==="ranges2"){
     card.innerHTML=`
-     <div class="cfg-row"><span class="cfg-label">From :</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" id="f1in" value="${s.f1}"> to <input class="binput" type="number" id="f2in" value="${s.f2}"></span></div>
-     <div class="cfg-row"><span class="cfg-label">Multiplied By :</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" id="t1in" value="${s.t1}"> to <input class="binput" type="number" id="t2in" value="${s.t2}"></span></div>`;
+     <div class="cfg-row"><span class="cfg-label">Tables :</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" min="1" max="100" id="f1in" value="${s.f1}"> to <input class="binput" type="number" min="1" max="100" id="f2in" value="${s.f2}"></span></div>
+     <div class="cfg-row"><span class="cfg-label">Multiply :</span><span style="display:flex;align-items:center;gap:8px"><input class="binput" type="number" min="1" max="100" id="t1in" value="${s.t1}"> to <input class="binput" type="number" min="1" max="100" id="t2in" value="${s.t2}"></span></div>`;
     wrap.appendChild(card);
     $("f1in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.f1=v;};
     $("f2in").oninput=e=>{const v=parseInt(e.target.value,10);if(!isNaN(v))s.f2=v;};
@@ -843,7 +853,7 @@ function buildChartRows(id){
   else if(id==="sqroots"){const s=catSettings.sqroots;for(let x=s.r1;x<=s.r2;x++)rows.push({text:`√${x*x} = ${x}`});}
   else if(id==="cubes"){const s=catSettings.cubes;for(let x=s.r1;x<=s.r2;x++)rows.push({text:`${x}³ = ${x**3}`});}
   else if(id==="cuberoots"){const s=catSettings.cuberoots;for(let x=s.r1;x<=s.r2;x++)rows.push({text:`³√${x**3} = ${x}`});}
-  else if(id==="multtables"){const s=catSettings.multtables;for(let f=s.f1;f<=s.f2;f++){rows.push({group:`Table of ${f}`});for(let t=s.t1;t<=s.t2;t++)rows.push({text:`${f} × ${t} = ${f*t}`});}}
+  else if(id==="multtables"){const s=catSettings.multtables;const f1=Math.min(s.f1,s.f2),f2=Math.max(s.f1,s.f2),t1=Math.min(s.t1,s.t2),t2=Math.max(s.t1,s.t2);for(let f=f1;f<=f2;f++){rows.push({group:`Table of ${f}`});for(let t=t1;t<=t2;t++)rows.push({text:`${f} × ${t} = ${f*t}`});}}
   else if(id==="trig"){TRIG_NAMES.forEach(name=>{rows.push({group:name});DEGREES.forEach((d,i)=>rows.push({text:`${name} ${d} = ${TRIG[name][i]}`}));});}
   else if(id==="pyth"){TRIPLES.forEach(t=>rows.push({text:t.join(", ")}));}
   else if(id==="ci"){[2,3,4,5].forEach(y=>{rows.push({group:`${y} Years`});CI_DATA[y].forEach(row=>rows.push({text:`${row.r}% = SI ${row.si}%, CI ${row.ci}%`}));});}
@@ -1135,6 +1145,6 @@ document.addEventListener("keydown",e=>{
 renderHome();
 show("home");
 </script>
-<script src="presets.js?v=2"></script>
+<script src="presets.js?v=3"></script>
 </body>
 </html>

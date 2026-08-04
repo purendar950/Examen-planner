@@ -30,6 +30,7 @@
  */
 
 const TelegramBot = require('node-telegram-bot-api');
+const crypto      = require('crypto');
 const http        = require('http');
 const https       = require('https');
 const { isProUser } = require('../shared/proGating');
@@ -714,6 +715,191 @@ async function rememberTelegramMediaOwner(uid, fileId, source) {
   }
 }
 
+/* ── Instant Calculation Practice delivery ─────────────────────────────── */
+async function enforceCalculationPresetRateLimit(uid) {
+  const id = crypto.createHash('sha256').update(String(uid)).digest('hex');
+  const ref = db.collection('calculationPresetSendRates').doc(id);
+  const nowMs = Date.now();
+  await db.runTransaction(async transaction => {
+    const snapshot = await transaction.get(ref);
+    const data = snapshot.exists ? (snapshot.data() || {}) : {};
+    const startedMs = data.windowStartedAt && typeof data.windowStartedAt.toMillis === 'function'
+      ? data.windowStartedAt.toMillis()
+      : 0;
+    const sameWindow = startedMs > 0 && nowMs - startedMs < 60000;
+    const count = sameWindow ? boundedInteger(data.count, 0, 1000, 0) : 0;
+    if (count >= 5) {
+      throw Object.assign(new Error('Too many sends. Wait one minute and try again.'), { status: 429 });
+    }
+    transaction.set(ref, {
+      uid,
+      count: count + 1,
+      windowStartedAt: global._fbAdmin.firestore.Timestamp.fromMillis(sameWindow ? startedMs : nowMs),
+      updatedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+  });
+}
+
+function positivePrivateChatId(value) {
+  const chatId = String(value == null ? '' : value).trim();
+  return /^\d+$/.test(chatId) && Number(chatId) > 0 ? chatId : '';
+}
+
+function escapeTelegramHtml(value) {
+  return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function boundedInteger(value, min, max, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(max, Math.max(min, Math.round(number))) : fallback;
+}
+
+function sanitizeCalculationPreset(raw) {
+  raw = raw && typeof raw === 'object' ? raw : {};
+  const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
+  let multFrom = boundedInteger(settings.multFrom, 1, 100, 2);
+  let multTo = boundedInteger(settings.multTo, 1, 100, 9);
+  let multiplierFrom = boundedInteger(settings.multiplierFrom, 1, 100, 1);
+  let multiplierTo = boundedInteger(settings.multiplierTo, 1, 100, 10);
+  if (multTo < multFrom) [multFrom, multTo] = [multTo, multFrom];
+  if (multiplierTo < multiplierFrom) [multiplierFrom, multiplierTo] = [multiplierTo, multiplierFrom];
+  const quizIds = Array.isArray(raw.quizIds)
+    ? raw.quizIds.map(id => String(id || '').slice(0, 32)).filter(id => ['mult1', 'mult2', 'mult3'].includes(id))
+    : [];
+  return {
+    id: String(raw.id || '').slice(0, 80),
+    name: String(raw.name || 'Calculation Practice').trim().slice(0, 40) || 'Calculation Practice',
+    icon: String(raw.icon || '🧮').slice(0, 4),
+    questionCount: boundedInteger(raw.questionCount, 3, 50, 10),
+    difficulty: ['easy', 'standard', 'exam', 'custom'].includes(raw.difficulty) ? raw.difficulty : 'standard',
+    hasTables: quizIds.length > 0,
+    multFrom,
+    multTo,
+    multiplierFrom,
+    multiplierTo
+  };
+}
+
+function calculationPresetText(preset) {
+  const difficulty = preset.difficulty === 'exam'
+    ? 'Exam'
+    : preset.difficulty.charAt(0).toUpperCase() + preset.difficulty.slice(1);
+  let detail = `${preset.questionCount} questions · ${escapeTelegramHtml(difficulty)}`;
+  if (preset.hasTables) {
+    const tables = preset.multFrom === preset.multTo ? `Table ${preset.multFrom}` : `Tables ${preset.multFrom}–${preset.multTo}`;
+    detail += `\n${tables} · ×${preset.multiplierFrom} to ×${preset.multiplierTo}`;
+  }
+  return `🧮 <b>Calculation Practice</b>\n${escapeTelegramHtml(preset.icon)} <b>${escapeTelegramHtml(preset.name)}</b>\n${detail}\n\nYour practice preset is ready.`;
+}
+
+function calculationPresetRequestRef(uid, requestId) {
+  const id = crypto.createHash('sha256').update(`${uid}\n${requestId}`).digest('hex');
+  return db.collection('calculationPresetSendRequests').doc(id);
+}
+
+async function claimCalculationPresetRequest(uid, presetId, requestId) {
+  const ref = calculationPresetRequestRef(uid, requestId);
+  try {
+    await ref.create({
+      uid,
+      presetId,
+      requestId,
+      status: 'sending',
+      createdAt: global._fbAdmin.firestore.FieldValue.serverTimestamp(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
+    });
+    return { ref, duplicate: false };
+  } catch (error) {
+    const existing = await ref.get();
+    const data = existing.exists ? (existing.data() || {}) : {};
+    if (data.uid === uid && data.requestId === requestId && data.presetId === presetId && data.status === 'sent') {
+      return { ref, duplicate: true };
+    }
+    if (existing.exists) {
+      const failed = data.status === 'failed';
+      throw Object.assign(new Error(failed
+        ? 'That send attempt failed. Press Send to Telegram again to retry.'
+        : 'This preset send is already being processed. Check Telegram before trying a new send.'), {
+        status: 409,
+        retryWithNewRequest: failed
+      });
+    }
+    throw error;
+  }
+}
+
+async function sendCalculationPresetForUser(uid, presetId, requestId) {
+  const userSnapshot = await db.collection('users').doc(uid).get();
+  if (!userSnapshot.exists) throw Object.assign(new Error('User profile not found.'), { status: 404 });
+  const userData = userSnapshot.data() || {};
+  if (!await isAdminUid(uid) && !isProUser(userData, todayIST())) {
+    throw Object.assign(new Error('Instant Telegram practice delivery requires an active Pro plan or trial.'), { status: 403 });
+  }
+  const appState = userData.appState && typeof userData.appState === 'object' ? userData.appState : {};
+  const telegram = appState.telegram && typeof appState.telegram === 'object' ? appState.telegram : {};
+  const chatId = positivePrivateChatId(telegram.chatId);
+  if (telegram.enabled !== true || !chatId) {
+    throw Object.assign(new Error('Enable Telegram and save your positive private Chat ID in Study Profile first.'), { status: 400 });
+  }
+  const linkSnapshot = await db.collection('telegram_links').doc(chatId).get();
+  const link = linkSnapshot.exists ? (linkSnapshot.data() || {}) : {};
+  if (!linkSnapshot.exists || link.uid !== uid) {
+    throw Object.assign(new Error('Reconnect Telegram: open the bot from Study Profile, press Start, then save your private Chat ID.'), { status: 409 });
+  }
+  const calculation = appState.calculationPractice && typeof appState.calculationPractice === 'object'
+    ? appState.calculationPractice
+    : {};
+  const presets = Array.isArray(calculation.presets) ? calculation.presets : [];
+  const rawPreset = presets.find(preset => preset && preset.id === presetId);
+  if (!rawPreset) throw Object.assign(new Error('Saved preset not found. Sync it and try again.'), { status: 404 });
+
+  const claim = await claimCalculationPresetRequest(uid, presetId, requestId);
+  if (claim.duplicate) return { duplicate: true };
+
+  const preset = sanitizeCalculationPreset(rawPreset);
+  const practiceUrl = `https://examzen.in/app.html?open=calc&preset=${encodeURIComponent(preset.id)}`;
+  let sent;
+  try {
+    sent = await bot.sendMessage(chatId, calculationPresetText(preset), {
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[{ text: '▶ Start Practice', url: practiceUrl }]] }
+    });
+  } catch (error) {
+    const responseBody = error && error.response && error.response.body ? error.response.body : null;
+    const explicitRejection = !!(responseBody && (responseBody.ok === false || responseBody.error_code));
+    const telegramError = (responseBody && responseBody.description) || error.message || 'Telegram send failed';
+    await claim.ref.update({
+      status: explicitRejection ? 'failed' : 'uncertain',
+      finishedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp(),
+      error: String(telegramError).slice(0, 200)
+    }).catch(() => {});
+    if (!explicitRejection) {
+      throw Object.assign(new Error('Telegram delivery status is uncertain. Check Telegram before trying again.'), { status: 502, retryWithNewRequest: false });
+    }
+    if (/chat not found|bot was blocked|user is deactivated/i.test(telegramError)) {
+      throw Object.assign(new Error('Telegram could not reach this private chat. Reconnect the bot and try again.'), { status: 409, retryWithNewRequest: true });
+    }
+    throw Object.assign(new Error('Telegram rejected the delivery. Try again shortly.'), { status: 502, retryWithNewRequest: true });
+  }
+
+  try {
+    await claim.ref.update({
+      status: 'sent',
+      sentAt: global._fbAdmin.firestore.FieldValue.serverTimestamp(),
+      telegramMessageId: sent && sent.message_id ? String(sent.message_id) : '',
+      error: null
+    });
+  } catch (error) {
+    // Telegram already accepted the message. Keep the claim in "sending" so
+    // the same request ID cannot send a duplicate if acknowledgement storage
+    // is temporarily unavailable, but still report delivery success to the UI.
+    console.error(`⚠️ Instant preset sent but idempotency acknowledgement failed for uid:${uid}: ${error.message}`);
+  }
+  console.log(`✅ Instant calculation preset → uid:${uid} preset:${preset.id}`);
+  return { duplicate: false };
+}
+
 const server = http.createServer((req, res) => {
 
   const corsAllowed = setCors(req, res);
@@ -733,6 +919,45 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('StudyPlanner Bot is alive 🤖');
+    return;
+  }
+
+  /* ── POST /send-calculation-preset — authenticated, server-derived send ── */
+  if (req.method === 'POST' && req.url === '/send-calculation-preset') {
+    let body = '';
+    let aborted = false;
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 4096) {
+        aborted = true;
+        sendJson(res, 413, { ok: false, error: 'request too large' });
+        req.destroy();
+      }
+    });
+    req.on('end', async () => {
+      if (aborted) return;
+      try {
+        const actor = await requireFirebaseUser(req);
+        let parsed;
+        try { parsed = JSON.parse(body || '{}'); }
+        catch (parseError) { throw Object.assign(new Error('valid JSON body required'), { status: 400 }); }
+        const presetId = typeof parsed.presetId === 'string' ? parsed.presetId : '';
+        const requestId = typeof parsed.requestId === 'string' ? parsed.requestId : '';
+        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(presetId) || !/^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$/.test(requestId)) {
+          throw Object.assign(new Error('valid presetId and requestId are required'), { status: 400 });
+        }
+        await enforceCalculationPresetRateLimit(actor.uid);
+        const result = await sendCalculationPresetForUser(actor.uid, presetId, requestId);
+        sendJson(res, 200, { ok: true, duplicate: result.duplicate === true });
+      } catch (error) {
+        console.error('❌ /send-calculation-preset error:', error.message);
+        sendJson(res, error.status || 500, {
+          ok: false,
+          error: error.message || 'send failed',
+          retryWithNewRequest: error.retryWithNewRequest === true
+        });
+      }
+    });
     return;
   }
 

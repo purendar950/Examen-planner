@@ -14,6 +14,8 @@
   var lastResult = null;
   var timerHandle = null;
   var settingsBackup = null;
+  var presetSendStates = Object.create(null);
+  var parentSessionKey = '';
 
   var QUIZ_CHOICES = [
     ['addition', 'Addition'], ['subtraction', 'Subtraction'],
@@ -102,12 +104,12 @@
 
   function difficultySettings(level) {
     if (level === 'easy') {
-      return { digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierTo: 10, primeMax: 50, ciYears: 2 };
+      return { digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10, primeMax: 50, ciYears: 2 };
     }
     if (level === 'exam') {
-      return { digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierTo: 20, primeMax: 300, ciYears: 3 };
+      return { digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20, primeMax: 300, ciYears: 3 };
     }
-    return { digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierTo: 10, primeMax: 100, ciYears: 2 };
+    return { digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10, primeMax: 100, ciYears: 2 };
   }
 
   function normalizeSettings(raw, difficulty) {
@@ -119,13 +121,17 @@
     var multFrom = clamp(raw.multFrom, 1, 100, fallback.multFrom);
     var multTo = clamp(raw.multTo, 1, 100, fallback.multTo);
     if (multTo < multFrom) { var multSwap = multFrom; multFrom = multTo; multTo = multSwap; }
+    var multiplierFrom = clamp(raw.multiplierFrom, 1, 100, fallback.multiplierFrom);
+    var multiplierTo = clamp(raw.multiplierTo, 1, 100, fallback.multiplierTo);
+    if (multiplierTo < multiplierFrom) { var multiplierSwap = multiplierFrom; multiplierFrom = multiplierTo; multiplierTo = multiplierSwap; }
     return {
       digits: clamp(raw.digits, 1, 4, fallback.digits),
       rangeMin: min,
       rangeMax: max,
       multFrom: multFrom,
       multTo: multTo,
-      multiplierTo: clamp(raw.multiplierTo, 2, 100, fallback.multiplierTo),
+      multiplierFrom: multiplierFrom,
+      multiplierTo: multiplierTo,
       primeMax: clamp(raw.primeMax, 10, 300, fallback.primeMax),
       ciYears: clamp(raw.ciYears, 2, 5, fallback.ciYears)
     };
@@ -268,15 +274,16 @@
     }
   }
   function sendToParent(type, payload) {
-    if (window.parent === window || window.location.origin === 'null') return;
+    if (window.parent === window || window.location.origin === 'null') return false;
     try {
       window.parent.postMessage(Object.assign({ source: 'calc-practice', type: type }, payload || {}), window.location.origin);
-    } catch (error) {}
+      return true;
+    } catch (error) { return false; }
   }
   function persistState() {
     state = normalizeState(state);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (error) {}
-    sendToParent('state-save', { state: state });
+    sendToParent('state-save', { state: state, sessionKey: parentSessionKey });
     renderDashboard();
   }
 
@@ -284,7 +291,7 @@
     settingsBackup = clone(catSettings);
     var values = preset.settings;
     catSettings.addsub = { digits: values.digits };
-    catSettings.multtables = { f1: values.multFrom, f2: values.multTo, t1: 1, t2: values.multiplierTo };
+    catSettings.multtables = { f1: values.multFrom, f2: values.multTo, t1: values.multiplierFrom, t2: values.multiplierTo };
     catSettings.squares = { r1: values.rangeMin, r2: values.rangeMax };
     catSettings.sqroots = { r1: values.rangeMin, r2: values.rangeMax };
     catSettings.cubes = { r1: values.rangeMin, r2: values.rangeMax };
@@ -552,8 +559,41 @@
   function presetTags(preset) {
     var tags = [preset.questionCount + ' questions', preset.difficulty === 'exam' ? 'Exam' : preset.difficulty.charAt(0).toUpperCase() + preset.difficulty.slice(1)];
     if (preset.timerMinutes) tags.push(preset.timerMinutes + ' min');
+    if (preset.quizIds.some(function (id) { return id === 'mult1' || id === 'mult2' || id === 'mult3'; })) {
+      tags.push(preset.settings.multFrom === preset.settings.multTo
+        ? 'Table ' + preset.settings.multFrom
+        : 'Tables ' + preset.settings.multFrom + '–' + preset.settings.multTo);
+    }
     tags.push(preset.quizIds.length + ' types');
     return tags;
+  }
+  function requestPresetSend(presetId) {
+    var preset = getPreset(presetId);
+    var current = presetSendStates[presetId];
+    if (!preset || (current && current.status === 'pending')) return;
+    var requestId = current && current.status === 'error' && current.retrySameRequest
+      ? current.requestId
+      : uniqueId('send');
+    presetSendStates[presetId] = { status: 'pending', message: 'Sending…', requestId: requestId, retrySameRequest: false };
+    renderPresetGrids();
+    if (!sendToParent('preset-send-request', { presetId: presetId, requestId: requestId, sessionKey: parentSessionKey })) {
+      presetSendStates[presetId] = { status: 'error', message: 'Open Calculation Practice inside StudyPlanner to send.', requestId: requestId, retrySameRequest: false };
+      renderPresetGrids();
+    }
+  }
+  function applyPresetSendResult(data) {
+    var presetId = String(data.presetId || '').slice(0, 80);
+    var requestId = String(data.requestId || '').slice(0, 100);
+    var resultSessionKey = String(data.sessionKey || '').slice(0, 100);
+    var current = presetSendStates[presetId];
+    if (!current || current.requestId !== requestId || !parentSessionKey || resultSessionKey !== parentSessionKey) return;
+    presetSendStates[presetId] = {
+      status: data.ok === true ? 'success' : 'error',
+      message: data.ok === true ? 'Sent ✓' : String(data.error || 'Could not send. Try again.').slice(0, 180),
+      requestId: requestId,
+      retrySameRequest: data.ok !== true && data.retrySameRequest === true
+    };
+    renderPresetGrids();
   }
   function createCard(preset, suggested) {
     var card = document.createElement('article');
@@ -562,16 +602,21 @@
     var recent = state.history.find(function (entry) { return entry.presetId === preset.id; });
     var dailyBadge = state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : (suggested ? '<span class="preset-badge">Suggested</span>' : '');
     var tags = presetTags(preset).map(function (tag) { return '<span class="preset-tag">' + escapeHtml(tag) + '</span>'; }).join('');
+    var sendState = presetSendStates[preset.id] || null;
+    var sendStatus = !suggested && sendState
+      ? '<span class="preset-send-status ' + escapeHtml(sendState.status) + '" data-send-status role="status">' + escapeHtml(sendState.message) + '</span>'
+      : '';
     var actions = suggested
       ? '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="customize">Customize & Save</button>'
-      : '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="edit">Edit</button><button type="button" class="preset-btn" data-action="duplicate">Duplicate</button><button type="button" class="preset-btn" data-action="schedule">Schedule</button><button type="button" class="preset-btn" data-action="reset">Reset</button><button type="button" class="preset-btn danger" data-action="delete">Delete</button>';
+      : '<button type="button" class="preset-btn primary" data-action="start">Start</button><button type="button" class="preset-btn" data-action="send"' + (sendState && sendState.status === 'pending' ? ' disabled' : '') + '>Send to Telegram</button><button type="button" class="preset-btn" data-action="edit">Edit</button><button type="button" class="preset-btn" data-action="duplicate">Duplicate</button><button type="button" class="preset-btn" data-action="schedule">Schedule</button><button type="button" class="preset-btn" data-action="reset">Reset</button><button type="button" class="preset-btn danger" data-action="delete">Delete</button>';
     card.innerHTML =
       '<div class="preset-card-top"><div class="preset-icon">' + escapeHtml(preset.icon) + '</div><div class="preset-card-title"><h3>' + escapeHtml(preset.name) + '</h3><p>' + escapeHtml(preset.description || (recent ? 'Last score ' + accuracy(recent) + '%' : 'Ready to practice')) + '</p></div>' + dailyBadge + '</div>' +
-      '<div class="preset-tags">' + tags + '</div><div class="preset-actions">' + actions + '</div>';
+      '<div class="preset-tags">' + tags + '</div><div class="preset-actions">' + actions + sendStatus + '</div>';
     card.querySelector('[data-action="start"]').onclick = function () { startPreset(preset); };
     if (suggested) {
       card.querySelector('[data-action="customize"]').onclick = function () { openEditor(null, preset.id); };
     } else {
+      card.querySelector('[data-action="send"]').onclick = function () { requestPresetSend(preset.id); };
       card.querySelector('[data-action="edit"]').onclick = function () { openEditor(preset.id); };
       card.querySelector('[data-action="duplicate"]').onclick = function () { duplicatePreset(preset.id); };
       card.querySelector('[data-action="schedule"]').onclick = function () { openSchedule(preset.id); };
@@ -676,19 +721,38 @@
       container.appendChild(item);
     });
   }
-  function setRangeInputs(settings) {
+  function setOtherRangeInputs(settings) {
     element('presetDigits').value = settings.digits;
     element('presetRangeMin').value = settings.rangeMin;
     element('presetRangeMax').value = settings.rangeMax;
-    element('presetMultFrom').value = settings.multFrom;
-    element('presetMultTo').value = settings.multTo;
-    element('presetMultiplierTo').value = settings.multiplierTo;
     element('presetPrimeMax').value = settings.primeMax;
     element('presetCiYears').value = settings.ciYears;
   }
+  function setRangeInputs(settings) {
+    setOtherRangeInputs(settings);
+    element('presetMultFrom').value = settings.multFrom;
+    element('presetMultTo').value = settings.multTo;
+    element('presetMultiplierFrom').value = settings.multiplierFrom;
+    element('presetMultiplierTo').value = settings.multiplierTo;
+  }
+  function updateTableMode() {
+    var single = element('presetTableMode').value === 'single';
+    var from = clamp(element('presetMultFrom').value, 1, 100, 2);
+    if (single) element('presetMultTo').value = from;
+    element('presetMultTo').disabled = single;
+    element('presetMultFromLabel').textContent = single ? 'Table number' : 'Tables from';
+    var to = single ? from : clamp(element('presetMultTo').value, 1, 100, from);
+    var low = Math.min(from, to);
+    var high = Math.max(from, to);
+    var multiplierFrom = clamp(element('presetMultiplierFrom').value, 1, 100, 1);
+    var multiplierTo = clamp(element('presetMultiplierTo').value, 1, 100, 10);
+    var multiplierLow = Math.min(multiplierFrom, multiplierTo);
+    var multiplierHigh = Math.max(multiplierFrom, multiplierTo);
+    element('presetTablePreview').textContent = (low === high ? 'Table ' + low : 'Tables ' + low + '–' + high) + ' · ×' + multiplierLow + ' to ×' + multiplierHigh;
+  }
   function updateRangeDisabled() {
     var custom = element('presetDifficulty').value === 'custom';
-    element('presetRangePanel').querySelectorAll('input,select').forEach(function (input) { input.disabled = !custom; });
+    element('presetRangePanel').querySelectorAll('[data-custom-range]').forEach(function (input) { input.disabled = !custom; });
   }
   function editorSourcePreset() {
     if (editingPresetId) return getPreset(editingPresetId);
@@ -713,8 +777,10 @@
     element('presetSnoozeMinutes').value = preset.reminder.snoozeMinutes;
     element('presetMaxSnoozes').value = preset.reminder.maxSnoozes;
     setRangeInputs(preset.settings);
+    element('presetTableMode').value = preset.settings.multFrom === preset.settings.multTo ? 'single' : 'range';
     renderQuizChoices(preset.quizIds, preset.weights);
     renderDays(preset.days);
+    updateTableMode();
     updateRangeDisabled();
   }
   function genericPreset() {
@@ -756,12 +822,13 @@
       digits: element('presetDigits').value,
       rangeMin: element('presetRangeMin').value,
       rangeMax: element('presetRangeMax').value,
-      multFrom: element('presetMultFrom').value,
-      multTo: element('presetMultTo').value,
-      multiplierTo: element('presetMultiplierTo').value,
       primeMax: element('presetPrimeMax').value,
       ciYears: element('presetCiYears').value
     } : difficultySettings(difficulty);
+    rawSettings.multFrom = element('presetMultFrom').value;
+    rawSettings.multTo = element('presetTableMode').value === 'single' ? element('presetMultFrom').value : element('presetMultTo').value;
+    rawSettings.multiplierFrom = element('presetMultiplierFrom').value;
+    rawSettings.multiplierTo = element('presetMultiplierTo').value;
     var selectedQuizIds = Array.from(element('presetQuizGrid').querySelectorAll('input[type="checkbox"]:checked')).map(function (input) { return input.value; });
     var selectedWeights = {};
     element('presetQuizGrid').querySelectorAll('.preset-check').forEach(function (item) {
@@ -887,6 +954,10 @@
     if (event.source !== window.parent || event.origin !== window.location.origin) return;
     var data = event.data;
     if (!data || data.source !== 'studyplanner') return;
+    if (data.type === 'preset-send-result') {
+      applyPresetSendResult(data);
+      return;
+    }
     if (data.type === 'start-preset') {
       var linkedPreset = getPreset(String(data.presetId || '').slice(0, 80)) || getTemplate(String(data.presetId || '').slice(0, 80));
       if (linkedPreset) startPreset(linkedPreset);
@@ -894,6 +965,14 @@
       return;
     }
     if (data.type !== 'calc-state') return;
+    var nextSessionKey = String(data.sessionKey || '').slice(0, 100);
+    if (parentSessionKey && nextSessionKey && nextSessionKey !== parentSessionKey) {
+      presetSendStates = Object.create(null);
+      if (activeSession) stopSession(false);
+      lastResult = null;
+      show('home');
+    }
+    parentSessionKey = nextSessionKey;
     state = normalizeState(data.state);
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (error) {}
     renderDashboard();
@@ -914,10 +993,16 @@
       if (!this.checked) element('presetTelegramEnabled').checked = false;
     });
     element('presetEditorForm').addEventListener('submit', saveEditor);
+    element('presetTableMode').addEventListener('change', updateTableMode);
+    ['presetMultFrom', 'presetMultTo', 'presetMultiplierFrom', 'presetMultiplierTo'].forEach(function (id) {
+      element(id).addEventListener('input', updateTableMode);
+      element(id).addEventListener('change', updateTableMode);
+    });
     element('presetDifficulty').addEventListener('change', function () {
       var difficulty = this.value;
-      if (difficulty !== 'custom') setRangeInputs(difficultySettings(difficulty));
+      if (difficulty !== 'custom') setOtherRangeInputs(difficultySettings(difficulty));
       updateRangeDisabled();
+      updateTableMode();
     });
     element('clearHistoryBtn').onclick = clearHistory;
     window.addEventListener('message', receiveParentState);

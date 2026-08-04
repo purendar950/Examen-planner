@@ -6,6 +6,8 @@
 (function () {
   var loaded = false;
   var deepLinkSent = false;
+  var calcSessionUid = null;
+  var calcSessionKey = '';
   var VALID_QUIZ_IDS = new Set([
     'addition', 'subtraction', 'mult1', 'mult2', 'mult3', 'squares', 'sqroots', 'cubes', 'cuberoots', 'higherpow',
     'pctfrac', 'pctnum', 'trig', 'pyth', 'ci_si', 'ci_ci', 'primeinrange', 'isprime', 'astr1', 'astr2', 'arev1', 'arev2'
@@ -46,6 +48,15 @@
     var weights = {};
     Array.from(new Set(quizIds)).forEach(function (id) { weights[id] = clampNumber(rawWeights[id], 1, 10, 1); });
     var rawReminder = raw.reminder && typeof raw.reminder === 'object' ? raw.reminder : {};
+    var rangeMin = clampNumber(settings.rangeMin, 1, 100, 2);
+    var rangeMax = clampNumber(settings.rangeMax, 1, 100, 25);
+    var multFrom = clampNumber(settings.multFrom, 1, 100, 2);
+    var multTo = clampNumber(settings.multTo, 1, 100, 9);
+    var multiplierFrom = clampNumber(settings.multiplierFrom, 1, 100, 1);
+    var multiplierTo = clampNumber(settings.multiplierTo, 1, 100, 10);
+    if (rangeMax < rangeMin) { var rangeSwap = rangeMin; rangeMin = rangeMax; rangeMax = rangeSwap; }
+    if (multTo < multFrom) { var multSwap = multFrom; multFrom = multTo; multTo = multSwap; }
+    if (multiplierTo < multiplierFrom) { var multiplierSwap = multiplierFrom; multiplierFrom = multiplierTo; multiplierTo = multiplierSwap; }
     var leadOptions = [0, 5, 10, 15, 30, 60];
     var snoozeOptions = [5, 10, 15, 30, 60];
     var maxSnoozeOptions = [0, 1, 2, 3, 5];
@@ -66,11 +77,12 @@
       retryWrong: ['immediate', 'end', 'none'].includes(raw.retryWrong) ? raw.retryWrong : 'immediate',
       settings: {
         digits: clampNumber(settings.digits, 1, 4, 2),
-        rangeMin: clampNumber(settings.rangeMin, 1, 100, 2),
-        rangeMax: clampNumber(settings.rangeMax, 2, 100, 25),
-        multFrom: clampNumber(settings.multFrom, 1, 100, 2),
-        multTo: clampNumber(settings.multTo, 1, 100, 9),
-        multiplierTo: clampNumber(settings.multiplierTo, 2, 100, 10),
+        rangeMin: rangeMin,
+        rangeMax: rangeMax,
+        multFrom: multFrom,
+        multTo: multTo,
+        multiplierFrom: multiplierFrom,
+        multiplierTo: multiplierTo,
         primeMax: clampNumber(settings.primeMax, 10, 300, 100),
         ciYears: clampNumber(settings.ciYears, 2, 5, 2)
       },
@@ -149,6 +161,15 @@
     });
   }
 
+  function currentCalcSessionKey() {
+    var uid = (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) ? String(currentUser.uid) : '';
+    if (uid !== calcSessionUid || !calcSessionKey) {
+      calcSessionUid = uid;
+      calcSessionKey = 'calc-session-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+    }
+    return calcSessionKey;
+  }
+
   function syncCalcState() {
     var stored = (typeof appState !== 'undefined' && appState && appState.calculationPractice)
       ? appState.calculationPractice
@@ -156,6 +177,7 @@
     postToCalc({
       source: 'studyplanner',
       type: 'calc-state',
+      sessionKey: currentCalcSessionKey(),
       state: sanitizeCalcState(stored)
     });
   }
@@ -180,7 +202,21 @@
     } catch (error) {}
   }
 
-  function handleCalcMessage(event) {
+  function postPresetSendResult(frame, presetId, requestId, sessionKey, result) {
+    if (!frame || !frame.contentWindow) return;
+    frame.contentWindow.postMessage({
+      source: 'studyplanner',
+      type: 'preset-send-result',
+      presetId: presetId,
+      requestId: requestId,
+      sessionKey: sessionKey,
+      ok: result.ok === true,
+      retrySameRequest: result.retrySameRequest === true,
+      error: result.ok === true ? '' : safeText(result.error || 'Could not send. Try again.', 180)
+    }, window.location.origin);
+  }
+
+  async function handleCalcMessage(event) {
     var frame = calcFrame();
     if (!frame || event.origin !== window.location.origin || event.source !== frame.contentWindow) return;
     var data = event.data;
@@ -193,7 +229,55 @@
       syncCalcState();
       return;
     }
+    if (data.type === 'preset-send-request') {
+      var presetId = typeof data.presetId === 'string' ? data.presetId : '';
+      var requestId = typeof data.requestId === 'string' ? data.requestId : '';
+      var requestSessionKey = typeof data.sessionKey === 'string' ? data.sessionKey : '';
+      var activeSessionKey = currentCalcSessionKey();
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(presetId) ||
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{7,99}$/.test(requestId) ||
+          !/^[A-Za-z0-9-]{12,100}$/.test(requestSessionKey) ||
+          requestSessionKey !== activeSessionKey) {
+        postPresetSendResult(frame, presetId.slice(0, 80), requestId.slice(0, 100), requestSessionKey.slice(0, 100), { ok: false, error: 'This account session changed. Reload and try again.' });
+        if (requestSessionKey !== activeSessionKey) syncCalcState();
+        return;
+      }
+      var requestUid = (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) ? String(currentUser.uid) : '';
+      try {
+        if (typeof appState === 'undefined' || !appState) throw new Error('Calculation presets are not ready yet.');
+        var currentCalcState = sanitizeCalcState(appState.calculationPractice || defaultCalcState());
+        if (!currentCalcState.presets.some(function (preset) { return preset.id === presetId; })) {
+          throw new Error('Save this preset before sending it to Telegram.');
+        }
+        if (navigator.onLine === false) throw new Error('You are offline. Reconnect before sending.');
+        if (!requestUid) throw new Error('Sign in before sending to Telegram.');
+        if (typeof saveProgressNow !== 'function') throw new Error('Cloud sync is not ready yet.');
+        await saveProgressNow();
+        if (navigator.onLine === false || (typeof _localDirty !== 'undefined' && _localDirty)) {
+          throw new Error('Preset could not sync to the cloud. Reconnect and try again.');
+        }
+        if (typeof currentUser === 'undefined' || !currentUser || String(currentUser.uid || '') !== requestUid || currentCalcSessionKey() !== requestSessionKey) {
+          syncCalcState();
+          throw new Error('Your signed-in account changed. Send again from the current account.');
+        }
+        if (typeof sendCalculationPresetNow !== 'function') throw new Error('Telegram delivery is not ready. Reload and try again.');
+        await sendCalculationPresetNow(presetId, requestId, requestUid);
+        postPresetSendResult(frame, presetId, requestId, requestSessionKey, { ok: true });
+      } catch (error) {
+        postPresetSendResult(frame, presetId, requestId, requestSessionKey, {
+          ok: false,
+          retrySameRequest: !!(error && error.retrySameRequest),
+          error: error && error.message ? error.message : 'Could not send. Try again.'
+        });
+      }
+      return;
+    }
     if (data.type !== 'state-save') return;
+    var saveSessionKey = typeof data.sessionKey === 'string' ? data.sessionKey : '';
+    if (!/^[A-Za-z0-9-]{12,100}$/.test(saveSessionKey) || saveSessionKey !== currentCalcSessionKey()) {
+      syncCalcState();
+      return;
+    }
     var nextState = sanitizeCalcState(data.state);
     if (typeof appState === 'undefined' || !appState) return;
     var previous = JSON.stringify(appState.calculationPractice || defaultCalcState());
@@ -219,7 +303,7 @@
       syncCalcState();
       setTimeout(syncCalcDeepLink, 0);
     });
-    frame.src = 'calc/index.html';
+    frame.src = 'calc/index.html?v=3';
   }
 
   if (typeof onPageActivated === 'function') onPageActivated('calc', loadCalc);

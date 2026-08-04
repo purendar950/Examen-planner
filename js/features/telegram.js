@@ -55,15 +55,16 @@ function saveTelegramSettings() {
   const chatEl   = document.getElementById('tg-chatid');
   const onEl     = document.getElementById('tg-enabled');
   const statusEl = document.getElementById('tg-status-msg');
-  if (chatEl) appState.telegram.chatId = (chatEl.value || '').trim();
-  if (onEl)   appState.telegram.enabled = !!onEl.checked;
-
-  /* Warn if enabled but no chat ID */
-  if (appState.telegram.enabled && !appState.telegram.chatId) {
-    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '⚠️ Pehle Chat ID daalo — "Step 1: Bot kholo" dabao ya @userinfobot se ID lo.'; }
-    if (typeof showToast === 'function') showToast('⚠️ Chat ID missing! Pehle bot se ya @userinfobot se ID lo.', 'info');
+  const chatId = (chatEl && chatEl.value || '').trim();
+  const enabled = !!(onEl && onEl.checked);
+  if (enabled && (!/^\d+$/.test(chatId) || Number(chatId) <= 0)) {
+    const guidance = '⚠️ Private Telegram Chat ID daalo (positive number, e.g. 987654321). Group/channel IDs supported nahi hain.';
+    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = guidance; }
+    if (typeof showToast === 'function') showToast('Private Telegram Chat ID required.', 'info');
     return;
   }
+  appState.telegram.chatId = chatId;
+  appState.telegram.enabled = enabled;
 
   refreshTelegramDigest();
   saveProgress();
@@ -106,8 +107,8 @@ async function verifyTelegramChatId() {
   const chatEl = document.getElementById('tg-chatid');
   const statusEl = document.getElementById('tg-status-msg');
   const chatId = (chatEl && chatEl.value || '').trim();
-  if (!chatId || !/^-?\d+$/.test(chatId)) {
-    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '⚠️ Valid numeric Chat ID daalo (e.g. 987654321)'; }
+  if (!/^\d+$/.test(chatId) || Number(chatId) <= 0) {
+    if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '⚠️ Positive private Chat ID daalo (e.g. 987654321). Group/channel IDs supported nahi hain.'; }
     return;
   }
   if (statusEl) { statusEl.style.color = 'var(--muted)'; statusEl.textContent = '⏳ Testing...'; }
@@ -118,6 +119,51 @@ async function verifyTelegramChatId() {
   } catch(e) {
     if (statusEl) { statusEl.style.color = '#e74c3c'; statusEl.textContent = '❌ Error: ' + e.message; }
   }
+}
+
+function telegramBotBaseUrl() {
+  let override = '';
+  try { override = localStorage.getItem('telegramBotUrl') || ''; } catch (e) {}
+  return (override || 'https://examen-planner-2.onrender.com').replace(/\/+$/, '');
+}
+
+/* Send one saved Calculation Practice preset immediately. The backend derives
+   the account, private chat, entitlement, and preset from the verified token;
+   the browser sends only bounded identifiers. */
+async function sendCalculationPresetNow(presetId, requestId, expectedUid) {
+  if (typeof auth === 'undefined' || !auth || !auth.currentUser || (expectedUid && auth.currentUser.uid !== expectedUid)) {
+    throw new Error('Your signed-in account changed. Send again from the current account.');
+  }
+  const token = await getFirebaseIdToken();
+  if (!auth.currentUser || (expectedUid && auth.currentUser.uid !== expectedUid)) {
+    throw new Error('Your signed-in account changed. Send again from the current account.');
+  }
+  let response;
+  try {
+    response = await fetch(telegramBotBaseUrl() + '/send-calculation-preset', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ presetId, requestId })
+    });
+  } catch (fetchError) {
+    fetchError.retrySameRequest = true;
+    throw fetchError;
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || body.ok !== true) {
+    const error = new Error(body.error || (response.status === 401
+      ? 'Sign in again before sending.'
+      : response.status === 429
+        ? 'Too many sends. Wait a minute and try again.'
+        : 'Telegram send failed. Try again.'));
+    error.status = response.status;
+    error.retrySameRequest = body.retryWithNewRequest !== true;
+    throw error;
+  }
+  return body;
 }
 
 /* Opened from the user dropdown — close the menu and show the Study Profile
