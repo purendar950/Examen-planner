@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>StudyPlanner - Maths App</title>
+<!-- The Telegram Mini App SDK is loaded on demand by presets.js, only when the
+     page is opened from a Telegram launch link. Every calc-tab user loads this
+     file in an iframe, so it must not block on a third-party request. -->
 <style>
 :root{
   --bg:#3a3a3a;
@@ -288,6 +291,16 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 /* finite session + results */
 .preset-session-meta{display:none;align-items:center;gap:6px;color:var(--muted);font-size:10px;white-space:nowrap;}.preset-session-meta.active{display:flex;}.preset-session-meta strong{color:var(--accent);font-size:11px;}
 .preset-skip{display:none;}.preset-skip.active{display:inline-flex;}
+/* Telegram Mini App launch states */
+.mini-overlay{position:fixed;inset:0;z-index:60;background:var(--bg);display:grid;place-items:center;padding:26px;}
+.mini-overlay[hidden]{display:none;}
+.mini-overlay-card{max-width:340px;display:grid;gap:12px;justify-items:center;text-align:center;}
+.mini-overlay-icon{width:58px;height:58px;border-radius:17px;display:grid;place-items:center;background:var(--accent-dim);border:1px solid rgba(0,200,150,.35);font-size:27px;}
+.mini-overlay-card h2{font-size:17px;color:var(--text);}
+.mini-overlay-card p{font-size:12.5px;color:var(--muted);line-height:1.5;}
+.mini-spinner{width:22px;height:22px;border-radius:50%;border:2px solid var(--border);border-top-color:var(--accent);animation:mini-spin .8s linear infinite;}
+@keyframes mini-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.mini-spinner{animation-duration:2.4s}}
 .result-wrap{max-width:680px;margin:16px auto 0;display:grid;gap:14px;}.result-card{padding:24px;text-align:center;background:linear-gradient(145deg,var(--accent-dim),transparent 58%),var(--card);}.result-mark{width:64px;height:64px;border-radius:18px;display:grid;place-items:center;margin:0 auto 13px;background:var(--accent-dim);border:1px solid rgba(0,200,150,.35);font-size:30px;}.result-card h2{font-size:22px;color:var(--text);}.result-card>p{font-size:12px;color:var(--muted);margin-top:5px;}.result-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:18px;}.result-stat{padding:12px 6px;background:var(--surface);border:1px solid var(--border);border-radius:9px;}.result-stat strong{display:block;font-size:18px;color:var(--text);}.result-stat span{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;}.result-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:18px;}
 
 @media(max-width:640px){.page{padding:12px 12px 26px}.hdr{padding:16px 50px}.hdr h1{font-size:17px}.stack{grid-template-columns:1fr;gap:10px}.scard{min-height:108px}.scard .pillbox{min-height:48px;font-size:18px}.qcard{padding:26px 14px}.qline{font-size:25px}.chartcard{max-height:64vh}.preset-hero{grid-template-columns:1fr}.preset-daily{align-items:flex-start;flex-direction:column}.preset-grid{grid-template-columns:1fr}.preset-form-grid{grid-template-columns:1fr}.preset-field.full{grid-column:auto}.preset-quiz-grid{grid-template-columns:1fr 1fr}.preset-history-row{grid-template-columns:minmax(0,1fr) auto}.preset-history-time{display:none}.result-stats{grid-template-columns:repeat(2,1fr)}.hdr-quiz{padding-left:48px;flex-wrap:wrap}.preset-session-meta{order:5;width:100%;justify-content:center}.preset-editor-actions{justify-content:stretch}.preset-editor-actions .preset-btn{flex:1}}
@@ -295,6 +308,17 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 </style>
 </head>
 <body>
+
+<!-- Telegram Mini App launch/status screen (hidden in browser + embedded modes) -->
+<div class="mini-overlay" id="miniOverlay" hidden>
+  <div class="mini-overlay-card">
+    <div class="mini-overlay-icon" id="miniOverlayIcon">🧮</div>
+    <div class="mini-spinner" id="miniOverlaySpinner"></div>
+    <h2 id="miniOverlayTitle">Loading your practice</h2>
+    <p id="miniOverlayText">Checking your Telegram account…</p>
+    <div class="preset-actions" id="miniOverlayActions"></div>
+  </div>
+</div>
 
 <!-- HOME -->
 <div class="page active" id="home">
@@ -1145,6 +1169,6 @@ document.addEventListener("keydown",e=>{
 renderHome();
 show("home");
 </script>
-<script src="presets.js?v=4"></script>
+<script src="presets.js?v=6"></script>
 </body>
 </html>

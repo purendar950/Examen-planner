@@ -936,6 +936,11 @@ if (auth && !_isBadProtocol) {
            bot. Done before the local-edit guard so new tasks always appear. ── */
         try { if (typeof drainTelegramInbox === 'function') drainTelegramInbox(snapData); } catch(e) {}
 
+        /* ── Practice finished inside Telegram (Mini App): merge those attempts
+           into the calculation history. Also before the local-edit guard, so a
+           result always lands even while this tab has pending edits. ── */
+        try { if (typeof drainCalculationAttempts === 'function') drainCalculationAttempts(snapData); } catch(e) {}
+
         if (typeof newProfile !== 'undefined') {
           const oldSuspended = EZ_PROFILE && EZ_PROFILE.trialSuspended;
           const newSuspended = newProfile && newProfile.trialSuspended;

@@ -16,6 +16,10 @@
   var settingsBackup = null;
   var presetSendStates = Object.create(null);
   var parentSessionKey = '';
+  /* Telegram Mini App mode: the practice is launched from a Telegram message
+     and the account is proven by Telegram's signed initData, because Google
+     sign-in cannot run inside an embedded webview. */
+  var miniApp = { active: false, presetId: '', preset: null, tg: null, resultStatus: '', sdkPromise: null };
 
   var QUIZ_CHOICES = [
     ['addition', 'Addition'], ['subtraction', 'Subtraction'],
@@ -517,8 +521,12 @@
     activeSession = null;
     updateSessionChrome();
     persistState();
+    miniApp.resultStatus = '';
     renderResult(result);
     show('presetResult');
+    /* In Telegram the attempt is written server-side, since the Mini App has no
+       authenticated app shell to persist through. */
+    if (miniApp.active) submitMiniAppResult(result);
   }
 
   function accuracy(result) {
@@ -530,6 +538,19 @@
     var pct = accuracy(result);
     var heading = result.reason === 'time' ? 'Time is up' : (pct >= 80 ? 'Excellent work!' : pct >= 50 ? 'Practice complete' : 'Keep building speed');
     var mistakesAction = result.mistakeQuizIds.length ? '<button type="button" class="preset-btn" id="resultMistakesBtn">Practice mistakes</button>' : '';
+    /* Inside Telegram there is no preset dashboard to go back to, so the last
+       action closes the Mini App and the sync state is shown instead. */
+    var closingAction = miniApp.active
+      ? '<button type="button" class="preset-btn" id="resultCloseBtn">Close</button>'
+      : '<button type="button" class="preset-btn" id="resultHomeBtn">Back to presets</button>';
+    /* A failed sync must be recoverable: "Practice again" would discard the
+       attempt, so offer an explicit retry of the submission itself. */
+    var retrySyncAction = miniApp.active && miniApp.resultSyncFailed
+      ? '<button type="button" class="preset-btn" id="resultRetrySyncBtn">Retry save</button>'
+      : '';
+    var syncNote = miniApp.active && miniApp.resultStatus
+      ? '<p class="preset-muted" id="resultSyncNote" role="status">' + escapeHtml(miniApp.resultStatus) + '</p>'
+      : '';
     card.innerHTML =
       '<div class="result-mark">' + (pct >= 80 ? '🏆' : pct >= 50 ? '🎯' : '📈') + '</div>' +
       '<h2>' + escapeHtml(heading) + '</h2>' +
@@ -540,8 +561,16 @@
         '<div class="result-stat"><strong>' + result.wrongAttempts + '</strong><span>Retries</span></div>' +
         '<div class="result-stat"><strong>' + escapeHtml(formatDuration(result.durationSec)) + '</strong><span>Time</span></div>' +
       '</div>' +
-      '<div class="result-actions"><button type="button" class="preset-btn primary" id="resultRepeatBtn">Practice again</button>' + mistakesAction + '<button type="button" class="preset-btn" id="resultHomeBtn">Back to presets</button></div>';
-    element('resultRepeatBtn').onclick = function () { if (result.presetSnapshot) startPreset(result.presetSnapshot); };
+      syncNote +
+      '<div class="result-actions">' + retrySyncAction + '<button type="button" class="preset-btn primary" id="resultRepeatBtn">Practice again</button>' + mistakesAction + closingAction + '</div>';
+    if (element('resultRetrySyncBtn')) {
+      element('resultRetrySyncBtn').onclick = function () { submitMiniAppResult(result); };
+    }
+    element('resultRepeatBtn').onclick = function () {
+      var repeat = result.presetSnapshot || miniApp.preset;
+      if (repeat) startPreset(repeat);
+    };
+    if (element('resultCloseBtn')) element('resultCloseBtn').onclick = closeMiniApp;
     if (element('resultMistakesBtn')) element('resultMistakesBtn').onclick = function () {
       var retry = clone(result.presetSnapshot);
       retry.id = uniqueId('mistakes');
@@ -551,7 +580,7 @@
       retry.timerMinutes = 0;
       startPreset(retry);
     };
-    element('resultHomeBtn').onclick = function () { renderDashboard(); show('home'); };
+    if (element('resultHomeBtn')) element('resultHomeBtn').onclick = function () { renderDashboard(); show('home'); };
   }
 
   function getTemplate(id) { return SUGGESTED_PRESETS.find(function (preset) { return preset.id === id; }); }
@@ -958,6 +987,179 @@
     persistState();
   }
 
+  function botBaseUrl() {
+    var override = '';
+    try { override = localStorage.getItem('telegramBotUrl') || ''; } catch (error) {}
+    return (override || 'https://examen-planner-2.onrender.com').replace(/\/+$/, '');
+  }
+  function telegramWebApp() {
+    return (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+  }
+  /* Fetch Telegram's SDK only for a Telegram launch, so the embedded and
+     standalone browser modes never wait on a third-party script. */
+  function loadTelegramSdk() {
+    if (telegramWebApp()) return Promise.resolve(telegramWebApp());
+    if (!miniApp.sdkPromise) {
+      miniApp.sdkPromise = new Promise(function (resolve) {
+        var script = document.createElement('script');
+        script.src = 'https://telegram.org/js/telegram-web-app.js';
+        script.async = true;
+        script.onload = function () { resolve(telegramWebApp()); };
+        script.onerror = function () { resolve(null); };
+        document.head.appendChild(script);
+      });
+    }
+    return miniApp.sdkPromise;
+  }
+  function miniOverlay(state) {
+    var overlay = element('miniOverlay');
+    if (!overlay) return;
+    overlay.hidden = state === null;
+    if (state === null) return;
+    element('miniOverlayIcon').textContent = state.icon || '🧮';
+    element('miniOverlaySpinner').hidden = !state.busy;
+    element('miniOverlayTitle').textContent = state.title || '';
+    element('miniOverlayText').textContent = state.text || '';
+    var actions = element('miniOverlayActions');
+    actions.innerHTML = '';
+    (state.actions || []).forEach(function (action) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'preset-btn' + (action.primary ? ' primary' : '');
+      button.textContent = action.label;
+      button.onclick = action.onClick;
+      actions.appendChild(button);
+    });
+  }
+  function closeMiniApp() {
+    var tg = telegramWebApp();
+    if (tg && typeof tg.close === 'function') tg.close();
+  }
+  async function requestMiniApp(path, payload) {
+    var tg = telegramWebApp();
+    var initData = tg && tg.initData ? String(tg.initData) : '';
+    if (!initData) throw new Error('Open this practice from your Telegram chat.');
+    var response;
+    /* The bot can cold-start slowly; without a timeout the launch screen would
+       spin forever with no way back. */
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var timeout = controller ? setTimeout(function () { controller.abort(); }, 30000) : null;
+    try {
+      response = await fetch(botBaseUrl() + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({ initData: initData }, payload || {})),
+        signal: controller ? controller.signal : undefined
+      });
+    } catch (error) {
+      throw new Error(error && error.name === 'AbortError'
+        ? 'StudyPlanner took too long to respond. Try again.'
+        : 'Could not reach StudyPlanner. Check your connection and try again.');
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
+    var body = await response.json().catch(function () { return {}; });
+    if (!response.ok || body.ok !== true) {
+      throw new Error(String(body.error || 'Request failed. Try again.').slice(0, 200));
+    }
+    return body;
+  }
+  function applyTelegramChrome(tg) {
+    if (!tg) return;
+    try { tg.ready(); } catch (error) {}
+    try { tg.expand(); } catch (error) {}
+    var apply = function () {
+      document.documentElement.dataset.theme = tg.colorScheme === 'light' ? 'light' : 'dark';
+    };
+    apply();
+    try { tg.onEvent('themeChanged', apply); } catch (error) {}
+  }
+  async function loadMiniAppPreset() {
+    miniOverlay({ busy: true, title: 'Loading your practice', text: 'Checking your Telegram account…' });
+    try {
+      var body = await requestMiniApp('/mini/calculation-preset', { presetId: miniApp.presetId });
+      miniApp.preset = normalizePreset(body.preset, false);
+      miniOverlay(null);
+      startPreset(miniApp.preset);
+    } catch (error) {
+      miniOverlay({
+        icon: '⚠️',
+        title: 'Could not start practice',
+        text: error && error.message ? error.message : 'Something went wrong.',
+        actions: [
+          { label: 'Try again', primary: true, onClick: loadMiniAppPreset },
+          { label: 'Close', onClick: closeMiniApp }
+        ]
+      });
+    }
+  }
+  async function submitMiniAppResult(result) {
+    miniApp.resultStatus = 'Saving to your account…';
+    miniApp.resultSyncFailed = false;
+    renderResult(result);
+    try {
+      await requestMiniApp('/mini/calculation-result', {
+        presetId: miniApp.presetId,
+        result: {
+          /* Stable id so a retried submission is not stored twice. */
+          id: result.id,
+          total: result.total,
+          answered: result.answered,
+          firstTryCorrect: result.firstTryCorrect,
+          wrongAttempts: result.wrongAttempts,
+          hintsUsed: result.hintsUsed,
+          skipped: result.skipped,
+          durationSec: result.durationSec,
+          reason: result.reason,
+          mistakeQuizIds: result.mistakeQuizIds,
+          /* Used only if the preset was deleted while practising. */
+          presetName: result.presetName
+        }
+      });
+      miniApp.resultStatus = 'Saved to your account ✓';
+      miniApp.resultSyncFailed = false;
+    } catch (error) {
+      miniApp.resultStatus = (error && error.message ? error.message : 'Could not save this attempt.') + ' Your score is shown above.';
+      miniApp.resultSyncFailed = true;
+    }
+    renderResult(result);
+  }
+  function miniAppLaunchPresetId() {
+    try { return String(new URLSearchParams(window.location.search).get('tgpreset') || '').slice(0, 80); }
+    catch (error) { return ''; }
+  }
+  async function startMiniApp() {
+    var presetId = miniAppLaunchPresetId();
+    if (!presetId) return;
+    miniApp.presetId = presetId;
+    miniOverlay({ busy: true, title: 'Loading your practice', text: 'Connecting to Telegram…' });
+    var tg = await loadTelegramSdk();
+    /* A launch link opened in a normal browser has no Telegram signature, so it
+       cannot be authorized here. Send the user to the full app instead, which
+       signs in normally and opens the same preset. */
+    if (!tg || !tg.initData) {
+      miniOverlay({
+        icon: '📱',
+        title: 'Open this from Telegram',
+        text: 'This link runs practice inside Telegram. Tap “Practice here” on the message in your Telegram chat, or continue in the full StudyPlanner app.',
+        actions: [
+          { label: 'Open in StudyPlanner', primary: true, onClick: function () {
+            window.location.href = '../app.html?open=calc&preset=' + encodeURIComponent(presetId);
+          } },
+          { label: 'Browse practice library', onClick: function () {
+            miniOverlay(null);
+            sendToParent('state-request');
+          } }
+        ]
+      });
+      return;
+    }
+    miniApp.active = true;
+    miniApp.tg = tg;
+    applyTelegramChrome(tg);
+    loadMiniAppPreset();
+  }
+
   function onScreenChange() {}
   function receiveParentState(event) {
     if (event.source !== window.parent || event.origin !== window.location.origin) return;
@@ -1015,7 +1217,10 @@
     });
     element('clearHistoryBtn').onclick = clearHistory;
     window.addEventListener('message', receiveParentState);
-    sendToParent('state-request');
+    /* A Telegram launch authorizes itself and starts the requested preset;
+       every other mode asks the parent app for account state as before. */
+    if (miniAppLaunchPresetId()) startMiniApp();
+    else sendToParent('state-request');
   }
 
   window.CalcPresets = {

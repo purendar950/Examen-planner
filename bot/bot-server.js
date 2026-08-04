@@ -698,6 +698,13 @@ function appBaseUrlForRequest(req) {
 /* Surface the resolved routing once at boot: an allow-listed origin with no
    base of its own silently receives the fallback link, which is easy to miss
    when a new deployment origin is added to only one of the two lists. */
+/* A deep-link base whose origin is not allow-listed produces a Mini App that
+   loads and authorizes, then fails every request on CORS — worth saying loudly
+   at boot rather than debugging from the client. */
+const _basesNotAllowed = Array.from(APP_BASE_URLS.keys()).filter(origin => !ALLOWED_ORIGINS.has(origin));
+if (_basesNotAllowed.length) {
+  console.warn(`⚠️  App base origin(s) not in ALLOWED_ORIGINS — the Mini App will fail CORS from: ${_basesNotAllowed.join(', ')}`);
+}
 const _originsWithoutBase = Array.from(ALLOWED_ORIGINS).filter(origin => !APP_BASE_URLS.has(origin));
 console.log(`🔗 Deep-link bases: ${Array.from(APP_BASE_URLS.values()).join(', ')} · fallback ${FALLBACK_APP_BASE_URL}`
   + (_originsWithoutBase.length ? ` · using fallback for ${_originsWithoutBase.join(', ')}` : ''));
@@ -793,9 +800,11 @@ async function rememberTelegramMediaOwner(uid, fileId, source) {
 }
 
 /* ── Instant Calculation Practice delivery ─────────────────────────────── */
-async function enforceCalculationPresetRateLimit(uid) {
-  const id = crypto.createHash('sha256').update(String(uid)).digest('hex');
-  const ref = db.collection('calculationPresetSendRates').doc(id);
+/* Shared per-identity fixed-window limiter. Firestore-backed so the quota holds
+   across restarts and across every instance of this service. */
+async function enforceFirestoreRateLimit(collectionName, identity, limit, windowMs, message) {
+  const id = crypto.createHash('sha256').update(String(identity)).digest('hex');
+  const ref = db.collection(collectionName).doc(id);
   const nowMs = Date.now();
   await db.runTransaction(async transaction => {
     const snapshot = await transaction.get(ref);
@@ -803,18 +812,21 @@ async function enforceCalculationPresetRateLimit(uid) {
     const startedMs = data.windowStartedAt && typeof data.windowStartedAt.toMillis === 'function'
       ? data.windowStartedAt.toMillis()
       : 0;
-    const sameWindow = startedMs > 0 && nowMs - startedMs < 60000;
-    const count = sameWindow ? boundedInteger(data.count, 0, 1000, 0) : 0;
-    if (count >= 5) {
-      throw Object.assign(new Error('Too many sends. Wait one minute and try again.'), { status: 429 });
-    }
+    const sameWindow = startedMs > 0 && nowMs - startedMs < windowMs;
+    const count = sameWindow ? boundedInteger(data.count, 0, 100000, 0) : 0;
+    if (count >= limit) throw Object.assign(new Error(message), { status: 429 });
     transaction.set(ref, {
-      uid,
+      identity: String(identity),
       count: count + 1,
       windowStartedAt: global._fbAdmin.firestore.Timestamp.fromMillis(sameWindow ? startedMs : nowMs),
       updatedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
   });
+}
+
+async function enforceCalculationPresetRateLimit(uid) {
+  await enforceFirestoreRateLimit('calculationPresetSendRates', uid, 5, 60000,
+    'Too many sends. Wait one minute and try again.');
 }
 
 function positivePrivateChatId(value) {
@@ -879,6 +891,30 @@ function calculationPresetText(preset) {
     detail += `\n${tables} · ×${preset.multiplierFrom} to ×${preset.multiplierTo}`;
   }
   return `🧮 <b>Calculation Practice</b>\n${escapeTelegramHtml(preset.icon)} <b>${escapeTelegramHtml(preset.name)}</b>\n${detail}\n\nYour practice preset is ready.`;
+}
+
+/* Launch buttons for a practice preset.
+   `web_app` opens the Mini App inside Telegram and is only valid over HTTPS in
+   private chats, so it is added conditionally; the plain URL button stays as a
+   fallback for clients that cannot open Mini Apps. */
+function calculationPracticeButtons(appBase, presetId, options) {
+  const base = String(appBase || FALLBACK_APP_BASE_URL).replace(/\/+$/, '');
+  const encodedPreset = encodeURIComponent(presetId);
+  const rows = [];
+  if (/^https:\/\//i.test(base) && !(options && options.browserOnly)) {
+    rows.push([{
+      text: '▶ Practice here',
+      web_app: { url: `${base}/calc/index.html?tgpreset=${encodedPreset}` }
+    }]);
+  }
+  rows.push([{ text: '🌐 Open in browser', url: `${base}/app.html?open=calc&preset=${encodedPreset}` }]);
+  return rows;
+}
+
+/* A Mini App button Telegram refuses would otherwise fail the whole message and
+   lose the reminder, so fall back to the plain URL keyboard once. */
+function isTelegramButtonRejection(description) {
+  return /BUTTON|WEB_?APP|url invalid/i.test(String(description || ''));
 }
 
 function calculationPresetRequestRef(uid, requestId) {
@@ -958,14 +994,22 @@ async function sendCalculationPresetForUser(uid, presetId, requestId, presetFing
 
   const preset = sanitizeCalculationPreset(rawPreset);
   const practiceBase = String(appBaseUrl || FALLBACK_APP_BASE_URL).replace(/\/+$/, '');
-  const practiceUrl = `${practiceBase}/app.html?open=calc&preset=${encodeURIComponent(preset.id)}`;
   let sent;
   try {
-    sent = await bot.sendMessage(chatId, calculationPresetText(preset), {
+    const send = rows => bot.sendMessage(chatId, calculationPresetText(preset), {
       parse_mode: 'HTML',
       disable_web_page_preview: true,
-      reply_markup: { inline_keyboard: [[{ text: '▶ Start Practice', url: practiceUrl }]] }
+      reply_markup: { inline_keyboard: rows }
     });
+    try {
+      sent = await send(calculationPracticeButtons(practiceBase, preset.id));
+    } catch (buttonError) {
+      const description = (buttonError && buttonError.response && buttonError.response.body
+        && buttonError.response.body.description) || buttonError.message;
+      if (!isTelegramButtonRejection(description)) throw buttonError;
+      console.warn(`⚠️  Telegram refused the Mini App button (${description}) — sending the browser link instead.`);
+      sent = await send(calculationPracticeButtons(practiceBase, preset.id, { browserOnly: true }));
+    }
   } catch (error) {
     const responseBody = error && error.response && error.response.body ? error.response.body : null;
     const explicitRejection = !!(responseBody && (responseBody.ok === false || responseBody.error_code));
@@ -1001,6 +1045,334 @@ async function sendCalculationPresetForUser(uid, presetId, requestId, presetFing
   return { duplicate: false };
 }
 
+/* ════════════════════════════════════════════════════════════════════════════
+   TELEGRAM MINI APP — run Calculation Practice inside Telegram
+   ─────────────────────────────────────────────────────────────────────────────
+   A Mini App cannot use the web app's Google sign-in (Google blocks OAuth in
+   embedded webviews). Telegram instead hands the page a signed `initData`
+   string; verifying its HMAC with the bot token proves which Telegram user is
+   running the app. That verified Telegram id is mapped to the StudyPlanner
+   account through the same link the reminders already rely on, so the browser
+   never states who it is.
+   ════════════════════════════════════════════════════════════════════════════ */
+const MINI_APP_MAX_INIT_DATA = 4096;
+/* initData is a bearer credential that Telegram exposes in the webview URL, so
+   the acceptance window is kept short. The client re-reads `tg.initData` for
+   every request and the launch screen offers a retry, so a long window buys
+   nothing while widening the replay opportunity. */
+const MINI_APP_INIT_DATA_MAX_AGE_SEC = 3 * 60 * 60;
+/* `initData` is fixed at launch and never refreshed, so a session left open on a
+   phone would lose its finished attempt under the same bound. Submitting a
+   result gets a longer window; replaying it is harmless because the attempt id
+   makes the write idempotent. */
+const MINI_APP_RESULT_MAX_AGE_SEC = 24 * 60 * 60;
+const CALC_QUIZ_IDS = new Set([
+  'addition', 'subtraction', 'mult1', 'mult2', 'mult3', 'squares', 'sqroots', 'cubes', 'cuberoots',
+  'higherpow', 'pctfrac', 'pctnum', 'trig', 'pyth', 'ci_si', 'ci_ci', 'primeinrange', 'isprime',
+  'astr1', 'astr2', 'arev1', 'arev2'
+]);
+
+/* Verify Telegram's WebApp initData exactly as documented: build the
+   data_check_string from every field except `hash`, sorted by key, then compare
+   an HMAC keyed by SHA256("WebAppData", bot token). Constant-time compare, and
+   stale payloads are refused so a leaked initData cannot be replayed forever. */
+function verifyTelegramInitData(initData, maxAgeSec) {
+  const raw = String(initData == null ? '' : initData);
+  if (!raw || raw.length > MINI_APP_MAX_INIT_DATA) {
+    throw Object.assign(new Error('Telegram initData is required'), { status: 400 });
+  }
+  let params;
+  try { params = new URLSearchParams(raw); } catch (error) {
+    throw Object.assign(new Error('Telegram initData is malformed'), { status: 400 });
+  }
+  const hash = String(params.get('hash') || '');
+  if (!/^[a-f0-9]{64}$/i.test(hash)) {
+    throw Object.assign(new Error('Telegram initData signature is missing'), { status: 401 });
+  }
+  params.delete('hash');
+  const dataCheckString = Array.from(params.entries())
+    .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join('\n');
+  const secret = crypto.createHmac('sha256', 'WebAppData').update(String(TOKEN)).digest();
+  const expected = crypto.createHmac('sha256', secret).update(dataCheckString).digest();
+  const provided = Buffer.from(hash.toLowerCase(), 'hex');
+  if (expected.length !== provided.length || !crypto.timingSafeEqual(expected, provided)) {
+    throw Object.assign(new Error('Telegram initData signature is invalid'), { status: 401 });
+  }
+  const authDate = Number(params.get('auth_date') || 0);
+  const maxAge = Number.isFinite(Number(maxAgeSec)) ? Number(maxAgeSec) : MINI_APP_INIT_DATA_MAX_AGE_SEC;
+  if (!Number.isFinite(authDate) || authDate <= 0
+      || Math.floor(Date.now() / 1000) - authDate > maxAge) {
+    throw Object.assign(new Error('This Telegram session expired. Reopen the practice from Telegram.'), { status: 401 });
+  }
+  let user;
+  try { user = JSON.parse(params.get('user') || '{}'); } catch (error) { user = {}; }
+  const telegramUserId = positivePrivateChatId(user && user.id);
+  if (!telegramUserId) {
+    throw Object.assign(new Error('Open this practice from your private Telegram chat with the bot.'), { status: 401 });
+  }
+  return { telegramUserId, authDate };
+}
+
+/* Resolve the StudyPlanner account for a verified Telegram user.
+   BOTH halves of the link must agree, because neither is sufficient alone:
+     • account side — `appState.telegram.chatId` is free-typed by whoever is
+       signed in, so on its own it lets someone claim another person's Telegram
+       id and capture their Mini App sessions;
+     • chat side — `telegram_links/<chatId>` is written by `/start <uid>` from
+       the chat itself, so on its own it lets anyone who knows a uid claim that
+       account (the app hands out shareable `?start=<uid>` links).
+   Requiring both closes each hole with the other: an attacker can write neither
+   the victim's `appState` nor a link doc keyed by the victim's chat id.
+   `findUserByChatId` is deliberately not used here — it falls back to the link
+   map alone. */
+async function miniAppAccountForTelegramUser(telegramUserId) {
+  const chatId = String(telegramUserId);
+  const reconnectHint = 'Reconnect Telegram: in StudyPlanner open Profile → Daily Plan on Telegram, tap the button that opens this bot, press Start, then save this Chat ID.';
+
+  const [query, linkSnapshot] = await Promise.all([
+    db.collection('users').where('appState.telegram.chatId', '==', chatId).limit(5).get(),
+    db.collection('telegram_links').doc(chatId).get()
+  ]);
+  if (query.empty) throw Object.assign(new Error(reconnectHint), { status: 403 });
+
+  const linkedUid = linkSnapshot.exists ? String((linkSnapshot.data() || {}).uid || '') : '';
+  if (!linkedUid) throw Object.assign(new Error(reconnectHint), { status: 403 });
+
+  /* The link map holds a single uid per chat, so this filter also removes the
+     ambiguity a duplicate claim would otherwise create. */
+  const candidates = query.docs.filter(doc => doc.id === linkedUid);
+  if (!candidates.length) throw Object.assign(new Error(reconnectHint), { status: 403 });
+  if (candidates.length > 1) {
+    console.error(`⚠️  Telegram chat ${chatId} resolves to multiple accounts — refusing Mini App access.`);
+    throw Object.assign(new Error('This Telegram Chat ID is linked to more than one StudyPlanner account.'), { status: 409 });
+  }
+
+  const doc = candidates[0];
+  const account = { uid: doc.id, data: doc.data() || {} };
+  const telegram = ((account.data.appState || {}).telegram) || {};
+  /* Matches /send-calculation-preset: turning Telegram off disables this too,
+     so an old message in the chat cannot keep access alive. */
+  if (telegram.enabled !== true) {
+    throw Object.assign(new Error('Telegram is switched off for this account. Turn it back on in Profile → Daily Plan on Telegram.'), { status: 403 });
+  }
+  if (!await isAdminUid(account.uid) && !isProUser(account.data, todayIST())) {
+    throw Object.assign(new Error('Practice inside Telegram requires an active Pro plan or trial.'), { status: 403 });
+  }
+  return account;
+}
+
+/* Difficulty presets mirrored from calc/presets.js difficultySettings(), so a
+   stored preset missing `settings` practises at the same level in Telegram as it
+   does in the browser. */
+function calculationDifficultyDefaults(level) {
+  if (level === 'easy') {
+    return { digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10, primeMax: 50, ciYears: 2 };
+  }
+  if (level === 'exam') {
+    return { digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20, primeMax: 300, ciYears: 3 };
+  }
+  return { digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10, primeMax: 100, ciYears: 2 };
+}
+
+/* The full practice configuration the engine needs, clamped to the same bounds
+   the web app enforces so a tampered stored document cannot widen ranges. */
+function sanitizeCalculationPracticeConfig(raw) {
+  raw = raw && typeof raw === 'object' ? raw : {};
+  const settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
+  const rawWeights = raw.weights && typeof raw.weights === 'object' ? raw.weights : {};
+  const difficulty = ['easy', 'standard', 'exam', 'custom'].includes(raw.difficulty) ? raw.difficulty : 'standard';
+  const fallback = calculationDifficultyDefaults(difficulty === 'custom' ? 'standard' : difficulty);
+  let quizIds = Array.isArray(raw.quizIds)
+    ? Array.from(new Set(raw.quizIds.map(id => String(id || '').slice(0, 32)).filter(id => CALC_QUIZ_IDS.has(id))))
+    : [];
+  if (!quizIds.length) quizIds = ['addition', 'subtraction', 'mult1'];
+  const weights = {};
+  quizIds.forEach(id => { weights[id] = boundedInteger(rawWeights[id], 1, 10, 1); });
+
+  let rangeMin = boundedInteger(settings.rangeMin, 1, 100, fallback.rangeMin);
+  let rangeMax = boundedInteger(settings.rangeMax, 1, 100, fallback.rangeMax);
+  let multFrom = boundedInteger(settings.multFrom, 1, 100, fallback.multFrom);
+  let multTo = boundedInteger(settings.multTo, 1, 100, fallback.multTo);
+  let multiplierFrom = boundedInteger(settings.multiplierFrom, 1, 100, fallback.multiplierFrom);
+  let multiplierTo = boundedInteger(settings.multiplierTo, 1, 100, fallback.multiplierTo);
+  if (rangeMax < rangeMin) [rangeMin, rangeMax] = [rangeMax, rangeMin];
+  if (multTo < multFrom) [multFrom, multTo] = [multTo, multFrom];
+  if (multiplierTo < multiplierFrom) [multiplierFrom, multiplierTo] = [multiplierTo, multiplierFrom];
+
+  return {
+    id: String(raw.id || '').slice(0, 80),
+    name: String(raw.name || 'Calculation Practice').trim().slice(0, 40) || 'Calculation Practice',
+    icon: String(raw.icon || '🧮').slice(0, 4),
+    color: /^#[0-9a-f]{6}$/i.test(raw.color || '') ? raw.color : '#00C896',
+    description: String(raw.description || '').trim().slice(0, 100),
+    questionCount: boundedInteger(raw.questionCount, 3, 50, 10),
+    difficulty,
+    timerMinutes: [0, 3, 5, 10, 15].includes(Number(raw.timerMinutes)) ? Number(raw.timerMinutes) : 0,
+    quizIds,
+    weights,
+    allowHints: raw.allowHints !== false,
+    allowSkip: raw.allowSkip !== false,
+    shuffle: raw.shuffle !== false,
+    retryWrong: ['immediate', 'end', 'none'].includes(raw.retryWrong) ? raw.retryWrong : 'immediate',
+    settings: {
+      digits: boundedInteger(settings.digits, 1, 4, fallback.digits),
+      rangeMin,
+      rangeMax,
+      multFrom,
+      multTo,
+      multiplierFrom,
+      multiplierTo,
+      primeMax: boundedInteger(settings.primeMax, 10, 300, fallback.primeMax),
+      ciYears: boundedInteger(settings.ciYears, 2, 5, fallback.ciYears)
+    }
+  };
+}
+
+/* An attempt record the web app's own history sanitizer will accept. Scores are
+   re-clamped and the completion time is server-owned. The attempt id comes from
+   the client so that a retried submission is idempotent; `date` is deliberately
+   omitted because streaks are computed against the user's LOCAL day, which only
+   the browser knows — it is filled in when the app drains the attempt. */
+function sanitizeMiniAppResult(raw, preset) {
+  raw = raw && typeof raw === 'object' ? raw : {};
+  const total = boundedInteger(raw.total, 1, 50, preset.questionCount);
+  const answered = Math.min(total, boundedInteger(raw.answered, 0, 50, 0));
+  const firstTryCorrect = Math.min(total, boundedInteger(raw.firstTryCorrect, 0, 50, 0));
+  const mistakeQuizIds = Array.isArray(raw.mistakeQuizIds)
+    ? Array.from(new Set(raw.mistakeQuizIds.map(id => String(id || '').slice(0, 32))))
+      .filter(id => CALC_QUIZ_IDS.has(id)).slice(0, 20)
+    : [];
+  const clientId = String(raw.id || '');
+  return {
+    id: /^[A-Za-z0-9_-]{6,60}$/.test(clientId)
+      ? clientId
+      : 'tgmini-' + crypto.randomUUID().replace(/-/g, '').slice(0, 20),
+    presetId: preset.id,
+    presetName: preset.name,
+    completedAt: new Date().toISOString(),
+    total,
+    answered,
+    firstTryCorrect,
+    wrongAttempts: boundedInteger(raw.wrongAttempts, 0, 500, 0),
+    hintsUsed: Math.min(total, boundedInteger(raw.hintsUsed, 0, 50, 0)),
+    skipped: Math.min(total, boundedInteger(raw.skipped, 0, 50, 0)),
+    durationSec: boundedInteger(raw.durationSec, 0, 86400, 0),
+    reason: raw.reason === 'time' ? 'time' : 'completed',
+    mistakeQuizIds,
+    source: 'telegram-mini-app'
+  };
+}
+
+/* Queue the attempt in a TOP-LEVEL inbox, deliberately NOT inside `appState`.
+   The browser saves the whole `appState` map with merge:true (auto-save timer,
+   page-exit flush, offline replay), and Firestore replaces arrays on merge — so
+   an attempt written into appState.calculationPractice.history could be silently
+   dropped by any tab with pending edits. This mirrors `telegramInbox`, which the
+   app already drains for bot-created tasks. */
+async function queueMiniAppAttempt(uid, attempt) {
+  const ref = db.collection('users').doc(uid);
+  await db.runTransaction(async transaction => {
+    const snapshot = await transaction.get(ref);
+    const data = snapshot.exists ? (snapshot.data() || {}) : {};
+    const inbox = Array.isArray(data.calculationAttemptInbox) ? data.calculationAttemptInbox : [];
+    if (inbox.some(entry => entry && entry.id === attempt.id)) return;
+    const next = [attempt].concat(inbox).slice(0, 20);
+    transaction.set(ref, { calculationAttemptInbox: next }, { merge: true });
+  });
+}
+
+function requireMiniAppBackend() {
+  if (!db || !global._fbAdmin) {
+    throw Object.assign(new Error('Practice sync is temporarily unavailable. Try again shortly.'), { status: 503 });
+  }
+}
+
+async function miniAppPresetForRequest(body) {
+  const { telegramUserId } = verifyTelegramInitData(body && body.initData);
+  requireMiniAppBackend();
+  await enforceFirestoreRateLimit('calculationMiniAppRates', telegramUserId, 30, 60000,
+    'Too many requests. Wait a minute and reopen the practice.');
+  const account = await miniAppAccountForTelegramUser(telegramUserId);
+  const presetId = String((body && body.presetId) || '').slice(0, 80);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(presetId)) {
+    throw Object.assign(new Error('A valid presetId is required'), { status: 400 });
+  }
+  const calculation = ((account.data.appState || {}).calculationPractice) || {};
+  const presets = Array.isArray(calculation.presets) ? calculation.presets : [];
+  const rawPreset = presets.find(preset => preset && preset.id === presetId);
+  if (!rawPreset) {
+    throw Object.assign(new Error('This preset is no longer saved in your account.'), { status: 404 });
+  }
+  return { uid: account.uid, preset: sanitizeCalculationPracticeConfig(rawPreset) };
+}
+
+async function miniAppSaveResult(body) {
+  const { telegramUserId } = verifyTelegramInitData(body && body.initData, MINI_APP_RESULT_MAX_AGE_SEC);
+  requireMiniAppBackend();
+  await enforceFirestoreRateLimit('calculationMiniAppResultRates', telegramUserId, 20, 60000,
+    'Too many results. Wait a minute and try again.');
+  const account = await miniAppAccountForTelegramUser(telegramUserId);
+  const presetId = String((body && body.presetId) || '').slice(0, 80);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(presetId)) {
+    throw Object.assign(new Error('A valid presetId is required'), { status: 400 });
+  }
+  const calculation = ((account.data.appState || {}).calculationPractice) || {};
+  const presets = Array.isArray(calculation.presets) ? calculation.presets : [];
+  const rawPreset = presets.find(preset => preset && preset.id === presetId);
+  /* A preset deleted from another device mid-session must not cost the user
+     their finished attempt: the preset is only needed for the display name. */
+  const preset = rawPreset
+    ? sanitizeCalculationPracticeConfig(rawPreset)
+    : sanitizeCalculationPracticeConfig({
+      id: presetId,
+      name: String((body && body.result && body.result.presetName) || 'Calculation Practice'),
+      quizIds: ['mult1']
+    });
+  const result = sanitizeMiniAppResult(body && body.result, preset);
+  await queueMiniAppAttempt(account.uid, result);
+  console.log(`🧮 Mini App attempt saved → uid:${account.uid} preset:${preset.id} ${result.firstTryCorrect}/${result.total}`);
+  return { saved: true, attemptId: result.id };
+}
+
+/* Collect a bounded JSON body. Mini App payloads are small; anything larger is
+   rejected before it is parsed. */
+function readJsonBody(req, res, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    let aborted = false;
+    /* Decode as UTF-8 across chunk boundaries: concatenating raw Buffers would
+       corrupt a multi-byte character split between chunks, which would break
+       initData verification for non-Latin Telegram names. */
+    req.setEncoding('utf8');
+    req.on('data', chunk => {
+      /* A later chunk can still arrive after the 413 was written; writing a
+         second response would throw out of this listener and kill the process
+         (the HTTP server shares it with the long-polling bot). */
+      if (aborted) return;
+      body += chunk;
+      if (body.length > maxBytes) {
+        aborted = true;
+        /* Answer before dropping the connection, so the caller sees a real 413
+           instead of an opaque network failure. `responded` tells the route not
+           to write a second response. */
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'request too large' }), () => {
+          try { req.destroy(); } catch (error) { /* already closed */ }
+        });
+        reject(Object.assign(new Error('request too large'), { status: 413, responded: true }));
+      }
+    });
+    req.on('error', error => { if (!aborted) reject(error); });
+    req.on('end', () => {
+      if (aborted) return;
+      try { resolve(JSON.parse(body || '{}')); }
+      catch (error) { reject(Object.assign(new Error('valid JSON body required'), { status: 400 })); }
+    });
+  });
+}
+
 const server = http.createServer((req, res) => {
 
   const corsAllowed = setCors(req, res);
@@ -1020,6 +1392,36 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('StudyPlanner Bot is alive 🤖');
+    return;
+  }
+
+  /* ── Mini App: fetch the preset to practise, authorized by Telegram initData ── */
+  if (req.method === 'POST' && req.url === '/mini/calculation-preset') {
+    (async () => {
+      try {
+        const body = await readJsonBody(req, res, 8192);
+        const result = await miniAppPresetForRequest(body);
+        sendJson(res, 200, { ok: true, preset: result.preset });
+      } catch (error) {
+        console.error('❌ /mini/calculation-preset error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
+    return;
+  }
+
+  /* ── Mini App: store a finished attempt in the linked account ── */
+  if (req.method === 'POST' && req.url === '/mini/calculation-result') {
+    (async () => {
+      try {
+        const body = await readJsonBody(req, res, 8192);
+        const result = await miniAppSaveResult(body);
+        sendJson(res, 200, { ok: true, attemptId: result.attemptId });
+      } catch (error) {
+        console.error('❌ /mini/calculation-result error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
     return;
   }
 
