@@ -58,7 +58,13 @@ let appState = {
   recurringTasks: [],      // [{id, text, priority, subject, type, freq, days, startDate, endDate}]
   habitsLog: {},           // {dateStr: {ruleId: true/false}} — per-day habit completion
   deletedTaskKeys: [],     // content signatures of deleted regenerable tasks — keeps a deleted plan/mock/video task from re-appearing the next day
-  videoStudyLog: {}        // {dateStr: seconds} — real time spent watching videos in-app, credited to that day's Study Time
+  videoStudyLog: {},       // {dateStr: seconds} — real in-app video watch time credited to that day's Study Time
+  calculationPractice: {  // editable calculation presets + finite-session history
+    version: 2,
+    presets: [],
+    dailyPresetId: '',
+    history: []
+  }
 };
 
 let currentFilter = 'all';
