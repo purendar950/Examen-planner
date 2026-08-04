@@ -393,6 +393,53 @@ bot.onText(/^\/setup(?:@\w+)?$/, async (msg) => {
   }
 });
 
+/* ── Calculation Practice reminder snooze buttons ───────────────────────── */
+bot.on('callback_query', async (query) => {
+  const data = query && query.data ? String(query.data) : '';
+  const match = data.match(/^calc_snooze:([a-f0-9]{32})$/);
+  if (!match) return;
+  const chatId = query.message && query.message.chat ? String(query.message.chat.id) : '';
+  const chatType = query.message && query.message.chat ? query.message.chat.type : '';
+  const fromId = query.from && query.from.id ? String(query.from.id) : '';
+  if (!db || !chatId || chatType !== 'private' || !fromId) {
+    bot.answerCallbackQuery(query.id, { text: 'Snooze is available only in your private bot chat.', show_alert: true }).catch(() => {});
+    return;
+  }
+
+  try {
+    const ref = db.collection('calculationReminderDeliveries').doc(match[1]);
+    const result = await db.runTransaction(async transaction => {
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists) return { ok: false, message: 'This reminder has expired.' };
+      const delivery = snapshot.data() || {};
+      if (String(delivery.chatId || '') !== chatId || String(delivery.authorizedTelegramUserId || '') !== fromId) {
+        return { ok: false, message: 'This reminder belongs to another account.' };
+      }
+      if (delivery.status !== 'sent') return { ok: false, message: 'This reminder is already pending or unavailable.' };
+      const sentAtMs = delivery.sentAt && typeof delivery.sentAt.toMillis === 'function' ? delivery.sentAt.toMillis() : 0;
+      if (!sentAtMs || Date.now() - sentAtMs > 24 * 60 * 60 * 1000) return { ok: false, message: 'This reminder has expired.' };
+      const maxSnoozes = Math.max(0, Math.min(5, Number(delivery.maxSnoozes) || 0));
+      const snoozeCount = Math.max(0, Number(delivery.snoozeCount) || 0);
+      if (!maxSnoozes || snoozeCount >= maxSnoozes) return { ok: false, message: 'No snoozes remaining.' };
+      const minutes = Math.max(5, Math.min(60, Number(delivery.snoozeMinutes) || 10));
+      transaction.update(ref, {
+        status: 'snoozed',
+        snoozeCount: snoozeCount + 1,
+        nextSendAt: global._fbAdmin.firestore.Timestamp.fromMillis(Date.now() + minutes * 60000),
+        snoozedAt: global._fbAdmin.firestore.FieldValue.serverTimestamp()
+      });
+      return { ok: true, minutes, remaining: maxSnoozes - snoozeCount - 1 };
+    });
+    const message = result.ok
+      ? `Snoozed for ${result.minutes} minutes${result.remaining ? ` · ${result.remaining} left` : ''}.`
+      : result.message;
+    await bot.answerCallbackQuery(query.id, { text: message, show_alert: !result.ok });
+  } catch (error) {
+    console.error('Calculation reminder snooze failed:', error.message);
+    bot.answerCallbackQuery(query.id, { text: 'Could not snooze. Please try again.', show_alert: true }).catch(() => {});
+  }
+});
+
 /* ════════════════════════════════════════════════════════════════════════════
    AI AUTO-SCHEDULE — handle any non-command text message
    ════════════════════════════════════════════════════════════════════════════ */

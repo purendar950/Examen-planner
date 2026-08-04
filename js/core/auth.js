@@ -152,6 +152,31 @@ async function handleForgotPassword() {
   }
 }
 
+function migrateCalculationPracticeState(raw) {
+  raw = raw && typeof raw === 'object' ? { ...raw } : {};
+  if (Number(raw.version) >= 2) return raw;
+  const migratePreset = (preset) => {
+    const next = preset && typeof preset === 'object' ? { ...preset } : {};
+    const quizIds = Array.isArray(next.quizIds) ? next.quizIds : [];
+    if (!next.weights || typeof next.weights !== 'object') {
+      next.weights = {};
+      quizIds.forEach((id) => { next.weights[id] = 1; });
+    }
+    if (!['immediate', 'end', 'none'].includes(next.retryWrong)) next.retryWrong = 'immediate';
+    if (!next.reminder || typeof next.reminder !== 'object') {
+      next.reminder = { telegramEnabled: false, reminderMinutes: 0, snoozeMinutes: 10, maxSnoozes: 2 };
+    }
+    return next;
+  };
+  raw.presets = Array.isArray(raw.presets) ? raw.presets.map(migratePreset) : [];
+  raw.history = Array.isArray(raw.history) ? raw.history.map((entry) => {
+    if (!entry || typeof entry !== 'object' || !entry.presetSnapshot) return entry;
+    return { ...entry, presetSnapshot: migratePreset(entry.presetSnapshot) };
+  }) : [];
+  raw.version = 2;
+  return raw;
+}
+
 function getDefaultState() {
   return {
     progress: {}, tasks: {},
@@ -171,6 +196,7 @@ function getDefaultState() {
     deletedTaskKeys: [],     // content signatures of deleted regenerable tasks — stops a deleted plan/mock/video task re-appearing next day
     videoStudyLog: {},       // {dateStr: seconds} — real in-app video watch time credited to that day's Study Time
     telegramProcessedIds: [], // inbox item ids already materialised — makes the drain idempotent so a deleted Telegram task never comes back
+    calculationPractice: { version: 2, presets: [], dailyPresetId: '', history: [] },
     planSchedule: null,   // date -> [topic items] for the active syllabus plan
     /* Telegram daily-plan delivery. The GitHub Actions sender reads this from
        Firestore: chatId (target account), enabled (opt-in), and digest
@@ -223,6 +249,10 @@ function loginUser(email, name, uid, state) {
   if (!appState.habitsLog) appState.habitsLog = {};
   if (!Array.isArray(appState.deletedTaskKeys)) appState.deletedTaskKeys = [];
   if (!appState.videoStudyLog || typeof appState.videoStudyLog !== 'object') appState.videoStudyLog = {};
+  appState.calculationPractice = migrateCalculationPracticeState(appState.calculationPractice);
+  if (!Array.isArray(appState.calculationPractice.presets)) appState.calculationPractice.presets = [];
+  if (!Array.isArray(appState.calculationPractice.history)) appState.calculationPractice.history = [];
+  if (typeof appState.calculationPractice.dailyPresetId !== 'string') appState.calculationPractice.dailyPresetId = '';
   if (!appState.activePage) appState.activePage = 'dashboard';
   if (typeof appState.activePlanId === 'undefined') appState.activePlanId = null;
   /* Hydrate the active plan marker from persisted state */
@@ -243,6 +273,12 @@ function loginUser(email, name, uid, state) {
   if (loginBtn) { loginBtn.disabled = false; loginBtn.textContent = 'Sign In →'; }
 
   initApp();
+  try {
+    const deepLink = new URLSearchParams(window.location.search);
+    if (deepLink.get('open') === 'calc' && deepLink.get('preset')) {
+      setTimeout(() => { if (typeof switchPage === 'function') switchPage('calc'); }, 0);
+    }
+  } catch (e) {}
   ytoLoad(); // Restore Playlist Organiser data (cloud-synced via Firestore)
   // Warm the YouTube Data API config (Cloudflare proxy URL / key[s]) from
   // Firestore (config/youtube) so the first playlist load has it ready.
