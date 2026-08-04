@@ -442,10 +442,10 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
         <div class="preset-field"><label for="presetRangeMax">Squares/cubes/roots to</label><input class="preset-input" id="presetRangeMax" type="number" min="2" max="100" value="25"></div>
         <div class="preset-field"><label for="presetMult2Min">Two-digit multiplication from</label><input class="preset-input" id="presetMult2Min" type="number" min="10" max="99" value="10"></div>
         <div class="preset-field"><label for="presetMult2Max">Two-digit multiplication to</label><input class="preset-input" id="presetMult2Max" type="number" min="10" max="99" value="99"></div>
-        <div class="preset-field"><label for="presetDivMin">Division dividend from</label><input class="preset-input" id="presetDivMin" type="number" min="100" max="999" value="100"></div>
-        <div class="preset-field"><label for="presetDivMax">Division dividend to</label><input class="preset-input" id="presetDivMax" type="number" min="100" max="999" value="999"></div>
-        <div class="preset-field"><label for="presetDivisorMin">Divisor from</label><input class="preset-input" id="presetDivisorMin" type="number" min="2" max="99" value="2"></div>
-        <div class="preset-field"><label for="presetDivisorMax">Divisor to</label><input class="preset-input" id="presetDivisorMax" type="number" min="2" max="99" value="12"></div>
+        <div class="preset-field"><label for="presetMult3Min">Three-digit multiplication from</label><input class="preset-input" id="presetMult3Min" type="number" min="100" max="999" value="100"></div>
+        <div class="preset-field"><label for="presetMult3Max">Three-digit multiplication to</label><input class="preset-input" id="presetMult3Max" type="number" min="100" max="999" value="999"></div>
+        <div class="preset-field"><label for="presetMult3ByMin">Multiplied by from</label><input class="preset-input" id="presetMult3ByMin" type="number" min="2" max="999" value="100"></div>
+        <div class="preset-field"><label for="presetMult3ByMax">Multiplied by to</label><input class="preset-input" id="presetMult3ByMax" type="number" min="2" max="999" value="999"></div>
         <div class="preset-field"><label for="presetPrimeMax">Prime range maximum</label><input class="preset-input" id="presetPrimeMax" type="number" min="10" max="300" value="100"></div>
         <div class="preset-field"><label for="presetCiYears">Compound-interest years</label><select class="preset-select" id="presetCiYears"><option value="2">2 years</option><option value="3">3 years</option><option value="4">4 years</option><option value="5">5 years</option></select></div>
       </div>
@@ -626,9 +626,9 @@ const CATEGORIES=[
   items:[
    {kind:'quiz',quizId:'mult2d',sample:'24 × 37 = ?',subtitle:'Start Practice',color:'pink'}
   ]},
- {id:'div3d',title:'Three-Digit Division',sample:'384 ÷ 8 = ?',subtitle:'Three-Digit Division',color:'blue',configType:'ranges2',configLabels:['Dividend :','Divisor :'],configBounds:[[100,999],[2,99]],
+ {id:'mult3d',title:'Three-Digit Multiplication',sample:'234 × 567 = ?',subtitle:'Three-Digit Multiplication',color:'blue',configType:'ranges2',configLabels:['Multiply :','By :'],configBounds:[[100,999],[2,999]],
   items:[
-   {kind:'quiz',quizId:'div3d',sample:'384 ÷ 8 = ?',subtitle:'Start Practice',color:'pink'}
+   {kind:'quiz',quizId:'mult3d',sample:'234 × 567 = ?',subtitle:'Start Practice',color:'pink'}
   ]},
  {id:'squares',title:'Squares',sample:'x²',subtitle:'Squares',color:'yellow',configType:'rangeExp',exp:'2',
   items:[
@@ -716,18 +716,14 @@ const QUIZZES={
    const x=ri(lo,hi),y=ri(lo,hi);
    return{q:[x,y],ans:String(x*y),hint:x*y};
   }},
- div3d:{keypad:'num',configKey:'div3d',
+ /* A three-digit number times a second factor; both ranges are user-chosen, so
+    the same engine covers 3-digit × 1-digit up to 3-digit × 3-digit. */
+ mult3d:{keypad:'num',configKey:'mult3d',
   gen(s){
-   let lo=Math.max(100,Math.min(s.f1,s.f2)),hi=Math.min(999,Math.max(s.f1,s.f2));
-   if(hi<lo)hi=lo;
-   const d1=Math.max(2,Math.min(99,Math.min(s.t1,s.t2))),d2=Math.max(d1,Math.min(99,Math.max(s.t1,s.t2)));
-   /* Keep the quotient whole: only divisors with a multiple inside the dividend range qualify. */
-   const usable=[];
-   for(let d=d1;d<=d2;d++)if(Math.floor(hi/d)>=Math.ceil(lo/d))usable.push(d);
-   const d=usable.length?usable[ri(0,usable.length-1)]:2;
-   const qlo=Math.max(1,Math.ceil(lo/d)),qhi=Math.max(qlo,Math.floor(hi/d));
-   const quotient=ri(qlo,qhi);
-   return{q:[quotient*d,d],ans:String(quotient),hint:quotient};
+   const lo=Math.max(100,Math.min(999,Math.min(s.f1,s.f2))),hi=Math.max(lo,Math.min(999,Math.max(s.f1,s.f2)));
+   const by1=Math.max(2,Math.min(999,Math.min(s.t1,s.t2))),by2=Math.max(by1,Math.min(999,Math.max(s.t1,s.t2)));
+   const x=ri(lo,hi),y=ri(by1,by2);
+   return{q:[x,y],ans:String(x*y),hint:x*y};
   }},
  squares:{keypad:'num',configKey:'squares',
   gen(s){const x=ri(s.r1,s.r2);return{q:[x],ans:String(x*x),hint:x*x};}},
@@ -788,13 +784,13 @@ const QUIZZES={
   }}
 };
 
-const QUIZ_TITLES={addition:'Addition',subtraction:'Subtraction',mult1:'Multiplication · Type 1',mult2:'Multiplication · Type 2',mult3:'Multiplication · Type 3',tablewrite:'Writing Table',mult2d:'Two-Digit Multiplication',div3d:'Three-Digit Division',squares:'Squares',sqroots:'Square Roots',cubes:'Cubes',cuberoots:'Cube Roots',trig:'Trigonometric Ratios',pyth:'Pythagorean Triples',pctfrac:'Percentage → Fraction',pctnum:'Percentage of a Number',ci_si:'Compound Interest · SI %',ci_ci:'Compound Interest · CI %',primeinrange:'List Primes in Range',isprime:'Is it Prime?',astr1:'Alphabet Position',astr2:'Alphabet Letter',arev1:'Alphabet Reverse Position',arev2:'Alphabet Reverse Letter',higherpow:'Higher Powers'};
+const QUIZ_TITLES={addition:'Addition',subtraction:'Subtraction',mult1:'Multiplication · Type 1',mult2:'Multiplication · Type 2',mult3:'Multiplication · Type 3',tablewrite:'Writing Table',mult2d:'Two-Digit Multiplication',mult3d:'Three-Digit Multiplication',squares:'Squares',sqroots:'Square Roots',cubes:'Cubes',cuberoots:'Cube Roots',trig:'Trigonometric Ratios',pyth:'Pythagorean Triples',pctfrac:'Percentage → Fraction',pctnum:'Percentage of a Number',ci_si:'Compound Interest · SI %',ci_ci:'Compound Interest · CI %',primeinrange:'List Primes in Range',isprime:'Is it Prime?',astr1:'Alphabet Position',astr2:'Alphabet Letter',arev1:'Alphabet Reverse Position',arev2:'Alphabet Reverse Letter',higherpow:'Higher Powers'};
 
 let catSettings={
  addsub:{digits:2},
  multtables:{f1:2,f2:9,t1:1,t2:10},
  mult2d:{r1:10,r2:99},
- div3d:{f1:100,f2:999,t1:2,t2:12},
+ mult3d:{f1:100,f2:999,t1:100,t2:999},
  squares:{r1:2,r2:25},
  sqroots:{r1:2,r2:25},
  cubes:{r1:2,r2:25},
@@ -1028,10 +1024,9 @@ function questionHTML(id){
   switch(id){
     case"addition":return `${numSpan(cur.q[0])} ${opSpan("+")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
     case"subtraction":return `${numSpan(cur.q[0])} ${opSpan("−")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
-    case"mult1":case"mult2d":return `${numSpan(cur.q[0])} ${opSpan("×")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
+    case"mult1":case"mult2d":case"mult3d":return `${numSpan(cur.q[0])} ${opSpan("×")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
     case"mult2":return `${numSpan(cur.q[0])} ${opSpan("×")} ${ansSpan(0)} ${opSpan("=")} ${numSpan(cur.q[3])}`;
     case"mult3":return `${ansSpan(0)} ${opSpan("×")} ${ansSpan(1)} ${opSpan("=")} ${numSpan(cur.q[2])}`;
-    case"div3d":return `${numSpan(cur.q[0])} ${opSpan("÷")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
     case"tablewrite":{const n=cur.q[0],from=cur.q[1];return cur.ans.map((_,i)=>`<span class="qrow">${numSpan(n)} ${opSpan("×")} ${numSpan(from+i)} ${opSpan("=")} ${ansSpan(i)}</span>`).join("");}
     case"squares":return `${numSpan(cur.q[0])}${supSpan("2")} ${opSpan("=")} ${ansSpan(0)}`;
     case"sqroots":return `${opSpan("√")}${numSpan(cur.q[0])} ${opSpan("=")} ${ansSpan(0)}`;

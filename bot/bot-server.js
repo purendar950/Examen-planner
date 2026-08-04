@@ -1067,7 +1067,7 @@ const MINI_APP_INIT_DATA_MAX_AGE_SEC = 3 * 60 * 60;
    makes the write idempotent. */
 const MINI_APP_RESULT_MAX_AGE_SEC = 24 * 60 * 60;
 const CALC_QUIZ_IDS = new Set([
-  'addition', 'subtraction', 'mult1', 'mult2', 'mult3', 'tablewrite', 'mult2d', 'div3d',
+  'addition', 'subtraction', 'mult1', 'mult2', 'mult3', 'tablewrite', 'mult2d', 'mult3d',
   'squares', 'sqroots', 'cubes', 'cuberoots',
   'higherpow', 'pctfrac', 'pctnum', 'trig', 'pyth', 'ci_si', 'ci_ci', 'primeinrange', 'isprime',
   'astr1', 'astr2', 'arev1', 'arev2'
@@ -1171,18 +1171,18 @@ function calculationDifficultyDefaults(level) {
   if (level === 'easy') {
     return {
       digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
-      mult2Min: 10, mult2Max: 30, divMin: 100, divMax: 400, divisorMin: 2, divisorMax: 9, primeMax: 50, ciYears: 2
+      mult2Min: 10, mult2Max: 30, mult3Min: 100, mult3Max: 400, mult3ByMin: 2, mult3ByMax: 9, primeMax: 50, ciYears: 2
     };
   }
   if (level === 'exam') {
     return {
       digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20,
-      mult2Min: 10, mult2Max: 99, divMin: 100, divMax: 999, divisorMin: 7, divisorMax: 25, primeMax: 300, ciYears: 3
+      mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 11, mult3ByMax: 99, primeMax: 300, ciYears: 3
     };
   }
   return {
     digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
-    mult2Min: 10, mult2Max: 99, divMin: 100, divMax: 999, divisorMin: 2, divisorMax: 12, primeMax: 100, ciYears: 2
+    mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 2, mult3ByMax: 12, primeMax: 100, ciYears: 2
   };
 }
 
@@ -1217,8 +1217,8 @@ function sanitizeCalculationPracticeConfig(raw) {
     return b < a ? [b, a] : [a, b];
   };
   const [mult2Min, mult2Max] = orderedPair(settings.mult2Min, settings.mult2Max, 10, 99, fallback.mult2Min, fallback.mult2Max);
-  const [divMin, divMax] = orderedPair(settings.divMin, settings.divMax, 100, 999, fallback.divMin, fallback.divMax);
-  const [divisorMin, divisorMax] = orderedPair(settings.divisorMin, settings.divisorMax, 2, 99, fallback.divisorMin, fallback.divisorMax);
+  const [mult3Min, mult3Max] = orderedPair(settings.mult3Min, settings.mult3Max, 100, 999, fallback.mult3Min, fallback.mult3Max);
+  const [mult3ByMin, mult3ByMax] = orderedPair(settings.mult3ByMin, settings.mult3ByMax, 2, 999, fallback.mult3ByMin, fallback.mult3ByMax);
 
   return {
     id: String(raw.id || '').slice(0, 80),
@@ -1245,10 +1245,10 @@ function sanitizeCalculationPracticeConfig(raw) {
       multiplierTo,
       mult2Min,
       mult2Max,
-      divMin,
-      divMax,
-      divisorMin,
-      divisorMax,
+      mult3Min,
+      mult3Max,
+      mult3ByMin,
+      mult3ByMax,
       primeMax: boundedInteger(settings.primeMax, 10, 300, fallback.primeMax),
       ciYears: boundedInteger(settings.ciYears, 2, 5, fallback.ciYears)
     }
