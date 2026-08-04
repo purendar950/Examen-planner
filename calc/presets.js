@@ -20,6 +20,9 @@
   var templateRangeDrafts = Object.create(null);
   var templateSaveStates = Object.create(null);
   var templateSaveTimer = null;
+  /* Quick presets ticked for combining, and the result of the last combine. */
+  var combineSelection = Object.create(null);
+  var combineStatus = null;
   var parentSessionKey = '';
   /* Telegram Mini App mode: the practice is launched from a Telegram message
      and the account is proven by Telegram's signed initData, because Google
@@ -76,13 +79,23 @@
       ]
     },
     {
-      id: 'template-squares-cubes', name: 'Squares & Cubes', icon: '🏆', color: '#A855F7',
-      description: 'Squares and cubes across your own range.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
-      quizIds: ['squares', 'cubes'], allowHints: true, allowSkip: true, shuffle: true,
-      settings: { rangeMin: 2, rangeMax: 30 },
+      id: 'template-squares', name: 'Squares', icon: '🏆', color: '#A855F7',
+      description: 'Squares across your own base range.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
+      quizIds: ['squares'], allowHints: true, allowSkip: true, shuffle: true,
+      settings: { sqMin: 2, sqMax: 30 },
       rangeFields: [
-        { key: 'rangeMin', label: 'Base from', min: 1, max: 100 },
-        { key: 'rangeMax', label: 'Base to', min: 2, max: 100 }
+        { key: 'sqMin', label: 'Base from', min: 1, max: 100 },
+        { key: 'sqMax', label: 'Base to', min: 1, max: 100 }
+      ]
+    },
+    {
+      id: 'template-cubes', name: 'Cubes', icon: '🎲', color: '#8B5CF6',
+      description: 'Cubes across your own base range.', questionCount: 10, difficulty: 'custom', timerMinutes: 0,
+      quizIds: ['cubes'], allowHints: true, allowSkip: true, shuffle: true,
+      settings: { cubeMin: 2, cubeMax: 15 },
+      rangeFields: [
+        { key: 'cubeMin', label: 'Base from', min: 1, max: 100 },
+        { key: 'cubeMax', label: 'Base to', min: 1, max: 100 }
       ]
     },
     {
@@ -106,6 +119,11 @@
        re-attached afterwards. */
     var preset = normalizePreset(template, true);
     preset.rangeFields = Array.isArray(template.rangeFields) ? template.rangeFields : [];
+    /* Which settings this preset actually governs. Normalized settings contain
+       every key (unused ones hold difficulty fallbacks), so combining presets
+       must copy only the owned keys or one preset's fallbacks would silently
+       overwrite another's real range. */
+    preset.settingKeys = template.settings ? Object.keys(template.settings) : [];
     return preset;
   });
 
@@ -149,21 +167,25 @@
     return found ? found[1] : id;
   }
 
+  /* Squares/square roots and cubes/cube roots keep separate base ranges: cubes
+     grow far faster, so a range that suits squares is punishing for cubes. It
+     also means combining a squares preset with a cubes preset cannot force one
+     of them onto the other's range. */
   function difficultySettings(level) {
     if (level === 'easy') {
       return {
-        digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
+        digits: 1, sqMin: 2, sqMax: 12, cubeMin: 2, cubeMax: 8, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
         mult2Min: 10, mult2Max: 30, mult3Min: 100, mult3Max: 400, mult3ByMin: 2, mult3ByMax: 9, primeMax: 50, ciYears: 2
       };
     }
     if (level === 'exam') {
       return {
-        digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20,
+        digits: 3, sqMin: 10, sqMax: 50, cubeMin: 5, cubeMax: 25, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20,
         mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 11, mult3ByMax: 99, primeMax: 300, ciYears: 3
       };
     }
     return {
-      digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
+      digits: 2, sqMin: 2, sqMax: 25, cubeMin: 2, cubeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
       mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 2, mult3ByMax: 12, primeMax: 100, ciYears: 2
     };
   }
@@ -171,9 +193,6 @@
   function normalizeSettings(raw, difficulty) {
     var fallback = difficultySettings(difficulty === 'custom' ? 'standard' : difficulty);
     raw = raw && typeof raw === 'object' ? raw : {};
-    var min = clamp(raw.rangeMin, 1, 100, fallback.rangeMin);
-    var max = clamp(raw.rangeMax, 2, 100, fallback.rangeMax);
-    if (max < min) { var swap = min; min = max; max = swap; }
     var multFrom = clamp(raw.multFrom, 1, 100, fallback.multFrom);
     var multTo = clamp(raw.multTo, 1, 100, fallback.multTo);
     if (multTo < multFrom) { var multSwap = multFrom; multFrom = multTo; multTo = multSwap; }
@@ -188,10 +207,22 @@
     var twoDigit = orderedPair(raw.mult2Min, raw.mult2Max, 10, 99, fallback.mult2Min, fallback.mult2Max);
     var threeDigit = orderedPair(raw.mult3Min, raw.mult3Max, 100, 999, fallback.mult3Min, fallback.mult3Max);
     var threeDigitBy = orderedPair(raw.mult3ByMin, raw.mult3ByMax, 2, 999, fallback.mult3ByMin, fallback.mult3ByMax);
+    /* Presets saved before the split carry a single rangeMin/rangeMax, which
+       seeds both base ranges so existing presets keep behaving the same. */
+    var legacyLow = raw.sqMin == null && raw.cubeMin == null ? raw.rangeMin : null;
+    var legacyHigh = raw.sqMax == null && raw.cubeMax == null ? raw.rangeMax : null;
+    var squareBase = orderedPair(
+      raw.sqMin != null ? raw.sqMin : legacyLow, raw.sqMax != null ? raw.sqMax : legacyHigh,
+      1, 100, fallback.sqMin, fallback.sqMax);
+    var cubeBase = orderedPair(
+      raw.cubeMin != null ? raw.cubeMin : legacyLow, raw.cubeMax != null ? raw.cubeMax : legacyHigh,
+      1, 100, fallback.cubeMin, fallback.cubeMax);
     return {
       digits: clamp(raw.digits, 1, 4, fallback.digits),
-      rangeMin: min,
-      rangeMax: max,
+      sqMin: squareBase[0],
+      sqMax: squareBase[1],
+      cubeMin: cubeBase[0],
+      cubeMax: cubeBase[1],
       multFrom: multFrom,
       multTo: multTo,
       multiplierFrom: multiplierFrom,
@@ -364,10 +395,10 @@
     catSettings.multtables = { f1: values.multFrom, f2: values.multTo, t1: values.multiplierFrom, t2: values.multiplierTo };
     catSettings.mult2d = { r1: values.mult2Min, r2: values.mult2Max };
     catSettings.mult3d = { f1: values.mult3Min, f2: values.mult3Max, t1: values.mult3ByMin, t2: values.mult3ByMax };
-    catSettings.squares = { r1: values.rangeMin, r2: values.rangeMax };
-    catSettings.sqroots = { r1: values.rangeMin, r2: values.rangeMax };
-    catSettings.cubes = { r1: values.rangeMin, r2: values.rangeMax };
-    catSettings.cuberoots = { r1: values.rangeMin, r2: values.rangeMax };
+    catSettings.squares = { r1: values.sqMin, r2: values.sqMax };
+    catSettings.sqroots = { r1: values.sqMin, r2: values.sqMax };
+    catSettings.cubes = { r1: values.cubeMin, r2: values.cubeMax };
+    catSettings.cuberoots = { r1: values.cubeMin, r2: values.cubeMax };
     catSettings.compoundint = { years: values.ciYears };
     catSettings.primes = { r1: 1, r2: values.primeMax };
   }
@@ -665,7 +696,8 @@
     }
     if (uses(['mult2d'])) tags.push('2-digit ' + values.mult2Min + '–' + values.mult2Max);
     if (uses(['mult3d'])) tags.push(values.mult3Min + '–' + values.mult3Max + ' × ' + values.mult3ByMin + '–' + values.mult3ByMax);
-    if (uses(['squares', 'cubes', 'sqroots', 'cuberoots'])) tags.push('Base ' + values.rangeMin + '–' + values.rangeMax);
+    if (uses(['squares', 'sqroots'])) tags.push('Sq base ' + values.sqMin + '–' + values.sqMax);
+    if (uses(['cubes', 'cuberoots'])) tags.push('Cube base ' + values.cubeMin + '–' + values.cubeMax);
     if (uses(['ci_si', 'ci_ci'])) tags.push(values.ciYears + ' years');
     tags.push(preset.quizIds.length + ' types');
     return tags;
@@ -761,6 +793,92 @@
     persistState();
     clearTemplateSaveStatesSoon();
   }
+  function selectedTemplates() {
+    /* Kept in dashboard order so the merged name reads predictably. */
+    return TEMPLATE_PRESETS.filter(function (preset) { return combineSelection[preset.id]; });
+  }
+  function combinedName(presets) {
+    var joined = presets.map(function (preset) { return preset.name; }).join(' + ');
+    return joined.length <= 40 ? joined : 'Mixed Practice (' + presets.length + ' presets)';
+  }
+  /* Merge two or more quick presets into a single preset: the question types are
+     unioned and each preset contributes only the ranges it owns, so nothing gets
+     overwritten. */
+  function buildCombinedPreset(presets) {
+    var settings = {};
+    var quizIds = [];
+    var questionCount = 0;
+    var timerMinutes = 0;
+    presets.forEach(function (preset) {
+      var typed = templateRangeDrafts[preset.id] || {};
+      (preset.settingKeys || []).forEach(function (key) {
+        settings[key] = typed[key] != null ? typed[key] : preset.settings[key];
+      });
+      preset.quizIds.forEach(function (id) { if (quizIds.indexOf(id) < 0) quizIds.push(id); });
+      questionCount += preset.questionCount;
+      timerMinutes = Math.max(timerMinutes, preset.timerMinutes);
+    });
+    return normalizePreset({
+      id: uniqueId('preset'),
+      name: combinedName(presets),
+      icon: presets[0].icon,
+      color: presets[0].color,
+      description: presets.map(function (preset) { return preset.name; }).join(', '),
+      questionCount: Math.min(50, Math.max(3, questionCount)),
+      difficulty: 'custom',
+      timerMinutes: timerMinutes,
+      quizIds: quizIds,
+      allowHints: true,
+      allowSkip: true,
+      shuffle: true,
+      retryWrong: 'immediate',
+      settings: settings
+    }, false);
+  }
+  function renderCombineBar() {
+    var bar = element('quickCombineBar');
+    if (!bar) return;
+    var presets = selectedTemplates();
+    bar.hidden = presets.length === 0;
+    if (!presets.length) return;
+    var enough = presets.length >= 2;
+    var combined = enough ? buildCombinedPreset(presets) : null;
+    element('quickCombineCount').textContent = presets.length === 1
+      ? '1 preset selected'
+      : presets.length + ' presets selected · ' + combinedName(presets);
+    element('quickCombineDetail').textContent = enough
+      ? combined.quizIds.length + ' question types · ' + combined.questionCount + ' questions'
+      : 'Tick at least one more preset to combine.';
+    element('quickCombineStart').disabled = !enough;
+    element('quickCombineSave').disabled = !enough;
+    var status = element('quickCombineStatus');
+    status.textContent = combineStatus ? combineStatus.message : '';
+    status.className = 'preset-send-status' + (combineStatus ? ' ' + combineStatus.status : '');
+  }
+  function startCombined() {
+    var presets = selectedTemplates();
+    if (presets.length < 2) return;
+    startPreset(buildCombinedPreset(presets));
+  }
+  function saveCombined() {
+    var presets = selectedTemplates();
+    if (presets.length < 2) return;
+    if (state.presets.length >= MAX_PRESETS) {
+      combineStatus = { status: 'error', message: 'Preset limit reached (' + MAX_PRESETS + '). Delete one first.' };
+      renderCombineBar();
+      return;
+    }
+    var combined = buildCombinedPreset(presets);
+    combined.name = uniquePresetName(combined.name);
+    state.presets.unshift(combined);
+    combineStatus = { status: 'success', message: 'Added to My Presets as “' + combined.name + '” ✓' };
+    persistState();
+  }
+  function clearCombineSelection() {
+    combineSelection = Object.create(null);
+    combineStatus = null;
+    renderPresetGrids();
+  }
   function clearTemplateSaveStatesSoon() {
     if (templateSaveTimer) clearTimeout(templateSaveTimer);
     templateSaveTimer = setTimeout(function () {
@@ -774,7 +892,12 @@
     card.className = 'preset-card';
     card.style.setProperty('--preset-color', preset.color);
     var recent = state.history.find(function (entry) { return entry.presetId === preset.id; });
-    var dailyBadge = state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : (template ? '<span class="preset-badge">Preset</span>' : '');
+    /* Templates use the badge slot for the combine checkbox; saved presets keep
+       the Daily badge there. */
+    var dailyBadge = template
+      ? '<label class="preset-combine-toggle"><input type="checkbox" data-combine' + (combineSelection[preset.id] ? ' checked' : '') +
+        ' aria-label="Select ' + escapeHtml(preset.name) + ' for combining"><span>Combine</span></label>'
+      : (state.dailyPresetId === preset.id ? '<span class="preset-badge">Daily</span>' : '');
     var rangeFields = template && Array.isArray(preset.rangeFields) ? preset.rangeFields : [];
     var rangeMarkup = rangeFields.length
       ? '<div class="preset-range-fields">' + rangeFields.map(function (field) {
@@ -804,6 +927,17 @@
       startPreset(presetWithCardRanges(preset, card, rangeFields));
     };
     if (template) {
+      if (combineSelection[preset.id]) card.classList.add('combine-selected');
+      var combineToggle = card.querySelector('[data-combine]');
+      if (combineToggle) {
+        combineToggle.addEventListener('change', function () {
+          if (combineToggle.checked) combineSelection[preset.id] = true;
+          else delete combineSelection[preset.id];
+          card.classList.toggle('combine-selected', combineToggle.checked);
+          combineStatus = null;
+          renderCombineBar();
+        });
+      }
       rangeFields.forEach(function (field) {
         var input = card.querySelector('[data-range-key="' + field.key + '"]');
         if (input) input.addEventListener('input', function () { rememberCardRanges(preset.id, card, rangeFields); });
@@ -871,6 +1005,7 @@
     else state.presets.forEach(function (preset) { mine.appendChild(createCard(preset, false)); });
     quick.innerHTML = '';
     TEMPLATE_PRESETS.forEach(function (preset) { quick.appendChild(createCard(preset, true)); });
+    renderCombineBar();
   }
   function renderHistory() {
     var section = element('presetHistorySection');
@@ -926,8 +1061,10 @@
   }
   function setOtherRangeInputs(settings) {
     element('presetDigits').value = settings.digits;
-    element('presetRangeMin').value = settings.rangeMin;
-    element('presetRangeMax').value = settings.rangeMax;
+    element('presetSqMin').value = settings.sqMin;
+    element('presetSqMax').value = settings.sqMax;
+    element('presetCubeMin').value = settings.cubeMin;
+    element('presetCubeMax').value = settings.cubeMax;
     element('presetMult2Min').value = settings.mult2Min;
     element('presetMult2Max').value = settings.mult2Max;
     element('presetMult3Min').value = settings.mult3Min;
@@ -1030,8 +1167,10 @@
        Difficulty only pre-fills the inputs when it changes. */
     var rawSettings = {
       digits: element('presetDigits').value,
-      rangeMin: element('presetRangeMin').value,
-      rangeMax: element('presetRangeMax').value,
+      sqMin: element('presetSqMin').value,
+      sqMax: element('presetSqMax').value,
+      cubeMin: element('presetCubeMin').value,
+      cubeMax: element('presetCubeMax').value,
       mult2Min: element('presetMult2Min').value,
       mult2Max: element('presetMult2Max').value,
       mult3Min: element('presetMult3Min').value,
@@ -1394,6 +1533,9 @@
       if (difficulty !== 'custom') setOtherRangeInputs(normalizeSettings(difficultySettings(difficulty), difficulty));
       updateTableMode();
     });
+    element('quickCombineStart').onclick = startCombined;
+    element('quickCombineSave').onclick = saveCombined;
+    element('quickCombineClear').onclick = clearCombineSelection;
     element('clearHistoryBtn').onclick = clearHistory;
     window.addEventListener('message', receiveParentState);
     /* A Telegram launch authorizes itself and starts the requested preset;

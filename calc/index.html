@@ -265,6 +265,15 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
 .preset-badge{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--accent);background:var(--accent-dim);border-radius:99px;padding:4px 7px;white-space:nowrap;}
 .preset-tags{display:flex;flex-wrap:wrap;gap:5px;}
 .preset-tag{font-size:10px;color:var(--muted);background:var(--surface);border:1px solid var(--border);padding:4px 7px;border-radius:99px;}
+.preset-combine{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;border:1px solid rgba(0,200,150,.35);border-radius:12px;background:linear-gradient(135deg,var(--accent-dim),transparent 68%),var(--card);}
+.preset-combine[hidden]{display:none;}
+.preset-combine-copy{display:grid;gap:2px;min-width:0;}
+.preset-combine-copy strong{font-size:13px;color:var(--text);}
+.preset-combine-copy span{font-size:11px;}
+.preset-combine-toggle{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);cursor:pointer;padding:5px 7px;border:1px solid var(--border);border-radius:99px;background:var(--surface);}
+.preset-combine-toggle input{accent-color:var(--accent);margin:0;}
+.preset-combine-toggle:has(input:checked){border-color:var(--accent);color:var(--accent);background:var(--accent-dim);}
+.preset-card.combine-selected{border-color:var(--accent);}
 .preset-range-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(84px,1fr));gap:6px;}
 .preset-range-fields label{display:grid;gap:3px;font-size:9px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
 .preset-range-fields input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text);padding:7px 6px;font-size:12px;font-weight:700;text-align:center;outline:none;}
@@ -348,7 +357,19 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
     <section class="preset-section" aria-labelledby="quickPresetsTitle">
       <div class="preset-section-head">
         <h2 id="quickPresetsTitle">Quick Presets</h2>
-        <span class="preset-muted">Choose your range, then start — or save a customized copy</span>
+        <span class="preset-muted">Set your range, then start — or tick two or more to combine them into one</span>
+      </div>
+      <div class="preset-combine" id="quickCombineBar" hidden>
+        <div class="preset-combine-copy">
+          <strong id="quickCombineCount"></strong>
+          <span class="preset-muted" id="quickCombineDetail"></span>
+        </div>
+        <div class="preset-actions">
+          <button type="button" class="preset-btn primary" id="quickCombineStart">Start combined</button>
+          <button type="button" class="preset-btn" id="quickCombineSave">+ Add to My Presets</button>
+          <button type="button" class="preset-btn" id="quickCombineClear">Clear</button>
+        </div>
+        <span class="preset-send-status" id="quickCombineStatus" role="status"></span>
       </div>
       <div class="preset-grid" id="quickPresetGrid"></div>
     </section>
@@ -438,8 +459,10 @@ html[data-theme="light"] .c-blue .pillbox{color:#1E3A8A;}
       <p class="preset-panel-note">Picking a difficulty fills these in for you — every value stays editable.</p>
       <div class="preset-form-grid">
         <div class="preset-field"><label for="presetDigits">Addition/subtraction digits</label><input class="preset-input" id="presetDigits" type="number" min="1" max="4" value="2"></div>
-        <div class="preset-field"><label for="presetRangeMin">Squares/cubes/roots from</label><input class="preset-input" id="presetRangeMin" type="number" min="1" max="100" value="2"></div>
-        <div class="preset-field"><label for="presetRangeMax">Squares/cubes/roots to</label><input class="preset-input" id="presetRangeMax" type="number" min="2" max="100" value="25"></div>
+        <div class="preset-field"><label for="presetSqMin">Squares/square roots base from</label><input class="preset-input" id="presetSqMin" type="number" min="1" max="100" value="2"></div>
+        <div class="preset-field"><label for="presetSqMax">Squares/square roots base to</label><input class="preset-input" id="presetSqMax" type="number" min="1" max="100" value="25"></div>
+        <div class="preset-field"><label for="presetCubeMin">Cubes/cube roots base from</label><input class="preset-input" id="presetCubeMin" type="number" min="1" max="100" value="2"></div>
+        <div class="preset-field"><label for="presetCubeMax">Cubes/cube roots base to</label><input class="preset-input" id="presetCubeMax" type="number" min="1" max="100" value="15"></div>
         <div class="preset-field"><label for="presetMult2Min">Two-digit multiplication from</label><input class="preset-input" id="presetMult2Min" type="number" min="10" max="99" value="10"></div>
         <div class="preset-field"><label for="presetMult2Max">Two-digit multiplication to</label><input class="preset-input" id="presetMult2Max" type="number" min="10" max="99" value="99"></div>
         <div class="preset-field"><label for="presetMult3Min">Three-digit multiplication from</label><input class="preset-input" id="presetMult3Min" type="number" min="100" max="999" value="100"></div>

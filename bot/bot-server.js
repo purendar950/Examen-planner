@@ -1170,18 +1170,18 @@ async function miniAppAccountForTelegramUser(telegramUserId) {
 function calculationDifficultyDefaults(level) {
   if (level === 'easy') {
     return {
-      digits: 1, rangeMin: 2, rangeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
+      digits: 1, sqMin: 2, sqMax: 12, cubeMin: 2, cubeMax: 8, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
       mult2Min: 10, mult2Max: 30, mult3Min: 100, mult3Max: 400, mult3ByMin: 2, mult3ByMax: 9, primeMax: 50, ciYears: 2
     };
   }
   if (level === 'exam') {
     return {
-      digits: 3, rangeMin: 10, rangeMax: 50, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20,
+      digits: 3, sqMin: 10, sqMax: 50, cubeMin: 5, cubeMax: 25, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20,
       mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 11, mult3ByMax: 99, primeMax: 300, ciYears: 3
     };
   }
   return {
-    digits: 2, rangeMin: 2, rangeMax: 25, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
+    digits: 2, sqMin: 2, sqMax: 25, cubeMin: 2, cubeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
     mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 2, mult3ByMax: 12, primeMax: 100, ciYears: 2
   };
 }
@@ -1201,13 +1201,14 @@ function sanitizeCalculationPracticeConfig(raw) {
   const weights = {};
   quizIds.forEach(id => { weights[id] = boundedInteger(rawWeights[id], 1, 10, 1); });
 
-  let rangeMin = boundedInteger(settings.rangeMin, 1, 100, fallback.rangeMin);
-  let rangeMax = boundedInteger(settings.rangeMax, 1, 100, fallback.rangeMax);
+  /* Presets saved before squares and cubes were given separate base ranges
+     carry a single rangeMin/rangeMax, which seeds both. */
+  const legacyBaseLow = settings.sqMin == null && settings.cubeMin == null ? settings.rangeMin : null;
+  const legacyBaseHigh = settings.sqMax == null && settings.cubeMax == null ? settings.rangeMax : null;
   let multFrom = boundedInteger(settings.multFrom, 1, 100, fallback.multFrom);
   let multTo = boundedInteger(settings.multTo, 1, 100, fallback.multTo);
   let multiplierFrom = boundedInteger(settings.multiplierFrom, 1, 100, fallback.multiplierFrom);
   let multiplierTo = boundedInteger(settings.multiplierTo, 1, 100, fallback.multiplierTo);
-  if (rangeMax < rangeMin) [rangeMin, rangeMax] = [rangeMax, rangeMin];
   if (multTo < multFrom) [multFrom, multTo] = [multTo, multFrom];
   if (multiplierTo < multiplierFrom) [multiplierFrom, multiplierTo] = [multiplierTo, multiplierFrom];
 
@@ -1219,6 +1220,12 @@ function sanitizeCalculationPracticeConfig(raw) {
   const [mult2Min, mult2Max] = orderedPair(settings.mult2Min, settings.mult2Max, 10, 99, fallback.mult2Min, fallback.mult2Max);
   const [mult3Min, mult3Max] = orderedPair(settings.mult3Min, settings.mult3Max, 100, 999, fallback.mult3Min, fallback.mult3Max);
   const [mult3ByMin, mult3ByMax] = orderedPair(settings.mult3ByMin, settings.mult3ByMax, 2, 999, fallback.mult3ByMin, fallback.mult3ByMax);
+  const [sqMin, sqMax] = orderedPair(
+    settings.sqMin != null ? settings.sqMin : legacyBaseLow, settings.sqMax != null ? settings.sqMax : legacyBaseHigh,
+    1, 100, fallback.sqMin, fallback.sqMax);
+  const [cubeMin, cubeMax] = orderedPair(
+    settings.cubeMin != null ? settings.cubeMin : legacyBaseLow, settings.cubeMax != null ? settings.cubeMax : legacyBaseHigh,
+    1, 100, fallback.cubeMin, fallback.cubeMax);
 
   return {
     id: String(raw.id || '').slice(0, 80),
@@ -1237,8 +1244,10 @@ function sanitizeCalculationPracticeConfig(raw) {
     retryWrong: ['immediate', 'end', 'none'].includes(raw.retryWrong) ? raw.retryWrong : 'immediate',
     settings: {
       digits: boundedInteger(settings.digits, 1, 4, fallback.digits),
-      rangeMin,
-      rangeMax,
+      sqMin,
+      sqMax,
+      cubeMin,
+      cubeMax,
       multFrom,
       multTo,
       multiplierFrom,
