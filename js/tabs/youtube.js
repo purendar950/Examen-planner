@@ -1032,15 +1032,26 @@ async function ytFetchPlaylistVideos(plId) {
    localStorage-cached for a week like playlists are.
 ══════════════════════════════════════════════ */
 
+/* Bump when the cached channel object gains fields, so stale 7-day entries from
+   an older build are refetched instead of rendering a half-empty channel page. */
+const YT_CHAN_SHAPE = 2;
+
 /* Resolve { kind, value } from ytExtractChannelRef() to channel metadata:
-   { id, title, thumb, handle, uploads, videoCount }.
+   { id, title, thumb, avatar, handle, uploads, videoCount, viewCount,
+     subscriberCount, hiddenSubs, publishedAt, country, description, banner }.
    `uploads` is the auto-generated "all uploads" playlist — note it is NOT
-   returned by playlists.list, so callers must supply its title themselves. */
+   returned by playlists.list, so callers must supply its title themselves.
+   Heavy display fields (description, banner) are intentionally kept in this
+   localStorage cache rather than appState: appState syncs to a single 1 MiB
+   Firestore document, this cache never leaves the device. */
 async function ytFetchChannelInfo(ref) {
   if (!ref || !ref.value) return null;
   const cacheId = ref.kind + '_' + ref.value;
+  // Entries cached by an older build lack the channel-page fields (banner,
+  // description, subscriberCount…). Treat a shape mismatch as a cache miss so
+  // the channel page isn't blank for a week after an upgrade.
   const cached = ytCacheGet('chan', cacheId);
-  if (cached) return cached;
+  if (cached && cached._v === YT_CHAN_SHAPE) return cached;
 
   // Try the cheapest resolutions in order. A handle lookup can legitimately
   // come back empty (e.g. a legacy /c/ name that is not the handle), so an
@@ -1054,19 +1065,35 @@ async function ytFetchChannelInfo(ref) {
   }
 
   for (const q of attempts) {
-    const data = await ytApiFetchJson(`channels?part=snippet,contentDetails,statistics&${q}`);
+    // brandingSettings adds the banner; channels.list still costs 1 unit
+    // regardless of how many parts are requested.
+    const data = await ytApiFetchJson(`channels?part=snippet,contentDetails,statistics,brandingSettings&${q}`);
     if (data && data.error) { ytReportApiError(data.error); return null; }
     const it = data && data.items && data.items[0];
     if (!it) continue;
-    const s = it.snippet || {};
+    const s  = it.snippet || {};
+    const st = it.statistics || {};
     const info = {
+      _v: YT_CHAN_SHAPE,
       id: it.id || '',
       title: s.title || 'Channel',
       thumb: s.thumbnails?.medium?.url || s.thumbnails?.default?.url || '',
+      // Larger avatar for the channel page hero (falls back to the small one)
+      avatar: s.thumbnails?.high?.url || s.thumbnails?.medium?.url || s.thumbnails?.default?.url || '',
       handle: s.customUrl || '',
       uploads: it.contentDetails?.relatedPlaylists?.uploads
                || (it.id ? 'UU' + String(it.id).slice(2) : ''),
-      videoCount: Number(it.statistics?.videoCount || 0)
+      videoCount: Number(st.videoCount || 0),
+      viewCount: Number(st.viewCount || 0),
+      // Channels can hide their subscriber count — render must handle 0/hidden
+      subscriberCount: Number(st.subscriberCount || 0),
+      hiddenSubs: !!st.hiddenSubscriberCount,
+      publishedAt: s.publishedAt || '',
+      country: s.country || '',
+      description: s.description || '',
+      // Many channels return no banner at all, so the hero must look
+      // intentional without one.
+      banner: it.brandingSettings?.image?.bannerExternalUrl || ''
     };
     ytCacheSet('chan', cacheId, info);
     // Alias under the canonical id so pasting the /channel/UC… form later hits cache
