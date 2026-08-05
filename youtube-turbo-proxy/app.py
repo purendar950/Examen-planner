@@ -4674,6 +4674,16 @@ def _env_first(*names):
         val = (os.environ.get(name) or "").strip()
         if val:
             return val, name
+    # Case-insensitive fallback. Environment variables ARE case-sensitive on
+    # Linux, so a dashboard entry typed as "memory_supa_url" is invisible to an
+    # exact os.environ lookup and looks identical to "not set at all".
+    lowered = {k.lower(): k for k in os.environ}
+    for name in names:
+        actual = lowered.get(name.lower())
+        if actual:
+            val = (os.environ.get(actual) or "").strip()
+            if val:
+                return val, actual
     return "", None
 
 
@@ -4716,6 +4726,20 @@ def _log_vector_env():
     log.warning("advanced tutor: semantic search OFF — missing %s. The library "
                 "tutor still answers, but via title-keyword fallback.",
                 " and ".join(missing))
+    # Near-miss report: any variable whose NAME looks related but matched none of
+    # the accepted spellings. This is the fastest way to spot a typo, and it goes
+    # ONLY to the server log — /health is public, so it never lists env var names
+    # there. Names only; values are never read or logged.
+    near = sorted(n for n in os.environ
+                  if ("SUPA" in n.upper() or "MEMORY" in n.upper())
+                  and n not in (_MEM_URL_ENV, _MEM_KEY_ENV))
+    if near:
+        log.warning("advanced tutor: these env vars look related but matched no "
+                    "accepted name (names only, no values): %s", ", ".join(near))
+    else:
+        log.warning("advanced tutor: NO env var on this process has 'SUPA' or "
+                    "'MEMORY' in its name — the variables are almost certainly "
+                    "set on a different Render service than this one.")
     if anon_named:
         log.warning("advanced tutor: found %s, but note_chunks needs the SERVICE "
                     "ROLE key (RLS is enabled with no policies, so the anon key "
