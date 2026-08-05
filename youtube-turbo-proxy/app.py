@@ -2461,16 +2461,26 @@ def _vector_index_probe():
     from the outside (both just leave the advanced tutor in keyword-fallback
     mode). This distinguishes them:
 
-      not_configured : MEMORY_SUPA_* env vars are absent
+      not_configured : neither MEMORY_SUPA_* env var is set
+      missing_url    : MEMORY_SUPA_SERVICE_KEY is set but MEMORY_SUPA_URL is not
+      missing_key    : MEMORY_SUPA_URL is set but MEMORY_SUPA_SERVICE_KEY is not
       ok             : env vars set AND note_chunks + its RPCs exist
       missing_schema : env vars set but supabase/note_chunks.sql was never run
       denied         : credentials rejected (wrong/expired service key)
       unreachable    : network error or the project is paused
 
+    The missing_url / missing_key split exists because both vars are required
+    and a single "not_configured" cannot tell you which half is wrong — the most
+    likely cause being a variable named slightly differently in the dashboard.
+
     Deliberately behind ?deep=1 so the ordinary health check stays fast and
     makes no outbound Supabase call."""
-    if not _vec_enabled():
+    if not MEMORY_SUPA_URL and not MEMORY_SUPA_SERVICE_KEY:
         return "not_configured"
+    if not MEMORY_SUPA_URL:
+        return "missing_url"
+    if not MEMORY_SUPA_SERVICE_KEY:
+        return "missing_key"
     try:
         r = requests.post("%s/rest/v1/rpc/indexed_videos" % MEMORY_SUPA_URL,
                           headers=_supa_headers(), json={"vids": []}, timeout=10)
