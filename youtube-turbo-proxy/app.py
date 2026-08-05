@@ -2453,6 +2453,38 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
 
 
 # ------------------------------------------------------------------ routes
+def _vector_index_probe():
+    """Is the note_chunks schema actually present in the memory project?
+
+    Env vars and the SQL migration are two independent setup steps, and a
+    missing migration fails in a way that looks identical to missing env vars
+    from the outside (both just leave the advanced tutor in keyword-fallback
+    mode). This distinguishes them:
+
+      not_configured : MEMORY_SUPA_* env vars are absent
+      ok             : env vars set AND note_chunks + its RPCs exist
+      missing_schema : env vars set but supabase/note_chunks.sql was never run
+      denied         : credentials rejected (wrong/expired service key)
+      unreachable    : network error or the project is paused
+
+    Deliberately behind ?deep=1 so the ordinary health check stays fast and
+    makes no outbound Supabase call."""
+    if not _vec_enabled():
+        return "not_configured"
+    try:
+        r = requests.post("%s/rest/v1/rpc/indexed_videos" % MEMORY_SUPA_URL,
+                          headers=_supa_headers(), json={"vids": []}, timeout=10)
+        if r.status_code < 300:
+            return "ok"
+        if r.status_code in (401, 403):
+            return "denied"
+        if r.status_code == 404:
+            return "missing_schema"
+        return "error_%d" % r.status_code
+    except Exception:  # noqa: BLE001
+        return "unreachable"
+
+
 @app.get("/health")
 def health():
     pot_ok = False
@@ -2461,7 +2493,7 @@ def health():
         pot_ok = r.status_code < 500
     except requests.RequestException:
         pot_ok = False
-    return jsonify({
+    out = {
         "status": "ok",
         "pot_provider": pot_ok,
         "cookies": _HAS_COOKIES,
@@ -2469,8 +2501,15 @@ def health():
         "cached_videos": len(_cache),
         "cached_transcripts": len(_transcript_cache),
         "persistent_cache": bool(_fb_db),   # Firestore-backed (survives restarts)
-        "object_storage": _s3_enabled(),    # study bodies on Backblaze B2 / R2
-    })
+        "object_storage": _s3_enabled(),    # study/transcript bodies on B2 / R2
+        # Advanced (library-scope) tutor. False => it still answers, but via
+        # title-keyword fallback instead of semantic search.
+        "vector_search": _vec_enabled(),
+        "embed_model": EMBED_MODEL if _vec_enabled() else None,
+    }
+    if (request.args.get("deep") or "").strip().lower() in ("1", "true", "yes"):
+        out["vector_index"] = _vector_index_probe()
+    return jsonify(out)
 
 
 @app.get("/api/info")
