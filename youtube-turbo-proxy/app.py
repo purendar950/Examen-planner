@@ -2516,6 +2516,10 @@ def health():
         # title-keyword fallback instead of semantic search.
         "vector_search": _vec_enabled(),
         "embed_model": EMBED_MODEL if _vec_enabled() else None,
+        # WHICH env var name each value was resolved from (null = not found under
+        # any accepted name). Names are not secrets, and this is what actually
+        # pins down a misconfiguration — the values themselves are never exposed.
+        "vector_env": {"url": _MEM_URL_ENV, "key": _MEM_KEY_ENV},
     }
     if (request.args.get("deep") or "").strip().lower() in ("1", "true", "yes"):
         out["vector_index"] = _vector_index_probe()
@@ -4660,8 +4664,66 @@ def _tutor_prepare(body, user):
 # Supabase project holding note_chunks — the SAME project as student_memory.
 # Writes use the SERVICE ROLE key (bypasses RLS), because note_chunks has RLS
 # enabled with no policies so the public anon key can neither read nor write it.
-MEMORY_SUPA_URL = os.environ.get("MEMORY_SUPA_URL", "").strip().rstrip("/")
-MEMORY_SUPA_SERVICE_KEY = os.environ.get("MEMORY_SUPA_SERVICE_KEY", "").strip()
+def _env_first(*names):
+    """First non-empty env var among `names`. Returns (value, name_it_came_from).
+
+    Accepting aliases is deliberate: this feature is silently degraded rather
+    than broken when a variable is misnamed, which makes the mistake very hard to
+    spot from the outside. The canonical name is always the first one."""
+    for name in names:
+        val = (os.environ.get(name) or "").strip()
+        if val:
+            return val, name
+    return "", None
+
+
+MEMORY_SUPA_URL, _MEM_URL_ENV = _env_first(
+    "MEMORY_SUPA_URL",            # canonical
+    "SUPABASE_MEMORY_URL",        # name used in an earlier design sketch
+    "MEMORY_SUPABASE_URL",
+    "SUPA_MEMORY_URL",
+)
+MEMORY_SUPA_URL = MEMORY_SUPA_URL.rstrip("/")
+
+# NOTE: anon-key aliases are deliberately NOT accepted. note_chunks has RLS
+# enabled with no policies, so the anon key cannot read or write it — wiring one
+# in here would turn a clear "key missing" into a confusing "denied" on every
+# query. If only an anon-named variable is present we log that explicitly below.
+MEMORY_SUPA_SERVICE_KEY, _MEM_KEY_ENV = _env_first(
+    "MEMORY_SUPA_SERVICE_KEY",    # canonical
+    "SUPABASE_MEMORY_SERVICE_KEY",
+    "MEMORY_SUPABASE_SERVICE_KEY",
+    "SUPA_MEMORY_SERVICE_KEY",
+    "MEMORY_SUPA_KEY",
+)
+
+
+def _log_vector_env():
+    """One startup line saying exactly what was resolved, so a misconfiguration
+    is visible in the Render logs instead of only as a degraded feature."""
+    if MEMORY_SUPA_URL and MEMORY_SUPA_SERVICE_KEY:
+        log.info("advanced tutor: semantic search ON (url from %s, key from %s)",
+                 _MEM_URL_ENV, _MEM_KEY_ENV)
+        return
+    missing = []
+    if not MEMORY_SUPA_URL:
+        missing.append("MEMORY_SUPA_URL")
+    if not MEMORY_SUPA_SERVICE_KEY:
+        missing.append("MEMORY_SUPA_SERVICE_KEY")
+    anon_named = [n for n in ("MEMORY_SUPA_ANON_KEY", "SUPABASE_MEMORY_ANON_KEY",
+                              "MEMORY_SUPABASE_ANON_KEY")
+                  if (os.environ.get(n) or "").strip()]
+    log.warning("advanced tutor: semantic search OFF — missing %s. The library "
+                "tutor still answers, but via title-keyword fallback.",
+                " and ".join(missing))
+    if anon_named:
+        log.warning("advanced tutor: found %s, but note_chunks needs the SERVICE "
+                    "ROLE key (RLS is enabled with no policies, so the anon key "
+                    "cannot read or write it). Set MEMORY_SUPA_SERVICE_KEY.",
+                    ", ".join(anon_named))
+
+
+_log_vector_env()
 
 # Embedding model. Its output dimension MUST match note_chunks.embedding's
 # vector(768) — embeddings from different models are not comparable, so
