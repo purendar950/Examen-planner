@@ -5329,9 +5329,19 @@ def _library_prepare(body, user):
 
     indexed, _ = _library_coverage(video_ids)
     hits = _retrieve_semantic(question, video_ids) if _vec_enabled() else None
-    mode_used = "semantic"
-    if hits is None:
-        hits, mode_used = _retrieve_by_title(question, videos), "keyword"
+    mode_used = "semantic" if hits is not None else "keyword"
+    # An empty semantic result is not the same failure as an unavailable one, but
+    # both leave the answer ungrounded. This matters most the moment the index is
+    # first created: nothing is embedded yet, so EVERY question would return zero
+    # passages and the tutor would look broken rather than merely cold. Falling
+    # back to title matching whenever semantic search produced nothing usable
+    # keeps answers grounded while the index warms up.
+    if not hits:
+        kw_hits = _retrieve_by_title(question, videos)
+        if kw_hits:
+            hits, mode_used = kw_hits, "keyword"
+        else:
+            hits = hits or []
 
     # Warm the index for library videos we could not search, so the NEXT
     # question is better. Deliberately fire-and-forget: making this request wait
