@@ -34,7 +34,7 @@
         <div class="yt-input-bar">
           <span class="yt-input-icon" aria-hidden="true">▶</span>
           <input type="text" class="yt-url-input" id="yt-url-input"
-            placeholder="Paste a YouTube video or playlist URL"
+            placeholder="Paste a YouTube video, playlist or channel URL"
             autocomplete="off" inputmode="url"
             onkeydown="if(event.key==='Enter'){event.preventDefault();ytPlay();}"
             oninput="ytInputChange(this.value)"
@@ -215,26 +215,28 @@
             <div class="yto-import-copy">
               <span class="yto-eyebrow">Your learning space</span>
               <h2 id="yto-library-title">Course Library</h2>
-              <p>Save a YouTube playlist or video, track what you finish, and turn long courses into a practical study plan.</p>
+              <p>Save a YouTube playlist, video or a whole channel, track what you finish, and turn long courses into a practical study plan.</p>
             </div>
             <div class="yto-import-panel">
               <label for="yto-url-input">Add a YouTube course</label>
               <div class="yto-import-row">
                 <span class="yto-import-icon" aria-hidden="true">▶</span>
                 <input type="text" class="yto-import-input" id="yto-url-input"
-                  placeholder="Paste playlist or video URL"
+                  placeholder="Paste playlist, video or channel URL"
                   autocomplete="off" inputmode="url"
                   onkeydown="if(event.key==='Enter'){event.preventDefault();ytoLoadPlaylist();}">
                 <button class="yto-import-btn" id="yto-load-btn" onclick="ytoLoadPlaylist()">
                   <span aria-hidden="true">＋</span> Import
                 </button>
               </div>
-              <div class="yto-import-hint">Public playlists and individual YouTube videos are supported.</div>
+              <div class="yto-import-hint">Playlists, single videos, and channels (<code>youtube.com/@name</code>) — a channel lists all its playlists so you can pick which to import.</div>
               <div id="yto-error" class="yto-import-error" role="alert"></div>
             </div>
           </section>
 
           <section id="yto-library-overview" class="yto-library-overview" aria-label="Library overview"></section>
+
+          <section id="yto-channel-strip" class="yto-chan-strip" aria-label="Imported channels" hidden></section>
 
           <section id="yto-library-controls" class="yto-library-controls" aria-label="Course library controls" hidden>
             <div class="yto-search-wrap">
@@ -253,6 +255,7 @@
               <select id="yto-library-sort" onchange="ytoRenderLibrary()" aria-label="Sort courses">
                 <option value="recent">Recently added</option>
                 <option value="name">Course name</option>
+                <option value="channel">Channel</option>
                 <option value="progress">Most progress</option>
               </select>
             </label>

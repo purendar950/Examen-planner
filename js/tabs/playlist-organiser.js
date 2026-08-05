@@ -387,7 +387,74 @@ function ytoOpenSidebarLibrary() {
   ytoRenderLibrary();
 }
 
-/* ── Load playlist OR single video from URL → save as course ── */
+/* ── Sort freshly-fetched API videos oldest-upload-first.
+   Operates on the API shape (publishedAt/position); ytoSortVideosOldestFirst()
+   is the equivalent for already-stored videos (pub). ── */
+function ytoCmpFetchedOldestFirst(a, b) {
+  const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : null;
+  const tb = b.publishedAt ? new Date(b.publishedAt).getTime() : null;
+  if (ta === null && tb === null) return (a.position || 0) - (b.position || 0);
+  if (ta === null) return 1;   // undated items go last
+  if (tb === null) return -1;
+  return ta - tb;              // ascending = oldest first
+}
+
+/* ── Shared import core: write one fetched playlist into the library ──
+   Preserves everything the user owns (watched map, study plan, custom title,
+   addedAt) and keeps manually-added videos the source playlist no longer
+   returns. Used by the single-playlist import AND the channel importer.
+
+   opts.slim  — don't store per-video thumbnail URLs. They are ~28% of each
+                video's stored bytes and the only place a per-video thumb is
+                rendered (ytRenderVideoList) already derives it from the video
+                id, so bulk channel imports drop them to protect the 1 MiB
+                Firestore document ceiling.
+   Returns the stored entry. Does NOT persist — callers batch that. */
+function ytoUpsertPlaylistCourse(plId, fetched, opts) {
+  const o = opts || {};
+  const info    = fetched.info || null;
+  const durMap  = fetched.durMap || {};
+  const videos  = (fetched.videos || []).slice().sort(ytoCmpFetchedOldestFirst);
+  const lib = ytoLib();
+  const existing = lib[plId];
+
+  const fetchedVideos = videos.map(v => {
+    const row = { id: v.id, title: v.title, dur: durMap[v.id] || 0, pub: v.publishedAt || null };
+    if (!o.slim) row.thumb = v.thumb;
+    return row;
+  });
+  // Preserving ALL videos the source no longer returns (not just ones tagged
+  // `manual`) means videos added before that flag existed also survive.
+  const fetchedIds = new Set(fetchedVideos.map(v => v.id));
+  const keptManual = (existing?.videos || [])
+    .filter(v => v && v.id && !fetchedIds.has(v.id))
+    .map(v => ({ ...v, manual: true }));
+
+  lib[plId] = {
+    id: plId,
+    type: 'playlist',
+    // Precedence matches the original single-playlist import (fresh API title
+    // wins) so refetch behaviour is unchanged. fallbackTitle exists because the
+    // auto-generated "uploads" playlist is not returned by playlists.list.
+    title: info?.title || o.fallbackTitle || existing?.title || 'Playlist',
+    channel: info?.channelTitle || o.channelTitle || existing?.channel || '',
+    thumb: info?.thumb || o.fallbackThumb || fetchedVideos[0]?.thumb || existing?.thumb || '',
+    videos: fetchedVideos.concat(keptManual),
+    watched: existing?.watched || {},
+    lastVideo: existing?.lastVideo || null,
+    plan: existing?.plan || null,
+    addedAt: existing?.addedAt || Date.now()
+  };
+  // Tag provenance so the library can group courses by the channel they came
+  // from and re-sync the whole channel later.
+  if (o.channelId) {
+    lib[plId].channelId = o.channelId;
+    lib[plId].channelTitle = o.channelTitle || lib[plId].channel || '';
+  }
+  return lib[plId];
+}
+
+/* ── Load playlist OR single video OR channel from URL → save as course ── */
 async function ytoLoadPlaylist() {
   const url = document.getElementById('yto-url-input').value.trim();
   const errEl = document.getElementById('yto-error');
@@ -395,10 +462,12 @@ async function ytoLoadPlaylist() {
   if (!url) { errEl.textContent = 'URL enter karo pehle.'; errEl.style.display='block'; return; }
   const plId = ytExtractPlaylistId(url);
   if (!plId) {
-    // Not a playlist — try a single video URL before giving up
+    // Not a playlist — try a single video, then a whole channel, before giving up
     const vId = ytExtractVideoId(url);
     if (vId) { return ytoLoadSingleVideo(vId); }
-    errEl.textContent = 'Valid YouTube playlist ya video URL nahi mili. Example: youtube.com/playlist?list=PL... ya youtube.com/watch?v=...';
+    const chRef = typeof ytExtractChannelRef === 'function' ? ytExtractChannelRef(url) : null;
+    if (chRef) { return ytoLoadChannel(chRef); }
+    errEl.textContent = 'Valid YouTube playlist, video ya channel URL nahi mili. Example: youtube.com/playlist?list=PL... , youtube.com/watch?v=... ya youtube.com/@channelname';
     errEl.style.display='block';
     return;
   }
@@ -422,43 +491,10 @@ async function ytoLoadPlaylist() {
   const durMap = await ytFetchDurations(videos).catch(() => ({}));
   loadBtn.disabled = false; loadBtn.innerHTML = orig;
 
-  // Sort oldest video first (by upload date; fall back to playlist position)
-  videos.sort((a, b) => {
-    const ta = a.publishedAt ? new Date(a.publishedAt).getTime() : null;
-    const tb = b.publishedAt ? new Date(b.publishedAt).getTime() : null;
-    if (ta === null && tb === null) return (a.position || 0) - (b.position || 0);
-    if (ta === null) return 1;   // undated items go last
-    if (tb === null) return -1;
-    return ta - tb;              // ascending = oldest first
-  });
-
-  const lib = ytoLib();
-  const existing = lib[plId];
-  const fetchedVideos = videos.map(v => ({ id: v.id, title: v.title, thumb: v.thumb, dur: durMap[v.id] || 0, pub: v.publishedAt || null }));
-  // Keep any videos already in the course that the source playlist no longer
-  // returns — these are user-added videos (Add Video to section) that aren't
-  // part of the YouTube playlist. Preserving ALL such videos (not just ones
-  // tagged `manual`) means videos added before that flag existed also survive
-  // a Refresh. Mark them so they stay flagged going forward.
-  const fetchedIds = new Set(fetchedVideos.map(v => v.id));
-  const keptManual = (existing?.videos || [])
-    .filter(v => v && v.id && !fetchedIds.has(v.id))
-    .map(v => ({ ...v, manual: true }));
-  lib[plId] = {
-    id: plId,
-    type: 'playlist',
-    title: info?.title || existing?.title || 'Playlist',
-    channel: info?.channelTitle || existing?.channel || '',
-    thumb: info?.thumb || fetchedVideos[0]?.thumb || '',
-    videos: fetchedVideos.concat(keptManual),
-    watched: existing?.watched || {},
-    lastVideo: existing?.lastVideo || null,
-    plan: existing?.plan || null,
-    addedAt: existing?.addedAt || Date.now()
-  };
+  const entry = ytoUpsertPlaylistCourse(plId, { info, videos, durMap });
   ytoPersist();
   document.getElementById('yto-url-input').value = '';
-  showToast(`✅ "${lib[plId].title}" saved — ${videos.length} videos · ${ytoFmtHM(ytoTotalSecs(lib[plId]))}`, 'success');
+  showToast(`✅ "${entry.title}" saved — ${entry.videos.length} videos · ${ytoFmtHM(ytoTotalSecs(entry))}`, 'success');
   ytoOpenCourse(plId);
 }
 
@@ -606,6 +642,7 @@ function ytoRenderLibrary() {
   const entries = Object.values(ytoLib()).filter(pl => pl && Array.isArray(pl.videos));
 
   ytoRenderLibraryOverview(entries);
+  ytoRenderChannelStrip();
   if (controls) controls.hidden = !entries.length;
   if (referralSlot) referralSlot.hidden = false;
 
@@ -634,6 +671,14 @@ function ytoRenderLibrary() {
   visible.sort((a, b) => {
     if (sort === 'name') return (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' });
     if (sort === 'progress') return ytoCourseProgress(b).ratio - ytoCourseProgress(a).ratio || (b.addedAt || 0) - (a.addedAt || 0);
+    // Group courses from the same channel together (channel-imported courses
+    // carry channelTitle; everything else falls back to the playlist's channel)
+    if (sort === 'channel') {
+      const ca = (a.channelTitle || a.channel || '').toLowerCase();
+      const cb = (b.channelTitle || b.channel || '').toLowerCase();
+      if (ca !== cb) return ca.localeCompare(cb, undefined, { sensitivity: 'base' });
+      return (a.title || '').localeCompare(b.title || '', undefined, { sensitivity: 'base' });
+    }
     return (b.addedAt || 0) - (a.addedAt || 0);
   });
 
@@ -1317,3 +1362,470 @@ onPageActivated('youtube', function () {
 /* UPSC exam switching support */
 const _origSwitchExam = window.switchExam || function(){};
 
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   CHANNEL IMPORT — paste a channel URL → pick playlists → bulk import
+
+   Flow (deliberately two-stage):
+     1. Resolve the channel and list every playlist it owns. Costs ~2 quota
+        units and saves NOTHING yet. contentDetails.itemCount gives us video
+        counts for free, so the picker can show sizes without fetching items.
+     2. Import only the checked playlists, one at a time, with a progress bar.
+
+   Why not just import everything silently? The whole appState lives in ONE
+   Firestore document with a hard 1 MiB ceiling (see js/core/persistence.js).
+   A 40-playlist channel is easily 4,000 videos ≈ 500 KB+, which would break
+   sync for the entire app — not just YouTube. So the picker shows a live size
+   estimate, blocks imports that would cross the limit, and the import loop
+   re-checks after every playlist.
+══════════════════════════════════════════════════════════════════════ */
+
+/* Approx stored bytes per slim video row: {"id","title","dur","pub"}. Measured
+   against real imports; intentionally a slight over-estimate so the guard errs
+   toward safety. */
+const YTO_BYTES_PER_VIDEO = 130;
+const YTO_SYNC_WARN_BYTES = 900 * 1024;   // matches FIRESTORE_DOC_WARN
+const YTO_SYNC_HARD_BYTES = 1048576;      // Firestore hard document limit
+
+let _ytoChan = null;   // { info, playlists, sel:Set<string>, importing, cancel }
+
+function ytoChannels() {
+  if (!appState.ytoChannels) appState.ytoChannels = {};
+  return appState.ytoChannels;
+}
+
+/* UTF-8 byte size of the synced state. Mirrors _docByteSize() in
+   persistence.js but stays self-contained so script load order can't break it. */
+function ytoDocBytes(obj) {
+  try {
+    const json = JSON.stringify(obj || {});
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(json).length;
+    return unescape(encodeURIComponent(json)).length;
+  } catch (e) { return 0; }
+}
+
+function ytoFmtBytes(b) {
+  if (b >= 1048576) return (b / 1048576).toFixed(2) + ' MB';
+  return Math.round(b / 1024) + ' KB';
+}
+
+/* ── "Suggested" heuristic ──
+   Ranks how likely a playlist is a real structured course rather than noise
+   (shorts reels, live-stream dumps, song collections). Used to pre-select
+   sensible playlists and to show a Suggested badge, so a channel with 60
+   playlists doesn't force the user to read all 60. */
+function ytoChanCourseScore(pl) {
+  const t = (pl.title || '').toLowerCase();
+  let score = 0;
+  if (/\b(complete|full|course|series|batch|chapter|lecture|class|classes|unit|syllabus|crash|marathon|tutorial|tutorials|basics|foundation|beginner|advanced|preparation|revision)\b/.test(t)) score += 2;
+  if (pl.itemCount >= 20) score += 2;
+  else if (pl.itemCount >= 8) score += 1;
+  if (/\b(short|shorts|live|stream|streams|song|songs|music|vlog|vlogs|podcast|trailer|status|meme|memes|interview|motivation)\b/.test(t)) score -= 3;
+  if (pl.itemCount <= 2) score -= 2;
+  return score;
+}
+function ytoChanIsSuggested(pl) { return ytoChanCourseScore(pl) >= 2; }
+
+/* ── Stage 1: resolve channel + list playlists, then open the picker ── */
+async function ytoLoadChannel(ref, preselectIds) {
+  const errEl = document.getElementById('yto-error');
+  if (errEl) errEl.style.display = 'none';
+  const loadBtn = document.getElementById('yto-load-btn');
+  const orig = loadBtn ? loadBtn.innerHTML : '';
+  if (loadBtn) { loadBtn.disabled = true; loadBtn.innerHTML = '⏳ Channel...'; }
+
+  const info = await ytFetchChannelInfo(ref).catch(() => null);
+  if (!info || !info.id) {
+    if (loadBtn) { loadBtn.disabled = false; loadBtn.innerHTML = orig; }
+    if (errEl) {
+      errEl.textContent = ref.kind === 'id'
+        ? '⚠️ Channel load nahi hua — ID galat hai ya API quota/key issue hai.'
+        : '⚠️ Ye channel handle resolve nahi hua. Channel ke "/channel/UC..." wala URL try karo (channel page → share).';
+      errEl.style.display = 'block';
+    }
+    return;
+  }
+
+  const playlists = await ytFetchChannelPlaylists(info.id).catch(() => null);
+  if (loadBtn) { loadBtn.disabled = false; loadBtn.innerHTML = orig; }
+  if (playlists === null) {
+    if (errEl) {
+      errEl.textContent = '⚠️ Channel ke playlists load nahi hue — API quota/key ya proxy check karo.';
+      errEl.style.display = 'block';
+    }
+    return;
+  }
+
+  // "All uploads" is a synthetic row: the auto-generated uploads playlist is a
+  // normal playlist ID for fetching purposes, but playlists.list never returns
+  // it, so we build its metadata from the channel snippet.
+  const rows = [];
+  if (info.uploads) {
+    rows.push({
+      id: info.uploads,
+      title: 'All uploads — ' + info.title,
+      thumb: info.thumb,
+      channelTitle: info.title,
+      itemCount: info.videoCount || 0,
+      isUploads: true
+    });
+  }
+  playlists.forEach(p => rows.push(p));
+
+  if (!rows.length) {
+    if (errEl) {
+      errEl.textContent = 'Is channel par koi public playlist nahi mili.';
+      errEl.style.display = 'block';
+    }
+    return;
+  }
+
+  // Sort: uploads first, then suggested courses, then by size
+  const others = rows.filter(r => !r.isUploads).sort((a, b) => {
+    const d = ytoChanCourseScore(b) - ytoChanCourseScore(a);
+    return d !== 0 ? d : (b.itemCount - a.itemCount);
+  });
+  const ordered = rows.filter(r => r.isUploads).concat(others);
+
+  const lib = ytoLib();
+  const sel = new Set();
+  if (preselectIds && preselectIds.length) {
+    // Re-sync: keep exactly what was imported before
+    preselectIds.forEach(id => { if (ordered.some(r => r.id === id)) sel.add(id); });
+  } else {
+    // First import: pre-check suggested playlists plus anything already saved
+    ordered.forEach(r => {
+      if (lib[r.id] || (!r.isUploads && ytoChanIsSuggested(r))) sel.add(r.id);
+    });
+  }
+
+  _ytoChan = { info, playlists: ordered, sel, importing: false, cancel: false };
+  ytoChanOpenModal();
+}
+
+/* ── Picker modal ── */
+(function () {
+  const div = document.createElement('div');
+  div.className = 'ch-link-modal-overlay';
+  div.id = 'yto-chan-overlay';
+  div.innerHTML = `<div class="ch-link-modal" style="max-width:640px;width:100%;">
+    <div id="yto-chan-head"></div>
+    <div id="yto-chan-toolbar" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:10px 0 8px;">
+      <button type="button" class="yto-chan-chip" onclick="ytoChanSelect('all')">Select all</button>
+      <button type="button" class="yto-chan-chip" onclick="ytoChanSelect('none')">None</button>
+      <button type="button" class="yto-chan-chip" onclick="ytoChanSelect('suggested')">Suggested only</button>
+      <input type="search" id="yto-chan-search" placeholder="Filter playlists"
+        aria-label="Filter playlists" oninput="ytoChanRenderList()"
+        style="flex:1;min-width:130px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font-size:0.8rem;">
+    </div>
+    <div id="yto-chan-list" style="max-height:44vh;overflow-y:auto;border:1px solid var(--border);border-radius:10px;"></div>
+    <div id="yto-chan-progress" style="display:none;margin-top:12px;">
+      <div style="font-size:0.8rem;color:var(--muted);margin-bottom:6px;" id="yto-chan-progress-label"></div>
+      <div style="height:8px;background:var(--border);border-radius:999px;overflow:hidden;">
+        <span id="yto-chan-progress-bar" style="display:block;height:100%;width:0%;background:var(--accent);transition:width .25s;"></span>
+      </div>
+    </div>
+    <div id="yto-chan-summary" style="font-size:0.8rem;margin-top:12px;line-height:1.5;"></div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" id="yto-chan-cancel" onclick="ytoChanClose()">Cancel</button>
+      <button class="btn-modal-save" id="yto-chan-go" onclick="ytoChanImport()">Import</button>
+    </div>
+  </div>`;
+  div.onclick = (e) => { if (e.target === div) ytoChanClose(); };
+  document.body.appendChild(div);
+})();
+
+function ytoChanOpenModal() {
+  if (!_ytoChan) return;
+  const c = _ytoChan.info;
+  const sub = [c.handle || '', c.videoCount ? c.videoCount.toLocaleString() + ' videos' : '',
+               _ytoChan.playlists.length + ' importable'].filter(Boolean).join(' · ');
+  document.getElementById('yto-chan-head').innerHTML = `
+    <h3 style="margin:0 0 2px;">▤ Import from channel</h3>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+      ${c.thumb ? `<img src="${escapeHtml(c.thumb)}" alt="" style="width:44px;height:44px;border-radius:50%;flex:0 0 auto;" onerror="this.style.display='none'">` : ''}
+      <div style="min-width:0;">
+        <div style="font-weight:700;font-size:0.95rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(c.title)}</div>
+        <div style="font-size:0.76rem;color:var(--muted);">${escapeHtml(sub)}</div>
+      </div>
+    </div>`;
+  document.getElementById('yto-chan-search').value = '';
+  document.getElementById('yto-chan-progress').style.display = 'none';
+  document.getElementById('yto-chan-overlay').classList.add('open');
+  ytoChanRenderList();
+}
+
+function ytoChanClose() {
+  // Mid-import the button becomes a Stop control — don't let a stray click or
+  // ESC leave the loop running against a torn-down modal.
+  if (_ytoChan && _ytoChan.importing) { _ytoChan.cancel = true; return; }
+  const ov = document.getElementById('yto-chan-overlay');
+  if (ov) ov.classList.remove('open');
+  _ytoChan = null;
+}
+
+function ytoChanRenderList() {
+  if (!_ytoChan) return;
+  const listEl = document.getElementById('yto-chan-list');
+  const q = (document.getElementById('yto-chan-search')?.value || '').trim().toLowerCase();
+  const lib = ytoLib();
+  const rows = _ytoChan.playlists.filter(p => !q || (p.title || '').toLowerCase().includes(q));
+
+  if (!rows.length) {
+    listEl.innerHTML = `<div style="padding:16px;text-align:center;color:var(--muted);font-size:0.82rem;">Koi playlist match nahi hui.</div>`;
+    ytoChanUpdateSummary();
+    return;
+  }
+
+  listEl.innerHTML = rows.map(p => {
+    const checked = _ytoChan.sel.has(p.id);
+    const already = !!lib[p.id];
+    const suggested = !p.isUploads && ytoChanIsSuggested(p);
+    const badges = [
+      p.isUploads ? `<span style="font-size:0.66rem;padding:1px 6px;border-radius:999px;background:var(--border);color:var(--text);">Everything</span>` : '',
+      suggested ? `<span style="font-size:0.66rem;padding:1px 6px;border-radius:999px;background:var(--accent);color:#fff;">Suggested</span>` : '',
+      already ? `<span style="font-size:0.66rem;padding:1px 6px;border-radius:999px;border:1px solid var(--border);color:var(--muted);">In library</span>` : ''
+    ].filter(Boolean).join(' ');
+    return `<label style="display:flex;gap:10px;align-items:center;padding:9px 11px;border-bottom:1px solid var(--border);cursor:pointer;">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="ytoChanToggle('${escapeHtml(p.id)}',this.checked)" style="flex:0 0 auto;width:16px;height:16px;accent-color:var(--accent);">
+      <div style="min-width:0;flex:1;">
+        <div style="font-size:0.84rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(p.title)}</div>
+        <div style="font-size:0.72rem;color:var(--muted);margin-top:2px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <span>▶ ${p.itemCount ? p.itemCount.toLocaleString() + (p.itemCount === 1 ? ' video' : ' videos') : 'count unknown'}</span>
+          ${badges}
+        </div>
+      </div>
+    </label>`;
+  }).join('');
+  ytoChanUpdateSummary();
+}
+
+function ytoChanToggle(id, on) {
+  if (!_ytoChan) return;
+  if (on) _ytoChan.sel.add(id); else _ytoChan.sel.delete(id);
+  ytoChanUpdateSummary();
+}
+
+function ytoChanSelect(mode) {
+  if (!_ytoChan) return;
+  const q = (document.getElementById('yto-chan-search')?.value || '').trim().toLowerCase();
+  // Bulk actions apply to what's visible, so filtering then "Select all" works
+  const rows = _ytoChan.playlists.filter(p => !q || (p.title || '').toLowerCase().includes(q));
+  rows.forEach(p => {
+    if (mode === 'all') _ytoChan.sel.add(p.id);
+    else if (mode === 'none') _ytoChan.sel.delete(p.id);
+    else if (mode === 'suggested') {
+      if (!p.isUploads && ytoChanIsSuggested(p)) _ytoChan.sel.add(p.id);
+      else _ytoChan.sel.delete(p.id);
+    }
+  });
+  ytoChanRenderList();
+}
+
+/* Live size/quota estimate + the storage guard that can disable Import. */
+function ytoChanEstimate() {
+  const lib = ytoLib();
+  const picked = _ytoChan.playlists.filter(p => _ytoChan.sel.has(p.id));
+  // Videos already stored for a playlist don't add new bytes on re-import
+  let newVideos = 0, totalVideos = 0;
+  picked.forEach(p => {
+    const have = lib[p.id]?.videos?.length || 0;
+    const count = Math.min(p.itemCount || 0, 2000);   // playlistItems fetch cap
+    totalVideos += count;
+    newVideos += Math.max(0, count - have);
+  });
+  const currentBytes = ytoDocBytes(appState);
+  const addedBytes = newVideos * YTO_BYTES_PER_VIDEO;
+  const projected = currentBytes + addedBytes;
+  // 1 playlistItems page per 50 videos + 1 durations page per 50 new videos
+  const quota = picked.reduce((sum, p) => sum + Math.ceil(Math.min(p.itemCount || 1, 2000) / 50), 0)
+              + Math.ceil(newVideos / 50);
+  return {
+    picked, totalVideos, newVideos, currentBytes, addedBytes, projected, quota,
+    over: projected >= YTO_SYNC_HARD_BYTES,
+    warn: projected >= YTO_SYNC_WARN_BYTES
+  };
+}
+
+function ytoChanUpdateSummary() {
+  if (!_ytoChan) return;
+  const e = ytoChanEstimate();
+  const goBtn = document.getElementById('yto-chan-go');
+  const sumEl = document.getElementById('yto-chan-summary');
+  const n = e.picked.length;
+
+  let tone = 'var(--muted)', extra = '';
+  if (e.over) {
+    tone = 'var(--red)';
+    extra = `<br><strong style="color:var(--red)">⚠️ Ye import sync limit (1 MB) cross kar dega — app ka saara sync ruk jayega. Kam playlists select karo.</strong>`;
+  } else if (e.warn) {
+    tone = 'var(--amber, #d97706)';
+    extra = `<br><strong style="color:var(--amber, #d97706)">⚠️ Sync limit ke kareeb (${ytoFmtBytes(e.projected)} / 1 MB). Sirf zaroori playlists rakho.</strong>`;
+  }
+
+  sumEl.innerHTML = n
+    ? `<span style="color:${tone}">${n} ${n === 1 ? 'playlist' : 'playlists'} · ~${e.totalVideos.toLocaleString()} videos · storage ~${ytoFmtBytes(e.projected)} of 1 MB · ~${e.quota} API units</span>${extra}`
+    : `<span style="color:var(--muted)">Ek bhi playlist select nahi hui.</span>`;
+
+  if (goBtn) {
+    goBtn.disabled = !n || e.over;
+    goBtn.innerHTML = n ? `Import ${n} ${n === 1 ? 'playlist' : 'playlists'}` : 'Import';
+  }
+}
+
+/* ── Stage 2: import the checked playlists, one at a time ── */
+async function ytoChanImport() {
+  if (!_ytoChan || _ytoChan.importing) return;
+  const e0 = ytoChanEstimate();
+  if (!e0.picked.length || e0.over) return;
+
+  const ch = _ytoChan.info;
+  const picked = e0.picked;
+  _ytoChan.importing = true;
+  _ytoChan.cancel = false;
+
+  const goBtn = document.getElementById('yto-chan-go');
+  const cancelBtn = document.getElementById('yto-chan-cancel');
+  const progWrap = document.getElementById('yto-chan-progress');
+  const progBar = document.getElementById('yto-chan-progress-bar');
+  const progLabel = document.getElementById('yto-chan-progress-label');
+  if (goBtn) { goBtn.disabled = true; goBtn.innerHTML = '⏳ Importing...'; }
+  if (cancelBtn) cancelBtn.innerHTML = 'Stop';
+  if (progWrap) progWrap.style.display = 'block';
+
+  const importedIds = [];
+  let failed = 0, stoppedForSize = false;
+
+  for (let i = 0; i < picked.length; i++) {
+    if (_ytoChan.cancel) break;
+    const p = picked[i];
+    if (progLabel) progLabel.textContent = `Importing ${i + 1} of ${picked.length} — ${p.title}`;
+    if (progBar) progBar.style.width = Math.round((i / picked.length) * 100) + '%';
+
+    // Sequential on purpose: fanning 40 playlists out in parallel would hammer
+    // the proxy and burn quota with nothing to throttle it.
+    const videos = await ytFetchPlaylistVideos(p.id).catch(() => null);
+    if (!videos || !videos.length) { failed++; continue; }
+    const durMap = await ytFetchDurations(videos).catch(() => ({}));
+
+    // We already have title/thumb from the channel listing, so skip the extra
+    // playlists.list call (1 quota unit saved per playlist). The uploads
+    // playlist has no API metadata at all, hence the explicit fallbacks.
+    ytoUpsertPlaylistCourse(p.id, {
+      info: p.isUploads ? null : { title: p.title, channelTitle: p.channelTitle || ch.title, thumb: p.thumb },
+      videos,
+      durMap
+    }, {
+      slim: true,
+      channelId: ch.id,
+      channelTitle: ch.title,
+      fallbackTitle: p.isUploads ? p.title : '',
+      fallbackThumb: p.thumb || ch.thumb || ''
+    });
+    importedIds.push(p.id);
+
+    // Re-check the real size as we go — itemCount is only an estimate, and a
+    // blown Firestore doc breaks sync for the entire app, not just YouTube.
+    if (ytoDocBytes(appState) >= YTO_SYNC_WARN_BYTES) { stoppedForSize = true; break; }
+  }
+
+  // Record the channel so the library can group and re-sync it
+  if (importedIds.length) {
+    const store = ytoChannels();
+    const prev = store[ch.id];
+    store[ch.id] = {
+      id: ch.id,
+      title: ch.title,
+      thumb: ch.thumb || '',
+      handle: ch.handle || '',
+      playlistIds: Array.from(new Set((prev?.playlistIds || []).concat(importedIds))),
+      lastSyncedAt: Date.now()
+    };
+    ytoPersist();
+  }
+
+  const wasCancelled = _ytoChan.cancel;
+  _ytoChan.importing = false;
+  if (progBar) progBar.style.width = '100%';
+  if (cancelBtn) cancelBtn.innerHTML = 'Cancel';
+  ytoChanClose();
+
+  const urlInput = document.getElementById('yto-url-input');
+  if (urlInput) urlInput.value = '';
+
+  if (!importedIds.length) {
+    showToast('⚠️ Koi playlist import nahi hui — public hai? API quota check karo.', 'error');
+  } else {
+    const bits = [`✅ ${ch.title} — ${importedIds.length} ${importedIds.length === 1 ? 'course' : 'courses'} imported`];
+    if (failed) bits.push(`${failed} skip hui`);
+    if (wasCancelled) bits.push('(rok diya)');
+    showToast(bits.join(' · '), 'success');
+    if (stoppedForSize) {
+      showToast('⚠️ Sync limit ke kareeb pahunch gaye, baaki playlists chhod di. Purane courses delete karke dobara try karo.', 'error');
+    }
+  }
+
+  // Land the user on just-imported courses by filtering the library to them
+  const searchEl = document.getElementById('yto-library-search');
+  if (searchEl && importedIds.length) searchEl.value = ch.title;
+  ytoLibraryFilter = 'all';
+  switchPage('yt-organiser');
+  ytoRenderLibrary();
+}
+
+/* Re-run the picker for an already-imported channel, pre-checking what was
+   imported before and busting the 7-day caches so new uploads show up. */
+async function ytoResyncChannel(channelId) {
+  const rec = ytoChannels()[channelId];
+  if (!rec) return;
+  if (typeof ytCacheDelete === 'function') {
+    ytCacheDelete('chanpls', channelId);
+    ytCacheDelete('chan', 'id_' + channelId);
+    (rec.playlistIds || []).forEach(id => { ytCacheDelete('vids', id); ytCacheDelete('info', id); });
+  }
+  showToast('Channel refresh ho raha hai...', 'info');
+  await ytoLoadChannel({ kind: 'id', value: channelId }, rec.playlistIds || []);
+}
+
+function ytoForgetChannel(channelId) {
+  const rec = ytoChannels()[channelId];
+  if (!rec) return;
+  if (!confirm(`"${rec.title}" ko channel list se hatayein? Courses library mein rahenge.`)) return;
+  delete ytoChannels()[channelId];
+  ytoPersist();
+  ytoRenderLibrary();
+}
+
+/* Channel chips above the course grid — grouping + re-sync entry point. */
+function ytoRenderChannelStrip() {
+  const el = document.getElementById('yto-channel-strip');
+  if (!el) return;
+  const lib = ytoLib();
+  const chans = Object.values(ytoChannels()).filter(c => c && c.id);
+  if (!chans.length) { el.innerHTML = ''; el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<div class="yto-chan-strip-head"><span class="yto-eyebrow">Imported channels</span></div>
+    <div class="yto-chan-strip-row">${chans.map(c => {
+      const owned = Object.values(lib).filter(pl => pl && pl.channelId === c.id);
+      const videos = owned.reduce((s, pl) => s + (pl.videos?.length || 0), 0);
+      return `<div class="yto-chan-card">
+        ${c.thumb ? `<img src="${escapeHtml(c.thumb)}" alt="" onerror="this.style.display='none'">` : ''}
+        <div class="yto-chan-card-body">
+          <strong title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</strong>
+          <span>${owned.length} ${owned.length === 1 ? 'course' : 'courses'} · ${videos.toLocaleString()} videos</span>
+        </div>
+        <div class="yto-chan-card-actions">
+          <button type="button" title="Check for new playlists and videos" onclick="ytoResyncChannel('${escapeHtml(c.id)}')">⟳</button>
+          <button type="button" title="Remove from this list" onclick="ytoForgetChannel('${escapeHtml(c.id)}')">✕</button>
+        </div>
+      </div>`;
+    }).join('')}</div>`;
+}
+
+/* ESC closes the channel picker (no-op while an import is running). */
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && document.getElementById('yto-chan-overlay')?.classList.contains('open')) {
+    ytoChanClose();
+  }
+});

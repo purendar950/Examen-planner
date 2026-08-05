@@ -21,6 +21,44 @@ function ytExtractVideoId(url) {
   return null;
 }
 
+/* Channel URL → a reference the Data API can resolve.
+   Returns { kind:'id'|'handle'|'user', value } or null.
+
+     youtube.com/channel/UCxxxxxxxxxxxxxxxxxxxxxx   → { kind:'id' }
+     youtube.com/@handle                            → { kind:'handle' }
+     youtube.com/c/CustomName                       → { kind:'handle' }
+     youtube.com/user/LegacyName                    → { kind:'user' }
+
+   Trailing tab segments (/videos, /playlists, /streams, /featured, /shorts…)
+   are ignored, so pasting any page of a channel works. There is no official
+   API parameter for the legacy /c/ form, but those custom names are almost
+   always the channel's handle too, so forHandle resolves them — that keeps us
+   off `search`, which would cost 100 quota units instead of 1. */
+function ytExtractChannelRef(url) {
+  try {
+    const raw = (url || '').trim();
+    if (!raw) return null;
+    const u = new URL(/^https?:\/\//i.test(raw) ? raw : 'https://' + raw);
+    if (!/(youtube\.com)/i.test(u.hostname)) return null;   // youtu.be has no channel URLs
+    // A URL carrying list= or v= is a playlist/video, not a channel
+    if (u.searchParams.get('list') || u.searchParams.get('v')) return null;
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (!parts.length) return null;
+    const first = decodeURIComponent(parts[0]);
+    if (first.charAt(0) === '@') {
+      const h = first.slice(1).trim();
+      return h ? { kind: 'handle', value: h } : null;
+    }
+    const next = parts[1] ? decodeURIComponent(parts[1]).trim() : '';
+    switch (first.toLowerCase()) {
+      case 'channel': return /^UC[A-Za-z0-9_-]{22}$/.test(next) ? { kind: 'id',     value: next } : null;
+      case 'c':       return next ? { kind: 'handle', value: next } : null;
+      case 'user':    return next ? { kind: 'user',   value: next } : null;
+      default:        return null;
+    }
+  } catch { return null; }
+}
+
 function ytValidate(url) {
   if (!url.trim()) return { err: 'URL dalo pehle.', type: null };
   const t = url.trim().toLowerCase();
@@ -29,7 +67,10 @@ function ytValidate(url) {
   if (plId) return { err: null, type: 'playlist', id: plId };
   const vId = ytExtractVideoId(url);
   if (vId) return { err: null, type: 'video', id: vId };
-  return { err: 'Valid playlist ya video URL nahi mili. Example: youtube.com/playlist?list=PL...', type: null };
+  // Channel comes last so playlist/video URLs on a channel page still win
+  const chRef = ytExtractChannelRef(url);
+  if (chRef) return { err: null, type: 'channel', id: chRef.value, ref: chRef };
+  return { err: 'Valid playlist, video ya channel URL nahi mili. Example: youtube.com/playlist?list=PL... ya youtube.com/@channelname', type: null };
 }
 
 function ytBuildEmbedUrl(type, id, autoplay=1) {
@@ -330,15 +371,21 @@ function ytToggleFocus() {
 function ytInputChange(val) {
   const btn = document.getElementById('yt-play-btn');
   const err = document.getElementById('yt-err');
+  // Keep the markup identical to pages/youtube.html so the icon span survives
+  const PLAY_LABEL   = '<span aria-hidden="true">▶</span> Play';
+  const IMPORT_LABEL = '<span aria-hidden="true">▤</span> Import';
   if (!val.trim()) {
-    btn.disabled = true; err.classList.remove('show'); return;
+    btn.disabled = true; btn.innerHTML = PLAY_LABEL;
+    err.classList.remove('show'); return;
   }
   const v = ytValidate(val);
   if (v.err) {
-    btn.disabled = true;
+    btn.disabled = true; btn.innerHTML = PLAY_LABEL;
     err.textContent = v.err; err.classList.add('show');
   } else {
     btn.disabled = false; err.classList.remove('show');
+    // A channel has nothing to play — the button opens the import picker instead
+    btn.innerHTML = (v.type === 'channel') ? IMPORT_LABEL : PLAY_LABEL;
   }
 }
 
@@ -347,6 +394,23 @@ function ytPlay() {
   const url = document.getElementById('yt-url-input').value;
   const v = ytValidate(url);
   if (v.err) { document.getElementById('yt-err').textContent = v.err; document.getElementById('yt-err').classList.add('show'); return; }
+
+  // A channel cannot be embedded in the player. Hand it to the Course Library
+  // importer, which lists every playlist on the channel so the user can choose.
+  if (v.type === 'channel') {
+    document.getElementById('yt-err').classList.remove('show');
+    if (typeof ytoLoadChannel !== 'function') {
+      document.getElementById('yt-err').textContent = 'Channel import available nahi hai — page reload karo.';
+      document.getElementById('yt-err').classList.add('show');
+      return;
+    }
+    const libInput = document.getElementById('yto-url-input');
+    if (libInput) libInput.value = url;
+    switchPage('yt-organiser');
+    ytoLoadChannel(v.ref);
+    return;
+  }
+
   // A pasted URL is plain Watch mode, not the organiser course that may have
   // been open previously. Clear that context so the sidebar selection and
   // course queue do not imply the new URL belongs to the old playlist.
@@ -864,6 +928,29 @@ function ytPiP() {
 /* ══════════════════════════════════════════════
    YOUTUBE DATA API — FETCH PLAYLIST
 ══════════════════════════════════════════════ */
+
+/* Turn a Data API error object into one consistent user-facing toast. Shared by
+   every fetcher so quota / key / proxy problems always read the same way.
+   Quota reasons only reach here after ytApiFetchJson exhausted every key.
+   Returns the raw reason string so callers can branch further if needed. */
+function ytReportApiError(err) {
+  const reason = err?.errors?.[0]?.reason || '';
+  if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded')
+    showToast('⚠️ YouTube API quota exceed ho gaya (saare keys). Kal try karo ya nayi API key add karo.', 'error');
+  else if (reason === 'noApiKey')
+    showToast('⚠️ YouTube API key set nahi hai (Firestore config/youtube). Admin se contact karo.', 'error');
+  else if (reason === 'keyInvalid')
+    showToast('⚠️ YouTube API key invalid hai. Firestore config/youtube check karo.', 'error');
+  else if (reason === 'endpointBlocked')
+    // The Cloudflare Worker allow-lists endpoints. An older deploy without
+    // 'channels' blocks channel import — say so instead of "load nahi hui".
+    showToast('⚠️ Channel import ke liye YouTube proxy purana hai (channels endpoint blocked). Admin: cloudflare/youtube-proxy redeploy karo.', 'error');
+  else if (reason)
+    showToast('⚠️ YouTube API error: ' + reason, 'error');
+  else console.warn('YT API error:', err?.message || err);
+  return reason;
+}
+
 async function ytFetchPlaylistInfo(plId) {
   const cached = ytCacheGet('info', plId);
   if (cached) return cached;
@@ -915,18 +1002,7 @@ async function ytFetchPlaylistVideos(plId) {
       `playlistItems?part=snippet,contentDetails&playlistId=${plId}&maxResults=50` +
       (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '')
     );
-    if (data.error) {
-      const reason = data.error.errors?.[0]?.reason || '';
-      // quota reasons only surface here after ytApiFetchJson exhausted every key
-      if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded')
-        showToast('⚠️ YouTube API quota exceed ho gaya (saare keys). Kal try karo ya nayi API key add karo.', 'error');
-      else if (reason === 'noApiKey')
-        showToast('⚠️ YouTube API key set nahi hai (Firestore config/youtube). Admin se contact karo.', 'error');
-      else if (reason === 'keyInvalid')
-        showToast('⚠️ YouTube API key invalid hai. Firestore config/youtube check karo.', 'error');
-      else console.warn('YT API error:', data.error.message, reason);
-      return null;
-    }
+    if (data.error) { ytReportApiError(data.error); return null; }
     for (const item of (data.items || [])) {
       const s = item.snippet;
       if (s.resourceId?.videoId) {
@@ -947,6 +1023,96 @@ async function ytFetchPlaylistVideos(plId) {
   // Cache the full video list so repeat loads (any user) cost 0 quota for a week
   if (videos.length > 0) ytCacheSet('vids', plId, videos);
   return videos;
+}
+
+/* ══════════════════════════════════════════════
+   YOUTUBE DATA API — FETCH CHANNEL
+   Resolve a channel URL, then list every playlist it owns. Cost is 1 quota
+   unit per call (`search` at 100 units is never used), and both results are
+   localStorage-cached for a week like playlists are.
+══════════════════════════════════════════════ */
+
+/* Resolve { kind, value } from ytExtractChannelRef() to channel metadata:
+   { id, title, thumb, handle, uploads, videoCount }.
+   `uploads` is the auto-generated "all uploads" playlist — note it is NOT
+   returned by playlists.list, so callers must supply its title themselves. */
+async function ytFetchChannelInfo(ref) {
+  if (!ref || !ref.value) return null;
+  const cacheId = ref.kind + '_' + ref.value;
+  const cached = ytCacheGet('chan', cacheId);
+  if (cached) return cached;
+
+  // Try the cheapest resolutions in order. A handle lookup can legitimately
+  // come back empty (e.g. a legacy /c/ name that is not the handle), so an
+  // empty items array is not an error — just fall through to the next attempt.
+  const attempts = [];
+  if (ref.kind === 'id')     attempts.push('id=' + encodeURIComponent(ref.value));
+  if (ref.kind === 'handle') attempts.push('forHandle=' + encodeURIComponent('@' + ref.value));
+  if (ref.kind === 'user') {
+    attempts.push('forUsername=' + encodeURIComponent(ref.value));
+    attempts.push('forHandle='   + encodeURIComponent('@' + ref.value));
+  }
+
+  for (const q of attempts) {
+    const data = await ytApiFetchJson(`channels?part=snippet,contentDetails,statistics&${q}`);
+    if (data && data.error) { ytReportApiError(data.error); return null; }
+    const it = data && data.items && data.items[0];
+    if (!it) continue;
+    const s = it.snippet || {};
+    const info = {
+      id: it.id || '',
+      title: s.title || 'Channel',
+      thumb: s.thumbnails?.medium?.url || s.thumbnails?.default?.url || '',
+      handle: s.customUrl || '',
+      uploads: it.contentDetails?.relatedPlaylists?.uploads
+               || (it.id ? 'UU' + String(it.id).slice(2) : ''),
+      videoCount: Number(it.statistics?.videoCount || 0)
+    };
+    ytCacheSet('chan', cacheId, info);
+    // Alias under the canonical id so pasting the /channel/UC… form later hits cache
+    if (info.id) ytCacheSet('chan', 'id_' + info.id, info);
+    return info;
+  }
+  return null;
+}
+
+/* Every public playlist owned by a channel, newest first as YouTube returns
+   them. `itemCount` comes free with part=contentDetails, which lets the import
+   picker show video counts WITHOUT fetching a single playlistItems page.
+   Caveat: this returns only playlists the channel itself created — playlists
+   merely *featured* on its Playlists tab belong to other channels and are not
+   discoverable through this endpoint. */
+async function ytFetchChannelPlaylists(channelId) {
+  if (!channelId) return null;
+  const cached = ytCacheGet('chanpls', channelId);
+  if (cached) return cached;
+
+  const out = [];
+  let pageToken = '';
+  // Up to 20 pages × 50 = 1000 playlists. Breaks as soon as there is no
+  // nextPageToken, so small channels cost exactly 1 unit.
+  for (let page = 0; page < 20; page++) {
+    const data = await ytApiFetchJson(
+      `playlists?part=snippet,contentDetails&channelId=${encodeURIComponent(channelId)}&maxResults=50` +
+      (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '')
+    );
+    if (data && data.error) { ytReportApiError(data.error); return null; }
+    for (const it of (data.items || [])) {
+      const s = it.snippet || {};
+      out.push({
+        id: it.id,
+        title: s.title || 'Playlist',
+        thumb: s.thumbnails?.medium?.url || s.thumbnails?.default?.url || '',
+        channelTitle: s.channelTitle || '',
+        itemCount: Number(it.contentDetails?.itemCount || 0),
+        publishedAt: s.publishedAt || null
+      });
+    }
+    pageToken = data.nextPageToken || '';
+    if (!pageToken) break;
+  }
+  if (out.length) ytCacheSet('chanpls', channelId, out);
+  return out;
 }
 
 async function ytFetchDurations(videos) {
