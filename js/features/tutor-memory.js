@@ -139,7 +139,13 @@
       lines.push('Pace: ' + prefs.pace);
     }
 
-    if (mem.preferred_language) lines.push('Preferred language: ' + mem.preferred_language);
+    // NOTE: mem.preferred_language is deliberately NOT added to the prompt.
+    // The output language is set explicitly by the panel's language dropdown and
+    // enforced server-side. This field is an *inference* the profiler made from
+    // the student's past messages, so it was usually 'Hindi' for anyone who types
+    // in Devanagari — which then contradicted an explicit 'Hinglish' selection
+    // inside the same system prompt. An explicit user choice must win over an
+    // inferred one. The value is still stored in Supabase for profiling.
     return lines.join('\n');
   }
 
