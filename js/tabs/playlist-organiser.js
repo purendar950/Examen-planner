@@ -837,6 +837,8 @@ function ytoOpenCourse(plId) {
   const overview = document.getElementById('yto-library-overview'); if (overview) overview.hidden = true;
   const controls = document.getElementById('yto-library-controls'); if (controls) controls.hidden = true;
   const referralSlot = document.getElementById('yto-referral-slot'); if (referralSlot) referralSlot.hidden = true;
+  // The channel strip belongs to the library index, not to a single course view
+  const chanStrip = document.getElementById('yto-channel-strip'); if (chanStrip) chanStrip.hidden = true;
   const content = document.getElementById('yto-content');
   content.innerHTML = `
     <button onclick="ytoRenderLibrary()" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:5px 14px;font-size:0.78rem;cursor:pointer;margin-bottom:0.85rem;font-family:var(--font);">← My Courses</button>
