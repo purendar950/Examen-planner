@@ -1151,8 +1151,12 @@ async function ytFetchChannelPlaylists(channelId) {
    incomplete. Hence its own 'ups' cache kind. */
 async function ytFetchChannelUploads(channelId, uploadsId, limit) {
   const cap = Math.max(1, Number(limit) || 60);
-  const cached = ytCacheGet('ups', channelId);
-  if (cached) return cached.slice(0, cap);
+  // Cache records how far we got, so asking for a bigger window later refetches
+  // instead of silently returning the old short list.
+  const cached = ytCacheGet('ups2', channelId);
+  if (cached && cached.videos && (cached.videos.length >= cap || cached.complete)) {
+    return cached.videos.slice(0, cap);
+  }
   if (!uploadsId) return null;
 
   const out = [];
@@ -1180,8 +1184,30 @@ async function ytFetchChannelUploads(channelId, uploadsId, limit) {
     pageToken = data.nextPageToken || '';
     if (!pageToken) break;
   }
-  if (out.length) ytCacheSet('ups', channelId, out);
+  if (out.length) ytCacheSet('ups2', channelId, { videos: out, complete: !pageToken });
   return out;
+}
+
+/* View counts for a batch of videos, 50 per request (1 quota unit each).
+   Powers YouTube's "1.2M views" meta line and the Popular sort. Cached as one
+   map per channel; view counts drift slowly so the standard 7-day TTL is fine. */
+async function ytFetchViewCounts(channelId, videos) {
+  const cached = ytCacheGet('vstats', channelId) || {};
+  const need = (videos || []).filter(v => v && v.id && cached[v.id] == null);
+  if (!need.length) return cached;
+
+  let changed = false;
+  for (let i = 0; i < need.length; i += 50) {
+    const ids = need.slice(i, i + 50).map(v => v.id).join(',');
+    const data = await ytApiFetchJson(`videos?part=statistics&id=${ids}`);
+    if (data && data.error) { ytReportApiError(data.error); break; }
+    for (const it of (data.items || [])) {
+      cached[it.id] = Number(it.statistics?.viewCount || 0);
+      changed = true;
+    }
+  }
+  if (changed) ytCacheSet('vstats', channelId, cached);
+  return cached;
 }
 
 async function ytFetchDurations(videos) {

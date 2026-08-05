@@ -2089,11 +2089,87 @@ function ytoRenderChannelPage(channelId) {
    Live needs search (100 quota units per call), and Community posts are not
    exposed at all. ── */
 let _ytoChanTab = 'videos';
-let _ytoChanTabToken = 0;   // guards against a slow fetch overwriting a newer tab
+let _ytoChanTabToken = 0;    // guards against a slow fetch overwriting a newer tab
+let _ytoVidSort = 'latest';  // 'latest' | 'popular' | 'oldest'
+let _ytoChanQuery = '';      // in-channel search
+let _ytoChanOpenPl = null;   // playlist being browsed inside the channel
+let _ytoChanPlaying = null;  // { id, title } currently playing inline
+const YTO_UPLOAD_WINDOW = 200;  // uploads pulled for the Videos tab (4 quota units)
 
 function ytoChanSetTab(tab) {
+  if (_ytoChanTab !== tab) { _ytoChanQuery = ''; _ytoChanOpenPl = null; }
   _ytoChanTab = tab;
   if (ytoCurrentChannel) ytoRenderChannelPage(ytoCurrentChannel);
+}
+
+function ytoChanSetVidSort(sort) {
+  _ytoVidSort = sort;
+  ytoRenderChanTabPanel();
+}
+
+function ytoChanSearch(q) {
+  _ytoChanQuery = (q || '').trim().toLowerCase();
+  ytoRenderChanTabPanel();
+}
+
+/* Tap a tile → play right here, like tapping a video on YouTube, instead of
+   bouncing the user to another tab. Browse-only: study time and watched state
+   are tracked by the real player, so the inline player links out to it. */
+function ytoChanPlay(videoId, title) {
+  _ytoChanPlaying = { id: videoId, title: title || 'Video' };
+  ytoRenderChanTabPanel();
+  setTimeout(() => {
+    const el = document.getElementById('yto-chan-player');
+    if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, 40);
+}
+
+function ytoChanClosePlayer() {
+  _ytoChanPlaying = null;
+  ytoRenderChanTabPanel();
+}
+
+/* Inline player block shown above the tab content. */
+function ytoChanPlayerHtml() {
+  if (!_ytoChanPlaying) return '';
+  const id = escapeHtml(_ytoChanPlaying.id);
+  const title = escapeHtml(_ytoChanPlaying.title);
+  const src = (typeof ytBuildEmbedUrl === 'function')
+    ? ytBuildEmbedUrl('video', _ytoChanPlaying.id, 1)
+    : `https://www.youtube-nocookie.com/embed/${id}?autoplay=1`;
+  const saved = !!ytoLib()['vid_' + _ytoChanPlaying.id];
+  return `<section class="yto-chan-player" id="yto-chan-player">
+    <div class="yto-chan-player-frame">
+      <iframe src="${escapeHtml(src)}" title="${title}" loading="lazy"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+    </div>
+    <div class="yto-chan-player-bar">
+      <strong title="${title}">${title}</strong>
+      <div class="yto-chan-player-acts">
+        <button type="button" onclick="ytoWatchChannelVideo('${id}', ${JSON.stringify(title)})" title="Open in the full player with progress tracking">⤢ Full player</button>
+        ${saved
+          ? `<button type="button" class="is-done" disabled>✓ Saved</button>`
+          : `<button type="button" onclick="ytoSaveChannelVideo('${id}', this)">＋ Save</button>`}
+        <button type="button" onclick="ytoChanClosePlayer()" aria-label="Close player">✕</button>
+      </div>
+    </div>
+  </section>`;
+}
+
+/* YouTube-style filter chip row. */
+function ytoChanChipsHtml(chips, active, handler) {
+  return `<div class="yto-chan-chips">${chips.map(([key, label]) =>
+    `<button type="button" class="yto-chan-chip2${active === key ? ' active' : ''}"
+      onclick="${handler}('${key}')">${label}</button>`).join('')}</div>`;
+}
+
+function ytoChanSearchHtml(placeholder) {
+  return `<div class="yto-chan-search">
+    <span aria-hidden="true">⌕</span>
+    <input type="search" value="${escapeHtml(_ytoChanQuery)}" placeholder="${escapeHtml(placeholder)}"
+      aria-label="${escapeHtml(placeholder)}" oninput="ytoChanSearch(this.value)">
+  </div>`;
 }
 
 function ytoChanTabLoading(msg) {
@@ -2138,6 +2214,52 @@ async function ytoRenderChanTabPanel() {
     return;
   }
 
+  /* ── A playlist opened inside the channel (YouTube's playlist page) ── */
+  if (_ytoChanOpenPl) {
+    const plId = _ytoChanOpenPl;
+    let rows = null;
+    try { rows = ytCacheGet('chanpls', channelId); } catch (e) {}
+    const pmeta = (rows || []).find(r => r.id === plId) || { id: plId, title: 'Playlist', itemCount: 0 };
+    let vids = null;
+    try { vids = ytCacheGet('vids', plId); } catch (e) {}
+    if (!vids) {
+      ytoChanTabLoading('Playlist ke videos load ho rahe hain...');
+      vids = await ytFetchPlaylistVideos(plId).catch(() => null);
+      if (stale()) return;
+    }
+    if (!vids || !vids.length) {
+      panel.innerHTML = `${ytoChanPlayerHtml()}
+        <button type="button" class="yto-chan-back" onclick="ytoChanClosePlaylist()">← Playlists</button>
+        <div class="yto-filter-empty"><span aria-hidden="true">▤</span>
+          <h3>Is playlist ke videos load nahi hue</h3>
+          <p>Public hai? API quota check karo.</p></div>`;
+      return;
+    }
+    let durMap = {};
+    try { durMap = await ytFetchDurations(vids); } catch (e) {}
+    if (stale()) return;
+    const imported = !!ytoLib()[plId];
+    const totalSecs = vids.reduce((t, v) => t + (durMap[v.id] || 0), 0);
+    const q = _ytoChanQuery;
+    const shown = q ? vids.filter(v => (v.title || '').toLowerCase().includes(q)) : vids;
+    panel.innerHTML = `${ytoChanPlayerHtml()}
+      <button type="button" class="yto-chan-back" onclick="ytoChanClosePlaylist()">← All playlists</button>
+      <div class="yto-library-heading">
+        <div><span class="yto-eyebrow">Playlist</span><h3>${escapeHtml(pmeta.title)}</h3></div>
+        <span>${vids.length} videos${totalSecs ? ' · ' + ytoFmtHM(totalSecs) : ''}</span>
+      </div>
+      <div class="yto-chan-plactions">
+        ${imported
+          ? `<button type="button" class="primary" onclick="ytoOpenCourse('${escapeHtml(plId)}')">Open saved course →</button>`
+          : `<button type="button" class="primary" onclick="ytoImportChannelPlaylist('${escapeHtml(plId)}', this)">＋ Import whole playlist</button>`}
+      </div>
+      ${ytoChanSearchHtml('Search in this playlist')}
+      ${shown.length
+        ? `<ol class="yto-chan-vlist">${shown.map((v, i) => ytoChanRowHtml(v, i + 1, durMap)).join('')}</ol>`
+        : `<div class="yto-chan-tab-loading">Koi video match nahi hui.</div>`}`;
+    return;
+  }
+
   /* ── Playlists (all of them, imported or not) ── */
   if (_ytoChanTab === 'playlists') {
     let rows = null;
@@ -2154,36 +2276,94 @@ async function ytoRenderChanTabPanel() {
       return;
     }
     const lib = ytoLib();
-    const sorted = rows.slice().sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
-    panel.innerHTML = `<div class="yto-yt-grid">${
-      sorted.map(pl => ytoChanPlaylistCardHtml(pl, !!lib[pl.id])).join('')}</div>`;
+    const q = _ytoChanQuery;
+    const sorted = rows.slice()
+      .filter(pl => !q || (pl.title || '').toLowerCase().includes(q))
+      .sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
+    panel.innerHTML = `${ytoChanPlayerHtml()}
+      ${ytoChanSearchHtml('Search playlists')}
+      ${sorted.length
+        ? `<div class="yto-yt-grid">${sorted.map(pl => ytoChanPlaylistCardHtml(pl, !!lib[pl.id])).join('')}</div>`
+        : `<div class="yto-chan-tab-loading">Koi playlist match nahi hui.</div>`}`;
     return;
   }
 
-  /* ── Videos (latest uploads) ── */
+  /* ── Videos (uploads, with YouTube's Latest / Popular / Oldest sorts) ── */
   const meta = ytoChannelMeta(channelId);
   const uploads = meta.uploads || ('UU' + String(channelId).slice(2));
-  let vids = null;
-  try { vids = ytCacheGet('ups', channelId); } catch (e) {}
-  if (!vids) {
+  let vids = await ytFetchChannelUploads(channelId, uploads, YTO_UPLOAD_WINDOW).catch(() => null);
+  if (vids === null) {
     ytoChanTabLoading('Videos load ho rahe hain...');
-    vids = await ytFetchChannelUploads(channelId, uploads, 60).catch(() => null);
-    if (stale()) return;
+    vids = await ytFetchChannelUploads(channelId, uploads, YTO_UPLOAD_WINDOW).catch(() => null);
   }
+  if (stale()) return;
   if (!vids || !vids.length) {
     panel.innerHTML = `<div class="yto-filter-empty"><span aria-hidden="true">▶</span>
       <h3>Videos load nahi hue</h3>
       <p>API quota / key check karo, ya thodi der baad try karo.</p></div>`;
     return;
   }
+
   let durMap = {};
   try { durMap = await ytFetchDurations(vids); } catch (e) {}
   if (stale()) return;
-  const lib = ytoLib();
+  // View counts are only needed for the meta line and the Popular sort
+  let viewMap = {};
+  try { viewMap = await ytFetchViewCounts(channelId, vids); } catch (e) {}
+  if (stale()) return;
+
   const savedIds = new Set();
-  Object.values(lib).forEach(pl => (pl.videos || []).forEach(v => savedIds.add(v.id)));
-  panel.innerHTML = `<div class="yto-yt-grid">${
-    vids.map(v => ytoChanVideoCardHtml(v, durMap, savedIds.has(v.id))).join('')}</div>`;
+  Object.values(ytoLib()).forEach(pl => (pl.videos || []).forEach(v => savedIds.add(v.id)));
+
+  const q = _ytoChanQuery;
+  let list = vids.slice().filter(v => !q || (v.title || '').toLowerCase().includes(q));
+  if (_ytoVidSort === 'popular') {
+    list.sort((a, b) => (viewMap[b.id] || 0) - (viewMap[a.id] || 0));
+  } else if (_ytoVidSort === 'oldest') {
+    list.sort((a, b) => new Date(a.publishedAt || 0) - new Date(b.publishedAt || 0));
+  } else {
+    list.sort((a, b) => new Date(b.publishedAt || 0) - new Date(a.publishedAt || 0));
+  }
+
+  panel.innerHTML = `${ytoChanPlayerHtml()}
+    ${ytoChanChipsHtml([['latest', 'Latest'], ['popular', 'Popular'], ['oldest', 'Oldest']], _ytoVidSort, 'ytoChanSetVidSort')}
+    ${ytoChanSearchHtml('Search videos')}
+    ${list.length
+      ? `<div class="yto-yt-grid">${list.map(v => ytoChanVideoCardHtml(v, durMap, savedIds.has(v.id), viewMap)).join('')}</div>`
+      : `<div class="yto-chan-tab-loading">Koi video match nahi hui.</div>`}
+    ${vids.length >= YTO_UPLOAD_WINDOW
+      ? `<div class="yto-chan-note">Showing the latest ${YTO_UPLOAD_WINDOW} uploads. Sorting applies to these.</div>` : ''}`;
+}
+
+function ytoChanOpenPlaylist(plId) {
+  _ytoChanOpenPl = plId;
+  _ytoChanQuery = '';
+  ytoRenderChanTabPanel();
+  window.scrollTo(0, 0);
+}
+
+function ytoChanClosePlaylist() {
+  _ytoChanOpenPl = null;
+  _ytoChanQuery = '';
+  ytoRenderChanTabPanel();
+}
+
+/* A compact numbered row for a playlist's videos (YouTube's playlist list). */
+function ytoChanRowHtml(v, n, durMap) {
+  const id = escapeHtml(v.id);
+  const title = escapeHtml(v.title || 'Video');
+  const dur = (durMap || {})[v.id] || 0;
+  const playing = _ytoChanPlaying && _ytoChanPlaying.id === v.id;
+  return `<li class="yto-chan-vrow${playing ? ' is-playing' : ''}">
+    <button type="button" onclick="ytoChanPlay('${id}', ${JSON.stringify(v.title || 'Video')})">
+      <span class="yto-chan-vnum">${playing ? '▶' : n}</span>
+      <span class="yto-chan-vthumb"><img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt="" loading="lazy" onerror="this.style.display='none'"></span>
+      <span class="yto-chan-vmeta">
+        <strong title="${title}">${title}</strong>
+        <span>${dur ? ytFormatDuration(dur) : ''}${v.publishedAt ? (dur ? ' · ' : '') + escapeHtml(ytoFmtAgo(v.publishedAt)) : ''}</span>
+      </span>
+    </button>
+  </li>`;
 }
 
 /* "3 days ago" / "2 months ago" — YouTube-style relative upload date. */
@@ -2202,21 +2382,27 @@ function ytoFmtAgo(iso) {
 }
 
 /* A YouTube-style video tile: 16:9 thumb, duration badge, 2-line title. */
-function ytoChanVideoCardHtml(v, durMap, alreadySaved) {
+function ytoChanVideoCardHtml(v, durMap, alreadySaved, viewMap) {
   const dur = (durMap || {})[v.id] || v.duration || 0;
+  const views = (viewMap || {})[v.id];
   const id = escapeHtml(v.id);
   const title = escapeHtml(v.title || 'Video');
-  return `<article class="yto-yt-card">
-    <button type="button" class="yto-yt-thumb" onclick="ytoWatchChannelVideo('${id}')" aria-label="Play ${title}">
+  const jsTitle = JSON.stringify(v.title || 'Video');
+  const playing = _ytoChanPlaying && _ytoChanPlaying.id === v.id;
+  // YouTube's meta line: "1.2M views · 3 days ago"
+  const meta = [views != null ? ytoFmtCount(views) + ' views' : '', ytoFmtAgo(v.publishedAt)]
+    .filter(Boolean).join(' · ');
+  return `<article class="yto-yt-card${playing ? ' is-playing' : ''}">
+    <button type="button" class="yto-yt-thumb" onclick="ytoChanPlay('${id}', ${jsTitle})" aria-label="Play ${title}">
       <img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt="" loading="lazy" onerror="this.style.display='none'">
       ${dur ? `<span class="yto-yt-dur">${ytFormatDuration(dur)}</span>` : ''}
       <span class="yto-yt-play" aria-hidden="true">▶</span>
     </button>
     <div class="yto-yt-body">
       <h4 title="${title}">${title}</h4>
-      <div class="yto-yt-meta">${escapeHtml(ytoFmtAgo(v.publishedAt))}</div>
+      <div class="yto-yt-meta">${escapeHtml(meta)}</div>
       <div class="yto-yt-actions">
-        <button type="button" onclick="ytoWatchChannelVideo('${id}')">▶ Watch</button>
+        <button type="button" onclick="ytoChanPlay('${id}', ${jsTitle})">▶ Play</button>
         ${alreadySaved
           ? `<button type="button" class="is-done" disabled>✓ Saved</button>`
           : `<button type="button" onclick="ytoSaveChannelVideo('${id}', this)">＋ Save</button>`}
@@ -2237,19 +2423,24 @@ function ytoChanPlaylistCardHtml(pl, imported) {
     const prog = ytoCourseProgress(ytoLib()[pl.id]);
     footer = `<div class="yto-yt-prog"><i style="width:${prog.pct}%"></i></div>
       <div class="yto-yt-actions">
+        <button type="button" onclick="ytoChanOpenPlaylist('${id}')">View</button>
         <button type="button" onclick="ytoOpenCourse('${id}')">Open · ${prog.pct}%</button>
       </div>`;
   } else {
     footer = `<div class="yto-yt-actions">
+        <button type="button" onclick="ytoChanOpenPlaylist('${id}')">View</button>
         <button type="button" onclick="ytoImportChannelPlaylist('${id}', this)">＋ Import</button>
       </div>`;
   }
+  // Tapping the cover browses the playlist's videos, like YouTube — you can
+  // look inside before deciding to import it.
   return `<article class="yto-yt-card${imported ? ' is-imported' : ''}">
-    <div class="yto-yt-thumb as-playlist">
+    <button type="button" class="yto-yt-thumb" onclick="ytoChanOpenPlaylist('${id}')" aria-label="View ${title}">
       ${thumb ? `<img src="${thumb}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
       <span class="yto-yt-dur">▤ ${count}</span>
       ${imported ? `<span class="yto-yt-badge">In library</span>` : ''}
-    </div>
+      <span class="yto-yt-play" aria-hidden="true">▤</span>
+    </button>
     <div class="yto-yt-body">
       <h4 title="${title}">${title}</h4>
       <div class="yto-yt-meta">${count} ${count === 1 ? 'video' : 'videos'}</div>
