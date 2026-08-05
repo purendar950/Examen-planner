@@ -3228,6 +3228,31 @@ html:not([data-theme="light"]) .topbar {
   background: var(--accent-dim, transparent);
 }
 
+/* Jump-to-channel buttons shown when every course lives inside a channel */
+.yto-chan-jump {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: .9rem;
+}
+.yto-chan-jump button {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .4rem .8rem .4rem .45rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font-size: .78rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+}
+.yto-chan-jump button:hover { border-color: var(--accent); color: var(--accent); }
+.yto-chan-jump img { width: 26px; height: 26px; border-radius: 50%; }
+
 /* ── Channel page tab bar ── */
 .yto-chan-tabs {
   display: flex;

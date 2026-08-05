@@ -643,6 +643,16 @@ function ytoRenderLibrary() {
   const sortEl = document.getElementById('yto-library-sort');
   const entries = Object.values(ytoLib()).filter(pl => pl && Array.isArray(pl.videos));
 
+  // Courses that came from a channel live INSIDE that channel's page, so they
+  // stay out of the top-level grid — importing a 73-playlist channel would
+  // otherwise bury every standalone course. The channel record must still
+  // exist: "Forget channel" keeps the courses, and they belong back in the grid.
+  const chans = ytoChannels();
+  const ownedByChannel = pl => !!(pl.channelId && chans[pl.channelId]);
+  const standalone = entries.filter(pl => !ownedByChannel(pl));
+  const inChannels = entries.length - standalone.length;
+
+  // Overview counts EVERYTHING — it's the total study load, channel or not.
   ytoRenderLibraryOverview(entries);
   ytoRenderChannelStrip();
   if (controls) controls.hidden = !entries.length;
@@ -652,7 +662,7 @@ function ytoRenderLibrary() {
     content.innerHTML = `<div class="yto-library-empty">
       <div class="yto-empty-art" aria-hidden="true"><span>▶</span></div>
       <h3>Build your first course library</h3>
-      <p>Paste a public playlist or video above. StudyPlanner will keep the content, progress, and study plan together.</p>
+      <p>Paste a public playlist or video above, or add a whole YouTube channel.</p>
       <button type="button" onclick="document.getElementById('yto-url-input').focus()">Add your first course</button>
     </div>`;
     return;
@@ -660,7 +670,26 @@ function ytoRenderLibrary() {
 
   const query = (searchEl?.value || '').trim().toLowerCase();
   const sort = sortEl?.value || 'recent';
-  let visible = entries.filter(pl => {
+
+  // Everything the user has is inside channels — say so instead of showing the
+  // "build your first library" state, which would look like data loss.
+  if (!query && !standalone.length) {
+    const list = Object.values(chans).filter(c => c && c.id);
+    content.innerHTML = `<div class="yto-library-empty">
+      <div class="yto-empty-art" aria-hidden="true"><span>▤</span></div>
+      <h3>Your courses live inside your channels</h3>
+      <p>Open a channel above to see its playlists and videos, or paste a playlist link to add a standalone course.</p>
+      <div class="yto-chan-jump">${list.map(c => `<button type="button" onclick="ytoOpenChannel('${escapeHtml(c.id)}')">
+        ${c.thumb ? `<img src="${escapeHtml(c.thumb)}" alt="" onerror="this.style.display='none'">` : ''}
+        <span>${escapeHtml(c.title)}</span>
+      </button>`).join('')}</div>
+    </div>`;
+    return;
+  }
+
+  // Searching looks through channel courses too, so nothing is ever unfindable
+  const base = query ? entries : standalone;
+  let visible = base.filter(pl => {
     const progress = ytoCourseProgress(pl);
     const matchesSearch = !query || `${pl.title || ''} ${pl.channel || ''}`.toLowerCase().includes(query);
     const matchesStatus = ytoLibraryFilter === 'all'
@@ -694,9 +723,15 @@ function ytoRenderLibrary() {
     return;
   }
 
+  const aside = query
+    ? `${visible.length} of ${entries.length} shown${inChannels ? ' · includes channel courses' : ''}`
+    : (inChannels
+        ? `${inChannels} more inside ${Object.keys(chans).length === 1 ? 'your channel' : 'your channels'}`
+        : (standalone.length === visible.length ? 'Everything in one place' : `${visible.length} of ${standalone.length} shown`));
+
   content.innerHTML = `<div class="yto-library-heading">
       <div><span class="yto-eyebrow">My courses</span><h3>${visible.length} ${visible.length === 1 ? 'course' : 'courses'}</h3></div>
-      <span>${entries.length === visible.length ? 'Everything in one place' : `${visible.length} of ${entries.length} shown`}</span>
+      <span>${aside}</span>
     </div>
     <div class="yto-course-grid">${visible.map(pl => ytoCourseCardHtml(pl)).join('')}</div>`;
 }
@@ -2077,14 +2112,29 @@ async function ytoRenderChanTabPanel() {
   if (_ytoChanTab === 'saved') {
     const courses = ytoChannelCourses(channelId)
       .slice().sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
-    panel.innerHTML = courses.length
-      ? `<div class="yto-course-grid">${courses.map(pl => ytoCourseCardHtml(pl)).join('')}</div>`
-      : `<div class="yto-filter-empty">
+    if (!courses.length) {
+      panel.innerHTML = `<div class="yto-filter-empty">
            <span aria-hidden="true">▤</span>
            <h3>Nothing saved from this channel yet</h3>
-           <p>Open the Playlists tab and import what you need.</p>
+           <p>Open the Playlists or Videos tab and add what you need.</p>
            <button type="button" onclick="ytoChanSetTab('playlists')">Browse playlists</button>
          </div>`;
+      return;
+    }
+    // Playlists and single videos are both saved here, so label them apart
+    // rather than mixing two different kinds of thing in one anonymous grid.
+    const pls = courses.filter(pl => pl.type !== 'video');
+    const vids = courses.filter(pl => pl.type === 'video');
+    const section = (label, items) => items.length
+      ? `<div class="yto-library-heading" style="margin-top:.25rem;">
+           <div><span class="yto-eyebrow">${label}</span>
+             <h3>${items.length} ${items.length === 1 ? label.replace(/s$/, '') : label}</h3></div>
+         </div>
+         <div class="yto-course-grid" style="margin-bottom:1.1rem;">${items.map(pl => ytoCourseCardHtml(pl)).join('')}</div>`
+      : '';
+    panel.innerHTML = (pls.length && vids.length)
+      ? section('Playlists', pls) + section('Videos', vids)
+      : `<div class="yto-course-grid">${courses.map(pl => ytoCourseCardHtml(pl)).join('')}</div>`;
     return;
   }
 
