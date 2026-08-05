@@ -1722,10 +1722,115 @@
   }
   window.notesFocusRefreshPrivateMarks = notesFocusRefreshPrivateMarks;
 
+  /* ── Real fullscreen inside Notes Focus ──────────────────────────────────
+     Notes Focus is already a fixed full-viewport layer, so it fills the page
+     viewport; what it cannot reclaim on its own is the browser's chrome (tab
+     strip + address bar), which is most of the wasted height on laptops and
+     Android. Requesting Fullscreen on #ai-sub — the very node that carries
+     .ai-notes-focus — keeps the toolbar, annotation bar and mini-video dock as
+     descendants, so every Focus control stays available while fullscreen.
+     Document/native PiP is the one exception: it opens an OS-level window that
+     a fullscreen tab paints over, so those actions drop back to windowed mode
+     (see notesFocusVideoAction). */
+  function notesFocusFullscreenNode() {
+    return document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement || null;
+  }
+
+  function notesFocusFullscreenActive(box) {
+    var node = notesFocusFullscreenNode();
+    return !!(box && node && (node === box || box.contains(node)));
+  }
+
+  function notesFocusIsFullscreen() {
+    return notesFocusFullscreenActive(_notesFocus && _notesFocus.box);
+  }
+
+  function notesFocusFullscreenSupported(box) {
+    if (!box) return false;
+    // iPhone Safari exposes element fullscreen for <video> only; treat that as
+    // unsupported so the control can hide instead of failing on every tap.
+    if (document.fullscreenEnabled === false || document.webkitFullscreenEnabled === false) return false;
+    return !!(box.requestFullscreen || box.webkitRequestFullscreen || box.msRequestFullscreen);
+  }
+
+  function notesFocusEnterFullscreen() {
+    var box = _notesFocus && _notesFocus.box;
+    if (!box) return Promise.resolve(false);
+    if (notesFocusFullscreenActive(box)) return Promise.resolve(true);
+    var result;
+    try {
+      if (box.requestFullscreen) {
+        // navigationUI:'hide' also reclaims the Android system navigation bar.
+        // Only the standard method accepts options; legacy WebKit/MS ignore them.
+        result = box.requestFullscreen({ navigationUI: 'hide' });
+      } else {
+        var legacy = box.webkitRequestFullscreen || box.msRequestFullscreen;
+        if (!legacy) return Promise.resolve(false);
+        result = legacy.call(box);
+      }
+    } catch (e) { result = Promise.reject(e); }
+    var settled = (result && typeof result.then === 'function') ? result : Promise.resolve();
+    return settled.then(function () { return true; }, function () {
+      // Permissions policy, a frame without allowfullscreen, or a spent user
+      // gesture. Focus Mode still fills the window, so this is degraded rather
+      // than broken — say so instead of appearing to ignore the tap.
+      if (typeof showToast === 'function') showToast('This browser blocked fullscreen. Focus Mode is still filling the window.', 'info');
+      return false;
+    }).then(function (ok) { notesFocusPaintFullscreenAction(); return ok; });
+  }
+
+  function notesFocusExitFullscreen(box) {
+    box = box || (_notesFocus && _notesFocus.box);
+    if (!notesFocusFullscreenActive(box)) return Promise.resolve(false);
+    var exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if (!exit) return Promise.resolve(false);
+    var done;
+    try {
+      var p = exit.call(document);
+      done = (p && typeof p.then === 'function') ? p.catch(function () {}) : Promise.resolve();
+    } catch (e) { done = Promise.resolve(); }
+    return done.then(function () { notesFocusPaintFullscreenAction(); return true; });
+  }
+
+  function notesFocusPaintFullscreenAction() {
+    var box = _notesFocus && _notesFocus.box;
+    var btn = box && box.querySelector('#ai-focus-fullscreen');
+    if (!btn) return;
+    if (!notesFocusFullscreenSupported(box)) {
+      // A control that can never work is worse than no control.
+      if (!btn.hidden) { btn.hidden = true; btn.dataset.fsOn = ''; }
+      return;
+    }
+    var on = notesFocusFullscreenActive(box);
+    var flag = on ? '1' : '0';
+    if (!btn.hidden && btn.dataset.fsOn === flag) return;
+    // The glyph stays constant so the control never shifts width next to Exit;
+    // state is carried by aria-pressed, the tooltip and the active fill.
+    var title = on
+      ? 'Exit full screen — show the browser tabs and address bar again (Esc)'
+      : 'Full screen — hide the browser tabs and address bar';
+    btn.hidden = false;
+    btn.dataset.fsOn = flag;
+    btn.title = title;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.setAttribute('aria-label', title.replace(/ —/, '.'));
+    btn.classList.toggle('ai-focus-control-active', on);
+  }
+
+  function notesFocusToggleFullscreen() {
+    if (!_notesFocus) return;
+    if (notesFocusIsFullscreen()) notesFocusExitFullscreen();
+    else notesFocusEnterFullscreen();
+  }
+
   function notesFocusToolbarHtml() {
     return '<div class="ai-focus-toolbar" role="toolbar" aria-label="Notes Focus Mode controls">' +
       '<div class="ai-focus-heading">' +
         '<button type="button" class="ai-focus-control ai-focus-close" id="ai-focus-close" aria-label="Exit Notes Focus Mode" title="Exit Focus Mode (Esc)">←</button>' +
+        // Grouped with Exit rather than in .ai-focus-actions: that row already
+        // overflows into a horizontal scroller on phones, which would leave this
+        // control off-screen. The heading cluster never scrolls.
+        '<button type="button" class="ai-focus-control ai-focus-fullscreen" id="ai-focus-fullscreen" aria-pressed="false" aria-label="Full screen. Hide the browser tabs and address bar" title="Full screen — hide the browser tabs and address bar">⛶</button>' +
         '<span class="ai-focus-title"><strong>Notes Focus</strong><small id="ai-focus-video-title">' + esc(curTitle()) + '</small></span>' +
       '</div>' +
       '<div class="ai-focus-actions">' +
@@ -1857,6 +1962,15 @@
     if (!_notesFocus) return;
     var btn = _notesFocus.box.querySelector('#ai-focus-video');
     var action = btn ? btn.dataset.action : '';
+    // Document/native PiP opens an OS-level window that a fullscreen tab would
+    // paint over, leaving the student with an invisible video. Drop back to
+    // windowed Focus Mode for those actions only. Deliberately not awaited: the
+    // exit resolves on a later task, and spending this click's user activation
+    // there is exactly what would make requestPictureInPicture() fail.
+    if (notesFocusIsFullscreen()) {
+      var pipActiveNow = notesFocusTurboState().pipActive;
+      if (action === 'regular' || (action === 'pip' && !pipActiveNow)) notesFocusExitFullscreen();
+    }
     if (action === 'locked') {
       if (typeof ezLockedMsg === 'function') ezLockedMsg('⚡ Turbo Player (4x speed + Picture-in-Picture)');
       else if (typeof showToast === 'function') showToast('Turbo Picture-in-Picture is available on Pro.', 'info');
@@ -1910,6 +2024,9 @@
     var title = _notesFocus.box.querySelector('#ai-focus-video-title');
     if (title) title.textContent = curTitle();
     notesFocusPaintVideoAction();
+    // Also covers exits that arrive without a fullscreenchange event, such as
+    // F11 or an Android gesture handled by the shell.
+    notesFocusPaintFullscreenAction();
   }
 
   function notesFocusFocusable(box) {
@@ -1950,6 +2067,9 @@
   function finishNotesFocusClose(restoreFocus) {
     var active = _notesFocus;
     if (!active) return;
+    // Never leave the browser fullscreen on a node whose focus styling is about
+    // to be stripped; that would strand the page in a chromeless dead state.
+    notesFocusExitFullscreen(active.box);
     _notesFocusReturn = { box: active.box, trigger: active.trigger };
     _notesFocus = null;
     clearInterval(active.clock);
@@ -2082,9 +2202,21 @@
   window.addEventListener('examzen:turbo-state', function () {
     if (_notesFocus) notesFocusPaintVideoAction();
   });
+  // Keep the toggle honest when fullscreen is left outside our button — Esc, the
+  // Android back gesture, or the browser's own exit affordance.
+  ['fullscreenchange', 'webkitfullscreenchange', 'MSFullscreenChange'].forEach(function (evt) {
+    document.addEventListener(evt, function () {
+      if (_notesFocus) notesFocusPaintFullscreenAction();
+    });
+  });
   document.addEventListener('keydown', function (e) {
     if (!_notesFocus) return;
     if (e.key === 'Escape') {
+      // The browser consumes Esc to leave fullscreen and that is not
+      // cancelable, so stop here: one keypress must not also tear down Focus
+      // Mode. Exit explicitly too, for shells that deliver the key without
+      // acting on it themselves.
+      if (notesFocusIsFullscreen()) { notesFocusExitFullscreen(); return; }
       e.preventDefault();
       var annotationBar = _notesFocus.box && _notesFocus.box.querySelector('#ai-focus-annotation-bar');
       if (annotationBar && !annotationBar.hidden) {
@@ -2150,6 +2282,8 @@
     if (focusClose) focusClose.onclick = requestNotesFocusClose;
     var focusVideo = box.querySelector('#ai-focus-video');
     if (focusVideo) focusVideo.onclick = notesFocusVideoAction;
+    var focusFullscreen = box.querySelector('#ai-focus-fullscreen');
+    if (focusFullscreen) focusFullscreen.onclick = notesFocusToggleFullscreen;
     var miniClose = box.querySelector('#ai-focus-mini-close');
     if (miniClose) miniClose.onclick = function () {
       if (focusVideo) focusVideo.dataset.action = 'mini-hide';

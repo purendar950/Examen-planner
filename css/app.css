@@ -5530,6 +5530,9 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
 }
 #page-youtube .ai-focus-control:disabled { opacity: .55; cursor: not-allowed; }
 #page-youtube .ai-focus-close { width: 36px; padding: 0; font-size: 1.05rem; }
+/* Icon-only, matching Exit, so the pair reads as one view-control cluster and
+   costs the title almost no width on phones. */
+#page-youtube .ai-focus-fullscreen { flex: 0 0 auto; width: 36px; padding: 0; font-size: .95rem; }
 #page-youtube .ai-focus-control.ai-follow-on {
   border-color: #08733a;
   background: #dff5e6;
@@ -5580,6 +5583,32 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
   font-weight: 800;
   text-align: center;
 }
+/* Real Fullscreen. The fullscreen element is #ai-sub itself, so the toolbar,
+   annotation bar and mini-video dock are all descendants and every Focus
+   control stays reachable — only the browser's own chrome is reclaimed. The UA
+   fullscreen rules already size and position the element with !important (UA
+   important outranks author important), so restating geometry here is both
+   unnecessary and impossible; only the painted surface needs declaring.
+   :fullscreen and :-webkit-full-screen must stay in separate rules: an unknown
+   pseudo-class invalidates an entire selector list. */
+#page-youtube #ai-sub.ai-notes-focus:fullscreen {
+  background:
+    radial-gradient(circle at 50% -20%, rgba(181, 218, 176, .28), transparent 42%),
+    #f5f0e4 !important;
+}
+#page-youtube #ai-sub.ai-notes-focus:-webkit-full-screen {
+  background:
+    radial-gradient(circle at 50% -20%, rgba(181, 218, 176, .28), transparent 42%),
+    #f5f0e4 !important;
+}
+/* The UA backdrop is black; match the reading surface so any sub-pixel gap or
+   letterboxing during the fullscreen transition does not flash. */
+#page-youtube #ai-sub.ai-notes-focus::backdrop { background: #f5f0e4; }
+/* Nothing overlays the bar once the browser chrome is gone, so the notch inset
+   that protects the windowed layout would only waste reading height. */
+#page-youtube #ai-sub.ai-notes-focus:fullscreen .ai-focus-toolbar { padding-top: .55rem; }
+#page-youtube #ai-sub.ai-notes-focus:-webkit-full-screen .ai-focus-toolbar { padding-top: .55rem; }
+
 /* The Focus toolbar replaces all in-panel chrome while active. */
 #page-youtube #ai-sub.ai-notes-focus > .ai-brandbar,
 #page-youtube #ai-sub.ai-notes-focus > .ai-meta-bar { display: none !important; }
@@ -5665,7 +5694,8 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
   }
   #page-youtube .ai-focus-heading { flex: 1 1 100%; }
   #page-youtube .ai-focus-title { flex: 1 1 auto; }
-  #page-youtube .ai-focus-title small { max-width: calc(100vw - 5.5rem); }
+  /* Exit + Full screen + their gaps now precede the title in this row. */
+  #page-youtube .ai-focus-title small { max-width: calc(100vw - 9rem); }
   #page-youtube .ai-focus-actions {
     width: 100%;
     gap: .35rem;
