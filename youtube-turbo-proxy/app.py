@@ -527,8 +527,18 @@ def _study_put(doc_id, data):
     behaviour). Returns True on success."""
     if _s3_enabled() and _s3_put_json(doc_id, data):
         # small index (metadata only) so the langs check + fetch still work
-        return _fs_set("study", doc_id, _study_index_doc(data))
-    return _fs_set("study", doc_id, data)     # fallback: full doc in Firestore
+        ok = _fs_set("study", doc_id, _study_index_doc(data))
+    else:
+        ok = _fs_set("study", doc_id, data)   # fallback: full doc in Firestore
+    # Freshly generated notes are the best corpus the advanced tutor has, so
+    # index them for semantic search now. Background + fire-and-forget: this must
+    # never delay or fail the response the student is waiting on.
+    if ok and data.get("mode") == "notes" and data.get("content"):
+        try:
+            _index_video_async(data.get("id"), data.get("out_lang") or "Hinglish")
+        except Exception:  # noqa: BLE001
+            pass
+    return ok
 
 
 def _study_get(doc_id):
@@ -1274,8 +1284,13 @@ def _load_ai_limits():
     now = time.time()
     if _ai_limits["data"] is not None and now - _ai_limits["ts"] < AI_LIMITS_TTL:
         return _ai_limits["data"]
+    # tutorAllPerHour/Day govern the library-scope (advanced) tutor. It gets its
+    # own budget because one library answer carries a far bigger context than a
+    # single-video message, so sharing the classic tutor's bucket would let a few
+    # library questions consume a whole day of normal chat.
     data = {"unlimited": {}, "focusUsers": {}, "studyPerHour": 15,
-            "tutorPerHour": 20, "tutorPerDay": 80}
+            "tutorPerHour": 20, "tutorPerDay": 80,
+            "tutorAllPerHour": 10, "tutorAllPerDay": 40}
     if _fb_db:
         try:
             doc = _fb_db.collection("config").document("aiLimits").get()
@@ -1289,7 +1304,8 @@ def _load_ai_limits():
                 if isinstance(fu, list):
                     fu = {u: True for u in fu}
                 data["focusUsers"] = fu
-                for k in ("studyPerHour", "tutorPerHour", "tutorPerDay"):
+                for k in ("studyPerHour", "tutorPerHour", "tutorPerDay",
+                          "tutorAllPerHour", "tutorAllPerDay"):
                     if isinstance(d.get(k), (int, float)):
                         data[k] = int(d[k])
         except Exception as exc:  # noqa: BLE001
@@ -4477,6 +4493,758 @@ def _tutor_prepare(body, user):
 
     return None, {"messages": messages, "ai": ai, "video_id": video_id,
                   "mode": mode, "transcript_lang": t.get("chosen_lang")}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  ADVANCED TUTOR — semantic retrieval over the student's own study material
+#  ─────────────────────────────────────────────────────────────────────────
+#  The classic tutor is grounded in ONE video's transcript, which fits in a
+#  single context window. The advanced ("library scope") tutor answers across
+#  every video in the student's organiser library, whose combined notes run to
+#  millions of tokens — far past any context window. So it retrieves first and
+#  answers second.
+#
+#  Retrieval is semantic (embeddings), not keyword, because the lectures are
+#  Hindi/Hinglish: "photosynthesis kaise hota hai" shares no characters with
+#  प्रकाश संश्लेषण, so keyword overlap silently misses most of the corpus.
+#
+#  Cost per question is deliberately ONE embedding call plus ONE chat call —
+#  the same chat cost as the classic tutor. A multi-call retrieve/rerank/answer
+#  pipeline would be unaffordable against free-tier quotas (a free account gets
+#  5 tutor messages/day, and Gemini's free tier allows 20 chat requests/day).
+#
+#  Rows in note_chunks are GLOBAL PER VIDEO, never per user — see the long
+#  rationale in supabase/note_chunks.sql. Storage and embedding cost are paid
+#  once per video, ever, across all users.
+#
+#  Degrades gracefully: with no Supabase credentials configured the endpoint
+#  still works, falling back to title-keyword routing plus whole-note context
+#  (see _retrieve_by_title). Quality is lower; nothing breaks.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Supabase project holding note_chunks — the SAME project as student_memory.
+# Writes use the SERVICE ROLE key (bypasses RLS), because note_chunks has RLS
+# enabled with no policies so the public anon key can neither read nor write it.
+MEMORY_SUPA_URL = os.environ.get("MEMORY_SUPA_URL", "").strip().rstrip("/")
+MEMORY_SUPA_SERVICE_KEY = os.environ.get("MEMORY_SUPA_SERVICE_KEY", "").strip()
+
+# Embedding model. Its output dimension MUST match note_chunks.embedding's
+# vector(768) — embeddings from different models are not comparable, so
+# switching model means altering the column and re-indexing every row. That is
+# why each row stores embed_model. text-embedding-004 is natively 768-dim and
+# multilingual, which is the property this whole feature depends on.
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "text-embedding-004").strip()
+EMBED_DIM = int(os.environ.get("EMBED_DIM", "768"))
+EMBED_ENDPOINT = os.environ.get(
+    "EMBED_ENDPOINT",
+    "https://generativelanguage.googleapis.com/v1beta/openai/embeddings").strip()
+EMBED_BATCH = int(os.environ.get("EMBED_BATCH", "32"))
+
+# Chunk sizing. Notes are dense and heading-structured so they chunk small;
+# raw ASR transcripts are low-density (no punctuation, repetition, filler) so
+# they chunk coarser — roughly halving transcript rows at little recall cost.
+NOTES_CHUNK_CHARS = int(os.environ.get("VEC_NOTES_CHUNK_CHARS", "2200"))
+TRANSCRIPT_CHUNK_CHARS = int(os.environ.get("VEC_TRANSCRIPT_CHUNK_CHARS", "4000"))
+LIBRARY_MAX_VIDEOS = int(os.environ.get("LIBRARY_MAX_VIDEOS", "400"))
+LIBRARY_TOP_K = int(os.environ.get("LIBRARY_TOP_K", "14"))
+
+
+def _vec_enabled():
+    return bool(MEMORY_SUPA_URL and MEMORY_SUPA_SERVICE_KEY)
+
+
+def _supa_headers():
+    return {"apikey": MEMORY_SUPA_SERVICE_KEY,
+            "Authorization": "Bearer " + MEMORY_SUPA_SERVICE_KEY,
+            "Content-Type": "application/json"}
+
+
+def _supa_rpc(fn, payload):
+    """Call a Postgres function via PostgREST. Returns parsed JSON or None.
+
+    PostgREST cannot express `order by embedding <=> $1`, so semantic search
+    lives in the match_chunks SQL function rather than in a URL query."""
+    if not _vec_enabled():
+        return None
+    try:
+        r = requests.post("%s/rest/v1/rpc/%s" % (MEMORY_SUPA_URL, fn),
+                          headers=_supa_headers(), json=payload,
+                          timeout=REQUEST_TIMEOUT)
+        if r.status_code >= 300:
+            log.warning("supabase rpc %s failed: HTTP %s %s", fn, r.status_code,
+                        r.text[:200])
+            return None
+        return r.json()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("supabase rpc %s threw: %s", fn, exc)
+        return None
+
+
+def _supa_upsert_chunks(rows):
+    """Insert chunk rows. Returns True on success."""
+    if not _vec_enabled() or not rows:
+        return False
+    try:
+        r = requests.post(
+            "%s/rest/v1/note_chunks?on_conflict=video_id,source,lang,chunk_index"
+            % MEMORY_SUPA_URL,
+            headers=dict(_supa_headers(), Prefer="resolution=merge-duplicates,return=minimal"),
+            json=rows, timeout=60)
+        if r.status_code >= 300:
+            log.warning("supabase chunk upsert failed: HTTP %s %s",
+                        r.status_code, r.text[:200])
+            return False
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("supabase chunk upsert threw: %s", exc)
+        return False
+
+
+def _embed_texts(texts):
+    """Embed a list of strings. Returns a list of vectors, or None on failure.
+
+    Uses the SAME googleApiKeys already configured in Firestore config/ai for
+    chat, so no new secret is needed. Embeddings are billed/quota'd separately
+    from chat completions, so this does not consume the chat request budget.
+    """
+    texts = [t for t in (texts or []) if t and t.strip()]
+    if not texts:
+        return []
+    cfg = {}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                cfg = doc.to_dict() or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/ai read failed for embeddings: %s", exc)
+    keys = _cfg_keys(cfg, "googleApiKeys") or _cfg_keys(cfg, "embedApiKeys")
+    if not keys:
+        log.warning("no embedding key configured (config/ai googleApiKeys is empty)")
+        return None
+
+    out = []
+    for start in range(0, len(texts), EMBED_BATCH):
+        batch = texts[start:start + EMBED_BATCH]
+        vectors = None
+        for key in keys:
+            try:
+                r = requests.post(EMBED_ENDPOINT,
+                                  headers={"Authorization": "Bearer " + key,
+                                           "Content-Type": "application/json"},
+                                  json={"model": EMBED_MODEL, "input": batch},
+                                  timeout=60)
+                if r.status_code >= 300:
+                    log.warning("embed HTTP %s: %s", r.status_code, r.text[:200])
+                    continue
+                data = (r.json() or {}).get("data") or []
+                vectors = [d.get("embedding") for d in data]
+                if len(vectors) != len(batch) or not all(vectors):
+                    log.warning("embed returned %d vectors for %d inputs",
+                                len(vectors), len(batch))
+                    vectors = None
+                    continue
+                bad = next((v for v in vectors if len(v) != EMBED_DIM), None)
+                if bad is not None:
+                    # Fail loudly rather than writing unusable rows: a mismatched
+                    # dimension means EMBED_MODEL and note_chunks.embedding
+                    # disagree, and Postgres would reject or silently corrupt.
+                    log.error("embed dimension mismatch: model %s returned %d, "
+                              "note_chunks.embedding is vector(%d). Fix EMBED_MODEL "
+                              "or alter the column and re-index.",
+                              EMBED_MODEL, len(bad), EMBED_DIM)
+                    return None
+                break
+            except Exception as exc:  # noqa: BLE001
+                log.warning("embed threw: %s", exc)
+                continue
+        if vectors is None:
+            return None
+        out.extend(vectors)
+        if start + EMBED_BATCH < len(texts):
+            time.sleep(0.2)          # be gentle with free-tier embedding quota
+    return out
+
+
+_TS_HEADING_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\b")
+
+
+def _heading_ts_seconds(heading):
+    """Parse the leading timestamp out of a heading like '3:45 Refraction'.
+
+    _notes_instr() asks the model to prefix each section with the nearest
+    [M:SS] marker, so most note headings carry one. Storing it per chunk is what
+    lets an answer cite '[Optics L3 @ 3:45]' and have the client turn that into
+    a tap that seeks the player (linkTs in js/features/ai-tutor.js)."""
+    m = _TS_HEADING_RE.match(heading or "")
+    if not m:
+        return None
+    a, b, c = m.group(1), m.group(2), m.group(3)
+    return (int(a) * 3600 + int(b) * 60 + int(c)) if c else (int(a) * 60 + int(b))
+
+
+def _chunk_notes_md(md, max_chars=None):
+    """Split notes markdown into retrievable chunks on heading boundaries.
+
+    Heading-aligned chunks beat fixed-size windows because a section is already
+    a coherent unit of meaning — and this costs nothing here, since _notes_instr
+    mandates ## / ### structure. Each chunk keeps its heading as a prefix so the
+    embedding captures the topic even when the body is a bare bullet list.
+
+    Returns [{heading, ts_seconds, text}].
+    """
+    max_chars = max_chars or NOTES_CHUNK_CHARS
+    md = (md or "").strip()
+    if not md:
+        return []
+
+    # Group lines into (heading, body) sections.
+    sections, cur_head, cur_body = [], "", []
+    for line in md.splitlines():
+        if line.strip().startswith("##"):
+            if cur_body or cur_head:
+                sections.append((cur_head, "\n".join(cur_body).strip()))
+            cur_head = line.strip().lstrip("#").strip()
+            cur_body = []
+        else:
+            cur_body.append(line)
+    if cur_body or cur_head:
+        sections.append((cur_head, "\n".join(cur_body).strip()))
+
+    chunks = []
+    for head, body in sections:
+        if not body and not head:
+            continue
+        ts = _heading_ts_seconds(head)
+        payload = ("%s\n%s" % (head, body)).strip() if head else body
+        if len(payload) <= max_chars:
+            if payload:
+                chunks.append({"heading": head, "ts_seconds": ts, "text": payload})
+            continue
+        # Oversized section: split on blank lines, re-prefixing the heading so
+        # every piece stays self-describing once retrieved out of context.
+        buf = []
+        size = 0
+        for para in re.split(r"\n\s*\n", body):
+            para = para.strip()
+            if not para:
+                continue
+            if size + len(para) > max_chars and buf:
+                chunks.append({"heading": head, "ts_seconds": ts,
+                               "text": ("%s\n%s" % (head, "\n\n".join(buf))).strip()})
+                buf, size = [], 0
+            buf.append(para)
+            size += len(para)
+        if buf:
+            chunks.append({"heading": head, "ts_seconds": ts,
+                           "text": ("%s\n%s" % (head, "\n\n".join(buf))).strip()})
+
+    # Absorb runt chunks forward — a 40-char section is noise in a vector index.
+    # But NEVER merge a section that carries its own timestamp: each distinct
+    # [M:SS] is a separate seek target, and collapsing them would coarsen every
+    # citation to whichever heading happened to come first.
+    merged = []
+    for ch in chunks:
+        if (merged and ch["ts_seconds"] is None and len(ch["text"]) < 200
+                and len(merged[-1]["text"]) + len(ch["text"]) <= max_chars):
+            merged[-1]["text"] += "\n" + ch["text"]
+        else:
+            merged.append(ch)
+    return merged
+
+
+def _chunk_transcript(segments, max_chars=None):
+    """Chunk raw caption segments into coarse windows, keeping a start time.
+
+    Coarser than notes on purpose: ASR output has no punctuation and repeats
+    heavily, so per-character information density is far lower."""
+    max_chars = max_chars or TRANSCRIPT_CHUNK_CHARS
+    chunks, buf, size, start = [], [], 0, None
+    for seg in (segments or []):
+        text = str((seg or {}).get("text") or "").strip()
+        if not text:
+            continue
+        if start is None:
+            try:
+                start = int(float(seg.get("start") or 0))
+            except (TypeError, ValueError):
+                start = 0
+        buf.append(text)
+        size += len(text) + 1
+        if size >= max_chars:
+            chunks.append({"heading": "", "ts_seconds": start,
+                           "text": " ".join(buf).strip()})
+            buf, size, start = [], 0, None
+    if buf:
+        chunks.append({"heading": "", "ts_seconds": start or 0,
+                       "text": " ".join(buf).strip()})
+    return chunks
+
+
+_indexing_inflight = set()
+_indexing_lock = threading.Lock()
+
+
+def _index_video(video_id, out_lang="Hinglish", force=False):
+    """Embed and store one video's chunks. Notes preferred, transcript fallback.
+
+    Notes are the better corpus by a wide margin — promo-stripped, deduped,
+    heading-structured and ~5-10x denser than raw captions — so a transcript is
+    only indexed when no notes exist for the video yet.
+
+    Safe to call repeatedly: an in-flight set stops two requests racing on the
+    same video, and existing rows short-circuit unless force=True."""
+    if not _vec_enabled() or not video_id:
+        return False
+    with _indexing_lock:
+        if video_id in _indexing_inflight:
+            return False
+        _indexing_inflight.add(video_id)
+    try:
+        if not force:
+            have = _supa_rpc("indexed_videos", {"vids": [video_id]}) or []
+            if have:
+                return True
+
+        source, lang, chunks = None, out_lang, []
+        # Prefer notes in the requested language, then any other language we hold.
+        for lang_try in (out_lang, "Hinglish", "English", "Hindi"):
+            _, fs_id = _study_text_cache_keys(video_id, "notes", lang_try, "")
+            doc = _study_get(fs_id)
+            content = (doc or {}).get("content")
+            if content:
+                source, lang = "notes", lang_try
+                chunks = _chunk_notes_md(content)
+                break
+        if not chunks:
+            t = _fs_get("transcripts", _fs_doc_id(video_id, "auto"))
+            if t and t.get("segments"):
+                source, lang = "transcript", (t.get("chosen_lang") or "auto")
+                chunks = _chunk_transcript(t["segments"])
+        if not chunks:
+            return False
+
+        vectors = _embed_texts([c["text"] for c in chunks])
+        if not vectors or len(vectors) != len(chunks):
+            return False
+
+        # Replace rather than merge: a shorter re-chunk would otherwise leave
+        # orphaned tail rows from the previous, longer chunking behind.
+        _supa_rpc("delete_video_chunks", {"vid": video_id, "src": source})
+        rows = []
+        for i, (ch, vec) in enumerate(zip(chunks, vectors)):
+            rows.append({"video_id": video_id, "source": source, "lang": lang,
+                         "chunk_index": i, "heading": (ch["heading"] or "")[:300],
+                         "ts_seconds": ch["ts_seconds"], "chunk_text": ch["text"],
+                         "embedding": vec, "embed_model": EMBED_MODEL})
+        ok = _supa_upsert_chunks(rows)
+        log.info("indexed %s: %d %s chunks -> %s", video_id, len(rows), source,
+                 "ok" if ok else "FAILED")
+        return ok
+    except Exception as exc:  # noqa: BLE001
+        log.warning("index %s threw: %s", video_id, exc)
+        return False
+    finally:
+        with _indexing_lock:
+            _indexing_inflight.discard(video_id)
+
+
+def _index_video_async(video_id, out_lang="Hinglish"):
+    """Fire-and-forget indexing so it never delays a user-facing response."""
+    if not _vec_enabled() or not video_id:
+        return
+    threading.Thread(target=_index_video, args=(video_id, out_lang),
+                     daemon=True).start()
+
+
+def _user_library(identity, course_id=None):
+    """The student's videos, from users/{uid}.appState.
+
+    No extra Firestore read: _verified_user_record already loaded the whole user
+    document, and the organiser library lives inside it. There is no per-user
+    index of generated notes anywhere (study docs carry no uid and Firestore is
+    only ever point-read here), so the library is the ONLY way to know which
+    videos belong to a student.
+
+    Returns [{video_id, title, course, course_id}], deduped, newest course first.
+    """
+    app_state = (identity.get("data") or {}).get("appState") or {}
+    out, seen = [], set()
+
+    def _add(vid, title, course_title, cid):
+        vid = str(vid or "").strip()
+        if not vid or vid in seen or len(out) >= LIBRARY_MAX_VIDEOS:
+            return
+        seen.add(vid)
+        out.append({"video_id": vid, "title": str(title or "").strip()[:200],
+                    "course": str(course_title or "").strip()[:120],
+                    "course_id": str(cid or "")})
+
+    lib = app_state.get("ytoLibrary")
+    if isinstance(lib, dict):
+        # Newest-added course first so a big library truncates the stalest.
+        def _added(item):
+            try:
+                return float((item[1] or {}).get("addedAt") or 0)
+            except (TypeError, ValueError):
+                return 0.0
+        for cid, course in sorted(lib.items(), key=_added, reverse=True):
+            if not isinstance(course, dict):
+                continue
+            if course_id and str(cid) != str(course_id):
+                continue
+            ctitle = course.get("title") or ""
+            vids = course.get("videos")
+            if isinstance(vids, list):
+                for v in vids:
+                    if isinstance(v, dict):
+                        _add(v.get("id"), v.get("title"), ctitle, cid)
+            # Single-video courses are keyed 'vid_<id>' and carry videoId.
+            if course.get("type") == "video" and course.get("videoId"):
+                _add(course.get("videoId"), ctitle, ctitle, cid)
+
+    # Legacy pre-organiser store. Shape varies, so probe defensively.
+    legacy = app_state.get("ytPlaylists")
+    if isinstance(legacy, dict) and not course_id:
+        for cid, pl in legacy.items():
+            if not isinstance(pl, dict):
+                continue
+            vids = pl.get("videos") or pl.get("items")
+            if isinstance(vids, list):
+                for v in vids:
+                    if isinstance(v, dict):
+                        _add(v.get("id") or v.get("videoId"), v.get("title"),
+                             pl.get("title") or "", cid)
+                    elif isinstance(v, str):
+                        _add(v, "", pl.get("title") or "", cid)
+    return out
+
+
+def _library_coverage(video_ids):
+    """How much of the library is searchable. Returns (indexed_ids, per_source).
+
+    Surfaced in the UI verbatim ("Searching 24 of 148 videos") because a tutor
+    that silently cannot see 124 videos looks broken rather than un-indexed."""
+    if not _vec_enabled() or not video_ids:
+        return set(), {}
+    rows = _supa_rpc("indexed_videos", {"vids": video_ids}) or []
+    ids, per_source = set(), {}
+    for r in rows:
+        if isinstance(r, dict) and r.get("video_id"):
+            ids.add(r["video_id"])
+            src = r.get("source") or "notes"
+            per_source[src] = per_source.get(src, 0) + 1
+    return ids, per_source
+
+
+_STOPWORDS = set("""the a an is are was were what how why can could would should this
+that it in on at to for of and or but with please explain tell me my do does did has
+have kya kaise kyu kyun hai hain ka ki ke ko se me mein aur ya par bata batao samjhao
+kar karo hota hoti""".split())
+
+
+def _keywords(text):
+    words = re.split(r"[^\w\u0900-\u097F]+", (text or "").lower())
+    return {w for w in words if len(w) > 2 and w not in _STOPWORDS}
+
+
+def _retrieve_semantic(question, video_ids, k=None):
+    """Embed the question and pull the nearest chunks inside the library."""
+    if not _vec_enabled() or not video_ids:
+        return None
+    vecs = _embed_texts([question])
+    if not vecs:
+        return None
+    rows = _supa_rpc("match_chunks", {"q": vecs[0], "vids": video_ids,
+                                      "k": int(k or LIBRARY_TOP_K)})
+    return rows if isinstance(rows, list) else None
+
+
+def _retrieve_by_title(question, videos, max_videos=3):
+    """Fallback when no vector store is configured.
+
+    Scores the question against video TITLES only (already in hand, zero reads),
+    then loads whole notes for the best few. Much weaker than semantic search —
+    it cannot bridge 'photosynthesis' to प्रकाश संश्लेषण, which is the entire
+    reason the vector path exists — but it keeps the feature usable before the
+    Supabase migration is run."""
+    qk = _keywords(question)
+    if not qk:
+        return []
+    scored = []
+    for v in videos:
+        overlap = len(qk & _keywords("%s %s" % (v.get("title"), v.get("course"))))
+        if overlap:
+            scored.append((overlap, v))
+    scored.sort(key=lambda p: p[0], reverse=True)
+    hits = []
+    for _, v in scored[:max_videos]:
+        for lang_try in ("Hinglish", "English", "Hindi"):
+            _, fs_id = _study_text_cache_keys(v["video_id"], "notes", lang_try, "")
+            doc = _study_get(fs_id)
+            content = (doc or {}).get("content")
+            if content:
+                for ch in _chunk_notes_md(content)[:6]:
+                    hits.append({"video_id": v["video_id"], "source": "notes",
+                                 "heading": ch["heading"],
+                                 "ts_seconds": ch["ts_seconds"],
+                                 "chunk_text": ch["text"], "distance": None})
+                break
+    return hits
+
+
+def _library_budget_tokens(ai):
+    """Input-token budget for retrieved context.
+
+    Mirrors _tutor_context_chars' reasoning but reserves a little more, since
+    this prompt also carries the citation contract and coverage line."""
+    ctx = _model_ctx_tokens(ai)
+    return max(1500, int(ctx * 0.6) - (_TUTOR_MAX_TOKENS + 4200))
+
+
+def _pack_library_context(hits, titles, ai):
+    """Render retrieved chunks into a citable context block within budget.
+
+    Token accounting is per-chunk via _chars_per_token, NOT a flat character
+    cap: Devanagari is ~1.2 chars/token against ASCII's ~4, so a character
+    budget overshoots by ~3.3x on Hindi content and would blow the window."""
+    budget = _library_budget_tokens(ai)
+    used, blocks, sources = 0, [], []
+    for h in hits:
+        text = (h.get("chunk_text") or "").strip()
+        if not text:
+            continue
+        vid = h.get("video_id") or ""
+        title = titles.get(vid, {}).get("title") or vid
+        ts = h.get("ts_seconds")
+        label = "%s @ %s" % (title, _fmt_mmss(ts)) if ts is not None else title
+        if (h.get("source") or "notes") == "transcript":
+            label += " (transcript \u2014 no notes generated yet)"
+        head = "[%d] %s" % (len(blocks) + 1, label)
+        block = "%s\n%s" % (head, text)
+        cost = int(len(block) / max(0.5, _chars_per_token(block))) + 8
+        if blocks and used + cost > budget:
+            break
+        used += cost
+        blocks.append(block)
+        sources.append({"video_id": vid, "title": title, "ts": ts,
+                        "source": h.get("source") or "notes"})
+    return "\n\n".join(blocks), sources
+
+
+def _library_sys(out_lang, scope_label, coverage_line, uncovered_titles):
+    return (
+        "You are an exam-prep AI tutor with access to this student's OWN study "
+        "notes across %s. Below are the most relevant passages retrieved from "
+        "their notes.\n\n"
+        "%s\n\n"
+        "HOW TO ANSWER:\n"
+        "- Answer primarily from the RETRIEVED PASSAGES. Open with a heading "
+        "line exactly '**From your notes:**' and cite every claim as "
+        "[video title @ M:SS] using the label shown above each passage. Keep the "
+        "M:SS form exactly \u2014 the app turns it into a tap that seeks the video.\n"
+        "- You MAY add knowledge beyond their notes, but ONLY after a separate "
+        "heading line exactly '**Beyond your notes:**'. Never blend the two: the "
+        "student is revising for an exam and must be able to tell what their own "
+        "lecture actually said from what you added.\n"
+        "- If the passages do not cover the question, say so plainly in one line "
+        "before the 'Beyond your notes' section. Do not invent a citation, and "
+        "never cite a video that is not listed above.\n"
+        "%s"
+        "- Be concise and concrete. Prefer the student's own wording and "
+        "terminology over your own phrasing.\n"
+        "%s"
+        % (scope_label, coverage_line,
+           ("- These of their videos look related but were NOT retrieved: %s. "
+            "If the answer likely lives there, say so and suggest opening that "
+            "video's tutor directly.\n" % ", ".join(uncovered_titles[:5]))
+           if uncovered_titles else "",
+           _lang_rule(out_lang))
+    )
+
+
+def _library_prepare(body, user):
+    """Shared setup for the library-scope tutor endpoints.
+
+    Returns (err, data) with exactly one non-None, mirroring _tutor_prepare."""
+    question = str(body.get("q") or body.get("question") or "").strip()
+    out_lang = str(body.get("out") or "Hinglish").strip() or "Hinglish"
+    scope = str(body.get("scope") or "library").strip().lower()
+    course_id = str(body.get("course_id") or "").strip()[:120] or None
+    history = body.get("history") or []
+    student_memory = str(body.get("memory") or "").strip()[:1500]
+    if not question:
+        return ({"error": "missing_question", "detail": "Ask a question."}, 400), None
+    if scope not in ("library", "course"):
+        return ({"error": "bad_scope",
+                 "detail": "scope must be 'library' or 'course'."}, 400), None
+
+    uid = user["uid"]
+    # Library answers carry far larger contexts than single-video chat, so they
+    # get their own budget instead of sharing the classic tutor's.
+    if not _is_unlimited(uid):
+        lims = _load_ai_limits()
+        if (not _rate_ok("tutor_all_h", uid, lims["tutorAllPerHour"], 3600)
+                or not _rate_ok("tutor_all_d", uid, lims["tutorAllPerDay"], 86400)):
+            return ({"error": "rate_limited",
+                     "detail": "Library-wide question limit reached. Try later, or "
+                               "ask about a single video."}, 429), None
+
+    videos = _user_library(user, course_id if scope == "course" else None)
+    if not videos:
+        return ({"error": "empty_library",
+                 "detail": "No videos found in your library yet. Add a playlist in "
+                           "the Organiser first."}, 200), None
+
+    req_model = str(body.get("model") or "").strip()[:80]
+    req_provider = str(body.get("provider") or "").strip()[:40]
+    ai = _load_ai_config(req_model or None, req_provider or None)
+    if not _ai_configured(ai):
+        return ({"error": "ai_not_configured",
+                 "detail": "Add an AI key in the admin panel."}, 503), None
+
+    titles = {v["video_id"]: v for v in videos}
+    video_ids = [v["video_id"] for v in videos]
+
+    indexed, _ = _library_coverage(video_ids)
+    hits = _retrieve_semantic(question, video_ids) if _vec_enabled() else None
+    mode_used = "semantic"
+    if hits is None:
+        hits, mode_used = _retrieve_by_title(question, videos), "keyword"
+
+    # Warm the index for library videos we could not search, so the NEXT
+    # question is better. Deliberately fire-and-forget: making this request wait
+    # on embedding would trade a permanent latency cost for a one-off gain.
+    if _vec_enabled():
+        qk = _keywords(question)
+        cold = [v for v in videos if v["video_id"] not in indexed
+                and qk & _keywords("%s %s" % (v.get("title"), v.get("course")))]
+        for v in cold[:3]:
+            _index_video_async(v["video_id"], out_lang)
+
+    context, sources = _pack_library_context(hits or [], titles, ai)
+    if not context:
+        context = "(no passages retrieved)"
+
+    scope_label = ("the course \u201c%s\u201d" % (videos[0].get("course") or "this course")) \
+        if scope == "course" else "their whole video library"
+    if _vec_enabled():
+        coverage_line = ("COVERAGE: %d of %d videos in scope are indexed and "
+                         "searchable." % (len(indexed), len(videos)))
+    else:
+        coverage_line = ("COVERAGE: semantic search is not configured on this "
+                         "server, so passages were found by title match only and "
+                         "may be incomplete.")
+
+    used_ids = {s["video_id"] for s in sources}
+    qk = _keywords(question)
+    uncovered = [v["title"] for v in videos
+                 if v["video_id"] not in used_ids and v.get("title")
+                 and qk & _keywords(v["title"])][:5]
+
+    sysmsg = _library_sys(out_lang, scope_label, coverage_line, uncovered)
+    if student_memory:
+        sysmsg += ("\n\nWHAT YOU KNOW ABOUT THIS STUDENT (from past sessions \u2014 "
+                   "adapt to it, don't repeat it back):\n%s" % student_memory)
+    sysmsg += "\n\nRETRIEVED PASSAGES:\n%s" % context
+    sysmsg += _lang_reminder(out_lang)
+
+    messages = [{"role": "system", "content": sysmsg}]
+    for m in (history or [])[-6:]:
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
+            messages.append({"role": m["role"], "content": str(m["content"])[:2000]})
+    messages.append({"role": "user", "content": question + _lang_reminder(out_lang)})
+
+    # Small-context providers (Cerebras/Kiro at 8192) can only fit ~1 passage,
+    # which makes a library answer far weaker than the retrieval deserves. Report
+    # it so the UI can suggest switching model rather than looking broken.
+    return None, {"messages": messages, "ai": ai, "sources": sources,
+                  "scope": scope, "retrieval": mode_used,
+                  "indexed": len(indexed), "total": len(videos),
+                  "context_limited": _model_ctx_tokens(ai) <= 8192}
+
+
+@app.route("/api/tutor/library", methods=["POST"])
+def api_tutor_library():
+    """Advanced tutor: answers across every video in the student's library.
+
+    Pro-only — a library answer carries a much larger context than single-video
+    chat, and the free tier's 5 messages/day would not survive it."""
+    user, auth_err = _verified_user_record(require_pro=True)
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    err, data = _library_prepare(request.get_json(silent=True) or {}, user)
+    if err:
+        return jsonify(err[0]), err[1]
+    try:
+        answer = _ai_chat(data["messages"], data["ai"], max_tokens=_TUTOR_MAX_TOKENS)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
+    ai = data["ai"]
+    return jsonify({"answer": answer, "scope": data["scope"],
+                    "sources": data["sources"], "retrieval": data["retrieval"],
+                    "indexed": data["indexed"], "total": data["total"],
+                    "context_limited": data["context_limited"],
+                    "provider": _ai_display_provider(ai),
+                    "model": _ai_display_model(ai)})
+
+
+@app.route("/api/tutor/library/stream", methods=["POST"])
+def api_tutor_library_stream():
+    """Streaming (SSE) variant of /api/tutor/library."""
+    user, auth_err = _verified_user_record(require_pro=True)
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    err, data = _library_prepare(request.get_json(silent=True) or {}, user)
+    if err:
+        return jsonify(err[0]), err[1]
+    ai = data["ai"]
+
+    def _sse(event, payload):
+        return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False))
+
+    def gen():
+        yield _sse("meta", {"provider": _ai_display_provider(ai),
+                            "model": _ai_display_model(ai),
+                            "scope": data["scope"], "sources": data["sources"],
+                            "retrieval": data["retrieval"],
+                            "indexed": data["indexed"], "total": data["total"],
+                            "context_limited": data["context_limited"]})
+        produced = False
+        try:
+            for piece in _ai_chat_stream(data["messages"], ai,
+                                         max_tokens=_TUTOR_MAX_TOKENS):
+                produced = True
+                yield _sse("chunk", {"t": piece})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"error": "ai_failed", "detail": str(exc)[:200]})
+            return
+        if not produced:
+            yield _sse("error", {"error": "ai_failed", "detail": "empty response"})
+            return
+        yield _sse("done", {})
+
+    return Response(stream_with_context(gen()), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache, no-transform",
+                             "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/tutor/library/coverage")
+def api_tutor_library_coverage():
+    """How many library videos are searchable — drives the UI coverage strip."""
+    user, auth_err = _verified_user_record(require_pro=True)
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    course_id = (request.args.get("course_id") or "").strip()[:120] or None
+    scope = (request.args.get("scope") or "library").strip().lower()
+    videos = _user_library(user, course_id if scope == "course" else None)
+    ids = [v["video_id"] for v in videos]
+    indexed, per_source = _library_coverage(ids)
+    return jsonify({"total": len(videos), "indexed": len(indexed),
+                    "per_source": per_source, "vector_search": _vec_enabled(),
+                    "courses": [{"id": cid, "title": title} for cid, title in
+                                sorted({(v["course_id"], v["course"]) for v in videos
+                                        if v.get("course")}, key=lambda p: p[1])]})
 
 
 @app.route("/api/tutor", methods=["GET", "POST"])
