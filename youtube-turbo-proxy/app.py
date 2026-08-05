@@ -981,7 +981,8 @@ NOTES_MAX_CONT = int(os.environ.get("NOTES_MAX_CONTINUATIONS", "4"))
 _NOTES_CONTINUE = ("Continue the notes from EXACTLY where you stopped (finish the "
                    "cut-off line first). Do NOT repeat anything already written, do "
                    "NOT restart, and do NOT add any intro, heading recap or closing "
-                   "remark \u2014 just carry straight on.")
+                   "remark \u2014 just carry straight on. Keep writing in the SAME "
+                   "language and SAME script you were instructed to use.")
 STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 # Version the MCQ-notes cache independently. The previous prompt could only
 # extract questions already stated in a transcript, so it cached conversational
@@ -989,6 +990,26 @@ STUDY_TTL = int(os.environ.get("STUDY_TTL", str(30 * 24 * 3600)))  # 30 days
 # MCQ request use the corrected generation contract without needing to purge
 # otherwise-valid study material.
 _MCQ_CACHE_STYLE = "mcq-v2"
+# Version the Hinglish cache the same way. "Respond ONLY in Hinglish" used to be
+# the entire instruction, and models overwhelmingly read that as plain Devanagari
+# Hindi, so every Hinglish note cached before _HINGLISH_RULE existed is really a
+# Hindi note. A separate namespace retires those without purging English/Hindi
+# material. Bump the suffix whenever the Hinglish contract changes again.
+_HINGLISH_CACHE_LANG = "Hinglish-v2"
+
+
+def _is_hinglish(out_lang):
+    """True when the requested output language is Hinglish (any version suffix)."""
+    return (out_lang or "").strip().lower().startswith("hinglish")
+
+
+def _cache_lang(out_lang):
+    """Cache-key form of an output language. Only Hinglish is versioned; English
+    and Hindi keep their plain labels so their existing caches stay valid. The
+    stored/returned `out_lang` metadata keeps the user-facing label."""
+    return _HINGLISH_CACHE_LANG if _is_hinglish(out_lang) else out_lang
+
+
 _study_cache = {}
 _study_lock = threading.Lock()
 
@@ -1126,12 +1147,13 @@ def _remember_study_job_stop(job_id):
 
 def _study_text_cache_keys(video_id, mode, out_lang, style):
     """Return the exact text-mode cache keys shared with /api/study/stream."""
+    lang = _cache_lang(out_lang)
     if style:
         cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
-        return ("%s:%s:%s:%s:%s" % (video_id, mode, out_lang, 25, cache_style),
-                _fs_doc_id(video_id, mode, out_lang, 25, cache_style))
-    return ("%s:%s:%s:%s" % (video_id, mode, out_lang, 25),
-            _fs_doc_id(video_id, mode, out_lang, 25))
+        return ("%s:%s:%s:%s:%s" % (video_id, mode, lang, 25, cache_style),
+                _fs_doc_id(video_id, mode, lang, 25, cache_style))
+    return ("%s:%s:%s:%s" % (video_id, mode, lang, 25),
+            _fs_doc_id(video_id, mode, lang, 25))
 
 
 def _load_ai_config(prefer_model=None, prefer_provider=None):
@@ -1804,16 +1826,29 @@ def _condense(text, out_lang, ai, target_chars=14000, depth=0,
               cancel_event=None):
     """Recursively map a long transcript to key-point bullets until it fits a
     single downstream call under the TPM budget. Skipped entirely for
-    big-context providers (e.g. Bynara ~1M ctx) — the full transcript is sent."""
+    big-context providers (e.g. Bynara ~1M ctx) — the full transcript is sent.
+
+    `out_lang` is accepted but intentionally unused: this step no longer
+    translates (see the comment on sysmsg below). It is kept in the signature so
+    every existing call site stays valid and so the parameter documents that
+    translation is deliberately deferred to the generation call."""
     if cancel_event is not None and cancel_event.is_set():
         return ""
     text = (text or "").strip()
     if ai.get("big_context") or len(text) <= target_chars or depth >= 3:
         return text
     chunks = _chunk_words(text, 6000)     # ~1.5k input tokens/chunk
+    # This map step deliberately does NOT translate. It used to write points in
+    # out_lang, which meant non-big-context providers translated twice (here, then
+    # again when generating) — and every hop drifted Hinglish back towards plain
+    # Hindi. Extraction stays in the source language; the single translation now
+    # happens only in the final generation call, which carries the full language
+    # contract. (Big-context providers skip _condense entirely, so this also makes
+    # Hinglish behave the same across providers.)
     sysmsg = ("You extract faithful key points from a chunk of an auto-generated "
               "lecture transcript (may be Hindi/Hinglish, no punctuation, ASR "
-              "errors). Do not invent facts. Write points in " + out_lang + ".")
+              "errors). Do not invent facts. Keep the points in the transcript's "
+              "OWN language and wording \u2014 do NOT translate at this stage.")
     parts = []
     for i, ch in enumerate(chunks):
         if cancel_event is not None and cancel_event.is_set():
@@ -1867,11 +1902,61 @@ def _timestamped_transcript(segments, every=15):
     return "\n".join(lines)
 
 
+# "Respond ONLY in Hinglish" is ambiguous to an LLM: it can mean romanised Hindi
+# (what students here want) or Devanagari Hindi with a few English words. Given a
+# Devanagari transcript, models resolve the ambiguity by mirroring the source
+# script — so the label alone reliably produced plain Hindi. Spell the contract
+# out instead, and demonstrate it: a worked example moves small models (the
+# free-tier Groq/Gemini defaults) far more than any abstract description.
+_HINGLISH_RULE = (
+    " Hinglish here has an EXACT meaning: write in ROMAN / LATIN script ONLY \u2014 "
+    "do NOT output any Devanagari (\u0926\u0947\u0935\u0928\u093E\u0917\u0930\u0940) "
+    "character anywhere, not even for a single word. Use natural spoken Hindi "
+    "sentence structure and grammar, romanised, and keep ALL technical and "
+    "academic terms, proper nouns, formulas, numbers and units in English. Aim "
+    "for roughly 60% romanised Hindi and 40% English \u2014 exactly how an Indian "
+    "coaching teacher explains a topic in class. Section headings stay in "
+    "English. Write it the way it is spoken, not as a literal translation.\n"
+    "This is exactly the style you must produce \u2014 match it:\n"
+    "--- EXAMPLE START ---\n"
+    "## Photosynthesis\n"
+    "- **Photosynthesis** ek aisa process hai jisme plants sunlight ko chemical "
+    "energy me convert karte hain.\n"
+    "- Ye mainly **chloroplast** me hota hai, aur iska byproduct **oxygen** hai.\n"
+    "--- EXAMPLE END ---\n"
+    "Do NOT write pure Hindi and do NOT write pure English."
+)
+
+
+def _lang_rule(out_lang):
+    """The output-language instruction. Hinglish gets an explicit script + register
+    contract; other languages just need naming."""
+    if _is_hinglish(out_lang):
+        return "Respond ONLY in Hinglish." + _HINGLISH_RULE
+    return "Respond ONLY in " + out_lang + "."
+
+
+def _lang_reminder(out_lang):
+    """Short language rule to append AFTER the transcript in the user message.
+
+    The transcript is the last (and by far the largest) thing the model reads, so
+    with the rule only in the system message the freshest signal is tens of
+    thousands of Devanagari characters and the model copies that script. Repeating
+    the rule last is what actually holds the output in Hinglish."""
+    if _is_hinglish(out_lang):
+        return ("\n\n[OUTPUT LANGUAGE \u2014 this overrides the script used in the "
+                "transcript above] Write the answer in Hinglish: ROMAN/LATIN "
+                "script only, zero Devanagari characters, spoken romanised Hindi "
+                "grammar with all technical terms kept in English.")
+    return ("\n\n[OUTPUT LANGUAGE \u2014 this overrides the language used in the "
+            "transcript above] Write the answer ONLY in %s." % out_lang)
+
+
 def _study_sys(out_lang):
     return ("The source is an auto-generated lecture transcript that may be in "
-            "Hindi/Hinglish with no punctuation and ASR errors. First mentally "
-            "clean and punctuate it, then respond. Respond ONLY in " + out_lang +
-            ". Stay strictly faithful to the transcript — never invent facts.")
+            "Hindi or Hinglish with no punctuation and ASR errors. First mentally "
+            "clean and punctuate it, then respond. " + _lang_rule(out_lang) +
+            " Stay strictly faithful to the transcript — never invent facts.")
 
 
 def _extract_note_headings(md):
@@ -1912,16 +1997,19 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
     full explanation) for lectures that are solving MCQs; default = topic notes."""
     sysmsg = _study_sys(out_lang)
     instr = _notes_instr(style)
+    # Restated after the transcript: the transcript is the last thing the model
+    # reads, so the language rule has to be the last thing after it.
+    tail = _lang_reminder(out_lang)
     secs, part_cap = _notes_sections(transcript, out_lang, ai, style)
     if len(secs) == 1:
         return _chat_notes_complete(
-            sysmsg, head + instr + "\n\n" + secs[0], ai,
+            sysmsg, head + instr + "\n\n" + secs[0] + tail, ai,
             (part_cap if ai.get("big_context") else 2400))
     parts, covered = [], []
     for i, sec in enumerate(secs):
         user = (head + ("(Part %d of %d \u2014 detailed notes for THIS part only.) "
                         % (i + 1, len(secs))) + _covered_note(covered, style)
-                + instr + "\n\n" + sec)
+                + instr + "\n\n" + sec + tail)
         part = _chat_notes_complete(sysmsg, user, ai, part_cap)
         parts.append(part)
         covered.extend(_extract_note_headings(part))   # so later parts don't repeat these
@@ -2112,6 +2200,8 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_ev
     (notes / summary / insights), streamed from the model. Mirrors _generate_study
     for those modes; quiz/flashcards are NOT streamed (they return structured JSON)."""
     sysmsg = _study_sys(out_lang)
+    # Restated after the transcript for the same reason as in _gen_notes.
+    tail = _lang_reminder(out_lang)
     if mode == "notes":
         instr = _notes_instr(style)
         secs, part_cap = _notes_sections(
@@ -2123,11 +2213,11 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_ev
             if i:
                 yield "\n\n"                          # separate parts like _gen_notes
             if len(secs) == 1:
-                user = head + instr + "\n\n" + sec
+                user = head + instr + "\n\n" + sec + tail
                 mt = part_cap if ai.get("big_context") else 2400
             else:
                 user = head + ("(Part %d of %d \u2014 detailed notes for THIS part "
-                               "only.) " % (i + 1, len(secs))) + _covered_note(covered, style) + instr + "\n\n" + sec
+                               "only.) " % (i + 1, len(secs))) + _covered_note(covered, style) + instr + "\n\n" + sec + tail
                 mt = part_cap
             buf = []                                  # collect this part to learn its headings
             for piece in _stream_notes_part(sysmsg, user, ai, mt, cancel_event=cancel_event):
@@ -2143,7 +2233,7 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_ev
         for piece in _ai_chat_stream(
                 [{"role": "system", "content": sysmsg},
                  {"role": "user", "content": head + "Write a concise summary as 4-7 "
-                  "bullet points:\n\n" + body}], ai, max_tokens=1000,
+                  "bullet points:\n\n" + body + tail}], ai, max_tokens=1000,
                 cancel_event=cancel_event):
             yield piece
         return
@@ -2160,7 +2250,7 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_ev
                      "- CRITICAL: the list MUST be complete \u2014 always finish the "
                      "final bullet. Never stop in the middle of a line. If space is "
                      "running out, shorten the bullets rather than cut the list.\n\n"
-                 ) + body}], ai, max_tokens=2500,
+                 ) + body + tail}], ai, max_tokens=2500,
                 cancel_event=cancel_event):
             yield piece
         return
@@ -2195,7 +2285,9 @@ def _gen_quiz(transcript, out_lang, ai, head, n, focus=""):
               'choice questions on the important points in the content below. Each '
               'has exactly 4 options and one correct answer. Return JSON: '
               '{"questions":[{"question":"...","options":["a","b","c","d"],'
-              '"answer_index":0,"explanation":"..."}]}.\n\n' % want) + sec}],
+              '"answer_index":0,"explanation":"..."}]}.\n\n' % want) + sec
+              + _lang_reminder(out_lang)
+              + " Still return ONLY the JSON object described above."}],
             ai, max_tokens=min(300 + want * 110, 3500), json_mode=True)
         data = _safe_json(raw)
         qs = data.get("questions") if isinstance(data, dict) else data
@@ -2215,6 +2307,7 @@ def _gen_quiz(transcript, out_lang, ai, head, n, focus=""):
 def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus="", style=""):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
+    tail = _lang_reminder(out_lang)      # restated after the body, see _lang_reminder
     if mode == "notes":
         return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head, style=style)}
     if mode == "quiz":
@@ -2226,7 +2319,7 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
              {"role": "user", "content": head + "Write a concise summary as 4-7 "
-              "bullet points:\n\n" + body}], ai, max_tokens=1000)}
+              "bullet points:\n\n" + body + tail}], ai, max_tokens=1000)}
     if mode == "insights":
         return {"format": "markdown", "content": _ai_chat(
             [{"role": "system", "content": sysmsg},
@@ -2240,13 +2333,14 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
                  "- CRITICAL: the list MUST be complete \u2014 always finish the "
                  "final bullet. Never stop in the middle of a line. If space is "
                  "running out, shorten the bullets rather than cut the list.\n\n"
-             ) + body}], ai, max_tokens=2500)}
+             ) + body + tail}], ai, max_tokens=2500)}
     if mode == "flashcards":
         fc_focus = (("Focus the flashcards on \u2014 %s. " % focus) if focus else "")
         raw = _ai_chat(
             [{"role": "system", "content": sysmsg + " Output ONLY valid JSON."},
              {"role": "user", "content": head + fc_focus + 'Create 8-12 flashcards. Return '
-              'JSON: {"cards":[{"front":"...","back":"..."}]}.\n\n' + body}],
+              'JSON: {"cards":[{"front":"...","back":"..."}]}.\n\n' + body + tail
+              + " Still return ONLY the JSON object described above."}],
             ai, max_tokens=2000, json_mode=True)
         data = _safe_json(raw)
         cards = data.get("cards") if isinstance(data, dict) else data
@@ -2448,18 +2542,21 @@ def api_study():
     # the existing note instead of regenerating a duplicate (saves storage + quota),
     # and the "available languages" bar shows every language regardless of model.
     # Use the "Regenerate" button (?refresh=1) to remake it with the chosen model.
+    # Hinglish uses a versioned language bucket (_cache_lang) so pre-fix copies,
+    # which were really Devanagari Hindi, are never served again.
+    clang = _cache_lang(out_lang)
     if fkey:
-        ckey = "%s:%s:%s:%s::%s" % (video_id, mode, out_lang, num_q, fkey)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, fkey)
+        ckey = "%s:%s:%s:%s::%s" % (video_id, mode, clang, num_q, fkey)
+        fs_id = _fs_doc_id(video_id, mode, clang, num_q, fkey)
     elif style:
         # MCQ prompts are versioned so cached responses produced by the retired
         # "extract existing questions" contract are never served again.
         cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, num_q, cache_style)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q, cache_style)
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, clang, num_q, cache_style)
+        fs_id = _fs_doc_id(video_id, mode, clang, num_q, cache_style)
     else:
-        ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, num_q)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, num_q)
+        ckey = "%s:%s:%s:%s" % (video_id, mode, clang, num_q)
+        fs_id = _fs_doc_id(video_id, mode, clang, num_q)
     now = time.time()
     if not force:
         with _study_lock:
@@ -2580,14 +2677,15 @@ def api_study_stream():
 
     # Cache key MUST match /api/study (notes/summary/insights have no focus and a
     # fixed num_q of 25) so a streamed note reuses/populates the same entry.
+    clang = _cache_lang(out_lang)       # versioned Hinglish bucket, as in /api/study
     if style:
         # Match /api/study's versioned MCQ cache namespace.
         cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, out_lang, 25, cache_style)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, 25, cache_style)
+        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, clang, 25, cache_style)
+        fs_id = _fs_doc_id(video_id, mode, clang, 25, cache_style)
     else:
-        ckey = "%s:%s:%s:%s" % (video_id, mode, out_lang, 25)
-        fs_id = _fs_doc_id(video_id, mode, out_lang, 25)
+        ckey = "%s:%s:%s:%s" % (video_id, mode, clang, 25)
+        fs_id = _fs_doc_id(video_id, mode, clang, 25)
 
     def _sse(event, payload):
         return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False))
@@ -3042,8 +3140,11 @@ def api_study_langs():
     available = []
     cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
     for lang in _STUDY_LANGS:
-        fs_id = _fs_doc_id(video_id, mode, lang, num_q, cache_style) if cache_style \
-            else _fs_doc_id(video_id, mode, lang, num_q)
+        # Probe the versioned bucket (Hinglish) but report the user-facing label,
+        # so a pre-fix Hindi-flavoured Hinglish copy no longer shows as available.
+        clang = _cache_lang(lang)
+        fs_id = _fs_doc_id(video_id, mode, clang, num_q, cache_style) if cache_style \
+            else _fs_doc_id(video_id, mode, clang, num_q)
         try:
             # Firestore is only the fast index. Also detect a B2 body whose index
             # write failed, otherwise a successfully saved note stays invisible
