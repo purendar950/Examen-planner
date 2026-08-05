@@ -3003,13 +3003,30 @@ html:not([data-theme="light"]) .topbar {
 .yto-chan-card {
   display: flex;
   align-items: center;
-  gap: .55rem;
+  gap: .35rem;
   flex: 0 0 auto;
   max-width: 17rem;
   padding: .5rem .6rem;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--card);
+  transition: border-color .15s;
+}
+.yto-chan-card:hover { border-color: var(--accent); }
+/* Whole card body is the tap target for opening the channel page */
+.yto-chan-card-open {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  min-width: 0;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .yto-chan-card img { width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto; }
 .yto-chan-card-body { min-width: 0; display: flex; flex-direction: column; }
@@ -3019,8 +3036,179 @@ html:not([data-theme="light"]) .topbar {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.yto-chan-card-body span { font-size: .68rem; color: var(--muted); }
+.yto-chan-card-body > span { font-size: .68rem; color: var(--muted); }
+.yto-chan-card-track {
+  display: block;
+  height: 3px;
+  margin-top: .3rem;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.yto-chan-card-track i { display: block; height: 100%; background: var(--accent); }
 .yto-chan-card-actions { display: flex; gap: .2rem; margin-left: auto; }
+
+/* ── Channel page ── */
+.yto-chan-back {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 5px 14px;
+  font-size: .78rem;
+  cursor: pointer;
+  margin-bottom: .85rem;
+  font-family: var(--font);
+}
+.yto-chan-hero {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--card);
+  margin-bottom: 1rem;
+}
+.yto-chan-hero-banner { height: 96px; background: var(--surface); position: relative; }
+.yto-chan-hero-banner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* No banner from the API is common — make the fallback look deliberate */
+.yto-chan-hero-banner.is-generated {
+  background:
+    radial-gradient(circle at 18% 120%, hsl(var(--chan-hue) 70% 55% / .55), transparent 60%),
+    linear-gradient(115deg, hsl(var(--chan-hue) 65% 42%), hsl(calc(var(--chan-hue) + 45) 60% 28%));
+}
+.yto-chan-hero-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: .85rem;
+  padding: 0 1rem 1rem;
+  margin-top: -30px;
+}
+.yto-chan-hero-avatar {
+  width: 68px;
+  height: 68px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 3px solid var(--card);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+}
+.yto-chan-hero-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.yto-chan-hero-avatar span { font-size: 1.6rem; font-weight: 800; color: var(--muted); }
+.yto-chan-hero-text { flex: 1 1 12rem; min-width: 0; padding-top: 34px; }
+.yto-chan-hero-text h2 { margin: 0; font-size: 1.15rem; line-height: 1.25; }
+.yto-chan-hero-facts { font-size: .74rem; color: var(--muted); margin-top: .2rem; }
+.yto-chan-hero-desc {
+  margin: .45rem 0 0;
+  font-size: .78rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.yto-chan-hero-actions {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  padding-top: 34px;
+  margin-left: auto;
+}
+.yto-chan-hero-actions button,
+.yto-chan-hero-actions a {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: .35rem .8rem;
+  font-size: .74rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.yto-chan-hero-actions button:hover,
+.yto-chan-hero-actions a:hover { border-color: var(--accent); color: var(--accent); }
+
+.yto-chan-progress {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: .8rem .9rem;
+  margin-bottom: 1rem;
+}
+.yto-chan-progress-top {
+  display: flex;
+  justify-content: space-between;
+  gap: .5rem;
+  flex-wrap: wrap;
+  font-size: .82rem;
+}
+.yto-chan-progress-top span { color: var(--muted); }
+.yto-chan-progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+  margin: .5rem 0 .35rem;
+}
+.yto-chan-progress-track i { display: block; height: 100%; background: var(--accent); }
+.yto-chan-progress-sub { font-size: .72rem; color: var(--muted); }
+
+.yto-chan-continue {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  padding: .6rem .7rem;
+  margin-bottom: 1rem;
+  cursor: pointer;
+  font-family: var(--font);
+  color: inherit;
+}
+.yto-chan-continue:hover { border-color: var(--accent); }
+.yto-chan-continue-thumb {
+  width: 84px;
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.yto-chan-continue-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.yto-chan-continue-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.yto-chan-continue-text em {
+  font-style: normal;
+  font-size: .66rem;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--accent);
+  font-weight: 700;
+}
+.yto-chan-continue-text strong {
+  font-size: .84rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.yto-chan-continue-text > span { font-size: .7rem; color: var(--muted); }
+.yto-chan-continue-go { color: var(--accent); font-size: 1.1rem; flex: 0 0 auto; }
+
+@media (max-width: 600px) {
+  .yto-chan-hero-banner { height: 74px; }
+  .yto-chan-hero-body { margin-top: -26px; gap: .6rem; }
+  .yto-chan-hero-avatar { width: 56px; height: 56px; }
+  /* Stack: avatar+name on one row, actions full width below */
+  .yto-chan-hero-text { flex-basis: calc(100% - 68px); padding-top: 28px; }
+  .yto-chan-hero-actions { margin-left: 0; padding-top: .2rem; width: 100%; }
+  .yto-chan-hero-actions button,
+  .yto-chan-hero-actions a { flex: 1; text-align: center; }
+  .yto-chan-hero-text h2 { font-size: 1.02rem; }
+  .yto-chan-continue-thumb { width: 64px; height: 38px; }
+}
 .yto-chan-card-actions button {
   width: 26px;
   height: 26px;

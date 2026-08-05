@@ -630,6 +630,8 @@ function ytoRenderLibraryOverview(entries) {
 
 function ytoRenderLibrary() {
   ytoCurrentPl = null;
+  ytoCurrentChannel = null;
+  _ytoBackToChannel = null;
   ytoRenderMainSidebar();
   const content = document.getElementById('yto-content');
   if (!content) return;
@@ -696,7 +698,12 @@ function ytoRenderLibrary() {
       <div><span class="yto-eyebrow">My courses</span><h3>${visible.length} ${visible.length === 1 ? 'course' : 'courses'}</h3></div>
       <span>${entries.length === visible.length ? 'Everything in one place' : `${visible.length} of ${entries.length} shown`}</span>
     </div>
-    <div class="yto-course-grid">${visible.map(pl => {
+    <div class="yto-course-grid">${visible.map(pl => ytoCourseCardHtml(pl)).join('')}</div>`;
+}
+
+/* One course card. Extracted so the library grid and the channel page render
+   identical cards from a single source of truth. */
+function ytoCourseCardHtml(pl) {
       const progress = ytoCourseProgress(pl);
       const totalSecs = ytoTotalSecs(pl);
       const remainingSecs = ytoRemainingSecs(pl);
@@ -743,7 +750,6 @@ function ytoRenderLibrary() {
           </div>
         </div>
       </article>`;
-    }).join('')}</div>`;
 }
 
 function ytoRename(plId) {
@@ -825,6 +831,18 @@ async function ytoBackfillDatesAndSort(plId) {
   return true;
 }
 
+/* ── Hide every library-index section before rendering a detail view ──
+   Course view and channel view both replace #yto-content only, so the sections
+   that live *outside* it must be hidden explicitly. Centralised because
+   forgetting one leaves it stranded above the detail view (that bug shipped
+   once already with the channel strip). ── */
+function ytoHideLibraryChrome() {
+  ['yto-library-overview', 'yto-library-controls', 'yto-referral-slot', 'yto-channel-strip']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.hidden = true; });
+  const s = document.getElementById('yto-stats'); if (s) s.style.display = 'none';
+  const t = document.getElementById('yto-toolbar'); if (t) t.style.display = 'none';
+}
+
 /* ── Course view skeleton ── */
 function ytoOpenCourse(plId) {
   const pl = ytoLib()[plId];
@@ -832,16 +850,14 @@ function ytoOpenCourse(plId) {
   ytoCurrentPl = plId;
   ytoRenderMainSidebar();
   ytoPlayerV2 = null; ytoPlayerV2Ready = false; ytoPendingVid = null;
-  const s = document.getElementById('yto-stats'); if (s) s.style.display = 'none';
-  const t = document.getElementById('yto-toolbar'); if (t) t.style.display = 'none';
-  const overview = document.getElementById('yto-library-overview'); if (overview) overview.hidden = true;
-  const controls = document.getElementById('yto-library-controls'); if (controls) controls.hidden = true;
-  const referralSlot = document.getElementById('yto-referral-slot'); if (referralSlot) referralSlot.hidden = true;
-  // The channel strip belongs to the library index, not to a single course view
-  const chanStrip = document.getElementById('yto-channel-strip'); if (chanStrip) chanStrip.hidden = true;
+  ytoHideLibraryChrome();
   const content = document.getElementById('yto-content');
+  // If the user arrived from a channel page, go back there instead of the grid
+  const backCh = _ytoBackToChannel && ytoChannels()[_ytoBackToChannel] ? _ytoBackToChannel : '';
+  const backLabel = backCh ? `← ${escapeHtml(ytoChannels()[backCh].title)}` : '← My Courses';
+  const backCall = backCh ? `ytoOpenChannel('${escapeHtml(backCh)}')` : 'ytoRenderLibrary()';
   content.innerHTML = `
-    <button onclick="ytoRenderLibrary()" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:5px 14px;font-size:0.78rem;cursor:pointer;margin-bottom:0.85rem;font-family:var(--font);">← My Courses</button>
+    <button onclick="${backCall}" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:5px 14px;font-size:0.78rem;cursor:pointer;margin-bottom:0.85rem;font-family:var(--font);">${backLabel}</button>
     <div id="yto-course-head"></div>
     <div id="yto-player-area" style="display:none;margin-bottom:1rem;">
       <div style="aspect-ratio:16/9;background:#000;border-radius:12px;overflow:hidden;border:1px solid var(--border);"><div id="yto-player-host" style="width:100%;height:100%;"></div></div>
@@ -1349,6 +1365,8 @@ onPageActivated('yt-organiser', function () {
   if (ytoCurrentPl && ytoLib()[ytoCurrentPl]) {
     if (document.getElementById('yto-course-head')) ytoRefreshCourse();
     else ytoOpenCourse(ytoCurrentPl);
+  } else if (ytoCurrentChannel && ytoChannels()[ytoCurrentChannel]) {
+    ytoOpenChannel(ytoCurrentChannel);
   } else {
     ytoRenderLibrary();
   }
@@ -1741,6 +1759,11 @@ async function ytoChanImport() {
       title: ch.title,
       thumb: ch.thumb || '',
       handle: ch.handle || '',
+      // Small numbers only. Banner, avatar and description are display-only and
+      // stay in the localStorage yt cache — appState syncs to a 1 MiB Firestore
+      // document, so long URLs and descriptions must not accumulate here.
+      videoCount: ch.videoCount || 0,
+      subscriberCount: ch.hiddenSubs ? 0 : (ch.subscriberCount || 0),
       playlistIds: Array.from(new Set((prev?.playlistIds || []).concat(importedIds))),
       lastSyncedAt: Date.now()
     };
@@ -1768,11 +1791,16 @@ async function ytoChanImport() {
     }
   }
 
-  // Land the user on just-imported courses by filtering the library to them
+  switchPage('yt-organiser');
+  // Re-syncing from a channel page should land back on that channel page.
+  if (importedIds.length && ytoChannels()[ch.id]) {
+    ytoOpenChannel(ch.id);
+    return;
+  }
+  // Otherwise land on the just-imported courses by filtering the library to them
   const searchEl = document.getElementById('yto-library-search');
   if (searchEl && importedIds.length) searchEl.value = ch.title;
   ytoLibraryFilter = 'all';
-  switchPage('yt-organiser');
   ytoRenderLibrary();
 }
 
@@ -1795,34 +1823,252 @@ function ytoForgetChannel(channelId) {
   if (!rec) return;
   if (!confirm(`"${rec.title}" ko channel list se hatayein? Courses library mein rahenge.`)) return;
   delete ytoChannels()[channelId];
+  // Don't leave the channel page open for a channel that no longer exists
+  if (ytoCurrentChannel === channelId) ytoCurrentChannel = null;
+  if (_ytoBackToChannel === channelId) _ytoBackToChannel = null;
   ytoPersist();
   ytoRenderLibrary();
 }
 
-/* Channel chips above the course grid — grouping + re-sync entry point. */
+/* Channel chips above the course grid — the entry point to each channel page.
+   Kept compact on purpose: at phone width the course grid is a single column,
+   so vertical space above it is the scarce resource. */
 function ytoRenderChannelStrip() {
   const el = document.getElementById('yto-channel-strip');
   if (!el) return;
-  const lib = ytoLib();
   const chans = Object.values(ytoChannels()).filter(c => c && c.id);
   if (!chans.length) { el.innerHTML = ''; el.hidden = true; return; }
   el.hidden = false;
   el.innerHTML = `<div class="yto-chan-strip-head"><span class="yto-eyebrow">Imported channels</span></div>
     <div class="yto-chan-strip-row">${chans.map(c => {
-      const owned = Object.values(lib).filter(pl => pl && pl.channelId === c.id);
-      const videos = owned.reduce((s, pl) => s + (pl.videos?.length || 0), 0);
+      const p = ytoChannelProgress(c.id);
+      const id = escapeHtml(c.id);
       return `<div class="yto-chan-card">
-        ${c.thumb ? `<img src="${escapeHtml(c.thumb)}" alt="" onerror="this.style.display='none'">` : ''}
-        <div class="yto-chan-card-body">
-          <strong title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</strong>
-          <span>${owned.length} ${owned.length === 1 ? 'course' : 'courses'} · ${videos.toLocaleString()} videos</span>
-        </div>
+        <button type="button" class="yto-chan-card-open" onclick="ytoOpenChannel('${id}')"
+          aria-label="Open ${escapeHtml(c.title)} channel">
+          ${c.thumb ? `<img src="${escapeHtml(c.thumb)}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
+          <span class="yto-chan-card-body">
+            <strong title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</strong>
+            <span>${p.courses.length} ${p.courses.length === 1 ? 'course' : 'courses'} · ${p.total.toLocaleString()} videos</span>
+            <span class="yto-chan-card-track"><i style="width:${p.pct}%"></i></span>
+          </span>
+        </button>
         <div class="yto-chan-card-actions">
-          <button type="button" title="Check for new playlists and videos" onclick="ytoResyncChannel('${escapeHtml(c.id)}')">⟳</button>
-          <button type="button" title="Remove from this list" onclick="ytoForgetChannel('${escapeHtml(c.id)}')">✕</button>
+          <button type="button" title="Check for new playlists and videos" onclick="ytoResyncChannel('${id}')">⟳</button>
+          <button type="button" title="Remove from this list" onclick="ytoForgetChannel('${id}')">✕</button>
         </div>
       </div>`;
     }).join('')}</div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   CHANNEL PAGE — a YouTube-style channel view inside the Course Library
+
+   Third view level:  library grid → channel page → course view
+
+   Renders into #yto-content like the course view does, so it needs no new
+   markup in pages/youtube.html.
+
+   Data sourcing is deliberately split:
+     · appState.ytoChannels[id]  — tiny synced fields (title, thumb, counts).
+       This lives in the 1 MiB Firestore document, so nothing large goes here.
+     · ytCacheGet('chan', 'id_…') — banner, description, subscriber count and
+       other display-only metadata. localStorage, never synced, 7-day TTL.
+   If the local cache has expired the page still renders from the synced
+   fields, then quietly refetches (1 quota unit) and re-renders.
+══════════════════════════════════════════════════════════════════════ */
+let ytoCurrentChannel = null;
+let _ytoBackToChannel = null;   // set when a course is opened from a channel page
+let _ytoChanPageFetching = '';  // de-dupes the lazy metadata refetch
+
+function ytoChannelCourses(channelId) {
+  return Object.values(ytoLib())
+    .filter(pl => pl && pl.channelId === channelId && Array.isArray(pl.videos));
+}
+
+/* Channel-wide progress across every imported course from that channel. */
+function ytoChannelProgress(channelId) {
+  const courses = ytoChannelCourses(channelId);
+  let total = 0, done = 0, totalSecs = 0, remainSecs = 0;
+  courses.forEach(pl => {
+    total += pl.videos.length;
+    done += ytoDoneCount(pl);
+    totalSecs += ytoTotalSecs(pl);
+    remainSecs += ytoRemainingSecs(pl);
+  });
+  return {
+    courses, total, done, totalSecs, remainSecs,
+    pct: total ? Math.round(done / total * 100) : 0,
+    complete: total > 0 && done === total
+  };
+}
+
+/* 639000 → "639K", 7776590 → "7.8M". Matches how YouTube abbreviates. */
+function ytoFmtCount(n) {
+  n = Number(n || 0);
+  if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+  return String(n);
+}
+
+/* Stable hue per channel so the no-banner hero still looks designed. */
+function ytoChanHue(id) {
+  let h = 0;
+  for (const ch of String(id || '')) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+
+/* Merge the synced record with whatever richer metadata is cached locally. */
+function ytoChannelMeta(channelId) {
+  const rec = ytoChannels()[channelId] || { id: channelId, title: 'Channel' };
+  let rich = null;
+  try {
+    if (typeof ytCacheGet === 'function') rich = ytCacheGet('chan', 'id_' + channelId);
+  } catch (e) {}
+  return Object.assign({}, rec, rich || {}, {
+    // Never let cached metadata override a title the user renamed
+    title: rec.title || rich?.title || 'Channel',
+    hasRich: !!(rich && rich._v === (typeof YT_CHAN_SHAPE !== 'undefined' ? YT_CHAN_SHAPE : 2))
+  });
+}
+
+function ytoOpenChannel(channelId) {
+  if (!ytoChannels()[channelId]) { ytoRenderLibrary(); return; }
+  ytoCurrentChannel = channelId;
+  ytoCurrentPl = null;
+  _ytoBackToChannel = channelId;
+  ytoRenderMainSidebar();
+  ytoHideLibraryChrome();
+  ytoRenderChannelPage(channelId);
+  window.scrollTo(0, 0);
+
+  // Lazily fill in banner/description/subs if the local cache expired.
+  const meta = ytoChannelMeta(channelId);
+  if (!meta.hasRich && _ytoChanPageFetching !== channelId && typeof ytFetchChannelInfo === 'function') {
+    _ytoChanPageFetching = channelId;
+    ytFetchChannelInfo({ kind: 'id', value: channelId })
+      .then(() => { if (ytoCurrentChannel === channelId) ytoRenderChannelPage(channelId); })
+      .catch(() => {})
+      .finally(() => { _ytoChanPageFetching = ''; });
+  }
+}
+
+function ytoRenderChannelPage(channelId) {
+  const content = document.getElementById('yto-content');
+  if (!content) return;
+  const c = ytoChannelMeta(channelId);
+  const p = ytoChannelProgress(channelId);
+  const id = escapeHtml(channelId);
+  const hue = ytoChanHue(channelId);
+  const avatar = c.avatar || c.thumb || '';
+
+  // Total playlists on the channel, read from cache only — never worth a
+  // network call just to render a number.
+  let allPlaylists = null;
+  try {
+    if (typeof ytCacheGet === 'function') allPlaylists = ytCacheGet('chanpls', channelId);
+  } catch (e) {}
+
+  const facts = [
+    c.handle ? escapeHtml(c.handle) : '',
+    (!c.hiddenSubs && c.subscriberCount) ? ytoFmtCount(c.subscriberCount) + ' subscribers' : '',
+    // statistics.videoCount counts UPLOADS. It is not the sum of playlist item
+    // counts, because videos repeat across playlists and playlists may contain
+    // other channels' videos — so these are labelled separately on purpose.
+    c.videoCount ? ytoFmtCount(c.videoCount) + ' uploads' : '',
+    allPlaylists ? allPlaylists.length + ' playlists' : '',
+    c.publishedAt ? 'joined ' + String(c.publishedAt).slice(0, 4) : ''
+  ].filter(Boolean).join(' · ');
+
+  const desc = (c.description || '').trim();
+  const shortDesc = desc.length > 220 ? desc.slice(0, 220).trim() + '…' : desc;
+  const watchUrl = c.handle
+    ? 'https://www.youtube.com/' + encodeURIComponent(c.handle)
+    : 'https://www.youtube.com/channel/' + encodeURIComponent(channelId);
+
+  const cont = ytoChannelContinue(channelId);
+
+  content.innerHTML = `
+    <button onclick="ytoRenderLibrary()" class="yto-chan-back">← My Courses</button>
+
+    <section class="yto-chan-hero" style="--chan-hue:${hue};">
+      <div class="yto-chan-hero-banner${c.banner ? '' : ' is-generated'}">
+        ${c.banner ? `<img src="${escapeHtml(c.banner)}=w1280" alt="" loading="lazy" onerror="this.remove()">` : ''}
+      </div>
+      <div class="yto-chan-hero-body">
+        <div class="yto-chan-hero-avatar">
+          ${avatar
+            ? `<img src="${escapeHtml(avatar)}" alt="" onerror="this.style.display='none'">`
+            : `<span>${escapeHtml((c.title || '?').charAt(0).toUpperCase())}</span>`}
+        </div>
+        <div class="yto-chan-hero-text">
+          <h2>${escapeHtml(c.title)}</h2>
+          ${facts ? `<div class="yto-chan-hero-facts">${facts}</div>` : ''}
+          ${shortDesc ? `<p class="yto-chan-hero-desc">${escapeHtml(shortDesc)}</p>` : ''}
+        </div>
+        <div class="yto-chan-hero-actions">
+          <button type="button" onclick="ytoResyncChannel('${id}')">⟳ Re-sync</button>
+          <a href="${escapeHtml(watchUrl)}" target="_blank" rel="noopener noreferrer">YouTube ↗</a>
+        </div>
+      </div>
+    </section>
+
+    ${p.total ? `<section class="yto-chan-progress">
+      <div class="yto-chan-progress-top">
+        <strong>${p.done.toLocaleString()} of ${p.total.toLocaleString()} videos</strong>
+        <span>${p.complete ? 'Channel complete 🎉'
+                 : (p.remainSecs ? ytoFmtHM(p.remainSecs) + ' remaining' : 'Remaining time unavailable')}</span>
+      </div>
+      <div class="yto-chan-progress-track"><i style="width:${p.pct}%"></i></div>
+      <div class="yto-chan-progress-sub">${p.pct}% complete · ${p.courses.length} ${p.courses.length === 1 ? 'course' : 'courses'} saved${p.totalSecs ? ' · ' + ytoFmtHM(p.totalSecs) + ' total' : ''}</div>
+    </section>` : ''}
+
+    ${cont ? `<button type="button" class="yto-chan-continue" onclick="ytoOpenCourse('${escapeHtml(cont.plId)}')">
+      <span class="yto-chan-continue-thumb"><img src="https://i.ytimg.com/vi/${escapeHtml(cont.videoId)}/mqdefault.jpg" alt="" loading="lazy" onerror="this.style.display='none'"></span>
+      <span class="yto-chan-continue-text">
+        <em>Continue watching</em>
+        <strong>${escapeHtml(cont.title)}</strong>
+        <span>${escapeHtml(cont.courseTitle)}</span>
+      </span>
+      <span class="yto-chan-continue-go" aria-hidden="true">▶</span>
+    </button>` : ''}
+
+    <div class="yto-library-heading">
+      <div><span class="yto-eyebrow">From this channel</span>
+        <h3>${p.courses.length} ${p.courses.length === 1 ? 'playlist' : 'playlists'}</h3></div>
+      ${allPlaylists && allPlaylists.length > p.courses.length
+        ? `<span>${allPlaylists.length - p.courses.length} more on the channel</span>` : ''}
+    </div>
+    ${p.courses.length
+      ? `<div class="yto-course-grid">${p.courses
+            .slice()
+            .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
+            .map(pl => ytoCourseCardHtml(pl)).join('')}</div>`
+      : `<div class="yto-filter-empty">
+           <span aria-hidden="true">▤</span>
+           <h3>No playlists saved from this channel yet</h3>
+           <p>Re-sync the channel to pick playlists to import.</p>
+           <button type="button" onclick="ytoResyncChannel('${id}')">⟳ Re-sync channel</button>
+         </div>`}`;
+}
+
+/* Best "resume here" pick for a channel.
+   There is no per-course lastPlayedAt in the data model, so this prefers an
+   in-progress course and falls back to the first unwatched video. */
+function ytoChannelContinue(channelId) {
+  const courses = ytoChannelCourses(channelId);
+  const inProgress = courses.filter(pl => {
+    const d = ytoDoneCount(pl);
+    return d > 0 && d < pl.videos.length;
+  });
+  const pick = inProgress[0] || courses.find(pl => ytoDoneCount(pl) < pl.videos.length);
+  if (!pick) return null;
+  const next = (pick.lastVideo && !pick.watched[pick.lastVideo]
+                 ? pick.videos.find(v => v.id === pick.lastVideo) : null)
+            || pick.videos.find(v => !pick.watched[v.id]);
+  if (!next) return null;
+  return { plId: pick.id, videoId: next.id, title: next.title || 'Next video', courseTitle: pick.title || '' };
 }
 
 /* ESC closes the channel picker (no-op while an import is running). */
