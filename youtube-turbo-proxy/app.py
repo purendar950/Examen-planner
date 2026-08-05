@@ -440,16 +440,23 @@ def _s3():
     return _s3_client
 
 
-def _s3_obj_key(doc_id):
-    return "study/%s.json" % doc_id
+def _s3_obj_key(doc_id, prefix="study"):
+    """Object key for a stored body.
+
+    `prefix` keeps namespaces separate in the bucket: study material lives under
+    study/, transcripts under transcripts/. It defaults to "study" so every
+    pre-existing call site (and every already-uploaded object) is untouched.
+    Separate prefixes also mean the admin study-cleanup endpoint, which deletes
+    study/<id>.json, can never reach a transcript body."""
+    return "%s/%s.json" % (prefix, doc_id)
 
 
-def _s3_get_json(doc_id):
+def _s3_get_json(doc_id, prefix="study"):
     cli = _s3()
     if not cli:
         return None
     try:
-        obj = cli.get_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id))
+        obj = cli.get_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id, prefix))
         return json.loads(obj["Body"].read().decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         code = ""
@@ -461,13 +468,13 @@ def _s3_get_json(doc_id):
         return None
 
 
-def _s3_exists(doc_id):
+def _s3_exists(doc_id, prefix="study"):
     """Check for a stored body without downloading the potentially large note."""
     cli = _s3()
     if not cli:
         return False
     try:
-        cli.head_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id))
+        cli.head_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id, prefix))
         return True
     except Exception as exc:  # noqa: BLE001
         code = ""
@@ -479,7 +486,7 @@ def _s3_exists(doc_id):
         return False
 
 
-def _s3_put_json(doc_id, data):
+def _s3_put_json(doc_id, data, prefix="study"):
     cli = _s3()
     if not cli:
         return False
@@ -487,7 +494,7 @@ def _s3_put_json(doc_id, data):
     last = None
     for attempt in range(3):
         try:
-            cli.put_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id), Body=body,
+            cli.put_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id, prefix), Body=body,
                            ContentType="application/json; charset=utf-8")
             return True
         except Exception as exc:  # noqa: BLE001
@@ -497,12 +504,13 @@ def _s3_put_json(doc_id, data):
     return False
 
 
-def _s3_delete(doc_id):
+def _s3_delete(doc_id, prefix="study"):
     cli = _s3()
     if not cli:
         return False
     try:
-        cli.delete_object(Bucket=_S3_BUCKET, Key=_s3_obj_key(doc_id))   # no-op if absent
+        cli.delete_object(Bucket=_S3_BUCKET,
+                          Key=_s3_obj_key(doc_id, prefix))   # no-op if absent
         return True
     except Exception as exc:  # noqa: BLE001
         log.warning("object storage delete %s failed: %s", doc_id, exc)
@@ -559,6 +567,83 @@ def _study_get(doc_id):
     # Old-style FULL doc in Firestore → serve it, and migrate to object storage.
     if _s3_enabled() and _s3_put_json(doc_id, idx):
         _fs_set("study", doc_id, _study_index_doc(idx))
+    return idx
+
+
+# ── transcripts: same body/index split as study material ───────────────────
+#  Transcripts used to be written whole into Firestore, which has a hard ~1 MiB
+#  per-document ceiling. A transcript doc stores BOTH `segments` and `text` — the
+#  same content twice — and Devanagari costs 3 bytes/char in UTF-8, so a 2-hour
+#  Hindi lecture lands around 700 KB and a 3-hour one goes over. Past the limit
+#  _fs_set SKIPS the write entirely (logging "SKIPPED: ~N bytes"), leaving the
+#  transcript only in the in-memory cache — which dies on every Render restart,
+#  after which it is re-fetched from YouTube: slow, and exposed to bot-gating.
+#  Exactly the longest lectures were the ones that never persisted.
+#
+#  Bodies now go to object storage (no size limit) with a tiny index doc in
+#  Firestore, which is what study material has always done.
+_TRANSCRIPT_INDEX_FIELDS = ("id", "title", "requested_lang", "detected_language",
+                            "chosen_lang", "kind", "languages_manual",
+                            "languages_auto", "segment_count", "char_count")
+
+
+def _transcript_index_doc(data):
+    idx = {k: data.get(k) for k in _TRANSCRIPT_INDEX_FIELDS}
+    idx["store"] = "b2"
+    idx["savedAt"] = int(time.time())
+    return idx
+
+
+def _transcript_put(doc_id, data):
+    """Persist a transcript. Body -> object storage with a small index ->
+    Firestore; if object storage is off, the full doc goes to Firestore (the old
+    behaviour, including its size ceiling). Returns True on success."""
+    if _s3_enabled() and _s3_put_json(doc_id, data, prefix="transcripts"):
+        return _fs_set("transcripts", doc_id, _transcript_index_doc(data))
+    return _fs_set("transcripts", doc_id, data)
+
+
+def _transcript_exists(doc_id):
+    """Whether a transcript is cached, without downloading it.
+
+    Handles all three shapes: the new index doc (`segment_count`), an old full
+    Firestore doc (`segments`), and a body whose index write failed (HEAD on
+    object storage), so a valid cached transcript is never reported missing."""
+    idx = _fs_get("transcripts", doc_id)
+    if idx:
+        if idx.get("segments") or idx.get("segment_count"):
+            return True
+        if idx.get("store") == "b2":
+            return _s3_exists(doc_id, prefix="transcripts") if _s3_enabled() else False
+        return False
+    return _s3_exists(doc_id, prefix="transcripts") if _s3_enabled() else False
+
+
+def _transcript_get(doc_id):
+    """Read a transcript. Prefers the object-storage body; falls back to
+    Firestore. Transcripts stored fully in Firestore are served AND migrated up
+    to object storage on first read, so the switchover needs no backfill job and
+    no downtime.
+
+    Returns the FULL document (with `segments`), never the bare index — callers
+    gate on `.get("segments")`, so returning an index would look like a valid
+    but empty transcript. If the body is genuinely gone this returns None and
+    the caller re-extracts from YouTube."""
+    idx = _fs_get("transcripts", doc_id)
+    if idx is None:
+        # No index doc — the body may exist from a split write whose index failed.
+        body = _s3_get_json(doc_id, prefix="transcripts") if _s3_enabled() else None
+        if body is not None:
+            # Best-effort repair; serving the body must not depend on it.
+            _fs_create("transcripts", doc_id, _transcript_index_doc(body))
+        return body
+    if idx.get("store") == "b2":
+        return _s3_get_json(doc_id, prefix="transcripts")
+    # Old-style FULL doc in Firestore → serve it now, and move it up to object
+    # storage so the next read is cheap and the 1 MiB ceiling stops applying.
+    if _s3_enabled() and idx.get("segments") and \
+            _s3_put_json(doc_id, idx, prefix="transcripts"):
+        _fs_set("transcripts", doc_id, _transcript_index_doc(idx))
     return idx
 
 
@@ -852,7 +937,7 @@ def _extract_transcript(video_id, lang="auto", force=False):
 
     # persistent cache: survives Render restarts, shared across all users
     if not force:
-        fs = _fs_get("transcripts", fs_id)
+        fs = _transcript_get(fs_id)
         if fs and fs.get("segments"):
             with _transcript_lock:
                 _transcript_cache[ckey] = {"ts": time.time(), "data": fs}
@@ -915,7 +1000,7 @@ def _extract_transcript(video_id, lang="auto", force=False):
         with _transcript_lock:
             _transcript_cache[ckey] = {"ts": time.time(), "data": data}
         if data.get("segments"):          # persist only successful transcripts
-            _fs_set("transcripts", fs_id, data)
+            _transcript_put(fs_id, data)
     return data
 
 
@@ -4324,8 +4409,9 @@ def api_status():
            "showRegenerate": False}
     if video_id:
         try:
-            fs = _fs_get("transcripts", _fs_doc_id(video_id, "auto"))
-            out["cachedTranscript"] = bool(fs and fs.get("segments"))
+            # Existence only — deliberately NOT _transcript_get(), which would
+            # download the whole body from object storage just to set a boolean.
+            out["cachedTranscript"] = _transcript_exists(_fs_doc_id(video_id, "auto"))
         except Exception:  # noqa: BLE001
             pass
     # UI flags managed by the admin panel. The browser can't read config/ai
@@ -4817,7 +4903,7 @@ def _index_video(video_id, out_lang="Hinglish", force=False):
                 chunks = _chunk_notes_md(content)
                 break
         if not chunks:
-            t = _fs_get("transcripts", _fs_doc_id(video_id, "auto"))
+            t = _transcript_get(_fs_doc_id(video_id, "auto"))
             if t and t.get("segments"):
                 source, lang = "transcript", (t.get("chosen_lang") or "auto")
                 chunks = _chunk_transcript(t["segments"])
