@@ -1142,6 +1142,48 @@ async function ytFetchChannelPlaylists(channelId) {
   return out;
 }
 
+/* Latest uploads for a channel, deliberately CAPPED.
+   Powers the channel page's "Videos" tab. Kept separate from
+   ytFetchPlaylistVideos() for two reasons: that function walks up to 2000
+   videos (40 quota units on a big channel) which is wasteful for a browse
+   grid, and its 'vids' cache entry means "the complete playlist" — storing a
+   truncated list under that key would make a later real import silently
+   incomplete. Hence its own 'ups' cache kind. */
+async function ytFetchChannelUploads(channelId, uploadsId, limit) {
+  const cap = Math.max(1, Number(limit) || 60);
+  const cached = ytCacheGet('ups', channelId);
+  if (cached) return cached.slice(0, cap);
+  if (!uploadsId) return null;
+
+  const out = [];
+  let pageToken = '';
+  const maxPages = Math.ceil(cap / 50);
+  for (let page = 0; page < maxPages; page++) {
+    const data = await ytApiFetchJson(
+      `playlistItems?part=snippet,contentDetails&playlistId=${encodeURIComponent(uploadsId)}&maxResults=50` +
+      (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '')
+    );
+    if (data && data.error) { ytReportApiError(data.error); return null; }
+    for (const item of (data.items || [])) {
+      const s = item.snippet || {};
+      if (!s.resourceId?.videoId) continue;
+      out.push({
+        id: s.resourceId.videoId,
+        title: s.title || 'Video',
+        thumb: s.thumbnails?.medium?.url || '',
+        publishedAt: item.contentDetails?.videoPublishedAt || s.publishedAt || null,
+        duration: 0
+      });
+      if (out.length >= cap) break;
+    }
+    if (out.length >= cap) break;
+    pageToken = data.nextPageToken || '';
+    if (!pageToken) break;
+  }
+  if (out.length) ytCacheSet('ups', channelId, out);
+  return out;
+}
+
 async function ytFetchDurations(videos) {
   const map = {};
   const durCache = ytDurCacheLoad();

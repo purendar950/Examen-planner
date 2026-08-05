@@ -2034,23 +2034,274 @@ function ytoRenderChannelPage(channelId) {
       <span class="yto-chan-continue-go" aria-hidden="true">▶</span>
     </button>` : ''}
 
-    <div class="yto-library-heading">
-      <div><span class="yto-eyebrow">From this channel</span>
-        <h3>${p.courses.length} ${p.courses.length === 1 ? 'playlist' : 'playlists'}</h3></div>
-      ${allPlaylists && allPlaylists.length > p.courses.length
-        ? `<span>${allPlaylists.length - p.courses.length} more on the channel</span>` : ''}
-    </div>
-    ${p.courses.length
-      ? `<div class="yto-course-grid">${p.courses
-            .slice()
-            .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
-            .map(pl => ytoCourseCardHtml(pl)).join('')}</div>`
+    <nav class="yto-chan-tabs" role="tablist" aria-label="Channel sections">
+      ${[['videos', 'Videos'], ['playlists', 'Playlists' + (allPlaylists ? ` (${allPlaylists.length})` : '')],
+         ['saved', 'My courses' + (p.courses.length ? ` (${p.courses.length})` : '')]]
+        .map(([key, label]) => `<button type="button" role="tab"
+              aria-selected="${_ytoChanTab === key ? 'true' : 'false'}"
+              class="yto-chan-tab${_ytoChanTab === key ? ' active' : ''}"
+              onclick="ytoChanSetTab('${key}')">${label}</button>`).join('')}
+    </nav>
+    <div id="yto-chan-tabpanel" role="tabpanel"></div>`;
+
+  ytoRenderChanTabPanel();
+}
+
+/* ── Channel page tabs ──
+   Mirrors YouTube's channel layout (Videos / Playlists) with a third tab for
+   the user's own saved courses. YouTube's other tabs are deliberately absent
+   because the Data API cannot serve them: Shorts is not a distinct API concept,
+   Live needs search (100 quota units per call), and Community posts are not
+   exposed at all. ── */
+let _ytoChanTab = 'videos';
+let _ytoChanTabToken = 0;   // guards against a slow fetch overwriting a newer tab
+
+function ytoChanSetTab(tab) {
+  _ytoChanTab = tab;
+  if (ytoCurrentChannel) ytoRenderChannelPage(ytoCurrentChannel);
+}
+
+function ytoChanTabLoading(msg) {
+  const el = document.getElementById('yto-chan-tabpanel');
+  if (el) el.innerHTML = `<div class="yto-chan-tab-loading">${escapeHtml(msg)}</div>`;
+}
+
+async function ytoRenderChanTabPanel() {
+  const channelId = ytoCurrentChannel;
+  const panel = document.getElementById('yto-chan-tabpanel');
+  if (!panel || !channelId) return;
+  const token = ++_ytoChanTabToken;
+  const stale = () => token !== _ytoChanTabToken || ytoCurrentChannel !== channelId;
+
+  /* ── My courses ── */
+  if (_ytoChanTab === 'saved') {
+    const courses = ytoChannelCourses(channelId)
+      .slice().sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+    panel.innerHTML = courses.length
+      ? `<div class="yto-course-grid">${courses.map(pl => ytoCourseCardHtml(pl)).join('')}</div>`
       : `<div class="yto-filter-empty">
            <span aria-hidden="true">▤</span>
-           <h3>No playlists saved from this channel yet</h3>
-           <p>Re-sync the channel to pick playlists to import.</p>
-           <button type="button" onclick="ytoResyncChannel('${id}')">⟳ Re-sync channel</button>
-         </div>`}`;
+           <h3>Nothing saved from this channel yet</h3>
+           <p>Open the Playlists tab and import what you need.</p>
+           <button type="button" onclick="ytoChanSetTab('playlists')">Browse playlists</button>
+         </div>`;
+    return;
+  }
+
+  /* ── Playlists (all of them, imported or not) ── */
+  if (_ytoChanTab === 'playlists') {
+    let rows = null;
+    try { rows = ytCacheGet('chanpls', channelId); } catch (e) {}
+    if (!rows) {
+      ytoChanTabLoading('Playlists load ho rahe hain...');
+      rows = await ytFetchChannelPlaylists(channelId).catch(() => null);
+      if (stale()) return;
+    }
+    if (!rows || !rows.length) {
+      panel.innerHTML = `<div class="yto-filter-empty"><span aria-hidden="true">▤</span>
+        <h3>No public playlists found</h3>
+        <p>This channel may not have any, or the API quota is exhausted.</p></div>`;
+      return;
+    }
+    const lib = ytoLib();
+    const sorted = rows.slice().sort((a, b) => (b.itemCount || 0) - (a.itemCount || 0));
+    panel.innerHTML = `<div class="yto-yt-grid">${
+      sorted.map(pl => ytoChanPlaylistCardHtml(pl, !!lib[pl.id])).join('')}</div>`;
+    return;
+  }
+
+  /* ── Videos (latest uploads) ── */
+  const meta = ytoChannelMeta(channelId);
+  const uploads = meta.uploads || ('UU' + String(channelId).slice(2));
+  let vids = null;
+  try { vids = ytCacheGet('ups', channelId); } catch (e) {}
+  if (!vids) {
+    ytoChanTabLoading('Videos load ho rahe hain...');
+    vids = await ytFetchChannelUploads(channelId, uploads, 60).catch(() => null);
+    if (stale()) return;
+  }
+  if (!vids || !vids.length) {
+    panel.innerHTML = `<div class="yto-filter-empty"><span aria-hidden="true">▶</span>
+      <h3>Videos load nahi hue</h3>
+      <p>API quota / key check karo, ya thodi der baad try karo.</p></div>`;
+    return;
+  }
+  let durMap = {};
+  try { durMap = await ytFetchDurations(vids); } catch (e) {}
+  if (stale()) return;
+  const lib = ytoLib();
+  const savedIds = new Set();
+  Object.values(lib).forEach(pl => (pl.videos || []).forEach(v => savedIds.add(v.id)));
+  panel.innerHTML = `<div class="yto-yt-grid">${
+    vids.map(v => ytoChanVideoCardHtml(v, durMap, savedIds.has(v.id))).join('')}</div>`;
+}
+
+/* "3 days ago" / "2 months ago" — YouTube-style relative upload date. */
+function ytoFmtAgo(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!t) return '';
+  const d = Math.max(0, Math.floor((Date.now() - t) / 86400000));
+  if (d === 0) return 'today';
+  if (d === 1) return '1 day ago';
+  if (d < 30) return d + ' days ago';
+  const m = Math.floor(d / 30);
+  if (m < 12) return m + (m === 1 ? ' month ago' : ' months ago');
+  const y = Math.floor(d / 365);
+  return y + (y === 1 ? ' year ago' : ' years ago');
+}
+
+/* A YouTube-style video tile: 16:9 thumb, duration badge, 2-line title. */
+function ytoChanVideoCardHtml(v, durMap, alreadySaved) {
+  const dur = (durMap || {})[v.id] || v.duration || 0;
+  const id = escapeHtml(v.id);
+  const title = escapeHtml(v.title || 'Video');
+  return `<article class="yto-yt-card">
+    <button type="button" class="yto-yt-thumb" onclick="ytoWatchChannelVideo('${id}')" aria-label="Play ${title}">
+      <img src="https://i.ytimg.com/vi/${id}/mqdefault.jpg" alt="" loading="lazy" onerror="this.style.display='none'">
+      ${dur ? `<span class="yto-yt-dur">${ytFormatDuration(dur)}</span>` : ''}
+      <span class="yto-yt-play" aria-hidden="true">▶</span>
+    </button>
+    <div class="yto-yt-body">
+      <h4 title="${title}">${title}</h4>
+      <div class="yto-yt-meta">${escapeHtml(ytoFmtAgo(v.publishedAt))}</div>
+      <div class="yto-yt-actions">
+        <button type="button" onclick="ytoWatchChannelVideo('${id}')">▶ Watch</button>
+        ${alreadySaved
+          ? `<button type="button" class="is-done" disabled>✓ Saved</button>`
+          : `<button type="button" onclick="ytoSaveChannelVideo('${id}', this)">＋ Save</button>`}
+      </div>
+    </div>
+  </article>`;
+}
+
+/* A YouTube-style playlist tile. Imported ones show progress; the rest offer
+   a one-tap import so you never have to re-run the picker for one playlist. */
+function ytoChanPlaylistCardHtml(pl, imported) {
+  const id = escapeHtml(pl.id);
+  const title = escapeHtml(pl.title || 'Playlist');
+  const count = pl.itemCount || 0;
+  const thumb = pl.thumb ? escapeHtml(pl.thumb) : '';
+  let footer;
+  if (imported) {
+    const prog = ytoCourseProgress(ytoLib()[pl.id]);
+    footer = `<div class="yto-yt-prog"><i style="width:${prog.pct}%"></i></div>
+      <div class="yto-yt-actions">
+        <button type="button" onclick="ytoOpenCourse('${id}')">Open · ${prog.pct}%</button>
+      </div>`;
+  } else {
+    footer = `<div class="yto-yt-actions">
+        <button type="button" onclick="ytoImportChannelPlaylist('${id}', this)">＋ Import</button>
+      </div>`;
+  }
+  return `<article class="yto-yt-card${imported ? ' is-imported' : ''}">
+    <div class="yto-yt-thumb as-playlist">
+      ${thumb ? `<img src="${thumb}" alt="" loading="lazy" onerror="this.style.display='none'">` : ''}
+      <span class="yto-yt-dur">▤ ${count}</span>
+      ${imported ? `<span class="yto-yt-badge">In library</span>` : ''}
+    </div>
+    <div class="yto-yt-body">
+      <h4 title="${title}">${title}</h4>
+      <div class="yto-yt-meta">${count} ${count === 1 ? 'video' : 'videos'}</div>
+      ${footer}
+    </div>
+  </article>`;
+}
+
+/* Play a channel video in the Watch tab. */
+function ytoWatchChannelVideo(videoId, title) {
+  if (typeof ytLoadInTab !== 'function') return;
+  switchPage('youtube');
+  setTimeout(() => {
+    ytLoadInTab('video', videoId, 'https://www.youtube.com/watch?v=' + videoId, title || 'Video');
+  }, 60);
+}
+
+/* Shared storage guard for the one-at-a-time import paths. Returns the
+   projected byte size if the write would cross the Firestore hard limit, else 0.
+   Without this, tapping ＋ repeatedly could walk the synced document past 1 MiB
+   and break sync for the whole app. */
+function ytoSingleImportBlocked(plId, itemCount) {
+  const have = ytoLib()[plId]?.videos?.length || 0;
+  const newVideos = Math.max(0, Math.min(Number(itemCount) || 0, 2000) - have);
+  const projected = ytoDocBytes(appState) + newVideos * YTO_BYTES_PER_VIDEO;
+  return projected >= YTO_SYNC_HARD_BYTES ? projected : 0;
+}
+
+/* Import one playlist straight from the channel page. */
+async function ytoImportChannelPlaylist(plId, btn) {
+  const channelId = ytoCurrentChannel;
+  if (!channelId) return;
+  const ch = ytoChannelMeta(channelId);
+  let rows = null;
+  try { rows = ytCacheGet('chanpls', channelId); } catch (e) {}
+  const meta = (rows || []).find(r => r.id === plId) || { id: plId, title: 'Playlist', itemCount: 0 };
+
+  const blocked = ytoSingleImportBlocked(plId, meta.itemCount);
+  if (blocked) {
+    showToast(`⚠️ Ye playlist add karne se sync limit (1 MB) cross ho jayegi (~${ytoFmtBytes(blocked)}). Pehle kuch purane courses delete karo.`, 'error');
+    return;
+  }
+
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳'; }
+  const videos = await ytFetchPlaylistVideos(plId).catch(() => null);
+  if (!videos || !videos.length) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    showToast('⚠️ Is playlist ke videos load nahi hue — public hai? quota check karo.', 'error');
+    return;
+  }
+
+  // Re-check with the REAL video count before writing. The pre-check uses
+  // itemCount from the cached channel listing, which is 0 when the playlist
+  // isn't in that list — so without this a large playlist could slip past the
+  // guard and break sync for the whole app.
+  const blockedReal = ytoSingleImportBlocked(plId, videos.length);
+  if (blockedReal) {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    showToast(`⚠️ ${videos.length} videos add karne se sync limit (1 MB) cross ho jayegi (~${ytoFmtBytes(blockedReal)}). Pehle kuch purane courses delete karo.`, 'error');
+    return;
+  }
+
+  const durMap = await ytFetchDurations(videos).catch(() => ({}));
+  ytoUpsertPlaylistCourse(plId, {
+    info: { title: meta.title, channelTitle: meta.channelTitle || ch.title, thumb: meta.thumb },
+    videos, durMap
+  }, { slim: true, channelId, channelTitle: ch.title, fallbackThumb: meta.thumb || ch.thumb || '' });
+
+  // Keep the channel's playlist list in sync so a later re-sync knows about it
+  const rec = ytoChannels()[channelId];
+  if (rec) rec.playlistIds = Array.from(new Set((rec.playlistIds || []).concat([plId])));
+  ytoPersist();
+  showToast(`✅ "${meta.title}" added — ${videos.length} videos`, 'success');
+  if (ytoCurrentChannel === channelId) ytoRenderChannelPage(channelId);
+}
+
+/* Save a single channel video as a 1-video course, without leaving the page. */
+async function ytoSaveChannelVideo(videoId, btn) {
+  const channelId = ytoCurrentChannel;
+  const ch = channelId ? ytoChannelMeta(channelId) : {};
+  const key = 'vid_' + videoId;
+  if (ytoLib()[key]) { showToast('Ye video already library mein hai.', 'info'); return; }
+
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳'; }
+  const info = await ytFetchVideoInfo(videoId).catch(() => null);
+  const lib = ytoLib();
+  lib[key] = {
+    id: key,
+    type: 'video',
+    videoId,
+    title: info?.title || 'Video',
+    channel: info?.channelTitle || ch.title || '',
+    thumb: info?.thumb || `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
+    videos: [{ id: videoId, title: info?.title || 'Video', dur: info?.duration || 0 }],
+    watched: {}, lastVideo: videoId, plan: null, addedAt: Date.now()
+  };
+  if (channelId) { lib[key].channelId = channelId; lib[key].channelTitle = ch.title || ''; }
+  ytoPersist();
+  showToast(`✅ "${lib[key].title}" saved to library`, 'success');
+  if (btn) { btn.disabled = true; btn.className = 'is-done'; btn.innerHTML = '✓ Saved'; }
 }
 
 /* Best "resume here" pick for a channel.
@@ -2076,4 +2327,116 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape' && document.getElementById('yto-chan-overlay')?.classList.contains('open')) {
     ytoChanClose();
   }
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+   ADD CHANNEL — a dedicated entry point
+
+   Pasting a channel URL into the course box works, but nothing told the user
+   that, so channels were effectively undiscoverable. This gives channels their
+   own button and modal, and accepts what people actually have to hand:
+   a bare handle, an @handle, a raw UC… id, or any channel URL.
+══════════════════════════════════════════════════════════════════════ */
+
+/* Accepts:  @parmarrailways | parmarrailways | UC7D9zpW… | any channel URL */
+function ytoParseChannelInput(raw) {
+  const s = (raw || '').trim();
+  if (!s) return null;
+  // A full URL (or anything that looks like one) goes through the URL parser
+  if (/youtube\.com|youtu\.be|^https?:\/\//i.test(s)) {
+    return typeof ytExtractChannelRef === 'function' ? ytExtractChannelRef(s) : null;
+  }
+  if (/^UC[A-Za-z0-9_-]{22}$/.test(s)) return { kind: 'id', value: s };
+  const handle = s.replace(/^@/, '').trim();
+  // Handles allow letters, digits, dots, dashes and underscores (3+ chars)
+  if (/^[A-Za-z0-9._-]{3,}$/.test(handle)) return { kind: 'handle', value: handle };
+  return null;
+}
+
+(function () {
+  const div = document.createElement('div');
+  div.className = 'ch-link-modal-overlay';
+  div.id = 'yto-addchan-overlay';
+  div.innerHTML = `<div class="ch-link-modal" style="max-width:480px;">
+    <h3>▤ Add YouTube channel</h3>
+    <div class="modal-sub" style="color:var(--muted);font-size:0.78rem;margin-bottom:0.85rem;line-height:1.5;">
+      Channel ka link ya handle dalo. Phir uske saare playlists dikhenge — jo chahiye wo import karo.
+    </div>
+    <label style="font-size:0.78rem;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:0.05em;">Channel link or @handle *</label>
+    <input type="text" id="yto-addchan-input" class="form-input" style="margin:6px 0 8px;"
+      placeholder="@parmarrailways" autocomplete="off" inputmode="url"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();ytoSubmitAddChannel();}">
+    <div style="font-size:0.72rem;color:var(--muted);line-height:1.6;margin-bottom:10px;">
+      Ye sab chalte hain:<br>
+      <code>@parmarrailways</code> · <code>youtube.com/@parmarrailways</code><br>
+      <code>youtube.com/channel/UC…</code> · <code>youtube.com/c/Name</code>
+    </div>
+    <div id="yto-addchan-err" style="color:var(--red);font-size:0.8rem;margin-bottom:8px;display:none;"></div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel" onclick="ytoCloseAddChannelModal()">Cancel</button>
+      <button class="btn-modal-save" id="yto-addchan-go" onclick="ytoSubmitAddChannel()">Find channel</button>
+    </div>
+  </div>`;
+  div.onclick = (e) => { if (e.target === div) ytoCloseAddChannelModal(); };
+  document.body.appendChild(div);
+})();
+
+function ytoOpenAddChannelModal(prefill) {
+  const inp = document.getElementById('yto-addchan-input');
+  const err = document.getElementById('yto-addchan-err');
+  if (inp) inp.value = prefill || '';
+  if (err) err.style.display = 'none';
+  document.getElementById('yto-addchan-overlay').classList.add('open');
+  setTimeout(() => inp && inp.focus(), 80);
+}
+
+function ytoCloseAddChannelModal() {
+  const ov = document.getElementById('yto-addchan-overlay');
+  if (ov) ov.classList.remove('open');
+}
+
+async function ytoSubmitAddChannel() {
+  const inp = document.getElementById('yto-addchan-input');
+  const err = document.getElementById('yto-addchan-err');
+  const btn = document.getElementById('yto-addchan-go');
+  const val = (inp?.value || '').trim();
+  if (err) err.style.display = 'none';
+
+  if (!val) {
+    if (err) { err.textContent = 'Channel link ya handle dalo.'; err.style.display = 'block'; }
+    return;
+  }
+  const ref = ytoParseChannelInput(val);
+  if (!ref) {
+    if (err) {
+      err.textContent = 'Ye channel handle/link samajh nahi aaya. Jaise: @parmarrailways ya youtube.com/@parmarrailways';
+      err.style.display = 'block';
+    }
+    return;
+  }
+
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Dhundh rahe hain...'; }
+  // ytoLoadChannel writes its own failures into #yto-error on the library page,
+  // so mirror them into this modal instead of closing it on failure.
+  const libErr = document.getElementById('yto-error');
+  if (libErr) { libErr.textContent = ''; libErr.style.display = 'none'; }
+  await ytoLoadChannel(ref);
+  if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+
+  const opened = document.getElementById('yto-chan-overlay')?.classList.contains('open');
+  if (opened) {
+    ytoCloseAddChannelModal();   // picker took over
+  } else if (err) {
+    err.textContent = (libErr && libErr.textContent)
+      ? libErr.textContent
+      : 'Channel load nahi hua. Handle check karo ya /channel/UC… wala link try karo.';
+    err.style.display = 'block';
+    if (libErr) libErr.style.display = 'none';
+  }
+}
+
+/* ESC closes the add-channel modal */
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') ytoCloseAddChannelModal();
 });
