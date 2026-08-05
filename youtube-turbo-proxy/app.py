@@ -1928,28 +1928,31 @@ _HINGLISH_RULE = (
 )
 
 
-def _lang_rule(out_lang):
+def _lang_rule(out_lang, verb="Respond"):
     """The output-language instruction. Hinglish gets an explicit script + register
-    contract; other languages just need naming."""
+    contract; other languages just need naming. `verb` lets the tutor say "Reply"
+    while the study modes say "Respond"."""
     if _is_hinglish(out_lang):
-        return "Respond ONLY in Hinglish." + _HINGLISH_RULE
-    return "Respond ONLY in " + out_lang + "."
+        return "%s ONLY in Hinglish." % verb + _HINGLISH_RULE
+    return "%s ONLY in %s." % (verb, out_lang)
 
 
 def _lang_reminder(out_lang):
-    """Short language rule to append AFTER the transcript in the user message.
+    """Short language rule to append AFTER the source text (transcript, condensed
+    body, or the student's chat question).
 
-    The transcript is the last (and by far the largest) thing the model reads, so
-    with the rule only in the system message the freshest signal is tens of
-    thousands of Devanagari characters and the model copies that script. Repeating
-    the rule last is what actually holds the output in Hinglish."""
+    The source text is the last — and by far the largest — thing the model reads,
+    so with the rule only in the system message the freshest signal is tens of
+    thousands of Devanagari characters and the model simply copies that script.
+    Repeating the rule last is what actually holds the output in Hinglish. Worded
+    without naming a specific source so it reads correctly in every context."""
     if _is_hinglish(out_lang):
-        return ("\n\n[OUTPUT LANGUAGE \u2014 this overrides the script used in the "
-                "transcript above] Write the answer in Hinglish: ROMAN/LATIN "
-                "script only, zero Devanagari characters, spoken romanised Hindi "
-                "grammar with all technical terms kept in English.")
-    return ("\n\n[OUTPUT LANGUAGE \u2014 this overrides the language used in the "
-            "transcript above] Write the answer ONLY in %s." % out_lang)
+        return ("\n\n[OUTPUT LANGUAGE \u2014 this overrides the script of the text "
+                "above] Write your answer in Hinglish: ROMAN/LATIN script only, "
+                "zero Devanagari characters, spoken romanised Hindi grammar with "
+                "all technical terms kept in English.")
+    return ("\n\n[OUTPUT LANGUAGE \u2014 this overrides the language of the text "
+            "above] Write your answer ONLY in %s." % out_lang)
 
 
 def _study_sys(out_lang):
@@ -4439,10 +4442,10 @@ def _tutor_prepare(body, user):
     sysmsg = (
         "You are an exam-prep AI tutor for the video titled %r. Answer ONLY using "
         "the transcript below. If something isn't covered, say so briefly. The "
-        "transcript is auto-generated (may be Hindi/Hinglish, no punctuation) \u2014 "
-        "clean it mentally. Cite timestamps as [mm:ss] when pointing to a part. "
-        "Reply ONLY in %s. Be clear and use simple examples."
-        % (t.get("title") or "this lesson", out_lang)
+        "transcript is auto-generated (may be Hindi or Hinglish, no punctuation) "
+        "\u2014 clean it mentally. Cite timestamps as [mm:ss] when pointing to a "
+        "part. Be clear and use simple examples. %s"
+        % (t.get("title") or "this lesson", _lang_rule(out_lang, verb="Reply"))
     )
     if student_memory:
         sysmsg += (
@@ -4451,16 +4454,26 @@ def _tutor_prepare(body, user):
             "back verbatim):\n%s" % student_memory
         )
     sysmsg += "\n\nTRANSCRIPT:\n%s" % context
+    # Restated after the transcript, exactly as in _gen_notes: the transcript is
+    # the bulk of what the model reads, so the language rule has to come after it.
+    sysmsg += _lang_reminder(out_lang)
     messages = [{"role": "system", "content": sysmsg}]
     for m in (history or [])[-8:]:
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
             messages.append({"role": m["role"], "content": str(m["content"])[:2000]})
+    # Chat has two pressures the one-shot study modes don't: the student's own
+    # question is usually typed in Devanagari, and replayed history may contain
+    # pre-fix Hindi answers the model will stay consistent with. Both sit AFTER
+    # the system message, so the rule is repeated once more on the final turn —
+    # this reminder is server-side only and never enters the client's history.
+    turn_tail = _lang_reminder(out_lang)
     if mode == "teach" and not question:
         messages.append({"role": "user", "content":
                          "Teach me this lesson step by step. Explain the first part "
-                         "simply, then ask me ONE check-question. Keep it interactive."})
+                         "simply, then ask me ONE check-question. Keep it interactive."
+                         + turn_tail})
     else:
-        messages.append({"role": "user", "content": question})
+        messages.append({"role": "user", "content": question + turn_tail})
 
     return None, {"messages": messages, "ai": ai, "video_id": video_id,
                   "mode": mode, "transcript_lang": t.get("chosen_lang")}
