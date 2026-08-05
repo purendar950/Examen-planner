@@ -28,6 +28,26 @@
   function outLang() { return localStorage.getItem(LANG_KEY) || 'Hinglish'; }
   function setLang(v) { try { localStorage.setItem(LANG_KEY, v); } catch (e) {} }
 
+  /* ── Tutor scope ──────────────────────────────────────────────────────────
+     'video'   → classic tutor, grounded in the open video's transcript.
+     'library' → advanced tutor, answers across every video in the organiser
+                 library using semantic retrieval over the student's own notes.
+     Deliberately a toggle inside the Tutor tab rather than a 5th tab: a fifth
+     tab is cramped on mobile, and this keeps one chat surface. Histories are
+     kept separate per scope (see chatKey) because the two are different
+     conversations. A per-course scope exists server-side but is not exposed
+     yet — it needs course-id plumbing the client doesn't have cleanly. */
+  var SCOPE_KEY = 'aiTutorScope';
+  function tutorScope() {
+    var v = null;
+    try { v = localStorage.getItem(SCOPE_KEY); } catch (e) {}
+    return v === 'library' ? 'library' : 'video';
+  }
+  function setTutorScope(v) {
+    try { localStorage.setItem(SCOPE_KEY, v === 'library' ? 'library' : 'video'); } catch (e) {}
+  }
+  function isLibraryScope() { return tutorScope() === 'library'; }
+
   /* User-picked AI model. "" = Auto (proxy uses the admin default). The dropdown
      is filled from /api/status.studyModels — i.e. ONLY the active provider's
      models — so any choice the user makes is valid for the configured key. */
@@ -3444,7 +3464,12 @@
   /* ── Tutor chat ── */
   // Tutor chat is stored in localStorage (device-local) — NOT Firestore — so it
   // never bloats the synced user document. Capped at 30 messages per video.
-  function chatKey(videoId) { return 'aiTutorChat_' + (videoId || curVid()); }
+  // Library-scope chat is NOT tied to a video, so it gets its own key. That is
+  // also what lets it survive video changes without being wiped.
+  function chatKey(videoId) {
+    if (isLibraryScope()) return 'aiTutorChat_library';
+    return 'aiTutorChat_' + (videoId || curVid());
+  }
   function getHistory(key) {
     try { var raw = localStorage.getItem(key || chatKey()); return raw ? JSON.parse(raw) : []; } catch (e) { return []; }
   }
@@ -3481,25 +3506,114 @@
           '<button class="ai-btn sec" id="ai-tutor-pdf" title="Download chat as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>' +
           '<button class="ai-btn sec" id="ai-clear" style="padding:4px 10px;font-size:0.72rem">🗑 Clear chat</button></div>'
       : '';
-    return clearBar + '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted ai-chat-empty">Ask a doubt about this video, ya "Teach me" dabao.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span></div>') + '</div>' +
-      '<div class="ai-chips">' +
-      '<span class="ai-chip" data-q="Is video ko simple example se samjhao">Explain simpler</span>' +
-      '<span class="ai-chip" data-q="Ek real example do is topic ka">Give example</span>' +
-      '<span class="ai-chip" data-q="Is video se important cheezein ek ek karke pucho">Quiz me</span>' +
-      '<span class="ai-chip" data-q="Exam point of view se important cheezein batao">Real exam angle</span>' +
-      '<span class="ai-chip" data-teach="1">📚 Teach me</span>' +
-      '</div>' +
-      '<div class="ai-input-row"><input id="ai-chat-in" placeholder="Type your doubt…"><button class="ai-btn" id="ai-chat-send">Send</button></div>';
+    var lib = isLibraryScope();
+
+    // Scope toggle. Library scope is Pro-only because one library answer carries
+    // a much bigger context than single-video chat.
+    var scopeBar =
+      '<div class="ai-scope" id="ai-scope" role="tablist" aria-label="Tutor scope" ' +
+        'style="display:flex;gap:4px;margin-bottom:6px">' +
+        '<button type="button" class="ai-btn' + (lib ? ' sec' : '') + '" data-scope="video" ' +
+          'role="tab" aria-selected="' + (!lib) + '" ' +
+          'style="flex:1;padding:5px 8px;font-size:0.72rem">🎬 This video</button>' +
+        '<button type="button" class="ai-btn' + (lib ? '' : ' sec') + '" data-scope="library" ' +
+          'role="tab" aria-selected="' + lib + '" ' +
+          'title="Ask across every video in your Organiser library" ' +
+          'style="flex:1;padding:5px 8px;font-size:0.72rem">🧠 All my library' +
+          (isPro() ? '' : ' 🔒') + '</button>' +
+      '</div>';
+
+    // Coverage is filled in by refreshLibraryCoverage() — an un-indexed library
+    // is the single most likely reason for a disappointing answer, so it is
+    // stated plainly rather than left to look like the tutor is ignorant.
+    var coverageBar = lib
+      ? '<div class="ai-muted" id="ai-lib-coverage" style="font-size:0.7rem;margin-bottom:6px">Checking your library…</div>'
+      : '';
+
+    if (lib && !isPro()) {
+      return scopeBar +
+        '<div class="ai-muted" style="padding:14px;line-height:1.6">' +
+        '<b>🔒 Pro feature</b><br>Asking across your whole library needs Pro — it ' +
+        'searches every video\'s notes at once, which costs a lot more than a ' +
+        'single-video question.<br><span style="font-size:0.72rem">Switch back to ' +
+        '“This video” to keep using the normal tutor.</span></div>';
+    }
+
+    var emptyMsg = lib
+      ? 'Ask anything across <b>all your library videos</b> — main aapke saare notes me dhoond ke jawab dunga, ' +
+        'source video + timestamp ke saath.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span>'
+      : 'Ask a doubt about this video, ya "Teach me" dabao.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span>';
+
+    var chips = lib
+      ? '<span class="ai-chip" data-q="Mere notes me jo main topics cover hue hain unki list do">What have I covered?</span>' +
+        '<span class="ai-chip" data-q="Mere weak topics ke hisaab se ek revision plan banao">Revision plan</span>' +
+        '<span class="ai-chip" data-q="Is topic par mere kis video me sabse detail me padhaya gaya hai?">Which video covers…?</span>' +
+        '<span class="ai-chip" data-q="Mere notes me se exam ke liye sabse important points batao">Exam-important points</span>'
+      : '<span class="ai-chip" data-q="Is video ko simple example se samjhao">Explain simpler</span>' +
+        '<span class="ai-chip" data-q="Ek real example do is topic ka">Give example</span>' +
+        '<span class="ai-chip" data-q="Is video se important cheezein ek ek karke pucho">Quiz me</span>' +
+        '<span class="ai-chip" data-q="Exam point of view se important cheezein batao">Real exam angle</span>' +
+        '<span class="ai-chip" data-teach="1">📚 Teach me</span>';
+
+    return scopeBar + clearBar + coverageBar +
+      '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted ai-chat-empty">' + emptyMsg + '</div>') + '</div>' +
+      '<div class="ai-chips">' + chips + '</div>' +
+      '<div class="ai-input-row"><input id="ai-chat-in" placeholder="' +
+      (lib ? 'Ask across all your videos…' : 'Type your doubt…') +
+      '"><button class="ai-btn" id="ai-chat-send">Send</button></div>';
+  }
+
+  /* ── Library coverage strip ──
+     Answers only reach videos that have been indexed. Saying "24 of 148" up
+     front is the difference between "the tutor is dumb" and "I should generate
+     notes for more videos". */
+  var _libCoverage = null;
+  function paintLibraryCoverage(text) {
+    var el = document.getElementById('ai-lib-coverage');
+    if (el) el.innerHTML = text;
+  }
+  function refreshLibraryCoverage(force) {
+    if (!isLibraryScope() || !isPro()) return;
+    if (_libCoverage && !force) { paintLibraryCoverage(_libCoverage); return; }
+    backendAuthFetch('/api/tutor/library/coverage?scope=library')
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || j.error) { paintLibraryCoverage(''); return; }
+        var bits = ['🔎 Searching <b>' + (j.indexed || 0) + '</b> of <b>' +
+                    (j.total || 0) + '</b> videos in your library'];
+        if (!j.vector_search) {
+          bits.push('<span title="Semantic search is not configured on the server; ' +
+                    'matching falls back to video titles.">⚠ basic search</span>');
+        }
+        if (j.total && j.indexed < j.total) {
+          bits.push('<span style="opacity:.8">generate notes for more videos to include them</span>');
+        }
+        _libCoverage = bits.join(' · ');
+        paintLibraryCoverage(_libCoverage);
+      }).catch(function () { paintLibraryCoverage(''); });
   }
   function renderTutor() {
     var b = shellBody(); if (!b) return;
     b.innerHTML = chatHtml();
     bindTsLinks(b);
+    Array.prototype.forEach.call(b.querySelectorAll('#ai-scope [data-scope]'), function (btn) {
+      btn.onclick = function () {
+        var next = btn.dataset.scope;
+        if (next === tutorScope()) return;
+        setTutorScope(next);
+        renderTutor();      // re-renders with the other scope's own history,
+                            // and re-runs refreshLibraryCoverage() itself
+      };
+    });
+    refreshLibraryCoverage();
     Array.prototype.forEach.call(b.querySelectorAll('.ai-chip'), function (c) {
       c.onclick = function () { c.dataset.teach ? sendTutor('', 'teach') : sendTutor(c.dataset.q); };
     });
     var clr = document.getElementById('ai-clear');
-    if (clr) clr.onclick = function () { if (confirm('Clear this video\'s tutor chat?')) { clearHistory(); renderTutor(); } };
+    if (clr) clr.onclick = function () {
+      var what = isLibraryScope() ? 'your library-wide tutor chat' : 'this video\'s tutor chat';
+      if (confirm('Clear ' + what + '?')) { clearHistory(); renderTutor(); }
+    };
     var tpdf = document.getElementById('ai-tutor-pdf');
     if (tpdf) tpdf.onclick = function () { pdfDownload((curTitle() || 'Video').replace(/\s+/g, ' ').trim() + ' — AI Tutor Chat', tutorChatPdfHtml()); };
     var input = document.getElementById('ai-chat-in'), send = document.getElementById('ai-chat-send');
@@ -3509,7 +3623,16 @@
     var chat = document.getElementById('ai-chat'); if (chat) chat.scrollTop = chat.scrollHeight;
   }
   // Build the JSON body shared by the streaming + one-shot tutor calls.
+  // Library scope has no video id and its own scope field; everything else
+  // (language, provider/model override, memory) is identical.
   function tutorBody(vid, question, mode, histForApi) {
+    if (isLibraryScope()) {
+      return JSON.stringify({
+        q: question || '', out: outLang(), scope: 'library',
+        provider: outProvider(), model: outModel(), history: histForApi,
+        memory: (window.TutorMemory && window.TutorMemory.contextText()) || ''
+      });
+    }
     return JSON.stringify({
       id: vid, q: question || '', out: outLang(), mode: mode || 'chat',
       provider: outProvider(), model: outModel(), history: histForApi,
@@ -3581,8 +3704,8 @@
   // Classic one-shot request — the fallback when streaming isn't available or
   // fails. The user turn is already pushed + saved by sendTutor; this only adds
   // the assistant reply. `histForApi` is the trimmed history to send.
-  function sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl) {
-    backendAuthFetch('/api/tutor', {
+  function sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl, oncePath) {
+    backendAuthFetch(oncePath || '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: tutorBody(vid, question, mode, histForApi)
     }).then(function (r) { return r.json(); }).then(function (j) {
@@ -3600,7 +3723,15 @@
   // falls back to the one-shot /api/tutor on any error / no-stream / abort — so
   // this is never worse than the classic path.
   function sendTutor(question, mode) {
-    var vid = curVid(); if (!vid) return;
+    var lib = isLibraryScope();
+    // Library scope is not tied to an open video, so it must NOT bail on !vid —
+    // the student can ask across their library with nothing playing.
+    var vid = curVid();
+    if (!lib && !vid) return;
+    if (lib && !isPro()) { renderTutor(); return; }
+    if (lib && !question) return;                 // no "Teach me" without a video
+    var streamPath = lib ? '/api/tutor/library/stream' : '/api/tutor/stream';
+    var oncePath = lib ? '/api/tutor/library' : '/api/tutor';
     var historyKey = chatKey(vid);
     var turnId = 'turn_' + Date.now() + '_' + (++_tutorTurnRequest);
     var h = getHistory(historyKey);
@@ -3657,7 +3788,7 @@
       if (done) return;
       streamPainter.cancel();
       done = true;
-      sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl);
+      sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl, oncePath);
     }
     function handleFrame(frame) {
       var ev = 'message', data = '';
@@ -3665,7 +3796,27 @@
         if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
         else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
       });
-      if (ev === 'meta') { return; }
+      if (ev === 'meta') {
+        // Library scope reports what it actually searched. Showing it turns a
+        // weak answer into an explainable one.
+        if (lib && data) {
+          try {
+            var m = JSON.parse(data);
+            var bits = [];
+            if (typeof m.indexed === 'number') {
+              bits.push('🔎 searched <b>' + m.indexed + '</b> of <b>' + m.total + '</b> videos');
+            }
+            if (m.retrieval === 'keyword') bits.push('⚠ basic (title) search');
+            if (m.context_limited) {
+              bits.push('<span title="This model has a small context window, so only a ' +
+                        'little of your notes fits. Pick a bigger model for library questions.">' +
+                        '⚠ small model context</span>');
+            }
+            if (bits.length) { _libCoverage = bits.join(' · '); paintLibraryCoverage(_libCoverage); }
+          } catch (e) {}
+        }
+        return;
+      }
       if (ev === 'error') { fallback(); return; }
       if (ev === 'done') { return; }
       if (data) {
@@ -3679,7 +3830,7 @@
       }
     }
 
-    backendAuthFetch('/api/tutor/stream', {
+    backendAuthFetch(streamPath, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: tutorBody(vid, question, mode, histForApi)
     }).then(function (r) {
@@ -4555,7 +4706,14 @@
     mountRightColumn();
     applyView();   // idempotent re-assert of visibility + split + full-width
     var v = curVid();
-    if (v !== _lastVid) { _lastVid = v; if (document.getElementById('ai-body')) { renderTabs(); renderBody(); } }
+    if (v !== _lastVid) {
+      _lastVid = v;
+      // A library-scope tutor chat is not about the open video, so a video change
+      // must not re-render (and wipe) it — including mid-stream.
+      var keepLibraryChat = state.tab === 'tutor' && isLibraryScope();
+      if (document.getElementById('ai-body') && !keepLibraryChat) { renderTabs(); renderBody(); }
+      else if (keepLibraryChat) { renderTabs(); }
+    }
   }, 800);
 
   /* ── Resume a shared MCQ test after login (independent of the active tab) ──
