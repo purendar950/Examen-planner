@@ -37,7 +37,14 @@
 --  anon key cannot read or write this table.
 -- ═══════════════════════════════════════════════════════════════════════════
 
-create extension if not exists vector;
+-- pgvector. On Supabase, extensions are installed into the `extensions` schema,
+-- not `public`. Being explicit here — and putting `extensions` on the search_path
+-- for the rest of the script — avoids the most common failure when running this:
+--   ERROR: type "vector" does not exist
+-- which happens when the extension is installed somewhere the plain type name
+-- cannot be resolved from. Both statements are safe to re-run.
+create extension if not exists vector with schema extensions;
+set search_path = public, extensions;
 
 -- ── chunks ────────────────────────────────────────────────────────────────
 --  One row per retrievable passage of one video's study material.
@@ -138,3 +145,24 @@ $$;
 
 revoke all on function delete_video_chunks(text, text) from anon, authenticated, public;
 grant execute on function delete_video_chunks(text, text) to service_role;
+
+
+-- ── verify ────────────────────────────────────────────────────────────────
+--  Run this last. You should get exactly 4 rows: the note_chunks table plus the
+--  three functions. Anything missing means an earlier statement failed — scroll
+--  up to the FIRST error in the output, since later statements depend on it.
+--
+--  The backend reports the same thing at /health?deep=1:
+--    missing_schema -> this script has not been applied
+--    ok             -> table + functions present and reachable
+select 'table'    as kind, c.relname::text as name
+  from pg_class c
+  join pg_namespace n on n.oid = c.relnamespace
+ where n.nspname = 'public' and c.relname = 'note_chunks' and c.relkind = 'r'
+union all
+select 'function' as kind, p.proname::text as name
+  from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public'
+   and p.proname in ('match_chunks', 'indexed_videos', 'delete_video_chunks')
+ order by kind, name;
