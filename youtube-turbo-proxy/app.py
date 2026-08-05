@@ -4503,20 +4503,39 @@ def api_tutor():
                     "model": _ai_display_model(ai), "transcript_lang": data["transcript_lang"]})
 
 
-@app.route("/api/tutor/memory-update", methods=["POST"])  
+def _clamp_float_safe(v, lo=0.0, hi=1.0, default=0.5):
+    """Coerce an untrusted value into [lo, hi], falling back to `default`."""
+    try:
+        return max(lo, min(hi, float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+@app.route("/api/tutor/memory-update", methods=["POST"])
 def api_tutor_memory_update():
     """Enhanced memory update: extracts rich structured profile from a tutor
     conversation — topic mastery with confidence scores, mistakes, learning
     style preferences, and a session summary. Returns separate objects for
     each table so the client can save them independently.
-    Body: {history:[{role,content}...], existing:{memory:{...},preferences:{...}}, video_id?}"""
+    Body: {history:[{role,content}...],
+           existing:{memory:{...},preferences:{...},mastery:[...],sessions:[...]},
+           video_id?}"""
     user, auth_err = _verified_user_record()
     if auth_err:
         return jsonify(auth_err[0]), auth_err[1]
     body = request.get_json(silent=True) or {}
     history = body.get("history") or []
-    existing_mem = (body.get("existing") or {}).get("memory") if isinstance(body.get("existing"), dict) else {}
-    existing_prefs = (body.get("existing") or {}).get("preferences") if isinstance(body.get("existing"), dict) else {}
+    _existing = body.get("existing") if isinstance(body.get("existing"), dict) else {}
+    # `or {}` / `or []`: a present-but-null key used to yield None here, and
+    # existing_mem.get(...) further down would then raise AttributeError -> 500.
+    existing_mem = _existing.get("memory") or {}
+    existing_prefs = _existing.get("preferences") or {}
+    existing_mastery = _existing.get("mastery") or []
+    existing_sessions = _existing.get("sessions") or []
+    if not isinstance(existing_mem, dict):
+        existing_mem = {}
+    if not isinstance(existing_prefs, dict):
+        existing_prefs = {}
     video_id = str(body.get("video_id") or "")[:20]
     if not history:
         return jsonify({"error": "missing history"}), 400
@@ -4530,7 +4549,60 @@ def api_tutor_memory_update():
         if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
             convo_lines.append("%s: %s" % (m["role"], str(m["content"])[:500]))
     convo_text = "\n".join(convo_lines)[:6000]
-    existing_json = json.dumps({"memory": existing_mem, "preferences": existing_prefs})[:1500]
+
+    def _compact_existing():
+        """Bounded, noise-free view of the stored profile for the prompt.
+
+        The previous version was json.dumps({memory, preferences})[:1500] — a raw
+        character cut of JSON, which sliced mid-object and handed the model
+        malformed JSON as the very profile it was told to merge. It also shipped
+        DB noise (student_id, updated_at) and omitted mastery/sessions entirely,
+        so the "RAISE/LOWER confidence" and "don't repeat known mistakes" rules
+        had nothing to work against. Every list here is length- and item-capped,
+        so the result is bounded by construction (worst case ~5 KB) and the
+        defensive cap below is a safety net rather than the normal path."""
+        def _names(v, n):
+            return [str(x)[:80] for x in v][:n] if isinstance(v, list) else []
+
+        summaries = []
+        for s in (existing_mem.get("past_summaries") or [])[:5]:
+            text = str(s.get("summary") or "")[:200] if isinstance(s, dict) \
+                else str(s)[:200]
+            if text:
+                summaries.append(text)
+
+        confidences = []
+        for m in existing_mastery[:12]:
+            if isinstance(m, dict) and m.get("topic"):
+                confidences.append({
+                    "topic": str(m["topic"])[:80],
+                    # default=None: never fabricate a prior score the student
+                    # does not actually have — the model must see it as unknown.
+                    "confidence": _clamp_float_safe(m.get("confidence"), default=None),
+                    "attempts": m.get("attempts") if isinstance(
+                        m.get("attempts"), int) else None,
+                })
+
+        known_mistakes = []
+        for s in existing_sessions[:5]:
+            if not isinstance(s, dict):
+                continue
+            for mk in (s.get("mistakes") or [])[:5]:
+                if isinstance(mk, dict) and mk.get("mistake"):
+                    known_mistakes.append(str(mk["mistake"])[:120])
+
+        return {
+            "weak_topics": _names(existing_mem.get("weak_topics"), 8),
+            "strong_topics": _names(existing_mem.get("strong_topics"), 8),
+            "past_summaries_newest_first": summaries,
+            "mastery": confidences,
+            "already_recorded_mistakes": known_mistakes[:10],
+            "preferences": {k: existing_prefs.get(k) for k in
+                            ("learning_style", "explanation_depth", "pace")
+                            if existing_prefs.get(k)},
+        }
+
+    existing_json = json.dumps(_compact_existing(), ensure_ascii=False)[:6000]
 
     sysmsg = (
         "You are a student-memory profiler for an exam-prep AI tutor. Analyze the "
@@ -4564,13 +4636,23 @@ def api_tutor_memory_update():
         '    "pace": string                       // slow | normal | fast\n'
         '  }\n'
         '}\n\n'
+        "The EXISTING PROFILE you are given contains: weak_topics, strong_topics, "
+        "past_summaries_newest_first, preferences, `mastery` (the CURRENT stored "
+        "confidence and attempt count per topic, where confidence null means no "
+        "score yet) and `already_recorded_mistakes`.\n\n"
         "RULES:\n"
         "- Merge the NEW conversation INTO the existing profile — keep old facts that still apply, "
         "update confidence scores based on new evidence, drop resolved items.\n"
-        "- For mastery confidence: if a student asked a basic question on a topic they previously "
-        "knew well, LOWER confidence. If they answered/understood correctly, RAISE it.\n"
+        "- For mastery confidence: start from the stored value in EXISTING PROFILE.mastery "
+        "for that topic. If the student asked a basic question on a topic they previously "
+        "knew well, LOWER it. If they answered/understood correctly, RAISE it. Move it "
+        "gradually — do not jump to 0.0 or 1.0 on a single exchange. Only invent a fresh "
+        "score when the topic has no stored confidence.\n"
+        "- Re-emit topics from EXISTING PROFILE.mastery unchanged if this conversation "
+        "gave no new evidence about them, so their scores are not lost.\n"
         "- Detect mistakes: when the student said something wrong or misunderstood, record the "
-        "specific mistake AND the correction the tutor gave.\n"
+        "specific mistake AND the correction the tutor gave. Do NOT re-record anything "
+        "already in already_recorded_mistakes.\n"
         "- Detect learning style from clues like 'give me an example', 'explain step by step', "
         "'keep it short', 'go slow'. Update only if the new conversation has clear signals.\n"
         "- past_summaries: prepend the new session summary, keep total at most 5 entries.\n"
@@ -4591,10 +4673,6 @@ def api_tutor_memory_update():
     def _arr(v, max_len=8, item_max=80):
         return [str(x)[:item_max] for x in v][:max_len] if isinstance(v, list) else []
 
-    def _clamp_float(v, lo=0.0, hi=1.0):
-        try: return max(lo, min(hi, float(v)))
-        except (TypeError, ValueError): return 0.5
-
     # memory
     memory = {
         "weak_topics": _arr(result.get("memory", {}).get("weak_topics")),
@@ -4602,14 +4680,29 @@ def api_tutor_memory_update():
         "preferred_language": str(
             result.get("memory", {}).get("preferred_language")
             or existing_mem.get("preferred_language") or "Hinglish")[:40],
-        "past_summaries": _arr(
-            result.get("memory", {}).get("past_summaries"), max_len=5, item_max=200),
     }
-    # Ensure past_summaries entries are valid
-    memory["past_summaries"] = [
-        s if isinstance(s, dict) else {"summary": str(s)[:200]}
-        for s in memory["past_summaries"]
-    ][:5]
+    # past_summaries must keep its {date, video_id, summary} shape.
+    # This deliberately does NOT use _arr(): _arr() runs str(x) on every item, so
+    # each dict became "{'date': ..., 'video_id': ..., 'summary': ...}" truncated
+    # to 200 chars. That made the isinstance(s, dict) repair below dead code, so
+    # every stored entry ended up as {"summary": "<stringified python dict>"} —
+    # date and video_id lost as fields and the real summary text often truncated
+    # away. contextText() then printed that blob as a "Recent session".
+    raw_summaries = result.get("memory", {}).get("past_summaries")
+    past_summaries = []
+    if isinstance(raw_summaries, list):
+        for s in raw_summaries[:5]:
+            if isinstance(s, dict):
+                entry = {
+                    "date": str(s.get("date") or "")[:32],
+                    "video_id": str(s.get("video_id") or "")[:20],
+                    "summary": str(s.get("summary") or "")[:200],
+                }
+            else:
+                entry = {"date": "", "video_id": "", "summary": str(s)[:200]}
+            if entry["summary"]:
+                past_summaries.append(entry)
+    memory["past_summaries"] = past_summaries
 
     # session
     sess = result.get("session") or {}
@@ -4636,10 +4729,12 @@ def api_tutor_memory_update():
     mastery = []
     for m in raw_mastery[:12]:
         if isinstance(m, dict) and m.get("topic"):
+            # No "attempts" key: it used to be hardcoded to 1 on every response,
+            # so the stored counter could never grow past 1. The client derives it
+            # from the value already on record and writes that instead.
             mastery.append({
                 "topic": str(m["topic"])[:80],
-                "confidence": _clamp_float(m.get("confidence")),
-                "attempts": 1,
+                "confidence": _clamp_float_safe(m.get("confidence")),
             })
 
     # preferences

@@ -3541,14 +3541,22 @@
       if (!hasPending && !document.getElementById('ai-clear')) renderTutor();
     }
     // Update the student's cross-session memory with smarter triggers:
-    //   1. Every 4 exchanges (baseline)
+    //   1. Every 2 completed turns (baseline, ~4 messages)
     //   2. On topic change (detected by comparing question keywords)
     //   3. On confusion signals ("I don't understand", "again", "confused")
     if (window.TutorMemory) {
       var full = getHistory(historyKey).filter(function (m) { return !m.pending; });
       var shouldRefresh = false;
-      // Baseline: every 4 messages
-      if (full.length && full.length % 4 === 0) shouldRefresh = true;
+      // Baseline: every 2 completed turns (~4 messages). This used to be
+      // `full.length % 4 === 0`, but history is capped at 30 messages, so in a
+      // long chat length sticks at 30, 30 % 4 === 2, and the baseline trigger
+      // stopped firing forever. TutorMemory counts turns instead and resets the
+      // counter only when a refresh actually persisted.
+      if (typeof window.TutorMemory.noteTurn === 'function') {
+        if (window.TutorMemory.noteTurn() >= 2) shouldRefresh = true;
+      } else if (full.length && full.length % 4 === 0) {
+        shouldRefresh = true;               // older cached tutor-memory.js
+      }
       // Topic change detection
       if (full.length >= 4 && window.TutorMemory.detectTopicChange(
         full.map(function (m) { return { role: m.role, content: m.content }; })
