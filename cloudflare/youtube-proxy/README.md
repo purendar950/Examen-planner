@@ -10,6 +10,17 @@ IFrame (0 quota), and if the Worker/keys fail the app falls back to the IFrame.
 - Configured in Firestore `config/youtube` → `{ "proxyUrl": "<worker-url>" }`.
 - Keys stored as a Cloudflare **Secret** (`YT_API_KEYS`, comma-separated).
 
+## ⚠️ Redeploy required for channel import
+The Worker only proxies endpoints in its `ALLOWED_ENDPOINTS` allow-list. The
+Course Library **channel import** needs `channels`, which was added to
+`worker.js` — so **the currently deployed Worker must be updated** or channel
+import will fail with `endpointBlocked` (the app shows an explicit toast telling
+you to redeploy). Playlist and single-video imports are unaffected.
+
+Allow-listed: `playlists`, `playlistItems`, `videos`, `channels` — 1 quota unit
+each. `search` is deliberately **not** allow-listed because it costs 100 units
+per call; the app resolves channel handles with `channels?forHandle=` instead.
+
 ## Deploy / update (Dashboard)
 1. https://dash.cloudflare.com → Workers & Pages → open the Worker → **Edit code**.
 2. Paste `worker.js` from this folder → **Deploy**.
@@ -38,3 +49,10 @@ YouTube.
 https://cold-paper-bc65.syncstudyssc.workers.dev/playlists?part=snippet&id=PLbpi6ZahtOH6Blw3RGYpWkSByi_T7Rygb
 ```
 Should return JSON with the playlist title.
+
+Channel endpoint (confirms the redeploy above landed):
+```
+https://cold-paper-bc65.syncstudyssc.workers.dev/channels?part=snippet,contentDetails&forHandle=@YouTube
+```
+Should return the channel snippet. A 403 with `"reason":"endpointBlocked"` means
+the deployed Worker is still the old version.

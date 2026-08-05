@@ -26,7 +26,11 @@
 const YT_BASE = 'https://www.googleapis.com/youtube/v3/';
 
 // Only these YouTube Data API endpoints may be proxied.
-const ALLOWED_ENDPOINTS = ['playlists', 'playlistItems', 'videos'];
+// `channels` powers the Course Library channel import (resolve a /@handle or
+// /channel/UC… URL → channelId + uploads playlist). It costs 1 quota unit per
+// call, same as the others. `search` is deliberately NOT allowed: it costs 100
+// units per call and the app resolves channels without it.
+const ALLOWED_ENDPOINTS = ['playlists', 'playlistItems', 'videos', 'channels'];
 
 // Used if the ALLOWED_ORIGINS environment variable is not set.
 const DEFAULT_ALLOWED_ORIGINS = [

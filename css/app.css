@@ -2978,6 +2978,62 @@ html:not([data-theme="light"]) .topbar {
   font-size: .75rem;
   line-height: 1.45;
 }
+/* ── Channel import: picker chips + imported-channel strip ── */
+.yto-chan-chip {
+  padding: .35rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--text);
+  font-size: .72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.yto-chan-chip:hover { border-color: var(--accent); color: var(--accent); }
+.yto-chan-strip { margin-bottom: 1rem; }
+.yto-chan-strip[hidden] { display: none; }
+.yto-chan-strip-head { margin-bottom: .5rem; }
+.yto-chan-strip-row {
+  display: flex;
+  gap: .6rem;
+  overflow-x: auto;
+  padding-bottom: .25rem;
+}
+.yto-chan-card {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  flex: 0 0 auto;
+  max-width: 17rem;
+  padding: .5rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.yto-chan-card img { width: 32px; height: 32px; border-radius: 50%; flex: 0 0 auto; }
+.yto-chan-card-body { min-width: 0; display: flex; flex-direction: column; }
+.yto-chan-card-body strong {
+  font-size: .8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.yto-chan-card-body span { font-size: .68rem; color: var(--muted); }
+.yto-chan-card-actions { display: flex; gap: .2rem; margin-left: auto; }
+.yto-chan-card-actions button {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: .8rem;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+.yto-chan-card-actions button:hover { border-color: var(--accent); color: var(--accent); }
+
 .yto-library-overview {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
