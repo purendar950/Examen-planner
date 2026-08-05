@@ -3283,6 +3283,156 @@ html:not([data-theme="light"]) .topbar {
   font-size: .82rem;
 }
 
+/* ── Inline player on the channel page ── */
+.yto-chan-player { margin-bottom: 1rem; }
+.yto-chan-player-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.yto-chan-player-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.yto-chan-player-bar {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-wrap: wrap;
+  margin-top: .5rem;
+}
+.yto-chan-player-bar > strong {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font-size: .86rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.yto-chan-player-acts { display: flex; gap: .3rem; flex-wrap: wrap; }
+.yto-chan-player-acts button {
+  padding: .34rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: .72rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.yto-chan-player-acts button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.yto-chan-player-acts button.is-done { color: var(--accent); border-color: var(--accent); cursor: default; }
+
+/* ── Sort chips + in-channel search ── */
+.yto-chan-chips { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .6rem; }
+.yto-chan-chip2 {
+  padding: .35rem .8rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: .74rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+}
+.yto-chan-chip2:hover { border-color: var(--border); }
+.yto-chan-chip2.active { background: var(--text); color: var(--bg); }
+.yto-chan-search {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .35rem .7rem;
+  margin-bottom: .8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+}
+.yto-chan-search > span { color: var(--muted); font-size: .85rem; }
+.yto-chan-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-size: .8rem;
+  font-family: var(--font);
+  outline: none;
+}
+.yto-chan-note {
+  margin-top: .9rem;
+  font-size: .7rem;
+  color: var(--muted);
+  text-align: center;
+}
+.yto-chan-plactions { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .8rem; }
+.yto-chan-plactions button {
+  padding: .45rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: .78rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+}
+.yto-chan-plactions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ── Numbered video rows inside a playlist ── */
+.yto-chan-vlist { list-style: none; margin: 0; padding: 0; }
+.yto-chan-vrow { border-bottom: 1px solid var(--border); }
+.yto-chan-vrow > button {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .45rem .3rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+.yto-chan-vrow > button:hover { background: var(--surface); }
+.yto-chan-vrow.is-playing > button { background: var(--accent-dim, var(--surface)); }
+.yto-chan-vrow.is-playing .yto-chan-vnum { color: var(--accent); }
+.yto-chan-vnum {
+  flex: 0 0 1.4rem;
+  text-align: center;
+  font-size: .74rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.yto-chan-vthumb {
+  flex: 0 0 auto;
+  width: 76px;
+  height: 43px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.yto-chan-vthumb img { width: 100%; height: 100%; object-fit: cover; }
+.yto-chan-vmeta { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.yto-chan-vmeta strong {
+  font-size: .8rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.yto-chan-vmeta > span { font-size: .68rem; color: var(--muted); }
+.yto-yt-card.is-playing { border-color: var(--accent); }
+
+@media (max-width: 600px) {
+  .yto-chan-vthumb { width: 62px; height: 35px; }
+  .yto-chan-player-bar > strong { flex-basis: 100%; }
+  .yto-chan-plactions button { flex: 1; }
+}
+
 /* ── YouTube-style video / playlist tiles ── */
 .yto-yt-grid {
   display: grid;
