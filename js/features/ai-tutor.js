@@ -3502,24 +3502,22 @@
         (m.role === 'user' ? esc(m.content) : '<div class="ai-md">' + mdToHtml(m.content) + '</div>') + '</div>';
     }).join('');
     var clearBar = visible.length
-      ? '<div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:4px">' +
-          '<button class="ai-btn sec" id="ai-tutor-pdf" title="Download chat as PDF (A4)" style="padding:4px 10px;font-size:0.72rem">📄 PDF</button>' +
-          '<button class="ai-btn sec" id="ai-clear" style="padding:4px 10px;font-size:0.72rem">🗑 Clear chat</button></div>'
+      ? '<div class="ai-tutor-actions">' +
+          '<button class="ai-btn sec" id="ai-tutor-pdf" title="Download chat as PDF (A4)">📄 PDF</button>' +
+          '<button class="ai-btn sec" id="ai-clear">🗑 Clear</button></div>'
       : '';
     var lib = isLibraryScope();
 
-    // Scope toggle. Library scope is Pro-only because one library answer carries
-    // a much bigger context than single-video chat.
+    // The scope switch remains inside Tutor, but it is intentionally a compact
+    // segmented control: the chat gets the panel height instead of two wide
+    // buttons competing with the actual conversation.
     var scopeBar =
-      '<div class="ai-scope" id="ai-scope" role="tablist" aria-label="Tutor scope" ' +
-        'style="display:flex;gap:4px;margin-bottom:6px">' +
-        '<button type="button" class="ai-btn' + (lib ? ' sec' : '') + '" data-scope="video" ' +
-          'role="tab" aria-selected="' + (!lib) + '" ' +
-          'style="flex:1;padding:5px 8px;font-size:0.72rem">🎬 This video</button>' +
-        '<button type="button" class="ai-btn' + (lib ? '' : ' sec') + '" data-scope="library" ' +
+      '<div class="ai-scope-toggle" id="ai-scope" role="tablist" aria-label="Tutor scope">' +
+        '<button type="button" class="ai-scope-option' + (!lib ? ' on' : '') + '" data-scope="video" ' +
+          'role="tab" aria-selected="' + (!lib) + '" title="Ask about this video">🎬 Video</button>' +
+        '<button type="button" class="ai-scope-option' + (lib ? ' on' : '') + '" data-scope="library" ' +
           'role="tab" aria-selected="' + lib + '" ' +
-          'title="Ask across every video in your Organiser library" ' +
-          'style="flex:1;padding:5px 8px;font-size:0.72rem">🧠 All my library' +
+          'title="Ask across every video in your Organiser library">🧠 Library' +
           (isPro() ? '' : ' 🔒') + '</button>' +
       '</div>';
 
@@ -3555,12 +3553,15 @@
         '<span class="ai-chip" data-q="Exam point of view se important cheezein batao">Real exam angle</span>' +
         '<span class="ai-chip" data-teach="1">📚 Teach me</span>';
 
-    return scopeBar + clearBar + coverageBar +
+    return '<div class="ai-tutor-shell">' +
+      '<div class="ai-tutor-topline">' + scopeBar + clearBar + '</div>' +
+      coverageBar +
       '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted ai-chat-empty">' + emptyMsg + '</div>') + '</div>' +
       '<div class="ai-chips">' + chips + '</div>' +
       '<div class="ai-input-row"><input id="ai-chat-in" placeholder="' +
       (lib ? 'Ask across all your videos…' : 'Type your doubt…') +
-      '"><button class="ai-btn" id="ai-chat-send">Send</button></div>';
+      '"><button class="ai-btn" id="ai-chat-send">Send</button></div>' +
+    '</div>';
   }
 
   /* ── Library coverage strip ──
@@ -3889,6 +3890,7 @@
   function renderBody() {
     var b = shellBody(); if (!b) return;
     b.setAttribute('data-ai-tab', state.tab);
+    syncPanelHeader();
     // In the desktop Notes view, the complete right-hand card becomes the
     // notebook surface. This keeps the visible notes canvas aligned beside
     // the video instead of making a small paper box begin below the controls.
@@ -4202,20 +4204,36 @@
     setModel(def);
     fillStudyModels(pid, def);
   }
+  function syncPanelHeader() {
+    var panel = document.getElementById('ai-study-panel');
+    var title = document.getElementById('ai-panel-title');
+    var isTutor = state.tab === 'tutor';
+    if (panel) panel.classList.toggle('ai-tutor-active', isTutor);
+    if (title) {
+      title.textContent = isTutor ? 'AI Tutor' : 'AI Study';
+      title.title = isTutor
+        ? 'Ask about this video or your entire library'
+        : 'Generate notes, quizzes, flashcards, or open the AI Tutor';
+    }
+  }
+
   function panelHtml() {
-    return '<div class="ai-head"><button type="button" class="ai-mobile-back" id="ai-notes-back" aria-label="Back to course content" title="Back to course content">←</button><span class="ai-dot checking" id="ai-status-dot" title="Checking server…">\u25cf</span><span class="ai-title">Generate Notes</span>' +
-      // Reveals/hides the setup controls (these selects plus mode/style/
-      // Generate). It lives in the head rather than the controls row because
-      // the head is a single-line scroller with room to spare, while the
-      // controls row wraps to a third line on a narrow panel. Notes-only:
-      // CSS hides it on the Quiz/Cards/Tutor tabs and on mobile.
-      '<button type="button" class="ai-btn sec ai-setup-toggle" id="ai-setup-toggle" aria-expanded="true" title="Hide the notes setup controls">\u2699 Setup</button>' +
-      '<select id="ai-provider" title="AI provider" style="margin-left:auto"><option value="">Auto</option></select>' +
-      '<select id="ai-omni-provider" title="OmniRoute provider" style="display:none"></select>' +
-      '<select id="ai-model" title="AI model" style="display:none"></select>' +
-      '<select id="ai-lang" title="Output language">' +
-      ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
-      '</select></div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
+    return '<div class="ai-head">' +
+      '<div class="ai-head-title">' +
+        '<button type="button" class="ai-mobile-back" id="ai-notes-back" aria-label="Back to course content" title="Back to course content">←</button>' +
+        '<span class="ai-dot checking" id="ai-status-dot" title="Checking server…">●</span>' +
+        '<span class="ai-title" id="ai-panel-title">AI Study</span>' +
+        '<button type="button" class="ai-btn sec ai-setup-toggle" id="ai-setup-toggle" aria-expanded="true" title="Hide the notes setup controls">⚙ Setup</button>' +
+      '</div>' +
+      '<div class="ai-head-controls" aria-label="AI and language options">' +
+        '<select id="ai-provider" title="AI provider" aria-label="AI provider"><option value="">Auto</option></select>' +
+        '<select id="ai-omni-provider" title="OmniRoute provider" aria-label="OmniRoute provider" style="display:none"></select>' +
+        '<select id="ai-model" title="AI model" aria-label="AI model" style="display:none"></select>' +
+        '<select id="ai-lang" title="Output language" aria-label="Output language">' +
+          ['Hinglish', 'English', 'Hindi'].map(function (l) { return '<option' + (outLang() === l ? ' selected' : '') + '>' + l + '</option>'; }).join('') +
+        '</select>' +
+      '</div>' +
+    '</div><div class="ai-tabs" id="ai-tabs"></div><div class="ai-body" id="ai-body"></div>';
   }
 
   /* ── right-column: [Course Content | AI Study] toggle + 60/40 player/panel split ── */
@@ -4621,7 +4639,7 @@
     var toggle = document.createElement('div');
     toggle.id = 'ai-view-toggle'; toggle.className = 'ai-view-toggle';
     toggle.setAttribute('role', 'group');
-    toggle.setAttribute('aria-label', 'Course content or Generate Notes workspace');
+    toggle.setAttribute('aria-label', 'Course content or AI Study workspace');
     toggle.innerHTML =
       '<button type="button" data-v="course" class="on" aria-pressed="true">' +
         '<span class="ai-switch-icon" aria-hidden="true">▤</span>' +
@@ -4630,8 +4648,8 @@
       '</button>' +
       '<button type="button" data-v="ai" aria-pressed="false">' +
         '<span class="ai-switch-icon" aria-hidden="true">✦</span>' +
-        '<span class="ai-switch-copy"><strong>Generate Notes</strong><small>Turn this video into notes</small></span>' +
-        '<span class="ai-switch-badge">NOTES</span>' +
+        '<span class="ai-switch-copy"><strong>AI Study</strong><small>Notes, quiz, cards &amp; tutor</small></span>' +
+        '<span class="ai-switch-badge">AI</span>' +
       '</button>';
 
     // wrap the existing course-content children so we can show/hide them as one
