@@ -12,8 +12,20 @@
    quiz made by anyone reaches everyone who added a playlist with that
    video — no need to know the playlist at generation time.
 
-   Mirrors js/saved-questions.js (same public anon key + RLS model,
-   dedicated persistSession:false client).
+   ⚠ THIS MODULE USES A DIFFERENT SUPABASE PROJECT to the other quiz
+   modules. Shared MCQ quizzes live in the bhhxulecdpqnsiaogmoc project;
+   saved-questions.js, quiz-attempts.js, question-fix.js and
+   supabase-config.js still point at deefmrmmjlknotzpceqp. Do NOT "fix"
+   the difference by copying a URL/key across from one of those files —
+   that would send published quizzes to a project with no
+   playlist_quizzes table, and every write fails SILENTLY here (publish()
+   only console.warns, and the local ez_pl_quizzes copy still succeeds,
+   so the loss is invisible).
+
+   Schema + RLS for this table: supabase/playlist_quizzes.sql
+
+   Structurally still mirrors js/saved-questions.js: public anon key,
+   RLS-protected, dedicated persistSession:false client.
 
    Exposes window.PlaylistQuizzes:
      .available()              -> bool
@@ -40,8 +52,10 @@
    create policy "update playlist quizzes" on playlist_quizzes for update using (true) with check (true);
    ═══════════════════════════════════════════════════════════════ */
 (function () {
-  var SUPA_URL  = 'https://deefmrmmjlknotzpceqp.supabase.co';
-  var SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlZWZtcm1tamxrbm90enBjZXFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMTMwNzMsImV4cCI6MjA5OTc4OTA3M30.53-6HdN8umsqrHsaoSNX-o1VFdJbZdN6_mnYZ1bCN8A';
+  // Shared MCQ quiz project. anon/public key — RLS-protected, safe in the
+  // browser. See the warning above before changing either value.
+  var SUPA_URL  = 'https://bhhxulecdpqnsiaogmoc.supabase.co';
+  var SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJoaHh1bGVjZHBxbnNpYW9nbW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MjQ2MTYsImV4cCI6MjA5ODEwMDYxNn0.vdqIwXiIx9OSIoiBkX_o78MbYSDp5dN6303xKuXn4P4';
 
   var _client = null;
   function client() {
