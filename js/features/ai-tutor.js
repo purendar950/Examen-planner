@@ -60,32 +60,25 @@
     try { localStorage.setItem(COURSE_KEY, String(id || '')); } catch (e) {}
   }
   function isCourseTutorScope() { return isLibraryScope() && libraryTutorScope() === 'course'; }
-  /* Playlists pulled in by a channel import are NOT offered in the picker.
-     Importing one channel can add dozens of its playlists at once, which would
-     bury the handful the student actually pasted themselves. Provenance is read
-     two ways because they fail in different situations: `channelId` is stamped
-     on the course at import time, but ytoRefetch() rebuilds the entry and drops
-     it, so ytoChannels[].playlistIds is also consulted as the durable record. */
-  function channelImportedPlaylistIds() {
-    var channels = null, ids = {};
-    try { channels = typeof appState !== 'undefined' && appState && appState.ytoChannels; } catch (e) {}
-    if (channels && typeof channels === 'object') Object.keys(channels).forEach(function (cid) {
-      var list = channels[cid] && channels[cid].playlistIds;
-      if (Array.isArray(list)) list.forEach(function (pid) { ids[String(pid)] = true; });
-    });
-    return ids;
-  }
+  /* The picker mirrors My Courses: every playlist the student has added to the
+     library is offered, however it got there.
+
+     Channel provenance is deliberately NOT filtered any more. `channelId` and
+     ytoChannels[].playlistIds are written both by a bulk channel import AND by
+     ytoImportChannelPlaylist() — the button a student presses to add one
+     playlist from a channel page — so excluding them also hid playlists that
+     were added on purpose. Unwanted courses belong in Delete, not in a hidden
+     filter here. */
   function localTutorCourses() {
     var lib = null;
     try { lib = typeof appState !== 'undefined' && appState && appState.ytoLibrary; } catch (e) {}
-    var out = [], fromChannel = channelImportedPlaylistIds();
+    var out = [];
     if (lib && typeof lib === 'object') Object.keys(lib).forEach(function (id) {
       var course = lib[id];
-      // Playlists only — single saved videos (type 'video') are not a course.
-      // The server still authorizes by its own current appState snapshot rather
-      // than trusting this local list.
+      // Playlists only — a single saved video (type 'video') is not a playlist,
+      // and the backend rejects it as a preparation target. The server still
+      // authorizes from its own appState snapshot, never this local list.
       if (!course || course.type !== 'playlist') return;
-      if (course.channelId || fromChannel[String(id)]) return;
       out.push({ id: String(id), title: String(course.title || 'Untitled playlist'),
                  count: Array.isArray(course.videos) ? course.videos.length : 0 });
     });

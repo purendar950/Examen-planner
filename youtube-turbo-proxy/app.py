@@ -6124,24 +6124,14 @@ def api_tutor_library_coverage():
     # valid playlist preparation targets.
     app_state = (user.get("data") or {}).get("appState") or {}
     raw_courses = app_state.get("ytoLibrary") or {}
-    # Playlists that arrived with a channel import are not offered: one channel
-    # can contribute dozens, which would bury the manually added ones. Both
-    # provenance markers are checked because a refetch drops `channelId` while
-    # ytoChannels[].playlistIds survives.
-    channel_playlist_ids = set()
-    raw_channels = app_state.get("ytoChannels") or {}
-    if isinstance(raw_channels, dict):
-        for channel in raw_channels.values():
-            if not isinstance(channel, dict):
-                continue
-            for pid in (channel.get("playlistIds") or []):
-                channel_playlist_ids.add(str(pid))
+    # Every playlist in the student's library is advertised, matching the
+    # organiser's My Courses list. Channel provenance is not filtered: the same
+    # markers are set by a bulk channel import and by adding one playlist from a
+    # channel page, so filtering them also hid deliberate additions.
     courses = []
     if isinstance(raw_courses, dict):
         for cid, course in raw_courses.items():
             if not isinstance(course, dict) or course.get("type") != "playlist":
-                continue
-            if course.get("channelId") or str(cid) in channel_playlist_ids:
                 continue
             courses.append((str(cid), str(course.get("title") or "Untitled playlist")))
     courses.sort(key=lambda pair: pair[1].lower())
