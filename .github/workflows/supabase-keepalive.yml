@@ -1,45 +1,279 @@
 name: Supabase Keep-Alive
 
-# Supabase pauses Free Plan projects after ~7 days with no real database
-# activity. Twice a week is a comfortable buffer inside that window. This
-# touches student_memory (a plain SELECT), which is enough to count as
-# activity and reset the clock — see supabase/student_memory.sql.
+# ═══════════════════════════════════════════════════════════════
+# Supabase "may pause applications on the Free Plan that exhibit low
+# activity in a 7-day period" (docs: platform/going-into-prod).
+# This workflow keeps every Free Plan project in the org awake.
+#
+# WHAT THIS FIXES vs. the previous version
+#   1. The old job pinged ONE project — whatever the SUPABASE_URL secret
+#      held — by selecting from `student_memory`. That table only exists
+#      in `aqxglvtndssjkqluvzpl` (it 404s on `bhhxulecdpqnsiaogmoc`), and
+#      the job was passing, which proved the secret pointed at the tutor
+#      project. The MAIN project holding the entire mock/quiz bank
+#      (`bhhxulecdpqnsiaogmoc`) was never pinged at all and survived only
+#      on organic user traffic.
+#      -> Now driven by .github/supabase-keepalive-projects.json, so every
+#         project is covered and adding one is a 6-line edit.
+#   2. Twice a week (Sun+Wed) left a 4-day gap. GitHub's scheduler is
+#      best-effort and drops runs under load, so ONE missed run could
+#      open a >7-day hole.
+#      -> Now daily. Six consecutive runs must fail before there is risk.
+#   3. A SELECT on a tiny table can be served from cache.
+#      -> Now also performs a WRITE (see supabase/keepalive_heartbeat.sql).
+#   4. Scheduled workflows are disabled automatically after 60 days of
+#      repository inactivity — which would silently kill the keep-alive
+#      and pause the databases a week later.
+#      -> The keep-cron-alive job below defuses that.
+#   5. A failure was invisible unless you happened to check the Actions
+#      tab. -> Optional Telegram alert.
+#
+# NOTE ON CREDENTIALS: the JSON registry holds project URLs and `anon`
+# keys. Those are public by design — they already ship to every browser
+# in js/supabase-config.js et al, and are protected by RLS. Keeping them
+# in the repo (rather than in secrets) means this workflow cannot silently
+# point at the wrong project, and needs no secret setup to work. Never put
+# a service_role key in that file.
+#
+# GUARANTEE: this makes pausing very unlikely, not impossible — Supabase
+# only *guarantees* no inactivity pause on the Pro plan.
+# ═══════════════════════════════════════════════════════════════
 
 on:
   schedule:
-    - cron: '0 3 * * 0,3'   # Sun & Wed, 03:00 UTC — well inside the 7-day window
+    # Daily at 03:17 UTC. Deliberately not on the hour: GitHub queues
+    # every :00 cron in the world at once, and drops runs under load.
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: supabase-keepalive
+  cancel-in-progress: false
+
 jobs:
-  ping:
+  # ── Load the project registry into a matrix ──────────────────
+  load:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-
+    outputs:
+      projects: ${{ steps.read.outputs.projects }}
     steps:
-      - name: Validate secrets
-        run: |
-          if [ -z "$SUPABASE_URL" ]; then
-            echo "❌ SUPABASE_URL secret is not set!"
-            exit 1
-          fi
-          if [ -z "$SUPABASE_ANON_KEY" ]; then
-            echo "❌ SUPABASE_ANON_KEY secret is not set!"
-            exit 1
-          fi
-          echo "✅ Both secrets present"
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      - uses: actions/checkout@v4
 
-      - name: Touch the database
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      - name: Read project registry
+        id: read
         run: |
-          curl -sf -X GET "$SUPABASE_URL/rest/v1/student_memory?select=student_id&limit=1" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-            -o /dev/null -w "HTTP %{http_code}\n"
+          set -euo pipefail
+          FILE=.github/supabase-keepalive-projects.json
+
+          if [ ! -f "$FILE" ]; then
+            echo "::error::$FILE is missing — nothing would be kept alive."
+            exit 1
+          fi
+
+          # Fail loudly on a malformed registry rather than silently
+          # producing an empty matrix (which would "pass" while pinging
+          # nothing — the exact failure mode this rewrite removes).
+          if ! jq -e 'type == "array" and length > 0' "$FILE" >/dev/null; then
+            echo "::error::$FILE must be a non-empty JSON array."
+            exit 1
+          fi
+
+          MISSING=$(jq -r '
+            to_entries[]
+            | select((.value.url // "") == "" or (.value.anon_key // "") == "" or (.value.probe_table // "") == "")
+            | "index \(.key)"' "$FILE")
+          if [ -n "$MISSING" ]; then
+            echo "::error::entries missing url/anon_key/probe_table: $MISSING"
+            exit 1
+          fi
+
+          # A service_role key here would be a credential leak.
+          if grep -q 'service_role' "$FILE"; then
+            echo "::error::$FILE contains a service_role key. Use the anon key only."
+            exit 1
+          fi
+
+          echo "Keeping these projects alive:"
+          jq -r '.[] | "  - \(.name) (\(.ref)) via \(.probe_table)"' "$FILE"
+
+          echo "projects=$(jq -c . "$FILE")" >> "$GITHUB_OUTPUT"
+
+  # ── Ping each project independently ──────────────────────────
+  ping:
+    needs: load
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false          # one dead project must not mask the others
+      matrix:
+        project: ${{ fromJSON(needs.load.outputs.projects) }}
+    steps:
+      - name: Read ${{ matrix.project.probe_table }} (liveness gate)
+        env:
+          SUPA_URL: ${{ matrix.project.url }}
+          SUPA_KEY: ${{ matrix.project.anon_key }}
+          PROBE: ${{ matrix.project.probe_table }}
+          REF: ${{ matrix.project.ref }}
+        run: |
+          set -uo pipefail
+
+          # Retry with backoff. A single transient network blip must not
+          # raise a false alarm, and we have ~6 days of slack anyway.
+          code=""
+          for attempt in 1 2 3; do
+            # `|| true` (not `|| echo 000`): curl's -w already emits 000 on a
+            # connection failure, so echoing would concatenate to "000000".
+            code=$(curl -s -o /tmp/probe.json -w '%{http_code}' --max-time 25 \
+              "$SUPA_URL/rest/v1/$PROBE?select=*&limit=1" \
+              -H "apikey: $SUPA_KEY" \
+              -H "Authorization: Bearer $SUPA_KEY") || true
+            code="${code:-000}"
+
+            echo "attempt $attempt -> HTTP $code"
+            [ "$code" = "200" ] && break
+            [ "$attempt" -lt 3 ] && sleep $((attempt * 15))
+          done
+
+          if [ "$code" = "200" ]; then
+            echo "✅ $REF is awake (read $PROBE OK)"
+            exit 0
+          fi
+
+          echo "::error::$REF did not respond 200 on $PROBE (last HTTP $code)"
+          head -c 400 /tmp/probe.json 2>/dev/null || true
+          echo
+
+          case "$code" in
+            000) echo "::error::Could not connect/resolve. If DNS is NXDOMAIN the project was DELETED, not paused." ;;
+            401|403) echo "::error::Key rejected — the anon key in the registry was probably rotated." ;;
+            404) echo "::error::Table '$PROBE' does not exist in this project. Pick a table that does." ;;
+            5*)  echo "::error::Project is erroring or PAUSED. Restore it from the Supabase dashboard." ;;
+          esac
+          exit 1
+
+      - name: Write heartbeat (strongest activity signal, best-effort)
+        # Runs even if the read failed, since a write may still land and
+        # is the thing that actually resets the inactivity clock.
+        if: always()
+        env:
+          SUPA_URL: ${{ matrix.project.url }}
+          SUPA_KEY: ${{ matrix.project.anon_key }}
+          REF: ${{ matrix.project.ref }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          BODY=$(jq -nc --arg t "$NOW" --arg u "$RUN_URL" \
+            '{id:"github-actions", last_seen:$t, source:"github-actions", run_url:$u}')
+
+          code=$(curl -s -o /tmp/hb.json -w '%{http_code}' --max-time 25 \
+            -X POST "$SUPA_URL/rest/v1/keepalive_heartbeat" \
+            -H "apikey: $SUPA_KEY" \
+            -H "Authorization: Bearer $SUPA_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates,return=minimal" \
+            -d "$BODY") || true
+          code="${code:-000}"
+
+          case "$code" in
+            2*)
+              echo "✅ heartbeat written to $REF at $NOW"
+              ;;
+            404)
+              echo "::warning::keepalive_heartbeat missing in $REF — run supabase/keepalive_heartbeat.sql in its SQL editor to enable write-based keep-alive. The read above is still keeping it awake."
+              ;;
+            *)
+              echo "::warning::heartbeat write to $REF returned HTTP $code (non-fatal)"
+              head -c 300 /tmp/hb.json 2>/dev/null || true
+              ;;
+          esac
+
+  # ── Stop GitHub from disabling this very cron ─────────────────
+  # "Scheduled workflows are disabled automatically after 60 days of
+  # repository inactivity." If the repo goes quiet, the schedule dies and
+  # the databases pause ~7 days later. Pushing a commit resets that clock.
+  keep-cron-alive:
+    needs: ping
+    if: always() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Commit a heartbeat only if the repo has been quiet
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          PUSHED_AT=$(gh api "repos/${{ github.repository }}" --jq .pushed_at)
+          PUSHED_TS=$(date -u -d "$PUSHED_AT" +%s)
+          NOW_TS=$(date -u +%s)
+          DAYS=$(( (NOW_TS - PUSHED_TS) / 86400 ))
+
+          echo "Last push: $PUSHED_AT (${DAYS} days ago). Cron is disabled at 60."
+
+          # 45 gives a fortnight of margin before GitHub's 60-day cutoff,
+          # while keeping this to roughly one commit every 45 quiet days.
+          if [ "$DAYS" -lt 45 ]; then
+            echo "✅ Repo is active enough — no commit needed."
+            exit 0
+          fi
+
+          echo "⚠️  Repo quiet for ${DAYS} days — pushing a heartbeat commit."
+          mkdir -p .github
+          {
+            echo "Touched by the Supabase Keep-Alive workflow to stop GitHub"
+            echo "disabling its schedule after 60 days of repo inactivity."
+            echo "See .github/workflows/supabase-keepalive.yml"
+            echo
+            echo "last_touched: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > .github/keepalive-heartbeat.txt
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive-heartbeat.txt
+
+          if git diff --cached --quiet; then
+            echo "Nothing changed — skipping commit."
+            exit 0
+          fi
+
+          git commit -m "chore: keep scheduled workflows enabled [skip ci]"
+          # Explicit refspec: robust regardless of how checkout left HEAD.
+          git push origin "HEAD:${{ github.ref_name }}"
+
+  # ── Tell someone when it breaks ──────────────────────────────
+  alert:
+    needs: [load, ping]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Telegram alert (skipped if secrets absent)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
+            echo "::warning::TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set — no alert sent."
+            echo "The Supabase keep-alive FAILED. Check $RUN_URL"
+            exit 0
+          fi
+
+          TEXT=$(printf '🚨 Supabase keep-alive FAILED\n\nA Free Plan project may be paused within 7 days.\n\n%s' "$RUN_URL")
+
+          curl -s -o /dev/null -w "telegram HTTP %{http_code}\n" --max-time 20 \
+            "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+            --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" \
+            --data-urlencode "text=$TEXT" || true

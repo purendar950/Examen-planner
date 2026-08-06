@@ -1,0 +1,18 @@
+[
+  {
+    "name": "studyplanner-main",
+    "ref": "bhhxulecdpqnsiaogmoc",
+    "url": "https://bhhxulecdpqnsiaogmoc.supabase.co",
+    "probe_table": "mock_tests",
+    "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJoaHh1bGVjZHBxbnNpYW9nbW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MjQ2MTYsImV4cCI6MjA5ODEwMDYxNn0.vdqIwXiIx9OSIoiBkX_o78MbYSDp5dN6303xKuXn4P4",
+    "note": "Mock/quiz bank: mock_tests, mock_questions, mock_attempts, playlist_quizzes, saved_questions, quiz_attempts, question_reports."
+  },
+  {
+    "name": "tutor-memory",
+    "ref": "aqxglvtndssjkqluvzpl",
+    "url": "https://aqxglvtndssjkqluvzpl.supabase.co",
+    "probe_table": "student_memory",
+    "anon_key": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxeGdsdnRuZHNzamtxbHV2enBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNTgzMDcsImV4cCI6MjEwMDgzNDMwN30.ArJZRjAH153udthHZlAau8WnQH2bkBIxOveAEX1otMA",
+    "note": "AI tutor cross-session memory: student_memory, student_sessions, student_topic_mastery, note_chunks."
+  }
+]
