@@ -46,8 +46,8 @@
    create policy "delete quiz attempts" on quiz_attempts for delete using (true);
    ═══════════════════════════════════════════════════════════════ */
 (function () {
-  var SUPA_URL  = 'https://deefmrmmjlknotzpceqp.supabase.co';
-  var SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlZWZtcm1tamxrbm90enBjZXFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMTMwNzMsImV4cCI6MjA5OTc4OTA3M30.53-6HdN8umsqrHsaoSNX-o1VFdJbZdN6_mnYZ1bCN8A';
+  var SUPA_URL  = 'https://bhhxulecdpqnsiaogmoc.supabase.co';
+  var SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJoaHh1bGVjZHBxbnNpYW9nbW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MjQ2MTYsImV4cCI6MjA5ODEwMDYxNn0.vdqIwXiIx9OSIoiBkX_o78MbYSDp5dN6303xKuXn4P4';
 
   var _client = null;
 
@@ -184,8 +184,11 @@
       var c = client(), uid = userId();
       if (!c || !uid) return [];
       try {
+        // Ordered by submitted_at: that is the column mock_attempts actually
+        // has. created_at does not exist there, and PostgREST rejects the whole
+        // query on an unknown order column, so this silently returned [].
         var res = await c.from('mock_attempts')
-          .select('*').eq('user_id', uid).order('created_at', { ascending: false }).limit(50);
+          .select('*').eq('user_id', uid).order('submitted_at', { ascending: false }).limit(50);
         if (res.error) { console.warn('[quiz-attempts] mockAttempts failed:', res.error.message); return []; }
         return res.data || [];
       } catch (e) { console.warn('[quiz-attempts] mockAttempts threw:', e); return []; }

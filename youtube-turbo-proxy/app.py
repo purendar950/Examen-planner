@@ -6882,9 +6882,9 @@ def api_report():
 
 # StudyPlanner Supabase (public anon key — RLS-protected). Used to update a
 # report's status when an admin taps ✅ Fixed / ❌ Already Correct in Telegram.
-REPORT_SUPA_URL  = os.environ.get("REPORT_SUPA_URL", "https://deefmrmmjlknotzpceqp.supabase.co").rstrip("/")
+REPORT_SUPA_URL  = os.environ.get("REPORT_SUPA_URL", "https://bhhxulecdpqnsiaogmoc.supabase.co").rstrip("/")
 REPORT_SUPA_ANON = os.environ.get("REPORT_SUPA_ANON",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlZWZtcm1tamxrbm90enBjZXFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMTMwNzMsImV4cCI6MjA5OTc4OTA3M30.53-6HdN8umsqrHsaoSNX-o1VFdJbZdN6_mnYZ1bCN8A")
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJoaHh1bGVjZHBxbnNpYW9nbW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MjQ2MTYsImV4cCI6MjA5ODEwMDYxNn0.vdqIwXiIx9OSIoiBkX_o78MbYSDp5dN6303xKuXn4P4")
 
 
 def _update_report_status(quiz_id, q_id, status):
