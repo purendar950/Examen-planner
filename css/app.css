@@ -7950,3 +7950,272 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 @media (max-width: 840px) {
   #page-youtube #ai-setup-toggle { display: none !important; }
 }
+
+/* ══════════════════ AI TUTOR — compact controls, larger chat ══════════════════
+   The Tutor needs the room for the conversation, not a stack of setup controls.
+   Keep every AI/language selector in one non-wrapping row and give the chat the
+   remaining workspace height. */
+#page-youtube .ai-head {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .35rem;
+}
+#page-youtube .ai-head-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: .35rem;
+}
+#page-youtube .ai-head-title .ai-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+#page-youtube .ai-head-controls {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  gap: .32rem;
+}
+#page-youtube .ai-head-controls select {
+  width: 0;
+  min-width: 0;
+  max-width: none;
+  margin-left: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-youtube .ai-head-controls #ai-omni-provider { flex-grow: 1.35; }
+#page-youtube .ai-head-controls #ai-model { flex-grow: .9; }
+#page-youtube .ai-head-controls #ai-lang { flex-grow: .72; }
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-title .ai-title {
+  color: var(--accent);
+}
+
+#page-youtube .ai-tutor-shell {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 300px;
+}
+#page-youtube .ai-tutor-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .45rem;
+  margin-bottom: .42rem;
+}
+#page-youtube .ai-scope-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+}
+#page-youtube .ai-scope-option {
+  min-height: 26px;
+  padding: .22rem .5rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 800 .61rem/1 var(--font);
+  white-space: nowrap;
+}
+#page-youtube .ai-scope-option:hover { color: var(--text); }
+#page-youtube .ai-scope-option.on {
+  background: var(--accent);
+  color: #04120d;
+}
+#page-youtube .ai-scope-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+#page-youtube .ai-tutor-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: .28rem;
+  margin-left: auto;
+}
+#page-youtube .ai-tutor-actions .ai-btn {
+  min-height: 26px;
+  padding: .22rem .45rem;
+  font-size: .57rem;
+  white-space: nowrap;
+}
+#page-youtube .ai-tutor-shell > #ai-lib-coverage {
+  margin-bottom: .4rem !important;
+  font-size: .61rem !important;
+}
+#page-youtube .ai-tutor-shell .ai-chat {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 190px;
+  max-height: none;
+  margin-bottom: .42rem;
+  padding-right: .12rem;
+}
+#page-youtube .ai-tutor-shell .ai-chips {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  margin: 0 0 .38rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+#page-youtube .ai-tutor-shell .ai-chips::-webkit-scrollbar { display: none; }
+#page-youtube .ai-tutor-shell .ai-chip { flex: 0 0 auto; }
+#page-youtube .ai-tutor-shell .ai-input-row {
+  flex: 0 0 auto;
+  padding-top: 0;
+}
+
+@media (min-width: 841px) {
+  #page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] {
+    overflow: hidden;
+  }
+  #page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-tutor-shell {
+    min-height: 0;
+  }
+  #page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-input-row {
+    position: static;
+    background: transparent;
+  }
+}
+
+@media (max-width: 840px) {
+  #page-youtube .ai-tutor-shell { min-height: 360px; }
+  #page-youtube .ai-tutor-shell .ai-chat { min-height: 250px; }
+}
+
+@media (max-width: 360px) {
+  #page-youtube .ai-tutor-topline { align-items: flex-start; flex-direction: column; }
+  #page-youtube .ai-tutor-actions { margin-left: 0; }
+  #page-youtube .ai-scope-option { padding-inline: .42rem; }
+}
+
+/* Tutor mode is deliberately denser than Notes/Quiz/Cards: the conversation
+   is the work surface. Keep all selectors on one scrollable rail, keep scope
+   and actions on one line, and return every remaining pixel to the chat. */
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-height: 32px;
+  padding: .3rem .45rem;
+  gap: .3rem;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head::-webkit-scrollbar { display: none; }
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-title,
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-controls {
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 0;
+  gap: .25rem;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-title .ai-title {
+  flex: 0 0 auto;
+  font-size: .66rem;
+  white-space: nowrap;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-dot {
+  margin-right: 0;
+  font-size: .62rem;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-controls select {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 .32rem;
+  font-size: .55rem;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-controls #ai-provider { width: 68px; }
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-controls #ai-omni-provider { width: 98px; }
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-controls #ai-model { width: 50px; }
+#page-youtube #ai-study-panel.ai-tutor-active .ai-head-controls #ai-lang { width: 62px; }
+
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] {
+  padding: .32rem .45rem .42rem;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-tutor-topline {
+  min-height: 26px;
+  gap: .28rem;
+  margin-bottom: .24rem;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-scope-toggle {
+  gap: 1px;
+  padding: 1px;
+  border-radius: 7px;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-scope-option {
+  min-height: 23px;
+  padding: .18rem .4rem;
+  border-radius: 5px;
+  font-size: .55rem;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-tutor-actions {
+  gap: .18rem;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-tutor-actions .ai-btn {
+  min-height: 23px;
+  padding: .16rem .34rem;
+  border-radius: 6px;
+  font-size: .52rem;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-tutor-shell > #ai-lib-coverage {
+  margin-bottom: .22rem !important;
+  font-size: .55rem !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-chat {
+  min-height: 0;
+  margin-bottom: .28rem;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-chips {
+  gap: .28rem;
+  margin-bottom: .28rem;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-chip {
+  padding: .22rem .38rem;
+  font-size: .53rem;
+}
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-input-row input,
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-input-row .ai-btn {
+  min-height: 30px;
+  padding-block: .28rem;
+  font-size: .6rem;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-tabs {
+  gap: .24rem;
+  padding: .28rem .4rem;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-tab {
+  min-height: 29px;
+  padding: .18rem .24rem;
+  border-radius: 8px;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-mode-icon {
+  width: 17px;
+  height: 17px;
+  border-radius: 5px;
+  font-size: .5rem;
+}
+#page-youtube #ai-study-panel.ai-tutor-active .ai-mode-label { font-size: .54rem; }
+
+@media (max-width: 840px) {
+  #page-youtube #ai-study-panel.ai-tutor-active .ai-head { padding-inline: .4rem; }
+  #page-youtube .ai-tutor-shell { min-height: 0; }
+  #page-youtube .ai-tutor-shell .ai-chat { min-height: 230px; }
+}
