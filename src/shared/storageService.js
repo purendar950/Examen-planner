@@ -140,12 +140,33 @@ export function createStorageService({ db, auth, localStorageRef = window.localS
     }
   }
 
+  /* The whole appState goes up as ONE field, and it must REPLACE that field
+     rather than deep-merge into it.
+
+     Firestore's { merge: true } merges nested maps key by key. appState is one
+     big nested map, so a key the user deleted locally (a playlist, a task, an
+     exam) is simply absent from the payload — and an absent key is left
+     untouched on the server instead of being removed. The next snapshot then
+     handed that key back and the deleted item reappeared.
+
+     update() replaces the named field wholesale, so a deletion is a real
+     deletion, while sibling document fields (Pro status, Telegram link, …) are
+     still left alone because update() only touches the fields it is given.
+     update() rejects a document that does not exist yet, so a brand-new
+     account falls back to the creating merge write. */
   async function saveUserState(uid, appState) {
     if (!db || !uid) throw new Error('Firestore db and uid are required');
-    return db.collection('users').doc(uid).set({
+    const payload = {
       appState,
       updatedAt: window.firebase?.firestore?.FieldValue?.serverTimestamp?.() || new Date().toISOString()
-    }, { merge: true });
+    };
+    const ref = db.collection('users').doc(uid);
+    try {
+      return await ref.update(payload);
+    } catch (error) {
+      if (error?.code !== 'not-found') throw error;
+      return ref.set(payload, { merge: true });
+    }
   }
 
   async function loadUserState(uid, fallback = null) {

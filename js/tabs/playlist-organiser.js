@@ -760,7 +760,19 @@ function ytoRename(plId) {
 
 function ytoDelete(plId) {
   if (!confirm('Course delete karein? Saara progress bhi delete hoga.')) return;
-  delete ytoLib()[plId]; ytoPersist(); ytoRenderLibrary();
+  delete ytoLib()[plId];
+  /* A channel import records every playlist it added in playlistIds, and
+     ytoResyncChannel() pre-ticks exactly those ids in the picker. Leaving a
+     deleted id there meant the next channel refresh offered it back already
+     selected, so one "Import" silently undid the delete. */
+  const channels = ytoChannels();
+  Object.keys(channels).forEach(cid => {
+    const rec = channels[cid];
+    if (!rec || !Array.isArray(rec.playlistIds)) return;
+    const kept = rec.playlistIds.filter(id => String(id) !== String(plId));
+    if (kept.length !== rec.playlistIds.length) rec.playlistIds = kept;
+  });
+  ytoPersist(); ytoRenderLibrary();
 }
 
 /* ── Auto-detect chapter structure from video titles ── */

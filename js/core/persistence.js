@@ -250,10 +250,20 @@ async function saveProgressNow() {
     if (svc) {
       await svc.saveUserState(saveUid, firestorePayload);
     } else {
-      await db.collection('users').doc(saveUid).set({
+      // Mirrors storageService.saveUserState: appState must REPLACE its field,
+      // because a merge:true write cannot express a deleted key and would keep
+      // resurrecting locally deleted playlists/tasks on the next snapshot.
+      const ref = db.collection('users').doc(saveUid);
+      const payload = {
         appState: firestorePayload,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      }, { merge: true });
+      };
+      try {
+        await ref.update(payload);
+      } catch (err) {
+        if (err && err.code === 'not-found') await ref.set(payload, { merge: true });
+        else throw err;
+      }
     }
 
     _lastSavedJSON = json;
