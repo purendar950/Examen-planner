@@ -8219,3 +8219,35 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   #page-youtube .ai-tutor-shell { min-height: 0; }
   #page-youtube .ai-tutor-shell .ai-chat { min-height: 230px; }
 }
+
+
+
+/* Keep the full provider/model/language names visible in Notes, Quiz and
+   Cards. Only Tutor needs the compact scroll rail; these modes retain the
+   familiar labelled selectors shown before the Tutor layout refinement. */
+#page-youtube #ai-study-panel:not(.ai-tutor-active) .ai-head-controls {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .32rem;
+}
+#page-youtube #ai-study-panel:not(.ai-tutor-active) .ai-head-controls select {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 0;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 .48rem;
+  font-size: .61rem;
+}
+#page-youtube #ai-study-panel:not(.ai-tutor-active) .ai-head-controls #ai-provider {
+  width: 86px;
+}
+#page-youtube #ai-study-panel:not(.ai-tutor-active) .ai-head-controls #ai-omni-provider {
+  width: 132px;
+}
+#page-youtube #ai-study-panel:not(.ai-tutor-active) .ai-head-controls #ai-model {
+  width: 58px;
+}
+#page-youtube #ai-study-panel:not(.ai-tutor-active) .ai-head-controls #ai-lang {
+  width: 66px;
+}
