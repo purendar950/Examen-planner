@@ -5,7 +5,7 @@
         <div>
           <div class="fin-eyebrow"><span class="fin-live-dot"></span> Preparation overview</div>
           <h1 id="fin-dashboard-title"><span id="dash-greeting">Good evening,</span> <span id="dash-username">Aspirant</span></h1>
-          <p>Your study portfolio, priorities and progress in one place.</p>
+          <p>Your coverage, today's priorities and performance in one place.</p>
         </div>
         <div class="fin-head-exam" aria-label="Active exam">
           <span>Active preparation</span>
@@ -18,7 +18,7 @@
         <article class="fin-readiness-card">
           <div class="fin-card-kicker"><span class="fin-status-dot"></span> Syllabus readiness</div>
           <div class="fin-readiness-main">
-            <div class="ring fin-score-ring">
+            <div class="ring fin-score-ring" role="img" id="dash-syllabus-ring-wrap" aria-label="Syllabus coverage 0 percent">
               <svg width="132" height="132" viewBox="0 0 120 120" aria-hidden="true">
                 <circle class="ring-track" cx="60" cy="60" r="52" stroke-width="9" fill="none"></circle>
                 <circle class="ring-prog" id="dash-syllabus-ring" cx="60" cy="60" r="52" stroke-width="9" fill="none" stroke-linecap="round" stroke-dasharray="326.7" stroke-dashoffset="326.7"></circle>
@@ -34,10 +34,10 @@
               <p id="dash-readiness-note">Complete today’s priority chapters to move your preparation forward.</p>
               <div class="fin-readiness-metrics">
                 <div>
-                  <span>Completed</span>
+                  <span>Chapters done</span>
                   <strong id="dash-done-frac">0 / 0</strong>
                 </div>
-                <div>
+                <div id="dash-exam-in">
                   <span>Exam in</span>
                   <strong><b id="cd-days">00</b> days</strong>
                 </div>
@@ -55,7 +55,7 @@
               <strong id="exam-date-label">Set your date</strong>
             </div>
             <label class="dash-datepick" title="Set your exam date">
-              <span aria-hidden="true">Calendar</span>
+              <span aria-hidden="true">Change</span>
               <input type="date" class="exam-date-input" id="exam-date-picker" aria-label="Set exam date" onchange="updateExamDate(this.value)">
             </label>
             <div class="dash-rank" id="dash-target-rank" style="display:none;"></div>
@@ -72,28 +72,30 @@
           </div>
           <div class="dash-todo" id="dash-today-list"></div>
           <div class="fin-focus-footer">
-            <button class="dash-btn" onclick="switchPage('syllabus')">Start next chapter <span aria-hidden="true">→</span></button>
-            <span>One priority from each subject</span>
+            <button class="dash-btn" id="dash-focus-cta" onclick="dashStartNext()">Start next chapter <span aria-hidden="true">→</span></button>
+            <span>Tick one off, or tap it to open the chapter</span>
           </div>
         </article>
       </section>
 
-      <!-- Key syllabus metrics -->
-      <section class="fin-stat-grid" aria-label="Key syllabus metrics">
+      <!-- Momentum metrics — deliberately excludes total/completed counts,
+           which the readiness card above already reports, so every tile here
+           adds information the student cannot see anywhere else. -->
+      <section class="fin-stat-grid" aria-label="Recent momentum">
         <article class="fin-stat-card">
-          <div class="fin-stat-top"><span class="fin-stat-icon fin-blue">▦</span><span class="fin-stat-trend">Portfolio</span></div>
-          <strong class="fin-stat-value" id="stat-total">0</strong>
-          <span class="fin-stat-label">Total chapters</span>
-        </article>
-        <article class="fin-stat-card">
-          <div class="fin-stat-top"><span class="fin-stat-icon fin-green">✓</span><span class="fin-stat-trend fin-positive">Covered</span></div>
-          <strong class="fin-stat-value" id="stat-done">0</strong>
-          <span class="fin-stat-label">Completed chapters</span>
-        </article>
-        <article class="fin-stat-card">
-          <div class="fin-stat-top"><span class="fin-stat-icon fin-amber">◷</span><span class="fin-stat-trend fin-warning">Open</span></div>
+          <div class="fin-stat-top"><span class="fin-stat-icon fin-amber">▦</span><span class="fin-stat-trend fin-warning">Left to cover</span></div>
           <strong class="fin-stat-value" id="stat-remaining">0</strong>
-          <span class="fin-stat-label">Remaining chapters</span>
+          <span class="fin-stat-label">Chapters remaining</span>
+        </article>
+        <article class="fin-stat-card">
+          <div class="fin-stat-top"><span class="fin-stat-icon fin-green">✓</span><span class="fin-stat-trend fin-positive">Last 7 days</span></div>
+          <strong class="fin-stat-value" id="stat-week-done">0</strong>
+          <span class="fin-stat-label">Chapters finished this week</span>
+        </article>
+        <article class="fin-stat-card">
+          <div class="fin-stat-top"><span class="fin-stat-icon fin-blue">◷</span><span class="fin-stat-trend">Last 7 days</span></div>
+          <strong class="fin-stat-value" id="stat-week-time">0h</strong>
+          <span class="fin-stat-label">Study time logged</span>
         </article>
         <article class="fin-stat-card">
           <div class="fin-stat-top"><span class="fin-stat-icon fin-purple">◇</span><span class="fin-stat-trend">Saved</span></div>
@@ -102,17 +104,20 @@
         </article>
       </section>
 
-      <div class="fin-pace-card">
-        <span class="fin-pace-icon">↗</span>
-        <div><strong>Daily completion target</strong><span>Maintain this pace to finish your current syllabus before the exam.</span></div>
-        <div class="fin-pace-value"><strong id="chapters-per-day">6</strong><span>chapters / day</span></div>
+      <!-- Pace check. dashUpdatePace() swaps the state class, copy and CTA so an
+           impossible target reads as a warning instead of a neutral goal. -->
+      <div class="fin-pace-card" id="dash-pace-card">
+        <span class="fin-pace-icon" id="dash-pace-icon">↗</span>
+        <div><strong id="dash-pace-title">Daily completion target</strong><span id="dash-pace-note">Maintain this pace to finish your current syllabus before the exam.</span></div>
+        <div class="fin-pace-value"><strong id="chapters-per-day">0</strong><span id="dash-pace-unit">chapters / day</span></div>
+        <button class="fin-pace-action" id="dash-pace-action" type="button" hidden></button>
       </div>
 
       <!-- Immediate study operations -->
       <section class="fin-section" aria-labelledby="fin-operations-title">
         <div class="fin-section-head">
-          <div><span class="fin-eyebrow">Priority workspace</span><h2 id="fin-operations-title">Study operations</h2></div>
-          <span>Everything that needs your attention next</span>
+          <div><span class="fin-eyebrow">Needs attention</span><h2 id="fin-operations-title">Revision, mocks &amp; lessons</h2></div>
+          <span>Pick up whichever is most overdue</span>
         </div>
 
         <div class="fin-operations-grid">
@@ -129,7 +134,7 @@
               <span><b id="rev-week-count">0</b>This week</span>
               <span><b id="rev-mastered-count">0</b>Mastered</span>
             </div>
-            <div class="fin-action-preview" id="rev-due-preview">Loading your revision portfolio…</div>
+            <div class="fin-action-preview" id="rev-due-preview">Checking your revision schedule…</div>
           </article>
 
           <article class="fin-action-card fin-mock-card" id="mock-dash-summary" tabindex="0" role="button"></article>
@@ -147,9 +152,9 @@
             <div id="an-dash-sub">View your schedule analysis and saved video gallery.</div>
           </div>
           <div class="fin-analysis-metrics">
-            <div><span>Completion</span><strong id="an-dash-pct">0%</strong></div>
-            <div><span>Consistency</span><strong><b id="an-dash-streak">0</b> days</strong></div>
-            <div><span>Saved moments</span><strong id="an-dash-moments">0</strong></div>
+            <div><span>Tasks completed</span><strong id="an-dash-pct">0%</strong></div>
+            <div><span>Days on target</span><strong><b id="an-dash-streak">0</b> of 7</strong></div>
+            <div><span>Saved clips</span><strong id="an-dash-moments">0</strong></div>
           </div>
           <span class="fin-analysis-arrow" aria-hidden="true">→</span>
         </article>
@@ -158,7 +163,7 @@
       <!-- Subject allocation -->
       <section class="fin-section" aria-labelledby="fin-subjects-title">
         <div class="fin-section-head">
-          <div><span class="fin-eyebrow">Syllabus allocation</span><h2 id="fin-subjects-title">Subject-wise Progress</h2></div>
+          <div><span class="fin-eyebrow">Coverage by subject</span><h2 id="fin-subjects-title">Subject progress</h2></div>
           <button class="fin-text-btn" onclick="switchPage('syllabus')">View full syllabus →</button>
         </div>
         <div class="dash-subjects" id="subject-progress-cards"></div>
@@ -167,7 +172,7 @@
       <!-- Recent completion activity -->
       <section class="fin-section" aria-labelledby="fin-recent-title">
         <div class="fin-section-head">
-          <div><span class="fin-eyebrow">Activity ledger</span><h2 id="fin-recent-title">Recently Completed</h2></div>
+          <div><span class="fin-eyebrow">Recent activity</span><h2 id="fin-recent-title">Recently completed</h2></div>
           <span>Your five latest chapter completions</span>
         </div>
         <div id="recent-activity-list"></div>

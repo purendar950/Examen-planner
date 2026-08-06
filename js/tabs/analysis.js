@@ -1332,8 +1332,9 @@ onPageActivated('analysis', function () { anRender(); });
 
 /* ════════ DASHBOARD SNAPSHOT WIDGET ════════ */
 /* Fills the #analysis-dashboard-widget card on the Dashboard with a quick
-   7-day completion %, trailing streak, and saved-moment count. Computed
-   independently so it works even before the Analysis tab is opened. */
+   7-day task-completion %, a count of days that hit the 80% target, and the
+   saved-clip count. Computed independently so it works even before the
+   Analysis tab is opened. */
 function anRenderDashWidget(){
   const pctEl = document.getElementById('an-dash-pct');
   if (!pctEl || typeof appState === 'undefined' || !appState) return; // widget absent
@@ -1347,10 +1348,12 @@ function anRenderDashWidget(){
     const d = new Date(today); d.setDate(today.getDate()-i); const key = anFmtKey(d);
     const t = tasks[key] || []; let tt = t.length, dd = t.filter(x => x.done).length;
     const h = habitsLog[key] || {}; const hv = Object.values(h); tt += hv.length; dd += hv.filter(Boolean).length;
-    total += tt; done += dd; dayRatios.push(tt ? dd/tt : 0);
+    // null = nothing was scheduled that day. Previously these counted as 0 and
+    // reset the streak, so anyone not using the planner always saw "0 days"
+    // right next to a live study streak in the readiness card.
+    total += tt; done += dd; dayRatios.push(tt ? dd/tt : null);
   }
-  let streak = 0;
-  dayRatios.forEach(p => { if (p >= 0.8) streak++; else streak = 0; });
+  const streak = dayRatios.filter(p => p !== null && p >= 0.8).length;
   const pct = total ? Math.round(done/total*100) : 0;
 
   let moments = 0;
