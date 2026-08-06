@@ -923,7 +923,7 @@ def _pick_caption_url(raw, lang):
     return None, None, None
 
 
-def _extract_transcript(video_id, lang="auto", force=False):
+def _extract_transcript(video_id, lang="auto", force=False, persist=True):
     """Fetch + parse a video's captions. Reuses the global transcript cache and
     the extraction semaphore. Tries the android client first, then web.
     lang='auto' (default) auto-detects the video's caption language."""
@@ -999,7 +999,7 @@ def _extract_transcript(video_id, lang="auto", force=False):
         }
         with _transcript_lock:
             _transcript_cache[ckey] = {"ts": time.time(), "data": data}
-        if data.get("segments"):          # persist only successful transcripts
+        if persist and data.get("segments"):  # persist only successful transcripts
             _transcript_put(fs_id, data)
     return data
 
@@ -5070,6 +5070,62 @@ def _index_video(video_id, out_lang="Hinglish", force=False):
             _indexing_inflight.discard(video_id)
 
 
+def _index_caption_transcript(video_id, force=False, permit=None):
+    """Index only persisted real caption chunks for playlist preparation.
+
+    Unlike `_index_video`, this deliberately ignores generated notes and does
+    not accept an existing notes vector as proof of caption readiness. A ready
+    preparation item therefore always means `source="transcript"` has been
+    indexed from the saved yt-dlp caption segments.
+    """
+    if not _vec_enabled() or not video_id:
+        return False
+    inflight_key = "transcript:" + video_id
+    with _indexing_lock:
+        if inflight_key in _indexing_inflight:
+            return False
+        _indexing_inflight.add(inflight_key)
+    try:
+        if not force:
+            rows = _supa_rpc("indexed_videos", {"vids": [video_id]}) or []
+            if any(isinstance(row, dict) and row.get("video_id") == video_id
+                   and row.get("source") == "transcript" for row in rows):
+                return True
+        transcript = _transcript_get(_fs_doc_id(video_id, "auto"))
+        if not transcript or not transcript.get("segments"):
+            return False
+        chunks = _chunk_transcript(transcript.get("segments"))
+        if not chunks:
+            return False
+        vectors = _embed_texts([chunk["text"] for chunk in chunks])
+        if not vectors or len(vectors) != len(chunks):
+            return False
+        # Firebase and Supabase cannot share a transaction, so fence each
+        # destructive cross-store write immediately before it begins.
+        if permit and not permit():
+            return False
+        _supa_rpc("delete_video_chunks", {"vid": video_id, "src": "transcript"})
+        rows = []
+        lang = transcript.get("chosen_lang") or "auto"
+        for index, (chunk, vector) in enumerate(zip(chunks, vectors)):
+            rows.append({"video_id": video_id, "source": "transcript", "lang": lang,
+                         "chunk_index": index, "heading": "",
+                         "ts_seconds": chunk["ts_seconds"], "chunk_text": chunk["text"],
+                         "embedding": vector, "embed_model": EMBED_MODEL})
+        if permit and not permit():
+            return False
+        ok = _supa_upsert_chunks(rows)
+        log.info("caption-indexed %s: %d chunks -> %s", video_id, len(rows),
+                 "ok" if ok else "FAILED")
+        return ok
+    except Exception as exc:  # noqa: BLE001
+        log.warning("caption index %s threw: %s", video_id, exc)
+        return False
+    finally:
+        with _indexing_lock:
+            _indexing_inflight.discard(inflight_key)
+
+
 def _index_video_async(video_id, out_lang="Hinglish"):
     """Fire-and-forget indexing so it never delays a user-facing response."""
     if not _vec_enabled() or not video_id:
@@ -5299,6 +5355,9 @@ def _library_prepare(body, user):
     if scope not in ("library", "course"):
         return ({"error": "bad_scope",
                  "detail": "scope must be 'library' or 'course'."}, 400), None
+    if scope == "course" and not course_id:
+        # A course request must never silently widen into the whole library.
+        return ({"error": "missing_course_id", "detail": "Choose a playlist first."}, 400), None
 
     uid = user["uid"]
     # Library answers carry far larger contexts than single-video chat, so they
@@ -5460,22 +5519,628 @@ def api_tutor_library_stream():
                              "X-Accel-Buffering": "no"})
 
 
+# ── Playlist transcript preparation ───────────────────────────────────────
+# A preparation job is intentionally separate from study_jobs. It never calls an
+# LLM: it saves only caption segments returned by yt-dlp, then indexes those
+# segments for advanced Tutor retrieval. The Firestore status is a durable
+# progress record, but the worker itself is in-process; a restart marks an active
+# job as interrupted rather than pretending it will resume automatically.
+TUTOR_PREPARE_COLLECTION = "tutor_prepare_jobs"
+TUTOR_PREPARE_MAX_VIDEOS = max(1, min(
+    int(os.environ.get("TUTOR_PREPARE_MAX_VIDEOS", str(LIBRARY_MAX_VIDEOS))),
+    LIBRARY_MAX_VIDEOS,
+))
+_tutor_prepare_jobs = {}
+_tutor_prepare_jobs_lock = threading.Lock()
+# Keep expensive caption extraction/indexing gentle on small Render instances,
+# even if multiple students queue separate playlists at the same time.
+_tutor_prepare_worker_sem = threading.Semaphore(
+    max(1, int(os.environ.get("TUTOR_PREPARE_WORKERS", "1"))))
+_TUTOR_PREPARE_LEASE_SEC = max(60, int(os.environ.get("TUTOR_PREPARE_LEASE_SEC", "180")))
+_TUTOR_PREPARE_INSTANCE_ID = os.environ.get("HOSTNAME", "proxy") + "-" + secrets.token_urlsafe(8)
+
+
+def _tutor_prepare_job_id(uid, course_id):
+    return _fs_doc_id("playlist_prepare", uid, course_id)
+
+
+def _tutor_prepare_counts(items):
+    counts = {}
+    for item in (items or []):
+        state = str((item or {}).get("state") or "queued")
+        counts[state] = counts.get(state, 0) + 1
+    return counts
+
+
+def _tutor_prepare_job_public(job):
+    items = []
+    for item in (job or {}).get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        items.append({
+            "video_id": str(item.get("video_id") or "")[:20],
+            "title": str(item.get("title") or "")[:160],
+            "state": str(item.get("state") or "queued"),
+            "source": str(item.get("source") or "")[:20],
+            "detail": str(item.get("detail") or "")[:180],
+        })
+    counts = _tutor_prepare_counts(items)
+    terminal = {"ready", "no_captions", "bot_gated", "extract_failed",
+                "index_failed", "cancelled", "interrupted"}
+    return {
+        "course_id": job.get("course_id"),
+        "course_title": job.get("course_title") or "Playlist",
+        "status": job.get("status") or "queued",
+        "error": str(job.get("error") or "")[:240],
+        "total": len(items),
+        "processed": sum(value for key, value in counts.items() if key in terminal),
+        "counts": counts,
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "finished_at": job.get("finished_at"),
+        "items": items,
+    }
+
+
+def _tutor_prepare_active_lease(current, job, now=None):
+    """Whether `current` grants this exact claim an active Firestore lease."""
+    if not isinstance(current, dict) or not job:
+        return False
+    try:
+        lease_expires_at = int(current.get("lease_expires_at") or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(job.get("lease_token")
+                and current.get("owner_uid") == job.get("owner_uid")
+                and current.get("lease_owner") == job.get("lease_owner")
+                and current.get("lease_token") == job.get("lease_token")
+                and current.get("status") in ("queued", "running")
+                and lease_expires_at > (int(time.time()) if now is None else now))
+
+
+def _tutor_prepare_mutation_permit(job):
+    """Transactionally fence a preparation claim before a storage mutation.
+
+    The permit deliberately performs no B2/Supabase work: Firestore cannot
+    atomically include either external store, so callers obtain it immediately
+    before each such write.
+    """
+    if _tutor_prepare_cancelled(job):
+        return False
+    if not _fb_db:
+        if job.get("cancel_event"):
+            job["cancel_event"].set()
+        return False
+    ref = _fb_db.collection(TUTOR_PREPARE_COLLECTION).document(job.get("id") or "")
+    try:
+        from firebase_admin import firestore
+
+        @firestore.transactional
+        def permit(transaction):
+            snap = ref.get(transaction=transaction)
+            current = snap.to_dict() if snap.exists else {}
+            return _tutor_prepare_active_lease(current, job)
+
+        allowed = bool(permit(_fb_db.transaction()))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("playlist preparation mutation permit failed: %s", exc)
+        allowed = False
+    if not allowed and job.get("cancel_event"):
+        # Fail closed: the worker must not begin any later external mutation.
+        job["cancel_event"].set()
+    return allowed
+
+
+def _tutor_prepare_job_persist(job):
+    """Transactionally renew an exact active claim and write its checkpoint."""
+    if not job:
+        return False
+    if not _fb_db:
+        if job.get("cancel_event"):
+            job["cancel_event"].set()
+        return False
+    public = _tutor_prepare_job_public(job)
+    stored = {
+        "owner_uid": job.get("owner_uid"),
+        "lease_owner": job.get("lease_owner"),
+        "lease_token": job.get("lease_token"),
+        "lease_expires_at": job.get("lease_expires_at"),
+        "course_id": public["course_id"],
+        "course_title": public["course_title"],
+        "status": public["status"],
+        "error": public["error"],
+        "created_at": public["created_at"],
+        "updated_at": public["updated_at"],
+        "finished_at": public["finished_at"],
+        "items": public["items"],
+    }
+    ref = _fb_db.collection(TUTOR_PREPARE_COLLECTION).document(job["id"])
+    try:
+        from firebase_admin import firestore
+
+        @firestore.transactional
+        def persist(transaction):
+            snap = ref.get(transaction=transaction)
+            current = snap.to_dict() if snap.exists else {}
+            now = int(time.time())
+            if not _tutor_prepare_active_lease(current, job, now):
+                return {"ok": False, "current": current}
+            # An active checkpoint renews its lease; a terminal checkpoint is
+            # allowed only as the exact active claim's final state transition.
+            if stored["status"] in ("queued", "running"):
+                stored["lease_expires_at"] = now + _TUTOR_PREPARE_LEASE_SEC
+            else:
+                stored["lease_expires_at"] = current.get("lease_expires_at")
+            transaction.set(ref, stored)
+            return {"ok": True, "lease_expires_at": stored["lease_expires_at"]}
+
+        result = persist(_fb_db.transaction()) or {"ok": False}
+        if not result.get("ok"):
+            # Lost ownership is a stop signal. Do not overwrite the newer
+            # claim's status, including when this process has the same owner ID.
+            if job.get("cancel_event"):
+                job["cancel_event"].set()
+            return False
+        job["lease_expires_at"] = result.get("lease_expires_at")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("playlist preparation checkpoint failed: %s", exc)
+        if job.get("cancel_event"):
+            job["cancel_event"].set()
+        return False
+
+
+def _tutor_prepare_claim(job):
+    """Atomically claim the one active playlist worker across proxy instances.
+
+    Firestore is the source of truth for the lease; the local map only avoids
+    repeat reads in the process that owns the worker. An active, unexpired lease
+    is returned to callers instead of spawning a second extractor/indexer.
+    """
+    if not _fb_db:
+        return False, None
+    now = int(time.time())
+    job["lease_owner"] = _TUTOR_PREPARE_INSTANCE_ID
+    # A process identity is not enough: a replacement claim on the same proxy
+    # must still fence the earlier worker.
+    job["lease_token"] = secrets.token_urlsafe(16)
+    job["lease_expires_at"] = now + _TUTOR_PREPARE_LEASE_SEC
+    public = _tutor_prepare_job_public(job)
+    stored = {
+        "owner_uid": job.get("owner_uid"),
+        "lease_owner": job["lease_owner"],
+        "lease_token": job["lease_token"],
+        "lease_expires_at": job["lease_expires_at"],
+        "course_id": public["course_id"],
+        "course_title": public["course_title"],
+        "status": public["status"],
+        "error": public["error"],
+        "created_at": public["created_at"],
+        "updated_at": public["updated_at"],
+        "finished_at": public["finished_at"],
+        "items": public["items"],
+    }
+    ref = _fb_db.collection(TUTOR_PREPARE_COLLECTION).document(job["id"])
+    try:
+        from firebase_admin import firestore
+
+        @firestore.transactional
+        def claim(transaction):
+            snap = ref.get(transaction=transaction)
+            current = snap.to_dict() if snap.exists else None
+            if current:
+                try:
+                    current_lease = int(current.get("lease_expires_at") or 0)
+                except (TypeError, ValueError):
+                    current_lease = 0
+                if (current.get("owner_uid") == job.get("owner_uid")
+                        and current.get("status") in ("queued", "running")
+                        and current_lease > now):
+                    return current
+            transaction.set(ref, stored)
+            return None
+
+        active = claim(_fb_db.transaction())
+        return active is None, active
+    except Exception as exc:  # noqa: BLE001
+        log.warning("playlist preparation lease claim failed: %s", exc)
+        return False, None
+
+
+def _tutor_prepare_mark_interrupted(job):
+    """Active workers cannot survive a proxy restart; report that truthfully."""
+    if job.get("status") not in ("queued", "running"):
+        return job
+    try:
+        lease_expires_at = int(job.get("lease_expires_at") or 0)
+    except (TypeError, ValueError):
+        lease_expires_at = 0
+    # Another healthy proxy instance may own the active lease. Never mark its
+    # job interrupted merely because this instance is serving a status request.
+    if lease_expires_at > int(time.time()):
+        return job
+    for item in job.get("items") or []:
+        if item.get("state") in ("queued", "processing"):
+            item["state"] = "interrupted"
+            item["detail"] = "Preparation stopped when the server restarted. Retry the playlist."
+    job["status"] = "interrupted"
+    job["error"] = "Preparation stopped when the server restarted. Retry the playlist."
+    job["updated_at"] = int(time.time())
+    job["finished_at"] = job["updated_at"]
+    return job
+
+
+def _get_tutor_prepare_job(job_id):
+    local_active = None
+    with _tutor_prepare_jobs_lock:
+        active = _tutor_prepare_jobs.get(job_id)
+        # A local worker is only a cache. Validate its exact token before it can
+        # block a retry or be reported as active after another proxy reclaimed.
+        if (active and active.get("status") in ("queued", "running")
+                and active.get("lease_owner") == _TUTOR_PREPARE_INSTANCE_ID):
+            local_active = active
+    if local_active and not _tutor_prepare_sync_remote_cancel(local_active):
+        return local_active
+    saved = _fs_get(TUTOR_PREPARE_COLLECTION, job_id)
+    if not saved:
+        return None
+    job = dict(saved)
+    job["id"] = job_id
+    job["items"] = list(job.get("items") or [])
+    job["cancel_event"] = threading.Event()
+    before = job.get("status")
+    _tutor_prepare_mark_interrupted(job)
+    if job.get("status") != before:
+        _tutor_prepare_job_persist(job)
+    # Never cache a Firestore snapshot from another request. In particular, a
+    # cached completed/cancelled status would make a Stop request miss a later
+    # retry for this same stable user+playlist job ID.
+    return job
+
+
+def _tutor_prepare_cancelled(job):
+    return bool(job.get("cancel_event") and job["cancel_event"].is_set())
+
+
+def _tutor_prepare_sync_remote_cancel(job):
+    """Stop a worker when its exact Firestore lease no longer permits work."""
+    if _tutor_prepare_cancelled(job):
+        return True
+    if not _tutor_prepare_mutation_permit(job):
+        # The transactional permit set cancel_event on loss so the outer worker
+        # checks and heartbeat retain their existing cancellation behavior.
+        return True
+    return False
+
+
+def _tutor_prepare_heartbeat(job, stop_event):
+    """Renew the lease while yt-dlp or vector indexing blocks the worker."""
+    interval = max(10, min(60, _TUTOR_PREPARE_LEASE_SEC // 3))
+    while not stop_event.wait(interval):
+        if _tutor_prepare_sync_remote_cancel(job):
+            return
+        if not _tutor_prepare_job_persist(job):
+            # The transactional checkpoint sets the local cancellation event on
+            # lost ownership; keep the explicit set for non-Firestore failures.
+            job["cancel_event"].set()
+            return
+
+
+def _tutor_prepare_update_item(job, video_id, state, detail="", source=""):
+    """Checkpoint one video's explicit real-caption preparation state."""
+    if state != "cancelled":
+        _tutor_prepare_sync_remote_cancel(job)
+    with _tutor_prepare_jobs_lock:
+        if state != "cancelled" and _tutor_prepare_cancelled(job):
+            return False
+        for item in job.get("items") or []:
+            if item.get("video_id") != video_id:
+                continue
+            item["state"] = state
+            item["detail"] = str(detail or "")[:180]
+            if source:
+                item["source"] = source
+            break
+        job["updated_at"] = int(time.time())
+    return _tutor_prepare_job_persist(job)
+
+
+def _tutor_prepare_finish(job, status, error=""):
+    with _tutor_prepare_jobs_lock:
+        if _tutor_prepare_cancelled(job) and status != "cancelled":
+            status = "cancelled"
+        job["status"] = status
+        job["error"] = str(error or "")[:240]
+        job["updated_at"] = int(time.time())
+        job["finished_at"] = job["updated_at"]
+    _tutor_prepare_job_persist(job)
+
+
+def _tutor_prepare_bot_error(exc):
+    text = str(exc or "")
+    lowered = text.lower()
+    return ("confirm you" in lowered or "bot" in lowered or "sign in" in lowered
+            or "not a bot" in lowered)
+
+
+def _tutor_prepare_extract(video_id):
+    """Extract captions once, with the same cookie refresh retry as Tutor.
+
+    This deliberately has no audio/ASR/LLM fallback. A returned document is only
+    accepted when yt-dlp supplied non-empty caption segments.
+    """
+    try:
+        return _extract_transcript(video_id, "auto", persist=False), None
+    except yt_dlp.utils.DownloadError as exc:
+        if _tutor_prepare_bot_error(exc) and refresh_cookies() and _cookie_source == "firestore":
+            try:
+                return _extract_transcript(video_id, "auto", force=True, persist=False), None
+            except Exception as retry_exc:  # noqa: BLE001
+                return None, retry_exc
+        return None, exc
+    except Exception as exc:  # noqa: BLE001
+        return None, exc
+
+
+def _run_tutor_prepare_job(job_id):
+    job = _get_tutor_prepare_job(job_id)
+    if not job:
+        return
+    with _tutor_prepare_worker_sem:
+        if _tutor_prepare_sync_remote_cancel(job):
+            _tutor_prepare_finish(job, "cancelled")
+            return
+        with _tutor_prepare_jobs_lock:
+            job["status"] = "running"
+            job["updated_at"] = int(time.time())
+        if not _tutor_prepare_job_persist(job):
+            return
+
+        # Caption extraction and embedding calls can outlast a normal request.
+        # Keep the transactionally-fenced lease live throughout them so another
+        # instance cannot reclaim a healthy worker in the middle of an item.
+        heartbeat_stop = threading.Event()
+        heartbeat = threading.Thread(target=_tutor_prepare_heartbeat,
+                                     args=(job, heartbeat_stop), daemon=True,
+                                     name="tutor-prepare-lease-" + job_id[-12:])
+        heartbeat.start()
+        try:
+            for item in job.get("items") or []:
+                if _tutor_prepare_sync_remote_cancel(job):
+                    break
+                video_id = str(item.get("video_id") or "")
+                if not video_id:
+                    continue
+                if not _tutor_prepare_update_item(job, video_id, "processing"):
+                    break
+                # `_transcript_get` may repair legacy B2-backed cache entries;
+                # permit it before that otherwise read-mostly path can write.
+                if not _tutor_prepare_mutation_permit(job):
+                    break
+
+                transcript_id = _fs_doc_id(video_id, "auto")
+                transcript = _transcript_get(transcript_id)
+                source = "cached"
+                if not transcript or not transcript.get("segments"):
+                    if _tutor_prepare_sync_remote_cancel(job):
+                        break
+                    transcript, extract_error = _tutor_prepare_extract(video_id)
+                    source = "captions"
+                    if _tutor_prepare_sync_remote_cancel(job):
+                        break
+                    if extract_error:
+                        state = "bot_gated" if _tutor_prepare_bot_error(extract_error) else "extract_failed"
+                        _tutor_prepare_update_item(job, video_id, state, str(extract_error), source)
+                        continue
+                    if not transcript or not transcript.get("segments"):
+                        _tutor_prepare_update_item(
+                            job, video_id, "no_captions",
+                            "No YouTube manual or automatic captions are available.", source)
+                        continue
+                    # Some caption formats expose segments but omit an aggregate text
+                    # field. Build it only from those real caption segments; never ask
+                    # an LLM to invent missing lecture content.
+                    if not str(transcript.get("text") or "").strip():
+                        transcript["text"] = " ".join(
+                            str((seg or {}).get("text") or "").strip()
+                            for seg in transcript.get("segments") or []
+                        ).strip()
+                    if not transcript.get("text"):
+                        _tutor_prepare_update_item(
+                            job, video_id, "no_captions",
+                            "Caption tracks contained no usable spoken text.", source)
+                        continue
+                    transcript.setdefault("id", video_id)
+                    transcript.setdefault("title", item.get("title") or video_id)
+                    transcript.setdefault("requested_lang", "auto")
+                    transcript.setdefault("segment_count", len(transcript.get("segments") or []))
+                    if not _tutor_prepare_mutation_permit(job):
+                        break
+                    if not _transcript_put(transcript_id, transcript):
+                        _tutor_prepare_update_item(
+                            job, video_id, "extract_failed",
+                            "Real captions were found but could not be saved. Retry this playlist.", source)
+                        continue
+
+                if _tutor_prepare_sync_remote_cancel(job):
+                    break
+                # Preparation has a stricter success contract than normal Tutor
+                # warm-up: only a persisted real-caption (`source=transcript`) index
+                # can make this video ready. Generated notes remain a separate,
+                # preferred retrieval source for regular queries.
+                indexed_ok = _index_caption_transcript(
+                    video_id, permit=lambda: _tutor_prepare_mutation_permit(job))
+                if _tutor_prepare_sync_remote_cancel(job):
+                    break
+                if not indexed_ok:
+                    indexed, per_source = _library_coverage([video_id])
+                    indexed_ok = video_id in indexed and per_source.get("transcript", 0) > 0
+                if indexed_ok:
+                    _tutor_prepare_update_item(job, video_id, "ready", "", source)
+                else:
+                    _tutor_prepare_update_item(
+                        job, video_id, "index_failed",
+                        "Transcript is saved, but semantic indexing failed. Retry this playlist.", source)
+        finally:
+            heartbeat_stop.set()
+            heartbeat.join()
+
+        if _tutor_prepare_sync_remote_cancel(job):
+            with _tutor_prepare_jobs_lock:
+                for item in job.get("items") or []:
+                    if item.get("state") in ("queued", "processing"):
+                        item["state"] = "cancelled"
+                        item["detail"] = "Cancelled by you."
+            _tutor_prepare_finish(job, "cancelled")
+        else:
+            _tutor_prepare_finish(job, "completed")
+
+
+@app.post("/api/tutor/library/prepare")
+def api_tutor_library_prepare_start():
+    """Start caption-only transcript preparation for one owned playlist/course."""
+    user, auth_err = _verified_user_record(require_pro=True)
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"error": "bad_request"}), 400
+    course_id = str(body.get("course_id") or "").strip()[:120]
+    if not course_id:
+        return jsonify({"error": "missing_course_id"}), 400
+
+    # Never trust a browser-supplied playlist video list. Membership is resolved
+    # exclusively from the verified account's users/{uid}.appState.ytoLibrary.
+    videos = _user_library(user, course_id)
+    if not videos:
+        return jsonify({"error": "course_not_found",
+                        "detail": "This playlist is not in your Organiser library."}), 404
+    videos = videos[:TUTOR_PREPARE_MAX_VIDEOS]
+    job_id = _tutor_prepare_job_id(user["uid"], course_id)
+    existing = _get_tutor_prepare_job(job_id)
+    if existing and existing.get("owner_uid") == user["uid"] and \
+            existing.get("status") in ("queued", "running"):
+        return jsonify(_tutor_prepare_job_public(existing)), 202
+
+    now = int(time.time())
+    job = {
+        "id": job_id,
+        "owner_uid": user["uid"],
+        "course_id": course_id,
+        "course_title": videos[0].get("course") or "Playlist",
+        "status": "queued",
+        "error": "",
+        "created_at": now,
+        "updated_at": now,
+        "finished_at": None,
+        "items": [{"video_id": v["video_id"], "title": v.get("title") or v["video_id"],
+                   "state": "queued", "source": "", "detail": ""} for v in videos],
+        "cancel_event": threading.Event(),
+    }
+    claimed, active_remote = _tutor_prepare_claim(job)
+    if not claimed:
+        if active_remote:
+            active_remote = dict(active_remote)
+            active_remote["id"] = job_id
+            return jsonify(_tutor_prepare_job_public(active_remote)), 202
+        return jsonify({"error": "prepare_unavailable",
+                        "detail": "Could not claim a preparation worker. Please retry."}), 503
+    with _tutor_prepare_jobs_lock:
+        # Protect the no-Firestore/local edge too: only the request that owns the
+        # map entry may launch a worker for this stable owner+playlist job ID.
+        raced = _tutor_prepare_jobs.get(job_id)
+        if raced and raced.get("status") in ("queued", "running"):
+            return jsonify(_tutor_prepare_job_public(raced)), 202
+        _tutor_prepare_jobs[job_id] = job
+    worker = threading.Thread(target=_run_tutor_prepare_job, args=(job_id,), daemon=True,
+                              name="tutor-prepare-" + job_id[-12:])
+    worker.start()
+    return jsonify(_tutor_prepare_job_public(job)), 202
+
+
+@app.get("/api/tutor/library/prepare")
+def api_tutor_library_prepare_status():
+    user, auth_err = _verified_user_record(require_pro=True)
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    course_id = (request.args.get("course_id") or "").strip()[:120]
+    if not course_id:
+        return jsonify({"error": "missing_course_id"}), 400
+    # Resolve against the signed-in user's current library before even looking up
+    # the status document, so a stale browser cannot probe a removed course.
+    if not _user_library(user, course_id):
+        return jsonify({"error": "course_not_found"}), 404
+    job = _get_tutor_prepare_job(_tutor_prepare_job_id(user["uid"], course_id))
+    if not job or job.get("owner_uid") != user["uid"]:
+        return jsonify({"status": "idle", "course_id": course_id, "total": 0,
+                        "processed": 0, "counts": {}, "items": []})
+    return jsonify(_tutor_prepare_job_public(job))
+
+
+@app.delete("/api/tutor/library/prepare")
+def api_tutor_library_prepare_cancel():
+    user, auth_err = _verified_user_record(require_pro=True)
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    course_id = (request.args.get("course_id") or "").strip()[:120]
+    if not course_id or not _user_library(user, course_id):
+        return jsonify({"error": "course_not_found"}), 404
+    job = _get_tutor_prepare_job(_tutor_prepare_job_id(user["uid"], course_id))
+    if not job or job.get("owner_uid") != user["uid"]:
+        return jsonify({"error": "job_not_found"}), 404
+    should_cancel = False
+    with _tutor_prepare_jobs_lock:
+        if job.get("status") in ("queued", "running"):
+            should_cancel = True
+            job["cancel_event"].set()
+            for item in job.get("items") or []:
+                if item.get("state") in ("queued", "processing"):
+                    item["state"] = "cancelled"
+                    item["detail"] = "Cancelled by you."
+    # Never rewrite a completed/interrupted record as cancelled after the UI's
+    # Stop request arrives late.
+    if should_cancel:
+        _tutor_prepare_finish(job, "cancelled")
+    return jsonify(_tutor_prepare_job_public(job))
+
+
 @app.get("/api/tutor/library/coverage")
 def api_tutor_library_coverage():
-    """How many library videos are searchable — drives the UI coverage strip."""
+    """How many scoped videos are searchable, plus selected-playlist readiness."""
     user, auth_err = _verified_user_record(require_pro=True)
     if auth_err:
         return jsonify(auth_err[0]), auth_err[1]
     course_id = (request.args.get("course_id") or "").strip()[:120] or None
     scope = (request.args.get("scope") or "library").strip().lower()
+    if scope not in ("library", "course"):
+        return jsonify({"error": "bad_scope"}), 400
+    if scope == "course" and not course_id:
+        return jsonify({"error": "missing_course_id"}), 400
     videos = _user_library(user, course_id if scope == "course" else None)
     ids = [v["video_id"] for v in videos]
     indexed, per_source = _library_coverage(ids)
-    return jsonify({"total": len(videos), "indexed": len(indexed),
+    # The picker advertises only current organiser playlists. Legacy and
+    # single-video records remain searchable in all-library mode but are not
+    # valid playlist preparation targets.
+    app_state = (user.get("data") or {}).get("appState") or {}
+    raw_courses = app_state.get("ytoLibrary") or {}
+    courses = []
+    if isinstance(raw_courses, dict):
+        for cid, course in raw_courses.items():
+            if isinstance(course, dict) and course.get("type") == "playlist":
+                courses.append((str(cid), str(course.get("title") or "Untitled playlist")))
+    courses.sort(key=lambda pair: pair[1].lower())
+    job = None
+    if scope == "course" and videos:
+        candidate = _get_tutor_prepare_job(_tutor_prepare_job_id(user["uid"], course_id))
+        if candidate and candidate.get("owner_uid") == user["uid"]:
+            job = _tutor_prepare_job_public(candidate)
+    return jsonify({"scope": scope, "course_id": course_id,
+                    "course_title": videos[0].get("course") if videos else "",
+                    "total": len(videos), "indexed": len(indexed),
                     "per_source": per_source, "vector_search": _vec_enabled(),
-                    "courses": [{"id": cid, "title": title} for cid, title in
-                                sorted({(v["course_id"], v["course"]) for v in videos
-                                        if v.get("course")}, key=lambda p: p[1])]})
+                    "courses": [{"id": cid, "title": title} for cid, title in courses],
+                    "preparation": job})
 
 
 @app.route("/api/tutor", methods=["GET", "POST"])

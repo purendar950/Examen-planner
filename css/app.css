@@ -8251,3 +8251,32 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 #page-youtube #ai-study-panel:not(.ai-tutor-active) .ai-head-controls #ai-lang {
   width: 66px;
 }
+
+
+/* Playlist-scoped Advanced Tutor: compact controls so the chat remains dominant. */
+#ai-study-panel .ai-library-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 0 0 6px;
+}
+#ai-study-panel .ai-library-controls .ai-subscope-toggle { flex: 0 0 auto; }
+#ai-study-panel #ai-tutor-course {
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 270px;
+  padding: 5px 8px;
+  font-size: .72rem;
+}
+#ai-study-panel .ai-prepare-status {
+  min-height: 18px;
+  margin: -1px 0 6px;
+  font-size: .68rem;
+  line-height: 1.4;
+}
+@media (max-width: 520px) {
+  #ai-study-panel .ai-library-controls { gap: 5px; }
+  #ai-study-panel #ai-tutor-course { flex-basis: 100%; max-width: none; order: 2; }
+  #ai-study-panel #ai-prepare-playlist { font-size: .68rem; padding: 5px 7px; }
+}
