@@ -8253,30 +8253,60 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 }
 
 
-/* Playlist-scoped Advanced Tutor: compact controls so the chat remains dominant. */
-#ai-study-panel .ai-library-controls {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: 0 0 6px;
+/* Playlist-scoped Advanced Tutor.
+   Scope switch, playlist picker and PDF/Clear share ONE row. The row never
+   wraps: on a narrow phone it scrolls sideways instead, because wrapping this
+   strip to three lines is what ate the chat height. */
+#page-youtube .ai-tutor-topline.has-library-controls {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  /* Room for the focus ring, which would otherwise be clipped by overflow. */
+  padding: 2px;
+  margin-inline: -2px;
 }
-#ai-study-panel .ai-library-controls .ai-subscope-toggle { flex: 0 0 auto; }
-#ai-study-panel #ai-tutor-course {
-  flex: 1 1 140px;
-  min-width: 0;
-  max-width: 270px;
-  padding: 5px 8px;
-  font-size: .72rem;
+#page-youtube .ai-tutor-topline.has-library-controls::-webkit-scrollbar { display: none; }
+#page-youtube .ai-tutor-topline.has-library-controls > * { flex: 0 0 auto; }
+#page-youtube .ai-tutor-topline .ai-subscope-toggle { flex: 0 0 auto; }
+/* The picker is the only elastic item, so it absorbs the leftover width and
+   truncates long playlist titles rather than pushing the row wider. */
+#page-youtube .ai-tutor-topline #ai-tutor-course {
+  flex: 1 1 96px;
+  min-width: 72px;
+  max-width: 260px;
+  min-height: 26px;
+  padding: .22rem 1.1rem .22rem .4rem;
+  font-size: .57rem;
+  text-overflow: ellipsis;
 }
-#ai-study-panel .ai-prepare-status {
-  min-height: 18px;
-  margin: -1px 0 6px;
-  font-size: .68rem;
-  line-height: 1.4;
+#page-youtube .ai-tutor-topline #ai-prepare-playlist {
+  min-height: 26px;
+  padding: .22rem .45rem;
+  font-size: .57rem;
+  white-space: nowrap;
 }
-@media (max-width: 520px) {
-  #ai-study-panel .ai-library-controls { gap: 5px; }
-  #ai-study-panel #ai-tutor-course { flex-basis: 100%; max-width: none; order: 2; }
-  #ai-study-panel #ai-prepare-playlist { font-size: .68rem; padding: 5px 7px; }
+#page-youtube .ai-tutor-shell > .ai-prepare-status {
+  min-height: 16px;
+  margin: 0 0 .3rem;
+  font-size: .63rem;
+  line-height: 1.45;
+}
+/* The split view and very narrow phones already shrink every other control in
+   this row; keep the picker in proportion so the row stays one line. */
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-tutor-topline #ai-tutor-course,
+#page-youtube .yt-layout.ai-split .ai-body[data-ai-tab="tutor"] .ai-tutor-topline #ai-prepare-playlist {
+  min-height: 23px;
+  padding-block: .16rem;
+  font-size: .52rem;
+}
+@media (max-width: 360px) {
+  #page-youtube .ai-tutor-topline.has-library-controls {
+    align-items: center;
+    flex-direction: row;
+    gap: .3rem;
+  }
+  #page-youtube .ai-tutor-topline.has-library-controls .ai-tutor-actions { margin-left: .1rem; }
+  #page-youtube .ai-tutor-topline #ai-tutor-course { max-width: 150px; }
 }

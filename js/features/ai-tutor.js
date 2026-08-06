@@ -60,15 +60,32 @@
     try { localStorage.setItem(COURSE_KEY, String(id || '')); } catch (e) {}
   }
   function isCourseTutorScope() { return isLibraryScope() && libraryTutorScope() === 'course'; }
+  /* Playlists pulled in by a channel import are NOT offered in the picker.
+     Importing one channel can add dozens of its playlists at once, which would
+     bury the handful the student actually pasted themselves. Provenance is read
+     two ways because they fail in different situations: `channelId` is stamped
+     on the course at import time, but ytoRefetch() rebuilds the entry and drops
+     it, so ytoChannels[].playlistIds is also consulted as the durable record. */
+  function channelImportedPlaylistIds() {
+    var channels = null, ids = {};
+    try { channels = typeof appState !== 'undefined' && appState && appState.ytoChannels; } catch (e) {}
+    if (channels && typeof channels === 'object') Object.keys(channels).forEach(function (cid) {
+      var list = channels[cid] && channels[cid].playlistIds;
+      if (Array.isArray(list)) list.forEach(function (pid) { ids[String(pid)] = true; });
+    });
+    return ids;
+  }
   function localTutorCourses() {
     var lib = null;
     try { lib = typeof appState !== 'undefined' && appState && appState.ytoLibrary; } catch (e) {}
-    var out = [];
+    var out = [], fromChannel = channelImportedPlaylistIds();
     if (lib && typeof lib === 'object') Object.keys(lib).forEach(function (id) {
       var course = lib[id];
-      // The visible picker is intentionally playlist-focused. The server still
-      // authorizes by its own current appState snapshot, never this local list.
+      // Playlists only — single saved videos (type 'video') are not a course.
+      // The server still authorizes by its own current appState snapshot rather
+      // than trusting this local list.
       if (!course || course.type !== 'playlist') return;
+      if (course.channelId || fromChannel[String(id)]) return;
       out.push({ id: String(id), title: String(course.title || 'Untitled playlist'),
                  count: Array.isArray(course.videos) ? course.videos.length : 0 });
     });
@@ -3580,19 +3597,22 @@
       var label = course.title + (course.count ? ' (' + course.count + ')' : '');
       return '<option value="' + esc(course.id) + '"' + (selected ? ' selected' : '') + '>' + esc(label) + '</option>';
     }).join('');
+    // These live in the same top row as the scope switch and PDF/Clear so the
+    // whole control strip is one line and the chat keeps the panel height. The
+    // row scrolls sideways on a narrow phone rather than wrapping to 3 lines.
     var libraryControl = lib
-      ? '<div class="ai-library-controls" id="ai-library-controls">' +
-          '<div class="ai-scope-toggle ai-subscope-toggle" role="tablist" aria-label="Library range">' +
-            '<button type="button" class="ai-scope-option' + (!courseMode ? ' on' : '') + '" data-library-scope="library" role="tab" aria-selected="' + (!courseMode) + '">All library</button>' +
-            '<button type="button" class="ai-scope-option' + (courseMode ? ' on' : '') + '" data-library-scope="course" role="tab" aria-selected="' + courseMode + '">Playlist</button>' +
-          '</div>' +
-          '<select id="ai-tutor-course" class="ai-btn sec"' + (courseMode ? '' : ' disabled') + ' aria-label="Choose playlist">' + courseOptions + '</select>' +
-          (courseMode && courseId
-            ? '<button type="button" class="ai-btn sec" id="ai-prepare-playlist" title="Save real YouTube captions and index this playlist">⚡ Prepare playlist</button>'
-            : '') +
+      ? '<div class="ai-scope-toggle ai-subscope-toggle" role="tablist" aria-label="Library range">' +
+          '<button type="button" class="ai-scope-option' + (!courseMode ? ' on' : '') + '" data-library-scope="library" role="tab" aria-selected="' + (!courseMode) + '">All library</button>' +
+          '<button type="button" class="ai-scope-option' + (courseMode ? ' on' : '') + '" data-library-scope="course" role="tab" aria-selected="' + courseMode + '">Playlist</button>' +
         '</div>' +
-        (courseMode ? '<div class="ai-muted ai-prepare-status" id="ai-prepare-status">' +
-          (courseId ? 'Checking playlist readiness…' : 'Choose a playlist to ask questions only from its videos.') + '</div>' : '')
+        '<select id="ai-tutor-course" class="ai-btn sec"' + (courseMode ? '' : ' disabled') + ' aria-label="Choose playlist">' + courseOptions + '</select>' +
+        (courseMode && courseId
+          ? '<button type="button" class="ai-btn sec" id="ai-prepare-playlist" title="Save real YouTube captions and index this playlist">⚡ Prepare</button>'
+          : '')
+      : '';
+    var prepareStatus = lib && courseMode
+      ? '<div class="ai-muted ai-prepare-status" id="ai-prepare-status">' +
+          (courseId ? 'Checking playlist readiness…' : 'Choose a playlist to ask questions only from its videos.') + '</div>'
       : '';
 
     var coverageBar = lib
@@ -3616,8 +3636,10 @@
         '<span class="ai-chip" data-teach="1">📚 Teach me</span>';
 
     return '<div class="ai-tutor-shell">' +
-      '<div class="ai-tutor-topline">' + scopeBar + clearBar + '</div>' +
-      libraryControl + coverageBar +
+      '<div class="ai-tutor-topline' + (lib ? ' has-library-controls' : '') + '">' +
+        scopeBar + libraryControl + clearBar +
+      '</div>' +
+      prepareStatus + coverageBar +
       '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted ai-chat-empty">' + emptyMsg + '</div>') + '</div>' +
       '<div class="ai-chips">' + chips + '</div>' +
       '<div class="ai-input-row"><input id="ai-chat-in" placeholder="' +
