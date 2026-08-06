@@ -52,11 +52,23 @@ Push to `main` and let Render redeploy.
   ("I don't understand", "confused", "wrong", "again").
 - `app.html` — cache-bust versions bumped.
 
-## 4. GitHub secrets for keep-alive
+## 4. Keep-alive
 
-Already set up from v1 (`SUPABASE_URL`, `SUPABASE_ANON_KEY`). The
-`.github/workflows/supabase-keepalive.yml` workflow now touches
-`student_memory` which keeps the project awake — no changes needed.
+Supabase pauses Free Plan projects after ~7 days of low activity.
+`.github/workflows/supabase-keepalive.yml` prevents that, and it no longer
+reads the `SUPABASE_URL` / `SUPABASE_ANON_KEY` secrets — those pointed at a
+single project, which meant only this tutor-memory project was ever pinged
+while the main mock/quiz project was left uncovered.
+
+The project list now lives in
+[`.github/supabase-keepalive-projects.json`](.github/supabase-keepalive-projects.json).
+To cover a new project, add an entry there (public `anon` key only — never a
+`service_role` key) and run
+[`supabase/keepalive_heartbeat.sql`](supabase/keepalive_heartbeat.sql) in its
+SQL editor.
+
+The old `SUPABASE_URL` / `SUPABASE_ANON_KEY` secrets are now unused by this
+workflow; leaving them in place is harmless.
 
 ## 5. Test it
 

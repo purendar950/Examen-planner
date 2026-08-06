@@ -1,0 +1,13 @@
+name = "supabase-keepalive"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Two runs a day, offset from the GitHub Actions cron (03:17 UTC) so the
+# two layers never depend on the same moment in time. Either one alone is
+# enough to keep the projects awake.
+[triggers]
+crons = ["47 9 * * *", "47 21 * * *"]
+
+# Optional override of the baked-in project list (same JSON shape as
+# .github/supabase-keepalive-projects.json). anon keys ONLY:
+#   npx wrangler secret put SUPABASE_PROJECTS
