@@ -30,14 +30,14 @@
 
   /* ── Tutor scope ──────────────────────────────────────────────────────────
      'video'   → classic tutor, grounded in the open video's transcript.
-     'library' → advanced tutor, answers across every video in the organiser
-                 library using semantic retrieval over the student's own notes.
-     Deliberately a toggle inside the Tutor tab rather than a 5th tab: a fifth
-     tab is cramped on mobile, and this keeps one chat surface. Histories are
-     kept separate per scope (see chatKey) because the two are different
-     conversations. A per-course scope exists server-side but is not exposed
-     yet — it needs course-id plumbing the client doesn't have cleanly. */
+     'library' → advanced tutor. Within it, a student may search every saved
+                 video or one organiser playlist/course. The backend still
+                 resolves the actual membership from the signed-in account; the
+                 browser only remembers the selected course ID and chat view. */
   var SCOPE_KEY = 'aiTutorScope';
+  var LIBRARY_SCOPE_KEY = 'aiTutorLibraryScope';
+  var COURSE_KEY = 'aiTutorCourseId';
+  var _tutorServerCourses = [];
   function tutorScope() {
     var v = null;
     try { v = localStorage.getItem(SCOPE_KEY); } catch (e) {}
@@ -47,6 +47,48 @@
     try { localStorage.setItem(SCOPE_KEY, v === 'library' ? 'library' : 'video'); } catch (e) {}
   }
   function isLibraryScope() { return tutorScope() === 'library'; }
+  function libraryTutorScope() {
+    try { return localStorage.getItem(LIBRARY_SCOPE_KEY) === 'course' ? 'course' : 'library'; } catch (e) { return 'library'; }
+  }
+  function setLibraryTutorScope(v) {
+    try { localStorage.setItem(LIBRARY_SCOPE_KEY, v === 'course' ? 'course' : 'library'); } catch (e) {}
+  }
+  function tutorCourseId() {
+    try { return (localStorage.getItem(COURSE_KEY) || '').trim(); } catch (e) { return ''; }
+  }
+  function setTutorCourseId(id) {
+    try { localStorage.setItem(COURSE_KEY, String(id || '')); } catch (e) {}
+  }
+  function isCourseTutorScope() { return isLibraryScope() && libraryTutorScope() === 'course'; }
+  function localTutorCourses() {
+    var lib = null;
+    try { lib = typeof appState !== 'undefined' && appState && appState.ytoLibrary; } catch (e) {}
+    var out = [];
+    if (lib && typeof lib === 'object') Object.keys(lib).forEach(function (id) {
+      var course = lib[id];
+      // The visible picker is intentionally playlist-focused. The server still
+      // authorizes by its own current appState snapshot, never this local list.
+      if (!course || course.type !== 'playlist') return;
+      out.push({ id: String(id), title: String(course.title || 'Untitled playlist'),
+                 count: Array.isArray(course.videos) ? course.videos.length : 0 });
+    });
+    return out.sort(function (a, b) { return a.title.localeCompare(b.title); });
+  }
+  function tutorCourses() {
+    var local = localTutorCourses(), seen = {}, out = [];
+    local.forEach(function (course) { seen[course.id] = true; out.push(course); });
+    (_tutorServerCourses || []).forEach(function (course) {
+      if (!course || !course.id || seen[course.id]) return;
+      seen[course.id] = true;
+      out.push({ id: String(course.id), title: String(course.title || 'Untitled playlist'), count: 0 });
+    });
+    return out;
+  }
+  function tutorCourseTitle() {
+    var id = tutorCourseId(), courses = tutorCourses();
+    for (var i = 0; i < courses.length; i++) if (courses[i].id === id) return courses[i].title;
+    return 'this playlist';
+  }
 
   /* User-picked AI model. "" = Auto (proxy uses the admin default). The dropdown
      is filled from /api/status.studyModels — i.e. ONLY the active provider's
@@ -3467,7 +3509,12 @@
   // Library-scope chat is NOT tied to a video, so it gets its own key. That is
   // also what lets it survive video changes without being wiped.
   function chatKey(videoId) {
-    if (isLibraryScope()) return 'aiTutorChat_library';
+    if (isLibraryScope()) {
+      // A playlist is a distinct course of study, so its questions and answers
+      // must never bleed into the all-library conversation (or another course).
+      var courseId = isCourseTutorScope() ? tutorCourseId() : '';
+      return courseId ? 'aiTutorChat_course_' + courseId : 'aiTutorChat_library';
+    }
     return 'aiTutorChat_' + (videoId || curVid());
   }
   function getHistory(key) {
@@ -3507,39 +3554,54 @@
           '<button class="ai-btn sec" id="ai-clear">🗑 Clear</button></div>'
       : '';
     var lib = isLibraryScope();
+    var courseMode = isCourseTutorScope();
+    var courseId = tutorCourseId();
+    var courses = tutorCourses();
 
-    // The scope switch remains inside Tutor, but it is intentionally a compact
-    // segmented control: the chat gets the panel height instead of two wide
-    // buttons competing with the actual conversation.
     var scopeBar =
       '<div class="ai-scope-toggle" id="ai-scope" role="tablist" aria-label="Tutor scope">' +
         '<button type="button" class="ai-scope-option' + (!lib ? ' on' : '') + '" data-scope="video" ' +
           'role="tab" aria-selected="' + (!lib) + '" title="Ask about this video">🎬 Video</button>' +
         '<button type="button" class="ai-scope-option' + (lib ? ' on' : '') + '" data-scope="library" ' +
           'role="tab" aria-selected="' + lib + '" ' +
-          'title="Ask across every video in your Organiser library">🧠 Library' +
+          'title="Ask across saved Organiser videos">🧠 Library' +
           (isPro() ? '' : ' 🔒') + '</button>' +
       '</div>';
-
-    // Coverage is filled in by refreshLibraryCoverage() — an un-indexed library
-    // is the single most likely reason for a disappointing answer, so it is
-    // stated plainly rather than left to look like the tutor is ignorant.
-    var coverageBar = lib
-      ? '<div class="ai-muted" id="ai-lib-coverage" style="font-size:0.7rem;margin-bottom:6px">Checking your library…</div>'
-      : '';
 
     if (lib && !isPro()) {
       return scopeBar +
         '<div class="ai-muted" style="padding:14px;line-height:1.6">' +
-        '<b>🔒 Pro feature</b><br>Asking across your whole library needs Pro — it ' +
-        'searches every video\'s notes at once, which costs a lot more than a ' +
-        'single-video question.<br><span style="font-size:0.72rem">Switch back to ' +
-        '“This video” to keep using the normal tutor.</span></div>';
+        '<b>🔒 Pro feature</b><br>Library Tutor searches your saved videos and their real captions/notes. ' +
+        'Switch back to Video to use the normal tutor.</div>';
     }
 
+    var courseOptions = '<option value="">Choose a playlist…</option>' + courses.map(function (course) {
+      var selected = courseMode && course.id === courseId;
+      var label = course.title + (course.count ? ' (' + course.count + ')' : '');
+      return '<option value="' + esc(course.id) + '"' + (selected ? ' selected' : '') + '>' + esc(label) + '</option>';
+    }).join('');
+    var libraryControl = lib
+      ? '<div class="ai-library-controls" id="ai-library-controls">' +
+          '<div class="ai-scope-toggle ai-subscope-toggle" role="tablist" aria-label="Library range">' +
+            '<button type="button" class="ai-scope-option' + (!courseMode ? ' on' : '') + '" data-library-scope="library" role="tab" aria-selected="' + (!courseMode) + '">All library</button>' +
+            '<button type="button" class="ai-scope-option' + (courseMode ? ' on' : '') + '" data-library-scope="course" role="tab" aria-selected="' + courseMode + '">Playlist</button>' +
+          '</div>' +
+          '<select id="ai-tutor-course" class="ai-btn sec"' + (courseMode ? '' : ' disabled') + ' aria-label="Choose playlist">' + courseOptions + '</select>' +
+          (courseMode && courseId
+            ? '<button type="button" class="ai-btn sec" id="ai-prepare-playlist" title="Save real YouTube captions and index this playlist">⚡ Prepare playlist</button>'
+            : '') +
+        '</div>' +
+        (courseMode ? '<div class="ai-muted ai-prepare-status" id="ai-prepare-status">' +
+          (courseId ? 'Checking playlist readiness…' : 'Choose a playlist to ask questions only from its videos.') + '</div>' : '')
+      : '';
+
+    var coverageBar = lib
+      ? '<div class="ai-muted" id="ai-lib-coverage" style="font-size:0.7rem;margin-bottom:6px">Checking your library…</div>'
+      : '';
+    var scopeLabel = courseMode && courseId ? '<b>' + esc(tutorCourseTitle()) + '</b>' : '<b>all your library videos</b>';
     var emptyMsg = lib
-      ? 'Ask anything across <b>all your library videos</b> — main aapke saare notes me dhoond ke jawab dunga, ' +
-        'source video + timestamp ke saath.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span>'
+      ? 'Ask anything across ' + scopeLabel + ' — answers cite the source video and timestamp.' +
+        '<br><span style="font-size:0.72rem">(chat is saved on this device only)</span>'
       : 'Ask a doubt about this video, ya "Teach me" dabao.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span>';
 
     var chips = lib
@@ -3555,43 +3617,160 @@
 
     return '<div class="ai-tutor-shell">' +
       '<div class="ai-tutor-topline">' + scopeBar + clearBar + '</div>' +
-      coverageBar +
+      libraryControl + coverageBar +
       '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted ai-chat-empty">' + emptyMsg + '</div>') + '</div>' +
       '<div class="ai-chips">' + chips + '</div>' +
       '<div class="ai-input-row"><input id="ai-chat-in" placeholder="' +
-      (lib ? 'Ask across all your videos…' : 'Type your doubt…') +
+      (lib ? (courseMode ? 'Ask about this playlist…' : 'Ask across all your videos…') : 'Type your doubt…') +
       '"><button class="ai-btn" id="ai-chat-send">Send</button></div>' +
     '</div>';
   }
 
-  /* ── Library coverage strip ──
-     Answers only reach videos that have been indexed. Saying "24 of 148" up
-     front is the difference between "the tutor is dumb" and "I should generate
-     notes for more videos". */
-  var _libCoverage = null;
+  /* ── Library coverage + playlist preparation ──────────────────────────────
+     The preparation status is server-owned and only represents real YouTube
+     caption tracks. It is never an LLM-generated "transcript". */
+  var _libCoverage = null, _libCoverageKey = '';
+  var _preparePollTimer = 0;
   function paintLibraryCoverage(text) {
     var el = document.getElementById('ai-lib-coverage');
     if (el) el.innerHTML = text;
   }
+  function activeLibraryScopeKey() {
+    return isCourseTutorScope() ? ('course:' + tutorCourseId()) : 'library';
+  }
+  function isActivePlaylistScope(scopeKey) {
+    return isCourseTutorScope() && activeLibraryScopeKey() === scopeKey;
+  }
+  function preparationSummary(job) {
+    if (!job || job.status === 'idle') {
+      return 'Prepare saves only real YouTube captions, then indexes them for this playlist. No captions means no invented script.';
+    }
+    var c = job.counts || {}, total = Number(job.total) || 0, processed = Number(job.processed) || 0;
+    var bits = [];
+    if (job.status === 'queued' || job.status === 'running') bits.push('Preparing ' + processed + '/' + total);
+    else if (job.status === 'completed') bits.push('Preparation finished');
+    else if (job.status === 'cancelled') bits.push('Preparation cancelled');
+    else if (job.status === 'interrupted') bits.push('Preparation interrupted — retry to continue');
+    else bits.push('Preparation status: ' + esc(job.status || 'unknown'));
+    if (c.ready) bits.push('✅ ' + c.ready + ' ready');
+    if (c.no_captions) bits.push('◌ ' + c.no_captions + ' no captions');
+    if (c.bot_gated) bits.push('⚠ ' + c.bot_gated + ' bot-gated');
+    if (c.extract_failed || c.index_failed) bits.push('⚠ ' + ((c.extract_failed || 0) + (c.index_failed || 0)) + ' need retry');
+    if (job.error) bits.push(esc(job.error));
+    if (job.status === 'queued' || job.status === 'running') {
+      bits.push('<button type="button" class="ai-btn sec" id="ai-cancel-prepare" style="padding:3px 7px;font-size:.68rem">Stop</button>');
+    }
+    return bits.join(' · ');
+  }
+  function paintTutorPreparation(job) {
+    var el = document.getElementById('ai-prepare-status');
+    if (!el) return;
+    el.innerHTML = preparationSummary(job);
+    var cancel = document.getElementById('ai-cancel-prepare');
+    if (cancel) cancel.onclick = cancelPlaylistPreparation;
+  }
+  function stopPreparationPolling() {
+    if (_preparePollTimer) clearTimeout(_preparePollTimer);
+    _preparePollTimer = 0;
+  }
+  function pollPlaylistPreparation(courseId) {
+    var scopeKey = 'course:' + courseId;
+    stopPreparationPolling();
+    if (!courseId || !isActivePlaylistScope(scopeKey)) return;
+    backendAuthFetch('/api/tutor/library/prepare?course_id=' + encodeURIComponent(courseId))
+      .then(function (r) { return r.json(); })
+      .then(function (job) {
+        if (!isActivePlaylistScope(scopeKey)) return;
+        if (!job || !job.status) return;
+        paintTutorPreparation(job);
+        if (job.status === 'queued' || job.status === 'running') {
+          _preparePollTimer = setTimeout(function () { pollPlaylistPreparation(courseId); }, 2500);
+        } else {
+          refreshLibraryCoverage(true);
+        }
+      }).catch(function () {});
+  }
+  function startPlaylistPreparation() {
+    var courseId = tutorCourseId();
+    var scopeKey = 'course:' + courseId;
+    if (!courseId || !isActivePlaylistScope(scopeKey)) return;
+    var btn = document.getElementById('ai-prepare-playlist');
+    if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
+    backendAuthFetch('/api/tutor/library/prepare', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ course_id: courseId })
+    }).then(function (r) { return r.json(); }).then(function (job) {
+      if (!isActivePlaylistScope(scopeKey)) return;
+      if (!job || job.error) {
+        if (typeof showToast === 'function') showToast((job && (job.detail || job.error)) || 'Could not start playlist preparation.', 'error');
+        return;
+      }
+      paintTutorPreparation(job);
+      refreshLibraryCoverage(true);
+      pollPlaylistPreparation(courseId);
+    }).catch(function () {
+      if (!isActivePlaylistScope(scopeKey)) return;
+      if (typeof showToast === 'function') showToast('Could not start playlist preparation.', 'error');
+    }).then(function () {
+      if (!isActivePlaylistScope(scopeKey)) return;
+      var button = document.getElementById('ai-prepare-playlist');
+      if (button) { button.disabled = false; button.textContent = '⚡ Prepare playlist'; }
+    });
+  }
+  function cancelPlaylistPreparation() {
+    var courseId = tutorCourseId();
+    var scopeKey = 'course:' + courseId;
+    if (!courseId || !isActivePlaylistScope(scopeKey)) return;
+    backendAuthFetch('/api/tutor/library/prepare?course_id=' + encodeURIComponent(courseId), { method: 'DELETE' })
+      .then(function (r) { return r.json(); }).then(function (job) {
+        if (!isActivePlaylistScope(scopeKey)) return;
+        stopPreparationPolling();
+        paintTutorPreparation(job);
+        refreshLibraryCoverage(true);
+      }).catch(function () {});
+  }
   function refreshLibraryCoverage(force) {
     if (!isLibraryScope() || !isPro()) return;
-    if (_libCoverage && !force) { paintLibraryCoverage(_libCoverage); return; }
-    backendAuthFetch('/api/tutor/library/coverage?scope=library')
-      .then(function (r) { return r.json(); })
+    var courseMode = isCourseTutorScope(), courseId = tutorCourseId();
+    if (courseMode && !courseId) {
+      _libCoverage = 'Choose a playlist to search only its videos.';
+      _libCoverageKey = activeLibraryScopeKey();
+      paintLibraryCoverage(_libCoverage);
+      paintTutorPreparation({ status: 'idle' });
+      return;
+    }
+    var key = activeLibraryScopeKey();
+    if (_libCoverage && _libCoverageKey === key && !force) {
+      paintLibraryCoverage(_libCoverage);
+      if (courseMode) pollPlaylistPreparation(courseId);
+      return;
+    }
+    var url = '/api/tutor/library/coverage?scope=' + (courseMode ? 'course' : 'library');
+    if (courseMode) url += '&course_id=' + encodeURIComponent(courseId);
+    backendAuthFetch(url).then(function (r) { return r.json(); })
       .then(function (j) {
+        if (!isLibraryScope() || activeLibraryScopeKey() !== key) return;
         if (!j || j.error) { paintLibraryCoverage(''); return; }
-        var bits = ['🔎 Searching <b>' + (j.indexed || 0) + '</b> of <b>' +
-                    (j.total || 0) + '</b> videos in your library'];
+        if (Array.isArray(j.courses)) _tutorServerCourses = j.courses;
+        var label = courseMode ? (j.course_title || tutorCourseTitle()) : 'your library';
+        var bits = ['🔎 <b>' + (j.indexed || 0) + '</b> of <b>' + (j.total || 0) + '</b> videos ready in ' + esc(label)];
         if (!j.vector_search) {
-          bits.push('<span title="Semantic search is not configured on the server; ' +
-                    'matching falls back to video titles.">⚠ basic search</span>');
+          bits.push('<span title="Semantic search is not configured on the server; matching falls back to video titles.">⚠ basic search</span>');
         }
         if (j.total && j.indexed < j.total) {
-          bits.push('<span style="opacity:.8">generate notes for more videos to include them</span>');
+          bits.push(courseMode ? 'prepare this playlist to fetch available captions' : 'choose a playlist to prepare captions');
         }
         _libCoverage = bits.join(' · ');
+        _libCoverageKey = key;
         paintLibraryCoverage(_libCoverage);
-      }).catch(function () { paintLibraryCoverage(''); });
+        if (courseMode) {
+          paintTutorPreparation(j.preparation || { status: 'idle' });
+          var job = j.preparation;
+          if (job && (job.status === 'queued' || job.status === 'running')) pollPlaylistPreparation(courseId);
+        }
+      }).catch(function () {
+        if (isLibraryScope() && activeLibraryScopeKey() === key) paintLibraryCoverage('');
+      });
   }
   function renderTutor() {
     var b = shellBody(); if (!b) return;
@@ -3601,18 +3780,40 @@
       btn.onclick = function () {
         var next = btn.dataset.scope;
         if (next === tutorScope()) return;
+        if (next !== 'library') stopPreparationPolling();
         setTutorScope(next);
-        renderTutor();      // re-renders with the other scope's own history,
-                            // and re-runs refreshLibraryCoverage() itself
+        renderTutor();
       };
     });
+    Array.prototype.forEach.call(b.querySelectorAll('[data-library-scope]'), function (btn) {
+      btn.onclick = function () {
+        var next = btn.dataset.libraryScope;
+        if (next === libraryTutorScope()) return;
+        stopPreparationPolling();
+        setLibraryTutorScope(next);
+        _libCoverage = null;
+        renderTutor();
+      };
+    });
+    var courseSelect = document.getElementById('ai-tutor-course');
+    if (courseSelect) courseSelect.onchange = function () {
+      stopPreparationPolling();
+      setTutorCourseId(courseSelect.value);
+      setLibraryTutorScope('course');
+      _libCoverage = null;
+      renderTutor();
+    };
+    var prepare = document.getElementById('ai-prepare-playlist');
+    if (prepare) prepare.onclick = startPlaylistPreparation;
     refreshLibraryCoverage();
     Array.prototype.forEach.call(b.querySelectorAll('.ai-chip'), function (c) {
       c.onclick = function () { c.dataset.teach ? sendTutor('', 'teach') : sendTutor(c.dataset.q); };
     });
     var clr = document.getElementById('ai-clear');
     if (clr) clr.onclick = function () {
-      var what = isLibraryScope() ? 'your library-wide tutor chat' : 'this video\'s tutor chat';
+      var what = isLibraryScope()
+        ? (isCourseTutorScope() ? 'this playlist tutor chat' : 'your library-wide tutor chat')
+        : 'this video\'s tutor chat';
       if (confirm('Clear ' + what + '?')) { clearHistory(); renderTutor(); }
     };
     var tpdf = document.getElementById('ai-tutor-pdf');
@@ -3628,8 +3829,10 @@
   // (language, provider/model override, memory) is identical.
   function tutorBody(vid, question, mode, histForApi) {
     if (isLibraryScope()) {
+      var courseMode = isCourseTutorScope();
       return JSON.stringify({
-        q: question || '', out: outLang(), scope: 'library',
+        q: question || '', out: outLang(), scope: courseMode ? 'course' : 'library',
+        course_id: courseMode ? tutorCourseId() : '',
         provider: outProvider(), model: outModel(), history: histForApi,
         memory: (window.TutorMemory && window.TutorMemory.contextText()) || ''
       });
@@ -3705,10 +3908,10 @@
   // Classic one-shot request — the fallback when streaming isn't available or
   // fails. The user turn is already pushed + saved by sendTutor; this only adds
   // the assistant reply. `histForApi` is the trimmed history to send.
-  function sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl, oncePath) {
+  function sendTutorOnce(requestBody, historyKey, turnId, liveEl, oncePath) {
     backendAuthFetch(oncePath || '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: tutorBody(vid, question, mode, histForApi)
+      body: requestBody
     }).then(function (r) { return r.json(); }).then(function (j) {
       var answer = j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)');
       saveTutorAnswer(historyKey, turnId, answer);
@@ -3725,11 +3928,18 @@
   // this is never worse than the classic path.
   function sendTutor(question, mode) {
     var lib = isLibraryScope();
+    var requestLibraryScopeKey = lib ? activeLibraryScopeKey() : '';
+    var requestLibraryScopeLabel = lib
+      ? (isCourseTutorScope() ? tutorCourseTitle() : 'your library') : '';
     // Library scope is not tied to an open video, so it must NOT bail on !vid —
     // the student can ask across their library with nothing playing.
     var vid = curVid();
     if (!lib && !vid) return;
     if (lib && !isPro()) { renderTutor(); return; }
+    if (lib && isCourseTutorScope() && !tutorCourseId()) {
+      if (typeof showToast === 'function') showToast('Choose a playlist first.', 'info');
+      return;
+    }
     if (lib && !question) return;                 // no "Teach me" without a video
     var streamPath = lib ? '/api/tutor/library/stream' : '/api/tutor/stream';
     var oncePath = lib ? '/api/tutor/library' : '/api/tutor';
@@ -3740,6 +3950,10 @@
     h.push({ role: 'assistant', content: '', turnId: turnId, pending: true });
     saveHistory(h, historyKey);
     var histForApi = h.filter(function (m) { return !m.pending; }).slice(-8).map(function (m) { return { role: m.role, content: m.content }; });
+    // Keep the target scope immutable for both transports. A stream may fail
+    // after the student changes playlists; its one-shot fallback must still
+    // search the original playlist and save into that same conversation.
+    var requestBody = tutorBody(vid, question, mode, histForApi);
 
     // Live assistant bubble we grow as chunks arrive (only when the tutor tab is
     // visible). Starts as a "thinking…" spinner; the first chunk replaces it.
@@ -3789,7 +4003,7 @@
       if (done) return;
       streamPainter.cancel();
       done = true;
-      sendTutorOnce(vid, question, mode, histForApi, historyKey, turnId, liveEl, oncePath);
+      sendTutorOnce(requestBody, historyKey, turnId, liveEl, oncePath);
     }
     function handleFrame(frame) {
       var ev = 'message', data = '';
@@ -3800,12 +4014,13 @@
       if (ev === 'meta') {
         // Library scope reports what it actually searched. Showing it turns a
         // weak answer into an explainable one.
-        if (lib && data) {
+        if (lib && data && isLibraryScope() && activeLibraryScopeKey() === requestLibraryScopeKey) {
           try {
             var m = JSON.parse(data);
             var bits = [];
             if (typeof m.indexed === 'number') {
-              bits.push('🔎 searched <b>' + m.indexed + '</b> of <b>' + m.total + '</b> videos');
+              var searchedLabel = requestLibraryScopeLabel;
+              bits.push('🔎 searched <b>' + m.indexed + '</b> of <b>' + m.total + '</b> videos in ' + esc(searchedLabel));
             }
             if (m.retrieval === 'keyword') bits.push('⚠ basic (title) search');
             if (m.context_limited) {
@@ -3813,7 +4028,11 @@
                         'little of your notes fits. Pick a bigger model for library questions.">' +
                         '⚠ small model context</span>');
             }
-            if (bits.length) { _libCoverage = bits.join(' · '); paintLibraryCoverage(_libCoverage); }
+            if (bits.length) {
+              _libCoverage = bits.join(' · ');
+              _libCoverageKey = requestLibraryScopeKey;
+              paintLibraryCoverage(_libCoverage);
+            }
           } catch (e) {}
         }
         return;
@@ -3833,7 +4052,7 @@
 
     backendAuthFetch(streamPath, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: tutorBody(vid, question, mode, histForApi)
+      body: requestBody
     }).then(function (r) {
       if (!r.ok || !r.body || !window.TextDecoder) { throw new Error('nostream'); }
       var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
