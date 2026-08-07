@@ -3602,6 +3602,24 @@
   }
 
   /* ── Tutor chat ── */
+  var FOCUS_QUIZ_OFFER_KEY = 'examzen:focus-quiz-offer';
+  function readFocusQuizOffer() {
+    try {
+      var offer = JSON.parse(sessionStorage.getItem(FOCUS_QUIZ_OFFER_KEY) || 'null');
+      if (!offer || !offer.createdAt || Date.now() - offer.createdAt > 4 * 60 * 60 * 1000) {
+        sessionStorage.removeItem(FOCUS_QUIZ_OFFER_KEY);
+        return null;
+      }
+      return offer;
+    } catch (e) { return null; }
+  }
+  function saveFocusQuizOffer(offer) {
+    try {
+      if (offer) sessionStorage.setItem(FOCUS_QUIZ_OFFER_KEY, JSON.stringify(offer));
+      else sessionStorage.removeItem(FOCUS_QUIZ_OFFER_KEY);
+    } catch (e) {}
+  }
+  var _focusQuizOffer = readFocusQuizOffer();
   // Tutor chat is stored in localStorage (device-local) — NOT Firestore — so it
   // never bloats the synced user document. Capped at 30 messages per video.
   // Library-scope chat is NOT tied to a video, so it gets its own key. That is
@@ -3781,7 +3799,10 @@
         '<br><span style="font-size:0.72rem">(chat is saved on this device only)</span>'
       : 'Ask a doubt about this video, ya "Teach me" dabao.<br><span style="font-size:0.72rem">(chat is saved on this device only)</span>';
 
-    var chips = lib
+    var focusQuizChip = _focusQuizOffer
+      ? '<span class="ai-chip" data-focus-quiz="1">Quiz me on what I just studied?</span>'
+      : '';
+    var chips = focusQuizChip + (lib
       ? '<span class="ai-chip" data-q="Mere notes me jo main topics cover hue hain unki list do">What have I covered?</span>' +
         '<span class="ai-chip" data-q="Mere weak topics ke hisaab se ek revision plan banao">Revision plan</span>' +
         '<span class="ai-chip" data-q="Is topic par mere kis video me sabse detail me padhaya gaya hai?">Which video covers…?</span>' +
@@ -3790,7 +3811,7 @@
         '<span class="ai-chip" data-q="Ek real example do is topic ka">Give example</span>' +
         '<span class="ai-chip" data-q="Is video se important cheezein ek ek karke pucho">Quiz me</span>' +
         '<span class="ai-chip" data-q="Exam point of view se important cheezein batao">Real exam angle</span>' +
-        '<span class="ai-chip" data-teach="1">📚 Teach me</span>';
+        '<span class="ai-chip" data-teach="1">📚 Teach me</span>');
 
     return shellOpenTag() +
       '<div class="ai-tutor-topline' + (lib ? ' has-library-controls' : '') + '">' +
@@ -4009,7 +4030,19 @@
     if (prepare) prepare.onclick = startPlaylistPreparation;
     refreshLibraryCoverage();
     Array.prototype.forEach.call(b.querySelectorAll('.ai-chip'), function (c) {
-      c.onclick = function () { c.dataset.teach ? sendTutor('', 'teach') : sendTutor(c.dataset.q); };
+      c.onclick = function () {
+        if (c.dataset.focusQuiz) {
+          var offer = _focusQuizOffer;
+          var taskText = offer && offer.taskText ? ': ' + offer.taskText : '';
+          if (sendTutor('Quiz me on what I just studied' + taskText + '.')) {
+            _focusQuizOffer = null;
+            saveFocusQuizOffer(null);
+            if (c.parentNode) c.parentNode.removeChild(c);
+          }
+          return;
+        }
+        c.dataset.teach ? sendTutor('', 'teach') : sendTutor(c.dataset.q);
+      };
     });
     var clr = document.getElementById('ai-clear');
     if (clr) clr.onclick = function () {
@@ -4290,20 +4323,20 @@
     var vid = curVid();
     // Never fail silently: re-render so the student sees WHY nothing was sent
     // (the "no video open" card) instead of watching their question vanish.
-    if (!lib && !vid) { renderTutor(); return; }
-    if (lib && !isPro()) { renderTutor(); return; }
+    if (!lib && !vid) { renderTutor(); return false; }
+    if (lib && !isPro()) { renderTutor(); return false; }
     if (lib && isCourseTutorScope() && !tutorCourseId()) {
       if (typeof showToast === 'function') showToast('Choose a playlist first.', 'info');
-      return;
+      return false;
     }
-    if (lib && !question) return;                 // no "Teach me" without a video
+    if (lib && !question) return false;                 // no "Teach me" without a video
 
     /* Free-tier daily message cap, owned by js/features/preppath-phase4-gating.js.
        It is a runtime seam rather than a wrapper around sendTutor because this
        function is IIFE-scoped and was never assignable from outside — the old
        monkey-patch silently never applied. Fail-open if gating has not loaded. */
     try {
-      if (typeof window.ezTutorSendAllowed === 'function' && !window.ezTutorSendAllowed()) return;
+      if (typeof window.ezTutorSendAllowed === 'function' && !window.ezTutorSendAllowed()) return false;
     } catch (e) {}
     /* Actually asking something in the auto-selected Library scope makes it the
        student's own choice, so stop treating it as a temporary stand-in for the
@@ -4448,6 +4481,7 @@
     }).catch(function () {
       fallback();   // network / non-ok / no-stream → classic endpoint
     });
+    return true;
   }
 
   /* ── panel shell ── */
@@ -5358,6 +5392,16 @@
     render: renderTutor,
     // Ask a question programmatically (goes through the same gate + streaming).
     ask: function (question, mode) { sendTutor(question, mode); },
+    // Keep one contextual Pomodoro action ready across tutor re-renders.
+    offerFocusQuiz: function (detail) {
+      _focusQuizOffer = {
+        taskText: String((detail && detail.taskText) || '').slice(0, 160),
+        createdAt: Date.now()
+      };
+      saveFocusQuizOffer(_focusQuizOffer);
+      var mount = tutorMount();
+      if (mount && (tutorDock() === 'float' || state.tab === 'tutor')) renderTutor();
+    },
     dock: tutorDock,
     setDock: setTutorDock,
     // True when a video id is available, i.e. Video scope can actually answer.

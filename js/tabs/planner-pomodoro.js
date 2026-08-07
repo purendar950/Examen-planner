@@ -86,20 +86,34 @@ function pomodoroResume() {
 function pomodoroTick() {
   if (!_pomo || _pomo.remaining != null || _pomo.endsAt == null) return false;
   if (Date.now() < _pomo.endsAt) return false;
-  _pomoAdvance();
+  _pomoAdvance(true);
   return true;
 }
 
-function _pomoAdvance() {
+function _pomoAdvance(completedNaturally) {
   if (!_pomo) return;
   if (_pomo.phase === 'focus') {
     // Focus block finished → bank focus time, pause the clock, start a break.
+    const completedBlock = _pomo.block;
+    const completedRef = _pomo.ref;
+    const completedTask = (typeof _focusTask === 'function') ? _focusTask() : null;
     if (typeof pauseTaskTimer === 'function') pauseTaskTimer(_pomo.ref.dateStr, _pomo.ref.taskId);
     const isLong = (_pomo.block % POMO_LONG_EVERY === 0);
     _pomo.phase = isLong ? 'long' : 'short';
     _pomo.endsAt = Date.now() + _pomoDuration(_pomo.phase) * 1000;
     _pomo.remaining = null;
     _pomoNotify(isLong ? 'Long break 🌿' : 'Break time 🌿', 'Focus block done — the clock is paused. Relax for a bit.');
+    if (completedNaturally) {
+      window.dispatchEvent(new CustomEvent('examzen:pomodoro-focus-complete', {
+        detail: {
+          block: completedBlock,
+          dateStr: completedRef.dateStr,
+          taskId: completedRef.taskId,
+          taskText: (completedTask && completedTask.text) || '',
+          completedAt: new Date().toISOString()
+        }
+      }));
+    }
   } else {
     // Break finished → resume study, start the next focus block.
     const wasLong = (_pomo.phase === 'long');
