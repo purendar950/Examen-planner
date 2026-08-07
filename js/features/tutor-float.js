@@ -29,21 +29,21 @@
   var _activeTurns = {};
   var _anonymousTurns = 0;
   var _lastFocus = null;
+  var _entryTimer = 0;
 
   function core() { return window.AiTutorCore || null; }
 
   /* ── the tutor character ──────────────────────────────────────────────────
      A hand-built SVG standing in for the LottieFiles character, driven by CSS
-     keyframes. ~2 KB inline and no player library, against ~102 KB gzipped for
-     lottie-web plus the animation JSON — a poor trade for a 54px decoration
+     keyframes. ~3 KB inline and no player library, against ~102 KB gzipped for
+     lottie-web plus the animation JSON — a poor trade for a 56px decoration
      that loads on every page, when the two are hard to tell apart at that size.
 
-     States mirror the original animation's segments. Only `idle` and `thinking`
-     are wired up so far; the rest are ready for whatever should trigger them:
-       idle      gentle bob, occasional blink  (default, loops)
-       thinking  eyes give way to a spinner    (a reply is still streaming)
-       alert     amber, exclamation mark       (daily limit reached)
-       yes / no  green / red acknowledgements  (unused)                       */
+     States mirror the original animation's segments:
+       idle      aura breath, sheen, gentle bob, blink and eye glances
+       thinking  faster aura, spinner and orbiting dots (reply in progress)
+       alert     amber shake and exclamation mark (daily limit reached)
+       yes / no  green check or red cross acknowledgements (public API)       */
   var MOODS = ['idle', 'thinking', 'alert', 'yes', 'no'];
 
   function characterSvg() {
@@ -65,7 +65,15 @@
           '<stop offset="0" stop-color="#fff" stop-opacity=".16"/>' +
           '<stop offset=".6" stop-color="#fff" stop-opacity="0"/>' +
           '<stop offset="1" stop-color="#000" stop-opacity=".17"/></radialGradient>' +
+        '<clipPath id="tcFaceClip"><circle cx="50" cy="50" r="42"/></clipPath>' +
       '</defs>' +
+      // Two quiet rings make the character feel powered-on without changing
+      // its 56px hitbox. The dashed ring moves independently from the body.
+      '<g class="tc-aura" fill="none" stroke="#a88bff">' +
+        '<circle class="tc-aura-ring" cx="50" cy="50" r="46" stroke-width="1.8"/>' +
+        '<circle class="tc-aura-dashes" cx="50" cy="50" r="49" stroke-width="1.2" ' +
+          'stroke-linecap="round" stroke-dasharray="7 11"/>' +
+      '</g>' +
       '<g class="tc-body">' +
         '<circle class="tc-skin" cx="50" cy="50" r="43"/>' +
         '<circle cx="50" cy="50" r="43" fill="url(#tcShade)"/>' +
@@ -86,6 +94,15 @@
         '<g class="tc-cross" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round">' +
           '<path d="M36 36l28 28"/><path d="M64 36L36 64"/>' +
         '</g>' +
+      '</g>' +
+      // A clipped highlight crosses the face occasionally and immediately on
+      // hover/open. Thinking gets two chunky orbiting dots beside its spinner.
+      '<g class="tc-sheen" clip-path="url(#tcFaceClip)">' +
+        '<path d="M23 69L63 20" fill="none" stroke="#fff" stroke-width="7" ' +
+          'stroke-linecap="round"/>' +
+      '</g>' +
+      '<g class="tc-think-dots" fill="#fff">' +
+        '<circle cx="50" cy="12" r="3.5"/><circle cx="85" cy="50" r="2.5"/>' +
       '</g>' +
       '<g class="tc-sparks" fill="#fff">' +
         '<path d="M16 25l1.8 4.2L22 31l-4.2 1.8L16 37l-1.8-4.2L10 31l4.2-1.8z"/>' +
@@ -146,20 +163,36 @@
       '.tutor-fab-art{display:flex;align-items:center;justify-content:center;',
       'width:100%;height:100%;pointer-events:none;line-height:1}',
       '.tutor-fab-art svg{width:100%;height:100%;display:block;overflow:visible}',
-      /* A reply still arriving while the window is closed: the character's own
-         thinking state carries it, plus a soft coloured glow so it is catchable
-         from the corner of the eye. */
-      '#tutor-fab.is-busy{animation:tutorFabGlow 1.9s ease-in-out infinite}',
-      '@keyframes tutorFabGlow{',
-      '0%,100%{filter:drop-shadow(0 8px 16px rgba(0,0,0,.42)) drop-shadow(0 0 0 rgba(99,28,255,0))}',
-      '50%{filter:drop-shadow(0 8px 16px rgba(0,0,0,.42)) drop-shadow(0 0 10px rgba(140,60,255,.85))}}',
-
       /* ── the character ── */
       '.tc{display:block}',
       '.tc .tc-skin{fill:url(#tcSkin)}',
       '.tc.is-alert .tc-skin{fill:url(#tcSkinAlert)}',
       '.tc.is-yes .tc-skin{fill:url(#tcSkinYes)}',
       '.tc.is-no .tc-skin{fill:url(#tcSkinNo)}',
+      '.tc.is-alert .tc-aura{stroke:#ffd45a}',
+      '.tc.is-yes .tc-aura{stroke:#45ffd0}',
+      '.tc.is-no .tc-aura{stroke:#ff6f91}',
+      // A soft powered-on aura breathes behind the character. Its dashed outer
+      // ring rotates slowly, then accelerates while a tutor reply is arriving.
+      // Keeping the glow inside SVG leaves the button's focus/drag filter free.
+      '.tc-aura{opacity:.3;transform-origin:50px 50px;animation:tcAuraBreathe 4.8s ease-in-out infinite}',
+      '.tc-aura-dashes{transform-origin:50px 50px;animation:tcAuraOrbit 8s linear infinite}',
+      '@keyframes tcAuraBreathe{0%,100%{opacity:.2;transform:scale(.96)}',
+      '50%{opacity:.58;transform:scale(1.035)}}',
+      '@keyframes tcAuraOrbit{to{transform:rotate(360deg)}}',
+      // A face sheen passes occasionally at idle and responds instantly to an
+      // open or hover. It is clipped to the blob, so artwork never grows wider.
+      '.tc-sheen{opacity:0;transform-origin:50px 50px}',
+      '.tc:not(.is-thinking):not(.is-alert):not(.is-yes):not(.is-no) .tc-sheen{',
+      'animation:tcSheenIdle 7s ease-in-out infinite}',
+      '@keyframes tcSheenIdle{0%,72%,100%{opacity:0;transform:translate(-18px,14px)}',
+      '80%{opacity:.38}90%{opacity:0;transform:translate(18px,-14px)}}',
+      '#tutor-fab:hover .tc:not(.is-thinking):not(.is-alert):not(.is-yes):not(.is-no) .tc-sheen,',
+      '#tutor-fab.is-opening .tc:not(.is-thinking):not(.is-alert):not(.is-yes):not(.is-no) .tc-sheen{',
+      'animation:tcSheenSweep .9s ease-out}',
+      '@keyframes tcSheenSweep{0%{opacity:0;transform:translate(-20px,16px)}',
+      '42%{opacity:.52}100%{opacity:0;transform:translate(20px,-16px)}}',
+      '.tc-think-dots{opacity:0;transform-origin:50px 50px}',
       // Idle motion: a slow bob, occasional blink, and two tiny eye glances.
       // Anchoring low gives the blob weight instead of making it hover rigidly.
       '.tc-body{transform-origin:50px 64px;animation:tcBob 3.2s ease-in-out infinite}',
@@ -180,9 +213,11 @@
       '.tc-sparks{opacity:0;transform-origin:50px 50px}',
 
       // Opening the chat gets one friendly hello bounce, then returns to idle.
-      '#tutor-fab.is-open .tc-body{animation:tcHello .72s cubic-bezier(.2,.9,.25,1),',
+      // is-opening is removed after this entry sequence, unlike persistent
+      // is-open, so later hovers can start a fresh sheen sweep.
+      '#tutor-fab.is-opening .tc-body{animation:tcHello .72s cubic-bezier(.2,.9,.25,1),',
       'tcBob 3.2s .72s ease-in-out infinite}',
-      '#tutor-fab.is-open .tc-sparks{animation:tcSpark 1.15s ease-out}',
+      '#tutor-fab.is-opening .tc-sparks{animation:tcSpark 1.15s ease-out}',
       '@keyframes tcHello{0%{transform:scale(1)}35%{transform:translateY(-7px) scale(.9,1.1) rotate(-5deg)}',
       '65%{transform:translateY(1px) scale(1.08,.92) rotate(4deg)}100%{transform:scale(1)}}',
       '@keyframes tcSpark{0%{opacity:0;transform:scale(.4) rotate(-20deg)}',
@@ -195,11 +230,19 @@
       '@keyframes tcDragWiggle{from{transform:rotate(-5deg) scale(.96,1.04)}',
       'to{transform:rotate(5deg) scale(1.04,.96)}}',
 
-      // Thinking: hide the eyes, breathe faster, and spin the arc.
+      // Thinking: hide the eyes, breathe faster, spin the arc and orbit two
+      // small satellites. The aura accelerates to make activity readable even
+      // when the icon is viewed peripherally.
       '.tc.is-thinking .tc-eyes{opacity:0}',
       '#tutor-fab .tc.is-thinking .tc-body{animation:tcThinkBreathe 1.15s ease-in-out infinite}',
       '.tc.is-thinking .tc-spin{opacity:1;animation:tcSpin .9s linear infinite}',
+      '.tc.is-thinking .tc-aura{animation:tcAuraThink 1.15s ease-in-out infinite}',
+      '.tc.is-thinking .tc-aura-dashes{animation-duration:1.35s}',
+      '.tc.is-thinking .tc-think-dots{opacity:.92;animation:tcThinkOrbit 1.4s linear infinite}',
       '@keyframes tcThinkBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.055)}}',
+      '@keyframes tcAuraThink{0%,100%{opacity:.32;transform:scale(.96)}',
+      '50%{opacity:.82;transform:scale(1.055)}}',
+      '@keyframes tcThinkOrbit{to{transform:rotate(360deg)}}',
       '@keyframes tcSpin{to{transform:rotate(360deg)}}',
 
       // Alert, yes and no now have their own movement and glyph — not just a
@@ -224,9 +267,11 @@
       // Respect a stated preference for stillness: keep the character, drop the
       // motion. The state colours and glyphs still carry all the meaning.
       '@media(prefers-reduced-motion:reduce){',
-      '.tutor-fab-art,.tc-body,.tc-eyes,.tc-gloss,.tc-spin,.tc-bang,.tc-check,.tc-cross,.tc-sparks,',
+      '.tutor-fab-art,.tc-aura,.tc-aura-dashes,.tc-sheen,.tc-think-dots,.tc-body,.tc-eyes,',
+      '.tc-gloss,.tc-spin,.tc-bang,.tc-check,.tc-cross,.tc-sparks,',
       '#tutor-fab,#tutor-fab.is-busy,#tutor-float{animation:none!important;transition:none!important}',
-      '.tc.is-thinking .tc-spin,.tc.is-alert .tc-bang,.tc.is-yes .tc-check,.tc.is-no .tc-cross{opacity:1}',
+      '.tc.is-thinking .tc-spin,.tc.is-thinking .tc-think-dots,.tc.is-alert .tc-bang,',
+      '.tc.is-yes .tc-check,.tc.is-no .tc-cross{opacity:1}',
       '}',
 
       /* ── the window ── */
@@ -737,6 +782,12 @@
     if (_fab) {
       _fab.hidden = false;
       _fab.classList.add('is-open');
+      _fab.classList.add('is-opening');
+      if (_entryTimer) clearTimeout(_entryTimer);
+      _entryTimer = setTimeout(function () {
+        _entryTimer = 0;
+        if (_fab) _fab.classList.remove('is-opening');
+      }, 1250);
       _fab.setAttribute('aria-expanded', 'true');
       _fab.setAttribute('aria-label', 'Close the AI Tutor');
       _fab.title = 'Close AI Tutor — drag to move';
@@ -787,10 +838,12 @@
     _open = false;
     _historyPushed = false;
     document.body.classList.remove(OPEN_CLASS);
+    if (_entryTimer) { clearTimeout(_entryTimer); _entryTimer = 0; }
     if (_panel) { _panel.style.transform = ''; _panel.classList.remove('is-dragging'); }
     if (_fab) {
       _fab.hidden = false;
       _fab.classList.remove('is-open');
+      _fab.classList.remove('is-opening');
       _fab.setAttribute('aria-expanded', 'false');
       _fab.setAttribute('aria-label', 'Ask the AI Tutor');
       _fab.title = 'Ask the AI Tutor — drag to move';
