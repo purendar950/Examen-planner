@@ -674,11 +674,10 @@ async function saveGroqConfig() {
    config/ai doc (merge) so the proxy reads it via Firebase Admin. Leaving the
    base URL blank makes /api/study fall back to the Groq key above. The key
    lives only in Firestore — never in the codebase. */
-/* Study AI providers (all OpenAI-compatible). baseUrl '' = Bynara default in
-   the proxy; otherwise the proxy routes to baseUrl + /chat/completions. Each
-   provider keeps its own key(s)/model in config/ai so switching never wipes the
-   other; the SELECTED provider is mirrored into studyApiKeys/studyModel/
-   studyBaseUrl (the only fields youtube-turbo-proxy reads). */
+/* Study AI providers. Most use OpenAI-compatible chat completions; providers
+   with a `transport` use a dedicated proxy adapter. Each provider keeps its own
+   key(s)/model in config/ai so switching never wipes the others; the selected
+   provider is mirrored into the legacy generic Study fields as well. */
 const STUDY_PROVIDERS = {
   bynara:   { label: 'Bynara',   host: 'router.bynara.id', baseUrl: '',                           keyField: 'bynaraApiKeys',   modelField: 'bynaraModel',
               models: ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3'], def: 'mistral-large',
@@ -698,6 +697,9 @@ const STUDY_PROVIDERS = {
   google:   { label: 'Google Gemini', host: 'generativelanguage.googleapis.com', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', keyField: 'googleApiKeys', modelField: 'googleModel',
               models: ['gemini-flash-latest', 'gemini-flash-lite-latest', 'gemini-3.5-flash', 'gemini-2.5-flash'], def: 'gemini-flash-latest',
               note: 'OpenAI-compatible · large context · free tier ~20 req/day', keyUrl: 'https://aistudio.google.com/apikey' },
+  google_interactions: { label: 'Gemini Interactions', host: 'generativelanguage.googleapis.com', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/interactions', keyField: 'googleInteractionsApiKeys', modelField: 'googleInteractionsModel', transport: 'google_interactions',
+              models: ['gemini-3.6-flash'], def: 'gemini-3.6-flash',
+              note: 'Native Interactions API · x-goog-api-key · streaming text', keyUrl: 'https://aistudio.google.com/apikey' },
   hcnsec:   { label: 'HCNSec', host: 'api.hcnsec.cn', baseUrl: 'https://api.hcnsec.cn/v1', keyField: 'hcnsecApiKeys', modelField: 'hcnsecModel',
               models: ['auto', 'DeepSeek-V4-Pro', 'DeepSeek-V4-Flash', 'Qwen3.5-397B-A17B', 'Qwen3.6-35B-A3B', 'MiniMax-M3', 'MiniMax-M2.7', 'Kimi-K2.6', 'glm-5.1'], def: 'DeepSeek-V4-Pro',
               note: 'OpenAI-compatible gateway (multi-model)', keyUrl: '' },
@@ -715,7 +717,7 @@ const STUDY_PROVIDERS = {
               def: 'auto',
               note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' },
 };
-const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro'];
+const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'google_interactions', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro'];
 /* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
    provider APIs block direct browser calls (CORS), so the proxy pings them. */
 const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
@@ -799,7 +801,9 @@ function studyModelsFor(pid) {
 // OmniRoute's live catalog is intentionally not auto-synced: it is a routed
 // multi-provider catalog whose availability can change while a route is live.
 // Its approved model list is managed explicitly in this Admin screen.
-const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.filter(function (pid) { return pid !== 'omniroute'; });
+const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.filter(function (pid) {
+  return pid !== 'omniroute' && pid !== 'google_interactions';
+});
 const STUDY_FREE_MODEL_REFRESH_PROVIDERS = STUDY_CATALOG_REFRESH_PROVIDERS;
 const STUDY_MODEL_CATALOG_CONFIG = {
   free: { providerField: 'dailyFreeModelProviders', statusField: 'dailyFreeModelSyncStatus', label: 'free-model' },
@@ -1030,7 +1034,8 @@ function parseCurlIntoStudy() {
   var urlM = text.match(/https?:\/\/[^\s'"\\]+/);
   var url = urlM ? urlM[0] : '';
   var keyM = text.match(/[Bb]earer\s+([A-Za-z0-9._~+\/-]{8,})/);
-  var key = keyM ? keyM[1] : '';
+  var googleKeyM = text.match(/x-goog-api-key\s*:\s*([A-Za-z0-9._~+\/-]{8,})/i);
+  var key = keyM ? keyM[1] : (googleKeyM ? googleKeyM[1] : '');
   if (/YOUR|APIKEY_HERE|\$\{|xxxx/i.test(key)) key = '';        // ignore placeholders
   var modelM = text.match(/["']model["']\s*:\s*["']([^"']+)["']/);
   var model = modelM ? modelM[1] : '';
@@ -1038,11 +1043,12 @@ function parseCurlIntoStudy() {
   var host = '';
   try { host = url ? new URL(url).host : ''; } catch (e) { host = ''; }
   var pid = '';
+  if (/\/v1beta\/interactions(?:[/?#]|$)/i.test(url)) pid = 'google_interactions';
   STUDY_PROVIDER_ORDER.forEach(function (k) {
     if (!pid && STUDY_PROVIDERS[k].host && host.indexOf(STUDY_PROVIDERS[k].host) !== -1) pid = k;
   });
   if (!pid) {
-    showToast('⚠️ Unknown host "' + (host || '?') + '". Supported: OmniRoute, Mistral, Cerebras, Bynara, OpenRouter, NVIDIA.');
+    showToast('⚠️ Unknown host "' + (host || '?') + '". Paste a cURL snippet for any provider shown above.');
     return;
   }
   if (key) {
@@ -1078,6 +1084,7 @@ async function saveStudyAiConfig() {
   const payload = {
     studyProvider: provider,
     studyApiKeys: activeKeys, studyModel: model, studyBaseUrl: p.baseUrl,
+    studyTransport: p.transport || 'openai_chat',
     savedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
   STUDY_PROVIDER_ORDER.forEach(function (k) { payload[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
@@ -1088,6 +1095,7 @@ async function saveStudyAiConfig() {
     STUDY_PROVIDER_ORDER.forEach(function (k) { AI_CONFIG[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
     AI_CONFIG[p.modelField] = model;
     AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
+    AI_CONFIG.studyTransport = p.transport || 'openai_chat';
     showToast('✅ Study AI saved — active: ' + p.label +
               ' (' + activeKeys.length + ' key' + (activeKeys.length === 1 ? '' : 's') + ')');
     render();

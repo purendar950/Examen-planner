@@ -1521,8 +1521,101 @@ def _tune_body_for_provider(body, ai):
     return body
 
 
-def _ai_headers(ai, key):
+def _is_google_interactions(ai):
+    return (ai.get("transport") or "").lower() == "google_interactions"
+
+
+def _google_interactions_body(messages, ai, temperature, max_tokens,
+                              json_mode=False, stream=False):
+    """Translate the app's OpenAI-style conversation into Interactions input.
+
+    The native API accepts a separate system instruction and structured steps.
+    A lone user prompt stays a simple string (matching Google's cURL example),
+    while tutor history and continuations retain their native user/model roles.
+    """
+    system_parts, turns = [], []
+    for message in messages or []:
+        if not isinstance(message, dict):
+            continue
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        role = str(message.get("role") or "user").strip().lower()
+        if role == "system":
+            system_parts.append(content)
+        elif role in ("user", "assistant"):
+            step_type = "model_output" if role == "assistant" else "user_input"
+            turns.append({
+                "type": step_type,
+                "content": [{"type": "text", "text": content}],
+            })
+    if len(turns) == 1 and turns[0]["type"] == "user_input":
+        input_value = turns[0]["content"][0]["text"]
+    else:
+        input_value = turns
+    body = {
+        "model": ai["model"],
+        "input": input_value,
+        "store": False,
+        "generation_config": {
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        },
+    }
+    if system_parts:
+        body["system_instruction"] = "\n\n".join(system_parts)
+    if json_mode:
+        body["response_format"] = {"type": "text", "mime_type": "application/json"}
+    if stream:
+        body["stream"] = True
+    return body
+
+
+def _google_interactions_url(ai, stream=False):
+    url = ai["base_url"]
+    if stream:
+        return url + ("&" if "?" in url else "?") + "alt=sse"
+    return url
+
+
+def _google_interactions_text(payload):
+    """Extract text from the current steps schema (plus sunset legacy output)."""
+    if not isinstance(payload, dict):
+        return ""
+    pieces = []
+    for step in payload.get("steps") or []:
+        if not isinstance(step, dict) or step.get("type") != "model_output":
+            continue
+        for content in step.get("content") or []:
+            if isinstance(content, dict) and content.get("type") == "text":
+                text = content.get("text")
+                if isinstance(text, str) and text:
+                    pieces.append(text)
+    if not pieces:  # Compatibility with the pre-June-2026 Interactions schema.
+        for output in payload.get("outputs") or []:
+            if isinstance(output, dict) and output.get("type") == "text":
+                text = output.get("text")
+                if isinstance(text, str) and text:
+                    pieces.append(text)
+    if not pieces and isinstance(payload.get("output_text"), str):
+        pieces.append(payload["output_text"])
+    return "".join(pieces)
+
+
+def _google_interactions_finish_reason(payload):
+    status = payload.get("status") if isinstance(payload, dict) else None
+    if status == "incomplete":
+        return "length"
+    return "stop" if status == "completed" else status
+
+
+def _ai_headers(ai, key, stream=False):
     """Build upstream headers without exposing provider-specific behavior to clients."""
+    if _is_google_interactions(ai):
+        headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
+        if stream:
+            headers["Accept"] = "text/event-stream"
+        return headers
     headers = {"Authorization": "Bearer " + key, "Content-Type": "application/json"}
     if (ai.get("provider") or "").lower() == "omniroute":
         # The stable Dev Domain remains protected by ngrok's free-plan browser
@@ -1587,13 +1680,127 @@ def _ai_chat(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False,
     raise RuntimeError("AI failed on all %d provider(s): %s" % (len(chain), last))
 
 
+def _read_google_interactions_stream(resp, meta=None):
+    """Read Interactions SSE events and return only model text deltas."""
+    out = []
+    resp.encoding = "utf-8"
+    for raw in resp.iter_lines(decode_unicode=True):
+        if not raw:
+            continue
+        line = raw.strip()
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if not line or line[0] != "{":
+            continue
+        try:
+            payload = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        event_type = payload.get("event_type") or payload.get("type")
+        if event_type == "step.start":
+            step = payload.get("step") or {}
+            if step.get("type") == "model_output":
+                for content in step.get("content") or []:
+                    if isinstance(content, dict) and content.get("type") == "text":
+                        text = content.get("text")
+                        if isinstance(text, str) and text:
+                            out.append(text)
+        elif event_type == "step.delta":
+            delta = payload.get("delta") or {}
+            text = delta.get("text") if delta.get("type") == "text" else None
+            if isinstance(text, str) and text:
+                out.append(text)
+        elif event_type in ("interaction.completed", "interaction.incomplete",
+                            "interaction.failed", "interaction.cancelled"):
+            interaction = payload.get("interaction") or {}
+            status = interaction.get("status") or event_type.removeprefix("interaction.")
+            if meta is not None:
+                meta["interaction_status"] = status
+                meta["finish_reason"] = _google_interactions_finish_reason({"status": status})
+        elif event_type == "error" and meta is not None:
+            error = payload.get("error") or {}
+            meta["interaction_error"] = str(error.get("message") or "Interactions stream error")[:160]
+    return "".join(out)
+
+
+def _chat_google_interactions(messages, ai, temperature, max_tokens,
+                              json_mode=False, meta=None):
+    """Native Gemini Interactions call with key failover and 429 retries."""
+    body = _google_interactions_body(messages, ai, temperature, max_tokens,
+                                     json_mode=json_mode, stream=_AI_STREAM)
+    keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
+    if not keys:
+        raise RuntimeError("no AI API key configured")
+    est = _est_tokens(messages, max_tokens)
+    last = "unknown error"
+    for ki, key in enumerate(keys):
+        for _ in range(3):
+            _ai_pace(est, ai.get("tpm", 0))
+            try:
+                response = requests.post(
+                    _google_interactions_url(ai, _AI_STREAM),
+                    headers=_ai_headers(ai, key, stream=_AI_STREAM),
+                    json=body, timeout=_AI_TIMEOUT, stream=_AI_STREAM)
+            except requests.Timeout:
+                last = "timeout after %ss (key %d)" % (_AI_TIMEOUT, ki + 1)
+                break
+            except requests.RequestException as exc:
+                last = "network (key %d): %s" % (ki + 1, exc)
+                break
+            if response.status_code == 200:
+                if _AI_STREAM:
+                    stream_meta = meta if meta is not None else {}
+                    try:
+                        text = _read_google_interactions_stream(response, stream_meta)
+                    except Exception as exc:  # noqa: BLE001
+                        last = "stream broke (key %d): %s" % (ki + 1, exc)
+                        time.sleep(3)
+                        continue
+                    finally:
+                        response.close()
+                    status = stream_meta.get("interaction_status")
+                    stream_error = stream_meta.get("interaction_error")
+                    if text.strip() and not stream_error and status in ("completed", "incomplete"):
+                        return text
+                    last = stream_error or (
+                        "stream ended with status %s (key %d)" % (status or "unknown", ki + 1))
+                    time.sleep(2)
+                    continue
+                try:
+                    payload = response.json()
+                except (TypeError, ValueError):
+                    payload = {}
+                if meta is not None:
+                    meta["finish_reason"] = _google_interactions_finish_reason(payload)
+                text = _google_interactions_text(payload)
+                status = payload.get("status") if isinstance(payload, dict) else None
+                if text.strip() and status in ("completed", "incomplete"):
+                    return text
+                last = "empty or unusable content with status %s (key %d)" % (
+                    status or "unknown", ki + 1)
+                break
+            if response.status_code == 429:
+                last = "429 (key %d): %s" % (ki + 1, response.text[:120])
+                time.sleep(_retry_after_secs(response))
+                continue
+            if 500 <= response.status_code < 600:
+                last = "%d (key %d): upstream timeout/busy" % (response.status_code, ki + 1)
+                time.sleep(4)
+                continue
+            last = "%s (key %d): %s" % (response.status_code, ki + 1, response.text[:120])
+            break
+    raise RuntimeError("AI failed on all %d key(s): %s" % (len(keys), last))
+
+
 def _chat_one_provider(messages, ai, temperature=0.3, max_tokens=2048, json_mode=False, meta=None):
-    """OpenAI-compatible chat call (Groq or Bynara). STREAMS by default so slow
-    models don't trip Cloudflare's ~100s 524. Tries each configured key in turn: a
-    429 is retried a couple times on the same key, any other error (or a persistent
-    429) fails over to the next key. Paces to TPM only when tpm>0.
-    If `meta` (a dict) is passed, meta['finish_reason'] captures the upstream
-    finish_reason ('stop', 'length', ...) so callers can detect truncation."""
+    """Chat call with transport-specific handling and configured-key failover.
+
+    OpenAI-compatible providers stream by default. Native Gemini Interactions
+    uses its own x-goog-api-key request and steps/SSE response schema.
+    """
+    if _is_google_interactions(ai):
+        return _chat_google_interactions(messages, ai, temperature, max_tokens,
+                                         json_mode=json_mode, meta=meta)
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens}
     _tune_body_for_provider(body, ai)
@@ -1704,12 +1911,125 @@ def _ai_chat_stream(messages, ai, temperature=0.3, max_tokens=2048, meta=None,
     raise RuntimeError("AI stream failed on all %d provider(s): %s" % (len(chain), last))
 
 
+def _stream_google_interactions(messages, ai, temperature, max_tokens, meta,
+                                cancel_event, result):
+    """Relay native Interactions text events through the app's SSE generator."""
+    body = _google_interactions_body(messages, ai, temperature, max_tokens, stream=True)
+    keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
+    if not keys:
+        result["last"] = "no AI API key configured"
+        return
+    est = _est_tokens(messages, max_tokens)
+    last = "unknown error"
+    for ki, key in enumerate(keys):
+        for _ in range(3):
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            _ai_pace(est, ai.get("tpm", 0))
+            try:
+                response = requests.post(
+                    _google_interactions_url(ai, True),
+                    headers=_ai_headers(ai, key, stream=True),
+                    json=body, timeout=_AI_TIMEOUT, stream=True)
+            except requests.RequestException as exc:
+                last = "network (key %d): %s" % (ki + 1, exc)
+                break
+            if response.status_code != 200:
+                status = response.status_code
+                last = "%s (key %d): %s" % (status, ki + 1, response.text[:120])
+                response.close()
+                if status == 429:
+                    time.sleep(_retry_after_secs(response))
+                    continue
+                if 500 <= status < 600:
+                    time.sleep(4)
+                    continue
+                break
+            got_any = False
+            stream_error = ""
+            terminal_status = ""
+            try:
+                response.encoding = "utf-8"
+                for raw in response.iter_lines(decode_unicode=True):
+                    if cancel_event is not None and cancel_event.is_set():
+                        return
+                    if not raw:
+                        continue
+                    line = raw.strip()
+                    if line.startswith("data:"):
+                        line = line[5:].strip()
+                    if not line or line[0] != "{":
+                        continue
+                    try:
+                        payload = json.loads(line)
+                    except (TypeError, ValueError):
+                        continue
+                    event_type = payload.get("event_type") or payload.get("type")
+                    pieces = []
+                    if event_type == "step.start":
+                        step = payload.get("step") or {}
+                        if step.get("type") == "model_output":
+                            pieces = [content.get("text") for content in step.get("content") or []
+                                      if isinstance(content, dict)
+                                      and content.get("type") == "text"
+                                      and isinstance(content.get("text"), str)]
+                    elif event_type == "step.delta":
+                        delta = payload.get("delta") or {}
+                        if delta.get("type") == "text" and isinstance(delta.get("text"), str):
+                            pieces = [delta["text"]]
+                    elif event_type in ("interaction.completed", "interaction.incomplete",
+                                        "interaction.failed", "interaction.cancelled"):
+                        interaction = payload.get("interaction") or {}
+                        terminal_status = (interaction.get("status")
+                                           or event_type.removeprefix("interaction."))
+                        if meta is not None:
+                            meta["finish_reason"] = _google_interactions_finish_reason(
+                                {"status": terminal_status})
+                    elif event_type == "error":
+                        error = payload.get("error") or {}
+                        stream_error = str(error.get("message") or "Interactions stream error")[:160]
+                    for piece in pieces:
+                        if not piece:
+                            continue
+                        got_any = True
+                        result["produced"] = True
+                        yield piece
+            except Exception as exc:  # noqa: BLE001
+                if got_any:
+                    raise RuntimeError("Interactions stream interrupted after output: %s" % exc) from exc
+                last = "stream broke (key %d): %s" % (ki + 1, exc)
+                time.sleep(3)
+                continue
+            finally:
+                response.close()
+            if stream_error:
+                if got_any:
+                    raise RuntimeError("Interactions stream failed after output: %s" % stream_error)
+                last = stream_error
+                time.sleep(2)
+                continue
+            if got_any and terminal_status in ("completed", "incomplete"):
+                return
+            if got_any:
+                raise RuntimeError("Interactions stream ended after output with status %s" % (
+                    terminal_status or "unknown"))
+            last = "empty stream with status %s (key %d)" % (
+                terminal_status or "unknown", ki + 1)
+            time.sleep(2)
+        # Persistent failure on this key falls through to the next configured key.
+    result["last"] = last
+
+
 def _stream_one_provider(messages, ai, temperature, max_tokens, meta,
                          cancel_event, result):
     """Attempt ONE provider config (all of its keys) as a generator. Sets
     result['produced']=True the moment the first piece is yielded; on total
     failure sets result['last'] to the final error string. Mirrors the original
     per-provider streaming logic, including OmniRoute's non-stream fallback."""
+    if _is_google_interactions(ai):
+        yield from _stream_google_interactions(messages, ai, temperature, max_tokens,
+                                               meta, cancel_event, result)
+        return
     body = {"model": ai["model"], "messages": messages,
             "temperature": temperature, "max_tokens": max_tokens, "stream": True}
     _tune_body_for_provider(body, ai)
@@ -3413,6 +3733,8 @@ STUDY_TEST_PROVIDERS = {
     "nvidia":     {"url": "https://integrate.api.nvidia.com/v1/chat/completions", "keyField": "nvidiaApiKeys",  "modelField": "nvidiaModel",     "def": "deepseek-ai/deepseek-v4-pro"},
     # Google Gemini via its OpenAI-compatible endpoint (Authorization: Bearer key).
     "google":     {"url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "keyField": "googleApiKeys", "modelField": "googleModel", "def": "gemini-flash-latest"},
+    # Native Gemini Interactions transport (x-goog-api-key + {model,input}).
+    "google_interactions": {"url": "https://generativelanguage.googleapis.com/v1beta/interactions", "keyField": "googleInteractionsApiKeys", "modelField": "googleInteractionsModel", "def": "gemini-3.6-flash", "transport": "google_interactions"},
     # HCNSec gateway (OpenAI-compatible, multi-model).
     "hcnsec":     {"url": "https://api.hcnsec.cn/v1/chat/completions", "keyField": "hcnsecApiKeys", "modelField": "hcnsecModel", "def": "DeepSeek-V4-Pro"},
     # BluesMinds gateway (OpenAI-compatible, multi-model).
@@ -3434,6 +3756,7 @@ STUDY_PROVIDER_MODELS = {
     "openrouter": ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
     "nvidia":     ["deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash", "qwen/qwen3.5-397b-a17b", "nvidia/nemotron-3-nano-30b-a3b", "z-ai/glm-5.2", "minimaxai/minimax-m3"],
     "google":     ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
+    "google_interactions": ["gemini-3.6-flash"],
     "hcnsec":     ["auto", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "Qwen3.5-397B-A17B", "Qwen3.6-35B-A3B", "MiniMax-M3", "MiniMax-M2.7", "Kimi-K2.6", "glm-5.1"],
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
     "aicampus":   ["minimax-m3", "kimi-k2.7-code"],
@@ -3446,8 +3769,8 @@ STUDY_PROVIDER_MODELS = {
 # list (_all_study_models) and the grouped list (/api/status studyModelGroups)
 # can never drift out of sync (a missing id here made Gemini vanish from the
 # user-side model dropdown even though it worked everywhere else).
-STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "hcnsec", "bluesminds", "aicampus", "omniroute", "kiro")
-STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "omniroute": "OmniRoute", "kiro": "Kiro"}
+STUDY_PROVIDER_IDS = ("bynara", "mistral", "cerebras", "openrouter", "nvidia", "google", "google_interactions", "hcnsec", "bluesminds", "aicampus", "omniroute", "kiro")
+STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google": "Google Gemini", "google_interactions": "Gemini Interactions", "hcnsec": "HCNSec", "bluesminds": "BluesMinds", "aicampus": "AICampus", "omniroute": "OmniRoute", "kiro": "Kiro"}
 
 # OmniRoute aggregates many AI providers behind one OpenAI-compatible endpoint;
 # every text/chat model ID is namespaced `provider/model`. The student picker
@@ -4236,6 +4559,7 @@ def _ai_for_provider(cfg, pid, model=None):
         "big_context": pid not in _NOT_BIG_CONTEXT,
         "tpm": 0,
         "provider": pid,
+        "transport": meta.get("transport", "openai_chat"),
     }
     if pid == "omniroute":
         # OmniRoute's tunnel can be offline; carry an ordered list of alternate
@@ -4324,10 +4648,23 @@ def api_study_test():
             continue
         t0 = time.time()
         try:
+            probe_ai = {
+                "provider": pid,
+                "transport": meta.get("transport", "openai_chat"),
+                "base_url": meta["url"],
+                "model": model,
+            }
+            if _is_google_interactions(probe_ai):
+                probe_body = _google_interactions_body(
+                    [{"role": "user", "content": "ping"}], probe_ai, 0.1, 1)
+                probe_url = _google_interactions_url(probe_ai)
+            else:
+                probe_body = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}
+                probe_url = meta["url"]
             r = requests.post(
-                meta["url"],
-                headers=_ai_headers({"provider": pid}, keys[0]),
-                json={"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1},
+                probe_url,
+                headers=_ai_headers(probe_ai, keys[0]),
+                json=probe_body,
                 timeout=25)
             dt = int((time.time() - t0) * 1000)
             results[pid] = {"configured": True, "ok": (r.status_code == 200),
