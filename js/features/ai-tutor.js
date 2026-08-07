@@ -4181,6 +4181,14 @@
       var hasPending = getHistory(historyKey).some(function (m) { return m.pending; });
       if (!hasPending && !document.getElementById('ai-clear')) renderTutor();
     }
+    // Request-level lifecycle is independent of whichever video/course the UI
+    // currently shows. Emit before optional memory work so a TutorMemory error
+    // cannot strand the floating character in Thinking.
+    try {
+      window.dispatchEvent(new CustomEvent('examzen:tutor-settled', {
+        detail: { turnId: turnId, historyKey: historyKey }
+      }));
+    } catch (e) {}
     // Update the student's cross-session memory with smarter triggers:
     //   1. Every 2 completed turns (baseline, ~4 messages)
     //   2. On topic change (detected by comparing question keywords)
@@ -4265,8 +4273,6 @@
     try {
       if (typeof window.ezTutorSendAllowed === 'function' && !window.ezTutorSendAllowed()) return;
     } catch (e) {}
-    // Trial usage tracking listens for this instead of wrapping the function.
-    try { window.dispatchEvent(new CustomEvent('examzen:tutor-send')); } catch (e) {}
     /* Actually asking something in the auto-selected Library scope makes it the
        student's own choice, so stop treating it as a temporary stand-in for the
        missing video. Without this, loading a video later would silently pull
@@ -4280,6 +4286,14 @@
     if (question) h.push({ role: 'user', content: question, turnId: turnId });
     h.push({ role: 'assistant', content: '', turnId: turnId, pending: true });
     saveHistory(h, historyKey);
+    // Accepted-send lifecycle. Trial usage and the floating character listen to
+    // this; emitting only after the pending turn is persisted guarantees every
+    // send event has exactly one eventual settled event.
+    try {
+      window.dispatchEvent(new CustomEvent('examzen:tutor-send', {
+        detail: { turnId: turnId, historyKey: historyKey }
+      }));
+    } catch (e) {}
     var histForApi = h.filter(function (m) { return !m.pending; }).slice(-8).map(function (m) { return { role: m.role, content: m.content }; });
     // Keep the target scope immutable for both transports. A stream may fail
     // after the student changes playlists; its one-shot fallback must still
