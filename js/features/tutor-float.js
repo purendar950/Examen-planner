@@ -730,7 +730,7 @@
       if (typeof showToast === 'function') showToast('AI Tutor is still loading — try again in a moment.', 'info');
       return;
     }
-    if (_open) { syncChrome(); syncPanelPlacement(); focusInput(); return; }
+    if (_open) { syncChrome(); syncPanelPlacement(); return; }
     _lastFocus = document.activeElement;
     _open = true;
     document.body.classList.add(OPEN_CLASS);
@@ -757,7 +757,6 @@
     // above makes it display:flex synchronously; RAF catches the final layout.
     syncPanelPlacement();
     requestAnimationFrame(syncPanelPlacement);
-    focusInput();
   }
 
   /* Hide first, then consume the synthetic Back entry so the student never has
@@ -804,16 +803,6 @@
   }
 
   function toggle() { if (_open) close(); else open(); }
-
-  function focusInput() {
-    // Never steal focus on a phone: the on-screen keyboard would cover the
-    // conversation the moment the sheet opens.
-    if (window.innerWidth <= 768) return;
-    requestAnimationFrame(function () {
-      var input = document.getElementById('ai-chat-in');
-      if (input) { try { input.focus(); } catch (e) {} }
-    });
-  }
 
   window.addEventListener('popstate', function (event) {
     if (!_open) return;
