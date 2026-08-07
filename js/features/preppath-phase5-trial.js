@@ -545,16 +545,15 @@ function ezTrialTrack(feature) {
    only when the user is on an active trial, so non-trial sessions take
    zero overhead. */
 (function () {
-  // Track AI Tutor sends (real function name: sendTutor)
-  if (typeof sendTutor === 'function') {
-    var _aiSend = sendTutor;
-    sendTutor = function () {
-      var result;
-      try { result = _aiSend.apply(this, arguments); } catch(e) { result = undefined; }
-      try { ezTrialTrack('aiTutor'); } catch(e) {}
-      return result;
-    };
-  }
+  /* Track AI Tutor sends. This used to wrap `sendTutor`, but that function is
+     declared inside the IIFE in js/features/ai-tutor.js and is not a window
+     property, so `typeof sendTutor === 'function'` was false here and trial
+     tutor usage was never actually counted. ai-tutor.js now emits an event for
+     every accepted send instead, which also covers the suggestion chips, the
+     quiz "re-explain" jump and the floating tutor window. */
+  window.addEventListener('examzen:tutor-send', function () {
+    try { ezTrialTrack('aiTutor'); } catch(e) {}
+  });
   // Track Turbo 4× toggles (real function name: ytToggleTurbo)
   if (typeof ytToggleTurbo === 'function') {
     var _turbo = ytToggleTurbo;

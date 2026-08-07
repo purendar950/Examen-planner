@@ -145,6 +145,67 @@
   // otherwise straight into #ai-body (tutor tab).
   function contentEl() { return document.getElementById('ai-sub') || document.getElementById('ai-body'); }
 
+  /* ── Tutor dock ───────────────────────────────────────────────────────────
+     The chat exists in exactly ONE place at a time — either the AI Study panel
+     body (#ai-body, YouTube tab) or the global floating window
+     (#tutor-float-body, every page). It is never rendered twice.
+
+     That single-instance rule is what keeps the fixed ids inside chatHtml()
+     (#ai-chat, #ai-chat-in, #ai-chat-send) unambiguous: with two live copies,
+     getElementById would resolve to whichever came first in the document and a
+     streaming reply could paint into the hidden one.
+
+     Handing the chat over is a re-parent, not a re-render (see adoptTutorInto),
+     so an in-flight SSE stream and a half-typed question both survive the move.
+
+     Ownership is session state and deliberately NOT persisted: the floating
+     window is always closed on a fresh load, so restoring 'float' would only
+     describe a dock that does not exist yet. */
+  var _tutorDock = 'panel';
+  function tutorDock() { return _tutorDock === 'float' ? 'float' : 'panel'; }
+  function setTutorDock(v) { _tutorDock = v === 'float' ? 'float' : 'panel'; }
+  function floatBody() { return document.getElementById('tutor-float-body'); }
+  function floatOpen() { return !!document.body && document.body.classList.contains('tutor-float-open'); }
+  // Where chatHtml() should be written. Null means "nowhere right now" (the
+  // float is the owner but closed), which every caller treats as a no-op.
+  function tutorMount() { return tutorDock() === 'float' ? floatBody() : shellBody(); }
+  // Is the one chat instance actually on screen? Streaming paints and history
+  // re-renders are skipped when it is not, and resume from localStorage later.
+  function tutorVisible() {
+    if (tutorDock() === 'float') return !!(floatBody() && floatOpen());
+    return state.tab === 'tutor' && !!shellBody();
+  }
+  // Video scope needs an id to send. It stays usable off the YouTube tab while a
+  // video is still loaded, so a student can keep asking about the lecture they
+  // just watched from the Planner or Analysis page.
+  function canUseVideoScope() { return !!curVid(); }
+
+  /* Video scope with no video loaded is a dead end: sendTutor() returns without
+     sending and the student just sees their question vanish. So when the chat is
+     opened with no video, Pro users are moved to Library scope (which needs no
+     page context at all) and that move is remembered as automatic, so loading a
+     video later puts them back where they chose to be.
+
+     Free users are NOT moved — Library is Pro-only, so there is nothing to move
+     them to. chatHtml() renders the upgrade card for them instead. */
+  var SCOPE_AUTO_KEY = 'aiTutorScopeAutoLibrary';
+  function scopeAutoForced() {
+    try { return localStorage.getItem(SCOPE_AUTO_KEY) === '1'; } catch (e) { return false; }
+  }
+  function setScopeAutoForced(on) {
+    try {
+      if (on) localStorage.setItem(SCOPE_AUTO_KEY, '1');
+      else localStorage.removeItem(SCOPE_AUTO_KEY);
+    } catch (e) {}
+  }
+  function autoScopeForContext() {
+    var hasVid = canUseVideoScope();
+    if (!hasVid && !isLibraryScope() && isPro()) { setTutorScope('library'); setScopeAutoForced(true); return true; }
+    if (hasVid && scopeAutoForced() && isLibraryScope()) { setTutorScope('video'); setScopeAutoForced(false); return true; }
+    if (hasVid && scopeAutoForced()) { setScopeAutoForced(false); }
+    return false;
+  }
+
   /* ── tiny markdown → HTML ── */
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function mdInline(s) {
@@ -3548,6 +3609,69 @@
   function clearHistory() {
     try { localStorage.removeItem(chatKey()); } catch (e) {}
   }
+  /* Shown when the chat is open in Video scope with no video loaded. sendTutor()
+     cannot answer without an id, so this replaces the input rather than leaving a
+     box that silently swallows the question.
+
+     Free users get the Library upsell here because Library scope — the only mode
+     that works with no video — is Pro-only. */
+  function tutorNoVideoHtml() {
+    if (!isPro()) {
+      return '<div class="ai-tutor-notice">' +
+        '<div class="ai-tutor-notice-icon" aria-hidden="true">💎</div>' +
+        '<strong>Ask from any page with Library Tutor</strong>' +
+        '<p>No video is open right now. <b>Library Tutor</b> answers from every video and note you have saved, ' +
+        'so a doubt can be asked straight from the Dashboard, Planner or Analysis page — no need to find the lecture first.</p>' +
+        '<div class="ai-tutor-notice-actions">' +
+          '<button type="button" class="ai-btn" id="ai-tutor-upgrade">💎 Upgrade to Pro</button>' +
+          '<button type="button" class="ai-btn sec" id="ai-tutor-open-yt">▶ Open a video instead</button>' +
+        '</div>' +
+        '<span class="ai-muted ai-tutor-notice-foot">On the Free plan the tutor answers about the video you are watching.</span>' +
+      '</div>';
+    }
+    return '<div class="ai-tutor-notice">' +
+      '<div class="ai-tutor-notice-icon" aria-hidden="true">🎬</div>' +
+      '<strong>No video open</strong>' +
+      '<p>Switch to <b>🧠 Library</b> to ask across everything you have saved, or open a lecture to ask about it directly.</p>' +
+      '<div class="ai-tutor-notice-actions">' +
+        '<button type="button" class="ai-btn" id="ai-tutor-use-library">🧠 Ask my library</button>' +
+        '<button type="button" class="ai-btn sec" id="ai-tutor-open-yt">▶ Open a video</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* The hand-off control, and the single source of truth for it — chatHtml()
+     renders it, and refreshDockButton() swaps it after a move without touching
+     the rest of the chat. "Dock" only appears while the AI Study panel is
+     actually on screen; otherwise it would move the chat somewhere the student
+     cannot see it. */
+  function dockButtonHtml() {
+    var ytPage = document.getElementById('page-youtube');
+    var panelReachable = !!(ytPage && ytPage.classList.contains('active') && shellBody());
+    if (tutorDock() === 'float') {
+      return panelReachable
+        ? '<button type="button" class="ai-btn sec ai-tutor-dock-btn" id="ai-tutor-dock-panel" ' +
+          'title="Move this chat back into the AI Study panel">⇱ Dock</button>'
+        : '';
+    }
+    return '<button type="button" class="ai-btn sec ai-tutor-dock-btn" id="ai-tutor-pop-out" ' +
+      'title="Pop the chat out into a floating window and give the video full width">⤢ Pop out</button>';
+  }
+
+  /* A stamp describing the context chatHtml() was rendered for. The dock
+     hand-off compares it before re-parenting: carrying the markup across is
+     only correct while it still describes the same conversation. If the video,
+     the scope or the plan changed in between, the old shell is stale — showing
+     it in the new dock would present a usable-looking input for a chat that no
+     longer applies. */
+  function renderSignature() {
+    return [chatKey(), tutorScope(), libraryTutorScope(), tutorCourseId(),
+      canUseVideoScope() ? 'vid' : 'novid', isPro() ? 'pro' : 'free'].join('|');
+  }
+  function shellOpenTag() {
+    return '<div class="ai-tutor-shell" data-tutor-sig="' + esc(renderSignature()) + '">';
+  }
+
   function chatHtml() {
     var h = getHistory();
     var visible = h.filter(function (m) { return !m.pending; });
@@ -3578,11 +3702,24 @@
           (isPro() ? '' : ' 🔒') + '</button>' +
       '</div>';
 
+    var dockBar = dockButtonHtml();
+
     if (lib && !isPro()) {
-      return scopeBar +
+      return shellOpenTag() +
+        '<div class="ai-tutor-topline">' + scopeBar + dockBar + '</div>' +
         '<div class="ai-muted" style="padding:14px;line-height:1.6">' +
         '<b>🔒 Pro feature</b><br>Library Tutor searches your saved videos and their real captions/notes. ' +
-        'Switch back to Video to use the normal tutor.</div>';
+        'Switch back to Video to use the normal tutor.</div>' +
+      '</div>';
+    }
+
+    // Video scope with nothing loaded → explain it instead of showing an input
+    // that cannot send.
+    if (!lib && !canUseVideoScope()) {
+      return shellOpenTag() +
+        '<div class="ai-tutor-topline">' + scopeBar + dockBar + '</div>' +
+        tutorNoVideoHtml() +
+      '</div>';
     }
 
     var courseOptions = '<option value="">Choose a playlist…</option>' + courses.map(function (course) {
@@ -3628,9 +3765,9 @@
         '<span class="ai-chip" data-q="Exam point of view se important cheezein batao">Real exam angle</span>' +
         '<span class="ai-chip" data-teach="1">📚 Teach me</span>';
 
-    return '<div class="ai-tutor-shell">' +
+    return shellOpenTag() +
       '<div class="ai-tutor-topline' + (lib ? ' has-library-controls' : '') + '">' +
-        scopeBar + libraryControl + clearBar +
+        scopeBar + dockBar + libraryControl + clearBar +
       '</div>' +
       prepareStatus + coverageBar +
       '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted ai-chat-empty">' + emptyMsg + '</div>') + '</div>' +
@@ -3788,7 +3925,7 @@
       });
   }
   function renderTutor() {
-    var b = shellBody(); if (!b) return;
+    var b = tutorMount(); if (!b) return;
     b.innerHTML = chatHtml();
     bindTsLinks(b);
     Array.prototype.forEach.call(b.querySelectorAll('#ai-scope [data-scope]'), function (btn) {
@@ -3796,10 +3933,33 @@
         var next = btn.dataset.scope;
         if (next === tutorScope()) return;
         if (next !== 'library') stopPreparationPolling();
+        // An explicit pick outranks the automatic no-video switch, so never
+        // undo it later.
+        setScopeAutoForced(false);
         setTutorScope(next);
         renderTutor();
       };
     });
+    var popOut = b.querySelector('#ai-tutor-pop-out');
+    if (popOut) popOut.onclick = function () { moveTutorToFloat(); };
+    var dockBack = b.querySelector('#ai-tutor-dock-panel');
+    if (dockBack) dockBack.onclick = function () { moveTutorToPanel(); };
+    var useLib = b.querySelector('#ai-tutor-use-library');
+    if (useLib) useLib.onclick = function () {
+      setScopeAutoForced(false);
+      setTutorScope('library');
+      renderTutor();
+    };
+    var openYt = b.querySelector('#ai-tutor-open-yt');
+    if (openYt) openYt.onclick = function () {
+      if (typeof switchPage === 'function') switchPage('youtube');
+      if (typeof showToast === 'function') showToast('Open a lecture, then ask your doubt.', 'info');
+    };
+    var upgrade = b.querySelector('#ai-tutor-upgrade');
+    if (upgrade) upgrade.onclick = function () {
+      if (typeof ezOpenUpgrade === 'function') ezOpenUpgrade();
+      else if (typeof ezLockedMsg === 'function') ezLockedMsg('🧠 Library Tutor');
+    };
     Array.prototype.forEach.call(b.querySelectorAll('[data-library-scope]'), function (btn) {
       btn.onclick = function () {
         var next = btn.dataset.libraryScope;
@@ -3838,6 +3998,143 @@
     if (send) send.onclick = go;
     if (input) input.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
     var chat = document.getElementById('ai-chat'); if (chat) chat.scrollTop = chat.scrollHeight;
+    // The floating window's header mirrors the active scope, so keep it honest
+    // when the student flips Video ⇄ Library from inside the chat.
+    if (tutorDock() === 'float' && window.TutorFloat && typeof window.TutorFloat.syncChrome === 'function') {
+      window.TutorFloat.syncChrome();
+    }
+  }
+
+  /* ── Dock hand-off ────────────────────────────────────────────────────────
+     Ownership of the single .ai-tutor-shell node moves between the AI Study
+     panel body and the floating window. The node is RE-PARENTED, never rebuilt,
+     so a streaming answer keeps painting and a half-typed question is kept —
+     an <input>'s value and every bound handler survive appendChild().        */
+
+  // Swap the Pop out ⇄ Dock button in place, leaving the conversation untouched.
+  function refreshDockButton(shell) {
+    var line = shell && shell.querySelector('.ai-tutor-topline');
+    if (!line) return;
+    var old = line.querySelector('.ai-tutor-dock-btn');
+    var html = dockButtonHtml();
+    if (!html) { if (old && old.parentNode) old.parentNode.removeChild(old); return; }
+    var holder = document.createElement('div');
+    holder.innerHTML = html;
+    var btn = holder.firstChild;
+    if (old && old.parentNode) old.parentNode.replaceChild(btn, old);
+    else {
+      var scope = line.querySelector('#ai-scope');
+      if (scope && scope.nextSibling) line.insertBefore(btn, scope.nextSibling);
+      else line.appendChild(btn);
+    }
+    btn.onclick = btn.id === 'ai-tutor-pop-out'
+      ? function () { moveTutorToFloat(); }
+      : function () { moveTutorToPanel(); };
+  }
+
+  // Returns false when there is nothing worth adopting, so the caller falls back
+  // to a fresh renderTutor(). A stale shell is destroyed on the way out — leaving
+  // it behind would give the fixed #ai-chat / #ai-chat-in ids two owners.
+  function adoptTutorInto(target) {
+    if (!target) return false;
+    var shell = document.querySelector('.ai-tutor-shell');
+    if (!shell) return false;
+    if (shell.getAttribute('data-tutor-sig') !== renderSignature()) {
+      if (shell.parentNode) shell.parentNode.removeChild(shell);
+      return false;
+    }
+    if (shell.parentNode !== target) {
+      var chat = shell.querySelector('#ai-chat');
+      // Re-parenting resets scroll, so remember whether the student was reading
+      // the newest message (keep pinned to the bottom) or scrolled back.
+      var pinned = !chat || (chat.scrollHeight - chat.scrollTop - chat.clientHeight) < 40;
+      var keepAt = chat ? chat.scrollTop : 0;
+      target.innerHTML = '';
+      target.appendChild(shell);
+      chat = shell.querySelector('#ai-chat');
+      if (chat) chat.scrollTop = pinned ? chat.scrollHeight : keepAt;
+    }
+    refreshDockButton(shell);
+    return true;
+  }
+
+  // Called BY the floating widget once its window is open and owns the chat.
+  function mountTutorInFloat() {
+    setTutorDock('float');
+    autoScopeForContext();
+    var host = floatBody();
+    if (!host) return;
+    if (!adoptTutorInto(host)) renderTutor();
+    // The panel can no longer show the same chat, so leave a signpost there.
+    if (state.tab === 'tutor' && shellBody()) renderBody();
+    refreshLibraryCoverage();
+  }
+
+  // True only while the AI Study panel is actually the visible workspace.
+  // applyView() re-asserts the YouTube grid, so calling it from another page
+  // would briefly widen that page's .main-content to the AI Study width.
+  function onYouTubePage() {
+    var page = document.getElementById('page-youtube');
+    return !!(page && page.classList.contains('active'));
+  }
+
+  function moveTutorToFloat() {
+    if (!window.TutorFloat || typeof window.TutorFloat.open !== 'function') {
+      if (typeof showToast === 'function') showToast('Floating tutor is unavailable — reload the page.', 'error');
+      return;
+    }
+    // Popping out is also how the video reclaims the full width: hand the right
+    // column back to Course Content so the split collapses, and let the chat
+    // float over the player instead of sitting beside it.
+    var restoreAiView = false;
+    if (onYouTubePage() && currentView() === 'ai') { restoreAiView = true; persistView('course'); }
+    window.TutorFloat.open();      // opens, then calls mountTutorInFloat()
+    if (restoreAiView || onYouTubePage()) applyView();
+  }
+
+  function moveTutorToPanel() {
+    var host = shellBody();
+    setTutorDock('panel');
+    // NOTE: the "auto-switched to Library" flag is deliberately NOT cleared
+    // here. Moving the chat between docks says nothing about scope, and
+    // clearing it would silently cancel the pending restore to Video scope for
+    // when a video is loaded again.
+    if (host) {
+      state.tab = 'tutor';
+      renderTabs();
+      host.setAttribute('data-ai-tab', 'tutor');
+      syncPanelHeader();
+      if (!adoptTutorInto(host)) renderTutor();
+      // Bringing the chat back means the AI Study workspace is wanted again —
+      // popping out had handed the right column to Course Content.
+      if (onYouTubePage()) persistView('ai');
+    }
+    // The chat has already been re-parented out of the window, so this only
+    // hides now-empty chrome.
+    if (window.TutorFloat && typeof window.TutorFloat.close === 'function') {
+      window.TutorFloat.close();
+    }
+    if (onYouTubePage()) { applyView(); alignPlayerToNotes(); }
+  }
+
+  // Shown in the panel's Tutor tab while the floating window owns the chat.
+  function tutorPanelPlaceholderHtml() {
+    return '<div class="ai-tutor-notice">' +
+      '<div class="ai-tutor-notice-icon" aria-hidden="true">💬</div>' +
+      '<strong>Chat is in the floating window</strong>' +
+      '<p>Your tutor chat popped out so the video can use the full width. It follows you to every page.</p>' +
+      '<div class="ai-tutor-notice-actions">' +
+        '<button type="button" class="ai-btn" id="ai-tutor-bring-back">⇱ Bring it back here</button>' +
+        '<button type="button" class="ai-btn sec" id="ai-tutor-show-float">💬 Show the window</button>' +
+      '</div>' +
+    '</div>';
+  }
+  function renderTutorPanelPlaceholder(host) {
+    host.innerHTML = tutorPanelPlaceholderHtml();
+    var back = host.querySelector('#ai-tutor-bring-back');
+    if (back) back.onclick = function () { moveTutorToPanel(); };
+    var show = host.querySelector('#ai-tutor-show-float');
+    if (show) show.onclick = function () { moveTutorToFloat(); };
   }
   // Build the JSON body shared by the streaming + one-shot tutor calls.
   // Library scope has no video id and its own scope field; everything else
@@ -3871,14 +4168,16 @@
   }
   function findTutorBubble(historyKey, turnId, preferred) {
     if (preferred && preferred.isConnected) return preferred;
-    if (state.tab !== 'tutor' || chatKey() !== historyKey) return null;
+    // Visibility, not the panel tab: the chat may be living in the floating
+    // window while the panel sits on Notes.
+    if (!tutorVisible() || chatKey() !== historyKey) return null;
     var chat = document.getElementById('ai-chat');
     return chat ? chat.querySelector('[data-ai-turn="' + turnId + '"]') : null;
   }
   function finishTutorBubble(historyKey, turnId, preferred, content) {
     var bubble = findTutorBubble(historyKey, turnId, preferred);
     paintTutorBubble(bubble, content, false);
-    if (state.tab === 'tutor' && chatKey() === historyKey) {
+    if (tutorVisible() && chatKey() === historyKey) {
       var hasPending = getHistory(historyKey).some(function (m) { return m.pending; });
       if (!hasPending && !document.getElementById('ai-clear')) renderTutor();
     }
@@ -3949,13 +4248,30 @@
     // Library scope is not tied to an open video, so it must NOT bail on !vid —
     // the student can ask across their library with nothing playing.
     var vid = curVid();
-    if (!lib && !vid) return;
+    // Never fail silently: re-render so the student sees WHY nothing was sent
+    // (the "no video open" card) instead of watching their question vanish.
+    if (!lib && !vid) { renderTutor(); return; }
     if (lib && !isPro()) { renderTutor(); return; }
     if (lib && isCourseTutorScope() && !tutorCourseId()) {
       if (typeof showToast === 'function') showToast('Choose a playlist first.', 'info');
       return;
     }
     if (lib && !question) return;                 // no "Teach me" without a video
+
+    /* Free-tier daily message cap, owned by js/features/preppath-phase4-gating.js.
+       It is a runtime seam rather than a wrapper around sendTutor because this
+       function is IIFE-scoped and was never assignable from outside — the old
+       monkey-patch silently never applied. Fail-open if gating has not loaded. */
+    try {
+      if (typeof window.ezTutorSendAllowed === 'function' && !window.ezTutorSendAllowed()) return;
+    } catch (e) {}
+    // Trial usage tracking listens for this instead of wrapping the function.
+    try { window.dispatchEvent(new CustomEvent('examzen:tutor-send')); } catch (e) {}
+    /* Actually asking something in the auto-selected Library scope makes it the
+       student's own choice, so stop treating it as a temporary stand-in for the
+       missing video. Without this, loading a video later would silently pull
+       them out of a library conversation they had started using. */
+    if (lib && scopeAutoForced()) setScopeAutoForced(false);
     var streamPath = lib ? '/api/tutor/library/stream' : '/api/tutor/stream';
     var oncePath = lib ? '/api/tutor/library' : '/api/tutor';
     var historyKey = chatKey(vid);
@@ -3973,7 +4289,7 @@
     // Live assistant bubble we grow as chunks arrive (only when the tutor tab is
     // visible). Starts as a "thinking…" spinner; the first chunk replaces it.
     var liveEl = null, chat = null;
-    if (state.tab === 'tutor' && chatKey() === historyKey) {
+    if (tutorVisible() && chatKey() === historyKey) {
       chat = document.getElementById('ai-chat');
       var renderedFromHistory = false;
       var emptyState = chat && chat.querySelector('.ai-chat-empty');
@@ -4116,6 +4432,10 @@
           item.classList.toggle('on', selected);
           item.setAttribute('aria-pressed', selected ? 'true' : 'false');
         });
+        // Pressing Tutor here means "I want the chat in this panel", so take
+        // ownership back from the floating window rather than showing a
+        // placeholder the student then has to click through.
+        if (state.tab === 'tutor' && tutorDock() === 'float') { moveTutorToPanel(); b.focus(); return; }
         renderBody();
         b.focus();
       };
@@ -4190,7 +4510,12 @@
       applyFocusVisibility();
       checkLangs('quiz', parseInt((document.getElementById('ai-qn') || {}).value, 10) || 25, false);
     } else if (state.tab === 'tutor') {
-      renderTutor();
+      // The chat is a single instance. When the floating window owns it, the
+      // panel must show a signpost instead of a second copy — two live chats
+      // would give the fixed #ai-chat / #ai-chat-in ids two owners and a
+      // streaming reply could paint into the hidden one.
+      if (tutorDock() === 'float') renderTutorPanelPlaceholder(b);
+      else renderTutor();
     }
     alignPlayerToNotes();   // re-align the player after the tab's controls change height
   }
@@ -4965,8 +5290,41 @@
       var keepLibraryChat = state.tab === 'tutor' && isLibraryScope();
       if (document.getElementById('ai-body') && !keepLibraryChat) { renderTabs(); renderBody(); }
       else if (keepLibraryChat) { renderTabs(); }
+      // The floating window shows the same conversation, so a video change has
+      // to refresh it too — but only in video scope, where the chat key really
+      // changed. Library chat is deliberately left alone, mid-stream included.
+      if (tutorDock() === 'float' && floatOpen() && !isLibraryScope()) renderTutor();
     }
   }, 800);
+
+  /* ── Control surface for the floating tutor window ────────────────────────
+     js/features/tutor-float.js owns the FAB, the window chrome and the mobile
+     sheet; everything about the conversation itself stays here so there is only
+     one implementation of the chat. Deliberately narrow. */
+  window.AiTutorCore = {
+    // The float calls this once its body element exists and is visible.
+    mountFloat: mountTutorInFloat,
+    // Return the chat to the AI Study panel (used by the float's Dock button).
+    dockToPanel: moveTutorToPanel,
+    // Re-render the conversation in whichever dock owns it.
+    render: renderTutor,
+    // Ask a question programmatically (goes through the same gate + streaming).
+    ask: function (question, mode) { sendTutor(question, mode); },
+    dock: tutorDock,
+    setDock: setTutorDock,
+    // True when a video id is available, i.e. Video scope can actually answer.
+    hasVideo: canUseVideoScope,
+    isLibraryScope: isLibraryScope,
+    isPro: isPro,
+    // Does the AI Study panel currently exist to hand the chat back to?
+    panelAvailable: function () { return !!shellBody(); },
+    // Unread-ish signal for the FAB: is a reply still streaming?
+    isStreaming: function () {
+      try {
+        return getHistory().some(function (m) { return m.pending; });
+      } catch (e) { return false; }
+    }
+  };
 
   /* ── Resume a shared MCQ test after login (independent of the active tab) ──
      app.html / index.html capture ?mcqshare= into localStorage before the auth
