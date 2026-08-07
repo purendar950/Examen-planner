@@ -375,6 +375,9 @@ window.ezTutorSendAllowed = function ezTutorSendAllowed() {
   const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
   if (count >= maxFree) {
     ezShowTutorLimitPreview(maxFree);
+    // The floating bubble reflects this too — the student may have the chat
+    // window closed at the moment they run out.
+    try { window.dispatchEvent(new CustomEvent('examzen:tutor-limit')); } catch(e) {}
     return false;
   }
   try { localStorage.setItem(key, String(count + 1)); } catch(e) {}

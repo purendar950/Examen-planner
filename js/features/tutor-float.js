@@ -31,6 +31,67 @@
 
   function core() { return window.AiTutorCore || null; }
 
+  /* ── the tutor character ──────────────────────────────────────────────────
+     A hand-built SVG standing in for the LottieFiles character, driven by CSS
+     keyframes. ~2 KB inline and no player library, against ~102 KB gzipped for
+     lottie-web plus the animation JSON — a poor trade for a 54px decoration
+     that loads on every page, when the two are hard to tell apart at that size.
+
+     States mirror the original animation's segments. Only `idle` and `thinking`
+     are wired up so far; the rest are ready for whatever should trigger them:
+       idle      gentle bob, occasional blink  (default, loops)
+       thinking  eyes give way to a spinner    (a reply is still streaming)
+       alert     amber, exclamation mark       (daily limit reached)
+       yes / no  green / red acknowledgements  (unused)                       */
+  var MOODS = ['idle', 'thinking', 'alert', 'yes', 'no'];
+
+  function characterSvg() {
+    return '<svg class="tc" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" focusable="false">' +
+      '<defs>' +
+        // the original's gradient: #0036ff → #631cff → #c700ff on a 45° axis
+        '<linearGradient id="tcSkin" x1="0" y1="0" x2="1" y2="1">' +
+          '<stop offset="0" stop-color="#0036ff"/><stop offset=".52" stop-color="#631cff"/>' +
+          '<stop offset="1" stop-color="#c700ff"/></linearGradient>' +
+        '<linearGradient id="tcSkinAlert" x1="0" y1="0" x2="1" y2="1">' +
+          '<stop offset="0" stop-color="#ffd23d"/><stop offset="1" stop-color="#ff8a00"/></linearGradient>' +
+        '<linearGradient id="tcSkinYes" x1="0" y1="0" x2="1" y2="1">' +
+          '<stop offset="0" stop-color="#38ffc4"/><stop offset="1" stop-color="#00a37a"/></linearGradient>' +
+        '<linearGradient id="tcSkinNo" x1="0" y1="0" x2="1" y2="1">' +
+          '<stop offset="0" stop-color="#ff5c7a"/><stop offset="1" stop-color="#c2003f"/></linearGradient>' +
+        // Kept deliberately faint. A stronger radial reads as a glossy 3D ball,
+        // where the original is a flatter gradient disc.
+        '<radialGradient id="tcShade" cx=".36" cy=".3" r=".82">' +
+          '<stop offset="0" stop-color="#fff" stop-opacity=".16"/>' +
+          '<stop offset=".6" stop-color="#fff" stop-opacity="0"/>' +
+          '<stop offset="1" stop-color="#000" stop-opacity=".17"/></radialGradient>' +
+      '</defs>' +
+      '<g class="tc-body">' +
+        '<circle class="tc-skin" cx="50" cy="50" r="43"/>' +
+        '<circle cx="50" cy="50" r="43" fill="url(#tcShade)"/>' +
+        '<path class="tc-gloss" d="M61 17.8a35 35 0 0 1 8.6 5.4" fill="none" stroke="#fff" ' +
+          'stroke-width="3.2" stroke-linecap="round"/>' +
+        '<g class="tc-eyes" fill="#fff">' +
+          '<rect x="36.8" y="40.5" width="6.6" height="18" rx="3.3"/>' +
+          '<rect x="56.6" y="40.5" width="6.6" height="18" rx="3.3"/>' +
+        '</g>' +
+        '<g class="tc-spin"><path d="M50 27a23 23 0 0 0-23 23" fill="none" stroke="#fff" ' +
+          'stroke-width="5.4" stroke-linecap="round"/></g>' +
+        '<g class="tc-bang" fill="#fff">' +
+          '<rect x="46.6" y="34" width="6.8" height="21" rx="3.4"/>' +
+          '<circle cx="50" cy="63.5" r="3.9"/>' +
+        '</g>' +
+      '</g></svg>';
+  }
+
+  var _mood = 'idle';
+  function setMood(name) {
+    if (MOODS.indexOf(name) === -1) name = 'idle';
+    _mood = name;
+    var svg = _fab && _fab.querySelector('.tc');
+    if (!svg) return;
+    MOODS.forEach(function (m) { svg.classList.toggle('is-' + m, m === name && m !== 'idle'); });
+  }
+
   /* ── styles ───────────────────────────────────────────────────────────────
      The chat's own layout rules in css/app.css are all scoped to #page-youtube,
      so they do not reach the window here — the shell layout is restated below,
@@ -44,33 +105,72 @@
     var s = document.createElement('style');
     s.id = 'tutor-float-css';
     s.textContent = [
-      /* ── the bubble ── */
+      /* ── the bubble ──────────────────────────────────────────────────────
+         The character IS the bubble, so there is no disc behind it: a green
+         circle under a blue-magenta blob only clashes. The shadow therefore
+         comes from drop-shadow, which follows the artwork instead of boxing
+         a transparent square. */
       '#tutor-fab{position:fixed;z-index:7998;right:max(1.15rem,env(safe-area-inset-right));',
-      'bottom:max(1.15rem,calc(env(safe-area-inset-bottom) + .6rem));width:54px;height:54px;border-radius:50%;',
-      'border:1px solid rgba(0,200,150,.45);background:linear-gradient(150deg,var(--accent,#00c896),#039b76);',
-      'color:#04120d;font-size:1.35rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;',
-      'box-shadow:0 10px 30px rgba(0,0,0,.38),0 0 0 0 rgba(0,200,150,.42);transition:transform .16s ease,box-shadow .16s ease;padding:0}',
-      '#tutor-fab:hover{transform:translateY(-2px) scale(1.04)}',
-      '#tutor-fab:active{transform:translateY(0) scale(.97)}',
-      '#tutor-fab:focus-visible{outline:3px solid var(--accent,#00c896);outline-offset:3px}',
+      'bottom:max(1.15rem,calc(env(safe-area-inset-bottom) + .6rem));width:56px;height:56px;',
+      'border:0;background:none;padding:0;line-height:1;cursor:pointer;',
+      'display:flex;align-items:center;justify-content:center;',
+      '-webkit-tap-highlight-color:transparent;',
+      'filter:drop-shadow(0 8px 16px rgba(0,0,0,.42));',
+      'transition:transform .16s ease,filter .2s ease}',
+      '#tutor-fab:hover{transform:translateY(-2px) scale(1.05)}',
+      '#tutor-fab:active{transform:translateY(0) scale(.96)}',
+      // The button box is transparent, so the focus ring has to hug the blob.
+      '#tutor-fab:focus{outline:none}',
+      '#tutor-fab:focus-visible .tc-skin{stroke:#fff;stroke-width:4}',
+      '#tutor-fab:focus-visible{filter:drop-shadow(0 0 0 3px var(--accent,#00c896)) drop-shadow(0 8px 16px rgba(0,0,0,.42))}',
       '#tutor-fab[hidden]{display:none!important}',
       // Draggable: touch-action stops the page scrolling under the finger, and
       // the grab cursors advertise that the bubble can be moved.
       '#tutor-fab{touch-action:none;-webkit-user-select:none;user-select:none;cursor:grab}',
-      '#tutor-fab.is-dragging{cursor:grabbing;transition:none;transform:scale(1.08);',
-      'box-shadow:0 16px 40px rgba(0,0,0,.5),0 0 0 6px rgba(0,200,150,.16)}',
-      '#tutor-fab.is-dragging:hover{transform:scale(1.08)}',
-      '#tutor-fab .tutor-fab-art{display:flex;align-items:center;justify-content:center;',
+      '#tutor-fab.is-dragging{cursor:grabbing;transition:none;transform:scale(1.1);',
+      'filter:drop-shadow(0 14px 26px rgba(0,0,0,.5))}',
+      '#tutor-fab.is-dragging:hover{transform:scale(1.1)}',
+      // Class-scoped rather than under #tutor-fab so the character can also be
+      // dropped into an empty state or onboarding panel later.
+      '.tutor-fab-art{display:flex;align-items:center;justify-content:center;',
       'width:100%;height:100%;pointer-events:none;line-height:1}',
-      '#tutor-fab .tutor-fab-art svg,#tutor-fab .tutor-fab-art canvas{width:100%;height:100%;display:block}',
-      /* a reply that is still streaming while the window is closed */
-      '#tutor-fab.is-busy{animation:tutorFabPulse 1.7s ease-out infinite}',
-      '@keyframes tutorFabPulse{0%{box-shadow:0 10px 30px rgba(0,0,0,.38),0 0 0 0 rgba(0,200,150,.5)}',
-      '70%{box-shadow:0 10px 30px rgba(0,0,0,.38),0 0 0 13px rgba(0,200,150,0)}',
-      '100%{box-shadow:0 10px 30px rgba(0,0,0,.38),0 0 0 0 rgba(0,200,150,0)}}',
-      '#tutor-fab .tutor-fab-dot{position:absolute;top:3px;right:3px;width:11px;height:11px;border-radius:50%;',
-      'background:#ffcc32;border:2px solid #04120d;display:none}',
-      '#tutor-fab.is-busy .tutor-fab-dot{display:block}',
+      '.tutor-fab-art svg{width:100%;height:100%;display:block;overflow:visible}',
+      /* A reply still arriving while the window is closed: the character's own
+         thinking state carries it, plus a soft coloured glow so it is catchable
+         from the corner of the eye. */
+      '#tutor-fab.is-busy{animation:tutorFabGlow 1.9s ease-in-out infinite}',
+      '@keyframes tutorFabGlow{',
+      '0%,100%{filter:drop-shadow(0 8px 16px rgba(0,0,0,.42)) drop-shadow(0 0 0 rgba(99,28,255,0))}',
+      '50%{filter:drop-shadow(0 8px 16px rgba(0,0,0,.42)) drop-shadow(0 0 10px rgba(140,60,255,.85))}}',
+
+      /* ── the character ── */
+      '.tc{display:block}',
+      '.tc .tc-skin{fill:url(#tcSkin)}',
+      '.tc.is-alert .tc-skin{fill:url(#tcSkinAlert)}',
+      '.tc.is-yes .tc-skin{fill:url(#tcSkinYes)}',
+      '.tc.is-no .tc-skin{fill:url(#tcSkinNo)}',
+      // A slow bob with a touch of squash, anchored low so it reads as weight.
+      '.tc-body{transform-origin:50px 64px;animation:tcBob 3.2s ease-in-out infinite}',
+      '@keyframes tcBob{0%,100%{transform:translateY(0) scale(1,1)}',
+      '30%{transform:translateY(-2px) scale(.986,1.014)}',
+      '62%{transform:translateY(.8px) scale(1.016,.984)}}',
+      '.tc-eyes{transform-origin:50px 49.5px;animation:tcBlink 5.2s ease-in-out infinite}',
+      '@keyframes tcBlink{0%,93%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}',
+      '.tc-gloss{opacity:.9;animation:tcGloss 3.2s ease-in-out infinite}',
+      '@keyframes tcGloss{0%,100%{opacity:.9}50%{opacity:.58}}',
+      '.tc-spin{transform-origin:50px 50px;opacity:0}',
+      '.tc-bang{opacity:0}',
+      '.tc.is-thinking .tc-eyes{opacity:0}',
+      '.tc.is-thinking .tc-spin{opacity:1;animation:tcSpin .9s linear infinite}',
+      '@keyframes tcSpin{to{transform:rotate(360deg)}}',
+      '.tc.is-alert .tc-eyes{opacity:0}',
+      '.tc.is-alert .tc-bang{opacity:1}',
+      // Respect a stated preference for stillness: keep the character, drop the
+      // motion. The state colours and glyphs still carry all the meaning.
+      '@media(prefers-reduced-motion:reduce){',
+      '.tc-body,.tc-eyes,.tc-gloss,.tc-spin,#tutor-fab.is-busy{animation:none!important}',
+      '.tc.is-thinking .tc-spin{opacity:1}',
+      '}',
 
       /* ── the window ── */
       '#tutor-float{position:fixed;z-index:8000;display:none;flex-direction:column;overflow:hidden;',
@@ -172,11 +272,10 @@
     fab.setAttribute('aria-label', 'Ask the AI Tutor');
     fab.setAttribute('aria-haspopup', 'dialog');
     fab.setAttribute('aria-expanded', 'false');
-    // The artwork lives in its own element so it can be swapped (emoji today,
-    // an animated character later) without touching the drag or open logic.
-    fab.innerHTML =
-      '<span class="tutor-fab-art" id="tutor-fab-art" aria-hidden="true">\uD83D\uDCAC</span>' +
-      '<span class="tutor-fab-dot" aria-hidden="true"></span>';
+    // The artwork lives in its own element, isolated from the drag and open
+    // logic so the visual can be swapped without touching behaviour.
+    fab.innerHTML = '<span class="tutor-fab-art" id="tutor-fab-art" aria-hidden="true">' +
+      characterSvg() + '</span>';
     fab.addEventListener('click', function (e) {
       // A click always follows a drag's pointerup; ignore that one.
       if (_suppressClick) { _suppressClick = false; e.preventDefault(); e.stopPropagation(); return; }
@@ -534,6 +633,7 @@
   function startPulse() {
     if (!_fab || _open) return;
     _fab.classList.add('is-busy');
+    setMood('thinking');
     if (_pulseTimer) return;
     _pulseTimer = setInterval(function () {
       var c = core();
@@ -545,9 +645,25 @@
   function stopPulse() {
     if (_pulseTimer) { clearInterval(_pulseTimer); _pulseTimer = 0; }
     if (_fab) _fab.classList.remove('is-busy');
+    if (_mood === 'thinking') setMood('idle');
   }
   window.addEventListener('examzen:tutor-send', function () {
     if (!_open) startPulse();
+  });
+
+  /* The free plan's daily message limit. Worth showing on the bubble because the
+     student may well have the window closed when they hit it. Clears itself so
+     the character does not sit there scolding them. */
+  var _alertTimer = 0;
+  window.addEventListener('examzen:tutor-limit', function () {
+    if (!_fab) return;
+    stopPulse();
+    setMood('alert');
+    if (_alertTimer) clearTimeout(_alertTimer);
+    _alertTimer = setTimeout(function () {
+      _alertTimer = 0;
+      if (_mood === 'alert') setMood('idle');
+    }, 6000);
   });
 
   /* ── boot ── */
@@ -567,6 +683,10 @@
     close: close,
     toggle: toggle,
     isOpen: function () { return _open; },
-    syncChrome: syncChrome
+    syncChrome: syncChrome,
+    // Character state: 'idle' | 'thinking' | 'alert' | 'yes' | 'no'.
+    setMood: setMood,
+    getMood: function () { return _mood; },
+    moods: MOODS.slice()
   };
 })();
