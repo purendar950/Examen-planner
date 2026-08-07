@@ -26,7 +26,8 @@
   var _token = 0;
   var _historyPushed = false;
   var _open = false;
-  var _pulseTimer = 0;
+  var _activeTurns = {};
+  var _anonymousTurns = 0;
   var _lastFocus = null;
 
   function core() { return window.AiTutorCore || null; }
@@ -80,6 +81,16 @@
           '<rect x="46.6" y="34" width="6.8" height="21" rx="3.4"/>' +
           '<circle cx="50" cy="63.5" r="3.9"/>' +
         '</g>' +
+        '<path class="tc-check" d="M33 50l11 11 24-27" fill="none" stroke="#fff" ' +
+          'stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<g class="tc-cross" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="round">' +
+          '<path d="M36 36l28 28"/><path d="M64 36L36 64"/>' +
+        '</g>' +
+      '</g>' +
+      '<g class="tc-sparks" fill="#fff">' +
+        '<path d="M16 25l1.8 4.2L22 31l-4.2 1.8L16 37l-1.8-4.2L10 31l4.2-1.8z"/>' +
+        '<path d="M82 17l1.3 3.1 3.2 1.3-3.2 1.4-1.3 3.1-1.3-3.1-3.2-1.4 3.2-1.3z"/>' +
+        '<circle cx="87" cy="68" r="2.5"/>' +
       '</g></svg>';
   }
 
@@ -110,7 +121,7 @@
          circle under a blue-magenta blob only clashes. The shadow therefore
          comes from drop-shadow, which follows the artwork instead of boxing
          a transparent square. */
-      '#tutor-fab{position:fixed;z-index:7998;right:max(1.15rem,env(safe-area-inset-right));',
+      '#tutor-fab{position:fixed;z-index:8002;right:max(1.15rem,env(safe-area-inset-right));',
       'bottom:max(1.15rem,calc(env(safe-area-inset-bottom) + .6rem));width:56px;height:56px;',
       'border:0;background:none;padding:0;line-height:1;cursor:pointer;',
       'display:flex;align-items:center;justify-content:center;',
@@ -149,27 +160,73 @@
       '.tc.is-alert .tc-skin{fill:url(#tcSkinAlert)}',
       '.tc.is-yes .tc-skin{fill:url(#tcSkinYes)}',
       '.tc.is-no .tc-skin{fill:url(#tcSkinNo)}',
-      // A slow bob with a touch of squash, anchored low so it reads as weight.
+      // Idle motion: a slow bob, occasional blink, and two tiny eye glances.
+      // Anchoring low gives the blob weight instead of making it hover rigidly.
       '.tc-body{transform-origin:50px 64px;animation:tcBob 3.2s ease-in-out infinite}',
       '@keyframes tcBob{0%,100%{transform:translateY(0) scale(1,1)}',
       '30%{transform:translateY(-2px) scale(.986,1.014)}',
       '62%{transform:translateY(.8px) scale(1.016,.984)}}',
-      '.tc-eyes{transform-origin:50px 49.5px;animation:tcBlink 5.2s ease-in-out infinite}',
-      '@keyframes tcBlink{0%,93%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}',
+      '.tc-eyes{transform-origin:50px 49.5px;animation:tcEyesAlive 6.4s ease-in-out infinite}',
+      '@keyframes tcEyesAlive{',
+      '0%,18%,30%,58%,72%,92%,100%{transform:translateX(0) scaleY(1)}',
+      '23%{transform:translateX(2.5px) scaleY(1)}',
+      '64%{transform:translateX(-2px) scaleY(1)}',
+      '95%{transform:translateX(0) scaleY(.1)}}',
       '.tc-gloss{opacity:.9;animation:tcGloss 3.2s ease-in-out infinite}',
-      '@keyframes tcGloss{0%,100%{opacity:.9}50%{opacity:.58}}',
+      '@keyframes tcGloss{0%,100%{opacity:.9;transform:translateX(0)}',
+      '50%{opacity:.56;transform:translateX(-1px)}}',
       '.tc-spin{transform-origin:50px 50px;opacity:0}',
-      '.tc-bang{opacity:0}',
+      '.tc-bang,.tc-check,.tc-cross{opacity:0}',
+      '.tc-sparks{opacity:0;transform-origin:50px 50px}',
+
+      // Opening the chat gets one friendly hello bounce, then returns to idle.
+      '#tutor-fab.is-open .tc-body{animation:tcHello .72s cubic-bezier(.2,.9,.25,1),',
+      'tcBob 3.2s .72s ease-in-out infinite}',
+      '#tutor-fab.is-open .tc-sparks{animation:tcSpark 1.15s ease-out}',
+      '@keyframes tcHello{0%{transform:scale(1)}35%{transform:translateY(-7px) scale(.9,1.1) rotate(-5deg)}',
+      '65%{transform:translateY(1px) scale(1.08,.92) rotate(4deg)}100%{transform:scale(1)}}',
+      '@keyframes tcSpark{0%{opacity:0;transform:scale(.4) rotate(-20deg)}',
+      '35%{opacity:1;transform:scale(1.15) rotate(8deg)}100%{opacity:0;transform:scale(1.35) rotate(20deg)}}',
+
+      // Animate the artwork wrapper, not .tc-body: mood animations own the
+      // body's transform, so targeting the wrapper keeps drag motion visible
+      // while Thinking, Alert, Yes, or No is active.
+      '#tutor-fab.is-dragging .tutor-fab-art{animation:tcDragWiggle .42s ease-in-out infinite alternate}',
+      '@keyframes tcDragWiggle{from{transform:rotate(-5deg) scale(.96,1.04)}',
+      'to{transform:rotate(5deg) scale(1.04,.96)}}',
+
+      // Thinking: hide the eyes, breathe faster, and spin the arc.
       '.tc.is-thinking .tc-eyes{opacity:0}',
+      '#tutor-fab .tc.is-thinking .tc-body{animation:tcThinkBreathe 1.15s ease-in-out infinite}',
       '.tc.is-thinking .tc-spin{opacity:1;animation:tcSpin .9s linear infinite}',
+      '@keyframes tcThinkBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.055)}}',
       '@keyframes tcSpin{to{transform:rotate(360deg)}}',
+
+      // Alert, yes and no now have their own movement and glyph — not just a
+      // colour swap. These mirror the source Lottie's expressive states.
       '.tc.is-alert .tc-eyes{opacity:0}',
-      '.tc.is-alert .tc-bang{opacity:1}',
+      '.tc.is-alert .tc-bang{opacity:1;animation:tcBang .65s ease-in-out infinite alternate}',
+      '#tutor-fab .tc.is-alert .tc-body{animation:tcAlertShake .42s ease-in-out 3}',
+      '@keyframes tcAlertShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px) rotate(-3deg)}',
+      '75%{transform:translateX(3px) rotate(3deg)}}',
+      '@keyframes tcBang{from{transform:scale(.9);transform-origin:50px 50px}',
+      'to{transform:scale(1.08);transform-origin:50px 50px}}',
+      '.tc.is-yes .tc-eyes,.tc.is-no .tc-eyes{opacity:0}',
+      '.tc.is-yes .tc-check{opacity:1;stroke-dasharray:55;animation:tcCheck .55s ease-out both}',
+      '#tutor-fab .tc.is-yes .tc-body{animation:tcYesBounce .7s cubic-bezier(.2,.9,.2,1)}',
+      '@keyframes tcCheck{from{stroke-dashoffset:55}to{stroke-dashoffset:0}}',
+      '@keyframes tcYesBounce{0%{transform:scale(.9)}45%{transform:translateY(-5px) scale(1.09)}',
+      '75%{transform:translateY(1px) scale(.98)}100%{transform:scale(1)}}',
+      '.tc.is-no .tc-cross{opacity:1}',
+      '#tutor-fab .tc.is-no .tc-body{animation:tcNoShake .58s ease-in-out}',
+      '@keyframes tcNoShake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-4px)}',
+      '40%,80%{transform:translateX(4px)}}',
       // Respect a stated preference for stillness: keep the character, drop the
       // motion. The state colours and glyphs still carry all the meaning.
       '@media(prefers-reduced-motion:reduce){',
-      '.tc-body,.tc-eyes,.tc-gloss,.tc-spin,#tutor-fab.is-busy{animation:none!important}',
-      '.tc.is-thinking .tc-spin{opacity:1}',
+      '.tutor-fab-art,.tc-body,.tc-eyes,.tc-gloss,.tc-spin,.tc-bang,.tc-check,.tc-cross,.tc-sparks,',
+      '#tutor-fab,#tutor-fab.is-busy,#tutor-float{animation:none!important;transition:none!important}',
+      '.tc.is-thinking .tc-spin,.tc.is-alert .tc-bang,.tc.is-yes .tc-check,.tc.is-no .tc-cross{opacity:1}',
       '}',
 
       /* ── the window ── */
@@ -177,16 +234,12 @@
       'right:max(1.15rem,env(safe-area-inset-right));bottom:max(1.15rem,calc(env(safe-area-inset-bottom) + .6rem));',
       'width:min(410px,calc(100vw - 2rem));height:min(580px,calc(var(--shell-vh,100dvh) - 5.5rem));',
       'background:var(--card,#151a24);border:1px solid var(--border,#2a3140);border-radius:16px;',
-      'box-shadow:0 26px 64px rgba(0,0,0,.5);color:var(--text,#e7ecf5)}',
+      'box-shadow:0 26px 64px rgba(0,0,0,.5);color:var(--text,#e7ecf5);',
+      'transition:left .18s ease,top .18s ease,right .18s ease,bottom .18s ease}',
       'body.' + OPEN_CLASS + ' #tutor-float{display:flex}',
-      /* The window opens on whichever side the bubble was parked — desktop only,
-         because on a phone it is a full-width bottom sheet with no side to pick.
-         Scoped in a min-width query rather than overridden later: a body-class
-         selector outranks the plain #tutor-float rule in the mobile block, so an
-         unscoped version would stretch the sheet off-centre. */
-      '@media(min-width:769px){',
-      'body.tutor-float-left #tutor-float{right:auto;left:max(1.15rem,env(safe-area-inset-left))}',
-      '}',
+      // The character stays above the window and becomes the visible open/close
+      // control. Keeping it present also means it can be moved while chatting.
+      'body.' + OPEN_CLASS + ' #tutor-fab{z-index:8002}',
       '#tutor-float-head{display:flex;align-items:center;gap:.5rem;flex:0 0 auto;padding:.6rem .7rem;',
       'background:var(--surface,#1b1f2a);border-bottom:1px solid var(--border,#2a3140)}',
       '#tutor-float-head .tutor-float-title{font:800 .82rem/1.2 var(--font,inherit);color:var(--text,#e7ecf5);',
@@ -285,24 +338,37 @@
   }
 
   /* ── dragging the bubble ──────────────────────────────────────────────────
-     Students park the bubble wherever it does not cover what they are reading,
-     so the position is theirs to choose and is remembered.
-
-     Horizontally it snaps to the nearest edge (a half-off-screen bubble is a
-     hit-target problem, and an edge-parked bubble covers the least content);
-     vertically it stays exactly where it was dropped. The vertical position is
-     stored as a fraction of the viewport so it survives rotation and the
-     Android URL bar collapsing rather than drifting off-screen.            */
+     Students can park the character ANYWHERE in the usable viewport — it no
+     longer snaps to a side. The position is stored as x/y fractions of the
+     available travel area, not raw pixels, so rotation and Android browser-bar
+     changes preserve the relative spot without stranding it off-screen.        */
   var POS_KEY = 'tutorFabPos';
   var DRAG_SLOP = 6;          // px of travel before a tap becomes a drag
   var _suppressClick = false;
-  var _pos = null;            // { side: 'left'|'right', topRatio: 0..1 }
+  var _pos = null;            // { xRatio: 0..1, yRatio: 0..1 }
 
   function loadPos() {
     try {
       var raw = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
-      if (raw && (raw.side === 'left' || raw.side === 'right') && typeof raw.topRatio === 'number') {
-        _pos = { side: raw.side, topRatio: Math.min(1, Math.max(0, raw.topRatio)) };
+      if (raw && typeof raw.xRatio === 'number' && typeof raw.yRatio === 'number') {
+        _pos = {
+          xRatio: Math.min(1, Math.max(0, raw.xRatio)),
+          yRatio: Math.min(1, Math.max(0, raw.yRatio))
+        };
+      } else if (raw && (raw.side === 'left' || raw.side === 'right') && typeof raw.topRatio === 'number') {
+        // One-time migration from PR #612. Its topRatio was rect.top divided by
+        // the FULL layout-viewport height, while the new yRatio is relative to
+        // the safe travel area. Reconstruct the old pixel point first; copying
+        // the ratio directly would move a bottom mobile placement upward by
+        // roughly 100px and then permanently discard the original value.
+        var fw = (_fab && _fab.offsetWidth) || 56;
+        var fh = (_fab && _fab.offsetHeight) || 56;
+        var vb = viewportBox();
+        var oldBounds = fabBounds(fw, fh);
+        var oldLeft = raw.side === 'left' ? oldBounds.minX : oldBounds.maxX;
+        var oldTop = vb.top + raw.topRatio * vb.height;
+        _pos = ratiosFromPoint(oldLeft, oldTop, fw, fh);
+        savePos();
       }
     } catch (e) {}
   }
@@ -310,30 +376,86 @@
     try { localStorage.setItem(POS_KEY, JSON.stringify(_pos)); } catch (e) {}
   }
 
-  function edgeGap() { return window.innerWidth <= 768 ? 14 : 18; }
-
-  // Keep the bubble fully on screen and clear of the mobile toast band.
-  function clampTop(top, h) {
-    var min = 8;
-    var reserveBottom = window.innerWidth <= 768 ? 76 : 12;   // toast strip on phones
-    var max = window.innerHeight - h - reserveBottom;
-    if (max < min) max = min;
-    return Math.min(max, Math.max(min, top));
+  /* visualViewport tracks the actually visible area when a mobile keyboard or
+     browser chrome shrinks/offsets it. Falling back to the layout viewport keeps
+     desktop and older WebViews unchanged. */
+  function viewportBox() {
+    var vv = window.visualViewport;
+    if (vv && typeof vv.width === 'number' && typeof vv.height === 'number') {
+      return {
+        left: vv.offsetLeft || 0,
+        top: vv.offsetTop || 0,
+        width: vv.width,
+        height: vv.height,
+        right: (vv.offsetLeft || 0) + vv.width,
+        bottom: (vv.offsetTop || 0) + vv.height
+      };
+    }
+    return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight,
+      right: window.innerWidth, bottom: window.innerHeight };
   }
 
-  /* Applies the remembered position. Until the bubble has been dragged once,
-     nothing is written to style and the stylesheet's default corner stands. */
+  function fabBounds(w, h) {
+    var vb = viewportBox();
+    var minX = vb.left + Math.max(8, safeInset('left'));
+    var minY = vb.top + Math.max(8, safeInset('top'));
+    // Keep clear of the full-width toast band on phones; desktop toasts only
+    // occupy one corner, so a small safety gap is enough there.
+    var reserveBottom = vb.width <= 768 ? 76 : 12;
+    var maxX = Math.max(minX, vb.right - w - Math.max(8, safeInset('right')));
+    var maxY = Math.max(minY, vb.bottom - h - Math.max(reserveBottom, safeInset('bottom') + 8));
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+  }
+
+  // CSS env() values cannot be read directly from JS. A hidden probe converts
+  // the active safe-area inset into pixels in browsers/WebViews that expose it.
+  var _insetProbe = null;
+  function safeInset(side) {
+    if (!_insetProbe) {
+      _insetProbe = document.createElement('div');
+      _insetProbe.setAttribute('aria-hidden', 'true');
+      _insetProbe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;' +
+        'padding-top:env(safe-area-inset-top);padding-right:env(safe-area-inset-right);' +
+        'padding-bottom:env(safe-area-inset-bottom);padding-left:env(safe-area-inset-left)';
+      document.body.appendChild(_insetProbe);
+    }
+    try {
+      var styles = getComputedStyle(_insetProbe);
+      return parseFloat(styles['padding' + side.charAt(0).toUpperCase() + side.slice(1)]) || 0;
+    } catch (e) { return 0; }
+  }
+
+  function clampFabPoint(left, top, w, h) {
+    var b = fabBounds(w, h);
+    return {
+      left: Math.min(b.maxX, Math.max(b.minX, left)),
+      top: Math.min(b.maxY, Math.max(b.minY, top)),
+      bounds: b
+    };
+  }
+
+  function ratiosFromPoint(left, top, w, h) {
+    var p = clampFabPoint(left, top, w, h), b = p.bounds;
+    return {
+      xRatio: (p.left - b.minX) / Math.max(1, b.maxX - b.minX),
+      yRatio: (p.top - b.minY) / Math.max(1, b.maxY - b.minY)
+    };
+  }
+
+  /* Applies the remembered free position. Until the character has been dragged
+     once, nothing is written inline and the stylesheet's default corner stands. */
   function applyFabPosition() {
     if (!_fab || !_pos) return;
-    var w = _fab.offsetWidth || 54, h = _fab.offsetHeight || 54;
-    var gap = edgeGap();
-    var top = clampTop(Math.round(_pos.topRatio * window.innerHeight), h);
+    var w = _fab.offsetWidth || 56, h = _fab.offsetHeight || 56;
+    var b = fabBounds(w, h);
+    var left = b.minX + _pos.xRatio * Math.max(0, b.maxX - b.minX);
+    var top = b.minY + _pos.yRatio * Math.max(0, b.maxY - b.minY);
+    var p = clampFabPoint(left, top, w, h);
     _fab.style.right = 'auto';
     _fab.style.bottom = 'auto';
-    _fab.style.left = (_pos.side === 'left' ? gap : window.innerWidth - w - gap) + 'px';
-    _fab.style.top = top + 'px';
-    // The window opens from the same side the bubble was parked on.
-    document.body.classList.toggle('tutor-float-left', _pos.side === 'left');
+    _fab.style.left = Math.round(p.left) + 'px';
+    _fab.style.top = Math.round(p.top) + 'px';
+    if (_open) syncPanelPlacement();
   }
 
   function setupFabDrag(fab) {
@@ -351,12 +473,12 @@
       var dx = x - startX, dy = y - startY;
       if (!moved && Math.abs(dx) + Math.abs(dy) < DRAG_SLOP) return;
       if (!moved) { moved = true; fab.classList.add('is-dragging'); }
-      var w = fab.offsetWidth || 54, h = fab.offsetHeight || 54;
-      var left = Math.min(window.innerWidth - w - 2, Math.max(2, originLeft + dx));
+      var w = fab.offsetWidth || 56, h = fab.offsetHeight || 56;
+      var p = clampFabPoint(originLeft + dx, originTop + dy, w, h);
       fab.style.right = 'auto';
       fab.style.bottom = 'auto';
-      fab.style.left = left + 'px';
-      fab.style.top = clampTop(originTop + dy, h) + 'px';
+      fab.style.left = p.left + 'px';
+      fab.style.top = p.top + 'px';
     }
     function end() {
       if (!dragging) return;
@@ -366,15 +488,13 @@
       fab.classList.remove('is-dragging');
       _suppressClick = true;              // the drag's click must not open the chat
       var r = fab.getBoundingClientRect();
-      _pos = {
-        side: (r.left + r.width / 2) < window.innerWidth / 2 ? 'left' : 'right',
-        topRatio: r.top / Math.max(1, window.innerHeight)
-      };
+      _pos = ratiosFromPoint(r.left, r.top, r.width || 56, r.height || 56);
       savePos();
-      applyFabPosition();                 // snap to the edge
+      applyFabPosition();                 // preserve the exact free position
+      if (_open) syncPanelPlacement();
       if (typeof showToast === 'function' && !_posToastShown) {
         _posToastShown = true;
-        showToast('Bubble moved. Drag it anywhere — the spot is remembered.', 'info');
+        showToast('Character moved. Place it anywhere — the spot is remembered.', 'info');
       }
     }
 
@@ -410,23 +530,22 @@
       fab.addEventListener('touchcancel', end);
     }
 
-    // Keyboard users can move it too, and it is the only way back if the bubble
-    // has been parked somewhere awkward.
+    // Keyboard users can move freely too. Shift accelerates the move.
     fab.addEventListener('keydown', function (e) {
       var step = e.shiftKey ? 40 : 12;
       var r = fab.getBoundingClientRect();
-      var handled = true;
-      if (e.key === 'ArrowUp') _pos = { side: sideOf(r), topRatio: (r.top - step) / window.innerHeight };
-      else if (e.key === 'ArrowDown') _pos = { side: sideOf(r), topRatio: (r.top + step) / window.innerHeight };
-      else if (e.key === 'ArrowLeft') _pos = { side: 'left', topRatio: r.top / window.innerHeight };
-      else if (e.key === 'ArrowRight') _pos = { side: 'right', topRatio: r.top / window.innerHeight };
+      var left = r.left, top = r.top, handled = true;
+      if (e.key === 'ArrowUp') top -= step;
+      else if (e.key === 'ArrowDown') top += step;
+      else if (e.key === 'ArrowLeft') left -= step;
+      else if (e.key === 'ArrowRight') left += step;
       else handled = false;
       if (!handled) return;
       e.preventDefault();
+      _pos = ratiosFromPoint(left, top, r.width || 56, r.height || 56);
       savePos();
       applyFabPosition();
     });
-    function sideOf(r) { return (r.left + r.width / 2) < window.innerWidth / 2 ? 'left' : 'right'; }
   }
   var _posToastShown = false;
 
@@ -476,10 +595,110 @@
   var _reflow = 0;
   function scheduleReflow() {
     if (_reflow) clearTimeout(_reflow);
-    _reflow = setTimeout(function () { _reflow = 0; applyFabPosition(); }, 120);
+    _reflow = setTimeout(function () {
+      _reflow = 0;
+      applyFabPosition();
+      if (_open) syncPanelPlacement();
+    }, 120);
   }
   window.addEventListener('resize', scheduleReflow);
   window.addEventListener('orientationchange', scheduleReflow);
+  if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+    window.visualViewport.addEventListener('resize', scheduleReflow);
+    window.visualViewport.addEventListener('scroll', scheduleReflow);
+  }
+
+  /* Place the desktop chat beside the freely positioned character without
+     covering it. Four candidates (left/right/above/below) are evaluated after
+     clamping to the safe viewport; overlap is penalised first, then how far a
+     candidate had to be pulled back on-screen. On narrow screens the chat is a
+     full-width bottom sheet, so inline placement is cleared and CSS takes over. */
+  function syncPanelPlacement() {
+    if (!_panel || !_fab || !_open) return;
+    if (window.innerWidth <= 768) {
+      _panel.style.left = '';
+      _panel.style.right = '';
+      _panel.style.top = '';
+      _panel.style.bottom = '';
+      _panel.style.width = '';
+      _panel.removeAttribute('data-placement');
+      return;
+    }
+
+    _panel.style.width = '';
+    var vb = viewportBox();
+    var fr = _fab.getBoundingClientRect();
+    var pw = _panel.offsetWidth || Math.min(410, vb.width - 32);
+    var ph = _panel.offsetHeight || Math.min(580, vb.height - 88);
+    var gap = 14;
+    var minX = vb.left + Math.max(12, safeInset('left'));
+    var minY = vb.top + Math.max(12, safeInset('top'));
+    var maxX = Math.max(minX, vb.right - pw - Math.max(12, safeInset('right')));
+    var maxY = Math.max(minY, vb.bottom - ph - Math.max(12, safeInset('bottom')));
+    var centerX = fr.left + fr.width / 2 - pw / 2;
+    var centerY = fr.top + fr.height / 2 - ph / 2;
+    var candidates = [
+      { name: 'right', x: fr.right + gap, y: centerY },
+      { name: 'left', x: fr.left - gap - pw, y: centerY },
+      { name: 'below', x: centerX, y: fr.bottom + gap },
+      { name: 'above', x: centerX, y: fr.top - gap - ph }
+    ];
+
+    function clamp(v, min, max) { return Math.min(max, Math.max(min, v)); }
+    function overlapArea(a, b) {
+      var w = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+      var h = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+      return w * h;
+    }
+
+    var best = null;
+    candidates.forEach(function (c, index) {
+      var x = clamp(c.x, minX, maxX), y = clamp(c.y, minY, maxY);
+      var box = { left: x, top: y, right: x + pw, bottom: y + ph };
+      // Expand the character's avoidance rect slightly so the panel does not
+      // visually kiss its drop shadow.
+      var avoid = { left: fr.left - 6, top: fr.top - 6, right: fr.right + 6, bottom: fr.bottom + 6 };
+      var overlap = overlapArea(box, avoid);
+      var displacement = Math.abs(x - c.x) + Math.abs(y - c.y);
+      var score = overlap * 1000000 + displacement * 100 + index;
+      if (!best || score < best.score) {
+        best = { x: x, y: y, name: c.name, score: score, overlap: overlap };
+      }
+    });
+
+    /* A compact desktop can be too short for above/below and too narrow for a
+       410px card beside a centred character. Ranking the four overlapping boxes
+       is not enough — the higher-z character would mask chat controls. In that
+       case shrink the panel into whichever horizontal lane is wider. At the
+       desktop breakpoint (769px+) one side is always at least ~330px, still a
+       comfortable chat width, and overlap becomes mathematically impossible. */
+    if (best && best.overlap > 0) {
+      var rightEdge = vb.right - Math.max(12, safeInset('right'));
+      var leftSpace = Math.max(0, fr.left - gap - minX);
+      var rightSpace = Math.max(0, rightEdge - (fr.right + gap));
+      var useRight = rightSpace >= leftSpace;
+      var laneWidth = Math.floor(Math.max(leftSpace, rightSpace));
+      if (laneWidth >= 260) {
+        pw = Math.min(pw, laneWidth);
+        _panel.style.width = pw + 'px';
+        maxY = Math.max(minY, vb.bottom - ph - Math.max(12, safeInset('bottom')));
+        best = {
+          x: useRight ? fr.right + gap : fr.left - gap - pw,
+          y: clamp(centerY, minY, maxY),
+          name: useRight ? 'compact-right' : 'compact-left',
+          overlap: 0,
+          score: 0
+        };
+      }
+    }
+
+    if (!best) return;
+    _panel.style.right = 'auto';
+    _panel.style.bottom = 'auto';
+    _panel.style.left = Math.round(best.x) + 'px';
+    _panel.style.top = Math.round(best.y) + 'px';
+    _panel.setAttribute('data-placement', best.name);
+  }
 
   /* The Dock button is only useful where the AI Study panel is actually on
      screen; anywhere else it would hide the chat behind a page the student is
@@ -511,11 +730,17 @@
       if (typeof showToast === 'function') showToast('AI Tutor is still loading — try again in a moment.', 'info');
       return;
     }
-    if (_open) { syncChrome(); focusInput(); return; }
+    if (_open) { syncChrome(); syncPanelPlacement(); focusInput(); return; }
     _lastFocus = document.activeElement;
     _open = true;
     document.body.classList.add(OPEN_CLASS);
-    if (_fab) { _fab.hidden = true; _fab.setAttribute('aria-expanded', 'true'); }
+    if (_fab) {
+      _fab.hidden = false;
+      _fab.classList.add('is-open');
+      _fab.setAttribute('aria-expanded', 'true');
+      _fab.setAttribute('aria-label', 'Close the AI Tutor');
+      _fab.title = 'Close AI Tutor — drag to move';
+    }
     if (!_historyPushed) {
       try {
         var base = (history.state && typeof history.state === 'object') ? history.state : {};
@@ -528,7 +753,10 @@
     }
     c.mountFloat();          // hands the single chat node to #tutor-float-body
     syncChrome();
-    stopPulse();
+    // The panel must be measurable before it can be placed. The open body class
+    // above makes it display:flex synchronously; RAF catches the final layout.
+    syncPanelPlacement();
+    requestAnimationFrame(syncPanelPlacement);
     focusInput();
   }
 
@@ -561,7 +789,13 @@
     _historyPushed = false;
     document.body.classList.remove(OPEN_CLASS);
     if (_panel) { _panel.style.transform = ''; _panel.classList.remove('is-dragging'); }
-    if (_fab) { _fab.hidden = false; _fab.setAttribute('aria-expanded', 'false'); }
+    if (_fab) {
+      _fab.hidden = false;
+      _fab.classList.remove('is-open');
+      _fab.setAttribute('aria-expanded', 'false');
+      _fab.setAttribute('aria-label', 'Ask the AI Tutor');
+      _fab.title = 'Ask the AI Tutor — drag to move';
+    }
     if (_lastFocus && _lastFocus.isConnected && typeof _lastFocus.focus === 'function') {
       try { _lastFocus.focus(); } catch (e) {}
     } else if (_fab) {
@@ -629,40 +863,57 @@
     grab.addEventListener('touchcancel', end);
   }
 
-  /* ── the bubble shows that a reply is still arriving while it is closed ── */
-  function startPulse() {
-    if (!_fab || _open) return;
-    _fab.classList.add('is-busy');
-    setMood('thinking');
-    if (_pulseTimer) return;
-    _pulseTimer = setInterval(function () {
-      var c = core();
-      var busy = !!(c && typeof c.isStreaming === 'function' && c.isStreaming());
-      if (busy && !_open) return;
-      stopPulse();
-    }, 1200);
+  /* ── request-level character activity ────────────────────────────────────
+     This tracks accepted sends by immutable turn id, rather than polling the
+     currently selected chat history. A student can switch video/course while a
+     reply is in flight and the character will still think until THAT request
+     settles. */
+  function activeTurnCount() {
+    var count = _anonymousTurns;
+    Object.keys(_activeTurns).forEach(function (key) { if (_activeTurns[key]) count++; });
+    return count;
   }
-  function stopPulse() {
-    if (_pulseTimer) { clearInterval(_pulseTimer); _pulseTimer = 0; }
-    if (_fab) _fab.classList.remove('is-busy');
-    if (_mood === 'thinking') setMood('idle');
+  function refreshActivityMood() {
+    var busy = activeTurnCount() > 0;
+    if (_fab) _fab.classList.toggle('is-busy', busy);
+    // Alert is a temporary higher-priority state. Its timer calls this again,
+    // restoring Thinking when another accepted request is still running.
+    if (_mood !== 'alert') setMood(busy ? 'thinking' : 'idle');
   }
-  window.addEventListener('examzen:tutor-send', function () {
-    if (!_open) startPulse();
+  function startPulse(detail) {
+    if (detail && detail.turnId) _activeTurns[detail.turnId] = true;
+    else _anonymousTurns++;
+    refreshActivityMood();
+  }
+  function settlePulse(detail) {
+    if (detail && detail.turnId) delete _activeTurns[detail.turnId];
+    else _anonymousTurns = Math.max(0, _anonymousTurns - 1);
+    refreshActivityMood();
+  }
+  window.addEventListener('examzen:tutor-send', function (event) {
+    startPulse(event && event.detail);
+  });
+  window.addEventListener('examzen:tutor-settled', function (event) {
+    settlePulse(event && event.detail);
   });
 
-  /* The free plan's daily message limit. Worth showing on the bubble because the
-     student may well have the window closed when they hit it. Clears itself so
-     the character does not sit there scolding them. */
+  /* The free plan's daily message limit. Worth showing on the character because
+     the student may well have the window closed when they hit it. It does NOT
+     cancel another in-flight request's activity; after six seconds, the real
+     request count decides whether to restore Thinking or Idle. */
   var _alertTimer = 0;
   window.addEventListener('examzen:tutor-limit', function () {
     if (!_fab) return;
-    stopPulse();
     setMood('alert');
     if (_alertTimer) clearTimeout(_alertTimer);
     _alertTimer = setTimeout(function () {
       _alertTimer = 0;
-      if (_mood === 'alert') setMood('idle');
+      if (_mood === 'alert') {
+        // Leave alert before refreshing, otherwise its priority guard would
+        // intentionally preserve it.
+        _mood = 'idle';
+        refreshActivityMood();
+      }
     }, 6000);
   });
 
