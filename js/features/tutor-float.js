@@ -30,6 +30,17 @@
   var _anonymousTurns = 0;
   var _lastFocus = null;
   var _entryTimer = 0;
+  var _discoveryTimer = 0;
+  var _messageTimer = 0;
+  var _celebrationTimer = 0;
+  var _reactionTimer = 0;
+  var _reactionToken = 0;
+  var _activeReaction = null;
+  var _reactionQueue = [];
+  var _recentReactionKeys = {};
+  var _unreadHistories = {};
+  var _limitAlertActive = false;
+  var _discoveryAttempted = false;
 
   function core() { return window.AiTutorCore || null; }
 
@@ -112,12 +123,108 @@
   }
 
   var _mood = 'idle';
+  var _currentMessage = '';
   function setMood(name) {
     if (MOODS.indexOf(name) === -1) name = 'idle';
     _mood = name;
     var svg = _fab && _fab.querySelector('.tc');
     if (!svg) return;
     MOODS.forEach(function (m) { svg.classList.toggle('is-' + m, m === name && m !== 'idle'); });
+  }
+
+  function unreadCount() { return Object.keys(_unreadHistories).length; }
+  function syncFabStatus() {
+    if (!_fab) return;
+    var count = unreadCount();
+    var badge = _fab.querySelector('#tutor-fab-badge');
+    if (badge) {
+      badge.hidden = count < 1;
+      badge.textContent = count > 9 ? '9+' : String(count || '');
+    }
+    var label = _open ? 'Close the AI Tutor' : 'Ask the AI Tutor';
+    if (!_open && count) label += ', ' + count + ' unread ' + (count === 1 ? 'reply' : 'replies');
+    if (!_open && _currentMessage) label += '. ' + _currentMessage;
+    _fab.setAttribute('aria-label', label);
+  }
+  function setUnread(historyKey, unread) {
+    if (!historyKey) return;
+    if (unread) _unreadHistories[historyKey] = true;
+    else delete _unreadHistories[historyKey];
+    syncFabStatus();
+  }
+  function dismissDiscoverability() {
+    if (_discoveryTimer) { clearTimeout(_discoveryTimer); _discoveryTimer = 0; }
+    if (_fab) _fab.classList.remove('is-discovering');
+  }
+  function hideMascotMessage() {
+    if (_messageTimer) { clearTimeout(_messageTimer); _messageTimer = 0; }
+    _currentMessage = '';
+    if (_fab) {
+      _fab.classList.remove('has-mascot-message');
+      var tip = _fab.querySelector('#tutor-fab-tip');
+      if (tip) tip.textContent = 'Ask me anything';
+    }
+    syncFabStatus();
+  }
+  function announceMascotMessage(message) {
+    if (!_fab || !message) return;
+    var status = _fab.querySelector('#tutor-fab-status');
+    if (!status) return;
+    // Clearing first makes identical messages from separate attempts announce.
+    status.textContent = '';
+    setTimeout(function () { if (status.isConnected) status.textContent = message; }, 0);
+  }
+  function syncTipPlacement() {
+    if (!_fab) return;
+    syncTipSide();
+    var tip = _fab.querySelector('#tutor-fab-tip');
+    if (!tip) return;
+    var fabRect = _fab.getBoundingClientRect();
+    var vb = viewportBox();
+    var toRight = _fab.classList.contains('tip-to-right');
+    var available = toRight
+      ? vb.right - fabRect.right - 18
+      : fabRect.left - vb.left - 18;
+    tip.style.maxWidth = Math.max(80, Math.min(190, available)) + 'px';
+    tip.style.setProperty('--tip-shift-y', '0px');
+    requestAnimationFrame(function () {
+      if (!tip.isConnected) return;
+      var rect = tip.getBoundingClientRect();
+      var shift = 0;
+      if (rect.top < vb.top + 8) shift = vb.top + 8 - rect.top;
+      else if (rect.bottom > vb.bottom - 8) shift = vb.bottom - 8 - rect.bottom;
+      tip.style.setProperty('--tip-shift-y', Math.round(shift) + 'px');
+    });
+  }
+  function showMascotMessage(message, duration) {
+    if (!_fab || !message) return;
+    dismissDiscoverability();
+    _currentMessage = String(message).slice(0, 90);
+    var tip = _fab.querySelector('#tutor-fab-tip');
+    if (tip) tip.textContent = _currentMessage;
+    _fab.classList.add('has-mascot-message');
+    syncFabStatus();
+    syncTipPlacement();
+    announceMascotMessage(_currentMessage);
+    if (_messageTimer) clearTimeout(_messageTimer);
+    _messageTimer = setTimeout(hideMascotMessage, duration || 2800);
+  }
+  function triggerCelebration() {
+    if (!_fab) return;
+    _fab.classList.remove('is-celebrating');
+    void _fab.offsetWidth;
+    _fab.classList.add('is-celebrating');
+    if (_celebrationTimer) clearTimeout(_celebrationTimer);
+    _celebrationTimer = setTimeout(function () {
+      _celebrationTimer = 0;
+      if (_fab) _fab.classList.remove('is-celebrating');
+    }, 1350);
+  }
+  function syncTipSide() {
+    if (!_fab) return;
+    var r = _fab.getBoundingClientRect();
+    var vb = viewportBox();
+    _fab.classList.toggle('tip-to-right', r.left + r.width / 2 < vb.left + vb.width / 2);
   }
 
   /* ── styles ───────────────────────────────────────────────────────────────
@@ -158,6 +265,28 @@
       '#tutor-fab.is-dragging{cursor:grabbing;transition:none;transform:scale(1.1);',
       'filter:drop-shadow(0 14px 26px rgba(0,0,0,.5))}',
       '#tutor-fab.is-dragging:hover{transform:scale(1.1)}',
+      // Session-only discoverability and contextual nudge copy stay outside the
+      // hit target. The badge is visual; the button's aria-label carries count.
+      '.tutor-fab-badge{position:absolute;right:-2px;top:-2px;z-index:2;display:flex;align-items:center;',
+      'justify-content:center;min-width:18px;height:18px;padding:0 4px;border:2px solid var(--card,#151a24);',
+      'border-radius:999px;background:#ff3b67;color:#fff;font:800 10px/1 var(--font,inherit);box-sizing:border-box}',
+      '.tutor-fab-badge[hidden]{display:none!important}',
+      '.tutor-fab-tip{position:absolute;right:calc(100% + 10px);top:calc(50% + var(--tip-shift-y,0px));width:max-content;max-width:190px;',
+      'box-sizing:border-box;padding:.5rem .65rem;border:1px solid var(--border,#2a3140);border-radius:10px;background:var(--card,#151a24);',
+      'box-shadow:0 10px 28px rgba(0,0,0,.35);color:var(--text,#e7ecf5);font:700 .7rem/1.35 var(--font,inherit);',
+      'white-space:normal;overflow-wrap:anywhere;text-align:left;opacity:0;visibility:hidden;transform:translate(8px,-50%) scale(.96);',
+      'transition:opacity .18s ease,transform .18s ease,visibility .18s ease;pointer-events:none}',
+      '#tutor-fab.is-discovering .tutor-fab-tip,#tutor-fab.has-mascot-message .tutor-fab-tip{',
+      'opacity:1;visibility:visible;transform:translate(0,-50%) scale(1)}',
+      '#tutor-fab.tip-to-right .tutor-fab-tip{right:auto;left:calc(100% + 10px);transform:translate(-8px,-50%) scale(.96)}',
+      '#tutor-fab.tip-to-right.is-discovering .tutor-fab-tip,',
+      '#tutor-fab.tip-to-right.has-mascot-message .tutor-fab-tip{transform:translate(0,-50%) scale(1)}',
+      '.tutor-fab-status{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;',
+      'margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}',
+      '#tutor-fab.is-celebrating .tc-sparks{animation:tcCelebrate 1.25s ease-out}',
+      '@keyframes tcCelebrate{0%{opacity:0;transform:scale(.25) rotate(-24deg)}',
+      '28%{opacity:1;transform:scale(1.2) rotate(8deg)}65%{opacity:.9;transform:scale(.95) rotate(-6deg)}',
+      '100%{opacity:0;transform:scale(1.5) rotate(24deg)}}',
       // Class-scoped rather than under #tutor-fab so the character can also be
       // dropped into an empty state or onboarding panel later.
       '.tutor-fab-art{display:flex;align-items:center;justify-content:center;',
@@ -269,7 +398,8 @@
       '@media(prefers-reduced-motion:reduce){',
       '.tutor-fab-art,.tc-aura,.tc-aura-dashes,.tc-sheen,.tc-think-dots,.tc-body,.tc-eyes,',
       '.tc-gloss,.tc-spin,.tc-bang,.tc-check,.tc-cross,.tc-sparks,',
-      '#tutor-fab,#tutor-fab.is-busy,#tutor-float{animation:none!important;transition:none!important}',
+      '#tutor-fab,#tutor-fab.is-busy,#tutor-fab .tutor-fab-tip,#tutor-float{',
+      'animation:none!important;transition:none!important}',
       '.tc.is-thinking .tc-spin,.tc.is-thinking .tc-think-dots,.tc.is-alert .tc-bang,',
       '.tc.is-yes .tc-check,.tc.is-no .tc-cross{opacity:1}',
       '}',
@@ -373,7 +503,10 @@
     // The artwork lives in its own element, isolated from the drag and open
     // logic so the visual can be swapped without touching behaviour.
     fab.innerHTML = '<span class="tutor-fab-art" id="tutor-fab-art" aria-hidden="true">' +
-      characterSvg() + '</span>';
+      characterSvg() + '</span>' +
+      '<span class="tutor-fab-badge" id="tutor-fab-badge" aria-hidden="true" hidden></span>' +
+      '<span class="tutor-fab-tip" id="tutor-fab-tip" aria-hidden="true">Ask me anything</span>' +
+      '<span class="tutor-fab-status" id="tutor-fab-status" role="status" aria-live="polite" aria-atomic="true"></span>';
     fab.addEventListener('click', function (e) {
       // A click always follows a drag's pointerup; ignore that one.
       if (_suppressClick) { _suppressClick = false; e.preventDefault(); e.stopPropagation(); return; }
@@ -500,6 +633,7 @@
     _fab.style.bottom = 'auto';
     _fab.style.left = Math.round(p.left) + 'px';
     _fab.style.top = Math.round(p.top) + 'px';
+    syncTipPlacement();
     if (_open) syncPanelPlacement();
   }
 
@@ -508,6 +642,7 @@
     var dragging = false, moved = false, pointerId = null;
 
     function begin(x, y, id) {
+      dismissDiscoverability();
       var r = fab.getBoundingClientRect();
       startX = x; startY = y;
       originLeft = r.left; originTop = r.top;
@@ -524,6 +659,7 @@
       fab.style.bottom = 'auto';
       fab.style.left = p.left + 'px';
       fab.style.top = p.top + 'px';
+      syncTipSide();
     }
     function end() {
       if (!dragging) return;
@@ -778,6 +914,7 @@
     if (_open) { syncChrome(); syncPanelPlacement(); return; }
     _lastFocus = document.activeElement;
     _open = true;
+    dismissDiscoverability();
     document.body.classList.add(OPEN_CLASS);
     if (_fab) {
       _fab.hidden = false;
@@ -789,7 +926,7 @@
         if (_fab) _fab.classList.remove('is-opening');
       }, 1250);
       _fab.setAttribute('aria-expanded', 'true');
-      _fab.setAttribute('aria-label', 'Close the AI Tutor');
+      syncFabStatus();
       _fab.title = 'Close AI Tutor — drag to move';
     }
     if (!_historyPushed) {
@@ -845,7 +982,7 @@
       _fab.classList.remove('is-open');
       _fab.classList.remove('is-opening');
       _fab.setAttribute('aria-expanded', 'false');
-      _fab.setAttribute('aria-label', 'Ask the AI Tutor');
+      syncFabStatus();
       _fab.title = 'Ask the AI Tutor — drag to move';
     }
     if (_lastFocus && _lastFocus.isConnected && typeof _lastFocus.focus === 'function') {
@@ -905,32 +1042,103 @@
     grab.addEventListener('touchcancel', end);
   }
 
-  /* ── request-level character activity ────────────────────────────────────
-     This tracks accepted sends by immutable turn id, rather than polling the
-     currently selected chat history. A student can switch video/course while a
-     reply is in flight and the character will still think until THAT request
-     settles. */
+  /* ── request and app-level character activity ─────────────────────────────
+     Tutor requests have priority over app reactions. Non-chat producers emit
+     one keyed `examzen:mascot` event instead of reaching into visual classes:
+       { kind:'feedback', outcome:'correct'|'wrong', key, message? }
+       { kind:'celebrate', key, message? }
+       { kind:'nudge', key, message? }
+     A tiny bounded queue prevents quiz bursts or init-time nudges from fighting
+     Thinking/limit state. Celebration sparks are orthogonal and can coexist. */
   function activeTurnCount() {
     var count = _anonymousTurns;
     Object.keys(_activeTurns).forEach(function (key) { if (_activeTurns[key]) count++; });
     return count;
   }
+  function reactionBlocked() { return _limitAlertActive || activeTurnCount() > 0; }
+  function finishReaction(token) {
+    if (token !== _reactionToken) return;
+    _reactionTimer = 0;
+    hideMascotMessage();
+    _activeReaction = null;
+    refreshActivityMood();
+  }
+  function drainReactionQueue() {
+    if (_activeReaction || reactionBlocked() || !_reactionQueue.length) return;
+    _activeReaction = _reactionQueue.shift();
+    var token = ++_reactionToken;
+    setMood(_activeReaction.mood);
+    if (_activeReaction.message) showMascotMessage(_activeReaction.message, _activeReaction.duration);
+    _reactionTimer = setTimeout(function () { finishReaction(token); }, _activeReaction.duration);
+  }
+  function preemptReaction() {
+    if (!_activeReaction) return;
+    if (_reactionTimer) { clearTimeout(_reactionTimer); _reactionTimer = 0; }
+    hideMascotMessage();
+    _reactionQueue.unshift(_activeReaction);
+    if (_reactionQueue.length > 3) _reactionQueue.pop();
+    _activeReaction = null;
+    _reactionToken++;
+  }
   function refreshActivityMood() {
     var busy = activeTurnCount() > 0;
     if (_fab) _fab.classList.toggle('is-busy', busy);
-    // Alert is a temporary higher-priority state. Its timer calls this again,
-    // restoring Thinking when another accepted request is still running.
-    if (_mood !== 'alert') setMood(busy ? 'thinking' : 'idle');
+    if (_limitAlertActive) { setMood('alert'); return; }
+    if (busy) { setMood('thinking'); return; }
+    if (_activeReaction) { setMood(_activeReaction.mood); return; }
+    setMood('idle');
+    drainReactionQueue();
   }
   function startPulse(detail) {
     if (detail && detail.turnId) _activeTurns[detail.turnId] = true;
     else _anonymousTurns++;
+    preemptReaction();
     refreshActivityMood();
   }
   function settlePulse(detail) {
     if (detail && detail.turnId) delete _activeTurns[detail.turnId];
     else _anonymousTurns = Math.max(0, _anonymousTurns - 1);
+    if (detail && detail.historyKey && detail.visibleAtSettle === false) {
+      setUnread(detail.historyKey, true);
+      acceptReaction({
+        kind: 'celebrate',
+        key: 'tutor-ready:' + (detail.turnId || detail.historyKey),
+        message: 'Your tutor reply is ready'
+      });
+    }
     refreshActivityMood();
+  }
+  function acceptReaction(detail) {
+    detail = detail || {};
+    var kind = detail.kind;
+    var key = String(detail.key || '').slice(0, 140);
+    if (!key || ['feedback', 'celebrate', 'nudge'].indexOf(kind) < 0) return;
+    var now = Date.now();
+    if (_recentReactionKeys[key] && now - _recentReactionKeys[key] < 20000) return;
+    _recentReactionKeys[key] = now;
+    var keys = Object.keys(_recentReactionKeys);
+    if (keys.length > 80) {
+      keys.sort(function (a, b) { return _recentReactionKeys[a] - _recentReactionKeys[b]; });
+      keys.slice(0, keys.length - 60).forEach(function (oldKey) { delete _recentReactionKeys[oldKey]; });
+    }
+    if (kind === 'celebrate') triggerCelebration();
+    var message = String(detail.message || '').slice(0, 90);
+    if (kind === 'celebrate' && !message) return;
+    var reaction = {
+      key: key,
+      kind: kind,
+      mood: kind === 'nudge' ? 'alert' : 'yes',
+      message: message,
+      duration: kind === 'nudge' ? 4200 : (kind === 'celebrate' ? 2600 : (detail.outcome === 'correct' ? 1700 : 1450))
+    };
+    if (kind === 'feedback') {
+      if (detail.outcome !== 'correct' && detail.outcome !== 'wrong') return;
+      reaction.mood = detail.outcome === 'correct' ? 'yes' : 'no';
+    }
+    // A nudge should not sit behind several per-answer reactions.
+    if (kind === 'nudge') _reactionQueue.unshift(reaction); else _reactionQueue.push(reaction);
+    _reactionQueue = _reactionQueue.slice(0, 3);
+    drainReactionQueue();
   }
   window.addEventListener('examzen:tutor-send', function (event) {
     startPulse(event && event.detail);
@@ -938,24 +1146,27 @@
   window.addEventListener('examzen:tutor-settled', function (event) {
     settlePulse(event && event.detail);
   });
+  window.addEventListener('examzen:tutor-viewed', function (event) {
+    var detail = event && event.detail;
+    if (detail && detail.historyKey) setUnread(detail.historyKey, false);
+  });
+  window.addEventListener('examzen:mascot', function (event) {
+    acceptReaction(event && event.detail);
+  });
 
-  /* The free plan's daily message limit. Worth showing on the character because
-     the student may well have the window closed when they hit it. It does NOT
-     cancel another in-flight request's activity; after six seconds, the real
-     request count decides whether to restore Thinking or Idle. */
+  /* The free plan's daily message limit is the highest-priority alert. It does
+     not cancel a request or queued app feedback; expiry restores the true state. */
   var _alertTimer = 0;
   window.addEventListener('examzen:tutor-limit', function () {
     if (!_fab) return;
-    setMood('alert');
+    preemptReaction();
+    _limitAlertActive = true;
+    refreshActivityMood();
     if (_alertTimer) clearTimeout(_alertTimer);
     _alertTimer = setTimeout(function () {
       _alertTimer = 0;
-      if (_mood === 'alert') {
-        // Leave alert before refreshing, otherwise its priority guard would
-        // intentionally preserve it.
-        _mood = 'idle';
-        refreshActivityMood();
-      }
+      _limitAlertActive = false;
+      refreshActivityMood();
     }, 6000);
   });
 
@@ -963,6 +1174,28 @@
   function boot() {
     ensureDom();
     syncChrome();
+    syncFabStatus();
+    syncTipPlacement();
+    // A short session-only nudge helps first-time visitors notice the global
+    // tutor without becoming a recurring tooltip on every navigation. The
+    // in-memory guard still delivers it once if sessionStorage is unavailable.
+    var showDiscovery = !_discoveryAttempted;
+    _discoveryAttempted = true;
+    try {
+      var discoveryKey = 'examzen:mascot:discovery-seen';
+      if (sessionStorage.getItem(discoveryKey) === '1') showDiscovery = false;
+      else sessionStorage.setItem(discoveryKey, '1');
+    } catch (e) {}
+    if (showDiscovery) {
+      _discoveryTimer = setTimeout(function () {
+        _discoveryTimer = 0;
+        if (!_open && _fab) {
+          _fab.classList.add('is-discovering');
+          syncTipPlacement();
+          _discoveryTimer = setTimeout(dismissDiscoverability, 5200);
+        }
+      }, 900);
+    }
     // Keep the Dock button and the scope pill honest as the student moves around.
     // switchPage() emits this for every navigation, so no polling is needed.
     if (typeof onPageActivated === 'function') onPageActivated('*', syncChrome);

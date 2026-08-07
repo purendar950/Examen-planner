@@ -1265,6 +1265,7 @@ function toggleTask(dateStr, taskId) {
     if (typeof syncTaskChapterProgress === 'function') syncTaskChapterProgress(task);
     /* Bridge into the spaced-repetition engine after any stale-task reset. */
     if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
+    if (typeof maybeCelebrateDailyTasks === 'function') maybeCelebrateDailyTasks(dateStr, task.done);
     saveProgress();
     buildPlannerCalendar();
     try { if (typeof renderRevisionWidget === 'function') renderRevisionWidget(); } catch(e) {}

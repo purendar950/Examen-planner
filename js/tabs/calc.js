@@ -250,6 +250,19 @@
       syncCalcState();
       return;
     }
+    if (data.type === 'mascot-feedback') {
+      var outcome = data.outcome === 'correct' ? 'correct' : (data.outcome === 'wrong' ? 'wrong' : '');
+      var feedbackKey = typeof data.key === 'string' ? data.key.slice(0, 140) : '';
+      if (!outcome || !feedbackKey) return;
+      try {
+        window.dispatchEvent(new CustomEvent('examzen:mascot', { detail: {
+          kind: 'feedback', outcome: outcome,
+          key: 'calc:' + feedbackKey,
+          message: outcome === 'correct' ? 'Correct calculation!' : 'Try that calculation again'
+        }}));
+      } catch (e) {}
+      return;
+    }
     if (data.type === 'preset-send-request') {
       var presetId = typeof data.presetId === 'string' ? data.presetId : '';
       var requestId = typeof data.requestId === 'string' ? data.requestId : '';
@@ -329,7 +342,7 @@
       syncCalcState();
       setTimeout(syncCalcDeepLink, 0);
     });
-    frame.src = 'calc/index.html?v=6';
+    frame.src = 'calc/index.html?v=7';
   }
 
   /* Lets other modules refresh the embedded practice tab, e.g. after Telegram

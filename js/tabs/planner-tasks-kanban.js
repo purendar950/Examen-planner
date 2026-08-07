@@ -12,6 +12,36 @@ function taskStatus(t) {
   return 'todo';
 }
 
+function maybeCelebrateDailyTasks(dateStr, completedNow) {
+  if (!completedNow || typeof appState === 'undefined' || !appState) return;
+  const today = (typeof fmtDate === 'function') ? fmtDate(new Date()) : new Date().toISOString().slice(0, 10);
+  if (dateStr !== today) return;
+  const tasks = (appState.tasks[dateStr] || []).filter(t => t && !t.deleted);
+  if (!tasks.length || tasks.some(t => taskStatus(t) !== 'done')) return;
+  const uid = (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) ? currentUser.uid : 'guest';
+  const key = 'examzen:mascot:daily-tasks:' + uid + ':' + dateStr;
+  let deliver = true;
+  if (typeof ezMascotSessionOnce === 'function') {
+    deliver = ezMascotSessionOnce(key);
+  } else {
+    const sent = maybeCelebrateDailyTasks._sent || (maybeCelebrateDailyTasks._sent = new Set());
+    if (sent.has(key)) deliver = false;
+    else {
+      try { if (sessionStorage.getItem(key) === '1') deliver = false; } catch (e) {}
+      if (deliver) {
+        sent.add(key);
+        try { sessionStorage.setItem(key, '1'); } catch (e) {}
+      }
+    }
+  }
+  if (!deliver) return;
+  try {
+    window.dispatchEvent(new CustomEvent('examzen:mascot', { detail: {
+      kind: 'celebrate', key: key, message: 'Today’s study tasks are complete!'
+    }}));
+  } catch (e) {}
+}
+
 function setTaskStatus(dateStr, taskId, status) {
   const task = (appState.tasks[dateStr]||[]).find(t=>t.id===taskId);
   if (!task) return;
@@ -26,6 +56,7 @@ function setTaskStatus(dateStr, taskId, status) {
      reset to todo before the generic revision bridge observes their status. */
   if (wasDone !== task.done && typeof syncTaskChapterProgress === 'function') syncTaskChapterProgress(task);
   if (typeof syncTaskRevision === 'function') syncTaskRevision(task);
+  maybeCelebrateDailyTasks(dateStr, !wasDone && !!task.done);
   saveProgress();
   buildPlannerCalendar();
   try { if (typeof renderRevisionWidget === 'function') renderRevisionWidget(); } catch(e) {}

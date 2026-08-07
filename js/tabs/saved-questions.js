@@ -1323,8 +1323,9 @@ function sqQuizSubmit() {
 
   // Record the attempt (skip re-recording when reviewing a past attempt).
   if (!q.fromHistory) {
+    const attemptId = 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
     sqRecordAttempt({
-      id: 'att_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+      id: attemptId,
       scope: q.scope || 'all',
       title: q.title,
       at: new Date().toISOString(),
@@ -1335,6 +1336,15 @@ function sqQuizSubmit() {
       items: q.items,
       answers: q.answers
     });
+    try {
+      window.dispatchEvent(new CustomEvent('examzen:mascot', { detail: {
+        kind: 'feedback', outcome: stats.accuracy >= 60 ? 'correct' : 'wrong',
+        key: 'saved-quiz:' + attemptId,
+        message: stats.accuracy >= 60
+          ? 'Quiz complete — ' + stats.accuracy + '% accuracy!'
+          : 'Quiz complete — review the questions you missed'
+      }}));
+    } catch (e) {}
   }
 
   sqShowStage('result');

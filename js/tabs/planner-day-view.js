@@ -262,6 +262,12 @@ function setPlanTopicProgress(chId, done, partIndex, totalParts, planId) {
       p.nextRevisionAt = addDaysISO(new Date(), 1);
     }
     if (typeof updateStreak === 'function') updateStreak();
+    try {
+      window.dispatchEvent(new CustomEvent('examzen:mascot', { detail: {
+        kind: 'celebrate', key: 'plan-topic:' + chId + ':' + p.completedAt,
+        message: 'Study topic complete — keep the momentum!'
+      }}));
+    } catch (e) {}
   }
   try { _cachedRemainingCount = null; } catch (e) {}
   return { changed, stale:false, isMultiPart, chapterDone:!!p.done, completedCount, totalParts:total };

@@ -30,6 +30,111 @@ function ezRefreshExamYears() {
   } catch(e) {}
 }
 
+function ezMascotLocalDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/* sessionStorage is an optimisation, not a delivery requirement. Browsers can
+   deny it (private/embedded contexts), so keep a same-page once ledger too. */
+const _ezMascotOnceMemory = new Set();
+function ezMascotSessionOnce(key) {
+  if (_ezMascotOnceMemory.has(key)) return false;
+  try {
+    if (sessionStorage.getItem(key) === '1') {
+      _ezMascotOnceMemory.add(key);
+      return false;
+    }
+    sessionStorage.setItem(key, '1');
+  } catch (e) {}
+  _ezMascotOnceMemory.add(key);
+  return true;
+}
+
+function ezConsumeMascotResult() {
+  const key = 'examzen:mascot:pending-result';
+  let result = null;
+  ['sessionStorage', 'localStorage'].some(name => {
+    let store, raw = null;
+    try { store = window[name]; raw = store.getItem(key); } catch (e) { return false; }
+    try {
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.key) result = parsed;
+      }
+    } catch (e) {
+      // Malformed handoffs are discarded below rather than retried forever.
+    } finally {
+      try { store.removeItem(key); } catch (e) {}
+    }
+    return !!result;
+  });
+  // A successful session write may coexist with an old fallback; remove both.
+  try { localStorage.removeItem(key); } catch (e) {}
+  try { sessionStorage.removeItem(key); } catch (e) {}
+  return result;
+}
+
+function ezPendingMockCount(today) {
+  const pending = new Set();
+  const done = new Set();
+  const tasks = ((appState && appState.tasks && appState.tasks[today]) || []);
+  tasks.forEach(task => {
+    if (!task || task.type !== 'mock' || /analysis/i.test(task.text || '')) return;
+    const text = String(task.text || task.id || '').trim();
+    if (!text) return;
+    const isDone = task.done || task.status === 'done';
+    (isDone ? done : pending).add(text);
+  });
+  // Imported/legacy duplicates can disagree; a completed identity wins.
+  done.forEach(text => pending.delete(text));
+
+  let plans = [];
+  try {
+    plans = typeof plansForCurrentExam === 'function'
+      ? plansForCurrentExam()
+      : (Array.isArray(appState.plans) ? appState.plans : []);
+  } catch (e) {}
+  if (!plans.length && window._planConfig) plans = [{ cfg: window._planConfig }];
+  plans.forEach(plan => {
+    const cfg = plan && plan.cfg;
+    if (!cfg || cfg.planType !== 'mock' || typeof buildMockSchedule !== 'function') return;
+    let items = [];
+    try { items = buildMockSchedule(cfg).byDate[today] || []; } catch (e) {}
+    items.forEach(item => {
+      const ch = (item && item.ch) || {};
+      if (/analysis/i.test(ch.name || '')) return;
+      const texts = typeof mockTaskTexts === 'function' ? mockTaskTexts(ch, cfg) : [ch.name || 'Mock'];
+      texts.forEach(text => { if (text && !done.has(text)) pending.add(text); });
+    });
+  });
+  return pending.size;
+}
+
+/* Deliver one cross-page exam result and at most one combined daily study
+   nudge after hydration. Rendering functions are intentionally side-effect
+   free, so navigation/rerenders cannot spam the mascot. */
+function ezInitMascotSignals() {
+  const emit = detail => {
+    try { window.dispatchEvent(new CustomEvent('examzen:mascot', { detail })); } catch (e) {}
+  };
+  const pending = ezConsumeMascotResult();
+  if (pending) emit(pending);
+
+  const today = ezMascotLocalDate();
+  const uid = (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) ? currentUser.uid : 'guest';
+  const sessionKey = 'examzen:mascot:daily-nudge:' + uid + ':' + today;
+
+  let revisions = 0, mocks = 0;
+  try { revisions = typeof getDueRevisions === 'function' ? getDueRevisions().length : 0; } catch (e) {}
+  try { mocks = ezPendingMockCount(today); } catch (e) {}
+  if (!revisions && !mocks) return;
+  if (!ezMascotSessionOnce(sessionKey)) return;
+  let message = mocks ? (mocks + (mocks === 1 ? ' mock test' : ' mock tests') + ' scheduled today') : '';
+  if (revisions) message += (message ? ' · ' : '') + revisions + (revisions === 1 ? ' revision due' : ' revisions due');
+  emit({ kind: 'nudge', key: sessionKey, message });
+}
+
 function initApp() {
   ezRefreshExamYears();
   // Restore the user's last-selected exam (defaults to SSC CGL). Done first so
@@ -78,5 +183,8 @@ function initApp() {
   safely(refreshPlannerBadges);        // refresh chips with phase badge
   safely(renderSavedPlansList);        // My Plans list (under AI gen card)
   safely(() => { if (typeof restoreActivePage === 'function') restoreActivePage(); }); // keep tab after refresh
+  // Tutor scripts are deferred after this module; auth normally calls initApp
+  // after all have loaded, and this short defer also covers unusually fast init.
+  setTimeout(() => safely(ezInitMascotSignals), 350);
 }
 
