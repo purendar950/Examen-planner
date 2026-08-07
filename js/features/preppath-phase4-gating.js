@@ -336,12 +336,23 @@ saveTelegramSettings = function() {
    ───────────────────────────────────────────────────────────── */
 
 /* 10. AI Tutor messages → max 5/day free (was ungated).
-   Wraps `sendTutor` from js/features/ai-tutor.js (the function the
-   chat Send button + the suggestion chips call). */
+
+   This gate used to try `sendTutor = function() {...}` around the function in
+   js/features/ai-tutor.js. That never worked: sendTutor is declared inside that
+   file's IIFE and is not a window property, so `typeof sendTutor === 'function'`
+   was false here and the whole wrapper was skipped — free users have in practice
+   had unlimited tutor messages. Its DOM probes were stale too (#tutor-chat /
+   #ai-tutor-messages do not exist; the real chat is #ai-chat).
+
+   ai-tutor.js now calls window.ezTutorSendAllowed() from inside sendTutor,
+   just before a request is built, and abandons the send when it returns false.
+   That covers every entry point — Send button, suggestion chips, the quiz
+   "re-explain what I missed" jump and the floating tutor window — and is
+   fail-open if this file has not loaded yet. */
 function ezShowTutorLimitPreview(maxFree) {
-  const el = document.getElementById('tutor-chat') ||
-             document.getElementById('ai-tutor-messages') ||
-             document.querySelector('.tutor-messages');
+  const el = document.getElementById('ai-chat') ||
+             document.querySelector('#tutor-float-body .ai-chat') ||
+             document.querySelector('.ai-tutor-shell');
   if (el) {
     ezBlurPreview(el, {
       title: 'AI Tutor — Daily Limit Reached',
@@ -352,23 +363,27 @@ function ezShowTutorLimitPreview(maxFree) {
     ezLockedMsg('Free plan: max ' + maxFree + ' AI messages/day. Pro: unlimited AI Tutor');
   }
 }
-const _aiTutorSendGate = typeof sendTutor === 'function' ? sendTutor : null;
-if (_aiTutorSendGate) {
-  sendTutor = function() {
-    if (ezGated()) {
-      const today = new Date().toISOString().split('T')[0];
-      const key = 'sp_ai_tutor_' + today;
-      const count = parseInt(localStorage.getItem(key) || '0', 10);
-      const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
-      if (count >= maxFree) {
-        ezShowTutorLimitPreview(maxFree);
-        return;
-      }
-      try { localStorage.setItem(key, String(count + 1)); } catch(e) {}
-    }
-    return _aiTutorSendGate.apply(this, arguments);
-  };
-}
+
+/* Returns false to abandon the send. Counts a message only when it is allowed
+   through, so a blocked attempt never burns part of the allowance. */
+window.ezTutorSendAllowed = function ezTutorSendAllowed() {
+  if (!ezGated()) return true;               // Pro / trial → unlimited
+  const today = new Date().toISOString().split('T')[0];
+  const key = 'sp_ai_tutor_' + today;
+  let count = 0;
+  try { count = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e) {}
+  const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
+  if (count >= maxFree) {
+    ezShowTutorLimitPreview(maxFree);
+    return false;
+  }
+  try { localStorage.setItem(key, String(count + 1)); } catch(e) {}
+  // A quiet heads-up on the last free message beats a hard stop with no warning.
+  if (count + 1 === maxFree && typeof showToast === 'function') {
+    showToast('That was your last free AI Tutor message today. Pro removes the limit.', 'info');
+  }
+  return true;
+};
 
 /* 11. Turbo 4× Player → Pro only.
    Wraps `ytToggleTurbo` from js/features/turbo-player.js. The function
