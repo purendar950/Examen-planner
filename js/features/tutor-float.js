@@ -54,6 +54,15 @@
       '#tutor-fab:active{transform:translateY(0) scale(.97)}',
       '#tutor-fab:focus-visible{outline:3px solid var(--accent,#00c896);outline-offset:3px}',
       '#tutor-fab[hidden]{display:none!important}',
+      // Draggable: touch-action stops the page scrolling under the finger, and
+      // the grab cursors advertise that the bubble can be moved.
+      '#tutor-fab{touch-action:none;-webkit-user-select:none;user-select:none;cursor:grab}',
+      '#tutor-fab.is-dragging{cursor:grabbing;transition:none;transform:scale(1.08);',
+      'box-shadow:0 16px 40px rgba(0,0,0,.5),0 0 0 6px rgba(0,200,150,.16)}',
+      '#tutor-fab.is-dragging:hover{transform:scale(1.08)}',
+      '#tutor-fab .tutor-fab-art{display:flex;align-items:center;justify-content:center;',
+      'width:100%;height:100%;pointer-events:none;line-height:1}',
+      '#tutor-fab .tutor-fab-art svg,#tutor-fab .tutor-fab-art canvas{width:100%;height:100%;display:block}',
       /* a reply that is still streaming while the window is closed */
       '#tutor-fab.is-busy{animation:tutorFabPulse 1.7s ease-out infinite}',
       '@keyframes tutorFabPulse{0%{box-shadow:0 10px 30px rgba(0,0,0,.38),0 0 0 0 rgba(0,200,150,.5)}',
@@ -70,6 +79,14 @@
       'background:var(--card,#151a24);border:1px solid var(--border,#2a3140);border-radius:16px;',
       'box-shadow:0 26px 64px rgba(0,0,0,.5);color:var(--text,#e7ecf5)}',
       'body.' + OPEN_CLASS + ' #tutor-float{display:flex}',
+      /* The window opens on whichever side the bubble was parked — desktop only,
+         because on a phone it is a full-width bottom sheet with no side to pick.
+         Scoped in a min-width query rather than overridden later: a body-class
+         selector outranks the plain #tutor-float rule in the mobile block, so an
+         unscoped version would stretch the sheet off-centre. */
+      '@media(min-width:769px){',
+      'body.tutor-float-left #tutor-float{right:auto;left:max(1.15rem,env(safe-area-inset-left))}',
+      '}',
       '#tutor-float-head{display:flex;align-items:center;gap:.5rem;flex:0 0 auto;padding:.6rem .7rem;',
       'background:var(--surface,#1b1f2a);border-bottom:1px solid var(--border,#2a3140)}',
       '#tutor-float-head .tutor-float-title{font:800 .82rem/1.2 var(--font,inherit);color:var(--text,#e7ecf5);',
@@ -151,14 +168,168 @@
     var fab = document.createElement('button');
     fab.type = 'button';
     fab.id = 'tutor-fab';
-    fab.title = 'Ask the AI Tutor';
+    fab.title = 'Ask the AI Tutor — drag to move';
     fab.setAttribute('aria-label', 'Ask the AI Tutor');
     fab.setAttribute('aria-haspopup', 'dialog');
     fab.setAttribute('aria-expanded', 'false');
-    fab.innerHTML = '<span aria-hidden="true">\uD83D\uDCAC</span><span class="tutor-fab-dot" aria-hidden="true"></span>';
-    fab.onclick = function () { toggle(); };
+    // The artwork lives in its own element so it can be swapped (emoji today,
+    // an animated character later) without touching the drag or open logic.
+    fab.innerHTML =
+      '<span class="tutor-fab-art" id="tutor-fab-art" aria-hidden="true">\uD83D\uDCAC</span>' +
+      '<span class="tutor-fab-dot" aria-hidden="true"></span>';
+    fab.addEventListener('click', function (e) {
+      // A click always follows a drag's pointerup; ignore that one.
+      if (_suppressClick) { _suppressClick = false; e.preventDefault(); e.stopPropagation(); return; }
+      toggle();
+    });
     return fab;
   }
+
+  /* ── dragging the bubble ──────────────────────────────────────────────────
+     Students park the bubble wherever it does not cover what they are reading,
+     so the position is theirs to choose and is remembered.
+
+     Horizontally it snaps to the nearest edge (a half-off-screen bubble is a
+     hit-target problem, and an edge-parked bubble covers the least content);
+     vertically it stays exactly where it was dropped. The vertical position is
+     stored as a fraction of the viewport so it survives rotation and the
+     Android URL bar collapsing rather than drifting off-screen.            */
+  var POS_KEY = 'tutorFabPos';
+  var DRAG_SLOP = 6;          // px of travel before a tap becomes a drag
+  var _suppressClick = false;
+  var _pos = null;            // { side: 'left'|'right', topRatio: 0..1 }
+
+  function loadPos() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(POS_KEY) || 'null');
+      if (raw && (raw.side === 'left' || raw.side === 'right') && typeof raw.topRatio === 'number') {
+        _pos = { side: raw.side, topRatio: Math.min(1, Math.max(0, raw.topRatio)) };
+      }
+    } catch (e) {}
+  }
+  function savePos() {
+    try { localStorage.setItem(POS_KEY, JSON.stringify(_pos)); } catch (e) {}
+  }
+
+  function edgeGap() { return window.innerWidth <= 768 ? 14 : 18; }
+
+  // Keep the bubble fully on screen and clear of the mobile toast band.
+  function clampTop(top, h) {
+    var min = 8;
+    var reserveBottom = window.innerWidth <= 768 ? 76 : 12;   // toast strip on phones
+    var max = window.innerHeight - h - reserveBottom;
+    if (max < min) max = min;
+    return Math.min(max, Math.max(min, top));
+  }
+
+  /* Applies the remembered position. Until the bubble has been dragged once,
+     nothing is written to style and the stylesheet's default corner stands. */
+  function applyFabPosition() {
+    if (!_fab || !_pos) return;
+    var w = _fab.offsetWidth || 54, h = _fab.offsetHeight || 54;
+    var gap = edgeGap();
+    var top = clampTop(Math.round(_pos.topRatio * window.innerHeight), h);
+    _fab.style.right = 'auto';
+    _fab.style.bottom = 'auto';
+    _fab.style.left = (_pos.side === 'left' ? gap : window.innerWidth - w - gap) + 'px';
+    _fab.style.top = top + 'px';
+    // The window opens from the same side the bubble was parked on.
+    document.body.classList.toggle('tutor-float-left', _pos.side === 'left');
+  }
+
+  function setupFabDrag(fab) {
+    var startX = 0, startY = 0, originLeft = 0, originTop = 0;
+    var dragging = false, moved = false, pointerId = null;
+
+    function begin(x, y, id) {
+      var r = fab.getBoundingClientRect();
+      startX = x; startY = y;
+      originLeft = r.left; originTop = r.top;
+      dragging = true; moved = false; pointerId = id;
+    }
+    function move(x, y) {
+      if (!dragging) return;
+      var dx = x - startX, dy = y - startY;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < DRAG_SLOP) return;
+      if (!moved) { moved = true; fab.classList.add('is-dragging'); }
+      var w = fab.offsetWidth || 54, h = fab.offsetHeight || 54;
+      var left = Math.min(window.innerWidth - w - 2, Math.max(2, originLeft + dx));
+      fab.style.right = 'auto';
+      fab.style.bottom = 'auto';
+      fab.style.left = left + 'px';
+      fab.style.top = clampTop(originTop + dy, h) + 'px';
+    }
+    function end() {
+      if (!dragging) return;
+      dragging = false;
+      pointerId = null;
+      if (!moved) return;                 // a tap: let the click handler open it
+      fab.classList.remove('is-dragging');
+      _suppressClick = true;              // the drag's click must not open the chat
+      var r = fab.getBoundingClientRect();
+      _pos = {
+        side: (r.left + r.width / 2) < window.innerWidth / 2 ? 'left' : 'right',
+        topRatio: r.top / Math.max(1, window.innerHeight)
+      };
+      savePos();
+      applyFabPosition();                 // snap to the edge
+      if (typeof showToast === 'function' && !_posToastShown) {
+        _posToastShown = true;
+        showToast('Bubble moved. Drag it anywhere — the spot is remembered.', 'info');
+      }
+    }
+
+    if (window.PointerEvent) {
+      fab.addEventListener('pointerdown', function (e) {
+        if (e.button && e.button !== 0) return;
+        begin(e.clientX, e.clientY, e.pointerId);
+        try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+      });
+      fab.addEventListener('pointermove', function (e) {
+        if (pointerId !== null && e.pointerId !== pointerId) return;
+        move(e.clientX, e.clientY);
+      });
+      fab.addEventListener('pointerup', end);
+      fab.addEventListener('pointercancel', end);
+    } else {
+      // Older WebViews: mouse + touch.
+      fab.addEventListener('mousedown', function (e) {
+        if (e.button) return;
+        begin(e.clientX, e.clientY, null);
+      });
+      document.addEventListener('mousemove', function (e) { move(e.clientX, e.clientY); });
+      document.addEventListener('mouseup', end);
+      fab.addEventListener('touchstart', function (e) {
+        if (!e.touches || !e.touches.length) return;
+        begin(e.touches[0].clientX, e.touches[0].clientY, null);
+      }, { passive: true });
+      fab.addEventListener('touchmove', function (e) {
+        if (!e.touches || !e.touches.length) return;
+        move(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: true });
+      fab.addEventListener('touchend', end);
+      fab.addEventListener('touchcancel', end);
+    }
+
+    // Keyboard users can move it too, and it is the only way back if the bubble
+    // has been parked somewhere awkward.
+    fab.addEventListener('keydown', function (e) {
+      var step = e.shiftKey ? 40 : 12;
+      var r = fab.getBoundingClientRect();
+      var handled = true;
+      if (e.key === 'ArrowUp') _pos = { side: sideOf(r), topRatio: (r.top - step) / window.innerHeight };
+      else if (e.key === 'ArrowDown') _pos = { side: sideOf(r), topRatio: (r.top + step) / window.innerHeight };
+      else if (e.key === 'ArrowLeft') _pos = { side: 'left', topRatio: r.top / window.innerHeight };
+      else if (e.key === 'ArrowRight') _pos = { side: 'right', topRatio: r.top / window.innerHeight };
+      else handled = false;
+      if (!handled) return;
+      e.preventDefault();
+      savePos();
+      applyFabPosition();
+    });
+    function sideOf(r) { return (r.left + r.width / 2) < window.innerWidth / 2 ? 'left' : 'right'; }
+  }
+  var _posToastShown = false;
 
   function buildPanel() {
     var box = document.createElement('div');
@@ -195,7 +366,21 @@
       if (c && typeof c.dockToPanel === 'function') c.dockToPanel();
     };
     setupSheetDrag(_panel.querySelector('#tutor-float-grab'));
+    setupFabDrag(_fab);
+    loadPos();
+    applyFabPosition();
   }
+
+  /* Rotating the phone, or the Android URL bar collapsing, changes the viewport
+     under a bubble that is positioned in pixels — re-clamp so it can never end
+     up stranded off-screen. */
+  var _reflow = 0;
+  function scheduleReflow() {
+    if (_reflow) clearTimeout(_reflow);
+    _reflow = setTimeout(function () { _reflow = 0; applyFabPosition(); }, 120);
+  }
+  window.addEventListener('resize', scheduleReflow);
+  window.addEventListener('orientationchange', scheduleReflow);
 
   /* The Dock button is only useful where the AI Study panel is actually on
      screen; anywhere else it would hide the chat behind a page the student is
