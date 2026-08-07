@@ -23,13 +23,16 @@
 
   var OPEN_CLASS = 'tutor-float-open';
   var HISTORY_KEY = 'tutorFloat';
+  var TUTOR_SOUND_MUTE_KEY = 'preppath.tutorSoundMuted';
   var _token = 0;
   var _historyPushed = false;
   var _open = false;
+  var _tutorAudioCtx = null;
   var _activeTurns = {};
   var _anonymousTurns = 0;
   var _lastFocus = null;
   var _entryTimer = 0;
+  var _sheenTimer = 0;
   var _discoveryTimer = 0;
   var _messageTimer = 0;
   var _celebrationTimer = 0;
@@ -43,6 +46,50 @@
   var _discoveryAttempted = false;
 
   function core() { return window.AiTutorCore || null; }
+
+  function tutorSoundMuted() {
+    try { return localStorage.getItem(TUTOR_SOUND_MUTE_KEY) === '1'; } catch (e) { return false; }
+  }
+  function requestTutorNotificationPermission() {
+    try {
+      if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+    } catch (e) {}
+  }
+  function tutorReplyChime() {
+    if (tutorSoundMuted()) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      _tutorAudioCtx = _tutorAudioCtx || new AC();
+      var ctx = _tutorAudioCtx, now = ctx.currentTime;
+      [880, 1175].forEach(function (f, i) {
+        var o = ctx.createOscillator(), g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.type = 'sine'; o.frequency.value = f;
+        var t = now + i * 0.18;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+        o.start(t); o.stop(t + 0.36);
+      });
+    } catch (e) {}
+  }
+  function notifyTutorReply(detail) {
+    if (!document.hidden) return;
+    try {
+      if (!('Notification' in window) || Notification.permission !== 'granted') return;
+      var notification = new Notification('Your tutor reply is ready', {
+        body: 'Open ExamZen to continue studying.',
+        tag: 'examzen-tutor-ready:' + ((detail && detail.historyKey) || 'latest'),
+        silent: tutorSoundMuted()
+      });
+      notification.onclick = function () {
+        try { window.focus(); } catch (e) {}
+        open();
+        try { notification.close(); } catch (e) {}
+      };
+    } catch (e) {}
+  }
 
   /* ── the tutor character ──────────────────────────────────────────────────
      A hand-built SVG standing in for the LottieFiles character, driven by CSS
@@ -209,6 +256,28 @@
     if (_messageTimer) clearTimeout(_messageTimer);
     _messageTimer = setTimeout(hideMascotMessage, duration || 2800);
   }
+  function triggerOpening() {
+    if (!_fab) return;
+    _fab.classList.remove('is-opening');
+    void _fab.offsetWidth;
+    _fab.classList.add('is-opening');
+    if (_entryTimer) clearTimeout(_entryTimer);
+    _entryTimer = setTimeout(function () {
+      _entryTimer = 0;
+      if (_fab) _fab.classList.remove('is-opening');
+    }, 1250);
+  }
+  function triggerSheen() {
+    if (!_fab) return;
+    _fab.classList.remove('is-sheening');
+    void _fab.offsetWidth;
+    _fab.classList.add('is-sheening');
+    if (_sheenTimer) clearTimeout(_sheenTimer);
+    _sheenTimer = setTimeout(function () {
+      _sheenTimer = 0;
+      if (_fab) _fab.classList.remove('is-sheening');
+    }, 950);
+  }
   function triggerCelebration() {
     if (!_fab) return;
     _fab.classList.remove('is-celebrating');
@@ -301,6 +370,7 @@
       '.tc.is-alert .tc-aura{stroke:#ffd45a}',
       '.tc.is-yes .tc-aura{stroke:#45ffd0}',
       '.tc.is-no .tc-aura{stroke:#ff6f91}',
+      'html[data-theme="light"] .tc-aura{stroke:#7c4dff}',
       // A soft powered-on aura breathes behind the character. Its dashed outer
       // ring rotates slowly, then accelerates while a tutor reply is arriving.
       // Keeping the glow inside SVG leaves the button's focus/drag filter free.
@@ -317,7 +387,8 @@
       '@keyframes tcSheenIdle{0%,72%,100%{opacity:0;transform:translate(-18px,14px)}',
       '80%{opacity:.38}90%{opacity:0;transform:translate(18px,-14px)}}',
       '#tutor-fab:hover .tc:not(.is-thinking):not(.is-alert):not(.is-yes):not(.is-no) .tc-sheen,',
-      '#tutor-fab.is-opening .tc:not(.is-thinking):not(.is-alert):not(.is-yes):not(.is-no) .tc-sheen{',
+      '#tutor-fab.is-opening .tc:not(.is-thinking):not(.is-alert):not(.is-yes):not(.is-no) .tc-sheen,',
+      '#tutor-fab.is-sheening .tc .tc-sheen{',
       'animation:tcSheenSweep .9s ease-out}',
       '@keyframes tcSheenSweep{0%{opacity:0;transform:translate(-20px,16px)}',
       '42%{opacity:.52}100%{opacity:0;transform:translate(20px,-16px)}}',
@@ -919,12 +990,7 @@
     if (_fab) {
       _fab.hidden = false;
       _fab.classList.add('is-open');
-      _fab.classList.add('is-opening');
-      if (_entryTimer) clearTimeout(_entryTimer);
-      _entryTimer = setTimeout(function () {
-        _entryTimer = 0;
-        if (_fab) _fab.classList.remove('is-opening');
-      }, 1250);
+      triggerOpening();
       _fab.setAttribute('aria-expanded', 'true');
       syncFabStatus();
       _fab.title = 'Close AI Tutor — drag to move';
@@ -1141,10 +1207,16 @@
     drainReactionQueue();
   }
   window.addEventListener('examzen:tutor-send', function (event) {
+    requestTutorNotificationPermission();
     startPulse(event && event.detail);
   });
   window.addEventListener('examzen:tutor-settled', function (event) {
-    settlePulse(event && event.detail);
+    var detail = event && event.detail;
+    settlePulse(detail);
+    if (!_open) {
+      tutorReplyChime();
+      notifyTutorReply(detail);
+    }
   });
   window.addEventListener('examzen:tutor-viewed', function (event) {
     var detail = event && event.detail;
@@ -1152,6 +1224,24 @@
   });
   window.addEventListener('examzen:mascot', function (event) {
     acceptReaction(event && event.detail);
+  });
+  window.addEventListener('examzen:streak-milestone', function (event) {
+    var streak = Number(event && event.detail && event.detail.streak);
+    if ([7, 15, 30, 50, 100].indexOf(streak) < 0) return;
+    triggerOpening();
+    acceptReaction({
+      kind: 'feedback',
+      outcome: 'correct',
+      key: 'streak-milestone:' + streak,
+      message: streak + '-day streak — amazing work!'
+    });
+  });
+  window.addEventListener('examzen:pomodoro-focus-complete', function (event) {
+    var detail = (event && event.detail) || {};
+    triggerSheen();
+    showMascotMessage('Quiz me on what I just studied?', 5000);
+    var c = core();
+    if (c && typeof c.offerFocusQuiz === 'function') c.offerFocusQuiz(detail);
   });
 
   /* The free plan's daily message limit is the highest-priority alert. It does
