@@ -1028,7 +1028,7 @@ function renderMultChart(n){
 }
 
 /* ---------- QUIZ ---------- */
-let cur=null,curQuizId=null,inputs=[""],field=0,score=0,qcount=0,soundOn=true,busy=false,quizReturn="category";
+let cur=null,curQuizId=null,inputs=[""],field=0,score=0,qcount=0,soundOn=true,busy=false,quizReturn="category",mascotQuestionSeq=0;
 
 function openQuiz(quizId,returnTo,options){
   if((!options||!options.preset)&&window.CalcPresets&&typeof window.CalcPresets.stopSession==="function")window.CalcPresets.stopSession(false);
@@ -1053,7 +1053,7 @@ function nextQ(){
   const def=QUIZZES[curQuizId];if(!def)return;
   const s=def.configKey?catSettings[def.configKey]:{};
   const presetSnapshot=window.CalcPresets&&typeof window.CalcPresets.questionSnapshot==="function"?window.CalcPresets.questionSnapshot():null;
-  cur=presetSnapshot||def.gen(s);inputs=[""];field=0;
+  cur=presetSnapshot||def.gen(s);inputs=[""];field=0;mascotQuestionSeq++;
   const presetNumber=window.CalcPresets&&typeof window.CalcPresets.questionNumber==="function"?window.CalcPresets.questionNumber():0;
   qcount=presetNumber||qcount+1;
   $("count").textContent=qcount;$("feedback").textContent="";
@@ -1101,7 +1101,17 @@ function renderQ(){
   line.innerHTML=questionHTML(curQuizId);
 }
 
+let lastMascotFeedbackKey="";
+function sendMascotFeedback(ok){
+  if(window.parent===window||window.location.origin==="null"||!cur)return;
+  const questionKey=curQuizId+":"+mascotQuestionSeq+":"+field+":"+(ok?"yes":"no");
+  if(questionKey===lastMascotFeedbackKey)return;
+  lastMascotFeedbackKey=questionKey;
+  try{window.parent.postMessage({source:"calc-practice",type:"mascot-feedback",outcome:ok?"correct":"wrong",key:questionKey},window.location.origin);}catch(e){}
+}
+
 function flash(ok,idx){
+  sendMascotFeedback(ok);
   const wrongAction=!ok&&window.CalcPresets&&typeof window.CalcPresets.onWrong==="function"?window.CalcPresets.onWrong():null;
   const sel=idx!=null?`.ansbox[data-i="${idx}"]`:".ansbox";
   const box=$("qline").querySelector(sel)||$("qline").querySelector(".ansbox");

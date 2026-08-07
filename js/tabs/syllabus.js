@@ -207,6 +207,14 @@ function toggleChapter(chId, subId) {
       appState.progress[chId].nextRevisionAt = addDaysISO(new Date(), 1);
     }
     updateStreak();
+    try {
+      const sub = getActiveSubjects().find(s => s.id === subId);
+      const subjectDone = !!(sub && sub.chapters.length && sub.chapters.every(c => appState.progress[c.id]?.done));
+      window.dispatchEvent(new CustomEvent('examzen:mascot', { detail: {
+        kind: 'celebrate', key: 'chapter:' + chId + ':' + appState.progress[chId].completedAt,
+        message: subjectDone ? sub.name + ' complete — excellent work!' : 'Chapter complete — great progress!'
+      }}));
+    } catch (e) {}
     showToast('Chapter marked complete! 🎯 First revision: tomorrow', 'success');
   } else {
     showToast('Chapter unmarked.', 'info');

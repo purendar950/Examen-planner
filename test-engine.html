@@ -4175,7 +4175,7 @@ localStorage.setItem(QUIZ_RESPONSE_STREAM_KEY, responseStream);
   const totalAllowedTime = Object.values(SECTION_TIMERS)
   .reduce((sum, t) => sum + t, 0);
 
- const firebasePayload = {
+  const firebasePayload = {
     name: USER_DISPLAY_NAME,
     score: totalMarks,
     total: maxTotalMarks,
@@ -4190,6 +4190,29 @@ localStorage.setItem(QUIZ_RESPONSE_STREAM_KEY, responseStream);
     submittedAt: (isAuto === "silent" && answers.originalTimestamp) ? answers.originalTimestamp : Date.now()
     
   };
+
+  // Hand one aggregate outcome back to app.html. The exam engine is a separate
+  // page and does not load the floating tutor; app init consumes/removes this.
+  if (isAuto !== "silent") {
+    const mascotResult = JSON.stringify({
+      kind: "feedback",
+      outcome: Number(accuracy) >= 60 ? "correct" : "wrong",
+      key: "exam:" + QUIZ_ID + ":" + firebasePayload.submittedAt,
+      message: Number(accuracy) >= 60
+        ? "Test complete — " + accuracy + "% accuracy!"
+        : "Test complete — review your weak sections"
+    });
+    let stored = false;
+    try {
+      sessionStorage.setItem("examzen:mascot:pending-result", mascotResult);
+      stored = true;
+    } catch (e) {}
+    // Embedded/private contexts can deny session storage independently. A
+    // small local fallback is consumed and deleted by app init on return.
+    if (!stored) {
+      try { localStorage.setItem("examzen:mascot:pending-result", mascotResult); } catch (e) {}
+    }
+  }
 
 
 // Only save to Firebase if NOT in silent sync mode

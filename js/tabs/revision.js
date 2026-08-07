@@ -31,7 +31,10 @@ function addDaysToISODate(iso, days) {
   x.setUTCDate(x.getUTCDate() + days);
   return x.toISOString().slice(0, 10);
 }
-function todayISO() { return new Date().toISOString().slice(0, 10); }
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 function daysUntil(isoDate) {
   const today = new Date(todayISO());
   const target = new Date(isoDate);
@@ -264,7 +267,7 @@ function scheduleNextRevision(chId, rating) {
   const intervals = REVISION_INTERVALS[rating] || REVISION_INTERVALS.medium;
   const idx = Math.min(revCount, intervals.length - 1);
   const gapDays = intervals[idx];
-  const nextAt = addDaysISO(new Date(), gapDays);
+  const nextAt = addDaysToISODate(todayISO(), gapDays);
   p.revisionCount = revCount + 1;
   p.lastRevisedAt = todayISO();
   p.nextRevisionAt = nextAt;
@@ -275,7 +278,7 @@ function scheduleNextRevision(chId, rating) {
     gapDays,
     masteryAfter: Math.min(MASTERY_LEVELS, p.revisionCount)
   });
-  return { nextAt, gapDays, newCount: p.revisionCount };
+  return { nextAt, gapDays, previousCount: revCount, newCount: p.revisionCount };
 }
 
 function openReviseModal(chId) {
@@ -349,19 +352,37 @@ function submitRevision(chId, rating) {
     forgot: '😵 No worries — back on the queue in ' + result.gapDays + ' day(s)'
   };
   showToast(messages[rating] + ' · Mastery ' + result.newCount + '/5', 'success');
-  bumpRevisionStreak();
+  const streakResult = bumpRevisionStreak();
+  const masteredNow = result.previousCount < MASTERY_LEVELS && result.newCount >= MASTERY_LEVELS;
+  const streakMilestone = streakResult.advanced && [3, 7, 14, 30, 60, 100].includes(streakResult.count);
+  if (masteredNow || streakMilestone) {
+    try {
+      window.dispatchEvent(new CustomEvent('examzen:mascot', { detail: {
+        kind: 'celebrate',
+        key: masteredNow
+          ? 'mastered:' + chId
+          : 'revision-streak:' + streakResult.count + ':' + todayISO(),
+        message: masteredNow
+          ? 'Chapter mastered — brilliant work!'
+          : streakResult.count + '-day revision streak!'
+      }}));
+    } catch (e) {}
+  }
 }
 
 function bumpRevisionStreak() {
   const today = todayISO();
-  if (appState.lastRevisionDate === today) return;
-  if (appState.lastRevisionDate === addDaysISO(new Date(), -1)) {
+  if (appState.lastRevisionDate === today) {
+    return { count: appState.revisionStreak || 0, advanced: false };
+  }
+  if (appState.lastRevisionDate === addDaysToISODate(today, -1)) {
     appState.revisionStreak = (appState.revisionStreak || 0) + 1;
   } else {
     appState.revisionStreak = 1;
   }
   appState.lastRevisionDate = today;
   saveProgress();
+  return { count: appState.revisionStreak || 0, advanced: true };
 }
 
 function renderRevisionQueue() {

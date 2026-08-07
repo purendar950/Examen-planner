@@ -173,7 +173,28 @@
   // re-renders are skipped when it is not, and resume from localStorage later.
   function tutorVisible() {
     if (tutorDock() === 'float') return !!(floatBody() && floatOpen());
-    return state.tab === 'tutor' && !!shellBody();
+    // Panel ownership alone is not visibility: the shell remains mounted when
+    // navigation leaves YouTube, and the selected Tutor sub-tab is remembered.
+    // Only suppress unread state while that exact workspace is on screen.
+    return state.tab === 'tutor' && !!shellBody() && onYouTubePage() && currentView() === 'ai';
+  }
+  var _lastPresentedHistoryKey = '';
+  function emitTutorViewed() {
+    if (!tutorVisible()) return;
+    var historyKey = chatKey();
+    _lastPresentedHistoryKey = historyKey;
+    try {
+      window.dispatchEvent(new CustomEvent('examzen:tutor-viewed', {
+        detail: { historyKey: historyKey }
+      }));
+    } catch (e) {}
+  }
+  function syncTutorViewedPresentation() {
+    if (!tutorVisible()) { _lastPresentedHistoryKey = ''; return; }
+    if (chatKey() !== _lastPresentedHistoryKey) emitTutorViewed();
+  }
+  function emitMascot(detail) {
+    try { window.dispatchEvent(new CustomEvent('examzen:mascot', { detail: detail })); } catch (e) {}
   }
   // Video scope needs an id to send. It stays usable off the YouTube tab while a
   // video is still loaded, so a student can keep asking about the lecture they
@@ -3511,7 +3532,7 @@
       if (j.error && j.error !== 'no_captions') { contentEl().innerHTML = errHtml(j); return; }
       var qs = j.questions || [];
       if (!qs.length) { contentEl().innerHTML = '<div class="ai-muted">Could not generate questions.</div>'; return; }
-      quiz = { qs: qs, idx: 0, correct: 0, wrong: [] };
+      quiz = { qs: qs, idx: 0, correct: 0, wrong: [], mascotAttempt: Date.now().toString(36) };
       renderQ();
       checkLangs('quiz', n, false);        // refresh "already generated" bar
     }).catch(function (e) {
@@ -3540,9 +3561,15 @@
       if (j === ans) btn.classList.add('correct');
       if (j === k && k !== ans) btn.classList.add('wrong');
     });
-    if (k === ans) quiz.correct++; else quiz.wrong.push(q);
+    var correct = k === ans;
+    if (correct) quiz.correct++; else quiz.wrong.push(q);
+    emitMascot({
+      kind: 'feedback', outcome: correct ? 'correct' : 'wrong',
+      key: 'ai-quiz:' + (quiz.mascotAttempt || 'attempt') + ':' + quiz.idx,
+      message: correct ? 'Correct — keep going!' : 'Not this one — review the explanation'
+    });
     var fb = document.getElementById('ai-q-fb');
-    fb.innerHTML = '<div class="ai-md" style="margin:8px 0">' + (k === ans ? '✅ Correct. ' : '❌ ') + mdToHtml(q.explanation || '') + '</div>' +
+    fb.innerHTML = '<div class="ai-md" style="margin:8px 0">' + (correct ? '✅ Correct. ' : '❌ ') + mdToHtml(q.explanation || '') + '</div>' +
       '<button class="ai-btn" id="ai-q-next">' + (quiz.idx + 1 < quiz.qs.length ? 'Next →' : 'See result') + '</button>';
     document.getElementById('ai-q-next').onclick = function () { quiz.idx++; renderQ(); };
   }
@@ -4003,6 +4030,7 @@
     if (tutorDock() === 'float' && window.TutorFloat && typeof window.TutorFloat.syncChrome === 'function') {
       window.TutorFloat.syncChrome();
     }
+    emitTutorViewed();
   }
 
   /* ── Dock hand-off ────────────────────────────────────────────────────────
@@ -4065,6 +4093,7 @@
     var host = floatBody();
     if (!host) return;
     if (!adoptTutorInto(host)) renderTutor();
+    emitTutorViewed();
     // The panel can no longer show the same chat, so leave a signpost there.
     if (state.tab === 'tutor' && shellBody()) renderBody();
     refreshLibraryCoverage();
@@ -4105,6 +4134,7 @@
       host.setAttribute('data-ai-tab', 'tutor');
       syncPanelHeader();
       if (!adoptTutorInto(host)) renderTutor();
+      emitTutorViewed();
       // Bringing the chat back means the AI Study workspace is wanted again —
       // popping out had handed the right column to Course Content.
       if (onYouTubePage()) persistView('ai');
@@ -4184,9 +4214,11 @@
     // Request-level lifecycle is independent of whichever video/course the UI
     // currently shows. Emit before optional memory work so a TutorMemory error
     // cannot strand the floating character in Thinking.
+    var visibleAtSettle = tutorVisible() && chatKey() === historyKey;
+    if (!visibleAtSettle) _lastPresentedHistoryKey = '';
     try {
       window.dispatchEvent(new CustomEvent('examzen:tutor-settled', {
-        detail: { turnId: turnId, historyKey: historyKey }
+        detail: { turnId: turnId, historyKey: historyKey, visibleAtSettle: visibleAtSettle }
       }));
     } catch (e) {}
     // Update the student's cross-session memory with smarter triggers:
@@ -5292,10 +5324,12 @@
       // leaving the YouTube tab → restore the normal centered width for other pages
       var mc = document.querySelector('.main-content');
       if (mc) mc.classList.remove('ai-wide');
+      syncTutorViewedPresentation();
       return;
     }
     mountRightColumn();
     applyView();   // idempotent re-assert of visibility + split + full-width
+    syncTutorViewedPresentation();
     var v = curVid();
     if (v !== _lastVid) {
       _lastVid = v;
