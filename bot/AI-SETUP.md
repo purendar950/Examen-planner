@@ -32,19 +32,64 @@ browser tab can never overwrite the new tasks.
 
 ## 3. Give the Render bot Firebase access (one-time)
 
-The bot needs to read `config/ai` and write `telegramInbox`. Add the service-account JSON
-as an env var on Render (same JSON used by the GitHub Actions daily sender):
+**This is the single most common cause of "the bot is up but nothing works".** Without it
+the process still starts and still answers `/start`, so it looks healthy — but every
+Firestore-backed feature is dead:
+
+| Needs `FIREBASE_SERVICE_ACCOUNT` | Works without it |
+| --- | --- |
+| `/calc`, `/setup`, AI auto-schedule | `/start`, `/id`, `/help` |
+| Mini App practice, "Send to Telegram", screenshot relay | (Chat-ID replies only) |
+
+Note the GitHub Actions daily sender has its **own** copy of this secret, so the morning
+digest and calculation reminders can keep arriving while the Render bot has no access
+at all.
 
 1. Firebase Console → Project settings → **Service accounts** → **Generate new private key**.
 2. Render → your bot **Web Service** → **Environment** → add:
    - `TELEGRAM_BOT_TOKEN` = (existing) bot token from @BotFather
-   - `FIREBASE_SERVICE_ACCOUNT` = paste the **entire** JSON (one variable)
+   - `FIREBASE_SERVICE_ACCOUNT` = the **entire** JSON, in one variable
 3. The bot's **Build** command is `npm install` and **Start** is `node bot-server.js`
-   (root directory `bot`). `firebase-admin` is now in `package.json`, so a redeploy installs it.
+   (root directory `bot`). `firebase-admin` is in `package.json`, so a redeploy installs it.
 4. Click **Manual Deploy → Deploy latest commit**.
 
-> If `FIREBASE_SERVICE_ACCOUNT` is missing, the bot still replies with Chat IDs,
-> but AI auto-scheduling stays off (logged on startup).
+### If the JSON keeps getting mangled, use base64
+
+The loader repairs the usual paste damage by itself (surrounding quotes, a BOM, real
+newlines inside `private_key`, double-escaped `\n`) and logs when it does. When a
+dashboard still corrupts the value, sidestep it — base64 has no braces or newlines to
+break, and the bot accepts it directly:
+
+```bash
+base64 -w0 service-account.json     # macOS: base64 -i service-account.json
+```
+
+Paste that single line as `FIREBASE_SERVICE_ACCOUNT` instead.
+
+### Verify without reading logs
+
+```
+GET https://<your-bot-host>/health
+```
+
+```json
+{ "ok": true, "bot": "alive", "firestore": "ready", "commands": ["/start", "/calc", "/id", "/setup", "/help"] }
+```
+
+`firestore: "ready"` is the only healthy answer. Otherwise `reason` names the problem:
+
+| `reason` | Meaning |
+| --- | --- |
+| `not-set` | the env var is absent or empty on this service |
+| `not-json` | the value is neither JSON nor base64 — usually truncated on paste |
+| `incomplete` | parsed, but no `project_id` / `private_key` — wrong file? |
+| `bad-private-key` | `private_key` is not a PEM block |
+| `rejected` | Firebase refused the credentials — key revoked, or wrong project |
+
+`/health` deliberately returns **200** even when unhealthy, so a platform health check
+cannot roll a deploy back over it; read the body, not the status. The precise parser
+error stays in the boot logs, which print a `FIRESTORE UNAVAILABLE` banner naming the
+cause and the fix. Never exposed over HTTP — it can quote the credential.
 
 ## 4. Firestore security rules
 

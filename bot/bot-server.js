@@ -43,27 +43,136 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-/* ── Firebase Admin (optional but required for AI auto-scheduling) ─────────── */
-let db = null;
-try {
-  const admin = require('firebase-admin');
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT || '';
-  if (raw.trim()) {
-    const svc = JSON.parse(raw);
-    if (svc.project_id && svc.private_key) {
-      admin.initializeApp({ credential: admin.credential.cert(svc) });
-      db = admin.firestore();
-      global._fbAdmin = admin; // for FieldValue
-      console.log(`✅ Firebase Admin ready (project: ${svc.project_id}) — AI auto-schedule enabled`);
-    } else {
-      console.warn('⚠️  FIREBASE_SERVICE_ACCOUNT incomplete — AI auto-schedule disabled.');
-    }
-  } else {
-    console.warn('⚠️  FIREBASE_SERVICE_ACCOUNT not set — AI auto-schedule disabled (Chat-ID replies still work).');
+/* ── Firebase Admin ─────────────────────────────────────────────────────────
+   Everything past the Chat-ID reply needs Firestore: /calc, /setup, the AI
+   auto-schedule, the Mini App routes and both send proxies all go through `db`.
+   When `db` is null each of them fails in its own way, so one mis-pasted env
+   var shows up as several unrelated bugs — which is exactly how it was reported.
+
+   The value arrives through a hosting dashboard, and that is where it gets
+   damaged: some UIs wrap a pasted value in quotes, some strip the real newlines
+   out of `private_key`, shells prepend a BOM, and round-tripping through an
+   editor can double-escape the `\n` sequences. Every one of those ends as a null
+   `db`. So accept the value in each shape it realistically arrives in, repair
+   `private_key`, and when it still cannot be used say which of those was wrong
+   rather than one generic line. */
+
+/* A raw control character inside a JSON string is invalid JSON — which is what
+   a `private_key` pasted with real newlines produces. Escape them only where
+   they matter, inside string literals: escaping the newlines that pretty-print
+   the document would corrupt it instead of repairing it. */
+function escapeControlCharsInJsonStrings(text) {
+  const replacements = { '\n': '\\n', '\r': '\\r', '\t': '\\t' };
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (escaped) { out += ch; escaped = false; continue; }
+    if (ch === '\\') { out += ch; escaped = true; continue; }
+    if (ch === '"') { inString = !inString; out += ch; continue; }
+    out += inString && replacements[ch] ? replacements[ch] : ch;
   }
-} catch (e) {
-  console.warn('⚠️  Could not init Firebase Admin:', e.message, '— AI auto-schedule disabled.');
+  return out;
 }
+
+/* → { serviceAccount } on success, else { code, detail }.
+   `code` is a fixed token safe to expose on /health; `detail` can quote the
+   parser error, which may echo part of the value, so it stays in the logs. */
+function parseServiceAccount(rawValue) {
+  let raw = String(rawValue == null ? '' : rawValue).replace(/^\uFEFF/, '').trim();
+  if (!raw) return { code: 'not-set', detail: 'FIREBASE_SERVICE_ACCOUNT is empty or not set' };
+
+  /* A dashboard or shell that wraps the value in double quotes also escapes the
+     quotes inside it, so stripping the outer pair alone leaves `{\"type\":…` —
+     still not parseable. Decoding the whole thing as the JSON string literal it
+     has become recovers the document properly; the plain strip is the fallback
+     for a wrap that is not a valid literal. */
+  if (raw.length > 1 && raw.startsWith('"') && raw.endsWith('"')) {
+    let unwrapped = null;
+    try {
+      const decoded = JSON.parse(raw);
+      if (typeof decoded === 'string') unwrapped = decoded;
+    } catch (error) { /* not a valid literal — fall back below */ }
+    raw = (unwrapped === null ? raw.slice(1, -1) : unwrapped).trim();
+  } else if (raw.length > 1 && raw.startsWith("'") && raw.endsWith("'")) {
+    raw = raw.slice(1, -1).trim();
+  }
+
+  /* Base64 carries no braces or newlines for a dashboard to mangle, so it is
+     the shape to fall back on when the raw JSON keeps arriving broken. */
+  if (!raw.startsWith('{')) {
+    const decoded = Buffer.from(raw, 'base64').toString('utf8').trim();
+    if (decoded.startsWith('{')) raw = decoded;
+  }
+  if (!raw.startsWith('{')) return { code: 'not-json', detail: 'value is neither JSON nor base64-encoded JSON' };
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (firstError) {
+    try {
+      parsed = JSON.parse(escapeControlCharsInJsonStrings(raw));
+      console.warn('⚠️  FIREBASE_SERVICE_ACCOUNT contained unescaped newlines — repaired in memory. Prefer the base64 form.');
+    } catch (secondError) {
+      return { code: 'not-json', detail: `JSON.parse failed: ${firstError.message}` };
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return { code: 'not-json', detail: 'value did not decode to an object' };
+
+  /* A key that survived an extra round of escaping arrives as two-character
+     "\n" sequences with no real newlines, and the PEM parser rejects it. */
+  if (typeof parsed.private_key === 'string'
+    && !parsed.private_key.includes('\n') && parsed.private_key.includes('\\n')) {
+    parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
+    console.warn('⚠️  FIREBASE_SERVICE_ACCOUNT private_key was double-escaped — repaired in memory.');
+  }
+
+  if (!parsed.project_id) return { code: 'incomplete', detail: 'no project_id field' };
+  if (!parsed.private_key) return { code: 'incomplete', detail: 'no private_key field' };
+  if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(parsed.private_key)) {
+    return { code: 'bad-private-key', detail: 'private_key is not a PEM block' };
+  }
+  return { serviceAccount: parsed };
+}
+
+let db = null;
+/* Surfaced by GET /health so a deployment can be checked without log access. */
+const FIRESTORE_STATUS = { code: 'init' };
+
+/* The old single console.warn scrolled past unnoticed for however long this has
+   been broken, so state the blast radius and the fix at the point of failure. */
+function reportFirestoreDown(code, detail) {
+  FIRESTORE_STATUS.code = code;
+  console.error('══════════════════════════════════════════════════════════════════');
+  console.error(`❌ FIRESTORE UNAVAILABLE (${code}) — ${detail}`);
+  console.error('   Disabled: /calc, /setup, AI auto-schedule, Mini App practice,');
+  console.error('             "Send to Telegram", screenshot relay.');
+  console.error('   Working:  /start, /id, /help (Chat-ID replies only).');
+  console.error('   Fix:      set FIREBASE_SERVICE_ACCOUNT on the bot host to the');
+  console.error('             full service-account JSON (or its base64), redeploy.');
+  console.error('   Verify:   GET /health → {"firestore":"ready"}');
+  console.error('══════════════════════════════════════════════════════════════════');
+}
+
+function initFirestore() {
+  const loaded = parseServiceAccount(process.env.FIREBASE_SERVICE_ACCOUNT);
+  if (loaded.code) {
+    reportFirestoreDown(loaded.code, loaded.detail);
+    return;
+  }
+  try {
+    const admin = require('firebase-admin');
+    admin.initializeApp({ credential: admin.credential.cert(loaded.serviceAccount) });
+    db = admin.firestore();
+    global._fbAdmin = admin; // for FieldValue / Timestamp
+    FIRESTORE_STATUS.code = 'ready';
+    console.log(`✅ Firebase Admin ready (project: ${loaded.serviceAccount.project_id}) — Firestore features enabled`);
+  } catch (error) {
+    db = null;
+    reportFirestoreDown('rejected', `Firebase Admin rejected the credentials: ${error.message}`);
+  }
+}
+initFirestore();
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 console.log('🤖 StudyPlanner Bot running (long-polling)...');
@@ -1160,8 +1269,16 @@ bot.onText(/^\/calc(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
       { parse_mode: 'HTML' }).catch(() => {});
     return;
   }
+  /* Not the user's fault and nothing they can do, so say so rather than leaving
+     them retrying — and leave a trace, since this path used to log nothing at
+     all and the failure was invisible server-side. */
   if (!db) {
-    bot.sendMessage(chatId, '⚠️ Server config missing — practice abhi nahi bhej sakta.').catch(() => {});
+    console.error(`❌ /calc unavailable — Firestore is not configured (${FIRESTORE_STATUS.code}). See /health.`);
+    bot.sendMessage(chatId,
+      '⚠️ <b>Server-side dikkat hai</b> — bot ka database connection missing hai, is liye main tumhare ' +
+      'saved presets padh nahi sakta. Yeh tumhari galti nahi hai, admin ko bata do.\n\n' +
+      'Tab tak app ke <b>Calculation</b> tab se practice kar sakte ho.',
+      { parse_mode: 'HTML', disable_web_page_preview: true }).catch(() => {});
     return;
   }
 
@@ -1644,10 +1761,30 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  /* Health check */
+  /* Health check. "Alive" alone was misleading: the process answers this even
+     when every Firestore-backed feature is dead, which is how a missing
+     FIREBASE_SERVICE_ACCOUNT went unnoticed. */
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('StudyPlanner Bot is alive 🤖');
+    res.end(`StudyPlanner Bot is alive 🤖${db ? '' : ' — but Firestore is UNAVAILABLE, see /health'}`);
+    return;
+  }
+
+  /* Deployment check. Deliberately always 200: an uptime monitor or a platform
+     health check pointed here must not roll a deploy back over this, and `/`
+     stays plain text for the keep-alive ping. `reason` is the fixed token from
+     FIRESTORE_STATUS — the parser detail is never exposed, because it can quote
+     the credential. `commands` confirms which build is actually live. */
+  if (req.method === 'GET' && (req.url === '/health' || req.url === '/healthz')) {
+    const ready = !!db;
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({
+      ok: ready,
+      bot: 'alive',
+      firestore: ready ? 'ready' : 'unavailable',
+      reason: ready ? undefined : FIRESTORE_STATUS.code,
+      commands: BOT_COMMANDS.map(entry => '/' + entry.command)
+    }));
     return;
   }
 
