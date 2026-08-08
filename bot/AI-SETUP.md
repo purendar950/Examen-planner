@@ -91,7 +91,35 @@ cannot roll a deploy back over it; read the body, not the status. The precise pa
 error stays in the boot logs, which print a `FIRESTORE UNAVAILABLE` banner naming the
 cause and the fix. Never exposed over HTTP — it can quote the credential.
 
-## 4. Firestore security rules
+## 4. Exactly one instance may run
+
+The bot uses **long polling**, and Telegram hands each update to exactly one
+`getUpdates` consumer. A second running copy does not just duplicate work — it competes
+for updates and answers them with **its own build and its own configuration**.
+
+Observed symptom: one `/calc` produced three different replies — a stale build's preset
+list, the current build's buttons, and `⚠️ Server-side dikkat hai` from a third instance
+that had no `FIREBASE_SERVICE_ACCOUNT`. Nothing looks broken in any single log; the bot
+just appears to behave at random.
+
+Telegram reports the collision as HTTP 409, which the bot now prints as an
+`ANOTHER BOT INSTANCE IS POLLING THIS TOKEN` banner naming the build that logged it.
+
+To find the duplicate, check `/health` on **every** URL that might be running this bot —
+old Render services, a second instance of the current one, a local `node bot-server.js`:
+
+```json
+"instance": { "id": "…", "service": "examen-planner-2", "commit": "f9f37af", "branch": "main", "startedAt": "…" }
+```
+
+Two URLs reporting **different `commit` values are both live and competing**. Keep one
+service, suspend or delete the rest. `GET /` shows the same identity in one line, so
+`curl` is enough for a quick sweep.
+
+> Scaling this service to more than one instance breaks it for the same reason — the bot
+> must stay at a single instance.
+
+## 5. Firestore security rules
 
 The admin writes `config/ai`. Make sure your rules allow admin writes to it, the same
 way `config/telegram` is allowed, e.g.:
@@ -105,7 +133,7 @@ match /config/{doc} {
 
 The bot uses the Admin SDK, which bypasses rules — no extra rule needed for it.
 
-## 5. Use it
+## 6. Use it
 
 A user who has connected Telegram (pasted their Chat ID in Profile → Daily Plan on Telegram)
 can now text the bot:

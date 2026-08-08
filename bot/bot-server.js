@@ -174,8 +174,24 @@ function initFirestore() {
 }
 initFirestore();
 
+/* Identifies this process in the logs and on /health. Several deployments of
+   this bot answering the same chat is otherwise almost impossible to diagnose:
+   the replies look like one bot behaving erratically, when in fact each came
+   from a different build. Render supplies these; a local run falls back to a
+   random id. */
+const INSTANCE = {
+  id: String(process.env.RENDER_INSTANCE_ID || crypto.randomBytes(6).toString('hex')).slice(-12),
+  service: process.env.RENDER_SERVICE_NAME || 'local',
+  commit: String(process.env.RENDER_GIT_COMMIT || '').slice(0, 7),
+  branch: String(process.env.RENDER_GIT_BRANCH || ''),
+  startedAt: new Date().toISOString()
+};
+function describeInstance() {
+  return `${INSTANCE.service}@${INSTANCE.commit || 'unknown'} (instance ${INSTANCE.id})`;
+}
+
 const bot = new TelegramBot(TOKEN, { polling: true });
-console.log('🤖 StudyPlanner Bot running (long-polling)...');
+console.log(`🤖 StudyPlanner Bot running (long-polling) — ${describeInstance()}`);
 
 /* ════════════════════════════════════════════════════════════════════════════
    HELPERS
@@ -746,9 +762,45 @@ bot.on('photo', async (msg) => {
   }
 });
 
-/* ── Polling error handler ──────────────────────────────────────────────── */
+/* ── Polling error handler ────────────────────────────────────────────────
+   Telegram hands each update to exactly one getUpdates consumer, so a second
+   process polling the same token does not merely duplicate work — it competes
+   for updates and answers them with whatever build and configuration it happens
+   to be running. That is how a single /calc produced three different replies,
+   one of them "Server-side dikkat hai" from an instance with no Firestore
+   credential while a healthy instance answered the same command correctly.
+
+   Telegram reports the collision as HTTP 409, which used to scroll past as a
+   one-line warning among ordinary network noise. It is the only authoritative
+   signal that a duplicate exists, so it gets said properly. */
+function isPollingConflict(error) {
+  const body = error && error.response && error.response.body;
+  if (body && Number(body.error_code) === 409) return true;
+  return /\b409\b|terminated by other getupdates|only one bot instance/i
+    .test(String((error && error.message) || ''));
+}
+
+let lastConflictWarnAt = 0;
 bot.on('polling_error', (err) => {
-  console.error('⚠️  Polling error:', err.code, err.message);
+  if (!isPollingConflict(err)) {
+    console.error('⚠️  Polling error:', err.code, err.message);
+    return;
+  }
+  /* A conflict repeats on every poll, so the banner is rate-limited rather than
+     printed dozens of times a minute. */
+  if (Date.now() - lastConflictWarnAt < 60000) return;
+  lastConflictWarnAt = Date.now();
+  console.error('══════════════════════════════════════════════════════════════════');
+  console.error('❌ ANOTHER BOT INSTANCE IS POLLING THIS TOKEN (Telegram 409)');
+  console.error(`   This instance: ${describeInstance()}`);
+  console.error('   Only one process may long-poll a bot token. While two run,');
+  console.error('   updates are split between them, so a reply comes from whichever');
+  console.error('   wins the race — including stale builds, and instances with no');
+  console.error('   Firestore credential that answer "Server-side dikkat hai".');
+  console.error('   Fix: stop every other deployment of this bot — an older Render');
+  console.error('        service, a second instance of this one, or a local run —');
+  console.error('        then check GET /health on each URL and keep one build.');
+  console.error('══════════════════════════════════════════════════════════════════');
 });
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -1809,7 +1861,8 @@ const server = http.createServer((req, res) => {
      FIREBASE_SERVICE_ACCOUNT went unnoticed. */
   if (req.method === 'GET' && req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end(`StudyPlanner Bot is alive 🤖${db ? '' : ' — but Firestore is UNAVAILABLE, see /health'}`);
+    res.end(`StudyPlanner Bot is alive 🤖 — ${describeInstance()}`
+      + `${db ? '' : ' — but Firestore is UNAVAILABLE, see /health'}`);
     return;
   }
 
@@ -1826,6 +1879,10 @@ const server = http.createServer((req, res) => {
       bot: 'alive',
       firestore: ready ? 'ready' : 'unavailable',
       reason: ready ? undefined : FIRESTORE_STATUS.code,
+      /* Identifies the build answering here. Comparing this across every bot URL
+         is how a duplicate deployment gets found: two services reporting
+         different commits are both competing for the same updates. */
+      instance: INSTANCE,
       commands: BOT_COMMANDS.map(entry => '/' + entry.command)
     }));
     return;
