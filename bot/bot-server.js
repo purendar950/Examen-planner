@@ -191,10 +191,17 @@ function describeInstance() {
   return `${INSTANCE.service}@${INSTANCE.commit || 'unknown'} (instance ${INSTANCE.id})`;
 }
 
+/* Telegram only delivers the update types explicitly asked for here, and the
+   default omits the ones this bot depends on: `channel_post` (/setup typed in a
+   channel) and `my_chat_member` (the bot being promoted). Kept as a named
+   constant because /health reports it — a hardcoded second copy had already
+   drifted out of sync with this list once. */
+const ALLOWED_UPDATES = ['message', 'callback_query', 'channel_post', 'edited_channel_post', 'my_chat_member'];
+
 const bot = new TelegramBot(TOKEN, {
   polling: {
     params: {
-      allowed_updates: ['message', 'callback_query', 'channel_post', 'edited_channel_post']
+      allowed_updates: ALLOWED_UPDATES
     }
   }
 });
@@ -723,7 +730,15 @@ bot.on('channel_post', async (msg) => {
       `<code>/setup ${chat.id}</code>\n\n` +
       `Isse tumhara account is channel se link ho jayega aur screenshots yahan aayenge.`,
       { parse_mode: 'HTML' }
-    ).catch(() => {});
+    ).catch(err => {
+      /* A silent .catch() here is what made this look like "nothing happens":
+         the update arrived and the write succeeded, but the reply was refused
+         (usually because the bot has no "Post Messages" right) and the reason
+         was thrown away. Say it loudly instead. */
+      const why = (err && err.response && err.response.body && err.response.body.description) || err.message;
+      console.error(`❌ /setup channel_post: received in channel ${chat.id} but REPLY FAILED — ${why}`);
+      console.error('   → Grant the bot "Post Messages" in the channel, or link it from your DM with /setup ' + chat.id);
+    });
     console.log(`✅ /setup channel_post → channel:${chat.id} title:${chat.title || ''}`);
   } catch (e) {
     const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
@@ -732,6 +747,87 @@ bot.on('channel_post', async (msg) => {
       { parse_mode: 'HTML' }
     ).catch(() => {});
     console.error('❌ /setup channel_post error:', errMsg);
+  }
+});
+
+/* ── Auto-link on promotion (my_chat_member) ──────────────────────────────
+   The reliable way to connect a channel. `channel_post` has two failure modes
+   that both look like "nothing happens": the update may not be delivered, and
+   a channel post carries no `from`, so even when it arrives the bot cannot tell
+   whose account to link — it has to ask the user to relay the id by hand.
+
+   `my_chat_member` has neither problem. Telegram sends it the moment the bot's
+   own membership changes, and it carries BOTH halves at once: `chat` is the
+   channel, and `from` is the user who promoted the bot — which for a private
+   chat is also their DM chat id. So the link is established with no command at
+   all, and the confirmation goes to the DM, which always works because the user
+   has already pressed Start. It also reports `can_post_messages`, so a missing
+   post right is stated up front instead of silently eating every later reply. */
+bot.on('my_chat_member', async (update) => {
+  const chat = update && update.chat;
+  const actor = update && update.from;
+  const status = update && update.new_chat_member && update.new_chat_member.status;
+  if (!chat || !actor || !status) return;
+  if (chat.type === 'private') return;                       // DM membership is not a destination
+  if (!['administrator', 'member', 'creator'].includes(status)) return;  // demoted/kicked/left
+  if (!db) return;
+
+  const actorId = String(actor.id);
+  const label = chat.type === 'channel' ? 'channel' : 'group';
+
+  try {
+    /* A forum supergroup still gets its own "📸 Images" topic, so preserve that
+       path; everything else is a direct destination. */
+    let topicId = null;
+    if (chat.type === 'supergroup' && chat.is_forum) {
+      try {
+        const topic = await bot.createForumTopic(chat.id, '📸 Images', { icon_color: 0x6FB9F0 });
+        topicId = (topic && topic.message_thread_id) || null;
+      } catch (topicError) {
+        /* No "Manage Topics" right — fall back to posting in the group itself
+           rather than refusing the whole link. */
+        topicId = null;
+      }
+    }
+
+    await db.collection('telegram_groups').doc(actorId).set({
+      groupId:       chat.id,
+      imagesTopicId: topicId,
+      groupTitle:    chat.title || '',
+      username:      actor.username || '',
+      chatType:      chat.type,
+      linkedVia:     'my_chat_member',
+      updatedAt:     new Date().toISOString()
+    }, { merge: true });
+
+    /* Only channels expose can_post_messages; for groups an admin can post. */
+    const canPost = chat.type !== 'channel'
+      || update.new_chat_member.can_post_messages !== false;
+
+    const where = topicId
+      ? `is group ke <b>📸 Images</b> topic mein`
+      : `"<b>${escapeTelegramHtml(String(chat.title || chat.id).slice(0, 60))}</b>" ${label} mein`;
+
+    const lines = [
+      `✅ <b>Setup complete!</b>`,
+      `Tumhare Turbo screenshots ab ${where} aayenge.`,
+      ``,
+      `(Daily study plan pehle jaisa yahan DM mein hi milega.)`
+    ];
+    if (!canPost) {
+      lines.push('',
+        `⚠️ <b>Ek cheez baaki hai:</b> mujhe is ${label} mein <b>"Post Messages"</b> permission nahi hai, ` +
+        `is liye main wahan kuch bhej nahi paunga. Channel Settings → Administrators → Studyplannerbot → ` +
+        `<b>Post Messages</b> ON kar do.`);
+    }
+
+    /* The DM is the dependable surface here: the actor has started the bot, so
+       this delivers even when the bot cannot post in the channel itself. */
+    await bot.sendMessage(actorId, lines.join('\n'), { parse_mode: 'HTML' });
+    console.log(`✅ my_chat_member link → user:${actorId} chat:${chat.id} type:${chat.type} topic:${topicId || 'none'} canPost:${canPost}`);
+  } catch (error) {
+    const why = (error && error.response && error.response.body && error.response.body.description) || error.message;
+    console.error(`❌ my_chat_member link failed for user:${actorId} chat:${chat.id} — ${why}`);
   }
 });
 
@@ -2705,7 +2801,7 @@ const server = http.createServer((req, res) => {
       bot: 'alive',
       firestore: ready ? 'ready' : 'unavailable',
       reason: ready ? undefined : FIRESTORE_STATUS.code,
-      allowedUpdates: ['message', 'callback_query', 'channel_post', 'edited_channel_post'],
+      allowedUpdates: ALLOWED_UPDATES,
       /* Identifies the build answering here. Comparing this across every bot URL
          is how a duplicate deployment gets found: two services reporting
          different commits are both competing for the same updates. */
