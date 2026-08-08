@@ -1355,7 +1355,7 @@ function setCors(req, res) {
 }
 
 function sendJson(res, status, body) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
   res.end(JSON.stringify(body));
 }
 
@@ -1960,7 +1960,22 @@ function registerAccountCommand(options) {
       const body = typeof reply === 'string' ? reply : reply.text;
       const sendOptions = { parse_mode: 'HTML', disable_web_page_preview: true };
       if (reply && reply.rows && reply.rows.length) sendOptions.reply_markup = { inline_keyboard: reply.rows };
-      await bot.sendMessage(chatId, body, sendOptions);
+      try {
+        await bot.sendMessage(chatId, body, sendOptions);
+      } catch (sendError) {
+        /* Older Telegram clients can reject a web_app keyboard. Keep the
+           command useful by retrying once with the ordinary browser URL. */
+        if (!reply || !Array.isArray(reply.fallbackRows)
+            || !isTelegramButtonRejection(sendError && sendError.message)) throw sendError;
+        const fallbackOptions = {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true
+        };
+        if (reply.fallbackRows.length) {
+          fallbackOptions.reply_markup = { inline_keyboard: reply.fallbackRows };
+        }
+        await bot.sendMessage(chatId, body, fallbackOptions);
+      }
       console.log(`✅ /${name} → uid:${account.uid}`);
     } catch (error) {
       const actionable = [400, 403, 409, 429].includes(error && error.status);
@@ -2323,15 +2338,28 @@ function parseAddMockArgument(argument) {
 
 async function queueMockAttempt(uid, item) {
   const ref = db.collection('users').doc(uid);
-  await db.runTransaction(async transaction => {
+  return db.runTransaction(async transaction => {
     const snapshot = await transaction.get(ref);
     const data = snapshot.exists ? (snapshot.data() || {}) : {};
     const inbox = Array.isArray(data.mockAttemptInbox) ? data.mockAttemptInbox : [];
-    if (inbox.some(entry => entry && entry.id === item.id)) return;
+    const existing = inbox.find(entry => entry && entry.id === item.id);
+    if (existing) {
+      const comparable = value => JSON.stringify({
+        id: value && value.id,
+        exam: value && value.exam,
+        tier: value && value.tier,
+        attempt: value && value.attempt
+      });
+      if (comparable(existing) !== comparable(item)) {
+        throw Object.assign(new Error('This form changed after an earlier save attempt. Reopen it and save again.'), { status: 409 });
+      }
+      return { duplicate: true, item: existing };
+    }
     if (inbox.length >= 20) {
       throw Object.assign(new Error('20 mock results sync hone baaki hain. StudyPlanner app ek baar kholo, phir try karo.'), { status: 409 });
     }
     transaction.set(ref, { mockAttemptInbox: [item].concat(inbox) }, { merge: true });
+    return { duplicate: false, item };
   });
 }
 
@@ -2344,9 +2372,20 @@ function countSavedMocks(appState) {
 
 async function buildAddMockMessage(account, argument) {
   if (!argument) {
-    return '➕ <b>Mock marks add karo</b>\n\n<code>/addmock cgl t1 38 32.5 41 36 | Testbook Mock 14 | 2026-08-08</code>\n\n'
-      + 'Valid exams/tiers: <code>cgl t1/t2</code>, <code>ntpc cbt1/cbt2</code>, <code>gd cbt</code>, '
-      + '<code>ibps pre/mains</code>, <code>upsc pre</code>, <code>uppcs pre</code>, <code>bpsc pre</code>.';
+    const base = String(FALLBACK_APP_BASE_URL || '').replace(/\/+$/, '');
+    const formUrl = `${base}/addmock/index.html`;
+    const formRows = /^https:\/\//i.test(base)
+      ? [[{ text: '📝 Open Mock Marks Form', web_app: { url: formUrl } }]]
+      : [];
+    return {
+      text: '➕ <b>Add Mock Marks</b>\n\nTap the button to choose your exam and enter section-wise marks in a simple form.\n\n'
+        + 'Manual entry also works:\n<code>/addmock cgl t1 38 32.5 41 36 | Test name | 2026-08-08</code>',
+      rows: formRows,
+      /* A plain URL does not receive Telegram initData and therefore cannot
+         authenticate this form. If Telegram rejects web_app, retry the same
+         manual-entry instructions without an unusable browser button. */
+      fallbackRows: []
+    };
   }
   const parsed = parseAddMockArgument(argument);
   const existing = countSavedMocks(accountAppState(account));
@@ -3070,6 +3109,146 @@ async function miniAppSaveResult(body) {
   return { saved: true, attemptId: result.id };
 }
 
+/* Public, presentation-only view of the server's mock schema. Bounds are still
+   enforced again on submit; returning them here only lets the form render the
+   correct section labels and input limits without maintaining a third copy. */
+function mockMiniAppExamConfig() {
+  return Object.entries(TELEGRAM_MOCK_EXAMS).map(([examId, exam]) => ({
+    id: examId,
+    label: exam.label,
+    tiers: Object.entries(exam.tiers).map(([tierId, tier]) => ({
+      id: tierId,
+      label: tier.label,
+      sections: tier.sections.map(section => ({
+        key: section[0],
+        name: section[1],
+        max: Math.round(Number(section[2]) * 100) / 100,
+        min: Math.round(Number(section[3]) * 100) / 100
+      }))
+    }))
+  }));
+}
+
+async function miniAppMockConfig(body) {
+  const { telegramUserId } = verifyTelegramInitData(body && body.initData);
+  requireMiniAppBackend();
+  await enforceFirestoreRateLimit('mockMiniAppRates', telegramUserId, 30, 60000,
+    'Too many requests. Wait a minute and reopen the mock form.');
+  const account = await miniAppAccountForTelegramUser(telegramUserId);
+  const selected = String(accountAppState(account).selectedExam || '');
+  return {
+    exams: mockMiniAppExamConfig(),
+    defaultExam: TELEGRAM_MOCK_EXAMS[selected] ? selected : 'cgl',
+    today: todayIST()
+  };
+}
+
+function sanitizeMiniAppMock(body, account) {
+  body = body && typeof body === 'object' ? body : {};
+  const requestId = String(body.requestId || '');
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(requestId)) {
+    throw Object.assign(new Error('A valid request id is required. Reopen the mock form.'), { status: 400 });
+  }
+
+  const exam = String(body.exam || '').toLowerCase();
+  const examCfg = TELEGRAM_MOCK_EXAMS[exam];
+  if (!examCfg) throw Object.assign(new Error('Choose a valid exam.'), { status: 400 });
+  const tier = normalizeMockTier(exam, body.tier);
+  const tierCfg = examCfg.tiers[tier];
+  if (!tierCfg) throw Object.assign(new Error('Choose a valid tier or stage.'), { status: 400 });
+
+  const rawMarks = body.marks && typeof body.marks === 'object' && !Array.isArray(body.marks)
+    ? body.marks
+    : null;
+  if (!rawMarks) throw Object.assign(new Error('Section marks are required.'), { status: 400 });
+  const expectedKeys = new Set(tierCfg.sections.map(section => section[0]));
+  const receivedKeys = Object.keys(rawMarks);
+  if (receivedKeys.length !== expectedKeys.size || receivedKeys.some(key => !expectedKeys.has(key))) {
+    throw Object.assign(new Error('Enter marks for every section shown in the form.'), { status: 400 });
+  }
+
+  const sections = {};
+  let total = 0;
+  tierCfg.sections.forEach(section => {
+    const raw = rawMarks[section[0]];
+    if (raw === '' || raw == null || (typeof raw !== 'number' && typeof raw !== 'string')) {
+      throw Object.assign(new Error(`${section[1]} marks are required.`), { status: 400 });
+    }
+    const mark = Number(raw);
+    const minimum = Math.round(Number(section[3]) * 100) / 100;
+    const maximum = Math.round(Number(section[2]) * 100) / 100;
+    if (!Number.isFinite(mark) || mark < minimum || mark > maximum) {
+      throw Object.assign(new Error(`${section[1]} marks must be between ${minimum} and ${maximum}.`), { status: 400 });
+    }
+    const rounded = Math.round(mark * 100) / 100;
+    sections[section[0]] = { m: rounded };
+    total += rounded;
+  });
+
+  const date = String(body.date || '');
+  if (!validMockCalendarDate(date)) {
+    throw Object.assign(new Error('Choose a valid mock date.'), { status: 400 });
+  }
+  const suppliedName = String(body.name || '').trim();
+  if (suppliedName.length > 60) {
+    throw Object.assign(new Error('Mock name must be 60 characters or fewer.'), { status: 400 });
+  }
+  /* Mini App retries must not change identity merely because the first write is
+     now counted as pending. Use a stable descriptive default; the request id
+     still lets separate unnamed submissions remain separate attempts. */
+  const name = suppliedName || `${examCfg.label} ${tierCfg.label} Mock`;
+  const roundedTotal = Math.round(total * 100) / 100;
+  /* Bind the deterministic retry id to the normalized payload. An unchanged
+     retry reuses the id, while edited marks/name/date produce a genuinely new
+     attempt instead of acknowledging different data under an old id. */
+  const payloadFingerprint = JSON.stringify({ exam, tier, name, date, sections, total: roundedTotal });
+  const id = 'tgmock-' + crypto.createHash('sha256')
+    .update(`${account.uid}\n${requestId}\n${payloadFingerprint}`)
+    .digest('hex')
+    .slice(0, 24);
+  return {
+    id,
+    exam,
+    tier,
+    examCfg,
+    tierCfg,
+    attempt: {
+      id,
+      name,
+      date,
+      s: sections,
+      total: roundedTotal,
+      weakTopics: []
+    }
+  };
+}
+
+async function miniAppSaveMock(body) {
+  const { telegramUserId } = verifyTelegramInitData(body && body.initData, MINI_APP_RESULT_MAX_AGE_SEC);
+  requireMiniAppBackend();
+  await enforceFirestoreRateLimit('mockMiniAppResultRates', telegramUserId, 20, 60000,
+    'Too many mock results. Wait a minute and try again.');
+  const account = await miniAppAccountForTelegramUser(telegramUserId);
+  const result = sanitizeMiniAppMock(body, account);
+  const queued = await queueMockAttempt(account.uid, {
+    id: result.id,
+    exam: result.exam,
+    tier: result.tier,
+    attempt: result.attempt,
+    queuedAt: new Date().toISOString()
+  });
+  const storedAttempt = queued && queued.item && queued.item.attempt
+    ? queued.item.attempt
+    : result.attempt;
+  console.log(`📝 Mock Mini App saved → uid:${account.uid} ${result.exam}/${result.tier} total:${storedAttempt.total}`);
+  return {
+    attemptId: storedAttempt.id,
+    name: storedAttempt.name,
+    total: storedAttempt.total,
+    duplicate: !!(queued && queued.duplicate)
+  };
+}
+
 /* Collect a bounded JSON body. Mini App payloads are small; anything larger is
    rejected before it is parsed. */
 function readJsonBody(req, res, maxBytes) {
@@ -3152,6 +3331,36 @@ const server = http.createServer((req, res) => {
       instance: INSTANCE,
       commands: BOT_COMMANDS.map(entry => '/' + entry.command)
     }));
+    return;
+  }
+
+  /* ── Mini App: load mock exam/tier/section metadata ── */
+  if (req.method === 'POST' && req.url === '/mini/mock-config') {
+    (async () => {
+      try {
+        const body = await readJsonBody(req, res, 8192);
+        const result = await miniAppMockConfig(body);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        console.error('❌ /mini/mock-config error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
+    return;
+  }
+
+  /* ── Mini App: validate and queue a graphical mock-marks submission ── */
+  if (req.method === 'POST' && req.url === '/mini/mock-result') {
+    (async () => {
+      try {
+        const body = await readJsonBody(req, res, 8192);
+        const result = await miniAppSaveMock(body);
+        sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        console.error('❌ /mini/mock-result error:', error.message);
+        if (!error.responded) sendJson(res, error.status || 500, { ok: false, error: error.message || 'request failed' });
+      }
+    })();
     return;
   }
 

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://telegram.org; style-src 'self'; connect-src https://examen-planner-2.onrender.com http://localhost:3000; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Add Mock Marks</title>
+  <link rel="stylesheet" href="./addmock.css?v=20260808a">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <span class="hero-icon" aria-hidden="true">↗</span>
+      <div>
+        <p class="eyebrow">StudyPlanner</p>
+        <h1>Add Mock Marks</h1>
+        <p class="subtitle">Enter section scores and save the result directly from Telegram.</p>
+      </div>
+    </header>
+
+    <section id="status-card" class="status-card" role="status" aria-live="polite">
+      <span id="status-spinner" class="spinner" aria-hidden="true"></span>
+      <div>
+        <strong id="status-title">Loading your mock form</strong>
+        <p id="status-text">Checking your linked StudyPlanner account…</p>
+      </div>
+      <button id="retry-button" class="secondary-button" type="button" hidden>Try again</button>
+    </section>
+
+    <form id="mock-form" class="form" hidden novalidate>
+      <section class="card form-grid">
+        <label class="field">
+          <span>Exam</span>
+          <select id="exam-select" required></select>
+        </label>
+        <label class="field">
+          <span>Tier / Stage</span>
+          <select id="tier-select" required></select>
+        </label>
+        <label class="field field-wide">
+          <span>Mock name <small>optional</small></span>
+          <input id="mock-name" type="text" maxlength="60" autocomplete="off" placeholder="e.g. Testbook Mock 14">
+        </label>
+        <label class="field field-wide">
+          <span>Date</span>
+          <input id="mock-date" type="date" required>
+        </label>
+      </section>
+
+      <section class="card sections-card">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Section scores</p>
+            <h2 id="tier-heading">Enter marks</h2>
+          </div>
+          <span class="hint">Blank = 0</span>
+        </div>
+        <div id="section-fields" class="section-fields"></div>
+      </section>
+
+      <aside class="total-card" aria-live="polite">
+        <div>
+          <span>Total score</span>
+          <strong id="total-score">0</strong>
+        </div>
+        <span id="maximum-score" class="maximum-score">out of 0</span>
+      </aside>
+
+      <p id="form-error" class="form-error" role="alert" hidden></p>
+      <button id="save-button" class="save-button" type="submit">
+        <span id="save-label">Save Mock Result</span>
+        <span aria-hidden="true">→</span>
+      </button>
+      <p class="sync-note">The result will appear in Mock Tests when StudyPlanner next syncs.</p>
+    </form>
+
+    <section id="success-card" class="success-card" hidden aria-live="polite">
+      <span class="success-icon" aria-hidden="true">✓</span>
+      <p class="eyebrow">Saved successfully</p>
+      <h2 id="success-name">Mock result added</h2>
+      <p id="success-details"></p>
+      <button id="close-button" class="save-button" type="button">Close Telegram Form</button>
+    </section>
+  </main>
+
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="./addmock.js?v=20260808a"></script>
+</body>
+</html>
