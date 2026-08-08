@@ -196,6 +196,8 @@ function getDefaultState() {
     deletedTaskKeys: [],     // content signatures of deleted regenerable tasks — stops a deleted plan/mock/video task re-appearing next day
     videoStudyLog: {},       // {dateStr: seconds} — real in-app video watch time credited to that day's Study Time
     telegramProcessedIds: [], // inbox item ids already materialised — makes the drain idempotent so a deleted Telegram task never comes back
+    calculationProcessedAttemptIds: [], // Telegram Mini App calculation results already merged into history
+    mockProcessedAttemptIds: [], // /addmock queue items already merged into mock history
     calculationPractice: { version: 2, presets: [], dailyPresetId: '', history: [] },
     planSchedule: null,   // date -> [topic items] for the active syllabus plan
     /* Telegram daily-plan delivery. The GitHub Actions sender reads this from
@@ -957,6 +959,11 @@ if (auth && !_isBadProtocol) {
            into the calculation history. Also before the local-edit guard, so a
            result always lands even while this tab has pending edits. ── */
         try { if (typeof drainCalculationAttempts === 'function') drainCalculationAttempts(snapData); } catch(e) {}
+
+        /* ── /addmock: merge section-wise marks queued by the Telegram command
+           before local-state reconciliation, using the same save-then-clear
+           ownership rule as Calculation Practice. ── */
+        try { if (typeof drainMockAttempts === 'function') drainMockAttempts(snapData); } catch(e) {}
 
         if (typeof newProfile !== 'undefined') {
           const oldSuspended = EZ_PROFILE && EZ_PROFILE.trialSuspended;
