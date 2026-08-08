@@ -453,6 +453,139 @@ function drainCalculationAttempts(snapData) {
   } catch (e) {}
 }
 
+/* ══════════════════════════════════════════════
+   TELEGRAM COMMAND → MOCK TEST HISTORY
+   /addmock queues a complete section-wise attempt in the top-level
+   `mockAttemptInbox`. Validate it again here, merge it into the browser-owned
+   appState, persist that state, and only then remove the processed queue items.
+══════════════════════════════════════════════ */
+function drainMockAttempts(snapData) {
+  try {
+    const inbox = snapData && snapData.mockAttemptInbox;
+    if (!Array.isArray(inbox) || !inbox.length || typeof MOCK_EXAMS === 'undefined') return;
+    if (!appState.mocks || typeof appState.mocks !== 'object') appState.mocks = {};
+    if (!Array.isArray(appState.mockProcessedAttemptIds)) appState.mockProcessedAttemptIds = [];
+
+    const processed = appState.mockProcessedAttemptIds;
+    const known = new Set(processed.filter(Boolean));
+    Object.keys(appState.mocks).forEach(exam => {
+      const tiers = appState.mocks[exam] || {};
+      Object.keys(tiers).forEach(tier => {
+        (Array.isArray(tiers[tier]) ? tiers[tier] : []).forEach(attempt => {
+          if (attempt && attempt.id) known.add(String(attempt.id));
+        });
+      });
+    });
+
+    const isCalendarDate = value => {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
+      const parts = String(value).split('-').map(Number);
+      const parsed = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+      return parsed.getUTCFullYear() === parts[0]
+        && parsed.getUTCMonth() === parts[1] - 1
+        && parsed.getUTCDate() === parts[2];
+    };
+    const handledIds = new Set();
+    const newlyProcessed = [];
+    let added = 0;
+
+    inbox.forEach(item => {
+      if (!item || typeof item !== 'object') return;
+      const id = String(item.id || '').slice(0, 80);
+      if (!id) return;
+      if (known.has(id)) {
+        /* A second snapshot can repeat this inbox item while the first merge is
+           still being saved. Do not clear the durable queue merely because the
+           id exists in memory; wait until no local appState write is pending. */
+        const pendingLocalWrite = typeof _localDirty !== 'undefined' && _localDirty;
+        if (!pendingLocalWrite) handledIds.add(id);
+        return;
+      }
+
+      const exam = String(item.exam || '');
+      const tier = String(item.tier || '');
+      const examCfg = MOCK_EXAMS[exam];
+      const tierCfg = examCfg && examCfg.tiers && examCfg.tiers[tier];
+      const raw = item.attempt && typeof item.attempt === 'object' ? item.attempt : null;
+      if (!tierCfg || !raw || String(raw.id || '') !== id || !isCalendarDate(raw.date)) return;
+
+      const sections = {};
+      let total = 0;
+      for (const section of tierCfg.sections) {
+        const value = raw.s && raw.s[section.k] && Number(raw.s[section.k].m);
+        const negative = section.neg != null ? section.neg : tierCfg.neg;
+        const minimum = Number.isFinite(Number(negative))
+          ? -Math.round((Number(section.q) || 0) * Number(negative) * 100) / 100
+          : 0;
+        if (!Number.isFinite(value) || value < minimum || value > section.max) return;
+        const mark = Math.round(value * 100) / 100;
+        sections[section.k] = { m: mark };
+        total += mark;
+      }
+
+      if (!appState.mocks[exam] || typeof appState.mocks[exam] !== 'object') appState.mocks[exam] = {};
+      if (!Array.isArray(appState.mocks[exam][tier])) appState.mocks[exam][tier] = [];
+      appState.mocks[exam][tier].push({
+        id,
+        name: String(raw.name || 'Telegram Mock').trim().slice(0, 60) || 'Telegram Mock',
+        date: raw.date,
+        s: sections,
+        total: Math.round(total * 100) / 100,
+        weakTopics: []
+      });
+      known.add(id);
+      handledIds.add(id);
+      newlyProcessed.push(id);
+      added++;
+    });
+
+    if (!handledIds.size) return;
+    if (newlyProcessed.length) {
+      appState.mockProcessedAttemptIds = processed.concat(newlyProcessed).slice(-200);
+    }
+
+    const saveUid = currentUser && currentUser.uid;
+    /* Mark the merge dirty synchronously before saveProgressNow reaches its
+       first await. The Firestore snapshot listener checks this flag immediately
+       after the drain; without it, that same (pre-merge) snapshot can reconcile
+       over the attempt before the write starts. */
+    if (added) {
+      if (typeof saveProgress === 'function') saveProgress();
+      else if (typeof _localDirty !== 'undefined') _localDirty = true;
+    }
+    const flush = added && typeof saveProgressNow === 'function'
+      ? saveProgressNow()
+      : Promise.resolve();
+    Promise.resolve(flush).then(() => {
+      const stored = typeof _localDirty === 'undefined' || !_localDirty;
+      if (!stored || !db || !currentUser || currentUser.uid !== saveUid) return;
+      const ref = db.collection('users').doc(saveUid);
+      /* Filter only ids from this snapshot so a command arriving during the
+         save is not erased by a blanket `mockAttemptInbox: []` update. */
+      return db.runTransaction(async transaction => {
+        const latest = await transaction.get(ref);
+        const latestInbox = latest.exists && Array.isArray((latest.data() || {}).mockAttemptInbox)
+          ? latest.data().mockAttemptInbox
+          : [];
+        transaction.update(ref, {
+          mockAttemptInbox: latestInbox.filter(item => !handledIds.has(String(item && item.id || '')))
+        });
+      });
+    }).catch(() => { /* Keep the queue intact; a later snapshot retries safely. */ });
+
+    if (added) {
+      try {
+        const page = document.getElementById('page-mocks');
+        if (page && page.classList.contains('active') && typeof mockRenderPage === 'function') mockRenderPage();
+      } catch (e) {}
+      try { if (typeof mockUpdateDashSummary === 'function') mockUpdateDashSummary(); } catch (e) {}
+      if (typeof showToast === 'function') {
+        showToast('📝 ' + added + ' Telegram mock result' + (added > 1 ? 's' : '') + ' added.', 'success');
+      }
+    }
+  } catch (e) {}
+}
+
 /* Drain the telegramInbox array from a Firestore user-doc snapshot into the
    planner. Safe to call on every snapshot — it no-ops when the inbox is empty
    and clears the inbox after merging so items are processed exactly once. */

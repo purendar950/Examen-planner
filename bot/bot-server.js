@@ -465,6 +465,7 @@ bot.onText(/^\/help$/, (msg) => {
     `/exam — Exam countdown\n` +
     `/stats — Practice streak aur accuracy (<code>/streak</code> bhi)\n` +
     `/mock — Mock test scores aur trend\n` +
+    `/addmock — Section-wise mock marks seedha add karo\n` +
     `/ask — Koi doubt poocho (AI tutor)\n` +
     `/status — Account aur bot ka health check\n` +
     `/id — Chat ID dobara dekho\n` +
@@ -495,6 +496,7 @@ const BOT_COMMANDS = [
   { command: 'exam',    description: 'Days left until your exam' },
   { command: 'stats',   description: 'Practice streak and accuracy' },
   { command: 'mock',    description: 'Mock test scores and trend' },
+  { command: 'addmock', description: 'Add section-wise mock test marks' },
   { command: 'ask',     description: 'Ask a study doubt' },
   { command: 'status',  description: 'Check your account and the bot' },
   { command: 'id',      description: 'Show your Chat ID again' },
@@ -2193,6 +2195,190 @@ function buildStatsMessage(account) {
   return lines.join('\n');
 }
 
+/* ── /addmock ────────────────────────────────────────────────────────────
+   Mirror of MOCK_EXAMS in js/tabs/mock-tests-data.js. The command accepts one
+   mark per section in this order, then queues the attempt outside appState so
+   an open browser tab cannot overwrite it with a whole-state save. */
+const TELEGRAM_MOCK_EXAMS = {
+  cgl: { label: 'SSC CGL', tiers: {
+    t1: { label: 'Tier I', sections: [['gi', 'Reasoning', 50, -12.5], ['ga', 'Awareness', 50, -12.5], ['qa', 'Quant', 50, -12.5], ['en', 'English', 50, -12.5]] },
+    t2: { label: 'Tier II', sections: [['ma', 'Maths', 90, -30], ['re', 'Reasoning', 90, -30], ['en', 'English', 135, -45], ['ga', 'Awareness', 75, -25], ['ck', 'Computer', 60, -20]] }
+  } },
+  ntpc: { label: 'RRB NTPC', tiers: {
+    cbt1: { label: 'CBT 1', sections: [['ma', 'Maths', 30, -10], ['gi', 'Reasoning', 30, -10], ['ga', 'Awareness', 40, -40 / 3]] },
+    cbt2: { label: 'CBT 2', sections: [['ma', 'Maths', 35, -35 / 3], ['gi', 'Reasoning', 35, -35 / 3], ['ga', 'Awareness', 50, -50 / 3]] }
+  } },
+  gd: { label: 'SSC GD', tiers: {
+    cbt: { label: 'CBT', sections: [['gi', 'Reasoning', 40, -10], ['gk', 'GK', 40, -10], ['em', 'Maths', 40, -10], ['eh', 'English/Hindi', 40, -10]] }
+  } },
+  ibps: { label: 'IBPS', tiers: {
+    pre: { label: 'Prelims', sections: [['en', 'English', 30, -7.5], ['qa', 'Quant', 35, -8.75], ['re', 'Reasoning', 35, -8.75]] },
+    mains: { label: 'Mains', sections: [['rc', 'Reasoning/Computer', 60, -11.25], ['ga', 'Awareness', 40, -10], ['en', 'English', 40, -8.75], ['di', 'Data Analysis', 60, -8.75]] }
+  } },
+  upsc: { label: 'UPSC', tiers: {
+    pre: { label: 'Prelims', sections: [['gs', 'GS', 200, -66], ['csat', 'CSAT', 200, -66.4]] }
+  } },
+  uppcs: { label: 'UPPCS', tiers: {
+    pre: { label: 'Prelims', sections: [['gs', 'GS', 200, -66], ['csat', 'CSAT', 200, -66]] }
+  } },
+  bpsc: { label: 'BPSC', tiers: {
+    pre: { label: 'Prelims', sections: [['gs', 'GS', 150, -50]] }
+  } }
+};
+
+function addMockUsageText() {
+  return 'Use: /addmock cgl t1 38 32.5 41 36 | Test name | YYYY-MM-DD\n'
+    + 'Valid: cgl(t1,t2), ntpc(cbt1,cbt2), gd(cbt), ibps(pre,mains), upsc(pre), uppcs(pre), bpsc(pre).';
+}
+
+function validMockCalendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
+  const parts = String(value).split('-').map(Number);
+  const parsed = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  return parsed.getUTCFullYear() === parts[0]
+    && parsed.getUTCMonth() === parts[1] - 1
+    && parsed.getUTCDate() === parts[2];
+}
+
+function normalizeMockTier(exam, value) {
+  const raw = String(value || '').toLowerCase().replace(/[-_\s]/g, '');
+  const aliases = {
+    cgl: { tier1: 't1', i: 't1', tier2: 't2', ii: 't2' },
+    ntpc: { '1': 'cbt1', '2': 'cbt2' },
+    ibps: { prelim: 'pre', prelims: 'pre' },
+    upsc: { prelim: 'pre', prelims: 'pre' },
+    uppcs: { prelim: 'pre', prelims: 'pre' },
+    bpsc: { prelim: 'pre', prelims: 'pre' }
+  };
+  return (aliases[exam] && aliases[exam][raw]) || raw;
+}
+
+function parseAddMockArgument(argument) {
+  const pieces = String(argument || '').split('|');
+  if (!String(argument || '').trim()) {
+    throw Object.assign(new Error(addMockUsageText()), { status: 400 });
+  }
+  if (pieces.length > 3) {
+    throw Object.assign(new Error('Name ya date mein | use mat karo. ' + addMockUsageText()), { status: 400 });
+  }
+
+  const tokens = pieces[0].trim().split(/\s+/).filter(Boolean);
+  const exam = String(tokens.shift() || '').toLowerCase();
+  const examCfg = TELEGRAM_MOCK_EXAMS[exam];
+  if (!examCfg) {
+    throw Object.assign(new Error('Exam valid nahi hai. ' + addMockUsageText()), { status: 400 });
+  }
+  const tier = normalizeMockTier(exam, tokens.shift());
+  const tierCfg = examCfg.tiers[tier];
+  if (!tierCfg) {
+    throw Object.assign(new Error(`${examCfg.label} tier valid nahi hai. Options: ${Object.keys(examCfg.tiers).join(', ')}.`), { status: 400 });
+  }
+  if (tokens.length !== tierCfg.sections.length) {
+    const order = tierCfg.sections.map(section => `${section[0]}(max ${section[2]})`).join(' ');
+    throw Object.assign(new Error(`${tierCfg.sections.length} section marks chahiye, is order mein: ${order}.`), { status: 400 });
+  }
+
+  const sectionMarks = {};
+  let total = 0;
+  tierCfg.sections.forEach((section, index) => {
+    const raw = tokens[index];
+    if (!/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(raw)) {
+      throw Object.assign(new Error(`${section[1]} marks valid number hona chahiye.`), { status: 400 });
+    }
+    const mark = Number(raw);
+    if (!Number.isFinite(mark) || mark < section[3] || mark > section[2]) {
+      throw Object.assign(new Error(`${section[1]} marks ${Math.round(section[3] * 100) / 100} se ${section[2]} ke beech hona chahiye.`), { status: 400 });
+    }
+    const rounded = Math.round(mark * 100) / 100;
+    sectionMarks[section[0]] = { m: rounded };
+    total += rounded;
+  });
+
+  let name = String(pieces[1] || '').trim();
+  let date = String(pieces[2] || '').trim();
+  /* Allow a date without a custom name: `/addmock … | 2026-08-08`. */
+  if (pieces.length === 2 && validMockCalendarDate(name)) {
+    date = name;
+    name = '';
+  }
+  date = date || todayIST();
+  if (!validMockCalendarDate(date)) {
+    throw Object.assign(new Error('Date YYYY-MM-DD format mein valid calendar date honi chahiye.'), { status: 400 });
+  }
+  if (name.length > 60) {
+    throw Object.assign(new Error('Mock name 60 characters se chhota rakho.'), { status: 400 });
+  }
+
+  return {
+    exam,
+    tier,
+    examCfg,
+    tierCfg,
+    name,
+    date,
+    sections: sectionMarks,
+    total: Math.round(total * 100) / 100
+  };
+}
+
+async function queueMockAttempt(uid, item) {
+  const ref = db.collection('users').doc(uid);
+  await db.runTransaction(async transaction => {
+    const snapshot = await transaction.get(ref);
+    const data = snapshot.exists ? (snapshot.data() || {}) : {};
+    const inbox = Array.isArray(data.mockAttemptInbox) ? data.mockAttemptInbox : [];
+    if (inbox.some(entry => entry && entry.id === item.id)) return;
+    if (inbox.length >= 20) {
+      throw Object.assign(new Error('20 mock results sync hone baaki hain. StudyPlanner app ek baar kholo, phir try karo.'), { status: 409 });
+    }
+    transaction.set(ref, { mockAttemptInbox: [item].concat(inbox) }, { merge: true });
+  });
+}
+
+function countSavedMocks(appState) {
+  const mocks = appState && appState.mocks && typeof appState.mocks === 'object' ? appState.mocks : {};
+  return Object.values(mocks).reduce((examTotal, tiers) => examTotal
+    + Object.values(tiers && typeof tiers === 'object' ? tiers : {})
+      .reduce((tierTotal, attempts) => tierTotal + (Array.isArray(attempts) ? attempts.length : 0), 0), 0);
+}
+
+async function buildAddMockMessage(account, argument) {
+  if (!argument) {
+    return '➕ <b>Mock marks add karo</b>\n\n<code>/addmock cgl t1 38 32.5 41 36 | Testbook Mock 14 | 2026-08-08</code>\n\n'
+      + 'Valid exams/tiers: <code>cgl t1/t2</code>, <code>ntpc cbt1/cbt2</code>, <code>gd cbt</code>, '
+      + '<code>ibps pre/mains</code>, <code>upsc pre</code>, <code>uppcs pre</code>, <code>bpsc pre</code>.';
+  }
+  const parsed = parseAddMockArgument(argument);
+  const existing = countSavedMocks(accountAppState(account));
+  const pending = Array.isArray(account.data.mockAttemptInbox) ? account.data.mockAttemptInbox.length : 0;
+  const name = parsed.name || `Telegram Mock ${existing + pending + 1}`;
+  const id = 'tgmock-' + crypto.randomUUID().replace(/-/g, '').slice(0, 20);
+  const attempt = {
+    id,
+    name,
+    date: parsed.date,
+    s: parsed.sections,
+    total: parsed.total,
+    weakTopics: []
+  };
+  await queueMockAttempt(account.uid, {
+    id,
+    exam: parsed.exam,
+    tier: parsed.tier,
+    attempt,
+    queuedAt: new Date().toISOString()
+  });
+
+  const sectionLine = parsed.tierCfg.sections
+    .map(section => `${section[0].toUpperCase()} ${attempt.s[section[0]].m}`)
+    .join(' · ');
+  return `✅ <b>Mock marks add ho gaye!</b>\n\n`
+    + `<b>${escapeTelegramHtml(name)}</b> · ${escapeTelegramHtml(parsed.examCfg.label)} ${escapeTelegramHtml(parsed.tierCfg.label)}\n`
+    + `${escapeTelegramHtml(parsed.date)} · ${escapeTelegramHtml(sectionLine)}\n`
+    + `Total: <b>${attempt.total}</b>\n\n`
+    + 'StudyPlanner app khulte hi result Mock Tests mein sync ho jayega.';
+}
+
 /* ── /mock ───────────────────────────────────────────────────────────────
    appState.mocks is keyed exam → tier → attempts[], and neither key reaches the
    bot (both come from browser globals), so every bucket is flattened and sorted
@@ -2266,6 +2452,7 @@ registerAccountCommand({ name: 'pending', regex: /^\/pending(?:@\w+)?$/, limit: 
 registerAccountCommand({ name: 'exam', regex: /^\/exam(?:@\w+)?$/, limit: 6, build: buildExamMessage });
 registerAccountCommand({ name: 'stats', regex: /^\/(?:stats|streak)(?:@\w+)?$/, limit: 6, build: buildStatsMessage });
 registerAccountCommand({ name: 'mock', regex: /^\/mock(?:s)?(?:@\w+)?$/, limit: 6, build: buildMockMessage });
+registerAccountCommand({ name: 'addmock', regex: /^\/addmock(?:@\w+)?(?:\s+([\s\S]+))?$/, limit: 6, build: buildAddMockMessage });
 
 /* ── /ask — study doubts answered in the chat ─────────────────────────────
    Routed through whichever provider the admin selected in the panel, rather
