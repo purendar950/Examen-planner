@@ -1,11 +1,13 @@
 /**
  * StudyPlanner Telegram Bot Server
  * ─────────────────────────────────────────────────────────────────────────────
- * Two jobs:
+ * Three jobs:
  *   1. Reply with the user's Chat ID on /start  (existing connect flow)
  *   2. AI auto-schedule: when a connected user sends a task or a YouTube link,
  *      parse it with Groq, auto-detect the subject, and drop it into their
  *      planner To-Do list (via the user doc's `telegramInbox` field).
+ *   3. /calc: hand a saved Calculation Practice preset back on demand — the pull
+ *      counterpart to the scheduled reminder in scripts/send-calculation-reminders.js.
  *
  * Routes:
  *   GET  /            → health check
@@ -312,10 +314,13 @@ bot.onText(/^\/(id|chatid)$/, (msg) => {
 });
 
 /* ── /help ──────────────────────────────────────────────────────────────── */
+/* Keep this list, BOT_COMMANDS below, and the handlers themselves in sync — the
+   help text is hand-written, so a new command is invisible without all three. */
 bot.onText(/^\/help$/, (msg) => {
   bot.sendMessage(msg.chat.id,
     `📖 <b>StudyPlanner Bot Commands:</b>\n\n` +
     `/start — Apna Chat ID pao\n` +
+    `/calc — Aaj ki Calculation Practice turant shuru karo (<code>/calc &lt;name&gt;</code> se koi bhi preset)\n` +
     `/id — Chat ID dobara dekho\n` +
     `/setup — (Ek group mein) apne screenshots ke liye ek 📸 Images topic banao\n` +
     `/help — Yeh help message\n\n` +
@@ -328,6 +333,25 @@ bot.onText(/^\/help$/, (msg) => {
     { parse_mode: 'HTML', disable_web_page_preview: true }
   ).catch(err => console.error('sendMessage error:', err.message));
 });
+
+/* ── Command menu ──────────────────────────────────────────────────────────
+   Without setMyCommands Telegram shows no autocomplete list, so every command
+   above is discoverable only by reading /help — which itself has to be found
+   first. Registering the menu is per-bot state on Telegram's side, not per
+   process, so sending it on each boot simply overwrites the previous list.
+   `/chatid` is deliberately omitted: it is an alias of `/id` and would only
+   pad the menu. A failure here costs autocomplete, not any command, so it is
+   logged rather than fatal. */
+const BOT_COMMANDS = [
+  { command: 'start', description: 'Connect the bot and get your Chat ID' },
+  { command: 'calc',  description: "Start today's Calculation Practice" },
+  { command: 'id',    description: 'Show your Chat ID again' },
+  { command: 'setup', description: 'Send your screenshots to a group topic' },
+  { command: 'help',  description: 'What this bot can do' }
+];
+bot.setMyCommands(BOT_COMMANDS)
+  .then(() => console.log(`⌨️  Command menu registered (${BOT_COMMANDS.map(entry => '/' + entry.command).join(' ')})`))
+  .catch(err => console.warn('⚠️  setMyCommands failed:', err.message, '— commands still work, autocomplete may be stale.'));
 
 /* ── /setup ───────────────────────────────────────────────────────────────
    Option B: the user creates their OWN forum supergroup, adds this bot as an
@@ -1044,6 +1068,169 @@ async function sendCalculationPresetForUser(uid, presetId, requestId, presetFing
   console.log(`✅ Instant calculation preset → uid:${uid} preset:${preset.id}`);
   return { duplicate: false };
 }
+
+/* ── /calc — start Calculation Practice from the chat ─────────────────────────
+   Every other practice delivery is push-only: the scheduled reminder
+   (scripts/send-calculation-reminders.js) and the app's "Send to Telegram"
+   button both decide *when* a session arrives. A user who missed the reminder,
+   or who wants a second round, had no way to open one from Telegram. This is
+   the pull equivalent, and it deliberately reuses the reminder's presentation
+   (`calculationPresetText` + `calculationPracticeButtons`) so a preset looks
+   the same however it arrives.
+
+   Question generation stays in the Mini App: the QUIZZES engines live in an
+   inline <script> in calc/index.html and cannot be required here, so this hands
+   over a preset id and nothing more — exactly like the other delivery paths.
+
+   Authorization goes through `miniAppAccountForTelegramUser` (both halves of
+   the link must agree) rather than `findUserByChatId`, whose link-map fallback
+   would let anyone holding a shareable `?start=<uid>` link read another
+   account's preset names and settings.
+
+   No idempotency claim: `claimCalculationPresetRequest` exists to stop the
+   browser button double-submitting, whereas a typed command *is* the user
+   asking again on purpose. The rate limit is the right control here. */
+const CALC_COMMAND_USAGE = 'Daily preset ke liye <code>/calc</code> bhejo, ya kisi bhi preset ke liye <code>/calc &lt;name&gt;</code>.';
+const CALC_PRESET_LIST_LIMIT = 10;
+
+function calculationPresetLabel(preset) {
+  const icon = escapeTelegramHtml(String((preset && preset.icon) || '🧮').slice(0, 4));
+  const name = escapeTelegramHtml(String((preset && preset.name) || 'Practice').trim().slice(0, 40) || 'Practice');
+  return `${icon} <b>${name}</b>`;
+}
+
+function calculationPresetChoices(presets) {
+  const lines = presets.slice(0, CALC_PRESET_LIST_LIMIT).map(preset => `• ${calculationPresetLabel(preset)}`);
+  if (presets.length > CALC_PRESET_LIST_LIMIT) {
+    lines.push(`…aur ${presets.length - CALC_PRESET_LIST_LIMIT} more`);
+  }
+  return lines.join('\n');
+}
+
+/* Matching stays forgiving because the name is retyped from memory on a phone
+   keyboard: an exact id wins, then an exact name, then a unique prefix, then a
+   unique substring. A term that stays ambiguous asks rather than guessing,
+   since silently practising the wrong preset wastes the session. */
+function findCalculationPreset(presets, query) {
+  const term = String(query || '').trim().toLowerCase();
+  if (!term) return { preset: null, matches: [] };
+  const byId = presets.find(preset => String(preset.id || '').toLowerCase() === term);
+  if (byId) return { preset: byId, matches: [byId] };
+  const nameOf = preset => String(preset.name || '').trim().toLowerCase();
+  const tiers = [
+    presets.filter(preset => nameOf(preset) === term),
+    presets.filter(preset => nameOf(preset).startsWith(term)),
+    presets.filter(preset => nameOf(preset).includes(term))
+  ];
+  for (const candidates of tiers) {
+    if (candidates.length === 1) return { preset: candidates[0], matches: candidates };
+    if (candidates.length > 1) return { preset: null, matches: candidates };
+  }
+  return { preset: null, matches: [] };
+}
+
+/* Same Mini App button fallback as sendCalculationPresetForUser: a rejected
+   web_app button must not cost the user the whole message. */
+async function sendCalculationPracticeMessage(chatId, preset, note) {
+  const body = calculationPresetText(preset) + (note ? `\n\n${note}` : '');
+  const send = rows => bot.sendMessage(chatId, body, {
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: rows }
+  });
+  try {
+    return await send(calculationPracticeButtons(FALLBACK_APP_BASE_URL, preset.id));
+  } catch (buttonError) {
+    const description = (buttonError && buttonError.response && buttonError.response.body
+      && buttonError.response.body.description) || buttonError.message;
+    if (!isTelegramButtonRejection(description)) throw buttonError;
+    console.warn(`⚠️  Telegram refused the Mini App button (${description}) — sending the browser link instead.`);
+    return send(calculationPracticeButtons(FALLBACK_APP_BASE_URL, preset.id, { browserOnly: true }));
+  }
+}
+
+bot.onText(/^\/calc(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const query = match && match[1] ? String(match[1]).slice(0, 60) : '';
+
+  /* Mini App buttons are only valid in private chats, and a preset list is the
+     user's own data — neither belongs in a group. */
+  if (msg.chat.type !== 'private') {
+    bot.sendMessage(chatId, '⚠️ <b>/calc</b> sirf private chat mein chalta hai — mujhe DM karo.',
+      { parse_mode: 'HTML' }).catch(() => {});
+    return;
+  }
+  if (!db) {
+    bot.sendMessage(chatId, '⚠️ Server config missing — practice abhi nahi bhej sakta.').catch(() => {});
+    return;
+  }
+
+  try {
+    await enforceFirestoreRateLimit('calculationCommandRates', String(msg.from.id), 6, 60000,
+      'Bahut zyada requests. Ek minute wait karke dobara try karo.');
+    const account = await miniAppAccountForTelegramUser(msg.from.id);
+    const appState = account.data.appState && typeof account.data.appState === 'object' ? account.data.appState : {};
+    const calculation = appState.calculationPractice && typeof appState.calculationPractice === 'object'
+      ? appState.calculationPractice
+      : {};
+    const presets = (Array.isArray(calculation.presets) ? calculation.presets : []).filter(preset => preset && preset.id);
+
+    if (!presets.length) {
+      await bot.sendMessage(chatId,
+        '🧮 <b>Koi practice preset nahi mila.</b>\n\nApp mein <b>Calculation</b> tab kholo, ek preset banao ' +
+        '(ya template use karo), phir yahan <code>/calc</code> bhejo.',
+        { parse_mode: 'HTML', disable_web_page_preview: true });
+      return;
+    }
+
+    let preset;
+    if (query) {
+      const found = findCalculationPreset(presets, query);
+      if (!found.preset) {
+        const ambiguous = found.matches.length > 0;
+        const heading = ambiguous
+          ? `🤔 "<b>${escapeTelegramHtml(query)}</b>" se ek se zyada preset match hue:`
+          : `🤔 "<b>${escapeTelegramHtml(query)}</b>" naam ka koi preset nahi mila. Tumhare presets:`;
+        await bot.sendMessage(chatId,
+          `${heading}\n${calculationPresetChoices(ambiguous ? found.matches : presets)}\n\n${CALC_COMMAND_USAGE}`,
+          { parse_mode: 'HTML', disable_web_page_preview: true });
+        return;
+      }
+      preset = found.preset;
+    } else {
+      /* One preset needs no disambiguation, so treat it as the default even
+         when the user never marked a daily one. */
+      preset = presets.find(item => item.id === calculation.dailyPresetId)
+        || (presets.length === 1 ? presets[0] : null);
+      if (!preset) {
+        await bot.sendMessage(chatId,
+          `🧮 <b>Koi daily preset set nahi hai.</b> Tumhare presets:\n${calculationPresetChoices(presets)}\n\n${CALC_COMMAND_USAGE}`,
+          { parse_mode: 'HTML', disable_web_page_preview: true });
+        return;
+      }
+    }
+
+    /* `history` is written by the browser against its own local day, which for
+       these users is IST — the same key todayIST() produces. Mini App attempts
+       land in `calculationAttemptInbox` first, so a session finished inside
+       Telegram only counts here once the app drains it; the note is a nudge,
+       never a gate, so a stale read costs nothing. */
+    const history = Array.isArray(calculation.history) ? calculation.history : [];
+    const doneToday = history.some(entry => entry && entry.presetId === preset.id
+      && entry.date === todayIST() && entry.reason === 'completed');
+    const note = doneToday ? '✅ Aaj yeh preset already complete ho chuka hai — yeh bonus round hai.' : '';
+
+    await sendCalculationPracticeMessage(chatId, sanitizeCalculationPreset(preset), note);
+    console.log(`✅ /calc → uid:${account.uid} preset:${preset.id}`);
+  } catch (error) {
+    /* The thrown statuses carry copy written for the user (reconnect hints, Pro
+       upsell, rate limit); anything else is ours and must not leak. */
+    const actionable = [400, 403, 409, 429].includes(error && error.status);
+    if (!actionable) console.error('❌ /calc error:', (error && error.message) || error);
+    const message = actionable ? error.message : 'Practice bhejne mein dikkat hui. Thodi der baad try karo.';
+    bot.sendMessage(chatId, `⚠️ ${escapeTelegramHtml(message)}`, { parse_mode: 'HTML' }).catch(() => {});
+  }
+});
 
 /* ════════════════════════════════════════════════════════════════════════════
    TELEGRAM MINI APP — run Calculation Practice inside Telegram
