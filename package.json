@@ -10,8 +10,9 @@
     "prebuild": "npm run vendor:sync",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "check": "node --check js/core/auth.js && node --check js/core/dialog.js && node --check js/core/offline.js && node --check js/core/persistence.js && node --check js/planner-enhance.js && node --check js/tabs/plan-wizard.js && node --check js/tabs/youtube.js && node --check js/tabs/calc.js && node --check js/features/telegram.js && node --check calc/presets.js && node --check bot/bot-server.js && node --check scripts/send-calculation-reminders.js && node --check src/shared/offlineStore.js && node --check src/shared/storageService.js && node --check scripts/sync-vendor-assets.mjs && node --check vite.config.mjs && npm run test:telegram",
-    "test:telegram": "node tests/telegram-mini-app.test.mjs"
+    "check": "node --check js/core/auth.js && node --check js/core/dialog.js && node --check js/core/offline.js && node --check js/core/persistence.js && node --check js/planner-enhance.js && node --check js/tabs/plan-wizard.js && node --check js/tabs/youtube.js && node --check js/tabs/calc.js && node --check js/features/telegram.js && node --check calc/presets.js && node --check bot/bot-server.js && node --check scripts/send-calculation-reminders.js && node --check src/shared/offlineStore.js && node --check src/shared/storageService.js && node --check scripts/sync-vendor-assets.mjs && node --check vite.config.mjs && npm run test:telegram && npm run test:service-account",
+    "test:telegram": "node tests/telegram-mini-app.test.mjs",
+    "test:service-account": "node tests/service-account.test.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
