@@ -35,7 +35,8 @@ const TelegramBot = require('node-telegram-bot-api');
 const crypto      = require('crypto');
 const http        = require('http');
 const https       = require('https');
-const { isProUser } = require('../shared/proGating');
+/* `isLifetimePlan` is only used to word /status; the gate itself is isProUser. */
+const { isProUser, isLifetimePlan } = require('../shared/proGating');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TOKEN) {
@@ -446,6 +447,13 @@ bot.onText(/^\/help$/, (msg) => {
     `📖 <b>StudyPlanner Bot Commands:</b>\n\n` +
     `/start — Apna Chat ID pao\n` +
     `/calc — Aaj ki Calculation Practice turant shuru karo (<code>/calc &lt;name&gt;</code> se koi bhi preset)\n` +
+    `/plan — Aaj ka study plan\n` +
+    `/pending — Kya baaki hai\n` +
+    `/exam — Exam countdown\n` +
+    `/stats — Practice streak aur accuracy (<code>/streak</code> bhi)\n` +
+    `/mock — Mock test scores aur trend\n` +
+    `/ask — Koi doubt poocho (AI tutor)\n` +
+    `/status — Account aur bot ka health check\n` +
     `/id — Chat ID dobara dekho\n` +
     `/setup — (Ek group mein) apne screenshots ke liye ek 📸 Images topic banao\n` +
     `/help — Yeh help message\n\n` +
@@ -468,11 +476,18 @@ bot.onText(/^\/help$/, (msg) => {
    pad the menu. A failure here costs autocomplete, not any command, so it is
    logged rather than fatal. */
 const BOT_COMMANDS = [
-  { command: 'start', description: 'Connect the bot and get your Chat ID' },
-  { command: 'calc',  description: "Start today's Calculation Practice" },
-  { command: 'id',    description: 'Show your Chat ID again' },
-  { command: 'setup', description: 'Send your screenshots to a group topic' },
-  { command: 'help',  description: 'What this bot can do' }
+  { command: 'start',   description: 'Connect the bot and get your Chat ID' },
+  { command: 'calc',    description: "Start today's Calculation Practice" },
+  { command: 'plan',    description: "Today's study plan" },
+  { command: 'pending', description: "What's still left today" },
+  { command: 'exam',    description: 'Days left until your exam' },
+  { command: 'stats',   description: 'Practice streak and accuracy' },
+  { command: 'mock',    description: 'Mock test scores and trend' },
+  { command: 'ask',     description: 'Ask a study doubt' },
+  { command: 'status',  description: 'Check your account and the bot' },
+  { command: 'id',      description: 'Show your Chat ID again' },
+  { command: 'setup',   description: 'Send your screenshots to a group topic' },
+  { command: 'help',    description: 'What this bot can do' }
 ];
 bot.setMyCommands(BOT_COMMANDS)
   .then(() => console.log(`⌨️  Command menu registered (${BOT_COMMANDS.map(entry => '/' + entry.command).join(' ')})`))
@@ -1440,6 +1455,475 @@ bot.onText(/^\/calc(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
     const actionable = [400, 403, 409, 429].includes(error && error.status);
     if (!actionable) console.error('❌ /calc error:', (error && error.message) || error);
     const message = actionable ? error.message : 'Practice bhejne mein dikkat hui. Thodi der baad try karo.';
+    bot.sendMessage(chatId, `⚠️ ${escapeTelegramHtml(message)}`, { parse_mode: 'HTML' }).catch(() => {});
+  }
+});
+
+/* ════════════════════════════════════════════════════════════════════════════
+   READ-ONLY ACCOUNT COMMANDS
+   ─────────────────────────────────────────────────────────────────────────────
+   /status /plan /pending /exam /stats /streak /mock — everything the app already
+   stores, answered in the chat. None of them write user state: appState belongs
+   to the browser, and a direct write from here can be clobbered by any open tab
+   (the reason telegramInbox and calculationAttemptInbox exist).
+
+   They share one preamble — private chat, Firestore up, rate limit, the strict
+   both-halves account link — so it lives in registerAccountCommand() rather than
+   being restated seven times, and each handler is only about its own message.
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* Task and video extraction is the same logic the scheduled digests use. It is
+   imported rather than reimplemented so a chat reply can never disagree with the
+   6 AM message about what is still pending. */
+const tgLib = require('../scripts/telegram-lib');
+
+function accountAppState(account) {
+  return account && account.data && typeof account.data.appState === 'object' && account.data.appState
+    ? account.data.appState
+    : {};
+}
+
+function accountCalculation(account) {
+  const calculation = accountAppState(account).calculationPractice;
+  return calculation && typeof calculation === 'object' ? calculation : {};
+}
+
+/* Firestore stores dates as plain "YYYY-MM-DD", so day arithmetic is done at
+   noon UTC to stay clear of DST and timezone edges. */
+function daysBetweenDates(fromDate, toDate) {
+  const from = Date.parse(`${fromDate}T12:00:00Z`);
+  const to = Date.parse(`${toDate}T12:00:00Z`);
+  if (Number.isNaN(from) || Number.isNaN(to)) return null;
+  return Math.round((to - from) / 86400000);
+}
+
+function isDateString(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+}
+
+function registerAccountCommand(options) {
+  const { name, regex, limit, build } = options;
+  bot.onText(regex, async (msg, match) => {
+    const chatId = msg.chat.id;
+    if (msg.chat.type !== 'private') {
+      bot.sendMessage(chatId, `⚠️ <b>/${name}</b> sirf private chat mein chalta hai — mujhe DM karo.`,
+        { parse_mode: 'HTML' }).catch(() => {});
+      return;
+    }
+    if (!db) {
+      console.error(`❌ /${name} unavailable — Firestore is not configured (${FIRESTORE_STATUS.code}). See /health.`);
+      bot.sendMessage(chatId,
+        '⚠️ <b>Server-side dikkat hai</b> — bot ka database connection missing hai. '
+        + 'Yeh tumhari galti nahi hai, admin ko bata do.',
+        { parse_mode: 'HTML' }).catch(() => {});
+      return;
+    }
+    try {
+      await enforceFirestoreRateLimit(`command:${name}`, String(msg.from.id), limit || 6, 60000,
+        'Bahut zyada requests. Ek minute wait karke dobara try karo.');
+      const account = await miniAppAccountForTelegramUser(msg.from.id);
+      const argument = match && match[1] ? String(match[1]).slice(0, 200).trim() : '';
+      const reply = await build(account, argument, msg);
+      if (!reply) return;
+      const body = typeof reply === 'string' ? reply : reply.text;
+      const sendOptions = { parse_mode: 'HTML', disable_web_page_preview: true };
+      if (reply && reply.rows && reply.rows.length) sendOptions.reply_markup = { inline_keyboard: reply.rows };
+      await bot.sendMessage(chatId, body, sendOptions);
+      console.log(`✅ /${name} → uid:${account.uid}`);
+    } catch (error) {
+      const actionable = [400, 403, 409, 429].includes(error && error.status);
+      if (!actionable) console.error(`❌ /${name} error:`, (error && error.message) || error);
+      const message = actionable ? error.message : 'Kuch galat ho gaya. Thodi der baad try karo.';
+      bot.sendMessage(chatId, `⚠️ ${escapeTelegramHtml(message)}`, { parse_mode: 'HTML' }).catch(() => {});
+    }
+  });
+}
+
+/* ── /status ──────────────────────────────────────────────────────────────
+   Written for self-diagnosis. Every confusing report so far — Firestore down,
+   duplicate bot instances, no daily preset, a digest the browser never
+   refreshed — is visible in these six lines, so the user can see the cause
+   without anyone reading a server log. */
+function buildStatusMessage(account) {
+  const today = todayIST();
+  const appState = accountAppState(account);
+  const profile = account.data.profile && typeof account.data.profile === 'object' ? account.data.profile : {};
+  const telegram = appState.telegram && typeof appState.telegram === 'object' ? appState.telegram : {};
+  const calculation = accountCalculation(account);
+  const lines = ['🩺 <b>Status</b>', ''];
+
+  lines.push(`📡 Telegram: <b>connected</b> ✓  <code>${escapeTelegramHtml(String(telegram.chatId || ''))}</code>`);
+
+  /* Mirrors shared/proGating.js, which is the gate itself — this only explains
+     the outcome, it never decides it. */
+  const trial = appState.proTrial && typeof appState.proTrial === 'object' ? appState.proTrial : {};
+  let plan;
+  if (profile.plan && profile.plan !== 'free' && isLifetimePlan(profile.plan)) {
+    plan = `<b>${escapeTelegramHtml(profile.plan)}</b> · lifetime`;
+  } else if (profile.plan && profile.plan !== 'free' && profile.planExpiry) {
+    const left = daysBetweenDates(today, profile.planExpiry);
+    plan = `<b>${escapeTelegramHtml(profile.plan)}</b> · ${left != null && left >= 0 ? `${left} din baaki` : 'expired'}`;
+  } else if (profile.trialExpiry && !profile.trialSuspended) {
+    const left = daysBetweenDates(today, profile.trialExpiry);
+    plan = `trial · ${left != null && left >= 0 ? `${left} din baaki` : 'expired'}`;
+  } else if (trial.expiry) {
+    const left = daysBetweenDates(today, trial.expiry);
+    plan = `free trial · ${left != null && left >= 0 ? `${left} din baaki` : 'expired'}`;
+  } else {
+    plan = 'free';
+  }
+  lines.push(`💳 Plan: ${plan}`);
+
+  const presets = Array.isArray(calculation.presets) ? calculation.presets : [];
+  const daily = presets.find(preset => preset && preset.id === calculation.dailyPresetId);
+  lines.push(`🧮 Daily preset: ${daily
+    ? `<b>${escapeTelegramHtml(String(daily.name || 'Practice'))}</b>`
+    : `<i>set nahi hai</i> — <code>/calc</code> se choose karo`}`);
+
+  /* The digest is precomputed in the browser, so a stale one means the app has
+     not been opened — not that nothing is scheduled. Saying which it is here is
+     the whole point. */
+  const digest = telegram.digest && typeof telegram.digest === 'object' ? telegram.digest : {};
+  const digestDates = Object.keys(digest).filter(isDateString).sort();
+  const newestDigest = digestDates.length ? digestDates[digestDates.length - 1] : '';
+  if (digest[today]) {
+    lines.push('📋 Aaj ka plan: <b>ready</b> ✓');
+  } else if (newestDigest) {
+    lines.push(`📋 Aaj ka plan: <i>missing</i> — app ne last ${escapeTelegramHtml(tgLib.fmtDM(newestDigest))} tak banaya tha. App kholo.`);
+  } else {
+    lines.push('📋 Aaj ka plan: <i>kabhi banaya nahi</i> — ek baar app kholo.');
+  }
+
+  const history = Array.isArray(calculation.history) ? calculation.history : [];
+  const lastSession = history.find(entry => entry && isDateString(entry.date));
+  lines.push(`🎯 Last practice: ${lastSession
+    ? `${escapeTelegramHtml(tgLib.fmtDM(lastSession.date))} · ${calculationAccuracy(lastSession)}%`
+    : '<i>abhi tak koi nahi</i>'}`);
+
+  const examDate = isDateString(appState.examDate) ? appState.examDate : '';
+  if (examDate) {
+    const left = daysBetweenDates(today, examDate);
+    lines.push(`📅 Exam: ${escapeTelegramHtml(tgLib.fmtDM(examDate))}${left != null && left >= 0 ? ` · ${left} din baaki` : ''}`);
+  }
+
+  lines.push('', `🤖 Bot: Firestore <b>${FIRESTORE_STATUS.code}</b> · ${escapeTelegramHtml(describeInstance())}`);
+  return lines.join('\n');
+}
+
+/* ── /plan and /pending ───────────────────────────────────────────────────
+   The same sections the 6 AM and evening jobs send, on demand — built with the
+   senders' own helpers so the three can never disagree. */
+function buildPlanMessage(account) {
+  const today = todayIST();
+  const appState = accountAppState(account);
+  const telegram = appState.telegram && typeof appState.telegram === 'object' ? appState.telegram : {};
+  const digest = telegram.digest && typeof telegram.digest === 'object' ? telegram.digest : {};
+  const sections = [`📅 <b>Aaj ka plan</b> — ${escapeTelegramHtml(tgLib.fmtDM(today))}`];
+
+  if (digest[today]) {
+    sections.push(`📚 <b>Study topics</b>\n${escapeTelegramHtml(String(digest[today]).slice(0, 2000))}`);
+  }
+
+  const { todoLines, videoItems, doneCount } = tgLib.buildTaskSections(appState, today);
+  if (todoLines.length) sections.push(`📝 <b>To-Do</b>\n${tgLib.capLines(todoLines, 12)}`);
+  if (videoItems.length) {
+    sections.push(`🎥 <b>Videos</b>\n${tgLib.capLines(videoItems.map(video => `▶ <a href="${video.url}">${tgLib.escHtml(video.title)}</a>`), 10)}`);
+  }
+  if (doneCount) sections.push(`✅ ${doneCount} already done`);
+
+  if (sections.length === 1) {
+    /* Distinguish "nothing scheduled" from "the app never built a digest",
+       because the fix is different and only the user can do it. */
+    sections.push(Object.keys(digest).filter(isDateString).length
+      ? '📭 Aaj ke liye kuch scheduled nahi hai.\nPlanner mein topics add karke Save karo.'
+      : '📭 Abhi tak koi plan nahi bana.\nEk baar app kholo — plan yahan aa jayega.');
+  }
+  return sections.join('\n\n');
+}
+
+function buildPendingMessage(account) {
+  const today = todayIST();
+  const appState = accountAppState(account);
+  const { todoLines, videoItems, doneCount } = tgLib.buildTaskSections(appState, today);
+  if (!todoLines.length && !videoItems.length) {
+    return doneCount
+      ? `🎉 <b>Sab complete!</b>\nAaj ke ${doneCount} kaam ho gaye. Shabaash!`
+      : '📭 Aaj kuch track nahi hua hai. Planner mein tasks add karo.';
+  }
+  const sections = [`⏳ <b>Kya baaki hai</b> — ${escapeTelegramHtml(tgLib.fmtDM(today))}`];
+  if (todoLines.length) sections.push(`📝 <b>Pending</b>\n${tgLib.capLines(todoLines, 12)}`);
+  if (videoItems.length) {
+    sections.push(`🎥 <b>Videos pending</b>\n${tgLib.capLines(videoItems.map(video => `▶ <a href="${video.url}">${tgLib.escHtml(video.title)}</a>`), 10)}`);
+  }
+  if (doneCount) sections.push(`✅ ${doneCount} done`);
+  return sections.join('\n\n');
+}
+
+/* ── /exam ───────────────────────────────────────────────────────────────
+   `currentExam` is a browser global and never reaches Firestore, so
+   appState.examDate is the only reliable "my exam" here; examDates holds the
+   per-exam map the app maintains alongside it. */
+function buildExamMessage(account) {
+  const today = todayIST();
+  const appState = accountAppState(account);
+  const primary = isDateString(appState.examDate) ? appState.examDate : '';
+  const examDates = appState.examDates && typeof appState.examDates === 'object' ? appState.examDates : {};
+  const others = Object.keys(examDates)
+    .filter(exam => isDateString(examDates[exam]) && examDates[exam] !== primary && examDates[exam] >= today)
+    .sort((left, right) => (examDates[left] < examDates[right] ? -1 : 1))
+    .slice(0, 5);
+
+  if (!primary && !others.length) {
+    return '📅 <b>Koi exam date set nahi hai.</b>\n\nApp ke <b>Profile</b> mein exam date daal do — phir countdown yahan milega.';
+  }
+
+  const lines = ['📅 <b>Exam countdown</b>', ''];
+  if (primary) {
+    const left = daysBetweenDates(today, primary);
+    if (left === null) {
+      lines.push(`Date: ${escapeTelegramHtml(primary)}`);
+    } else if (left > 0) {
+      lines.push(`⏳ <b>${left}</b> din baaki — ${escapeTelegramHtml(tgLib.fmtDM(primary))}`);
+      const weeks = Math.floor(left / 7);
+      if (weeks >= 1) lines.push(`(${weeks} hafte${weeks > 1 ? '' : ''}${left % 7 ? ` ${left % 7} din` : ''})`);
+    } else if (left === 0) {
+      lines.push('🔥 <b>Aaj exam hai!</b> All the best!');
+    } else {
+      lines.push(`✅ Exam ho gaya (${escapeTelegramHtml(tgLib.fmtDM(primary))}).`);
+    }
+  }
+  if (others.length) {
+    lines.push('', '<b>Aage aane wale</b>');
+    others.forEach(exam => {
+      const left = daysBetweenDates(today, examDates[exam]);
+      lines.push(`• ${escapeTelegramHtml(exam.toUpperCase())} — ${escapeTelegramHtml(tgLib.fmtDM(examDates[exam]))}${left != null ? ` · ${left} din` : ''}`);
+    });
+  }
+  return lines.join('\n');
+}
+
+/* ── /stats and /streak ──────────────────────────────────────────────────
+   Mirrors accuracy() and calculateStreak() in calc/presets.js. Attempts made
+   inside the Mini App land in calculationAttemptInbox and only join `history`
+   once the app drains them, so those are reported as pending instead of being
+   silently missing from the totals. */
+function calculationAccuracy(entry) {
+  const total = Math.max(1, Number(entry && entry.total) || 1);
+  const correct = Math.max(0, Number(entry && entry.firstTryCorrect) || 0);
+  return Math.round((correct / total) * 100);
+}
+
+function calculationStreak(history, today) {
+  const completed = new Set(history
+    .filter(entry => entry && entry.reason === 'completed' && isDateString(entry.date))
+    .map(entry => entry.date));
+  let streak = 0;
+  let cursor = today;
+  while (completed.has(cursor)) {
+    streak++;
+    cursor = tgLib.shiftDate(cursor, -1);
+  }
+  return streak;
+}
+
+function buildStatsMessage(account) {
+  const today = todayIST();
+  const calculation = accountCalculation(account);
+  const history = (Array.isArray(calculation.history) ? calculation.history : [])
+    .filter(entry => entry && isDateString(entry.date));
+  const pending = Array.isArray(account.data.calculationAttemptInbox) ? account.data.calculationAttemptInbox.length : 0;
+
+  if (!history.length) {
+    return '📊 <b>Abhi tak koi practice session nahi.</b>\n\n<code>/calc</code> bhejo aur pehla session shuru karo.'
+      + (pending ? `\n\n(${pending} attempt sync hone baaki hain — app kholo.)` : '');
+  }
+
+  const streak = calculationStreak(history, today);
+  const sessions = history.length;
+  const average = Math.round(history.reduce((sum, entry) => sum + calculationAccuracy(entry), 0) / sessions);
+  const best = history.reduce((top, entry) => Math.max(top, calculationAccuracy(entry)), 0);
+  const totalQuestions = history.reduce((sum, entry) => sum + (Number(entry.total) || 0), 0);
+  const minutes = Math.round(history.reduce((sum, entry) => sum + (Number(entry.durationSec) || 0), 0) / 60);
+  const doneToday = history.some(entry => entry.date === today && entry.reason === 'completed');
+
+  const lines = [
+    '📊 <b>Calculation practice</b>',
+    '',
+    `🔥 Streak: <b>${streak}</b> din${streak ? '' : ' — aaj shuru karo'}`,
+    `🎯 Average accuracy: <b>${average}%</b> (best ${best}%)`,
+    `🧮 Sessions: <b>${sessions}</b> · ${totalQuestions} questions · ${minutes} min`,
+    '',
+    `<b>Recent</b>`
+  ];
+  history.slice(0, 5).forEach(entry => {
+    lines.push(`• ${escapeTelegramHtml(tgLib.fmtDM(entry.date))} — ${escapeTelegramHtml(String(entry.presetName || 'Practice').slice(0, 30))} · ${calculationAccuracy(entry)}%`);
+  });
+  if (pending) lines.push('', `⏳ ${pending} attempt sync hone baaki hain — app kholo.`);
+  if (!doneToday) lines.push('', 'Aaj ka session pending hai — <code>/calc</code> bhejo.');
+  return lines.join('\n');
+}
+
+/* ── /mock ───────────────────────────────────────────────────────────────
+   appState.mocks is keyed exam → tier → attempts[], and neither key reaches the
+   bot (both come from browser globals), so every bucket is flattened and sorted
+   by date instead of guessing which exam is current. */
+function collectMockAttempts(appState) {
+  const mocks = appState.mocks && typeof appState.mocks === 'object' ? appState.mocks : {};
+  const attempts = [];
+  Object.keys(mocks).forEach(exam => {
+    const tiers = mocks[exam] && typeof mocks[exam] === 'object' ? mocks[exam] : {};
+    Object.keys(tiers).forEach(tier => {
+      (Array.isArray(tiers[tier]) ? tiers[tier] : []).forEach(attempt => {
+        if (!attempt || !isDateString(attempt.date)) return;
+        attempts.push({
+          exam,
+          tier,
+          name: String(attempt.name || 'Mock'),
+          date: attempt.date,
+          total: Number(attempt.total) || 0,
+          weakTopics: Array.isArray(attempt.weakTopics) ? attempt.weakTopics : []
+        });
+      });
+    });
+  });
+  /* Newest first; a same-day pair keeps a stable order by name. */
+  attempts.sort((left, right) => (left.date === right.date
+    ? String(left.name).localeCompare(String(right.name))
+    : (left.date < right.date ? 1 : -1)));
+  return attempts;
+}
+
+function buildMockMessage(account) {
+  const attempts = collectMockAttempts(accountAppState(account));
+  if (!attempts.length) {
+    return '📝 <b>Koi mock test save nahi hua.</b>\n\nApp ke <b>Mock Tests</b> tab mein score daalo — trend yahan dikhega.';
+  }
+  const latest = attempts[0];
+  const lines = [
+    '📝 <b>Mock tests</b>',
+    '',
+    `<b>${escapeTelegramHtml(latest.name.slice(0, 40))}</b> — ${escapeTelegramHtml(tgLib.fmtDM(latest.date))}`,
+    `Score: <b>${latest.total}</b>`
+  ];
+  /* Compare with the previous attempt of the same exam and tier, so a different
+     paper cannot masquerade as improvement. */
+  const previous = attempts.slice(1).find(attempt => attempt.exam === latest.exam && attempt.tier === latest.tier);
+  if (previous) {
+    const change = Math.round((latest.total - previous.total) * 100) / 100;
+    const arrow = change > 0 ? `📈 +${change}` : change < 0 ? `📉 ${change}` : '➖ same';
+    lines.push(`vs pichhla (${escapeTelegramHtml(tgLib.fmtDM(previous.date))}): ${arrow}`);
+  }
+  if (latest.weakTopics.length) {
+    lines.push('', `⚠️ Weak: ${escapeTelegramHtml(latest.weakTopics.slice(0, 5).map(String).join(', ').slice(0, 200))}`);
+  }
+  if (attempts.length > 1) {
+    lines.push('', '<b>Recent</b>');
+    attempts.slice(0, 5).forEach(attempt => {
+      lines.push(`• ${escapeTelegramHtml(tgLib.fmtDM(attempt.date))} — ${escapeTelegramHtml(attempt.name.slice(0, 30))} · ${attempt.total}`);
+    });
+    const scored = attempts.filter(attempt => attempt.total > 0);
+    if (scored.length > 1) {
+      const average = Math.round((scored.reduce((sum, attempt) => sum + attempt.total, 0) / scored.length) * 10) / 10;
+      lines.push('', `Average: <b>${average}</b> over ${scored.length} mocks`);
+    }
+  }
+  return lines.join('\n');
+}
+
+registerAccountCommand({ name: 'status', regex: /^\/status(?:@\w+)?$/, limit: 6, build: buildStatusMessage });
+registerAccountCommand({ name: 'plan', regex: /^\/plan(?:@\w+)?$/, limit: 6, build: buildPlanMessage });
+registerAccountCommand({ name: 'pending', regex: /^\/pending(?:@\w+)?$/, limit: 6, build: buildPendingMessage });
+registerAccountCommand({ name: 'exam', regex: /^\/exam(?:@\w+)?$/, limit: 6, build: buildExamMessage });
+registerAccountCommand({ name: 'stats', regex: /^\/(?:stats|streak)(?:@\w+)?$/, limit: 6, build: buildStatsMessage });
+registerAccountCommand({ name: 'mock', regex: /^\/mock(?:s)?(?:@\w+)?$/, limit: 6, build: buildMockMessage });
+
+/* ── /ask — study doubts answered in the chat ─────────────────────────────
+   Uses the same Groq credentials and admin toggle as the auto-scheduler, so
+   there is no second key to manage and turning AI off disables this too.
+
+   Deliberately stateless: the tutor's memory lives in Supabase, which the bot
+   has no credentials for, so this answers one question at a time rather than
+   pretending to hold a conversation. The rate limit is tighter than the other
+   commands because every call spends someone else's quota. */
+async function answerStudyDoubt(question, cfg) {
+  const key = cfg && cfg.groqApiKey;
+  if (!key) return null;
+  const model = (cfg && cfg.model) || 'llama-3.1-8b-instant';
+  const system = 'You are a patient tutor for Indian competitive-exam aspirants (SSC, UPSC, banking, railways). '
+    + 'Answer the question directly and briefly: at most 150 words. Show the working for any calculation, '
+    + 'step by step. Prefer the shortcut an exam candidate would use under time pressure. '
+    + 'Reply in the language of the question (Hindi, Hinglish or English). '
+    + 'Use plain text only — no markdown, no headings, no asterisks. '
+    + 'If the question is not about studying or an exam subject, say so in one line instead of answering.';
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      temperature: 0.3,
+      max_completion_tokens: 700,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: question }]
+    })
+  });
+  if (!response.ok) {
+    throw Object.assign(new Error(`Groq ${response.status}`), { status: 502 });
+  }
+  const data = await response.json().catch(() => null);
+  const answer = data && data.choices && data.choices[0] && data.choices[0].message
+    ? String(data.choices[0].message.content || '').trim()
+    : '';
+  return answer || null;
+}
+
+bot.onText(/^\/ask(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const question = match && match[1] ? String(match[1]).trim().slice(0, 600) : '';
+  if (msg.chat.type !== 'private') {
+    bot.sendMessage(chatId, '⚠️ <b>/ask</b> sirf private chat mein chalta hai — mujhe DM karo.',
+      { parse_mode: 'HTML' }).catch(() => {});
+    return;
+  }
+  if (!db) {
+    bot.sendMessage(chatId, '⚠️ <b>Server-side dikkat hai</b> — bot ka database connection missing hai.',
+      { parse_mode: 'HTML' }).catch(() => {});
+    return;
+  }
+  if (!question) {
+    bot.sendMessage(chatId,
+      '🧠 <b>Kuch poocho!</b>\n\nJaise:\n'
+      + '• <code>/ask 15% of 840 kaise nikaalein</code>\n'
+      + '• <code>/ask Article 14 kya kehta hai</code>\n'
+      + '• <code>/ask difference between DNA and RNA</code>',
+      { parse_mode: 'HTML' }).catch(() => {});
+    return;
+  }
+  try {
+    /* Tighter than the read-only commands: each answer costs Groq quota. */
+    await enforceFirestoreRateLimit('command:ask', String(msg.from.id), 4, 60000,
+      'Ek minute mein 4 sawaal — thoda ruk ke poocho.');
+    const account = await miniAppAccountForTelegramUser(msg.from.id);
+    const cfg = await getAiConfig();
+    if (!cfg || cfg.enabled === false || !cfg.groqApiKey) {
+      await bot.sendMessage(chatId, '⚠️ AI abhi off hai. Admin ise panel se on kar sakta hai.',
+        { parse_mode: 'HTML' });
+      return;
+    }
+    bot.sendChatAction(chatId, 'typing').catch(() => {});
+    const answer = await answerStudyDoubt(question, cfg);
+    if (!answer) {
+      await bot.sendMessage(chatId, '⚠️ Jawab nahi mila. Dobara try karo.', { parse_mode: 'HTML' });
+      return;
+    }
+    /* The model is told to send plain text, but it is still untrusted input for a
+       parse_mode:'HTML' message, so escape before sending. */
+    await bot.sendMessage(chatId,
+      `🧠 <b>${escapeTelegramHtml(question.slice(0, 80))}</b>\n\n${escapeTelegramHtml(answer).slice(0, 3500)}`,
+      { parse_mode: 'HTML', disable_web_page_preview: true });
+    console.log(`✅ /ask → uid:${account.uid}`);
+  } catch (error) {
+    const actionable = [400, 403, 409, 429].includes(error && error.status);
+    if (!actionable) console.error('❌ /ask error:', (error && error.message) || error);
+    const message = actionable ? error.message : 'AI se jawab nahi aaya. Thodi der baad try karo.';
     bot.sendMessage(chatId, `⚠️ ${escapeTelegramHtml(message)}`, { parse_mode: 'HTML' }).catch(() => {});
   }
 });

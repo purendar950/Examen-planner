@@ -9,7 +9,13 @@
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-const fetch = require('node-fetch');
+/* `fetch` is deliberately the Node built-in (18+) rather than node-fetch. The
+   pure helpers below — date math, escaping, task and video extraction — are the
+   only server-side copy of that logic, and bot/bot-server.js needs them too. A
+   top-level `require('node-fetch')` made this file unloadable there, because
+   bot/package.json does not carry that dependency; the bot would have had to
+   duplicate the logic instead. Both GitHub Actions senders run Node 20, so the
+   built-in is available everywhere this module is used. */
 
 /** Today's date string in IST (YYYY-MM-DD). */
 function todayIST() {
