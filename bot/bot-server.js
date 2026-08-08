@@ -191,7 +191,13 @@ function describeInstance() {
   return `${INSTANCE.service}@${INSTANCE.commit || 'unknown'} (instance ${INSTANCE.id})`;
 }
 
-const bot = new TelegramBot(TOKEN, { polling: true });
+const bot = new TelegramBot(TOKEN, {
+  polling: {
+    params: {
+      allowed_updates: ['message', 'callback_query', 'channel_post']
+    }
+  }
+});
 console.log(`🤖 StudyPlanner Bot running (long-polling) — ${describeInstance()}`);
 
 /* ════════════════════════════════════════════════════════════════════════════
