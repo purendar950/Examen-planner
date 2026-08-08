@@ -32,6 +32,7 @@
   var _anonymousTurns = 0;
   var _lastFocus = null;
   var _entryTimer = 0;
+  var _entranceTimer = 0;
   var _sheenTimer = 0;
   var _discoveryTimer = 0;
   var _messageTimer = 0;
@@ -256,6 +257,17 @@
     if (_messageTimer) clearTimeout(_messageTimer);
     _messageTimer = setTimeout(hideMascotMessage, duration || 2800);
   }
+  function triggerEntrance() {
+    if (!_fab) return;
+    _fab.classList.remove('is-entering');
+    void _fab.offsetWidth;
+    _fab.classList.add('is-entering');
+    if (_entranceTimer) clearTimeout(_entranceTimer);
+    _entranceTimer = setTimeout(function () {
+      _entranceTimer = 0;
+      if (_fab) _fab.classList.remove('is-entering');
+    }, 780);
+  }
   function triggerOpening() {
     if (!_fab) return;
     _fab.classList.remove('is-opening');
@@ -411,6 +423,18 @@
       '.tc-spin{transform-origin:50px 50px;opacity:0}',
       '.tc-bang,.tc-check,.tc-cross{opacity:0}',
       '.tc-sparks{opacity:0;transform-origin:50px 50px}',
+
+      // The launcher arrives with a bounce on the session's first page: it
+      // starts small, low, tilted and invisible, overshoots past full size,
+      // then settles. The overshoot is what reads as a bounce rather than a
+      // plain fade-in. This is the one animation on the button itself rather
+      // than the artwork, so :not(.is-dragging) hands the transform straight
+      // back to the drag if a student grabs the bubble mid-flight.
+      '#tutor-fab.is-entering:not(.is-dragging){animation:tcBounceIn .72s cubic-bezier(.2,.9,.25,1)}',
+      '@keyframes tcBounceIn{0%{opacity:0;transform:translateY(20px) scale(.45) rotate(-10deg)}',
+      '60%{opacity:1;transform:translateY(-3px) scale(1.12) rotate(4deg)}',
+      '80%{transform:translateY(1px) scale(.97) rotate(-2deg)}',
+      '100%{opacity:1;transform:translateY(0) scale(1) rotate(0)}}',
 
       // Opening the chat gets one friendly hello bounce, then returns to idle.
       // is-opening is removed after this entry sequence, unlike persistent
@@ -1276,10 +1300,16 @@
       if (sessionStorage.getItem(discoveryKey) === '1') showDiscovery = false;
       else sessionStorage.setItem(discoveryKey, '1');
     } catch (e) {}
+    // The same gate carries the arrival animation, so the bubble bounces in on
+    // the session's first page only. The hello wave then rides the tooltip's
+    // existing cue: landing, waving and "Ask me anything" become one moment
+    // instead of three disconnected ones.
     if (showDiscovery) {
+      triggerEntrance();
       _discoveryTimer = setTimeout(function () {
         _discoveryTimer = 0;
         if (!_open && _fab) {
+          triggerOpening();
           _fab.classList.add('is-discovering');
           syncTipPlacement();
           _discoveryTimer = setTimeout(dismissDiscoverability, 5200);
