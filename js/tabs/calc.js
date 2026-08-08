@@ -457,7 +457,9 @@
       syncCalcState();
       setTimeout(syncCalcDeepLink, 0);
     });
-    frame.src = 'calc/index.html?v=7';
+    /* Bumped whenever calc/index.html changes, or the iframe keeps serving the
+       cached copy — v8 adds no-repeat question sampling. */
+    frame.src = 'calc/index.html?v=8';
   }
 
   /* Lets other modules refresh the embedded practice tab, e.g. after Telegram
