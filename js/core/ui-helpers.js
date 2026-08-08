@@ -47,6 +47,60 @@ function showToast(msg, type='info') {
 }
 
 /* ══════════════════════════════════════════════
+   DISPLAY NAME
+   One source of truth for "what do we call this user on screen". The welcome
+   greeting, the account chip, its avatar initial and the dashboard heading all
+   read this, so they can no longer disagree with each other.
+
+   Presentation only — identity data keeps the full raw name: currentUser.name,
+   the um-name dropdown line and the ez_user_name bridge to test-engine.html
+   are all left untouched.
+══════════════════════════════════════════════ */
+const EZ_NAME_FALLBACK = 'Aspirant';
+
+/* Reduce whatever we know to a presentable first name. Also covers the case
+   where the only thing available is an email local part ("rahul.kumar123"),
+   which previously reached the greeting verbatim. Returns '' when nothing
+   usable survives, so callers can fall through to the next source. */
+function ezPrettyFirstName(raw) {
+  let nm = String(raw ?? '').trim();
+  if (!nm) return '';
+  // A displayName is sometimes the address itself; never show the domain.
+  if (nm.includes('@')) nm = nm.split('@')[0];
+  // Split on spaces and on the separators address local parts use, so both
+  // "Rahul Kumar" and "rahul.kumar123" reduce to "rahul".
+  let first = nm.split(/[\s._\-+]+/).filter(Boolean)[0] || '';
+  // Trailing digits are address noise ("rahul123"), not part of a name.
+  first = first.replace(/\d+$/, '');
+  if (!first) return '';
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
+/* Preference order: the in-app editable Firestore profile name (the user's own
+   choice) → the auth record → the email local part → the localStorage identity
+   bridge → a neutral fallback. */
+function ezDisplayFirstName() {
+  let nm = '';
+  try { if (window.EZ_PROFILE && EZ_PROFILE.name) nm = ezPrettyFirstName(EZ_PROFILE.name); } catch (e) {}
+  if (!nm) try { if (typeof currentUser !== 'undefined' && currentUser) nm = ezPrettyFirstName(currentUser.name || currentUser.displayName); } catch (e) {}
+  if (!nm) try { if (typeof currentUser !== 'undefined' && currentUser) nm = ezPrettyFirstName(currentUser.email); } catch (e) {}
+  if (!nm) try { nm = ezPrettyFirstName(localStorage.getItem('ez_user_name')); } catch (e) {}
+  return nm || EZ_NAME_FALLBACK;
+}
+
+/* Paint the canonical name into every surface that shows it, in one call, so a
+   rename or a late-arriving profile can never update one and miss another.
+   setText() no-ops on absent nodes, so this is safe before the dashboard
+   include has been injected. */
+function ezRenderDisplayName() {
+  const display = ezDisplayFirstName();
+  setText('#user-name-display', display);
+  setText('#user-avatar-text', display.charAt(0).toUpperCase());
+  setText('#dash-username', display);
+  return display;
+}
+
+/* ══════════════════════════════════════════════
    KEYBOARD SHORTCUTS
 ══════════════════════════════════════════════ */
 document.addEventListener('keydown', e => {
