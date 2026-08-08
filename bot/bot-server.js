@@ -194,7 +194,7 @@ function describeInstance() {
 const bot = new TelegramBot(TOKEN, {
   polling: {
     params: {
-      allowed_updates: ['message', 'callback_query', 'channel_post']
+      allowed_updates: ['message', 'callback_query', 'channel_post', 'edited_channel_post']
     }
   }
 });
@@ -641,6 +641,46 @@ bot.onText(/^\/setup(?:@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
       { parse_mode: 'HTML' }
     ).catch(() => {});
     console.error('❌ /setup error (direct):', errMsg);
+  }
+});
+
+/* ── /setup via message with sender_chat (channels with "Sign Messages" ON) ─
+   When a channel has "Sign Messages" or "Show Authors' Profiles" enabled,
+   Telegram may deliver channel posts as regular `message` updates with a
+   `sender_chat` field identifying the channel. Handle /setup here too. */
+bot.on('message', async (msg) => {
+  if (!msg.text || !msg.text.match(/^\/setup(?:@\w+)?$/)) return;
+  if (!msg.sender_chat || msg.sender_chat.type !== 'channel') return;
+  if (msg.chat.type === 'private') return; // not a forwarded channel post
+  
+  const chat = msg.chat;
+  if (!db) {
+    bot.sendMessage(chat.id, '⚠️ Server config missing — setup abhi save nahi ho sakta.').catch(() => {});
+    return;
+  }
+
+  try {
+    await db.collection('telegram_channels').doc(String(chat.id)).set({
+      channelId:    chat.id,
+      channelTitle: chat.title || '',
+      setupAt:      new Date().toISOString()
+    }, { merge: true });
+
+    bot.sendMessage(chat.id,
+      `✅ <b>Channel registered!</b>\n\n` +
+      `Ab apne bot DM mein yeh bhejo:\n` +
+      `<code>/setup ${chat.id}</code>\n\n` +
+      `Isse tumhara account is channel se link ho jayega aur screenshots yahan aayenge.`,
+      { parse_mode: 'HTML' }
+    ).catch(() => {});
+    console.log(`✅ /setup sender_chat → channel:${chat.id} title:${chat.title || ''}`);
+  } catch (e) {
+    const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
+    bot.sendMessage(chat.id,
+      `❌ Setup fail: ${errMsg}\n\nCheck karo: kya main is channel ka <b>admin</b> hoon?`,
+      { parse_mode: 'HTML' }
+    ).catch(() => {});
+    console.error('❌ /setup sender_chat error:', errMsg);
   }
 });
 
@@ -2665,6 +2705,7 @@ const server = http.createServer((req, res) => {
       bot: 'alive',
       firestore: ready ? 'ready' : 'unavailable',
       reason: ready ? undefined : FIRESTORE_STATUS.code,
+      allowedUpdates: ['message', 'callback_query', 'channel_post', 'edited_channel_post'],
       /* Identifies the build answering here. Comparing this across every bot URL
          is how a duplicate deployment gets found: two services reporting
          different commits are both competing for the same updates. */
