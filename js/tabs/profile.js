@@ -289,9 +289,17 @@
     var v = ((i && i.value) || '').trim();
     if (!v) { toast('Naam khali nahi ho sakta.', 'error'); return; }
     try { currentUser.name = v; } catch (e) {}
-    ['user-name-display', 'um-name'].forEach(function (id) {
-      var el = document.getElementById(id); if (el) el.textContent = v;
-    });
+    /* EZ_PROFILE is the highest-priority name source and the Firestore write
+       below only reaches it on the next snapshot. Update it optimistically so
+       the chip and the dashboard heading show the new name straight away
+       instead of the stale one. */
+    try { if (window.EZ_PROFILE) EZ_PROFILE.name = v; } catch (e) {}
+    /* The dropdown line carries the full name; the chip, avatar initial and
+       dashboard heading carry the canonical first name, so route those through
+       the shared renderer rather than writing the raw input into them. */
+    var umName = document.getElementById('um-name');
+    if (umName) umName.textContent = v;
+    if (typeof ezRenderDisplayName === 'function') ezRenderDisplayName();
     try { if (typeof _fbReady !== 'undefined' && _fbReady && typeof auth !== 'undefined' && auth && auth.currentUser) auth.currentUser.updateProfile({ displayName: v }); } catch (e) {}
     try {
       if (typeof _fbReady !== 'undefined' && _fbReady && typeof db !== 'undefined' && db && currentUser && currentUser.uid) {

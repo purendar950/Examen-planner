@@ -11,14 +11,14 @@ function dashTint(hex, a) {
   return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
 }
 
-/* Best-effort current user's first name */
+/* Best-effort current user's first name.
+   Delegates to the canonical resolver in js/core/ui-helpers.js so the heading,
+   the account chip and the welcome greeting cannot drift apart. The previous
+   local copy of this fallback chain also probed appState.userName, which is
+   never written anywhere in the codebase. */
 function dashUserName() {
-  let nm = '';
-  try { if (window.EZ_PROFILE && EZ_PROFILE.name) nm = EZ_PROFILE.name; } catch (e) {}
-  try { if (!nm && typeof currentUser !== 'undefined' && currentUser) nm = currentUser.name || currentUser.displayName || ''; } catch (e) {}
-  try { if (!nm && typeof appState !== 'undefined' && appState.userName) nm = appState.userName; } catch (e) {}
-  nm = (nm || 'Aspirant').trim().split(/\s+/)[0];
-  return nm.charAt(0).toUpperCase() + nm.slice(1);
+  if (typeof ezDisplayFirstName === 'function') return ezDisplayFirstName();
+  return 'Aspirant';
 }
 
 function dashGreeting() {

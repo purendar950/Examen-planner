@@ -205,6 +205,26 @@ function getDefaultState() {
   };
 }
 
+/* Remembers the name the welcome toast actually used. The greeting fires from
+   loginUser(), which runs before the Firestore profile has loaded, so on a cold
+   start it can legitimately have nothing but the neutral fallback to work with.
+   Keeping the greeted name lets a late profile upgrade a generic greeting
+   without ever re-toasting one real name over another — that would read as a
+   duplicate greeting rather than a correction. */
+let _greetedName = '';
+
+function greetReturningUser() {
+  _greetedName = ezDisplayFirstName();
+  showToast(`Welcome back, ${_greetedName}! 👋`, 'success');
+}
+
+function upgradeGreetingIfGeneric() {
+  if (_greetedName !== EZ_NAME_FALLBACK) return;
+  const display = ezDisplayFirstName();
+  if (!display || display === EZ_NAME_FALLBACK) return;
+  greetReturningUser();
+}
+
 function loginUser(email, name, uid, state) {
   currentUser = { email, name, uid };
 
@@ -266,8 +286,7 @@ function loginUser(email, name, uid, state) {
 
   document.getElementById('auth-screen').style.display   = 'none';
   document.getElementById('app').style.display           = 'block';
-  document.getElementById('user-name-display').textContent = name.split(' ')[0];
-  document.getElementById('user-avatar-text').textContent  = name[0].toUpperCase();
+  ezRenderDisplayName();
   document.getElementById('login-error').style.display   = 'none';
   const loginBtn = document.getElementById('btn-login');
   if (loginBtn) { loginBtn.disabled = false; loginBtn.textContent = 'Sign In →'; }
@@ -284,7 +303,7 @@ function loginUser(email, name, uid, state) {
   // Firestore (config/youtube) so the first playlist load has it ready.
   // Safe no-op if already loaded / offline.
   if (typeof ytLoadApiKeys === 'function') { try { ytLoadApiKeys(); } catch (e) {} }
-  showToast(`Welcome back, ${name.split(' ')[0]}! 👋`, 'success');
+  greetReturningUser();
   // Feature 3: show Study Profile modal if never set up
   setTimeout(() => { if (!appState.studyProfile?.setupDone) openStudyProfileModal(); }, 1200);
   setSyncStatus('saved', '☁ Synced');
@@ -821,10 +840,8 @@ if (auth && !_isBadProtocol) {
       name = nextName;
       if (!appStarted || !currentUser || currentUser.uid !== user.uid) return;
       currentUser.name = nextName;
-      const display = document.getElementById('user-name-display');
-      const avatar = document.getElementById('user-avatar-text');
-      if (display) display.textContent = nextName.split(' ')[0];
-      if (avatar) avatar.textContent = nextName.charAt(0).toUpperCase();
+      ezRenderDisplayName();
+      upgradeGreetingIfGeneric();
     };
     const reconcileRemoteState = function(remoteState) {
       if (!remoteState || !appStarted || !isCurrentAuthEvent()) return;
