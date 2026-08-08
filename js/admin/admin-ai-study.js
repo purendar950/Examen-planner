@@ -359,7 +359,7 @@ function renderAiStudy() {
 
       '<section class="ai-panel ai-import-panel">' +
         '<div class="ai-panel-heading is-compact"><div><span class="ai-panel-eyebrow">Quick onboarding</span><h3>Import from cURL</h3><p>Auto-detect a supported provider, credential and model from an API snippet.</p></div><span class="ai-code-icon">&lt;/&gt;</span></div>' +
-        '<label class="sr-only" for="study-curl">Paste cURL or API snippet</label><textarea id="study-curl" class="ai-code-input" spellcheck="false" placeholder="Paste cURL for Mistral, Cerebras, Bynara, OpenRouter or NVIDIA"></textarea>' +
+        '<label class="sr-only" for="study-curl">Paste cURL or API snippet</label><textarea id="study-curl" class="ai-code-input" spellcheck="false" placeholder="Paste cURL for Gemini Interactions or any provider shown above"></textarea>' +
         '<div class="ai-import-actions"><span>Credentials are moved to the matching vault field.</span><button class="ai-btn ai-btn-secondary" type="button" onclick="parseCurlIntoStudy()">Parse & fill</button></div>' +
       '</section>' +
     '</div>' +
