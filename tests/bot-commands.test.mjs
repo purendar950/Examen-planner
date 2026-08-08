@@ -60,6 +60,12 @@ function test(name, fn) {
   try { fn(); results.push(`  ✓ ${name}`); }
   catch (error) { results.push(`  ✗ ${name}\n    ${error.message}`); process.exitCode = 1; }
 }
+/* Awaited, so an async assertion cannot escape as an unhandled rejection and
+   cannot interleave with the next test's request counters. */
+async function testAsync(name, fn) {
+  try { await fn(); results.push(`  ✓ ${name}`); }
+  catch (error) { results.push(`  ✗ ${name}\n    ${error.message}`); process.exitCode = 1; }
+}
 
 /* ── /status ─────────────────────────────────────────────────────────────── */
 const LINKED = { telegram: { enabled: true, chatId: '555000111', digest: {} } };
@@ -281,6 +287,147 @@ test('date helpers reject malformed input instead of guessing', () => {
   assert.equal(api.isDateString(undefined), false);
 });
 
+/* ── /ask provider routing ───────────────────────────────────────────────── */
+/* The admin panel writes a flattened mirror of the selected provider into
+   config/ai (studyProvider / studyBaseUrl / studyApiKeys / studyModel /
+   studyTransport). /ask reads that mirror rather than hard-coding a provider, so
+   OmniRoute's ngrok URL can change without a redeploy. */
+let askFetchCalls = [];
+let askFetchQueue = [];
+const askApi = vm.runInNewContext(
+  section('const ASK_TIMEOUT_MS', 'bot.onText(/^\\/ask')
+  + ';({ studyProviderFromConfig, groqFallbackProvider, callStudyProvider, buildTutorMessages, studyApiKeyList })',
+  {
+    /* The real validator, so a base the bot would reject is rejected here too. */
+    normalizeAppBaseUrl: value => {
+      const candidate = String(value == null ? '' : value).trim().replace(/\/+$/, '');
+      if (!candidate) return '';
+      try {
+        const parsed = new URL(candidate);
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return '';
+        return candidate;
+      } catch (error) { return ''; }
+    },
+    AbortSignal: { timeout: () => undefined },
+    fetch: async (url, init) => {
+      askFetchCalls.push({ url, init });
+      const next = askFetchQueue.shift();
+      if (!next) throw new Error('no queued response');
+      if (next.throw) throw new Error(next.throw);
+      return {
+        ok: next.status === 200,
+        status: next.status,
+        json: async () => next.body || { choices: [{ message: { content: next.answer || '' } }] }
+      };
+    },
+    console: { log() {}, warn() {}, error() {} }
+  }
+);
+
+const OMNIROUTE_CONFIG = {
+  enabled: true,
+  studyProvider: 'omniroute',
+  studyBaseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1',
+  studyApiKeys: ['key-one', 'key-two'],
+  studyModel: 'auto',
+  studyTransport: 'openai_chat'
+};
+
+test('the selected study provider is used, not a hard-coded one', () => {
+  const provider = askApi.studyProviderFromConfig(OMNIROUTE_CONFIG);
+  assert.equal(provider.provider, 'omniroute');
+  assert.equal(provider.url, 'https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions');
+  assert.equal(provider.model, 'auto');
+  assert.deepEqual(Array.from(provider.keys), ['key-one', 'key-two']);
+});
+
+test('keys are accepted as an array or as typed text', () => {
+  assert.deepEqual(Array.from(askApi.studyApiKeyList(['a', ' b ', '', null])), ['a', 'b']);
+  assert.deepEqual(Array.from(askApi.studyApiKeyList('a\n b ,c\n')), ['a', 'b', 'c']);
+  assert.deepEqual(Array.from(askApi.studyApiKeyList(undefined)), []);
+});
+
+test('an unusable provider config resolves to null instead of a bad request', () => {
+  assert.equal(askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyApiKeys: [] }), null, 'no keys');
+  assert.equal(askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyBaseUrl: '' }), null, 'no base url');
+  assert.equal(askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyBaseUrl: 'not a url' }), null, 'malformed base');
+  /* Gemini Interactions speaks a different protocol — it must fall through
+     rather than be sent an OpenAI chat body. */
+  assert.equal(askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyTransport: 'google_interactions' }), null);
+  assert.equal(askApi.studyProviderFromConfig({}), null);
+});
+
+test('a trailing slash on the base URL does not double up', () => {
+  const provider = askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyBaseUrl: 'https://host.dev/v1///' });
+  assert.equal(provider.url, 'https://host.dev/v1/chat/completions');
+});
+
+test('Groq remains the fallback when no study provider is configured', () => {
+  assert.equal(askApi.groqFallbackProvider({ groqApiKey: 'gsk_x' }).url,
+    'https://api.groq.com/openai/v1/chat/completions');
+  assert.equal(askApi.groqFallbackProvider({}), null);
+});
+
+await testAsync('the request carries the model, the key and the ngrok header', async () => {
+  askFetchCalls = [];
+  askFetchCalls = [];
+  askFetchQueue = [{ status: 200, answer: '126' }];
+  const answer = await askApi.callStudyProvider(askApi.studyProviderFromConfig(OMNIROUTE_CONFIG),
+    askApi.buildTutorMessages('15% of 840'));
+  assert.equal(answer, '126');
+  assert.equal(askFetchCalls.length, 1);
+  const { init } = askFetchCalls[0];
+  assert.equal(init.headers.Authorization, 'Bearer key-one');
+  /* An ngrok dev domain otherwise answers with an HTML interstitial. */
+  assert.equal(init.headers['ngrok-skip-browser-warning'], 'true');
+  const body = JSON.parse(init.body);
+  assert.equal(body.model, 'auto');
+  assert.equal(body.messages[1].content, '15% of 840');
+  assert.match(body.messages[0].content, /competitive-exam/);
+});
+
+await testAsync('a dead key rotates to the next one', async () => {
+  askFetchCalls = [];
+  askFetchCalls = [];
+  askFetchQueue = [{ status: 401 }, { status: 200, answer: 'answered by the second key' }];
+  const answer = await askApi.callStudyProvider(askApi.studyProviderFromConfig(OMNIROUTE_CONFIG), []);
+  assert.equal(answer, 'answered by the second key');
+  assert.equal(askFetchCalls.length, 2);
+  assert.equal(askFetchCalls[1].init.headers.Authorization, 'Bearer key-two');
+});
+
+await testAsync('a network failure or a down tunnel rotates too', async () => {
+  askFetchCalls = [];
+  askFetchQueue = [{ throw: 'fetch failed' }, { status: 200, answer: 'ok' }];
+  assert.equal(await askApi.callStudyProvider(askApi.studyProviderFromConfig(OMNIROUTE_CONFIG), []), 'ok');
+});
+
+await testAsync('an empty completion is treated as a failure and rotates', async () => {
+  askFetchCalls = [];
+  askFetchQueue = [{ status: 200, answer: '   ' }, { status: 200, answer: 'real answer' }];
+  assert.equal(await askApi.callStudyProvider(askApi.studyProviderFromConfig(OMNIROUTE_CONFIG), []), 'real answer');
+});
+
+await testAsync('a 400 is not retried, because every key would refuse it', async () => {
+  askFetchCalls = [];
+  askFetchCalls = [];
+  askFetchQueue = [{ status: 400 }, { status: 200, answer: 'never reached' }];
+  await assert.rejects(
+    () => askApi.callStudyProvider(askApi.studyProviderFromConfig(OMNIROUTE_CONFIG), []),
+    error => error.status === 400 && /chhota karke/i.test(error.message)
+  );
+  assert.equal(askFetchCalls.length, 1, 'must not burn the other keys on a bad request');
+});
+
+await testAsync('exhausting every key fails as unavailable, naming the provider only in the log', async () => {
+  askFetchCalls = [];
+  askFetchQueue = [{ status: 429 }, { status: 500 }];
+  await assert.rejects(
+    () => askApi.callStudyProvider(askApi.studyProviderFromConfig(OMNIROUTE_CONFIG), []),
+    error => error.status === 502 && /omniroute responded 500/.test(error.message)
+  );
+});
+
 test('every helper this sandbox supplies really exists in bot-server.js', () => {
   /* The vm context provides these so the builders can be evaluated in isolation
      — which also means a missing import in the real file would be invisible
@@ -293,7 +440,8 @@ test('every helper this sandbox supplies really exists in bot-server.js', () => 
     escapeTelegramHtml: /function escapeTelegramHtml\(/,
     describeInstance: /function describeInstance\(/,
     FIRESTORE_STATUS: /const FIRESTORE_STATUS = /,
-    isLifetimePlan: /const \{[^}]*\bisLifetimePlan\b[^}]*\} = require\('\.\.\/shared\/proGating'\)/
+    isLifetimePlan: /const \{[^}]*\bisLifetimePlan\b[^}]*\} = require\('\.\.\/shared\/proGating'\)/,
+    normalizeAppBaseUrl: /function normalizeAppBaseUrl\(/
   };
   for (const [name, pattern] of Object.entries(declarations)) {
     assert.match(source, pattern, `${name} is stubbed in the test but not available in bot-server.js`);

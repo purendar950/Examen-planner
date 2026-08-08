@@ -1838,41 +1838,129 @@ registerAccountCommand({ name: 'stats', regex: /^\/(?:stats|streak)(?:@\w+)?$/, 
 registerAccountCommand({ name: 'mock', regex: /^\/mock(?:s)?(?:@\w+)?$/, limit: 6, build: buildMockMessage });
 
 /* ── /ask — study doubts answered in the chat ─────────────────────────────
-   Uses the same Groq credentials and admin toggle as the auto-scheduler, so
-   there is no second key to manage and turning AI off disables this too.
+   Routed through whichever provider the admin selected in the panel, rather
+   than one hard-coded here. Saving the Study AI card writes a flattened mirror
+   into config/ai — studyProvider, studyBaseUrl, studyApiKeys, studyModel,
+   studyTransport — described in js/admin/admin-actions.js as "the only fields
+   youtube-turbo-proxy reads". Reading the same mirror keeps the panel the single
+   source of truth and puts this bot on the same contract as the other
+   server-side consumers, so switching provider needs no code change here.
+
+   It matters most for the current selection, OmniRoute: it is reached over an
+   ngrok dev domain, so its URL changes. Taking the URL from studyBaseUrl means
+   the admin re-saves the card and the bot follows, with no redeploy.
+
+   `groqApiKey` remains a fallback so /ask still works on an installation that
+   only ever configured the auto-scheduler.
 
    Deliberately stateless: the tutor's memory lives in Supabase, which the bot
    has no credentials for, so this answers one question at a time rather than
    pretending to hold a conversation. The rate limit is tighter than the other
    commands because every call spends someone else's quota. */
-async function answerStudyDoubt(question, cfg) {
-  const key = cfg && cfg.groqApiKey;
+const ASK_TIMEOUT_MS = 30000;
+const ASK_MAX_ANSWER_CHARS = 3500;
+const STUDY_TUTOR_SYSTEM_PROMPT = 'You are a patient tutor for Indian competitive-exam aspirants '
+  + '(SSC, UPSC, banking, railways). Answer the question directly and briefly: at most 150 words. '
+  + 'Show the working for any calculation, step by step. Prefer the shortcut an exam candidate would use '
+  + 'under time pressure. Reply in the language of the question (Hindi, Hinglish or English). '
+  + 'Use plain text only — no markdown, no headings, no asterisks. '
+  + 'If the question is not about studying or an exam subject, say so in one line instead of answering.';
+
+function buildTutorMessages(question) {
+  return [
+    { role: 'system', content: STUDY_TUTOR_SYSTEM_PROMPT },
+    { role: 'user', content: String(question || '') }
+  ];
+}
+
+/* Keys are stored as an array by the panel, but tolerate the newline/comma text
+   form too — that is how they are typed in, and splitStudyKeys() accepts both. */
+function studyApiKeyList(raw) {
+  const list = Array.isArray(raw) ? raw : String(raw == null ? '' : raw).split(/[\n,]+/);
+  return list.map(key => String(key == null ? '' : key).trim()).filter(Boolean);
+}
+
+/* → { provider, url, keys, model } or null when the panel has not configured a
+   usable provider. A base that is not an absolute http(s) URL is a typo in the
+   panel, and must not be turned into a request. */
+function studyProviderFromConfig(cfg) {
+  cfg = cfg && typeof cfg === 'object' ? cfg : {};
+  /* `google_interactions` speaks a different protocol; only the OpenAI-compatible
+     transport is understood here, so anything else falls through to the
+     fallback rather than being sent a body it cannot read. */
+  if (String(cfg.studyTransport || 'openai_chat') !== 'openai_chat') return null;
+  const base = normalizeAppBaseUrl(cfg.studyBaseUrl);
+  const keys = studyApiKeyList(cfg.studyApiKeys);
+  if (!base || !keys.length) return null;
+  return {
+    provider: String(cfg.studyProvider || 'study').slice(0, 40),
+    url: `${base}/chat/completions`,
+    keys,
+    model: String(cfg.studyModel || '').trim() || 'auto'
+  };
+}
+
+function groqFallbackProvider(cfg) {
+  const key = cfg && cfg.groqApiKey ? String(cfg.groqApiKey).trim() : '';
   if (!key) return null;
-  const model = (cfg && cfg.model) || 'llama-3.1-8b-instant';
-  const system = 'You are a patient tutor for Indian competitive-exam aspirants (SSC, UPSC, banking, railways). '
-    + 'Answer the question directly and briefly: at most 150 words. Show the working for any calculation, '
-    + 'step by step. Prefer the shortcut an exam candidate would use under time pressure. '
-    + 'Reply in the language of the question (Hindi, Hinglish or English). '
-    + 'Use plain text only — no markdown, no headings, no asterisks. '
-    + 'If the question is not about studying or an exam subject, say so in one line instead of answering.';
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      model,
-      temperature: 0.3,
-      max_completion_tokens: 700,
-      messages: [{ role: 'system', content: system }, { role: 'user', content: question }]
-    })
-  });
-  if (!response.ok) {
-    throw Object.assign(new Error(`Groq ${response.status}`), { status: 502 });
+  return {
+    provider: 'groq',
+    url: 'https://api.groq.com/openai/v1/chat/completions',
+    keys: [key],
+    model: (cfg && cfg.model) || 'llama-3.1-8b-instant'
+  };
+}
+
+/* The key list is a rotation, not a preference order: a revoked or exhausted key
+   must not take /ask down while another still works. A 400 is not retried,
+   because the request itself is what was refused and every key would say the
+   same. */
+async function callStudyProvider(provider, messages) {
+  let lastDetail = 'no key succeeded';
+  for (const key of provider.keys) {
+    let response;
+    try {
+      response = await fetch(provider.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${key}`,
+          /* OmniRoute sits behind an ngrok dev domain, which answers some
+             requests with an HTML interstitial instead of JSON unless asked not
+             to. Harmless for every other provider. */
+          'ngrok-skip-browser-warning': 'true'
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          temperature: 0.3,
+          max_completion_tokens: 700,
+          messages
+        }),
+        signal: AbortSignal.timeout(ASK_TIMEOUT_MS)
+      });
+    } catch (error) {
+      /* Network failure, or the ngrok tunnel being down — try the next key, then
+         report it as unavailable rather than as a bad question. */
+      lastDetail = `request failed: ${(error && error.message) || error}`;
+      continue;
+    }
+    if (response.status === 400) {
+      throw Object.assign(new Error('AI ne yeh sawaal accept nahi kiya. Thoda chhota karke poocho.'), { status: 400 });
+    }
+    if (!response.ok) {
+      lastDetail = `${provider.provider} responded ${response.status}`;
+      continue;
+    }
+    const data = await response.json().catch(() => null);
+    const answer = data && data.choices && data.choices[0] && data.choices[0].message
+      ? String(data.choices[0].message.content || '').trim()
+      : '';
+    if (answer) return answer;
+    lastDetail = `${provider.provider} returned an empty completion`;
   }
-  const data = await response.json().catch(() => null);
-  const answer = data && data.choices && data.choices[0] && data.choices[0].message
-    ? String(data.choices[0].message.content || '').trim()
-    : '';
-  return answer || null;
+  /* The detail names the provider and status for the log; the handler replaces it
+     with user-facing copy, so no upstream wording reaches the chat. */
+  throw Object.assign(new Error(lastDetail), { status: 502 });
 }
 
 bot.onText(/^\/ask(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
@@ -1903,13 +1991,22 @@ bot.onText(/^\/ask(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
       'Ek minute mein 4 sawaal — thoda ruk ke poocho.');
     const account = await miniAppAccountForTelegramUser(msg.from.id);
     const cfg = await getAiConfig();
-    if (!cfg || cfg.enabled === false || !cfg.groqApiKey) {
+    if (!cfg || cfg.enabled === false) {
       await bot.sendMessage(chatId, '⚠️ AI abhi off hai. Admin ise panel se on kar sakta hai.',
         { parse_mode: 'HTML' });
       return;
     }
+    /* Whatever the admin selected in the Study AI card, with the auto-scheduler's
+       Groq key as the fallback for an installation that configured only that. */
+    const provider = studyProviderFromConfig(cfg) || groqFallbackProvider(cfg);
+    if (!provider) {
+      await bot.sendMessage(chatId,
+        '⚠️ AI provider set nahi hai. Admin panel ke <b>Study AI</b> card mein provider aur key save karo.',
+        { parse_mode: 'HTML' });
+      return;
+    }
     bot.sendChatAction(chatId, 'typing').catch(() => {});
-    const answer = await answerStudyDoubt(question, cfg);
+    const answer = await callStudyProvider(provider, buildTutorMessages(question));
     if (!answer) {
       await bot.sendMessage(chatId, '⚠️ Jawab nahi mila. Dobara try karo.', { parse_mode: 'HTML' });
       return;
@@ -1917,9 +2014,9 @@ bot.onText(/^\/ask(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
     /* The model is told to send plain text, but it is still untrusted input for a
        parse_mode:'HTML' message, so escape before sending. */
     await bot.sendMessage(chatId,
-      `🧠 <b>${escapeTelegramHtml(question.slice(0, 80))}</b>\n\n${escapeTelegramHtml(answer).slice(0, 3500)}`,
+      `🧠 <b>${escapeTelegramHtml(question.slice(0, 80))}</b>\n\n${escapeTelegramHtml(answer).slice(0, ASK_MAX_ANSWER_CHARS)}`,
       { parse_mode: 'HTML', disable_web_page_preview: true });
-    console.log(`✅ /ask → uid:${account.uid}`);
+    console.log(`✅ /ask → uid:${account.uid} via ${provider.provider}/${provider.model}`);
   } catch (error) {
     const actionable = [400, 403, 409, 429].includes(error && error.status);
     if (!actionable) console.error('❌ /ask error:', (error && error.message) || error);
