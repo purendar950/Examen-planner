@@ -1199,21 +1199,50 @@ async function sendCalculationPresetForUser(uid, presetId, requestId, presetFing
    No idempotency claim: `claimCalculationPresetRequest` exists to stop the
    browser button double-submitting, whereas a typed command *is* the user
    asking again on purpose. The rate limit is the right control here. */
-const CALC_COMMAND_USAGE = 'Daily preset ke liye <code>/calc</code> bhejo, ya kisi bhi preset ke liye <code>/calc &lt;name&gt;</code>.';
 const CALC_PRESET_LIST_LIMIT = 10;
 
-function calculationPresetLabel(preset) {
-  const icon = escapeTelegramHtml(String((preset && preset.icon) || '🧮').slice(0, 4));
-  const name = escapeTelegramHtml(String((preset && preset.name) || 'Practice').trim().slice(0, 40) || 'Practice');
-  return `${icon} <b>${name}</b>`;
+/* Button labels are plain text, not HTML — escaping them here would surface a
+   literal "&amp;" on the button, so `escapeTelegramHtml` is deliberately absent. */
+function calculationPresetButtonLabel(preset) {
+  const icon = String((preset && preset.icon) || '🧮').slice(0, 4);
+  const name = String((preset && preset.name) || 'Practice').trim().slice(0, 40) || 'Practice';
+  return `▶ ${icon} ${name}`;
 }
 
-function calculationPresetChoices(presets) {
-  const lines = presets.slice(0, CALC_PRESET_LIST_LIMIT).map(preset => `• ${calculationPresetLabel(preset)}`);
-  if (presets.length > CALC_PRESET_LIST_LIMIT) {
-    lines.push(`…aur ${presets.length - CALC_PRESET_LIST_LIMIT} more`);
+/* A plain text list made the user retype a name to start anything, which is
+   painful on a phone and worse for a name like "Mixed Practice (8 presets)".
+   One button per preset starts that quiz inside Telegram in a single tap.
+
+   `web_app` is the right button type here: the Bot API caps `callback_data` at
+   64 bytes, and a preset id may be up to 80 characters, so a callback round trip
+   would need an extra id→index mapping to stay inside the limit. A `web_app`
+   button carries the id in its URL and needs none. It is private-chat only,
+   which every caller of this already is. */
+function calculationPresetListButtons(presets, appBase, options) {
+  const base = String(appBase || FALLBACK_APP_BASE_URL).replace(/\/+$/, '');
+  const miniAppAllowed = /^https:\/\//i.test(base) && !(options && options.browserOnly);
+  const rows = presets.slice(0, CALC_PRESET_LIST_LIMIT).map(preset => {
+    const label = calculationPresetButtonLabel(preset);
+    const encodedPreset = encodeURIComponent(preset.id);
+    return [miniAppAllowed
+      ? { text: label, web_app: { url: `${base}/calc/index.html?tgpreset=${encodedPreset}` } }
+      : { text: label, url: `${base}/app.html?open=calc&preset=${encodedPreset}` }];
+  });
+  /* One shared browser row, not a second button beside every preset: ten presets
+     would otherwise be twenty buttons. Skipped in browserOnly mode, where every
+     row is already a plain link. */
+  if (rows.length && miniAppAllowed) {
+    rows.push([{ text: '🌐 Open in browser', url: `${base}/app.html?open=calc` }]);
   }
-  return lines.join('\n');
+  return rows;
+}
+
+/* Shown only when the list is truncated, so the remaining presets are still
+   reachable by name rather than silently missing. */
+function calculationPresetOverflowNote(presets) {
+  return presets.length > CALC_PRESET_LIST_LIMIT
+    ? `\n\n(Pehle ${CALC_PRESET_LIST_LIMIT} dikhaye hain — baaki ke liye <code>/calc &lt;name&gt;</code> bhejo.)`
+    : '';
 }
 
 /* Matching stays forgiving because the name is retyped from memory on a phone
@@ -1238,24 +1267,35 @@ function findCalculationPreset(presets, query) {
   return { preset: null, matches: [] };
 }
 
-/* Same Mini App button fallback as sendCalculationPresetForUser: a rejected
-   web_app button must not cost the user the whole message. */
-async function sendCalculationPracticeMessage(chatId, preset, note) {
-  const body = calculationPresetText(preset) + (note ? `\n\n${note}` : '');
-  const send = rows => bot.sendMessage(chatId, body, {
-    parse_mode: 'HTML',
-    disable_web_page_preview: true,
-    reply_markup: { inline_keyboard: rows }
-  });
+/* Same Mini App fallback as sendCalculationPresetForUser: a web_app button
+   Telegram refuses must not cost the user the whole message, so build the rows
+   through a callback and resend once with plain links if it is rejected. */
+async function sendWithMiniAppFallback(chatId, body, rowsFor) {
+  const send = rows => {
+    const options = { parse_mode: 'HTML', disable_web_page_preview: true };
+    if (rows && rows.length) options.reply_markup = { inline_keyboard: rows };
+    return bot.sendMessage(chatId, body, options);
+  };
   try {
-    return await send(calculationPracticeButtons(FALLBACK_APP_BASE_URL, preset.id));
+    return await send(rowsFor(undefined));
   } catch (buttonError) {
     const description = (buttonError && buttonError.response && buttonError.response.body
       && buttonError.response.body.description) || buttonError.message;
     if (!isTelegramButtonRejection(description)) throw buttonError;
-    console.warn(`⚠️  Telegram refused the Mini App button (${description}) — sending the browser link instead.`);
-    return send(calculationPracticeButtons(FALLBACK_APP_BASE_URL, preset.id, { browserOnly: true }));
+    console.warn(`⚠️  Telegram refused the Mini App button (${description}) — sending browser links instead.`);
+    return send(rowsFor({ browserOnly: true }));
   }
+}
+
+function sendCalculationPracticeMessage(chatId, preset, note) {
+  const body = calculationPresetText(preset) + (note ? `\n\n${note}` : '');
+  return sendWithMiniAppFallback(chatId, body, options =>
+    calculationPracticeButtons(FALLBACK_APP_BASE_URL, preset.id, options));
+}
+
+function sendCalculationPresetList(chatId, body, presets) {
+  return sendWithMiniAppFallback(chatId, body + calculationPresetOverflowNote(presets), options =>
+    calculationPresetListButtons(presets, FALLBACK_APP_BASE_URL, options));
 }
 
 bot.onText(/^\/calc(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
@@ -1306,11 +1346,9 @@ bot.onText(/^\/calc(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
       if (!found.preset) {
         const ambiguous = found.matches.length > 0;
         const heading = ambiguous
-          ? `🤔 "<b>${escapeTelegramHtml(query)}</b>" se ek se zyada preset match hue:`
-          : `🤔 "<b>${escapeTelegramHtml(query)}</b>" naam ka koi preset nahi mila. Tumhare presets:`;
-        await bot.sendMessage(chatId,
-          `${heading}\n${calculationPresetChoices(ambiguous ? found.matches : presets)}\n\n${CALC_COMMAND_USAGE}`,
-          { parse_mode: 'HTML', disable_web_page_preview: true });
+          ? `🤔 "<b>${escapeTelegramHtml(query)}</b>" se ek se zyada preset match hue — kaunsa chahiye?`
+          : `🤔 "<b>${escapeTelegramHtml(query)}</b>" naam ka koi preset nahi mila.\nTap karke koi bhi shuru karo:`;
+        await sendCalculationPresetList(chatId, heading, ambiguous ? found.matches : presets);
         return;
       }
       preset = found.preset;
@@ -1320,9 +1358,14 @@ bot.onText(/^\/calc(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
       preset = presets.find(item => item.id === calculation.dailyPresetId)
         || (presets.length === 1 ? presets[0] : null);
       if (!preset) {
-        await bot.sendMessage(chatId,
-          `🧮 <b>Koi daily preset set nahi hai.</b> Tumhare presets:\n${calculationPresetChoices(presets)}\n\n${CALC_COMMAND_USAGE}`,
-          { parse_mode: 'HTML', disable_web_page_preview: true });
+        /* The old footer said "send /calc for your daily preset" to someone who
+           had just sent /calc and had no daily preset. Point at the setting that
+           actually makes this one tap instead. */
+        await sendCalculationPresetList(chatId,
+          '🧮 <b>Kaunsi practice karni hai?</b>\nTap karke Telegram mein hi shuru ho jao.\n\n'
+          + '⭐ App ke <b>Calculation</b> tab mein kisi preset ko <b>Daily</b> mark kar do — '
+          + 'phir sirf <code>/calc</code> bhejna kaafi hoga.',
+          presets);
         return;
       }
     }
