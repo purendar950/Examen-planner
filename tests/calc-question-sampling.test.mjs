@@ -37,8 +37,9 @@ const api = vm.runInNewContext(
   section('const DEGREES=', 'const CATEGORIES=')
   + section('const HIGHER_POWERS={', 'const HP_ORDER=')
   + section('const QUIZZES={', 'const QUIZ_TITLES=')
+  + section('let catSettings={', '/* ---------- screen switching')
   + section('const DRAW_ATTEMPTS=', 'function openQuiz(')
-  + ';({ QUIZZES, drawQuestion, resetAskedPools, questionKey, DRAW_ATTEMPTS })',
+  + ';({ QUIZZES, catSettings, drawQuestion, resetAskedPools, questionKey, DRAW_ATTEMPTS })',
   {}
 );
 
@@ -183,6 +184,51 @@ test('questions are keyed on what is displayed, not the answer', () => {
   assert.equal(api.questionKey({ q: [12], ans: '144' }), api.questionKey({ q: [12], ans: 'whatever' }));
   assert.notEqual(api.questionKey({ q: [12] }), api.questionKey({ q: [13] }));
   assert.equal(api.questionKey(null), 'null', 'must not throw on a malformed question');
+});
+
+/* ── every type, not just the ones named above ───────────────────────────── */
+test('every quiz type deduplicates, using its own default settings', () => {
+  /* The sampler wraps the single gen() call site, so it cannot be type-specific
+     — but "cannot be" is worth proving per type rather than asserting. For each
+     type: measure the pool with raw gen() calls, then require the sampler to
+     return exactly min(draws, pool) distinct questions, and never the same
+     question twice running unless the pool holds only one. */
+  const DRAWS = 12;
+  const ids = Object.keys(api.QUIZZES);
+  assert.equal(ids.length, 25, `expected 25 quiz types, found ${ids.length}`);
+
+  const broken = [];
+  for (const id of ids) {
+    const def = api.QUIZZES[id];
+    const settings = def.configKey ? api.catSettings[def.configKey] : {};
+
+    /* Small pools are fully enumerated long before this many samples; a large
+       pool only needs to be shown larger than DRAWS. */
+    const raw = new Set();
+    for (let i = 0; i < 8000; i++) raw.add(api.questionKey(def.gen(settings)));
+    const pool = raw.size;
+
+    api.resetAskedPools();
+    const seen = new Set();
+    let backToBack = 0;
+    let previous = null;
+    for (let i = 0; i < DRAWS; i++) {
+      const question = api.drawQuestion(def, settings, id);
+      assert.ok(question && question.q !== undefined, `${id}: draw ${i} produced no question`);
+      const key = api.questionKey(question);
+      if (key === previous) backToBack++;
+      previous = key;
+      seen.add(key);
+    }
+
+    const expected = Math.min(DRAWS, pool);
+    if (seen.size !== expected) {
+      broken.push(`${id}: ${seen.size}/${DRAWS} distinct, expected ${expected} (pool ${pool})`);
+    } else if (backToBack > 0 && pool > 1) {
+      broken.push(`${id}: repeated back to back ${backToBack}x (pool ${pool})`);
+    }
+  }
+  assert.deepEqual(broken, [], `types still repeating:\n    ${broken.join('\n    ')}`);
 });
 
 /* ── the only syntax gate calc/index.html has ────────────────────────────── */
