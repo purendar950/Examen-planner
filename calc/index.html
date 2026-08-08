@@ -1030,9 +1030,83 @@ function renderMultChart(n){
 /* ---------- QUIZ ---------- */
 let cur=null,curQuizId=null,inputs=[""],field=0,score=0,qcount=0,soundOn=true,busy=false,quizReturn="category",mascotQuestionSeq=0;
 
+/* ---------- no-repeat question sampling ----------
+   Every gen() draws independently through Math.random(), with no memory, so a
+   narrow range repeats heavily. Squares over 10–30 is a pool of 21 values, and
+   asking 10 questions from it has only a ~8% chance of avoiding a repeat: most
+   sessions ask one value two or three times while several never appear at all.
+
+   gen() cannot be asked for "the i-th question in the pool", and enumerating
+   every pool would mean re-implementing all 25 engines — a second copy of the
+   same knowledge, which is exactly how the preset model drifted before. So keep
+   gen() as the only source of questions and draw repeatedly, rejecting values
+   already asked. The question itself is the key.
+
+   Pools are tracked per quiz id AND per settings, because a combined preset can
+   practise one type over two different ranges in two parts; those are genuinely
+   different pools and must not suppress each other.
+
+   Once a pool is exhausted the rejection loop cannot succeed — `primeinrange`
+   has a pool of exactly one — so an exhausted pool starts a fresh cycle rather
+   than spinning. The value shown immediately before is still excluded, so a
+   reset is never visible as the same question twice in a row. */
+const DRAW_ATTEMPTS=120;
+/* Free practice never ends, so the seen set needs an upper bound. Large pools
+   are the only ones that can reach this, and by then a repeat is unnoticeable. */
+const MAX_TRACKED_QUESTIONS=2000;
+let askedPools=Object.create(null);
+
+function resetAskedPools(){askedPools=Object.create(null);}
+
+/* `q` is the displayed operand list, which is what makes two questions the same
+   one. The answer is not usable as a key: engines share answers (2² and 4 both
+   answer 4), and pctnum compares with a tolerance. */
+function questionKey(question){
+  try{return JSON.stringify(question&&question.q!==undefined?question.q:question);}
+  catch(e){return "";}
+}
+
+function askedPool(quizId,settings){
+  const poolKey=quizId+"|"+JSON.stringify(settings||{});
+  return askedPools[poolKey]||(askedPools[poolKey]={asked:new Set(),last:""});
+}
+
+function rememberQuestion(pool,key){
+  if(!key)return;
+  if(pool.asked.size>=MAX_TRACKED_QUESTIONS)pool.asked=new Set();
+  pool.asked.add(key);
+  pool.last=key;
+}
+
+function drawQuestion(def,settings,quizId){
+  const pool=askedPool(quizId,settings);
+  let candidate=null,key="";
+  for(let attempt=0;attempt<DRAW_ATTEMPTS;attempt++){
+    candidate=def.gen(settings);
+    key=questionKey(candidate);
+    if(!key||!pool.asked.has(key)){rememberQuestion(pool,key);return candidate;}
+  }
+  /* Exhausted: every value has been asked, so begin a new cycle. `previous` is
+     held back rather than carried over, so the only thing a reset cannot do is
+     repeat the question still on screen. */
+  const previous=pool.last;
+  pool.asked=new Set();
+  for(let attempt=0;attempt<DRAW_ATTEMPTS;attempt++){
+    candidate=def.gen(settings);
+    key=questionKey(candidate);
+    if(key!==previous){rememberQuestion(pool,key);return candidate;}
+  }
+  /* A single-question pool can only repeat itself. */
+  rememberQuestion(pool,key);
+  return candidate;
+}
+
 function openQuiz(quizId,returnTo,options){
   if((!options||!options.preset)&&window.CalcPresets&&typeof window.CalcPresets.stopSession==="function")window.CalcPresets.stopSession(false);
   curQuizId=quizId;score=0;qcount=0;cur=null;inputs=[""];field=0;busy=false;
+  /* One practice run is one no-repeat cycle: starting a quiz or a preset session
+     forgets what the previous run asked. */
+  resetAskedPools();
   quizReturn=returnTo||"category";
   $("qtitle").textContent=QUIZ_TITLES[quizId]||"";
   $("score").textContent=score;
@@ -1053,7 +1127,9 @@ function nextQ(){
   const def=QUIZZES[curQuizId];if(!def)return;
   const s=def.configKey?catSettings[def.configKey]:{};
   const presetSnapshot=window.CalcPresets&&typeof window.CalcPresets.questionSnapshot==="function"?window.CalcPresets.questionSnapshot():null;
-  cur=presetSnapshot||def.gen(s);inputs=[""];field=0;mascotQuestionSeq++;
+  /* A review slot deliberately re-shows a question it already asked, so it must
+     not consume a fresh draw. */
+  cur=presetSnapshot||drawQuestion(def,s,curQuizId);inputs=[""];field=0;mascotQuestionSeq++;
   const presetNumber=window.CalcPresets&&typeof window.CalcPresets.questionNumber==="function"?window.CalcPresets.questionNumber():0;
   qcount=presetNumber||qcount+1;
   $("count").textContent=qcount;$("feedback").textContent="";
