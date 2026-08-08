@@ -494,11 +494,10 @@ bot.setMyCommands(BOT_COMMANDS)
   .catch(err => console.warn('⚠️  setMyCommands failed:', err.message, '— commands still work, autocomplete may be stale.'));
 
 /* ── /setup ───────────────────────────────────────────────────────────────
-   Option B: the user creates their OWN forum supergroup, adds this bot as an
-   admin (with "Manage Topics"), and runs /setup inside it. The bot creates a
-   "📸 Images" topic and remembers { groupId, imagesTopicId } keyed by the
-   user's Telegram id (which equals their private-chat / app chatId). After
-   that, their Turbo screenshots are routed to that topic (see /send-photo).
+   Supports ALL group/channel types:
+   • Supergroup with Topics (forum) → creates "📸 Images" topic, routes there
+   • Channel / regular group / supergroup without Topics → routes directly
+   • Private chat → rejected (screenshots need a separate destination)
 
    A bot CANNOT create a group/channel itself (Bot API limitation), so the
    group creation is the one manual step; everything after is automatic. */
@@ -506,55 +505,88 @@ bot.onText(/^\/setup(?:@\w+)?$/, async (msg) => {
   const chat   = msg.chat;
   const fromId = msg.from && msg.from.id;
 
-  if (chat.type !== 'supergroup') {
+  /* Private bot DM — screenshots need a separate destination. */
+  if (chat.type === 'private') {
     bot.sendMessage(chat.id,
-      `⚠️ Yeh command ek <b>group</b> mein chalao (private chat mein nahi).\n\n` +
+      `⚠️ Yeh command ek <b>group</b> ya <b>channel</b> mein chalao (private chat mein nahi).\n\n` +
+      `<b>Option A — Group (with Topics):</b>\n` +
       `1️⃣ Ek naya group banao\n2️⃣ Group Settings → <b>Topics</b> ON karo\n` +
-      `3️⃣ Mujhe us group mein <b>admin</b> banao (Manage Topics permission ke saath)\n` +
-      `4️⃣ Phir group mein <b>/setup</b> bhejo.`,
+      `3️⃣ Mujhe us group mein <b>admin</b> banao (Manage Topics permission)\n` +
+      `4️⃣ Group mein <b>/setup</b> bhejo\n\n` +
+      `<b>Option B — Channel ya Group (bina Topics):</b>\n` +
+      `1️⃣ Channel/Group banao ya existing use karo\n` +
+      `2️⃣ Mujhe <b>admin</b> banao (Post Messages permission)\n` +
+      `3️⃣ Us channel/group mein <b>/setup</b> bhejo`,
       { parse_mode: 'HTML' }
     ).catch(() => {});
     return;
   }
-  if (!chat.is_forum) {
-    bot.sendMessage(chat.id,
-      `⚠️ Is group mein <b>Topics</b> OFF hai. Group Settings → <b>Topics</b> ON karo, phir dobara <b>/setup</b> bhejo.`,
-      { parse_mode: 'HTML' }
-    ).catch(() => {});
-    return;
-  }
+
   if (!db) {
     bot.sendMessage(chat.id, '⚠️ Server config missing — setup abhi save nahi ho sakta.').catch(() => {});
     return;
   }
 
-  try {
-    const topic = await bot.createForumTopic(chat.id, '📸 Images', { icon_color: 0x6FB9F0 });
-    const threadId = topic && topic.message_thread_id;
-    if (!threadId) throw new Error('no message_thread_id returned');
+  /* Supergroup with Topics (forum) — create a dedicated "📸 Images" topic. */
+  if (chat.type === 'supergroup' && chat.is_forum) {
+    try {
+      const topic = await bot.createForumTopic(chat.id, '📸 Images', { icon_color: 0x6FB9F0 });
+      const threadId = topic && topic.message_thread_id;
+      if (!threadId) throw new Error('no message_thread_id returned');
 
+      await db.collection('telegram_groups').doc(String(fromId)).set({
+        groupId:       chat.id,
+        imagesTopicId: threadId,
+        groupTitle:    chat.title || '',
+        username:      (msg.from && msg.from.username) || '',
+        updatedAt:     new Date().toISOString()
+      }, { merge: true });
+
+      bot.sendMessage(chat.id,
+        `✅ <b>Setup complete!</b>\nTumhare Turbo screenshots ab is group ke <b>📸 Images</b> topic mein aayenge.\n` +
+        `(Daily study plan pehle jaisa tumhare private chat mein hi milega.)`,
+        { parse_mode: 'HTML', message_thread_id: threadId }
+      ).catch(() => {});
+      console.log(`✅ /setup → user:${fromId} group:${chat.id} topic:${threadId} (forum)`);
+    } catch (e) {
+      const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
+      bot.sendMessage(chat.id,
+        `❌ Topic nahi bana paya: ${errMsg}\n\n` +
+        `Check karo: kya main is group ka <b>admin</b> hoon <b>"Manage Topics"</b> permission ke saath?`,
+        { parse_mode: 'HTML' }
+      ).catch(() => {});
+      console.error('❌ /setup error (forum):', errMsg);
+    }
+    return;
+  }
+
+  /* Channel, regular group, or supergroup without Topics — save as direct
+     screenshot destination (no topic creation needed). */
+  try {
     await db.collection('telegram_groups').doc(String(fromId)).set({
       groupId:       chat.id,
-      imagesTopicId: threadId,
+      imagesTopicId: null,
       groupTitle:    chat.title || '',
       username:      (msg.from && msg.from.username) || '',
+      chatType:      chat.type,
       updatedAt:     new Date().toISOString()
     }, { merge: true });
 
+    const label = chat.type === 'channel' ? 'channel' : 'group';
     bot.sendMessage(chat.id,
-      `✅ <b>Setup complete!</b>\nTumhare Turbo screenshots ab is group ke <b>📸 Images</b> topic mein aayenge.\n` +
+      `✅ <b>Setup complete!</b>\nTumhare Turbo screenshots ab is ${label} mein seedhe aayenge.\n` +
       `(Daily study plan pehle jaisa tumhare private chat mein hi milega.)`,
-      { parse_mode: 'HTML', message_thread_id: threadId }
+      { parse_mode: 'HTML' }
     ).catch(() => {});
-    console.log(`✅ /setup → user:${fromId} group:${chat.id} topic:${threadId}`);
+    console.log(`✅ /setup → user:${fromId} chat:${chat.id} type:${chat.type} (direct, no topic)`);
   } catch (e) {
     const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
     bot.sendMessage(chat.id,
-      `❌ Topic nahi bana paya: ${errMsg}\n\n` +
-      `Check karo: kya main is group ka <b>admin</b> hoon <b>"Manage Topics"</b> permission ke saath?`,
+      `❌ Setup fail: ${errMsg}\n\n` +
+      `Check karo: kya main is ${chat.type === 'channel' ? 'channel' : 'group'} ka <b>admin</b> hoon?`,
       { parse_mode: 'HTML' }
     ).catch(() => {});
-    console.error('❌ /setup error:', errMsg);
+    console.error('❌ /setup error (direct):', errMsg);
   }
 });
 
@@ -2728,9 +2760,9 @@ const server = http.createServer((req, res) => {
           try {
             const g = await db.collection('telegram_groups').doc(String(chatId)).get();
             const gd = g.exists ? g.data() : null;
-            if (gd && gd.groupId && gd.imagesTopicId) {
+            if (gd && gd.groupId) {
               target = gd.groupId;
-              opts.message_thread_id = gd.imagesTopicId;
+              if (gd.imagesTopicId) opts.message_thread_id = gd.imagesTopicId;
             }
           } catch (e) { /* fall back to DM on any lookup error */ }
         }
