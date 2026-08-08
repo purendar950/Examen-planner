@@ -468,13 +468,12 @@ bot.onText(/^\/help$/, (msg) => {
     `/ask — Koi doubt poocho (AI tutor)\n` +
     `/status — Account aur bot ka health check\n` +
     `/id — Chat ID dobara dekho\n` +
-    `/setup — (Ek group mein) apne screenshots ke liye ek 📸 Images topic banao\n` +
+    `/setup — Screenshot destination choose karo (DM mein button se channel select karo)\n` +
     `/help — Yeh help message\n\n` +
     `🧠 <b>AI auto-schedule:</b> Bas apna task likho (e.g. "Polity Article 14 kal") ` +
     `ya YouTube link bhejo — main planner mein add kar dunga.\n\n` +
-    `📸 <b>Screenshots alag rakhne ke liye:</b> ek group banao → Settings → <b>Topics</b> ON ` +
-    `→ mujhe admin (Manage Topics) banao → group mein <b>/setup</b> bhejo. Uske baad tumhare ` +
-    `Turbo screenshots seedhe us group ke <b>📸 Images</b> topic mein jayenge (daily plan DM mein hi rahega).\n\n` +
+    `📸 <b>Screenshots alag rakhne ke liye:</b> DM mein /setup bhejo aur Choose my channel dabao. ` +
+    `Group ke liye group mein /setup bhej sakte ho.\n\n` +
     `🌐 App: <a href="https://examzen.in">examzen.in</a>`,
     { parse_mode: 'HTML', disable_web_page_preview: true }
   ).catch(err => console.error('sendMessage error:', err.message));
@@ -499,7 +498,7 @@ const BOT_COMMANDS = [
   { command: 'ask',     description: 'Ask a study doubt' },
   { command: 'status',  description: 'Check your account and the bot' },
   { command: 'id',      description: 'Show your Chat ID again' },
-  { command: 'setup',   description: 'Send your screenshots to a group topic' },
+  { command: 'setup',   description: 'Choose a screenshot channel or group' },
   { command: 'help',    description: 'What this bot can do' }
 ];
 bot.setMyCommands(BOT_COMMANDS)
@@ -514,6 +513,28 @@ bot.setMyCommands(BOT_COMMANDS)
 
    A bot CANNOT create a group/channel itself (Bot API limitation), so the
    group creation is the one manual step; everything after is automatic. */
+const SETUP_CHANNEL_REQUEST_TTL_MS = 10 * 60 * 1000;
+const _setupChannelRequests = new Map();
+
+function setupChannelPickerMarkup(requestId) {
+  return {
+    keyboard: [[{
+      text: '📣 Choose my channel',
+      request_chat: {
+        request_id: requestId,
+        chat_is_channel: true,
+        chat_is_created: true,
+        bot_is_member: true,
+        request_title: true,
+        request_username: true
+      }
+    }]],
+    resize_keyboard: true,
+    one_time_keyboard: true,
+    input_field_placeholder: 'Choose the channel for screenshots'
+  };
+}
+
 bot.onText(/^\/setup(?:@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
   const chat   = msg.chat;
   const fromId = msg.from && msg.from.id;
@@ -565,21 +586,27 @@ bot.onText(/^\/setup(?:@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
       return;
     }
 
-    /* No argument — show instructions. */
+    /* Native Bot API channel picker: Telegram returns a chat_shared service
+       message in this DM, so private channel ids never need to be discovered,
+       copied or inferred from anonymous channel posts. */
+    const requestId = crypto.randomInt(1, 0x7fffffff);
+    const requestOwner = String(fromId);
+    _setupChannelRequests.set(requestOwner, {
+      requestId,
+      expiresAt: Date.now() + SETUP_CHANNEL_REQUEST_TTL_MS
+    });
     bot.sendMessage(chat.id,
-      `⚠️ Yeh command ek <b>group</b> ya <b>channel</b> mein chalao, ya channel ID ke saath yahan bhejo.\n\n` +
-      `<b>Option A — Group mein:</b>\n` +
-      `1️⃣ Group banao → Topics ON karo (optional)\n` +
-      `2️⃣ Mujhe <b>admin</b> banao\n` +
-      `3️⃣ Group mein <b>/setup</b> bhejo\n\n` +
-      `<b>Option B — Channel ke liye:</b>\n` +
-      `1️⃣ Channel mein mujhe <b>admin</b> banao\n` +
-      `2️⃣ Channel mein <b>/setup</b> bhejo — main ID bata dunga\n` +
-      `3️⃣ Phir yahan bhejo: <code>/setup &lt;channel_id&gt;</code>\n\n` +
-      `<b>Option C — Agar channel ID pata hai:</b>\n` +
-      `<code>/setup -100XXXXXXXXXX</code> yahan bhejo`,
-      { parse_mode: 'HTML' }
-    ).catch(() => {});
+      `📸 <b>Screenshot destination setup</b>\n\n` +
+      `Neeche <b>Choose my channel</b> dabao aur apna channel select karo.\n\n` +
+      `Channel list mein aane ke liye:\n` +
+      `• channel tumhara created/owned hona chahiye\n` +
+      `• Studyplannerbot us channel mein pehle se member/admin hona chahiye\n\n` +
+      `Select karte hi main permission check karke channel mein test message bhejunga.`,
+      { parse_mode: 'HTML', reply_markup: setupChannelPickerMarkup(requestId) }
+    ).catch(err => {
+      _setupChannelRequests.delete(requestOwner);
+      console.error('❌ /setup picker send failed:', err.message);
+    });
     return;
   }
 
@@ -648,6 +675,136 @@ bot.onText(/^\/setup(?:@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
       { parse_mode: 'HTML' }
     ).catch(() => {});
     console.error('❌ /setup error (direct):', errMsg);
+  }
+});
+
+/* ── Native channel selection from /setup DM ─────────────────────────────
+   KeyboardButtonRequestChat returns Message.chat_shared in the private chat.
+   This is the authoritative setup path for private channels: Telegram supplies
+   the id, the picker restricts selection to channels owned by the user where
+   this bot is already a member, and we prove write access with a test post
+   before persisting the destination. */
+bot.on('message', async (msg) => {
+  const shared = msg && msg.chat_shared;
+  if (!shared) return;
+  if (!msg.chat || msg.chat.type !== 'private' || !msg.from) return;
+
+  const dmChatId = msg.chat.id;
+  const userId = String(msg.from.id);
+  const pending = _setupChannelRequests.get(userId);
+  const requestId = Number(shared.request_id);
+  if (!pending || pending.requestId !== requestId || pending.expiresAt < Date.now()) {
+    _setupChannelRequests.delete(userId);
+    bot.sendMessage(dmChatId,
+      '⚠️ Yeh channel selection expire ho chuka hai. Naya button pane ke liye /setup dobara bhejo.',
+      { reply_markup: { remove_keyboard: true } }
+    ).catch(() => {});
+    return;
+  }
+  /* Consume before network work so duplicate service messages cannot post or save twice. */
+  _setupChannelRequests.delete(userId);
+
+  const targetId = String(shared.chat_id || '');
+  if (!/^-?\d+$/.test(targetId)) {
+    bot.sendMessage(dmChatId, '❌ Telegram ne valid channel ID nahi diya. /setup dobara bhejo.', {
+      reply_markup: { remove_keyboard: true }
+    }).catch(() => {});
+    return;
+  }
+  if (!db) {
+    bot.sendMessage(dmChatId, '⚠️ Server database unavailable hai. Thodi der baad /setup dobara bhejo.', {
+      reply_markup: { remove_keyboard: true }
+    }).catch(() => {});
+    return;
+  }
+
+  try {
+    await enforceFirestoreRateLimit('command:setupChannel', userId, 4, 60000,
+      'Bahut zyada setup attempts. Ek minute wait karke dobara try karo.');
+
+    const [chatInfo, me] = await Promise.all([bot.getChat(targetId), bot.getMe()]);
+    if (!chatInfo || chatInfo.type !== 'channel') {
+      const userMessage = 'Selected chat channel nahi hai.';
+      throw Object.assign(new Error(userMessage), { userMessage });
+    }
+
+    const [botMembership, ownerMembership] = await Promise.all([
+      bot.getChatMember(targetId, me.id),
+      bot.getChatMember(targetId, msg.from.id)
+    ]);
+    if (!ownerMembership || ownerMembership.status !== 'creator') {
+      const userMessage = 'Sirf channel owner apna channel connect kar sakta hai.';
+      throw Object.assign(new Error(userMessage), { userMessage });
+    }
+
+    const isAdmin = botMembership && ['administrator', 'creator'].includes(botMembership.status);
+    const canPost = botMembership && botMembership.status === 'creator'
+      ? true
+      : botMembership && botMembership.can_post_messages === true;
+    if (!isAdmin || !canPost) {
+      const userMessage =
+        'Studyplannerbot ko channel ka admin banao aur “Post Messages” permission ON karo, phir /setup se channel dobara choose karo.';
+      throw Object.assign(new Error(userMessage), { userMessage });
+    }
+
+    let testMessage;
+    testMessage = await bot.sendMessage(targetId,
+      '🔄 <b>StudyPlanner connection test</b>\nPermission verified. Setup save ho raha hai…',
+      { parse_mode: 'HTML' });
+
+    try {
+      await db.collection('telegram_groups').doc(userId).set({
+        groupId: Number(targetId),
+        imagesTopicId: null,
+        groupTitle: String(shared.title || chatInfo.title || '').slice(0, 120),
+        username: (msg.from && msg.from.username) || '',
+        chatType: 'channel',
+        linkedVia: 'chat_shared',
+        setupTestMessageId: testMessage && testMessage.message_id ? String(testMessage.message_id) : '',
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (persistenceError) {
+      if (testMessage && testMessage.message_id) {
+        await bot.deleteMessage(targetId, testMessage.message_id).catch(deleteError => {
+          console.error('❌ /setup provisional message cleanup failed:', deleteError.message);
+        });
+      }
+      throw persistenceError;
+    }
+
+    if (testMessage && testMessage.message_id) {
+      await bot.editMessageText(
+        '✅ <b>StudyPlanner connected</b>\nTurbo screenshots ab is channel mein aa sakte hain.',
+        { chat_id: targetId, message_id: testMessage.message_id, parse_mode: 'HTML' }
+      ).catch(editError => console.error('❌ /setup saved but channel confirmation edit failed:', editError.message));
+    }
+
+    console.log(`✅ /setup chat_shared → user:${userId} channel:${targetId} test:${testMessage && testMessage.message_id}`);
+    try {
+      await bot.sendMessage(dmChatId,
+        `✅ <b>Setup complete!</b>\n\n` +
+        `Channel: <b>${escapeTelegramHtml(String(shared.title || chatInfo.title || targetId).slice(0, 80))}</b>\n` +
+        `Test message successfully bhej diya. Turbo screenshots ab isi channel mein jayenge.`,
+        { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
+    } catch (confirmationError) {
+      console.error('❌ setup saved but confirmation DM failed:', confirmationError.message);
+    }
+    return;
+  } catch (error) {
+    const telegramDetail = error && error.response && error.response.body && error.response.body.description;
+    const detail = String(telegramDetail || error.message || 'unknown error');
+    console.error(`❌ /setup chat_shared failed → user:${userId} channel:${targetId}: ${detail}`);
+    const userText = error && error.userMessage
+      ? error.userMessage
+      : error && error.status === 429
+        ? error.message
+        : /not enough rights|administrator|chat not found|forbidden|have no rights/i.test(detail)
+          ? 'Bot channel mein post nahi kar sakta. Studyplannerbot ko admin banao, “Post Messages” ON karo, phir /setup dobara bhejo.'
+          : 'Channel setup abhi complete nahi hua. Thodi der baad /setup dobara try karo.';
+    await bot.sendMessage(dmChatId,
+      `❌ <b>Setup complete nahi hua.</b>\n\n${escapeTelegramHtml(userText)}`,
+      { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } }
+    ).catch(sendError => console.error('❌ /setup failure DM also failed:', sendError.message));
   }
 });
 
