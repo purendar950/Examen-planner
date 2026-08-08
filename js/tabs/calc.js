@@ -8,9 +8,19 @@
   var deepLinkSent = false;
   var calcSessionUid = null;
   var calcSessionKey = '';
+  /* Every question type the practice app can generate. This list, QUIZ_CHOICES in
+     calc/presets.js and CALC_QUIZ_IDS in bot/bot-server.js must stay identical:
+     a type missing here is stripped from a preset on its way into appState, and a
+     preset left with no types was then dropped outright. That is how the
+     "Writing Table", "Two-Digit Multiplication" and "Three-Digit Multiplication"
+     quick presets failed — saved in the iframe, absent from the cloud, so
+     "Send to Telegram" answered "Save this preset before sending it to Telegram."
+     tests/calc-preset-sync.test.mjs pins the three lists together. */
   var VALID_QUIZ_IDS = new Set([
-    'addition', 'subtraction', 'mult1', 'mult2', 'mult3', 'squares', 'sqroots', 'cubes', 'cuberoots', 'higherpow',
-    'pctfrac', 'pctnum', 'trig', 'pyth', 'ci_si', 'ci_ci', 'primeinrange', 'isprime', 'astr1', 'astr2', 'arev1', 'arev2'
+    'addition', 'subtraction', 'mult1', 'mult2', 'mult3', 'tablewrite', 'mult2d', 'mult3d',
+    'squares', 'sqroots', 'cubes', 'cuberoots', 'higherpow',
+    'pctfrac', 'pctnum', 'trig', 'pyth', 'ci_si', 'ci_ci', 'primeinrange', 'isprime',
+    'astr1', 'astr2', 'arev1', 'arev2'
   ]);
 
   function defaultCalcState() {
@@ -33,33 +43,142 @@
     return parts[0] >= 0 && parts[0] <= 23 && parts[1] >= 0 && parts[1] <= 59;
   }
 
+  /* Mirrors difficultySettings() in calc/presets.js (and calculationDifficulty-
+     Defaults() in bot/bot-server.js). Only a fallback for absent keys — the
+     iframe always sends a full settings object — but a preset saved before the
+     ranges were split relies on it. */
+  function difficultyDefaults(level) {
+    if (level === 'easy') {
+      return {
+        digits: 1, sqMin: 2, sqMax: 12, cubeMin: 2, cubeMax: 8, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
+        mult2Min: 10, mult2Max: 30, mult3Min: 100, mult3Max: 400, mult3ByMin: 2, mult3ByMax: 9, primeMax: 50, ciYears: 2
+      };
+    }
+    if (level === 'exam') {
+      return {
+        digits: 3, sqMin: 10, sqMax: 50, cubeMin: 5, cubeMax: 25, multFrom: 11, multTo: 25, multiplierFrom: 1, multiplierTo: 20,
+        mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 11, mult3ByMax: 99, primeMax: 300, ciYears: 3
+      };
+    }
+    return {
+      digits: 2, sqMin: 2, sqMax: 25, cubeMin: 2, cubeMax: 15, multFrom: 2, multTo: 9, multiplierFrom: 1, multiplierTo: 10,
+      mult2Min: 10, mult2Max: 99, mult3Min: 100, mult3Max: 999, mult3ByMin: 2, mult3ByMax: 12, primeMax: 100, ciYears: 2
+    };
+  }
+
+  /* Mirrors normalizeSettings() in calc/presets.js. Every key it produces has to
+     survive this round trip: the ten it used to omit (squares, cubes, two- and
+     three-digit multiplication bounds) were reset to difficulty defaults on
+     every sync, so a customised range quietly reverted. */
+  function sanitizeSettings(raw, difficulty) {
+    var fallback = difficultyDefaults(difficulty === 'custom' ? 'standard' : difficulty);
+    raw = raw && typeof raw === 'object' ? raw : {};
+    var orderedPair = function (low, high, min, max, fallbackLow, fallbackHigh) {
+      var lowValue = clampNumber(low, min, max, fallbackLow);
+      var highValue = clampNumber(high, min, max, fallbackHigh);
+      return highValue < lowValue ? [highValue, lowValue] : [lowValue, highValue];
+    };
+    /* A preset saved before the split carries one rangeMin/rangeMax pair, which
+       seeds both base ranges so it keeps behaving the same. */
+    var legacyLow = raw.sqMin == null && raw.cubeMin == null ? raw.rangeMin : null;
+    var legacyHigh = raw.sqMax == null && raw.cubeMax == null ? raw.rangeMax : null;
+    var square = orderedPair(
+      raw.sqMin != null ? raw.sqMin : legacyLow, raw.sqMax != null ? raw.sqMax : legacyHigh,
+      1, 100, fallback.sqMin, fallback.sqMax);
+    var cube = orderedPair(
+      raw.cubeMin != null ? raw.cubeMin : legacyLow, raw.cubeMax != null ? raw.cubeMax : legacyHigh,
+      1, 100, fallback.cubeMin, fallback.cubeMax);
+    var table = orderedPair(raw.multFrom, raw.multTo, 1, 100, fallback.multFrom, fallback.multTo);
+    var multiplier = orderedPair(raw.multiplierFrom, raw.multiplierTo, 1, 100, fallback.multiplierFrom, fallback.multiplierTo);
+    var twoDigit = orderedPair(raw.mult2Min, raw.mult2Max, 10, 99, fallback.mult2Min, fallback.mult2Max);
+    var threeDigit = orderedPair(raw.mult3Min, raw.mult3Max, 100, 999, fallback.mult3Min, fallback.mult3Max);
+    var threeDigitBy = orderedPair(raw.mult3ByMin, raw.mult3ByMax, 2, 999, fallback.mult3ByMin, fallback.mult3ByMax);
+    return {
+      digits: clampNumber(raw.digits, 1, 4, fallback.digits),
+      sqMin: square[0],
+      sqMax: square[1],
+      cubeMin: cube[0],
+      cubeMax: cube[1],
+      multFrom: table[0],
+      multTo: table[1],
+      multiplierFrom: multiplier[0],
+      multiplierTo: multiplier[1],
+      mult2Min: twoDigit[0],
+      mult2Max: twoDigit[1],
+      mult3Min: threeDigit[0],
+      mult3Max: threeDigit[1],
+      mult3ByMin: threeDigitBy[0],
+      mult3ByMax: threeDigitBy[1],
+      primeMax: clampNumber(raw.primeMax, 10, 300, fallback.primeMax),
+      ciYears: clampNumber(raw.ciYears, 2, 5, fallback.ciYears)
+    };
+  }
+
+  /* Mirrors normalizeSegments() in calc/presets.js. Dropping these turned a
+     combined multi-part preset back into a flat one on every sync — and the bot
+     already reads parts, so Mini App practice never saw them either. */
+  function sanitizeSegments(raw, difficulty) {
+    if (!Array.isArray(raw)) return [];
+    return raw.slice(0, 8).map(function (segment) {
+      segment = segment && typeof segment === 'object' ? segment : {};
+      var quizIds = Array.isArray(segment.quizIds)
+        ? Array.from(new Set(segment.quizIds
+          .map(function (id) { return safeText(id, 32); })
+          .filter(function (id) { return VALID_QUIZ_IDS.has(id); })))
+        : [];
+      if (!quizIds.length) return null;
+      var rawSegmentWeights = segment.weights && typeof segment.weights === 'object' ? segment.weights : {};
+      var segmentWeights = {};
+      quizIds.forEach(function (id) { segmentWeights[id] = clampNumber(rawSegmentWeights[id], 1, 10, 1); });
+      return {
+        name: safeText(segment.name, 40) || 'Part',
+        quizIds: quizIds,
+        weights: segmentWeights,
+        share: clampNumber(segment.share, 1, 50, 10),
+        settings: sanitizeSettings(segment.settings, difficulty)
+      };
+    }).filter(Boolean);
+  }
+
   function sanitizePreset(raw) {
     raw = raw && typeof raw === 'object' ? raw : {};
     var validDifficulties = ['easy', 'standard', 'exam', 'custom'];
     var validTimers = [0, 3, 5, 10, 15];
+    var difficulty = validDifficulties.includes(raw.difficulty) ? raw.difficulty : 'standard';
     var quizIds = Array.isArray(raw.quizIds)
       ? raw.quizIds.map(function (id) { return safeText(id, 32); }).filter(function (id) { return VALID_QUIZ_IDS.has(id); }).slice(0, VALID_QUIZ_IDS.size)
       : [];
+    quizIds = Array.from(new Set(quizIds));
+    /* Backfill exactly as normalizePreset() does rather than leaving the preset
+       empty for sanitizeCalcState() to discard. A preset the user can still see
+       in the iframe but that never reaches the cloud is the worst outcome: it
+       cannot be sent, and the next state push deletes it. */
+    if (!quizIds.length) {
+      if (Array.isArray(raw.quizIds) && raw.quizIds.length) {
+        console.warn('[calc] preset "' + safeText(raw.name, 40) + '" had no recognized question types', raw.quizIds);
+      }
+      quizIds = ['addition', 'subtraction', 'mult1'];
+    }
     var days = Array.isArray(raw.days)
       ? raw.days.map(Number).filter(function (day) { return Number.isInteger(day) && day >= 0 && day <= 6; }).slice(0, 7)
       : [];
-    var settings = raw.settings && typeof raw.settings === 'object' ? raw.settings : {};
     var rawWeights = raw.weights && typeof raw.weights === 'object' ? raw.weights : {};
     var weights = {};
-    Array.from(new Set(quizIds)).forEach(function (id) { weights[id] = clampNumber(rawWeights[id], 1, 10, 1); });
+    quizIds.forEach(function (id) { weights[id] = clampNumber(rawWeights[id], 1, 10, 1); });
     var rawReminder = raw.reminder && typeof raw.reminder === 'object' ? raw.reminder : {};
-    var rangeMin = clampNumber(settings.rangeMin, 1, 100, 2);
-    var rangeMax = clampNumber(settings.rangeMax, 1, 100, 25);
-    var multFrom = clampNumber(settings.multFrom, 1, 100, 2);
-    var multTo = clampNumber(settings.multTo, 1, 100, 9);
-    var multiplierFrom = clampNumber(settings.multiplierFrom, 1, 100, 1);
-    var multiplierTo = clampNumber(settings.multiplierTo, 1, 100, 10);
-    if (rangeMax < rangeMin) { var rangeSwap = rangeMin; rangeMin = rangeMax; rangeMax = rangeSwap; }
-    if (multTo < multFrom) { var multSwap = multFrom; multFrom = multTo; multTo = multSwap; }
-    if (multiplierTo < multiplierFrom) { var multiplierSwap = multiplierFrom; multiplierFrom = multiplierTo; multiplierTo = multiplierSwap; }
     var leadOptions = [0, 5, 10, 15, 30, 60];
     var snoozeOptions = [5, 10, 15, 30, 60];
     var maxSnoozeOptions = [0, 1, 2, 3, 5];
+    /* Parts are kept only while they cover exactly the selected types, matching
+       normalizePreset() — otherwise a part would practise something the preset
+       no longer lists, or a new type would never be asked. */
+    var segments = sanitizeSegments(raw.segments, difficulty);
+    var covered = [];
+    segments.forEach(function (segment) {
+      segment.quizIds.forEach(function (id) { if (covered.indexOf(id) < 0) covered.push(id); });
+    });
+    if (segments.length < 2 || covered.length !== quizIds.length
+      || covered.some(function (id) { return quizIds.indexOf(id) < 0; })) segments = [];
     return {
       id: safeText(raw.id, 80),
       name: safeText(raw.name, 40) || 'My Practice',
@@ -67,25 +186,17 @@
       color: /^#[0-9a-f]{6}$/i.test(raw.color || '') ? raw.color : '#00C896',
       description: safeText(raw.description, 100),
       questionCount: clampNumber(raw.questionCount, 3, 50, 10),
-      difficulty: validDifficulties.includes(raw.difficulty) ? raw.difficulty : 'standard',
+      difficulty: difficulty,
       timerMinutes: validTimers.includes(Number(raw.timerMinutes)) ? Number(raw.timerMinutes) : 0,
-      quizIds: Array.from(new Set(quizIds)),
+      quizIds: quizIds,
       weights: weights,
       allowHints: raw.allowHints !== false,
       allowSkip: raw.allowSkip !== false,
       shuffle: raw.shuffle !== false,
       retryWrong: ['immediate', 'end', 'none'].includes(raw.retryWrong) ? raw.retryWrong : 'immediate',
-      settings: {
-        digits: clampNumber(settings.digits, 1, 4, 2),
-        rangeMin: rangeMin,
-        rangeMax: rangeMax,
-        multFrom: multFrom,
-        multTo: multTo,
-        multiplierFrom: multiplierFrom,
-        multiplierTo: multiplierTo,
-        primeMax: clampNumber(settings.primeMax, 10, 300, 100),
-        ciYears: clampNumber(settings.ciYears, 2, 5, 2)
-      },
+      settings: sanitizeSettings(raw.settings, difficulty),
+      segments: segments,
+      sequential: segments.length >= 2 && raw.sequential !== false,
       dailyEnabled: raw.dailyEnabled === true,
       dailyTime: validTime(raw.dailyTime) ? raw.dailyTime : '07:00',
       days: Array.from(new Set(days)),
@@ -149,8 +260,12 @@
     raw = raw && typeof raw === 'object' ? raw : {};
     var presets = Array.isArray(raw.presets) ? raw.presets.map(sanitizePreset).slice(0, 30) : [];
     var validIds = new Set();
+    /* sanitizePreset() backfills question types, so a preset can no longer be
+       discarded for having none — that check silently deleted any preset built
+       only from types this file did not recognise. A missing or duplicate id is
+       the only reason left to drop one. */
     presets = presets.filter(function (preset) {
-      if (!preset.id || validIds.has(preset.id) || !preset.quizIds.length) return false;
+      if (!preset.id || validIds.has(preset.id)) return false;
       validIds.add(preset.id);
       return true;
     });
