@@ -501,22 +501,70 @@ bot.setMyCommands(BOT_COMMANDS)
 
    A bot CANNOT create a group/channel itself (Bot API limitation), so the
    group creation is the one manual step; everything after is automatic. */
-bot.onText(/^\/setup(?:@\w+)?$/, async (msg) => {
+bot.onText(/^\/setup(?:@\w+)?(?:\s+(.+))?$/, async (msg, match) => {
   const chat   = msg.chat;
   const fromId = msg.from && msg.from.id;
 
-  /* Private bot DM — screenshots need a separate destination. */
+  /* Private bot DM — either link a channel/group by ID, or show instructions. */
   if (chat.type === 'private') {
+    /* Check if user provided a chat ID argument: /setup -100123456 */
+    const targetId = match && match[1] ? match[1].trim() : '';
+
+    if (/^-?\d+$/.test(targetId) && db && fromId) {
+      /* User is linking a specific channel/group from their DM. */
+      try {
+        /* Verify the bot is a member of that chat. */
+        const chatInfo = await bot.getChat(targetId);
+        if (!chatInfo) throw new Error('Chat not found');
+
+        const chatType = chatInfo.type; // 'channel', 'group', 'supergroup'
+        if (chatType === 'private') {
+          bot.sendMessage(chat.id, '⚠️ Private chat nahi — channel ya group ka ID do.', { parse_mode: 'HTML' }).catch(() => {});
+          return;
+        }
+
+        await db.collection('telegram_groups').doc(String(fromId)).set({
+          groupId:       Number(targetId),
+          imagesTopicId: null,
+          groupTitle:    chatInfo.title || '',
+          username:      (msg.from && msg.from.username) || '',
+          chatType:      chatType,
+          updatedAt:     new Date().toISOString()
+        }, { merge: true });
+
+        const label = chatType === 'channel' ? 'channel' : 'group';
+        bot.sendMessage(chat.id,
+          `✅ <b>Setup complete!</b>\n` +
+          `Tumhare screenshots ab "<b>${escapeTelegramHtml((chatInfo.title || targetId).slice(0, 60))}</b>" ${label} mein jayenge.\n\n` +
+          `(Daily plan pehle jaisa DM mein hi milega.)`,
+          { parse_mode: 'HTML' }
+        ).catch(() => {});
+        console.log(`✅ /setup DM link → user:${fromId} target:${targetId} type:${chatType}`);
+      } catch (e) {
+        const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
+        bot.sendMessage(chat.id,
+          `❌ Link nahi ho paya: ${errMsg}\n\n` +
+          `Check karo:\n• Kya bot us channel/group mein <b>admin</b> hai?\n• Kya ID sahi hai?`,
+          { parse_mode: 'HTML' }
+        ).catch(() => {});
+        console.error('❌ /setup DM link error:', errMsg);
+      }
+      return;
+    }
+
+    /* No argument — show instructions. */
     bot.sendMessage(chat.id,
-      `⚠️ Yeh command ek <b>group</b> ya <b>channel</b> mein chalao (private chat mein nahi).\n\n` +
-      `<b>Option A — Group (with Topics):</b>\n` +
-      `1️⃣ Ek naya group banao\n2️⃣ Group Settings → <b>Topics</b> ON karo\n` +
-      `3️⃣ Mujhe us group mein <b>admin</b> banao (Manage Topics permission)\n` +
-      `4️⃣ Group mein <b>/setup</b> bhejo\n\n` +
-      `<b>Option B — Channel ya Group (bina Topics):</b>\n` +
-      `1️⃣ Channel/Group banao ya existing use karo\n` +
-      `2️⃣ Mujhe <b>admin</b> banao (Post Messages permission)\n` +
-      `3️⃣ Us channel/group mein <b>/setup</b> bhejo`,
+      `⚠️ Yeh command ek <b>group</b> ya <b>channel</b> mein chalao, ya channel ID ke saath yahan bhejo.\n\n` +
+      `<b>Option A — Group mein:</b>\n` +
+      `1️⃣ Group banao → Topics ON karo (optional)\n` +
+      `2️⃣ Mujhe <b>admin</b> banao\n` +
+      `3️⃣ Group mein <b>/setup</b> bhejo\n\n` +
+      `<b>Option B — Channel ke liye:</b>\n` +
+      `1️⃣ Channel mein mujhe <b>admin</b> banao\n` +
+      `2️⃣ Channel mein <b>/setup</b> bhejo — main ID bata dunga\n` +
+      `3️⃣ Phir yahan bhejo: <code>/setup &lt;channel_id&gt;</code>\n\n` +
+      `<b>Option C — Agar channel ID pata hai:</b>\n` +
+      `<code>/setup -100XXXXXXXXXX</code> yahan bhejo`,
       { parse_mode: 'HTML' }
     ).catch(() => {});
     return;
@@ -587,6 +635,57 @@ bot.onText(/^\/setup(?:@\w+)?$/, async (msg) => {
       { parse_mode: 'HTML' }
     ).catch(() => {});
     console.error('❌ /setup error (direct):', errMsg);
+  }
+});
+
+/* ── /setup in channels (channel_post) ────────────────────────────────────
+   Telegram sends messages posted in channels as `channel_post` updates, not
+   regular `message` updates — so `bot.onText()` never sees them. This listener
+   catches /setup typed in a channel and links it as the screenshot destination.
+
+   Channel posts have NO `from` field (the sender is anonymous). To identify the
+   user, we look up who has this bot linked via telegram_links where uid matches
+   a user whose appState.telegram.chatId resolves to a known account. Since only
+   channel admins can post, and the user must also be bot-connected, we use the
+   sender_chat or fall back to requiring /setup <channel_id> from the DM. */
+bot.on('channel_post', async (msg) => {
+  if (!msg.text || !msg.text.match(/^\/setup(?:@\w+)?$/)) return;
+  const chat = msg.chat;
+
+  if (!db) {
+    bot.sendMessage(chat.id, '⚠️ Server config missing — setup abhi save nahi ho sakta.').catch(() => {});
+    return;
+  }
+
+  /* In a channel, msg.from is undefined. We use sender_chat (the channel itself)
+     to confirm this is a channel, then save it. The owner will link it via
+     /setup <channel_id> from DM, OR if we can identify them from telegram_links
+     we save directly. For now, save keyed by the channel's own chat ID and let
+     /setup <id> from DM create the user-keyed record. */
+  try {
+    /* Save a channel-level record so we know this channel has been set up.
+       The user-keyed record (needed for routing) is created by /setup <id> from DM. */
+    await db.collection('telegram_channels').doc(String(chat.id)).set({
+      channelId:    chat.id,
+      channelTitle: chat.title || '',
+      setupAt:      new Date().toISOString()
+    }, { merge: true });
+
+    bot.sendMessage(chat.id,
+      `✅ <b>Channel registered!</b>\n\n` +
+      `Ab apne bot DM mein yeh bhejo:\n` +
+      `<code>/setup ${chat.id}</code>\n\n` +
+      `Isse tumhara account is channel se link ho jayega aur screenshots yahan aayenge.`,
+      { parse_mode: 'HTML' }
+    ).catch(() => {});
+    console.log(`✅ /setup channel_post → channel:${chat.id} title:${chat.title || ''}`);
+  } catch (e) {
+    const errMsg = (e && e.response && e.response.body && e.response.body.description) || e.message;
+    bot.sendMessage(chat.id,
+      `❌ Setup fail: ${errMsg}\n\nCheck karo: kya main is channel ka <b>admin</b> hoon?`,
+      { parse_mode: 'HTML' }
+    ).catch(() => {});
+    console.error('❌ /setup channel_post error:', errMsg);
   }
 });
 
