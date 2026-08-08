@@ -1911,6 +1911,69 @@ function groqFallbackProvider(cfg) {
   };
 }
 
+/* ── Cross-provider failover registry ─────────────────────────────────────
+   Server-side mirror of the subset of STUDY_PROVIDERS (from admin-actions.js)
+   that speaks the OpenAI-compatible chat/completions protocol. Used to build a
+   fallback chain when the active provider is unreachable.
+   google_interactions is intentionally excluded (transport !== 'openai_chat'). */
+const FAILOVER_PROVIDERS = [
+  { id: 'bynara',      keyField: 'bynaraApiKeys',      modelField: 'bynaraModel',      baseUrl: 'https://router.bynara.id/v1',                            defaultModel: 'mistral-large' },
+  { id: 'mistral',     keyField: 'mistralApiKeys',     modelField: 'mistralModel',     baseUrl: 'https://api.mistral.ai/v1',                           defaultModel: 'mistral-large-latest' },
+  { id: 'cerebras',    keyField: 'cerebrasApiKeys',    modelField: 'cerebrasModel',    baseUrl: 'https://api.cerebras.ai/v1',                          defaultModel: 'gpt-oss-120b' },
+  { id: 'openrouter',  keyField: 'openrouterApiKeys',  modelField: 'openrouterModel',  baseUrl: 'https://openrouter.ai/api/v1',                        defaultModel: 'nvidia/nemotron-3-ultra-550b-a55b:free' },
+  { id: 'nvidia',      keyField: 'nvidiaApiKeys',      modelField: 'nvidiaModel',      baseUrl: 'https://integrate.api.nvidia.com/v1',                  defaultModel: 'deepseek-ai/deepseek-v4-pro' },
+  { id: 'google',      keyField: 'googleApiKeys',      modelField: 'googleModel',      baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-flash-latest' },
+  { id: 'hcnsec',      keyField: 'hcnsecApiKeys',      modelField: 'hcnsecModel',      baseUrl: 'https://api.hcnsec.cn/v1',                            defaultModel: 'DeepSeek-V4-Pro' },
+  { id: 'bluesminds',  keyField: 'bluesmindsApiKeys',  modelField: 'bluesmindsModel',  baseUrl: 'https://api.bluesminds.com/v1',                       defaultModel: 'gpt-5.2-chat' },
+  { id: 'aicampus',    keyField: 'aicampusApiKeys',    modelField: 'aicampusModel',    baseUrl: 'https://ai-hub.aicampus.my/v1',                       defaultModel: 'minimax-m3' },
+  { id: 'omniroute',   keyField: 'omnirouteApiKeys',   modelField: 'omnirouteModel',   baseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1',     defaultModel: 'auto' },
+  { id: 'kiro',        keyField: 'kiroApiKeys',        modelField: 'kiroModel',        baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1',           defaultModel: 'auto' },
+];
+
+/* Build a list of fallback providers from the config, excluding the provider that
+   was already tried (matched by its completions URL). Returns an array of
+   provider objects in registry order, ready for callStudyProvider(). */
+function buildFallbackProviderList(cfg, excludeProvider) {
+  const result = [];
+  const excludeUrl = excludeProvider ? excludeProvider.url : null;
+
+  for (const entry of FAILOVER_PROVIDERS) {
+    const keys = studyApiKeyList(cfg[entry.keyField]);
+    if (!keys.length) continue;
+    const url = `${entry.baseUrl}/chat/completions`;
+    if (url === excludeUrl) continue;
+    const model = (cfg[entry.modelField] || entry.defaultModel || 'auto').trim();
+    result.push({ provider: entry.id, url, keys, model });
+  }
+
+  // Include Groq fallback if not already excluded
+  if (!excludeProvider || excludeProvider.provider !== 'groq') {
+    const groq = groqFallbackProvider(cfg);
+    if (groq) result.push(groq);
+  }
+
+  return result;
+}
+
+/* Try each provider in sequence. Re-throw HTTP 400 immediately (bad question —
+   retrying won't help). Swallow 502/network errors and move to the next. If all
+   providers fail, throw the last error. */
+async function callWithFailover(providers, messages) {
+  let lastError = null;
+  for (const provider of providers) {
+    try {
+      const answer = await callStudyProvider(provider, messages);
+      if (answer) return { answer, provider };
+    } catch (error) {
+      if (error && error.status === 400) throw error; // bad question — don't retry
+      lastError = error;
+      continue;
+    }
+  }
+  if (lastError) throw lastError;
+  throw Object.assign(new Error('no providers available'), { status: 502 });
+}
+
 /* The key list is a rotation, not a preference order: a revoked or exhausted key
    must not take /ask down while another still works. A 400 is not retried,
    because the request itself is what was refused and every key would say the
@@ -1997,16 +2060,21 @@ bot.onText(/^\/ask(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
       return;
     }
     /* Whatever the admin selected in the Study AI card, with the auto-scheduler's
-       Groq key as the fallback for an installation that configured only that. */
-    const provider = studyProviderFromConfig(cfg) || groqFallbackProvider(cfg);
-    if (!provider) {
+       Groq key as the fallback for an installation that configured only that.
+       If the primary provider fails, walk through all other configured providers
+       (cross-provider failover) before giving up. */
+    const primaryProvider = studyProviderFromConfig(cfg) || groqFallbackProvider(cfg);
+    const fallbacks = buildFallbackProviderList(cfg, primaryProvider);
+    if (!primaryProvider && fallbacks.length === 0) {
       await bot.sendMessage(chatId,
         '⚠️ AI provider set nahi hai. Admin panel ke <b>Study AI</b> card mein provider aur key save karo.',
         { parse_mode: 'HTML' });
       return;
     }
+    const allProviders = primaryProvider ? [primaryProvider, ...fallbacks] : fallbacks;
+    const messages = buildTutorMessages(question);
     bot.sendChatAction(chatId, 'typing').catch(() => {});
-    const answer = await callStudyProvider(provider, buildTutorMessages(question));
+    const { answer, provider } = await callWithFailover(allProviders, messages);
     if (!answer) {
       await bot.sendMessage(chatId, '⚠️ Jawab nahi mila. Dobara try karo.', { parse_mode: 'HTML' });
       return;
