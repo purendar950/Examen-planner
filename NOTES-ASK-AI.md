@@ -114,3 +114,53 @@ key format and the limit. It counts nothing, and returns `null` for Pro/trial.
   timer. Covered by a sequenced regression test.
 - **A second tap on the same section button dismisses the popover.** It is
   anchored by block index, so tapping a *different* section re-anchors instead.
+
+
+## Inverted (night) reading — the ◐ toggle
+
+The notebook is a deliberately light "paper" surface, which is punishing in a dark
+room. `◐` in the Focus toolbar flips it to dark paper / light ink, and the choice
+is remembered (`aiNotesInvert`).
+
+It sits in the **heading cluster** next to Exit and Full screen, not in the actions
+row on the right — that row scrolls sideways on a phone, and a display toggle
+should not be able to slide off screen.
+
+### Why a filter and not a dark palette
+
+`nbCss()` carries ~55 rules of hard-coded light colour: headings in five accents,
+fact/mem/note boxes, MCQ cards, tables, chips, badges. A parallel dark copy would
+drift out of sync with the light one the first time either side was touched. One
+declaration does the whole thing instead:
+
+```css
+filter: invert(1) hue-rotate(180deg);
+```
+
+The `hue-rotate` is what makes it usable rather than psychedelic — it puts hues
+roughly back where they started, so green headings stay green instead of turning
+magenta.
+
+### Why it is on the scroller, not the layer
+
+The filter is applied to `> .ai-scroll`, never to `#ai-sub` itself:
+
+- The toolbar, annotation bar, ask sheet, selection popover and mini video are all
+  **siblings** of the scroller. They are darkened explicitly instead of being
+  double-inverted — and the video keeps true colour.
+- **`filter` makes an element a containing block for `position: fixed`
+  descendants.** `#ai-note-pop` is fixed; putting a filter on its ancestor would
+  break its positioning outright.
+- The annotation canvas *is* inside the scroller, so it is counter-inverted — a red
+  pen stays red, because the student picked that colour.
+- The **PDF export** renders from the `nbHtml` string with its own print CSS, so it
+  is untouched and never prints white-on-black.
+
+The UA fullscreen rules restate the light paper with `!important`, so the inverted
+variants restate it too (`:fullscreen`, `:-webkit-full-screen`, `::backdrop`) —
+otherwise going full screen snapped the background back to paper.
+
+**Trade-off:** a filtered scroller is a composited layer, so very long notes may
+cost some scroll smoothness on low-end phones. If that shows up in practice, the
+fallback is a real dark palette for the handful of `nbCss` rules that carry most of
+the surface area.

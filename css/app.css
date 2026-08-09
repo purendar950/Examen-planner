@@ -8426,3 +8426,120 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   #page-youtube .ai-focus-ask-head { font-size: .72rem; }
   #page-youtube .ai-focus-ask-body { padding-inline: .55rem; }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Notes Focus Mode — inverted (night) reading
+   ───────────────────────────────────────────────────────────────────────────
+   One filter declaration stands in for a parallel dark copy of all ~55 nbCss()
+   rules (five heading accents, fact/mem/note boxes, MCQ cards, tables, chips,
+   badges). A hand-written dark palette would drift out of sync with the light one
+   the first time either was touched. hue-rotate(180deg) pairs with invert(1) so
+   hues land roughly back where they started — green headings stay green instead
+   of turning magenta.
+
+   The filter is on the SCROLLER, not the layer, deliberately:
+     - the toolbar, annotation bar, ask sheet, selection popover and mini video
+       are all siblings, so they are darkened explicitly below rather than
+       double-inverted — and video keeps true colour
+     - `filter` makes an element a containing block for position:fixed
+       descendants; #ai-note-pop is fixed, so keeping the filter off its
+       ancestors leaves its positioning intact
+     - the PDF export renders from the nbHtml string with its own print CSS, so
+       it is untouched and never prints white-on-black
+
+   Trade-off: a filtered scroller is a composited layer, so very long notes may
+   cost some scroll smoothness on low-end phones. */
+#page-youtube .ai-focus-invert-btn { flex: 0 0 auto; width: 36px; padding: 0; font-size: 1rem; }
+
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert {
+  background: #0f1310 !important;
+  color: #e7ece7;
+}
+/* The UA fullscreen rules restate the light surface with !important, so the
+   inverted variants have to be restated too or entering full screen would snap
+   the background back to paper. Separate rules per vendor pseudo-class: one
+   unknown pseudo-class invalidates an entire selector list. */
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert:fullscreen { background: #0f1310 !important; }
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert:-webkit-full-screen { background: #0f1310 !important; }
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert::backdrop { background: #0f1310; }
+
+/* The paper's own light background inverts to near-black along with its text, so
+   no colour needs restating here. */
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert > .ai-scroll,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert > .ai-scroll.nb {
+  filter: invert(1) hue-rotate(180deg);
+}
+/* Counter-invert the private annotation layer so a red pen is still red — the
+   student picked those colours and should get them back. */
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-marks-canvas {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* ── chrome outside the filtered scroller ── */
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-toolbar {
+  border-bottom-color: #2a312b;
+  background: rgba(18, 22, 19, .96);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .5);
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-title strong { color: #e7ece7; }
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-title small { color: #94a09a; }
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-control,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-tool,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-action,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-done {
+  border-color: #37413a;
+  background: #1a1f1c;
+  color: #dfe6e0;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-control:hover,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-tool:hover,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-action:hover,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-done:hover {
+  border-color: #4d8a63;
+  background: #222b25;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-time {
+  background: #1a1f1c;
+  color: #b9c4bc;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-annotation-bar {
+  border-bottom-color: #2a312b;
+  background: #141814;
+  color: #dfe6e0;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-annotation-label { color: #94a09a; }
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-divider { background: #2a312b; }
+/* State variants would otherwise stay light-on-light and read as unselected. */
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-control.ai-focus-control-active,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-control.ai-follow-on,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-tool.is-active {
+  border-color: #3fae72;
+  background: #123723;
+  color: #a8e7c3;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-control.ai-follow-reading {
+  border-color: #a58128;
+  background: #3a2f10;
+  color: #f0d894;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-control:focus-visible,
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-focus-mark-tool:focus-visible {
+  outline-color: #63ffd2;
+}
+/* The selection popover is a sibling of the scroller, so it stays on the light
+   paper palette unless told otherwise. */
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-note-pop {
+  border-color: #37413a;
+  background: #171c18;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .55);
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-note-pop-btn {
+  border-color: #37413a;
+  background: #1e241f;
+  color: #dfe6e0;
+}
+#page-youtube #ai-sub.ai-notes-focus.ai-notes-invert .ai-note-pop-btn:hover {
+  border-color: #4d8a63;
+  background: #26302a;
+}
