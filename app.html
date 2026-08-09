@@ -195,6 +195,9 @@
       <div class="nav-tab" onclick="switchPage('yt-organiser')" id="nav-yt-organiser" title="Course Library">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17.5H6.5A2.5 2.5 0 0 0 4 23z"></path><path d="M4 5.5V20.5M8 7h8M8 11h8M8 15h5"></path></svg></span><span class="nav-tab-label"> Course Library</span>
       </div>
+      <div class="nav-tab" onclick="switchPage('yt-notebook')" id="nav-yt-notebook" title="Multi-Video Notebook">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H13v18H6.5A2.5 2.5 0 0 0 4 23z"></path><path d="M13 3h4.5A2.5 2.5 0 0 1 20 5.5V21h-7z"></path><path d="M7 8h3M7 12h3"></path></svg></span><span class="nav-tab-label"> Notebook</span>
+      </div>
       <div class="nav-tab" onclick="switchPage('analysis')" id="nav-analysis" title="Analysis">
         <span class="tab-icon" style="color:#3B82F6;" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 20V4M4 20h16"></path><path d="m7 15 4-4 3 2 4-6"></path></svg></span><span class="nav-tab-label"> Analysis</span>
       </div>
@@ -292,6 +295,8 @@
     <div data-include="pages/planner.html"></div>
     <!-- ═══ YOUTUBE WATCH + STANDALONE COURSE LIBRARY PAGES ═══ -->
     <div data-include="pages/youtube.html"></div>
+    <!-- ═══ MULTI-VIDEO NOTEBOOK PAGE (notes merged/compiled across lectures) ═══ -->
+    <div data-include="pages/yt-notebook.html"></div>
     <!-- ═══ ANALYSIS PAGE (includes Revision sub-tab) ═══ -->
     <div data-include="pages/analysis.html"></div>
     <!-- ═══ QUIZ PAGE (Attempt Quiz + Saved sub-tabs, built from saved questions) ═══ -->
@@ -549,6 +554,9 @@
      manual ?v= here — it is stripped and replaced by the build. -->
 <script defer src="js/tabs/youtube.js"></script>
 <script defer src="js/tabs/playlist-organiser.js"></script>
+<!-- Multi-video notebook: needs the organiser's library + fetchers above it, and
+     window.AiNotesKit from ai-tutor.js (loaded later — only used on click). -->
+<script defer src="js/tabs/yt-notebook.js"></script>
 <script defer src="js/features/yt-screenshots.js"></script>
 <!-- mock-tests.js split by responsibility (see mock-tests-render.js header).
      Load order matters: data.js declares the shared const/let that

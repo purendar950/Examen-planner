@@ -8543,3 +8543,338 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   border-color: #4d8a63;
   background: #26302a;
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MULTI-VIDEO NOTEBOOK  (#page-yt-notebook · js/tabs/yt-notebook.js)
+   A picker-first workspace: import, tick lectures across courses, choose a
+   shape, then read the combined notebook full width. Reuses the AI Study
+   paper (.ai-nb, styled by nbCss() in js/features/ai-tutor.js).
+   ══════════════════════════════════════════════════════════════════════════ */
+#page-yt-notebook .ytnb-view { display: none; }
+#page-yt-notebook .ytnb-view.active { display: block; }
+
+#page-yt-notebook .ytnb-card {
+  background: var(--card, #161B26);
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+#page-yt-notebook .ytnb-card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+#page-yt-notebook .ytnb-label {
+  font-size: .78rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--text, #E8EDF5);
+}
+#page-yt-notebook .ytnb-hint { font-size: .75rem; color: var(--muted, #5A6478); }
+
+/* ── import bar ── */
+#page-yt-notebook .ytnb-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface, #111620);
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 10px;
+  padding: 6px 8px 6px 12px;
+}
+#page-yt-notebook .ytnb-input-bar:focus-within { border-color: var(--accent, #00C896); }
+#page-yt-notebook .ytnb-input-icon { font-size: .9rem; opacity: .7; }
+#page-yt-notebook .ytnb-url-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: .88rem;
+  padding: 7px 0;
+  outline: none;
+}
+#page-yt-notebook .ytnb-add-btn,
+#page-yt-notebook .ytnb-go {
+  border: none;
+  border-radius: 8px;
+  background: var(--accent, #00C896);
+  color: #04120d;
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 700;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+#page-yt-notebook .ytnb-go { padding: 10px 22px; font-size: .88rem; }
+#page-yt-notebook .ytnb-add-btn:disabled,
+#page-yt-notebook .ytnb-go:disabled { opacity: .45; cursor: not-allowed; }
+#page-yt-notebook .ytnb-error {
+  display: none;
+  margin-top: 8px;
+  font-size: .78rem;
+  color: #ff8b8b;
+}
+
+/* ── picker tools ── */
+#page-yt-notebook .ytnb-tools {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+#page-yt-notebook .ytnb-search {
+  flex: 1;
+  min-width: 180px;
+  background: var(--surface, #111620);
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  font-size: .84rem;
+  padding: 8px 10px;
+}
+#page-yt-notebook .ytnb-chip {
+  background: var(--surface, #111620);
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 8px;
+  color: var(--text, #E8EDF5);
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 600;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+#page-yt-notebook .ytnb-chip:hover { border-color: var(--accent, #00C896); }
+#page-yt-notebook .ytnb-chip.sm { padding: 4px 9px; font-size: .72rem; }
+#page-yt-notebook .ytnb-chip.danger { border-color: #7a2c2c; color: #ffb4b4; }
+
+/* ── course groups ── */
+#page-yt-notebook .ytnb-groups { max-height: 52vh; overflow-y: auto; }
+#page-yt-notebook .ytnb-group {
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+#page-yt-notebook .ytnb-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface, #111620);
+  padding: 4px 8px 4px 4px;
+}
+#page-yt-notebook .ytnb-group-toggle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 8px 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+#page-yt-notebook .ytnb-caret { color: var(--muted, #5A6478); font-size: .8rem; }
+#page-yt-notebook .ytnb-group-title {
+  font-size: .88rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-yt-notebook .ytnb-group-count { font-size: .72rem; color: var(--muted, #5A6478); white-space: nowrap; }
+#page-yt-notebook .ytnb-group-picked {
+  font-size: .7rem;
+  font-weight: 700;
+  color: #04120d;
+  background: var(--accent, #00C896);
+  border-radius: 10px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+#page-yt-notebook .ytnb-group-actions { display: flex; gap: 5px; }
+
+#page-yt-notebook .ytnb-list { list-style: none; margin: 0; padding: 0; }
+#page-yt-notebook .ytnb-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid var(--border, #1E2535);
+  padding: 2px 10px 2px 6px;
+}
+#page-yt-notebook .ytnb-item.on { background: rgba(0, 200, 150, .07); }
+#page-yt-notebook .ytnb-item-label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 4px;
+  cursor: pointer;
+  min-width: 0;
+}
+#page-yt-notebook .ytnb-item-label input { accent-color: var(--accent, #00C896); flex: none; }
+#page-yt-notebook .ytnb-item-n {
+  flex: none;
+  width: 22px;
+  font-size: .7rem;
+  color: var(--muted, #5A6478);
+  text-align: right;
+}
+#page-yt-notebook .ytnb-item-title {
+  font-size: .83rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-yt-notebook .ytnb-item-meta { display: flex; align-items: center; gap: 8px; flex: none; }
+#page-yt-notebook .ytnb-dur { font-size: .72rem; color: var(--muted, #5A6478); }
+#page-yt-notebook .ytnb-badge.ready { font-size: .68rem; font-weight: 700; color: var(--accent, #00C896); white-space: nowrap; }
+#page-yt-notebook .ytnb-empty {
+  padding: 22px 16px;
+  text-align: center;
+  color: var(--muted, #5A6478);
+  font-size: .84rem;
+}
+#page-yt-notebook .ytnb-empty strong { display: block; color: var(--text, #E8EDF5); margin-bottom: 4px; }
+
+/* ── run bar: estimate, shape, options ── */
+#page-yt-notebook .ytnb-estimate {
+  font-size: .82rem;
+  color: var(--text, #E8EDF5);
+  padding: 2px 0 12px;
+  border-bottom: 1px solid var(--border, #1E2535);
+  margin-bottom: 12px;
+}
+#page-yt-notebook .ytnb-est-empty { color: var(--muted, #5A6478); }
+#page-yt-notebook .ytnb-est-warn { color: #ffcf7a; }
+
+#page-yt-notebook .ytnb-shapes {
+  border: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+#page-yt-notebook .ytnb-shapes legend { padding: 0 0 8px; }
+#page-yt-notebook .ytnb-shape {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+#page-yt-notebook .ytnb-shape:has(input:checked) {
+  border-color: var(--accent, #00C896);
+  background: var(--accent-dim, rgba(0, 200, 150, .12));
+}
+#page-yt-notebook .ytnb-shape input { accent-color: var(--accent, #00C896); margin-top: 3px; flex: none; }
+#page-yt-notebook .ytnb-shape-body { display: flex; flex-direction: column; gap: 2px; }
+#page-yt-notebook .ytnb-shape-body strong { font-size: .85rem; }
+#page-yt-notebook .ytnb-shape-body small { font-size: .74rem; color: var(--muted, #5A6478); line-height: 1.35; }
+
+#page-yt-notebook .ytnb-selects { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+#page-yt-notebook .ytnb-field { display: flex; flex-direction: column; gap: 4px; }
+#page-yt-notebook .ytnb-field > span { font-size: .72rem; color: var(--muted, #5A6478); }
+#page-yt-notebook .ytnb-select {
+  background: var(--surface, #111620);
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+  font-size: .82rem;
+  padding: 7px 9px;
+}
+#page-yt-notebook .ytnb-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+#page-yt-notebook .ytnb-note { flex: 1; min-width: 160px; font-size: .75rem; color: #ffcf7a; }
+
+/* ── run view ── */
+#page-yt-notebook .ytnb-run-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+#page-yt-notebook .ytnb-run-title { flex: 1; min-width: 160px; font-size: 1rem; font-weight: 700; }
+#page-yt-notebook .ytnb-run-meta { font-size: .74rem; color: var(--muted, #5A6478); }
+#page-yt-notebook .ytnb-run-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+
+#page-yt-notebook .ytnb-progress {
+  background: var(--card, #161B26);
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 12px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+#page-yt-notebook .ytnb-progress > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: .82rem;
+  font-weight: 600;
+}
+#page-yt-notebook .ytnb-checklist { max-height: 260px; overflow-y: auto; padding: 0 6px 8px; }
+#page-yt-notebook .ytnb-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: .8rem;
+}
+#page-yt-notebook .ytnb-check-icon { flex: none; width: 14px; text-align: center; color: var(--muted, #5A6478); }
+#page-yt-notebook .ytnb-check.ready .ytnb-check-icon { color: var(--accent, #00C896); }
+#page-yt-notebook .ytnb-check.processing .ytnb-check-icon { color: #ffcf7a; }
+#page-yt-notebook .ytnb-check.no_captions .ytnb-check-icon,
+#page-yt-notebook .ytnb-check.bot_gated .ytnb-check-icon,
+#page-yt-notebook .ytnb-check.extract_failed .ytnb-check-icon { color: #ff8b8b; }
+#page-yt-notebook .ytnb-check-tag {
+  flex: none;
+  min-width: 30px;
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--muted, #5A6478);
+}
+#page-yt-notebook .ytnb-check-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-yt-notebook .ytnb-check-state { flex: none; font-size: .72rem; color: var(--muted, #5A6478); }
+
+/* The notebook is the whole page here, so the paper gets full width and grows
+   with its content instead of scrolling inside a small pane. */
+#page-yt-notebook .ytnb-paper { padding-bottom: 30px; }
+#page-yt-notebook .ytnb-paper .ai-nb { background: #fffdf6; border-radius: 10px; padding: 18px 20px 24px; }
+/* There is no player on this page, so a timestamp cannot "follow the lecture" —
+   it becomes a visible deep link into the lecture it came from instead. */
+#page-yt-notebook .ytnb-paper .ai-nb .ai-ts { display: inline; }
+
+@media (max-width: 640px) {
+  #page-yt-notebook .ytnb-card { padding: 12px; }
+  #page-yt-notebook .ytnb-groups { max-height: none; }
+  #page-yt-notebook .ytnb-actions { justify-content: stretch; }
+  #page-yt-notebook .ytnb-go { width: 100%; }
+  #page-yt-notebook .ytnb-check-state { display: none; }
+}

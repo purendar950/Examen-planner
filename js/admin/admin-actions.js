@@ -1188,6 +1188,10 @@ async function saveAiLimits() {
   const sph = parseInt((document.getElementById('ail-study') || {}).value, 10);
   const tph = parseInt((document.getElementById('ail-tutor-h') || {}).value, 10);
   const tpd = parseInt((document.getElementById('ail-tutor-d') || {}).value, 10);
+  // Multi-video notebooks have their own budget: one notebook can generate notes
+  // for a dozen lectures, so it must not draw from the single-video bucket.
+  const bph = parseInt((document.getElementById('ail-bundle') || {}).value, 10);
+  const bmv = parseInt((document.getElementById('ail-bundle-max') || {}).value, 10);
   const emails = emailsRaw.split(/[\n,]+/).map(function (e) { return e.trim().toLowerCase(); }).filter(Boolean);
   const unlimited = {}, resolvedEmails = [], unresolved = [];
   emails.forEach(function (em) {
@@ -1199,12 +1203,17 @@ async function saveAiLimits() {
       unlimited: unlimited,
       unlimitedEmails: resolvedEmails,
       studyPerHour: isNaN(sph) ? 15 : Math.max(0, sph),
+      studyBundlePerHour: isNaN(bph) ? 3 : Math.max(0, bph),
+      studyBundleMaxVideos: isNaN(bmv) ? 15 : Math.min(40, Math.max(2, bmv)),
       tutorPerHour: isNaN(tph) ? 20 : Math.max(0, tph),
       tutorPerDay:  isNaN(tpd) ? 80 : Math.max(0, tpd),
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
     AI_LIMITS = Object.assign({}, AI_LIMITS, { unlimited: unlimited, unlimitedEmails: resolvedEmails,
-      studyPerHour: isNaN(sph) ? 15 : Math.max(0, sph), tutorPerHour: isNaN(tph) ? 20 : Math.max(0, tph), tutorPerDay: isNaN(tpd) ? 80 : Math.max(0, tpd) });
+      studyPerHour: isNaN(sph) ? 15 : Math.max(0, sph),
+      studyBundlePerHour: isNaN(bph) ? 3 : Math.max(0, bph),
+      studyBundleMaxVideos: isNaN(bmv) ? 15 : Math.min(40, Math.max(2, bmv)),
+      tutorPerHour: isNaN(tph) ? 20 : Math.max(0, tph), tutorPerDay: isNaN(tpd) ? 80 : Math.max(0, tpd) });
     var msg = '✅ AI limits saved. Unlimited: ' + resolvedEmails.length + ' user(s).';
     if (unresolved.length) msg += ' ⚠️ Not found: ' + unresolved.join(', ');
     showToast(msg);
@@ -1443,6 +1452,8 @@ function renderAiStudyLegacy() {
   /* ── AI Study usage limits + grant unlimited Card ── */
   var ailEmails = (AI_LIMITS && Array.isArray(AI_LIMITS.unlimitedEmails)) ? AI_LIMITS.unlimitedEmails.join('\n') : '';
   var ailStudy = (AI_LIMITS && AI_LIMITS.studyPerHour != null) ? AI_LIMITS.studyPerHour : 15;
+  var ailBundle = (AI_LIMITS && AI_LIMITS.studyBundlePerHour != null) ? AI_LIMITS.studyBundlePerHour : 3;
+  var ailBundleMax = (AI_LIMITS && AI_LIMITS.studyBundleMaxVideos != null) ? AI_LIMITS.studyBundleMaxVideos : 15;
   var ailTutorH = (AI_LIMITS && AI_LIMITS.tutorPerHour != null) ? AI_LIMITS.tutorPerHour : 20;
   var ailTutorD = (AI_LIMITS && AI_LIMITS.tutorPerDay != null) ? AI_LIMITS.tutorPerDay : 80;
   var ailCount = (AI_LIMITS && AI_LIMITS.unlimited) ? Object.keys(AI_LIMITS.unlimited).length : 0;
@@ -1456,6 +1467,8 @@ function renderAiStudyLegacy() {
       '<label style="font-size:.78rem;">New generations/hr <input id="ail-study" type="number" min="0" value="' + ailStudy + '" style="width:70px;margin-left:4px;"></label>' +
       '<label style="font-size:.78rem;">Tutor msgs/hr <input id="ail-tutor-h" type="number" min="0" value="' + ailTutorH + '" style="width:70px;margin-left:4px;"></label>' +
       '<label style="font-size:.78rem;">Tutor msgs/day <input id="ail-tutor-d" type="number" min="0" value="' + ailTutorD + '" style="width:70px;margin-left:4px;"></label>' +
+      '<label style="font-size:.78rem;" title="Multi-video notebooks per hour. One notebook = one slot, however many lectures it covers.">Notebooks/hr <input id="ail-bundle" type="number" min="0" value="' + ailBundle + '" style="width:70px;margin-left:4px;"></label>' +
+      '<label style="font-size:.78rem;" title="Hardest cap on how many lectures one notebook may combine (2-40).">Lectures/notebook <input id="ail-bundle-max" type="number" min="2" max="40" value="' + ailBundleMax + '" style="width:70px;margin-left:4px;"></label>' +
     '</div>' +
     '<label style="font-size:.8rem;color:#555;">Unlimited users — one email per line (' + ailCount + ' active)</label>' +
     '<textarea id="ail-emails" placeholder="user1@email.com&#10;user2@email.com" style="width:100%;min-height:66px;font-family:monospace;font-size:.8rem;margin:4px 0 8px;">' + esc(ailEmails) + '</textarea>' +

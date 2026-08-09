@@ -1128,7 +1128,7 @@ _study_job_stop_tombstones = {}
 
 def _study_job_public(job):
     """Return only reconnect-safe job data (never provider keys or thread state)."""
-    return {
+    out = {
         "jobId": job.get("id"),
         "status": job.get("status"),
         "mode": job.get("mode"),
@@ -1149,6 +1149,18 @@ def _study_job_public(job):
         "content": job.get("content", ""),
         "error": job.get("error", ""),
     }
+    # Multi-video notebooks add per-lecture progress. Single-video jobs keep the
+    # exact shape they had, so nothing about the Notes tab changes.
+    if job.get("kind") == "bundle":
+        items = _bundle_items_public(job.get("items"))
+        out.update({"kind": "bundle", "shape": job.get("shape"),
+                    "bundleTitle": job.get("bundle_title"),
+                    "videoIds": list(job.get("video_ids") or []),
+                    "courseId": job.get("course_id") or "",
+                    "degraded": job.get("degraded") or "",
+                    "items": items, "counts": _bundle_counts(items),
+                    "total": len(items)})
+    return out
 
 
 def _study_job_persist(job, force=False):
@@ -1211,6 +1223,17 @@ def _get_study_job(job_id):
         "cancel_event": threading.Event(),
         "last_persist_at": time.time(),
     }
+    # Restore notebook progress so a reconnect after a proxy restart still shows
+    # which lectures made it in rather than an empty checklist.
+    if saved.get("kind") == "bundle":
+        job.update({
+            "kind": "bundle", "shape": saved.get("shape") or "merge",
+            "bundle_title": saved.get("bundleTitle") or saved.get("title"),
+            "video_ids": list(saved.get("videoIds") or []),
+            "course_id": saved.get("courseId") or "",
+            "degraded": saved.get("degraded") or "",
+            "items": [dict(i) for i in (saved.get("items") or []) if isinstance(i, dict)],
+        })
     with _study_jobs_lock:
         return _study_jobs.setdefault(job_id, job)
 
@@ -1380,7 +1403,12 @@ def _load_ai_limits():
     # own budget because one library answer carries a far bigger context than a
     # single-video message, so sharing the classic tutor's bucket would let a few
     # library questions consume a whole day of normal chat.
+    # studyBundlePerHour governs multi-video notebooks. They get their own small
+    # budget because one notebook can generate notes for a dozen lectures, so
+    # sharing studyPerHour would let two notebooks eat a whole hour of ordinary
+    # single-video generation.
     data = {"unlimited": {}, "focusUsers": {}, "studyPerHour": 15,
+            "studyBundlePerHour": 3, "studyBundleMaxVideos": STUDY_BUNDLE_MAX_VIDEOS,
             "tutorPerHour": 20, "tutorPerDay": 80,
             "tutorAllPerHour": 10, "tutorAllPerDay": 40}
     if _fb_db:
@@ -1396,7 +1424,8 @@ def _load_ai_limits():
                 if isinstance(fu, list):
                     fu = {u: True for u in fu}
                 data["focusUsers"] = fu
-                for k in ("studyPerHour", "tutorPerHour", "tutorPerDay",
+                for k in ("studyPerHour", "studyBundlePerHour", "studyBundleMaxVideos",
+                          "tutorPerHour", "tutorPerDay",
                           "tutorAllPerHour", "tutorAllPerDay"):
                     if isinstance(d.get(k), (int, float)):
                         data[k] = int(d[k])
@@ -3644,6 +3673,690 @@ def api_study_job_stream(job_id):
 
     return Response(stream_with_context(follow()), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
+# ── Multi-video notebooks ("bundles") ──────────────────────────────────────
+#  One notebook out of MANY lectures, in two shapes:
+#    compile — every selected lecture's notes, in the order chosen, behind one
+#              cover, with each lecture introduced by a card the reader can jump
+#              from. Deterministic: no extra AI call beyond the per-video notes.
+#    merge   — ONE document organised BY TOPIC. A topic taught across five
+#              lectures collapses into a single section that cites all five.
+#
+#  A bundle runs as an ordinary study job, so /api/study/jobs/<id>,
+#  /api/study/jobs/<id>/stream and DELETE are reused verbatim: the output is
+#  still one growing markdown string and only per-video `items[]` progress is
+#  new. That keeps Stop, refresh-resume and byte-offset SSE replay working here
+#  with no second implementation.
+#
+#  The map stage writes each lecture's notes into the SHARED per-video cache
+#  under the ordinary single-video key, so building a notebook also warms the
+#  normal Notes tab for every video in it — and a notebook assembled from notes
+#  the student already generated costs no AI calls at all.
+STUDY_BUNDLE_MAX_VIDEOS = max(2, min(40, int(os.environ.get("STUDY_BUNDLE_MAX_VIDEOS", "15"))))
+# A bundle holds its worker for minutes. Bound how many run at once per instance
+# so they can never starve single-video generation or the control endpoints.
+_study_bundle_worker_sem = threading.Semaphore(
+    max(1, int(os.environ.get("STUDY_BUNDLE_WORKERS", "2"))))
+_BUNDLE_SHAPES = ("merge", "compile")
+BUNDLE_MERGE_CAP = int(os.environ.get("BUNDLE_MERGE_MAX_TOKENS", "3000"))
+# Ceiling on merge-stage AI calls. Only topics taught in MORE THAN ONE lecture
+# are sent to the model; single-lecture topics are passed through verbatim. This
+# cap is the backstop for a pathological selection.
+BUNDLE_MERGE_MAX_CALLS = int(os.environ.get("BUNDLE_MERGE_MAX_CALLS", "45"))
+_BUNDLE_ITEM_FIELDS = ("video_id", "title", "label", "state", "source", "detail")
+
+
+def _bundle_label(index):
+    return "V%d" % (index + 1)
+
+
+def _bundle_fingerprint(video_ids, shape):
+    """Stable cache id for a selection.
+
+    `compile` depends on ORDER because it is read top to bottom; `merge` does
+    not, so its key is order-insensitive and two students who tick the same
+    lectures in a different order share one cached notebook.
+    """
+    ids = list(video_ids) if shape == "compile" else sorted(video_ids)
+    return hashlib.sha1("|".join(ids).encode("utf-8")).hexdigest()[:32]
+
+
+def _bundle_cache_keys(video_ids, shape, mode, out_lang, style):
+    lang = _cache_lang(out_lang)
+    cache_style = (_MCQ_CACHE_STYLE if style == "mcq" else style) or "topic"
+    fp = _bundle_fingerprint(video_ids, shape)
+    return ("bundle:%s:%s:%s:%s:%s" % (fp, shape, mode, lang, cache_style),
+            _fs_doc_id("bundle", fp, shape, mode, lang, cache_style))
+
+
+def _bundle_counts(items):
+    counts = {}
+    for item in items or []:
+        state = str((item or {}).get("state") or "queued")
+        counts[state] = counts.get(state, 0) + 1
+    return counts
+
+
+def _bundle_items_public(items):
+    return [{k: (item or {}).get(k) for k in _BUNDLE_ITEM_FIELDS}
+            for item in items or []]
+
+
+def _bundle_update_item(job, video_id, state, detail="", source=""):
+    with _study_jobs_lock:
+        for item in job.get("items") or []:
+            if item.get("video_id") == video_id:
+                item["state"] = state
+                item["detail"] = str(detail or "")[:200]
+                if source:
+                    item["source"] = source
+                break
+        job["updated_at"] = int(time.time())
+    _study_job_persist(job, force=True)
+
+
+def _bundle_emit(job, text):
+    """Append to the one markdown string the SSE stream replays."""
+    if not text:
+        return
+    with _study_jobs_lock:
+        job["content"] += text
+        job["updated_at"] = int(time.time())
+    _study_job_persist(job)
+
+
+def _bundle_lecture_card(item_or_note):
+    """A renderer-recognised lecture divider.
+
+    The browser turns this into a lecture card AND uses its video id to scope
+    every bare [M:SS] that follows to the right lecture, which a plain heading
+    could not do once several videos share one document.
+    """
+    title = str(item_or_note.get("title") or item_or_note.get("video_id") or "")
+    return "[LECTURE: %s | %s | %s]\n\n" % (
+        item_or_note.get("label"), item_or_note.get("video_id"),
+        title.replace("|", "/").replace("]", ")")[:180])
+
+
+def _bundle_sources_md(items):
+    """Closing legend. Uses lecture cards rather than raw URLs on purpose: the
+    notebook renderer strips lines containing links as promo/junk."""
+    ready = [i for i in items if i.get("state") == "ready"]
+    if not ready:
+        return ""
+    out = ["\n\n## Sources\n\n"]
+    for item in ready:
+        out.append(_bundle_lecture_card(item))
+    return "".join(out)
+
+
+def _bundle_skipped_md(items):
+    skipped = [i for i in items if i.get("state") not in ("ready", "queued", "processing")]
+    if not skipped:
+        return ""
+    reasons = {"no_captions": "no captions", "bot_gated": "blocked by YouTube",
+               "extract_failed": "captions could not be read",
+               "cancelled": "cancelled"}
+    groups = {}
+    for item in skipped:
+        groups.setdefault(reasons.get(item.get("state"), "skipped"), []).append(
+            item.get("label") or item.get("video_id"))
+    parts = ["%s (%s)" % (reason, ", ".join(labels)) for reason, labels in groups.items()]
+    return "\n\n> %d lecture%s left out — %s\n" % (
+        len(skipped), "" if len(skipped) == 1 else "s", "; ".join(parts))
+
+
+# ── merge stage: split, cluster, then write one section per topic ───────────
+_BUNDLE_HEAD_TS = re.compile(r"^\s*\(?\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\)?\s*[-\u2014\u00b7:]?\s*")
+_BUNDLE_BARE_TS = re.compile(r"(?<!\w)\(?\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\)?(?!\w)")
+_TOPIC_STOP = frozenset((
+    "the", "a", "an", "of", "and", "or", "in", "on", "for", "to", "with", "its",
+    "is", "are", "was", "were", "by", "at", "from", "as", "that", "this", "what",
+    "how", "why", "part", "intro", "introduction", "basics", "overview", "about",
+    "aur", "mein", "hai", "kya", "kaise", "wala", "wale", "wali", "aap", "yeh"))
+
+
+def _split_note_sections(md):
+    """Split generated notes into [{heading, body}] on '##' boundaries. '###'
+    sub-headings stay inside their parent section's body."""
+    sections, cur = [], None
+    for line in (md or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            level = len(stripped) - len(stripped.lstrip("#"))
+            if level <= 2:
+                cur = {"heading": stripped.lstrip("#").strip(), "lines": []}
+                sections.append(cur)
+                continue
+        if cur is None:
+            if not stripped:
+                continue
+            cur = {"heading": "", "lines": []}
+            sections.append(cur)
+        cur["lines"].append(line)
+    out = []
+    for sec in sections:
+        body = "\n".join(sec["lines"]).strip()
+        if sec["heading"] or body:
+            out.append({"heading": sec["heading"], "body": body})
+    return out
+
+
+def _topic_tokens(heading):
+    text = _BUNDLE_HEAD_TS.sub("", heading or "").lower()
+    text = re.sub(r"[^0-9a-z\u0900-\u097f]+", " ", text)
+    return {w for w in text.split() if len(w) > 2 and w not in _TOPIC_STOP}
+
+
+def _topic_similar(a, b):
+    if not a or not b:
+        return False
+    inter = len(a & b)
+    if not inter:
+        return False
+    smaller = min(len(a), len(b))
+    # Containment catches "Indus Valley" vs "Indus Valley Civilisation"; the
+    # Jaccard floor catches reordering and small wording differences.
+    if inter == smaller and smaller >= 2:
+        return True
+    return inter / float(len(a | b)) >= 0.55
+
+
+def _cluster_bundle_sections(sources):
+    """Group the same topic across lectures. Deterministic and free: the model is
+    only ever asked to WRITE a merged section, never to FIND the topics, so a bad
+    model response can never make a topic disappear from the notebook."""
+    clusters = []
+    for src in sources:
+        tokens = _topic_tokens(src["heading"])
+        target = None
+        for cluster in clusters:
+            if _topic_similar(tokens, cluster["tokens"]):
+                target = cluster
+                break
+        if target is None:
+            clusters.append({
+                "title": _BUNDLE_HEAD_TS.sub("", src["heading"]).strip() or "Untitled topic",
+                "tokens": set(tokens), "sources": [src],
+                "order": (src["video_index"], src["order"])})
+        else:
+            target["tokens"] |= tokens
+            target["sources"].append(src)
+    # Follow teaching order: a topic appears where it was first taught.
+    clusters.sort(key=lambda c: c["order"])
+    return clusters
+
+
+def _bundle_citeify(text, label):
+    """Turn a single lecture's bare [M:SS] marks into cross-lecture citations, so
+    a passed-through section still deep-links to the lecture it came from."""
+    def repl(match):
+        return "[%s %s]" % (label, match.group(1))
+    return _BUNDLE_BARE_TS.sub(repl, text or "")
+
+
+def _bundle_excerpt_budget(ai, source_count, sample=""):
+    """Per-source excerpt size for one merge call, sized to the model's context
+    window and the transcript's script, then split across the sources."""
+    ctx = _model_ctx_tokens(ai)
+    in_tokens = max(1200, int(ctx * _CTX_INPUT_FRAC))
+    chars = int(in_tokens * _chars_per_token(sample)) - 2000   # instruction headroom
+    return max(700, int(chars / max(1, source_count)))
+
+
+def _bundle_merge_instr(topic_title, source_count, total_videos):
+    high_yield = ""
+    if source_count >= 3:
+        high_yield = ("- This topic is taught in %d of the %d selected lectures. "
+                      "Put the line '**High yield** \u2014 taught in %d lectures.' "
+                      "directly under the heading.\n"
+                      % (source_count, total_videos, source_count))
+    return ("You are merging what SEVERAL lectures teach about ONE topic into a "
+            "single section of a combined notebook.\n"
+            "Write EXACTLY ONE section starting with '## " + topic_title + "'. Do "
+            "not write any other '## ' section, preamble, or closing remark.\n"
+            "Rules:\n"
+            "- MERGE the sources: keep the deepest explanation and fold every "
+            "extra fact, figure, date, name, place, example and formula from the "
+            "other sources into it. Never write the same point twice.\n"
+            "- End every bullet with the lecture it came from, in the form "
+            "[V<n> <M:SS>], copying the label and a timestamp from that source's "
+            "excerpt. When a point is taught in several lectures, cite them all.\n"
+            "- Use '### ' sub-headings when the topic has distinct parts, '- ' "
+            "bullets for detail, and a Markdown table for comparisons or "
+            "date/figure lists.\n"
+            "- Bold (**...**) ONLY key terms, never whole sentences.\n"
+            "- If two lectures CONTRADICT each other, keep both and begin that "
+            "bullet with '\u26a0 Conflicting:'.\n"
+            + high_yield +
+            "- Use nothing that is not in the excerpts below, and do not wrap the "
+            "answer in code fences.")
+
+
+def _bundle_passthrough_section(cluster):
+    """A single-lecture topic needs no model call: keep the lecture's own words,
+    just re-headed and cited."""
+    src = cluster["sources"][0]
+    heading = _BUNDLE_HEAD_TS.sub("", src["heading"]).strip() or cluster["title"]
+    stamp = _BUNDLE_HEAD_TS.match(src["heading"] or "")
+    cite = " [%s %s]" % (src["label"], stamp.group(1)) if stamp else " [%s]" % src["label"]
+    return ("## " + heading + cite + "\n\n"
+            + _bundle_citeify(src["body"], src["label"]).strip() + "\n\n")
+
+
+def _bundle_merge_stage(job, notes):
+    """Reduce per topic, not per document: each call carries only the sections
+    that actually discuss that topic, so this fits a small context window and
+    streams section by section instead of going quiet for minutes."""
+    sources = []
+    for video_index, note in enumerate(notes):
+        for order, sec in enumerate(_split_note_sections(note["content"])):
+            if not sec["heading"] and len(sec["body"]) < 200:
+                continue          # stray preamble, not a topic
+            sources.append({
+                "label": note["label"], "video_id": note["video_id"],
+                "lecture": note["title"], "video_index": video_index,
+                "heading": sec["heading"] or note["title"],
+                "body": sec["body"], "order": order})
+    if not sources:
+        _bundle_emit(job, "> These lectures produced no topic headings to merge, "
+                          "so they are compiled in order instead.\n\n")
+        for note in notes:
+            _bundle_emit(job, _bundle_lecture_card(note) + note["content"].strip() + "\n\n")
+        return
+
+    clusters = _cluster_bundle_sections(sources)
+    total_videos = len(notes)
+    shared = [c for c in clusters if len(c["sources"]) > 1]
+    budget_left = min(BUNDLE_MERGE_MAX_CALLS, len(shared))
+    sysmsg = _study_sys(job["out_lang"])
+    tail = _lang_reminder(job["out_lang"])
+    covered = []
+    for cluster in clusters:
+        if _study_job_stop_requested(job):
+            return
+        # Single-lecture topics keep the lecture's own wording: cheaper, and it
+        # removes any chance of a model call losing content nothing else says.
+        if len(cluster["sources"]) < 2 or budget_left <= 0:
+            _bundle_emit(job, _bundle_passthrough_section(cluster))
+            continue
+        budget_left -= 1
+        sample = "\n".join(s["body"] for s in cluster["sources"])
+        limit = _bundle_excerpt_budget(job["ai"], len(cluster["sources"]), sample)
+        excerpts = []
+        for src in cluster["sources"]:
+            body = _bundle_citeify(src["body"], src["label"])
+            if len(body) > limit:
+                body = body[:limit].rsplit("\n", 1)[0] + "\n\u2026"
+            excerpts.append("--- Source %s (lecture \u201c%s\u201d), section \u201c%s\u201d ---\n%s"
+                            % (src["label"], src["lecture"], src["heading"], body))
+        user = (_covered_note(covered) + _bundle_merge_instr(
+            cluster["title"], len(cluster["sources"]), total_videos)
+            + "\n\n" + "\n\n".join(excerpts) + tail)
+        buf = []
+        try:
+            for piece in _stream_notes_part(sysmsg, user, job["ai"], BUNDLE_MERGE_CAP,
+                                            cancel_event=job["cancel_event"]):
+                if _study_job_stop_requested(job):
+                    return
+                buf.append(piece)
+                _bundle_emit(job, piece)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("bundle %s merge call failed for %r: %s",
+                        job.get("id"), cluster["title"], exc)
+        written = "".join(buf)
+        if not written.strip():
+            # A failed or empty merge must never drop the topic from the notebook.
+            _bundle_emit(job, _bundle_passthrough_section(cluster))
+            for extra in cluster["sources"][1:]:
+                _bundle_emit(job, _bundle_citeify(extra["body"], extra["label"]).strip() + "\n\n")
+        else:
+            covered.extend(_extract_note_headings(written))
+            _bundle_emit(job, "\n\n")
+
+
+def _bundle_extract(video_id):
+    """Captions for one bundle item, with the same bot-gate self-heal as Tutor.
+    Persists, unlike the Tutor preflight, because a bundle is worth the cache."""
+    try:
+        return _extract_transcript(video_id, "auto"), None
+    except yt_dlp.utils.DownloadError as exc:
+        if _tutor_prepare_bot_error(exc) and refresh_cookies() and _cookie_source == "firestore":
+            try:
+                return _extract_transcript(video_id, "auto", force=True), None
+            except Exception as retry_exc:  # noqa: BLE001
+                return None, retry_exc
+        return None, exc
+    except Exception as exc:  # noqa: BLE001
+        return None, exc
+
+
+def _bundle_map_stage(job):
+    """Per-lecture notes: shared cache first, generate only on a miss.
+
+    A lecture without captions is reported on its own item and skipped — one bad
+    video in twelve must never fail the notebook.
+    """
+    ready, compile_shape = [], job["shape"] == "compile"
+    for item in list(job.get("items") or []):
+        if _study_job_stop_requested(job):
+            return ready
+        vid = item["video_id"]
+        _bundle_update_item(job, vid, "processing")
+        ckey, fs_id = _study_text_cache_keys(vid, job["mode"], job["out_lang"], job["style"])
+        saved = _study_job_cached_result(ckey, fs_id, False) or {}
+        content = saved.get("content") or ""
+        title = saved.get("title") or item.get("title") or vid
+        source = "cached"
+
+        if not content:
+            transcript, err = _bundle_extract(vid)
+            if _study_job_stop_requested(job):
+                return ready
+            if err is not None:
+                state = "bot_gated" if _tutor_prepare_bot_error(err) else "extract_failed"
+                _bundle_update_item(job, vid, state, str(err), "captions")
+                continue
+            if not (transcript or {}).get("segments"):
+                _bundle_update_item(job, vid, "no_captions",
+                                    "YouTube has no manual or automatic captions for this video.",
+                                    "captions")
+                continue
+            title = transcript.get("title") or title
+            gen_text = _timestamped_transcript(transcript.get("segments")) or transcript.get("text") or ""
+            if not gen_text.strip():
+                _bundle_update_item(job, vid, "no_captions",
+                                    "The caption tracks held no usable spoken text.", "captions")
+                continue
+            with _study_jobs_lock:
+                item["title"] = title
+                job["model"] = _ai_display_model(job["ai"])
+                job["provider"] = _ai_display_provider(job["ai"])
+            if compile_shape:
+                _bundle_emit(job, _bundle_lecture_card(item))
+            pieces = []
+            for piece in _stream_study_text(job["mode"], gen_text, job["out_lang"],
+                                            job["ai"], "Video title: %s\n\n" % title,
+                                            job["style"], cancel_event=job["cancel_event"]):
+                if _study_job_stop_requested(job):
+                    return ready
+                pieces.append(piece)
+                if compile_shape:
+                    _bundle_emit(job, piece)      # compile streams each lecture live
+            content = "".join(pieces)
+            source = "generated"
+            if not content.strip():
+                _bundle_update_item(job, vid, "extract_failed",
+                                    "The AI returned an empty response for this lecture.", source)
+                continue
+            if compile_shape:
+                # Streamed notes rarely end with a newline, and without this the
+                # next lecture's card would be glued onto the last bullet.
+                _bundle_emit(job, "\n\n")
+            # This is byte-for-byte what the Notes tab would have produced for
+            # this video, so save it under the ordinary single-video key: the
+            # notebook warms every lecture's own notes as a side effect.
+            _study_put(fs_id, {
+                "id": vid, "title": title, "mode": job["mode"],
+                "style": job["style"] or "topic", "out_lang": job["out_lang"],
+                "model": _ai_display_model(job["ai"]), "format": "markdown",
+                "num_questions": None, "provider": _ai_display_provider(job["ai"]),
+                "keys_available": _ai_key_count(job["ai"]),
+                "transcript_lang": transcript.get("chosen_lang"),
+                "segment_count": transcript.get("segment_count"),
+                "cached": False, "content": content})
+        elif compile_shape:
+            with _study_jobs_lock:
+                item["title"] = title
+            _bundle_emit(job, _bundle_lecture_card(item) + content.strip() + "\n\n")
+
+        with _study_jobs_lock:
+            item["title"] = title
+        _bundle_update_item(job, vid, "ready", "", source)
+        ready.append({"label": item["label"], "video_id": vid, "title": title,
+                      "content": content})
+    return ready
+
+
+def _run_study_bundle_job(job_id):
+    job = _get_study_job(job_id)
+    if not job:
+        return
+    with _study_bundle_worker_sem:
+        if _study_job_stop_requested(job):
+            _set_study_job_terminal(job, "stopped")
+            return
+        with _study_jobs_lock:
+            job["status"] = "running"
+            job["updated_at"] = int(time.time())
+        _study_job_persist(job, force=True)
+        try:
+            # No '# Title' line: the notebook's title is carried as metadata and
+            # shown by the page header and the PDF cover. Emitting it here would
+            # make the renderer number it as if it were the first topic.
+            notes = _bundle_map_stage(job)
+            if _study_job_stop_requested(job):
+                _set_study_job_terminal(job, "stopped")
+                return
+            if not notes:
+                _set_study_job_terminal(
+                    job, "failed",
+                    "None of the selected lectures had usable captions, so there was nothing to combine.")
+                return
+            if job["shape"] == "merge":
+                _bundle_merge_stage(job, notes)
+            if _study_job_stop_requested(job):
+                _set_study_job_terminal(job, "stopped")
+                return
+            with _study_jobs_lock:
+                items = _bundle_items_public(job.get("items"))
+            _bundle_emit(job, _bundle_skipped_md(items) + _bundle_sources_md(items))
+
+            with _study_jobs_lock:
+                content = job["content"]
+                job["model"] = _ai_display_model(job["ai"])
+                job["provider"] = _ai_display_provider(job["ai"])
+            data = {
+                "id": job["fingerprint"], "title": job.get("bundle_title"),
+                # Deliberately not "notes": _study_put semantically indexes notes
+                # by video id, and a bundle's id is a selection fingerprint.
+                "mode": "bundle", "bundle_mode": job["mode"], "shape": job["shape"],
+                "style": job["style"] or "topic", "out_lang": job["out_lang"],
+                "model": job["model"], "provider": job["provider"], "format": "markdown",
+                "num_questions": None, "keys_available": _ai_key_count(job["ai"]),
+                "video_ids": list(job.get("video_ids") or []),
+                "items": items, "cached": False, "content": content}
+            persisted = _study_put(job["fs_id"], data)
+            with _study_lock:
+                _study_cache[job["ckey"]] = {"ts": time.time(), "data": data}
+            with _study_jobs_lock:
+                job["persisted"] = persisted
+                job["status"] = "completed"
+                job["updated_at"] = int(time.time())
+            _study_job_persist(job, force=True)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("study bundle %s failed", job_id)
+            if _study_job_stop_requested(job):
+                _set_study_job_terminal(job, "stopped")
+            else:
+                _set_study_job_terminal(job, "failed", str(exc)[:200])
+
+
+def _bundle_requested_ids(payload):
+    raw = payload.get("video_ids") or payload.get("ids") or []
+    if isinstance(raw, str):
+        raw = [p for p in re.split(r"[\s,]+", raw) if p]
+    out, seen = [], set()
+    for entry in raw[:200]:
+        vid = _parse_video_id(str(entry or "").strip())
+        if vid and vid not in seen:
+            seen.add(vid)
+            out.append(vid)
+    return out
+
+
+@app.post("/api/study/bundles")
+def api_study_bundle_start():
+    """Create (or return) a multi-video notebook job. Safe to retry after reload."""
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    uid = user["uid"]
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "bad_request"}), 400
+    job_id = _new_study_job_id(payload.get("jobId"))
+    existing = _get_study_job(job_id)
+    if existing:
+        if existing.get("owner_uid") != uid:
+            return jsonify({"error": "job_not_found"}), 404
+        return jsonify(_study_job_public(existing))
+
+    shape = str(payload.get("shape") or "merge").strip().lower()
+    if shape not in _BUNDLE_SHAPES:
+        return jsonify({"error": "bad_shape", "detail": "shape must be merge or compile"}), 400
+    mode = str(payload.get("mode") or "notes").strip().lower()
+    if mode not in ("notes", "summary", "insights"):
+        return jsonify({"error": "bad_mode", "detail": "notebooks support notes, summary and insights"}), 400
+    out_lang = str(payload.get("out") or payload.get("lang") or "English").strip() or "English"
+    style = str(payload.get("style") or "").strip().lower()
+    if mode != "notes" or style not in ("mcq", "topic+images"):
+        style = ""
+    degraded = ""
+    if shape == "merge" and style == "mcq":
+        # Merging question sets is a different product (a playlist test); keep
+        # MCQ honest by compiling it lecture by lecture instead of pretending.
+        shape, degraded = "compile", ("MCQ notebooks are compiled lecture by lecture — "
+                                      "topic merging applies to topic notes.")
+
+    course_id = str(payload.get("course_id") or "").strip()[:120]
+    requested = _bundle_requested_ids(payload)
+    if len(requested) < 2:
+        return jsonify({"error": "need_two_videos",
+                        "detail": "Pick at least two videos for a notebook."}), 400
+    # Never trust a browser-supplied video list: membership is resolved only from
+    # the verified account's own Organiser library, exactly as playlist
+    # preparation does. An empty course_id widens the check to the whole library
+    # so a notebook may span several courses.
+    library = _user_library(user, course_id or None)
+    owned = {v["video_id"]: v for v in library}
+    ordered = [vid for vid in requested if vid in owned]
+    if len(ordered) < 2:
+        return jsonify({"error": "not_in_library",
+                        "detail": "These videos are not in your Course Library. Import the playlist first."}), 404
+    limits = _load_ai_limits()
+    cap = limits.get("studyBundleMaxVideos")
+    cap = min(STUDY_BUNDLE_MAX_VIDEOS, int(cap)) if isinstance(cap, (int, float)) else STUDY_BUNDLE_MAX_VIDEOS
+    truncated = len(ordered) - cap if len(ordered) > cap else 0
+    ordered = ordered[:cap]
+
+    was_stopped = _study_job_was_stopped(job_id)
+    ai = _load_ai_config(str(payload.get("model") or "").strip()[:80] or None,
+                         str(payload.get("provider") or "").strip()[:40] or None)
+    if not _ai_configured(ai) and not was_stopped:
+        return jsonify({"error": "ai_not_configured", "detail": "Add an AI key in the admin panel."}), 503
+    force = _job_force(payload.get("refresh") or payload.get("nocache"))
+    ckey, fs_id = _bundle_cache_keys(ordered, shape, mode, out_lang, style)
+    cached = _study_job_cached_result(ckey, fs_id, force)
+
+    # Name the notebook after the course the selection came from; a cross-course
+    # selection has no single course, so it falls back to a neutral title.
+    courses = {owned[vid].get("course") for vid in ordered if owned[vid].get("course")}
+    course = courses.pop() if len(courses) == 1 else None
+    title = str(payload.get("title") or "").strip()[:120] or (
+        "%s \u2014 %s of %d lectures" % (course or "Combined notebook",
+                                         "topic merge" if shape == "merge" else "compilation",
+                                         len(ordered)))
+    now = int(time.time())
+    job = {
+        "id": job_id, "owner_uid": uid, "kind": "bundle", "shape": shape,
+        "bundle_title": title, "fingerprint": _bundle_fingerprint(ordered, shape),
+        "video_ids": ordered, "course_id": course_id,
+        "video_id": ordered[0],       # keeps single-video helpers/logging happy
+        "mode": mode, "style": style, "out_lang": out_lang,
+        "provider": ai.get("provider", "ai"), "model": ai["model"], "ai": ai,
+        "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
+        "cached": bool(cached), "persisted": bool(cached), "title": title,
+        "transcript_lang": None, "segment_count": None, "error": "",
+        "degraded": degraded,
+        "items": [{"video_id": vid, "label": _bundle_label(i),
+                   "title": owned[vid].get("title") or vid,
+                   "state": "queued", "source": "", "detail": ""}
+                  for i, vid in enumerate(ordered)],
+        "created_at": now, "updated_at": now, "expires_at": now + STUDY_JOB_TTL,
+        "cancel_event": threading.Event(), "last_persist_at": 0,
+    }
+    if truncated:
+        job["degraded"] = ((job["degraded"] + " ") if job["degraded"] else "") + (
+            "Only the first %d videos were used (%d more were dropped)." % (cap, truncated))
+    if was_stopped:
+        job.update({"status": "stopped", "error": "Stopped before generation began."})
+    elif cached:
+        job.update({"status": "completed", "content": cached.get("content", ""),
+                    "provider": cached.get("provider", job["provider"]),
+                    "model": cached.get("model", job["model"])})
+        restored = cached.get("items")
+        if isinstance(restored, list) and restored:
+            job["items"] = [dict(i) for i in restored if isinstance(i, dict)]
+    else:
+        # One notebook costs ONE slot in its own hourly bucket. Charging the
+        # per-video study bucket N times would let a single notebook exhaust a
+        # student's normal note generation for the hour.
+        if not _is_unlimited(uid) and not _rate_ok(
+                "study_bundle", uid, limits.get("studyBundlePerHour", 3), 3600):
+            return jsonify({"error": "rate_limited",
+                            "detail": "Hourly notebook limit reached. Try again later."}), 429
+
+    _cleanup_study_jobs()
+    with _study_jobs_lock:
+        raced = _study_jobs.get(job_id)
+        if raced:
+            if raced.get("owner_uid") != uid:
+                return jsonify({"error": "job_not_found"}), 404
+            return jsonify(_study_job_public(raced))
+        if _study_job_stop_tombstones.get(job_id, 0) >= time.time():
+            job.update({"status": "stopped", "error": "Stopped before generation began."})
+        _study_jobs[job_id] = job
+    if job["status"] == "queued":
+        _study_job_persist(job, force=True)
+        worker = threading.Thread(target=_run_study_bundle_job, args=(job_id,), daemon=True,
+                                  name="study-bundle-" + job_id[:10])
+        with _study_jobs_lock:
+            job["thread"] = worker
+        worker.start()
+    return jsonify(_study_job_public(job)), (202 if job["status"] == "queued" else 200)
+
+
+@app.post("/api/study/cached")
+def api_study_cached():
+    """Which of these videos ALREADY have saved notes.
+
+    The notebook picker shows an honest cost estimate ("8 of 12 already
+    generated") before the student commits, which needs one batch answer rather
+    than a dozen /api/study/langs calls.
+    """
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "bad_request"}), 400
+    if not _is_unlimited(user["uid"]) and not _rate_ok("study_cached", user["uid"], 240, 3600):
+        return jsonify({"error": "rate_limited"}), 429
+    mode = str(payload.get("mode") or "notes").strip().lower()
+    if mode not in ("notes", "summary", "insights"):
+        mode = "notes"
+    out_lang = str(payload.get("out") or payload.get("lang") or "English").strip() or "English"
+    style = str(payload.get("style") or "").strip().lower()
+    if mode != "notes" or style not in ("mcq", "topic+images"):
+        style = ""
+    requested = _bundle_requested_ids(payload)[:60]
+    owned = {v["video_id"] for v in _user_library(user, None)}
+    ready = [vid for vid in requested if vid in owned
+             and _study_exists(_study_text_cache_keys(vid, mode, out_lang, style)[1])]
+    return jsonify({"mode": mode, "out": out_lang, "style": style or "topic",
+                    "checked": len(requested), "ready": ready})
 
 
 # Which languages a video's study material (for a given mode) is ALREADY cached
