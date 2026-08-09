@@ -1036,7 +1036,10 @@ POSTER_CAP = int(os.environ.get("POSTER_MAX_TOKENS", "4000"))
 # A long lecture is covered in several passes so its later half contributes too,
 # instead of only whatever survived a condense.
 POSTER_CHUNK = int(os.environ.get("POSTER_CHUNK_CHARS", "24000"))
-POSTER_MAX_PASSES = int(os.environ.get("POSTER_MAX_PASSES", "4"))
+# A guard against a runaway source, NOT a budget: _poster_sections redistributes
+# into this many passes rather than dropping the tail, so a three-hour lecture is
+# still read to the end.
+POSTER_MAX_PASSES = int(os.environ.get("POSTER_MAX_PASSES", "10"))
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
 _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
@@ -3090,20 +3093,31 @@ def _poster_source(video_id, transcript, out_lang, ai):
             content = (saved or {}).get("content") or ""
             if len(content.strip()) > 400:
                 return content, "notes"
-    if ai.get("big_context"):
-        return transcript, "transcript"
-    return _condense(transcript, out_lang, ai), "condensed"
+    # Never condense. _condense() summarises detail away, and a poster that
+    # silently drops half a lecture's dates is worse than one that costs an extra
+    # pass. Small-context models get more, smaller chunks instead.
+    return transcript, "transcript"
 
 
 def _poster_sections(source, ai):
-    """Split the source so a long lecture is covered in several passes."""
+    """Split the source so EVERY part of the lecture is read.
+
+    Sized to the model's context window and the transcript's script, then the
+    whole source is covered — the pass cap is a runaway guard, not a budget, so a
+    long lecture is read to the end rather than truncated after four chunks.
+    """
     chunk = POSTER_CHUNK
     ctx = _model_ctx_tokens(ai)
     if ctx:
         budget = int(int(ctx * _CTX_INPUT_FRAC) * _chars_per_token(source))
         chunk = min(chunk, max(3000, budget))
     parts = _chunk_words(source, chunk)
-    return parts[:POSTER_MAX_PASSES]
+    if len(parts) <= POSTER_MAX_PASSES:
+        return parts
+    # Past the guard, redistribute rather than drop the tail: a coarser split
+    # still reads the whole lecture, where slicing the list would lose its end.
+    coarse = int(len(source) / POSTER_MAX_PASSES) + 1
+    return _chunk_words(source, max(chunk, coarse))[:POSTER_MAX_PASSES]
 
 
 def _poster_block_sig(block):
@@ -3164,7 +3178,10 @@ def _poster_merge(parts, kind):
         title = title or (part or {}).get("title") or ""
         subject = subject or (part or {}).get("subject") or ""
     return {"title": title, "subject": subject, "kind": kind,
-            "blocks": ordered[:POSTER_MAX_BLOCKS]}
+            "blocks": ordered[:POSTER_MAX_BLOCKS],
+            # Reported so the UI can state what was actually read, rather than
+            # leaving the student to wonder whether the tail was covered.
+            "dropped": max(0, len(ordered) - POSTER_MAX_BLOCKS)}
 
 
 def _gen_poster(transcript, out_lang, ai, head, kind="auto", video_id=None):
@@ -3197,7 +3214,10 @@ def _gen_poster(transcript, out_lang, ai, head, kind="auto", video_id=None):
             if label:
                 covered.append(str(label))
     if parts:
-        return _poster_merge(parts, kind)
+        poster = _poster_merge(parts, kind)
+        poster["coverage"] = {"source": origin, "passes": len(sections),
+                              "chars": len(source), "read": sum(len(s) for s in sections)}
+        return poster
     # Nothing parsed. Retry once with the schema as the entire request: a provider
     # that ignored json_mode usually complies then.
     raw = _ai_chat(
@@ -4732,6 +4752,104 @@ def api_study_bundle_start():
             job["thread"] = worker
         worker.start()
     return jsonify(_study_job_public(job)), (202 if job["status"] == "queued" else 200)
+
+
+_POSTER_REFINE_MAX = int(os.environ.get("POSTER_REFINE_CHARS", "300"))
+
+
+@app.post("/api/study/poster/refine")
+def api_study_poster_refine():
+    """Revise a poster from a student's own instruction.
+
+    The result is returned but NOT written to the shared `study` cache: a poster
+    there is keyed by (video, mode, language, kind) and serves every student, so
+    saving one person's "add more about the Mughals" would silently change what
+    everyone else sees. The browser keeps the revision instead, which also makes
+    a Reset button trivially correct.
+    """
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    uid = user["uid"]
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"error": "bad_request"}), 400
+    video_id = _parse_video_id(str(payload.get("id") or payload.get("v") or "").strip())
+    if not video_id:
+        return jsonify({"error": "missing or invalid id"}), 400
+    instruction = _clean_line(payload.get("instruction"), _POSTER_REFINE_MAX)
+    if len(instruction) < 3:
+        return jsonify({"error": "missing_instruction",
+                        "detail": "Say what to add or change."}), 400
+    out_lang = str(payload.get("out") or payload.get("lang") or "English").strip() or "English"
+    kind = str(payload.get("style") or "auto").strip().lower()
+    if kind not in _POSTER_KINDS:
+        kind = "auto"
+
+    ai = _load_ai_config(str(payload.get("model") or "").strip()[:80] or None,
+                         str(payload.get("provider") or "").strip()[:40] or None)
+    if not _ai_configured(ai):
+        return jsonify({"error": "ai_not_configured",
+                        "detail": "Add an AI key in the admin panel."}), 503
+    if not _is_unlimited(uid) and not _rate_ok("study", uid, _load_ai_limits()["studyPerHour"], 3600):
+        return jsonify({"error": "rate_limited",
+                        "detail": "Hourly AI generation limit reached."}), 429
+
+    # Start from whatever the student is looking at, falling back to the shared
+    # copy. Their version is re-validated: it arrived from a browser.
+    current = _sanitise_poster(payload.get("poster") if isinstance(payload.get("poster"), dict) else None, kind)
+    if not current:
+        ckey, fs_id = _study_text_cache_keys(video_id, "poster", out_lang, kind)
+        saved = _study_job_cached_result(ckey, fs_id, False) or {}
+        current = _sanitise_poster((saved.get("poster") if isinstance(saved.get("poster"), dict)
+                                    else saved.get("content")), kind)
+    if not current:
+        return jsonify({"error": "poster_not_found",
+                        "detail": "Generate the poster first, then ask for changes."}), 404
+
+    # Ground the edit in the lecture so a request for more detail pulls REAL
+    # facts rather than inventing plausible ones.
+    try:
+        transcript = _extract_transcript(video_id, "auto")
+        source, origin = _poster_source(video_id, transcript.get("text") or "", out_lang, ai)
+    except Exception:  # noqa: BLE001
+        source, origin = "", "none"
+    sections = _poster_sections(source, ai) if source else []
+    grounding = sections[0] if sections else ""
+
+    prompt = (
+        "Here is a student's revision poster as JSON:\n\n"
+        + json.dumps(current, ensure_ascii=False)
+        + "\n\nThe student asks: \"" + instruction + "\"\n\n"
+        "Return the COMPLETE revised poster as one JSON object in the same schema. "
+        "Rules:\n"
+        "- Apply exactly what was asked. Keep every existing block that the "
+        "request does not affect, with its wording unchanged.\n"
+        "- Adding content: take it ONLY from the lecture text below. Never invent "
+        "a date, figure or name. If the lecture does not support the request, "
+        "leave the poster as it is.\n"
+        "- Keep the same block shapes, the same `group` wording for a topic, and "
+        "at most %d blocks.\n"
+        "- Plain text only: no markdown, no LaTeX.\n"
+        "- Write everything in %s, keeping technical terms in English.\n\n"
+        % (POSTER_MAX_BLOCKS, out_lang)
+        + ("Lecture text:\n" + grounding if grounding else "")
+    )
+    try:
+        raw = _ai_chat(
+            [{"role": "system", "content": _study_sys(out_lang) + " Output ONLY valid JSON."},
+             {"role": "user", "content": prompt + _lang_reminder(out_lang)}],
+            ai, max_tokens=POSTER_CAP, json_mode=True)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
+    revised = _sanitise_poster(_safe_json(raw), kind)
+    if not revised:
+        return jsonify({"error": "refine_failed",
+                        "detail": "The AI did not return a usable poster. Try rewording the request."}), 502
+    revised["coverage"] = dict(current.get("coverage") or {}, source=origin, edited=True)
+    return jsonify({"poster": revised, "instruction": instruction,
+                    "provider": _ai_display_provider(ai), "model": _ai_display_model(ai),
+                    "out_lang": out_lang, "style": kind})
 
 
 @app.get("/api/study/saved")

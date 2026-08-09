@@ -9163,3 +9163,41 @@ body.ai-map-full-open { overflow: hidden; }
 @media print {
   .ai-poster-group { break-inside: avoid-page; }
 }
+
+
+/* ── poster: the Ask-AI editing bar ───────────────────────────────────────── */
+#page-youtube .ai-poster-ask {
+  margin: 0 0 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+#page-youtube .ai-poster-ask-row { display: flex; gap: 6px; }
+#page-youtube .ai-poster-ask-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: .8rem;
+}
+#page-youtube .ai-poster-ask-input:focus { outline: none; border-color: var(--accent); }
+#page-youtube .ai-poster-ask-chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+#page-youtube .ai-poster-chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: .7rem;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+#page-youtube .ai-poster-chip:hover { border-color: var(--accent); color: var(--text); }
+#page-youtube .ai-poster-ask-note { margin-top: 6px; font-size: .72rem; color: var(--muted); }
+/* The editing bar is a control, not part of the poster: never print it. */
+@media print { .ai-poster-ask { display: none !important; } }

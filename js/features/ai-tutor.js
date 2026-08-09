@@ -1383,9 +1383,20 @@
       sc + ' .ai-poster-stat{border:1.5px solid #263238;border-radius:10px;padding:8px 10px;text-align:center;background:#f7f9fa}',
       sc + ' .ai-poster-stat strong{display:block;font-size:1.34rem;line-height:1.1;color:#c62828;font-variant-numeric:tabular-nums}',
       sc + ' .ai-poster-stat span{display:block;margin-top:3px;font-size:.68rem;line-height:1.3;color:#37474f}',
-      sc + ' .ai-poster-card{border:1.5px solid #cfd8dc;border-radius:10px;padding:9px 11px;break-inside:avoid;page-break-inside:avoid}',
+      sc + ' .ai-poster-card{border:1.5px solid #cfd8dc;border-radius:10px;padding:9px 11px;break-inside:avoid;page-break-inside:avoid;border-top-width:4px}',
       sc + ' .ai-poster-card.wide{grid-column:1/-1}',
       sc + ' .ai-poster-head{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#1565c0;margin-bottom:6px}',
+      /* One colour per block TYPE, so the same kind of information looks the
+         same on every poster and a dense page stays scannable. Tinted fills are
+         kept pale on purpose: these must survive a black-and-white printout. */
+      sc + ' .ai-poster-card.k1{border-color:#e57373;background:#fdf4f4}' + sc + ' .ai-poster-card.k1 .ai-poster-head{color:#c62828}',
+      sc + ' .ai-poster-card.k2{border-color:#64b5f6;background:#f3f8fe}' + sc + ' .ai-poster-card.k2 .ai-poster-head{color:#1565c0}',
+      sc + ' .ai-poster-card.k3{border-color:#81c784;background:#f4faf5}' + sc + ' .ai-poster-card.k3 .ai-poster-head{color:#2e7d32}',
+      sc + ' .ai-poster-card.k4{border-color:#ffb74d;background:#fff9f2}' + sc + ' .ai-poster-card.k4 .ai-poster-head{color:#e65100}',
+      sc + ' .ai-poster-card.k5{border-color:#4db6ac;background:#f2fbfa}' + sc + ' .ai-poster-card.k5 .ai-poster-head{color:#00695c}',
+      sc + ' .ai-poster-card.k6{border-color:#9575cd;background:#f7f5fd}' + sc + ' .ai-poster-card.k6 .ai-poster-head{color:#4527a0}',
+      sc + ' .ai-poster-card.k7{border-color:#f06292;background:#fdf4f7}' + sc + ' .ai-poster-card.k7 .ai-poster-head{color:#ad1457}',
+      sc + ' .ai-poster-card.k8{border-color:#ba68c8;background:#faf4fb}' + sc + ' .ai-poster-card.k8 .ai-poster-head{color:#7b1fa2}',
       sc + ' .ai-poster-facts,' + sc + ' .ai-poster-steps,' + sc + ' .ai-poster-formulas{margin:0;padding-left:16px;font-size:.76rem;line-height:1.45}',
       sc + ' .ai-poster-facts li,' + sc + ' .ai-poster-steps li{margin:3px 0}',
       sc + ' .ai-poster-formulas{list-style:none;padding-left:0}',
@@ -6263,10 +6274,20 @@
     }).join('') + '</div>';
   }
 
+  /* Each block type gets its own colour, so a dense poster is scannable: a
+     student looking for "the dates" finds the red timeline without reading
+     headings. Keyed by TYPE rather than position, so the same kind of
+     information is always the same colour across every poster. */
+  var POSTER_TONE = {
+    stat: 'k0', timeline: 'k1', compare: 'k2', keyfacts: 'k3',
+    process: 'k4', formula: 'k5', glossary: 'k6', qa: 'k7', mnemonic: 'k8'
+  };
+  function posterTone(type) { return POSTER_TONE[type] || 'k3'; }
+
   function posterBlockHtml(b) {
     var head = b.title ? '<div class="ai-poster-head">' + esc(b.title) + '</div>' : '';
     if (b.type === 'timeline') {
-      return '<section class="ai-poster-card wide">' + head + '<ol class="ai-poster-time">' +
+      return '<section class="ai-poster-card wide ' + posterTone(b.type) + '">' + head + '<ol class="ai-poster-time">' +
         (b.items || []).map(function (i) {
           return '<li><span class="w">' + esc(i.when) + '</span><span class="t">' + esc(i.what) + '</span></li>';
         }).join('') + '</ol></section>';
@@ -6277,17 +6298,17 @@
         return '<tr><th class="rl">' + esc(r.label) + '</th>' +
           (r.values || []).map(function (v) { return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>';
       }).join('');
-      return '<section class="ai-poster-card wide">' + head +
+      return '<section class="ai-poster-card wide ' + posterTone(b.type) + '">' + head +
         '<table class="ai-poster-table"><thead><tr><th></th>' + heads + '</tr></thead>' +
         '<tbody>' + rows + '</tbody></table></section>';
     }
     if (b.type === 'process') {
-      return '<section class="ai-poster-card">' + head + '<ol class="ai-poster-steps">' +
+      return '<section class="ai-poster-card ' + posterTone(b.type) + '">' + head + '<ol class="ai-poster-steps">' +
         (b.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') +
         '</ol></section>';
     }
     if (b.type === 'formula') {
-      return '<section class="ai-poster-card">' + head + '<ul class="ai-poster-formulas">' +
+      return '<section class="ai-poster-card ' + posterTone(b.type) + '">' + head + '<ul class="ai-poster-formulas">' +
         (b.items || []).map(function (i) {
           return '<li>' + (i.name ? '<span class="fn">' + esc(i.name) + '</span>' : '') +
             '<code>' + esc(i.expr) + '</code>' +
@@ -6295,27 +6316,27 @@
         }).join('') + '</ul></section>';
     }
     if (b.type === 'glossary') {
-      return '<section class="ai-poster-card">' + (head || '<div class="ai-poster-head">Terms</div>') +
+      return '<section class="ai-poster-card ' + posterTone(b.type) + '">' + (head || '<div class="ai-poster-head">Terms</div>') +
         '<dl class="ai-poster-gloss">' + (b.items || []).map(function (i) {
           return '<dt>' + esc(i.term) + '</dt><dd>' + esc(i.meaning) + '</dd>';
         }).join('') + '</dl></section>';
     }
     if (b.type === 'qa') {
-      return '<section class="ai-poster-card wide">' +
+      return '<section class="ai-poster-card wide ' + posterTone(b.type) + '">' +
         (head || '<div class="ai-poster-head">Likely questions</div>') +
         '<ol class="ai-poster-qa">' + (b.items || []).map(function (i) {
           return '<li><span class="q">' + esc(i.q) + '</span><span class="a">' + esc(i.a) + '</span></li>';
         }).join('') + '</ol></section>';
     }
     if (b.type === 'mnemonic') {
-      return '<section class="ai-poster-card">' +
+      return '<section class="ai-poster-card ' + posterTone(b.type) + '">' +
         (head || '<div class="ai-poster-head">Memory tricks</div>') +
         '<ul class="ai-poster-mnem">' + (b.items || []).map(function (i) {
           return '<li><span class="t">' + esc(i.trick) + '</span><span class="m">' + esc(i.means) + '</span></li>';
         }).join('') + '</ul></section>';
     }
     // keyfacts
-    return '<section class="ai-poster-card">' + (head || '<div class="ai-poster-head">Must remember</div>') +
+    return '<section class="ai-poster-card ' + posterTone(b.type) + '">' + (head || '<div class="ai-poster-head">Must remember</div>') +
       '<ul class="ai-poster-facts">' + (b.items || []).map(function (i) {
         return '<li>' + esc(i) + '</li>';
       }).join('') + '</ul></section>';
@@ -6361,6 +6382,139 @@
       '<div class="ai-poster-grid">' + out.join('') + '</div></div>';
   }
 
+  /* ── Ask-AI editing ──────────────────────────────────────────────────────
+     A revision is the student's own, so it is kept in THEIR browser and never
+     written to the shared `study` cache, where one poster serves everyone who
+     watches that lecture. That also makes Reset trivially correct: drop the
+     local copy and the shared one reappears. */
+  function posterRevKey(vid, kind, lang) {
+    return 'aiPosterRev:' + vid + ':' + (kind || 'auto') + ':' + (lang || 'English');
+  }
+  function posterReadRevision(vid, kind, lang) {
+    try {
+      var raw = localStorage.getItem(posterRevKey(vid, kind, lang));
+      var parsed = raw ? JSON.parse(raw) : null;
+      return (parsed && parsed.blocks && parsed.blocks.length) ? parsed : null;
+    } catch (e) { return null; }
+  }
+  function posterSaveRevision(vid, kind, lang, poster) {
+    try { localStorage.setItem(posterRevKey(vid, kind, lang), JSON.stringify(poster)); } catch (e) {}
+  }
+  function posterClearRevision(vid, kind, lang) {
+    try { localStorage.removeItem(posterRevKey(vid, kind, lang)); } catch (e) {}
+  }
+
+  var POSTER_ASK_CHIPS = [
+    'Add more dates and figures',
+    'Add likely exam questions',
+    'Add memory tricks',
+    'Add a comparison table',
+    'Make it shorter'
+  ];
+
+  function posterCoverageText(poster) {
+    var c = (poster && poster.coverage) || {};
+    if (!c.source) return '';
+    var from = c.source === 'notes' ? 'your full notes' : 'the full transcript';
+    return 'built from ' + from + (c.passes > 1 ? ' in ' + c.passes + ' passes' : '');
+  }
+
+  function posterPaint(poster, meta) {
+    var box = contentEl();
+    if (!box) return;
+    var html = posterHtml(poster);
+    var coverage = posterCoverageText(poster);
+    box.innerHTML = brandBarHtml(true) +
+      '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+      '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' \u00b7 ' + esc(meta.model || '') +
+      (meta.cached ? ' \u00b7 cached' : ' \u00b7 fresh') + ' \u00b7 ' + esc(meta.lang) +
+      (coverage ? ' \u00b7 ' + esc(coverage) : '') +
+      (meta.edited ? ' \u00b7 <b>edited by you</b>' : '') + '</span>' +
+      '<button class="ai-btn sec" id="ai-poster-pdf" style="padding:4px 10px;font-size:0.72rem">\uD83D\uDCC4 Print / PDF</button>' +
+      (meta.edited ? '<button class="ai-btn sec" id="ai-poster-reset" title="Go back to the generated poster" style="padding:4px 10px;font-size:0.72rem">\u21ba Reset</button>' : '') +
+      '<button class="ai-btn sec" id="ai-poster-regen" style="padding:4px 10px;font-size:0.72rem">\u21bb Regenerate</button>' +
+      '</div>' +
+      '<div class="ai-poster-ask">' +
+        '<div class="ai-poster-ask-row">' +
+          '<input id="ai-poster-ask-input" class="ai-poster-ask-input" ' +
+            'placeholder="Ask AI to add or change something\u2026" maxlength="300" ' +
+            'aria-label="Ask the AI to change this poster">' +
+          '<button class="ai-btn" id="ai-poster-ask-go">\u2728 Apply</button>' +
+        '</div>' +
+        '<div class="ai-poster-ask-chips">' + POSTER_ASK_CHIPS.map(function (c) {
+          return '<button type="button" class="ai-poster-chip">' + esc(c) + '</button>';
+        }).join('') + '</div>' +
+        '<div class="ai-poster-ask-note" id="ai-poster-ask-note"></div>' +
+      '</div>' +
+      '<div class="ai-nb ai-poster-paper">' + html + '</div>';
+
+    var pdf = document.getElementById('ai-poster-pdf');
+    if (pdf) pdf.onclick = function () {
+      pdfDownload((poster.title || curTitle() || 'Lecture') + ' \u2014 Revision Poster',
+        html, { notebook: true, documentLabel: 'Revision Poster' });
+    };
+    var regen = document.getElementById('ai-poster-regen');
+    if (regen) regen.onclick = function () {
+      posterClearRevision(meta.vid, meta.kind, meta.lang);
+      showPoster(true);
+    };
+    var reset = document.getElementById('ai-poster-reset');
+    if (reset) reset.onclick = function () {
+      posterClearRevision(meta.vid, meta.kind, meta.lang);
+      showPoster(false);
+    };
+    var input = document.getElementById('ai-poster-ask-input');
+    var go = document.getElementById('ai-poster-ask-go');
+    function apply() { posterRefine(poster, meta, input ? input.value : ''); }
+    if (go) go.onclick = apply;
+    if (input) input.onkeydown = function (event) {
+      if (event.key === 'Enter') { event.preventDefault(); apply(); }
+    };
+    Array.prototype.forEach.call(box.querySelectorAll('.ai-poster-chip'), function (chip) {
+      chip.onclick = function () {
+        if (input) input.value = chip.textContent;
+        posterRefine(poster, meta, chip.textContent);
+      };
+    });
+  }
+
+  function posterRefine(poster, meta, instruction) {
+    instruction = String(instruction || '').trim();
+    var note = document.getElementById('ai-poster-ask-note');
+    if (instruction.length < 3) {
+      if (note) note.textContent = 'Say what to add or change \u2014 for example "add more dates".';
+      return;
+    }
+    var go = document.getElementById('ai-poster-ask-go');
+    if (go) { go.disabled = true; go.textContent = '\u2728 Working\u2026'; }
+    if (note) note.textContent = 'Asking the AI to ' + instruction.toLowerCase() + '\u2026';
+    backendAuthFetch('/api/study/poster/refine', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: meta.vid, out: meta.lang, style: meta.kind, instruction: instruction,
+        poster: poster, model: outModel(), provider: outProvider()
+      })
+    }).then(function (r) {
+      return r.json().then(function (j) { j._httpStatus = r.status; return j; });
+    }).then(function (j) {
+      if (go) { go.disabled = false; go.textContent = '\u2728 Apply'; }
+      if (!j || !j.poster) {
+        if (note) note.textContent = (j && (j.detail || j.error)) || 'Could not apply that. Try rewording it.';
+        return;
+      }
+      if (state.tab !== 'poster' || curVid() !== meta.vid) return;
+      posterSaveRevision(meta.vid, meta.kind, meta.lang, j.poster);
+      posterPaint(j.poster, Object.assign({}, meta, {
+        provider: j.provider || meta.provider, model: j.model || meta.model,
+        cached: false, edited: true
+      }));
+      if (typeof showToast === 'function') showToast('\u2728 Poster updated', 'success');
+    }).catch(function () {
+      if (go) { go.disabled = false; go.textContent = '\u2728 Apply'; }
+      if (note) note.textContent = 'Could not reach the AI. Try again in a moment.';
+    });
+  }
+
   function showPoster(force) {
     var vid = curVid(), box = contentEl();
     if (!box) return;
@@ -6384,21 +6538,14 @@
             (j && (j.detail || j.error)) || 'Please try again in a moment.');
           return;
         }
-        var html = posterHtml(j.poster);
-        box.innerHTML = brandBarHtml(true) +
-          '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
-          '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' \u00b7 ' + esc(j.model || '') +
-          (j.cached ? ' \u00b7 cached' : ' \u00b7 fresh') + ' \u00b7 ' + esc(j.out_lang || lang) + '</span>' +
-          '<button class="ai-btn sec" id="ai-poster-pdf" style="padding:4px 10px;font-size:0.72rem">\uD83D\uDCC4 Print / PDF</button>' +
-          '<button class="ai-btn sec" id="ai-poster-regen" style="padding:4px 10px;font-size:0.72rem">\u21bb Regenerate</button>' +
-          '</div><div class="ai-nb ai-poster-paper">' + html + '</div>';
-        var pdf = document.getElementById('ai-poster-pdf');
-        if (pdf) pdf.onclick = function () {
-          pdfDownload((j.poster.title || curTitle() || 'Lecture') + ' \u2014 Revision Poster',
-            html, { notebook: true, documentLabel: 'Revision Poster' });
-        };
-        var regen = document.getElementById('ai-poster-regen');
-        if (regen) regen.onclick = function () { showPoster(true); };
+        // A locally-kept edit wins over the shared copy, so a reload does not
+        // silently throw away what the student asked the AI to change.
+        var edited = posterReadRevision(vid, kind, j.out_lang || lang);
+        posterPaint(edited || j.poster, {
+          vid: vid, kind: kind, lang: j.out_lang || lang,
+          provider: j.provider, model: j.model, cached: j.cached,
+          edited: !!edited
+        });
       })
       .catch(function (e) {
         if (_isAbort(e)) return;
