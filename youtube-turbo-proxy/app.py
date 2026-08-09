@@ -4815,9 +4815,31 @@ def _refine_one_block(video_id, block, index, instruction, out_lang, kind, ai):
         return jsonify({"error": "refine_failed",
                         "detail": "The AI changed the box type. Try rewording it."}), 502
     revised["group"] = block.get("group", revised.get("group", ""))
-    return jsonify({"block": revised, "index": index, "instruction": instruction,
-                    "provider": _ai_display_provider(ai), "model": _ai_display_model(ai),
-                    "source": origin})
+
+    # Report the edit as a DIFF rather than a fait accompli. The browser shows
+    # what was found and lets the student pick, so an instruction the lecture
+    # cannot support is visible as "nothing to add" instead of a success message
+    # in front of an unchanged box.
+    field = _POSTER_LIST_FIELD.get(block.get("type")) or "items"
+    def _tokens(b):
+        return [json.dumps(i, sort_keys=True, ensure_ascii=False) for i in (b.get(field) or [])]
+    before, after = _tokens(block), _tokens(revised)
+    before_set, after_set = set(before), set(after)
+    added = [i for i, tok in zip(revised.get(field) or [], after) if tok not in before_set]
+    removed = [i for i, tok in zip(block.get(field) or [], before) if tok not in after_set]
+    retitled = _clean_line(revised.get("title"), 80) != _clean_line(block.get("title"), 80)
+    return jsonify({
+        "block": revised, "index": index, "instruction": instruction,
+        "field": field,
+        # What the student is offered.
+        "add": added,
+        # A rewrite (shorten/reword) removes or rephrases items, so it cannot be
+        # presented as a list of additions — the browser previews it whole.
+        "rewrite": bool(removed) or retitled,
+        "removed": len(removed),
+        "unchanged": not added and not removed and not retitled,
+        "provider": _ai_display_provider(ai), "model": _ai_display_model(ai),
+        "source": origin})
 
 
 @app.post("/api/study/poster/refine")

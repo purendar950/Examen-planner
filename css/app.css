@@ -9291,3 +9291,60 @@ body.ai-sheet-full-open { overflow: hidden; }
   justify-content: center;
   margin-top: -4px;
 }
+
+
+/* ── poster: reviewing what the AI proposes ───────────────────────────────
+   The AI's findings are shown BEFORE anything changes, so the student picks
+   what goes in rather than being told a box was updated. */
+.ai-poster-proposal {
+  margin-top: 7px;
+  border: 1px solid #2e7d32;
+  border-radius: 8px;
+  background: #f4faf5;
+  overflow: hidden;
+}
+.ai-poster-proposal-head {
+  padding: 5px 8px;
+  background: #2e7d32;
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 800;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+}
+.ai-poster-proposal-body { padding: 7px 8px; font-size: .74rem; line-height: 1.4; color: #22303f; }
+.ai-poster-proposal-body ul { margin: 3px 0 0; padding-left: 16px; }
+.ai-poster-proposal-body li { margin: 3px 0; }
+.ai-poster-pick {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  padding: 3px 0;
+  cursor: pointer;
+}
+.ai-poster-pick input { margin-top: 3px; flex: none; accent-color: #2e7d32; }
+.ai-poster-proposal-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 8px 8px;
+}
+.ai-poster-proposal-actions button {
+  border: 1px solid #2e7d32;
+  border-radius: 6px;
+  background: #2e7d32;
+  color: #fff;
+  font: inherit;
+  font-size: .7rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.ai-poster-proposal-actions button.cancel,
+.ai-poster-proposal-actions button.none {
+  background: #fff;
+  color: #22303f;
+  border-color: #cfd8dc;
+}
+.ai-poster-proposal-actions button:disabled { opacity: .5; cursor: not-allowed; }
+@media print { .ai-poster-proposal { display: none !important; } }
