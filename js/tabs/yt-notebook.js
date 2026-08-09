@@ -24,9 +24,11 @@
      1 MiB Firestore document ceiling.
    ══════════════════════════════════════════════════════════════════════════ */
 
-/* Mirrors STUDY_BUNDLE_MAX_VIDEOS in youtube-turbo-proxy/app.py. The proxy is
-   the authority; this only keeps the UI honest before a request is sent. */
-const YTNB_MAX_VIDEOS = 15;
+/* The server remains authoritative and reports its current admin-configured cap
+   through /api/study/cached. Start with the deployment default so the picker is
+   usable while that authenticated request is still in flight. */
+const YTNB_DEFAULT_MAX_VIDEOS = 15;
+let _ytnbMaxVideos = YTNB_DEFAULT_MAX_VIDEOS;
 const YTNB_SEL_KEY = 'ytNotebookSelectionV1';
 const YTNB_OPTS_KEY = 'ytNotebookOptionsV1';
 const YTNB_JOB_KEY = 'ytNotebookActiveJobV1';
@@ -38,6 +40,7 @@ let _ytnbCached = {};           // videoId  -> true when notes already exist
 let _ytnbCachedSig = '';        // options+ids signature the cache map belongs to
 let _ytnbCacheTimer = null;
 let _ytnbRun = null;            // { jobId, follower, acc, items, meta, done }
+let _ytnbDisplayedRecipe = null; // exact notebook currently shown in the reader
 
 function ytnbKit() { return window.AiNotesKit || null; }
 
@@ -317,7 +320,7 @@ function ytnbUpdateEstimate() {
   if (!line) return;
   const ids = ytnbSelectedIds();
   const opts = ytnbOptions();
-  const capped = ids.slice(0, YTNB_MAX_VIDEOS);
+  const capped = ids.slice(0, _ytnbMaxVideos);
   const cachedCount = capped.filter(id => _ytnbCached[id]).length;
   const needed = capped.length - cachedCount;
   const secs = needed * YTNB_SECS_PER_VIDEO + (capped.length > 1 && opts.shape === 'merge' ? 40 : 0);
@@ -346,9 +349,9 @@ function ytnbUpdateEstimate() {
   bits.push('<strong>' + capped.length + '</strong> ' + (single ? 'lecture' : 'lectures selected'));
   if (cachedCount) bits.push('<strong>' + cachedCount + '</strong> already generated');
   bits.push(needed ? ('~' + mins + ' min') : 'ready instantly');
-  if (ids.length > YTNB_MAX_VIDEOS) {
-    bits.push('<span class="ytnb-est-warn">only the first ' + YTNB_MAX_VIDEOS +
-      ' will be used (' + (ids.length - YTNB_MAX_VIDEOS) + ' extra)</span>');
+  if (ids.length > _ytnbMaxVideos) {
+    bits.push('<span class="ytnb-est-warn">only the first ' + _ytnbMaxVideos +
+      ' will be used (' + (ids.length - _ytnbMaxVideos) + ' extra)</span>');
   }
   line.innerHTML = bits.join(' · ');
 }
@@ -381,17 +384,23 @@ function ytnbRefreshCached() {
   const ids = ytnbSelectedIds().slice(0, 60);
   if (!kit || !ids.length) return;
   const opts = ytnbOptions();
-  const sig = [opts.mode, opts.style, opts.lang, ids.join(',')].join('|');
+  const provider = kit.provider();
+  const model = kit.model();
+  const sig = [opts.mode, opts.style, opts.lang, provider, model, ids.join(',')].join('|');
   if (sig === _ytnbCachedSig) return;
   _ytnbCachedSig = sig;
   kit.authFetch('/api/study/cached', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       video_ids: ids, mode: opts.mode, out: opts.lang,
-      style: opts.mode === 'notes' ? opts.style : ''
+      style: opts.mode === 'notes' ? opts.style : '',
+      provider: provider, model: model
     })
   }).then(r => r.ok ? r.json() : null).then(function (j) {
     if (!j || !Array.isArray(j.ready)) return;
+    if (Number.isFinite(Number(j.maxVideos))) {
+      _ytnbMaxVideos = Math.max(2, Math.min(40, Math.trunc(Number(j.maxVideos))));
+    }
     const map = {};
     j.ready.forEach(id => { map[id] = true; });
     _ytnbCached = map;
@@ -412,6 +421,20 @@ function ytnbImportError(msg) {
   if (!el) return;
   el.textContent = msg || '';
   el.style.display = msg ? 'block' : 'none';
+}
+
+/* The bundle endpoint authorizes against Firestore, not this tab's local cache.
+   Flush the imported Course Library before enabling generation so an immediate
+   click cannot race the normal two-second persistence debounce. */
+async function ytnbPersistImportedLibrary() {
+  ytoPersist();
+  if (typeof saveProgressNow !== 'function') {
+    throw new Error('Cloud sync is still loading. Wait a moment and try again.');
+  }
+  const synced = await saveProgressNow();
+  if (!synced) {
+    throw new Error('The library was saved on this device but could not sync to the cloud. Reconnect, then try again.');
+  }
 }
 
 async function ytnbImportUrl() {
@@ -444,7 +467,7 @@ async function ytnbImportUrl() {
       }
       const durMap = await ytFetchDurations(videos).catch(() => ({}));
       const entry = ytoUpsertPlaylistCourse(plId, { info: info, videos: videos, durMap: durMap });
-      ytoPersist();
+      await ytnbPersistImportedLibrary();
       done();
       input.value = '';
       _ytnbCollapsed[plId] = false;
@@ -474,7 +497,7 @@ async function ytnbImportUrl() {
         plan: (existing && existing.plan) || null,
         addedAt: (existing && existing.addedAt) || Date.now()
       };
-      ytoPersist();
+      await ytnbPersistImportedLibrary();
       done();
       input.value = '';
       _ytnbCollapsed[key] = false;
@@ -521,6 +544,7 @@ function ytnbShowView(which) {
 }
 
 function ytnbBackToPicker() {
+  _ytnbDisplayedRecipe = null;
   ytnbShowView('build');
   ytnbRenderSaved();
   ytnbRenderGroups();
@@ -597,7 +621,7 @@ function ytnbGenerate() {
     return;
   }
   const opts = ytnbReadOptionsFromUi();
-  const picked = ytnbSelection().slice(0, YTNB_MAX_VIDEOS);
+  const picked = ytnbSelection().slice(0, _ytnbMaxVideos);
   if (!picked.length) { ytnbUpdateEstimate(); return; }
   // A single lecture is an ordinary note, not a notebook: send it to that
   // lecture's own reader, which already has Follow the lecture, Focus mode and
@@ -617,7 +641,7 @@ function ytnbGenerate() {
     courseId: courses.length === 1 ? courses[0] : '',
     shape: opts.shape, mode: opts.mode,
     style: opts.mode === 'notes' ? opts.style : '',
-    lang: opts.lang
+    lang: opts.lang, provider: kit.provider(), model: kit.model()
   };
   ytnbStart(job, false);
 }
@@ -651,6 +675,10 @@ function ytnbGenerateSingle(pick, opts) {
 function ytnbStart(job, isResume) {
   const kit = ytnbKit();
   if (!kit) return;
+  // Persist the stable routing choice with the job. A refresh must reconnect to
+  // the same provider/model even if the admin changes the active default.
+  job.provider = job.provider || kit.provider();
+  job.model = job.model || kit.model();
   ytnbSaveJob(job);                       // persist BEFORE the POST, so a reload retries the same id
   ytnbShowView('run');
   const out = document.getElementById('ytnb-output');
@@ -673,7 +701,8 @@ function ytnbStart(job, isResume) {
     body: JSON.stringify({
       jobId: job.jobId, video_ids: job.ids, course_id: job.courseId || '',
       shape: job.shape, mode: job.mode, style: job.style || '', out: job.lang,
-      model: kit.model(), provider: kit.provider(), refresh: job.force ? 1 : 0
+      model: job.model, provider: job.provider,
+      refresh: job.force ? 1 : 0, rebuild: job.rebuild ? 1 : 0
     })
   }).then(function (r) {
     if (r.ok) return r.json();
@@ -682,7 +711,13 @@ function ytnbStart(job, isResume) {
     });
   }).then(function (created) {
     created = created || {};
-    if (created.jobId) { job.jobId = created.jobId; ytnbSaveJob(job); }
+    if (Array.isArray(created.videoIds) && created.videoIds.length >= 2) {
+      // The server owns the cap and membership check. Persist exactly the IDs it
+      // accepted, never a broader pre-cap selection that could change on rebuild.
+      job.ids = created.videoIds.slice();
+    }
+    if (created.jobId) job.jobId = created.jobId;
+    ytnbSaveJob(job);
     if (created.status === 'completed' && !created.error) { ytnbFinish(job, created); return; }
     if (created.status === 'stopped') { ytnbEnded(job, 'stopped'); return; }
     if (created.status === 'failed') { ytnbEnded(job, 'failed', created.error); return; }
@@ -709,7 +744,9 @@ function ytnbStream(job, created) {
       shape: created.shape || job.shape,
       // Saved so the finished notebook can be reopened later without the
       // browser having to reproduce the exact selection that built it.
-      fingerprint: created.fingerprint || ''
+      fingerprint: created.fingerprint || '',
+      cacheProvider: created.cacheProvider || job.provider || '',
+      cacheModel: created.cacheModel || job.model || ''
     }
   };
   _ytnbRun = run;
@@ -757,6 +794,12 @@ function ytnbStream(job, created) {
         run.meta.degraded = obj.degraded || run.meta.degraded;
         run.meta.shape = obj.shape || run.meta.shape;
         run.meta.fingerprint = obj.fingerprint || run.meta.fingerprint;
+        run.meta.cacheProvider = obj.cacheProvider || run.meta.cacheProvider;
+        run.meta.cacheModel = obj.cacheModel || run.meta.cacheModel;
+        if (Array.isArray(obj.videoIds) && obj.videoIds.length >= 2) {
+          job.ids = obj.videoIds.slice();
+          ytnbSaveJob(job);
+        }
         if (Array.isArray(obj.items) && obj.items.length) {
           run.items = obj.items;
           run.counts = obj.counts || {};
@@ -773,7 +816,8 @@ function ytnbStream(job, created) {
           provider: run.meta.provider, model: run.meta.model,
           out_lang: run.meta.lang, bundleTitle: run.meta.title,
           degraded: run.meta.degraded, shape: run.meta.shape,
-          fingerprint: run.meta.fingerprint
+          fingerprint: run.meta.fingerprint,
+          cacheProvider: run.meta.cacheProvider, cacheModel: run.meta.cacheModel
         });
         return false;
       }
@@ -803,6 +847,13 @@ function ytnbFinish(job, result) {
   const content = result.content || '';
   const shapeLabel = ytnbShapeLabel(result.shape || job.shape);
   const bookTitle = result.bundleTitle || 'Notebook';
+  _ytnbDisplayedRecipe = {
+    ids: (job.ids || []).slice(), courseId: job.courseId || '',
+    shape: result.shape || job.shape, mode: job.mode || 'notes',
+    style: job.style || 'topic', lang: result.out_lang || job.lang,
+    provider: result.cacheProvider || job.provider || '',
+    model: result.cacheModel || job.model || ''
+  };
 
   const html = kit.build(content, job.style, { lectures: ytnbLectureMap(items) });
   out.innerHTML = '<div class="ai-nb">' + html + '</div>';
@@ -843,6 +894,8 @@ function ytnbFinish(job, result) {
       mode: job.mode || 'notes',
       style: job.style || 'topic',
       lang: result.out_lang || job.lang,
+      cacheProvider: result.cacheProvider || job.provider || '',
+      cacheModel: result.cacheModel || job.model || '',
       ids: (job.ids || []).slice(),
       courseId: job.courseId || '',
       n: items.filter(i => i.state === 'ready').length || (job.ids || []).length,
@@ -879,16 +932,28 @@ function ytnbStop() {
 
 function ytnbRegenerate() {
   const kit = ytnbKit();
+  if (!kit) return;
+  const shown = _ytnbDisplayedRecipe;
+  if (shown && Array.isArray(shown.ids) && shown.ids.length >= 2) {
+    ytnbStart({
+      jobId: kit.newJobId(), ids: shown.ids.slice(0, _ytnbMaxVideos),
+      courseId: shown.courseId || '', shape: shown.shape, mode: shown.mode,
+      style: shown.mode === 'notes' ? (shown.style || '') : '', lang: shown.lang,
+      provider: shown.provider || kit.provider(), model: shown.model || kit.model(),
+      force: true
+    }, false);
+    return;
+  }
   const opts = ytnbOptions();
-  const picked = ytnbSelection().slice(0, YTNB_MAX_VIDEOS);
-  if (!kit || picked.length < 2) { ytnbBackToPicker(); return; }
+  const picked = ytnbSelection().slice(0, _ytnbMaxVideos);
+  if (picked.length < 2) { ytnbBackToPicker(); return; }
   const courses = Array.from(new Set(picked.map(p => p.courseId).filter(Boolean)));
   ytnbStart({
     jobId: kit.newJobId(), ids: picked.map(p => p.id),
     courseId: courses.length === 1 ? courses[0] : '',
     shape: opts.shape, mode: opts.mode,
     style: opts.mode === 'notes' ? opts.style : '',
-    lang: opts.lang, force: true
+    lang: opts.lang, provider: kit.provider(), model: kit.model(), force: true
   }, false);
 }
 
@@ -901,16 +966,11 @@ function ytnbResume() {
 }
 
 /* ── saved notebooks ───────────────────────────────────────────────────────
-   A finished notebook is already durable: the proxy stores its markdown in the
-   shared `study` collection (+ B2) keyed by a fingerprint of the exact
-   selection + shape + mode + style + language. What was missing is a way to
-   FIND it again — those docs carry no uid, so there is no per-user index
-   anywhere on the server.
-
-   So appState keeps the RECIPE and nothing else: fingerprint, options, video
-   ids, title, timestamp. ~300 bytes an entry, against a 1 MiB document ceiling
-   the Organiser is already watching. Opening a notebook fetches the body from
-   the proxy; if it has been purged, the recipe is enough to rebuild it — and a
+   A finished notebook is durable: the proxy stores its markdown in the
+   verified user's provider/model-scoped cache, keyed by a fingerprint of the
+   exact selection + shape + mode + style + language. appState only needs a
+   small per-user recipe index so the body can be found again. Opening a
+   notebook fetches the body from the proxy; if it has been purged, the recipe is enough to rebuild it — and a
    rebuild is mostly cache hits on the per-video notes, so it is fast and cheap.
    That is why a saved notebook can never become a dead link. */
 const YTNB_SAVED_MAX = 40;
@@ -922,7 +982,8 @@ function ytnbSavedList() {
   return st.ytNotebooks;
 }
 function ytnbSavedKey(entry) {
-  return [entry.fp, entry.shape, entry.mode, entry.style || 'topic', entry.lang].join('|');
+  return [entry.fp, entry.shape, entry.mode, entry.style || 'topic', entry.lang,
+    entry.cacheProvider || '', entry.cacheModel || ''].join('|');
 }
 
 /* Record a finished notebook. Same selection + same options overwrites its own
@@ -1003,7 +1064,9 @@ function ytnbOpenSaved(key) {
   const q = '?shape=' + encodeURIComponent(entry.shape) +
     '&mode=' + encodeURIComponent(entry.mode) +
     '&out=' + encodeURIComponent(entry.lang) +
-    '&style=' + encodeURIComponent(entry.style || '');
+    '&style=' + encodeURIComponent(entry.style || '') +
+    '&provider=' + encodeURIComponent(entry.cacheProvider || '') +
+    '&model=' + encodeURIComponent(entry.cacheModel || '');
   kit.authFetch('/api/study/bundles/' + encodeURIComponent(entry.fp) + q)
     .then(function (r) {
       if (r.ok) return r.json();
@@ -1013,12 +1076,16 @@ function ytnbOpenSaved(key) {
     })
     .then(function (saved) {
       ytnbFinish({
-        shape: entry.shape, style: entry.style || '', mode: entry.mode, ids: entry.ids || []
+        shape: entry.shape, style: entry.style || '', mode: entry.mode,
+        lang: entry.lang, ids: entry.ids || [], courseId: entry.courseId || '',
+        provider: entry.cacheProvider || '', model: entry.cacheModel || ''
       }, {
         content: saved.content || '', items: saved.items || [],
         counts: {}, provider: saved.provider, model: saved.model,
         out_lang: saved.out_lang, bundleTitle: saved.title || entry.title,
-        shape: saved.shape || entry.shape, reopened: true
+        shape: saved.shape || entry.shape, reopened: true,
+        cacheProvider: saved.cacheProvider || entry.cacheProvider || '',
+        cacheModel: saved.cacheModel || entry.cacheModel || ''
       });
     })
     .catch(function (e) {
@@ -1048,10 +1115,11 @@ function ytnbRebuildSaved(key) {
   } catch (e) {}
   ytnbApplyOptionsToUi();
   ytnbStart({
-    jobId: kit.newJobId(), ids: entry.ids.slice(0, YTNB_MAX_VIDEOS),
+    jobId: kit.newJobId(), ids: entry.ids.slice(0, _ytnbMaxVideos),
     courseId: entry.courseId || '', shape: entry.shape, mode: entry.mode,
     style: entry.mode === 'notes' ? (entry.style || '') : '', lang: entry.lang,
-    force: true
+    provider: entry.cacheProvider || kit.provider(),
+    model: entry.cacheModel || kit.model(), force: false, rebuild: true
   }, false);
 }
 
@@ -1061,7 +1129,7 @@ function ytnbOpenForCourse(courseId) {
   switchPage('yt-notebook');
   if (course) {
     const videos = ytnbCourseVideos(course);
-    ytnbSaveSelection(videos.slice(0, YTNB_MAX_VIDEOS).map(v => ({ id: v.id, courseId: courseId })));
+    ytnbSaveSelection(videos.slice(0, _ytnbMaxVideos).map(v => ({ id: v.id, courseId: courseId })));
     _ytnbCollapsed[courseId] = false;
   }
   ytnbShowView('build');
