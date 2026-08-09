@@ -125,6 +125,18 @@ the limit. It counts nothing, and returns `null` for Pro/trial.
 - **`noteBlockText` strips** the injected button, the decorative `.num` counter
   (which would otherwise read "1Fundamental Rights") and the `⏩` glyph that
   `linkTs()` prefixes timestamps with.
+- **One passage line per visual line, not per DOM block.** `nbUL()` joins its items
+  with *no* separator (`'<ul>' + items.join('') + '</ul>'`), and `textContent` has
+  no notion of layout, so a seven-bullet section reached the model as one unbroken
+  paragraph — `…held in Switzerland.WHO declared Ebola outbreak in Congo…`. It read
+  two bullets as one sentence and then "corrected" a claim the notes never made.
+  `NOTE_LINE_TAGS` marks the line boundaries before the text is read; chips and MCQ
+  options are joined the same way and need the same treatment.
+- **Verify adapts to the number of claims.** A heading's passage is a whole
+  section, so asking to "verify this line" invited the model to treat eight facts
+  as one assertion. Past one claim it asks for a verdict per claim, in order, and
+  is told explicitly that a correction must *actually differ* from the note —
+  restating a correct note as a correction destroys trust in the check.
 
 - **The section button and the selection handler share one element**, so the
   selection handlers explicitly ignore events from `.ai-nb-ask` and `#ai-note-pop`
