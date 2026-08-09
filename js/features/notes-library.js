@@ -34,7 +34,16 @@
   var BACKFILL_BATCH = 60;      // the server caps a /api/study/cached call at 60
   var _scanning = false;
 
-  function state() { return (window.appState || null); }
+  /* js/core/state.js declares `let appState`, and a top-level `let` in a classic
+     script creates a GLOBAL LEXICAL binding — never a property of `window`. So
+     `window.appState` is permanently undefined here, and reading it silently
+     disabled this whole module: nothing was recorded and the library scan found
+     no courses. The bare identifier is the only correct way to reach it. */
+  function state() {
+    try {
+      return (typeof appState !== 'undefined' && appState) ? appState : null;
+    } catch (e) { return null; }
+  }
   function esc(s) {
     return (s == null ? '' : String(s))
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
