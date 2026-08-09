@@ -2520,11 +2520,32 @@ const STUDY_TUTOR_SYSTEM_PROMPT = 'You are a patient tutor for Indian competitiv
   + 'Show the working for any calculation, step by step. Prefer the shortcut an exam candidate would use '
   + 'under time pressure. Reply in the language of the question (Hindi, Hinglish or English). '
   + 'Use plain text only — no markdown, no headings, no asterisks. '
-  + 'If the question is not about studying or an exam subject, say so in one line instead of answering.';
+  /* This used to end with "If the question is not about studying or an exam
+     subject, say so in one line instead of answering." That refusal misfired on
+     the single most-asked category: General Awareness / current affairs IS a
+     scored subject in every one of these exams, so "who is the current RBI
+     governor" was being turned away as off-topic. Answer everything instead; the
+     only thing to be careful about is not sounding certain on facts that may
+     have moved since training. */
+  + 'Every question is in scope, including general awareness, current affairs and general knowledge '
+  + '— these are scored subjects in these exams. Never refuse a question for being off-topic. '
+  + 'If the answer depends on a fact that may have changed recently, give what you know and add one '
+  + 'short line saying it should be verified.';
+
+/* The bot has no web search (that lives in the app backend), so date awareness
+   is the one thing keeping it from confidently answering current-affairs
+   questions relative to whenever its training data stopped. IST, because that is
+   where the students are. */
+function tutorDateContext(now) {
+  const ist = new Date((now instanceof Date ? now : new Date()).getTime() + (5.5 * 3600 * 1000));
+  const stamp = ist.toISOString().slice(0, 10);
+  return 'Today is ' + stamp + ' (IST). Your training data is older than that, so treat anything '
+    + 'you recall as "current" or "latest" as possibly out of date.';
+}
 
 function buildTutorMessages(question) {
   return [
-    { role: 'system', content: STUDY_TUTOR_SYSTEM_PROMPT },
+    { role: 'system', content: STUDY_TUTOR_SYSTEM_PROMPT + ' ' + tutorDateContext() },
     { role: 'user', content: String(question || '') }
   ];
 }

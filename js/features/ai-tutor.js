@@ -100,6 +100,80 @@
     return 'this playlist';
   }
 
+  /* ── Web search / general awareness ───────────────────────────────────────
+     The tutor is no longer limited to the transcript, so it can answer general
+     awareness and current-affairs questions too. Anything whose answer changes
+     over time (who holds an office, exam dates, latest news) is worthless from
+     training data alone, so the backend can look it up live.
+
+       'auto' → search ONLY questions that look time-sensitive. The default:
+                it costs a round trip just when freshness matters, and nothing
+                on "explain photosynthesis".
+       'on'   → search every question.
+       'off'  → never search; answer from the video and the model's own
+                knowledge only.
+
+     The decision is the server's (see _tutor_web_results in app.py); this is
+     only the student's preference, and the server treats it as untrusted. */
+  var WEB_KEY = 'aiTutorWeb';
+  var WEB_MODES = ['auto', 'on', 'off'];
+  function tutorWebMode() {
+    var v = null;
+    try { v = localStorage.getItem(WEB_KEY); } catch (e) {}
+    return (v === 'on' || v === 'off') ? v : 'auto';
+  }
+  function setTutorWebMode(v) {
+    try { localStorage.setItem(WEB_KEY, WEB_MODES.indexOf(v) >= 0 ? v : 'auto'); } catch (e) {}
+  }
+  function cycleTutorWebMode() {
+    setTutorWebMode(WEB_MODES[(WEB_MODES.indexOf(tutorWebMode()) + 1) % WEB_MODES.length]);
+    return tutorWebMode();
+  }
+  var WEB_MODE_UI = {
+    auto: { label: '🌐 Auto',
+            title: 'Web: Auto — the tutor looks things up online only for questions whose answer changes over time (current affairs, exam dates, latest news). Tap to change.',
+            toast: '🌐 Web: Auto — looked up only when the answer could be out of date.' },
+    on:   { label: '🌐 On',
+            title: 'Web: On — the tutor searches the internet for every question. Slower, but always current. Tap to change.',
+            toast: '🌐 Web: On — every question gets a live search.' },
+    off:  { label: '🌐 Off',
+            title: 'Web: Off — no internet. The tutor answers from this video and its own knowledge only. Tap to change.',
+            toast: '🌐 Web: Off — answering without the internet.' }
+  };
+  function webModeUi(mode) { return WEB_MODE_UI[mode] || WEB_MODE_UI.auto; }
+  function webBtnHtml() {
+    var mode = tutorWebMode(), ui = webModeUi(mode);
+    return '<button type="button" class="ai-btn sec ai-tutor-web-btn' + (mode === 'off' ? '' : ' on') +
+      '" id="ai-tutor-web" data-web-mode="' + mode + '" aria-label="' + escAttr(ui.title) +
+      '" title="' + escAttr(ui.title) + '">' + ui.label + '</button>';
+  }
+  /* Only ever render a link the browser can safely follow. These URLs come from
+     the backend, but they originate from third-party search results, so the
+     scheme is checked here rather than trusted. */
+  function safeHttpUrl(u) {
+    var s = (u == null ? '' : String(u)).trim();
+    return /^https?:\/\//i.test(s) ? s : '';
+  }
+  /* The model cites its web sources inline as [Web 1], [Web 2] — numbers that
+     mean nothing unless the student can see the list they point at. The index is
+     the position in the array the server sent, so numbering matches the prompt
+     even if an entry is skipped here. */
+  function webSourcesHtml(list) {
+    if (!list || !list.length) return '';
+    var items = [];
+    for (var i = 0; i < list.length; i++) {
+      var src = list[i] || {}, url = safeHttpUrl(src.url);
+      if (!url) continue;
+      var label = src.site || src.title || url;
+      // escAttr, not esc: these strings are third-party search-result text.
+      items.push('<a class="ai-web-link" href="' + escAttr(url) + '" target="_blank" ' +
+        'rel="noopener noreferrer nofollow" title="' + escAttr(src.title || url) + '">' +
+        '[Web ' + (i + 1) + '] ' + esc(label) + '</a>');
+    }
+    if (!items.length) return '';
+    return '<div class="ai-web-src">🌐 <b>Looked up online:</b> ' + items.join(' · ') + '</div>';
+  }
+
   /* User-picked AI model. "" = Auto (proxy uses the admin default). The dropdown
      is filled from /api/status.studyModels — i.e. ONLY the active provider's
      models — so any choice the user makes is valid for the configured key. */
@@ -229,6 +303,15 @@
 
   /* ── tiny markdown → HTML ── */
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  /* esc() is a TEXT escaper — it deliberately leaves quotes alone, which is fine
+     between tags but unsafe inside an attribute: a value containing a double
+     quote closes the attribute early and everything after it is parsed as more
+     attributes, so `x" onmouseover=alert(1)` becomes a live event handler.
+     Every attribute built from data this app did not author (web search titles
+     and URLs, video titles) must use this instead. */
+  function escAttr(s) {
+    return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
   function mdInline(s) {
     return s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
             .replace(/__([^_]+)__/g, '<strong>$1</strong>')
@@ -782,6 +865,15 @@
       '.ai-msg{padding:8px 11px;border-radius:10px;font-size:0.86rem;max-width:92%}',
       '.ai-msg.u{align-self:flex-end;background:var(--accent,#00c896);color:#04120d}',
       '.ai-msg.a{align-self:flex-start;background:var(--surface,#1b1f2a);border:1px solid var(--border,#2a3140)}',
+      // ── web search: the 🌐 toggle, and the source list under an answer ──
+      // Unprefixed (unlike the topline rules in css/app.css, which are scoped to
+      // #page-youtube) because the same shell node is re-parented into the
+      // floating tutor window, which lives outside that page container.
+      '.ai-tutor-web-btn{min-height:26px;padding:.22rem .45rem;font-size:.57rem;font-weight:800;white-space:nowrap;flex:0 0 auto}',
+      '.ai-tutor-web-btn.on{border-color:var(--accent,#00c896);color:var(--accent,#00c896)}',
+      '.ai-web-src{margin-top:7px;padding-top:6px;border-top:1px dashed var(--border,#2a3140);font-size:0.68rem;line-height:1.6;color:var(--muted,#8b93a7)}',
+      '.ai-web-link{color:var(--accent,#00c896);text-decoration:none;word-break:break-word}',
+      '.ai-web-link:hover{text-decoration:underline}',
       '.ai-input-row{display:flex;gap:8px}',
       '.ai-input-row input{flex:1;background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border:1px solid var(--border,#2a3140);border-radius:8px;padding:9px}',
       '.ai-q{border:1px solid var(--border,#2a3140);border-radius:10px;padding:12px;margin-bottom:10px}',
@@ -3281,7 +3373,11 @@
     if (!h.length) return '<p>No chat yet.</p>';
     return h.map(function (m) {
       var who = m.role === 'user' ? 'You' : 'AI Tutor';
-      var body = m.role === 'user' ? '<div>' + esc(m.content) + '</div>' : '<div>' + mdToHtml(m.content) + '</div>';
+      var body = m.role === 'user'
+        ? '<div>' + esc(m.content) + '</div>'
+        // Sources travel into the PDF too — a printed answer citing [Web 2] with
+        // no list of what Web 2 was is not checkable later.
+        : '<div>' + mdToHtml(m.content) + webSourcesHtml(m.web) + '</div>';
       return '<div class="pdf-msg pdf-' + (m.role === 'user' ? 'u' : 'a') + '"><div class="pdf-who">' + who + '</div>' + body + '</div>';
     }).join('');
   }
@@ -3639,13 +3735,23 @@
   function saveHistory(h, key) {
     try { localStorage.setItem(key || chatKey(), JSON.stringify(h.slice(-30))); } catch (e) {}
   }
-  function saveTutorAnswer(key, turnId, content) {
+  function saveTutorAnswer(key, turnId, content, web) {
     var hist = getHistory(key), answerAt = -1, userAt = -1;
     for (var i = 0; i < hist.length; i++) {
       if (hist[i].turnId === turnId && hist[i].role === 'user') userAt = i;
       if (hist[i].turnId === turnId && hist[i].role === 'assistant') answerAt = i;
     }
     var answer = { role: 'assistant', content: content, turnId: turnId };
+    // Persisted alongside the answer so the [Web n] citations inside it stay
+    // resolvable after a reload. Trimmed to what the footer renders — history
+    // shares a localStorage budget with every other chat on the device.
+    if (web && web.length) {
+      answer.web = web.slice(0, 8).map(function (s) {
+        return { title: String((s && s.title) || '').slice(0, 160),
+                 url: String((s && s.url) || '').slice(0, 400),
+                 site: String((s && s.site) || '').slice(0, 80) };
+      });
+    }
     if (answerAt >= 0) hist[answerAt] = answer;
     else if (userAt >= 0) hist.splice(userAt + 1, 0, answer);
     else hist.push(answer);
@@ -3725,7 +3831,10 @@
         return '<div class="ai-msg a" data-ai-turn="' + esc(m.turnId) + '">' + loading('Tutor soch raha hai…') + '</div>';
       }
       return '<div class="ai-msg ' + (m.role === 'user' ? 'u' : 'a') + '">' +
-        (m.role === 'user' ? esc(m.content) : '<div class="ai-md">' + mdToHtml(m.content) + '</div>') + '</div>';
+        (m.role === 'user' ? esc(m.content)
+          // Sources are persisted on the history entry, so a reloaded chat still
+          // shows what the [Web n] citations in the saved answer refer to.
+          : '<div class="ai-md">' + mdToHtml(m.content) + '</div>' + webSourcesHtml(m.web)) + '</div>';
     }).join('');
     var clearBar = visible.length
       ? '<div class="ai-tutor-actions">' +
@@ -3736,6 +3845,8 @@
     var courseMode = isCourseTutorScope();
     var courseId = tutorCourseId();
     var courses = tutorCourses();
+
+    var webBar = webBtnHtml();
 
     var scopeBar =
       '<div class="ai-scope-toggle" id="ai-scope" role="tablist" aria-label="Tutor scope">' +
@@ -3811,11 +3922,14 @@
         '<span class="ai-chip" data-q="Ek real example do is topic ka">Give example</span>' +
         '<span class="ai-chip" data-q="Is video se important cheezein ek ek karke pucho">Quiz me</span>' +
         '<span class="ai-chip" data-q="Exam point of view se important cheezein batao">Real exam angle</span>' +
+        // The tutor is no longer confined to the transcript, and nothing in the
+        // UI said so. This chip is how a student discovers it.
+        '<span class="ai-chip" data-q="Aaj ke important current affairs batao exam ke liye">🌐 Current affairs</span>' +
         '<span class="ai-chip" data-teach="1">📚 Teach me</span>');
 
     return shellOpenTag() +
       '<div class="ai-tutor-topline' + (lib ? ' has-library-controls' : '') + '">' +
-        scopeBar + dockBar + libraryControl + clearBar +
+        scopeBar + webBar + dockBar + libraryControl + clearBar +
       '</div>' +
       prepareStatus + coverageBar +
       '<div class="ai-chat" id="ai-chat">' + (msgs || '<div class="ai-muted ai-chat-empty">' + emptyMsg + '</div>') + '</div>' +
@@ -3988,6 +4102,22 @@
         renderTutor();
       };
     });
+    /* Patched in place rather than via renderTutor(): re-rendering the shell
+       mid-answer would tear down the bubble a stream is painting into, and the
+       new mode applies from the NEXT question anyway. For the same reason the
+       mode is deliberately NOT part of renderSignature() — the carried node is
+       already up to date, so a dock hand-off must not treat it as stale. */
+    var webBtn = b.querySelector('#ai-tutor-web');
+    if (webBtn) webBtn.onclick = function () {
+      var next = cycleTutorWebMode(), ui = webModeUi(next);
+      webBtn.textContent = ui.label;
+      webBtn.title = ui.title;
+      webBtn.setAttribute('aria-label', ui.title);
+      webBtn.setAttribute('data-web-mode', next);
+      if (next === 'off') webBtn.classList.remove('on');
+      else webBtn.classList.add('on');
+      if (typeof showToast === 'function') showToast(ui.toast, 'info');
+    };
     var popOut = b.querySelector('#ai-tutor-pop-out');
     if (popOut) popOut.onclick = function () { moveTutorToFloat(); };
     var dockBack = b.querySelector('#ai-tutor-dock-panel');
@@ -4209,12 +4339,16 @@
         q: question || '', out: outLang(), scope: courseMode ? 'course' : 'library',
         course_id: courseMode ? tutorCourseId() : '',
         provider: outProvider(), model: outModel(), history: histForApi,
+        web: tutorWebMode(),
         memory: (window.TutorMemory && window.TutorMemory.contextText()) || ''
       });
     }
     return JSON.stringify({
       id: vid, q: question || '', out: outLang(), mode: mode || 'chat',
       provider: outProvider(), model: outModel(), history: histForApi,
+      // 'auto' | 'on' | 'off' — whether the backend may search the internet for
+      // this question. The server re-validates and decides; see app.py.
+      web: tutorWebMode(),
       // Cross-session student memory (see js/features/tutor-memory.js) —
       // works no matter which provider/model answers, since it's injected
       // fresh into the prompt server-side on every call rather than living
@@ -4223,9 +4357,10 @@
     });
   }
 
-  function paintTutorBubble(el, content, streaming) {
+  function paintTutorBubble(el, content, streaming, web) {
     if (!el || !el.isConnected) return false;
-    el.innerHTML = '<div class="ai-md">' + mdToHtml(content) + (streaming ? '<span class="ai-caret"></span>' : '') + '</div>';
+    el.innerHTML = '<div class="ai-md">' + mdToHtml(content) + (streaming ? '<span class="ai-caret"></span>' : '') + '</div>' +
+      webSourcesHtml(web);
     bindTsLinks(el);
     return true;
   }
@@ -4237,9 +4372,9 @@
     var chat = document.getElementById('ai-chat');
     return chat ? chat.querySelector('[data-ai-turn="' + turnId + '"]') : null;
   }
-  function finishTutorBubble(historyKey, turnId, preferred, content) {
+  function finishTutorBubble(historyKey, turnId, preferred, content, web) {
     var bubble = findTutorBubble(historyKey, turnId, preferred);
-    paintTutorBubble(bubble, content, false);
+    paintTutorBubble(bubble, content, false, web);
     if (tutorVisible() && chatKey() === historyKey) {
       var hasPending = getHistory(historyKey).some(function (m) { return m.pending; });
       if (!hasPending && !document.getElementById('ai-clear')) renderTutor();
@@ -4301,8 +4436,9 @@
       body: requestBody
     }).then(function (r) { return r.json(); }).then(function (j) {
       var answer = j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)');
-      saveTutorAnswer(historyKey, turnId, answer);
-      finishTutorBubble(historyKey, turnId, liveEl, answer);
+      var web = (!j.error && j.web) || null;
+      saveTutorAnswer(historyKey, turnId, answer, web);
+      finishTutorBubble(historyKey, turnId, liveEl, answer, web);
     }).catch(function (e) {
       var answer = '\u26a0 ' + String(e);
       saveTutorAnswer(historyKey, turnId, answer);
@@ -4389,11 +4525,14 @@
       }
     }
 
-    var acc = '', gotChunk = false, done = false;
+    // Sources the server searched for this question, from the meta frame. They
+    // arrive before the first chunk, so the student sees the tutor is answering
+    // from a live lookup while it is still typing.
+    var acc = '', gotChunk = false, done = false, webSources = null;
 
     function paint() {
       liveEl = findTutorBubble(historyKey, turnId, liveEl);
-      if (!paintTutorBubble(liveEl, acc, true)) {
+      if (!paintTutorBubble(liveEl, acc, true, webSources)) {
         streamPainter.cancel();
         return false;
       }
@@ -4406,8 +4545,8 @@
       if (!gotChunk || !acc.trim()) { fallback(); return; }   // nothing streamed → fall back
       streamPainter.cancel();
       done = true;
-      saveTutorAnswer(historyKey, turnId, acc);
-      finishTutorBubble(historyKey, turnId, liveEl, acc);
+      saveTutorAnswer(historyKey, turnId, acc, webSources);
+      finishTutorBubble(historyKey, turnId, liveEl, acc, webSources);
     }
     function fallback() {
       if (done) return;
@@ -4422,11 +4561,19 @@
         else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
       });
       if (ev === 'meta') {
+        var meta = null;
+        if (data) { try { meta = JSON.parse(data); } catch (e) {} }
+        /* Web sources apply to BOTH scopes, so they are read before the
+           library-only coverage handling below. No repaint is forced here: the
+           frame arrives before the first chunk, and painting now would replace
+           the "thinking" spinner with an empty bubble. paint() already carries
+           webSources, so the footer appears with the first chunk. */
+        if (meta && meta.web && meta.web.length) webSources = meta.web;
         // Library scope reports what it actually searched. Showing it turns a
         // weak answer into an explainable one.
-        if (lib && data && isLibraryScope() && activeLibraryScopeKey() === requestLibraryScopeKey) {
+        if (lib && meta && isLibraryScope() && activeLibraryScopeKey() === requestLibraryScopeKey) {
           try {
-            var m = JSON.parse(data);
+            var m = meta;
             var bits = [];
             if (typeof m.indexed === 'number') {
               var searchedLabel = requestLibraryScopeLabel;
