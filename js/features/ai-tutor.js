@@ -1346,7 +1346,63 @@
       sc + ' .nb-lec-tag{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:24px;padding:0 7px;border-radius:12px;background:#2e7d32;color:#fff;font-size:.74rem;font-weight:700;font-family:system-ui,Arial,sans-serif;flex:none}',
       sc + ' .nb-lec-title{flex:1;min-width:140px;font-weight:700;font-size:1.02rem;color:#1b5e20}',
       sc + ' .nb-lec-open{font-size:.72rem;font-weight:700;color:#1565c0;text-decoration:none;font-family:system-ui,Arial,sans-serif;white-space:nowrap}',
-      sc + ' .ai-cite{color:#6a1b9a;font-weight:700;font-size:.76rem;text-decoration:none;white-space:nowrap;font-family:system-ui,Arial,sans-serif;background:#f3e5f5;border:1px solid #ce93d8;border-radius:6px;padding:0 5px;margin-left:4px}'
+      sc + ' .ai-cite{color:#6a1b9a;font-weight:700;font-size:.76rem;text-decoration:none;white-space:nowrap;font-family:system-ui,Arial,sans-serif;background:#f3e5f5;border:1px solid #ce93d8;border-radius:6px;padding:0 5px;margin-left:4px}',
+      /* ── mind map ──
+         Declared here, in the stylesheet shared by the on-screen notebook and
+         the PDF, so a printed map is identical to the one on screen. Nodes are
+         absolutely positioned from measured heights; the SVG edge layer sits
+         behind them. System font, not the handwriting face: map labels are
+         small and must stay legible. */
+      sc + ' .ai-map{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;overflow:auto;padding:6px 2px}',
+      sc + ' .ai-map-canvas{position:relative}',
+      sc + ' .ai-map-edges{position:absolute;left:0;top:0;overflow:visible;pointer-events:none}',
+      sc + ' .ai-map-edges path{fill:none;stroke-width:2}',
+      sc + ' .ai-map-edges path.e0{stroke:#e0a3a3}' + sc + ' .ai-map-edges path.e1{stroke:#9ccfa0}',
+      sc + ' .ai-map-edges path.e2{stroke:#9fc2e8}' + sc + ' .ai-map-edges path.e3{stroke:#c8aede}',
+      sc + ' .ai-map-edges path.e4{stroke:#e8bf95}',
+      sc + ' .ai-map-node{position:absolute;box-sizing:border-box;padding:6px 24px 6px 10px;border-radius:9px;border:1.5px solid #cfd8dc;background:#fff;font-size:.78rem;line-height:1.32;color:#22303f}',
+      sc + ' .ai-map-node.root{background:#263238;border-color:#263238;color:#fff;font-weight:700;font-size:.86rem}',
+      sc + ' .ai-map-node.d1{font-weight:700;font-size:.82rem}',
+      sc + ' .ai-map-node.leaf{font-size:.74rem;border-style:dashed;background:#fbfdfb}',
+      sc + ' .ai-map-node.c0{border-color:#c62828;background:#fdf3f3}' + sc + ' .ai-map-node.c0.d1{background:#c62828;color:#fff}',
+      sc + ' .ai-map-node.c1{border-color:#2e7d32;background:#f2f9f3}' + sc + ' .ai-map-node.c1.d1{background:#2e7d32;color:#fff}',
+      sc + ' .ai-map-node.c2{border-color:#1565c0;background:#f2f7fd}' + sc + ' .ai-map-node.c2.d1{background:#1565c0;color:#fff}',
+      sc + ' .ai-map-node.c3{border-color:#7b1fa2;background:#f8f3fb}' + sc + ' .ai-map-node.c3.d1{background:#7b1fa2;color:#fff}',
+      sc + ' .ai-map-node.c4{border-color:#e65100;background:#fdf6f0}' + sc + ' .ai-map-node.c4.d1{background:#e65100;color:#fff}',
+      sc + ' .ai-map-label[data-s]{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px}',
+      sc + ' .ai-map-ts{display:block;margin-top:2px;font-size:.64rem;opacity:.75;font-variant-numeric:tabular-nums}',
+      sc + ' .ai-map-toggle{position:absolute;top:4px;right:4px;width:17px;height:17px;line-height:1;padding:0;border-radius:50%;border:1px solid currentColor;background:transparent;color:inherit;font-size:.72rem;font-weight:700;cursor:pointer;opacity:.65}',
+      sc + ' .ai-map-toggle:hover{opacity:1}',
+      /* ── revision poster ── */
+      sc + ' .ai-poster{font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;color:#22303f}',
+      sc + ' .ai-poster-title{display:flex;flex-direction:column;gap:2px;padding-bottom:8px;margin-bottom:10px;border-bottom:2.5px solid #263238}',
+      sc + ' .ai-poster-title strong{font-size:1.16rem;line-height:1.25}',
+      sc + ' .ai-poster-title span{font-size:.7rem;text-transform:uppercase;letter-spacing:.09em;color:#5d6b7a}',
+      sc + ' .ai-poster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}',
+      sc + ' .ai-poster-stats{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}',
+      sc + ' .ai-poster-stat{border:1.5px solid #263238;border-radius:10px;padding:8px 10px;text-align:center;background:#f7f9fa}',
+      sc + ' .ai-poster-stat strong{display:block;font-size:1.34rem;line-height:1.1;color:#c62828;font-variant-numeric:tabular-nums}',
+      sc + ' .ai-poster-stat span{display:block;margin-top:3px;font-size:.68rem;line-height:1.3;color:#37474f}',
+      sc + ' .ai-poster-card{border:1.5px solid #cfd8dc;border-radius:10px;padding:9px 11px;break-inside:avoid;page-break-inside:avoid}',
+      sc + ' .ai-poster-card.wide{grid-column:1/-1}',
+      sc + ' .ai-poster-head{font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#1565c0;margin-bottom:6px}',
+      sc + ' .ai-poster-facts,' + sc + ' .ai-poster-steps,' + sc + ' .ai-poster-formulas{margin:0;padding-left:16px;font-size:.76rem;line-height:1.45}',
+      sc + ' .ai-poster-facts li,' + sc + ' .ai-poster-steps li{margin:3px 0}',
+      sc + ' .ai-poster-formulas{list-style:none;padding-left:0}',
+      sc + ' .ai-poster-formulas li{margin:5px 0;padding-left:8px;border-left:3px solid #2e7d32}',
+      sc + ' .ai-poster-formulas .fn{display:block;font-weight:700;font-size:.74rem}',
+      sc + ' .ai-poster-formulas code{display:block;font-family:"Courier New",monospace;font-size:.8rem;background:#f2f9f3;border-radius:5px;padding:2px 6px;margin:2px 0}',
+      sc + ' .ai-poster-formulas .fnote{display:block;font-size:.68rem;color:#5d6b7a}',
+      sc + ' .ai-poster-time{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:.76rem}',
+      sc + ' .ai-poster-time li{display:contents}',
+      sc + ' .ai-poster-time .w{font-weight:700;color:#c62828;white-space:nowrap;font-variant-numeric:tabular-nums}',
+      sc + ' .ai-poster-table{width:100%;border-collapse:collapse;font-size:.74rem}',
+      sc + ' .ai-poster-table th,' + sc + ' .ai-poster-table td{border:1px solid #cfd8dc;padding:4px 7px;text-align:left}',
+      sc + ' .ai-poster-table thead th{background:#eceff1;font-weight:700}',
+      sc + ' .ai-poster-table .rl{background:#f7f9fa;font-weight:700;width:26%}',
+      sc + ' .ai-poster-gloss{margin:0;font-size:.74rem;line-height:1.4}',
+      sc + ' .ai-poster-gloss dt{font-weight:700;margin-top:4px}',
+      sc + ' .ai-poster-gloss dd{margin:0 0 0 10px;color:#37474f}'
     ].join('');
   }
 
@@ -1447,6 +1503,12 @@
       // ── "Follow the lecture": hide timestamps IN NOTES + highlight the block
       //    matching the current playback time (works for Topic AND MCQ notes) ──
       '.ai-nb .ai-ts{display:none}',
+      // The map and the poster are their own artifacts, so they get the paper
+      // surface without the notebook's fixed padding or hidden timestamps.
+      '.ai-map-wrap{overflow:auto;max-width:100%}',
+      '.ai-nb.ai-map{padding:10px 12px}',
+      '.ai-nb.ai-poster-paper{padding:14px 16px 20px}',
+      '@media (max-width:640px){.ai-nb.ai-map{padding:8px}.ai-poster-grid{grid-template-columns:1fr!important}}',
       '.ai-nb>.ai-lec-on{background:rgba(255,214,0,.45);box-shadow:0 0 0 3px rgba(245,168,0,.5);border-radius:6px}',
       '.ai-btn.ai-follow-on{background:var(--accent,#00c896)!important;color:#04120d!important;border-color:var(--accent,#00c896)!important}',
       '.ai-btn.ai-follow-reading{background:#fff1bf!important;color:#6b4b00!important;border-color:#d6a82d!important}',
@@ -5525,6 +5587,8 @@
   function renderTabs() {
     var tabs = [
       ['notes', '📝', 'Notes'],
+      ['map', '🗺', 'Map'],
+      ['poster', '📊', 'Poster'],
       ['quiz', '❓', 'Quiz'],
       ['cards', '🃏', 'Cards'],
       ['tutor', '💬', 'Tutor']
@@ -5558,6 +5622,450 @@
       };
     });
   }
+  /* ════════════════════════════════════════════════════════════════════════
+     MIND MAP — a lecture as a tree, drawn from notes it already has
+     ────────────────────────────────────────────────────────────────────────
+     _notes_instr() on the proxy forces every note into "## M:SS Topic" /
+     "### M:SS Sub-topic" with "- " details, so the hierarchy a mind map needs
+     is ALREADY in the cached markdown. This therefore costs no AI call and no
+     new backend mode: it reads the saved note through the cache-only endpoint
+     (which never generates) and redraws it as a tree.
+
+     Nodes are HTML and edges are one SVG layer behind them. All-SVG would mean
+     measuring text by hand or using <foreignObject>, which prints unreliably;
+     HTML nodes wrap text for free, inherit the app's CSS, and print correctly.
+     ════════════════════════════════════════════════════════════════════════ */
+  var MM_DETAIL_KEY = 'aiMindMapDetailV1';
+  var MM_MAX_LEAVES = 6;            // details per topic, so one node cannot explode
+  var MM_W = [200, 215, 215, 235];  // node width by depth
+  var MM_GAP_X = 54, MM_GAP_Y = 10;
+  var _mmCollapsed = {};            // node id -> true
+  var _mmTree = null, _mmMeta = null;
+
+  function mmDetail() {
+    try { return localStorage.getItem(MM_DETAIL_KEY) !== '0'; } catch (e) { return true; }
+  }
+  function mmSetDetail(on) {
+    try { localStorage.setItem(MM_DETAIL_KEY, on ? '1' : '0'); } catch (e) {}
+  }
+
+  // Leading "3:45 " / "[3:45] " on a heading is the moment that topic starts.
+  function mmHeadTs(text) {
+    var s = String(text || '');
+    var m = s.match(/^\s*\(?\[?(\d{1,2}):(\d{2})(?::(\d{2}))?\]?\)?\s*[-\u2013\u00b7:]?\s*/);
+    if (!m) return { secs: null, label: s.trim() };
+    var secs = m[3] ? (+m[1] * 3600 + (+m[2]) * 60 + (+m[3])) : (+m[1] * 60 + (+m[2]));
+    return { secs: secs, label: s.slice(m[0].length).trim() };
+  }
+  // A detail bullet carries its timestamp inline, e.g. "Harappa found [0:50]".
+  function mmBulletTs(text) {
+    var s = String(text || '');
+    var m = s.match(/\[?\(?\b(\d{1,2}):(\d{2})(?::(\d{2}))?\b\)?\]?/);
+    if (!m) return { secs: null, label: s.trim() };
+    var secs = m[3] ? (+m[1] * 3600 + (+m[2]) * 60 + (+m[3])) : (+m[1] * 60 + (+m[2]));
+    if (secs > 86400) return { secs: null, label: s.trim() };
+    return { secs: secs, label: s.replace(m[0], '').replace(/\s{2,}/g, ' ').trim() };
+  }
+
+  function mmTrim(text, max) {
+    text = String(text || '').replace(/\*\*/g, '').replace(/`/g, '').trim();
+    return text.length > max ? text.slice(0, max - 1).replace(/[\s,;:.]+$/, '') + '\u2026' : text;
+  }
+
+  /* Markdown notes -> tree. '#'/'##' are branches, '###'+ are sub-branches and
+     '- ' bullets become leaves under whichever branch is open. */
+  function mmParse(md, rootLabel) {
+    var clean = nbStrip(deLatex(md || ''));
+    var seq = 0;
+    function node(label, secs, leaf) {
+      seq += 1;
+      return { id: 'm' + seq, label: label, secs: secs, leaf: !!leaf, children: [] };
+    }
+    var root = node(mmTrim(rootLabel || 'This lecture', 70), null, false);
+    root.id = 'root';
+    var branch = null, sub = null;
+    clean.replace(/\r/g, '').split('\n').forEach(function (raw) {
+      var t = raw.trim();
+      if (!t || t === '---' || t === '***') return;
+      var h = t.match(/^(#{1,6})\s+(.*)/);
+      if (h) {
+        var head = mmHeadTs(h[2].replace(/^[*#\s]+/, '').replace(/[*#:\s]+$/, ''));
+        if (!head.label) return;
+        if (h[1].length <= 2) {
+          branch = node(mmTrim(head.label, 64), head.secs, false);
+          root.children.push(branch);
+          sub = null;
+        } else {
+          if (!branch) { branch = node('Overview', null, false); root.children.push(branch); }
+          sub = node(mmTrim(head.label, 64), head.secs, false);
+          branch.children.push(sub);
+        }
+        return;
+      }
+      var b = t.match(/^[-*+]\s+(.*)/);
+      if (!b) return;
+      var parent = sub || branch;
+      if (!parent) return;
+      if (parent.children.length >= MM_MAX_LEAVES) return;
+      var bullet = mmBulletTs(b[1]);
+      var label = mmTrim(bullet.label, 96);
+      if (label) parent.children.push(node(label, bullet.secs, true));
+    });
+    return root;
+  }
+
+  function mmVisibleChildren(node, detail) {
+    if (_mmCollapsed[node.id]) return [];
+    return (node.children || []).filter(function (c) { return detail || !c.leaf; });
+  }
+
+  function mmCount(node) {
+    var n = 0;
+    (node.children || []).forEach(function (c) { n += 1 + mmCount(c); });
+    return n;
+  }
+
+  /* Draw into a live container: node heights must be measured before positions
+     can be assigned, so this cannot be a pure HTML-string builder. */
+  function mmDraw(container, root) {
+    var detail = mmDetail();
+    container.innerHTML = '<div class="ai-map-canvas"><svg class="ai-map-edges" aria-hidden="true"></svg></div>';
+    var canvas = container.querySelector('.ai-map-canvas');
+    var svg = canvas.querySelector('.ai-map-edges');
+
+    var xs = [0];
+    for (var d = 1; d < MM_W.length; d++) xs[d] = xs[d - 1] + MM_W[d - 1] + MM_GAP_X;
+
+    var flat = [];
+    (function walk(node, depth, colour) {
+      node.depth = depth;
+      node.colour = depth === 0 ? -1 : (depth === 1 ? (flat.filter(function (n) { return n.depth === 1; }).length % 5) : colour);
+      flat.push(node);
+      mmVisibleChildren(node, detail).forEach(function (c) { walk(c, depth + 1, node.colour); });
+    })(root, 0, 0);
+
+    // Pass 1 — create and measure.
+    flat.forEach(function (node) {
+      var depth = Math.min(node.depth, MM_W.length - 1);
+      var el = document.createElement('div');
+      var hidden = (node.children || []).length && _mmCollapsed[node.id];
+      el.className = 'ai-map-node d' + depth + (node.leaf ? ' leaf' : '') +
+        (node.colour >= 0 ? ' c' + node.colour : ' root');
+      el.style.width = MM_W[depth] + 'px';
+      el.style.left = xs[depth] + 'px';
+      var toggleable = (node.children || []).filter(function (c) { return detail || !c.leaf; }).length;
+      el.innerHTML =
+        '<span class="ai-map-label"' + (node.secs != null ? ' data-s="' + node.secs + '" title="Jump to this moment"' : '') + '>' +
+        esc(node.label) + '</span>' +
+        (node.secs != null ? '<span class="ai-map-ts">' + esc(fmtClock(node.secs)) + '</span>' : '') +
+        (toggleable ? '<button type="button" class="ai-map-toggle" data-n="' + escAttr(node.id) + '" ' +
+          'aria-label="' + (hidden ? 'Expand' : 'Collapse') + ' this branch">' + (hidden ? '+' : '\u2013') + '</button>' : '');
+      canvas.appendChild(el);
+      node.el = el;
+      node.h = el.offsetHeight || 34;
+    });
+
+    // Pass 2 — vertical placement, children first so a parent centres on them.
+    var cursor = 0;
+    (function place(node) {
+      var kids = mmVisibleChildren(node, detail);
+      if (!kids.length) { node.y = cursor; cursor += node.h + MM_GAP_Y; return; }
+      kids.forEach(place);
+      var first = kids[0], last = kids[kids.length - 1];
+      var mid = ((first.y + first.h / 2) + (last.y + last.h / 2)) / 2;
+      node.y = Math.max(0, mid - node.h / 2);
+    })(root);
+
+    var width = 0, height = 0;
+    flat.forEach(function (node) {
+      node.el.style.top = Math.round(node.y) + 'px';
+      var depth = Math.min(node.depth, MM_W.length - 1);
+      width = Math.max(width, xs[depth] + MM_W[depth]);
+      height = Math.max(height, node.y + node.h);
+    });
+    canvas.style.width = (width + 4) + 'px';
+    canvas.style.height = (height + 4) + 'px';
+
+    // Pass 3 — edges behind the nodes.
+    var paths = [];
+    flat.forEach(function (node) {
+      var depth = Math.min(node.depth, MM_W.length - 1);
+      var x1 = xs[depth] + MM_W[depth], y1 = node.y + node.h / 2;
+      mmVisibleChildren(node, detail).forEach(function (c) {
+        var cd = Math.min(c.depth, MM_W.length - 1);
+        var x2 = xs[cd], y2 = c.y + c.h / 2;
+        var bend = Math.max(18, (x2 - x1) / 2);
+        paths.push('<path d="M' + x1 + ' ' + y1 + 'C' + (x1 + bend) + ' ' + y1 + ',' +
+          (x2 - bend) + ' ' + y2 + ',' + x2 + ' ' + y2 + '" class="e' +
+          (c.colour >= 0 ? c.colour : 0) + '"/>');
+      });
+    });
+    svg.setAttribute('width', width + 4);
+    svg.setAttribute('height', height + 4);
+    svg.setAttribute('viewBox', '0 0 ' + (width + 4) + ' ' + (height + 4));
+    svg.innerHTML = paths.join('');
+
+    // Interactions: a timestamp seeks the player, a toggle folds the branch.
+    Array.prototype.forEach.call(canvas.querySelectorAll('.ai-map-label[data-s]'), function (label) {
+      label.onclick = function () {
+        if (typeof ssSeekTo === 'function') ssSeekTo(parseInt(label.dataset.s, 10) || 0);
+      };
+    });
+    Array.prototype.forEach.call(canvas.querySelectorAll('.ai-map-toggle'), function (btn) {
+      btn.onclick = function (event) {
+        event.stopPropagation();
+        var id = btn.dataset.n;
+        if (_mmCollapsed[id]) delete _mmCollapsed[id]; else _mmCollapsed[id] = true;
+        mmDraw(container, root);
+      };
+    });
+    return { width: width, height: height };
+  }
+
+  function fmtClock(secs) {
+    secs = Math.max(0, parseInt(secs, 10) || 0);
+    var h = Math.floor(secs / 3600), m = Math.floor((secs % 3600) / 60), s = secs % 60;
+    return (h ? h + ':' + (m < 10 ? '0' : '') : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function mmToolbarHtml(meta, nodes) {
+    var detail = mmDetail();
+    return brandBarHtml(true) +
+      '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+      '<span class="ai-muted" style="flex:1">' + nodes + ' topics \u00b7 ' +
+      esc((meta && meta.lang) || outLang()) + ' \u00b7 from your saved notes</span>' +
+      '<button class="ai-btn sec" id="ai-map-detail" style="padding:4px 10px;font-size:0.72rem">' +
+      (detail ? '\u25a3 Hide details' : '\u25a2 Show details') + '</button>' +
+      '<button class="ai-btn sec" id="ai-map-expand" style="padding:4px 10px;font-size:0.72rem">\u21f2 Expand all</button>' +
+      '<button class="ai-btn sec" id="ai-map-fold" style="padding:4px 10px;font-size:0.72rem">\u21f0 Topics only</button>' +
+      '<button class="ai-btn sec" id="ai-map-pdf" style="padding:4px 10px;font-size:0.72rem">\uD83D\uDCC4 Print / PDF</button>' +
+      '</div><div class="ai-map-wrap"><div class="ai-nb ai-map"></div></div>';
+  }
+
+  function mmPaint(box) {
+    if (!_mmTree) return;
+    box.innerHTML = mmToolbarHtml(_mmMeta, mmCount(_mmTree));
+    var host = box.querySelector('.ai-map');
+    mmDraw(host, _mmTree);
+    var detailBtn = document.getElementById('ai-map-detail');
+    if (detailBtn) detailBtn.onclick = function () { mmSetDetail(!mmDetail()); mmPaint(box); };
+    var expand = document.getElementById('ai-map-expand');
+    if (expand) expand.onclick = function () { _mmCollapsed = {}; mmSetDetail(true); mmPaint(box); };
+    var fold = document.getElementById('ai-map-fold');
+    if (fold) fold.onclick = function () {
+      _mmCollapsed = {};
+      // Fold every branch that has sub-branches, leaving the top level readable.
+      (function walk(n) {
+        (n.children || []).forEach(function (c) {
+          if ((c.children || []).length) _mmCollapsed[c.id] = true;
+          walk(c);
+        });
+      })(_mmTree);
+      mmSetDetail(false);
+      mmPaint(box);
+    };
+    var pdf = document.getElementById('ai-map-pdf');
+    if (pdf) pdf.onclick = function () {
+      var canvas = host.querySelector('.ai-map-canvas');
+      var w = canvas ? parseFloat(canvas.style.width) || 900 : 900;
+      // A map is usually wider than a page; scale it down to fit rather than
+      // letting the print engine clip the right-hand branches.
+      var scale = Math.min(1, 720 / w);
+      pdfDownload((curTitle() || 'Lecture') + ' \u2014 Mind Map',
+        '<div class="ai-map" style="transform:scale(' + scale.toFixed(3) +
+        ');transform-origin:top left">' + host.innerHTML + '</div>',
+        { notebook: true, documentLabel: 'Mind Map' });
+    };
+  }
+
+  /* Read the saved note for this video WITHOUT generating, then draw it. */
+  function showMindMap() {
+    var vid = curVid(), box = contentEl();
+    if (!box) return;
+    if (!vid) {
+      box.innerHTML = notesStageMessageHtml('video', 'Play a lecture first',
+        'A mind map is drawn from that lecture\u2019s notes.');
+      return;
+    }
+    var lang = outLang();
+    box.innerHTML = notesLoadingHtml('map', '', lang, false);
+    var styles = ['', 'topic+images'];      // whichever style the notes were made in
+    var attempt = 0;
+    function tryNext() {
+      if (attempt >= styles.length) {
+        box.innerHTML = notesStageMessageHtml('captions', 'No notes for this lecture yet',
+          'A mind map is built from your notes, so generate them once and the map is then free and instant.') +
+          '<div style="text-align:center;margin-top:-6px"><button class="ai-btn" id="ai-map-make">\uD83D\uDCDD Generate notes now</button></div>';
+        var make = document.getElementById('ai-map-make');
+        if (make) make.onclick = function () {
+          state.tab = 'notes';
+          renderTabs();
+          renderBody();
+          setTimeout(function () { showStudy('notes'); }, 0);
+        };
+        return;
+      }
+      var style = styles[attempt++];
+      apiGet('/api/study/saved?id=' + encodeURIComponent(vid) + '&mode=notes&out=' +
+        encodeURIComponent(lang) + (style ? '&style=' + encodeURIComponent(style) : ''))
+        .then(function (j) {
+          if (!j || j.error || !j.content) { tryNext(); return; }
+          if (curVid() !== vid || state.tab !== 'map') return;
+          _mmTree = mmParse(j.content, curTitle() || j.title);
+          _mmMeta = { lang: j.out_lang || lang };
+          _mmCollapsed = {};
+          if (!(_mmTree.children || []).length) {
+            box.innerHTML = notesStageMessageHtml('error', 'These notes have no topic headings',
+              'Regenerate the notes for this lecture and the map will build from them.');
+            return;
+          }
+          mmPaint(box);
+        })
+        .catch(function () { tryNext(); });
+    }
+    tryNext();
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════
+     REVISION POSTER — one printable page of what a lecture is examined on
+     ────────────────────────────────────────────────────────────────────────
+     The proxy returns validated typed blocks (mode=poster); layout lives here,
+     in CSS, written once. A model asked to design a page produces overlapping
+     text and invented coordinates, but asked to fill named slots it is
+     reliable — and the result stays text, so it is searchable, translatable
+     and cacheable exactly like notes.
+     ════════════════════════════════════════════════════════════════════════ */
+  var POSTER_KIND_KEY = 'aiPosterKindV1';
+  var POSTER_KINDS = [
+    ['auto', '\u2728 Auto (match the subject)'],
+    ['facts', '\uD83D\uDCC5 Facts \u00b7 dates \u00b7 comparisons'],
+    ['formula', '\u2797 Formula & shortcut sheet'],
+    ['process', '\uD83D\uDD01 Processes & cycles'],
+    ['pattern', '\uD83E\uDDE9 Question patterns']
+  ];
+  function posterKind() {
+    try { return localStorage.getItem(POSTER_KIND_KEY) || 'auto'; } catch (e) { return 'auto'; }
+  }
+  function setPosterKind(v) { try { localStorage.setItem(POSTER_KIND_KEY, v); } catch (e) {} }
+
+  function posterStatsHtml(stats) {
+    return '<div class="ai-poster-stats">' + stats.map(function (s) {
+      return '<div class="ai-poster-stat"><strong>' + esc(s.value) + '</strong><span>' +
+        esc(s.label) + '</span></div>';
+    }).join('') + '</div>';
+  }
+
+  function posterBlockHtml(b) {
+    var head = b.title ? '<div class="ai-poster-head">' + esc(b.title) + '</div>' : '';
+    if (b.type === 'timeline') {
+      return '<section class="ai-poster-card wide">' + head + '<ol class="ai-poster-time">' +
+        (b.items || []).map(function (i) {
+          return '<li><span class="w">' + esc(i.when) + '</span><span class="t">' + esc(i.what) + '</span></li>';
+        }).join('') + '</ol></section>';
+    }
+    if (b.type === 'compare') {
+      var heads = (b.headers || []).map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('');
+      var rows = (b.rows || []).map(function (r) {
+        return '<tr><th class="rl">' + esc(r.label) + '</th>' +
+          (r.values || []).map(function (v) { return '<td>' + esc(v) + '</td>'; }).join('') + '</tr>';
+      }).join('');
+      return '<section class="ai-poster-card wide">' + head +
+        '<table class="ai-poster-table"><thead><tr><th></th>' + heads + '</tr></thead>' +
+        '<tbody>' + rows + '</tbody></table></section>';
+    }
+    if (b.type === 'process') {
+      return '<section class="ai-poster-card">' + head + '<ol class="ai-poster-steps">' +
+        (b.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') +
+        '</ol></section>';
+    }
+    if (b.type === 'formula') {
+      return '<section class="ai-poster-card">' + head + '<ul class="ai-poster-formulas">' +
+        (b.items || []).map(function (i) {
+          return '<li>' + (i.name ? '<span class="fn">' + esc(i.name) + '</span>' : '') +
+            '<code>' + esc(i.expr) + '</code>' +
+            (i.note ? '<span class="fnote">' + esc(i.note) + '</span>' : '') + '</li>';
+        }).join('') + '</ul></section>';
+    }
+    if (b.type === 'glossary') {
+      return '<section class="ai-poster-card">' + (head || '<div class="ai-poster-head">Terms</div>') +
+        '<dl class="ai-poster-gloss">' + (b.items || []).map(function (i) {
+          return '<dt>' + esc(i.term) + '</dt><dd>' + esc(i.meaning) + '</dd>';
+        }).join('') + '</dl></section>';
+    }
+    // keyfacts
+    return '<section class="ai-poster-card">' + (head || '<div class="ai-poster-head">Must remember</div>') +
+      '<ul class="ai-poster-facts">' + (b.items || []).map(function (i) {
+        return '<li>' + esc(i) + '</li>';
+      }).join('') + '</ul></section>';
+  }
+
+  function posterHtml(p) {
+    var blocks = (p && p.blocks) || [];
+    var out = [], i = 0;
+    while (i < blocks.length) {
+      if (blocks[i].type === 'stat') {
+        var run = [];
+        while (i < blocks.length && blocks[i].type === 'stat') { run.push(blocks[i]); i++; }
+        out.push(posterStatsHtml(run));     // the big numbers read as one strip
+        continue;
+      }
+      out.push(posterBlockHtml(blocks[i]));
+      i++;
+    }
+    return '<div class="ai-poster">' +
+      '<div class="ai-poster-title"><strong>' + esc(p.title || curTitle() || 'Revision poster') + '</strong>' +
+      '<span>Revision poster' + (p.subject ? ' \u00b7 ' + esc(p.subject) : '') + '</span></div>' +
+      '<div class="ai-poster-grid">' + out.join('') + '</div></div>';
+  }
+
+  function showPoster(force) {
+    var vid = curVid(), box = contentEl();
+    if (!box) return;
+    if (!vid) {
+      box.innerHTML = notesStageMessageHtml('video', 'Play a lecture first',
+        'A poster is built from the lecture playing beside this panel.');
+      return;
+    }
+    var lang = outLang(), kind = posterKind();
+    box.innerHTML = notesLoadingHtml('poster', '', lang, force);
+    var signal = _genStart('ai-poster-go');
+    var requestId = ++_studyPaintRequest;
+    apiGet('/api/study?id=' + encodeURIComponent(vid) + '&mode=poster&out=' +
+      encodeURIComponent(lang) + '&style=' + encodeURIComponent(kind) +
+      (force ? '&refresh=1' : '') + modelParam(), signal)
+      .then(function (j) {
+        if (requestId !== _studyPaintRequest || curVid() !== vid || state.tab !== 'poster') return;
+        _genEnd('ai-poster-go');
+        if (!j || j.error || !j.poster) {
+          box.innerHTML = notesStageMessageHtml('error', 'Poster could not be built',
+            (j && (j.detail || j.error)) || 'Please try again in a moment.');
+          return;
+        }
+        var html = posterHtml(j.poster);
+        box.innerHTML = brandBarHtml(true) +
+          '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+          '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' \u00b7 ' + esc(j.model || '') +
+          (j.cached ? ' \u00b7 cached' : ' \u00b7 fresh') + ' \u00b7 ' + esc(j.out_lang || lang) + '</span>' +
+          '<button class="ai-btn sec" id="ai-poster-pdf" style="padding:4px 10px;font-size:0.72rem">\uD83D\uDCC4 Print / PDF</button>' +
+          '<button class="ai-btn sec" id="ai-poster-regen" style="padding:4px 10px;font-size:0.72rem">\u21bb Regenerate</button>' +
+          '</div><div class="ai-nb ai-poster-paper">' + html + '</div>';
+        var pdf = document.getElementById('ai-poster-pdf');
+        if (pdf) pdf.onclick = function () {
+          pdfDownload((j.poster.title || curTitle() || 'Lecture') + ' \u2014 Revision Poster',
+            html, { notebook: true, documentLabel: 'Revision Poster' });
+        };
+        var regen = document.getElementById('ai-poster-regen');
+        if (regen) regen.onclick = function () { showPoster(true); };
+      })
+      .catch(function (e) {
+        if (_isAbort(e)) return;
+        if (requestId !== _studyPaintRequest) return;
+        _genEnd('ai-poster-go');
+        box.innerHTML = notesStageMessageHtml('error', 'Poster could not be built',
+          'Please try again in a moment or pick another model.');
+      });
+  }
+
   /* Which Organiser course holds this video. Used to pre-select a course when
      handing off to the multi-video Notebook page. Prefers the course the
      student currently has open, then falls back to a library scan. */
@@ -5648,6 +6156,35 @@
       var pendingStudyJob = readStudyJob();
       checkLangs(modeSel.value, 25, !pendingStudyJob);
       if (pendingStudyJob) setTimeout(resumeActiveStudyJob, 0);
+    } else if (state.tab === 'map') {
+      // No generate button: the map is drawn from notes that already exist, so
+      // opening the tab IS the action. Nothing here costs AI quota.
+      b.innerHTML = '<div class="ai-notes-workspace-intro"><span>Mind Map</span>' +
+        '<p>The whole lecture as one branching tree, built from your notes. Tap any topic to jump the video there.</p></div>' +
+        '<div id="ai-sub"></div>';
+      setSetupCollapsed(true);
+      setTimeout(showMindMap, 0);
+    } else if (state.tab === 'poster') {
+      b.innerHTML = '<div class="ai-notes-workspace-intro"><span>Revision Poster</span>' +
+        '<p>One printable page of what this lecture is examined on \u2014 numbers, dates, comparisons.</p></div>' +
+        '<div class="ai-notes-controls">' +
+        '<select id="ai-poster-kind" class="ai-btn sec" title="What kind of sheet" style="padding:6px 8px">' +
+        POSTER_KINDS.map(function (k) {
+          return '<option value="' + k[0] + '"' + (posterKind() === k[0] ? ' selected' : '') + '>' + k[1] + '</option>';
+        }).join('') + '</select>' +
+        '<button class="ai-btn" id="ai-poster-go">Generate Poster</button>' +
+        '</div><div id="ai-langbar"></div><div id="ai-sub"></div>';
+      var kindSel = document.getElementById('ai-poster-kind');
+      if (kindSel) kindSel.onchange = function () {
+        setPosterKind(this.value);
+        _cancelActiveStudy();
+        _genEnd('ai-poster-go');
+        var sub = document.getElementById('ai-sub');
+        if (sub) sub.innerHTML = '';
+      };
+      var posterGo = document.getElementById('ai-poster-go');
+      if (posterGo) posterGo.onclick = function () { showPoster(false); };
+      setSetupCollapsed(false);
     } else if (state.tab === 'cards') {
       b.innerHTML = '<div id="ai-cards-focus-wrap" style="margin-bottom:8px;display:none">' +
         '<input id="ai-cards-focus" placeholder="Optional: kis topic ke cards? (blank = important)" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#334);background:transparent;color:inherit;font-size:.82rem"></div>' +
