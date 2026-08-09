@@ -183,7 +183,7 @@ function _firestoreSafeFocusMarks(focusMarks) {
 }
 
 async function saveProgressNow() {
-  if (!currentUser) return;
+  if (!currentUser) return false;
   const saveUid = currentUser.uid;
   const json = JSON.stringify(appState);
   const stateToSave = JSON.parse(json);
@@ -210,13 +210,13 @@ async function saveProgressNow() {
   if (!_fbReady || !db || navigator.onLine === false) {
     _localDirty = true;
     setSyncStatus('offline', 'Offline — saved on device');
-    return;
+    return false;
   }
   if (json === _lastSavedJSON) {
     _localDirty = false;
     _clearPendingSync(saveUid);
     setSyncStatus('', '');
-    return;
+    return true;
   } // Nothing changed
 
   /* Pre-flight size guard. If the serialized state is over the Firestore
@@ -232,7 +232,7 @@ async function saveProgressNow() {
       + ' Trim large data (playlists / handwritten Focus marks / video notes).');
     setSyncStatus('error', '⚠ Data too large to sync');
     setTimeout(() => setSyncStatus('', ''), 6000);
-    return;
+    return false;
   }
   if (bytes >= FIRESTORE_DOC_WARN) {
     console.warn('[sync] appState is ' + bytes + ' bytes (~'
@@ -284,6 +284,7 @@ async function saveProgressNow() {
     }
     setSyncStatus('saved', '☁ Saved');
     setTimeout(() => setSyncStatus('', ''), 2500);
+    return true;
   } catch(e) {
     if (!currentUser || currentUser.uid === saveUid) _localDirty = true;
     _markPendingSync(saveUid, stateToSave);
@@ -297,6 +298,7 @@ async function saveProgressNow() {
       setSyncStatus('error', _syncErrorLabel(e));
       setTimeout(() => setSyncStatus('', ''), 4000);
     }
+    return false;
   }
 }
 

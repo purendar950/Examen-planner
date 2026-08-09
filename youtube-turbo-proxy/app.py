@@ -257,26 +257,31 @@ _user_record_cache = {}
 _user_record_cache_lock = threading.Lock()
 
 
-def _cached_user_data_and_admin(uid):
+def _cached_user_data_and_admin(uid, fresh_user=False):
     now = time.time()
     with _user_record_cache_lock:
         hit = _user_record_cache.get(uid)
-        if hit and now - hit[0] < _USER_RECORD_TTL:
+        fresh_hit = hit and now - hit[0] < _USER_RECORD_TTL
+        if fresh_hit and not fresh_user:
             return hit[1], hit[2]
+    # Notebook creation authorizes against a library the browser may have just
+    # written. `fresh_user=True` bypasses only the user document cache while a
+    # still-fresh admin result is reused, avoiding both stale membership and an
+    # unnecessary second Firestore read.
     snap = _fb_db.collection("users").document(uid).get()
     data = snap.to_dict() if snap.exists else {}
-    is_admin = _fb_db.collection("admins").document(uid).get().exists
+    is_admin = hit[2] if fresh_hit else _fb_db.collection("admins").document(uid).get().exists
     with _user_record_cache_lock:
         _user_record_cache[uid] = (now, data, is_admin)
     return data, is_admin
 
 
-def _verified_user_record(require_pro=False):
+def _verified_user_record(require_pro=False, fresh_user=False):
     identity, err = _require_firebase_user()
     if err:
         return None, err
     try:
-        data, is_admin = _cached_user_data_and_admin(identity["uid"])
+        data, is_admin = _cached_user_data_and_admin(identity["uid"], fresh_user=fresh_user)
     except Exception as exc:  # noqa: BLE001
         log.warning("Could not load Firebase user %s: %s", identity["uid"], exc)
         return None, ({"error": "auth_unavailable", "detail": "Could not verify account access."}, 503)
@@ -519,7 +524,8 @@ def _s3_delete(doc_id, prefix="study"):
 
 # Metadata copied into the tiny Firestore index doc (NOT the big body).
 _STUDY_INDEX_FIELDS = ("id", "title", "mode", "style", "out_lang", "model",
-                       "num_questions", "provider", "transcript_lang", "segment_count")
+                       "num_questions", "provider", "cache_provider", "cache_model",
+                       "transcript_lang", "segment_count")
 
 
 def _study_index_doc(data):
@@ -1176,6 +1182,8 @@ def _study_job_public(job):
         items = _bundle_items_public(job.get("items"))
         out.update({"kind": "bundle", "shape": job.get("shape"),
                     "bundleTitle": job.get("bundle_title"),
+                    "cacheProvider": job.get("cache_provider") or "",
+                    "cacheModel": job.get("cache_model") or "",
                     # The browser saves this so the notebook can be reopened
                     # later without resending the selection it was built from.
                     "fingerprint": job.get("fingerprint") or "",
@@ -1253,6 +1261,8 @@ def _get_study_job(job_id):
         job.update({
             "kind": "bundle", "shape": saved.get("shape") or "merge",
             "bundle_title": saved.get("bundleTitle") or saved.get("title"),
+            "cache_provider": saved.get("cacheProvider") or "",
+            "cache_model": saved.get("cacheModel") or "",
             "video_ids": list(saved.get("videoIds") or []),
             "course_id": saved.get("courseId") or "",
             "degraded": saved.get("degraded") or "",
@@ -4133,6 +4143,70 @@ BUNDLE_MERGE_MAX_CALLS = int(os.environ.get("BUNDLE_MERGE_MAX_CALLS", "45"))
 _BUNDLE_ITEM_FIELDS = ("video_id", "title", "label", "state", "source", "detail")
 
 
+def _bundle_video_cap(limits=None):
+    """Authoritative per-notebook cap, clamped even if admin data is corrupt."""
+    configured = (limits or _load_ai_limits()).get("studyBundleMaxVideos")
+    try:
+        configured = int(configured)
+    except (TypeError, ValueError):
+        configured = STUDY_BUNDLE_MAX_VIDEOS
+    return max(2, min(STUDY_BUNDLE_MAX_VIDEOS, configured))
+
+
+def _bundle_cache_identity(owner_uid, provider, model):
+    """Opaque cache scope: notebooks are private and model selections stay exact."""
+    raw = "%s|%s|%s" % (str(owner_uid or ""), str(provider or "").strip().lower(),
+                         str(model or "").strip().lower())
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:20]
+
+
+def _bundle_note_cache_matches(saved, provider, model):
+    """Whether note metadata was produced by this stable routing choice."""
+    if not isinstance(saved, dict):
+        return False
+    saved_provider = saved.get("cache_provider") or saved.get("provider") or ""
+    saved_model = saved.get("cache_model") or saved.get("model") or ""
+    return (str(saved_provider).strip().lower() == str(provider or "").strip().lower()
+            and str(saved_model).strip().lower() == str(model or "").strip().lower())
+
+
+def _bundle_note_cache_ready(fs_id, provider="", model=""):
+    """Route-aware notebook estimate, or legacy any-route discovery if omitted."""
+    if not provider and not model:
+        return _study_exists(fs_id)
+    saved = _fs_get("study", fs_id)
+    if saved is None and _s3_enabled() and _s3_exists(fs_id):
+        # Body upload can succeed before its Firestore index write. Load through
+        # the normal recovery path so route metadata is checked and the missing
+        # index is repaired instead of falsely reporting a cache miss.
+        saved = _study_get(fs_id)
+    return _bundle_note_cache_matches(saved, provider, model)
+
+
+def _bundle_refresh_policy(payload):
+    """Separate final-notebook rebuilds from expensive lecture regeneration."""
+    refresh_lectures = _job_force(payload.get("refresh") or payload.get("nocache"))
+    rebuild_bundle = _job_force(payload.get("rebuild"))
+    return refresh_lectures, (refresh_lectures or rebuild_bundle)
+
+
+def _bundle_cached_note_result(ckey, fs_id, provider, model):
+    """Route-aware lecture lookup where stale memory cannot hide persistence."""
+    now = time.time()
+    with _study_lock:
+        hit = _study_cache.get(ckey)
+        if (hit and now - hit["ts"] < STUDY_TTL
+                and _bundle_note_cache_matches(hit.get("data"), provider, model)):
+            return hit["data"]
+    saved = _study_get(fs_id)
+    if not _bundle_note_cache_matches(saved, provider, model):
+        return {}
+    saved["cached"] = True
+    with _study_lock:
+        _study_cache[ckey] = {"ts": time.time(), "data": saved}
+    return saved
+
+
 def _bundle_label(index):
     return "V%d" % (index + 1)
 
@@ -4148,22 +4222,28 @@ def _bundle_fingerprint(video_ids, shape):
     return hashlib.sha1("|".join(ids).encode("utf-8")).hexdigest()[:32]
 
 
-def _bundle_keys_for(fp, shape, mode, out_lang, style):
+def _bundle_keys_for(fp, shape, mode, out_lang, style, owner_uid="", provider="", model=""):
     """Cache keys from an already-known fingerprint.
 
-    Split out from _bundle_cache_keys so a SAVED notebook can be reopened from
-    its fingerprint alone, without the browser having to resend (and the server
-    having to re-trust) the video list it was built from.
+    New notebooks are scoped to the verified owner and the selected AI route.
+    Calls without that identity retain the legacy key solely so recipes saved
+    before this cache version can still be reopened.
     """
     lang = _cache_lang(out_lang)
     cache_style = (_MCQ_CACHE_STYLE if style == "mcq" else style) or "topic"
-    return ("bundle:%s:%s:%s:%s:%s" % (fp, shape, mode, lang, cache_style),
-            _fs_doc_id("bundle", fp, shape, mode, lang, cache_style))
+    if not owner_uid and not provider and not model:
+        return ("bundle:%s:%s:%s:%s:%s" % (fp, shape, mode, lang, cache_style),
+                _fs_doc_id("bundle", fp, shape, mode, lang, cache_style))
+    scope = _bundle_cache_identity(owner_uid, provider, model)
+    return ("bundle-v2:%s:%s:%s:%s:%s:%s" %
+            (scope, fp, shape, mode, lang, cache_style),
+            _fs_doc_id("bundle-v2", scope, fp, shape, mode, lang, cache_style))
 
 
-def _bundle_cache_keys(video_ids, shape, mode, out_lang, style):
+def _bundle_cache_keys(video_ids, shape, mode, out_lang, style,
+                       owner_uid="", provider="", model=""):
     return _bundle_keys_for(_bundle_fingerprint(video_ids, shape), shape, mode,
-                            out_lang, style)
+                            out_lang, style, owner_uid, provider, model)
 
 
 def _bundle_counts(items):
@@ -4431,25 +4511,37 @@ def _bundle_merge_stage(job, notes):
             cluster["title"], len(cluster["sources"]), total_videos)
             + "\n\n" + "\n\n".join(excerpts) + tail)
         buf = []
+        merge_ok = False
         try:
             for piece in _stream_notes_part(sysmsg, user, job["ai"], BUNDLE_MERGE_CAP,
                                             cancel_event=job["cancel_event"]):
                 if _study_job_stop_requested(job):
                     return
                 buf.append(piece)
-                _bundle_emit(job, piece)
+            merge_ok = True
         except Exception as exc:  # noqa: BLE001
             log.warning("bundle %s merge call failed for %r: %s",
                         job.get("id"), cluster["title"], exc)
         written = "".join(buf)
-        if not written.strip():
-            # A failed or empty merge must never drop the topic from the notebook.
+        headings = re.findall(r"(?m)^\s*##\s+", written)
+        cited_labels = {
+            src["label"] for src in cluster["sources"]
+            if re.search(r"\[" + re.escape(src["label"]) + r"(?:\s|\])", written)
+        }
+        required_labels = {src["label"] for src in cluster["sources"]}
+        valid = (merge_ok and bool(written.strip()) and len(headings) == 1
+                 and bool(re.match(r"^##\s+", written.lstrip()))
+                 and cited_labels == required_labels)
+        if not valid:
+            # Buffer each AI call until it completes and validates. If a stream
+            # fails after yielding tokens, none of that partial section reaches
+            # the client; deterministic source sections replace it atomically.
             _bundle_emit(job, _bundle_passthrough_section(cluster))
             for extra in cluster["sources"][1:]:
                 _bundle_emit(job, _bundle_citeify(extra["body"], extra["label"]).strip() + "\n\n")
         else:
+            _bundle_emit(job, written.rstrip() + "\n\n")
             covered.extend(_extract_note_headings(written))
-            _bundle_emit(job, "\n\n")
 
 
 def _bundle_extract(video_id):
@@ -4481,7 +4573,8 @@ def _bundle_map_stage(job):
         vid = item["video_id"]
         _bundle_update_item(job, vid, "processing")
         ckey, fs_id = _study_text_cache_keys(vid, job["mode"], job["out_lang"], job["style"])
-        saved = _study_job_cached_result(ckey, fs_id, False) or {}
+        saved = {} if job.get("force") else _bundle_cached_note_result(
+            ckey, fs_id, job.get("cache_provider"), job.get("cache_model"))
         content = saved.get("content") or ""
         title = saved.get("title") or item.get("title") or vid
         source = "cached"
@@ -4533,15 +4626,23 @@ def _bundle_map_stage(job):
             # This is byte-for-byte what the Notes tab would have produced for
             # this video, so save it under the ordinary single-video key: the
             # notebook warms every lecture's own notes as a side effect.
-            _study_put(fs_id, {
+            note_data = {
                 "id": vid, "title": title, "mode": job["mode"],
                 "style": job["style"] or "topic", "out_lang": job["out_lang"],
                 "model": _ai_display_model(job["ai"]), "format": "markdown",
                 "num_questions": None, "provider": _ai_display_provider(job["ai"]),
+                "cache_provider": job.get("cache_provider") or "",
+                "cache_model": job.get("cache_model") or "",
                 "keys_available": _ai_key_count(job["ai"]),
                 "transcript_lang": transcript.get("chosen_lang"),
                 "segment_count": transcript.get("segment_count"),
-                "cached": False, "content": content})
+                "cached": False, "content": content}
+            _study_put(fs_id, note_data)
+            # The canonical key is route-agnostic, so the newly generated copy
+            # must replace process memory as well as persistence. Otherwise an
+            # older same-route value can be resurrected by the next rebuild.
+            with _study_lock:
+                _study_cache[ckey] = {"ts": time.time(), "data": note_data}
         elif compile_shape:
             with _study_jobs_lock:
                 item["title"] = title
@@ -4600,6 +4701,8 @@ def _run_study_bundle_job(job_id):
                 "mode": "bundle", "bundle_mode": job["mode"], "shape": job["shape"],
                 "style": job["style"] or "topic", "out_lang": job["out_lang"],
                 "model": job["model"], "provider": job["provider"], "format": "markdown",
+                "cache_provider": job.get("cache_provider") or "",
+                "cache_model": job.get("cache_model") or "",
                 "num_questions": None, "keys_available": _ai_key_count(job["ai"]),
                 "video_ids": list(job.get("video_ids") or []),
                 "items": items, "cached": False, "content": content}
@@ -4635,7 +4738,7 @@ def _bundle_requested_ids(payload):
 @app.post("/api/study/bundles")
 def api_study_bundle_start():
     """Create (or return) a multi-video notebook job. Safe to retry after reload."""
-    user, err = _verified_user_record(require_pro=True)
+    user, err = _verified_user_record(require_pro=True, fresh_user=True)
     if err:
         return jsonify(err[0]), err[1]
     uid = user["uid"]
@@ -4682,8 +4785,7 @@ def api_study_bundle_start():
         return jsonify({"error": "not_in_library",
                         "detail": "These videos are not in your Course Library. Import the playlist first."}), 404
     limits = _load_ai_limits()
-    cap = limits.get("studyBundleMaxVideos")
-    cap = min(STUDY_BUNDLE_MAX_VIDEOS, int(cap)) if isinstance(cap, (int, float)) else STUDY_BUNDLE_MAX_VIDEOS
+    cap = _bundle_video_cap(limits)
     truncated = len(ordered) - cap if len(ordered) > cap else 0
     ordered = ordered[:cap]
 
@@ -4692,9 +4794,12 @@ def api_study_bundle_start():
                          str(payload.get("provider") or "").strip()[:40] or None)
     if not _ai_configured(ai) and not was_stopped:
         return jsonify({"error": "ai_not_configured", "detail": "Add an AI key in the admin panel."}), 503
-    force = _job_force(payload.get("refresh") or payload.get("nocache"))
-    ckey, fs_id = _bundle_cache_keys(ordered, shape, mode, out_lang, style)
-    cached = _study_job_cached_result(ckey, fs_id, force)
+    force, bypass_bundle_cache = _bundle_refresh_policy(payload)
+    cache_provider = str(ai.get("provider") or "ai")
+    cache_model = str(ai.get("model") or "")
+    ckey, fs_id = _bundle_cache_keys(
+        ordered, shape, mode, out_lang, style, uid, cache_provider, cache_model)
+    cached = _study_job_cached_result(ckey, fs_id, bypass_bundle_cache)
 
     # Name the notebook after the course the selection came from; a cross-course
     # selection has no single course, so it falls back to a neutral title.
@@ -4712,6 +4817,8 @@ def api_study_bundle_start():
         "video_id": ordered[0],       # keeps single-video helpers/logging happy
         "mode": mode, "style": style, "out_lang": out_lang,
         "provider": ai.get("provider", "ai"), "model": ai["model"], "ai": ai,
+        "cache_provider": cache_provider, "cache_model": cache_model,
+        "force": force,
         "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
         "cached": bool(cached), "persisted": bool(cached), "title": title,
         "transcript_lang": None, "segment_count": None, "error": "",
@@ -5076,12 +5183,11 @@ def api_study_saved():
 def api_study_bundle_get(fingerprint):
     """Reopen a saved notebook.
 
-    Deliberately NOT gated on current library membership, unlike creation. A
-    notebook costs AI budget to BUILD, which is why that path resolves every
-    video against users/{uid}.appState.ytoLibrary; READING one back is a lookup
-    in the shared `study` cache that costs nothing, and re-checking membership
-    here would lock a student out of their own saved notebook the moment they
-    tidied a playlist out of their library.
+    Notebook creation and new saved recipes are private to the verified user.
+    Library membership is intentionally not rechecked while reopening: removing
+    a source playlist must not delete access to a notebook the student built.
+    Legacy recipes without cache-route metadata use their old shared key only
+    for backward compatibility.
     """
     user, err = _verified_user_record(require_pro=True)
     if err:
@@ -5101,7 +5207,16 @@ def api_study_bundle_get(fingerprint):
         style = ""
     if mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
-    ckey, fs_id = _bundle_keys_for(fp, shape, mode, out_lang, style)
+    cache_provider = (request.args.get("provider") or "").strip()[:40]
+    cache_model = (request.args.get("model") or "").strip()[:80]
+    # New recipes carry both fields and therefore use a private, model-aware
+    # cache. Recipes created before this version omit them and retain access to
+    # their legacy shared key for backward compatibility.
+    if cache_provider and cache_model:
+        ckey, fs_id = _bundle_keys_for(
+            fp, shape, mode, out_lang, style, user["uid"], cache_provider, cache_model)
+    else:
+        ckey, fs_id = _bundle_keys_for(fp, shape, mode, out_lang, style)
     saved = _study_job_cached_result(ckey, fs_id, False)
     if not saved or not str(saved.get("content") or "").strip():
         # Gone (or purged). The browser holds the recipe, so it can rebuild —
@@ -5115,6 +5230,8 @@ def api_study_bundle_get(fingerprint):
         "mode": saved.get("bundle_mode") or mode, "style": saved.get("style") or "topic",
         "out_lang": saved.get("out_lang") or out_lang,
         "provider": saved.get("provider") or "ai", "model": saved.get("model") or "",
+        "cacheProvider": saved.get("cache_provider") or cache_provider,
+        "cacheModel": saved.get("cache_model") or cache_model,
         "cached": True,
     })
 
@@ -5142,12 +5259,31 @@ def api_study_cached():
     style = str(payload.get("style") or "").strip().lower()
     if mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
+    req_model = str(payload.get("model") or "").strip()[:80]
+    req_provider = str(payload.get("provider") or "").strip()[:40]
+    route_specific = bool(req_model or req_provider)
+    if route_specific:
+        ai = _load_ai_config(req_model or None, req_provider or None)
+        cache_provider = str(ai.get("provider") or "ai")
+        cache_model = str(ai.get("model") or "")
     requested = _bundle_requested_ids(payload)[:60]
     owned = {v["video_id"] for v in _user_library(user, None)}
-    ready = [vid for vid in requested if vid in owned
-             and _study_exists(_study_text_cache_keys(vid, mode, out_lang, style)[1])]
+    ready = []
+    for vid in requested:
+        if vid not in owned:
+            continue
+        fs_id = _study_text_cache_keys(vid, mode, out_lang, style)[1]
+        if route_specific:
+            cached = _bundle_note_cache_ready(fs_id, cache_provider, cache_model)
+        else:
+            # Legacy Notes Library scans intentionally discover any existing
+            # note, regardless of which provider/model originally produced it.
+            cached = _bundle_note_cache_ready(fs_id)
+        if cached:
+            ready.append(vid)
     return jsonify({"mode": mode, "out": out_lang, "style": style or "topic",
-                    "checked": len(requested), "ready": ready})
+                    "checked": len(requested), "ready": ready,
+                    "maxVideos": _bundle_video_cap(_load_ai_limits())})
 
 
 # Which languages a video's study material (for a given mode) is ALREADY cached

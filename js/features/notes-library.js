@@ -71,7 +71,8 @@
     return ['video', e.vid, e.mode || 'notes', e.style || 'topic', e.lang].join('|');
   }
   function notebookKey(e) {
-    return ['nb', e.fp, e.shape, e.mode || 'notes', e.style || 'topic', e.lang].join('|');
+    return ['nb', e.fp, e.shape, e.mode || 'notes', e.style || 'topic', e.lang,
+      e.cacheProvider || '', e.cacheModel || ''].join('|');
   }
 
   /* Record a single-video note the moment it renders. Called from ai-tutor.js on
@@ -348,7 +349,7 @@
         '</span></button>' +
         (opts.actions ? '<span class="nlib-actions">' +
           (r.kind === 'notebook'
-            ? '<button type="button" class="ytnb-chip sm" onclick="NotesLibrary.rebuild(' + arg + ')" title="Build a fresh copy from the same lectures">↻</button>'
+            ? '<button type="button" class="ytnb-chip sm" onclick="NotesLibrary.rebuild(' + arg + ')" title="Rebuild this notebook from its saved lecture notes">↻</button>'
             : '') +
           '<button type="button" class="ytnb-chip sm danger" onclick="NotesLibrary.forget(' + arg + ')" title="Remove from your notes">⌫</button>' +
           '</span>' : '') +

@@ -65,3 +65,6 @@ jobs:
 
       - name: AI Tutor server logic
         run: python youtube-turbo-proxy/tests/test_tutor.py
+
+      - name: Multi-video notebook server logic
+        run: python youtube-turbo-proxy/tests/test_notebook.py
