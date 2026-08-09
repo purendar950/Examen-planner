@@ -8880,10 +8880,32 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 }
 
 
-/* ── saved notebooks shelf (top of the build view) ── */
+/* ── saved notes shelf (top of the build view) ── */
 #page-yt-notebook .ytnb-saved-card { border-color: var(--accent-dim, rgba(0, 200, 150, .12)); }
-#page-yt-notebook .ytnb-saved { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
-#page-yt-notebook .ytnb-saved-row {
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   AI NOTES LIBRARY  (js/features/notes-library.js)
+   The same rows render in three places: the Notebook page shelf, the "Saved"
+   dialog in the AI Study panel, and the Dashboard card. One rule set, so they
+   cannot drift apart.
+   ══════════════════════════════════════════════════════════════════════════ */
+.nlib-filters { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
+.nlib-chip {
+  background: var(--surface, #111620);
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 999px;
+  color: var(--text, #E8EDF5);
+  font: inherit;
+  font-size: .74rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.nlib-chip.on { background: var(--accent, #00C896); border-color: var(--accent, #00C896); color: #04120d; }
+
+.nlib-list { display: flex; flex-direction: column; gap: 6px; max-height: 58vh; overflow-y: auto; }
+.nlib-row {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -8891,8 +8913,8 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   border-radius: 10px;
   padding: 4px 8px 4px 4px;
 }
-#page-yt-notebook .ytnb-saved-row:hover { border-color: var(--accent, #00C896); }
-#page-yt-notebook .ytnb-saved-open {
+.nlib-row:hover { border-color: var(--accent, #00C896); }
+.nlib-open {
   flex: 1;
   display: flex;
   align-items: center;
@@ -8906,14 +8928,28 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   cursor: pointer;
   min-width: 0;
 }
-#page-yt-notebook .ytnb-saved-icon { font-size: 1.05rem; flex: none; }
-#page-yt-notebook .ytnb-saved-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-#page-yt-notebook .ytnb-saved-title {
-  font-size: .86rem;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.nlib-icon { font-size: 1.05rem; flex: none; }
+.nlib-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nlib-title { font-size: .86rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nlib-facts { font-size: .72rem; color: var(--muted, #5A6478); }
+.nlib-actions { display: flex; gap: 4px; flex: none; }
+/* A notebook draws on many lectures; the accent stripe distinguishes it from a
+   single-lecture note at a glance, without a second row of labels. */
+.nlib-row[data-kind="notebook"] { border-left: 4px solid var(--accent, #00C896); }
+.nlib-empty { padding: 22px 16px; text-align: center; color: var(--muted, #5A6478); font-size: .84rem; }
+.nlib-empty strong { display: block; color: var(--text, #E8EDF5); margin-bottom: 4px; }
+
+/* Dashboard card preview */
+.ai-notes-card .nlib-dash-list { display: flex; flex-direction: column; gap: 5px; margin: 10px 0 6px; }
+.ai-notes-card .nlib-dash-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .8rem;
+  min-width: 0;
 }
-#page-yt-notebook .ytnb-saved-meta { font-size: .72rem; color: var(--muted, #5A6478); }
-#page-yt-notebook .ytnb-saved-actions { display: flex; gap: 4px; flex: none; }
+.ai-notes-card .nlib-dash-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-notes-card .nlib-dash-empty { color: var(--muted, #5A6478); font-size: .76rem; line-height: 1.5; }
+
+/* The Notebook page shelf reuses these rows, so its own row rules are gone. */
+#page-yt-notebook .ytnb-saved { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }

@@ -182,12 +182,13 @@ function getDefaultState() {
     progress: {}, tasks: {},
     examDate: getDefaultExamDate(), selectedExam: 'cgl', activePage: 'dashboard', examDates: {}, streak: 0,
     lastStudyDate: null, ytLinks: {}, ytNotes: [],
-    /* Saved multi-video notebooks — the RECIPE only ({fingerprint, options,
-       video ids, title}), never the notes themselves. The markdown lives in the
-       proxy's shared `study` store, which has no per-user index, so this is what
-       makes a notebook findable again. Bodies must never be copied in here:
-       this whole document has a 1 MiB Firestore ceiling. */
-    ytNotebooks: [],
+    /* AI notes library — the RECIPE only ({video id or notebook fingerprint,
+       options, title}), never the notes themselves. The markdown lives in the
+       proxy's shared `study` store, which has no per-user index, so these two
+       lists are what make a note findable again. Bodies must never be copied in
+       here: this whole document has a 1 MiB Firestore ceiling. */
+    ytNotebooks: [],   // multi-video notebooks
+    ytAiNotes: [],     // single-video AI notes
     // Private handwriting and highlighter strokes from AI Notes Focus.
     focusMarks: {},
     ytLastVideo: null, ytPlaylists: {}, ytWatched: {},
@@ -258,6 +259,7 @@ function loginUser(email, name, uid, state) {
   if (!appState.ytLinks)   appState.ytLinks    = {};
   if (!appState.ytNotes)   appState.ytNotes    = [];
   if (!Array.isArray(appState.ytNotebooks)) appState.ytNotebooks = [];
+  if (!Array.isArray(appState.ytAiNotes))   appState.ytAiNotes   = [];
   if (!appState.focusMarks || typeof appState.focusMarks !== 'object') appState.focusMarks = {};
   // Firestore-bound saves store stroke points as {x, y} objects (Firestore
   // rejects arrays-of-arrays); normalize back to [x, y] pairs here so the
