@@ -305,8 +305,22 @@
      Select any text in the notebook and the Explain / Verify / Example / Ask
      actions appear next to it. Nothing in this app handled text selection before,
      so this is the whole implementation. */
-  var _notePopCtx = { passage: '', ts: null };
+  var _notePopCtx = { passage: '', ts: null, anchor: null };
   function notePopEl() { return document.getElementById('ai-note-pop'); }
+  function notePopVisible() {
+    var pop = notePopEl();
+    return !!(pop && !pop.hidden);
+  }
+  /* True for the controls that OWN the popover — the section buttons and the
+     popover itself. The selection handlers must ignore these: a click on a button
+     selects no text, so letting settle() run for it would close the popover that
+     the very same gesture is about to open (pointerup fires before click, and its
+     deferred settle would land right after). */
+  function fromNoteAffordance(e) {
+    var t = e && e.target;
+    if (!t || !t.closest) return false;
+    return !!(t.closest('.ai-nb-ask') || t.closest('#ai-note-pop'));
+  }
   // Returns true when it actually closed something, so Esc can consume the key.
   function hideNotePop() {
     var pop = notePopEl();
@@ -324,10 +338,12 @@
     return html + '<button type="button" class="ai-note-pop-btn" data-note-action="ask" ' +
       'title="Type your own question about this passage">💬 Ask…</button>';
   }
-  function showNotePop(rect, passage, ts) {
+  function showNotePop(rect, passage, ts, anchor) {
     var pop = notePopEl();
     if (!pop || !rect) return;
-    _notePopCtx = { passage: passage, ts: ts };
+    // `anchor` identifies the section button it was opened from, so a second tap
+    // on that same button can close it again. Selections leave it undefined.
+    _notePopCtx = { passage: passage, ts: ts, anchor: anchor == null ? null : String(anchor) };
     if (!pop.innerHTML) pop.innerHTML = notePopHtml();
     pop.hidden = false;
     // Measured after unhiding, because a hidden element has no size.
@@ -393,12 +409,19 @@
     /* pointerup/keyup rather than selectionchange: selectionchange fires
        continuously through a drag, which would send the popover skating across
        the screen while the student is still choosing what to select. */
-    nb.addEventListener('pointerup', function () { setTimeout(settle, 10); });
+    nb.addEventListener('pointerup', function (e) {
+      if (fromNoteAffordance(e)) return;
+      setTimeout(settle, 10);
+    });
     nb.addEventListener('keyup', function (e) {
       if (e.shiftKey || e.key === 'Shift' || (e.key || '').indexOf('Arrow') === 0) setTimeout(settle, 10);
     });
-    // A fresh drag or a scroll invalidates the anchor position.
-    nb.addEventListener('pointerdown', function () { hideNotePop(); });
+    // A fresh drag or a scroll invalidates the anchor position — but tapping the
+    // section button is not a fresh drag, it is how the popover is opened.
+    nb.addEventListener('pointerdown', function (e) {
+      if (fromNoteAffordance(e)) return;
+      hideNotePop();
+    });
     var scroller = box.querySelector('.ai-scroll');
     if (scroller) scroller.addEventListener('scroll', function () { hideNotePop(); }, { passive: true });
   }
@@ -467,7 +490,11 @@
       e.stopPropagation();          // never let this reach a timestamp seek link
       var block = noteBlockOf(btn);
       if (!block) return;
-      showNotePop(btn.getBoundingClientRect(), noteSectionText(block), noteBlockTs(block));
+      var anchor = btn.getAttribute('data-nb-ask');
+      // Second tap on the same button dismisses it. Without this the only way to
+      // close the popover is to tap somewhere else in the notes.
+      if (notePopVisible() && _notePopCtx.anchor === String(anchor)) { hideNotePop(); return; }
+      showNotePop(btn.getBoundingClientRect(), noteSectionText(block), noteBlockTs(block), anchor);
     });
     armNoteSelection(box);
   }
