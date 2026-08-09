@@ -947,20 +947,25 @@ function ytnbRenderSaved() {
   if (!card || !host) return;
   const lib = window.NotesLibrary;
   if (!lib) {                        // library script missing: fall back to notebooks only
-    const own = ytnbSavedList();
-    card.hidden = !own.length;
+    card.hidden = !ytnbSavedList().length;
     return;
   }
+  // Always visible. Hiding it when empty meant a student whose notes predate
+  // this list had no way to discover that the list — or the scan — existed.
+  card.hidden = false;
   const rows = lib.all();
-  card.hidden = !rows.length;
-  if (!rows.length) return;
   const books = rows.filter(r => r.kind === 'notebook').length;
   if (hint) {
-    hint.textContent = rows.length + (rows.length === 1 ? ' note' : ' notes') +
-      (books ? ' · ' + books + (books === 1 ? ' notebook' : ' notebooks') : '') +
-      ' · opens instantly';
+    hint.textContent = rows.length
+      ? rows.length + (rows.length === 1 ? ' note' : ' notes') +
+        (books ? ' · ' + books + (books === 1 ? ' notebook' : ' notebooks') : '') +
+        ' · opens instantly'
+      : 'Already generated some? Find them here';
   }
-  host.innerHTML = lib.rowsHtml(rows, { actions: true });
+  host.innerHTML = lib.rowsHtml(rows, { actions: true }) +
+    (rows.length ? '<div class="nlib-scan-row">' +
+      lib.scanButtonHtml(lib.scannedBefore() ? '🔍 Check my library again' : '🔍 Find my existing notes') +
+      '</div>' : '');
 }
 
 function ytnbFindSaved(key) {

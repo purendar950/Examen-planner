@@ -9014,3 +9014,21 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   #page-yt-notebook .ytnb-actionbar { gap: 10px; padding: 10px 12px; }
   #page-yt-notebook .ytnb-actionbar .ytnb-go { width: 100%; }
 }
+
+
+/* ── notes library: "find my existing notes" scan ── */
+.nlib-scan {
+  background: var(--accent-dim, rgba(0, 200, 150, .12));
+  border: 1px solid var(--accent, #00C896);
+  border-radius: 8px;
+  color: var(--accent, #00C896);
+  font: inherit;
+  font-size: .78rem;
+  font-weight: 700;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+.nlib-scan:hover { background: var(--accent, #00C896); color: #04120d; }
+.nlib-scan:disabled { opacity: .7; cursor: progress; }
+.nlib-scan-row { display: flex; justify-content: center; padding: 8px 0 2px; }
+.nlib-empty-action { margin-top: 12px; }

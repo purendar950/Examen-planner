@@ -26,6 +26,13 @@
 
   var VIDEO_MAX = 120;          // recipes are ~200 bytes; this stays well clear
   var LIB_FILTER_KEY = 'notesLibFilterV1';
+  var BACKFILL_DONE_KEY = 'notesLibBackfilledV1';
+  /* How much of the library one scan covers. 250 lectures x 3 languages x
+     (topic, mcq) = 1500 ids, which is 25 batched requests of cheap point reads —
+     comfortably inside the endpoint's hourly budget. */
+  var BACKFILL_MAX_VIDEOS = 250;
+  var BACKFILL_BATCH = 60;      // the server caps a /api/study/cached call at 60
+  var _scanning = false;
 
   function state() { return (window.appState || null); }
   function esc(s) {
@@ -61,15 +68,19 @@
   /* Record a single-video note the moment it renders. Called from ai-tutor.js on
      every successful note render — including a cache hit, because re-reading a
      note is exactly the signal that it belongs near the top of the library. */
-  function recordVideoNote(entry) {
+  function recordVideoNote(entry, opts) {
     var st = state();
-    if (!st || !entry || !entry.vid) return;
+    if (!st || !entry || !entry.vid) return false;
+    opts = opts || {};
     var list = videoNotes();
     var key = videoKey(entry);
     var at = -1;
     for (var i = 0; i < list.length; i++) {
       if (videoKey(list[i]) === key) { at = i; break; }
     }
+    // A library scan must never overwrite a note we already know the real date
+    // of, nor push it to the top for having been re-discovered.
+    if (at >= 0 && opts.onlyIfNew) return false;
     var row = {
       vid: String(entry.vid),
       title: String(entry.title || '').slice(0, 160),
@@ -77,8 +88,11 @@
       style: entry.style || 'topic',
       lang: entry.lang || 'Hinglish',
       courseId: entry.courseId || '',
-      ts: Date.now()
+      // A scanned note has no known generation date. Recording 'now' would be a
+      // lie that also reorders the list, so it keeps ts 0 and is labelled.
+      ts: entry.found ? 0 : Date.now()
     };
+    if (entry.found) row.found = 1;
     // Keep the first-seen title if a later render has none (the panel does not
     // always know the video's title, e.g. straight after a cold reload).
     if (at >= 0) {
@@ -89,8 +103,9 @@
     list.unshift(row);
     if (list.length > VIDEO_MAX) list.length = VIDEO_MAX;
     guardSize();
-    persist();
-    refreshMounts();
+    // A scan records many at once; it saves and repaints itself when it is done.
+    if (!opts.defer) { persist(); refreshMounts(); }
+    return true;
   }
 
   /* The organiser applies the same check after a bulk import: this document is
@@ -103,6 +118,134 @@
     if (vids.length > 20) { vids.length = 20; return; }
     var nbs = notebooks();
     if (nbs.length > 10) nbs.length = 10;
+  }
+
+  /* ── find notes generated before this index existed ───────────────────────
+     Notes are cached server-side under (video id, mode, style, language), and
+     `study` docs carry no uid, so nothing recorded that a given student had
+     generated them. Anyone who used the app before the library shipped
+     therefore had a real note store and an empty list.
+
+     This asks the proxy which of the lectures in the student's own Course
+     Library already have notes — cheap point reads, batched, no AI — and indexes
+     the hits. It never generates anything. */
+  function scanCandidates(limit) {
+    var lib = (state() && state().ytoLibrary) || {};
+    var out = [], seen = {};
+    Object.keys(lib).forEach(function (cid) {
+      var course = lib[cid] || {};
+      var add = function (id, title) {
+        id = String(id || '');
+        if (!id || seen[id]) return;
+        seen[id] = 1;
+        out.push({ id: id, title: title || '', courseId: cid });
+      };
+      if (Array.isArray(course.videos)) {
+        course.videos.forEach(function (v) { if (v) add(v.id, v.title); });
+      }
+      if (course.type === 'video' && course.videoId) add(course.videoId, course.title);
+    });
+    return out.slice(0, limit || BACKFILL_MAX_VIDEOS);
+  }
+
+  function scanning() { return _scanning; }
+
+  function scan(onProgress) {
+    var kit = window.AiNotesKit;
+    if (_scanning || !kit) return Promise.resolve(0);
+    var candidates = scanCandidates(BACKFILL_MAX_VIDEOS);
+    if (!candidates.length) {
+      if (typeof showToast === 'function') {
+        showToast('Import a playlist into your Course Library first, then I can find its notes.', 'error');
+      }
+      return Promise.resolve(0);
+    }
+    var byId = {};
+    candidates.forEach(function (c) { byId[c.id] = c; });
+    var ids = candidates.map(function (c) { return c.id; });
+
+    // Which (language, style) combinations to look for. Mode stays `notes`:
+    // summaries and insights are quick to regenerate and far rarer, so probing
+    // them would multiply the reads for very little.
+    var jobs = [];
+    (kit.LANGS || ['English']).forEach(function (lang) {
+      ['topic', 'mcq'].forEach(function (style) {
+        for (var i = 0; i < ids.length; i += BACKFILL_BATCH) {
+          jobs.push({ ids: ids.slice(i, i + BACKFILL_BATCH), lang: lang, style: style });
+        }
+      });
+    });
+
+    _scanning = true;
+    var found = 0, done = 0;
+    function report() {
+      if (typeof onProgress === 'function') onProgress(done, jobs.length, found);
+    }
+    report();
+
+    function step(index) {
+      if (index >= jobs.length) return Promise.resolve();
+      var job = jobs[index];
+      return kit.authFetch('/api/study/cached', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_ids: job.ids, mode: 'notes', out: job.lang, style: job.style })
+      }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+        (((j || {}).ready) || []).forEach(function (vid) {
+          var meta = byId[vid] || {};
+          if (recordVideoNote({
+            vid: vid, title: meta.title, mode: 'notes', style: job.style,
+            lang: job.lang, courseId: meta.courseId, found: true
+          }, { defer: true, onlyIfNew: true })) found += 1;
+        });
+      }).catch(function () {
+        /* One failed batch must not abandon the scan. */
+      }).then(function () {
+        done += 1;
+        report();
+        return step(index + 1);
+      });
+    }
+
+    return step(0).then(function () {
+      _scanning = false;
+      try { localStorage.setItem(BACKFILL_DONE_KEY, String(Date.now())); } catch (e) {}
+      persist();
+      refreshMounts();
+      if (typeof showToast === 'function') {
+        showToast(found
+          ? '📚 Found ' + found + (found === 1 ? ' note' : ' notes') + ' you had already generated'
+          : 'No previously generated notes found in your Course Library', found ? 'success' : 'error');
+      }
+      return found;
+    }).catch(function () {
+      _scanning = false;
+      refreshMounts();
+      return found;
+    });
+  }
+
+  function scannedBefore() {
+    try { return !!localStorage.getItem(BACKFILL_DONE_KEY); } catch (e) { return false; }
+  }
+
+  /* Shared "find my notes" control, used by the shelf and the dialog. */
+  function scanButtonHtml(label) {
+    return '<button type="button" class="nlib-scan" id="nlib-scan-btn" onclick="NotesLibrary.runScan()">' +
+      esc(label || '🔍 Find my existing notes') + '</button>';
+  }
+
+  function runScan() {
+    var btn = document.getElementById('nlib-scan-btn');
+    var original = btn ? btn.innerHTML : '';
+    scan(function (done, total, found) {
+      var live = document.getElementById('nlib-scan-btn');
+      if (!live) return;
+      live.disabled = done < total;
+      live.innerHTML = done < total
+        ? 'Checking your library… ' + Math.round((done / total) * 100) + '%' +
+          (found ? ' · ' + found + ' found' : '')
+        : original;
+    });
   }
 
   /* ── unified, normalised view ── */
@@ -136,7 +279,9 @@
           '1 lecture',
           e.lang
         ],
-        ts: e.ts || 0
+        ts: e.ts || 0,
+        // Discovered by a library scan, so its generation date is unknown.
+        when: e.found ? 'generated earlier' : ''
       });
     });
     if (filter === 'notebook' || filter === 'video') {
@@ -169,9 +314,15 @@
   function rowsHtml(rows, opts) {
     opts = opts || {};
     if (!rows.length) {
+      // Anything generated before this index existed is in the server cache but
+      // not in the list, so an empty list must offer to go looking rather than
+      // insisting nothing exists.
+      var offerScan = opts.scan !== false;
       return '<div class="nlib-empty">' +
-        '<strong>No AI notes yet.</strong>' +
-        '<p>Generate notes for a lecture, or build a notebook from several, and they will be listed here.</p>' +
+        '<strong>Nothing listed yet.</strong>' +
+        '<p>Notes you generated before this list existed are still saved — ' +
+        'check your Course Library for them, or generate some new ones.</p>' +
+        (offerScan ? '<div class="nlib-empty-action">' + scanButtonHtml() + '</div>' : '') +
         '</div>';
     }
     return rows.map(function (r) {
@@ -183,7 +334,8 @@
         '<span class="nlib-icon" aria-hidden="true">' + r.icon + '</span>' +
         '<span class="nlib-body">' +
         '<span class="nlib-title">' + esc(r.title) + '</span>' +
-        '<span class="nlib-facts">' + esc(facts) + (r.ts ? ' · ' + esc(when(r.ts)) : '') + '</span>' +
+        '<span class="nlib-facts">' + esc(facts) +
+        (r.ts ? ' · ' + esc(when(r.ts)) : (r.when ? ' · ' + esc(r.when) : '')) + '</span>' +
         '</span></button>' +
         (opts.actions ? '<span class="nlib-actions">' +
           (r.kind === 'notebook'
@@ -295,7 +447,13 @@
           '" onclick="NotesLibrary.setFilter(\'' + c[0] + '\')">' + esc(c[1]) + '</button>';
       }).join('');
     }
-    host.innerHTML = rowsHtml(all(active), { actions: true });
+    var rows = all(active);
+    host.innerHTML = rowsHtml(rows, { actions: true }) +
+      // Offer the scan alongside a populated list too: a first scan only covers
+      // the library as it was, so a newly imported playlist can be checked again.
+      (rows.length ? '<div class="nlib-scan-row">' +
+        scanButtonHtml(scannedBefore() ? '🔍 Check my library again' : '🔍 Find my existing notes') +
+        '</div>' : '');
   }
 
   function openModal() {
@@ -351,6 +509,11 @@
 
   window.NotesLibrary = {
     recordVideoNote: recordVideoNote,
+    scan: scan,
+    runScan: runScan,
+    scanning: scanning,
+    scannedBefore: scannedBefore,
+    scanButtonHtml: scanButtonHtml,
     all: all,
     count: function () { return all().length; },
     rowsHtml: rowsHtml,
