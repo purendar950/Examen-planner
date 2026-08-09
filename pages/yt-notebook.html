@@ -77,9 +77,7 @@
           <div class="ytnb-groups" id="ytnb-groups" aria-live="polite"></div>
         </section>
 
-        <section class="ytnb-card ytnb-runbar" aria-label="Notebook options">
-          <div class="ytnb-estimate" id="ytnb-estimate" aria-live="polite"></div>
-
+        <section class="ytnb-card ytnb-runbar" id="ytnb-options" aria-label="Notebook options">
           <fieldset class="ytnb-shapes">
             <legend class="ytnb-label">Shape</legend>
             <label class="ytnb-shape" for="ytnb-shape-merge">
@@ -125,9 +123,23 @@
 
           <div class="ytnb-actions">
             <span class="ytnb-note" id="ytnb-shape-note"></span>
-            <button class="ytnb-go" id="ytnb-go" onclick="ytnbGenerate()" disabled>Generate Notebook</button>
           </div>
         </section>
+
+        <!-- Pinned to the bottom of the viewport. The lecture list can be
+             hundreds of rows long, and when this lived at the end of that list
+             the primary action sat below the fold with nothing hinting it
+             existed. It stays visible, and names the shape it will use so the
+             options card above is only needed to CHANGE something. -->
+        <div class="ytnb-actionbar" id="ytnb-actionbar">
+          <div class="ytnb-actionbar-copy">
+            <div class="ytnb-estimate" id="ytnb-estimate" aria-live="polite"></div>
+            <button type="button" class="ytnb-shape-link" id="ytnb-shape-link"
+              onclick="ytnbJumpToOptions()"
+              title="Change shape, style or language"></button>
+          </div>
+          <button class="ytnb-go" id="ytnb-go" onclick="ytnbGenerate()" disabled>Generate Notebook</button>
+        </div>
       </div>
 
       <!-- ── Run view: per-lecture progress above the streaming notebook ── -->

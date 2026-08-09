@@ -8553,6 +8553,7 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
    ══════════════════════════════════════════════════════════════════════════ */
 #page-yt-notebook .ytnb-view { display: none; }
 #page-yt-notebook .ytnb-view.active { display: block; }
+#page-yt-notebook #ytnb-build-view.active { padding-bottom: 96px; }
 
 #page-yt-notebook .ytnb-card {
   background: var(--card, #161B26);
@@ -8657,7 +8658,10 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 #page-yt-notebook .ytnb-chip.danger { border-color: #7a2c2c; color: #ffb4b4; }
 
 /* ── course groups ── */
-#page-yt-notebook .ytnb-groups { max-height: 52vh; overflow-y: auto; }
+/* No inner scrollbar. When this list scrolled inside a 52vh box, the page
+   below it (including Generate) was pushed out of view with nothing to hint at
+   it. The list now grows, the page scrolls, and .ytnb-actionbar stays pinned. */
+#page-yt-notebook .ytnb-groups { display: flex; flex-direction: column; gap: 8px; }
 #page-yt-notebook .ytnb-group {
   border: 1px solid var(--border, #1E2535);
   border-radius: 10px;
@@ -8873,7 +8877,6 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 
 @media (max-width: 640px) {
   #page-yt-notebook .ytnb-card { padding: 12px; }
-  #page-yt-notebook .ytnb-groups { max-height: none; }
   #page-yt-notebook .ytnb-actions { justify-content: stretch; }
   #page-yt-notebook .ytnb-go { width: 100%; }
   #page-yt-notebook .ytnb-check-state { display: none; }
@@ -8953,3 +8956,61 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 
 /* The Notebook page shelf reuses these rows, so its own row rules are gone. */
 #page-yt-notebook .ytnb-saved { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+
+
+/* ── notebook: pinned action bar ───────────────────────────────────────────
+   The lecture list can run to hundreds of rows. With the primary action at the
+   end of it, "Generate Notebook" sat below the fold and the page looked like it
+   had no way to act — so the bar is pinned to the bottom of the viewport and
+   names the shape it will use, leaving the options card above for changes. */
+#page-yt-notebook .ytnb-actionbar {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card, #161B26) 96%, var(--accent, #00C896));
+  box-shadow: 0 -10px 26px rgba(0, 0, 0, .45), 0 0 0 1px rgba(0, 200, 150, .08);
+}
+#page-yt-notebook .ytnb-actionbar-copy { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 3px; }
+#page-yt-notebook .ytnb-actionbar .ytnb-estimate {
+  padding: 0;
+  margin: 0;
+  border: none;
+  font-size: .82rem;
+}
+#page-yt-notebook .ytnb-shape-link {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent, #00C896);
+  font: inherit;
+  font-size: .72rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+#page-yt-notebook .ytnb-shape-link:hover { text-decoration: underline; }
+#page-yt-notebook .ytnb-actionbar .ytnb-go { flex: none; }
+
+/* Brief highlight when "change" scrolls the options card into view, so it is
+   obvious which card just answered the click. */
+#page-yt-notebook .ytnb-flash {
+  animation: ytnbFlash 1.2s ease;
+}
+@keyframes ytnbFlash {
+  0%, 100% { box-shadow: none; }
+  25%, 60% { box-shadow: 0 0 0 2px var(--accent, #00C896); }
+}
+
+@media (max-width: 640px) {
+  #page-yt-notebook .ytnb-actionbar { gap: 10px; padding: 10px 12px; }
+  #page-yt-notebook .ytnb-actionbar .ytnb-go { width: 100%; }
+}

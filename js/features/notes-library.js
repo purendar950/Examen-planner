@@ -235,11 +235,10 @@
     }
     // Let the player and the AI panel mount before asking for the note.
     setTimeout(function () {
-      if (window.AiNotesKit && typeof window.AiNotesKit.openSavedNote === 'function') {
-        window.AiNotesKit.openSavedNote({
-          vid: e.vid, mode: e.mode || 'notes',
-          style: e.style || 'topic', lang: e.lang
-        });
+      var kit = window.AiNotesKit;
+      var open = kit && (kit.openNote || kit.openSavedNote);
+      if (typeof open === 'function') {
+        open({ vid: e.vid, mode: e.mode || 'notes', style: e.style || 'topic', lang: e.lang });
       }
     }, started ? 900 : 300);
   }

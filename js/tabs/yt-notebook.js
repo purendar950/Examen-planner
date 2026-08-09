@@ -226,7 +226,7 @@ function ytnbRenderGroups() {
   }
 
   const html = [];
-  let shown = 0;
+  let shown = 0, shownGroups = 0;
   entries.forEach(function (entry) {
     const course = entry.course;
     const videos = ytnbVisibleCourseVideos(entry.id);
@@ -235,10 +235,14 @@ function ytnbRenderGroups() {
 
     const pickedHere = videos.filter(v => selected.has(v.id)).length;
     // A search result is opened so matches are visible without another click.
-    // Otherwise an explicit fold always wins, and the default is folded unless
-    // this course already contributes to the selection.
+    // Otherwise an explicit fold always wins. The default is folded — EXCEPT for
+    // the first course when nothing is selected yet: an all-collapsed list gives
+    // a new student nothing to act on and hides what the page is even for.
     const explicit = _ytnbCollapsed[entry.id];
-    const collapsed = q ? false : (explicit === undefined ? pickedHere === 0 : !!explicit);
+    const firstByDefault = !selected.size && shownGroups === 0;
+    const collapsed = q ? false
+      : (explicit === undefined ? (pickedHere === 0 && !firstByDefault) : !!explicit);
+    shownGroups += 1;
     html.push('<section class="ytnb-group' + (collapsed ? ' collapsed' : '') + '">');
     html.push('<header class="ytnb-group-head">' +
       '<button class="ytnb-group-toggle" onclick="ytnbToggleGroup(' + JSON.stringify(entry.id).replace(/"/g, '&quot;') + ')" ' +
@@ -300,30 +304,61 @@ function ytnbToggleGroup(courseId) {
 function ytnbUpdateEstimate() {
   const line = document.getElementById('ytnb-estimate');
   const go = document.getElementById('ytnb-go');
+  const shapeLink = document.getElementById('ytnb-shape-link');
   if (!line) return;
   const ids = ytnbSelectedIds();
   const opts = ytnbOptions();
   const capped = ids.slice(0, YTNB_MAX_VIDEOS);
   const cachedCount = capped.filter(id => _ytnbCached[id]).length;
   const needed = capped.length - cachedCount;
-  const secs = needed * YTNB_SECS_PER_VIDEO + (opts.shape === 'merge' ? 40 : 0);
+  const secs = needed * YTNB_SECS_PER_VIDEO + (capped.length > 1 && opts.shape === 'merge' ? 40 : 0);
   const mins = Math.max(1, Math.round(secs / 60));
+  const single = capped.length === 1;
 
-  if (go) go.disabled = capped.length < 2;
+  // One lecture is not a notebook, it is an ordinary note — so instead of
+  // refusing, the button says what it will actually do and hands off to the
+  // lecture's own reader. Refusing was the more confusing of the two options.
+  if (go) {
+    go.disabled = !capped.length;
+    go.textContent = single ? 'Generate notes for this lecture' : 'Generate Notebook';
+  }
+  if (shapeLink) {
+    const label = single
+      ? ((opts.mode === 'notes' ? ytnbStyleLabel(opts.style) : ytnbModeLabel(opts.mode)) + ' · ' + opts.lang)
+      : (ytnbShapeLabel(opts.shape) + ' · ' + (opts.mode === 'notes' ? ytnbStyleLabel(opts.style) : ytnbModeLabel(opts.mode)) + ' · ' + opts.lang);
+    shapeLink.textContent = label + '  ·  change';
+    shapeLink.hidden = !capped.length;
+  }
   if (!ids.length) {
-    line.innerHTML = '<span class="ytnb-est-empty">Tick at least two lectures to build a notebook.</span>';
+    line.innerHTML = '<span class="ytnb-est-empty">Tick lectures below — one for a single note, two or more for a notebook.</span>';
     return;
   }
   const bits = [];
-  bits.push('<strong>' + capped.length + '</strong> selected');
+  bits.push('<strong>' + capped.length + '</strong> ' + (single ? 'lecture' : 'lectures selected'));
   if (cachedCount) bits.push('<strong>' + cachedCount + '</strong> already generated');
   bits.push(needed ? ('~' + mins + ' min') : 'ready instantly');
   if (ids.length > YTNB_MAX_VIDEOS) {
     bits.push('<span class="ytnb-est-warn">only the first ' + YTNB_MAX_VIDEOS +
       ' will be used (' + (ids.length - YTNB_MAX_VIDEOS) + ' extra)</span>');
   }
-  if (capped.length < 2) bits.push('<span class="ytnb-est-warn">pick one more</span>');
   line.innerHTML = bits.join(' · ');
+}
+
+function ytnbStyleLabel(style) {
+  return style === 'mcq' ? 'MCQ' : style === 'topic+images' ? 'Topic + images' : 'Topic notes';
+}
+function ytnbModeLabel(mode) {
+  return mode === 'summary' ? 'Summary' : mode === 'insights' ? 'Key insights' : 'Notes';
+}
+
+/* The options card sits above the pinned bar; bring it into view when the
+   student wants to change the shape rather than making them hunt for it. */
+function ytnbJumpToOptions() {
+  const card = document.getElementById('ytnb-options');
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  card.classList.add('ytnb-flash');
+  setTimeout(function () { card.classList.remove('ytnb-flash'); }, 1200);
 }
 
 /* Which selected lectures already have saved notes. One batch call, debounced,
@@ -554,7 +589,14 @@ function ytnbGenerate() {
   }
   const opts = ytnbReadOptionsFromUi();
   const picked = ytnbSelection().slice(0, YTNB_MAX_VIDEOS);
-  if (picked.length < 2) { ytnbUpdateEstimate(); return; }
+  if (!picked.length) { ytnbUpdateEstimate(); return; }
+  // A single lecture is an ordinary note, not a notebook: send it to that
+  // lecture's own reader, which already has Follow the lecture, Focus mode and
+  // ask-the-AI. Building a one-video "notebook" would be a worse copy of it.
+  if (picked.length === 1) {
+    ytnbGenerateSingle(picked[0], opts);
+    return;
+  }
 
   // Send a course id only when the whole selection came from one course: the
   // proxy narrows its library check to that course, and a cross-course notebook
@@ -569,6 +611,32 @@ function ytnbGenerate() {
     lang: opts.lang
   };
   ytnbStart(job, false);
+}
+
+/* One ticked lecture → its own note, in the AI Study panel beside the video. */
+function ytnbGenerateSingle(pick, opts) {
+  const kit = ytnbKit();
+  if (!kit || !pick || !pick.id) return;
+  if (typeof showToast === 'function') showToast('Opening this lecture to generate its notes…', 'success');
+  if (typeof switchPage === 'function') switchPage('youtube');
+  let started = false;
+  if (pick.courseId && typeof ytoPlayInYtTab === 'function') {
+    try { ytoPlayInYtTab(pick.courseId, pick.id); started = true; } catch (e) { started = false; }
+  }
+  if (!started) {
+    const box = document.getElementById('yt-url-input');
+    if (box && typeof ytPlay === 'function') {
+      box.value = 'https://www.youtube.com/watch?v=' + pick.id;
+      if (typeof ytInputChange === 'function') { try { ytInputChange(box.value); } catch (e) {} }
+      try { ytPlay(); started = true; } catch (e) { started = false; }
+    }
+  }
+  // Let the player and the AI panel mount before asking for the note.
+  setTimeout(function () {
+    if (typeof kit.openNote === 'function') {
+      kit.openNote({ vid: pick.id, mode: opts.mode, style: opts.style, lang: opts.lang });
+    }
+  }, started ? 900 : 300);
 }
 
 function ytnbStart(job, isResume) {
