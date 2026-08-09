@@ -5841,12 +5841,292 @@
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + nodes + ' topics \u00b7 ' +
       esc((meta && meta.lang) || outLang()) + ' \u00b7 from your saved notes</span>' +
+      '<button class="ai-btn" id="ai-map-full" style="padding:4px 10px;font-size:0.72rem">\u26f6 Full screen</button>' +
       '<button class="ai-btn sec" id="ai-map-detail" style="padding:4px 10px;font-size:0.72rem">' +
       (detail ? '\u25a3 Hide details' : '\u25a2 Show details') + '</button>' +
       '<button class="ai-btn sec" id="ai-map-expand" style="padding:4px 10px;font-size:0.72rem">\u21f2 Expand all</button>' +
       '<button class="ai-btn sec" id="ai-map-fold" style="padding:4px 10px;font-size:0.72rem">\u21f0 Topics only</button>' +
       '<button class="ai-btn sec" id="ai-map-pdf" style="padding:4px 10px;font-size:0.72rem">\uD83D\uDCC4 Print / PDF</button>' +
       '</div><div class="ai-map-wrap"><div class="ai-nb ai-map"></div></div>';
+  }
+
+  /* ── Full-screen map ──────────────────────────────────────────────────────
+     A tree is the one artifact the 40%-wide study panel really cannot hold, so
+     it gets its own surface. Deliberately NOT built on the notes Focus Mode:
+     that carries a handwriting canvas, the ask-AI sheet and per-note annotation
+     storage, none of which a read-only map wants.
+
+     Zoom is a transform on the map with a sizer element scaled alongside it, so
+     the stage keeps real scrollbars and drag-to-pan works at any zoom. Native
+     fullscreen is offered as a separate toggle rather than forced on open,
+     because requestFullscreen on an element is unsupported on iOS Safari and
+     the overlay alone already fills the viewport. */
+  var MM_ZOOMS = [0.4, 0.5, 0.65, 0.8, 1, 1.25, 1.5, 2];
+  var _mmFull = null;
+  var _mmFullToken = 0;
+
+  function mmFullZoomIndex(zoom) {
+    var best = 0;
+    for (var i = 0; i < MM_ZOOMS.length; i++) {
+      if (Math.abs(MM_ZOOMS[i] - zoom) < Math.abs(MM_ZOOMS[best] - zoom)) best = i;
+    }
+    return best;
+  }
+
+  function mmFullApplyZoom() {
+    var f = _mmFull;
+    if (!f) return;
+    var canvas = f.host.querySelector('.ai-map-canvas');
+    if (!canvas) return;
+    var w = parseFloat(canvas.style.width) || canvas.offsetWidth || 900;
+    var h = parseFloat(canvas.style.height) || canvas.offsetHeight || 600;
+    f.host.style.transformOrigin = 'top left';
+    f.host.style.transform = 'scale(' + f.zoom + ')';
+    // The sizer gives the stage something real to scroll: a transform alone does
+    // not change layout size, so panning would be impossible past the viewport.
+    f.sizer.style.width = Math.ceil((w + 28) * f.zoom) + 'px';
+    f.sizer.style.height = Math.ceil((h + 28) * f.zoom) + 'px';
+    var label = f.overlay.querySelector('.ai-map-zoom-val');
+    if (label) label.textContent = Math.round(f.zoom * 100) + '%';
+  }
+
+  function mmFullSetZoom(zoom) {
+    if (!_mmFull) return;
+    _mmFull.zoom = Math.min(MM_ZOOMS[MM_ZOOMS.length - 1], Math.max(MM_ZOOMS[0], zoom));
+    mmFullApplyZoom();
+  }
+
+  function mmFullFit() {
+    var f = _mmFull;
+    if (!f) return;
+    var canvas = f.host.querySelector('.ai-map-canvas');
+    if (!canvas) return;
+    var w = (parseFloat(canvas.style.width) || 900) + 28;
+    var h = (parseFloat(canvas.style.height) || 600) + 28;
+    var stage = f.stage.getBoundingClientRect();
+    if (!stage.width || !stage.height) return;
+    // Never magnify past 1: a small map blown up looks broken rather than clear.
+    mmFullSetZoom(Math.min(1, stage.width / w, stage.height / h));
+    f.stage.scrollTop = 0;
+    f.stage.scrollLeft = 0;
+  }
+
+  function mmFullRedraw() {
+    if (!_mmFull) return;
+    mmDraw(_mmFull.host, _mmTree);
+    mmFullApplyZoom();
+    var detailBtn = _mmFull.overlay.querySelector('#ai-mapf-detail');
+    if (detailBtn) detailBtn.textContent = mmDetail() ? '\u25a3 Hide details' : '\u25a2 Show details';
+  }
+
+  function mmFullNativeSupported() {
+    var el = document.documentElement;
+    return !!(el.requestFullscreen || el.webkitRequestFullscreen);
+  }
+  function mmFullIsNative() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+  function mmFullToggleNative() {
+    var f = _mmFull;
+    if (!f) return;
+    try {
+      if (mmFullIsNative()) {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      } else if (f.overlay.requestFullscreen) {
+        f.overlay.requestFullscreen();
+      } else if (f.overlay.webkitRequestFullscreen) {
+        f.overlay.webkitRequestFullscreen();
+      }
+    } catch (e) { /* a refusal just leaves the overlay as it is */ }
+  }
+
+  function mmFullClose(fromHistory) {
+    var f = _mmFull;
+    if (!f || f.closing) return;
+    f.closing = true;
+    if (mmFullIsNative()) {
+      try {
+        if (document.exitFullscreen) document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      } catch (e) {}
+    }
+    document.removeEventListener('keydown', f.onKey, true);
+    window.removeEventListener('resize', f.onResize);
+    document.body.classList.remove('ai-map-full-open');
+    if (f.overlay.parentNode) f.overlay.parentNode.removeChild(f.overlay);
+    var trigger = f.trigger;
+    var pushed = f.historyPushed;
+    _mmFull = null;
+    // Redraw the inline map: it shares _mmTree, and collapse/detail changes made
+    // in full screen should be reflected when the student comes back to it.
+    var box = contentEl();
+    if (box && state.tab === 'map' && _mmTree) mmPaint(box);
+    else if (trigger && trigger.isConnected && typeof trigger.focus === 'function') trigger.focus();
+    if (pushed && !fromHistory) {
+      try { history.back(); } catch (e) {}
+    }
+  }
+
+  function mmOpenFullscreen(trigger) {
+    if (!_mmTree || _mmFull) return;
+    var token = 'map-full-' + (++_mmFullToken) + '-' + Date.now();
+    var overlay = document.createElement('div');
+    overlay.className = 'ai-map-full';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Mind map, full screen');
+    overlay.innerHTML =
+      '<div class="ai-map-full-bar">' +
+        '<span class="ai-map-full-title">' + esc(curTitle() || 'Mind map') + '</span>' +
+        '<span class="ai-map-full-tools">' +
+          '<button type="button" class="ai-btn sec" id="ai-mapf-detail" title="Show or hide the detail bullets"></button>' +
+          '<button type="button" class="ai-btn sec" id="ai-mapf-expand" title="Expand every branch">\u21f2 Expand all</button>' +
+          '<button type="button" class="ai-btn sec" id="ai-mapf-fold" title="Collapse to topics">\u21f0 Topics only</button>' +
+          '<span class="ai-map-zoom" role="group" aria-label="Zoom">' +
+            '<button type="button" class="ai-btn sec" id="ai-mapf-out" aria-label="Zoom out">\u2212</button>' +
+            '<span class="ai-map-zoom-val" aria-live="polite">100%</span>' +
+            '<button type="button" class="ai-btn sec" id="ai-mapf-in" aria-label="Zoom in">+</button>' +
+            '<button type="button" class="ai-btn sec" id="ai-mapf-fit" title="Fit the whole map on screen">Fit</button>' +
+          '</span>' +
+          (mmFullNativeSupported()
+            ? '<button type="button" class="ai-btn sec" id="ai-mapf-native" title="Use the whole screen">\u26f6</button>' : '') +
+          '<button type="button" class="ai-btn sec" id="ai-mapf-pdf" title="Print or save as PDF">\uD83D\uDCC4</button>' +
+          '<button type="button" class="ai-btn" id="ai-mapf-close">\u2715 Close</button>' +
+        '</span>' +
+      '</div>' +
+      '<div class="ai-map-full-stage"><div class="ai-map-full-sizer">' +
+      '<div class="ai-nb ai-map"></div></div></div>' +
+      '<div class="ai-map-full-hint">Drag to move \u00b7 scroll to zoom \u00b7 tap a topic to jump the video \u00b7 Esc to close</div>';
+    document.body.appendChild(overlay);
+    document.body.classList.add('ai-map-full-open');
+
+    _mmFull = {
+      overlay: overlay,
+      stage: overlay.querySelector('.ai-map-full-stage'),
+      sizer: overlay.querySelector('.ai-map-full-sizer'),
+      host: overlay.querySelector('.ai-map'),
+      zoom: 1,
+      trigger: trigger || document.activeElement,
+      closing: false,
+      historyPushed: false,
+      onKey: function (event) {
+        if (!_mmFull) return;
+        if (event.key === 'Escape') { event.preventDefault(); mmFullClose(false); return; }
+        if (event.key === '+' || event.key === '=') { mmFullStep(1); }
+        else if (event.key === '-' || event.key === '_') { mmFullStep(-1); }
+        else if (event.key === '0') { mmFullFit(); }
+      },
+      onResize: function () { if (_mmFull) mmFullApplyZoom(); }
+    };
+
+    mmDraw(_mmFull.host, _mmTree);
+    mmFullFit();
+    var detailBtn = overlay.querySelector('#ai-mapf-detail');
+    if (detailBtn) detailBtn.textContent = mmDetail() ? '\u25a3 Hide details' : '\u25a2 Show details';
+
+    overlay.querySelector('#ai-mapf-close').onclick = function () { mmFullClose(false); };
+    if (detailBtn) detailBtn.onclick = function () { mmSetDetail(!mmDetail()); mmFullRedraw(); };
+    overlay.querySelector('#ai-mapf-expand').onclick = function () {
+      _mmCollapsed = {}; mmSetDetail(true); mmFullRedraw();
+    };
+    overlay.querySelector('#ai-mapf-fold').onclick = function () {
+      _mmCollapsed = {};
+      (function walk(n) {
+        (n.children || []).forEach(function (c) {
+          if ((c.children || []).length) _mmCollapsed[c.id] = true;
+          walk(c);
+        });
+      })(_mmTree);
+      mmSetDetail(false);
+      mmFullRedraw();
+    };
+    overlay.querySelector('#ai-mapf-out').onclick = function () { mmFullStep(-1); };
+    overlay.querySelector('#ai-mapf-in').onclick = function () { mmFullStep(1); };
+    overlay.querySelector('#ai-mapf-fit').onclick = function () { mmFullFit(); };
+    var nativeBtn = overlay.querySelector('#ai-mapf-native');
+    if (nativeBtn) nativeBtn.onclick = function () { mmFullToggleNative(); };
+    overlay.querySelector('#ai-mapf-pdf').onclick = function () { mmPrint(_mmFull.host); };
+
+    mmFullBindPan(_mmFull);
+    document.addEventListener('keydown', _mmFull.onKey, true);
+    window.addEventListener('resize', _mmFull.onResize);
+    overlay.querySelector('#ai-mapf-close').focus();
+
+    // A synthetic history entry so the Android back gesture closes the map
+    // instead of leaving the page.
+    try {
+      var base = (history.state && typeof history.state === 'object') ? history.state : {};
+      history.pushState(Object.assign({}, base, { aiMapFull: token }), '', location.href);
+      _mmFull.historyPushed = true;
+      _mmFull.token = token;
+    } catch (e) {}
+  }
+
+  function mmFullStep(direction) {
+    if (!_mmFull) return;
+    var index = mmFullZoomIndex(_mmFull.zoom) + direction;
+    mmFullSetZoom(MM_ZOOMS[Math.min(MM_ZOOMS.length - 1, Math.max(0, index))]);
+  }
+
+  /* Drag to pan, wheel to zoom. Pointer events cover mouse and touch with one
+     path; a drag that started on a topic must not also fire its seek. */
+  function mmFullBindPan(f) {
+    var stage = f.stage, dragging = false, moved = false, startX = 0, startY = 0, left = 0, top = 0;
+    stage.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0 && event.pointerType === 'mouse') return;
+      if (event.target.closest('.ai-map-toggle')) return;
+      dragging = true; moved = false;
+      startX = event.clientX; startY = event.clientY;
+      left = stage.scrollLeft; top = stage.scrollTop;
+      stage.classList.add('grabbing');
+    });
+    stage.addEventListener('pointermove', function (event) {
+      if (!dragging) return;
+      var dx = event.clientX - startX, dy = event.clientY - startY;
+      if (!moved && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) moved = true;
+      if (!moved) return;
+      stage.scrollLeft = left - dx;
+      stage.scrollTop = top - dy;
+    });
+    function end(event) {
+      if (!dragging) return;
+      dragging = false;
+      stage.classList.remove('grabbing');
+      // Suppress the click that follows a real drag, so panning off a topic node
+      // does not also seek the video.
+      if (moved && event) {
+        var swallow = function (click) {
+          click.stopPropagation();
+          click.preventDefault();
+          stage.removeEventListener('click', swallow, true);
+        };
+        stage.addEventListener('click', swallow, true);
+        setTimeout(function () { stage.removeEventListener('click', swallow, true); }, 60);
+      }
+    }
+    stage.addEventListener('pointerup', end);
+    stage.addEventListener('pointercancel', end);
+    stage.addEventListener('pointerleave', end);
+    stage.addEventListener('wheel', function (event) {
+      // Plain wheel scrolls the stage as usual; zoom needs intent.
+      if (!event.ctrlKey && !event.metaKey && Math.abs(event.deltaY) < 40) return;
+      event.preventDefault();
+      mmFullStep(event.deltaY < 0 ? 1 : -1);
+    }, { passive: false });
+  }
+
+  /* Shared by the inline toolbar and the full-screen bar. */
+  function mmPrint(host) {
+    var canvas = host && host.querySelector('.ai-map-canvas');
+    var w = canvas ? (parseFloat(canvas.style.width) || 900) : 900;
+    // A map is usually wider than a page; scale it down to fit rather than
+    // letting the print engine clip the right-hand branches.
+    var scale = Math.min(1, 720 / w);
+    pdfDownload((curTitle() || 'Lecture') + ' \u2014 Mind Map',
+      '<div class="ai-map" style="transform:scale(' + scale.toFixed(3) +
+      ');transform-origin:top left">' + host.innerHTML + '</div>',
+      { notebook: true, documentLabel: 'Mind Map' });
   }
 
   function mmPaint(box) {
@@ -5872,18 +6152,25 @@
       mmPaint(box);
     };
     var pdf = document.getElementById('ai-map-pdf');
-    if (pdf) pdf.onclick = function () {
-      var canvas = host.querySelector('.ai-map-canvas');
-      var w = canvas ? parseFloat(canvas.style.width) || 900 : 900;
-      // A map is usually wider than a page; scale it down to fit rather than
-      // letting the print engine clip the right-hand branches.
-      var scale = Math.min(1, 720 / w);
-      pdfDownload((curTitle() || 'Lecture') + ' \u2014 Mind Map',
-        '<div class="ai-map" style="transform:scale(' + scale.toFixed(3) +
-        ');transform-origin:top left">' + host.innerHTML + '</div>',
-        { notebook: true, documentLabel: 'Mind Map' });
-    };
+    if (pdf) pdf.onclick = function () { mmPrint(host); };
+    var full = document.getElementById('ai-map-full');
+    if (full) full.onclick = function () { mmOpenFullscreen(full); };
   }
+
+  /* Back / back-gesture closes the full-screen map rather than leaving the page.
+     Registered once, and a no-op whenever the map is not open. */
+  window.addEventListener('popstate', function (event) {
+    if (!_mmFull) return;
+    var st = event.state;
+    if (!st || typeof st !== 'object' || st.aiMapFull !== _mmFull.token) mmFullClose(true);
+  });
+  // Leaving native fullscreen by pressing Esc/F11 must not leave a stale overlay
+  // that no longer fills anything.
+  ['fullscreenchange', 'webkitfullscreenchange'].forEach(function (name) {
+    document.addEventListener(name, function () {
+      if (_mmFull) mmFullApplyZoom();
+    });
+  });
 
   /* Read the saved note for this video WITHOUT generating, then draw it. */
   function showMindMap() {

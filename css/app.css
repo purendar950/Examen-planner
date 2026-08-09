@@ -9059,3 +9059,98 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 .nlib-scan:disabled { opacity: .7; cursor: progress; }
 .nlib-scan-row { display: flex; justify-content: center; padding: 8px 0 2px; }
 .nlib-empty-action { margin-top: 12px; }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FULL-SCREEN MIND MAP  (js/features/ai-tutor.js → mmOpenFullscreen)
+   A tree is the one study artifact the 40%-wide panel cannot hold. The node and
+   edge styling itself comes from nbCss('.ai-nb'), which is already injected, so
+   only the surface, the toolbar and the pan/zoom stage live here.
+   ══════════════════════════════════════════════════════════════════════════ */
+.ai-map-full {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #0A0D12);
+}
+/* The page behind must not scroll while the map owns the screen. */
+body.ai-map-full-open { overflow: hidden; }
+
+.ai-map-full-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #1E2535);
+  background: var(--card, #161B26);
+}
+.ai-map-full-title {
+  flex: 1;
+  min-width: 120px;
+  font-size: .9rem;
+  font-weight: 700;
+  color: var(--text, #E8EDF5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-map-full-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ai-map-full-tools .ai-btn { padding: 5px 10px; font-size: .74rem; }
+
+.ai-map-zoom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-left: 1px solid var(--border, #1E2535);
+  border-right: 1px solid var(--border, #1E2535);
+}
+.ai-map-zoom-val {
+  min-width: 44px;
+  text-align: center;
+  font-size: .72rem;
+  font-weight: 700;
+  color: var(--muted, #5A6478);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The stage scrolls; the sizer is scaled with the map so there is real content
+   to scroll past at any zoom (a transform alone changes no layout size). */
+.ai-map-full-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  cursor: grab;
+  overscroll-behavior: contain;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, .07) 1px, transparent 0) 0 0 / 22px 22px,
+    var(--bg, #0A0D12);
+}
+.ai-map-full-stage.grabbing { cursor: grabbing; }
+.ai-map-full-sizer { position: relative; }
+/* Suppress text selection while dragging so a pan does not highlight labels. */
+.ai-map-full-stage.grabbing .ai-map { user-select: none; -webkit-user-select: none; }
+.ai-map-full .ai-nb.ai-map { margin: 14px; width: max-content; }
+
+.ai-map-full-hint {
+  flex: 0 0 auto;
+  padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border, #1E2535);
+  background: var(--card, #161B26);
+  color: var(--muted, #5A6478);
+  font-size: .7rem;
+  text-align: center;
+}
+
+@media (max-width: 640px) {
+  .ai-map-full-bar { gap: 6px; padding: 6px 8px; }
+  .ai-map-full-title { flex-basis: 100%; font-size: .82rem; }
+  .ai-map-full-tools { width: 100%; justify-content: space-between; }
+  .ai-map-full-tools .ai-btn { padding: 5px 8px; font-size: .7rem; }
+  /* Keyboard-only affordances make no sense on a touch device. */
+  .ai-map-full-hint { font-size: .66rem; }
+}
