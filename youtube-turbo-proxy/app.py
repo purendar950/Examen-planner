@@ -1018,7 +1018,15 @@ BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
 # server-side. ngrok's browser-warning bypass is applied by _ai_headers().
 OMNIROUTE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions"
 
-STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards"]
+STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards", "poster"]
+
+# A revision poster is a ONE-PAGE sheet of the facts a lecture is examined on.
+# `auto` lets the model pick blocks that suit the subject it actually detects —
+# a maths lecture wants formulas and shortcuts, a current-affairs one wants
+# who/what/when — and the rest force a shape when the student knows better.
+_POSTER_KINDS = ("auto", "formula", "facts", "process", "pattern")
+# Blocks past this are dropped: the artifact is defined by fitting on one page.
+POSTER_MAX_BLOCKS = int(os.environ.get("POSTER_MAX_BLOCKS", "7"))
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
 _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
@@ -2827,6 +2835,202 @@ def _gen_quiz(transcript, out_lang, ai, head, n, focus=""):
     return questions[:n]
 
 
+_POSTER_KIND_STEER = {
+    "formula": ("This must be a FORMULA SHEET. Prefer `formula` blocks, plus "
+                "`keyfacts` for shortcuts and traps. Every formula needs the "
+                "symbols named in its `note`."),
+    "facts": ("This must be a FACT SHEET. Prefer `stat`, `timeline`, `compare` "
+              "and `keyfacts` — the names, dates, figures and places an examiner "
+              "asks about."),
+    "process": ("This must explain PROCESSES. Prefer `process` blocks for each "
+                "cycle/sequence/mechanism, plus `glossary` for the terms."),
+    "pattern": ("This must be a QUESTION-PATTERN sheet. Use `process` blocks "
+                "where each block is one question type and the steps are how to "
+                "solve it, plus `keyfacts` for the giveaways in the wording."),
+}
+
+
+def _poster_instr(kind, out_lang):
+    """Prompt for the one-page revision poster.
+
+    The model fills TYPED SLOTS and never designs a layout: a language model is
+    good at picking which facts matter and poor at arranging them on a page,
+    while the browser can lay out a fixed schema consistently and print it. It
+    also keeps the artifact as text — searchable, translatable, and cacheable in
+    the same store as notes — which a generated image could never be.
+    """
+    steer = _POSTER_KIND_STEER.get(kind) or (
+        "FIRST decide what subject this lecture is (maths, science, history, "
+        "polity, geography, economy, current affairs, reasoning, English…), then "
+        "choose the block types that genuinely suit it: formulas and shortcuts "
+        "for maths, processes and diagrams-in-words for science, dates and "
+        "comparisons for history, who/what/when for current affairs, question "
+        "patterns for reasoning.")
+    return (
+        "Build a ONE-PAGE revision poster for this lecture: only what an "
+        "examiner is likely to ask, arranged as separate blocks. This is for "
+        "last-week revision, not for teaching.\n" + steer + "\n\n"
+        "Return ONLY this JSON object:\n"
+        '{"title":"<short lecture title>",'
+        '"subject":"<one word>",'
+        '"blocks":[ ... ]}\n\n'
+        "Each block is ONE of these exact shapes:\n"
+        '{"type":"stat","value":"1921","label":"Harappa discovered"}\n'
+        '{"type":"timeline","title":"...","items":[{"when":"1921","what":"Harappa found"}]}\n'
+        '{"type":"compare","title":"...","headers":["A","B"],'
+        '"rows":[{"label":"River","values":["Ravi","Indus"]}]}\n'
+        '{"type":"keyfacts","title":"Must remember","items":["...","..."]}\n'
+        '{"type":"process","title":"...","steps":["...","..."]}\n'
+        '{"type":"formula","title":"...","items":['
+        '{"name":"Percentage change","expr":"(New - Old) / Old x 100","note":"Old = original value"}]}\n'
+        '{"type":"glossary","items":[{"term":"...","meaning":"one line"}]}\n\n'
+        "Rules:\n"
+        "- At most %d blocks, ordered most examinable first. It MUST fit one page.\n"
+        "- 2 to 4 `stat` blocks when the lecture has memorable numbers; a `stat` "
+        "value is at most 12 characters.\n"
+        "- A `compare` block needs 2 or 3 headers and every row must have exactly "
+        "that many values.\n"
+        "- Keep every line SHORT — a poster is scanned, not read. No paragraphs, "
+        "no sentences longer than about 14 words.\n"
+        "- Plain text only inside the JSON: no markdown, no bold markers, no "
+        "LaTeX. Write maths as ordinary text, e.g. 'a^2 + b^2 = c^2'.\n"
+        "- Use ONLY facts stated in the transcript. Never invent a date or "
+        "figure. Skip a block type rather than pad it.\n"
+        "- Exclude course promotion, batch names, links, class timings and "
+        "anything about which lecture number this is.\n"
+        "- Every title, label and line must be written in %s, keeping technical "
+        "terms in English."
+        % (POSTER_MAX_BLOCKS, out_lang))
+
+
+_POSTER_BLOCK_FIELDS = {
+    "stat": ("value", "label"),
+    "timeline": ("title", "items"),
+    "compare": ("title", "headers", "rows"),
+    "keyfacts": ("title", "items"),
+    "process": ("title", "steps"),
+    "formula": ("title", "items"),
+    "glossary": ("title", "items"),
+}
+
+
+def _clean_line(value, limit=180):
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+
+def _sanitise_poster(data, kind):
+    """Keep only blocks the renderer can actually draw.
+
+    A model that returns a nearly-right shape must not be able to produce a
+    broken page, so every block is validated field by field and anything
+    malformed is dropped rather than passed through and rendered as blanks.
+    """
+    if not isinstance(data, dict):
+        return None
+    blocks_in = data.get("blocks")
+    if not isinstance(blocks_in, list):
+        return None
+    blocks = []
+    for raw in blocks_in:
+        if not isinstance(raw, dict):
+            continue
+        btype = str(raw.get("type") or "").strip().lower()
+        if btype not in _POSTER_BLOCK_FIELDS:
+            continue
+        block = {"type": btype, "title": _clean_line(raw.get("title"), 80)}
+        if btype == "stat":
+            value = _clean_line(raw.get("value"), 14)
+            label = _clean_line(raw.get("label"), 60)
+            if not value or not label:
+                continue
+            block.update({"value": value, "label": label})
+        elif btype == "timeline":
+            items = [{"when": _clean_line(i.get("when"), 24),
+                      "what": _clean_line(i.get("what"), 120)}
+                     for i in (raw.get("items") or []) if isinstance(i, dict)]
+            items = [i for i in items if i["when"] and i["what"]][:10]
+            if len(items) < 2:
+                continue
+            block["items"] = items
+        elif btype == "compare":
+            headers = [_clean_line(h, 40) for h in (raw.get("headers") or []) if _clean_line(h, 40)]
+            if len(headers) < 2 or len(headers) > 3:
+                continue
+            rows = []
+            for r in (raw.get("rows") or []):
+                if not isinstance(r, dict):
+                    continue
+                values = [_clean_line(v, 80) for v in (r.get("values") or [])]
+                # A ragged row would misalign the whole table, so drop it.
+                if len(values) != len(headers) or not any(values):
+                    continue
+                rows.append({"label": _clean_line(r.get("label"), 40), "values": values})
+            if not rows:
+                continue
+            block.update({"headers": headers, "rows": rows[:8]})
+        elif btype in ("keyfacts", "process"):
+            key = "items" if btype == "keyfacts" else "steps"
+            items = [_clean_line(i, 160) for i in (raw.get(key) or raw.get("items") or [])]
+            items = [i for i in items if i][:8]
+            if not items:
+                continue
+            block[key] = items
+        elif btype == "formula":
+            items = []
+            for i in (raw.get("items") or []):
+                if not isinstance(i, dict):
+                    continue
+                expr = _clean_line(i.get("expr"), 120)
+                if not expr:
+                    continue
+                items.append({"name": _clean_line(i.get("name"), 60), "expr": expr,
+                              "note": _clean_line(i.get("note"), 120)})
+            if not items:
+                continue
+            block["items"] = items[:8]
+        elif btype == "glossary":
+            items = []
+            for i in (raw.get("items") or []):
+                if not isinstance(i, dict):
+                    continue
+                term = _clean_line(i.get("term"), 60)
+                meaning = _clean_line(i.get("meaning"), 140)
+                if term and meaning:
+                    items.append({"term": term, "meaning": meaning})
+            if len(items) < 2:
+                continue
+            block["items"] = items[:10]
+        blocks.append(block)
+        if len(blocks) >= POSTER_MAX_BLOCKS:
+            break
+    if not blocks:
+        return None
+    return {"title": _clean_line(data.get("title"), 120),
+            "subject": _clean_line(data.get("subject"), 30).lower(),
+            "kind": kind, "blocks": blocks}
+
+
+def _gen_poster(transcript, out_lang, ai, head, kind="auto"):
+    """One-page revision poster as validated, typed blocks."""
+    body = _condense(transcript, out_lang, ai)
+    raw = _ai_chat(
+        [{"role": "system", "content": _study_sys(out_lang) + " Output ONLY valid JSON."},
+         {"role": "user", "content": head + _poster_instr(kind, out_lang) + "\n\n" + body
+          + _lang_reminder(out_lang) + " Still return ONLY the JSON object described above."}],
+        ai, max_tokens=2600, json_mode=True)
+    poster = _sanitise_poster(_safe_json(raw), kind)
+    if poster:
+        return poster
+    # One retry with a blunter instruction: a provider that ignored json_mode
+    # usually complies when the schema is the entire request.
+    raw = _ai_chat(
+        [{"role": "system", "content": "Return ONLY a JSON object. No prose, no code fences."},
+         {"role": "user", "content": head + _poster_instr(kind, out_lang) + "\n\n" + body[:8000]
+          + _lang_reminder(out_lang)}],
+        ai, max_tokens=2600, json_mode=True)
+    return _sanitise_poster(_safe_json(raw), kind)
+
+
 def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus="", style=""):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
@@ -2836,6 +3040,11 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
     if mode == "quiz":
         return {"format": "json",
                 "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions, focus)}
+    if mode == "poster":
+        poster = _gen_poster(transcript, out_lang, ai, head, style or "auto")
+        if not poster:
+            raise RuntimeError("The AI did not return a usable poster. Please try again.")
+        return {"format": "json", "poster": poster}
     # summary / insights / flashcards work well from a condensed body
     body = _condense(transcript, out_lang, ai)
     if mode == "summary":
@@ -3108,8 +3317,13 @@ def api_study():
     # ?style=mcq|topic+images (notes only): format notes by style.
     # Only 'mcq' and 'topic+images' are recognised non-default styles;
     # everything else keeps the original topic-notes behaviour.
+    # For mode=poster, `style` instead carries WHICH KIND of one-page sheet to
+    # build, and it stays in the cache key so a formula sheet and a fact sheet
+    # for the same lecture are stored separately rather than overwriting.
     style = (request.args.get("style") or "").strip().lower()
-    if mode != "notes" or style not in ("mcq", "topic+images"):
+    if mode == "poster":
+        style = style if style in _POSTER_KINDS else "auto"
+    elif mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
 
     # Cache key is MODEL-AGNOSTIC: a note is identified by its CONTENT dimensions
