@@ -192,18 +192,47 @@
     var s = String(text || '').replace(/\s+/g, ' ').trim();
     return s.length > NOTE_SNIPPET_MAX ? s.slice(0, NOTE_SNIPPET_MAX - 1).trim() + '…' : s;
   }
-  /* Plain text of one notebook block, as the student reads it. Dropped on the
-     way out: our own ask button, the decorative .num counter (which would
-     otherwise run straight into the heading — "1Fundamental Rights"), and the
-     ⏩ glyph linkTs() prefixes every timestamp with. The time itself is kept,
-     because it is useful context even though note_ts carries it separately. */
+  /* Elements that end a line of reading.
+
+     These have to be marked explicitly because textContent has no concept of
+     layout, and nbUL() joins its items with NO separator at all
+     ('<ul>' + items.join('') + '</ul>'). So a seven-bullet section arrived at the
+     model as one unbroken paragraph — "...held in Switzerland.WHO declared Ebola
+     outbreak in Congo and Gwanda." — and it duly read two bullets as one
+     sentence, then "corrected" a claim the notes had never made. Chips are joined
+     the same way, and MCQ options too. */
+  var NOTE_LINE_TAGS = 'li,p,div,tr,br,h1,h2,h3,h4,h5,h6,td,th,pre,blockquote,.chip';
+
+  /* Plain text of one notebook block, as the student reads it — one line per
+     visual line. Dropped on the way out: our own ask button, the decorative .num
+     counter (which would otherwise run straight into the heading, "1Fundamental
+     Rights"), and the ⏩ glyph linkTs() prefixes every timestamp with. The time
+     itself is kept, because it is useful context even though note_ts carries it
+     separately. */
   function noteBlockText(block) {
     if (!block) return '';
     var clone = block.cloneNode(true);
     Array.prototype.forEach.call(clone.querySelectorAll('.ai-nb-ask,.num'), function (n) {
       if (n.parentNode) n.parentNode.removeChild(n);
     });
-    return (clone.textContent || '').replace(/\u23e9/g, ' ').replace(/\s+/g, ' ').trim();
+    var doc = clone.ownerDocument || document;
+    Array.prototype.forEach.call(clone.querySelectorAll(NOTE_LINE_TAGS), function (n) {
+      // insertBefore(nextSibling), not appendChild: <br> is void, and putting a
+      // child inside one would be nonsense even though the DOM permits it.
+      if (n.parentNode) n.parentNode.insertBefore(doc.createTextNode('\n'), n.nextSibling);
+    });
+    return (clone.textContent || '')
+      .replace(/\u23e9/g, ' ')
+      // Collapse runs of space/tab but NOT newlines — the newlines are the point.
+      .replace(/[^\S\n]+/g, ' ')
+      .replace(/ *\n+ */g, '\n')
+      .trim();
+  }
+  // How many separate claims a passage holds. Drives whether Verify asks about
+  // "this line" or asks for a verdict per claim.
+  function noteClaimCount(passage) {
+    return String(passage || '').split('\n')
+      .filter(function (line) { return line.trim().length > 1; }).length;
   }
   // The whole note, one line per block so the model still sees its structure.
   function noteFullText(nb) {
@@ -264,7 +293,21 @@
       label: '✅ Verify',
       title: 'Check this against the lecture and the web',
       web: 'on',
-      prompt: function (snip) {
+      prompt: function (snip, passage) {
+        /* A heading's passage carries the whole section — seven or eight separate
+           facts. Asking to "verify this line" invited the model to treat all of
+           them as one assertion, answer about part of it, and file the rest under
+           "corrections" even when the note was already right. Ask per claim once
+           there is more than one. */
+        if (noteClaimCount(passage) > 1) {
+          return 'Check this part of my notes against the lecture, claim by claim. ' +
+            'Give ONE line per claim, in the order they appear, starting with ✅ if ' +
+            'the lecture says it, ⚠️ if the lecture does not cover it (then say ' +
+            'whether it is still factually correct), or ❌ if the lecture ' +
+            'contradicts it (then give the correction). Only call something a ' +
+            'correction if it actually differs from what my note says — if my note ' +
+            'is already right, just mark it ✅ and move on.';
+        }
         return 'Verify this line from my notes: "' + snip + '". Does this lecture ' +
           'actually say it, and is it correct? If it is wrong or not in the lecture, ' +
           'say so and give the correct version.';
@@ -442,7 +485,9 @@
     }
     var spec = NOTE_ACTIONS[action];
     if (!spec) return false;
-    return askAboutNote(spec.prompt(noteSnippet(text)), text, ts, { web: spec.web });
+    // The full passage is handed to the prompt as well as the snippet, so an
+    // action can adapt to a single line versus a whole multi-claim section.
+    return askAboutNote(spec.prompt(noteSnippet(text), text), text, ts, { web: spec.web });
   }
 
   /* ── Per-block ask buttons ────────────────────────────────────────────────

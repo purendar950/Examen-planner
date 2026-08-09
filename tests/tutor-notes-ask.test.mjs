@@ -58,7 +58,7 @@ const NOTEBOOK = `<!doctype html><body><div id="ai-sub">
   <div class="ai-scroll nb"><div class="ai-nb">
     <div class="sec"><span class="num">1</span>Fundamental Rights <a class="ai-ts" data-s="0">\u23e9 0:00</a></div>
     <p id="p1">Article <span class="fig">21</span> protects life and personal liberty.</p>
-    <ul><li>Article 21A covers education</li></ul>
+    <ul><li>Article 21A covers education</li><li>Second bullet, kept separate.</li></ul>
     <div class="factbox"><span class="badge key">KEY</span>Added by the 86th Amendment</div>
     <div class="sec"><span class="num">2</span>Directive Principles <a class="ai-ts" data-s="754">\u23e9 12:34</a></div>
     <p id="p2">Part IV, not enforceable by courts.</p>
@@ -103,7 +103,8 @@ function buildNotes() {
   const api = vm.runInNewContext(
     section('  var NOTE_EXCERPT_MAX = 12000;', '  /* ── Whole-note check') +
     ';({ noteSnippet, noteBlockText, noteFullText, noteBlockOf, noteBlockTs, noteSectionText,' +
-    ' noteAskBtnHtml, setupNoteAsk, runNoteAction, hideNotePop, notePopVisible, fromNoteAffordance,' +
+    ' noteAskBtnHtml, noteClaimCount, setupNoteAsk, runNoteAction, hideNotePop,' +
+  ' notePopVisible, fromNoteAffordance,' +
     ' setPendingNoteContext, takePendingNoteContext, NOTE_ACTIONS, NOTE_EXCERPT_MAX,' +
     ' NOTE_SNIPPET_MAX, NOTE_CONTEXT_TTL_MS,' +
     ' _peekPending: () => _pendingNoteContext, _popCtx: () => _notePopCtx })',
@@ -132,6 +133,44 @@ function buildNotes() {
     assert.ok(blocks[0].querySelector('.ai-nb-ask'), 'button should be rendered');
     assert.ok(!api.noteBlockText(blocks[0]).includes('💬'));
     assert.ok(!api.noteFullText(nb).includes('💬'));
+  });
+
+  test('every bullet becomes its own line, so claims cannot merge', () => {
+    /* Regression, reported from a real answer. nbUL() joins its items with NO
+       separator ('<ul>' + items.join('') + '</ul>'), and textContent has no notion
+       of layout, so a seven-bullet section reached the model as one unbroken
+       paragraph: "...held in Switzerland.WHO declared Ebola outbreak in Congo and
+       Gwanda." It read the two bullets as one sentence and then "corrected" a
+       claim the notes had never made. */
+    const list = blocks.find((b) => b.tagName === 'UL');
+    const text = api.noteBlockText(list);
+    assert.equal(text.split('\n').length, 2, 'one line per <li>');
+    assert.ok(!/education\S/.test(text), 'adjacent items must not be glued together');
+    assert.equal(text.split('\n')[0], 'Article 21A covers education');
+    assert.equal(text.split('\n')[1], 'Second bullet, kept separate.');
+  });
+
+  test('chips and MCQ options are separated too — they are joined the same way', () => {
+    const chips = new JSDOM('<div class="ai-nb"><div class="chips">' +
+      '<span class="chip">Alpha</span><span class="chip">Beta</span></div></div>')
+      .window.document.querySelector('.chips');
+    assert.equal(api.noteBlockText(chips), 'Alpha\nBeta');
+    const card = blocks.find((b) => b.classList.contains('qkeep'));
+    const cardText = api.noteBlockText(card);
+    assert.ok(cardText.includes('21A\n') || cardText.split('\n').length > 3,
+      `MCQ options should be on their own lines, got: ${JSON.stringify(cardText)}`);
+  });
+
+  test('claims in a passage are counted, so a question can adapt to them', () => {
+    assert.equal(api.noteClaimCount('one line'), 1);
+    assert.equal(api.noteClaimCount('Claim one.\nClaim two.\nClaim three.'), 3);
+    assert.equal(api.noteClaimCount('Claim one.\n\n \nClaim two.'), 2,
+      'blank lines are not claims');
+    /* A stray single character is punctuation left over from rendering, not a
+       claim, so it must not push a one-line passage onto the per-claim path. */
+    assert.equal(api.noteClaimCount('Only claim.\n-'), 1);
+    assert.equal(api.noteClaimCount(''), 0);
+    assert.equal(api.noteClaimCount(null), 0);
   });
 
   test('a snippet is collapsed and bounded, and never throws on empty input', () => {
@@ -205,7 +244,9 @@ function buildNotes() {
     assert.ok(text.includes('Article 21A'));
     assert.ok(text.includes('86th Amendment'));
     assert.ok(!text.includes('Directive Principles'), 'must not run into the next section');
-    assert.equal(text.split('\n').length, 4, 'one line per block');
+    /* heading + paragraph + two bullets + factbox: one line per VISUAL line, not
+       one per DOM block, because a single <ul> block holds several claims. */
+    assert.equal(text.split('\n').length, 5, 'one line per claim');
   });
 
   test('an MCQ card owns its trailing explanation, which is a SIBLING not a child', () => {
@@ -376,11 +417,29 @@ test('every action embeds the passage and asks something answerable', () => {
   for (const key of Object.keys(api.NOTE_ACTIONS)) {
     const spec = api.NOTE_ACTIONS[key];
     assert.ok(spec.label && spec.title, `${key} needs a label and a title`);
-    assert.ok(spec.prompt('SOME CLAIM').includes('SOME CLAIM'), `${key} must quote the passage`);
+    assert.ok(spec.prompt('SOME CLAIM', 'SOME CLAIM').includes('SOME CLAIM'),
+      `${key} must quote the passage`);
   }
-  const verify = api.NOTE_ACTIONS.verify.prompt('X');
+  const verify = api.NOTE_ACTIONS.verify.prompt('X', 'X');
   assert.match(verify, /this lecture\s+actually say/i, 'Verify must ask about the LECTURE');
   assert.match(verify, /correct version/i, 'Verify must ask for the correction');
+});
+
+test('Verify asks per claim once the passage holds more than one', () => {
+  /* Regression. A heading's passage is a whole section — seven or eight facts —
+     and asking to "verify this line" invited the model to treat them as one
+     assertion, answer about part of it, and file already-correct notes under
+     "Correction for your notes". */
+  const { api } = buildNotes();
+  const many = ['Heading', 'Claim one.', 'Claim two.', 'Claim three.'].join('\n');
+  const prompt = api.NOTE_ACTIONS.verify.prompt(api.noteSnippet(many), many);
+  assert.match(prompt, /claim by claim/i);
+  assert.match(prompt, /ONE line per claim/i);
+  assert.ok(prompt.includes('✅') && prompt.includes('⚠️') && prompt.includes('❌'),
+    'each verdict marker must be spelled out');
+  assert.match(prompt, /actually differs/i,
+    'the model must be told not to restate a correct note as a correction');
+  assert.ok(!/verify this line/i.test(prompt), 'singular framing must be dropped');
 });
 
 test('an action sends the full passage and the timestamp, not just the snippet', () => {
@@ -393,7 +452,10 @@ test('an action sends the full passage and the timestamp, not just the snippet',
   assert.ok(call.passage.includes('Inserted by the 86th Amendment'), 'full passage travels');
   assert.equal(call.ts, 754);
   assert.equal(call.opts.web, 'on');
-  assert.ok(call.q.length < call.passage.length + 300, 'the question stays a question');
+  /* The body of a multi-claim passage must not be duplicated into the question —
+     that is what note_excerpt is for, and it would fill the chat bubble. */
+  assert.ok(!call.q.includes('Inserted by the 86th Amendment'),
+    'the passage body must not be glued into the question');
 });
 
 test('an empty passage is not sent anywhere', () => {
