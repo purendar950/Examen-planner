@@ -1025,8 +1025,18 @@ STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards", "poster"]
 # a maths lecture wants formulas and shortcuts, a current-affairs one wants
 # who/what/when — and the rest force a shape when the student knows better.
 _POSTER_KINDS = ("auto", "formula", "facts", "process", "pattern")
-# Blocks past this are dropped: the artifact is defined by fitting on one page.
-POSTER_MAX_BLOCKS = int(os.environ.get("POSTER_MAX_BLOCKS", "7"))
+# A dense lecture carries far more than seven blocks of examinable material, and
+# capping there was throwing most of it away. The renderer groups blocks under
+# headings and lets print paginate, so "one page" is no longer the constraint —
+# completeness is. Still bounded so a runaway response cannot be unreadable.
+POSTER_MAX_BLOCKS = int(os.environ.get("POSTER_MAX_BLOCKS", "18"))
+# Output budget per pass. The old 2600 truncated long JSON, which silently lost
+# whole blocks because a cut-off object cannot be parsed.
+POSTER_CAP = int(os.environ.get("POSTER_MAX_TOKENS", "4000"))
+# A long lecture is covered in several passes so its later half contributes too,
+# instead of only whatever survived a condense.
+POSTER_CHUNK = int(os.environ.get("POSTER_CHUNK_CHARS", "24000"))
+POSTER_MAX_PASSES = int(os.environ.get("POSTER_MAX_PASSES", "4"))
 # Big-context providers process a whole lecture in one call, which can take a
 # while on free tiers — give the request plenty of time. Configurable via env.
 _AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "300"))  # seconds
@@ -2874,28 +2884,41 @@ def _poster_instr(kind, out_lang):
         '{"title":"<short lecture title>",'
         '"subject":"<one word>",'
         '"blocks":[ ... ]}\n\n'
-        "Each block is ONE of these exact shapes:\n"
+        "Each block is ONE of these exact shapes. `group` is the topic area the "
+        "block belongs to (e.g. \"Indus Valley\", \"Percentages\"); blocks sharing "
+        "a group are printed together under that heading, so use the SAME wording "
+        "for every block on one topic:\n"
         '{"type":"stat","value":"1921","label":"Harappa discovered"}\n'
-        '{"type":"timeline","title":"...","items":[{"when":"1921","what":"Harappa found"}]}\n'
-        '{"type":"compare","title":"...","headers":["A","B"],'
+        '{"type":"timeline","group":"...","title":"...","items":[{"when":"1921","what":"Harappa found"}]}\n'
+        '{"type":"compare","group":"...","title":"...","headers":["A","B"],'
         '"rows":[{"label":"River","values":["Ravi","Indus"]}]}\n'
-        '{"type":"keyfacts","title":"Must remember","items":["...","..."]}\n'
-        '{"type":"process","title":"...","steps":["...","..."]}\n'
-        '{"type":"formula","title":"...","items":['
+        '{"type":"keyfacts","group":"...","title":"Must remember","items":["...","..."]}\n'
+        '{"type":"process","group":"...","title":"...","steps":["...","..."]}\n'
+        '{"type":"formula","group":"...","title":"...","items":['
         '{"name":"Percentage change","expr":"(New - Old) / Old x 100","note":"Old = original value"}]}\n'
-        '{"type":"glossary","items":[{"term":"...","meaning":"one line"}]}\n\n'
+        '{"type":"glossary","group":"...","title":"...","items":[{"term":"...","meaning":"one line"}]}\n'
+        '{"type":"qa","group":"...","title":"Likely questions","items":['
+        '{"q":"Who excavated Harappa?","a":"Daya Ram Sahni, 1921"}]}\n'
+        '{"type":"mnemonic","group":"...","title":"Memory tricks","items":['
+        '{"trick":"VIBGYOR","means":"Violet Indigo Blue Green Yellow Orange Red"}]}\n\n'
         "Rules:\n"
-        "- At most %d blocks, ordered most examinable first. It MUST fit one page.\n"
-        "- 2 to 4 `stat` blocks when the lecture has memorable numbers; a `stat` "
-        "value is at most 12 characters.\n"
+        "- BE THOROUGH. Include EVERY exam-relevant number, date, name, place, "
+        "definition, formula and comparison in the text — a poster that omits "
+        "half the lecture is useless. Use up to %d blocks and split a big topic "
+        "into several blocks rather than dropping its detail.\n"
+        "- Up to 6 `stat` blocks for the most memorable numbers; a `stat` value is "
+        "at most 12 characters and carries no `group`.\n"
         "- A `compare` block needs 2 or 3 headers and every row must have exactly "
         "that many values.\n"
-        "- Keep every line SHORT — a poster is scanned, not read. No paragraphs, "
-        "no sentences longer than about 14 words.\n"
+        "- Prefer `qa` for anything the lecturer flagged as previously asked or "
+        "important, and `mnemonic` for any trick, order or acronym given.\n"
+        "- Keep every LINE short — a poster is scanned, not read. No paragraphs, "
+        "no sentence longer than about 16 words. Many short blocks beat a few "
+        "long ones.\n"
         "- Plain text only inside the JSON: no markdown, no bold markers, no "
         "LaTeX. Write maths as ordinary text, e.g. 'a^2 + b^2 = c^2'.\n"
-        "- Use ONLY facts stated in the transcript. Never invent a date or "
-        "figure. Skip a block type rather than pad it.\n"
+        "- Use ONLY facts stated in the text. Never invent a date or figure. Skip "
+        "a block type rather than pad it.\n"
         "- Exclude course promotion, batch names, links, class timings and "
         "anything about which lecture number this is.\n"
         "- Every title, label and line must be written in %s, keeping technical "
@@ -2911,6 +2934,11 @@ _POSTER_BLOCK_FIELDS = {
     "process": ("title", "steps"),
     "formula": ("title", "items"),
     "glossary": ("title", "items"),
+    # qa carries what the lecturer flagged as asked before; mnemonic carries the
+    # tricks and acronyms, which students copy out of a lecture more than
+    # anything else and which a plain bullet list buries.
+    "qa": ("title", "items"),
+    "mnemonic": ("title", "items"),
 }
 
 
@@ -2938,6 +2966,11 @@ def _sanitise_poster(data, kind):
         if btype not in _POSTER_BLOCK_FIELDS:
             continue
         block = {"type": btype, "title": _clean_line(raw.get("title"), 80)}
+        # `group` is what gives a long poster structure: blocks sharing one are
+        # printed under a single heading. Stats are the headline strip and are
+        # never grouped.
+        if btype != "stat":
+            block["group"] = _clean_line(raw.get("group") or raw.get("topic"), 60)
         if btype == "stat":
             value = _clean_line(raw.get("value"), 14)
             label = _clean_line(raw.get("label"), 60)
@@ -2948,7 +2981,7 @@ def _sanitise_poster(data, kind):
             items = [{"when": _clean_line(i.get("when"), 24),
                       "what": _clean_line(i.get("what"), 120)}
                      for i in (raw.get("items") or []) if isinstance(i, dict)]
-            items = [i for i in items if i["when"] and i["what"]][:10]
+            items = [i for i in items if i["when"] and i["what"]][:16]
             if len(items) < 2:
                 continue
             block["items"] = items
@@ -2967,14 +3000,38 @@ def _sanitise_poster(data, kind):
                 rows.append({"label": _clean_line(r.get("label"), 40), "values": values})
             if not rows:
                 continue
-            block.update({"headers": headers, "rows": rows[:8]})
+            block.update({"headers": headers, "rows": rows[:12]})
         elif btype in ("keyfacts", "process"):
             key = "items" if btype == "keyfacts" else "steps"
             items = [_clean_line(i, 160) for i in (raw.get(key) or raw.get("items") or [])]
-            items = [i for i in items if i][:8]
+            items = [i for i in items if i][:14]
             if not items:
                 continue
             block[key] = items
+        elif btype == "qa":
+            items = []
+            for i in (raw.get("items") or []):
+                if not isinstance(i, dict):
+                    continue
+                question = _clean_line(i.get("q") or i.get("question"), 160)
+                answer = _clean_line(i.get("a") or i.get("answer"), 160)
+                if question and answer:
+                    items.append({"q": question, "a": answer})
+            if not items:
+                continue
+            block["items"] = items[:12]
+        elif btype == "mnemonic":
+            items = []
+            for i in (raw.get("items") or []):
+                if not isinstance(i, dict):
+                    continue
+                trick = _clean_line(i.get("trick") or i.get("name"), 80)
+                means = _clean_line(i.get("means") or i.get("meaning"), 200)
+                if trick and means:
+                    items.append({"trick": trick, "means": means})
+            if not items:
+                continue
+            block["items"] = items[:10]
         elif btype == "formula":
             items = []
             for i in (raw.get("items") or []):
@@ -2987,7 +3044,7 @@ def _sanitise_poster(data, kind):
                               "note": _clean_line(i.get("note"), 120)})
             if not items:
                 continue
-            block["items"] = items[:8]
+            block["items"] = items[:12]
         elif btype == "glossary":
             items = []
             for i in (raw.get("items") or []):
@@ -2999,7 +3056,7 @@ def _sanitise_poster(data, kind):
                     items.append({"term": term, "meaning": meaning})
             if len(items) < 2:
                 continue
-            block["items"] = items[:10]
+            block["items"] = items[:16]
         blocks.append(block)
         if len(blocks) >= POSTER_MAX_BLOCKS:
             break
@@ -3010,28 +3067,149 @@ def _sanitise_poster(data, kind):
             "kind": kind, "blocks": blocks}
 
 
-def _gen_poster(transcript, out_lang, ai, head, kind="auto"):
-    """One-page revision poster as validated, typed blocks."""
-    body = _condense(transcript, out_lang, ai)
-    raw = _ai_chat(
-        [{"role": "system", "content": _study_sys(out_lang) + " Output ONLY valid JSON."},
-         {"role": "user", "content": head + _poster_instr(kind, out_lang) + "\n\n" + body
-          + _lang_reminder(out_lang) + " Still return ONLY the JSON object described above."}],
-        ai, max_tokens=2600, json_mode=True)
-    poster = _sanitise_poster(_safe_json(raw), kind)
-    if poster:
-        return poster
-    # One retry with a blunter instruction: a provider that ignored json_mode
-    # usually complies when the schema is the entire request.
+def _poster_source(video_id, transcript, out_lang, ai):
+    """What the poster is built FROM. Returns (text, origin).
+
+    Prefer the lecture's own notes. _notes_instr() requires them to cover every
+    topic, fact, figure, date, name and formula, so they are the densest record
+    of the lecture that exists — whereas _condense() (what this used to use)
+    deliberately discards detail to fit a summary budget, which is precisely the
+    numbers a revision poster needs to keep. Notes are already cached, so this is
+    also cheaper than re-reading the transcript.
+
+    Falls back to the transcript. Big-context models get it whole rather than
+    condensed; small-context ones still need the condense to fit at all.
+    """
+    if video_id:
+        for style in ("", "topic+images"):
+            try:
+                _ckey, fs_id = _study_text_cache_keys(video_id, "notes", out_lang, style)
+                saved = _study_get(fs_id)
+            except Exception:  # noqa: BLE001
+                saved = None
+            content = (saved or {}).get("content") or ""
+            if len(content.strip()) > 400:
+                return content, "notes"
+    if ai.get("big_context"):
+        return transcript, "transcript"
+    return _condense(transcript, out_lang, ai), "condensed"
+
+
+def _poster_sections(source, ai):
+    """Split the source so a long lecture is covered in several passes."""
+    chunk = POSTER_CHUNK
+    ctx = _model_ctx_tokens(ai)
+    if ctx:
+        budget = int(int(ctx * _CTX_INPUT_FRAC) * _chars_per_token(source))
+        chunk = min(chunk, max(3000, budget))
+    parts = _chunk_words(source, chunk)
+    return parts[:POSTER_MAX_PASSES]
+
+
+def _poster_block_sig(block):
+    """Identity of a block for merging across passes."""
+    title = re.sub(r"[^a-z0-9\u0900-\u097f]+", "", str(block.get("title") or "").lower())
+    if block.get("type") == "stat":
+        return ("stat", re.sub(r"\s+", "", str(block.get("label") or "").lower()))
+    return (block.get("type"), title)
+
+
+_POSTER_LIST_FIELD = {"timeline": "items", "keyfacts": "items", "process": "steps",
+                      "formula": "items", "glossary": "items", "qa": "items",
+                      "mnemonic": "items"}
+
+
+def _poster_merge(parts, kind):
+    """Combine the passes.
+
+    Two passes over one lecture legitimately produce the same section — the same
+    "Must remember" heading with different facts under it — so same-type
+    same-title blocks have their items MERGED rather than the later one dropped.
+    That is what turns several passes into a fuller poster instead of a
+    duplicated one.
+    """
+    order, by_sig = [], {}
+    for part in parts:
+        for block in (part or {}).get("blocks") or []:
+            sig = _poster_block_sig(block)
+            if sig not in by_sig:
+                by_sig[sig] = block
+                order.append(sig)
+                continue
+            field = _POSTER_LIST_FIELD.get(block.get("type"))
+            if not field:
+                continue                      # stat/compare: keep the first
+            existing = by_sig[sig].setdefault(field, [])
+            seen = {json.dumps(i, sort_keys=True, ensure_ascii=False) for i in existing}
+            for item in block.get(field) or []:
+                token = json.dumps(item, sort_keys=True, ensure_ascii=False)
+                if token not in seen:
+                    seen.add(token)
+                    existing.append(item)
+    blocks = [by_sig[sig] for sig in order]
+    # Structure the page: the headline numbers, then everything else grouped by
+    # the subject area the model assigned, in the order the groups first appeared.
+    stats = [b for b in blocks if b.get("type") == "stat"]
+    rest = [b for b in blocks if b.get("type") != "stat"]
+    groups, seen_groups = [], set()
+    for b in rest:
+        g = b.get("group") or ""
+        if g not in seen_groups:
+            seen_groups.add(g)
+            groups.append(g)
+    ordered = stats + [b for g in groups for b in rest if (b.get("group") or "") == g]
+    title = ""
+    subject = ""
+    for part in parts:
+        title = title or (part or {}).get("title") or ""
+        subject = subject or (part or {}).get("subject") or ""
+    return {"title": title, "subject": subject, "kind": kind,
+            "blocks": ordered[:POSTER_MAX_BLOCKS]}
+
+
+def _gen_poster(transcript, out_lang, ai, head, kind="auto", video_id=None):
+    """A revision poster as validated, typed blocks, built over several passes."""
+    source, origin = _poster_source(video_id, transcript, out_lang, ai)
+    if origin == "notes":
+        head = head + ("(The text below is the comprehensive study notes for this "
+                       "lecture. Everything examinable is already in it.)\n\n")
+    sections = _poster_sections(source, ai)
+    sysmsg = _study_sys(out_lang) + " Output ONLY valid JSON."
+    parts, covered = [], []
+    for index, section in enumerate(sections):
+        note = ""
+        if index:
+            note = ("(Part %d of %d. Blocks ALREADY written: %s. Cover only what is "
+                    "NEW here, or add items to those same headings.)\n"
+                    % (index + 1, len(sections), "; ".join(covered[-24:]) or "none"))
+        raw = _ai_chat(
+            [{"role": "system", "content": sysmsg},
+             {"role": "user", "content": head + note + _poster_instr(kind, out_lang)
+              + "\n\n" + section + _lang_reminder(out_lang)
+              + " Still return ONLY the JSON object described above."}],
+            ai, max_tokens=POSTER_CAP, json_mode=True)
+        part = _sanitise_poster(_safe_json(raw), kind)
+        if not part:
+            continue
+        parts.append(part)
+        for block in part["blocks"]:
+            label = block.get("title") or block.get("label") or block.get("type")
+            if label:
+                covered.append(str(label))
+    if parts:
+        return _poster_merge(parts, kind)
+    # Nothing parsed. Retry once with the schema as the entire request: a provider
+    # that ignored json_mode usually complies then.
     raw = _ai_chat(
         [{"role": "system", "content": "Return ONLY a JSON object. No prose, no code fences."},
-         {"role": "user", "content": head + _poster_instr(kind, out_lang) + "\n\n" + body[:8000]
-          + _lang_reminder(out_lang)}],
-        ai, max_tokens=2600, json_mode=True)
+         {"role": "user", "content": head + _poster_instr(kind, out_lang) + "\n\n"
+          + (sections[0] if sections else source)[:9000] + _lang_reminder(out_lang)}],
+        ai, max_tokens=POSTER_CAP, json_mode=True)
     return _sanitise_poster(_safe_json(raw), kind)
 
 
-def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25, focus="", style=""):
+def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25,
+                    focus="", style="", video_id=None):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
     tail = _lang_reminder(out_lang)      # restated after the body, see _lang_reminder
@@ -3041,7 +3219,8 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
         return {"format": "json",
                 "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions, focus)}
     if mode == "poster":
-        poster = _gen_poster(transcript, out_lang, ai, head, style or "auto")
+        poster = _gen_poster(transcript, out_lang, ai, head, style or "auto",
+                             video_id=video_id)
         if not poster:
             raise RuntimeError("The AI did not return a usable poster. Please try again.")
         return {"format": "json", "poster": poster}
@@ -3404,7 +3583,7 @@ def api_study():
     try:
         result = _generate_study(mode, gen_text, out_lang, ai,
                                  title=t.get("title"), num_questions=num_q,
-                                 focus=focus, style=style)
+                                 focus=focus, style=style, video_id=video_id)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 

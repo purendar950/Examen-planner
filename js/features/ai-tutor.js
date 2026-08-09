@@ -1402,7 +1402,21 @@
       sc + ' .ai-poster-table .rl{background:#f7f9fa;font-weight:700;width:26%}',
       sc + ' .ai-poster-gloss{margin:0;font-size:.74rem;line-height:1.4}',
       sc + ' .ai-poster-gloss dt{font-weight:700;margin-top:4px}',
-      sc + ' .ai-poster-gloss dd{margin:0 0 0 10px;color:#37474f}'
+      sc + ' .ai-poster-gloss dd{margin:0 0 0 10px;color:#37474f}',
+      /* Topic groups: what turns a long poster into navigable sections. */
+      sc + ' .ai-poster-group{grid-column:1/-1;margin:2px 0 0}',
+      sc + ' .ai-poster-group>h3{margin:6px 0 8px;padding:3px 9px;border-radius:6px;background:#263238;color:#fff;font-size:.78rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase}',
+      sc + ' .ai-poster-group>.ai-poster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}',
+      /* Likely questions — the single most useful block on a revision sheet. */
+      sc + ' .ai-poster-qa{margin:0;padding-left:18px;font-size:.75rem;line-height:1.4}',
+      sc + ' .ai-poster-qa li{margin:5px 0}',
+      sc + ' .ai-poster-qa .q{display:block;font-weight:700}',
+      sc + ' .ai-poster-qa .a{display:block;color:#2e7d32;font-weight:700}',
+      sc + ' .ai-poster-qa .a::before{content:"\\2192  "}',
+      sc + ' .ai-poster-mnem{list-style:none;margin:0;padding:0;font-size:.75rem;line-height:1.4}',
+      sc + ' .ai-poster-mnem li{margin:5px 0;padding-left:8px;border-left:3px solid #7b1fa2}',
+      sc + ' .ai-poster-mnem .t{display:block;font-weight:800;letter-spacing:.05em;color:#7b1fa2}',
+      sc + ' .ai-poster-mnem .m{display:block;color:#37474f}'
     ].join('');
   }
 
@@ -6286,6 +6300,20 @@
           return '<dt>' + esc(i.term) + '</dt><dd>' + esc(i.meaning) + '</dd>';
         }).join('') + '</dl></section>';
     }
+    if (b.type === 'qa') {
+      return '<section class="ai-poster-card wide">' +
+        (head || '<div class="ai-poster-head">Likely questions</div>') +
+        '<ol class="ai-poster-qa">' + (b.items || []).map(function (i) {
+          return '<li><span class="q">' + esc(i.q) + '</span><span class="a">' + esc(i.a) + '</span></li>';
+        }).join('') + '</ol></section>';
+    }
+    if (b.type === 'mnemonic') {
+      return '<section class="ai-poster-card">' +
+        (head || '<div class="ai-poster-head">Memory tricks</div>') +
+        '<ul class="ai-poster-mnem">' + (b.items || []).map(function (i) {
+          return '<li><span class="t">' + esc(i.trick) + '</span><span class="m">' + esc(i.means) + '</span></li>';
+        }).join('') + '</ul></section>';
+    }
     // keyfacts
     return '<section class="ai-poster-card">' + (head || '<div class="ai-poster-head">Must remember</div>') +
       '<ul class="ai-poster-facts">' + (b.items || []).map(function (i) {
@@ -6293,22 +6321,43 @@
       }).join('') + '</ul></section>';
   }
 
+  /* A dense lecture yields many blocks, so they are printed under the topic
+     heading each one declares. Without that a long poster is an undifferentiated
+     wall of cards; with it, it reads as sections a student can navigate. */
   function posterHtml(p) {
     var blocks = (p && p.blocks) || [];
-    var out = [], i = 0;
+    var out = [], i = 0, group = null, open = false;
+    function closeGroup() {
+      if (open) { out.push('</div></section>'); open = false; }
+    }
     while (i < blocks.length) {
       if (blocks[i].type === 'stat') {
         var run = [];
         while (i < blocks.length && blocks[i].type === 'stat') { run.push(blocks[i]); i++; }
+        closeGroup();
         out.push(posterStatsHtml(run));     // the big numbers read as one strip
+        group = null;
         continue;
+      }
+      var g = blocks[i].group || '';
+      if (g !== group) {
+        closeGroup();
+        group = g;
+        if (g) {
+          out.push('<section class="ai-poster-group"><h3>' + esc(g) + '</h3><div class="ai-poster-grid">');
+          open = true;
+        }
       }
       out.push(posterBlockHtml(blocks[i]));
       i++;
     }
+    closeGroup();
+    var count = blocks.filter(function (b) { return b.type !== 'stat'; }).length;
     return '<div class="ai-poster">' +
       '<div class="ai-poster-title"><strong>' + esc(p.title || curTitle() || 'Revision poster') + '</strong>' +
-      '<span>Revision poster' + (p.subject ? ' \u00b7 ' + esc(p.subject) : '') + '</span></div>' +
+      '<span>Revision poster' + (p.subject ? ' \u00b7 ' + esc(p.subject) : '') +
+      (count ? ' \u00b7 ' + count + ' section' + (count === 1 ? '' : 's') : '') + '</span></div>' +
+      // Ungrouped blocks still need a grid, so the outer one stays.
       '<div class="ai-poster-grid">' + out.join('') + '</div></div>';
   }
 
