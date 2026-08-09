@@ -580,7 +580,14 @@
       '}',
 
       /* Notes Focus Mode is a full-screen reading surface with its own
-         picture-in-picture player parked bottom-right. Stay out of its way. */
+         picture-in-picture player parked bottom-right. Stay out of its way.
+
+         This is not merely cosmetic: that layer sits at z-index 2147483000 and
+         marks everything outside it `inert`, so the FAB would be painted beneath
+         the notes AND unclickable. The tutor is still reachable in there — the
+         notes carry their own in-layer dock (#ai-focus-ask, the 'focus' dock in
+         js/features/ai-tutor.js), which is where "Ask AI" and the note selection
+         popover send their questions. */
       'body.ai-notes-focus-open #tutor-fab,body.ai-notes-focus-open #tutor-float{display:none!important}'
     ].join('');
     document.head.appendChild(s);

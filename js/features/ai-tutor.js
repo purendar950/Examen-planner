@@ -174,6 +174,338 @@
     return '<div class="ai-web-src">🌐 <b>Looked up online:</b> ' + items.join(' · ') + '</div>';
   }
 
+  /* ── Asking about the notes themselves ────────────────────────────────────
+     Generated notes are LLM output: they can be wrong, and until now a student
+     had no way to challenge a line of them. These helpers turn a piece of the
+     rendered notebook into a grounded tutor question — the passage travels in
+     its own `note_excerpt` field and the server treats the TRANSCRIPT as
+     authoritative over it, so "verify this" can actually come back "no". */
+  // Matches NOTE_EXCERPT_CHARS in youtube-turbo-proxy/app.py. The server clamps
+  // again (and further, against the model's context window); this only avoids
+  // shipping a pointlessly large body.
+  var NOTE_EXCERPT_MAX = 12000;
+  // What goes in the visible chat bubble. The full passage still reaches the
+  // model, so this only has to read like something a person would type.
+  var NOTE_SNIPPET_MAX = 180;
+
+  function noteSnippet(text) {
+    var s = String(text || '').replace(/\s+/g, ' ').trim();
+    return s.length > NOTE_SNIPPET_MAX ? s.slice(0, NOTE_SNIPPET_MAX - 1).trim() + '…' : s;
+  }
+  /* Plain text of one notebook block, as the student reads it. Dropped on the
+     way out: our own ask button, the decorative .num counter (which would
+     otherwise run straight into the heading — "1Fundamental Rights"), and the
+     ⏩ glyph linkTs() prefixes every timestamp with. The time itself is kept,
+     because it is useful context even though note_ts carries it separately. */
+  function noteBlockText(block) {
+    if (!block) return '';
+    var clone = block.cloneNode(true);
+    Array.prototype.forEach.call(clone.querySelectorAll('.ai-nb-ask,.num'), function (n) {
+      if (n.parentNode) n.parentNode.removeChild(n);
+    });
+    return (clone.textContent || '').replace(/\u23e9/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  // The whole note, one line per block so the model still sees its structure.
+  function noteFullText(nb) {
+    if (!nb) return '';
+    return Array.prototype.map.call(nb.children, noteBlockText)
+      .filter(function (line) { return !!line; }).join('\n');
+  }
+  /* The notebook block that owns a node — i.e. the direct child of .ai-nb, which
+     is the same unit "Follow the lecture" highlights. */
+  function noteBlockOf(node) {
+    var el = (node && node.nodeType === 1) ? node : (node && node.parentElement);
+    while (el && el.parentElement) {
+      var parent = el.parentElement;
+      if (parent.classList && parent.classList.contains('ai-nb')) return el;
+      el = parent;
+    }
+    return null;
+  }
+  /* Roughly where a block sits in the lecture, so the tutor can check the right
+     part of the transcript and cite it. Blocks without their own [mm:ss] marker
+     inherit the nearest preceding one — the same "a cue owns everything until the
+     next cue" model lecIndex() uses. Returns null when the notes carry no
+     timestamps at all. */
+  function noteBlockTs(block) {
+    if (!block) return null;
+    var own = block.querySelector && block.querySelector('.ai-ts[data-s]');
+    if (own) {
+      var s = parseInt(own.getAttribute('data-s'), 10);
+      if (!isNaN(s)) return s;
+    }
+    for (var i = 0; i < _lecBlocks.length; i++) {
+      if (_lecBlocks[i].el === block) return _lecBlocks[i].start;
+    }
+    var prev = block.previousElementSibling;
+    while (prev) {
+      var cue = prev.querySelector && prev.querySelector('.ai-ts[data-s]');
+      if (cue) {
+        var ps = parseInt(cue.getAttribute('data-s'), 10);
+        if (!isNaN(ps)) return ps;
+      }
+      prev = prev.previousElementSibling;
+    }
+    return null;
+  }
+
+  /* The four things a student wants from a line of their notes. `web:'on'` on
+     verify is deliberate: checking a fact against stale training data is the
+     failure mode being fixed, not a cheaper version of it. */
+  var NOTE_ACTIONS = {
+    explain: {
+      label: '💡 Explain',
+      title: 'Explain this part of the notes simply',
+      prompt: function (snip) {
+        return 'Explain this part of my notes simply, with a concrete example: "' + snip + '"';
+      }
+    },
+    verify: {
+      label: '✅ Verify',
+      title: 'Check this against the lecture and the web',
+      web: 'on',
+      prompt: function (snip) {
+        return 'Verify this line from my notes: "' + snip + '". Does this lecture ' +
+          'actually say it, and is it correct? If it is wrong or not in the lecture, ' +
+          'say so and give the correct version.';
+      }
+    },
+    example: {
+      label: '📝 Example',
+      title: 'Give an exam-style example of this',
+      prompt: function (snip) {
+        return 'Give me an exam-style example/question based on this part of my notes: "' + snip + '"';
+      }
+    }
+  };
+
+  /* A passage chosen with "Ask…", waiting for the student to type their own
+     question. It attaches to the NEXT message sent from the chat input and then
+     clears, so the passage does not silently ride along on every later question
+     in the conversation. */
+  var _pendingNoteContext = null;
+  // A passage staged this long ago is no longer what the student is asking about.
+  // Without a bound, picking "Ask…" and then wandering off would silently attach
+  // that old line to a completely unrelated question later in the session.
+  var NOTE_CONTEXT_TTL_MS = 5 * 60 * 1000;
+  function setPendingNoteContext(passage, ts) {
+    _pendingNoteContext = passage
+      ? { passage: String(passage).slice(0, NOTE_EXCERPT_MAX), ts: ts, at: Date.now() }
+      : null;
+    paintFocusAskQuote(passage || '');
+  }
+  function takePendingNoteContext() {
+    var pending = _pendingNoteContext;
+    _pendingNoteContext = null;
+    if (pending && (Date.now() - pending.at) > NOTE_CONTEXT_TTL_MS) return null;
+    return pending;
+  }
+
+  /* ── Selection popover ────────────────────────────────────────────────────
+     Select any text in the notebook and the Explain / Verify / Example / Ask
+     actions appear next to it. Nothing in this app handled text selection before,
+     so this is the whole implementation. */
+  var _notePopCtx = { passage: '', ts: null };
+  function notePopEl() { return document.getElementById('ai-note-pop'); }
+  // Returns true when it actually closed something, so Esc can consume the key.
+  function hideNotePop() {
+    var pop = notePopEl();
+    if (!pop || pop.hidden) return false;
+    pop.hidden = true;
+    return true;
+  }
+  function notePopHtml() {
+    var html = '';
+    ['explain', 'verify', 'example'].forEach(function (key) {
+      var spec = NOTE_ACTIONS[key];
+      html += '<button type="button" class="ai-note-pop-btn" data-note-action="' + key +
+        '" title="' + escAttr(spec.title) + '">' + spec.label + '</button>';
+    });
+    return html + '<button type="button" class="ai-note-pop-btn" data-note-action="ask" ' +
+      'title="Type your own question about this passage">💬 Ask…</button>';
+  }
+  function showNotePop(rect, passage, ts) {
+    var pop = notePopEl();
+    if (!pop || !rect) return;
+    _notePopCtx = { passage: passage, ts: ts };
+    if (!pop.innerHTML) pop.innerHTML = notePopHtml();
+    pop.hidden = false;
+    // Measured after unhiding, because a hidden element has no size.
+    var w = pop.offsetWidth || 260, h = pop.offsetHeight || 34;
+    var left = Math.min(
+      Math.max(8, rect.left + (rect.width / 2) - (w / 2)),
+      Math.max(8, (window.innerWidth || w) - w - 8)
+    );
+    // Above the selection by preference — below it would cover the next line the
+    // student is reading. Flips under when there is no room above.
+    var top = rect.top - h - 8;
+    if (top < 8) top = Math.min(rect.bottom + 8, Math.max(8, (window.innerHeight || h) - h - 8));
+    pop.style.left = Math.round(left) + 'px';
+    pop.style.top = Math.round(top) + 'px';
+  }
+  /* The annotation canvas sits over the notebook and captures pointer events for
+     every tool except 'move', so while the student is drawing there is no
+     selection to act on and the popover would just be in the way. */
+  function noteSelectionAllowed(box) {
+    var marks = notesFocusMarkState(box);
+    return !marks || marks.tool === 'move';
+  }
+  function readNoteSelection(nb) {
+    var sel = null;
+    try { sel = window.getSelection(); } catch (e) { return null; }
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    // Same ⏩ cleanup as noteBlockText: a selection that crosses a timestamp
+    // link would otherwise carry the seek glyph into the question.
+    var text = String(sel).replace(/\u23e9/g, ' ').replace(/\s+/g, ' ').trim();
+    // Two characters is a stray tap-drag, not a question.
+    if (text.length < 3) return null;
+    var range = sel.getRangeAt(0);
+    if (!nb.contains(range.commonAncestorContainer) &&
+        !nb.contains(range.startContainer)) return null;
+    var rect = range.getBoundingClientRect();
+    if (!rect || (!rect.width && !rect.height)) return null;
+    var block = noteBlockOf(range.startContainer);
+    return { text: text, rect: rect, ts: noteBlockTs(block) };
+  }
+  function armNoteSelection(box) {
+    var nb = box.querySelector('.ai-nb');
+    if (!nb) return;
+    var pop = box.querySelector('#ai-note-pop');
+    if (pop) {
+      pop.innerHTML = notePopHtml();
+      pop.onclick = function (e) {
+        var target = e.target;
+        var btn = (target && target.closest) ? target.closest('[data-note-action]') : null;
+        if (!btn) return;
+        e.preventDefault();
+        runNoteAction(btn.getAttribute('data-note-action'), _notePopCtx.passage, _notePopCtx.ts);
+      };
+      // Keep the selection alive: focusing a button would otherwise collapse it
+      // before the click handler can read it.
+      pop.onmousedown = function (e) { e.preventDefault(); };
+    }
+    function settle() {
+      if (!noteSelectionAllowed(box)) { hideNotePop(); return; }
+      var found = readNoteSelection(nb);
+      if (!found) { hideNotePop(); return; }
+      showNotePop(found.rect, found.text, found.ts);
+    }
+    /* pointerup/keyup rather than selectionchange: selectionchange fires
+       continuously through a drag, which would send the popover skating across
+       the screen while the student is still choosing what to select. */
+    nb.addEventListener('pointerup', function () { setTimeout(settle, 10); });
+    nb.addEventListener('keyup', function (e) {
+      if (e.shiftKey || e.key === 'Shift' || (e.key || '').indexOf('Arrow') === 0) setTimeout(settle, 10);
+    });
+    // A fresh drag or a scroll invalidates the anchor position.
+    nb.addEventListener('pointerdown', function () { hideNotePop(); });
+    var scroller = box.querySelector('.ai-scroll');
+    if (scroller) scroller.addEventListener('scroll', function () { hideNotePop(); }, { passive: true });
+  }
+
+  function runNoteAction(action, passage, ts) {
+    hideNotePop();
+    var text = String(passage || '').trim();
+    if (!text) return false;
+    if (action === 'ask') {
+      // No prompt of our own: attach the passage and hand the student the input.
+      setPendingNoteContext(text, ts);
+      if (!(_notesFocus ? openTutorInFocus(text) : showTutorTab())) return false;
+      setTimeout(function () {
+        var input = document.getElementById('ai-chat-in');
+        if (input) input.focus();
+      }, 60);
+      return true;
+    }
+    var spec = NOTE_ACTIONS[action];
+    if (!spec) return false;
+    return askAboutNote(spec.prompt(noteSnippet(text)), text, ts, { web: spec.web });
+  }
+
+  /* ── Per-section ask buttons ──────────────────────────────────────────────
+     Selection is precise but fiddly on a phone, and the drag competes with the
+     scroll gesture. A button on each section heading is the reliable path: one
+     tap, no selection, and it already knows the section's transcript position.
+
+     Only .sec (major headings) gets one, and for a layout reason: .sec is a flex
+     row, so a child pushed over with margin-left:auto cannot make the block
+     taller. The private annotation canvas is absolutely positioned over the
+     notebook and its saved strokes are anchored to that geometry, so a change in
+     block height here would visibly shift every existing highlight. */
+  function noteAskBtnHtml(index) {
+    return '<button type="button" class="ai-nb-ask" data-nb-ask="' + index + '" ' +
+      'aria-label="Ask the AI about this section" title="Ask the AI about this section">💬</button>';
+  }
+  /* Everything under a heading up to the next heading. That is what a student
+     means by "this section" — the heading line on its own is not a question. */
+  function noteSectionText(headingBlock) {
+    var parts = [noteBlockText(headingBlock)];
+    var el = headingBlock.nextElementSibling;
+    while (el && !(el.classList && el.classList.contains('sec'))) {
+      var line = noteBlockText(el);
+      if (line) parts.push(line);
+      el = el.nextElementSibling;
+    }
+    return parts.filter(Boolean).join('\n').slice(0, NOTE_EXCERPT_MAX);
+  }
+  function setupNoteAsk(box) {
+    var nb = box && box.querySelector('.ai-nb');
+    if (!nb) return;
+    Array.prototype.forEach.call(nb.children, function (block, index) {
+      // Every block is indexed, not just the ones that get a button — the index
+      // is the stable handle the notebook never had.
+      block.setAttribute('data-nb-block', String(index));
+      if (!block.classList || !block.classList.contains('sec')) return;
+      if (block.querySelector('.ai-nb-ask')) return;
+      block.insertAdjacentHTML('beforeend', noteAskBtnHtml(index));
+    });
+    nb.addEventListener('click', function (e) {
+      var target = e.target;
+      var btn = (target && target.closest) ? target.closest('.ai-nb-ask') : null;
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();          // never let this reach a timestamp seek link
+      var block = noteBlockOf(btn);
+      if (!block) return;
+      showNotePop(btn.getBoundingClientRect(), noteSectionText(block), noteBlockTs(block));
+    });
+    armNoteSelection(box);
+  }
+
+  /* ── Whole-note check ─────────────────────────────────────────────────────
+     One pass over the entire note, claim by claim, against the transcript that
+     produced it. This is the real payoff of note_excerpt: the notes ARE model
+     output, and until now nothing in the app could tell a student which parts of
+     their own revision material to distrust.
+
+     Deliberately NOT forced to search the web: the question is a formatting
+     instruction with no searchable subject, so a lookup would return noise. The
+     transcript is the right authority for "does my note match the lecture". */
+  var NOTE_CHECK_PROMPT =
+    'Check these notes against the lecture, claim by claim. For each factual claim ' +
+    'give ONE short line: ✅ supported (cite [mm:ss]), ⚠️ not covered in this lecture ' +
+    '(and say whether it is still factually correct), or ❌ contradicts the lecture ' +
+    '(then give the correction with [mm:ss]). Put the ❌ and ⚠️ lines first, skip ' +
+    'headings and anything that is not a claim, and end with a one-line verdict on ' +
+    'how much I can trust these notes.';
+
+  function checkWholeNote(box) {
+    var nb = box && box.querySelector('.ai-nb');
+    var text = nb ? noteFullText(nb) : '';
+    if (!text) {
+      if (typeof showToast === 'function') showToast('No notes to check yet.', 'info');
+      return false;
+    }
+    var question = NOTE_CHECK_PROMPT;
+    if (text.length > NOTE_EXCERPT_MAX) {
+      // Say so in the question rather than silently checking a fraction: a
+      // "trustworthy" verdict over an invisible subset would be worse than none.
+      text = text.slice(0, NOTE_EXCERPT_MAX);
+      question += ' (Only the first part of my notes is included here.)';
+    }
+    return askAboutNote(question, text, null, {});
+  }
+
   /* User-picked AI model. "" = Auto (proxy uses the admin default). The dropdown
      is filled from /api/status.studyModels — i.e. ONLY the active provider's
      models — so any choice the user makes is valid for the configured key. */
@@ -234,18 +566,43 @@
 
      Ownership is session state and deliberately NOT persisted: the floating
      window is always closed on a fresh load, so restoring 'float' would only
-     describe a dock that does not exist yet. */
+     describe a dock that does not exist yet.
+
+     There is a THIRD dock: 'focus', the ask sheet inside Notes Focus Mode. It
+     exists because Focus Mode is a fixed layer at z-index 2147483000 that marks
+     every other element `inert`, so the floating window is both painted under it
+     and unclickable — tutor-float.js hides itself outright while Focus is up.
+     Anything that wants to talk to the student in there has to live INSIDE the
+     notes subtree, so the chat is re-parented into the sheet exactly the way it
+     is re-parented into the float. */
   var _tutorDock = 'panel';
-  function tutorDock() { return _tutorDock === 'float' ? 'float' : 'panel'; }
-  function setTutorDock(v) { _tutorDock = v === 'float' ? 'float' : 'panel'; }
+  var TUTOR_DOCKS = ['panel', 'float', 'focus'];
+  function tutorDock() { return TUTOR_DOCKS.indexOf(_tutorDock) > 0 ? _tutorDock : 'panel'; }
+  function setTutorDock(v) { _tutorDock = TUTOR_DOCKS.indexOf(v) > 0 ? v : 'panel'; }
   function floatBody() { return document.getElementById('tutor-float-body'); }
   function floatOpen() { return !!document.body && document.body.classList.contains('tutor-float-open'); }
+  function focusAskBody() { return document.getElementById('ai-focus-ask-body'); }
+  // The sheet is only a usable dock while Focus Mode is actually up and the sheet
+  // is expanded — not merely present in the notes markup.
+  function focusAskOpen() {
+    var sheet = document.getElementById('ai-focus-ask');
+    return !!(_notesFocus && sheet && !sheet.hidden);
+  }
   // Where chatHtml() should be written. Null means "nowhere right now" (the
   // float is the owner but closed), which every caller treats as a no-op.
-  function tutorMount() { return tutorDock() === 'float' ? floatBody() : shellBody(); }
+  function tutorMount() {
+    if (tutorDock() === 'float') return floatBody();
+    if (tutorDock() === 'focus') return focusAskBody();
+    return shellBody();
+  }
   // Is the one chat instance actually on screen? Streaming paints and history
   // re-renders are skipped when it is not, and resume from localStorage later.
   function tutorVisible() {
+    // Checked before the others: while Focus Mode owns the screen the panel and
+    // the float are both invisible, so a reply must only be painted into the
+    // sheet. Getting this wrong is what makes an answer stream into a hidden
+    // node and appear to vanish.
+    if (tutorDock() === 'focus') return focusAskOpen();
     if (tutorDock() === 'float') return !!(floatBody() && floatOpen());
     // Panel ownership alone is not visibility: the shell remains mounted when
     // navigation leaves YouTube, and the selected Tutor sub-tab is remembered.
@@ -874,6 +1231,27 @@
       '.ai-web-src{margin-top:7px;padding-top:6px;border-top:1px dashed var(--border,#2a3140);font-size:0.68rem;line-height:1.6;color:var(--muted,#8b93a7)}',
       '.ai-web-link{color:var(--accent,#00c896);text-decoration:none;word-break:break-word}',
       '.ai-web-link:hover{text-decoration:underline}',
+      /* ── asking about the notes ──
+         Both of these live in the notebook, which is a light "paper" surface in
+         the panel AND in Focus Mode, so they use literal neutrals rather than the
+         app's dark theme tokens. Declared here rather than in css/app.css because
+         css/app.css scopes its notebook rules to Focus Mode, and these have to
+         work in the ordinary panel view too. */
+      // margin-left:auto works because .sec is a flex row; the button therefore
+      // cannot make the block taller, which would shift saved annotation strokes.
+      // user-select:none keeps it out of the text the student selects.
+      '.ai-nb-ask{margin-left:auto;flex:0 0 auto;width:27px;height:22px;padding:0;border:1px solid rgba(0,0,0,.16);border-radius:6px;background:rgba(255,255,255,.6);color:inherit;font-size:.7rem;line-height:1;cursor:pointer;opacity:.3;user-select:none;-webkit-user-select:none;transition:opacity .15s,border-color .15s}',
+      '.sec:hover>.ai-nb-ask,.ai-nb-ask:focus-visible{opacity:1;border-color:#8eb69a}',
+      // No hover on touch, so the affordance has to be permanently visible there.
+      '@media(hover:none){.ai-nb-ask{opacity:.6}}',
+      // While a pen/highlighter tool is armed the canvas swallows the taps, so
+      // showing an unusable button would just be a lie.
+      '.ai-focus-marking .ai-nb-ask{opacity:.12;pointer-events:none}',
+      '.ai-note-pop{position:fixed;z-index:9000;display:flex;flex-wrap:wrap;gap:4px;max-width:min(94vw,340px);padding:4px;border:1px solid rgba(0,0,0,.14);border-radius:10px;background:#fffdf6;box-shadow:0 10px 30px rgba(30,40,34,.24)}',
+      '.ai-note-pop[hidden]{display:none}',
+      '.ai-note-pop-btn{cursor:pointer;border:1px solid rgba(0,0,0,.12);border-radius:7px;background:#fff;color:#17231d;padding:5px 9px;font-weight:800;font-size:.68rem;line-height:1;white-space:nowrap;font-family:inherit}',
+      '.ai-note-pop-btn:hover{background:#eef7eb;border-color:#8eb69a}',
+      '.ai-note-pop-btn:focus-visible{outline:2px solid #08733a;outline-offset:1px}',
       '.ai-input-row{display:flex;gap:8px}',
       '.ai-input-row input{flex:1;background:var(--surface,#1b1f2a);color:var(--text,#e7ecf5);border:1px solid var(--border,#2a3140);border-radius:8px;padding:9px}',
       '.ai-q{border:1px solid var(--border,#2a3140);border-radius:10px;padding:12px;margin-bottom:10px}',
@@ -1756,6 +2134,11 @@
     if (!state) return;
     state.tool = tool || 'move';
     state.canvas.style.pointerEvents = state.tool === 'move' ? 'none' : 'auto';
+    // The canvas swallows taps for every tool except 'move', so the in-note ask
+    // buttons and the selection popover are unusable while drawing. Say so in the
+    // UI rather than leaving dead controls on screen.
+    box.classList.toggle('ai-focus-marking', state.tool !== 'move');
+    if (state.tool !== 'move') hideNotePop();
     state.canvas.style.cursor = state.tool === 'eraser' ? 'cell' : state.tool === 'highlight' ? 'text' : 'crosshair';
     Array.prototype.forEach.call(box.querySelectorAll('[data-focus-mark-tool]'), function (button) {
       var selected = button.dataset.focusMarkTool === state.tool;
@@ -2083,6 +2466,8 @@
         '<span class="ai-focus-time" id="ai-focus-time" aria-label="Current video time">0:00</span>' +
         '<button type="button" class="ai-focus-control ai-focus-video" id="ai-focus-video" data-action="start" aria-live="polite">⚡ Start Turbo</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-follow" data-ai-follow-control aria-pressed="false">🎯 Follow</button>' +
+        '<button type="button" class="ai-focus-control" id="ai-focus-ask-toggle" aria-expanded="false" title="Ask the AI about these notes without leaving Focus Mode">💬 Ask AI</button>' +
+        '<button type="button" class="ai-focus-control" id="ai-focus-verify" title="Check these notes against the lecture and flag anything unsupported">🔍 Check notes</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-annotations-toggle" aria-expanded="false" title="Write and highlight privately on these notes">🖍 My notes</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-pdf" title="Print or save notes as PDF">📄 PDF</button>' +
       '</div>' +
@@ -2109,7 +2494,29 @@
     '</div>' +
     '<div class="ai-focus-mini-video" id="ai-focus-mini-video" hidden>' +
       '<button type="button" class="ai-focus-mini-close" id="ai-focus-mini-close" aria-label="Hide floating video" title="Hide floating video">×</button>' +
-    '</div>';
+    '</div>' +
+    /* The in-layer tutor dock. It MUST be inside the notes subtree: Focus Mode
+       marks every element outside it `inert` and sits at z-index 2147483000, so
+       the floating tutor is both unclickable and painted underneath (which is why
+       tutor-float.js hides itself while Focus is up). #ai-focus-ask-body is the
+       mount point the single .ai-tutor-shell node is re-parented into. */
+    '<div class="ai-focus-ask" id="ai-focus-ask" role="region" aria-label="Ask the AI about these notes" hidden>' +
+      '<div class="ai-focus-ask-head">' +
+        '<strong>💬 Ask about these notes</strong>' +
+        // Free-tier allowance, shown BEFORE a message is spent. One tap per
+        // section makes 5/day easy to burn through by accident, and finding out
+        // by hitting the wall reads as the feature being broken.
+        '<span class="ai-focus-ask-left" id="ai-focus-ask-left" hidden></span>' +
+        '<button type="button" class="ai-focus-ask-close" id="ai-focus-ask-close" aria-label="Close the ask panel" title="Close (Esc)">×</button>' +
+      '</div>' +
+      // Shows WHICH passage the question is about, so the student can see the
+      // tutor is answering about the line they picked and not the whole note.
+      '<div class="ai-focus-ask-quote" id="ai-focus-ask-quote" hidden></div>' +
+      '<div class="ai-focus-ask-body" id="ai-focus-ask-body"></div>' +
+    '</div>' +
+    // Anchored to the text the student selected. Inside the notes subtree for the
+    // same inert/z-index reasons as the sheet.
+    '<div class="ai-note-pop" id="ai-note-pop" role="toolbar" aria-label="Ask the AI about the selected text" hidden></div>';
   }
 
   function notesFocusTimeLabel(seconds) {
@@ -2313,6 +2720,11 @@
   function finishNotesFocusClose(restoreFocus) {
     var active = _notesFocus;
     if (!active) return;
+    // Hand the chat back to the panel while the sheet still exists, so a reply
+    // that is mid-stream survives the move instead of painting into a node that
+    // is about to be hidden.
+    hideNotePop();
+    closeFocusAsk();
     // Never leave the browser fullscreen on a node whose focus styling is about
     // to be stripped; that would strand the page in a chromeless dead state.
     notesFocusExitFullscreen(active.box);
@@ -2464,6 +2876,11 @@
       // acting on it themselves.
       if (notesFocusIsFullscreen()) { notesFocusExitFullscreen(); return; }
       e.preventDefault();
+      // Innermost layer first, so Esc never tears down the whole reading view
+      // while the student is mid-question in the ask sheet.
+      if (hideNotePop()) return;
+      var askSheet = _notesFocus.box && _notesFocus.box.querySelector('#ai-focus-ask');
+      if (askSheet && !askSheet.hidden) { closeFocusAsk(); return; }
       var annotationBar = _notesFocus.box && _notesFocus.box.querySelector('#ai-focus-annotation-bar');
       if (annotationBar && !annotationBar.hidden) {
         notesFocusToggleAnnotations(_notesFocus.box, false);
@@ -2495,6 +2912,13 @@
   function renderNotesResult(mode, n, style, j, targetEl) {
     var box = targetEl || contentEl();
     var content = j.content || '';
+    /* The ask sheet lives in the markup this function is about to overwrite, so
+       reclaim the chat first. Without this the single .ai-tutor-shell node would
+       be destroyed mid-conversation along with the ids it owns. */
+    returnTutorFromFocus();
+    // These notes are being replaced, so any passage staged from the old ones is
+    // meaningless now.
+    setPendingNoteContext(null, null);
     // One private annotation layer per video + generated-notes style. Strokes
     // stay in this student's appState and never create a shared document.
     box.dataset.focusNoteKey = ['video', curVid() || 'untitled', mode || 'notes', style || 'topic'].join(':');
@@ -2519,6 +2943,7 @@
     };
     bindTsLinks(box);
     lecSetup(box);                    // wire up "Follow the lecture" (Topic + MCQ)
+    setupNoteAsk(box);                // per-section ask buttons + selection popover
     var pb = document.getElementById('ai-pdf');
     var printNotes = function () { pdfDownload(pdfTitleFor(mode, style), nbHtml, { notebook: true, documentLabel: pdfDocumentLabelFor(mode, style) }); };
     if (pb) pb.onclick = printNotes;
@@ -2530,6 +2955,12 @@
     if (focusVideo) focusVideo.onclick = notesFocusVideoAction;
     var focusFullscreen = box.querySelector('#ai-focus-fullscreen');
     if (focusFullscreen) focusFullscreen.onclick = notesFocusToggleFullscreen;
+    var focusAskToggle = box.querySelector('#ai-focus-ask-toggle');
+    if (focusAskToggle) focusAskToggle.onclick = toggleFocusAsk;
+    var focusAskClose = box.querySelector('#ai-focus-ask-close');
+    if (focusAskClose) focusAskClose.onclick = closeFocusAsk;
+    var focusVerify = box.querySelector('#ai-focus-verify');
+    if (focusVerify) focusVerify.onclick = function () { checkWholeNote(box); };
     var miniClose = box.querySelector('#ai-focus-mini-close');
     if (miniClose) miniClose.onclick = function () {
       if (focusVideo) focusVideo.dataset.action = 'mini-hide';
@@ -3799,6 +4230,9 @@
   function dockButtonHtml() {
     var ytPage = document.getElementById('page-youtube');
     var panelReachable = !!(ytPage && ytPage.classList.contains('active') && shellBody());
+    // Nothing to offer from the Focus sheet: the panel and the float are both
+    // behind an inert full-screen layer, and the sheet's own header closes it.
+    if (tutorDock() === 'focus') return '';
     if (tutorDock() === 'float') {
       return panelReachable
         ? '<button type="button" class="ai-btn sec ai-tutor-dock-btn" id="ai-tutor-dock-panel" ' +
@@ -4262,6 +4696,130 @@
     refreshLibraryCoverage();
   }
 
+  /* ── Notes Focus Mode dock ────────────────────────────────────────────────
+     The ask sheet lives inside the notes subtree (see the dock comment above for
+     why it has to). Moving the chat in and out of it uses the same re-parenting
+     path as the floating window, so an answer that is mid-stream when the sheet
+     opens or closes keeps painting instead of being rebuilt. */
+  function paintFocusAskQuote(text) {
+    var el = document.getElementById('ai-focus-ask-quote');
+    if (!el) return;
+    var snip = noteSnippet(text);
+    el.hidden = !snip;
+    el.textContent = snip ? '“' + snip + '”' : '';
+  }
+  /* Free-plan allowance, read from the gate that owns it. Absent (older cached
+     gating file) or null (Pro/trial) both mean "show nothing" — this must never
+     invent a limit of its own. */
+  function paintFocusAskLeft() {
+    var el = document.getElementById('ai-focus-ask-left');
+    if (!el) return;
+    var quota = null;
+    try {
+      if (typeof window.ezTutorMessagesLeft === 'function') quota = window.ezTutorMessagesLeft();
+    } catch (e) {}
+    if (!quota) { el.hidden = true; el.textContent = ''; return; }
+    el.hidden = false;
+    el.textContent = quota.left + ' of ' + quota.max + ' free left today';
+    el.classList.toggle('is-out', quota.left <= 0);
+  }
+  function paintFocusAskToggle() {
+    var btn = document.getElementById('ai-focus-ask-toggle');
+    if (!btn) return;
+    var open = focusAskOpen();
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    btn.classList.toggle('ai-focus-control-active', open);
+  }
+  // Open the sheet and give it the chat. Idempotent — every ask action calls it.
+  function openTutorInFocus(quoteText) {
+    var sheet = document.getElementById('ai-focus-ask');
+    var host = focusAskBody();
+    if (!sheet || !host) return false;
+    sheet.hidden = false;
+    if (_notesFocus && _notesFocus.box) _notesFocus.box.classList.add('ai-focus-ask-open');
+    paintFocusAskQuote(quoteText);
+    setTutorDock('focus');
+    if (!adoptTutorInto(host)) renderTutor();
+    paintFocusAskToggle();
+    paintFocusAskLeft();
+    emitTutorViewed();
+    return true;
+  }
+  function returnTutorFromFocus() {
+    if (tutorDock() !== 'focus') return;
+    setTutorDock('panel');
+    var host = shellBody();
+    /* Re-parent while the sheet is still in the DOM so a live stream survives.
+       Only mount into the panel when the Tutor tab is the visible workspace;
+       otherwise destroy the shell outright, because leaving it inside a collapsed
+       sheet would give the fixed #ai-chat / #ai-chat-in ids an invisible second
+       owner and a later reply could paint into the wrong one. */
+    if (host && state.tab === 'tutor') {
+      if (!adoptTutorInto(host)) renderTutor();
+    } else {
+      var stale = document.querySelector('.ai-tutor-shell');
+      if (stale && stale.parentNode) stale.parentNode.removeChild(stale);
+    }
+  }
+  function closeFocusAsk() {
+    var sheet = document.getElementById('ai-focus-ask');
+    returnTutorFromFocus();          // must run BEFORE the sheet is hidden
+    if (sheet) sheet.hidden = true;
+    if (_notesFocus && _notesFocus.box) _notesFocus.box.classList.remove('ai-focus-ask-open');
+    // Dismissing the ask surface discards the passage that was staged for it, so
+    // reopening it always starts from a clean question.
+    setPendingNoteContext(null, null);
+    paintFocusAskToggle();
+  }
+  function toggleFocusAsk() {
+    if (focusAskOpen()) closeFocusAsk();
+    else openTutorInFocus('');
+  }
+
+  /* Single entry point for every "ask the AI about this note" affordance — the
+     selection popover, the per-section buttons and the whole-note check.
+
+     `passage` is the full text the tutor should look at; `question` is what the
+     student appears to have said. They differ on purpose: a long passage would
+     make an unreadable chat bubble and would be truncated out of the replayed
+     history, so it travels in note_excerpt instead. */
+  function askAboutNote(question, passage, ts, opts) {
+    opts = opts || {};
+    if (!question) return false;
+    /* Video scope only. The library endpoint ignores note_excerpt, so a note
+       question asked in Library scope would silently lose the passage it is
+       about. Focus Mode always has a video loaded, so this can never strand the
+       student in a scope that cannot answer. */
+    if (isLibraryScope() && canUseVideoScope()) {
+      setScopeAutoForced(false);
+      setTutorScope('video');
+    }
+    var opened = _notesFocus
+      ? openTutorInFocus(passage || question)
+      : showTutorTab();
+    if (!opened) return false;
+    // Same beat as the quiz's "Re-explain what I missed": let the chat DOM exist
+    // before a bubble is created in it.
+    setTimeout(function () {
+      sendTutor(question, null, {
+        web: opts.web,
+        noteExcerpt: passage || '',
+        noteTs: (ts == null ? null : ts)
+      });
+    }, 50);
+    return true;
+  }
+  // Bring the tutor on screen in the normal (non-Focus) panel.
+  function showTutorTab() {
+    if (!shellBody()) return false;
+    if (tutorDock() === 'float' && floatOpen()) return true;   // already reachable
+    setTutorDock('panel');
+    state.tab = 'tutor';
+    renderTabs();
+    renderBody();
+    return true;
+  }
+
   // True only while the AI Study panel is actually the visible workspace.
   // applyView() re-asserts the YouTube grid, so calling it from another page
   // would briefly widen that page's .main-content to the AI Study width.
@@ -4332,29 +4890,42 @@
   // Build the JSON body shared by the streaming + one-shot tutor calls.
   // Library scope has no video id and its own scope field; everything else
   // (language, provider/model override, memory) is identical.
-  function tutorBody(vid, question, mode, histForApi) {
-    if (isLibraryScope()) {
-      var courseMode = isCourseTutorScope();
-      return JSON.stringify({
-        q: question || '', out: outLang(), scope: courseMode ? 'course' : 'library',
-        course_id: courseMode ? tutorCourseId() : '',
-        provider: outProvider(), model: outModel(), history: histForApi,
-        web: tutorWebMode(),
-        memory: (window.TutorMemory && window.TutorMemory.contextText()) || ''
-      });
-    }
-    return JSON.stringify({
-      id: vid, q: question || '', out: outLang(), mode: mode || 'chat',
+  function tutorBody(vid, question, mode, histForApi, opts) {
+    opts = opts || {};
+    var body = {
+      q: question || '', out: outLang(),
       provider: outProvider(), model: outModel(), history: histForApi,
       // 'auto' | 'on' | 'off' — whether the backend may search the internet for
-      // this question. The server re-validates and decides; see app.py.
-      web: tutorWebMode(),
+      // this question. `opts.web` is a per-call override: Verify forces a live
+      // lookup, because "is this still true?" is worthless from training data.
+      // The server re-validates and decides; see app.py.
+      web: opts.web || tutorWebMode(),
       // Cross-session student memory (see js/features/tutor-memory.js) —
       // works no matter which provider/model answers, since it's injected
       // fresh into the prompt server-side on every call rather than living
       // inside any one model.
       memory: (window.TutorMemory && window.TutorMemory.contextText()) || ''
-    });
+    };
+    /* A passage of the student's own generated notes that this question is about.
+       Sent as its own field rather than glued into `q` for three reasons: the
+       chat bubble stays readable, the 2000-char history truncation does not eat
+       it, and the memory profiler does not learn a wall of quoted notes as if the
+       student had said it. The server frames it as the SUBJECT of the question,
+       never as a source — see _NOTE_PASSAGE_RULE in app.py. */
+    if (opts.noteExcerpt) {
+      body.note_excerpt = String(opts.noteExcerpt).slice(0, NOTE_EXCERPT_MAX);
+      var ts = Number(opts.noteTs);
+      if (opts.noteTs != null && isFinite(ts) && ts >= 0) body.note_ts = Math.round(ts);
+    }
+    if (isLibraryScope()) {
+      var courseMode = isCourseTutorScope();
+      body.scope = courseMode ? 'course' : 'library';
+      body.course_id = courseMode ? tutorCourseId() : '';
+    } else {
+      body.id = vid;
+      body.mode = mode || 'chat';
+    }
+    return JSON.stringify(body);
   }
 
   function paintTutorBubble(el, content, streaming, web) {
@@ -4375,6 +4946,7 @@
   function finishTutorBubble(historyKey, turnId, preferred, content, web) {
     var bubble = findTutorBubble(historyKey, turnId, preferred);
     paintTutorBubble(bubble, content, false, web);
+    paintFocusAskLeft();              // the allowance just changed; no-op elsewhere
     if (tutorVisible() && chatKey() === historyKey) {
       var hasPending = getHistory(historyKey).some(function (m) { return m.pending; });
       if (!hasPending && !document.getElementById('ai-clear')) renderTutor();
@@ -4449,7 +5021,8 @@
   // Tutor reply STREAMS from /api/tutor/stream (SSE) so it types out live, and
   // falls back to the one-shot /api/tutor on any error / no-stream / abort — so
   // this is never worse than the classic path.
-  function sendTutor(question, mode) {
+  function sendTutor(question, mode, opts) {
+    opts = opts || {};
     var lib = isLibraryScope();
     var requestLibraryScopeKey = lib ? activeLibraryScopeKey() : '';
     var requestLibraryScopeLabel = lib
@@ -4495,11 +5068,20 @@
         detail: { turnId: turnId, historyKey: historyKey }
       }));
     } catch (e) {}
+    /* A passage picked with "Ask…" applies to whatever the student types next.
+       Consumed here — after every early return — so a question that was never
+       actually sent does not silently eat the attachment. */
+    if (!opts.noteExcerpt) {
+      var pendingNote = takePendingNoteContext();
+      if (pendingNote) {
+        opts = { web: opts.web, noteExcerpt: pendingNote.passage, noteTs: pendingNote.ts };
+      }
+    }
     var histForApi = h.filter(function (m) { return !m.pending; }).slice(-8).map(function (m) { return { role: m.role, content: m.content }; });
     // Keep the target scope immutable for both transports. A stream may fail
     // after the student changes playlists; its one-shot fallback must still
     // search the original playlist and save into that same conversation.
-    var requestBody = tutorBody(vid, question, mode, histForApi);
+    var requestBody = tutorBody(vid, question, mode, histForApi, opts);
 
     // Live assistant bubble we grow as chunks arrive (only when the tutor tab is
     // visible). Starts as a "thinking…" spinner; the first chunk replaces it.
@@ -5538,7 +6120,8 @@
     // Re-render the conversation in whichever dock owns it.
     render: renderTutor,
     // Ask a question programmatically (goes through the same gate + streaming).
-    ask: function (question, mode) { sendTutor(question, mode); },
+    // `opts` carries per-call overrides: {web, noteExcerpt, noteTs}.
+    ask: function (question, mode, opts) { sendTutor(question, mode, opts); },
     // Keep one contextual Pomodoro action ready across tutor re-renders.
     offerFocusQuiz: function (detail) {
       _focusQuizOffer = {
