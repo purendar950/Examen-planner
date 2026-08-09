@@ -1029,7 +1029,7 @@ _POSTER_KINDS = ("auto", "formula", "facts", "process", "pattern")
 # capping there was throwing most of it away. The renderer groups blocks under
 # headings and lets print paginate, so "one page" is no longer the constraint —
 # completeness is. Still bounded so a runaway response cannot be unreadable.
-POSTER_MAX_BLOCKS = int(os.environ.get("POSTER_MAX_BLOCKS", "18"))
+POSTER_MAX_BLOCKS = int(os.environ.get("POSTER_MAX_BLOCKS", "40"))
 # Output budget per pass. The old 2600 truncated long JSON, which silently lost
 # whole blocks because a cut-off object cannot be parsed.
 POSTER_CAP = int(os.environ.get("POSTER_MAX_TOKENS", "4000"))
@@ -2905,10 +2905,12 @@ def _poster_instr(kind, out_lang):
         '{"type":"mnemonic","group":"...","title":"Memory tricks","items":['
         '{"trick":"VIBGYOR","means":"Violet Indigo Blue Green Yellow Orange Red"}]}\n\n'
         "Rules:\n"
-        "- BE THOROUGH. Include EVERY exam-relevant number, date, name, place, "
-        "definition, formula and comparison in the text — a poster that omits "
-        "half the lecture is useless. Use up to %d blocks and split a big topic "
-        "into several blocks rather than dropping its detail.\n"
+        "- BE EXHAUSTIVE. Include EVERY exam-relevant number, date, name, place, "
+        "definition, formula, comparison and example in the text. Nothing "
+        "examinable may be left out — if the material is large, use MORE blocks "
+        "(up to %d) and split a big topic across several, rather than "
+        "summarising or dropping its detail. Length is not a problem here; "
+        "omission is.\n"
         "- Up to 6 `stat` blocks for the most memorable numbers; a `stat` value is "
         "at most 12 characters and carries no `group`.\n"
         "- A `compare` block needs 2 or 3 headers and every row must have exactly "
@@ -2984,7 +2986,7 @@ def _sanitise_poster(data, kind):
             items = [{"when": _clean_line(i.get("when"), 24),
                       "what": _clean_line(i.get("what"), 120)}
                      for i in (raw.get("items") or []) if isinstance(i, dict)]
-            items = [i for i in items if i["when"] and i["what"]][:16]
+            items = [i for i in items if i["when"] and i["what"]][:30]
             if len(items) < 2:
                 continue
             block["items"] = items
@@ -3003,11 +3005,11 @@ def _sanitise_poster(data, kind):
                 rows.append({"label": _clean_line(r.get("label"), 40), "values": values})
             if not rows:
                 continue
-            block.update({"headers": headers, "rows": rows[:12]})
+            block.update({"headers": headers, "rows": rows[:20]})
         elif btype in ("keyfacts", "process"):
             key = "items" if btype == "keyfacts" else "steps"
             items = [_clean_line(i, 160) for i in (raw.get(key) or raw.get("items") or [])]
-            items = [i for i in items if i][:14]
+            items = [i for i in items if i][:24]
             if not items:
                 continue
             block[key] = items
@@ -3022,7 +3024,7 @@ def _sanitise_poster(data, kind):
                     items.append({"q": question, "a": answer})
             if not items:
                 continue
-            block["items"] = items[:12]
+            block["items"] = items[:20]
         elif btype == "mnemonic":
             items = []
             for i in (raw.get("items") or []):
@@ -3034,7 +3036,7 @@ def _sanitise_poster(data, kind):
                     items.append({"trick": trick, "means": means})
             if not items:
                 continue
-            block["items"] = items[:10]
+            block["items"] = items[:16]
         elif btype == "formula":
             items = []
             for i in (raw.get("items") or []):
@@ -3047,7 +3049,7 @@ def _sanitise_poster(data, kind):
                               "note": _clean_line(i.get("note"), 120)})
             if not items:
                 continue
-            block["items"] = items[:12]
+            block["items"] = items[:18]
         elif btype == "glossary":
             items = []
             for i in (raw.get("items") or []):
@@ -3059,12 +3061,14 @@ def _sanitise_poster(data, kind):
                     items.append({"term": term, "meaning": meaning})
             if len(items) < 2:
                 continue
-            block["items"] = items[:16]
+            block["items"] = items[:30]
         blocks.append(block)
-        if len(blocks) >= POSTER_MAX_BLOCKS:
-            break
     if not blocks:
         return None
+    # Do NOT truncate here. This used to cap at POSTER_MAX_BLOCKS and break,
+    # which lost blocks before _poster_merge could count them — a silent drop
+    # that read as "the poster is still missing things". Merging enforces the
+    # cap once, for the whole sheet, and reports the surplus.
     return {"title": _clean_line(data.get("title"), 120),
             "subject": _clean_line(data.get("subject"), 30).lower(),
             "kind": kind, "blocks": blocks}
@@ -3179,8 +3183,9 @@ def _poster_merge(parts, kind):
         subject = subject or (part or {}).get("subject") or ""
     return {"title": title, "subject": subject, "kind": kind,
             "blocks": ordered[:POSTER_MAX_BLOCKS],
-            # Reported so the UI can state what was actually read, rather than
-            # leaving the student to wonder whether the tail was covered.
+            # Surfaced in the UI. Silently slicing the surplus is what made the
+            # poster look like it was still missing content, so if it ever
+            # happens the student is told rather than left to guess.
             "dropped": max(0, len(ordered) - POSTER_MAX_BLOCKS)}
 
 
@@ -4757,6 +4762,64 @@ def api_study_bundle_start():
 _POSTER_REFINE_MAX = int(os.environ.get("POSTER_REFINE_CHARS", "300"))
 
 
+def _poster_grounding(video_id, out_lang, ai, limit=0):
+    """Lecture text an edit may draw new facts from, so 'add more dates' pulls
+    real ones. Uses the notes when they exist, for the same reason generation
+    does: they are the densest record of the lecture."""
+    try:
+        transcript = _extract_transcript(video_id, "auto")
+        source, origin = _poster_source(video_id, transcript.get("text") or "", out_lang, ai)
+    except Exception:  # noqa: BLE001
+        return "", "none"
+    if limit and len(source) > limit:
+        source = source[:limit]
+    sections = _poster_sections(source, ai) if source else []
+    return (sections[0] if sections else ""), origin
+
+
+def _refine_one_block(video_id, block, index, instruction, out_lang, kind, ai):
+    """Revise a single poster box from the student's instruction."""
+    grounding, origin = _poster_grounding(video_id, out_lang, ai)
+    prompt = (
+        "Here is ONE block from a student's revision poster, as JSON:\n\n"
+        + json.dumps(block, ensure_ascii=False)
+        + "\n\nThe student asks: \"" + instruction + "\"\n\n"
+        "Return ONLY that one revised block, as a single JSON object in exactly "
+        "the same shape (same \"type\", and keep its \"group\" wording).\n"
+        "Rules:\n"
+        "- Apply exactly what was asked and change nothing else.\n"
+        "- Any new content must come ONLY from the lecture text below. Never "
+        "invent a date, figure or name; if the lecture does not support the "
+        "request, return the block unchanged.\n"
+        "- Plain text only: no markdown, no LaTeX.\n"
+        "- Write everything in %s, keeping technical terms in English.\n\n" % out_lang
+        + ("Lecture text:\n" + grounding if grounding else ""))
+    try:
+        raw = _ai_chat(
+            [{"role": "system", "content": _study_sys(out_lang) + " Output ONLY valid JSON."},
+             {"role": "user", "content": prompt + _lang_reminder(out_lang)}],
+            ai, max_tokens=2000, json_mode=True)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
+    parsed = _safe_json(raw)
+    if isinstance(parsed, dict) and "blocks" in parsed:
+        parsed = (parsed.get("blocks") or [None])[0]        # a model that wrapped it anyway
+    # Validated through the same gate as a whole poster, so a malformed edit is
+    # rejected instead of replacing a good box with blanks.
+    checked = _sanitise_poster({"blocks": [parsed]}, kind)
+    revised = (checked or {}).get("blocks", [None])[0]
+    if not revised:
+        return jsonify({"error": "refine_failed",
+                        "detail": "The AI did not return a usable block. Try rewording it."}), 502
+    if revised.get("type") != block.get("type"):
+        return jsonify({"error": "refine_failed",
+                        "detail": "The AI changed the box type. Try rewording it."}), 502
+    revised["group"] = block.get("group", revised.get("group", ""))
+    return jsonify({"block": revised, "index": index, "instruction": instruction,
+                    "provider": _ai_display_provider(ai), "model": _ai_display_model(ai),
+                    "source": origin})
+
+
 @app.post("/api/study/poster/refine")
 def api_study_poster_refine():
     """Revise a poster from a student's own instruction.
@@ -4807,15 +4870,23 @@ def api_study_poster_refine():
         return jsonify({"error": "poster_not_found",
                         "detail": "Generate the poster first, then ask for changes."}), 404
 
+    # Per-box edit. Revising ONE block keeps the request and the response small
+    # and makes collateral damage impossible: the rest of the sheet is never in
+    # the model's output, so it cannot be silently reworded.
+    block_index = payload.get("block")
+    if isinstance(block_index, bool):
+        block_index = None
+    if isinstance(block_index, (int, float)):
+        block_index = int(block_index)
+        blocks = current.get("blocks") or []
+        if block_index < 0 or block_index >= len(blocks):
+            return jsonify({"error": "bad_block"}), 400
+        return _refine_one_block(video_id, blocks[block_index], block_index,
+                                 instruction, out_lang, kind, ai)
+
     # Ground the edit in the lecture so a request for more detail pulls REAL
     # facts rather than inventing plausible ones.
-    try:
-        transcript = _extract_transcript(video_id, "auto")
-        source, origin = _poster_source(video_id, transcript.get("text") or "", out_lang, ai)
-    except Exception:  # noqa: BLE001
-        source, origin = "", "none"
-    sections = _poster_sections(source, ai) if source else []
-    grounding = sections[0] if sections else ""
+    grounding, origin = _poster_grounding(video_id, out_lang, ai)
 
     prompt = (
         "Here is a student's revision poster as JSON:\n\n"
