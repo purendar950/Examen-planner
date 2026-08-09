@@ -9154,3 +9154,12 @@ body.ai-map-full-open { overflow: hidden; }
   /* Keyboard-only affordances make no sense on a touch device. */
   .ai-map-full-hint { font-size: .66rem; }
 }
+
+
+/* Poster: topic groups and the two exam-prep block types. The rest of the poster
+   is styled by nbCss('.ai-nb'/'.pdf-nb') so screen and print stay identical;
+   these are declared there too — see ai-tutor.js — and only the print page-break
+   behaviour lives here. */
+@media print {
+  .ai-poster-group { break-inside: avoid-page; }
+}
