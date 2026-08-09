@@ -2479,6 +2479,58 @@
     else notesFocusEnterFullscreen();
   }
 
+  /* ── Inverted (night) reading ─────────────────────────────────────────────
+     The notebook is a deliberately light "paper" surface, which is punishing in a
+     dark room — and this is a study app people use late.
+
+     Implemented as a CSS filter on the scroller rather than a hand-written dark
+     palette. nbCss() carries ~55 rules of hard-coded light colour (headings in
+     five accents, fact/mem/note boxes, MCQ cards, tables, chips, badges); a
+     parallel dark copy of all of that would drift out of sync the first time
+     either side was touched. invert(1) + hue-rotate(180deg) is the standard
+     pairing: the hue-rotate puts hues roughly back where they started, so green
+     headings stay green rather than turning magenta.
+
+     Applied to the SCROLLER specifically, not the whole layer:
+       - the toolbar, ask sheet, selection popover and mini video all sit outside
+         it, so they are darkened explicitly instead of being double-inverted
+         (and the video keeps true colour)
+       - `filter` turns an element into a containing block for position:fixed
+         descendants, and #ai-note-pop is fixed — keeping the filter off its
+         ancestors leaves its positioning alone
+       - the PDF export is built from the nbHtml string with its own print CSS,
+         so it is unaffected and never prints white-on-black
+
+     Trade-off worth knowing: a filtered scroller is a composited layer, so very
+     long notes may cost some scroll smoothness on low-end phones. */
+  var NOTES_INVERT_KEY = 'aiNotesInvert';
+  function notesInverted() {
+    try { return localStorage.getItem(NOTES_INVERT_KEY) === '1'; } catch (e) { return false; }
+  }
+  function setNotesInverted(on) {
+    try { localStorage.setItem(NOTES_INVERT_KEY, on ? '1' : '0'); } catch (e) {}
+  }
+  function applyNotesInvert(box) {
+    if (!box) return;
+    var on = notesInverted();
+    // The class lives on the notes container but every rule is scoped under
+    // .ai-notes-focus, so the ordinary panel view is untouched.
+    box.classList.toggle('ai-notes-invert', on);
+    var btn = box.querySelector('#ai-focus-invert');
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.classList.toggle('ai-focus-control-active', on);
+    var label = on
+      ? 'Back to the paper look (light background)'
+      : 'Invert colours \u2014 dark paper, light ink, easier at night';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+  }
+  function toggleNotesInvert(box) {
+    setNotesInverted(!notesInverted());
+    applyNotesInvert(box);
+  }
+
   function notesFocusToolbarHtml() {
     return '<div class="ai-focus-toolbar" role="toolbar" aria-label="Notes Focus Mode controls">' +
       '<div class="ai-focus-heading">' +
@@ -2487,6 +2539,10 @@
         // overflows into a horizontal scroller on phones, which would leave this
         // control off-screen. The heading cluster never scrolls.
         '<button type="button" class="ai-focus-control ai-focus-fullscreen" id="ai-focus-fullscreen" aria-pressed="false" aria-label="Full screen. Hide the browser tabs and address bar" title="Full screen — hide the browser tabs and address bar">⛶</button>' +
+        // Grouped with Exit/Full screen because it is a view control, and because
+        // this cluster never scrolls — the actions row on the right does, and a
+        // display toggle should not be able to slide off a phone screen.
+        '<button type="button" class="ai-focus-control ai-focus-invert-btn" id="ai-focus-invert" aria-pressed="false" aria-label="Invert colours — dark paper, light ink, easier at night" title="Invert colours — dark paper, light ink, easier at night">◐</button>' +
         '<span class="ai-focus-title"><strong>Notes Focus</strong><small id="ai-focus-video-title">' + esc(curTitle()) + '</small></span>' +
       '</div>' +
       '<div class="ai-focus-actions">' +
@@ -2982,6 +3038,11 @@
     if (focusVideo) focusVideo.onclick = notesFocusVideoAction;
     var focusFullscreen = box.querySelector('#ai-focus-fullscreen');
     if (focusFullscreen) focusFullscreen.onclick = notesFocusToggleFullscreen;
+    var focusInvert = box.querySelector('#ai-focus-invert');
+    if (focusInvert) focusInvert.onclick = function () { toggleNotesInvert(box); };
+    // Restore the remembered choice on every render, so a regenerated note does
+    // not silently snap back to the light surface.
+    applyNotesInvert(box);
     var focusAskToggle = box.querySelector('#ai-focus-ask-toggle');
     if (focusAskToggle) focusAskToggle.onclick = toggleFocusAsk;
     var focusAskClose = box.querySelector('#ai-focus-ask-close');
