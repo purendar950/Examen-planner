@@ -730,6 +730,7 @@ function ytoCourseCardHtml(pl) {
             <details class="yto-course-menu" onclick="event.stopPropagation()">
               <summary aria-label="Course actions" title="Course actions">•••</summary>
               <div>
+                ${pl.videos.length > 1 ? `<button type="button" onclick="ytnbOpenForCourse('${pl.id}')"><span>📚</span> Make notebook</button>` : ''}
                 <button type="button" onclick="ytoRename('${pl.id}')"><span>✎</span> Rename</button>
                 <button type="button" class="danger" onclick="ytoDelete('${pl.id}')"><span>⌫</span> Delete</button>
               </div>

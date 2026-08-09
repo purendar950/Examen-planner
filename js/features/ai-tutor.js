@@ -906,6 +906,17 @@
   }
   function bindTsLinks(root) {
     Array.prototype.forEach.call((root || document).querySelectorAll('.ai-ts'), function (a) {
+      // In a multi-lecture notebook a timestamp belongs to a specific video, not
+      // to whatever happens to be in the player, so those open YouTube instead
+      // of seeking the current video to a meaningless offset.
+      var vid = a.dataset.v || '';
+      if (vid) {
+        a.onclick = function () {
+          window.open('https://www.youtube.com/watch?v=' + encodeURIComponent(vid) +
+            '&t=' + (parseInt(a.dataset.s, 10) || 0) + 's', '_blank', 'noopener');
+        };
+        return;
+      }
       a.onclick = function () { if (typeof ssSeekTo === 'function') ssSeekTo(parseInt(a.dataset.s, 10) || 0); };
     });
   }
@@ -1054,6 +1065,9 @@
         out.push('</tbody></table>'); continue;
       }
       if (t === '---' || t === '***' || t === '___') { closeOl(); out.push('<div class="divider"></div>'); i++; continue; }
+      // Notebook lecture divider — emitted only by multi-video notebooks.
+      var lec = t.match(NB_LEC);
+      if (lec) { closeOl(); out.push(nbLecBlock(lec[1], lec[2], lec[3])); i++; continue; }
       var h = t.match(/^(#{1,6})\s+(.*)/);
       if (h) {
         closeOl();
@@ -1177,11 +1191,69 @@
     return '<div class="nb-img-block"><div class="nb-img-icon">🖼</div><div class="nb-img-content">' + nbInline(esc(text)) + '</div></div>';
   }
 
-  function nbBuild(content, style) {
+  /* ── Multi-lecture notebooks ──────────────────────────────────────────────
+     A combined notebook draws on several videos, so two things a single-video
+     note never needed become necessary:
+       [LECTURE: V1 | videoId | Title]  a lecture divider, which ALSO tells the
+                                        renderer which video the bare [M:SS]
+                                        marks that follow belong to
+       [V2 12:30]                       a cross-lecture citation that deep-links
+                                        into a different video
+     Both are emitted by the proxy's bundle job. */
+  var NB_LEC = /^\[\s*LECTURE\s*:\s*([^|\]]+)\|([^|\]]+)\|([\s\S]*?)\s*\]$/i;
+  var NB_CITE = /\[\s*(V\d{1,3})\s+(\d{1,2}:\d{2}(?::\d{2})?)\s*\]/g;
+  function nbLecBlock(label, videoId, title) {
+    var vid = String(videoId || '').trim();
+    return '<div class="nb-lec" data-v="' + escAttr(vid) + '">' +
+      '<span class="nb-lec-tag">' + esc(String(label || '').trim()) + '</span>' +
+      '<span class="nb-lec-title">' + nbInline(esc(String(title || '').trim())) + '</span>' +
+      '<a class="nb-lec-open" href="https://www.youtube.com/watch?v=' + escAttr(vid) +
+      '" target="_blank" rel="noopener" title="Open this lecture on YouTube">Watch \u2197</a></div>';
+  }
+
+  /* Rewrite [V2 12:30] into a real deep link before linkTs() can mangle the
+     timestamp inside it. The anchors are parked as tokens and restored after, so
+     the generic timestamp pass cannot double-wrap them. */
+  function nbLinkCites(html, lectures) {
+    var parked = [];
+    var out = html.replace(NB_CITE, function (m, label, ts) {
+      var lec = lectures[label] || lectures[label.toUpperCase()];
+      if (!lec || !lec.id) return m;
+      var parts = ts.split(':').map(Number);
+      var secs = parts.length === 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : parts[0] * 60 + parts[1];
+      parked.push('<a class="ai-cite" href="https://www.youtube.com/watch?v=' + escAttr(lec.id) +
+        '&t=' + secs + 's" target="_blank" rel="noopener" title="' +
+        escAttr((lec.title || label) + ' \u2014 ' + ts) + '">' + esc(label) + ' ' + esc(ts) + '</a>');
+      return '\u0000cite' + (parked.length - 1) + '\u0000';
+    });
+    return { html: out, restore: function (h) {
+      return h.replace(/\u0000cite(\d+)\u0000/g, function (m, i) { return parked[+i] || ''; });
+    } };
+  }
+
+  /* Scope every [M:SS] that follows a lecture card to that lecture's video, so a
+     compiled notebook's timestamps open the right video rather than seeking
+     whatever is loaded in the player. */
+  function nbScopeLectureTs(html) {
+    var chunks = html.split('<div class="nb-lec"');
+    if (chunks.length < 2) return html;
+    for (var i = 1; i < chunks.length; i++) {
+      var m = chunks[i].match(/^\s*data-v="([^"]*)"/);
+      if (!m || !m[1]) continue;
+      chunks[i] = chunks[i].replace(/<a class="ai-ts" /g, '<a class="ai-ts" data-v="' + m[1] + '" ');
+    }
+    return chunks.join('<div class="nb-lec"');
+  }
+
+  // opts.lectures — {V1:{id,title},…} enables the notebook-only passes above.
+  function nbBuild(content, style, opts) {
     var clean = deLatex(nbStrip(content));
-    if (style === 'mcq') return linkTs(nbMCQ(clean));
-    if (style === 'topic+images') return linkTs(nbTopicImages(clean));
-    return linkTs(nbInner(clean));
+    var lectures = (opts && opts.lectures) || null;
+    var body = (style === 'mcq') ? nbMCQ(clean)
+      : (style === 'topic+images') ? nbTopicImages(clean) : nbInner(clean);
+    if (!lectures) return linkTs(body);
+    var cites = nbLinkCites(body, lectures);
+    return cites.restore(nbScopeLectureTs(linkTs(cites.html)));
   }
   // Topic+Images renderer: same as topic (nbInner) but also renders
   // [IMAGE: ...], [DIAGRAM: ...], [FIGURE: ...] blocks as visual cards.
@@ -1267,7 +1339,14 @@
       sc + ' tbody td{border:1px solid #dce7df;padding:6px 10px}',
       sc + ' tbody tr:nth-child(even){background:#f4faf5}',
       sc + ' .divider{border:none;text-align:center;color:#c0ccd6;letter-spacing:7px;margin:12px 0}' + sc + ' .divider::after{content:"\\2726 \\2726 \\2726"}',
-      sc + ' .ai-ts{color:#1565c0;cursor:pointer;font-weight:700;white-space:nowrap}'
+      sc + ' .ai-ts{color:#1565c0;cursor:pointer;font-weight:700;white-space:nowrap}',
+      // Multi-lecture notebook: lecture dividers + cross-lecture citations.
+      sc + ' .nb-lec{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:20px 0 10px;padding:9px 12px;border-radius:10px;background:linear-gradient(135deg,#e8f5e9 0%,#e3f2fd 100%);border:1.5px solid #a5d6a7;border-left:5px solid #2e7d32}',
+      sc + ' .nb-lec:first-child{margin-top:2px}',
+      sc + ' .nb-lec-tag{display:inline-flex;align-items:center;justify-content:center;min-width:32px;height:24px;padding:0 7px;border-radius:12px;background:#2e7d32;color:#fff;font-size:.74rem;font-weight:700;font-family:system-ui,Arial,sans-serif;flex:none}',
+      sc + ' .nb-lec-title{flex:1;min-width:140px;font-weight:700;font-size:1.02rem;color:#1b5e20}',
+      sc + ' .nb-lec-open{font-size:.72rem;font-weight:700;color:#1565c0;text-decoration:none;font-family:system-ui,Arial,sans-serif;white-space:nowrap}',
+      sc + ' .ai-cite{color:#6a1b9a;font-weight:700;font-size:.76rem;text-decoration:none;white-space:nowrap;font-family:system-ui,Arial,sans-serif;background:#f3e5f5;border:1px solid #ce93d8;border-radius:6px;padding:0 5px;margin-left:4px}'
     ].join('');
   }
 
@@ -3212,6 +3291,66 @@
     });
   }
 
+  /* ── Shared SSE reader for server-owned generation jobs ───────────────────
+     Reads the proxy's bounded snapshots and reconnects from the caller's exact
+     UTF-8 byte offset, so a refresh in the middle of a generation can neither
+     repeat nor lose text. Single-video notes and multi-video notebooks share
+     this one implementation; only the path and the frame handler differ.
+     cfg: {path, signal, getOffset(), isAlive(), onFrame(ev,obj), onGone(),
+           reconnectMs} — onFrame returning false ends the stream. */
+  function followJobStream(cfg) {
+    var stopped = false, timer = 0;
+    function finish() { stopped = true; clearTimeout(timer); }
+    function alive() {
+      return !stopped && !(cfg.signal && cfg.signal.aborted) && (!cfg.isAlive || cfg.isAlive());
+    }
+    function handle(frame) {
+      var ev = 'message', data = '';
+      frame.split('\n').forEach(function (ln) {
+        if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
+        else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
+      });
+      var obj = {};
+      if (data) { try { obj = JSON.parse(data) || {}; } catch (e) { obj = {}; } }
+      if (cfg.onFrame(ev, obj) === false) finish();
+    }
+    function reconnect() {
+      if (!alive()) return;
+      clearTimeout(timer);
+      timer = setTimeout(connect, cfg.reconnectMs || 900);
+    }
+    function connect() {
+      if (!alive()) return;
+      backendAuthFetch(cfg.path + '?offset=' + encodeURIComponent(cfg.getOffset()),
+        cfg.signal ? { signal: cfg.signal } : {}).then(function (r) {
+        if (r.ok && r.body && window.TextDecoder) return r;
+        return r.json().catch(function () { return {}; }).then(function (j) { j._httpStatus = r.status; throw j; });
+      }).then(function (r) {
+        var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
+        function pump() {
+          return reader.read().then(function (res) {
+            if (res.done) { if (!stopped) reconnect(); return; }
+            buf += dec.decode(res.value, { stream: true });
+            var frames = buf.split('\n\n'); buf = frames.pop();
+            frames.forEach(handle);
+            if (stopped) { try { reader.cancel(); } catch (e) {} return; }
+            return pump();
+          });
+        }
+        return pump();
+      }).catch(function (e) {
+        if (stopped) return;
+        // Stop waits for an acknowledged DELETE; navigation merely detaches the
+        // viewer. Neither path should let a stale stream alter a newer job.
+        if (_isAbort(e)) return;
+        if (e && e._httpStatus === 404) { finish(); if (cfg.onGone) cfg.onGone(); return; }
+        reconnect();
+      });
+    }
+    connect();
+    return { stop: finish };
+  }
+
   // A refresh-safe text-generation path. The POST creates a server-owned job;
   // the SSE connection only observes it, so browser navigation never aborts the
   // AI request. A client-generated opaque id makes a reload during the POST safe
@@ -3297,7 +3436,8 @@
       lang: initial.out_lang || lang
     };
     var acc = initial.content || '', done = false, built = false, stick = true, scrollEl = null, nbEl = null, metaEl = null;
-    var reconnectTimer = 0;
+    var follower = null;
+    function detach() { if (follower) follower.stop(); }
 
     function ownsStudyTarget() {
       return (!canRender || canRender()) && targetEl && targetEl.isConnected && targetEl === contentEl();
@@ -3339,7 +3479,7 @@
 
     function endAsComplete() {
       if (done) return;
-      done = true; clearTimeout(reconnectTimer); streamPainter.cancel();
+      done = true; detach(); streamPainter.cancel();
       var ownsUi = ownsJobUi();
       clearStudyJob(job.jobId);
       if (ownsUi) {
@@ -3351,7 +3491,7 @@
     }
     function endAsStopped() {
       if (done) return;
-      done = true; clearTimeout(reconnectTimer); streamPainter.cancel();
+      done = true; detach(); streamPainter.cancel();
       var ownsUi = ownsJobUi();
       clearStudyJob(job.jobId);
       if (ownsUi) {
@@ -3361,7 +3501,7 @@
     }
     function endAsError(payload) {
       if (done) return;
-      done = true; clearTimeout(reconnectTimer); streamPainter.cancel();
+      done = true; detach(); streamPainter.cancel();
       var ownsUi = ownsJobUi();
       clearStudyJob(job.jobId);
       var detail = (payload && (payload.detail || payload.error)) || 'Please try again in a moment.';
@@ -3370,14 +3510,7 @@
         targetEl.innerHTML = notesStageMessageHtml('error', 'Notes could not be prepared', detail);
       }
     }
-    function handleFrame(frame) {
-      var ev = 'message', data = '';
-      frame.split('\n').forEach(function (ln) {
-        if (ln.indexOf('event:') === 0) ev = ln.slice(6).trim();
-        else if (ln.indexOf('data:') === 0) data += ln.slice(5).trim();
-      });
-      var obj = {};
-      if (data) { try { obj = JSON.parse(data) || {}; } catch (e) { obj = {}; } }
+    function handleFrame(ev, obj) {
       if (ev === 'meta') {
         meta.provider = obj.provider || meta.provider; meta.model = obj.model || meta.model;
         meta.cached = obj.cached != null ? !!obj.cached : meta.cached;
@@ -3386,46 +3519,18 @@
         return;
       }
       if (ev === 'chunk' && typeof obj.t === 'string') { acc += obj.t; streamPainter.schedule(); return; }
-      if (ev === 'done') { endAsComplete(); return; }
-      if (ev === 'stopped') { endAsStopped(); return; }
-      if (ev === 'error') { endAsError(obj); }
+      if (ev === 'done') { endAsComplete(); return false; }
+      if (ev === 'stopped') { endAsStopped(); return false; }
+      if (ev === 'error') { endAsError(obj); return false; }
     }
-    function connect() {
-      if (done || (signal && signal.aborted) || !ownsStudyTarget()) return;
-      backendAuthFetch('/api/study/jobs/' + encodeURIComponent(job.jobId) + '/stream?offset=' + encodeURIComponent(utf8Length(acc)),
-        signal ? { signal: signal } : {}).then(function (r) {
-        if (r.ok && r.body && window.TextDecoder) return r;
-        return r.json().catch(function () { return {}; }).then(function (j) { j._httpStatus = r.status; throw j; });
-      }).then(function (r) {
-        var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
-        function pump() {
-          return reader.read().then(function (res) {
-            if (res.done) { if (!done) scheduleReconnect(); return; }
-            buf += dec.decode(res.value, { stream: true });
-            var frames = buf.split('\n\n'); buf = frames.pop();
-            frames.forEach(handleFrame);
-            if (done) { try { reader.cancel(); } catch (e) {} return; }
-            return pump();
-          });
-        }
-        return pump();
-      }).catch(function (e) {
-        if (done) return;
-        if (_isAbort(e)) {
-          // Stop waits for an acknowledged DELETE; navigation merely detaches the
-          // viewer. Neither path should let this stale stream alter a newer job.
-          return;
-        }
-        if (e && e._httpStatus === 404) { endAsError({ detail: 'This note job is no longer available. Please generate again.' }); return; }
-        scheduleReconnect();
-      });
-    }
-    function scheduleReconnect() {
-      if (done || (signal && signal.aborted) || !ownsStudyTarget()) return;
-      clearTimeout(reconnectTimer);
-      reconnectTimer = setTimeout(connect, 900);
-    }
-    connect();
+    follower = followJobStream({
+      path: '/api/study/jobs/' + encodeURIComponent(job.jobId) + '/stream',
+      signal: signal,
+      getOffset: function () { return utf8Length(acc); },
+      isAlive: function () { return !done && ownsStudyTarget(); },
+      onFrame: handleFrame,
+      onGone: function () { endAsError({ detail: 'This note job is no longer available. Please generate again.' }); }
+    });
   }
 
   // Restore an in-flight text job after a full page reload. The POST is
@@ -5439,6 +5544,27 @@
       };
     });
   }
+  /* Which Organiser course holds this video. Used to pre-select a course when
+     handing off to the multi-video Notebook page. Prefers the course the
+     student currently has open, then falls back to a library scan. */
+  function courseIdForVideo(vid) {
+    if (!vid) return '';
+    var lib = (window.appState && appState.ytoLibrary) || {};
+    if (window.ytoCurrentPl && lib[window.ytoCurrentPl]) return window.ytoCurrentPl;
+    var ids = Object.keys(lib);
+    for (var i = 0; i < ids.length; i++) {
+      var course = lib[ids[i]] || {};
+      if (course.videoId === vid) return ids[i];
+      var vids = course.videos;
+      if (Array.isArray(vids)) {
+        for (var j = 0; j < vids.length; j++) {
+          if (vids[j] && vids[j].id === vid) return ids[i];
+        }
+      }
+    }
+    return '';
+  }
+
   function renderBody() {
     var b = shellBody(); if (!b) return;
     b.setAttribute('data-ai-tab', state.tab);
@@ -5456,6 +5582,7 @@
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
         '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="topic+images">🖼 Topic + Images</option><option value="mcq">❓ MCQ</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
+        '<button class="ai-btn sec" id="ai-notes-bundle" title="Combine several lectures into one notebook" style="padding:6px 10px">\uD83D\uDCDA Multi-video</button>' +
         '<span id="ai-note-actions" class="ai-note-actions" role="group" aria-label="Note actions"></span>' +
         '</div><div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
@@ -5478,6 +5605,17 @@
         checkLangs(modeSel.value, 25, false);
       };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
+      // Hand off to the Notebook page, pre-selecting the course this video
+      // belongs to so the common case ("notes for this whole playlist") is one
+      // click away from the lecture the student is already watching.
+      var bundleBtn = document.getElementById('ai-notes-bundle');
+      if (bundleBtn) bundleBtn.onclick = function () {
+        if (typeof window.ytnbOpenForCourse !== 'function') {
+          if (typeof switchPage === 'function') switchPage('yt-notebook');
+          return;
+        }
+        window.ytnbOpenForCourse(courseIdForVideo(curVid()));
+      };
       // A freshly built body has no notes yet, so the setup controls start open.
       setSetupCollapsed(false);
       var setupBtn = document.getElementById('ai-setup-toggle');
@@ -6296,6 +6434,32 @@
       if (tutorDock() === 'float' && floatOpen() && !isLibraryScope()) renderTutor();
     }
   }, 800);
+
+  /* ── Notebook kit for other pages ─────────────────────────────────────────
+     The multi-video Notebook page (js/tabs/yt-notebook.js) renders the SAME
+     paper, runs the SAME kind of server-owned job and prints the SAME PDF as the
+     Notes tab. Exporting these primitives keeps one markdown renderer, one SSE
+     reader and one print stylesheet in the app instead of a second copy that
+     drifts. Deliberately narrow: no panel state, no tutor, no player. */
+  window.AiNotesKit = {
+    authFetch: backendAuthFetch,        // adds the Firebase ID token
+    follow: followJobStream,            // reconnecting job stream reader
+    newJobId: newStudyJobId,
+    utf8Length: utf8Length,
+    build: nbBuild,                     // (markdown, style, {lectures}) -> html
+    bindLinks: bindTsLinks,
+    paintScheduler: makeStreamPaintScheduler,
+    stageMessage: notesStageMessageHtml,
+    pdf: pdfDownload,
+    esc: esc,
+    escAttr: escAttr,
+    lang: outLang,
+    setLang: setLang,
+    model: outModel,
+    provider: outProvider,
+    isPro: isPro,
+    LANGS: ['Hinglish', 'English', 'Hindi']
+  };
 
   /* ── Control surface for the floating tutor window ────────────────────────
      js/features/tutor-float.js owns the FAB, the window chrome and the mobile

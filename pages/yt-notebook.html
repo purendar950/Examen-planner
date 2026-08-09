@@ -1,0 +1,137 @@
+    <!-- ══════════════════════════════════════════════════════════════════
+         MULTI-VIDEO NOTEBOOK
+         One notebook out of many lectures. Two shapes:
+           merge   — organised BY TOPIC, so the same topic taught across five
+                     lectures becomes one section that cites all five
+           compile — every lecture's notes in the chosen order, behind one cover
+         Videos are always selected from the Course Library, because the proxy
+         verifies membership against users/{uid}.appState.ytoLibrary and never
+         trusts a browser-supplied video list. Pasting a URL therefore imports
+         into the library first (js/tabs/yt-notebook.js → ytnbImportUrl).
+         ══════════════════════════════════════════════════════════════════ -->
+    <div class="page" id="page-yt-notebook">
+      <header class="yt-workspace-head">
+        <div class="yt-workspace-lead">
+          <span class="yt-workspace-badge" aria-hidden="true">📚</span>
+          <div class="yt-workspace-copy">
+            <span class="yt-workspace-eyebrow">Combined study material</span>
+            <h2>Multi-Video Notebook</h2>
+            <p>Turn a whole playlist — or any set of lectures — into one set of notes.</p>
+          </div>
+        </div>
+        <ol class="yt-flow" aria-label="How the notebook works">
+          <li>
+            <span class="yt-flow-num" aria-hidden="true">1</span>
+            <span class="yt-flow-copy"><strong>Pick lectures</strong><small>Any course, or many</small></span>
+          </li>
+          <li>
+            <span class="yt-flow-num" aria-hidden="true">2</span>
+            <span class="yt-flow-copy"><strong>Choose a shape</strong><small>Merge or compile</small></span>
+          </li>
+          <li>
+            <span class="yt-flow-num" aria-hidden="true">3</span>
+            <span class="yt-flow-copy"><strong>One notebook</strong><small>Read · print · PDF</small></span>
+          </li>
+        </ol>
+      </header>
+
+      <!-- ── Build view: import, pick, configure ── -->
+      <div class="ytnb-view active" id="ytnb-build-view">
+        <section class="ytnb-card ytnb-import" aria-label="Add a playlist or video">
+          <div class="ytnb-card-top">
+            <label class="ytnb-label" for="ytnb-url-input">Add lectures</label>
+            <span class="ytnb-hint">Playlist, video or channel URL — it is saved to your Course Library</span>
+          </div>
+          <div class="ytnb-input-bar">
+            <span class="ytnb-input-icon" aria-hidden="true">🔗</span>
+            <input type="text" class="ytnb-url-input" id="ytnb-url-input"
+              placeholder="Paste a YouTube playlist or video URL"
+              autocomplete="off" inputmode="url"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();ytnbImportUrl();}">
+            <button class="ytnb-add-btn" id="ytnb-add-btn" onclick="ytnbImportUrl()">Add</button>
+          </div>
+          <div class="ytnb-error" id="ytnb-import-error" role="alert"></div>
+        </section>
+
+        <section class="ytnb-card" aria-label="Choose lectures">
+          <div class="ytnb-card-top">
+            <label class="ytnb-label" for="ytnb-search">Choose lectures</label>
+            <span class="ytnb-hint" id="ytnb-scope-hint">Tick videos from one course, or across several</span>
+          </div>
+          <div class="ytnb-tools">
+            <input type="search" id="ytnb-search" class="ytnb-search"
+              placeholder="Search your courses and lectures" oninput="ytnbRenderGroups()"
+              aria-label="Search courses and lectures">
+            <button class="ytnb-chip" id="ytnb-clear-sel" onclick="ytnbClearSelection()">Clear selection</button>
+          </div>
+          <div class="ytnb-groups" id="ytnb-groups" aria-live="polite"></div>
+        </section>
+
+        <section class="ytnb-card ytnb-runbar" aria-label="Notebook options">
+          <div class="ytnb-estimate" id="ytnb-estimate" aria-live="polite"></div>
+
+          <fieldset class="ytnb-shapes">
+            <legend class="ytnb-label">Shape</legend>
+            <label class="ytnb-shape" for="ytnb-shape-merge">
+              <input type="radio" name="ytnb-shape" id="ytnb-shape-merge" value="merge" checked
+                onchange="ytnbShapeChanged()">
+              <span class="ytnb-shape-body">
+                <strong>Merge by topic</strong>
+                <small>The same topic from five lectures becomes one section, citing all five</small>
+              </span>
+            </label>
+            <label class="ytnb-shape" for="ytnb-shape-compile">
+              <input type="radio" name="ytnb-shape" id="ytnb-shape-compile" value="compile"
+                onchange="ytnbShapeChanged()">
+              <span class="ytnb-shape-body">
+                <strong>Compile in order</strong>
+                <small>Each lecture's notes kept separate, in the order you picked</small>
+              </span>
+            </label>
+          </fieldset>
+
+          <div class="ytnb-selects">
+            <label class="ytnb-field">
+              <span>Notes</span>
+              <select id="ytnb-mode" class="ytnb-select" onchange="ytnbOptionsChanged()">
+                <option value="notes">Comprehensive notes</option>
+                <option value="summary">Summary</option>
+                <option value="insights">Key insights</option>
+              </select>
+            </label>
+            <label class="ytnb-field">
+              <span>Style</span>
+              <select id="ytnb-style" class="ytnb-select" onchange="ytnbOptionsChanged()">
+                <option value="topic">📝 Topic</option>
+                <option value="topic+images">🖼 Topic + Images</option>
+                <option value="mcq">❓ MCQ</option>
+              </select>
+            </label>
+            <label class="ytnb-field">
+              <span>Language</span>
+              <select id="ytnb-lang" class="ytnb-select" onchange="ytnbOptionsChanged()"></select>
+            </label>
+          </div>
+
+          <div class="ytnb-actions">
+            <span class="ytnb-note" id="ytnb-shape-note"></span>
+            <button class="ytnb-go" id="ytnb-go" onclick="ytnbGenerate()" disabled>Generate Notebook</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- ── Run view: per-lecture progress above the streaming notebook ── -->
+      <div class="ytnb-view" id="ytnb-run-view" hidden>
+        <div class="ytnb-run-head">
+          <button class="ytnb-chip" id="ytnb-back" onclick="ytnbBackToPicker()">← Change selection</button>
+          <div class="ytnb-run-title" id="ytnb-run-title">Building your notebook</div>
+          <span class="ytnb-run-meta" id="ytnb-run-meta"></span>
+          <span class="ytnb-run-tools" id="ytnb-run-tools"></span>
+        </div>
+        <details class="ytnb-progress" id="ytnb-progress" open>
+          <summary id="ytnb-progress-summary">Preparing lectures…</summary>
+          <div class="ytnb-checklist" id="ytnb-checklist"></div>
+        </details>
+        <div class="ytnb-paper" id="ytnb-output"></div>
+      </div>
+    </div>
