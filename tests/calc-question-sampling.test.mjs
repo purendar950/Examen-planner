@@ -86,6 +86,23 @@ test('squares 10–30: twenty-one questions cover every value exactly once', () 
   }
 });
 
+/* A WIDE pool is what makes the exhaustion flaw visible. Rejection sampling can
+   find an unasked value but cannot prove none is left: over 90 values, a
+   120-attempt budget misses the last one in roughly a quarter of sessions, and
+   drawQuestion() used to read that as an exhausted pool and start a new cycle —
+   asking a repeat while a value had never appeared. Measured on the real
+   engine: 11 of 40 sessions failed before the confirmation sweep, 0 of 40 after.
+   Squares 10–30 shows the same bug only ~1 session in 300, which is why it
+   surfaced as a flaky test rather than a reported one. */
+test('squares 10–99: a wide pool is still covered exactly once', () => {
+  for (let session = 0; session < 40; session++) {
+    api.resetAskedPools();
+    const keys = drawMany('squares', { r1: 10, r2: 99 }, 90);
+    assert.equal(new Set(keys).size, 90,
+      `session ${session} repeated a value before the pool was spent`);
+  }
+});
+
 test('squares 10–30: asking more than the pool starts a fresh cycle', () => {
   /* 25 questions from 21 values must repeat 4 — but only after all 21 are used. */
   api.resetAskedPools();

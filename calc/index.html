@@ -1051,6 +1051,19 @@ let cur=null,curQuizId=null,inputs=[""],field=0,score=0,qcount=0,soundOn=true,bu
    than spinning. The value shown immediately before is still excluded, so a
    reset is never visible as the same question twice in a row. */
 const DRAW_ATTEMPTS=120;
+/* Rejection sampling can find an unasked value, but it can never PROVE that
+   none is left. Over squares 10-30 (21 values) the single remaining value is
+   missed by 120 random draws about 0.3% of the time, and drawQuestion() then
+   treated that as an exhausted pool and began a new cycle — so a student was
+   asked a repeat while one value had never appeared at all. Roughly one session
+   in 300, which is exactly what made the sampling test flaky.
+
+   Before declaring exhaustion we now sweep with a budget that scales with how
+   many distinct values this pool has already produced, which drops a false
+   exhaustion to about e^-20. gen() is plain arithmetic, so a few hundred extra
+   calls in the rare near-exhaustion case cost nothing measurable. */
+const EXHAUSTION_SWEEP_PER_VALUE=20;
+const MAX_EXHAUSTION_SWEEP=4000;
 /* Free practice never ends, so the seen set needs an upper bound. Large pools
    are the only ones that can reach this, and by then a repeat is unnoticeable. */
 const MAX_TRACKED_QUESTIONS=2000;
@@ -1082,6 +1095,16 @@ function drawQuestion(def,settings,quizId){
   const pool=askedPool(quizId,settings);
   let candidate=null,key="";
   for(let attempt=0;attempt<DRAW_ATTEMPTS;attempt++){
+    candidate=def.gen(settings);
+    key=questionKey(candidate);
+    if(!key||!pool.asked.has(key)){rememberQuestion(pool,key);return candidate;}
+  }
+  /* The quick loop found nothing new, which usually means the pool is spent —
+     but on a small pool it can simply have been unlucky. Confirm before wiping
+     the cycle, so a value is never skipped in favour of a repeat. */
+  const sweep=Math.min(MAX_EXHAUSTION_SWEEP,
+    Math.max(DRAW_ATTEMPTS,(pool.asked.size+1)*EXHAUSTION_SWEEP_PER_VALUE));
+  for(let attempt=0;attempt<sweep;attempt++){
     candidate=def.gen(settings);
     key=questionKey(candidate);
     if(!key||!pool.asked.has(key)){rememberQuestion(pool,key);return candidate;}
