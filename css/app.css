@@ -9348,3 +9348,50 @@ body.ai-sheet-full-open { overflow: hidden; }
 }
 .ai-poster-proposal-actions button:disabled { opacity: .5; cursor: not-allowed; }
 @media print { .ai-poster-proposal { display: none !important; } }
+
+
+/* ── poster: looking beyond the lecture ───────────────────────────────────
+   General Awareness lives largely outside any one lecture, so the AI may be
+   asked to widen its sources. Anything it finds that way is labelled, in the
+   review list and in the finished sheet, so the poster stays an honest record
+   of what the video actually taught. */
+.ai-poster-box-beyond {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: .68rem;
+  color: #5d6b7a;
+  cursor: pointer;
+}
+.ai-poster-box-beyond input { accent-color: #1565c0; flex: none; }
+.ai-poster-box-ask button.beyond { border-color: #1565c0; color: #1565c0; }
+.ai-poster-proposal-sub {
+  margin: 6px 0 2px;
+  font-size: .66rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #2e7d32;
+}
+.ai-poster-proposal-sub:not(:first-child) {
+  padding-top: 6px;
+  border-top: 1px dashed #a5d6a7;
+  color: #1565c0;
+}
+.ai-poster-proposal-src { margin-top: 5px; font-size: .66rem; color: #5d6b7a; }
+.ai-poster-proposal-src a { color: #1565c0; }
+.ai-poster-gk {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border: 1px solid #90caf9;
+  border-radius: 999px;
+  background: #e3f2fd;
+  color: #1565c0;
+  font-size: .6rem;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}

@@ -1427,7 +1427,11 @@
       sc + ' .ai-poster-mnem{list-style:none;margin:0;padding:0;font-size:.75rem;line-height:1.4}',
       sc + ' .ai-poster-mnem li{margin:5px 0;padding-left:8px;border-left:3px solid #7b1fa2}',
       sc + ' .ai-poster-mnem .t{display:block;font-weight:800;letter-spacing:.05em;color:#7b1fa2}',
-      sc + ' .ai-poster-mnem .m{display:block;color:#37474f}'
+      sc + ' .ai-poster-mnem .m{display:block;color:#37474f}',
+      /* Declared here as well as in app.css, so an entry taken from beyond the
+         lecture is still labelled in the PRINTED sheet — that is where the
+         distinction matters most, because the paper outlives the screen. */
+      sc + ' .ai-poster-gk{display:inline-block;margin-left:4px;padding:0 5px;border:1px solid #90caf9;border-radius:999px;background:#e3f2fd;color:#1565c0;font-size:.58rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;vertical-align:1px;font-family:system-ui,Arial,sans-serif}'
     ].join('');
   }
 
@@ -6284,12 +6288,21 @@
   };
   function posterTone(type) { return POSTER_TONE[type] || 'k3'; }
 
+  /* An entry the student accepted from beyond the lecture keeps a marker, in the
+     poster and in the PDF. A revision sheet that quietly mixes the video with
+     the internet is no longer a record of the video. */
+  function posterBeyondMark(b, item) {
+    if (!b || !b.beyond || !b.beyond.length) return '';
+    return b.beyond.indexOf(JSON.stringify(item)) === -1 ? ''
+      : ' <span class="ai-poster-gk" title="Not from this lecture">GK</span>';
+  }
+
   function posterBlockHtml(b) {
     var head = b.title ? '<div class="ai-poster-head">' + esc(b.title) + '</div>' : '';
     if (b.type === 'timeline') {
       return '<section class="ai-poster-card wide ' + posterTone(b.type) + '">' + head + '<ol class="ai-poster-time">' +
         (b.items || []).map(function (i) {
-          return '<li><span class="w">' + esc(i.when) + '</span><span class="t">' + esc(i.what) + '</span></li>';
+          return '<li><span class="w">' + esc(i.when) + '</span><span class="t">' + esc(i.what) + posterBeyondMark(b, i) + '</span></li>';
         }).join('') + '</ol></section>';
     }
     if (b.type === 'compare') {
@@ -6304,7 +6317,7 @@
     }
     if (b.type === 'process') {
       return '<section class="ai-poster-card ' + posterTone(b.type) + '">' + head + '<ol class="ai-poster-steps">' +
-        (b.steps || []).map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') +
+        (b.steps || []).map(function (s) { return '<li>' + esc(s) + posterBeyondMark(b, s) + '</li>'; }).join('') +
         '</ol></section>';
     }
     if (b.type === 'formula') {
@@ -6318,27 +6331,27 @@
     if (b.type === 'glossary') {
       return '<section class="ai-poster-card ' + posterTone(b.type) + '">' + (head || '<div class="ai-poster-head">Terms</div>') +
         '<dl class="ai-poster-gloss">' + (b.items || []).map(function (i) {
-          return '<dt>' + esc(i.term) + '</dt><dd>' + esc(i.meaning) + '</dd>';
+          return '<dt>' + esc(i.term) + '</dt><dd>' + esc(i.meaning) + posterBeyondMark(b, i) + '</dd>';
         }).join('') + '</dl></section>';
     }
     if (b.type === 'qa') {
       return '<section class="ai-poster-card wide ' + posterTone(b.type) + '">' +
         (head || '<div class="ai-poster-head">Likely questions</div>') +
         '<ol class="ai-poster-qa">' + (b.items || []).map(function (i) {
-          return '<li><span class="q">' + esc(i.q) + '</span><span class="a">' + esc(i.a) + '</span></li>';
+          return '<li><span class="q">' + esc(i.q) + posterBeyondMark(b, i) + '</span><span class="a">' + esc(i.a) + '</span></li>';
         }).join('') + '</ol></section>';
     }
     if (b.type === 'mnemonic') {
       return '<section class="ai-poster-card ' + posterTone(b.type) + '">' +
         (head || '<div class="ai-poster-head">Memory tricks</div>') +
         '<ul class="ai-poster-mnem">' + (b.items || []).map(function (i) {
-          return '<li><span class="t">' + esc(i.trick) + '</span><span class="m">' + esc(i.means) + '</span></li>';
+          return '<li><span class="t">' + esc(i.trick) + '</span><span class="m">' + esc(i.means) + posterBeyondMark(b, i) + '</span></li>';
         }).join('') + '</ul></section>';
     }
     // keyfacts
     return '<section class="ai-poster-card ' + posterTone(b.type) + '">' + (head || '<div class="ai-poster-head">Must remember</div>') +
       '<ul class="ai-poster-facts">' + (b.items || []).map(function (i) {
-        return '<li>' + esc(i) + '</li>';
+        return '<li>' + esc(i) + posterBeyondMark(b, i) + '</li>';
       }).join('') + '</ul></section>';
   }
 
@@ -6551,19 +6564,32 @@
             '<button type="button" data-q="Add more detail from the lecture">More detail</button>' +
             '<button type="button" data-q="Add any dates and figures the lecture gives for this">Add numbers</button>' +
             '<button type="button" data-q="Make this shorter and sharper">Shorter</button>' +
-          '</div><div class="ai-poster-box-note"></div>';
+            // General Awareness lives largely outside any one lecture, so this
+            // widens the sources on request — and only on request.
+            '<button type="button" class="beyond" data-q="Add important exam facts on this topic that the lecture does not cover">\uD83C\uDF10 Beyond lecture</button>' +
+          '</div>' +
+          '<label class="ai-poster-box-beyond"><input type="checkbox">' +
+          '<span>Also use general knowledge &amp; web (marked separately)</span></label>' +
+          '<div class="ai-poster-box-note"></div>';
         card.appendChild(wrap);
-        var field = wrap.querySelector('input');
+        var field = wrap.querySelector('.ai-poster-box-ask > input');
+        var beyondBox = wrap.querySelector('.ai-poster-box-beyond input');
         var note = wrap.querySelector('.ai-poster-box-note');
-        function send(text) {
+        function send(text, forceBeyond) {
           text = String(text || '').trim();
           if (text.length < 3) { note.textContent = 'Say what should change.'; return; }
-          note.textContent = 'Asking the AI\u2026';
+          var beyond = !!(forceBeyond || (beyondBox && beyondBox.checked));
+          var old = wrap.querySelector('.ai-poster-proposal');
+          if (old) old.parentNode.removeChild(old);
+          note.textContent = beyond
+            ? 'Searching the lecture, general knowledge and the web\u2026'
+            : 'Asking the AI\u2026';
           backendAuthFetch('/api/study/poster/refine', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               id: meta.vid, out: meta.lang, style: meta.kind, instruction: text,
-              poster: poster, block: index, model: outModel(), provider: outProvider()
+              poster: poster, block: index, beyond: beyond,
+              model: outModel(), provider: outProvider()
             })
           }).then(function (r) {
             return r.json().then(function (j) { j._httpStatus = r.status; return j; });
@@ -6578,7 +6604,11 @@
         }
         wrap.querySelector('.go').onclick = function () { send(field.value); };
         Array.prototype.forEach.call(wrap.querySelectorAll('[data-q]'), function (quick) {
-          quick.onclick = function () { field.value = quick.dataset.q; send(quick.dataset.q); };
+          quick.onclick = function () {
+            field.value = quick.dataset.q;
+            // The Beyond-lecture shortcut implies the wider sources.
+            send(quick.dataset.q, quick.classList.contains('beyond'));
+          };
         });
         field.onkeydown = function (event2) {
           if (event2.key === 'Enter') { event2.preventDefault(); send(field.value); }
@@ -6601,9 +6631,15 @@
     var field = result.field || posterItemField(type);
     var additions = result.add || [];
 
-    if (result.unchanged || (!additions.length && !result.rewrite)) {
-      note.innerHTML = '<b>Nothing to add.</b> The lecture does not cover anything ' +
-        'more for this box \u2014 try a different wording, or ask on another box.';
+    var beyondAdds = result.beyond || [];
+    if (result.unchanged || (!additions.length && !beyondAdds.length && !result.rewrite)) {
+      // Point at the wider sources instead of a dead end, unless they were the
+      // ones that just came back empty.
+      note.innerHTML = result.searched
+        ? '<b>Nothing found.</b> Neither the lecture nor a web lookup adds anything ' +
+          'here \u2014 try naming what you are after, e.g. "add the years and who founded it".'
+        : '<b>Not in this lecture.</b> Tick <b>Also use general knowledge &amp; web</b> ' +
+          'above, or press <b>\uD83C\uDF10 Beyond lecture</b>, to look outside the video.';
       return;
     }
 
@@ -6632,16 +6668,40 @@
       return;
     }
 
-    // Additive: a tick list of exactly what would go in.
+    /* Additive: a tick list of exactly what would go in. Lecture-backed and
+       beyond-the-lecture entries are listed SEPARATELY and labelled, because for
+       General Awareness the student needs to know which facts the video actually
+       taught and which came from outside it. */
+    var all = additions.map(function (item) { return { item: item, beyond: false }; })
+      .concat(beyondAdds.map(function (item) { return { item: item, beyond: true }; }));
     note.innerHTML = '';
     var list = document.createElement('div');
     list.className = 'ai-poster-proposal';
-    list.innerHTML = '<div class="ai-poster-proposal-head">Found ' + additions.length +
-      (additions.length === 1 ? ' addition' : ' additions') + ' \u2014 choose what to keep</div>' +
-      '<div class="ai-poster-proposal-body">' + additions.map(function (item, n) {
-        return '<label class="ai-poster-pick"><input type="checkbox" checked data-n="' + n + '">' +
-          '<span>' + esc(posterItemText(type, item)) + '</span></label>';
-      }).join('') + '</div>' +
+    function pickHtml(entry, n) {
+      return '<label class="ai-poster-pick"><input type="checkbox" checked data-n="' + n + '">' +
+        '<span>' + esc(posterItemText(type, entry.item)) +
+        (entry.beyond ? ' <b class="ai-poster-gk">outside lecture</b>' : '') + '</span></label>';
+    }
+    var groupsHtml = '';
+    if (additions.length) {
+      groupsHtml += '<div class="ai-poster-proposal-sub">From this lecture</div>' +
+        all.map(function (e, n) { return e.beyond ? '' : pickHtml(e, n); }).join('');
+    }
+    if (beyondAdds.length) {
+      groupsHtml += '<div class="ai-poster-proposal-sub">Beyond the lecture \u2014 general knowledge' +
+        (result.sources && result.sources.length ? ' &amp; web' : '') + '</div>' +
+        all.map(function (e, n) { return e.beyond ? pickHtml(e, n) : ''; }).join('') +
+        ((result.sources || []).length
+          ? '<div class="ai-poster-proposal-src">Checked: ' +
+            result.sources.slice(0, 4).map(function (s) {
+              return '<a href="' + escAttr(s.url) + '" target="_blank" rel="noopener">' +
+                esc(s.site || s.title) + '</a>';
+            }).join(', ') + '</div>'
+          : '');
+    }
+    list.innerHTML = '<div class="ai-poster-proposal-head">Found ' + all.length +
+      (all.length === 1 ? ' addition' : ' additions') + ' \u2014 choose what to keep</div>' +
+      '<div class="ai-poster-proposal-body">' + groupsHtml + '</div>' +
       '<div class="ai-poster-proposal-actions">' +
       '<button type="button" class="apply">Add selected</button>' +
       '<button type="button" class="none">Add none</button></div>';
@@ -6650,7 +6710,7 @@
     function selected() {
       return Array.prototype.filter.call(list.querySelectorAll('input[type=checkbox]'),
         function (cb) { return cb.checked; }).map(function (cb) {
-          return additions[parseInt(cb.dataset.n, 10)];
+          return all[parseInt(cb.dataset.n, 10)];
         });
     }
     var apply = list.querySelector('.apply');
@@ -6672,11 +6732,18 @@
       var existing = merged[field] || [];
       var seen = {};
       existing.forEach(function (i) { seen[JSON.stringify(i)] = 1; });
-      picked.forEach(function (i) {
-        var token = JSON.stringify(i);
-        if (!seen[token]) { seen[token] = 1; existing.push(i); }
+      // Provenance is carried on the block so the "outside lecture" badge
+      // survives into the poster, the PDF and any later edit.
+      var marks = Array.isArray(merged.beyond) ? merged.beyond.slice() : [];
+      picked.forEach(function (entry) {
+        var token = JSON.stringify(entry.item);
+        if (seen[token]) return;
+        seen[token] = 1;
+        existing.push(entry.item);
+        if (entry.beyond && marks.indexOf(token) === -1) marks.push(token);
       });
       merged[field] = existing;
+      if (marks.length) merged.beyond = marks;
       posterApplyBlock(poster, meta, index, merged);
     };
     list.querySelector('.none').onclick = function () {

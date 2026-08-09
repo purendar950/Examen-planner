@@ -2976,6 +2976,11 @@ def _sanitise_poster(data, kind):
         # never grouped.
         if btype != "stat":
             block["group"] = _clean_line(raw.get("group") or raw.get("topic"), 60)
+        # Provenance for entries the student accepted from beyond the lecture.
+        # Preserved through every round trip so the badge survives a later edit.
+        marks = raw.get("beyond")
+        if isinstance(marks, list) and marks:
+            block["beyond"] = [str(m)[:400] for m in marks if isinstance(m, (str,))][:40]
         if btype == "stat":
             value = _clean_line(raw.get("value"), 14)
             label = _clean_line(raw.get("label"), 60)
@@ -4762,38 +4767,102 @@ def api_study_bundle_start():
 _POSTER_REFINE_MAX = int(os.environ.get("POSTER_REFINE_CHARS", "300"))
 
 
-def _poster_grounding(video_id, out_lang, ai, limit=0):
-    """Lecture text an edit may draw new facts from, so 'add more dates' pulls
-    real ones. Uses the notes when they exist, for the same reason generation
-    does: they are the densest record of the lecture."""
+_GROUND_STOP = frozenset((
+    "the", "and", "for", "with", "that", "this", "from", "into", "were", "was",
+    "are", "its", "his", "her", "their", "which", "what", "when", "where", "how",
+    "must", "remember", "key", "facts", "likely", "questions", "terms", "dates"))
+
+
+def _ground_terms(text):
+    words = re.findall(r"[0-9a-z\u0900-\u097f]{3,}", str(text or "").lower())
+    return {w for w in words if w not in _GROUND_STOP}
+
+
+def _poster_grounding(video_id, out_lang, ai, block=None, want=2):
+    """Lecture text an edit may draw new facts from.
+
+    Picks the chunks most RELEVANT to the block being edited. This used to return
+    sections[0] unconditionally, so a box about the middle of a two-hour lecture
+    was handed the opening minutes and the model — correctly — reported that it
+    had nothing to add. That single line was the main reason "Nothing to add"
+    came back so often.
+    """
     try:
         transcript = _extract_transcript(video_id, "auto")
         source, origin = _poster_source(video_id, transcript.get("text") or "", out_lang, ai)
     except Exception:  # noqa: BLE001
         return "", "none"
-    if limit and len(source) > limit:
-        source = source[:limit]
     sections = _poster_sections(source, ai) if source else []
-    return (sections[0] if sections else ""), origin
+    if not sections:
+        return "", origin
+    if len(sections) == 1 or not block:
+        return sections[0], origin
+    terms = _ground_terms(json.dumps(block, ensure_ascii=False))
+    if not terms:
+        return sections[0], origin
+    scored = sorted(
+        ((len(terms & _ground_terms(sec)), -i, i) for i, sec in enumerate(sections)),
+        reverse=True)
+    picked = sorted(i for _score, _neg, i in scored[:max(1, want)])
+    return "\n\n[...]\n\n".join(sections[i] for i in picked), origin
 
 
-def _refine_one_block(video_id, block, index, instruction, out_lang, kind, ai):
-    """Revise a single poster box from the student's instruction."""
-    grounding, origin = _poster_grounding(video_id, out_lang, ai)
+def _refine_one_block(video_id, block, index, instruction, out_lang, kind, ai,
+                      beyond=False, title=""):
+    """Revise a single poster box from the student's instruction.
+
+    `beyond` widens the sources from the lecture alone to exam-standard general
+    knowledge plus a live lookup. Kept as an explicit choice, and its additions
+    are returned SEPARATELY, because a poster that silently mixes the lecture
+    with the internet stops being a record of the lecture — and for General
+    Awareness the student needs to know which is which.
+    """
+    grounding, origin = _poster_grounding(video_id, out_lang, ai, block=block)
+    sources = []
+    outside = ""
+    if beyond:
+        query = " ".join(x for x in (title, block.get("group") or "",
+                                     block.get("title") or "", instruction) if x)
+        sources = _web_search(query, limit=6) or []
+        if sources:
+            outside = "\n\n".join(
+                "%s (%s)\n%s" % (r.get("title") or "", r.get("site") or "",
+                                 (r.get("snippet") or "")[:600])
+                for r in sources[:6])
+
+    if beyond:
+        rules = (
+            "- Apply exactly what was asked and change nothing else.\n"
+            "- Return TWO lists: \"from_lecture\" for entries supported by the "
+            "lecture text, and \"beyond_lecture\" for correct, exam-standard "
+            "general knowledge or web findings that the lecture does not cover. "
+            "Never mix them up.\n"
+            "- Everything in \"beyond_lecture\" must be a well-established fact "
+            "an examiner would accept. Do not speculate; omit rather than guess.\n")
+    else:
+        rules = (
+            "- Apply exactly what was asked and change nothing else.\n"
+            "- Any new content must come ONLY from the lecture text below. Never "
+            "invent a date, figure or name; if the lecture does not support the "
+            "request, return the block unchanged.\n")
+
+    field = _POSTER_LIST_FIELD.get(block.get("type")) or "items"
+    shape = ('{"block": <the revised block>}' if not beyond else
+             '{"block": <the revised block including BOTH lists\' entries>, '
+             '"from_lecture": [<new entries backed by the lecture>], '
+             '"beyond_lecture": [<new entries from general knowledge / the web>]}')
     prompt = (
         "Here is ONE block from a student's revision poster, as JSON:\n\n"
         + json.dumps(block, ensure_ascii=False)
         + "\n\nThe student asks: \"" + instruction + "\"\n\n"
-        "Return ONLY that one revised block, as a single JSON object in exactly "
-        "the same shape (same \"type\", and keep its \"group\" wording).\n"
-        "Rules:\n"
-        "- Apply exactly what was asked and change nothing else.\n"
-        "- Any new content must come ONLY from the lecture text below. Never "
-        "invent a date, figure or name; if the lecture does not support the "
-        "request, return the block unchanged.\n"
+        "Return ONLY this JSON object:\n" + shape + "\n"
+        "The revised block must keep the same \"type\" and the same \"group\" "
+        "wording, and its entries live in \"" + field + "\".\n"
+        "Rules:\n" + rules +
         "- Plain text only: no markdown, no LaTeX.\n"
         "- Write everything in %s, keeping technical terms in English.\n\n" % out_lang
-        + ("Lecture text:\n" + grounding if grounding else ""))
+        + ("Lecture text:\n" + grounding + "\n\n" if grounding else "")
+        + ("Web results (for beyond_lecture only):\n" + outside if outside else ""))
     try:
         raw = _ai_chat(
             [{"role": "system", "content": _study_sys(out_lang) + " Output ONLY valid JSON."},
@@ -4802,6 +4871,10 @@ def _refine_one_block(video_id, block, index, instruction, out_lang, kind, ai):
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
     parsed = _safe_json(raw)
+    claimed_beyond = []
+    if isinstance(parsed, dict) and ("block" in parsed or "beyond_lecture" in parsed):
+        claimed_beyond = parsed.get("beyond_lecture") or []
+        parsed = parsed.get("block") or parsed.get("revised") or parsed
     if isinstance(parsed, dict) and "blocks" in parsed:
         parsed = (parsed.get("blocks") or [None])[0]        # a model that wrapped it anyway
     # Validated through the same gate as a whole poster, so a malformed edit is
@@ -4828,11 +4901,24 @@ def _refine_one_block(video_id, block, index, instruction, out_lang, kind, ai):
     added = [i for i, tok in zip(revised.get(field) or [], after) if tok not in before_set]
     removed = [i for i, tok in zip(block.get(field) or [], before) if tok not in after_set]
     retitled = _clean_line(revised.get("title"), 80) != _clean_line(block.get("title"), 80)
+
+    # Split the additions by where they came from. The model's own labelling is
+    # trusted only as far as matching real entries: anything it claims came from
+    # beyond the lecture but did not actually appear is ignored.
+    beyond_tokens = {json.dumps(i, sort_keys=True, ensure_ascii=False)
+                     for i in claimed_beyond if i is not None}
+    add_lecture, add_beyond = [], []
+    for item in added:
+        token = json.dumps(item, sort_keys=True, ensure_ascii=False)
+        (add_beyond if token in beyond_tokens else add_lecture).append(item)
     return jsonify({
         "block": revised, "index": index, "instruction": instruction,
         "field": field,
-        # What the student is offered.
-        "add": added,
+        # What the student is offered, kept separate so the browser can label it.
+        "add": add_lecture,
+        "beyond": add_beyond,
+        "sources": _web_sources_public(sources) if sources else [],
+        "searched": bool(beyond),
         # A rewrite (shorten/reword) removes or rephrases items, so it cannot be
         # presented as a list of additions — the browser previews it whole.
         "rewrite": bool(removed) or retitled,
@@ -4904,7 +4990,9 @@ def api_study_poster_refine():
         if block_index < 0 or block_index >= len(blocks):
             return jsonify({"error": "bad_block"}), 400
         return _refine_one_block(video_id, blocks[block_index], block_index,
-                                 instruction, out_lang, kind, ai)
+                                 instruction, out_lang, kind, ai,
+                                 beyond=bool(payload.get("beyond")),
+                                 title=_clean_line(current.get("title"), 120))
 
     # Ground the edit in the lecture so a request for more detail pulls REAL
     # facts rather than inventing plausible ones.
