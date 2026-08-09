@@ -9254,7 +9254,13 @@ body.ai-sheet-full-open { overflow: hidden; }
   padding-top: 7px;
   border-top: 1px dashed currentColor;
 }
-.ai-poster-box-ask input {
+/* Must stay scoped to the text field. As `.ai-poster-box-ask input` this also
+   matched the "beyond lecture" checkbox and every tick box in the review list
+   (both are descendants of this panel), stretching each one to the full panel
+   width — Chrome centres a checkbox's glyph in an oversized box, so the box
+   appeared to float in a gap while its label text was pushed out past the
+   poster's right edge and wrapped into a one-word column. */
+.ai-poster-box-ask > input[type="text"] {
   width: 100%;
   padding: 5px 7px;
   border: 1px solid #cfd8dc;
@@ -9322,7 +9328,8 @@ body.ai-sheet-full-open { overflow: hidden; }
   padding: 3px 0;
   cursor: pointer;
 }
-.ai-poster-pick input { margin-top: 3px; flex: none; accent-color: #2e7d32; }
+.ai-poster-pick input { margin-top: 3px; flex: none; width: auto; accent-color: #2e7d32; }
+.ai-poster-pick span { min-width: 0; }
 .ai-poster-proposal-actions {
   display: flex;
   gap: 6px;
@@ -9357,14 +9364,26 @@ body.ai-sheet-full-open { overflow: hidden; }
    of what the video actually taught. */
 .ai-poster-box-beyond {
   display: flex;
-  align-items: center;
+  /* The caption wraps to two lines in a narrow panel, so the box aligns with
+     the first line rather than the middle of the block. */
+  align-items: flex-start;
   gap: 6px;
   margin-top: 6px;
   font-size: .68rem;
+  line-height: 1.35;
   color: #5d6b7a;
   cursor: pointer;
 }
-.ai-poster-box-beyond input { accent-color: #1565c0; flex: none; }
+/* width:auto and min-width:0 are load-bearing, not decoration: they keep the
+   box at its intrinsic size and let the caption shrink inside the panel
+   instead of overflowing it, whatever a broader `input` rule may say. */
+.ai-poster-box-beyond input {
+  accent-color: #1565c0;
+  flex: none;
+  width: auto;
+  margin: 2px 0 0;
+}
+.ai-poster-box-beyond span { min-width: 0; }
 .ai-poster-box-ask button.beyond { border-color: #1565c0; color: #1565c0; }
 .ai-poster-proposal-sub {
   margin: 6px 0 2px;
