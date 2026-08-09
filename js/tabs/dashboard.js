@@ -163,6 +163,12 @@ function updateDashboard() {
     }
   }
 
+  // My AI Notes — a way back into anything already generated, from the page the
+  // student lands on. Owned by NotesLibrary so all three surfaces agree.
+  if (window.NotesLibrary) {
+    try { window.NotesLibrary.renderDashboardCard(); } catch (e) {}
+  }
+
   // Continue Watching remains visible even before the first video so the
   // three-card operations grid never collapses or hides the feature.
   const lv = appState.ytLastVideo;

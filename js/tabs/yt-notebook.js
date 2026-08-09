@@ -866,61 +866,33 @@ function ytnbRemember(entry) {
   ytnbRenderSaved();
 }
 
-function ytnbForget(key) {
-  const list = ytnbSavedList();
-  const at = list.findIndex(e => ytnbSavedKey(e) === key);
-  if (at < 0) return;
-  const gone = list[at];
-  if (!window.confirm('Remove "' + (gone.title || 'this notebook') + '" from your notebooks?')) return;
-  list.splice(at, 1);
-  if (typeof saveProgress === 'function') saveProgress();
-  ytnbRenderSaved();
-  if (typeof showToast === 'function') showToast('Notebook removed', 'success');
-}
 
-function ytnbSavedWhen(ts) {
-  if (!ts) return '';
-  const days = Math.floor((Date.now() - ts) / 86400000);
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 30) return days + ' days ago';
-  return new Date(ts).toLocaleDateString();
-}
 
+/* The shelf shows EVERYTHING the AI has written — single-lecture notes as well
+   as notebooks — because "where are my notes?" is one question, not two. The
+   rows come from js/features/notes-library.js so this page, the AI Study panel's
+   Saved dialog and the Dashboard card can never disagree about the list. */
 function ytnbRenderSaved() {
   const card = document.getElementById('ytnb-saved-card');
   const host = document.getElementById('ytnb-saved');
   const hint = document.getElementById('ytnb-saved-hint');
   if (!card || !host) return;
-  const list = ytnbSavedList();
-  card.hidden = !list.length;
-  if (!list.length) return;
-  if (hint) hint.textContent = list.length + (list.length === 1 ? ' notebook' : ' notebooks') + ' · opens instantly';
-  host.innerHTML = list.map(function (e) {
-    const key = ytnbSavedKey(e);
-    const arg = JSON.stringify(key).replace(/"/g, '&quot;');
-    const bits = [
-      ytnbShapeLabel(e.shape),
-      (e.n || (e.ids || []).length) + ' lectures',
-      e.lang,
-      e.mode !== 'notes' ? e.mode : (e.style && e.style !== 'topic' ? e.style : '')
-    ].filter(Boolean);
-    return '<div class="ytnb-saved-row">' +
-      '<button class="ytnb-saved-open" onclick="ytnbOpenSaved(' + arg + ')" ' +
-      'title="Open this notebook">' +
-      '<span class="ytnb-saved-icon" aria-hidden="true">📖</span>' +
-      '<span class="ytnb-saved-body">' +
-      '<span class="ytnb-saved-title">' + ytnbEsc(e.title || 'Notebook') + '</span>' +
-      '<span class="ytnb-saved-meta">' + ytnbEsc(bits.join(' · ')) +
-      (e.ts ? ' · ' + ytnbEsc(ytnbSavedWhen(e.ts)) : '') + '</span>' +
-      '</span></button>' +
-      '<span class="ytnb-saved-actions">' +
-      '<button class="ytnb-chip sm" onclick="ytnbRebuildSaved(' + arg + ')" ' +
-      'title="Build a fresh copy from the same lectures">↻</button>' +
-      '<button class="ytnb-chip sm danger" onclick="ytnbForget(' + arg + ')" ' +
-      'title="Remove from your notebooks">⌫</button>' +
-      '</span></div>';
-  }).join('');
+  const lib = window.NotesLibrary;
+  if (!lib) {                        // library script missing: fall back to notebooks only
+    const own = ytnbSavedList();
+    card.hidden = !own.length;
+    return;
+  }
+  const rows = lib.all();
+  card.hidden = !rows.length;
+  if (!rows.length) return;
+  const books = rows.filter(r => r.kind === 'notebook').length;
+  if (hint) {
+    hint.textContent = rows.length + (rows.length === 1 ? ' note' : ' notes') +
+      (books ? ' · ' + books + (books === 1 ? ' notebook' : ' notebooks') : '') +
+      ' · opens instantly';
+  }
+  host.innerHTML = lib.rowsHtml(rows, { actions: true });
 }
 
 function ytnbFindSaved(key) {

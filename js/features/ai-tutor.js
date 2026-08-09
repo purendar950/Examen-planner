@@ -3225,6 +3225,20 @@
     var headTitle = document.querySelector('#ai-study-panel .ai-head .ai-title');
     if (capEl && headTitle) headTitle.title = capEl.textContent;
     setSetupCollapsed(true);          // notes are on screen — hand their space to the paper
+    /* Index it in the student's notes library. The body is already cached
+       server-side; what has been missing is any record that THIS student has
+       these notes, because `study` docs carry no uid. A cache hit is recorded
+       too: re-reading a note is exactly the signal that it belongs near the top
+       of the list. */
+    if (window.NotesLibrary && content.trim()) {
+      try {
+        window.NotesLibrary.recordVideoNote({
+          vid: curVid(), title: curTitle(), mode: mode,
+          style: style || 'topic', lang: j.lang || outLang(),
+          courseId: courseIdForVideo(curVid())
+        });
+      } catch (e) {}
+    }
     // As soon as MCQ notes are generated, make them available as a quiz in the
     // Quiz tab — no "Take as Test" needed. Keyed by the current video; deduped
     // so re-renders of the same set don't re-publish.
@@ -5583,6 +5597,7 @@
         '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="topic+images">🖼 Topic + Images</option><option value="mcq">❓ MCQ</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
         '<button class="ai-btn sec" id="ai-notes-bundle" title="Combine several lectures into one notebook" style="padding:6px 10px">\uD83D\uDCDA Multi-video</button>' +
+        '<button class="ai-btn sec" id="ai-notes-saved" title="Every note the AI has written for you" style="padding:6px 10px">\uD83D\uDDC2 Saved</button>' +
         '<span id="ai-note-actions" class="ai-note-actions" role="group" aria-label="Note actions"></span>' +
         '</div><div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
@@ -5615,6 +5630,10 @@
           return;
         }
         window.ytnbOpenForCourse(courseIdForVideo(curVid()));
+      };
+      var savedBtn = document.getElementById('ai-notes-saved');
+      if (savedBtn) savedBtn.onclick = function () {
+        if (window.NotesLibrary) window.NotesLibrary.openModal();
       };
       // A freshly built body has no notes yet, so the setup controls start open.
       setSetupCollapsed(false);
@@ -6458,7 +6477,40 @@
     model: outModel,
     provider: outProvider,
     isPro: isPro,
-    LANGS: ['Hinglish', 'English', 'Hindi']
+    LANGS: ['Hinglish', 'English', 'Hindi'],
+    /* Reopen a saved single-video note in the real reader.
+       The notes library sends the student back to the lecture the note belongs
+       to, so everything the panel offers — Follow the lecture, Focus mode,
+       ask-the-AI on a line, timestamps that seek the player — still works. The
+       proxy answers a cache hit instantly, so this costs nothing; a miss falls
+       through to the normal generate path with the button in its usual state. */
+    openSavedNote: function (opts) {
+      opts = opts || {};
+      if (!opts.vid) return;
+      var lang = opts.lang || outLang();
+      var mode = ['notes', 'summary', 'insights'].indexOf(opts.mode) !== -1 ? opts.mode : 'notes';
+      var style = (opts.style === 'mcq' || opts.style === 'topic+images') ? opts.style : 'topic';
+      setLang(lang);
+      // Same sequence the [Course Content | AI Study] switcher uses to open the
+      // notes generator, so this cannot drift from the button beside it.
+      _cancelActiveStudy();
+      state.tab = 'notes';
+      renderTabs();
+      renderBody();
+      persistView('ai');
+      applyView();
+      // renderBody() rebuilt the controls, so set them after it has run.
+      setTimeout(function () {
+        var modeSel = document.getElementById('ai-notes-mode');
+        var styleSel = document.getElementById('ai-notes-style');
+        if (modeSel) modeSel.value = mode;
+        if (styleSel) {
+          styleSel.value = style;
+          styleSel.style.display = (mode === 'notes') ? '' : 'none';
+        }
+        showStudy(mode, 25, false, '', lang);
+      }, 0);
+    }
   };
 
   /* ── Control surface for the floating tutor window ────────────────────────

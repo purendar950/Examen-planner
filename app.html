@@ -443,6 +443,26 @@
   </div>
 
   <!-- ═══ CHAPTER LINK MODAL ═══ -->
+  <!-- ═══ MY AI NOTES LIBRARY ═══
+       One list of every note the AI has written: single-lecture notes and
+       multi-video notebooks. Rendered by js/features/notes-library.js, which
+       stores only the recipe for each (never the note body). -->
+  <div class="ch-link-modal-overlay sp-dialog-overlay" id="nlib-overlay" onclick="NotesLibrary.outsideClose(event)" aria-hidden="true">
+    <div class="ch-link-modal sp-dialog-content sp-dialog-md sp-dialog-scroll" role="dialog" aria-modal="true" aria-labelledby="nlib-title" aria-describedby="nlib-sub" tabindex="-1">
+      <div class="sp-dialog-header">
+        <div>
+          <h3 class="sp-dialog-title" id="nlib-title">My AI Notes</h3>
+          <div class="modal-sub sp-dialog-description" id="nlib-sub">Everything you have generated — opens instantly, no AI needed.</div>
+        </div>
+        <button type="button" class="sp-dialog-close" data-dialog-close onclick="NotesLibrary.closeModal()" aria-label="Close notes library">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"></path></svg>
+        </button>
+      </div>
+      <div class="nlib-filters" id="nlib-filters" role="group" aria-label="Filter notes"></div>
+      <div class="nlib-list" id="nlib-list" aria-live="polite"></div>
+    </div>
+  </div>
+
   <div class="ch-link-modal-overlay sp-dialog-overlay" id="ch-link-overlay" onclick="chLinkOutsideClose(event)" aria-hidden="true">
     <div class="ch-link-modal sp-dialog-content sp-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="ch-link-title" aria-describedby="ch-link-chname" tabindex="-1">
       <div class="sp-dialog-header">
@@ -557,6 +577,8 @@
 <!-- Multi-video notebook: needs the organiser's library + fetchers above it, and
      window.AiNotesKit from ai-tutor.js (loaded later — only used on click). -->
 <script defer src="js/tabs/yt-notebook.js"></script>
+<!-- The AI notes library indexes both single-lecture notes and notebooks. -->
+<script defer src="js/features/notes-library.js"></script>
 <script defer src="js/features/yt-screenshots.js"></script>
 <!-- mock-tests.js split by responsibility (see mock-tests-render.js header).
      Load order matters: data.js declares the shared const/let that

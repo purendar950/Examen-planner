@@ -135,6 +135,10 @@
           <article class="fin-action-card fin-mock-card" id="mock-dash-summary" tabindex="0" role="button"></article>
 
           <article class="fin-action-card yt-continue-card" id="yt-continue-card" onclick="switchPage('youtube');setTimeout(ytResume,120)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" tabindex="0" role="button"></article>
+
+          <!-- Every AI note this student has generated (single lectures + notebooks).
+               Filled by NotesLibrary.renderDashboardCard(). -->
+          <article class="fin-action-card yt-continue-card ai-notes-card" id="ai-notes-card" onclick="if(window.NotesLibrary)NotesLibrary.openModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}" tabindex="0" role="button"></article>
         </div>
       </section>
 

@@ -4341,6 +4341,45 @@ def api_study_bundle_start():
     return jsonify(_study_job_public(job)), (202 if job["status"] == "queued" else 200)
 
 
+@app.get("/api/study/saved")
+def api_study_saved():
+    """Read ONE already-generated single-video note, without ever generating.
+
+    /api/study would generate on a miss, which spends AI budget and a rate-limit
+    slot. Reopening something from the student's own notes library must never do
+    that: a missing body is reported so the UI can offer to generate it, as an
+    explicit choice rather than a side effect of clicking a saved item.
+    """
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    video_id = _parse_video_id((request.args.get("id") or request.args.get("v") or "").strip())
+    if not video_id:
+        return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
+    mode = (request.args.get("mode") or "notes").strip().lower()
+    if mode not in ("notes", "summary", "insights"):
+        return jsonify({"error": "bad_mode"}), 400
+    out_lang = (request.args.get("out") or request.args.get("lang") or "English").strip() or "English"
+    style = (request.args.get("style") or "").strip().lower()
+    if style == "topic":
+        style = ""
+    if mode != "notes" or style not in ("mcq", "topic+images"):
+        style = ""
+    ckey, fs_id = _study_text_cache_keys(video_id, mode, out_lang, style)
+    saved = _study_job_cached_result(ckey, fs_id, False)
+    if not saved or not str(saved.get("content") or "").strip():
+        return jsonify({"error": "note_not_found",
+                        "detail": "These notes are no longer stored. Generate them again."}), 404
+    return jsonify({
+        "id": video_id, "title": saved.get("title"),
+        "content": saved.get("content") or "", "mode": saved.get("mode") or mode,
+        "style": saved.get("style") or "topic",
+        "out_lang": saved.get("out_lang") or out_lang,
+        "provider": saved.get("provider") or "ai", "model": saved.get("model") or "",
+        "cached": True,
+    })
+
+
 @app.get("/api/study/bundles/<fingerprint>")
 def api_study_bundle_get(fingerprint):
     """Reopen a saved notebook.
