@@ -35,8 +35,18 @@
         </ol>
       </header>
 
-      <!-- ── Build view: import, pick, configure ── -->
+      <!-- ── Build view: saved shelf, import, pick, configure ── -->
       <div class="ytnb-view active" id="ytnb-build-view">
+        <!-- Saved notebooks. Only the recipe is stored in appState; the notes
+             themselves are fetched from the proxy on open. Hidden when empty. -->
+        <section class="ytnb-card ytnb-saved-card" id="ytnb-saved-card" aria-label="Your saved notebooks" hidden>
+          <div class="ytnb-card-top">
+            <label class="ytnb-label">Your notebooks</label>
+            <span class="ytnb-hint" id="ytnb-saved-hint"></span>
+          </div>
+          <div class="ytnb-saved" id="ytnb-saved"></div>
+        </section>
+
         <section class="ytnb-card ytnb-import" aria-label="Add a playlist or video">
           <div class="ytnb-card-top">
             <label class="ytnb-label" for="ytnb-url-input">Add lectures</label>

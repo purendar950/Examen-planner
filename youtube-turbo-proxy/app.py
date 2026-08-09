@@ -1155,6 +1155,9 @@ def _study_job_public(job):
         items = _bundle_items_public(job.get("items"))
         out.update({"kind": "bundle", "shape": job.get("shape"),
                     "bundleTitle": job.get("bundle_title"),
+                    # The browser saves this so the notebook can be reopened
+                    # later without resending the selection it was built from.
+                    "fingerprint": job.get("fingerprint") or "",
                     "videoIds": list(job.get("video_ids") or []),
                     "courseId": job.get("course_id") or "",
                     "degraded": job.get("degraded") or "",
@@ -3722,12 +3725,22 @@ def _bundle_fingerprint(video_ids, shape):
     return hashlib.sha1("|".join(ids).encode("utf-8")).hexdigest()[:32]
 
 
-def _bundle_cache_keys(video_ids, shape, mode, out_lang, style):
+def _bundle_keys_for(fp, shape, mode, out_lang, style):
+    """Cache keys from an already-known fingerprint.
+
+    Split out from _bundle_cache_keys so a SAVED notebook can be reopened from
+    its fingerprint alone, without the browser having to resend (and the server
+    having to re-trust) the video list it was built from.
+    """
     lang = _cache_lang(out_lang)
     cache_style = (_MCQ_CACHE_STYLE if style == "mcq" else style) or "topic"
-    fp = _bundle_fingerprint(video_ids, shape)
     return ("bundle:%s:%s:%s:%s:%s" % (fp, shape, mode, lang, cache_style),
             _fs_doc_id("bundle", fp, shape, mode, lang, cache_style))
+
+
+def _bundle_cache_keys(video_ids, shape, mode, out_lang, style):
+    return _bundle_keys_for(_bundle_fingerprint(video_ids, shape), shape, mode,
+                            out_lang, style)
 
 
 def _bundle_counts(items):
@@ -4326,6 +4339,53 @@ def api_study_bundle_start():
             job["thread"] = worker
         worker.start()
     return jsonify(_study_job_public(job)), (202 if job["status"] == "queued" else 200)
+
+
+@app.get("/api/study/bundles/<fingerprint>")
+def api_study_bundle_get(fingerprint):
+    """Reopen a saved notebook.
+
+    Deliberately NOT gated on current library membership, unlike creation. A
+    notebook costs AI budget to BUILD, which is why that path resolves every
+    video against users/{uid}.appState.ytoLibrary; READING one back is a lookup
+    in the shared `study` cache that costs nothing, and re-checking membership
+    here would lock a student out of their own saved notebook the moment they
+    tidied a playlist out of their library.
+    """
+    user, err = _verified_user_record(require_pro=True)
+    if err:
+        return jsonify(err[0]), err[1]
+    fp = str(fingerprint or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{8,64}", fp):
+        return jsonify({"error": "bad_fingerprint"}), 400
+    shape = (request.args.get("shape") or "merge").strip().lower()
+    if shape not in _BUNDLE_SHAPES:
+        return jsonify({"error": "bad_shape"}), 400
+    mode = (request.args.get("mode") or "notes").strip().lower()
+    if mode not in ("notes", "summary", "insights"):
+        return jsonify({"error": "bad_mode"}), 400
+    out_lang = (request.args.get("out") or request.args.get("lang") or "English").strip() or "English"
+    style = (request.args.get("style") or "").strip().lower()
+    if style == "topic":
+        style = ""
+    if mode != "notes" or style not in ("mcq", "topic+images"):
+        style = ""
+    ckey, fs_id = _bundle_keys_for(fp, shape, mode, out_lang, style)
+    saved = _study_job_cached_result(ckey, fs_id, False)
+    if not saved or not str(saved.get("content") or "").strip():
+        # Gone (or purged). The browser holds the recipe, so it can rebuild —
+        # which is mostly cache hits on the per-video notes.
+        return jsonify({"error": "bundle_not_found",
+                        "detail": "This notebook is no longer stored. Rebuild it to get it back."}), 404
+    return jsonify({
+        "fingerprint": fp, "shape": saved.get("shape") or shape,
+        "title": saved.get("title"), "content": saved.get("content") or "",
+        "items": saved.get("items") or [], "videoIds": saved.get("video_ids") or [],
+        "mode": saved.get("bundle_mode") or mode, "style": saved.get("style") or "topic",
+        "out_lang": saved.get("out_lang") or out_lang,
+        "provider": saved.get("provider") or "ai", "model": saved.get("model") or "",
+        "cached": True,
+    })
 
 
 @app.post("/api/study/cached")
