@@ -6478,13 +6478,13 @@
     provider: outProvider,
     isPro: isPro,
     LANGS: ['Hinglish', 'English', 'Hindi'],
-    /* Reopen a saved single-video note in the real reader.
-       The notes library sends the student back to the lecture the note belongs
-       to, so everything the panel offers — Follow the lecture, Focus mode,
-       ask-the-AI on a line, timestamps that seek the player — still works. The
-       proxy answers a cache hit instantly, so this costs nothing; a miss falls
-       through to the normal generate path with the button in its usual state. */
-    openSavedNote: function (opts) {
+    /* Open ONE lecture's notes in the real reader, generating them if they are
+       not cached yet. Callers send the student back to the lecture the note
+       belongs to, so everything the panel offers — Follow the lecture, Focus
+       mode, ask-the-AI on a line, timestamps that seek the player — still
+       works. A cached note costs nothing and appears at once; a miss falls
+       through to the ordinary generate path with the usual Stop button. */
+    openNote: function (opts) {
       opts = opts || {};
       if (!opts.vid) return;
       var lang = opts.lang || outLang();
@@ -6512,6 +6512,9 @@
       }, 0);
     }
   };
+  /* Back-compat alias: notes-library.js may be served from cache while a newer
+     ai-tutor.js loads (only ai-tutor.js carries a ?v= buster in app.html). */
+  window.AiNotesKit.openSavedNote = window.AiNotesKit.openNote;
 
   /* ── Control surface for the floating tutor window ────────────────────────
      js/features/tutor-float.js owns the FAB, the window chrome and the mobile
