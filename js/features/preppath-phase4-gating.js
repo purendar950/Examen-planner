@@ -388,6 +388,21 @@ window.ezTutorSendAllowed = function ezTutorSendAllowed() {
   return true;
 };
 
+/* Read-only view of the same allowance, for UI that wants to show it BEFORE the
+   student spends a message. Lives here rather than in ai-tutor.js because this
+   file owns the key format and the limit; duplicating either would drift.
+
+   Returns null for Pro/trial (nothing to show) so callers can simply skip.
+   Counts nothing — calling this must never consume an allowance. */
+window.ezTutorMessagesLeft = function ezTutorMessagesLeft() {
+  if (!ezGated()) return null;               // Pro / trial → unlimited
+  const today = new Date().toISOString().split('T')[0];
+  let count = 0;
+  try { count = parseInt(localStorage.getItem('sp_ai_tutor_' + today) || '0', 10) || 0; } catch(e) {}
+  const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
+  return { left: Math.max(0, maxFree - count), max: maxFree };
+};
+
 /* 11. Turbo 4× Player → Pro only.
    Wraps `ytToggleTurbo` from js/features/turbo-player.js. The function
    already shows its own ezLockedMsg, but we replace it with our

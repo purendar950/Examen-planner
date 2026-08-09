@@ -8310,3 +8310,119 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   #page-youtube .ai-tutor-topline.has-library-controls .ai-tutor-actions { margin-left: .1rem; }
   #page-youtube .ai-tutor-topline #ai-tutor-course { max-width: 150px; }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Notes Focus Mode — the in-layer AI ask sheet (the third tutor dock)
+   ───────────────────────────────────────────────────────────────────────────
+   Why it exists at all: Focus Mode promotes #ai-sub to a fixed layer at
+   z-index 2147483000 and marks every element outside it `inert`, so the global
+   floating tutor is both painted underneath and unclickable — tutor-float.js
+   hides itself outright while Focus is up. Anything that wants to talk to the
+   student in here has to live INSIDE the notes subtree, so the single
+   .ai-tutor-shell node is re-parented into #ai-focus-ask-body.
+
+   Laid out as the LAST flex child (order: 5 — the sheet sits early in the DOM
+   because it ships with the toolbar markup) rather than as an overlay, so the
+   notes stay readable while the student asks about them. Covering the passage
+   they are questioning would defeat the point.
+
+   The sheet deliberately keeps the app's dark surface instead of the notebook's
+   paper: it reads as clearly "the assistant, not your notes", and the chat
+   renders exactly as it does in the panel and the float with no restyling. */
+#page-youtube .ai-focus-ask { display: none; }
+#page-youtube #ai-sub.ai-notes-focus { --ai-ask-h: 0px; }
+#page-youtube #ai-sub.ai-notes-focus.ai-focus-ask-open { --ai-ask-h: min(52vh, 460px); }
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-ask {
+  display: flex;
+  order: 5;
+  flex: 0 0 auto;
+  flex-direction: column;
+  /* A set height rather than max-height, so the mini-video offset below can be
+     kept in exact agreement with it. */
+  height: var(--ai-ask-h);
+  width: min(100%, 960px);
+  min-height: 0;
+  margin: 0 auto;
+  border-top: 1px solid var(--border, #2a3140);
+  background: var(--card, #151a24);
+  color: var(--text, #e7ecf5);
+  box-shadow: 0 -12px 34px rgba(20, 26, 22, .28);
+}
+/* The `hidden` attribute must still beat the display:flex above. */
+#page-youtube .ai-focus-ask[hidden] { display: none !important; }
+#page-youtube .ai-focus-ask-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  padding: .5rem .8rem;
+  border-bottom: 1px solid var(--border, #2a3140);
+  font-size: .76rem;
+}
+#page-youtube .ai-focus-ask-close {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--border, #2a3140);
+  border-radius: 8px;
+  background: var(--surface, #1b1f2a);
+  color: var(--text, #e7ecf5);
+  font: 700 1.05rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+#page-youtube .ai-focus-ask-close:focus-visible { outline: 2px solid var(--accent, #00c896); outline-offset: 2px; }
+/* Free-plan allowance. Pushed hard right, next to Close, so it reads as status
+   rather than as part of the title. */
+#page-youtube .ai-focus-ask-left {
+  margin-left: auto;
+  color: var(--muted, #8b93a7);
+  font-size: .64rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+#page-youtube .ai-focus-ask-left.is-out { color: #e0464b; }
+#page-youtube .ai-focus-ask-left[hidden] { display: none; }
+/* Which passage the answer is about. Without this the student cannot tell
+   whether the tutor is talking about the line they picked or the whole note. */
+#page-youtube .ai-focus-ask-quote {
+  flex: 0 0 auto;
+  max-height: 4.6em;
+  margin: .5rem .8rem 0;
+  padding: .42rem .6rem;
+  overflow: auto;
+  border-left: 3px solid var(--accent, #00c896);
+  border-radius: 0 6px 6px 0;
+  background: var(--surface, #1b1f2a);
+  color: var(--muted, #8b93a7);
+  font-size: .7rem;
+  line-height: 1.5;
+}
+#page-youtube .ai-focus-ask-quote[hidden] { display: none; }
+#page-youtube .ai-focus-ask-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: .6rem .8rem max(.6rem, env(safe-area-inset-bottom));
+  overflow: auto;
+}
+/* The shell brings its own 340px chat cap, which is meaningless inside a sheet
+   that is already height-bounded — let the conversation use the space it has. */
+#page-youtube .ai-focus-ask-body .ai-chat { max-height: none; flex: 1 1 auto; }
+#page-youtube .ai-focus-ask-body .ai-tutor-shell { display: flex; flex-direction: column; min-height: 100%; }
+/* Keep the picture-in-picture player clear of the sheet instead of letting it
+   sit on top: it is absolutely positioned, so it does not know the sheet exists.
+   --ai-ask-h is 0px while the sheet is closed, so this matches the base rule. */
+#page-youtube #ai-sub.ai-notes-focus .ai-focus-mini-video {
+  bottom: calc(max(1rem, env(safe-area-inset-bottom)) + var(--ai-ask-h));
+}
+
+@media (max-width: 700px) {
+  /* Phones have less height to give, but a cramped chat is worse than a shorter
+     view of the notes while a question is actually being asked. */
+  #page-youtube #ai-sub.ai-notes-focus.ai-focus-ask-open { --ai-ask-h: 62vh; }
+  #page-youtube .ai-focus-ask-head { font-size: .72rem; }
+  #page-youtube .ai-focus-ask-body { padding-inline: .55rem; }
+}
