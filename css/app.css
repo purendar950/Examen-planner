@@ -8878,3 +8878,42 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   #page-yt-notebook .ytnb-go { width: 100%; }
   #page-yt-notebook .ytnb-check-state { display: none; }
 }
+
+
+/* ── saved notebooks shelf (top of the build view) ── */
+#page-yt-notebook .ytnb-saved-card { border-color: var(--accent-dim, rgba(0, 200, 150, .12)); }
+#page-yt-notebook .ytnb-saved { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto; }
+#page-yt-notebook .ytnb-saved-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 10px;
+  padding: 4px 8px 4px 4px;
+}
+#page-yt-notebook .ytnb-saved-row:hover { border-color: var(--accent, #00C896); }
+#page-yt-notebook .ytnb-saved-open {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 7px 6px;
+  cursor: pointer;
+  min-width: 0;
+}
+#page-yt-notebook .ytnb-saved-icon { font-size: 1.05rem; flex: none; }
+#page-yt-notebook .ytnb-saved-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+#page-yt-notebook .ytnb-saved-title {
+  font-size: .86rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-yt-notebook .ytnb-saved-meta { font-size: .72rem; color: var(--muted, #5A6478); }
+#page-yt-notebook .ytnb-saved-actions { display: flex; gap: 4px; flex: none; }

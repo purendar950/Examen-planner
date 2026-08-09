@@ -478,6 +478,7 @@ function ytnbShowView(which) {
 
 function ytnbBackToPicker() {
   ytnbShowView('build');
+  ytnbRenderSaved();
   ytnbRenderGroups();
 }
 
@@ -628,7 +629,10 @@ function ytnbStream(job, created) {
       title: created.bundleTitle || '',
       // The proxy may legitimately change the shape (MCQ cannot be merged), so
       // the label follows what it actually did rather than what was asked for.
-      shape: created.shape || job.shape
+      shape: created.shape || job.shape,
+      // Saved so the finished notebook can be reopened later without the
+      // browser having to reproduce the exact selection that built it.
+      fingerprint: created.fingerprint || ''
     }
   };
   _ytnbRun = run;
@@ -675,6 +679,7 @@ function ytnbStream(job, created) {
         run.meta.title = obj.bundleTitle || run.meta.title;
         run.meta.degraded = obj.degraded || run.meta.degraded;
         run.meta.shape = obj.shape || run.meta.shape;
+        run.meta.fingerprint = obj.fingerprint || run.meta.fingerprint;
         if (Array.isArray(obj.items) && obj.items.length) {
           run.items = obj.items;
           run.counts = obj.counts || {};
@@ -690,7 +695,8 @@ function ytnbStream(job, created) {
           content: run.acc, items: run.items, counts: run.counts,
           provider: run.meta.provider, model: run.meta.model,
           out_lang: run.meta.lang, bundleTitle: run.meta.title,
-          degraded: run.meta.degraded, shape: run.meta.shape
+          degraded: run.meta.degraded, shape: run.meta.shape,
+          fingerprint: run.meta.fingerprint
         });
         return false;
       }
@@ -735,9 +741,14 @@ function ytnbFinish(job, result) {
   ytnbRenderChecklist(items, result.counts || {}, 'completed');
   const progress = document.getElementById('ytnb-progress');
   if (progress) progress.open = false;      // the notebook is the point now, not the log
+  // A reopened notebook has no checklist to show, and re-recording it would
+  // only move it to the top of the shelf for being read.
+  if (progress && result.reopened) progress.hidden = true;
+  else if (progress) progress.hidden = false;
   ytnbSetTools(
     '<button class="ytnb-chip" id="ytnb-pdf">📄 Print / PDF</button>' +
-    '<button class="ytnb-chip" onclick="ytnbRegenerate()" title="Build a fresh copy, ignoring the saved one">↻ Regenerate</button>');
+    '<button class="ytnb-chip" onclick="ytnbRegenerate()" title="Build a fresh copy, ignoring the saved one">↻ Regenerate</button>' +
+    '<button class="ytnb-chip" onclick="ytnbBackToPicker()">📚 My notebooks</button>');
   const pdf = document.getElementById('ytnb-pdf');
   if (pdf) {
     pdf.onclick = function () {
@@ -745,6 +756,23 @@ function ytnbFinish(job, result) {
     };
   }
   if (result.degraded && typeof showToast === 'function') showToast(result.degraded, 'info');
+
+  // Put it on the shelf. Only the recipe is stored, so this stays tiny.
+  if (!result.reopened && result.fingerprint) {
+    ytnbRemember({
+      fp: result.fingerprint,
+      title: bookTitle,
+      shape: result.shape || job.shape,
+      mode: job.mode || 'notes',
+      style: job.style || 'topic',
+      lang: result.out_lang || job.lang,
+      ids: (job.ids || []).slice(),
+      courseId: job.courseId || '',
+      n: items.filter(i => i.state === 'ready').length || (job.ids || []).length,
+      ts: Date.now()
+    });
+    if (typeof showToast === 'function') showToast('📚 Saved to your notebooks', 'success');
+  }
 }
 
 function ytnbEnded(job, status, detail) {
@@ -795,6 +823,182 @@ function ytnbResume() {
   ytnbStart(job, true);
 }
 
+/* ── saved notebooks ───────────────────────────────────────────────────────
+   A finished notebook is already durable: the proxy stores its markdown in the
+   shared `study` collection (+ B2) keyed by a fingerprint of the exact
+   selection + shape + mode + style + language. What was missing is a way to
+   FIND it again — those docs carry no uid, so there is no per-user index
+   anywhere on the server.
+
+   So appState keeps the RECIPE and nothing else: fingerprint, options, video
+   ids, title, timestamp. ~300 bytes an entry, against a 1 MiB document ceiling
+   the Organiser is already watching. Opening a notebook fetches the body from
+   the proxy; if it has been purged, the recipe is enough to rebuild it — and a
+   rebuild is mostly cache hits on the per-video notes, so it is fast and cheap.
+   That is why a saved notebook can never become a dead link. */
+const YTNB_SAVED_MAX = 40;
+
+function ytnbSavedList() {
+  if (!window.appState) return [];
+  if (!Array.isArray(appState.ytNotebooks)) appState.ytNotebooks = [];
+  return appState.ytNotebooks;
+}
+function ytnbSavedKey(entry) {
+  return [entry.fp, entry.shape, entry.mode, entry.style || 'topic', entry.lang].join('|');
+}
+
+/* Record a finished notebook. Same selection + same options overwrites its own
+   entry rather than stacking duplicates every time it is regenerated. */
+function ytnbRemember(entry) {
+  if (!window.appState || !entry || !entry.fp) return;
+  const list = ytnbSavedList();
+  const key = ytnbSavedKey(entry);
+  const at = list.findIndex(e => ytnbSavedKey(e) === key);
+  if (at >= 0) list.splice(at, 1);
+  list.unshift(entry);
+  if (list.length > YTNB_SAVED_MAX) list.length = YTNB_SAVED_MAX;
+  // Same guard the Organiser applies after a bulk import: this document is
+  // shared with the whole course library, so never grow it blindly.
+  if (typeof ytoDocBytes === 'function' && ytoDocBytes(appState) > 1000 * 1024) {
+    list.splice(Math.max(5, Math.floor(list.length / 2)));
+  }
+  if (typeof saveProgress === 'function') saveProgress();
+  ytnbRenderSaved();
+}
+
+function ytnbForget(key) {
+  const list = ytnbSavedList();
+  const at = list.findIndex(e => ytnbSavedKey(e) === key);
+  if (at < 0) return;
+  const gone = list[at];
+  if (!window.confirm('Remove "' + (gone.title || 'this notebook') + '" from your notebooks?')) return;
+  list.splice(at, 1);
+  if (typeof saveProgress === 'function') saveProgress();
+  ytnbRenderSaved();
+  if (typeof showToast === 'function') showToast('Notebook removed', 'success');
+}
+
+function ytnbSavedWhen(ts) {
+  if (!ts) return '';
+  const days = Math.floor((Date.now() - ts) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return days + ' days ago';
+  return new Date(ts).toLocaleDateString();
+}
+
+function ytnbRenderSaved() {
+  const card = document.getElementById('ytnb-saved-card');
+  const host = document.getElementById('ytnb-saved');
+  const hint = document.getElementById('ytnb-saved-hint');
+  if (!card || !host) return;
+  const list = ytnbSavedList();
+  card.hidden = !list.length;
+  if (!list.length) return;
+  if (hint) hint.textContent = list.length + (list.length === 1 ? ' notebook' : ' notebooks') + ' · opens instantly';
+  host.innerHTML = list.map(function (e) {
+    const key = ytnbSavedKey(e);
+    const arg = JSON.stringify(key).replace(/"/g, '&quot;');
+    const bits = [
+      ytnbShapeLabel(e.shape),
+      (e.n || (e.ids || []).length) + ' lectures',
+      e.lang,
+      e.mode !== 'notes' ? e.mode : (e.style && e.style !== 'topic' ? e.style : '')
+    ].filter(Boolean);
+    return '<div class="ytnb-saved-row">' +
+      '<button class="ytnb-saved-open" onclick="ytnbOpenSaved(' + arg + ')" ' +
+      'title="Open this notebook">' +
+      '<span class="ytnb-saved-icon" aria-hidden="true">📖</span>' +
+      '<span class="ytnb-saved-body">' +
+      '<span class="ytnb-saved-title">' + ytnbEsc(e.title || 'Notebook') + '</span>' +
+      '<span class="ytnb-saved-meta">' + ytnbEsc(bits.join(' · ')) +
+      (e.ts ? ' · ' + ytnbEsc(ytnbSavedWhen(e.ts)) : '') + '</span>' +
+      '</span></button>' +
+      '<span class="ytnb-saved-actions">' +
+      '<button class="ytnb-chip sm" onclick="ytnbRebuildSaved(' + arg + ')" ' +
+      'title="Build a fresh copy from the same lectures">↻</button>' +
+      '<button class="ytnb-chip sm danger" onclick="ytnbForget(' + arg + ')" ' +
+      'title="Remove from your notebooks">⌫</button>' +
+      '</span></div>';
+  }).join('');
+}
+
+function ytnbFindSaved(key) {
+  return ytnbSavedList().find(e => ytnbSavedKey(e) === key) || null;
+}
+
+/* Open a saved notebook read-only. No job, no AI call — one GET for the body. */
+function ytnbOpenSaved(key) {
+  const kit = ytnbKit();
+  const entry = ytnbFindSaved(key);
+  if (!kit || !entry) return;
+  ytnbShowView('run');
+  const out = document.getElementById('ytnb-output');
+  const titleEl = document.getElementById('ytnb-run-title');
+  const metaEl = document.getElementById('ytnb-run-meta');
+  if (titleEl) titleEl.textContent = entry.title || 'Notebook';
+  if (metaEl) metaEl.textContent = 'Opening your saved notebook…';
+  const progress = document.getElementById('ytnb-progress');
+  if (progress) progress.open = false;
+  ytnbSetTools('');
+  if (out) out.innerHTML = kit.stageMessage('captions', 'Opening “' + (entry.title || 'Notebook') + '”',
+    'Loading the notes you already generated — no AI needed.');
+
+  const q = '?shape=' + encodeURIComponent(entry.shape) +
+    '&mode=' + encodeURIComponent(entry.mode) +
+    '&out=' + encodeURIComponent(entry.lang) +
+    '&style=' + encodeURIComponent(entry.style || '');
+  kit.authFetch('/api/study/bundles/' + encodeURIComponent(entry.fp) + q)
+    .then(function (r) {
+      if (r.ok) return r.json();
+      return r.json().catch(() => ({})).then(function (j) {
+        j = j || {}; j._httpStatus = r.status; throw j;
+      });
+    })
+    .then(function (saved) {
+      ytnbFinish({
+        shape: entry.shape, style: entry.style || '', mode: entry.mode, ids: entry.ids || []
+      }, {
+        content: saved.content || '', items: saved.items || [],
+        counts: {}, provider: saved.provider, model: saved.model,
+        out_lang: saved.out_lang, bundleTitle: saved.title || entry.title,
+        shape: saved.shape || entry.shape, reopened: true
+      });
+    })
+    .catch(function (e) {
+      const gone = e && e._httpStatus === 404;
+      if (out) {
+        out.innerHTML = kit.stageMessage('error',
+          gone ? 'This notebook is no longer stored' : 'Could not open that notebook',
+          gone ? 'Rebuilding uses the notes already saved for each lecture, so it is usually quick.'
+               : ((e && (e.detail || e.error)) || 'Please try again in a moment.'));
+      }
+      ytnbSetTools('<button class="ytnb-chip" onclick="ytnbRebuildSaved(' +
+        JSON.stringify(key).replace(/"/g, '&quot;') + ')">↻ Rebuild</button>' +
+        '<button class="ytnb-chip" onclick="ytnbBackToPicker()">Back</button>');
+    });
+}
+
+/* Restore a saved notebook's exact recipe into the picker and build it again. */
+function ytnbRebuildSaved(key) {
+  const kit = ytnbKit();
+  const entry = ytnbFindSaved(key);
+  if (!kit || !entry || !(entry.ids || []).length) return;
+  ytnbSaveSelection(entry.ids.map(id => ({ id: id, courseId: entry.courseId || '' })));
+  try {
+    localStorage.setItem(YTNB_OPTS_KEY, JSON.stringify({
+      shape: entry.shape, mode: entry.mode, style: entry.style || 'topic', lang: entry.lang
+    }));
+  } catch (e) {}
+  ytnbApplyOptionsToUi();
+  ytnbStart({
+    jobId: kit.newJobId(), ids: entry.ids.slice(0, YTNB_MAX_VIDEOS),
+    courseId: entry.courseId || '', shape: entry.shape, mode: entry.mode,
+    style: entry.mode === 'notes' ? (entry.style || '') : '', lang: entry.lang,
+    force: true
+  }, false);
+}
+
 /* ── entry points ── */
 function ytnbOpenForCourse(courseId) {
   const course = (typeof ytoLib === 'function' ? ytoLib() : {})[courseId];
@@ -806,11 +1010,13 @@ function ytnbOpenForCourse(courseId) {
   }
   ytnbShowView('build');
   ytnbApplyOptionsToUi();
+  ytnbRenderSaved();
   ytnbRenderGroups();
 }
 
 function ytnbOnActivate() {
   ytnbApplyOptionsToUi();
+  ytnbRenderSaved();
   ytnbRenderGroups();
   const job = ytnbReadJob();
   if (job && job.jobId && !ytnbRunViewActive()) setTimeout(ytnbResume, 0);
