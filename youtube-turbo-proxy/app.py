@@ -4857,7 +4857,589 @@ def api_status():
     except Exception:  # noqa: BLE001
         granted = False
     out["showFocusBox"] = bool(global_focus or granted)
+    out["tutorWebSearch"] = bool(_load_search_config()["enabled"])
     return jsonify(out)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  GENERAL AWARENESS + LIVE WEB SEARCH FOR THE TUTOR
+#  ─────────────────────────────────────────────────────────────────────────
+#  Two complaints with one root cause — the tutor only knew its training data,
+#  and was told to answer ONLY from the transcript.
+#
+#  1. General awareness. These students sit Indian competitive exams where
+#     "General Awareness" is a scored subject, so "who is the current RBI
+#     governor" IS studying, not chit-chat. The old prompt refused it by
+#     construction ("Answer ONLY using the transcript below"), which made the
+#     tutor look broken for a whole exam section. The transcript is now the
+#     PRIMARY source rather than the ONLY one, and off-transcript material is
+#     answered under an explicit '**Beyond this video:**' heading so a revising
+#     student can still tell the lecture apart from what the model added.
+#
+#  2. Freshness. Current-affairs answers taken from training data are silently
+#     stale, which in an exam is worse than no answer. Time-sensitive questions
+#     therefore get a real web search injected as context, and every tutor
+#     prompt now carries today's real date.
+#
+#  Why context injection and not tool/function calling? The tutor routes across
+#  ~12 gateways (STUDY_PROVIDER_IDS), many of them free tiers proxying small
+#  models with partial or absent tool-call support, and the reply streams. A
+#  missing tools[] capability would silently degrade to no-search on an unknown
+#  subset of providers, i.e. exactly the models most students are on. Deciding
+#  server-side costs one round trip and behaves identically everywhere.
+#
+#  Keys never reach the browser — same rule as the AI providers.
+# ═══════════════════════════════════════════════════════════════════════════
+import html as _htmllib
+import urllib.parse as _urlparse
+
+# Master switch. Admin can also flip it per-deployment from Firestore
+# (config/ai.tutorWebSearch) without a redeploy.
+_TUTOR_WEB_DEFAULT = os.environ.get("TUTOR_WEB_SEARCH", "1").strip().lower() \
+    not in ("0", "false", "no", "off")
+WEB_SEARCH_TTL = int(os.environ.get("WEB_SEARCH_TTL", "900"))            # 15 min
+# Per-provider read timeout, and a hard ceiling on the whole chain. The student
+# is watching a "Tutor soch raha hai…" spinner, so search latency is answer
+# latency: better a slightly staler answer than a chat that feels hung.
+WEB_SEARCH_TIMEOUT = float(os.environ.get("WEB_SEARCH_TIMEOUT", "6"))
+WEB_SEARCH_BUDGET = float(os.environ.get("WEB_SEARCH_BUDGET", "12"))
+WEB_SEARCH_RESULTS = max(1, min(10, int(os.environ.get("WEB_SEARCH_RESULTS", "5"))))
+WEB_SNIPPET_CHARS = int(os.environ.get("WEB_SNIPPET_CHARS", "420"))
+# Searches/hour/user. Separate from the tutor message budget because one
+# message can only ever trigger one search, but a scripted client could.
+WEB_SEARCH_PER_HOUR = int(os.environ.get("WEB_SEARCH_PER_HOUR", "60"))
+WEB_CACHE_MAX = 500
+
+_WEB_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like "
+           "Gecko) Chrome/124.0.0.0 Safari/537.36")
+# Results are shared across users: a query string is not user data, and current
+# affairs answers are identical for everyone asking within the TTL.
+_web_cache = {}
+_web_cache_lock = threading.Lock()
+
+_SEARCH_CFG_TTL = 300
+_search_cfg = {"ts": 0.0, "data": None}
+
+
+def _load_search_config():
+    """Search-provider credentials from Firestore config/ai, with env fallbacks.
+
+    Cached for _SEARCH_CFG_TTL: this is consulted on tutor requests that already
+    read config/ai for the AI route, and a second uncached Firestore round trip
+    per message would be pure added latency on the critical path."""
+    now = time.time()
+    if _search_cfg["data"] is not None and now - _search_cfg["ts"] < _SEARCH_CFG_TTL:
+        return _search_cfg["data"]
+    cfg = {}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                cfg = doc.to_dict() or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/ai search read failed: %s", exc)
+
+    def _pick(field, env):
+        return str(cfg.get(field) or "").strip() or os.environ.get(env, "").strip()
+
+    data = {
+        # An explicit False in Firestore disables search everywhere; an absent
+        # field defers to the env default.
+        "enabled": bool(cfg.get("tutorWebSearch", _TUTOR_WEB_DEFAULT)),
+        "tavily": _pick("tavilyApiKey", "TAVILY_API_KEY"),
+        "brave": _pick("braveApiKey", "BRAVE_API_KEY"),
+        "serper": _pick("serperApiKey", "SERPER_API_KEY"),
+        "searxng": _pick("searxngUrl", "SEARXNG_URL").rstrip("/"),
+    }
+    _search_cfg["ts"] = now
+    _search_cfg["data"] = data
+    return data
+
+
+_WEB_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _web_clean(text):
+    """HTML fragment → plain single-line text. Search snippets arrive with
+    <b>/<span class="searchmatch"> markup and entities in every provider."""
+    if not text:
+        return ""
+    s = _WEB_TAG_RE.sub(" ", str(text))
+    try:
+        s = _htmllib.unescape(s)
+    except Exception:  # noqa: BLE001
+        pass
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _web_host(url):
+    try:
+        host = (_urlparse.urlparse(url).hostname or "").lower()
+    except Exception:  # noqa: BLE001
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _web_norm(items, via):
+    """Coerce a provider's raw rows into the one shape the prompt builder uses.
+    Anything without an http(s) URL and a title is dropped rather than shown to
+    the model as an uncitable claim."""
+    out = []
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        url = str(it.get("url") or "").strip()
+        title = _web_clean(it.get("title"))[:180]
+        if not title or not url.lower().startswith(("http://", "https://")):
+            continue
+        out.append({"title": title, "url": url,
+                    "snippet": _web_clean(it.get("snippet"))[:WEB_SNIPPET_CHARS],
+                    "site": _web_host(url), "via": via})
+    return out
+
+
+# How much to trust each provider's ranking, for ordering the final list. The
+# model reads top-down and the list is truncated to WEB_SEARCH_RESULTS, so this
+# decides which sources actually reach the prompt. Wikinews sits last because its
+# full-text search matches loosely — it will happily return a 2011 IMF story for
+# "current RBI governor", which should not be the first thing the model reads.
+_WEB_VIA_RANK = {"tavily": 0, "serper": 0, "brave": 0, "searxng": 1,
+                 "duckduckgo": 2, "ddg-instant": 3, "wikipedia": 4, "wikinews": 5}
+
+
+def _web_rank(results):
+    """Stable sort by provider trust, preserving each provider's own ordering."""
+    return sorted(results, key=lambda r: _WEB_VIA_RANK.get(r.get("via"), 9))
+
+
+def _web_dedupe(results):
+    """Drop repeats by URL and by (site, title) — the keyless providers are
+    chained, so the same page legitimately arrives twice."""
+    seen_url, seen_pair, out = set(), set(), []
+    for r in results:
+        url = r["url"].rstrip("/")
+        pair = (r["site"], r["title"].lower())
+        if url in seen_url or pair in seen_pair:
+            continue
+        seen_url.add(url)
+        seen_pair.add(pair)
+        out.append(r)
+    return out
+
+
+# ── Keyed providers (used when an admin has supplied a key) ───────────────
+def _search_tavily(q, key, n):
+    r = requests.post("https://api.tavily.com/search",
+                      json={"api_key": key, "query": q, "max_results": n,
+                            "search_depth": "basic"},
+                      timeout=WEB_SEARCH_TIMEOUT)
+    if r.status_code >= 400:
+        raise RuntimeError("tavily %s" % r.status_code)
+    return _web_norm([{"title": it.get("title"), "url": it.get("url"),
+                       "snippet": it.get("content")}
+                      for it in (r.json().get("results") or [])], "tavily")
+
+
+def _search_brave(q, key, n):
+    r = requests.get("https://api.search.brave.com/res/v1/web/search",
+                     params={"q": q, "count": n, "country": "in"},
+                     headers={"Accept": "application/json",
+                              "X-Subscription-Token": key},
+                     timeout=WEB_SEARCH_TIMEOUT)
+    if r.status_code >= 400:
+        raise RuntimeError("brave %s" % r.status_code)
+    return _web_norm([{"title": it.get("title"), "url": it.get("url"),
+                       "snippet": it.get("description")}
+                      for it in ((r.json().get("web") or {}).get("results") or [])],
+                     "brave")
+
+
+def _search_serper(q, key, n):
+    r = requests.post("https://google.serper.dev/search",
+                      json={"q": q, "num": n, "gl": "in"},
+                      headers={"X-API-KEY": key,
+                               "Content-Type": "application/json"},
+                      timeout=WEB_SEARCH_TIMEOUT)
+    if r.status_code >= 400:
+        raise RuntimeError("serper %s" % r.status_code)
+    payload = r.json()
+    rows = [{"title": it.get("title"), "url": it.get("link"),
+             "snippet": it.get("snippet")} for it in (payload.get("organic") or [])]
+    # Google's answer box is usually the exact fact a GK question wants.
+    kg = payload.get("answerBox") or {}
+    if kg.get("answer") or kg.get("snippet"):
+        rows.insert(0, {"title": kg.get("title") or q,
+                        "url": kg.get("link") or "https://www.google.com/search?q=" + _urlparse.quote_plus(q),
+                        "snippet": kg.get("answer") or kg.get("snippet")})
+    return _web_norm(rows, "serper")
+
+
+def _search_searxng(q, base, n):
+    r = requests.get(base + "/search",
+                     params={"q": q, "format": "json", "language": "en"},
+                     headers={"User-Agent": _WEB_UA},
+                     timeout=WEB_SEARCH_TIMEOUT)
+    if r.status_code >= 400:
+        raise RuntimeError("searxng %s" % r.status_code)
+    return _web_norm([{"title": it.get("title"), "url": it.get("url"),
+                       "snippet": it.get("content")}
+                      for it in (r.json().get("results") or [])][:n], "searxng")
+
+
+# ── Keyless providers (the default, so the feature works with no setup) ───
+# DuckDuckGo's HTML endpoint needs no key and no quota, and returns real ranked
+# web results (measured: ssc.gov.in plus coaching sites for an exam-date query).
+# It is scraped, so it is strictly best-effort — from a datacenter IP it starts
+# answering HTTP 202 with an "anomaly" challenge page after a couple of hits,
+# which is exactly why it is one link in a chain and not the whole feature.
+#
+# Regex rather than an HTML parser because the container ships no HTML library
+# (see requirements.txt) and the markup we need is one flat list of anchors. The
+# class attribute is matched WITHOUT assuming attribute order: the endpoint emits
+# `<a rel="nofollow" class="result__a" href="…">`, i.e. href AFTER class, and an
+# order-dependent pattern silently matched nothing at all.
+_DDG_ANCHOR_RE = re.compile(
+    r'<a\b(?P<attrs>[^>]*class="[^"]*result__a[^"]*"[^>]*)>(?P<title>.*?)</a>',
+    re.S | re.I)
+_DDG_HREF_RE = re.compile(r'\bhref="(?P<href>[^"]+)"', re.I)
+_DDG_SNIPPET_RE = re.compile(
+    r'class="[^"]*result__snippet[^"]*"[^>]*>(?P<snip>.*?)</a>', re.S | re.I)
+
+
+def _ddg_unwrap(href):
+    """DuckDuckGo's GET responses wrap outbound links as
+    //duckduckgo.com/l/?uddg=<encoded>; POST responses give the URL directly."""
+    href = _htmllib.unescape(href or "").strip()
+    if href.startswith("//"):
+        href = "https:" + href
+    if "duckduckgo.com/l/" in href or href.startswith("/l/?"):
+        try:
+            qs = _urlparse.parse_qs(_urlparse.urlparse(href).query)
+            target = (qs.get("uddg") or [""])[0]
+            if target:
+                href = _urlparse.unquote(target)
+        except Exception:  # noqa: BLE001
+            pass
+    return href
+
+
+def _search_duckduckgo(q, n):
+    r = requests.post("https://html.duckduckgo.com/html/",
+                      data={"q": q, "kl": "in-en"},
+                      headers={"User-Agent": _WEB_UA,
+                               "Accept-Language": "en-IN,en;q=0.9",
+                               "Content-Type": "application/x-www-form-urlencoded"},
+                      timeout=WEB_SEARCH_TIMEOUT)
+    body = r.text or ""
+    # 202 + "anomaly" is DuckDuckGo's bot wall. Raise rather than return [] so the
+    # reason reaches the log, and so the caller advances to the next provider at
+    # once instead of spending the remaining budget parsing a challenge page.
+    if r.status_code == 202 or "anomaly" in body[:4000].lower():
+        raise RuntimeError("duckduckgo rate-limited (bot check)")
+    if r.status_code >= 400:
+        raise RuntimeError("duckduckgo %s" % r.status_code)
+
+    anchors = list(_DDG_ANCHOR_RE.finditer(body))
+    rows = []
+    for i, m in enumerate(anchors[:n]):
+        href = _DDG_HREF_RE.search(m.group("attrs") or "")
+        if not href:
+            continue
+        # Each result's snippet sits between its own anchor and the next one.
+        tail_end = anchors[i + 1].start() if i + 1 < len(anchors) else len(body)
+        snip = _DDG_SNIPPET_RE.search(body, m.end(), tail_end)
+        rows.append({"title": m.group("title"),
+                     "url": _ddg_unwrap(href.group("href")),
+                     "snippet": snip.group("snip") if snip else ""})
+    return _web_norm(rows, "duckduckgo")
+
+
+def _search_ddg_instant(q, n):
+    """DuckDuckGo's official Instant Answer API — keyless and with no bot wall,
+    but it only holds entity abstracts, so it answers "who/what is X" and little
+    else. Cheap enough to be worth a try when the scraped endpoint is walled."""
+    r = requests.get("https://api.duckduckgo.com/",
+                     params={"q": q, "format": "json", "no_html": 1,
+                             "no_redirect": 1, "skip_disambig": 1},
+                     headers={"User-Agent": _WEB_UA},
+                     timeout=WEB_SEARCH_TIMEOUT)
+    if r.status_code >= 400:
+        raise RuntimeError("ddg-instant %s" % r.status_code)
+    payload = r.json() or {}
+    rows = []
+    abstract = str(payload.get("AbstractText") or "").strip()
+    if abstract:
+        rows.append({"title": payload.get("Heading") or q,
+                     "url": payload.get("AbstractURL") or "",
+                     "snippet": abstract})
+    for it in (payload.get("Results") or []):
+        rows.append({"title": it.get("Text"), "url": it.get("FirstURL"),
+                     "snippet": it.get("Text")})
+    return _web_norm(rows[:n], "ddg-instant")
+
+
+def _search_mediawiki(q, n, host, label, via):
+    r = requests.get("https://%s/w/api.php" % host,
+                     params={"action": "query", "format": "json", "list": "search",
+                             "srsearch": q, "srlimit": n, "srprop": "snippet"},
+                     headers={"User-Agent": _WEB_UA},
+                     timeout=WEB_SEARCH_TIMEOUT)
+    if r.status_code >= 400:
+        raise RuntimeError("%s %s" % (via, r.status_code))
+    rows = []
+    for it in ((r.json().get("query") or {}).get("search") or []):
+        title = str(it.get("title") or "").strip()
+        if not title:
+            continue
+        rows.append({"title": "%s — %s" % (title, label),
+                     "url": "https://%s/wiki/%s"
+                            % (host, _urlparse.quote(title.replace(" ", "_"))),
+                     "snippet": it.get("snippet")})
+    return _web_norm(rows, via)
+
+
+def _search_wikipedia(q, n):
+    """The dependable floor of the chain, and a strong one for General Awareness:
+    static-fact GK (constitution articles, organisations, geography, office
+    holders) is exactly Wikipedia's strength. Keyless, generous quota, and the
+    only provider here that answered every probe without rate-limiting."""
+    return _search_mediawiki(q, n, "en.wikipedia.org", "Wikipedia", "wikipedia")
+
+
+def _search_wikinews(q, n):
+    """Dated news events, which Wikipedia articles lag on. Same keyless API."""
+    return _search_mediawiki(q, n, "en.wikinews.org", "Wikinews", "wikinews")
+
+
+def _web_search(query, limit=None):
+    """Live web results for `query`; [] when search is off or every provider fails.
+
+    Never raises. A failed search must cost the answer its freshness, not the
+    answer itself — the tutor still replies from the transcript and its own
+    knowledge."""
+    q = re.sub(r"\s+", " ", str(query or "")).strip()[:300]
+    if not q:
+        return []
+    limit = limit or WEB_SEARCH_RESULTS
+    cfg = _load_search_config()
+    if not cfg["enabled"]:
+        return []
+
+    ckey = q.lower()
+    now = time.time()
+    with _web_cache_lock:
+        hit = _web_cache.get(ckey)
+        if hit and now - hit["ts"] < WEB_SEARCH_TTL:
+            return hit["results"][:limit]
+
+    # Keyed providers first (better results, real quotas), then the keyless
+    # ones so the feature works on a fresh deployment with zero configuration.
+    chain = []
+    if cfg["tavily"]:
+        chain.append(("tavily", lambda: _search_tavily(q, cfg["tavily"], limit)))
+    if cfg["serper"]:
+        chain.append(("serper", lambda: _search_serper(q, cfg["serper"], limit)))
+    if cfg["brave"]:
+        chain.append(("brave", lambda: _search_brave(q, cfg["brave"], limit)))
+    if cfg["searxng"]:
+        chain.append(("searxng", lambda: _search_searxng(q, cfg["searxng"], limit)))
+    # Keyless tail, ordered by how much general-web coverage each one gives.
+    # Wikipedia is last because it always answers, so putting it earlier would
+    # satisfy `len(results) >= limit` and stop the chain before the broader
+    # providers ever ran.
+    chain.append(("duckduckgo", lambda: _search_duckduckgo(q, limit)))
+    chain.append(("ddg-instant", lambda: _search_ddg_instant(q, limit)))
+    chain.append(("wikinews", lambda: _search_wikinews(q, max(2, limit // 2))))
+    chain.append(("wikipedia", lambda: _search_wikipedia(q, limit)))
+
+    deadline = now + WEB_SEARCH_BUDGET
+    results = []
+    for name, fn in chain:
+        if time.time() >= deadline:
+            break
+        try:
+            results = _web_dedupe(results + (fn() or []))
+        except Exception as exc:  # noqa: BLE001
+            log.info("web search via %s failed: %s", name, str(exc)[:160])
+        if len(results) >= limit:
+            break
+    results = _web_rank(results)[:limit]
+
+    if results:
+        with _web_cache_lock:
+            _web_cache[ckey] = {"ts": now, "results": results}
+            if len(_web_cache) > WEB_CACHE_MAX:
+                stale = sorted(_web_cache, key=lambda k: _web_cache[k]["ts"])
+                for k in stale[:len(stale) // 2]:
+                    _web_cache.pop(k, None)
+    return results
+
+
+def _web_context_block(results):
+    """Render results for the prompt. Numbered so the model can cite [Web 2],
+    and the URL is included so the citation the student sees is checkable."""
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append("[Web %d] %s (%s)\n    %s\n    %s"
+                     % (i, r["title"], r["site"] or "web",
+                        r["snippet"] or "(no summary text)", r["url"]))
+    return "\n".join(lines)
+
+
+def _web_sources_public(results):
+    """The subset of a result the browser is allowed to render as a link."""
+    return [{"title": r["title"], "url": r["url"], "site": r["site"]}
+            for r in results]
+
+
+# Questions whose correct answer changes over time. Matching one is what turns
+# a plain prompt into a searched prompt in 'auto' mode. Deliberately specific:
+# every false positive is a wasted round trip on the student's critical path,
+# so bare words like "result" or "rate" are qualified rather than matched alone.
+_WEB_TRIGGER_RE = re.compile("|".join((
+    # time-sensitive phrasing (English + Hinglish)
+    r"\blatest\b", r"\bcurrent(?:ly)?\b", r"\brecent(?:ly)?\b", r"\bnowadays\b",
+    r"\btoday'?s?\b", r"\bthis (?:week|month|year)\b", r"\bright now\b",
+    r"\bas of\b", r"\bup[ -]?to[ -]?date\b",
+    r"\baaj\b", r"\babhi\b", r"\bfilhal\b", r"\bab tak\b", r"\bhaal hi\b",
+    r"\bnews\b", r"\bkhabar\b", r"\bbreaking\b", r"\blive score\b",
+    # General Awareness by name — an exam section, not small talk
+    r"\bcurrent affairs\b", r"\bgeneral awareness\b", r"\bsamanya gyan\b",
+    r"\bgk\b", r"\bone[ -]?liners?\b",
+    # "who holds this post now" questions
+    r"\bwho is the\b", r"\bkaun ha[iy]\b", r"\bkon ha[iy]\b",
+    r"\bprime minister\b", r"\bpresident of\b", r"\bchief minister\b",
+    r"\b(?:rbi|sebi|cbi|isro|drdo|un|wto|imf|world bank)\b",
+    # exam-cycle facts that change every single session
+    r"\bnotification\b", r"\bvacanc(?:y|ies)\b", r"\brecruitment\b",
+    r"\badmit card\b", r"\banswer key\b", r"\bexam date\b", r"\blast date\b",
+    r"\bapply online\b", r"\bcut[ -]?off\b", r"\bmerit list\b",
+    r"\bresult (?:kab|date|out|declared|link|aaya)\b",
+    r"\b(?:ssc|upsc|neet|jee|ibps|rrb|cgl|chsl)\b",
+    r"\bsyllabus (?:change[ds]?|update[ds]?|new|20\d\d)\b",
+    # economy / awards / sport outcomes
+    r"\brepo rate\b", r"\binflation\b", r"\bbudget 20\d\d\b", r"\bgdp\b",
+    r"\bwho won\b", r"\bwinner\b", r"\bchampion\b", r"\baward 20\d\d\b",
+    # the student asking for it in so many words
+    r"\bsearch (?:the )?(?:web|internet|google|online)\b",
+    r"\bgoogle (?:kar|it|this|karke)\b", r"\b(?:internet|web|online) (?:par|pe|se)\b",
+    # any year from the training-cutoff era onwards
+    r"\b20(?:2[5-9]|[3-9]\d)\b",
+)), re.I)
+
+
+def _web_mode(value):
+    """Tri-state from an untrusted client field: 'on' | 'off' | 'auto'."""
+    v = str(value if value is not None else "auto").strip().lower()
+    if v in ("1", "true", "on", "yes", "always", "force"):
+        return "on"
+    if v in ("0", "false", "off", "no", "never"):
+        return "off"
+    return "auto"
+
+
+def _tutor_web_results(question, requested, uid):
+    """Decide whether this message earns a web search, and run it if so.
+
+    Returns [] for "no search" — callers treat an empty list as "answer without
+    web context", so an unavailable search is indistinguishable from a question
+    that never needed one."""
+    mode = _web_mode(requested)
+    if mode == "off":
+        return []
+    q = str(question or "").strip()
+    # Too short to be a searchable question ("haan", "ok", "next").
+    if len(q) < 8:
+        return []
+    if mode == "auto" and not _WEB_TRIGGER_RE.search(q):
+        return []
+    if not _load_search_config()["enabled"]:
+        return []
+    # Cheap to serve from cache, so only the uncached path is metered — but we
+    # cannot know that before calling, so meter every attempt and fail soft.
+    if uid and not _is_unlimited(uid) and not _rate_ok("web_s", uid, WEB_SEARCH_PER_HOUR, 3600):
+        return []
+    return _web_search(q)
+
+
+def _world_context():
+    """Today's real date, IST. Without this the model silently answers current-
+    affairs questions relative to its training cutoff and sounds confident about
+    a year that has already passed — the single most common wrong answer in
+    General Awareness."""
+    now = datetime.now(timezone(timedelta(hours=5, minutes=30)))
+    return (
+        "\n\nTODAY / REAL-WORLD CONTEXT (authoritative \u2014 trust this over any "
+        "date you infer from your training data):\n"
+        "- Right now it is %s, %s IST. The current year is %d.\n"
+        "- Your training data ends well before today, so treat anything you "
+        "recall as \u201crecent\u201d, \u201clatest\u201d or \u201ccurrent\u201d "
+        "as possibly outdated.\n"
+        "- If a question turns on a fact newer than you reliably know and no web "
+        "results are given below, answer with what you do know and say in one "
+        "line that it may have changed."
+        % (now.strftime("%A %d %B %Y"), now.strftime("%H:%M"), now.year)
+    )
+
+
+def _tutor_sys(title, out_lang, has_web):
+    """System prompt for the video-scope tutor.
+
+    Replaces the old "Answer ONLY using the transcript below" rule. That rule was
+    written to stop hallucinated lecture content, and it did — but it also made
+    the tutor useless the moment a student asked anything the lecture didn't
+    happen to cover, which for exam aspirants includes the whole General
+    Awareness section. The anti-hallucination goal is now met by SEPARATION
+    instead of REFUSAL: the transcript stays the primary source and keeps its
+    [mm:ss] citations, while everything else is quarantined under an explicit
+    '**Beyond this video:**' heading. A revising student can still see exactly
+    what their lecture said, and also gets an answer."""
+    sources = [
+        "1. THE TRANSCRIPT below \u2014 the lesson the student is watching right "
+        "now. This is your primary source. It is auto-generated (may be Hindi or "
+        "Hinglish, with no punctuation and ASR errors) \u2014 clean it mentally "
+        "before using it. Cite timestamps as [mm:ss] when you point at a part of "
+        "it; the app turns them into a tap that seeks the video."
+    ]
+    if has_web:
+        sources.append(
+            "2. THE WEB RESULTS below \u2014 live search results fetched from the "
+            "internet moments ago, for THIS question. They are newer than your "
+            "training data, so where they disagree with what you remember, they "
+            "win. Cite them as [Web 1], [Web 2] matching their numbers, and name "
+            "the site when the fact is contested."
+        )
+    sources.append(
+        "%d. YOUR OWN GENERAL KNOWLEDGE \u2014 allowed, and expected, whenever "
+        "the sources above do not cover the question." % (len(sources) + 1)
+    )
+    return (
+        "You are an exam-prep AI tutor for an Indian competitive-exam aspirant "
+        "(SSC, UPSC, banking, railways, state exams) who is studying the video "
+        "titled %r.\n\n"
+        "YOUR SOURCES, in priority order:\n%s\n\n"
+        "HOW TO ANSWER:\n"
+        "- If the transcript covers the question, answer from it and cite [mm:ss].\n"
+        "- If the transcript does NOT cover it, do NOT refuse and do NOT stop at "
+        "\u201cthe video doesn't cover this\u201d. Answer the question properly "
+        "anyway \u2014 from %s \u2014 under a "
+        "heading line exactly '**Beyond this video:**'. Put every non-transcript "
+        "claim below that heading and never blend the two, so the student can "
+        "always tell what their lecture actually taught from what you added.\n"
+        "- EVERY question is in scope. General awareness and current affairs, "
+        "other subjects, exam strategy, form dates, or ordinary conversation "
+        "\u2014 answer all of them. General Awareness is a scored subject in "
+        "these exams, so never dismiss a question as off-topic or unrelated to "
+        "the video, and never tell the student to ask elsewhere.\n"
+        "- Never invent a timestamp for something that is not in the transcript, "
+        "and never present your own knowledge as though the lecture said it. "
+        "Those are the only two things you must not do.\n"
+        "- Be clear, concrete and use simple examples. %s"
+        % (title or "this lesson", "\n".join(sources),
+           ("the WEB RESULTS below and your own knowledge" if has_web
+            else "your own general knowledge"),
+           _lang_rule(out_lang, verb="Reply"))
+    )
 
 
 def _tutor_prepare(body, user):
@@ -4876,6 +5458,9 @@ def _tutor_prepare(body, user):
     # on every request so it works no matter which AI provider/model answers.
     # Capped defensively — this is untrusted client input.
     student_memory = str(body.get("memory") or "").strip()[:1500]
+    # 'auto' (default) searches only time-sensitive questions; 'on' is the
+    # student pressing the 🌐 button; 'off' opts out entirely.
+    web_pref = request.args.get("web") if request.args.get("web") is not None else body.get("web")
 
     video_id = _parse_video_id(raw_arg)
     if not video_id:
@@ -4931,21 +5516,26 @@ def _tutor_prepare(body, user):
     # of the lecture, small ones stay under their limit. Streaming keeps the
     # connection alive so a larger context no longer risks Cloudflare's 524.
     context = (t.get("text") or "")[:_tutor_context_chars(ai, t.get("text") or "")]
-    sysmsg = (
-        "You are an exam-prep AI tutor for the video titled %r. Answer ONLY using "
-        "the transcript below. If something isn't covered, say so briefly. The "
-        "transcript is auto-generated (may be Hindi or Hinglish, no punctuation) "
-        "\u2014 clean it mentally. Cite timestamps as [mm:ss] when pointing to a "
-        "part. Be clear and use simple examples. %s"
-        % (t.get("title") or "this lesson", _lang_rule(out_lang, verb="Reply"))
-    )
+    # Searched after the transcript resolves, so a bot-gated or caption-less
+    # video never pays for a search whose answer is thrown away.
+    web = _tutor_web_results(question, web_pref, uid)
+    sysmsg = _tutor_sys(t.get("title"), out_lang, bool(web))
     if student_memory:
         sysmsg += (
             "\n\nWHAT YOU KNOW ABOUT THIS STUDENT (from past sessions across "
             "videos \u2014 adapt your explanations to this, don't just repeat it "
             "back verbatim):\n%s" % student_memory
         )
+    sysmsg += _world_context()
     sysmsg += "\n\nTRANSCRIPT:\n%s" % context
+    # After the transcript, not before: the transcript is tens of thousands of
+    # characters, and anything placed ahead of it competes with that bulk for the
+    # model's attention. Fresh web facts have to win over the model's own
+    # recollection, so they go last — same reasoning as the language reminder.
+    if web:
+        sysmsg += ("\n\nWEB RESULTS (live, fetched just now for this question "
+                   "\u2014 newer and more reliable than your training data):\n%s"
+                   % _web_context_block(web))
     # Restated after the transcript, exactly as in _gen_notes: the transcript is
     # the bulk of what the model reads, so the language rule has to come after it.
     sysmsg += _lang_reminder(out_lang)
@@ -4968,7 +5558,8 @@ def _tutor_prepare(body, user):
         messages.append({"role": "user", "content": question + turn_tail})
 
     return None, {"messages": messages, "ai": ai, "video_id": video_id,
-                  "mode": mode, "transcript_lang": t.get("chosen_lang")}
+                  "mode": mode, "transcript_lang": t.get("chosen_lang"),
+                  "web": _web_sources_public(web)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -5646,7 +6237,7 @@ def _pack_library_context(hits, titles, ai):
     return "\n\n".join(blocks), sources
 
 
-def _library_sys(out_lang, scope_label, coverage_line, uncovered_titles):
+def _library_sys(out_lang, scope_label, coverage_line, uncovered_titles, has_web=False):
     return (
         "You are an exam-prep AI tutor with access to this student's OWN study "
         "notes across %s. Below are the most relevant passages retrieved from "
@@ -5662,13 +6253,23 @@ def _library_sys(out_lang, scope_label, coverage_line, uncovered_titles):
         "student is revising for an exam and must be able to tell what their own "
         "lecture actually said from what you added.\n"
         "- If the passages do not cover the question, say so plainly in one line "
-        "before the 'Beyond your notes' section. Do not invent a citation, and "
-        "never cite a video that is not listed above.\n"
+        "and then STILL answer it in full under 'Beyond your notes' \u2014 from "
+        "%syour own general knowledge. Never leave the student with only "
+        "\u201cyour notes don't cover this\u201d. General awareness and current "
+        "affairs questions are legitimate exam preparation, not off-topic.\n"
+        "- Do not invent a citation, and never cite a video that is not listed "
+        "above.\n"
+        "%s"
         "%s"
         "- Be concise and concrete. Prefer the student's own wording and "
         "terminology over your own phrasing.\n"
         "%s"
         % (scope_label, coverage_line,
+           "the WEB RESULTS below and " if has_web else "",
+           ("- The WEB RESULTS below were fetched live from the internet moments "
+            "ago for this question. They are newer than your training data, so "
+            "prefer them over what you remember, and cite them as [Web 1], "
+            "[Web 2] by their numbers.\n") if has_web else "",
            ("- These of their videos look related but were NOT retrieved: %s. "
             "If the answer likely lives there, say so and suggest opening that "
             "video's tutor directly.\n" % ", ".join(uncovered_titles[:5]))
@@ -5687,6 +6288,7 @@ def _library_prepare(body, user):
     course_id = str(body.get("course_id") or "").strip()[:120] or None
     history = body.get("history") or []
     student_memory = str(body.get("memory") or "").strip()[:1500]
+    web_pref = body.get("web")
     if not question:
         return ({"error": "missing_question", "detail": "Ask a question."}, 400), None
     if scope not in ("library", "course"):
@@ -5769,11 +6371,17 @@ def _library_prepare(body, user):
                  if v["video_id"] not in used_ids and v.get("title")
                  and qk & _keywords(v["title"])][:5]
 
-    sysmsg = _library_sys(out_lang, scope_label, coverage_line, uncovered)
+    web = _tutor_web_results(question, web_pref, uid)
+    sysmsg = _library_sys(out_lang, scope_label, coverage_line, uncovered, bool(web))
     if student_memory:
         sysmsg += ("\n\nWHAT YOU KNOW ABOUT THIS STUDENT (from past sessions \u2014 "
                    "adapt to it, don't repeat it back):\n%s" % student_memory)
+    sysmsg += _world_context()
     sysmsg += "\n\nRETRIEVED PASSAGES:\n%s" % context
+    if web:
+        sysmsg += ("\n\nWEB RESULTS (live, fetched just now for this question "
+                   "\u2014 newer and more reliable than your training data):\n%s"
+                   % _web_context_block(web))
     sysmsg += _lang_reminder(out_lang)
 
     messages = [{"role": "system", "content": sysmsg}]
@@ -5788,7 +6396,8 @@ def _library_prepare(body, user):
     return None, {"messages": messages, "ai": ai, "sources": sources,
                   "scope": scope, "retrieval": mode_used,
                   "indexed": len(indexed), "total": len(videos),
-                  "context_limited": _model_ctx_tokens(ai) <= 8192}
+                  "context_limited": _model_ctx_tokens(ai) <= 8192,
+                  "web": _web_sources_public(web)}
 
 
 @app.route("/api/tutor/library", methods=["POST"])
@@ -5813,7 +6422,7 @@ def api_tutor_library():
                     "indexed": data["indexed"], "total": data["total"],
                     "context_limited": data["context_limited"],
                     "provider": _ai_display_provider(ai),
-                    "model": _ai_display_model(ai)})
+                    "model": _ai_display_model(ai), "web": data["web"]})
 
 
 @app.route("/api/tutor/library/stream", methods=["POST"])
@@ -5836,7 +6445,8 @@ def api_tutor_library_stream():
                             "scope": data["scope"], "sources": data["sources"],
                             "retrieval": data["retrieval"],
                             "indexed": data["indexed"], "total": data["total"],
-                            "context_limited": data["context_limited"]})
+                            "context_limited": data["context_limited"],
+                            "web": data["web"]})
         produced = False
         try:
             for piece in _ai_chat_stream(data["messages"], ai,
@@ -6506,7 +7116,47 @@ def api_tutor():
     ai = data["ai"]
     return jsonify({"id": data["video_id"], "answer": answer, "mode": data["mode"],
                     "provider": _ai_display_provider(ai),
-                    "model": _ai_display_model(ai), "transcript_lang": data["transcript_lang"]})
+                    "model": _ai_display_model(ai), "transcript_lang": data["transcript_lang"],
+                    "web": data["web"]})
+
+
+@app.get("/api/search")
+def api_search():
+    """Diagnostic: what the tutor's web search actually returns for a query.
+
+    Exists because a silent search is impossible to debug from the outside — if
+    the tutor gives a stale current-affairs answer, this says whether the search
+    returned nothing, which provider answered, and whether the heuristic would
+    even have fired. Verified users only, and metered on the same bucket as the
+    tutor's own searches so it cannot be used as a free search API."""
+    user, err = _verified_user_record()
+    if err:
+        return jsonify(err[0]), err[1]
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"error": "missing_query", "detail": "Pass ?q="}), 400
+    cfg = _load_search_config()
+    uid = user["uid"]
+    if not _is_unlimited(uid) and not _rate_ok("web_s", uid, WEB_SEARCH_PER_HOUR, 3600):
+        return jsonify({"error": "rate_limited",
+                        "detail": "Search limit reached. Try later."}), 429
+    started = time.time()
+    results = _web_search(q) if cfg["enabled"] else []
+    return jsonify({
+        "q": q,
+        "enabled": cfg["enabled"],
+        # Which providers are wired up — never the keys themselves.
+        "providers": [p for p in ("tavily", "serper", "brave", "searxng") if cfg[p]]
+                     + ["duckduckgo", "ddg-instant", "wikinews", "wikipedia"],
+        # True once an admin has added a key. Without one the chain still works,
+        # but general-web coverage depends on a scraped endpoint that rate-limits.
+        "keyed": any(cfg[p] for p in ("tavily", "serper", "brave", "searxng")),
+        # Would 'auto' mode have searched this on its own?
+        "auto_would_search": bool(_WEB_TRIGGER_RE.search(q)),
+        "count": len(results),
+        "took_ms": int((time.time() - started) * 1000),
+        "results": results,
+    })
 
 
 def _clamp_float_safe(v, lo=0.0, hi=1.0, default=0.5):
@@ -6797,7 +7447,8 @@ def api_tutor_stream():
         initial_model = _ai_display_model(ai)
         yield _sse("meta", {"provider": initial_provider,
                             "model": initial_model,
-                            "transcript_lang": data["transcript_lang"]})
+                            "transcript_lang": data["transcript_lang"],
+                            "web": data["web"]})
         resolved_meta_sent = False
         produced = False
         try:
@@ -6808,7 +7459,8 @@ def api_tutor_stream():
                     if (resolved_provider, resolved_model) != (initial_provider, initial_model):
                         yield _sse("meta", {"provider": resolved_provider,
                                             "model": resolved_model,
-                                            "transcript_lang": data["transcript_lang"]})
+                                            "transcript_lang": data["transcript_lang"],
+                                            "web": data["web"]})
                     resolved_meta_sent = True
                 produced = True
                 yield _sse("chunk", {"t": piece})
