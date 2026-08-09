@@ -574,7 +574,11 @@
 <script defer src="js/features/registration.js"></script>
 <script defer src="js/features/preppath-phase2-plans.js"></script>
 <script defer src="js/features/preppath-phase3-referral.js"></script>
-<script defer src="js/features/preppath-phase4-gating.js"></script>
+<!-- Versioned from here on: ai-tutor.js reads window.ezTutorMessagesLeft /
+     ezTutorMarkExhausted from this file to show and correct the free-message
+     count. A stale cached copy degrades gracefully (the count is simply hidden),
+     but the whole point of that feature is not showing a wrong number. -->
+<script defer src="js/features/preppath-phase4-gating.js?v=20260809a"></script>
 <script defer src="js/features/preppath-phase5-trial.js"></script>
 <!-- ⚡ Turbo Player (Pro-only, opt-in): plays via youtube-turbo-proxy backend
      for real 4x speed + native PiP; falls back to the iframe on any failure.
@@ -586,7 +590,7 @@
      getFirebaseIdToken) and BEFORE ai-tutor.js, which reads window.TutorMemory. -->
 <script defer src="js/features/tutor-memory.js?v=20260805b"></script>
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
-<script defer src="js/features/ai-tutor.js?v=20260809d"></script>
+<script defer src="js/features/ai-tutor.js?v=20260809e"></script>
 <!-- 💬 Floating AI Tutor bubble — makes the tutor reachable from every page.
      Holds NO chat logic of its own: it opens a window and ai-tutor.js re-parents
      its single chat node into it. Must load AFTER ai-tutor.js (uses

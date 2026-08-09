@@ -1139,6 +1139,45 @@ async function saveStudyControls() {
   } catch(e) { showToast('Failed: ' + e.message); }
 }
 
+/* Live web search for the AI Tutor. Fields are read server-side by
+   _load_search_config() in youtube-turbo-proxy/app.py; the keys never reach a
+   student's browser, only this admin page.
+
+   Written with { merge: true } so it cannot clobber the provider keys, model
+   lists or policy flags that share config/ai. */
+async function saveWebSearchConfig() {
+  const val = (id) => String(((document.getElementById(id) || {}).value) || '').trim();
+  const enabled = !!((document.getElementById('websearch-enabled') || {}).checked);
+  let searxng = val('websearch-searxng');
+  // A base URL is the one field here that is easy to get wrong in a way the
+  // server cannot recover from, so reject it here rather than failing silently
+  // on every tutor question.
+  if (searxng && !/^https?:\/\/[^\s]+$/i.test(searxng)) {
+    showToast('SearXNG URL must start with http:// or https://');
+    return;
+  }
+  searxng = searxng.replace(/\/+$/, '');            // matches the server's rstrip
+
+  const payload = {
+    tutorWebSearch: enabled,
+    tavilyApiKey: val('websearch-tavily'),
+    serperApiKey: val('websearch-serper'),
+    braveApiKey: val('websearch-brave'),
+    searxngUrl: searxng,
+    savedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  try {
+    await db.collection('config').doc('ai').set(payload, { merge: true });
+    AI_CONFIG = Object.assign({}, AI_CONFIG, payload);
+    const keyed = ['tavilyApiKey', 'serperApiKey', 'braveApiKey', 'searxngUrl']
+      .filter((f) => !!payload[f]).length;
+    if (!enabled) showToast('✅ Web search saved — disabled. The tutor will not look anything up.');
+    else if (keyed) showToast('✅ Web search saved — ' + keyed + ' provider(s) configured. Cached for ~5 min server-side.');
+    else showToast('✅ Web search saved — no key set, so results stay Wikipedia-only.');
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
 /* ── AI Study usage limits + grant unlimited ────────────────────────────────
    Saves per-hour/day rate limits and the admin-granted "unlimited" user list to
    Firestore config/aiLimits. The youtube-turbo-proxy reads this: normal users

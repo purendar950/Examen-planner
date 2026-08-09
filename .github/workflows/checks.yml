@@ -1,0 +1,67 @@
+# Syntax + unit checks.
+#
+# `npm run check` already existed and was never run by any workflow: the only
+# GitHub job was the Pages deploy (static.yml, which runs `npm run build`), and
+# GitLab CI only builds too. So a syntax error in a legacy js/ file — including
+# js/features/ai-tutor.js, the largest file in the repo — would deploy to Pages
+# unnoticed. This runs the gate before that can happen.
+#
+# The Python job covers youtube-turbo-proxy/app.py, which is deployed separately
+# to Render (see turbo-proxy-image.yml) and so was outside every existing check.
+name: Checks
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push supersedes an in-flight run for the same ref.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: JS syntax + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # `npm ci` rather than `npm install` so the lockfile is authoritative and
+      # a drifted lockfile fails here instead of on the deploy.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: node --check + test suites
+        run: npm run check
+
+  backend:
+    name: Turbo proxy (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # The tutor tests slice app.py and execute the pieces directly, so they need
+      # no Flask, Firebase, cookies or network — only requests, for the type the
+      # search providers are stubbed against.
+      - name: Install test dependencies
+        run: python -m pip install --quiet requests
+
+      - name: Byte-compile the proxy
+        run: python -m py_compile youtube-turbo-proxy/app.py
+
+      - name: AI Tutor server logic
+        run: python youtube-turbo-proxy/tests/test_tutor.py

@@ -975,3 +975,25 @@ html[data-theme="dark"] .ai-free-refresh-provider,html[data-theme="dark"] .ai-fr
   .ai-free-refresh-remove { width:100%; }
   .ai-free-refresh-add > div:last-child { align-items:stretch; flex-direction:column; }
 }
+
+
+
+/* ── Live web search card (AI Study tab) ──────────────────────────────────────
+   .ai-field previously only ever wrapped a <select>, so text/password inputs in
+   one had no styling of their own. Uses the same --ai-* tokens as the rest of the
+   panel, so light and dark themes are both covered without a second rule set. */
+.ai-field-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:10px; }
+.ai-field input[type="text"],
+.ai-field input[type="password"] {
+  width:100%; min-height:41px; margin-top:6px; padding:0 11px;
+  border:1px solid var(--ai-line); border-radius:9px;
+  background:var(--ai-soft); color:var(--ai-ink);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.72rem;
+}
+.ai-field input[type="text"]:focus,
+.ai-field input[type="password"]:focus { outline:2px solid var(--ai-focus); outline-offset:1px; }
+.ai-field > span a { color:var(--ai-blue); text-decoration:none; }
+.ai-field > span a:hover { text-decoration:underline; }
+@media (max-width:720px) {
+  .ai-field-grid { grid-template-columns:1fr; }
+}

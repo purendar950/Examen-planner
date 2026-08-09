@@ -364,12 +364,24 @@ function ezShowTutorLimitPreview(maxFree) {
   }
 }
 
+/* The localStorage key holding today's tutor count.
+
+   Deliberately IST, not UTC. `toISOString()` rolls over at 00:00 UTC = 05:30 IST,
+   so a student studying at 11pm got a fresh allowance a few hours later at dawn
+   while the backend's rolling 24-hour window was still counting those messages —
+   the UI offered five messages that the server then refused. Anchoring to the
+   audience's own day does not make this authoritative (only the server can be),
+   but it stops the estimate resetting in the middle of a study night. */
+function ezTutorDayKey() {
+  const ist = new Date(Date.now() + (5.5 * 3600 * 1000));
+  return 'sp_ai_tutor_' + ist.toISOString().split('T')[0];
+}
+
 /* Returns false to abandon the send. Counts a message only when it is allowed
    through, so a blocked attempt never burns part of the allowance. */
 window.ezTutorSendAllowed = function ezTutorSendAllowed() {
   if (!ezGated()) return true;               // Pro / trial → unlimited
-  const today = new Date().toISOString().split('T')[0];
-  const key = 'sp_ai_tutor_' + today;
+  const key = ezTutorDayKey();
   let count = 0;
   try { count = parseInt(localStorage.getItem(key) || '0', 10) || 0; } catch(e) {}
   const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
@@ -392,15 +404,31 @@ window.ezTutorSendAllowed = function ezTutorSendAllowed() {
    student spends a message. Lives here rather than in ai-tutor.js because this
    file owns the key format and the limit; duplicating either would drift.
 
+   This is an ESTIMATE, not the truth. The backend meters a rolling 24-hour window
+   per account; this counts messages sent from this device inside one calendar day.
+   The two cannot be reconciled locally, so ai-tutor.js prefers the `quota` the
+   server returns with every answer and only falls back to this before the first
+   message of a session.
+
    Returns null for Pro/trial (nothing to show) so callers can simply skip.
    Counts nothing — calling this must never consume an allowance. */
 window.ezTutorMessagesLeft = function ezTutorMessagesLeft() {
   if (!ezGated()) return null;               // Pro / trial → unlimited
-  const today = new Date().toISOString().split('T')[0];
   let count = 0;
-  try { count = parseInt(localStorage.getItem('sp_ai_tutor_' + today) || '0', 10) || 0; } catch(e) {}
+  try { count = parseInt(localStorage.getItem(ezTutorDayKey()) || '0', 10) || 0; } catch(e) {}
   const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
-  return { left: Math.max(0, maxFree - count), max: maxFree };
+  return { left: Math.max(0, maxFree - count), max: maxFree, estimated: true };
+};
+
+/* Called when the SERVER refuses a tutor message as rate limited. The local
+   counter can legitimately be behind — a second device, or a rolling window that
+   has not rotated yet — and leaving it behind means the UI keeps offering
+   messages that are already being rejected. Burn the rest of the day locally so
+   the count, the gate and the server agree. */
+window.ezTutorMarkExhausted = function ezTutorMarkExhausted() {
+  if (!ezGated()) return;
+  const maxFree = EZ_FREE_LIMITS.aiTutorPerDay || 5;
+  try { localStorage.setItem(ezTutorDayKey(), String(maxFree)); } catch(e) {}
 };
 
 /* 11. Turbo 4× Player → Pro only.
