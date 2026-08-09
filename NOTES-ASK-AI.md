@@ -104,3 +104,13 @@ key format and the limit. It counts nothing, and returns `null` for Pro/trial.
 - **`noteBlockText` strips** the injected button, the decorative `.num` counter
   (which would otherwise read "1Fundamental Rights") and the `⏩` glyph that
   `linkTs()` prefixes timestamps with.
+
+- **The section button and the selection handler share one element**, so the
+  selection handlers explicitly ignore events from `.ai-nb-ask` and `#ai-note-pop`
+  (`fromNoteAffordance`). Without that guard the desktop event order —
+  `pointerdown`, `pointerup`, `click` — meant the click opened the popover and the
+  `pointerup`'s deferred `settle()` closed it ~10 ms later, because a button click
+  selects no text. It reproduced on desktop only: touch delays `click` past the
+  timer. Covered by a sequenced regression test.
+- **A second tap on the same section button dismisses the popover.** It is
+  anchored by block index, so tapping a *different* section re-anchors instead.
