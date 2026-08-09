@@ -6345,6 +6345,14 @@
   /* A dense lecture yields many blocks, so they are printed under the topic
      heading each one declares. Without that a long poster is an undifferentiated
      wall of cards; with it, it reads as sections a student can navigate. */
+  /* Each box carries its own ✨, so a change can be asked for exactly where it is
+     needed rather than by describing the box to a whole-sheet prompt. The index
+     is stamped on the card because that is what the refine endpoint revises. */
+  function posterBoxAiHtml(index) {
+    return '<button type="button" class="ai-poster-box-ai" data-box="' + index +
+      '" title="Ask AI to change this box" aria-label="Ask AI to change this box">\u2728</button>';
+  }
+
   function posterHtml(p) {
     var blocks = (p && p.blocks) || [];
     var out = [], i = 0, group = null, open = false;
@@ -6369,7 +6377,9 @@
           open = true;
         }
       }
-      out.push(posterBlockHtml(blocks[i]));
+      // Splice the per-box control into the card's own markup, so it inherits
+      // that block type's colour and sits inside its border.
+      out.push(posterBlockHtml(blocks[i]).replace('</section>', posterBoxAiHtml(i) + '</section>'));
       i++;
     }
     closeGroup();
@@ -6429,7 +6439,11 @@
       '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' \u00b7 ' + esc(meta.model || '') +
       (meta.cached ? ' \u00b7 cached' : ' \u00b7 fresh') + ' \u00b7 ' + esc(meta.lang) +
       (coverage ? ' \u00b7 ' + esc(coverage) : '') +
+      // If the cap ever bites, say so. Silently trimming is what made the sheet
+      // look incomplete with no way to tell.
+      (poster.dropped ? ' \u00b7 <b>' + poster.dropped + ' more did not fit</b>' : '') +
       (meta.edited ? ' \u00b7 <b>edited by you</b>' : '') + '</span>' +
+      '<button class="ai-btn" id="ai-poster-full" style="padding:4px 10px;font-size:0.72rem">\u26f6 Full screen</button>' +
       '<button class="ai-btn sec" id="ai-poster-pdf" style="padding:4px 10px;font-size:0.72rem">\uD83D\uDCC4 Print / PDF</button>' +
       (meta.edited ? '<button class="ai-btn sec" id="ai-poster-reset" title="Go back to the generated poster" style="padding:4px 10px;font-size:0.72rem">\u21ba Reset</button>' : '') +
       '<button class="ai-btn sec" id="ai-poster-regen" style="padding:4px 10px;font-size:0.72rem">\u21bb Regenerate</button>' +
@@ -6476,6 +6490,125 @@
         posterRefine(poster, meta, chip.textContent);
       };
     });
+    posterBindBoxAi(box, poster, meta);
+    var fullBtn = document.getElementById('ai-poster-full');
+    if (fullBtn) fullBtn.onclick = function () { posterOpenFullscreen(poster, meta, fullBtn); };
+  }
+
+  /* Per-box editing: the ✨ opens a small prompt inside that card only, and the
+     proxy revises just that block, so the rest of the sheet cannot be reworded
+     as a side effect. */
+  function posterBindBoxAi(root, poster, meta) {
+    Array.prototype.forEach.call(root.querySelectorAll('.ai-poster-box-ai'), function (btn) {
+      btn.onclick = function (event) {
+        event.stopPropagation();
+        var card = btn.closest('.ai-poster-card');
+        if (!card) return;
+        var existing = card.querySelector('.ai-poster-box-ask');
+        if (existing) { existing.parentNode.removeChild(existing); return; }
+        var index = parseInt(btn.dataset.box, 10);
+        var wrap = document.createElement('div');
+        wrap.className = 'ai-poster-box-ask';
+        wrap.innerHTML =
+          '<input type="text" maxlength="300" placeholder="What should change in this box?" ' +
+          'aria-label="Ask AI to change this box">' +
+          '<div class="ai-poster-box-ask-row">' +
+            '<button type="button" class="go">Apply</button>' +
+            '<button type="button" data-q="Add more detail from the lecture">More detail</button>' +
+            '<button type="button" data-q="Add any dates and figures the lecture gives for this">Add numbers</button>' +
+            '<button type="button" data-q="Make this shorter and sharper">Shorter</button>' +
+          '</div><div class="ai-poster-box-note"></div>';
+        card.appendChild(wrap);
+        var field = wrap.querySelector('input');
+        var note = wrap.querySelector('.ai-poster-box-note');
+        function send(text) {
+          text = String(text || '').trim();
+          if (text.length < 3) { note.textContent = 'Say what should change.'; return; }
+          note.textContent = 'Asking the AI\u2026';
+          backendAuthFetch('/api/study/poster/refine', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: meta.vid, out: meta.lang, style: meta.kind, instruction: text,
+              poster: poster, block: index, model: outModel(), provider: outProvider()
+            })
+          }).then(function (r) {
+            return r.json().then(function (j) { j._httpStatus = r.status; return j; });
+          }).then(function (j) {
+            if (!j || !j.block) {
+              note.textContent = (j && (j.detail || j.error)) || 'Could not apply that.';
+              return;
+            }
+            if (state.tab !== 'poster' || curVid() !== meta.vid) return;
+            var next = JSON.parse(JSON.stringify(poster));
+            next.blocks[index] = j.block;
+            posterSaveRevision(meta.vid, meta.kind, meta.lang, next);
+            posterPaint(next, Object.assign({}, meta, { cached: false, edited: true }));
+            if (typeof showToast === 'function') showToast('\u2728 Box updated', 'success');
+          }).catch(function () { note.textContent = 'Could not reach the AI.'; });
+        }
+        wrap.querySelector('.go').onclick = function () { send(field.value); };
+        Array.prototype.forEach.call(wrap.querySelectorAll('[data-q]'), function (quick) {
+          quick.onclick = function () { field.value = quick.dataset.q; send(quick.dataset.q); };
+        });
+        field.onkeydown = function (event2) {
+          if (event2.key === 'Enter') { event2.preventDefault(); send(field.value); }
+          if (event2.key === 'Escape') { wrap.parentNode.removeChild(wrap); }
+        };
+        field.focus();
+      };
+    });
+  }
+
+  /* Full screen: the poster is a page to read, so this reuses the map's overlay
+     shell but with a plain scrolling stage instead of a pan/zoom one. */
+  var _posterFull = null;
+
+  function posterCloseFullscreen() {
+    var f = _posterFull;
+    if (!f) return;
+    document.removeEventListener('keydown', f.onKey, true);
+    document.body.classList.remove('ai-sheet-full-open');
+    if (f.overlay.parentNode) f.overlay.parentNode.removeChild(f.overlay);
+    _posterFull = null;
+    if (f.trigger && f.trigger.isConnected && typeof f.trigger.focus === 'function') f.trigger.focus();
+  }
+
+  function posterOpenFullscreen(poster, meta, trigger) {
+    if (_posterFull) return;
+    var overlay = document.createElement('div');
+    overlay.className = 'ai-sheet-full';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'Revision poster, full screen');
+    var html = posterHtml(poster);
+    overlay.innerHTML =
+      '<div class="ai-sheet-full-bar">' +
+        '<span class="ai-sheet-full-title">' + esc(poster.title || curTitle() || 'Revision poster') + '</span>' +
+        '<span class="ai-sheet-full-tools">' +
+          '<button type="button" class="ai-btn sec" id="ai-posterf-pdf">\uD83D\uDCC4 Print / PDF</button>' +
+          '<button type="button" class="ai-btn" id="ai-posterf-close">\u2715 Close</button>' +
+        '</span>' +
+      '</div>' +
+      '<div class="ai-sheet-full-stage"><div class="ai-nb ai-poster-paper">' + html + '</div></div>' +
+      '<div class="ai-sheet-full-hint">Tap \u2728 on any box to ask the AI to change it \u00b7 Esc to close</div>';
+    document.body.appendChild(overlay);
+    document.body.classList.add('ai-sheet-full-open');
+    _posterFull = {
+      overlay: overlay, trigger: trigger || document.activeElement,
+      onKey: function (event) {
+        if (event.key === 'Escape') { event.preventDefault(); posterCloseFullscreen(); }
+      }
+    };
+    overlay.querySelector('#ai-posterf-close').onclick = posterCloseFullscreen;
+    overlay.querySelector('#ai-posterf-pdf').onclick = function () {
+      pdfDownload((poster.title || curTitle() || 'Lecture') + ' \u2014 Revision Poster',
+        html, { notebook: true, documentLabel: 'Revision Poster' });
+    };
+    // Editing works in here too, and a successful edit repaints the panel
+    // underneath, so close afterwards to show the updated sheet.
+    posterBindBoxAi(overlay, poster, meta);
+    document.addEventListener('keydown', _posterFull.onKey, true);
+    overlay.querySelector('#ai-posterf-close').focus();
   }
 
   function posterRefine(poster, meta, instruction) {
@@ -6524,6 +6657,40 @@
       return;
     }
     var lang = outLang(), kind = posterKind();
+    /* A poster built from the lecture's NOTES is far more complete than one
+       built from the raw transcript, because the notes already carry every fig-
+       ure, date and name. So check for them first and say so, rather than
+       quietly producing a thinner sheet the student cannot account for. */
+    if (!force && !posterReadRevision(vid, kind, lang)) {
+      apiGet('/api/study/saved?id=' + encodeURIComponent(vid) + '&mode=notes&out=' +
+        encodeURIComponent(lang)).then(function (j) {
+        if (state.tab !== 'poster' || curVid() !== vid) return;
+        if (j && !j.error && j.content) { posterGenerate(vid, lang, kind, false); return; }
+        box.innerHTML = notesStageMessageHtml('captions', 'Notes give a complete poster',
+          'This lecture has no notes yet. Generating them once makes the poster cover ' +
+          'everything — and the notes are worth having anyway.') +
+          '<div class="ai-poster-choice">' +
+          '<button class="ai-btn" id="ai-poster-mknotes">\uD83D\uDCDD Generate notes first</button>' +
+          '<button class="ai-btn sec" id="ai-poster-anyway">Build from the transcript anyway</button>' +
+          '</div>';
+        var mk = document.getElementById('ai-poster-mknotes');
+        if (mk) mk.onclick = function () {
+          state.tab = 'notes';
+          renderTabs();
+          renderBody();
+          setTimeout(function () { showStudy('notes'); }, 0);
+        };
+        var anyway = document.getElementById('ai-poster-anyway');
+        if (anyway) anyway.onclick = function () { posterGenerate(vid, lang, kind, false); };
+      }).catch(function () { posterGenerate(vid, lang, kind, false); });
+      return;
+    }
+    posterGenerate(vid, lang, kind, force);
+  }
+
+  function posterGenerate(vid, lang, kind, force) {
+    var box = contentEl();
+    if (!box) return;
     box.innerHTML = notesLoadingHtml('poster', '', lang, force);
     var signal = _genStart('ai-poster-go');
     var requestId = ++_studyPaintRequest;

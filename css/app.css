@@ -9067,7 +9067,8 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
    edge styling itself comes from nbCss('.ai-nb'), which is already injected, so
    only the surface, the toolbar and the pan/zoom stage live here.
    ══════════════════════════════════════════════════════════════════════════ */
-.ai-map-full {
+.ai-map-full,
+.ai-sheet-full {
   position: fixed;
   inset: 0;
   z-index: 4000;
@@ -9076,9 +9077,11 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   background: var(--bg, #0A0D12);
 }
 /* The page behind must not scroll while the map owns the screen. */
-body.ai-map-full-open { overflow: hidden; }
+body.ai-map-full-open,
+body.ai-sheet-full-open { overflow: hidden; }
 
-.ai-map-full-bar {
+.ai-map-full-bar,
+.ai-sheet-full-bar {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -9088,7 +9091,8 @@ body.ai-map-full-open { overflow: hidden; }
   border-bottom: 1px solid var(--border, #1E2535);
   background: var(--card, #161B26);
 }
-.ai-map-full-title {
+.ai-map-full-title,
+.ai-sheet-full-title {
   flex: 1;
   min-width: 120px;
   font-size: .9rem;
@@ -9098,8 +9102,10 @@ body.ai-map-full-open { overflow: hidden; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ai-map-full-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.ai-map-full-tools .ai-btn { padding: 5px 10px; font-size: .74rem; }
+.ai-map-full-tools,
+.ai-sheet-full-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ai-map-full-tools .ai-btn,
+.ai-sheet-full-tools .ai-btn { padding: 5px 10px; font-size: .74rem; }
 
 .ai-map-zoom {
   display: inline-flex;
@@ -9136,7 +9142,8 @@ body.ai-map-full-open { overflow: hidden; }
 .ai-map-full-stage.grabbing .ai-map { user-select: none; -webkit-user-select: none; }
 .ai-map-full .ai-nb.ai-map { margin: 14px; width: max-content; }
 
-.ai-map-full-hint {
+.ai-map-full-hint,
+.ai-sheet-full-hint {
   flex: 0 0 auto;
   padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--border, #1E2535);
@@ -9146,13 +9153,29 @@ body.ai-map-full-open { overflow: hidden; }
   text-align: center;
 }
 
+/* The poster needs a readable scrolling page, not a pan/zoom stage. */
+.ai-sheet-full-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 16px 40px;
+  overscroll-behavior: contain;
+}
+.ai-sheet-full-stage > .ai-nb { max-width: 1100px; margin: 0 auto; }
+
 @media (max-width: 640px) {
-  .ai-map-full-bar { gap: 6px; padding: 6px 8px; }
-  .ai-map-full-title { flex-basis: 100%; font-size: .82rem; }
-  .ai-map-full-tools { width: 100%; justify-content: space-between; }
-  .ai-map-full-tools .ai-btn { padding: 5px 8px; font-size: .7rem; }
+  .ai-map-full-bar,
+  .ai-sheet-full-bar { gap: 6px; padding: 6px 8px; }
+  .ai-sheet-full-stage { padding: 12px 8px 32px; }
+  .ai-map-full-title,
+  .ai-sheet-full-title { flex-basis: 100%; font-size: .82rem; }
+  .ai-map-full-tools,
+  .ai-sheet-full-tools { width: 100%; justify-content: space-between; }
+  .ai-map-full-tools .ai-btn,
+  .ai-sheet-full-tools .ai-btn { padding: 5px 8px; font-size: .7rem; }
   /* Keyboard-only affordances make no sense on a touch device. */
-  .ai-map-full-hint { font-size: .66rem; }
+  .ai-map-full-hint,
+  .ai-sheet-full-hint { font-size: .66rem; }
 }
 
 
@@ -9201,3 +9224,70 @@ body.ai-map-full-open { overflow: hidden; }
 #page-youtube .ai-poster-ask-note { margin-top: 6px; font-size: .72rem; color: var(--muted); }
 /* The editing bar is a control, not part of the poster: never print it. */
 @media print { .ai-poster-ask { display: none !important; } }
+
+
+/* ── poster: per-box AI editing ────────────────────────────────────────────
+   Each box carries its own ✨ so a change can be asked for exactly where it is
+   needed, instead of describing which box to the whole-sheet prompt. */
+.ai-poster-card { position: relative; }
+.ai-poster-box-ai {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .82);
+  color: inherit;
+  font-size: .72rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: .45;
+  transition: opacity .15s;
+}
+.ai-poster-card:hover .ai-poster-box-ai,
+.ai-poster-box-ai:focus-visible { opacity: 1; }
+.ai-poster-box-ask {
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed currentColor;
+}
+.ai-poster-box-ask input {
+  width: 100%;
+  padding: 5px 7px;
+  border: 1px solid #cfd8dc;
+  border-radius: 6px;
+  font: inherit;
+  font-size: .74rem;
+  color: #22303f;
+  background: #fff;
+}
+.ai-poster-box-ask-row { display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap; }
+.ai-poster-box-ask button {
+  border: 1px solid #cfd8dc;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
+  font-size: .7rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  cursor: pointer;
+  color: #22303f;
+}
+.ai-poster-box-ask button.go { background: #2e7d32; border-color: #2e7d32; color: #fff; }
+.ai-poster-box-note { margin-top: 4px; font-size: .68rem; color: #5d6b7a; }
+/* Controls are not part of the sheet: never print them. */
+@media print {
+  .ai-poster-box-ai, .ai-poster-box-ask { display: none !important; }
+}
+
+
+#page-youtube .ai-poster-choice {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: -4px;
+}
