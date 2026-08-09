@@ -5563,7 +5563,9 @@
      student currently has open, then falls back to a library scan. */
   function courseIdForVideo(vid) {
     if (!vid) return '';
-    var lib = (window.appState && appState.ytoLibrary) || {};
+    // `let appState` is a global lexical binding, not a window property.
+    var lib = {};
+    try { if (typeof appState !== 'undefined' && appState) lib = appState.ytoLibrary || {}; } catch (e) {}
     if (window.ytoCurrentPl && lib[window.ytoCurrentPl]) return window.ytoCurrentPl;
     var ids = Object.keys(lib);
     for (var i = 0; i < ids.length; i++) {

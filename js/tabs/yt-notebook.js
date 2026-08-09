@@ -41,6 +41,15 @@ let _ytnbRun = null;            // { jobId, follower, acc, items, meta, done }
 
 function ytnbKit() { return window.AiNotesKit || null; }
 
+/* js/core/state.js declares `let appState`, which is a global LEXICAL binding —
+   `window.appState` is undefined for it. Reading it through `window` silently
+   disabled saving entirely, so the bare identifier is the only correct access. */
+function ytnbState() {
+  try {
+    return (typeof appState !== 'undefined' && appState) ? appState : null;
+  } catch (e) { return null; }
+}
+
 /* ── selection tray ───────────────────────────────────────────────────────
    An ordered list, because `compile` reads top to bottom and the order the
    student ticked things in is the order they expect to read them. */
@@ -177,7 +186,7 @@ function ytnbSearchTerm() {
    shows. Shared by the renderer and the All/None buttons so they can never
    disagree about what "all" means. */
 function ytnbVisibleCourseVideos(courseId) {
-  const lib = (typeof ytoLib === 'function') ? ytoLib() : ((window.appState && appState.ytoLibrary) || {});
+  const lib = (typeof ytoLib === 'function') ? ytoLib() : ((ytnbState() || {}).ytoLibrary || {});
   const course = (lib || {})[courseId];
   if (!course) return [];
   const all = ytnbCourseVideos(course);
@@ -189,7 +198,7 @@ function ytnbVisibleCourseVideos(courseId) {
   return all.filter(v => (v.title || '').toLowerCase().indexOf(q) !== -1);
 }
 function ytnbLibraryEntries() {
-  const lib = (typeof ytoLib === 'function') ? ytoLib() : ((window.appState && appState.ytoLibrary) || {});
+  const lib = (typeof ytoLib === 'function') ? ytoLib() : ((ytnbState() || {}).ytoLibrary || {});
   return Object.keys(lib || {})
     .map(id => ({ id: id, course: lib[id] }))
     .filter(e => e.course && ytnbCourseVideos(e.course).length)
@@ -907,9 +916,10 @@ function ytnbResume() {
 const YTNB_SAVED_MAX = 40;
 
 function ytnbSavedList() {
-  if (!window.appState) return [];
-  if (!Array.isArray(appState.ytNotebooks)) appState.ytNotebooks = [];
-  return appState.ytNotebooks;
+  const st = ytnbState();
+  if (!st) return [];
+  if (!Array.isArray(st.ytNotebooks)) st.ytNotebooks = [];
+  return st.ytNotebooks;
 }
 function ytnbSavedKey(entry) {
   return [entry.fp, entry.shape, entry.mode, entry.style || 'topic', entry.lang].join('|');
@@ -918,7 +928,8 @@ function ytnbSavedKey(entry) {
 /* Record a finished notebook. Same selection + same options overwrites its own
    entry rather than stacking duplicates every time it is regenerated. */
 function ytnbRemember(entry) {
-  if (!window.appState || !entry || !entry.fp) return;
+  const st = ytnbState();
+  if (!st || !entry || !entry.fp) return;
   const list = ytnbSavedList();
   const key = ytnbSavedKey(entry);
   const at = list.findIndex(e => ytnbSavedKey(e) === key);
@@ -927,7 +938,7 @@ function ytnbRemember(entry) {
   if (list.length > YTNB_SAVED_MAX) list.length = YTNB_SAVED_MAX;
   // Same guard the Organiser applies after a bulk import: this document is
   // shared with the whole course library, so never grow it blindly.
-  if (typeof ytoDocBytes === 'function' && ytoDocBytes(appState) > 1000 * 1024) {
+  if (typeof ytoDocBytes === 'function' && ytoDocBytes(st) > 1000 * 1024) {
     list.splice(Math.max(5, Math.floor(list.length / 2)));
   }
   if (typeof saveProgress === 'function') saveProgress();
