@@ -5596,9 +5596,16 @@
     var el = document.getElementById('ai-tabs'); if (!el) return;
     el.setAttribute('role', 'group');
     el.setAttribute('aria-label', 'AI study mode');
+    // The row is a grid whose column count used to be frozen at four, so adding
+    // a mode pushed tabs onto a second line. Publish the real count instead.
+    el.style.setProperty('--ai-tab-count', tabs.length);
     el.innerHTML = tabs.map(function (t) {
       var selected = state.tab === t[0];
-      return '<button type="button" class="ai-tab' + (selected ? ' on' : '') + '" data-t="' + t[0] + '" aria-pressed="' + (selected ? 'true' : 'false') + '">' +
+      // title + aria-label so the mode is still identifiable when the row is
+      // narrow enough that syncTabDensity() hides the visible labels.
+      return '<button type="button" class="ai-tab' + (selected ? ' on' : '') + '" data-t="' + t[0] +
+        '" title="' + escAttr(t[2]) + '" aria-label="' + escAttr(t[2]) +
+        '" aria-pressed="' + (selected ? 'true' : 'false') + '">' +
         '<span class="ai-mode-icon" aria-hidden="true">' + t[1] + '</span>' +
         '<span class="ai-mode-label">' + t[2] + '</span>' +
       '</button>';
@@ -6694,14 +6701,35 @@
     if (notesStageHeight > 0) layout.style.setProperty('--yt-parallel-stage-height', Math.ceil(notesStageHeight) + 'px');
     else layout.style.removeProperty('--yt-parallel-stage-height');
   }
+  /* Six modes cannot show a readable label in a narrow split panel. Rather than
+     wrap onto a second line (which is what a frozen 4-column grid did) or
+     ellipsise every label to nothing, the row drops to icon-only below the width
+     where a label still fits. Measured from the panel, not a viewport
+     breakpoint, because the student can drag the pane divider to any width. */
+  var AI_TAB_LABEL_MIN = 74;      // px per tab needed for icon + a readable word
+
+  function syncTabDensity() {
+    var el = document.getElementById('ai-tabs');
+    if (!el) return;
+    var count = parseInt(el.style.getPropertyValue('--ai-tab-count'), 10) ||
+      el.querySelectorAll('.ai-tab').length || 4;
+    var width = el.clientWidth;
+    if (!width || !count) return;   // not laid out yet; a later resize will call again
+    el.classList.toggle('ai-tabs-compact', (width / count) < AI_TAB_LABEL_MIN);
+  }
+
   function setupAlignSync() {
     alignPlayerToNotes();
+    syncTabDensity();
     if (setupAlignSync._bound) return;
     setupAlignSync._bound = true;
     var resizeTimer = null;
     function scheduleAlign() {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(alignPlayerToNotes, 80);
+      resizeTimer = setTimeout(function () {
+        alignPlayerToNotes();
+        syncTabDensity();     // the pane divider changes the panel width too
+      }, 80);
     }
     window.addEventListener('resize', scheduleAlign);
 
