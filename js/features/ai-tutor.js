@@ -6498,6 +6498,40 @@
   /* Per-box editing: the ✨ opens a small prompt inside that card only, and the
      proxy revises just that block, so the rest of the sheet cannot be reworded
      as a side effect. */
+  /* Which array a block keeps its entries in. */
+  var POSTER_ITEM_FIELD = { process: 'steps', compare: 'rows' };
+  function posterItemField(type) { return POSTER_ITEM_FIELD[type] || 'items'; }
+
+  /* One proposed entry as readable text, so the review list shows the actual
+     content rather than "item 3". */
+  function posterItemText(type, item) {
+    if (item == null) return '';
+    if (typeof item === 'string') return item;
+    if (type === 'timeline') return (item.when || '') + ' \u2014 ' + (item.what || '');
+    if (type === 'qa') return (item.q || '') + '  \u2192  ' + (item.a || '');
+    if (type === 'glossary') return (item.term || '') + ': ' + (item.meaning || '');
+    if (type === 'mnemonic') return (item.trick || '') + ' = ' + (item.means || '');
+    if (type === 'formula') {
+      return (item.name ? item.name + ': ' : '') + (item.expr || '') +
+        (item.note ? '  (' + item.note + ')' : '');
+    }
+    if (type === 'compare') {
+      return (item.label || '') + ': ' + ((item.values || []).join('  |  '));
+    }
+    return String(item.text || item.q || item.term || JSON.stringify(item));
+  }
+
+  /* Repaint every surface showing this poster. The per-box edit used to repaint
+     only the panel, so applying a change while in full screen said "updated"
+     over a sheet that never changed. */
+  function posterRepaintAll(poster, meta) {
+    var wasFull = !!_posterFull;
+    var trigger = wasFull ? _posterFull.trigger : null;
+    if (wasFull) posterCloseFullscreen();
+    posterPaint(poster, meta);
+    if (wasFull) posterOpenFullscreen(poster, meta, trigger);
+  }
+
   function posterBindBoxAi(root, poster, meta) {
     Array.prototype.forEach.call(root.querySelectorAll('.ai-poster-box-ai'), function (btn) {
       btn.onclick = function (event) {
@@ -6539,11 +6573,7 @@
               return;
             }
             if (state.tab !== 'poster' || curVid() !== meta.vid) return;
-            var next = JSON.parse(JSON.stringify(poster));
-            next.blocks[index] = j.block;
-            posterSaveRevision(meta.vid, meta.kind, meta.lang, next);
-            posterPaint(next, Object.assign({}, meta, { cached: false, edited: true }));
-            if (typeof showToast === 'function') showToast('\u2728 Box updated', 'success');
+            posterShowProposal(wrap, note, poster, meta, index, j);
           }).catch(function () { note.textContent = 'Could not reach the AI.'; });
         }
         wrap.querySelector('.go').onclick = function () { send(field.value); };
@@ -6557,6 +6587,110 @@
         field.focus();
       };
     });
+  }
+
+  /* Show WHAT the AI found and let the student choose, rather than silently
+     rewriting the box. Three outcomes, each stated plainly:
+       nothing found — the lecture does not support the request
+       additions     — a tick list, so only wanted facts go in
+       a rewrite     — shorten/reword touches existing entries, so it is
+                       previewed whole and accepted or discarded */
+  function posterShowProposal(wrap, note, poster, meta, index, result) {
+    var block = poster.blocks[index] || {};
+    var type = block.type;
+    var field = result.field || posterItemField(type);
+    var additions = result.add || [];
+
+    if (result.unchanged || (!additions.length && !result.rewrite)) {
+      note.innerHTML = '<b>Nothing to add.</b> The lecture does not cover anything ' +
+        'more for this box \u2014 try a different wording, or ask on another box.';
+      return;
+    }
+
+    if (result.rewrite) {
+      note.innerHTML = '';
+      var preview = document.createElement('div');
+      preview.className = 'ai-poster-proposal';
+      preview.innerHTML = '<div class="ai-poster-proposal-head">Suggested rewrite \u2014 ' +
+        'review before applying</div>' +
+        '<div class="ai-poster-proposal-body">' +
+        (result.block.title ? '<b>' + esc(result.block.title) + '</b>' : '') +
+        '<ul>' + (result.block[field] || []).map(function (item) {
+          return '<li>' + esc(posterItemText(type, item)) + '</li>';
+        }).join('') + '</ul></div>' +
+        '<div class="ai-poster-proposal-actions">' +
+        '<button type="button" class="apply">Replace this box</button>' +
+        '<button type="button" class="cancel">Keep the original</button></div>';
+      wrap.appendChild(preview);
+      preview.querySelector('.apply').onclick = function () {
+        posterApplyBlock(poster, meta, index, result.block);
+      };
+      preview.querySelector('.cancel').onclick = function () {
+        preview.parentNode.removeChild(preview);
+        note.textContent = 'Kept the original.';
+      };
+      return;
+    }
+
+    // Additive: a tick list of exactly what would go in.
+    note.innerHTML = '';
+    var list = document.createElement('div');
+    list.className = 'ai-poster-proposal';
+    list.innerHTML = '<div class="ai-poster-proposal-head">Found ' + additions.length +
+      (additions.length === 1 ? ' addition' : ' additions') + ' \u2014 choose what to keep</div>' +
+      '<div class="ai-poster-proposal-body">' + additions.map(function (item, n) {
+        return '<label class="ai-poster-pick"><input type="checkbox" checked data-n="' + n + '">' +
+          '<span>' + esc(posterItemText(type, item)) + '</span></label>';
+      }).join('') + '</div>' +
+      '<div class="ai-poster-proposal-actions">' +
+      '<button type="button" class="apply">Add selected</button>' +
+      '<button type="button" class="none">Add none</button></div>';
+    wrap.appendChild(list);
+
+    function selected() {
+      return Array.prototype.filter.call(list.querySelectorAll('input[type=checkbox]'),
+        function (cb) { return cb.checked; }).map(function (cb) {
+          return additions[parseInt(cb.dataset.n, 10)];
+        });
+    }
+    var apply = list.querySelector('.apply');
+    function syncApply() {
+      var n = selected().length;
+      apply.textContent = n ? 'Add selected (' + n + ')' : 'Add selected';
+      apply.disabled = !n;
+    }
+    Array.prototype.forEach.call(list.querySelectorAll('input[type=checkbox]'), function (cb) {
+      cb.onchange = syncApply;
+    });
+    syncApply();
+    apply.onclick = function () {
+      var picked = selected();
+      if (!picked.length) return;
+      // Merge into the EXISTING box rather than replacing it, so nothing the
+      // student already had can be lost by adding to it.
+      var merged = JSON.parse(JSON.stringify(block));
+      var existing = merged[field] || [];
+      var seen = {};
+      existing.forEach(function (i) { seen[JSON.stringify(i)] = 1; });
+      picked.forEach(function (i) {
+        var token = JSON.stringify(i);
+        if (!seen[token]) { seen[token] = 1; existing.push(i); }
+      });
+      merged[field] = existing;
+      posterApplyBlock(poster, meta, index, merged);
+    };
+    list.querySelector('.none').onclick = function () {
+      list.parentNode.removeChild(list);
+      note.textContent = 'Nothing added.';
+    };
+  }
+
+  function posterApplyBlock(poster, meta, index, block) {
+    var next = JSON.parse(JSON.stringify(poster));
+    next.blocks[index] = block;
+    posterSaveRevision(meta.vid, meta.kind, meta.lang, next);
+    posterRepaintAll(next, Object.assign({}, meta, { cached: false, edited: true }));
+    if (typeof showToast === 'function') showToast('\u2728 Box updated', 'success');
   }
 
   /* Full screen: the poster is a page to read, so this reuses the map's overlay
@@ -6636,12 +6770,26 @@
         return;
       }
       if (state.tab !== 'poster' || curVid() !== meta.vid) return;
+      // Nothing changed is a real outcome, not a success: saying "updated" over
+      // an identical sheet is what made this feel broken.
+      var before = JSON.stringify(poster.blocks || []);
+      if (JSON.stringify(j.poster.blocks || []) === before) {
+        if (note) {
+          note.innerHTML = '<b>No change.</b> The lecture does not support that \u2014 ' +
+            'try different wording, or use \u2728 on a single box.';
+        }
+        return;
+      }
       posterSaveRevision(meta.vid, meta.kind, meta.lang, j.poster);
-      posterPaint(j.poster, Object.assign({}, meta, {
+      posterRepaintAll(j.poster, Object.assign({}, meta, {
         provider: j.provider || meta.provider, model: j.model || meta.model,
         cached: false, edited: true
       }));
-      if (typeof showToast === 'function') showToast('\u2728 Poster updated', 'success');
+      var added = (j.poster.blocks || []).length - (poster.blocks || []).length;
+      if (typeof showToast === 'function') {
+        showToast(added > 0 ? '\u2728 Added ' + added + (added === 1 ? ' box' : ' boxes')
+          : '\u2728 Poster updated', 'success');
+      }
     }).catch(function () {
       if (go) { go.disabled = false; go.textContent = '\u2728 Apply'; }
       if (note) note.textContent = 'Could not reach the AI. Try again in a moment.';
