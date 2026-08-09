@@ -1217,6 +1217,9 @@ def _get_study_job(job_id):
 
 def _cleanup_study_jobs():
     """Keep completed in-memory jobs bounded; persisted records use their TTL."""
+    # Same job: keep long-lived in-memory maps from growing without bound. Cheap
+    # to call from here because it self-throttles.
+    _prune_rate_buckets()
     cutoff = time.time() - STUDY_JOB_TTL
     with _study_jobs_lock:
         stale = [jid for jid, job in _study_jobs.items()
@@ -1422,6 +1425,66 @@ def _rate_ok(bucket, key, limit, window):
         hits.append(now)
         b[key] = hits
         return True
+
+
+def _rate_left(bucket, key, limit, window):
+    """How many calls remain in `key`'s window, WITHOUT consuming one.
+
+    Exists so the UI can be told the truth about a student's remaining free
+    messages. The browser used to compute that itself from a localStorage counter
+    keyed to the UTC calendar day, while this module meters a rolling `window`
+    — two different meanings of "today" that disagreed for hours at a time.
+
+    Also the only place that evicts: _rate_ok rewrites each key's timestamp list
+    but never removes the key itself, so `_rate[bucket]` grew by one entry per
+    user per bucket for the lifetime of the process (tutor_h, tutor_d,
+    tutor_all_h, tutor_all_d, study_h, web_s, ...). Small per entry, unbounded in
+    aggregate on a long-lived container."""
+    now = time.time()
+    with _rate_lock:
+        b = _rate.setdefault(bucket, {})
+        hits = [t for t in b.get(key, []) if now - t < window]
+        if hits:
+            b[key] = hits
+        else:
+            b.pop(key, None)
+        return max(0, int(limit) - len(hits))
+
+
+_RATE_PRUNE_INTERVAL = 600
+_rate_pruned_at = 0.0
+
+
+def _prune_rate_buckets(force=False):
+    """Drop every key whose window has fully expired. Returns the count dropped.
+
+    _rate_ok/_rate_left only touch the key being served, so a student who never
+    comes back is never revisited and their entry stays forever. This sweeps the
+    rest. Self-throttled to once per _RATE_PRUNE_INTERVAL so callers on a hot path
+    can invoke it unconditionally."""
+    global _rate_pruned_at
+    now = time.time()
+    if not force and now - _rate_pruned_at < _RATE_PRUNE_INTERVAL:
+        return 0
+    _rate_pruned_at = now
+    # The widest window any caller uses is a day; nothing older can still count.
+    horizon = 86400
+    dropped = 0
+    with _rate_lock:
+        for bucket in list(_rate.keys()):
+            entries = _rate[bucket]
+            for key in list(entries.keys()):
+                fresh = [t for t in entries[key] if now - t < horizon]
+                if fresh:
+                    entries[key] = fresh
+                else:
+                    entries.pop(key, None)
+                    dropped += 1
+            if not entries:
+                _rate.pop(bucket, None)
+    if dropped:
+        log.info("rate limiter: pruned %d expired key(s)", dropped)
+    return dropped
 
 
 def _is_unlimited(uid):
@@ -5591,6 +5654,12 @@ def _tutor_prepare(body, user):
     # spoofable X-Forwarded-For header. Free accounts get the same five-message
     # daily experience as the UI; Pro accounts use the configured server caps.
     uid = user["uid"]
+    # Remaining free messages, reported to the browser. Only this module knows the
+    # real number: it meters a rolling 24h window, while the browser was deriving
+    # a count from a localStorage key named after the UTC calendar day. The two
+    # disagreed for hours every night, so the UI could promise five messages while
+    # this endpoint refused them. None = nothing to show (Pro or unlimited).
+    quota = None
     if not _is_unlimited(uid):
         lims = _load_ai_limits()
         daily_limit = lims["tutorPerDay"] if user.get("is_pro") else min(5, lims["tutorPerDay"])
@@ -5598,7 +5667,14 @@ def _tutor_prepare(body, user):
         if (not _rate_ok("tutor_h", uid, hourly_limit, 3600)
                 or not _rate_ok("tutor_d", uid, daily_limit, 86400)):
             return ({"error": "rate_limited",
-                     "detail": "Tutor message limit reached. Try later, or upgrade for higher limits."}, 429), None
+                     "detail": "Tutor message limit reached. Try later, or upgrade for higher limits.",
+                     # Sent on the refusal too, so a browser showing "5 left" is
+                     # corrected the moment it is proven wrong.
+                     "quota": {"left": 0, "max": daily_limit}}, 429), None
+        if not user.get("is_pro"):
+            # Read AFTER the checks above, so this counts the message being served.
+            quota = {"left": _rate_left("tutor_d", uid, daily_limit, 86400),
+                     "max": daily_limit}
 
     try:
         t = _extract_transcript(video_id, "auto")
@@ -5689,7 +5765,7 @@ def _tutor_prepare(body, user):
 
     return None, {"messages": messages, "ai": ai, "video_id": video_id,
                   "mode": mode, "transcript_lang": t.get("chosen_lang"),
-                  "web": _web_sources_public(web)}
+                  "web": _web_sources_public(web), "quota": quota}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -7247,7 +7323,7 @@ def api_tutor():
     return jsonify({"id": data["video_id"], "answer": answer, "mode": data["mode"],
                     "provider": _ai_display_provider(ai),
                     "model": _ai_display_model(ai), "transcript_lang": data["transcript_lang"],
-                    "web": data["web"]})
+                    "web": data["web"], "quota": data["quota"]})
 
 
 @app.get("/api/search")
@@ -7578,7 +7654,7 @@ def api_tutor_stream():
         yield _sse("meta", {"provider": initial_provider,
                             "model": initial_model,
                             "transcript_lang": data["transcript_lang"],
-                            "web": data["web"]})
+                            "web": data["web"], "quota": data["quota"]})
         resolved_meta_sent = False
         produced = False
         try:
@@ -7590,7 +7666,7 @@ def api_tutor_stream():
                         yield _sse("meta", {"provider": resolved_provider,
                                             "model": resolved_model,
                                             "transcript_lang": data["transcript_lang"],
-                                            "web": data["web"]})
+                                            "web": data["web"], "quota": data["quota"]})
                     resolved_meta_sent = True
                 produced = True
                 yield _sse("chunk", {"t": piece})

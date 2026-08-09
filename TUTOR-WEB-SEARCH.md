@@ -45,8 +45,9 @@ results as context behaves identically on every provider.
 Tried in order; the first to return enough results wins. Failures are logged and
 skipped — a failed search costs the answer its freshness, never the answer.
 
-**Keyed (recommended — add any one).** Configure in Firestore `config/ai`, or by
-env var on the proxy:
+**Keyed (recommended — add any one).** Set them in **Admin → AI Study → Live web
+search**, which writes the fields below to Firestore `config/ai`. They can also be
+set directly in Firestore, or by env var on the proxy:
 
 | Provider | `config/ai` field | Env var | Free tier |
 |---|---|---|---|
@@ -75,10 +76,13 @@ Keys never reach the browser, exactly like the AI provider keys.
 
 ## Turning it off
 
-- Globally, without redeploying: set `config/ai.tutorWebSearch = false` in
-  Firestore (cached for 5 minutes).
+- **Admin → AI Study → Live web search → Enable web search** (writes
+  `config/ai.tutorWebSearch`; the server caches it for 5 minutes).
 - By env var: `TUTOR_WEB_SEARCH=0`.
 - Per student: the 🌐 button → Off.
+
+The admin card also states plainly when no key is configured, because "working"
+and "working but Wikipedia-only" look identical from the outside.
 
 Date awareness stays on regardless — it needs no network.
 
@@ -113,6 +117,15 @@ exactly what the tutor would see:
 `auto_would_search` answers "would `auto` mode have searched this at all?", which
 is the usual cause of a stale-looking answer. `/api/status` also returns
 `tutorWebSearch` so the UI can tell whether the feature is on.
+
+## Tests
+
+`youtube-turbo-proxy/tests/test_tutor.py` covers the trigger heuristic (both
+directions), the mode parser, the DuckDuckGo parser against fixture markup, the
+bot-wall fast-fail, provider ranking and dedupe, the kill switch, and the prompt
+contracts. It slices `app.py` and runs the pieces directly, so it needs no Flask,
+Firebase, cookies or network. `npm run test:tutor-web` covers the browser side.
+Both run in CI (`.github/workflows/checks.yml`).
 
 ## What the student sees
 

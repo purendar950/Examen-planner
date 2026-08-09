@@ -286,6 +286,70 @@ function aiStudyModelCatalogRefreshMarkup(mode) {
 function aiStudyFreeModelRefreshMarkup() { return aiStudyModelCatalogRefreshMarkup('free'); }
 function aiStudyAllModelRefreshMarkup() { return aiStudyModelCatalogRefreshMarkup('all'); }
 
+/* Live web search for the AI Tutor (config/ai, read by _load_search_config in
+   youtube-turbo-proxy/app.py).
+
+   This card exists because the feature shipped usable-but-degraded and there was
+   no way to improve it from the panel. Without a key the server falls back to
+   scraping DuckDuckGo — which answers a couple of requests from a datacenter IP
+   and then serves a bot-check page — leaving Wikipedia as the only reliable
+   source. That is fine for static GK and useless for "SSC CGL 2026 exam date".
+   Any one of these keys fixes it, and all four have a free tier. */
+function aiStudyWebSearchKeyRow(id, field, label, hint, placeholder) {
+  var value = (AI_CONFIG && AI_CONFIG[field]) || '';
+  return '<div class="ai-field">' +
+    '<label for="' + id + '">' + esc(label) + '</label>' +
+    '<input id="' + id + '" type="password" autocomplete="off" spellcheck="false" ' +
+      'data-websearch-secret placeholder="' + esc(placeholder) + '" value="' + esc(value) + '">' +
+    '<span>' + hint + '</span>' +
+  '</div>';
+}
+
+function toggleWebSearchSecrets(button) {
+  var fields = document.querySelectorAll('[data-websearch-secret]');
+  if (!fields.length) return;
+  var reveal = fields[0].type === 'password';
+  Array.prototype.forEach.call(fields, function (f) { f.type = reveal ? 'text' : 'password'; });
+  if (button) {
+    button.textContent = reveal ? 'Hide keys' : 'Show keys';
+    button.setAttribute('aria-pressed', String(reveal));
+  }
+}
+
+function aiStudyWebSearchMarkup() {
+  var cfg = AI_CONFIG || {};
+  var enabled = cfg.tutorWebSearch !== false;      // absent = on, matching the server default
+  var keyed = ['tavilyApiKey', 'serperApiKey', 'braveApiKey', 'searxngUrl']
+    .some(function (f) { return !!String(cfg[f] || '').trim(); });
+  var score = !enabled ? 'Off' : (keyed ? 'Keyed' : 'Keyless');
+  var scoreClass = !enabled ? '' : (keyed ? 'is-safe' : 'is-open');
+  return '<section id="ai-websearch" class="ai-panel ai-anchor-section">' +
+    '<div class="ai-panel-heading"><div><span class="ai-panel-eyebrow">Tutor grounding</span>' +
+      '<h3>Live web search</h3><p>Lets the tutor look up current affairs, exam dates and anything newer than the model\'s training data.</p></div>' +
+      '<div class="ai-heading-actions"><span class="ai-policy-score ' + scoreClass + '">' + score + '</span>' +
+      '<button class="ai-btn ai-btn-soft" type="button" aria-pressed="false" onclick="toggleWebSearchSecrets(this)">Show keys</button></div></div>' +
+    '<div class="ai-switch-list">' +
+      '<label class="ai-switch-row" for="websearch-enabled"><span><strong>Enable web search</strong>' +
+        '<small>Off = the tutor answers from the transcript and its own knowledge only. Today\'s date is still provided either way.</small></span>' +
+        '<span class="ai-toggle"><input id="websearch-enabled" type="checkbox"' + (enabled ? ' checked' : '') + '><i></i></span></label>' +
+    '</div>' +
+    (keyed ? '' :
+      '<div class="ai-grant-editor"><div><label>No search key configured</label><span>degraded</span></div>' +
+      '<p>The tutor currently falls back to DuckDuckGo scraping, which a datacenter IP gets bot-blocked from after a couple of requests, so answers come mostly from Wikipedia. Good enough for static general knowledge; not for exam dates or recent news. Add any ONE key below to fix it — every option has a free tier.</p></div>') +
+    '<div class="ai-field-grid">' +
+      aiStudyWebSearchKeyRow('websearch-tavily', 'tavilyApiKey', 'Tavily API key',
+        'Built for LLM grounding. <a href="https://tavily.com" target="_blank" rel="noopener noreferrer">tavily.com</a>', 'tvly-…') +
+      aiStudyWebSearchKeyRow('websearch-serper', 'serperApiKey', 'Serper API key',
+        'Google results, includes the answer box. <a href="https://serper.dev" target="_blank" rel="noopener noreferrer">serper.dev</a>', '') +
+      aiStudyWebSearchKeyRow('websearch-brave', 'braveApiKey', 'Brave Search API key',
+        'Independent index. <a href="https://brave.com/search/api/" target="_blank" rel="noopener noreferrer">brave.com/search/api</a>', 'BSA…') +
+      aiStudyWebSearchKeyRow('websearch-searxng', 'searxngUrl', 'SearXNG base URL',
+        'Self-hosted, no key. Must have the JSON API enabled.', 'https://searx.example.com') +
+    '</div>' +
+    '<button class="ai-btn ai-btn-dark ai-save-wide" type="button" onclick="saveWebSearchConfig()">Save web search</button>' +
+  '</section>';
+}
+
 function renderAiStudy() {
   if (!AI_CONFIG.loaded || !AI_LIMITS.loaded) {
     return '<div class="ai-loading-shell" aria-live="polite"><span class="ai-button-spinner"></span><div><strong>Loading AI operations</strong><span>Fetching providers, models and policy controls…</span></div></div>';
@@ -372,6 +436,8 @@ function renderAiStudy() {
       '<div class="ai-panel-heading"><div><span class="ai-panel-eyebrow">Network health</span><h3>Provider diagnostics</h3><p>Run server-side probes for availability, latency, quota and model compatibility.</p></div><div class="ai-heading-actions"><span id="ai-health-time">' + esc(lastTested) + '</span><button class="ai-btn ai-btn-soft" type="button" data-ai-health-button onclick="testStudyProviders()">Run health check</button></div></div>' +
       '<div id="study-test-out" aria-live="polite">' + aiStudyHealthMarkup(_aiStudyHealth) + '</div>' +
     '</section>' +
+
+    aiStudyWebSearchMarkup() +
 
     '<div id="ai-policy" class="ai-policy-grid ai-anchor-section">' +
       '<section class="ai-panel">' +

@@ -445,26 +445,33 @@
     return askAboutNote(spec.prompt(noteSnippet(text)), text, ts, { web: spec.web });
   }
 
-  /* ── Per-section ask buttons ──────────────────────────────────────────────
+  /* ── Per-block ask buttons ────────────────────────────────────────────────
      Selection is precise but fiddly on a phone, and the drag competes with the
-     scroll gesture. A button on each section heading is the reliable path: one
-     tap, no selection, and it already knows the section's transcript position.
+     scroll gesture. A button on the block itself is the reliable path: one tap,
+     no selection, and it already knows the block's transcript position.
 
-     Only .sec (major headings) gets one, and for a layout reason: .sec is a flex
-     row, so a child pushed over with margin-left:auto cannot make the block
-     taller. The private annotation canvas is absolutely positioned over the
-     notebook and its saved strokes are anchored to that geometry, so a change in
-     block height here would visibly shift every existing highlight. */
-  function noteAskBtnHtml(index) {
+     Two hosts get one — .sec headings and MCQ .q-head bars — and both were chosen
+     for the same layout reason: they are already flex rows, so a child pushed over
+     with margin-left:auto cannot make the block taller. The private annotation
+     canvas is absolutely positioned over the notebook and its saved strokes are
+     anchored to that geometry, so a change in block height here would visibly
+     shift every existing highlight. */
+  function noteAskBtnHtml(index, what) {
+    var label = 'Ask the AI about this ' + (what || 'section');
     return '<button type="button" class="ai-nb-ask" data-nb-ask="' + index + '" ' +
-      'aria-label="Ask the AI about this section" title="Ask the AI about this section">💬</button>';
+      'aria-label="' + escAttr(label) + '" title="' + escAttr(label) + '">💬</button>';
   }
-  /* Everything under a heading up to the next heading. That is what a student
-     means by "this section" — the heading line on its own is not a question. */
-  function noteSectionText(headingBlock) {
-    var parts = [noteBlockText(headingBlock)];
-    var el = headingBlock.nextElementSibling;
-    while (el && !(el.classList && el.classList.contains('sec'))) {
+  /* The passage a button stands for. How far it reaches depends on what was
+     clicked: a heading owns everything down to the next heading, while an MCQ card
+     owns only its own trailing explanation (which nbCard emits as a SIBLING of
+     .qkeep, not a child, so it has to be walked to). */
+  function noteSectionText(block) {
+    var parts = [noteBlockText(block)];
+    var isCard = !!(block.classList && block.classList.contains('qkeep'));
+    var el = block.nextElementSibling;
+    while (el && el.classList) {
+      if (el.classList.contains('sec')) break;
+      if (isCard && el.classList.contains('qkeep')) break;
       var line = noteBlockText(el);
       if (line) parts.push(line);
       el = el.nextElementSibling;
@@ -478,9 +485,25 @@
       // Every block is indexed, not just the ones that get a button — the index
       // is the stable handle the notebook never had.
       block.setAttribute('data-nb-block', String(index));
-      if (!block.classList || !block.classList.contains('sec')) return;
-      if (block.querySelector('.ai-nb-ask')) return;
-      block.insertAdjacentHTML('beforeend', noteAskBtnHtml(index));
+      if (!block.classList) return;
+      /* Two hosts, both chosen because they are already flex rows: a child pushed
+         over with margin-left:auto cannot make them taller, and the private
+         annotation canvas is anchored to the notebook's geometry, so any height
+         change here would visibly shift every saved stroke.
+
+         MCQ cards matter more than headings, not less. nbMCQ() emits .qkeep per
+         question and only calls nbInner() for prose between them, so before this
+         a student reading MCQ-style notes had no ask button at all — and a
+         hallucinated answer key is the single most damaging thing generated notes
+         can contain. */
+      var host = null, what = 'section';
+      if (block.classList.contains('sec')) host = block;
+      else if (block.classList.contains('qkeep')) {
+        host = block.querySelector('.q-head');
+        what = 'question';
+      }
+      if (!host || host.querySelector('.ai-nb-ask')) return;
+      host.insertAdjacentHTML('beforeend', noteAskBtnHtml(index, what));
     });
     nb.addEventListener('click', function (e) {
       var target = e.target;
@@ -1268,7 +1291,10 @@
       // cannot make the block taller, which would shift saved annotation strokes.
       // user-select:none keeps it out of the text the student selects.
       '.ai-nb-ask{margin-left:auto;flex:0 0 auto;width:27px;height:22px;padding:0;border:1px solid rgba(0,0,0,.16);border-radius:6px;background:rgba(255,255,255,.6);color:inherit;font-size:.7rem;line-height:1;cursor:pointer;opacity:.3;user-select:none;-webkit-user-select:none;transition:opacity .15s,border-color .15s}',
-      '.sec:hover>.ai-nb-ask,.ai-nb-ask:focus-visible{opacity:1;border-color:#8eb69a}',
+      '.sec:hover>.ai-nb-ask,.q-head:hover>.ai-nb-ask,.ai-nb-ask:focus-visible{opacity:1;border-color:#8eb69a}',
+      // MCQ question heads are a dark bar, so the light chip needs inverting.
+      '.q-head>.ai-nb-ask{border-color:rgba(255,255,255,.34);background:rgba(255,255,255,.14);color:#fff;align-self:center}',
+      '.q-head:hover>.ai-nb-ask{border-color:rgba(255,255,255,.7);background:rgba(255,255,255,.24)}',
       // No hover on touch, so the affordance has to be permanently visible there.
       '@media(hover:none){.ai-nb-ask{opacity:.6}}',
       // While a pen/highlighter tool is armed the canvas swallows the taps, so
@@ -4796,17 +4822,42 @@
     el.hidden = !snip;
     el.textContent = snip ? '“' + snip + '”' : '';
   }
-  /* Free-plan allowance, read from the gate that owns it. Absent (older cached
+  /* The server's own count of remaining free messages, from the last answer it
+     gave. It is the only authority: the backend meters a rolling 24-hour window
+     per ACCOUNT, while the local gate counts calendar days on THIS DEVICE. Those
+     two disagree for hours every night, and the UI used to show the local guess —
+     promising messages the server would then refuse. */
+  var _tutorQuota = null;
+  function noteTutorQuota(quota) {
+    if (!quota || typeof quota.left !== 'number') return;
+    _tutorQuota = { left: Math.max(0, quota.left),
+                    max: Math.max(0, Number(quota.max) || 0) };
+    paintFocusAskLeft();
+  }
+  /* Called when the SERVER refuses as rate limited. Push that back into the local
+     gate as well, otherwise it keeps letting sends through to be rejected again. */
+  function noteTutorRateLimited(quota) {
+    noteTutorQuota(quota && typeof quota.left === 'number' ? quota : { left: 0, max: (_tutorQuota || {}).max || 0 });
+    try {
+      if (typeof window.ezTutorMarkExhausted === 'function') window.ezTutorMarkExhausted();
+    } catch (e) {}
+  }
+  /* Free-plan allowance. Prefers the server's number; falls back to the local
+     estimate only before the first answer of the session. Absent (older cached
      gating file) or null (Pro/trial) both mean "show nothing" — this must never
      invent a limit of its own. */
   function paintFocusAskLeft() {
     var el = document.getElementById('ai-focus-ask-left');
     if (!el) return;
-    var quota = null;
-    try {
-      if (typeof window.ezTutorMessagesLeft === 'function') quota = window.ezTutorMessagesLeft();
-    } catch (e) {}
-    if (!quota) { el.hidden = true; el.textContent = ''; return; }
+    var quota = _tutorQuota;
+    if (!quota) {
+      try {
+        if (typeof window.ezTutorMessagesLeft === 'function') quota = window.ezTutorMessagesLeft();
+      } catch (e) {}
+    }
+    // max 0 means the server reported a quota it could not size; showing
+    // "0 of 0" would read as a lockout, so say nothing instead.
+    if (!quota || !quota.max) { el.hidden = true; el.textContent = ''; return; }
     el.hidden = false;
     el.textContent = quota.left + ' of ' + quota.max + ' free left today';
     el.classList.toggle('is-out', quota.left <= 0);
@@ -5097,6 +5148,10 @@
     }).then(function (r) { return r.json(); }).then(function (j) {
       var answer = j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)');
       var web = (!j.error && j.web) || null;
+      // The server reports the real remaining allowance on success AND on a
+      // refusal, so the counter is corrected either way.
+      if (j.error === 'rate_limited') noteTutorRateLimited(j.quota);
+      else if (!j.error) noteTutorQuota(j.quota);
       saveTutorAnswer(historyKey, turnId, answer, web);
       finishTutorBubble(historyKey, turnId, liveEl, answer, web);
     }).catch(function (e) {
@@ -5239,6 +5294,7 @@
            the "thinking" spinner with an empty bubble. paint() already carries
            webSources, so the footer appears with the first chunk. */
         if (meta && meta.web && meta.web.length) webSources = meta.web;
+        if (meta && meta.quota) noteTutorQuota(meta.quota);
         // Library scope reports what it actually searched. Showing it turns a
         // weak answer into an explainable one.
         if (lib && meta && isLibraryScope() && activeLibraryScopeKey() === requestLibraryScopeKey) {

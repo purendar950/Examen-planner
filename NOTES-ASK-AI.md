@@ -78,18 +78,39 @@ is the right authority for "does my note match the lecture".
 
 The free plan allows 5 tutor messages/day. One tap per section makes that easy to
 burn through by accident, and discovering it by hitting the wall reads as the
-feature being broken. The ask sheet header therefore shows `N of 5 free left today`,
-read from `window.ezTutorMessagesLeft()` — a read-only companion to the existing
-gate, living in `js/features/preppath-phase4-gating.js` because that file owns the
-key format and the limit. It counts nothing, and returns `null` for Pro/trial.
+feature being broken. The ask sheet header therefore shows `N of 5 free left today`.
+
+**The server owns that number.** It is returned as `quota: {left, max}` on every
+tutor answer *and* on the `rate_limited` refusal, computed by `_rate_left()` — a
+non-consuming read of the same rolling window `_rate_ok()` meters.
+
+That matters because the browser cannot work it out. The backend counts a rolling
+24 hours per **account**; the local gate counts messages sent from **this device**
+inside one calendar day. `toISOString()` rolls over at 00:00 UTC = 05:30 IST, so a
+student who spent five messages at 11pm used to see a fresh allowance at dawn while
+the server was still refusing — the UI promised five and the server delivered a
+429. The local counter is now only an estimate used before the first answer of a
+session, it is keyed to the **IST** day so it does not reset mid-study-night, and
+`window.ezTutorMarkExhausted()` pushes a server refusal back into it so the gate,
+the counter and the server agree.
+
+`window.ezTutorMessagesLeft()` still lives in
+`js/features/preppath-phase4-gating.js` because that file owns the key format and
+the limit. It counts nothing, and returns `null` for Pro/trial.
 
 ## Details worth knowing before changing this
 
-- **Only `.sec` headings get a 💬 button.** `.sec` is a flex row, so a child pushed
-  over with `margin-left:auto` cannot make the block taller. The private annotation
-  canvas is absolutely positioned over the notebook and its saved strokes are
-  anchored to that geometry, so a change in block height here would visibly shift
-  every existing highlight.
+- **Two hosts get a 💬 button: `.sec` headings and MCQ `.q-head` bars.** Both are
+  already flex rows, so a child pushed over with `margin-left:auto` cannot make the
+  block taller. The private annotation canvas is absolutely positioned over the
+  notebook and its saved strokes are anchored to that geometry, so a change in
+  block height here would visibly shift every existing highlight.
+- **MCQ cards matter more than headings, not less.** `nbMCQ()` emits `.qkeep` per
+  question and only calls `nbInner()` for prose between them, so MCQ-style notes
+  originally had no ask button anywhere — and a hallucinated answer key is the
+  single most damaging thing generated notes can contain. An MCQ passage also has
+  to reach forward to its `.explain` block, which `nbCard()` emits as a *sibling*
+  of `.qkeep` rather than a child.
 - **Selection is disarmed while drawing.** The annotation canvas takes pointer
   events for every tool except `move`, so the popover and the buttons are dimmed
   and disabled then (`.ai-focus-marking`).
