@@ -290,6 +290,8 @@ function renderUsers() {
           '<button class="btn btn-blue btn-sm" onclick="setPlan(\'' + u.id + '\')">Set Plan</button>' +
         '</div>' +
         trialBtn +
+        '<button class="btn ' + (u.p.mediaSavesMax != null ? 'btn-blue' : 'btn-gray') + ' btn-sm" onclick="setMediaSaveLimit(\'' + u.id + '\')" title="Playlist / video save limit for this user">📚 ' +
+          (Number(u.p.mediaSavesMax) === -1 ? '∞ Saves' : (Number(u.p.mediaSavesMax) > 0 ? u.p.mediaSavesMax + ' Saves' : 'Saves')) + '</button>' +
         '<button class="btn btn-gray btn-sm" onclick="showUserPayments(\'' + u.id + '\')" title="View this user payments">🧾 Payments</button>' +
         ((u.p.fp || u.p.deviceDuplicate) ? '<button class="btn btn-gray btn-sm" onclick="resetDeviceFlag(\'' + u.id + '\')" title="Clear device fingerprint / duplicate flag">🔓 Reset Device</button>' : '') +
         (suspended
@@ -366,14 +368,17 @@ function renderPlans() {
     '<input id="cfg-payee" placeholder="Payee name" value="' + esc(CONFIG.payeeName || '') + '" style="width:160px;">' +
     '<button class="btn btn-green" onclick="saveUpiConfig()">Save UPI</button></div>' +
     '<div class="muted" style="margin-top:6px;">Ye UPI ID users ko app ke Upgrade modal mein dikhegi. Pehle ise zaroor set karo.</div></div>';
-  const fr = CONFIG.free || { mocks:5, mediaSaves:2, notes:10 };
-  h += '<div class="card"><h3>🆓 Free Plan Limits</h3>' +
+  const fr = CONFIG.free || { mocks:5, mediaSaves:2, notes:10, proMediaSaves:20 };
+  h += '<div class="card"><h3>🆓 Plan Limits</h3>' +
     '<div class="row" style="gap:12px;flex-wrap:wrap;">' +
     '<label style="display:flex;flex-direction:column;gap:4px;font-size:.82rem;color:var(--muted);">Mock saves<input id="free-mocks" type="number" min="0" value="' + (fr.mocks||5) + '" style="width:80px;"></label>' +
-    '<label style="display:flex;flex-direction:column;gap:4px;font-size:.82rem;color:var(--muted);">Playlists / links<input id="free-media" type="number" min="0" value="' + (fr.mediaSaves||2) + '" style="width:80px;"></label>' +
+    '<label style="display:flex;flex-direction:column;gap:4px;font-size:.82rem;color:var(--muted);">Free playlists / links<input id="free-media" type="number" min="0" value="' + (fr.mediaSaves||2) + '" style="width:80px;"></label>' +
+    '<label style="display:flex;flex-direction:column;gap:4px;font-size:.82rem;color:var(--muted);">Pro playlists / videos<input id="free-pro-media" type="number" min="1" value="' + (fr.proMediaSaves||20) + '" style="width:80px;"></label>' +
     '<label style="display:flex;flex-direction:column;gap:4px;font-size:.82rem;color:var(--muted);">Video notes<input id="free-notes" type="number" min="0" value="' + (fr.notes||10) + '" style="width:80px;"></label>' +
     '<button class="btn btn-green" style="align-self:flex-end;" onclick="saveFreeLimits()">Save Limits</button>' +
-    '</div><div class="muted" style="margin-top:6px;">App automatically loads these from Firestore on next refresh.</div></div>';
+    '</div><div class="muted" style="margin-top:6px;">App automatically loads these from Firestore on next refresh. ' +
+    '<strong>Pro playlists / videos</strong> is the Course Library save cap for Pro &amp; trial users (default 20). ' +
+    'To raise, lower or unlimit it for ONE user, use <strong>📚 Saves</strong> on their row in the Users tab.</div></div>';
   h += '<div class="card"><h3>➕ Add / Edit Plan</h3><div class="row">' +
     '<input id="pl-name" placeholder="Plan name (e.g. Pro 1 Month)" style="flex:1;min-width:160px;">' +
     '<input id="pl-price" type="number" placeholder="Price ₹" style="width:100px;">' +

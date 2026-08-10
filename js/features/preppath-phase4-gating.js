@@ -55,6 +55,7 @@ let EZ_FREE_LIMITS = {
   mocks: 5,                // total mock saves (keep) — global cap so free users still see value in saving
   mocksPerDay: 3,          // NEW: daily cap on NEW mock saves (was unlimited) — creates daily habit
   mediaSaves: 3,           // CHANGED: 2 → 3 playlists/links (more generous)
+  proMediaSaves: 20,       // NEW: Pro/trial playlist+video saves — admin-editable
   notes: 10,               // keep
   aiTutorPerDay: 5,        // NEW: AI Tutor messages/day — let them experience AI value
   aiTimetablePerWeek: 1,   // NEW: AI timetable generations/week — let them taste the magic
@@ -245,18 +246,74 @@ function ezIsoWeekKey() {
   return target.getUTCFullYear() + '_W' + (week < 10 ? '0' + week : week);
 }
 
-/* 5. Playlist Organiser courses → configurable free limit; Pro/trial users can save up to 20 */
+/* ── 5. Saved playlists / videos cap ──────────────────────────────────────
+   ONE resolver for every save path, because the cap used to be the literal 20
+   written inside the ytoLoadPlaylist gate below — and that gate's own error
+   message told admins to "manage user limit from the admin panel", which was not
+   a thing that existed. It is now:
+
+     per-user override (Admin → Users → 📚 Saves)   ← wins, and can be unlimited
+     admin Pro cap     (Admin → Plans → Save Limits · config/free.proMediaSaves)
+     admin free cap    (config/free.mediaSaves)
+
+   The old gate also wrapped ytoLoadPlaylist ONLY, so importing from the channel
+   page, the bulk channel import and the Notebook tab's URL box all walked
+   straight past the cap. Every one of those paths now calls this. */
+const EZ_SAVES_UNLIMITED = -1;
+const EZ_PRO_SAVES_DEFAULT = 20;
+
+function ezProMediaSaveMax() {
+  const configured = Number(EZ_FREE_LIMITS.proMediaSaves);
+  return configured > 0 ? configured : EZ_PRO_SAVES_DEFAULT;
+}
+
+/* The cap that applies to THIS user right now. Infinity when unlimited. */
+function ezMediaSaveMax() {
+  const override = EZ_PROFILE ? Number(EZ_PROFILE.mediaSavesMax) : NaN;
+  if (override === EZ_SAVES_UNLIMITED) return Infinity;
+  if (isFinite(override) && override > 0) return override;
+  if (!ezIsPro()) return Number(EZ_FREE_LIMITS.mediaSaves) || 3;
+  return ezProMediaSaveMax();
+}
+
+function ezMediaSaveCount() {
+  try { return Object.keys(ytoLib() || {}).length; } catch (e) { return 0; }
+}
+
+/* '' when the save is allowed, otherwise the reason to show the user.
+   `existing` truthy means re-importing something already saved, which must never
+   count against the cap — re-syncing a course you already have is not a new save. */
+function ezMediaSaveDenied(existing) {
+  if (!currentUser || existing) return '';
+  const max = ezMediaSaveMax();
+  if (!isFinite(max) || ezMediaSaveCount() < max) return '';
+  return ezIsPro()
+    ? 'Save limit reached — max ' + max + ' playlists/videos. Purane courses delete karo, ya admin se limit badhwao.'
+    : 'Free plan: sirf ' + max + ' playlists/videos save. Pro mein ' + ezProMediaSaveMax() + ' tak save kar sakte ho';
+}
+
+/* Same check, but it also shows the standard message. True when blocked. */
+function ezMediaSaveGuard(existing) {
+  const reason = ezMediaSaveDenied(existing);
+  if (!reason) return false;
+  if (ezIsPro()) showToast('⚠️ ' + reason, 'error');
+  else ezLockedMsg(reason);
+  return true;
+}
+window.ezMediaSaveDenied = ezMediaSaveDenied;
+window.ezMediaSaveGuard = ezMediaSaveGuard;
+window.ezMediaSaveMax = ezMediaSaveMax;
+
 const _ytoLoadGate = ytoLoadPlaylist;
 ytoLoadPlaylist = async function() {
   const url = (document.getElementById('yto-url-input') || { value: '' }).value.trim();
   const plId = ytExtractPlaylistId(url);
+  const vId = !plId && typeof ytExtractVideoId === 'function' ? ytExtractVideoId(url) : null;
   const lib = ytoLib();
-  const existing = plId && lib[plId];
-  const maxSaved = ezIsPro() ? 20 : EZ_FREE_LIMITS.mediaSaves;
-  if (currentUser && !existing && Object.keys(lib).length >= maxSaved) {
-    if (ezIsPro()) showToast('Pro users max 20 playlists/videos save kar sakte hain. Admin panel se user limit manage karein.', 'error');
-    else ezLockedMsg('Free plan: sirf ' + EZ_FREE_LIMITS.mediaSaves + ' playlists/videos save. Pro mein 20 tak save kar sakte ho');
-    return;
+  // A channel URL only OPENS the channel page here, it saves nothing, so it must
+  // not be blocked by a save cap. Its two import buttons are guarded instead.
+  if (plId || vId) {
+    if (ezMediaSaveGuard((plId && lib[plId]) || (vId && lib['vid_' + vId]))) return;
   }
   return _ytoLoadGate();
 };

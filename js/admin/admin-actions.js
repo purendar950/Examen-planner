@@ -152,9 +152,50 @@ async function saveFreeLimits() {
   const mocks = parseInt(document.getElementById('free-mocks').value) || 5;
   const mediaSaves = parseInt(document.getElementById('free-media').value) || 2;
   const notes = parseInt(document.getElementById('free-notes').value) || 10;
-  await db.collection('config').doc('free').set({ mocks, mediaSaves, notes });
-  CONFIG.free = { mocks, mediaSaves, notes };
-  showToast('✅ Free limits saved! Pro users get up to 20 playlist/video saves.');
+  // Pro Course Library save cap. Clamped so a typo cannot lock every Pro user out
+  // of saving, or set a number the 1 MiB synced document could never hold.
+  const proMediaSaves = Math.max(1, Math.min(500,
+    parseInt(document.getElementById('free-pro-media').value) || 20));
+  // merge:true is REQUIRED: this document also holds mocksPerDay, aiTutorPerDay,
+  // aiTimetablePerWeek and the two telegram flags. A plain set() silently reset
+  // every one of them to code defaults on each save from this card.
+  await db.collection('config').doc('free')
+    .set({ mocks, mediaSaves, notes, proMediaSaves }, { merge: true });
+  CONFIG.free = Object.assign({}, CONFIG.free, { mocks, mediaSaves, notes, proMediaSaves });
+  showToast('✅ Limits saved — free ' + mediaSaves + ', Pro ' + proMediaSaves + ' playlist/video saves.');
+}
+
+/* Per-user override for the Course Library save cap, so one account can be raised,
+   lowered or made unlimited without moving the cap for everyone. Stored on the
+   user's own profile: the app reads its own profile already, so the gate stays
+   instant and no other user can see who has a grant. */
+async function setMediaSaveLimit(id) {
+  const user = USERS.find(x => x.id === id);
+  const current = user ? user.p.mediaSavesMax : null;
+  const shown = Number(current) === -1 ? 'u' : (Number(current) > 0 ? String(current) : '');
+  const raw = prompt('Playlist / video save limit for this user?\n\n' +
+    'A number = that many saves\n"u" = unlimited\nblank = use the plan default', shown);
+  if (raw === null) return;
+  const text = raw.trim().toLowerCase();
+  let value = null;                                  // null = clear the override
+  if (text === 'u' || text === 'unlimited' || text === '-1') value = -1;
+  else if (text) {
+    const n = parseInt(text, 10);
+    if (isNaN(n) || n < 1) {
+      showToast('⚠️ Enter a number of 1 or more, "u" for unlimited, or leave it blank.', 'error');
+      return;
+    }
+    value = Math.min(5000, n);
+  }
+  await db.collection('users').doc(id).update({
+    'profile.mediaSavesMax': value === null
+      ? firebase.firestore.FieldValue.delete() : value
+  });
+  await adminLog('set_media_saves', id, { limit: value });
+  await loadAll(); render();
+  showToast(value === null ? '✅ Save limit reset to the plan default'
+    : value === -1 ? '✅ Unlimited playlist / video saves granted'
+      : '✅ Save limit set to ' + value);
 }
 async function giveTrial(id) {
   const days = parseInt(prompt('Trial kitne din ka dena hai?', '7')) || 0;

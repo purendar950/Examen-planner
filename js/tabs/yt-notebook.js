@@ -470,6 +470,15 @@ async function ytnbImportUrl() {
 
   try {
     const plId = (typeof ytExtractPlaylistId === 'function') ? ytExtractPlaylistId(url) : null;
+    const vidId = (typeof ytExtractVideoId === 'function') ? ytExtractVideoId(url) : null;
+    // The saved-course cap. This page imports through the Organiser's own upsert,
+    // so it has to respect the same limit — it used to bypass it entirely. Errors
+    // here belong in the page's own inline slot, not a toast.
+    if (typeof ezMediaSaveDenied === 'function' && (plId || vidId)) {
+      const lib = (typeof ytoLib === 'function') ? (ytoLib() || {}) : {};
+      const capMsg = ezMediaSaveDenied((plId && lib[plId]) || (vidId && lib['vid_' + vidId]));
+      if (capMsg) { done(); ytnbImportError(capMsg); return; }
+    }
     if (plId) {
       const [info, videos] = await Promise.all([
         ytFetchPlaylistInfo(plId).catch(() => null),
