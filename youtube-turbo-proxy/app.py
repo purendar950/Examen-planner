@@ -4639,7 +4639,11 @@ _TOPIC_STOP = frozenset((
     "the", "a", "an", "of", "and", "or", "in", "on", "for", "to", "with", "its",
     "is", "are", "was", "were", "by", "at", "from", "as", "that", "this", "what",
     "how", "why", "part", "intro", "introduction", "basics", "overview", "about",
-    "aur", "mein", "hai", "kya", "kaise", "wala", "wale", "wali", "aap", "yeh"))
+    "aur", "mein", "hai", "kya", "kaise", "wala", "wale", "wali", "aap", "yeh",
+    # Hindi grammatical particles common in Hindi-English lecture headings
+    "ke", "ka", "ki", "ko", "se", "pe", "par", "mein", "hain",
+    "karna", "kar", "ye", "woh", "sab", "bhi", "bahut", "zyada", "sabse",
+    "kaun", "kis", "kisi", "apna", "apne", "apni", "uska", "uske", "uski"))
 # Words that name the LECTURE rather than the topic. These were the loudest false
 # signal on the courses this is actually used for: in a monthly current-affairs
 # playlist, "National Awards 2026", "Awards and Honours" and "April 2026 Awards"
@@ -4656,11 +4660,11 @@ _TOPIC_NOISE = frozenset((
     "series", "batch", "pdf", "full", "complete", "detailed", "explained",
     "compilation", "roundup", "update", "updates", "new", "news",
     "types", "type", "definition", "meaning", "concept", "concepts", "key",
-    "main", "summary", "analysis", "overview", "introduction", "basics",
+    "main", "summary", "analysis",
     "basic", "fundamental", "fundamentals", "note", "notes", "point",
-    "point", "remember", "must", "one", "shot", "crash", "quick",
+    "remember", "must", "one", "shot", "crash", "quick",
     "deep", "dive", "guide", "study", "material", "topic", "topics",
-    "revision", "revised", "practice", "discus", "discussed", "covered",
+    "revised", "practice", "discussed", "covered",
     "understand", "understanding", "learn", "learned", "know", "knowing"
     ))
 # A four-digit year says WHEN a lecture was recorded, never what it teaches. Other
@@ -4704,6 +4708,38 @@ def _split_note_sections(md):
     return out
 
 
+# Adjective forms that name the same entity as their noun.  In Indian exam
+# content, "Indian History" and "History of India" are the same topic, but
+# the plural-aware stemmer turns neither into the other: "india" != "indian".
+# This map is applied AFTER _topic_stem so both sides resolve to the noun.
+_TOPIC_NORM = {
+    "indian": "india",
+    "american": "america",
+    "australian": "australia",
+    "european": "europe",
+    "african": "africa",
+    "asian": "asia",
+    "russian": "russia",
+    "chinese": "china",
+    "japanese": "japan",
+    "british": "britain",
+    "french": "france",
+    "german": "germany",
+    "global": "world",
+    "international": "world",
+    "national": "nation",
+    "regional": "region",
+    "constitutional": "constitution",
+    "geographical": "geography",
+    "historical": "history",
+    "political": "politics",
+    "economic": "economy",
+    "scientific": "science",
+    "technological": "technology",
+    "environmental": "environment",
+}
+
+
 def _topic_stem(word):
     """Fold the plural forms that made one topic look like two.
 
@@ -4731,6 +4767,8 @@ def _topic_tokens(heading):
     text = re.sub(r"[^0-9a-z\u0900-\u097f]+", " ", text)
     words = {_topic_stem(w) for w in text.split()
              if len(w) > 2 and w not in _TOPIC_STOP}
+    # Normalise adjective forms ("indian" -> "india") before the noise filter.
+    words = {_TOPIC_NORM.get(w, w) for w in words}
     core = {w for w in words
             if w not in _TOPIC_NOISE and not _TOPIC_YEAR.match(w)}
     return core or words
