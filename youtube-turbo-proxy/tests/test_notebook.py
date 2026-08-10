@@ -10,6 +10,7 @@ import concurrent.futures
 import hashlib
 import io
 import logging
+import math
 import os
 import re
 import sys
@@ -45,6 +46,7 @@ def load_bundle():
     ns = {
         "os": os,
         "re": re,
+        "math": math,
         "hashlib": hashlib,
         "threading": threading,
         "time": time,
@@ -142,14 +144,85 @@ check("matching persistence repairs the route-agnostic memory entry",
 
 print("== deterministic topic grouping ==")
 cluster = bundle["_cluster_bundle_sections"]
+
+
+def group(headings, labels=None):
+    """Cluster a list of headings, one per lecture unless labels say otherwise."""
+    labels = labels or list(range(len(headings)))
+    sources = [{"heading": h, "body": "- fact [0:1%d]" % i, "label": "V%d" % (labels[i] + 1),
+                "video_id": "v%d" % labels[i], "lecture": "L%d" % labels[i],
+                "video_index": labels[i], "order": i}
+               for i, h in enumerate(headings)]
+    return cluster(sources)
+
+
+def grouped_labels(headings, labels=None):
+    return sorted(tuple(sorted({s["label"] for s in c["sources"]}))
+                  for c in group(headings, labels))
+
+
 sources = [
-    {"heading": "Indus Valley Civilisation", "body": "A", "video_index": 0, "order": 0},
-    {"heading": "Indus Valley", "body": "B", "video_index": 1, "order": 0},
-    {"heading": "Vedic Period", "body": "C", "video_index": 1, "order": 1},
+    {"heading": "Indus Valley Civilisation", "body": "A", "label": "V1",
+     "video_index": 0, "order": 0},
+    {"heading": "Indus Valley", "body": "B", "label": "V2", "video_index": 1, "order": 0},
+    {"heading": "Vedic Period", "body": "C", "label": "V2", "video_index": 1, "order": 1},
 ]
 clusters = cluster(sources)
 check("overlapping headings merge into one topic", len(clusters) == 2, clusters)
 check("shared topic retains both lecture sources", len(clusters[0]["sources"]) == 2, clusters[0])
+
+# The heading a lecture gives a topic carries the month, the series name and a
+# leading timestamp. All three used to dominate the token set, so the same topic
+# taught every month was filed as a separate section every month — which is the
+# whole promise of the merge shape failing.
+check("a leading timestamp is not part of the topic",
+      len(group(["3:45 Awards and Honours", "12:07 Awards and Honours"])) == 1)
+check("the month a lecture covers is not part of the topic",
+      len(group(["April 2026 Important Days", "May 2026 Important Days"])) == 1)
+check("series and course words are not part of the topic",
+      len(group(["Top 100 Current Affairs Sports News", "Monthly Sports News"])) == 1)
+check("a topic taught in three months becomes one section",
+      len(group(["National Awards 2026", "Awards and Honours", "Awards"])) == 1)
+
+# Plurals shared NO token at all before, so no threshold could have grouped them.
+check("singular and plural headings are the same topic",
+      len(group(["Books and Authors", "Book and Author"])) == 1)
+check("an -ies plural folds too", len(group(["Government Policies", "Government Policy"])) == 1)
+
+# A heading fully contained in a longer one is the commonest way two lectures name
+# one topic, and it is exactly what a Jaccard-only measure punished.
+check("a shorter heading inside a longer one is one topic",
+      len(group(["Sports", "Sports and Games Roundup"])) == 1)
+
+# The old scan unioned each cluster's tokens as it absorbed members, so a topic
+# got HARDER to match the more lectures taught it, and the first cluster to match
+# won regardless of order.
+check("grouping does not depend on the order sections are visited in",
+      grouped_labels(["Sports News", "Sports and Games", "Sport"])
+      == grouped_labels(["Sport", "Sports and Games", "Sports News"]))
+check("a topic does not get harder to match as more lectures teach it",
+      len(group(["Awards", "Awards and Honours", "National Awards",
+                 "Awards and Prizes", "Award"])) == 1)
+
+# A false merge is worse than a missed one: it files unrelated facts under one
+# heading and then instructs the model to fold them into each other.
+check("sharing one common word is not enough to merge",
+      len(group(["Indian Railways", "Indian Economy"])) == 2)
+check("a shared qualifier does not merge unrelated topics",
+      len(group(["National Parks and Sanctuaries", "National Awards 2026"])) == 2)
+check("numbered items stay distinct topics",
+      len(group(["Article 370", "Article 35A"])) == 2)
+check("headings with nothing in common stay apart",
+      len(group(["Sports News", "Union Budget", "Space Missions"])) == 3)
+
+# One lecture can head the same topic twice. Counting sections as lectures made the
+# notebook claim a topic was "taught in 3 lectures" when it was taught in two.
+twice = group(["Awards", "Awards and Honours", "Awards"], labels=[0, 1, 1])
+check("a repeated heading in one lecture still groups", len(twice) == 1, twice)
+check("the lecture count is distinct lectures, not sections",
+      twice[0]["lectures"] == 2 and len(twice[0]["sources"]) == 3, twice[0])
+check("sources are ordered by teaching order inside a topic",
+      [s["video_index"] for s in twice[0]["sources"]] == [0, 1, 1], twice[0]["sources"])
 
 
 def notes_fixture():
