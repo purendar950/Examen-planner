@@ -314,6 +314,59 @@ merged = run_merge(valid)
 check("one valid merged section is accepted", "Combined fact" in merged, merged)
 check("valid output replaces source duplication", "First fact" not in merged and "Second fact" not in merged, merged)
 
+print("== zero data loss: truncated content is preserved ==")
+# Simulate a source that exceeds the excerpt budget.  The merge should
+# succeed (AI output is valid) but the truncated tail must be appended.
+
+def run_merge_with_budget(stream, budget_per_source, notes_data=None):
+    """Run merge with a controlled per-source char limit."""
+    bundle["_stream_notes_part"] = stream
+    bundle["_bundle_excerpt_budget"] = lambda ai, n, sample: budget_per_source
+    ns_notes = notes_data or notes_fixture()
+    job = {"id": "job", "out_lang": "English", "ai": {},
+           "cancel_event": threading.Event(), "content": ""}
+    bundle["_bundle_merge_stage"](job, ns_notes)
+    return job["content"]
+
+# Each source has 200+ chars but budget is only 50 — forces truncation.
+long_notes = [
+    {"label": "V1", "video_id": "aaaaaaaaaaa", "title": "Lecture one",
+     "content": "## Gravity\n\n- First fact about gravity [0:10]\n"
+                "- Second fact about gravity [0:20]\n"
+                "- Third fact about gravity [0:30]"},
+    {"label": "V2", "video_id": "bbbbbbbbbbb", "title": "Lecture two",
+     "content": "## Gravity\n\n- Unique fact from video two [0:15]\n"
+                "- Another unique fact from video two [0:25]"},
+]
+
+
+def merge_with_overflow(*args, **kwargs):
+    yield "## Gravity\n\n- Combined fact [V1 0:10] [V2 0:15]"
+
+overflow_out = run_merge_with_budget(merge_with_overflow, 50, long_notes)
+check("truncated content is appended after merge",
+      "Third fact about gravity" in overflow_out, overflow_out)
+check("truncated content from second source is also appended",
+      "Another unique fact from video two" in overflow_out, overflow_out)
+check("the overflow block has a clear marker",
+      "beyond the merge excerpt limit" in overflow_out, overflow_out)
+
+# When truncation drops more than 50%, passthrough is used instead.
+very_long_notes = [
+    {"label": "V1", "video_id": "aaaaaaaaaaa", "title": "Lecture one",
+     "content": "## Gravity\n\n" + "- Fact A [0:10]\n" * 40},
+    {"label": "V2", "video_id": "bbbbbbbbbbb", "title": "Lecture two",
+     "content": "## Gravity\n\n" + "- Fact B [0:20]\n" * 40},
+]
+
+passthrough_out = run_merge_with_budget(merge_with_overflow, 30, very_long_notes)
+check("severe truncation falls back to passthrough",
+      "Fact A" in passthrough_out and "Fact B" in passthrough_out, passthrough_out)
+check("passthrough fallback keeps all 40 facts from V1",
+      passthrough_out.count("Fact A") == 40, passthrough_out.count("Fact A"))
+check("passthrough fallback keeps all 40 facts from V2",
+      passthrough_out.count("Fact B") == 40, passthrough_out.count("Fact B"))
+
 print("== passthrough fallback organisation ==")
 passthrough = bundle["_bundle_passthrough_section"]
 # Single source: plain section with citation.
