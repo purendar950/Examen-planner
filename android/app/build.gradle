@@ -58,12 +58,12 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
+        buildConfigField "boolean", "DEBUG", "true"
     }
 
     buildTypes {
         debug {
             debuggable true
-            buildConfigField "boolean", "DEBUG", "true"
         }
         release {
             minifyEnabled false
