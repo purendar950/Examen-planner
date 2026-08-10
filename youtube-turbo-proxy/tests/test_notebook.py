@@ -6,6 +6,7 @@ so they need no Flask server, Firebase project, YouTube access, or AI key.
 Run with: python3 youtube-turbo-proxy/tests/test_notebook.py
 """
 
+import concurrent.futures
 import hashlib
 import io
 import logging
@@ -202,48 +203,285 @@ merged = run_merge(valid)
 check("one valid merged section is accepted", "Combined fact" in merged, merged)
 check("valid output replaces source duplication", "First fact" not in merged and "Second fact" not in merged, merged)
 
+print("== progress reporting ==")
+# The bar needs a number that keeps moving through the topic-merge pass, which is
+# the longest part of a merged notebook and used to have no signal at all.
+pct = bundle["_bundle_progress_pct"]
+merge_job = {"shape": "merge", "phase": "lectures",
+             "items": [{"state": "ready"}, {"state": "ready"}, {"state": "queued"}]}
+check("a lecture in flight moves the bar before it finishes",
+      pct({"shape": "merge", "phase": "lectures",
+           "items": [{"state": "processing"}, {"state": "queued"}]})
+      > pct({"shape": "merge", "phase": "lectures",
+             "items": [{"state": "queued"}, {"state": "queued"}]}))
+lectures_done = pct({"shape": "merge", "phase": "lectures",
+                     "items": [{"state": "ready"}, {"state": "ready"}]})
+check("a merged notebook is not near-complete when its lectures are",
+      lectures_done < 75, lectures_done)
+check("a compiled notebook IS near-complete when its lectures are",
+      pct({"shape": "compile", "phase": "lectures",
+           "items": [{"state": "ready"}, {"state": "ready"}]}) > 90)
+half_merged = pct({"shape": "merge", "phase": "merging", "merge_total": 10, "merge_done": 5,
+                   "items": [{"state": "ready"}, {"state": "ready"}]})
+check("topics written drive the bar during the merge", half_merged > lectures_done, half_merged)
+check("an unfinished notebook never reports 100%", half_merged < 100, half_merged)
+check("a completed notebook reports 100%",
+      pct({"shape": "merge", "phase": "done", "status": "completed", "items": []}) == 100)
+# A late item update recomputes a LOWER number than the bar already showed. It
+# must be ignored: a bar that goes backwards reads as a bug.
+regressing = {"shape": "merge", "phase": "merging", "merge_total": 10, "merge_done": 5,
+              "progress": 90, "items": [{"state": "ready"}]}
+check("progress can never move backwards",
+      bundle["_bundle_recalc_progress"](regressing) == 90, regressing)
+check("progress still rises when the real number overtakes it",
+      bundle["_bundle_recalc_progress"](
+          dict(regressing, merge_done=10, progress=90)) > 90)
+
+print("== live preview channel ==")
+# Partial text may only ever appear in the replaceable preview, never in the
+# append-only content the browser replays from a byte offset.
+preview_job = {"preview": None, "preview_owner": None, "preview_at": 0.0}
+check("the earliest lecture still writing owns the preview",
+      bundle["_bundle_claim_preview"](preview_job, 1))
+check("a later lecture cannot steal the preview slot",
+      not bundle["_bundle_claim_preview"](preview_job, 3))
+check("an earlier lecture takes the preview over",
+      bundle["_bundle_claim_preview"](preview_job, 0))
+bundle["_bundle_set_preview"](preview_job, 0, "V1", "Lecture one", "x" * 5000, force=True)
+check("a preview is capped rather than sending the whole document",
+      len(preview_job["preview"]["text"]) <= bundle["BUNDLE_PREVIEW_CHARS"],
+      len(preview_job["preview"]["text"]))
+check("a clipped preview says so", preview_job["preview"]["clipped"])
+check("a preview reports the true length written", preview_job["preview"]["chars"] == 5000)
+check("a non-owner cannot write the preview",
+      not bundle["_bundle_set_preview"](preview_job, 4, "V5", "Lecture five", "nope", force=True))
+check("the preview is throttled between updates",
+      not bundle["_bundle_set_preview"](preview_job, 0, "V1", "Lecture one", "again"))
+bundle["_bundle_release_preview"](preview_job, 0)
+check("releasing the slot clears the panel", preview_job["preview"] is None)
+check("a released slot is free for any lecture",
+      bundle["_bundle_claim_preview"](preview_job, 5))
+
 print("== force regeneration ==")
-map_ns = {
-    "_study_job_stop_requested": lambda job: False,
-    "_bundle_update_item": lambda job, vid, state, detail="", source="": next(
-        item.update({"state": state, "detail": detail, "source": source or item.get("source", "")})
-        for item in job["items"] if item["video_id"] == vid),
-    "_study_text_cache_keys": lambda vid, mode, lang, style: ("cache", "doc"),
-    "_bundle_note_cache_matches": matches,
-    "_bundle_extract": lambda vid: ({"segments": [{"start": 10, "text": "spoken"}],
-                                      "text": "spoken", "title": "Lecture",
-                                      "chosen_lang": "en", "segment_count": 1}, None),
-    "_timestamped_transcript": lambda segments: "[0:10] spoken",
-    "_stream_study_text": lambda *args, **kwargs: iter(["## Topic\n\n- Fresh notes [0:10]"]),
-    "_study_jobs_lock": threading.RLock(),
-    "_study_lock": threading.Lock(),
-    "_study_cache": {},
-    "time": time,
-    "_ai_display_model": lambda ai: ai["model"],
-    "_ai_display_provider": lambda ai: ai["provider"],
-    "_bundle_emit": lambda job, text: job.__setitem__("content", job.get("content", "") + text),
-    "_study_put": lambda doc, data: True,
-    "_ai_key_count": lambda ai: 1,
-}
+
+
+def make_map_ns():
+    """Fresh namespace per map-stage scenario, so cache state cannot leak."""
+    emit_lock = threading.Lock()
+    lock = threading.RLock()
+
+    def emit(job, text):
+        if not text:
+            return
+        with emit_lock:
+            job["content"] = job.get("content", "") + text
+
+    def update_item(job, vid, state, detail="", source=""):
+        with lock:
+            for item in job["items"]:
+                if item["video_id"] == vid:
+                    item.update({"state": state, "detail": detail,
+                                 "source": source or item.get("source", "")})
+                    break
+
+    return {
+        "log": logging.getLogger("test.notebook"),
+        "concurrent": concurrent,
+        "threading": threading,
+        "STUDY_BUNDLE_LECTURE_WORKERS": 3,
+        "_study_job_stop_requested": lambda job: False,
+        "_bundle_update_item": update_item,
+        "_study_text_cache_keys": lambda vid, mode, lang, style: ("cache-" + vid, "doc-" + vid),
+        "_bundle_note_cache_matches": matches,
+        "_bundle_extract": lambda vid: ({"segments": [{"start": 10, "text": "spoken"}],
+                                         "text": "spoken", "title": "Lecture " + vid,
+                                         "chosen_lang": "en", "segment_count": 1}, None),
+        "_timestamped_transcript": lambda segments: "[0:10] spoken",
+        "_stream_study_text": lambda *args, **kwargs: iter(["## Topic\n\n- Fresh notes [0:10]"]),
+        "_study_jobs_lock": lock,
+        "_study_lock": threading.Lock(),
+        "_study_cache": {},
+        "time": time,
+        "_ai_display_model": lambda ai: ai["model"],
+        "_ai_display_provider": lambda ai: ai["provider"],
+        "_bundle_emit": emit,
+        "_bundle_lecture_card": lambda item: "[LECTURE: %s | %s | %s]\n\n" % (
+            item.get("label"), item.get("video_id"), item.get("title")),
+        "_study_put": lambda doc, data: True,
+        "_ai_key_count": lambda ai: 1,
+        # Progress/preview plumbing is exercised on its own above; the map stage
+        # only has to keep calling it correctly.
+        "_bundle_set_phase": lambda *args, **kwargs: None,
+        "_bundle_clear_preview": lambda *args, **kwargs: None,
+        "_bundle_claim_preview": lambda *args, **kwargs: True,
+        "_bundle_release_preview": lambda *args, **kwargs: None,
+        "_bundle_preview_due": lambda *args, **kwargs: False,
+        "_bundle_set_preview": lambda *args, **kwargs: False,
+        "_bundle_note_progress": lambda *args, **kwargs: None,
+    }
+
+
+def load_map(ns):
+    exec(compile(section("def _bundle_map_stage(job):", "def _run_study_bundle_job("),
+                 "app.py:notebook-map", "exec"), ns)
+    return ns
+
+
+def map_job(shape, ids, force=True):
+    return {
+        "shape": shape, "force": force, "mode": "notes", "out_lang": "English", "style": "",
+        "cache_provider": "gemini", "cache_model": "model-1",
+        "ai": {"provider": "gemini", "model": "model-1"}, "cancel_event": threading.Event(),
+        "content": "", "items": [{"video_id": vid, "label": "V%d" % (i + 1), "title": "old"}
+                                 for i, vid in enumerate(ids)],
+    }
+
+
+map_ns = load_map(make_map_ns())
 cache_calls = []
 map_ns["_study_job_cached_result"] = lambda *args: cache_calls.append(args) or {
     "content": "## Topic\n\n- Stale notes", "provider": "gemini", "model": "model-1"
 }
-exec(compile(section("def _bundle_map_stage(job):", "def _run_study_bundle_job("),
-             "app.py:notebook-map", "exec"), map_ns)
-job = {
-    "shape": "merge", "force": True, "mode": "notes", "out_lang": "English", "style": "",
-    "cache_provider": "gemini", "cache_model": "model-1",
-    "ai": {"provider": "gemini", "model": "model-1"}, "cancel_event": threading.Event(),
-    "content": "", "items": [{"video_id": "aaaaaaaaaaa", "label": "V1", "title": "old"}],
-}
+job = map_job("merge", ["aaaaaaaaaaa"])
 ready = map_ns["_bundle_map_stage"](job)
 check("force regeneration does not read the lecture-note cache", not cache_calls, cache_calls)
 check("force regeneration produces fresh lecture notes", ready and "Fresh notes" in ready[0]["content"], ready)
 check("force regeneration writes stable route metadata",
-      map_ns["_study_cache"]["cache"]["data"].get("cache_model") == "model-1")
+      map_ns["_study_cache"]["cache-aaaaaaaaaaa"]["data"].get("cache_model") == "model-1")
 check("force regeneration refreshes the route-agnostic memory body",
-      "Fresh notes" in map_ns["_study_cache"]["cache"]["data"].get("content", ""))
+      "Fresh notes" in map_ns["_study_cache"]["cache-aaaaaaaaaaa"]["data"].get("content", ""))
+
+print("== concurrent lectures, ordered output ==")
+# Lectures are read several at a time now. The selection order still has to
+# survive that, because `compile` is read top to bottom and `merge` places each
+# topic where it was first taught.
+ids = ["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc", "ddddddddddd"]
+concurrent_ns = load_map(make_map_ns())
+overlap = {"peak": 0, "live": 0}
+overlap_lock = threading.Lock()
+
+
+def slow_stream(*args, **kwargs):
+    with overlap_lock:
+        overlap["live"] += 1
+        overlap["peak"] = max(overlap["peak"], overlap["live"])
+    time.sleep(0.05)
+    try:
+        yield "## Topic\n\n- Fresh notes [0:10]"
+    finally:
+        with overlap_lock:
+            overlap["live"] -= 1
+
+
+concurrent_ns["_stream_study_text"] = slow_stream
+merge_notes = concurrent_ns["_bundle_map_stage"](map_job("merge", ids))
+check("several lectures are genuinely read at the same time", overlap["peak"] > 1, overlap)
+check("every lecture still makes it into the notebook", len(merge_notes) == len(ids), merge_notes)
+check("merged lectures are returned in the selected order",
+      [n["label"] for n in merge_notes] == ["V1", "V2", "V3", "V4"],
+      [n["label"] for n in merge_notes])
+
+compile_ns = load_map(make_map_ns())
+# Finish the lectures deliberately out of order: the LAST one returns first.
+order_lock = threading.Lock()
+finish_order = []
+
+
+def reversed_stream(mode, transcript, out_lang, ai, head, style="", cancel_event=None):
+    delay = {"Lecture " + ids[0]: 0.20, "Lecture " + ids[1]: 0.14,
+             "Lecture " + ids[2]: 0.07, "Lecture " + ids[3]: 0.0}
+    title = head.replace("Video title: ", "").strip()
+    time.sleep(delay.get(title, 0))
+    with order_lock:
+        finish_order.append(title)
+    yield "notes for " + title
+
+
+compile_ns["_stream_study_text"] = reversed_stream
+compile_job = map_job("compile", ids)
+compile_notes = compile_ns["_bundle_map_stage"](compile_job)
+check("lectures really did finish out of order",
+      finish_order and finish_order[0] != "Lecture " + ids[0], finish_order)
+check("a compiled notebook is still published in lecture order",
+      [compile_job["content"].index("notes for Lecture " + vid) for vid in ids]
+      == sorted(compile_job["content"].index("notes for Lecture " + vid) for vid in ids),
+      compile_job["content"])
+check("each lecture is still introduced by its own card",
+      all(("[LECTURE: V%d | %s" % (i + 1, vid)) in compile_job["content"]
+          for i, vid in enumerate(ids)), compile_job["content"])
+check("no lecture text is lost by the ordered emitter",
+      all(("notes for Lecture " + vid) in compile_job["content"] for vid in ids))
+check("compiled lectures are returned in the selected order",
+      [n["label"] for n in compile_notes] == ["V1", "V2", "V3", "V4"],
+      [n["label"] for n in compile_notes])
+
+print("== ordered emitter under contention ==")
+# The emitter is the subtlest new code: many threads writing at once into one
+# append-only string that must still read in lecture order. Hammer it directly.
+emitter_ns = load_map(make_map_ns())
+LECTURES, CHUNKS = 8, 25
+emit_job = {"content": ""}
+emitter = emitter_ns["_BundleOrderedEmitter"](emit_job, LECTURES)
+barrier = threading.Barrier(LECTURES)
+
+
+def writer(index):
+    barrier.wait()                      # maximise overlap
+    for chunk in range(CHUNKS):
+        emitter.write(index, "L%d-%d " % (index, chunk))
+        if chunk % 7 == 0:
+            time.sleep(0)               # yield, to shuffle the interleaving
+    emitter.finish(index)
+
+
+threads = [threading.Thread(target=writer, args=(i,)) for i in range(LECTURES)]
+# Start the LAST lecture first, so the frontier is never the thread that is ready.
+for thread in reversed(threads):
+    thread.start()
+for thread in threads:
+    thread.join()
+emitter.drain()
+tokens = emit_job["content"].split()
+check("every chunk from every lecture is published exactly once",
+      len(tokens) == LECTURES * CHUNKS, len(tokens))
+lecture_seq = [int(token.split("-")[0][1:]) for token in tokens]
+check("lectures appear strictly in order, never interleaved",
+      lecture_seq == sorted(lecture_seq), lecture_seq[:40])
+check("each lecture's own chunks keep their order",
+      all([int(t.split("-")[1]) for t in tokens if t.startswith("L%d-" % i)]
+          == list(range(CHUNKS)) for i in range(LECTURES)))
+
+print("== one bad lecture cannot fail a notebook ==")
+partial_ns = load_map(make_map_ns())
+partial_ns["_bundle_extract"] = lambda vid: (
+    (None, RuntimeError("captions unavailable")) if vid == ids[1]
+    else ({"segments": [{"start": 10, "text": "spoken"}], "text": "spoken",
+           "title": "Lecture " + vid, "chosen_lang": "en", "segment_count": 1}, None))
+partial_ns["_tutor_prepare_bot_error"] = lambda exc: False
+partial_job = map_job("merge", ids)
+partial_notes = partial_ns["_bundle_map_stage"](partial_job)
+check("a lecture that cannot be read is skipped, not fatal",
+      [n["label"] for n in partial_notes] == ["V1", "V3", "V4"],
+      [n["label"] for n in partial_notes])
+check("the skipped lecture reports its own reason",
+      next(i["state"] for i in partial_job["items"] if i["video_id"] == ids[1]) == "extract_failed",
+      partial_job["items"])
+
+crash_ns = load_map(make_map_ns())
+
+
+def crashing_stream(mode, transcript, out_lang, ai, head, style="", cancel_event=None):
+    if ids[2] in head:
+        raise RuntimeError("provider exploded")
+    yield "notes"
+
+
+crash_ns["_stream_study_text"] = crashing_stream
+crash_job = map_job("merge", ids)
+crash_notes = crash_ns["_bundle_map_stage"](crash_job)
+check("an unexpected failure in one lecture leaves the rest intact",
+      [n["label"] for n in crash_notes] == ["V1", "V2", "V4"],
+      [n["label"] for n in crash_notes])
 
 print("== fresh Course Library authorization ==")
 class FakeSnapshot:

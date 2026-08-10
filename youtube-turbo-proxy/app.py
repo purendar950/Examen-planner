@@ -34,6 +34,7 @@ import hmac
 import threading
 import logging
 import secrets
+import concurrent.futures
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -1191,7 +1192,18 @@ def _study_job_public(job):
                     "courseId": job.get("course_id") or "",
                     "degraded": job.get("degraded") or "",
                     "items": items, "counts": _bundle_counts(items),
-                    "total": len(items)})
+                    "total": len(items),
+                    # What the page draws its determinate progress bar from.
+                    # `phase` names the stage, `progress` is a monotonic 0-100,
+                    # and `preview` is the paragraph being written this second
+                    # (see the preview channel notes above _bundle_progress_pct).
+                    "phase": job.get("phase") or (
+                        "done" if job.get("status") == "completed" else "queued"),
+                    "progress": int(job.get("progress")
+                                    or (100 if job.get("status") == "completed" else 0)),
+                    "mergeDone": int(job.get("merge_done") or 0),
+                    "mergeTotal": int(job.get("merge_total") or 0),
+                    "preview": job.get("preview") or None})
     return out
 
 
@@ -1209,6 +1221,9 @@ def _study_job_persist(job, force=False):
             return False
         job["last_persist_at"] = now
         doc = _study_job_public(job)
+        # The live preview is a transient view of an AI stream that is still open.
+        # It has no meaning in a checkpoint and would only bloat every write.
+        doc.pop("preview", None)
         # Owner is persisted for authorization after a proxy restart but is not
         # exposed in the browser response shape.
         doc["_owner_uid"] = job.get("owner_uid", "")
@@ -1267,6 +1282,13 @@ def _get_study_job(job_id):
             "course_id": saved.get("courseId") or "",
             "degraded": saved.get("degraded") or "",
             "items": [dict(i) for i in (saved.get("items") or []) if isinstance(i, dict)],
+            # Restore the bar too, so a reconnect shows how far the notebook got
+            # rather than resetting to 0% next to a checklist that says otherwise.
+            "phase": "done" if status == "completed" else (saved.get("phase") or "queued"),
+            "progress": 100 if status == "completed" else int(saved.get("progress") or 0),
+            "merge_done": int(saved.get("mergeDone") or 0),
+            "merge_total": int(saved.get("mergeTotal") or 0),
+            "preview": None, "preview_owner": None, "preview_at": 0.0,
         })
     with _study_jobs_lock:
         return _study_jobs.setdefault(job_id, job)
@@ -3838,6 +3860,10 @@ def _set_study_job_terminal(job, status, error=""):
             return
         job["status"] = status
         job["error"] = error or ""
+        # A terminated job has nothing being written any more. Leaving the live
+        # preview behind would keep a "writing…" panel on screen for good.
+        job["preview"] = None
+        job["preview_owner"] = None
         job["updated_at"] = int(time.time())
     _study_job_persist(job, force=True)
 
@@ -4134,13 +4160,26 @@ STUDY_BUNDLE_MAX_VIDEOS = max(2, min(40, int(os.environ.get("STUDY_BUNDLE_MAX_VI
 # so they can never starve single-video generation or the control endpoints.
 _study_bundle_worker_sem = threading.Semaphore(
     max(1, int(os.environ.get("STUDY_BUNDLE_WORKERS", "2"))))
+# How many lectures ONE notebook reads at the same time. Lectures are entirely
+# independent — own transcript download, own AI stream — so reading them strictly
+# one after another made a notebook cost (lectures x per-lecture time) by
+# construction, which is the whole reason a ten-lecture notebook took so long.
+# Kept small on purpose: every slot is a thread inside a Gunicorn worker holding
+# an AI stream open, and `_ai_pace` still enforces the provider's
+# tokens-per-minute ceiling across all of them, so raising this past a handful
+# buys queueing rather than speed.
+STUDY_BUNDLE_LECTURE_WORKERS = max(1, min(6, int(
+    os.environ.get("STUDY_BUNDLE_LECTURE_WORKERS", "3"))))
 _BUNDLE_SHAPES = ("merge", "compile")
 BUNDLE_MERGE_CAP = int(os.environ.get("BUNDLE_MERGE_MAX_TOKENS", "3000"))
 # Ceiling on merge-stage AI calls. Only topics taught in MORE THAN ONE lecture
 # are sent to the model; single-lecture topics are passed through verbatim. This
 # cap is the backstop for a pathological selection.
 BUNDLE_MERGE_MAX_CALLS = int(os.environ.get("BUNDLE_MERGE_MAX_CALLS", "45"))
-_BUNDLE_ITEM_FIELDS = ("video_id", "title", "label", "state", "source", "detail")
+# `chars` is live: how much of this lecture has been written so far. It lets a
+# row say "writing… 1.2k chars" instead of sitting on "reading captions…" for
+# minutes, which is what made a working notebook look like a stuck one.
+_BUNDLE_ITEM_FIELDS = ("video_id", "title", "label", "state", "source", "detail", "chars")
 
 
 def _bundle_video_cap(limits=None):
@@ -4267,8 +4306,12 @@ def _bundle_update_item(job, video_id, state, detail="", source=""):
                 item["detail"] = str(detail or "")[:200]
                 if source:
                     item["source"] = source
+                if state != "processing":
+                    # A settled row reports its outcome, not a byte count.
+                    item.pop("chars", None)
                 break
         job["updated_at"] = int(time.time())
+    _bundle_recalc_progress(job)
     _study_job_persist(job, force=True)
 
 
@@ -4280,6 +4323,171 @@ def _bundle_emit(job, text):
         job["content"] += text
         job["updated_at"] = int(time.time())
     _study_job_persist(job)
+
+
+# ── live progress: a determinate bar, and the text being written right now ──
+#  Two deliberately SEPARATE channels, because they have opposite requirements:
+#
+#    job["content"]  is APPEND-ONLY. The browser replays it from a byte offset,
+#                    so nothing provisional may ever enter it and nothing may
+#                    ever be retracted from it. That property is what makes
+#                    refresh-resume exact, and it is not negotiable.
+#
+#    job["preview"]  is a REPLACEABLE snapshot of the paragraph being written
+#                    this second. It exists because "nothing is happening" was a
+#                    lie: while a MERGED notebook reads its lectures, `content`
+#                    is legitimately still empty (the text is being held for the
+#                    topic pass), and a merged section is only published once it
+#                    is complete and validated. Tokens were arriving the whole
+#                    time with nowhere to show them, so the page looked frozen
+#                    for minutes.
+#
+#  The preview is memory-only: never checkpointed, never part of a saved
+#  notebook, and it costs no Firestore write however fast tokens arrive.
+BUNDLE_PREVIEW_CHARS = max(200, int(os.environ.get("BUNDLE_PREVIEW_CHARS", "1600")))
+BUNDLE_PREVIEW_SEC = max(0.15, float(os.environ.get("BUNDLE_PREVIEW_SEC", "0.45")))
+# Named stages, so the bar can label itself instead of showing a bare number.
+_BUNDLE_PHASES = ("queued", "lectures", "merging", "assembling", "done")
+
+
+def _bundle_progress_pct(job):
+    """Determinate 0-100 for the page's progress bar.
+
+    TWO measured stages rather than one. Lectures are scored from item state, and
+    a lecture in flight counts as part-done so the bar still moves inside a single
+    long lecture. The merge is scored from topics written, and is given real
+    weight: there was previously no merge signal at all, so any bar built from
+    lecture counts alone would have read 100% for the longest part of the run —
+    which is exactly the impression this is meant to fix.
+    """
+    items = job.get("items") or []
+    total = len(items) or 1
+    settled = sum(1 for i in items
+                  if str((i or {}).get("state") or "queued") not in ("queued", "processing"))
+    running = sum(1 for i in items if (i or {}).get("state") == "processing")
+    lecture_frac = min(1.0, (settled + 0.45 * running) / float(total))
+    phase = job.get("phase") or "queued"
+    if job.get("status") == "completed" or phase == "done":
+        return 100
+    # A compiled notebook is essentially finished when its lectures are; a merged
+    # one still has the entire topic pass ahead of it.
+    lecture_span = 68.0 if job.get("shape") == "merge" else 94.0
+    pct = 3.0 + lecture_span * lecture_frac
+    if phase in ("merging", "assembling"):
+        merge_total = max(1, int(job.get("merge_total") or 0))
+        merge_done = max(0, min(merge_total, int(job.get("merge_done") or 0)))
+        pct = max(pct, 3.0 + lecture_span
+                  + (95.0 - 3.0 - lecture_span) * (merge_done / float(merge_total)))
+    if phase == "assembling":
+        pct = max(pct, 96.0)
+    return int(max(1, min(99, round(pct))))
+
+
+def _bundle_recalc_progress(job):
+    """Publish progress, never letting it move backwards.
+
+    A retried lecture or a late state change must not drop a bar that already read
+    60% back to 40%; a bar that goes backwards reads as a bug even when the
+    underlying number is defensible.
+    """
+    with _study_jobs_lock:
+        if job.get("status") == "completed":
+            job["progress"] = 100
+        else:
+            job["progress"] = max(int(job.get("progress") or 0), _bundle_progress_pct(job))
+        return job["progress"]
+
+
+def _bundle_set_phase(job, phase, merge_total=None):
+    """Name the stage the notebook is in, so the bar can be honest about it."""
+    with _study_jobs_lock:
+        job["phase"] = phase
+        if merge_total is not None:
+            job["merge_total"] = max(0, int(merge_total))
+            job["merge_done"] = 0
+        job["updated_at"] = int(time.time())
+    _bundle_recalc_progress(job)
+
+
+def _bundle_merge_step(job):
+    """One more topic written into the notebook."""
+    with _study_jobs_lock:
+        job["merge_done"] = int(job.get("merge_done") or 0) + 1
+        job["updated_at"] = int(time.time())
+    _bundle_recalc_progress(job)
+
+
+def _bundle_claim_preview(job, index):
+    """Hand the single preview slot to the EARLIEST lecture still being written.
+
+    Several lectures are generated at once now, and letting each of them push its
+    own tokens into one panel produced interleaved nonsense. The lowest index
+    wins, so the panel always reads as one continuous page.
+    """
+    with _study_jobs_lock:
+        owner = job.get("preview_owner")
+        if owner is not None and index > owner:
+            return False
+        if owner != index:
+            job["preview_owner"] = index
+            job["preview"] = None
+            job["preview_at"] = 0.0
+        return True
+
+
+def _bundle_release_preview(job, index):
+    with _study_jobs_lock:
+        if job.get("preview_owner") == index:
+            job["preview_owner"] = None
+            job["preview"] = None
+            job["preview_at"] = 0.0
+
+
+def _bundle_clear_preview(job):
+    with _study_jobs_lock:
+        job["preview_owner"] = None
+        job["preview"] = None
+        job["preview_at"] = 0.0
+
+
+def _bundle_preview_due(job, index):
+    """Cheap gate callers check BEFORE building a preview.
+
+    Joining a growing token buffer on every token would be quadratic, so the
+    throttle has to be testable without paying for the string first.
+    """
+    with _study_jobs_lock:
+        return (job.get("preview_owner") == index
+                and time.time() - float(job.get("preview_at") or 0.0) >= BUNDLE_PREVIEW_SEC)
+
+
+def _bundle_set_preview(job, index, label, title, text, force=False):
+    """Replace the live preview with the tail of `text`. Memory only."""
+    now = time.time()
+    with _study_jobs_lock:
+        if job.get("preview_owner") != index:
+            return False
+        if not force and now - float(job.get("preview_at") or 0.0) < BUNDLE_PREVIEW_SEC:
+            return False
+        job["preview_at"] = now
+        full = str(text or "")
+        tail = full[-BUNDLE_PREVIEW_CHARS:]
+        job["preview"] = {"label": str(label or ""), "title": str(title or "")[:180],
+                          "text": tail, "clipped": len(full) > len(tail),
+                          "chars": len(full)}
+        job["updated_at"] = int(time.time())
+        return True
+
+
+def _bundle_note_progress(job, video_id, chars):
+    """Live character count on one lecture's own row. Memory only, like the
+    preview: this ticks several times a second and must never become a write."""
+    with _study_jobs_lock:
+        for item in job.get("items") or []:
+            if item.get("video_id") == video_id:
+                item["chars"] = int(chars)
+                break
+        job["updated_at"] = int(time.time())
 
 
 def _bundle_lecture_card(item_or_note):
@@ -4476,26 +4684,36 @@ def _bundle_merge_stage(job, notes):
                 "heading": sec["heading"] or note["title"],
                 "body": sec["body"], "order": order})
     if not sources:
+        _bundle_set_phase(job, "merging", merge_total=len(notes) or 1)
         _bundle_emit(job, "> These lectures produced no topic headings to merge, "
                           "so they are compiled in order instead.\n\n")
         for note in notes:
             _bundle_emit(job, _bundle_lecture_card(note) + note["content"].strip() + "\n\n")
+            _bundle_merge_step(job)
         return
 
     clusters = _cluster_bundle_sections(sources)
     total_videos = len(notes)
     shared = [c for c in clusters if len(c["sources"]) > 1]
     budget_left = min(BUNDLE_MERGE_MAX_CALLS, len(shared))
+    # The bar finally has a real denominator for this stage. Every topic counts
+    # towards it, whether it needs a model call or is passed through, because from
+    # the reader's side both are one more section of their notebook.
+    _bundle_set_phase(job, "merging", merge_total=len(clusters))
+    _bundle_clear_preview(job)
+    _bundle_claim_preview(job, 0)
     sysmsg = _study_sys(job["out_lang"])
     tail = _lang_reminder(job["out_lang"])
     covered = []
     for cluster in clusters:
         if _study_job_stop_requested(job):
+            _bundle_release_preview(job, 0)
             return
         # Single-lecture topics keep the lecture's own wording: cheaper, and it
         # removes any chance of a model call losing content nothing else says.
         if len(cluster["sources"]) < 2 or budget_left <= 0:
             _bundle_emit(job, _bundle_passthrough_section(cluster))
+            _bundle_merge_step(job)
             continue
         budget_left -= 1
         sample = "\n".join(s["body"] for s in cluster["sources"])
@@ -4516,8 +4734,16 @@ def _bundle_merge_stage(job, notes):
             for piece in _stream_notes_part(sysmsg, user, job["ai"], BUNDLE_MERGE_CAP,
                                             cancel_event=job["cancel_event"]):
                 if _study_job_stop_requested(job):
+                    _bundle_release_preview(job, 0)
                     return
                 buf.append(piece)
+                # The section cannot be PUBLISHED until it is complete and
+                # validated — that guarantee is the reason this stage buffers at
+                # all — but the student can still watch it being written. The
+                # preview is a separate, replaceable channel, so showing it here
+                # cannot leak a half-finished section into the notebook.
+                if _bundle_preview_due(job, 0):
+                    _bundle_set_preview(job, 0, "", cluster["title"], "".join(buf))
             merge_ok = True
         except Exception as exc:  # noqa: BLE001
             log.warning("bundle %s merge call failed for %r: %s",
@@ -4542,6 +4768,8 @@ def _bundle_merge_stage(job, notes):
         else:
             _bundle_emit(job, written.rstrip() + "\n\n")
             covered.extend(_extract_note_headings(written))
+        _bundle_merge_step(job)
+    _bundle_release_preview(job, 0)
 
 
 def _bundle_extract(video_id):
@@ -4563,97 +4791,237 @@ def _bundle_extract(video_id):
 def _bundle_map_stage(job):
     """Per-lecture notes: shared cache first, generate only on a miss.
 
-    A lecture without captions is reported on its own item and skipped — one bad
+    Lectures are read CONCURRENTLY. They are completely independent of each other
+    — separate transcript download, separate AI stream, separate cache entry — so
+    doing them strictly one after another made a notebook cost
+    (lectures x per-lecture time) by construction. With continuation calls and
+    transcript condensing on top of that, a ten-lecture notebook was dozens of
+    round trips in a single queue, which is what made this feel broken rather than
+    slow.
+
+    Order is still honoured on the way out:
+      compile — publishes through an ordered emitter, so the reader still gets
+                V1, V2, V3 top to bottom, and still watches text arrive as it is
+                written (see _BundleOrderedEmitter).
+      merge   — reassembled into the selected order before the topic pass, which
+                is what makes a topic appear where it was first taught.
+
+    A lecture without captions is reported on its own row and skipped — one bad
     video in twelve must never fail the notebook.
     """
-    ready, compile_shape = [], job["shape"] == "compile"
-    for item in list(job.get("items") or []):
+    items = list(job.get("items") or [])
+    if not items:
+        return []
+    _bundle_set_phase(job, "lectures")
+    emitter = _BundleOrderedEmitter(job, len(items)) if job["shape"] == "compile" else None
+    workers = min(STUDY_BUNDLE_LECTURE_WORKERS, len(items))
+    # Written from several threads, but only ever one distinct key per thread, and
+    # dict item assignment is atomic. Read back only after the pool has drained.
+    results = {}
+
+    def read_lecture(index, item):
         if _study_job_stop_requested(job):
-            return ready
-        vid = item["video_id"]
-        _bundle_update_item(job, vid, "processing")
-        ckey, fs_id = _study_text_cache_keys(vid, job["mode"], job["out_lang"], job["style"])
-        saved = {} if job.get("force") else _bundle_cached_note_result(
-            ckey, fs_id, job.get("cache_provider"), job.get("cache_model"))
-        content = saved.get("content") or ""
-        title = saved.get("title") or item.get("title") or vid
-        source = "cached"
+            return
+        try:
+            note = _bundle_lecture_note(job, item, index, emitter)
+        except Exception as exc:  # noqa: BLE001
+            # One lecture blowing up is a lecture that gets left out, not a
+            # notebook that fails. Same contract as a missing caption track.
+            log.warning("bundle %s lecture %s failed: %s", job.get("id"),
+                        item.get("video_id"), exc)
+            _bundle_update_item(job, item["video_id"], "extract_failed",
+                                str(exc)[:200], "generated")
+            return
+        if note is not None:
+            results[index] = note
 
-        if not content:
-            transcript, err = _bundle_extract(vid)
-            if _study_job_stop_requested(job):
-                return ready
-            if err is not None:
-                state = "bot_gated" if _tutor_prepare_bot_error(err) else "extract_failed"
-                _bundle_update_item(job, vid, state, str(err), "captions")
-                continue
-            if not (transcript or {}).get("segments"):
-                _bundle_update_item(job, vid, "no_captions",
-                                    "YouTube has no manual or automatic captions for this video.",
-                                    "captions")
-                continue
-            title = transcript.get("title") or title
-            gen_text = _timestamped_transcript(transcript.get("segments")) or transcript.get("text") or ""
-            if not gen_text.strip():
-                _bundle_update_item(job, vid, "no_captions",
-                                    "The caption tracks held no usable spoken text.", "captions")
-                continue
-            with _study_jobs_lock:
-                item["title"] = title
-                job["model"] = _ai_display_model(job["ai"])
-                job["provider"] = _ai_display_provider(job["ai"])
-            if compile_shape:
-                _bundle_emit(job, _bundle_lecture_card(item))
-            pieces = []
-            for piece in _stream_study_text(job["mode"], gen_text, job["out_lang"],
-                                            job["ai"], "Video title: %s\n\n" % title,
-                                            job["style"], cancel_event=job["cancel_event"]):
-                if _study_job_stop_requested(job):
-                    return ready
-                pieces.append(piece)
-                if compile_shape:
-                    _bundle_emit(job, piece)      # compile streams each lecture live
-            content = "".join(pieces)
-            source = "generated"
-            if not content.strip():
-                _bundle_update_item(job, vid, "extract_failed",
-                                    "The AI returned an empty response for this lecture.", source)
-                continue
-            if compile_shape:
-                # Streamed notes rarely end with a newline, and without this the
-                # next lecture's card would be glued onto the last bullet.
-                _bundle_emit(job, "\n\n")
-            # This is byte-for-byte what the Notes tab would have produced for
-            # this video, so save it under the ordinary single-video key: the
-            # notebook warms every lecture's own notes as a side effect.
-            note_data = {
-                "id": vid, "title": title, "mode": job["mode"],
-                "style": job["style"] or "topic", "out_lang": job["out_lang"],
-                "model": _ai_display_model(job["ai"]), "format": "markdown",
-                "num_questions": None, "provider": _ai_display_provider(job["ai"]),
-                "cache_provider": job.get("cache_provider") or "",
-                "cache_model": job.get("cache_model") or "",
-                "keys_available": _ai_key_count(job["ai"]),
-                "transcript_lang": transcript.get("chosen_lang"),
-                "segment_count": transcript.get("segment_count"),
-                "cached": False, "content": content}
-            _study_put(fs_id, note_data)
-            # The canonical key is route-agnostic, so the newly generated copy
-            # must replace process memory as well as persistence. Otherwise an
-            # older same-route value can be resurrected by the next rebuild.
-            with _study_lock:
-                _study_cache[ckey] = {"ts": time.time(), "data": note_data}
-        elif compile_shape:
-            with _study_jobs_lock:
-                item["title"] = title
-            _bundle_emit(job, _bundle_lecture_card(item) + content.strip() + "\n\n")
+    if workers <= 1:
+        for index, item in enumerate(items):
+            read_lecture(index, item)
+            if emitter is not None:
+                emitter.finish(index)
+    else:
+        with concurrent.futures.ThreadPoolExecutor(
+                max_workers=workers, thread_name_prefix="bundle-lecture") as pool:
+            pending = {pool.submit(read_lecture, i, item): i
+                       for i, item in enumerate(items)}
+            for future in concurrent.futures.as_completed(pending):
+                index = pending[future]
+                # read_lecture already absorbs per-lecture failures; this only
+                # surfaces a defect in the orchestration itself.
+                future.result()
+                if emitter is not None:
+                    emitter.finish(index)
+    if emitter is not None:
+        emitter.drain()
+    _bundle_clear_preview(job)
+    # Selected order, not completion order: `compile` reads top to bottom and
+    # `merge` places each topic where it was first taught.
+    return [results[index] for index in sorted(results)]
 
+
+class _BundleOrderedEmitter:
+    """Publish a COMPILED notebook in lecture order out of lectures that are
+    written out of order.
+
+    Only the frontier lecture — the earliest one not yet finished — writes
+    straight into the notebook. Lectures further down buffer their text and
+    release it the moment the frontier reaches them, then keep streaming live from
+    there. So the reader still gets V1, V2, V3 in order, still sees text appear as
+    it is written, and several lectures are being generated the whole time.
+
+    This exists because job["content"] is append-only: text cannot be inserted
+    above something already sent, so ordering has to be settled before a byte is
+    emitted rather than corrected afterwards.
+    """
+
+    def __init__(self, job, count):
+        self.job = job
+        self.count = count
+        self.lock = threading.Lock()
+        self.frontier = 0
+        self.buffers = {}
+        self.finished = set()
+
+    # Every method emits while HOLDING the lock. Deciding to write under the lock
+    # and then appending outside it would let two threads reach the notebook in
+    # the opposite order to the one they agreed on — which is the exact bug this
+    # class exists to prevent. Nothing outside the emitter takes this lock, so
+    # ordering it before _study_jobs_lock cannot deadlock.
+
+    def write(self, index, text):
+        if not text:
+            return
+        with self.lock:
+            if self.frontier != index:
+                self.buffers.setdefault(index, []).append(text)
+                return
+            _bundle_emit(self.job, "".join(self.buffers.pop(index, [])) + text)
+
+    def finish(self, index):
+        """Mark one lecture complete and let the frontier run forward."""
+        with self.lock:
+            self.finished.add(index)
+            while self.frontier < self.count and self.frontier in self.finished:
+                _bundle_emit(self.job, "".join(self.buffers.pop(self.frontier, [])))
+                self.frontier += 1
+            if self.frontier < self.count:
+                # The new frontier may already have text waiting. Release it now
+                # instead of making the reader wait for that lecture's next token.
+                _bundle_emit(self.job, "".join(self.buffers.pop(self.frontier, [])))
+
+    def drain(self):
+        """Flush anything still buffered — a lecture that never reported in must
+        not silently lose its text."""
+        with self.lock:
+            for index in sorted(self.buffers):
+                _bundle_emit(self.job, "".join(self.buffers.pop(index, [])))
+            self.frontier = self.count
+
+
+def _bundle_lecture_note(job, item, index, emitter=None):
+    """Resolve ONE lecture to markdown notes.
+
+    Returns the note, or None when the lecture has to be left out — the reason is
+    recorded on that lecture's own row rather than raised, because one bad video
+    must never fail the notebook.
+
+    `emitter` is passed for a COMPILED notebook, which is read top to bottom and
+    therefore has to reach the page in lecture order even though lectures are now
+    generated out of order. A merged notebook passes None: its text is held for
+    the topic pass anyway, so only the live preview moves.
+    """
+    vid = item["video_id"]
+    _bundle_update_item(job, vid, "processing")
+    ckey, fs_id = _study_text_cache_keys(vid, job["mode"], job["out_lang"], job["style"])
+    saved = {} if job.get("force") else _bundle_cached_note_result(
+        ckey, fs_id, job.get("cache_provider"), job.get("cache_model"))
+    content = saved.get("content") or ""
+    title = saved.get("title") or item.get("title") or vid
+
+    if content:
         with _study_jobs_lock:
             item["title"] = title
-        _bundle_update_item(job, vid, "ready", "", source)
-        ready.append({"label": item["label"], "video_id": vid, "title": title,
-                      "content": content})
-    return ready
+        if emitter is not None:
+            emitter.write(index, _bundle_lecture_card(item) + content.strip() + "\n\n")
+        _bundle_update_item(job, vid, "ready", "", "cached")
+        return {"label": item["label"], "video_id": vid, "title": title,
+                "content": content}
+
+    transcript, err = _bundle_extract(vid)
+    if _study_job_stop_requested(job):
+        return None
+    if err is not None:
+        state = "bot_gated" if _tutor_prepare_bot_error(err) else "extract_failed"
+        _bundle_update_item(job, vid, state, str(err), "captions")
+        return None
+    if not (transcript or {}).get("segments"):
+        _bundle_update_item(job, vid, "no_captions",
+                            "YouTube has no manual or automatic captions for this video.",
+                            "captions")
+        return None
+    title = transcript.get("title") or title
+    gen_text = _timestamped_transcript(transcript.get("segments")) or transcript.get("text") or ""
+    if not gen_text.strip():
+        _bundle_update_item(job, vid, "no_captions",
+                            "The caption tracks held no usable spoken text.", "captions")
+        return None
+    with _study_jobs_lock:
+        item["title"] = title
+        job["model"] = _ai_display_model(job["ai"])
+        job["provider"] = _ai_display_provider(job["ai"])
+    if emitter is not None:
+        emitter.write(index, _bundle_lecture_card(item))
+
+    pieces, written = [], 0
+    _bundle_claim_preview(job, index)
+    try:
+        for piece in _stream_study_text(job["mode"], gen_text, job["out_lang"],
+                                        job["ai"], "Video title: %s\n\n" % title,
+                                        job["style"], cancel_event=job["cancel_event"]):
+            if _study_job_stop_requested(job):
+                return None
+            pieces.append(piece)
+            written += len(piece)
+            if emitter is not None:
+                emitter.write(index, piece)   # compile streams each lecture live
+            if _bundle_preview_due(job, index):
+                _bundle_note_progress(job, vid, written)
+                _bundle_set_preview(job, index, item["label"], title, "".join(pieces))
+    finally:
+        _bundle_release_preview(job, index)
+    content = "".join(pieces)
+    if not content.strip():
+        _bundle_update_item(job, vid, "extract_failed",
+                            "The AI returned an empty response for this lecture.", "generated")
+        return None
+    if emitter is not None:
+        # Streamed notes rarely end with a newline, and without this the next
+        # lecture's card would be glued onto the last bullet.
+        emitter.write(index, "\n\n")
+    # This is byte-for-byte what the Notes tab would have produced for this video,
+    # so save it under the ordinary single-video key: the notebook warms every
+    # lecture's own notes as a side effect.
+    note_data = {
+        "id": vid, "title": title, "mode": job["mode"],
+        "style": job["style"] or "topic", "out_lang": job["out_lang"],
+        "model": _ai_display_model(job["ai"]), "format": "markdown",
+        "num_questions": None, "provider": _ai_display_provider(job["ai"]),
+        "cache_provider": job.get("cache_provider") or "",
+        "cache_model": job.get("cache_model") or "",
+        "keys_available": _ai_key_count(job["ai"]),
+        "transcript_lang": transcript.get("chosen_lang"),
+        "segment_count": transcript.get("segment_count"),
+        "cached": False, "content": content}
+    _study_put(fs_id, note_data)
+    # The canonical key is route-agnostic, so the newly generated copy must replace
+    # process memory as well as persistence. Otherwise an older same-route value
+    # can be resurrected by the next rebuild.
+    with _study_lock:
+        _study_cache[ckey] = {"ts": time.time(), "data": note_data}
+    _bundle_update_item(job, vid, "ready", "", "generated")
+    return {"label": item["label"], "video_id": vid, "title": title,
+            "content": content}
 
 
 def _run_study_bundle_job(job_id):
@@ -4686,6 +5054,8 @@ def _run_study_bundle_job(job_id):
             if _study_job_stop_requested(job):
                 _set_study_job_terminal(job, "stopped")
                 return
+            _bundle_set_phase(job, "assembling")
+            _bundle_clear_preview(job)
             with _study_jobs_lock:
                 items = _bundle_items_public(job.get("items"))
             _bundle_emit(job, _bundle_skipped_md(items) + _bundle_sources_md(items))
@@ -4712,6 +5082,10 @@ def _run_study_bundle_job(job_id):
             with _study_jobs_lock:
                 job["persisted"] = persisted
                 job["status"] = "completed"
+                job["phase"] = "done"
+                job["progress"] = 100
+                job["preview"] = None
+                job["preview_owner"] = None
                 job["updated_at"] = int(time.time())
             _study_job_persist(job, force=True)
         except Exception as exc:  # noqa: BLE001
@@ -4820,6 +5194,11 @@ def api_study_bundle_start():
         "cache_provider": cache_provider, "cache_model": cache_model,
         "force": force,
         "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
+        # Progress bar + live preview state (see the preview channel notes above
+        # _bundle_progress_pct). `preview_owner` is the lecture index currently
+        # allowed to write into the single preview slot.
+        "phase": "queued", "progress": 0, "merge_done": 0, "merge_total": 0,
+        "preview": None, "preview_owner": None, "preview_at": 0.0,
         "cached": bool(cached), "persisted": bool(cached), "title": title,
         "transcript_lang": None, "segment_count": None, "error": "",
         "degraded": degraded,
@@ -4837,6 +5216,7 @@ def api_study_bundle_start():
         job.update({"status": "stopped", "error": "Stopped before generation began."})
     elif cached:
         job.update({"status": "completed", "content": cached.get("content", ""),
+                    "phase": "done", "progress": 100,
                     "provider": cached.get("provider", job["provider"]),
                     "model": cached.get("model", job["model"])})
         restored = cached.get("items")

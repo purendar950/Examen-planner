@@ -34,6 +34,15 @@ const YTNB_OPTS_KEY = 'ytNotebookOptionsV1';
 const YTNB_JOB_KEY = 'ytNotebookActiveJobV1';
 /* Rough per-lecture generation time, used only for the "~N min" estimate. */
 const YTNB_SECS_PER_VIDEO = 45;
+/* The proxy reads several lectures at once (STUDY_BUNDLE_LECTURE_WORKERS), so
+   wall-clock cost is not the sum of them. Scaling is deliberately assumed to be
+   sub-linear rather than the full worker count: the provider's tokens-per-minute
+   pacing is shared across all of them. */
+const YTNB_LECTURE_PARALLELISM = 2.2;
+/* Merging is charged per TOPIC, and longer selections share more topics. The old
+   flat +40s under-promised badly on ten or more lectures, which is a large part
+   of why the merge pass felt like it had hung. */
+const YTNB_MERGE_SECS_PER_VIDEO = 14;
 
 let _ytnbCollapsed = {};        // courseId -> true while its list is folded
 let _ytnbCached = {};           // videoId  -> true when notes already exist
@@ -323,7 +332,11 @@ function ytnbUpdateEstimate() {
   const capped = ids.slice(0, _ytnbMaxVideos);
   const cachedCount = capped.filter(id => _ytnbCached[id]).length;
   const needed = capped.length - cachedCount;
-  const secs = needed * YTNB_SECS_PER_VIDEO + (capped.length > 1 && opts.shape === 'merge' ? 40 : 0);
+  // A merged notebook still has to WRITE the topic pass even when every lecture
+  // is already saved, so that cost is counted separately from the lecture cost.
+  const mergeSecs = (capped.length > 1 && opts.shape === 'merge')
+    ? Math.round(capped.length * YTNB_MERGE_SECS_PER_VIDEO) : 0;
+  const secs = Math.round(needed * YTNB_SECS_PER_VIDEO / YTNB_LECTURE_PARALLELISM) + mergeSecs;
   const mins = Math.max(1, Math.round(secs / 60));
   const single = capped.length === 1;
 
@@ -348,7 +361,9 @@ function ytnbUpdateEstimate() {
   const bits = [];
   bits.push('<strong>' + capped.length + '</strong> ' + (single ? 'lecture' : 'lectures selected'));
   if (cachedCount) bits.push('<strong>' + cachedCount + '</strong> already generated');
-  bits.push(needed ? ('~' + mins + ' min') : 'ready instantly');
+  // `secs`, not `needed`: only a notebook with nothing left to write is instant,
+  // and a merged one always has its topic pass left to write.
+  bits.push(secs ? ('~' + mins + ' min') : 'ready instantly');
   if (ids.length > _ytnbMaxVideos) {
     bits.push('<span class="ytnb-est-warn">only the first ' + _ytnbMaxVideos +
       ' will be used (' + (ids.length - _ytnbMaxVideos) + ' extra)</span>');
@@ -564,13 +579,20 @@ const YTNB_STATES = {
   cancelled: { icon: '–', label: 'cancelled' }
 };
 
-function ytnbRenderChecklist(items, counts, status) {
+/* `run` is optional and carries the proxy's own progress fields
+   ({progress, phase, mergeDone, mergeTotal}). Without it the bar falls back to
+   counting settled lectures, so an older proxy still shows something moving. */
+function ytnbRenderChecklist(items, counts, status, run) {
   const host = document.getElementById('ytnb-checklist');
   const summary = document.getElementById('ytnb-progress-summary');
-  if (!host) return;
   items = items || [];
   const ready = (counts && counts.ready) || 0;
   const done = items.filter(i => (i.state || 'queued') !== 'queued' && i.state !== 'processing').length;
+  // A fresh run starts here, so this is also where the ETA clock is reset. Doing
+  // it in ytnbStart would spread one concern over two functions.
+  if (status === 'queued') { _ytnbBarStart = Date.now(); _ytnbBarShown = 0; }
+  ytnbPaintBar(items, done, status, run);
+  if (!host) return;
   if (summary) {
     summary.textContent = (status === 'completed')
       ? ready + ' of ' + items.length + ' lectures in this notebook'
@@ -578,7 +600,10 @@ function ytnbRenderChecklist(items, counts, status) {
   }
   host.innerHTML = items.map(function (item) {
     const meta = YTNB_STATES[item.state] || YTNB_STATES.queued;
-    const label = (item.source === 'cached' && item.state === 'ready') ? 'reused saved notes' : meta.label;
+    let label = (item.source === 'cached' && item.state === 'ready') ? 'reused saved notes' : meta.label;
+    // A lecture being written now reports how much of it exists. "reading
+    // captions…" for four minutes was what made a working run look stuck.
+    if (item.state === 'processing' && Number(item.chars) > 0) label = 'writing… ' + ytnbCount(item.chars);
     return '<div class="ytnb-check ' + ytnbEsc(item.state || 'queued') + '">' +
       '<span class="ytnb-check-icon" aria-hidden="true">' + meta.icon + '</span>' +
       '<span class="ytnb-check-tag">' + ytnbEsc(item.label || '') + '</span>' +
@@ -586,6 +611,107 @@ function ytnbRenderChecklist(items, counts, status) {
       '<span class="ytnb-check-state">' + ytnbEsc(label) +
       (item.detail ? ' — ' + ytnbEsc(item.detail) : '') + '</span></div>';
   }).join('');
+}
+
+/* ── progress bar ──────────────────────────────────────────────────────────
+   Determinate, and driven by the proxy rather than guessed here. The proxy
+   reports a named phase plus a monotonic 0-100 that scores the lecture pass and
+   the topic-merge pass separately — a bar built only from "lectures done" would
+   necessarily read 100% for the whole merge, which is the longest part of a
+   merged notebook and exactly the wait this is meant to explain. */
+const YTNB_PHASES = {
+  queued: 'Getting ready…',
+  lectures: 'Reading lectures',
+  merging: 'Merging topics',
+  assembling: 'Finishing the notebook',
+  done: 'Notebook ready'
+};
+
+let _ytnbBarStart = 0;    // when this run began, for the "time left" estimate
+let _ytnbBarShown = 0;    // last width drawn, so the bar can never go backwards
+
+function ytnbCount(n) {
+  n = Number(n) || 0;
+  return n >= 1000 ? (Math.round(n / 100) / 10) + 'k chars' : n + ' chars';
+}
+
+function ytnbPaintBar(items, settled, status, run) {
+  const wrap = document.getElementById('ytnb-bar');
+  const fill = document.getElementById('ytnb-bar-fill');
+  if (!wrap || !fill) return;
+  const track = document.getElementById('ytnb-bar-track');
+  const phaseEl = document.getElementById('ytnb-bar-phase');
+  const pctEl = document.getElementById('ytnb-bar-pct');
+  const etaEl = document.getElementById('ytnb-bar-eta');
+  const finished = status === 'completed';
+  const reported = (run && Number.isFinite(Number(run.progress))) ? Number(run.progress) : null;
+  let pct = finished ? 100 : Math.max(1, Math.min(99, Math.round(
+    reported === null ? (3 + 94 * (settled / (items.length || 1))) : reported)));
+  if (!finished && pct < _ytnbBarShown) pct = _ytnbBarShown;
+  _ytnbBarShown = pct;
+
+  const phrase = ytnbPhaseText(items, settled, status, run);
+  wrap.hidden = false;
+  wrap.classList.toggle('done', finished);
+  fill.style.width = pct + '%';
+  if (track) {
+    track.setAttribute('aria-valuenow', String(pct));
+    track.setAttribute('aria-valuetext', phrase + ' · ' + pct + '%');
+  }
+  if (phaseEl) phaseEl.textContent = phrase;
+  if (pctEl) pctEl.textContent = pct + '%';
+  if (etaEl) etaEl.textContent = finished ? '' : ytnbEtaText(pct);
+}
+
+function ytnbPhaseText(items, settled, status, run) {
+  if (status === 'completed') return YTNB_PHASES.done;
+  if (status === 'stopped') return 'Stopped';
+  const phase = (run && run.phase) || (settled ? 'lectures' : 'queued');
+  if (phase === 'merging' && run && Number(run.mergeTotal) > 0) {
+    return 'Merging topics — ' + Math.min(Number(run.mergeDone) || 0, Number(run.mergeTotal)) +
+      ' of ' + Number(run.mergeTotal);
+  }
+  if (phase === 'lectures') return 'Reading lectures — ' + settled + ' of ' + items.length;
+  return YTNB_PHASES[phase] || 'Working…';
+}
+
+/* Time left, extrapolated from the progress this run has actually achieved.
+   Held back until there is enough of a run to extrapolate from: an estimate that
+   swings wildly in the first seconds is worse than no estimate at all. */
+function ytnbEtaText(pct) {
+  if (!_ytnbBarStart || pct < 8) return '';
+  const elapsed = (Date.now() - _ytnbBarStart) / 1000;
+  if (elapsed < 12) return '';
+  const left = elapsed * (100 - pct) / pct;
+  if (left < 20) return 'almost done · ';
+  if (left < 90) return '~' + (Math.ceil(left / 10) * 10) + 's left · ';
+  return '~' + Math.ceil(left / 60) + ' min left · ';
+}
+
+/* ── live writing panel ────────────────────────────────────────────────────
+   The paragraph the AI is producing right now, as reported by the proxy's
+   `preview` field. This is a REPLACEABLE view of an open stream and is kept out
+   of the notebook itself, because a merged section is only published once it is
+   complete and validated — so partial text may appear here and nowhere else.
+   It is why a merged notebook no longer looks frozen while it reads lectures. */
+function ytnbRenderLive(preview, active) {
+  const wrap = document.getElementById('ytnb-live');
+  if (!wrap) return;
+  const text = (preview && typeof preview.text === 'string') ? preview.text : '';
+  if (!active || !text.trim()) { wrap.hidden = true; return; }
+  const what = document.getElementById('ytnb-live-what');
+  const count = document.getElementById('ytnb-live-count');
+  const body = document.getElementById('ytnb-live-text');
+  const who = [preview.label, preview.title].filter(Boolean).join(' · ');
+  if (what) what.textContent = who ? ('Writing ' + who) : 'Writing…';
+  if (count) count.textContent = preview.chars ? ytnbCount(preview.chars) : '';
+  if (body) {
+    // textContent, not markdown: this is a mid-sentence fragment, and half-parsed
+    // markdown reflowing every second is harder to read than the raw text.
+    body.textContent = (preview.clipped ? '…' : '') + text;
+    body.scrollTop = body.scrollHeight;
+  }
+  wrap.hidden = false;
 }
 
 function ytnbLectureMap(items) {
@@ -735,6 +861,9 @@ function ytnbStream(job, created) {
   const run = {
     jobId: job.jobId, acc: created.content || '', done: false, built: false,
     items: created.items || [], counts: created.counts || {}, stick: true,
+    // Progress reported by the proxy, for the determinate bar.
+    progress: Number(created.progress) || 0, phase: created.phase || 'queued',
+    mergeDone: Number(created.mergeDone) || 0, mergeTotal: Number(created.mergeTotal) || 0,
     meta: {
       provider: created.provider || 'ai', model: created.model || '',
       lang: created.out_lang || job.lang, degraded: created.degraded || '',
@@ -800,11 +929,19 @@ function ytnbStream(job, created) {
           job.ids = obj.videoIds.slice();
           ytnbSaveJob(job);
         }
+        if (Number.isFinite(Number(obj.progress))) run.progress = Number(obj.progress);
+        run.phase = obj.phase || run.phase;
+        run.mergeDone = Number(obj.mergeDone) || 0;
+        run.mergeTotal = Number(obj.mergeTotal) || 0;
         if (Array.isArray(obj.items) && obj.items.length) {
           run.items = obj.items;
           run.counts = obj.counts || {};
-          ytnbRenderChecklist(run.items, run.counts, obj.status);
         }
+        // Repainted on every meta frame, not only when items change: during the
+        // topic-merge pass the lecture rows are all final and the phase counters
+        // are the only thing still moving.
+        ytnbRenderChecklist(run.items, run.counts, obj.status, run);
+        ytnbRenderLive(obj.preview, obj.status !== 'completed');
         refreshHead();
         return;
       }
@@ -866,13 +1003,18 @@ function ytnbFinish(job, result) {
     metaEl.textContent = [shapeLabel, result.provider, result.model, result.out_lang]
       .filter(Boolean).join(' · ');
   }
-  ytnbRenderChecklist(items, result.counts || {}, 'completed');
+  ytnbRenderChecklist(items, result.counts || {}, 'completed', _ytnbRun);
+  ytnbRenderLive(null, false);
   const progress = document.getElementById('ytnb-progress');
   if (progress) progress.open = false;      // the notebook is the point now, not the log
   // A reopened notebook has no checklist to show, and re-recording it would
   // only move it to the top of the shelf for being read.
   if (progress && result.reopened) progress.hidden = true;
   else if (progress) progress.hidden = false;
+  // Nothing was generated for a reopened notebook, so a full bar would be a
+  // claim about work that never happened.
+  const bar = document.getElementById('ytnb-bar');
+  if (bar) bar.hidden = !!result.reopened;
   ytnbSetTools(
     '<button class="ytnb-chip" id="ytnb-pdf">📄 Print / PDF</button>' +
     '<button class="ytnb-chip" onclick="ytnbRegenerate()" title="Build a fresh copy, ignoring the saved one">↻ Regenerate</button>' +
@@ -918,6 +1060,11 @@ function ytnbEnded(job, status, detail) {
   ytnbSetTools('<button class="ytnb-chip" onclick="ytnbBackToPicker()">Change selection</button>');
   const metaEl = document.getElementById('ytnb-run-meta');
   if (metaEl) metaEl.textContent = '';
+  // Nothing is being written any more, so neither the bar nor the live panel has
+  // anything true left to say.
+  ytnbRenderLive(null, false);
+  const bar = document.getElementById('ytnb-bar');
+  if (bar) bar.hidden = true;
 }
 
 function ytnbStop() {
