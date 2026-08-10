@@ -1231,19 +1231,114 @@ def _study_job_persist(job, force=False):
     return _fs_set("study_jobs", job["id"], doc)
 
 
+def _resume_study_bundle_job(job_id, saved):
+    """Relaunch a multi-video notebook whose worker thread died with an earlier
+    proxy process (free-tier restart, redeploy, OOM), instead of surfacing it
+    as failed.
+
+    This is safe specifically for bundles because each lecture's note is
+    cached independently of the bundle job itself (_bundle_cached_note_result,
+    keyed by video + mode + language + model — see also
+    STUDY_BUNDLE_LECTURE_WORKERS above). A relaunch is therefore cheap: any
+    lecture that finished generating before the restart is picked straight
+    from cache, and only the lectures that hadn't finished yet (plus the
+    merge/assembly pass) are redone. A single-video streaming note has no such
+    per-step cache to resume from, so that case is intentionally left to fall
+    through to the old "interrupted" message below.
+
+    Returns the running job dict on success, or None if a resume isn't
+    possible right now (e.g. no AI provider is currently reachable) — the
+    caller then falls back to the existing failed-with-explanation path.
+    """
+    owner_uid = str(saved.get("_owner_uid") or "")
+    video_ids = [v for v in (saved.get("videoIds") or []) if v]
+    if not owner_uid or len(video_ids) < 2:
+        return None
+
+    shape = saved.get("shape") or "merge"
+    mode = saved.get("mode") or "notes"
+    style = saved.get("style") or ""
+    if style == "topic":
+        style = ""
+    out_lang = saved.get("out_lang") or "English"
+    cache_provider = saved.get("cacheProvider") or ""
+    cache_model = saved.get("cacheModel") or ""
+
+    ai = _load_ai_config(cache_model or None, cache_provider or None)
+    if not _ai_configured(ai):
+        # Nothing to relaunch with either; an honest "failed" beats silently
+        # relaunching into a second guaranteed failure.
+        return None
+
+    ckey, fs_id = _bundle_cache_keys(
+        video_ids, shape, mode, out_lang, style, owner_uid, cache_provider, cache_model)
+    items = [dict(i) for i in (saved.get("items") or []) if isinstance(i, dict)] or [
+        {"video_id": vid, "label": _bundle_label(i), "title": vid,
+         "state": "queued", "source": "", "detail": ""}
+        for i, vid in enumerate(video_ids)]
+
+    now = int(time.time())
+    job = {
+        "id": job_id, "owner_uid": owner_uid, "kind": "bundle", "shape": shape,
+        "bundle_title": saved.get("bundleTitle") or saved.get("title") or "Combined notebook",
+        "fingerprint": saved.get("fingerprint") or _bundle_fingerprint(video_ids, shape),
+        "video_ids": video_ids, "course_id": saved.get("courseId") or "",
+        "video_id": video_ids[0],
+        "mode": mode, "style": style, "out_lang": out_lang,
+        "provider": ai.get("provider", "ai"), "model": ai.get("model", ""), "ai": ai,
+        "cache_provider": cache_provider, "cache_model": cache_model,
+        "force": False,
+        "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
+        "phase": "queued", "progress": 0, "merge_done": 0, "merge_total": 0,
+        "preview": None, "preview_owner": None, "preview_at": 0.0,
+        "cached": False, "persisted": False,
+        "title": saved.get("title") or saved.get("bundleTitle") or "Combined notebook",
+        "transcript_lang": saved.get("transcript_lang"),
+        "segment_count": saved.get("segment_count"), "error": "",
+        "degraded": saved.get("degraded") or "",
+        "items": items,
+        "created_at": saved.get("createdAt") or now, "updated_at": now,
+        "expires_at": saved.get("expiresAt") or now + STUDY_JOB_TTL,
+        "cancel_event": threading.Event(), "last_persist_at": 0,
+    }
+
+    with _study_jobs_lock:
+        raced = _study_jobs.get(job_id)
+        if raced:
+            # Another caller (e.g. a racing SSE reconnect) already relaunched
+            # this same job id — join that one instead of starting a second
+            # worker thread for it.
+            return raced
+        _study_jobs[job_id] = job
+    _study_job_persist(job, force=True)
+    worker = threading.Thread(target=_run_study_bundle_job, args=(job_id,), daemon=True,
+                              name="study-bundle-resume-" + job_id[:10])
+    with _study_jobs_lock:
+        job["thread"] = worker
+    worker.start()
+    log.info("resumed orphaned study bundle job %s after proxy restart", job_id)
+    return job
+
+
 def _get_study_job(job_id):
     with _study_jobs_lock:
         job = _study_jobs.get(job_id)
         if job:
             return job
     # A completed/stopped checkpoint can still be displayed after a proxy
-    # restart. A running process cannot safely be resurrected without a durable
-    # worker queue, so surface it as interrupted rather than pretending it runs.
+    # restart. A notebook (bundle) job is relaunched rather than resurrected in
+    # place — see _resume_study_bundle_job for why that's safe. A single-video
+    # streaming job has no equivalent per-step cache to resume from, so it
+    # still cannot be safely resurrected and is surfaced as interrupted below.
     saved = _fs_get("study_jobs", job_id)
     if not saved:
         return None
     status = saved.get("status")
     if status in ("queued", "running"):
+        if saved.get("kind") == "bundle":
+            resumed = _resume_study_bundle_job(job_id, saved)
+            if resumed:
+                return resumed
         status = "failed"
         saved["status"] = status
         saved["error"] = "Generation was interrupted because the AI proxy restarted. Please generate again."
@@ -4168,9 +4263,14 @@ _study_bundle_worker_sem = threading.Semaphore(
 # Kept small on purpose: every slot is a thread inside a Gunicorn worker holding
 # an AI stream open, and `_ai_pace` still enforces the provider's
 # tokens-per-minute ceiling across all of them, so raising this past a handful
-# buys queueing rather than speed.
+# buys queueing rather than speed. Defaults to 2 rather than 3: on the free-tier
+# instance this proxy runs on (512 MB RAM), 3 lectures reading captions and
+# streaming AI output at once was enough peak memory pressure to occasionally
+# get the whole process OOM-killed mid-notebook (see the "AI proxy restarted"
+# failure surfaced by _get_study_job). Override via env var if the instance has
+# more headroom.
 STUDY_BUNDLE_LECTURE_WORKERS = max(1, min(6, int(
-    os.environ.get("STUDY_BUNDLE_LECTURE_WORKERS", "3"))))
+    os.environ.get("STUDY_BUNDLE_LECTURE_WORKERS", "2"))))
 _BUNDLE_SHAPES = ("merge", "compile")
 BUNDLE_MERGE_CAP = int(os.environ.get("BUNDLE_MERGE_MAX_TOKENS", "3000"))
 # Ceiling on merge-stage AI calls. Only topics taught in MORE THAN ONE lecture
