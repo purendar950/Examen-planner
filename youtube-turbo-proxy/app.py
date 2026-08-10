@@ -4994,13 +4994,42 @@ def _bundle_merge_stage(job, notes):
         budget_left -= 1
         sample = "\n".join(s["body"] for s in cluster["sources"])
         limit = _bundle_excerpt_budget(job["ai"], len(cluster["sources"]), sample)
-        excerpts = []
+        # Citeify once, then split into excerpt + overflow so the overflow
+        # can be appended after a successful merge.  Without this, any content
+        # beyond the per-source char limit is silently dropped — the model never
+        # sees it and the reader never gets it.
+        citeified = {}
         for src in cluster["sources"]:
-            body = _bundle_citeify(src["body"], src["label"])
+            citeified[src["label"]] = _bundle_citeify(src["body"], src["label"])
+        excerpts = []
+        overflow = {}
+        total_source_chars = 0
+        for src in cluster["sources"]:
+            body = citeified[src["label"]]
+            total_source_chars += len(body)
             if len(body) > limit:
-                body = body[:limit].rsplit("\n", 1)[0] + "\n\u2026"
+                # Keep everything after the last complete line within budget.
+                cut = body[:limit].rsplit("\n", 1)[0]
+                tail = body[len(cut):]
+                # Trim any leading whitespace/newline from the tail.
+                tail = tail.lstrip("\n")
+                if tail:
+                    overflow[src["label"]] = tail
+                body = cut + "\n\u2026"
             excerpts.append("--- Source %s (lecture \u201c%s\u201d), section \u201c%s\u201d ---\n%s"
                             % (src["label"], src["lecture"], src["heading"], body))
+        # If truncation would discard more than half the source content, the
+        # model is working with an incomplete picture — passthrough is safer.
+        excerpt_chars = sum(len(e) for e in excerpts)
+        if overflow and excerpt_chars < total_source_chars * 0.5:
+            log.info("bundle %s skipping merge for %r: truncation would drop "
+                     "%d of %d chars (%.0f%%)",
+                     job.get("id"), cluster["title"],
+                     total_source_chars - excerpt_chars, total_source_chars,
+                     100 * (1 - excerpt_chars / total_source_chars))
+            _bundle_emit(job, _bundle_passthrough_section(cluster))
+            _bundle_merge_step(job)
+            continue
         user = (_covered_note(covered) + _bundle_merge_instr(
             cluster["title"], cluster["lectures"], len(cluster["sources"]), total_videos)
             + "\n\n" + "\n\n".join(excerpts) + tail)
@@ -5043,6 +5072,23 @@ def _bundle_merge_stage(job, notes):
             _bundle_emit(job, _bundle_passthrough_section(cluster))
         else:
             _bundle_emit(job, written.rstrip() + "\n\n")
+            # Any content that was truncated (never shown to the model)
+            # is appended in full so nothing from any lecture is lost.
+            if overflow:
+                overflow_parts = []
+                for src in cluster["sources"]:
+                    tail = overflow.get(src["label"])
+                    if tail and tail.strip():
+                        src_head = (src["heading"] or src["lecture"])
+                        overflow_parts.append(
+                            "### %s [%s]\n\n" % (src_head, src["label"]))
+                        overflow_parts.append(tail.strip() + "\n\n")
+                if overflow_parts:
+                    _bundle_emit(
+                        job,
+                        "> The following notes were beyond the merge excerpt "
+                        "limit and are included in full:\n\n"
+                        + "".join(overflow_parts))
             covered.extend(_extract_note_headings(written))
         _bundle_merge_step(job)
     _bundle_release_preview(job, 0)
