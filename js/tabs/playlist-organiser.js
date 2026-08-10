@@ -502,6 +502,9 @@ async function ytoLoadPlaylist() {
 async function ytoLoadSingleVideo(vId) {
   const errEl = document.getElementById('yto-error');
   if (errEl) errEl.style.display = 'none';
+  // Guarded at the write site as well as at the URL box, because this is also
+  // reached directly from ytoLoadPlaylist's fall-through.
+  if (typeof ezMediaSaveGuard === 'function' && ezMediaSaveGuard(ytoLib()['vid_' + vId])) return;
   const loadBtn = document.getElementById('yto-load-btn');
   const orig = loadBtn ? loadBtn.innerHTML : '';
   if (loadBtn) { loadBtn.disabled = true; loadBtn.innerHTML = '⏳ Loading...'; }
@@ -1740,6 +1743,13 @@ async function ytoChanImport() {
     // the proxy and burn quota with nothing to throttle it.
     const videos = await ytFetchPlaylistVideos(p.id).catch(() => null);
     if (!videos || !videos.length) { failed++; continue; }
+    // The cap is checked per playlist, so a 40-playlist channel import stops AT
+    // the limit instead of walking the whole way past it in one go.
+    if (typeof ezMediaSaveDenied === 'function' && !ytoLib()[p.id]) {
+      const capMsg = ezMediaSaveDenied(null);
+      if (capMsg) { showToast('⚠️ ' + capMsg, 'error'); break; }
+    }
+
     const durMap = await ytFetchDurations(videos).catch(() => ({}));
 
     // We already have title/thumb from the channel listing, so skip the extra
@@ -2250,6 +2260,10 @@ async function ytoImportChannelPlaylist(plId, btn) {
   try { rows = ytCacheGet('chanpls', channelId); } catch (e) {}
   const meta = (rows || []).find(r => r.id === plId) || { id: plId, title: 'Playlist', itemCount: 0 };
 
+  // The saved-course cap, which the old ytoLoadPlaylist-only gate never applied
+  // to the channel page's ＋ button.
+  if (typeof ezMediaSaveGuard === 'function' && ezMediaSaveGuard(ytoLib()[plId])) return;
+
   const blocked = ytoSingleImportBlocked(plId, meta.itemCount);
   if (blocked) {
     showToast(`⚠️ Ye playlist add karne se sync limit (1 MB) cross ho jayegi (~${ytoFmtBytes(blocked)}). Pehle kuch purane courses delete karo.`, 'error');
@@ -2296,6 +2310,7 @@ async function ytoSaveChannelVideo(videoId, btn) {
   const ch = channelId ? ytoChannelMeta(channelId) : {};
   const key = 'vid_' + videoId;
   if (ytoLib()[key]) { showToast('Ye video already library mein hai.', 'info'); return; }
+  if (typeof ezMediaSaveGuard === 'function' && ezMediaSaveGuard(null)) return;
 
   const orig = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳'; }

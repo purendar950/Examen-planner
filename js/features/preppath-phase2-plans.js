@@ -28,6 +28,7 @@ async function ezLoadPlans() {
         mocks:               (fd.mocks               != null && fd.mocks               > 0 ? fd.mocks               : 5),
         mocksPerDay:         (fd.mocksPerDay         != null && fd.mocksPerDay         > 0 ? fd.mocksPerDay         : 3),
         mediaSaves:          (fd.mediaSaves          != null && fd.mediaSaves          > 0 ? fd.mediaSaves          : 3),
+        proMediaSaves:       (fd.proMediaSaves       != null && fd.proMediaSaves       > 0 ? fd.proMediaSaves       : 20),
         notes:               (fd.notes               != null && fd.notes               > 0 ? fd.notes               : 10),
         aiTutorPerDay:       (fd.aiTutorPerDay       != null && fd.aiTutorPerDay       > 0 ? fd.aiTutorPerDay       : 5),
         aiTimetablePerWeek:  (fd.aiTimetablePerWeek  != null && fd.aiTimetablePerWeek  > 0 ? fd.aiTimetablePerWeek  : 1),
