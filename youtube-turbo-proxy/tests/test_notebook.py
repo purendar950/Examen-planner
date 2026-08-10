@@ -215,6 +215,18 @@ check("numbered items stay distinct topics",
 check("headings with nothing in common stay apart",
       len(group(["Sports News", "Union Budget", "Space Missions"])) == 3)
 
+# --- improvements: wider grouping, more noise words, extra-word budget ---
+check("a topic with 3 extra words is still contained",
+      len(group(["Sports", "Sports and Games Roundup Update"])) == 1)
+check("educational noise words do not prevent a match",
+      len(group(["Key Concept Types of Awards", "Awards and Honours"])) == 1)
+check("overview and summary noise is stripped",
+      len(group(["Biology Overview", "Biology Summary"])) == 1)
+check("topics with reworded prepositions still merge",
+      len(group(["Economy Survey", "Survey of Economy"])) == 1)
+check("concept and meaning noise is filtered",
+      len(group(["Meaning of Constitution", "Constitution Concepts"])) == 1)
+
 # One lecture can head the same topic twice. Counting sections as lectures made the
 # notebook claim a topic was "taught in 3 lectures" when it was taught in two.
 twice = group(["Awards", "Awards and Honours", "Awards"], labels=[0, 1, 1])
@@ -275,6 +287,32 @@ def valid(*args, **kwargs):
 merged = run_merge(valid)
 check("one valid merged section is accepted", "Combined fact" in merged, merged)
 check("valid output replaces source duplication", "First fact" not in merged and "Second fact" not in merged, merged)
+
+print("== passthrough fallback organisation ==")
+passthrough = bundle["_bundle_passthrough_section"]
+# Single source: plain section with citation.
+single_cluster = {"sources": [{"heading": "Gravity", "body": "- fact [0:10]", "label": "V1",
+                              "video_id": "a", "lecture": "L1", "video_index": 0, "order": 0}],
+                   "title": "Gravity"}
+single_out = passthrough(single_cluster)
+check("single-source passthrough has ## heading", "## Gravity" in single_out, single_out)
+check("single-source passthrough has no ### sub-heading", "###" not in single_out, single_out)
+# Multiple sources: each gets its own ### sub-heading.
+multi_cluster = {"sources": [
+    {"heading": "3:00 Gravity", "body": "- first fact [0:10]", "label": "V1",
+     "video_id": "a", "lecture": "Lecture 1", "video_index": 0, "order": 0},
+    {"heading": "12:00 Gravity", "body": "- second fact [0:20]", "label": "V2",
+     "video_id": "b", "lecture": "Lecture 2", "video_index": 1, "order": 0}],
+    "title": "Gravity"}
+multi_out = passthrough(multi_cluster)
+check("multi-source passthrough has one ## heading",
+      multi_out.startswith("## ") and multi_out.count("\n## ") == 0, multi_out)
+check("multi-source passthrough has ### sub-headings per lecture",
+      multi_out.count("### ") == 2, multi_out)
+check("multi-source passthrough includes both lectures",
+      "first fact" in multi_out and "second fact" in multi_out, multi_out)
+check("multi-source passthrough labels each sub-heading",
+      "[V1]" in multi_out and "[V2]" in multi_out, multi_out)
 
 print("== progress reporting ==")
 # The bar needs a number that keeps moving through the topic-merge pass, which is

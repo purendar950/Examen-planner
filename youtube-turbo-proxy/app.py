@@ -4654,18 +4654,28 @@ _TOPIC_NOISE = frozenset((
     "current", "affair", "affairs", "top", "best", "important", "latest",
     "lecture", "class", "video", "session", "chapter", "unit", "revision",
     "series", "batch", "pdf", "full", "complete", "detailed", "explained",
-    "compilation", "roundup", "update", "updates", "new", "news"))
+    "compilation", "roundup", "update", "updates", "new", "news",
+    "types", "type", "definition", "meaning", "concept", "concepts", "key",
+    "main", "summary", "analysis", "overview", "introduction", "basics",
+    "basic", "fundamental", "fundamentals", "note", "notes", "point",
+    "point", "remember", "must", "one", "shot", "crash", "quick",
+    "deep", "dive", "guide", "study", "material", "topic", "topics",
+    "revision", "revised", "practice", "discus", "discussed", "covered",
+    "understand", "understanding", "learn", "learned", "know", "knowing"
+    ))
 # A four-digit year says WHEN a lecture was recorded, never what it teaches. Other
 # numbers are kept: "Article 370" and "Article 35A" must stay distinct topics.
 _TOPIC_YEAR = re.compile(r"^(?:19|20)\d\d$")
 # Weighted-overlap floor, plus a weighted-Jaccard floor as a second condition so
 # one shared word cannot marry two long, unrelated headings.
-_TOPIC_OVERLAP_MIN = 0.60
-_TOPIC_JACCARD_MIN = 0.30
+_TOPIC_OVERLAP_MIN = 0.50
+_TOPIC_JACCARD_MIN = 0.25
 # How many extra words the longer of two headings may add and still be the same
 # topic. This bounds the containment rule below; without a bound, a one-word
 # heading would swallow every long heading that happens to contain that word.
-_TOPIC_EXTRA_MAX = 2
+# Raised from 2 to 3: a topic like "Sports" vs "Sports and Games Roundup Update"
+# has 3 extra content words and is clearly the same topic.
+_TOPIC_EXTRA_MAX = 3
 
 
 def _split_note_sections(md):
@@ -4878,14 +4888,22 @@ def _bundle_merge_instr(topic_title, lecture_count, section_count, total_videos)
             "Write EXACTLY ONE section starting with '## " + topic_title + "'. Do "
             "not write any other '## ' section, preamble, or closing remark.\n"
             "Rules:\n"
+            "- GROUP by information type: collect all definitions together, all "
+            "formulas together, all examples together, all dates/facts together, "
+            "all names/places together. Use '### ' sub-headings for each type "
+            "(e.g. '### Definitions', '### Formulas', '### Examples', "
+            "'### Key Facts', '### Important Dates'). Put the SAME type of "
+            "information from ALL lectures under the SAME sub-heading.\n"
             "- MERGE the sources: keep the deepest explanation and fold every "
             "extra fact, figure, date, name, place, example and formula from the "
             "other sources into it. Never write the same point twice.\n"
             "- End every bullet with the lecture it came from, in the form "
             "[V<n> <M:SS>], copying the label and a timestamp from that source's "
             "excerpt. When a point is taught in several lectures, cite them all.\n"
-            "- Use '### ' sub-headings when the topic has distinct parts, '- ' "
-            "bullets for detail, and a Markdown table for comparisons or "
+            "- Within each sub-heading, list items from all lectures together — "
+            "do NOT separate them by lecture. A reader must see every definition "
+            "in one place, every formula in one place, etc.\n"
+            "- Use '- ' bullets for detail, and a Markdown table for comparisons or "
             "date/figure lists.\n"
             "- Bold (**...**) ONLY key terms, never whole sentences.\n"
             "- If two lectures CONTRADICT each other, keep both and begin that "
@@ -4904,20 +4922,26 @@ def _bundle_passthrough_section(cluster):
     the other lectures' material on any cluster that ran past
     BUNDLE_MERGE_MAX_CALLS. The invalid-merge path happened to re-emit the extras
     itself, which hid the bug everywhere except the one place it lost content.
+
+    When multiple lectures cover the same topic, their content is organised under
+    lecture-labeled sub-headings so a reader can compare what each lecture taught
+    about the topic without scanning the whole section.
     """
     src = cluster["sources"][0]
     heading = _BUNDLE_HEAD_TS.sub("", src["heading"]).strip() or cluster["title"]
     stamp = _BUNDLE_HEAD_TS.match(src["heading"] or "")
     cite = " [%s %s]" % (src["label"], stamp.group(1)) if stamp else " [%s]" % src["label"]
-    out = ["## " + heading + cite + "\n\n",
-           _bundle_citeify(src["body"], src["label"]).strip() + "\n\n"]
-    for extra in cluster["sources"][1:]:
-        extra_head = _BUNDLE_HEAD_TS.sub("", extra["heading"]).strip()
-        # Keep the other lecture's own wording under its own sub-heading, so an
-        # unmerged group still reads as one topic rather than two stitched bodies.
-        if extra_head and extra_head.lower() != heading.lower():
-            out.append("### %s [%s]\n\n" % (extra_head, extra["label"]))
-        out.append(_bundle_citeify(extra["body"], extra["label"]).strip() + "\n\n")
+    if len(cluster["sources"]) < 2:
+        return ("## " + heading + cite + "\n\n"
+                + _bundle_citeify(src["body"], src["label"]).strip() + "\n\n")
+    # Multiple sources: give each its own labeled sub-heading so the reader
+    # can see what each lecture contributed to this topic in one place.
+    out = ["## " + heading + "\n\n"]
+    for src in cluster["sources"]:
+        src_head = _BUNDLE_HEAD_TS.sub("", src["heading"]).strip()
+        label = src_head if (src_head and src_head.lower() != heading.lower()) else src["lecture"]
+        out.append("### %s [%s]\n\n" % (label, src["label"]))
+        out.append(_bundle_citeify(src["body"], src["label"]).strip() + "\n\n")
     return "".join(out)
 
 
