@@ -227,6 +227,32 @@ check("topics with reworded prepositions still merge",
 check("concept and meaning noise is filtered",
       len(group(["Meaning of Constitution", "Constitution Concepts"])) == 1)
 
+# --- adjective-noun normalisation (India/Indian etc.) ---
+check("Indian History and History of India are one topic",
+      len(group(["Indian History", "History of India"])) == 1)
+check("Indian Economy and Economy of India are one topic",
+      len(group(["Indian Economy", "Economy of India"])) == 1)
+check("Indian Polity matches Polity of India",
+      len(group(["Indian Polity", "Polity of India"])) == 1)
+check("Geographical features and Geography match",
+      len(group(["Geographical Features of India", "Geography of India"])) == 1)
+check("Constitutional amendments matches Amendments in Constitution",
+      len(group(["Constitutional Amendments", "Amendments in Constitution"])) == 1)
+check("Historical events matches Events in History",
+      len(group(["Historical Events", "Events in History"])) == 1)
+check("Economic Survey of India matches Indian Economy Survey",
+      len(group(["Economic Survey of India", "Indian Economy Survey"])) == 1)
+check("Scientific discoveries matches Discoveries in Science",
+      len(group(["Scientific Discoveries", "Discoveries in Science"])) == 1)
+check("National Parks and Nation are different from each other",
+      len(group(["National Parks", "Nation and Nationalism"])) == 2)
+check("adjective norm does not merge unrelated topics",
+      len(group(["Indian Economy", "Indian Polity"])) == 2)
+check("Hindi filler words are stripped from headings",
+      len(group(["Bharat ke Rashtriya Udyan", "Rashtriya Udyan"])) == 1)
+check("discus (athletics) is not falsely filtered as noise",
+      len(group(["Discus Throw", "Javelin Throw"])) == 2)
+
 # One lecture can head the same topic twice. Counting sections as lectures made the
 # notebook claim a topic was "taught in 3 lectures" when it was taught in two.
 twice = group(["Awards", "Awards and Honours", "Awards"], labels=[0, 1, 1])
