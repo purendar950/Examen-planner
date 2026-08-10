@@ -34,6 +34,7 @@ import hmac
 import threading
 import logging
 import secrets
+import math
 import concurrent.futures
 from datetime import datetime, timedelta, timezone
 
@@ -4539,6 +4540,32 @@ _TOPIC_STOP = frozenset((
     "is", "are", "was", "were", "by", "at", "from", "as", "that", "this", "what",
     "how", "why", "part", "intro", "introduction", "basics", "overview", "about",
     "aur", "mein", "hai", "kya", "kaise", "wala", "wale", "wali", "aap", "yeh"))
+# Words that name the LECTURE rather than the topic. These were the loudest false
+# signal on the courses this is actually used for: in a monthly current-affairs
+# playlist, "National Awards 2026", "Awards and Honours" and "April 2026 Awards"
+# are one topic, but the date and series words dominated the token set and pushed
+# every similarity measure under its threshold, so they became three sections.
+# Stored in stemmed form, because stemming happens before this filter.
+_TOPIC_NOISE = frozenset((
+    "january", "february", "march", "april", "may", "june", "july", "august",
+    "september", "october", "november", "december",
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    "monthly", "weekly", "daily", "today", "year", "month", "week",
+    "current", "affair", "affairs", "top", "best", "important", "latest",
+    "lecture", "class", "video", "session", "chapter", "unit", "revision",
+    "series", "batch", "pdf", "full", "complete", "detailed", "explained",
+    "compilation", "roundup", "update", "updates", "new", "news"))
+# A four-digit year says WHEN a lecture was recorded, never what it teaches. Other
+# numbers are kept: "Article 370" and "Article 35A" must stay distinct topics.
+_TOPIC_YEAR = re.compile(r"^(?:19|20)\d\d$")
+# Weighted-overlap floor, plus a weighted-Jaccard floor as a second condition so
+# one shared word cannot marry two long, unrelated headings.
+_TOPIC_OVERLAP_MIN = 0.60
+_TOPIC_JACCARD_MIN = 0.30
+# How many extra words the longer of two headings may add and still be the same
+# topic. This bounds the containment rule below; without a bound, a one-word
+# heading would swallow every long heading that happens to contain that word.
+_TOPIC_EXTRA_MAX = 2
 
 
 def _split_note_sections(md):
@@ -4567,46 +4594,147 @@ def _split_note_sections(md):
     return out
 
 
+def _topic_stem(word):
+    """Fold the plural forms that made one topic look like two.
+
+    "Awards"/"Award" and "Books and Authors"/"Book and Author" name the same
+    topic, but before this they shared no token at all, so they could never be
+    grouped however generous the threshold was. Deliberately not a real stemmer:
+    this only has to make two spellings of one heading agree, and an over-eager
+    stem invents matches that are not there.
+    """
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
 def _topic_tokens(heading):
+    """The tokens that identify a TOPIC, with lecture-identifying words removed.
+
+    Falls back to the unfiltered set when filtering would leave nothing: a section
+    genuinely headed "Current Affairs" still has to be able to match another one
+    headed "Current Affairs".
+    """
     text = _BUNDLE_HEAD_TS.sub("", heading or "").lower()
     text = re.sub(r"[^0-9a-z\u0900-\u097f]+", " ", text)
-    return {w for w in text.split() if len(w) > 2 and w not in _TOPIC_STOP}
+    words = {_topic_stem(w) for w in text.split()
+             if len(w) > 2 and w not in _TOPIC_STOP}
+    core = {w for w in words
+            if w not in _TOPIC_NOISE and not _TOPIC_YEAR.match(w)}
+    return core or words
 
 
-def _topic_similar(a, b):
+def _topic_weights(token_sets):
+    """Down-weight words that turn up all over this particular course.
+
+    Without this, a word that appears in half the headings ("India" in an Indian
+    current-affairs course) counted for exactly as much as the word that actually
+    names the topic. That cut both ways: it invented similarity between unrelated
+    sections and hid it between matching ones.
+    """
+    hits = {}
+    for tokens in token_sets:
+        for token in tokens:
+            hits[token] = hits.get(token, 0) + 1
+    total = max(1, len(token_sets))
+    return {token: math.log(1.0 + total / float(count)) for token, count in hits.items()}
+
+
+def _topic_weight(tokens, weights):
+    return sum(weights.get(token, 1.0) for token in tokens)
+
+
+def _topic_similar(a, b, weights=None):
+    """Whether two headings name the same topic.
+
+    Weighted OVERLAP first, not plain Jaccard. The old measure could not group
+    "Sports" with "Sports News" at all, yet a longer heading that fully contains a
+    shorter one is the commonest way two lectures name one topic — and Jaccard
+    penalises exactly that, because the extra words inflate the union. The old
+    containment shortcut was meant to cover it but required two or more shared
+    words, so every single-word topic fell through to the Jaccard floor and lost.
+    """
     if not a or not b:
         return False
-    inter = len(a & b)
-    if not inter:
-        return False
-    smaller = min(len(a), len(b))
-    # Containment catches "Indus Valley" vs "Indus Valley Civilisation"; the
-    # Jaccard floor catches reordering and small wording differences.
-    if inter == smaller and smaller >= 2:
+    if a == b:
         return True
-    return inter / float(len(a | b)) >= 0.55
+    shared = a & b
+    if not shared:
+        return False
+    # Containment, bounded by how much the longer heading adds. The old code had
+    # this idea but demanded two or more shared words, so every SINGLE-word topic
+    # ("Awards", "Sports") fell through to a Jaccard floor it could not reach: the
+    # shorter and cleaner the heading, the worse it was treated. The rarity
+    # weighting below also cannot carry this case on its own — a word that appears
+    # in every heading is weighted down to nothing, so a notebook where every
+    # lecture is about awards would stop recognising "Awards" as a topic at all.
+    if shared in (a, b) and abs(len(a) - len(b)) <= _TOPIC_EXTRA_MAX:
+        return True
+    weights = weights or {}
+    shared_w = _topic_weight(shared, weights)
+    smaller_w = min(_topic_weight(a, weights), _topic_weight(b, weights))
+    union_w = _topic_weight(a | b, weights)
+    if shared_w <= 0 or smaller_w <= 0 or union_w <= 0:
+        return False
+    return (shared_w / smaller_w >= _TOPIC_OVERLAP_MIN
+            and shared_w / union_w >= _TOPIC_JACCARD_MIN)
 
 
 def _cluster_bundle_sections(sources):
     """Group the same topic across lectures. Deterministic and free: the model is
     only ever asked to WRITE a merged section, never to FIND the topics, so a bad
-    model response can never make a topic disappear from the notebook."""
+    model response can never make a topic disappear from the notebook.
+
+    Single linkage over EVERY pair, rather than the old first-match-wins scan
+    against each cluster's accumulated tokens. That scan had three defects that
+    all split topics belonging together:
+
+      * the cluster's tokens were UNIONED with every member it absorbed, so the
+        set grew, and a bigger set made each further match harder — a topic became
+        less recognisable the more lectures taught it, which is backwards;
+      * the FIRST cluster that matched won, even when a later one matched far
+        better;
+      * matching was not transitive, so which topics merged depended on the order
+        sections happened to be visited in.
+    """
+    token_sets = [_topic_tokens(src["heading"]) for src in sources]
+    weights = _topic_weights(token_sets)
+    parent = list(range(len(sources)))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]          # path compression
+            i = parent[i]
+        return i
+
+    for i in range(len(sources)):
+        for j in range(i + 1, len(sources)):
+            if not _topic_similar(token_sets[i], token_sets[j], weights):
+                continue
+            left, right = root(i), root(j)
+            if left != right:
+                # Lowest index wins, so the grouping is order-independent.
+                parent[max(left, right)] = min(left, right)
+
+    grouped = {}
+    for index, src in enumerate(sources):
+        grouped.setdefault(root(index), []).append((index, src))
     clusters = []
-    for src in sources:
-        tokens = _topic_tokens(src["heading"])
-        target = None
-        for cluster in clusters:
-            if _topic_similar(tokens, cluster["tokens"]):
-                target = cluster
-                break
-        if target is None:
-            clusters.append({
-                "title": _BUNDLE_HEAD_TS.sub("", src["heading"]).strip() or "Untitled topic",
-                "tokens": set(tokens), "sources": [src],
-                "order": (src["video_index"], src["order"])})
-        else:
-            target["tokens"] |= tokens
-            target["sources"].append(src)
+    for members in grouped.values():
+        # Teaching order inside the topic, so the excerpts reach the model — and
+        # the citations reach the reader — in the order the course taught them.
+        members.sort(key=lambda m: (m[1]["video_index"], m[1]["order"]))
+        head = members[0][1]
+        clusters.append({
+            "title": _BUNDLE_HEAD_TS.sub("", head["heading"]).strip() or "Untitled topic",
+            "tokens": set().union(*(token_sets[m[0]] for m in members)),
+            "sources": [m[1] for m in members],
+            # Distinct LECTURES, not sections. One lecture can head the same topic
+            # twice, and counting sections made "taught in N lectures" a lie.
+            "lectures": len({m[1]["video_index"] for m in members}),
+            "order": (head["video_index"], head["order"])})
     # Follow teaching order: a topic appears where it was first taught.
     clusters.sort(key=lambda c: c["order"])
     return clusters
@@ -4629,14 +4757,23 @@ def _bundle_excerpt_budget(ai, source_count, sample=""):
     return max(700, int(chars / max(1, source_count)))
 
 
-def _bundle_merge_instr(topic_title, source_count, total_videos):
+def _bundle_merge_instr(topic_title, lecture_count, section_count, total_videos):
+    """`lecture_count` is DISTINCT lectures, `section_count` is sections.
+
+    They are not the same number: one lecture can head the same topic twice, and
+    passing the section count as the lecture count made the notebook claim a topic
+    was "taught in 3 lectures" when two of those sections came from one lecture.
+    """
     high_yield = ""
-    if source_count >= 3:
+    if lecture_count >= 3:
         high_yield = ("- This topic is taught in %d of the %d selected lectures. "
                       "Put the line '**High yield** \u2014 taught in %d lectures.' "
                       "directly under the heading.\n"
-                      % (source_count, total_videos, source_count))
-    return ("You are merging what SEVERAL lectures teach about ONE topic into a "
+                      % (lecture_count, total_videos, lecture_count))
+    scope = ("what SEVERAL lectures teach about ONE topic"
+             if lecture_count > 1 else
+             "SEVERAL sections of one lecture that cover ONE topic")
+    return ("You are merging " + scope + " into a "
             "single section of a combined notebook.\n"
             "Write EXACTLY ONE section starting with '## " + topic_title + "'. Do "
             "not write any other '## ' section, preamble, or closing remark.\n"
@@ -4659,14 +4796,29 @@ def _bundle_merge_instr(topic_title, source_count, total_videos):
 
 
 def _bundle_passthrough_section(cluster):
-    """A single-lecture topic needs no model call: keep the lecture's own words,
-    just re-headed and cited."""
+    """The cluster's own words, re-headed and cited — no model call.
+
+    Used for a topic only one section covers, and as the deterministic fallback
+    whenever a merge call cannot be made or cannot be trusted. EVERY source is
+    written out: this previously emitted only the first one, which silently DROPPED
+    the other lectures' material on any cluster that ran past
+    BUNDLE_MERGE_MAX_CALLS. The invalid-merge path happened to re-emit the extras
+    itself, which hid the bug everywhere except the one place it lost content.
+    """
     src = cluster["sources"][0]
     heading = _BUNDLE_HEAD_TS.sub("", src["heading"]).strip() or cluster["title"]
     stamp = _BUNDLE_HEAD_TS.match(src["heading"] or "")
     cite = " [%s %s]" % (src["label"], stamp.group(1)) if stamp else " [%s]" % src["label"]
-    return ("## " + heading + cite + "\n\n"
-            + _bundle_citeify(src["body"], src["label"]).strip() + "\n\n")
+    out = ["## " + heading + cite + "\n\n",
+           _bundle_citeify(src["body"], src["label"]).strip() + "\n\n"]
+    for extra in cluster["sources"][1:]:
+        extra_head = _BUNDLE_HEAD_TS.sub("", extra["heading"]).strip()
+        # Keep the other lecture's own wording under its own sub-heading, so an
+        # unmerged group still reads as one topic rather than two stitched bodies.
+        if extra_head and extra_head.lower() != heading.lower():
+            out.append("### %s [%s]\n\n" % (extra_head, extra["label"]))
+        out.append(_bundle_citeify(extra["body"], extra["label"]).strip() + "\n\n")
+    return "".join(out)
 
 
 def _bundle_merge_stage(job, notes):
@@ -4726,7 +4878,7 @@ def _bundle_merge_stage(job, notes):
             excerpts.append("--- Source %s (lecture \u201c%s\u201d), section \u201c%s\u201d ---\n%s"
                             % (src["label"], src["lecture"], src["heading"], body))
         user = (_covered_note(covered) + _bundle_merge_instr(
-            cluster["title"], len(cluster["sources"]), total_videos)
+            cluster["title"], cluster["lectures"], len(cluster["sources"]), total_videos)
             + "\n\n" + "\n\n".join(excerpts) + tail)
         buf = []
         merge_ok = False
@@ -4762,9 +4914,9 @@ def _bundle_merge_stage(job, notes):
             # Buffer each AI call until it completes and validates. If a stream
             # fails after yielding tokens, none of that partial section reaches
             # the client; deterministic source sections replace it atomically.
+            # _bundle_passthrough_section now writes every source itself, so the
+            # extras must NOT be re-emitted here.
             _bundle_emit(job, _bundle_passthrough_section(cluster))
-            for extra in cluster["sources"][1:]:
-                _bundle_emit(job, _bundle_citeify(extra["body"], extra["label"]).strip() + "\n\n")
         else:
             _bundle_emit(job, written.rstrip() + "\n\n")
             covered.extend(_extract_note_headings(written))
