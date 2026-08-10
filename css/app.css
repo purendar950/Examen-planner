@@ -8894,6 +8894,88 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
 }
 #page-yt-notebook .ytnb-check-state { flex: none; font-size: .72rem; color: var(--muted, #5A6478); }
 
+/* ── determinate progress bar ──
+   Outside the <details> so it survives folding the per-lecture log away. */
+#page-yt-notebook .ytnb-bar { margin: 0 0 12px; }
+#page-yt-notebook .ytnb-bar-track {
+  height: 6px;
+  border-radius: 99px;
+  background: var(--surface, #111620);
+  border: 1px solid var(--border, #1E2535);
+  overflow: hidden;
+}
+#page-yt-notebook .ytnb-bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent, #00C896), #44ddb7);
+  transition: width .4s ease;
+}
+#page-yt-notebook .ytnb-bar.done .ytnb-bar-fill { background: var(--accent, #00C896); }
+#page-yt-notebook .ytnb-bar-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: .72rem;
+  color: var(--muted, #5A6478);
+}
+#page-yt-notebook .ytnb-bar-phase { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#page-yt-notebook .ytnb-bar-right { flex: none; }
+#page-yt-notebook .ytnb-bar-right strong { color: var(--text, #E8EDF5); font-size: .76rem; }
+
+/* ── live writing panel ──
+   Partial, unvalidated text lives here and never in the notebook above. */
+#page-yt-notebook .ytnb-live {
+  margin: 6px 0 30px;
+  background: var(--card, #161B26);
+  border: 1px solid var(--border, #1E2535);
+  border-radius: 12px;
+  overflow: hidden;
+}
+#page-yt-notebook .ytnb-live-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, #1E2535);
+  font-size: .74rem;
+  color: var(--muted, #5A6478);
+}
+#page-yt-notebook .ytnb-live-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent, #00C896);
+  animation: ytnb-live-pulse 1.4s ease-in-out infinite;
+}
+#page-yt-notebook .ytnb-live-what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text, #E8EDF5);
+}
+#page-yt-notebook .ytnb-live-count { flex: none; font-size: .7rem; }
+#page-yt-notebook .ytnb-live-text {
+  max-height: 190px;
+  overflow-y: auto;
+  padding: 10px 12px 12px;
+  font-size: .78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--muted, #5A6478);
+}
+@keyframes ytnb-live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) {
+  #page-yt-notebook .ytnb-bar-fill { transition: none; }
+  #page-yt-notebook .ytnb-live-dot { animation: none; }
+}
+
 /* The notebook is the whole page here, so the paper gets full width and grows
    with its content instead of scrolling inside a small pane. */
 #page-yt-notebook .ytnb-paper { padding-bottom: 30px; }

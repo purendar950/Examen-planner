@@ -150,10 +150,39 @@
           <span class="ytnb-run-meta" id="ytnb-run-meta"></span>
           <span class="ytnb-run-tools" id="ytnb-run-tools"></span>
         </div>
+        <!-- The bar sits OUTSIDE the <details> on purpose: it is the one thing
+             that has to stay visible once the per-lecture log is folded away.
+             It is driven by the proxy's own phase/progress fields, so it keeps
+             moving through the topic-merge pass instead of parking at 100%. -->
+        <div class="ytnb-bar" id="ytnb-bar" hidden>
+          <div class="ytnb-bar-track" id="ytnb-bar-track" role="progressbar"
+            aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+            aria-label="Notebook progress">
+            <div class="ytnb-bar-fill" id="ytnb-bar-fill"></div>
+          </div>
+          <div class="ytnb-bar-meta">
+            <span class="ytnb-bar-phase" id="ytnb-bar-phase">Getting ready…</span>
+            <span class="ytnb-bar-right">
+              <span class="ytnb-bar-eta" id="ytnb-bar-eta"></span><strong id="ytnb-bar-pct">0%</strong>
+            </span>
+          </div>
+        </div>
         <details class="ytnb-progress" id="ytnb-progress" open>
           <summary id="ytnb-progress-summary">Preparing lectures…</summary>
           <div class="ytnb-checklist" id="ytnb-checklist"></div>
         </details>
         <div class="ytnb-paper" id="ytnb-output"></div>
+        <!-- What the AI is writing THIS SECOND. Deliberately not part of the
+             notebook above: a merged section is only published once it is
+             complete and validated, so this is the only place partial text is
+             allowed to appear. -->
+        <div class="ytnb-live" id="ytnb-live" hidden>
+          <div class="ytnb-live-head">
+            <span class="ytnb-live-dot" aria-hidden="true"></span>
+            <span class="ytnb-live-what" id="ytnb-live-what">Writing…</span>
+            <span class="ytnb-live-count" id="ytnb-live-count"></span>
+          </div>
+          <div class="ytnb-live-text" id="ytnb-live-text"></div>
+        </div>
       </div>
     </div>
