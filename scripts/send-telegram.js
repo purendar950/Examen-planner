@@ -1,6 +1,6 @@
 /*
  * PrepPath — Daily Telegram study-plan sender
- * ─────────────────────────────────────────────────────────────────────────────
+ * ────────────────────────────────────────────────────────────────────────────────────────
  * Runs in GitHub Actions (see .github/workflows/daily-telegram.yml).
  *
  * For every user who has:
@@ -14,7 +14,10 @@
  *
  * The digest is built in the browser (buildTelegramDigest in app.html) and
  * stored at Firestore: users/{uid}.appState.telegram.digest = { 'YYYY-MM-DD': text }
- * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * v4 — Animated cascade: 3 sequential messages with delays,
+ * <tg-spoiler> quote reveal, gradient emoji progress, status dots.
+ * ────────────────────────────────────────────────────────────────────────────────────────
  */
 
 const admin = require('firebase-admin');
@@ -22,11 +25,16 @@ const { isProUser } = require('../shared/proGating');
 const {
   todayIST, istMinutesNow, istClockNow,
   sendTelegramMessage: _sendTelegramMessage,
-  fmtDM, shiftDate, escHtml, rolloverLabel, capLines,
+  sendSequentialMessages,
+  fmtDM, fmtDMDay, escHtml, capLines, capTaskLines,
   scheduledCourseVideos, buildTaskSections,
+  progressBar, gradientBar, hr, dotHr, sparkleHr, dailyQuote, todayTotalTasks,
+  boxTop, boxBottom, boxMid,
+  subjectEmoji, sectionHeader, completionBadge, miniStats, statPill,
+  statusDot, spoiler, taskBullet, labelPill,
 } = require('./telegram-lib');
 
-/* ── 1. Validate secrets ────────────────────────────────────────────────── */
+/* ── 1. Validate secrets ──────────────────────────────────────── */
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) {
   console.error('❌ TELEGRAM_BOT_TOKEN is not set. Add it as a GitHub secret.');
@@ -48,121 +56,206 @@ if (!svc.project_id || !svc.private_key) {
 }
 console.log(`✅ Firebase project: ${svc.project_id}`);
 
-/* ── 2. Init Firebase Admin ─────────────────────────────────────────────── */
+/* ── 2. Init Firebase Admin ─────────────────────────────── */
 admin.initializeApp({ credential: admin.credential.cert(svc) });
 const db = admin.firestore();
 
-/* ── 3. Helpers ─────────────────────────────────────────────────────────── */
-/* Date/IST-time helpers, buildTaskSections, and the Telegram send helper now
-   live in ./telegram-lib.js (shared with send-telegram-evening.js) — see that
-   file's header comment. Nothing below was changed, just moved. */
-
-/** Send a message via Telegram Bot API. Throws on API error. Thin wrapper so
- *  the rest of this file can keep calling sendTelegramMessage(chatId, text). */
+/* ── 3. Helpers ──────────────────────────────────────── */
 function sendTelegramMessage(chatId, text) {
   return _sendTelegramMessage(BOT_TOKEN, chatId, text);
 }
 
-/* ── Pro check ──────────────────────────────────────────────────────────────
-   Delegated to shared/proGating.js — the single source of truth for
-   server-side Pro/trial gating, also used by bot/bot-server.js. Auto
-   Telegram delivery is a Pro feature, so the cron must not send to free
-   users even if their appState.telegram.enabled is somehow true (stale
-   data, expired plan, etc.). Must stay behaviourally in sync with the web
-   app's ezIsPro() (js/features/preppath-phase4-gating.js) — see the
-   comment in that file. */
+function sendCascade(chatId, messages) {
+  return sendSequentialMessages(BOT_TOKEN, chatId, messages, 1200);
+}
 
-/* ── 4. Main ────────────────────────────────────────────────────────────── */
+/* ── Pro check ─────────────────────────────────────────────────
+   Delegated to shared/proGating.js. */
 
-/* Assemble the full per-user message: Study Topics + To-Do + Videos. */
+/* ── 4. Main ──────────────────────────────────────── */
+
+/* Build 3 sequential messages for the animated cascade effect:
+ *   Message 1: Header card + progress (the "teaser")
+ *   Message 2: Study topics + Tasks + Videos (the "meat")
+ *   Message 3: Motivational quote in spoiler (the "reward")
+ *
+ * Returns an array of message strings (1-3 items).
+ * Falls back to single-message mode for empty state. */
 function buildMessage(name, appState, topicDigest, today) {
-  const header = `☀️ <b>Good morning, ${escHtml(name)}!</b>\n📅 Aaj ka plan (${fmtDM(today)})\n`;
-  const sections = [];
-
-  if (topicDigest && topicDigest.trim()) {
-    sections.push('▪ <b>Study Topics</b>\n' + topicDigest.trim());
-  }
-
   const { todoLines, videoItems, doneCount } = buildTaskSections(appState, today);
+  const totalCount = todayTotalTasks(appState, today);
+  const total = totalCount + doneCount;
+  const todayPending = todoLines.filter(t => !t.overdue).length;
+  const overdueCount = todoLines.filter(t => t.overdue).length;
+  const hasContent = (topicDigest && topicDigest.trim()) || todoLines.length || videoItems.length;
+  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
+  if (!hasContent) {
+    /* Empty state — single message, no cascade */
+    const parts = [];
+    parts.push(boxTop());
+    parts.push(`<b>☀️  Good Morning, ${escHtml(name)}!</b>`);
+    parts.push(boxMid());
+    parts.push(`📅  <b>${fmtDMDay(today)}</b>`);
+    parts.push('');
+    parts.push('<b>📋  No plan scheduled today</b>');
+    parts.push(dotHr());
+    parts.push('<i>💡 App kholo → Planner mein add karo → Save karo</i>');
+    parts.push(boxMid());
+    parts.push(sparkleHr());
+    parts.push(spoiler(`<i>💬  “${dailyQuote(today)}”</i>`));
+    parts.push(sparkleHr());
+    parts.push(boxBottom());
+    parts.push(`<a href="https://examzen.in">🏠  StudyPlanner</a>`);
+    return { messages: [parts.join('\n')], hasContent: false };
+  }
+
+  /* ── MESSAGE 1: HEADER + PROGRESS (the teaser) ── */
+  const msg1 = [];
+  msg1.push(boxTop());
+  msg1.push(`<b>☀️  Good Morning, ${escHtml(name)}!</b>`);
+  msg1.push(boxMid());
+  msg1.push(`📅  <b>${fmtDMDay(today)}</b>`);
+  msg1.push('');
+  if (total > 0) {
+    msg1.push(labelPill('📊', `${statusDot(pct)}  ${doneCount}/${total} done  ·  ${todayPending} pending  ·  ${overdueCount} overdue`));
+    msg1.push('');
+    msg1.push(gradientBar(doneCount, total));
+    msg1.push(progressBar(doneCount, total));
+  }
+  msg1.push(boxBottom());
+
+  /* ── MESSAGE 2: CONTENT (study plan + tasks + videos) ── */
+  const msg2 = [];
+  let hasMsg2Content = false;
+
+  /* Study Topics */
+  if (topicDigest && topicDigest.trim()) {
+    hasMsg2Content = true;
+    msg2.push(boxTop());
+    msg2.push(sectionHeader('📚', 'Study Plan'));
+    msg2.push(hr());
+    const topicLines = topicDigest.trim().split('\n').filter(l => l.trim());
+    topicLines.forEach((line, i) => {
+      const emoji = subjectEmoji(line);
+      msg2.push(`  <code>${String(i + 1).padStart(2, '0')}</code>  ${emoji}  ${line}`);
+    });
+  }
+
+  /* Today's Tasks */
   if (todoLines.length) {
-    let block = '✓ <b>To-Do</b>\n' + capLines(todoLines, 12);
-    if (doneCount) block += `\n✅ ${doneCount} done`;
-    sections.push(block);
-  } else if (doneCount) {
-    sections.push(`✓ <b>To-Do</b>\n✅ Sab ${doneCount} tasks done — shabash! 🎉`);
+    const todayTasks = todoLines.filter(t => !t.overdue);
+    const overdueTasks = todoLines.filter(t => t.overdue);
+
+    if (todayTasks.length) {
+      if (hasMsg2Content) msg2.push('');
+      hasMsg2Content = true;
+      if (!topicDigest || !topicDigest.trim()) msg2.push(boxTop());
+      msg2.push(sectionHeader('✅', "Today's Tasks"));
+      msg2.push(hr());
+      todayTasks.forEach(t => { msg2.push(`  ${t.line}`); });
+    }
+
+    if (overdueTasks.length) {
+      if (hasMsg2Content) msg2.push('');
+      hasMsg2Content = true;
+      if (!topicDigest || !topicDigest.trim()) msg2.push(boxTop());
+      msg2.push(`<b>⚠️  OVERDUE (${overdueTasks.length})</b>`);
+      msg2.push(dotHr());
+      overdueTasks.forEach(t => { msg2.push(`  ${t.line}`); });
+    }
+
+    if (doneCount > 0) {
+      msg2.push('');
+      msg2.push(`<i>✅  ${doneCount} task${doneCount > 1 ? 's' : ''} already completed</i>`);
+    }
+  } else if (doneCount > 0) {
+    if (!topicDigest || !topicDigest.trim()) msg2.push(boxTop());
+    hasMsg2Content = true;
+    msg2.push('');
+    msg2.push(`<b>✨  ALL TASKS DONE!</b>`);
+    msg2.push(`<i>Sab ${doneCount} tasks done — shabash! 🎉</i>`);
   }
 
+  /* Videos */
   if (videoItems.length) {
-    const vlines = videoItems.map(v => `▶ <a href="${v.url}">${escHtml(v.title)}</a>`);
-    sections.push('🎥 <b>Videos</b>\n' + capLines(vlines, 10));
+    if (hasMsg2Content) msg2.push('');
+    hasMsg2Content = true;
+    if (!topicDigest || !topicDigest.trim()) msg2.push(boxTop());
+    msg2.push(sectionHeader('🎬', 'Videos'));
+    msg2.push(hr());
+    videoItems.forEach((v, i) => {
+      const emoji = subjectEmoji(v.title);
+      msg2.push(`  <code>${String(i + 1).padStart(2, '0')}</code>  ${emoji}  <a href="${v.url}">${escHtml(v.title)}</a>`);
+    });
   }
 
-  const footer = '\n\n— <a href="https://examzen.in">StudyPlanner</a>';
-  const hasContent = sections.length > 0;
-  const body = hasContent
-    ? sections.join('\n\n')
-    : '📋 Aaj koi topic/task scheduled nahi.\n💡 App kholo → Planner mein add karo → Save karo.';
-  return { text: header + '\n' + body + footer, hasContent };
+  if (hasMsg2Content) {
+    msg2.push(boxBottom());
+  }
+
+  /* ── MESSAGE 3: SPOILER QUOTE (the reward — tap to reveal!) ── */
+  const msg3 = [];
+  msg3.push(sparkleHr());
+  msg3.push(spoiler(`<i>💬  “${dailyQuote(today)}”</i>`));
+  msg3.push(sparkleHr());
+  msg3.push(`<a href="https://examzen.in">🏠  StudyPlanner</a>`);
+
+  /* Combine into cascade messages array */
+  const messages = [];
+  messages.push(msg1.join('\n'));
+  if (hasMsg2Content) messages.push(msg2.join('\n'));
+  messages.push(msg3.join('\n'));
+
+  return { messages, hasContent: true };
 }
 
 async function main() {
   const today = todayIST();
   const eventName = process.env.GITHUB_EVENT_NAME || '';
-  /* "Force" = a MANUAL "Run workflow" (gated input false) → send immediately.
-     Scheduled runs AND external-cron dispatches (gated=true) respect the
-     admin-set time gate below, so the external cron can safely ping every few
-     minutes without sending more than once per day. */
   const gated = process.env.GATED === 'true';
   const forced = (eventName === 'workflow_dispatch') && !gated;
 
-  /* ── Schedule gate ───────────────────────────────────────────────────────
-     The workflow runs every 30 min. The admin sets the daily send time in
-     config/telegram.sendTime ("HH:MM", IST, default 06:00). We send on the
-     FIRST run at/after that time each day and record config/telegram.lastSentDate
-     so we never send twice. A manual workflow_dispatch run bypasses the gate. */
+  /* ── Schedule gate ──────────────────────────────────────────────── */
   let cfg = {};
   try {
     const cfgSnap = await db.collection('config').doc('telegram').get();
     cfg = cfgSnap.exists ? (cfgSnap.data() || {}) : {};
-  } catch (e) { console.warn('⚠️  Could not read config/telegram:', e.message); }
+  } catch (e) { console.warn('\u26A0\uFE0F  Could not read config/telegram:', e.message); }
 
   const sendTime = /^\d{1,2}:\d{2}$/.test(cfg.sendTime) ? cfg.sendTime : '06:00';
   const [sh, sm] = sendTime.split(':').map(n => parseInt(n, 10));
   const targetMin = (sh * 60) + sm;
 
   if (forced) {
-    console.log('🚀 Manual run (workflow_dispatch) — bypassing schedule gate.');
+    console.log('\uD83D\uDE80 Manual run (workflow_dispatch) — bypassing schedule gate.');
   } else {
     if (cfg.lastSentDate === today) {
-      console.log(`⏭  Already auto-sent today (${today}). Nothing to do.`);
+      console.log(`\u23ED  Already auto-sent today (${today}). Nothing to do.`);
       return;
     }
     if (istMinutesNow() < targetMin) {
-      console.log(`⏰ Not send time yet. Now ${istClockNow()} IST, scheduled ${sendTime} IST. Skipping this run.`);
+      console.log(`\u23F0 Not send time yet. Now ${istClockNow()} IST, scheduled ${sendTime} IST. Skipping this run.`);
       return;
     }
-    console.log(`✅ Send window reached (now ${istClockNow()} IST ≥ ${sendTime} IST).`);
+    console.log(`\u2705 Send window reached (now ${istClockNow()} IST \u2265 ${sendTime} IST).`);
   }
 
-  /* Claim today's slot BEFORE sending so an overlapping/next 30-min run can't
-     double-send. A manual re-run (workflow_dispatch) ignores lastSentDate, so
-     the admin can always force a resend. */
   try {
     await db.collection('config').doc('telegram').set(
       { lastSentDate: today, lastRunAt: admin.firestore.FieldValue.serverTimestamp() },
       { merge: true }
     );
-  } catch (e) { console.warn('⚠️  Could not record lastSentDate:', e.message); }
+  } catch (e) { console.warn('\u26A0\uFE0F  Could not record lastSentDate:', e.message); }
 
-  console.log(`📅 Sending plans for ${today}`);
+  console.log(`\uD83D\uDCC5 Sending plans for ${today}`);
 
   const snap = await db.collection('users').get();
-  console.log(`👥 Total users in Firestore: ${snap.size}`);
+  console.log(`\uD83D\uDC65 Total users in Firestore: ${snap.size}`);
 
   const adminSnap = await db.collection('admins').get();
   const adminUids = new Set(adminSnap.docs.map(d => d.id));
-  console.log(`🛡️  Admins (always treated as Pro): ${adminUids.size}`);
+  console.log(`\uD83D\uDEE1\uFE0F  Admins (always treated as Pro): ${adminUids.size}`);
 
   let sent = 0, skipped = 0, skippedFree = 0, failed = 0, noDigest = 0;
 
@@ -170,22 +263,14 @@ async function main() {
     const data = doc.data() || {};
     const tg   = (data.appState && data.appState.telegram) || {};
 
-    /* Skip users who haven't connected Telegram */
-    if (!tg.enabled || !tg.chatId) {
-      skipped++;
-      continue;
-    }
+    if (!tg.enabled || !tg.chatId) { skipped++; continue; }
 
-    /* Pro-only feature — skip free users even if enabled/chatId are set */
     if (!adminUids.has(doc.id) && !isProUser(data, today)) {
       skippedFree++;
-      console.log(`  💎 Skipped (not Pro) → ${doc.id} chat:${tg.chatId}`);
+      console.log(`  \uD83D\uDC8E Skipped (not Pro) → ${doc.id} chat:${tg.chatId}`);
       continue;
     }
 
-    /* Read today's digest entry (study topics + revisions, browser-built) and
-       assemble the full message (topics + to-do + videos) at send time so the
-       to-do list, videos, and rolled-over items are always accurate. */
     const digest = tg.digest || {};
     const plan   = digest[today];
     const aState = data.appState || {};
@@ -197,9 +282,10 @@ async function main() {
     if (!built.hasContent) noDigest++;
 
     try {
-      await sendTelegramMessage(tg.chatId, built.text);
+      /* v4: Send as animated cascade (multiple sequential messages) */
+      await sendCascade(tg.chatId, built.messages);
       sent++;
-      console.log(`  ✅ Sent → ${doc.id} (${name}) chat:${tg.chatId}`);
+      console.log(`  ✅ Sent (${built.messages.length} msgs) → ${doc.id} (${name}) chat:${tg.chatId}`);
     } catch (e) {
       if (e.skip) {
         console.log(`  ⚠️  Skipped (blocked/not found) → ${doc.id} chat:${tg.chatId}: ${e.message}`);
@@ -211,15 +297,15 @@ async function main() {
     }
   }
 
-  console.log('\n─────────────────────────────');
+  console.log('\n' + hr());
   console.log(`Done. Sent=${sent}  Skipped=${skipped}  SkippedFree=${skippedFree}  Failed=${failed}  NoDigest=${noDigest}`);
 
   if (noDigest > 0) {
     console.log(`ℹ️  ${noDigest} user(s) got fallback message — they haven't set up a study plan yet.`);
   }
   if (failed > 0) {
-    console.log('⚠️  Some sends failed — check the error lines above.');
-    process.exit(1); // Make the Actions step red so you notice
+    console.log('\u26A0\uFE0F  Some sends failed — check the error lines above.');
+    process.exit(1);
   }
 }
 

@@ -1,6 +1,6 @@
 /*
- * PrepPath — Evening Telegram "incomplete tasks" check-in
- * ─────────────────────────────────────────────────────────────────────────────
+ * PrepPath — Evening Telegram “incomplete tasks” check-in
+ * ──────────────────────────────────────────────────────────────────────────────────────
  * Runs in GitHub Actions (see .github/workflows/evening-telegram.yml).
  * Companion to scripts/send-telegram.js (the morning digest) — this one fires
  * later in the day and tells each user what's STILL not done today: incomplete
@@ -8,20 +8,14 @@
  * and task/video extraction with the morning script via ./telegram-lib.js so
  * the two stay behaviourally consistent.
  *
- * For every user who has:
- *   - appState.telegram.enabled  = true
- *   - appState.telegram.chatId   = a numeric Telegram chat ID
- *   - (Pro or admin — same gate as the morning digest)
- * it looks at today's tasks and sends whatever is still incomplete.
- *
- * If a user has nothing tracked for today at all (no tasks, nothing done),
- * we skip them rather than send an empty "nothing to report" message every
- * evening — see the `noContent` branch in main().
- *
  * Required GitHub secrets (same two as the morning script):
  *   TELEGRAM_BOT_TOKEN        – from @BotFather
  *   FIREBASE_SERVICE_ACCOUNT  – full service-account JSON (one line or pretty-printed)
- * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * v4 — Animated cascade: 2-3 sequential messages with delays,
+ * <tg-spoiler> tomorrow preview & encouragement reveal, gradient progress,
+ * status dots, and premium card formatting.
+ * ──────────────────────────────────────────────────────────────────────────────────────
  */
 
 const admin = require('firebase-admin');
@@ -29,11 +23,16 @@ const { isProUser } = require('../shared/proGating');
 const {
   todayIST, istMinutesNow, istClockNow,
   sendTelegramMessage: _sendTelegramMessage,
-  fmtDM, escHtml, capLines,
+  sendSequentialMessages,
+  fmtDM, fmtDMDay, escHtml, capLines, capTaskLines,
   buildTaskSections,
+  progressBar, gradientBar, hr, dotHr, sparkleHr, eveningEncouragement, todayTotalTasks, shiftDate,
+  boxTop, boxBottom, boxMid,
+  subjectEmoji, sectionHeader, completionBadge, miniStats,
+  statusDot, spoiler, taskBullet, labelPill,
 } = require('./telegram-lib');
 
-/* ── 1. Validate secrets ────────────────────────────────────────────────── */
+/* ── 1. Validate secrets ────────────────────── */
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!BOT_TOKEN) {
   console.error('❌ TELEGRAM_BOT_TOKEN is not set. Add it as a GitHub secret.');
@@ -55,103 +54,193 @@ if (!svc.project_id || !svc.private_key) {
 }
 console.log(`✅ Firebase project: ${svc.project_id}`);
 
-/* ── 2. Init Firebase Admin ─────────────────────────────────────────────── */
+/* ── 2. Init Firebase Admin ────────────── */
 admin.initializeApp({ credential: admin.credential.cert(svc) });
 const db = admin.firestore();
 
-/** Send a message via Telegram Bot API. Throws on API error. */
 function sendTelegramMessage(chatId, text) {
   return _sendTelegramMessage(BOT_TOKEN, chatId, text);
 }
 
-/* ── Pro check ──────────────────────────────────────────────────────────────
-   Same gate as the morning digest (shared/proGating.js) — the evening
-   check-in is part of the same Pro Telegram feature, not a separate one. */
+function sendCascade(chatId, messages) {
+  return sendSequentialMessages(BOT_TOKEN, chatId, messages, 1200);
+}
 
-/* Assemble the evening message: what's still not done today.
-   Returns { text, hasContent } — hasContent is false when there is truly
-   nothing to say (no tasks tracked today, nothing done either), so main()
-   can skip sending rather than nag an empty message every evening. */
+/* ── Pro check ─────────────────────────────
+   Same gate as the morning digest (shared/proGating.js). */
+
+/* Build 2-3 sequential messages for animated cascade effect:
+ *   Message 1: Evening header + progress card
+ *   Message 2: Pending tasks + overdue + videos + tomorrow preview
+ *   Message 3: Encouragement in spoiler (tap to reveal!)
+ *
+ * Returns { messages: string[], hasContent: bool }. */
 function buildEveningMessage(name, appState, today) {
-  const header = `🌙 <b>Evening check-in, ${escHtml(name)}!</b>\n📅 ${fmtDM(today)} — kya baaki hai?\n`;
   const { todoLines, videoItems, doneCount } = buildTaskSections(appState, today);
+  const totalTaskCount = todayTotalTasks(appState, today);
+  const totalCount = totalTaskCount + doneCount;
   const pending = todoLines.length > 0 || videoItems.length > 0;
+  const todayPending = todoLines.filter(t => !t.overdue).length;
+  const overdueCount = todoLines.filter(t => t.overdue).length;
+  const pct = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
   if (!pending && doneCount === 0) {
-    /* Nothing tracked for today at all — nothing meaningful to report. */
-    return { text: '', hasContent: false };
+    return { messages: [], hasContent: false };
   }
 
-  const sections = [];
-  if (todoLines.length) {
-    sections.push('⏳ <b>Still pending</b>\n' + capLines(todoLines, 12));
+  /* ── MESSAGE 1: HEADER + PROGRESS (the status card) ── */
+  const msg1 = [];
+  msg1.push(boxTop());
+  msg1.push(`<b>🌙  Evening Check-in, ${escHtml(name)}!</b>`);
+  msg1.push(boxMid());
+  msg1.push(`📅  <b>${fmtDMDay(today)}</b>`);
+  msg1.push('');
+  if (totalCount > 0) {
+    msg1.push(labelPill(completionBadge(pct), `${doneCount}/${totalCount} tasks done  ·  ${todayPending} pending  ·  ${overdueCount} overdue`));
+    msg1.push('');
+    msg1.push(gradientBar(doneCount, totalCount));
+    msg1.push(progressBar(doneCount, totalCount));
+    msg1.push('');
+    msg1.push(miniStats(doneCount, todayPending, overdueCount));
+  } else {
+    msg1.push(labelPill('📊', 'No tracked tasks today'));
   }
+  msg1.push(boxBottom());
+
+  /* ── MESSAGE 2: CONTENT (pending + overdue + videos + tomorrow) ── */
+  const msg2 = [];
+  let hasMsg2Content = false;
+  const todayTasks = todoLines.filter(t => !t.overdue);
+  const overdueTasks = todoLines.filter(t => t.overdue);
+
+  /* Today's Pending */
+  if (todayTasks.length) {
+    hasMsg2Content = true;
+    msg2.push(boxTop());
+    msg2.push(sectionHeader('📋', 'Still Pending'));
+    msg2.push(hr());
+    todayTasks.forEach(t => { msg2.push(`  ${t.line}`); });
+  }
+
+  /* Overdue */
+  if (overdueTasks.length) {
+    if (hasMsg2Content) msg2.push('');
+    hasMsg2Content = true;
+    if (!todayTasks.length) msg2.push(boxTop());
+    msg2.push(`<b>⚠️  OVERDUE (${overdueTasks.length})</b>`);
+    msg2.push(dotHr());
+    overdueTasks.forEach(t => { msg2.push(`  ${t.line}`); });
+  }
+
+  /* All Done Celebration */
+  if (!pending && doneCount > 0) {
+    hasMsg2Content = true;
+    msg2.push(boxTop());
+    msg2.push(`<b>✨  ALL TASKS DONE!</b>`);
+    msg2.push(`<i>Sab ${doneCount} tasks done for today — shabash! 🎉</i>`);
+  }
+
+  /* Videos Pending */
   if (videoItems.length) {
-    const vlines = videoItems.map(v => `▶ <a href="${v.url}">${escHtml(v.title)}</a>`);
-    sections.push('🎥 <b>Videos still pending</b>\n' + capLines(vlines, 10));
-  }
-  if (!pending) {
-    /* Everything that was tracked today is done. */
-    sections.push(`✅ Sab ${doneCount} tasks done for today — shabash! 🎉`);
-  } else if (doneCount) {
-    sections.push(`✅ ${doneCount} already done today`);
+    if (hasMsg2Content) msg2.push('');
+    hasMsg2Content = true;
+    if (!todayTasks.length && !overdueTasks.length && (pending || doneCount === 0)) msg2.push(boxTop());
+    msg2.push(sectionHeader('🎬', 'Videos Pending'));
+    msg2.push(hr());
+    videoItems.forEach((v, i) => {
+      const emoji = subjectEmoji(v.title);
+      msg2.push(`  <code>${String(i + 1).padStart(2, '0')}</code>  ${emoji}  <a href="${v.url}">${escHtml(v.title)}</a>`);
+    });
   }
 
-  const footer = '\n\n— <a href="https://examzen.in">StudyPlanner</a>';
-  return { text: header + '\n' + sections.join('\n\n') + footer, hasContent: true };
+  /* Tomorrow Preview — wrapped in spoiler for interactive reveal */
+  const tomorrow = shiftDate(today, 1);
+  const tomorrowTasks = appState && appState.tasks && Array.isArray(appState.tasks[tomorrow])
+    ? appState.tasks[tomorrow].filter(t => t && !t.done && t.status !== 'done')
+    : [];
+  if (tomorrowTasks.length > 0) {
+    if (hasMsg2Content) msg2.push('');
+    hasMsg2Content = true;
+    if (!todayTasks.length && !overdueTasks.length && videoItems.length === 0 && (pending || doneCount === 0)) msg2.push(boxTop());
+    msg2.push(sectionHeader('🔮', "Tomorrow's Preview"));
+    msg2.push(hr());
+    const previewLines = [];
+    tomorrowTasks.slice(0, 3).forEach(t => {
+      const raw = t.text || 'Task';
+      previewLines.push(`  ${subjectEmoji(raw)}  ${escHtml(raw)}`);
+    });
+    if (tomorrowTasks.length > 3) {
+      previewLines.push(`  <i>…+${tomorrowTasks.length - 3} more</i>`);
+    }
+    /* Wrap tomorrow preview in spoiler — user taps to reveal! */
+    msg2.push(spoiler(previewLines.join('\n')));
+  }
+
+  if (hasMsg2Content) {
+    msg2.push(boxBottom());
+  }
+
+  /* ── MESSAGE 3: ENCOURAGEMENT SPOILER (tap to reveal!) ── */
+  const encouragement = eveningEncouragement(doneCount, totalCount);
+  const msg3 = [];
+  if (encouragement) {
+    msg3.push(sparkleHr());
+    msg3.push(spoiler(`<i>${encouragement}</i>`));
+    msg3.push(sparkleHr());
+  }
+  msg3.push(`<a href="https://examzen.in">🏠  StudyPlanner</a>`);
+
+  /* Build cascade array */
+  const messages = [];
+  messages.push(msg1.join('\n'));
+  if (hasMsg2Content) messages.push(msg2.join('\n'));
+  messages.push(msg3.join('\n'));
+
+  return { messages, hasContent: true };
 }
 
 async function main() {
   const today = todayIST();
   const eventName = process.env.GITHUB_EVENT_NAME || '';
-  /* Same "gated" pattern as the morning script: a plain manual run sends
-     immediately; scheduled runs and gated=true external-cron dispatches
-     respect the admin-set evening time + once-per-day guard below. */
   const gated = process.env.GATED === 'true';
   const forced = (eventName === 'workflow_dispatch') && !gated;
 
-  /* ── Schedule gate ───────────────────────────────────────────────────────
-     Separate from the morning gate: config/telegram.eveningSendTime ("HH:MM",
-     IST, default 20:00) and config/telegram.lastEveningSentDate, so the
-     morning and evening sends never interfere with each other's guard. */
+  /* ── Schedule gate ── */
   let cfg = {};
   try {
     const cfgSnap = await db.collection('config').doc('telegram').get();
     cfg = cfgSnap.exists ? (cfgSnap.data() || {}) : {};
-  } catch (e) { console.warn('⚠️  Could not read config/telegram:', e.message); }
+  } catch (e) { console.warn('\u26A0\uFE0F  Could not read config/telegram:', e.message); }
 
   const sendTime = /^\d{1,2}:\d{2}$/.test(cfg.eveningSendTime) ? cfg.eveningSendTime : '20:00';
   const [sh, sm] = sendTime.split(':').map(n => parseInt(n, 10));
   const targetMin = (sh * 60) + sm;
 
   if (forced) {
-    console.log('🚀 Manual run (workflow_dispatch) — bypassing schedule gate.');
+    console.log('\uD83D\uDE80 Manual run (workflow_dispatch) \u2014 bypassing schedule gate.');
   } else {
     if (cfg.lastEveningSentDate === today) {
-      console.log(`⏭  Already auto-sent this evening (${today}). Nothing to do.`);
+      console.log(`\u23ED  Already auto-sent this evening (${today}). Nothing to do.`);
       return;
     }
     if (istMinutesNow() < targetMin) {
-      console.log(`⏰ Not send time yet. Now ${istClockNow()} IST, scheduled ${sendTime} IST. Skipping this run.`);
+      console.log(`\u23F0 Not send time yet. Now ${istClockNow()} IST, scheduled ${sendTime} IST. Skipping this run.`);
       return;
     }
-    console.log(`✅ Send window reached (now ${istClockNow()} IST ≥ ${sendTime} IST).`);
+    console.log(`\u2705 Send window reached (now ${istClockNow()} IST \u2265 ${sendTime} IST).`);
   }
 
-  /* Claim today's evening slot BEFORE sending so an overlapping/next run
-     can't double-send. A manual re-run (workflow_dispatch) ignores the
-     guard, so the admin can always force a resend. */
   try {
     await db.collection('config').doc('telegram').set(
       { lastEveningSentDate: today, lastEveningRunAt: admin.firestore.FieldValue.serverTimestamp() },
       { merge: true }
     );
-  } catch (e) { console.warn('⚠️  Could not record lastEveningSentDate:', e.message); }
+  } catch (e) { console.warn('\u26A0\uFE0F  Could not record lastEveningSentDate:', e.message); }
 
-  console.log(`📅 Sending evening check-ins for ${today}`);
+  console.log(`\uD83D\uDCC5 Sending evening check-ins for ${today}`);
 
   const snap = await db.collection('users').get();
-  console.log(`👥 Total users in Firestore: ${snap.size}`);
+  console.log(`\uD83D\uDC65 Total users in Firestore: ${snap.size}`);
 
   const adminSnap = await db.collection('admins').get();
   const adminUids = new Set(adminSnap.docs.map(d => d.id));
@@ -162,10 +251,7 @@ async function main() {
     const data = doc.data() || {};
     const tg   = (data.appState && data.appState.telegram) || {};
 
-    if (!tg.enabled || !tg.chatId) {
-      skipped++;
-      continue;
-    }
+    if (!tg.enabled || !tg.chatId) { skipped++; continue; }
 
     if (!adminUids.has(doc.id) && !isProUser(data, today)) {
       skippedFree++;
@@ -178,12 +264,13 @@ async function main() {
                     : 'there';
 
     const built = buildEveningMessage(name, aState, today);
-    if (!built.hasContent) { noContent++; continue; } /* nothing tracked today — don't nag */
+    if (!built.hasContent) { noContent++; continue; }
 
     try {
-      await sendTelegramMessage(tg.chatId, built.text);
+      /* v4: Send as animated cascade */
+      await sendCascade(tg.chatId, built.messages);
       sent++;
-      console.log(`  ✅ Sent → ${doc.id} (${name}) chat:${tg.chatId}`);
+      console.log(`  ✅ Sent (${built.messages.length} msgs) → ${doc.id} (${name}) chat:${tg.chatId}`);
     } catch (e) {
       if (e.skip) {
         console.log(`  ⚠️  Skipped (blocked/not found) → ${doc.id} chat:${tg.chatId}: ${e.message}`);
@@ -195,12 +282,12 @@ async function main() {
     }
   }
 
-  console.log('\n─────────────────────────────');
+  console.log('\n' + hr());
   console.log(`Done. Sent=${sent}  Skipped=${skipped}  SkippedFree=${skippedFree}  Failed=${failed}  NoContent=${noContent}`);
 
   if (failed > 0) {
-    console.log('⚠️  Some sends failed — check the error lines above.');
-    process.exit(1); // Make the Actions step red so you notice
+    console.log('\u26A0\uFE0F  Some sends failed \u2014 check the error lines above.');
+    process.exit(1);
   }
 }
 
