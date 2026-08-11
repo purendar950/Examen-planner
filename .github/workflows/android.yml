@@ -79,10 +79,11 @@ jobs:
                 repo: context.repo.repo,
                 release_id: latestRelease.id
               });
+              // delete the tag ref (require fully-qualified ref name)
               await github.rest.git.deleteRef({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                ref: 'tags/latest-build'
+                ref: 'refs/tags/latest-build'
               });
             }
 
