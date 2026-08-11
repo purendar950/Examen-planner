@@ -26,8 +26,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          node-version: 20  # Explicitly request Node 20
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -44,27 +42,38 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
+        env:
+          ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
 
       - name: Install web dependencies
         run: npm ci
 
-      - name: Debug vendor sync
+      - name: Verify vendor dependencies exist
         run: |
-          echo "=== Before vendor:sync ==="
-          ls -la public/ 2>/dev/null || echo "public/ not found"
-          npm run vendor:sync
+          echo "=== Checking Firebase installation ==="
+          ls -la node_modules/firebase/ | head -20 || echo "Firebase NOT found"
+          echo "=== Checking Supabase installation ==="
+          ls -la node_modules/@supabase/supabase-js/dist/umd/ | head -20 || echo "Supabase NOT found"
+
+      - name: Sync vendor assets
+        run: npm run vendor:sync
+        continue-on-error: false
+
+      - name: Verify vendor sync output
+        run: |
           echo "=== After vendor:sync ==="
-          ls -la public/vendor/ 2>/dev/null || echo "public/vendor/ not found"
+          ls -la public/vendor/ || echo "public/vendor/ directory not found"
+          find public -name "*.js" 2>/dev/null | head -10
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
         working-directory: android
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace --info
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
         working-directory: android
         env:
-          GRADLE_OPTS: "-Xmx2048m"
+          GRADLE_OPTS: "-Xmx2048m -XX:+UseParallelGC"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -89,7 +98,6 @@ jobs:
                 repo: context.repo.repo,
                 release_id: latestRelease.id
               });
-              // delete the tag ref (require fully-qualified ref name)
               await github.rest.git.deleteRef({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
