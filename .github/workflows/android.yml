@@ -45,6 +45,9 @@ jobs:
       - name: Install web dependencies
         run: npm ci
 
+      - name: Sync vendor assets
+        run: npm run vendor:sync
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
         working-directory: android
