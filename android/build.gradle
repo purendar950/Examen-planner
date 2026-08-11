@@ -2,3 +2,13 @@
 plugins {
     id 'com.android.application' version '8.5.2' apply false
 }
+
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            android {
+                compileSdkVersion 34
+            }
+        }
+    }
+}
