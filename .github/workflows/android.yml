@@ -48,29 +48,15 @@ jobs:
       - name: Install web dependencies
         run: npm ci
 
-      - name: Verify vendor dependencies exist
-        run: |
-          echo "=== Checking Firebase installation ==="
-          ls -la node_modules/firebase/ | head -20 || echo "Firebase NOT found"
-          echo "=== Checking Supabase installation ==="
-          ls -la node_modules/@supabase/supabase-js/dist/umd/ | head -20 || echo "Supabase NOT found"
-
       - name: Sync vendor assets
         run: npm run vendor:sync
-        continue-on-error: false
-
-      - name: Verify vendor sync output
-        run: |
-          echo "=== After vendor:sync ==="
-          ls -la public/vendor/ || echo "public/vendor/ directory not found"
-          find public -name "*.js" 2>/dev/null | head -10
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
         working-directory: android
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: Build debug APK (with debug output)
+        run: ./gradlew assembleDebug --debug 2>&1 | tail -100
         working-directory: android
         env:
           GRADLE_OPTS: "-Xmx2048m -XX:+UseParallelGC"
