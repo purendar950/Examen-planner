@@ -37,6 +37,7 @@ const http        = require('http');
 const https       = require('https');
 /* `isLifetimePlan` is only used to word /status; the gate itself is isProUser. */
 const { isProUser, isLifetimePlan } = require('../shared/proGating');
+const calcPoll = require('./calc-poll-quiz');
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 if (!TOKEN) {
@@ -1037,6 +1038,20 @@ bot.on('callback_query', async (query) => {
   }
 });
 
+/* ── Calc Poll Quiz: skip/end callbacks ───────────────────────────────── */
+bot.on('callback_query', async (query) => {
+  const data = query && query.data ? String(query.data) : '';
+  if (!data.startsWith('calc_skip:') && !data.startsWith('calc_end:') && !data.startsWith('calc_ans:')) return;
+  const session = calcPoll.getSession(query.message && query.message.chat ? query.message.chat.id : null);
+  if (!session) return;
+  await calcPoll.handleCallback(bot, query);
+});
+
+/* ── Calc Poll Quiz: native poll answer handler ─────────────────────── */
+bot.on('poll_answer', async (pollAnswer) => {
+  await calcPoll.handlePollAnswer(bot, pollAnswer);
+});
+
 /* ════════════════════════════════════════════════════════════════════════════
    AI AUTO-SCHEDULE — handle any non-command text message
    ════════════════════════════════════════════════════════════════════════════ */
@@ -1703,9 +1718,10 @@ const CALC_PRESET_LIST_LIMIT = 10;
 /* Button labels are plain text, not HTML — escaping them here would surface a
    literal "&amp;" on the button, so `escapeTelegramHtml` is deliberately absent. */
 function calculationPresetButtonLabel(preset) {
+  const pollOk = calcPoll.isPollCompatible((preset && preset.quizIds) || []);
   const icon = String((preset && preset.icon) || '🧮').slice(0, 4);
   const name = String((preset && preset.name) || 'Practice').trim().slice(0, 40) || 'Practice';
-  return `▶ ${icon} ${name}`;
+  return pollOk ? `📊 ${icon} ${name}` : `▶ ${icon} ${name}`;
 }
 
 /* A plain text list made the user retype a name to start anything, which is
@@ -1879,8 +1895,17 @@ bot.onText(/^\/calc(?:@\w+)?(?:\s+([\s\S]+))?$/, async (msg, match) => {
       && entry.date === todayIST() && entry.reason === 'completed');
     const note = doneToday ? '✅ Aaj yeh preset already complete ho chuka hai — yeh bonus round hai.' : '';
 
-    await sendCalculationPracticeMessage(chatId, sanitizeCalculationPreset(preset), note);
-    console.log(`✅ /calc → uid:${account.uid} preset:${preset.id}`);
+    /* ── Poll-mode vs Mini-App ──
+       If ALL quiz types in the preset are poll-compatible, start a native
+       Telegram quiz poll session. Otherwise fall back to the Mini App link. */
+    const sanitized = sanitizeCalculationPreset(preset);
+    if (calcPoll.isPollCompatible(sanitized.quizIds)) {
+      await calcPoll.startPollQuiz(bot, chatId, sanitized);
+      console.log(`✅ /calc (poll mode) → uid:${account.uid} preset:${preset.id}`);
+    } else {
+      await sendCalculationPracticeMessage(chatId, sanitized, note);
+      console.log(`✅ /calc (mini-app) → uid:${account.uid} preset:${preset.id}`);
+    }
   } catch (error) {
     /* The thrown statuses carry copy written for the user (reconnect hints, Pro
        upsell, rate limit); anything else is ours and must not leak. */
