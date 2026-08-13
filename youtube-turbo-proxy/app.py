@@ -1767,6 +1767,48 @@ def _ai_chat_model_key(provider, model):
     return "%s::%s" % (provider, model)
 
 
+def _ai_chat_model_groups(models):
+    """Build dependent provider/model picker data without changing model keys.
+
+    OmniRoute is an aggregator, so its ``prefix/model`` IDs become individual
+    provider choices (for example ``OmniRoute — OpenRouter``). The full model
+    ID remains in each opaque key and is what request validation receives.
+    """
+    groups, by_key = [], {}
+    for item in models:
+        provider = item["provider"]
+        model = item["model"]
+        provider_label = item["label"]
+        subprovider = None
+        model_label = model
+        group_key = provider
+
+        if provider == "omniroute":
+            if "/" in model:
+                subprovider, model_label = model.split("/", 1)
+            else:
+                subprovider = "auto"
+                model_label = "Auto"
+            group_key = "omniroute:%s" % subprovider
+            route_label = ("Auto (smart routing)" if subprovider == "auto"
+                           else _omniroute_provider_label(subprovider))
+            provider_label = "OmniRoute — %s" % route_label
+
+        group = by_key.get(group_key)
+        if group is None:
+            group = {"key": group_key, "label": provider_label,
+                     "provider": provider, "subprovider": subprovider,
+                     "models": []}
+            by_key[group_key] = group
+            groups.append(group)
+        group["models"].append({
+            "key": _ai_chat_model_key(provider, model),
+            "label": model_label,
+            "model": model,
+        })
+    return groups
+
+
 def _ai_chat_resolve_model(models, requested_key):
     """Pick which {provider, model} to answer with. `requested_key` is
     untrusted client input (the dropdown selection) and MUST be one of the
@@ -11642,16 +11684,23 @@ def api_ai_chat_status():
     chat_cfg = _load_ai_chat_config()
     allowed = bool(is_admin or uid in chat_cfg["allowed_users"])
     models, image_models = [], []
+    provider_groups, image_provider_groups = [], []
     if allowed:
         raw_cfg = _load_study_raw_cfg()
+        available = _ai_chat_available_models(raw_cfg)
+        available_images = _ai_chat_image_models(raw_cfg)
         models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
-                  "label": "%s — %s" % (m["label"], m["model"])}
-                  for m in _ai_chat_available_models(raw_cfg)]
+                   "label": "%s — %s" % (m["label"], m["model"])}
+                  for m in available]
         image_models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
                          "label": "%s — %s" % (m["label"], m["model"])}
-                        for m in _ai_chat_image_models(raw_cfg)]
+                        for m in available_images]
+        provider_groups = _ai_chat_model_groups(available)
+        image_provider_groups = _ai_chat_model_groups(available_images)
     return jsonify({"ok": True, "enabled": allowed, "models": models,
+                    "providerGroups": provider_groups,
                     "imageModels": image_models,
+                    "imageProviderGroups": image_provider_groups,
                     "imageEnabled": bool(allowed and image_models),
                     "ragEnabled": bool(allowed and _vec_enabled())})
 
