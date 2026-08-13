@@ -71,3 +71,6 @@ jobs:
 
       - name: AI-designed notes — design-pass provider failover
         run: python youtube-turbo-proxy/tests/test_design_failover.py
+
+      - name: Notes generation — combined requirements box
+        run: python youtube-turbo-proxy/tests/test_requirements_box.py

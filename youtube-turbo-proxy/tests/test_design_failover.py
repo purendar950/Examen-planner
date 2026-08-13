@@ -60,6 +60,10 @@ def load(*ranges, **extra):
         # so the real _ai_for_provider is stubbed rather than pulled in whole.
         "STUDY_PROVIDER_IDS": ("cerebras", "google", "mistral"),
         "_ai_for_provider": lambda cfg, pid, model=None: None,
+        # The single-box requirements feature (see test_requirements_box.py for
+        # its own dedicated coverage) is not what this file tests; a no-op
+        # keeps every prompt builder here exercising failover only, unchanged.
+        "_requirements_instr": lambda requirements, for_design=False: "",
     }
     ns.update(extra)
     for start_marker, end_marker in ranges:

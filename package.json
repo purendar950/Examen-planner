@@ -24,7 +24,8 @@
     "test:media-cap": "node tests/media-save-cap.test.mjs",
     "test:tutor-backend": "python3 youtube-turbo-proxy/tests/test_tutor.py",
     "test:notebook-backend": "python3 youtube-turbo-proxy/tests/test_notebook.py",
-    "test:design-failover-backend": "python3 youtube-turbo-proxy/tests/test_design_failover.py"
+    "test:design-failover-backend": "python3 youtube-turbo-proxy/tests/test_design_failover.py",
+    "test:requirements-box-backend": "python3 youtube-turbo-proxy/tests/test_requirements_box.py"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
