@@ -3610,16 +3610,57 @@
     htmlNoteFollowPaint();
   }
 
+  /* Force the print layout regardless of what the design AI's own @media print
+     block says. _html_design_instr (app.py) ASKS every provider for a tight
+     @page margin + full-width, 2-column .page in print — but that is a prompt,
+     not a guarantee: a model can ignore it, word it in a way _html_parse_design
+     didn't expect, or a note can simply predate that instruction (already
+     generated and cached before it was added). The symptom is exactly what
+     shipped notes showed: dozens of near-empty single-column pages instead of
+     one dense, filled sheet.
+     This client-side override is injected on top of whatever CSS the note
+     actually has, with !important, so the printed layout is correct 100% of
+     the time — for every note, past or future, no matter which AI designed
+     it or how well it followed instructions. It only touches @media print, so
+     the on-screen design (colours, fonts, decoration — the actual "AI design")
+     is completely unaffected; only the print layout is pinned down. */
+  var HTML_NOTE_PRINT_OVERRIDE_CSS =
+    '@media print{' +
+      '@page{margin:8mm!important}' +
+      'body{background:#fff!important;padding:0!important}' +
+      '.page{max-width:none!important;width:100%!important;margin:0 0 6mm!important;' +
+        'padding:0!important;border-radius:0!important;box-shadow:none!important;' +
+        'min-height:0!important;height:auto!important;' +
+        'break-after:auto!important;break-before:auto!important;page-break-after:auto!important;' +
+        'column-count:2!important;column-gap:6mm!important;column-fill:auto!important}' +
+      '.h-topic,.h-sub,.figure{break-inside:avoid!important;page-break-inside:avoid!important}' +
+    '}';
+  function htmlNoteWithPrintOverride(doc) {
+    var html = String(doc || '');
+    var tag = '<style>' + HTML_NOTE_PRINT_OVERRIDE_CSS + '</style>';
+    // Inserted right before </head> so it comes AFTER the note's own <style>
+    // in source order — later rules of equal specificity win even without the
+    // !important above, so this is doubly certain to override, not merely
+    // likely to. Falls back to prepending if a truncated/malformed document
+    // (e.g. a stopped stream) has no </head> to anchor on.
+    return /<\/head>/i.test(html)
+      ? html.replace(/<\/head>/i, tag + '</head>')
+      : tag + html;
+  }
+
   /* Print / save as PDF. The note is already a standalone document with its own
      @media print rules, so there is nothing to rebuild — unlike the Markdown
-     path, which has to assemble a whole print document from an HTML fragment. */
+     path, which has to assemble a whole print document from an HTML fragment.
+     htmlNoteWithPrintOverride() still pins the print LAYOUT down on top of
+     whatever the design AI wrote — see its comment for why that is necessary
+     even though the AI is explicitly asked to get this right on its own. */
   function htmlNotePrint(doc, title) {
     var w = window.open('', '_blank');
     if (!w) {
       if (typeof showToast === 'function') showToast('Allow pop-ups to print these notes', 'error');
       return;
     }
-    var html = String(doc || '');
+    var html = htmlNoteWithPrintOverride(doc);
     if (title) {
       html = html.replace(/<title>[\s\S]*?<\/title>/i,
         '<title>' + esc(title) + '<\/title>');
@@ -3636,10 +3677,14 @@
   }
 
   // The note is a real file, so offer it as one. Downloading is also the escape
-  // hatch if a student wants to keep or share the design itself.
+  // hatch if a student wants to keep or share the design itself. The print
+  // override is included here too — it only touches @media print (see its own
+  // comment on htmlNoteWithPrintOverride), so the on-screen design a student
+  // downloads to keep or share is byte-identical either way; only what happens
+  // if THEY later print this saved file from their own browser is affected.
   function htmlNoteDownload(doc, title) {
     try {
-      var blob = new Blob([String(doc || '')], { type: 'text/html;charset=utf-8' });
+      var blob = new Blob([htmlNoteWithPrintOverride(doc)], { type: 'text/html;charset=utf-8' });
       var url = URL.createObjectURL(blob);
       var a = document.createElement('a');
       a.href = url;
