@@ -74,3 +74,6 @@ jobs:
 
       - name: Notes generation — combined requirements box
         run: python youtube-turbo-proxy/tests/test_requirements_box.py
+
+      - name: AI Chat — chat vs image model separation
+        run: python youtube-turbo-proxy/tests/test_ai_chat_models.py

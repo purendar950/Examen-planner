@@ -1741,12 +1741,18 @@ def _load_study_raw_cfg():
 
 
 def _ai_chat_available_models(cfg):
-    """Every model whose provider currently has an API key configured — the
-    exact same universe the Study AI tutor already exposes via
-    /api/status's studyModelGroups. A student in this chat can pick ANY of
+    """Every TEXT/CHAT model whose provider currently has an API key
+    configured — the exact same universe the Study AI tutor already exposes
+    via /api/status's studyModelGroups. A student in this chat can pick ANY of
     them; there is no separate admin curation step for this feature — a
     provider becomes selectable here the moment its key is added anywhere in
-    the AI Study panel, and disappears again if the key is removed."""
+    the AI Study panel, and disappears again if the key is removed.
+
+    Image-only models are deliberately EXCLUDED here even if an admin hand-added
+    one to providerModels: they cannot answer a chat turn, and they belong to
+    the separate image list (_ai_chat_image_models) that drives the dedicated
+    image-generation picker. Keeping the two lists disjoint is what stops an
+    image model from showing up in — and breaking — the chat dropdown."""
     eff = _effective_provider_models(cfg)
     out = []
     for pid in STUDY_PROVIDER_IDS:
@@ -1754,6 +1760,8 @@ def _ai_chat_available_models(cfg):
             continue
         label = STUDY_PROVIDER_LABELS.get(pid, pid.title())
         for model in eff.get(pid, []):
+            if _is_image_model_name(model):
+                continue
             out.append({"provider": pid, "model": model, "label": label})
     return out
 
@@ -2001,32 +2009,87 @@ def _is_image_model_name(model_id):
     return any(marker in lowered for marker in IMAGE_MODEL_MARKERS)
 
 
+# Image models live in their OWN catalog, deliberately NOT in
+# STUDY_PROVIDER_MODELS. Two reasons, both of which broke image generation when
+# they were merged into one list:
+#   1. STUDY_PROVIDER_MODELS feeds the TEXT/chat dropdowns (this chat and the
+#      video tutor). An image-only model there is unusable — it cannot answer a
+#      chat turn — so it must never appear in that list.
+#   2. The nightly/admin model-catalog refresh overwrites
+#      config/ai.providerModels with a list filtered by _is_text_chat_model_id,
+#      which explicitly DROPS every id containing "image"/"imagen"/"dall"/
+#      "flux". So any image model parked in providerModels is erased the next
+#      time the catalog syncs, silently turning image generation off again.
+# Hence: a separate default catalog below, overridable from a separate config
+# field (config/ai.imageModels) that no chat-catalog refresh ever touches.
+IMAGE_PROVIDER_MODELS = {
+    # Gemini's native image ("Nano Banana") models, called through the
+    # Interactions API by _ai_chat_generate_image.
+    "google": ["gemini-3.1-flash-image", "gemini-2.5-flash-image", "gemini-3-pro-image"],
+}
+
+
+def _effective_image_models(cfg):
+    """Per-provider IMAGE model list. Admin overrides in config/ai.imageModels
+    win over the defaults above; a missing/empty override falls back to them.
+    Kept entirely separate from _effective_provider_models/providerModels so a
+    chat-catalog refresh can never wipe the image list (see the long note on
+    IMAGE_PROVIDER_MODELS)."""
+    overrides = (cfg or {}).get("imageModels") or {}
+    out = {}
+    for pid, default in IMAGE_PROVIDER_MODELS.items():
+        ov = overrides.get(pid)
+        if isinstance(ov, list):
+            cleaned = [m.strip() for m in ov if isinstance(m, str) and m.strip()]
+            out[pid] = cleaned if cleaned else list(default)
+        else:
+            out[pid] = list(default)
+    return out
+
+
 def _ai_chat_image_models(cfg):
-    """Every configured Gemini model whose name signals native image output.
-    Only the `google` provider (plain Gemini API key) is used for image
-    generation — `google_interactions` already denotes the interactions
-    transport regardless of model, so listing it separately would just
-    duplicate the same models under a second label."""
-    if not _provider_configured(cfg, "google"):
-        return []
-    eff = _effective_provider_models(cfg)
-    label = STUDY_PROVIDER_LABELS.get("google", "Google Gemini")
-    return [{"provider": "google", "model": m, "label": label}
-            for m in eff.get("google", []) if _is_image_model_name(m)]
+    """Image-capable models the caller can generate with: every model from the
+    dedicated image catalog whose provider has a key configured, PLUS any
+    image-named model an admin hand-added to that provider's regular model list
+    (so a manual addition still works until the next catalog refresh strips it).
+
+    Only providers with a verified server-side image code path are listed —
+    currently `google` via the Gemini Interactions API. `google_interactions`
+    is intentionally excluded: it denotes the interactions transport for chat
+    and would just duplicate the same Gemini models under a second label."""
+    eff_images = _effective_image_models(cfg)
+    eff_text = _effective_provider_models(cfg)
+    out, seen = [], set()
+    for pid in IMAGE_PROVIDER_MODELS:
+        if not _provider_configured(cfg, pid):
+            continue
+        label = STUDY_PROVIDER_LABELS.get(pid, pid.title())
+        candidates = list(eff_images.get(pid, []))
+        candidates += [m for m in eff_text.get(pid, []) if _is_image_model_name(m)]
+        for model in candidates:
+            key = (pid, model)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"provider": pid, "model": model, "label": label})
+    return out
 
 
 def _ai_chat_generate_image(cfg, model_id, prompt, aspect_ratio=None):
     """Calls Gemini's Interactions API with response_format={"type":"image"}.
-    Returns (bytes, content_type) or (None, error_message). The API key comes
-    from _load_ai_config the same way every other call in this file resolves
-    Gemini credentials — never a client-supplied value."""
+    Returns (bytes, content_type) or (None, error_message).
+
+    Keys are read straight from the provider's configured key list rather than
+    through _load_ai_config(): that helper validates the requested model
+    against the TEXT catalog (_effective_provider_models) and silently swaps an
+    unrecognised id for a chat default, which is exactly wrong here — an image
+    model legitimately isn't in the text catalog. Going direct keeps the
+    admin-configured model we were asked for and avoids a bogus
+    "Replacing unavailable model" warning on every image request."""
     prompt = re.sub(r"\s+", " ", str(prompt or "")).strip()[:800]
     if not prompt:
         return None, "Empty prompt."
-    ai = _load_ai_config(prefer_model=model_id, prefer_provider="google")
-    if not _ai_configured(ai):
-        return None, "No Gemini API key is configured for image generation."
-    keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
+    keys = _configured_provider_keys(cfg, "google")
     if not keys:
         return None, "No Gemini API key is configured for image generation."
 
@@ -7736,7 +7799,7 @@ STUDY_PROVIDER_MODELS = {
     "cerebras":   ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
     "openrouter": ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
     "nvidia":     ["deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash", "qwen/qwen3.5-397b-a17b", "nvidia/nemotron-3-nano-30b-a3b", "z-ai/glm-5.2", "minimaxai/minimax-m3"],
-    "google":     ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.1-flash-image", "gemini-2.5-flash-image"],
+    "google":     ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
     "google_interactions": ["gemini-3.6-flash"],
     "hcnsec":     ["auto", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "Qwen3.5-397B-A17B", "Qwen3.6-35B-A3B", "MiniMax-M3", "MiniMax-M2.7", "Kimi-K2.6", "glm-5.1"],
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
