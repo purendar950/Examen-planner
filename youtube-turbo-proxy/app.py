@@ -8085,30 +8085,73 @@ def _omniroute_fetch_model_ids():
 # ---- OmniRoute IMAGE models -----------------------------------------------
 # The chat catalog above deliberately strips image/video/audio ids (see
 # _OMNIROUTE_NON_CHAT_ID_MARKERS). Image generation needs the opposite: keep
-# only the text-to-IMAGE ids, and exclude video/audio families that also match
-# a generic "media" shape (veo/sora/kling/runway/hailuo produce video, not a
-# still image, and would fail or return something unusable at /v1/images).
+# only text-to-IMAGE models.
+#
+# Detection is METADATA-FIRST, not name-based. OmniRoute's /v1/models entries
+# carry `type` and `output_modalities` — _omniroute_item_is_chat() above already
+# relies on both — and its dashboard reports ~62 models on
+# /v1/images/generations, separately from ~9 on /v1/videos/generations. Matching
+# on names alone would miss most of those 62: plenty of image models are named
+# nothing like "image" (seedream, recraft, ideogram, hidream, kolors,
+# playground, janus, kandinsky...). So:
+#   1. output_modalities containing "image" (and not "video") is authoritative.
+#   2. else an explicit type of image/text-to-image.
+#   3. else, only for catalogs that publish no metadata at all, fall back to the
+#      widened id-marker list below.
+# Video is excluded throughout: it is a different endpoint
+# (/v1/videos/generations) and would fail or return something unusable here.
 _OMNIROUTE_IMAGE_ID_MARKERS = (
-    "flux", "dall-e", "dalle", "imagen", "stable-diffusion", "sdxl",
-    "midjourney", "midijourney", "image",
+    "flux", "dall-e", "dalle", "imagen", "stable-diffusion", "sdxl", "sd3",
+    "midjourney", "midijourney", "image", "seedream", "seededit", "recraft",
+    "ideogram", "hidream", "kolors", "playground-v", "janus", "kandinsky",
+    "nano-banana", "qwen-image", "wan2", "grok-2-image", "gpt-image",
+    "photon", "luma-photon", "firefly", "titan-image",
 )
 _OMNIROUTE_NOT_IMAGE_MARKERS = (
     "veo", "sora", "kling", "runway", "hailuo", "musicgen", "lyria",
     "whisper", "tts", "speech", "audio", "polly", "embedding", "embed",
-    "rerank", "moderation", "safety", "video",
+    "rerank", "moderation", "safety", "video", "transcri",
 )
+_OMNIROUTE_IMAGE_TYPES = {"image", "images", "text-to-image", "text_to_image", "image-generation"}
 _omniroute_image_models_cache = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
 _omniroute_image_models_lock = threading.Lock()
 
 
 def _omniroute_id_is_image(model_id):
-    """True for an id that looks like a text-to-image model and not video/audio."""
+    """Name-only fallback for catalog entries that publish no capability
+    metadata. Prefer _omniroute_item_is_image(), which uses the metadata."""
     lowered = (model_id or "").lower()
     if not lowered:
         return False
     if any(marker in lowered for marker in _OMNIROUTE_NOT_IMAGE_MARKERS):
         return False
     return any(marker in lowered for marker in _OMNIROUTE_IMAGE_ID_MARKERS)
+
+
+def _omniroute_item_is_image(item, model_id):
+    """Whether a /v1/models entry can serve text-to-image generation.
+
+    Mirrors _omniroute_item_is_chat()'s use of the catalog's own `type` and
+    `output_modalities` fields, inverted for image output. Falls back to the id
+    markers only when the entry carries neither field."""
+    item = item if isinstance(item, dict) else {}
+    modalities = item.get("output_modalities")
+    if isinstance(modalities, list) and modalities:
+        outputs = {str(v).strip().lower() for v in modalities}
+        if "video" in outputs:
+            return False          # video endpoint's territory, not ours
+        return "image" in outputs
+    model_type = str(item.get("type") or "").strip().lower()
+    if model_type:
+        if model_type in _OMNIROUTE_IMAGE_TYPES:
+            return True
+        # A declared non-image type is authoritative — don't second-guess it
+        # with the name heuristic.
+        if model_type in {"model", "chat", "text", "llm", "video", "audio",
+                          "embedding", "rerank", "moderation"}:
+            return model_type == "model" and _omniroute_id_is_image(model_id)
+        return False
+    return _omniroute_id_is_image(model_id)
 
 
 def _omniroute_fetch_image_model_ids():
@@ -8149,7 +8192,7 @@ def _omniroute_fetch_image_model_ids():
                     model_id = str(item.get("id") or "").strip()
                     if not model_id or model_id in seen:
                         continue
-                    if _omniroute_id_is_image(model_id):
+                    if _omniroute_item_is_image(item, model_id):
                         seen.add(model_id)
                         ids.append(model_id)
                 if ids:
