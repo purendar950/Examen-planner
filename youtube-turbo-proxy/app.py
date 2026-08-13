@@ -1680,13 +1680,25 @@ _ai_chat_cfg_cache = {"ts": 0.0, "data": None}
 
 
 def _load_ai_chat_config():
-    """Returns {allowed_users: set(uid), provider, model}. Fails closed
-    (empty allowlist) if the doc is missing, unreadable, or Firestore is
-    unavailable — nobody gets access rather than everybody."""
+    """Returns {allowed_users: set(uid), models: [{provider, model, label}, ...],
+    default_model_key, image_enabled}. Fails closed (empty allowlist AND empty
+    model list) if the doc is missing, unreadable, or Firestore is unavailable
+    — nobody gets access and nothing is answerable rather than everybody/anything.
+
+    v2 schema (config/aiChat):
+      allowedUsers  : {uid: true}   — same shape as v1
+      allowedEmails : [email, ...] — display mirror only, never trusted for auth
+      models        : [{provider, model}, ...] — ADMIN-CURATED allowlist of
+                      provider/model pairs a granted user may pick from in the
+                      chat's model dropdown. Replaces v1's single provider+model
+                      fields (still read as a length-1 fallback below so an
+                      existing v1 config keeps working without a re-save).
+      imageEnabled  : bool — whether the 🎨 image-generation action is shown.
+    """
     now = time.time()
     if _ai_chat_cfg_cache["data"] is not None and now - _ai_chat_cfg_cache["ts"] < AI_CHAT_TTL:
         return _ai_chat_cfg_cache["data"]
-    out = {"allowed_users": set(), "provider": "", "model": ""}
+    out = {"allowed_users": set(), "models": [], "image_enabled": False}
     if _fb_db:
         try:
             doc = _fb_db.collection("config").document("aiChat").get()
@@ -1696,8 +1708,25 @@ def _load_ai_chat_config():
                 if isinstance(allowed, list):
                     allowed = {u: True for u in allowed}
                 out["allowed_users"] = {u for u, v in allowed.items() if v}
-                out["provider"] = str(d.get("provider") or "").strip().lower()
-                out["model"] = str(d.get("model") or "").strip()
+                models = d.get("models")
+                cleaned = []
+                if isinstance(models, list):
+                    for m in models:
+                        if not isinstance(m, dict):
+                            continue
+                        pid = str(m.get("provider") or "").strip().lower()
+                        model = str(m.get("model") or "").strip()
+                        if pid in STUDY_PROVIDER_IDS and model:
+                            cleaned.append({"provider": pid, "model": model})
+                # v1 fallback: a single {provider, model} pair saved before the
+                # multi-model UI shipped. Read once so old configs keep working.
+                if not cleaned and d.get("provider") and d.get("model"):
+                    pid = str(d.get("provider") or "").strip().lower()
+                    model = str(d.get("model") or "").strip()
+                    if pid in STUDY_PROVIDER_IDS and model:
+                        cleaned.append({"provider": pid, "model": model})
+                out["models"] = cleaned
+                out["image_enabled"] = bool(d.get("imageEnabled"))
         except Exception as exc:  # noqa: BLE001
             log.warning("config/aiChat read failed: %s", exc)
     _ai_chat_cfg_cache["ts"] = now
@@ -1705,12 +1734,269 @@ def _load_ai_chat_config():
     return out
 
 
-def _ai_chat_tab_sys():
+def _ai_chat_model_key(provider, model):
+    return "%s::%s" % (provider, model)
+
+
+def _ai_chat_resolve_model(chat_cfg, requested_key):
+    """Pick which {provider, model} to answer with. `requested_key` is untrusted
+    client input (the dropdown selection) and MUST be one of the admin's curated
+    pairs — fails closed to the first configured pair otherwise, never to an
+    arbitrary provider the admin never approved for this feature."""
+    models = chat_cfg["models"]
+    if not models:
+        return None
+    if requested_key:
+        for m in models:
+            if _ai_chat_model_key(m["provider"], m["model"]) == requested_key:
+                return m
+    return models[0]
+
+
+def _ai_chat_tab_sys(persona=None):
     today = datetime.now(timezone.utc).strftime("%d %B %Y")
-    return ("You are a helpful, friendly AI assistant inside a study-planner app "
+    base = ("You are a helpful, friendly AI assistant inside a study-planner app "
             "used by students preparing for competitive exams. Answer clearly and "
             "concisely, using Markdown formatting where it helps readability. "
             "Today's date is %s." % today)
+    persona = str(persona or "").strip()[:800]
+    if persona:
+        # The persona is student-authored, untrusted text — treated as a style/
+        # tone instruction layered on TOP of the base system prompt, never as a
+        # replacement for it, so it cannot be used to strip the app's own rules.
+        base += ("\n\nADDITIONAL INSTRUCTIONS FROM THE STUDENT for how you should "
+                 "respond (a custom persona/system prompt they set for this "
+                 "conversation) — follow these unless they conflict with the "
+                 "rules above:\n%s" % persona)
+    return base
+
+
+# ---- AI Chat tab: file upload RAG (per-thread, per-user) ------------------
+# Reuses the SAME Supabase project + embedding pipeline as the video tutor's
+# note_chunks (MEMORY_SUPA_URL/_KEY, EMBED_MODEL, _embed_texts) — see
+# supabase/ai_chat_rag.sql for the table/RPC definitions and the security
+# rationale (RLS enabled, no policies, service-role only, never touched by the
+# browser). Files/chunks are scoped by (uid, thread_id) rather than global,
+# because unlike a public lecture's notes, a student's uploaded file is theirs
+# alone and tied to one conversation.
+AI_CHAT_FILE_MAX_BYTES = int(os.environ.get("AI_CHAT_FILE_MAX_BYTES", str(8 * 1024 * 1024)))
+AI_CHAT_FILE_CHUNK_CHARS = int(os.environ.get("AI_CHAT_FILE_CHUNK_CHARS", "1800"))
+AI_CHAT_FILE_TOP_K = int(os.environ.get("AI_CHAT_FILE_TOP_K", "8"))
+AI_CHAT_FILES_PER_THREAD = int(os.environ.get("AI_CHAT_FILES_PER_THREAD", "10"))
+
+
+def _ai_chat_supa_upsert(table, on_conflict, rows):
+    """Same shape as _supa_upsert_chunks but parameterised on table name, since
+    this feature writes to ai_chat_chunks/ai_chat_files rather than note_chunks."""
+    if not _vec_enabled() or not rows:
+        return False
+    try:
+        url = "%s/rest/v1/%s" % (MEMORY_SUPA_URL, table)
+        if on_conflict:
+            url += "?on_conflict=" + on_conflict
+        r = requests.post(url, headers=dict(_supa_headers(),
+                          Prefer="resolution=merge-duplicates,return=representation"),
+                          json=rows, timeout=60)
+        if r.status_code >= 300:
+            log.warning("supabase %s upsert failed: HTTP %s %s", table, r.status_code, r.text[:200])
+            return False
+        return r.json()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("supabase %s upsert threw: %s", table, exc)
+        return False
+
+
+def _ai_chat_supa_patch(table, row_id, fields):
+    if not _vec_enabled():
+        return False
+    try:
+        r = requests.patch("%s/rest/v1/%s?id=eq.%s" % (MEMORY_SUPA_URL, table, row_id),
+                           headers=dict(_supa_headers(), Prefer="return=minimal"),
+                           json=fields, timeout=30)
+        return r.status_code < 300
+    except Exception as exc:  # noqa: BLE001
+        log.warning("supabase %s patch threw: %s", table, exc)
+        return False
+
+
+def _ai_chat_supa_select(table, params):
+    if not _vec_enabled():
+        return []
+    try:
+        r = requests.get("%s/rest/v1/%s" % (MEMORY_SUPA_URL, table),
+                         headers=_supa_headers(), params=params, timeout=30)
+        if r.status_code >= 300:
+            return []
+        return r.json() or []
+    except Exception as exc:  # noqa: BLE001
+        log.warning("supabase %s select threw: %s", table, exc)
+        return []
+
+
+def _ai_chat_supa_delete(table, params):
+    if not _vec_enabled():
+        return False
+    try:
+        r = requests.delete("%s/rest/v1/%s" % (MEMORY_SUPA_URL, table),
+                            headers=_supa_headers(), params=params, timeout=30)
+        return r.status_code < 300
+    except Exception as exc:  # noqa: BLE001
+        log.warning("supabase %s delete threw: %s", table, exc)
+        return False
+
+
+def _chunk_plain_text(text, max_chars=None):
+    """Generic paragraph-aware chunker for uploaded files (no heading structure
+    to lean on, unlike _chunk_notes_md). Splits on blank lines, packs paragraphs
+    up to max_chars, and hard-splits any single paragraph that alone exceeds it
+    (a wall-of-text PDF page with no blank lines) so no chunk is ever dropped."""
+    max_chars = max_chars or AI_CHAT_FILE_CHUNK_CHARS
+    text = (text or "").strip()
+    if not text:
+        return []
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if not paras:
+        paras = [text]
+    chunks, buf, size = [], [], 0
+    for para in paras:
+        if len(para) > max_chars:
+            if buf:
+                chunks.append("\n\n".join(buf))
+                buf, size = [], 0
+            for i in range(0, len(para), max_chars):
+                chunks.append(para[i:i + max_chars])
+            continue
+        if size + len(para) > max_chars and buf:
+            chunks.append("\n\n".join(buf))
+            buf, size = [], 0
+        buf.append(para)
+        size += len(para)
+    if buf:
+        chunks.append("\n\n".join(buf))
+    return chunks
+
+
+def _extract_file_text(raw_bytes, mime_type, file_name):
+    """Best-effort plain-text extraction. Returns (text, error). Never raises —
+    an unsupported or corrupt file becomes a user-facing error message, not a
+    500. Supported: .txt/.md (any UTF-8-ish text) and .pdf (via pypdf)."""
+    name = (file_name or "").lower()
+    if name.endswith(".pdf") or mime_type == "application/pdf":
+        try:
+            import io as _io
+            from pypdf import PdfReader
+            reader = PdfReader(_io.BytesIO(raw_bytes))
+            pages = [(page.extract_text() or "") for page in reader.pages]
+            text = "\n\n".join(p for p in pages if p.strip())
+            if not text.strip():
+                return None, ("No extractable text found in this PDF (it may be "
+                              "a scanned image with no text layer).")
+            return text, None
+        except Exception as exc:  # noqa: BLE001
+            return None, "Could not read this PDF: %s" % str(exc)[:150]
+    # Treat everything else as plain text (.txt, .md, .csv, code files, etc.)
+    try:
+        return raw_bytes.decode("utf-8"), None
+    except UnicodeDecodeError:
+        try:
+            return raw_bytes.decode("latin-1"), None
+        except Exception:  # noqa: BLE001
+            return None, "Unsupported file type — upload a .txt, .md, or .pdf file."
+
+
+def _ai_chat_index_file(uid, thread_id, file_row_id, text):
+    """Chunk + embed + store one file's text. Updates ai_chat_files.status to
+    ready/failed on completion so the UI's "Indexing…" pill resolves."""
+    chunks = _chunk_plain_text(text)
+    if not chunks:
+        _ai_chat_supa_patch("ai_chat_files", file_row_id,
+                            {"status": "failed", "error": "File has no readable text."})
+        return
+    vectors = _embed_texts(chunks)
+    if not vectors or len(vectors) != len(chunks):
+        _ai_chat_supa_patch("ai_chat_files", file_row_id,
+                            {"status": "failed",
+                             "error": "Embedding failed — no embedding key configured, or the provider errored."})
+        return
+    rows = []
+    for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
+        rows.append({"file_id": file_row_id, "uid": uid, "thread_id": thread_id,
+                     "chunk_index": i, "chunk_text": chunk, "embedding": vec,
+                     "embed_model": EMBED_MODEL})
+    ok = _ai_chat_supa_upsert("ai_chat_chunks", "file_id,chunk_index", rows)
+    if ok:
+        _ai_chat_supa_patch("ai_chat_files", file_row_id,
+                            {"status": "ready", "chunk_count": len(rows)})
+    else:
+        _ai_chat_supa_patch("ai_chat_files", file_row_id,
+                            {"status": "failed", "error": "Could not save the indexed file. Try again."})
+
+
+def _ai_chat_index_file_async(uid, thread_id, file_row_id, text):
+    threading.Thread(target=_ai_chat_index_file, args=(uid, thread_id, file_row_id, text),
+                     daemon=True).start()
+
+
+def _ai_chat_retrieve_file_context(question, thread_id, k=None):
+    """Embed the question and pull the nearest chunks from files attached to
+    this thread. Returns [] when no files are indexed, semantic search is
+    unavailable, or the embedding call fails — callers treat that exactly like
+    "no files attached", never as an error."""
+    if not _vec_enabled() or not thread_id:
+        return []
+    vecs = _embed_texts([question])
+    if not vecs:
+        return []
+    rows = _supa_rpc("match_ai_chat_chunks", {"q": vecs[0], "tid": thread_id,
+                                              "k": int(k or AI_CHAT_FILE_TOP_K)})
+    return rows if isinstance(rows, list) else []
+
+
+def _ai_chat_file_context_block(rows):
+    lines = []
+    for i, r in enumerate(rows, 1):
+        lines.append("[File %d]\n%s" % (i, r.get("chunk_text") or ""))
+    return "\n\n".join(lines)
+
+
+# ---- AI Chat tab: image generation (keyless, no API key to manage) --------
+# Uses pollinations.ai's public, keyless, URL-based image endpoint so this
+# feature needs zero new secrets in the admin panel. The backend fetches the
+# bytes server-side (never lets the browser hit a third-party URL directly)
+# and returns them as a data URL, keeping the same "everything through our
+# proxy" pattern as every other AI feature here. Disclosed to the admin in the
+# admin panel copy since it is a new third-party dependency, unlike the chat
+# text path which only ever talks to providers the admin already configured.
+IMAGE_GEN_ENDPOINT = os.environ.get("IMAGE_GEN_ENDPOINT", "https://image.pollinations.ai/prompt/").rstrip("/") + "/"
+IMAGE_GEN_MODEL = os.environ.get("IMAGE_GEN_MODEL", "flux")
+IMAGE_GEN_TIMEOUT = int(os.environ.get("IMAGE_GEN_TIMEOUT", "90"))
+
+
+def _ai_chat_generate_image(prompt, width=1024, height=1024, seed=None):
+    """Returns (bytes, content_type) or (None, error_message)."""
+    prompt = re.sub(r"\s+", " ", str(prompt or "")).strip()[:800]
+    if not prompt:
+        return None, "Empty prompt."
+    import urllib.parse
+    url = IMAGE_GEN_ENDPOINT + urllib.parse.quote(prompt)
+    params = {"width": max(256, min(1536, int(width or 1024))),
+             "height": max(256, min(1536, int(height or 1024))),
+             "model": IMAGE_GEN_MODEL, "nologo": "true"}
+    if seed is not None:
+        try:
+            params["seed"] = int(seed)
+        except (TypeError, ValueError):
+            pass
+    try:
+        r = requests.get(url, params=params, timeout=IMAGE_GEN_TIMEOUT)
+        if r.status_code != 200 or not r.content:
+            return None, "Image service returned HTTP %s." % r.status_code
+        ctype = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+        if not ctype.startswith("image/"):
+            return None, "Image service did not return an image."
+        return r.content, ctype
+    except requests.RequestException as exc:
+        return None, "Image service request failed: %s" % str(exc)[:150]
 
 
 _ai_calls = []                   # (ts, est_tokens) within the last 60s
@@ -10874,13 +11160,32 @@ def api_tutor():
                     "web": data["web"], "quota": data["quota"]})
 
 
+def _ai_chat_authorize():
+    """Shared auth+allowlist check for every /api/ai-chat* route. Returns
+    (user, chat_cfg, is_admin, err) where err is an (payload, status) tuple to
+    return immediately on failure, else None."""
+    user, auth_err = _require_firebase_user()
+    if auth_err:
+        return None, None, False, auth_err
+    uid = user["uid"]
+    chat_cfg = _load_ai_chat_config()
+    try:
+        _, is_admin = _cached_user_data_and_admin(uid)
+    except Exception:  # noqa: BLE001
+        is_admin = False
+    if not is_admin and uid not in chat_cfg["allowed_users"]:
+        return None, None, False, ({"error": "forbidden",
+                                    "detail": "AI Chat is not enabled for this account."}, 403)
+    return user, chat_cfg, is_admin, None
+
+
 @app.get("/api/ai-chat/status")
 def api_ai_chat_status():
-    """Whether the AI Chat tab should be visible for the caller. No Pro/entitlement
-    check on purpose — the admin's allowlist is the sole gate for this feature, so
-    a free-plan user the admin explicitly grants access to can still use it.
-    The allowlist and provider/model choice never reach the browser, only this
-    single boolean."""
+    """Whether the AI Chat tab should be visible for the caller, and — if so —
+    which models they may pick from and whether image generation is on. No
+    Pro/entitlement check on purpose — the admin's allowlist is the sole gate
+    for this feature. Model API keys never reach the browser; only labels +
+    an opaque `key` string (used to select a model on later requests) do."""
     user, err = _require_firebase_user()
     if err:
         return jsonify(err[0]), err[1]
@@ -10891,55 +11196,84 @@ def api_ai_chat_status():
         is_admin = False
     chat_cfg = _load_ai_chat_config()
     allowed = bool(is_admin or uid in chat_cfg["allowed_users"])
-    return jsonify({"ok": True, "enabled": allowed})
+    models = []
+    if allowed:
+        for m in chat_cfg["models"]:
+            label = STUDY_PROVIDER_LABELS.get(m["provider"], m["provider"].title())
+            models.append({"key": _ai_chat_model_key(m["provider"], m["model"]),
+                           "label": "%s — %s" % (label, m["model"])})
+    return jsonify({"ok": True, "enabled": allowed, "models": models,
+                    "imageEnabled": bool(allowed and chat_cfg["image_enabled"]),
+                    "ragEnabled": bool(allowed and _vec_enabled())})
 
 
-@app.route("/api/ai-chat", methods=["POST"])
-def api_ai_chat():
-    """Standalone AI Chat tab — no video/transcript involved. Admin-allowlisted
-    users only, always answered by the single provider/model the admin locked
-    in config/aiChat. History is client-supplied and NOT stored server-side
-    (the tab persists chats locally per the product decision to keep this
-    lightweight); rate limiting is admin-controlled (unlimited by policy, but
-    the bucket exists so a future admin can tighten it without a code change)."""
-    user, auth_err = _require_firebase_user()
-    if auth_err:
-        return jsonify(auth_err[0]), auth_err[1]
-    uid = user["uid"]
-
-    chat_cfg = _load_ai_chat_config()
-    is_admin = False
-    try:
-        _, is_admin = _cached_user_data_and_admin(uid)
-    except Exception:  # noqa: BLE001
-        is_admin = False
-    if not is_admin and uid not in chat_cfg["allowed_users"]:
-        return jsonify({"error": "forbidden",
-                        "detail": "AI Chat is not enabled for this account."}), 403
-
-    body = request.get_json(silent=True) or {}
+def _ai_chat_build_messages(chat_cfg, body, thread_id):
+    """Shared message-building for the blocking and streaming chat endpoints.
+    Returns (err, messages, ai, web_sources) — err is set on any failure."""
     q = str(body.get("q") or "").strip()
     if not q:
-        return jsonify({"error": "missing_question", "detail": "Pass q"}), 400
+        return ({"error": "missing_question", "detail": "Pass q"}, 400), None, None, None
     if len(q) > 4000:
-        return jsonify({"error": "question_too_long", "detail": "Keep it under 4000 characters."}), 400
+        return ({"error": "question_too_long", "detail": "Keep it under 4000 characters."}, 400), None, None, None
 
+    if not chat_cfg["models"]:
+        return ({"error": "ai_chat_not_configured",
+                "detail": "AI Chat has no model configured yet. Ask an admin to set one up."}, 503), None, None, None
+    picked = _ai_chat_resolve_model(chat_cfg, str(body.get("model") or "").strip())
+    ai = _load_ai_config(prefer_model=picked["model"], prefer_provider=picked["provider"])
+    if not _ai_configured(ai):
+        return ({"error": "ai_not_configured",
+                "detail": "That model has no API key configured."}, 503), None, None, None
+
+    persona = str(body.get("persona") or "").strip()[:800]
+    sysmsg = _ai_chat_tab_sys(persona)
+
+    web_sources = []
+    web_pref = body.get("web")
+    if _web_mode(web_pref) != "off" and len(q) >= 8:
+        if _web_mode(web_pref) == "on" or _WEB_TRIGGER_RE.search(q):
+            if _load_search_config()["enabled"]:
+                results = _web_search(q)
+                if results:
+                    web_sources = results
+                    sysmsg += ("\n\nWEB RESULTS (live, fetched just now for this "
+                              "question — newer and more reliable than your "
+                              "training data):\n%s" % _web_context_block(results))
+    sysmsg += _world_context()
+
+    file_rows = _ai_chat_retrieve_file_context(q, thread_id) if thread_id else []
+    if file_rows:
+        sysmsg += ("\n\nFILES THE STUDENT ATTACHED TO THIS CONVERSATION (most "
+                  "relevant passages, retrieved for this question — cite as "
+                  "[File 1], [File 2] etc. matching the numbers below):\n%s"
+                  % _ai_chat_file_context_block(file_rows))
+
+    messages = [{"role": "system", "content": sysmsg}]
     history = body.get("history") or []
-    messages = [{"role": "system", "content": _ai_chat_tab_sys()}]
     if isinstance(history, list):
         for m in history[-20:]:
             if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
                 messages.append({"role": m["role"], "content": str(m["content"])[:4000]})
     messages.append({"role": "user", "content": q})
+    return None, messages, ai, _web_sources_public(web_sources)
 
-    if not chat_cfg["provider"]:
-        return jsonify({"error": "ai_chat_not_configured",
-                        "detail": "AI Chat has no provider configured yet. Ask an admin to set it up."}), 503
 
-    ai = _load_ai_config(prefer_model=chat_cfg["model"] or None, prefer_provider=chat_cfg["provider"])
-    if not _ai_configured(ai):
-        return jsonify({"error": "ai_not_configured",
-                        "detail": "The AI Chat provider has no API key configured."}), 503
+@app.route("/api/ai-chat", methods=["POST"])
+def api_ai_chat():
+    """Standalone AI Chat tab, blocking variant — no video/transcript involved.
+    Admin-allowlisted users only, answered by an admin-curated model the
+    caller picked from their allowed list. History is client-supplied and NOT
+    stored server-side (chats persist client-side, see js/tabs/ai-chat.js);
+    rate limiting is admin-controlled (unlimited by policy, but the plumbing
+    is here so a future admin can tighten it without a code change)."""
+    user, chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    body = request.get_json(silent=True) or {}
+    thread_id = str(body.get("threadId") or "").strip()[:120]
+    err, messages, ai, web = _ai_chat_build_messages(chat_cfg, body, thread_id)
+    if err:
+        return jsonify(err[0]), err[1]
 
     try:
         answer = _ai_chat(messages, ai, max_tokens=_TUTOR_MAX_TOKENS)
@@ -10947,7 +11281,136 @@ def api_ai_chat():
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     return jsonify({"answer": answer, "provider": _ai_display_provider(ai),
-                    "model": _ai_display_model(ai)})
+                    "model": _ai_display_model(ai), "web": web})
+
+
+@app.route("/api/ai-chat/stream", methods=["POST"])
+def api_ai_chat_stream():
+    """Streaming (SSE) variant of /api/ai-chat — same auth, same message
+    building, but relays the answer token-by-token so it types out live,
+    mirroring /api/tutor/stream's exact pattern (meta frame, chunk frames,
+    done/error frames)."""
+    user, chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    body = request.get_json(silent=True) or {}
+    thread_id = str(body.get("threadId") or "").strip()[:120]
+    err, messages, ai, web = _ai_chat_build_messages(chat_cfg, body, thread_id)
+    if err:
+        return jsonify(err[0]), err[1]
+
+    def _sse(event, payload):
+        return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False))
+
+    _sse_headers = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
+
+    def gen():
+        yield _sse("meta", {"provider": _ai_display_provider(ai),
+                            "model": _ai_display_model(ai), "web": web})
+        produced = False
+        try:
+            for piece in _ai_chat_stream(messages, ai, max_tokens=_TUTOR_MAX_TOKENS):
+                produced = True
+                yield _sse("chunk", {"t": piece})
+        except Exception as exc:  # noqa: BLE001
+            yield _sse("error", {"error": "ai_failed", "detail": str(exc)[:200]})
+            return
+        if not produced:
+            yield _sse("error", {"error": "ai_failed", "detail": "empty response"})
+            return
+        yield _sse("done", {})
+
+    return Response(stream_with_context(gen()), mimetype="text/event-stream", headers=_sse_headers)
+
+
+@app.route("/api/ai-chat/files", methods=["GET", "POST"])
+def api_ai_chat_files():
+    """GET: list files attached to a thread (id, name, status, chunk_count).
+    POST: upload one file (multipart, field name 'file'), extract text, and
+    index it in the background — the response returns immediately with
+    status='processing' so the UI can show a spinner rather than blocking the
+    whole request on embedding, which can take several seconds for a big PDF."""
+    user, chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    if not _vec_enabled():
+        return jsonify({"error": "rag_not_configured",
+                        "detail": "File uploads need the semantic search database configured. Ask an admin."}), 503
+    uid = user["uid"]
+
+    if request.method == "GET":
+        thread_id = str(request.args.get("threadId") or "").strip()[:120]
+        if not thread_id:
+            return jsonify({"error": "missing_thread"}), 400
+        rows = _ai_chat_supa_select("ai_chat_files",
+                                    {"uid": "eq.%s" % uid, "thread_id": "eq.%s" % thread_id,
+                                     "select": "id,file_name,file_size,status,error,chunk_count,created_at",
+                                     "order": "created_at.asc"})
+        return jsonify({"files": rows})
+
+    thread_id = str(request.form.get("threadId") or "").strip()[:120]
+    if not thread_id:
+        return jsonify({"error": "missing_thread"}), 400
+    existing = _ai_chat_supa_select("ai_chat_files",
+                                    {"uid": "eq.%s" % uid, "thread_id": "eq.%s" % thread_id,
+                                     "select": "id"})
+    if len(existing) >= AI_CHAT_FILES_PER_THREAD:
+        return jsonify({"error": "too_many_files",
+                        "detail": "Max %d files per conversation. Remove one first." % AI_CHAT_FILES_PER_THREAD}), 400
+    up = request.files.get("file")
+    if not up or not up.filename:
+        return jsonify({"error": "missing_file"}), 400
+    raw = up.read(AI_CHAT_FILE_MAX_BYTES + 1)
+    if len(raw) > AI_CHAT_FILE_MAX_BYTES:
+        return jsonify({"error": "file_too_large",
+                        "detail": "Max %d MB." % (AI_CHAT_FILE_MAX_BYTES // (1024 * 1024))}), 400
+    text, extract_err = _extract_file_text(raw, up.mimetype, up.filename)
+    if extract_err:
+        return jsonify({"error": "extract_failed", "detail": extract_err}), 400
+
+    created = _ai_chat_supa_upsert("ai_chat_files", None, [{
+        "uid": uid, "thread_id": thread_id, "file_name": up.filename[:200],
+        "file_size": len(raw), "mime_type": up.mimetype or "", "status": "processing",
+    }])
+    if not created or not isinstance(created, list) or not created[0].get("id"):
+        return jsonify({"error": "save_failed", "detail": "Could not save the file record."}), 502
+    file_row_id = created[0]["id"]
+    _ai_chat_index_file_async(uid, thread_id, file_row_id, text)
+    return jsonify({"id": file_row_id, "file_name": up.filename[:200], "status": "processing"})
+
+
+@app.delete("/api/ai-chat/files/<int:file_id>")
+def api_ai_chat_delete_file(file_id):
+    """Delete one uploaded file (and its chunks, via the FK cascade)."""
+    user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    ok = _ai_chat_supa_delete("ai_chat_files", {"id": "eq.%d" % file_id, "uid": "eq.%s" % user["uid"]})
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/ai-chat/image", methods=["POST"])
+def api_ai_chat_image():
+    """Generate an image from a text prompt. Admin-gated by imageEnabled on
+    config/aiChat (separate from the model allowlist — image generation uses
+    a free third-party keyless endpoint, not one of the admin's own provider
+    keys, so it is its own on/off switch). Returns the image bytes directly
+    (not a JSON data URL) so the browser can just <img src> the response."""
+    user, chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    if not chat_cfg["image_enabled"]:
+        return jsonify({"error": "forbidden", "detail": "Image generation is off for this account."}), 403
+    body = request.get_json(silent=True) or {}
+    prompt = str(body.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "missing_prompt"}), 400
+    if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_img", user["uid"], 20, 3600):
+        return jsonify({"error": "rate_limited", "detail": "Too many images this hour. Try later."}), 429
+    data, result = _ai_chat_generate_image(prompt, body.get("width"), body.get("height"), body.get("seed"))
+    if data is None:
+        return jsonify({"error": "image_failed", "detail": result}), 502
+    return Response(data, mimetype=result)
 
 
 @app.get("/api/search")

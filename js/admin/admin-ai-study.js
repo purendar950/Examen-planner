@@ -319,41 +319,53 @@ function toggleWebSearchSecrets(button) {
 
 /* ── AI Chat tab access policy card ──────────────────────────────────────
    A standalone chat page in the app, hidden by default. Enable it for
-   specific users (one email per line), and lock it to exactly one provider +
-   model from the STUDY_PROVIDERS catalog above — regardless of whichever
-   provider is currently the Study AI "active route". Saved to a dedicated
-   Firestore doc (config/aiChat) via saveAiChatConfig() so it can never
-   collide with config/ai's own fields. */
+   specific users (one email per line), and curate a LIST of provider/model
+   pairs from the STUDY_PROVIDERS catalog above — a granted user picks among
+   THOSE in the chat's own model dropdown, independent of whichever provider
+   is currently the Study AI "active route". Also gates the 🎨 image
+   generation action (a free third-party keyless endpoint, disclosed in the
+   copy below since it's not one of the admin's own provider keys). Saved to
+   a dedicated Firestore doc (config/aiChat) via saveAiChatConfig() so it can
+   never collide with config/ai's own fields. */
 function aiStudyChatMarkup() {
   var cfg = AI_CHAT_CONFIG || {};
-  var provider = STUDY_PROVIDERS[cfg.provider] ? cfg.provider : STUDY_PROVIDER_ORDER[0];
-  var models = studyModelsFor(provider);
-  var model = (cfg.model && models.indexOf(cfg.model) !== -1) ? cfg.model : (models[0] || '');
+  var models = aiChatModelsList();
   var emails = Array.isArray(cfg.allowedEmails) ? cfg.allowedEmails.join('\n') : '';
   var grantCount = cfg.allowedUsers ? Object.keys(cfg.allowedUsers).length : 0;
+  var imageEnabled = !!cfg.imageEnabled;
+  var addProvider = STUDY_PROVIDER_ORDER[0];
   var providerOptions = STUDY_PROVIDER_ORDER.map(function (pid) {
     var p = STUDY_PROVIDERS[pid];
-    return '<option value="' + pid + '"' + (pid === provider ? ' selected' : '') + '>' + esc(p.label) + '</option>';
+    return '<option value="' + pid + '"' + (pid === addProvider ? ' selected' : '') + '>' + esc(p.label) + '</option>';
   }).join('');
+  var modelRows = models.length
+    ? models.map(function (m) {
+      var label = (STUDY_PROVIDERS[m.provider] || {}).label || m.provider;
+      return '<div class="ai-free-refresh-provider">' +
+        '<div class="ai-free-refresh-provider-main">' +
+          '<span class="ai-provider-monogram ai-provider-monogram--small">' + esc(aiStudyProviderInitials(label)) + '</span>' +
+          '<div><strong>' + esc(label) + '</strong><small>' + esc(m.model) + '</small></div>' +
+        '</div>' +
+        '<button class="ai-free-refresh-remove" type="button" onclick="aiChatRemoveModel(\'' + esc(m.provider) + '\',\'' + esc(m.model) + '\')" aria-label="Remove ' + esc(label) + ' ' + esc(m.model) + '">Remove</button>' +
+      '</div>';
+    }).join('')
+    : '<div class="ai-free-refresh-empty"><strong>No model added yet.</strong><span>Add at least one below — granted users pick from this list in the chat itself.</span></div>';
   return '<section class="ai-panel">' +
-    '<div class="ai-panel-heading is-compact"><div><span class="ai-panel-eyebrow">Standalone feature</span><h3>AI Chat tab access</h3><p>A separate chat page in the app, hidden unless a user is on this list. Always answers with the one provider/model locked below — independent of the Study AI route above.</p></div><span class="ai-policy-score ' + (grantCount ? 'is-open' : '') + '">' + (grantCount ? grantCount + ' granted' : 'Nobody yet') + '</span></div>' +
-    '<div class="ai-field-grid">' +
-      '<div class="ai-field"><label for="aichat-provider">Locked provider</label><select id="aichat-provider" onchange="aiChatProviderChanged()">' + providerOptions + '</select><span>Admins always get access regardless of this list.</span></div>' +
-      '<div class="ai-field"><label for="aichat-model">Locked model</label><select id="aichat-model">' + studyModelOptions(models, model) + '</select><span>From ' + esc((STUDY_PROVIDERS[provider] || {}).label || provider) + '\'s approved model list.</span></div>' +
+    '<div class="ai-panel-heading is-compact"><div><span class="ai-panel-eyebrow">Standalone feature</span><h3>AI Chat tab access</h3><p>A separate chat page in the app, hidden unless a user is on this list. They pick among the models curated below — independent of the Study AI route above.</p></div><span class="ai-policy-score ' + (grantCount ? 'is-open' : '') + '">' + (grantCount ? grantCount + ' granted' : 'Nobody yet') + '</span></div>' +
+    '<div class="ai-model-manager"><div class="ai-model-manager-title"><label>Selectable models</label><small>Granted users switch between these in the chat\'s own model picker.</small></div>' +
+      '<div class="ai-free-refresh-list">' + modelRows + '</div>' +
+      '<div class="ai-inline-form"><select id="aichat-add-provider" onchange="aiChatAddProviderChanged()">' + providerOptions + '</select>' +
+      '<select id="aichat-add-model">' + studyModelOptions(studyModelsFor(addProvider), '') + '</select>' +
+      '<button class="ai-btn ai-btn-soft" type="button" onclick="aiChatAddModel()">Add model</button></div>' +
     '</div>' +
-    '<div class="ai-grant-editor"><div><label for="aichat-emails">Allowed accounts</label><span>' + grantCount + ' active</span></div><p>One registered user email per line. Saving replaces the current list.</p><textarea id="aichat-emails" placeholder="student@example.com">' + esc(emails) + '</textarea></div>' +
+    '<div class="ai-switch-list">' +
+      '<label class="ai-switch-row" for="aichat-image-enabled"><span><strong>Image generation</strong>' +
+        '<small>Lets granted users generate images from a text prompt in the chat, via a free third-party keyless image API (pollinations.ai) fetched server-side — no admin key needed, no user IP exposed to it.</small></span>' +
+        '<span class="ai-toggle"><input id="aichat-image-enabled" type="checkbox"' + (imageEnabled ? ' checked' : '') + '><i></i></span></label>' +
+    '</div>' +
+    '<div class="ai-grant-editor"><div><label for="aichat-emails">Allowed accounts</label><span>' + grantCount + ' active</span></div><p>One registered user email per line. Saving replaces the current list. Admins always get access regardless of this list.</p><textarea id="aichat-emails" placeholder="student@example.com">' + esc(emails) + '</textarea></div>' +
     '<button class="ai-btn ai-btn-dark ai-save-wide" type="button" onclick="saveAiChatConfig()">Save AI Chat access</button>' +
   '</section>';
-}
-
-/* Refresh the model dropdown when the admin switches the locked provider,
-   mirroring how studyActiveChanged() keeps #study-model in sync above. */
-function aiChatProviderChanged() {
-  var sel = document.getElementById('aichat-provider');
-  var modelSel = document.getElementById('aichat-model');
-  if (!sel || !modelSel) return;
-  var pid = sel.value;
-  modelSel.innerHTML = studyModelOptions(studyModelsFor(pid), studyModelFor(pid));
 }
 
 function aiStudyWebSearchMarkup() {
