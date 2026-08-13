@@ -66,6 +66,13 @@ def load():
             "mistral": ["mistral-large-latest"],
         },
         "_omniroute_catalog_flat": lambda: [],
+        # Real value is derived from OMNIROUTE_URL; the tests never call out.
+        "OMNIROUTE_IMAGES_URL": "https://example.invalid/v1/images/generations",
+        # OmniRoute's image list is discovered live from its /v1/models catalog.
+        # Stubbed here so the suite stays offline and deterministic; the live
+        # fetch/caching path is exercised separately by the id-classification
+        # checks further down.
+        "_omniroute_fetch_image_model_ids": lambda: ["pol/flux-schnell", "cx/dall-e-3"],
     }
     exec(section("IMAGE_MODEL_MARKERS = ", "def _ai_chat_generate_image"), ns)
     exec(section("def _effective_provider_models(cfg):", "def _model_provider("), ns)
@@ -127,6 +134,66 @@ for name in ("gemini-3.1-flash-image", "gemini-2.5-flash-image", "imagen-4",
 for name in ("gemini-flash-latest", "mistral-large-latest", "llama-3.3-70b",
              "claude-sonnet-4"):
     check("classified as a chat model: %s" % name, not ns["_is_image_model_name"](name))
+
+# ── 8. OmniRoute image detection ─────────────────────────────────────────────
+# Detection is metadata-first (output_modalities / type), exactly like the
+# existing _omniroute_item_is_chat, with id markers only as a last resort. The
+# router reports ~62 models on /v1/images/generations vs ~9 on
+# /v1/videos/generations, and many image models are named nothing like "image",
+# so metadata is what actually has to work here.
+ns2 = {"re": re}
+exec(section("_OMNIROUTE_IMAGE_ID_MARKERS = ", "_omniroute_image_models_cache = "), ns2)
+exec(section("def _omniroute_id_is_image(model_id):", "def _omniroute_fetch_image_model_ids("), ns2)
+is_img = ns2["_omniroute_item_is_image"]
+
+# 8a. output_modalities is authoritative — even for an unrecognisable name.
+check("metadata: output_modalities ['image'] wins over an unknown name",
+      is_img({"output_modalities": ["image"]}, "zw/some-brand-new-model"))
+check("metadata: output_modalities ['text'] is not an image model",
+      not is_img({"output_modalities": ["text"]}, "openrouter/gpt-5"))
+check("metadata: output_modalities ['video'] is rejected (video endpoint)",
+      not is_img({"output_modalities": ["video"]}, "veo-free/veo-3"))
+check("metadata: mixed ['image','video'] rejected as video",
+      not is_img({"output_modalities": ["image", "video"]}, "zw/multi"))
+check("metadata: ['text','image'] accepted as image-capable",
+      is_img({"output_modalities": ["text", "image"]}, "gweb/gemini-image"))
+
+# 8b. Declared type, when no modalities are published.
+for t in ("image", "images", "text-to-image", "image-generation"):
+    check("metadata: type=%s accepted" % t, is_img({"type": t}, "zw/whatever"))
+for t in ("chat", "text", "llm", "video", "audio", "embedding", "rerank", "moderation"):
+    check("metadata: type=%s rejected" % t, not is_img({"type": t}, "zw/whatever"))
+
+# 8c. Real-world image models whose NAMES carry no "image" marker — these are
+# exactly the ones a name-only filter would have silently dropped.
+for name in ("zw/seedream-4.5", "cx/recraft-v3", "af/ideogram-v2",
+             "kc/hidream-i1", "pol/kolors-v2", "gweb/janus-pro-7b"):
+    check("no-metadata fallback still finds: %s" % name, is_img({}, name))
+
+# 8d. Name fallback when the catalog publishes nothing at all.
+for name in ("pol/flux-schnell", "cx/dall-e-3", "gweb/imagen-3",
+             "zw/stable-diffusion-xl", "kc/sdxl-turbo", "af/image-gen-v2"):
+    check("no-metadata fallback: image model detected: %s" % name, is_img({}, name))
+for name in ("veo-free/veo-3", "cx/sora-2", "zw/kling-v2", "af/runway-gen3",
+             "kc/hailuo-02", "pol/musicgen", "gweb/lyria-2", "cx/whisper-large",
+             "zw/tts-1", "af/text-embedding-3", "openrouter/gpt-5",
+             "mistral/mistral-large-latest"):
+    check("no-metadata fallback: NOT an image model: %s" % name, not is_img({}, name))
+
+# ── 9. Aspect-ratio -> pixel size mapping for the OpenAI images contract ─────
+ns3 = {"re": re}
+exec(section("def _aspect_ratio_to_size(", "def _generate_image_openai_images_api("), ns3)
+a2s = ns3["_aspect_ratio_to_size"]
+check("ratio 1:1 -> square", a2s("1:1") == "1024x1024", a2s("1:1"))
+check("ratio 16:9 -> landscape long-edge 1024", a2s("16:9").startswith("1024x"), a2s("16:9"))
+check("ratio 9:16 -> portrait long-edge 1024", a2s("9:16").endswith("x1024"), a2s("9:16"))
+check("missing ratio falls back to square", a2s(None) == "1024x1024", a2s(None))
+check("garbage ratio falls back to square", a2s("not-a-ratio") == "1024x1024", a2s("not-a-ratio"))
+check("zero ratio falls back to square", a2s("0:0") == "1024x1024", a2s("0:0"))
+for r in ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"):
+    w, h = a2s(r).split("x")
+    check("ratio %s yields sane dimensions" % r,
+          256 <= int(w) <= 1024 and 256 <= int(h) <= 1024, a2s(r))
 
 print("AI Chat — chat vs image model separation")
 print("\n".join(_RESULTS))
