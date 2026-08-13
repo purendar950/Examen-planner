@@ -1713,6 +1713,9 @@
       renderNotesResult(saved.mode || result.mode || 'notes', saved.n || 25, saved.style || '', {
         content: result.content, provider: result.provider, model: result.model,
         cached: !!result.cached, format: result.format || '',
+        design_provider: result.design_provider || '', design_model: result.design_model || '',
+        design_ms: result.design_ms || 0, design_fallback: !!result.design_fallback,
+        requirements: result.requirements || saved.requirements || '',
         lang: result.out_lang || saved.lang || outLang()
       }, targetEl);
     }
@@ -2123,6 +2126,35 @@
     return NB_STYLES.indexOf(style) !== -1 ? '&style=' + encodeURIComponent(style) : '';
   }
 
+  /* ── Notes & design requirements — ONE free-text box, read by BOTH the notes
+     prompt (what to cover, how to organise it) and — for style="html" — the
+     design prompt (how it should look and behave). See _requirements_instr in
+     youtube-turbo-proxy/app.py: the server sends the SAME text to both passes,
+     each reading only the half that applies to it. Deliberately one box, not
+     two — a request like "focus on dates, make it look like a cheat sheet" is
+     one sentence about both things at once, and splitting it into two boxes
+     would just make the student decide which half goes where. Persisted per
+     browser like the model/language choices, so it survives a tab reopen —
+     but NOT sent again automatically for a different video without the
+     student noticing, because it renders back into the textarea every time
+     the Notes tab is (re)built and is always visible above Generate. */
+  var NOTES_REQUIREMENTS_KEY = 'aiStudyNotesRequirements';
+  var NOTES_REQUIREMENTS_MAX = 600;   // mirrors NOTES_REQUIREMENTS_MAX_CHARS server-side
+  function notesRequirements() {
+    var el = document.getElementById('ai-notes-requirements');
+    // Read from the box when it exists (the Notes tab is open); otherwise the
+    // last-saved value still applies (e.g. a resumed job after reload, before
+    // renderBody() has rebuilt the controls).
+    var raw = el ? el.value : (localStorage.getItem(NOTES_REQUIREMENTS_KEY) || '');
+    return String(raw || '').replace(/\s+/g, ' ').trim().slice(0, NOTES_REQUIREMENTS_MAX);
+  }
+  function setNotesRequirements(v) {
+    try { localStorage.setItem(NOTES_REQUIREMENTS_KEY, v == null ? '' : String(v)); } catch (e) {}
+  }
+  function requirementsParam(requirements) {
+    return requirements ? '&requirements=' + encodeURIComponent(requirements) : '';
+  }
+
   /* ── Notes / Summary / Insights / Flashcards (from /api/study) ──
      Text modes (notes/summary/insights) STREAM progressively from
      /api/study/stream and fall back to the classic /api/study on any error.
@@ -2131,6 +2163,10 @@
     var vid = curVid(), el = contentEl();
     var lang = langOverride || outLang();
     var style = (mode === 'notes') ? nbNotesStyle() : '';
+    // Only mode="notes" has a requirements box; summary/insights/quiz/flashcards
+    // never read it server-side (see _requirements_instr), so it is never sent
+    // for them even if a stale value is still sitting in localStorage.
+    var requirements = (mode === 'notes') ? notesRequirements() : '';
     var isNotebookMode = mode === 'notes' || mode === 'summary' || mode === 'insights';
     if (!vid) {
       el.innerHTML = isNotebookMode
@@ -2151,7 +2187,7 @@
     var requestId = _studyPaintRequest;
     function ownsOutput() { return requestId === _studyPaintRequest && el && el.isConnected && el === contentEl(); }
     if (mode === 'flashcards' || mode === 'quiz') { studyOnce(mode, n, style, lang, focus, force, signal, btnId, el, ownsOutput); return; }
-    studyJobStart(mode, n, style, lang, focus, force, signal, btnId, el, ownsOutput);
+    studyJobStart(mode, n, style, lang, focus, force, signal, btnId, el, ownsOutput, null, requirements);
   }
 
   // StudyPlanner header shown at the top of the notes (brand only on screen; the
@@ -3642,16 +3678,44 @@
     return askAboutNote(question, text, null, {});
   }
 
+  /* One line describing which AI actually designed the page, or that every
+     configured provider failed and the built-in theme had to be used. Shared
+     between the finished-note mount and (via renderHtmlNoteResult) whatever
+     ends up in the meta bar, so the wording can't drift between the two. */
+  function designAttributionText(meta) {
+    if (meta.designFallback) return '🎨 Design: built-in theme (every configured AI failed to design it)';
+    var label = [meta.designProvider, meta.designModel].filter(Boolean).map(esc).join(' · ');
+    if (!label) return '';
+    var ms = meta.designMs;
+    return '🎨 Design: ' + label + (ms ? ' in ' + (ms / 1000).toFixed(1) + 's' : '');
+  }
+
+  // One line surfacing the free-text requirements box back to the student, so
+  // it's obvious a note reflects a request typed a while ago rather than the
+  // current, possibly-edited, box contents.
+  function requirementsAttributionText(requirements) {
+    var r = String(requirements || '').trim();
+    if (!r) return '';
+    if (r.length > 140) r = r.slice(0, 140) + '…';
+    return '📝 Your requirements: “' + esc(r) + '”';
+  }
+
   /* Mount a finished HTML note into `box`. Returns the iframe. */
   function htmlNoteMount(box, doc, meta) {
     meta = meta || {};
     htmlNoteListen();
     var tok = 'nb' + (++_htmlNoteSeq) + '_' + Math.random().toString(36).slice(2, 10);
+    var designLine = designAttributionText(meta);
+    var reqLine = requirementsAttributionText(meta.requirements);
+    var subLine = (designLine || reqLine) ?
+      '<div class="ai-muted ai-meta-sub" style="flex-basis:100%;font-size:0.7rem;opacity:0.85">' +
+      [designLine, reqLine].filter(Boolean).join(' &nbsp;·&nbsp; ') + '</div>' : '';
     box.innerHTML = notesFocusToolbarHtml() + brandBarHtml(true) +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' +
       esc(meta.model || '') + ' · AI-designed' + (meta.cached ? ' · cached' : ' · fresh') +
       (meta.lang ? ' · ' + esc(meta.lang) : '') + '</span>' +
+      subLine +
       '<button class="ai-btn sec" id="ai-htmlnote-save" title="Download these notes as a self-contained .html file" style="padding:4px 10px;font-size:0.72rem">⤓ Save .html</button>' +
       '<button class="ai-btn sec" id="ai-notes-focus" title="Read notes in Focus Mode" style="padding:4px 10px;font-size:0.72rem">⛶ Focus</button>' +
       '<button class="ai-btn sec" id="ai-follow" data-ai-follow-control style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>' +
@@ -3701,7 +3765,10 @@
     // layout, so offering the tool would be a promise this cannot keep).
     box.classList.add('ai-note-htmldoc');
     htmlNoteMount(box, content, {
-      provider: j.provider, model: j.model, cached: j.cached, lang: j.lang
+      provider: j.provider, model: j.model, cached: j.cached, lang: j.lang,
+      designProvider: j.design_provider, designModel: j.design_model,
+      designMs: j.design_ms, designFallback: j.design_fallback,
+      requirements: j.requirements
     });
     var title = pdfTitleFor(mode, 'html');
     var noteTools = box.querySelector('#ai-note-actions-toggle');
@@ -3805,10 +3872,16 @@
     // Share a link so others can take the same MCQ test (login required).
     var shareBtn = (style === 'mcq') ? '<button class="ai-btn sec" id="ai-mcq-share" title="Copy a link so others can take this same MCQ test (they must log in / register)" style="padding:4px 10px;font-size:0.72rem">🔗 Share</button>' : '';
     var nbHtml = nbBuild(content, style);
+    // Plain Markdown notes have no design half to report, but a requirements
+    // box can still steer the content itself (mode === 'notes' only — see
+    // notesRequirements()), so that much is still worth surfacing here.
+    var reqLine = requirementsAttributionText(j.requirements);
+    var subLine = reqLine ?
+      '<div class="ai-muted ai-meta-sub" style="flex-basis:100%;font-size:0.7rem;opacity:0.85">' + reqLine + '</div>' : '';
     box.innerHTML = notesFocusToolbarHtml() + brandBarHtml(true) +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(j.provider || 'ai') + ' · ' + esc(j.model || '') + (style === 'mcq' ? ' · MCQ' : '') + (j.cached ? ' · cached' : ' · fresh') + (j.lang ? ' · ' + esc(j.lang) : '') + '</span>' +
-      testBtn + shareBtn + focusBtn + followBtn + pdfBtn + regenBtn + '</div>' +
+      testBtn + shareBtn + focusBtn + followBtn + pdfBtn + regenBtn + subLine + '</div>' +
       '<div class="ai-scroll nb"><div class="ai-nb">' + nbHtml + '</div></div>';
     var noteTools = box.querySelector('#ai-note-actions-toggle');
     if (noteTools) noteTools.onclick = function () {
@@ -3901,11 +3974,12 @@
 
   // Classic one-shot request — handles flashcards + text modes. Also the fallback
   // when streaming isn't available/fails. Owns _genEnd for its lifecycle.
-  function studyOnce(mode, n, style, lang, focus, force, signal, btnId, targetEl, canRender) {
+  function studyOnce(mode, n, style, lang, focus, force, signal, btnId, targetEl, canRender, requirements) {
     var vid = curVid();
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
     url += nbStyleParam(style);
+    url += requirementsParam(requirements);
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
     apiGet(url, signal).then(function (j) {
@@ -4009,11 +4083,11 @@
   // the SSE connection only observes it, so browser navigation never aborts the
   // AI request. A client-generated opaque id makes a reload during the POST safe
   // too: retrying the same id returns the original job instead of duplicating it.
-  function studyJobStart(mode, n, style, lang, focus, force, signal, btnId, targetEl, canRender, resumeJob) {
+  function studyJobStart(mode, n, style, lang, focus, force, signal, btnId, targetEl, canRender, resumeJob, requirements) {
     var vid = curVid();
     var job = resumeJob || {
       jobId: newStudyJobId(), videoId: vid, mode: mode, n: n || 25, style: style || '',
-      lang: lang, focus: focus || '', force: !!force
+      lang: lang, focus: focus || '', force: !!force, requirements: requirements || ''
     };
     _genControlsStudyJob = true;
     saveStudyJob(job);                 // persist BEFORE POST, not after it returns
@@ -4029,7 +4103,12 @@
       body: JSON.stringify({
         jobId: job.jobId, id: vid, mode: mode, out: lang,
         model: outModel(), provider: outProvider(), style: style || '',
-        focus: job.focus || '', refresh: force ? 1 : 0
+        focus: job.focus || '', refresh: force ? 1 : 0,
+        // Same free-text box for both content and (style="html") design; see
+        // notesRequirements(). Sent as "" rather than omitted when empty so the
+        // server's own cache-key logic (which treats "" as "no requirements")
+        // never has to guess a missing key apart from an intentionally blank one.
+        requirements: job.requirements || ''
       })
     }).then(function (r) { return r.ok ? r.json() : jobRequestError(r); }).then(function (created) {
       if (created && created.jobId) {
@@ -4048,6 +4127,9 @@
         renderNotesResult(mode, n, style, {
           content: created.content || '', provider: created.provider || 'ai',
           model: created.model || '', cached: !!created.cached,
+          design_provider: created.design_provider || '', design_model: created.design_model || '',
+          design_ms: created.design_ms || 0, design_fallback: !!created.design_fallback,
+          requirements: created.requirements || job.requirements || '',
           format: created.format || '', lang: created.out_lang || lang
         }, targetEl);
         return;
@@ -4071,7 +4153,7 @@
       // yet. Retain the existing stream as a compatibility fallback only then.
       if (e && e._httpStatus === 404 && !resumeJob) {
         clearStudyJob(job.jobId);
-        studyStream(mode, n, style, lang, focus, force, signal, btnId);
+        studyStream(mode, n, style, lang, focus, force, signal, btnId, job.requirements);
         return;
       }
       clearStudyJob(job.jobId);
@@ -4146,6 +4228,9 @@
         _genEnd(btnId);
         renderNotesResult(mode, n, style, {
           content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached,
+          design_provider: meta.designProvider || '', design_model: meta.designModel || '',
+          design_ms: meta.designMs || 0, design_fallback: !!meta.designFallback,
+          requirements: meta.requirements || job.requirements || '',
           format: style === 'html' ? 'html' : '', lang: meta.lang || lang
         }, targetEl);
       }
@@ -4176,6 +4261,14 @@
         meta.provider = obj.provider || meta.provider; meta.model = obj.model || meta.model;
         meta.cached = obj.cached != null ? !!obj.cached : meta.cached;
         meta.lang = obj.out_lang || obj.lang || meta.lang;
+        // Which model designed the note (may differ from the notes model, and
+        // may arrive later than the first meta frame — the design pass runs
+        // concurrently and is collected only once the first body part lands).
+        if (obj.design_provider) meta.designProvider = obj.design_provider;
+        if (obj.design_model) meta.designModel = obj.design_model;
+        if (obj.design_ms) meta.designMs = obj.design_ms;
+        if (obj.design_fallback != null) meta.designFallback = !!obj.design_fallback;
+        if (obj.requirements) meta.requirements = obj.requirements;
         refreshLiveMeta();
         return;
       }
@@ -4202,11 +4295,15 @@
     var targetEl = contentEl(); if (!targetEl) return;
     var modeSel = document.getElementById('ai-notes-mode');
     var styleSel = document.getElementById('ai-notes-style');
+    var reqBox = document.getElementById('ai-notes-requirements');
     if (modeSel && ['notes', 'summary', 'insights'].indexOf(job.mode) !== -1) modeSel.value = job.mode;
     if (styleSel) {
       var sv = nbStyleOf(job.style);
       styleSel.value = sv; styleSel.style.display = job.mode === 'notes' ? '' : 'none';
     }
+    // Show what this in-flight job was actually asked for, in case the student
+    // reloaded after typing something new but before it was ever sent.
+    if (reqBox && job.requirements) reqBox.value = job.requirements;
     if (job.stopRequested) {
       _genStart('ai-notes-go');
       _genControlsStudyJob = true;
@@ -4221,16 +4318,17 @@
     var requestId = _studyPaintRequest;
     function ownsOutput() { return requestId === _studyPaintRequest && targetEl.isConnected && targetEl === contentEl(); }
     studyJobStart(job.mode, job.n || 25, job.style || '', job.lang || outLang(), job.focus || '', !!job.force,
-                  signal, 'ai-notes-go', targetEl, ownsOutput, job);
+                  signal, 'ai-notes-go', targetEl, ownsOutput, job, job.requirements || '');
   }
 
   // Progressive streaming for text notes (legacy SSE from /api/study/stream).
   // chunks arrive; on ANY non-abort failure it falls back to studyOnce, so this is
   // never worse than the classic path (e.g. if the proxy/stream isn't available).
-  function studyStream(mode, n, style, lang, focus, force, signal, btnId) {
+  function studyStream(mode, n, style, lang, focus, force, signal, btnId, requirements) {
     var vid = curVid();
     var url = '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     url += nbStyleParam(style);
+    url += requirementsParam(requirements);
     if (force) url += '&refresh=1';
     var meta = {}, acc = '', gotChunk = false, done = false;
     var targetEl = contentEl(), paintRequest = _studyPaintRequest;
@@ -4292,7 +4390,7 @@
       done = true;
       if (!ownsStudyTarget() || (signal && signal.aborted)) return;
       targetEl.innerHTML = notesLoadingHtml(mode, style, lang, force);
-      studyOnce(mode, n, style, lang, focus, force, signal, btnId, targetEl, ownsStudyTarget);   // owns _genEnd
+      studyOnce(mode, n, style, lang, focus, force, signal, btnId, targetEl, ownsStudyTarget, requirements);   // owns _genEnd
     }
     function finish() {
       if (done) return;
@@ -4305,7 +4403,13 @@
       streamPainter.cancel();
       done = true;
       _genEnd(btnId);
-      renderNotesResult(mode, n, style, { content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached, format: style === 'html' ? 'html' : '', lang: (meta.lang || lang) }, targetEl);
+      renderNotesResult(mode, n, style, {
+        content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached,
+        design_provider: meta.design_provider || '', design_model: meta.design_model || '',
+        design_ms: meta.design_ms || 0, design_fallback: !!meta.design_fallback,
+        requirements: meta.requirements || requirements || '',
+        format: style === 'html' ? 'html' : '', lang: (meta.lang || lang)
+      }, targetEl);
     }
     function handleFrame(frame) {
       var ev = 'message', data = '';
@@ -4496,14 +4600,19 @@
     var requestId = ++_langCheckRequest;
     var vid = curVid(), bar = document.getElementById('ai-langbar');
     var style = (mode === 'notes') ? nbNotesStyle() : '';
+    // Which requirements bucket to probe — must match what Generate would
+    // actually send, or a chip could point at an unrelated cached note.
+    var requirements = (mode === 'notes') ? notesRequirements() : '';
     if (!vid || !bar) return;
-    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + nbStyleParam(style) + modelParam()).then(function (j) {
+    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) +
+      nbStyleParam(style) + modelParam() + requirementsParam(requirements)).then(function (j) {
       // Ignore an older language-cache response after the user has switched a
-      // note type/style, tab, video, or rebuilt the workspace.
+      // note type/style, tab, video, requirements text, or rebuilt the workspace.
       if (requestId !== _langCheckRequest || curVid() !== vid || bar !== document.getElementById('ai-langbar')) return;
       if (mode === 'notes') {
         var modeSel = document.getElementById('ai-notes-mode');
-        if (!modeSel || modeSel.value !== mode || nbNotesStyle() !== style) return;
+        if (!modeSel || modeSel.value !== mode || nbNotesStyle() !== style ||
+            notesRequirements() !== requirements) return;
       }
       var avail = (j && j.available) || [];
       if (!avail.length) { bar.innerHTML = ''; return; }
@@ -7542,12 +7651,53 @@
         '<button class="ai-btn sec" id="ai-notes-bundle" title="Combine several lectures into one notebook" style="padding:6px 10px">\uD83D\uDCDA Multi-video</button>' +
         '<button class="ai-btn sec" id="ai-notes-saved" title="Every note the AI has written for you" style="padding:6px 10px">\uD83D\uDDC2 Saved</button>' +
         '<span id="ai-note-actions" class="ai-note-actions" role="group" aria-label="Note actions"></span>' +
-        '</div><div id="ai-langbar"></div><div id="ai-sub"></div>';
+        '</div>' +
+        // ONE box for both content ("what to cover") and — for AI Designed
+        // notes — design ("how it should look"). See notesRequirements() above
+        // for why it is deliberately a single field.
+        '<div id="ai-notes-requirements-wrap" style="margin:2px 0 8px">' +
+          '<textarea id="ai-notes-requirements" rows="2" maxlength="' + NOTES_REQUIREMENTS_MAX + '" ' +
+            'placeholder="Optional: what should these notes cover, and (for AI Designed) how should they look? e.g. focus on dates and formulas, dark theme with big headings" ' +
+            'style="width:100%;padding:7px 9px;border-radius:8px;border:1px solid var(--border,#334);' +
+            'background:transparent;color:inherit;font-size:.82rem;font-family:inherit;resize:vertical;' +
+            'min-height:42px">' + esc(notesRequirements()) + '</textarea>' +
+          '<div id="ai-notes-requirements-count" class="ai-muted" style="font-size:.68rem;text-align:right;margin-top:1px"></div>' +
+        '</div>' +
+        '<div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
       var styleSel = document.getElementById('ai-notes-style');
+      var reqBox = document.getElementById('ai-notes-requirements');
+      var reqCount = document.getElementById('ai-notes-requirements-count');
       // MCQ style only applies to comprehensive notes; hide it for summary/insights.
-      function syncStyleVis() { styleSel.style.display = (modeSel.value === 'notes') ? '' : 'none'; }
+      // The requirements box also only matters for notes — summary/insights are
+      // fixed-shape outputs with nothing to "cover more/less of" or restyle.
+      function syncStyleVis() {
+        var isNotes = modeSel.value === 'notes';
+        styleSel.style.display = isNotes ? '' : 'none';
+        document.getElementById('ai-notes-requirements-wrap').style.display = isNotes ? '' : 'none';
+      }
       syncStyleVis();
+      function reqCountUpdate() {
+        if (!reqCount) return;
+        var n = (reqBox.value || '').length;
+        reqCount.textContent = n + ' / ' + NOTES_REQUIREMENTS_MAX;
+      }
+      reqCountUpdate();
+      // Saved on every keystroke (cheap, localStorage) rather than only on
+      // Generate, so a student who fills this in and then reloads mid-typing
+      // (or before clicking Generate) does not lose it. The "already
+      // generated" chips are debounced (not re-checked per keystroke) since
+      // they depend on this text and a stale set would point at the wrong
+      // cached note.
+      var _reqLangCheckTimer = 0;
+      reqBox.oninput = function () {
+        setNotesRequirements(this.value);
+        reqCountUpdate();
+        clearTimeout(_reqLangCheckTimer);
+        _reqLangCheckTimer = setTimeout(function () {
+          if (document.getElementById('ai-notes-requirements') === reqBox) checkLangs(modeSel.value, 25, false);
+        }, 600);
+      };
       // switching a dropdown: clear stale output + refresh which languages are cached.
       modeSel.onchange = function () {
         _cancelActiveStudy();
