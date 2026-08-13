@@ -319,49 +319,35 @@ function toggleWebSearchSecrets(button) {
 
 /* ── AI Chat tab access policy card ──────────────────────────────────────
    A standalone chat page in the app, hidden by default. Enable it for
-   specific users (one email per line), and curate a LIST of provider/model
-   pairs from the STUDY_PROVIDERS catalog above — a granted user picks among
-   THOSE in the chat's own model dropdown, independent of whichever provider
-   is currently the Study AI "active route". Also gates the 🎨 image
-   generation action (a free third-party keyless endpoint, disclosed in the
-   copy below since it's not one of the admin's own provider keys). Saved to
-   a dedicated Firestore doc (config/aiChat) via saveAiChatConfig() so it can
-   never collide with config/ai's own fields. */
+   specific users (one email per line) — that's the ONLY thing this card
+   configures now. There is no separate model curation step: a granted user
+   automatically sees EVERY provider/model configured above (the exact same
+   list the Study AI tutor already exposes), and image generation
+   auto-activates the moment any configured `google` model's name signals
+   native image output (e.g. gemini-3.1-flash-image) — no third-party
+   service, no extra toggle. Saved to a dedicated Firestore doc
+   (config/aiChat) via saveAiChatConfig() so it can never collide with
+   config/ai's own fields. */
 function aiStudyChatMarkup() {
   var cfg = AI_CHAT_CONFIG || {};
-  var models = aiChatModelsList();
   var emails = Array.isArray(cfg.allowedEmails) ? cfg.allowedEmails.join('\n') : '';
   var grantCount = cfg.allowedUsers ? Object.keys(cfg.allowedUsers).length : 0;
-  var imageEnabled = !!cfg.imageEnabled;
-  var addProvider = STUDY_PROVIDER_ORDER[0];
-  var providerOptions = STUDY_PROVIDER_ORDER.map(function (pid) {
-    var p = STUDY_PROVIDERS[pid];
-    return '<option value="' + pid + '"' + (pid === addProvider ? ' selected' : '') + '>' + esc(p.label) + '</option>';
-  }).join('');
-  var modelRows = models.length
-    ? models.map(function (m) {
-      var label = (STUDY_PROVIDERS[m.provider] || {}).label || m.provider;
-      return '<div class="ai-free-refresh-provider">' +
-        '<div class="ai-free-refresh-provider-main">' +
-          '<span class="ai-provider-monogram ai-provider-monogram--small">' + esc(aiStudyProviderInitials(label)) + '</span>' +
-          '<div><strong>' + esc(label) + '</strong><small>' + esc(m.model) + '</small></div>' +
-        '</div>' +
-        '<button class="ai-free-refresh-remove" type="button" onclick="aiChatRemoveModel(\'' + esc(m.provider) + '\',\'' + esc(m.model) + '\')" aria-label="Remove ' + esc(label) + ' ' + esc(m.model) + '">Remove</button>' +
-      '</div>';
-    }).join('')
-    : '<div class="ai-free-refresh-empty"><strong>No model added yet.</strong><span>Add at least one below — granted users pick from this list in the chat itself.</span></div>';
+  var configuredModelCount = STUDY_PROVIDER_ORDER.reduce(function (total, pid) {
+    return studyKeysFor(pid).length ? total + studyModelsFor(pid).length : total;
+  }, 0);
+  var imageCapableCount = studyKeysFor('google').length
+    ? studyModelsFor('google').filter(function (m) {
+      var lowered = m.toLowerCase();
+      return lowered.indexOf('image') !== -1 || lowered.indexOf('nano-banana') !== -1 || lowered.indexOf('imagen') !== -1;
+    }).length
+    : 0;
   return '<section class="ai-panel">' +
-    '<div class="ai-panel-heading is-compact"><div><span class="ai-panel-eyebrow">Standalone feature</span><h3>AI Chat tab access</h3><p>A separate chat page in the app, hidden unless a user is on this list. They pick among the models curated below — independent of the Study AI route above.</p></div><span class="ai-policy-score ' + (grantCount ? 'is-open' : '') + '">' + (grantCount ? grantCount + ' granted' : 'Nobody yet') + '</span></div>' +
-    '<div class="ai-model-manager"><div class="ai-model-manager-title"><label>Selectable models</label><small>Granted users switch between these in the chat\'s own model picker.</small></div>' +
-      '<div class="ai-free-refresh-list">' + modelRows + '</div>' +
-      '<div class="ai-inline-form"><select id="aichat-add-provider" onchange="aiChatAddProviderChanged()">' + providerOptions + '</select>' +
-      '<select id="aichat-add-model">' + studyModelOptions(studyModelsFor(addProvider), '') + '</select>' +
-      '<button class="ai-btn ai-btn-soft" type="button" onclick="aiChatAddModel()">Add model</button></div>' +
-    '</div>' +
+    '<div class="ai-panel-heading is-compact"><div><span class="ai-panel-eyebrow">Standalone feature</span><h3>AI Chat tab access</h3><p>A separate chat page in the app, hidden unless a user is on this list. They automatically see every model configured in the provider portfolio above and can switch freely — no separate model curation here.</p></div><span class="ai-policy-score ' + (grantCount ? 'is-open' : '') + '">' + (grantCount ? grantCount + ' granted' : 'Nobody yet') + '</span></div>' +
     '<div class="ai-switch-list">' +
-      '<label class="ai-switch-row" for="aichat-image-enabled"><span><strong>Image generation</strong>' +
-        '<small>Lets granted users generate images from a text prompt in the chat, via a free third-party keyless image API (pollinations.ai) fetched server-side — no admin key needed, no user IP exposed to it.</small></span>' +
-        '<span class="ai-toggle"><input id="aichat-image-enabled" type="checkbox"' + (imageEnabled ? ' checked' : '') + '><i></i></span></label>' +
+      '<div class="ai-switch-row" style="cursor:default;"><span><strong>Selectable models</strong><small>Every model from a configured provider above — currently <b>' + configuredModelCount + '</b> model' + (configuredModelCount === 1 ? '' : 's') + ' across ' + aiStudyConfiguredProviderCount() + ' provider' + (aiStudyConfiguredProviderCount() === 1 ? '' : 's') + '. Add or remove keys in the provider portfolio to change this list.</small></span></div>' +
+      '<div class="ai-switch-row" style="cursor:default;"><span><strong>Image generation</strong><small>' + (imageCapableCount
+        ? 'Auto-enabled — ' + imageCapableCount + ' Gemini image model' + (imageCapableCount === 1 ? '' : 's') + ' configured (e.g. gemini-3.1-flash-image). Uses the same Google Gemini key already entered above; no separate service or toggle.'
+        : 'Off — no Gemini image model is configured yet. Add a Google Gemini API key above and keep an "-image" model (e.g. gemini-3.1-flash-image) in its model list to enable this automatically.') + '</small></span></div>' +
     '</div>' +
     '<div class="ai-grant-editor"><div><label for="aichat-emails">Allowed accounts</label><span>' + grantCount + ' active</span></div><p>One registered user email per line. Saving replaces the current list. Admins always get access regardless of this list.</p><textarea id="aichat-emails" placeholder="student@example.com">' + esc(emails) + '</textarea></div>' +
     '<button class="ai-btn ai-btn-dark ai-save-wide" type="button" onclick="saveAiChatConfig()">Save AI Chat access</button>' +

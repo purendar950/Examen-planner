@@ -1370,70 +1370,24 @@ async function loadAiStudyData() {
   } catch(e) { AI_LIMITS = { unlimited:{}, unlimitedEmails:[], focusUsers:{}, focusEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, loaded: true }; }
   try {
     const cSnap = await db.collection('config').doc('aiChat').get();
-    const raw = cSnap.exists ? cSnap.data() : {};
-    // v1 compatibility: an existing config saved before the multi-model UI
-    // shipped has {provider, model} instead of {models:[...]}. Read it once
-    // into the new shape so the admin panel never shows an empty picker for a
-    // feature that was already configured and working.
-    var models = Array.isArray(raw.models) ? raw.models : [];
-    if (!models.length && raw.provider && raw.model) models = [{ provider: raw.provider, model: raw.model }];
-    AI_CHAT_CONFIG = { allowedUsers:{}, allowedEmails:[], models: [], imageEnabled:false, ...raw, models: models, loaded: true };
-  } catch(e) { AI_CHAT_CONFIG = { allowedUsers:{}, allowedEmails:[], models: [], imageEnabled:false, loaded: true }; }
+    AI_CHAT_CONFIG = { allowedUsers:{}, allowedEmails:[], ...(cSnap.exists ? cSnap.data() : {}), loaded: true };
+  } catch(e) { AI_CHAT_CONFIG = { allowedUsers:{}, allowedEmails:[], loaded: true }; }
   render();
 }
 
 /* ── AI Chat tab access policy ───────────────────────────────────────────
-   New, separate feature from Study AI/the tutor: a plain chat page shown only
-   to users on this allowlist (or admins). Unlike v1 (locked to ONE provider),
-   the admin now curates a LIST of provider/model pairs a granted user can
-   switch between in the chat's own model dropdown — independent of the
-   Study AI "active route" above. Stored in its own doc, config/aiChat, so it
-   can never widen/narrow config/ai's existing behavior. The browser cannot
-   read config/aiChat directly (same rule as config/ai); youtube-turbo-proxy
-   surfaces only labels (never keys) via /api/ai-chat/status, and answers the
-   chat itself server-side via /api/ai-chat[/stream], resolving whichever
-   model the user picked through _load_ai_config. */
-var _aiChatModelsWork = null;   // in-progress edit list, null = not yet touched this render
-
-function aiChatModelsList() {
-  if (_aiChatModelsWork) return _aiChatModelsWork;
-  return (AI_CHAT_CONFIG && Array.isArray(AI_CHAT_CONFIG.models)) ? AI_CHAT_CONFIG.models.slice() : [];
-}
-
-function aiChatAddModel() {
-  var providerSel = document.getElementById('aichat-add-provider');
-  var modelSel = document.getElementById('aichat-add-model');
-  if (!providerSel || !modelSel) return;
-  var provider = providerSel.value, model = modelSel.value;
-  if (!provider || !model) return;
-  var list = aiChatModelsList();
-  if (list.some(function (m) { return m.provider === provider && m.model === model; })) {
-    showToast('That model is already in the list.');
-    return;
-  }
-  list.push({ provider: provider, model: model });
-  _aiChatModelsWork = list;
-  render();
-}
-
-function aiChatRemoveModel(provider, model) {
-  var list = aiChatModelsList().filter(function (m) { return !(m.provider === provider && m.model === model); });
-  _aiChatModelsWork = list;
-  render();
-}
-
-/* Refresh the "add model" model dropdown when the admin switches the provider
-   they're adding from, mirroring studyActiveChanged()'s #study-model sync. */
-function aiChatAddProviderChanged() {
-  var sel = document.getElementById('aichat-add-provider');
-  var modelSel = document.getElementById('aichat-add-model');
-  if (!sel || !modelSel) return;
-  modelSel.innerHTML = studyModelOptions(studyModelsFor(sel.value), '');
-}
-
+   A standalone chat page in the app, shown only to users on this allowlist
+   (or admins). There is no separate model curation step here: a granted
+   user automatically sees every provider/model configured above in the
+   Study AI provider portfolio (same list the tutor already exposes), and
+   image generation auto-activates the moment a configured Gemini model's
+   name signals native image output — no admin toggle to keep in sync.
+   Stored in its own doc, config/aiChat, so it can never widen/narrow
+   config/ai's existing behavior. The browser cannot read config/aiChat
+   directly (same rule as config/ai); youtube-turbo-proxy surfaces only
+   labels (never keys) via /api/ai-chat/status, and answers the chat itself
+   server-side via /api/ai-chat[/stream]. */
 async function saveAiChatConfig() {
-  const models = aiChatModelsList();
-  const imageEnabled = !!((document.getElementById('aichat-image-enabled') || {}).checked);
   const emailsRaw = (document.getElementById('aichat-emails') || {}).value || '';
   const emails = emailsRaw.split(/[\n,]+/).map(function (e) { return e.trim().toLowerCase(); }).filter(Boolean);
   const allowedUsers = {}, resolved = [], unresolved = [];
@@ -1445,20 +1399,17 @@ async function saveAiChatConfig() {
     await db.collection('config').doc('aiChat').set({
       allowedUsers: allowedUsers,
       allowedEmails: resolved,
-      models: models,
-      imageEnabled: imageEnabled,
-      // Cleared so a stale v1 single-model pair never shadows the new list
-      // in _load_ai_chat_config's v1 fallback path once models[] is non-empty.
+      // Cleared: older configs curated a fixed model list / image toggle here.
+      // Both are now auto-derived from the provider portfolio, so these
+      // fields would otherwise linger unused and confusing in Firestore.
+      models: firebase.firestore.FieldValue.delete(),
+      imageEnabled: firebase.firestore.FieldValue.delete(),
       provider: firebase.firestore.FieldValue.delete(),
       model: firebase.firestore.FieldValue.delete(),
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-    AI_CHAT_CONFIG = Object.assign({}, AI_CHAT_CONFIG, {
-      allowedUsers: allowedUsers, allowedEmails: resolved, models: models, imageEnabled: imageEnabled
-    });
-    _aiChatModelsWork = null;
-    var msg = '✅ AI Chat saved — ' + resolved.length + ' user(s), ' + models.length + ' model(s)' +
-              (imageEnabled ? ', image generation ON' : '') + '.';
+    AI_CHAT_CONFIG = Object.assign({}, AI_CHAT_CONFIG, { allowedUsers: allowedUsers, allowedEmails: resolved });
+    var msg = '✅ AI Chat access saved — ' + resolved.length + ' user(s) granted.';
     if (unresolved.length) msg += ' ⚠️ Not found: ' + unresolved.join(', ');
     showToast(msg);
     render();
