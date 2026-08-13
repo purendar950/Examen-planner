@@ -42,6 +42,17 @@
     --line:#d7e0e8; --accent:#00976f; --accent-ink:#04231a;
     --warn:#c62828; --shadow:0 6px 22px rgba(20,40,60,.10);
   }
+  /* Match the app-wide theme contract from js/core/theme.js. The demo reads
+     ez_theme on load and listens for the same cross-page updates. */
+  html[data-theme="dark"]{
+    --bg:#101923; --panel:#182431; --ink:#e6edf5; --muted:#a9b6c5;
+    --line:#324354; --accent:#00c896; --accent-ink:#04231a;
+    --warn:#ff8d8d; --shadow:0 6px 22px rgba(0,0,0,.28);
+  }
+  html[data-theme="dark"] input[type=text],html[data-theme="dark"] select,
+  html[data-theme="dark"] .hnp-card,html[data-theme="dark"] .events{background:#111c27;color:var(--ink)}
+  html[data-theme="dark"] .btn-sec,html[data-theme="dark"] code{background:#263747;color:var(--ink)}
+  html[data-theme="dark"] .stage{background:#0e1620;border-color:var(--line)}
   *{box-sizing:border-box}
   html,body{margin:0;padding:0}
   body{background:var(--bg);color:var(--ink);font-size:16px;line-height:1.5;
@@ -143,6 +154,7 @@
   <span class="brand">🎨 AI-Designed HTML Notes</span>
   <span class="tag">notes style = "html"</span>
   <span class="spacer"></span>
+  <span class="tag" id="theme-tag">app theme: light</span>
   <span class="tag" id="sandbox-tag">sandbox: allow-scripts</span>
 </div>
 
@@ -276,7 +288,7 @@
     <div class="row">
       <button class="btn-sec" id="print">📄 Print / PDF</button>
       <button class="btn-sec" id="save">⤓ Save .html</button>
-      <button class="btn-sec" id="invert">◐ Night</button>
+      <button class="btn-sec" id="invert" aria-pressed="false" title="Invert colours — dark paper, light ink, easier at night">◐ Night reading</button>
       <button class="btn-sec" id="viewsrc">&lt;/&gt; View source</button>
     </div>
 
@@ -310,6 +322,48 @@
 (function () {
   "use strict";
   var $ = function (id) { return document.getElementById(id); };
+
+  /* Use the same browser-local settings as app.html. These are view preferences,
+     so they intentionally stay local rather than entering a demo record or
+     Firestore. The generated document itself remains independent for printing. */
+  function readSetting(key, fallback) {
+    try { var value = localStorage.getItem(key); return value == null ? fallback : value; }
+    catch (e) { return fallback; }
+  }
+  function writeSetting(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) {}
+  }
+  function applyAppTheme(theme) {
+    theme = theme === 'dark' ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+    $('theme-tag').textContent = 'app theme: ' + theme;
+  }
+  function applyReaderPreference() {
+    var on = readSetting('aiNotesInvert', '0') === '1';
+    $('stage').classList.toggle('invert', on);
+    var button = $('invert');
+    button.classList.toggle('on', on);
+    button.setAttribute('aria-pressed', on ? 'true' : 'false');
+    button.textContent = on ? '◐ Paper reading' : '◐ Night reading';
+  }
+  function restoreLanguage() {
+    var saved = readSetting('aiStudyLang', '');
+    if (saved && Array.prototype.some.call($('lang').options, function (o) { return o.value === saved; })) {
+      $('lang').value = saved;
+    }
+  }
+  applyAppTheme(readSetting('ez_theme', 'light'));
+  restoreLanguage();
+  applyReaderPreference();
+  window.addEventListener('ez-theme-change', function (event) {
+    applyAppTheme(event && event.detail && event.detail.theme);
+  });
+  window.addEventListener('storage', function (event) {
+    if (event.key === 'ez_theme') applyAppTheme(event.newValue);
+    if (event.key === 'aiNotesInvert') applyReaderPreference();
+    if (event.key === 'aiStudyLang') restoreLanguage();
+  });
+  $('lang').addEventListener('change', function () { writeSetting('aiStudyLang', this.value); });
 
   /* ════════════════════════════════════════════════════════════════════
      The bridge — byte-for-byte the same contract as js/features/ai-tutor.js.
@@ -452,7 +506,7 @@
   }
 
   /* ── mock player ─────────────────────────────────────────────────── */
-  var t = 0, playing = false, timer = null, following = false;
+  var t = 0, playing = false, timer = null, following = readSetting('aiStudyFollow', '0') === '1';
   function fmt(s) {
     s = Math.max(0, Math.round(s));
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
@@ -479,6 +533,7 @@
   $('follow').onclick = function () {
     if (!tsCount) return;
     following = !following;
+    writeSetting('aiStudyFollow', following ? '1' : '0');
     if (following) post({ type: 'nb-follow', s: t });
     else post({ type: 'nb-unfollow' });
     paintFollow();
@@ -499,13 +554,30 @@
   });
 
   /* ── toolbar ─────────────────────────────────────────────────────── */
-  $('print').onclick = function () {
+  function printCurrentNote() {
     if (!docNow) return;
+    // Print the completed standalone document, not the sandbox frame or the
+    // filtered reader. Its own @media print rules therefore control page breaks
+    // and the exported PDF keeps the paper version even when Night reading is on.
     var w = window.open('', '_blank');
     if (!w) { setStatus('⚠️ Allow pop-ups to use Print / PDF.', true); return; }
-    w.document.open(); w.document.write(docNow); w.document.close(); w.focus();
-    setTimeout(function () { try { w.print(); } catch (e) {} }, 800);
-  };
+    var printed = false;
+    function printWhenReady() {
+      if (printed) return;
+      printed = true;
+      try { w.focus(); w.print(); }
+      catch (e) { setStatus('⚠️ The print window opened, but the browser could not start printing.', true); }
+    }
+    w.addEventListener('load', function () { setTimeout(printWhenReady, 120); }, { once: true });
+    w.document.open();
+    w.document.write(docNow);
+    w.document.close();
+    // A document without external resources can finish before the listener is
+    // observed; the fallback still gives print CSS and hosted fonts time to settle.
+    setTimeout(printWhenReady, 1200);
+    setStatus('🖨️ Opening the note’s print layout. Choose “Save to PDF” in the print dialog.');
+  }
+  $('print').onclick = printCurrentNote;
   $('save').onclick = function () {
     if (!docNow) return;
     var blob = new Blob([docNow], { type: 'text/html;charset=utf-8' });
@@ -516,8 +588,8 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
   };
   $('invert').onclick = function () {
-    var on = $('stage').classList.toggle('invert');
-    this.classList.toggle('on', on);
+    writeSetting('aiNotesInvert', $('stage').classList.contains('invert') ? '0' : '1');
+    applyReaderPreference();
   };
   $('viewsrc').onclick = function () {
     var on = !$('src').classList.toggle('hidden');
@@ -598,6 +670,7 @@
         // changes for anyone who does not want to think about it.
         design.innerHTML = '<option value="">Same as Notes AI</option>' + opts;
         notes.disabled = design.disabled = false;
+        restoreNotesModel();
         _modelsLoaded = true;
         $('models-note').innerHTML =
           'Loaded from <code>/api/status</code> — only providers with a key are listed. ' +
@@ -620,6 +693,20 @@
     return { provider: raw.slice(0, bar), model: raw.slice(bar + 1) };
   }
   function choiceLabel(c, fallback) { return c ? (c.model || fallback) : fallback; }
+  function restoreNotesModel() {
+    var provider = readSetting('aiStudyProvider', '');
+    var model = readSetting('aiStudyModel', '');
+    var value = provider + '|' + model;
+    var notes = $('notes-ai');
+    if (model && Array.prototype.some.call(notes.options, function (o) { return o.value === value; })) {
+      notes.value = value;
+    }
+  }
+  $('notes-ai').addEventListener('change', function () {
+    var selected = aiChoice('notes-ai');
+    writeSetting('aiStudyProvider', selected ? selected.provider : '');
+    writeSetting('aiStudyModel', selected ? selected.model : '');
+  });
 
   /* ── live generation ─────────────────────────────────────────────── */
   function setStatus(msg, isErr) {
