@@ -2188,6 +2188,11 @@
 
   var NOTES_REQUIREMENTS_KEY = 'aiStudyNotesRequirements';
   var NOTES_REQUIREMENTS_MAX = 600;   // mirrors NOTES_REQUIREMENTS_MAX_CHARS server-side
+  // Whether the requirements textarea itself is tucked away (label + toggle
+  // stay visible either way). Separate from isSetupCollapsed()/notes-tab-active
+  // collapse below — the two toggles cover different controls and either can
+  // be open while the other is closed.
+  var REQ_BOX_COLLAPSED_KEY = 'aiStudyNotesRequirementsCollapsed';
   function notesRequirements() {
     var el = document.getElementById('ai-notes-requirements');
     // Read from the box when it exists (the Notes tab is open); otherwise the
@@ -7721,14 +7726,26 @@
         '</div>' +
         // ONE box for both content ("what to cover") and — for AI Designed
         // notes — design ("how it should look"). See notesRequirements() above
-        // for why it is deliberately a single field.
+        // for why it is deliberately a single field. The header row (label +
+        // toggle) stays put whether the box is open or not, so a student can
+        // reclaim the space once a note is on screen (see the "takes more
+        // lines" feedback that led to this toggle) without losing the ability
+        // to reopen it, and without it depending on the separate "⚙ Setup"
+        // collapse (which only ever covered mode/style/design-ai/Generate).
         '<div id="ai-notes-requirements-wrap" style="margin:2px 0 8px">' +
-          '<textarea id="ai-notes-requirements" rows="2" maxlength="' + NOTES_REQUIREMENTS_MAX + '" ' +
-            'placeholder="Optional: what should these notes cover, and (for AI Designed) how should they look? e.g. focus on dates and formulas, dark theme with big headings" ' +
-            'style="width:100%;padding:7px 9px;border-radius:8px;border:1px solid var(--border,#334);' +
-            'background:transparent;color:inherit;font-size:.82rem;font-family:inherit;resize:vertical;' +
-            'min-height:42px">' + esc(notesRequirements()) + '</textarea>' +
-          '<div id="ai-notes-requirements-count" class="ai-muted" style="font-size:.68rem;text-align:right;margin-top:1px"></div>' +
+          '<div class="ai-notes-requirements-head" style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:2px">' +
+            '<span class="ai-muted" style="font-size:.72rem">📝 Notes &amp; design requirements <em style="font-style:normal;opacity:.75">(optional)</em></span>' +
+            '<button type="button" class="ai-btn sec" id="ai-notes-requirements-toggle" ' +
+              'style="padding:2px 8px;font-size:.68rem" title="Show/hide the requirements box"></button>' +
+          '</div>' +
+          '<div id="ai-notes-requirements-body">' +
+            '<textarea id="ai-notes-requirements" rows="2" maxlength="' + NOTES_REQUIREMENTS_MAX + '" ' +
+              'placeholder="Optional: what should these notes cover, and (for AI Designed) how should they look? e.g. focus on dates and formulas, dark theme with big headings" ' +
+              'style="width:100%;padding:7px 9px;border-radius:8px;border:1px solid var(--border,#334);' +
+              'background:transparent;color:inherit;font-size:.82rem;font-family:inherit;resize:vertical;' +
+              'min-height:42px">' + esc(notesRequirements()) + '</textarea>' +
+            '<div id="ai-notes-requirements-count" class="ai-muted" style="font-size:.68rem;text-align:right;margin-top:1px"></div>' +
+          '</div>' +
         '</div>' +
         '<div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
@@ -7736,6 +7753,25 @@
       var designSel = document.getElementById('ai-notes-design-ai');
       var reqBox = document.getElementById('ai-notes-requirements');
       var reqCount = document.getElementById('ai-notes-requirements-count');
+      var reqBody = document.getElementById('ai-notes-requirements-body');
+      var reqToggle = document.getElementById('ai-notes-requirements-toggle');
+      // Independent of the "⚙ Setup" collapse (mode/style/design-ai/Generate):
+      // a student may want this box out of the way even while setup is still
+      // open (empty box, nothing to say) or kept open even once setup itself
+      // collapses (mid-thought about what to type). Remembered across notes
+      // sessions like the box's own text, but defaults to OPEN so a first-time
+      // visitor actually notices the feature exists.
+      function reqBoxCollapsed() { return localStorage.getItem(REQ_BOX_COLLAPSED_KEY) === '1'; }
+      function setReqBoxCollapsed(collapsed) {
+        try { localStorage.setItem(REQ_BOX_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+        if (reqBody) reqBody.style.display = collapsed ? 'none' : '';
+        if (reqToggle) {
+          reqToggle.textContent = collapsed ? '▾ Show' : '▴ Hide';
+          reqToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        }
+      }
+      setReqBoxCollapsed(reqBoxCollapsed());
+      if (reqToggle) reqToggle.onclick = function () { setReqBoxCollapsed(!reqBoxCollapsed()); };
       // MCQ style only applies to comprehensive notes; hide it for summary/insights.
       // The requirements box also only matters for notes — summary/insights are
       // fixed-shape outputs with nothing to "cover more/less of" or restyle.
