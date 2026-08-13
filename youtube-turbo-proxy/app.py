@@ -1748,11 +1748,10 @@ def _ai_chat_available_models(cfg):
     provider becomes selectable here the moment its key is added anywhere in
     the AI Study panel, and disappears again if the key is removed.
 
-    Image-only models are deliberately EXCLUDED here even if an admin hand-added
-    one to providerModels: they cannot answer a chat turn, and they belong to
-    the separate image list (_ai_chat_image_models) that drives the dedicated
-    image-generation picker. Keeping the two lists disjoint is what stops an
-    image model from showing up in — and breaking — the chat dropdown."""
+    Image-only models cannot answer a chat turn and belong to the separate image
+    list (_ai_chat_image_models) that drives the dedicated image-generation
+    picker. They are already stripped centrally by _effective_provider_models(),
+    so this list is image-free by construction."""
     eff = _effective_provider_models(cfg)
     out = []
     for pid in STUDY_PROVIDER_IDS:
@@ -1760,8 +1759,6 @@ def _ai_chat_available_models(cfg):
             continue
         label = STUDY_PROVIDER_LABELS.get(pid, pid.title())
         for model in eff.get(pid, []):
-            if _is_image_model_name(model):
-                continue
             out.append({"provider": pid, "model": model, "label": label})
     return out
 
@@ -2086,7 +2083,9 @@ def _ai_chat_image_models(cfg):
     interactions transport for chat and would just duplicate the same Gemini
     models under a second label."""
     eff_images = _effective_image_models(cfg)
-    eff_text = _effective_provider_models(cfg)
+    # RAW here on purpose: _effective_provider_models() now strips image ids, so
+    # reading the filtered list would never surface a hand-added image model.
+    eff_text = _effective_provider_models_raw(cfg)
     out, seen = [], set()
     for pid in IMAGE_PROVIDER_MODELS:
         if not _provider_configured(cfg, pid):
@@ -8274,10 +8273,13 @@ def _omniroute_catalog_flat():
     return models
 
 
-def _effective_provider_models(cfg):
-    """Per-provider model list. Admin overrides in config/ai.providerModels
-    (managed from the AI Study panel — add/remove models) win over the hardcoded
-    defaults; a missing/empty override falls back to the default list."""
+def _effective_provider_models_raw(cfg):
+    """Per-provider model list EXACTLY as configured, image models included.
+
+    Only two callers want this: _effective_provider_models() below (which
+    filters it), and _ai_chat_image_models() (which needs the image ids an admin
+    may have hand-added to a provider's regular list). Everything else must use
+    the filtered version — see the note there."""
     overrides = (cfg or {}).get("providerModels") or {}
     out = {}
     for pid, default in STUDY_PROVIDER_MODELS.items():
@@ -8295,6 +8297,25 @@ def _effective_provider_models(cfg):
         else:
             out[pid] = list(default)
     return out
+
+
+def _effective_provider_models(cfg):
+    """Per-provider TEXT/chat model list. Admin overrides in
+    config/ai.providerModels win over the hardcoded defaults; a missing/empty
+    override falls back to the default list.
+
+    Image-only models are stripped here, at the single source every text
+    selector reads: the AI Chat model picker, /api/status's studyModels and
+    studyModelGroups (the video tutor's dropdown), _all_study_models, and
+    _ai_for_provider's request validation. Filtering centrally is what keeps
+    the chat and image lists separate EVERYWHERE — an earlier fix only filtered
+    the AI Chat list, so an image id hand-added to providerModels still showed
+    up in the tutor's dropdown, where selecting it would break notes/quiz
+    generation. Image models are offered exclusively through
+    _ai_chat_image_models()."""
+    raw = _effective_provider_models_raw(cfg)
+    return {pid: [m for m in models if not _is_image_model_name(m)]
+            for pid, models in raw.items()}
 
 
 def _model_provider(model, cfg=None):
