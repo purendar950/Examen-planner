@@ -20,6 +20,12 @@
   var LANG_KEY = 'aiStudyLang';
   var MODEL_KEY = 'aiStudyModel';
   var PROVIDER_KEY = 'aiStudyProvider';
+  // Optional SECOND model, used only for style="html" notes: which AI writes
+  // the STYLESHEET, independent of which one writes the content. Mirrors the
+  // demo's "Design AI" picker (demo/ai-html-notes-demo.html) — see
+  // fillDesignAiOptions() below for why the app exposes the same choice.
+  var DESIGN_MODEL_KEY = 'aiStudyDesignModel';
+  var DESIGN_PROVIDER_KEY = 'aiStudyDesignProvider';
   // Telegram channel branding shown on the notes (on-screen header) and in the
   // exported PDF (header handle + watermark + footer link). Single source of truth.
   var TG_CHANNEL = 'StudyPlannerSSC';
@@ -612,6 +618,21 @@
     var m = outModel(), p = outProvider();
     return (m ? '&model=' + encodeURIComponent(m) : '') +
       (p ? '&provider=' + encodeURIComponent(p) : '');
+  }
+
+  /* Second, INDEPENDENT model choice: which AI writes the STYLESHEET for
+     style="html" notes. "" = follow the Notes AI (server default — see
+     _load_design_ai). Mirrors demo/ai-html-notes-demo.html's "Design AI"
+     picker, which exists because design (short, creative, format-following)
+     and content (long, factual, big-context) reward different models. */
+  function outDesignModel() { return localStorage.getItem(DESIGN_MODEL_KEY) || ''; }
+  function setDesignModel(v) { try { localStorage.setItem(DESIGN_MODEL_KEY, v == null ? '' : v); } catch (e) {} }
+  function outDesignProvider() { return localStorage.getItem(DESIGN_PROVIDER_KEY) || ''; }
+  function setDesignProvider(v) { try { localStorage.setItem(DESIGN_PROVIDER_KEY, v == null ? '' : v); } catch (e) {} }
+  function designModelParam() {
+    var m = outDesignModel(), p = outDesignProvider();
+    return (m ? '&design_model=' + encodeURIComponent(m) : '') +
+      (p ? '&design_provider=' + encodeURIComponent(p) : '');
   }
 
   // NOTE: youtube.js declares ytCurrentVideoId with `let`, so it is NOT a
@@ -2138,6 +2159,33 @@
      but NOT sent again automatically for a different video without the
      student noticing, because it renders back into the textarea every time
      the Notes tab is (re)built and is always visible above Generate. */
+  // Fill #ai-notes-design-ai from the SAME provider/model catalog the main AI
+  // picker uses (_studyGroups, populated by applyServerModels() from
+  // /api/status) — flattened into "provider|model" options, like the demo's
+  // #design-ai. Safe to call before the catalog has loaded: it just renders
+  // the "same as Notes AI" default until a later applyServerModels() call
+  // (see checkStatus()) refills it with the real list.
+  function fillDesignAiOptions() {
+    var sel = document.getElementById('ai-notes-design-ai');
+    if (!sel) return;
+    var savedProvider = outDesignProvider(), savedModel = outDesignModel();
+    var savedValue = savedModel ? (savedProvider + '|' + savedModel) : '';
+    var opts = _studyGroups.map(function (g) {
+      return (g.models || []).map(function (m) {
+        return '<option value="' + esc(g.provider) + '|' + esc(m) + '">' + esc(m) + '</option>';
+      }).join('');
+    }).join('');
+    sel.innerHTML = '<option value="">🎨 Design: same as Notes AI</option>' + opts;
+    if (savedValue && Array.prototype.some.call(sel.options, function (o) { return o.value === savedValue; })) {
+      sel.value = savedValue;
+    } else if (savedModel) {
+      // A previously-saved design model dropped out of the catalog (provider
+      // lost its key, model retired) — fall back to "same as Notes AI" rather
+      // than silently keep sending a now-invalid choice.
+      setDesignProvider(''); setDesignModel('');
+    }
+  }
+
   var NOTES_REQUIREMENTS_KEY = 'aiStudyNotesRequirements';
   var NOTES_REQUIREMENTS_MAX = 600;   // mirrors NOTES_REQUIREMENTS_MAX_CHARS server-side
   function notesRequirements() {
@@ -3979,6 +4027,7 @@
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
     url += nbStyleParam(style);
+    if (style === 'html') url += designModelParam();
     url += requirementsParam(requirements);
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
@@ -4098,11 +4147,17 @@
         throw j;
       });
     }
+    // Design AI only applies to style="html" — other styles have nothing for a
+    // second model to design, so never send it (matches the server, which
+    // ignores design_model/design_provider unless style="html" anyway).
+    var wantsDesignAi = job.style === 'html';
     backendAuthFetch('/api/study/jobs', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: signal,
       body: JSON.stringify({
         jobId: job.jobId, id: vid, mode: mode, out: lang,
         model: outModel(), provider: outProvider(), style: style || '',
+        designModel: wantsDesignAi ? outDesignModel() : '',
+        designProvider: wantsDesignAi ? outDesignProvider() : '',
         focus: job.focus || '', refresh: force ? 1 : 0,
         // Same free-text box for both content and (style="html") design; see
         // notesRequirements(). Sent as "" rather than omitted when empty so the
@@ -4301,6 +4356,11 @@
       var sv = nbStyleOf(job.style);
       styleSel.value = sv; styleSel.style.display = job.mode === 'notes' ? '' : 'none';
     }
+    // Design AI picker only matters for style="html"; the resumed job's design
+    // choice already lives in localStorage (outDesignModel/outDesignProvider,
+    // read fresh by studyJobStart below), so only visibility needs restoring.
+    var designSel = document.getElementById('ai-notes-design-ai');
+    if (designSel) designSel.style.display = (job.mode === 'notes' && sv === 'html') ? '' : 'none';
     // Show what this in-flight job was actually asked for, in case the student
     // reloaded after typing something new but before it was ever sent.
     if (reqBox && job.requirements) reqBox.value = job.requirements;
@@ -4328,6 +4388,7 @@
     var vid = curVid();
     var url = '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     url += nbStyleParam(style);
+    if (style === 'html') url += designModelParam();
     url += requirementsParam(requirements);
     if (force) url += '&refresh=1';
     var meta = {}, acc = '', gotChunk = false, done = false;
@@ -7647,6 +7708,11 @@
         '<div class="ai-notes-controls">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
         '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="topic+images">🖼 Topic + Images</option><option value="mcq">❓ MCQ</option><option value="html">🎨 AI Designed</option></select>' +
+        // Only meaningful for style="html": which AI writes the STYLESHEET,
+        // independent of which one writes the content (see outDesignModel()
+        // above). Mirrors demo/ai-html-notes-demo.html's "Design AI" picker.
+        '<select id="ai-notes-design-ai" class="ai-btn sec" title="Design AI — which model styles the AI-Designed note (independent of the Notes AI above)" ' +
+          'aria-label="Design AI" style="padding:6px 8px;display:none"><option value="">🎨 Design: same as Notes AI</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
         '<button class="ai-btn sec" id="ai-notes-bundle" title="Combine several lectures into one notebook" style="padding:6px 10px">\uD83D\uDCDA Multi-video</button>' +
         '<button class="ai-btn sec" id="ai-notes-saved" title="Every note the AI has written for you" style="padding:6px 10px">\uD83D\uDDC2 Saved</button>' +
@@ -7666,6 +7732,7 @@
         '<div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
       var styleSel = document.getElementById('ai-notes-style');
+      var designSel = document.getElementById('ai-notes-design-ai');
       var reqBox = document.getElementById('ai-notes-requirements');
       var reqCount = document.getElementById('ai-notes-requirements-count');
       // MCQ style only applies to comprehensive notes; hide it for summary/insights.
@@ -7675,8 +7742,16 @@
         var isNotes = modeSel.value === 'notes';
         styleSel.style.display = isNotes ? '' : 'none';
         document.getElementById('ai-notes-requirements-wrap').style.display = isNotes ? '' : 'none';
+        syncDesignAiVis();
+      }
+      // The Design AI picker only means anything for style="html" — every other
+      // style is Markdown with no separate stylesheet pass to route elsewhere.
+      function syncDesignAiVis() {
+        if (!designSel) return;
+        designSel.style.display = (modeSel.value === 'notes' && styleSel.value === 'html') ? '' : 'none';
       }
       syncStyleVis();
+      fillDesignAiOptions();
       function reqCountUpdate() {
         if (!reqCount) return;
         var n = (reqBox.value || '').length;
@@ -7710,7 +7785,13 @@
         _cancelActiveStudy();
         _genEnd('ai-notes-go');
         var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
+        syncDesignAiVis();
         checkLangs(modeSel.value, 25, false);
+      };
+      if (designSel) designSel.onchange = function () {
+        var raw = designSel.value, bar = raw.indexOf('|');
+        if (bar === -1) { setDesignProvider(''); setDesignModel(''); }
+        else { setDesignProvider(raw.slice(0, bar)); setDesignModel(raw.slice(bar + 1)); }
       };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
       // Hand off to the Notebook page, pre-selecting the course this video
@@ -8011,6 +8092,11 @@
       showOmniProviderBox(false);
       fillStudyModels(savedProvider, savedModel);
     }
+    // The Notes tab's Design AI picker (if currently mounted) reads the same
+    // _studyGroups just refreshed above — repopulate it with the real catalog
+    // rather than leaving it on the "same as Notes AI"-only placeholder it
+    // rendered with before this status call returned.
+    fillDesignAiOptions();
   }
   // Provider changed → default to that provider's admin model (else its first)
   // and reveal its model dropdown. Auto hides the model dropdown.
