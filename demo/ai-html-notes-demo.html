@@ -235,6 +235,32 @@
       </label>
     </div>
     <p class="note" id="models-note">Sign in to load the model list from your server.</p>
+
+    <!-- ONE combined box: content ("what to write") and design ("how it should
+         look") share the same text, because most real requests are about both
+         at once ("focus on dates, make it feel like a cheat sheet") and asking
+         a student to split that into two boxes is friction with no payoff. The
+         server sends this same string to both the notes prompt and the design
+         prompt (each reads only the half that applies to it) — see
+         _requirements_instr in youtube-turbo-proxy/app.py. -->
+    <label class="fld" for="requirements">📝 Notes &amp; design requirements
+      <span class="pill" style="margin-left:4px">optional · one box for both</span>
+    </label>
+    <textarea id="requirements" rows="3" maxlength="600" spellcheck="true"
+      placeholder="e.g. Focus on dates, formulas and definitions — skip the anecdotes. Make it look like an exam cheat-sheet with bold headings and a dark background."
+      style="font:inherit;font-size:.92rem;padding:9px 11px;border-radius:9px;border:1px solid var(--line);
+             background:#fbfdff;color:var(--ink);width:100%;resize:vertical;min-height:64px;margin-top:2px"></textarea>
+    <p class="note">
+      Sent to <b>both</b> passes: the notes AI reads it as "what to cover and how to organise it",
+      the design AI reads it as "how it should look and behave" — same sentence, two angles.
+      It cannot override safety rules (no external images, no invented facts, the fixed class
+      contract for style="html") — a conflicting request is quietly ignored rather than breaking
+      the document. Any non-empty text also forces a fresh generation, for the same reason
+      picking a Design AI does: the cache does not know what you typed, so a cached note would
+      come back unchanged and look like the box did nothing.
+      <span id="req-counter" style="float:right;color:var(--muted)">0 / 600</span>
+    </p>
+
     <!-- Sign-in strip. /api/study is authenticated AND Pro-gated, so this is
          not optional decoration: without a token the request is a 401. The
          markup, styles and token fallback all come from demo-auth.js, which the
@@ -700,29 +726,49 @@
       });
   };
 
+  // Live character counter for the combined requirements box. Collapsing
+  // whitespace client-side too, so the count the student sees roughly matches
+  // what _clean_requirements will actually keep server-side.
+  var reqBox = $('requirements');
+  function reqCounterUpdate() {
+    var n = (reqBox.value || '').length;
+    $('req-counter').textContent = n + ' / 600';
+    $('req-counter').style.color = n > 600 ? 'var(--warn)' : 'var(--muted)';
+  }
+  reqBox.addEventListener('input', reqCounterUpdate);
+  reqCounterUpdate();
+
   $('go').onclick = function () {
     var backend = ($('backend').value || '').trim().replace(/\/+$/, '');
     var id = parseId($('url').value);
     if (!id) { setStatus('⚠️ Enter a valid YouTube URL or 11-character video ID.', true); return; }
     var lang = $('lang').value, fresh = $('fresh').value === '1';
     var notesAi = aiChoice('notes-ai'), designAi = aiChoice('design-ai');
+    // Collapsed the same way the server's _clean_requirements does, and capped
+    // to the same 600 chars — so what is sent matches what the counter showed.
+    var requirements = (reqBox.value || '').replace(/\s+/g, ' ').trim().slice(0, 600);
 
     /* The cache key is deliberately model-agnostic — a note is identified by
-       (video, mode, language, style), NOT by which model made it. So swapping
-       only the Design AI would otherwise return the previously cached document
-       and look like the setting did nothing. Comparing designs therefore has to
-       force a fresh generation. */
-    if (designAi && !fresh) {
+       (video, mode, language, style [, requirements]), NOT by which model made
+       it. So swapping only the Design AI, or typing a NEW request into a box
+       that previously held a different one, would otherwise return whatever
+       was cached under the OLD key and look like the setting did nothing.
+       Comparing designs, or trying a different request, therefore both force
+       a fresh generation. (The requirements box itself already has its own
+       cache-key slot server-side — this is about not confusing a genuinely new
+       request with a stale cache hit while testing.) */
+    if ((designAi || requirements) && !fresh) {
       fresh = true;
-      setStatus('ℹ️ Forcing a fresh run: the cache is keyed on the video and language, ' +
-        'not on the model, so a cached note would come back unchanged.');
+      setStatus('ℹ️ Forcing a fresh run: the cache does not know which model or ' +
+        'request you used, so a cached note could otherwise come back unchanged.');
     }
 
     syncGoEnabled(true);
     setStatus('<span class="spin"></span> Starting the job… a sleeping Render instance can take ~50s to wake.');
     showProgress();
 
-    job = { id: newJobId(), backend: backend, acc: '', stopped: false, timer: null, t0: Date.now() };
+    job = { id: newJobId(), backend: backend, acc: '', stopped: false, timer: null,
+            t0: Date.now(), requirements: requirements };
     var mine = job;
 
     DemoAuth.fetch(backend + '/api/study/jobs', {
@@ -736,7 +782,10 @@
         model: notesAi ? notesAi.model : '',
         provider: notesAi ? notesAi.provider : '',
         designModel: designAi ? designAi.model : '',
-        designProvider: designAi ? designAi.provider : ''
+        designProvider: designAi ? designAi.provider : '',
+        // One field, read by both the notes prompt and the design prompt —
+        // see the label above the textarea for why it is a single box.
+        requirements: requirements
       })
     }).then(function (r) {
       var st = r.status;
@@ -893,12 +942,14 @@
       : (dProv || dModel) ? (dProv + (dModel ? ' · ' + dModel : '')) + (dMs ? ' in ' + (dMs / 1000).toFixed(1) + 's' : '')
       : 'same model as the notes';
 
+    var reqUsed = (meta && meta.requirements) || mine.requirements || '';
     setStatus('✅ Generated in ' + secs + 's · ' + sizeLabel(content) + ' of HTML' +
       (meta && meta.cached ? ' (served from cache)' : '') + '.<br>' +
       '<b>✍️ Notes:</b> ' + esc(notesLabel) + ' &nbsp;·&nbsp; <b>🎨 Design:</b> ' + esc(designLabel) +
       (dMs && !dFallback
         ? ' &nbsp;— written <i>while</i> the notes were, so it added nothing to the ' + secs + 's.'
-        : ''));
+        : '') +
+      (reqUsed ? '<br><b>📝 Requirements used:</b> \u201c' + esc(reqUsed) + '\u201d' : ''));
     mount(content, '✍️ ' + notesLabel + '  🎨 ' + designLabel +
       ' · ' + (meta && meta.cached ? 'cached' : 'fresh') + ' · ' + $('lang').value);
     endJob();

@@ -532,7 +532,11 @@ _STUDY_INDEX_FIELDS = ("id", "title", "mode", "style", "out_lang", "model",
                        # which one styled the note is what makes a saved note
                        # attributable later — the body model alone does not
                        # explain why one note looks nothing like another.
-                       "design_provider", "design_model", "design_fallback")
+                       "design_provider", "design_model", "design_fallback",
+                       # The single free-text box that shaped this note's content
+                       # and (for style="html") design, so reopening a saved note
+                       # can show what was asked for.
+                       "requirements")
 
 
 def _study_index_doc(data):
@@ -1170,6 +1174,67 @@ def _cache_lang(out_lang):
     return _HINGLISH_CACHE_LANG if _is_hinglish(out_lang) else out_lang
 
 
+# ── one free-text "requirements" box for style="html" notes ────────────────
+# A single field the student fills in once, covering BOTH what the notes should
+# say (content) and how they should look (design) — deliberately one box, not
+# two, because most requests are really about one thing seen from two angles
+# ("focus on dates and make it exam-cheat-sheet style") and asking a student to
+# decide which half of a sentence belongs in which box is friction with no
+# payoff: both prompt functions already read the SAME field.
+NOTES_REQUIREMENTS_MAX = int(os.environ.get("NOTES_REQUIREMENTS_MAX_CHARS", "600"))
+
+
+def _clean_requirements(raw):
+    """Collapse whitespace and cap length. Feeds into the AI prompt AND the
+    cache key, so it also has to be safe as a Firestore document-id component —
+    _fs_doc_id already strips anything that isn't, this just bounds the size
+    before that happens."""
+    text = re.sub(r"\s+", " ", str(raw or "")).strip()
+    return text[:NOTES_REQUIREMENTS_MAX]
+
+
+def _requirements_key(requirements):
+    """Cache-key fragment for a requirements string: short, and stable for the
+    SAME text but different for any other. A raw (cleaned) string works for the
+    focus box elsewhere in this file, but that one is capped at 120 chars for a
+    doc id; this box goes to 600, comfortably past what _fs_doc_id's automatic
+    truncation of the full id (1400 chars) tolerates alongside the video id,
+    mode, language and style already ahead of it in the id. Hashing removes
+    that ceiling and, incidentally, means the exact wording of the request
+    never appears in a doc id if that ever gets logged."""
+    if not requirements:
+        return ""
+    return hashlib.sha1(requirements.encode("utf-8")).hexdigest()[:16]
+
+
+def _requirements_instr(requirements, for_design=False):
+    """The block appended to a prompt for the student's free-text requirements.
+
+    Deliberately the SAME wording style in both callers (_html_body_instr /
+    _notes_instr for content, _html_design_instr for design) so a request that
+    is really about layout ("bigger headings") or really about content ("skip
+    the history, just formulas") reads sensibly to whichever pass receives it —
+    the student wrote one sentence, not one for each half.
+
+    Framed as a preference to satisfy where it does not conflict with the rules
+    already given, not as an instruction that can override them: accuracy,
+    the SVG-only diagram rule, and the fixed class contract exist for reasons a
+    free-text field should not be able to switch off by asking nicely (or by a
+    student unknowingly asking for something that breaks the document).
+    """
+    if not requirements:
+        return ""
+    role = ("how these notes should look and behave" if for_design
+            else "what these notes should contain and how they should be organised")
+    return (
+        "\n\nSTUDENT'S REQUEST for %s: \"%s\"\n"
+        "Follow it wherever it does not conflict with the rules above. If it "
+        "asks for something those rules forbid (e.g. an external image, "
+        "dropping cited facts, inventing content, or breaking the class "
+        "contract), quietly follow the rule instead rather than refusing or "
+        "commenting on the conflict.\n" % (role, requirements))
+
+
 _study_cache = {}
 _study_lock = threading.Lock()
 
@@ -1218,6 +1283,9 @@ def _study_job_public(job):
         "design_model": job.get("design_model") or "",
         "design_ms": job.get("design_ms") or 0,
         "design_fallback": bool(job.get("design_fallback")),
+        # Echoed back so a reconnecting client can show what was actually asked
+        # for without having kept its own copy.
+        "requirements": job.get("requirements") or "",
         "error": job.get("error", ""),
     }
     # Multi-video notebooks add per-lecture progress. Single-video jobs keep the
@@ -1464,15 +1532,39 @@ def _remember_study_job_stop(job_id):
         _study_job_stop_tombstones[job_id] = time.time() + 300
 
 
-def _study_text_cache_keys(video_id, mode, out_lang, style):
+def _text_cache_key_parts(video_id, mode, lang, num_q, style="", requirements=""):
+    """The ordered key components shared by every text-mode cache-key builder
+    (/api/study, /api/study/stream, jobs, saved, cached, langs).
+
+    `requirements` folds the student's single free-text box (see
+    _requirements_instr) into the key: the SAME request text reuses a cached
+    note, different text gets its own — exactly the way the focus box already
+    works for quiz/flashcards. It never changes the key when empty, so every
+    existing caller and every already-cached note is unaffected.
+
+    "custom" is inserted as a stand-in style slot when requirements are given
+    but style is not (plain topic notes with a request) — otherwise that key
+    would collapse to the same shape as the un-requested default and either
+    collide with it or silently shift every other position, depending on how a
+    caller joins the parts.
+    """
+    cache_style = (_MCQ_CACHE_STYLE if style == "mcq" else style) if style else ""
+    rkey = _requirements_key(requirements)
+    parts = [video_id, mode, lang, num_q]
+    if cache_style:
+        parts.append(cache_style)
+    elif rkey:
+        parts.append("custom")
+    if rkey:
+        parts.append(rkey)
+    return parts
+
+
+def _study_text_cache_keys(video_id, mode, out_lang, style, requirements=""):
     """Return the exact text-mode cache keys shared with /api/study/stream."""
-    lang = _cache_lang(out_lang)
-    if style:
-        cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
-        return ("%s:%s:%s:%s:%s" % (video_id, mode, lang, 25, cache_style),
-                _fs_doc_id(video_id, mode, lang, 25, cache_style))
-    return ("%s:%s:%s:%s" % (video_id, mode, lang, 25),
-            _fs_doc_id(video_id, mode, lang, 25))
+    parts = _text_cache_key_parts(video_id, mode, _cache_lang(out_lang), 25,
+                                  style, requirements)
+    return ":".join(str(p) for p in parts), _fs_doc_id(*parts)
 
 
 def _load_ai_config(prefer_model=None, prefer_provider=None):
@@ -2766,20 +2858,23 @@ def _covered_note(headings, style=""):
             + "\n- ".join(shown) + "\n\n")
 
 
-def _gen_notes(transcript, out_lang, ai, head, style="", design_ai=None, meta=None):
+def _gen_notes(transcript, out_lang, ai, head, style="", design_ai=None, meta=None,
+               requirements=""):
     """COMPREHENSIVE notes covering the whole transcript. Big-context providers
     process the transcript section-by-section (so nothing gets cut by the output
     limit); non-big providers use the condensed body.
     style='mcq' -> format the notes question-by-question (Question + options +
     full explanation) for lectures that are solving MCQs; default = topic notes.
     style='html' -> hand off entirely: the model designs and writes a standalone
-    HTML document instead of Markdown (see _gen_notes_html)."""
+    HTML document instead of Markdown (see _gen_notes_html).
+    `requirements` -> the student's free-text ask, see _requirements_instr."""
     if style == "html":
         return _gen_notes_html(transcript, out_lang, ai, head,
                                _head_title(head),
-                               design_ai=design_ai, meta=meta)
+                               design_ai=design_ai, meta=meta,
+                               requirements=requirements)
     sysmsg = _study_sys(out_lang)
-    instr = _notes_instr(style)
+    instr = _notes_instr(style, requirements)
     # Restated after the transcript: the transcript is the last thing the model
     # reads, so the language rule has to be the last thing after it.
     tail = _lang_reminder(out_lang)
@@ -2799,9 +2894,19 @@ def _gen_notes(transcript, out_lang, ai, head, style="", design_ai=None, meta=No
     return "\n\n".join(parts)
 
 
-def _notes_instr(style=""):
+def _notes_instr(style="", requirements=""):
     """The notes-generation instruction (topic or MCQ). Shared by _gen_notes
-    (blocking) and _stream_study_text (streaming) so the two never drift."""
+    (blocking) and _stream_study_text (streaming) so the two never drift.
+
+    `requirements` is the student's free-text ask from the single combined
+    requirements box (see NOTES_REQUIREMENTS_MAX / _requirements_instr) —
+    appended once, after whichever style branch below returns, rather than
+    duplicated into each one.
+    """
+    return _notes_instr_body(style) + _requirements_instr(requirements)
+
+
+def _notes_instr_body(style=""):
     no_promo = ("\nExclude everything that is NOT the exam subject matter: course/"
                 "coaching promotion, foundation/revision batch names, app/Telegram/"
                 "PDF/download links, class timings, subscribe/like/share reminders, "
@@ -3033,13 +3138,18 @@ body{margin:0;padding:18px;background:#e8ecf1;color:var(--ink);
 """
 
 
-def _html_design_instr(out_lang):
+def _html_design_instr(out_lang, requirements=""):
     """Pass 1. Asks for a visual identity for THIS lecture, not a generic theme.
 
     The output is deliberately not JSON: a stylesheet is full of braces, quotes
     and newlines, so JSON-encoding it invites escaping bugs and a truncated
     object would lose the whole design. Plain marker sections degrade gracefully
     — if only the CSS arrived we still have a usable design.
+
+    `requirements` is the SAME free-text string _html_body_instr receives (one
+    combined box on the client — see _requirements_instr): the design pass
+    reads it as being about layout/look, the body pass as being about content,
+    and each ignores the parts that don't apply to it.
     """
     return (
         "You are the ART DIRECTOR for a set of study notes on the lecture below. "
@@ -3106,10 +3216,11 @@ def _html_design_instr(out_lang):
         "- Never intercept clicks on `.ai-ts` elements — the app handles those.\n"
         "- If no behaviour is needed, leave the section empty.\n\n"
         "Write any human-readable text (headings inside CSS `content`, button "
-        "labels created by your JS) in " + out_lang + ".")
+        "labels created by your JS) in " + out_lang + "."
+        + _requirements_instr(requirements, for_design=True))
 
 
-def _html_body_instr(out_lang, part_no=0, part_total=0):
+def _html_body_instr(out_lang, part_no=0, part_total=0, requirements=""):
     """Pass 2. Writes the notes as HTML fragments against the fixed contract.
 
     Takes NO input from the design pass — that is the point. The vocabulary is
@@ -3118,6 +3229,9 @@ def _html_body_instr(out_lang, part_no=0, part_total=0):
 
     Fragments only — no <html>/<head>/<style>. That is what lets N chunks be
     concatenated into one document instead of producing N documents.
+
+    `requirements` — see _html_design_instr's matching parameter; this is the
+    body-pass reading of the same student text.
     """
     part_note = ""
     if part_total > 1:
@@ -3383,7 +3497,7 @@ def _html_part_cap(ai, part_cap):
     return part_cap if ai.get("big_context") else min(part_cap, 3400)
 
 
-def _gen_notes_design(transcript, out_lang, ai, title, cancel_event=None):
+def _gen_notes_design(transcript, out_lang, ai, title, cancel_event=None, requirements=""):
     """Run the design pass and return (css, js, used_fallback, resolved_ai).
 
     Tries `ai`, then each of `ai["fallbacks"]` in order (see
@@ -3404,7 +3518,7 @@ def _gen_notes_design(transcript, out_lang, ai, title, cancel_event=None):
     chain = [ai] + [f for f in (ai.get("fallbacks") or []) if _ai_configured(f)]
     sample = (transcript or "")[:NOTES_HTML_DESIGN_SAMPLE]
     head = "Lecture title: %s\n\n" % (title or "(untitled)")
-    user = (head + _html_design_instr(out_lang) +
+    user = (head + _html_design_instr(out_lang, requirements) +
             "\n\nLECTURE SAMPLE:\n" + sample + _lang_reminder(out_lang))
     sysmsg = ("You are a senior web designer who writes production CSS by hand. "
               "You answer with code only, never with explanation.")
@@ -3493,7 +3607,7 @@ class _DesignPass(object):
     just whoever was asked first.
     """
 
-    def __init__(self, transcript, out_lang, ai, title, cancel_event=None):
+    def __init__(self, transcript, out_lang, ai, title, cancel_event=None, requirements=""):
         ai = _with_design_fallbacks(ai)
         self.css = _HTML_FALLBACK_CSS
         self.js = ""
@@ -3503,14 +3617,15 @@ class _DesignPass(object):
         self._started = time.time()
         self._thread = threading.Thread(
             target=self._run,
-            args=(transcript, out_lang, ai, title, cancel_event),
+            args=(transcript, out_lang, ai, title, cancel_event, requirements),
             daemon=True, name="notes-design")
         self._thread.start()
 
-    def _run(self, transcript, out_lang, ai, title, cancel_event):
+    def _run(self, transcript, out_lang, ai, title, cancel_event, requirements=""):
         try:
             self.css, self.js, fell_back, resolved_ai = _gen_notes_design(
-                transcript, out_lang, ai, title, cancel_event=cancel_event)
+                transcript, out_lang, ai, title, cancel_event=cancel_event,
+                requirements=requirements)
             self.failed = fell_back
             self.ai = resolved_ai       # may differ from the requested `ai` after failover
         except Exception as exc:  # noqa: BLE001
@@ -3546,15 +3661,19 @@ class _DesignPass(object):
 
 
 def _gen_notes_html(transcript, out_lang, ai, head, title,
-                    cancel_event=None, design_ai=None, meta=None):
+                    cancel_event=None, design_ai=None, meta=None, requirements=""):
     """Blocking AI-designed HTML notes.
 
     The design pass starts first and runs CONCURRENTLY with the body passes on
     its own thread (and, if configured, its own provider). It is collected only
     at the end, when the stylesheet is finally needed to open the document.
+
+    `requirements` — the student's single free-text box (see
+    _requirements_instr) — is handed to BOTH the design pass and every body
+    part, unmodified. Each prompt reads only the half of it that applies.
     """
     design = _DesignPass(transcript, out_lang, design_ai or ai, title,
-                         cancel_event=cancel_event)
+                         cancel_event=cancel_event, requirements=requirements)
     sysmsg = _study_sys(out_lang)
     tail = _lang_reminder(out_lang)
     secs, part_cap = _notes_sections(transcript, out_lang, ai, "html",
@@ -3564,7 +3683,7 @@ def _gen_notes_html(transcript, out_lang, ai, head, title,
     for i, sec in enumerate(secs):
         if cancel_event is not None and cancel_event.is_set():
             break
-        instr = _html_body_instr(out_lang, i + 1, len(secs))
+        instr = _html_body_instr(out_lang, i + 1, len(secs), requirements=requirements)
         user = head + _html_covered_note(covered) + instr + "\n\n" + sec + tail
         raw = _chat_notes_complete(sysmsg, user, ai, part_cap)
         frag = _sanitise_note_body(raw)
@@ -3580,7 +3699,7 @@ def _gen_notes_html(transcript, out_lang, ai, head, title,
 
 
 def _stream_notes_html(transcript, out_lang, ai, head, title,
-                       cancel_event=None, design_ai=None, meta=None):
+                       cancel_event=None, design_ai=None, meta=None, requirements=""):
     """Streaming twin of _gen_notes_html.
 
     Ordering constraint: the prologue carries the <style>, so it cannot be
@@ -3595,10 +3714,11 @@ def _stream_notes_html(transcript, out_lang, ai, head, title,
     repainting a half-built document.
 
     The pieces it yields concatenate to exactly what _gen_notes_html returns, so
-    a streamed note and a cached note are byte-identical.
+    a streamed note and a cached note are byte-identical. `requirements` — see
+    _gen_notes_html's matching parameter.
     """
     design = _DesignPass(transcript, out_lang, design_ai or ai, title,
-                         cancel_event=cancel_event)
+                         cancel_event=cancel_event, requirements=requirements)
     sysmsg = _study_sys(out_lang)
     tail = _lang_reminder(out_lang)
     secs, part_cap = _notes_sections(transcript, out_lang, ai, "html",
@@ -3608,7 +3728,7 @@ def _stream_notes_html(transcript, out_lang, ai, head, title,
     for i, sec in enumerate(secs):
         if cancel_event is not None and cancel_event.is_set():
             break
-        instr = _html_body_instr(out_lang, i + 1, len(secs))
+        instr = _html_body_instr(out_lang, i + 1, len(secs), requirements=requirements)
         user = head + _html_covered_note(covered) + instr + "\n\n" + sec + tail
         buf = []
         for piece in _stream_notes_part(sysmsg, user, ai, part_cap,
@@ -3738,10 +3858,12 @@ def _notes_sections(transcript, out_lang, ai, style="", cancel_event=None):
 
 
 def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_event=None,
-                       design_ai=None, meta=None):
+                       design_ai=None, meta=None, requirements=""):
     """Generator yielding markdown content pieces for the TEXT study modes
     (notes / summary / insights), streamed from the model. Mirrors _generate_study
-    for those modes; quiz/flashcards are NOT streamed (they return structured JSON)."""
+    for those modes; quiz/flashcards are NOT streamed (they return structured JSON).
+    `requirements` -> the student's free-text ask, see _requirements_instr; only
+    read by mode="notes" (summary/insights have no requirements box)."""
     sysmsg = _study_sys(out_lang)
     # Restated after the transcript for the same reason as in _gen_notes.
     tail = _lang_reminder(out_lang)
@@ -3749,11 +3871,12 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_ev
         for piece in _stream_notes_html(transcript, out_lang, ai, head,
                                         _head_title(head),
                                         cancel_event=cancel_event,
-                                        design_ai=design_ai, meta=meta):
+                                        design_ai=design_ai, meta=meta,
+                                        requirements=requirements):
             yield piece
         return
     if mode == "notes":
-        instr = _notes_instr(style)
+        instr = _notes_instr(style, requirements)
         secs, part_cap = _notes_sections(
             transcript, out_lang, ai, style, cancel_event=cancel_event)
         covered = []
@@ -4248,14 +4371,16 @@ def _gen_poster(transcript, out_lang, ai, head, kind="auto", video_id=None):
 
 
 def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25,
-                    focus="", style="", video_id=None, design_ai=None, meta=None):
+                    focus="", style="", video_id=None, design_ai=None, meta=None,
+                    requirements=""):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
     tail = _lang_reminder(out_lang)      # restated after the body, see _lang_reminder
     if mode == "notes":
         return {"format": "html" if style == "html" else "markdown",
                 "content": _gen_notes(transcript, out_lang, ai, head, style=style,
-                                      design_ai=design_ai, meta=meta)}
+                                      design_ai=design_ai, meta=meta,
+                                      requirements=requirements)}
     if mode == "quiz":
         return {"format": "json",
                 "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions, focus)}
@@ -4552,6 +4677,15 @@ def api_study():
     elif mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
 
+    # ?requirements=... (notes only): the single free-text box the student uses
+    # for BOTH content and — for style="html" — design requests. See
+    # _requirements_instr for how it reads to each prompt, and
+    # _text_cache_key_parts for how it folds into the cache key below.
+    requirements = _clean_requirements(request.args.get("requirements")
+                                       or request.args.get("instructions"))
+    if mode != "notes":
+        requirements = ""                       # other modes have no requirements box
+
     # Cache key is MODEL-AGNOSTIC: a note is identified by its CONTENT dimensions
     # (video + mode + language + question-count + focus/style), NOT by which model
     # made it. So picking a different model for the same video/mode/language reuses
@@ -4564,15 +4698,10 @@ def api_study():
     if fkey:
         ckey = "%s:%s:%s:%s::%s" % (video_id, mode, clang, num_q, fkey)
         fs_id = _fs_doc_id(video_id, mode, clang, num_q, fkey)
-    elif style:
-        # MCQ prompts are versioned so cached responses produced by the retired
-        # "extract existing questions" contract are never served again.
-        cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, clang, num_q, cache_style)
-        fs_id = _fs_doc_id(video_id, mode, clang, num_q, cache_style)
     else:
-        ckey = "%s:%s:%s:%s" % (video_id, mode, clang, num_q)
-        fs_id = _fs_doc_id(video_id, mode, clang, num_q)
+        parts = _text_cache_key_parts(video_id, mode, clang, num_q, style, requirements)
+        ckey = ":".join(str(p) for p in parts)
+        fs_id = _fs_doc_id(*parts)
     now = time.time()
     if not force:
         with _study_lock:
@@ -4632,7 +4761,8 @@ def api_study():
         result = _generate_study(mode, gen_text, out_lang, ai,
                                  title=t.get("title"), num_questions=num_q,
                                  focus=focus, style=style, video_id=video_id,
-                                 design_ai=design_ai, meta=gen_meta)
+                                 design_ai=design_ai, meta=gen_meta,
+                                 requirements=requirements)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
@@ -4644,6 +4774,7 @@ def api_study():
             "keys_available": _ai_key_count(ai),
             "transcript_lang": t.get("chosen_lang"),
             "segment_count": t.get("segment_count"),
+            "requirements": requirements,
             "cached": False}
     data.update(result)
     data.update(gen_meta)          # design_provider / design_model / design_ms
@@ -4697,18 +4828,17 @@ def api_study_stream():
     style = (request.args.get("style") or "").strip().lower()
     if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
+    requirements = _clean_requirements(request.args.get("requirements")
+                                       or request.args.get("instructions"))
+    if mode != "notes":
+        requirements = ""
 
     # Cache key MUST match /api/study (notes/summary/insights have no focus and a
     # fixed num_q of 25) so a streamed note reuses/populates the same entry.
     clang = _cache_lang(out_lang)       # versioned Hinglish bucket, as in /api/study
-    if style:
-        # Match /api/study's versioned MCQ cache namespace.
-        cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
-        ckey = "%s:%s:%s:%s:%s" % (video_id, mode, clang, 25, cache_style)
-        fs_id = _fs_doc_id(video_id, mode, clang, 25, cache_style)
-    else:
-        ckey = "%s:%s:%s:%s" % (video_id, mode, clang, 25)
-        fs_id = _fs_doc_id(video_id, mode, clang, 25)
+    parts = _text_cache_key_parts(video_id, mode, clang, 25, style, requirements)
+    ckey = ":".join(str(p) for p in parts)
+    fs_id = _fs_doc_id(*parts)
 
     def _sse(event, payload):
         return "event: %s\ndata: %s\n\n" % (event, json.dumps(payload, ensure_ascii=False))
@@ -4790,7 +4920,8 @@ def api_study_stream():
         full = []
         try:
             for piece in _stream_study_text(mode, gen_text, out_lang, ai, head, style,
-                                            design_ai=design_ai, meta=gen_meta):
+                                            design_ai=design_ai, meta=gen_meta,
+                                            requirements=requirements):
                 if not resolved_meta_sent:
                     resolved_provider = _ai_display_provider(ai)
                     resolved_model = _ai_display_model(ai)
@@ -4814,6 +4945,7 @@ def api_study_stream():
                     "keys_available": _ai_key_count(ai),
                     "transcript_lang": t.get("chosen_lang"),
                     "segment_count": t.get("segment_count"),
+                    "requirements": requirements,
                     "cached": False, "content": content}
             data.update(gen_meta)      # which model styled it, if any
             with _study_lock:
@@ -4910,7 +5042,8 @@ def _run_study_job(job_id):
                                          job["ai"], head, job["style"],
                                          cancel_event=job["cancel_event"],
                                          design_ai=job.get("design_ai"),
-                                         meta=job):
+                                         meta=job,
+                                         requirements=job.get("requirements", "")):
             if _study_job_stop_requested(job):
                 _set_study_job_terminal(job, "stopped")
                 return
@@ -4949,7 +5082,8 @@ def _run_study_job(job_id):
                 "content": content,
                 "design_provider": job.get("design_provider") or "",
                 "design_model": job.get("design_model") or "",
-                "design_fallback": bool(job.get("design_fallback"))}
+                "design_fallback": bool(job.get("design_fallback")),
+                "requirements": job.get("requirements") or ""}
         with _study_lock:
             _study_cache[job["ckey"]] = {"ts": time.time(), "data": data}
         persisted = _study_put(job["fs_id"], data)
@@ -5002,6 +5136,13 @@ def api_study_jobs_start():
     if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
 
+    # The single combined "what to write / how to design it" box. Only notes
+    # read it (see _requirements_instr); folded into the cache key so the SAME
+    # request reuses a cached note and any OTHER request gets its own.
+    requirements = _clean_requirements(payload.get("requirements") or payload.get("instructions"))
+    if mode != "notes":
+        requirements = ""
+
     was_stopped = _study_job_was_stopped(job_id)
     ai = _load_ai_config(str(payload.get("model") or "").strip()[:80] or None,
                          str(payload.get("provider") or "").strip()[:40] or None)
@@ -5012,7 +5153,7 @@ def api_study_jobs_start():
     if not _ai_configured(ai) and not was_stopped:
         return jsonify({"error": "ai_not_configured", "detail": "Add an AI key in the admin panel."}), 503
     force = _job_force(payload.get("refresh") or payload.get("nocache"))
-    ckey, fs_id = _study_text_cache_keys(video_id, mode, out_lang, style)
+    ckey, fs_id = _study_text_cache_keys(video_id, mode, out_lang, style, requirements)
     cached = _study_job_cached_result(ckey, fs_id, force)
     now = int(time.time())
     job = {
@@ -5021,6 +5162,7 @@ def api_study_jobs_start():
         "ai": ai,
         # Second provider for the style="html" stylesheet. None = same as notes.
         "design_ai": design_ai,
+        "requirements": requirements,
         "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
         "cached": bool(cached), "persisted": bool(cached), "title": None,
         "transcript_lang": None, "segment_count": None, "error": "",
@@ -6826,7 +6968,14 @@ def api_study_saved():
         style = ""
     if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
-    ckey, fs_id = _study_text_cache_keys(video_id, mode, out_lang, style)
+    # Reopening a note generated WITH a requirements box needs the exact same
+    # text to land on the same cache key — a different (or missing) value here
+    # is a genuinely different note and correctly reports not_found.
+    requirements = _clean_requirements(request.args.get("requirements")
+                                       or request.args.get("instructions"))
+    if mode != "notes":
+        requirements = ""
+    ckey, fs_id = _study_text_cache_keys(video_id, mode, out_lang, style, requirements)
     saved = _study_job_cached_result(ckey, fs_id, False)
     if not saved or not str(saved.get("content") or "").strip():
         return jsonify({"error": "note_not_found",
@@ -6841,6 +6990,7 @@ def api_study_saved():
                    or ("html" if _is_html_note(saved.get("content")) else "markdown")),
         "design_provider": saved.get("design_provider") or "",
         "design_model": saved.get("design_model") or "",
+        "requirements": saved.get("requirements") or "",
         "out_lang": saved.get("out_lang") or out_lang,
         "provider": saved.get("provider") or "ai", "model": saved.get("model") or "",
         "cached": True,
