@@ -23,6 +23,10 @@ let REPORTS = [], REPORTS_LOADED = false, REPORTS_FILTER = 'open', REP_EDITING =
 /* AI Study usage limits + admin-granted unlimited users (Firestore config/aiLimits),
    read by youtube-turbo-proxy to rate-limit /api/study + /api/tutor. */
 let AI_LIMITS = { unlimited: {}, unlimitedEmails: [], focusUsers: {}, focusEmails: [], studyPerHour: 15, tutorPerHour: 20, tutorPerDay: 80, loaded: false };
+/* AI Chat tab access policy (Firestore config/aiChat) — a standalone chat page,
+   allowlisted per-user (or admins), locked to one admin-chosen provider/model.
+   Separate from AI_CONFIG's Study AI routing above; never widens/narrows it. */
+let AI_CHAT_CONFIG = { allowedUsers: {}, allowedEmails: [], provider: '', model: '', loaded: false };
 /* AI auto-schedule (Groq) config — stored in Firestore config/ai, read by the
    Telegram bot server to parse incoming messages into planner tasks. */
 let AI_CONFIG = { groqApiKey: '', model: 'llama-3.1-8b-instant', enabled: false, loaded: false };
@@ -566,7 +570,7 @@ function setTab(t, options) {
     } catch(e) {}
   }
   if (t === 'telegram' && !TG_CONFIG.loaded) loadTelegramData();
-  if (t === 'aistudy' && !AI_CONFIG.loaded) loadAiStudyData();
+  if (t === 'aistudy' && (!AI_CONFIG.loaded || !AI_CHAT_CONFIG.loaded)) loadAiStudyData();
   if (t === 'reports' && !REPORTS_LOADED) loadReportsData();
   if (t === 'dnsAdblock' && !DNS_CONFIG.loaded) loadDnsAdblockData();
   render();

@@ -1668,6 +1668,51 @@ def _load_ai_config(prefer_model=None, prefer_provider=None):
     }
 
 
+# ---- standalone "AI Chat" tab: admin allowlist + one locked provider -------
+# A separate feature from Study AI/the tutor: a plain chat page, visible only
+# to users the admin explicitly grants access to, always answering with the
+# ONE provider/model the admin picked (independent of whatever the Study AI
+# "active route" is, and independent of Pro entitlement). Config lives in its
+# own Firestore doc, config/aiChat, so this can never accidentally widen or
+# narrow config/ai's existing behavior.
+AI_CHAT_TTL = 60
+_ai_chat_cfg_cache = {"ts": 0.0, "data": None}
+
+
+def _load_ai_chat_config():
+    """Returns {allowed_users: set(uid), provider, model}. Fails closed
+    (empty allowlist) if the doc is missing, unreadable, or Firestore is
+    unavailable — nobody gets access rather than everybody."""
+    now = time.time()
+    if _ai_chat_cfg_cache["data"] is not None and now - _ai_chat_cfg_cache["ts"] < AI_CHAT_TTL:
+        return _ai_chat_cfg_cache["data"]
+    out = {"allowed_users": set(), "provider": "", "model": ""}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("aiChat").get()
+            if doc.exists:
+                d = doc.to_dict() or {}
+                allowed = d.get("allowedUsers") or {}
+                if isinstance(allowed, list):
+                    allowed = {u: True for u in allowed}
+                out["allowed_users"] = {u for u, v in allowed.items() if v}
+                out["provider"] = str(d.get("provider") or "").strip().lower()
+                out["model"] = str(d.get("model") or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/aiChat read failed: %s", exc)
+    _ai_chat_cfg_cache["ts"] = now
+    _ai_chat_cfg_cache["data"] = out
+    return out
+
+
+def _ai_chat_tab_sys():
+    today = datetime.now(timezone.utc).strftime("%d %B %Y")
+    return ("You are a helpful, friendly AI assistant inside a study-planner app "
+            "used by students preparing for competitive exams. Answer clearly and "
+            "concisely, using Markdown formatting where it helps readability. "
+            "Today's date is %s." % today)
+
+
 _ai_calls = []                   # (ts, est_tokens) within the last 60s
 _ai_pace_lock = threading.Lock()
 
@@ -10827,6 +10872,82 @@ def api_tutor():
                     "provider": _ai_display_provider(ai),
                     "model": _ai_display_model(ai), "transcript_lang": data["transcript_lang"],
                     "web": data["web"], "quota": data["quota"]})
+
+
+@app.get("/api/ai-chat/status")
+def api_ai_chat_status():
+    """Whether the AI Chat tab should be visible for the caller. No Pro/entitlement
+    check on purpose — the admin's allowlist is the sole gate for this feature, so
+    a free-plan user the admin explicitly grants access to can still use it.
+    The allowlist and provider/model choice never reach the browser, only this
+    single boolean."""
+    user, err = _require_firebase_user()
+    if err:
+        return jsonify(err[0]), err[1]
+    uid = user["uid"]
+    try:
+        _, is_admin = _cached_user_data_and_admin(uid)
+    except Exception:  # noqa: BLE001
+        is_admin = False
+    chat_cfg = _load_ai_chat_config()
+    allowed = bool(is_admin or uid in chat_cfg["allowed_users"])
+    return jsonify({"ok": True, "enabled": allowed})
+
+
+@app.route("/api/ai-chat", methods=["POST"])
+def api_ai_chat():
+    """Standalone AI Chat tab — no video/transcript involved. Admin-allowlisted
+    users only, always answered by the single provider/model the admin locked
+    in config/aiChat. History is client-supplied and NOT stored server-side
+    (the tab persists chats locally per the product decision to keep this
+    lightweight); rate limiting is admin-controlled (unlimited by policy, but
+    the bucket exists so a future admin can tighten it without a code change)."""
+    user, auth_err = _require_firebase_user()
+    if auth_err:
+        return jsonify(auth_err[0]), auth_err[1]
+    uid = user["uid"]
+
+    chat_cfg = _load_ai_chat_config()
+    is_admin = False
+    try:
+        _, is_admin = _cached_user_data_and_admin(uid)
+    except Exception:  # noqa: BLE001
+        is_admin = False
+    if not is_admin and uid not in chat_cfg["allowed_users"]:
+        return jsonify({"error": "forbidden",
+                        "detail": "AI Chat is not enabled for this account."}), 403
+
+    body = request.get_json(silent=True) or {}
+    q = str(body.get("q") or "").strip()
+    if not q:
+        return jsonify({"error": "missing_question", "detail": "Pass q"}), 400
+    if len(q) > 4000:
+        return jsonify({"error": "question_too_long", "detail": "Keep it under 4000 characters."}), 400
+
+    history = body.get("history") or []
+    messages = [{"role": "system", "content": _ai_chat_tab_sys()}]
+    if isinstance(history, list):
+        for m in history[-20:]:
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and m.get("content"):
+                messages.append({"role": m["role"], "content": str(m["content"])[:4000]})
+    messages.append({"role": "user", "content": q})
+
+    if not chat_cfg["provider"]:
+        return jsonify({"error": "ai_chat_not_configured",
+                        "detail": "AI Chat has no provider configured yet. Ask an admin to set it up."}), 503
+
+    ai = _load_ai_config(prefer_model=chat_cfg["model"] or None, prefer_provider=chat_cfg["provider"])
+    if not _ai_configured(ai):
+        return jsonify({"error": "ai_not_configured",
+                        "detail": "The AI Chat provider has no API key configured."}), 503
+
+    try:
+        answer = _ai_chat(messages, ai, max_tokens=_TUTOR_MAX_TOKENS)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
+
+    return jsonify({"answer": answer, "provider": _ai_display_provider(ai),
+                    "model": _ai_display_model(ai)})
 
 
 @app.get("/api/search")

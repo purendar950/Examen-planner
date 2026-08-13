@@ -1368,7 +1368,51 @@ async function loadAiStudyData() {
     const lSnap = await db.collection('config').doc('aiLimits').get();
     AI_LIMITS = { unlimited:{}, unlimitedEmails:[], focusUsers:{}, focusEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, ...(lSnap.exists ? lSnap.data() : {}), loaded: true };
   } catch(e) { AI_LIMITS = { unlimited:{}, unlimitedEmails:[], focusUsers:{}, focusEmails:[], studyPerHour:15, tutorPerHour:20, tutorPerDay:80, loaded: true }; }
+  try {
+    const cSnap = await db.collection('config').doc('aiChat').get();
+    AI_CHAT_CONFIG = { allowedUsers:{}, allowedEmails:[], provider:'', model:'', ...(cSnap.exists ? cSnap.data() : {}), loaded: true };
+  } catch(e) { AI_CHAT_CONFIG = { allowedUsers:{}, allowedEmails:[], provider:'', model:'', loaded: true }; }
   render();
+}
+
+/* ── AI Chat tab access policy ───────────────────────────────────────────
+   New, separate feature from Study AI/the tutor: a plain chat page shown only
+   to users on this allowlist (or admins), always answered by ONE admin-locked
+   provider/model — independent of the Study AI "active route" above. Stored
+   in its own doc, config/aiChat, so it can never widen/narrow config/ai's
+   existing behavior. The browser cannot read config/aiChat directly (same
+   rule as config/ai); youtube-turbo-proxy surfaces only a yes/no flag via
+   /api/ai-chat/status, and answers the chat itself server-side via
+   /api/ai-chat, resolving the locked provider through _load_ai_config. */
+async function saveAiChatConfig() {
+  const providerSel = document.getElementById('aichat-provider');
+  const modelSel = document.getElementById('aichat-model');
+  const provider = providerSel ? providerSel.value : '';
+  const model = modelSel ? modelSel.value : '';
+  const emailsRaw = (document.getElementById('aichat-emails') || {}).value || '';
+  const emails = emailsRaw.split(/[\n,]+/).map(function (e) { return e.trim().toLowerCase(); }).filter(Boolean);
+  const allowedUsers = {}, resolved = [], unresolved = [];
+  emails.forEach(function (em) {
+    const u = (typeof USERS !== 'undefined' ? USERS : []).find(function (x) { return (x.p && (x.p.email || '').toLowerCase()) === em; });
+    if (u) { allowedUsers[u.id] = true; resolved.push(em); } else { unresolved.push(em); }
+  });
+  try {
+    await db.collection('config').doc('aiChat').set({
+      allowedUsers: allowedUsers,
+      allowedEmails: resolved,
+      provider: provider,
+      model: model,
+      savedAt: firebase.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    AI_CHAT_CONFIG = Object.assign({}, AI_CHAT_CONFIG, {
+      allowedUsers: allowedUsers, allowedEmails: resolved, provider: provider, model: model
+    });
+    var msg = '✅ AI Chat access saved — ' + resolved.length + ' user(s), locked to ' +
+              (STUDY_PROVIDERS[provider] ? STUDY_PROVIDERS[provider].label : provider) + ' (' + model + ').';
+    if (unresolved.length) msg += ' ⚠️ Not found: ' + unresolved.join(', ');
+    showToast(msg);
+    render();
+  } catch(e) { showToast('Failed: ' + e.message); }
 }
 
 /* Render the dedicated 🎓 AI Study admin tab:

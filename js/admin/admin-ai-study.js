@@ -43,6 +43,7 @@ function toggleStudyKeyVisibility(pid, button) {
 function aiStudyReload() {
   AI_CONFIG.loaded = false;
   AI_LIMITS.loaded = false;
+  AI_CHAT_CONFIG.loaded = false;
   render();
   loadAiStudyData();
 }
@@ -316,6 +317,45 @@ function toggleWebSearchSecrets(button) {
   }
 }
 
+/* ── AI Chat tab access policy card ──────────────────────────────────────
+   A standalone chat page in the app, hidden by default. Enable it for
+   specific users (one email per line), and lock it to exactly one provider +
+   model from the STUDY_PROVIDERS catalog above — regardless of whichever
+   provider is currently the Study AI "active route". Saved to a dedicated
+   Firestore doc (config/aiChat) via saveAiChatConfig() so it can never
+   collide with config/ai's own fields. */
+function aiStudyChatMarkup() {
+  var cfg = AI_CHAT_CONFIG || {};
+  var provider = STUDY_PROVIDERS[cfg.provider] ? cfg.provider : STUDY_PROVIDER_ORDER[0];
+  var models = studyModelsFor(provider);
+  var model = (cfg.model && models.indexOf(cfg.model) !== -1) ? cfg.model : (models[0] || '');
+  var emails = Array.isArray(cfg.allowedEmails) ? cfg.allowedEmails.join('\n') : '';
+  var grantCount = cfg.allowedUsers ? Object.keys(cfg.allowedUsers).length : 0;
+  var providerOptions = STUDY_PROVIDER_ORDER.map(function (pid) {
+    var p = STUDY_PROVIDERS[pid];
+    return '<option value="' + pid + '"' + (pid === provider ? ' selected' : '') + '>' + esc(p.label) + '</option>';
+  }).join('');
+  return '<section class="ai-panel">' +
+    '<div class="ai-panel-heading is-compact"><div><span class="ai-panel-eyebrow">Standalone feature</span><h3>AI Chat tab access</h3><p>A separate chat page in the app, hidden unless a user is on this list. Always answers with the one provider/model locked below — independent of the Study AI route above.</p></div><span class="ai-policy-score ' + (grantCount ? 'is-open' : '') + '">' + (grantCount ? grantCount + ' granted' : 'Nobody yet') + '</span></div>' +
+    '<div class="ai-field-grid">' +
+      '<div class="ai-field"><label for="aichat-provider">Locked provider</label><select id="aichat-provider" onchange="aiChatProviderChanged()">' + providerOptions + '</select><span>Admins always get access regardless of this list.</span></div>' +
+      '<div class="ai-field"><label for="aichat-model">Locked model</label><select id="aichat-model">' + studyModelOptions(models, model) + '</select><span>From ' + esc((STUDY_PROVIDERS[provider] || {}).label || provider) + '\'s approved model list.</span></div>' +
+    '</div>' +
+    '<div class="ai-grant-editor"><div><label for="aichat-emails">Allowed accounts</label><span>' + grantCount + ' active</span></div><p>One registered user email per line. Saving replaces the current list.</p><textarea id="aichat-emails" placeholder="student@example.com">' + esc(emails) + '</textarea></div>' +
+    '<button class="ai-btn ai-btn-dark ai-save-wide" type="button" onclick="saveAiChatConfig()">Save AI Chat access</button>' +
+  '</section>';
+}
+
+/* Refresh the model dropdown when the admin switches the locked provider,
+   mirroring how studyActiveChanged() keeps #study-model in sync above. */
+function aiChatProviderChanged() {
+  var sel = document.getElementById('aichat-provider');
+  var modelSel = document.getElementById('aichat-model');
+  if (!sel || !modelSel) return;
+  var pid = sel.value;
+  modelSel.innerHTML = studyModelOptions(studyModelsFor(pid), studyModelFor(pid));
+}
+
 function aiStudyWebSearchMarkup() {
   var cfg = AI_CONFIG || {};
   var enabled = cfg.tutorWebSearch !== false;      // absent = on, matching the server default
@@ -351,7 +391,7 @@ function aiStudyWebSearchMarkup() {
 }
 
 function renderAiStudy() {
-  if (!AI_CONFIG.loaded || !AI_LIMITS.loaded) {
+  if (!AI_CONFIG.loaded || !AI_LIMITS.loaded || !AI_CHAT_CONFIG.loaded) {
     return '<div class="ai-loading-shell" aria-live="polite"><span class="ai-button-spinner"></span><div><strong>Loading AI operations</strong><span>Fetching providers, models and policy controls…</span></div></div>';
   }
 
@@ -406,6 +446,7 @@ function renderAiStudy() {
       '<button type="button" onclick="aiStudyScrollTo(\'ai-all-model-refresh\')">Free & paid refresh</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-health\')">Network health</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-policy\')">Access policy</button>' +
+      '<button type="button" onclick="aiStudyScrollTo(\'ai-chat-access\')">AI Chat tab</button>' +
     '</nav>' +
 
     '<section id="ai-providers" class="ai-panel ai-anchor-section">' +
@@ -461,5 +502,7 @@ function renderAiStudy() {
         '<button class="ai-btn ai-btn-dark ai-save-wide" type="button" onclick="saveAiLimits()">Save usage policy</button>' +
       '</section>' +
     '</div>' +
+
+    '<div id="ai-chat-access" class="ai-anchor-section">' + aiStudyChatMarkup() + '</div>' +
   '</div>';
 }
