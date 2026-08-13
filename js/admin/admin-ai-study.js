@@ -332,15 +332,30 @@ function aiStudyChatMarkup() {
   var cfg = AI_CHAT_CONFIG || {};
   var emails = Array.isArray(cfg.allowedEmails) ? cfg.allowedEmails.join('\n') : '';
   var grantCount = cfg.allowedUsers ? Object.keys(cfg.allowedUsers).length : 0;
+  var isImageModelName = function (m) {
+    var lowered = String(m || '').toLowerCase();
+    return lowered.indexOf('image') !== -1 || lowered.indexOf('nano-banana') !== -1 || lowered.indexOf('imagen') !== -1;
+  };
+  // Chat models exclude image-only ids, matching the backend's split — the two
+  // dropdowns in the chat are deliberately disjoint.
   var configuredModelCount = STUDY_PROVIDER_ORDER.reduce(function (total, pid) {
-    return studyKeysFor(pid).length ? total + studyModelsFor(pid).length : total;
+    if (!studyKeysFor(pid).length) return total;
+    return total + studyModelsFor(pid).filter(function (m) { return !isImageModelName(m); }).length;
   }, 0);
-  var imageCapableCount = studyKeysFor('google').length
-    ? studyModelsFor('google').filter(function (m) {
-      var lowered = m.toLowerCase();
-      return lowered.indexOf('image') !== -1 || lowered.indexOf('nano-banana') !== -1 || lowered.indexOf('imagen') !== -1;
-    }).length
-    : 0;
+  /* Image models come from their OWN catalog (config/ai.imageModels, defaulting
+     to the backend's IMAGE_PROVIDER_MODELS) — NOT from providerModels, which the
+     nightly chat-catalog refresh strips every image id out of. Mirrors
+     _ai_chat_image_models(): dedicated list + any hand-added image id still
+     sitting in the provider's regular model list. */
+  var IMAGE_MODEL_DEFAULTS = { google: ['gemini-3.1-flash-image', 'gemini-2.5-flash-image', 'gemini-3-pro-image'] };
+  var imageCapableCount = Object.keys(IMAGE_MODEL_DEFAULTS).reduce(function (total, pid) {
+    if (!studyKeysFor(pid).length) return total;
+    var override = (AI_CONFIG && AI_CONFIG.imageModels && AI_CONFIG.imageModels[pid]);
+    var list = (Array.isArray(override) && override.length) ? override : IMAGE_MODEL_DEFAULTS[pid];
+    var extra = studyModelsFor(pid).filter(isImageModelName);
+    var union = list.concat(extra).filter(function (m, i, arr) { return arr.indexOf(m) === i; });
+    return total + union.length;
+  }, 0);
   return '<section class="ai-panel">' +
     '<div class="ai-panel-heading is-compact"><div><span class="ai-panel-eyebrow">Standalone feature</span><h3>AI Chat tab access</h3><p>A separate chat page in the app, hidden unless a user is on this list. They automatically see every model configured in the provider portfolio above and can switch freely — no separate model curation here.</p></div><span class="ai-policy-score ' + (grantCount ? 'is-open' : '') + '">' + (grantCount ? grantCount + ' granted' : 'Nobody yet') + '</span></div>' +
     '<div class="ai-switch-list">' +
