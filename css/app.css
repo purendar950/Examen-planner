@@ -5398,6 +5398,14 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
     background: transparent;
     box-shadow: none;
   }
+  /* #ai-notes-design-ai only shows for style="html" — a 4th grid item the
+     3-column template above was never sized for. Give it the full row of its
+     own rather than let it squeeze into (or overflow) one of the three fixed
+     columns designed for mode/style/Generate. */
+  #page-youtube .ai-study-panel.notes-tab-active #ai-notes-design-ai {
+    grid-column: 1 / -1;
+    max-width: none;
+  }
   /* The mobile controls row is a fixed 4-column grid, so the relocated action
      buttons sit on their own full-width row directly beneath it. */
   #page-youtube .ai-study-panel.notes-tab-active .ai-note-actions {
@@ -7943,6 +7951,7 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed .ai-head select,
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed #ai-notes-mode,
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed #ai-notes-style,
+  #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed #ai-notes-design-ai,
   #page-youtube .yt-layout.ai-split.notes-parallel-stage #ai-study-panel.ai-setup-collapsed #ai-notes-go {
     display: none !important;
   }
