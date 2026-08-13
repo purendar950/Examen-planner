@@ -7966,8 +7966,16 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   }
 }
 
-/* Setup toggle — a compact head control sitting just after the panel title. */
-#page-youtube .ai-head .ai-btn#ai-setup-toggle {
+/* Setup toggle — a compact head control sitting just after the panel title.
+   #ai-notes-requirements-toggle (the requirements-box show/hide button) sits
+   right beside it and shares every one of these rules: same size, same
+   "active" highlight via [aria-expanded], same Notes-tab-only visibility. It
+   used to live INSIDE the notes body as its own label+button row, costing the
+   requirements box a whole extra line just to hold its own collapse control —
+   moved up here instead, next to Setup, so both toggles share one line of
+   chrome ("beside setup button so it takes less space"). */
+#page-youtube .ai-head .ai-btn#ai-setup-toggle,
+#page-youtube .ai-head .ai-btn#ai-notes-requirements-toggle {
   flex: 0 0 auto;
   min-height: 24px;
   padding: .16rem .48rem !important;
@@ -7975,16 +7983,29 @@ html[data-theme="light"] #page-youtube .yt-flow-num { color: #007d5b; }
   font-weight: 800;
   white-space: nowrap;
 }
-#page-youtube .ai-head .ai-btn#ai-setup-toggle[aria-expanded="true"] {
+#page-youtube .ai-head .ai-btn#ai-setup-toggle[aria-expanded="true"],
+#page-youtube .ai-head .ai-btn#ai-notes-requirements-toggle[aria-expanded="true"] {
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
   background: var(--accent-dim);
   color: var(--accent);
 }
-/* Only the Notes tab has setup controls to disclose. */
-#page-youtube #ai-study-panel:not(.notes-tab-active) #ai-setup-toggle { display: none; }
+/* Only the Notes tab has setup controls / a requirements box to disclose. */
+#page-youtube #ai-study-panel:not(.notes-tab-active) #ai-setup-toggle,
+#page-youtube #ai-study-panel:not(.notes-tab-active) #ai-notes-requirements-toggle {
+  display: none;
+}
 /* Mobile keeps every control visible, so the disclosure would be a dead button. */
 @media (max-width: 840px) {
-  #page-youtube #ai-setup-toggle { display: none !important; }
+  #page-youtube #ai-setup-toggle,
+  #page-youtube #ai-notes-requirements-toggle {
+    display: none !important;
+  }
+}
+/* Collapsed state: the requirements textarea + its character counter tuck
+   away completely (there is no separate header row left to keep visible —
+   the toggle itself now lives in the panel head, see above). */
+#page-youtube #ai-notes-requirements-wrap.ai-req-collapsed {
+  display: none !important;
 }
 
 /* ══════════════════ AI TUTOR — compact controls, larger chat ══════════════════

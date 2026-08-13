@@ -7726,26 +7726,18 @@
         '</div>' +
         // ONE box for both content ("what to cover") and — for AI Designed
         // notes — design ("how it should look"). See notesRequirements() above
-        // for why it is deliberately a single field. The header row (label +
-        // toggle) stays put whether the box is open or not, so a student can
-        // reclaim the space once a note is on screen (see the "takes more
-        // lines" feedback that led to this toggle) without losing the ability
-        // to reopen it, and without it depending on the separate "⚙ Setup"
-        // collapse (which only ever covered mode/style/design-ai/Generate).
+        // for why it is deliberately a single field. Its own show/hide toggle
+        // (📝) lives up in the panel head beside "⚙ Setup" rather than as a
+        // label+button row here — that used to cost this box an entire extra
+        // line just to hold its own collapse control ("beside setup button so
+        // it takes less space" feedback).
         '<div id="ai-notes-requirements-wrap" style="margin:2px 0 8px">' +
-          '<div class="ai-notes-requirements-head" style="display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:2px">' +
-            '<span class="ai-muted" style="font-size:.72rem">📝 Notes &amp; design requirements <em style="font-style:normal;opacity:.75">(optional)</em></span>' +
-            '<button type="button" class="ai-btn sec" id="ai-notes-requirements-toggle" ' +
-              'style="padding:2px 8px;font-size:.68rem" title="Show/hide the requirements box"></button>' +
-          '</div>' +
-          '<div id="ai-notes-requirements-body">' +
-            '<textarea id="ai-notes-requirements" rows="2" maxlength="' + NOTES_REQUIREMENTS_MAX + '" ' +
-              'placeholder="Optional: what should these notes cover, and (for AI Designed) how should they look? e.g. focus on dates and formulas, dark theme with big headings" ' +
-              'style="width:100%;padding:7px 9px;border-radius:8px;border:1px solid var(--border,#334);' +
-              'background:transparent;color:inherit;font-size:.82rem;font-family:inherit;resize:vertical;' +
-              'min-height:42px">' + esc(notesRequirements()) + '</textarea>' +
-            '<div id="ai-notes-requirements-count" class="ai-muted" style="font-size:.68rem;text-align:right;margin-top:1px"></div>' +
-          '</div>' +
+          '<textarea id="ai-notes-requirements" rows="2" maxlength="' + NOTES_REQUIREMENTS_MAX + '" ' +
+            'placeholder="Optional: what should these notes cover, and (for AI Designed) how should they look? e.g. focus on dates and formulas, dark theme with big headings" ' +
+            'style="width:100%;padding:7px 9px;border-radius:8px;border:1px solid var(--border,#334);' +
+            'background:transparent;color:inherit;font-size:.82rem;font-family:inherit;resize:vertical;' +
+            'min-height:42px">' + esc(notesRequirements()) + '</textarea>' +
+          '<div id="ai-notes-requirements-count" class="ai-muted" style="font-size:.68rem;text-align:right;margin-top:1px"></div>' +
         '</div>' +
         '<div id="ai-langbar"></div><div id="ai-sub"></div>';
       var modeSel = document.getElementById('ai-notes-mode');
@@ -7753,21 +7745,23 @@
       var designSel = document.getElementById('ai-notes-design-ai');
       var reqBox = document.getElementById('ai-notes-requirements');
       var reqCount = document.getElementById('ai-notes-requirements-count');
-      var reqBody = document.getElementById('ai-notes-requirements-body');
       var reqToggle = document.getElementById('ai-notes-requirements-toggle');
       // Independent of the "⚙ Setup" collapse (mode/style/design-ai/Generate):
       // a student may want this box out of the way even while setup is still
       // open (empty box, nothing to say) or kept open even once setup itself
       // collapses (mid-thought about what to type). Remembered across notes
       // sessions like the box's own text, but defaults to OPEN so a first-time
-      // visitor actually notices the feature exists.
+      // visitor actually notices the feature exists. The toggle button itself
+      // lives in the panel head (see panelHtml()) and is only ever shown for
+      // the Notes tab, matching #ai-setup-toggle (CSS in app.css).
       function reqBoxCollapsed() { return localStorage.getItem(REQ_BOX_COLLAPSED_KEY) === '1'; }
       function setReqBoxCollapsed(collapsed) {
         try { localStorage.setItem(REQ_BOX_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
-        if (reqBody) reqBody.style.display = collapsed ? 'none' : '';
+        var wrap = document.getElementById('ai-notes-requirements-wrap');
+        if (wrap) wrap.classList.toggle('ai-req-collapsed', !!collapsed);
         if (reqToggle) {
-          reqToggle.textContent = collapsed ? '▾ Show' : '▴ Hide';
           reqToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          reqToggle.title = collapsed ? 'Show the notes/design requirements box' : 'Hide the notes/design requirements box';
         }
       }
       setReqBoxCollapsed(reqBoxCollapsed());
@@ -7779,6 +7773,7 @@
         var isNotes = modeSel.value === 'notes';
         styleSel.style.display = isNotes ? '' : 'none';
         document.getElementById('ai-notes-requirements-wrap').style.display = isNotes ? '' : 'none';
+        if (reqToggle) reqToggle.style.display = isNotes ? '' : 'none';
         syncDesignAiVis();
       }
       // The Design AI picker only means anything for style="html" — every other
@@ -8183,6 +8178,15 @@
         '<span class="ai-dot checking" id="ai-status-dot" title="Checking server…">●</span>' +
         '<span class="ai-title" id="ai-panel-title">AI Study</span>' +
         '<button type="button" class="ai-btn sec ai-setup-toggle" id="ai-setup-toggle" aria-expanded="true" title="Hide the notes setup controls">⚙ Setup</button>' +
+        // Sits right beside Setup rather than inside the notes body (where it
+        // used to add its own header row above the textarea — the "beside
+        // setup button so it takes less space" fix). Same collapse pattern as
+        // Setup: the icon/label never changes, only aria-expanded + the CSS
+        // it drives (accent highlight) show the state, so this costs no extra
+        // width for a "Show"/"Hide" word. Hidden by CSS whenever the Notes tab
+        // isn't active, exactly like #ai-setup-toggle (app.css).
+        '<button type="button" class="ai-btn sec ai-setup-toggle" id="ai-notes-requirements-toggle" ' +
+          'aria-expanded="true" title="Hide the notes/design requirements box">📝</button>' +
       '</div>' +
       '<div class="ai-head-controls" aria-label="AI and language options">' +
         '<select id="ai-provider" title="AI provider" aria-label="AI provider"><option value="">Auto</option></select>' +
