@@ -4571,11 +4571,9 @@
   //    multi-page content and leaves the right column blank).
   //  • Section headers do NOT use `column-span:all`. A full-width spanner
   //    fragments the multicol into isolated segments and forces both columns to
-  //    "level off" before each header — so a section whose left column is taller
-  //    than its right (e.g. a tall table) leaves a whitespace gap in the shorter
-  //    column. Letting headers flow inside the columns keeps one continuous flow
-  //    that fills both columns with no leveling gaps. `break-after:avoid` keeps a
-  //    header from being stranded at the bottom of a column, away from its content.
+  //    "level off" before each header. The ordinary flow may therefore continue
+  //    headings and note blocks at the next available column position instead of
+  //    reserving a mostly-empty remainder of the current sheet.
   function nbPdfCss() {
     // The approved hard-copy format targets A4 explicitly: 5 mm at the top and
     // bottom, 3 mm at the left and right. The footer stays in normal flow, so it
@@ -4589,15 +4587,15 @@
       '.pdf-kicker{display:inline-block;margin:0 0 4pt;padding:2.5pt 6pt;border:0.8pt solid #d69a00;border-radius:3pt;background:#fff5b8;color:#684800;font-family:"Segoe UI",Arial,sans-serif;font-size:7pt;font-weight:800;letter-spacing:.09em;text-transform:uppercase}' +
       '.pdf-title{font-family:"Noto Sans Devanagari","Segoe UI",Arial,sans-serif;font-size:17pt;line-height:1.16;font-weight:800;margin:0 0 3pt;color:#123e6b;position:relative;z-index:1}' +
       '.pdf-meta{font-family:"Segoe UI",Arial,sans-serif;font-size:8.2pt;color:#365f7f;margin:0 0 8pt;padding-bottom:5pt;border-bottom:0.8pt solid #aac7de;position:relative;z-index:1}' +
-      '.pdf-nb{column-count:2;column-gap:8mm;column-fill:auto;font-size:10pt;line-height:1.48;position:relative;z-index:1}' +
-      '.pdf-nb .sec,.pdf-nb .subsec{break-after:avoid}' +
-      // Keep genuinely small blocks intact, but let the tall blocks (topic
-      // tables + factboxes) SPLIT across columns/pages. A `break-inside:avoid`
-      // table that is taller than the space left in a column gets bumped whole
-      // to the next column, stranding a big gap at the bottom of every page.
-      // Splitting them at row boundaries lets the columns fill to the bottom.
-      '.pdf-nb .membox,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .sec,.pdf-nb .subsec,.pdf-nb .q-card,.pdf-nb .qkeep{break-inside:avoid}' +
-      '.pdf-nb table,.pdf-nb .factbox{break-inside:auto}' +
+      // A 1 mm gutter gives both columns the widest possible reading area. The
+      // column root stays continuous: the browser fills left, then right, then
+      // the next sheet rather than treating each topic as an isolated page.
+      '.pdf-nb{column-count:2;column-gap:1mm;column-fill:auto;font-size:10pt;line-height:1.48;position:relative;z-index:1}' +
+      // Do not reserve a whole column for a heading or a long note card. That
+      // produced the visible blank areas in long PDFs. Heading styling remains,
+      // but every note block may continue into the next column/page.
+      '.pdf-nb .sec,.pdf-nb .subsec{break-after:auto;break-inside:auto}' +
+      '.pdf-nb .membox,.pdf-nb .answer,.pdf-nb .notebox,.pdf-nb .chips,.pdf-nb .q-card,.pdf-nb .qkeep,.pdf-nb table,.pdf-nb .factbox{break-inside:auto}' +
       '.pdf-nb thead{display:table-header-group}' +      // repeat header on continuation
       '.pdf-nb tbody tr{break-inside:avoid}' +            // never split a row mid-way
 
@@ -4652,7 +4650,7 @@
       '.pdf-nb tbody td{padding:3.5pt 5pt;border:0.5pt solid #b8d6d0;vertical-align:top}' +
       '.pdf-nb tbody tr:nth-child(even){background:#eef9f7}' +
       '.pdf-nb .divider{display:none}' +
-      '.pdf-nb .q-card{margin:8pt 0 3pt;border:0.8pt solid #82958a;border-radius:0;box-shadow:none;break-inside:avoid}' +
+      '.pdf-nb .q-card{margin:8pt 0 3pt;border:0.8pt solid #82958a;border-radius:0;box-shadow:none;break-inside:auto}' +
       '.pdf-nb .q-head{padding:5pt 7pt;background:#edf3ee;color:#17211d;font-size:10pt}' +
       '.pdf-nb .q-head .qtag{padding:1pt 4pt;border:0.8pt solid #315542;border-radius:2pt;background:#fff;color:#173c2c;font-size:6.5pt}' +
       '.pdf-nb .q-head strong,.pdf-nb .q-head b,.pdf-nb .q-head .pen,.pdf-nb .q-head .fig{color:#17211d}' +

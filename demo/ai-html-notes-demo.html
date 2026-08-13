@@ -303,7 +303,7 @@
     </div>
     <p class="note">Night reading filters only this preview — exactly like the app’s Focus reader — and never changes the PDF.
       <b>A4 · 2-column reflow test</b> is an opt-in comparison of the standard-notes geometry:
-      A4 paper, 5 mm × 3 mm margins, an 8 mm gutter, continuous columns and safe heading breaks.
+      A4 paper, 5 mm × 3 mm margins, a 1 mm gutter, continuous columns and safe heading breaks.
       Normal AI HTML notes use their author-defined layout; the raw AI document and Save .html file stay unchanged.</p>
 
     <div class="stage" id="stage" style="margin-top:12px">
@@ -462,15 +462,20 @@
      disposable reader/print copy. It never changes docNow or Save .html. */
   function a4ColumnsStyle() {
     return '<style data-demo-a4-columns>' +
-      'body[data-demo-a4-columns="1"]{width:210mm;max-width:calc(100% - 18px);margin:12mm auto;padding:9mm;background:#fff;column-count:2;column-gap:8mm;column-fill:balance}' +
-      'body[data-demo-a4-columns="1"] > .page{position:static!important;width:auto!important;max-width:none!important;min-height:0!important;margin:0 0 7pt!important;box-shadow:none!important;break-inside:auto!important;page-break-inside:auto!important}' +
+      'body[data-demo-a4-columns="1"]{width:210mm;max-width:calc(100% - 18px);margin:12mm auto;padding:9mm;background:#fff;column-count:2;column-gap:1mm;column-fill:balance}' +
+      // Reflow only: clear the author document's page-card sizing, floats and
+      // forced page breaks. Keeping one continuous body column flow prevents
+      // a large unused area before the next direct page fragment.
+      'body[data-demo-a4-columns="1"] > .page{position:static!important;float:none!important;clear:none!important;width:auto!important;max-width:none!important;height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;box-shadow:none!important;break-before:auto!important;break-after:auto!important;break-inside:auto!important;page-break-before:auto!important;page-break-after:auto!important;page-break-inside:auto!important}' +
       'body[data-demo-a4-columns="1"] > .page::before,body[data-demo-a4-columns="1"] > .page::after{display:none!important}' +
-      'body[data-demo-a4-columns="1"] > .page h1,body[data-demo-a4-columns="1"] > .page h2,body[data-demo-a4-columns="1"] > .page h3,body[data-demo-a4-columns="1"] > .page h4,body[data-demo-a4-columns="1"] > .page .h-topic,body[data-demo-a4-columns="1"] > .page .h-sub{break-after:avoid;page-break-after:avoid}' +
-      'body[data-demo-a4-columns="1"] > .page figure,body[data-demo-a4-columns="1"] > .page .callout,body[data-demo-a4-columns="1"] > .page .formula,body[data-demo-a4-columns="1"] > .page .quiz,body[data-demo-a4-columns="1"] > .page .q-card{break-inside:avoid;page-break-inside:avoid}' +
-      'body[data-demo-a4-columns="1"] > .page table,body[data-demo-a4-columns="1"] > .page .factbox{break-inside:auto;page-break-inside:auto}' +
-      'body[data-demo-a4-columns="1"] > .page thead{display:table-header-group}' +
-      'body[data-demo-a4-columns="1"] > .page tbody tr{break-inside:avoid;page-break-inside:avoid}' +
-      '@media print{@page{size:A4;margin:5mm 3mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}html{font-size:16px}body[data-demo-a4-columns="1"]{width:auto;max-width:none;margin:0;padding:0;background:#fff;column-count:2;column-gap:8mm;column-fill:auto}body[data-demo-a4-columns="1"] > .page{margin:0 0 7pt!important}}' +
+      // Keep headings with their following content, but allow tall note blocks
+      // to continue into the next column rather than leaving a large blank gap.
+      'body[data-demo-a4-columns="1"] > .page h1,body[data-demo-a4-columns="1"] > .page h2,body[data-demo-a4-columns="1"] > .page h3,body[data-demo-a4-columns="1"] > .page h4,body[data-demo-a4-columns="1"] > .page .h-topic,body[data-demo-a4-columns="1"] > .page .h-sub{break-after:avoid!important;page-break-after:avoid!important}' +
+      'body[data-demo-a4-columns="1"] > .page figure,body[data-demo-a4-columns="1"] > .page .callout,body[data-demo-a4-columns="1"] > .page .formula,body[data-demo-a4-columns="1"] > .page .quiz,body[data-demo-a4-columns="1"] > .page .q-card,body[data-demo-a4-columns="1"] > .page table,body[data-demo-a4-columns="1"] > .page .factbox{break-inside:auto!important;page-break-inside:auto!important}' +
+      'body[data-demo-a4-columns="1"] > .page table{display:table!important;overflow:visible!important}' +
+      'body[data-demo-a4-columns="1"] > .page thead{display:table-header-group!important}' +
+      'body[data-demo-a4-columns="1"] > .page tbody tr{break-inside:avoid!important;page-break-inside:avoid!important}' +
+      '@media print{@page{size:A4;margin:5mm 3mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}html{font-size:16px}body[data-demo-a4-columns="1"]{width:auto;max-width:none;margin:0;padding:0;background:#fff;column-count:2;column-gap:1mm;column-fill:auto}body[data-demo-a4-columns="1"] > .page{margin:0!important}}' +
       '</style>';
   }
   function documentForSelectedLayout(doc) {
