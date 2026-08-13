@@ -75,7 +75,7 @@ def load():
         "_omniroute_fetch_image_model_ids": lambda: ["pol/flux-schnell", "cx/dall-e-3"],
     }
     exec(section("IMAGE_MODEL_MARKERS = ", "def _ai_chat_generate_image"), ns)
-    exec(section("def _effective_provider_models(cfg):", "def _model_provider("), ns)
+    exec(section("def _effective_provider_models_raw(cfg):", "def _model_provider("), ns)
     exec(section("def _ai_chat_available_models(cfg):", "def _ai_chat_model_key("), ns)
     ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral")
     return ns
@@ -134,6 +134,30 @@ for name in ("gemini-3.1-flash-image", "gemini-2.5-flash-image", "imagen-4",
 for name in ("gemini-flash-latest", "mistral-large-latest", "llama-3.3-70b",
              "claude-sonnet-4"):
     check("classified as a chat model: %s" % name, not ns["_is_image_model_name"](name))
+
+# ── 7b. The separation must be CENTRAL, not just in the AI Chat list ─────────
+# _effective_provider_models() is the single source every TEXT selector reads:
+# the AI Chat picker, /api/status's studyModels + studyModelGroups (the video
+# tutor's dropdown), _all_study_models, and _ai_for_provider's validation.
+# An earlier fix filtered only the AI Chat list, so an image id hand-added to
+# providerModels still appeared in the tutor's dropdown — where picking it would
+# break notes/quiz generation. These lock the central filter in place.
+polluted = {"providerModels": {"google": ["gemini-flash-latest",
+                                          "gemini-3.1-flash-image",
+                                          "gemini-2.5-flash-image"]}}
+text_catalog = ns["_effective_provider_models"](polluted)["google"]
+raw_catalog = ns["_effective_provider_models_raw"](polluted)["google"]
+check("central: text catalog strips image models (tutor dropdown is clean too)",
+      not any(ns["_is_image_model_name"](m) for m in text_catalog), text_catalog)
+check("central: text catalog keeps the real chat model",
+      "gemini-flash-latest" in text_catalog, text_catalog)
+check("central: RAW catalog still exposes them for the image picker",
+      "gemini-3.1-flash-image" in raw_catalog, raw_catalog)
+check("central: hand-added image model still reaches the image picker",
+      "gemini-3.1-flash-image" in image_models(polluted), image_models(polluted))
+check("central: AI Chat list inherits the central filter",
+      not any(ns["_is_image_model_name"](m) for m in chat_models(polluted)),
+      chat_models(polluted))
 
 # ── 8. OmniRoute image detection ─────────────────────────────────────────────
 # Detection is metadata-first (output_modalities / type), exactly like the
