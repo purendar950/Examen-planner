@@ -175,6 +175,12 @@
     '.aic-persona-box{padding:0.6rem 0.85rem;border-bottom:1px solid var(--border);background:var(--surface);}' +
     '.aic-persona-box textarea{width:100%;min-height:52px;resize:vertical;font-size:0.78rem;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-family:var(--font);}' +
     '.aic-persona-box .aic-persona-label{font-size:0.7rem;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between;}' +
+    '.aic-image-box{padding:0.7rem 0.85rem;border-bottom:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;gap:8px;}' +
+    '.aic-image-box .aic-image-label{font-size:0.7rem;color:var(--muted);display:flex;justify-content:space-between;align-items:center;}' +
+    '.aic-image-row{display:flex;gap:8px;flex-wrap:wrap;}' +
+    '.aic-image-row .aic-select{flex:0 0 auto;min-width:180px;max-width:none;}' +
+    '.aic-image-prompt{flex:1 1 220px;min-width:180px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:0.85rem;font-family:var(--font);}' +
+    '.aic-image-row .aic-send{flex:0 0 auto;}' +
     '@media (max-width: 720px){.aic-side{width:170px;flex:0 0 170px;}.aic-select{max-width:110px;}}';
   document.head.appendChild(st);
 
@@ -192,13 +198,21 @@
     '        <select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="Model"></select>',
     '        <button class="aic-chip-btn" id="aic-web-btn" onclick="aicCycleWeb()" title="Web search">\uD83C\uDF10 Auto</button>',
     '        <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">\uD83C\uDFAD Persona</button>',
-    '        <button class="aic-icon-btn" id="aic-image-btn" onclick="aicPromptImage()" title="Generate an image" style="display:none;">\uD83C\uDFA8 Image</button>',
+    '        <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">\uD83C\uDFA8 Image</button>',
     '        <button class="aic-icon-btn" onclick="aicExportThread()" title="Export as Markdown">\u2B07 Export</button>',
     '      </div>',
     '    </div>',
     '    <div class="aic-persona-box" id="aic-persona-box" style="display:none;">',
     '      <div class="aic-persona-label"><span>Custom instructions for this chat (optional)</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicSavePersona()">Save</button></div>',
     '      <textarea id="aic-persona-input" placeholder="e.g. Explain like I'+"'"+'m preparing for SSC CGL, keep answers short and in Hinglish."></textarea>',
+    '    </div>',
+    '    <div class="aic-image-box" id="aic-image-box" style="display:none;">',
+    '      <div class="aic-image-label"><span>Generate an image</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseImageBox()">\u2715 Close</button></div>',
+    '      <div class="aic-image-row">',
+    '        <select class="aic-select" id="aic-image-model-select" title="Image model" style="max-width:none;"></select>',
+    '        <input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe the image…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();aicGenerateImage();}">',
+    '        <button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button>',
+    '      </div>',
     '    </div>',
     '    <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>',
     '    <div class="aic-log" id="aic-log"></div>',
@@ -457,38 +471,62 @@
     if (_filePollTimer) { clearInterval(_filePollTimer); _filePollTimer = null; }
   }
 
-  /* ── image generation ── */
-  // Auto-selects the configured Gemini image model (gemini-3.1-flash-image,
-  // etc. — whatever the admin has in the provider portfolio with an "image"
-  // marker in its name); if more than one is configured, asks which to use
-  // instead of guessing silently.
-  window.aicPromptImage = function () {
-    var imageModels = (_statusCache && _statusCache.imageModels) || [];
-    if (!imageModels.length) { toast('Image generation is not configured yet.'); return; }
-    var prompt = window.prompt('Describe the image to generate:');
-    if (!prompt || !prompt.trim()) return;
-    var modelKey = imageModels[0].key;
-    if (imageModels.length > 1) {
-      var choice = window.prompt(
-        'Which model?\n' + imageModels.map(function (m, i) { return (i + 1) + '. ' + m.label; }).join('\n'),
-        '1'
-      );
-      var idx = parseInt(choice, 10);
-      if (idx && imageModels[idx - 1]) modelKey = imageModels[idx - 1].key;
-    }
+  /* ── image generation: one box to pick the model, another for the prompt ──
+     Every image-capable model the admin has configured (any provider whose
+     model name signals native image output, e.g. Gemini's
+     gemini-3.1-flash-image) shows up in the model dropdown — the student
+     explicitly picks which one to use rather than the app guessing. ── */
+  function renderImageModelSelect() {
+    var sel = document.getElementById('aic-image-model-select');
+    if (!sel) return;
+    var models = (_statusCache && _statusCache.imageModels) || [];
+    sel.innerHTML = models.length
+      ? models.map(function (m, i) { return '<option value="' + escAttr(m.key) + '"' + (i === 0 ? ' selected' : '') + '>' + esc(m.label) + '</option>'; }).join('')
+      : '<option value="">No image model configured</option>';
+  }
+
+  window.aicToggleImageBox = function () {
+    var box = document.getElementById('aic-image-box');
+    if (!box) return;
+    var models = (_statusCache && _statusCache.imageModels) || [];
+    if (!models.length) { toast('Image generation is not configured yet — ask an admin to add a Gemini image model.'); return; }
+    var showing = box.style.display !== 'none';
+    if (showing) { box.style.display = 'none'; return; }
+    renderImageModelSelect();
+    box.style.display = '';
+    var input = document.getElementById('aic-image-prompt-input');
+    if (input) input.focus();
+  };
+  window.aicCloseImageBox = function () {
+    var box = document.getElementById('aic-image-box');
+    if (box) box.style.display = 'none';
+  };
+
+  window.aicGenerateImage = function () {
+    var modelSel = document.getElementById('aic-image-model-select');
+    var promptInput = document.getElementById('aic-image-prompt-input');
+    var modelKey = modelSel ? modelSel.value : '';
+    var prompt = ((promptInput && promptInput.value) || '').trim();
+    if (!modelKey) { toast('No image model configured.'); return; }
+    if (!prompt) { toast('Describe what image to generate.'); return; }
+
     var t = getThread(currentThreadId());
     if (!t) return;
-    t.messages.push({ role: 'user', content: '\uD83C\uDFA8 Generate image: ' + prompt.trim() });
+    var modelLabel = modelSel && modelSel.options[modelSel.selectedIndex] ? modelSel.options[modelSel.selectedIndex].text : '';
+    t.messages.push({ role: 'user', content: '\uD83C\uDFA8 [' + modelLabel + '] ' + prompt });
     upsertThread(t);
+    if (promptInput) promptInput.value = '';
     renderLog();
     var log = document.getElementById('aic-log');
     var typing = document.createElement('div');
     typing.className = 'aic-typing';
-    typing.textContent = 'Generating image…';
+    typing.id = 'aic-image-typing';
+    typing.textContent = 'Generating image with ' + modelLabel + '…';
     if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+
     backendAuthFetch('/api/ai-chat/image', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt.trim(), model: modelKey })
+      body: JSON.stringify({ prompt: prompt, model: modelKey })
     }).then(function (r) {
       if (!r.ok) return r.json().then(function (j) { throw new Error((j && (j.detail || j.error)) || 'Image generation failed'); });
       return r.blob();
@@ -539,6 +577,8 @@
     renderFilesBar();
     var box = document.getElementById('aic-persona-box');
     if (box) box.style.display = 'none';
+    var imgBox = document.getElementById('aic-image-box');
+    if (imgBox) imgBox.style.display = 'none';
   }
 
   function setSending(on) {
