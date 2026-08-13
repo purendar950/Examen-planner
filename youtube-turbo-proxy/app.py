@@ -1067,6 +1067,13 @@ _OMNIROUTE_FALLBACK_READ_TIMEOUT = min(_OMNIROUTE_FALLBACK_TIMEOUT, 5)  # second
 # generation may fail over to at most this many alternate configured providers
 # so a downed tunnel no longer hard-fails notes/quiz/summary generation.
 _OMNIROUTE_FALLBACK_MAX = int(os.environ.get("OMNIROUTE_FALLBACK_MAX", "3"))
+# style="html" design pass: how many OTHER configured providers to try, in
+# order, if the chosen one fails/times out/answers with no usable stylesheet —
+# before giving up and using the built-in theme. Mirrors the OmniRoute-outage
+# idea above but applies to ANY provider, because any provider can have a bad
+# day. Kept separate from _OMNIROUTE_FALLBACK_MAX so the two can be tuned
+# independently.
+_DESIGN_FALLBACK_MAX = int(os.environ.get("DESIGN_FALLBACK_MAX", "3"))
 # Stream the model response by default: the first tokens arrive within seconds,
 # which keeps the upstream connection alive and PREVENTS Cloudflare's ~100s 524
 # on slow models (mistral-large, Hunyuan, etc.). Set AI_STREAM=0 to disable.
@@ -2676,35 +2683,48 @@ def _load_design_ai(prefer_model=None, prefer_provider=None):
     Being able to point each half at the model that is actually good at it is
     the whole reason this is split.
 
-    Resolution order: explicit request parameter, then the admin's
-    config/ai.designProvider / designModel, then None — and None means the
-    caller reuses the notes provider, so nothing changes for anyone who has not
-    configured a second one.
+    Resolution order for the PRIMARY: explicit request parameter, then the
+    admin's config/ai.designProvider / designModel, then None — and None means
+    the caller reuses the notes provider, so nothing changes for anyone who has
+    not configured a second one.
+
+    The returned config also carries `ai["fallbacks"]`: every OTHER configured
+    provider, in the admin's preferred order. If the primary design call fails,
+    times out, or returns nothing usable, _gen_notes_design walks this chain
+    before giving up — a design pass no longer degrades to the plain built-in
+    theme just because ONE provider is having a bad day, as long as ANY
+    configured provider is still answering.
     """
     prefer_model = (prefer_model or "").strip()[:80]
     prefer_provider = (prefer_provider or "").strip()[:40]
+    cfg = {}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                cfg = doc.to_dict() or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/ai read failed while resolving design AI: %s", exc)
     if not prefer_model and not prefer_provider:
-        cfg = {}
-        if _fb_db:
-            try:
-                doc = _fb_db.collection("config").document("ai").get()
-                if doc.exists:
-                    cfg = doc.to_dict() or {}
-            except Exception as exc:  # noqa: BLE001
-                log.warning("config/ai read failed while resolving design AI: %s", exc)
         prefer_provider = (cfg.get("designProvider") or "").strip().lower()
         prefer_model = (cfg.get("designModel") or "").strip()
         if not prefer_model and not prefer_provider:
             return None
     ai = _load_ai_config(prefer_model or None, prefer_provider or None)
-    # An explicitly requested design provider with no key would silently produce
-    # the fallback theme on every note. Reusing the notes provider is the more
-    # useful failure: the design is still AI-authored, just not by the requested
-    # model, and _record_design_meta reports which model actually ran.
     if not _ai_configured(ai):
-        log.warning("design AI %s/%s has no key — falling back to the notes provider",
+        # The requested provider has no key at all — there is no call to make,
+        # so route the whole design straight to another configured provider
+        # instead of "trying" one that can't possibly answer.
+        log.warning("design AI %s/%s has no key — trying another configured provider",
                     prefer_provider or "-", prefer_model or "-")
-        return None
+        chain = _fallback_ai_configs(cfg, prefer_provider or "", max_n=_DESIGN_FALLBACK_MAX)
+        if not chain:
+            return None                 # nothing configured at all → reuse the notes provider
+        ai = chain[0]
+        ai["fallbacks"] = chain[1:]
+    else:
+        ai["fallbacks"] = _fallback_ai_configs(
+            cfg, ai.get("provider") or prefer_provider or "", max_n=_DESIGN_FALLBACK_MAX)
     return ai
 
 
@@ -3364,37 +3384,87 @@ def _html_part_cap(ai, part_cap):
 
 
 def _gen_notes_design(transcript, out_lang, ai, title, cancel_event=None):
-    """Run the design pass and return (css, js, used_fallback).
+    """Run the design pass and return (css, js, used_fallback, resolved_ai).
 
-    Never raises: a failed design pass falls back to the built-in theme, so the
-    body pass — which is where nearly all the time and tokens go — is never
-    wasted on a styling problem.
+    Tries `ai`, then each of `ai["fallbacks"]` in order (see
+    _load_design_ai / _fallback_ai_configs), stopping at the first provider
+    that returns a usable stylesheet. Only when EVERY configured provider has
+    failed does this fall back to the built-in theme — a design pass no longer
+    goes plain just because ONE provider is having a bad day.
 
-    `used_fallback` is returned rather than inferred by the caller because the
-    two outcomes are indistinguishable from the outside: a handled provider
-    error still produces a perfectly good stylesheet, and reporting that as the
-    chosen model's work would blame it for a design it never wrote.
+    Never raises. `resolved_ai` is whichever config actually produced the
+    result (or the last one tried, if all failed), so the caller can report who
+    really did the work — that may not be `ai` any more.
+
+    `used_fallback` means "every candidate failed, this is the built-in theme",
+    not "a failover happened". A handled provider outage that a fallback
+    provider then answered is a full success, not a fallback in this sense —
+    reporting it as one would blame a model for a design it never wrote.
     """
+    chain = [ai] + [f for f in (ai.get("fallbacks") or []) if _ai_configured(f)]
     sample = (transcript or "")[:NOTES_HTML_DESIGN_SAMPLE]
     head = "Lecture title: %s\n\n" % (title or "(untitled)")
     user = (head + _html_design_instr(out_lang) +
             "\n\nLECTURE SAMPLE:\n" + sample + _lang_reminder(out_lang))
     sysmsg = ("You are a senior web designer who writes production CSS by hand. "
               "You answer with code only, never with explanation.")
-    try:
+    last_ai = ai
+    for i, cur in enumerate(chain):
         if cancel_event is not None and cancel_event.is_set():
-            return _HTML_FALLBACK_CSS, "", True
-        raw = _ai_chat([{"role": "system", "content": sysmsg},
-                        {"role": "user", "content": user}], ai,
-                       temperature=0.7,        # design wants variety, not accuracy
-                       max_tokens=NOTES_HTML_DESIGN_CAP) or ""
-    except Exception as exc:  # noqa: BLE001
-        log.warning("html notes: design pass failed (%s) — using fallback theme", exc)
-        return _HTML_FALLBACK_CSS, "", True
-    css, js = _html_parse_design(raw)
-    # _html_parse_design substitutes the built-in theme when the reply had no
-    # usable stylesheet in it, which is a fallback just as much as an exception.
-    return css, _sanitise_note_design_js(js), css is _HTML_FALLBACK_CSS
+            return _HTML_FALLBACK_CSS, "", True, last_ai
+        last_ai = cur
+        try:
+            raw = _ai_chat([{"role": "system", "content": sysmsg},
+                            {"role": "user", "content": user}], cur,
+                           temperature=0.7,    # design wants variety, not accuracy
+                           max_tokens=NOTES_HTML_DESIGN_CAP) or ""
+        except Exception as exc:  # noqa: BLE001
+            log.warning("html notes: design pass failed on %s/%s (%s)%s",
+                        cur.get("provider"), cur.get("model"), exc,
+                        " — trying the next provider" if i + 1 < len(chain)
+                        else " — no more providers, using fallback theme")
+            continue
+        css, js = _html_parse_design(raw)
+        if css is _HTML_FALLBACK_CSS:
+            # The reply had no usable stylesheet in it (empty, refused, wrong
+            # format) — a soft failure that deserves the same retry as a hard
+            # one, not silent acceptance of the built-in theme.
+            log.warning("html notes: %s/%s returned no usable stylesheet%s",
+                        cur.get("provider"), cur.get("model"),
+                        " — trying the next provider" if i + 1 < len(chain)
+                        else " — no more providers, using fallback theme")
+            continue
+        return css, _sanitise_note_design_js(js), False, cur
+    return _HTML_FALLBACK_CSS, "", True, last_ai
+
+
+def _with_design_fallbacks(ai):
+    """Make sure the config handed to the design pass carries a fallback chain.
+
+    _load_design_ai already attaches one when a design provider was explicitly
+    requested. When none was (the common case — design just reuses the notes
+    provider, `design_ai or ai` in _gen_notes_html/_stream_notes_html), `ai`
+    is the notes config as-is and has no "fallbacks" key unless it happens to be
+    OmniRoute. Without this, that path would drop straight to the built-in
+    theme on a single provider hiccup even though other providers are
+    configured and idle.
+
+    Returns a NEW dict — never mutates the caller's `ai`, which the body passes
+    are using concurrently on another thread.
+    """
+    if "fallbacks" in ai:
+        return ai
+    out = dict(ai)
+    cfg = {}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                cfg = doc.to_dict() or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/ai read failed while building the design fallback chain: %s", exc)
+    out["fallbacks"] = _fallback_ai_configs(cfg, ai.get("provider") or "", max_n=_DESIGN_FALLBACK_MAX)
+    return out
 
 
 class _DesignPass(object):
@@ -3412,12 +3482,19 @@ class _DesignPass(object):
     multi-provider setup can now use the right one for each instead of forcing
     one model to be adequate at both.
 
-    Failure is not propagated. A dead thread, a provider outage or a timeout all
-    resolve to the built-in theme, because a plain-looking note that contains
-    the whole lecture is worth far more than an error.
+    Failure is not propagated to the caller as an exception, but it is also not
+    accepted at the first provider that stumbles: _gen_notes_design walks
+    `ai["fallbacks"]` (every other configured provider) before giving up. Only
+    when the WHOLE chain has failed does this resolve to the built-in theme —
+    a plain-looking note containing the whole lecture beats an error, but an
+    AI-authored design from a working provider beats the built-in theme too.
+    self.ai is updated to whichever provider actually answered, so attribution
+    (design_provider/design_model in the response) names the real author, not
+    just whoever was asked first.
     """
 
     def __init__(self, transcript, out_lang, ai, title, cancel_event=None):
+        ai = _with_design_fallbacks(ai)
         self.css = _HTML_FALLBACK_CSS
         self.js = ""
         self.ai = ai
@@ -3432,9 +3509,10 @@ class _DesignPass(object):
 
     def _run(self, transcript, out_lang, ai, title, cancel_event):
         try:
-            self.css, self.js, fell_back = _gen_notes_design(
+            self.css, self.js, fell_back, resolved_ai = _gen_notes_design(
                 transcript, out_lang, ai, title, cancel_event=cancel_event)
             self.failed = fell_back
+            self.ai = resolved_ai       # may differ from the requested `ai` after failover
         except Exception as exc:  # noqa: BLE001
             # _gen_notes_design already swallows provider errors; this is the
             # last resort so a thread can never die silently and leave the
@@ -7867,13 +7945,20 @@ def _ai_for_provider(cfg, pid, model=None):
     return ai
 
 
-def _fallback_ai_configs(cfg, primary_provider):
-    """Ordered alternate provider configs to try if OmniRoute yields nothing.
+def _fallback_ai_configs(cfg, primary_provider, max_n=None):
+    """Ordered alternate provider configs to try if the primary yields nothing.
+
+    Originally OmniRoute-only (a downed tunnel answering nothing); also reused
+    by the style="html" design pass (_load_design_ai / _with_design_fallbacks) so
+    ANY provider can fail over to another, not just OmniRoute — `max_n` lets
+    each caller cap the chain independently instead of sharing OmniRoute's
+    outage budget.
 
     Never includes OmniRoute itself (or the primary), and only providers that
     actually have a usable key. The admin's active provider is preferred first,
-    then the standard provider order. Capped at _OMNIROUTE_FALLBACK_MAX so a
-    downed tunnel adds bounded latency before generation succeeds elsewhere."""
+    then the standard provider order. Capped at `max_n` (default
+    _OMNIROUTE_FALLBACK_MAX) so a downed provider adds bounded latency before
+    generation succeeds elsewhere."""
     primary_provider = (primary_provider or "").strip().lower()
     skip = {primary_provider, "omniroute"}
     order = []
@@ -7884,6 +7969,7 @@ def _fallback_ai_configs(cfg, primary_provider):
         if pid not in skip and pid not in order:
             order.append(pid)
     out, seen = [], set()
+    cap = _OMNIROUTE_FALLBACK_MAX if max_n is None else max_n
     for pid in order:
         alt = _ai_for_provider(cfg, pid)          # None when unavailable
         if not _ai_configured(alt):
@@ -7893,7 +7979,7 @@ def _fallback_ai_configs(cfg, primary_provider):
             continue
         seen.add(sig)
         out.append(alt)
-        if len(out) >= _OMNIROUTE_FALLBACK_MAX:
+        if len(out) >= cap:
             break
     return out
 
