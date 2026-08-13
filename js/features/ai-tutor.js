@@ -2175,7 +2175,7 @@
         return '<option value="' + esc(g.provider) + '|' + esc(m) + '">' + esc(m) + '</option>';
       }).join('');
     }).join('');
-    sel.innerHTML = '<option value="">🎨 Design: same as Notes AI</option>' + opts;
+    sel.innerHTML = '<option value="">🎨 Design: same</option>' + opts;
     if (savedValue && Array.prototype.some.call(sel.options, function (o) { return o.value === savedValue; })) {
       sel.value = savedValue;
     } else if (savedModel) {
@@ -7712,7 +7712,8 @@
         // independent of which one writes the content (see outDesignModel()
         // above). Mirrors demo/ai-html-notes-demo.html's "Design AI" picker.
         '<select id="ai-notes-design-ai" class="ai-btn sec" title="Design AI — which model styles the AI-Designed note (independent of the Notes AI above)" ' +
-          'aria-label="Design AI" style="padding:6px 8px;display:none"><option value="">🎨 Design: same as Notes AI</option></select>' +
+          'aria-label="Design AI" style="padding:6px 8px;display:none;max-width:150px;text-overflow:ellipsis">' +
+          '<option value="">🎨 Design: same</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
         '<button class="ai-btn sec" id="ai-notes-bundle" title="Combine several lectures into one notebook" style="padding:6px 10px">\uD83D\uDCDA Multi-video</button>' +
         '<button class="ai-btn sec" id="ai-notes-saved" title="Every note the AI has written for you" style="padding:6px 10px">\uD83D\uDDC2 Saved</button>' +
