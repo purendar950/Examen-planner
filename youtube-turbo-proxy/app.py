@@ -3132,8 +3132,12 @@ body{margin:0;padding:18px;background:#e8ecf1;color:var(--ink);
 .ai-ts{color:var(--accent2);cursor:pointer;text-decoration:underline dotted;
        font-size:.82em;font-weight:700}
 @media (max-width:680px){body{padding:10px}.page{padding:16px 15px}}
-@media print{body{background:#fff;padding:0}
-  .page{box-shadow:none;margin:0 0 10px;break-inside:avoid}
+@media print{
+  @page{margin:8mm}
+  body{background:#fff;padding:0}
+  .page{max-width:none;width:100%;margin:0 0 6mm;padding:0;border-radius:0;
+        box-shadow:none;column-count:2;column-gap:6mm;column-fill:auto}
+  .h-topic,.h-sub,.figure{break-inside:avoid}
   .answer{max-height:none!important;opacity:1!important}.reveal{display:none}}
 """
 
@@ -3187,9 +3191,27 @@ def _html_design_instr(out_lang, requirements=""):
         "- Mobile-first and responsive: the notes are read on phones. Use "
         "relative units, wrap long tables, and add a `@media (max-width:680px)` "
         "block that reduces padding and font sizes.\n"
-        "- Include a `@media print` block so the notes print cleanly on A4 "
-        "(white background, no shadows, avoid breaking a `.page` across sheets "
-        "with `break-inside:avoid`).\n"
+        "- Include a `@media print` block so the notes print cleanly on A4. It "
+        "MUST override the on-screen layout, not just remove decoration \u2014 "
+        "a phone-width centered card wastes most of a printed page:\n"
+        "  - Set `@page{margin:8mm}` (or similarly tight \u2014 never rely on the "
+        "browser's own large default margins).\n"
+        "  - In `@media print`, give `.page` white background, no shadow, and "
+        "make it use the FULL sheet width \u2014 override any on-screen "
+        "`max-width`/centering with `max-width:none;margin:0 0 6mm;width:100%`.\n"
+        "  - In `@media print`, lay `.page`'s text out as TWO COLUMNS "
+        "(`column-count:2;column-gap:6mm;column-fill:auto`) so a page of dense "
+        "notes fills the sheet instead of one narrow strip with blank space "
+        "beside it. Keep `.h-topic`/`.h-sub`-style headings and `.figure` "
+        "SVGs from being split mid-element (`break-inside:avoid` on those "
+        "specifically), but let ordinary paragraphs, lists and tables flow "
+        "and split across the column break \u2014 an unsplittable table or card "
+        "taller than one column strands a big blank gap below it.\n"
+        "  - NEVER give `.page` a fixed or minimum height (no `min-height:"
+        "100vh` or similar) and never force one `.page` per printed sheet "
+        "(`page-break-after:always`/`break-after:page`) \u2014 a short topic "
+        "must NOT print as an almost-empty page. Only break where the "
+        "content actually reaches the bottom of a sheet.\n"
         "- Support long Devanagari and Latin text in the same paragraph.\n"
         "- End EVERY `font-family` with a generic family (`sans-serif`, `serif` "
         "or `monospace`), and put `system-ui` before it. A decorative display "
