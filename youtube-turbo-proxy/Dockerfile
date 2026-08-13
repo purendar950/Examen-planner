@@ -27,11 +27,24 @@ RUN pip install -r requirements.txt
 
 # Build the bgutil PO-token provider server AND install its matching yt-dlp
 # plugin from the same source so versions never drift apart.
+#
+# upstream/plugin/pyproject.toml points readme at "../README.md" (outside the
+# plugin's own build root). Newer hatchling releases (the plugin's build
+# backend) reject any readme path that escapes the project directory —
+# "ValueError: Readme path must be within the project directory" — which
+# broke `pip install /opt/bgutil/plugin` on every build once pip resolved a
+# hatchling new enough to enforce that check (no version pin upstream, so
+# this could recur again on a future hatchling release). Copying the repo's
+# top-level README.md into plugin/ before installing satisfies the check
+# without needing a patched fork or an upstream fix — same file, same
+# content, just reachable from where hatchling insists on finding it.
 RUN git clone --depth 1 --branch "${BGUTIL_REF}" \
         https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git /opt/bgutil \
     && cd /opt/bgutil/server \
     && npm install \
     && npx --yes tsc \
+    && cp /opt/bgutil/README.md /opt/bgutil/plugin/README.md \
+    && sed -i 's#readme = {file = "\.\./README\.md"#readme = {file = "README.md"#' /opt/bgutil/plugin/pyproject.toml \
     && pip install /opt/bgutil/plugin \
     # Fail the build loudly if the PO-token server didn't compile, instead of
     # silently shipping an image where pot_provider is always false.
