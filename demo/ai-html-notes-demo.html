@@ -225,10 +225,15 @@
       <button class="btn-sec" id="stop">■ Stop</button>
     </div>
     <div class="statusline" id="status"></div>
-    <p class="note">Requests <code>GET /api/study?id=…&amp;mode=notes&amp;style=html&amp;out=…</code>
-      with <code>Authorization: Bearer &lt;token&gt;</code>.
-      A first run is slow (design pass, then one body pass per chunk) and caches afterwards.
-      If the server returns <code>style: "topic"</code> it is still running the old code.</p>
+    <p class="note">Runs the same way the app does:
+      <code>POST /api/study/jobs</code> (returns at once, generates in the background), then
+      follows <code>GET /api/study/jobs/&lt;id&gt;/stream</code> and reconnects from a byte offset
+      until it finishes. <b>■ Stop</b> sends <code>DELETE</code> on the job.
+      This is not a nicety — a first run is a design pass plus one body pass per 26k-char
+      transcript chunk, so a long lecture is a dozen sequential model calls and would outlive
+      any single HTTP request. Results cache, so the second run is instant.
+      If the server returns Markdown instead of an HTML document, the proxy is still running
+      the old code.</p>
   </div>
 
   <!-- ══════════ 3 · the note ══════════ -->
@@ -535,85 +540,236 @@
     return m ? m[1] : '';
   }
 
-  var ctrl = null;
-  $('stop').onclick = function () { if (ctrl) { ctrl.abort(); ctrl = null; } };
+  /* ════════════════════════════════════════════════════════════════════
+     LIVE GENERATION — job + SSE, not a blocking request
+
+     This demo originally used the blocking `GET /api/study`, which has to finish
+     the whole generation inside one HTTP request. That cannot work for this
+     style. A body pass runs per transcript chunk, chunks are 26k chars, and each
+     pass may auto-continue up to NOTES_MAX_CONTINUATIONS times with a 300s
+     per-call ceiling — so a long lecture is a dozen sequential model calls.
+     Add a cold Render instance and the request outlives any client timeout;
+     the demo's own 5-minute abort was hitting first and reporting "Stopped".
+
+     So it now does what the app does: POST the job, which returns 202
+     immediately and generates in a background thread, then follow it. There is
+     no request left to time out, and the progress card gets something real to
+     show instead of a blind wait.
+
+     The stream endpoint is a BOUNDED SNAPSHOT, not a held connection — it exists
+     so a Gunicorn thread is never parked on a reader. The client reconnects with
+     `?offset=<utf-8 bytes already received>` until a terminal frame arrives.
+     Offsets are UTF-8 bytes, not JS string length, or replay would desync on the
+     first non-BMP character.
+     ════════════════════════════════════════════════════════════════════ */
+  var job = null;          // {id, backend, acc, stopped, timer, t0}
+
+  function utf8Length(text) {
+    text = String(text || '');
+    try { return new TextEncoder().encode(text).length; }
+    catch (e) { return unescape(encodeURIComponent(text)).length; }
+  }
+  function newJobId() {
+    // The proxy requires [A-Za-z0-9_-]{20,80}.
+    try {
+      var b = new Uint8Array(24), out = '';
+      window.crypto.getRandomValues(b);
+      for (var i = 0; i < b.length; i++) out += ('0' + b[i].toString(16)).slice(-2);
+      return out;
+    } catch (e) {
+      return ('demo' + Date.now() + Math.random().toString(36).slice(2)).slice(0, 60);
+    }
+  }
+
+  function sizeLabel(text) {
+    var b = utf8Length(text);
+    return b < 1024 ? (b + ' bytes') : ((b / 1024).toFixed(b < 10240 ? 1 : 0) + ' KB');
+  }
+
+  function endJob() {
+    if (job && job.timer) clearTimeout(job.timer);
+    job = null;
+    syncGoEnabled(false);
+  }
+
+  $('stop').onclick = function () {
+    if (!job) return;
+    var id = job.id, backend = job.backend;
+    job.stopped = true;
+    setStatus('⏹ Stopping — asking the proxy to cancel the job…');
+    DemoAuth.fetch(backend + '/api/study/jobs/' + encodeURIComponent(id), { method: 'DELETE' })
+      .catch(function () {})
+      .then(function () {
+        setStatus('⏹ Stopped. Nothing was cached — generate again whenever you like.');
+        showPlaceholder('Stopped.');
+        endJob();
+      });
+  };
+
   $('go').onclick = function () {
     var backend = ($('backend').value || '').trim().replace(/\/+$/, '');
     var id = parseId($('url').value);
     if (!id) { setStatus('⚠️ Enter a valid YouTube URL or 11-character video ID.', true); return; }
     var lang = $('lang').value, fresh = $('fresh').value === '1';
-    var url = backend + '/api/study?id=' + encodeURIComponent(id) +
-      '&mode=notes&style=html&out=' + encodeURIComponent(lang) + (fresh ? '&refresh=1' : '');
 
     syncGoEnabled(true);
-    setStatus('<span class="spin"></span> Designing, then writing — the first run can take 1–3 minutes for a long lecture.');
-    // Reuse the streaming progress surface: the shape of the wait is the same
-    // even though this endpoint answers in one piece.
+    setStatus('<span class="spin"></span> Starting the job… a sleeping Render instance can take ~50s to wake.');
     showProgress();
 
-    ctrl = ('AbortController' in window) ? new AbortController() : null;
-    var to = setTimeout(function () { if (ctrl) ctrl.abort(); }, 300000);
-    var t0 = Date.now();
-    var httpStatus = 0;
+    job = { id: newJobId(), backend: backend, acc: '', stopped: false, timer: null, t0: Date.now() };
+    var mine = job;
 
-    DemoAuth.fetch(url, ctrl ? { signal: ctrl.signal } : {})
-      .then(function (r) { httpStatus = r.status; return r.json().catch(function () { return {}; }); })
-      .then(function (j) {
-        clearTimeout(to); syncGoEnabled(false); ctrl = null;
-        var secs = ((Date.now() - t0) / 1000).toFixed(1);
-        // Auth / entitlement / quota first: these are not "generation failed",
-        // and they need a different next step from the reader.
-        var authMsg = DemoAuth.errorMessage(httpStatus, j);
-        if (authMsg) { setStatus(authMsg, true); showPlaceholder('Not generated.'); return; }
-        if (j.error === 'no_captions' || j.warning === 'no_captions') {
-          setStatus('⚠️ This video has no captions, so notes cannot be generated.', true);
-          showPlaceholder('No captions on this video.'); return;
-        }
-        if (j.error) {
-          setStatus('❌ ' + esc(j.error) + (j.detail ? ' — ' + esc(j.detail) : ''), true);
-          showPlaceholder('Nothing generated.'); return;
-        }
-        var content = j.content || '';
-        if (!content.trim()) {
-          setStatus('⚠️ Empty response from the server.', true);
-          showPlaceholder('Nothing generated.'); return;
-        }
-        var looksHtml = /^\s*<!doctype html|^\s*<html/i.test(content);
-        if (!looksHtml) {
-          setStatus('⚠️ The server returned <code>style: ' + esc(j.style || 'topic') +
-            '</code> and Markdown, not an HTML document — it is still running the old ' +
-            'code. Deploy the updated proxy, then try again. Showing it as text.', true);
-          mount('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Raw response</title>' +
-            '<style>body{font:14px/1.6 ui-monospace,monospace;padding:20px;white-space:pre-wrap;' +
-            'word-break:break-word}</style></head><body>' + escHtml(content) + '</body></html>',
-            'Markdown response from an un-updated backend');
-          return;
-        }
-        setStatus('✅ Generated in ' + secs + 's · ' + Math.round(content.length / 1024) + ' KB of HTML.');
-        mount(content, (j.provider || 'ai') + ' · ' + (j.model || '') + ' · ' +
-          (j.cached ? 'cached' : 'fresh') + ' · ' + lang);
+    DemoAuth.fetch(backend + '/api/study/jobs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobId: mine.id, id: id, mode: 'notes', out: lang,
+        style: 'html', refresh: fresh ? 1 : 0
       })
-      .catch(function (e) {
-        clearTimeout(to); syncGoEnabled(false);
-        var aborted = e && e.name === 'AbortError';
-        var msg;
-        if (aborted) {
-          msg = '⏱️ Stopped. A cold Render instance or a very long lecture can exceed this; try again, or a shorter video.';
-        } else if (DemoAuth.failureMessage(e)) {
-          msg = DemoAuth.failureMessage(e);
-        } else {
-          msg = '❌ Request failed: ' + esc(String(e)) + '. The server may be asleep — retry in a few seconds.';
-        }
-        setStatus(msg, true);
-        showPlaceholder(aborted ? 'Stopped.' : 'Request failed.');
-        ctrl = null;
-      });
+    }).then(function (r) {
+      var st = r.status;
+      return r.json().catch(function () { return {}; }).then(function (j) { return [st, j]; });
+    }).then(function (pair) {
+      if (mine !== job) return;                      // superseded or stopped
+      var st = pair[0], j = pair[1];
+      var authMsg = DemoAuth.errorMessage(st, j);
+      if (authMsg) { setStatus(authMsg, true); showPlaceholder('Not generated.'); endJob(); return; }
+      if (j.error) {
+        setStatus('❌ ' + esc(j.error) + (j.detail ? ' — ' + esc(j.detail) : ''), true);
+        showPlaceholder('Nothing generated.'); endJob(); return;
+      }
+      if (j.jobId) mine.id = j.jobId;
+      // A cache hit is already finished; the POST returns it and there is
+      // nothing to follow.
+      if (j.status === 'completed' && (j.content || '').trim()) { finishJob(mine, j, j.content); return; }
+      if (j.status === 'stopped') {
+        setStatus('⏹ The proxy reports this job as stopped.', true);
+        showPlaceholder('Stopped.'); endJob(); return;
+      }
+      setStatus('<span class="spin"></span> Generating on the server — designing, then one pass per ' +
+        'transcript chunk. Long lectures take several minutes; this no longer times out.');
+      followJob(mine, lang);
+    }).catch(function (e) {
+      if (mine !== job) return;
+      var signedOut = DemoAuth.failureMessage(e);
+      setStatus(signedOut || ('❌ Could not start the job: ' + esc(String(e)) +
+        '. The proxy may be asleep — try again in a few seconds.'), true);
+      showPlaceholder('Request failed.');
+      endJob();
+    });
   };
+
+  /* Read one snapshot, then reconnect from the byte offset we have reached.
+     `meta` carries provider/model, `chunk` is the replayed tail, and
+     done/stopped/error are terminal. */
+  function followJob(mine, lang) {
+    if (mine !== job || mine.stopped) return;
+    var url = mine.backend + '/api/study/jobs/' + encodeURIComponent(mine.id) +
+              '/stream?offset=' + utf8Length(mine.acc);
+    DemoAuth.fetch(url).then(function (r) {
+      if (r.status === 404) throw new Error('job-gone');
+      return r.text().then(function (body) { return [r.status, body]; });
+    }).then(function (pair) {
+      if (mine !== job || mine.stopped) return;
+      var st = pair[0], body = pair[1];
+      if (st >= 400) {
+        var j = {};
+        try { j = JSON.parse(body); } catch (e) {}
+        var authMsg = DemoAuth.errorMessage(st, j);
+        setStatus(authMsg || ('❌ Stream failed: ' + esc(j.error || String(st))), true);
+        showPlaceholder('Not generated.'); endJob(); return;
+      }
+      var terminal = '';
+      parseSse(body, function (ev, data) {
+        if (ev === 'meta') {
+          if (data.provider) mine.provider = data.provider;
+          if (data.model) mine.model = data.model;
+          if (data.cached != null) mine.cached = !!data.cached;
+        } else if (ev === 'chunk' && typeof data.t === 'string') {
+          mine.acc += data.t;
+        } else if (ev === 'done' || ev === 'stopped' || ev === 'error') {
+          terminal = ev; mine.terminalData = data;
+        }
+      });
+      progressPaint(mine.acc);
+      if (terminal === 'done') { finishJob(mine, mine, mine.acc); return; }
+      if (terminal === 'stopped') {
+        setStatus('⏹ Generation was stopped. Nothing was cached.', true);
+        showPlaceholder('Stopped.'); endJob(); return;
+      }
+      if (terminal === 'error') {
+        var d = mine.terminalData || {};
+        setStatus('❌ ' + esc(d.error || 'generation failed') +
+          (d.detail ? ' — ' + esc(d.detail) : ''), true);
+        showPlaceholder('Generation failed.'); endJob(); return;
+      }
+      // Still running: reconnect shortly. Elapsed time is shown because this can
+      // legitimately run for minutes and silence reads as a hang.
+      var mins = Math.floor((Date.now() - mine.t0) / 60000);
+      var secs = Math.floor(((Date.now() - mine.t0) % 60000) / 1000);
+      setStatus('<span class="spin"></span> Generating on the server — ' +
+        (mins ? mins + 'm ' : '') + secs + 's elapsed · ' + sizeLabel(mine.acc) +
+        ' written. Press ■ Stop to cancel.');
+      mine.timer = setTimeout(function () { followJob(mine, lang); }, 1400);
+    }).catch(function (e) {
+      if (mine !== job || mine.stopped) return;
+      if (e && e.message === 'job-gone') {
+        setStatus('⚠️ The proxy no longer has this job (it restarted, or the job expired). ' +
+          'Generate again — a completed note would have been cached.', true);
+        showPlaceholder('Job no longer available.'); endJob(); return;
+      }
+      // A dropped snapshot is normal on a free instance; keep following.
+      mine.timer = setTimeout(function () { followJob(mine, lang); }, 2500);
+    });
+  }
+
+  /* Minimal SSE frame parser. The endpoint returns a complete bounded snapshot
+     rather than an open stream, so this parses a whole body instead of needing
+     an incremental reader. */
+  function parseSse(body, onFrame) {
+    var blocks = String(body || '').split(/\n\n+/);
+    for (var i = 0; i < blocks.length; i++) {
+      var lines = blocks[i].split('\n'), ev = 'message', data = '';
+      for (var k = 0; k < lines.length; k++) {
+        var line = lines[k];
+        if (line.indexOf('event:') === 0) ev = line.slice(6).trim();
+        else if (line.indexOf('data:') === 0) data += line.slice(5).trim();
+      }
+      if (!data) continue;
+      var parsed = null;
+      try { parsed = JSON.parse(data); } catch (e) { continue; }
+      onFrame(ev, parsed || {});
+    }
+  }
+
+  function finishJob(mine, meta, content) {
+    var secs = ((Date.now() - mine.t0) / 1000).toFixed(1);
+    content = String(content || '');
+    if (!content.trim()) {
+      setStatus('⚠️ The job finished but returned nothing.', true);
+      showPlaceholder('Nothing generated.'); endJob(); return;
+    }
+    var looksHtml = /^\s*<!doctype html|^\s*<html/i.test(content);
+    if (!looksHtml) {
+      setStatus('⚠️ The server returned Markdown, not an HTML document — the proxy is still ' +
+        'running the old code, so <code>style=html</code> fell back to topic notes. Deploy the ' +
+        'updated proxy and try again. Showing the raw response as text.', true);
+      mount('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Raw response</title>' +
+        '<style>body{font:14px/1.6 ui-monospace,monospace;padding:20px;white-space:pre-wrap;' +
+        'word-break:break-word}</style></head><body>' + esc(content) + '</body></html>',
+        'Markdown response from an un-updated backend');
+      endJob(); return;
+    }
+    setStatus('✅ Generated in ' + secs + 's · ' + sizeLabel(content) + ' of HTML' +
+      (meta && meta.cached ? ' (served from cache)' : '') + '.');
+    mount(content, ((meta && meta.provider) || 'ai') + ' · ' + ((meta && meta.model) || '') +
+      ' · ' + (meta && meta.cached ? 'cached' : 'fresh') + ' · ' + $('lang').value);
+    endJob();
+  }
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
-  var escHtml = esc;
   function showPlaceholder(msg) {
     frame = null; docNow = ''; tsCount = 0;
     $('stage').innerHTML = '<div class="placeholder">' + esc(msg) + '</div>';
