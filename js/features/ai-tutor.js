@@ -2201,10 +2201,13 @@
     var meta = box.querySelector('.ai-meta-bar');
     if (!meta) return;
     slot.innerHTML = '';
-    var btns = meta.querySelectorAll('.ai-btn');
-    for (var i = 0; i < btns.length; i++) slot.appendChild(btns[i]);
+    // HTML-designed notes also expose their Preview / PDF layout selector. Move
+    // it with the buttons so the control remains visible beside Generate Notes
+    // after setup has collapsed, rather than leaving it in an empty meta row.
+    var actions = meta.querySelectorAll('.ai-btn, .ai-htmlnote-layout');
+    for (var i = 0; i < actions.length; i++) slot.appendChild(actions[i]);
     // Mark the meta-bar so CSS can hide it when only the muted caption remains.
-    meta.classList.toggle('ai-meta-bar-bare', !meta.querySelector('.ai-btn'));
+    meta.classList.toggle('ai-meta-bar-bare', !meta.querySelector('.ai-btn, .ai-htmlnote-layout'));
   }
 
   /* ── Notes Focus Mode ────────────────────────────────────────────────────
@@ -2808,7 +2811,10 @@
     applyNotesInvert(box);
   }
 
-  function notesFocusToolbarHtml() {
+  function notesFocusToolbarHtml(htmlNoteDoc) {
+    var htmlLayoutControl = htmlNoteDoc ?
+      '<label class="ai-focus-htmlnote-layout" for="ai-focus-htmlnote-layout">Layout <select class="ai-focus-control" id="ai-focus-htmlnote-layout" aria-label="Preview and PDF layout">' +
+      htmlNoteLayoutOptions(htmlNoteDoc) + '</select></label>' : '';
     return '<div class="ai-focus-toolbar" role="toolbar" aria-label="Notes Focus Mode controls">' +
       '<div class="ai-focus-heading">' +
         '<button type="button" class="ai-focus-control ai-focus-close" id="ai-focus-close" aria-label="Exit Notes Focus Mode" title="Exit Focus Mode (Esc)">←</button>' +
@@ -2829,6 +2835,7 @@
         '<button type="button" class="ai-focus-control" id="ai-focus-ask-toggle" aria-expanded="false" title="Ask the AI about these notes without leaving Focus Mode">💬 Ask AI</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-verify" title="Check these notes against the lecture and flag anything unsupported">🔍 Check notes</button>' +
         '<button type="button" class="ai-focus-control" id="ai-focus-annotations-toggle" aria-expanded="false" title="Write and highlight privately on these notes">🖍 My notes</button>' +
+        htmlLayoutControl +
         '<button type="button" class="ai-focus-control" id="ai-focus-pdf" title="Print or save notes as PDF">📄 PDF</button>' +
       '</div>' +
     '</div>' +
@@ -3297,6 +3304,58 @@
   // No allow-same-origin (see above) and no allow-forms/allow-modals/
   // allow-top-navigation: the note is a document to read, not an app.
   var HTMLNOTE_SANDBOX = 'allow-scripts';
+  /* A view preference only: never write this into the generated document or a
+     saved note. Author layout is deliberately the safe default. */
+  var HTMLNOTE_LAYOUT_KEY = 'aiHtmlNotesPreviewPdfLayout';
+  function htmlNoteLayout() {
+    try { return localStorage.getItem(HTMLNOTE_LAYOUT_KEY) === 'a4-columns' ? 'a4-columns' : 'author'; }
+    catch (e) { return 'author'; }
+  }
+  function setHtmlNoteLayout(value) {
+    try { localStorage.setItem(HTMLNOTE_LAYOUT_KEY, value === 'a4-columns' ? 'a4-columns' : 'author'); }
+    catch (e) {}
+  }
+  function htmlNoteHasDirectPageFragments(doc) {
+    try {
+      var parsed = new DOMParser().parseFromString(String(doc || ''), 'text/html');
+      return Array.prototype.some.call(parsed.body.children, function (node) {
+        return node.classList && node.classList.contains('page');
+      });
+    } catch (e) { return false; }
+  }
+  function htmlNoteUsesA4Columns(doc) {
+    return htmlNoteLayout() === 'a4-columns' && htmlNoteHasDirectPageFragments(doc);
+  }
+  /* This stylesheet is appended only to a disposable `srcdoc` / print string.
+     It cannot touch the opaque reader from app.css, and it never changes the
+     raw author document used by Save .html. */
+  function htmlNoteA4ColumnsStyle() {
+    return '<style data-ai-htmlnote-a4-columns>' +
+      'body[data-ai-htmlnote-a4-columns="1"]{width:210mm;max-width:calc(100% - 18px);margin:12mm auto;padding:9mm;background:#fff;column-count:2;column-gap:1mm;column-fill:balance}' +
+      'body[data-ai-htmlnote-a4-columns="1"] > .page{position:static!important;float:none!important;clear:none!important;width:auto!important;max-width:none!important;height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;box-shadow:none!important;break-before:auto!important;break-after:auto!important;break-inside:auto!important;page-break-before:auto!important;page-break-after:auto!important;page-break-inside:auto!important}' +
+      'body[data-ai-htmlnote-a4-columns="1"] > .page::before,body[data-ai-htmlnote-a4-columns="1"] > .page::after{display:none!important}' +
+      'body[data-ai-htmlnote-a4-columns="1"] > .page h1,body[data-ai-htmlnote-a4-columns="1"] > .page h2,body[data-ai-htmlnote-a4-columns="1"] > .page h3,body[data-ai-htmlnote-a4-columns="1"] > .page h4,body[data-ai-htmlnote-a4-columns="1"] > .page .h-topic,body[data-ai-htmlnote-a4-columns="1"] > .page .h-sub{break-after:avoid!important;page-break-after:avoid!important}' +
+      'body[data-ai-htmlnote-a4-columns="1"] > .page figure,body[data-ai-htmlnote-a4-columns="1"] > .page .callout,body[data-ai-htmlnote-a4-columns="1"] > .page .formula,body[data-ai-htmlnote-a4-columns="1"] > .page .quiz,body[data-ai-htmlnote-a4-columns="1"] > .page .q-card,body[data-ai-htmlnote-a4-columns="1"] > .page table,body[data-ai-htmlnote-a4-columns="1"] > .page .factbox{break-inside:auto!important;page-break-inside:auto!important}' +
+      'body[data-ai-htmlnote-a4-columns="1"] > .page table{display:table!important;overflow:visible!important}body[data-ai-htmlnote-a4-columns="1"] > .page thead{display:table-header-group!important}body[data-ai-htmlnote-a4-columns="1"] > .page tbody tr{break-inside:avoid!important;page-break-inside:avoid!important}' +
+      '@media print{@page{size:A4;margin:5mm 3mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}html{font-size:16px}body[data-ai-htmlnote-a4-columns="1"]{width:auto;max-width:none;margin:0;padding:0;background:#fff;column-count:2;column-gap:1mm;column-fill:auto}body[data-ai-htmlnote-a4-columns="1"] > .page{margin:0!important}}' +
+      '</style>';
+  }
+  function htmlNoteDocumentForSelectedLayout(doc) {
+    var html = String(doc || '');
+    if (!htmlNoteUsesA4Columns(html)) return html;
+    html = html.replace(/<body\b([^>]*)>/i, function (whole, attrs) {
+      return '<body' + attrs + ' data-ai-htmlnote-a4-columns="1">';
+    });
+    var at = html.toLowerCase().lastIndexOf('</head>');
+    return at === -1 ? htmlNoteA4ColumnsStyle() + html : html.slice(0, at) + htmlNoteA4ColumnsStyle() + html.slice(at);
+  }
+  function htmlNoteLayoutOptions(doc) {
+    var eligible = htmlNoteHasDirectPageFragments(doc);
+    var selected = htmlNoteUsesA4Columns(doc) ? 'a4-columns' : 'author';
+    return '<option value="author"' + (selected === 'author' ? ' selected' : '') + '>AI document layout</option>' +
+      '<option value="a4-columns"' + (selected === 'a4-columns' ? ' selected' : '') +
+      (eligible ? '' : ' disabled') + '>A4 · 2-column preview + PDF' + (eligible ? '' : ' (unavailable)') + '</option>';
+  }
   var _htmlNoteSeq = 0;
   var _htmlNoteFrames = Object.create(null);   // token -> {el, scroller, tsCount}
   var _htmlNoteListening = false;
@@ -3645,14 +3704,16 @@
   /* Mount a finished HTML note into `box`. Returns the iframe. */
   function htmlNoteMount(box, doc, meta) {
     meta = meta || {};
+    var sourceDoc = meta.sourceDoc || doc;
     htmlNoteListen();
     var tok = 'nb' + (++_htmlNoteSeq) + '_' + Math.random().toString(36).slice(2, 10);
-    box.innerHTML = notesFocusToolbarHtml() + brandBarHtml(true) +
+    box.innerHTML = notesFocusToolbarHtml(sourceDoc) + brandBarHtml(true) +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' +
       esc(meta.model || '') + ' · AI-designed' + (meta.cached ? ' · cached' : ' · fresh') +
       (meta.lang ? ' · ' + esc(meta.lang) : '') + '</span>' +
       '<button class="ai-btn sec" id="ai-htmlnote-save" title="Download these notes as a self-contained .html file" style="padding:4px 10px;font-size:0.72rem">⤓ Save .html</button>' +
+      '<label class="ai-htmlnote-layout" for="ai-htmlnote-layout">Preview / PDF <select id="ai-htmlnote-layout" aria-label="Preview and PDF layout">' + htmlNoteLayoutOptions(sourceDoc) + '</select></label>' +
       '<button class="ai-btn sec" id="ai-notes-focus" title="Read notes in Focus Mode" style="padding:4px 10px;font-size:0.72rem">⛶ Focus</button>' +
       '<button class="ai-btn sec" id="ai-follow" data-ai-follow-control style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>' +
       '<button class="ai-btn sec" id="ai-pdf" title="Print or save as PDF" style="padding:4px 10px;font-size:0.72rem">📄 Print / PDF</button>' +
@@ -3700,8 +3761,8 @@
     // access (private pen annotations cannot be anchored to another origin's
     // layout, so offering the tool would be a promise this cannot keep).
     box.classList.add('ai-note-htmldoc');
-    htmlNoteMount(box, content, {
-      provider: j.provider, model: j.model, cached: j.cached, lang: j.lang
+    htmlNoteMount(box, htmlNoteDocumentForSelectedLayout(content), {
+      sourceDoc: content, provider: j.provider, model: j.model, cached: j.cached, lang: j.lang
     });
     var title = pdfTitleFor(mode, 'html');
     var noteTools = box.querySelector('#ai-note-actions-toggle');
@@ -3709,13 +3770,31 @@
       var open = box.classList.toggle('ai-note-actions-open');
       noteTools.setAttribute('aria-expanded', open ? 'true' : 'false');
     };
-    var printNote = function () { htmlNotePrint(content, title); };
+    var printNote = function () { htmlNotePrint(htmlNoteDocumentForSelectedLayout(content), title); };
     var pb = box.querySelector('#ai-pdf');
     if (pb) pb.onclick = printNote;
     var focusPdf = box.querySelector('#ai-focus-pdf');
     if (focusPdf) focusPdf.onclick = printNote;
     var save = box.querySelector('#ai-htmlnote-save');
     if (save) save.onclick = function () { htmlNoteDownload(content, title); };
+    Array.prototype.forEach.call(
+      box.querySelectorAll('#ai-htmlnote-layout, #ai-focus-htmlnote-layout'), function (control) {
+        control.onchange = function () {
+          var choice = this.value === 'a4-columns' ? 'a4-columns' : 'author';
+          if (choice === 'a4-columns' && !htmlNoteHasDirectPageFragments(content)) {
+            setHtmlNoteLayout('author');
+            if (typeof showToast === 'function') showToast('A4 two-column preview needs direct .page sections in this AI document.', 'info');
+          } else {
+            setHtmlNoteLayout(choice);
+            if (typeof showToast === 'function') showToast(choice === 'a4-columns'
+              ? 'Showing the A4 two-column preview. Print/PDF uses the same disposable copy.'
+              : 'Restored the AI document’s original layout.');
+          }
+          // Re-render from raw `content`; neither the generated HTML nor the
+          // downloadable file is modified by changing this view preference.
+          renderHtmlNoteResult(mode, n, j, box);
+        };
+      });
     var focusClose = box.querySelector('#ai-focus-close');
     if (focusClose) focusClose.onclick = requestNotesFocusClose;
     var focusVideo = box.querySelector('#ai-focus-video');

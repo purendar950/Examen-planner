@@ -579,9 +579,13 @@ test('an empty passage is not sent anywhere', () => {
 {
   const dom = new JSDOM('<!doctype html><body><div id="ai-sub"></div></body>');
   const store = {};
+  // Keep the extraction resilient to Focus-toolbar parameters: AI-designed
+  // HTML notes pass their source document so the toolbar can show its optional
+  // Preview / PDF selector, while ordinary notes still call it with no argument.
+  const focusToolbarStart = '  function notesFocusToolbarHtml(';
   const invert = vm.runInNewContext(
-    section("  var NOTES_INVERT_KEY = 'aiNotesInvert';", '  function notesFocusToolbarHtml()') +
-    section('  function notesFocusToolbarHtml() {', '  function notesFocusTimeLabel(') +
+    section("  var NOTES_INVERT_KEY = 'aiNotesInvert';", focusToolbarStart) +
+    section(focusToolbarStart, '  function notesFocusTimeLabel(') +
     ';({ notesInverted, setNotesInverted, applyNotesInvert, toggleNotesInvert, notesFocusToolbarHtml })',
     {
       window: dom.window,
