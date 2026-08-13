@@ -68,3 +68,6 @@ jobs:
 
       - name: Multi-video notebook server logic
         run: python youtube-turbo-proxy/tests/test_notebook.py
+
+      - name: AI-designed notes — design-pass provider failover
+        run: python youtube-turbo-proxy/tests/test_design_failover.py

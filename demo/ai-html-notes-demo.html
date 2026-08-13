@@ -885,7 +885,11 @@
     var dModel = (meta && meta.design_model) || mine.designModel || '';
     var dMs = (meta && meta.design_ms) || mine.designMs || 0;
     var dFallback = (meta && meta.design_fallback) || mine.designFallback;
-    var designLabel = dFallback ? 'built-in theme (the design model did not answer)'
+    // dProv/dModel here name whichever provider actually answered — the proxy
+    // fails over to every other configured provider before giving up, so this
+    // is only the built-in theme when ALL of them failed, not just the one
+    // that was picked.
+    var designLabel = dFallback ? 'built-in theme (every configured AI failed to design it)'
       : (dProv || dModel) ? (dProv + (dModel ? ' · ' + dModel : '')) + (dMs ? ' in ' + (dMs / 1000).toFixed(1) + 's' : '')
       : 'same model as the notes';
 
