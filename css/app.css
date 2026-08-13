@@ -4564,11 +4564,36 @@ html:not([data-theme="light"]) #page-youtube .ai-tab:focus-visible { outline-col
 #page-youtube .ai-meta-bar { gap: .3rem !important; }
 #page-youtube .ai-meta-bar .ai-muted { min-width: 100px; font-size: .58rem; }
 #page-youtube .ai-meta-bar .ai-btn { min-height: 27px; padding: .22rem .45rem !important; font-size: .58rem !important; }
-/* Note-action buttons (Follow · Print/PDF · Regenerate · Take as Test · Share)
-   relocated from the in-notes meta-bar onto the Generate controls line. On
-   desktop the slot dissolves (display:contents) so its buttons flow as part of
-   the wrapping controls row beside Generate/Course. */
+/* Note-action controls (Follow · Print/PDF · Regenerate · Take as Test · Share
+   · AI HTML Preview/PDF layout) relocate from the in-notes meta-bar onto the
+   Generate controls line. On desktop the slot dissolves (display:contents) so
+   its controls flow as part of the wrapping row beside Generate/Course. */
 #page-youtube .ai-note-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
+#page-youtube .ai-htmlnote-layout {
+  display: inline-flex;
+  align-items: center;
+  gap: .28rem;
+  min-height: 27px;
+  color: var(--muted, #5a6478);
+  font-size: .56rem;
+  font-weight: 800;
+  letter-spacing: .035em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+#page-youtube .ai-htmlnote-layout select {
+  max-width: 185px;
+  min-height: 27px;
+  padding: .2rem .42rem;
+  border: 1px solid var(--border, #1e2535);
+  border-radius: 7px;
+  background: var(--card, #161b26);
+  color: var(--text, #e8edf5);
+  font: inherit;
+  font-size: .58rem;
+  letter-spacing: normal;
+  text-transform: none;
+}
 #page-youtube .ai-note-actions:empty { display: none; }
 #page-youtube .ai-notes-controls .ai-btn#ai-notes-focus,
 #page-youtube .ai-notes-controls .ai-btn#ai-follow,
@@ -5556,6 +5581,19 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
   outline-offset: 2px;
 }
 #page-youtube .ai-focus-control:disabled { opacity: .55; cursor: not-allowed; }
+/* HTML-designed notes may use an opt-in disposable A4 preview. The selector is
+   inside the Focus toolbar too, so its saved layout remains controllable after
+   Focus Mode makes the ordinary controls inert. */
+#page-youtube .ai-focus-htmlnote-layout {
+  display: inline-flex;
+  align-items: center;
+  gap: .28rem;
+  color: #6b776f;
+  font-size: .6rem;
+  font-weight: 780;
+  white-space: nowrap;
+}
+#page-youtube .ai-focus-htmlnote-layout select { max-width: 218px; min-height: 34px; }
 #page-youtube .ai-focus-close { width: 36px; padding: 0; font-size: 1.05rem; }
 /* Icon-only, matching Exit, so the pair reads as one view-control cluster and
    costs the title almost no width on phones. */
