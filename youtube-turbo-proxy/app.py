@@ -7132,6 +7132,14 @@ def api_study_langs():
     style = (request.args.get("style") or "").strip().lower()
     if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
+    # The single combined requirements box changes the cache bucket a note
+    # lands in (see _text_cache_key_parts), so "already generated" has to probe
+    # the SAME bucket the student is about to request, or the chips would point
+    # at a plain default note that has nothing to do with what was typed.
+    requirements = _clean_requirements(request.args.get("requirements")
+                                       or request.args.get("instructions"))
+    if mode != "notes":
+        requirements = ""
     # model-agnostic: a language is "available" if a note exists for it, no matter
     # which model made it (cache key no longer includes the model).
     req_model = (request.args.get("model") or "").strip()[:80]
@@ -7141,13 +7149,12 @@ def api_study_langs():
     except Exception:  # noqa: BLE001
         model = ""
     available = []
-    cache_style = _MCQ_CACHE_STYLE if style == "mcq" else style
     for lang in _STUDY_LANGS:
         # Probe the versioned bucket (Hinglish) but report the user-facing label,
         # so a pre-fix Hindi-flavoured Hinglish copy no longer shows as available.
         clang = _cache_lang(lang)
-        fs_id = _fs_doc_id(video_id, mode, clang, num_q, cache_style) if cache_style \
-            else _fs_doc_id(video_id, mode, clang, num_q)
+        parts = _text_cache_key_parts(video_id, mode, clang, num_q, style, requirements)
+        fs_id = _fs_doc_id(*parts)
         try:
             # Firestore is only the fast index. Also detect a B2 body whose index
             # write failed, otherwise a successfully saved note stays invisible
