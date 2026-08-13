@@ -12,15 +12,15 @@
    backend so keys/allowlists never reach the browser):
      - Multiple named conversation threads (sidebar), not just one chat
      - Streaming replies (SSE), falling back to a blocking request on failure
-     - Model picker — every currently-configured provider/model, automatically
+     - Provider + model pickers — every currently-configured provider/model,
+       with OmniRoute upstream providers grouped separately
      - Web search toggle (auto / on / off) — reuses the tutor's search chain
      - File upload (.txt/.md/.pdf) — per-thread RAG over the student's own
        files via note_chunks' sibling table (ai_chat_chunks)
      - Persona / custom system prompt, saved per thread
      - Copy message / export whole thread as Markdown
-     - Image generation — auto-detected from any configured Gemini model
-       whose name signals native image output (e.g. gemini-3.1-flash-image);
-       no third-party API, no separate admin toggle
+     - Image generation — dedicated provider/model controls plus automatic
+       routing of explicit image requests to an image-capable model
 
    Self-injecting (same pattern as js/tabs/profile.js): creates #page-ai-chat
    and a #nav-ai-chat tab so app.html needs no markup changes. The nav tab
@@ -94,7 +94,7 @@
   function ensureThread() {
     var list = loadThreads();
     if (list.length) return list[0];
-    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', web: 'auto', createdAt: Date.now() };
+    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', createdAt: Date.now() };
     saveThreads([t]);
     return t;
   }
@@ -195,7 +195,8 @@
     '    <div class="aic-head">',
     '      <h2>\uD83E\uDD16 AI Chat</h2>',
     '      <div class="aic-head-controls">',
-    '        <select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="Model"></select>',
+    '        <select class="aic-select" id="aic-provider-select" onchange="aicProviderChanged()" title="AI provider"></select>',
+    '        <select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="AI model"></select>',
     '        <button class="aic-chip-btn" id="aic-web-btn" onclick="aicCycleWeb()" title="Web search">\uD83C\uDF10 Auto</button>',
     '        <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">\uD83C\uDFAD Persona</button>',
     '        <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">\uD83C\uDFA8 Image</button>',
@@ -209,7 +210,8 @@
     '    <div class="aic-image-box" id="aic-image-box" style="display:none;">',
     '      <div class="aic-image-label"><span>Generate an image</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseImageBox()">\u2715 Close</button></div>',
     '      <div class="aic-image-row">',
-    '        <select class="aic-select" id="aic-image-model-select" title="Image model" style="max-width:none;"></select>',
+    '        <select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider" style="max-width:none;"></select>',
+    '        <select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model" style="max-width:none;"></select>',
     '        <input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe the image…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();aicGenerateImage();}">',
     '        <button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button>',
     '      </div>',
@@ -311,7 +313,7 @@
   }
 
   window.aicNewThread = function () {
-    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', web: 'auto', createdAt: Date.now() };
+    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', createdAt: Date.now() };
     upsertThread(t);
     setCurrentThread(t.id);
   };
@@ -324,17 +326,86 @@
     setCurrentThread(list[0].id);
   };
 
-  /* ── model picker ── */
-  function renderModelSelect() {
-    var sel = document.getElementById('aic-model-select');
-    if (!sel || !_statusCache) return;
-    var models = _statusCache.models || [];
-    var thread = getThread(currentThreadId());
-    var current = (thread && thread.model) || (models[0] && models[0].key) || '';
-    sel.innerHTML = models.length
-      ? models.map(function (m) { return '<option value="' + escAttr(m.key) + '"' + (m.key === current ? ' selected' : '') + '>' + esc(m.label) + '</option>'; }).join('')
-      : '<option value="">No model configured</option>';
+  /* ── dependent provider + model pickers ── */
+  function catalogGroups(groupField, flatField) {
+    var groups = (_statusCache && _statusCache[groupField]) || [];
+    if (groups.length) return groups;
+
+    // Backward compatibility while static assets and backend roll out at
+    // slightly different times: old status responses only had a flat list.
+    var fallback = [], byProvider = {};
+    (((_statusCache && _statusCache[flatField]) || [])).forEach(function (m) {
+      var keyParts = String(m.key || '').split('::');
+      var provider = keyParts[0] || 'provider';
+      var rawModel = keyParts.slice(1).join('::');
+      var groupKey = provider, subprovider = null;
+      var parts = String(m.label || '').split(' — ');
+      var groupLabel = parts[0] || provider;
+      var modelLabel = String(m.label || '').replace(/^.*? — /, '');
+      if (provider === 'omniroute') {
+        subprovider = rawModel.indexOf('/') === -1 ? 'auto' : rawModel.split('/', 1)[0];
+        groupKey = 'omniroute:' + subprovider;
+        groupLabel = 'OmniRoute — ' + (subprovider === 'auto' ? 'Auto (smart routing)' : subprovider.replace(/-/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }));
+        modelLabel = rawModel.indexOf('/') === -1 ? 'Auto' : rawModel.slice(rawModel.indexOf('/') + 1);
+      }
+      var group = byProvider[groupKey];
+      if (!group) {
+        group = { key: groupKey, label: groupLabel, provider: provider, subprovider: subprovider, models: [] };
+        byProvider[groupKey] = group;
+        fallback.push(group);
+      }
+      group.models.push({ key: m.key, label: modelLabel, model: rawModel });
+    });
+    return fallback;
   }
+
+  function groupForModel(groups, modelKey) {
+    for (var i = 0; i < groups.length; i += 1) {
+      if ((groups[i].models || []).some(function (m) { return m.key === modelKey; })) return groups[i];
+    }
+    return groups[0] || null;
+  }
+
+  function renderDependentSelects(providerId, modelId, groups, currentModel) {
+    var providerSel = document.getElementById(providerId);
+    var modelSel = document.getElementById(modelId);
+    if (!providerSel || !modelSel) return '';
+    var group = groupForModel(groups, currentModel);
+    providerSel.innerHTML = groups.length
+      ? groups.map(function (g) { return '<option value="' + escAttr(g.key) + '"' + (group && g.key === group.key ? ' selected' : '') + '>' + esc(g.label) + '</option>'; }).join('')
+      : '<option value="">No provider configured</option>';
+    var models = (group && group.models) || [];
+    var selected = models.some(function (m) { return m.key === currentModel; }) ? currentModel : ((models[0] && models[0].key) || '');
+    modelSel.innerHTML = models.length
+      ? models.map(function (m) { return '<option value="' + escAttr(m.key) + '"' + (m.key === selected ? ' selected' : '') + '>' + esc(m.label) + '</option>'; }).join('')
+      : '<option value="">No model configured</option>';
+    return selected;
+  }
+
+  function renderModelsForProvider(providerId, modelId, groups) {
+    var providerSel = document.getElementById(providerId);
+    var modelSel = document.getElementById(modelId);
+    if (!providerSel || !modelSel) return '';
+    var group = groups.find(function (g) { return g.key === providerSel.value; }) || groups[0];
+    var models = (group && group.models) || [];
+    modelSel.innerHTML = models.length
+      ? models.map(function (m, i) { return '<option value="' + escAttr(m.key) + '"' + (i === 0 ? ' selected' : '') + '>' + esc(m.label) + '</option>'; }).join('')
+      : '<option value="">No model configured</option>';
+    return (models[0] && models[0].key) || '';
+  }
+
+  function renderModelSelect() {
+    if (!_statusCache) return;
+    var groups = catalogGroups('providerGroups', 'models');
+    var thread = getThread(currentThreadId());
+    renderDependentSelects('aic-provider-select', 'aic-model-select', groups, (thread && thread.model) || '');
+  }
+  window.aicProviderChanged = function () {
+    var groups = catalogGroups('providerGroups', 'models');
+    var selected = renderModelsForProvider('aic-provider-select', 'aic-model-select', groups);
+    var t = getThread(currentThreadId());
+    if (t) { t.model = selected; upsertThread(t); }
+  };
   window.aicModelChanged = function () {
     var sel = document.getElementById('aic-model-select');
     var t = getThread(currentThreadId());
@@ -471,25 +542,33 @@
     if (_filePollTimer) { clearInterval(_filePollTimer); _filePollTimer = null; }
   }
 
-  /* ── image generation: one box to pick the model, another for the prompt ──
-     Every image-capable model the admin has configured (any provider whose
-     model name signals native image output, e.g. Gemini's
-     gemini-3.1-flash-image) shows up in the model dropdown — the student
-     explicitly picks which one to use rather than the app guessing. ── */
+  /* ── image generation: separate provider, model, and prompt controls ──
+     Every image-capable model the admin has configured is grouped under its
+     provider. OmniRoute's own upstream prefixes appear as separate providers,
+     while the full opaque model key is still sent to backend validation. ── */
   function renderImageModelSelect() {
-    var sel = document.getElementById('aic-image-model-select');
-    if (!sel) return;
-    var models = (_statusCache && _statusCache.imageModels) || [];
-    sel.innerHTML = models.length
-      ? models.map(function (m, i) { return '<option value="' + escAttr(m.key) + '"' + (i === 0 ? ' selected' : '') + '>' + esc(m.label) + '</option>'; }).join('')
-      : '<option value="">No image model configured</option>';
+    var groups = catalogGroups('imageProviderGroups', 'imageModels');
+    var thread = getThread(currentThreadId());
+    return renderDependentSelects('aic-image-provider-select', 'aic-image-model-select', groups, (thread && thread.imageModel) || '');
   }
+
+  window.aicImageProviderChanged = function () {
+    var groups = catalogGroups('imageProviderGroups', 'imageModels');
+    var selected = renderModelsForProvider('aic-image-provider-select', 'aic-image-model-select', groups);
+    var t = getThread(currentThreadId());
+    if (t) { t.imageModel = selected; upsertThread(t); }
+  };
+  window.aicImageModelChanged = function () {
+    var sel = document.getElementById('aic-image-model-select');
+    var t = getThread(currentThreadId());
+    if (t && sel) { t.imageModel = sel.value; upsertThread(t); }
+  };
 
   window.aicToggleImageBox = function () {
     var box = document.getElementById('aic-image-box');
     if (!box) return;
     var models = (_statusCache && _statusCache.imageModels) || [];
-    if (!models.length) { toast('Image generation is not configured yet — ask an admin to add a Gemini image model.'); return; }
+    if (!models.length) { toast('Image generation is not configured yet — ask an admin to add an image-capable provider/model.'); return; }
     var showing = box.style.display !== 'none';
     if (showing) { box.style.display = 'none'; return; }
     renderImageModelSelect();
@@ -502,48 +581,94 @@
     if (box) box.style.display = 'none';
   };
 
-  window.aicGenerateImage = function () {
-    var modelSel = document.getElementById('aic-image-model-select');
-    var promptInput = document.getElementById('aic-image-prompt-input');
-    var modelKey = modelSel ? modelSel.value : '';
-    var prompt = ((promptInput && promptInput.value) || '').trim();
-    if (!modelKey) { toast('No image model configured.'); return; }
-    if (!prompt) { toast('Describe what image to generate.'); return; }
+  function imageSelection(thread) {
+    var groups = catalogGroups('imageProviderGroups', 'imageModels');
+    var group = groupForModel(groups, (thread && thread.imageModel) || '');
+    var models = (group && group.models) || [];
+    var model = models.find(function (m) { return thread && m.key === thread.imageModel; }) || models[0];
+    if (!group || !model) return null;
+    return { key: model.key, label: group.label + ' / ' + model.label };
+  }
 
-    var t = getThread(currentThreadId());
-    if (!t) return;
-    var modelLabel = modelSel && modelSel.options[modelSel.selectedIndex] ? modelSel.options[modelSel.selectedIndex].text : '';
-    t.messages.push({ role: 'user', content: '\uD83C\uDFA8 [' + modelLabel + '] ' + prompt });
-    upsertThread(t);
-    if (promptInput) promptInput.value = '';
+  function isImageIntent(text) {
+    var q = String(text || '').trim().toLowerCase();
+    if (!q) return false;
+    var noun = '(?:images?|pictures?|photos?|illustrations?|posters?|logos?|wallpapers?|artworks?|graphics?|thumbnails?|avatars?|icons?|diagrams?|paintings?)';
+    var verb = '(?:generate|create|draw|make|design|render|paint|produce)';
+
+    // Keep requests where an existing image is the topic/input in normal chat.
+    // Only direct, object-focused visual creation requests switch endpoints.
+    if (/\b(?:draw|make)\s+conclusions?\b/.test(q)) return false;
+    if (/\b(?:explain|teach|tutorial|steps?|how\s+to)\b[\s\S]{0,60}\b(?:generate|create|draw|make|design|render)\b/.test(q)) return false;
+    var textOutput = new RegExp('\\b' + verb + '\\s+[\\s\\S]{0,60}\\b(?:caption|description|alt\\s+text|prompt|story|essay|article|explanation|code|website|app|component|carousel|gallery|database|storage|analysis|classification|compression|processing|recognition)\\b[\\s\\S]{0,40}\\b' + noun + '\\b');
+    var visualTopic = new RegExp('\\b' + noun + '\\s+(?:carousel|gallery|component|element|tag|storage|compression|processing|recognition|classification)\\b');
+    var codeTechnique = new RegExp('\\b' + noun + '\\s+(?:in|with|using)\\s+(?:css|html|javascript|code|canvas)\\b');
+    if (textOutput.test(q) || visualTopic.test(q) || codeTechnique.test(q)) return false;
+
+    var directCommand = new RegExp('^(?:(?:please|kindly)\\s+|(?:can|could|would|will)\\s+you\\s+)*' + verb + '\\s+(?:(?:me|us)\\s+)?(?:(?:an?|the|some)\\s+)?(?:[a-z0-9-]+\\s+){0,5}' + noun + '\\b');
+    var wantGenerated = new RegExp('^(?:i\\s+)?(?:want|need)\\s+(?:you\\s+to\\s+)?' + verb + '\\s+(?:(?:me|us)\\s+)?(?:(?:an?|the|some)\\s+)?(?:[a-z0-9-]+\\s+){0,5}' + noun + '\\b');
+    var wantImage = new RegExp('^(?:i\\s+)?(?:want|need)\\s+(?:an?\\s+)?' + noun + '\\s+(?:of|showing|depicting|for)\\b');
+    var giveMe = new RegExp('^(?:(?:please|kindly)\\s+)?(?:give|show)\\s+me\\s+(?:an?\\s+)?' + noun + '\\b');
+    var nounFirst = new RegExp('^' + noun + '\\s+' + verb + '(?:\\s+karo)?\\b');
+    var transform = new RegExp('\\b(?:turn|convert|transform)\\b[\\s\\S]{0,80}\\binto\\s+(?:an?\\s+)?' + noun + '\\b');
+    return directCommand.test(q) || wantGenerated.test(q) || wantImage.test(q) || giveMe.test(q) || nounFirst.test(q) || transform.test(q) || /^text[- ]to[- ]image\s*:/i.test(q);
+  }
+
+  function requestGeneratedImage(thread, prompt, userContent) {
+    var selected = imageSelection(thread);
+    if (!selected) return Promise.reject(new Error('No image-capable provider/model is configured. Ask an admin to add one in AI Study.'));
+
+    if (!thread.messages.length) thread.title = threadTitleFromFirstMessage(prompt);
+    thread.imageModel = selected.key;
+    thread.messages.push({ role: 'user', content: userContent || prompt });
+    upsertThread(thread);
+    renderThreadList();
     renderLog();
+
     var log = document.getElementById('aic-log');
     var typing = document.createElement('div');
     typing.className = 'aic-typing';
-    typing.id = 'aic-image-typing';
-    typing.textContent = 'Generating image with ' + modelLabel + '…';
+    typing.textContent = 'Generating image with ' + selected.label + '…';
     if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
 
-    backendAuthFetch('/api/ai-chat/image', {
+    return backendAuthFetch('/api/ai-chat/image', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt, model: modelKey })
+      body: JSON.stringify({ prompt: prompt, model: selected.key })
     }).then(function (r) {
-      if (!r.ok) return r.json().then(function (j) { throw new Error((j && (j.detail || j.error)) || 'Image generation failed'); });
+      if (!r.ok) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          throw new Error((j && (j.detail || j.error)) || 'Image generation failed');
+        });
+      }
       return r.blob();
     }).then(function (blob) {
-      var url = URL.createObjectURL(blob);
-      var cur = getThread(currentThreadId());
+      var cur = getThread(thread.id);
       if (!cur) return;
-      cur.messages.push({ role: 'assistant', content: '', imageUrl: url });
+      cur.messages.push({ role: 'assistant', content: '', imageUrl: URL.createObjectURL(blob) });
       upsertThread(cur);
-      renderLog();
+      if (currentThreadId() === thread.id) renderLog();
     }).catch(function (e) {
-      var cur = getThread(currentThreadId());
+      var cur = getThread(thread.id);
       if (!cur) return;
       cur.messages.push({ role: 'error', content: '\u26a0\uFE0F ' + (e.message || 'Image generation failed') });
       upsertThread(cur);
-      renderLog();
+      if (currentThreadId() === thread.id) renderLog();
     });
+  }
+
+  window.aicGenerateImage = function () {
+    if (_sending) return;
+    var promptInput = document.getElementById('aic-image-prompt-input');
+    var prompt = ((promptInput && promptInput.value) || '').trim();
+    if (!prompt) { toast('Describe what image to generate.'); return; }
+
+    var t = getThread(currentThreadId());
+    var selected = imageSelection(t);
+    if (!t || !selected) { toast('No image-capable provider/model is configured.', 'error'); return; }
+    if (promptInput) promptInput.value = '';
+    setSending(true);
+    requestGeneratedImage(t, prompt, '\uD83C\uDFA8 [' + selected.label + '] ' + prompt)
+      .finally(function () { setSending(false); });
   };
 
   /* ── rendering ── */
@@ -606,10 +731,30 @@
 
     var t = getThread(currentThreadId());
     if (!t) return;
+
+    // Explicit image requests bypass text chat entirely. This prevents a text
+    // model from replying that it cannot create images and automatically uses
+    // the thread's selected image model (or the first configured image model).
+    if (isImageIntent(q)) {
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      if (!imageSelection(t)) {
+        if (!t.messages.length) t.title = threadTitleFromFirstMessage(q);
+        t.messages.push({ role: 'user', content: q });
+        t.messages.push({ role: 'error', content: '\u26a0\uFE0F No image-capable provider/model is configured. Ask an admin to add one in AI Study.' });
+        upsertThread(t);
+        renderThreadList();
+        renderLog();
+        toast('No image-capable provider/model is configured.', 'error');
+        return;
+      }
+      setSending(true);
+      requestGeneratedImage(t, q, q).finally(function () { setSending(false); });
+      return;
+    }
+
     if (!t.messages.length) t.title = threadTitleFromFirstMessage(q);
     t.messages.push({ role: 'user', content: q });
-    var assistantMsg = { role: 'assistant', content: '' };
-    t.messages.push(assistantMsg);
+    t.messages.push({ role: 'assistant', content: '' });
     upsertThread(t);
     renderThreadList();
     renderLog();
@@ -629,6 +774,7 @@
     var acc = '', gotChunk = false, settled = false;
 
     function paint() {
+      if (currentThreadId() !== t.id) return;
       var log = document.getElementById('aic-log');
       var row = log && log.lastElementChild;
       if (row) {
@@ -641,9 +787,14 @@
     function finishSuccess() {
       if (settled) return;
       settled = true;
-      assistantMsg.content = acc;
-      upsertThread(t);
-      renderLog();
+      var cur = getThread(t.id);
+      if (cur) {
+        var last = cur.messages[cur.messages.length - 1];
+        if (last && last.role === 'assistant' && !last.content) last.content = acc;
+        else cur.messages.push({ role: 'assistant', content: acc });
+        upsertThread(cur);
+        if (currentThreadId() === t.id) renderLog();
+      }
       setSending(false);
     }
     function fallbackToBlocking() {
@@ -666,14 +817,14 @@
             cur.messages.push({ role: 'error', content: '\u26a0\uFE0F ' + msg });
           }
           upsertThread(cur);
-          renderLog();
+          if (currentThreadId() === t.id) renderLog();
         })
         .catch(function () {
           var cur = getThread(t.id);
           if (!cur) return;
           cur.messages.push({ role: 'error', content: '\u26a0\uFE0F Network error — check your connection and try again.' });
           upsertThread(cur);
-          renderLog();
+          if (currentThreadId() === t.id) renderLog();
         })
         .finally(function () { setSending(false); });
     }
