@@ -292,8 +292,8 @@
     <div class="row">
       <label class="print-layout" for="print-layout">PDF test layout
         <select id="print-layout" aria-label="PDF test layout">
-          <option value="author">AI document layout</option>
-          <option value="a4-columns" selected>App A4 · 2 columns</option>
+          <option value="author" selected>AI document layout</option>
+          <option value="a4-columns">A4 · 2-column reflow test</option>
         </select>
       </label>
       <button class="btn-sec" id="print">📄 Print / PDF</button>
@@ -301,9 +301,10 @@
       <button class="btn-sec" id="invert" aria-pressed="false" title="Invert colours — dark paper, light ink, easier at night">◐ Night reading</button>
       <button class="btn-sec" id="viewsrc">&lt;/&gt; View source</button>
     </div>
-    <p class="note">Use <b>App A4 · 2 columns</b> to preview and print the app notebook geometry:
+    <p class="note">Night reading filters only this preview — exactly like the app’s Focus reader — and never changes the PDF.
+      <b>A4 · 2-column reflow test</b> is an opt-in comparison of the standard-notes geometry:
       A4 paper, 5 mm × 3 mm margins, an 8 mm gutter, continuous columns and safe heading breaks.
-      It is a comparison mode only; the raw AI document and Save .html file stay unchanged.</p>
+      Normal AI HTML notes use their author-defined layout; the raw AI document and Save .html file stay unchanged.</p>
 
     <div class="stage" id="stage" style="margin-top:12px">
       <div class="placeholder">Pick a sample above, or generate from a video.</div>
@@ -357,20 +358,24 @@
     var button = $('invert');
     button.classList.toggle('on', on);
     button.setAttribute('aria-pressed', on ? 'true' : 'false');
-    button.textContent = on ? '◐ Paper reading' : '◐ Night reading';
+    button.textContent = on ? '◐ Paper reading' : '◐ Focus night reading';
   }
   var PRINT_LAYOUT_KEY = 'aiHtmlNotesDemoPrintLayout';
   function restorePrintLayout() {
-    var choice = readSetting(PRINT_LAYOUT_KEY, 'a4-columns');
-    $('print-layout').value = choice === 'author' ? 'author' : 'a4-columns';
+    var choice = readSetting(PRINT_LAYOUT_KEY, 'author');
+    $('print-layout').value = choice === 'a4-columns' ? 'a4-columns' : 'author';
   }
   function usesA4Columns() { return $('print-layout').value === 'a4-columns'; }
-  function hasPageFragments(doc) {
-    return /<body\b/i.test(String(doc || '')) &&
-      /\bclass\s*=\s*(["'])[^"']*\bpage\b[^"']*\1/i.test(String(doc || ''));
+  function hasDirectPageFragments(doc) {
+    try {
+      var parsed = new DOMParser().parseFromString(String(doc || ''), 'text/html');
+      return !!Array.prototype.some.call(parsed.body.children, function (node) {
+        return node.classList && node.classList.contains('page');
+      });
+    } catch (e) { return false; }
   }
   function layoutSuffix(doc) {
-    return usesA4Columns() && hasPageFragments(doc) ? ' · A4 / 2-column test' : '';
+    return usesA4Columns() && hasDirectPageFragments(doc) ? ' · A4 / 2-column test' : '';
   }
   function restoreLanguage() {
     var saved = readSetting('aiStudyLang', '');
@@ -451,30 +456,43 @@
     return at === -1 ? html + tag : html.slice(0, at) + tag + html.slice(at);
   }
 
-  /* Comparison-only overlay. The standard app notebook exporter owns the
-     Markdown DOM and applies this exact paper geometry through nbPdfCss().
-     HTML notes are authored documents, so the demo injects this only into a
-     disposable reader/print copy: docNow and Save .html remain untouched. */
+  /* Comparison-only overlay. The app prints ordinary Markdown notes by placing
+     one continuous `.pdf-nb` flow into two A4 columns. HTML notes are authored
+     documents, so this test applies that *single-root* geometry only to a
+     disposable reader/print copy. It never changes docNow or Save .html. */
   function a4ColumnsStyle() {
     return '<style data-demo-a4-columns>' +
-      'body[data-demo-a4-columns="1"]{margin:0;padding:12mm 0;background:#e8edf2}' +
-      'body[data-demo-a4-columns="1"] .page{width:210mm;max-width:calc(100% - 18px);min-height:297mm;margin:0 auto 12mm;column-count:2;column-gap:8mm;column-fill:auto;break-inside:auto;page-break-inside:auto}' +
-      'body[data-demo-a4-columns="1"] .page h1,body[data-demo-a4-columns="1"] .page h2,body[data-demo-a4-columns="1"] .page h3,body[data-demo-a4-columns="1"] .page h4,body[data-demo-a4-columns="1"] .page .h-topic,body[data-demo-a4-columns="1"] .page .h-sub{break-after:avoid;page-break-after:avoid}' +
-      'body[data-demo-a4-columns="1"] .page figure,body[data-demo-a4-columns="1"] .page .callout,body[data-demo-a4-columns="1"] .page .formula,body[data-demo-a4-columns="1"] .page .quiz,body[data-demo-a4-columns="1"] .page .q-card{break-inside:avoid;page-break-inside:avoid}' +
-      'body[data-demo-a4-columns="1"] .page table,body[data-demo-a4-columns="1"] .page .factbox{break-inside:auto;page-break-inside:auto}' +
-      'body[data-demo-a4-columns="1"] .page thead{display:table-header-group}' +
-      'body[data-demo-a4-columns="1"] .page tbody tr{break-inside:avoid;page-break-inside:avoid}' +
-      '@media print{@page{size:A4;margin:5mm 3mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}html{font-size:16px}body[data-demo-a4-columns="1"]{margin:0;padding:0;background:#fff}body[data-demo-a4-columns="1"] .page{width:auto;max-width:none;min-height:0;margin:0 0 4mm;column-count:2;column-gap:8mm;column-fill:auto;break-inside:auto;page-break-inside:auto}}' +
+      'body[data-demo-a4-columns="1"]{width:210mm;max-width:calc(100% - 18px);margin:12mm auto;padding:9mm;background:#fff;column-count:2;column-gap:8mm;column-fill:balance}' +
+      'body[data-demo-a4-columns="1"] > .page{position:static!important;width:auto!important;max-width:none!important;min-height:0!important;margin:0 0 7pt!important;box-shadow:none!important;break-inside:auto!important;page-break-inside:auto!important}' +
+      'body[data-demo-a4-columns="1"] > .page::before,body[data-demo-a4-columns="1"] > .page::after{display:none!important}' +
+      'body[data-demo-a4-columns="1"] > .page h1,body[data-demo-a4-columns="1"] > .page h2,body[data-demo-a4-columns="1"] > .page h3,body[data-demo-a4-columns="1"] > .page h4,body[data-demo-a4-columns="1"] > .page .h-topic,body[data-demo-a4-columns="1"] > .page .h-sub{break-after:avoid;page-break-after:avoid}' +
+      'body[data-demo-a4-columns="1"] > .page figure,body[data-demo-a4-columns="1"] > .page .callout,body[data-demo-a4-columns="1"] > .page .formula,body[data-demo-a4-columns="1"] > .page .quiz,body[data-demo-a4-columns="1"] > .page .q-card{break-inside:avoid;page-break-inside:avoid}' +
+      'body[data-demo-a4-columns="1"] > .page table,body[data-demo-a4-columns="1"] > .page .factbox{break-inside:auto;page-break-inside:auto}' +
+      'body[data-demo-a4-columns="1"] > .page thead{display:table-header-group}' +
+      'body[data-demo-a4-columns="1"] > .page tbody tr{break-inside:avoid;page-break-inside:avoid}' +
+      '@media print{@page{size:A4;margin:5mm 3mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}html{font-size:16px}body[data-demo-a4-columns="1"]{width:auto;max-width:none;margin:0;padding:0;background:#fff;column-count:2;column-gap:8mm;column-fill:auto}body[data-demo-a4-columns="1"] > .page{margin:0 0 7pt!important}}' +
       '</style>';
   }
   function documentForSelectedLayout(doc) {
     var html = String(doc || '');
-    if (!usesA4Columns() || !hasPageFragments(html)) return html;
+    if (!usesA4Columns() || !hasDirectPageFragments(html)) return html;
     html = html.replace(/<body\b([^>]*)>/i, function (whole, attrs) {
       return '<body' + attrs + ' data-demo-a4-columns="1">';
     });
     var at = html.toLowerCase().lastIndexOf('</head>');
     return at === -1 ? a4ColumnsStyle() + html : html.slice(0, at) + a4ColumnsStyle() + html.slice(at);
+  }
+  function printTitle(doc) {
+    try {
+      var parsed = new DOMParser().parseFromString(String(doc || ''), 'text/html');
+      return (parsed.title || 'AI-designed study notes').trim();
+    } catch (e) { return 'AI-designed study notes'; }
+  }
+  function withPrintTitle(doc, title) {
+    var html = String(doc || '');
+    var safe = esc(title || 'AI-designed study notes');
+    if (/<title>[\s\S]*?<\/title>/i.test(html)) return html.replace(/<title>[\s\S]*?<\/title>/i, '<title>' + safe + '</title>');
+    return html.replace(/<head\b([^>]*)>/i, '<head$1><title>' + safe + '</title>');
   }
 
   /* ── parent side ─────────────────────────────────────────────────── */
@@ -613,25 +631,25 @@
   $('print-layout').addEventListener('change', function () {
     writeSetting(PRINT_LAYOUT_KEY, this.value);
     if (!docNow) return;
-    if (usesA4Columns() && !hasPageFragments(docNow)) {
-      setStatus('⚠️ This document has no <code>.page</code> fragments, so it stays in its AI print layout.', true);
+    if (usesA4Columns() && !hasDirectPageFragments(docNow)) {
+      setStatus('⚠️ A4 reflow needs direct <code>&lt;body&gt; &gt; .page</code> fragments. This document stays in its author layout.', true);
       return;
     }
     mount(docNow, noteLabel);
     setStatus(usesA4Columns()
-      ? '🔬 Showing the app A4 / 2-column comparison layout. The source and saved HTML are unchanged.'
+      ? '🔬 Showing the A4 / 2-column reflow test. The source and saved HTML are unchanged.'
       : '↩️ Restored the AI document’s original layout.');
   });
   function printCurrentNote() {
     if (!docNow) return;
-    if (usesA4Columns() && !hasPageFragments(docNow)) {
-      setStatus('⚠️ App A4 · 2 columns needs the HTML-notes <code>.page</code> contract. This document keeps its own print layout.', true);
+    if (usesA4Columns() && !hasDirectPageFragments(docNow)) {
+      setStatus('⚠️ A4 reflow needs direct <code>&lt;body&gt; &gt; .page</code> fragments. This document keeps its author print layout.', true);
       return;
     }
     // Print a completed standalone document, never the sandbox frame. In test
     // mode only, a disposable copy adds the app notebook's A4 geometry; the
     // saved document and the normal AI-document option are never modified.
-    var printable = documentForSelectedLayout(docNow);
+    var printable = withPrintTitle(documentForSelectedLayout(docNow), printTitle(docNow));
     var w = window.open('', '_blank');
     if (!w) { setStatus('⚠️ Allow pop-ups to use Print / PDF.', true); return; }
     var printed = false;
@@ -641,16 +659,15 @@
       try { w.focus(); w.print(); }
       catch (e) { setStatus('⚠️ The print window opened, but the browser could not start printing.', true); }
     }
-    w.addEventListener('load', function () { setTimeout(printWhenReady, 120); }, { once: true });
     w.document.open();
     w.document.write(printable);
     w.document.close();
-    // A document without external resources can finish before the listener is
-    // observed; the fallback still gives print CSS and hosted fonts time to settle.
-    setTimeout(printWhenReady, 1200);
+    // Match htmlNotePrint(): author CSS/fonts settle before the browser opens
+    // its dialog. Night Reading filters only #stage, never this print window.
+    setTimeout(printWhenReady, 800);
     setStatus(usesA4Columns()
-      ? '🖨️ Opening the app A4 / 2-column test layout. Choose “Save to PDF” in the print dialog.'
-      : '🖨️ Opening the AI document’s print layout. Choose “Save to PDF” in the print dialog.');
+      ? '🖨️ Opening the A4 / 2-column reflow test. Choose “Save to PDF” in the print dialog.'
+      : '🖨️ Opening the AI document’s author print layout. Choose “Save to PDF” in the print dialog.');
   }
   $('print').onclick = printCurrentNote;
   $('save').onclick = function () {
