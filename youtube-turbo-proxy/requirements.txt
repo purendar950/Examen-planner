@@ -13,5 +13,8 @@ firebase-admin>=6.5.0
 # BODIES — keeps big notes out of Firestore's 1 MiB/doc limit. Optional: without
 # the S3_* env vars the backend transparently falls back to Firestore-only.
 boto3>=1.34.0
+# PDF text extraction for the AI Chat tab's file-upload RAG feature (.pdf
+# uploads only — .txt/.md are read directly, no dependency needed for those).
+pypdf>=4.2.0
 # bgutil PO-token plugin is installed from the same git clone as the POT server
 # (see Dockerfile) so the plugin and server versions always match.
