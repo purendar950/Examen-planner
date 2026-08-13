@@ -24,9 +24,10 @@ let REPORTS = [], REPORTS_LOADED = false, REPORTS_FILTER = 'open', REP_EDITING =
    read by youtube-turbo-proxy to rate-limit /api/study + /api/tutor. */
 let AI_LIMITS = { unlimited: {}, unlimitedEmails: [], focusUsers: {}, focusEmails: [], studyPerHour: 15, tutorPerHour: 20, tutorPerDay: 80, loaded: false };
 /* AI Chat tab access policy (Firestore config/aiChat) — a standalone chat page,
-   allowlisted per-user (or admins), locked to one admin-chosen provider/model.
-   Separate from AI_CONFIG's Study AI routing above; never widens/narrows it. */
-let AI_CHAT_CONFIG = { allowedUsers: {}, allowedEmails: [], models: [], imageEnabled: false, loaded: false };
+   allowlisted per-user (or admins). Selectable models and image generation are
+   both auto-derived from the Study AI provider portfolio (AI_CONFIG) — this
+   doc only stores WHO is allowed in, nothing about which models. */
+let AI_CHAT_CONFIG = { allowedUsers: {}, allowedEmails: [], loaded: false };
 /* AI auto-schedule (Groq) config — stored in Firestore config/ai, read by the
    Telegram bot server to parse incoming messages into planner tasks. */
 let AI_CONFIG = { groqApiKey: '', model: 'llama-3.1-8b-instant', enabled: false, loaded: false };

@@ -2,22 +2,25 @@
    AI CHAT TAB — a standalone chat page, separate from the video-grounded
    AI Tutor in the YouTube tab. Hidden by default; only shown once the backend
    confirms (via /api/ai-chat/status) that an admin has granted this account
-   access. Talks to the ADMIN-CURATED model(s) the account is allowed to use
-   (config/aiChat) — the browser never sees provider API keys; every answer is
-   proxied through youtube-turbo-proxy's /api/ai-chat[/stream], which resolves
-   the chosen model server-side via _load_ai_config(prefer_provider=...).
+   access (config/aiChat.allowedUsers). Once granted, the account automatically
+   sees EVERY provider/model already configured in the AI Study panel — there
+   is no separate model curation for this feature, and no key ever reaches the
+   browser; every answer is proxied through youtube-turbo-proxy's
+   /api/ai-chat[/stream], which resolves the chosen model server-side.
 
    Features (all native — no external app, everything routes through this
    backend so keys/allowlists never reach the browser):
      - Multiple named conversation threads (sidebar), not just one chat
      - Streaming replies (SSE), falling back to a blocking request on failure
-     - Model picker — only models the admin curated for THIS feature
+     - Model picker — every currently-configured provider/model, automatically
      - Web search toggle (auto / on / off) — reuses the tutor's search chain
      - File upload (.txt/.md/.pdf) — per-thread RAG over the student's own
        files via note_chunks' sibling table (ai_chat_chunks)
      - Persona / custom system prompt, saved per thread
      - Copy message / export whole thread as Markdown
-     - Image generation (admin-gated), via a free keyless third-party API
+     - Image generation — auto-detected from any configured Gemini model
+       whose name signals native image output (e.g. gemini-3.1-flash-image);
+       no third-party API, no separate admin toggle
 
    Self-injecting (same pattern as js/tabs/profile.js): creates #page-ai-chat
    and a #nav-ai-chat tab so app.html needs no markup changes. The nav tab
@@ -37,7 +40,7 @@
   var HISTORY_MAX = 20;      // messages kept as context sent to the backend
   var _checked = false;      // avoid re-checking /status on every page switch
   var _sending = false;
-  var _statusCache = null;   // last /api/ai-chat/status response {enabled, models, imageEnabled, ragEnabled}
+  var _statusCache = null;   // last /api/ai-chat/status response {enabled, models, imageModels, imageEnabled, ragEnabled}
   var _curThreadId = null;
   var _filePollTimer = null;
 
@@ -455,9 +458,24 @@
   }
 
   /* ── image generation ── */
+  // Auto-selects the configured Gemini image model (gemini-3.1-flash-image,
+  // etc. — whatever the admin has in the provider portfolio with an "image"
+  // marker in its name); if more than one is configured, asks which to use
+  // instead of guessing silently.
   window.aicPromptImage = function () {
+    var imageModels = (_statusCache && _statusCache.imageModels) || [];
+    if (!imageModels.length) { toast('Image generation is not configured yet.'); return; }
     var prompt = window.prompt('Describe the image to generate:');
     if (!prompt || !prompt.trim()) return;
+    var modelKey = imageModels[0].key;
+    if (imageModels.length > 1) {
+      var choice = window.prompt(
+        'Which model?\n' + imageModels.map(function (m, i) { return (i + 1) + '. ' + m.label; }).join('\n'),
+        '1'
+      );
+      var idx = parseInt(choice, 10);
+      if (idx && imageModels[idx - 1]) modelKey = imageModels[idx - 1].key;
+    }
     var t = getThread(currentThreadId());
     if (!t) return;
     t.messages.push({ role: 'user', content: '\uD83C\uDFA8 Generate image: ' + prompt.trim() });
@@ -470,7 +488,7 @@
     if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
     backendAuthFetch('/api/ai-chat/image', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt.trim() })
+      body: JSON.stringify({ prompt: prompt.trim(), model: modelKey })
     }).then(function (r) {
       if (!r.ok) return r.json().then(function (j) { throw new Error((j && (j.detail || j.error)) || 'Image generation failed'); });
       return r.blob();

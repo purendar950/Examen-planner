@@ -1680,25 +1680,25 @@ _ai_chat_cfg_cache = {"ts": 0.0, "data": None}
 
 
 def _load_ai_chat_config():
-    """Returns {allowed_users: set(uid), models: [{provider, model, label}, ...],
-    default_model_key, image_enabled}. Fails closed (empty allowlist AND empty
-    model list) if the doc is missing, unreadable, or Firestore is unavailable
-    — nobody gets access and nothing is answerable rather than everybody/anything.
+    """Returns {allowed_users: set(uid)}. Fails closed (empty allowlist) if the
+    doc is missing, unreadable, or Firestore is unavailable — nobody gets
+    access rather than everybody.
 
-    v2 schema (config/aiChat):
-      allowedUsers  : {uid: true}   — same shape as v1
+    v3 schema (config/aiChat):
+      allowedUsers  : {uid: true}
       allowedEmails : [email, ...] — display mirror only, never trusted for auth
-      models        : [{provider, model}, ...] — ADMIN-CURATED allowlist of
-                      provider/model pairs a granted user may pick from in the
-                      chat's model dropdown. Replaces v1's single provider+model
-                      fields (still read as a length-1 fallback below so an
-                      existing v1 config keeps working without a re-save).
-      imageEnabled  : bool — whether the 🎨 image-generation action is shown.
-    """
+
+    Unlike v1/v2, this doc no longer curates WHICH models are selectable —
+    every provider/model the admin has configured anywhere in the AI Study
+    panel is automatically available here too (see _ai_chat_available_models),
+    and image generation auto-picks a configured Google Gemini image model
+    (see _ai_chat_image_models). Any leftover `models`/`imageEnabled`/
+    `provider`/`model` fields from an older config are simply ignored — there
+    is nothing left to migrate."""
     now = time.time()
     if _ai_chat_cfg_cache["data"] is not None and now - _ai_chat_cfg_cache["ts"] < AI_CHAT_TTL:
         return _ai_chat_cfg_cache["data"]
-    out = {"allowed_users": set(), "models": [], "image_enabled": False}
+    out = {"allowed_users": set()}
     if _fb_db:
         try:
             doc = _fb_db.collection("config").document("aiChat").get()
@@ -1708,25 +1708,6 @@ def _load_ai_chat_config():
                 if isinstance(allowed, list):
                     allowed = {u: True for u in allowed}
                 out["allowed_users"] = {u for u, v in allowed.items() if v}
-                models = d.get("models")
-                cleaned = []
-                if isinstance(models, list):
-                    for m in models:
-                        if not isinstance(m, dict):
-                            continue
-                        pid = str(m.get("provider") or "").strip().lower()
-                        model = str(m.get("model") or "").strip()
-                        if pid in STUDY_PROVIDER_IDS and model:
-                            cleaned.append({"provider": pid, "model": model})
-                # v1 fallback: a single {provider, model} pair saved before the
-                # multi-model UI shipped. Read once so old configs keep working.
-                if not cleaned and d.get("provider") and d.get("model"):
-                    pid = str(d.get("provider") or "").strip().lower()
-                    model = str(d.get("model") or "").strip()
-                    if pid in STUDY_PROVIDER_IDS and model:
-                        cleaned.append({"provider": pid, "model": model})
-                out["models"] = cleaned
-                out["image_enabled"] = bool(d.get("imageEnabled"))
         except Exception as exc:  # noqa: BLE001
             log.warning("config/aiChat read failed: %s", exc)
     _ai_chat_cfg_cache["ts"] = now
@@ -1734,16 +1715,58 @@ def _load_ai_chat_config():
     return out
 
 
+# Raw config/ai, cached briefly and used ONLY to list which providers/models
+# are configured (studyModelGroups-style enumeration). Never used to resolve
+# keys for an outbound call — _load_ai_config() re-reads Firestore fresh for
+# that on every request, exactly like every other AI feature in this file.
+_study_raw_cfg_cache = {"ts": 0.0, "data": None}
+_STUDY_RAW_CFG_TTL = 30
+
+
+def _load_study_raw_cfg():
+    now = time.time()
+    if _study_raw_cfg_cache["data"] is not None and now - _study_raw_cfg_cache["ts"] < _STUDY_RAW_CFG_TTL:
+        return _study_raw_cfg_cache["data"]
+    cfg = {}
+    if _fb_db:
+        try:
+            doc = _fb_db.collection("config").document("ai").get()
+            if doc.exists:
+                cfg = doc.to_dict() or {}
+        except Exception as exc:  # noqa: BLE001
+            log.warning("config/ai raw read failed: %s", exc)
+    _study_raw_cfg_cache["ts"] = now
+    _study_raw_cfg_cache["data"] = cfg
+    return cfg
+
+
+def _ai_chat_available_models(cfg):
+    """Every model whose provider currently has an API key configured — the
+    exact same universe the Study AI tutor already exposes via
+    /api/status's studyModelGroups. A student in this chat can pick ANY of
+    them; there is no separate admin curation step for this feature — a
+    provider becomes selectable here the moment its key is added anywhere in
+    the AI Study panel, and disappears again if the key is removed."""
+    eff = _effective_provider_models(cfg)
+    out = []
+    for pid in STUDY_PROVIDER_IDS:
+        if not _provider_configured(cfg, pid):
+            continue
+        label = STUDY_PROVIDER_LABELS.get(pid, pid.title())
+        for model in eff.get(pid, []):
+            out.append({"provider": pid, "model": model, "label": label})
+    return out
+
+
 def _ai_chat_model_key(provider, model):
     return "%s::%s" % (provider, model)
 
 
-def _ai_chat_resolve_model(chat_cfg, requested_key):
-    """Pick which {provider, model} to answer with. `requested_key` is untrusted
-    client input (the dropdown selection) and MUST be one of the admin's curated
-    pairs — fails closed to the first configured pair otherwise, never to an
-    arbitrary provider the admin never approved for this feature."""
-    models = chat_cfg["models"]
+def _ai_chat_resolve_model(models, requested_key):
+    """Pick which {provider, model} to answer with. `requested_key` is
+    untrusted client input (the dropdown selection) and MUST be one of the
+    currently-configured models — fails closed to the first configured model
+    otherwise, never to an arbitrary/unconfigured provider."""
     if not models:
         return None
     if requested_key:
@@ -1959,44 +1982,116 @@ def _ai_chat_file_context_block(rows):
     return "\n\n".join(lines)
 
 
-# ---- AI Chat tab: image generation (keyless, no API key to manage) --------
-# Uses pollinations.ai's public, keyless, URL-based image endpoint so this
-# feature needs zero new secrets in the admin panel. The backend fetches the
-# bytes server-side (never lets the browser hit a third-party URL directly)
-# and returns them as a data URL, keeping the same "everything through our
-# proxy" pattern as every other AI feature here. Disclosed to the admin in the
-# admin panel copy since it is a new third-party dependency, unlike the chat
-# text path which only ever talks to providers the admin already configured.
-IMAGE_GEN_ENDPOINT = os.environ.get("IMAGE_GEN_ENDPOINT", "https://image.pollinations.ai/prompt/").rstrip("/") + "/"
-IMAGE_GEN_MODEL = os.environ.get("IMAGE_GEN_MODEL", "flux")
-IMAGE_GEN_TIMEOUT = int(os.environ.get("IMAGE_GEN_TIMEOUT", "90"))
+# ---- AI Chat tab: image generation (auto-selects a configured Gemini image
+# model — no third-party service, no separate key to manage) ---------------
+# Google's Gemini "Nano Banana" family generates images natively through the
+# same Interactions API used for text (see _google_interactions_url/_body
+# above), just with response_format={"type":"image"}. Whichever Gemini API
+# key the admin already entered for chat (googleApiKeys) is reused here — no
+# new credential, no new admin toggle. If the admin's model list for the
+# `google`/`google_interactions` provider includes an image-capable model
+# name (matched below), it becomes usable for image generation automatically;
+# if none is configured, image generation is simply unavailable rather than
+# falling back to an unrelated third-party API.
+IMAGE_MODEL_MARKERS = ("image", "nano-banana", "imagen")
 
 
-def _ai_chat_generate_image(prompt, width=1024, height=1024, seed=None):
-    """Returns (bytes, content_type) or (None, error_message)."""
+def _is_image_model_name(model_id):
+    lowered = (model_id or "").lower()
+    return any(marker in lowered for marker in IMAGE_MODEL_MARKERS)
+
+
+def _ai_chat_image_models(cfg):
+    """Every configured Gemini model whose name signals native image output.
+    Only the `google` provider (plain Gemini API key) is used for image
+    generation — `google_interactions` already denotes the interactions
+    transport regardless of model, so listing it separately would just
+    duplicate the same models under a second label."""
+    if not _provider_configured(cfg, "google"):
+        return []
+    eff = _effective_provider_models(cfg)
+    label = STUDY_PROVIDER_LABELS.get("google", "Google Gemini")
+    return [{"provider": "google", "model": m, "label": label}
+            for m in eff.get("google", []) if _is_image_model_name(m)]
+
+
+def _ai_chat_generate_image(cfg, model_id, prompt, aspect_ratio=None):
+    """Calls Gemini's Interactions API with response_format={"type":"image"}.
+    Returns (bytes, content_type) or (None, error_message). The API key comes
+    from _load_ai_config the same way every other call in this file resolves
+    Gemini credentials — never a client-supplied value."""
     prompt = re.sub(r"\s+", " ", str(prompt or "")).strip()[:800]
     if not prompt:
         return None, "Empty prompt."
-    import urllib.parse
-    url = IMAGE_GEN_ENDPOINT + urllib.parse.quote(prompt)
-    params = {"width": max(256, min(1536, int(width or 1024))),
-             "height": max(256, min(1536, int(height or 1024))),
-             "model": IMAGE_GEN_MODEL, "nologo": "true"}
-    if seed is not None:
+    ai = _load_ai_config(prefer_model=model_id, prefer_provider="google")
+    if not _ai_configured(ai):
+        return None, "No Gemini API key is configured for image generation."
+    keys = ai.get("keys") or ([ai["key"]] if ai.get("key") else [])
+    if not keys:
+        return None, "No Gemini API key is configured for image generation."
+
+    body = {
+        "model": model_id,
+        "input": prompt,
+        "response_format": {"type": "image"},
+    }
+    ratio = str(aspect_ratio or "").strip()
+    if re.fullmatch(r"\d{1,2}:\d{1,2}", ratio):
+        body["response_format"]["aspect_ratio"] = ratio
+
+    last_err = "Image generation failed."
+    for key in keys:
         try:
-            params["seed"] = int(seed)
-        except (TypeError, ValueError):
-            pass
-    try:
-        r = requests.get(url, params=params, timeout=IMAGE_GEN_TIMEOUT)
-        if r.status_code != 200 or not r.content:
-            return None, "Image service returned HTTP %s." % r.status_code
-        ctype = r.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
-        if not ctype.startswith("image/"):
-            return None, "Image service did not return an image."
-        return r.content, ctype
-    except requests.RequestException as exc:
-        return None, "Image service request failed: %s" % str(exc)[:150]
+            r = requests.post(
+                "https://generativelanguage.googleapis.com/v1beta/interactions",
+                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+                json=body, timeout=90,
+            )
+        except requests.RequestException as exc:
+            last_err = "Gemini request failed: %s" % str(exc)[:150]
+            continue
+        if r.status_code == 429 or r.status_code >= 500:
+            last_err = "Gemini returned HTTP %s (try again shortly)." % r.status_code
+            continue
+        if r.status_code >= 400:
+            detail = ""
+            try:
+                detail = (r.json().get("error") or {}).get("message", "")
+            except Exception:  # noqa: BLE001
+                pass
+            return None, ("Gemini rejected the request: %s" % detail[:200] if detail
+                          else "Gemini returned HTTP %s." % r.status_code)
+        try:
+            payload = r.json()
+        except ValueError:
+            return None, "Gemini returned an unreadable response."
+        image_b64, mime = _extract_gemini_image(payload)
+        if not image_b64:
+            return None, "Gemini did not return an image for this prompt — try rephrasing it."
+        try:
+            return base64.b64decode(image_b64), (mime or "image/png")
+        except Exception:  # noqa: BLE001
+            return None, "Gemini returned malformed image data."
+    return None, last_err
+
+
+def _extract_gemini_image(payload):
+    """Pulls the first {type: image} content block's (data, mime_type) out of
+    an Interactions API response. Structure per Google's docs:
+    payload['output_image'] is the convenience accessor server SDKs expose;
+    the REST response instead nests it under steps -> model_output -> content."""
+    if not isinstance(payload, dict):
+        return None, None
+    out_img = payload.get("output_image")
+    if isinstance(out_img, dict) and out_img.get("data"):
+        return out_img["data"], out_img.get("mime_type")
+    for step in payload.get("steps") or []:
+        if not isinstance(step, dict) or step.get("type") != "model_output":
+            continue
+        for block in step.get("content") or []:
+            if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
+                return block["data"], block.get("mime_type")
+    return None, None
 
 
 _ai_calls = []                   # (ts, est_tokens) within the last 60s
@@ -7641,7 +7736,7 @@ STUDY_PROVIDER_MODELS = {
     "cerebras":   ["gpt-oss-120b", "zai-glm-4.7", "gemma-4-31b"],
     "openrouter": ["nvidia/nemotron-3-ultra-550b-a55b:free", "google/gemma-4-31b-it:free"],
     "nvidia":     ["deepseek-ai/deepseek-v4-pro", "deepseek-ai/deepseek-v4-flash", "qwen/qwen3.5-397b-a17b", "nvidia/nemotron-3-nano-30b-a3b", "z-ai/glm-5.2", "minimaxai/minimax-m3"],
-    "google":     ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash"],
+    "google":     ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-3.1-flash-image", "gemini-2.5-flash-image"],
     "google_interactions": ["gemini-3.6-flash"],
     "hcnsec":     ["auto", "DeepSeek-V4-Pro", "DeepSeek-V4-Flash", "Qwen3.5-397B-A17B", "Qwen3.6-35B-A3B", "MiniMax-M3", "MiniMax-M2.7", "Kimi-K2.6", "glm-5.1"],
     "bluesminds": ["gpt-5.2-chat", "gpt-5.6-luna", "gpt-5-mini", "gpt-4o", "openai/gpt-oss-120b", "openai/gpt-oss-20b"],
@@ -11182,7 +11277,9 @@ def _ai_chat_authorize():
 @app.get("/api/ai-chat/status")
 def api_ai_chat_status():
     """Whether the AI Chat tab should be visible for the caller, and — if so —
-    which models they may pick from and whether image generation is on. No
+    every configured provider/model they may pick from (the SAME universe the
+    Study AI tutor already exposes — no separate admin curation for this
+    feature) plus which of those support native image generation. No
     Pro/entitlement check on purpose — the admin's allowlist is the sole gate
     for this feature. Model API keys never reach the browser; only labels +
     an opaque `key` string (used to select a model on later requests) do."""
@@ -11196,14 +11293,18 @@ def api_ai_chat_status():
         is_admin = False
     chat_cfg = _load_ai_chat_config()
     allowed = bool(is_admin or uid in chat_cfg["allowed_users"])
-    models = []
+    models, image_models = [], []
     if allowed:
-        for m in chat_cfg["models"]:
-            label = STUDY_PROVIDER_LABELS.get(m["provider"], m["provider"].title())
-            models.append({"key": _ai_chat_model_key(m["provider"], m["model"]),
-                           "label": "%s — %s" % (label, m["model"])})
+        raw_cfg = _load_study_raw_cfg()
+        models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
+                  "label": "%s — %s" % (m["label"], m["model"])}
+                  for m in _ai_chat_available_models(raw_cfg)]
+        image_models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
+                         "label": "%s — %s" % (m["label"], m["model"])}
+                        for m in _ai_chat_image_models(raw_cfg)]
     return jsonify({"ok": True, "enabled": allowed, "models": models,
-                    "imageEnabled": bool(allowed and chat_cfg["image_enabled"]),
+                    "imageModels": image_models,
+                    "imageEnabled": bool(allowed and image_models),
                     "ragEnabled": bool(allowed and _vec_enabled())})
 
 
@@ -11216,10 +11317,11 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
     if len(q) > 4000:
         return ({"error": "question_too_long", "detail": "Keep it under 4000 characters."}, 400), None, None, None
 
-    if not chat_cfg["models"]:
+    available = _ai_chat_available_models(_load_study_raw_cfg())
+    if not available:
         return ({"error": "ai_chat_not_configured",
-                "detail": "AI Chat has no model configured yet. Ask an admin to set one up."}, 503), None, None, None
-    picked = _ai_chat_resolve_model(chat_cfg, str(body.get("model") or "").strip())
+                "detail": "No AI provider is configured yet. Ask an admin to add a key in the AI Study panel."}, 503), None, None, None
+    picked = _ai_chat_resolve_model(available, str(body.get("model") or "").strip())
     ai = _load_ai_config(prefer_model=picked["model"], prefer_provider=picked["provider"])
     if not _ai_configured(ai):
         return ({"error": "ai_not_configured",
@@ -11391,23 +11493,28 @@ def api_ai_chat_delete_file(file_id):
 
 @app.route("/api/ai-chat/image", methods=["POST"])
 def api_ai_chat_image():
-    """Generate an image from a text prompt. Admin-gated by imageEnabled on
-    config/aiChat (separate from the model allowlist — image generation uses
-    a free third-party keyless endpoint, not one of the admin's own provider
-    keys, so it is its own on/off switch). Returns the image bytes directly
-    (not a JSON data URL) so the browser can just <img src> the response."""
-    user, chat_cfg, _is_admin, err = _ai_chat_authorize()
+    """Generate an image from a text prompt using an automatically-selected
+    (or explicitly picked, if the caller sent more than one option) configured
+    Gemini image model — no third-party service, no separate admin toggle.
+    Unavailable (503) when the admin hasn't configured a Gemini API key with
+    an image-capable model. Returns the image bytes directly (not a JSON data
+    URL) so the browser can just <img src> the response."""
+    user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
     if err:
         return jsonify(err[0]), err[1]
-    if not chat_cfg["image_enabled"]:
-        return jsonify({"error": "forbidden", "detail": "Image generation is off for this account."}), 403
+    raw_cfg = _load_study_raw_cfg()
+    image_models = _ai_chat_image_models(raw_cfg)
+    if not image_models:
+        return jsonify({"error": "image_not_configured",
+                        "detail": "No image-capable Gemini model is configured. Ask an admin to add one in the AI Study panel."}), 503
     body = request.get_json(silent=True) or {}
     prompt = str(body.get("prompt") or "").strip()
     if not prompt:
         return jsonify({"error": "missing_prompt"}), 400
+    picked = _ai_chat_resolve_model(image_models, str(body.get("model") or "").strip())
     if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_img", user["uid"], 20, 3600):
         return jsonify({"error": "rate_limited", "detail": "Too many images this hour. Try later."}), 429
-    data, result = _ai_chat_generate_image(prompt, body.get("width"), body.get("height"), body.get("seed"))
+    data, result = _ai_chat_generate_image(raw_cfg, picked["model"], prompt, body.get("aspectRatio"))
     if data is None:
         return jsonify({"error": "image_failed", "detail": result}), 502
     return Response(data, mimetype=result)
