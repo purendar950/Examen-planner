@@ -196,6 +196,7 @@
     '      <h2>\uD83E\uDD16 AI Chat</h2>',
     '      <div class="aic-head-controls">',
     '        <select class="aic-select" id="aic-provider-select" onchange="aicProviderChanged()" title="AI provider"></select>',
+    '        <select class="aic-select" id="aic-omniroute-provider-select" onchange="aicOmniRouteProviderChanged()" title="OmniRoute provider" style="display:none;"></select>',
     '        <select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="AI model"></select>',
     '        <button class="aic-chip-btn" id="aic-web-btn" onclick="aicCycleWeb()" title="Web search">\uD83C\uDF10 Auto</button>',
     '        <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">\uD83C\uDFAD Persona</button>',
@@ -208,9 +209,10 @@
     '      <textarea id="aic-persona-input" placeholder="e.g. Explain like I'+"'"+'m preparing for SSC CGL, keep answers short and in Hinglish."></textarea>',
     '    </div>',
     '    <div class="aic-image-box" id="aic-image-box" style="display:none;">',
-    '      <div class="aic-image-label"><span>Generate an image</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseImageBox()">\u2715 Close</button></div>',
+    '      <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseImageBox()">\u2715 Close</button></div>',
     '      <div class="aic-image-row">',
     '        <select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider" style="max-width:none;"></select>',
+    '        <select class="aic-select" id="aic-image-omniroute-provider-select" onchange="aicImageOmniRouteProviderChanged()" title="OmniRoute image provider" style="display:none;max-width:none;"></select>',
     '        <select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model" style="max-width:none;"></select>',
     '        <input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe the image…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();aicGenerateImage();}">',
     '        <button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button>',
@@ -366,50 +368,117 @@
     return groups[0] || null;
   }
 
-  function renderDependentSelects(providerId, modelId, groups, currentModel) {
-    var providerSel = document.getElementById(providerId);
-    var modelSel = document.getElementById(modelId);
-    if (!providerSel || !modelSel) return '';
-    var group = groupForModel(groups, currentModel);
-    providerSel.innerHTML = groups.length
-      ? groups.map(function (g) { return '<option value="' + escAttr(g.key) + '"' + (group && g.key === group.key ? ' selected' : '') + '>' + esc(g.label) + '</option>'; }).join('')
-      : '<option value="">No provider configured</option>';
+  function providerCatalog(groups) {
+    var out = [], byProvider = {};
+    groups.forEach(function (group) {
+      var provider = group.provider || group.key;
+      var entry = byProvider[provider];
+      if (!entry) {
+        entry = {
+          key: provider,
+          label: provider === 'omniroute' ? 'OmniRoute' : group.label,
+          modelCount: 0
+        };
+        byProvider[provider] = entry;
+        out.push(entry);
+      }
+      entry.modelCount += (group.models || []).length;
+    });
+    return out;
+  }
+
+  function groupsForProvider(groups, provider) {
+    return groups.filter(function (group) { return group.provider === provider; });
+  }
+
+  function upstreamLabel(group) {
+    var label = String(group.label || group.subprovider || '').replace(/^OmniRoute\s+—\s+/, '');
+    return label + ' (' + ((group.models || []).length) + ')';
+  }
+
+  function renderModelOptions(modelSel, group, currentModel) {
     var models = (group && group.models) || [];
-    var selected = models.some(function (m) { return m.key === currentModel; }) ? currentModel : ((models[0] && models[0].key) || '');
+    var selected = models.some(function (m) { return m.key === currentModel; })
+      ? currentModel : ((models[0] && models[0].key) || '');
     modelSel.innerHTML = models.length
       ? models.map(function (m) { return '<option value="' + escAttr(m.key) + '"' + (m.key === selected ? ' selected' : '') + '>' + esc(m.label) + '</option>'; }).join('')
       : '<option value="">No model configured</option>';
     return selected;
   }
 
-  function renderModelsForProvider(providerId, modelId, groups) {
+  function renderOmniRouteProviderOptions(upstreamSel, providerGroups, group) {
+    var isOmniRoute = !!(group && group.provider === 'omniroute');
+    upstreamSel.style.display = isOmniRoute ? '' : 'none';
+    upstreamSel.disabled = !isOmniRoute;
+    if (!isOmniRoute) {
+      upstreamSel.innerHTML = '';
+      return;
+    }
+    upstreamSel.innerHTML = providerGroups.map(function (candidate) {
+      return '<option value="' + escAttr(candidate.key) + '"' + (candidate.key === group.key ? ' selected' : '') + '>' + esc(upstreamLabel(candidate)) + '</option>';
+    }).join('');
+  }
+
+  function renderDependentSelects(providerId, upstreamId, modelId, groups, currentModel) {
     var providerSel = document.getElementById(providerId);
+    var upstreamSel = document.getElementById(upstreamId);
     var modelSel = document.getElementById(modelId);
-    if (!providerSel || !modelSel) return '';
-    var group = groups.find(function (g) { return g.key === providerSel.value; }) || groups[0];
-    var models = (group && group.models) || [];
-    modelSel.innerHTML = models.length
-      ? models.map(function (m, i) { return '<option value="' + escAttr(m.key) + '"' + (i === 0 ? ' selected' : '') + '>' + esc(m.label) + '</option>'; }).join('')
-      : '<option value="">No model configured</option>';
-    return (models[0] && models[0].key) || '';
+    if (!providerSel || !upstreamSel || !modelSel) return '';
+
+    var group = groupForModel(groups, currentModel);
+    var providers = providerCatalog(groups);
+    providerSel.innerHTML = providers.length
+      ? providers.map(function (provider) {
+          return '<option value="' + escAttr(provider.key) + '"' + (group && provider.key === group.provider ? ' selected' : '') + '>' + esc(provider.label + ' (' + provider.modelCount + ')') + '</option>';
+        }).join('')
+      : '<option value="">No provider configured</option>';
+
+    var providerGroups = group ? groupsForProvider(groups, group.provider) : [];
+    renderOmniRouteProviderOptions(upstreamSel, providerGroups, group);
+    return renderModelOptions(modelSel, group, currentModel);
+  }
+
+  function renderForProviderChange(providerId, upstreamId, modelId, groups) {
+    var providerSel = document.getElementById(providerId);
+    var upstreamSel = document.getElementById(upstreamId);
+    var modelSel = document.getElementById(modelId);
+    if (!providerSel || !upstreamSel || !modelSel) return '';
+    var providerGroups = groupsForProvider(groups, providerSel.value);
+    var group = providerGroups[0] || null;
+    renderOmniRouteProviderOptions(upstreamSel, providerGroups, group);
+    return renderModelOptions(modelSel, group, '');
+  }
+
+  function renderForUpstreamChange(upstreamId, modelId, groups) {
+    var upstreamSel = document.getElementById(upstreamId);
+    var modelSel = document.getElementById(modelId);
+    if (!upstreamSel || !modelSel) return '';
+    var group = groups.find(function (candidate) { return candidate.key === upstreamSel.value; }) || null;
+    return renderModelOptions(modelSel, group, '');
+  }
+
+  function saveThreadModel(field, selected) {
+    var thread = getThread(currentThreadId());
+    if (thread) { thread[field] = selected; upsertThread(thread); }
   }
 
   function renderModelSelect() {
     if (!_statusCache) return;
     var groups = catalogGroups('providerGroups', 'models');
     var thread = getThread(currentThreadId());
-    renderDependentSelects('aic-provider-select', 'aic-model-select', groups, (thread && thread.model) || '');
+    renderDependentSelects('aic-provider-select', 'aic-omniroute-provider-select', 'aic-model-select', groups, (thread && thread.model) || '');
   }
   window.aicProviderChanged = function () {
     var groups = catalogGroups('providerGroups', 'models');
-    var selected = renderModelsForProvider('aic-provider-select', 'aic-model-select', groups);
-    var t = getThread(currentThreadId());
-    if (t) { t.model = selected; upsertThread(t); }
+    saveThreadModel('model', renderForProviderChange('aic-provider-select', 'aic-omniroute-provider-select', 'aic-model-select', groups));
+  };
+  window.aicOmniRouteProviderChanged = function () {
+    var groups = catalogGroups('providerGroups', 'models');
+    saveThreadModel('model', renderForUpstreamChange('aic-omniroute-provider-select', 'aic-model-select', groups));
   };
   window.aicModelChanged = function () {
     var sel = document.getElementById('aic-model-select');
-    var t = getThread(currentThreadId());
-    if (t && sel) { t.model = sel.value; upsertThread(t); }
+    if (sel) saveThreadModel('model', sel.value);
   };
 
   /* ── web search toggle: auto -> on -> off -> auto ── */
@@ -542,26 +611,39 @@
     if (_filePollTimer) { clearInterval(_filePollTimer); _filePollTimer = null; }
   }
 
-  /* ── image generation: separate provider, model, and prompt controls ──
-     Every image-capable model the admin has configured is grouped under its
-     provider. OmniRoute's own upstream prefixes appear as separate providers,
-     while the full opaque model key is still sent to backend validation. ── */
+  /* ── image generation: provider → OmniRoute provider → model → prompt ──
+     Every image-capable model the backend discovers remains selectable. When
+     OmniRoute is chosen, its upstream providers get their own box instead of
+     being mixed into the top-level provider list. The full opaque model key is
+     still sent unchanged to backend validation and /v1/images/generations. ── */
+  function renderImageCatalogStatus(groups) {
+    var status = document.getElementById('aic-image-catalog-status');
+    if (!status) return;
+    var omniGroups = groupsForProvider(groups, 'omniroute');
+    var omniCount = omniGroups.reduce(function (sum, group) { return sum + (group.models || []).length; }, 0);
+    status.textContent = omniCount
+      ? 'Generate an image · OmniRoute: ' + omniCount + ' models across ' + omniGroups.length + ' providers'
+      : 'Generate an image';
+  }
+
   function renderImageModelSelect() {
     var groups = catalogGroups('imageProviderGroups', 'imageModels');
     var thread = getThread(currentThreadId());
-    return renderDependentSelects('aic-image-provider-select', 'aic-image-model-select', groups, (thread && thread.imageModel) || '');
+    renderImageCatalogStatus(groups);
+    return renderDependentSelects('aic-image-provider-select', 'aic-image-omniroute-provider-select', 'aic-image-model-select', groups, (thread && thread.imageModel) || '');
   }
 
   window.aicImageProviderChanged = function () {
     var groups = catalogGroups('imageProviderGroups', 'imageModels');
-    var selected = renderModelsForProvider('aic-image-provider-select', 'aic-image-model-select', groups);
-    var t = getThread(currentThreadId());
-    if (t) { t.imageModel = selected; upsertThread(t); }
+    saveThreadModel('imageModel', renderForProviderChange('aic-image-provider-select', 'aic-image-omniroute-provider-select', 'aic-image-model-select', groups));
+  };
+  window.aicImageOmniRouteProviderChanged = function () {
+    var groups = catalogGroups('imageProviderGroups', 'imageModels');
+    saveThreadModel('imageModel', renderForUpstreamChange('aic-image-omniroute-provider-select', 'aic-image-model-select', groups));
   };
   window.aicImageModelChanged = function () {
     var sel = document.getElementById('aic-image-model-select');
-    var t = getThread(currentThreadId());
-    if (t && sel) { t.imageModel = sel.value; upsertThread(t); }
+    if (sel) saveThreadModel('imageModel', sel.value);
   };
 
   window.aicToggleImageBox = function () {

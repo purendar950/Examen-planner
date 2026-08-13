@@ -2088,25 +2088,39 @@ IMAGE_PROVIDER_ENDPOINTS = {
 
 
 def _effective_image_models(cfg):
-    """Per-provider IMAGE model list. Admin overrides in config/ai.imageModels
-    win over the defaults above; a missing/empty override falls back to them.
-    Kept entirely separate from _effective_provider_models/providerModels so a
-    chat-catalog refresh can never wipe the image list (see the long note on
-    IMAGE_PROVIDER_MODELS)."""
+    """Per-provider IMAGE model list, separate from the text catalog.
+
+    Normal provider overrides replace their defaults. OmniRoute is different:
+    its live /v1/models image catalog is authoritative and is merged with any
+    manually configured fallback IDs. This keeps every currently advertised
+    image route selectable (the router commonly exposes about 62) without
+    losing admin-provided IDs during a temporary tunnel/catalog outage.
+    """
     overrides = (cfg or {}).get("imageModels") or {}
     out = {}
     for pid, default in IMAGE_PROVIDER_MODELS.items():
         ov = overrides.get(pid)
-        if isinstance(ov, list):
-            cleaned = [m.strip() for m in ov if isinstance(m, str) and m.strip()]
-            if cleaned:
-                out[pid] = cleaned
-                continue
+        cleaned = ([m.strip() for m in ov if isinstance(m, str) and m.strip()]
+                   if isinstance(ov, list) else [])
         if pid == "omniroute":
-            # Router owns its own line-up (same rule the chat catalog follows
-            # for OmniRoute), so discover it live rather than trusting a
-            # hardcoded or stale admin list.
-            out[pid] = _omniroute_fetch_image_model_ids()
+            # A configured fallback must make /status fast even when the free
+            # tunnel is down. Serve fallback + last-good cache immediately and
+            # refresh the live (~62 model) catalog in the background. Without
+            # a fallback, do one synchronous discovery so a fresh install can
+            # populate the picker on its first status request.
+            if cleaned and "_omniroute_image_models_cache" in globals():
+                discovered = list(_omniroute_image_models_cache.get("ids") or [])
+                _omniroute_refresh_image_models_async()
+            else:
+                discovered = _omniroute_fetch_image_model_ids()
+            merged, seen = [], set()
+            for model in list(discovered) + cleaned:
+                if model not in seen:
+                    seen.add(model)
+                    merged.append(model)
+            out[pid] = merged
+        elif cleaned:
+            out[pid] = cleaned
         else:
             out[pid] = list(default)
     return out
@@ -8156,6 +8170,33 @@ _OMNIROUTE_NOT_IMAGE_MARKERS = (
 _OMNIROUTE_IMAGE_TYPES = {"image", "images", "text-to-image", "text_to_image", "image-generation"}
 _omniroute_image_models_cache = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
 _omniroute_image_models_lock = threading.Lock()
+_omniroute_image_refresh_guard = threading.Lock()
+_omniroute_image_refresh_running = False
+
+
+def _omniroute_refresh_image_models_async():
+    """Refresh the image catalog without delaying status when fallbacks exist."""
+    global _omniroute_image_refresh_running
+    now = time.time()
+    cached = _omniroute_image_models_cache["ids"]
+    if cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+        return
+    if now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+        return
+    with _omniroute_image_refresh_guard:
+        if _omniroute_image_refresh_running:
+            return
+        _omniroute_image_refresh_running = True
+
+    def refresh():
+        global _omniroute_image_refresh_running
+        try:
+            _omniroute_fetch_image_model_ids()
+        finally:
+            with _omniroute_image_refresh_guard:
+                _omniroute_image_refresh_running = False
+
+    threading.Thread(target=refresh, name="omniroute-image-catalog", daemon=True).start()
 
 
 def _omniroute_id_is_image(model_id):
