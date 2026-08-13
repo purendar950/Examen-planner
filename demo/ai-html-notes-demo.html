@@ -18,6 +18,7 @@
 <script src="../vendor/firebase-app-compat.js"></script>
 <script src="../vendor/firebase-auth-compat.js"></script>
 <script src="../js/core/firebase-config.js"></script>
+<script src="demo-auth.js"></script>
 <style>
   /* ══════════════════════════════════════════════════════════════════
      DEMO — notes style "html": the AI designs and writes the whole
@@ -131,17 +132,6 @@
   .hidden{display:none!important}
   .note{font-size:.78rem;color:var(--muted);margin:8px 0 0;line-height:1.55}
 
-  /* ── auth strip ── */
-  .auth{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 13px;
-        border:1px solid var(--line);border-radius:11px;background:#f7fafc;margin-top:12px}
-  .auth .dot{width:9px;height:9px;border-radius:50%;background:#c9d3dc;flex:none}
-  .auth.in .dot{background:var(--accent)}
-  .auth.out .dot{background:#e0a030}
-  .auth.err .dot{background:var(--warn)}
-  .auth .who{font-size:.84rem;font-weight:700;flex:1;min-width:150px}
-  .auth .who small{display:block;font-weight:400;color:var(--muted);font-size:.75rem}
-  .auth input{width:auto;flex:1;min-width:130px;font-size:.85rem;padding:7px 10px}
-  .auth button{padding:7px 13px;font-size:.8rem}
   .pill{display:inline-block;font-size:.68rem;font-weight:800;letter-spacing:.05em;
         text-transform:uppercase;padding:3px 8px;border-radius:999px;background:#eef3f7;
         border:1px solid var(--line);color:var(--muted);margin-right:5px}
@@ -224,34 +214,15 @@
         </select>
       </label>
     </div>
-    <!-- Signed-in state. /api/study is authenticated AND Pro-gated, so this is
-         not optional decoration — without a token the request is a 401. -->
-    <div class="auth" id="auth">
-      <span class="dot" aria-hidden="true"></span>
-      <span class="who" id="auth-who">Checking your sign-in…<small>/api/study needs a signed-in Pro account.</small></span>
-      <span id="auth-form" class="hidden" style="display:flex;gap:8px;flex-wrap:wrap;flex:2;min-width:260px">
-        <input type="text" id="auth-email" placeholder="email" autocomplete="username" spellcheck="false">
-        <input type="password" id="auth-pass" placeholder="password" autocomplete="current-password">
-        <button class="btn-go" id="auth-in">Sign in</button>
-        <button class="btn-sec" id="auth-google">Google</button>
-      </span>
-      <button class="btn-sec hidden" id="auth-out">Sign out</button>
-    </div>
+    <!-- Sign-in strip. /api/study is authenticated AND Pro-gated, so this is
+         not optional decoration: without a token the request is a 401. The
+         markup, styles and token fallback all come from demo-auth.js, which the
+         other proxy-backed demos share. -->
+    <div id="dz-auth-mount"></div>
 
     <div class="row">
       <button class="btn-go" id="go" disabled>⚡ Generate from this video</button>
       <button class="btn-sec" id="stop">■ Stop</button>
-      <button class="btn-sec" id="tok-toggle" title="Paste an ID token instead of signing in here">🔑 Use a token</button>
-    </div>
-    <div id="tok-wrap" class="hidden" style="margin-top:8px">
-      <label class="fld">Firebase ID token (overrides the sign-in above)
-        <input type="text" id="token" placeholder="eyJhbGciOi…" spellcheck="false">
-      </label>
-      <p class="note">For testing from <code>file://</code> or localhost, where Firebase
-        blocks sign-in because the origin is not an authorized domain. Get one from a tab
-        that is signed into the app:
-        <code>await firebase.auth().currentUser.getIdToken()</code>. Tokens expire after
-        about an hour.</p>
     </div>
     <div class="statusline" id="status"></div>
     <p class="note">Requests <code>GET /api/study?id=…&amp;mode=notes&amp;style=html&amp;out=…</code>
@@ -529,138 +500,27 @@
   };
 
   /* ════════════════════════════════════════════════════════════════════
-     AUTH
+     AUTH — delegated to demo/demo-auth.js
 
      /api/study calls _verified_user_record(require_pro=True), so it needs a
      Firebase ID token AND an active Pro plan or trial. A bare fetch gets
      `401 unauthorized — A Firebase ID token is required.`
 
-     Because Pages serves this page from the same origin as app.html, Firebase
-     Auth's IndexedDB persistence is shared: a student already signed into the
-     app arrives here already signed in. The form below is only for the case
-     where they are not.
+     The strip, the token fallback, the 401-retry and the error wording all live
+     in demo-auth.js because the other proxy-backed demos need exactly the same
+     thing, and three copies of a token-refresh flow is three chances to fix a
+     bug in one of them and not the others.
      ════════════════════════════════════════════════════════════════════ */
-  var fbAuth = null, authUser = null;
-
-  function paintAuth(state, title, sub) {
-    var el = $('auth');
-    el.className = 'auth ' + state;
-    $('auth-who').innerHTML = title + (sub ? '<small>' + sub + '</small>' : '');
-    $('auth-form').classList.toggle('hidden', state === 'in');
-    $('auth-out').classList.toggle('hidden', state !== 'in');
-    syncGoEnabled(false);
-  }
-  function manualToken() { return ($('token').value || '').trim(); }
-  /* One place decides whether Generate is usable, so a finished request cannot
+  /* One place decides whether Generate is usable, so a settled request cannot
      re-enable it for a signed-out reader. */
   function syncGoEnabled(busy) {
-    $('go').disabled = !!busy || (!authUser && !manualToken());
+    $('go').disabled = !!busy || !DemoAuth.ready();
   }
-
-  try {
-    if (window.firebase && window.firebase.initializeApp && window.PREPPATH_FIREBASE_CONFIG) {
-      firebase.initializeApp(window.PREPPATH_FIREBASE_CONFIG);
-      fbAuth = firebase.auth();
-    }
-  } catch (e) { /* already initialised, or the SDK failed to load */ }
-  if (!fbAuth && window.firebase && firebase.apps && firebase.apps.length) {
-    try { fbAuth = firebase.auth(); } catch (e) {}
-  }
-
-  if (fbAuth) {
-    fbAuth.onAuthStateChanged(function (u) {
-      authUser = u || null;
-      if (u) {
-        paintAuth('in', 'Signed in as ' + esc(u.email || u.uid),
-          'Notes generation also requires an active Pro plan or trial.');
-      } else {
-        paintAuth('out', 'Not signed in',
-          'Sign in with your StudyPlanner account, or paste a token below.');
-      }
-    });
-  } else {
-    paintAuth('err', 'Firebase SDK unavailable',
-      'Expected ../vendor/firebase-*-compat.js — present once the site is built. Use 🔑 Use a token instead.');
-  }
-
-  $('auth-in').onclick = function () {
-    if (!fbAuth) return;
-    var em = ($('auth-email').value || '').trim(), pw = $('auth-pass').value || '';
-    if (!em || !pw) { setStatus('⚠️ Enter your email and password.', true); return; }
-    paintAuth('out', 'Signing in…', '');
-    fbAuth.signInWithEmailAndPassword(em, pw).then(function () {
-      $('auth-pass').value = '';
-      setStatus('✅ Signed in.');
-    }).catch(function (e) {
-      paintAuth('err', 'Sign-in failed', esc((e && (e.code || e.message)) || 'unknown error'));
-      setStatus('❌ Sign-in failed: ' + esc((e && (e.code || e.message)) || ''), true);
-    });
-  };
-  $('auth-google').onclick = function () {
-    if (!fbAuth) return;
-    var p = new firebase.auth.GoogleAuthProvider();
-    p.setCustomParameters({ prompt: 'select_account' });
-    fbAuth.signInWithPopup(p).catch(function (e) {
-      var code = (e && (e.code || e.message)) || '';
-      setStatus('❌ Google sign-in failed: ' + esc(code) +
-        (/unauthorized-domain/.test(code)
-          ? ' — this origin is not in Firebase → Authentication → Settings → Authorized domains. Use 🔑 Use a token instead.'
-          : ''), true);
-    });
-  };
-  $('auth-out').onclick = function () { if (fbAuth) fbAuth.signOut(); };
-  $('tok-toggle').onclick = function () {
-    var on = !$('tok-wrap').classList.toggle('hidden');
-    this.classList.toggle('on', on);
-    if (on) $('token').focus();
-  };
-  $('token').addEventListener('input', function () {
-    // A pasted token is enough on its own — that is the point of the fallback.
-    syncGoEnabled(false);
+  DemoAuth.mount('dz-auth-mount', {
+    needs: 'Generating calls /api/study, which needs a signed-in Pro account. ' +
+           'The bundled samples above need nothing.'
   });
-
-  /* A pasted token wins, so the fallback works even while signed in as someone
-     else. `force` re-mints the token after a 401, which is what an expired
-     token looks like from here. */
-  function idToken(force) {
-    var manual = manualToken();
-    if (manual) return Promise.resolve(manual);
-    if (!authUser) return Promise.reject(new Error('not-signed-in'));
-    return authUser.getIdToken(!!force);
-  }
-  function authedFetch(url, signal, force) {
-    return idToken(force).then(function (tk) {
-      return fetch(url, { signal: signal, headers: { Authorization: 'Bearer ' + tk } });
-    }).then(function (r) {
-      // One silent retry with a fresh token: an hour-old tab would otherwise
-      // just show "unauthorized" for something the student cannot diagnose.
-      if (r.status === 401 && !force && !manualToken()) return authedFetch(url, signal, true);
-      return r;
-    });
-  }
-
-  /* Maps the proxy's auth/quota failures onto something actionable, instead of
-     relaying "unauthorized" and leaving the reader to guess. */
-  function authErrorMessage(status, j) {
-    var err = (j && j.error) || '', detail = (j && j.detail) || '';
-    if (status === 401) {
-      return '🔒 Not authorised — ' + esc(detail || 'a Firebase ID token is required') +
-        '. Sign in above, or paste a fresh token (they expire after about an hour).';
-    }
-    if (status === 403 && err === 'pro_required') {
-      return '⛔ This needs an active <b>Pro plan or trial</b>. ' + esc(detail) +
-        ' AI notes are Pro-gated on the proxy, so the demo cannot bypass it.';
-    }
-    if (status === 403) return '⛔ ' + esc(err || 'forbidden') + (detail ? ' — ' + esc(detail) : '');
-    if (status === 429) {
-      return '⏳ Rate limited — ' + esc(detail || 'hourly AI generation limit reached') +
-        '. Try again later, or load a bundled sample above.';
-    }
-    if (status === 503 && err === 'auth_unavailable') {
-      return '⚠️ The proxy cannot verify accounts right now (Firebase Admin not configured).';
-    }
-    return null;
-  }
+  DemoAuth.onChange(function () { syncGoEnabled(false); });
 
   /* ── live generation ─────────────────────────────────────────────── */
   function setStatus(msg, isErr) {
@@ -696,14 +556,14 @@
     var t0 = Date.now();
     var httpStatus = 0;
 
-    authedFetch(url, ctrl ? ctrl.signal : undefined)
+    DemoAuth.fetch(url, ctrl ? { signal: ctrl.signal } : {})
       .then(function (r) { httpStatus = r.status; return r.json().catch(function () { return {}; }); })
       .then(function (j) {
         clearTimeout(to); syncGoEnabled(false); ctrl = null;
         var secs = ((Date.now() - t0) / 1000).toFixed(1);
         // Auth / entitlement / quota first: these are not "generation failed",
         // and they need a different next step from the reader.
-        var authMsg = authErrorMessage(httpStatus, j);
+        var authMsg = DemoAuth.errorMessage(httpStatus, j);
         if (authMsg) { setStatus(authMsg, true); showPlaceholder('Not generated.'); return; }
         if (j.error === 'no_captions' || j.warning === 'no_captions') {
           setStatus('⚠️ This video has no captions, so notes cannot be generated.', true);
@@ -739,8 +599,8 @@
         var msg;
         if (aborted) {
           msg = '⏱️ Stopped. A cold Render instance or a very long lecture can exceed this; try again, or a shorter video.';
-        } else if (e && e.message === 'not-signed-in') {
-          msg = '🔒 Sign in first — /api/study needs a Firebase ID token.';
+        } else if (DemoAuth.failureMessage(e)) {
+          msg = DemoAuth.failureMessage(e);
         } else {
           msg = '❌ Request failed: ' + esc(String(e)) + '. The server may be asleep — retry in a few seconds.';
         }
