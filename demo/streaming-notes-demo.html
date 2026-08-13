@@ -220,6 +220,15 @@
     .pdf-footer .g{color:#8bffbe}
   }
 </style>
+<!-- Both live calls this page makes — /api/study and /api/status — are
+     authenticated and Pro-gated, so it has to sign in the way the app does.
+     demo-auth.js is the shared strip + authenticated fetch (see its header for
+     why the live Generate button and the model dropdown used to 401). Not
+     deferred: the inline script at the end of <body> needs these present. -->
+<script src="../vendor/firebase-app-compat.js"></script>
+<script src="../vendor/firebase-auth-compat.js"></script>
+<script src="../js/core/firebase-config.js"></script>
+<script src="demo-auth.js"></script>
 </head>
 <body>
 
@@ -260,6 +269,7 @@
       <input id="backend" type="text" value="https://youtube-turbo-proxy-gej4.onrender.com"
              style="width:320px;max-width:100%;font-size:12px;padding:7px 9px;border:1px solid #cdd6df;border-radius:7px;font-family:inherit">
     </div>
+    <div id="dz-auth-mount" style="display:none"></div>
     <div class="bar">
       <span class="save idle" id="save">● Idle</span>
       <span class="metric" id="metric"></span>
@@ -574,9 +584,16 @@
     var fs=Date.now();
     _fetchCtrl=('AbortController' in window)? new AbortController():null;
     var to=setTimeout(function(){ if(_fetchCtrl) _fetchCtrl.abort(); }, 240000);   // 4-min safety
-    fetch(url, _fetchCtrl?{signal:_fetchCtrl.signal}:{}).then(function(r){return r.json();}).then(function(j){
+    var httpStatus=0;
+    DemoAuth.fetch(url, _fetchCtrl?{signal:_fetchCtrl.signal}:{}).then(function(r){
+      httpStatus=r.status; return r.json().catch(function(){ return {}; });
+    }).then(function(j){
       clearTimeout(to); _fetchCtrl=null;
       var serverS=((Date.now()-fs)/1000).toFixed(1);
+      // Auth / entitlement / quota are not "generation failed" and need a
+      // different next step, so they are separated out.
+      var authMsg=DemoAuth.errorMessage(httpStatus,j);
+      if(authMsg){ setSave("stopped",authMsg); resetBtn(); page.innerHTML='<div class="placeholder">Not generated.</div>'; return; }
       if(j.error && j.error!=="no_captions"){ setSave("stopped","❌ "+esc(j.error)+(j.detail?" — "+esc(j.detail):"")); resetBtn(); page.innerHTML='<div class="placeholder">Server error.</div>'; return; }
       if(j.warning==="no_captions"||j.error==="no_captions"){ setSave("stopped","⚠️ This video has no captions — can't generate"); resetBtn(); page.innerHTML='<div class="placeholder">No captions on this video.</div>'; return; }
       var content=j.content||"";
@@ -592,6 +609,8 @@
       });
     }).catch(function(e){
       clearTimeout(to); _fetchCtrl=null; resetBtn();
+      var signedOut=DemoAuth.failureMessage(e);
+      if(signedOut){ setSave("stopped",signedOut); page.innerHTML='<div class="placeholder">Sign in to generate.</div>'; return; }
       if(e && e.name==="AbortError"){ setSave("stopped","⏹ Stopped — server request cancelled (nothing rendered)"); page.innerHTML='<div class="placeholder">Cancelled.</div>'; }
       else { setSave("stopped","❌ "+esc(String(e))+" — server may be asleep, try again"); page.innerHTML='<div class="placeholder">Request failed.</div>'; }
     });
@@ -603,9 +622,20 @@
     var v=this.value==="video";
     $("videorow").style.display=v?"":"none";
     $("serverrow").style.display=v?"":"none";
+    // Sample mode talks to nothing, so sign-in is only surfaced in live mode.
+    $("dz-auth-mount").style.display=v?"":"none";
     $("speed").style.display=v?"none":"";     // speed only paces the SAMPLE simulation
     if(v && !_modelsLoaded) loadModels();
+    syncGo();
   };
+  /* Generate drives BOTH the offline sample and the live fetch, so it may only
+     be disabled while live mode is selected without a usable token. */
+  function liveMode(){ var s=$("source"); return !!s && s.value==="video"; }
+  function syncGo(){ goBtn.disabled = liveMode() && !DemoAuth.ready(); }
+  DemoAuth.mount("dz-auth-mount", {
+    needs: "Live mode calls /api/study and /api/status, which need a signed-in Pro account. The sample source needs nothing."
+  });
+  DemoAuth.onChange(function(){ syncGo(); });
 
   /* Populate the AI-model dropdown from the server's REAL config (/api/status).
      Only providers that have a key are listed; "Auto" = the admin's active model.
@@ -614,7 +644,18 @@
     var sel=$("aimodel"); if(!sel) return;
     var backend=($("backend").value||"").trim().replace(/\/+$/,"");
     sel.innerHTML='<option value="">🤖 Auto (server default)</option><option value="" disabled>loading models…</option>';
-    fetch(backend+"/api/status").then(function(r){return r.json();}).then(function(j){
+    var mStatus=0;
+    DemoAuth.fetch(backend+"/api/status").then(function(r){
+      mStatus=r.status; return r.json().catch(function(){ return {}; });
+    }).then(function(j){
+      // /api/status is Pro-gated too, so an unauthenticated reader used to get
+      // a silent "couldn't reach server" here when the server was fine.
+      if(DemoAuth.errorMessage(mStatus,j)){
+        _modelsLoaded=false;
+        sel.innerHTML='<option value="">🤖 Auto (server default)</option>'+
+          '<option value="" disabled>sign in to list models</option>';
+        return;
+      }
       _modelsLoaded=true;
       var groups=(j&&j.studyModelGroups)||[], def=(j&&j.studyModel)||"";
       var html='<option value="">🤖 Auto (server default'+(def?": "+esc(def):"")+')</option>';
@@ -630,9 +671,10 @@
         flat.forEach(function(m){ html+='<option value="'+esc(m)+'">'+esc(m)+'</option>'; });
       }
       sel.innerHTML=html;
-    }).catch(function(){
+    }).catch(function(e){
       _modelsLoaded=false;
-      sel.innerHTML='<option value="">🤖 Auto (server default)</option><option value="" disabled>⚠️ couldn\'t reach server</option>';
+      var msg=DemoAuth.failureMessage(e) ? "sign in to list models" : "\u26a0 couldn\'t reach server";
+      sel.innerHTML='<option value="">🤖 Auto (server default)</option><option value="" disabled>'+msg+'</option>';
     });
   }
   var _bk=$("backend"); if(_bk) _bk.addEventListener("change",function(){ _modelsLoaded=false; loadModels(); });

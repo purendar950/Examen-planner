@@ -193,6 +193,15 @@
     @page{margin:5mm 7mm}
   }
 </style>
+<!-- /api/study is authenticated and Pro-gated, so this page has to sign in the
+     way the app does. Same vendored SDK and config the app loads; demo-auth.js
+     is the shared strip + authenticated fetch (see its header for why the live
+     Generate button used to 401). Not deferred: the inline script at the end of
+     <body> runs before deferred scripts and needs these present. -->
+<script src="../vendor/firebase-app-compat.js"></script>
+<script src="../vendor/firebase-auth-compat.js"></script>
+<script src="../js/core/firebase-config.js"></script>
+<script src="demo-auth.js"></script>
 </head>
 <body>
 
@@ -239,6 +248,7 @@
       so the order is clean (Q1 → Q2 → Q3 …). Use <b>🖨️ Print / PDF</b> for the compact <b>2-column A4 pages</b>
       (page 1: column-1 → column-2, then page 2 …). First run per video ~30–90s; caches after.
     </div>
+    <div id="dz-auth-mount"></div>
     <div class="statusline" id="status"></div>
   </div>
 
@@ -488,6 +498,14 @@
   /* ── call the live server ── */
   function setStatus(msg,isErr){ var s=$("status"); s.className="statusline show"+(isErr?" err":""); s.innerHTML=msg; }
 
+  /* One place decides whether Generate is usable, so a settled request cannot
+     re-enable it for a signed-out reader. */
+  function syncGo(busy){ $("go").disabled = !!busy || !DemoAuth.ready(); }
+  DemoAuth.mount("dz-auth-mount", {
+    needs: "Generating notes calls /api/study, which needs a signed-in Pro account. The 🧪 sample below needs nothing."
+  });
+  DemoAuth.onChange(function(){ syncGo(false); });
+
   function generate(){
     var backend=($("backend").value||"").trim().replace(/\/+$/,"");
     var id=parseId($("url").value);
@@ -497,7 +515,7 @@
             (mode==="notes"&&style==="mcq"?"&style=mcq":"")+(fresh?"&refresh=1":"");
     var wantMcq = (mode==="notes" && style==="mcq");
 
-    $("go").disabled=true; $("meta").textContent="";
+    syncGo(true); $("meta").textContent="";
     setStatus('<span class="spin"></span> Generating '+(wantMcq?"MCQ ":"")+mode+' ('+lang+') for <code>'+id+'</code>… first run can take ~30–90s.');
     $("page").innerHTML='<div class="placeholder"><span class="spin"></span> Waiting for your server + AI…</div>';
 
@@ -506,11 +524,17 @@
     var TIMEOUT_MS = 240000;   // 4 min
     var to = setTimeout(function(){ if(ctrl) ctrl.abort(); }, TIMEOUT_MS);
 
-    var t0=Date.now();
-    fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function(r){return r.json();}).then(function(j){
+    var t0=Date.now(), httpStatus=0;
+    DemoAuth.fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function(r){
+      httpStatus=r.status; return r.json().catch(function(){ return {}; });
+    }).then(function(j){
       clearTimeout(to);
-      $("go").disabled=false;
+      syncGo();
       var secs=((Date.now()-t0)/1000).toFixed(1);
+      // Auth / entitlement / quota first: these are not "generation failed" and
+      // need a different next step from the reader.
+      var authMsg=DemoAuth.errorMessage(httpStatus,j);
+      if(authMsg){ setStatus(authMsg,true); $("page").innerHTML='<div class="placeholder">Not generated.</div>'; return; }
       if(j.error && j.error!=="no_captions"){ setStatus("❌ "+esc(j.error)+(j.detail?" — "+esc(j.detail):""),true); $("page").innerHTML='<div class="placeholder">No notes generated.</div>'; return; }
       if(j.warning==="no_captions"||j.error==="no_captions"){ setStatus("⚠️ This video has no captions, so notes can't be generated yet.",true); $("page").innerHTML='<div class="placeholder">No captions on this video.</div>'; return; }
       var content=j.content||"";
@@ -524,7 +548,9 @@
       $("page").innerHTML = wantMcq ? renderMCQ(content) : mdToHandwritten(content);
     }).catch(function(e){
       clearTimeout(to);
-      $("go").disabled=false;
+      syncGo();
+      var signedOut=DemoAuth.failureMessage(e);
+      if(signedOut){ setStatus(signedOut,true); $("page").innerHTML='<div class="placeholder">Sign in to generate.</div>'; return; }
       var aborted = e && (e.name==="AbortError");
       if(aborted){
         setStatus("⏱️ No response in 4 min — stopped waiting. Likely causes: the server is running the OLD code (no streaming, big chunks) or is asleep, or this is a livestream with no captions. "+
