@@ -2002,6 +2002,9 @@ def _ai_chat_file_context_block(rows):
 # if none is configured, image generation is simply unavailable rather than
 # falling back to an unrelated third-party API.
 IMAGE_MODEL_MARKERS = ("image", "nano-banana", "imagen")
+# Image generation is slower than a chat turn (diffusion backends routinely take
+# 30-90s), so it gets its own generous timeout rather than the chat default.
+IMAGE_GEN_TIMEOUT = int(os.environ.get("IMAGE_GEN_TIMEOUT", "120"))
 
 
 def _is_image_model_name(model_id):
@@ -2026,6 +2029,22 @@ IMAGE_PROVIDER_MODELS = {
     # Gemini's native image ("Nano Banana") models, called through the
     # Interactions API by _ai_chat_generate_image.
     "google": ["gemini-3.1-flash-image", "gemini-2.5-flash-image", "gemini-3-pro-image"],
+    # OmniRoute's list is NOT hardcoded — it is discovered live from its
+    # /v1/models catalog by _omniroute_fetch_image_model_ids() (see
+    # _effective_image_models below), because the router's line-up changes
+    # without notice. The empty default keeps the provider registered so a
+    # configured key is still recognised while the catalog is unreachable.
+    "omniroute": [],
+}
+# Which transport each image provider speaks. "gemini_interactions" =
+# Google's Interactions API; "openai_images" = the standard OpenAI
+# POST /v1/images/generations contract that OmniRoute exposes.
+IMAGE_PROVIDER_TRANSPORT = {
+    "google": "gemini_interactions",
+    "omniroute": "openai_images",
+}
+IMAGE_PROVIDER_ENDPOINTS = {
+    "omniroute": OMNIROUTE_IMAGES_URL,
 }
 
 
@@ -2041,7 +2060,14 @@ def _effective_image_models(cfg):
         ov = overrides.get(pid)
         if isinstance(ov, list):
             cleaned = [m.strip() for m in ov if isinstance(m, str) and m.strip()]
-            out[pid] = cleaned if cleaned else list(default)
+            if cleaned:
+                out[pid] = cleaned
+                continue
+        if pid == "omniroute":
+            # Router owns its own line-up (same rule the chat catalog follows
+            # for OmniRoute), so discover it live rather than trusting a
+            # hardcoded or stale admin list.
+            out[pid] = _omniroute_fetch_image_model_ids()
         else:
             out[pid] = list(default)
     return out
@@ -2053,10 +2079,12 @@ def _ai_chat_image_models(cfg):
     image-named model an admin hand-added to that provider's regular model list
     (so a manual addition still works until the next catalog refresh strips it).
 
-    Only providers with a verified server-side image code path are listed —
-    currently `google` via the Gemini Interactions API. `google_interactions`
-    is intentionally excluded: it denotes the interactions transport for chat
-    and would just duplicate the same Gemini models under a second label."""
+    Only providers with a server-side image code path are listed — see
+    IMAGE_PROVIDER_TRANSPORT (`google` via the Gemini Interactions API,
+    `omniroute` via the standard OpenAI /v1/images/generations contract).
+    `google_interactions` is intentionally excluded: it denotes the
+    interactions transport for chat and would just duplicate the same Gemini
+    models under a second label."""
     eff_images = _effective_image_models(cfg)
     eff_text = _effective_provider_models(cfg)
     out, seen = [], set()
@@ -2075,8 +2103,10 @@ def _ai_chat_image_models(cfg):
     return out
 
 
-def _ai_chat_generate_image(cfg, model_id, prompt, aspect_ratio=None):
-    """Calls Gemini's Interactions API with response_format={"type":"image"}.
+def _ai_chat_generate_image(cfg, provider, model_id, prompt, aspect_ratio=None):
+    """Generate one image. Dispatches on the provider's image transport:
+      google    -> Gemini Interactions API (response_format {"type":"image"})
+      omniroute -> standard OpenAI POST /v1/images/generations
     Returns (bytes, content_type) or (None, error_message).
 
     Keys are read straight from the provider's configured key list rather than
@@ -2089,9 +2119,116 @@ def _ai_chat_generate_image(cfg, model_id, prompt, aspect_ratio=None):
     prompt = re.sub(r"\s+", " ", str(prompt or "")).strip()[:800]
     if not prompt:
         return None, "Empty prompt."
-    keys = _configured_provider_keys(cfg, "google")
+    transport = IMAGE_PROVIDER_TRANSPORT.get(provider)
+    if not transport:
+        return None, "That provider cannot generate images."
+    keys = _configured_provider_keys(cfg, provider)
     if not keys:
-        return None, "No Gemini API key is configured for image generation."
+        label = STUDY_PROVIDER_LABELS.get(provider, provider.title())
+        return None, "No %s API key is configured for image generation." % label
+    if transport == "openai_images":
+        endpoint = IMAGE_PROVIDER_ENDPOINTS.get(provider)
+        if not endpoint:
+            return None, "No image endpoint is configured for that provider."
+        return _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_ratio)
+    return _generate_image_gemini(keys, model_id, prompt, aspect_ratio)
+
+
+def _aspect_ratio_to_size(aspect_ratio, base=1024):
+    """Map an "W:H" ratio to a pixel `size` string for the OpenAI images API,
+    which takes explicit dimensions rather than a ratio. Falls back to a
+    square when the ratio is missing or unparseable."""
+    ratio = str(aspect_ratio or "").strip()
+    m = re.fullmatch(r"(\d{1,2}):(\d{1,2})", ratio)
+    if not m:
+        return "%dx%d" % (base, base)
+    w, h = int(m.group(1)), int(m.group(2))
+    if w <= 0 or h <= 0:
+        return "%dx%d" % (base, base)
+    # Keep the long edge at `base` and round the short edge to a multiple of 64,
+    # which every diffusion backend we route to accepts.
+    if w >= h:
+        return "%dx%d" % (base, max(256, int(round(base * h / w / 64)) * 64))
+    return "%dx%d" % (max(256, int(round(base * w / h / 64)) * 64), base)
+
+
+def _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_ratio=None):
+    """Standard OpenAI images contract, as exposed by OmniRoute:
+        POST {model, prompt, n, size, response_format}
+        -> {"data": [{"b64_json": "..."}]}  or  {"data": [{"url": "..."}]}
+    Both response shapes are accepted because a router may ignore
+    response_format and hand back a hosted URL instead of inline base64; in
+    that case the bytes are fetched server-side so the browser still never
+    talks to the upstream host directly."""
+    body = {
+        "model": model_id,
+        "prompt": prompt,
+        "n": 1,
+        "size": _aspect_ratio_to_size(aspect_ratio),
+        "response_format": "b64_json",
+    }
+    last_err = "Image generation failed."
+    for key in keys:
+        try:
+            r = requests.post(
+                endpoint,
+                headers={"Authorization": "Bearer %s" % key,
+                         "Content-Type": "application/json",
+                         "ngrok-skip-browser-warning": "true"},
+                json=body, timeout=IMAGE_GEN_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            last_err = "Image request failed: %s" % str(exc)[:150]
+            continue
+        # 404 is what an offline ngrok tunnel returns, so say something the
+        # admin can act on instead of a bare status code.
+        if r.status_code == 404:
+            last_err = ("The image endpoint returned 404 — if this provider runs "
+                        "behind an ngrok tunnel, that tunnel is offline.")
+            continue
+        if r.status_code == 429 or r.status_code >= 500:
+            last_err = "Image provider returned HTTP %s (try again shortly)." % r.status_code
+            continue
+        if r.status_code >= 400:
+            detail = ""
+            try:
+                payload = r.json()
+                err = payload.get("error") if isinstance(payload, dict) else None
+                detail = (err.get("message") if isinstance(err, dict) else str(err or ""))[:200]
+            except Exception:  # noqa: BLE001
+                detail = r.text[:200]
+            return None, ("Image provider rejected the request: %s" % detail if detail
+                          else "Image provider returned HTTP %s." % r.status_code)
+        try:
+            payload = r.json()
+        except ValueError:
+            return None, "Image provider returned an unreadable response."
+        items = payload.get("data") if isinstance(payload, dict) else None
+        first = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else None
+        if not first:
+            return None, "Image provider returned no image for this prompt."
+        b64 = first.get("b64_json") or first.get("b64") or first.get("image_base64")
+        if b64:
+            try:
+                return base64.b64decode(b64), "image/png"
+            except Exception:  # noqa: BLE001
+                return None, "Image provider returned malformed image data."
+        url = first.get("url")
+        if url:
+            try:
+                img = requests.get(url, timeout=IMAGE_GEN_TIMEOUT)
+                ctype = img.headers.get("Content-Type", "image/png").split(";")[0].strip()
+                if img.status_code == 200 and img.content and ctype.startswith("image/"):
+                    return img.content, ctype
+                return None, "Could not download the generated image."
+            except requests.RequestException as exc:
+                return None, "Could not download the generated image: %s" % str(exc)[:120]
+        return None, "Image provider returned no usable image data."
+    return None, last_err
+
+
+def _generate_image_gemini(keys, model_id, prompt, aspect_ratio=None):
+    """Gemini Interactions API with response_format={"type":"image"}."""
 
     body = {
         "model": model_id,
@@ -2108,7 +2245,7 @@ def _ai_chat_generate_image(cfg, model_id, prompt, aspect_ratio=None):
             r = requests.post(
                 "https://generativelanguage.googleapis.com/v1beta/interactions",
                 headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-                json=body, timeout=90,
+                json=body, timeout=IMAGE_GEN_TIMEOUT,
             )
         except requests.RequestException as exc:
             last_err = "Gemini request failed: %s" % str(exc)[:150]
@@ -7822,6 +7959,9 @@ STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google
 # when a selected model is called; using asynchronous one-model health probes as
 # a visibility gate previously left the picker permanently stuck on Auto.
 OMNIROUTE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
+# OmniRoute also exposes the standard OpenAI Images endpoint alongside chat.
+# Used for AI Chat image generation (see _generate_image_openai_images_api).
+OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
 _OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))
 _OMNIROUTE_MODELS_TIMEOUT = max(3, min(
     int(os.environ.get("OMNIROUTE_MODELS_TIMEOUT", "10")), 12))
@@ -7940,6 +8080,87 @@ def _omniroute_fetch_model_ids():
         except Exception as exc:  # noqa: BLE001
             log.warning("OmniRoute /models refresh failed: %s", exc)
         return list(_omniroute_models_cache["ids"])
+
+
+# ---- OmniRoute IMAGE models -----------------------------------------------
+# The chat catalog above deliberately strips image/video/audio ids (see
+# _OMNIROUTE_NON_CHAT_ID_MARKERS). Image generation needs the opposite: keep
+# only the text-to-IMAGE ids, and exclude video/audio families that also match
+# a generic "media" shape (veo/sora/kling/runway/hailuo produce video, not a
+# still image, and would fail or return something unusable at /v1/images).
+_OMNIROUTE_IMAGE_ID_MARKERS = (
+    "flux", "dall-e", "dalle", "imagen", "stable-diffusion", "sdxl",
+    "midjourney", "midijourney", "image",
+)
+_OMNIROUTE_NOT_IMAGE_MARKERS = (
+    "veo", "sora", "kling", "runway", "hailuo", "musicgen", "lyria",
+    "whisper", "tts", "speech", "audio", "polly", "embedding", "embed",
+    "rerank", "moderation", "safety", "video",
+)
+_omniroute_image_models_cache = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
+_omniroute_image_models_lock = threading.Lock()
+
+
+def _omniroute_id_is_image(model_id):
+    """True for an id that looks like a text-to-image model and not video/audio."""
+    lowered = (model_id or "").lower()
+    if not lowered:
+        return False
+    if any(marker in lowered for marker in _OMNIROUTE_NOT_IMAGE_MARKERS):
+        return False
+    return any(marker in lowered for marker in _OMNIROUTE_IMAGE_ID_MARKERS)
+
+
+def _omniroute_fetch_image_model_ids():
+    """Image-capable OmniRoute ids from /v1/models, cached like the chat list.
+
+    Mirrors _omniroute_fetch_model_ids' caching exactly (TTL, short negative
+    cache on failure, stale-last-good during an outage) because it hits the same
+    free ngrok tunnel, which is regularly offline — ngrok answers an offline
+    endpoint with HTTP 404, so a failed refresh must never wipe a good list or
+    block /api/ai-chat/status repeatedly."""
+    now = time.time()
+    cached = _omniroute_image_models_cache["ids"]
+    if cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+        return list(cached)
+    if now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+        return list(cached)
+    with _omniroute_image_models_lock:
+        now = time.time()
+        cached = _omniroute_image_models_cache["ids"]
+        if cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+            return list(cached)
+        if now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+            return list(cached)
+        _omniroute_image_models_cache["attempt_ts"] = now
+        try:
+            r = requests.get(
+                OMNIROUTE_MODELS_URL,
+                headers={"ngrok-skip-browser-warning": "true"},
+                timeout=_OMNIROUTE_MODELS_TIMEOUT,
+            )
+            if r.status_code == 200:
+                payload = r.json() or {}
+                data = payload.get("data") if isinstance(payload, dict) else []
+                ids, seen = [], set()
+                for item in data or []:
+                    if not isinstance(item, dict):
+                        continue
+                    model_id = str(item.get("id") or "").strip()
+                    if not model_id or model_id in seen:
+                        continue
+                    if _omniroute_id_is_image(model_id):
+                        seen.add(model_id)
+                        ids.append(model_id)
+                if ids:
+                    _omniroute_image_models_cache["ids"] = ids
+                    _omniroute_image_models_cache["ts"] = now
+                    return list(ids)
+            else:
+                log.warning("OmniRoute image /models refresh: HTTP %s", r.status_code)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("OmniRoute image /models refresh failed: %s", exc)
+        return list(_omniroute_image_models_cache["ids"])
 
 
 def _omniroute_auto_models(ids=None):
@@ -11577,7 +11798,8 @@ def api_ai_chat_image():
     picked = _ai_chat_resolve_model(image_models, str(body.get("model") or "").strip())
     if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_img", user["uid"], 20, 3600):
         return jsonify({"error": "rate_limited", "detail": "Too many images this hour. Try later."}), 429
-    data, result = _ai_chat_generate_image(raw_cfg, picked["model"], prompt, body.get("aspectRatio"))
+    data, result = _ai_chat_generate_image(raw_cfg, picked["provider"], picked["model"],
+                                           prompt, body.get("aspectRatio"))
     if data is None:
         return jsonify({"error": "image_failed", "detail": result}), 502
     return Response(data, mimetype=result)
