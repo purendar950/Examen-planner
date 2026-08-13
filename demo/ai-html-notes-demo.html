@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI-Designed HTML Notes — Demo (notes style "html")</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Noto+Sans+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ══════════════════════════════════════════════════════════════════
+     DEMO — notes style "html": the AI designs and writes the whole
+     document instead of filling in a fixed template.
+
+     What this page is for: the other note styles (Topic / Topic+Images /
+     MCQ) are rendered by nbBuild() in js/features/ai-tutor.js, which only
+     understands a fixed Markdown subset — so every lecture comes out
+     looking the same. Here the model authors real HTML + CSS + JS and the
+     app renders it in a sandboxed iframe.
+
+     Two bundled samples ship with the page so the idea can be judged
+     WITHOUT deploying the backend, and so the point that the design
+     changes per subject is actually visible rather than asserted. The
+     Generate button calls the live server once the backend is deployed.
+
+     Standalone; mirrors the real implementation but is not wired into it.
+     ══════════════════════════════════════════════════════════════════ */
+  :root{
+    --bg:#e8ecf1; --panel:#ffffff; --ink:#22303f; --muted:#5d6b7a;
+    --line:#d7e0e8; --accent:#00976f; --accent-ink:#04231a;
+    --warn:#c62828; --shadow:0 6px 22px rgba(20,40,60,.10);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-size:16px;line-height:1.5;
+       font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+       -webkit-font-smoothing:antialiased}
+
+  /* ── top bar ── */
+  .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;
+          flex-wrap:wrap;padding:12px 18px;background:linear-gradient(135deg,#12352a,#17614a);
+          color:#eafff5;box-shadow:0 2px 12px rgba(0,0,0,.25)}
+  .topbar .brand{font-weight:800;font-size:1.02rem;letter-spacing:.2px}
+  .topbar .tag{font-size:.72rem;padding:3px 9px;border-radius:999px;
+               background:rgba(255,255,255,.15);font-weight:700}
+  .topbar .spacer{flex:1}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:18px 14px 70px}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+        padding:16px 18px;box-shadow:var(--shadow);margin-bottom:16px}
+  .card h2{margin:0 0 4px;font-size:1.02rem}
+  .card p.sub{margin:0 0 12px;font-size:.84rem;color:var(--muted)}
+
+  .grid{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+  label.fld{display:flex;flex-direction:column;gap:4px;font-size:.74rem;font-weight:700;
+            color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  input[type=text],select{font:inherit;font-size:.92rem;padding:9px 11px;border-radius:9px;
+        border:1px solid var(--line);background:#fbfdff;color:var(--ink);width:100%}
+  input[type=text]:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
+
+  .row{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin-top:12px}
+  button{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:999px;
+         padding:9px 16px;font-size:.86rem;font-weight:700;display:inline-flex;
+         align-items:center;gap:6px}
+  button:disabled{opacity:.5;cursor:default}
+  .btn-go{background:var(--accent);color:var(--accent-ink)}
+  .btn-sec{background:#eef3f7;color:#20323f;border-color:var(--line)}
+  .btn-sec.on{background:#20323f;color:#eef3f7;border-color:#20323f}
+
+  .statusline{display:none;margin-top:12px;padding:10px 13px;border-radius:10px;
+              background:#eef7f3;border:1px solid #cfe6dc;font-size:.85rem;color:#14503c}
+  .statusline.show{display:block}
+  .statusline.err{background:#fdeeee;border-color:#f2c9c9;color:#8f1d1d}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid #cfe6dc;
+        border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;
+        vertical-align:-2px;margin-right:6px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  code{background:#eef3f7;padding:1px 5px;border-radius:4px;font-size:.85em}
+
+  /* ── mock player, so Follow / timestamp seeking can be demonstrated ── */
+  .player{display:flex;align-items:center;gap:11px;flex-wrap:wrap}
+  .player .time{font-variant-numeric:tabular-nums;font-weight:800;font-size:1rem;
+                min-width:64px;text-align:center;background:#20323f;color:#eafff5;
+                padding:5px 9px;border-radius:8px}
+  .player input[type=range]{flex:1;min-width:180px;accent-color:var(--accent)}
+
+  /* ── the note surface: container styled, CONTENT never touched ── */
+  .stage{background:#eef1f5;border:1px solid #d9e0e8;border-radius:12px;overflow:auto;
+         max-height:74vh;-webkit-overflow-scrolling:touch}
+  .stage.invert{filter:invert(1) hue-rotate(180deg)}
+  .noteframe{display:block;width:100%;border:0;min-height:360px;background:transparent;
+             color-scheme:light}
+  .placeholder{padding:56px 22px;text-align:center;color:var(--muted);font-size:.9rem}
+
+  /* ── streaming progress card (mirrors .ai-htmlnote-progress in the app) ── */
+  .hnp{display:flex;justify-content:center;padding:26px 12px}
+  .hnp-card{width:100%;max-width:520px;display:flex;flex-direction:column;align-items:center;
+            gap:9px;text-align:center;padding:24px 20px;border:1px solid var(--line);
+            border-radius:14px;background:#fbfdff}
+  .hnp-card strong{font-size:1.02rem}
+  .hnp-card p{margin:0;font-size:.82rem;color:var(--muted);max-width:44ch}
+  .hnp-steps{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+  .hnp-step{font-size:.62rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+            padding:4px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .hnp-step.active{border-color:var(--accent);color:var(--accent)}
+  .hnp-step.done{border-color:var(--accent);background:var(--accent);color:var(--accent-ink)}
+
+  /* ── bridge event log: the whole cross-origin contract, visible ── */
+  .events{margin-top:10px;max-height:150px;overflow:auto;border:1px solid var(--line);
+          border-radius:9px;background:#fbfdff;padding:8px 10px;font-size:.72rem;
+          font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+  .events b{color:var(--accent);font-weight:700}
+  .events .hi{color:var(--warn)}
+
+  pre.src{max-height:340px;overflow:auto;margin:10px 0 0;padding:11px 13px;border-radius:10px;
+          background:#0f1722;color:#c8d6e5;font-size:.7rem;line-height:1.5;
+          font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
+          word-break:break-all}
+  .hidden{display:none!important}
+  .note{font-size:.78rem;color:var(--muted);margin:8px 0 0;line-height:1.55}
+  .pill{display:inline-block;font-size:.68rem;font-weight:800;letter-spacing:.05em;
+        text-transform:uppercase;padding:3px 8px;border-radius:999px;background:#eef3f7;
+        border:1px solid var(--line);color:var(--muted);margin-right:5px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <span class="brand">🎨 AI-Designed HTML Notes</span>
+  <span class="tag">notes style = "html"</span>
+  <span class="spacer"></span>
+  <span class="tag" id="sandbox-tag">sandbox: allow-scripts</span>
+</div>
+
+<div class="wrap">
+
+  <!-- ══════════ 1 · what changed ══════════ -->
+  <div class="card">
+    <h2>What this replaces</h2>
+    <p class="sub">The comprehensive-notes prompt used to dictate the layout, and the client
+      rendered a fixed Markdown subset — so every lecture produced the same-looking notebook.</p>
+    <p class="note">
+      <span class="pill">before</span> Prompt says <code>## for sections, - for bullets</code> →
+      <code>nbBuild()</code> emits <code>.sec</code> / <code>.subsec</code> / <code>&lt;ul&gt;</code>
+      with one stylesheet. Anything the renderer has no rule for cannot be expressed at all.
+    </p>
+    <p class="note">
+      <span class="pill">after</span> <b>Pass 1 (design)</b> reads a sample of the lecture and
+      invents a visual identity for that subject — a stylesheet, a component vocabulary and an
+      optional script. <b>Pass 2 (body)</b> runs per transcript chunk and writes
+      <code>&lt;section class="page"&gt;</code> fragments using only that vocabulary, drawing
+      diagrams as inline <code>&lt;svg&gt;</code>. The server assembles one standalone document.
+    </p>
+    <p class="note">
+      Splitting the passes is what makes chunking possible: a whole document cannot be
+      concatenated, but N body fragments sharing one stylesheet can. It is also why this emits
+      HTML rather than JSON — a truncated JSON object loses everything, while truncated HTML
+      still renders every page that arrived.
+    </p>
+  </div>
+
+  <!-- ══════════ 2 · samples + live generate ══════════ -->
+  <div class="card">
+    <h2>Try it</h2>
+    <p class="sub">The two samples are real generated-shape documents bundled into this page, so
+      they work offline. Generate calls your live server and needs the updated backend deployed.</p>
+
+    <div class="row">
+      <button class="btn-go" id="s-geo">📗 Sample · Geography lecture</button>
+      <button class="btn-go" id="s-chem">🧪 Sample · Organic Chemistry lecture</button>
+      <button class="btn-sec" id="s-stream">▶ Replay the streaming view</button>
+    </div>
+    <p class="note">Same feature, same code path, two lectures — different palette, typography,
+      page furniture and components. That difference is the entire point: it is chosen by the
+      model, not selected from a list.</p>
+
+    <hr style="border:0;border-top:1px solid var(--line);margin:16px 0">
+
+    <div class="grid">
+      <label class="fld">Backend
+        <input type="text" id="backend" value="https://youtube-turbo-proxy-gej4.onrender.com"
+               spellcheck="false">
+      </label>
+      <label class="fld">YouTube URL or 11-char ID
+        <input type="text" id="url" value="https://www.youtube.com/live/Bvj4PsjQCaM"
+               spellcheck="false">
+      </label>
+      <label class="fld">Output language
+        <select id="lang">
+          <option>English</option>
+          <option>Hinglish</option>
+          <option>Hindi</option>
+        </select>
+      </label>
+      <label class="fld">Fresh copy
+        <select id="fresh">
+          <option value="0">Use cached if available</option>
+          <option value="1">Ignore cache (regenerate)</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <button class="btn-go" id="go">⚡ Generate from this video</button>
+      <button class="btn-sec" id="stop">■ Stop</button>
+    </div>
+    <div class="statusline" id="status"></div>
+    <p class="note">Requests <code>GET /api/study?id=…&amp;mode=notes&amp;style=html&amp;out=…</code>.
+      A first run is slow (design pass, then one body pass per chunk) and caches afterwards.
+      If the server returns <code>style: "topic"</code> it is still running the old code.</p>
+  </div>
+
+  <!-- ══════════ 3 · the note ══════════ -->
+  <div class="card">
+    <h2>Rendered note</h2>
+    <p class="sub" id="meta">Nothing loaded yet.</p>
+
+    <div class="player">
+      <button class="btn-sec" id="play">▶ Play</button>
+      <span class="time" id="clock">0:00</span>
+      <input type="range" id="seek" min="0" max="2700" value="0" step="1"
+             aria-label="Mock lecture position">
+      <button class="btn-sec" id="follow">🎯 Follow</button>
+    </div>
+    <p class="note">A stand-in for the real player. Tapping a timestamp inside the note seeks it;
+      Follow highlights and softly scrolls to whatever the lecture is on now — both travel over
+      <code>postMessage</code>, because the note is on an opaque origin the app cannot read.</p>
+
+    <div class="row">
+      <button class="btn-sec" id="print">📄 Print / PDF</button>
+      <button class="btn-sec" id="save">⤓ Save .html</button>
+      <button class="btn-sec" id="invert">◐ Night</button>
+      <button class="btn-sec" id="viewsrc">&lt;/&gt; View source</button>
+    </div>
+
+    <div class="stage" id="stage" style="margin-top:12px">
+      <div class="placeholder">Pick a sample above, or generate from a video.</div>
+    </div>
+
+    <pre class="src hidden" id="src"></pre>
+  </div>
+
+  <!-- ══════════ 4 · the bridge ══════════ -->
+  <div class="card">
+    <h2>Bridge traffic</h2>
+    <p class="sub">Every message crossing the origin boundary, live. The app injects this script;
+      the model never writes it and cannot remove it.</p>
+    <div class="events" id="events"><i>waiting…</i></div>
+    <p class="note">
+      The frame is <code>sandbox="allow-scripts"</code> with <b>no</b> <code>allow-same-origin</code>
+      — together those two void the sandbox, and the note's script could then read the Firebase
+      token and <code>appState</code> out of <code>localStorage</code>. The document also carries
+      <code>connect-src 'none'</code>, so it cannot send anything anywhere even inside its own
+      origin. Messages are trusted by <code>event.source === iframe.contentWindow</code>;
+      <code>event.origin</code> is the string <code>"null"</code> for an opaque origin and proves
+      nothing.
+    </p>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ════════════════════════════════════════════════════════════════════
+     The bridge — byte-for-byte the same contract as js/features/ai-tutor.js.
+     Injected into the note document; reports height, forwards timestamp
+     taps and text selection out, accepts follow instructions in.
+     ════════════════════════════════════════════════════════════════════ */
+  function bridgeSrc(tok) {
+    return '(function(){' +
+      'var TOK=' + JSON.stringify(tok) + ',P=window.parent;' +
+      'function send(m){try{m.nbTok=TOK;P.postMessage(m,"*");}catch(e){}}' +
+      'function docH(){var b=document.body,d=document.documentElement;' +
+        'return Math.max(b?b.scrollHeight:0,b?b.offsetHeight:0,d?d.scrollHeight:0,d?d.offsetHeight:0);}' +
+      'var lastH=0;' +
+      'function height(){var h=docH();if(Math.abs(h-lastH)>3){lastH=h;send({type:"nb-height",h:h});}}' +
+      'window.addEventListener("load",height);window.addEventListener("resize",height);' +
+      'if(window.ResizeObserver){try{new ResizeObserver(height).observe(document.documentElement);}catch(e){}}' +
+      'setInterval(height,600);' +
+      'function tsList(){return [].slice.call(document.querySelectorAll(".ai-ts[data-s]")).map(function(el){' +
+        'return {el:el,s:parseFloat(el.getAttribute("data-s"))||0};}).sort(function(a,b){return a.s-b.s;});}' +
+      'document.addEventListener("click",function(e){' +
+        'var a=e.target&&e.target.closest?e.target.closest(".ai-ts[data-s]"):null;if(!a)return;' +
+        'e.preventDefault();send({type:"nb-seek",s:parseFloat(a.getAttribute("data-s"))||0});},true);' +
+      'function sel(){var s=null,t="";try{s=window.getSelection();t=String(s||"");}catch(e){return;}' +
+        't=t.replace(/\\s+/g," ").trim();' +
+        'if(!s||s.isCollapsed||!s.rangeCount||t.length<3){send({type:"nb-unselect"});return;}' +
+        'var r=s.getRangeAt(0).getBoundingClientRect();' +
+        'send({type:"nb-select",text:t.slice(0,4000),' +
+          'rect:{top:r.top,left:r.left,right:r.right,bottom:r.bottom,width:r.width,height:r.height}});}' +
+      'document.addEventListener("mouseup",sel);document.addEventListener("touchend",sel);' +
+      'var marked=null;' +
+      'function follow(sec){var l=tsList(),hit=null;' +
+        'for(var i=0;i<l.length;i++){if(l[i].s<=sec+0.4)hit=l[i];else break;}' +
+        'var blk=hit?(hit.el.closest("section,article,div,li,h1,h2,h3,h4,p")||hit.el):null;' +
+        'if(marked&&marked!==blk)marked.classList.remove("nb-follow-on");' +
+        'if(!blk){marked=null;return;}' +
+        'blk.classList.add("nb-follow-on");marked=blk;' +
+        'var r=blk.getBoundingClientRect();' +
+        'send({type:"nb-active",top:r.top+(window.pageYOffset||0),h:r.height});}' +
+      'window.addEventListener("message",function(e){var d=e.data;' +
+        'if(!d||d.nbTok!==TOK)return;' +
+        'if(d.type==="nb-follow")follow(d.s||0);' +
+        'else if(d.type==="nb-unfollow"){if(marked)marked.classList.remove("nb-follow-on");marked=null;}});' +
+      'try{var st=document.createElement("style");' +
+        'st.textContent=".nb-follow-on{background:rgba(255,214,0,.38)!important;' +
+        'box-shadow:0 0 0 3px rgba(245,168,0,.45)!important;border-radius:6px;' +
+        'transition:background .25s}@media print{.nb-follow-on{background:none!important;' +
+        'box-shadow:none!important}}";document.head.appendChild(st);}catch(e){}' +
+      'function plain(){var t="";try{t=(document.body&&(document.body.innerText||document.body.textContent))||"";}catch(e){}' +
+        'return t.replace(/[ \\t]+/g," ").replace(/\\n{3,}/g,"\\n\\n").trim().slice(0,60000);}' +
+      'send({type:"nb-ready",ts:tsList().length,text:plain()});height();' +
+    '})();';
+  }
+
+  function withBridge(doc, tok) {
+    var tag = '<scr' + 'ipt>' + bridgeSrc(tok) + '</scr' + 'ipt>';
+    var html = String(doc || '');
+    var at = html.toLowerCase().lastIndexOf('</body>');
+    return at === -1 ? html + tag : html.slice(0, at) + tag + html.slice(at);
+  }
+
+  /* ── parent side ─────────────────────────────────────────────────── */
+  var frame = null, tok = '', docNow = '', tsCount = 0, noteText = '';
+  var manualUntil = 0, evCount = 0;
+
+  function logEvent(kind, detail, hi) {
+    var box = $('events');
+    if (evCount === 0) box.innerHTML = '';
+    evCount++;
+    // Height messages arrive constantly; collapse them into one updating line
+    // so the interesting events stay readable.
+    if (kind === 'nb-height') {
+      var h = box.querySelector('[data-h]');
+      if (h) { h.innerHTML = '<b>nb-height</b> → ' + detail; return; }
+    }
+    var line = document.createElement('div');
+    if (kind === 'nb-height') line.setAttribute('data-h', '1');
+    line.innerHTML = '<b>' + kind + '</b>' + (detail ? ' → ' + (hi ? '<span class="hi">' : '<span>') + detail + '</span>' : '');
+    box.appendChild(line);
+    while (box.childElementCount > 40) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  window.addEventListener('message', function (ev) {
+    var d = ev.data;
+    if (!d || typeof d !== 'object' || !d.nbTok || d.nbTok !== tok) return;
+    // The note's origin is opaque, so ev.origin is "null" and proves nothing.
+    // The window identity is what can be trusted.
+    if (!frame || ev.source !== frame.contentWindow) return;
+    if (d.type === 'nb-height') {
+      frame.style.height = Math.max(240, Math.min(60000, Number(d.h) || 0)) + 'px';
+      logEvent('nb-height', Math.round(d.h) + 'px');
+      return;
+    }
+    if (d.type === 'nb-ready') {
+      tsCount = Number(d.ts) || 0;
+      noteText = typeof d.text === 'string' ? d.text : '';
+      logEvent('nb-ready', tsCount + ' timestamps · ' + noteText.length + ' chars of text');
+      paintFollow();
+      return;
+    }
+    if (d.type === 'nb-seek') {
+      setClock(Number(d.s) || 0);
+      logEvent('nb-seek', 'seek player to ' + fmt(Number(d.s) || 0), true);
+      return;
+    }
+    if (d.type === 'nb-select') {
+      logEvent('nb-select', '“' + String(d.text).slice(0, 70) + '…” (Ask AI popover would open here)');
+      return;
+    }
+    if (d.type === 'nb-unselect') { return; }
+    if (d.type === 'nb-active') { scrollToActive(Number(d.top) || 0, Number(d.h) || 0); return; }
+  });
+
+  function post(msg) {
+    if (!frame || !frame.contentWindow) return;
+    msg.nbTok = tok;
+    try { frame.contentWindow.postMessage(msg, '*'); } catch (e) {}
+  }
+
+  function mount(doc, label) {
+    docNow = String(doc || '');
+    tok = 'nb' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+    tsCount = 0; noteText = ''; evCount = 0;
+    $('events').innerHTML = '<i>waiting…</i>';
+    var stage = $('stage');
+    stage.innerHTML = '';
+    frame = document.createElement('iframe');
+    frame.className = 'noteframe';
+    // No allow-same-origin. See the note under "Bridge traffic".
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.setAttribute('referrerpolicy', 'no-referrer');
+    frame.setAttribute('title', 'AI-designed study notes');
+    stage.appendChild(frame);
+    // Property, never string-concatenated into a srcdoc="" attribute: this is
+    // thousands of lines of generated markup and one stray quote would escape it.
+    frame.srcdoc = withBridge(docNow, tok);
+    $('meta').textContent = label;
+    $('src').textContent = docNow;
+    paintFollow();
+  }
+
+  /* ── mock player ─────────────────────────────────────────────────── */
+  var t = 0, playing = false, timer = null, following = false;
+  function fmt(s) {
+    s = Math.max(0, Math.round(s));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+  function setClock(v) {
+    t = Math.max(0, Math.min(Number($('seek').max), v));
+    $('seek').value = t; $('clock').textContent = fmt(t);
+    if (following) post({ type: 'nb-follow', s: t });
+  }
+  $('seek').addEventListener('input', function () { setClock(Number(this.value)); });
+  $('play').onclick = function () {
+    playing = !playing;
+    this.textContent = playing ? '❙❙ Pause' : '▶ Play';
+    this.classList.toggle('on', playing);
+    if (timer) { clearInterval(timer); timer = null; }
+    if (playing) timer = setInterval(function () { setClock(t + 1); }, 1000);
+  };
+  function paintFollow() {
+    var b = $('follow');
+    b.disabled = !tsCount;
+    b.classList.toggle('on', following && !!tsCount);
+    b.textContent = !tsCount ? '🎯 Follow unavailable' : (following ? '🎯 Following' : '🎯 Follow');
+  }
+  $('follow').onclick = function () {
+    if (!tsCount) return;
+    following = !following;
+    if (following) post({ type: 'nb-follow', s: t });
+    else post({ type: 'nb-unfollow' });
+    paintFollow();
+  };
+  function scrollToActive(topInDoc, blockH) {
+    var sc = $('stage');
+    if (Date.now() < manualUntil) return;
+    var target = frame.offsetTop + topInDoc;
+    var view = sc.clientHeight || 1;
+    var rel = target - sc.scrollTop;
+    if (rel >= view * 0.15 && (rel + Math.min(blockH, view * 0.5)) <= view * 0.78) return;
+    var want = Math.max(0, target - view * 0.22);
+    if (Math.abs(want - sc.scrollTop) < 8) return;
+    try { sc.scrollTo({ top: want, behavior: 'smooth' }); } catch (e) { sc.scrollTop = want; }
+  }
+  ['wheel', 'touchmove', 'keydown'].forEach(function (ev) {
+    $('stage').addEventListener(ev, function () { manualUntil = Date.now() + 2600; }, { passive: ev !== 'keydown' });
+  });
+
+  /* ── toolbar ─────────────────────────────────────────────────────── */
+  $('print').onclick = function () {
+    if (!docNow) return;
+    var w = window.open('', '_blank');
+    if (!w) { setStatus('⚠️ Allow pop-ups to use Print / PDF.', true); return; }
+    w.document.open(); w.document.write(docNow); w.document.close(); w.focus();
+    setTimeout(function () { try { w.print(); } catch (e) {} }, 800);
+  };
+  $('save').onclick = function () {
+    if (!docNow) return;
+    var blob = new Blob([docNow], { type: 'text/html;charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'ai-designed-notes.html';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+  };
+  $('invert').onclick = function () {
+    var on = $('stage').classList.toggle('invert');
+    this.classList.toggle('on', on);
+  };
+  $('viewsrc').onclick = function () {
+    var on = !$('src').classList.toggle('hidden');
+    this.classList.toggle('on', on);
+    this.innerHTML = on ? '&lt;/&gt; Hide source' : '&lt;/&gt; View source';
+  };
+
+  /* ── live generation ─────────────────────────────────────────────── */
+  function setStatus(msg, isErr) {
+    var s = $('status');
+    s.className = 'statusline show' + (isErr ? ' err' : '');
+    s.innerHTML = msg;
+  }
+  function parseId(v) {
+    v = String(v || '').trim();
+    if (/^[\w-]{11}$/.test(v)) return v;
+    var m = v.match(/(?:v=|\/live\/|\/shorts\/|\/embed\/|youtu\.be\/)([\w-]{11})/);
+    return m ? m[1] : '';
+  }
+
+  var ctrl = null;
+  $('stop').onclick = function () { if (ctrl) { ctrl.abort(); ctrl = null; } };
+  $('go').onclick = function () {
+    var backend = ($('backend').value || '').trim().replace(/\/+$/, '');
+    var id = parseId($('url').value);
+    if (!id) { setStatus('⚠️ Enter a valid YouTube URL or 11-character video ID.', true); return; }
+    var lang = $('lang').value, fresh = $('fresh').value === '1';
+    var url = backend + '/api/study?id=' + encodeURIComponent(id) +
+      '&mode=notes&style=html&out=' + encodeURIComponent(lang) + (fresh ? '&refresh=1' : '');
+
+    $('go').disabled = true;
+    setStatus('<span class="spin"></span> Designing, then writing — the first run can take 1–3 minutes for a long lecture.');
+    // Reuse the streaming progress surface: the shape of the wait is the same
+    // even though this endpoint answers in one piece.
+    showProgress();
+
+    ctrl = ('AbortController' in window) ? new AbortController() : null;
+    var to = setTimeout(function () { if (ctrl) ctrl.abort(); }, 300000);
+    var t0 = Date.now();
+
+    fetch(url, ctrl ? { signal: ctrl.signal } : {})
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        clearTimeout(to); $('go').disabled = false; ctrl = null;
+        var secs = ((Date.now() - t0) / 1000).toFixed(1);
+        if (j.error === 'no_captions' || j.warning === 'no_captions') {
+          setStatus('⚠️ This video has no captions, so notes cannot be generated.', true);
+          showPlaceholder('No captions on this video.'); return;
+        }
+        if (j.error) {
+          setStatus('❌ ' + esc(j.error) + (j.detail ? ' — ' + esc(j.detail) : ''), true);
+          showPlaceholder('Nothing generated.'); return;
+        }
+        var content = j.content || '';
+        if (!content.trim()) {
+          setStatus('⚠️ Empty response from the server.', true);
+          showPlaceholder('Nothing generated.'); return;
+        }
+        var looksHtml = /^\s*<!doctype html|^\s*<html/i.test(content);
+        if (!looksHtml) {
+          setStatus('⚠️ The server returned <code>style: ' + esc(j.style || 'topic') +
+            '</code> and Markdown, not an HTML document — it is still running the old ' +
+            'code. Deploy the updated proxy, then try again. Showing it as text.', true);
+          mount('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Raw response</title>' +
+            '<style>body{font:14px/1.6 ui-monospace,monospace;padding:20px;white-space:pre-wrap;' +
+            'word-break:break-word}</style></head><body>' + escHtml(content) + '</body></html>',
+            'Markdown response from an un-updated backend');
+          return;
+        }
+        setStatus('✅ Generated in ' + secs + 's · ' + Math.round(content.length / 1024) + ' KB of HTML.');
+        mount(content, (j.provider || 'ai') + ' · ' + (j.model || '') + ' · ' +
+          (j.cached ? 'cached' : 'fresh') + ' · ' + lang);
+      })
+      .catch(function (e) {
+        clearTimeout(to); $('go').disabled = false;
+        var aborted = e && e.name === 'AbortError';
+        setStatus(aborted
+          ? '⏱️ Stopped. A cold Render instance or a very long lecture can exceed this; try again, or a shorter video.'
+          : '❌ Request failed: ' + esc(String(e)) + '. The server may be asleep — retry in a few seconds.', true);
+        showPlaceholder(aborted ? 'Stopped.' : 'Request failed.');
+        ctrl = null;
+      });
+  };
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  var escHtml = esc;
+  function showPlaceholder(msg) {
+    frame = null; docNow = ''; tsCount = 0;
+    $('stage').innerHTML = '<div class="placeholder">' + esc(msg) + '</div>';
+    paintFollow();
+  }
+
+  /* ── the streaming progress surface ──────────────────────────────── */
+  function showProgress() {
+    frame = null;
+    $('stage').innerHTML =
+      '<div class="hnp"><div class="hnp-card">' +
+        '<span class="hnp-step done" style="border:0;background:none;color:var(--muted)">AI-DESIGNED NOTES</span>' +
+        '<strong id="hnp-stage">Designing your notebook…</strong>' +
+        '<p id="hnp-copy">The AI is choosing a look for this lecture before it starts writing.</p>' +
+        '<div class="hnp-steps">' +
+          '<span class="hnp-step active" data-step="design">Design</span>' +
+          '<span class="hnp-step" data-step="write">Write pages</span>' +
+          '<span class="hnp-step" data-step="render">Render</span>' +
+        '</div>' +
+      '</div></div>';
+  }
+  function progressPaint(acc) {
+    if (!$('hnp-stage')) return;
+    var designed = /<\/style>/i.test(acc);
+    var pages = (acc.match(/<section\b/gi) || []).length;
+    $('hnp-stage').textContent = !designed ? 'Designing your notebook…'
+      : pages ? ('Writing page ' + pages + '…') : 'Design ready — writing the notes…';
+    $('hnp-copy').textContent = !designed
+      ? 'The AI is choosing a look for this lecture before it starts writing.'
+      : 'Pages appear all at once when the document is finished, so the layout never flickers while it is written.';
+    Array.prototype.forEach.call(document.querySelectorAll('.hnp-step[data-step]'), function (el) {
+      var s = el.getAttribute('data-step');
+      var done = (s === 'design' && designed) || (s === 'write' && pages > 1);
+      var active = (s === 'design' && !designed) || (s === 'write' && designed);
+      el.classList.toggle('done', !!done);
+      el.classList.toggle('active', !!active && !done);
+    });
+  }
+
+  /* Replay the wait the same way it looks against the real server, by feeding
+     a bundled document through the progress surface in slices. */
+  $('s-stream').onclick = function () {
+    var doc = SAMPLES.geo(), i = 0;
+    showProgress();
+    setStatus('<span class="spin"></span> Replaying the streaming view with the bundled Geography sample…');
+    var step = setInterval(function () {
+      i = Math.min(doc.length, i + Math.max(400, Math.round(doc.length / 34)));
+      progressPaint(doc.slice(0, i));
+      if (i >= doc.length) {
+        clearInterval(step);
+        setTimeout(function () {
+          mount(doc, 'bundled sample · Geography · replayed stream');
+          setStatus('✅ Replay finished — the document mounts once, complete.');
+        }, 550);
+      }
+    }, 130);
+  };
+
+  /* ════════════════════════════════════════════════════════════════════
+     BUNDLED SAMPLES
+
+     Assembled exactly the way the server assembles a real one:
+       _html_doc_open(css, title, lang) + body fragments + _html_doc_close(js)
+     including the same Content-Security-Policy. Two different subjects, so
+     the claim "the design is chosen per lecture" can be checked rather than
+     taken on trust.
+     ════════════════════════════════════════════════════════════════════ */
+  var CSP = "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; " +
+    "font-src https://fonts.gstatic.com data:; img-src data: blob:; script-src 'unsafe-inline'; " +
+    "connect-src 'none'; form-action 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'";
+
+  function assemble(title, css, body, js) {
+    return '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
+      '<meta http-equiv="Content-Security-Policy" content="' + CSP + '">\n' +
+      '<title>' + title + '</title>\n' +
+      '<link rel="preconnect" href="https://fonts.googleapis.com">\n' +
+      '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n' +
+      '<style>\n' + css + '\n</style>\n</head>\n<body>\n' + body + '\n' +
+      (js ? '<scr' + 'ipt>\n(function(){\ntry{\n' + js + '\n}catch(e){}\n})();\n</scr' + 'ipt>\n' : '') +
+      '</body>\n</html>\n';
+  }
+
+  var SAMPLES = {};
+
+  /* ── Sample A · Geography ──────────────────────────────────────────
+     What a design pass produces for a map-and-diagram subject: ruled
+     paper, pen colours, hand-drawn SVG, exam-tip / common-mistake
+     callouts. Close in spirit to a topper's physical notebook.        */
+  SAMPLES.geo = function () {
+    var css = [
+      "@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Kalam:wght@400;700&display=swap');",
+      ":root{--paper:#faf5e6;--rule:#c7d4ea;--red:#b3121e;--red2:#d6394a;--blue:#17359e;",
+      "  --green:#256d2e;--purple:#6a4c93;--ink:#22303f}",
+      "*{box-sizing:border-box}",
+      "body{margin:0;padding:22px 10px 60px;background:#ded7c4;",
+      // A decorative web font has no arrow or maths glyphs, so the stack ends
+      // with system-ui: without it every -> and >= in the notes is a tofu box.
+      "  font-family:'Kalam','Noto Sans Devanagari',system-ui,'Segoe UI Symbol',sans-serif;",
+      "  color:var(--blue);line-height:1.6}",
+      ".page{position:relative;max-width:900px;margin:0 auto 30px;background:var(--paper);",
+      "  background-image:linear-gradient(var(--rule) 1px,transparent 1px);background-size:100% 34px;",
+      "  background-position:0 74px;padding:30px 30px 34px 62px;border-radius:3px;",
+      "  box-shadow:0 12px 30px rgba(0,0,0,.24)}",
+      ".page::before{content:'';position:absolute;left:46px;top:0;bottom:0;width:2px;",
+      "  background:rgba(179,18,30,.4)}",
+      ".page::after{content:'';position:absolute;left:16px;top:18px;bottom:18px;width:12px;",
+      "  background-image:repeating-radial-gradient(circle at 6px 16px,#9a9a9a 0 3px,transparent 4px 34px);",
+      "  opacity:.4}",
+      ".h-topic{font-family:'Caveat',cursive;font-size:2.1rem;font-weight:700;color:var(--red);",
+      "  margin:0 0 8px;text-decoration:underline wavy var(--red2) 2px;text-underline-offset:6px}",
+      ".h-sub{font-family:'Caveat',cursive;font-size:1.5rem;font-weight:700;color:var(--red2);",
+      "  margin:18px 0 4px}",
+      ".note-list{list-style:none;margin:6px 0 14px;padding:0}",
+      ".note-list li{position:relative;padding-left:20px;margin:5px 0;font-size:1.06rem}",
+      ".note-list li::before{content:'\\2014';position:absolute;left:0;color:var(--blue);font-weight:700}",
+      ".note-list li li{font-size:.98rem;opacity:.92}",
+      ".key-term{font-weight:700;color:#111;background:linear-gradient(100deg,transparent,",
+      "  #fff27a 8%,#fff27a 92%,transparent);padding:0 4px;border-radius:2px}",
+      ".circled{display:inline-block;border:2px solid var(--red);padding:0 8px;",
+      "  border-radius:50% 44% 56% 47%/56% 46% 54% 44%;transform:rotate(-1.6deg)}",
+      ".definition{border-left:3px solid var(--red2);background:rgba(214,57,74,.06);",
+      "  padding:7px 12px;margin:12px 0;font-weight:700;color:var(--red2)}",
+      ".callout{display:inline-block;border:2px dashed;border-radius:11px;padding:8px 13px;",
+      "  margin:8px 10px 12px 0;max-width:330px;vertical-align:top;font-size:.98rem}",
+      ".callout b{display:block;font-size:.72rem;letter-spacing:.5px;margin-bottom:2px}",
+      ".callout.tip{border-color:var(--green);color:var(--green);background:rgba(37,109,46,.07);",
+      "  transform:rotate(-1.2deg)}",
+      ".callout.mistake{border-color:var(--red2);color:#a5202f;background:rgba(214,57,74,.07);",
+      "  transform:rotate(1.1deg)}",
+      ".callout.trick{border-color:var(--purple);color:var(--purple);background:rgba(106,76,147,.07);",
+      "  transform:rotate(-1.7deg)}",
+      ".data-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:1rem}",
+      ".data-table th,.data-table td{border:1px solid #c9bfa4;padding:6px 9px;text-align:left}",
+      ".data-table th{background:rgba(179,18,30,.09);color:var(--red);font-family:'Caveat',cursive;",
+      "  font-size:1.15rem}",
+      ".figure{float:right;width:46%;margin:4px 0 12px 18px;text-align:center}",
+      ".figure svg{width:100%;height:auto;overflow:visible}",
+      ".figure figcaption{font-size:.82rem;color:#6b6b6b;margin-top:3px}",
+      ".clear{clear:both}",
+      ".ai-ts{font-family:'Kalam',cursive;font-size:.72em;font-weight:700;color:var(--red);",
+      "  border:1px solid rgba(179,18,30,.35);border-radius:999px;padding:1px 7px;margin-right:6px;",
+      "  cursor:pointer;vertical-align:2px;background:rgba(255,255,255,.55)}",
+      ".ai-ts:hover{background:#fff27a}",
+      "@media (max-width:680px){.page{padding:22px 16px 26px 44px}.page::before{left:30px}",
+      "  .page::after{left:9px;width:9px}.figure{float:none;width:88%;margin:12px auto}",
+      "  .h-topic{font-size:1.7rem}.callout{max-width:100%}}",
+      "@media print{body{background:#fff;padding:0}",
+      "  .page{box-shadow:none;margin:0 0 8px;break-inside:avoid;page-break-inside:avoid}",
+      "  .ai-ts{border:0;background:none}}"
+    ].join('\n');
+
+    var body = [
+      '<section class="page">',
+      '  <h1 class="h-topic"><a class="ai-ts" data-s="0">0:00</a>NITTO — Option Elimination</h1>',
+      '  <div class="definition">A way to eliminate wrong options by reading the <em>tone</em> of a',
+      '  statement — an edge on top of knowledge, never a replacement for it.</div>',
+      '  <ul class="note-list">',
+      '    <li>Best used in the GK/GS section — Geography, History, Polity</li>',
+      '    <li>Practise in <span class="key-term">mocks first</span>: note the question numbers you',
+      '        applied it to, then check whether the net result was positive</li>',
+      '  </ul>',
+      '  <h2 class="h-sub"><a class="ai-ts" data-s="95">1:35</a>Rule 1 — generalist keywords</h2>',
+      '  <ul class="note-list">',
+      '    <li>Keywords: <span class="key-term">most, may be, some, generally, can be</span></li>',
+      '    <li>Safe, flexible statements → usually <span class="circled">CORRECT</span></li>',
+      '  </ul>',
+      '  <h2 class="h-sub"><a class="ai-ts" data-s="188">3:08</a>Rule 2 — extreme keywords</h2>',
+      '  <ul class="note-list">',
+      '    <li>Keywords: <span class="key-term">all, none, never, only, sole</span></li>',
+      '    <li>Usually wrong — but verify, do not eliminate blindly</li>',
+      '  </ul>',
+      '  <div class="callout mistake"><b>COMMON MISTAKE</b>Do not cut an option just because it',
+      '  contains an extreme word. Cross-check against what you actually know first.</div>',
+      '  <div class="callout trick"><b>MEMORY TRICK</b>“MELC” — Most/May (safe), Extreme (danger),',
+      '  Length (safe), Contrast (exactly one is right).</div>',
+      '  <div class="clear"></div>',
+      '</section>',
+      '<section class="page">',
+      '  <h1 class="h-topic"><a class="ai-ts" data-s="640">10:40</a>Volcanoes &amp; Plate Tectonics</h1>',
+      '  <figure class="figure">',
+      '    <svg viewBox="0 0 240 190" role="img" aria-label="Divergent, convergent and transform plate boundaries">',
+      '      <g fill="none" stroke="#3a3a3a" stroke-width="2">',
+      '        <rect x="8" y="14" width="86" height="26" fill="#e8dcc0"/>',
+      '        <rect x="146" y="14" width="86" height="26" fill="#e8dcc0"/>',
+      '        <path d="M112 27 L86 27" stroke="#b3121e" marker-end="url(#ar)"/>',
+      '        <path d="M128 27 L154 27" stroke="#b3121e" marker-end="url(#ar)"/>',
+      '        <rect x="18" y="86" width="80" height="24" fill="#e8dcc0"/>',
+      '        <path d="M96 108 L136 124" stroke="#3a3a3a"/>',
+      '        <rect x="128" y="80" width="86" height="26" fill="#e8dcc0" transform="rotate(3 171 93)"/>',
+      '        <polygon points="60,86 68,66 76,86" fill="#e8b0a0"/>',
+      '        <rect x="18" y="150" width="94" height="18" fill="#e8dcc0"/>',
+      '        <rect x="128" y="150" width="94" height="18" fill="#e8dcc0"/>',
+      '        <path d="M40 142 L74 142" stroke="#b3121e" marker-end="url(#ar)"/>',
+      '        <path d="M206 176 L172 176" stroke="#b3121e" marker-end="url(#ar)"/>',
+      '      </g>',
+      '      <g font-family="Kalam,cursive" font-size="11" fill="#17359e">',
+      '        <text x="8" y="58">DIVERGENT — new crust</text>',
+      '        <text x="18" y="128">CONVERGENT — subduction</text>',
+      '        <text x="18" y="185">TRANSFORM — San Andreas</text>',
+      '      </g>',
+      '      <defs><marker id="ar" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">',
+      '        <path d="M0,0 L6,3 L0,6 z" fill="#b3121e"/></marker></defs>',
+      '    </svg>',
+      '    <figcaption>Three plate boundaries — sketch</figcaption>',
+      '  </figure>',
+      '  <h2 class="h-sub"><a class="ai-ts" data-s="712">11:52</a>Volcanoes in India</h2>',
+      '  <ul class="note-list">',
+      '    <li><span class="key-term">Barren Island</span> — India\u2019s only ACTIVE volcano</li>',
+      '    <li><span class="key-term">Narcondam Island</span> — DORMANT</li>',
+      '    <li>India has <span class="circled">no extinct</span> volcano</li>',
+      '  </ul>',
+      '  <div class="callout mistake"><b>COMMON MISTAKE</b>“No active volcanoes in India” is extreme',
+      '  and wrong. “No <em>extinct</em> volcano” would have been correct.</div>',
+      '  <div class="clear"></div>',
+      '  <h2 class="h-sub"><a class="ai-ts" data-s="884">14:44</a>Theories</h2>',
+      '  <table class="data-table">',
+      '    <thead><tr><th>Theory</th><th>Given by</th><th>Year</th></tr></thead>',
+      '    <tbody>',
+      '      <tr><td>Continental Drift</td><td>Alfred Wegener</td><td>1912</td></tr>',
+      '      <tr><td>Sea Floor Spreading</td><td>Harry Hess</td><td>1962</td></tr>',
+      '      <tr><td>Plate Tectonics</td><td>McKenzie &amp; Parker</td><td>1967</td></tr>',
+      '    </tbody>',
+      '  </table>',
+      '</section>',
+      '<section class="page">',
+      '  <h1 class="h-topic"><a class="ai-ts" data-s="1310">21:50</a>Western Ghats — Rain Shadow</h1>',
+      '  <figure class="figure" style="float:none;width:96%;margin:6px auto 14px">',
+      '    <svg viewBox="0 0 460 160" role="img" aria-label="Orographic rainfall over the Western Ghats">',
+      '      <polygon points="58,150 210,24 362,150" fill="#e6ddc4" stroke="#3a3a3a" stroke-width="2"/>',
+      '      <path d="M0 150 Q28 141 58 148 M0 136 Q28 127 58 134" fill="none" stroke="#4a7fb5" stroke-width="1.6"/>',
+      '      <path d="M86 126 Q106 92 126 72" fill="none" stroke="#256d2e" stroke-width="2" marker-end="url(#g)"/>',
+      '      <ellipse cx="108" cy="54" rx="26" ry="14" fill="#dfe6ee" stroke="#3a3a3a" stroke-width="1.4"/>',
+      '      <ellipse cx="138" cy="47" rx="19" ry="11" fill="#dfe6ee" stroke="#3a3a3a" stroke-width="1.4"/>',
+      '      <path d="M99 70 L95 81 M111 70 L107 83 M123 68 L119 80" stroke="#17359e" stroke-width="1.6"/>',
+      '      <circle cx="404" cy="42" r="16" fill="none" stroke="#c9a227" stroke-width="2"/>',
+      '      <g font-family="Kalam,cursive" font-size="11">',
+      '        <text x="2" y="126" fill="#17359e">Arabian Sea</text>',
+      '        <text x="66" y="140" fill="#256d2e">WINDWARD — heavy rain</text>',
+      '        <text x="252" y="140" fill="#a5202f">LEEWARD — rain shadow</text>',
+      '      </g>',
+      '      <defs><marker id="g" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">',
+      '        <path d="M0,0 L6,3 L0,6 z" fill="#256d2e"/></marker></defs>',
+      '    </svg>',
+      '    <figcaption>SW monsoon meets the Ghats → orographic rainfall</figcaption>',
+      '  </figure>',
+      '  <ul class="note-list">',
+      '    <li>The Ghats <span class="key-term">block moisture-laden SW monsoon</span> winds off the Arabian Sea</li>',
+      '    <li>Rising moist air = <span class="key-term">anabatic</span>; descending dry air = <span class="key-term">katabatic</span></li>',
+      '    <li>Example: Mumbai (windward, wet) vs Pune (leeward, dry)</li>',
+      '    <li>Western Ghats are CONTINUOUS; Eastern Ghats are DISCONTINUOUS</li>',
+      '  </ul>',
+      '  <div class="callout tip"><b>EXAM TIP</b>“One of the largest” is playing safe and is usually',
+      '  correct. “THE largest” is extreme — check it.</div>',
+      '  <div class="clear"></div>',
+      '</section>'
+    ].join('\n');
+
+    // Behaviour a design pass is allowed to add: a private highlighter. No
+    // network, no storage, nothing that removes note content.
+    var js = [
+      "var pens=['rgba(255,214,0,.45)','rgba(120,220,160,.45)','rgba(160,190,255,.45)'];",
+      "var n=0;",
+      "document.querySelectorAll('.note-list li').forEach(function(li){",
+      "  li.style.cursor='pointer';",
+      "  li.title='Tap to highlight while revising';",
+      "  li.addEventListener('click',function(e){",
+      "    if(e.target.closest('.ai-ts'))return;",
+      "    var cur=li.getAttribute('data-hl');",
+      "    if(cur===null){li.setAttribute('data-hl',String(n));li.style.background=pens[n%pens.length];n++;}",
+      "    else{li.removeAttribute('data-hl');li.style.background='';}",
+      "  });",
+      "});"
+    ].join('\n');
+
+    return assemble('Geography — Topper\u2019s Notes', css, body, js);
+  };
+
+  /* ── Sample B · Organic Chemistry ──────────────────────────────────
+     Same feature, same code path, a completely different design pass
+     result: dark grid "lab notebook", monospace formulas, reaction
+     arrows, and a reveal-the-answer control built from a checkbox.    */
+  SAMPLES.chem = function () {
+    var css = [
+      "@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600;800&display=swap');",
+      ":root{--bg:#0e1116;--panel:#151b23;--panel2:#1b232d;--edge:#26303c;",
+      "  --ink:#dbe4ee;--dim:#8b9aab;--cyan:#37d6c0;--amber:#ffc65c;--rose:#ff6b81;--violet:#a78bfa}",
+      "*{box-sizing:border-box}",
+      "body{margin:0;padding:20px 10px 60px;background:var(--bg);color:var(--ink);",
+      "  font-family:'Inter',system-ui,'Segoe UI Symbol',sans-serif;line-height:1.62;",
+      "  background-image:linear-gradient(var(--edge) 1px,transparent 1px),",
+      "    linear-gradient(90deg,var(--edge) 1px,transparent 1px);",
+      "  background-size:32px 32px;background-position:-1px -1px}",
+      ".page{max-width:880px;margin:0 auto 22px;background:var(--panel);border:1px solid var(--edge);",
+      "  border-radius:14px;padding:22px 24px 26px;box-shadow:0 18px 44px rgba(0,0,0,.5)}",
+      // NOT display:flex. A heading contains inline markup — <sub>, <sup>, <em> —
+      // and flex turns every one of those into a separate flex item, so
+      // "S<sub>N</sub>2" comes apart into "S  N  2" with gaps between.
+      ".h-topic{font-size:1.42rem;font-weight:800;letter-spacing:-.01em;margin:0 0 10px;",
+      "  color:var(--cyan);padding-bottom:9px;",
+      "  border-bottom:1px solid rgba(55,214,192,.35)}",
+      ".h-topic sub,.h-topic sup{font-size:.7em}",
+      ".h-sub{font-size:1.02rem;font-weight:600;color:var(--amber);margin:20px 0 6px;",
+      "  text-transform:uppercase;letter-spacing:.08em}",
+      ".note-list{margin:8px 0 14px;padding-left:20px}",
+      ".note-list li{margin:6px 0}",
+      ".note-list li::marker{color:var(--cyan)}",
+      ".key-term{color:var(--cyan);font-weight:600}",
+      ".formula{font-family:'IBM Plex Mono',monospace;background:#0a0e13;border:1px solid var(--edge);",
+      "  border-left:3px solid var(--violet);border-radius:0 8px 8px 0;padding:10px 14px;margin:10px 0;",
+      "  font-size:.95rem;color:#e8f0f8;overflow-x:auto;white-space:pre}",
+      ".definition{background:var(--panel2);border:1px solid var(--edge);border-radius:10px;",
+      "  padding:11px 14px;margin:12px 0}",
+      ".definition::before{content:'DEFINITION';display:block;font-size:.62rem;font-weight:800;",
+      "  letter-spacing:.14em;color:var(--dim);margin-bottom:4px}",
+      ".callout{border-radius:10px;padding:11px 14px;margin:12px 0;font-size:.92rem;",
+      "  border:1px solid;background:var(--panel2)}",
+      ".callout b{display:block;font-size:.62rem;font-weight:800;letter-spacing:.14em;margin-bottom:3px}",
+      ".callout.tip{border-color:rgba(55,214,192,.4);color:#bff3ea}",
+      ".callout.tip b{color:var(--cyan)}",
+      ".callout.mistake{border-color:rgba(255,107,129,.4);color:#ffd6dc}",
+      ".callout.mistake b{color:var(--rose)}",
+      ".data-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:.9rem;display:block;overflow-x:auto}",
+      ".data-table th,.data-table td{border:1px solid var(--edge);padding:8px 11px;text-align:left;white-space:nowrap}",
+      ".data-table th{background:#0a0e13;color:var(--amber);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase}",
+      ".figure{margin:16px 0;padding:14px;background:#0a0e13;border:1px solid var(--edge);border-radius:10px;text-align:center}",
+      ".figure svg{max-width:100%;height:auto}",
+      ".figure figcaption{font-size:.78rem;color:var(--dim);margin-top:7px}",
+      ".quiz{background:var(--panel2);border:1px solid var(--edge);border-left:3px solid var(--amber);",
+      "  border-radius:0 10px 10px 0;padding:12px 15px;margin:14px 0}",
+      ".quiz .q{font-weight:600;margin-bottom:8px}",
+      ".reveal{appearance:none;-webkit-appearance:none;font:inherit;font-size:.74rem;font-weight:700;",
+      "  letter-spacing:.06em;text-transform:uppercase;cursor:pointer;padding:6px 13px;border-radius:999px;",
+      "  border:1px solid var(--amber);background:transparent;color:var(--amber)}",
+      ".reveal:checked{background:var(--amber);color:#22190a}",
+      ".reveal::after{content:'Show answer'}",
+      ".reveal:checked::after{content:'Hide answer'}",
+      ".answer{max-height:0;overflow:hidden;transition:max-height .3s ease,opacity .2s;opacity:0}",
+      ".reveal:checked + .answer{max-height:340px;opacity:1;margin-top:9px}",
+      ".ai-ts{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:.7em;",
+      "  font-weight:600;color:var(--violet);background:rgba(167,139,250,.12);",
+      "  border:1px solid rgba(167,139,250,.35);border-radius:5px;padding:2px 6px;",
+      "  margin-right:7px;cursor:pointer;vertical-align:2px}",
+      ".ai-ts:hover{background:rgba(167,139,250,.3)}",
+      "@media (max-width:680px){body{padding:12px 6px 40px}.page{padding:16px 15px 20px;border-radius:11px}",
+      "  .h-topic{font-size:1.16rem}.formula{font-size:.84rem}}",
+      "@media print{body{background:#fff;color:#111;background-image:none}",
+      "  .page{background:#fff;border-color:#bbb;box-shadow:none;break-inside:avoid;page-break-inside:avoid}",
+      "  .h-topic{color:#0a6}.h-sub{color:#a60}.formula{background:#f4f4f4;color:#111}",
+      "  .answer{max-height:none!important;opacity:1!important}.reveal{display:none}}"
+    ].join('\n');
+
+    var body = [
+      '<section class="page">',
+      '  <h1 class="h-topic"><a class="ai-ts" data-s="0">0:00</a>Nucleophilic Substitution — S<sub>N</sub>1 vs S<sub>N</sub>2</h1>',
+      '  <div class="definition">A <span class="key-term">nucleophile</span> replaces a leaving group',
+      '  on a saturated carbon. Which of the two mechanisms runs depends on the substrate, the',
+      '  nucleophile and the solvent.</div>',
+      '  <h2 class="h-sub"><a class="ai-ts" data-s="132">2:12</a>S<sub>N</sub>2 — one step</h2>',
+      '  <div class="formula">Nu\u207B  +  R\u2013X   \u2192   [Nu\u00B7\u00B7\u00B7R\u00B7\u00B7\u00B7X]\u207B   \u2192   Nu\u2013R  +  X\u207B\n',
+      '                    transition state          inversion at C</div>',
+      '  <ul class="note-list">',
+      '    <li>Rate = k[R\u2013X][Nu\u207B] — <span class="key-term">second order</span>, bimolecular</li>',
+      '    <li>Backside attack \u2192 <span class="key-term">inversion of configuration</span> (Walden inversion)</li>',
+      '    <li>Order of reactivity: <span class="key-term">methyl &gt; primary &gt; secondary \u226B tertiary</span></li>',
+      '    <li>Favoured by polar <em>aprotic</em> solvents — DMSO, DMF, acetone</li>',
+      '  </ul>',
+      '  <figure class="figure">',
+      '    <svg viewBox="0 0 420 130" role="img" aria-label="Backside attack in an SN2 reaction causing inversion">',
+      '      <g fill="none" stroke="#37d6c0" stroke-width="2">',
+      '        <circle cx="120" cy="65" r="17"/><circle cx="300" cy="65" r="17"/>',
+      '        <path d="M60 65 L98 65" marker-end="url(#c)"/>',
+      '        <path d="M142 65 L182 65" stroke="#ff6b81" marker-end="url(#r)"/>',
+      '        <path d="M212 65 L268 65" stroke="#a78bfa" stroke-width="2.4" marker-end="url(#v)"/>',
+      '        <path d="M120 48 L120 24 M120 82 L104 104 M120 82 L136 104" stroke="#8b9aab" stroke-width="1.6"/>',
+      '        <path d="M300 48 L300 24 M300 82 L284 104 M300 82 L316 104" stroke="#8b9aab" stroke-width="1.6"/>',
+      '        <path d="M322 65 L360 65" marker-end="url(#c)"/>',
+      '      </g>',
+      '      <g font-family="IBM Plex Mono,monospace" font-size="12">',
+      '        <text x="30" y="60" fill="#37d6c0">Nu\u207B</text>',
+      '        <text x="112" y="70" fill="#dbe4ee">C</text>',
+      '        <text x="292" y="70" fill="#dbe4ee">C</text>',
+      '        <text x="186" y="60" fill="#ff6b81">X\u207B</text>',
+      '        <text x="366" y="60" fill="#8b9aab">out</text>',
+      '        <text x="214" y="52" fill="#a78bfa" font-size="10">inversion</text>',
+      '      </g>',
+      '      <defs>',
+      '        <marker id="c" markerWidth="7" markerHeight="7" refX="4" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#37d6c0"/></marker>',
+      '        <marker id="r" markerWidth="7" markerHeight="7" refX="4" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#ff6b81"/></marker>',
+      '        <marker id="v" markerWidth="7" markerHeight="7" refX="4" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#a78bfa"/></marker>',
+      '      </defs>',
+      '    </svg>',
+      '    <figcaption>Nucleophile attacks opposite the leaving group — the centre inverts</figcaption>',
+      '  </figure>',
+      '  <div class="callout mistake"><b>COMMON MISTAKE</b>Tertiary halides do not undergo S<sub>N</sub>2',
+      '  “slowly” — steric crowding blocks the backside approach almost completely. They go S<sub>N</sub>1.</div>',
+      '</section>',
+      '<section class="page">',
+      '  <h1 class="h-topic"><a class="ai-ts" data-s="486">8:06</a>S<sub>N</sub>1 — two steps</h1>',
+      '  <div class="formula">Step 1 (slow):  R\u2013X   \u2192   R\u207A  +  X\u207B      \u2190 rate determining\n',
+      'Step 2 (fast):  R\u207A  +  Nu\u207B   \u2192   Nu\u2013R</div>',
+      '  <ul class="note-list">',
+      '    <li>Rate = k[R\u2013X] — <span class="key-term">first order</span>, nucleophile absent from the rate law</li>',
+      '    <li>Planar carbocation \u2192 attack from either face \u2192 <span class="key-term">racemic mixture</span></li>',
+      '    <li>Reactivity follows carbocation stability: <span class="key-term">tertiary &gt; secondary &gt; primary</span></li>',
+      '    <li>Favoured by polar <em>protic</em> solvents — water, alcohols — which stabilise the ion pair</li>',
+      '  </ul>',
+      '  <h2 class="h-sub"><a class="ai-ts" data-s="702">11:42</a>Side-by-side</h2>',
+      '  <table class="data-table">',
+      '    <thead><tr><th>Feature</th><th>S<sub>N</sub>1</th><th>S<sub>N</sub>2</th></tr></thead>',
+      '    <tbody>',
+      '      <tr><td>Steps</td><td>Two</td><td>One</td></tr>',
+      '      <tr><td>Kinetics</td><td>First order</td><td>Second order</td></tr>',
+      '      <tr><td>Intermediate</td><td>Carbocation</td><td>None (transition state)</td></tr>',
+      '      <tr><td>Stereochemistry</td><td>Racemisation</td><td>Inversion</td></tr>',
+      '      <tr><td>Best substrate</td><td>Tertiary</td><td>Methyl / primary</td></tr>',
+      '      <tr><td>Solvent</td><td>Polar protic</td><td>Polar aprotic</td></tr>',
+      '    </tbody>',
+      '  </table>',
+      '  <div class="callout tip"><b>EXAM TIP</b>Read the solvent before the substrate. Polar protic',
+      '  plus a tertiary halide is S<sub>N</sub>1 nearly every time.</div>',
+      '  <div class="quiz">',
+      '    <div class="q"><a class="ai-ts" data-s="880">14:40</a>2-bromo-2-methylpropane in aqueous',
+      '    ethanol — which mechanism, and what is the product\u2019s stereochemistry?</div>',
+      '    <input type="checkbox" class="reveal" id="q1" aria-label="Show answer"><div class="answer">',
+      '      <strong>S<sub>N</sub>1, racemic.</strong> The substrate is tertiary, so a stable 3\u00B0',
+      '      carbocation forms; aqueous ethanol is polar protic and stabilises it. Water attacks the',
+      '      planar cation from both faces, giving both enantiomers.',
+      '    </div>',
+      '  </div>',
+      '</section>'
+    ].join('\n');
+
+    // A table of contents built from headings that are already in the page —
+    // additive only, never rewriting note content.
+    var js = [
+      "var heads=[].slice.call(document.querySelectorAll('.h-topic'));",
+      "if(heads.length>1){",
+      "  var nav=document.createElement('nav');",
+      "  nav.style.cssText='max-width:880px;margin:0 auto 18px;padding:12px 16px;background:#151b23;'+",
+      "    'border:1px solid #26303c;border-radius:12px;font-size:.82rem';",
+      "  nav.innerHTML='<div style=\"font-size:.62rem;font-weight:800;letter-spacing:.14em;'+",
+      "    'color:#8b9aab;margin-bottom:7px\">ON THIS PAGE</div>';",
+      "  heads.forEach(function(h,i){",
+      "    h.id=h.id||('sec'+i);",
+      "    var a=document.createElement('a');",
+      "    a.href='#'+h.id;",
+      "    a.textContent=(h.textContent||'').replace(/^\\d+:\\d+/,'').trim();",
+      "    a.style.cssText='display:block;color:#37d6c0;text-decoration:none;padding:3px 0';",
+      "    nav.appendChild(a);",
+      "  });",
+      "  document.body.insertBefore(nav,document.body.firstChild);",
+      "}"
+    ].join('\n');
+
+    return assemble('Organic Chemistry — Lab Notebook', css, body, js);
+  };
+
+  $('s-geo').onclick = function () {
+    mount(SAMPLES.geo(), 'bundled sample · Geography · ruled paper, pen colours, SVG sketches');
+    setStatus('📗 Geography sample loaded. Tap a timestamp chip, drag the player and turn on Follow, ' +
+      'select some text, then try Print and View source.');
+  };
+  $('s-chem').onclick = function () {
+    mount(SAMPLES.chem(), 'bundled sample · Organic Chemistry · dark grid, monospace formulas, reveal answers');
+    setStatus('🧪 Chemistry sample loaded — same feature, same code path, a design the model chose ' +
+      'for this subject. Note the reveal-answer control and the generated table of contents.');
+  };
+
+  // Start on the Geography sample so the page is never empty.
+  $('s-geo').click();
+})();
+</script>
+</body>
+</html>

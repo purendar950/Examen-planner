@@ -1537,6 +1537,27 @@
       '.ai-map-wrap{overflow:auto;max-width:100%}',
       '.ai-nb.ai-map{padding:10px 12px}',
       '.ai-nb.ai-poster-paper{padding:14px 16px 20px}',
+      /* ── AI-designed HTML notes (style="html") ──
+         The note is a whole document in a sandboxed frame, so the app styles the
+         CONTAINER only and never the content — the design belongs to the note.
+         The frame is sized to its content height by the bridge so the app's own
+         scroller does the scrolling; a nested scrollbar would swallow touch
+         gestures and break Follow. */
+      '.ai-scroll.ai-htmlnote-scroll{background:#eef1f5;padding:0;border-color:#d9e0e8;overflow:auto;-webkit-overflow-scrolling:touch}',
+      '.ai-htmlnote-frame{display:block;width:100%;border:0;min-height:320px;background:transparent;color-scheme:light}',
+      // Controls that need to read or draw on the note's DOM cannot work across
+      // an origin boundary, so they are hidden rather than left to fail quietly.
+      '.ai-note-htmldoc #ai-focus-annotations-toggle,.ai-note-htmldoc .ai-focus-annotation-bar{display:none!important}',
+      // Progress card shown while an AI-designed note is being written.
+      '.ai-htmlnote-progress{display:flex;justify-content:center;padding:8px 0}',
+      '.ai-htmlnote-progress-card{position:relative;width:100%;max-width:520px;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:22px 20px;border:1px solid var(--border,#2a3140);border-radius:14px;background:var(--surface,#1b1f2a)}',
+      '.ai-htmlnote-progress-card strong{font-size:1.02rem;color:var(--text,#e7ecf5)}',
+      '.ai-htmlnote-progress-card p{margin:0;font-size:.82rem;line-height:1.5;color:var(--muted,#8b93a7);max-width:42ch}',
+      '.ai-hnp-steps{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-top:2px}',
+      '.ai-hnp-step{font-size:.64rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:4px 9px;border-radius:999px;border:1px solid var(--border,#2a3140);color:var(--muted,#8b93a7)}',
+      '.ai-hnp-step.active{border-color:var(--accent,#00c896);color:var(--accent,#00c896)}',
+      '.ai-hnp-step.done{border-color:var(--accent,#00c896);background:var(--accent,#00c896);color:#04120d}',
+      '.ai-hnp-tail{width:100%;max-height:104px;overflow:hidden;margin:4px 0 0;padding:8px 10px;border-radius:9px;background:rgba(0,0,0,.28);border:1px solid var(--border,#2a3140);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.62rem;line-height:1.45;text-align:left;color:var(--muted,#8b93a7);white-space:pre-wrap;word-break:break-all;direction:ltr}',
       '@media (max-width:640px){.ai-nb.ai-map{padding:8px}.ai-poster-grid{grid-template-columns:1fr!important}}',
       '.ai-nb>.ai-lec-on{background:rgba(255,214,0,.45);box-shadow:0 0 0 3px rgba(245,168,0,.5);border-radius:6px}',
       '.ai-btn.ai-follow-on{background:var(--accent,#00c896)!important;color:#04120d!important;border-color:var(--accent,#00c896)!important}',
@@ -1570,7 +1591,7 @@
   // calm and useful while captions are being processed. It deliberately avoids
   // showing raw request text under the floating desktop control rail.
   function notesLoadingHtml(mode, style, lang, force) {
-    var kind = (style === 'mcq') ? 'MCQ notes' :
+    var kind = (style === 'mcq') ? 'MCQ notes' : (style === 'html') ? 'AI-designed notes' :
       (mode === 'summary') ? 'summary' : (mode === 'insights') ? 'key insights' : 'notes';
     var title = force ? 'Creating a fresh set of ' + kind : 'Preparing your ' + kind;
     return '<div class="ai-notes-loading" role="status" aria-live="polite">' +
@@ -1691,7 +1712,8 @@
     if (state.tab === 'notes' && targetEl && targetEl.isConnected && result && result.content) {
       renderNotesResult(saved.mode || result.mode || 'notes', saved.n || 25, saved.style || '', {
         content: result.content, provider: result.provider, model: result.model,
-        cached: !!result.cached, lang: result.out_lang || saved.lang || outLang()
+        cached: !!result.cached, format: result.format || '',
+        lang: result.out_lang || saved.lang || outLang()
       }, targetEl);
     }
   }
@@ -2077,14 +2099,28 @@
     if (lecOn()) setTimeout(lecTick, 120);
   }
 
-  // Notes style toggle (Topic vs Topic+Images vs MCQ) — only meaningful for the "notes" mode.
+  // Notes style toggle — only meaningful for the "notes" mode.
+  // topic / topic+images / mcq all render through nbBuild into this notebook's
+  // markup; 'html' is different in kind — the AI designs and writes the whole
+  // document, which renders in its own frame (see htmlNoteMount).
   function nbNotesStyle() {
     var s = document.getElementById('ai-notes-style');
     if (!s) return 'topic';
     var v = s.value;
     if (v === 'mcq') return 'mcq';
     if (v === 'topic+images') return 'topic+images';
+    if (v === 'html') return 'html';
     return 'topic';
+  }
+  /* The non-default note styles, in one place. Every request that carries a
+     style and every control that restores one reads this list, so adding a
+     style cannot leave one call site behind — which is how a note gets
+     generated in one style and then read back as another. 'topic' is the
+     server's default and is sent as no parameter at all. */
+  var NB_STYLES = ['mcq', 'topic+images', 'html'];
+  function nbStyleOf(v) { return NB_STYLES.indexOf(v) !== -1 ? v : 'topic'; }
+  function nbStyleParam(style) {
+    return NB_STYLES.indexOf(style) !== -1 ? '&style=' + encodeURIComponent(style) : '';
   }
 
   /* ── Notes / Summary / Insights / Flashcards (from /api/study) ──
@@ -2105,7 +2141,7 @@
     }
     el.innerHTML = isNotebookMode
       ? notesLoadingHtml(mode, style, lang, force)
-      : loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
+      : loading((force ? 'Regenerating ' : 'Generating ') + (style === 'mcq' ? 'MCQ ' : style === 'html' ? 'AI-designed ' : '') + mode + ' (' + lang + ')' + (force ? ' (fresh copy)…' : ' (first time takes a bit — it caches after)…'));
     // Clear any note-action buttons parked on the controls line from a previous
     // render; the new result re-populates the slot when it finishes.
     var _naSlot = document.getElementById('ai-note-actions');
@@ -3115,7 +3151,10 @@
 
   function openNotesFocus(box, trigger, options) {
     options = options || {};
-    if (!box || !box.querySelector('.ai-nb')) return;
+    // A rendered note is either the notebook (.ai-nb) or an AI-designed
+    // document in its own frame. Both are worth reading full-screen; the checks
+    // inside (annotations, mark canvas) already opt out on their own.
+    if (!box || !(box.querySelector('.ai-nb') || box.querySelector('.ai-htmlnote-frame'))) return;
     // A second open request must close the existing synthetic history entry
     // first; direct teardown would leave an indistinguishable dead Back step.
     if (_notesFocus) { requestNotesFocusClose(false); return; }
@@ -3227,6 +3266,508 @@
     target.focus();
   });
 
+  /* ══════════════════════════════════════════════════════════════════════
+     AI-DESIGNED HTML NOTES  (notes style "html")
+
+     Every other style renders a KNOWN markup shape: the model emits a fixed
+     Markdown subset and nbBuild() turns it into this notebook's own elements,
+     with this notebook's stylesheet. That is why a chemistry lecture and a
+     history lecture come out looking identical, and why anything the renderer
+     has no rule for cannot be expressed at all.
+
+     Here the server returns a complete standalone HTML document the model wrote
+     itself — its own stylesheet, its own optional behaviour, hand-drawn inline
+     SVG diagrams. It therefore CANNOT share the page with the app: an injected
+     stylesheet would restyle the whole UI, and injected script would run with
+     the app's own privileges.
+
+     So it renders in an iframe sandboxed WITHOUT allow-same-origin. That
+     omission is the load-bearing detail: `allow-scripts allow-same-origin`
+     together void the sandbox, and the note's script could then read the
+     Firebase ID token and appState straight out of localStorage. The document
+     also carries a CSP with `connect-src 'none'`, so even inside its own origin
+     it cannot send anything anywhere.
+
+     The price of a real origin boundary is that the parent cannot reach into the
+     document. The few things that must cross — height, timestamp taps, text
+     selection, follow-the-lecture — travel over postMessage via the bridge
+     script below, which this file injects and the model never sees.
+     ══════════════════════════════════════════════════════════════════════ */
+
+  // No allow-same-origin (see above) and no allow-forms/allow-modals/
+  // allow-top-navigation: the note is a document to read, not an app.
+  var HTMLNOTE_SANDBOX = 'allow-scripts';
+  var _htmlNoteSeq = 0;
+  var _htmlNoteFrames = Object.create(null);   // token -> {el, scroller, tsCount}
+  var _htmlNoteListening = false;
+  var _htmlFollowToken = '';
+  var _htmlFollowTimer = null;
+  var _htmlFollowManualUntil = 0;
+
+  function isHtmlNote(content) {
+    var head = String(content || '').replace(/^\s+/, '').slice(0, 400).toLowerCase();
+    return head.indexOf('<!doctype html') === 0 || head.indexOf('<html') === 0;
+  }
+
+  /* Runs INSIDE the note document. Kept as one string rather than a file
+     because it has to be inlined into srcdoc — the document has no origin it
+     could load a script from, which is the whole point.
+
+     `tok` is minted per mount and only ever written into that one document, so
+     it routes a message to the right frame; the actual trust check on the parent
+     side is `event.source === iframe.contentWindow`. */
+  function htmlNoteBridgeSrc(tok) {
+    return '(function(){' +
+      'var TOK=' + JSON.stringify(tok) + ',P=window.parent;' +
+      'function send(m){try{m.nbTok=TOK;P.postMessage(m,"*");}catch(e){}}' +
+      // Report height so the parent can size the frame to its content and let
+      // the app's own scroller do the scrolling — a nested scrollbar would trap
+      // touch gestures on a phone.
+      'function docH(){var b=document.body,d=document.documentElement;' +
+        'return Math.max(b?b.scrollHeight:0,b?b.offsetHeight:0,d?d.scrollHeight:0,d?d.offsetHeight:0);}' +
+      'var lastH=0;' +
+      'function height(){var h=docH();if(Math.abs(h-lastH)>3){lastH=h;send({type:"nb-height",h:h});}}' +
+      // Fonts swap late, <details> open, and the note\'s own script may rewrite
+      // the DOM at any time, so height is observed AND polled.
+      'window.addEventListener("load",height);window.addEventListener("resize",height);' +
+      'if(window.ResizeObserver){try{new ResizeObserver(height).observe(document.documentElement);}catch(e){}}' +
+      'setInterval(height,600);' +
+      'function tsList(){return [].slice.call(document.querySelectorAll(".ai-ts[data-s]")).map(function(el){' +
+        'return {el:el,s:parseFloat(el.getAttribute("data-s"))||0};}).sort(function(a,b){return a.s-b.s;});}' +
+      // Capture phase, so this wins even if the note\'s own script also listens.
+      'document.addEventListener("click",function(e){' +
+        'var a=e.target&&e.target.closest?e.target.closest(".ai-ts[data-s]"):null;if(!a)return;' +
+        'e.preventDefault();send({type:"nb-seek",s:parseFloat(a.getAttribute("data-s"))||0});},true);' +
+      // Selection travels out with its rectangle so the parent can put its
+      // existing Explain / Verify / Ask popover next to the actual words.
+      'function sel(){var s=null,t="";try{s=window.getSelection();t=String(s||"");}catch(e){return;}' +
+        't=t.replace(/\\s+/g," ").trim();' +
+        'if(!s||s.isCollapsed||!s.rangeCount||t.length<3){send({type:"nb-unselect"});return;}' +
+        'var r=s.getRangeAt(0).getBoundingClientRect();' +
+        'var host=s.getRangeAt(0).startContainer;host=host.nodeType===1?host:host.parentNode;' +
+        'var near=0,c=host;while(c&&c!==document.body){var m=c.querySelector?c.querySelector(".ai-ts[data-s]"):null;' +
+          'if(m){near=parseFloat(m.getAttribute("data-s"))||0;break;}c=c.parentNode;}' +
+        'send({type:"nb-select",text:t.slice(0,4000),s:near,' +
+          'rect:{top:r.top,left:r.left,right:r.right,bottom:r.bottom,width:r.width,height:r.height}});}' +
+      'document.addEventListener("mouseup",sel);document.addEventListener("touchend",sel);' +
+      'document.addEventListener("selectionchange",function(){clearTimeout(sel._t);sel._t=setTimeout(sel,220);});' +
+      // Follow the lecture. The parent owns the clock and the scrolling; this
+      // side owns "which element is current", because only it can see the DOM.
+      'var marked=null;' +
+      'function follow(sec){var l=tsList(),hit=null;' +
+        'for(var i=0;i<l.length;i++){if(l[i].s<=sec+0.4)hit=l[i];else break;}' +
+        'var blk=hit?(hit.el.closest("section,article,div,li,h1,h2,h3,h4,p")||hit.el):null;' +
+        'if(marked&&marked!==blk)marked.classList.remove("nb-follow-on");' +
+        'if(!blk){marked=null;return;}' +
+        'blk.classList.add("nb-follow-on");marked=blk;' +
+        'var r=blk.getBoundingClientRect();' +
+        'send({type:"nb-active",top:r.top+(window.pageYOffset||0),h:r.height});}' +
+      'window.addEventListener("message",function(e){var d=e.data;' +
+        'if(!d||d.nbTok!==TOK)return;' +
+        'if(d.type==="nb-follow")follow(d.s||0);' +
+        'else if(d.type==="nb-unfollow"){if(marked)marked.classList.remove("nb-follow-on");marked=null;}' +
+        'else if(d.type==="nb-height?")height();});' +
+      // The AI designed the note; it did not design the follow highlight, so
+      // the highlight brings its own style rather than hoping a class exists.
+      'try{var st=document.createElement("style");' +
+        'st.textContent=".nb-follow-on{background:rgba(255,214,0,.38)!important;' +
+        'box-shadow:0 0 0 3px rgba(245,168,0,.45)!important;border-radius:6px;' +
+        'transition:background .25s}@media print{.nb-follow-on{background:none!important;' +
+        'box-shadow:none!important}}";document.head.appendChild(st);}catch(e){}' +
+      // The plain text goes out once so the parent can run "Check notes"
+      // against it. The parent cannot read this document, and re-deriving note
+      // text by regex-stripping generated markup would be far less reliable
+      // than letting the document that owns it report it.
+      'function plain(){var t="";try{t=(document.body&&(document.body.innerText||document.body.textContent))||"";}catch(e){}' +
+        'return t.replace(/[ \\t]+/g," ").replace(/\\n{3,}/g,"\\n\\n").trim().slice(0,60000);}' +
+      'send({type:"nb-ready",ts:tsList().length,text:plain()});height();' +
+    '})();';
+  }
+
+  /* Put the bridge inside the document. Appended last so the note's own script
+     has already run, and tolerant of a document with no </body> — a stopped or
+     truncated stream still produces something readable. */
+  function htmlNoteWithBridge(doc, tok) {
+    var tag = '<script>' + htmlNoteBridgeSrc(tok) + '<\/script>';
+    var html = String(doc || '');
+    var at = html.toLowerCase().lastIndexOf('</body>');
+    return at === -1 ? html + tag : html.slice(0, at) + tag + html.slice(at);
+  }
+
+  function htmlNoteListen() {
+    if (_htmlNoteListening) return;
+    _htmlNoteListening = true;
+    window.addEventListener('message', function (ev) {
+      var d = ev.data;
+      if (!d || typeof d !== 'object' || !d.nbTok) return;
+      var reg = _htmlNoteFrames[d.nbTok];
+      if (!reg) return;
+      if (!reg.el || !reg.el.isConnected) { delete _htmlNoteFrames[d.nbTok]; return; }
+      /* The note has an opaque origin, so ev.origin is the string "null" and
+         proves nothing. Identity comes from the window itself: only the document
+         we mounted in this frame can be its contentWindow. */
+      if (ev.source !== reg.el.contentWindow) return;
+      if (d.type === 'nb-height') {
+        // Clamped: a runaway generated layout must not create a 2,000,000px
+        // element that freezes the tab.
+        reg.el.style.height = Math.max(240, Math.min(60000, Number(d.h) || 0)) + 'px';
+        return;
+      }
+      if (d.type === 'nb-ready') {
+        reg.tsCount = Number(d.ts) || 0;
+        reg.text = typeof d.text === 'string' ? d.text : '';
+        htmlNoteFollowPaint();
+        return;
+      }
+      if (d.type === 'nb-seek') {
+        if (typeof ssSeekTo === 'function') ssSeekTo(Math.max(0, Math.round(Number(d.s) || 0)));
+        return;
+      }
+      if (d.type === 'nb-select') {
+        var r = d.rect || {};
+        var fr = reg.el.getBoundingClientRect();
+        // Rect arrives in the note's own viewport coordinates; the frame is not
+        // scrolled internally (it is sized to its content), so one translation
+        // by the frame's position is enough.
+        setPendingNoteContext(d.text, d.s || null);
+        showNotePop({
+          top: fr.top + (r.top || 0), bottom: fr.top + (r.bottom || 0),
+          left: fr.left + (r.left || 0), right: fr.left + (r.right || 0),
+          width: r.width || 0, height: r.height || 0
+        }, d.text, d.s || null);
+        return;
+      }
+      if (d.type === 'nb-unselect') { hideNotePop(); return; }
+      if (d.type === 'nb-active') {
+        htmlNoteScrollTo(reg, Number(d.top) || 0, Number(d.h) || 0);
+        return;
+      }
+    });
+  }
+
+  function htmlNotePost(tok, msg) {
+    var reg = _htmlNoteFrames[tok];
+    if (!reg || !reg.el || !reg.el.isConnected || !reg.el.contentWindow) return;
+    msg.nbTok = tok;
+    try { reg.el.contentWindow.postMessage(msg, '*'); } catch (e) {}
+  }
+
+  /* Soft follow, in the APP's scroller. Same intent as the Markdown engine's
+     safe band: move only when the current note has drifted out of a comfortable
+     reading window, and never fight a student who just scrolled by hand. */
+  function htmlNoteScrollTo(reg, topInDoc, blockH) {
+    var sc = reg.scroller;
+    if (!sc || !sc.isConnected || Date.now() < _htmlFollowManualUntil) return;
+    var target = reg.el.offsetTop + topInDoc;
+    var view = sc.clientHeight || 1;
+    var rel = target - sc.scrollTop;
+    if (rel >= view * 0.15 && (rel + Math.min(blockH, view * 0.5)) <= view * 0.78) return;
+    var want = Math.max(0, target - view * 0.22);
+    if (Math.abs(want - sc.scrollTop) < 8) return;
+    try { sc.scrollTo({ top: want, behavior: 'smooth' }); }
+    catch (e) { sc.scrollTop = want; }
+  }
+
+  function htmlNoteFollowPaint() {
+    var reg = _htmlNoteFrames[_htmlFollowToken];
+    var na = !reg || !reg.tsCount;
+    var on = lecOn() && !na;
+    Array.prototype.forEach.call(
+      document.querySelectorAll('#ai-follow, [data-ai-follow-control]'), function (btn) {
+        btn.classList.toggle('ai-follow-on', on);
+        btn.classList.remove('ai-follow-reading');
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.setAttribute('data-follow-state', on ? 'following' : 'off');
+        btn.disabled = na;
+        btn.textContent = na ? '🎯 Follow unavailable' : (on ? '🎯 Following' : '🎯 Follow');
+        btn.title = na
+          ? 'These notes have no timestamps. Regenerate them to use Follow.'
+          : (on ? 'Following the lecture — scroll freely to read ahead'
+                : 'Auto-highlight and softly follow notes with the lecture');
+      });
+  }
+
+  function htmlNoteFollowTick() {
+    var reg = _htmlNoteFrames[_htmlFollowToken];
+    if (!reg || !reg.el || !reg.el.isConnected) { htmlNoteFollowStop(); return; }
+    if (!lecOn()) return;
+    var t = 0;
+    try { if (typeof ssGetVideoTimestamp === 'function') t = ssGetVideoTimestamp() || 0; } catch (e) {}
+    htmlNotePost(_htmlFollowToken, { type: 'nb-follow', s: t });
+  }
+
+  function htmlNoteFollowStart() {
+    if (_htmlFollowTimer) return;
+    _htmlFollowTimer = setInterval(htmlNoteFollowTick, LEC_POLL_MS);
+    htmlNoteFollowTick();
+  }
+  function htmlNoteFollowStop() {
+    if (_htmlFollowTimer) { clearInterval(_htmlFollowTimer); _htmlFollowTimer = null; }
+  }
+  function htmlNoteFollowToggle() {
+    var reg = _htmlNoteFrames[_htmlFollowToken];
+    if (!reg || !reg.tsCount) {
+      if (typeof showToast === 'function') showToast('Follow unavailable — these notes have no timestamps.', 'info');
+      return;
+    }
+    if (lecOn()) {
+      setLecOn(false);
+      htmlNoteFollowStop();
+      htmlNotePost(_htmlFollowToken, { type: 'nb-unfollow' });
+    } else {
+      setLecOn(true);
+      htmlNoteFollowStart();
+    }
+    htmlNoteFollowPaint();
+  }
+
+  /* Print / save as PDF. The note is already a standalone document with its own
+     @media print rules, so there is nothing to rebuild — unlike the Markdown
+     path, which has to assemble a whole print document from an HTML fragment. */
+  function htmlNotePrint(doc, title) {
+    var w = window.open('', '_blank');
+    if (!w) {
+      if (typeof showToast === 'function') showToast('Allow pop-ups to print these notes', 'error');
+      return;
+    }
+    var html = String(doc || '');
+    if (title) {
+      html = html.replace(/<title>[\s\S]*?<\/title>/i,
+        '<title>' + esc(title) + '<\/title>');
+    }
+    try {
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+      w.focus();
+      setTimeout(function () { try { w.print(); } catch (e) {} }, 800);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Could not open the print view', 'error');
+    }
+  }
+
+  // The note is a real file, so offer it as one. Downloading is also the escape
+  // hatch if a student wants to keep or share the design itself.
+  function htmlNoteDownload(doc, title) {
+    try {
+      var blob = new Blob([String(doc || '')], { type: 'text/html;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = (String(title || 'study-notes').replace(/[^\w\u0900-\u097F -]+/g, '').trim()
+        || 'study-notes').slice(0, 80) + '.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+    } catch (e) {
+      if (typeof showToast === 'function') showToast('Could not download the notes', 'error');
+    }
+  }
+
+  /* Progress surface while an AI-designed note streams in.
+
+     The Markdown styles repaint the growing note on every chunk, which reads
+     beautifully. That is not possible here: re-assigning srcdoc reloads the
+     document, so a per-chunk repaint would flash, restart the note's own script
+     and throw away the reader's scroll position several times a second. Showing
+     honest progress — which stage, how many pages so far, the markup as it
+     arrives — is better than a view that fights itself. The finished document is
+     mounted once, when it is complete. */
+  function htmlNoteStreamHtml() {
+    return '<div class="ai-htmlnote-progress" role="status" aria-live="polite">' +
+      '<div class="ai-htmlnote-progress-card">' +
+        '<span class="ai-notes-loading-kicker">AI-DESIGNED NOTES</span>' +
+        '<span class="ai-notes-loading-orbit" aria-hidden="true"><span></span></span>' +
+        '<strong class="ai-hnp-stage">Designing your notebook…</strong>' +
+        '<p class="ai-hnp-copy">The AI is choosing a look for this lecture before it starts writing.</p>' +
+        '<div class="ai-hnp-steps" aria-hidden="true">' +
+          '<span class="ai-hnp-step" data-step="design">Design</span>' +
+          '<span class="ai-hnp-step" data-step="write">Write pages</span>' +
+          '<span class="ai-hnp-step" data-step="render">Render</span>' +
+        '</div>' +
+        // The raw markup, visible on purpose: this style generates code, and
+        // watching it arrive is the clearest possible sign of life on a slow model.
+        '<pre class="ai-hnp-tail" aria-hidden="true"></pre>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function htmlNoteStreamPaint(root, acc) {
+    if (!root || !root.isConnected) return;
+    var text = String(acc || '');
+    // The stylesheet closes at the end of the design pass, so its presence is
+    // the boundary between "designing" and "writing".
+    var designed = /<\/style>/i.test(text);
+    var pages = (text.match(/<section\b/gi) || []).length;
+    var stage = root.querySelector('.ai-hnp-stage');
+    var copy = root.querySelector('.ai-hnp-copy');
+    var tail = root.querySelector('.ai-hnp-tail');
+    if (stage) {
+      stage.textContent = !designed ? 'Designing your notebook…'
+        : pages ? ('Writing page ' + pages + '…')
+        : 'Design ready — writing the notes…';
+    }
+    if (copy) {
+      copy.textContent = !designed
+        ? 'The AI is choosing a look for this lecture before it starts writing.'
+        : 'Pages appear all at once when the document is finished, so the layout never flickers while it is written.';
+    }
+    Array.prototype.forEach.call(root.querySelectorAll('.ai-hnp-step'), function (el) {
+      var s = el.getAttribute('data-step');
+      var done = (s === 'design' && designed) || (s === 'write' && pages > 1);
+      var active = (s === 'design' && !designed) || (s === 'write' && designed);
+      el.classList.toggle('done', !!done);
+      el.classList.toggle('active', !!active && !done);
+    });
+    // textContent, not innerHTML: this is generated markup being displayed AS
+    // markup, and it has not been sanitised at this point in the stream.
+    if (tail) tail.textContent = text.slice(-700);
+  }
+
+  /* "Check notes" for an AI-designed note. The Markdown version reads .ai-nb
+     directly; here the text was reported by the document itself on nb-ready. */
+  function htmlNoteCheck() {
+    var reg = _htmlNoteFrames[_htmlFollowToken];
+    var text = (reg && reg.text) || '';
+    if (!text) {
+      if (typeof showToast === 'function') showToast('No notes to check yet.', 'info');
+      return false;
+    }
+    var question = NOTE_CHECK_PROMPT;
+    if (text.length > NOTE_EXCERPT_MAX) {
+      text = text.slice(0, NOTE_EXCERPT_MAX);
+      question += ' (Only the first part of my notes is included here.)';
+    }
+    return askAboutNote(question, text, null, {});
+  }
+
+  /* Mount a finished HTML note into `box`. Returns the iframe. */
+  function htmlNoteMount(box, doc, meta) {
+    meta = meta || {};
+    htmlNoteListen();
+    var tok = 'nb' + (++_htmlNoteSeq) + '_' + Math.random().toString(36).slice(2, 10);
+    box.innerHTML = notesFocusToolbarHtml() + brandBarHtml(true) +
+      '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
+      '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' +
+      esc(meta.model || '') + ' · AI-designed' + (meta.cached ? ' · cached' : ' · fresh') +
+      (meta.lang ? ' · ' + esc(meta.lang) : '') + '</span>' +
+      '<button class="ai-btn sec" id="ai-htmlnote-save" title="Download these notes as a self-contained .html file" style="padding:4px 10px;font-size:0.72rem">⤓ Save .html</button>' +
+      '<button class="ai-btn sec" id="ai-notes-focus" title="Read notes in Focus Mode" style="padding:4px 10px;font-size:0.72rem">⛶ Focus</button>' +
+      '<button class="ai-btn sec" id="ai-follow" data-ai-follow-control style="padding:4px 10px;font-size:0.72rem">🎯 Follow</button>' +
+      '<button class="ai-btn sec" id="ai-pdf" title="Print or save as PDF" style="padding:4px 10px;font-size:0.72rem">📄 Print / PDF</button>' +
+      (_showRegen ? '<button class="ai-btn sec" id="ai-regen" title="Generate a fresh copy (ignores the saved one)" style="padding:4px 10px;font-size:0.72rem">↻ Regenerate</button>' : '') +
+      '</div>' +
+      '<div class="ai-scroll nb ai-htmlnote-scroll"></div>';
+    var scroller = box.querySelector('.ai-htmlnote-scroll');
+    var frame = document.createElement('iframe');
+    frame.className = 'ai-htmlnote-frame';
+    frame.setAttribute('sandbox', HTMLNOTE_SANDBOX);
+    frame.setAttribute('referrerpolicy', 'no-referrer');
+    frame.setAttribute('loading', 'eager');
+    frame.setAttribute('title', 'AI-designed study notes');
+    scroller.appendChild(frame);
+    // Assigned as a property, never concatenated into innerHTML: the document is
+    // thousands of lines of generated markup and one unescaped quote in an
+    // srcdoc="" attribute would break out of it.
+    frame.srcdoc = htmlNoteWithBridge(doc, tok);
+    _htmlNoteFrames[tok] = { el: frame, scroller: scroller, tsCount: 0 };
+    _htmlFollowToken = tok;
+    // A hand scroll means "I am reading over here" — pause automatic movement
+    // for a while rather than yanking the page back.
+    ['wheel', 'touchmove', 'keydown'].forEach(function (ev) {
+      scroller.addEventListener(ev, function () {
+        _htmlFollowManualUntil = Date.now() + 2600;
+      }, { passive: ev !== 'keydown' });
+    });
+    htmlNoteFollowStop();
+    htmlNoteFollowPaint();
+    if (lecOn()) htmlNoteFollowStart();
+    return frame;
+  }
+
+  /* Final render for an AI-designed note. Deliberately a sibling of
+     renderNotesResult rather than a branch inside it: almost everything that
+     function does afterwards — per-section ask buttons, the annotation canvas,
+     MCQ extraction, the notebook PDF builder — reaches into `.ai-nb` in the
+     light DOM, which does not exist here. Sharing the code would mean a dozen
+     `if (style === 'html')` guards through a function that is already long. */
+  function renderHtmlNoteResult(mode, n, j, box) {
+    var content = j.content || '';
+    returnTutorFromFocus();
+    setPendingNoteContext(null, null);
+    // Marks the surface so CSS can drop the controls that need in-page DOM
+    // access (private pen annotations cannot be anchored to another origin's
+    // layout, so offering the tool would be a promise this cannot keep).
+    box.classList.add('ai-note-htmldoc');
+    htmlNoteMount(box, content, {
+      provider: j.provider, model: j.model, cached: j.cached, lang: j.lang
+    });
+    var title = pdfTitleFor(mode, 'html');
+    var noteTools = box.querySelector('#ai-note-actions-toggle');
+    if (noteTools) noteTools.onclick = function () {
+      var open = box.classList.toggle('ai-note-actions-open');
+      noteTools.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    var printNote = function () { htmlNotePrint(content, title); };
+    var pb = box.querySelector('#ai-pdf');
+    if (pb) pb.onclick = printNote;
+    var focusPdf = box.querySelector('#ai-focus-pdf');
+    if (focusPdf) focusPdf.onclick = printNote;
+    var save = box.querySelector('#ai-htmlnote-save');
+    if (save) save.onclick = function () { htmlNoteDownload(content, title); };
+    var focusClose = box.querySelector('#ai-focus-close');
+    if (focusClose) focusClose.onclick = requestNotesFocusClose;
+    var focusVideo = box.querySelector('#ai-focus-video');
+    if (focusVideo) focusVideo.onclick = notesFocusVideoAction;
+    var focusFullscreen = box.querySelector('#ai-focus-fullscreen');
+    if (focusFullscreen) focusFullscreen.onclick = notesFocusToggleFullscreen;
+    var focusAskToggle = box.querySelector('#ai-focus-ask-toggle');
+    if (focusAskToggle) focusAskToggle.onclick = toggleFocusAsk;
+    var focusAskClose = box.querySelector('#ai-focus-ask-close');
+    if (focusAskClose) focusAskClose.onclick = closeFocusAsk;
+    var focusVerify = box.querySelector('#ai-focus-verify');
+    if (focusVerify) focusVerify.onclick = function () { htmlNoteCheck(); };
+    /* Night reading still works. The app cannot restyle another origin's
+       document, but it can invert the frame itself as a whole — which is the one
+       case where a CSS filter is a better tool than a stylesheet, because it
+       applies to a design this code has never seen. */
+    var focusInvert = box.querySelector('#ai-focus-invert');
+    if (focusInvert) focusInvert.onclick = function () { toggleNotesInvert(box); };
+    applyNotesInvert(box);
+    var miniClose = box.querySelector('#ai-focus-mini-close');
+    if (miniClose) miniClose.onclick = function () {
+      if (focusVideo) focusVideo.dataset.action = 'mini-hide';
+      notesFocusVideoAction();
+    };
+    var focusOpen = box.querySelector('#ai-notes-focus');
+    if (focusOpen) focusOpen.onclick = function () { openNotesFocus(box, focusOpen); };
+    var rb = box.querySelector('#ai-regen');
+    if (rb) rb.onclick = function () { showStudy(mode, n, true); };
+    // Bind AFTER the buttons are relocated onto the controls line, or the copy
+    // that ends up outside #ai-sub would have no handler.
+    relocateNoteActions(box);
+    Array.prototype.forEach.call(
+      document.querySelectorAll('#ai-follow, [data-ai-follow-control]'), function (btn) {
+        btn.onclick = htmlNoteFollowToggle;
+      });
+    htmlNoteFollowPaint();
+    var capEl = box.querySelector('.ai-meta-bar .ai-muted');
+    var headTitle = document.querySelector('#ai-study-panel .ai-head .ai-title');
+    if (capEl && headTitle) headTitle.title = capEl.textContent;
+    setSetupCollapsed(true);
+    if (window.NotesLibrary && content.trim()) {
+      try {
+        window.NotesLibrary.recordVideoNote({
+          vid: curVid(), title: curTitle(), mode: mode,
+          style: 'html', lang: j.lang || outLang(),
+          courseId: courseIdForVideo(curVid())
+        });
+      } catch (e) {}
+    }
+    checkLangs(mode, n || 25, false);
+  }
+
   // Tracks the last MCQ set auto-published to the Quiz tab (video:count), so
   // re-renders of the same notes don't republish repeatedly.
   var _lastAutoQuizSig = '';
@@ -3236,6 +3777,15 @@
   function renderNotesResult(mode, n, style, j, targetEl) {
     var box = targetEl || contentEl();
     var content = j.content || '';
+    /* AI-designed notes are a whole document, not a Markdown fragment, so they
+       take a completely different path (see htmlNoteMount). The body is sniffed
+       as well as the style checked: `style` can be lost across a reload or an
+       older cached entry, and feeding a full HTML document to the Markdown
+       renderer would show the student a page of escaped tags. */
+    if (style === 'html' || j.format === 'html' || isHtmlNote(content)) {
+      renderHtmlNoteResult(mode, n, j, box);
+      return;
+    }
     /* The ask sheet lives in the markup this function is about to overwrite, so
        reclaim the chat first. Without this the single .ai-tutor-shell node would
        be destroyed mid-conversation along with the ids it owns. */
@@ -3355,8 +3905,7 @@
     var vid = curVid();
     var url = '/api/study?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
     if (mode === 'quiz') url += '&n=' + (n || 25);
-    if (style === 'mcq') url += '&style=mcq';
-    else if (style === 'topic+images') url += '&style=topic+images';
+    url += nbStyleParam(style);
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
     apiGet(url, signal).then(function (j) {
@@ -3499,7 +4048,7 @@
         renderNotesResult(mode, n, style, {
           content: created.content || '', provider: created.provider || 'ai',
           model: created.model || '', cached: !!created.cached,
-          lang: created.out_lang || lang
+          format: created.format || '', lang: created.out_lang || lang
         }, targetEl);
         return;
       }
@@ -3541,6 +4090,7 @@
       lang: initial.out_lang || lang
     };
     var acc = initial.content || '', done = false, built = false, stick = true, scrollEl = null, nbEl = null, metaEl = null;
+    var hnpEl = null;           // AI-designed notes stream into a progress card instead
     var follower = null;
     function detach() { if (follower) follower.stop(); }
 
@@ -3552,28 +4102,33 @@
     }
     function liveMetaText() {
       return (meta.provider || 'ai') + ' · ' + (meta.model || '') +
-        (style === 'mcq' ? ' · MCQ' : '') + (meta.lang ? ' · ' + meta.lang : '') + ' · writing safely…';
+        (style === 'mcq' ? ' · MCQ' : style === 'html' ? ' · AI-designed' : '') +
+        (meta.lang ? ' · ' + meta.lang : '') + ' · writing safely…';
     }
     function refreshLiveMeta() {
       if (metaEl) metaEl.textContent = liveMetaText();
     }
     function paint() {
-      if (!ownsStudyTarget() || (signal && signal.aborted) || (built && (!nbEl || !nbEl.isConnected))) {
+      if (!ownsStudyTarget() || (signal && signal.aborted) ||
+          (built && !(hnpEl ? hnpEl.isConnected : (nbEl && nbEl.isConnected)))) {
         streamPainter.cancel(); return false;
       }
       if (!built) {
         targetEl.innerHTML = brandBarHtml(false, true) +
           '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
           '<span class="ai-muted ai-live-meta" style="flex:1">' + esc(liveMetaText()) + '</span></div>' +
-          '<div class="ai-scroll nb"><div class="ai-nb"></div></div>';
+          (style === 'html' ? htmlNoteStreamHtml()
+            : '<div class="ai-scroll nb"><div class="ai-nb"></div></div>');
         metaEl = targetEl.querySelector('.ai-live-meta');
         scrollEl = targetEl.querySelector('.ai-scroll');
         nbEl = targetEl.querySelector('.ai-nb');
+        hnpEl = targetEl.querySelector('.ai-htmlnote-progress');
         if (scrollEl) scrollEl.addEventListener('scroll', function () {
           stick = (scrollEl.scrollTop + scrollEl.clientHeight) >= (scrollEl.scrollHeight - 40);
         });
         built = true;
       }
+      if (hnpEl) { htmlNoteStreamPaint(hnpEl, acc); return true; }
       if (!nbEl || !nbEl.isConnected) return false;
       nbEl.innerHTML = nbBuild(acc, style) + '<span class="ai-caret"></span>';
       if (stick && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;
@@ -3590,7 +4145,8 @@
       if (ownsUi) {
         _genEnd(btnId);
         renderNotesResult(mode, n, style, {
-          content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached, lang: meta.lang || lang
+          content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached,
+          format: style === 'html' ? 'html' : '', lang: meta.lang || lang
         }, targetEl);
       }
     }
@@ -3648,7 +4204,7 @@
     var styleSel = document.getElementById('ai-notes-style');
     if (modeSel && ['notes', 'summary', 'insights'].indexOf(job.mode) !== -1) modeSel.value = job.mode;
     if (styleSel) {
-      var sv = (job.style === 'mcq') ? 'mcq' : (job.style === 'topic+images') ? 'topic+images' : 'topic';
+      var sv = nbStyleOf(job.style);
       styleSel.value = sv; styleSel.style.display = job.mode === 'notes' ? '' : 'none';
     }
     if (job.stopRequested) {
@@ -3674,8 +4230,7 @@
   function studyStream(mode, n, style, lang, focus, force, signal, btnId) {
     var vid = curVid();
     var url = '/api/study/stream?id=' + vid + '&mode=' + mode + '&out=' + encodeURIComponent(lang) + modelParam();
-    if (style === 'mcq') url += '&style=mcq';
-    else if (style === 'topic+images') url += '&style=topic+images';
+    url += nbStyleParam(style);
     if (force) url += '&refresh=1';
     var meta = {}, acc = '', gotChunk = false, done = false;
     var targetEl = contentEl(), paintRequest = _studyPaintRequest;
@@ -3685,6 +4240,7 @@
     // caret) in view while the user is at the bottom; if they scroll up to re-read
     // mid-generation, following pauses until they scroll back down.
     var built = false, stick = true, scrollEl = null, nbEl = null, metaEl = null;
+    var hnpEl = null;           // AI-designed notes stream into a progress card instead
 
     function ownsStudyTarget() {
       return paintRequest === _studyPaintRequest && targetEl && targetEl.isConnected &&
@@ -3692,14 +4248,15 @@
     }
     function liveMetaText() {
       return (meta.provider || 'ai') + ' · ' + (meta.model || '') +
-        (style === 'mcq' ? ' · MCQ' : '') + (lang ? ' · ' + lang : '') + ' · streaming…';
+        (style === 'mcq' ? ' · MCQ' : style === 'html' ? ' · AI-designed' : '') +
+        (lang ? ' · ' + lang : '') + ' · streaming…';
     }
     function refreshLiveMeta() {
       if (metaEl) metaEl.textContent = liveMetaText();
     }
     function paint() {
       if (!ownsStudyTarget() || (signal && signal.aborted) ||
-          (built && (!nbEl || !nbEl.isConnected))) {
+          (built && !(hnpEl ? hnpEl.isConnected : (nbEl && nbEl.isConnected)))) {
         streamPainter.cancel();
         return false;
       }
@@ -3708,10 +4265,12 @@
         box.innerHTML = brandBarHtml(false, true) +
           '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
           '<span class="ai-muted ai-live-meta" style="flex:1">' + esc(liveMetaText()) + '</span></div>' +
-          '<div class="ai-scroll nb"><div class="ai-nb"></div></div>';
+          (style === 'html' ? htmlNoteStreamHtml()
+            : '<div class="ai-scroll nb"><div class="ai-nb"></div></div>');
         metaEl = box.querySelector('.ai-live-meta');
         scrollEl = box.querySelector('.ai-scroll');
         nbEl = box.querySelector('.ai-nb');
+        hnpEl = box.querySelector('.ai-htmlnote-progress');
         if (scrollEl) {
           scrollEl.addEventListener('scroll', function () {
             // "at bottom" within a small threshold → keep following
@@ -3720,6 +4279,7 @@
         }
         built = true;
       }
+      if (hnpEl) { htmlNoteStreamPaint(hnpEl, acc); return true; }
       if (!nbEl || !nbEl.isConnected) return false;
       nbEl.innerHTML = nbBuild(acc, style) + '<span class="ai-caret"></span>';
       if (stick && scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight;   // follow the writing line
@@ -3745,7 +4305,7 @@
       streamPainter.cancel();
       done = true;
       _genEnd(btnId);
-      renderNotesResult(mode, n, style, { content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached, lang: (meta.lang || lang) }, targetEl);
+      renderNotesResult(mode, n, style, { content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached, format: style === 'html' ? 'html' : '', lang: (meta.lang || lang) }, targetEl);
     }
     function handleFrame(frame) {
       var ev = 'message', data = '';
@@ -3937,7 +4497,7 @@
     var vid = curVid(), bar = document.getElementById('ai-langbar');
     var style = (mode === 'notes') ? nbNotesStyle() : '';
     if (!vid || !bar) return;
-    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + ((style === 'mcq' || style === 'topic+images') ? '&style=' + encodeURIComponent(style) : '') + modelParam()).then(function (j) {
+    apiGet('/api/study/langs?id=' + vid + '&mode=' + mode + '&n=' + (n || 25) + nbStyleParam(style) + modelParam()).then(function (j) {
       // Ignore an older language-cache response after the user has switched a
       // note type/style, tab, video, or rebuilt the workspace.
       if (requestId !== _langCheckRequest || curVid() !== vid || bar !== document.getElementById('ai-langbar')) return;
@@ -4159,12 +4719,15 @@
   function pdfDocumentLabelFor(mode, style) {
     if (style === 'mcq') return 'MCQ Practice Notes';
     if (style === 'topic+images') return 'Topic + Images Notes';
+    if (style === 'html') return 'AI-Designed Notes';
     if (mode === 'summary') return 'Video Summary';
     if (mode === 'insights') return 'Key Insights';
     return 'Comprehensive Notes';
   }
   function pdfTitleFor(mode, style) {
-    var label = mode === 'insights' ? 'Key Insights' : (mode === 'summary' ? 'Summary' : (style === 'mcq' ? 'Notes (MCQ)' : 'Notes'));
+    var label = mode === 'insights' ? 'Key Insights'
+      : (mode === 'summary' ? 'Summary'
+      : (style === 'mcq' ? 'Notes (MCQ)' : (style === 'html' ? 'Notes (AI-designed)' : 'Notes')));
     var t = (curTitle() || 'Video').replace(/\s+/g, ' ').trim();
     return t + ' — ' + label;
   }
@@ -6976,7 +7539,7 @@
       b.innerHTML = '<div class="ai-notes-workspace-intro"><span>Generate Notes</span><p>Turn the video playing beside this panel into revision-ready notes.</p></div>' +
         '<div class="ai-notes-controls">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
-        '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="topic+images">🖼 Topic + Images</option><option value="mcq">❓ MCQ</option></select>' +
+        '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="topic+images">🖼 Topic + Images</option><option value="mcq">❓ MCQ</option><option value="html">🎨 AI Designed</option></select>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
         '<button class="ai-btn sec" id="ai-notes-bundle" title="Combine several lectures into one notebook" style="padding:6px 10px">\uD83D\uDCDA Multi-video</button>' +
         '<button class="ai-btn sec" id="ai-notes-saved" title="Every note the AI has written for you" style="padding:6px 10px">\uD83D\uDDC2 Saved</button>' +
@@ -7921,7 +8484,7 @@
       if (!opts.vid) return;
       var lang = opts.lang || outLang();
       var mode = ['notes', 'summary', 'insights'].indexOf(opts.mode) !== -1 ? opts.mode : 'notes';
-      var style = (opts.style === 'mcq' || opts.style === 'topic+images') ? opts.style : 'topic';
+      var style = nbStyleOf(opts.style);
       setLang(lang);
       // Same sequence the [Course Content | AI Study] switcher uses to open the
       // notes generator, so this cannot drift from the button beside it.
