@@ -146,6 +146,10 @@
   .pill{display:inline-block;font-size:.68rem;font-weight:800;letter-spacing:.05em;
         text-transform:uppercase;padding:3px 8px;border-radius:999px;background:#eef3f7;
         border:1px solid var(--line);color:var(--muted);margin-right:5px}
+  .print-layout{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:.72rem;
+                font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+  .print-layout select{width:auto;min-width:205px;padding:7px 10px;font-size:.8rem;text-transform:none;
+                       letter-spacing:normal;font-weight:600}
 </style>
 </head>
 <body>
@@ -286,11 +290,20 @@
       <code>postMessage</code>, because the note is on an opaque origin the app cannot read.</p>
 
     <div class="row">
+      <label class="print-layout" for="print-layout">PDF test layout
+        <select id="print-layout" aria-label="PDF test layout">
+          <option value="author">AI document layout</option>
+          <option value="a4-columns" selected>App A4 · 2 columns</option>
+        </select>
+      </label>
       <button class="btn-sec" id="print">📄 Print / PDF</button>
       <button class="btn-sec" id="save">⤓ Save .html</button>
       <button class="btn-sec" id="invert" aria-pressed="false" title="Invert colours — dark paper, light ink, easier at night">◐ Night reading</button>
       <button class="btn-sec" id="viewsrc">&lt;/&gt; View source</button>
     </div>
+    <p class="note">Use <b>App A4 · 2 columns</b> to preview and print the app notebook geometry:
+      A4 paper, 5 mm × 3 mm margins, an 8 mm gutter, continuous columns and safe heading breaks.
+      It is a comparison mode only; the raw AI document and Save .html file stay unchanged.</p>
 
     <div class="stage" id="stage" style="margin-top:12px">
       <div class="placeholder">Pick a sample above, or generate from a video.</div>
@@ -346,6 +359,19 @@
     button.setAttribute('aria-pressed', on ? 'true' : 'false');
     button.textContent = on ? '◐ Paper reading' : '◐ Night reading';
   }
+  var PRINT_LAYOUT_KEY = 'aiHtmlNotesDemoPrintLayout';
+  function restorePrintLayout() {
+    var choice = readSetting(PRINT_LAYOUT_KEY, 'a4-columns');
+    $('print-layout').value = choice === 'author' ? 'author' : 'a4-columns';
+  }
+  function usesA4Columns() { return $('print-layout').value === 'a4-columns'; }
+  function hasPageFragments(doc) {
+    return /<body\b/i.test(String(doc || '')) &&
+      /\bclass\s*=\s*(["'])[^"']*\bpage\b[^"']*\1/i.test(String(doc || ''));
+  }
+  function layoutSuffix(doc) {
+    return usesA4Columns() && hasPageFragments(doc) ? ' · A4 / 2-column test' : '';
+  }
   function restoreLanguage() {
     var saved = readSetting('aiStudyLang', '');
     if (saved && Array.prototype.some.call($('lang').options, function (o) { return o.value === saved; })) {
@@ -354,6 +380,7 @@
   }
   applyAppTheme(readSetting('ez_theme', 'light'));
   restoreLanguage();
+  restorePrintLayout();
   applyReaderPreference();
   window.addEventListener('ez-theme-change', function (event) {
     applyAppTheme(event && event.detail && event.detail.theme);
@@ -424,8 +451,34 @@
     return at === -1 ? html + tag : html.slice(0, at) + tag + html.slice(at);
   }
 
+  /* Comparison-only overlay. The standard app notebook exporter owns the
+     Markdown DOM and applies this exact paper geometry through nbPdfCss().
+     HTML notes are authored documents, so the demo injects this only into a
+     disposable reader/print copy: docNow and Save .html remain untouched. */
+  function a4ColumnsStyle() {
+    return '<style data-demo-a4-columns>' +
+      'body[data-demo-a4-columns="1"]{margin:0;padding:12mm 0;background:#e8edf2}' +
+      'body[data-demo-a4-columns="1"] .page{width:210mm;max-width:calc(100% - 18px);min-height:297mm;margin:0 auto 12mm;column-count:2;column-gap:8mm;column-fill:auto;break-inside:auto;page-break-inside:auto}' +
+      'body[data-demo-a4-columns="1"] .page h1,body[data-demo-a4-columns="1"] .page h2,body[data-demo-a4-columns="1"] .page h3,body[data-demo-a4-columns="1"] .page h4,body[data-demo-a4-columns="1"] .page .h-topic,body[data-demo-a4-columns="1"] .page .h-sub{break-after:avoid;page-break-after:avoid}' +
+      'body[data-demo-a4-columns="1"] .page figure,body[data-demo-a4-columns="1"] .page .callout,body[data-demo-a4-columns="1"] .page .formula,body[data-demo-a4-columns="1"] .page .quiz,body[data-demo-a4-columns="1"] .page .q-card{break-inside:avoid;page-break-inside:avoid}' +
+      'body[data-demo-a4-columns="1"] .page table,body[data-demo-a4-columns="1"] .page .factbox{break-inside:auto;page-break-inside:auto}' +
+      'body[data-demo-a4-columns="1"] .page thead{display:table-header-group}' +
+      'body[data-demo-a4-columns="1"] .page tbody tr{break-inside:avoid;page-break-inside:avoid}' +
+      '@media print{@page{size:A4;margin:5mm 3mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box}html{font-size:16px}body[data-demo-a4-columns="1"]{margin:0;padding:0;background:#fff}body[data-demo-a4-columns="1"] .page{width:auto;max-width:none;min-height:0;margin:0 0 4mm;column-count:2;column-gap:8mm;column-fill:auto;break-inside:auto;page-break-inside:auto}}' +
+      '</style>';
+  }
+  function documentForSelectedLayout(doc) {
+    var html = String(doc || '');
+    if (!usesA4Columns() || !hasPageFragments(html)) return html;
+    html = html.replace(/<body\b([^>]*)>/i, function (whole, attrs) {
+      return '<body' + attrs + ' data-demo-a4-columns="1">';
+    });
+    var at = html.toLowerCase().lastIndexOf('</head>');
+    return at === -1 ? a4ColumnsStyle() + html : html.slice(0, at) + a4ColumnsStyle() + html.slice(at);
+  }
+
   /* ── parent side ─────────────────────────────────────────────────── */
-  var frame = null, tok = '', docNow = '', tsCount = 0, noteText = '';
+  var frame = null, tok = '', docNow = '', noteLabel = '', tsCount = 0, noteText = '';
   var manualUntil = 0, evCount = 0;
 
   function logEvent(kind, detail, hi) {
@@ -485,6 +538,7 @@
 
   function mount(doc, label) {
     docNow = String(doc || '');
+    noteLabel = label || noteLabel;
     tok = 'nb' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
     tsCount = 0; noteText = ''; evCount = 0;
     $('events').innerHTML = '<i>waiting…</i>';
@@ -499,8 +553,10 @@
     stage.appendChild(frame);
     // Property, never string-concatenated into a srcdoc="" attribute: this is
     // thousands of lines of generated markup and one stray quote would escape it.
-    frame.srcdoc = withBridge(docNow, tok);
-    $('meta').textContent = label;
+    // The A4 comparison overlay is a separate disposable copy; the raw document
+    // stays in docNow for source view, downloads and the normal AI layout.
+    frame.srcdoc = withBridge(documentForSelectedLayout(docNow), tok);
+    $('meta').textContent = noteLabel + layoutSuffix(docNow);
     $('src').textContent = docNow;
     paintFollow();
   }
@@ -554,11 +610,28 @@
   });
 
   /* ── toolbar ─────────────────────────────────────────────────────── */
+  $('print-layout').addEventListener('change', function () {
+    writeSetting(PRINT_LAYOUT_KEY, this.value);
+    if (!docNow) return;
+    if (usesA4Columns() && !hasPageFragments(docNow)) {
+      setStatus('⚠️ This document has no <code>.page</code> fragments, so it stays in its AI print layout.', true);
+      return;
+    }
+    mount(docNow, noteLabel);
+    setStatus(usesA4Columns()
+      ? '🔬 Showing the app A4 / 2-column comparison layout. The source and saved HTML are unchanged.'
+      : '↩️ Restored the AI document’s original layout.');
+  });
   function printCurrentNote() {
     if (!docNow) return;
-    // Print the completed standalone document, not the sandbox frame or the
-    // filtered reader. Its own @media print rules therefore control page breaks
-    // and the exported PDF keeps the paper version even when Night reading is on.
+    if (usesA4Columns() && !hasPageFragments(docNow)) {
+      setStatus('⚠️ App A4 · 2 columns needs the HTML-notes <code>.page</code> contract. This document keeps its own print layout.', true);
+      return;
+    }
+    // Print a completed standalone document, never the sandbox frame. In test
+    // mode only, a disposable copy adds the app notebook's A4 geometry; the
+    // saved document and the normal AI-document option are never modified.
+    var printable = documentForSelectedLayout(docNow);
     var w = window.open('', '_blank');
     if (!w) { setStatus('⚠️ Allow pop-ups to use Print / PDF.', true); return; }
     var printed = false;
@@ -570,12 +643,14 @@
     }
     w.addEventListener('load', function () { setTimeout(printWhenReady, 120); }, { once: true });
     w.document.open();
-    w.document.write(docNow);
+    w.document.write(printable);
     w.document.close();
     // A document without external resources can finish before the listener is
     // observed; the fallback still gives print CSS and hosted fonts time to settle.
     setTimeout(printWhenReady, 1200);
-    setStatus('🖨️ Opening the note’s print layout. Choose “Save to PDF” in the print dialog.');
+    setStatus(usesA4Columns()
+      ? '🖨️ Opening the app A4 / 2-column test layout. Choose “Save to PDF” in the print dialog.'
+      : '🖨️ Opening the AI document’s print layout. Choose “Save to PDF” in the print dialog.');
   }
   $('print').onclick = printCurrentNote;
   $('save').onclick = function () {
@@ -995,7 +1070,7 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
   function showPlaceholder(msg) {
-    frame = null; docNow = ''; tsCount = 0;
+    frame = null; docNow = ''; noteLabel = ''; tsCount = 0;
     $('stage').innerHTML = '<div class="placeholder">' + esc(msg) + '</div>';
     paintFollow();
   }
