@@ -13,7 +13,7 @@
 <link rel="icon" type="image/svg+xml" href="assets/brand/studyplanner-mark.svg">
 <link rel="apple-touch-icon" sizes="180x180" href="assets/brand/apple-touch-icon.png">
 <link rel="manifest" href="assets/brand/site.webmanifest" vite-ignore>
-<link rel="stylesheet" href="css/app.css?v=20260809b">
+<link rel="stylesheet" href="css/app.css?v=20260813b">
 <!-- Handwriting fonts for AI Study "topper notebook" notes (scoped to .ai-nb / PDF) -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -623,7 +623,7 @@
      getFirebaseIdToken) and BEFORE ai-tutor.js, which reads window.TutorMemory. -->
 <script defer src="js/features/tutor-memory.js?v=20260805b"></script>
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
-<script defer src="js/features/ai-tutor.js?v=20260813a"></script>
+<script defer src="js/features/ai-tutor.js?v=20260813b"></script>
 <!-- 💬 Floating AI Tutor bubble — makes the tutor reachable from every page.
      Holds NO chat logic of its own: it opens a window and ai-tutor.js re-parents
      its single chat node into it. Must load AFTER ai-tutor.js (uses

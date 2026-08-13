@@ -20,6 +20,11 @@
   var LANG_KEY = 'aiStudyLang';
   var MODEL_KEY = 'aiStudyModel';
   var PROVIDER_KEY = 'aiStudyProvider';
+  // HTML notes have two independent AI passes: the usual model writes the
+  // factual notes, while this optional selection writes only the visual design.
+  // Blank preserves the normal, safe default of using the notes AI for both.
+  var DESIGN_MODEL_KEY = 'aiHtmlNotesDesignModel';
+  var DESIGN_PROVIDER_KEY = 'aiHtmlNotesDesignProvider';
   // Telegram channel branding shown on the notes (on-screen header) and in the
   // exported PDF (header handle + watermark + footer link). Single source of truth.
   var TG_CHANNEL = 'StudyPlannerSSC';
@@ -608,6 +613,20 @@
   function setModel(v) { try { localStorage.setItem(MODEL_KEY, v == null ? '' : v); } catch (e) {} }
   function outProvider() { return localStorage.getItem(PROVIDER_KEY) || ''; }
   function setProvider(v) { try { localStorage.setItem(PROVIDER_KEY, v == null ? '' : v); } catch (e) {} }
+  // A blank design choice means "use the Notes AI". Keep these separate from
+  // the primary picker: changing a visual-design experiment must not silently
+  // change the model that writes factual study material.
+  function outDesignModel() { try { return localStorage.getItem(DESIGN_MODEL_KEY) || ''; } catch (e) { return ''; } }
+  function setDesignModel(v) { try { localStorage.setItem(DESIGN_MODEL_KEY, v == null ? '' : v); } catch (e) {} }
+  function outDesignProvider() { try { return localStorage.getItem(DESIGN_PROVIDER_KEY) || ''; } catch (e) { return ''; } }
+  function setDesignProvider(v) { try { localStorage.setItem(DESIGN_PROVIDER_KEY, v == null ? '' : v); } catch (e) {} }
+  function designAiChoice() {
+    return { provider: outDesignProvider(), model: outDesignModel() };
+  }
+  function hasCustomDesignAi(choice) {
+    choice = choice || designAiChoice();
+    return !!(choice.provider || choice.model);
+  }
   function modelParam() {
     var m = outModel(), p = outProvider();
     return (m ? '&model=' + encodeURIComponent(m) : '') +
@@ -1713,7 +1732,9 @@
       renderNotesResult(saved.mode || result.mode || 'notes', saved.n || 25, saved.style || '', {
         content: result.content, provider: result.provider, model: result.model,
         cached: !!result.cached, format: result.format || '',
-        lang: result.out_lang || saved.lang || outLang()
+        lang: result.out_lang || saved.lang || outLang(),
+        design_provider: result.design_provider || '', design_model: result.design_model || '',
+        design_ms: result.design_ms || 0, design_fallback: !!result.design_fallback
       }, targetEl);
     }
   }
@@ -2131,6 +2152,11 @@
     var vid = curVid(), el = contentEl();
     var lang = langOverride || outLang();
     var style = (mode === 'notes') ? nbNotesStyle() : '';
+    // A study cache is intentionally model-agnostic. If the learner selects a
+    // separate Design AI, a cached HTML document would otherwise hide that
+    // choice, so make this a fresh run automatically (as the demo does).
+    var designAi = style === 'html' ? designAiChoice() : { provider: '', model: '' };
+    force = !!force || (style === 'html' && hasCustomDesignAi(designAi));
     var isNotebookMode = mode === 'notes' || mode === 'summary' || mode === 'insights';
     if (!vid) {
       el.innerHTML = isNotebookMode
@@ -3642,6 +3668,16 @@
     return askAboutNote(question, text, null, {});
   }
 
+  /* Summarize the actual AI that authored the HTML document's visual design. */
+  function htmlNoteDesignLabel(meta) {
+    meta = meta || {};
+    if (meta.design_fallback) return 'Design: built-in theme';
+    if (!meta.design_provider && !meta.design_model) return 'Design: same as notes';
+    return 'Design: ' + (meta.design_provider || 'AI') +
+      (meta.design_model ? ' · ' + meta.design_model : '') +
+      (meta.design_ms ? ' · ' + (Number(meta.design_ms) / 1000).toFixed(1) + 's' : '');
+  }
+
   /* Mount a finished HTML note into `box`. Returns the iframe. */
   function htmlNoteMount(box, doc, meta) {
     meta = meta || {};
@@ -3650,7 +3686,8 @@
     box.innerHTML = notesFocusToolbarHtml() + brandBarHtml(true) +
       '<div class="ai-meta-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">' +
       '<span class="ai-muted" style="flex:1">' + esc(meta.provider || 'ai') + ' · ' +
-      esc(meta.model || '') + ' · AI-designed' + (meta.cached ? ' · cached' : ' · fresh') +
+      esc(meta.model || '') + ' · AI-designed · ' + esc(htmlNoteDesignLabel(meta)) +
+      (meta.cached ? ' · cached' : ' · fresh') +
       (meta.lang ? ' · ' + esc(meta.lang) : '') + '</span>' +
       '<button class="ai-btn sec" id="ai-htmlnote-save" title="Download these notes as a self-contained .html file" style="padding:4px 10px;font-size:0.72rem">⤓ Save .html</button>' +
       '<button class="ai-btn sec" id="ai-notes-focus" title="Read notes in Focus Mode" style="padding:4px 10px;font-size:0.72rem">⛶ Focus</button>' +
@@ -3701,7 +3738,9 @@
     // layout, so offering the tool would be a promise this cannot keep).
     box.classList.add('ai-note-htmldoc');
     htmlNoteMount(box, content, {
-      provider: j.provider, model: j.model, cached: j.cached, lang: j.lang
+      provider: j.provider, model: j.model, cached: j.cached, lang: j.lang,
+      design_provider: j.design_provider, design_model: j.design_model,
+      design_ms: j.design_ms, design_fallback: j.design_fallback
     });
     var title = pdfTitleFor(mode, 'html');
     var noteTools = box.querySelector('#ai-note-actions-toggle');
@@ -4011,9 +4050,13 @@
   // too: retrying the same id returns the original job instead of duplicating it.
   function studyJobStart(mode, n, style, lang, focus, force, signal, btnId, targetEl, canRender, resumeJob) {
     var vid = curVid();
+    var selection = resumeJob
+      ? { provider: resumeJob.designProvider || '', model: resumeJob.designModel || '' }
+      : (style === 'html' ? designAiChoice() : { provider: '', model: '' });
     var job = resumeJob || {
       jobId: newStudyJobId(), videoId: vid, mode: mode, n: n || 25, style: style || '',
-      lang: lang, focus: focus || '', force: !!force
+      lang: lang, focus: focus || '', force: !!force,
+      designProvider: selection.provider, designModel: selection.model
     };
     _genControlsStudyJob = true;
     saveStudyJob(job);                 // persist BEFORE POST, not after it returns
@@ -4029,6 +4072,9 @@
       body: JSON.stringify({
         jobId: job.jobId, id: vid, mode: mode, out: lang,
         model: outModel(), provider: outProvider(), style: style || '',
+        // The CSS/layout pass is optional and only used by style="html".
+        // Sending blank values tells the proxy to reuse the Notes AI.
+        designModel: selection.model || '', designProvider: selection.provider || '',
         focus: job.focus || '', refresh: force ? 1 : 0
       })
     }).then(function (r) { return r.ok ? r.json() : jobRequestError(r); }).then(function (created) {
@@ -4048,7 +4094,9 @@
         renderNotesResult(mode, n, style, {
           content: created.content || '', provider: created.provider || 'ai',
           model: created.model || '', cached: !!created.cached,
-          format: created.format || '', lang: created.out_lang || lang
+          format: created.format || '', lang: created.out_lang || lang,
+          design_provider: created.design_provider || '', design_model: created.design_model || '',
+          design_ms: created.design_ms || 0, design_fallback: !!created.design_fallback
         }, targetEl);
         return;
       }
@@ -4087,7 +4135,9 @@
   function studyJobStream(mode, n, style, lang, job, initial, signal, btnId, targetEl, canRender) {
     var meta = {
       provider: initial.provider || 'ai', model: initial.model || '', cached: !!initial.cached,
-      lang: initial.out_lang || lang
+      lang: initial.out_lang || lang,
+      designProvider: initial.design_provider || '', designModel: initial.design_model || '',
+      designMs: initial.design_ms || 0, designFallback: !!initial.design_fallback
     };
     var acc = initial.content || '', done = false, built = false, stick = true, scrollEl = null, nbEl = null, metaEl = null;
     var hnpEl = null;           // AI-designed notes stream into a progress card instead
@@ -4146,7 +4196,9 @@
         _genEnd(btnId);
         renderNotesResult(mode, n, style, {
           content: acc, provider: meta.provider, model: meta.model, cached: !!meta.cached,
-          format: style === 'html' ? 'html' : '', lang: meta.lang || lang
+          format: style === 'html' ? 'html' : '', lang: meta.lang || lang,
+          design_provider: meta.designProvider, design_model: meta.designModel,
+          design_ms: meta.designMs, design_fallback: meta.designFallback
         }, targetEl);
       }
     }
@@ -4176,6 +4228,10 @@
         meta.provider = obj.provider || meta.provider; meta.model = obj.model || meta.model;
         meta.cached = obj.cached != null ? !!obj.cached : meta.cached;
         meta.lang = obj.out_lang || obj.lang || meta.lang;
+        meta.designProvider = obj.design_provider || meta.designProvider;
+        meta.designModel = obj.design_model || meta.designModel;
+        meta.designMs = obj.design_ms || meta.designMs;
+        meta.designFallback = obj.design_fallback != null ? !!obj.design_fallback : meta.designFallback;
         refreshLiveMeta();
         return;
       }
@@ -4207,6 +4263,13 @@
       var sv = nbStyleOf(job.style);
       styleSel.value = sv; styleSel.style.display = job.mode === 'notes' ? '' : 'none';
     }
+    // Restore the exact independent design choice that created this server job,
+    // not a newer selector value the learner may have chosen before reloading.
+    if (job.style === 'html') {
+      setDesignProvider(job.designProvider || '');
+      setDesignModel(job.designModel || '');
+    }
+    syncDesignAiVisibility();
     if (job.stopRequested) {
       _genStart('ai-notes-go');
       _genControlsStudyJob = true;
@@ -7538,6 +7601,7 @@
         '<div class="ai-notes-controls">' +
         '<select id="ai-notes-mode" class="ai-btn sec" style="padding:6px 8px"><option value="notes">Comprehensive notes</option><option value="summary">Summary</option><option value="insights">Key insights</option></select>' +
         '<select id="ai-notes-style" class="ai-btn sec" title="Notes style" style="padding:6px 8px"><option value="topic">📝 Topic</option><option value="topic+images">🖼 Topic + Images</option><option value="mcq">❓ MCQ</option><option value="html">🎨 AI Designed</option></select>' +
+        '<span class="ai-design-ai" id="ai-design-ai" style="display:none" aria-label="AI-designed note appearance"><span>🎨 Design AI</span><select id="ai-design-provider" class="ai-btn sec" title="Design AI provider" aria-label="Design AI provider" style="padding:6px 8px"><option value="">Same as Notes AI</option></select><select id="ai-design-model" class="ai-btn sec" title="Design AI model" aria-label="Design AI model" style="display:none;padding:6px 8px"></select></span>' +
         '<button class="ai-btn" id="ai-notes-go">Generate Notes</button>' +
         '<button class="ai-btn sec" id="ai-notes-bundle" title="Combine several lectures into one notebook" style="padding:6px 10px">\uD83D\uDCDA Multi-video</button>' +
         '<button class="ai-btn sec" id="ai-notes-saved" title="Every note the AI has written for you" style="padding:6px 10px">\uD83D\uDDC2 Saved</button>' +
@@ -7546,7 +7610,10 @@
       var modeSel = document.getElementById('ai-notes-mode');
       var styleSel = document.getElementById('ai-notes-style');
       // MCQ style only applies to comprehensive notes; hide it for summary/insights.
-      function syncStyleVis() { styleSel.style.display = (modeSel.value === 'notes') ? '' : 'none'; }
+      function syncStyleVis() {
+        styleSel.style.display = (modeSel.value === 'notes') ? '' : 'none';
+        syncDesignAiVisibility();
+      }
       syncStyleVis();
       // switching a dropdown: clear stale output + refresh which languages are cached.
       modeSel.onchange = function () {
@@ -7560,8 +7627,13 @@
         _cancelActiveStudy();
         _genEnd('ai-notes-go');
         var sub = document.getElementById('ai-sub'); if (sub) sub.innerHTML = '';
+        syncDesignAiVisibility();
         checkLangs(modeSel.value, 25, false);
       };
+      var designProviderSel = document.getElementById('ai-design-provider');
+      if (designProviderSel) designProviderSel.onchange = onDesignAiProviderChange;
+      var designModelSel = document.getElementById('ai-design-model');
+      if (designModelSel) designModelSel.onchange = function () { setDesignModel(designModelSel.value); };
       document.getElementById('ai-notes-go').onclick = function () { showStudy(modeSel.value); };
       // Hand off to the Notebook page, pre-selecting the course this video
       // belongs to so the common case ("notes for this whole playlist") is one
@@ -7776,6 +7848,75 @@
     }).join('');
     ms.style.display = '';
   }
+  // Populate the optional Design AI picker for HTML notes. It deliberately uses
+  // the same server-approved provider/model catalogue as the main picker, while
+  // keeping its own preference and its "same as Notes AI" default.
+  function applyDesignAiPicker() {
+    var wrap = document.getElementById('ai-design-ai');
+    var ps = document.getElementById('ai-design-provider');
+    var ms = document.getElementById('ai-design-model');
+    if (!wrap || !ps || !ms) return;
+    var provider = outDesignProvider();
+    var group = studyGroupFor(provider);
+    // The Notes body can render before /api/status returns. Preserve a saved
+    // choice during that short loading window; only discard it once a real
+    // catalogue proves that the provider was retired.
+    if (provider && _studyGroups.length && !group) {
+      provider = '';
+      setDesignProvider('');
+      setDesignModel('');
+    }
+    var providerOptions = '<option value=""' + (provider === '' ? ' selected' : '') + '>Same as Notes AI</option>';
+    if (provider && !group) {
+      providerOptions += '<option value="' + esc(provider) + '" selected>Loading saved provider…</option>';
+    }
+    ps.innerHTML = providerOptions +
+      _studyGroups.map(function (g) {
+        return '<option value="' + esc(g.provider) + '"' + (g.provider === provider ? ' selected' : '') +
+          '>' + esc(g.label || g.provider) + '</option>';
+      }).join('');
+    var models = group ? (group.models || []) : [];
+    var model = outDesignModel();
+    if (!provider || !models.length) {
+      ms.style.display = 'none';
+      ms.innerHTML = '';
+      return;
+    }
+    if (models.indexOf(model) === -1) {
+      model = (models.indexOf(_studyDefaultModel) !== -1) ? _studyDefaultModel : (models[0] || '');
+      setDesignModel(model);
+    }
+    ms.innerHTML = models.map(function (m) {
+      return '<option value="' + esc(m) + '"' + (m === model ? ' selected' : '') + '>' + esc(m) + '</option>';
+    }).join('');
+    ms.style.display = '';
+  }
+  function syncDesignAiVisibility() {
+    var wrap = document.getElementById('ai-design-ai');
+    var mode = document.getElementById('ai-notes-mode');
+    var style = document.getElementById('ai-notes-style');
+    if (!wrap) return;
+    var show = !!(mode && style && mode.value === 'notes' && style.value === 'html');
+    wrap.style.display = show ? '' : 'none';
+    if (show) applyDesignAiPicker();
+  }
+  function onDesignAiProviderChange() {
+    var ps = document.getElementById('ai-design-provider');
+    if (!ps) return;
+    var provider = ps.value;
+    setDesignProvider(provider);
+    if (!provider) {
+      setDesignModel('');
+      applyDesignAiPicker();
+      return;
+    }
+    var group = studyGroupFor(provider);
+    var models = group ? (group.models || []) : [];
+    var model = (models.indexOf(_studyDefaultModel) !== -1) ? _studyDefaultModel : (models[0] || '');
+    setDesignModel(model);
+    applyDesignAiPicker();
+  }
+
   // Build the provider dropdown from /api/status, then show the active provider's
   // model list by default. A cached server catalogue keeps the picker usable
   // through short backend outages; stale selections fall back safely.
@@ -7861,6 +8002,7 @@
       showOmniProviderBox(false);
       fillStudyModels(savedProvider, savedModel);
     }
+    applyDesignAiPicker();
   }
   // Provider changed → default to that provider's admin model (else its first)
   // and reveal its model dropdown. Auto hides the model dropdown.
