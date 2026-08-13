@@ -171,6 +171,14 @@
       HTML rather than JSON — a truncated JSON object loses everything, while truncated HTML
       still renders every page that arrived.
     </p>
+    <p class="note">
+      <span class="pill">two models</span> The passes share a <b>fixed class contract</b>, so
+      neither needs the other's output — which means they can run <b>at the same time, on
+      different providers</b>. Writing a stylesheet is short, creative and format-following;
+      writing exam notes from a two-hour transcript is long, factual and context-hungry. Those
+      reward different models, and the design half is short enough to finish while the first
+      body pass is still running, so it costs roughly <b>zero extra wall-clock time</b>.
+    </p>
   </div>
 
   <!-- ══════════ 2 · samples + live generate ══════════ -->
@@ -213,7 +221,20 @@
           <option value="1">Ignore cache (regenerate)</option>
         </select>
       </label>
+      <!-- The two halves are independent calls against a fixed class contract,
+           so they can be pointed at different models and run at the same time. -->
+      <label class="fld">✍️ Notes AI <span class="pill" style="margin-left:4px">writes the content</span>
+        <select id="notes-ai" disabled>
+          <option value="">Auto (server default)</option>
+        </select>
+      </label>
+      <label class="fld">🎨 Design AI <span class="pill" style="margin-left:4px">writes the CSS</span>
+        <select id="design-ai" disabled>
+          <option value="">Same as Notes AI</option>
+        </select>
+      </label>
     </div>
+    <p class="note" id="models-note">Sign in to load the model list from your server.</p>
     <!-- Sign-in strip. /api/study is authenticated AND Pro-gated, so this is
          not optional decoration: without a token the request is a 401. The
          markup, styles and token fallback all come from demo-auth.js, which the
@@ -525,7 +546,80 @@
     needs: 'Generating calls /api/study, which needs a signed-in Pro account. ' +
            'The bundled samples above need nothing.'
   });
-  DemoAuth.onChange(function () { syncGoEnabled(false); });
+  DemoAuth.onChange(function (ready) {
+    syncGoEnabled(false);
+    if (ready) loadModels();
+  });
+
+  /* ════════════════════════════════════════════════════════════════════
+     MODEL CATALOGUE — one list, two pickers
+
+     /api/status returns the providers that actually have a key, so this offers
+     only pairings that can really run. Option values carry BOTH provider and
+     model: model ids like "auto" exist under several providers, so sending the
+     model alone is ambiguous and the proxy could route a choice to the wrong
+     gateway. _load_ai_config treats an explicit provider as authoritative.
+     ════════════════════════════════════════════════════════════════════ */
+  var _modelsLoaded = false;
+
+  function loadModels(force) {
+    if (_modelsLoaded && !force) return;
+    var backend = ($('backend').value || '').trim().replace(/\/+$/, '');
+    var notes = $('notes-ai'), design = $('design-ai');
+    $('models-note').textContent = 'Loading the model list from your server…';
+    var st = 0;
+    DemoAuth.fetch(backend + '/api/status')
+      .then(function (r) { st = r.status; return r.json().catch(function () { return {}; }); })
+      .then(function (j) {
+        var authMsg = DemoAuth.errorMessage(st, j);
+        if (authMsg) { $('models-note').innerHTML = authMsg; return; }
+        var groups = (j && j.studyModelGroups) || [];
+        var flat = (j && j.studyModels) || [];
+        var def = (j && j.studyModel) || '';
+        var opts = '';
+        if (groups.length) {
+          groups.forEach(function (g) {
+            if (!(g.models || []).length) return;
+            opts += '<optgroup label="' + esc(g.label || g.provider) + '">';
+            (g.models || []).forEach(function (m) {
+              opts += '<option value="' + esc(g.provider) + '|' + esc(m) + '">' + esc(m) + '</option>';
+            });
+            opts += '</optgroup>';
+          });
+        } else {
+          flat.forEach(function (m) { opts += '<option value="|' + esc(m) + '">' + esc(m) + '</option>'; });
+        }
+        if (!opts) {
+          $('models-note').textContent = 'No models are configured on this server — add a provider key in the admin panel.';
+          return;
+        }
+        notes.innerHTML = '<option value="">Auto (server default' + (def ? ': ' + esc(def) : '') + ')</option>' + opts;
+        // "Same as Notes AI" is the default so the split is opt-in and nothing
+        // changes for anyone who does not want to think about it.
+        design.innerHTML = '<option value="">Same as Notes AI</option>' + opts;
+        notes.disabled = design.disabled = false;
+        _modelsLoaded = true;
+        $('models-note').innerHTML =
+          'Loaded from <code>/api/status</code> — only providers with a key are listed. ' +
+          'Pick a different <b>Design AI</b> to run the stylesheet on another model, ' +
+          '<b>concurrently</b> with the notes.';
+      })
+      .catch(function (e) {
+        $('models-note').textContent = DemoAuth.failureMessage(e) ||
+          'Could not reach the server to list models — it may be asleep.';
+      });
+  }
+  // Re-fetch against a different backend rather than showing a stale list.
+  $('backend').addEventListener('change', function () { _modelsLoaded = false; loadModels(true); });
+
+  /* "provider|model" -> the pair the proxy expects. */
+  function aiChoice(id) {
+    var raw = ($(id).value || '');
+    if (!raw) return null;
+    var bar = raw.indexOf('|');
+    return { provider: raw.slice(0, bar), model: raw.slice(bar + 1) };
+  }
+  function choiceLabel(c, fallback) { return c ? (c.model || fallback) : fallback; }
 
   /* ── live generation ─────────────────────────────────────────────── */
   function setStatus(msg, isErr) {
@@ -611,6 +705,18 @@
     var id = parseId($('url').value);
     if (!id) { setStatus('⚠️ Enter a valid YouTube URL or 11-character video ID.', true); return; }
     var lang = $('lang').value, fresh = $('fresh').value === '1';
+    var notesAi = aiChoice('notes-ai'), designAi = aiChoice('design-ai');
+
+    /* The cache key is deliberately model-agnostic — a note is identified by
+       (video, mode, language, style), NOT by which model made it. So swapping
+       only the Design AI would otherwise return the previously cached document
+       and look like the setting did nothing. Comparing designs therefore has to
+       force a fresh generation. */
+    if (designAi && !fresh) {
+      fresh = true;
+      setStatus('ℹ️ Forcing a fresh run: the cache is keyed on the video and language, ' +
+        'not on the model, so a cached note would come back unchanged.');
+    }
 
     syncGoEnabled(true);
     setStatus('<span class="spin"></span> Starting the job… a sleeping Render instance can take ~50s to wake.');
@@ -624,7 +730,13 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jobId: mine.id, id: id, mode: 'notes', out: lang,
-        style: 'html', refresh: fresh ? 1 : 0
+        style: 'html', refresh: fresh ? 1 : 0,
+        // Blank strings are omitted so the proxy falls back to its own default
+        // rather than trying to resolve an empty provider.
+        model: notesAi ? notesAi.model : '',
+        provider: notesAi ? notesAi.provider : '',
+        designModel: designAi ? designAi.model : '',
+        designProvider: designAi ? designAi.provider : ''
       })
     }).then(function (r) {
       var st = r.status;
@@ -683,6 +795,10 @@
       parseSse(body, function (ev, data) {
         if (ev === 'meta') {
           if (data.provider) mine.provider = data.provider;
+          if (data.design_provider) mine.designProvider = data.design_provider;
+          if (data.design_model) mine.designModel = data.design_model;
+          if (data.design_ms) mine.designMs = data.design_ms;
+          if (data.design_fallback != null) mine.designFallback = !!data.design_fallback;
           if (data.model) mine.model = data.model;
           if (data.cached != null) mine.cached = !!data.cached;
         } else if (ev === 'chunk' && typeof data.t === 'string') {
@@ -760,9 +876,26 @@
         'Markdown response from an un-updated backend');
       endJob(); return;
     }
+    // Which model wrote the words, and which wrote the look. Reported from the
+    // job's own meta rather than from what was requested, so a design provider
+    // that failed over is visible instead of silently misattributed.
+    var notesLabel = ((meta && meta.provider) || mine.provider || 'ai') +
+      (((meta && meta.model) || mine.model) ? ' · ' + ((meta && meta.model) || mine.model) : '');
+    var dProv = (meta && meta.design_provider) || mine.designProvider || '';
+    var dModel = (meta && meta.design_model) || mine.designModel || '';
+    var dMs = (meta && meta.design_ms) || mine.designMs || 0;
+    var dFallback = (meta && meta.design_fallback) || mine.designFallback;
+    var designLabel = dFallback ? 'built-in theme (the design model did not answer)'
+      : (dProv || dModel) ? (dProv + (dModel ? ' · ' + dModel : '')) + (dMs ? ' in ' + (dMs / 1000).toFixed(1) + 's' : '')
+      : 'same model as the notes';
+
     setStatus('✅ Generated in ' + secs + 's · ' + sizeLabel(content) + ' of HTML' +
-      (meta && meta.cached ? ' (served from cache)' : '') + '.');
-    mount(content, ((meta && meta.provider) || 'ai') + ' · ' + ((meta && meta.model) || '') +
+      (meta && meta.cached ? ' (served from cache)' : '') + '.<br>' +
+      '<b>✍️ Notes:</b> ' + esc(notesLabel) + ' &nbsp;·&nbsp; <b>🎨 Design:</b> ' + esc(designLabel) +
+      (dMs && !dFallback
+        ? ' &nbsp;— written <i>while</i> the notes were, so it added nothing to the ' + secs + 's.'
+        : ''));
+    mount(content, '✍️ ' + notesLabel + '  🎨 ' + designLabel +
       ' · ' + (meta && meta.cached ? 'cached' : 'fresh') + ' · ' + $('lang').value);
     endJob();
   }

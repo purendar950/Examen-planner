@@ -527,7 +527,12 @@ def _s3_delete(doc_id, prefix="study"):
 # Metadata copied into the tiny Firestore index doc (NOT the big body).
 _STUDY_INDEX_FIELDS = ("id", "title", "mode", "style", "out_lang", "model",
                        "num_questions", "provider", "cache_provider", "cache_model",
-                       "transcript_lang", "segment_count")
+                       "transcript_lang", "segment_count",
+                       # style="html" notes are written by TWO models. Recording
+                       # which one styled the note is what makes a saved note
+                       # attributable later — the body model alone does not
+                       # explain why one note looks nothing like another.
+                       "design_provider", "design_model", "design_fallback")
 
 
 def _study_index_doc(data):
@@ -1115,6 +1120,12 @@ NOTES_HTML_DESIGN_CAP = int(os.environ.get("NOTES_HTML_DESIGN_MAX_TOKENS", "3200
 # identity. It needs enough to recognise the subject and the KINDS of content
 # (diagrams? dates? formulas? MCQs?), not the whole transcript.
 NOTES_HTML_DESIGN_SAMPLE = int(os.environ.get("NOTES_HTML_DESIGN_SAMPLE_CHARS", "9000"))
+# How long the body work will wait for the concurrent design pass before giving
+# up on it and using the built-in theme. The design call is a few thousand
+# tokens, so this is generous; it exists so one wedged provider cannot hold a
+# finished set of notes hostage. Comfortably under _AI_TIMEOUT, because a design
+# call that has already hit its own ceiling is not going to arrive.
+_NOTES_HTML_DESIGN_WAIT = int(os.environ.get("NOTES_HTML_DESIGN_WAIT_SEC", "90"))
 # When a model stops because it hit its output-token cap (finish_reason=="length"),
 # the notes would end mid-sentence (seen on smaller models). We detect that and
 # re-prompt the model to CONTINUE from where it stopped, stitching the parts,
@@ -1194,6 +1205,12 @@ def _study_job_public(job):
         # HTML document; feeding one to the Markdown renderer would display a
         # page of escaped tags, so this is stated rather than inferred.
         "format": ("html" if job.get("style") == "html" else "markdown"),
+        # Which model wrote the stylesheet, how long it took, and whether it had
+        # to fall back to the built-in theme. Absent until the design lands.
+        "design_provider": job.get("design_provider") or "",
+        "design_model": job.get("design_model") or "",
+        "design_ms": job.get("design_ms") or 0,
+        "design_fallback": bool(job.get("design_fallback")),
         "error": job.get("error", ""),
     }
     # Multi-video notebooks add per-lecture progress. Single-video jobs keep the
@@ -2649,6 +2666,48 @@ def _study_sys(out_lang):
             " Stay strictly faithful to the transcript — never invent facts.")
 
 
+def _load_design_ai(prefer_model=None, prefer_provider=None):
+    """The provider/model that writes the STYLESHEET for style="html" notes.
+
+    Design and content are two independent calls (see _HTML_COMPONENTS), so they
+    do not have to come from the same model — and they reward different ones.
+    Writing a stylesheet is a short, creative, format-following task; writing
+    exam notes from a two-hour transcript is a long, factual, big-context one.
+    Being able to point each half at the model that is actually good at it is
+    the whole reason this is split.
+
+    Resolution order: explicit request parameter, then the admin's
+    config/ai.designProvider / designModel, then None — and None means the
+    caller reuses the notes provider, so nothing changes for anyone who has not
+    configured a second one.
+    """
+    prefer_model = (prefer_model or "").strip()[:80]
+    prefer_provider = (prefer_provider or "").strip()[:40]
+    if not prefer_model and not prefer_provider:
+        cfg = {}
+        if _fb_db:
+            try:
+                doc = _fb_db.collection("config").document("ai").get()
+                if doc.exists:
+                    cfg = doc.to_dict() or {}
+            except Exception as exc:  # noqa: BLE001
+                log.warning("config/ai read failed while resolving design AI: %s", exc)
+        prefer_provider = (cfg.get("designProvider") or "").strip().lower()
+        prefer_model = (cfg.get("designModel") or "").strip()
+        if not prefer_model and not prefer_provider:
+            return None
+    ai = _load_ai_config(prefer_model or None, prefer_provider or None)
+    # An explicitly requested design provider with no key would silently produce
+    # the fallback theme on every note. Reusing the notes provider is the more
+    # useful failure: the design is still AI-authored, just not by the requested
+    # model, and _record_design_meta reports which model actually ran.
+    if not _ai_configured(ai):
+        log.warning("design AI %s/%s has no key — falling back to the notes provider",
+                    prefer_provider or "-", prefer_model or "-")
+        return None
+    return ai
+
+
 def _head_title(head):
     """Recover the video title from the `head` preamble every study caller
     builds as "Video title: ...\\n\\n". Read back rather than threaded through a
@@ -2687,7 +2746,7 @@ def _covered_note(headings, style=""):
             + "\n- ".join(shown) + "\n\n")
 
 
-def _gen_notes(transcript, out_lang, ai, head, style=""):
+def _gen_notes(transcript, out_lang, ai, head, style="", design_ai=None, meta=None):
     """COMPREHENSIVE notes covering the whole transcript. Big-context providers
     process the transcript section-by-section (so nothing gets cut by the output
     limit); non-big providers use the condensed body.
@@ -2697,7 +2756,8 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
     HTML document instead of Markdown (see _gen_notes_html)."""
     if style == "html":
         return _gen_notes_html(transcript, out_lang, ai, head,
-                               _head_title(head))
+                               _head_title(head),
+                               design_ai=design_ai, meta=meta)
     sysmsg = _study_sys(out_lang)
     instr = _notes_instr(style)
     # Restated after the transcript: the transcript is the last thing the model
@@ -2864,11 +2924,45 @@ def _notes_instr(style=""):
 # script can contain, so a plain string split is enough — no JSON to truncate.
 _HTML_CSS_MARK = "===CSS==="
 _HTML_JS_MARK = "===JS==="
-_HTML_COMPONENTS_MARK = "===COMPONENTS==="
 
-# Used when the design pass fails, returns nothing usable, or omits the CSS
-# marker. A readable note with plain styling always beats an error, and the body
-# pass has already been told which class names exist, so the two still agree.
+# ── THE COMPONENT CONTRACT ───────────────────────────────────────────────────
+# The fixed set of semantic slots both passes are given up front.
+#
+# This used to be negotiated: the design pass invented class names, declared
+# them, and the body pass was handed that declaration. That made the body pass
+# DEPEND on the design pass's output, which forced the two to run one after the
+# other — and the dependency bought nothing, because two independent model calls
+# agreeing on invented identifiers is a coin toss. When they disagreed (design
+# emits `.topic-header`, writer emits `.h-topic`) the note rendered completely
+# unstyled, and nothing detected it.
+#
+# Fixing the vocabulary removes the dependency, so the two passes can run at the
+# same time on two different providers, and removes the failure mode. What it
+# costs is the ability to invent new slot NAMES — not the ability to design. The
+# design pass still chooses every colour, font, weight, border, background,
+# spacing rule, decoration, page shape, print behaviour and optional script; it
+# simply attaches them to agreed hooks. That is what a design system is.
+_HTML_COMPONENTS = (
+    "- .page — one page/screen of notes (every section is wrapped in this)\n"
+    "- .h-topic — main topic heading\n"
+    "- .h-sub — sub-topic heading\n"
+    "- .note-list — <ul>/<ol> of detail points\n"
+    "- .key-term — inline emphasis for a keyword\n"
+    "- .definition — a definition block\n"
+    "- .callout — an exam tip / common mistake / memory trick\n"
+    "- .callout-tip, .callout-warn, .callout-trick — added ALONGSIDE .callout "
+    "to say which of the three it is\n"
+    "- .data-table — a comparison or fact table (<table>)\n"
+    "- .figure — a <figure> holding an inline <svg> diagram + <figcaption>\n"
+    "- .formula — a formula / equation / worked expression\n"
+    "- .quiz — a question block\n"
+    "- .quiz-q — the question text inside .quiz\n"
+    "- .reveal — an <input type=\"checkbox\"> that hides/shows an answer\n"
+    "- .answer — the answer, revealed by the .reveal next to it\n"
+    "- .ai-ts — an inline lecture-timestamp link\n")
+
+# Used when the design pass fails or returns nothing usable. A readable note
+# with plain styling always beats an error. Covers the whole contract above.
 _HTML_FALLBACK_CSS = """
 :root{--paper:#fffdf6;--ink:#22303f;--accent:#c62828;--accent2:#1565c0;
       --soft:#eef2f6;--line:#d7e0e8}
@@ -2893,24 +2987,30 @@ body{margin:0;padding:18px;background:#e8ecf1;color:var(--ink);
 .figure{margin:12px 0;text-align:center}
 .figure svg{max-width:100%;height:auto}
 .figure figcaption{font-size:.86rem;opacity:.7;margin-top:4px}
+.callout-tip{background:#e8f5e9;border-color:#a5d6a7}
+.callout-warn{background:#fdecea;border-color:#f5c6c2}
+.callout-trick{background:#f3e5f5;border-color:#ce93d8}
+.formula{font-family:ui-monospace,"Cascadia Mono",Menlo,monospace;background:#0f1722;
+         color:#dbe4ee;padding:10px 13px;border-radius:8px;margin:10px 0;
+         overflow-x:auto;white-space:pre-wrap}
+.quiz{background:var(--soft);border-left:4px solid var(--accent);
+      padding:11px 14px;margin:12px 0;border-radius:0 8px 8px 0}
+.quiz-q{font-weight:700;margin-bottom:7px}
+.reveal{appearance:none;-webkit-appearance:none;font:inherit;font-size:.74rem;
+        font-weight:700;cursor:pointer;padding:5px 12px;border-radius:999px;
+        border:1px solid var(--accent);background:transparent;color:var(--accent)}
+.reveal::after{content:"Show answer"}
+.reveal:checked{background:var(--accent);color:#fff}
+.reveal:checked::after{content:"Hide answer"}
+.answer{max-height:0;overflow:hidden;opacity:0;transition:max-height .3s,opacity .2s}
+.reveal:checked + .answer{max-height:400px;opacity:1;margin-top:8px}
 .ai-ts{color:var(--accent2);cursor:pointer;text-decoration:underline dotted;
        font-size:.82em;font-weight:700}
-@media print{body{background:#fff;padding:0}.page{box-shadow:none;margin:0 0 10px}}
+@media (max-width:680px){body{padding:10px}.page{padding:16px 15px}}
+@media print{body{background:#fff;padding:0}
+  .page{box-shadow:none;margin:0 0 10px;break-inside:avoid}
+  .answer{max-height:none!important;opacity:1!important}.reveal{display:none}}
 """
-
-# The component vocabulary the body pass may use when the design pass didn't
-# declare one. Mirrors _HTML_FALLBACK_CSS.
-_HTML_FALLBACK_COMPONENTS = (
-    "- .page — one page/screen of notes (wrap every section in this)\n"
-    "- .h-topic — main topic heading\n"
-    "- .h-sub — sub-topic heading\n"
-    "- .note-list — <ul>/<ol> of detail points\n"
-    "- .key-term — inline emphasis for a keyword\n"
-    "- .definition — a definition block\n"
-    "- .callout — an exam tip / warning / memory trick\n"
-    "- .data-table — a comparison or fact table\n"
-    "- .figure — a <figure> holding an inline <svg> diagram + <figcaption>\n"
-    "- .ai-ts — an inline lecture-timestamp link\n")
 
 
 def _html_design_instr(out_lang):
@@ -2931,27 +3031,29 @@ def _html_design_instr(out_lang):
         "hand-drawn diagrams; a mathematics lecture wants a grid background and "
         "space for formulas; a history lecture wants timelines; a lecture that "
         "solves MCQs wants question cards with option rows. Choose colours, "
-        "fonts, spacing and components accordingly. Do NOT reuse a generic "
+        "fonts, spacing and decoration accordingly. Do NOT reuse a generic "
         "template — the design must be recognisably about this subject.\n\n"
-        "Reply in EXACTLY these three sections, in this order, with nothing "
+        "You are styling a FIXED set of hooks. Another model is writing the "
+        "notes against the same list AT THE SAME TIME as you, so you cannot "
+        "invent new class names for it to use — it will never see your reply. "
+        "Style EVERY class in this list:\n"
+        + _HTML_COMPONENTS + "\n"
+        "You may add extra classes of your own for purely decorative purposes, "
+        "and you may style `body`, `section`, `h1`-`h4`, `ul`, `li`, `table`, "
+        "`th`, `td`, `svg`, `figcaption`, `button` and `input` directly.\n\n"
+        "Reply in EXACTLY these two sections, in this order, with nothing "
         "before, between or after them except the markers:\n\n"
         + _HTML_CSS_MARK + "\n"
         "<plain CSS only — no <style> tag, no markdown code fences>\n"
-        + _HTML_COMPONENTS_MARK + "\n"
-        "<one '- .class-name — what it is for' line per component>\n"
         + _HTML_JS_MARK + "\n"
         "<plain JavaScript only — no <script> tag. May be empty.>\n\n"
         "CSS REQUIREMENTS (the notes will not render correctly otherwise):\n"
-        "- Style a `.page` class: one page/screen of notes. Also style `body`.\n"
-        "- Define a class for: main headings, sub-headings, detail lists, "
-        "inline keyword emphasis, definitions, callouts (exam tip / common "
-        "mistake / memory trick), tables, and figures holding inline SVG.\n"
+        "- Style `body` and `.page` (one page/screen of notes).\n"
         "- Style `.ai-ts` (inline lecture-timestamp links) as small, clickable "
-        "and visually secondary. Keep this exact class name.\n"
-        "- If your design has study controls (a 'reveal the answer' toggle, a "
-        "collapsible section), style the `<button>` and "
-        "`<input type=\"checkbox\">` that drive them, and declare their classes "
-        "below so the writer can use them.\n"
+        "and visually secondary.\n"
+        "- `.answer` must be HIDDEN until its `.reveal` checkbox is checked, "
+        "using the adjacent-sibling selector `.reveal:checked + .answer`. Never "
+        "hide it with `display:none` alone \u2014 it must still print.\n"
         "- Mobile-first and responsive: the notes are read on phones. Use "
         "relative units, wrap long tables, and add a `@media (max-width:680px)` "
         "block that reduces padding and font sizes.\n"
@@ -2973,11 +3075,6 @@ def _html_design_instr(out_lang):
         "- You may @import Google Fonts from https://fonts.googleapis.com ONLY. "
         "No other external URL will load: images, scripts and network requests "
         "from other origins are blocked, so never reference one.\n\n"
-        "COMPONENT LIST REQUIREMENTS:\n"
-        "- List EVERY class the writer is allowed to use, including `.page` and "
-        "`.ai-ts`. The writer can use nothing else, so anything you leave out "
-        "will never appear in the notes.\n"
-        "- Keep class names lowercase-hyphenated and self-describing.\n\n"
         "JAVASCRIPT REQUIREMENTS:\n"
         "- Optional. Only add behaviour that genuinely helps studying: "
         "collapsible sections, a 'hide answers' revision toggle, highlight-on-"
@@ -2992,8 +3089,12 @@ def _html_design_instr(out_lang):
         "labels created by your JS) in " + out_lang + ".")
 
 
-def _html_body_instr(components, out_lang, part_no=0, part_total=0):
-    """Pass 2. Writes the notes as HTML fragments against pass 1's vocabulary.
+def _html_body_instr(out_lang, part_no=0, part_total=0):
+    """Pass 2. Writes the notes as HTML fragments against the fixed contract.
+
+    Takes NO input from the design pass — that is the point. The vocabulary is
+    _HTML_COMPONENTS, known to both sides in advance, so this call can run at the
+    same time as the design call, on a different provider.
 
     Fragments only — no <html>/<head>/<style>. That is what lets N chunks be
     concatenated into one document instead of producing N documents.
@@ -3023,8 +3124,10 @@ def _html_body_instr(components, out_lang, part_no=0, part_total=0):
         "- Wrap each section of notes in `<section class=\"page\">...</section>`. "
         "Start a new `.page` for each major topic, and also whenever one would "
         "grow past roughly a screenful, so no page becomes a wall of text.\n"
-        "- Use ONLY these classes. Any other class name will be unstyled:\n"
-        + (components or _HTML_FALLBACK_COMPONENTS) + "\n"
+        "- Use ONLY these classes. A different model is designing the "
+        "stylesheet for this exact list at the same time as you, so any other "
+        "class name you invent will be completely unstyled:\n"
+        + _HTML_COMPONENTS + "\n"
         "- The transcript is annotated with inline timestamps like [M:SS]. Put "
         "the lecture timestamp at the start of every heading as "
         "`<a class=\"ai-ts\" data-s=\"225\">3:45</a>` \u2014 `data-s` is that "
@@ -3042,10 +3145,13 @@ def _html_body_instr(components, out_lang, part_no=0, part_total=0):
         "- Never use `<img>`: external images and files are blocked and will "
         "show as a broken box.\n\n"
         "INTERACTIVITY (optional):\n"
-        "- You MAY use `<button>` and `<input type=\"checkbox\">` for study "
-        "controls such as a 'reveal the answer' toggle or a collapsible "
-        "section. Give them the classes the design provides for this. Anything "
-        "hidden behind a toggle must still be present in the HTML.\n"
+        "- For a question with an answer, use exactly this shape so the "
+        "stylesheet's reveal rule matches \u2014 the checkbox must be the "
+        "IMMEDIATELY PRECEDING sibling of the answer:\n"
+        "  <div class=\"quiz\"><div class=\"quiz-q\">...question...</div>"
+        "<input type=\"checkbox\" class=\"reveal\">"
+        "<div class=\"answer\">...answer + why...</div></div>\n"
+        "- Anything hidden behind a toggle must still be present in the HTML.\n"
         "- Do not add `<script>` or inline `on...` handlers; the document's own "
         "script already handles behaviour.\n\n"
         "SAFETY:\n"
@@ -3096,14 +3202,13 @@ def _html_extract_titles(fragment):
 
 
 def _html_parse_design(raw):
-    """Split the design pass's answer into (css, components, js).
+    """Split the design pass's answer into (css, js).
 
-    Every piece is optional and independently recoverable — a design pass that
-    only managed to emit CSS still yields a styled note. Falls back to the
-    built-in theme so `style=html` can never fail outright.
+    Both pieces are independently recoverable — a design pass that only managed
+    to emit CSS still yields a styled note. Falls back to the built-in theme so
+    `style=html` can never fail outright.
     """
     text = _strip_fences(raw or "")
-    css = components = js = ""
 
     def _after(mark, *stops):
         if mark not in text:
@@ -3114,9 +3219,8 @@ def _html_parse_design(raw):
                 seg = seg.split(stop, 1)[0]
         return seg.strip()
 
-    css = _after(_HTML_CSS_MARK, _HTML_COMPONENTS_MARK, _HTML_JS_MARK)
-    components = _after(_HTML_COMPONENTS_MARK, _HTML_JS_MARK, _HTML_CSS_MARK)
-    js = _after(_HTML_JS_MARK, _HTML_CSS_MARK, _HTML_COMPONENTS_MARK)
+    css = _after(_HTML_CSS_MARK, _HTML_JS_MARK)
+    js = _after(_HTML_JS_MARK, _HTML_CSS_MARK)
     # A model that ignored the markers usually still returned a stylesheet.
     if not css and "{" in text and "}" in text and "<" not in text[:200]:
         css = text.strip()
@@ -3126,10 +3230,8 @@ def _html_parse_design(raw):
     css = re.sub(r"</?style[^>]*>", "", css, flags=re.I).strip()
     js = re.sub(r"</?script[^>]*>", "", js, flags=re.I).strip()
     if not css:
-        css, components = _HTML_FALLBACK_CSS, _HTML_FALLBACK_COMPONENTS
-    if not components:
-        components = _HTML_FALLBACK_COMPONENTS
-    return css, components, js
+        css = _HTML_FALLBACK_CSS
+    return css, js
 
 
 def _strip_fences(text):
@@ -3262,10 +3364,16 @@ def _html_part_cap(ai, part_cap):
 
 
 def _gen_notes_design(transcript, out_lang, ai, title, cancel_event=None):
-    """Run the design pass and return (css, components, js).
+    """Run the design pass and return (css, js, used_fallback).
 
-    Never raises: a failed design pass falls back to the built-in theme so the
-    body pass — the expensive part — is not wasted.
+    Never raises: a failed design pass falls back to the built-in theme, so the
+    body pass — which is where nearly all the time and tokens go — is never
+    wasted on a styling problem.
+
+    `used_fallback` is returned rather than inferred by the caller because the
+    two outcomes are indistinguishable from the outside: a handled provider
+    error still produces a perfectly good stylesheet, and reporting that as the
+    chosen model's work would blame it for a design it never wrote.
     """
     sample = (transcript or "")[:NOTES_HTML_DESIGN_SAMPLE]
     head = "Lecture title: %s\n\n" % (title or "(untitled)")
@@ -3275,23 +3383,100 @@ def _gen_notes_design(transcript, out_lang, ai, title, cancel_event=None):
               "You answer with code only, never with explanation.")
     try:
         if cancel_event is not None and cancel_event.is_set():
-            return _HTML_FALLBACK_CSS, _HTML_FALLBACK_COMPONENTS, ""
+            return _HTML_FALLBACK_CSS, "", True
         raw = _ai_chat([{"role": "system", "content": sysmsg},
                         {"role": "user", "content": user}], ai,
                        temperature=0.7,        # design wants variety, not accuracy
                        max_tokens=NOTES_HTML_DESIGN_CAP) or ""
     except Exception as exc:  # noqa: BLE001
         log.warning("html notes: design pass failed (%s) — using fallback theme", exc)
-        return _HTML_FALLBACK_CSS, _HTML_FALLBACK_COMPONENTS, ""
-    css, components, js = _html_parse_design(raw)
-    return css, components, _sanitise_note_design_js(js)
+        return _HTML_FALLBACK_CSS, "", True
+    css, js = _html_parse_design(raw)
+    # _html_parse_design substitutes the built-in theme when the reply had no
+    # usable stylesheet in it, which is a fallback just as much as an exception.
+    return css, _sanitise_note_design_js(js), css is _HTML_FALLBACK_CSS
 
 
-def _gen_notes_html(transcript, out_lang, ai, head, title, cancel_event=None):
-    """Blocking AI-designed HTML notes: design pass, then one body pass per
-    transcript chunk, assembled into a single standalone document."""
-    css, components, js = _gen_notes_design(
-        transcript, out_lang, ai, title, cancel_event=cancel_event)
+class _DesignPass(object):
+    """The design pass, running on its own thread and its own provider.
+
+    Design and content are independent calls against a shared, fixed vocabulary
+    (_HTML_COMPONENTS), so there is no reason to pay for them one after the
+    other. Started before the first body pass and collected just before the
+    document prologue is emitted, the design costs effectively nothing: the
+    stylesheet is a few thousand tokens and lands long before the first body
+    part, which is the longest single wait in the whole generation.
+
+    It also lets the two halves run on DIFFERENT models, which is the useful
+    part — writing CSS and writing exam notes reward different models, and a
+    multi-provider setup can now use the right one for each instead of forcing
+    one model to be adequate at both.
+
+    Failure is not propagated. A dead thread, a provider outage or a timeout all
+    resolve to the built-in theme, because a plain-looking note that contains
+    the whole lecture is worth far more than an error.
+    """
+
+    def __init__(self, transcript, out_lang, ai, title, cancel_event=None):
+        self.css = _HTML_FALLBACK_CSS
+        self.js = ""
+        self.ai = ai
+        self.ms = 0
+        self.failed = False
+        self._started = time.time()
+        self._thread = threading.Thread(
+            target=self._run,
+            args=(transcript, out_lang, ai, title, cancel_event),
+            daemon=True, name="notes-design")
+        self._thread.start()
+
+    def _run(self, transcript, out_lang, ai, title, cancel_event):
+        try:
+            self.css, self.js, fell_back = _gen_notes_design(
+                transcript, out_lang, ai, title, cancel_event=cancel_event)
+            self.failed = fell_back
+        except Exception as exc:  # noqa: BLE001
+            # _gen_notes_design already swallows provider errors; this is the
+            # last resort so a thread can never die silently and leave the
+            # caller blocking on join() for the full timeout.
+            log.warning("html notes: design thread crashed (%s)", exc)
+            self.failed = True
+        finally:
+            self.ms = int((time.time() - self._started) * 1000)
+
+    def collect(self):
+        """Wait for the stylesheet, but never longer than the design pass could
+        legitimately need. Overshooting here would hand back the body work's
+        head start; the fallback theme is the cheaper trade.
+
+        Idempotent, and it RESOLVES the pair onto self. Callers read the head
+        (css) and the tail (js) at different points in the document, so they
+        must not be able to see a half-written thread result in between: after
+        this returns, self.css and self.js are the final answer for good.
+        """
+        if getattr(self, "_resolved", False):
+            return self.css, self.js
+        self._thread.join(timeout=_NOTES_HTML_DESIGN_WAIT)
+        if self._thread.is_alive():
+            log.warning("html notes: design pass still running after %ss — "
+                        "using the fallback theme", _NOTES_HTML_DESIGN_WAIT)
+            self.failed = True
+            # Abandon it rather than adopting a partially-assigned stylesheet.
+            self.css, self.js = _HTML_FALLBACK_CSS, ""
+        self._resolved = True
+        return self.css, self.js
+
+
+def _gen_notes_html(transcript, out_lang, ai, head, title,
+                    cancel_event=None, design_ai=None, meta=None):
+    """Blocking AI-designed HTML notes.
+
+    The design pass starts first and runs CONCURRENTLY with the body passes on
+    its own thread (and, if configured, its own provider). It is collected only
+    at the end, when the stylesheet is finally needed to open the document.
+    """
+    design = _DesignPass(transcript, out_lang, design_ai or ai, title,
+                         cancel_event=cancel_event)
     sysmsg = _study_sys(out_lang)
     tail = _lang_reminder(out_lang)
     secs, part_cap = _notes_sections(transcript, out_lang, ai, "html",
@@ -3301,7 +3486,7 @@ def _gen_notes_html(transcript, out_lang, ai, head, title, cancel_event=None):
     for i, sec in enumerate(secs):
         if cancel_event is not None and cancel_event.is_set():
             break
-        instr = _html_body_instr(components, out_lang, i + 1, len(secs))
+        instr = _html_body_instr(out_lang, i + 1, len(secs))
         user = head + _html_covered_note(covered) + instr + "\n\n" + sec + tail
         raw = _chat_notes_complete(sysmsg, user, ai, part_cap)
         frag = _sanitise_note_body(raw)
@@ -3310,38 +3495,42 @@ def _gen_notes_html(transcript, out_lang, ai, head, title, cancel_event=None):
         parts.append(frag)
         if len(secs) > 1:
             covered.extend(_html_extract_titles(frag))
+    css, js = design.collect()
+    _record_design_meta(meta, design)
     return (_html_doc_open(css, title, out_lang) +
             "\n".join(parts) + _html_doc_close(js))
 
 
-def _stream_notes_html(transcript, out_lang, ai, head, title, cancel_event=None):
+def _stream_notes_html(transcript, out_lang, ai, head, title,
+                       cancel_event=None, design_ai=None, meta=None):
     """Streaming twin of _gen_notes_html.
 
-    Emits the document prologue as soon as the design pass lands, then each body
-    part. Sanitising has to happen per COMPLETE part rather than per token —
-    a regex cannot judge a half-written tag — so a part is buffered, cleaned and
-    then released. Progress therefore arrives in page-sized steps, not
-    character by character, which is also why the client shows a progress view
-    while this runs instead of repainting a half-built document.
+    Ordering constraint: the prologue carries the <style>, so it cannot be
+    emitted before the design lands. That is why the design is collected after
+    the FIRST body part is generated rather than before it — the two overlap for
+    the duration of that part, which is more than enough time, and the client
+    still receives a complete, valid document head before any content.
+
+    Sanitising happens per COMPLETE part rather than per token, because a regex
+    cannot judge a half-written tag. Progress therefore arrives in page-sized
+    steps, which is also why the client shows a progress view instead of
+    repainting a half-built document.
 
     The pieces it yields concatenate to exactly what _gen_notes_html returns, so
     a streamed note and a cached note are byte-identical.
     """
-    css, components, js = _gen_notes_design(
-        transcript, out_lang, ai, title, cancel_event=cancel_event)
-    if cancel_event is not None and cancel_event.is_set():
-        return
-    yield _html_doc_open(css, title, out_lang)
+    design = _DesignPass(transcript, out_lang, design_ai or ai, title,
+                         cancel_event=cancel_event)
     sysmsg = _study_sys(out_lang)
     tail = _lang_reminder(out_lang)
     secs, part_cap = _notes_sections(transcript, out_lang, ai, "html",
                                      cancel_event=cancel_event)
     part_cap = _html_part_cap(ai, part_cap)
-    covered, emitted = [], 0
+    covered, emitted, opened = [], 0, False
     for i, sec in enumerate(secs):
         if cancel_event is not None and cancel_event.is_set():
             break
-        instr = _html_body_instr(components, out_lang, i + 1, len(secs))
+        instr = _html_body_instr(out_lang, i + 1, len(secs))
         user = head + _html_covered_note(covered) + instr + "\n\n" + sec + tail
         buf = []
         for piece in _stream_notes_part(sysmsg, user, ai, part_cap,
@@ -3350,13 +3539,40 @@ def _stream_notes_html(transcript, out_lang, ai, head, title, cancel_event=None)
                 return
             buf.append(piece)
         frag = _sanitise_note_body("".join(buf))
+        if not opened:
+            # First part is written; the design has had that entire time to
+            # finish. Open the document now so the prologue still precedes all
+            # content.
+            css, _js = design.collect()
+            _record_design_meta(meta, design)
+            yield _html_doc_open(css, title, out_lang)
+            opened = True
         if not frag:
             continue
         yield ("\n" if emitted else "") + frag
         emitted += 1
         if len(secs) > 1:
             covered.extend(_html_extract_titles(frag))
-    yield _html_doc_close(js)
+    if not opened:
+        # No body part survived (empty transcript, or cancelled before the first
+        # part finished). Still emit a valid, openable document.
+        css, _js = design.collect()
+        _record_design_meta(meta, design)
+        yield _html_doc_open(css, title, out_lang)
+    # collect() is idempotent and has already resolved the pair, so the script
+    # here always belongs to the stylesheet emitted above.
+    yield _html_doc_close(design.collect()[1])
+
+
+def _record_design_meta(meta, design):
+    """Publish which model designed the note, and how long it took, so a client
+    can show the pairing. `meta` is a caller-owned dict; None disables it."""
+    if meta is None:
+        return
+    meta["design_provider"] = _ai_display_provider(design.ai)
+    meta["design_model"] = _ai_display_model(design.ai)
+    meta["design_ms"] = design.ms
+    meta["design_fallback"] = bool(design.failed)
 
 
 def _is_html_note(content):
@@ -3443,7 +3659,8 @@ def _notes_sections(transcript, out_lang, ai, style="", cancel_event=None):
     return secs, part_cap
 
 
-def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_event=None):
+def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_event=None,
+                       design_ai=None, meta=None):
     """Generator yielding markdown content pieces for the TEXT study modes
     (notes / summary / insights), streamed from the model. Mirrors _generate_study
     for those modes; quiz/flashcards are NOT streamed (they return structured JSON)."""
@@ -3453,7 +3670,8 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_ev
     if mode == "notes" and style == "html":
         for piece in _stream_notes_html(transcript, out_lang, ai, head,
                                         _head_title(head),
-                                        cancel_event=cancel_event):
+                                        cancel_event=cancel_event,
+                                        design_ai=design_ai, meta=meta):
             yield piece
         return
     if mode == "notes":
@@ -3952,13 +4170,14 @@ def _gen_poster(transcript, out_lang, ai, head, kind="auto", video_id=None):
 
 
 def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25,
-                    focus="", style="", video_id=None):
+                    focus="", style="", video_id=None, design_ai=None, meta=None):
     head = ("Video title: %s\n\n" % title) if title else ""
     sysmsg = _study_sys(out_lang)
     tail = _lang_reminder(out_lang)      # restated after the body, see _lang_reminder
     if mode == "notes":
         return {"format": "html" if style == "html" else "markdown",
-                "content": _gen_notes(transcript, out_lang, ai, head, style=style)}
+                "content": _gen_notes(transcript, out_lang, ai, head, style=style,
+                                      design_ai=design_ai, meta=meta)}
     if mode == "quiz":
         return {"format": "json",
                 "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions, focus)}
@@ -4223,6 +4442,10 @@ def api_study():
                         "detail": "Add an AI key in the admin panel "
                                   "(Study AI \u2014 Bynara / Mistral / Cerebras, or Groq)."}), 503
     model = ai["model"]
+    # Optional SECOND provider/model, used only for the style="html" stylesheet.
+    # Blank = same model as the notes (see _load_design_ai).
+    design_ai = _load_design_ai(request.args.get("design_model"),
+                                request.args.get("design_provider"))
 
     # ?refresh=1 (or nocache=1) forces a fresh generation, ignoring BOTH the
     # in-memory and Firestore caches, and overwrites the old saved copy. Used by
@@ -4327,9 +4550,11 @@ def api_study():
     if mode == "notes":
         gen_text = _timestamped_transcript(t.get("segments")) or t["text"]
     try:
+        gen_meta = {}
         result = _generate_study(mode, gen_text, out_lang, ai,
                                  title=t.get("title"), num_questions=num_q,
-                                 focus=focus, style=style, video_id=video_id)
+                                 focus=focus, style=style, video_id=video_id,
+                                 design_ai=design_ai, meta=gen_meta)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
@@ -4343,6 +4568,7 @@ def api_study():
             "segment_count": t.get("segment_count"),
             "cached": False}
     data.update(result)
+    data.update(gen_meta)          # design_provider / design_model / design_ms
     with _study_lock:
         _study_cache[ckey] = {"ts": time.time(), "data": data}
     # persist for next time (all users): body -> object storage, index -> Firestore
@@ -4384,6 +4610,10 @@ def api_study_stream():
         return jsonify({"error": "ai_not_configured",
                         "detail": "Add an AI key in the admin panel."}), 503
     model = ai["model"]
+    # Optional SECOND provider/model, used only for the style="html" stylesheet.
+    # Blank = same model as the notes (see _load_design_ai).
+    design_ai = _load_design_ai(request.args.get("design_model"),
+                                request.args.get("design_provider"))
     force = (request.args.get("refresh") or request.args.get("nocache")
              or "").strip().lower() in ("1", "true", "yes")
     style = (request.args.get("style") or "").strip().lower()
@@ -4469,6 +4699,9 @@ def api_study_stream():
     if mode == "notes":
         gen_text = _timestamped_transcript(t.get("segments")) or t["text"]
     head = ("Video title: %s\n\n" % t.get("title")) if t.get("title") else ""
+    # Filled in by the design pass once it lands, so the persisted note records
+    # which model styled it.
+    gen_meta = {}
 
     def gen():
         initial_provider = _ai_display_provider(ai)
@@ -4478,7 +4711,8 @@ def api_study_stream():
         resolved_meta_sent = False
         full = []
         try:
-            for piece in _stream_study_text(mode, gen_text, out_lang, ai, head, style):
+            for piece in _stream_study_text(mode, gen_text, out_lang, ai, head, style,
+                                            design_ai=design_ai, meta=gen_meta):
                 if not resolved_meta_sent:
                     resolved_provider = _ai_display_provider(ai)
                     resolved_model = _ai_display_model(ai)
@@ -4503,6 +4737,7 @@ def api_study_stream():
                     "transcript_lang": t.get("chosen_lang"),
                     "segment_count": t.get("segment_count"),
                     "cached": False, "content": content}
+            data.update(gen_meta)      # which model styled it, if any
             with _study_lock:
                 _study_cache[ckey] = {"ts": time.time(), "data": data}
             persisted = _study_put(fs_id, data)     # cache ONLY on clean finish
@@ -4590,9 +4825,14 @@ def _run_study_job(job_id):
             job["updated_at"] = int(time.time())
         _study_job_persist(job, force=True)
 
+        # Design meta is written straight onto the job so /stream and
+        # /api/study/jobs/<id> can report which model produced the stylesheet
+        # while the body is still being written.
         for piece in _stream_study_text(job["mode"], gen_text, job["out_lang"],
                                          job["ai"], head, job["style"],
-                                         cancel_event=job["cancel_event"]):
+                                         cancel_event=job["cancel_event"],
+                                         design_ai=job.get("design_ai"),
+                                         meta=job):
             if _study_job_stop_requested(job):
                 _set_study_job_terminal(job, "stopped")
                 return
@@ -4628,7 +4868,10 @@ def _run_study_job(job_id):
                 "keys_available": _ai_key_count(job["ai"]),
                 "transcript_lang": job.get("transcript_lang"),
                 "segment_count": job.get("segment_count"), "cached": False,
-                "content": content}
+                "content": content,
+                "design_provider": job.get("design_provider") or "",
+                "design_model": job.get("design_model") or "",
+                "design_fallback": bool(job.get("design_fallback"))}
         with _study_lock:
             _study_cache[job["ckey"]] = {"ts": time.time(), "data": data}
         persisted = _study_put(job["fs_id"], data)
@@ -4684,6 +4927,10 @@ def api_study_jobs_start():
     was_stopped = _study_job_was_stopped(job_id)
     ai = _load_ai_config(str(payload.get("model") or "").strip()[:80] or None,
                          str(payload.get("provider") or "").strip()[:40] or None)
+    # Optional SECOND provider/model, used only for the style="html" stylesheet.
+    # Blank = same model as the notes (see _load_design_ai).
+    design_ai = _load_design_ai(payload.get("designModel") or payload.get("design_model"),
+                                payload.get("designProvider") or payload.get("design_provider"))
     if not _ai_configured(ai) and not was_stopped:
         return jsonify({"error": "ai_not_configured", "detail": "Add an AI key in the admin panel."}), 503
     force = _job_force(payload.get("refresh") or payload.get("nocache"))
@@ -4693,7 +4940,10 @@ def api_study_jobs_start():
     job = {
         "id": job_id, "owner_uid": uid, "video_id": video_id, "mode": mode, "style": style,
         "out_lang": out_lang, "provider": ai.get("provider", "ai"), "model": ai["model"],
-        "ai": ai, "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
+        "ai": ai,
+        # Second provider for the style="html" stylesheet. None = same as notes.
+        "design_ai": design_ai,
+        "ckey": ckey, "fs_id": fs_id, "status": "queued", "content": "",
         "cached": bool(cached), "persisted": bool(cached), "title": None,
         "transcript_lang": None, "segment_count": None, "error": "",
         "created_at": now, "updated_at": now, "expires_at": now + STUDY_JOB_TTL,
@@ -6511,6 +6761,8 @@ def api_study_saved():
         # Sniffed as a fallback for notes stored before `format` was recorded.
         "format": (saved.get("format")
                    or ("html" if _is_html_note(saved.get("content")) else "markdown")),
+        "design_provider": saved.get("design_provider") or "",
+        "design_model": saved.get("design_model") or "",
         "out_lang": saved.get("out_lang") or out_lang,
         "provider": saved.get("provider") or "ai", "model": saved.get("model") or "",
         "cached": True,
