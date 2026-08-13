@@ -290,10 +290,10 @@
       <code>postMessage</code>, because the note is on an opaque origin the app cannot read.</p>
 
     <div class="row">
-      <label class="print-layout" for="print-layout">PDF test layout
-        <select id="print-layout" aria-label="PDF test layout">
+      <label class="print-layout" for="print-layout">Preview / PDF layout
+        <select id="print-layout" aria-label="Preview and PDF layout">
           <option value="author" selected>AI document layout</option>
-          <option value="a4-columns">A4 · 2-column reflow test</option>
+          <option value="a4-columns">A4 · 2-column preview + PDF test</option>
         </select>
       </label>
       <button class="btn-sec" id="print">📄 Print / PDF</button>
@@ -302,9 +302,10 @@
       <button class="btn-sec" id="viewsrc">&lt;/&gt; View source</button>
     </div>
     <p class="note">Night reading filters only this preview — exactly like the app’s Focus reader — and never changes the PDF.
-      <b>A4 · 2-column reflow test</b> is an opt-in comparison of the standard-notes geometry:
-      A4 paper, 5 mm × 3 mm margins, a 1 mm gutter, continuous columns and safe heading breaks.
-      Normal AI HTML notes use their author-defined layout; the raw AI document and Save .html file stay unchanged.</p>
+      <b>A4 · 2-column preview + PDF test</b> reflows this on-screen preview immediately and uses the
+      same disposable copy for printing: A4 paper, 5 mm × 3 mm margins, a 1 mm gutter, continuous
+      columns and safe heading breaks. Normal AI HTML notes use their author-defined layout; the raw
+      AI document and Save .html file stay unchanged.</p>
 
     <div class="stage" id="stage" style="margin-top:12px">
       <div class="placeholder">Pick a sample above, or generate from a video.</div>
@@ -642,7 +643,7 @@
     }
     mount(docNow, noteLabel);
     setStatus(usesA4Columns()
-      ? '🔬 Showing the A4 / 2-column reflow test. The source and saved HTML are unchanged.'
+      ? '🔬 Showing the on-screen A4 / 2-column reflow preview; Print/PDF uses the same disposable test copy.'
       : '↩️ Restored the AI document’s original layout.');
   });
   function printCurrentNote() {
