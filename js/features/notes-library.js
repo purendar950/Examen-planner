@@ -280,11 +280,12 @@
       if (!e || !e.vid) return;
       out.push({
         kind: 'video', key: videoKey(e), raw: e,
-        icon: e.style === 'mcq' ? '❓' : '📝',
+        icon: e.style === 'mcq' ? '❓' : e.style === 'html' ? '🎨' : '📝',
         title: e.title || e.vid,
         facts: [
           e.mode === 'notes' ? (e.style === 'mcq' ? 'MCQ notes'
-            : e.style === 'topic+images' ? 'Topic + images' : 'Topic notes')
+            : e.style === 'topic+images' ? 'Topic + images'
+            : e.style === 'html' ? 'AI-designed' : 'Topic notes')
             : (e.mode === 'summary' ? 'Summary' : 'Key insights'),
           '1 lecture',
           e.lang

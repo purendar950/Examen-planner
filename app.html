@@ -577,8 +577,11 @@
 <!-- Multi-video notebook: needs the organiser's library + fetchers above it, and
      window.AiNotesKit from ai-tutor.js (loaded later — only used on click). -->
 <script defer src="js/tabs/yt-notebook.js"></script>
-<!-- The AI notes library indexes both single-lecture notes and notebooks. -->
-<script defer src="js/features/notes-library.js"></script>
+<!-- The AI notes library indexes both single-lecture notes and notebooks.
+     Versioned because Vite copies js/ verbatim: without a ?v= a change here
+     ships but browsers keep serving the cached copy (see
+     .kiro/steering/cache-busting.md). -->
+<script defer src="js/features/notes-library.js?v=20260813a"></script>
 <script defer src="js/features/yt-screenshots.js"></script>
 <!-- mock-tests.js split by responsibility (see mock-tests-render.js header).
      Load order matters: data.js declares the shared const/let that
@@ -620,7 +623,7 @@
      getFirebaseIdToken) and BEFORE ai-tutor.js, which reads window.TutorMemory. -->
 <script defer src="js/features/tutor-memory.js?v=20260805b"></script>
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
-<script defer src="js/features/ai-tutor.js?v=20260809f"></script>
+<script defer src="js/features/ai-tutor.js?v=20260813a"></script>
 <!-- 💬 Floating AI Tutor bubble — makes the tutor reachable from every page.
      Holds NO chat logic of its own: it opens a window and ai-tutor.js re-parents
      its single chat node into it. Must load AFTER ai-tutor.js (uses

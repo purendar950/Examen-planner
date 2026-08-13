@@ -1101,6 +1101,20 @@ NOTES_CHUNK = int(os.environ.get("NOTES_CHUNK_CHARS", "60000"))      # topic not
 NOTES_MCQ_CHUNK = int(os.environ.get("NOTES_MCQ_CHUNK_CHARS", "60000"))  # MCQ input chunk
 NOTES_CAP = int(os.environ.get("NOTES_MAX_TOKENS", "8000"))         # topic notes output cap/part
 NOTES_MCQ_CAP = int(os.environ.get("NOTES_MCQ_MAX_TOKENS", "6000"))  # MCQ output cap/part
+# style="html" (AI-designed notes). HTML is far more verbose per fact than
+# Markdown — tags, attributes and inline SVG easily triple the token count for
+# the same content — so the INPUT chunk is smaller (fewer facts per call) while
+# the OUTPUT cap is larger (more tokens to express them). Without this split the
+# model runs out of output budget halfway down a page.
+NOTES_HTML_CHUNK = int(os.environ.get("NOTES_HTML_CHUNK_CHARS", "26000"))  # body-pass input chunk
+NOTES_HTML_CAP = int(os.environ.get("NOTES_HTML_MAX_TOKENS", "9000"))     # body-pass output cap/part
+# The design pass only writes a stylesheet + a small script, never content, so
+# it needs a fraction of the budget.
+NOTES_HTML_DESIGN_CAP = int(os.environ.get("NOTES_HTML_DESIGN_MAX_TOKENS", "3200"))
+# How much of the lecture the design pass reads before choosing a visual
+# identity. It needs enough to recognise the subject and the KINDS of content
+# (diagrams? dates? formulas? MCQs?), not the whole transcript.
+NOTES_HTML_DESIGN_SAMPLE = int(os.environ.get("NOTES_HTML_DESIGN_SAMPLE_CHARS", "9000"))
 # When a model stops because it hit its output-token cap (finish_reason=="length"),
 # the notes would end mid-sentence (seen on smaller models). We detect that and
 # re-prompt the model to CONTINUE from where it stopped, stitching the parts,
@@ -1176,6 +1190,10 @@ def _study_job_public(job):
         # prune terminal checkpoints without an application-side sweep.
         "expiresAt": job.get("expires_at"),
         "content": job.get("content", ""),
+        # Tells the browser which renderer to use. style="html" notes are a whole
+        # HTML document; feeding one to the Markdown renderer would display a
+        # page of escaped tags, so this is stated rather than inferred.
+        "format": ("html" if job.get("style") == "html" else "markdown"),
         "error": job.get("error", ""),
     }
     # Multi-video notebooks add per-lecture progress. Single-video jobs keep the
@@ -2631,6 +2649,14 @@ def _study_sys(out_lang):
             " Stay strictly faithful to the transcript — never invent facts.")
 
 
+def _head_title(head):
+    """Recover the video title from the `head` preamble every study caller
+    builds as "Video title: ...\\n\\n". Read back rather than threaded through a
+    new parameter so the three _stream_study_text call sites stay untouched."""
+    m = re.match(r"\s*Video title:\s*(.+)", head or "")
+    return (m.group(1).strip() if m else "")
+
+
 def _extract_note_headings(md):
     """Return the ##/### heading texts from a generated notes part. Used to tell
     the NEXT chunk-call what earlier parts already covered so it doesn't emit the
@@ -2666,7 +2692,12 @@ def _gen_notes(transcript, out_lang, ai, head, style=""):
     process the transcript section-by-section (so nothing gets cut by the output
     limit); non-big providers use the condensed body.
     style='mcq' -> format the notes question-by-question (Question + options +
-    full explanation) for lectures that are solving MCQs; default = topic notes."""
+    full explanation) for lectures that are solving MCQs; default = topic notes.
+    style='html' -> hand off entirely: the model designs and writes a standalone
+    HTML document instead of Markdown (see _gen_notes_html)."""
+    if style == "html":
+        return _gen_notes_html(transcript, out_lang, ai, head,
+                               _head_title(head))
     sysmsg = _study_sys(out_lang)
     instr = _notes_instr(style)
     # Restated after the transcript: the transcript is the last thing the model
@@ -2797,6 +2828,546 @@ def _notes_instr(style=""):
             "- Do not wrap the whole answer in code fences." + no_promo)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# style="html" — AI-DESIGNED NOTES
+#
+# Every other notes style is a FIXED template: the prompt dictates "## for
+# sections, - for bullets", and nbBuild() on the client renders that exact
+# Markdown subset into the exact same notebook markup every time. A chemistry
+# lecture and a history lecture come out looking identical, and anything the
+# renderer doesn't know about (a hand-drawn diagram, a colour-coded comparison,
+# a fold-out table) simply cannot be expressed.
+#
+# Here the model authors the document instead: real HTML, its own stylesheet,
+# its own optional behaviour. Generation is TWO passes, for reasons that are
+# structural rather than stylistic:
+#
+#   1. DESIGN pass — reads a sample of the lecture, decides a visual identity
+#      for THIS subject, and emits a stylesheet + component vocabulary + an
+#      optional script. Cheap, runs once.
+#   2. BODY pass — runs per transcript chunk (reusing the existing chunking) and
+#      writes only <section> fragments using the vocabulary from pass 1.
+#
+# Splitting them is what makes this work at all. A whole document cannot be
+# chunked: `"\n\n".join(parts)` on three complete <html> documents is garbage,
+# and asking each chunk to re-invent its own CSS gives you a note that changes
+# typeface halfway through. With the stylesheet fixed up front, N body parts
+# concatenate into one coherent document — exactly like the Markdown path.
+#
+# It is also why this emits HTML and not JSON (as the poster mode does): a
+# truncated JSON object is unparseable and loses everything, whereas truncated
+# HTML still renders every page that arrived. Streaming works for the same
+# reason.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Markers the design pass answers in. Chosen to be things no stylesheet or
+# script can contain, so a plain string split is enough — no JSON to truncate.
+_HTML_CSS_MARK = "===CSS==="
+_HTML_JS_MARK = "===JS==="
+_HTML_COMPONENTS_MARK = "===COMPONENTS==="
+
+# Used when the design pass fails, returns nothing usable, or omits the CSS
+# marker. A readable note with plain styling always beats an error, and the body
+# pass has already been told which class names exist, so the two still agree.
+_HTML_FALLBACK_CSS = """
+:root{--paper:#fffdf6;--ink:#22303f;--accent:#c62828;--accent2:#1565c0;
+      --soft:#eef2f6;--line:#d7e0e8}
+*{box-sizing:border-box}
+body{margin:0;padding:18px;background:#e8ecf1;color:var(--ink);
+     font-family:"Kalam","Noto Sans Devanagari",system-ui,sans-serif;line-height:1.55}
+.page{max-width:900px;margin:0 auto 22px;background:var(--paper);padding:26px 30px;
+      border-radius:8px;box-shadow:0 8px 26px rgba(20,40,60,.12)}
+.h-topic{font-size:1.5rem;font-weight:700;color:var(--accent);margin:0 0 10px;
+         padding-bottom:6px;border-bottom:2.5px solid var(--accent)}
+.h-sub{font-size:1.12rem;font-weight:700;color:var(--accent2);margin:16px 0 4px}
+.note-list{margin:6px 0 12px;padding-left:22px}
+.note-list li{margin:4px 0}
+.key-term{font-weight:700;color:var(--accent)}
+.definition{border-left:4px solid var(--accent2);background:#f4f8fd;
+            padding:8px 12px;margin:10px 0;border-radius:0 6px 6px 0}
+.callout{background:#fff8e1;border:1px solid #ffe082;border-radius:8px;
+         padding:10px 13px;margin:10px 0}
+.data-table{width:100%;border-collapse:collapse;margin:10px 0}
+.data-table th,.data-table td{border:1px solid var(--line);padding:6px 9px;text-align:left}
+.data-table th{background:var(--soft)}
+.figure{margin:12px 0;text-align:center}
+.figure svg{max-width:100%;height:auto}
+.figure figcaption{font-size:.86rem;opacity:.7;margin-top:4px}
+.ai-ts{color:var(--accent2);cursor:pointer;text-decoration:underline dotted;
+       font-size:.82em;font-weight:700}
+@media print{body{background:#fff;padding:0}.page{box-shadow:none;margin:0 0 10px}}
+"""
+
+# The component vocabulary the body pass may use when the design pass didn't
+# declare one. Mirrors _HTML_FALLBACK_CSS.
+_HTML_FALLBACK_COMPONENTS = (
+    "- .page — one page/screen of notes (wrap every section in this)\n"
+    "- .h-topic — main topic heading\n"
+    "- .h-sub — sub-topic heading\n"
+    "- .note-list — <ul>/<ol> of detail points\n"
+    "- .key-term — inline emphasis for a keyword\n"
+    "- .definition — a definition block\n"
+    "- .callout — an exam tip / warning / memory trick\n"
+    "- .data-table — a comparison or fact table\n"
+    "- .figure — a <figure> holding an inline <svg> diagram + <figcaption>\n"
+    "- .ai-ts — an inline lecture-timestamp link\n")
+
+
+def _html_design_instr(out_lang):
+    """Pass 1. Asks for a visual identity for THIS lecture, not a generic theme.
+
+    The output is deliberately not JSON: a stylesheet is full of braces, quotes
+    and newlines, so JSON-encoding it invites escaping bugs and a truncated
+    object would lose the whole design. Plain marker sections degrade gracefully
+    — if only the CSS arrived we still have a usable design.
+    """
+    return (
+        "You are the ART DIRECTOR for a set of study notes on the lecture below. "
+        "You will NOT write the notes; another pass does that. Your ONLY job is "
+        "to design how they will look, as real CSS.\n\n"
+        "Read the lecture sample and decide a visual identity that suits THIS "
+        "subject and THIS kind of content. Consider what the material actually "
+        "needs: a geography lecture wants map-like earthy paper and room for "
+        "hand-drawn diagrams; a mathematics lecture wants a grid background and "
+        "space for formulas; a history lecture wants timelines; a lecture that "
+        "solves MCQs wants question cards with option rows. Choose colours, "
+        "fonts, spacing and components accordingly. Do NOT reuse a generic "
+        "template — the design must be recognisably about this subject.\n\n"
+        "Reply in EXACTLY these three sections, in this order, with nothing "
+        "before, between or after them except the markers:\n\n"
+        + _HTML_CSS_MARK + "\n"
+        "<plain CSS only — no <style> tag, no markdown code fences>\n"
+        + _HTML_COMPONENTS_MARK + "\n"
+        "<one '- .class-name — what it is for' line per component>\n"
+        + _HTML_JS_MARK + "\n"
+        "<plain JavaScript only — no <script> tag. May be empty.>\n\n"
+        "CSS REQUIREMENTS (the notes will not render correctly otherwise):\n"
+        "- Style a `.page` class: one page/screen of notes. Also style `body`.\n"
+        "- Define a class for: main headings, sub-headings, detail lists, "
+        "inline keyword emphasis, definitions, callouts (exam tip / common "
+        "mistake / memory trick), tables, and figures holding inline SVG.\n"
+        "- Style `.ai-ts` (inline lecture-timestamp links) as small, clickable "
+        "and visually secondary. Keep this exact class name.\n"
+        "- If your design has study controls (a 'reveal the answer' toggle, a "
+        "collapsible section), style the `<button>` and "
+        "`<input type=\"checkbox\">` that drive them, and declare their classes "
+        "below so the writer can use them.\n"
+        "- Mobile-first and responsive: the notes are read on phones. Use "
+        "relative units, wrap long tables, and add a `@media (max-width:680px)` "
+        "block that reduces padding and font sizes.\n"
+        "- Include a `@media print` block so the notes print cleanly on A4 "
+        "(white background, no shadows, avoid breaking a `.page` across sheets "
+        "with `break-inside:avoid`).\n"
+        "- Support long Devanagari and Latin text in the same paragraph.\n"
+        "- End EVERY `font-family` with a generic family (`sans-serif`, `serif` "
+        "or `monospace`), and put `system-ui` before it. A decorative display "
+        "font usually has no arrow, maths or Devanagari glyphs, so without a "
+        "fallback every \u2192, \u226b and Hindi word becomes an empty box.\n"
+        "- Never make a heading, list item or paragraph a flex or grid "
+        "container. Text contains inline markup \u2014 <sub>, <sup>, <em>, the "
+        "timestamp link \u2014 and flex turns each of those into a separate item, "
+        "so 'S<sub>N</sub>2' comes apart into 'S N 2'. Use flex only on "
+        "wrappers whose children are whole blocks.\n"
+        "- You MAY use CSS custom properties, gradients, SVG-in-CSS data URIs, "
+        "flexbox and grid.\n"
+        "- You may @import Google Fonts from https://fonts.googleapis.com ONLY. "
+        "No other external URL will load: images, scripts and network requests "
+        "from other origins are blocked, so never reference one.\n\n"
+        "COMPONENT LIST REQUIREMENTS:\n"
+        "- List EVERY class the writer is allowed to use, including `.page` and "
+        "`.ai-ts`. The writer can use nothing else, so anything you leave out "
+        "will never appear in the notes.\n"
+        "- Keep class names lowercase-hyphenated and self-describing.\n\n"
+        "JAVASCRIPT REQUIREMENTS:\n"
+        "- Optional. Only add behaviour that genuinely helps studying: "
+        "collapsible sections, a 'hide answers' revision toggle, highlight-on-"
+        "tap, a reading-progress bar, a table-of-contents jump list built from "
+        "the headings already in the page.\n"
+        "- It must run with no build step and no network access, degrade "
+        "silently if an element is missing, and never overwrite or remove note "
+        "content. Wrap it in an IIFE and guard every lookup.\n"
+        "- Never intercept clicks on `.ai-ts` elements — the app handles those.\n"
+        "- If no behaviour is needed, leave the section empty.\n\n"
+        "Write any human-readable text (headings inside CSS `content`, button "
+        "labels created by your JS) in " + out_lang + ".")
+
+
+def _html_body_instr(components, out_lang, part_no=0, part_total=0):
+    """Pass 2. Writes the notes as HTML fragments against pass 1's vocabulary.
+
+    Fragments only — no <html>/<head>/<style>. That is what lets N chunks be
+    concatenated into one document instead of producing N documents.
+    """
+    part_note = ""
+    if part_total > 1:
+        part_note = ("This is PART %d of %d of ONE continuous document. Do not "
+                     "re-open or re-style the document and do not write a title "
+                     "page again \u2014 continue straight into the next sections."
+                     % (part_no, part_total))
+    return (
+        "Write COMPREHENSIVE study notes for the lecture below as HTML "
+        "fragments. " + part_note + "\n\n"
+        "CONTENT (this matters more than the styling):\n"
+        "- Cover EVERY topic, point, fact, figure, date, name, place, "
+        "definition, formula and example mentioned. Do NOT omit or "
+        "over-summarize. Keep the lecture's order.\n"
+        "- CONSOLIDATE by subject: everything about one topic/person/scheme/"
+        "event belongs in a SINGLE section. Never write two sections for the "
+        "same subject and never restate a fact you already wrote.\n"
+        "- Use the SAME spelling for a given name or term throughout.\n"
+        "- Stay strictly faithful to the transcript. Never invent a fact.\n\n"
+        "OUTPUT FORMAT \u2014 read carefully:\n"
+        "- Output ONLY HTML that belongs inside <body>. NO <!DOCTYPE>, <html>, "
+        "<head>, <body>, <style>, <script> or <link> tags. NO markdown, NO code "
+        "fences, NO commentary before or after the HTML.\n"
+        "- Wrap each section of notes in `<section class=\"page\">...</section>`. "
+        "Start a new `.page` for each major topic, and also whenever one would "
+        "grow past roughly a screenful, so no page becomes a wall of text.\n"
+        "- Use ONLY these classes. Any other class name will be unstyled:\n"
+        + (components or _HTML_FALLBACK_COMPONENTS) + "\n"
+        "- The transcript is annotated with inline timestamps like [M:SS]. Put "
+        "the lecture timestamp at the start of every heading as "
+        "`<a class=\"ai-ts\" data-s=\"225\">3:45</a>` \u2014 `data-s` is that "
+        "timestamp in WHOLE SECONDS (3:45 \u2192 225), the link text is the "
+        "M:SS form. Take it from the nearest preceding [M:SS] marker. Never "
+        "leave a raw `[M:SS]` in the output.\n\n"
+        "DIAGRAMS:\n"
+        "- Wherever the lecture describes something visual \u2014 a diagram, "
+        "map, cycle, structure, flow, comparison, graph or timeline \u2014 DRAW "
+        "it as an inline `<svg>` inside a figure component, with a "
+        "`<figcaption>`.\n"
+        "- Give every `<svg>` a `viewBox` and no fixed width/height so it "
+        "scales. Label parts with `<text>`. Keep it simple and schematic: a "
+        "readable labelled sketch beats an ambitious drawing.\n"
+        "- Never use `<img>`: external images and files are blocked and will "
+        "show as a broken box.\n\n"
+        "INTERACTIVITY (optional):\n"
+        "- You MAY use `<button>` and `<input type=\"checkbox\">` for study "
+        "controls such as a 'reveal the answer' toggle or a collapsible "
+        "section. Give them the classes the design provides for this. Anything "
+        "hidden behind a toggle must still be present in the HTML.\n"
+        "- Do not add `<script>` or inline `on...` handlers; the document's own "
+        "script already handles behaviour.\n\n"
+        "SAFETY:\n"
+        "- No `<iframe>`, `<object>`, `<embed>`, `<form>`, `<textarea>` or "
+        "`<base>` tags, and no `src` pointing anywhere.\n"
+        "- Escape `&`, `<` and `>` inside note text as `&amp;`, `&lt;`, `&gt;` "
+        "so formulas and inequalities render instead of breaking the page.\n\n"
+        "Write all note text in " + out_lang + ".")
+
+
+def _html_covered_note(titles):
+    """Continuation preamble for body parts after the first — the HTML twin of
+    _covered_note. Headings are extracted from the HTML the model just wrote."""
+    if not titles:
+        return ""
+    shown = titles[-40:]
+    return ("ALREADY WRITTEN in earlier parts of this SAME document (do NOT "
+            "repeat any of them or restate their facts, names, figures or "
+            "dates). If this part's transcript revisits any of the below, SKIP "
+            "it and write only genuinely NEW sections. Reuse the EXACT same "
+            "spelling for any name or term that also appears here:\n- "
+            + "\n- ".join(shown) + "\n\n")
+
+
+_HTML_HEADING_RE = re.compile(
+    r"<(h[1-6])\b[^>]*>(.*?)</\1>|<[^>]*class=\"[^\"]*h-(?:topic|sub)[^\"]*\"[^>]*>(.*?)<",
+    re.I | re.S)
+
+
+def _html_extract_titles(fragment):
+    """Heading texts from a generated HTML body part, for _html_covered_note.
+
+    Deliberately forgiving: the design pass invents its own heading class names,
+    so we look for real heading tags AND the conventional h-topic/h-sub classes,
+    and fall back to nothing rather than guessing wrong.
+    """
+    out = []
+    for m in _HTML_HEADING_RE.finditer(fragment or ""):
+        raw = m.group(2) or m.group(3) or ""
+        txt = re.sub(r"<[^>]+>", " ", raw)
+        txt = re.sub(r"\s+", " ", txt).strip()
+        # Headings open with their lecture timestamp; the topic name is what the
+        # next part needs to recognise as already-covered, not the clock.
+        txt = re.sub(r"^\(?\d{1,2}:\d{2}(?::\d{2})?\)?\s*[-\u2013\u2014:]?\s*", "", txt)
+        if txt and len(txt) < 200:
+            out.append(txt)
+    return out
+
+
+def _html_parse_design(raw):
+    """Split the design pass's answer into (css, components, js).
+
+    Every piece is optional and independently recoverable — a design pass that
+    only managed to emit CSS still yields a styled note. Falls back to the
+    built-in theme so `style=html` can never fail outright.
+    """
+    text = _strip_fences(raw or "")
+    css = components = js = ""
+
+    def _after(mark, *stops):
+        if mark not in text:
+            return ""
+        seg = text.split(mark, 1)[1]
+        for stop in stops:
+            if stop in seg:
+                seg = seg.split(stop, 1)[0]
+        return seg.strip()
+
+    css = _after(_HTML_CSS_MARK, _HTML_COMPONENTS_MARK, _HTML_JS_MARK)
+    components = _after(_HTML_COMPONENTS_MARK, _HTML_JS_MARK, _HTML_CSS_MARK)
+    js = _after(_HTML_JS_MARK, _HTML_CSS_MARK, _HTML_COMPONENTS_MARK)
+    # A model that ignored the markers usually still returned a stylesheet.
+    if not css and "{" in text and "}" in text and "<" not in text[:200]:
+        css = text.strip()
+    css = _strip_fences(css)
+    js = _strip_fences(js)
+    # Strip tags the model may have wrapped its own output in anyway.
+    css = re.sub(r"</?style[^>]*>", "", css, flags=re.I).strip()
+    js = re.sub(r"</?script[^>]*>", "", js, flags=re.I).strip()
+    if not css:
+        css, components = _HTML_FALLBACK_CSS, _HTML_FALLBACK_COMPONENTS
+    if not components:
+        components = _HTML_FALLBACK_COMPONENTS
+    return css, components, js
+
+
+def _strip_fences(text):
+    """Drop a surrounding ```lang ... ``` fence, and any stray fence lines."""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```[a-zA-Z0-9_+-]*\s*\n?", "", t)
+        t = re.sub(r"\n?```\s*$", "", t)
+    return re.sub(r"^```[a-zA-Z0-9_+-]*\s*$", "", t, flags=re.M).strip()
+
+
+# Tags that must never reach the reader. The note renders inside a sandboxed
+# iframe with a restrictive CSP, so this is defence in depth rather than the
+# only barrier — but an <iframe> or <form> the model invented would be a real
+# hole (nested frames escape the CSP's connect-src, forms can POST), and a
+# <base> or meta-refresh would break the document outright.
+#
+# `button` and `input` are deliberately NOT here. A checkbox-driven "reveal the
+# answer" toggle and a collapsible-section button are the two most useful things
+# an interactive note can have, and neither is a capability: there is no <form>
+# to submit into, `form-action 'none'` blocks submission anyway, and
+# `connect-src 'none'` means the generated script cannot send what it reads.
+_HTML_BAD_TAGS = ("iframe", "object", "embed", "form", "textarea", "select",
+                  "base", "applet", "frame", "frameset", "meta", "link",
+                  "html", "head", "body", "title")
+_HTML_BAD_TAG_RE = re.compile(
+    r"</?(?:%s)\b[^>]*>" % "|".join(_HTML_BAD_TAGS), re.I)
+_HTML_SCRIPT_SRC_RE = re.compile(r"<script\b[^>]*\bsrc\s*=[^>]*>.*?</script\s*>",
+                                 re.I | re.S)
+_HTML_SCRIPT_RE = re.compile(r"</?script[^>]*>", re.I)
+# javascript:/data: hrefs and any absolute src the body pass slipped in.
+_HTML_BAD_ATTR_RE = re.compile(
+    r"\s(?:href|src|xlink:href|action|formaction)\s*=\s*"
+    r"(?:\"\s*(?:javascript|data|vbscript):[^\"]*\"|'\s*(?:javascript|data|vbscript):[^']*'"
+    r"|\"\s*(?:https?:)?//[^\"]*\"|'\s*(?:https?:)?//[^']*')", re.I)
+
+
+def _sanitise_note_body(fragment):
+    """Clean ONE body-pass fragment down to safe note markup.
+
+    The model is allowed to be creative with layout, but not with capabilities.
+    Structural/embedding tags go, external references go, and inline <script>
+    is dropped from the BODY specifically — behaviour belongs to the design
+    pass, which is reviewed as one small block, rather than being sprinkled
+    through thousands of lines of generated content where nobody would read it.
+    """
+    html = _strip_fences(fragment or "")
+    # The model sometimes emits a whole document despite being told not to.
+    if "<body" in html.lower():
+        html = re.split(r"<body[^>]*>", html, maxsplit=1, flags=re.I)[-1]
+        html = re.split(r"</body\s*>", html, maxsplit=1, flags=re.I)[0]
+    html = re.sub(r"<!DOCTYPE[^>]*>", "", html, flags=re.I)
+    html = re.sub(r"<style[^>]*>.*?</style\s*>", "", html, flags=re.I | re.S)
+    html = _HTML_SCRIPT_SRC_RE.sub("", html)
+    html = re.sub(r"<script[^>]*>.*?</script\s*>", "", html, flags=re.I | re.S)
+    html = _HTML_SCRIPT_RE.sub("", html)
+    html = _HTML_BAD_TAG_RE.sub("", html)
+    html = _HTML_BAD_ATTR_RE.sub(" ", html)
+    return html.strip()
+
+
+def _sanitise_note_design_js(js):
+    """Clean the design pass's script. Network and eval are removed even though
+    the CSP already blocks them, so a reviewer reading the stored note sees no
+    misleading calls, and so the note behaves the same if it is ever opened
+    outside the sandbox (e.g. saved to disk and double-clicked)."""
+    js = _strip_fences(js or "")
+    js = _HTML_SCRIPT_RE.sub("", js)
+    if re.search(r"\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|importScripts"
+                 r"|sendBeacon|localStorage|sessionStorage|indexedDB|document\s*"
+                 r"\.\s*cookie|eval|Function\s*\()", js):
+        return ""      # not worth repairing — the note works fine without it
+    return js.strip()
+
+
+# Only Google Fonts is reachable, and only for stylesheets/fonts. Everything
+# else — including any network call the generated script might try — is denied,
+# so a note can render arbitrary AI-authored markup without becoming a way to
+# phone home with the student's content.
+_HTML_NOTE_CSP = (
+    "default-src 'none'; "
+    "style-src 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src https://fonts.gstatic.com data:; "
+    "img-src data: blob:; "
+    "script-src 'unsafe-inline'; "
+    "connect-src 'none'; "
+    "form-action 'none'; "
+    "frame-src 'none'; "
+    "object-src 'none'; "
+    "base-uri 'none'")
+
+_HTML_DOC_HEAD = (
+    "<!DOCTYPE html>\n<html lang=\"%(lang)s\">\n<head>\n"
+    "<meta charset=\"utf-8\">\n"
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+    "<meta http-equiv=\"Content-Security-Policy\" content=\"%(csp)s\">\n"
+    "<title>%(title)s</title>\n"
+    "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n"
+    "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n"
+    "<style>\n%(css)s\n</style>\n</head>\n<body>\n")
+
+
+def _html_doc_open(css, title, out_lang):
+    return _HTML_DOC_HEAD % {
+        "lang": "hi" if _is_hinglish(out_lang) else "en",
+        "csp": _HTML_NOTE_CSP,
+        "title": _html_escape_text(title or "Study Notes"),
+        "css": css,
+    }
+
+
+def _html_doc_close(js):
+    tail = "\n"
+    if js:
+        tail += "<script>\n(function(){\ntry{\n%s\n}catch(e){}\n})();\n</script>\n" % js
+    return tail + "</body>\n</html>\n"
+
+
+def _html_escape_text(text):
+    return (str(text or "").replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace("\"", "&quot;"))
+
+
+def _html_part_cap(ai, part_cap):
+    """Output cap for one body part. The Markdown path drops small-context models
+    to a flat 2400 tokens; HTML needs a higher floor because roughly half of
+    every part is markup, and 2400 tokens of HTML is barely one page. 3400 still
+    fits comfortably inside an 8192-token window alongside the condensed body."""
+    return part_cap if ai.get("big_context") else min(part_cap, 3400)
+
+
+def _gen_notes_design(transcript, out_lang, ai, title, cancel_event=None):
+    """Run the design pass and return (css, components, js).
+
+    Never raises: a failed design pass falls back to the built-in theme so the
+    body pass — the expensive part — is not wasted.
+    """
+    sample = (transcript or "")[:NOTES_HTML_DESIGN_SAMPLE]
+    head = "Lecture title: %s\n\n" % (title or "(untitled)")
+    user = (head + _html_design_instr(out_lang) +
+            "\n\nLECTURE SAMPLE:\n" + sample + _lang_reminder(out_lang))
+    sysmsg = ("You are a senior web designer who writes production CSS by hand. "
+              "You answer with code only, never with explanation.")
+    try:
+        if cancel_event is not None and cancel_event.is_set():
+            return _HTML_FALLBACK_CSS, _HTML_FALLBACK_COMPONENTS, ""
+        raw = _ai_chat([{"role": "system", "content": sysmsg},
+                        {"role": "user", "content": user}], ai,
+                       temperature=0.7,        # design wants variety, not accuracy
+                       max_tokens=NOTES_HTML_DESIGN_CAP) or ""
+    except Exception as exc:  # noqa: BLE001
+        log.warning("html notes: design pass failed (%s) — using fallback theme", exc)
+        return _HTML_FALLBACK_CSS, _HTML_FALLBACK_COMPONENTS, ""
+    css, components, js = _html_parse_design(raw)
+    return css, components, _sanitise_note_design_js(js)
+
+
+def _gen_notes_html(transcript, out_lang, ai, head, title, cancel_event=None):
+    """Blocking AI-designed HTML notes: design pass, then one body pass per
+    transcript chunk, assembled into a single standalone document."""
+    css, components, js = _gen_notes_design(
+        transcript, out_lang, ai, title, cancel_event=cancel_event)
+    sysmsg = _study_sys(out_lang)
+    tail = _lang_reminder(out_lang)
+    secs, part_cap = _notes_sections(transcript, out_lang, ai, "html",
+                                     cancel_event=cancel_event)
+    part_cap = _html_part_cap(ai, part_cap)
+    parts, covered = [], []
+    for i, sec in enumerate(secs):
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        instr = _html_body_instr(components, out_lang, i + 1, len(secs))
+        user = head + _html_covered_note(covered) + instr + "\n\n" + sec + tail
+        raw = _chat_notes_complete(sysmsg, user, ai, part_cap)
+        frag = _sanitise_note_body(raw)
+        if not frag:
+            continue
+        parts.append(frag)
+        if len(secs) > 1:
+            covered.extend(_html_extract_titles(frag))
+    return (_html_doc_open(css, title, out_lang) +
+            "\n".join(parts) + _html_doc_close(js))
+
+
+def _stream_notes_html(transcript, out_lang, ai, head, title, cancel_event=None):
+    """Streaming twin of _gen_notes_html.
+
+    Emits the document prologue as soon as the design pass lands, then each body
+    part. Sanitising has to happen per COMPLETE part rather than per token —
+    a regex cannot judge a half-written tag — so a part is buffered, cleaned and
+    then released. Progress therefore arrives in page-sized steps, not
+    character by character, which is also why the client shows a progress view
+    while this runs instead of repainting a half-built document.
+
+    The pieces it yields concatenate to exactly what _gen_notes_html returns, so
+    a streamed note and a cached note are byte-identical.
+    """
+    css, components, js = _gen_notes_design(
+        transcript, out_lang, ai, title, cancel_event=cancel_event)
+    if cancel_event is not None and cancel_event.is_set():
+        return
+    yield _html_doc_open(css, title, out_lang)
+    sysmsg = _study_sys(out_lang)
+    tail = _lang_reminder(out_lang)
+    secs, part_cap = _notes_sections(transcript, out_lang, ai, "html",
+                                     cancel_event=cancel_event)
+    part_cap = _html_part_cap(ai, part_cap)
+    covered, emitted = [], 0
+    for i, sec in enumerate(secs):
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        instr = _html_body_instr(components, out_lang, i + 1, len(secs))
+        user = head + _html_covered_note(covered) + instr + "\n\n" + sec + tail
+        buf = []
+        for piece in _stream_notes_part(sysmsg, user, ai, part_cap,
+                                        cancel_event=cancel_event):
+            if cancel_event is not None and cancel_event.is_set():
+                return
+            buf.append(piece)
+        frag = _sanitise_note_body("".join(buf))
+        if not frag:
+            continue
+        yield ("\n" if emitted else "") + frag
+        emitted += 1
+        if len(secs) > 1:
+            covered.extend(_html_extract_titles(frag))
+    yield _html_doc_close(js)
+
+
+def _is_html_note(content):
+    """Whether a stored note body is an AI-designed HTML document rather than
+    Markdown. Used so a note saved before its style was recorded still renders
+    correctly, and so a mislabelled style can't inject markup into the notebook
+    renderer."""
+    head = (content or "").lstrip()[:400].lower()
+    return head.startswith("<!doctype html") or head.startswith("<html")
+
+
 # Approx context window (in TOKENS) per Study provider. Cerebras models cap low
 # (8192) — they are NOT really big-context — so a big char chunk 400s with
 # "reduce the length". Others (Bynara ~1M, Mistral, NVIDIA, OpenRouter, custom)
@@ -2852,11 +3423,16 @@ def _notes_sections(transcript, out_lang, ai, style="", cancel_event=None):
     transcript's script (Hindi ≈ 1 token/char), so small-context models (e.g.
     Cerebras 8192) don't 400 with 'reduce the length'. Big-context providers get
     the full NOTES_CHUNK (single coherent pass); non-big providers use one
-    condensed body. MCQ expands more per point, so it uses smaller chunks/caps."""
-    part_cap = NOTES_MCQ_CAP if style == "mcq" else NOTES_CAP
+    condensed body. MCQ expands more per point, so it uses smaller chunks/caps.
+    style='html' goes further in the same direction: markup and inline SVG cost
+    several times more output tokens per fact than Markdown, so it takes in less
+    and is allowed to write more."""
+    part_cap = (NOTES_HTML_CAP if style == "html"
+                else NOTES_MCQ_CAP if style == "mcq" else NOTES_CAP)
     if not ai.get("big_context"):
         return [_condense(transcript, out_lang, ai, cancel_event=cancel_event)], part_cap
-    chunk_chars = NOTES_MCQ_CHUNK if style == "mcq" else NOTES_CHUNK
+    chunk_chars = (NOTES_HTML_CHUNK if style == "html"
+                   else NOTES_MCQ_CHUNK if style == "mcq" else NOTES_CHUNK)
     ctx = _model_ctx_tokens(ai)
     if ctx:
         in_budget_tokens = int(ctx * _CTX_INPUT_FRAC)          # tokens for the chunk
@@ -2874,6 +3450,12 @@ def _stream_study_text(mode, transcript, out_lang, ai, head, style="", cancel_ev
     sysmsg = _study_sys(out_lang)
     # Restated after the transcript for the same reason as in _gen_notes.
     tail = _lang_reminder(out_lang)
+    if mode == "notes" and style == "html":
+        for piece in _stream_notes_html(transcript, out_lang, ai, head,
+                                        _head_title(head),
+                                        cancel_event=cancel_event):
+            yield piece
+        return
     if mode == "notes":
         instr = _notes_instr(style)
         secs, part_cap = _notes_sections(
@@ -3221,6 +3803,9 @@ def _poster_source(video_id, transcript, out_lang, ai):
     condensed; small-context ones still need the condense to fit at all.
     """
     if video_id:
+        # Markdown styles only. style="html" notes are a full HTML document, so
+        # feeding them here would spend the poster's context on tags and CSS
+        # instead of facts; falling through to the transcript is cheaper.
         for style in ("", "topic+images"):
             try:
                 _ckey, fs_id = _study_text_cache_keys(video_id, "notes", out_lang, style)
@@ -3372,7 +3957,8 @@ def _generate_study(mode, transcript, out_lang, ai, title=None, num_questions=25
     sysmsg = _study_sys(out_lang)
     tail = _lang_reminder(out_lang)      # restated after the body, see _lang_reminder
     if mode == "notes":
-        return {"format": "markdown", "content": _gen_notes(transcript, out_lang, ai, head, style=style)}
+        return {"format": "html" if style == "html" else "markdown",
+                "content": _gen_notes(transcript, out_lang, ai, head, style=style)}
     if mode == "quiz":
         return {"format": "json",
                 "questions": _gen_quiz(transcript, out_lang, ai, head, num_questions, focus)}
@@ -3652,15 +4238,17 @@ def api_study():
     fkey = re.sub(r"\s+", " ", focus).lower()[:120]
 
     # ?style=mcq|topic+images (notes only): format notes by style.
-    # Only 'mcq' and 'topic+images' are recognised non-default styles;
-    # everything else keeps the original topic-notes behaviour.
+    # Only 'mcq', 'topic+images' and 'html' are recognised non-default styles;
+    # everything else keeps the original topic-notes behaviour. 'html' returns an
+    # AI-designed standalone HTML document rather than Markdown — same cache key
+    # shape, so it is stored and served alongside the other styles.
     # For mode=poster, `style` instead carries WHICH KIND of one-page sheet to
     # build, and it stays in the cache key so a formula sheet and a fact sheet
     # for the same lecture are stored separately rather than overwriting.
     style = (request.args.get("style") or "").strip().lower()
     if mode == "poster":
         style = style if style in _POSTER_KINDS else "auto"
-    elif mode != "notes" or style not in ("mcq", "topic+images"):
+    elif mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
 
     # Cache key is MODEL-AGNOSTIC: a note is identified by its CONTENT dimensions
@@ -3799,7 +4387,7 @@ def api_study_stream():
     force = (request.args.get("refresh") or request.args.get("nocache")
              or "").strip().lower() in ("1", "true", "yes")
     style = (request.args.get("style") or "").strip().lower()
-    if mode != "notes" or style not in ("mcq", "topic+images"):
+    if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
 
     # Cache key MUST match /api/study (notes/summary/insights have no focus and a
@@ -3908,7 +4496,8 @@ def api_study_stream():
         if content.strip():
             data = {"id": video_id, "title": t.get("title"), "mode": mode,
                     "style": style or ("topic" if mode == "notes" else None),
-                    "out_lang": out_lang, "model": _ai_display_model(ai), "format": "markdown",
+                    "out_lang": out_lang, "model": _ai_display_model(ai),
+                    "format": "html" if style == "html" else "markdown",
                     "num_questions": None, "provider": _ai_display_provider(ai),
                     "keys_available": _ai_key_count(ai),
                     "transcript_lang": t.get("chosen_lang"),
@@ -4033,7 +4622,8 @@ def _run_study_job(job_id):
 
         data = {"id": job["video_id"], "title": job.get("title"), "mode": job["mode"],
                 "style": job["style"] or ("topic" if job["mode"] == "notes" else None),
-                "out_lang": job["out_lang"], "model": job["model"], "format": "markdown",
+                "out_lang": job["out_lang"], "model": job["model"],
+                "format": "html" if job["style"] == "html" else "markdown",
                 "num_questions": None, "provider": job["provider"],
                 "keys_available": _ai_key_count(job["ai"]),
                 "transcript_lang": job.get("transcript_lang"),
@@ -4088,7 +4678,7 @@ def api_study_jobs_start():
         return jsonify({"error": "bad_mode", "detail": "jobs support notes, summary and insights"}), 400
     if not video_id:
         return jsonify({"error": "missing or invalid ?id (11-char id or URL)"}), 400
-    if mode != "notes" or style not in ("mcq", "topic+images"):
+    if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
 
     was_stopped = _study_job_was_stopped(job_id)
@@ -5494,6 +6084,10 @@ def api_study_bundle_start():
         return jsonify({"error": "bad_mode", "detail": "notebooks support notes, summary and insights"}), 400
     out_lang = str(payload.get("out") or payload.get("lang") or "English").strip() or "English"
     style = str(payload.get("style") or "").strip().lower()
+    # Markdown styles only. A notebook interleaves per-lecture cards with the
+    # generated bodies and concatenates the lot into ONE document; style="html"
+    # produces a complete <html> document per lecture, so N of them stitched
+    # together is not a document at all. Falls back to topic notes.
     if mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
     degraded = ""
@@ -5902,7 +6496,7 @@ def api_study_saved():
     style = (request.args.get("style") or "").strip().lower()
     if style == "topic":
         style = ""
-    if mode != "notes" or style not in ("mcq", "topic+images"):
+    if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
     ckey, fs_id = _study_text_cache_keys(video_id, mode, out_lang, style)
     saved = _study_job_cached_result(ckey, fs_id, False)
@@ -5913,6 +6507,10 @@ def api_study_saved():
         "id": video_id, "title": saved.get("title"),
         "content": saved.get("content") or "", "mode": saved.get("mode") or mode,
         "style": saved.get("style") or "topic",
+        # Explicit so the client picks a renderer without sniffing the body.
+        # Sniffed as a fallback for notes stored before `format` was recorded.
+        "format": (saved.get("format")
+                   or ("html" if _is_html_note(saved.get("content")) else "markdown")),
         "out_lang": saved.get("out_lang") or out_lang,
         "provider": saved.get("provider") or "ai", "model": saved.get("model") or "",
         "cached": True,
@@ -5945,6 +6543,7 @@ def api_study_bundle_get(fingerprint):
     style = (request.args.get("style") or "").strip().lower()
     if style == "topic":
         style = ""
+    # Notebooks are Markdown-only (see api_study_bundle_start).
     if mode != "notes" or style not in ("mcq", "topic+images"):
         style = ""
     cache_provider = (request.args.get("provider") or "").strip()[:40]
@@ -5997,7 +6596,7 @@ def api_study_cached():
         mode = "notes"
     out_lang = str(payload.get("out") or payload.get("lang") or "English").strip() or "English"
     style = str(payload.get("style") or "").strip().lower()
-    if mode != "notes" or style not in ("mcq", "topic+images"):
+    if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
     req_model = str(payload.get("model") or "").strip()[:80]
     req_provider = str(payload.get("provider") or "").strip()[:40]
@@ -6051,7 +6650,7 @@ def api_study_langs():
     num_q = max(1, min(100, num_q))
     # match /api/study's cache buckets: MCQ notes are stored under their own key
     style = (request.args.get("style") or "").strip().lower()
-    if mode != "notes" or style not in ("mcq", "topic+images"):
+    if mode != "notes" or style not in ("mcq", "topic+images", "html"):
         style = ""
     # model-agnostic: a language is "available" if a note exists for it, no matter
     # which model made it (cache key no longer includes the model).
