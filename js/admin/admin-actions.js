@@ -751,7 +751,7 @@ const STUDY_PROVIDERS = {
               models: ['minimax-m3', 'kimi-k2.7-code'], def: 'minimax-m3',
               note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' },
   omniroute: { label: 'OmniRoute', host: 'squeak-earthly-obliged.ngrok-free.dev', baseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1', keyField: 'omnirouteApiKeys', modelField: 'omnirouteModel',
-              models: ['auto', 'auto/best-coding', 'auto/best-reasoning', 'auto/best-fast', 'auto/best-chat', 'auto/best-vision', 'auto/pro-reasoning', 'auto/pro-coding', 'auto/coding', 'auto/reasoning', 'auto/fast', 'auto/chat', 'auto/cheap', 'auto/smart', 'auto/vision', 'auto/multimodal', 'auto/claude-opus', 'auto/claude-sonnet', 'auto/gemini', 'auto/glm', 'auto/minimax', 'auto/llama', 'auto/gemma', 'auto/best-free'], def: 'auto',
+              models: ['auto', 'auto/best-coding', 'auto/best-reasoning', 'auto/best-fast', 'auto/best-chat', 'auto/best-vision', 'auto/best-coding-fast', 'auto/pro-coding', 'auto/pro-reasoning', 'auto/pro-vision', 'auto/pro-chat', 'auto/pro-fast', 'auto/coding', 'auto/reasoning', 'auto/fast', 'auto/chat', 'auto/cheap', 'auto/offline', 'auto/smart', 'auto/vision', 'auto/multimodal', 'auto/claude-opus', 'auto/claude-sonnet', 'auto/gemini', 'auto/glm', 'auto/minimax', 'auto/mimo', 'auto/zai', 'auto/llama', 'auto/gemma', 'auto/best-free'], def: 'auto',
               note: 'ngrok Dev Domain · auto/* routing aliases (live list surfaced in the app)', keyUrl: '' },
   kiro:     { label: 'Kiro', host: 'kiro-key-test-s6io.onrender.com', baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
               models: ['auto', 'claude-sonnet-5', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-opus-4.6', 'claude-sonnet-4.6', 'claude-opus-4.5', 'claude-sonnet-4.5', 'claude-sonnet-4', 'claude-haiku-4.5', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'deepseek-3.2', 'minimax-m2.5', 'minimax-m2.1', 'glm-5', 'qwen3-coder-next'],
@@ -825,12 +825,17 @@ function studyModelFor(pid) {
   return m || p.def;
 }
 /* Effective model list for a provider: admin override (config/ai.providerModels)
-   if set, else the hardcoded default. */
+   if set, else the hardcoded default. OmniRoute is machine-managed: its typed
+   last-good snapshot is merged with stable auto routes for read-only display. */
 function studyModelsFor(pid) {
-  // OmniRoute's routes come from its live /v1/models catalog on the app side.
-  // Here (admin) we show a static list of its `auto/*` routing aliases; admin
-  // model overrides deliberately do not apply to OmniRoute.
-  if (pid === 'omniroute') return ((STUDY_PROVIDERS.omniroute || {}).models || ['auto']).slice();
+  if (pid === 'omniroute') {
+    var defaults = ((STUDY_PROVIDERS.omniroute || {}).models || ['auto']).slice();
+    var catalog = AI_CONFIG && AI_CONFIG.omnirouteCatalog;
+    var durable = catalog && Array.isArray(catalog.chatModels) ? catalog.chatModels : [];
+    return defaults.concat(durable).filter(function (model, index, all) {
+      return typeof model === 'string' && model.trim() && all.indexOf(model) === index;
+    });
+  }
   var ov = AI_CONFIG && AI_CONFIG.providerModels && AI_CONFIG.providerModels[pid];
   if (Array.isArray(ov) && ov.length) return ov.slice();
   return ((STUDY_PROVIDERS[pid] || STUDY_PROVIDERS.bynara).models || []).slice();
@@ -839,9 +844,9 @@ function studyModelsFor(pid) {
 /* Daily catalog refresh supports every Study AI provider. Free-only refreshes
    remain conservative in the scheduler: a provider must return verifiable
    zero-price metadata before its catalog can replace the existing model list. */
-// OmniRoute's live catalog is intentionally not auto-synced: it is a routed
-// multi-provider catalog whose availability can change while a route is live.
-// Its approved model list is managed explicitly in this Admin screen.
+// OmniRoute is intentionally excluded here: the backend classifies its live
+// multi-provider /models response into typed chat/image snapshots and persists
+// them atomically. Admin displays that catalog read-only and never rewrites it.
 const STUDY_CATALOG_REFRESH_PROVIDERS = STUDY_PROVIDER_ORDER.filter(function (pid) {
   return pid !== 'omniroute' && pid !== 'google_interactions';
 });
@@ -974,8 +979,10 @@ function _modelsEnsure(pid) {
 function studyModelChipsHtml(pid) {
   var list = _modelsEnsure(pid);
   if (!list.length) return '<span class="ai-model-empty">No models configured — add one below.</span>';
+  var readOnly = pid === 'omniroute';
   return list.map(function (m, i) {
-    return '<span class="ai-model-token"><code>' + esc(m) + '</code><button type="button" title="Remove ' + esc(m) + '" aria-label="Remove ' + esc(m) + '" onclick="removeStudyModel(' + i + ')">×</button></span>';
+    var remove = readOnly ? '' : '<button type="button" title="Remove ' + esc(m) + '" aria-label="Remove ' + esc(m) + '" onclick="removeStudyModel(' + i + ')">×</button>';
+    return '<span class="ai-model-token"><code>' + esc(m) + '</code>' + remove + '</span>';
   }).join('');
 }
 function paintModelsManage() {
@@ -988,13 +995,13 @@ function paintModelsManage() {
   if (ms) ms.innerHTML = studyModelOptions(_modelsEnsure(pid), studyModelFor(pid));
 }
 function removeStudyModel(i) {
-  if (selectedStudyProvider() === 'omniroute') { showToast('OmniRoute always uses its automatic route.'); return; }
+  if (selectedStudyProvider() === 'omniroute') { showToast('OmniRoute models are discovered and managed by the backend.'); return; }
   var list = _modelsEnsure(selectedStudyProvider());
   if (i >= 0 && i < list.length) list.splice(i, 1);
   paintModelsManage();
 }
 function addStudyModel() {
-  if (selectedStudyProvider() === 'omniroute') { showToast('OmniRoute always uses its automatic route.'); return; }
+  if (selectedStudyProvider() === 'omniroute') { showToast('OmniRoute models are discovered and managed by the backend.'); return; }
   var list = _modelsEnsure(selectedStudyProvider());
   var inp = document.getElementById('study-model-add');
   var v = inp ? inp.value.trim() : '';
@@ -1005,7 +1012,11 @@ function addStudyModel() {
 }
 async function saveStudyModels() {
   var pid = selectedStudyProvider();
-  var list = pid === 'omniroute' ? ['auto'] : _modelsEnsure(pid).slice();
+  if (pid === 'omniroute') {
+    showToast('OmniRoute models are machine-managed and already saved from the last successful live catalog.');
+    return;
+  }
+  var list = _modelsEnsure(pid).slice();
   var pm = Object.assign({}, (AI_CONFIG && AI_CONFIG.providerModels) || {});
   pm[pid] = list;
   try {

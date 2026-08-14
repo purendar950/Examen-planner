@@ -1784,15 +1784,23 @@ def _ai_chat_model_groups(models):
         group_key = provider
 
         if provider == "omniroute":
-            if "/" in model:
-                subprovider, model_label = model.split("/", 1)
+            family_label = _OMNIROUTE_AUTO_FAMILY_LABELS.get(model)
+            if family_label:
+                family_id = model.split("/", 1)[1]
+                subprovider = "auto-family:%s" % family_id
+                model_label = model
+                group_key = "omniroute:%s" % subprovider
+                provider_label = "OmniRoute — %s" % family_label
             else:
-                subprovider = "auto"
-                model_label = "Auto"
-            group_key = "omniroute:%s" % subprovider
-            route_label = ("Auto (smart routing)" if subprovider == "auto"
-                           else _omniroute_provider_label(subprovider))
-            provider_label = "OmniRoute — %s" % route_label
+                if "/" in model:
+                    subprovider, model_label = model.split("/", 1)
+                else:
+                    subprovider = "auto"
+                    model_label = "Auto"
+                group_key = "omniroute:%s" % subprovider
+                route_label = ("Auto (smart routing)" if subprovider == "auto"
+                               else _omniroute_provider_label(subprovider))
+                provider_label = "OmniRoute — %s" % route_label
 
         group = by_key.get(group_key)
         if group is None:
@@ -2051,6 +2059,55 @@ def _is_image_model_name(model_id):
     return any(marker in lowered for marker in IMAGE_MODEL_MARKERS)
 
 
+def _clean_omniroute_catalog_ids(values):
+    """Return unique, non-empty model IDs from an untrusted config list."""
+    cleaned, seen = [], set()
+    if not isinstance(values, list):
+        return cleaned
+    for value in values:
+        if not isinstance(value, str):
+            continue
+        model_id = value.strip()
+        if not model_id or model_id in seen:
+            continue
+        seen.add(model_id)
+        cleaned.append(model_id)
+    return cleaned
+
+
+def _omniroute_snapshot_ids(cfg, kind):
+    """Read one typed, machine-managed OmniRoute catalog from config/ai.
+
+    Chat snapshots are defensively re-filtered by ID so a malformed config can
+    never leak obvious image/video/audio routes into text selectors. Image
+    snapshots intentionally accept unfamiliar names: live discovery classified
+    them from capability metadata before persistence, and models such as
+    Seedream/Recraft/Ideogram cannot reliably be reconstructed from names.
+    Obvious non-image media/embedding IDs are still rejected.
+    """
+    field = "chatModels" if kind == "chat" else "imageModels"
+    catalog = (cfg or {}).get("omnirouteCatalog") or {}
+    ids = _clean_omniroute_catalog_ids(catalog.get(field) if isinstance(catalog, dict) else [])
+    if kind == "chat" and "_omniroute_item_is_chat" in globals():
+        ids = [model_id for model_id in ids
+               if _omniroute_item_is_chat({}, model_id)]
+    elif kind == "image":
+        blocked = globals().get("_OMNIROUTE_NOT_IMAGE_MARKERS", ())
+        ids = [model_id for model_id in ids
+               if not any(marker in model_id.lower() for marker in blocked)]
+    return ids
+
+
+def _merge_unique_model_ids(*lists):
+    merged, seen = [], set()
+    for values in lists:
+        for model_id in values or []:
+            if model_id not in seen:
+                seen.add(model_id)
+                merged.append(model_id)
+    return merged
+
+
 # Image models live in their OWN catalog, deliberately NOT in
 # STUDY_PROVIDER_MODELS. Two reasons, both of which broke image generation when
 # they were merged into one list:
@@ -2103,22 +2160,21 @@ def _effective_image_models(cfg):
         cleaned = ([m.strip() for m in ov if isinstance(m, str) and m.strip()]
                    if isinstance(ov, list) else [])
         if pid == "omniroute":
-            # A configured fallback must make /status fast even when the free
-            # tunnel is down. Serve fallback + last-good cache immediately and
-            # refresh the live (~62 model) catalog in the background. Without
-            # a fallback, do one synchronous discovery so a fresh install can
-            # populate the picker on its first status request.
-            if cleaned and "_omniroute_image_models_cache" in globals():
-                discovered = list(_omniroute_image_models_cache.get("ids") or [])
+            durable = _omniroute_snapshot_ids(cfg, "image")
+            fallback = _merge_unique_model_ids(durable, cleaned)
+            # A durable/configured fallback must make /status fast even when the
+            # free tunnel is down. Serve fallback + last-good cache immediately
+            # and refresh the live (~62 model) catalog in the background.
+            # Without any fallback, do one synchronous discovery so a fresh
+            # install can populate the picker on its first status request.
+            cached = (list(_omniroute_image_models_cache.get("ids") or [])
+                      if "_omniroute_image_models_cache" in globals() else [])
+            if fallback or cached:
+                discovered = cached
                 _omniroute_refresh_image_models_async()
             else:
                 discovered = _omniroute_fetch_image_model_ids()
-            merged, seen = [], set()
-            for model in list(discovered) + cleaned:
-                if model not in seen:
-                    seen.add(model)
-                    merged.append(model)
-            out[pid] = merged
+            out[pid] = _merge_unique_model_ids(discovered, fallback)
         elif cleaned:
             out[pid] = cleaned
         else:
@@ -8063,9 +8119,84 @@ _OMNIROUTE_PROVIDER_LABELS = {
     "pollinations": "Pollinations", "t3chat": "T3 Chat", "ddgw": "DuckDuckGo",
     "oc": "OpenCode", "agentrouter": "AgentRouter", "pepper": "Pepper", "tllm": "TypingMind",
 }
+# These are provider-family routes, not generic capabilities. Showing each as
+# its own upstream choice keeps the selector useful on a cold start even when
+# the ngrok /models endpoint is unavailable. Capability aliases such as
+# auto/best-chat and auto/pro-reasoning remain together under Auto.
+_OMNIROUTE_AUTO_FAMILY_LABELS = {
+    "auto/claude-opus": "Claude Opus family",
+    "auto/claude-sonnet": "Claude Sonnet family",
+    "auto/gemini": "Gemini family",
+    "auto/glm": "GLM family",
+    "auto/minimax": "MiniMax family",
+    "auto/mimo": "MiMo family",
+    "auto/zai": "Z.AI family",
+    "auto/llama": "Llama family",
+    "auto/gemma": "Gemma family",
+}
 
 _omniroute_models_cache = {"ts": 0.0, "attempt_ts": 0.0, "ids": []}
 _omniroute_models_lock = threading.Lock()
+_omniroute_refresh_guard = threading.Lock()
+_omniroute_refresh_running = False
+
+
+def _persist_omniroute_catalog(kind, ids):
+    """Atomically persist a successful typed live discovery to config/ai.
+
+    Field-path merging is important: chat and image refresh threads may finish
+    concurrently, and neither is allowed to replace the other's last-good
+    snapshot. Failed/empty discoveries never call this helper.
+    """
+    field = "chatModels" if kind == "chat" else "imageModels"
+    updated_field = "chatUpdatedAt" if kind == "chat" else "imageUpdatedAt"
+    cleaned = _clean_omniroute_catalog_ids(ids)
+    if not cleaned or not _fb_db:
+        return False
+    updated_at = datetime.now(timezone.utc)
+    data = {"omnirouteCatalog": {field: cleaned, updated_field: updated_at}}
+    merge_fields = ["omnirouteCatalog.%s" % field,
+                    "omnirouteCatalog.%s" % updated_field]
+    try:
+        _fb_db.collection("config").document("ai").set(data, merge=merge_fields)
+        # Keep this process's short raw-config cache coherent as well. The live
+        # IDs already serve the current response; this prevents a later status
+        # request from briefly seeing an older snapshot.
+        cached_cfg = _study_raw_cfg_cache.get("data")
+        if isinstance(cached_cfg, dict):
+            catalog = cached_cfg.setdefault("omnirouteCatalog", {})
+            if isinstance(catalog, dict):
+                catalog[field] = list(cleaned)
+                catalog[updated_field] = updated_at
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log.warning("OmniRoute %s catalog persistence failed: %s", kind, exc)
+        return False
+
+
+def _omniroute_refresh_models_async():
+    """Refresh chat routes without delaying status when a fallback exists."""
+    global _omniroute_refresh_running
+    now = time.time()
+    cached = _omniroute_models_cache["ids"]
+    if cached and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+        return
+    if now - _omniroute_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+        return
+    with _omniroute_refresh_guard:
+        if _omniroute_refresh_running:
+            return
+        _omniroute_refresh_running = True
+
+    def refresh():
+        global _omniroute_refresh_running
+        try:
+            _omniroute_fetch_model_ids()
+        finally:
+            with _omniroute_refresh_guard:
+                _omniroute_refresh_running = False
+
+    threading.Thread(target=refresh, name="omniroute-chat-catalog", daemon=True).start()
 
 
 def _omniroute_item_is_chat(item, model_id):
@@ -8076,7 +8207,9 @@ def _omniroute_item_is_chat(item, model_id):
     output_modalities = item.get("output_modalities")
     if isinstance(output_modalities, list) and output_modalities:
         outputs = {str(value).strip().lower() for value in output_modalities}
-        if "text" not in outputs:
+        # Text-to-image/video/audio routes sometimes advertise text alongside
+        # their generated media. They belong to typed media catalogs, not chat.
+        if "text" not in outputs or outputs.intersection({"image", "video", "audio"}):
             return False
     lowered_id = model_id.lower()
     return not any(marker in lowered_id for marker in _OMNIROUTE_NON_CHAT_ID_MARKERS)
@@ -8130,6 +8263,7 @@ def _omniroute_fetch_model_ids():
                 if ids:
                     _omniroute_models_cache["ids"] = ids
                     _omniroute_models_cache["ts"] = now
+                    _persist_omniroute_catalog("chat", ids)
                     return list(ids)
             log.warning("OmniRoute /models refresh: HTTP %s", r.status_code)
         except Exception as exc:  # noqa: BLE001
@@ -8280,6 +8414,7 @@ def _omniroute_fetch_image_model_ids():
                 if ids:
                     _omniroute_image_models_cache["ids"] = ids
                     _omniroute_image_models_cache["ts"] = now
+                    _persist_omniroute_catalog("image", ids)
                     return list(ids)
             else:
                 log.warning("OmniRoute image /models refresh: HTTP %s", r.status_code)
@@ -8328,7 +8463,7 @@ def _omniroute_auto_group(ids=None):
             "models": _omniroute_auto_models(ids)}
 
 
-def _omniroute_catalog_providers():
+def _omniroute_catalog_providers(ids=None):
     """Complete selectable text/chat catalog, with Auto always first.
 
     Provider health is intentionally not a visibility gate: the old background
@@ -8336,19 +8471,28 @@ def _omniroute_catalog_providers():
     while the browser made no follow-up status request. That made healthy routes
     invisible and also caused valid selections to fail backend validation.
     """
-    ids = _omniroute_fetch_model_ids()
-    return [_omniroute_auto_group(ids)] + _omniroute_grouped_candidates(ids)
+    catalog_ids = _omniroute_fetch_model_ids() if ids is None else ids
+    return [_omniroute_auto_group(catalog_ids)] + _omniroute_grouped_candidates(catalog_ids)
 
 
-def _omniroute_catalog_available():
-    """Whether this process has a live or last-good concrete catalog."""
-    return bool(_omniroute_models_cache["ids"])
+def _omniroute_catalog_available(cfg=None):
+    """Whether live RAM or durable config contains concrete provider routes."""
+    ids = list(_omniroute_models_cache["ids"])
+    if cfg is not None:
+        ids = _merge_unique_model_ids(
+            ids,
+            _omniroute_snapshot_ids(cfg, "chat"),
+            _clean_omniroute_catalog_ids(
+                ((cfg or {}).get("providerModels") or {}).get("omniroute")),
+        )
+    return any("/" in model_id and not model_id.startswith("auto/")
+               for model_id in ids)
 
 
-def _omniroute_catalog_flat():
+def _omniroute_catalog_flat(ids=None):
     """Every model currently offered by the OmniRoute picker and validator."""
     models, seen = [], set()
-    for group in _omniroute_catalog_providers():
+    for group in _omniroute_catalog_providers(ids):
         for model in group.get("models") or []:
             if model not in seen:
                 seen.add(model)
@@ -8366,12 +8510,25 @@ def _effective_provider_models_raw(cfg):
     overrides = (cfg or {}).get("providerModels") or {}
     out = {}
     for pid, default in STUDY_PROVIDER_MODELS.items():
-        # OmniRoute's router—not Admin overrides or stale browser selections—
-        # owns its route list. The same complete text/chat catalog drives both
-        # the selectors and request validation, so a visible concrete model is
-        # always forwarded unchanged.
+        # OmniRoute's live router catalog owns the route list. Durable typed
+        # snapshots and legacy configured IDs are immediate fallbacks across a
+        # process restart/tunnel outage; a successful live refresh replaces the
+        # machine snapshot but a failed/empty refresh can never erase it.
         if pid == "omniroute":
-            out[pid] = _omniroute_catalog_flat()
+            durable = _omniroute_snapshot_ids(cfg, "chat")
+            legacy = _clean_omniroute_catalog_ids(overrides.get(pid))
+            fallback = [model_id for model_id in
+                        _merge_unique_model_ids(durable, legacy)
+                        if _omniroute_item_is_chat({}, model_id)]
+            cached = list(_omniroute_models_cache.get("ids") or [])
+            if fallback or cached:
+                catalog_ids = _merge_unique_model_ids(cached, fallback)
+                _omniroute_refresh_models_async()
+            else:
+                catalog_ids = _omniroute_fetch_model_ids()
+            # The same complete set drives selectors and request validation, so
+            # every visible canonical model ID is forwarded unchanged.
+            out[pid] = _omniroute_catalog_flat(catalog_ids)
             continue
         ov = overrides.get(pid)
         if isinstance(ov, list):
@@ -9265,12 +9422,12 @@ def api_status():
         for _pid in STUDY_PROVIDER_IDS
         if _provider_configured(cfg, _pid) and _eff.get(_pid)
     ]
-    # OmniRoute keeps a dedicated complete sub-provider/model list. The live
-    # catalog is cached server-side; it is not filtered by asynchronous health
-    # probes, which previously left clients stuck on Auto indefinitely.
+    # OmniRoute keeps a dedicated complete sub-provider/model list. Reuse the
+    # already-resolved effective catalog so durable/configured fallbacks are
+    # served immediately while live refresh runs asynchronously.
     if _configured_provider_keys(cfg, "omniroute"):
-        out["omnirouteProviders"] = _omniroute_catalog_providers()
-        out["omnirouteCatalogAvailable"] = _omniroute_catalog_available()
+        out["omnirouteProviders"] = _omniroute_catalog_providers(_eff.get("omniroute", []))
+        out["omnirouteCatalogAvailable"] = _omniroute_catalog_available(cfg)
     uid = user["uid"]
     try:
         granted = bool(_load_ai_limits().get("focusUsers", {}).get(uid))
