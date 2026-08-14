@@ -135,7 +135,7 @@
   function ensureThread() {
     var list = loadThreads();
     if (list.length) return list[0];
-    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', github: null, createdAt: Date.now() };
+    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', github: null, workspace: { files: [], activePath: '', lastRun: null }, createdAt: Date.now() };
     saveThreads([t]);
     return t;
   }
@@ -277,6 +277,20 @@
     .aic-file-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.68rem;}
     .aic-file-pill.is-ready{color:var(--text);}.aic-file-pill.is-failed{border-color:rgba(200,75,67,.35);color:#c54b43;}.aic-file-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.8em;}
     .aic-github-context strong{color:var(--text);}
+    .aic-code-workspace{display:none;width:min(100%,1120px);margin:0 auto .7rem;border:1px solid color-mix(in srgb,var(--border) 82%,transparent);border-radius:14px;background:var(--surface);box-shadow:0 7px 24px rgba(28,24,20,.07);overflow:hidden;}
+    .aic-workspace-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--card) 88%,transparent);}
+    .aic-workspace-title{font-size:.75rem;font-weight:750;color:var(--text);white-space:nowrap;}
+    .aic-workspace-file{min-width:150px;max-width:42%;padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:.72rem;}
+    .aic-workspace-head button{padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-size:.68rem;cursor:pointer;white-space:nowrap;}
+    .aic-workspace-head button:hover{border-color:var(--accent);color:var(--text);}
+    .aic-workspace-spacer{flex:1;}
+    .aic-workspace-editor{display:block;width:100%;min-height:180px;max-height:420px;padding:14px 16px;border:0;resize:vertical;outline:none;background:#17191d;color:#e7e9ed;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2;}
+    .aic-workspace-editor:focus{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 60%,transparent);}
+    .aic-workspace-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid color-mix(in srgb,var(--border) 55%,transparent);}
+    .aic-workspace-status{flex:1;color:var(--muted);font-size:.68rem;min-width:180px;}
+    .aic-workspace-output{display:none;margin:0;padding:10px 12px;max-height:210px;overflow:auto;border-top:1px solid color-mix(in srgb,var(--border) 58%,transparent);background:#101216;color:#d8dce5;font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;}
+    .aic-workspace-output.is-error{color:#ffaaa5;}
+    .aic-github-file{display:flex;align-items:center;gap:6px;}.aic-github-file button{margin-left:auto;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--muted);font-size:.62rem;cursor:pointer;}.aic-github-file button:hover{border-color:var(--accent);color:var(--text);}
     .aic-form{width:100%;max-width:980px;margin:0 auto;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
     .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
     .aic-composer:focus-within{border-color:color-mix(in srgb,var(--accent) 72%,var(--border));box-shadow:0 8px 30px color-mix(in srgb,var(--accent) 12%,transparent);}
@@ -352,6 +366,13 @@
     </div>
     <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>
     <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>
+    <input type="file" id="aic-code-file-input" class="aic-file-input" accept=".js,.jsx,.ts,.tsx,.py,.html,.css,.json,.md,.yml,.yaml,.sh,.sql,.java,.go,.rs" onchange="aicCodeFileSelected(event)">
+    <section class="aic-code-workspace" id="aic-code-workspace" aria-label="Coding workspace">
+      <div class="aic-workspace-head"><span class="aic-workspace-title">File workspace</span><select id="aic-workspace-file" class="aic-workspace-file" onchange="aicWorkspaceFileChanged(this)" aria-label="Active file"></select><span class="aic-workspace-spacer"></span><button type="button" onclick="document.getElementById('aic-code-file-input').click()">Open local file</button><button type="button" onclick="aicWorkspaceAskEdit()">Ask AI to edit</button><button type="button" onclick="aicCloseWorkspace()">×</button></div>
+      <textarea id="aic-workspace-editor" class="aic-workspace-editor" spellcheck="false" oninput="aicWorkspaceEdited(this)" aria-label="Active code file"></textarea>
+      <div class="aic-workspace-footer"><span id="aic-workspace-status" class="aic-workspace-status">Open a GitHub or local code file to start.</span><button type="button" onclick="aicWorkspaceRun()">Run / check</button><button type="button" onclick="aicWorkspaceSaveVersion()">Save local version</button><button type="button" id="aic-workspace-fix-btn" style="display:none;" onclick="aicWorkspaceFixRun()">Ask AI to fix output</button></div>
+      <pre id="aic-workspace-output" class="aic-workspace-output"></pre>
+    </section>
     <div class="aic-log" id="aic-log"></div>
     <form class="aic-form" onsubmit="aicSend(event)">
       <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
@@ -1072,6 +1093,206 @@
     return (t && t.github && t.github.repo && Array.isArray(t.github.files)) ? t.github : null;
   }
 
+  function workspaceState(t) {
+    if (!t) return null;
+    if (!t.workspace || !Array.isArray(t.workspace.files)) t.workspace = { files: [], activePath: '', lastRun: null };
+    if (!t.workspace.activePath && t.workspace.files[0]) t.workspace.activePath = t.workspace.files[0].path;
+    return t.workspace;
+  }
+  function workspaceLanguage(path) {
+    var ext = String(path || '').split('.').pop().toLowerCase();
+    return ({ js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx', py: 'python', html: 'html', css: 'css', json: 'json', md: 'markdown', yml: 'yaml', yaml: 'yaml', sh: 'bash', sql: 'sql', java: 'java', go: 'go', rs: 'rust' })[ext] || 'text';
+  }
+  function activeWorkspaceFile(t) {
+    var ws = workspaceState(t);
+    if (!ws) return null;
+    return ws.files.find(function (f) { return f.path === ws.activePath; }) || ws.files[0] || null;
+  }
+  function renderWorkspace() {
+    var box = document.getElementById('aic-code-workspace');
+    var select = document.getElementById('aic-workspace-file');
+    var editor = document.getElementById('aic-workspace-editor');
+    var status = document.getElementById('aic-workspace-status');
+    var output = document.getElementById('aic-workspace-output');
+    var fix = document.getElementById('aic-workspace-fix-btn');
+    var t = getThread(currentThreadId());
+    var ws = workspaceState(t);
+    var file = activeWorkspaceFile(t);
+    if (!box || !select || !editor || !status || !ws || !file) {
+      if (box) box.style.display = 'none';
+      return;
+    }
+    box.style.display = '';
+    select.innerHTML = ws.files.map(function (f) { return '<option value="' + escAttr(f.path) + '"' + (f.path === file.path ? ' selected' : '') + '>' + esc(f.path) + '</option>'; }).join('');
+    if (document.activeElement !== editor || editor.getAttribute('data-path') !== file.path) {
+      editor.value = file.content || '';
+      editor.setAttribute('data-path', file.path);
+    }
+    status.textContent = (file.dirty ? 'Unsaved local changes' : 'Loaded locally') + ' · ' + file.path + ' · ' + workspaceLanguage(file.path);
+    var result = ws.lastRun;
+    if (result && (result.stdout || result.stderr || result.detail || result.status)) {
+      output.style.display = '';
+      output.classList.toggle('is-error', result.status !== 'passed');
+      output.textContent = ['$ ' + (result.mode === 'check' ? 'syntax check' : 'run') + ' · ' + result.status + (result.durationMs ? ' · ' + result.durationMs + ' ms' : ''), result.stdout || '', result.stderr || '', result.detail || ''].filter(Boolean).join('\n');
+      if (fix) fix.style.display = result.status === 'passed' ? 'none' : '';
+    } else {
+      output.style.display = 'none';
+      output.textContent = '';
+      if (fix) fix.style.display = 'none';
+    }
+  }
+  function workspaceRequest(t) {
+    var file = activeWorkspaceFile(t);
+    if (!file) return null;
+    return { path: file.path, language: workspaceLanguage(file.path), content: String(file.content || '').slice(0, 26000) };
+  }
+  function addWorkspaceFile(t, file) {
+    var ws = workspaceState(t), existing = ws.files.find(function (f) { return f.path === file.path; });
+    if (existing) Object.assign(existing, file);
+    else ws.files.push(file);
+    ws.activePath = file.path;
+    ws.lastRun = null;
+    upsertThread(t);
+    renderWorkspace();
+  }
+  window.aicWorkspaceFileChanged = function (select) {
+    var t = getThread(currentThreadId()), ws = workspaceState(t);
+    if (!t || !ws || !select) return;
+    ws.activePath = select.value;
+    ws.lastRun = null;
+    upsertThread(t);
+    renderWorkspace();
+  };
+  window.aicWorkspaceEdited = function (editor) {
+    var t = getThread(currentThreadId()), file = activeWorkspaceFile(t);
+    if (!t || !file || !editor) return;
+    file.content = editor.value;
+    file.dirty = true;
+    upsertThread(t);
+    var status = document.getElementById('aic-workspace-status');
+    if (status) status.textContent = 'Unsaved local changes · ' + file.path + ' · ' + workspaceLanguage(file.path);
+  };
+  window.aicWorkspaceSaveVersion = function () {
+    var t = getThread(currentThreadId()), file = activeWorkspaceFile(t);
+    if (!t || !file) return;
+    file.originalContent = file.content;
+    file.dirty = false;
+    file.revision = (file.revision || 0) + 1;
+    upsertThread(t);
+    renderWorkspace();
+    toast('Saved local version ' + file.revision + ' for ' + file.path + '.', 'success');
+  };
+  window.aicCloseWorkspace = function () {
+    var t = getThread(currentThreadId());
+    if (!t) return;
+    t.workspace = { files: [], activePath: '', lastRun: null };
+    upsertThread(t);
+    renderWorkspace();
+  };
+  window.aicCodeFileSelected = function (ev) {
+    var file = ev && ev.target && ev.target.files && ev.target.files[0];
+    var t = getThread(currentThreadId());
+    if (!file || !t) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var content = String(reader.result || '');
+      addWorkspaceFile(t, { path: file.name, language: workspaceLanguage(file.name), content: content, originalContent: content, dirty: false, source: 'local', revision: 1 });
+    };
+    reader.readAsText(file);
+    ev.target.value = '';
+  };
+  window.aicOpenGithubFile = function (path) {
+    var t = getThread(currentThreadId()), state = githubState(t);
+    if (!t || !state || !path) return;
+    githubStatus('Opening ' + path + '…', false);
+    backendAuthFetch('/api/ai-chat/github/file?repo=' + encodeURIComponent(state.repo) + '&ref=' + encodeURIComponent(state.ref || 'HEAD') + '&path=' + encodeURIComponent(path))
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.detail || 'Could not open that file.');
+        addWorkspaceFile(t, { path: res.data.path || path, language: res.data.language || workspaceLanguage(path), content: res.data.content || '', originalContent: res.data.content || '', dirty: false, source: 'github', repo: state.repo, ref: state.ref || 'HEAD', revision: 1 });
+        githubStatus('Opened ' + path + ' in the local coding workspace.', false);
+      }).catch(function (e) { githubStatus(e.message || 'Could not open that file.', true); });
+  };
+  window.aicWorkspaceAskEdit = function () {
+    var t = getThread(currentThreadId()), file = activeWorkspaceFile(t), input = document.getElementById('aic-input');
+    if (!file || !input) { toast('Open a code file first.', 'error'); return; }
+    input.value = 'Improve only the necessary part of the active file ' + file.path + '. Do not rewrite the complete file. Return a unified diff that applies cleanly to the current file, followed by a brief explanation and verification steps.';
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+    input.focus();
+    toast('Focused edit request added to the composer.', 'info');
+  };
+  function applyUnifiedDiff(source, patch) {
+    var src = String(source || '').replace(/\r\n/g, '\n').split('\n');
+    var lines = String(patch || '').replace(/\r\n/g, '\n').split('\n');
+    var out = [], cursor = 0, i = 0, sawHunk = false;
+    while (i < lines.length) {
+      var hunk = lines[i].match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+      if (!hunk) { i += 1; continue; }
+      sawHunk = true;
+      var oldStart = Math.max(0, Number(hunk[1]) - 1);
+      while (cursor < oldStart) out.push(src[cursor++]);
+      i += 1;
+      while (i < lines.length && !/^@@ /.test(lines[i]) && !/^diff --git /.test(lines[i])) {
+        var line = lines[i];
+        if (line === '\\ No newline at end of file') { i += 1; continue; }
+        var marker = line.charAt(0), value = line.slice(1);
+        if (marker === ' ') { if (src[cursor] !== value) return { error: 'Patch context does not match ' + (cursor + 1) + '. Refresh the file and ask AI for a new diff.' }; out.push(src[cursor++]); }
+        else if (marker === '-') { if (src[cursor] !== value) return { error: 'Patch removal does not match line ' + (cursor + 1) + '.' }; cursor += 1; }
+        else if (marker === '+') out.push(value);
+        else if (line !== '') return { error: 'Unsupported patch line: ' + line.slice(0, 80) };
+        i += 1;
+      }
+    }
+    if (!sawHunk) return { error: 'No unified diff hunk was found.' };
+    while (cursor < src.length) out.push(src[cursor++]);
+    return { content: out.join('\n') };
+  }
+  window.aicApplyArtifact = function (btn) {
+    var card = btn && btn.closest('.aic-code-artifact'), t = getThread(currentThreadId()), file;
+    if (!card || !t) return;
+    file = activeWorkspaceFile(t);
+    if (!file) { toast('Open the target file before applying a patch.', 'error'); return; }
+    var result = applyUnifiedDiff(file.content, card.getAttribute('data-code') || '');
+    if (result.error) { toast(result.error, 'error'); return; }
+    file.content = result.content;
+    file.dirty = true;
+    workspaceState(t).lastRun = null;
+    upsertThread(t);
+    renderWorkspace();
+    toast('Patch applied to the local workspace. Review it before saving.', 'success');
+  };
+  window.aicWorkspaceRun = function () {
+    var t = getThread(currentThreadId()), file = activeWorkspaceFile(t);
+    if (!t || !file) { toast('Open a code file first.', 'error'); return; }
+    var status = document.getElementById('aic-workspace-status');
+    if (status) status.textContent = 'Running a constrained check…';
+    backendAuthFetch('/api/ai-chat/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: file.path, language: workspaceLanguage(file.path), content: file.content, mode: 'run' }) })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        var cur = getThread(currentThreadId());
+        if (!cur) return;
+        var ws = workspaceState(cur);
+        ws.lastRun = res.ok ? res.data : { status: 'failed', stderr: res.data.detail || res.data.error || 'Run request failed.' };
+        upsertThread(cur);
+        renderWorkspace();
+      }).catch(function (e) {
+        var cur = getThread(currentThreadId());
+        if (!cur) return;
+        workspaceState(cur).lastRun = { status: 'failed', stderr: e.message || 'Run request failed.' };
+        upsertThread(cur);
+        renderWorkspace();
+      });
+  };
+  window.aicWorkspaceFixRun = function () {
+    var t = getThread(currentThreadId()), file = activeWorkspaceFile(t), result = workspaceState(t) && workspaceState(t).lastRun, input = document.getElementById('aic-input');
+    if (!file || !result || !input) return;
+    input.value = 'Fix the active file ' + file.path + ' using this exact run output. Make the smallest necessary change; return a unified diff only, not a complete rewritten file.\n\nRUN OUTPUT:\n' + [result.stdout || '', result.stderr || '', result.detail || ''].filter(Boolean).join('\n');
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+    input.focus();
+    toast('The run output was added to the composer for a focused fix.', 'info');
+  };
   function githubStatus(text, isError) {
     var el = document.getElementById('aic-github-status');
     if (!el) return;
@@ -1097,7 +1318,7 @@
       var checked = state.files.indexOf(file.path) !== -1;
       return '<label class="aic-github-file"><input type="checkbox" ' + (checked ? 'checked ' : '') +
         'onchange="aicGithubFileChanged(this)" data-path="' + escAttr(file.path) + '">' +
-        '<span>' + esc(file.path) + '</span></label>';
+        '<span>' + esc(file.path) + '</span><button type="button" onclick="event.preventDefault();event.stopPropagation();aicOpenGithubFile(\'' + escAttr(file.path) + '\')">Open</button></label>';
     }).join('');
     githubStatus(state.files.length + ' file' + (state.files.length === 1 ? '' : 's') +
       ' selected from ' + state.repo + '. The AI will cite these paths when discussing code.', false);
@@ -1208,10 +1429,12 @@
       return '<span class="aic-code-line' + cls + '"><span class="aic-code-ln">' + (lineIndex + 1) + '</span>' + esc(line) + '</span>';
     }).join('');
     var safeTitle = title || (diff ? 'Suggested patch' : 'Code artifact');
-    var fixPrompt = 'Review and improve this code. Identify the bug or weakness, explain the cause briefly, then return the corrected version in a complete fenced code block.' + (normalizedLang !== 'text' ? '\nLanguage: ' + normalizedLang : '') + '\n\n```' + normalizedLang + '\n' + raw + '\n```';
+    var fixPrompt = diff
+      ? 'Review this suggested patch and return a corrected unified diff only. Do not rewrite the complete file. Preserve unchanged lines and include exact @@ hunks.\n\n```diff\n' + raw + '\n```'
+      : 'Review and improve this code. If an active file is open, change only the necessary lines and return a unified diff; otherwise return a complete new-file artifact.' + (normalizedLang !== 'text' ? '\nLanguage: ' + normalizedLang : '') + '\n\n```' + normalizedLang + '\n' + raw + '\n```';
     return '<section class="aic-code-artifact" data-code="' + escAttr(raw) + '" data-language="' + escAttr(normalizedLang) + '">' +
       '<div class="aic-code-head"><span class="aic-code-title">' + esc(safeTitle) + '</span><span class="aic-code-lang">' + esc(normalizedLang) + '</span>' +
-      '<button type="button" onclick="aicCopyArtifact(this)">Copy</button><button type="button" onclick="aicDownloadArtifact(this)">Download</button><button type="button" class="aic-code-fix" data-fix="' + escAttr(fixPrompt) + '" onclick="aicFixArtifact(this)">Try fixing</button></div>' +
+      '<button type="button" onclick="aicCopyArtifact(this)">Copy</button><button type="button" onclick="aicDownloadArtifact(this)">Download</button>' + (diff ? '<button type="button" onclick="aicApplyArtifact(this)">Apply to file</button>' : '') + '<button type="button" class="aic-code-fix" data-fix="' + escAttr(fixPrompt) + '" onclick="aicFixArtifact(this)">Try fixing</button></div>' +
       '<pre class="aic-code-body">' + rendered + '</pre>' + (diff ? '<div class="aic-code-status">Suggested diff · additions and removals are highlighted for review.</div>' : '') + '</section>';
   }
   function renderAssistantBody(text) {
@@ -1289,6 +1512,7 @@
     renderModelSelect();
     renderWebBtn();
     renderCodingBtn();
+    renderWorkspace();
     renderLog();
     renderFilesBar();
     renderGithubPanel();
@@ -1379,6 +1603,7 @@
       model: (modelSel && modelSel.value) || t.model || '',
       web: t.web || 'auto', persona: t.persona || '',
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
+      workspace: workspaceRequest(t),
       localMemory: localMemoryContext(t),
       imageContext: (function () {
         for (var i = t.messages.length - 1; i >= 0; i -= 1) {

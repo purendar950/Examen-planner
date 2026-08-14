@@ -69,6 +69,10 @@ MAX_TELEGRAM_IMAGE_BYTES = int(os.environ.get("MAX_TELEGRAM_IMAGE_BYTES", str(8 
 # ------------------------------------------------------------------ config
 import shutil
 import json
+import ast
+import subprocess
+import sys
+import tempfile
 
 POT_BASE_URL = os.environ.get("POT_BASE_URL", "http://127.0.0.1:4416")
 CACHE_TTL = int(os.environ.get("CACHE_TTL", "18000"))       # 5h (URLs expire ~6h)
@@ -12243,8 +12247,142 @@ def api_ai_chat_github_repo():
                     "defaultBranch": meta.get("default_branch") or "main", "ref": ref,
                     "files": files[:500], "treeTruncated": truncated})
 
+@app.get("/api/ai-chat/github/file")
+def api_ai_chat_github_file():
+    """Open one public repository code file for the local coding workspace."""
+    _user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    slug = _github_repo_slug(request.args.get("repo"))
+    path = str(request.args.get("path") or "").strip()
+    ref = str(request.args.get("ref") or "HEAD").strip()[:120] or "HEAD"
+    if not slug or not path:
+        return jsonify({"error": "github_file_invalid", "detail": "Repository and file path are required."}), 400
+    try:
+        text = _github_fetch_file(slug, ref, path)
+    except (requests.RequestException, ValueError) as exc:
+        return jsonify({"error": "github_file_failed", "detail": str(exc)[:240]}), 502
+    suffix = os.path.splitext(path)[1].lower()
+    language = {".js": "javascript", ".jsx": "jsx", ".ts": "typescript", ".tsx": "tsx",
+                ".py": "python", ".html": "html", ".css": "css", ".json": "json",
+                ".md": "markdown", ".yml": "yaml", ".yaml": "yaml", ".sh": "bash",
+                ".sql": "sql", ".java": "java", ".go": "go", ".rs": "rust"}.get(suffix, "text")
+    return jsonify({"ok": True, "repo": slug, "ref": ref, "path": path,
+                    "language": language, "content": text})
+
+_CODE_EXEC_MAX_CHARS = 120000
+_CODE_EXEC_TIMEOUT = 8
+_CODE_EXEC_IMPORTS = {"ast", "datetime", "json", "math", "re", "statistics", "string"}
+
+def _code_execution_language(path, language):
+    value = str(language or "").strip().lower()
+    if value:
+        return value
+    suffix = os.path.splitext(str(path or ""))[1].lower()
+    return {".js": "javascript", ".jsx": "jsx", ".ts": "typescript", ".tsx": "tsx",
+            ".py": "python", ".json": "json", ".html": "html", ".css": "css"}.get(suffix, "text")
+
+def _validate_python_for_workspace(code):
+    try:
+        tree = ast.parse(code, filename="workspace.py")
+    except SyntaxError as exc:
+        return "SyntaxError: %s (line %s)" % (exc.msg, exc.lineno or "?")
+    blocked_names = {"__import__", "eval", "exec", "compile", "open", "input", "breakpoint"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".", 1)[0] not in _CODE_EXEC_IMPORTS:
+                    return "Import '%s' is not allowed in the in-app runner." % alias.name
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").split(".", 1)[0] not in _CODE_EXEC_IMPORTS:
+                return "Import '%s' is not allowed in the in-app runner." % (node.module or "")
+        elif isinstance(node, ast.Name) and (node.id in blocked_names or node.id.startswith("__")):
+            return "Use of '%s' is not allowed in the in-app runner." % node.id
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            return "Dunder attribute access is not allowed in the in-app runner."
+    return None
+
+def _workspace_result(status, stdout="", stderr="", exit_code=None, duration_ms=0, detail=""):
+    return {"ok": status == "passed", "status": status, "stdout": str(stdout or "")[-12000:],
+            "stderr": str(stderr or "")[-12000:], "exitCode": exit_code,
+            "durationMs": int(duration_ms), "detail": detail}
+
+@app.post("/api/ai-chat/execute")
+def api_ai_chat_execute():
+    """Run a small, user-confirmed workspace file in a constrained temp directory.
+
+    This endpoint never touches the repository, GitHub, server filesystem outside
+    its temporary directory, network, or inherited application secrets. It is for
+    syntax checks and short educational snippets, not production workloads.
+    """
+    _user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    body = request.get_json(silent=True) or {}
+    code = str(body.get("content") or "")
+    path = str(body.get("path") or "workspace.txt")[:180]
+    language = _code_execution_language(path, body.get("language"))
+    mode = str(body.get("mode") or "run").lower()
+    if not code.strip():
+        return jsonify({"error": "code_missing", "detail": "Open or write code before running it."}), 400
+    if len(code) > _CODE_EXEC_MAX_CHARS:
+        return jsonify({"error": "code_too_large", "detail": "Keep the runnable file under 120,000 characters."}), 400
+    started = time.monotonic()
+    if language in {"python", "py"}:
+        guard = _validate_python_for_workspace(code)
+        if guard:
+            return jsonify(_workspace_result("failed", stderr=guard, duration_ms=(time.monotonic() - started) * 1000))
+        if mode == "check":
+            return jsonify(_workspace_result("passed", stdout="Python syntax check passed.", duration_ms=(time.monotonic() - started) * 1000))
+        try:
+            with tempfile.TemporaryDirectory(prefix="ai-chat-run-") as tmp:
+                script = os.path.join(tmp, "workspace.py")
+                with open(script, "w", encoding="utf-8") as fh:
+                    fh.write(code)
+                env = {"PATH": os.environ.get("PATH", ""), "HOME": tmp,
+                       "PYTHONIOENCODING": "utf-8", "PYTHONNOUSERSITE": "1"}
+                proc = subprocess.run([sys.executable, "-I", script], cwd=tmp, env=env,
+                                      input="", capture_output=True, text=True,
+                                      timeout=_CODE_EXEC_TIMEOUT)
+            return jsonify(_workspace_result("passed" if proc.returncode == 0 else "failed",
+                                             proc.stdout, proc.stderr, proc.returncode,
+                                             (time.monotonic() - started) * 1000))
+        except subprocess.TimeoutExpired as exc:
+            return jsonify(_workspace_result("timed_out", exc.stdout, exc.stderr,
+                                             None, (time.monotonic() - started) * 1000,
+                                             "Execution exceeded the 8-second limit."))
+    if language in {"javascript", "js", "jsx"}:
+        node = shutil.which("node")
+        if not node:
+            return jsonify(_workspace_result("unavailable", detail="Node.js is not available on this backend."))
+        with tempfile.TemporaryDirectory(prefix="ai-chat-run-") as tmp:
+            script = os.path.join(tmp, "workspace.js")
+            with open(script, "w", encoding="utf-8") as fh:
+                fh.write(code)
+            permission = ["--experimental-permission", "--allow-fs-read=" + script]
+            command = [node] + permission + (["--check", script] if mode == "check" else [script])
+            try:
+                proc = subprocess.run(command, cwd=tmp, env={"PATH": os.environ.get("PATH", "")},
+                                      input="", capture_output=True, text=True,
+                                      timeout=_CODE_EXEC_TIMEOUT)
+            except subprocess.TimeoutExpired as exc:
+                return jsonify(_workspace_result("timed_out", exc.stdout, exc.stderr,
+                                                 None, (time.monotonic() - started) * 1000,
+                                                 "Execution exceeded the 8-second limit."))
+        return jsonify(_workspace_result("passed" if proc.returncode == 0 else "failed",
+                                         proc.stdout, proc.stderr, proc.returncode,
+                                         (time.monotonic() - started) * 1000))
+    if language == "json":
+        try:
+            json.loads(code)
+        except json.JSONDecodeError as exc:
+            return jsonify(_workspace_result("failed", stderr="JSON error: %s (line %s)" % (exc.msg, exc.lineno),
+                                             duration_ms=(time.monotonic() - started) * 1000))
+        return jsonify(_workspace_result("passed", stdout="JSON syntax check passed.", duration_ms=(time.monotonic() - started) * 1000))
+    return jsonify(_workspace_result("unsupported", detail="Run/check is currently supported for Python, JavaScript, JSON, and syntax-only text files."))
 
 def _ai_chat_build_messages(chat_cfg, body, thread_id):
+
     """Shared message-building for the blocking and streaming chat endpoints.
     Returns (err, messages, ai, web_sources) — err is set on any failure."""
     q = str(body.get("q") or "").strip()
@@ -12284,18 +12422,17 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
         q, re.I))
     if coding_requested:
         sysmsg += ("\n\nCODING WORKSPACE MODE: Treat this as an engineering task. First state the "
-                   "goal and assumptions briefly. If repository or file context is present, "
-                   "name the relevant file paths and explain the smallest safe change. "
-                   "Return complete, copyable code in fenced Markdown blocks with an accurate "
-                   "language tag. For edits, prefer a unified diff or clearly separated "
-                   "before/after sections and include line-level or function-level locations. "
-                   "Include a concise verification section with tests, commands, expected "
-                   "results, and any limitations. Never claim that code was executed, a file "
-                   "was changed, or a repository was modified unless a trusted tool result "
-                   "is included in the conversation. If the user provides an error, explain "
-                   "the likely cause and end with a corrected complete snippet or patch. "
-                   "Keep explanatory prose outside code fences so the app can render the code "
-                   "as a reviewable artifact.")
+                   "goal and assumptions briefly. If repository or active file context is present, "
+                   "name the relevant file paths and explain the smallest safe change. For an active "
+                   "file, never rewrite the complete file unless explicitly requested: return an exact "
+                   "unified diff with @@ hunks that can be reviewed and applied in the browser. "
+                   "Return complete code only for a new file or an explicit full-replacement request. "
+                   "Include a concise verification section with tests, commands, expected results, "
+                   "and limitations. Never claim that code was executed, a file was changed, or a "
+                   "repository was modified unless a trusted tool result is included in the conversation. "
+                   "If the user provides an error, explain the likely cause and end with the smallest "
+                   "corrected patch. Keep explanatory prose outside code fences so the app can render "
+                   "the result as a reviewable artifact.")
     web_sources = []
 
     web_pref = body.get("web")
@@ -12322,8 +12459,22 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
         return github_err, None, None, None
     if github_context:
         sysmsg += "\n\n" + github_context
-
+    active_workspace = body.get("workspace")
+    if isinstance(active_workspace, dict) and active_workspace.get("path") and active_workspace.get("content") is not None:
+        active_path = str(active_workspace.get("path"))[:180]
+        active_language = str(active_workspace.get("language") or "text")[:40]
+        active_content = str(active_workspace.get("content") or "")[:26000]
+        sysmsg += ("\n\nACTIVE LOCAL WORKSPACE FILE (the browser owns this file; it has not been "
+                   "written to GitHub or the server):\nPath: %s\nLanguage: %s\n"
+                   "Current content:\n```%s\n%s\n```\n"
+                   "When the student asks to improve, fix, refactor, or change this active file, "
+                   "make the smallest necessary edit. Do not return the complete file. Return a "
+                   "standard unified diff with exact @@ hunks that can be applied to the current "
+                   "content, then a short explanation and verification steps. Only return a full "
+                   "file when the student explicitly asks for a full replacement.\n" %
+                   (active_path, active_language, active_language, active_content))
     messages = [{"role": "system", "content": sysmsg}]
+
     history = body.get("history") or []
     if isinstance(history, list):
         for m in history[-20:]:
