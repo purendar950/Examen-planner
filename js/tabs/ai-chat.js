@@ -63,6 +63,24 @@
   /* ── threads: localStorage only, per signed-in uid ──────────────────── */
   function threadsKey() { return 'preppath_ai_chat_threads_' + uid(); }
   function curKey() { return 'preppath_ai_chat_current_' + uid(); }
+  function sidebarKey() { return 'preppath_ai_chat_sidebar_collapsed_' + uid(); }
+  function sidebarIsCollapsed() {
+    try { return localStorage.getItem(sidebarKey()) === '1'; } catch (e) { return false; }
+  }
+  function applySidebarState() {
+    var page = document.getElementById('page-ai-chat');
+    if (!page) return;
+    var collapsed = sidebarIsCollapsed();
+    page.classList.toggle('aic-sidebar-collapsed', collapsed);
+    var collapseBtn = document.getElementById('aic-sidebar-collapse');
+    var expandBtn = document.getElementById('aic-sidebar-expand');
+    if (collapseBtn) { collapseBtn.textContent = '‹'; collapseBtn.title = 'Collapse conversations'; collapseBtn.setAttribute('aria-label', 'Collapse conversations'); }
+    if (expandBtn) { expandBtn.textContent = '☰ Conversations'; expandBtn.title = 'Expand conversations'; expandBtn.setAttribute('aria-label', 'Expand conversations'); }
+  }
+  window.aicToggleSidebar = function () {
+    try { localStorage.setItem(sidebarKey(), sidebarIsCollapsed() ? '0' : '1'); } catch (e) {}
+    applySidebarState();
+  };
 
   function normalizeThread(thread) {
     if (!thread || !Array.isArray(thread.messages)) return { thread: thread, changed: false };
@@ -161,6 +179,13 @@
     #app .main-content:has(#page-ai-chat.active){max-width:none;padding:0;}
     #app .main-content > #page-ai-chat{max-width:none;width:100%;margin:0;}
     .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:calc(100dvh - 122px);min-height:0;overflow:hidden;border:0;border-radius:0;background:var(--card);box-shadow:none;}
+    .aic-shell.aic-sidebar-collapsed{grid-template-columns:0 minmax(0,1fr);}
+    .aic-sidebar-collapsed .aic-side{width:0;min-width:0;overflow:hidden;border-right:0;opacity:0;pointer-events:none;}
+    .aic-sidebar-toggle{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-left:auto;border:1px solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:8px;background:transparent;color:var(--muted);font-size:1.15rem;line-height:1;cursor:pointer;transition:background .16s ease-out,color .16s ease-out,border-color .16s ease-out;}
+    .aic-sidebar-toggle:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent);color:var(--text);}
+    .aic-sidebar-expand{display:none;}
+    .aic-sidebar-collapsed .aic-sidebar-expand{display:inline-flex;}
+    .aic-sidebar-collapsed .aic-head-left{gap:8px;}
     @media (max-width:900px){#app .main-content:has(#page-ai-chat.active){padding:0;}.aic-shell{height:calc(100dvh - 104px);min-height:0;grid-template-columns:1fr;border-radius:0;}.aic-side{display:none;}}
     .aic-side{display:flex;flex-direction:column;min-width:0;border-right:1px solid color-mix(in srgb,var(--border) 78%,transparent);background:color-mix(in srgb,var(--surface) 82%,var(--card));}
     .aic-side-top{padding:1rem 1rem .8rem;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);}
@@ -199,7 +224,7 @@
     .aic-chip-btn:active,.aic-icon-btn:active{transform:scale(.97);}
     .aic-chip-btn.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text);}
     .aic-quick-spacer{flex:1;}
-    .aic-log{flex:1;min-height:0;overflow-y:auto;width:100%;max-width:900px;margin:0 auto;padding:1rem clamp(1rem,4vw,2.4rem) 2rem;scrollbar-width:thin;}
+    .aic-log{flex:1;min-height:0;overflow-y:auto;width:100%;max-width:none;margin:0;padding:1rem clamp(1rem,4vw,3.5rem) 2rem;scrollbar-width:thin;}
     .aic-msg-row{display:flex;flex-direction:column;max-width:100%;margin:0 0 .85rem;gap:4px;animation:aic-rise .18s ease-out both;}
     .aic-msg-row + .aic-msg-row{margin-top:.1rem;}
     .aic-msg-row.user{align-items:flex-end;}
@@ -224,11 +249,11 @@
     .aic-empty{max-width:500px;margin:clamp(2rem,8vh,5rem) auto 0;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.55;}
     .aic-empty strong{display:block;margin-bottom:8px;color:var(--text);font-size:1.15rem;letter-spacing:-.02em;}
     .aic-typing{color:var(--muted);font-size:.78rem;font-style:italic;}
-    .aic-files-bar,.aic-github-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:900px;margin:0 auto;padding:0 clamp(1rem,5vw,3.2rem) .45rem;color:var(--muted);font-size:.7rem;}
+    .aic-files-bar,.aic-github-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:none;margin:0;padding:0 clamp(1rem,4vw,3.5rem) .45rem;color:var(--muted);font-size:.7rem;}
     .aic-file-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.68rem;}
     .aic-file-pill.is-ready{color:var(--text);}.aic-file-pill.is-failed{border-color:rgba(200,75,67,.35);color:#c54b43;}.aic-file-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.8em;}
     .aic-github-context strong{color:var(--text);}
-    .aic-form{width:100%;max-width:900px;margin:0 auto;padding:.35rem clamp(1rem,4vw,2.4rem) .7rem;}
+    .aic-form{width:100%;max-width:none;margin:0;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
     .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
     .aic-composer:focus-within{border-color:color-mix(in srgb,var(--accent) 72%,var(--border));box-shadow:0 8px 30px color-mix(in srgb,var(--accent) 12%,transparent);}
     .aic-input{display:block;width:100%;min-height:48px;max-height:160px;padding:13px 14px 5px;border:0;resize:none;outline:none;background:transparent;color:var(--text);font:inherit;font-size:.9rem;line-height:1.5;}
@@ -255,7 +280,7 @@
 <div class="aic-shell">
   <aside class="aic-side">
     <div class="aic-side-top">
-      <div class="aic-brand"><span class="aic-mark">✦</span><div><strong>AI Chat</strong><small>Your focused study workspace</small></div></div>
+      <div class="aic-brand"><span class="aic-mark">✦</span><div><strong>AI Chat</strong><small>Your focused study workspace</small></div><button class="aic-sidebar-toggle" id="aic-sidebar-collapse" onclick="aicToggleSidebar()" title="Collapse conversations" aria-label="Collapse conversations">‹</button></div>
       <button class="aic-new-btn" onclick="aicNewThread()"><span class="aic-plus">+</span><span>New chat</span><kbd>⌘ K</kbd></button>
     </div>
     <div class="aic-side-label">Conversations</div>
@@ -264,7 +289,7 @@
   </aside>
   <main class="aic-main">
     <header class="aic-head">
-      <div class="aic-head-left"><div><span class="aic-eyebrow">Study workspace</span><h2 id="aic-chat-title">New chat</h2></div></div>
+      <div class="aic-head-left"><button class="aic-icon-btn aic-sidebar-expand" id="aic-sidebar-expand" onclick="aicToggleSidebar()" title="Expand conversations" aria-label="Expand conversations">☰ Conversations</button><div><span class="aic-eyebrow">Study workspace</span><h2 id="aic-chat-title">New chat</h2></div></div>
       <div class="aic-head-controls">
         <div class="aic-model-wrap"><span class="aic-control-label">Model</span><select class="aic-select" id="aic-provider-select" onchange="aicProviderChanged()" title="AI provider"></select><select class="aic-select" id="aic-omniroute-provider-select" onchange="aicOmniRouteProviderChanged()" title="OmniRoute provider" style="display:none;"></select><select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="AI model"></select></div>
         <button class="aic-icon-btn" onclick="aicExportThread()" title="Export as Markdown">↓ Export</button>
@@ -310,6 +335,7 @@
     page.id = 'page-ai-chat';
     page.innerHTML = MARKUP;
     mc.appendChild(page);
+    applySidebarState();
     injectNavTab();
   }
 
