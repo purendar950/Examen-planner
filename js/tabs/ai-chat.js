@@ -413,19 +413,19 @@
     <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>
     <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>
     <section class="aic-project-plan" id="aic-project-plan" aria-live="polite">
-      <div class="aic-project-head"><span class="aic-project-title" id="aic-project-title">Project workflow</span><span class="aic-project-status" id="aic-project-status">Planning</span></div>
+      <div class="aic-project-head"><span class="aic-project-title" id="aic-project-title">Project workflow</span><span style="display:flex;align-items:center;gap:6px;"><select id="aic-project-mode" class="aic-select" onchange="aicProjectWorkflowModeChanged(this)" title="Architect plans without editing; Editor applies changes"><option value="architect">Architect</option><option value="editor" selected>Editor</option></select><span class="aic-project-status" id="aic-project-status">Planning</span></span></div>
       <p class="aic-project-goal" id="aic-project-goal"></p>
       <div class="aic-project-steps" id="aic-project-steps"></div>
       <div class="aic-project-files" id="aic-project-files"></div>
       <div class="aic-project-verification" id="aic-project-verification"></div>
-      <div class="aic-project-actions"><button type="button" onclick="aicProjectContinue()">Continue next step</button><button type="button" onclick="aicProjectVerify()">Verify workspace</button><button type="button" onclick="aicProjectReset()">Reset plan</button></div>
+      <div class="aic-project-actions"><button type="button" id="aic-project-approve" style="display:none;" onclick="aicProjectApprovePlan()">Approve &amp; apply</button><button type="button" onclick="aicProjectContinue()">Continue next step</button><button type="button" onclick="aicProjectVerify()">Verify workspace</button><button type="button" onclick="aicProjectReset()">Reset plan</button></div>
     </section>
     <input type="file" id="aic-code-file-input" class="aic-file-input" accept=".js,.jsx,.ts,.tsx,.py,.html,.css,.json,.md,.yml,.yaml,.sh,.sql,.java,.go,.rs" onchange="aicCodeFileSelected(event)">
     <section class="aic-code-workspace" id="aic-code-workspace" aria-label="Coding workspace">
       <div class="aic-workspace-head" data-workspace-area="head"><span class="aic-workspace-title">File workspace</span><select id="aic-workspace-file" class="aic-workspace-file" onchange="aicWorkspaceFileChanged(this)" aria-label="Active file"></select><span class="aic-workspace-spacer"></span><button type="button" onclick="document.getElementById('aic-code-file-input').click()">Open local file</button><button type="button" onclick="aicWorkspaceAskEdit()">Ask AI to edit</button><button type="button" onclick="aicCloseWorkspace()">×</button></div>
       <div id="aic-workspace-targets" data-workspace-area="targets" class="aic-workspace-targets" aria-label="Files included in the next AI patch"><strong>Patch files:</strong></div>
       <textarea id="aic-workspace-editor" data-workspace-area="editor" class="aic-workspace-editor" spellcheck="false" oninput="aicWorkspaceEdited(this)" aria-label="Active code file"></textarea>
-      <div class="aic-workspace-footer" data-workspace-area="footer"><span id="aic-workspace-status" class="aic-workspace-status">Open a GitHub or local code file to start.</span><button type="button" onclick="aicWorkspaceRun()">Run / check</button><button type="button" id="aic-workspace-preview-btn" style="display:none;" onclick="aicWorkspacePreview()">Live preview</button><button type="button" onclick="aicWorkspaceSaveVersion()">Save local version</button><button type="button" id="aic-workspace-fix-btn" style="display:none;" onclick="aicWorkspaceFixRun()">Ask AI to fix output</button></div>
+      <div class="aic-workspace-footer" data-workspace-area="footer"><span id="aic-workspace-status" class="aic-workspace-status">Open a GitHub or local code file to start.</span><button type="button" onclick="aicWorkspaceRun()">Run / check</button><button type="button" id="aic-workspace-preview-btn" style="display:none;" onclick="aicWorkspacePreview()">Live preview</button><button type="button" onclick="aicWorkspaceCheckpoint()">Checkpoint</button><button type="button" onclick="aicWorkspaceUndo()">Undo last change</button><button type="button" onclick="aicWorkspaceSaveVersion()">Save local version</button><button type="button" id="aic-workspace-fix-btn" style="display:none;" onclick="aicWorkspaceFixRun()">Ask AI to fix output</button></div>
       <pre id="aic-workspace-output" data-workspace-area="output" class="aic-workspace-output"></pre>
       <div id="aic-workspace-preview" data-workspace-area="preview" class="aic-workspace-preview"><div class="aic-workspace-preview-label"><span>Live preview</span><span>Sandboxed local scripts</span></div><iframe id="aic-workspace-preview-frame" title="HTML, CSS, and JavaScript live preview" sandbox="allow-scripts"></iframe></div>
     </section>
@@ -1158,15 +1158,36 @@
 
   function workspaceState(t) {
     if (!t) return null;
-    if (!t.workspace || !Array.isArray(t.workspace.files)) t.workspace = { files: [], activePath: '', selectedPaths: [], lastRun: null };
+    if (!t.workspace || !Array.isArray(t.workspace.files)) t.workspace = { files: [], activePath: '', selectedPaths: [], contextPaths: [], history: [], lastRun: null };
+    if (!Array.isArray(t.workspace.history)) t.workspace.history = [];
     if (!Array.isArray(t.workspace.selectedPaths)) t.workspace.selectedPaths = [];
+    if (!Array.isArray(t.workspace.contextPaths)) t.workspace.contextPaths = [];
     if (!t.workspace.activePath && t.workspace.files[0]) t.workspace.activePath = t.workspace.files[0].path;
     t.workspace.selectedPaths = t.workspace.selectedPaths.filter(function (path) { return t.workspace.files.some(function (file) { return file.path === path; }); });
+    t.workspace.contextPaths = t.workspace.contextPaths.filter(function (path) { return t.workspace.files.some(function (file) { return file.path === path; }); });
     if (t.workspace.activePath && t.workspace.selectedPaths.indexOf(t.workspace.activePath) === -1) t.workspace.selectedPaths.unshift(t.workspace.activePath);
     return t.workspace;
   }
+  function generateRepoMap(t) {
+    var ws = workspaceState(t);
+    if (!ws || !ws.files.length) return '';
+    var lines = ['Repository Map:', ''];
+    ws.files.forEach(function (f) {
+      var isContext = ws.contextPaths.indexOf(f.path) !== -1;
+      var isPatch = ws.selectedPaths.indexOf(f.path) !== -1;
+      var isActive = f.path === ws.activePath;
+      var role = isActive ? '[ACTIVE]' : (isPatch ? '[PATCH]' : (isContext ? '[CONTEXT]' : '[MAP]'));
+      var content = String(f.content || '');
+      var symbols = [];
+      // Simple heuristic for symbols: function/class/const/var definitions
+      var re = /\b(function|class|const|var|let|interface|type|def|async\s+function)\s+([a-zA-Z0-9_$]+)/g, m;
+      while ((m = re.exec(content)) && symbols.length < 8) { if (m[2]) symbols.push(m[2]); }
+      lines.push(role + ' ' + f.path + (symbols.length ? ' (' + symbols.join(', ') + ')' : ''));
+    });
+    return lines.join('\n');
+  }
   function projectDefaultState() {
-    return { active: false, mode: 'idle', title: '', goal: '', steps: [], currentStep: '', status: 'idle', files: [], lastVerification: null, warning: '', updatedAt: 0 };
+    return { active: false, mode: 'idle', workflowMode: 'editor', title: '', goal: '', steps: [], currentStep: '', status: 'idle', files: [], lastVerification: null, warning: '', updatedAt: 0 };
   }
   function projectState(t) {
     if (!t) return null;
@@ -1201,7 +1222,7 @@
   function projectPayload(t) {
     var p = projectState(t), ws = workspaceState(t);
     if (!p || !p.active) return null;
-    return { mode: p.mode, title: p.title, goal: p.goal, currentStep: p.currentStep, status: p.status,
+    return { mode: p.mode, workflowMode: p.workflowMode || 'editor', title: p.title, goal: p.goal, currentStep: p.currentStep, status: p.status,
       steps: p.steps.slice(0, 6).map(function (step) { return { id: step.id, label: step.label, status: step.status }; }),
       files: (ws && ws.files || []).slice(0, 12).map(function (file) { return { path: file.path, language: workspaceLanguage(file.path), dirty: !!file.dirty }; }) };
   }
@@ -1233,9 +1254,11 @@
     var box = document.getElementById('aic-project-plan'), t = getThread(currentThreadId()), p = projectState(t), ws = workspaceState(t);
     if (!box || !p || !p.active) { if (box) box.style.display = 'none'; return; }
     box.style.display = '';
-    var title = document.getElementById('aic-project-title'), status = document.getElementById('aic-project-status'), goal = document.getElementById('aic-project-goal'), steps = document.getElementById('aic-project-steps'), files = document.getElementById('aic-project-files'), verification = document.getElementById('aic-project-verification');
+    var title = document.getElementById('aic-project-title'), status = document.getElementById('aic-project-status'), goal = document.getElementById('aic-project-goal'), steps = document.getElementById('aic-project-steps'), files = document.getElementById('aic-project-files'), verification = document.getElementById('aic-project-verification'), mode = document.getElementById('aic-project-mode'), approve = document.getElementById('aic-project-approve');
     if (title) title.textContent = p.title || 'Project workflow';
     if (status) status.textContent = projectStatusLabel(p);
+    if (mode) mode.value = p.workflowMode === 'architect' ? 'architect' : 'editor';
+    if (approve) approve.style.display = p.workflowMode === 'architect' ? '' : 'none';
     if (goal) goal.textContent = p.goal || 'The AI will work in small, reviewable milestones.';
     if (steps) steps.innerHTML = (p.steps || []).map(function (step, i) { return '<div class="aic-project-step ' + esc(step.status || 'pending') + '"><strong>' + (i + 1) + ' · ' + esc(step.status || 'pending') + '</strong>' + esc(step.label) + '</div>'; }).join('');
     if (files) files.innerHTML = '<span>Workspace files:</span>' + ((ws && ws.files || []).length ? (ws.files || []).slice(0, 12).map(function (file) { return '<code>' + esc(file.path) + '</code>'; }).join('') : '<span>none yet — the first milestone will create the file tree.</span>');
@@ -1255,6 +1278,21 @@
     if (!p || !p.active || !file) { toast('Create or open a workspace file before verifying.', 'error'); return; }
     p.currentStep = 'verify'; p.status = 'verifying'; setProjectStep(p, 'implement', 'done'); setProjectStep(p, 'verify', 'active'); p.updatedAt = Date.now(); upsertThread(t); renderProjectPlan();
     window.aicWorkspaceRun();
+  };
+  window.aicProjectWorkflowModeChanged = function (select) {
+    var t = getThread(currentThreadId()), p = projectState(t);
+    if (!t || !p || !select) return;
+    p.workflowMode = select.value === 'architect' ? 'architect' : 'editor';
+    upsertThread(t); renderProjectPlan();
+    toast(p.workflowMode === 'architect' ? 'Architect mode: plan first, no file edits.' : 'Editor mode: approved milestones may change files.', 'info');
+  };
+  window.aicProjectApprovePlan = function () {
+    var t = getThread(currentThreadId()), p = projectState(t), input = document.getElementById('aic-input');
+    if (!t || !p || !input) return;
+    p.workflowMode = 'editor'; p.status = 'working'; upsertThread(t); renderProjectPlan();
+    input.value = 'Plan approved. Apply the current milestone now. Return only the smallest named files or focused diff needed, then include verification steps.';
+    input.focus();
+    window.aicSend();
   };
   window.aicProjectReset = function () {
     var t = getThread(currentThreadId()); if (!t) return;
@@ -1331,10 +1369,20 @@
     }
     status.textContent = (file.dirty ? 'Unsaved local changes' : 'Loaded locally') + ' · ' + file.path + ' · ' + workspaceLanguage(file.path);
     var targetBox = document.getElementById('aic-workspace-targets');
-    if (targetBox) targetBox.innerHTML = '<strong>Patch files:</strong>' + ws.files.map(function (f) {
-      var checked = ws.selectedPaths.indexOf(f.path) !== -1;
-      return '<label class="aic-workspace-target"><input type="checkbox" ' + (checked ? 'checked ' : '') + 'onchange="aicWorkspaceTargetChanged(this)" data-path="' + escAttr(f.path) + '"><span>' + esc(f.path) + '</span></label>';
-    }).join('');
+    if (targetBox) {
+      var html = '<div style="display:flex;flex-direction:column;gap:4px;width:100%;">';
+      html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><strong>Patch files:</strong>' + ws.files.map(function (f) {
+        var checked = ws.selectedPaths.indexOf(f.path) !== -1;
+        return '<label class="aic-workspace-target" title="AI can edit these files"><input type="checkbox" ' + (checked ? 'checked ' : '') + 'onchange="aicWorkspaceTargetChanged(this)" data-path="' + escAttr(f.path) + '"><span>' + esc(f.path) + '</span></label>';
+      }).join('') + '</div>';
+      html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;"><strong>Chat context:</strong>' + ws.files.map(function (f) {
+        var checked = ws.contextPaths.indexOf(f.path) !== -1;
+        var isPatch = ws.selectedPaths.indexOf(f.path) !== -1;
+        return '<label class="aic-workspace-target" title="AI can read but not edit these files"><input type="checkbox" ' + (checked ? 'checked ' : '') + (isPatch ? 'disabled ' : '') + 'onchange="aicWorkspaceContextChanged(this)" data-path="' + escAttr(f.path) + '"><span>' + esc(f.path) + '</span></label>';
+      }).join('') + '</div>';
+      html += '</div>';
+      targetBox.innerHTML = html;
+    }
     var result = ws.lastRun;
     if (result && (result.stdout || result.stderr || result.detail || result.status)) {
       output.style.display = '';
@@ -1359,9 +1407,13 @@
     });
   }
   function workspaceRequest(t) {
-    var file = activeWorkspaceFile(t), files = workspacePatchFiles(t);
+    var file = activeWorkspaceFile(t), files = workspacePatchFiles(t), ws = workspaceState(t);
     if (!file) return null;
-    return { path: file.path, language: workspaceLanguage(file.path), content: String(file.content || '').slice(0, 26000), files: files };
+    var context = (ws && ws.contextPaths || []).slice(0, 8).map(function (path) {
+      var item = ws.files.find(function (candidate) { return candidate.path === path; });
+      return item ? { path: item.path, language: workspaceLanguage(item.path), content: String(item.content || '').slice(0, 12000), readOnly: true } : null;
+    }).filter(Boolean);
+    return { path: file.path, language: workspaceLanguage(file.path), content: String(file.content || '').slice(0, 26000), files: files, contextFiles: context, repositoryMap: generateRepoMap(t) };
   }
   function addWorkspaceFile(t, file) {
     var ws = workspaceState(t), existing = ws.files.find(function (f) { return f.path === file.path; });
@@ -1473,10 +1525,23 @@
     if (!t || !ws || !path) return;
     if (checkbox.checked) {
       if (ws.selectedPaths.indexOf(path) === -1) ws.selectedPaths.push(path);
+      ws.contextPaths = ws.contextPaths.filter(function (item) { return item !== path; });
     } else {
       ws.selectedPaths = ws.selectedPaths.filter(function (item) { return item !== path; });
       if (!ws.selectedPaths.length) ws.selectedPaths = [ws.activePath];
       if (path === ws.activePath) { checkbox.checked = true; toast('The active file must remain in the patch set.', 'info'); return; }
+    }
+    upsertThread(t);
+    renderWorkspace();
+  };
+  window.aicWorkspaceContextChanged = function (checkbox) {
+    var t = getThread(currentThreadId()), ws = workspaceState(t), path = checkbox && checkbox.getAttribute('data-path');
+    if (!t || !ws || !path) return;
+    if (checkbox.checked) {
+      if (ws.contextPaths.indexOf(path) === -1) ws.contextPaths.push(path);
+      ws.selectedPaths = ws.selectedPaths.filter(function (item) { return item !== path; });
+    } else {
+      ws.contextPaths = ws.contextPaths.filter(function (item) { return item !== path; });
     }
     upsertThread(t);
     renderWorkspace();
@@ -1491,9 +1556,37 @@
     var status = document.getElementById('aic-workspace-status');
     if (status) status.textContent = 'Unsaved local changes · ' + file.path + ' · ' + workspaceLanguage(file.path);
   };
+  function saveWorkspaceCheckpoint(t, label) {
+    var ws = workspaceState(t);
+    if (!ws) return false;
+    var snapshot = { label: String(label || 'Workspace checkpoint').slice(0, 120), createdAt: Date.now(), activePath: ws.activePath, selectedPaths: ws.selectedPaths.slice(), contextPaths: ws.contextPaths.slice(), files: ws.files.map(function (file) { return Object.assign({}, file); }) };
+    ws.history = (ws.history || []).filter(Boolean).slice(-7);
+    ws.history.push(snapshot);
+    return true;
+  }
+  window.aicWorkspaceCheckpoint = function () {
+    var t = getThread(currentThreadId());
+    if (!t || !activeWorkspaceFile(t)) { toast('Open a workspace file before creating a checkpoint.', 'error'); return; }
+    saveWorkspaceCheckpoint(t, 'Manual checkpoint');
+    upsertThread(t);
+    toast('Workspace checkpoint saved locally.', 'success');
+  };
+  window.aicWorkspaceUndo = function () {
+    var t = getThread(currentThreadId()), ws = workspaceState(t);
+    if (!t || !ws || !ws.history || !ws.history.length) { toast('No local checkpoint is available to undo.', 'info'); return; }
+    var snapshot = ws.history.pop();
+    ws.files = snapshot.files.map(function (file) { return Object.assign({}, file); });
+    ws.activePath = snapshot.activePath || (ws.files[0] && ws.files[0].path) || '';
+    ws.selectedPaths = snapshot.selectedPaths || [];
+    ws.contextPaths = snapshot.contextPaths || [];
+    ws.lastRun = null;
+    upsertThread(t); renderWorkspace();
+    toast('Restored ' + (snapshot.label || 'the previous workspace checkpoint') + '.', 'success');
+  };
   window.aicWorkspaceSaveVersion = function () {
     var t = getThread(currentThreadId()), file = activeWorkspaceFile(t);
     if (!t || !file) return;
+    saveWorkspaceCheckpoint(t, 'Before saving ' + file.path);
     file.originalContent = file.content;
     file.dirty = false;
     file.revision = (file.revision || 0) + 1;
@@ -1628,6 +1721,7 @@
     if (!drafts.length) { toast('No path-aware file patches were found.', 'error'); return; }
     var failure = drafts.find(function (item) { return item.error; });
     if (failure) { toast(failure.error + ' No files were changed.', 'error'); return; }
+    saveWorkspaceCheckpoint(t, 'Before applying AI patch');
     drafts.forEach(function (item) { item.file.content = item.content; item.file.dirty = true; });
     ws.lastRun = null;
     upsertThread(t);
@@ -2019,6 +2113,9 @@
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
       workspace: requestedWorkspace,
       editMode: requestedWorkspace ? 'multi-file-patch' : 'new-file',
+      repositoryMap: requestedWorkspace ? generateRepoMap(t) : '',
+      contextFiles: requestedWorkspace && requestedWorkspace.contextFiles ? requestedWorkspace.contextFiles : [],
+      workflowMode: (projectState(t) && projectState(t).workflowMode) || 'editor',
       project: projectPayload(t),
       localMemory: localMemoryContext(t),
       timeoutMs: codingIntent ? 90000 : 30000,

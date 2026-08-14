@@ -12444,6 +12444,9 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
     coding_requested = bool(body.get("coding")) or bool(re.search(
         r"\b(code|coding|debug|bug|fix|refactor|function|class|component|api|endpoint|repository|repo|github|javascript|typescript|python|html|css|sql|test|stack trace|error|diff|patch|implement|build)\b",
         q, re.I))
+    workflow_mode = str(body.get("workflowMode") or (project.get("workflowMode") if project else "") or "editor").strip().lower()
+    if workflow_mode not in ("architect", "editor"):
+        workflow_mode = "editor"
     if coding_requested:
         fresh_project = str(body.get("editMode") or "").strip().lower() == "new-file" and not body.get("workspace")
         if project_active:
@@ -12467,6 +12470,7 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                    "and limitations. Never claim that code was executed, a file was changed, or a "
                    "repository was modified unless a trusted tool result is included in the conversation. "
                    + ("This is a FRESH PROJECT request. Ignore implementation details from older projects in the supplied history unless the user explicitly asks to reuse them. Design the requested project from its current description and emit the complete named files needed to run it. " if fresh_project else "")
+                   + ("ARCHITECT MODE: do not emit FILE artifacts, complete code, or diffs. Return a concise implementation plan, proposed file tree, dependencies, risks, and verification strategy. Do not claim that changes were applied. " if workflow_mode == "architect" else "EDITOR MODE: apply only the approved current milestone. Return named files for new files or a focused unified diff for existing files, followed by verification steps. ")
                    + "If the user provides an error, explain the likely cause and end with the smallest "
                    "corrected patch. Keep explanatory prose outside code fences so the app can render "
                    "the result as a reviewable artifact. CREATION ARTIFACT CONTRACT: when no active "
@@ -12503,6 +12507,17 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
         return github_err, None, None, None
     if github_context:
         sysmsg += "\n\n" + github_context
+    repository_map = str(body.get("repositoryMap") or "").strip()[:9000]
+    if repository_map:
+        sysmsg += "\n\nREPOSITORY MAP (compact, browser-generated; use it to choose relevant files without rewriting unrelated files):\n" + repository_map
+    context_files = body.get("contextFiles") if isinstance(body.get("contextFiles"), list) else []
+    if context_files:
+        context_rows = []
+        for item in context_files[:8]:
+            if isinstance(item, dict) and item.get("path") and item.get("content") is not None:
+                context_rows.append("PATH: %s\nLANGUAGE: %s\nREAD-ONLY CONTENT:\n```%s\n%s\n```" % (str(item.get("path"))[:180], str(item.get("language") or "text")[:40], str(item.get("language") or "text")[:40], str(item.get("content") or "")[:12000]))
+        if context_rows:
+            sysmsg += "\n\nREAD-ONLY CONTEXT FILES (you may inspect these but must not edit them unless they are also selected patch files):\n" + "\n\n".join(context_rows)
     active_workspace = body.get("workspace")
     if isinstance(active_workspace, dict) and active_workspace.get("path") and active_workspace.get("content") is not None:
         workspace_files = active_workspace.get("files") if isinstance(active_workspace.get("files"), list) else []
