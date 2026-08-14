@@ -95,7 +95,7 @@
   function ensureThread() {
     var list = loadThreads();
     if (list.length) return list[0];
-    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', createdAt: Date.now() };
+    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', github: null, createdAt: Date.now() };
     saveThreads([t]);
     return t;
   }
@@ -182,7 +182,20 @@
     '.aic-image-row .aic-select{flex:0 0 auto;min-width:180px;max-width:none;}' +
     '.aic-image-prompt{flex:1 1 220px;min-width:180px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:0.85rem;font-family:var(--font);}' +
     '.aic-image-row .aic-send{flex:0 0 auto;}' +
-    '@media (max-width: 720px){.aic-side{width:170px;flex:0 0 170px;}.aic-select{max-width:110px;}}';
+    '.aic-github-box{padding:0.7rem 0.85rem;border-bottom:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;gap:8px;}' +
+    '.aic-github-label{font-size:0.72rem;color:var(--muted);display:flex;justify-content:space-between;align-items:center;gap:8px;}' +
+    '.aic-github-row{display:flex;gap:8px;flex-wrap:wrap;}' +
+    '.aic-github-input{flex:1 1 220px;min-width:150px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:0.82rem;font-family:var(--font);}' +
+    '.aic-github-input:focus{border-color:var(--accent);outline:none;}' +
+    '.aic-github-files{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:4px;max-height:150px;overflow:auto;}' +
+    '.aic-github-file{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;font-size:0.72rem;color:var(--muted);cursor:pointer;}' +
+    '.aic-github-file:hover{background:var(--card);color:var(--text);}' +
+    '.aic-github-file input{accent-color:var(--accent);}' +
+    '.aic-github-status{font-size:0.72rem;color:var(--muted);line-height:1.4;}' +
+    '.aic-github-status.is-error{color:#e74c3c;}' +
+    '.aic-github-context{display:flex;align-items:center;gap:7px;padding:0.45rem 0.85rem;border-bottom:1px solid var(--border);font-size:0.7rem;color:var(--muted);}' +
+    '.aic-github-context strong{color:var(--text);}' +
+    '@media (max-width: 720px){.aic-side{width:170px;flex:0 0 170px;}.aic-select{max-width:110px;}.aic-github-input{min-width:130px;}}';
   document.head.appendChild(st);
 
   /* ── page markup ── */
@@ -201,6 +214,7 @@
     '        <select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="AI model"></select>',
     '        <button class="aic-chip-btn" id="aic-web-btn" onclick="aicCycleWeb()" title="Web search">\uD83C\uDF10 Auto</button>',
     '        <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">\uD83C\uDFAD Persona</button>',
+    '        <button class="aic-icon-btn" onclick="aicToggleGithubBox()" title="Add read-only GitHub repository context">GitHub</button>',
     '        <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">\uD83C\uDFA8 Image</button>',
     '        <button class="aic-icon-btn" onclick="aicExportThread()" title="Export as Markdown">\u2B07 Export</button>',
     '      </div>',
@@ -208,6 +222,17 @@
     '    <div class="aic-persona-box" id="aic-persona-box" style="display:none;">',
     '      <div class="aic-persona-label"><span>Custom instructions for this chat (optional)</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicSavePersona()">Save</button></div>',
     '      <textarea id="aic-persona-input" placeholder="e.g. Explain like I'+"'"+'m preparing for SSC CGL, keep answers short and in Hinglish."></textarea>',
+    '    </div>',
+    '    <div class="aic-github-box" id="aic-github-box" style="display:none;">',
+    '      <div class="aic-github-label"><span>GitHub repository context <strong>· public, read-only</strong></span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseGithubBox()">✕ Close</button></div>',
+    '      <div class="aic-github-row">',
+    '        <input class="aic-github-input" id="aic-github-repo-input" placeholder="owner/repository or GitHub URL">',
+    '        <input class="aic-github-input" id="aic-github-ref-input" placeholder="Branch (optional)" style="flex:0 1 150px;">',
+    '        <button class="aic-icon-btn" type="button" onclick="aicLoadGithubRepo()">Load files</button>',
+    '      </div>',
+    '      <div class="aic-github-status" id="aic-github-status">Choose up to 8 code files. They are fetched only when you send a message.</div>',
+    '      <div class="aic-github-files" id="aic-github-files"></div>',
+    '      <div class="aic-github-row"><button class="aic-icon-btn" type="button" onclick="aicClearGithub()">Clear context</button></div>',
     '    </div>',
     '    <div class="aic-image-box" id="aic-image-box" style="display:none;">',
     '      <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseImageBox()">\u2715 Close</button></div>',
@@ -219,6 +244,7 @@
     '        <button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button>',
     '      </div>',
     '    </div>',
+    '    <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>',
     '    <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>',
     '    <div class="aic-log" id="aic-log"></div>',
     '    <form class="aic-form" onsubmit="aicSend(event)">',
@@ -328,7 +354,7 @@
   }
 
   window.aicNewThread = function () {
-    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', createdAt: Date.now() };
+    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', github: null, createdAt: Date.now() };
     upsertThread(t);
     setCurrentThread(t.id);
   };
@@ -786,6 +812,122 @@
       .finally(function () { setSending(false); });
   };
 
+  /* ── GitHub repository context ──────────────────────────────────────── */
+  function githubState(t) {
+    return (t && t.github && t.github.repo && Array.isArray(t.github.files)) ? t.github : null;
+  }
+
+  function githubStatus(text, isError) {
+    var el = document.getElementById('aic-github-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('is-error', !!isError);
+  }
+
+  function renderGithubPanel() {
+    var t = getThread(currentThreadId());
+    var state = githubState(t);
+    var repoInput = document.getElementById('aic-github-repo-input');
+    var refInput = document.getElementById('aic-github-ref-input');
+    var filesEl = document.getElementById('aic-github-files');
+    if (!repoInput || !refInput || !filesEl) return;
+    repoInput.value = state ? state.repo : '';
+    refInput.value = state && state.ref && state.ref !== 'HEAD' ? state.ref : '';
+    if (!state) {
+      filesEl.innerHTML = '';
+      githubStatus('Choose up to 8 code files. They are fetched only when you send a message.', false);
+      return;
+    }
+    filesEl.innerHTML = (state.catalog || []).map(function (file) {
+      var checked = state.files.indexOf(file.path) !== -1;
+      return '<label class="aic-github-file"><input type="checkbox" ' + (checked ? 'checked ' : '') +
+        'onchange="aicGithubFileChanged(this)" data-path="' + escAttr(file.path) + '">' +
+        '<span>' + esc(file.path) + '</span></label>';
+    }).join('');
+    githubStatus(state.files.length + ' file' + (state.files.length === 1 ? '' : 's') +
+      ' selected from ' + state.repo + '. The AI will cite these paths when discussing code.', false);
+  }
+
+  function renderGithubContext() {
+    var el = document.getElementById('aic-github-context');
+    if (!el) return;
+    var state = githubState(getThread(currentThreadId()));
+    if (!state || !state.files.length) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    el.style.display = '';
+    el.innerHTML = '<span>GitHub context</span><strong>' + esc(state.repo) + '</strong><span>· ' +
+      state.files.length + ' file' + (state.files.length === 1 ? '' : 's') + '</span>';
+  }
+
+  window.aicToggleGithubBox = function () {
+    var box = document.getElementById('aic-github-box');
+    if (!box) return;
+    var open = box.style.display !== 'none';
+    box.style.display = open ? 'none' : '';
+    if (!open) renderGithubPanel();
+  };
+  window.aicCloseGithubBox = function () {
+    var box = document.getElementById('aic-github-box');
+    if (box) box.style.display = 'none';
+  };
+  window.aicClearGithub = function () {
+    var t = getThread(currentThreadId());
+    if (!t) return;
+    t.github = null;
+    upsertThread(t);
+    renderGithubPanel();
+    renderGithubContext();
+  };
+  window.aicLoadGithubRepo = function () {
+    var repoInput = document.getElementById('aic-github-repo-input');
+    var refInput = document.getElementById('aic-github-ref-input');
+    var repo = ((repoInput && repoInput.value) || '').trim();
+    var ref = ((refInput && refInput.value) || '').trim();
+    if (!repo) { githubStatus('Enter a public GitHub repository first.', true); return; }
+    githubStatus('Loading repository files…', false);
+    backendAuthFetch('/api/ai-chat/github/repo?repo=' + encodeURIComponent(repo) +
+      (ref ? '&ref=' + encodeURIComponent(ref) : ''))
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.detail || 'Could not load that GitHub repository.');
+        var t = getThread(currentThreadId());
+        if (!t) return;
+        var catalog = (res.data.files || []).slice(0, 500);
+        t.github = { repo: res.data.repo, ref: res.data.ref || res.data.defaultBranch || 'main',
+          catalog: catalog, files: catalog.slice(0, 8).map(function (f) { return f.path; }) };
+        upsertThread(t);
+        renderGithubPanel();
+        renderGithubContext();
+      })
+      .catch(function (e) { githubStatus(e.message || 'Could not load that GitHub repository.', true); });
+  };
+  window.aicGithubFileChanged = function (input) {
+    var t = getThread(currentThreadId());
+    var state = githubState(t);
+    if (!t || !state || !input) return;
+    var path = input.getAttribute('data-path');
+    var next = state.files.slice();
+    var index = next.indexOf(path);
+    if (input.checked && index === -1) {
+      if (next.length >= 8) {
+        input.checked = false;
+        githubStatus('Select up to 8 files per message.', true);
+        return;
+      }
+      next.push(path);
+    } else if (!input.checked && index !== -1) {
+      next.splice(index, 1);
+    }
+    state.files = next;
+    t.github = state;
+    upsertThread(t);
+    renderGithubPanel();
+    renderGithubContext();
+  };
+
   /* ── rendering ── */
   function renderLog() {
     var log = document.getElementById('aic-log');
@@ -815,10 +957,14 @@
     renderWebBtn();
     renderLog();
     renderFilesBar();
+    renderGithubPanel();
+    renderGithubContext();
     var box = document.getElementById('aic-persona-box');
     if (box) box.style.display = 'none';
     var imgBox = document.getElementById('aic-image-box');
     if (imgBox) imgBox.style.display = 'none';
+    var githubBox = document.getElementById('aic-github-box');
+    if (githubBox) githubBox.style.display = 'none';
   }
 
   function setSending(on) {
@@ -882,7 +1028,8 @@
     var body = {
       q: q, history: contextHistory, threadId: t.id,
       model: (modelSel && modelSel.value) || t.model || '',
-      web: t.web || 'auto', persona: t.persona || ''
+      web: t.web || 'auto', persona: t.persona || '',
+      github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null
     };
 
     setSending(true);

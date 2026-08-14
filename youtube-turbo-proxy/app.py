@@ -11918,6 +11918,186 @@ def api_ai_chat_status():
                     "ragEnabled": bool(allowed and _vec_enabled())})
 
 
+# ── GitHub repository context (read-only, public repositories) ─────────────
+_GITHUB_API_BASE = "https://api.github.com"
+_GITHUB_RAW_BASE = "https://raw.githubusercontent.com"
+_GITHUB_TIMEOUT = 12
+_GITHUB_MAX_FILES = 8
+_GITHUB_MAX_FILE_CHARS = 24000
+_GITHUB_MAX_CONTEXT_CHARS = 72000
+_GITHUB_CODE_EXTENSIONS = {
+    ".c", ".cc", ".cpp", ".css", ".csv", ".go", ".gradle", ".h", ".hpp",
+    ".html", ".ini", ".java", ".js", ".json", ".jsx", ".kt", ".md", ".mjs",
+    ".py", ".rb", ".rs", ".sh", ".sql", ".swift", ".toml", ".ts", ".tsx",
+    ".txt", ".tsx", ".vue", ".xml", ".yaml", ".yml"
+}
+_GITHUB_SKIP_DIRS = {".git", "node_modules", "vendor", "dist", "build", "coverage"}
+
+
+def _github_headers():
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "StudyPlanner-AI-Chat",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    # Optional Render environment variable for a higher GitHub API rate limit.
+    # It is never returned to the browser or included in an AI prompt.
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    return headers
+
+
+def _github_repo_slug(raw):
+    value = str(raw or "").strip()
+    if value.startswith("https://") or value.startswith("http://"):
+        parsed = _urlparse.urlparse(value)
+        if parsed.netloc.lower() not in ("github.com", "www.github.com"):
+            return None
+        value = parsed.path.strip("/")
+    value = value.split("?", 1)[0].split("#", 1)[0].strip("/")
+    if value.endswith(".git"):
+        value = value[:-4]
+    parts = value.split("/")
+    if len(parts) != 2 or not all(parts):
+        return None
+    if not all(re.fullmatch(r"[A-Za-z0-9_.-]+", part) for part in parts):
+        return None
+    return "/".join(parts)
+
+
+def _github_request_json(path, params=None):
+    response = requests.get(
+        _GITHUB_API_BASE + path,
+        headers=_github_headers(),
+        params=params or {},
+        timeout=_GITHUB_TIMEOUT,
+    )
+    if response.status_code == 404:
+        raise ValueError("GitHub repository or resource was not found.")
+    if response.status_code == 403:
+        raise ValueError("GitHub rate limit reached. Add GITHUB_TOKEN on Render or try again later.")
+    response.raise_for_status()
+    return response.json()
+
+
+def _github_tree_files(slug, ref):
+    tree = _github_request_json("/repos/%s/git/trees/%s" % (slug, requests.utils.quote(ref, safe="")),
+                                {"recursive": "1"})
+    rows = []
+    for item in tree.get("tree", []):
+        if item.get("type") != "blob":
+            continue
+        path = str(item.get("path") or "")
+        parts = path.split("/")
+        if any(part in _GITHUB_SKIP_DIRS for part in parts[:-1]):
+            continue
+        suffix = os.path.splitext(path)[1].lower()
+        if suffix not in _GITHUB_CODE_EXTENSIONS and os.path.basename(path).lower() not in {
+            "dockerfile", "makefile", "procfile", "gemfile"
+        }:
+            continue
+        rows.append({"path": path, "size": int(item.get("size") or 0)})
+    rows.sort(key=lambda row: (row["path"].count("/"), row["path"].lower()))
+    return rows, bool(tree.get("truncated"))
+
+
+def _github_safe_path(path):
+    value = str(path or "").strip().lstrip("/")
+    if not value or len(value) > 240 or "\\" in value:
+        return None
+    parts = value.split("/")
+    if ".." in parts or any(part in _GITHUB_SKIP_DIRS for part in parts[:-1]):
+        return None
+    return value
+
+
+def _github_fetch_file(slug, ref, path):
+    safe_path = _github_safe_path(path)
+    if not safe_path:
+        raise ValueError("Invalid GitHub file path.")
+    suffix = os.path.splitext(safe_path)[1].lower()
+    basename = os.path.basename(safe_path).lower()
+    if suffix not in _GITHUB_CODE_EXTENSIONS and basename not in {"dockerfile", "makefile", "procfile", "gemfile"}:
+        raise ValueError("That file type is not supported for chat context.")
+    url = "%s/%s/%s/%s" % (
+        _GITHUB_RAW_BASE,
+        slug,
+        requests.utils.quote(ref, safe=""),
+        "/".join(requests.utils.quote(part, safe="") for part in safe_path.split("/")),
+    )
+    response = requests.get(url, headers={"User-Agent": "StudyPlanner-AI-Chat"}, timeout=_GITHUB_TIMEOUT)
+    if response.status_code == 404:
+        raise ValueError("GitHub file was not found: %s" % safe_path)
+    response.raise_for_status()
+    text = response.text
+    if "\\x00" in text:
+        raise ValueError("Binary files cannot be added to chat context: %s" % safe_path)
+    return text[:_GITHUB_MAX_FILE_CHARS]
+
+
+def _github_context_from_body(body):
+    spec = body.get("github")
+    if not isinstance(spec, dict) or not spec.get("repo"):
+        return None, None
+    slug = _github_repo_slug(spec.get("repo"))
+    if not slug:
+        return ({"error": "github_repo_invalid",
+                 "detail": "Enter a GitHub repository as owner/name or a github.com URL."}, 400), None
+    ref = str(spec.get("ref") or "").strip()[:120] or "HEAD"
+    files = spec.get("files") or []
+    if not isinstance(files, list):
+        return ({"error": "github_files_invalid", "detail": "GitHub files must be a list."}, 400), None
+    files = [p for p in files if isinstance(p, str)][: _GITHUB_MAX_FILES]
+    if not files:
+        return ({"error": "github_files_missing", "detail": "Select at least one repository file for context."}, 400), None
+
+    blocks, total = [], 0
+    try:
+        for path in files:
+            safe_path = _github_safe_path(path)
+            if not safe_path:
+                continue
+            text = _github_fetch_file(slug, ref, safe_path)
+            remaining = _GITHUB_MAX_CONTEXT_CHARS - total
+            if remaining <= 0:
+                break
+            text = text[:remaining]
+            blocks.append("FILE: %s\n```\n%s\n```" % (safe_path, text))
+            total += len(text)
+    except (requests.RequestException, ValueError) as exc:
+        return ({"error": "github_context_failed", "detail": str(exc)[:240]}, 502), None
+
+    if not blocks:
+        return ({"error": "github_context_empty", "detail": "No readable code files were selected."}, 400), None
+    return None, (
+        "REPOSITORY CONTEXT (read-only GitHub files; cite file paths when discussing code):\n"
+        "Repository: %s\nRef: %s\n%s" % (slug, ref, "\n\n".join(blocks))
+    )
+
+
+@app.get("/api/ai-chat/github/repo")
+def api_ai_chat_github_repo():
+    """Return safe metadata and a filtered file tree for one public GitHub repo."""
+    _user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    slug = _github_repo_slug(request.args.get("repo"))
+    if not slug:
+        return jsonify({"error": "github_repo_invalid",
+                        "detail": "Enter a GitHub repository as owner/name or a github.com URL."}), 400
+    try:
+        meta = _github_request_json("/repos/" + slug)
+        ref = str(request.args.get("ref") or meta.get("default_branch") or "main").strip()[:120]
+        files, truncated = _github_tree_files(slug, ref)
+    except (requests.RequestException, ValueError) as exc:
+        return jsonify({"error": "github_repo_failed", "detail": str(exc)[:240]}), 502
+    return jsonify({"ok": True, "repo": slug, "name": meta.get("full_name") or slug,
+                    "description": meta.get("description") or "", "private": bool(meta.get("private")),
+                    "defaultBranch": meta.get("default_branch") or "main", "ref": ref,
+                    "files": files[:500], "treeTruncated": truncated})
+
+
 def _ai_chat_build_messages(chat_cfg, body, thread_id):
     """Shared message-building for the blocking and streaming chat endpoints.
     Returns (err, messages, ai, web_sources) — err is set on any failure."""
@@ -11959,6 +12139,12 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                   "relevant passages, retrieved for this question — cite as "
                   "[File 1], [File 2] etc. matching the numbers below):\n%s"
                   % _ai_chat_file_context_block(file_rows))
+
+    github_err, github_context = _github_context_from_body(body)
+    if github_err:
+        return github_err, None, None, None
+    if github_context:
+        sysmsg += "\n\n" + github_context
 
     messages = [{"role": "system", "content": sysmsg}]
     history = body.get("history") or []
