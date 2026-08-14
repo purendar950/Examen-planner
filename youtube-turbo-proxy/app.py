@@ -1044,6 +1044,14 @@ OMNIROUTE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completio
 OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
 OMNIROUTE_IMAGE_MODELS_URL = OMNIROUTE_IMAGES_URL
 OMNIROUTE_EDITS_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/edits")
+OMNIROUTE_SEARCH_URL = OMNIROUTE_URL.replace("/chat/completions", "/search")
+OMNIROUTE_TTS_URL = OMNIROUTE_URL.replace("/chat/completions", "/audio/speech")
+OMNIROUTE_VIDEO_URL = OMNIROUTE_URL.replace("/chat/completions", "/videos/generations")
+# Typed OmniRoute routes expose their own catalogs. Keep this cache short so a
+# newly-enabled provider appears without making every chat-status request block.
+_OMNIROUTE_TYPED_CATALOG_TTL = max(60, min(int(os.environ.get("OMNIROUTE_TYPED_CATALOG_TTL", "300")), 1800))
+_omniroute_typed_catalog_cache = {}
+_omniroute_typed_catalog_lock = threading.Lock()
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards", "poster"]
 
@@ -2256,6 +2264,234 @@ def _ai_chat_image_models(cfg):
             seen.add(key)
             out.append({"provider": pid, "model": model, "label": label})
     return out
+
+
+OMNIROUTE_SEARCH_FALLBACK_MODELS = [
+    "duckduckgo-free", "serper-search", "brave-search", "perplexity-search",
+    "exa-search", "tavily-search", "firecrawl", "google-pse-search",
+    "linkup-search", "searchapi-search", "youcom-search", "searxng-search",
+    "ollama-search", "zai-search",
+]
+OMNIROUTE_SPEECH_FALLBACK_MODELS = [
+    "pollinations/default", "nvidia/fastpitch", "nvidia/tacotron2",
+    "huggingface/canopylabs/orpheus-3b-0.1-ft",
+    "huggingface/ResembleAI/chatterbox", "huggingface/hexgrad/Kokoro-82M",
+]
+OMNIROUTE_VIDEO_FALLBACK_MODELS = [
+    "pollinations/default", "veoaifree-web/veo", "veo-free/veo",
+    "veoaifree-web/seedance", "veo-free/seedance",
+    "deepinfra/Wan-AI/Wan2.2-T2V-A14B", "deepinfra/Wan-AI/Wan2.2-TI2V-5B",
+    "deepinfra/Wan-AI/Wan2.7-T2V", "deepinfra/Lightricks/LTX-2.3-Distilled",
+]
+
+
+def _omniroute_typed_catalog(cfg, kind):
+    """Return public model/provider IDs for one typed OmniRoute endpoint.
+
+    Search and video expose lightweight typed catalog routes. Speech models are
+    filtered from the general /models catalog when available, with a durable
+    fallback list so a slow or offline tunnel never removes the UI controls.
+    """
+    fallback = {
+        "search": OMNIROUTE_SEARCH_FALLBACK_MODELS,
+        "speech": OMNIROUTE_SPEECH_FALLBACK_MODELS,
+        "video": OMNIROUTE_VIDEO_FALLBACK_MODELS,
+    }.get(kind, [])
+    now = time.time()
+    cached = _omniroute_typed_catalog_cache.get(kind) or {}
+    if cached.get("ids") and now - float(cached.get("ts") or 0) < _OMNIROUTE_TYPED_CATALOG_TTL:
+        return list(cached["ids"])
+    if not _provider_configured(cfg, "omniroute"):
+        return []
+    keys = _configured_provider_keys(cfg, "omniroute")
+    urls = {
+        "search": [OMNIROUTE_SEARCH_URL],
+        "video": [OMNIROUTE_VIDEO_URL],
+        "speech": [OMNIROUTE_MODELS_URL],
+    }.get(kind, [])
+    discovered = []
+    for url in urls:
+        try:
+            response = requests.get(
+                url,
+                headers={"Authorization": "Bearer %s" % keys[0],
+                         "ngrok-skip-browser-warning": "true"},
+                timeout=15 if kind != "speech" else 35,
+            )
+            if response.status_code != 200:
+                continue
+            payload = response.json() or {}
+            rows = payload.get("data") if isinstance(payload, dict) else []
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                if isinstance(row, str):
+                    model_id = row.strip()
+                    subtype = ""
+                    model_type = ""
+                elif isinstance(row, dict):
+                    model_id = str(row.get("id") or row.get("model") or "").strip()
+                    subtype = str(row.get("subtype") or "").strip().lower()
+                    model_type = str(row.get("type") or "").strip().lower()
+                else:
+                    continue
+                if not model_id:
+                    continue
+                if kind == "speech" and not (model_type == "audio" and subtype in ("speech", "tts", "text_to_speech")):
+                    continue
+                if model_id not in discovered:
+                    discovered.append(model_id)
+            if discovered:
+                break
+        except (requests.RequestException, ValueError, TypeError):
+            continue
+    ids = discovered or list(cached.get("ids") or fallback)
+    if ids:
+        _omniroute_typed_catalog_cache[kind] = {"ts": now, "ids": list(ids)}
+    return ids
+
+
+def _omniroute_error(response, label):
+    detail = ""
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            detail = str(error.get("message") or error.get("detail") or "")
+        elif error:
+            detail = str(error)
+        elif isinstance(payload, dict):
+            detail = str(payload.get("detail") or payload.get("message") or "")
+    except (ValueError, TypeError):
+        detail = (response.text or "")[:240]
+    detail = re.sub(r"\\s+", " ", detail).strip()[:280]
+    if response.status_code == 404:
+        return "%s endpoint is unavailable; check the OmniRoute tunnel." % label
+    if response.status_code == 429:
+        return "%s is rate-limited; try again shortly." % label
+    if response.status_code >= 500:
+        return "%s returned HTTP %s; try another model or server." % (label, response.status_code)
+    return "%s rejected the request%s." % (label, (": " + detail) if detail else "")
+
+
+def _omniroute_json_request(cfg, endpoint, body, label, timeout=90):
+    keys = _configured_provider_keys(cfg, "omniroute")
+    if not keys:
+        return None, "OmniRoute is not configured. Ask an admin to add an OmniRoute API key."
+    last_err = "%s failed." % label
+    for key in keys:
+        try:
+            response = requests.post(
+                endpoint,
+                headers={"Authorization": "Bearer %s" % key,
+                         "Content-Type": "application/json",
+                         "ngrok-skip-browser-warning": "true"},
+                json=body,
+                timeout=timeout,
+            )
+        except requests.RequestException as exc:
+            last_err = "%s request failed: %s" % (label, str(exc)[:180])
+            continue
+        if response.status_code >= 400:
+            last_err = _omniroute_error(response, label)
+            if response.status_code in (401, 403, 408, 429) or response.status_code >= 500:
+                continue
+            return None, last_err
+        try:
+            return response.json(), None
+        except ValueError:
+            return None, "%s returned an unreadable response." % label
+    return None, last_err
+
+
+def _omniroute_binary_request(cfg, endpoint, body, label, timeout=180):
+    keys = _configured_provider_keys(cfg, "omniroute")
+    if not keys:
+        return None, "OmniRoute is not configured. Ask an admin to add an OmniRoute API key.", ""
+    last_err = "%s failed." % label
+    for key in keys:
+        try:
+            response = requests.post(
+                endpoint,
+                headers={"Authorization": "Bearer %s" % key,
+                         "Content-Type": "application/json",
+                         "ngrok-skip-browser-warning": "true"},
+                json=body,
+                timeout=timeout,
+            )
+        except requests.RequestException as exc:
+            last_err = "%s request failed: %s" % (label, str(exc)[:180])
+            continue
+        if response.status_code >= 400:
+            last_err = _omniroute_error(response, label)
+            if response.status_code in (401, 403, 408, 429) or response.status_code >= 500:
+                continue
+            return None, last_err, ""
+        ctype = (response.headers.get("Content-Type") or "application/octet-stream").split(";", 1)[0].strip()
+        if response.content and (ctype.startswith("audio/") or ctype.startswith("video/") or ctype == "application/octet-stream"):
+            return response.content, None, ctype
+        try:
+            payload = response.json()
+        except ValueError:
+            return None, "%s returned an unreadable response." % label, ""
+        return payload, None, "application/json"
+    return None, last_err, ""
+
+
+def _ai_chat_generate_speech(cfg, model_id, text, voice="alloy", response_format="mp3"):
+    model_id = str(model_id or "").strip()
+    body = {"model": model_id, "input": str(text or "").strip()[:12000],
+            "voice": str(voice or "alloy")[:80],
+            "response_format": str(response_format or "mp3")[:12]}
+    if not body["input"]:
+        return None, "Speech text is empty.", ""
+    return _omniroute_binary_request(cfg, OMNIROUTE_TTS_URL, body, "Text-to-speech", timeout=120)
+
+
+def _ai_chat_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration=None, source_image=None):
+    body = {"model": str(model_id or "").strip(), "prompt": str(prompt or "").strip()[:2000]}
+    if aspect_ratio:
+        body["aspect_ratio"] = str(aspect_ratio)[:12]
+    if duration is not None:
+        try:
+            body["duration"] = max(1, min(30, int(duration)))
+        except (TypeError, ValueError):
+            pass
+    if source_image:
+        body["image"] = str(source_image)[:16 * 1024 * 1024]
+    if not body["prompt"]:
+        return None, "Video prompt is empty.", ""
+    return _omniroute_binary_request(cfg, OMNIROUTE_VIDEO_URL, body, "Video generation", timeout=300)
+
+
+def _ai_chat_search(cfg, model_id, query, search_type="web", max_results=6):
+    query = re.sub(r"\\s+", " ", str(query or "")).strip()[:500]
+    if not query:
+        return None, "Search query is empty."
+    try:
+        limit = max(1, min(10, int(max_results)))
+    except (TypeError, ValueError):
+        limit = 6
+    body = {"model": str(model_id or "duckduckgo-free").strip(), "query": query,
+            "search_type": str(search_type or "web")[:20], "max_results": limit}
+    payload, error = _omniroute_json_request(cfg, OMNIROUTE_SEARCH_URL, body, "Web search", timeout=60)
+    if error:
+        return None, error
+    rows = payload.get("data") if isinstance(payload, dict) else []
+    if not isinstance(rows, list):
+        rows = []
+    results = []
+    for row in rows[:limit]:
+        if not isinstance(row, dict):
+            continue
+        results.append({
+            "title": str(row.get("title") or "Untitled")[:240],
+            "url": str(row.get("url") or row.get("link") or "")[:1000],
+            "snippet": str(row.get("snippet") or row.get("description") or row.get("content") or "")[:1200],
+            "publishedAt": str(row.get("published_at") or row.get("publishedAt") or "")[:80],
+            "favicon": str(row.get("favicon_url") or row.get("favicon") or "")[:500],
+        })
+    return {"query": query, "model": body["model"], "results": results}, None
 
 
 def _ai_chat_generate_image(cfg, provider, model_id, prompt, aspect_ratio=None, source_image=None):
@@ -12044,6 +12280,7 @@ def api_ai_chat_status():
     chat_cfg = _load_ai_chat_config()
     allowed = bool(is_admin or uid in chat_cfg["allowed_users"])
     models, image_models = [], []
+    search_models, speech_models, video_models = [], [], []
     provider_groups, image_provider_groups = [], []
     catalog_refreshing = False
     if allowed:
@@ -12059,12 +12296,25 @@ def api_ai_chat_status():
                         for m in available_images]
         provider_groups = _ai_chat_model_groups(available)
         image_provider_groups = _ai_chat_model_groups(available_images)
+        if _provider_configured(raw_cfg, "omniroute"):
+            search_models = [{"key": "omniroute/" + model, "label": "OmniRoute — " + model}
+                             for model in _omniroute_typed_catalog(raw_cfg, "search")]
+            speech_models = [{"key": "omniroute/" + model, "label": "OmniRoute — " + model}
+                             for model in _omniroute_typed_catalog(raw_cfg, "speech")]
+            video_models = [{"key": "omniroute/" + model, "label": "OmniRoute — " + model}
+                            for model in _omniroute_typed_catalog(raw_cfg, "video")]
     return jsonify({"ok": True, "enabled": allowed, "models": models,
                     "providerGroups": provider_groups,
                     "imageModels": image_models,
                     "imageProviderGroups": image_provider_groups,
+                    "searchModels": search_models,
+                    "speechModels": speech_models,
+                    "videoModels": video_models,
                     "catalogRefreshing": catalog_refreshing,
                     "imageEnabled": bool(allowed and image_models),
+                    "searchEnabled": bool(allowed and search_models),
+                    "speechEnabled": bool(allowed and speech_models),
+                    "videoEnabled": bool(allowed and video_models),
                     "ragEnabled": bool(allowed and _vec_enabled())})
 
 
@@ -12736,6 +12986,118 @@ def api_ai_chat_image():
     detail = "Image generation failed after trying %d configured model%s. %s" % (
         len(candidates), "" if len(candidates) == 1 else "s", " | ".join(failures)[:900])
     return jsonify({"error": "image_failed", "detail": detail}), 502
+
+
+
+def _typed_request_model(raw, kind):
+    value = str(raw or "").strip()
+    if value.startswith("omniroute/"):
+        value = value[len("omniroute/"):]
+    if value:
+        return value
+    defaults = {
+        "search": OMNIROUTE_SEARCH_FALLBACK_MODELS[0],
+        "speech": OMNIROUTE_SPEECH_FALLBACK_MODELS[0],
+        "video": OMNIROUTE_VIDEO_FALLBACK_MODELS[0],
+    }
+    return defaults[kind]
+
+
+def _typed_model_allowed(cfg, kind, model):
+    available = _omniroute_typed_catalog(cfg, kind)
+    return model in available or model in {
+        value for value in {
+            *OMNIROUTE_SEARCH_FALLBACK_MODELS,
+            *OMNIROUTE_SPEECH_FALLBACK_MODELS,
+            *OMNIROUTE_VIDEO_FALLBACK_MODELS,
+        }
+    }
+
+
+@app.post("/api/ai-chat/search")
+def api_ai_chat_search():
+    """Search the web through OmniRoute and return normalized source cards."""
+    user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    raw_cfg = _load_study_raw_cfg()
+    if not _provider_configured(raw_cfg, "omniroute"):
+        return jsonify({"error": "search_not_configured",
+                        "detail": "OmniRoute search is not configured. Ask an admin to add an OmniRoute key."}), 503
+    body = request.get_json(silent=True) or {}
+    model = _typed_request_model(body.get("model"), "search")
+    if not _typed_model_allowed(raw_cfg, "search", model):
+        return jsonify({"error": "search_model_invalid", "detail": "That search model is not available."}), 400
+    if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_search", user["uid"], 60, 3600):
+        return jsonify({"error": "rate_limited", "detail": "Search limit reached. Try later."}), 429
+    result, detail = _ai_chat_search(raw_cfg, model, body.get("query"), body.get("searchType"), body.get("maxResults", 6))
+    if detail:
+        return jsonify({"error": "search_failed", "detail": detail}), 502
+    return jsonify({"ok": True, **(result or {})})
+
+
+@app.post("/api/ai-chat/speech")
+def api_ai_chat_speech():
+    """Synthesize speech through a configured OmniRoute audio/speech model."""
+    user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    raw_cfg = _load_study_raw_cfg()
+    if not _provider_configured(raw_cfg, "omniroute"):
+        return jsonify({"error": "speech_not_configured",
+                        "detail": "OmniRoute text-to-speech is not configured."}), 503
+    body = request.get_json(silent=True) or {}
+    model = _typed_request_model(body.get("model"), "speech")
+    if not _typed_model_allowed(raw_cfg, "speech", model):
+        return jsonify({"error": "speech_model_invalid", "detail": "That speech model is not available."}), 400
+    text = str(body.get("text") or body.get("input") or "").strip()
+    if not text:
+        return jsonify({"error": "missing_text", "detail": "Speech text is required."}), 400
+    if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_tts", user["uid"], 40, 3600):
+        return jsonify({"error": "rate_limited", "detail": "Text-to-speech limit reached. Try later."}), 429
+    result, detail, content_type = _ai_chat_generate_speech(
+        raw_cfg, model, text, body.get("voice"), body.get("responseFormat") or body.get("format") or "mp3")
+    if detail:
+        return jsonify({"error": "speech_failed", "detail": detail}), 502
+    if isinstance(result, (bytes, bytearray)):
+        response = Response(bytes(result), mimetype=content_type or "audio/mpeg")
+        response.headers["X-Audio-Model"] = model
+        return response
+    if isinstance(result, dict):
+        return jsonify({"ok": True, "model": model, "audio": result})
+    return jsonify({"error": "speech_empty", "detail": "The speech provider returned no audio."}), 502
+
+
+@app.post("/api/ai-chat/video")
+def api_ai_chat_video():
+    """Generate a video through a configured OmniRoute video model."""
+    user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    raw_cfg = _load_study_raw_cfg()
+    if not _provider_configured(raw_cfg, "omniroute"):
+        return jsonify({"error": "video_not_configured",
+                        "detail": "OmniRoute video generation is not configured."}), 503
+    body = request.get_json(silent=True) or {}
+    model = _typed_request_model(body.get("model"), "video")
+    if not _typed_model_allowed(raw_cfg, "video", model):
+        return jsonify({"error": "video_model_invalid", "detail": "That video model is not available."}), 400
+    prompt = str(body.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"error": "missing_prompt", "detail": "Video prompt is required."}), 400
+    if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_video", user["uid"], 8, 3600):
+        return jsonify({"error": "rate_limited", "detail": "Video generation limit reached. Try later."}), 429
+    result, detail, content_type = _ai_chat_generate_video(
+        raw_cfg, model, prompt, body.get("aspectRatio") or "16:9", body.get("duration"), body.get("sourceImage"))
+    if detail:
+        return jsonify({"error": "video_failed", "detail": detail}), 502
+    if isinstance(result, (bytes, bytearray)):
+        response = Response(bytes(result), mimetype=content_type or "video/mp4")
+        response.headers["X-Video-Model"] = model
+        return response
+    if isinstance(result, dict):
+        return jsonify({"ok": True, "model": model, "video": result})
+    return jsonify({"error": "video_empty", "detail": "The video provider returned no video."}), 502
 
 
 @app.get("/api/search")
