@@ -28,7 +28,7 @@
 <a href="#main" class="skip-link">Skip to main content</a>
 <nav class="navbar" id="navbar" role="navigation" aria-label="Main navigation">
 <div class="nav-container">
-<a href="#" class="nav-logo" aria-label="StudyPlanner Home"><span class="logo-icon">📚</span><span class="logo-text">Study<span class="logo-highlight">Planner</span></span></a>
+<a href="#" class="nav-logo" aria-label="StudyPlanner Home"><img class="logo-icon" src="assets/brand/studyplanner-mark.svg" alt=""><span class="logo-text">Study<span class="logo-highlight">Planner</span></span></a>
 <div class="nav-links" role="menubar"><a href="#features">Features</a><a href="#exams">Exams</a><a href="#how-it-works">How It Works</a><a href="#pricing">Pricing</a><a href="#testimonials">Reviews</a><a href="#faq">FAQ</a></div>
 <div class="nav-actions"><button class="btn btn-ghost" onclick="openAuthModal('login')">Sign In</button><button class="btn btn-primary" onclick="openAuthModal('signup')">Start Free →</button></div>
 <button class="nav-hamburger" id="hamburger" onclick="toggleMobileNav()" aria-label="Toggle menu" aria-expanded="false"><span></span><span></span><span></span></button>
@@ -279,7 +279,7 @@
 <div class="auth-overlay" onclick="closeAuthModal()"></div>
 <div class="auth-card">
 <button class="auth-close" onclick="closeAuthModal()" aria-label="Close">&times;</button>
-<div class="auth-header"><span style="font-size:2rem">📚</span><h2 id="auth-title">Welcome to StudyPlanner</h2><p id="auth-subtitle">Sign in to continue your prep</p></div>
+<div class="auth-header"><img class="auth-brand-mark" src="assets/brand/studyplanner-mark.svg" alt=""><h2 id="auth-title">Welcome to StudyPlanner</h2><p id="auth-subtitle">Sign in to continue your prep</p></div>
 <form id="authForm" onsubmit="handleAuthSubmit(event)">
 <div class="auth-field" id="nameField" style="display:none"><label for="authName">Full Name</label><input type="text" id="authName" placeholder="Enter your name" autocomplete="name"></div>
 <div class="auth-field"><label for="authEmail">Email</label><input type="email" id="authEmail" placeholder="you@example.com" required autocomplete="email"></div>
