@@ -64,10 +64,31 @@
   function threadsKey() { return 'preppath_ai_chat_threads_' + uid(); }
   function curKey() { return 'preppath_ai_chat_current_' + uid(); }
 
+  function normalizeThread(thread) {
+    if (!thread || !Array.isArray(thread.messages)) return { thread: thread, changed: false };
+    var changed = false;
+    thread.messages = thread.messages.map(function (m) {
+      if (!m || typeof m !== 'object') return m;
+      if ((m.imageData || m.imageUrl) && !m.content) {
+        m.content = m.imageEdit ? 'Edited image already shown in this conversation.' : 'Generated image already shown in this conversation.';
+        changed = true;
+      }
+      return m;
+    });
+    return { thread: thread, changed: changed };
+  }
   function loadThreads() {
     try {
       var list = JSON.parse(localStorage.getItem(threadsKey()) || '[]');
-      return Array.isArray(list) ? list : [];
+      if (!Array.isArray(list)) return [];
+      var changed = false;
+      var normalized = list.map(function (thread) {
+        var result = normalizeThread(thread);
+        changed = changed || !!(result && result.changed);
+        return result ? result.thread : thread;
+      });
+      if (changed) localStorage.setItem(threadsKey(), JSON.stringify(normalized));
+      return normalized;
     } catch (e) { return []; }
   }
   function saveThreads(list) {
@@ -112,6 +133,17 @@
     try { localStorage.setItem(curKey(), id); } catch (e) {}
     renderAll();
   }
+  function localMemoryContext(thread) {
+    var messages = (thread && thread.messages) || [];
+    return messages.slice(-HISTORY_MAX).map(function (m) {
+      if (!m || !m.role) return '';
+      var content = String(m.content || '').trim();
+      if (m.imageData || m.imageUrl) content = content || (m.imageEdit ? 'Edited image already shown in this conversation.' : 'Generated image already shown in this conversation.');
+      if (!content) return '';
+      return (m.role === 'user' ? 'User' : 'Assistant') + ': ' + content;
+    }).filter(Boolean).join('\n').slice(-9000);
+  }
+
   function threadTitleFromFirstMessage(text) {
     var t = String(text || '').trim().slice(0, 48);
     return t || 'New chat';
@@ -1166,6 +1198,7 @@
       model: (modelSel && modelSel.value) || t.model || '',
       web: t.web || 'auto', persona: t.persona || '',
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
+      localMemory: localMemoryContext(t),
       imageContext: (function () {
         for (var i = t.messages.length - 1; i >= 0; i -= 1) {
           var m = t.messages[i];

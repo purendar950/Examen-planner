@@ -12265,6 +12265,12 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
 
     persona = str(body.get("persona") or "").strip()[:800]
     sysmsg = _ai_chat_tab_sys(persona)
+    local_memory = str(body.get("localMemory") or "").strip()[:9000]
+    if local_memory:
+        sysmsg += ("\n\nCLIENT-LOCAL CONVERSATION MEMORY: The following summary was supplied "
+                   "by the browser for this request. It is not stored on the server. "
+                   "Use it as the prior conversation even if the user changed models. "
+                   "Do not say that you forgot the previous turns.\n" + local_memory)
     image_context = str(body.get("imageContext") or "").strip()[:600]
     if image_context:
         sysmsg += ("\n\nIMAGE STATE: An image result has already been generated or edited in this "
