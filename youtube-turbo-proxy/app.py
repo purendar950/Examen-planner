@@ -12483,21 +12483,40 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
         sysmsg += "\n\n" + github_context
     active_workspace = body.get("workspace")
     if isinstance(active_workspace, dict) and active_workspace.get("path") and active_workspace.get("content") is not None:
-        active_path = str(active_workspace.get("path"))[:180]
-        active_language = str(active_workspace.get("language") or "text")[:40]
-        active_content = str(active_workspace.get("content") or "")[:26000]
-        sysmsg += ("\n\nACTIVE LOCAL WORKSPACE FILE (the browser owns this file; it has not been "
-                   "written to GitHub or the server):\nPath: %s\nLanguage: %s\n"
-                   "Current content:\n```%s\n%s\n```\n"
-                   "PATCH-ONLY EDIT CONTRACT: when the student asks to improve, fix, refactor, "
-                   "or change this active file, make the smallest necessary edit and do not return "
-                   "the complete file. Return exactly one fenced diff block in this shape:\n"
-                   "```diff\n--- a/%s\n+++ b/%s\n@@ -oldStart,oldCount +newStart,newCount @@\n context or changed lines\n```\n"
-                   "Use exact current-file context lines, correct hunk counts, and the active path. "
-                   "Then add a short explanation and verification steps outside the diff. If no change "
-                   "is needed, say so without emitting a replacement file. Only return a full file "
-                   "when the student explicitly asks for a full replacement or a new file.\n" %
-                   (active_path, active_language, active_language, active_content, active_path, active_path))
+        workspace_files = active_workspace.get("files") if isinstance(active_workspace.get("files"), list) else []
+        normalized_files = []
+        seen_paths = set()
+        for item in workspace_files + [active_workspace]:
+            if not isinstance(item, dict) or not item.get("path") or item.get("content") is None:
+                continue
+            item_path = str(item.get("path"))[:180]
+            if item_path in seen_paths:
+                continue
+            seen_paths.add(item_path)
+            normalized_files.append((item_path, str(item.get("language") or "text")[:40], str(item.get("content") or "")[:18000]))
+        if len(normalized_files) <= 1:
+            active_path, active_language, active_content = normalized_files[0]
+            sysmsg += ("\n\nACTIVE LOCAL WORKSPACE FILE (the browser owns this file; it has not been "
+                       "written to GitHub or the server):\nPath: %s\nLanguage: %s\n"
+                       "Current content:\n```%s\n%s\n```\n"
+                       "PATCH-ONLY EDIT CONTRACT: when the student asks to improve, fix, refactor, "
+                       "or change this active file, make the smallest necessary edit and do not return "
+                       "the complete file. Return exactly one fenced path-aware diff block with exact "
+                       "@@ hunk counts and current-file context. Then add a short explanation and "
+                       "verification steps outside the diff. Only return a full file when explicitly "
+                       "requested or when creating a new file.\n" %
+                       (active_path, active_language, active_language, active_content))
+        else:
+            workspace_dump = "\n\n".join("PATH: %s\nLANGUAGE: %s\n```%s\n%s\n```" % item for item in normalized_files)
+            sysmsg += ("\n\nACTIVE LOCAL WORKSPACE FILE SET (the browser owns these files; they have not been "
+                       "written to GitHub or the server):\n%s\n\nMULTI-FILE PATCH CONTRACT: the selected files are the only files you may edit. Return "
+                       "exactly one fenced unified diff containing one path-aware section per changed "
+                       "file, using `diff --git a/path b/path`, `--- a/path`, `+++ b/path`, and exact "
+                       "@@` hunk counts. Preserve unchanged context lines. Do not return complete "
+                       "files, do not edit unselected files, and do not emit a replacement file. "
+                       "Follow the diff with a concise summary and verification steps outside the diff. "
+                       "If only one file needs a change, emit one file section. If no change is needed, "
+                       "say so without a diff.\n" % workspace_dump)
     messages = [{"role": "system", "content": sysmsg}]
 
     history = body.get("history") or []

@@ -284,6 +284,9 @@
     .aic-workspace-head button{padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-size:.68rem;cursor:pointer;white-space:nowrap;}
     .aic-workspace-head button:hover{border-color:var(--accent);color:var(--text);}
     .aic-workspace-spacer{flex:1;}
+    .aic-workspace-targets{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:6px 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent);background:color-mix(in srgb,var(--card) 72%,transparent);font-size:.68rem;color:var(--muted);}
+    .aic-workspace-target{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);cursor:pointer;}
+    .aic-workspace-target input{accent-color:var(--accent);}
     .aic-workspace-editor{display:block;width:100%;min-height:180px;max-height:420px;padding:14px 16px;border:0;resize:vertical;outline:none;background:#17191d;color:#e7e9ed;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;tab-size:2;}
     .aic-workspace-editor:focus{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 60%,transparent);}
     .aic-workspace-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid color-mix(in srgb,var(--border) 55%,transparent);}
@@ -372,6 +375,7 @@
     <input type="file" id="aic-code-file-input" class="aic-file-input" accept=".js,.jsx,.ts,.tsx,.py,.html,.css,.json,.md,.yml,.yaml,.sh,.sql,.java,.go,.rs" onchange="aicCodeFileSelected(event)">
     <section class="aic-code-workspace" id="aic-code-workspace" aria-label="Coding workspace">
       <div class="aic-workspace-head"><span class="aic-workspace-title">File workspace</span><select id="aic-workspace-file" class="aic-workspace-file" onchange="aicWorkspaceFileChanged(this)" aria-label="Active file"></select><span class="aic-workspace-spacer"></span><button type="button" onclick="document.getElementById('aic-code-file-input').click()">Open local file</button><button type="button" onclick="aicWorkspaceAskEdit()">Ask AI to edit</button><button type="button" onclick="aicCloseWorkspace()">×</button></div>
+      <div id="aic-workspace-targets" class="aic-workspace-targets" aria-label="Files included in the next AI patch"><strong>Patch files:</strong></div>
       <textarea id="aic-workspace-editor" class="aic-workspace-editor" spellcheck="false" oninput="aicWorkspaceEdited(this)" aria-label="Active code file"></textarea>
       <div class="aic-workspace-footer"><span id="aic-workspace-status" class="aic-workspace-status">Open a GitHub or local code file to start.</span><button type="button" onclick="aicWorkspaceRun()">Run / check</button><button type="button" id="aic-workspace-preview-btn" style="display:none;" onclick="aicWorkspacePreview()">Live preview</button><button type="button" onclick="aicWorkspaceSaveVersion()">Save local version</button><button type="button" id="aic-workspace-fix-btn" style="display:none;" onclick="aicWorkspaceFixRun()">Ask AI to fix output</button></div>
       <pre id="aic-workspace-output" class="aic-workspace-output"></pre>
@@ -1099,8 +1103,11 @@
 
   function workspaceState(t) {
     if (!t) return null;
-    if (!t.workspace || !Array.isArray(t.workspace.files)) t.workspace = { files: [], activePath: '', lastRun: null };
+    if (!t.workspace || !Array.isArray(t.workspace.files)) t.workspace = { files: [], activePath: '', selectedPaths: [], lastRun: null };
+    if (!Array.isArray(t.workspace.selectedPaths)) t.workspace.selectedPaths = [];
     if (!t.workspace.activePath && t.workspace.files[0]) t.workspace.activePath = t.workspace.files[0].path;
+    t.workspace.selectedPaths = t.workspace.selectedPaths.filter(function (path) { return t.workspace.files.some(function (file) { return file.path === path; }); });
+    if (t.workspace.activePath && t.workspace.selectedPaths.indexOf(t.workspace.activePath) === -1) t.workspace.selectedPaths.unshift(t.workspace.activePath);
     return t.workspace;
   }
   function workspaceLanguage(path) {
@@ -1167,6 +1174,11 @@
       editor.setAttribute('data-path', file.path);
     }
     status.textContent = (file.dirty ? 'Unsaved local changes' : 'Loaded locally') + ' · ' + file.path + ' · ' + workspaceLanguage(file.path);
+    var targetBox = document.getElementById('aic-workspace-targets');
+    if (targetBox) targetBox.innerHTML = '<strong>Patch files:</strong>' + ws.files.map(function (f) {
+      var checked = ws.selectedPaths.indexOf(f.path) !== -1;
+      return '<label class="aic-workspace-target"><input type="checkbox" ' + (checked ? 'checked ' : '') + 'onchange="aicWorkspaceTargetChanged(this)" data-path="' + escAttr(f.path) + '"><span>' + esc(f.path) + '</span></label>';
+    }).join('');
     var result = ws.lastRun;
     if (result && (result.stdout || result.stderr || result.detail || result.status)) {
       output.style.display = '';
@@ -1180,10 +1192,19 @@
     }
     refreshWorkspacePreview(t);
   }
+  function workspacePatchFiles(t) {
+    var ws = workspaceState(t), active = activeWorkspaceFile(t);
+    if (!ws || !active) return [];
+    var paths = ws.selectedPaths.slice(0, 6);
+    if (paths.indexOf(active.path) === -1) paths.unshift(active.path);
+    return paths.map(function (path) { return ws.files.find(function (file) { return file.path === path; }); }).filter(Boolean).map(function (file) {
+      return { path: file.path, language: workspaceLanguage(file.path), content: String(file.content || '').slice(0, 18000) };
+    });
+  }
   function workspaceRequest(t) {
-    var file = activeWorkspaceFile(t);
+    var file = activeWorkspaceFile(t), files = workspacePatchFiles(t);
     if (!file) return null;
-    return { path: file.path, language: workspaceLanguage(file.path), content: String(file.content || '').slice(0, 26000) };
+    return { path: file.path, language: workspaceLanguage(file.path), content: String(file.content || '').slice(0, 26000), files: files };
   }
   function addWorkspaceFile(t, file) {
     var ws = workspaceState(t), existing = ws.files.find(function (f) { return f.path === file.path; });
@@ -1198,8 +1219,22 @@
     var t = getThread(currentThreadId()), ws = workspaceState(t);
     if (!t || !ws || !select) return;
     ws.activePath = select.value;
+    if (ws.selectedPaths.indexOf(select.value) === -1) ws.selectedPaths.unshift(select.value);
     ws.lastRun = null;
     ws.previewOpen = false;
+    upsertThread(t);
+    renderWorkspace();
+  };
+  window.aicWorkspaceTargetChanged = function (checkbox) {
+    var t = getThread(currentThreadId()), ws = workspaceState(t), path = checkbox && checkbox.getAttribute('data-path');
+    if (!t || !ws || !path) return;
+    if (checkbox.checked) {
+      if (ws.selectedPaths.indexOf(path) === -1) ws.selectedPaths.push(path);
+    } else {
+      ws.selectedPaths = ws.selectedPaths.filter(function (item) { return item !== path; });
+      if (!ws.selectedPaths.length) ws.selectedPaths = [ws.activePath];
+      if (path === ws.activePath) { checkbox.checked = true; toast('The active file must remain in the patch set.', 'info'); return; }
+    }
     upsertThread(t);
     renderWorkspace();
   };
@@ -1257,15 +1292,34 @@
   window.aicWorkspaceAskEdit = function () {
     var t = getThread(currentThreadId()), file = activeWorkspaceFile(t), input = document.getElementById('aic-input');
     if (!file || !input) { toast('Open a code file first.', 'error'); return; }
-    input.value = 'Improve only the necessary part of the active file ' + file.path + '. Do not rewrite the complete file. Return a unified diff that applies cleanly to the current file, followed by a brief explanation and verification steps.';
+    var paths = workspacePatchFiles(t).map(function (item) { return item.path; });
+    input.value = 'Improve only the necessary parts of the selected workspace files (' + paths.join(', ') + '). Do not rewrite complete files. Return one path-aware multi-file unified diff with exact hunks, followed by a brief explanation and verification steps.';
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 180) + 'px';
     input.focus();
     toast('Focused edit request added to the composer.', 'info');
   };
-  function patchTargetPath(patch) {
-    var match = String(patch || '').match(/^\+\+\+\s+(?:b\/)?([^\s]+)$/m) || String(patch || '').match(/^---\s+(?:a\/)?([^\s]+)$/m);
-    return match && match[1] && match[1] !== '/dev/null' ? match[1] : '';
+  function patchTargetPaths(patch) {
+    var paths = [], match, re = /^\+\+\+\s+(?:b\/)?([^\s]+)$/gm, source = String(patch || '');
+    while ((match = re.exec(source))) if (match[1] !== '/dev/null' && paths.indexOf(match[1]) === -1) paths.push(match[1]);
+    if (!paths.length) {
+      re = /^---\s+(?:a\/)?([^\s]+)$/gm;
+      while ((match = re.exec(source))) if (match[1] !== '/dev/null' && paths.indexOf(match[1]) === -1) paths.push(match[1]);
+    }
+    return paths;
+  }
+  function patchTargetPath(patch) { return patchTargetPaths(patch)[0] || ''; }
+  function splitMultiFilePatch(patch) {
+    var source = String(patch || '').replace(/\r\n/g, '\n'), matches = [], re = /^diff --git .*$/gm, match, i;
+    while ((match = re.exec(source))) matches.push(match.index);
+    if (!matches.length) {
+      re = /^---\s+(?:a\/)?[^\s]+$/gm;
+      while ((match = re.exec(source))) matches.push(match.index);
+    }
+    if (!matches.length || (matches.length === 1 && matches[0] === 0)) return [source];
+    var sections = [];
+    for (i = 0; i < matches.length; i += 1) sections.push(source.slice(matches[i], matches[i + 1] == null ? source.length : matches[i + 1]));
+    return sections;
   }
   function comparablePath(path) { return String(path || '').replace(/^(?:a|b)\//, '').replace(/^\.\//, ''); }
   function applyUnifiedDiff(source, patch) {
@@ -1299,20 +1353,29 @@
     return { content: out.join('\n') };
   }
   window.aicApplyArtifact = function (btn) {
-    var card = btn && btn.closest('.aic-code-artifact'), t = getThread(currentThreadId()), file;
+    var card = btn && btn.closest('.aic-code-artifact'), t = getThread(currentThreadId()), ws, patch, sections, drafts = [], seen = {};
     if (!card || !t) return;
-    file = activeWorkspaceFile(t);
-    if (!file) { toast('Open the target file before applying a patch.', 'error'); return; }
-    var target = comparablePath(card.getAttribute('data-target') || '');
-    if (target && target !== comparablePath(file.path)) { toast('This patch targets ' + target + ', but ' + file.path + ' is active. Open the matching file first.', 'error'); return; }
-    var result = applyUnifiedDiff(file.content, card.getAttribute('data-code') || '');
-    if (result.error) { toast(result.error, 'error'); return; }
-    file.content = result.content;
-    file.dirty = true;
-    workspaceState(t).lastRun = null;
+    ws = workspaceState(t);
+    patch = card.getAttribute('data-code') || '';
+    sections = splitMultiFilePatch(patch);
+    sections.forEach(function (section) {
+      var targets = patchTargetPaths(section), target = comparablePath(targets[0] || ''), file, result;
+      if (!target || seen[target]) return;
+      seen[target] = true;
+      file = ws.files.find(function (item) { return comparablePath(item.path) === target; });
+      if (!file) { drafts.push({ error: 'Patch targets ' + target + ', but that file is not open in the workspace.' }); return; }
+      result = applyUnifiedDiff(file.content, section);
+      if (result.error) drafts.push({ error: target + ': ' + result.error });
+      else drafts.push({ file: file, content: result.content });
+    });
+    if (!drafts.length) { toast('No path-aware file patches were found.', 'error'); return; }
+    var failure = drafts.find(function (item) { return item.error; });
+    if (failure) { toast(failure.error + ' No files were changed.', 'error'); return; }
+    drafts.forEach(function (item) { item.file.content = item.content; item.file.dirty = true; });
+    ws.lastRun = null;
     upsertThread(t);
     renderWorkspace();
-    toast('Patch applied to the local workspace. Review it before saving.', 'success');
+    toast('Applied reviewed patch to ' + drafts.length + ' file' + (drafts.length === 1 ? '' : 's') + '. Review before saving.', 'success');
   };
   window.aicWorkspaceRun = function () {
     var t = getThread(currentThreadId()), file = activeWorkspaceFile(t);
@@ -1480,15 +1543,15 @@
       }
       return '<span class="aic-code-line' + cls + '"><span class="aic-code-ln">' + (lineIndex + 1) + '</span>' + esc(line) + '</span>';
     }).join('');
-    var targetPath = diff ? patchTargetPath(raw) : '';
-    var safeTitle = title || (diff ? 'Suggested patch' : 'Code artifact');
+    var targetPaths = diff ? patchTargetPaths(raw) : [], targetPath = targetPaths.join(',');
+    var safeTitle = title || (diff ? (targetPaths.length > 1 ? 'Suggested multi-file patch' : 'Suggested patch') : 'Code artifact');
     var fixPrompt = diff
       ? 'Review this suggested patch and return a corrected unified diff only. Do not rewrite the complete file. Preserve unchanged lines and include exact @@ hunks.\n\n```diff\n' + raw + '\n```'
       : 'Review and improve this code. If an active file is open, change only the necessary lines and return a unified diff; otherwise return a complete new-file artifact.' + (normalizedLang !== 'text' ? '\nLanguage: ' + normalizedLang : '') + '\n\n```' + normalizedLang + '\n' + raw + '\n```';
     return '<section class="aic-code-artifact" data-code="' + escAttr(raw) + '" data-language="' + escAttr(normalizedLang) + '" data-target="' + escAttr(targetPath) + '">' +
       '<div class="aic-code-head"><span class="aic-code-title">' + esc(safeTitle) + '</span><span class="aic-code-lang">' + esc(normalizedLang) + '</span>' +
       '<button type="button" onclick="aicCopyArtifact(this)">Copy</button><button type="button" onclick="aicDownloadArtifact(this)">Download</button>' + (diff ? '<button type="button" onclick="aicApplyArtifact(this)">Apply to file</button>' : '') + '<button type="button" class="aic-code-fix" data-fix="' + escAttr(fixPrompt) + '" onclick="aicFixArtifact(this)">Try fixing</button></div>' +
-      '<pre class="aic-code-body">' + rendered + '</pre>' + (diff ? '<div class="aic-code-status">Suggested diff · additions and removals are highlighted for review.</div>' : '') + '</section>';
+      '<pre class="aic-code-body">' + rendered + '</pre>' + (diff ? '<div class="aic-code-status">Suggested ' + (targetPaths.length > 1 ? 'multi-file diff · ' + esc(targetPaths.join(', ')) : 'diff · ' + esc(targetPaths[0] || 'active file')) + ' · all files are validated before application.</div>' : '') + '</section>';
   }
   function renderAssistantBody(text) {
     var source = String(text || '');
@@ -1657,7 +1720,7 @@
       web: t.web || 'auto', persona: t.persona || '',
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
       workspace: workspaceRequest(t),
-      editMode: workspaceRequest(t) ? 'patch' : 'new-file',
+      editMode: workspaceRequest(t) ? 'multi-file-patch' : 'new-file',
       localMemory: localMemoryContext(t),
       imageContext: (function () {
         for (var i = t.messages.length - 1; i >= 0; i -= 1) {
