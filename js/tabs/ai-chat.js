@@ -809,38 +809,42 @@
     var message = t && t.messages[index];
     if (!message) { toast('This message cannot be retried.'); return; }
 
-    // Replaying a user turn means restoring the exact conversation prefix that
-    // existed before it. This removes the old answer and every later turn, then
-    // routes the original text through the same auto image/text decision.
-    var retryMessage = message;
-    if (message.role === 'error' && index > 0 && t.messages[index - 1] && t.messages[index - 1].role === 'user') {
-      index -= 1;
-      retryMessage = t.messages[index];
+    // Always recover the nearest original user turn. Error rows can be separated
+    // from their user prompt by an empty assistant placeholder or an intermediate
+    // status row, so relying only on index - 1 makes network retries fail.
+    var userIndex = message.role === 'user' ? index : -1;
+    if (userIndex < 0) {
+      for (var cursor = index - 1; cursor >= 0; cursor -= 1) {
+        if (t.messages[cursor] && t.messages[cursor].role === 'user') { userIndex = cursor; break; }
+      }
     }
-    if (retryMessage.role === 'user') {
-      var q = String(retryMessage.content || '').trim();
-      if (!q) { toast('This message cannot be retried.'); return; }
-      t.messages = t.messages.slice(0, index);
-      upsertThread(t);
-      renderThread(t);
-      var retryInput = document.getElementById('aic-input');
-      if (retryInput) retryInput.value = q;
-      window.aicSend({ preventDefault: function () {} });
-      return;
-    }
+    var retry = message.retry || {};
+    var fallbackPrompt = userIndex >= 0 ? String(t.messages[userIndex].content || '').trim() : '';
+    var q = String(retry.q || retry.prompt || fallbackPrompt || '').trim();
+    if (!q && message.role !== 'user') { toast('This message cannot be retried.'); return; }
 
-    if (!message.retry) { toast('This message cannot be retried.'); return; }
-    t.messages.splice(index, 1);
+    // Preserve image source before truncating the failed turn. The source may
+    // otherwise disappear when the previous generated-image message is removed.
+    var retrySource = retry.sourceImage || _retrySources[retry.sourceKey] || lastImageData(t) || '';
+    var retryKind = retry.kind || 'text';
+    var retryPrompt = retry.prompt || q;
+    var retryUserContent = retry.userContent || q;
+    var retryIsEdit = !!retry.isEdit;
+
+    // Remove the failed user/assistant turn and every later response, then resend
+    // from the exact same conversation prefix. This avoids duplicate user prompts.
+    var truncateAt = userIndex >= 0 ? userIndex : index;
+    t.messages = t.messages.slice(0, truncateAt);
     upsertThread(t);
     renderThread(t);
-    if (message.retry.kind === 'image') {
-      var retrySource = message.retry.sourceImage || _retrySources[message.retry.sourceKey] || lastImageData(t) || '';
+
+    if (retryKind === 'image') {
       setSending(true);
-      requestGeneratedImage(t, message.retry.prompt, message.retry.userContent || message.retry.prompt, retrySource, !!message.retry.isEdit)
+      requestGeneratedImage(t, retryPrompt, retryUserContent, retrySource, retryIsEdit)
         .finally(function () { setSending(false); });
     } else {
-      var retryInputFallback = document.getElementById('aic-input');
-      if (retryInputFallback) retryInputFallback.value = message.retry.q || '';
+      var retryInput = document.getElementById('aic-input');
+      if (retryInput) retryInput.value = q;
       window.aicSend({ preventDefault: function () {} });
     }
   };
