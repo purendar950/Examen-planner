@@ -1771,8 +1771,9 @@ def _ai_chat_model_groups(models):
     """Build dependent provider/model picker data without changing model keys.
 
     OmniRoute is an aggregator, so its ``prefix/model`` IDs become individual
-    provider choices (for example ``OmniRoute — OpenRouter``). The full model
-    ID remains in each opaque key and is what request validation receives.
+    provider choices (for example ``OmniRoute — OpenRouter``). Direct IDs are
+    kept in a dedicated group as well. The full model ID remains in each opaque
+    key and is what request validation receives.
     """
     groups, by_key = [], {}
     for item in models:
@@ -1794,12 +1795,12 @@ def _ai_chat_model_groups(models):
             else:
                 if "/" in model:
                     subprovider, model_label = model.split("/", 1)
+                    route_label = _omniroute_provider_label(subprovider)
                 else:
-                    subprovider = "auto"
-                    model_label = "Auto"
+                    subprovider = "direct"
+                    model_label = model
+                    route_label = "Direct model IDs"
                 group_key = "omniroute:%s" % subprovider
-                route_label = ("Auto (smart routing)" if subprovider == "auto"
-                               else _omniroute_provider_label(subprovider))
                 provider_label = "OmniRoute — %s" % route_label
 
         group = by_key.get(group_key)
@@ -8090,12 +8091,10 @@ _OMNIROUTE_AUTO_FALLBACK = (
     "auto/claude-sonnet", "auto/gemini", "auto/glm", "auto/minimax",
     "auto/mimo", "auto/zai", "auto/llama", "auto/gemma", "auto/best-free",
 )
-# Each aggregator alias appears under two prefixes; drop the twin (keep the more
-# descriptive name). Also drop non-chat (image/video) providers and modifiers.
-_OMNIROUTE_DROP_PREFIXES = {
-    "lma", "pol", "cx", "t3-web", "kc", "kmc", "gweb", "zw", "cf", "zmf",
-    "lc", "mcode", "af", "veoaifree-web", "no-think",
-}
+# Keep every valid provider prefix returned by the live catalog. OmniRoute
+# exposes aliases and provider-specific routes under multiple prefixes; hiding
+# those prefixes made the AI tab show only a partial list. Only known media
+# prefixes are excluded here because they are not text-chat routes.
 _OMNIROUTE_MEDIA_PREFIXES = {"veo-free", "veoaifree-web"}   # video/image → break notes
 _OMNIROUTE_NON_CHAT_ID_MARKERS = (
     "embedding", "/embed", "-embed", "/rerank", "-rerank",
@@ -8440,21 +8439,27 @@ def _omniroute_provider_label(pid):
 
 
 def _omniroute_grouped_candidates(ids=None):
-    """Concrete sub-providers (prefix before the first '/') and their models,
-    excluding `auto/*`, duplicate aliases, media providers and un-prefixed IDs.
-    Ordered by model count desc. Returns [{id, label, models}] (unverified)."""
+    """All non-auto text/chat routes grouped by provider prefix.
+
+    The live catalog is the source of truth. Do not remove provider aliases or
+    prefixes merely because they look redundant: each returned model ID is a
+    selectable route and the user explicitly needs the complete list. Direct
+    IDs without a slash are kept in a separate group.
+    """
     catalog_ids = _omniroute_fetch_model_ids() if ids is None else ids
     groups = {}
     for mid in catalog_ids:
-        if "/" not in mid or mid.startswith("auto/"):
+        if mid.startswith("auto/"):
             continue
-        pid = mid.split("/", 1)[0]
-        if pid in _OMNIROUTE_DROP_PREFIXES or pid in _OMNIROUTE_MEDIA_PREFIXES:
+        pid = mid.split("/", 1)[0] if "/" in mid else "direct"
+        if pid in _OMNIROUTE_MEDIA_PREFIXES:
             continue
         provider_models = groups.setdefault(pid, [])
         if mid not in provider_models:
             provider_models.append(mid)
-    return [{"id": pid, "label": _omniroute_provider_label(pid), "models": groups[pid]}
+    return [{"id": pid,
+             "label": "Direct model IDs" if pid == "direct" else _omniroute_provider_label(pid),
+             "models": groups[pid]}
             for pid in sorted(groups, key=lambda k: (-len(groups[k]), k))]
 
 
@@ -11883,9 +11888,11 @@ def api_ai_chat_status():
     allowed = bool(is_admin or uid in chat_cfg["allowed_users"])
     models, image_models = [], []
     provider_groups, image_provider_groups = [], []
+    catalog_refreshing = False
     if allowed:
         raw_cfg = _load_study_raw_cfg()
         available = _ai_chat_available_models(raw_cfg)
+        catalog_refreshing = bool(globals().get("_omniroute_refresh_running", False))
         available_images = _ai_chat_image_models(raw_cfg)
         models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
                    "label": "%s — %s" % (m["label"], m["model"])}
@@ -11899,6 +11906,7 @@ def api_ai_chat_status():
                     "providerGroups": provider_groups,
                     "imageModels": image_models,
                     "imageProviderGroups": image_provider_groups,
+                    "catalogRefreshing": catalog_refreshing,
                     "imageEnabled": bool(allowed and image_models),
                     "ragEnabled": bool(allowed and _vec_enabled())})
 

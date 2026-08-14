@@ -242,7 +242,8 @@ durable_cfg = {
     "omnirouteCatalog": {
         "chatModels": [
             "openrouter/gpt-5", "nvidia/nemotron", "mistral/large",
-            "pol/flux-schnell", "veo-free/veo-3", "cx/whisper-large",
+            "pol/fast-chat", "pol/flux-schnell", "veo-free/veo-3", "cx/whisper-large",
+            "direct-chat-model",
             "af/text-embedding-3", "openrouter/gpt-5", " ", None,
         ]
     },
@@ -281,7 +282,12 @@ check("every visible canonical key passes backend selection validation",
 check("durable catalog exposes all concrete provider prefixes",
       all(key in groups_by_key for key in
           ("omniroute:openrouter", "omniroute:nvidia", "omniroute:mistral",
-           "omniroute:agentrouter")), [group["key"] for group in groups])
+           "omniroute:agentrouter", "omniroute:pol")), [group["key"] for group in groups])
+check("complete catalog keeps a valid route from a previously hidden prefix",
+      "pol/fast-chat" in cold_models, cold_models)
+check("complete catalog keeps direct model IDs",
+      "direct-chat-model" in cold_models and "omniroute:direct" in groups_by_key,
+      (cold_models, [group["key"] for group in groups]))
 
 # Typed image snapshots retain metadata-only image models whose names cannot be
 # reclassified after restart, while still blocking obvious video/audio/etc.
