@@ -12439,11 +12439,24 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                    "image. Do not claim that no image was generated and do not promise "
                    "to generate it again unless the student explicitly asks for a new "
                    "image.\n" + image_context)
+    project = body.get("project") if isinstance(body.get("project"), dict) else None
+    project_active = bool(project and project.get("title"))
     coding_requested = bool(body.get("coding")) or bool(re.search(
         r"\b(code|coding|debug|bug|fix|refactor|function|class|component|api|endpoint|repository|repo|github|javascript|typescript|python|html|css|sql|test|stack trace|error|diff|patch|implement|build)\b",
         q, re.I))
     if coding_requested:
         fresh_project = str(body.get("editMode") or "").strip().lower() == "new-file" and not body.get("workspace")
+        if project_active:
+            steps = project.get("steps") if isinstance(project.get("steps"), list) else []
+            step_text = ", ".join("%s=%s" % (str(item.get("label") or item.get("id") or "step"), str(item.get("status") or "pending")) for item in steps if isinstance(item, dict))[:1200]
+            file_text = ", ".join(str(item.get("path") or "") for item in (project.get("files") or []) if isinstance(item, dict))[:1200]
+            sysmsg += ("\n\nLARGE PROJECT WORKFLOW STATE (browser-local, not server-persisted):\n"
+                       "Title: %s\nGoal: %s\nCurrent milestone: %s\nStatus: %s\nMilestones: %s\nWorkspace files: %s\n"
+                       "Work on exactly the current milestone. Preserve existing files and avoid unrelated rewrites. "
+                       "If the file tree is empty, create only the minimal scaffold needed for this milestone. "
+                       "Return named FILE artifacts only for files created in this milestone, or a focused unified diff for existing files. "
+                       "End with `NEXT MILESTONE: <one concrete step>` and never claim verification without an actual run or preview result."
+                       % (str(project.get("title") or "Project")[:120], str(project.get("goal") or q)[:1800], str(project.get("currentStep") or "")[:80], str(project.get("status") or "working")[:50], step_text or "not specified", file_text or "none"))
         sysmsg += ("\n\nCODING WORKSPACE MODE: Treat this as an engineering task. First state the "
                    "goal and assumptions briefly. If repository or active file context is present, "
                    "name the relevant file paths and explain the smallest safe change. For an active "

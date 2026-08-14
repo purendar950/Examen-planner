@@ -310,6 +310,31 @@
     .aic-file-artifact{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--border) 54%,transparent);border-radius:9px;background:color-mix(in srgb,var(--surface) 88%,var(--accent) 12%);}
     .aic-file-artifact-main{min-width:0;flex:1;}.aic-file-artifact-path{font:600 .76rem/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.aic-file-artifact-meta{font-size:.68rem;color:var(--muted);margin-top:2px;}
     .aic-file-artifact button{white-space:nowrap;}
+    .aic-project-plan{display:none;width:min(100%,1120px);margin:0 auto .7rem;border:1px solid color-mix(in srgb,var(--border) 82%,transparent);border-radius:14px;background:var(--surface);box-shadow:0 6px 20px rgba(28,24,20,.05);overflow:hidden;}
+    .aic-project-head{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid color-mix(in srgb,var(--border) 62%,transparent);background:color-mix(in srgb,var(--card) 88%,transparent);}
+    .aic-project-title{flex:1;min-width:0;color:var(--text);font-size:.78rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .aic-project-status{padding:3px 7px;border:1px solid color-mix(in srgb,var(--accent) 58%,var(--border));border-radius:999px;color:var(--accent);font-size:.62rem;font-weight:800;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;}
+    .aic-project-goal{margin:0;padding:9px 12px 3px;color:var(--muted);font-size:.72rem;line-height:1.45;}
+    .aic-project-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;padding:9px 12px;}
+    .aic-project-step{min-width:0;padding:7px 8px;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:.65rem;line-height:1.25;}
+    .aic-project-step strong{display:block;margin-bottom:2px;color:inherit;font-size:.62rem;letter-spacing:.05em;text-transform:uppercase;}
+    .aic-project-step.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent);color:var(--text);}
+    .aic-project-step.done{border-color:color-mix(in srgb,var(--accent) 70%,var(--border));background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text);}
+    .aic-project-step.blocked{border-color:rgba(200,75,67,.45);background:rgba(200,75,67,.07);color:#c54b43;}
+    .aic-project-files{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:0 12px 8px;color:var(--muted);font-size:.66rem;}
+    .aic-project-files code{padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:color-mix(in srgb,var(--card) 78%,transparent);color:var(--text);font-size:.64rem;}
+    .aic-project-verification{padding:7px 12px;border-top:1px solid color-mix(in srgb,var(--border) 50%,transparent);color:var(--muted);font-size:.67rem;line-height:1.4;}
+    .aic-project-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid color-mix(in srgb,var(--border) 50%,transparent);}
+    .aic-project-actions button{padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-size:.67rem;cursor:pointer;}
+    .aic-project-actions button:hover{border-color:var(--accent);color:var(--text);background:color-mix(in srgb,var(--accent) 8%,transparent);}
+    .aic-project-progress{display:flex;justify-content:center;padding:8px 0;}
+    .aic-project-progress-card{width:min(100%,620px);padding:14px 16px;border:1px solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:12px;background:var(--surface);}
+    .aic-project-progress-card strong{display:block;color:var(--text);font-size:.78rem;}
+    .aic-project-progress-card p{margin:4px 0 8px;color:var(--muted);font-size:.7rem;line-height:1.45;}
+    .aic-project-progress-steps{display:flex;gap:5px;flex-wrap:wrap;}
+    .aic-project-progress-step{padding:3px 7px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:.61rem;font-weight:800;text-transform:uppercase;letter-spacing:.04em;}
+    .aic-project-progress-step.active{border-color:var(--accent);color:var(--accent);}.aic-project-progress-step.done{border-color:var(--accent);background:var(--accent);color:#04120d;}
+    .aic-project-progress-tail{max-height:68px;overflow:hidden;margin:8px 0 0;padding:7px 8px;border:1px solid var(--border);border-radius:7px;background:rgba(0,0,0,.16);color:var(--muted);font:10px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-all;}
     @media (max-width:900px){.aic-code-workspace.has-preview{display:block;}.aic-code-workspace.has-preview .aic-workspace-preview{border-left:0;border-top:1px solid var(--border);min-height:320px;}.aic-code-workspace.has-preview .aic-workspace-preview iframe{min-height:320px;}}
     .aic-github-file{display:flex;align-items:center;gap:6px;}.aic-github-file button{margin-left:auto;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--muted);font-size:.62rem;cursor:pointer;}.aic-github-file button:hover{border-color:var(--accent);color:var(--text);}
     .aic-form{width:100%;max-width:980px;margin:0 auto;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
@@ -387,6 +412,14 @@
     </div>
     <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>
     <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>
+    <section class="aic-project-plan" id="aic-project-plan" aria-live="polite">
+      <div class="aic-project-head"><span class="aic-project-title" id="aic-project-title">Project workflow</span><span class="aic-project-status" id="aic-project-status">Planning</span></div>
+      <p class="aic-project-goal" id="aic-project-goal"></p>
+      <div class="aic-project-steps" id="aic-project-steps"></div>
+      <div class="aic-project-files" id="aic-project-files"></div>
+      <div class="aic-project-verification" id="aic-project-verification"></div>
+      <div class="aic-project-actions"><button type="button" onclick="aicProjectContinue()">Continue next step</button><button type="button" onclick="aicProjectVerify()">Verify workspace</button><button type="button" onclick="aicProjectReset()">Reset plan</button></div>
+    </section>
     <input type="file" id="aic-code-file-input" class="aic-file-input" accept=".js,.jsx,.ts,.tsx,.py,.html,.css,.json,.md,.yml,.yaml,.sh,.sql,.java,.go,.rs" onchange="aicCodeFileSelected(event)">
     <section class="aic-code-workspace" id="aic-code-workspace" aria-label="Coding workspace">
       <div class="aic-workspace-head" data-workspace-area="head"><span class="aic-workspace-title">File workspace</span><select id="aic-workspace-file" class="aic-workspace-file" onchange="aicWorkspaceFileChanged(this)" aria-label="Active file"></select><span class="aic-workspace-spacer"></span><button type="button" onclick="document.getElementById('aic-code-file-input').click()">Open local file</button><button type="button" onclick="aicWorkspaceAskEdit()">Ask AI to edit</button><button type="button" onclick="aicCloseWorkspace()">×</button></div>
@@ -1132,6 +1165,102 @@
     if (t.workspace.activePath && t.workspace.selectedPaths.indexOf(t.workspace.activePath) === -1) t.workspace.selectedPaths.unshift(t.workspace.activePath);
     return t.workspace;
   }
+  function projectDefaultState() {
+    return { active: false, mode: 'idle', title: '', goal: '', steps: [], currentStep: '', status: 'idle', files: [], lastVerification: null, warning: '', updatedAt: 0 };
+  }
+  function projectState(t) {
+    if (!t) return null;
+    if (!t.project || typeof t.project !== 'object') t.project = projectDefaultState();
+    var p = t.project, defaults = projectDefaultState();
+    Object.keys(defaults).forEach(function (key) { if (p[key] === undefined) p[key] = defaults[key]; });
+    if (!Array.isArray(p.steps)) p.steps = [];
+    if (!Array.isArray(p.files)) p.files = [];
+    return p;
+  }
+  function isLargeProjectRequest(prompt) {
+    var source = String(prompt || '').toLowerCase();
+    var featureWords = (source.match(/\b(feature|screen|page|component|dashboard|auth|login|database|api|backend|frontend|responsive|deploy|admin|workspace|multi file|multiple files|full app|complete app|production|project)\b/g) || []).length;
+    return isCreationRequest(source) && (featureWords >= 2 || source.length >= 180);
+  }
+  function projectTitleFromPrompt(prompt) {
+    var source = String(prompt || '').replace(/\s+/g, ' ').trim();
+    source = source.replace(/^\s*(please\s+)?(create|make|build|generate|write|scaffold|prototype|design|new)\s+/i, '').replace(/\s+(for|with|using)\s+.*$/i, '').trim();
+    if (!source) source = 'New coding project';
+    return source.charAt(0).toUpperCase() + source.slice(1, 72);
+  }
+  function buildProjectSteps(prompt) {
+    var web = /\b(html|css|javascript|typescript|web app|website|page|dashboard|frontend)\b/i.test(String(prompt || ''));
+    return [
+      { id: 'shape', label: 'Shape scope', status: 'active' },
+      { id: 'scaffold', label: web ? 'Create file tree' : 'Create modules', status: 'pending' },
+      { id: 'implement', label: 'Implement core', status: 'pending' },
+      { id: 'verify', label: web ? 'Preview and test' : 'Run and test', status: 'pending' },
+      { id: 'polish', label: 'Polish next change', status: 'pending' }
+    ];
+  }
+  function projectPayload(t) {
+    var p = projectState(t), ws = workspaceState(t);
+    if (!p || !p.active) return null;
+    return { mode: p.mode, title: p.title, goal: p.goal, currentStep: p.currentStep, status: p.status,
+      steps: p.steps.slice(0, 6).map(function (step) { return { id: step.id, label: step.label, status: step.status }; }),
+      files: (ws && ws.files || []).slice(0, 12).map(function (file) { return { path: file.path, language: workspaceLanguage(file.path), dirty: !!file.dirty }; }) };
+  }
+  function beginProject(t, prompt, mode) {
+    var p = projectState(t), q = String(prompt || '').trim(), fresh = mode === 'create';
+    if (fresh || !p.active) {
+      p.active = true; p.mode = fresh ? 'create' : 'edit'; p.title = projectTitleFromPrompt(q); p.goal = q;
+      p.steps = buildProjectSteps(q); p.currentStep = 'scaffold'; p.status = 'working'; p.files = []; p.lastVerification = null; p.warning = '';
+      setProjectStep(p, 'shape', 'done'); setProjectStep(p, 'scaffold', 'active');
+    } else {
+      p.mode = 'edit'; p.currentStep = p.currentStep || 'implement'; p.status = 'working';
+    }
+    p.updatedAt = Date.now();
+    upsertThread(t);
+    renderProjectPlan();
+    return p;
+  }
+  function projectStep(p, id) { return (p && p.steps || []).find(function (step) { return step.id === id; }) || null; }
+  function setProjectStep(p, id, status) { var step = projectStep(p, id); if (step) step.status = status; }
+  function projectStatusLabel(p) {
+    return ({ planning: 'Planning', working: 'In progress', verifying: 'Verifying', 'needs-verification': 'Needs verification', complete: 'Ready', blocked: 'Needs review', idle: 'Idle' })[p && p.status] || 'In progress';
+  }
+  function projectProgressHtml(p, tail) {
+    if (!p || !p.active) return '';
+    var steps = (p.steps || []).map(function (step) { return '<span class="aic-project-progress-step ' + (step.status === 'done' ? 'done' : (step.status === 'active' ? 'active' : '')) + '">' + esc(step.label) + '</span>'; }).join('');
+    return '<section class="aic-project-progress"><div class="aic-project-progress-card"><strong>' + esc(p.title || 'Project workflow') + '</strong><p>' + esc(p.status === 'verifying' ? 'Checking current workspace output before moving to the next milestone.' : 'Building this project in reviewable milestones; generated files will appear in the workspace.') + '</p><div class="aic-project-progress-steps">' + steps + '</div>' + (tail ? '<pre class="aic-project-progress-tail">' + esc(String(tail).slice(-700)) + '</pre>' : '') + '</div></section>';
+  }
+  function renderProjectPlan() {
+    var box = document.getElementById('aic-project-plan'), t = getThread(currentThreadId()), p = projectState(t), ws = workspaceState(t);
+    if (!box || !p || !p.active) { if (box) box.style.display = 'none'; return; }
+    box.style.display = '';
+    var title = document.getElementById('aic-project-title'), status = document.getElementById('aic-project-status'), goal = document.getElementById('aic-project-goal'), steps = document.getElementById('aic-project-steps'), files = document.getElementById('aic-project-files'), verification = document.getElementById('aic-project-verification');
+    if (title) title.textContent = p.title || 'Project workflow';
+    if (status) status.textContent = projectStatusLabel(p);
+    if (goal) goal.textContent = p.goal || 'The AI will work in small, reviewable milestones.';
+    if (steps) steps.innerHTML = (p.steps || []).map(function (step, i) { return '<div class="aic-project-step ' + esc(step.status || 'pending') + '"><strong>' + (i + 1) + ' · ' + esc(step.status || 'pending') + '</strong>' + esc(step.label) + '</div>'; }).join('');
+    if (files) files.innerHTML = '<span>Workspace files:</span>' + ((ws && ws.files || []).length ? (ws.files || []).slice(0, 12).map(function (file) { return '<code>' + esc(file.path) + '</code>'; }).join('') : '<span>none yet — the first milestone will create the file tree.</span>');
+    var check = p.lastVerification;
+    if (verification) verification.textContent = check ? ('Last verification: ' + (check.status || 'unknown') + (check.path ? ' · ' + check.path : '') + (check.detail ? ' · ' + check.detail : '')) : (p.warning || 'Verification is only marked complete from an actual workspace run or live preview.');
+  }
+  window.aicProjectContinue = function () {
+    var t = getThread(currentThreadId()), p = projectState(t), ws = workspaceState(t), input = document.getElementById('aic-input');
+    if (!p || !p.active || !input) return;
+    var files = (ws && ws.files || []).map(function (file) { return file.path; }).slice(0, 10).join(', ') || 'the planned file tree';
+    var label = (projectStep(p, p.currentStep) || {}).label || 'next milestone';
+    input.value = 'Continue the project "' + (p.title || 'project') + '" with the next milestone: ' + label + '. Work only on the smallest necessary change, preserve existing files, and verify the result. Current workspace: ' + files + '.';
+    input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 180) + 'px'; input.focus();
+  };
+  window.aicProjectVerify = function () {
+    var t = getThread(currentThreadId()), p = projectState(t), file = activeWorkspaceFile(t);
+    if (!p || !p.active || !file) { toast('Create or open a workspace file before verifying.', 'error'); return; }
+    p.currentStep = 'verify'; p.status = 'verifying'; setProjectStep(p, 'implement', 'done'); setProjectStep(p, 'verify', 'active'); p.updatedAt = Date.now(); upsertThread(t); renderProjectPlan();
+    window.aicWorkspaceRun();
+  };
+  window.aicProjectReset = function () {
+    var t = getThread(currentThreadId()); if (!t) return;
+    t.project = projectDefaultState(); upsertThread(t); renderProjectPlan(); toast('Project plan reset. Workspace files were preserved.', 'info');
+  };
+
   function workspaceLanguage(path) {
     var ext = String(path || '').split('.').pop().toLowerCase();
     return ({ js: 'javascript', jsx: 'jsx', ts: 'typescript', tsx: 'tsx', py: 'python', html: 'html', css: 'css', json: 'json', md: 'markdown', yml: 'yaml', yaml: 'yaml', sh: 'bash', sql: 'sql', java: 'java', go: 'go', rs: 'rust' })[ext] || 'text';
@@ -1218,6 +1347,7 @@
       if (fix) fix.style.display = 'none';
     }
     refreshWorkspacePreview(t);
+    renderProjectPlan();
   }
   function workspacePatchFiles(t) {
     var ws = workspaceState(t), active = activeWorkspaceFile(t);
@@ -1298,8 +1428,16 @@
       var file = ws.files.find(function (item) { return item.path === path; });
       return { path: path, language: workspaceLanguage(path), size: String(file && file.content || '').length, preview: ['html', 'css'].indexOf(workspaceLanguage(path)) !== -1 };
     });
+    var project = projectState(t);
+    if (project && project.active) {
+      project.files = message.workspaceArtifacts.map(function (item) { return item.path; });
+      project.currentStep = 'verify'; project.status = 'needs-verification';
+      setProjectStep(project, 'shape', 'done'); setProjectStep(project, 'scaffold', 'done'); setProjectStep(project, 'implement', 'done'); setProjectStep(project, 'verify', 'active');
+      project.updatedAt = Date.now();
+    }
     upsertThread(t);
     renderWorkspace();
+    renderProjectPlan();
     return message.workspaceArtifacts;
   }
   window.aicOpenGeneratedFile = function (btn) {
@@ -1508,14 +1646,30 @@
         if (!cur) return;
         var ws = workspaceState(cur);
         ws.lastRun = res.ok ? res.data : { status: 'failed', stderr: res.data.detail || res.data.error || 'Run request failed.' };
+        var project = projectState(cur);
+        if (project && project.active) {
+          project.lastVerification = { status: ws.lastRun.status || (res.ok ? 'passed' : 'failed'), path: file.path, detail: ws.lastRun.detail || ws.lastRun.stderr || ws.lastRun.stdout || '' };
+          project.currentStep = ws.lastRun.status === 'passed' ? 'polish' : 'verify';
+          project.status = ws.lastRun.status === 'passed' ? 'complete' : 'blocked';
+          setProjectStep(project, 'verify', ws.lastRun.status === 'passed' ? 'done' : 'blocked');
+          setProjectStep(project, 'polish', ws.lastRun.status === 'passed' ? 'active' : 'pending');
+          project.updatedAt = Date.now();
+        }
         upsertThread(cur);
         renderWorkspace();
+        renderProjectPlan();
       }).catch(function (e) {
         var cur = getThread(currentThreadId());
         if (!cur) return;
         workspaceState(cur).lastRun = { status: 'failed', stderr: e.message || 'Run request failed.' };
+        var project = projectState(cur);
+        if (project && project.active) {
+          project.lastVerification = { status: 'failed', path: file.path, detail: e.message || 'Run request failed.' };
+          project.currentStep = 'verify'; project.status = 'blocked'; setProjectStep(project, 'verify', 'blocked'); project.updatedAt = Date.now();
+        }
         upsertThread(cur);
         renderWorkspace();
+        renderProjectPlan();
       });
   };
   window.aicWorkspaceFixRun = function () {
@@ -1756,6 +1910,7 @@
     renderWebBtn();
     renderCodingBtn();
     renderWorkspace();
+    renderProjectPlan();
     renderLog();
     renderFilesBar();
     renderGithubPanel();
@@ -1844,12 +1999,15 @@
     // in this thread. Otherwise the backend correctly sees a workspace, enters
     // PATCH-ONLY mode, and refuses to emit the named files needed for creation.
     var creatingProject = isCreationRequest(q);
+    var largeProject = isLargeProjectRequest(q);
     if (creatingProject) resetStaleGeneratedWorkspace(t);
     // For ordinary edits this is equivalent to the legacy workspace: workspaceRequest(t) path.
     var existingWorkspace = workspaceRequest(t);
     var requestedWorkspace = creatingProject ? null : existingWorkspace;
     var workspaceEditIntent = !!existingWorkspace && /\b(improve|change|modify|update|remove|add|replace|refactor|fix|debug|edit|rewrite)\b/i.test(q);
     var codingIntent = creatingProject || isCodingRequest(q) || workspaceEditIntent;
+    var projectWorkflow = creatingProject || largeProject || workspaceEditIntent || !!(projectState(t) && projectState(t).active && /\b(continue|next milestone|finish|complete|verify|test|run|polish)\b/i.test(q));
+    if (projectWorkflow) beginProject(t, q, creatingProject ? 'create' : 'edit');
     var body = {
       q: q, history: contextHistory, threadId: t.id,
       // Coding mode is a preference, not a command to turn “Hi” into a file.
@@ -1861,6 +2019,7 @@
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
       workspace: requestedWorkspace,
       editMode: requestedWorkspace ? 'multi-file-patch' : 'new-file',
+      project: projectPayload(t),
       localMemory: localMemoryContext(t),
       timeoutMs: codingIntent ? 90000 : 30000,
       imageContext: (function () {
@@ -1882,7 +2041,7 @@
       if (row) {
         row.setAttribute('data-raw', acc);
         var bubble = row.querySelector('.aic-msg');
-                  if (bubble) bubble.innerHTML = renderAssistantBody(acc, { creationPrompt: q }) + '<span class="aic-typing" style="display:inline;"> \u258c</span>';
+                  if (bubble) bubble.innerHTML = projectProgressHtml(projectState(t), acc) + renderAssistantBody(acc, { creationPrompt: q, projectWorkflow: projectWorkflow }) + '<span class="aic-typing" style="display:inline;"> \u258c</span>';
 
         log.scrollTop = log.scrollHeight;
       }
@@ -1896,7 +2055,12 @@
         if (last && last.role === 'assistant' && !last.content) last.content = acc;
         else { last = { role: 'assistant', content: acc }; cur.messages.push(last); }
         materializeCreationArtifacts(cur, last, q);
+        var project = projectState(cur);
+        if (project && project.active && projectWorkflow && !(last.workspaceArtifacts && last.workspaceArtifacts.length) && !requestedWorkspace) {
+          project.status = 'blocked'; project.warning = 'No workspace files were returned for this milestone. Ask for a smaller named-file step before continuing.'; setProjectStep(project, 'scaffold', 'blocked'); project.updatedAt = Date.now();
+        }
         upsertThread(cur);
+        renderProjectPlan();
         if (currentThreadId() === t.id) renderLog();
       }
       setSending(false);
@@ -1922,13 +2086,17 @@
             if (last && last.role === 'assistant') last.content = res.data.answer;
             else { last = { role: 'assistant', content: res.data.answer }; cur.messages.push(last); }
             materializeCreationArtifacts(cur, last, q);
+            var project = projectState(cur);
+            if (project && project.active && projectWorkflow && !(last.workspaceArtifacts && last.workspaceArtifacts.length) && !requestedWorkspace) {
+              project.status = 'blocked'; project.warning = 'No workspace files were returned for this milestone. Continue with a smaller, named-file request.'; setProjectStep(project, 'scaffold', 'blocked'); project.updatedAt = Date.now();
+            }
           } else {
             var msg = (res.data && (res.data.detail || res.data.error)) || 'Something went wrong. Try again.';
             if (last && last.role === 'assistant' && !last.content) cur.messages.pop();
             cur.messages.push({ role: 'error', content: '\u26a0\uFE0F ' + msg, retry: { kind: 'text', q: q } });
           }
           upsertThread(cur);
-          if (currentThreadId() === t.id) renderLog();
+          if (currentThreadId() === t.id) { renderProjectPlan(); renderLog(); }
         })
         .catch(function (err) {
           var cur = getThread(t.id);
