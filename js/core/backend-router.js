@@ -17,7 +17,8 @@
     remoteLoaded: false,
     authBound: false,
     activeId: '',
-    health: {}
+    health: {},
+    cooldownUntil: {}
   };
 
   function cleanUrl(url) {
@@ -49,6 +50,7 @@
         state.servers = normalizeServers(saved.servers);
         state.mode = saved.mode === 'manual' ? 'manual' : 'auto';
         state.manualServerId = String(saved.manualServerId || '');
+        state.activeId = String(saved.activeId || '');
       } else {
         var legacy = cleanUrl(localStorage.getItem('turboBackendUrl'));
         if (legacy && legacy !== DEFAULT_SERVERS[0].url) state.servers = normalizeServers([{ id: 'legacy', label: 'Saved server', url: legacy }, DEFAULT_SERVERS[0], DEFAULT_SERVERS[1]]);
@@ -56,11 +58,20 @@
     } catch (e) {}
   }
   function writeLocal() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ servers: state.servers, mode: state.mode, manualServerId: state.manualServerId })); } catch (e) {}
+        try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ servers: state.servers, mode: state.mode, manualServerId: state.manualServerId, activeId: state.activeId }));
+ } catch (e) {}
   }
   function enabledServers() { return state.servers.filter(function (server) { return server.enabled !== false; }); }
+  function serverCooling(server) {
+    return state.mode !== 'manual' && Number(state.cooldownUntil[server.id] || 0) > Date.now();
+  }
   function orderedServers() {
-    var list = enabledServers();
+    var all = enabledServers();
+    var list = all.filter(function (server) { return !serverCooling(server); });
+    // Never leave the app without an attempt path if every server is cooling;
+    // retry the full enabled set once so a recovered backend can be detected.
+    if (!list.length) list = all.slice();
     if (state.mode === 'manual' && state.manualServerId) {
       list.sort(function (a, b) { return a.id === state.manualServerId ? -1 : b.id === state.manualServerId ? 1 : 0; });
     } else if (state.activeId) {
@@ -71,9 +82,20 @@
   function emit() {
     try { window.dispatchEvent(new CustomEvent('preppath:backend-status', { detail: getSnapshot() })); } catch (e) {}
   }
+  function failureCooldownMs(detail) {
+    var text = String(detail || '').toLowerCase();
+    if (/503|502|504|service suspended|failed to fetch|networkerror|network error|timed out|timeout|abort/.test(text)) return 120000;
+    return 20000;
+  }
   function mark(server, ok, detail) {
     state.health[server.id] = { ok: !!ok, detail: detail || '', checkedAt: Date.now() };
-    if (ok) state.activeId = server.id;
+    if (ok) {
+      state.activeId = server.id;
+      delete state.cooldownUntil[server.id];
+      writeLocal();
+    } else {
+      state.cooldownUntil[server.id] = Date.now() + failureCooldownMs(detail);
+    }
     emit();
   }
   function getSnapshot() {
@@ -125,6 +147,7 @@
     var servers = orderedServers();
     if (!servers.length) throw new Error('No backend servers are configured.');
     var lastError = null;
+    var attempts = [];
     for (var i = 0; i < servers.length; i += 1) {
       var server = servers[i];
       var timed = withTimeout(options.signal, options.timeoutMs || 12000);
@@ -138,6 +161,7 @@
           return response;
         }
         lastError = new Error('HTTP ' + response.status + ' from ' + server.label);
+        attempts.push(lastError.message);
         mark(server, false, lastError.message);
       } catch (error) {
         timed.clear();
@@ -146,10 +170,14 @@
         if (error && error.name === 'AbortError') {
           lastError = new Error('Request timed out after ' + (options.timeoutMs || 12000) + ' ms from ' + server.label);
         } else {
-          lastError = error;
+          lastError = new Error((error && error.message ? error.message : 'Network error') + ' from ' + server.label);
         }
+        attempts.push(lastError.message);
         mark(server, false, lastError && lastError.message ? lastError.message : 'Network error');
       }
+    }
+    if (attempts.length > 1) {
+      throw new Error('All backend servers failed: ' + attempts.join(' | ').slice(0, 900));
     }
     throw lastError || new Error('All backend servers failed.');
   }
@@ -191,9 +219,15 @@
     defaults: DEFAULT_SERVERS.slice()
   });
   if (window.addEventListener) {
-    window.addEventListener('preppath:firebase-ready', function () { bindAuth(); loadRemote(); });
+    window.addEventListener('preppath:firebase-ready', function () {
+      bindAuth();
+      Promise.resolve(loadRemote()).then(function () { return probeAll(); }).catch(function () {});
+    });
     bindAuth();
-    setTimeout(function () { bindAuth(); loadRemote(); }, 900);
+    setTimeout(function () {
+      bindAuth();
+      Promise.resolve(loadRemote()).then(function () { return probeAll(); }).catch(function () {});
+    }, 900);
   }
 })();
 

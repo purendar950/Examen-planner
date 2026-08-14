@@ -1094,12 +1094,18 @@
 
     return backendAuthFetch('/api/ai-chat/image', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      // Image diffusion can exceed the normal chat budget, especially after a
+      // Render cold start. Keep this longer than the server's 120s provider
+      // budget so the browser never aborts a valid generation prematurely.
+      timeoutMs: 150000,
       body: JSON.stringify({ prompt: prompt, model: selected.key, sourceImageData: sourceImageData || undefined })
     }).then(function (r) {
       var contentType = (r.headers.get('content-type') || '').toLowerCase();
       if (!r.ok || !contentType.startsWith('image/')) {
         return r.json().catch(function () { return {}; }).then(function (j) {
-          throw new Error((j && (j.detail || j.error)) || (!r.ok ? 'Image generation failed' : 'The image service returned no image data'));
+          var detail = j && (j.detail || j.message || j.error);
+          if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
+          throw new Error(String(detail || (!r.ok ? 'Image generation failed (HTTP ' + r.status + ')' : 'The image service returned no image data')).slice(0, 500));
         });
       }
       return r.blob();
@@ -1125,11 +1131,15 @@
     }).catch(function (e) {
       var cur = getThread(thread.id);
       if (!cur) return;
+      var detail = e && (e.message || e.detail || e.error) ? (e.message || e.detail || e.error) : 'Image generation failed';
+      if (/failed to fetch|networkerror/i.test(String(detail))) {
+        detail = 'Image request could not reach either configured backend. ' + detail;
+      }
       var sourceKey = thread.id + ':' + Date.now();
       if (sourceImageData) _retrySources[sourceKey] = sourceImageData;
       cur.messages.push({
         role: 'error',
-        content: '\u26a0\uFE0F ' + (e.message || 'Image generation failed'),
+        content: '\u26a0\uFE0F ' + String(detail).slice(0, 500),
         retry: { kind: 'image', prompt: prompt, userContent: userContent || prompt, isEdit: !!isEdit, sourceKey: sourceKey }
       });
       upsertThread(cur);
