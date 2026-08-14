@@ -72,6 +72,8 @@ if (_configFilled) {
       }
     });
     _fbReady = true;
+    window.PrepPathFirebase = { db: db, auth: auth };
+    window.dispatchEvent(new CustomEvent('preppath:firebase-ready'));
     console.log('✅ Firebase connected:', FIREBASE_CONFIG.projectId);
   } catch(e) {
     console.error('❌ Firebase init failed:', e.message);

@@ -239,7 +239,9 @@ function resolveTelegramTaskSubjects() {
 
 /* Base URL of the proxy that streams Telegram-hosted images (/tg-photo). */
 function tgProxyBase() {
-  return (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
+  var custom = '';
+  try { custom = localStorage.getItem('turboBackendUrl') || ''; } catch (e) {}
+  return (custom || (window.PrepPathBackend && window.PrepPathBackend.baseUrl()) || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
 }
 
 /* Telegram media is protected by Firebase identity, so <img src> cannot fetch
@@ -254,9 +256,11 @@ function tgHydrateImage(img, fileId) {
     attempts += 1;
     var retryPending = false;
     getFirebaseIdToken().then(function (token) {
-      return fetch(tgProxyBase() + '/tg-photo?file_id=' + encodeURIComponent(fileId), {
-        headers: { Authorization: 'Bearer ' + token }
-      });
+      var photoPath = '/tg-photo?file_id=' + encodeURIComponent(fileId);
+      var requestOptions = { headers: { Authorization: 'Bearer ' + token } };
+      return window.PrepPathBackend && !localStorage.getItem('turboBackendUrl')
+        ? window.PrepPathBackend.fetch(photoPath, requestOptions)
+        : fetch(tgProxyBase() + photoPath, requestOptions);
     }).then(function (response) {
       if (!response.ok) {
         var error = new Error('photo unavailable');

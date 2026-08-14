@@ -269,7 +269,7 @@
     if (videoId) _lastVideoId = videoId;
 
     return getFirebaseIdToken().then(function (token) {
-      return fetch(BACKEND + '/api/tutor/memory-update', {
+      var requestOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
@@ -286,7 +286,10 @@
           },
           video_id: _lastVideoId || videoId || ''
         })
-      });
+      };
+      return window.PrepPathBackend
+        ? window.PrepPathBackend.fetch('/api/tutor/memory-update', requestOptions)
+        : fetch(BACKEND + '/api/tutor/memory-update', requestOptions);
     }).then(function (r) {
       // A 429/502/503 body parses as JSON too, just without the four expected
       // keys, so a failed generation used to look like a successful no-op.

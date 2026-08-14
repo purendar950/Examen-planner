@@ -781,9 +781,10 @@ async function testStudyProvidersLegacy() {
   if (out) out.innerHTML = '<span class="muted">⏳ Pinging providers… (up to ~25s each if one is slow)</span>';
   try {
     var token = await auth.currentUser.getIdToken();
-    var r = await fetch(STUDY_BACKEND + '/api/study/test', {
-      headers: { 'Authorization': 'Bearer ' + token }
-    });
+    var requestOptions = { headers: { 'Authorization': 'Bearer ' + token } };
+    var r = window.PrepPathBackend
+      ? await window.PrepPathBackend.fetch('/api/study/test', requestOptions)
+      : await fetch(STUDY_BACKEND + '/api/study/test', requestOptions);
     var j = await r.json();
     if (j && j.error) { if (out) out.innerHTML = '⚠️ ' + esc(j.detail || j.error); return; }
     var res = (j && j.results) || {};
@@ -939,10 +940,10 @@ async function syncDailyModelCatalogs(button) {
   if (button) { button.disabled = true; button.innerHTML = '<span class="ai-button-spinner"></span> Refreshing'; }
   try {
     var token = await auth.currentUser.getIdToken();
-    var response = await fetch(STUDY_BACKEND + '/api/admin/model-catalogs/sync', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token }
-    });
+    var requestOptions = { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } };
+    var response = window.PrepPathBackend
+      ? await window.PrepPathBackend.fetch('/api/admin/model-catalogs/sync', requestOptions)
+      : await fetch(STUDY_BACKEND + '/api/admin/model-catalogs/sync', requestOptions);
     var payload = await response.json().catch(function () { return {}; });
     await loadAiStudyData();
     var failures = Object.keys(payload.results || {}).filter(function (pid) { return !payload.results[pid].ok; });
@@ -1813,7 +1814,53 @@ function renderSettings() {
     '<div id="turbo-backend-status" class="muted" role="status" tabindex="-1" style="font-size:0.78rem;margin-top:6px;"></div>' +
     '<div class="muted" style="font-size:0.72rem;margin-top:6px;">&#128274; Admin-only Firestore (config/turbo). Backend ko <code>FIREBASE_SERVICE_ACCOUNT</code> env var chahiye (bot wala hi) taaki ye padh sake. Code mein kabhi save nahi hota.</div>' +
     '</div>';
-  return turboCard +
+  var backendSnapshot = window.PrepPathBackend ? window.PrepPathBackend.getConfig() : { servers: [] , mode: 'auto', manualServerId: '' };
+  var backendServers = (CONFIG && CONFIG.turbo && Array.isArray(CONFIG.turbo.backendServers) && CONFIG.turbo.backendServers.length)
+    ? CONFIG.turbo.backendServers
+    : (backendSnapshot.servers || []);
+  var backendMode = (CONFIG && CONFIG.turbo && CONFIG.turbo.backendMode) || backendSnapshot.mode || 'auto';
+  var backendManual = (CONFIG && CONFIG.turbo && CONFIG.turbo.backendManualServerId) || backendSnapshot.manualServerId || '';
+  var backendCard = '<div class="card" style="margin-bottom:1rem;">' +
+    '<h3 style="margin-bottom:0.5rem;">&#127760; Backend Server Routing</h3>' +
+    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Manage Render and other proxy servers used by the app. <strong>Auto</strong> tries the healthiest server and switches after a timeout, network error, 429, or 5xx response. <strong>Manual preference</strong> starts with your selected server but keeps failover available if it fails.</p>' +
+    '<div class="row" style="gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:0.85rem;">' +
+      '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Routing mode' +
+        '<select id="cfg-backend-mode" style="min-width:210px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
+          '<option value="auto"' + (backendMode === 'auto' ? ' selected' : '') + '>Auto failover</option>' +
+          '<option value="manual"' + (backendMode === 'manual' ? ' selected' : '') + '>Manual preference + failover</option>' +
+        '</select>' +
+      '</label>' +
+      '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Preferred server' +
+        '<select id="cfg-backend-manual" style="min-width:250px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
+          '<option value="">Use health/order</option>' +
+          backendServers.map(function(server) { return '<option value="' + esc(server.id) + '"' + (backendManual === server.id ? ' selected' : '') + '>' + esc(server.label || server.id) + '</option>'; }).join('') +
+        '</select>' +
+      '</label>' +
+      '<button class="btn btn-green" onclick="saveBackendRegistry()">&#128190; Save routing</button>' +
+      '<button class="btn btn-gray" onclick="checkBackendServers()">&#128268; Check all</button>' +
+    '</div>' +
+    '<div style="display:grid;gap:8px;">' +
+      backendServers.map(function(server) {
+        var healthServer = (backendSnapshot.servers || []).find(function(item) { return item.id === server.id; });
+        var health = healthServer && healthServer.health;
+        var healthText = health ? (health.ok ? '&#9989; healthy' : '&#10060; ' + esc(health.detail || 'failed')) : '&#8226; not checked';
+        return '<div data-backend-server-row data-server-id="' + esc(server.id) + '" style="display:grid;grid-template-columns:minmax(130px,0.7fr) minmax(240px,1.5fr) auto auto;gap:8px;align-items:center;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2,#f8fafc);">' +
+          '<input data-server-label value="' + esc(server.label || server.id) + '" aria-label="Server label" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;">' +
+          '<input data-server-url value="' + esc(server.url) + '" aria-label="Server URL" inputmode="url" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-family:monospace;font-size:.78rem;">' +
+          '<span class="muted" style="font-size:.74rem;white-space:nowrap;">' + healthText + '</span>' +
+          '<button class="btn btn-gray" onclick="removeBackendServer(\'' + esc(server.id) + '\')" style="padding:5px 9px;">Remove</button>' +
+        '</div>';
+      }).join('') +
+    '</div>' +
+    '<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">' +
+      '<input id="cfg-backend-new-label" placeholder="New server label" style="flex:0 1 180px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
+      '<input id="cfg-backend-new-url" placeholder="https://your-backup.example.com" style="flex:1 1 280px;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:monospace;font-size:.78rem;">' +
+      '<button class="btn btn-blue" onclick="addBackendServer()">＋ Add server</button>' +
+    '</div>' +
+    '<div id="backend-server-status" class="muted" role="status" tabindex="-1" style="font-size:.78rem;margin-top:8px;"></div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:7px;line-height:1.55;">Current backup: <code>https://youtube-turbo-proxy.onrender.com</code>. The app stores the registry in <code>config/turbo</code>; server credentials are never entered here.</div>' +
+    '</div>';
+  return turboCard + backendCard +
     '<div class="card" style="margin-bottom:1rem;">' +
     '<h3 style="margin-bottom:0.5rem;">&#128273; Same-Device Detection (Always Active)</h3>' +
     '<p class="muted" style="line-height:1.65;font-size:0.85rem;margin-bottom:0.5rem;">This is the <strong>default rule</strong> and cannot be disabled:<br>' +
@@ -1987,7 +2034,7 @@ async function saveTurboCookies() {
    localStorage.setItem('turboBackendUrl', '<url>'). */
 async function checkTurboBackend() {
   var el = document.getElementById('turbo-backend-status');
-  var url = (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
+  var url = window.PrepPathBackend ? window.PrepPathBackend.baseUrl() : (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
   var revealResult = function() {
     if (!el) return;
     el.focus({ preventScroll: true });
@@ -1995,11 +2042,14 @@ async function checkTurboBackend() {
   };
   if (el) el.textContent = '⏳ Checking ' + url + '/health …';
   try {
-    var r = await fetch(url + '/health');
+    var r = window.PrepPathBackend
+      ? await window.PrepPathBackend.fetch('/health', { timeoutMs: 12000 })
+      : await fetch(url + '/health');
+    url = window.PrepPathBackend ? window.PrepPathBackend.baseUrl() : url;
     var d = await r.json();
     if (el) el.innerHTML = (d.pot_provider ? '🟢' : '🟡') +
       ' Backend online — cookies: <b>' + (d.cookies ? 'yes' : 'no') + '</b>' +
-      ' (source: ' + esc(d.cookie_source || '?') + '), PO-token: ' + (d.pot_provider ? 'yes' : 'no') + '.';
+      ' (source: ' + esc(d.cookie_source || '?') + '), PO-token: ' + (d.pot_provider ? 'yes' : 'no') + ' · server: <code>' + esc(url) + '</code>.';
     revealResult();
   } catch(e) {
     if (el) el.innerHTML = '🔴 Backend not reachable (' + esc(e.message) + '). Free tier wake ho raha ho to ~40s baad retry karo.';
@@ -2476,3 +2526,92 @@ async function toggleDnsGlobal(checked) {
     showToast('Toggle failed: ' + e.message, 'error');
   }
 }
+
+/* ── Backend server registry ── */
+function backendRowsFromForm() {
+  return Array.from(document.querySelectorAll('[data-backend-server-row]')).map(function(row, index) {
+    var id = row.getAttribute('data-server-id') || ('server-' + (index + 1));
+    var labelInput = row.querySelector('[data-server-label]');
+    var urlInput = row.querySelector('[data-server-url]');
+    return { id: id, label: (labelInput ? labelInput.value : id).trim() || id, url: (urlInput ? urlInput.value : '').trim().replace(/\/+$/, ''), enabled: true };
+  }).filter(function(server) { return /^https?:\/\//i.test(server.url); });
+}
+function backendConfigInMemory(servers, mode, manualServerId) {
+  CONFIG.turbo = Object.assign({}, CONFIG.turbo || {}, {
+    backendServers: servers,
+    backendMode: mode === 'manual' ? 'manual' : 'auto',
+    backendManualServerId: manualServerId || ''
+  });
+  if (window.PrepPathBackend) window.PrepPathBackend.configure({ servers: servers, mode: mode, manualServerId: manualServerId }, true);
+}
+async function saveBackendRegistry() {
+  var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
+  var manualServerId = (document.getElementById('cfg-backend-manual') || {}).value || '';
+  var servers = backendRowsFromForm();
+  if (!servers.length) { showToast('Add at least one valid HTTPS server URL.', 'error'); return; }
+  if (mode === 'manual' && manualServerId && !servers.some(function(server) { return server.id === manualServerId; })) {
+    showToast('Choose a valid preferred server.', 'error'); return;
+  }
+  backendConfigInMemory(servers, mode, manualServerId);
+  try {
+    await db.collection('config').doc('turbo').set({
+      backendServers: servers,
+      backendMode: mode,
+      backendManualServerId: manualServerId,
+      backendUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: auth.currentUser ? (auth.currentUser.email || auth.currentUser.uid) : ''
+    }, { merge: true });
+    var status = document.getElementById('backend-server-status');
+    if (status) status.textContent = 'Saved. New requests use ' + (mode === 'manual' ? 'the selected preference with failover.' : 'automatic health-aware failover.');
+    showToast('Backend server routing saved.');
+    render();
+  } catch (e) {
+    showToast('Could not save server routing: ' + (e.message || e), 'error');
+  }
+}
+function addBackendServer() {
+  var labelEl = document.getElementById('cfg-backend-new-label');
+  var urlEl = document.getElementById('cfg-backend-new-url');
+  var url = (urlEl ? urlEl.value : '').trim().replace(/\/+$/, '');
+  var label = (labelEl ? labelEl.value : '').trim() || 'Backup server';
+  if (!/^https?:\/\//i.test(url)) { showToast('Enter a complete HTTPS server URL.', 'error'); return; }
+  var servers = backendRowsFromForm();
+  if (servers.some(function(server) { return server.url === url; })) { showToast('That server is already listed.', 'error'); return; }
+  var baseId = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'server';
+  var id = baseId, n = 2;
+  while (servers.some(function(server) { return server.id === id; })) id = baseId + '-' + n++;
+  servers.push({ id: id, label: label, url: url, enabled: true });
+  var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
+  var manual = (document.getElementById('cfg-backend-manual') || {}).value || '';
+  backendConfigInMemory(servers, mode, manual);
+  showToast('Server added locally. Click Save routing to publish it.');
+  render();
+}
+function removeBackendServer(id) {
+  var servers = backendRowsFromForm().filter(function(server) { return server.id !== id; });
+  if (!servers.length) { showToast('At least one server must remain.', 'error'); return; }
+  var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
+  var manual = (document.getElementById('cfg-backend-manual') || {}).value || '';
+  if (manual === id) manual = '';
+  backendConfigInMemory(servers, mode, manual);
+  showToast('Server removed locally. Click Save routing to publish the change.');
+  render();
+}
+async function checkBackendServers() {
+  var status = document.getElementById('backend-server-status');
+  if (status) status.textContent = 'Checking server health…';
+  try {
+    var results = window.PrepPathBackend ? await window.PrepPathBackend.probeAll() : [];
+    var good = results.filter(function(result) { return result.ok; }).length;
+    if (status) status.textContent = good + ' of ' + results.length + ' server(s) healthy. Automatic failover will avoid failed servers.';
+    render();
+  } catch (e) {
+    if (status) status.textContent = 'Health check failed: ' + (e.message || e);
+    showToast('Health check failed.', 'error');
+  }
+}
+window.addEventListener('preppath:backend-status', function(event) {
+  var active = event.detail && event.detail.activeId;
+  var status = document.getElementById('backend-server-status');
+  if (status && active) status.textContent = 'Active server: ' + active;
+});

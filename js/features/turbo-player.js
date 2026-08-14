@@ -470,7 +470,10 @@
     emitTurboState();
     var timer = setTimeout(function () { if (seq === turboLoadSeq) ctrl.abort(); }, 95000);
 
-    fetch(TURBO_BACKEND_URL + '/api/info?id=' + encodeURIComponent(id), { signal: ctrl.signal })
+    var infoPath = '/api/info?id=' + encodeURIComponent(id);
+    (window.PrepPathBackend
+      ? window.PrepPathBackend.fetch(infoPath, { signal: ctrl.signal, timeoutMs: 95000 })
+      : fetch(TURBO_BACKEND_URL + infoPath, { signal: ctrl.signal }))
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         clearTimeout(timer);
@@ -481,7 +484,8 @@
         turboVidTitle = (res.d && res.d.title) || turboVidTitle;
         var f = res.d.formats[0];              // highest single-file quality
         var current = (typeof ytSpeedCurrent !== 'undefined') ? ytSpeedCurrent : 1;
-        var streamUrl = TURBO_BACKEND_URL + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
+        var streamBase = window.PrepPathBackend ? window.PrepPathBackend.baseUrl() : TURBO_BACKEND_URL;
+        var streamUrl = streamBase + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
         // Each asynchronous load owns a fresh media element. Event closures now
         // carry immutable seq/id/source identity, so an old queued media event
         // cannot observe mutable state from—and corrupt—a newer request.
@@ -678,11 +682,15 @@
     if (typeof showToast === 'function') showToast('📤 Telegram par bhej rahe hain…', 'info');
 
     getFirebaseIdToken().then(function (token) {
-      return fetch(TELEGRAM_BOT_URL + '/send-photo', {
+      var requestOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ imageBase64: base64, caption: caption })
-      });
+      };
+      var hasCustomRelay = !!localStorage.getItem('telegramBotUrl');
+      return window.PrepPathBackend && !hasCustomRelay
+        ? window.PrepPathBackend.fetch('/send-photo', requestOptions)
+        : fetch(TELEGRAM_BOT_URL + '/send-photo', requestOptions);
     })
       .then(function (r) { return r.json().catch(function () { return { ok: r.ok }; }); })
       .then(function (res) {

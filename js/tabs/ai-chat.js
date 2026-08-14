@@ -422,7 +422,10 @@
     options = options || {};
     return getFirebaseIdToken().then(function (token) {
       var headers = Object.assign({}, options.headers || {}, { Authorization: 'Bearer ' + token });
-      return fetch(BACKEND + path, Object.assign({}, options, { headers: headers }));
+      var requestOptions = Object.assign({}, options, { headers: headers });
+      return window.PrepPathBackend
+        ? window.PrepPathBackend.fetch(path, requestOptions)
+        : fetch(BACKEND + path, requestOptions);
     });
   }
 
@@ -1791,11 +1794,14 @@
     }
 
     getFirebaseIdToken().then(function (token) {
-      return fetch(BACKEND + '/api/ai-chat/stream', {
+      var requestOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(body)
-      });
+      };
+      return window.PrepPathBackend
+        ? window.PrepPathBackend.fetch('/api/ai-chat/stream', requestOptions)
+        : fetch(BACKEND + '/api/ai-chat/stream', requestOptions);
     }).then(function (r) {
       if (!r.ok || !r.body || !window.TextDecoder) return Promise.reject(new Error('no-stream'));
       var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';

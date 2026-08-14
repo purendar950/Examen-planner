@@ -1645,7 +1645,10 @@
     options = options || {};
     return getFirebaseIdToken().then(function (token) {
       var headers = Object.assign({}, options.headers || {}, { Authorization: 'Bearer ' + token });
-      return fetch(BACKEND + path, Object.assign({}, options, { headers: headers }));
+      var requestOptions = Object.assign({}, options, { headers: headers });
+      return window.PrepPathBackend
+        ? window.PrepPathBackend.fetch(path, requestOptions)
+        : fetch(BACKEND + path, requestOptions);
     });
   }
   function apiGet(path, signal) {

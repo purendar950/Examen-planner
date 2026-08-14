@@ -4,6 +4,7 @@
 const FIREBASE_CONFIG = window.PREPPATH_FIREBASE_CONFIG || {};
 firebase.initializeApp(FIREBASE_CONFIG);
 const db = firebase.firestore(), auth = firebase.auth();
+window.PrepPathAdminFirebase = { db: db, auth: auth };
 
 let USERS = [], PLANS = [], PAYMENTS = [], REQUESTS = [], COUPONS = [], REDEMPTIONS = [], TAB = 'pending', PAY_FILTER = 'all', PAY_VIEW = 'list'; // 'list' | 'reconcile'
 let ADMIN_READY = false;
