@@ -2326,7 +2326,12 @@ def _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_r
         b64 = first.get("b64_json") or first.get("b64") or first.get("image_base64")
         if b64:
             try:
-                return base64.b64decode(b64), "image/png"
+                b64 = str(b64)
+                mime = "image/png"
+                if b64.startswith("data:") and "," in b64:
+                    header, b64 = b64.split(",", 1)
+                    mime = header[5:].split(";", 1)[0] or mime
+                return base64.b64decode(b64), mime
             except Exception:  # noqa: BLE001
                 return None, "Image provider returned malformed image data."
         url = first.get("url")
@@ -2385,29 +2390,49 @@ def _generate_image_gemini(keys, model_id, prompt, aspect_ratio=None):
         if not image_b64:
             return None, "Gemini did not return an image for this prompt — try rephrasing it."
         try:
-            return base64.b64decode(image_b64), (mime or "image/png")
+            image_b64 = str(image_b64)
+            image_mime = mime or "image/png"
+            if image_b64.startswith("data:") and "," in image_b64:
+                header, image_b64 = image_b64.split(",", 1)
+                image_mime = header[5:].split(";", 1)[0] or image_mime
+            return base64.b64decode(image_b64), image_mime
         except Exception:  # noqa: BLE001
             return None, "Gemini returned malformed image data."
     return None, last_err
 
 
 def _extract_gemini_image(payload):
-    """Pulls the first {type: image} content block's (data, mime_type) out of
-    an Interactions API response. Structure per Google's docs:
-    payload['output_image'] is the convenience accessor server SDKs expose;
-    the REST response instead nests it under steps -> model_output -> content."""
+    """Extract image bytes from Gemini Interactions responses.
+
+    ``output_image`` is the SDK convenience field. Raw REST responses normally
+    place image blocks in ``steps[].content``, but compatible gateways may return
+    an output/data array or a URI instead. Keep the parser tolerant so a valid
+    generated image is not discarded merely because the upstream wraps it.
+    """
     if not isinstance(payload, dict):
         return None, None
-    out_img = payload.get("output_image")
-    if isinstance(out_img, dict) and out_img.get("data"):
-        return out_img["data"], out_img.get("mime_type")
-    for step in payload.get("steps") or []:
-        if not isinstance(step, dict) or step.get("type") != "model_output":
-            continue
-        for block in step.get("content") or []:
-            if isinstance(block, dict) and block.get("type") == "image" and block.get("data"):
-                return block["data"], block.get("mime_type")
-    return None, None
+
+    def visit(value):
+        if isinstance(value, dict):
+            kind = str(value.get("type") or "").lower()
+            data = value.get("data") or value.get("b64_json") or value.get("b64") or value.get("image_base64")
+            mime = value.get("mime_type") or value.get("mimeType") or value.get("content_type")
+            is_encoded = isinstance(data, (str, bytes, bytearray))
+            if data and is_encoded and (kind in ("image", "image_url", "output_image", "") or "image" in kind):
+                return data, mime
+            for key in ("output_image", "output", "steps", "content", "parts", "data"):
+                if key in value:
+                    found = visit(value[key])
+                    if found[0]:
+                        return found
+        elif isinstance(value, list):
+            for item in value:
+                found = visit(item)
+                if found[0]:
+                    return found
+        return None, None
+
+    return visit(payload)
 
 
 _ai_calls = []                   # (ts, est_tokens) within the last 60s
@@ -12289,12 +12314,9 @@ def api_ai_chat_delete_file(file_id):
 
 @app.route("/api/ai-chat/image", methods=["POST"])
 def api_ai_chat_image():
-    """Generate an image from a text prompt using an automatically-selected
-    (or explicitly picked, if the caller sent more than one option) configured
-    Gemini image model — no third-party service, no separate admin toggle.
-    Unavailable (503) when the admin hasn't configured a Gemini API key with
-    an image-capable model. Returns the image bytes directly (not a JSON data
-    URL) so the browser can just <img src> the response."""
+    """Generate an image through a configured Google or OmniRoute image model.
+    Returns validated image bytes directly so the browser can render the result
+    without exposing provider credentials or upstream URLs."""
     user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
     if err:
         return jsonify(err[0]), err[1]
@@ -12302,7 +12324,7 @@ def api_ai_chat_image():
     image_models = _ai_chat_image_models(raw_cfg)
     if not image_models:
         return jsonify({"error": "image_not_configured",
-                        "detail": "No image-capable Gemini model is configured. Ask an admin to add one in the AI Study panel."}), 503
+                        "detail": "No image-capable provider/model is configured. Ask an admin to add one in the AI Study panel."}), 503
     body = request.get_json(silent=True) or {}
     prompt = str(body.get("prompt") or "").strip()
     if not prompt:
