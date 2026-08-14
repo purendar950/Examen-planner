@@ -44,6 +44,9 @@
   var _catalogRefreshTimer = null;
   var _curThreadId = null;
   var _filePollTimer = null;
+  var _githubAuth = null;
+  var _githubPrDraft = null;
+  var _githubPopup = null;
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -195,6 +198,17 @@
     '.aic-github-status.is-error{color:#e74c3c;}' +
     '.aic-github-context{display:flex;align-items:center;gap:7px;padding:0.45rem 0.85rem;border-bottom:1px solid var(--border);font-size:0.7rem;color:var(--muted);}' +
     '.aic-github-context strong{color:var(--text);}' +
+    '.aic-github-auth{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:0.72rem;color:var(--muted);}' +
+    '.aic-github-auth strong{color:var(--text);}' +
+    '.aic-github-pr{border:1px solid var(--border);border-radius:9px;padding:8px;background:var(--card);display:flex;flex-direction:column;gap:7px;}' +
+    '.aic-github-pr-title{font-size:0.76rem;color:var(--text);font-weight:700;}' +
+    '.aic-github-pr-copy{font-size:0.7rem;color:var(--muted);line-height:1.4;}' +
+    '.aic-github-pr-files{display:flex;flex-direction:column;gap:4px;max-height:190px;overflow:auto;}' +
+    '.aic-github-pr-file{border:1px solid var(--border);border-radius:6px;padding:5px 7px;}' +
+    '.aic-github-pr-file summary{cursor:pointer;font-size:0.72rem;color:var(--text);}' +
+    '.aic-github-pr-file pre{white-space:pre-wrap;max-height:180px;overflow:auto;font-size:0.68rem;color:var(--muted);margin:6px 0 0;}' +
+    '.aic-github-pr-fields{display:flex;gap:7px;flex-wrap:wrap;}' +
+    '.aic-github-pr-fields input{flex:1 1 180px;min-width:140px;padding:7px 9px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:0.75rem;}' +
     '@media (max-width: 720px){.aic-side{width:170px;flex:0 0 170px;}.aic-select{max-width:110px;}.aic-github-input{min-width:130px;}}';
   document.head.appendChild(st);
 
@@ -224,7 +238,8 @@
     '      <textarea id="aic-persona-input" placeholder="e.g. Explain like I'+"'"+'m preparing for SSC CGL, keep answers short and in Hinglish."></textarea>',
     '    </div>',
     '    <div class="aic-github-box" id="aic-github-box" style="display:none;">',
-    '      <div class="aic-github-label"><span>GitHub repository context <strong>· public, read-only</strong></span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseGithubBox()">✕ Close</button></div>',
+    '      <div class="aic-github-label"><span>GitHub repository context <strong>· connect to review and create PRs</strong></span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseGithubBox()">✕ Close</button></div>',
+    '      <div class="aic-github-auth" id="aic-github-auth"><span>Checking GitHub connection…</span></div>',
     '      <div class="aic-github-row">',
     '        <input class="aic-github-input" id="aic-github-repo-input" placeholder="owner/repository or GitHub URL">',
     '        <input class="aic-github-input" id="aic-github-ref-input" placeholder="Branch (optional)" style="flex:0 1 150px;">',
@@ -232,7 +247,8 @@
     '      </div>',
     '      <div class="aic-github-status" id="aic-github-status">Choose up to 8 code files. They are fetched only when you send a message.</div>',
     '      <div class="aic-github-files" id="aic-github-files"></div>',
-    '      <div class="aic-github-row"><button class="aic-icon-btn" type="button" onclick="aicClearGithub()">Clear context</button></div>',
+    '      <div class="aic-github-row"><button class="aic-icon-btn" type="button" onclick="aicClearGithub()">Clear context</button><button class="aic-icon-btn" type="button" onclick="aicPrepareGithubPr()">Prepare PR from latest request</button></div>',
+    '      <div id="aic-github-pr-preview"></div>',
     '    </div>',
     '    <div class="aic-image-box" id="aic-image-box" style="display:none;">',
     '      <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseImageBox()">\u2715 Close</button></div>',
@@ -824,6 +840,143 @@
     el.classList.toggle('is-error', !!isError);
   }
 
+  function renderGithubAuth() {
+    var el = document.getElementById('aic-github-auth');
+    if (!el) return;
+    if (_githubAuth && _githubAuth.connected) {
+      el.innerHTML = '<span>Connected as <strong>@' + esc(_githubAuth.login || 'GitHub user') + '</strong>. You can read private repositories allowed by your account.</span>' +
+        '<button class="aic-icon-btn" type="button" onclick="aicGithubDisconnect()">Disconnect</button>';
+    } else {
+      el.innerHTML = '<span>Not connected. Connect GitHub to let AI prepare branches and pull requests.</span>' +
+        '<button class="aic-icon-btn" type="button" onclick="aicConnectGithub()">Connect GitHub</button>';
+    }
+  }
+
+  function refreshGithubAuth() {
+    return backendAuthFetch('/api/ai-chat/github/connection')
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        _githubAuth = res.ok ? res.data : { connected: false };
+        renderGithubAuth();
+        return _githubAuth;
+      })
+      .catch(function () {
+        _githubAuth = { connected: false };
+        renderGithubAuth();
+        return _githubAuth;
+      });
+  }
+
+  window.aicConnectGithub = function () {
+    var popup = window.open('about:blank', 'studyplanner-github-connect', 'popup,width=620,height=760');
+    _githubPopup = popup;
+    githubStatus('Starting secure GitHub authorization…', false);
+    backendAuthFetch('/api/ai-chat/github/oauth/start', { method: 'POST' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        if (!res.ok || !res.data.authUrl) throw new Error(res.data.detail || 'GitHub OAuth is not configured.');
+        if (popup) popup.location.href = res.data.authUrl;
+        else window.location.href = res.data.authUrl;
+      })
+      .catch(function (e) {
+        if (popup) popup.close();
+        githubStatus(e.message || 'Could not start GitHub authorization.', true);
+      });
+  };
+
+  window.aicGithubDisconnect = function () {
+    if (!window.confirm('Disconnect GitHub from this StudyPlanner account?')) return;
+    backendAuthFetch('/api/ai-chat/github/connection', { method: 'DELETE' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.detail || 'Could not disconnect GitHub.');
+        _githubAuth = { connected: false };
+        renderGithubAuth();
+        githubStatus('GitHub disconnected. Public repositories remain available for read-only context.', false);
+      })
+      .catch(function (e) { githubStatus(e.message || 'Could not disconnect GitHub.', true); });
+  };
+
+  window.addEventListener('message', function (event) {
+    var data = event && event.data;
+    if (!data || data.type !== 'studyplanner-github-auth' || (_githubPopup && event.source !== _githubPopup)) return;
+    var allowed = '';
+    try { allowed = new URL(BACKEND).origin; } catch (_) {}
+    if (allowed && event.origin !== allowed) return;
+    _githubPopup = null;
+    if (data.ok) {
+      githubStatus(data.detail || 'GitHub connected.', false);
+      refreshGithubAuth();
+    } else githubStatus(data.detail || 'GitHub authorization failed.', true);
+  });
+
+  function renderGithubPrPreview() {
+    var el = document.getElementById('aic-github-pr-preview');
+    if (!el) return;
+    var draft = _githubPrDraft;
+    if (!draft || draft.threadId !== currentThreadId()) { el.innerHTML = ''; return; }
+    var data = draft.data || {};
+    var files = (data.files || []).map(function (row) {
+      return '<details class="aic-github-pr-file"><summary>' + esc(row.path) + '</summary><pre>' + esc(row.content || '') + '</pre></details>';
+    }).join('');
+    el.innerHTML = '<div class="aic-github-pr">' +
+      '<div class="aic-github-pr-title">Review AI-proposed changes before creating the PR</div>' +
+      '<div class="aic-github-pr-copy">The AI will write only these selected files to a new branch. Nothing is committed until you press Create pull request.</div>' +
+      '<div class="aic-github-pr-files">' + files + '</div>' +
+      '<div class="aic-github-pr-fields"><input id="aic-github-pr-title" value="' + escAttr(data.title || '') + '" placeholder="Pull request title"><input id="aic-github-pr-branch" value="" placeholder="New branch, e.g. ai/fix-chat"></div>' +
+      '<textarea id="aic-github-pr-body" class="aic-github-input" rows="3" placeholder="Pull request description">' + esc(data.body || '') + '</textarea>' +
+      '<div class="aic-github-row"><button class="aic-icon-btn" type="button" onclick="aicDiscardGithubPr()">Discard draft</button><button class="aic-send" type="button" onclick="aicCreateGithubPr()">Create pull request</button></div>' +
+      '</div>';
+  }
+
+  window.aicPrepareGithubPr = function () {
+    var t = getThread(currentThreadId());
+    var state = githubState(t);
+    var last = t && t.messages ? t.messages.slice().reverse().find(function (m) { return m.role === 'user' && m.content; }) : null;
+    if (!_githubAuth || !_githubAuth.connected) { githubStatus('Connect GitHub before preparing a pull request.', true); return; }
+    if (!state || !state.files.length) { githubStatus('Load a repository and select files before preparing a pull request.', true); return; }
+    if (!last) { githubStatus('Ask the AI what code change you want first.', true); return; }
+    githubStatus('AI is preparing a reviewable change plan…', false);
+    var modelSel = document.getElementById('aic-model-select');
+    backendAuthFetch('/api/ai-chat/github/prepare', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: last.content, model: (modelSel && modelSel.value) || t.model || '',
+        github: { repo: state.repo, ref: state.ref, files: state.files.slice(0, 8) } })
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.detail || 'Could not prepare the code change.');
+        _githubPrDraft = { threadId: t.id, data: res.data };
+        githubStatus('Review the proposed diff below. The repository has not been changed.', false);
+        renderGithubPrPreview();
+      }).catch(function (e) { githubStatus(e.message || 'Could not prepare the code change.', true); });
+  };
+
+  window.aicDiscardGithubPr = function () {
+    _githubPrDraft = null;
+    renderGithubPrPreview();
+    githubStatus('PR draft discarded. The repository has not been changed.', false);
+  };
+
+  window.aicCreateGithubPr = function () {
+    var draft = _githubPrDraft;
+    if (!draft || draft.threadId !== currentThreadId()) return;
+    var title = (document.getElementById('aic-github-pr-title') || {}).value || '';
+    var branch = (document.getElementById('aic-github-pr-branch') || {}).value || '';
+    var body = (document.getElementById('aic-github-pr-body') || {}).value || '';
+    if (!branch.trim()) { githubStatus('Enter a new branch name before creating the PR.', true); return; }
+    githubStatus('Creating the branch, commit, and pull request…', false);
+    backendAuthFetch('/api/ai-chat/github/pr', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ draftId: draft.data.draftId, confirm: true, title: title, branch: branch, body: body })
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.detail || 'Could not create the pull request.');
+        _githubPrDraft = null;
+        renderGithubPrPreview();
+        githubStatus('Pull request created: ' + (res.data.url || 'open it on GitHub'), false);
+      }).catch(function (e) { githubStatus(e.message || 'Could not create the pull request.', true); });
+  };
+
   function renderGithubPanel() {
     var t = getThread(currentThreadId());
     var state = githubState(t);
@@ -836,6 +989,7 @@
     if (!state) {
       filesEl.innerHTML = '';
       githubStatus('Choose up to 8 code files. They are fetched only when you send a message.', false);
+      renderGithubPrPreview();
       return;
     }
     filesEl.innerHTML = (state.catalog || []).map(function (file) {
@@ -846,6 +1000,7 @@
     }).join('');
     githubStatus(state.files.length + ' file' + (state.files.length === 1 ? '' : 's') +
       ' selected from ' + state.repo + '. The AI will cite these paths when discussing code.', false);
+    renderGithubPrPreview();
   }
 
   function renderGithubContext() {
@@ -867,7 +1022,7 @@
     if (!box) return;
     var open = box.style.display !== 'none';
     box.style.display = open ? 'none' : '';
-    if (!open) renderGithubPanel();
+    if (!open) { renderGithubPanel(); refreshGithubAuth(); }
   };
   window.aicCloseGithubBox = function () {
     var box = document.getElementById('aic-github-box');
@@ -959,6 +1114,8 @@
     renderFilesBar();
     renderGithubPanel();
     renderGithubContext();
+    renderGithubAuth();
+    renderGithubPrPreview();
     var box = document.getElementById('aic-persona-box');
     if (box) box.style.display = 'none';
     var imgBox = document.getElementById('aic-image-box');
