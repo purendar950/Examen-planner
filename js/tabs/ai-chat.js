@@ -262,6 +262,7 @@
     .aic-code-status{padding:7px 10px;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);color:var(--muted);font-size:.68rem;}
     .aic-msg img.aic-gen-image{display:block;max-width:min(100%,620px);margin-top:5px;border:1px solid color-mix(in srgb,var(--border) 75%,transparent);border-radius:14px;box-shadow:0 8px 20px rgba(28,24,20,.1);}
     .aic-image-caption{margin-bottom:4px;color:var(--muted);font-size:.75rem;line-height:1.35;}
+    .aic-image-model{display:inline-block;margin-left:3px;color:var(--text);font-weight:650;}
     .aic-image-actions{display:flex;gap:6px;margin-top:7px;}
     .aic-image-actions button{padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-size:.68rem;cursor:pointer;}
     .aic-image-actions button:hover{border-color:var(--accent);color:var(--text);}
@@ -1100,6 +1101,11 @@
       timeoutMs: 150000,
       body: JSON.stringify({ prompt: prompt, model: selected.key, sourceImageData: sourceImageData || undefined })
     }).then(function (r) {
+      // The backend may fall back to a different provider/model. Capture the
+      // response metadata before consuming the image body so the result card and
+      // local conversation history identify what actually generated the image.
+      var actualProvider = r.headers.get('x-image-provider') || '';
+      var actualModel = r.headers.get('x-image-model') || '';
       var contentType = (r.headers.get('content-type') || '').toLowerCase();
       if (!r.ok || !contentType.startsWith('image/')) {
         return r.json().catch(function () { return {}; }).then(function (j) {
@@ -1108,23 +1114,46 @@
           throw new Error(String(detail || (!r.ok ? 'Image generation failed (HTTP ' + r.status + ')' : 'The image service returned no image data')).slice(0, 500));
         });
       }
-      return r.blob();
-    }).then(function (blob) {
+      return r.blob().then(function (blob) {
+        return { blob: blob, provider: actualProvider, model: actualModel };
+      });
+    }).then(function (result) {
+      var blob = result && result.blob;
       if (!blob || !String(blob.type || '').toLowerCase().startsWith('image/')) throw new Error('The image service returned invalid image data');
       return new Promise(function (resolve, reject) {
         var reader = new FileReader();
-        reader.onload = function () { resolve(String(reader.result || '')); };
+        reader.onload = function () {
+          resolve({ imageData: String(reader.result || ''), provider: result.provider || '', model: result.model || '' });
+        };
         reader.onerror = function () { reject(new Error('Could not save the generated image')); };
         reader.readAsDataURL(blob);
       });
-    }).then(function (imageData) {
+    }).then(function (result) {
       var cur = getThread(thread.id);
       if (!cur) return;
+      var actualProviderLabel = '';
+      if (result.provider) {
+        var imageGroups = catalogGroups('imageProviderGroups', 'imageModels');
+        for (var gi = 0; gi < imageGroups.length; gi += 1) {
+          var groupProvider = imageGroups[gi].provider || imageGroups[gi].key;
+          if (groupProvider === result.provider) {
+            actualProviderLabel = result.provider === 'omniroute' ? 'OmniRoute' : imageGroups[gi].label;
+            break;
+          }
+        }
+        if (!actualProviderLabel) actualProviderLabel = result.provider;
+      }
+      var actualModelLabel = actualProviderLabel && result.model
+        ? actualProviderLabel + ' / ' + result.model
+        : (selected.label || result.model || '');
       cur.messages.push({
         role: 'assistant',
         content: (isEdit ? 'Edited image based on: ' : 'Generated image based on: ') + prompt,
-        imageData: imageData,
-        imageEdit: !!isEdit
+        imageData: result.imageData,
+        imageEdit: !!isEdit,
+        imageProvider: result.provider,
+        imageModel: result.model,
+        imageModelLabel: actualModelLabel
       });
       upsertThread(cur);
       if (currentThreadId() === thread.id) renderLog();
@@ -2176,7 +2205,7 @@
       var cls = m.role === 'user' ? 'user' : (m.role === 'error' ? 'error' : 'assistant');
       var imageSource = m.imageData || m.imageUrl || '';
       var body = imageSource
-        ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
+        ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + (m.imageModelLabel ? '<span class="aic-image-model"> · ' + esc(m.imageModelLabel) + '</span>' : '') + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
         : (m.mediaType === 'search' ? renderSearchMessage(m) : (m.mediaType === 'audio' ? renderAudioMessage(m) : (m.mediaType === 'video' ? renderVideoMessage(m) : (m.role === 'assistant' ? renderAssistantBody(m.content, m) : mdLite(m.content)))));
       var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
       var actions = (m.role !== 'error' && m.content)

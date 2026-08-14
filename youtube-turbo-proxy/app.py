@@ -63,7 +63,8 @@ _env_allowed_origins = [origin.strip().rstrip("/") for origin in
 ALLOWED_ORIGINS = tuple(dict.fromkeys(
     [origin.rstrip("/") for origin in _DEFAULT_ALLOWED_ORIGINS] + _env_allowed_origins))
 CORS(app, origins=ALLOWED_ORIGINS, methods=["GET", "POST", "DELETE", "OPTIONS"],
-     allow_headers=["Authorization", "Content-Type"])
+     allow_headers=["Authorization", "Content-Type"],
+     expose_headers=["X-Image-Provider", "X-Image-Model"])
 MAX_TELEGRAM_IMAGE_BYTES = int(os.environ.get("MAX_TELEGRAM_IMAGE_BYTES", str(8 * 1024 * 1024)))
 
 # ------------------------------------------------------------------ config
