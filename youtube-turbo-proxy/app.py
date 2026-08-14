@@ -2229,7 +2229,11 @@ def _effective_image_models(cfg):
                 discovered = _omniroute_fetch_image_model_ids()
             out[pid] = _merge_unique_model_ids(discovered, fallback)
         elif cleaned:
-            out[pid] = cleaned
+            # Keep the administrator-selected models first, but do not discard
+            # the provider's known image fallbacks. A single Gemini model can
+            # return 429/5xx after one successful generation while another image
+            # model on the same configured key remains usable.
+            out[pid] = _merge_unique_model_ids(cleaned, default)
         else:
             out[pid] = list(default)
     return out

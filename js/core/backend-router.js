@@ -160,7 +160,8 @@
           mark(server, true, 'HTTP ' + response.status);
           return response;
         }
-        lastError = new Error('HTTP ' + response.status + ' from ' + server.label);
+        var responseDetail = await responseErrorDetail(response);
+        lastError = new Error('HTTP ' + response.status + ' from ' + server.label + (responseDetail ? ': ' + responseDetail : ''));
         attempts.push(lastError.message);
         mark(server, false, lastError.message);
       } catch (error) {
@@ -200,6 +201,25 @@
   async function probeAll() { return Promise.all(state.servers.map(probe)); }
   function baseUrl() { return (orderedServers()[0] || DEFAULT_SERVERS[0]).url; }
   function configure(config, persist) { return applyConfig(config, persist); }
+  async function responseErrorDetail(response) {
+    if (!response || response.ok) return '';
+    try {
+      var clone = response.clone();
+      var contentType = String(clone.headers.get('content-type') || '').toLowerCase();
+      if (contentType.indexOf('json') >= 0) {
+        var payload = await clone.json();
+        if (payload && typeof payload === 'object') {
+          var detail = payload.detail || payload.message || payload.error;
+          if (detail && typeof detail === 'object') detail = detail.message || detail.detail || JSON.stringify(detail);
+          if (detail) return String(detail).replace(/\s+/g, ' ').slice(0, 420);
+        }
+      } else {
+        var text = await clone.text();
+        if (text && !/^<!doctype html|^<html/i.test(text.trim())) return text.replace(/\s+/g, ' ').slice(0, 420);
+      }
+    } catch (e) {}
+    return '';
+  }
 
   readLocal();
   function bindAuth() {
