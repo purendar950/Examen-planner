@@ -176,9 +176,10 @@
   st.textContent = `
     /* The chat is a first-class page inside the existing app shell. It must use the
        available workspace height, not create a second viewport-sized application. */
-    #app .main-content:has(#page-ai-chat.active){max-width:none!important;width:auto!important;height:calc(100dvh - 114px)!important;min-height:0!important;overflow:hidden!important;margin-bottom:0!important;padding:0!important;box-sizing:border-box;}
-    #app:has(#shell-dock-tray > .topbar-right) .main-content:has(#page-ai-chat.active){height:calc(100dvh - 52px)!important;}
-    #app .main-content > #page-ai-chat{display:block;max-width:none!important;width:100%!important;height:100%!important;min-height:0!important;margin:0!important;padding:0!important;}
+    html:has(#page-ai-chat.active),body:has(#page-ai-chat.active){height:100%;overflow:hidden;}
+    #app:has(#page-ai-chat.active){display:flex!important;flex-direction:column!important;min-height:100dvh!important;height:100dvh!important;overflow:hidden!important;}
+    #app:has(#page-ai-chat.active) .main-content{display:flex!important;flex:1 1 auto!important;flex-direction:column!important;max-width:none!important;width:auto!important;height:auto!important;min-height:0!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;}
+    #app:has(#page-ai-chat.active) .main-content > #page-ai-chat{display:flex!important;flex:1 1 auto!important;flex-direction:column!important;max-width:none!important;width:100%!important;height:auto!important;min-height:0!important;margin:0!important;padding:0!important;}
     .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:100%;min-height:0;overflow:hidden;border:0;border-radius:0;background:var(--card);box-shadow:none;}
     .aic-shell.aic-sidebar-collapsed{grid-template-columns:56px minmax(0,1fr);}
     .aic-rail{display:none;flex-direction:column;align-items:center;gap:10px;height:100%;padding:12px 8px;background:color-mix(in srgb,var(--surface) 86%,var(--card));}
@@ -194,7 +195,7 @@
     .aic-sidebar-expand{display:none;}
     .aic-sidebar-collapsed .aic-sidebar-expand{display:none;}
     .aic-sidebar-collapsed .aic-head-left{gap:8px;}
-    @media (max-width:900px){#app .main-content:has(#page-ai-chat.active){height:calc(100dvh - 108px);padding:0;}.aic-shell{height:100%;min-height:0;grid-template-columns:1fr;border-radius:0;}.aic-side{display:none;}}
+    @media (max-width:900px){#app:has(#page-ai-chat.active){min-height:100dvh!important;height:100dvh!important;}#app:has(#page-ai-chat.active) .main-content{height:auto!important;padding:0!important;}.aic-shell{height:100%;min-height:0;grid-template-columns:1fr;border-radius:0;}.aic-side{display:none;}}
     .aic-side{display:flex;flex-direction:column;min-width:0;border-right:1px solid color-mix(in srgb,var(--border) 78%,transparent);background:color-mix(in srgb,var(--surface) 82%,var(--card));}
     .aic-side-top{padding:1rem 1rem .8rem;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);}
     .aic-brand{display:flex;align-items:center;gap:10px;margin-bottom:1rem;color:var(--text);}
