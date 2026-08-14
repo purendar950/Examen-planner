@@ -12489,12 +12489,15 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
         sysmsg += ("\n\nACTIVE LOCAL WORKSPACE FILE (the browser owns this file; it has not been "
                    "written to GitHub or the server):\nPath: %s\nLanguage: %s\n"
                    "Current content:\n```%s\n%s\n```\n"
-                   "When the student asks to improve, fix, refactor, or change this active file, "
-                   "make the smallest necessary edit. Do not return the complete file. Return a "
-                   "standard unified diff with exact @@ hunks that can be applied to the current "
-                   "content, then a short explanation and verification steps. Only return a full "
-                   "file when the student explicitly asks for a full replacement.\n" %
-                   (active_path, active_language, active_language, active_content))
+                   "PATCH-ONLY EDIT CONTRACT: when the student asks to improve, fix, refactor, "
+                   "or change this active file, make the smallest necessary edit and do not return "
+                   "the complete file. Return exactly one fenced diff block in this shape:\n"
+                   "```diff\n--- a/%s\n+++ b/%s\n@@ -oldStart,oldCount +newStart,newCount @@\n context or changed lines\n```\n"
+                   "Use exact current-file context lines, correct hunk counts, and the active path. "
+                   "Then add a short explanation and verification steps outside the diff. If no change "
+                   "is needed, say so without emitting a replacement file. Only return a full file "
+                   "when the student explicitly asks for a full replacement or a new file.\n" %
+                   (active_path, active_language, active_language, active_content, active_path, active_path))
     messages = [{"role": "system", "content": sysmsg}]
 
     history = body.get("history") or []

@@ -1263,6 +1263,11 @@
     input.focus();
     toast('Focused edit request added to the composer.', 'info');
   };
+  function patchTargetPath(patch) {
+    var match = String(patch || '').match(/^\+\+\+\s+(?:b\/)?([^\s]+)$/m) || String(patch || '').match(/^---\s+(?:a\/)?([^\s]+)$/m);
+    return match && match[1] && match[1] !== '/dev/null' ? match[1] : '';
+  }
+  function comparablePath(path) { return String(path || '').replace(/^(?:a|b)\//, '').replace(/^\.\//, ''); }
   function applyUnifiedDiff(source, patch) {
     var src = String(source || '').replace(/\r\n/g, '\n').split('\n');
     var lines = String(patch || '').replace(/\r\n/g, '\n').split('\n');
@@ -1271,6 +1276,9 @@
       var hunk = lines[i].match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
       if (!hunk) { i += 1; continue; }
       sawHunk = true;
+      var oldExpected = hunk[2] == null ? 1 : Number(hunk[2]);
+      var newExpected = hunk[4] == null ? 1 : Number(hunk[4]);
+      var oldConsumed = 0, newProduced = 0;
       var oldStart = Math.max(0, Number(hunk[1]) - 1);
       while (cursor < oldStart) out.push(src[cursor++]);
       i += 1;
@@ -1278,12 +1286,13 @@
         var line = lines[i];
         if (line === '\\ No newline at end of file') { i += 1; continue; }
         var marker = line.charAt(0), value = line.slice(1);
-        if (marker === ' ') { if (src[cursor] !== value) return { error: 'Patch context does not match ' + (cursor + 1) + '. Refresh the file and ask AI for a new diff.' }; out.push(src[cursor++]); }
-        else if (marker === '-') { if (src[cursor] !== value) return { error: 'Patch removal does not match line ' + (cursor + 1) + '.' }; cursor += 1; }
-        else if (marker === '+') out.push(value);
+        if (marker === ' ') { if (src[cursor] !== value) return { error: 'Patch context does not match ' + (cursor + 1) + '. Refresh the file and ask AI for a new diff.' }; out.push(src[cursor++]); oldConsumed += 1; newProduced += 1; }
+        else if (marker === '-') { if (src[cursor] !== value) return { error: 'Patch removal does not match line ' + (cursor + 1) + '.' }; cursor += 1; oldConsumed += 1; }
+        else if (marker === '+') { out.push(value); newProduced += 1; }
         else if (line !== '') return { error: 'Unsupported patch line: ' + line.slice(0, 80) };
         i += 1;
       }
+      if (oldConsumed !== oldExpected || newProduced !== newExpected) return { error: 'Patch hunk line counts do not match its header. Ask AI for a fresh diff.' };
     }
     if (!sawHunk) return { error: 'No unified diff hunk was found.' };
     while (cursor < src.length) out.push(src[cursor++]);
@@ -1294,6 +1303,8 @@
     if (!card || !t) return;
     file = activeWorkspaceFile(t);
     if (!file) { toast('Open the target file before applying a patch.', 'error'); return; }
+    var target = comparablePath(card.getAttribute('data-target') || '');
+    if (target && target !== comparablePath(file.path)) { toast('This patch targets ' + target + ', but ' + file.path + ' is active. Open the matching file first.', 'error'); return; }
     var result = applyUnifiedDiff(file.content, card.getAttribute('data-code') || '');
     if (result.error) { toast(result.error, 'error'); return; }
     file.content = result.content;
@@ -1469,11 +1480,12 @@
       }
       return '<span class="aic-code-line' + cls + '"><span class="aic-code-ln">' + (lineIndex + 1) + '</span>' + esc(line) + '</span>';
     }).join('');
+    var targetPath = diff ? patchTargetPath(raw) : '';
     var safeTitle = title || (diff ? 'Suggested patch' : 'Code artifact');
     var fixPrompt = diff
       ? 'Review this suggested patch and return a corrected unified diff only. Do not rewrite the complete file. Preserve unchanged lines and include exact @@ hunks.\n\n```diff\n' + raw + '\n```'
       : 'Review and improve this code. If an active file is open, change only the necessary lines and return a unified diff; otherwise return a complete new-file artifact.' + (normalizedLang !== 'text' ? '\nLanguage: ' + normalizedLang : '') + '\n\n```' + normalizedLang + '\n' + raw + '\n```';
-    return '<section class="aic-code-artifact" data-code="' + escAttr(raw) + '" data-language="' + escAttr(normalizedLang) + '">' +
+    return '<section class="aic-code-artifact" data-code="' + escAttr(raw) + '" data-language="' + escAttr(normalizedLang) + '" data-target="' + escAttr(targetPath) + '">' +
       '<div class="aic-code-head"><span class="aic-code-title">' + esc(safeTitle) + '</span><span class="aic-code-lang">' + esc(normalizedLang) + '</span>' +
       '<button type="button" onclick="aicCopyArtifact(this)">Copy</button><button type="button" onclick="aicDownloadArtifact(this)">Download</button>' + (diff ? '<button type="button" onclick="aicApplyArtifact(this)">Apply to file</button>' : '') + '<button type="button" class="aic-code-fix" data-fix="' + escAttr(fixPrompt) + '" onclick="aicFixArtifact(this)">Try fixing</button></div>' +
       '<pre class="aic-code-body">' + rendered + '</pre>' + (diff ? '<div class="aic-code-status">Suggested diff · additions and removals are highlighted for review.</div>' : '') + '</section>';
@@ -1645,6 +1657,7 @@
       web: t.web || 'auto', persona: t.persona || '',
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
       workspace: workspaceRequest(t),
+      editMode: workspaceRequest(t) ? 'patch' : 'new-file',
       localMemory: localMemoryContext(t),
       imageContext: (function () {
         for (var i = t.messages.length - 1; i >= 0; i -= 1) {
