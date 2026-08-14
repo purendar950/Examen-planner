@@ -246,6 +246,20 @@
     .aic-msg-row.error .aic-msg{padding:10px 13px;border:1px solid rgba(200,75,67,.35);border-radius:11px;background:rgba(200,75,67,.08);color:#c54b43;}
     .aic-msg code{padding:2px 5px;border-radius:5px;background:color-mix(in srgb,var(--border) 34%,transparent);font-size:.86em;}
     .aic-msg pre{overflow-x:auto;margin:.75rem 0;padding:12px 14px;border:1px solid color-mix(in srgb,var(--border) 60%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 80%,transparent);font-size:.8em;line-height:1.55;}
+    .aic-code-artifact{margin:.8rem 0;border:1px solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:12px;overflow:hidden;background:color-mix(in srgb,var(--surface) 90%,var(--card));box-shadow:0 5px 16px rgba(28,24,20,.06);}
+    .aic-code-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--card) 84%,transparent);font-size:.72rem;}
+    .aic-code-title{flex:1;min-width:0;color:var(--text);font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .aic-code-lang{color:var(--muted);font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;}
+    .aic-code-head button{padding:4px 7px;border:1px solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:7px;background:transparent;color:var(--muted);font-size:.68rem;cursor:pointer;}
+    .aic-code-head button:hover{border-color:var(--accent);color:var(--text);background:color-mix(in srgb,var(--accent) 8%,transparent);}
+    .aic-code-body{margin:0!important;padding:12px 14px!important;border:0!important;border-radius:0!important;background:transparent!important;white-space:pre;overflow:auto;font-size:.78rem;line-height:1.58;tab-size:2;}
+    .aic-code-line{display:block;min-height:1.58em;}
+    .aic-code-ln{display:inline-block;width:3.2em;margin-right:1em;color:color-mix(in srgb,var(--muted) 72%,transparent);text-align:right;user-select:none;}
+    .aic-code-line.diff-add{background:rgba(40,160,95,.12);color:#176d42;}
+    .aic-code-line.diff-del{background:rgba(200,75,67,.12);color:#a53c36;}
+    .aic-code-line.diff-hunk{color:#6e56a5;background:color-mix(in srgb,#8b72d6 10%,transparent);}
+    .aic-code-fix{color:var(--accent)!important;}
+    .aic-code-status{padding:7px 10px;border-top:1px solid color-mix(in srgb,var(--border) 60%,transparent);color:var(--muted);font-size:.68rem;}
     .aic-msg img.aic-gen-image{display:block;max-width:min(100%,620px);margin-top:5px;border:1px solid color-mix(in srgb,var(--border) 75%,transparent);border-radius:14px;box-shadow:0 8px 20px rgba(28,24,20,.1);}
     .aic-image-caption{margin-bottom:4px;color:var(--muted);font-size:.75rem;line-height:1.35;}
     .aic-image-actions{display:flex;gap:6px;margin-top:7px;}
@@ -316,6 +330,7 @@
     </header>
     <div class="aic-quick-actions">
       <button class="aic-chip-btn" id="aic-web-btn" onclick="aicCycleWeb()" title="Web search">◉ Auto</button>
+      <button class="aic-chip-btn" id="aic-code-btn" onclick="aicToggleCoding()" title="Prefer structured coding responses">⌘ Coding</button>
       <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">✦ Persona</button>
       <button class="aic-icon-btn" onclick="aicToggleGithubBox()" title="Add read-only GitHub repository context">GitHub</button>
       <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">▧ Image</button>
@@ -635,6 +650,26 @@
   /* ── web search toggle: auto -> on -> off -> auto ── */
   function webLabel(mode) {
     return mode === 'on' ? '\uD83C\uDF10 On' : (mode === 'off' ? '\uD83C\uDF10 Off' : '\uD83C\uDF10 Auto');
+  }
+  function renderCodingBtn() {
+    var btn = document.getElementById('aic-code-btn');
+    var t = getThread(currentThreadId());
+    if (!btn) return;
+    var on = !!(t && t.codingMode);
+    btn.classList.toggle('is-on', on);
+    btn.textContent = on ? '⌘ Coding on' : '⌘ Coding';
+    btn.title = on ? 'Coding mode is on — structured code artifacts and tests' : 'Prefer structured coding responses';
+  }
+  window.aicToggleCoding = function () {
+    var t = getThread(currentThreadId());
+    if (!t) return;
+    t.codingMode = !t.codingMode;
+    upsertThread(t);
+    renderCodingBtn();
+    toast(t.codingMode ? 'Coding mode enabled for this conversation.' : 'Coding mode disabled.', 'info');
+  };
+  function isCodingRequest(text) {
+    return /\b(code|coding|debug|bug|fix|refactor|function|class|component|api|endpoint|repository|repo|github|javascript|typescript|python|html|css|sql|test|stack trace|error|diff|patch|implement|build)\b/i.test(String(text || ''));
   }
   function renderWebBtn() {
     var btn = document.getElementById('aic-web-btn');
@@ -1149,6 +1184,82 @@
   };
 
   /* ── rendering ── */
+  function codingLanguage(raw) {
+    var value = String(raw || '').trim().toLowerCase();
+    var aliases = { js: 'javascript', ts: 'typescript', py: 'python', rb: 'ruby', sh: 'bash', yml: 'yaml', md: 'markdown', html: 'html', css: 'css', json: 'json', jsx: 'jsx', tsx: 'tsx' };
+    return aliases[value] || value || 'text';
+  }
+  function isDiffCode(code, lang) {
+    return String(lang || '').toLowerCase() === 'diff' || /^diff --git |^@@ /m.test(String(code || ''));
+  }
+  function codeArtifactHtml(code, lang, index, title) {
+    var raw = String(code || '').replace(/\r\n/g, '\n');
+    var normalizedLang = codingLanguage(lang);
+    var diff = isDiffCode(raw, normalizedLang);
+    var lines = raw.split('\n');
+    if (lines.length && lines[lines.length - 1] === '') lines.pop();
+    var rendered = lines.map(function (line, lineIndex) {
+      var cls = '';
+      if (diff) {
+        if (line.indexOf('+') === 0 && line.indexOf('+++') !== 0) cls = ' diff-add';
+        else if (line.indexOf('-') === 0 && line.indexOf('---') !== 0) cls = ' diff-del';
+        else if (line.indexOf('@@') === 0) cls = ' diff-hunk';
+      }
+      return '<span class="aic-code-line' + cls + '"><span class="aic-code-ln">' + (lineIndex + 1) + '</span>' + esc(line) + '</span>';
+    }).join('');
+    var safeTitle = title || (diff ? 'Suggested patch' : 'Code artifact');
+    var fixPrompt = 'Review and improve this code. Identify the bug or weakness, explain the cause briefly, then return the corrected version in a complete fenced code block.' + (normalizedLang !== 'text' ? '\nLanguage: ' + normalizedLang : '') + '\n\n```' + normalizedLang + '\n' + raw + '\n```';
+    return '<section class="aic-code-artifact" data-code="' + escAttr(raw) + '" data-language="' + escAttr(normalizedLang) + '">' +
+      '<div class="aic-code-head"><span class="aic-code-title">' + esc(safeTitle) + '</span><span class="aic-code-lang">' + esc(normalizedLang) + '</span>' +
+      '<button type="button" onclick="aicCopyArtifact(this)">Copy</button><button type="button" onclick="aicDownloadArtifact(this)">Download</button><button type="button" class="aic-code-fix" data-fix="' + escAttr(fixPrompt) + '" onclick="aicFixArtifact(this)">Try fixing</button></div>' +
+      '<pre class="aic-code-body">' + rendered + '</pre>' + (diff ? '<div class="aic-code-status">Suggested diff · additions and removals are highlighted for review.</div>' : '') + '</section>';
+  }
+  function renderAssistantBody(text) {
+    var source = String(text || '');
+    var fence = /```([^\n`]*)\n?([\s\S]*?)```/g;
+    var cursor = 0, found = false, html = '', match, blockIndex = 0;
+    while ((match = fence.exec(source))) {
+      found = true;
+      if (match.index > cursor) html += mdLite(source.slice(cursor, match.index));
+      html += codeArtifactHtml(match[2], match[1], blockIndex, 'Code artifact ' + (blockIndex + 1));
+      blockIndex += 1;
+      cursor = fence.lastIndex;
+    }
+    if (found) {
+      if (cursor < source.length) html += mdLite(source.slice(cursor));
+      return html;
+    }
+    if (isDiffCode(source, 'diff')) return codeArtifactHtml(source, 'diff', 0, 'Suggested patch');
+    return mdLite(source);
+  }
+  window.aicCopyArtifact = function (btn) {
+    var card = btn && btn.closest('.aic-code-artifact');
+    if (!card) return;
+    var text = card.getAttribute('data-code') || '';
+    navigator.clipboard.writeText(text).then(function () { toast('Code copied to clipboard.', 'success'); }).catch(function () { toast('Could not copy code automatically.', 'error'); });
+  };
+  window.aicDownloadArtifact = function (btn) {
+    var card = btn && btn.closest('.aic-code-artifact');
+    if (!card) return;
+    var lang = card.getAttribute('data-language') || 'txt';
+    var extensions = { javascript: 'js', typescript: 'ts', python: 'py', html: 'html', css: 'css', json: 'json', markdown: 'md', bash: 'sh', jsx: 'jsx', tsx: 'tsx', diff: 'patch' };
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([card.getAttribute('data-code') || ''], { type: 'text/plain;charset=utf-8' }));
+    a.download = 'ai-code-artifact.' + (extensions[lang] || 'txt');
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 500);
+  };
+  window.aicFixArtifact = function (btn) {
+    var input = document.getElementById('aic-input');
+    var prompt = btn && btn.getAttribute('data-fix');
+    if (!input || !prompt) return;
+    input.value = prompt;
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+    input.focus();
+    toast('Fix request added to the composer. Review it, then send.', 'info');
+  };
+  /* ── rendering ── */
   function renderLog() {
     var log = document.getElementById('aic-log');
     if (!log) return;
@@ -1163,7 +1274,7 @@
       var imageSource = m.imageData || m.imageUrl || '';
       var body = imageSource
         ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
-        : mdLite(m.content);
+        : (m.role === 'assistant' ? renderAssistantBody(m.content) : mdLite(m.content));
       var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
       var actions = (m.role !== 'error' && m.content)
         ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">Copy</button>' + (m.role === 'user' ? '<button onclick="aicRetryMessage(this)">↻ Retry</button>' : '') + '</div>' : '';
@@ -1177,6 +1288,7 @@
     renderThreadList();
     renderModelSelect();
     renderWebBtn();
+    renderCodingBtn();
     renderLog();
     renderFilesBar();
     renderGithubPanel();
@@ -1263,6 +1375,7 @@
     var modelSel = document.getElementById('aic-model-select');
     var body = {
       q: q, history: contextHistory, threadId: t.id,
+      coding: !!t.codingMode || isCodingRequest(q),
       model: (modelSel && modelSel.value) || t.model || '',
       web: t.web || 'auto', persona: t.persona || '',
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,

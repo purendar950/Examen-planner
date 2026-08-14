@@ -12279,8 +12279,25 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                    "image. Do not claim that no image was generated and do not promise "
                    "to generate it again unless the student explicitly asks for a new "
                    "image.\n" + image_context)
-
+    coding_requested = bool(body.get("coding")) or bool(re.search(
+        r"\b(code|coding|debug|bug|fix|refactor|function|class|component|api|endpoint|repository|repo|github|javascript|typescript|python|html|css|sql|test|stack trace|error|diff|patch|implement|build)\b",
+        q, re.I))
+    if coding_requested:
+        sysmsg += ("\n\nCODING WORKSPACE MODE: Treat this as an engineering task. First state the "
+                   "goal and assumptions briefly. If repository or file context is present, "
+                   "name the relevant file paths and explain the smallest safe change. "
+                   "Return complete, copyable code in fenced Markdown blocks with an accurate "
+                   "language tag. For edits, prefer a unified diff or clearly separated "
+                   "before/after sections and include line-level or function-level locations. "
+                   "Include a concise verification section with tests, commands, expected "
+                   "results, and any limitations. Never claim that code was executed, a file "
+                   "was changed, or a repository was modified unless a trusted tool result "
+                   "is included in the conversation. If the user provides an error, explain "
+                   "the likely cause and end with a corrected complete snippet or patch. "
+                   "Keep explanatory prose outside code fences so the app can render the code "
+                   "as a reviewable artifact.")
     web_sources = []
+
     web_pref = body.get("web")
     if _web_mode(web_pref) != "off" and len(q) >= 8:
         if _web_mode(web_pref) == "on" or _WEB_TRIGGER_RE.search(q):
