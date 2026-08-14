@@ -49,6 +49,14 @@ class GithubContextTests(unittest.TestCase):
             app._github_validate_plan({"files": [{"path": "app.py", "content": "x" * (app._GITHUB_MAX_FILE_CHARS * 2 + 1)}]},
                                       {"app.py"}, source)
 
+    def test_ai_chat_modes_are_allowlisted_and_memory_is_bounded(self):
+        tutor = app._ai_chat_tab_sys(mode="tutor", memory="memory-token-" * 500)
+        self.assertIn("Socratic tutor", tutor)
+        memory_block = tutor.split("STUDENT MEMORY", 1)[1]
+        self.assertLessEqual(memory_block.count("memory-token-"), 93)
+        unknown = app._ai_chat_tab_sys(mode="not-a-real-mode")
+        self.assertIn("Choose the right level of detail", unknown)
+
     @patch("app._github_connected_identity", return_value=({"uid": "u1"}, "token", None))
     @patch("app._github_user_request")
     def test_pr_requires_explicit_confirmation(self, request_mock, _identity):

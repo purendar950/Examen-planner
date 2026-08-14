@@ -47,6 +47,16 @@
   var _githubAuth = null;
   var _githubPrDraft = null;
   var _githubPopup = null;
+  var _activeAbort = null;
+  var _stopRequested = false;
+  var AIC_MODES = [
+    { key: 'adaptive', label: 'Adaptive', hint: 'Best all-round answers' },
+    { key: 'tutor', label: 'Tutor', hint: 'Step-by-step learning' },
+    { key: 'planner', label: 'Planner', hint: 'Turn goals into actions' },
+    { key: 'reviewer', label: 'Reviewer', hint: 'Find gaps and improve' },
+    { key: 'writer', label: 'Study writer', hint: 'Clean exam-ready notes' },
+    { key: 'coder', label: 'Coding partner', hint: 'Explain, edit, test' }
+  ];
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -65,6 +75,9 @@
   /* ── threads: localStorage only, per signed-in uid ──────────────────── */
   function threadsKey() { return 'preppath_ai_chat_threads_' + uid(); }
   function curKey() { return 'preppath_ai_chat_current_' + uid(); }
+  function memoryKey() { return 'preppath_ai_chat_memory_' + uid(); }
+  function loadMemory() { try { return localStorage.getItem(memoryKey()) || ''; } catch (e) { return ''; } }
+  function saveMemory(value) { try { localStorage.setItem(memoryKey(), String(value || '').slice(0, 1200)); } catch (e) {} }
 
   function loadThreads() {
     try {
@@ -98,7 +111,7 @@
   function ensureThread() {
     var list = loadThreads();
     if (list.length) return list[0];
-    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', github: null, createdAt: Date.now() };
+    var t = { id: newId(), title: 'New chat', messages: [], persona: '', mode: 'adaptive', model: '', imageModel: '', web: 'auto', github: null, createdAt: Date.now() };
     saveThreads([t]);
     return t;
   }
@@ -226,8 +239,10 @@
     '        <select class="aic-select" id="aic-provider-select" onchange="aicProviderChanged()" title="AI provider"></select>',
     '        <select class="aic-select" id="aic-omniroute-provider-select" onchange="aicOmniRouteProviderChanged()" title="OmniRoute provider" style="display:none;"></select>',
     '        <select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="AI model"></select>',
+    '        <select class="aic-select" id="aic-mode-select" onchange="aicModeChanged()" title="Assistant mode"></select>',
     '        <button class="aic-chip-btn" id="aic-web-btn" onclick="aicCycleWeb()" title="Web search">\uD83C\uDF10 Auto</button>',
     '        <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">\uD83C\uDFAD Persona</button>',
+    '        <button class="aic-icon-btn" onclick="aicToggleMemory()" title="Remember preferences on this device">\uD83E\uDDE0 Memory</button>',
     '        <button class="aic-icon-btn" onclick="aicToggleGithubBox()" title="Add read-only GitHub repository context">GitHub</button>',
     '        <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">\uD83C\uDFA8 Image</button>',
     '        <button class="aic-icon-btn" onclick="aicExportThread()" title="Export as Markdown">\u2B07 Export</button>',
@@ -236,6 +251,10 @@
     '    <div class="aic-persona-box" id="aic-persona-box" style="display:none;">',
     '      <div class="aic-persona-label"><span>Custom instructions for this chat (optional)</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicSavePersona()">Save</button></div>',
     '      <textarea id="aic-persona-input" placeholder="e.g. Explain like I'+"'"+'m preparing for SSC CGL, keep answers short and in Hinglish."></textarea>',
+    '    </div>',
+    '    <div class="aic-memory-box" id="aic-memory-box" style="display:none;">',
+    '      <div class="aic-persona-label"><span>Memory for future chats on this device</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicSaveMemory()">Save</button></div>',
+    '      <textarea id="aic-memory-input" placeholder="e.g. I prefer concise explanations and I am preparing for UPSC. Avoid saving sensitive information."></textarea>',
     '    </div>',
     '    <div class="aic-github-box" id="aic-github-box" style="display:none;">',
     '      <div class="aic-github-label"><span>GitHub repository context <strong>· connect to review and create PRs</strong></span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseGithubBox()">✕ Close</button></div>',
@@ -262,11 +281,13 @@
     '    </div>',
     '    <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>',
     '    <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>',
+    '    <div class="aic-activity" id="aic-activity" aria-live="polite"></div>',
     '    <div class="aic-log" id="aic-log"></div>',
     '    <form class="aic-form" onsubmit="aicSend(event)">',
     '      <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">',
     '      <button type="button" class="aic-icon-btn" id="aic-attach-btn" onclick="document.getElementById(\'aic-file-input\').click()" title="Attach a file" style="display:none;">\uD83D\uDCCE</button>',
-    '      <textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea>',
+    '      <div class="aic-composer-wrap"><textarea class="aic-input" id="aic-input" rows="1" maxlength="4000" placeholder="Message AI Chat…" oninput="aicInputChanged()" onkeydown="aicKeydown(event)"></textarea><div class="aic-shortcuts"><span>Enter to send · Shift+Enter for a new line</span><span id="aic-char-count">0 / 4000</span></div></div>',
+    '      <button class="aic-stop" id="aic-stop-btn" type="button" onclick="aicStop()" style="display:none;">Stop</button>',
     '      <button class="aic-send" id="aic-send-btn" type="submit">Send</button>',
     '    </form>',
     '  </div>',
@@ -370,7 +391,7 @@
   }
 
   window.aicNewThread = function () {
-    var t = { id: newId(), title: 'New chat', messages: [], persona: '', model: '', imageModel: '', web: 'auto', github: null, createdAt: Date.now() };
+    var t = { id: newId(), title: 'New chat', messages: [], persona: '', mode: 'adaptive', model: '', imageModel: '', web: 'auto', github: null, createdAt: Date.now() };
     upsertThread(t);
     setCurrentThread(t.id);
   };
@@ -554,6 +575,55 @@
   window.aicModelChanged = function () {
     var sel = document.getElementById('aic-model-select');
     if (sel) saveThreadModel('model', sel.value);
+  };
+  function renderModeSelect() {
+    var sel = document.getElementById('aic-mode-select');
+    if (!sel) return;
+    var t = getThread(currentThreadId());
+    var selected = (t && t.mode) || 'adaptive';
+    sel.innerHTML = AIC_MODES.map(function (m) {
+      return '<option value="' + escAttr(m.key) + '" title="' + escAttr(m.hint) + '"' + (m.key === selected ? ' selected' : '') + '>' + esc(m.label) + '</option>';
+    }).join('');
+  }
+  window.aicModeChanged = function () {
+    var sel = document.getElementById('aic-mode-select');
+    var t = getThread(currentThreadId());
+    if (sel && t) { t.mode = sel.value; upsertThread(t); }
+  };
+  window.aicToggleMemory = function () {
+    var box = document.getElementById('aic-memory-box');
+    var input = document.getElementById('aic-memory-input');
+    if (!box || !input) return;
+    var showing = box.style.display !== 'none';
+    box.style.display = showing ? 'none' : '';
+    if (!showing) input.value = loadMemory();
+  };
+  window.aicSaveMemory = function () {
+    var input = document.getElementById('aic-memory-input');
+    if (!input) return;
+    saveMemory(input.value);
+    toast(input.value.trim() ? 'Memory saved on this device.' : 'Memory cleared.', 'success');
+  };
+  function setActivity(text, live) {
+    var el = document.getElementById('aic-activity');
+    if (!el) return;
+    el.textContent = text || '';
+    el.classList.toggle('is-live', !!live);
+  }
+  window.aicInputChanged = function () {
+    var input = document.getElementById('aic-input');
+    var count = document.getElementById('aic-char-count');
+    if (count) count.textContent = ((input && input.value.length) || 0) + ' / 4000';
+    if (input) {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+    }
+  };
+  window.aicStop = function () {
+    if (!_sending || !_activeAbort) return;
+    _stopRequested = true;
+    try { _activeAbort.abort(); } catch (e) {}
+    setActivity('Generation stopped. You can continue the conversation or retry.', false);
   };
 
   /* ── web search toggle: auto -> on -> off -> auto ── */
@@ -1084,24 +1154,63 @@
   };
 
   /* ── rendering ── */
+  function sourceLinks(sources) {
+    if (!Array.isArray(sources) || !sources.length) return '';
+    return '<div class="aic-msg-sources" aria-label="Sources">' + sources.slice(0, 6).map(function (s) {
+      var url = s && s.url ? String(s.url) : '';
+      if (!/^https?:\/\//i.test(url)) return '';
+      return '<a class="aic-msg-source" href="' + escAttr(url) + '" target="_blank" rel="noopener noreferrer" title="' + escAttr(s.title || url) + '">↗ ' + esc(s.site || s.title || url) + '</a>';
+    }).join('') + '</div>';
+  }
+  window.aicStarter = function (text) {
+    var input = document.getElementById('aic-input');
+    if (!input) return;
+    input.value = text;
+    window.aicInputChanged();
+    input.focus();
+  };
+  window.aicRetryMessage = function (index) {
+    var t = getThread(currentThreadId());
+    if (!t || !t.messages[index] || t.messages[index].role !== 'assistant') return;
+    var user = t.messages[index - 1];
+    if (!user || user.role !== 'user') return;
+    t.messages.splice(index - 1, 2);
+    upsertThread(t);
+    var input = document.getElementById('aic-input');
+    if (input) { input.value = user.content || ''; window.aicInputChanged(); input.focus(); }
+    renderLog();
+  };
+  window.aicEditMessage = function (index) {
+    var t = getThread(currentThreadId());
+    if (!t || !t.messages[index] || t.messages[index].role !== 'user') return;
+    var text = t.messages[index].content || '';
+    if (t.messages[index + 1] && t.messages[index + 1].role === 'assistant') t.messages.splice(index, 2);
+    else t.messages.splice(index, 1);
+    upsertThread(t);
+    var input = document.getElementById('aic-input');
+    if (input) { input.value = text; window.aicInputChanged(); input.focus(); }
+    renderLog();
+  };
   function renderLog() {
     var log = document.getElementById('aic-log');
     if (!log) return;
     var t = getThread(currentThreadId());
     var messages = (t && t.messages) || [];
     if (!messages.length) {
-      log.innerHTML = '<div class="aic-empty">Ask anything, attach a file to chat with it, or generate an image — this stays on this device.</div>';
+      log.innerHTML = '<div class="aic-empty"><strong>What can I help you solve?</strong><br>Ask a question, attach study material, search the web, or work with repository code.' +
+        '<div class="aic-starter-row"><button class="aic-starter" onclick="aicStarter(\'Explain this topic simply\')">Explain a topic</button><button class="aic-starter" onclick="aicStarter(\'Create a realistic study plan for my next exam\')">Build a plan</button><button class="aic-starter" onclick="aicStarter(\'Review my approach and suggest improvements\')">Review my approach</button></div></div>';
       return;
     }
-    log.innerHTML = messages.map(function (m) {
+    log.innerHTML = messages.map(function (m, index) {
       var cls = m.role === 'user' ? 'user' : (m.role === 'error' ? 'error' : 'assistant');
       var body = m.imageUrl
         ? '<img class="aic-gen-image" src="' + escAttr(m.imageUrl) + '" alt="Generated image">'
         : mdLite(m.content);
-      var actions = (m.role !== 'error' && m.content)
-        ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">\uD83D\uDCCB Copy</button></div>' : '';
+      var actions = '';
+      if (m.role === 'user' && m.content) actions = '<div class="aic-msg-actions"><button onclick="aicEditMessage(' + index + ')">✎ Edit</button></div>';
+      if (m.role === 'assistant' && m.content) actions = '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">📋 Copy</button><button onclick="aicRetryMessage(' + index + ')">↻ Retry</button></div>';
       return '<div class="aic-msg-row ' + cls + '" data-raw="' + escAttr(m.content || '') + '">' +
-        '<div class="aic-msg">' + body + '</div>' + actions + '</div>';
+        '<div class="aic-msg">' + body + sourceLinks(m.sources) + '</div>' + actions + '</div>';
     }).join('');
     log.scrollTop = log.scrollHeight;
   }
@@ -1109,6 +1218,7 @@
   function renderAll() {
     renderThreadList();
     renderModelSelect();
+    renderModeSelect();
     renderWebBtn();
     renderLog();
     renderFilesBar();
@@ -1127,7 +1237,9 @@
   function setSending(on) {
     _sending = on;
     var btn = document.getElementById('aic-send-btn');
-    if (btn) { btn.disabled = on; btn.textContent = on ? 'Sending…' : 'Send'; }
+    var stop = document.getElementById('aic-stop-btn');
+    if (btn) { btn.disabled = on; btn.textContent = on ? 'Working…' : 'Send'; }
+    if (stop) stop.style.display = on ? '' : 'none';
   }
 
   window.aicKeydown = function (ev) {
@@ -1185,12 +1297,16 @@
     var body = {
       q: q, history: contextHistory, threadId: t.id,
       model: (modelSel && modelSel.value) || t.model || '',
+      mode: t.mode || 'adaptive', memory: loadMemory(),
       web: t.web || 'auto', persona: t.persona || '',
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null
     };
 
+    _stopRequested = false;
+    _activeAbort = window.AbortController ? new AbortController() : null;
+    setActivity((t.web || 'auto') === 'on' ? 'Searching the web and thinking…' : 'Thinking…', true);
     setSending(true);
-    var acc = '', gotChunk = false, settled = false;
+    var acc = '', gotChunk = false, settled = false, webSources = [];
 
     function paint() {
       if (currentThreadId() !== t.id) return;
@@ -1209,11 +1325,29 @@
       var cur = getThread(t.id);
       if (cur) {
         var last = cur.messages[cur.messages.length - 1];
-        if (last && last.role === 'assistant' && !last.content) last.content = acc;
-        else cur.messages.push({ role: 'assistant', content: acc });
+        if (last && last.role === 'assistant' && !last.content) { last.content = acc; last.sources = webSources; }
+        else cur.messages.push({ role: 'assistant', content: acc, sources: webSources });
         upsertThread(cur);
         if (currentThreadId() === t.id) renderLog();
       }
+      setActivity(webSources.length ? 'Answered with live sources.' : 'Ready', false);
+      _activeAbort = null;
+      setSending(false);
+    }
+    function finishStopped() {
+      if (settled) return;
+      settled = true;
+      var cur = getThread(t.id);
+      if (cur) {
+        var last = cur.messages[cur.messages.length - 1];
+        if (last && last.role === 'assistant') {
+          if (acc.trim()) { last.content = acc; last.sources = webSources; last.stopped = true; }
+          else cur.messages.pop();
+        }
+        upsertThread(cur);
+        if (currentThreadId() === t.id) renderLog();
+      }
+      _activeAbort = null;
       setSending(false);
     }
     function fallbackToBlocking() {
@@ -1228,8 +1362,9 @@
           if (!cur) return;
           var last = cur.messages[cur.messages.length - 1];
           if (res.ok && res.data && res.data.answer) {
-            if (last && last.role === 'assistant') last.content = res.data.answer;
-            else cur.messages.push({ role: 'assistant', content: res.data.answer });
+            webSources = Array.isArray(res.data.web) ? res.data.web : [];
+            if (last && last.role === 'assistant') { last.content = res.data.answer; last.sources = webSources; }
+            else cur.messages.push({ role: 'assistant', content: res.data.answer, sources: webSources });
           } else {
             var msg = (res.data && (res.data.detail || res.data.error)) || 'Something went wrong. Try again.';
             if (last && last.role === 'assistant' && !last.content) cur.messages.pop();
@@ -1245,15 +1380,17 @@
           upsertThread(cur);
           if (currentThreadId() === t.id) renderLog();
         })
-        .finally(function () { setSending(false); });
+        .finally(function () { _activeAbort = null; setActivity(webSources.length ? 'Answered with live sources.' : 'Ready', false); setSending(false); });
     }
 
     getFirebaseIdToken().then(function (token) {
-      return fetch(BACKEND + '/api/ai-chat/stream', {
+      var opts = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify(body)
-      });
+      };
+      if (_activeAbort) opts.signal = _activeAbort.signal;
+      return fetch(BACKEND + '/api/ai-chat/stream', opts);
     }).then(function (r) {
       if (!r.ok || !r.body || !window.TextDecoder) return Promise.reject(new Error('no-stream'));
       var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
@@ -1277,7 +1414,10 @@
             });
             var obj = {};
             if (data) { try { obj = JSON.parse(data) || {}; } catch (e) { obj = {}; } }
-            if (evName === 'chunk' && typeof obj.t === 'string') {
+            if (evName === 'meta') {
+              webSources = Array.isArray(obj.web) ? obj.web : [];
+              setActivity(webSources.length ? 'Reading live sources and thinking…' : 'Thinking…', true);
+            } else if (evName === 'chunk' && typeof obj.t === 'string') {
               acc += obj.t;
               gotChunk = true;
               paint();
@@ -1298,6 +1438,7 @@
       }
       return pump();
     }).catch(function () {
+      if (_stopRequested) { finishStopped(); return; }
       fallbackToBlocking();
     });
   };
@@ -1310,3 +1451,27 @@
     }
   });
 })();
+
+
+// Advanced AI Chat polish is injected above with the feature markup; these styles
+// are appended here so the upgrade remains self-contained in the tab module.
+(function () {
+  var extra = document.createElement('style');
+  extra.textContent =
+    '.aic-memory-box{padding:0.6rem 0.85rem;border-bottom:1px solid var(--border);background:var(--surface);}' +
+    '.aic-memory-box textarea{width:100%;min-height:52px;resize:vertical;font-size:0.78rem;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-family:var(--font);}' +
+    '.aic-activity{min-height:0;padding:0 0.85rem;color:var(--muted);font-size:0.7rem;line-height:1.4;}' +
+    '.aic-activity:not(:empty){padding-top:0.45rem;}' +
+    '.aic-activity.is-live{color:var(--accent);}' +
+    '.aic-composer-wrap{flex:1;min-width:0;}' +
+    '.aic-shortcuts{display:flex;justify-content:space-between;gap:8px;padding:3px 3px 0;color:var(--muted);font-size:0.62rem;}' +
+    '.aic-stop{padding:9px 11px;border-radius:10px;border:1px solid rgba(231,76,60,0.35);background:rgba(231,76,60,0.08);color:#e74c3c;font-weight:700;font-size:0.78rem;cursor:pointer;}' +
+    '.aic-msg-sources{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px;}' +
+    '.aic-msg-source{display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:0.66rem;text-decoration:none;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+    '.aic-msg-source:hover{border-color:var(--accent);color:var(--text);}' +
+    '.aic-starter-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin-top:10px;}' +
+    '.aic-starter{padding:6px 9px;border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:999px;font-size:0.7rem;cursor:pointer;}' +
+    '.aic-starter:hover{border-color:var(--accent);color:var(--text);}' +
+    '@media (max-width:720px){.aic-shortcuts span:first-child{display:none;}.aic-head-controls .aic-select{max-width:125px;}}';
+  document.head.appendChild(extra);
+}());
