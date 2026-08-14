@@ -348,10 +348,10 @@
     .aic-send{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:32px;padding:0 11px;border:0;border-radius:9px;background:var(--accent);color:#17130e;font-size:.78rem;font-weight:800;cursor:pointer;transition:transform .16s ease-out,opacity .16s ease-out;}
     .aic-send:hover{transform:translateY(-1px);}.aic-send:active{transform:scale(.97);}.aic-send:disabled{opacity:.5;cursor:default;transform:none;}
     .aic-file-input{display:none;}
-    .aic-persona-box,.aic-image-box,.aic-github-box{padding:.8rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
+    .aic-persona-box,.aic-image-box,.aic-github-box,.aic-media-box{padding:.8rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
     .aic-persona-label,.aic-image-label,.aic-github-label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:var(--muted);font-size:.7rem;}
     .aic-persona-box textarea,.aic-image-prompt,.aic-github-input{padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font:inherit;font-size:.8rem;outline:none;}.aic-persona-box textarea{width:100%;min-height:56px;resize:vertical;}.aic-persona-box textarea:focus,.aic-image-prompt:focus,.aic-github-input:focus{border-color:var(--accent);}
-    .aic-image-row,.aic-github-row{display:flex;gap:7px;flex-wrap:wrap;}.aic-image-row .aic-select{flex:0 0 auto;max-width:none;}.aic-image-prompt{flex:1 1 250px;min-width:180px;}.aic-image-source{display:inline-flex;align-items:center;gap:4px;padding:7px 9px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--muted);font-size:.76rem;cursor:pointer;white-space:nowrap;}.aic-image-source:hover{color:var(--text);border-color:var(--accent);}.aic-image-source input{display:none;}.aic-image-source-name{align-self:center;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.7rem;}.aic-github-input{flex:1 1 220px;min-width:150px;}.aic-github-files{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:3px;max-height:150px;overflow:auto;}.aic-github-file{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;color:var(--muted);cursor:pointer;font-size:.72rem;}.aic-github-file:hover{background:var(--card);color:var(--text);}.aic-github-file input{accent-color:var(--accent);}.aic-github-status{margin:6px 0;color:var(--muted);font-size:.72rem;line-height:1.4;}.aic-github-status.is-error{color:#c54b43;}
+    .aic-image-row,.aic-github-row,.aic-media-row{display:flex;gap:7px;flex-wrap:wrap;}.aic-image-row .aic-select,.aic-media-row .aic-select{flex:0 0 auto;max-width:none;}.aic-image-prompt,.aic-media-prompt{flex:1 1 250px;min-width:180px;}.aic-image-source{display:inline-flex;align-items:center;gap:4px;padding:7px 9px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--muted);font-size:.76rem;cursor:pointer;white-space:nowrap;}.aic-image-source:hover{color:var(--text);border-color:var(--accent);}.aic-image-source input{display:none;}.aic-image-source-name{align-self:center;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.7rem;}.aic-media-label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:var(--muted);font-size:.7rem;}.aic-media-hint{margin:6px 0 0;color:var(--muted);font-size:.68rem;line-height:1.4;}.aic-media-prompt{padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font:inherit;font-size:.8rem;outline:none;}.aic-media-prompt:focus{border-color:var(--accent);}.aic-media-row textarea{min-height:48px;resize:vertical;}.aic-github-input{flex:1 1 220px;min-width:150px;}.aic-github-files{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:3px;max-height:150px;overflow:auto;}.aic-github-file{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;color:var(--muted);cursor:pointer;font-size:.72rem;}.aic-github-file:hover{background:var(--card);color:var(--text);}.aic-github-file input{accent-color:var(--accent);}.aic-github-status{margin:6px 0;color:var(--muted);font-size:.72rem;line-height:1.4;}.aic-github-status.is-error{color:#c54b43;}.aic-search-results{display:grid;gap:8px;margin-top:8px;}.aic-search-source{display:block;padding:10px 12px;border:1px solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 82%,var(--card));text-decoration:none;color:var(--text);}.aic-search-source:hover{border-color:var(--accent);}.aic-search-source-title{font-size:.78rem;font-weight:800;line-height:1.35;}.aic-search-source-url{margin-top:3px;color:var(--accent);font-size:.63rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.aic-search-source-snippet{margin-top:5px;color:var(--muted);font-size:.7rem;line-height:1.4;}.aic-audio-card,.aic-video-card{display:grid;gap:8px;max-width:680px;padding:12px;border:1px solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:12px;background:var(--surface);}.aic-audio-card audio,.aic-video-card video{width:100%;border-radius:8px;background:#090909;}.aic-media-actions{display:flex;gap:6px;flex-wrap:wrap;}.aic-media-actions button{padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-size:.68rem;cursor:pointer;}.aic-media-actions button:hover{border-color:var(--accent);color:var(--text);}
     @keyframes aic-rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
     @media (max-width:820px){.aic-shell{grid-template-columns:205px minmax(0,1fr);height:100%;border-radius:14px;}.aic-side{width:auto;}.aic-head{align-items:flex-start;flex-direction:column;padding:.8rem .9rem;}.aic-head-controls{width:100%;flex-wrap:wrap;}.aic-model-wrap{flex:1 1 100%;}.aic-model-wrap .aic-select{flex:1;max-width:none;}.aic-quick-actions{overflow-x:auto;padding:.5rem .9rem;}.aic-log{padding-top:1.5rem;}.aic-msg-row.user .aic-msg{max-width:86%;}.aic-hint{display:none;}}
     @media (max-width:560px){.aic-shell{grid-template-columns:1fr;min-height:0;height:100%;}.aic-side{display:none;}.aic-head{flex-direction:row;align-items:center;}.aic-head-left{flex:1;}.aic-head-controls{width:auto;}.aic-head-controls .aic-model-wrap,.aic-head-controls .aic-select,.aic-head-controls .aic-control-label{display:none;}.aic-log{padding-left:1rem;padding-right:1rem;}.aic-form{padding-left:.75rem;padding-right:.75rem;}.aic-quick-actions{padding-left:.75rem;padding-right:.75rem;}.aic-msg{font-size:.88rem;}}
@@ -393,7 +393,7 @@
       <button class="aic-chip-btn" id="aic-code-btn" onclick="aicToggleCoding()" title="Prefer structured coding responses">⌘ Coding</button>
       <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">✦ Persona</button>
       <button class="aic-icon-btn" onclick="aicToggleGithubBox()" title="Add read-only GitHub repository context">GitHub</button>
-      <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">▧ Image</button>
+      <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">▧ Image</button><button class="aic-icon-btn" id="aic-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button class="aic-icon-btn" id="aic-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button class="aic-icon-btn" id="aic-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button>
       <span class="aic-quick-spacer"></span>
       <span class="aic-control-label">Enter to send · Shift + Enter for a new line</span>
     </div>
@@ -410,6 +410,9 @@
       <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseImageBox()">× Close</button></div>
       <div class="aic-image-row"><select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider"></select><select class="aic-select" id="aic-image-omniroute-provider-select" onchange="aicImageOmniRouteProviderChanged()" title="OmniRoute image provider" style="display:none;"></select><select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model"></select><label class="aic-image-source" title="Upload an image to edit">＋ Reference<input type="file" id="aic-image-source-input" accept="image/png,image/jpeg,image/webp" onchange="aicImageSourceSelected(event)"></label><span id="aic-image-source-name" class="aic-image-source-name"></span><input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe an image to create or edit…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicGenerateImage();}"><button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button></div>
     </div>
+    <div class="aic-media-box" id="aic-search-box" style="display:none;"><div class="aic-media-label"><span id="aic-search-catalog-status">Search the web</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseSearchBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-search-model-select" onchange="aicSearchModelChanged()" title="Search model"></select><input type="text" id="aic-search-query-input" class="aic-media-prompt" placeholder="Search the web…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicSearchWeb();}"><select class="aic-select" id="aic-search-limit-select" title="Number of results"><option value="4">4 results</option><option value="6" selected>6 results</option><option value="10">10 results</option></select><button class="aic-send" type="button" onclick="aicSearchWeb()">Search</button></div><p class="aic-media-hint">Search results stay in this local conversation with source links and snippets.</p></div>
+    <div class="aic-media-box" id="aic-speech-box" style="display:none;"><div class="aic-media-label"><span id="aic-speech-catalog-status">Read text aloud</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseSpeechBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-speech-model-select" onchange="aicSpeechModelChanged()" title="Speech model"></select><select class="aic-select" id="aic-speech-voice-select" title="Voice"><option value="alloy">Alloy</option><option value="ash">Ash</option><option value="coral">Coral</option><option value="echo">Echo</option><option value="fable">Fable</option><option value="onyx">Onyx</option><option value="nova">Nova</option><option value="sage">Sage</option><option value="shimmer">Shimmer</option></select><textarea id="aic-speech-text-input" class="aic-media-prompt" placeholder="Paste text to speak, or leave blank to use the latest AI response…"></textarea><button class="aic-send" type="button" onclick="aicGenerateSpeech()">Speak</button></div><p class="aic-media-hint">Audio is generated inline and can be played or downloaded from the conversation.</p></div>
+    <div class="aic-media-box" id="aic-video-box" style="display:none;"><div class="aic-media-label"><span id="aic-video-catalog-status">Generate a video</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseVideoBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-video-model-select" onchange="aicVideoModelChanged()" title="Video model"></select><select class="aic-select" id="aic-video-aspect-select" title="Aspect ratio"><option value="16:9" selected>16:9 landscape</option><option value="9:16">9:16 portrait</option><option value="1:1">1:1 square</option></select><select class="aic-select" id="aic-video-duration-select" title="Duration"><option value="5" selected>5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select><textarea id="aic-video-prompt-input" class="aic-media-prompt" placeholder="Describe the video to generate…"></textarea><button class="aic-send" type="button" onclick="aicGenerateVideo()">Generate</button></div><p class="aic-media-hint">Video generation may take a few minutes. Keep this chat open while the provider responds.</p></div>
     <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>
     <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>
     <section class="aic-project-plan" id="aic-project-plan" aria-live="polite">
@@ -432,7 +435,8 @@
     <div class="aic-log" id="aic-log"></div>
     <form class="aic-form" onsubmit="aicSend(event)">
       <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
-      <div class="aic-composer"><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea><div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button></div><span class="aic-hint">Ask for an image anytime — direct image requests generate inline.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
+      <div class="aic-composer"><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
+
     </form>
   </main>
 </div>`;
@@ -505,6 +509,7 @@
           return;
         }
         renderModelSelect();
+        renderTypedMediaControls();
         var imageBtn = document.getElementById('aic-image-btn');
         if (imageBtn) imageBtn.style.display = (j && j.imageEnabled) ? '' : 'none';
         var attachBtn = document.getElementById('aic-attach-btn');
@@ -875,6 +880,10 @@
       setSending(true);
       requestGeneratedImage(t, retryPrompt, retryUserContent, retrySource, retryIsEdit)
         .finally(function () { setSending(false); });
+    } else if (retryKind === 'search' || retryKind === 'speech' || retryKind === 'video') {
+      setSending(true);
+      var mediaRetry = retryKind === 'search' ? requestWebSearch(t, retryPrompt) : (retryKind === 'speech' ? requestSpeech(t, retryPrompt) : requestVideo(t, retryPrompt));
+      mediaRetry.finally(function () { setSending(false); });
     } else {
       var retryInput = document.getElementById('aic-input');
       if (retryInput) retryInput.value = q;
@@ -1150,6 +1159,176 @@
       if (cur) { cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + (err.message || 'Image request failed') }); upsertThread(cur); renderLog(); }
     }).finally(function () { setSending(false); });
   };
+
+  /* ── web search, speech, and video generation ───────────────────────── */
+  function typedModels(kind) {
+    return (_statusCache && Array.isArray(_statusCache[kind + 'Models'])) ? _statusCache[kind + 'Models'] : [];
+  }
+  function typedModel(kind, thread) {
+    var models = typedModels(kind);
+    if (!models.length) return null;
+    var field = kind + 'Model';
+    var current = thread && thread[field];
+    var selected = models.find(function (m) { return m.key === current; }) || models[0];
+    if (thread && thread[field] !== selected.key) { thread[field] = selected.key; upsertThread(thread); }
+    return selected;
+  }
+  function renderTypedModel(kind) {
+    var select = document.getElementById('aic-' + kind + '-model-select');
+    var status = document.getElementById('aic-' + kind + '-catalog-status');
+    var models = typedModels(kind);
+    var thread = getThread(currentThreadId());
+    var selected = typedModel(kind, thread);
+    if (select) select.innerHTML = models.map(function (m) { return '<option value="' + escAttr(m.key) + '">' + esc(m.label || m.key) + '</option>'; }).join('');
+    if (select && selected) select.value = selected.key;
+    if (status) status.textContent = models.length ? (kind === 'search' ? 'Search the web · ' : kind === 'speech' ? 'Read text aloud · ' : 'Generate a video · ') + models.length + ' model' + (models.length === 1 ? '' : 's') : (kind === 'search' ? 'Web search unavailable' : kind === 'speech' ? 'Text-to-speech unavailable' : 'Video generation unavailable');
+  }
+  function renderTypedMediaControls() {
+    ['search', 'speech', 'video'].forEach(function (kind) {
+      var enabled = !!(_statusCache && _statusCache[kind + 'Enabled'] && typedModels(kind).length);
+      var button = document.getElementById('aic-' + kind + '-btn');
+      var composerButton = document.getElementById('aic-composer-' + kind + '-btn');
+      if (button) button.style.display = enabled ? '' : 'none';
+      if (composerButton) composerButton.style.display = enabled ? '' : 'none';
+      renderTypedModel(kind);
+    });
+  }
+  function closeTypedMediaBoxes(except) {
+    ['search', 'speech', 'video'].forEach(function (kind) {
+      if (kind === except) return;
+      var box = document.getElementById('aic-' + kind + '-box');
+      if (box) box.style.display = 'none';
+    });
+  }
+  function toggleTypedMediaBox(kind) {
+    if (!typedModels(kind).length) { toast((kind === 'search' ? 'Web search' : kind === 'speech' ? 'Text-to-speech' : 'Video generation') + ' is not configured.', 'error'); return; }
+    var box = document.getElementById('aic-' + kind + '-box');
+    if (!box) return;
+    var showing = box.style.display !== 'none';
+    closeTypedMediaBoxes(showing ? '' : kind);
+    box.style.display = showing ? 'none' : '';
+    if (!showing) {
+      renderTypedModel(kind);
+      var input = document.getElementById('aic-' + kind + (kind === 'search' ? '-query' : kind === 'speech' ? '-text' : '-prompt') + '-input');
+      if (input) input.focus();
+    }
+  }
+  window.aicToggleSearchBox = function () { toggleTypedMediaBox('search'); };
+  window.aicToggleSpeechBox = function () { toggleTypedMediaBox('speech'); };
+  window.aicToggleVideoBox = function () { toggleTypedMediaBox('video'); };
+  window.aicCloseSearchBox = function () { var box = document.getElementById('aic-search-box'); if (box) box.style.display = 'none'; };
+  window.aicCloseSpeechBox = function () { var box = document.getElementById('aic-speech-box'); if (box) box.style.display = 'none'; };
+  window.aicCloseVideoBox = function () { var box = document.getElementById('aic-video-box'); if (box) box.style.display = 'none'; };
+  window.aicSearchModelChanged = function () { saveThreadModel('searchModel', (document.getElementById('aic-search-model-select') || {}).value || ''); };
+  window.aicSpeechModelChanged = function () { saveThreadModel('speechModel', (document.getElementById('aic-speech-model-select') || {}).value || ''); };
+  window.aicVideoModelChanged = function () { saveThreadModel('videoModel', (document.getElementById('aic-video-model-select') || {}).value || ''); };
+
+  function isSearchIntent(text) {
+    var q = String(text || '').trim().toLowerCase();
+    if (!q || isImageIntent(q)) return false;
+    return /^(?:please\s+)?(?:search|look\s+up|find\s+online|browse|research|google)\b/.test(q)
+      || /\b(?:latest|today's|todays|current|recent|breaking)\s+(?:news|updates?|information|価格|price|weather|results?)\b/.test(q)
+      || /\b(?:search|look\s+up|find\s+online|browse\s+the\s+web|web\s+search)\b/.test(q);
+  }
+  function isSpeechIntent(text) {
+    var q = String(text || '').trim().toLowerCase();
+    if (!q) return false;
+    return /^(?:please\s+)?(?:read|speak|say|narrate|convert)\b[\s\S]{0,80}\b(?:aloud|out\s+loud|audio|speech|voice|tts|text\s+to\s+speech)\b/.test(q)
+      || /\b(?:text\s+to\s+speech|read\s+this\s+aloud|read\s+it\s+aloud|make\s+(?:an?\s+)?audio)\b/.test(q);
+  }
+  function isVideoIntent(text) {
+    var q = String(text || '').trim().toLowerCase();
+    if (!q || isImageIntent(q)) return false;
+    return /^(?:(?:please|kindly)\s+)?(?:generate|create|make|render|produce|animate)\b[\s\S]{0,100}\b(?:video|clip|movie|animation|short)\b/.test(q)
+      || /\b(?:text\s+to\s+video|video\s+generation|generate\s+a\s+video|make\s+a\s+video)\b/.test(q);
+  }
+  function latestAssistantText(thread) {
+    var messages = (thread && thread.messages) || [];
+    for (var i = messages.length - 1; i >= 0; i -= 1) if (messages[i] && messages[i].role === 'assistant' && messages[i].content) return String(messages[i].content).replace(/```[\\s\\S]*?```/g, '').trim().slice(0, 12000);
+    return '';
+  }
+  function mediaUserMessage(thread, content) {
+    if (!thread.messages.length) thread.title = threadTitleFromFirstMessage(content);
+    thread.messages.push({ role: 'user', content: content });
+    upsertThread(thread);
+    renderThreadList();
+    renderLog();
+  }
+  function responseError(response, fallback) {
+    return response.json().catch(function () { return {}; }).then(function (j) { throw new Error((j && (j.detail || j.error)) || fallback); });
+  }
+  function blobToDataUrl(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || '')); };
+      reader.onerror = function () { reject(new Error('Could not save generated media.')); };
+      reader.readAsDataURL(blob);
+    });
+  }
+  function mediaSourceFromJson(payload, kind) {
+    var raw = payload && (payload[kind] || payload.audio || payload.video);
+    if (typeof raw === 'string') return raw;
+    if (!raw || typeof raw !== 'object') return '';
+    var value = raw.url || raw.uri || raw.data || raw.base64 || raw.b64_json || '';
+    if (value && /^[A-Za-z0-9+/=\r\n]+$/.test(value) && value.length > 80 && value.indexOf('http') !== 0 && value.indexOf('data:') !== 0) return value;
+    return value;
+  }
+  function mediaDownload(btn) {
+    var row = btn && btn.closest('.aic-msg-row');
+    var t = getThread(currentThreadId());
+    var index = row ? Number(row.getAttribute('data-index')) : -1;
+    var message = t && t.messages[index];
+    if (!message) return;
+    var source = message.audioData || message.audioUrl || message.videoData || message.videoUrl || (_mediaUrls[message.mediaKey] || '');
+    if (!source) { toast('This media is no longer available in this chat.', 'error'); return; }
+    var a = document.createElement('a'); a.href = source; a.download = (message.mediaType === 'audio' ? 'ai-chat-audio-' : 'ai-chat-video-') + Date.now() + (message.mediaType === 'audio' ? '.mp3' : '.mp4'); document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+  window.aicDownloadMedia = mediaDownload;
+  function renderSearchMessage(message) {
+    var results = (message.search && message.search.results) || [];
+    return '<div class="aic-search-summary"><strong>Search results for:</strong> ' + esc((message.search && message.search.query) || '') + '</div><div class="aic-search-results">' + (results.length ? results.map(function (item) { var url = String(item.url || ''); return '<a class="aic-search-source" href="' + escAttr(url) + '" target="_blank" rel="noopener noreferrer"><div class="aic-search-source-title">' + esc(item.title || 'Untitled') + '</div><div class="aic-search-source-url">' + esc(url) + '</div><div class="aic-search-source-snippet">' + esc(item.snippet || '') + '</div></a>'; }).join('') : '<div class="aic-media-hint">No sources were returned.</div>') + '</div>';
+  }
+  function renderAudioMessage(message) {
+    var source = message.audioData || message.audioUrl || (_mediaUrls[message.mediaKey] || '');
+    if (!source) return '<div class="aic-audio-card"><strong>Audio generated</strong><span class="aic-media-hint">The audio data is no longer available after reload.</span></div>';
+    return '<div class="aic-audio-card"><strong>Audio generated</strong><audio controls preload="metadata" src="' + escAttr(source) + '"></audio><div class="aic-media-actions"><button type="button" onclick="aicDownloadMedia(this)">↓ Download audio</button></div></div>';
+  }
+  function renderVideoMessage(message) {
+    var source = message.videoData || message.videoUrl || (_mediaUrls[message.mediaKey] || '');
+    if (!source) return '<div class="aic-video-card"><strong>Video generated</strong><span class="aic-media-hint">The video data is no longer available after reload. Generate it again to preview.</span></div>';
+    return '<div class="aic-video-card"><strong>Video generated</strong><video controls preload="metadata" src="' + escAttr(source) + '"></video><div class="aic-media-actions"><button type="button" onclick="aicDownloadMedia(this)">↓ Download video</button></div></div>';
+  }
+  function storeBinaryMedia(thread, message, blob, kind) {
+    var objectUrl = URL.createObjectURL(blob);
+    var key = thread.id + ':' + kind + ':' + Date.now() + ':' + Math.random().toString(36).slice(2, 6);
+    _mediaUrls[key] = objectUrl;
+    message.mediaKey = key;
+    message.mediaMime = blob.type || (kind === 'audio' ? 'audio/mpeg' : 'video/mp4');
+    // Keep small audio files durable; large videos stay in a session object URL so localStorage is not exhausted.
+    if (kind === 'audio' && blob.size <= 2.5 * 1024 * 1024) return blobToDataUrl(blob).then(function (data) { message.audioData = data; delete message.mediaKey; delete _mediaUrls[key]; });
+    return Promise.resolve();
+  }
+  function requestWebSearch(thread, query) {
+    var selected = typedModel('search', thread); if (!selected) return Promise.reject(new Error('No search model is configured.'));
+    mediaUserMessage(thread, '⌕ Search the web: ' + query);
+    var typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Searching the web with ' + (selected.label || selected.key) + '…'; var log = document.getElementById('aic-log'); if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+    return backendAuthFetch('/api/ai-chat/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: query, model: selected.key, searchType: 'web', maxResults: Number((document.getElementById('aic-search-limit-select') || {}).value || 6) }) }).then(function (r) { return r.ok ? r.json() : responseError(r, 'Web search failed.'); }).then(function (payload) { var cur = getThread(thread.id); if (!cur) return; cur.messages.push({ role: 'assistant', content: 'Web search results for ' + query, mediaType: 'search', search: payload || { query: query, results: [] } }); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Web search failed.'), retry: { kind: 'search', q: query } }); upsertThread(cur); renderLog(); } });
+  }
+  window.aicSearchWeb = function () { if (_sending) return; var input = document.getElementById('aic-search-query-input'); var query = String((input && input.value) || '').trim() || String((document.getElementById('aic-input') || {}).value || '').trim(); if (!query) { toast('Enter a search query.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (input) input.value = ''; setSending(true); requestWebSearch(t, query).finally(function () { setSending(false); }); };
+  function requestSpeech(thread, text) {
+    var selected = typedModel('speech', thread); if (!selected) return Promise.reject(new Error('No speech model is configured.'));
+    mediaUserMessage(thread, '♬ Read aloud: ' + text.slice(0, 500));
+    var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Generating audio with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+    return backendAuthFetch('/api/ai-chat/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, model: selected.key, voice: String((document.getElementById('aic-speech-voice-select') || {}).value || 'alloy'), responseFormat: 'mp3' }) }).then(function (r) { if (!r.ok) return responseError(r, 'Text-to-speech failed.'); var type = (r.headers.get('content-type') || '').toLowerCase(); return type.indexOf('audio/') === 0 ? r.blob().then(function (blob) { return { blob: blob }; }) : r.json().then(function (payload) { return { payload: payload }; }); }).then(function (result) { var cur = getThread(thread.id); if (!cur) return; var message = { role: 'assistant', content: 'Audio narration generated.', mediaType: 'audio', speechText: text, speechModel: selected.key }; if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'audio').then(function () { cur.messages.push(message); upsertThread(cur); renderLog(); }); var source = mediaSourceFromJson(result.payload, 'audio'); if (!source) throw new Error('The speech service returned no audio data.'); message.audioData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:audio/mpeg;base64,' + source; cur.messages.push(message); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Text-to-speech failed.'), retry: { kind: 'speech', q: text } }); upsertThread(cur); renderLog(); } });
+  }
+  window.aicGenerateSpeech = function () { if (_sending) return; var field = document.getElementById('aic-speech-text-input'); var t = getThread(currentThreadId()); var text = String((field && field.value) || '').trim() || latestAssistantText(t); if (!text) { toast('Enter text or generate an AI response first.'); return; } if (field) field.value = ''; setSending(true); requestSpeech(t, text).finally(function () { setSending(false); }); };
+  function requestVideo(thread, prompt) {
+    var selected = typedModel('video', thread); if (!selected) return Promise.reject(new Error('No video model is configured.'));
+    mediaUserMessage(thread, '▣ Generate video: ' + prompt);
+    var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Generating video with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+    return backendAuthFetch('/api/ai-chat/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: String((document.getElementById('aic-video-aspect-select') || {}).value || '16:9'), duration: Number((document.getElementById('aic-video-duration-select') || {}).value || 5) }) }).then(function (r) { if (!r.ok) return responseError(r, 'Video generation failed.'); var type = (r.headers.get('content-type') || '').toLowerCase(); return type.indexOf('video/') === 0 || type === 'application/octet-stream' ? r.blob().then(function (blob) { return { blob: blob }; }) : r.json().then(function (payload) { return { payload: payload }; }); }).then(function (result) { var cur = getThread(thread.id); if (!cur) return; var message = { role: 'assistant', content: 'Video generated from: ' + prompt, mediaType: 'video', videoPrompt: prompt, videoModel: selected.key }; if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'video').then(function () { cur.messages.push(message); upsertThread(cur); renderLog(); }); var source = mediaSourceFromJson(result.payload, 'video'); if (!source) throw new Error('The video service returned no video data.'); message.videoData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:video/mp4;base64,' + source; cur.messages.push(message); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Video generation failed.'), retry: { kind: 'video', q: prompt } }); upsertThread(cur); renderLog(); } });
+  }
+  window.aicGenerateVideo = function () { if (_sending) return; var field = document.getElementById('aic-video-prompt-input'); var prompt = String((field && field.value) || '').trim(); if (!prompt) { toast('Describe the video to generate.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (field) field.value = ''; setSending(true); requestVideo(t, prompt).finally(function () { setSending(false); }); };
 
   /* ── GitHub repository context ──────────────────────────────────────── */
   function githubState(t) {
@@ -1988,7 +2167,7 @@
       var imageSource = m.imageData || m.imageUrl || '';
       var body = imageSource
         ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
-        : (m.role === 'assistant' ? renderAssistantBody(m.content, m) : mdLite(m.content));
+        : (m.mediaType === 'search' ? renderSearchMessage(m) : (m.mediaType === 'audio' ? renderAudioMessage(m) : (m.mediaType === 'video' ? renderVideoMessage(m) : (m.role === 'assistant' ? renderAssistantBody(m.content, m) : mdLite(m.content)))));
       var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
       var actions = (m.role !== 'error' && m.content)
         ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">Copy</button>' + (m.role === 'user' ? '<button onclick="aicRetryMessage(this)">↻ Retry</button>' : '') + '</div>' : '';
@@ -2001,6 +2180,7 @@
   function renderAll() {
     renderThreadList();
     renderModelSelect();
+    renderTypedMediaControls();
     renderWebBtn();
     renderCodingBtn();
     renderWorkspace();
@@ -2015,6 +2195,10 @@
     if (imgBox) imgBox.style.display = 'none';
     var githubBox = document.getElementById('aic-github-box');
     if (githubBox) githubBox.style.display = 'none';
+    ['search', 'speech', 'video'].forEach(function (kind) {
+      var mediaBox = document.getElementById('aic-' + kind + '-box');
+      if (mediaBox) mediaBox.style.display = 'none';
+    });
   }
 
   function setSending(on) {
@@ -2042,6 +2226,27 @@
 
     var t = getThread(currentThreadId());
     if (!t) return;
+
+    // Typed OmniRoute capabilities bypass text chat entirely. This prevents a
+    // text model from pretending it searched, spoke, or rendered a video.
+    if (isSearchIntent(q)) {
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      setSending(true);
+      requestWebSearch(t, q).finally(function () { setSending(false); });
+      return;
+    }
+    if (isSpeechIntent(q)) {
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      setSending(true);
+      requestSpeech(t, q).finally(function () { setSending(false); });
+      return;
+    }
+    if (isVideoIntent(q)) {
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      setSending(true);
+      requestVideo(t, q).finally(function () { setSending(false); });
+      return;
+    }
 
     // Explicit image requests bypass text chat entirely. This prevents a text
     // model from replying that it cannot create images and automatically uses
