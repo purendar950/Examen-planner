@@ -235,8 +235,16 @@
     '.aic-new-btn{display:flex;align-items:center;gap:7px;width:100%;padding:10px 12px;border:1px solid rgba(52,211,153,.32);border-radius:11px;background:rgba(16,185,129,.12);color:#a7f3d0;font-size:.76rem;font-weight:800;letter-spacing:.01em;transition:background .16s,border-color .16s,transform .16s;}' +
     '.aic-new-btn span{font-size:1.1rem;line-height:0;color:var(--accent);}' +
     '.aic-new-btn:hover{border-color:var(--accent);background:rgba(16,185,129,.2);transform:translateY(-1px);}' +
-    '.aic-thread-list{padding:13px 9px;}' +
+    '.aic-thread-search{display:flex;align-items:center;gap:7px;margin-top:11px;padding:8px 10px;border:1px solid rgba(148,163,184,.14);border-radius:10px;background:rgba(2,6,23,.24);color:#64748b;}' +
+    '.aic-thread-search:focus-within{border-color:rgba(52,211,153,.45);background:rgba(2,6,23,.4);}' +
+    '.aic-thread-search span{font-size:.9rem;line-height:1;}' +
+    '.aic-thread-search input{width:100%;border:0;outline:0;background:transparent;color:#cbd5e1;font-size:.69rem;}' +
+    '.aic-thread-search input::placeholder{color:#64748b;}' +
+    '.aic-side-section-label{display:flex;justify-content:space-between;align-items:center;padding:14px 17px 4px;color:#64748b;font-size:.61rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;}' +
+    '.aic-side-section-label span:last-child{min-width:18px;text-align:center;border-radius:999px;background:rgba(148,163,184,.1);padding:2px 5px;font-size:.58rem;letter-spacing:0;}' +
+    '.aic-thread-list{padding:8px 9px;}' +
     '.aic-thread-list:empty:before{content:"Your conversations will appear here";display:block;padding:16px 10px;color:#64748b;font-size:.67rem;line-height:1.5;}' +
+    '.aic-thread-empty{padding:16px 10px;color:#64748b;font-size:.67rem;line-height:1.5;}' +
     '.aic-thread{padding:10px 11px;margin-bottom:3px;border:1px solid transparent;border-radius:10px;color:#cbd5e1;font-size:.76rem;transition:background .15s,border-color .15s;}' +
     '.aic-thread:before{content:"";width:5px;height:5px;flex:0 0 5px;border-radius:50%;background:#64748b;opacity:.65;}' +
     '.aic-thread:hover{background:rgba(148,163,184,.08);border-color:rgba(148,163,184,.1);}' +
@@ -284,8 +292,15 @@
     '.aic-starter:hover{border-color:rgba(52,211,153,.4);background:rgba(16,185,129,.1);color:#d1fae5;transform:translateY(-1px);}' +
     '.aic-activity{margin:0 22px;padding:0;color:#64748b;font-size:.67rem;}' +
     '.aic-activity:not(:empty){padding:7px 0;}' +
-    '.aic-form{margin:4px 18px 18px;padding:9px 10px 8px;gap:8px;border:1px solid rgba(148,163,184,.16);border-radius:16px;background:rgba(15,23,42,.78);box-shadow:0 12px 28px rgba(0,0,0,.14);}' +
+    '.aic-form{display:flex;flex-direction:column;align-items:stretch;margin:4px 18px 18px;padding:10px 12px 9px;gap:7px;border:1px solid rgba(148,163,184,.16);border-radius:16px;background:rgba(15,23,42,.78);box-shadow:0 12px 28px rgba(0,0,0,.14);}' +
     '.aic-form:focus-within{border-color:rgba(52,211,153,.42);box-shadow:0 0 0 3px rgba(16,185,129,.08),0 12px 28px rgba(0,0,0,.14);}' +
+    '.aic-composer-topline,.aic-composer-bottom{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;}' +
+    '.aic-composer-tools,.aic-composer-actions{display:flex;align-items:center;gap:6px;}' +
+    '.aic-tool-btn{height:27px;padding:4px 8px;border:1px solid rgba(148,163,184,.13);border-radius:8px;background:rgba(148,163,184,.05);color:#94a3b8;font-size:.63rem;cursor:pointer;transition:all .15s;}' +
+    '.aic-tool-btn:hover{border-color:rgba(52,211,153,.42);background:rgba(16,185,129,.1);color:#d1fae5;}' +
+    '.aic-composer-context{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:.61rem;}' +
+    '.aic-composer-disclaimer{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#64748b;font-size:.59rem;}' +
+    '.aic-send-key{display:inline-grid;place-items:center;margin-left:6px;width:17px;height:17px;border-radius:5px;background:rgba(0,0,0,.14);font-size:.68rem;}' +
     '.aic-input{min-height:44px;padding:10px 11px;border:0;background:transparent;color:#f8fafc;font-size:.86rem;}' +
     '.aic-input:focus{border:0;box-shadow:none;}' +
     '.aic-shortcuts{padding:3px 2px 0;color:#64748b;}' +
@@ -295,7 +310,7 @@
     '.aic-persona-box,.aic-memory-box,.aic-github-box,.aic-image-box{margin:0 18px 8px;padding:13px 14px;border:1px solid rgba(148,163,184,.12);border-radius:13px;background:rgba(15,23,42,.75);}' +
     '@media (max-width:900px){.aic-head{grid-template-columns:minmax(0,1fr) auto;}.aic-head h2{font-size:1.08rem;}.aic-head-status{font-size:.6rem;}.aic-head-controls{overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;scrollbar-width:none;}.aic-head-controls::-webkit-scrollbar{display:none;}}' +
     '@media (max-width:720px){.aic-shell{height:calc(100vh - 112px);min-height:500px;border-radius:16px;}.aic-sidebar-toggle{display:block;grid-column:auto;grid-row:1;}.aic-head{grid-template-columns:34px minmax(0,1fr) auto;padding:15px 15px 12px;}.aic-head-copy{grid-column:2;grid-row:1;}.aic-head-status{grid-column:3;grid-row:1;}.aic-head-controls{grid-column:1/-1;grid-row:2;margin-left:42px;}.aic-head-copy p{display:none;}.aic-context-strip{margin:11px 14px 3px;}.aic-log{padding:16px 14px;}.aic-msg-row,.aic-msg-row.user{max-width:92%;}.aic-form{margin:4px 10px 10px;}.aic-activity{margin:0 14px;}}' +
-    '@media (max-width:560px){.aic-side{position:absolute;z-index:20;inset:0 auto 0 0;width:246px;flex-basis:246px;transform:translateX(0);box-shadow:20px 0 35px rgba(0,0,0,.28);}.aic-shell.is-sidebar-collapsed .aic-side{width:246px;flex-basis:246px;transform:translateX(-104%);border-right:1px solid rgba(148,163,184,.13);}.aic-shell:not(.is-sidebar-collapsed) .aic-main:after{content:"";position:absolute;inset:0;background:rgba(2,6,23,.48);z-index:10;pointer-events:none;}.aic-head-status{padding:6px 7px;}.aic-head-status span:last-child{display:none;}.aic-head h2{font-size:.94rem;}.aic-eyebrow{font-size:.54rem;}.aic-form{align-items:flex-end;}.aic-attach-btn{display:none;}.aic-shortcuts span:last-child{font-size:.59rem;}}';
+    '@media (max-width:560px){.aic-side{position:absolute;z-index:20;inset:0 auto 0 0;width:246px;flex-basis:246px;transform:translateX(0);box-shadow:20px 0 35px rgba(0,0,0,.28);}.aic-shell.is-sidebar-collapsed .aic-side{width:246px;flex-basis:246px;transform:translateX(-104%);border-right:1px solid rgba(148,163,184,.13);}.aic-shell:not(.is-sidebar-collapsed) .aic-main:after{content:"";position:absolute;inset:0;background:rgba(2,6,23,.48);z-index:10;pointer-events:none;}.aic-head-status{padding:6px 7px;}.aic-head-status span:last-child{display:none;}.aic-head h2{font-size:.94rem;}.aic-eyebrow{font-size:.54rem;}.aic-form{align-items:stretch;}.aic-composer-tools{overflow-x:auto;max-width:70%;scrollbar-width:none;}.aic-composer-tools::-webkit-scrollbar{display:none;}.aic-composer-context{max-width:30%;}.aic-composer-disclaimer{max-width:58%;}.aic-tool-btn{white-space:nowrap;}.aic-attach-btn{display:none;}.aic-shortcuts span:last-child{font-size:.59rem;}}';
   document.head.appendChild(st);
 
   /* ── page markup ── */
@@ -305,7 +320,9 @@
     '    <div class="aic-side-head">',
     '      <div class="aic-brand-lockup"><span class="aic-brand-mark">✦</span><div><div class="aic-brand-name">StudyPlanner AI</div><div class="aic-brand-sub">Focused study copilot</div></div></div>',
     '      <button class="aic-new-btn" onclick="aicNewThread()"><span>＋</span> New conversation</button>',
+    '      <label class="aic-thread-search"><span>⌕</span><input id="aic-thread-search-input" type="search" placeholder="Search conversations" oninput="aicFilterThreads(this.value)" autocomplete="off"></label>',
     '    </div>',
+    '    <div class="aic-side-section-label"><span>Conversations</span><span id="aic-thread-count">0</span></div>',
     '    <div class="aic-thread-list" id="aic-thread-list"></div>',
     '    <div class="aic-side-foot"><span class="aic-side-tip"><span class="aic-side-tip-dot"></span> Private by default</span><span>⌘ K</span></div>',
     '  </aside>',
@@ -365,10 +382,9 @@
     '    <div class="aic-log" id="aic-log"></div>',
     '    <form class="aic-form" onsubmit="aicSend(event)">',
     '      <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">',
-    '      <button type="button" class="aic-icon-btn" id="aic-attach-btn" onclick="document.getElementById(\'aic-file-input\').click()" title="Attach a file" style="display:none;">\uD83D\uDCCE</button>',
-    '      <div class="aic-composer-wrap"><textarea class="aic-input" id="aic-input" rows="1" maxlength="4000" placeholder="Message AI Chat…" oninput="aicInputChanged()" onkeydown="aicKeydown(event)"></textarea><div class="aic-shortcuts"><span>Enter to send · Shift+Enter for a new line</span><span id="aic-char-count">0 / 4000</span></div></div>',
-    '      <button class="aic-stop" id="aic-stop-btn" type="button" onclick="aicStop()" style="display:none;">Stop</button>',
-    '      <button class="aic-send" id="aic-send-btn" type="submit">Send</button>',
+    '      <div class="aic-composer-topline"><div class="aic-composer-tools"><button type="button" class="aic-tool-btn" id="aic-attach-btn" onclick="document.getElementById(\'aic-file-input\').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-tool-btn" onclick="aicToggleGithubBox()" title="Add repository context">⌘ Repo</button><button type="button" class="aic-tool-btn" onclick="aicToggleMemory()" title="Use device memory">✦ Memory</button><button type="button" class="aic-tool-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;" id="aic-composer-image-btn">▧ Image</button></div><span class="aic-composer-context" id="aic-composer-context">Adaptive · Private workspace</span></div>',
+    '      <div class="aic-composer-wrap"><textarea class="aic-input" id="aic-input" rows="1" maxlength="4000" placeholder="Ask StudyPlanner AI anything…" oninput="aicInputChanged()" onkeydown="aicKeydown(event)"></textarea><div class="aic-shortcuts"><span>Enter to send · Shift+Enter for a new line</span><span id="aic-char-count">0 / 4000</span></div></div>',
+    '      <div class="aic-composer-bottom"><span class="aic-composer-disclaimer">AI can make mistakes. Review important answers.</span><div class="aic-composer-actions"><button class="aic-stop" id="aic-stop-btn" type="button" onclick="aicStop()" style="display:none;">Stop</button><button class="aic-send" id="aic-send-btn" type="submit"><span>Send</span><span class="aic-send-key">↵</span></button></div></div>',
     '    </form>',
     '  </div>',
     '</div>'
@@ -439,7 +455,9 @@
         }
         renderModelSelect();
         var imageBtn = document.getElementById('aic-image-btn');
+        var composerImageBtn = document.getElementById('aic-composer-image-btn');
         if (imageBtn) imageBtn.style.display = (j && j.imageEnabled) ? '' : 'none';
+        if (composerImageBtn) composerImageBtn.style.display = (j && j.imageEnabled) ? '' : 'none';
         var attachBtn = document.getElementById('aic-attach-btn');
         if (attachBtn) attachBtn.style.display = (j && j.ragEnabled) ? '' : 'none';
         scheduleCatalogRefresh(j);
@@ -455,20 +473,35 @@
     onPageActivated('dashboard', function () { if (_checked) checkAccess(); });
     onPageActivated('ai-chat', function () { checkAccess(); renderAll(); });
   }
+  document.addEventListener('keydown', function (event) {
+    if ((event.metaKey || event.ctrlKey) && String(event.key).toLowerCase() === 'k') {
+      var search = document.getElementById('aic-thread-search-input');
+      if (search) { event.preventDefault(); search.focus(); search.select(); }
+    }
+  });
 
   /* ── thread sidebar ── */
+  var _threadQuery = '';
   function renderThreadList() {
     var el = document.getElementById('aic-thread-list');
     if (!el) return;
-    var list = loadThreads();
+    var all = loadThreads();
+    var query = String(_threadQuery || '').trim().toLowerCase();
+    var list = query ? all.filter(function (t) { return String(t.title || 'New chat').toLowerCase().indexOf(query) !== -1; }) : all;
     var curId = currentThreadId();
-    el.innerHTML = list.map(function (t) {
+    var count = document.getElementById('aic-thread-count');
+    if (count) count.textContent = query ? list.length + '/' + all.length : all.length;
+    el.innerHTML = list.length ? list.map(function (t) {
       return '<div class="aic-thread' + (t.id === curId ? ' active' : '') + '" onclick="aicSwitchThread(\'' + escAttr(t.id) + '\')">' +
         '<span class="aic-thread-title">' + esc(t.title || 'New chat') + '</span>' +
         '<button class="aic-thread-del" onclick="event.stopPropagation();aicDeleteThread(\'' + escAttr(t.id) + '\')" title="Delete">\u2715</button>' +
       '</div>';
-    }).join('');
+    }).join('') : '<div class="aic-thread-empty">' + (query ? 'No matching conversations' : 'Your conversations will appear here') + '</div>';
   }
+  window.aicFilterThreads = function (value) {
+    _threadQuery = String(value || '').slice(0, 80);
+    renderThreadList();
+  };
 
   window.aicNewThread = function () {
     var t = { id: newId(), title: 'New chat', messages: [], persona: '', mode: 'adaptive', model: '', imageModel: '', web: 'auto', github: null, createdAt: Date.now() };
@@ -660,6 +693,7 @@
     var mode = AIC_MODES.find(function (m) { return m.key === key; }) || AIC_MODES[0];
     var label = document.getElementById('aic-context-label');
     var copy = document.getElementById('aic-context-copy');
+    var composerContext = document.getElementById('aic-composer-context');
     var copyByMode = {
       adaptive: 'Ask anything about your exam prep, plans, notes, or code.',
       tutor: 'Learn step by step with hints, examples, and quick checks.',
@@ -670,6 +704,7 @@
     };
     if (label) label.textContent = mode.label + ' workspace';
     if (copy) copy.textContent = copyByMode[mode.key] || mode.hint;
+    if (composerContext) composerContext.textContent = mode.label + ' · Private workspace';
   }
   function renderModeSelect() {
     var sel = document.getElementById('aic-mode-select');
