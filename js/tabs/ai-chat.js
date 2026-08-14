@@ -1819,15 +1819,22 @@
       return { role: m.role, content: content };
     }).filter(Boolean);
     var modelSel = document.getElementById('aic-model-select');
+    // A new-project request must not inherit stale files from an earlier project
+    // in this thread. Otherwise the backend correctly sees a workspace, enters
+    // PATCH-ONLY mode, and refuses to emit the named files needed for creation.
+    var creatingProject = isCreationRequest(q);
+    // For ordinary edits this is equivalent to the legacy workspace: workspaceRequest(t) path.
+    var requestedWorkspace = creatingProject ? null : workspaceRequest(t);
     var body = {
       q: q, history: contextHistory, threadId: t.id,
       coding: !!t.codingMode || isCodingRequest(q),
       model: (modelSel && modelSel.value) || t.model || '',
       web: t.web || 'auto', persona: t.persona || '',
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
-      workspace: workspaceRequest(t),
-      editMode: workspaceRequest(t) ? 'multi-file-patch' : 'new-file',
+      workspace: requestedWorkspace,
+      editMode: requestedWorkspace ? 'multi-file-patch' : 'new-file',
       localMemory: localMemoryContext(t),
+      timeoutMs: (creatingProject || !!t.codingMode || isCodingRequest(q)) ? 90000 : 30000,
       imageContext: (function () {
         for (var i = t.messages.length - 1; i >= 0; i -= 1) {
           var m = t.messages[i];
@@ -1866,11 +1873,17 @@
       }
       setSending(false);
     }
+    function errorText(err) {
+      if (!err) return 'Unknown request failure';
+      var msg = String(err.message || err.detail || err.error || err);
+      if (err.name === 'AbortError' || /aborted|abort/i.test(msg)) msg = 'Request timed out or was aborted';
+      return msg.slice(0, 300);
+    }
     function fallbackToBlocking() {
       if (settled) return;
       settled = true;
       backendAuthFetch('/api/ai-chat', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: body.timeoutMs
       })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, data: j || {} }; }); })
         .then(function (res) {
@@ -1889,10 +1902,10 @@
           upsertThread(cur);
           if (currentThreadId() === t.id) renderLog();
         })
-        .catch(function () {
+        .catch(function (err) {
           var cur = getThread(t.id);
           if (!cur) return;
-          cur.messages.push({ role: 'error', content: '\u26a0\uFE0F Network error — check your connection and try again.', retry: { kind: 'text', q: q } });
+          cur.messages.push({ role: 'error', content: '\u26a0\uFE0F ' + errorText(err) + ' — check the backend server and try again.', retry: { kind: 'text', q: q } });
           upsertThread(cur);
           if (currentThreadId() === t.id) renderLog();
         })
@@ -1903,7 +1916,8 @@
       var requestOptions = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        timeoutMs: body.timeoutMs
       };
       return window.PrepPathBackend
         ? window.PrepPathBackend.fetch('/api/ai-chat/stream', requestOptions)
@@ -1951,8 +1965,11 @@
         });
       }
       return pump();
-    }).catch(function () {
-      fallbackToBlocking();
+    }).catch(function (err) {
+      // Stream failures are retried through the blocking endpoint. The blocking
+      // path owns the user-facing error, but retain the failure for debugging
+      // when both attempts fail.
+      fallbackToBlocking(err);
     });
   };
 

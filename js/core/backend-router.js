@@ -141,8 +141,14 @@
         mark(server, false, lastError.message);
       } catch (error) {
         timed.clear();
-        lastError = error;
-        mark(server, false, error && error.message ? error.message : 'Network error');
+        // AbortController produces a browser-specific AbortError. Normalize it
+        // so the UI can distinguish a slow/cold backend from an offline client.
+        if (error && error.name === 'AbortError') {
+          lastError = new Error('Request timed out after ' + (options.timeoutMs || 12000) + ' ms from ' + server.label);
+        } else {
+          lastError = error;
+        }
+        mark(server, false, lastError && lastError.message ? lastError.message : 'Network error');
       }
     }
     throw lastError || new Error('All backend servers failed.');
