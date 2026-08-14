@@ -217,7 +217,7 @@
     .aic-image-actions button{padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-size:.68rem;cursor:pointer;}
     .aic-image-actions button:hover{border-color:var(--accent);color:var(--text);}
     .aic-msg-actions{display:flex;gap:6px;opacity:0;transition:opacity .12s;}
-    .aic-msg-row:hover .aic-msg-actions{opacity:1;}
+    .aic-msg-row:hover .aic-msg-actions,.aic-msg-row.user .aic-msg-actions{opacity:1;}
     .aic-msg-actions button{padding:1px 4px;border:0;background:none;color:var(--muted);font-size:.68rem;cursor:pointer;}
     .aic-msg-actions button:hover{color:var(--text);}
     .aic-retry-btn{margin-top:7px;padding:5px 9px;border:1px solid rgba(200,75,67,.4);border-radius:7px;background:transparent;color:#c54b43;font-size:.7rem;cursor:pointer;}.aic-retry-btn:hover{background:rgba(200,75,67,.1);}
@@ -675,11 +675,34 @@
   };
 
   window.aicRetryMessage = function (btn) {
+    if (_sending) return;
     var row = btn && btn.closest('.aic-msg-row');
     var t = getThread(currentThreadId());
     var index = row ? Number(row.getAttribute('data-index')) : -1;
     var message = t && t.messages[index];
-    if (!message || !message.retry) { toast('This message cannot be retried.'); return; }
+    if (!message) { toast('This message cannot be retried.'); return; }
+
+    // Replaying a user turn means restoring the exact conversation prefix that
+    // existed before it. This removes the old answer and every later turn, then
+    // routes the original text through the same auto image/text decision.
+    var retryMessage = message;
+    if (message.role === 'error' && index > 0 && t.messages[index - 1] && t.messages[index - 1].role === 'user') {
+      index -= 1;
+      retryMessage = t.messages[index];
+    }
+    if (retryMessage.role === 'user') {
+      var q = String(retryMessage.content || '').trim();
+      if (!q) { toast('This message cannot be retried.'); return; }
+      t.messages = t.messages.slice(0, index);
+      upsertThread(t);
+      renderThread(t);
+      var retryInput = document.getElementById('aic-input');
+      if (retryInput) retryInput.value = q;
+      window.aicSend({ preventDefault: function () {} });
+      return;
+    }
+
+    if (!message.retry) { toast('This message cannot be retried.'); return; }
     t.messages.splice(index, 1);
     upsertThread(t);
     renderThread(t);
@@ -689,8 +712,8 @@
       requestGeneratedImage(t, message.retry.prompt, message.retry.userContent || message.retry.prompt, retrySource, !!message.retry.isEdit)
         .finally(function () { setSending(false); });
     } else {
-      var retryInput = document.getElementById('aic-input');
-      if (retryInput) retryInput.value = message.retry.q || '';
+      var retryInputFallback = document.getElementById('aic-input');
+      if (retryInputFallback) retryInputFallback.value = message.retry.q || '';
       window.aicSend({ preventDefault: function () {} });
     }
   };
@@ -1098,7 +1121,7 @@
         : mdLite(m.content);
       var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
       var actions = (m.role !== 'error' && m.content)
-        ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">Copy</button></div>' : '';
+        ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">Copy</button>' + (m.role === 'user' ? '<button onclick="aicRetryMessage(this)">↻ Retry</button>' : '') + '</div>' : '';
       var retry = m.retry ? '<button class="aic-retry-btn" onclick="aicRetryMessage(this)">↻ Retry</button>' : '';
       return '<div class="aic-msg-row ' + cls + '" data-index="' + index + '" data-raw="' + escAttr(m.content || '') + '">' + author + '<div class="aic-msg">' + body + retry + '</div>' + actions + '</div>';
     }).join('');
