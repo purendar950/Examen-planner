@@ -25,3 +25,15 @@ services:
         value: "https://examzen.in,https://www.examzen.in,https://appassets.androidengine"
       - key: MAX_TELEGRAM_IMAGE_BYTES
         value: "8388608"
+      # GitHub OAuth App settings. Configure these in Render after creating the app.
+      - key: GITHUB_OAUTH_CLIENT_ID
+        sync: false
+      - key: GITHUB_OAUTH_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_OAUTH_REDIRECT_URI
+        sync: false
+      - key: GITHUB_OAUTH_FRONTEND_ORIGIN
+        value: "https://examzen.in"
+      # Optional server-side token for higher public GitHub API rate limits.
+      - key: GITHUB_TOKEN
+        sync: false

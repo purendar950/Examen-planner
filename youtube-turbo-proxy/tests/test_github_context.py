@@ -18,7 +18,7 @@ class GithubContextTests(unittest.TestCase):
 
     @patch("app._github_fetch_file")
     def test_context_is_bounded_and_contains_selected_paths(self, fetch_file):
-        fetch_file.side_effect = lambda slug, ref, path: "print('hello')\n" if path.endswith("main.py") else "# notes\n"
+        fetch_file.side_effect = lambda slug, ref, path, token=None: "print('hello')\n" if path.endswith("main.py") else "# notes\n"
         err, context = app._github_context_from_body({
             "github": {"repo": "owner/repo", "ref": "main", "files": ["src/main.py", "README.md"]}
         })
@@ -32,6 +32,45 @@ class GithubContextTests(unittest.TestCase):
         err, context = app._github_context_from_body({"github": {"repo": "owner/repo", "files": []}})
         self.assertEqual(err[0]["error"], "github_files_missing")
         self.assertIsNone(context)
+
+    def test_ai_plan_can_only_edit_selected_files(self):
+        source = [{"path": "app.py", "sha": "abc", "before": "print(1)"}]
+        plan = app._github_validate_plan({"title": "Fix", "body": "Review", "files": [
+            {"path": "app.py", "content": "print(2)"}
+        ]}, {"app.py"}, source)
+        self.assertEqual(plan["files"][0]["content"], "print(2)")
+        with self.assertRaises(ValueError):
+            app._github_validate_plan({"files": [{"path": "secret.py", "content": "x"}]},
+                                      {"app.py"}, source)
+
+    def test_large_files_are_rejected_for_safe_edits(self):
+        source = [{"path": "app.py", "sha": "abc", "before": "x"}]
+        with self.assertRaises(ValueError):
+            app._github_validate_plan({"files": [{"path": "app.py", "content": "x" * (app._GITHUB_MAX_FILE_CHARS * 2 + 1)}]},
+                                      {"app.py"}, source)
+
+    def test_ai_chat_modes_are_allowlisted_and_memory_is_bounded(self):
+        tutor = app._ai_chat_tab_sys(mode="tutor", memory="memory-token-" * 500)
+        self.assertIn("Socratic tutor", tutor)
+        memory_block = tutor.split("STUDENT MEMORY", 1)[1]
+        self.assertLessEqual(memory_block.count("memory-token-"), 93)
+        unknown = app._ai_chat_tab_sys(mode="not-a-real-mode")
+        self.assertIn("Choose the right level of detail", unknown)
+
+    @patch("app._github_connected_identity", return_value=({"uid": "u1"}, "token", None))
+    @patch("app._github_user_request")
+    def test_pr_requires_explicit_confirmation(self, request_mock, _identity):
+        response = app.app.test_client().post("/api/ai-chat/github/pr", json={"draftId": "draft"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("confirm", response.get_json()["detail"].lower())
+        request_mock.assert_not_called()
+
+    @patch("app._github_oauth_ready", return_value=False)
+    @patch("app._ai_chat_authorize", return_value=({"uid": "u1"}, {}, False, None))
+    def test_oauth_start_requires_render_configuration(self, _auth, _ready):
+        response = app.app.test_client().post("/api/ai-chat/github/oauth/start")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.get_json()["error"], "github_oauth_not_configured")
 
 
 if __name__ == "__main__":
