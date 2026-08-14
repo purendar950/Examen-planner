@@ -223,18 +223,97 @@
     '.aic-github-pr-fields{display:flex;gap:7px;flex-wrap:wrap;}' +
     '.aic-github-pr-fields input{flex:1 1 180px;min-width:140px;padding:7px 9px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:0.75rem;}' +
     '@media (max-width: 720px){.aic-side{width:170px;flex:0 0 170px;}.aic-select{max-width:110px;}.aic-github-input{min-width:130px;}}';
+  st.textContent +=
+    '.aic-shell{position:relative;min-height:540px;height:calc(100vh - 128px);border:1px solid rgba(148,163,184,.16);border-radius:22px;background:radial-gradient(circle at 72% -10%,rgba(16,185,129,.09),transparent 34%),linear-gradient(145deg,rgba(15,23,42,.98),rgba(7,12,24,.99));box-shadow:0 24px 70px rgba(0,0,0,.2);}' +
+    '.aic-side{width:264px;flex-basis:264px;background:rgba(15,23,42,.7);border-right:1px solid rgba(148,163,184,.13);backdrop-filter:blur(18px);transition:width .22s ease,flex-basis .22s ease,transform .22s ease;}' +
+    '.aic-shell.is-sidebar-collapsed .aic-side{width:0;flex-basis:0;border-right:0;overflow:hidden;}' +
+    '.aic-side-head{padding:18px 16px 14px;border-bottom:1px solid rgba(148,163,184,.11);}' +
+    '.aic-brand-lockup{display:flex;align-items:center;gap:10px;margin-bottom:18px;}' +
+    '.aic-brand-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:linear-gradient(145deg,var(--accent),#34d399);color:#052e1b;font-size:1.25rem;font-weight:900;box-shadow:0 8px 20px rgba(16,185,129,.2);}' +
+    '.aic-brand-name{color:var(--text);font-size:.86rem;font-weight:800;letter-spacing:-.01em;}' +
+    '.aic-brand-sub{margin-top:2px;color:var(--muted);font-size:.66rem;}' +
+    '.aic-new-btn{display:flex;align-items:center;gap:7px;width:100%;padding:10px 12px;border:1px solid rgba(52,211,153,.32);border-radius:11px;background:rgba(16,185,129,.12);color:#a7f3d0;font-size:.76rem;font-weight:800;letter-spacing:.01em;transition:background .16s,border-color .16s,transform .16s;}' +
+    '.aic-new-btn span{font-size:1.1rem;line-height:0;color:var(--accent);}' +
+    '.aic-new-btn:hover{border-color:var(--accent);background:rgba(16,185,129,.2);transform:translateY(-1px);}' +
+    '.aic-thread-list{padding:13px 9px;}' +
+    '.aic-thread-list:empty:before{content:"Your conversations will appear here";display:block;padding:16px 10px;color:#64748b;font-size:.67rem;line-height:1.5;}' +
+    '.aic-thread{padding:10px 11px;margin-bottom:3px;border:1px solid transparent;border-radius:10px;color:#cbd5e1;font-size:.76rem;transition:background .15s,border-color .15s;}' +
+    '.aic-thread:before{content:"";width:5px;height:5px;flex:0 0 5px;border-radius:50%;background:#64748b;opacity:.65;}' +
+    '.aic-thread:hover{background:rgba(148,163,184,.08);border-color:rgba(148,163,184,.1);}' +
+    '.aic-thread.active{background:rgba(16,185,129,.13);border-color:rgba(52,211,153,.22);color:#d1fae5;}' +
+    '.aic-thread.active:before{background:var(--accent);box-shadow:0 0 0 4px rgba(16,185,129,.12);}' +
+    '.aic-side-foot{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-top:1px solid rgba(148,163,184,.1);color:#64748b;font-size:.63rem;}' +
+    '.aic-side-tip{display:flex;align-items:center;gap:6px;}' +
+    '.aic-side-tip-dot{width:6px;height:6px;border-radius:50%;background:#34d399;box-shadow:0 0 0 3px rgba(52,211,153,.1);}' +
+    '.aic-main{background:linear-gradient(180deg,rgba(15,23,42,.3),rgba(2,6,23,.15));}' +
+    '.aic-head{display:grid;grid-template-columns:minmax(220px,1fr) auto;align-items:start;gap:12px;padding:20px 22px 15px;border-bottom:1px solid rgba(148,163,184,.12);background:rgba(15,23,42,.48);}' +
+    '.aic-sidebar-toggle{grid-column:1/-1;display:none;width:32px;height:32px;border:1px solid rgba(148,163,184,.18);border-radius:9px;background:rgba(148,163,184,.06);color:var(--muted);cursor:pointer;}' +
+    '.aic-head-copy{min-width:0;}' +
+    '.aic-eyebrow{margin-bottom:5px;color:#6ee7b7;font-size:.61rem;font-weight:800;letter-spacing:.16em;}' +
+    '.aic-head h2{margin:0;color:#f8fafc;font-size:1.28rem;line-height:1.15;letter-spacing:-.035em;}' +
+    '.aic-head-copy p{margin:7px 0 0;max-width:600px;color:#94a3b8;font-size:.73rem;line-height:1.45;}' +
+    '.aic-head-status{display:flex;align-items:center;align-self:start;gap:7px;padding:7px 10px;border:1px solid rgba(148,163,184,.13);border-radius:999px;background:rgba(15,23,42,.62);color:#94a3b8;font-size:.64rem;white-space:nowrap;}' +
+    '.aic-status-dot{width:7px;height:7px;border-radius:50%;background:#34d399;box-shadow:0 0 0 4px rgba(52,211,153,.1);}' +
+    '.aic-head-status.is-live{border-color:rgba(52,211,153,.3);color:#a7f3d0;}' +
+    '.aic-head-status.is-live .aic-status-dot{animation:aicPulse 1.2s ease-in-out infinite;}' +
+    '@keyframes aicPulse{50%{opacity:.35;transform:scale(.75);}}' +
+    '.aic-head-controls{grid-column:1/-1;display:flex;gap:7px;align-items:center;flex-wrap:wrap;padding-top:5px;}' +
+    '.aic-select{height:32px;padding:6px 9px;border-radius:9px;border-color:rgba(148,163,184,.18);background:rgba(15,23,42,.72);color:#cbd5e1;font-size:.7rem;}' +
+    '.aic-chip-btn,.aic-icon-btn{height:32px;padding:6px 10px;border-color:rgba(148,163,184,.16);border-radius:9px;background:rgba(148,163,184,.05);color:#94a3b8;font-size:.68rem;transition:background .15s,border-color .15s,color .15s,transform .15s;}' +
+    '.aic-chip-btn:hover,.aic-icon-btn:hover{border-color:rgba(52,211,153,.45);background:rgba(16,185,129,.1);color:#d1fae5;transform:translateY(-1px);}' +
+    '.aic-chip-btn.is-on{background:rgba(16,185,129,.17);color:#a7f3d0;border-color:rgba(52,211,153,.4);}' +
+    '.aic-context-strip{display:flex;align-items:center;gap:10px;margin:14px 22px 4px;padding:10px 12px;border:1px solid rgba(148,163,184,.11);border-radius:12px;background:rgba(15,23,42,.42);}' +
+    '.aic-context-icon{display:grid;place-items:center;width:25px;height:25px;border-radius:8px;background:rgba(16,185,129,.13);color:#6ee7b7;font-size:.9rem;}' +
+    '.aic-context-strip strong{display:block;color:#cbd5e1;font-size:.7rem;}' +
+    '.aic-context-strip span:not(.aic-context-icon){display:block;margin-top:2px;color:#64748b;font-size:.64rem;}' +
+    '.aic-log{padding:22px;gap:18px;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,.25) transparent;}' +
+    '.aic-msg-row{max-width:min(760px,88%);gap:6px;}' +
+    '.aic-msg-row.user{max-width:min(650px,82%);}' +
+    '.aic-msg{padding:12px 15px;border-radius:15px;font-size:.88rem;line-height:1.68;}' +
+    '.aic-msg-row.user .aic-msg{border-bottom-right-radius:5px;background:linear-gradient(135deg,#34d399,var(--accent));box-shadow:0 7px 18px rgba(16,185,129,.12);color:#052e1b;}' +
+    '.aic-msg-row.assistant .aic-msg{border:1px solid rgba(148,163,184,.12);border-bottom-left-radius:5px;background:rgba(15,23,42,.7);box-shadow:0 10px 26px rgba(0,0,0,.08);}' +
+    '.aic-msg-row.assistant:before{content:"AI";display:block;margin-left:3px;color:#6ee7b7;font-size:.6rem;font-weight:800;letter-spacing:.12em;}' +
+    '.aic-msg-row.user:before{content:"YOU";display:block;align-self:flex-end;margin-right:3px;color:#64748b;font-size:.58rem;font-weight:800;letter-spacing:.12em;}' +
+    '.aic-msg code{background:rgba(2,6,23,.38);color:#a7f3d0;}' +
+    '.aic-msg pre{margin:10px 0 2px;border:1px solid rgba(148,163,184,.12);background:#020617;color:#cbd5e1;}' +
+    '.aic-empty{max-width:470px;padding:30px 24px;color:#94a3b8;}' +
+    '.aic-empty:before{content:"✦";display:grid;place-items:center;width:52px;height:52px;margin:0 auto 16px;border:1px solid rgba(52,211,153,.25);border-radius:16px;background:rgba(16,185,129,.1);color:#6ee7b7;font-size:1.35rem;box-shadow:0 12px 26px rgba(16,185,129,.1);}' +
+    '.aic-empty strong{display:block;margin-bottom:7px;color:#f8fafc;font-size:1rem;letter-spacing:-.02em;}' +
+    '.aic-starter-row{gap:8px;margin-top:16px;}' +
+    '.aic-starter{padding:8px 11px;border-color:rgba(148,163,184,.16);border-radius:10px;background:rgba(15,23,42,.6);color:#94a3b8;font-size:.68rem;transition:all .15s;}' +
+    '.aic-starter:hover{border-color:rgba(52,211,153,.4);background:rgba(16,185,129,.1);color:#d1fae5;transform:translateY(-1px);}' +
+    '.aic-activity{margin:0 22px;padding:0;color:#64748b;font-size:.67rem;}' +
+    '.aic-activity:not(:empty){padding:7px 0;}' +
+    '.aic-form{margin:4px 18px 18px;padding:9px 10px 8px;gap:8px;border:1px solid rgba(148,163,184,.16);border-radius:16px;background:rgba(15,23,42,.78);box-shadow:0 12px 28px rgba(0,0,0,.14);}' +
+    '.aic-form:focus-within{border-color:rgba(52,211,153,.42);box-shadow:0 0 0 3px rgba(16,185,129,.08),0 12px 28px rgba(0,0,0,.14);}' +
+    '.aic-input{min-height:44px;padding:10px 11px;border:0;background:transparent;color:#f8fafc;font-size:.86rem;}' +
+    '.aic-input:focus{border:0;box-shadow:none;}' +
+    '.aic-shortcuts{padding:3px 2px 0;color:#64748b;}' +
+    '.aic-send{height:40px;padding:9px 17px;border-radius:11px;background:linear-gradient(135deg,#34d399,var(--accent));box-shadow:0 7px 16px rgba(16,185,129,.16);}' +
+    '.aic-stop{height:40px;border-radius:11px;}' +
+    '.aic-files-bar,.aic-github-context{margin:0 22px;padding-left:0;padding-right:0;}' +
+    '.aic-persona-box,.aic-memory-box,.aic-github-box,.aic-image-box{margin:0 18px 8px;padding:13px 14px;border:1px solid rgba(148,163,184,.12);border-radius:13px;background:rgba(15,23,42,.75);}' +
+    '@media (max-width:900px){.aic-head{grid-template-columns:minmax(0,1fr) auto;}.aic-head h2{font-size:1.08rem;}.aic-head-status{font-size:.6rem;}.aic-head-controls{overflow-x:auto;flex-wrap:nowrap;padding-bottom:2px;scrollbar-width:none;}.aic-head-controls::-webkit-scrollbar{display:none;}}' +
+    '@media (max-width:720px){.aic-shell{height:calc(100vh - 112px);min-height:500px;border-radius:16px;}.aic-sidebar-toggle{display:block;grid-column:auto;grid-row:1;}.aic-head{grid-template-columns:34px minmax(0,1fr) auto;padding:15px 15px 12px;}.aic-head-copy{grid-column:2;grid-row:1;}.aic-head-status{grid-column:3;grid-row:1;}.aic-head-controls{grid-column:1/-1;grid-row:2;margin-left:42px;}.aic-head-copy p{display:none;}.aic-context-strip{margin:11px 14px 3px;}.aic-log{padding:16px 14px;}.aic-msg-row,.aic-msg-row.user{max-width:92%;}.aic-form{margin:4px 10px 10px;}.aic-activity{margin:0 14px;}}' +
+    '@media (max-width:560px){.aic-side{position:absolute;z-index:20;inset:0 auto 0 0;width:246px;flex-basis:246px;transform:translateX(0);box-shadow:20px 0 35px rgba(0,0,0,.28);}.aic-shell.is-sidebar-collapsed .aic-side{width:246px;flex-basis:246px;transform:translateX(-104%);border-right:1px solid rgba(148,163,184,.13);}.aic-shell:not(.is-sidebar-collapsed) .aic-main:after{content:"";position:absolute;inset:0;background:rgba(2,6,23,.48);z-index:10;pointer-events:none;}.aic-head-status{padding:6px 7px;}.aic-head-status span:last-child{display:none;}.aic-head h2{font-size:.94rem;}.aic-eyebrow{font-size:.54rem;}.aic-form{align-items:flex-end;}.aic-attach-btn{display:none;}.aic-shortcuts span:last-child{font-size:.59rem;}}';
   document.head.appendChild(st);
 
   /* ── page markup ── */
   var MARKUP = [
     '<div class="aic-shell">',
     '  <aside class="aic-side">',
-    '    <div class="aic-side-head"><button class="aic-new-btn" onclick="aicNewThread()">+ New chat</button></div>',
+    '    <div class="aic-side-head">',
+    '      <div class="aic-brand-lockup"><span class="aic-brand-mark">✦</span><div><div class="aic-brand-name">StudyPlanner AI</div><div class="aic-brand-sub">Focused study copilot</div></div></div>',
+    '      <button class="aic-new-btn" onclick="aicNewThread()"><span>＋</span> New conversation</button>',
+    '    </div>',
     '    <div class="aic-thread-list" id="aic-thread-list"></div>',
+    '    <div class="aic-side-foot"><span class="aic-side-tip"><span class="aic-side-tip-dot"></span> Private by default</span><span>⌘ K</span></div>',
     '  </aside>',
     '  <div class="aic-main">',
     '    <div class="aic-head">',
-    '      <h2>\uD83E\uDD16 AI Chat</h2>',
+    '      <button class="aic-sidebar-toggle" type="button" onclick="aicToggleSidebar()" title="Toggle conversations">☰</button>',
+    '      <div class="aic-head-copy"><div class="aic-eyebrow">STUDYPLANNER AI</div><h2>Study smarter, one question at a time</h2><p>Personalized help for planning, learning, reviewing, and building momentum.</p></div>',
+    '      <div class="aic-head-status" id="aic-head-status"><span class="aic-status-dot"></span><span>Ready when you are</span></div>',
     '      <div class="aic-head-controls">',
     '        <select class="aic-select" id="aic-provider-select" onchange="aicProviderChanged()" title="AI provider"></select>',
     '        <select class="aic-select" id="aic-omniroute-provider-select" onchange="aicOmniRouteProviderChanged()" title="OmniRoute provider" style="display:none;"></select>',
@@ -279,6 +358,7 @@
     '        <button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button>',
     '      </div>',
     '    </div>',
+    '    <div class="aic-context-strip"><span class="aic-context-icon">✦</span><div><strong id="aic-context-label">Adaptive workspace</strong><span id="aic-context-copy">Ask anything about your exam prep, plans, notes, or code.</span></div></div>',
     '    <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>',
     '    <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>',
     '    <div class="aic-activity" id="aic-activity" aria-live="polite"></div>',
@@ -576,6 +656,21 @@
     var sel = document.getElementById('aic-model-select');
     if (sel) saveThreadModel('model', sel.value);
   };
+  function updateModeSummary(key) {
+    var mode = AIC_MODES.find(function (m) { return m.key === key; }) || AIC_MODES[0];
+    var label = document.getElementById('aic-context-label');
+    var copy = document.getElementById('aic-context-copy');
+    var copyByMode = {
+      adaptive: 'Ask anything about your exam prep, plans, notes, or code.',
+      tutor: 'Learn step by step with hints, examples, and quick checks.',
+      planner: 'Turn a goal, syllabus, or deadline into a realistic study plan.',
+      reviewer: 'Share an answer or plan and get gaps, corrections, and next steps.',
+      writer: 'Turn rough ideas into clean, exam-ready notes and explanations.',
+      coder: 'Explain code, diagnose errors, and plan safe implementation steps.'
+    };
+    if (label) label.textContent = mode.label + ' workspace';
+    if (copy) copy.textContent = copyByMode[mode.key] || mode.hint;
+  }
   function renderModeSelect() {
     var sel = document.getElementById('aic-mode-select');
     if (!sel) return;
@@ -584,11 +679,12 @@
     sel.innerHTML = AIC_MODES.map(function (m) {
       return '<option value="' + escAttr(m.key) + '" title="' + escAttr(m.hint) + '"' + (m.key === selected ? ' selected' : '') + '>' + esc(m.label) + '</option>';
     }).join('');
+    updateModeSummary(selected);
   }
   window.aicModeChanged = function () {
     var sel = document.getElementById('aic-mode-select');
     var t = getThread(currentThreadId());
-    if (sel && t) { t.mode = sel.value; upsertThread(t); }
+    if (sel && t) { t.mode = sel.value; upsertThread(t); updateModeSummary(sel.value); }
   };
   window.aicToggleMemory = function () {
     var box = document.getElementById('aic-memory-box');
@@ -606,10 +702,21 @@
   };
   function setActivity(text, live) {
     var el = document.getElementById('aic-activity');
-    if (!el) return;
-    el.textContent = text || '';
-    el.classList.toggle('is-live', !!live);
+    var status = document.getElementById('aic-head-status');
+    if (el) {
+      el.textContent = text || '';
+      el.classList.toggle('is-live', !!live);
+    }
+    if (status) {
+      var label = status.querySelector('span:last-child');
+      if (label) label.textContent = live ? (text || 'Working…') : (text ? 'Ready for your next question' : 'Ready when you are');
+      status.classList.toggle('is-live', !!live);
+    }
   }
+  window.aicToggleSidebar = function () {
+    var shell = document.querySelector('.aic-shell');
+    if (shell) shell.classList.toggle('is-sidebar-collapsed');
+  };
   window.aicInputChanged = function () {
     var input = document.getElementById('aic-input');
     var count = document.getElementById('aic-char-count');
