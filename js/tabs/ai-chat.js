@@ -296,6 +296,21 @@
     .aic-workspace-preview{display:none;border-top:1px solid color-mix(in srgb,var(--border) 58%,transparent);background:#fff;}
     .aic-workspace-preview iframe{display:block;width:100%;height:300px;border:0;background:#fff;}
     .aic-workspace-preview-label{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#f3f4f6;color:#4b5563;font-size:.66rem;font-weight:700;}
+    .aic-code-workspace.has-preview{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,42%);grid-template-areas:"head head" "targets targets" "editor preview" "footer preview" "output preview";align-items:stretch;}
+    .aic-code-workspace.has-preview .aic-workspace-head{grid-area:head;}
+    .aic-code-workspace.has-preview .aic-workspace-targets{grid-area:targets;}
+    .aic-code-workspace.has-preview .aic-workspace-editor{grid-area:editor;min-height:420px;border-right:1px solid var(--border);}
+    .aic-code-workspace.has-preview .aic-workspace-footer{grid-area:footer;}
+    .aic-code-workspace.has-preview .aic-workspace-output{grid-area:output;}
+    .aic-code-workspace.has-preview .aic-workspace-preview{grid-area:preview;display:block;border-top:0;border-left:1px solid var(--border);min-height:520px;}
+    .aic-code-workspace.has-preview .aic-workspace-preview iframe{height:100%;min-height:520px;}
+    .aic-file-bundle{margin:10px 0 4px;border:1px solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:12px;background:var(--surface,#fff);overflow:hidden;}
+    .aic-file-bundle-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-bottom:1px solid color-mix(in srgb,var(--border) 58%,transparent);font-size:.78rem;font-weight:700;}
+    .aic-file-bundle-list{display:grid;gap:6px;padding:8px;}
+    .aic-file-artifact{display:flex;align-items:center;gap:10px;padding:9px 10px;border:1px solid color-mix(in srgb,var(--border) 54%,transparent);border-radius:9px;background:color-mix(in srgb,var(--surface) 88%,var(--accent) 12%);}
+    .aic-file-artifact-main{min-width:0;flex:1;}.aic-file-artifact-path{font:600 .76rem/1.25 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}.aic-file-artifact-meta{font-size:.68rem;color:var(--muted);margin-top:2px;}
+    .aic-file-artifact button{white-space:nowrap;}
+    @media (max-width:900px){.aic-code-workspace.has-preview{display:block;}.aic-code-workspace.has-preview .aic-workspace-preview{border-left:0;border-top:1px solid var(--border);min-height:320px;}.aic-code-workspace.has-preview .aic-workspace-preview iframe{min-height:320px;}}
     .aic-github-file{display:flex;align-items:center;gap:6px;}.aic-github-file button{margin-left:auto;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--muted);font-size:.62rem;cursor:pointer;}.aic-github-file button:hover{border-color:var(--accent);color:var(--text);}
     .aic-form{width:100%;max-width:980px;margin:0 auto;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
     .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
@@ -374,12 +389,12 @@
     <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>
     <input type="file" id="aic-code-file-input" class="aic-file-input" accept=".js,.jsx,.ts,.tsx,.py,.html,.css,.json,.md,.yml,.yaml,.sh,.sql,.java,.go,.rs" onchange="aicCodeFileSelected(event)">
     <section class="aic-code-workspace" id="aic-code-workspace" aria-label="Coding workspace">
-      <div class="aic-workspace-head"><span class="aic-workspace-title">File workspace</span><select id="aic-workspace-file" class="aic-workspace-file" onchange="aicWorkspaceFileChanged(this)" aria-label="Active file"></select><span class="aic-workspace-spacer"></span><button type="button" onclick="document.getElementById('aic-code-file-input').click()">Open local file</button><button type="button" onclick="aicWorkspaceAskEdit()">Ask AI to edit</button><button type="button" onclick="aicCloseWorkspace()">×</button></div>
-      <div id="aic-workspace-targets" class="aic-workspace-targets" aria-label="Files included in the next AI patch"><strong>Patch files:</strong></div>
-      <textarea id="aic-workspace-editor" class="aic-workspace-editor" spellcheck="false" oninput="aicWorkspaceEdited(this)" aria-label="Active code file"></textarea>
-      <div class="aic-workspace-footer"><span id="aic-workspace-status" class="aic-workspace-status">Open a GitHub or local code file to start.</span><button type="button" onclick="aicWorkspaceRun()">Run / check</button><button type="button" id="aic-workspace-preview-btn" style="display:none;" onclick="aicWorkspacePreview()">Live preview</button><button type="button" onclick="aicWorkspaceSaveVersion()">Save local version</button><button type="button" id="aic-workspace-fix-btn" style="display:none;" onclick="aicWorkspaceFixRun()">Ask AI to fix output</button></div>
-      <pre id="aic-workspace-output" class="aic-workspace-output"></pre>
-      <div id="aic-workspace-preview" class="aic-workspace-preview"><div class="aic-workspace-preview-label"><span>HTML/CSS live preview</span><span>Scripts disabled for safety</span></div><iframe id="aic-workspace-preview-frame" title="HTML and CSS live preview" sandbox=""></iframe></div>
+      <div class="aic-workspace-head" data-workspace-area="head"><span class="aic-workspace-title">File workspace</span><select id="aic-workspace-file" class="aic-workspace-file" onchange="aicWorkspaceFileChanged(this)" aria-label="Active file"></select><span class="aic-workspace-spacer"></span><button type="button" onclick="document.getElementById('aic-code-file-input').click()">Open local file</button><button type="button" onclick="aicWorkspaceAskEdit()">Ask AI to edit</button><button type="button" onclick="aicCloseWorkspace()">×</button></div>
+      <div id="aic-workspace-targets" data-workspace-area="targets" class="aic-workspace-targets" aria-label="Files included in the next AI patch"><strong>Patch files:</strong></div>
+      <textarea id="aic-workspace-editor" data-workspace-area="editor" class="aic-workspace-editor" spellcheck="false" oninput="aicWorkspaceEdited(this)" aria-label="Active code file"></textarea>
+      <div class="aic-workspace-footer" data-workspace-area="footer"><span id="aic-workspace-status" class="aic-workspace-status">Open a GitHub or local code file to start.</span><button type="button" onclick="aicWorkspaceRun()">Run / check</button><button type="button" id="aic-workspace-preview-btn" style="display:none;" onclick="aicWorkspacePreview()">Live preview</button><button type="button" onclick="aicWorkspaceSaveVersion()">Save local version</button><button type="button" id="aic-workspace-fix-btn" style="display:none;" onclick="aicWorkspaceFixRun()">Ask AI to fix output</button></div>
+      <pre id="aic-workspace-output" data-workspace-area="output" class="aic-workspace-output"></pre>
+      <div id="aic-workspace-preview" data-workspace-area="preview" class="aic-workspace-preview"><div class="aic-workspace-preview-label"><span>Live preview</span><span>Sandboxed local scripts</span></div><iframe id="aic-workspace-preview-frame" title="HTML, CSS, and JavaScript live preview" sandbox="allow-scripts"></iframe></div>
     </section>
     <div class="aic-log" id="aic-log"></div>
     <form class="aic-form" onsubmit="aicSend(event)">
@@ -1132,10 +1147,13 @@
     var html = htmlFile ? String(htmlFile.content || '') : '<!doctype html><html><head><meta charset="utf-8"><title>CSS preview</title></head><body><main class="preview-sample"><h1>CSS live preview</h1><p>Edit an HTML file in this workspace to preview your own markup.</p><button>Example button</button></main></body></html>';
     var css = ws.files.filter(function (f) { return workspaceLanguage(f.path) === 'css'; }).map(function (f) { return '\n/* ' + f.path.replace(/[*/]/g, '') + ' */\n' + String(f.content || ''); }).join('\n');
     if (lang === 'css') css += '\n' + String(file.content || '');
+    var scripts = ws.files.filter(function (f) { return workspaceLanguage(f.path) === 'javascript'; }).map(function (f) { return String(f.content || ''); }).filter(Boolean);
     html = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '').replace(/javascript\s*:/gi, '');
     var style = '<style>html,body{min-height:100%;}body{margin:0;padding:20px;font-family:system-ui,sans-serif;}'+css+'</style>';
+    var scriptTag = scripts.length ? '<script>\\n' + scripts.join('\\n;\\n').replace(/<\/script/gi, '<\\/script') + '\\n</script>' : '';
     if (/<head[\s>]/i.test(html)) html = html.replace(/<\/head>/i, style + '</head>');
     else html = '<!doctype html><html><head>' + style + '</head><body>' + html + '</body></html>';
+    if (scriptTag) html = /<\/body>/i.test(html) ? html.replace(/<\/body>/i, scriptTag + '</body>') : html + scriptTag;
     return html;
   }
   function refreshWorkspacePreview(t) {
@@ -1170,6 +1188,8 @@
       return;
     }
     box.style.display = '';
+    var splitPreview = !!ws.previewOpen && isPreviewFile(file);
+    box.classList.toggle('has-preview', splitPreview);
     if (previewBtn) previewBtn.style.display = isPreviewFile(file) ? '' : 'none';
     select.innerHTML = ws.files.map(function (f) { return '<option value="' + escAttr(f.path) + '"' + (f.path === file.path ? ' selected' : '') + '>' + esc(f.path) + '</option>'; }).join('');
     if (document.activeElement !== editor || editor.getAttribute('data-path') !== file.path) {
@@ -1217,6 +1237,77 @@
     ws.lastRun = null;
     upsertThread(t);
     renderWorkspace();
+  }
+  function isCreationRequest(prompt) {
+    return /\b(create|make|build|generate|write|scaffold|prototype|design|new)\b/i.test(String(prompt || '')) && /\b(html|css|javascript|typescript|web app|website|program|page|component|game|calculator|quiz|todo)\b/i.test(String(prompt || ''));
+  }
+  function artifactExtension(language) {
+    return ({ html: 'html', css: 'css', javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts', jsx: 'jsx', tsx: 'tsx', python: 'py', py: 'py', json: 'json', markdown: 'md', bash: 'sh', sql: 'sql' })[String(language || '').toLowerCase()] || 'txt';
+  }
+  function artifactLanguage(language) {
+    var value = String(language || '').trim().toLowerCase().replace(/^language-/, '');
+    return value || 'text';
+  }
+  function creationArtifactBlocks(text, prompt) {
+    var source = String(text || ''), out = [], named = /(?:^|\n)\s*(?:FILE|PATH)\s*:\s*([^\n`]+)\s*\n\s*```([^\n`]*)\n([\s\S]*?)```/gi, match;
+    while ((match = named.exec(source))) {
+      var namedPath = String(match[1] || '').trim().replace(/^['\"]|['\"]$/g, '').replace(/^\/+/, '');
+      if (!namedPath || namedPath.indexOf('..') !== -1) continue;
+      out.push({ path: namedPath.slice(0, 180), language: artifactLanguage(match[2]), content: match[3].replace(/^\n/, '') });
+    }
+    if (out.length) return out.slice(0, 12);
+    if (!isCreationRequest(prompt)) return [];
+    var fence = /```([^\n`]*)\n([\s\S]*?)```/g, index = 0, counts = {};
+    while ((match = fence.exec(source))) {
+      var language = artifactLanguage(match[1]);
+      if (language === 'diff' || language === 'patch' || !match[2].trim()) continue;
+      var ext = artifactExtension(language), stem = ({ html: 'index', css: 'styles', javascript: 'app', typescript: 'app', jsx: 'app', tsx: 'app', python: 'main', json: 'data', markdown: 'README', bash: 'run', sql: 'query' })[language] || 'artifact';
+      counts[ext] = (counts[ext] || 0) + 1;
+      if (counts[ext] > 1) stem += '-' + counts[ext];
+      out.push({ path: stem + '.' + ext, language: language, content: match[2].replace(/^\n/, '') });
+    }
+    return out.slice(0, 12);
+  }
+  function materializeCreationArtifacts(t, message, prompt) {
+    var ws = workspaceState(t), blocks = creationArtifactBlocks(message && message.content, prompt);
+    if (!ws || !message || !blocks.length || (message.workspaceArtifacts && message.workspaceArtifacts.length)) return blocks;
+    var paths = [];
+    blocks.forEach(function (item) {
+      var path = item.path, existing = ws.files.find(function (file) { return file.path === path; });
+      if (existing && existing.dirty) return;
+      var file = { path: path, language: item.language, content: item.content, originalContent: item.content, dirty: false, source: 'ai-artifact', revision: 1 };
+      if (existing) Object.assign(existing, file); else ws.files.push(file);
+      paths.push(path);
+    });
+    if (!paths.length) return [];
+    ws.selectedPaths = paths.slice();
+    ws.activePath = (paths.find(function (path) { return workspaceLanguage(path) === 'html'; }) || paths[0]);
+    ws.previewOpen = paths.some(function (path) { return ['html', 'css'].indexOf(workspaceLanguage(path)) !== -1; });
+    message.workspaceArtifacts = paths.map(function (path) {
+      var file = ws.files.find(function (item) { return item.path === path; });
+      return { path: path, language: workspaceLanguage(path), size: String(file && file.content || '').length, preview: ['html', 'css'].indexOf(workspaceLanguage(path)) !== -1 };
+    });
+    upsertThread(t);
+    renderWorkspace();
+    return message.workspaceArtifacts;
+  }
+  window.aicOpenGeneratedFile = function (btn) {
+    var path = btn && btn.getAttribute('data-path'), t = getThread(currentThreadId()), ws = workspaceState(t);
+    if (!path || !ws || !ws.files.some(function (file) { return file.path === path; })) return;
+    ws.activePath = path; if (ws.selectedPaths.indexOf(path) === -1) ws.selectedPaths.push(path); ws.previewOpen = ['html', 'css'].indexOf(workspaceLanguage(path)) !== -1; upsertThread(t); renderWorkspace();
+  };
+  window.aicDownloadGeneratedFile = function (btn) {
+    var path = btn && btn.getAttribute('data-path'), t = getThread(currentThreadId()), ws = workspaceState(t), file = ws && ws.files.find(function (item) { return item.path === path; });
+    if (!file) return;
+    var a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([String(file.content || '')], { type: 'text/plain;charset=utf-8' })); a.download = path.split('/').pop() || 'ai-file.txt'; a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 500);
+  };
+  window.aicPreviewGeneratedFile = function (btn) { window.aicOpenGeneratedFile(btn); };
+  function generatedFileBundleHtml(message) {
+    var files = (message && message.workspaceArtifacts) || [];
+    if (!files.length) return '';
+    return '<section class="aic-file-bundle"><div class="aic-file-bundle-head"><span>Created in workspace</span><span>' + files.length + ' file' + (files.length === 1 ? '' : 's') + '</span></div><div class="aic-file-bundle-list">' + files.map(function (file) {
+      return '<div class="aic-file-artifact"><div class="aic-file-artifact-main"><div class="aic-file-artifact-path">' + esc(file.path) + '</div><div class="aic-file-artifact-meta">' + esc(file.language) + ' · ' + file.size + ' characters</div></div><button type="button" data-path="' + escAttr(file.path) + '" onclick="aicOpenGeneratedFile(this)">Open</button><button type="button" data-path="' + escAttr(file.path) + '" onclick="aicDownloadGeneratedFile(this)">Download</button>' + (file.preview ? '<button type="button" data-path="' + escAttr(file.path) + '" onclick="aicPreviewGeneratedFile(this)">Preview</button>' : '') + '</div>';
+    }).join('') + '</div></section>';
   }
   window.aicWorkspaceFileChanged = function (select) {
     var t = getThread(currentThreadId()), ws = workspaceState(t);
@@ -1556,9 +1647,13 @@
       '<button type="button" onclick="aicCopyArtifact(this)">Copy</button><button type="button" onclick="aicDownloadArtifact(this)">Download</button>' + (diff ? '<button type="button" onclick="aicApplyArtifact(this)">Apply to file</button>' : '') + '<button type="button" class="aic-code-fix" data-fix="' + escAttr(fixPrompt) + '" onclick="aicFixArtifact(this)">Try fixing</button></div>' +
       '<pre class="aic-code-body">' + rendered + '</pre>' + (diff ? '<div class="aic-code-status">Suggested ' + (targetPaths.length > 1 ? 'multi-file diff · ' + esc(targetPaths.join(', ')) : 'diff · ' + esc(targetPaths[0] || 'active file')) + ' · all files are validated before application.</div>' : '') + '</section>';
   }
-  function renderAssistantBody(text) {
+  function renderAssistantBody(text, message) {
     var source = String(text || '');
     var fence = /```([^\n`]*)\n?([\s\S]*?)```/g;
+    if (message && message.workspaceArtifacts && message.workspaceArtifacts.length) {
+      var proseOnly = source.replace(fence, '').replace(/\n{3,}/g, '\n\n').trim();
+      return generatedFileBundleHtml(message) + (proseOnly ? mdLite(proseOnly) : '');
+    }
     var cursor = 0, found = false, html = '', match, blockIndex = 0;
     while ((match = fence.exec(source))) {
       found = true;
@@ -1569,10 +1664,10 @@
     }
     if (found) {
       if (cursor < source.length) html += mdLite(source.slice(cursor));
-      return html;
+      return generatedFileBundleHtml(message) + html;
     }
-    if (isDiffCode(source, 'diff')) return codeArtifactHtml(source, 'diff', 0, 'Suggested patch');
-    return mdLite(source);
+    var rendered = isDiffCode(source, 'diff') ? codeArtifactHtml(source, 'diff', 0, 'Suggested patch') : mdLite(source);
+    return generatedFileBundleHtml(message) + rendered;
   }
   window.aicCopyArtifact = function (btn) {
     var card = btn && btn.closest('.aic-code-artifact');
@@ -1616,7 +1711,7 @@
       var imageSource = m.imageData || m.imageUrl || '';
       var body = imageSource
         ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
-        : (m.role === 'assistant' ? renderAssistantBody(m.content) : mdLite(m.content));
+        : (m.role === 'assistant' ? renderAssistantBody(m.content, m) : mdLite(m.content));
       var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
       var actions = (m.role !== 'error' && m.content)
         ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">Copy</button>' + (m.role === 'user' ? '<button onclick="aicRetryMessage(this)">↻ Retry</button>' : '') + '</div>' : '';
@@ -1755,7 +1850,8 @@
       if (cur) {
         var last = cur.messages[cur.messages.length - 1];
         if (last && last.role === 'assistant' && !last.content) last.content = acc;
-        else cur.messages.push({ role: 'assistant', content: acc });
+        else { last = { role: 'assistant', content: acc }; cur.messages.push(last); }
+        materializeCreationArtifacts(cur, last, q);
         upsertThread(cur);
         if (currentThreadId() === t.id) renderLog();
       }
@@ -1774,7 +1870,8 @@
           var last = cur.messages[cur.messages.length - 1];
           if (res.ok && res.data && res.data.answer) {
             if (last && last.role === 'assistant') last.content = res.data.answer;
-            else cur.messages.push({ role: 'assistant', content: res.data.answer });
+            else { last = { role: 'assistant', content: res.data.answer }; cur.messages.push(last); }
+            materializeCreationArtifacts(cur, last, q);
           } else {
             var msg = (res.data && (res.data.detail || res.data.error)) || 'Something went wrong. Try again.';
             if (last && last.role === 'assistant' && !last.content) cur.messages.pop();

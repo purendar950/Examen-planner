@@ -12454,7 +12454,14 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                    "repository was modified unless a trusted tool result is included in the conversation. "
                    "If the user provides an error, explain the likely cause and end with the smallest "
                    "corrected patch. Keep explanatory prose outside code fences so the app can render "
-                   "the result as a reviewable artifact.")
+                   "the result as a reviewable artifact. CREATION ARTIFACT CONTRACT: when no active "
+                   "workspace file is present and the student asks to create a new project, produce "
+                   "complete named files instead of an unnamed code dump. Before each fenced block, "
+                   "write exactly `FILE: relative/path.ext` on its own line, followed by a fenced block "
+                   "using the correct language. For a web program, prefer a small coherent bundle such "
+                   "as index.html, styles.css, and app.js. Keep explanation and usage steps outside the "
+                   "file blocks. Do not claim that files were written to GitHub; the browser will create "
+                   "local reviewable workspace files from these artifacts.")
     web_sources = []
 
     web_pref = body.get("web")
