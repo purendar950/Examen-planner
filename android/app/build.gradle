@@ -44,6 +44,11 @@ android {
     namespace 'com.examzen.app'
     compileSdk 34
 
+    // Required because defaultConfig and buildTypes define custom BuildConfig fields.
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId "com.examzen.app"
         minSdk 23
