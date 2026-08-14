@@ -359,8 +359,10 @@ class _Response:
 class _Requests:
     def __init__(self, response):
         self.response = response
+        self.calls = []
 
     def get(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
         return self.response
 
 
@@ -372,7 +374,7 @@ ns5 = {
     "log": type("_L", (), {"warning": lambda *a, **k: None})(),
     "OMNIROUTE_MODELS_URL": "https://example.invalid/v1/models",
     "_OMNIROUTE_MODELS_TTL": 600, "_OMNIROUTE_FAILURE_TTL": 30,
-    "_OMNIROUTE_MODELS_TIMEOUT": 3,
+    "_OMNIROUTE_MODELS_TIMEOUT": 60,
 }
 exec(section("def _clean_omniroute_catalog_ids(", "# Image models live"), ns5)
 exec(section("_OMNIROUTE_AUTO_FALLBACK = ", "_omniroute_models_cache = "), ns5)
@@ -387,6 +389,7 @@ ns5["requests"] = _Requests(_Response(200, {"data": [
 ]}))
 live_ids = ns5["_omniroute_fetch_model_ids"]()
 check("live success keeps only typed chat ids", live_ids == ["openrouter/gpt-5"], live_ids)
+check("live catalog timeout permits the large response", ns5["requests"].calls[-1][1].get("timeout") >= 45, ns5["requests"].calls)
 check("live success persists chatModels with field-path merge",
       bool(fake_doc.writes) and
       fake_doc.writes[-1][0]["omnirouteCatalog"]["chatModels"] == live_ids and
