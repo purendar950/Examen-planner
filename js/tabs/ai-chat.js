@@ -122,140 +122,143 @@
 
   /* ── styles ── */
   var st = document.createElement('style');
-  st.textContent =
-    '.aic-shell{display:flex;height:calc(100vh - 140px);min-height:460px;gap:0;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:var(--card);}' +
-    '.aic-side{width:230px;flex:0 0 230px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--surface);}' +
-    '.aic-side-head{padding:0.7rem;border-bottom:1px solid var(--border);}' +
-    '.aic-new-btn{width:100%;padding:8px 10px;border-radius:9px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:0.82rem;font-weight:700;cursor:pointer;text-align:left;}' +
-    '.aic-new-btn:hover{border-color:var(--accent);}' +
-    '.aic-thread-list{flex:1;overflow-y:auto;padding:0.4rem;}' +
-    '.aic-thread{display:flex;align-items:center;gap:6px;padding:8px 9px;border-radius:8px;cursor:pointer;font-size:0.8rem;color:var(--text);margin-bottom:2px;}' +
-    '.aic-thread:hover{background:var(--card);}' +
-    '.aic-thread.active{background:var(--accent);color:#000;}' +
-    '.aic-thread-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-    '.aic-thread-del{opacity:0;background:none;border:none;color:inherit;cursor:pointer;font-size:0.85rem;padding:0 3px;}' +
-    '.aic-thread:hover .aic-thread-del{opacity:0.7;}' +
-    '.aic-thread-del:hover{opacity:1 !important;}' +
-    '.aic-main{flex:1;display:flex;flex-direction:column;min-width:0;}' +
-    '.aic-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0.6rem 0.85rem;border-bottom:1px solid var(--border);flex-wrap:wrap;}' +
-    '.aic-head h2{font-size:0.95rem;margin:0;}' +
-    '.aic-head-controls{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}' +
-    '.aic-select{font-size:0.76rem;padding:5px 7px;border-radius:7px;border:1px solid var(--border);background:var(--surface);color:var(--text);max-width:180px;}' +
-    '.aic-chip-btn{font-size:0.72rem;padding:5px 9px;border-radius:999px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;white-space:nowrap;}' +
-    '.aic-chip-btn.is-on{background:var(--accent);color:#000;border-color:var(--accent);}' +
-    '.aic-icon-btn{background:none;border:1px solid var(--border);color:var(--muted);border-radius:7px;padding:5px 8px;font-size:0.76rem;cursor:pointer;}' +
-    '.aic-icon-btn:hover{border-color:var(--accent);color:var(--text);}' +
-    '.aic-log{flex:1;overflow-y:auto;padding:1rem;display:flex;flex-direction:column;gap:0.85rem;}' +
-    '.aic-msg-row{display:flex;flex-direction:column;max-width:88%;gap:3px;}' +
-    '.aic-msg-row.user{align-self:flex-end;align-items:flex-end;}' +
-    '.aic-msg-row.assistant,.aic-msg-row.error{align-self:flex-start;align-items:flex-start;}' +
-    '.aic-msg{padding:0.6rem 0.85rem;border-radius:12px;font-size:0.88rem;line-height:1.55;white-space:normal;word-break:break-word;}' +
-    '.aic-msg-row.user .aic-msg{background:var(--accent);color:#000;}' +
-    '.aic-msg-row.assistant .aic-msg{background:var(--surface);border:1px solid var(--border);}' +
-    '.aic-msg-row.error .aic-msg{background:rgba(231,76,60,0.1);border:1px solid rgba(231,76,60,0.35);color:#e74c3c;}' +
-    '.aic-msg code{background:rgba(0,0,0,0.12);padding:1px 5px;border-radius:4px;font-size:0.85em;}' +
-    '.aic-msg pre{background:rgba(0,0,0,0.12);padding:8px 10px;border-radius:8px;overflow-x:auto;font-size:0.8em;}' +
-    '.aic-msg img.aic-gen-image{max-width:100%;border-radius:10px;margin-top:4px;display:block;}' +
-    '.aic-msg-actions{display:flex;gap:6px;opacity:0;transition:opacity .12s;}' +
-    '.aic-msg-row:hover .aic-msg-actions{opacity:1;}' +
-    '.aic-msg-actions button{background:none;border:none;color:var(--muted);font-size:0.68rem;cursor:pointer;padding:1px 4px;}' +
-    '.aic-msg-actions button:hover{color:var(--text);}' +
-    '.aic-empty{color:var(--muted);font-size:0.85rem;text-align:center;margin:auto;padding:1.5rem;max-width:360px;}' +
-    '.aic-typing{align-self:flex-start;color:var(--muted);font-size:0.82rem;font-style:italic;}' +
-    '.aic-files-bar{display:flex;gap:6px;flex-wrap:wrap;padding:0 0.85rem;}' +
-    '.aic-file-pill{display:flex;align-items:center;gap:5px;font-size:0.7rem;padding:3px 8px;border-radius:999px;background:var(--surface);border:1px solid var(--border);color:var(--muted);}' +
-    '.aic-file-pill.is-ready{color:var(--text);}' +
-    '.aic-file-pill.is-failed{color:#e74c3c;border-color:rgba(231,76,60,0.35);}' +
-    '.aic-file-pill button{background:none;border:none;color:inherit;cursor:pointer;font-size:0.8em;padding:0;}' +
-    '.aic-form{display:flex;gap:8px;padding:0.75rem 0.85rem;align-items:flex-end;border-top:1px solid var(--border);}' +
-    '.aic-input{flex:1;resize:none;min-height:42px;max-height:140px;padding:9px 11px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:0.88rem;font-family:var(--font);outline:none;}' +
-    '.aic-input:focus{border-color:var(--accent);}' +
-    '.aic-send{padding:9px 16px;border-radius:10px;border:none;background:var(--accent);color:#000;font-weight:700;font-size:0.82rem;cursor:pointer;white-space:nowrap;}' +
-    '.aic-send:disabled{opacity:0.5;cursor:default;}' +
-    '.aic-file-input{display:none;}' +
-    '.aic-persona-box{padding:0.6rem 0.85rem;border-bottom:1px solid var(--border);background:var(--surface);}' +
-    '.aic-persona-box textarea{width:100%;min-height:52px;resize:vertical;font-size:0.78rem;padding:7px 9px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-family:var(--font);}' +
-    '.aic-persona-box .aic-persona-label{font-size:0.7rem;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between;}' +
-    '.aic-image-box{padding:0.7rem 0.85rem;border-bottom:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;gap:8px;}' +
-    '.aic-image-box .aic-image-label{font-size:0.7rem;color:var(--muted);display:flex;justify-content:space-between;align-items:center;}' +
-    '.aic-image-row{display:flex;gap:8px;flex-wrap:wrap;}' +
-    '.aic-image-row .aic-select{flex:0 0 auto;min-width:180px;max-width:none;}' +
-    '.aic-image-prompt{flex:1 1 220px;min-width:180px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:0.85rem;font-family:var(--font);}' +
-    '.aic-image-row .aic-send{flex:0 0 auto;}' +
-    '.aic-github-box{padding:0.7rem 0.85rem;border-bottom:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;gap:8px;}' +
-    '.aic-github-label{font-size:0.72rem;color:var(--muted);display:flex;justify-content:space-between;align-items:center;gap:8px;}' +
-    '.aic-github-row{display:flex;gap:8px;flex-wrap:wrap;}' +
-    '.aic-github-input{flex:1 1 220px;min-width:150px;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:0.82rem;font-family:var(--font);}' +
-    '.aic-github-input:focus{border-color:var(--accent);outline:none;}' +
-    '.aic-github-files{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:4px;max-height:150px;overflow:auto;}' +
-    '.aic-github-file{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;font-size:0.72rem;color:var(--muted);cursor:pointer;}' +
-    '.aic-github-file:hover{background:var(--card);color:var(--text);}' +
-    '.aic-github-file input{accent-color:var(--accent);}' +
-    '.aic-github-status{font-size:0.72rem;color:var(--muted);line-height:1.4;}' +
-    '.aic-github-status.is-error{color:#e74c3c;}' +
-    '.aic-github-context{display:flex;align-items:center;gap:7px;padding:0.45rem 0.85rem;border-bottom:1px solid var(--border);font-size:0.7rem;color:var(--muted);}' +
-    '.aic-github-context strong{color:var(--text);}' +
-    '@media (max-width: 720px){.aic-side{width:170px;flex:0 0 170px;}.aic-select{max-width:110px;}.aic-github-input{min-width:130px;}}';
+  st.textContent = `
+    .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:calc(100vh - 142px);min-height:540px;overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:20px;background:var(--card);box-shadow:0 18px 55px rgba(28,24,20,.08);}
+    .aic-side{display:flex;flex-direction:column;min-width:0;border-right:1px solid color-mix(in srgb,var(--border) 78%,transparent);background:color-mix(in srgb,var(--surface) 82%,var(--card));}
+    .aic-side-top{padding:1rem 1rem .8rem;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);}
+    .aic-brand{display:flex;align-items:center;gap:10px;margin-bottom:1rem;color:var(--text);}
+    .aic-mark{display:grid;place-items:center;width:30px;height:30px;border-radius:10px;background:var(--accent);color:#17130e;font-size:1rem;font-weight:800;box-shadow:0 4px 12px color-mix(in srgb,var(--accent) 32%,transparent);}
+    .aic-brand strong{display:block;font-size:.9rem;letter-spacing:-.01em;}
+    .aic-brand small{display:block;margin-top:2px;color:var(--muted);font-size:.68rem;}
+    .aic-new-btn{display:flex;align-items:center;gap:8px;width:100%;padding:10px 11px;border:1px solid color-mix(in srgb,var(--border) 85%,transparent);border-radius:11px;background:var(--card);color:var(--text);font-size:.8rem;font-weight:700;cursor:pointer;transition:transform .16s ease-out,border-color .16s ease-out,background .16s ease-out;}
+    .aic-new-btn:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,var(--card));}
+    .aic-new-btn:active{transform:scale(.97);}
+    .aic-plus{font-size:1.05rem;line-height:1;color:var(--accent);}
+    .aic-new-btn kbd{margin-left:auto;padding:2px 5px;border:1px solid var(--border);border-radius:5px;color:var(--muted);font:inherit;font-size:.62rem;}
+    .aic-side-label{padding:.9rem 1rem .45rem;color:var(--muted);font-size:.64rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;}
+    .aic-thread-list{flex:1;overflow-y:auto;padding:0 .55rem .9rem;scrollbar-width:thin;}
+    .aic-thread{display:flex;align-items:center;gap:7px;margin:2px 0;padding:9px 10px;border-radius:9px;color:var(--muted);cursor:pointer;font-size:.78rem;transition:background .16s ease-out,color .16s ease-out;}
+    .aic-thread:hover{background:color-mix(in srgb,var(--card) 82%,transparent);color:var(--text);}
+    .aic-thread.active{background:color-mix(in srgb,var(--accent) 18%,var(--card));color:var(--text);font-weight:700;}
+    .aic-thread-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .aic-thread-del{opacity:0;background:none;border:0;color:inherit;cursor:pointer;font-size:.8rem;padding:2px 3px;transition:opacity .12s;}
+    .aic-thread:hover .aic-thread-del,.aic-thread.active .aic-thread-del{opacity:.62;}
+    .aic-thread-del:hover{opacity:1!important;color:#c54b43;}
+    .aic-side-note{margin:0 1rem 1rem;padding:.7rem .75rem;border:1px solid color-mix(in srgb,var(--border) 65%,transparent);border-radius:11px;color:var(--muted);font-size:.68rem;line-height:1.45;background:color-mix(in srgb,var(--card) 62%,transparent);}
+    .aic-main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--card);}
+    .aic-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.85rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);background:color-mix(in srgb,var(--card) 92%,var(--surface));}
+    .aic-head-left{display:flex;align-items:center;gap:11px;min-width:0;}
+    .aic-head h2{overflow:hidden;margin:0;color:var(--text);font-size:.98rem;font-weight:750;letter-spacing:-.02em;text-overflow:ellipsis;white-space:nowrap;}
+    .aic-eyebrow{display:block;margin-bottom:2px;color:var(--muted);font-size:.61rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase;}
+    .aic-head-controls{display:flex;align-items:center;gap:7px;min-width:0;}
+    .aic-model-wrap{display:flex;align-items:center;gap:6px;min-width:0;}
+    .aic-control-label{color:var(--muted);font-size:.65rem;white-space:nowrap;}
+    .aic-select{max-width:190px;padding:7px 9px;border:1px solid color-mix(in srgb,var(--border) 82%,transparent);border-radius:9px;background:var(--surface);color:var(--text);font-size:.74rem;outline:none;}
+    .aic-select:focus{border-color:var(--accent);}
+    .aic-quick-actions{display:flex;align-items:center;gap:6px;padding:.55rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 55%,transparent);}
+    .aic-chip-btn,.aic-icon-btn{display:inline-flex;align-items:center;gap:5px;padding:6px 9px;border:1px solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:8px;background:transparent;color:var(--muted);font-size:.7rem;cursor:pointer;white-space:nowrap;transition:background .16s ease-out,border-color .16s ease-out,color .16s ease-out,transform .16s ease-out;}
+    .aic-chip-btn:hover,.aic-icon-btn:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--text);}
+    .aic-chip-btn:active,.aic-icon-btn:active{transform:scale(.97);}
+    .aic-chip-btn.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text);}
+    .aic-quick-spacer{flex:1;}
+    .aic-log{flex:1;overflow-y:auto;width:100%;max-width:900px;margin:0 auto;padding:2.2rem clamp(1rem,5vw,3.2rem) 6rem;scrollbar-width:thin;}
+    .aic-msg-row{display:flex;flex-direction:column;max-width:100%;margin:0 0 1.65rem;gap:6px;animation:aic-rise .18s ease-out both;}
+    .aic-msg-row.user{align-items:flex-end;}
+    .aic-msg-row.assistant,.aic-msg-row.error{align-items:flex-start;}
+    .aic-msg-author{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:.68rem;font-weight:700;}
+    .aic-msg-author .aic-avatar{display:grid;place-items:center;width:21px;height:21px;border-radius:7px;background:var(--accent);color:#17130e;font-size:.72rem;font-weight:900;}
+    .aic-msg{max-width:78ch;color:var(--text);font-size:.92rem;line-height:1.72;word-break:break-word;}
+    .aic-msg-row.user .aic-msg{max-width:min(70%,560px);padding:10px 14px;border-radius:17px 17px 5px 17px;background:var(--accent);color:#17130e;line-height:1.5;}
+    .aic-msg-row.error .aic-msg{padding:10px 13px;border:1px solid rgba(200,75,67,.35);border-radius:11px;background:rgba(200,75,67,.08);color:#c54b43;}
+    .aic-msg code{padding:2px 5px;border-radius:5px;background:color-mix(in srgb,var(--border) 34%,transparent);font-size:.86em;}
+    .aic-msg pre{overflow-x:auto;margin:.75rem 0;padding:12px 14px;border:1px solid color-mix(in srgb,var(--border) 60%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 80%,transparent);font-size:.8em;line-height:1.55;}
+    .aic-msg img.aic-gen-image{display:block;max-width:min(100%,620px);margin-top:4px;border:1px solid color-mix(in srgb,var(--border) 75%,transparent);border-radius:14px;box-shadow:0 12px 28px rgba(28,24,20,.12);}
+    .aic-image-actions{display:flex;gap:6px;margin-top:7px;}
+    .aic-image-actions button{padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-size:.68rem;cursor:pointer;}
+    .aic-image-actions button:hover{border-color:var(--accent);color:var(--text);}
+    .aic-msg-actions{display:flex;gap:6px;opacity:0;transition:opacity .12s;}
+    .aic-msg-row:hover .aic-msg-actions{opacity:1;}
+    .aic-msg-actions button{padding:1px 4px;border:0;background:none;color:var(--muted);font-size:.68rem;cursor:pointer;}
+    .aic-msg-actions button:hover{color:var(--text);}
+    .aic-empty{max-width:500px;margin:18vh auto 0;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.65;}
+    .aic-empty strong{display:block;margin-bottom:8px;color:var(--text);font-size:1.15rem;letter-spacing:-.02em;}
+    .aic-typing{color:var(--muted);font-size:.78rem;font-style:italic;}
+    .aic-files-bar,.aic-github-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:900px;margin:0 auto;padding:0 clamp(1rem,5vw,3.2rem) .45rem;color:var(--muted);font-size:.7rem;}
+    .aic-file-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.68rem;}
+    .aic-file-pill.is-ready{color:var(--text);}.aic-file-pill.is-failed{border-color:rgba(200,75,67,.35);color:#c54b43;}.aic-file-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.8em;}
+    .aic-github-context strong{color:var(--text);}
+    .aic-form{width:100%;max-width:900px;margin:0 auto;padding:.5rem clamp(1rem,5vw,3.2rem) 1.15rem;}
+    .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
+    .aic-composer:focus-within{border-color:color-mix(in srgb,var(--accent) 72%,var(--border));box-shadow:0 8px 30px color-mix(in srgb,var(--accent) 12%,transparent);}
+    .aic-input{display:block;width:100%;min-height:48px;max-height:160px;padding:13px 14px 5px;border:0;resize:none;outline:none;background:transparent;color:var(--text);font:inherit;font-size:.9rem;line-height:1.5;}
+    .aic-input::placeholder{color:var(--muted);}
+    .aic-composer-bottom{display:flex;align-items:center;gap:8px;padding:5px 8px 8px 11px;}
+    .aic-composer-tools{display:flex;align-items:center;gap:5px;}.aic-composer-tool{padding:5px 7px;border:0;border-radius:7px;background:transparent;color:var(--muted);font-size:.7rem;cursor:pointer;}.aic-composer-tool:hover{background:color-mix(in srgb,var(--border) 28%,transparent);color:var(--text);}
+    .aic-hint{flex:1;color:var(--muted);font-size:.64rem;}
+    .aic-send{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:32px;padding:0 11px;border:0;border-radius:9px;background:var(--accent);color:#17130e;font-size:.78rem;font-weight:800;cursor:pointer;transition:transform .16s ease-out,opacity .16s ease-out;}
+    .aic-send:hover{transform:translateY(-1px);}.aic-send:active{transform:scale(.97);}.aic-send:disabled{opacity:.5;cursor:default;transform:none;}
+    .aic-file-input{display:none;}
+    .aic-persona-box,.aic-image-box,.aic-github-box{padding:.8rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
+    .aic-persona-label,.aic-image-label,.aic-github-label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:var(--muted);font-size:.7rem;}
+    .aic-persona-box textarea,.aic-image-prompt,.aic-github-input{padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font:inherit;font-size:.8rem;outline:none;}.aic-persona-box textarea{width:100%;min-height:56px;resize:vertical;}.aic-persona-box textarea:focus,.aic-image-prompt:focus,.aic-github-input:focus{border-color:var(--accent);}
+    .aic-image-row,.aic-github-row{display:flex;gap:7px;flex-wrap:wrap;}.aic-image-row .aic-select{flex:0 0 auto;max-width:none;}.aic-image-prompt{flex:1 1 250px;min-width:180px;}.aic-github-input{flex:1 1 220px;min-width:150px;}.aic-github-files{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:3px;max-height:150px;overflow:auto;}.aic-github-file{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;color:var(--muted);cursor:pointer;font-size:.72rem;}.aic-github-file:hover{background:var(--card);color:var(--text);}.aic-github-file input{accent-color:var(--accent);}.aic-github-status{margin:6px 0;color:var(--muted);font-size:.72rem;line-height:1.4;}.aic-github-status.is-error{color:#c54b43;}
+    @keyframes aic-rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+    @media (max-width:820px){.aic-shell{grid-template-columns:205px minmax(0,1fr);height:calc(100vh - 128px);border-radius:14px;}.aic-side{width:auto;}.aic-head{align-items:flex-start;flex-direction:column;padding:.8rem .9rem;}.aic-head-controls{width:100%;flex-wrap:wrap;}.aic-model-wrap{flex:1 1 100%;}.aic-model-wrap .aic-select{flex:1;max-width:none;}.aic-quick-actions{overflow-x:auto;padding:.5rem .9rem;}.aic-log{padding-top:1.5rem;}.aic-msg-row.user .aic-msg{max-width:86%;}.aic-hint{display:none;}}
+    @media (max-width:560px){.aic-shell{grid-template-columns:1fr;min-height:0;height:calc(100vh - 110px);}.aic-side{display:none;}.aic-head{flex-direction:row;align-items:center;}.aic-head-left{flex:1;}.aic-head-controls{width:auto;}.aic-head-controls .aic-model-wrap,.aic-head-controls .aic-select,.aic-head-controls .aic-control-label{display:none;}.aic-log{padding-left:1rem;padding-right:1rem;}.aic-form{padding-left:.75rem;padding-right:.75rem;}.aic-quick-actions{padding-left:.75rem;padding-right:.75rem;}.aic-msg{font-size:.88rem;}}
+    @media (prefers-reduced-motion:reduce){.aic-msg-row,.aic-new-btn,.aic-send{animation:none;transition:none;}}
+  `;
   document.head.appendChild(st);
 
   /* ── page markup ── */
-  var MARKUP = [
-    '<div class="aic-shell">',
-    '  <aside class="aic-side">',
-    '    <div class="aic-side-head"><button class="aic-new-btn" onclick="aicNewThread()">+ New chat</button></div>',
-    '    <div class="aic-thread-list" id="aic-thread-list"></div>',
-    '  </aside>',
-    '  <div class="aic-main">',
-    '    <div class="aic-head">',
-    '      <h2>\uD83E\uDD16 AI Chat</h2>',
-    '      <div class="aic-head-controls">',
-    '        <select class="aic-select" id="aic-provider-select" onchange="aicProviderChanged()" title="AI provider"></select>',
-    '        <select class="aic-select" id="aic-omniroute-provider-select" onchange="aicOmniRouteProviderChanged()" title="OmniRoute provider" style="display:none;"></select>',
-    '        <select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="AI model"></select>',
-    '        <button class="aic-chip-btn" id="aic-web-btn" onclick="aicCycleWeb()" title="Web search">\uD83C\uDF10 Auto</button>',
-    '        <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">\uD83C\uDFAD Persona</button>',
-    '        <button class="aic-icon-btn" onclick="aicToggleGithubBox()" title="Add read-only GitHub repository context">GitHub</button>',
-    '        <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">\uD83C\uDFA8 Image</button>',
-    '        <button class="aic-icon-btn" onclick="aicExportThread()" title="Export as Markdown">\u2B07 Export</button>',
-    '      </div>',
-    '    </div>',
-    '    <div class="aic-persona-box" id="aic-persona-box" style="display:none;">',
-    '      <div class="aic-persona-label"><span>Custom instructions for this chat (optional)</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicSavePersona()">Save</button></div>',
-    '      <textarea id="aic-persona-input" placeholder="e.g. Explain like I'+"'"+'m preparing for SSC CGL, keep answers short and in Hinglish."></textarea>',
-    '    </div>',
-    '    <div class="aic-github-box" id="aic-github-box" style="display:none;">',
-    '      <div class="aic-github-label"><span>GitHub repository context <strong>· public, read-only</strong></span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseGithubBox()">✕ Close</button></div>',
-    '      <div class="aic-github-row">',
-    '        <input class="aic-github-input" id="aic-github-repo-input" placeholder="owner/repository or GitHub URL">',
-    '        <input class="aic-github-input" id="aic-github-ref-input" placeholder="Branch (optional)" style="flex:0 1 150px;">',
-    '        <button class="aic-icon-btn" type="button" onclick="aicLoadGithubRepo()">Load files</button>',
-    '      </div>',
-    '      <div class="aic-github-status" id="aic-github-status">Choose up to 8 code files. They are fetched only when you send a message.</div>',
-    '      <div class="aic-github-files" id="aic-github-files"></div>',
-    '      <div class="aic-github-row"><button class="aic-icon-btn" type="button" onclick="aicClearGithub()">Clear context</button></div>',
-    '    </div>',
-    '    <div class="aic-image-box" id="aic-image-box" style="display:none;">',
-    '      <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:2px 6px;" onclick="aicCloseImageBox()">\u2715 Close</button></div>',
-    '      <div class="aic-image-row">',
-    '        <select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider" style="max-width:none;"></select>',
-    '        <select class="aic-select" id="aic-image-omniroute-provider-select" onchange="aicImageOmniRouteProviderChanged()" title="OmniRoute image provider" style="display:none;max-width:none;"></select>',
-    '        <select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model" style="max-width:none;"></select>',
-    '        <input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe the image…" onkeydown="if(event.key===\'Enter\'){event.preventDefault();aicGenerateImage();}">',
-    '        <button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button>',
-    '      </div>',
-    '    </div>',
-    '    <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>',
-    '    <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>',
-    '    <div class="aic-log" id="aic-log"></div>',
-    '    <form class="aic-form" onsubmit="aicSend(event)">',
-    '      <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">',
-    '      <button type="button" class="aic-icon-btn" id="aic-attach-btn" onclick="document.getElementById(\'aic-file-input\').click()" title="Attach a file" style="display:none;">\uD83D\uDCCE</button>',
-    '      <textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea>',
-    '      <button class="aic-send" id="aic-send-btn" type="submit">Send</button>',
-    '    </form>',
-    '  </div>',
-    '</div>'
-  ].join('\n');
+  var MARKUP = `
+<div class="aic-shell">
+  <aside class="aic-side">
+    <div class="aic-side-top">
+      <div class="aic-brand"><span class="aic-mark">✦</span><div><strong>AI Chat</strong><small>Your focused study workspace</small></div></div>
+      <button class="aic-new-btn" onclick="aicNewThread()"><span class="aic-plus">+</span><span>New chat</span><kbd>⌘ K</kbd></button>
+    </div>
+    <div class="aic-side-label">Conversations</div>
+    <div class="aic-thread-list" id="aic-thread-list"></div>
+    <div class="aic-side-note">Your conversations stay on this device. Attach notes or connect a public GitHub repository when you need context.</div>
+  </aside>
+  <main class="aic-main">
+    <header class="aic-head">
+      <div class="aic-head-left"><div><span class="aic-eyebrow">Study workspace</span><h2 id="aic-chat-title">New chat</h2></div></div>
+      <div class="aic-head-controls">
+        <div class="aic-model-wrap"><span class="aic-control-label">Model</span><select class="aic-select" id="aic-provider-select" onchange="aicProviderChanged()" title="AI provider"></select><select class="aic-select" id="aic-omniroute-provider-select" onchange="aicOmniRouteProviderChanged()" title="OmniRoute provider" style="display:none;"></select><select class="aic-select" id="aic-model-select" onchange="aicModelChanged()" title="AI model"></select></div>
+        <button class="aic-icon-btn" onclick="aicExportThread()" title="Export as Markdown">↓ Export</button>
+      </div>
+    </header>
+    <div class="aic-quick-actions">
+      <button class="aic-chip-btn" id="aic-web-btn" onclick="aicCycleWeb()" title="Web search">◉ Auto</button>
+      <button class="aic-icon-btn" onclick="aicTogglePersona()" title="Custom persona / system prompt">✦ Persona</button>
+      <button class="aic-icon-btn" onclick="aicToggleGithubBox()" title="Add read-only GitHub repository context">GitHub</button>
+      <button class="aic-icon-btn" id="aic-image-btn" onclick="aicToggleImageBox()" title="Generate an image" style="display:none;">▧ Image</button>
+      <span class="aic-quick-spacer"></span>
+      <span class="aic-control-label">Enter to send · Shift + Enter for a new line</span>
+    </div>
+    <div class="aic-persona-box" id="aic-persona-box" style="display:none;">
+      <div class="aic-persona-label"><span>Custom instructions for this chat</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicSavePersona()">Save</button></div>
+      <textarea id="aic-persona-input" placeholder="Explain like I'm preparing for SSC CGL, keep answers short and in Hinglish."></textarea>
+    </div>
+    <div class="aic-github-box" id="aic-github-box" style="display:none;">
+      <div class="aic-github-label"><span>GitHub repository context <strong>· public, read-only</strong></span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseGithubBox()">× Close</button></div>
+      <div class="aic-github-row"><input class="aic-github-input" id="aic-github-repo-input" placeholder="owner/repository or GitHub URL"><input class="aic-github-input" id="aic-github-ref-input" placeholder="Branch (optional)" style="flex:0 1 150px;"><button class="aic-icon-btn" type="button" onclick="aicLoadGithubRepo()">Load files</button></div>
+      <div class="aic-github-status" id="aic-github-status">Choose up to 8 code files. They are fetched only when you send a message.</div><div class="aic-github-files" id="aic-github-files"></div><div class="aic-github-row"><button class="aic-icon-btn" type="button" onclick="aicClearGithub()">Clear context</button></div>
+    </div>
+    <div class="aic-image-box" id="aic-image-box" style="display:none;">
+      <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseImageBox()">× Close</button></div>
+      <div class="aic-image-row"><select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider"></select><select class="aic-select" id="aic-image-omniroute-provider-select" onchange="aicImageOmniRouteProviderChanged()" title="OmniRoute image provider" style="display:none;"></select><select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model"></select><input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe the image to create…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicGenerateImage();}"><button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button></div>
+    </div>
+    <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>
+    <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>
+    <div class="aic-log" id="aic-log"></div>
+    <form class="aic-form" onsubmit="aicSend(event)">
+      <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
+      <div class="aic-composer"><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea><div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button></div><span class="aic-hint">Responses are tailored to your current study context.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
+    </form>
+  </main>
+</div>`;
 
   function injectPage() {
     if (document.getElementById('page-ai-chat')) return;
@@ -345,6 +348,9 @@
     if (!el) return;
     var list = loadThreads();
     var curId = currentThreadId();
+    var titleEl = document.getElementById('aic-chat-title');
+    var current = list.find(function (t) { return t.id === curId; });
+    if (titleEl) titleEl.textContent = (current && current.title) || 'New chat';
     el.innerHTML = list.map(function (t) {
       return '<div class="aic-thread' + (t.id === curId ? ' active' : '') + '" onclick="aicSwitchThread(\'' + escAttr(t.id) + '\')">' +
         '<span class="aic-thread-title">' + esc(t.title || 'New chat') + '</span>' +
@@ -603,6 +609,21 @@
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
   };
 
+  window.aicDownloadImage = function (btn) {
+    var row = btn && btn.closest('.aic-msg-row');
+    var t = getThread(currentThreadId());
+    var index = row ? Number(row.getAttribute('data-index')) : -1;
+    var message = t && t.messages[index];
+    var source = message && (message.imageData || message.imageUrl);
+    if (!source) { toast('Image is no longer available in this chat.'); return; }
+    var a = document.createElement('a');
+    a.href = source;
+    a.download = 'ai-chat-image-' + Date.now() + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   window.aicCopyMessage = function (btn) {
     var row = btn.closest('.aic-msg-row');
     var text = row ? row.getAttribute('data-raw') : '';
@@ -776,16 +797,25 @@
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt: prompt, model: selected.key })
     }).then(function (r) {
-      if (!r.ok) {
+      var contentType = (r.headers.get('content-type') || '').toLowerCase();
+      if (!r.ok || !contentType.startsWith('image/')) {
         return r.json().catch(function () { return {}; }).then(function (j) {
-          throw new Error((j && (j.detail || j.error)) || 'Image generation failed');
+          throw new Error((j && (j.detail || j.error)) || (!r.ok ? 'Image generation failed' : 'The image service returned no image data'));
         });
       }
       return r.blob();
     }).then(function (blob) {
+      if (!blob || !String(blob.type || '').toLowerCase().startsWith('image/')) throw new Error('The image service returned invalid image data');
+      return new Promise(function (resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function () { resolve(String(reader.result || '')); };
+        reader.onerror = function () { reject(new Error('Could not save the generated image')); };
+        reader.readAsDataURL(blob);
+      });
+    }).then(function (imageData) {
       var cur = getThread(thread.id);
       if (!cur) return;
-      cur.messages.push({ role: 'assistant', content: '', imageUrl: URL.createObjectURL(blob) });
+      cur.messages.push({ role: 'assistant', content: '', imageData: imageData });
       upsertThread(cur);
       if (currentThreadId() === thread.id) renderLog();
     }).catch(function (e) {
@@ -935,18 +965,19 @@
     var t = getThread(currentThreadId());
     var messages = (t && t.messages) || [];
     if (!messages.length) {
-      log.innerHTML = '<div class="aic-empty">Ask anything, attach a file to chat with it, or generate an image — this stays on this device.</div>';
+      log.innerHTML = '<div class="aic-empty"><strong>What would you like to work on?</strong>Ask a question, attach notes, connect a GitHub repository, or create an image from the Image action.</div>';
       return;
     }
-    log.innerHTML = messages.map(function (m) {
+    log.innerHTML = messages.map(function (m, index) {
       var cls = m.role === 'user' ? 'user' : (m.role === 'error' ? 'error' : 'assistant');
-      var body = m.imageUrl
-        ? '<img class="aic-gen-image" src="' + escAttr(m.imageUrl) + '" alt="Generated image">'
+      var imageSource = m.imageData || m.imageUrl || '';
+      var body = imageSource
+        ? '<img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="Generated image"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
         : mdLite(m.content);
+      var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
       var actions = (m.role !== 'error' && m.content)
-        ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">\uD83D\uDCCB Copy</button></div>' : '';
-      return '<div class="aic-msg-row ' + cls + '" data-raw="' + escAttr(m.content || '') + '">' +
-        '<div class="aic-msg">' + body + '</div>' + actions + '</div>';
+        ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">Copy</button></div>' : '';
+      return '<div class="aic-msg-row ' + cls + '" data-index="' + index + '" data-raw="' + escAttr(m.content || '') + '">' + author + '<div class="aic-msg">' + body + '</div>' + actions + '</div>';
     }).join('');
     log.scrollTop = log.scrollHeight;
   }
