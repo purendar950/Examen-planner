@@ -176,9 +176,9 @@
   st.textContent = `
     /* The chat is a first-class page inside the existing app shell. It must use the
        available workspace height, not create a second viewport-sized application. */
-    #app .main-content:has(#page-ai-chat.active){max-width:none;width:auto;height:calc(100dvh - 114px);min-height:0;overflow:hidden;padding:0;box-sizing:border-box;}
-    #app:has(#shell-dock-tray > .topbar-right) .main-content:has(#page-ai-chat.active){height:calc(100dvh - 52px);}
-    #app .main-content > #page-ai-chat{max-width:none;width:100%;height:100%;margin:0;}
+    #app .main-content:has(#page-ai-chat.active){max-width:none!important;width:auto!important;height:calc(100dvh - 114px)!important;min-height:0!important;overflow:hidden!important;margin-bottom:0!important;padding:0!important;box-sizing:border-box;}
+    #app:has(#shell-dock-tray > .topbar-right) .main-content:has(#page-ai-chat.active){height:calc(100dvh - 52px)!important;}
+    #app .main-content > #page-ai-chat{display:block;max-width:none!important;width:100%!important;height:100%!important;min-height:0!important;margin:0!important;padding:0!important;}
     .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:100%;min-height:0;overflow:hidden;border:0;border-radius:0;background:var(--card);box-shadow:none;}
     .aic-shell.aic-sidebar-collapsed{grid-template-columns:56px minmax(0,1fr);}
     .aic-rail{display:none;flex-direction:column;align-items:center;gap:10px;height:100%;padding:12px 8px;background:color-mix(in srgb,var(--surface) 86%,var(--card));}
