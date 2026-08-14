@@ -12265,6 +12265,14 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
 
     persona = str(body.get("persona") or "").strip()[:800]
     sysmsg = _ai_chat_tab_sys(persona)
+    image_context = str(body.get("imageContext") or "").strip()[:600]
+    if image_context:
+        sysmsg += ("\n\nIMAGE STATE: An image result has already been generated or edited in this "
+                   "conversation and is visible to the student. Treat short follow-ups "
+                   "such as 'good', 'nice', or 'thanks' as reactions to that existing "
+                   "image. Do not claim that no image was generated and do not promise "
+                   "to generate it again unless the student explicitly asks for a new "
+                   "image.\n" + image_context)
 
     web_sources = []
     web_pref = body.get("web")

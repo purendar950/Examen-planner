@@ -44,6 +44,7 @@
   var _catalogRefreshTimer = null;
   var _curThreadId = null;
   var _filePollTimer = null;
+  var _retrySources = Object.create(null);
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -125,10 +126,10 @@
   st.textContent = `
     /* The chat is a first-class page inside the existing app shell. It must use the
        available workspace height, not create a second viewport-sized application. */
-    #app .main-content:has(#page-ai-chat.active){max-width:none;padding:1rem 1.25rem 1.25rem;}
+    #app .main-content:has(#page-ai-chat.active){max-width:none;padding:0;}
     #app .main-content > #page-ai-chat{max-width:none;width:100%;margin:0;}
-    .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:calc(100dvh - 148px);min-height:520px;overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:16px;background:var(--card);box-shadow:0 12px 38px rgba(28,24,20,.07);}
-    @media (max-width:900px){#app .main-content:has(#page-ai-chat.active){padding:.75rem;}.aic-shell{height:calc(100dvh - 116px);min-height:560px;grid-template-columns:1fr;border-radius:14px;}.aic-side{display:none;}}
+    .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:calc(100dvh - 122px);min-height:0;overflow:hidden;border:0;border-radius:0;background:var(--card);box-shadow:none;}
+    @media (max-width:900px){#app .main-content:has(#page-ai-chat.active){padding:0;}.aic-shell{height:calc(100dvh - 104px);min-height:0;grid-template-columns:1fr;border-radius:0;}.aic-side{display:none;}}
     .aic-side{display:flex;flex-direction:column;min-width:0;border-right:1px solid color-mix(in srgb,var(--border) 78%,transparent);background:color-mix(in srgb,var(--surface) 82%,var(--card));}
     .aic-side-top{padding:1rem 1rem .8rem;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);}
     .aic-brand{display:flex;align-items:center;gap:10px;margin-bottom:1rem;color:var(--text);}
@@ -166,18 +167,20 @@
     .aic-chip-btn:active,.aic-icon-btn:active{transform:scale(.97);}
     .aic-chip-btn.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text);}
     .aic-quick-spacer{flex:1;}
-    .aic-log{flex:1;overflow-y:auto;width:100%;max-width:900px;margin:0 auto;padding:2.2rem clamp(1rem,5vw,3.2rem) 6rem;scrollbar-width:thin;}
-    .aic-msg-row{display:flex;flex-direction:column;max-width:100%;margin:0 0 1.65rem;gap:6px;animation:aic-rise .18s ease-out both;}
+    .aic-log{flex:1;min-height:0;overflow-y:auto;width:100%;max-width:900px;margin:0 auto;padding:1rem clamp(1rem,4vw,2.4rem) 2rem;scrollbar-width:thin;}
+    .aic-msg-row{display:flex;flex-direction:column;max-width:100%;margin:0 0 .85rem;gap:4px;animation:aic-rise .18s ease-out both;}
+    .aic-msg-row + .aic-msg-row{margin-top:.1rem;}
     .aic-msg-row.user{align-items:flex-end;}
     .aic-msg-row.assistant,.aic-msg-row.error{align-items:flex-start;}
     .aic-msg-author{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:.68rem;font-weight:700;}
     .aic-msg-author .aic-avatar{display:grid;place-items:center;width:21px;height:21px;border-radius:7px;background:var(--accent);color:#17130e;font-size:.72rem;font-weight:900;}
-    .aic-msg{max-width:78ch;color:var(--text);font-size:.92rem;line-height:1.72;word-break:break-word;}
+    .aic-msg{max-width:78ch;color:var(--text);font-size:.92rem;line-height:1.55;word-break:break-word;}
     .aic-msg-row.user .aic-msg{max-width:min(70%,560px);padding:10px 14px;border-radius:17px 17px 5px 17px;background:var(--accent);color:#17130e;line-height:1.5;}
     .aic-msg-row.error .aic-msg{padding:10px 13px;border:1px solid rgba(200,75,67,.35);border-radius:11px;background:rgba(200,75,67,.08);color:#c54b43;}
     .aic-msg code{padding:2px 5px;border-radius:5px;background:color-mix(in srgb,var(--border) 34%,transparent);font-size:.86em;}
     .aic-msg pre{overflow-x:auto;margin:.75rem 0;padding:12px 14px;border:1px solid color-mix(in srgb,var(--border) 60%,transparent);border-radius:10px;background:color-mix(in srgb,var(--surface) 80%,transparent);font-size:.8em;line-height:1.55;}
-    .aic-msg img.aic-gen-image{display:block;max-width:min(100%,620px);margin-top:4px;border:1px solid color-mix(in srgb,var(--border) 75%,transparent);border-radius:14px;box-shadow:0 12px 28px rgba(28,24,20,.12);}
+    .aic-msg img.aic-gen-image{display:block;max-width:min(100%,620px);margin-top:5px;border:1px solid color-mix(in srgb,var(--border) 75%,transparent);border-radius:14px;box-shadow:0 8px 20px rgba(28,24,20,.1);}
+    .aic-image-caption{margin-bottom:4px;color:var(--muted);font-size:.75rem;line-height:1.35;}
     .aic-image-actions{display:flex;gap:6px;margin-top:7px;}
     .aic-image-actions button{padding:5px 8px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-size:.68rem;cursor:pointer;}
     .aic-image-actions button:hover{border-color:var(--accent);color:var(--text);}
@@ -185,14 +188,15 @@
     .aic-msg-row:hover .aic-msg-actions{opacity:1;}
     .aic-msg-actions button{padding:1px 4px;border:0;background:none;color:var(--muted);font-size:.68rem;cursor:pointer;}
     .aic-msg-actions button:hover{color:var(--text);}
-    .aic-empty{max-width:500px;margin:clamp(4rem,14vh,9rem) auto 0;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.65;}
+    .aic-retry-btn{margin-top:7px;padding:5px 9px;border:1px solid rgba(200,75,67,.4);border-radius:7px;background:transparent;color:#c54b43;font-size:.7rem;cursor:pointer;}.aic-retry-btn:hover{background:rgba(200,75,67,.1);}
+    .aic-empty{max-width:500px;margin:clamp(2rem,8vh,5rem) auto 0;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.55;}
     .aic-empty strong{display:block;margin-bottom:8px;color:var(--text);font-size:1.15rem;letter-spacing:-.02em;}
     .aic-typing{color:var(--muted);font-size:.78rem;font-style:italic;}
     .aic-files-bar,.aic-github-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:900px;margin:0 auto;padding:0 clamp(1rem,5vw,3.2rem) .45rem;color:var(--muted);font-size:.7rem;}
     .aic-file-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.68rem;}
     .aic-file-pill.is-ready{color:var(--text);}.aic-file-pill.is-failed{border-color:rgba(200,75,67,.35);color:#c54b43;}.aic-file-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.8em;}
     .aic-github-context strong{color:var(--text);}
-    .aic-form{width:100%;max-width:900px;margin:0 auto;padding:.5rem clamp(1rem,5vw,3.2rem) 1.15rem;}
+    .aic-form{width:100%;max-width:900px;margin:0 auto;padding:.35rem clamp(1rem,4vw,2.4rem) .7rem;}
     .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
     .aic-composer:focus-within{border-color:color-mix(in srgb,var(--accent) 72%,var(--border));box-shadow:0 8px 30px color-mix(in srgb,var(--accent) 12%,transparent);}
     .aic-input{display:block;width:100%;min-height:48px;max-height:160px;padding:13px 14px 5px;border:0;resize:none;outline:none;background:transparent;color:var(--text);font:inherit;font-size:.9rem;line-height:1.5;}
@@ -638,6 +642,27 @@
       .catch(function () { toast('Could not copy — select and copy manually.'); });
   };
 
+  window.aicRetryMessage = function (btn) {
+    var row = btn && btn.closest('.aic-msg-row');
+    var t = getThread(currentThreadId());
+    var index = row ? Number(row.getAttribute('data-index')) : -1;
+    var message = t && t.messages[index];
+    if (!message || !message.retry) { toast('This message cannot be retried.'); return; }
+    t.messages.splice(index, 1);
+    upsertThread(t);
+    renderThread(t);
+    if (message.retry.kind === 'image') {
+      var retrySource = message.retry.sourceImage || _retrySources[message.retry.sourceKey] || lastImageData(t) || '';
+      setSending(true);
+      requestGeneratedImage(t, message.retry.prompt, message.retry.userContent || message.retry.prompt, retrySource, !!message.retry.isEdit)
+        .finally(function () { setSending(false); });
+    } else {
+      var retryInput = document.getElementById('aic-input');
+      if (retryInput) retryInput.value = message.retry.q || '';
+      window.aicSend({ preventDefault: function () {} });
+    }
+  };
+
   /* ── file upload / RAG ── */
   window.aicFileSelected = function (ev) {
     var file = ev.target.files && ev.target.files[0];
@@ -861,13 +886,24 @@
     }).then(function (imageData) {
       var cur = getThread(thread.id);
       if (!cur) return;
-      cur.messages.push({ role: 'assistant', content: '', imageData: imageData, imageEdit: !!isEdit });
+      cur.messages.push({
+        role: 'assistant',
+        content: (isEdit ? 'Edited image based on: ' : 'Generated image based on: ') + prompt,
+        imageData: imageData,
+        imageEdit: !!isEdit
+      });
       upsertThread(cur);
       if (currentThreadId() === thread.id) renderLog();
     }).catch(function (e) {
       var cur = getThread(thread.id);
       if (!cur) return;
-      cur.messages.push({ role: 'error', content: '\u26a0\uFE0F ' + (e.message || 'Image generation failed') });
+      var sourceKey = thread.id + ':' + Date.now();
+      if (sourceImageData) _retrySources[sourceKey] = sourceImageData;
+      cur.messages.push({
+        role: 'error',
+        content: '\u26a0\uFE0F ' + (e.message || 'Image generation failed'),
+        retry: { kind: 'image', prompt: prompt, userContent: userContent || prompt, isEdit: !!isEdit, sourceKey: sourceKey }
+      });
       upsertThread(cur);
       if (currentThreadId() === thread.id) renderLog();
     });
@@ -1026,12 +1062,13 @@
       var cls = m.role === 'user' ? 'user' : (m.role === 'error' ? 'error' : 'assistant');
       var imageSource = m.imageData || m.imageUrl || '';
       var body = imageSource
-        ? '<img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="Generated image"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
+        ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
         : mdLite(m.content);
       var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
       var actions = (m.role !== 'error' && m.content)
         ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">Copy</button></div>' : '';
-      return '<div class="aic-msg-row ' + cls + '" data-index="' + index + '" data-raw="' + escAttr(m.content || '') + '">' + author + '<div class="aic-msg">' + body + '</div>' + actions + '</div>';
+      var retry = m.retry ? '<button class="aic-retry-btn" onclick="aicRetryMessage(this)">↻ Retry</button>' : '';
+      return '<div class="aic-msg-row ' + cls + '" data-index="' + index + '" data-raw="' + escAttr(m.content || '') + '">' + author + '<div class="aic-msg">' + body + retry + '</div>' + actions + '</div>';
     }).join('');
     log.scrollTop = log.scrollHeight;
   }
@@ -1101,7 +1138,8 @@
       }).catch(function (err) {
         var cur = getThread(t.id);
         if (!cur) return;
-        cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + (err.message || 'Image request failed') });
+        var sourceKey = t.id + ':' + Date.now();
+        cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + (err.message || 'Image request failed'), retry: { kind: 'image', prompt: q, userContent: q, isEdit: edit, sourceKey: sourceKey } });
         upsertThread(cur);
         renderLog();
       }).finally(function () { setSending(false); });
@@ -1117,14 +1155,24 @@
     if (input) { input.value = ''; input.style.height = 'auto'; }
 
     var contextHistory = t.messages.slice(0, -2).slice(-HISTORY_MAX).map(function (m) {
-      return { role: m.role, content: m.content };
-    });
+      if (!m || !m.role) return null;
+      var content = m.content || '';
+      if (m.imageData || m.imageUrl) content = content || (m.imageEdit ? 'An image was edited in this conversation and is visible to the user.' : 'An image was generated in this conversation and is visible to the user.');
+      return { role: m.role, content: content };
+    }).filter(Boolean);
     var modelSel = document.getElementById('aic-model-select');
     var body = {
       q: q, history: contextHistory, threadId: t.id,
       model: (modelSel && modelSel.value) || t.model || '',
       web: t.web || 'auto', persona: t.persona || '',
-      github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null
+      github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
+      imageContext: (function () {
+        for (var i = t.messages.length - 1; i >= 0; i -= 1) {
+          var m = t.messages[i];
+          if (m && (m.imageData || m.imageUrl)) return m.imageEdit ? 'The latest assistant result is an edited image already shown in the conversation.' : 'The latest assistant result is a generated image already shown in the conversation.';
+        }
+        return '';
+      }())
     };
 
     setSending(true);
@@ -1171,7 +1219,7 @@
           } else {
             var msg = (res.data && (res.data.detail || res.data.error)) || 'Something went wrong. Try again.';
             if (last && last.role === 'assistant' && !last.content) cur.messages.pop();
-            cur.messages.push({ role: 'error', content: '\u26a0\uFE0F ' + msg });
+            cur.messages.push({ role: 'error', content: '\u26a0\uFE0F ' + msg, retry: { kind: 'text', q: q } });
           }
           upsertThread(cur);
           if (currentThreadId() === t.id) renderLog();
@@ -1179,7 +1227,7 @@
         .catch(function () {
           var cur = getThread(t.id);
           if (!cur) return;
-          cur.messages.push({ role: 'error', content: '\u26a0\uFE0F Network error — check your connection and try again.' });
+          cur.messages.push({ role: 'error', content: '\u26a0\uFE0F Network error — check your connection and try again.', retry: { kind: 'text', q: q } });
           upsertThread(cur);
           if (currentThreadId() === t.id) renderLog();
         })
