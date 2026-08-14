@@ -8075,8 +8075,13 @@ OMNIROUTE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
 # Used for AI Chat image generation (see _generate_image_openai_images_api).
 OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
 _OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))
-_OMNIROUTE_MODELS_TIMEOUT = max(3, min(
-    int(os.environ.get("OMNIROUTE_MODELS_TIMEOUT", "10")), 12))
+# The live /v1/models catalog can exceed 1.8 MB and takes several seconds to
+# cross a free ngrok tunnel. A short 10-second cap returns the stale fallback
+# even while the endpoint is healthy, so keep the refresh asynchronous but give
+# the response enough time to finish. Operators may lower/raise this with an
+# environment variable, bounded to a safe range.
+_OMNIROUTE_MODELS_TIMEOUT = max(10, min(
+    int(os.environ.get("OMNIROUTE_MODELS_TIMEOUT", "60")), 120))
 _OMNIROUTE_FAILURE_TTL = max(5, min(
     int(os.environ.get("OMNIROUTE_FAILURE_TTL", "30")), 60))
 # Keep useful smart routes visible through a short tunnel/catalog outage. A
