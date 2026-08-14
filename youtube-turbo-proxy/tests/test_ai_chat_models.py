@@ -111,12 +111,16 @@ check("hand-added image model appears in the image list",
 check("hand-added image model is kept OUT of the chat list",
       "gemini-9.9-flash-image" not in chat_models(manual), chat_models(manual))
 
-# ── 4. The dedicated imageModels override wins over the defaults ─────────────
+# ── 4. The dedicated imageModels override is preferred but does not remove
+#       known provider fallbacks. A provider can exhaust one image model after a
+#       successful request while another model on the same configured key works.
 override = {"imageModels": {"google": ["my-custom-image-model"]}}
 check("imageModels override is honoured",
       "my-custom-image-model" in image_models(override), image_models(override))
-check("imageModels override replaces the defaults",
-      "gemini-3.1-flash-image" not in image_models(override), image_models(override))
+check("imageModels override keeps built-in fallbacks",
+      "gemini-3.1-flash-image" in image_models(override), image_models(override))
+check("imageModels override keeps custom model first",
+      image_models(override)[0] == "my-custom-image-model", image_models(override))
 check("imageModels override does not leak into the chat list",
       "my-custom-image-model" not in chat_models(override), chat_models(override))
 
