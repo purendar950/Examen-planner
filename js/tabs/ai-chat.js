@@ -179,12 +179,19 @@
     #app .main-content:has(#page-ai-chat.active){max-width:none;padding:0;}
     #app .main-content > #page-ai-chat{max-width:none;width:100%;margin:0;}
     .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:calc(100dvh - 122px);min-height:0;overflow:hidden;border:0;border-radius:0;background:var(--card);box-shadow:none;}
-    .aic-shell.aic-sidebar-collapsed{grid-template-columns:0 minmax(0,1fr);}
-    .aic-sidebar-collapsed .aic-side{width:0;min-width:0;overflow:hidden;border-right:0;opacity:0;pointer-events:none;}
+    .aic-shell.aic-sidebar-collapsed{grid-template-columns:56px minmax(0,1fr);}
+    .aic-rail{display:none;flex-direction:column;align-items:center;gap:10px;height:100%;padding:12px 8px;background:color-mix(in srgb,var(--surface) 86%,var(--card));}
+    .aic-rail-brand{display:grid;place-items:center;width:30px;height:30px;margin-bottom:3px;border-radius:10px;background:var(--accent);color:#17130e;font-weight:900;}
+    .aic-rail-toggle,.aic-rail-btn{display:grid;place-items:center;width:32px;height:32px;padding:0;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--muted);font-size:1rem;cursor:pointer;transition:background .16s ease-out,border-color .16s ease-out,color .16s ease-out;}
+    .aic-rail-toggle:hover,.aic-rail-btn:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--text);}
+    .aic-rail-spacer{flex:1;}
+    .aic-sidebar-collapsed .aic-side{width:56px;min-width:56px;overflow:hidden;opacity:1;pointer-events:auto;}
+    .aic-sidebar-collapsed .aic-rail{display:flex;}
+    .aic-sidebar-collapsed .aic-side-top,.aic-sidebar-collapsed .aic-side-label,.aic-sidebar-collapsed .aic-thread-list,.aic-sidebar-collapsed .aic-side-note{display:none;}
     .aic-sidebar-toggle{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin-left:auto;border:1px solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:8px;background:transparent;color:var(--muted);font-size:1.15rem;line-height:1;cursor:pointer;transition:background .16s ease-out,color .16s ease-out,border-color .16s ease-out;}
     .aic-sidebar-toggle:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent);color:var(--text);}
     .aic-sidebar-expand{display:none;}
-    .aic-sidebar-collapsed .aic-sidebar-expand{display:inline-flex;}
+    .aic-sidebar-collapsed .aic-sidebar-expand{display:none;}
     .aic-sidebar-collapsed .aic-head-left{gap:8px;}
     @media (max-width:900px){#app .main-content:has(#page-ai-chat.active){padding:0;}.aic-shell{height:calc(100dvh - 104px);min-height:0;grid-template-columns:1fr;border-radius:0;}.aic-side{display:none;}}
     .aic-side{display:flex;flex-direction:column;min-width:0;border-right:1px solid color-mix(in srgb,var(--border) 78%,transparent);background:color-mix(in srgb,var(--surface) 82%,var(--card));}
@@ -209,7 +216,7 @@
     .aic-thread-del:hover{opacity:1!important;color:#c54b43;}
     .aic-side-note{margin:0 1rem 1rem;padding:.7rem .75rem;border:1px solid color-mix(in srgb,var(--border) 65%,transparent);border-radius:11px;color:var(--muted);font-size:.68rem;line-height:1.45;background:color-mix(in srgb,var(--card) 62%,transparent);}
     .aic-main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--card);}
-    .aic-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.85rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);background:color-mix(in srgb,var(--card) 92%,var(--surface));}
+    .aic-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:52px;padding:.62rem clamp(1rem,4vw,2rem);border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);background:color-mix(in srgb,var(--card) 92%,var(--surface));}
     .aic-head-left{display:flex;align-items:center;gap:11px;min-width:0;}
     .aic-head h2{overflow:hidden;margin:0;color:var(--text);font-size:.98rem;font-weight:750;letter-spacing:-.02em;text-overflow:ellipsis;white-space:nowrap;}
     .aic-eyebrow{display:block;margin-bottom:2px;color:var(--muted);font-size:.61rem;font-weight:800;letter-spacing:.11em;text-transform:uppercase;}
@@ -224,8 +231,8 @@
     .aic-chip-btn:active,.aic-icon-btn:active{transform:scale(.97);}
     .aic-chip-btn.is-on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text);}
     .aic-quick-spacer{flex:1;}
-    .aic-log{flex:1;min-height:0;overflow-y:auto;width:100%;max-width:none;margin:0;padding:1rem clamp(1rem,4vw,3.5rem) 2rem;scrollbar-width:thin;}
-    .aic-msg-row{display:flex;flex-direction:column;max-width:100%;margin:0 0 .85rem;gap:4px;animation:aic-rise .18s ease-out both;}
+    .aic-log{flex:1;min-height:0;overflow-y:auto;width:100%;max-width:none;margin:0;padding:1.1rem clamp(1rem,6vw,5rem) 2rem;scrollbar-width:thin;}
+    .aic-msg-row{display:flex;flex-direction:column;width:min(100%,920px);margin:0 auto .85rem;gap:4px;animation:aic-rise .18s ease-out both;}
     .aic-msg-row + .aic-msg-row{margin-top:.1rem;}
     .aic-msg-row.user{align-items:flex-end;}
     .aic-msg-row.assistant,.aic-msg-row.error{align-items:flex-start;}
@@ -253,7 +260,7 @@
     .aic-file-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.68rem;}
     .aic-file-pill.is-ready{color:var(--text);}.aic-file-pill.is-failed{border-color:rgba(200,75,67,.35);color:#c54b43;}.aic-file-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.8em;}
     .aic-github-context strong{color:var(--text);}
-    .aic-form{width:100%;max-width:none;margin:0;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
+    .aic-form{width:100%;max-width:980px;margin:0 auto;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
     .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
     .aic-composer:focus-within{border-color:color-mix(in srgb,var(--accent) 72%,var(--border));box-shadow:0 8px 30px color-mix(in srgb,var(--accent) 12%,transparent);}
     .aic-input{display:block;width:100%;min-height:48px;max-height:160px;padding:13px 14px 5px;border:0;resize:none;outline:none;background:transparent;color:var(--text);font:inherit;font-size:.9rem;line-height:1.5;}
@@ -279,6 +286,15 @@
   var MARKUP = `
 <div class="aic-shell">
   <aside class="aic-side">
+    <div class="aic-rail" aria-label="Collapsed AI Chat navigation">
+      <button class="aic-rail-toggle" onclick="aicToggleSidebar()" title="Expand conversations" aria-label="Expand conversations">›</button>
+      <span class="aic-rail-brand">✦</span>
+      <button class="aic-rail-btn" onclick="aicNewThread()" title="New chat" aria-label="New chat">＋</button>
+      <button class="aic-rail-btn" onclick="aicToggleSidebar()" title="Show conversations" aria-label="Show conversations">☷</button>
+      <button class="aic-rail-btn" onclick="aicExportThread()" title="Export conversation" aria-label="Export conversation">↓</button>
+      <span class="aic-rail-spacer"></span>
+      <button class="aic-rail-btn" onclick="aicTogglePersona()" title="Persona" aria-label="Persona">✦</button>
+    </div>
     <div class="aic-side-top">
       <div class="aic-brand"><span class="aic-mark">✦</span><div><strong>AI Chat</strong><small>Your focused study workspace</small></div><button class="aic-sidebar-toggle" id="aic-sidebar-collapse" onclick="aicToggleSidebar()" title="Collapse conversations" aria-label="Collapse conversations">‹</button></div>
       <button class="aic-new-btn" onclick="aicNewThread()"><span class="aic-plus">+</span><span>New chat</span><kbd>⌘ K</kbd></button>
