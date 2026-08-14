@@ -1650,6 +1650,10 @@
   function renderAssistantBody(text, message) {
     var source = String(text || '');
     var fence = /```([^\n`]*)\n?([\s\S]*?)```/g;
+    if (message && message.creationPrompt && isCreationRequest(message.creationPrompt) && !message.workspaceArtifacts && /```/.test(source)) {
+      var progressText = source.replace(fence, '').replace(/\n{3,}/g, '\n\n').trim();
+      return (progressText ? mdLite(progressText) : '') + '<section class="aic-file-bundle aic-file-bundle-pending"><div class="aic-file-bundle-head"><span>Creating files in workspace</span><span>Preparing preview…</span></div><div class="aic-file-artifact-meta">The code will appear in the workspace file panel when generation finishes.</div></section>';
+    }
     if (message && message.workspaceArtifacts && message.workspaceArtifacts.length) {
       var proseOnly = source.replace(fence, '').replace(/\n{3,}/g, '\n\n').trim();
       return generatedFileBundleHtml(message) + (proseOnly ? mdLite(proseOnly) : '');
@@ -1798,7 +1802,7 @@
 
     if (!t.messages.length) t.title = threadTitleFromFirstMessage(q);
     t.messages.push({ role: 'user', content: q });
-    t.messages.push({ role: 'assistant', content: '' });
+    t.messages.push({ role: 'assistant', content: '', creationPrompt: q });
     upsertThread(t);
     renderThreadList();
     renderLog();
@@ -1839,7 +1843,8 @@
       if (row) {
         row.setAttribute('data-raw', acc);
         var bubble = row.querySelector('.aic-msg');
-        if (bubble) bubble.innerHTML = mdLite(acc) + '<span class="aic-typing" style="display:inline;"> \u258c</span>';
+                  if (bubble) bubble.innerHTML = renderAssistantBody(acc, { creationPrompt: q }) + '<span class="aic-typing" style="display:inline;"> \u258c</span>';
+
         log.scrollTop = log.scrollHeight;
       }
     }
