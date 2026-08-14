@@ -1836,6 +1836,39 @@ def _ai_chat_resolve_model(models, requested_key):
     return models[0]
 
 
+def _ai_chat_image_candidates(models, picked, max_n=None):
+    """Return a bounded, deterministic fallback list for image generation.
+
+    The browser may remember Gemini as the selected image model, but a temporary
+    Gemini quota/rate limit must not make every image request fail when the admin
+    has also configured OmniRoute image routes. Keep the user's selected model
+    first, then prefer OmniRoute's alternative routes, then other configured
+    providers. Every entry comes from the already-authorized image catalog.
+    """
+    if not picked:
+        return []
+    try:
+        cap = int(max_n if max_n is not None else os.environ.get("IMAGE_FALLBACK_MAX", "4"))
+    except (TypeError, ValueError):
+        cap = 4
+    cap = max(1, min(cap, 8))
+    selected_key = _ai_chat_model_key(picked.get("provider"), picked.get("model"))
+    out = [picked]
+    remaining = [m for m in (models or [])
+                 if isinstance(m, dict)
+                 and _ai_chat_model_key(m.get("provider"), m.get("model")) != selected_key]
+    # OmniRoute is deliberately first among fallbacks because it exposes the
+    # alternative image families advertised in its live catalog.
+    remaining.sort(key=lambda m: (0 if m.get("provider") == "omniroute" else 1,
+                                  str(m.get("provider") or ""),
+                                  str(m.get("model") or "")))
+    for candidate in remaining:
+        if len(out) >= cap:
+            break
+        out.append(candidate)
+    return out
+
+
 def _ai_chat_tab_sys(persona=None):
     today = datetime.now(timezone.utc).strftime("%d %B %Y")
     base = ("You are a helpful, friendly AI assistant inside a study-planner app "
@@ -12332,11 +12365,20 @@ def api_ai_chat_image():
     picked = _ai_chat_resolve_model(image_models, str(body.get("model") or "").strip())
     if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_img", user["uid"], 20, 3600):
         return jsonify({"error": "rate_limited", "detail": "Too many images this hour. Try later."}), 429
-    data, result = _ai_chat_generate_image(raw_cfg, picked["provider"], picked["model"],
-                                           prompt, body.get("aspectRatio"))
-    if data is None:
-        return jsonify({"error": "image_failed", "detail": result}), 502
-    return Response(data, mimetype=result)
+    candidates = _ai_chat_image_candidates(image_models, picked)
+    failures = []
+    for candidate in candidates:
+        data, result = _ai_chat_generate_image(raw_cfg, candidate["provider"], candidate["model"],
+                                               prompt, body.get("aspectRatio"))
+        if data is not None:
+            response = Response(data, mimetype=result)
+            response.headers["X-Image-Provider"] = str(candidate["provider"])
+            response.headers["X-Image-Model"] = str(candidate["model"])
+            return response
+        failures.append("%s/%s: %s" % (candidate["provider"], candidate["model"], result))
+    detail = "Image generation failed after trying %d configured model%s. %s" % (
+        len(candidates), "" if len(candidates) == 1 else "s", " | ".join(failures)[:900])
+    return jsonify({"error": "image_failed", "detail": detail}), 502
 
 
 @app.get("/api/search")
