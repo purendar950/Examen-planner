@@ -77,23 +77,35 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const releases = await github.rest.repos.listReleases({
+            const releases = await github.paginate(github.rest.repos.listReleases, {
               owner: context.repo.owner,
-              repo: context.repo.repo
+              repo: context.repo.repo,
+              per_page: 100
             });
-            
-            const latestRelease = releases.data.find(r => r.tag_name === 'latest-build');
+
+            const latestRelease = releases.find(r => r.tag_name === 'latest-build');
             if (latestRelease) {
               await github.rest.repos.deleteRelease({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 release_id: latestRelease.id
               });
+            }
+
+            // A release and its tag can be deleted independently. Ignore a
+            // missing tag so cleanup never turns a successful APK build red.
+            try {
               await github.rest.git.deleteRef({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                ref: 'refs/tags/latest-build'
+                ref: 'tags/latest-build'
               });
+            } catch (error) {
+              if (error.status === 404) {
+                core.info('latest-build tag is already absent; continuing.');
+              } else {
+                throw error;
+              }
             }
 
       - name: Create/Update Latest Release
