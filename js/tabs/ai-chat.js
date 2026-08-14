@@ -87,6 +87,13 @@
     var changed = false;
     thread.messages = thread.messages.map(function (m) {
       if (!m || typeof m !== 'object') return m;
+      if (m.imagePending) {
+        m.role = 'error';
+        m.imagePending = false;
+        m.content = '⚠️ Image generation was interrupted before completion. Retry to try again.';
+        m.retry = m.retry || { kind: 'image', prompt: m.imagePrompt || '', userContent: m.imageUserContent || m.imagePrompt || '', isEdit: !!m.imageEdit };
+        changed = true;
+      }
       if ((m.imageData || m.imageUrl) && !m.content) {
         m.content = m.imageEdit ? 'Edited image already shown in this conversation.' : 'Generated image already shown in this conversation.';
         changed = true;
@@ -273,7 +280,7 @@
     .aic-retry-btn{margin-top:7px;padding:5px 9px;border:1px solid rgba(200,75,67,.4);border-radius:7px;background:transparent;color:#c54b43;font-size:.7rem;cursor:pointer;}.aic-retry-btn:hover{background:rgba(200,75,67,.1);}
     .aic-empty{max-width:500px;margin:clamp(2rem,8vh,5rem) auto 0;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.55;}
     .aic-empty strong{display:block;margin-bottom:8px;color:var(--text);font-size:1.15rem;letter-spacing:-.02em;}
-    .aic-typing{color:var(--muted);font-size:.78rem;font-style:italic;}
+    .aic-typing{color:var(--muted);font-size:.78rem;font-style:italic;}.aic-image-pending{display:flex;align-items:center;gap:8px;padding:10px 13px;border:1px solid color-mix(in srgb,var(--border) 75%,transparent);border-radius:11px;background:color-mix(in srgb,var(--surface) 70%,transparent);color:var(--muted);}.aic-image-spinner{width:13px;height:13px;border:2px solid color-mix(in srgb,var(--muted) 30%,transparent);border-top-color:var(--accent);border-radius:50%;animation:aic-spin .8s linear infinite;}@keyframes aic-spin{to{transform:rotate(360deg);}}
     .aic-files-bar,.aic-github-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:none;margin:0;padding:0 clamp(1rem,4vw,3.5rem) .45rem;color:var(--muted);font-size:.7rem;}
     .aic-file-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.68rem;}
     .aic-file-pill.is-ready{color:var(--text);}.aic-file-pill.is-failed{border-color:rgba(200,75,67,.35);color:#c54b43;}.aic-file-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.8em;}
@@ -880,6 +887,7 @@
     if (retryKind === 'image') {
       setSending(true);
       requestGeneratedImage(t, retryPrompt, retryUserContent, retrySource, retryIsEdit)
+        .catch(function (err) { recordImageFailure(t, retryPrompt, retryUserContent, retrySource, retryIsEdit, err); })
         .finally(function () { setSending(false); });
     } else if (retryKind === 'search' || retryKind === 'speech' || retryKind === 'video') {
       setSending(true);
@@ -1076,6 +1084,38 @@
       || /\b(?:edit|modify|retouch|restyle|change the background|remove the background|remove an? object|replace the background)\b[\s\S]{0,120}\b(?:image|picture|photo|it|this|that|background)\b/.test(q);
   }
 
+  function removePendingImageMessages(thread) {
+    if (!thread || !Array.isArray(thread.messages)) return;
+    for (var i = thread.messages.length - 1; i >= 0; i -= 1) {
+      if (thread.messages[i] && thread.messages[i].imagePending) thread.messages.splice(i, 1);
+    }
+  }
+  function imageFailureText(e) {
+    var detail = e && (e.message || e.detail || e.error) ? (e.message || e.detail || e.error) : 'Image generation failed';
+    if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
+    if (/failed to fetch|networkerror/i.test(String(detail))) detail = 'Image request could not reach either configured backend. ' + detail;
+    return String(detail).slice(0, 500);
+  }
+  function recordImageFailure(thread, prompt, userContent, sourceImageData, isEdit, e) {
+    var cur = getThread(thread && thread.id) || thread;
+    if (!cur) return;
+    var expectedUserContent = userContent || prompt;
+    removePendingImageMessages(cur);
+    var last = cur.messages[cur.messages.length - 1];
+    if (!last || last.role !== 'user' || String(last.content || '') !== String(expectedUserContent || '')) {
+      cur.messages.push({ role: 'user', content: expectedUserContent || prompt });
+    }
+    var sourceKey = cur.id + ':' + Date.now();
+    if (sourceImageData) _retrySources[sourceKey] = sourceImageData;
+    cur.messages.push({
+      role: 'error',
+      content: '⚠️ ' + imageFailureText(e),
+      retry: { kind: 'image', prompt: prompt, userContent: expectedUserContent, isEdit: !!isEdit, sourceKey: sourceKey }
+    });
+    upsertThread(cur);
+    if (currentThreadId() === cur.id) renderLog();
+  }
+
   function requestGeneratedImage(thread, prompt, userContent, sourceImageData, isEdit) {
     var selected = imageSelection(thread);
     if (!selected) return Promise.reject(new Error('No image-capable provider/model is configured. Ask an admin to add one in AI Study.'));
@@ -1083,15 +1123,18 @@
     if (!thread.messages.length) thread.title = threadTitleFromFirstMessage(prompt);
     thread.imageModel = selected.key;
     thread.messages.push({ role: 'user', content: userContent || prompt });
+    thread.messages.push({
+      role: 'assistant',
+      content: (isEdit ? 'Editing image with ' : 'Generating image with ') + selected.label + '…',
+      imagePending: true,
+      imagePrompt: prompt,
+      imageUserContent: userContent || prompt,
+      imageEdit: !!isEdit,
+      retry: { kind: 'image', prompt: prompt, userContent: userContent || prompt, isEdit: !!isEdit }
+    });
     upsertThread(thread);
     renderThreadList();
     renderLog();
-
-    var log = document.getElementById('aic-log');
-    var typing = document.createElement('div');
-    typing.className = 'aic-typing';
-    typing.textContent = (isEdit ? 'Editing image with ' : 'Generating image with ') + selected.label + '…';
-    if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
 
     return backendAuthFetch('/api/ai-chat/image', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1131,6 +1174,7 @@
     }).then(function (result) {
       var cur = getThread(thread.id);
       if (!cur) return;
+      removePendingImageMessages(cur);
       var actualProviderLabel = '';
       if (result.provider) {
         var imageGroups = catalogGroups('imageProviderGroups', 'imageModels');
@@ -1157,22 +1201,6 @@
       });
       upsertThread(cur);
       if (currentThreadId() === thread.id) renderLog();
-    }).catch(function (e) {
-      var cur = getThread(thread.id);
-      if (!cur) return;
-      var detail = e && (e.message || e.detail || e.error) ? (e.message || e.detail || e.error) : 'Image generation failed';
-      if (/failed to fetch|networkerror/i.test(String(detail))) {
-        detail = 'Image request could not reach either configured backend. ' + detail;
-      }
-      var sourceKey = thread.id + ':' + Date.now();
-      if (sourceImageData) _retrySources[sourceKey] = sourceImageData;
-      cur.messages.push({
-        role: 'error',
-        content: '\u26a0\uFE0F ' + String(detail).slice(0, 500),
-        retry: { kind: 'image', prompt: prompt, userContent: userContent || prompt, isEdit: !!isEdit, sourceKey: sourceKey }
-      });
-      upsertThread(cur);
-      if (currentThreadId() === thread.id) renderLog();
     });
   }
 
@@ -1190,12 +1218,14 @@
     var sourceInput = document.getElementById('aic-image-source-input');
     var sourceFile = sourceInput && sourceInput.files && sourceInput.files[0];
     var edit = !!sourceFile || isImageEditIntent(prompt);
+    var imageSource = '';
+    var imageUserContent = '\uD83C\uDFA8 [' + selected.label + '] ' + prompt;
     selectedSourceImageData(t).then(function (source) {
+      imageSource = source || '';
       if (edit && !source) throw new Error('To edit an image, upload a reference image or generate an image first.');
-      return requestGeneratedImage(t, prompt, '\uD83C\uDFA8 [' + selected.label + '] ' + prompt, edit ? source : '', edit);
+      return requestGeneratedImage(t, prompt, imageUserContent, edit ? source : '', edit);
     }).catch(function (err) {
-      var cur = getThread(t.id);
-      if (cur) { cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + (err.message || 'Image request failed') }); upsertThread(cur); renderLog(); }
+      recordImageFailure(t, prompt, imageUserContent, edit ? imageSource : '', edit, err);
     }).finally(function () { setSending(false); });
   };
 
@@ -2204,13 +2234,15 @@
     log.innerHTML = messages.map(function (m, index) {
       var cls = m.role === 'user' ? 'user' : (m.role === 'error' ? 'error' : 'assistant');
       var imageSource = m.imageData || m.imageUrl || '';
-      var body = imageSource
-        ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + (m.imageModelLabel ? '<span class="aic-image-model"> · ' + esc(m.imageModelLabel) + '</span>' : '') + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
-        : (m.mediaType === 'search' ? renderSearchMessage(m) : (m.mediaType === 'audio' ? renderAudioMessage(m) : (m.mediaType === 'video' ? renderVideoMessage(m) : (m.role === 'assistant' ? renderAssistantBody(m.content, m) : mdLite(m.content)))));
+      var body = m.imagePending
+        ? '<div class="aic-image-pending" aria-live="polite"><span class="aic-image-spinner" aria-hidden="true"></span><span>' + esc(m.content || 'Generating image…') + '</span></div>'
+        : imageSource
+          ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + (m.imageModelLabel ? '<span class="aic-image-model"> · ' + esc(m.imageModelLabel) + '</span>' : '') + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
+          : (m.mediaType === 'search' ? renderSearchMessage(m) : (m.mediaType === 'audio' ? renderAudioMessage(m) : (m.mediaType === 'video' ? renderVideoMessage(m) : (m.role === 'assistant' ? renderAssistantBody(m.content, m) : mdLite(m.content)))));
       var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
-      var actions = (m.role !== 'error' && m.content)
+      var actions = (!m.imagePending && m.role !== 'error' && m.content)
         ? '<div class="aic-msg-actions"><button onclick="aicCopyMessage(this)">Copy</button>' + (m.role === 'user' ? '<button onclick="aicRetryMessage(this)">↻ Retry</button>' : '') + '</div>' : '';
-      var retry = m.retry ? '<button class="aic-retry-btn" onclick="aicRetryMessage(this)">↻ Retry</button>' : '';
+      var retry = m.retry && !m.imagePending ? '<button class="aic-retry-btn" onclick="aicRetryMessage(this)">↻ Retry</button>' : '';
       return '<div class="aic-msg-row ' + cls + '" data-index="' + index + '" data-raw="' + escAttr(m.content || '') + '">' + author + '<div class="aic-msg">' + body + retry + '</div>' + actions + '</div>';
     }).join('');
     log.scrollTop = log.scrollHeight;
@@ -2304,16 +2336,13 @@
       }
       setSending(true);
       var edit = isImageEditIntent(q);
+      var imageSource = '';
       selectedSourceImageData(t).then(function (source) {
+        imageSource = source || '';
         if (edit && !source) throw new Error('To edit an image, upload a reference image or generate an image first.');
         return requestGeneratedImage(t, q, q, edit ? source : '', edit);
       }).catch(function (err) {
-        var cur = getThread(t.id);
-        if (!cur) return;
-        var sourceKey = t.id + ':' + Date.now();
-        cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + (err.message || 'Image request failed'), retry: { kind: 'image', prompt: q, userContent: q, isEdit: edit, sourceKey: sourceKey } });
-        upsertThread(cur);
-        renderLog();
+        recordImageFailure(t, q, q, edit ? imageSource : '', edit, err);
       }).finally(function () { setSending(false); });
       return;
     }
