@@ -41,6 +41,7 @@
   var _checked = false;      // avoid re-checking /status on every page switch
   var _sending = false;
   var _statusCache = null;   // last /api/ai-chat/status response {enabled, models, imageModels, imageEnabled, ragEnabled}
+  var _catalogRefreshTimer = null;
   var _curThreadId = null;
   var _filePollTimer = null;
 
@@ -267,6 +268,17 @@
   }
 
   /* ── access check + status (models/imageEnabled/ragEnabled) ── */
+  function scheduleCatalogRefresh(j) {
+    if (!j || !j.catalogRefreshing || _catalogRefreshTimer) return;
+    // The backend serves the durable/last-good catalog immediately and refreshes
+    // the live OmniRoute list in a background thread. Re-fetch once that thread
+    // has had time to finish so the picker does not remain stuck on the fallback.
+    _catalogRefreshTimer = setTimeout(function () {
+      _catalogRefreshTimer = null;
+      checkAccess();
+    }, 1200);
+  }
+
   function checkAccess() {
     if (typeof currentUser === 'undefined' || !currentUser) return;
     if (typeof _fbReady === 'undefined' || !_fbReady) return;   // no backend identity offline
@@ -287,6 +299,7 @@
         if (imageBtn) imageBtn.style.display = (j && j.imageEnabled) ? '' : 'none';
         var attachBtn = document.getElementById('aic-attach-btn');
         if (attachBtn) attachBtn.style.display = (j && j.ragEnabled) ? '' : 'none';
+        scheduleCatalogRefresh(j);
       })
       .catch(function () { /* leave the tab hidden on any error — fail closed */ });
   }
