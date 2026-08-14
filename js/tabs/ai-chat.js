@@ -716,7 +716,7 @@
     toast(t.codingMode ? 'Coding mode enabled for this conversation.' : 'Coding mode disabled.', 'info');
   };
   function isCodingRequest(text) {
-    return /\b(code|coding|debug|bug|fix|refactor|function|class|component|api|endpoint|repository|repo|github|javascript|typescript|python|html|css|sql|test|stack trace|error|diff|patch|implement|build)\b/i.test(String(text || ''));
+    return /\b(code|coding|debug|bug|fix|refactor|function|class|component|api|endpoint|repository|repo|github|javascript|typescript|python|html|css|sql|test|stack trace|error|diff|patch|implement|build|stopwatch|timer|countdown)\b/i.test(String(text || ''));
   }
   function renderWebBtn() {
     var btn = document.getElementById('aic-web-btn');
@@ -1243,7 +1243,13 @@
     renderWorkspace();
   }
   function isCreationRequest(prompt) {
-    return /\b(create|make|build|generate|write|scaffold|prototype|design|new)\b/i.test(String(prompt || '')) && /\b(html|css|javascript|typescript|web app|website|program|page|component|game|calculator|quiz|todo)\b/i.test(String(prompt || ''));
+    var source = String(prompt || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    var createVerb = /\b(create|make|build|generate|write|scaffold|prototype|design|new)\b/.test(source);
+    // Include common small-app requests and tolerate the frequent “stop wate”
+    // typo so a stopwatch request starts a fresh project instead of patching
+    // whichever old file happens to remain in the conversation workspace.
+    var projectKind = /\b(html|css|javascript|typescript|web app|website|program|page|component|game|calculator|quiz|todo|stopwatch|stop watch|stop wate|timer|countdown|clock)\b/.test(source);
+    return createVerb && projectKind;
   }
   function artifactExtension(language) {
     return ({ html: 'html', css: 'css', javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts', jsx: 'jsx', tsx: 'tsx', python: 'py', py: 'py', json: 'json', markdown: 'md', bash: 'sh', sql: 'sql' })[String(language || '').toLowerCase()] || 'txt';
@@ -1273,6 +1279,7 @@
     return out.slice(0, 12);
   }
   function materializeCreationArtifacts(t, message, prompt) {
+    if (!isCreationRequest(prompt)) return [];
     var ws = workspaceState(t), blocks = creationArtifactBlocks(message && message.content, prompt);
     if (!ws || !message || !blocks.length || (message.workspaceArtifacts && message.workspaceArtifacts.length)) return blocks;
     var paths = [];
@@ -1356,6 +1363,20 @@
     renderWorkspace();
     toast('Saved local version ' + file.revision + ' for ' + file.path + '.', 'success');
   };
+  function resetStaleGeneratedWorkspace(t) {
+    var ws = workspaceState(t);
+    if (!ws || !ws.files.length) return;
+    // A new project should not inherit a previous AI demo. Preserve files the
+    // student opened from GitHub or uploaded/edited locally; those may contain
+    // work that must never be discarded implicitly.
+    var hasProtectedFile = ws.files.some(function (file) {
+      return file && (file.dirty || file.source === 'github' || file.source === 'local' || file.source === 'upload');
+    });
+    if (hasProtectedFile) return;
+    t.workspace = { files: [], activePath: '', selectedPaths: [], lastRun: null, previewOpen: false };
+    upsertThread(t);
+    renderWorkspace();
+  }
   window.aicCloseWorkspace = function () {
     var t = getThread(currentThreadId());
     if (!t) return;
@@ -1823,18 +1844,25 @@
     // in this thread. Otherwise the backend correctly sees a workspace, enters
     // PATCH-ONLY mode, and refuses to emit the named files needed for creation.
     var creatingProject = isCreationRequest(q);
+    if (creatingProject) resetStaleGeneratedWorkspace(t);
     // For ordinary edits this is equivalent to the legacy workspace: workspaceRequest(t) path.
-    var requestedWorkspace = creatingProject ? null : workspaceRequest(t);
+    var existingWorkspace = workspaceRequest(t);
+    var requestedWorkspace = creatingProject ? null : existingWorkspace;
+    var workspaceEditIntent = !!existingWorkspace && /\b(improve|change|modify|update|remove|add|replace|refactor|fix|debug|edit|rewrite)\b/i.test(q);
+    var codingIntent = creatingProject || isCodingRequest(q) || workspaceEditIntent;
     var body = {
       q: q, history: contextHistory, threadId: t.id,
-      coding: !!t.codingMode || isCodingRequest(q),
+      // Coding mode is a preference, not a command to turn “Hi” into a file.
+      // Only send structured coding instructions when the prompt has coding or
+      // workspace-edit intent.
+      coding: codingIntent,
       model: (modelSel && modelSel.value) || t.model || '',
       web: t.web || 'auto', persona: t.persona || '',
       github: githubState(t) ? { repo: t.github.repo, ref: t.github.ref, files: t.github.files.slice(0, 8) } : null,
       workspace: requestedWorkspace,
       editMode: requestedWorkspace ? 'multi-file-patch' : 'new-file',
       localMemory: localMemoryContext(t),
-      timeoutMs: (creatingProject || !!t.codingMode || isCodingRequest(q)) ? 90000 : 30000,
+      timeoutMs: codingIntent ? 90000 : 30000,
       imageContext: (function () {
         for (var i = t.messages.length - 1; i >= 0; i -= 1) {
           var m = t.messages[i];

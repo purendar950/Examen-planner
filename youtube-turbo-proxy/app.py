@@ -12443,6 +12443,7 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
         r"\b(code|coding|debug|bug|fix|refactor|function|class|component|api|endpoint|repository|repo|github|javascript|typescript|python|html|css|sql|test|stack trace|error|diff|patch|implement|build)\b",
         q, re.I))
     if coding_requested:
+        fresh_project = str(body.get("editMode") or "").strip().lower() == "new-file" and not body.get("workspace")
         sysmsg += ("\n\nCODING WORKSPACE MODE: Treat this as an engineering task. First state the "
                    "goal and assumptions briefly. If repository or active file context is present, "
                    "name the relevant file paths and explain the smallest safe change. For an active "
@@ -12452,7 +12453,8 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                    "Include a concise verification section with tests, commands, expected results, "
                    "and limitations. Never claim that code was executed, a file was changed, or a "
                    "repository was modified unless a trusted tool result is included in the conversation. "
-                   "If the user provides an error, explain the likely cause and end with the smallest "
+                   + ("This is a FRESH PROJECT request. Ignore implementation details from older projects in the supplied history unless the user explicitly asks to reuse them. Design the requested project from its current description and emit the complete named files needed to run it. " if fresh_project else "")
+                   + "If the user provides an error, explain the likely cause and end with the smallest "
                    "corrected patch. Keep explanatory prose outside code fences so the app can render "
                    "the result as a reviewable artifact. CREATION ARTIFACT CONTRACT: when no active "
                    "workspace file is present and the student asks to create a new project, produce "
