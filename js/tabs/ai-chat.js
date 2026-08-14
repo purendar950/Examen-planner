@@ -329,6 +329,18 @@
   };
 
   /* ── dependent provider + model pickers ── */
+  var OMNIROUTE_AUTO_FAMILY_LABELS = {
+    'auto/claude-opus': 'Claude Opus family',
+    'auto/claude-sonnet': 'Claude Sonnet family',
+    'auto/gemini': 'Gemini family',
+    'auto/glm': 'GLM family',
+    'auto/minimax': 'MiniMax family',
+    'auto/mimo': 'MiMo family',
+    'auto/zai': 'Z.AI family',
+    'auto/llama': 'Llama family',
+    'auto/gemma': 'Gemma family'
+  };
+
   function catalogGroups(groupField, flatField) {
     var groups = (_statusCache && _statusCache[groupField]) || [];
     if (groups.length) return groups;
@@ -345,10 +357,18 @@
       var groupLabel = parts[0] || provider;
       var modelLabel = String(m.label || '').replace(/^.*? — /, '');
       if (provider === 'omniroute') {
-        subprovider = rawModel.indexOf('/') === -1 ? 'auto' : rawModel.split('/', 1)[0];
-        groupKey = 'omniroute:' + subprovider;
-        groupLabel = 'OmniRoute — ' + (subprovider === 'auto' ? 'Auto (smart routing)' : subprovider.replace(/-/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }));
-        modelLabel = rawModel.indexOf('/') === -1 ? 'Auto' : rawModel.slice(rawModel.indexOf('/') + 1);
+        var familyLabel = OMNIROUTE_AUTO_FAMILY_LABELS[rawModel];
+        if (familyLabel) {
+          subprovider = 'auto-family:' + rawModel.slice('auto/'.length);
+          groupKey = 'omniroute:' + subprovider;
+          groupLabel = 'OmniRoute — ' + familyLabel;
+          modelLabel = rawModel;
+        } else {
+          subprovider = rawModel.indexOf('/') === -1 ? 'auto' : rawModel.split('/', 1)[0];
+          groupKey = 'omniroute:' + subprovider;
+          groupLabel = 'OmniRoute — ' + (subprovider === 'auto' ? 'Auto (smart routing)' : subprovider.replace(/-/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }));
+          modelLabel = rawModel.indexOf('/') === -1 ? 'Auto' : rawModel.slice(rawModel.indexOf('/') + 1);
+        }
       }
       var group = byProvider[groupKey];
       if (!group) {

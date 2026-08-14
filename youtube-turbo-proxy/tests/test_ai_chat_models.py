@@ -30,6 +30,9 @@ Run with:  python3 youtube-turbo-proxy/tests/test_ai_chat_models.py
 import io
 import os
 import re
+import threading
+import time
+from datetime import datetime, timezone
 
 APP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "app.py")
 SRC = io.open(APP, encoding="utf-8").read()
@@ -218,6 +221,189 @@ for r in ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"):
     w, h = a2s(r).split("x")
     check("ratio %s yields sane dimensions" % r,
           256 <= int(w) <= 1024 and 256 <= int(h) <= 1024, a2s(r))
+
+# ── 10. Durable OmniRoute catalogs + cold-start provider grouping ───────────
+# Execute the production helpers with a process-RAM cache that starts empty,
+# exactly as it does after a Render restart while the ngrok catalog is offline.
+ns4 = {
+    "os": os, "re": re, "time": time, "threading": threading,
+    "STUDY_PROVIDER_MODELS": {"omniroute": ["auto"]},
+}
+exec(section("def _clean_omniroute_catalog_ids(", "# Image models live"), ns4)
+exec(section("_OMNIROUTE_AUTO_FALLBACK = ", "_omniroute_models_cache = "), ns4)
+exec(section("def _omniroute_item_is_chat(", "def _omniroute_fetch_model_ids("), ns4)
+ns4["_omniroute_models_cache"] = {"ts": 0.0, "attempt_ts": 0.0, "ids": []}
+ns4["_omniroute_refresh_models_async"] = lambda: None
+exec(section("def _omniroute_auto_models(", "def _effective_provider_models_raw("), ns4)
+exec(section("def _effective_provider_models_raw(cfg):", "def _model_provider("), ns4)
+exec(section("def _ai_chat_model_key(", "def _ai_chat_tab_sys("), ns4)
+
+durable_cfg = {
+    "omnirouteCatalog": {
+        "chatModels": [
+            "openrouter/gpt-5", "nvidia/nemotron", "mistral/large",
+            "pol/flux-schnell", "veo-free/veo-3", "cx/whisper-large",
+            "af/text-embedding-3", "openrouter/gpt-5", " ", None,
+        ]
+    },
+    # The legacy field is imported as a fallback instead of being overwritten.
+    "providerModels": {"omniroute": ["agentrouter/claude-sonnet", "auto"]},
+}
+cold_models = ns4["_effective_provider_models_raw"](durable_cfg)["omniroute"]
+check("durable restart: concrete OpenRouter route survives empty RAM cache",
+      "openrouter/gpt-5" in cold_models, cold_models)
+check("durable restart: legacy concrete route remains available",
+      "agentrouter/claude-sonnet" in cold_models, cold_models)
+for rejected in ("pol/flux-schnell", "veo-free/veo-3", "cx/whisper-large",
+                 "af/text-embedding-3"):
+    check("typed chat snapshot rejects non-chat id: %s" % rejected,
+          rejected not in cold_models, cold_models)
+
+available = [{"provider": "omniroute", "model": model, "label": "OmniRoute"}
+             for model in cold_models]
+groups = ns4["_ai_chat_model_groups"](available)
+groups_by_key = {group["key"]: group for group in groups}
+check("cold fallback: generic capabilities remain under Auto",
+      "omniroute:auto" in groups_by_key and
+      any(m["model"] == "auto/best-chat" for m in groups_by_key["omniroute:auto"]["models"]),
+      [group["key"] for group in groups])
+for family in ("claude-opus", "claude-sonnet", "gemini", "glm", "minimax",
+               "mimo", "zai", "llama", "gemma"):
+    key = "omniroute:auto-family:%s" % family
+    check("cold fallback: %s is a distinct upstream choice" % family,
+          key in groups_by_key, [group["key"] for group in groups])
+check("canonical keys are unchanged by family grouping",
+      all(model["key"] == "omniroute::" + model["model"]
+          for group in groups for model in group["models"]))
+check("every visible canonical key passes backend selection validation",
+      all(ns4["_ai_chat_resolve_model"](available, model["key"])["model"] == model["model"]
+          for group in groups for model in group["models"]))
+check("durable catalog exposes all concrete provider prefixes",
+      all(key in groups_by_key for key in
+          ("omniroute:openrouter", "omniroute:nvidia", "omniroute:mistral",
+           "omniroute:agentrouter")), [group["key"] for group in groups])
+
+# Typed image snapshots retain metadata-only image models whose names cannot be
+# reclassified after restart, while still blocking obvious video/audio/etc.
+exec(section("_OMNIROUTE_IMAGE_ID_MARKERS = ", "_omniroute_image_models_cache = "), ns4)
+image_snapshot = ns4["_omniroute_snapshot_ids"]({
+    "omnirouteCatalog": {"imageModels": [
+        "zw/brand-new-renderer", "cx/seedream-4.5", "veo-free/veo-3",
+        "cx/sora-2", "af/text-embedding-3",
+    ]}
+}, "image")
+check("typed image snapshot preserves metadata-only image ids",
+      "zw/brand-new-renderer" in image_snapshot, image_snapshot)
+check("typed image snapshot excludes video and embedding ids",
+      not ({"veo-free/veo-3", "cx/sora-2", "af/text-embedding-3"} & set(image_snapshot)),
+      image_snapshot)
+ns4["OMNIROUTE_IMAGES_URL"] = "https://example.invalid/v1/images/generations"
+exec(section("IMAGE_MODEL_MARKERS = ", "def _ai_chat_generate_image"), ns4)
+ns4["_omniroute_image_models_cache"] = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
+ns4["_omniroute_refresh_image_models_async"] = lambda: None
+ns4["_omniroute_fetch_image_model_ids"] = lambda: []
+effective_images = ns4["_effective_image_models"]({
+    "omnirouteCatalog": {"imageModels": ["zw/brand-new-renderer"]},
+    "imageModels": {"omniroute": ["cx/seedream-4.5"]},
+})["omniroute"]
+check("image picker receives durable and legacy OmniRoute image fallbacks",
+      effective_images == ["zw/brand-new-renderer", "cx/seedream-4.5"],
+      effective_images)
+image_refresh_calls = []
+ns4["_omniroute_image_models_cache"] = {
+    "ids": ["zw/ram-only-image"], "ts": 0.0, "attempt_ts": 0.0,
+}
+ns4["_omniroute_refresh_image_models_async"] = lambda: image_refresh_calls.append(True)
+ns4["_omniroute_fetch_image_model_ids"] = lambda: (_ for _ in ()).throw(
+    AssertionError("stale RAM fallback must not refresh synchronously"))
+ram_only_images = ns4["_effective_image_models"]({})["omniroute"]
+check("stale RAM-only image catalog is served without blocking on the tunnel",
+      ram_only_images == ["zw/ram-only-image"] and image_refresh_calls == [True],
+      (ram_only_images, image_refresh_calls))
+
+# ── 11. Successful live refresh persists; later HTTP 404 keeps last-good ────
+class _FakeDoc:
+    def __init__(self):
+        self.writes = []
+
+    def set(self, data, merge=None):
+        self.writes.append((data, merge))
+
+
+class _FakeDb:
+    def __init__(self, doc):
+        self.doc = doc
+
+    def collection(self, name):
+        return self
+
+    def document(self, name):
+        return self.doc
+
+
+class _Response:
+    def __init__(self, status_code, payload=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+
+    def json(self):
+        return self._payload
+
+
+class _Requests:
+    def __init__(self, response):
+        self.response = response
+
+    def get(self, *args, **kwargs):
+        return self.response
+
+
+fake_doc = _FakeDoc()
+ns5 = {
+    "datetime": datetime, "timezone": timezone, "time": time,
+    "threading": threading, "_fb_db": _FakeDb(fake_doc),
+    "_study_raw_cfg_cache": {"ts": 0.0, "data": {}},
+    "log": type("_L", (), {"warning": lambda *a, **k: None})(),
+    "OMNIROUTE_MODELS_URL": "https://example.invalid/v1/models",
+    "_OMNIROUTE_MODELS_TTL": 600, "_OMNIROUTE_FAILURE_TTL": 30,
+    "_OMNIROUTE_MODELS_TIMEOUT": 3,
+}
+exec(section("def _clean_omniroute_catalog_ids(", "# Image models live"), ns5)
+exec(section("_OMNIROUTE_AUTO_FALLBACK = ", "_omniroute_models_cache = "), ns5)
+exec(section("def _persist_omniroute_catalog(", "def _omniroute_refresh_models_async("), ns5)
+exec(section("def _omniroute_item_is_chat(", "# ---- OmniRoute IMAGE models"), ns5)
+ns5["_omniroute_models_cache"] = {"ts": 0.0, "attempt_ts": 0.0, "ids": []}
+ns5["_omniroute_models_lock"] = threading.Lock()
+ns5["requests"] = _Requests(_Response(200, {"data": [
+    {"id": "openrouter/gpt-5", "type": "chat", "output_modalities": ["text"]},
+    {"id": "zw/metadata-image", "output_modalities": ["text", "image"]},
+    {"id": "veo-free/veo-3", "output_modalities": ["video"]},
+]}))
+live_ids = ns5["_omniroute_fetch_model_ids"]()
+check("live success keeps only typed chat ids", live_ids == ["openrouter/gpt-5"], live_ids)
+check("live success persists chatModels with field-path merge",
+      bool(fake_doc.writes) and
+      fake_doc.writes[-1][0]["omnirouteCatalog"]["chatModels"] == live_ids and
+      "omnirouteCatalog.chatModels" in fake_doc.writes[-1][1], fake_doc.writes)
+
+# Force expiry, then emulate the currently observed ngrok HTTP 404. The fetch
+# must return RAM last-good and must not write/erase the durable snapshot.
+writes_after_success = len(fake_doc.writes)
+ns5["_omniroute_models_cache"]["ts"] = 0.0
+ns5["_omniroute_models_cache"]["attempt_ts"] = 0.0
+ns5["requests"].response = _Response(404)
+after_404 = ns5["_omniroute_fetch_model_ids"]()
+check("later HTTP 404 retains last-good live ids", after_404 == live_ids, after_404)
+check("later HTTP 404 never erases the durable snapshot",
+      len(fake_doc.writes) == writes_after_success, fake_doc.writes)
+
+# Chat and image persistence target independent nested fields, preventing the
+# two asynchronous refreshes from replacing one another.
+ns5["_persist_omniroute_catalog"]("image", ["zw/seedream-4.5"])
+check("image persistence uses its own atomic field paths",
+      "omnirouteCatalog.imageModels" in fake_doc.writes[-1][1] and
+      "omnirouteCatalog.chatModels" not in fake_doc.writes[-1][1],
+      fake_doc.writes[-1])
 
 print("AI Chat — chat vs image model separation")
 print("\n".join(_RESULTS))
