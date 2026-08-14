@@ -45,6 +45,9 @@
   var _curThreadId = null;
   var _filePollTimer = null;
   var _retrySources = Object.create(null);
+  // A render reads localStorage again. Keep live pending requests marked in
+  // memory so that read/normalize cycles do not turn them into interruptions.
+  var _activeImageRequests = Object.create(null);
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -87,7 +90,7 @@
     var changed = false;
     thread.messages = thread.messages.map(function (m) {
       if (!m || typeof m !== 'object') return m;
-      if (m.imagePending) {
+      if (m.imagePending && !_activeImageRequests[m.imageRequestKey || '']) {
         m.role = 'error';
         m.imagePending = false;
         m.content = '⚠️ Image generation was interrupted before completion. Retry to try again.';
@@ -96,6 +99,10 @@
       }
       if ((m.imageData || m.imageUrl) && !m.content) {
         m.content = m.imageEdit ? 'Edited image already shown in this conversation.' : 'Generated image already shown in this conversation.';
+        changed = true;
+      }
+      if ((m.imageData || m.imageUrl) && !m.imageModelLabel && (m.imageProvider || m.imageModel)) {
+        m.imageModelLabel = [m.imageProvider, m.imageModel].filter(Boolean).join(' / ');
         changed = true;
       }
       return m;
@@ -1047,7 +1054,13 @@
     var models = (group && group.models) || [];
     var model = models.find(function (m) { return thread && m.key === thread.imageModel; }) || models[0];
     if (!group || !model) return null;
-    return { key: model.key, label: group.label + ' / ' + model.label };
+    var keyParts = String(model.key || '').split('::');
+    return {
+      key: model.key,
+      provider: group.provider || keyParts[0] || '',
+      model: model.model || keyParts.slice(1).join('::') || '',
+      label: group.label + ' / ' + model.label
+    };
   }
 
   function isImageIntent(text) {
@@ -1084,10 +1097,11 @@
       || /\b(?:edit|modify|retouch|restyle|change the background|remove the background|remove an? object|replace the background)\b[\s\S]{0,120}\b(?:image|picture|photo|it|this|that|background)\b/.test(q);
   }
 
-  function removePendingImageMessages(thread) {
+  function removePendingImageMessages(thread, requestKey) {
     if (!thread || !Array.isArray(thread.messages)) return;
     for (var i = thread.messages.length - 1; i >= 0; i -= 1) {
-      if (thread.messages[i] && thread.messages[i].imagePending) thread.messages.splice(i, 1);
+      var message = thread.messages[i];
+      if (message && message.imagePending && (!requestKey || message.imageRequestKey === requestKey)) thread.messages.splice(i, 1);
     }
   }
   function imageFailureText(e) {
@@ -1100,7 +1114,9 @@
     var cur = getThread(thread && thread.id) || thread;
     if (!cur) return;
     var expectedUserContent = userContent || prompt;
-    removePendingImageMessages(cur);
+    var requestKey = e && e.imageRequestKey ? String(e.imageRequestKey) : '';
+    removePendingImageMessages(cur, requestKey);
+    if (requestKey) delete _activeImageRequests[requestKey];
     var last = cur.messages[cur.messages.length - 1];
     if (!last || last.role !== 'user' || String(last.content || '') !== String(expectedUserContent || '')) {
       cur.messages.push({ role: 'user', content: expectedUserContent || prompt });
@@ -1122,6 +1138,8 @@
 
     if (!thread.messages.length) thread.title = threadTitleFromFirstMessage(prompt);
     thread.imageModel = selected.key;
+    var requestKey = thread.id + ':' + Date.now() + ':' + Math.random().toString(36).slice(2, 8);
+    _activeImageRequests[requestKey] = true;
     thread.messages.push({ role: 'user', content: userContent || prompt });
     thread.messages.push({
       role: 'assistant',
@@ -1130,7 +1148,8 @@
       imagePrompt: prompt,
       imageUserContent: userContent || prompt,
       imageEdit: !!isEdit,
-      retry: { kind: 'image', prompt: prompt, userContent: userContent || prompt, isEdit: !!isEdit }
+      imageRequestKey: requestKey,
+      retry: { kind: 'image', prompt: prompt, userContent: userContent || prompt, isEdit: !!isEdit, requestKey: requestKey }
     });
     upsertThread(thread);
     renderThreadList();
@@ -1173,34 +1192,40 @@
       });
     }).then(function (result) {
       var cur = getThread(thread.id);
-      if (!cur) return;
-      removePendingImageMessages(cur);
+      if (!cur) { delete _activeImageRequests[requestKey]; return; }
+      removePendingImageMessages(cur, requestKey);
+      delete _activeImageRequests[requestKey];
+      var displayedProvider = result.provider || selected.provider || '';
+      var displayedModel = result.model || selected.model || '';
       var actualProviderLabel = '';
-      if (result.provider) {
+      if (displayedProvider) {
         var imageGroups = catalogGroups('imageProviderGroups', 'imageModels');
         for (var gi = 0; gi < imageGroups.length; gi += 1) {
           var groupProvider = imageGroups[gi].provider || imageGroups[gi].key;
-          if (groupProvider === result.provider) {
-            actualProviderLabel = result.provider === 'omniroute' ? 'OmniRoute' : imageGroups[gi].label;
+          if (groupProvider === displayedProvider) {
+            actualProviderLabel = displayedProvider === 'omniroute' ? 'OmniRoute' : imageGroups[gi].label;
             break;
           }
         }
-        if (!actualProviderLabel) actualProviderLabel = result.provider;
+        if (!actualProviderLabel) actualProviderLabel = displayedProvider;
       }
-      var actualModelLabel = actualProviderLabel && result.model
-        ? actualProviderLabel + ' / ' + result.model
-        : (selected.label || result.model || '');
+      var actualModelLabel = actualProviderLabel && displayedModel
+        ? actualProviderLabel + ' / ' + displayedModel
+        : (selected.label || displayedModel || '');
       cur.messages.push({
         role: 'assistant',
         content: (isEdit ? 'Edited image based on: ' : 'Generated image based on: ') + prompt,
         imageData: result.imageData,
         imageEdit: !!isEdit,
-        imageProvider: result.provider,
-        imageModel: result.model,
+        imageProvider: displayedProvider,
+        imageModel: displayedModel,
         imageModelLabel: actualModelLabel
       });
       upsertThread(cur);
       if (currentThreadId() === thread.id) renderLog();
+    }).catch(function (err) {
+      if (err && typeof err === 'object') err.imageRequestKey = requestKey;
+      throw err;
     });
   }
 
@@ -2234,10 +2259,11 @@
     log.innerHTML = messages.map(function (m, index) {
       var cls = m.role === 'user' ? 'user' : (m.role === 'error' ? 'error' : 'assistant');
       var imageSource = m.imageData || m.imageUrl || '';
+      var imageLabel = m.imageModelLabel || ((m.imageProvider || m.imageModel) ? [m.imageProvider, m.imageModel].filter(Boolean).join(' / ') : '');
       var body = m.imagePending
         ? '<div class="aic-image-pending" aria-live="polite"><span class="aic-image-spinner" aria-hidden="true"></span><span>' + esc(m.content || 'Generating image…') + '</span></div>'
         : imageSource
-          ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + (m.imageModelLabel ? '<span class="aic-image-model"> · ' + esc(m.imageModelLabel) + '</span>' : '') + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
+          ? '<div class="aic-image-caption">' + esc(m.content || (m.imageEdit ? 'Image edited' : 'Image generated')) + (imageLabel ? '<span class="aic-image-model"> · Generated with ' + esc(imageLabel) + '</span>' : '') + '</div><img class="aic-gen-image" src="' + escAttr(imageSource) + '" alt="' + escAttr(m.imageEdit ? 'Edited image' : 'Generated image') + '"><div class="aic-image-actions"><button onclick="aicDownloadImage(this)">↓ Download image</button></div>'
           : (m.mediaType === 'search' ? renderSearchMessage(m) : (m.mediaType === 'audio' ? renderAudioMessage(m) : (m.mediaType === 'video' ? renderVideoMessage(m) : (m.role === 'assistant' ? renderAssistantBody(m.content, m) : mdLite(m.content)))));
       var author = cls === 'user' ? '<div class="aic-msg-author"><strong>You</strong></div>' : (cls === 'error' ? '<div class="aic-msg-author"><strong>Notice</strong></div>' : '<div class="aic-msg-author"><span class="aic-avatar">✦</span><strong>AI Chat</strong></div>');
       var actions = (!m.imagePending && m.role !== 'error' && m.content)
