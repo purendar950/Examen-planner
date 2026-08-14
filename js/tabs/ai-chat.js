@@ -206,7 +206,7 @@
     .aic-persona-box,.aic-image-box,.aic-github-box{padding:.8rem 1.25rem;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
     .aic-persona-label,.aic-image-label,.aic-github-label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;color:var(--muted);font-size:.7rem;}
     .aic-persona-box textarea,.aic-image-prompt,.aic-github-input{padding:9px 10px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--text);font:inherit;font-size:.8rem;outline:none;}.aic-persona-box textarea{width:100%;min-height:56px;resize:vertical;}.aic-persona-box textarea:focus,.aic-image-prompt:focus,.aic-github-input:focus{border-color:var(--accent);}
-    .aic-image-row,.aic-github-row{display:flex;gap:7px;flex-wrap:wrap;}.aic-image-row .aic-select{flex:0 0 auto;max-width:none;}.aic-image-prompt{flex:1 1 250px;min-width:180px;}.aic-github-input{flex:1 1 220px;min-width:150px;}.aic-github-files{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:3px;max-height:150px;overflow:auto;}.aic-github-file{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;color:var(--muted);cursor:pointer;font-size:.72rem;}.aic-github-file:hover{background:var(--card);color:var(--text);}.aic-github-file input{accent-color:var(--accent);}.aic-github-status{margin:6px 0;color:var(--muted);font-size:.72rem;line-height:1.4;}.aic-github-status.is-error{color:#c54b43;}
+    .aic-image-row,.aic-github-row{display:flex;gap:7px;flex-wrap:wrap;}.aic-image-row .aic-select{flex:0 0 auto;max-width:none;}.aic-image-prompt{flex:1 1 250px;min-width:180px;}.aic-image-source{display:inline-flex;align-items:center;gap:4px;padding:7px 9px;border:1px solid var(--border);border-radius:9px;background:var(--card);color:var(--muted);font-size:.76rem;cursor:pointer;white-space:nowrap;}.aic-image-source:hover{color:var(--text);border-color:var(--accent);}.aic-image-source input{display:none;}.aic-image-source-name{align-self:center;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:.7rem;}.aic-github-input{flex:1 1 220px;min-width:150px;}.aic-github-files{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:3px;max-height:150px;overflow:auto;}.aic-github-file{display:flex;align-items:center;gap:6px;padding:5px 7px;border-radius:6px;color:var(--muted);cursor:pointer;font-size:.72rem;}.aic-github-file:hover{background:var(--card);color:var(--text);}.aic-github-file input{accent-color:var(--accent);}.aic-github-status{margin:6px 0;color:var(--muted);font-size:.72rem;line-height:1.4;}.aic-github-status.is-error{color:#c54b43;}
     @keyframes aic-rise{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
     @media (max-width:820px){.aic-shell{grid-template-columns:205px minmax(0,1fr);height:calc(100vh - 128px);border-radius:14px;}.aic-side{width:auto;}.aic-head{align-items:flex-start;flex-direction:column;padding:.8rem .9rem;}.aic-head-controls{width:100%;flex-wrap:wrap;}.aic-model-wrap{flex:1 1 100%;}.aic-model-wrap .aic-select{flex:1;max-width:none;}.aic-quick-actions{overflow-x:auto;padding:.5rem .9rem;}.aic-log{padding-top:1.5rem;}.aic-msg-row.user .aic-msg{max-width:86%;}.aic-hint{display:none;}}
     @media (max-width:560px){.aic-shell{grid-template-columns:1fr;min-height:0;height:calc(100vh - 110px);}.aic-side{display:none;}.aic-head{flex-direction:row;align-items:center;}.aic-head-left{flex:1;}.aic-head-controls{width:auto;}.aic-head-controls .aic-model-wrap,.aic-head-controls .aic-select,.aic-head-controls .aic-control-label{display:none;}.aic-log{padding-left:1rem;padding-right:1rem;}.aic-form{padding-left:.75rem;padding-right:.75rem;}.aic-quick-actions{padding-left:.75rem;padding-right:.75rem;}.aic-msg{font-size:.88rem;}}
@@ -253,7 +253,7 @@
     </div>
     <div class="aic-image-box" id="aic-image-box" style="display:none;">
       <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseImageBox()">× Close</button></div>
-      <div class="aic-image-row"><select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider"></select><select class="aic-select" id="aic-image-omniroute-provider-select" onchange="aicImageOmniRouteProviderChanged()" title="OmniRoute image provider" style="display:none;"></select><select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model"></select><input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe the image to create…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicGenerateImage();}"><button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button></div>
+      <div class="aic-image-row"><select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider"></select><select class="aic-select" id="aic-image-omniroute-provider-select" onchange="aicImageOmniRouteProviderChanged()" title="OmniRoute image provider" style="display:none;"></select><select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model"></select><label class="aic-image-source" title="Upload an image to edit">＋ Reference<input type="file" id="aic-image-source-input" accept="image/png,image/jpeg,image/webp" onchange="aicImageSourceSelected(event)"></label><span id="aic-image-source-name" class="aic-image-source-name"></span><input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe an image to create or edit…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicGenerateImage();}"><button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button></div>
     </div>
     <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>
     <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>
@@ -748,6 +748,37 @@
     if (box) box.style.display = 'none';
   };
 
+  function readImageDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file) { resolve(''); return; }
+      if (file.size > 12 * 1024 * 1024) { reject(new Error('Reference image must be smaller than 12 MB')); return; }
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || '')); };
+      reader.onerror = function () { reject(new Error('Could not read the reference image')); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function lastImageData(thread) {
+    var messages = (thread && thread.messages) || [];
+    for (var i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i] && (messages[i].imageData || messages[i].imageUrl)) return messages[i].imageData || messages[i].imageUrl;
+    }
+    return '';
+  }
+
+  function selectedSourceImageData(thread) {
+    var input = document.getElementById('aic-image-source-input');
+    var file = input && input.files && input.files[0];
+    return file ? readImageDataUrl(file) : Promise.resolve(lastImageData(thread));
+  }
+
+  window.aicImageSourceSelected = function (ev) {
+    var file = ev && ev.target && ev.target.files && ev.target.files[0];
+    var name = document.getElementById('aic-image-source-name');
+    if (name) name.textContent = file ? file.name : '';
+  };
+
   function imageSelection(thread) {
     var groups = catalogGroups('imageProviderGroups', 'imageModels');
     var group = groupForModel(groups, (thread && thread.imageModel) || '');
@@ -780,10 +811,18 @@
     var imageOf = new RegExp('\\b' + noun + '\\s+(?:of|showing|depicting|for)\\b');
     var transform = new RegExp('\\b(?:turn|convert|transform)\\b[\\s\\S]{0,80}\\binto\\s+(?:an?\\s+)?' + noun + '\\b');
     var textToImage = /^(?:text[- ]to[- ]image|image generation)\s*:/i.test(q);
-    return directCommand.test(q) || nounFirst.test(q) || wantImage.test(q) || giveMe.test(q) || imageOf.test(q) || transform.test(q) || textToImage;
+    return directCommand.test(q) || nounFirst.test(q) || wantImage.test(q) || giveMe.test(q) || imageOf.test(q) || transform.test(q) || textToImage || isImageEditIntent(q);
   }
 
-  function requestGeneratedImage(thread, prompt, userContent) {
+  function isImageEditIntent(text) {
+    var q = String(text || '').trim().toLowerCase();
+    if (!q || /^(?:how|why|what|when|where|which|who)\b/.test(q)) return false;
+    if (/\b(?:code|javascript|css|html|document|essay|prompt|tutorial|steps?)\b/.test(q) && !/\b(?:this|that|the)\s+(?:image|picture|photo)\b/.test(q)) return false;
+    return /^(?:please\s+)?(?:edit|modify|change|retouch|enhance|improve|restyle|remove|replace|add)\b[\s\S]{0,120}\b(?:image|picture|photo|it|this|that|background|person|object|face|color|style)\b/.test(q)
+      || /\b(?:edit|modify|retouch|restyle|change the background|remove the background|remove an? object|replace the background)\b[\s\S]{0,120}\b(?:image|picture|photo|it|this|that|background)\b/.test(q);
+  }
+
+  function requestGeneratedImage(thread, prompt, userContent, sourceImageData, isEdit) {
     var selected = imageSelection(thread);
     if (!selected) return Promise.reject(new Error('No image-capable provider/model is configured. Ask an admin to add one in AI Study.'));
 
@@ -797,12 +836,12 @@
     var log = document.getElementById('aic-log');
     var typing = document.createElement('div');
     typing.className = 'aic-typing';
-    typing.textContent = 'Generating image with ' + selected.label + '…';
+    typing.textContent = (isEdit ? 'Editing image with ' : 'Generating image with ') + selected.label + '…';
     if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
 
     return backendAuthFetch('/api/ai-chat/image', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt: prompt, model: selected.key })
+      body: JSON.stringify({ prompt: prompt, model: selected.key, sourceImageData: sourceImageData || undefined })
     }).then(function (r) {
       var contentType = (r.headers.get('content-type') || '').toLowerCase();
       if (!r.ok || !contentType.startsWith('image/')) {
@@ -822,7 +861,7 @@
     }).then(function (imageData) {
       var cur = getThread(thread.id);
       if (!cur) return;
-      cur.messages.push({ role: 'assistant', content: '', imageData: imageData });
+      cur.messages.push({ role: 'assistant', content: '', imageData: imageData, imageEdit: !!isEdit });
       upsertThread(cur);
       if (currentThreadId() === thread.id) renderLog();
     }).catch(function (e) {
@@ -845,8 +884,16 @@
     if (!t || !selected) { toast('No image-capable provider/model is configured.', 'error'); return; }
     if (promptInput) promptInput.value = '';
     setSending(true);
-    requestGeneratedImage(t, prompt, '\uD83C\uDFA8 [' + selected.label + '] ' + prompt)
-      .finally(function () { setSending(false); });
+    var sourceInput = document.getElementById('aic-image-source-input');
+    var sourceFile = sourceInput && sourceInput.files && sourceInput.files[0];
+    var edit = !!sourceFile || isImageEditIntent(prompt);
+    selectedSourceImageData(t).then(function (source) {
+      if (edit && !source) throw new Error('To edit an image, upload a reference image or generate an image first.');
+      return requestGeneratedImage(t, prompt, '\uD83C\uDFA8 [' + selected.label + '] ' + prompt, edit ? source : '', edit);
+    }).catch(function (err) {
+      var cur = getThread(t.id);
+      if (cur) { cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + (err.message || 'Image request failed') }); upsertThread(cur); renderLog(); }
+    }).finally(function () { setSending(false); });
   };
 
   /* ── GitHub repository context ──────────────────────────────────────── */
@@ -1047,7 +1094,17 @@
         return;
       }
       setSending(true);
-      requestGeneratedImage(t, q, q).finally(function () { setSending(false); });
+      var edit = isImageEditIntent(q);
+      selectedSourceImageData(t).then(function (source) {
+        if (edit && !source) throw new Error('To edit an image, upload a reference image or generate an image first.');
+        return requestGeneratedImage(t, q, q, edit ? source : '', edit);
+      }).catch(function (err) {
+        var cur = getThread(t.id);
+        if (!cur) return;
+        cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + (err.message || 'Image request failed') });
+        upsertThread(cur);
+        renderLog();
+      }).finally(function () { setSending(false); });
       return;
     }
 

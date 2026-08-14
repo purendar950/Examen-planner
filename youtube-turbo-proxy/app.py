@@ -1038,6 +1038,8 @@ OMNIROUTE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completio
 # Define it next to the source URL because image-provider configuration is
 # initialized earlier during module import.
 OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
+OMNIROUTE_IMAGE_MODELS_URL = OMNIROUTE_IMAGES_URL
+OMNIROUTE_EDITS_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/edits")
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards", "poster"]
 
@@ -2252,7 +2254,7 @@ def _ai_chat_image_models(cfg):
     return out
 
 
-def _ai_chat_generate_image(cfg, provider, model_id, prompt, aspect_ratio=None):
+def _ai_chat_generate_image(cfg, provider, model_id, prompt, aspect_ratio=None, source_image=None):
     """Generate one image. Dispatches on the provider's image transport:
       google    -> Gemini Interactions API (response_format {"type":"image"})
       omniroute -> standard OpenAI POST /v1/images/generations
@@ -2279,7 +2281,11 @@ def _ai_chat_generate_image(cfg, provider, model_id, prompt, aspect_ratio=None):
         endpoint = IMAGE_PROVIDER_ENDPOINTS.get(provider)
         if not endpoint:
             return None, "No image endpoint is configured for that provider."
+        if source_image:
+            return _generate_image_openai_edits_api(OMNIROUTE_EDITS_URL, keys, model_id, prompt, source_image)
         return _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_ratio)
+    if source_image:
+        return None, "This Gemini transport does not support image edits; choose an OmniRoute image model."
     return _generate_image_gemini(keys, model_id, prompt, aspect_ratio)
 
 
@@ -2378,6 +2384,86 @@ def _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_r
             except requests.RequestException as exc:
                 return None, "Could not download the generated image: %s" % str(exc)[:120]
         return None, "Image provider returned no usable image data."
+    return None, last_err
+
+
+def _generate_image_openai_edits_api(endpoint, keys, model_id, prompt, source_image):
+    """Call OmniRoute's OpenAI-compatible multipart image-edit endpoint.
+
+    ``source_image`` is a data URI or base64 string supplied by the authenticated
+    chat client. Decode it server-side and never forward the browser's data URI
+    or provider credentials to the upstream response.
+    """
+    raw = str(source_image or "")
+    mime = "image/png"
+    if raw.startswith("data:") and "," in raw:
+        header, raw = raw.split(",", 1)
+        mime = header[5:].split(";", 1)[0] or mime
+    try:
+        image_bytes = base64.b64decode(raw)
+    except Exception:  # noqa: BLE001
+        return None, "The source image is not valid base64 data."
+    if not image_bytes or len(image_bytes) > 12 * 1024 * 1024:
+        return None, "The source image is empty or larger than 12 MB."
+
+    last_err = "Image edit failed."
+    filename = "source.%s" % (mime.split("/", 1)[1] if "/" in mime else "png")
+    for key in keys:
+        try:
+            r = requests.post(
+                endpoint,
+                headers={"Authorization": "Bearer %s" % key,
+                         "ngrok-skip-browser-warning": "true"},
+                files={"image": (filename, image_bytes, mime)},
+                data={"model": model_id, "prompt": prompt},
+                timeout=IMAGE_GEN_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            last_err = "Image edit request failed: %s" % str(exc)[:150]
+            continue
+        if r.status_code == 429 or r.status_code >= 500:
+            last_err = "Image edit provider returned HTTP %s (try another model shortly)." % r.status_code
+            continue
+        if r.status_code >= 400:
+            detail = ""
+            try:
+                payload = r.json()
+                err = payload.get("error") if isinstance(payload, dict) else None
+                detail = (err.get("message") if isinstance(err, dict) else str(err or ""))[:240]
+            except Exception:  # noqa: BLE001
+                detail = r.text[:240]
+            return None, ("Image edit provider rejected the request: %s" % detail
+                          if detail else "Image edit provider returned HTTP %s." % r.status_code)
+        try:
+            payload = r.json()
+        except ValueError:
+            return None, "Image edit provider returned an unreadable response."
+        items = payload.get("data") if isinstance(payload, dict) else None
+        first = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else None
+        if not first:
+            return None, "Image edit provider returned no image."
+        b64 = first.get("b64_json") or first.get("b64") or first.get("image_base64")
+        if b64:
+            try:
+                b64 = str(b64)
+                out_mime = "image/png"
+                if b64.startswith("data:") and "," in b64:
+                    header, b64 = b64.split(",", 1)
+                    out_mime = header[5:].split(";", 1)[0] or out_mime
+                return base64.b64decode(b64), out_mime
+            except Exception:  # noqa: BLE001
+                return None, "Image edit provider returned malformed image data."
+        url = first.get("url")
+        if url:
+            try:
+                img = requests.get(url, timeout=IMAGE_GEN_TIMEOUT)
+                ctype = img.headers.get("Content-Type", "image/png").split(";", 1)[0].strip()
+                if img.status_code == 200 and img.content and ctype.startswith("image/"):
+                    return img.content, ctype
+            except requests.RequestException as exc:
+                last_err = "Could not download the edited image: %s" % str(exc)[:120]
+                continue
+        return None, "Image edit provider returned no usable image data."
     return None, last_err
 
 
@@ -8435,13 +8521,14 @@ def _omniroute_item_is_image(item, model_id):
 
 
 def _omniroute_fetch_image_model_ids():
-    """Image-capable OmniRoute ids from /v1/models, cached like the chat list.
+    """Return the exact model IDs accepted by OmniRoute's image route.
 
-    Mirrors _omniroute_fetch_model_ids' caching exactly (TTL, short negative
-    cache on failure, stale-last-good during an outage) because it hits the same
-    free ngrok tunnel, which is regularly offline — ngrok answers an offline
-    endpoint with HTTP 404, so a failed refresh must never wipe a good list or
-    block /api/ai-chat/status repeatedly."""
+    The dashboard exposes a dedicated ``GET /v1/images/generations`` catalog
+    separate from the broad ``GET /v1/models`` catalog. Prefer that list because
+    it is the router's authoritative allow-list for image generation; retain the
+    older /v1/models metadata path only as a compatibility fallback for older
+    OmniRoute deployments.
+    """
     now = time.time()
     cached = _omniroute_image_models_cache["ids"]
     if cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
@@ -8456,23 +8543,26 @@ def _omniroute_fetch_image_model_ids():
         if now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
             return list(cached)
         _omniroute_image_models_cache["attempt_ts"] = now
+        headers = {"ngrok-skip-browser-warning": "true"}
         try:
-            r = requests.get(
-                OMNIROUTE_MODELS_URL,
-                headers={"ngrok-skip-browser-warning": "true"},
-                timeout=_OMNIROUTE_MODELS_TIMEOUT,
-            )
-            if r.status_code == 200:
+            for catalog_url in (OMNIROUTE_IMAGE_MODELS_URL, OMNIROUTE_MODELS_URL):
+                r = requests.get(catalog_url, headers=headers, timeout=_OMNIROUTE_MODELS_TIMEOUT)
+                if r.status_code != 200:
+                    log.warning("OmniRoute image catalog refresh %s: HTTP %s", catalog_url, r.status_code)
+                    continue
                 payload = r.json() or {}
                 data = payload.get("data") if isinstance(payload, dict) else []
                 ids, seen = [], set()
                 for item in data or []:
-                    if not isinstance(item, dict):
+                    if isinstance(item, str):
+                        model_id = item.strip()
+                        is_image = bool(model_id)
+                    elif isinstance(item, dict):
+                        model_id = str(item.get("id") or item.get("model") or "").strip()
+                        is_image = catalog_url == OMNIROUTE_IMAGE_MODELS_URL or _omniroute_item_is_image(item, model_id)
+                    else:
                         continue
-                    model_id = str(item.get("id") or "").strip()
-                    if not model_id or model_id in seen:
-                        continue
-                    if _omniroute_item_is_image(item, model_id):
+                    if model_id and model_id not in seen and is_image:
                         seen.add(model_id)
                         ids.append(model_id)
                 if ids:
@@ -8480,10 +8570,8 @@ def _omniroute_fetch_image_model_ids():
                     _omniroute_image_models_cache["ts"] = now
                     _persist_omniroute_catalog("image", ids)
                     return list(ids)
-            else:
-                log.warning("OmniRoute image /models refresh: HTTP %s", r.status_code)
         except Exception as exc:  # noqa: BLE001
-            log.warning("OmniRoute image /models refresh failed: %s", exc)
+            log.warning("OmniRoute image catalog refresh failed: %s", exc)
         return list(_omniroute_image_models_cache["ids"])
 
 
@@ -12365,11 +12453,17 @@ def api_ai_chat_image():
     picked = _ai_chat_resolve_model(image_models, str(body.get("model") or "").strip())
     if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_img", user["uid"], 20, 3600):
         return jsonify({"error": "rate_limited", "detail": "Too many images this hour. Try later."}), 429
+    source_image = str(body.get("sourceImageData") or "").strip()
+    if source_image and not any(candidate["provider"] == "omniroute" for candidate in image_models):
+        return jsonify({"error": "image_edit_not_configured",
+                        "detail": "Image editing requires a configured OmniRoute image provider/model."}), 503
     candidates = _ai_chat_image_candidates(image_models, picked)
+    if source_image:
+        candidates = [candidate for candidate in candidates if candidate["provider"] == "omniroute"]
     failures = []
     for candidate in candidates:
         data, result = _ai_chat_generate_image(raw_cfg, candidate["provider"], candidate["model"],
-                                               prompt, body.get("aspectRatio"))
+                                               prompt, body.get("aspectRatio"), source_image or None)
         if data is not None:
             response = Response(data, mimetype=result)
             response.headers["X-Image-Provider"] = str(candidate["provider"])
