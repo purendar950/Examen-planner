@@ -290,6 +290,9 @@
     .aic-workspace-status{flex:1;color:var(--muted);font-size:.68rem;min-width:180px;}
     .aic-workspace-output{display:none;margin:0;padding:10px 12px;max-height:210px;overflow:auto;border-top:1px solid color-mix(in srgb,var(--border) 58%,transparent);background:#101216;color:#d8dce5;font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;}
     .aic-workspace-output.is-error{color:#ffaaa5;}
+    .aic-workspace-preview{display:none;border-top:1px solid color-mix(in srgb,var(--border) 58%,transparent);background:#fff;}
+    .aic-workspace-preview iframe{display:block;width:100%;height:300px;border:0;background:#fff;}
+    .aic-workspace-preview-label{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#f3f4f6;color:#4b5563;font-size:.66rem;font-weight:700;}
     .aic-github-file{display:flex;align-items:center;gap:6px;}.aic-github-file button{margin-left:auto;padding:2px 6px;border:1px solid var(--border);border-radius:5px;background:transparent;color:var(--muted);font-size:.62rem;cursor:pointer;}.aic-github-file button:hover{border-color:var(--accent);color:var(--text);}
     .aic-form{width:100%;max-width:980px;margin:0 auto;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
     .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
@@ -370,8 +373,9 @@
     <section class="aic-code-workspace" id="aic-code-workspace" aria-label="Coding workspace">
       <div class="aic-workspace-head"><span class="aic-workspace-title">File workspace</span><select id="aic-workspace-file" class="aic-workspace-file" onchange="aicWorkspaceFileChanged(this)" aria-label="Active file"></select><span class="aic-workspace-spacer"></span><button type="button" onclick="document.getElementById('aic-code-file-input').click()">Open local file</button><button type="button" onclick="aicWorkspaceAskEdit()">Ask AI to edit</button><button type="button" onclick="aicCloseWorkspace()">×</button></div>
       <textarea id="aic-workspace-editor" class="aic-workspace-editor" spellcheck="false" oninput="aicWorkspaceEdited(this)" aria-label="Active code file"></textarea>
-      <div class="aic-workspace-footer"><span id="aic-workspace-status" class="aic-workspace-status">Open a GitHub or local code file to start.</span><button type="button" onclick="aicWorkspaceRun()">Run / check</button><button type="button" onclick="aicWorkspaceSaveVersion()">Save local version</button><button type="button" id="aic-workspace-fix-btn" style="display:none;" onclick="aicWorkspaceFixRun()">Ask AI to fix output</button></div>
+      <div class="aic-workspace-footer"><span id="aic-workspace-status" class="aic-workspace-status">Open a GitHub or local code file to start.</span><button type="button" onclick="aicWorkspaceRun()">Run / check</button><button type="button" id="aic-workspace-preview-btn" style="display:none;" onclick="aicWorkspacePreview()">Live preview</button><button type="button" onclick="aicWorkspaceSaveVersion()">Save local version</button><button type="button" id="aic-workspace-fix-btn" style="display:none;" onclick="aicWorkspaceFixRun()">Ask AI to fix output</button></div>
       <pre id="aic-workspace-output" class="aic-workspace-output"></pre>
+      <div id="aic-workspace-preview" class="aic-workspace-preview"><div class="aic-workspace-preview-label"><span>HTML/CSS live preview</span><span>Scripts disabled for safety</span></div><iframe id="aic-workspace-preview-frame" title="HTML and CSS live preview" sandbox=""></iframe></div>
     </section>
     <div class="aic-log" id="aic-log"></div>
     <form class="aic-form" onsubmit="aicSend(event)">
@@ -1108,6 +1112,38 @@
     if (!ws) return null;
     return ws.files.find(function (f) { return f.path === ws.activePath; }) || ws.files[0] || null;
   }
+  function isPreviewFile(file) {
+    return !!file && ['html', 'css'].indexOf(workspaceLanguage(file.path)) !== -1;
+  }
+  function previewHtml(t) {
+    var ws = workspaceState(t), file = activeWorkspaceFile(t);
+    if (!ws || !file) return '';
+    var lang = workspaceLanguage(file.path), htmlFile = lang === 'html' ? file : ws.files.find(function (f) { return workspaceLanguage(f.path) === 'html'; });
+    var html = htmlFile ? String(htmlFile.content || '') : '<!doctype html><html><head><meta charset="utf-8"><title>CSS preview</title></head><body><main class="preview-sample"><h1>CSS live preview</h1><p>Edit an HTML file in this workspace to preview your own markup.</p><button>Example button</button></main></body></html>';
+    var css = ws.files.filter(function (f) { return workspaceLanguage(f.path) === 'css'; }).map(function (f) { return '\n/* ' + f.path.replace(/[*/]/g, '') + ' */\n' + String(f.content || ''); }).join('\n');
+    if (lang === 'css') css += '\n' + String(file.content || '');
+    html = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '').replace(/javascript\s*:/gi, '');
+    var style = '<style>html,body{min-height:100%;}body{margin:0;padding:20px;font-family:system-ui,sans-serif;}'+css+'</style>';
+    if (/<head[\s>]/i.test(html)) html = html.replace(/<\/head>/i, style + '</head>');
+    else html = '<!doctype html><html><head>' + style + '</head><body>' + html + '</body></html>';
+    return html;
+  }
+  function refreshWorkspacePreview(t) {
+    var preview = document.getElementById('aic-workspace-preview'), frame = document.getElementById('aic-workspace-preview-frame'), file = activeWorkspaceFile(t);
+    if (!preview || !frame || !file || !isPreviewFile(file) || !workspaceState(t).previewOpen) {
+      if (preview) preview.style.display = 'none';
+      return;
+    }
+    preview.style.display = '';
+    frame.srcdoc = previewHtml(t);
+  }
+  window.aicWorkspacePreview = function () {
+    var t = getThread(currentThreadId()), file = activeWorkspaceFile(t);
+    if (!t || !file || !isPreviewFile(file)) { toast('Open an HTML or CSS file to preview.', 'error'); return; }
+    workspaceState(t).previewOpen = true;
+    upsertThread(t);
+    refreshWorkspacePreview(t);
+  };
   function renderWorkspace() {
     var box = document.getElementById('aic-code-workspace');
     var select = document.getElementById('aic-workspace-file');
@@ -1115,6 +1151,7 @@
     var status = document.getElementById('aic-workspace-status');
     var output = document.getElementById('aic-workspace-output');
     var fix = document.getElementById('aic-workspace-fix-btn');
+    var previewBtn = document.getElementById('aic-workspace-preview-btn');
     var t = getThread(currentThreadId());
     var ws = workspaceState(t);
     var file = activeWorkspaceFile(t);
@@ -1123,6 +1160,7 @@
       return;
     }
     box.style.display = '';
+    if (previewBtn) previewBtn.style.display = isPreviewFile(file) ? '' : 'none';
     select.innerHTML = ws.files.map(function (f) { return '<option value="' + escAttr(f.path) + '"' + (f.path === file.path ? ' selected' : '') + '>' + esc(f.path) + '</option>'; }).join('');
     if (document.activeElement !== editor || editor.getAttribute('data-path') !== file.path) {
       editor.value = file.content || '';
@@ -1140,6 +1178,7 @@
       output.textContent = '';
       if (fix) fix.style.display = 'none';
     }
+    refreshWorkspacePreview(t);
   }
   function workspaceRequest(t) {
     var file = activeWorkspaceFile(t);
@@ -1160,6 +1199,7 @@
     if (!t || !ws || !select) return;
     ws.activePath = select.value;
     ws.lastRun = null;
+    ws.previewOpen = false;
     upsertThread(t);
     renderWorkspace();
   };
@@ -1169,6 +1209,7 @@
     file.content = editor.value;
     file.dirty = true;
     upsertThread(t);
+    if (workspaceState(t).previewOpen && isPreviewFile(file)) refreshWorkspacePreview(t);
     var status = document.getElementById('aic-workspace-status');
     if (status) status.textContent = 'Unsaved local changes · ' + file.path + ' · ' + workspaceLanguage(file.path);
   };

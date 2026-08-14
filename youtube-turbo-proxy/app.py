@@ -12351,6 +12351,28 @@ def api_ai_chat_execute():
             return jsonify(_workspace_result("timed_out", exc.stdout, exc.stderr,
                                              None, (time.monotonic() - started) * 1000,
                                              "Execution exceeded the 8-second limit."))
+    if language in {"typescript", "ts"}:
+        node = shutil.which("node")
+        if not node:
+            return jsonify(_workspace_result("unavailable", detail="Node.js is not available on this backend."))
+        with tempfile.TemporaryDirectory(prefix="ai-chat-run-") as tmp:
+            script = os.path.join(tmp, "workspace.ts")
+            with open(script, "w", encoding="utf-8") as fh:
+                fh.write(code)
+            permission = ["--experimental-permission", "--allow-fs-read=" + script, "--experimental-strip-types"]
+            command = [node] + permission + (["--check", script] if mode == "check" else [script])
+            try:
+                proc = subprocess.run(command, cwd=tmp, env={"PATH": os.environ.get("PATH", "")},
+                                      input="", capture_output=True, text=True,
+                                      timeout=_CODE_EXEC_TIMEOUT)
+            except subprocess.TimeoutExpired as exc:
+                return jsonify(_workspace_result("timed_out", exc.stdout, exc.stderr,
+                                                 None, (time.monotonic() - started) * 1000,
+                                                 "Execution exceeded the 8-second limit."))
+        detail = "TypeScript ran with Node type stripping; static type-checking is not performed."
+        return jsonify(_workspace_result("passed" if proc.returncode == 0 else "failed",
+                                         proc.stdout, proc.stderr, proc.returncode,
+                                         (time.monotonic() - started) * 1000, detail))
     if language in {"javascript", "js", "jsx"}:
         node = shutil.which("node")
         if not node:
@@ -12379,7 +12401,7 @@ def api_ai_chat_execute():
             return jsonify(_workspace_result("failed", stderr="JSON error: %s (line %s)" % (exc.msg, exc.lineno),
                                              duration_ms=(time.monotonic() - started) * 1000))
         return jsonify(_workspace_result("passed", stdout="JSON syntax check passed.", duration_ms=(time.monotonic() - started) * 1000))
-    return jsonify(_workspace_result("unsupported", detail="Run/check is currently supported for Python, JavaScript, JSON, and syntax-only text files."))
+    return jsonify(_workspace_result("unsupported", detail="Run/check is currently supported for Python, TypeScript, JavaScript, and JSON."))
 
 def _ai_chat_build_messages(chat_cfg, body, thread_id):
 
