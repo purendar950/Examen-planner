@@ -1034,6 +1034,10 @@ BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
 # proxy so credentials, rate limits, transcript caching, and audit metadata stay
 # server-side. ngrok's browser-warning bypass is applied by _ai_headers().
 OMNIROUTE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions"
+# OmniRoute also exposes the standard OpenAI Images endpoint alongside chat.
+# Define it next to the source URL because image-provider configuration is
+# initialized earlier during module import.
+OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
 
 STUDY_MODES = ["summary", "insights", "notes", "quiz", "flashcards", "poster"]
 
@@ -8071,9 +8075,7 @@ STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google
 # when a selected model is called; using asynchronous one-model health probes as
 # a visibility gate previously left the picker permanently stuck on Auto.
 OMNIROUTE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
-# OmniRoute also exposes the standard OpenAI Images endpoint alongside chat.
 # Used for AI Chat image generation (see _generate_image_openai_images_api).
-OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
 _OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))
 # The live /v1/models catalog can exceed 1.8 MB and takes several seconds to
 # cross a free ngrok tunnel. A short 10-second cap returns the stale fallback
