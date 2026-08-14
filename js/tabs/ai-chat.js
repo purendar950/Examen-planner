@@ -123,7 +123,12 @@
   /* ── styles ── */
   var st = document.createElement('style');
   st.textContent = `
-    .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:calc(100vh - 142px);min-height:540px;overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:20px;background:var(--card);box-shadow:0 18px 55px rgba(28,24,20,.08);}
+    /* The chat is a first-class page inside the existing app shell. It must use the
+       available workspace height, not create a second viewport-sized application. */
+    #app .main-content:has(#page-ai-chat.active){max-width:none;padding:1rem 1.25rem 1.25rem;}
+    #app .main-content > #page-ai-chat{max-width:none;width:100%;margin:0;}
+    .aic-shell{display:grid;grid-template-columns:255px minmax(0,1fr);height:calc(100dvh - 148px);min-height:520px;overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:16px;background:var(--card);box-shadow:0 12px 38px rgba(28,24,20,.07);}
+    @media (max-width:900px){#app .main-content:has(#page-ai-chat.active){padding:.75rem;}.aic-shell{height:calc(100dvh - 116px);min-height:560px;grid-template-columns:1fr;border-radius:14px;}.aic-side{display:none;}}
     .aic-side{display:flex;flex-direction:column;min-width:0;border-right:1px solid color-mix(in srgb,var(--border) 78%,transparent);background:color-mix(in srgb,var(--surface) 82%,var(--card));}
     .aic-side-top{padding:1rem 1rem .8rem;border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);}
     .aic-brand{display:flex;align-items:center;gap:10px;margin-bottom:1rem;color:var(--text);}
@@ -180,7 +185,7 @@
     .aic-msg-row:hover .aic-msg-actions{opacity:1;}
     .aic-msg-actions button{padding:1px 4px;border:0;background:none;color:var(--muted);font-size:.68rem;cursor:pointer;}
     .aic-msg-actions button:hover{color:var(--text);}
-    .aic-empty{max-width:500px;margin:18vh auto 0;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.65;}
+    .aic-empty{max-width:500px;margin:clamp(4rem,14vh,9rem) auto 0;text-align:center;color:var(--muted);font-size:.88rem;line-height:1.65;}
     .aic-empty strong{display:block;margin-bottom:8px;color:var(--text);font-size:1.15rem;letter-spacing:-.02em;}
     .aic-typing{color:var(--muted);font-size:.78rem;font-style:italic;}
     .aic-files-bar,.aic-github-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:900px;margin:0 auto;padding:0 clamp(1rem,5vw,3.2rem) .45rem;color:var(--muted);font-size:.7rem;}
@@ -255,7 +260,7 @@
     <div class="aic-log" id="aic-log"></div>
     <form class="aic-form" onsubmit="aicSend(event)">
       <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
-      <div class="aic-composer"><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea><div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button></div><span class="aic-hint">Responses are tailored to your current study context.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
+      <div class="aic-composer"><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea><div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button></div><span class="aic-hint">Ask for an image anytime — direct image requests generate inline.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
     </form>
   </main>
 </div>`;
@@ -755,25 +760,27 @@
   function isImageIntent(text) {
     var q = String(text || '').trim().toLowerCase();
     if (!q) return false;
-    var noun = '(?:images?|pictures?|photos?|illustrations?|posters?|logos?|wallpapers?|artworks?|graphics?|thumbnails?|avatars?|icons?|diagrams?|paintings?)';
-    var verb = '(?:generate|create|draw|make|design|render|paint|produce)';
+    var noun = '(?:images?|pictures?|photos?|illustrations?|posters?|logos?|wallpapers?|artworks?|graphics?|thumbnails?|avatars?|icons?|diagrams?|paintings?|portraits?|scenes?|covers?|backgrounds?)';
+    var verb = '(?:generate|create|draw|make|design|render|paint|produce|imagine|visualize)';
 
     // Keep requests where an existing image is the topic/input in normal chat.
-    // Only direct, object-focused visual creation requests switch endpoints.
+    // Questions about image generation stay in text chat; direct visual requests
+    // switch endpoints like ChatGPT's image intent routing.
     if (/\b(?:draw|make)\s+conclusions?\b/.test(q)) return false;
-    if (/\b(?:explain|teach|tutorial|steps?|how\s+to)\b[\s\S]{0,60}\b(?:generate|create|draw|make|design|render)\b/.test(q)) return false;
+    if (/^(?:how|why|what|when|where|which|who)\b/.test(q) || /\b(?:explain|teach|tutorial|steps?|how\s+to|tell\s+me\s+how)\b[\s\S]{0,80}\b(?:generate|create|draw|make|design|render|produce)\b/.test(q)) return false;
     var textOutput = new RegExp('\\b' + verb + '\\s+[\\s\\S]{0,60}\\b(?:caption|description|alt\\s+text|prompt|story|essay|article|explanation|code|website|app|component|carousel|gallery|database|storage|analysis|classification|compression|processing|recognition)\\b[\\s\\S]{0,40}\\b' + noun + '\\b');
     var visualTopic = new RegExp('\\b' + noun + '\\s+(?:carousel|gallery|component|element|tag|storage|compression|processing|recognition|classification)\\b');
     var codeTechnique = new RegExp('\\b' + noun + '\\s+(?:in|with|using)\\s+(?:css|html|javascript|code|canvas)\\b');
     if (textOutput.test(q) || visualTopic.test(q) || codeTechnique.test(q)) return false;
 
-    var directCommand = new RegExp('^(?:(?:please|kindly)\\s+|(?:can|could|would|will)\\s+you\\s+)*' + verb + '\\s+(?:(?:me|us)\\s+)?(?:(?:an?|the|some)\\s+)?(?:[a-z0-9-]+\\s+){0,5}' + noun + '\\b');
-    var wantGenerated = new RegExp('^(?:i\\s+)?(?:want|need)\\s+(?:you\\s+to\\s+)?' + verb + '\\s+(?:(?:me|us)\\s+)?(?:(?:an?|the|some)\\s+)?(?:[a-z0-9-]+\\s+){0,5}' + noun + '\\b');
-    var wantImage = new RegExp('^(?:i\\s+)?(?:want|need)\\s+(?:an?\\s+)?' + noun + '\\s+(?:of|showing|depicting|for)\\b');
-    var giveMe = new RegExp('^(?:(?:please|kindly)\\s+)?(?:give|show)\\s+me\\s+(?:an?\\s+)?' + noun + '\\b');
-    var nounFirst = new RegExp('^' + noun + '\\s+' + verb + '(?:\\s+karo)?\\b');
+    var directCommand = new RegExp('^(?:(?:please|kindly)\\s+|(?:can|could|would|will)\\s+you\\s+|(?:i\\s+)?(?:want|need|would\\s+like)\\s+(?:you\\s+to\\s+)?)?' + verb + '\\s+(?:(?:me|us)\\s+)?(?:(?:an?|the|some|actual|real)\\s+)?(?:[a-z0-9-]+\\s+){0,10}' + noun + '\\b');
+    var nounFirst = new RegExp('^(?:an?\\s+|the\\s+|some\\s+)?' + noun + '\\s+' + verb + '(?:\\s+karo)?\\b');
+    var wantImage = new RegExp('^(?:i\\s+)?(?:want|need|would\\s+like)\\s+(?:you\\s+to\\s+)?(?:make|create|generate|give|show)\\s+(?:me\\s+)?(?:an?\\s+|the\\s+|some\\s+)?' + noun + '\\b');
+    var giveMe = new RegExp('^(?:(?:please|kindly)\\s+)?(?:give|show)\\s+me\\s+(?:an?\\s+|the\\s+|some\\s+)?' + noun + '\\b');
+    var imageOf = new RegExp('\\b' + noun + '\\s+(?:of|showing|depicting|for)\\b');
     var transform = new RegExp('\\b(?:turn|convert|transform)\\b[\\s\\S]{0,80}\\binto\\s+(?:an?\\s+)?' + noun + '\\b');
-    return directCommand.test(q) || wantGenerated.test(q) || wantImage.test(q) || giveMe.test(q) || nounFirst.test(q) || transform.test(q) || /^text[- ]to[- ]image\s*:/i.test(q);
+    var textToImage = /^(?:text[- ]to[- ]image|image generation)\s*:/i.test(q);
+    return directCommand.test(q) || nounFirst.test(q) || wantImage.test(q) || giveMe.test(q) || imageOf.test(q) || transform.test(q) || textToImage;
   }
 
   function requestGeneratedImage(thread, prompt, userContent) {
@@ -965,7 +972,7 @@
     var t = getThread(currentThreadId());
     var messages = (t && t.messages) || [];
     if (!messages.length) {
-      log.innerHTML = '<div class="aic-empty"><strong>What would you like to work on?</strong>Ask a question, attach notes, connect a GitHub repository, or create an image from the Image action.</div>';
+      log.innerHTML = '<div class="aic-empty"><strong>What would you like to work on?</strong>Ask anything, attach notes, connect a GitHub repository, or simply say “create an image of…” and I’ll generate the image here.</div>';
       return;
     }
     log.innerHTML = messages.map(function (m, index) {
