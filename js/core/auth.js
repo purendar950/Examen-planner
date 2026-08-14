@@ -13,10 +13,27 @@ async function _hashPassword(password) {
 }
 
 function switchAuthTab(tab) {
-  document.getElementById('tab-login').classList.toggle('active', tab==='login');
-  document.getElementById('tab-register').classList.toggle('active', tab==='register');
-  document.getElementById('form-login').style.display = tab==='login' ? '' : 'none';
-  document.getElementById('form-register').style.display = tab==='register' ? '' : 'none';
+  const isLogin = tab === 'login';
+  const loginTab = document.getElementById('tab-login');
+  const registerTab = document.getElementById('tab-register');
+  const loginForm = document.getElementById('form-login');
+  const registerForm = document.getElementById('form-register');
+  if (loginTab) {
+    loginTab.classList.toggle('active', isLogin);
+    loginTab.setAttribute('aria-selected', isLogin ? 'true' : 'false');
+  }
+  if (registerTab) {
+    registerTab.classList.toggle('active', !isLogin);
+    registerTab.setAttribute('aria-selected', isLogin ? 'false' : 'true');
+  }
+  if (loginForm) {
+    loginForm.style.display = isLogin ? '' : 'none';
+    loginForm.hidden = !isLogin;
+  }
+  if (registerForm) {
+    registerForm.style.display = isLogin ? 'none' : '';
+    registerForm.hidden = isLogin;
+  }
 }
 
 async function handleLogin() {
@@ -1076,10 +1093,49 @@ if (auth && !_isBadProtocol) {
 
 
 
+/* ── Keyboard and screen-reader affordances for the auth switcher ── */
+function initAuthAccessibility() {
+  const tabs = document.querySelectorAll('[role="tab"]');
+  Array.prototype.forEach.call(tabs, function(tab) {
+    if (tab._authA11yBound) return;
+    tab._authA11yBound = true;
+    tab.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        switchAuthTab(tab.id === 'tab-register' ? 'register' : 'login');
+        return;
+      }
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+      event.preventDefault();
+      const index = Array.prototype.indexOf.call(tabs, tab);
+      const target = event.key === 'Home' ? tabs[0]
+        : event.key === 'End' ? tabs[tabs.length - 1]
+        : event.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length]
+        : tabs[(index - 1 + tabs.length) % tabs.length];
+      target.focus();
+      switchAuthTab(target.id === 'tab-register' ? 'register' : 'login');
+    });
+  });
+
+  [['login-email', handleLogin], ['login-pass', handleLogin],
+   ['reg-name', handleRegister], ['reg-email', handleRegister], ['reg-pass', handleRegister]]
+    .forEach(function(entry) {
+      const field = document.getElementById(entry[0]);
+      if (!field || field._authEnterBound) return;
+      field._authEnterBound = true;
+      field.addEventListener('keydown', function(event) {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        entry[1]();
+      });
+    });
+}
+
 /* ── Password visibility toggles ──
    The password field stays masked until the user chooses to reveal it; only a
    click on the toggle flips it. Bound once the auth DOM is present. */
 function initPasswordToggles() {
+  initAuthAccessibility();
   const toggles = document.querySelectorAll('[data-pw-toggle]');
   Array.prototype.forEach.call(toggles, function(btn) {
     if (btn._pwBound) return;
