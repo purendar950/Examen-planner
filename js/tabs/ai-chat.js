@@ -677,6 +677,17 @@
   var BUILTIN_DIRECT_PROVIDERS = {
     pollinations: { enabled: true, apiKey: 'pollinations-free', imageUrl: 'https://image.pollinations.ai/prompt', transport: 'pollinations_get' }
   };
+  // OmniRoute sub-providers to EXCLUDE from image generation.
+  // These always fail (Gemini=rate-limited, OpenRouter=no credits) and waste
+  // time during failover. The OmniRoute catalog lists 62 image models across
+  // many sub-providers — only use the ones that actually work.
+  var OMNIROUTE_IMAGE_BLOCKLIST = ['google', 'openrouter'];
+  function isOmniRouteImageBlocked(modelName) {
+    var raw = String(modelName || '');
+    var slashIdx = raw.indexOf('/');
+    var sub = slashIdx > 0 ? raw.slice(0, slashIdx).toLowerCase() : '';
+    return OMNIROUTE_IMAGE_BLOCKLIST.indexOf(sub) >= 0;
+  }
   function directProviderConfig(provider) {
     var pid = String(provider || '').toLowerCase();
     // Check built-in free providers first (no admin config needed)
@@ -1554,13 +1565,13 @@
       if (seen[key]) return;
       seen[key] = true; all.push(item);
     }
-    // Always try the user-selected model first
-    add(selected);
+    // Always try the user-selected model first, UNLESS it's a blocked
+    // OmniRoute sub-provider (google/openrouter). Those always fail.
+    if (selected && !(selected.provider === 'omniroute' && isOmniRouteImageBlocked(selected.model))) {
+      add(selected);
+    }
     // If the selected model is from OmniRoute, detect known built-in sub-providers
-    // (e.g. pollinations/midijourney) and add them as direct candidates too. This
-    // bypasses the backend proxy which may ignore the model and default to Gemini.
-    // ONLY do this for the user's selected model — do NOT scan all OmniRoute models
-    // for other providers' models, which would cause silent fallback to wrong models.
+    // (e.g. pollinations/midijourney) and add them as direct candidates too.
     if (selected && selected.provider === 'omniroute' && selected.model) {
       var slashIdx = selected.model.indexOf('/');
       if (slashIdx > 0) {
@@ -1586,6 +1597,8 @@
         groups.forEach(function (group) {
           if (group.provider !== pid) return;
           (group.models || []).forEach(function (m) {
+            // Skip blocked OmniRoute sub-providers (google/openrouter)
+            if (pid === 'omniroute' && isOmniRouteImageBlocked(m.model)) return;
             var key = pid + '::' + m.model;
             if (seen[key]) return;
             providerBuckets[pid].push({ key: m.key, provider: pid, model: m.model, label: group.label + ' / ' + m.label });
@@ -1804,7 +1817,20 @@
       // User selected an OmniRoute model and direct OmniRoute is configured.
       // Use direct OmniRoute FIRST — the backend proxy ignores model selection
       // and falls back to Gemini/OpenRouter which are no longer used for images.
-      var omniCandidate = { key: selected.key, provider: 'omniroute', model: selected.model, label: selected.label };
+      // If the selected model is a blocked sub-provider (google/openrouter),
+      // pick the first non-blocked OmniRoute image model instead.
+      var omniModel = selected.model;
+      if (isOmniRouteImageBlocked(omniModel)) {
+        var imageGroups = catalogGroups('imageProviderGroups', 'imageModels');
+        var omniGroup = imageGroups.find(function (g) { return g.provider === 'omniroute'; });
+        var omniModels = (omniGroup && omniGroup.models) || [];
+        var fallback = omniModels.find(function (m) { return !isOmniRouteImageBlocked(m.model); });
+        if (fallback) {
+          omniModel = fallback.model;
+          selected = { key: fallback.key, provider: 'omniroute', model: fallback.model, label: 'OmniRoute / ' + fallback.label };
+        }
+      }
+      var omniCandidate = { key: selected.key, provider: 'omniroute', model: omniModel, label: selected.label };
       imageRequest = requestDirectImageCandidate(omniCandidate, prompt, 120000).catch(function (directErr) {
         // Direct OmniRoute failed — try proxy as last resort
         return proxyImageRequest();
