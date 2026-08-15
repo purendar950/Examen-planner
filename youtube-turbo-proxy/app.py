@@ -1889,6 +1889,17 @@ def _ai_chat_resolve_model(models, requested_key):
         for m in models:
             if _ai_chat_model_key(m["provider"], m["model"]) == requested_key:
                 return m
+        # The composite provider::model key did not match. Before falling back to
+        # an arbitrary default, try the model portion on its own: the picker
+        # groups OmniRoute routes by sub-provider, so a selection can arrive with
+        # a different provider prefix while naming the same route. This still
+        # only ever returns a configured model, so it cannot reach an
+        # unconfigured provider.
+        wanted_model = str(requested_key).split("::", 1)[-1].strip()
+        if wanted_model:
+            for m in models:
+                if str(m.get("model") or "") == wanted_model:
+                    return m
     return models[0]
 
 

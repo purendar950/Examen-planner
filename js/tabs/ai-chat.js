@@ -1426,18 +1426,50 @@
     if (name) name.textContent = file ? file.name : '';
   };
 
+  /* Resolve a saved selection key against EVERY group, not just the first one.
+     groupForModel() falls back to groups[0] when a key does not match, and
+     imageSelection() then fell back to models[0] of that group — so a selection
+     the catalog could not match silently became "first model of first group".
+     Matching on the model ID as well survives group-layout drift between what
+     the picker rendered and what _statusCache holds now. */
+  function findModelByKey(groups, modelKey) {
+    var wanted = String(modelKey || '');
+    if (!wanted) return null;
+    var wantedModel = wanted.split('::').slice(1).join('::');
+    var byKey = null, byModel = null;
+    (groups || []).forEach(function (group) {
+      (group.models || []).forEach(function (m) {
+        if (!byKey && String(m.key || '') === wanted) byKey = { group: group, model: m };
+        if (!byModel && wantedModel && String(m.model || '') === wantedModel) byModel = { group: group, model: m };
+      });
+    });
+    return byKey || byModel;
+  }
+
   function imageSelection(thread) {
     var groups = catalogGroups('imageProviderGroups', 'imageModels');
-    var group = groupForModel(groups, (thread && thread.imageModel) || '');
-    var models = (group && group.models) || [];
-    var model = models.find(function (m) { return thread && m.key === thread.imageModel; }) || models[0];
-    if (!group || !model) return null;
-    var keyParts = String(model.key || '').split('::');
+    var saved = (thread && thread.imageModel) || '';
+    var hit = findModelByKey(groups, saved);
+    /* No saved selection means auto mode, where the first entry is the intended
+       default. A saved selection that cannot be resolved is a different case:
+       still generate, but record it so the UI can say what actually ran instead
+       of pretending the user's choice was honoured. */
+    var substituted = false;
+    if (!hit) {
+      var group = groupForModel(groups, saved);
+      var models = (group && group.models) || [];
+      if (!group || !models.length) return null;
+      hit = { group: group, model: models[0] };
+      substituted = !!saved;
+    }
+    var keyParts = String(hit.model.key || '').split('::');
     return {
-      key: model.key,
-      provider: group.provider || keyParts[0] || '',
-      model: model.model || keyParts.slice(1).join('::') || '',
-      label: group.label + ' / ' + model.label
+      key: hit.model.key,
+      provider: hit.group.provider || keyParts[0] || '',
+      model: hit.model.model || keyParts.slice(1).join('::') || '',
+      label: hit.group.label + ' / ' + hit.model.label,
+      requestedKey: saved,
+      substituted: substituted
     };
   }
 
@@ -1899,6 +1931,17 @@
       var actualModelLabel = actualProviderLabel && displayedModel
         ? actualProviderLabel + ' / ' + displayedModel
         : (selected.label || displayedModel || '');
+      /* The proxy reports the model it really used via X-Image-Model, and it has
+         its own fall-back chain. Whenever that differs from what was asked for —
+         because the catalog could not resolve the saved key, or because the proxy
+         moved down its cascade — name both. Substituting in silence produced the
+         recurring "I selected X but got Y" report. */
+      var requestedModel = selected.substituted
+        ? String(selected.requestedKey || '').split('::').slice(1).join('::')
+        : String(selected.model || '');
+      if (requestedModel && displayedModel && requestedModel !== displayedModel) {
+        actualModelLabel += ' · requested ' + requestedModel;
+      }
       cur.messages.push({
         role: 'assistant',
         content: (isEdit ? 'Edited image based on: ' : 'Generated image based on: ') + prompt,
