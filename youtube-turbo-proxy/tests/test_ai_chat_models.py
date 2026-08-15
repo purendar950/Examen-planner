@@ -76,6 +76,9 @@ def load():
         # fetch/caching path is exercised separately by the id-classification
         # checks further down.
         "_omniroute_fetch_image_model_ids": lambda: ["pol/flux-schnell", "cx/dall-e-3"],
+        # The OpenRouter image catalog is optional and must stay offline in this
+        # sliced-helper test; no credential means the production helper returns [].
+        "_configured_provider_keys": lambda cfg, pid: [],
     }
     exec(section("IMAGE_MODEL_MARKERS = ", "def _ai_chat_generate_image"), ns)
     exec(section("def _effective_provider_models_raw(cfg):", "def _model_provider("), ns)
@@ -232,6 +235,8 @@ for r in ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"):
 ns4 = {
     "os": os, "re": re, "time": time, "threading": threading,
     "STUDY_PROVIDER_MODELS": {"omniroute": ["auto"]},
+    # Keep the optional OpenRouter catalog lookup offline in this sliced test.
+    "_configured_provider_keys": lambda cfg, pid: [],
 }
 exec(section("def _clean_omniroute_catalog_ids(", "# Image models live"), ns4)
 exec(section("_OMNIROUTE_AUTO_FALLBACK = ", "_omniroute_models_cache = "), ns4)

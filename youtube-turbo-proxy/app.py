@@ -2162,12 +2162,12 @@ def _openrouter_fetch_image_model_ids(cfg, force=False):
     is temporarily unavailable, callers retain the documented built-in image
     fallback instead of treating the provider as configured.
     """
-    now = time.time()
-    if (not force and now - _openrouter_image_models_cache["ts"] < _OPENROUTER_IMAGE_MODELS_TTL):
-        return list(_openrouter_image_models_cache["ids"])
     keys = _configured_provider_keys(cfg, "openrouter")
     if not keys:
         return []
+    now = time.time()
+    if (not force and now - _openrouter_image_models_cache["ts"] < _OPENROUTER_IMAGE_MODELS_TTL):
+        return list(_openrouter_image_models_cache["ids"])
     last_error = ""
     for key in keys:
         try:
