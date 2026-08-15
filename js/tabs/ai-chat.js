@@ -1465,9 +1465,21 @@
     if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
     if (/failed to fetch|networkerror/i.test(String(detail))) detail = 'Image request could not reach either configured backend. ' + detail;
     var text = String(detail);
+    // Check for individual provider failures and report each clearly
     var hasCredits = /insufficient credits|never purchased credits|purchase more at https:\/\/openrouter\.ai\/settings\/credits/i.test(text);
     var hasGeminiLimit = /gemini[^|]*(?:http\s*429|rate[\s_-]*limit|try again shortly)/i.test(text);
-    if (hasCredits && hasGeminiLimit) {
+    var hasProviderFailover = /provider failover/i.test(text);
+    // When failover was attempted, show a clear summary of what was tried vs what failed
+    if (hasProviderFailover) {
+      var failedParts = [];
+      if (hasGeminiLimit) failedParts.push('Gemini (rate-limited / 429)');
+      if (hasCredits) failedParts.push('OpenRouter (no credits / 402)');
+      if (!failedParts.length) failedParts.push('all configured image providers');
+      detail = 'All image providers failed after automatic failover. Tried: ' + failedParts.join(', ') + '. '
+        + (hasGeminiLimit && hasCredits
+          ? 'Gemini is rate-limited and OpenRouter has no credits. Add OpenRouter credits or configure another funded image provider, then retry.'
+          : 'Check that at least one image provider has available credits and is not rate-limited, then retry.');
+    } else if (hasCredits && hasGeminiLimit) {
       detail = 'Gemini is temporarily rate-limited, and the configured OpenRouter account has no image credits. Add OpenRouter credits or configure another funded image provider, then retry.';
     } else if (hasCredits) {
       detail = 'The configured OpenRouter account has no image credits. Add credits or configure another funded image provider, then retry.';
@@ -1541,13 +1553,42 @@
       if (seen[key]) return;
       seen[key] = true; all.push(item);
     }
+    // Always try the user-selected model first
     add(selected);
     var groups = catalogGroups('imageProviderGroups', 'imageModels');
+    // Build a priority-ordered interleaved list so different providers are tried
+    // before exhausting all models of the same provider. This prevents wasting
+    // time on multiple models that all route through the same failing backend.
     var preferredProviders = ['openrouter', 'google', 'omniroute'];
+    var providerBuckets = {}; // pid -> [{key, provider, model, label}]
     preferredProviders.forEach(function (pid) {
-      groups.forEach(function (group) { if (group.provider !== pid) return; (group.models || []).forEach(function (m) {
-        add({ key: m.key, provider: pid, model: m.model, label: group.label + ' / ' + m.label });
-      }); });
+      providerBuckets[pid] = [];
+      groups.forEach(function (group) {
+        if (group.provider !== pid) return;
+        (group.models || []).forEach(function (m) {
+          var key = pid + '::' + m.model;
+          if (seen[key]) return; // already added as selected
+          providerBuckets[pid].push({ key: m.key, provider: pid, model: m.model, label: group.label + ' / ' + m.label });
+        });
+      });
+    });
+    // Interleave: take one model from each provider in priority order
+    var maxRounds = 4;
+    for (var round = 0; round < maxRounds; round++) {
+      var added = false;
+      preferredProviders.forEach(function (pid) {
+        if (round < providerBuckets[pid].length) {
+          add(providerBuckets[pid][round]);
+          added = true;
+        }
+      });
+      if (!added) break;
+    }
+    // Append any remaining models from each provider
+    preferredProviders.forEach(function (pid) {
+      for (var i = maxRounds; i < providerBuckets[pid].length; i++) {
+        add(providerBuckets[pid][i]);
+      }
     });
     return all.slice(0, DIRECT_IMAGE_CANDIDATE_MAX);
   }
@@ -1567,16 +1608,36 @@
     }).then(function (r) { return directImageResponse(r, provider, model); });
   }
   function requestDirectImageCandidates(candidates, prompt) {
-    var errors = [], blockedProviders = {}, startedAt = Date.now(), deadline = startedAt + DIRECT_IMAGE_TOTAL_TIMEOUT_MS;
+    var errors = [], blockedProviders = {}, blockedModels = {}, startedAt = Date.now(), deadline = startedAt + DIRECT_IMAGE_TOTAL_TIMEOUT_MS;
     function sharedProviderFailure(provider, detail) {
       var text = String(detail || '').toLowerCase();
       if (provider === 'google') return /http\s*429|rate[\s_-]*limit|quota|resource exhausted|try again shortly/.test(text);
       if (provider === 'openrouter') return /http\s*402|insufficient credits|never purchased credits|purchase more|payment required/.test(text);
-      if (provider === 'omniroute') return /http\s*404|returned\s+404|endpoint[^.]{0,80}unavailable|ngrok[^.]{0,80}(offline|down)/.test(text);
+      if (provider === 'omniroute') {
+        // Provider-level: OmniRoute endpoint itself is down/unreachable
+        if (/http\s*404|returned\s+404|endpoint[^.]{0,80}unavailable|ngrok[^.]{0,80}(offline|down)/.test(text)) return true;
+        // Provider-level: OmniRoute auth failure or permanent config error
+        if (/http\s*401|http\s*403|unauthorized|forbidden|invalid.*api.?key/i.test(text)) return true;
+        // Upstream model-level failure through OmniRoute: rate-limit, quota, or
+        // credit errors from the model OmniRoute routed to. Don't block the entire
+        // provider — the next OmniRoute model might use a different upstream — but
+        // return true after multiple upstream failures so we move on to other providers.
+        if (/http\s*429|rate[\s_-]*limit|quota|resource\s*exhausted|try\s*again\s*shortly/i.test(text)) return true;
+        if (/http\s*402|insufficient\s*credits|never\s*purchased\s*credits|payment\s*required/i.test(text)) return true;
+      }
       return false;
     }
     function attempt(index) {
-      while (index < candidates.length && blockedProviders[String(candidates[index].provider || '').toLowerCase()]) index += 1;
+      while (index < candidates.length) {
+        var c = candidates[index];
+        var pid = String(c.provider || '').toLowerCase();
+        var mkey = c.provider + '::' + c.model;
+        // Skip blocked providers
+        if (blockedProviders[pid]) { index += 1; continue; }
+        // Skip individually blocked models (rate-limited / credits for that specific model)
+        if (blockedModels[mkey]) { index += 1; continue; }
+        break;
+      }
       if (index >= candidates.length) {
         var detail = errors.length ? errors.join(' | ') : 'No direct image candidate succeeded.';
         throw new Error('Image generation failed after provider failover: ' + detail.slice(0, 900));
@@ -1591,7 +1652,21 @@
         var message = String(error && error.message || error || 'request failed').slice(0, 220);
         errors.push(label + ': ' + message);
         var provider = String(candidate.provider || '').toLowerCase();
-        if (sharedProviderFailure(provider, message)) blockedProviders[provider] = true;
+        var modelKey = candidate.provider + '::' + candidate.model;
+        if (sharedProviderFailure(provider, message)) {
+          // For OmniRoute upstream model failures (429/402), block only the
+          // specific model first. After 3 model-level blocks from the same
+          // provider, block the entire provider to avoid wasting time.
+          if (provider === 'omniroute' && /http\s*429|rate[\s_-]*limit|quota|resource\s*exhausted|http\s*402|insufficient\s*credits/i.test(message)) {
+            blockedModels[modelKey] = true;
+            // Count how many models from this provider are now blocked
+            var omniBlocked = 0;
+            for (var k in blockedModels) { if (k.indexOf(provider + '::') === 0) omniBlocked++; }
+            if (omniBlocked >= 3) blockedProviders[provider] = true;
+          } else {
+            blockedProviders[provider] = true;
+          }
+        }
         return attempt(index + 1);
       });
     }
