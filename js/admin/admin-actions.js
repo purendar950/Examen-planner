@@ -1462,7 +1462,7 @@ async function saveAiChatConfig() {
     }, { merge: true });
     AI_CHAT_CONFIG = Object.assign({}, AI_CHAT_CONFIG, { allowedUsers: allowedUsers, allowedEmails: emails });
     var msg = '✅ AI Chat access saved — ' + emails.length + ' user(s) recorded.';
-    if (unresolved.length) msg += ' ⚠️ Not found: ' + unresolved.join(', ');
+    if (unresolved.length) msg += ' ℹ️ UID lookup pending for ' + unresolved.join(', ') + '; verified-email access is still saved.';
     showToast(msg);
     render();
   } catch(e) { showToast('Failed: ' + e.message); }
