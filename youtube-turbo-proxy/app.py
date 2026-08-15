@@ -1046,7 +1046,10 @@ OMNIROUTE_URL = os.environ.get(
 # Define it next to the source URL because image-provider configuration is
 # initialized earlier during module import.
 OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
-OMNIROUTE_IMAGE_MODELS_URL = OMNIROUTE_IMAGES_URL
+# OmniRoute's current public API does not expose a GET /v1/images/models route;
+# image-capable entries are advertised in the normal /v1/models catalog and
+# filtered by output metadata/name markers below.
+OMNIROUTE_IMAGE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
 OMNIROUTE_EDITS_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/edits")
 OMNIROUTE_SEARCH_URL = OMNIROUTE_URL.replace("/chat/completions", "/search")
 OMNIROUTE_TTS_URL = OMNIROUTE_URL.replace("/chat/completions", "/audio/speech")
@@ -8963,11 +8966,10 @@ def _omniroute_item_is_image(item, model_id):
 def _omniroute_fetch_image_model_ids(force=False):
     """Return the exact model IDs accepted by OmniRoute's image route.
 
-    The dashboard exposes a dedicated ``GET /v1/images/generations`` catalog
-    separate from the broad ``GET /v1/models`` catalog. Prefer that list because
-    it is the router's authoritative allow-list for image generation; retain the
-    older /v1/models metadata path only as a compatibility fallback for older
-    OmniRoute deployments.
+    The current OmniRoute public API exposes image-capable entries through the
+    broad ``GET /v1/models`` catalog. Filter that catalog using output metadata
+    and image-model markers, while retaining persisted image IDs during a
+    temporary tunnel/catalog outage.
     """
     now = time.time()
     cached = _omniroute_image_models_cache["ids"]
@@ -8985,7 +8987,7 @@ def _omniroute_fetch_image_model_ids(force=False):
         _omniroute_image_models_cache["attempt_ts"] = now
         headers = {"ngrok-skip-browser-warning": "true"}
         try:
-            for catalog_url in (OMNIROUTE_IMAGE_MODELS_URL, OMNIROUTE_MODELS_URL):
+            for catalog_url in (OMNIROUTE_IMAGE_MODELS_URL,):
                 r = requests.get(catalog_url, headers=headers, timeout=_OMNIROUTE_MODELS_TIMEOUT)
                 if r.status_code != 200:
                     log.warning("OmniRoute image catalog refresh %s: HTTP %s", catalog_url, r.status_code)
