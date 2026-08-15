@@ -2446,6 +2446,178 @@ def _omniroute_video_order(ids):
     ]
 
 
+# Video providers can take minutes and often return a large binary. Keep the
+# request/response boundary small: POST creates a job, the worker generates in
+# the background, GET reports state, and /media streams the completed bytes.
+_AI_CHAT_VIDEO_JOB_TTL = 2 * 60 * 60
+_ai_chat_video_jobs = {}
+_ai_chat_video_jobs_lock = threading.RLock()
+
+
+def _ai_chat_video_job_public(job):
+    return {
+        "ok": True,
+        "id": job["id"],
+        "jobId": job["id"],
+        "status": job.get("status", "queued"),
+        "model": job.get("used_model") or job.get("requested_model") or "",
+        "requestedModel": job.get("requested_model") or "",
+        "contentType": job.get("content_type") or "video/mp4",
+        "createdAt": job.get("created_at"),
+        "updatedAt": job.get("updated_at"),
+        "expiresAt": job.get("expires_at"),
+        "pollAfterMs": 2500,
+        "error": job.get("error") or "",
+    }
+
+
+def _cleanup_ai_chat_video_jobs():
+    cutoff = time.time() - _AI_CHAT_VIDEO_JOB_TTL
+    with _ai_chat_video_jobs_lock:
+        stale = [job_id for job_id, job in _ai_chat_video_jobs.items()
+                 if float(job.get("expires_at") or 0) < time.time()
+                 or (job.get("status") in ("completed", "failed")
+                     and float(job.get("updated_at") or 0) < cutoff)]
+        for job_id in stale:
+            _ai_chat_video_jobs.pop(job_id, None)
+
+
+def _get_ai_chat_video_job(job_id):
+    _cleanup_ai_chat_video_jobs()
+    with _ai_chat_video_jobs_lock:
+        return _ai_chat_video_jobs.get(str(job_id or ""))
+
+
+def _run_ai_chat_video_job(job_id):
+    job = _get_ai_chat_video_job(job_id)
+    if not job:
+        return
+    with _ai_chat_video_jobs_lock:
+        job["status"] = "running"
+        job["updated_at"] = time.time()
+    try:
+        result, detail, content_type, used_model = _ai_chat_generate_video(
+            job["cfg"], job["requested_model"], job["prompt"],
+            job["aspect_ratio"], job.get("duration"), job.get("source_image"))
+        with _ai_chat_video_jobs_lock:
+            if detail:
+                job["status"] = "failed"
+                job["error"] = detail
+            elif isinstance(result, (bytes, bytearray)):
+                job["status"] = "completed"
+                job["result_bytes"] = bytes(result)
+                job["content_type"] = content_type or "video/mp4"
+                job["used_model"] = used_model or job["requested_model"]
+            elif isinstance(result, dict):
+                job["status"] = "completed"
+                job["result_json"] = result
+                job["content_type"] = "application/json"
+                job["used_model"] = used_model or job["requested_model"]
+            else:
+                job["status"] = "failed"
+                job["error"] = "The video provider returned no video."
+            job["updated_at"] = time.time()
+    except Exception as exc:  # noqa: BLE001
+        log.exception("AI Chat video job %s failed", job_id)
+        with _ai_chat_video_jobs_lock:
+            job["status"] = "failed"
+            job["error"] = str(exc)[:1200]
+            job["updated_at"] = time.time()
+
+
+def _ai_chat_video_job_authorize(job_id):
+    user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return None, err
+    job = _get_ai_chat_video_job(job_id)
+    if not job or job.get("owner_uid") != user["uid"]:
+        return None, (jsonify({"error": "video_job_not_found", "detail": "Video job not found."}), 404)
+    return job, None
+
+
+@app.post("/api/ai-chat/video/jobs")
+def api_ai_chat_video_job_start():
+    """Queue video generation and return before the provider finishes."""
+    user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
+    if err:
+        return jsonify(err[0]), err[1]
+    raw_cfg = _load_study_raw_cfg()
+    if not _provider_configured(raw_cfg, "omniroute"):
+        return jsonify({"error": "video_not_configured",
+                        "detail": "OmniRoute video generation is not configured."}), 503
+    body = request.get_json(silent=True) or {}
+    model = _typed_request_model(body.get("model"), "video")
+    if not _typed_model_allowed(raw_cfg, "video", model):
+        return jsonify({"error": "video_model_invalid", "detail": "That video model is not available."}), 400
+    prompt = str(body.get("prompt") or "").strip()[:2000]
+    if not prompt:
+        return jsonify({"error": "missing_prompt", "detail": "Video prompt is required."}), 400
+    if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_video", user["uid"], 8, 3600):
+        return jsonify({"error": "rate_limited", "detail": "Video generation limit reached. Try later."}), 429
+    _cleanup_ai_chat_video_jobs()
+    job_id = secrets.token_urlsafe(18)
+    now = time.time()
+    job = {
+        "id": job_id, "owner_uid": user["uid"], "status": "queued",
+        "requested_model": model, "used_model": "", "prompt": prompt,
+        "aspect_ratio": str(body.get("aspectRatio") or "16:9")[:12],
+        "duration": body.get("duration"), "source_image": body.get("sourceImage"),
+        "cfg": raw_cfg, "content_type": "video/mp4", "result_bytes": None,
+        "result_json": None, "error": "", "created_at": now,
+        "updated_at": now, "expires_at": now + _AI_CHAT_VIDEO_JOB_TTL,
+    }
+    with _ai_chat_video_jobs_lock:
+        _ai_chat_video_jobs[job_id] = job
+    worker = threading.Thread(target=_run_ai_chat_video_job, args=(job_id,), daemon=True,
+                              name="aichat-video-" + job_id[:10])
+    job["thread"] = worker
+    worker.start()
+    return jsonify(_ai_chat_video_job_public(job)), 202
+
+
+@app.get("/api/ai-chat/video/jobs/<job_id>")
+def api_ai_chat_video_job_status(job_id):
+    job, err = _ai_chat_video_job_authorize(job_id)
+    if err:
+        return err
+    return jsonify(_ai_chat_video_job_public(job))
+
+
+@app.get("/api/ai-chat/video/jobs/<job_id>/media")
+def api_ai_chat_video_job_media(job_id):
+    job, err = _ai_chat_video_job_authorize(job_id)
+    if err:
+        return err
+    with _ai_chat_video_jobs_lock:
+        if job.get("status") != "completed":
+            return jsonify({"error": "video_not_ready", "detail": "Video generation is still in progress."}), 409
+        data = job.get("result_bytes")
+        result_json = job.get("result_json")
+        content_type = job.get("content_type") or "video/mp4"
+        used_model = job.get("used_model") or job.get("requested_model")
+    if isinstance(data, (bytes, bytearray)):
+        response = Response(bytes(data), mimetype=content_type)
+        response.headers["X-Video-Model"] = used_model or ""
+        response.headers["Cache-Control"] = "private, max-age=3600"
+        return response
+    if isinstance(result_json, dict):
+        return jsonify({"ok": True, "model": used_model, "video": result_json})
+    return jsonify({"error": "video_empty", "detail": "The video provider returned no video."}), 502
+
+
+@app.delete("/api/ai-chat/video/jobs/<job_id>")
+def api_ai_chat_video_job_cancel(job_id):
+    job, err = _ai_chat_video_job_authorize(job_id)
+    if err:
+        return err
+    with _ai_chat_video_jobs_lock:
+        if job.get("status") in ("queued", "running"):
+            job["status"] = "cancelled"
+            job["error"] = "Video generation cancelled."
+            job["updated_at"] = time.time()
+    return jsonify(_ai_chat_video_job_public(job))
+
+
 def _omniroute_typed_catalog(cfg, kind):
     """Return public model/provider IDs for one typed OmniRoute endpoint.
 

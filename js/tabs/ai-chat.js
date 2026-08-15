@@ -1886,13 +1886,55 @@
   function requestVideo(thread, prompt) {
     var selected = typedModel('video', thread); if (!selected) return Promise.reject(new Error('No video model is configured.'));
     mediaUserMessage(thread, '▣ Generate video: ' + prompt);
-    var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Generating video with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
+    var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Starting video job with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
     var body = { prompt: prompt, model: omniRouteModelId(selected.key), aspect_ratio: String((document.getElementById('aic-video-aspect-select') || {}).value || '16:9'), duration: Number((document.getElementById('aic-video-duration-select') || {}).value || 5) };
-    var proxyRequest = function () { return backendAuthFetch('/api/ai-chat/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: body.aspect_ratio, duration: body.duration }) }); };
-    var request = isDirectOmniRouteKey(selected.key) && directOmniRouteConfig()
-      ? directOmniRouteFetch('video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 300000, body: JSON.stringify(body) }).then(function (r) { return r.ok ? r : proxyRequest(); }).catch(function () { return proxyRequest(); })
-      : proxyRequest();
-    return request.then(function (r) { if (!r.ok) return responseError(r, 'Video generation failed.'); var type = (r.headers.get('content-type') || '').toLowerCase(); return type.indexOf('video/') === 0 || type === 'application/octet-stream' ? r.blob().then(function (blob) { return { blob: blob }; }) : r.json().then(function (payload) { return { payload: payload }; }); }).then(function (result) { var cur = getThread(thread.id); if (!cur) return; var message = { role: 'assistant', content: 'Video generated from: ' + prompt, mediaType: 'video', videoPrompt: prompt, videoModel: selected.key }; if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'video').then(function () { cur.messages.push(message); upsertThread(cur); renderLog(); }); var source = mediaSourceFromJson(result.payload, 'video'); if (!source) throw new Error('The video service returned no video data.'); message.videoData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:video/mp4;base64,' + source; cur.messages.push(message); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Video generation failed.'), retry: { kind: 'video', q: prompt } }); upsertThread(cur); renderLog(); } });
+    var finish = function (result, usedModel) {
+      var cur = getThread(thread.id); if (!cur) return;
+      var message = { role: 'assistant', content: 'Video generated from: ' + prompt, mediaType: 'video', videoPrompt: prompt, videoModel: usedModel || selected.key };
+      if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'video').then(function () { cur.messages.push(message); delete cur.pendingVideoJob; upsertThread(cur); renderLog(); });
+      var source = mediaSourceFromJson(result.payload, 'video'); if (!source) throw new Error('The video service returned no video data.');
+      message.videoData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:video/mp4;base64,' + source;
+      cur.messages.push(message); delete cur.pendingVideoJob; upsertThread(cur); renderLog();
+    };
+    var fail = function (e) {
+      var cur = getThread(thread.id); if (cur) { delete cur.pendingVideoJob; cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Video generation failed.'), retry: { kind: 'video', q: prompt } }); upsertThread(cur); renderLog(); }
+    };
+    var consume = function (r, usedModel) {
+      if (!r.ok) return responseError(r, 'Video generation failed.');
+      var type = (r.headers.get('content-type') || '').toLowerCase();
+      return type.indexOf('video/') === 0 || type === 'application/octet-stream' ? r.blob().then(function (blob) { return finish({ blob: blob }, usedModel); }) : r.json().then(function (payload) { return finish({ payload: payload }, usedModel); });
+    };
+    var direct = isDirectOmniRouteKey(selected.key) && directOmniRouteConfig();
+    if (direct) {
+      // Direct mode remains opt-in. It has no Render hop, but if the provider
+      // rejects or times out, fall back to the asynchronous proxy job below.
+      return directOmniRouteFetch('video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 300000, body: JSON.stringify(body) })
+        .then(function (r) { if (!r.ok) throw new Error('Direct video provider rejected the request.'); return consume(r, selected.key); })
+        .catch(function () { return startProxyJob(); })
+        .catch(fail);
+    }
+    function startProxyJob() {
+      return backendAuthFetch('/api/ai-chat/video/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: body.aspect_ratio, duration: body.duration, sourceImage: body.source_image || '' }) })
+        .then(function (r) { if (!r.ok) return responseError(r, 'Video job could not be started.'); return r.json(); })
+        .then(function (job) {
+          var cur = getThread(thread.id); if (cur) { cur.pendingVideoJob = { id: job.jobId || job.id, prompt: prompt, model: selected.key }; upsertThread(cur); }
+          var jobId = job.jobId || job.id; if (!jobId) throw new Error('The video service did not return a job ID.');
+          var startedAt = Date.now();
+          function poll() {
+            if (Date.now() - startedAt > 30 * 60 * 1000) throw new Error('Video generation is taking longer than 30 minutes. The job was left on the server; retry from the conversation later.');
+            return backendAuthFetch('/api/ai-chat/video/jobs/' + encodeURIComponent(jobId), { timeoutMs: 15000 })
+              .then(function (r) { if (!r.ok) return responseError(r, 'Unable to check video progress.'); return r.json(); })
+              .then(function (state) {
+                if (typing) typing.textContent = state.status === 'running' ? 'Generating video… this can take a few minutes (' + (state.model || selected.label || selected.key) + ')' : 'Video job queued…';
+                if (state.status === 'completed') return backendAuthFetch('/api/ai-chat/video/jobs/' + encodeURIComponent(jobId) + '/media', { timeoutMs: 300000 }).then(function (r) { return consume(r, state.model || selected.key); });
+                if (state.status === 'failed' || state.status === 'cancelled') throw new Error(state.error || 'Video generation failed.');
+                return new Promise(function (resolve) { setTimeout(function () { resolve(poll()); }, Math.max(1500, Number(state.pollAfterMs) || 2500)); });
+              });
+          }
+          return poll();
+        });
+    }
+    return startProxyJob().catch(fail);
   }
   window.aicGenerateVideo = function () { if (_sending) return; var field = document.getElementById('aic-video-prompt-input'); var prompt = String((field && field.value) || '').trim(); if (!prompt) { toast('Describe the video to generate.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (field) field.value = ''; setSending(true); requestVideo(t, prompt).finally(function () { setSending(false); }); };
 

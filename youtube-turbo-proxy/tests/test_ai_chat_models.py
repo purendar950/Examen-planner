@@ -80,7 +80,7 @@ def load():
         # sliced-helper test; no credential means the production helper returns [].
         "_configured_provider_keys": lambda cfg, pid: [],
     }
-    exec(section("IMAGE_MODEL_MARKERS = ", "def _ai_chat_generate_image"), ns)
+    exec(section("IMAGE_MODEL_MARKERS = ", "# Video providers can take minutes"), ns)
     exec(section("def _effective_provider_models_raw(cfg):", "def _model_provider("), ns)
     exec(section("def _ai_chat_available_models(cfg):", "def _ai_chat_model_key("), ns)
     ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral")
@@ -313,7 +313,7 @@ check("typed image snapshot excludes video and embedding ids",
       not ({"veo-free/veo-3", "cx/sora-2", "af/text-embedding-3"} & set(image_snapshot)),
       image_snapshot)
 ns4["OMNIROUTE_IMAGES_URL"] = "https://example.invalid/v1/images/generations"
-exec(section("IMAGE_MODEL_MARKERS = ", "def _ai_chat_generate_image"), ns4)
+exec(section("IMAGE_MODEL_MARKERS = ", "# Video providers can take minutes"), ns4)
 ns4["_omniroute_image_models_cache"] = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
 ns4["_omniroute_refresh_image_models_async"] = lambda: None
 ns4["_omniroute_fetch_image_model_ids"] = lambda: []
