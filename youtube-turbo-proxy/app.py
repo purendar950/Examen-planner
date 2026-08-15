@@ -12486,6 +12486,7 @@ def api_ai_chat_status():
     models, image_models = [], []
     search_models, speech_models, video_models = [], [], []
     provider_groups, image_provider_groups = [], []
+    omniroute_direct = None
     catalog_refreshing = False
     if allowed:
         raw_cfg = _load_study_raw_cfg()
@@ -12500,6 +12501,22 @@ def api_ai_chat_status():
                         for m in available_images]
         provider_groups = _ai_chat_model_groups(available)
         image_provider_groups = _ai_chat_model_groups(available_images)
+        # Direct browser mode is deliberately opt-in because the browser must
+        # receive an OmniRoute credential. The normal proxy path keeps all keys
+        # server-side. Only the first configured key is exposed to an already
+        # authorized AI Chat user when the admin explicitly enables this field.
+        if raw_cfg.get("omnirouteBrowserDirect") and _provider_configured(raw_cfg, "omniroute"):
+            direct_keys = _configured_provider_keys(raw_cfg, "omniroute")
+            if direct_keys:
+                omniroute_direct = {
+                    "enabled": True,
+                    "chatUrl": OMNIROUTE_URL,
+                    "imagesUrl": OMNIROUTE_IMAGES_URL,
+                    "searchUrl": OMNIROUTE_SEARCH_URL,
+                    "speechUrl": OMNIROUTE_TTS_URL,
+                    "videoUrl": OMNIROUTE_VIDEO_URL,
+                    "apiKey": direct_keys[0],
+                }
         if _provider_configured(raw_cfg, "omniroute"):
             search_models = [{"key": "omniroute/" + model, "label": "OmniRoute — " + model}
                              for model in _omniroute_typed_catalog(raw_cfg, "search")]
@@ -12519,7 +12536,8 @@ def api_ai_chat_status():
                     "searchEnabled": bool(allowed and search_models),
                     "speechEnabled": bool(allowed and speech_models),
                     "videoEnabled": bool(allowed and video_models),
-                    "ragEnabled": bool(allowed and _vec_enabled())})
+                    "ragEnabled": bool(allowed and _vec_enabled()),
+                    "omnirouteDirect": omniroute_direct})
 
 
 # ── GitHub repository context (read-only, public repositories) ─────────────

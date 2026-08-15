@@ -192,6 +192,9 @@ function aiStudyProviderCard(pid, activePid) {
   var keyLink = provider.keyUrl
     ? '<a class="ai-provider-link" href="' + esc(provider.keyUrl) + '" target="_blank" rel="noopener">Get API key ↗</a>'
     : '<span class="ai-provider-link is-muted">Private endpoint</span>';
+  var directBrowserBox = pid === 'omniroute'
+    ? '<label class="ai-switch-row ai-provider-direct-toggle" for="omniroute-browser-direct"><span><strong>Direct browser requests</strong><small>Send OmniRoute chat, image generation, search, speech and video directly from AI Chat. This exposes the first configured OmniRoute key to authorized browsers and requires OmniRoute CORS to allow this app.</small></span><span class="ai-toggle"><input id="omniroute-browser-direct" type="checkbox"' + (AI_CONFIG && AI_CONFIG.omnirouteBrowserDirect ? ' checked' : '') + '><i></i></span></label>'
+    : '';
 
   var metricsRow = '<div class="ai-provider-metrics">' +
         '<span><b>' + keys.length + '</b> key' + (keys.length === 1 ? '' : 's') + '</span>' +
@@ -213,6 +216,7 @@ function aiStudyProviderCard(pid, activePid) {
     metricsRow +
     '<div class="ai-provider-endpoint" title="' + esc(endpoint) + '"><span>Endpoint</span><code>' + esc(endpoint.replace(/^https?:\/\//, '')) + '</code></div>' +
     credentialsBox +
+    directBrowserBox +
     '<div class="ai-provider-card-foot"><span>' + esc(provider.note) + '</span>' + keyLink + '</div>' +
   '</article>';
 }

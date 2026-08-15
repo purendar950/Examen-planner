@@ -8,8 +8,10 @@
    browser; every answer is proxied through youtube-turbo-proxy's
    /api/ai-chat[/stream], which resolves the chosen model server-side.
 
-   Features (all native — no external app, everything routes through this
-   backend so keys/allowlists never reach the browser):
+   Features (all native — no external app. Protected providers, coding
+   workspace requests and fallback routes use the backend; administrators may
+   explicitly opt OmniRoute media/chat requests into a browser-direct route):
+
      - Multiple named conversation threads (sidebar), not just one chat
      - Streaming replies (SSE), falling back to a blocking request on failure
      - Provider + model pickers — every currently-configured provider/model,
@@ -494,6 +496,52 @@
         ? window.PrepPathBackend.fetch(path, requestOptions)
         : fetch(BACKEND + path, requestOptions);
     });
+  }
+
+  /* ── direct OmniRoute transport ────────────────────────────────────────
+     Direct mode is opt-in from the admin panel because it exposes the first
+     configured OmniRoute key to an authorized browser session. Render remains
+     the fallback transport and still handles coding/workspace requests. ── */
+  function directOmniRouteConfig() {
+    var cfg = _statusCache && _statusCache.omnirouteDirect;
+    return cfg && cfg.enabled && cfg.apiKey ? cfg : null;
+  }
+  function omniRouteModelId(key) {
+    var raw = String(key || '');
+    if (raw.indexOf('::') !== -1) return raw.split('::').slice(1).join('::');
+    if (raw.indexOf('/') !== -1) return raw.split('/').slice(1).join('/');
+    return raw;
+  }
+  function isDirectOmniRouteKey(key) {
+    return /^(?:omniroute::|omniroute\/)/i.test(String(key || ''));
+  }
+  function directOmniRouteFetch(kind, options) {
+    options = options || {};
+    var cfg = directOmniRouteConfig();
+    if (!cfg) return Promise.reject(new Error('Direct OmniRoute mode is not enabled by the administrator.'));
+    var url = cfg[kind + 'Url'];
+    if (!url) return Promise.reject(new Error('Direct OmniRoute ' + kind + ' endpoint is not configured.'));
+    var controller = window.AbortController ? new AbortController() : null;
+    var timeout = Number(options.timeoutMs || 90000);
+    var timer = controller ? setTimeout(function () { controller.abort(); }, Math.max(5000, timeout)) : null;
+    var headers = Object.assign({}, options.headers || {}, {
+      Authorization: 'Bearer ' + cfg.apiKey,
+      'ngrok-skip-browser-warning': 'true'
+    });
+    var requestOptions = Object.assign({}, options, { headers: headers });
+    delete requestOptions.timeoutMs;
+    if (controller) requestOptions.signal = controller.signal;
+    return fetch(url, requestOptions).finally(function () { if (timer) clearTimeout(timer); });
+  }
+  function directChatMessages(body) {
+    var messages = [];
+    if (body && body.persona) messages.push({ role: 'system', content: String(body.persona).slice(0, 8000) });
+    (body && body.history || []).forEach(function (item) {
+      if (!item || !item.role || !item.content) return;
+      messages.push({ role: item.role === 'assistant' ? 'assistant' : 'user', content: String(item.content).slice(0, 20000) });
+    });
+    messages.push({ role: 'user', content: String((body && body.q) || '') });
+    return messages;
   }
 
   /* ── access check + status (models/imageEnabled/ragEnabled) ── */
@@ -1132,6 +1180,28 @@
     if (currentThreadId() === cur.id) renderLog();
   }
 
+  function directImageResponse(response, model) {
+    if (!response.ok) return response.json().catch(function () { return {}; }).then(function (j) {
+      var detail = j && (j.detail || j.message || j.error);
+      if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
+      throw new Error(String(detail || 'Direct OmniRoute image request failed (HTTP ' + response.status + ')').slice(0, 500));
+    });
+    return response.json().then(function (payload) {
+      var items = payload && Array.isArray(payload.data) ? payload.data : [];
+      var first = items[0] || {};
+      var raw = first.b64_json || first.b64 || first.image_base64 || first.url || '';
+      if (!raw) throw new Error('Direct OmniRoute returned no image data.');
+      var source = String(raw);
+      if (source.indexOf('data:') !== 0 && source.indexOf('http') !== 0) source = 'data:image/png;base64,' + source;
+      return fetch(source).then(function (imageResponse) {
+        if (!imageResponse.ok) throw new Error('Could not read the direct OmniRoute image response.');
+        return imageResponse.blob();
+      }).then(function (blob) {
+        return { blob: blob, provider: 'omniroute', model: model };
+      });
+    });
+  }
+
   function requestGeneratedImage(thread, prompt, userContent, sourceImageData, isEdit) {
     var selected = imageSelection(thread);
     if (!selected) return Promise.reject(new Error('No image-capable provider/model is configured. Ask an admin to add one in AI Study.'));
@@ -1155,14 +1225,24 @@
     renderThreadList();
     renderLog();
 
-    return backendAuthFetch('/api/ai-chat/image', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      // Image diffusion can exceed the normal chat budget, especially after a
-      // Render cold start. Keep this longer than the server's 120s provider
-      // budget so the browser never aborts a valid generation prematurely.
-      timeoutMs: 150000,
-      body: JSON.stringify({ prompt: prompt, model: selected.key, sourceImageData: sourceImageData || undefined })
-    }).then(function (r) {
+    var imageRequest;
+    // Native OmniRoute generation can bypass Render. Image editing remains on
+    // the proxy because its multipart contract and binary source handling are
+    // provider-specific; the ordinary generation path is fully direct.
+    if (!isEdit && selected.provider === 'omniroute' && directOmniRouteConfig()) {
+      imageRequest = directOmniRouteFetch('images', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 150000,
+        body: JSON.stringify({ model: selected.model, prompt: prompt, n: 1, size: '1024x1024', response_format: 'b64_json' })
+      }).then(function (r) { return directImageResponse(r, selected.model); });
+    } else {
+      imageRequest = backendAuthFetch('/api/ai-chat/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        // Image diffusion can exceed the normal chat budget, especially after a
+        // Render cold start. Keep this longer than the server's 120s provider
+        // budget so the browser never aborts a valid generation prematurely.
+        timeoutMs: 150000,
+        body: JSON.stringify({ prompt: prompt, model: selected.key, sourceImageData: sourceImageData || undefined })
+      }).then(function (r) {
       // The backend may fall back to a different provider/model. Capture the
       // response metadata before consuming the image body so the result card and
       // local conversation history identify what actually generated the image.
@@ -1176,10 +1256,12 @@
           throw new Error(String(detail || (!r.ok ? 'Image generation failed (HTTP ' + r.status + ')' : 'The image service returned no image data')).slice(0, 500));
         });
       }
-      return r.blob().then(function (blob) {
-        return { blob: blob, provider: actualProvider, model: actualModel };
+        return r.blob().then(function (blob) {
+          return { blob: blob, provider: actualProvider, model: actualModel };
+        });
       });
-    }).then(function (result) {
+    }
+    return imageRequest.then(function (result) {
       var blob = result && result.blob;
       if (!blob || !String(blob.type || '').toLowerCase().startsWith('image/')) throw new Error('The image service returned invalid image data');
       return new Promise(function (resolve, reject) {
@@ -1402,25 +1484,47 @@
     if (kind === 'audio' && blob.size <= 2.5 * 1024 * 1024) return blobToDataUrl(blob).then(function (data) { message.audioData = data; delete message.mediaKey; delete _mediaUrls[key]; });
     return Promise.resolve();
   }
+  function normalizeDirectSearchPayload(payload, query, maxResults) {
+    var rows = payload && Array.isArray(payload.data) ? payload.data : [];
+    return { query: query, model: payload && payload.model, results: rows.slice(0, maxResults).map(function (row) {
+      row = row || {};
+      return { title: String(row.title || 'Untitled').slice(0, 240), url: String(row.url || row.link || '').slice(0, 1000),
+        snippet: String(row.snippet || row.description || row.content || '').slice(0, 1200),
+        publishedAt: String(row.published_at || row.publishedAt || '').slice(0, 80),
+        favicon: String(row.favicon_url || row.favicon || '').slice(0, 500) };
+    }) };
+  }
   function requestWebSearch(thread, query) {
     var selected = typedModel('search', thread); if (!selected) return Promise.reject(new Error('No search model is configured.'));
     mediaUserMessage(thread, '⌕ Search the web: ' + query);
     var typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Searching the web with ' + (selected.label || selected.key) + '…'; var log = document.getElementById('aic-log'); if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
-    return backendAuthFetch('/api/ai-chat/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: query, model: selected.key, searchType: 'web', maxResults: Number((document.getElementById('aic-search-limit-select') || {}).value || 6) }) }).then(function (r) { return r.ok ? r.json() : responseError(r, 'Web search failed.'); }).then(function (payload) { var cur = getThread(thread.id); if (!cur) return; cur.messages.push({ role: 'assistant', content: 'Web search results for ' + query, mediaType: 'search', search: payload || { query: query, results: [] } }); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Web search failed.'), retry: { kind: 'search', q: query } }); upsertThread(cur); renderLog(); } });
+    var maxResults = Number((document.getElementById('aic-search-limit-select') || {}).value || 6);
+    var request = isDirectOmniRouteKey(selected.key) && directOmniRouteConfig()
+      ? directOmniRouteFetch('search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 60000, body: JSON.stringify({ query: query, model: omniRouteModelId(selected.key), search_type: 'web', max_results: maxResults }) }).then(function (r) { return r.ok ? r.json().then(function (p) { return normalizeDirectSearchPayload(p, query, maxResults); }) : responseError(r, 'Direct OmniRoute web search failed.'); })
+      : backendAuthFetch('/api/ai-chat/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: query, model: selected.key, searchType: 'web', maxResults: maxResults }) }).then(function (r) { return r.ok ? r.json() : responseError(r, 'Web search failed.'); });
+    return request.then(function (payload) { var cur = getThread(thread.id); if (!cur) return; cur.messages.push({ role: 'assistant', content: 'Web search results for ' + query, mediaType: 'search', search: payload || { query: query, results: [] } }); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Web search failed.'), retry: { kind: 'search', q: query } }); upsertThread(cur); renderLog(); } });
   }
   window.aicSearchWeb = function () { if (_sending) return; var input = document.getElementById('aic-search-query-input'); var query = String((input && input.value) || '').trim() || String((document.getElementById('aic-input') || {}).value || '').trim(); if (!query) { toast('Enter a search query.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (input) input.value = ''; setSending(true); requestWebSearch(t, query).finally(function () { setSending(false); }); };
   function requestSpeech(thread, text) {
     var selected = typedModel('speech', thread); if (!selected) return Promise.reject(new Error('No speech model is configured.'));
     mediaUserMessage(thread, '♬ Read aloud: ' + text.slice(0, 500));
     var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Generating audio with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
-    return backendAuthFetch('/api/ai-chat/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, model: selected.key, voice: String((document.getElementById('aic-speech-voice-select') || {}).value || 'alloy'), responseFormat: 'mp3' }) }).then(function (r) { if (!r.ok) return responseError(r, 'Text-to-speech failed.'); var type = (r.headers.get('content-type') || '').toLowerCase(); return type.indexOf('audio/') === 0 ? r.blob().then(function (blob) { return { blob: blob }; }) : r.json().then(function (payload) { return { payload: payload }; }); }).then(function (result) { var cur = getThread(thread.id); if (!cur) return; var message = { role: 'assistant', content: 'Audio narration generated.', mediaType: 'audio', speechText: text, speechModel: selected.key }; if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'audio').then(function () { cur.messages.push(message); upsertThread(cur); renderLog(); }); var source = mediaSourceFromJson(result.payload, 'audio'); if (!source) throw new Error('The speech service returned no audio data.'); message.audioData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:audio/mpeg;base64,' + source; cur.messages.push(message); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Text-to-speech failed.'), retry: { kind: 'speech', q: text } }); upsertThread(cur); renderLog(); } });
+    var body = { text: text, model: omniRouteModelId(selected.key), voice: String((document.getElementById('aic-speech-voice-select') || {}).value || 'alloy'), response_format: 'mp3' };
+    var request = isDirectOmniRouteKey(selected.key) && directOmniRouteConfig()
+      ? directOmniRouteFetch('speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 120000, body: JSON.stringify(body) })
+      : backendAuthFetch('/api/ai-chat/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, model: selected.key, voice: body.voice, responseFormat: 'mp3' }) });
+    return request.then(function (r) { if (!r.ok) return responseError(r, 'Text-to-speech failed.'); var type = (r.headers.get('content-type') || '').toLowerCase(); return type.indexOf('audio/') === 0 ? r.blob().then(function (blob) { return { blob: blob }; }) : r.json().then(function (payload) { return { payload: payload }; }); }).then(function (result) { var cur = getThread(thread.id); if (!cur) return; var message = { role: 'assistant', content: 'Audio narration generated.', mediaType: 'audio', speechText: text, speechModel: selected.key }; if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'audio').then(function () { cur.messages.push(message); upsertThread(cur); renderLog(); }); var source = mediaSourceFromJson(result.payload, 'audio'); if (!source) throw new Error('The speech service returned no audio data.'); message.audioData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:audio/mpeg;base64,' + source; cur.messages.push(message); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Text-to-speech failed.'), retry: { kind: 'speech', q: text } }); upsertThread(cur); renderLog(); } });
   }
   window.aicGenerateSpeech = function () { if (_sending) return; var field = document.getElementById('aic-speech-text-input'); var t = getThread(currentThreadId()); var text = String((field && field.value) || '').trim() || latestAssistantText(t); if (!text) { toast('Enter text or generate an AI response first.'); return; } if (field) field.value = ''; setSending(true); requestSpeech(t, text).finally(function () { setSending(false); }); };
   function requestVideo(thread, prompt) {
     var selected = typedModel('video', thread); if (!selected) return Promise.reject(new Error('No video model is configured.'));
     mediaUserMessage(thread, '▣ Generate video: ' + prompt);
     var log = document.getElementById('aic-log'), typing = document.createElement('div'); typing.className = 'aic-typing'; typing.textContent = 'Generating video with ' + (selected.label || selected.key) + '…'; if (log) { log.appendChild(typing); log.scrollTop = log.scrollHeight; }
-    return backendAuthFetch('/api/ai-chat/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: String((document.getElementById('aic-video-aspect-select') || {}).value || '16:9'), duration: Number((document.getElementById('aic-video-duration-select') || {}).value || 5) }) }).then(function (r) { if (!r.ok) return responseError(r, 'Video generation failed.'); var type = (r.headers.get('content-type') || '').toLowerCase(); return type.indexOf('video/') === 0 || type === 'application/octet-stream' ? r.blob().then(function (blob) { return { blob: blob }; }) : r.json().then(function (payload) { return { payload: payload }; }); }).then(function (result) { var cur = getThread(thread.id); if (!cur) return; var message = { role: 'assistant', content: 'Video generated from: ' + prompt, mediaType: 'video', videoPrompt: prompt, videoModel: selected.key }; if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'video').then(function () { cur.messages.push(message); upsertThread(cur); renderLog(); }); var source = mediaSourceFromJson(result.payload, 'video'); if (!source) throw new Error('The video service returned no video data.'); message.videoData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:video/mp4;base64,' + source; cur.messages.push(message); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Video generation failed.'), retry: { kind: 'video', q: prompt } }); upsertThread(cur); renderLog(); } });
+    var body = { prompt: prompt, model: omniRouteModelId(selected.key), aspect_ratio: String((document.getElementById('aic-video-aspect-select') || {}).value || '16:9'), duration: Number((document.getElementById('aic-video-duration-select') || {}).value || 5) };
+    var request = isDirectOmniRouteKey(selected.key) && directOmniRouteConfig()
+      ? directOmniRouteFetch('video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 300000, body: JSON.stringify(body) })
+      : backendAuthFetch('/api/ai-chat/video', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: body.aspect_ratio, duration: body.duration }) });
+    return request.then(function (r) { if (!r.ok) return responseError(r, 'Video generation failed.'); var type = (r.headers.get('content-type') || '').toLowerCase(); return type.indexOf('video/') === 0 || type === 'application/octet-stream' ? r.blob().then(function (blob) { return { blob: blob }; }) : r.json().then(function (payload) { return { payload: payload }; }); }).then(function (result) { var cur = getThread(thread.id); if (!cur) return; var message = { role: 'assistant', content: 'Video generated from: ' + prompt, mediaType: 'video', videoPrompt: prompt, videoModel: selected.key }; if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'video').then(function () { cur.messages.push(message); upsertThread(cur); renderLog(); }); var source = mediaSourceFromJson(result.payload, 'video'); if (!source) throw new Error('The video service returned no video data.'); message.videoData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:video/mp4;base64,' + source; cur.messages.push(message); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Video generation failed.'), retry: { kind: 'video', q: prompt } }); upsertThread(cur); renderLog(); } });
   }
   window.aicGenerateVideo = function () { if (_sending) return; var field = document.getElementById('aic-video-prompt-input'); var prompt = String((field && field.value) || '').trim(); if (!prompt) { toast('Describe the video to generate.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (field) field.value = ''; setSending(true); requestVideo(t, prompt).finally(function () { setSending(false); }); };
 
@@ -2502,6 +2606,33 @@
           if (currentThreadId() === t.id) renderLog();
         })
         .finally(function () { setSending(false); });
+    }
+
+    var directChatEligible = isDirectOmniRouteKey(body.model) && directOmniRouteConfig()
+      && !codingIntent && !requestedWorkspace && !body.github && !body.contextFiles.length
+      && (!body.web || body.web === 'off');
+    if (directChatEligible) {
+      directOmniRouteFetch('chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: body.timeoutMs,
+        body: JSON.stringify({ model: omniRouteModelId(body.model), messages: directChatMessages(body), stream: false })
+      }).then(function (r) {
+        if (!r.ok) return responseError(r, 'Direct OmniRoute chat failed.');
+        return r.json();
+      }).then(function (payload) {
+        var choices = payload && Array.isArray(payload.choices) ? payload.choices : [];
+        var message = choices[0] && choices[0].message;
+        var answer = message && message.content;
+        if (Array.isArray(answer)) answer = answer.map(function (part) { return typeof part === 'string' ? part : (part && (part.text || part.content) || ''); }).join('');
+        if (!String(answer || '').trim()) throw new Error('Direct OmniRoute returned an empty answer.');
+        acc = String(answer);
+        gotChunk = true;
+        finishSuccess();
+      }).catch(function (err) {
+        // CORS, a tunnel outage, or an unsupported direct route should not lose
+        // the turn: reuse the protected Render request as the retry transport.
+        fallbackToBlocking(err);
+      });
+      return;
     }
 
     getFirebaseIdToken().then(function (token) {
