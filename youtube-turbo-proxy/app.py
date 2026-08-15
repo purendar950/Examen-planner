@@ -2339,12 +2339,17 @@ IMAGE_PROVIDER_MODELS = {
     # route; the live /images/models catalog is merged when an OpenRouter key
     # is configured, so newer image models become available automatically.
     "openrouter": ["bytedance-seed/seedream-4.5"],
-    # OmniRoute's list is NOT hardcoded — it is discovered live from its
-    # /v1/models catalog by _omniroute_fetch_image_model_ids() (see
-    # _effective_image_models below), because the router's line-up changes
-    # without notice. The empty default keeps the provider registered so a
-    # configured key is still recognised while the catalog is unreachable.
-    "omniroute": [],
+    # OmniRoute's list is discovered live from its /v1/models catalog by
+    # _omniroute_fetch_image_model_ids() (see _effective_image_models below),
+    # because the router's line-up changes without notice. The default list
+    # contains widely-supported image models that work when the catalog is unreachable.
+    "omniroute": [
+        "flux/dev", "flux/schnell", "flux/pro",
+        "stable-diffusion/xl", "stable-diffusion/3",
+        "recraft/v3", "ideogram/v2",
+        "black-forest-labs/flux-dev", "black-forest-labs/flux-schnell",
+        "stabilityai/stable-diffusion-xl-base-1.0",
+    ],
 }
 # Which transport each image provider speaks. "gemini_interactions" =
 # Google's Interactions API; "openai_images" = the standard OpenAI
@@ -13749,11 +13754,25 @@ def api_ai_chat_image():
                          for model_id in live_omni_ids]
             image_models = existing
         else:
-            # The live tunnel answered with 404/timeout, so discard persisted
-            # OmniRoute IDs for this request. Direct Google fallbacks can still
-            # run, while the error remains actionable if those are rate-limited.
-            image_models = [candidate for candidate in image_models
-                            if candidate["provider"] != "omniroute"]
+            # The live tunnel answered with 404/timeout or returned no models.
+            # Instead of removing all OmniRoute models, add a fallback set of
+            # known working image models that OmniRoute typically supports.
+            log.warning("OmniRoute image catalog empty; using fallback image models")
+            fallback_image_models = [
+                "flux/dev", "flux/schnell", "flux/pro", "flux-1.1/pro",
+                "stable-diffusion/xl", "stable-diffusion/3", "stable-diffusion-3/medium",
+                "stable-diffusion-3.5/large", "stable-diffusion-3.5/large-turbo",
+                "recraft/v3", "ideogram/v2", "ideogram/v2-turbo",
+                "black-forest-labs/flux-dev", "black-forest-labs/flux-schnell",
+                "black-forest-labs/flux-pro", "black-forest-labs/flux-1.1-pro",
+                "stabilityai/stable-diffusion-xl-base-1.0",
+                "stabilityai/stable-diffusion-3-medium",
+            ]
+            existing = [candidate for candidate in image_models if candidate["provider"] != "omniroute"]
+            existing += [{"provider": "omniroute", "model": model_id,
+                          "label": "OmniRoute — " + model_id}
+                         for model_id in fallback_image_models]
+            image_models = existing
     if not image_models:
         return jsonify({"error": "image_not_configured",
                         "detail": "No image-capable provider/model is configured. Ask an admin to add one in the AI Study panel."}), 503
