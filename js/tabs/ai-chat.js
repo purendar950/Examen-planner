@@ -50,6 +50,9 @@
   // A render reads localStorage again. Keep live pending requests marked in
   // memory so that read/normalize cycles do not turn them into interruptions.
   var _activeImageRequests = Object.create(null);
+  // A pending image request cannot survive a full page refresh. Live requests
+  // are protected by _activeImageRequests; anything else is recoverable via retry.
+  var DIRECT_IMAGE_TOTAL_TIMEOUT_MS = 240 * 1000;
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -95,7 +98,7 @@
       if (m.imagePending && !_activeImageRequests[m.imageRequestKey || '']) {
         m.role = 'error';
         m.imagePending = false;
-        m.content = '⚠️ Image generation was interrupted before completion. Retry to try again.';
+        m.content = '⚠️ The previous image request was interrupted by a page refresh, deployment, or lost connection. Retry to generate it again.';
         m.retry = m.retry || { kind: 'image', prompt: m.imagePrompt || '', userContent: m.imageUserContent || m.imagePrompt || '', isEdit: !!m.imageEdit };
         changed = true;
       }
@@ -1288,7 +1291,7 @@
     });
     return all.slice(0, 12);
   }
-  function requestDirectImageCandidate(candidate, prompt) {
+  function requestDirectImageCandidate(candidate, prompt, timeoutMs) {
     var provider = candidate.provider, model = candidate.model, body;
     var cfg = directProviderConfig(provider);
     if (cfg && cfg.transport === 'google_interactions') {
@@ -1299,9 +1302,29 @@
       body = { model: model, prompt: prompt, n: 1, size: '1024x1024', response_format: 'b64_json' };
     }
     return directProviderFetch(provider, 'images', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 150000,
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: Math.max(5000, Number(timeoutMs || 150000)),
       body: JSON.stringify(body)
     }).then(function (r) { return directImageResponse(r, provider, model); });
+  }
+  function requestDirectImageCandidates(candidates, prompt) {
+    var errors = [], startedAt = Date.now(), deadline = startedAt + DIRECT_IMAGE_TOTAL_TIMEOUT_MS;
+    function attempt(index) {
+      if (index >= candidates.length) {
+        var detail = errors.length ? errors.join(' | ') : 'No direct image candidate succeeded.';
+        throw new Error('Image generation failed after trying ' + candidates.length + ' configured models: ' + detail.slice(0, 900));
+      }
+      var candidate = candidates[index];
+      var remaining = deadline - Date.now();
+      if (remaining < 5000) {
+        throw new Error('Image generation timed out after trying ' + index + ' configured models: ' + errors.join(' | ').slice(0, 900));
+      }
+      return requestDirectImageCandidate(candidate, prompt, Math.min(150000, remaining)).catch(function (error) {
+        var label = (candidate.provider || 'provider') + '/' + (candidate.model || 'image model');
+        errors.push(label + ': ' + String(error && error.message || error || 'request failed').slice(0, 220));
+        return attempt(index + 1);
+      });
+    }
+    return attempt(0);
   }
 
   function requestGeneratedImage(thread, prompt, userContent, sourceImageData, isEdit) {
@@ -1321,6 +1344,7 @@
       imageUserContent: userContent || prompt,
       imageEdit: !!isEdit,
       imageRequestKey: requestKey,
+      imageStartedAt: Date.now(),
       retry: { kind: 'image', prompt: prompt, userContent: userContent || prompt, isEdit: !!isEdit, requestKey: requestKey }
     });
     upsertThread(thread);
@@ -1334,9 +1358,7 @@
     // editing remains on the proxy because its multipart contract is provider-specific.
     var directCandidates = !isEdit ? directImageCandidates(thread, selected) : [];
     if (directCandidates.length) {
-      imageRequest = directCandidates.reduce(function (chain, candidate) {
-        return chain.catch(function (lastError) { return requestDirectImageCandidate(candidate, prompt); });
-      }, Promise.reject(new Error('No direct image candidate succeeded.')));
+      imageRequest = requestDirectImageCandidates(directCandidates, prompt);
     } else {
       imageRequest = backendAuthFetch('/api/ai-chat/image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
