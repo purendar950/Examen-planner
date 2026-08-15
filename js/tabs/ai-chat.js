@@ -671,8 +671,19 @@
      Direct mode is opt-in from AI Study. Firebase-stored keys are bootstrapped
      only into authorized sessions after the admin enables the setting. Render
      remains the protected path for coding/workspace/RAG requests. ── */
+  // Built-in free image providers that work without admin configuration.
+  // These allow the frontend to bypass the backend proxy entirely for known
+  // free services, eliminating the "backend always routes to Gemini" problem.
+  var BUILTIN_DIRECT_PROVIDERS = {
+    pollinations: { enabled: true, apiKey: 'pollinations-free', imageUrl: 'https://image.pollinations.ai/prompt', transport: 'pollinations_get' }
+  };
   function directProviderConfig(provider) {
     var pid = String(provider || '').toLowerCase();
+    // Check built-in free providers first (no admin config needed)
+    if (BUILTIN_DIRECT_PROVIDERS[pid]) {
+      var builtin = BUILTIN_DIRECT_PROVIDERS[pid];
+      return builtin && builtin.enabled ? builtin : null;
+    }
     var all = _statusCache && _statusCache.directProviders;
     var cfg = all && all[pid];
     if (!cfg && pid === 'omniroute') cfg = _statusCache && _statusCache.omnirouteDirect;
@@ -1555,11 +1566,24 @@
     }
     // Always try the user-selected model first
     add(selected);
+    // If the selected model is from OmniRoute, detect known built-in sub-providers
+    // (e.g. pollinations/midijourney) and add them as direct candidates too. This
+    // bypasses the backend proxy which may ignore the model and default to Gemini.
+    if (selected && selected.provider === 'omniroute' && selected.model) {
+      var slashIdx = selected.model.indexOf('/');
+      if (slashIdx > 0) {
+        var subprovider = selected.model.slice(0, slashIdx).toLowerCase();
+        var submodel = selected.model.slice(slashIdx + 1);
+        if (BUILTIN_DIRECT_PROVIDERS[subprovider] && !seen[subprovider + '::' + submodel]) {
+          add({ key: selected.key, provider: subprovider, model: submodel, label: subprovider + ' / ' + submodel });
+        }
+      }
+    }
     var groups = catalogGroups('imageProviderGroups', 'imageModels');
     // Build a priority-ordered interleaved list so different providers are tried
     // before exhausting all models of the same provider. This prevents wasting
     // time on multiple models that all route through the same failing backend.
-    var preferredProviders = ['openrouter', 'google', 'omniroute'];
+    var preferredProviders = ['pollinations', 'openrouter', 'google', 'omniroute'];
     var providerBuckets = {}; // pid -> [{key, provider, model, label}]
     preferredProviders.forEach(function (pid) {
       providerBuckets[pid] = [];
@@ -1572,6 +1596,24 @@
         });
       });
     });
+    // Also scan OmniRoute models for known built-in sub-providers and add them
+    // as direct candidates under the built-in provider
+    if (providerBuckets.omniroute) {
+      providerBuckets.omniroute.forEach(function (m) {
+        var omniModel = String(m.model || '');
+        var sIdx = omniModel.indexOf('/');
+        if (sIdx > 0) {
+          var sp = omniModel.slice(0, sIdx).toLowerCase();
+          var sm = omniModel.slice(sIdx + 1);
+          if (BUILTIN_DIRECT_PROVIDERS[sp]) {
+            var bkey = sp + '::' + sm;
+            if (!seen[bkey]) {
+              add({ key: m.key, provider: sp, model: sm, label: sp + ' / ' + sm });
+            }
+          }
+        }
+      });
+    }
     // Interleave: take one model from each provider in priority order
     var maxRounds = 4;
     for (var round = 0; round < maxRounds; round++) {
@@ -1595,6 +1637,25 @@
   function requestDirectImageCandidate(candidate, prompt, timeoutMs) {
     var provider = candidate.provider, model = candidate.model, body;
     var cfg = directProviderConfig(provider);
+    // Pollinations.ai uses a simple GET API: /prompt/{encoded_prompt}?model={model}
+    // Returns a raw image directly (not JSON), so handle it separately.
+    if (cfg && cfg.transport === 'pollinations_get') {
+      var cleanModel = model.indexOf('/') >= 0 ? model.split('/').pop() : model;
+      var encodedPrompt = encodeURIComponent(prompt);
+      var seed = Math.floor(Math.random() * 999999);
+      var imageUrl = cfg.imageUrl + '/' + encodedPrompt + '?model=' + encodeURIComponent(cleanModel) + '&width=1024&height=1024&nologo=true&seed=' + seed;
+      var controller = window.AbortController ? new AbortController() : null;
+      var timer = controller ? setTimeout(function () { controller.abort(); }, Math.max(5000, Number(timeoutMs || 150000))) : null;
+      return fetch(imageUrl, controller ? { signal: controller.signal } : {}).finally(function () { if (timer) clearTimeout(timer); })
+        .then(function (r) {
+          if (!r.ok) throw new Error('Pollinations image generation failed (HTTP ' + r.status + ')');
+          var contentType = (r.headers.get('content-type') || '').toLowerCase();
+          if (!contentType.startsWith('image/')) throw new Error('Pollinations returned non-image content (got ' + contentType + ')');
+          return r.blob().then(function (blob) {
+            return { blob: blob, provider: provider, model: cleanModel };
+          });
+        });
+    }
     if (cfg && cfg.transport === 'google_interactions') {
       body = { model: model, input: prompt, response_format: { type: 'image' } };
     } else if (provider === 'openrouter') {
