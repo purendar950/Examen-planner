@@ -40,7 +40,7 @@
   'use strict';
 
   var BACKEND = (localStorage.getItem('turboBackendUrl')
-    || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
+    || 'https://youtube-turbo-proxy.onrender.com').replace(/\/+$/, '');
   var HISTORY_MAX = 20;      // messages kept as context sent to the backend
   var _checked = false;      // avoid re-checking /status on every page switch
   var _accessListenerBound = false;
@@ -683,10 +683,13 @@
   // many sub-providers — only use the ones that actually work.
   var OMNIROUTE_IMAGE_BLOCKLIST = ['google', 'openrouter'];
   function isOmniRouteImageBlocked(modelName) {
-    var raw = String(modelName || '');
-    var slashIdx = raw.indexOf('/');
-    var sub = slashIdx > 0 ? raw.slice(0, slashIdx).toLowerCase() : '';
-    return OMNIROUTE_IMAGE_BLOCKLIST.indexOf(sub) >= 0;
+    var segments = String(modelName || '').toLowerCase().split('/').filter(Boolean);
+    // Nested routes such as orcarouter/google/imagen-* still use Google's
+    // incompatible image transport. Check every namespace, not only the first.
+    for (var i = 0; i < Math.max(0, segments.length - 1); i += 1) {
+      if (OMNIROUTE_IMAGE_BLOCKLIST.indexOf(segments[i]) >= 0) return true;
+    }
+    return false;
   }
   function directProviderConfig(provider) {
     var pid = String(provider || '').toLowerCase();
@@ -1357,6 +1360,15 @@
     if (!status) return;
     var omniGroups = groupsForProvider(groups, 'omniroute');
     var omniCount = omniGroups.reduce(function (sum, group) { return sum + (group.models || []).length; }, 0);
+    var health = _statusCache && _statusCache.omnirouteImageCatalog;
+    if (health && health.stale) {
+      status.textContent = omniCount
+        ? 'Generate an image · OmniRoute unavailable; showing ' + omniCount + ' cached models'
+        : 'Generate an image · OmniRoute unavailable';
+      status.title = health.lastError || 'The live OmniRoute image catalog could not be reached.';
+      return;
+    }
+    status.removeAttribute('title');
     status.textContent = omniCount
       ? 'Generate an image · OmniRoute: ' + omniCount + ' models across ' + omniGroups.length + ' providers'
       : 'Generate an image';
@@ -1487,14 +1499,20 @@
     if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
     if (/failed to fetch|networkerror/i.test(String(detail))) detail = 'Image request could not reach either configured backend. ' + detail;
     var text = String(detail);
-    // Check for OmniRoute-specific failures and report clearly
     var hasProviderFailover = /provider failover/i.test(text);
-    var hasOmniRouteError = /omniroute|direct.*image.*failed/i.test(text);
-    if (hasProviderFailover) {
-      detail = 'All image providers failed after automatic failover. '
-        + 'OmniRoute or Pollinations may be temporarily unavailable. Try again in a moment.';
+    var hasOmniRouteError = /omniroute|direct.*image.*failed|image endpoint/i.test(text);
+    if (/ERR_NGROK_3200|ngrok tunnel is offline|image endpoint returned 404/i.test(text)) {
+      detail = 'OmniRoute endpoint is offline (HTTP 404). Ask an admin to update OMNIROUTE_URL in Render to the current OmniRoute API base and restart the backend.';
+    } else if (hasOmniRouteError && /HTTP (401|403)|unauthori[sz]ed|invalid.*key/i.test(text)) {
+      detail = 'OmniRoute rejected its API key (HTTP 401/403). Ask an admin to replace omnirouteApiKeys and retry.';
+    } else if (hasOmniRouteError && /429|rate.?limit|quota/i.test(text)) {
+      detail = 'OmniRoute rate limit or quota was reached. Try again later or use another OmniRoute key.';
+    } else if (hasProviderFailover) {
+      detail = 'All image-provider attempts failed. ' + text;
     } else if (hasOmniRouteError) {
-      detail = 'OmniRoute image generation failed. ' + (text.indexOf('429') >= 0 ? 'Rate limited — try again in a moment.' : 'Check OmniRoute configuration and retry.');
+      // Keep the sanitized upstream reason. It distinguishes an unsupported
+      // model/transport from bad credentials, an offline tunnel, and a timeout.
+      detail = 'OmniRoute image generation failed: ' + text;
     }
     return String(detail).slice(0, 500);
   }
@@ -1521,10 +1539,14 @@
   }
 
   function directImageResponse(response, provider, model) {
-    if (!response.ok) return response.json().catch(function () { return {}; }).then(function (j) {
+    if (!response.ok) return response.text().then(function (text) {
+      var j = {};
+      try { j = text ? JSON.parse(text) : {}; } catch (ignore) {}
       var detail = j && (j.detail || j.message || j.error);
       if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
-      throw new Error(String(detail || 'Direct ' + provider + ' image request failed (HTTP ' + response.status + ')').slice(0, 500));
+      detail = String(detail || text || '').trim();
+      throw new Error(String('Direct ' + provider + ' image request failed (HTTP ' + response.status + ')' +
+        (detail ? ': ' + detail : '')).slice(0, 500));
     });
     return response.json().then(function (payload) {
       var raw = '', mime = 'image/png';
@@ -1533,10 +1555,14 @@
         if (Array.isArray(value)) { value.forEach(visit); return; }
         if (typeof value !== 'object') return;
         var kind = String(value.type || '').toLowerCase();
-        var data = value.b64_json || value.b64 || value.image_base64 || value.data || (value.inline_data && value.inline_data.data);
+        var data = value.b64_json || value.b64 || value.image_base64 ||
+          (value.inline_data && value.inline_data.data) || value.data;
+        // `data` is also the standard OpenAI container array. Never stringify
+        // that array as "[object Object]" and mistake it for base64 bytes.
+        if (typeof data !== 'string') data = '';
         var candidateMime = value.mime_type || value.mimeType || value.content_type || (value.inline_data && value.inline_data.mime_type);
         if (data && (kind.indexOf('image') >= 0 || kind === '' || value.b64_json || value.image_base64 || value.inline_data)) {
-          raw = String(data); if (candidateMime) mime = String(candidateMime); return;
+          raw = data; if (candidateMime) mime = String(candidateMime); return;
         }
         ['output_image', 'output', 'steps', 'content', 'parts', 'data'].forEach(function (key) { if (value[key]) visit(value[key]); });
       }
@@ -1814,27 +1840,19 @@
       // Use the direct path — bypass the backend that ignores model selection.
       imageRequest = requestDirectImageCandidate(directCandidates[0], prompt, 120000);
     } else if (selected.provider === 'omniroute' && directProviderConfig('omniroute')) {
-      // User selected an OmniRoute model and direct OmniRoute is configured.
-      // Use direct OmniRoute FIRST — the backend proxy ignores model selection
-      // and falls back to Gemini/OpenRouter which are no longer used for images.
-      // If the selected model is a blocked sub-provider (google/openrouter),
-      // pick the first non-blocked OmniRoute image model instead.
-      var omniModel = selected.model;
-      if (isOmniRouteImageBlocked(omniModel)) {
-        var imageGroups = catalogGroups('imageProviderGroups', 'imageModels');
-        var omniGroup = imageGroups.find(function (g) { return g.provider === 'omniroute'; });
-        var omniModels = (omniGroup && omniGroup.models) || [];
-        var fallback = omniModels.find(function (m) { return !isOmniRouteImageBlocked(m.model); });
-        if (fallback) {
-          omniModel = fallback.model;
-          selected = { key: fallback.key, provider: 'omniroute', model: fallback.model, label: 'OmniRoute / ' + fallback.label };
-        }
+      // Respect an explicit model exactly once. Nested Google/OpenRouter routes
+      // require a different transport, so reject them instead of silently
+      // substituting the first model from an unrelated catalog group.
+      if (isOmniRouteImageBlocked(selected.model)) {
+        imageRequest = Promise.reject(new Error(
+          'The selected OmniRoute route (' + selected.model + ') is not compatible with the /images/generations endpoint. Refresh the catalog and choose another model.'
+        ));
+      } else {
+        var omniCandidate = { key: selected.key, provider: 'omniroute', model: selected.model, label: selected.label };
+        // Browser-direct mode is an explicit admin choice. Do not replay a
+        // failed non-idempotent generation through the proxy.
+        imageRequest = requestDirectImageCandidate(omniCandidate, prompt, 120000);
       }
-      var omniCandidate = { key: selected.key, provider: 'omniroute', model: omniModel, label: selected.label };
-      imageRequest = requestDirectImageCandidate(omniCandidate, prompt, 120000).catch(function (directErr) {
-        // Direct OmniRoute failed — try proxy as last resort
-        return proxyImageRequest();
-      });
     } else if (directCandidates.length && !thread.imageModel) {
       // No explicit model selected (auto mode) — try proxy first, then direct fallback
       imageRequest = proxyImageRequest().catch(function (proxyErr) {

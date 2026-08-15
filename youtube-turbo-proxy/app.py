@@ -1042,22 +1042,35 @@ BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
 # The browser never calls this URL directly; all traffic is routed through this
 # proxy so credentials, rate limits, transcript caching, and audit metadata stay
 # server-side. ngrok's browser-warning bypass is applied by _ai_headers().
-OMNIROUTE_URL = os.environ.get(
-    "OMNIROUTE_URL",
-    "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions",
-).strip().rstrip("/")
-# OmniRoute also exposes the standard OpenAI Images endpoint alongside chat.
-# Define it next to the source URL because image-provider configuration is
-# initialized earlier during module import.
-OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
+def _omniroute_api_base(value):
+    """Normalize either an OmniRoute API base or one of its endpoint URLs."""
+    raw = str(value or "").strip().rstrip("/")
+    endpoint_suffixes = (
+        "/chat/completions", "/images/generations", "/images/edits",
+        "/models", "/search", "/audio/speech", "/videos/generations",
+    )
+    for suffix in endpoint_suffixes:
+        if raw.endswith(suffix):
+            return raw[:-len(suffix)].rstrip("/")
+    if raw and not raw.endswith("/v1"):
+        raw += "/v1"
+    return raw
+
+
+# OMNIROUTE_URL accepts either the API base (preferred) or the legacy full chat
+# endpoint. Every typed endpoint is joined from the normalized base so setting
+# OMNIROUTE_URL=https://host/v1 no longer sends image requests to /v1 itself.
+OMNIROUTE_API_BASE = _omniroute_api_base(os.environ.get("OMNIROUTE_URL", ""))
+OMNIROUTE_URL = OMNIROUTE_API_BASE + "/chat/completions" if OMNIROUTE_API_BASE else ""
+OMNIROUTE_IMAGES_URL = OMNIROUTE_API_BASE + "/images/generations" if OMNIROUTE_API_BASE else ""
 # OmniRoute's current public API does not expose a GET /v1/images/models route;
 # image-capable entries are advertised in the normal /v1/models catalog and
 # filtered by output metadata/name markers below.
-OMNIROUTE_IMAGE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
-OMNIROUTE_EDITS_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/edits")
-OMNIROUTE_SEARCH_URL = OMNIROUTE_URL.replace("/chat/completions", "/search")
-OMNIROUTE_TTS_URL = OMNIROUTE_URL.replace("/chat/completions", "/audio/speech")
-OMNIROUTE_VIDEO_URL = OMNIROUTE_URL.replace("/chat/completions", "/videos/generations")
+OMNIROUTE_IMAGE_MODELS_URL = OMNIROUTE_API_BASE + "/models" if OMNIROUTE_API_BASE else ""
+OMNIROUTE_EDITS_URL = OMNIROUTE_API_BASE + "/images/edits" if OMNIROUTE_API_BASE else ""
+OMNIROUTE_SEARCH_URL = OMNIROUTE_API_BASE + "/search" if OMNIROUTE_API_BASE else ""
+OMNIROUTE_TTS_URL = OMNIROUTE_API_BASE + "/audio/speech" if OMNIROUTE_API_BASE else ""
+OMNIROUTE_VIDEO_URL = OMNIROUTE_API_BASE + "/videos/generations" if OMNIROUTE_API_BASE else ""
 # OpenRouter exposes video generation as an asynchronous API. It is used only
 # as a server-side fallback when the configured OmniRoute video route is absent
 # or unavailable; keys never reach the browser.
@@ -2199,15 +2212,18 @@ def _clean_omniroute_catalog_ids(values):
 
 
 def _omniroute_image_model_id_is_route_compatible(model_id):
-    """Reject aliases and chat-only Gemini IDs from the images endpoint.
+    """Reject aliases and routes that do not use the OpenAI Images contract.
 
-    OmniRoute exposes some Gemini flash-image models in the broad /v1/models
-    catalog, but its own response says those IDs must use /v1/chat/completions,
-    not /v1/images/generations. The dedicated image catalog contains valid
-    provider/model IDs such as Imagen, Flux, Recraft, and other image routes.
+    The catalog can nest a provider below another router (for example,
+    ``orcarouter/google/imagen-*``). Inspect every namespace segment instead of
+    only the first one; Google and OpenRouter routes require different image
+    transports and must not be sent to OmniRoute's /images/generations adapter.
     """
     lowered = str(model_id or "").strip().lower()
     if not lowered or lowered == "auto" or lowered.startswith("auto/"):
+        return False
+    route_segments = [segment for segment in lowered.split("/")[:-1] if segment]
+    if any(segment in {"google", "openrouter"} for segment in route_segments):
         return False
     if lowered.startswith("gemini/") and "imagen" not in lowered and (
         "image" in lowered or "nano-banana" in lowered
@@ -2371,10 +2387,10 @@ def _effective_image_models(cfg):
     """Per-provider IMAGE model list, separate from the text catalog.
 
     Normal provider overrides replace their defaults. OmniRoute is different:
-    its live /v1/models image catalog is authoritative and is merged with any
-    manually configured fallback IDs. This keeps every currently advertised
-    image route selectable (the router commonly exposes about 62) without
-    losing admin-provided IDs during a temporary tunnel/catalog outage.
+    only a successfully refreshed live /v1/models image catalog is active.
+    Persisted capability-free snapshots are quarantined during startup/outages;
+    explicit admin image-model overrides are merged only after live reachability
+    has been established.
     """
     overrides = (cfg or {}).get("imageModels") or {}
     out = {}
@@ -2383,21 +2399,39 @@ def _effective_image_models(cfg):
         cleaned = ([m.strip() for m in ov if isinstance(m, str) and m.strip()]
                    if isinstance(ov, list) else [])
         if pid == "omniroute":
-            durable = _omniroute_snapshot_ids(cfg, "image")
-            fallback = _merge_unique_model_ids(durable, cleaned)
-            # A durable/configured fallback must make /status fast even when the
-            # free tunnel is down. Serve fallback + last-good cache immediately
-            # and refresh the live (~62 model) catalog in the background.
-            # Without any fallback, do one synchronous discovery so a fresh
-            # install can populate the picker on its first status request.
-            cached = (list(_omniroute_image_models_cache.get("ids") or [])
-                      if "_omniroute_image_models_cache" in globals() else [])
-            if fallback or cached:
-                discovered = cached
-                _omniroute_refresh_image_models_async()
-            else:
+            image_cache = (globals().get("_omniroute_image_models_cache") or {})
+            # A failed live refresh invalidates the capability-free persisted
+            # snapshot. Quarantine those rows instead of presenting a stale
+            # 219-model catalog as currently usable.
+            if not globals().get("OMNIROUTE_IMAGES_URL"):
+                out[pid] = []
+                continue
+            if not image_cache:
+                # Supports isolated helper execution and very early startup;
+                # normal application requests always have the cache object.
                 discovered = _omniroute_fetch_image_model_ids()
-            out[pid] = [model_id for model_id in _merge_unique_model_ids(discovered, fallback)
+                out[pid] = [model_id for model_id in _merge_unique_model_ids(cleaned, discovered)
+                            if _omniroute_image_model_id_is_route_compatible(model_id)]
+                continue
+            if image_cache.get("last_error"):
+                _omniroute_refresh_image_models_async()
+                out[pid] = []
+                continue
+            if image_cache and image_cache.get("last_http_status") != 200:
+                _omniroute_refresh_image_models_async()
+                out[pid] = []
+                continue
+            cached = list(image_cache.get("ids") or [])
+            if not cached:
+                _omniroute_refresh_image_models_async()
+                out[pid] = []
+                continue
+            # Only a verified live cache plus explicit admin overrides may enter
+            # the active picker. The capability-free Firestore snapshot and
+            # speculative hardcoded defaults are recovery metadata, not proof
+            # that a model currently accepts /images/generations.
+            _omniroute_refresh_image_models_async()
+            out[pid] = [model_id for model_id in _merge_unique_model_ids(cleaned, cached)
                         if _omniroute_image_model_id_is_route_compatible(model_id)]
         elif pid == "openrouter":
             # OpenRouter keeps dedicated image models in a separate catalog.
@@ -3274,11 +3308,16 @@ def _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_r
         except requests.RequestException as exc:
             last_err = "Image request failed: %s" % str(exc)[:150]
             continue
-        # 404 is what an offline ngrok tunnel returns, so say something the
-        # admin can act on instead of a bare status code.
+        # ngrok returns ERR_NGROK_3200 when the configured persistent endpoint
+        # is offline. Preserve that actionable reason instead of reducing it to
+        # a generic model failure.
         if r.status_code == 404:
-            last_err = ("The image endpoint returned 404 — if this provider runs "
-                        "behind an ngrok tunnel, that tunnel is offline.")
+            response_text = str(r.text or "")[:240]
+            if "ERR_NGROK_3200" in response_text or "endpoint" in response_text.lower() and "offline" in response_text.lower():
+                last_err = ("OmniRoute endpoint is offline (HTTP 404, ERR_NGROK_3200). "
+                            "Update OMNIROUTE_URL to the active API base and restart the backend.")
+            else:
+                last_err = "OmniRoute image endpoint returned HTTP 404: %s" % (response_text or "route not found")
             continue
         if r.status_code == 429 or r.status_code >= 500:
             last_err = "Image provider returned HTTP %s (try again shortly)." % r.status_code
@@ -9157,7 +9196,7 @@ STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google
 # must reflect the complete live catalog immediately. Availability is resolved
 # when a selected model is called; using asynchronous one-model health probes as
 # a visibility gate previously left the picker permanently stuck on Auto.
-OMNIROUTE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
+OMNIROUTE_MODELS_URL = OMNIROUTE_API_BASE + "/models" if OMNIROUTE_API_BASE else ""
 # Used for AI Chat image generation (see _generate_image_openai_images_api).
 _OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))
 # The live /v1/models catalog can exceed 1.8 MB and takes several seconds to
@@ -9391,7 +9430,10 @@ _OMNIROUTE_NOT_IMAGE_MARKERS = (
     "rerank", "moderation", "safety", "video", "transcri",
 )
 _OMNIROUTE_IMAGE_TYPES = {"image", "images", "text-to-image", "text_to_image", "image-generation"}
-_omniroute_image_models_cache = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
+_omniroute_image_models_cache = {
+    "ids": [], "ts": 0.0, "attempt_ts": 0.0,
+    "last_error": "", "last_http_status": 0,
+}
 _omniroute_image_models_lock = threading.Lock()
 _omniroute_image_refresh_guard = threading.Lock()
 _omniroute_image_refresh_running = False
@@ -9402,7 +9444,8 @@ def _omniroute_refresh_image_models_async():
     global _omniroute_image_refresh_running
     now = time.time()
     cached = _omniroute_image_models_cache["ids"]
-    if cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+    if (cached and not _omniroute_image_models_cache.get("last_error") and
+            now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL):
         return
     if now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
         return
@@ -9469,14 +9512,16 @@ def _omniroute_fetch_image_model_ids(force=False):
     """
     now = time.time()
     cached = _omniroute_image_models_cache["ids"]
-    if not force and cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+    if (not force and cached and not _omniroute_image_models_cache.get("last_error") and
+            now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL):
         return list(cached)
     if not force and now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
         return list(cached)
     with _omniroute_image_models_lock:
         now = time.time()
         cached = _omniroute_image_models_cache["ids"]
-        if not force and cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+        if (not force and cached and not _omniroute_image_models_cache.get("last_error") and
+                now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL):
             return list(cached)
         if not force and now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
             return list(cached)
@@ -9486,6 +9531,17 @@ def _omniroute_fetch_image_model_ids(force=False):
             for catalog_url in (OMNIROUTE_IMAGE_MODELS_URL,):
                 r = requests.get(catalog_url, headers=headers, timeout=_OMNIROUTE_MODELS_TIMEOUT)
                 if r.status_code != 200:
+                    response_text = str(r.text or "")[:240]
+                    _omniroute_image_models_cache["last_http_status"] = r.status_code
+                    if r.status_code == 404 and (
+                        "ERR_NGROK_3200" in response_text or
+                        ("endpoint" in response_text.lower() and "offline" in response_text.lower())
+                    ):
+                        catalog_error = ("OmniRoute endpoint is offline (HTTP 404, ERR_NGROK_3200). "
+                                         "Update OMNIROUTE_URL to the active API base and restart the backend.")
+                    else:
+                        catalog_error = "OmniRoute model catalog returned HTTP %s." % r.status_code
+                    _omniroute_image_models_cache["last_error"] = catalog_error
                     log.warning("OmniRoute image catalog refresh %s: HTTP %s", catalog_url, r.status_code)
                     continue
                 payload = r.json() or {}
@@ -9494,7 +9550,10 @@ def _omniroute_fetch_image_model_ids(force=False):
                 for item in data or []:
                     if isinstance(item, str):
                         model_id = item.strip()
-                        is_image = bool(model_id)
+                        # Bare string rows have no capability metadata. Require
+                        # an image-name signal instead of treating the entire
+                        # broad /models catalog as image-capable.
+                        is_image = _omniroute_id_is_image(model_id)
                     elif isinstance(item, dict):
                         model_id = str(item.get("id") or item.get("model") or "").strip()
                         is_image = _omniroute_item_is_image(item, model_id)
@@ -9507,9 +9566,19 @@ def _omniroute_fetch_image_model_ids(force=False):
                 if ids:
                     _omniroute_image_models_cache["ids"] = ids
                     _omniroute_image_models_cache["ts"] = now
+                    _omniroute_image_models_cache["last_error"] = ""
+                    _omniroute_image_models_cache["last_http_status"] = 200
                     _persist_omniroute_catalog("image", ids)
                     return list(ids)
+                _omniroute_image_models_cache["last_http_status"] = 200
+                _omniroute_image_models_cache["last_error"] = (
+                    "OmniRoute model catalog returned no compatible image models."
+                )
         except Exception as exc:  # noqa: BLE001
+            _omniroute_image_models_cache["last_http_status"] = 0
+            _omniroute_image_models_cache["last_error"] = (
+                "OmniRoute model catalog could not be reached: %s" % str(exc)[:180]
+            )
             log.warning("OmniRoute image catalog refresh failed: %s", exc)
         # A forced refresh is used by the image route as a reachability check.
         # Never return stale IDs in that mode: they can point at a dead tunnel
@@ -13060,12 +13129,28 @@ def api_ai_chat_status():
     provider_groups, image_provider_groups = [], []
     omniroute_direct = None
     direct_providers = {}
+    omniroute_image_catalog = None
     catalog_refreshing = False
     if allowed:
         raw_cfg = _load_study_raw_cfg()
         available = _ai_chat_available_models(raw_cfg)
-        catalog_refreshing = bool(globals().get("_omniroute_refresh_running", False))
         available_images = _ai_chat_image_models(raw_cfg)
+        catalog_refreshing = bool(
+            globals().get("_omniroute_refresh_running", False) or
+            globals().get("_omniroute_image_refresh_running", False)
+        )
+        image_cache = globals().get("_omniroute_image_models_cache", {})
+        image_catalog_error = str(image_cache.get("last_error") or "")
+        image_catalog_status = int(image_cache.get("last_http_status") or 0)
+        if not OMNIROUTE_API_BASE:
+            image_catalog_error = "OMNIROUTE_URL is not configured on this backend."
+        omniroute_image_catalog = {
+            "reachable": (image_catalog_status == 200 and not image_catalog_error)
+                         if image_catalog_status else None,
+            "stale": bool(image_catalog_error),
+            "lastError": image_catalog_error[:240],
+            "lastHttpStatus": image_catalog_status,
+        }
         models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
                    "label": "%s — %s" % (m["label"], m["model"])}
                   for m in available]
@@ -13094,6 +13179,7 @@ def api_ai_chat_status():
                     "speechModels": speech_models,
                     "videoModels": video_models,
                     "catalogRefreshing": catalog_refreshing,
+                    "omnirouteImageCatalog": omniroute_image_catalog,
                     "imageEnabled": bool(allowed and image_models),
                     "searchEnabled": bool(allowed and search_models),
                     "speechEnabled": bool(allowed and speech_models),
@@ -13755,26 +13841,14 @@ def api_ai_chat_image():
                          for model_id in live_omni_ids]
             image_models = existing
         else:
-            # The live tunnel answered with 404/timeout or returned no models.
-            # Instead of removing all OmniRoute models, add a fallback set of
-            # known working image models that OmniRoute typically supports.
-            log.warning("OmniRoute image catalog empty; using fallback image models")
-            fallback_image_models = [
-                "codex/gpt",  # Popular GPT-based image generation
-                "flux/dev", "flux/schnell", "flux/pro", "flux-1.1/pro",
-                "stable-diffusion/xl", "stable-diffusion/3", "stable-diffusion-3/medium",
-                "stable-diffusion-3.5/large", "stable-diffusion-3.5/large-turbo",
-                "recraft/v3", "ideogram/v2", "ideogram/v2-turbo",
-                "black-forest-labs/flux-dev", "black-forest-labs/flux-schnell",
-                "black-forest-labs/flux-pro", "black-forest-labs/flux-1.1-pro",
-                "stabilityai/stable-diffusion-xl-base-1.0",
-                "stabilityai/stable-diffusion-3-medium",
-            ]
-            existing = [candidate for candidate in image_models if candidate["provider"] != "omniroute"]
-            existing += [{"provider": "omniroute", "model": model_id,
-                          "label": "OmniRoute — " + model_id}
-                         for model_id in fallback_image_models]
-            image_models = existing
+            catalog_error = str(_omniroute_image_models_cache.get("last_error") or "")
+            if not OMNIROUTE_API_BASE:
+                catalog_error = "OMNIROUTE_URL is not configured on this backend."
+            return jsonify({
+                "error": "omniroute_unavailable",
+                "detail": (catalog_error or
+                           "The live OmniRoute image catalog is unavailable; cached models were quarantined."),
+            }), 503
     if not image_models:
         return jsonify({"error": "image_not_configured",
                         "detail": "No image-capable provider/model is configured. Ask an admin to add one in the AI Study panel."}), 503
@@ -13782,14 +13856,28 @@ def api_ai_chat_image():
     prompt = str(body.get("prompt") or "").strip()
     if not prompt:
         return jsonify({"error": "missing_prompt"}), 400
-    picked = _ai_chat_resolve_model(image_models, str(body.get("model") or "").strip())
+    requested_model_key = str(body.get("model") or "").strip()
+    picked = _ai_chat_resolve_model(image_models, requested_model_key)
+    if requested_model_key and (
+        not picked or _ai_chat_model_key(picked.get("provider"), picked.get("model")) != requested_model_key
+    ):
+        return jsonify({
+            "error": "image_model_unavailable",
+            "detail": ("The selected OmniRoute image model is stale or incompatible with the "
+                       "/images/generations endpoint. Refresh the catalog and choose another model."),
+        }), 409
     if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_img", user["uid"], 20, 3600):
         return jsonify({"error": "rate_limited", "detail": "Too many images this hour. Try later."}), 429
     source_image = str(body.get("sourceImageData") or "").strip()
     if source_image and not any(candidate["provider"] == "omniroute" for candidate in image_models):
         return jsonify({"error": "image_edit_not_configured",
                         "detail": "Image editing requires a configured OmniRoute image provider/model."}), 503
-    candidates = _ai_chat_image_candidates(image_models, picked)
+    # An explicit dropdown selection is a contract: attempt exactly that model.
+    # Silent fanout across dozens of unrelated routes made one click last for
+    # minutes and obscured the selected model's real upstream error.
+    candidates = [picked] if requested_model_key and picked else _ai_chat_image_candidates(
+        image_models, picked, max_n=3
+    )
     # ONLY use OmniRoute for image generation - filter out Google/OpenRouter
     # to prevent fallback to rate-limited Gemini or expensive OpenRouter credits
     candidates = [candidate for candidate in candidates if candidate["provider"] == "omniroute"]

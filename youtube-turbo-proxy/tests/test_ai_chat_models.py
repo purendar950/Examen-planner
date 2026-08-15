@@ -83,7 +83,7 @@ def load():
     exec(section("IMAGE_MODEL_MARKERS = ", "# Video providers can take minutes"), ns)
     exec(section("def _effective_provider_models_raw(cfg):", "def _model_provider("), ns)
     exec(section("def _ai_chat_available_models(cfg):", "def _ai_chat_model_key("), ns)
-    ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral")
+    ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral", "omniroute")
     return ns
 
 
@@ -94,48 +94,48 @@ image_models = lambda cfg: [m["model"] for m in ns["_ai_chat_image_models"](cfg)
 # ── 1. Fresh install, no admin overrides ─────────────────────────────────────
 chat, imgs = chat_models({}), image_models({})
 check("fresh: image list is non-empty", len(imgs) > 0, imgs)
-check("fresh: a Gemini image model is offered", "gemini-3.1-flash-image" in imgs, imgs)
+check("fresh: a live OmniRoute image model is offered", "pol/flux-schnell" in imgs, imgs)
 check("fresh: chat list contains no image models",
       not any(ns["_is_image_model_name"](m) for m in chat), chat)
 check("fresh: the two lists are disjoint", not (set(chat) & set(imgs)), set(chat) & set(imgs))
 
-# ── 2. THE REPORTED BUG: a chat-catalog refresh has replaced providerModels
-#       with a text-only list. Image generation must still be possible. ───────
+# ── 2. A text chat-catalog refresh must not erase the independent live image
+#       catalog. ───────────────────────────────────────────────────────────────
 refreshed = {"providerModels": {"google": ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.5-flash"]}}
-check("after a chat-catalog refresh: image models SURVIVE",
-      len(image_models(refreshed)) > 0, image_models(refreshed))
+check("after a chat-catalog refresh: OmniRoute image models survive",
+      "pol/flux-schnell" in image_models(refreshed), image_models(refreshed))
 check("after a chat-catalog refresh: chat list stays image-free",
       not any(ns["_is_image_model_name"](m) for m in chat_models(refreshed)), chat_models(refreshed))
 
-# ── 3. An admin hand-added an image id into the regular model list ───────────
+# ── 3. A Google image ID hand-added to the text catalog must not leak into the
+#       OmniRoute-only image picker. ──────────────────────────────────────────
 manual = {"providerModels": {"google": ["gemini-flash-latest", "gemini-9.9-flash-image"]}}
-check("hand-added image model appears in the image list",
-      "gemini-9.9-flash-image" in image_models(manual), image_models(manual))
+check("hand-added non-OmniRoute image model stays out of the image list",
+      "gemini-9.9-flash-image" not in image_models(manual), image_models(manual))
 check("hand-added image model is kept OUT of the chat list",
       "gemini-9.9-flash-image" not in chat_models(manual), chat_models(manual))
 
-# ── 4. The dedicated imageModels override is preferred but does not remove
-#       known provider fallbacks. A provider can exhaust one image model after a
-#       successful request while another model on the same configured key works.
-override = {"imageModels": {"google": ["my-custom-image-model"]}}
-check("imageModels override is honoured",
+# ── 4. Explicit OmniRoute image overrides are preferred, but only after the
+#       live catalog is available. ────────────────────────────────────────────
+override = {"imageModels": {"omniroute": ["my-custom-image-model"]}}
+check("OmniRoute imageModels override is honoured",
       "my-custom-image-model" in image_models(override), image_models(override))
-check("imageModels override keeps built-in fallbacks",
-      "gemini-3.1-flash-image" in image_models(override), image_models(override))
+check("imageModels override keeps live catalog models",
+      "pol/flux-schnell" in image_models(override), image_models(override))
 check("imageModels override keeps custom model first",
       image_models(override)[0] == "my-custom-image-model", image_models(override))
 check("imageModels override does not leak into the chat list",
       "my-custom-image-model" not in chat_models(override), chat_models(override))
 
-# ── 5. An empty override falls back to the defaults rather than disabling ────
-empty_override = {"imageModels": {"google": []}}
-check("empty imageModels override falls back to defaults",
-      "gemini-3.1-flash-image" in image_models(empty_override), image_models(empty_override))
+# ── 5. An empty override retains the live catalog. ───────────────────────────
+empty_override = {"imageModels": {"omniroute": []}}
+check("empty imageModels override keeps live discovery",
+      "pol/flux-schnell" in image_models(empty_override), image_models(empty_override))
 
 # ── 6. A provider with no API key contributes nothing ────────────────────────
 ns["_provider_configured"] = lambda cfg, pid: False
 check("no API key configured: image list is empty", image_models({}) == [], image_models({}))
-ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral")
+ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral", "omniroute")
 
 # ── 7. Model-name classification ─────────────────────────────────────────────
 for name in ("gemini-3.1-flash-image", "gemini-2.5-flash-image", "imagen-4",
@@ -163,8 +163,8 @@ check("central: text catalog keeps the real chat model",
       "gemini-flash-latest" in text_catalog, text_catalog)
 check("central: RAW catalog still exposes them for the image picker",
       "gemini-3.1-flash-image" in raw_catalog, raw_catalog)
-check("central: hand-added image model still reaches the image picker",
-      "gemini-3.1-flash-image" in image_models(polluted), image_models(polluted))
+check("central: non-OmniRoute image does not reach the image picker",
+      "gemini-3.1-flash-image" not in image_models(polluted), image_models(polluted))
 check("central: AI Chat list inherits the central filter",
       not any(ns["_is_image_model_name"](m) for m in chat_models(polluted)),
       chat_models(polluted))
@@ -314,27 +314,91 @@ check("typed image snapshot excludes video and embedding ids",
       image_snapshot)
 ns4["OMNIROUTE_IMAGES_URL"] = "https://example.invalid/v1/images/generations"
 exec(section("IMAGE_MODEL_MARKERS = ", "# Video providers can take minutes"), ns4)
-ns4["_omniroute_image_models_cache"] = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
-ns4["_omniroute_refresh_image_models_async"] = lambda: None
+image_refresh_calls = []
+ns4["_omniroute_image_models_cache"] = {
+    "ids": [], "ts": 0.0, "attempt_ts": 0.0,
+    "last_error": "", "last_http_status": 0,
+}
+ns4["_omniroute_refresh_image_models_async"] = lambda: image_refresh_calls.append(True)
 ns4["_omniroute_fetch_image_model_ids"] = lambda: []
-effective_images = ns4["_effective_image_models"]({
+unverified_images = ns4["_effective_image_models"]({
     "omnirouteCatalog": {"imageModels": ["zw/brand-new-renderer"]},
     "imageModels": {"omniroute": ["cx/seedream-4.5"]},
 })["omniroute"]
-check("image picker receives durable and legacy OmniRoute image fallbacks",
-      effective_images == ["zw/brand-new-renderer", "cx/seedream-4.5"],
-      effective_images)
+check("unverified durable image catalogs are quarantined",
+      unverified_images == [] and image_refresh_calls == [True],
+      (unverified_images, image_refresh_calls))
+
+# A successful live refresh activates only the verified cache plus explicit
+# operator overrides; the old capability-free snapshot is not merged back.
+ns4["_omniroute_image_models_cache"] = {
+    "ids": ["zw/ram-only-image"], "ts": time.time(), "attempt_ts": time.time(),
+    "last_error": "", "last_http_status": 200,
+}
+ns4["_omniroute_refresh_image_models_async"] = lambda: None
+verified_images = ns4["_effective_image_models"]({
+    "omnirouteCatalog": {"imageModels": ["zw/contaminated-old-row"]},
+    "imageModels": {"omniroute": ["cx/seedream-4.5"]},
+})["omniroute"]
+check("verified live image catalog activates without stale snapshot rows",
+      verified_images == ["cx/seedream-4.5", "zw/ram-only-image"], verified_images)
+
+# A later outage quarantines even a RAM last-good list, while scheduling a
+# recovery probe after the failure backoff expires.
 image_refresh_calls = []
 ns4["_omniroute_image_models_cache"] = {
-    "ids": ["zw/ram-only-image"], "ts": 0.0, "attempt_ts": 0.0,
+    "ids": ["zw/ram-only-image"], "ts": time.time(), "attempt_ts": 0.0,
+    "last_error": "OmniRoute endpoint is offline", "last_http_status": 404,
 }
 ns4["_omniroute_refresh_image_models_async"] = lambda: image_refresh_calls.append(True)
-ns4["_omniroute_fetch_image_model_ids"] = lambda: (_ for _ in ()).throw(
-    AssertionError("stale RAM fallback must not refresh synchronously"))
-ram_only_images = ns4["_effective_image_models"]({})["omniroute"]
-check("stale RAM-only image catalog is served without blocking on the tunnel",
-      ram_only_images == ["zw/ram-only-image"] and image_refresh_calls == [True],
-      (ram_only_images, image_refresh_calls))
+failed_images = ns4["_effective_image_models"]({})["omniroute"]
+check("failed live catalog quarantines cached models and schedules recovery",
+      failed_images == [] and image_refresh_calls == [True],
+      (failed_images, image_refresh_calls))
+
+# The real fetch helper must not let a recent last-good timestamp suppress a
+# post-backoff network recovery when last_error is still set.
+class _ImageCatalogResponse:
+    status_code = 200
+    text = ""
+
+    @staticmethod
+    def json():
+        return {"data": [{"id": "cx/recovered-image", "output_modalities": ["image"]}]}
+
+
+class _ImageCatalogRequests:
+    def __init__(self):
+        self.calls = []
+
+    def get(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return _ImageCatalogResponse()
+
+
+recovery_requests = _ImageCatalogRequests()
+ns_recovery = {
+    "time": time, "requests": recovery_requests,
+    "log": type("_L", (), {"warning": lambda *a, **k: None})(),
+    "OMNIROUTE_IMAGE_MODELS_URL": "https://example.invalid/v1/models",
+    "_OMNIROUTE_MODELS_TTL": 600, "_OMNIROUTE_FAILURE_TTL": 30,
+    "_OMNIROUTE_MODELS_TIMEOUT": 60,
+    "_omniroute_image_models_cache": {
+        "ids": ["cx/last-good-image"], "ts": time.time(), "attempt_ts": 0.0,
+        "last_error": "offline", "last_http_status": 404,
+    },
+    "_omniroute_image_models_lock": threading.Lock(),
+    "_persist_omniroute_catalog": lambda kind, ids: None,
+    "_omniroute_item_is_image": lambda item, model_id: True,
+    "_omniroute_id_is_image": lambda model_id: True,
+    "_omniroute_image_model_id_is_route_compatible": lambda model_id: True,
+}
+exec(section("def _omniroute_fetch_image_model_ids(", "def _omniroute_auto_models("), ns_recovery)
+recovered_ids = ns_recovery["_omniroute_fetch_image_model_ids"]()
+check("post-backoff image catalog recovery probes the network and clears quarantine",
+      recovered_ids == ["cx/recovered-image"] and len(recovery_requests.calls) == 1 and
+      not ns_recovery["_omniroute_image_models_cache"]["last_error"],
+      (recovered_ids, recovery_requests.calls, ns_recovery["_omniroute_image_models_cache"]))
 
 # ── 11. Successful live refresh persists; later HTTP 404 keeps last-good ────
 class _FakeDoc:

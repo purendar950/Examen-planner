@@ -14,6 +14,10 @@ services:
       # Required to verify browser Firebase ID tokens and authorize relay calls.
       - key: FIREBASE_SERVICE_ACCOUNT
         sync: false
+      # Same current OmniRoute API base used by the Flask proxy. Required only
+      # when Telegram /ask may select or fail over to OmniRoute.
+      - key: OMNIROUTE_URL
+        sync: false
       # Comma-separated browser origins permitted to call relay endpoints.
       # The service's built-in defaults are always allowed; this only ADDS to
       # them, so the live GitHub Pages origin can never be dropped by a stale
@@ -50,6 +54,12 @@ services:
       # SAME service-account JSON the Telegram bot uses — lets the proxy read
       # config/ai + config/aiLimits from Firestore.
       - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      # REQUIRED for OmniRoute chat/image/search/speech/video. Set this to the
+      # current persistent API base (for example https://host.example/v1).
+      # Do not leave an expired ngrok URL here: its stale Firestore catalog can
+      # still populate selectors while every generation request returns 404.
+      - key: OMNIROUTE_URL
         sync: false
       - key: ALLOWED_ORIGINS
         value: "https://examzen.in,https://www.examzen.in,https://purendar950.github.io,https://appassets.androidengine"

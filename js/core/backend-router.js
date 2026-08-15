@@ -6,8 +6,11 @@
   'use strict';
 
   var DEFAULT_SERVERS = [
-    { id: 'render-primary', label: 'Render primary', url: 'https://youtube-turbo-proxy-gej4.onrender.com', enabled: true },
-    { id: 'render-secondary', label: 'Render backup', url: 'https://youtube-turbo-proxy.onrender.com', enabled: true }
+    { id: 'render-primary', label: 'Render primary', url: 'https://youtube-turbo-proxy.onrender.com', enabled: true },
+    // The former gej4 deployment currently returns Render's suspended-service
+    // page. Keep it visible for administrators, but never route user requests
+    // there unless it is explicitly re-enabled after recovery.
+    { id: 'render-legacy-gej4', label: 'Render legacy (suspended)', url: 'https://youtube-turbo-proxy-gej4.onrender.com', enabled: false }
   ];
   var STORAGE_KEY = 'preppath_backend_registry_v1';
   var state = {
@@ -144,6 +147,7 @@
   }
   async function request(path, options) {
     options = Object.assign({}, options || {});
+    var isImageGeneration = String(path || '').split('?', 1)[0] === '/api/ai-chat/image';
     var servers = orderedServers();
     if (!servers.length) throw new Error('No backend servers are configured.');
     var lastError = null;
@@ -156,7 +160,21 @@
       try {
         var response = await window.fetch(server.url + (String(path || '').charAt(0) === '/' ? path : '/' + path), requestOptions);
         timed.clear();
-        if (response.ok || (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)) {
+        var imageApplicationFailure = false;
+        if (isImageGeneration && (response.status === 502 || response.status === 503) &&
+            (response.headers.get('content-type') || '').toLowerCase().indexOf('application/json') >= 0) {
+          try {
+            var imageErrorPayload = await response.clone().json();
+            imageApplicationFailure = !!(imageErrorPayload && [
+              'image_failed', 'image_not_configured', 'omniroute_unavailable', 'image_edit_not_configured'
+            ].indexOf(String(imageErrorPayload.error || '')) >= 0);
+          } catch (ignore) {}
+        }
+        // Return recognized application errors without replaying a non-idempotent
+        // generation. HTML/plain infrastructure 502/503 responses still fail
+        // over, including Render's suspended-service page.
+        if (response.ok || imageApplicationFailure ||
+            (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)) {
           mark(server, true, 'HTTP ' + response.status);
           return response;
         }
