@@ -28,12 +28,14 @@
    and a #nav-ai-chat tab so app.html needs no markup changes. The nav tab
    stays hidden until the access check above passes.
 
-   Threads (including messages) are stored ONLY in localStorage, per signed-in
-   uid — never written to Firestore. They persist across reloads and are only
-   removed if the user explicitly deletes a thread (no auto-expiry). Uploaded
-   files are the one exception: their extracted text/embeddings live in the
-   backend's vector store (scoped to uid+thread) so retrieval works, and are
-   deleted server-side when the user removes the file or the thread. ══════ */
+   Threads (including messages) are stored locally per signed-in uid. A small
+   localStorage mirror preserves compatibility, while the full thread—including
+   generated image data—is also persisted through the app's IndexedDB-backed
+   storage service. Threads are never written to Firestore and are only removed
+   if the user explicitly deletes a thread (no auto-expiry). Uploaded files are
+   the one exception: their extracted text/embeddings live in the backend's
+   vector store (scoped to uid+thread) so retrieval works, and are deleted
+   server-side when the user removes the file or the thread. ══════ */
 (function () {
   'use strict';
 
@@ -52,6 +54,17 @@
   // A render reads localStorage again. Keep live pending requests marked in
   // memory so that read/normalize cycles do not turn them into interruptions.
   var _activeImageRequests = Object.create(null);
+  // Thread state is kept in memory during the session and durably mirrored to
+  // IndexedDB. Large base64 image data can exceed localStorage's quota; a failed
+  // localStorage write must never leave the next request reading stale pending data.
+  var _threadMemory = null;
+  var _threadRevision = 0;
+  var _threadStorageReadyUid = '';
+  var _threadHydrationUid = '';
+  var _threadHydrationPromise = null;
+  var _threadPersistTimer = null;
+  var _threadPersistChain = Promise.resolve();
+  var _aiStorageService = null;
   // A pending image request cannot survive a full page refresh. Live requests
   // are protected by _activeImageRequests; anything else is recoverable via retry.
   var DIRECT_IMAGE_TOTAL_TIMEOUT_MS = 240 * 1000;
@@ -74,9 +87,108 @@
   function uid() { return (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || 'guest'; }
   function newId() { return 't_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
 
-  /* ── threads: localStorage only, per signed-in uid ──────────────────── */
+  /* ── threads: local mirror + IndexedDB, per signed-in uid ───────────── */
   function threadsKey() { return 'preppath_ai_chat_threads_' + uid(); }
   function curKey() { return 'preppath_ai_chat_current_' + uid(); }
+  function storageUidFor(userId) { return 'ai-chat:' + (userId || uid()); }
+  function readLegacyThreads() {
+    try {
+      var raw = localStorage.getItem(threadsKey()) || '[]';
+      var list = JSON.parse(raw);
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      console.warn('[ai-chat] legacy thread read failed', e);
+      return [];
+    }
+  }
+  function getAiStorageService() {
+    if (_aiStorageService) return _aiStorageService;
+    var modules = window.PrepPathModules;
+    if (!modules || typeof modules.createStorageService !== 'function') return null;
+    try {
+      _aiStorageService = modules.createStorageService({ auth: (typeof auth !== 'undefined' ? auth : null) });
+    } catch (e) {
+      console.warn('[ai-chat] IndexedDB storage service unavailable', e);
+      return null;
+    }
+    return _aiStorageService;
+  }
+  function persistThreadsDurably() {
+    if (_threadPersistTimer) clearTimeout(_threadPersistTimer);
+    _threadPersistTimer = setTimeout(function () {
+      _threadPersistTimer = null;
+      var service = getAiStorageService();
+      var storageUid = storageUidFor();
+      if (!service || storageUid === 'ai-chat:guest' || !Array.isArray(_threadMemory)) return;
+      var snapshot;
+      try { snapshot = JSON.parse(JSON.stringify({ threads: _threadMemory })); }
+      catch (e) { console.warn('[ai-chat] thread snapshot failed', e); return; }
+      _threadPersistChain = _threadPersistChain
+        .catch(function () {})
+        .then(function () { return service.writeCache(storageUid, snapshot); })
+        .catch(function (error) { console.warn('[ai-chat] durable thread write failed', error); });
+    }, 0);
+  }
+  function normalizeStoredThreads() {
+    if (!Array.isArray(_threadMemory)) return;
+    var changed = false;
+    _threadMemory = _threadMemory.map(function (thread) {
+      var result = normalizeThread(thread);
+      changed = changed || !!(result && result.changed);
+      return result ? result.thread : thread;
+    });
+    if (changed) {
+      _threadRevision += 1;
+      try { localStorage.setItem(threadsKey(), JSON.stringify(_threadMemory)); } catch (e) {}
+      persistThreadsDurably();
+    }
+  }
+  function resetThreadCacheForUser(userId) {
+    var target = userId ? 'ai-chat:' + userId : 'ai-chat:guest';
+    var activeTarget = _threadStorageReadyUid || _threadHydrationUid;
+    if (activeTarget === target) return;
+    _threadMemory = null;
+    _threadRevision = 0;
+    _threadStorageReadyUid = '';
+    _threadHydrationUid = '';
+    _threadHydrationPromise = null;
+    _threadPersistTimer = null;
+    _threadPersistChain = Promise.resolve();
+    _curThreadId = '';
+  }
+  function hydrateThreadStorage() {
+    var storageUid = storageUidFor();
+    if (storageUid === 'ai-chat:guest') return Promise.resolve(false);
+    if (_threadStorageReadyUid === storageUid) return Promise.resolve(true);
+    if (_threadHydrationUid === storageUid && _threadHydrationPromise) return _threadHydrationPromise;
+    _threadHydrationUid = storageUid;
+    if (!Array.isArray(_threadMemory)) _threadMemory = readLegacyThreads();
+    var baseline = _threadMemory;
+    var revisionAtStart = _threadRevision;
+    var service = getAiStorageService();
+    if (!service) return Promise.resolve(false);
+    _threadHydrationPromise = service.readCache(storageUid, { threads: baseline })
+      .then(function (state) {
+        if (storageUid !== storageUidFor()) return false;
+        var durable = state && Array.isArray(state.threads) ? state.threads : baseline;
+        // Do not overwrite a request that changed the in-memory thread while
+        // IndexedDB was loading. Its newer revision will be persisted below.
+        if (_threadRevision === revisionAtStart) _threadMemory = durable;
+        _threadStorageReadyUid = storageUid;
+        normalizeStoredThreads();
+        persistThreadsDurably();
+        if (document.getElementById('page-ai-chat')) renderAll();
+        return true;
+      })
+      .catch(function (error) {
+        console.warn('[ai-chat] durable thread read failed; using memory/local mirror', error);
+        _threadStorageReadyUid = storageUid;
+        normalizeStoredThreads();
+        return false;
+      })
+      .finally(function () { _threadHydrationPromise = null; });
+    return _threadHydrationPromise;
+  }
   function sidebarKey() { return 'preppath_ai_chat_sidebar_collapsed_' + uid(); }
   function sidebarIsCollapsed() {
     try { return localStorage.getItem(sidebarKey()) === '1'; } catch (e) { return false; }
@@ -121,21 +233,16 @@
     return { thread: thread, changed: changed };
   }
   function loadThreads() {
-    try {
-      var list = JSON.parse(localStorage.getItem(threadsKey()) || '[]');
-      if (!Array.isArray(list)) return [];
-      var changed = false;
-      var normalized = list.map(function (thread) {
-        var result = normalizeThread(thread);
-        changed = changed || !!(result && result.changed);
-        return result ? result.thread : thread;
-      });
-      if (changed) localStorage.setItem(threadsKey(), JSON.stringify(normalized));
-      return normalized;
-    } catch (e) { return []; }
+    if (Array.isArray(_threadMemory)) return _threadMemory;
+    _threadMemory = readLegacyThreads();
+    return _threadMemory;
   }
   function saveThreads(list) {
-    try { localStorage.setItem(threadsKey(), JSON.stringify(list)); } catch (e) {}
+    _threadMemory = Array.isArray(list) ? list : [];
+    _threadRevision += 1;
+    try { localStorage.setItem(threadsKey(), JSON.stringify(_threadMemory)); }
+    catch (e) { console.warn('[ai-chat] localStorage mirror full; using IndexedDB for thread state', e); }
+    persistThreadsDurably();
   }
   function getThread(id) {
     return loadThreads().find(function (t) { return t.id === id; }) || null;
@@ -668,8 +775,10 @@
     if (typeof auth === 'undefined' || !auth || typeof auth.onAuthStateChanged !== 'function') return;
     _accessListenerBound = true;
     auth.onAuthStateChanged(function (user) {
+      resetThreadCacheForUser(user && user.uid);
       if (user) {
         _checked = true;
+        hydrateThreadStorage();
         setTimeout(checkAccess, 0);
       } else {
         _checked = false;
@@ -680,15 +789,22 @@
   }
 
   bindAuthAccessListener();
-  window.addEventListener('preppath:firebase-ready', bindAuthAccessListener);
+  window.addEventListener('preppath:firebase-ready', function () {
+    bindAuthAccessListener();
+    if (typeof currentUser !== 'undefined' && currentUser) hydrateThreadStorage();
+  });
+  window.addEventListener('preppath:modules-ready', function () {
+    if (typeof currentUser !== 'undefined' && currentUser) hydrateThreadStorage();
+  });
   window.addEventListener('load', function () {
     injectPage();
     bindAuthAccessListener();
+    if (typeof currentUser !== 'undefined' && currentUser) hydrateThreadStorage();
     setTimeout(function () { _checked = true; checkAccess(); }, 800);
   });
   if (typeof onPageActivated === 'function') {
     onPageActivated('dashboard', function () { if (_checked) checkAccess(); });
-    onPageActivated('ai-chat', function () { checkAccess(); renderAll(); });
+    onPageActivated('ai-chat', function () { hydrateThreadStorage().finally(function () { checkAccess(); renderAll(); }); });
   }
 
   /* ── thread sidebar ── */
