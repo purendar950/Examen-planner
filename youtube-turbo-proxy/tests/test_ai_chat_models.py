@@ -418,6 +418,22 @@ check("later HTTP 404 never erases the durable snapshot",
 # Chat and image persistence target independent nested fields, preventing the
 # two asynchronous refreshes from replacing one another.
 ns5["_persist_omniroute_catalog"]("image", ["zw/seedream-4.5"])
+check("status exposes image catalog refresh state",
+      '"imageCatalogRefreshing": image_catalog_refreshing' in SRC,
+      "missing imageCatalogRefreshing status field")
+check("status keeps polling active while image catalog refreshes",
+      'bool(catalog_refreshing or image_catalog_refreshing)' in SRC,
+      "image refresh state not included in catalogRefreshing")
+
+# The browser must re-fetch after the image catalog finishes its asynchronous
+# refresh; otherwise the initial fallback remains selected even though the
+# backend has discovered live image routes.
+AI_CHAT_JS = io.open(os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "..", "..", "js", "tabs", "ai-chat.js")),
+    encoding="utf-8").read()
+check("frontend polls during image catalog refresh",
+      "j.catalogRefreshing || j.imageCatalogRefreshing" in AI_CHAT_JS,
+      "image refresh flag is not consumed by the AI tab")
 check("image persistence uses its own atomic field paths",
       "omnirouteCatalog.imageModels" in fake_doc.writes[-1][1] and
       "omnirouteCatalog.chatModels" not in fake_doc.writes[-1][1],

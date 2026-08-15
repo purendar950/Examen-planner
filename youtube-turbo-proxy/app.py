@@ -13053,11 +13053,18 @@ def api_ai_chat_status():
     omniroute_direct = None
     direct_providers = {}
     catalog_refreshing = False
+    image_catalog_refreshing = False
     if allowed:
         raw_cfg = _load_study_raw_cfg()
         available = _ai_chat_available_models(raw_cfg)
         catalog_refreshing = bool(globals().get("_omniroute_refresh_running", False))
         available_images = _ai_chat_image_models(raw_cfg)
+        # _ai_chat_image_models() may start the background live image-catalog
+        # refresh when only durable/fallback IDs are available. Read this flag
+        # after that call; reading it before would always report false on the
+        # first status response and the browser would never re-fetch the image
+        # selector after the live catalog arrived.
+        image_catalog_refreshing = bool(globals().get("_omniroute_image_refresh_running", False))
         models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
                    "label": "%s — %s" % (m["label"], m["model"])}
                   for m in available]
@@ -13085,7 +13092,8 @@ def api_ai_chat_status():
                     "searchModels": search_models,
                     "speechModels": speech_models,
                     "videoModels": video_models,
-                    "catalogRefreshing": catalog_refreshing,
+                    "catalogRefreshing": bool(catalog_refreshing or image_catalog_refreshing),
+                    "imageCatalogRefreshing": image_catalog_refreshing,
                     "imageEnabled": bool(allowed and image_models),
                     "searchEnabled": bool(allowed and search_models),
                     "speechEnabled": bool(allowed and speech_models),
