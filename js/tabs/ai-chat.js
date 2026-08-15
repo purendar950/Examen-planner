@@ -768,7 +768,7 @@
 
   /* ── access check + status (models/imageEnabled/ragEnabled) ── */
   function scheduleCatalogRefresh(j) {
-    if (!j || !j.catalogRefreshing || _catalogRefreshTimer) return;
+    if (!j || !(j.catalogRefreshing || j.imageCatalogRefreshing) || _catalogRefreshTimer) return;
     // The backend serves the durable/last-good catalog immediately and refreshes
     // the live OmniRoute list in a background thread. Re-fetch once that thread
     // has had time to finish so the picker does not remain stuck on the fallback.
