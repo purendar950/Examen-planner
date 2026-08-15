@@ -1948,7 +1948,12 @@ def _ai_chat_image_shared_failure(provider, detail):
     if provider == "google":
         return bool(re.search(r"http\s*429|rate[\s_-]*limit|quota|resource exhausted|try again shortly", text))
     if provider == "openrouter":
-        return bool(re.search(r"http\s*402|insufficient credits|never purchased credits|purchase more|account[^.]{0,80}credit|payment required", text))
+        return bool(re.search(
+            r"http\s*402|http\s*429|rate[\s_-]*limit|quota|resource exhausted|"
+            r"insufficient credits|never purchased credits|purchase more|"
+            r"account[^.]{0,100}(?:credit|rate)|payment required|try again shortly",
+            text,
+        ))
     if provider == "omniroute":
         return bool(re.search(r"http\s*404|returned\s+404|endpoint[^.]{0,80}unavailable|ngrok[^.]{0,80}(offline|down)", text))
     return False
@@ -13793,8 +13798,15 @@ def api_ai_chat_image():
     skip_note = (" Skipped %d additional model%s after provider-wide rate-limit, "
                  "credit, or endpoint failures." %
                  (skipped, "" if skipped == 1 else "s")) if skipped else ""
-    detail = "Image generation failed after trying %d configured provider/model candidate%s.%s %s" % (
-        attempted, "" if attempted == 1 else "s", skip_note, " | ".join(failures)[:900])
+    account_limited = blocked_providers.intersection({"google", "openrouter"})
+    remediation_note = (
+        " Check the configured image-provider quota/credits, wait for a rate limit "
+        "to clear, or configure another image-capable provider."
+        if account_limited else ""
+    )
+    detail = "Image generation failed after trying %d configured provider/model candidate%s.%s%s %s" % (
+        attempted, "" if attempted == 1 else "s", skip_note, remediation_note,
+        " | ".join(failures)[:900])
     return jsonify({"error": "image_failed", "detail": detail}), 502
 
 
