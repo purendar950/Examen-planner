@@ -415,6 +415,20 @@
     .aic-files-bar,.aic-github-context{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:none;margin:0;padding:0 clamp(1rem,4vw,3.5rem) .45rem;color:var(--muted);font-size:.7rem;}
     .aic-file-pill{display:flex;align-items:center;gap:5px;padding:4px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.68rem;}
     .aic-file-pill.is-ready{color:var(--text);}.aic-file-pill.is-failed{border-color:rgba(200,75,67,.35);color:#c54b43;}.aic-file-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.8em;}
+    /* Attached-video bar: sits with the files bar so every piece of thread
+       context the model will see is visible in one place above the composer. */
+    .aic-yt-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:none;margin:0;padding:0 clamp(1rem,4vw,3.5rem) .45rem;color:var(--muted);font-size:.7rem;}
+    .aic-yt-pill{display:flex;align-items:center;gap:6px;max-width:100%;padding:4px 9px;border:1px solid color-mix(in srgb,#c4302b 38%,var(--border));border-radius:999px;background:color-mix(in srgb,#c4302b 8%,var(--surface));color:var(--text);font-size:.68rem;}
+    .aic-yt-pill .aic-yt-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(46vw,420px);}
+    .aic-yt-pill .aic-yt-meta{color:var(--muted);}
+    .aic-yt-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.85em;}
+    .aic-yt-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+    .aic-yt-chip{padding:3px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.66rem;cursor:pointer;transition:border-color .16s ease-out,color .16s ease-out,background .16s ease-out;}
+    .aic-yt-chip:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--text);}
+    .aic-yt-current{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:7px;padding:7px 9px;border:1px dashed color-mix(in srgb,var(--border) 85%,transparent);border-radius:9px;font-size:.7rem;color:var(--muted);}
+    .aic-yt-current strong{color:var(--text);font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(40vw,360px);}
+    .aic-yt-current button{padding:3px 9px;border:1px solid var(--accent);border-radius:7px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--text);font-size:.68rem;cursor:pointer;}
+    .aic-yt-current button:hover{background:color-mix(in srgb,var(--accent) 20%,transparent);}
     .aic-github-context strong{color:var(--text);}
     .aic-code-workspace{display:none;width:min(100%,1120px);margin:0 auto .7rem;border:1px solid color-mix(in srgb,var(--border) 82%,transparent);border-radius:14px;background:var(--surface);box-shadow:0 7px 24px rgba(28,24,20,.07);overflow:hidden;}
     .aic-workspace-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--card) 88%,transparent);}
@@ -553,11 +567,13 @@
       <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseImageBox()">× Close</button></div>
       <div class="aic-image-row"><select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider"></select><select class="aic-select" id="aic-image-omniroute-provider-select" onchange="aicImageOmniRouteProviderChanged()" title="OmniRoute image provider" style="display:none;"></select><select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model"></select><label class="aic-image-source" title="Upload an image to edit">＋ Reference<input type="file" id="aic-image-source-input" accept="image/png,image/jpeg,image/webp" onchange="aicImageSourceSelected(event)"></label><span id="aic-image-source-name" class="aic-image-source-name"></span><input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe an image to create or edit…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicGenerateImage();}"><button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button></div>
     </div>
+    <div class="aic-media-box" id="aic-youtube-box" style="display:none;"><div class="aic-media-label"><span>Attach a YouTube video</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseYoutubeBox()">× Close</button></div><div id="aic-yt-current" class="aic-yt-current" style="display:none;"></div><div class="aic-media-row"><input type="text" id="aic-yt-url-input" class="aic-media-prompt" placeholder="Paste a YouTube link or video ID…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicAttachYoutubeFromInput();}"><select class="aic-select" id="aic-yt-lang-select" title="Caption language"><option value="auto" selected>Auto-detect captions</option><option value="en">English</option><option value="hi">Hindi</option></select><button class="aic-send" type="button" onclick="aicAttachYoutubeFromInput()">Attach</button></div><p class="aic-media-hint">The video's captions become context for this whole chat — then ask for notes, a quiz, flashcards, or anything else.</p></div>
     <div class="aic-media-box" id="aic-search-box" style="display:none;"><div class="aic-media-label"><span id="aic-search-catalog-status">Search the web</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseSearchBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-search-model-select" onchange="aicSearchModelChanged()" title="Search model"></select><input type="text" id="aic-search-query-input" class="aic-media-prompt" placeholder="Search the web…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicSearchWeb();}"><select class="aic-select" id="aic-search-limit-select" title="Number of results"><option value="4">4 results</option><option value="6" selected>6 results</option><option value="10">10 results</option></select><button class="aic-send" type="button" onclick="aicSearchWeb()">Search</button></div><p class="aic-media-hint">Search results stay in this local conversation with source links and snippets.</p></div>
     <div class="aic-media-box" id="aic-speech-box" style="display:none;"><div class="aic-media-label"><span id="aic-speech-catalog-status">Read text aloud</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseSpeechBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-speech-model-select" onchange="aicSpeechModelChanged()" title="Speech model"></select><select class="aic-select" id="aic-speech-voice-select" title="Voice"><option value="alloy">Alloy</option><option value="ash">Ash</option><option value="coral">Coral</option><option value="echo">Echo</option><option value="fable">Fable</option><option value="onyx">Onyx</option><option value="nova">Nova</option><option value="sage">Sage</option><option value="shimmer">Shimmer</option></select><textarea id="aic-speech-text-input" class="aic-media-prompt" placeholder="Paste text to speak, or leave blank to use the latest AI response…"></textarea><button class="aic-send" type="button" onclick="aicGenerateSpeech()">Speak</button></div><p class="aic-media-hint">Audio is generated inline and can be played or downloaded from the conversation.</p></div>
     <div class="aic-media-box" id="aic-video-box" style="display:none;"><div class="aic-media-label"><span id="aic-video-catalog-status">Generate a video</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseVideoBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-video-model-select" onchange="aicVideoModelChanged()" title="Video model"></select><select class="aic-select" id="aic-video-aspect-select" title="Aspect ratio"><option value="16:9" selected>16:9 landscape</option><option value="9:16">9:16 portrait</option><option value="1:1">1:1 square</option></select><select class="aic-select" id="aic-video-duration-select" title="Duration"><option value="5" selected>5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select><textarea id="aic-video-prompt-input" class="aic-media-prompt" placeholder="Describe the video to generate…"></textarea><button class="aic-send" type="button" onclick="aicGenerateVideo()">Generate</button></div><p class="aic-media-hint">Video generation may take a few minutes. Keep this chat open while the provider responds.</p></div>
     <div class="aic-github-context" id="aic-github-context" style="display:none;"></div>
     <div class="aic-files-bar" id="aic-files-bar" style="display:none;"></div>
+    <div class="aic-yt-bar" id="aic-yt-bar" style="display:none;"></div>
     <section class="aic-project-plan" id="aic-project-plan" aria-live="polite">
       <div class="aic-project-head"><span class="aic-project-title" id="aic-project-title">Project workflow</span><span style="display:flex;align-items:center;gap:6px;"><select id="aic-project-mode" class="aic-select" onchange="aicProjectWorkflowModeChanged(this)" title="Architect plans without editing; Editor applies changes"><option value="architect">Architect</option><option value="editor" selected>Editor</option></select><span class="aic-project-status" id="aic-project-status">Planning</span></span></div>
       <p class="aic-project-goal" id="aic-project-goal"></p>
@@ -578,7 +594,7 @@
     <div class="aic-log" id="aic-log"></div>
     <form class="aic-form" onsubmit="aicSend(event)">
       <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
-      <div class="aic-composer"><div class="aic-composer-toolbox" id="aic-composer-toolbox" aria-live="polite"></div><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
+      <div class="aic-composer"><div class="aic-composer-toolbox" id="aic-composer-toolbox" aria-live="polite"></div><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" id="aic-composer-youtube-btn" onclick="aicToggleYoutubeBox()" title="Attach a YouTube video's transcript">▶ YouTube</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
 
     </form>
   </main>
@@ -601,7 +617,7 @@
   function mountComposerToolbox(page) {
     var toolbox = page && page.querySelector('#aic-composer-toolbox');
     if (!toolbox) return;
-    ['persona', 'github', 'image', 'search', 'speech', 'video'].forEach(function (kind) {
+    ['persona', 'github', 'youtube', 'image', 'search', 'speech', 'video'].forEach(function (kind) {
       var box = page.querySelector('#aic-' + kind + '-box');
       if (box) toolbox.appendChild(box);
     });
@@ -611,7 +627,7 @@
   function renderComposerToolbox() {
     var toolbox = document.getElementById('aic-composer-toolbox');
     if (!toolbox) return;
-    var kinds = ['persona', 'github', 'image', 'search', 'speech', 'video'];
+    var kinds = ['persona', 'github', 'youtube', 'image', 'search', 'speech', 'video'];
     kinds.forEach(function (kind) {
       var box = document.getElementById('aic-' + kind + '-box');
       if (box) box.style.display = _activeComposerTool === kind ? '' : 'none';
@@ -625,6 +641,7 @@
       speech: 'Text to speak, or leave blank to use the latest AI response…',
       video: 'Describe the video to generate…',
       github: 'Ask about the selected GitHub files…',
+      youtube: 'Attach a video above, then ask anything about it…',
       persona: 'Message AI Chat…'
     };
     if (input) input.placeholder = placeholders[_activeComposerTool] || 'Message AI Chat…';
@@ -1300,6 +1317,221 @@
       window.aicSend({ preventDefault: function () {} });
     }
   };
+
+  /* ── YouTube transcript attachment ───────────────────────────────────────
+     The video the student is watching in the app's YouTube tab (or any link
+     they paste) becomes context for the whole thread, so follow-ups like "now
+     make a quiz from it" work without re-attaching.
+
+     Only METADATA is kept on the thread. The transcript itself is deliberately
+     NOT stored or resent: /api/transcript is fetched once to prove the captions
+     exist and to show the student what they attached, and every message then
+     sends just {id, lang}. The backend re-reads the transcript from its own
+     three-tier cache. A 40-minute lecture is ~35 KB and a long one far more —
+     mirroring that into the localStorage thread copy would risk the quota (see
+     saveThreads) and resending it per message would waste the request budget. ── */
+  var YT_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+  /* youtube.js declares ytCurrentVideoId with `let`, so it is NOT a window
+     property and must be read as a bare global — same approach as
+     ai-tutor.js's curVid() and yt-screenshots.js. */
+  function ytTabVideoId() {
+    var v = '';
+    try { if (typeof ytCurrentVideoId !== 'undefined' && ytCurrentVideoId) v = String(ytCurrentVideoId); } catch (e) {}
+    // Playlist/organiser mode can leave a 'playlist_' id behind; the app's own
+    // context helper knows which video is actually playing.
+    if (!v || v.indexOf('playlist_') === 0) {
+      try {
+        if (typeof ssGetCurrentContext === 'function') {
+          var c = ssGetCurrentContext();
+          if (c && c.videoId) v = String(c.videoId);
+        }
+      } catch (e) {}
+    }
+    v = v.replace('playlist_', '');
+    return YT_ID_RE.test(v) ? v : '';
+  }
+  function ytTabVideoTitle() {
+    try { if (typeof ytCurrentVideoTitle !== 'undefined' && ytCurrentVideoTitle) return String(ytCurrentVideoTitle); } catch (e) {}
+    try {
+      if (typeof ssGetCurrentContext === 'function') {
+        var c = ssGetCurrentContext();
+        if (c && c.videoName) return String(c.videoName);
+      }
+    } catch (e) {}
+    return 'Current video';
+  }
+
+  function parseVideoId(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return '';
+    if (YT_ID_RE.test(s)) return s;
+    // Mirrors the backend's _parse_video_id: the trailing boundary keeps a
+    // longer query token like ?si=... from being sliced into a false id.
+    var m = s.match(/(?:v=|\/live\/|\/shorts\/|\/embed\/|\/v\/|youtu\.be\/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])/);
+    return m ? m[1] : '';
+  }
+
+  function fmtClock(seconds) {
+    var total = Math.max(0, Math.floor(Number(seconds) || 0));
+    var h = Math.floor(total / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return h ? (h + ':' + pad(m) + ':' + pad(s)) : (m + ':' + pad(s));
+  }
+
+  /* Quick actions. Each only prefills the composer — the student stays free to
+     edit or ignore them, which is the point: the attachment is general context,
+     not a fixed menu of study buttons like the video tutor's. */
+  var YT_ACTIONS = [
+    { label: 'Notes', prompt: 'Make structured revision notes from this video. Use headings and bullet points, keep every formula and definition, and cite the [m:ss] timestamp for each section.' },
+    { label: 'Quiz', prompt: 'Create 10 multiple-choice questions from this video. Four options each, mark the correct answer, and add a one-line explanation with the [m:ss] timestamp it came from.' },
+    { label: 'Flashcards', prompt: 'Turn this video into flashcards. One question and answer per line, formatted as Q: ... / A: ..., covering every key fact, definition and formula.' },
+    { label: 'Summary', prompt: 'Summarise this video in about 200 words, then list the 5 most important takeaways.' },
+    { label: 'Outline', prompt: 'Give me a timestamped outline of this video: every topic covered, in order, each with its [m:ss] start time.' },
+    { label: 'Formulas', prompt: 'List every formula, equation, constant and numerical value stated in this video, with the [m:ss] timestamp and a one-line explanation of each term.' },
+    { label: 'Explain simply', prompt: 'Explain this video from scratch as if I am a complete beginner. Define the jargon in plain language and use simple analogies.' }
+  ];
+
+  function ytAttachment(thread) {
+    return (thread && thread.youtube && thread.youtube.id) ? thread.youtube : null;
+  }
+
+  function renderYoutubeBar() {
+    var bar = document.getElementById('aic-yt-bar');
+    if (!bar) return;
+    var att = ytAttachment(getThread(currentThreadId()));
+    if (!att) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+    var meta = [];
+    if (att.duration) meta.push(fmtClock(att.duration));
+    if (att.lang) meta.push(att.lang + (att.kind === 'auto' ? ' auto' : ''));
+    bar.style.display = 'flex';
+    bar.innerHTML = '<span class="aic-yt-pill" title="' + escAttr(att.title || att.id) + '">\u25B6' +
+      '<span class="aic-yt-name">' + esc(att.title || att.id) + '</span>' +
+      (meta.length ? '<span class="aic-yt-meta">\u00B7 ' + esc(meta.join(' \u00B7 ')) + '</span>' : '') +
+      '<button onclick="aicRemoveYoutube()" title="Remove this video from the chat">\u2715</button></span>' +
+      '<span class="aic-yt-actions">' + YT_ACTIONS.map(function (a, i) {
+        return '<button type="button" class="aic-yt-chip" onclick="aicYoutubeAction(' + i + ')">' + esc(a.label) + '</button>';
+      }).join('') + '</span>';
+  }
+
+  function renderYoutubeCurrent() {
+    var box = document.getElementById('aic-yt-current');
+    if (!box) return;
+    var vid = ytTabVideoId();
+    if (!vid) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.style.display = 'flex';
+    box.innerHTML = '<span>Playing in your YouTube tab:</span><strong title="' + escAttr(ytTabVideoTitle()) + '">' +
+      esc(ytTabVideoTitle()) + '</strong>' +
+      '<button type="button" onclick="aicAttachCurrentYoutube()">Attach this video</button>';
+  }
+
+  window.aicToggleYoutubeBox = function () {
+    var showing = _activeComposerTool === 'youtube';
+    setComposerTool(showing ? '' : 'youtube');
+    if (showing) return;
+    renderYoutubeCurrent();
+    var input = document.getElementById('aic-yt-url-input');
+    // Prefill with the tab's video so one Enter is enough, while still leaving
+    // the field editable for a different link.
+    var vid = ytTabVideoId();
+    if (input) {
+      if (vid && !input.value) input.value = 'https://youtu.be/' + vid;
+      input.focus();
+      input.select();
+    }
+  };
+  window.aicCloseYoutubeBox = function () { if (_activeComposerTool === 'youtube') setComposerTool(''); };
+
+  window.aicAttachCurrentYoutube = function () {
+    var vid = ytTabVideoId();
+    if (!vid) { toast('No video is playing in the YouTube tab yet.'); return; }
+    attachYoutube(vid, ytTabVideoTitle());
+  };
+
+  window.aicAttachYoutubeFromInput = function () {
+    var input = document.getElementById('aic-yt-url-input');
+    var vid = parseVideoId(input && input.value);
+    if (!vid) { toast('Paste a YouTube link or an 11-character video ID.'); return; }
+    attachYoutube(vid, '');
+  };
+
+  window.aicRemoveYoutube = function () {
+    var t = getThread(currentThreadId());
+    if (!t) return;
+    t.youtube = null;
+    upsertThread(t);
+    renderYoutubeBar();
+    toast('Video removed from this chat.');
+  };
+
+  window.aicYoutubeAction = function (i) {
+    var action = YT_ACTIONS[i];
+    if (!action) return;
+    var input = document.getElementById('aic-input');
+    if (!input) return;
+    input.value = action.prompt;
+    input.focus();
+    // Let the student read and edit the prompt before it goes; a chip that sent
+    // silently would make the seven actions feel like seven fixed buttons.
+    try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+  };
+
+  var _ytAttachInFlight = false;
+
+  function attachYoutube(videoId, fallbackTitle) {
+    if (_ytAttachInFlight) return;
+    var lang = (document.getElementById('aic-yt-lang-select') || {}).value || 'auto';
+    var threadId = currentThreadId();
+    _ytAttachInFlight = true;
+    toast('Reading captions\u2026');
+    // Fetched once, purely to prove the captions exist and to show the student
+    // what they attached. The body is discarded; the backend re-reads it.
+    backendAuthFetch('/api/transcript?id=' + encodeURIComponent(videoId) + '&lang=' + encodeURIComponent(lang))
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, data: j || {} }; }); })
+      .then(function (res) {
+        var d = res.data;
+        if (!res.ok) {
+          // The backend distinguishes a bot-gated video from a generic failure;
+          // only the former is fixable, and only by an admin.
+          if (d.error === 'youtube_bot_check') {
+            toast('YouTube is bot-gating this video. An admin needs to refresh the YouTube cookies.', 'error');
+          } else {
+            toast('Could not read captions: ' + (d.detail || d.error || 'unknown error'), 'error');
+          }
+          return;
+        }
+        // A caption-less video is a 200 with warning:'no_captions', NOT an error.
+        if (d.warning === 'no_captions' || !d.segment_count) {
+          toast('This video has no subtitles, so there is nothing to read.', 'error');
+          return;
+        }
+        var segments = d.segments || [];
+        var last = segments.length ? segments[segments.length - 1] : null;
+        var t = getThread(threadId);
+        if (!t) return;
+        t.youtube = {
+          id: d.id || videoId,
+          title: d.title || fallbackTitle || videoId,
+          lang: d.chosen_lang || d.detected_language || lang,
+          kind: d.kind || '',
+          // Requested language, not the resolved one: re-requesting 'auto' lets
+          // the backend re-resolve rather than pinning a track that may vanish.
+          requestedLang: lang,
+          duration: last ? Math.round((Number(last.start) || 0) + (Number(last.dur) || 0)) : 0,
+          charCount: d.char_count || 0,
+          segmentCount: d.segment_count || segments.length,
+          attachedAt: Date.now()
+        };
+        upsertThread(t);
+        renderYoutubeBar();
+        setComposerTool('');
+        toast('Attached \u201c' + (t.youtube.title || videoId) + '\u201d \u2014 ask for notes, a quiz, anything.');
+      })
+      .catch(function () { toast('Could not read captions \u2014 network error.', 'error'); })
+      .finally(function () { _ytAttachInFlight = false; });
+  }
 
   /* ── file upload / RAG ── */
   window.aicFileSelected = function (ev) {
@@ -3326,6 +3558,7 @@
     renderProjectPlan();
     renderLog();
     renderFilesBar();
+    renderYoutubeBar();
     renderGithubPanel();
     renderGithubContext();
     renderComposerToolbox();
@@ -3509,6 +3742,11 @@
       contextFiles: requestedWorkspace && requestedWorkspace.contextFiles ? requestedWorkspace.contextFiles : [],
       workflowMode: (projectState(t) && projectState(t).workflowMode) || 'editor',
       project: projectPayload(t),
+      // Only the identifier travels: the backend re-reads the transcript from
+      // its own cache and sizes it against the chosen model's context window.
+      youtube: ytAttachment(t)
+        ? { id: t.youtube.id, lang: t.youtube.requestedLang || 'auto' }
+        : null,
       localMemory: localMemoryContext(t),
       timeoutMs: codingIntent ? 90000 : 30000,
       imageContext: (function () {
@@ -3598,8 +3836,13 @@
     }
 
     var directProvider = providerFromModelKey(body.model);
+    // An attached YouTube video is disqualifying for the same reason github/
+    // contextFiles are: the transcript is injected into the system prompt by
+    // Render, so a direct provider call would answer about the video without
+    // ever having seen it — silently, which is the worst possible failure here.
     var directChatEligible = !!directProviderConfig(directProvider)
       && !codingIntent && !requestedWorkspace && !body.github && !body.contextFiles.length
+      && !body.youtube
       && (!body.web || body.web === 'off');
     if (directChatEligible) {
       directProviderFetch(directProvider, 'chat', {
