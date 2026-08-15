@@ -1569,6 +1569,8 @@
     // If the selected model is from OmniRoute, detect known built-in sub-providers
     // (e.g. pollinations/midijourney) and add them as direct candidates too. This
     // bypasses the backend proxy which may ignore the model and default to Gemini.
+    // ONLY do this for the user's selected model — do NOT scan all OmniRoute models
+    // for other providers' models, which would cause silent fallback to wrong models.
     if (selected && selected.provider === 'omniroute' && selected.model) {
       var slashIdx = selected.model.indexOf('/');
       if (slashIdx > 0) {
@@ -1579,59 +1581,59 @@
         }
       }
     }
-    var groups = catalogGroups('imageProviderGroups', 'imageModels');
-    // Build a priority-ordered interleaved list so different providers are tried
-    // before exhausting all models of the same provider. This prevents wasting
-    // time on multiple models that all route through the same failing backend.
-    var preferredProviders = ['pollinations', 'openrouter', 'google', 'omniroute'];
-    var providerBuckets = {}; // pid -> [{key, provider, model, label}]
-    preferredProviders.forEach(function (pid) {
-      providerBuckets[pid] = [];
-      groups.forEach(function (group) {
-        if (group.provider !== pid) return;
-        (group.models || []).forEach(function (m) {
-          var key = pid + '::' + m.model;
-          if (seen[key]) return; // already added as selected
-          providerBuckets[pid].push({ key: m.key, provider: pid, model: m.model, label: group.label + ' / ' + m.label });
+    // Only add other provider models as fallback when user has NOT explicitly
+    // selected a model (auto mode). When user picks a specific model, respect it.
+    var userPickedModel = thread && thread.imageModel;
+    if (!userPickedModel) {
+      var groups = catalogGroups('imageProviderGroups', 'imageModels');
+      var preferredProviders = ['pollinations', 'openrouter', 'google', 'omniroute'];
+      var providerBuckets = {};
+      preferredProviders.forEach(function (pid) {
+        providerBuckets[pid] = [];
+        groups.forEach(function (group) {
+          if (group.provider !== pid) return;
+          (group.models || []).forEach(function (m) {
+            var key = pid + '::' + m.model;
+            if (seen[key]) return;
+            providerBuckets[pid].push({ key: m.key, provider: pid, model: m.model, label: group.label + ' / ' + m.label });
+          });
         });
       });
-    });
-    // Also scan OmniRoute models for known built-in sub-providers and add them
-    // as direct candidates under the built-in provider
-    if (providerBuckets.omniroute) {
-      providerBuckets.omniroute.forEach(function (m) {
-        var omniModel = String(m.model || '');
-        var sIdx = omniModel.indexOf('/');
-        if (sIdx > 0) {
-          var sp = omniModel.slice(0, sIdx).toLowerCase();
-          var sm = omniModel.slice(sIdx + 1);
-          if (BUILTIN_DIRECT_PROVIDERS[sp]) {
-            var bkey = sp + '::' + sm;
-            if (!seen[bkey]) {
-              add({ key: m.key, provider: sp, model: sm, label: sp + ' / ' + sm });
+      // Scan OmniRoute models for known built-in sub-providers (Pollinations etc.)
+      if (providerBuckets.omniroute) {
+        providerBuckets.omniroute.forEach(function (m) {
+          var omniModel = String(m.model || '');
+          var sIdx = omniModel.indexOf('/');
+          if (sIdx > 0) {
+            var sp = omniModel.slice(0, sIdx).toLowerCase();
+            var sm = omniModel.slice(sIdx + 1);
+            if (BUILTIN_DIRECT_PROVIDERS[sp]) {
+              var bkey = sp + '::' + sm;
+              if (!seen[bkey]) {
+                add({ key: m.key, provider: sp, model: sm, label: sp + ' / ' + sm });
+              }
             }
           }
-        }
-      });
-    }
-    // Interleave: take one model from each provider in priority order
-    var maxRounds = 4;
-    for (var round = 0; round < maxRounds; round++) {
-      var added = false;
-      preferredProviders.forEach(function (pid) {
-        if (round < providerBuckets[pid].length) {
-          add(providerBuckets[pid][round]);
-          added = true;
-        }
-      });
-      if (!added) break;
-    }
-    // Append any remaining models from each provider
-    preferredProviders.forEach(function (pid) {
-      for (var i = maxRounds; i < providerBuckets[pid].length; i++) {
-        add(providerBuckets[pid][i]);
+        });
       }
-    });
+      // Interleave providers for better failover
+      var maxRounds = 4;
+      for (var round = 0; round < maxRounds; round++) {
+        var added = false;
+        preferredProviders.forEach(function (pid) {
+          if (round < providerBuckets[pid].length) {
+            add(providerBuckets[pid][round]);
+            added = true;
+          }
+        });
+        if (!added) break;
+      }
+      preferredProviders.forEach(function (pid) {
+        for (var i = maxRounds; i < providerBuckets[pid].length; i++) {
+          add(providerBuckets[pid][i]);
+        }
+      });
+    }
     return all.slice(0, DIRECT_IMAGE_CANDIDATE_MAX);
   }
   function requestDirectImageCandidate(candidate, prompt, timeoutMs) {
@@ -1759,21 +1761,21 @@
     renderLog();
 
     var imageRequest;
-    // Two-phase strategy for maximum reliability:
+    // Strategy: ALWAYS respect the user's model selection.
     //
-    // Phase 1 — Proxy path (respects the selected model key):
-    //   The backend /api/ai-chat/image endpoint receives the full model key
-    //   (e.g. "omniroute::gpt-5.6-sol") and should route accordingly. This
-    //   path ALWAYS works regardless of which direct providers are configured.
+    // When the user explicitly selects a model (e.g. gpt-image-1, midijourney),
+    // ONLY try that specific model. Do NOT silently fall back to other providers
+    // or models — this was the #1 complaint: "I selected X but got Y".
     //
-    // Phase 2 — Direct candidates (bypasses the proxy, talks to providers
-    //   directly): If Phase 1 fails, try direct-enabled providers as fallback.
-    //   This catches cases where the proxy is down but Google/OpenRouter
-    //   direct endpoints are alive.
+    // For Pollinations models (pollinations/midijourney etc.), route directly
+    // to Pollinations.ai since the backend proxy ignores the model parameter.
     //
-    // Image editing always goes through the proxy because its multipart
-    // contract is provider-specific.
+    // For all other models, try the proxy path which sends the model key to
+    // the backend. If it fails, show the error for THAT model — don't switch.
     var directCandidates = !isEdit ? directImageCandidates(thread, selected) : [];
+    // Check if we have a direct candidate matching the user's selection
+    // (e.g. user selected pollinations/midijourney → direct candidate available)
+    var selectedHasDirect = directCandidates.length > 0 && directCandidates[0].provider !== selected.provider;
 
     function proxyImageRequest() {
       return backendAuthFetch('/api/ai-chat/image', {
@@ -1789,7 +1791,6 @@
             var detail = j && (j.detail || j.message || j.error);
             if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
             var errMsg = String(detail || (!r.ok ? 'Image generation failed (HTTP ' + r.status + ')' : 'The image service returned no image data')).slice(0, 500);
-            // Preserve the original error so the user can see what the proxy returned
             var enhancedErr = new Error(errMsg);
             enhancedErr._fromProxy = true;
             enhancedErr._proxyDetail = errMsg;
@@ -1802,20 +1803,19 @@
       });
     }
 
-    if (directCandidates.length) {
-      // Try proxy first (respects selected model), then direct candidates as fallback
+    if (selectedHasDirect) {
+      // User selected a model that has a built-in direct path (e.g. Pollinations).
+      // Use the direct path — bypass the backend that ignores model selection.
+      imageRequest = requestDirectImageCandidate(directCandidates[0], prompt, 150000);
+    } else if (directCandidates.length && !thread.imageModel) {
+      // No explicit model selected (auto mode) — try proxy first, then direct fallback
       imageRequest = proxyImageRequest().catch(function (proxyErr) {
-        // If the proxy returned a clear image (not a routing error), don't retry
-        if (proxyErr && proxyErr._fromProxy) {
-          // Re-throw the proxy error — direct candidates won't help if the
-          // proxy itself returned a proper error response about the model
-          throw proxyErr;
-        }
-        // Proxy network error / timeout — try direct candidates
+        if (proxyErr && proxyErr._fromProxy) throw proxyErr;
         return requestDirectImageCandidates(directCandidates, prompt);
       });
     } else {
-      // No direct candidates configured — proxy only
+      // User explicitly selected a specific model — proxy only, no fallback.
+      // If the proxy fails, show the error for THAT model.
       imageRequest = proxyImageRequest();
     }
     return imageRequest.then(function (result) {
