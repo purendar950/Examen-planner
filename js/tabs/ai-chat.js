@@ -1476,24 +1476,14 @@
     if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
     if (/failed to fetch|networkerror/i.test(String(detail))) detail = 'Image request could not reach either configured backend. ' + detail;
     var text = String(detail);
-    // Check for individual provider failures and report each clearly
-    var hasCredits = /insufficient credits|never purchased credits|purchase more at https:\/\/openrouter\.ai\/settings\/credits/i.test(text);
-    var hasGeminiLimit = /gemini[^|]*(?:http\s*429|rate[\s_-]*limit|try again shortly)/i.test(text);
+    // Check for OmniRoute-specific failures and report clearly
     var hasProviderFailover = /provider failover/i.test(text);
-    // When failover was attempted, show a clear summary of what was tried vs what failed
+    var hasOmniRouteError = /omniroute|direct.*image.*failed/i.test(text);
     if (hasProviderFailover) {
-      var failedParts = [];
-      if (hasGeminiLimit) failedParts.push('Gemini (rate-limited / 429)');
-      if (hasCredits) failedParts.push('OpenRouter (no credits / 402)');
-      if (!failedParts.length) failedParts.push('all configured image providers');
-      detail = 'All image providers failed after automatic failover. Tried: ' + failedParts.join(', ') + '. '
-        + (hasGeminiLimit && hasCredits
-          ? 'Gemini is rate-limited and OpenRouter has no credits. Add OpenRouter credits or configure another funded image provider, then retry.'
-          : 'Check that at least one image provider has available credits and is not rate-limited, then retry.');
-    } else if (hasCredits && hasGeminiLimit) {
-      detail = 'Gemini is temporarily rate-limited, and the configured OpenRouter account has no image credits. Add OpenRouter credits or configure another funded image provider, then retry.';
-    } else if (hasCredits) {
-      detail = 'The configured OpenRouter account has no image credits. Add credits or configure another funded image provider, then retry.';
+      detail = 'All image providers failed after automatic failover. '
+        + 'OmniRoute or Pollinations may be temporarily unavailable. Try again in a moment.';
+    } else if (hasOmniRouteError) {
+      detail = 'OmniRoute image generation failed. ' + (text.indexOf('429') >= 0 ? 'Rate limited — try again in a moment.' : 'Check OmniRoute configuration and retry.');
     }
     return String(detail).slice(0, 500);
   }
@@ -1586,7 +1576,10 @@
     var userPickedModel = thread && thread.imageModel;
     if (!userPickedModel) {
       var groups = catalogGroups('imageProviderGroups', 'imageModels');
-      var preferredProviders = ['pollinations', 'openrouter', 'google', 'omniroute'];
+      // Image generation only uses OmniRoute (62 models) and Pollinations (free).
+      // Gemini and OpenRouter are removed — they caused silent fallback away
+      // from the user's selected OmniRoute model.
+      var preferredProviders = ['omniroute', 'pollinations'];
       var providerBuckets = {};
       preferredProviders.forEach(function (pid) {
         providerBuckets[pid] = [];
@@ -1674,8 +1667,8 @@
     var errors = [], blockedProviders = {}, blockedModels = {}, startedAt = Date.now(), deadline = startedAt + DIRECT_IMAGE_TOTAL_TIMEOUT_MS;
     function sharedProviderFailure(provider, detail) {
       var text = String(detail || '').toLowerCase();
-      if (provider === 'google') return /http\s*429|rate[\s_-]*limit|quota|resource exhausted|try again shortly/.test(text);
-      if (provider === 'openrouter') return /http\s*402|insufficient credits|never purchased credits|purchase more|payment required/.test(text);
+      // Google and OpenRouter are no longer used for image generation.
+      // Only OmniRoute and Pollinations matter for image failover detection.
       if (provider === 'omniroute') {
         // Provider-level: OmniRoute endpoint itself is down/unreachable
         if (/http\s*404|returned\s+404|endpoint[^.]{0,80}unavailable|ngrok[^.]{0,80}(offline|down)/.test(text)) return true;
@@ -1809,14 +1802,12 @@
       imageRequest = requestDirectImageCandidate(directCandidates[0], prompt, 120000);
     } else if (selected.provider === 'omniroute' && directProviderConfig('omniroute')) {
       // User selected an OmniRoute model and direct OmniRoute is configured.
-      // Try proxy first (fast, 60s timeout), then fall back to direct OmniRoute
-      // which routes the model key directly to the OmniRoute gateway.
+      // Use direct OmniRoute FIRST — the backend proxy ignores model selection
+      // and falls back to Gemini/OpenRouter which are no longer used for images.
       var omniCandidate = { key: selected.key, provider: 'omniroute', model: selected.model, label: selected.label };
-      imageRequest = proxyImageRequest().catch(function (proxyErr) {
-        // If proxy returned a real API error (not timeout/fetch failure), show it
-        if (proxyErr && proxyErr._fromProxy) throw proxyErr;
-        // Proxy unreachable / timed out — try direct OmniRoute as fallback
-        return requestDirectImageCandidate(omniCandidate, prompt, 120000);
+      imageRequest = requestDirectImageCandidate(omniCandidate, prompt, 120000).catch(function (directErr) {
+        // Direct OmniRoute failed — try proxy as last resort
+        return proxyImageRequest();
       });
     } else if (directCandidates.length && !thread.imageModel) {
       // No explicit model selected (auto mode) — try proxy first, then direct fallback
