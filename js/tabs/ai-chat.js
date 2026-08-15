@@ -1719,6 +1719,24 @@
     if (value.indexOf('omniroute/') === 0 || value.indexOf('openrouter/') === 0) value = value.slice(value.indexOf('/') + 1);
     return value === 'pollinations/default' || value.indexOf('pollinations/') === 0;
   }
+  function videoDurationOptions(modelKey) {
+    var value = String(modelKey || '').toLowerCase();
+    if (value.indexOf('openrouter/') === 0) value = value.slice('openrouter/'.length);
+    if (value === 'google/veo-3.1' || value === 'google/veo-3.1-fast') return [4, 6, 8];
+    if (value.indexOf('wan-2.6') >= 0 || value.indexOf('wan2.6') >= 0) return [5, 10];
+    return [5, 10, 15, 30];
+  }
+  function renderVideoDurationOptions() {
+    var select = document.getElementById('aic-video-duration-select');
+    if (!select) return;
+    var thread = getThread(currentThreadId());
+    var selected = typedModel('video', thread);
+    var options = videoDurationOptions(selected && selected.key);
+    var current = Number(select.value || '');
+    if (!options.some(function (value) { return value === current; })) current = options.indexOf(6) >= 0 ? 6 : options[0];
+    select.innerHTML = options.map(function (value) { return '<option value="' + value + '">' + value + ' seconds</option>'; }).join('');
+    select.value = String(current);
+  }
   function typedModels(kind) {
     var models = (_statusCache && Array.isArray(_statusCache[kind + 'Models'])) ? _statusCache[kind + 'Models'] : [];
     if (kind !== 'video') return models;
@@ -1750,6 +1768,7 @@
     var selected = typedModel(kind, thread);
     if (select) select.innerHTML = models.map(function (m) { return '<option value="' + escAttr(m.key) + '">' + esc(m.label || m.key) + '</option>'; }).join('');
     if (select && selected) select.value = selected.key;
+    if (kind === 'video') renderVideoDurationOptions();
     if (status) status.textContent = models.length ? (kind === 'search' ? 'Search the web · ' : kind === 'speech' ? 'Read text aloud · ' : 'Generate a video · ') + models.length + ' model' + (models.length === 1 ? '' : 's') : (kind === 'search' ? 'Web search unavailable' : kind === 'speech' ? 'Text-to-speech unavailable' : 'Video generation unavailable');
   }
   function renderTypedMediaControls() {
@@ -1780,7 +1799,7 @@
   window.aicCloseVideoBox = function () { if (_activeComposerTool === 'video') setComposerTool(''); };
   window.aicSearchModelChanged = function () { saveThreadModel('searchModel', (document.getElementById('aic-search-model-select') || {}).value || ''); };
   window.aicSpeechModelChanged = function () { saveThreadModel('speechModel', (document.getElementById('aic-speech-model-select') || {}).value || ''); };
-  window.aicVideoModelChanged = function () { saveThreadModel('videoModel', (document.getElementById('aic-video-model-select') || {}).value || ''); };
+  window.aicVideoModelChanged = function () { saveThreadModel('videoModel', (document.getElementById('aic-video-model-select') || {}).value || ''); renderVideoDurationOptions(); };
 
   function isSearchIntent(text) {
     var q = String(text || '').trim().toLowerCase();

@@ -1069,6 +1069,13 @@ OPENROUTER_VIDEO_FALLBACK_MODELS = [
         "OPENROUTER_VIDEO_MODELS", "google/veo-3.1,minimax/hailuo-3"
     ).split(",") if value.strip()
 ]
+# OpenRouter video duration is model-specific. Veo 3.1 accepts only 4, 6,
+# or 8 seconds; keep this server-side too so an old local thread cannot send
+# the legacy global 5-second default and receive a preventable 400 response.
+OPENROUTER_VIDEO_DURATION_OPTIONS = {
+    "google/veo-3.1": (4, 6, 8),
+    "google/veo-3.1-fast": (4, 6, 8),
+}
 # Typed OmniRoute routes expose their own catalogs. Keep this cache short so a
 # newly-enabled provider appears without making every chat-status request block.
 _OMNIROUTE_TYPED_CATALOG_TTL = max(60, min(int(os.environ.get("OMNIROUTE_TYPED_CATALOG_TTL", "300")), 1800))
@@ -2870,10 +2877,28 @@ def _openrouter_video_error(response, label="OpenRouter video"):
             detail = detail or payload.get("detail") or payload.get("message") or ""
     except Exception:  # noqa: BLE001
         pass
+    detail = re.sub(r"\s+", " ", str(detail or "")).strip()
+    lower = detail.lower()
+    if response.status_code in (402, 403) and any(word in lower for word in ("credit", "balance", "fund")):
+        return "%s cannot run because the configured OpenRouter account has insufficient credits. Add credits or use a funded OpenRouter key." % label
     return "%s returned HTTP %s%s" % (
         label, response.status_code,
-        ": %s" % str(detail)[:240] if detail else ".",
+        ": %s" % detail[:240] if detail else ".",
     )
+
+
+def _openrouter_video_duration(model, duration):
+    """Return a duration accepted by the selected OpenRouter video model."""
+    try:
+        value = int(duration)
+    except (TypeError, ValueError):
+        return None
+    value = max(1, min(30, value))
+    normalized = str(model or "").strip().lower()
+    options = OPENROUTER_VIDEO_DURATION_OPTIONS.get(normalized)
+    if options and value not in options:
+        return 6 if 6 in options else options[0]
+    return value
 
 
 def _openrouter_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration=None, source_image=None):
@@ -2890,11 +2915,9 @@ def _openrouter_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", durat
     body = {"model": model, "prompt": str(prompt or "").strip()[:2000]}
     if aspect_ratio:
         body["aspect_ratio"] = str(aspect_ratio)[:12]
-    if duration is not None:
-        try:
-            body["duration"] = max(1, min(30, int(duration)))
-        except (TypeError, ValueError):
-            pass
+    normalized_duration = _openrouter_video_duration(model, duration)
+    if normalized_duration is not None:
+        body["duration"] = normalized_duration
     if source_image:
         body["input_references"] = [str(source_image)[:16 * 1024 * 1024]]
     last_err = "OpenRouter video generation failed."
@@ -2980,6 +3003,7 @@ def _ai_chat_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration
     if not prompt:
         return None, "Video prompt is empty.", "", str(model_id or "").strip()
     failures = []
+    route_unavailable = False
     for candidate in _omniroute_video_candidates(cfg, model_id):
         body = {"model": candidate, "prompt": prompt}
         if aspect_ratio:
@@ -2995,10 +3019,14 @@ def _ai_chat_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration
             cfg, OMNIROUTE_VIDEO_URL, body, "Video generation", timeout=300, media_kind="video")
         if result is not None:
             return result, None, content_type, candidate
-        failures.append("%s: %s" % (candidate, detail or "empty response"))
-    route_unavailable = any("endpoint is unavailable" in failure.lower()
-                            or "returned http 404" in failure.lower()
-                            for failure in failures)
+        failure_text = detail or "empty response"
+        failures.append("%s: %s" % (candidate, failure_text))
+        # Every candidate uses the same OmniRoute typed endpoint. Once that
+        # endpoint is a 404/unavailable, retrying eight more model IDs only
+        # creates noise and delays the OpenRouter fallback.
+        if "endpoint is unavailable" in failure_text.lower() or "returned http 404" in failure_text.lower():
+            route_unavailable = True
+            break
     requested = str(model_id or "").strip()
     if route_unavailable and _provider_configured(cfg, "openrouter"):
         fallback_models = OPENROUTER_VIDEO_FALLBACK_MODELS or [""]
@@ -3008,10 +3036,20 @@ def _ai_chat_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration
                 cfg, fallback_model, prompt, aspect_ratio, duration, source_image)
             if result is not None:
                 return result, None, content_type, used_model
-            openrouter_failures.append(fallback_detail or "empty response")
-        failures.append("OpenRouter fallback: %s" % " | ".join(openrouter_failures))
-    detail = "Video generation failed after trying %d model%s. %s" % (
-        len(failures), "" if len(failures) == 1 else "s", " | ".join(failures)[:1200])
+            normalized_failure = fallback_detail or "empty response"
+            openrouter_failures.append(normalized_failure)
+            # Credits and account balance are shared across models, so trying
+            # another fallback model cannot fix an account-level 402 response.
+            if "insufficient credits" in normalized_failure.lower():
+                break
+        if any("insufficient credits" in failure.lower() for failure in openrouter_failures):
+            failures.append("OpenRouter fallback unavailable: insufficient credits on the configured account. Add credits or use a funded key.")
+        else:
+            failures.append("OpenRouter fallback: %s" % " | ".join(openrouter_failures)[:700])
+    if route_unavailable and not _provider_configured(cfg, "openrouter"):
+        detail = "OmniRoute video endpoint is unavailable, and no OpenRouter fallback is configured. Ask an admin to restore the OmniRoute tunnel or add an OpenRouter video key."
+        return None, detail, "", requested
+    detail = "Video generation failed. %s" % " | ".join(failures)[:1200]
     return None, detail, "", requested
 
 
