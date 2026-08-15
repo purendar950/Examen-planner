@@ -1878,6 +1878,43 @@ def _ai_chat_model_groups(models):
     return groups
 
 
+def _ai_chat_image_model_groups(models):
+    """Picker groups for images, with the verified-working routes surfaced first.
+
+    OmniRoute advertises ~62 image routes and most cannot generate on a
+    free/BYOK account: no credits, card required, provider not logged in, model
+    deprecated. Grouping only by sub-provider makes the user hunt for the
+    handful that work, so the routes proven to return image bytes get their own
+    group at the top of the picker.
+
+    Entries keep their normal ``provider::model`` keys, so selection, validation
+    and request handling are unchanged — only discoverability improves. Routes
+    listed here also remain in their sub-provider group.
+    """
+    groups = _ai_chat_model_groups(models)
+    available = {str(item.get("model") or "")
+                 for item in models if item.get("provider") == "omniroute"}
+    verified = [model_id for model_id in OMNIROUTE_IMAGE_PREFERRED_MODELS
+                if model_id in available]
+    # With one route or none there is nothing to choose between, so an extra
+    # group would only add a level of navigation.
+    if len(verified) < 2:
+        return groups
+    verified_group = {
+        "key": "omniroute:verified",
+        "label": "OmniRoute — \u2713 Verified working",
+        "provider": "omniroute",
+        "subprovider": "verified",
+        # The full route ID is the label: this group mixes sub-providers, so a
+        # bare "flux" or "hidream" would not say which upstream serves it.
+        "models": [{"key": _ai_chat_model_key("omniroute", model_id),
+                    "label": model_id,
+                    "model": model_id}
+                   for model_id in verified],
+    }
+    return [verified_group] + groups
+
+
 def _ai_chat_resolve_model(models, requested_key):
     """Pick which {provider, model} to answer with. `requested_key` is
     untrusted client input (the dropdown selection) and MUST be one of the
@@ -13153,7 +13190,7 @@ def api_ai_chat_status():
                          "label": "%s — %s" % (m["label"], m["model"])}
                         for m in available_images]
         provider_groups = _ai_chat_model_groups(available)
-        image_provider_groups = _ai_chat_model_groups(available_images)
+        image_provider_groups = _ai_chat_image_model_groups(available_images)
         direct_providers = _browser_direct_provider_configs(raw_cfg)
         omniroute_direct = direct_providers.get("omniroute")
         if _provider_configured(raw_cfg, "omniroute"):

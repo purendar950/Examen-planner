@@ -1027,13 +1027,25 @@
         entry = {
           key: provider,
           label: provider === 'omniroute' ? 'OmniRoute' : group.label,
-          modelCount: 0
+          modelCount: 0,
+          seenKeys: {}
         };
         byProvider[provider] = entry;
         out.push(entry);
       }
-      entry.modelCount += (group.models || []).length;
+      /* Count each route once. The "Verified working" group deliberately repeats
+         routes that also appear under their sub-provider group, and counting
+         both copies would overstate the provider total in the dropdown. */
+      (group.models || []).forEach(function (m) {
+        var key = String(m.key || '');
+        if (key) {
+          if (entry.seenKeys[key]) return;
+          entry.seenKeys[key] = true;
+        }
+        entry.modelCount += 1;
+      });
     });
+    out.forEach(function (entry) { delete entry.seenKeys; });
     return out;
   }
 
