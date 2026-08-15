@@ -1482,6 +1482,19 @@
       if (message && message.imagePending && (!requestKey || message.imageRequestKey === requestKey)) thread.messages.splice(i, 1);
     }
   }
+  /* The proxy reports every attempt as "provider/model: reason", joined with
+     " | ". The reason is the only actionable part — "Insufficient balance",
+     "requires a valid credit card on file", "User not found" — so pull the
+     first one out instead of discarding it behind a generic sentence. */
+  function firstImageFailureReason(text) {
+    var match = /omniroute\/([^\s:]+)\s*:\s*([^|]+)/i.exec(String(text || ''));
+    if (!match) return '';
+    var model = String(match[1] || '').trim();
+    var reason = String(match[2] || '').replace(/\s+/g, ' ').trim();
+    if (!reason) return '';
+    return reason.slice(0, 240) + (model ? ' (' + model + ')' : '');
+  }
+
   function imageFailureText(e) {
     var detail = e && (e.message || e.detail || e.error) ? (e.message || e.detail || e.error) : 'Image generation failed';
     if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
@@ -1494,7 +1507,14 @@
       detail = 'All image providers failed after automatic failover. '
         + 'OmniRoute or Pollinations may be temporarily unavailable. Try again in a moment.';
     } else if (hasOmniRouteError) {
-      detail = 'OmniRoute image generation failed. ' + (text.indexOf('429') >= 0 ? 'Rate limited — try again in a moment.' : 'Check OmniRoute configuration and retry.');
+      var reason = firstImageFailureReason(text);
+      if (text.indexOf('429') >= 0) {
+        detail = 'OmniRoute image generation was rate limited — try again in a moment.';
+      } else if (reason) {
+        detail = 'OmniRoute image generation failed — ' + reason;
+      } else {
+        detail = 'OmniRoute image generation failed. Check OmniRoute configuration and retry.';
+      }
     }
     return String(detail).slice(0, 500);
   }
