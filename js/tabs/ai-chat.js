@@ -41,6 +41,8 @@
     || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
   var HISTORY_MAX = 20;      // messages kept as context sent to the backend
   var _checked = false;      // avoid re-checking /status on every page switch
+  var _accessListenerBound = false;
+  var _accessRetryTimer = null;
   var _sending = false;
   var _statusCache = null;   // last /api/ai-chat/status response {enabled, models, imageModels, imageEnabled, ragEnabled}
   var _catalogRefreshTimer = null;
@@ -613,10 +615,19 @@
   }
 
   function checkAccess() {
-    if (typeof currentUser === 'undefined' || !currentUser) return;
-    if (typeof _fbReady === 'undefined' || !_fbReady) return;   // no backend identity offline
+    if (typeof currentUser === 'undefined' || !currentUser) return false;
+    if (typeof _fbReady === 'undefined' || !_fbReady) return false;   // no backend identity offline
     backendAuthFetch('/api/ai-chat/status')
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          if (!r.ok) {
+            var err = new Error((j && (j.detail || j.error)) || ('HTTP ' + r.status));
+            err.status = r.status;
+            throw err;
+          }
+          return j;
+        });
+      })
       .then(function (j) {
         _statusCache = j || null;
         var nav = document.getElementById('nav-ai-chat');
@@ -635,11 +646,40 @@
         if (attachBtn) attachBtn.style.display = (j && j.ragEnabled) ? '' : 'none';
         scheduleCatalogRefresh(j);
       })
-      .catch(function () { /* leave the tab hidden on any error — fail closed */ });
+      .catch(function (err) {
+        // Auth restoration and backend failover can finish after the first
+        // page check. Retry transient failures instead of keeping an eligible
+        // tab hidden forever because one early request saw 503/401/network.
+        if (_accessRetryTimer || (err && err.status === 403)) return;
+        _accessRetryTimer = setTimeout(function () {
+          _accessRetryTimer = null;
+          checkAccess();
+        }, 1500);
+      });
+    return true;
   }
 
+  function bindAuthAccessListener() {
+    if (_accessListenerBound) return;
+    if (typeof auth === 'undefined' || !auth || typeof auth.onAuthStateChanged !== 'function') return;
+    _accessListenerBound = true;
+    auth.onAuthStateChanged(function (user) {
+      if (user) {
+        _checked = true;
+        setTimeout(checkAccess, 0);
+      } else {
+        _checked = false;
+        var nav = document.getElementById('nav-ai-chat');
+        if (nav) nav.style.display = 'none';
+      }
+    });
+  }
+
+  bindAuthAccessListener();
+  window.addEventListener('preppath:firebase-ready', bindAuthAccessListener);
   window.addEventListener('load', function () {
     injectPage();
+    bindAuthAccessListener();
     setTimeout(function () { _checked = true; checkAccess(); }, 800);
   });
   if (typeof onPageActivated === 'function') {
