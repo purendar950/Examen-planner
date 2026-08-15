@@ -49,6 +49,9 @@
   var _accessRetryCount = 0;
   var _accessRequestInFlight = false;
   var _sending = false;
+  // Only one optional tool panel may be open at a time. The active panel is
+  // moved into the universal composer instead of rendering as a separate page-wide box.
+  var _activeComposerTool = '';
   var _statusCache = null;   // last /api/ai-chat/status response {enabled, models, imageModels, imageEnabled, ragEnabled}
   var _catalogRefreshTimer = null;
   var _curThreadId = null;
@@ -476,6 +479,10 @@
     .aic-form{width:100%;max-width:980px;margin:0 auto;padding:.35rem clamp(1rem,4vw,3.5rem) .7rem;}
     .aic-composer{overflow:hidden;border:1px solid color-mix(in srgb,var(--border) 95%,transparent);border-radius:15px;background:var(--surface);box-shadow:0 8px 28px rgba(28,24,20,.07);transition:border-color .16s ease-out,box-shadow .16s ease-out;}
     .aic-composer:focus-within{border-color:color-mix(in srgb,var(--accent) 72%,var(--border));box-shadow:0 8px 30px color-mix(in srgb,var(--accent) 12%,transparent);}
+    .aic-composer-toolbox{border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--surface) 70%,var(--card));}
+    .aic-composer-toolbox:empty{display:none;}
+    .aic-composer-toolbox .aic-image-prompt,.aic-composer-toolbox .aic-media-prompt,.aic-composer-toolbox .aic-send{display:none;}
+    .aic-composer-toolbox .aic-persona-box,.aic-composer-toolbox .aic-image-box,.aic-composer-toolbox .aic-github-box,.aic-composer-toolbox .aic-media-box{border-bottom:0;}
     .aic-input{display:block;width:100%;min-height:48px;max-height:160px;padding:13px 14px 5px;border:0;resize:none;outline:none;background:transparent;color:var(--text);font:inherit;font-size:.9rem;line-height:1.5;}
     .aic-input::placeholder{color:var(--muted);}
     .aic-composer-bottom{display:flex;align-items:center;gap:8px;padding:5px 8px 8px 11px;}
@@ -571,7 +578,7 @@
     <div class="aic-log" id="aic-log"></div>
     <form class="aic-form" onsubmit="aicSend(event)">
       <input type="file" id="aic-file-input" class="aic-file-input" accept=".txt,.md,.pdf" onchange="aicFileSelected(event)">
-      <div class="aic-composer"><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
+      <div class="aic-composer"><div class="aic-composer-toolbox" id="aic-composer-toolbox" aria-live="polite"></div><textarea class="aic-input" id="aic-input" rows="1" placeholder="Message AI Chat…" onkeydown="aicKeydown(event)"></textarea>      <div class="aic-composer-bottom"><div class="aic-composer-tools"><button type="button" class="aic-composer-tool" id="aic-attach-btn" onclick="document.getElementById('aic-file-input').click()" title="Attach a file" style="display:none;">＋ Attach</button><button type="button" class="aic-composer-tool" onclick="aicToggleImageBox()" title="Generate an image">▧ Image</button><button type="button" class="aic-composer-tool" id="aic-composer-search-btn" onclick="aicToggleSearchBox()" title="Search the web" style="display:none;">⌕ Search</button><button type="button" class="aic-composer-tool" id="aic-composer-speech-btn" onclick="aicToggleSpeechBox()" title="Read text aloud" style="display:none;">♬ Speak</button><button type="button" class="aic-composer-tool" id="aic-composer-video-btn" onclick="aicToggleVideoBox()" title="Generate a video" style="display:none;">▣ Video</button></div><span class="aic-hint">Ask for an image, web search, spoken answer, or video anytime.</span><button class="aic-send" id="aic-send-btn" type="submit" aria-label="Send message">↑ Send</button></div></div>
 
     </form>
   </main>
@@ -586,8 +593,51 @@
     page.id = 'page-ai-chat';
     page.innerHTML = MARKUP;
     mc.appendChild(page);
+    mountComposerToolbox(page);
     applySidebarState();
     injectNavTab();
+  }
+
+  function mountComposerToolbox(page) {
+    var toolbox = page && page.querySelector('#aic-composer-toolbox');
+    if (!toolbox) return;
+    ['persona', 'github', 'image', 'search', 'speech', 'video'].forEach(function (kind) {
+      var box = page.querySelector('#aic-' + kind + '-box');
+      if (box) toolbox.appendChild(box);
+    });
+    renderComposerToolbox();
+  }
+
+  function renderComposerToolbox() {
+    var toolbox = document.getElementById('aic-composer-toolbox');
+    if (!toolbox) return;
+    var kinds = ['persona', 'github', 'image', 'search', 'speech', 'video'];
+    kinds.forEach(function (kind) {
+      var box = document.getElementById('aic-' + kind + '-box');
+      if (box) box.style.display = _activeComposerTool === kind ? '' : 'none';
+    });
+    toolbox.setAttribute('data-active-tool', _activeComposerTool || 'none');
+    var input = document.getElementById('aic-input');
+    var send = document.getElementById('aic-send-btn');
+    var placeholders = {
+      image: 'Describe the image to generate or edit…',
+      search: 'Search the web…',
+      speech: 'Text to speak, or leave blank to use the latest AI response…',
+      video: 'Describe the video to generate…',
+      github: 'Ask about the selected GitHub files…',
+      persona: 'Message AI Chat…'
+    };
+    if (input) input.placeholder = placeholders[_activeComposerTool] || 'Message AI Chat…';
+    if (send) {
+      var labels = { image: 'Generate', search: 'Search', speech: 'Speak', video: 'Generate' };
+      send.textContent = labels[_activeComposerTool] || 'Send';
+      send.setAttribute('aria-label', labels[_activeComposerTool] || 'Send message');
+    }
+  }
+
+  function setComposerTool(kind) {
+    _activeComposerTool = kind || '';
+    renderComposerToolbox();
   }
 
   /* Nav tab is inserted next to Planner (same anchor mock-tests.js uses),
@@ -1103,10 +1153,8 @@
 
   /* ── persona editor ── */
   window.aicTogglePersona = function () {
-    var box = document.getElementById('aic-persona-box');
-    if (!box) return;
-    var showing = box.style.display !== 'none';
-    box.style.display = showing ? 'none' : '';
+    var showing = _activeComposerTool === 'persona';
+    setComposerTool(showing ? '' : 'persona');
     if (!showing) {
       var t = getThread(currentThreadId());
       var input = document.getElementById('aic-persona-input');
@@ -1313,21 +1361,17 @@
   };
 
   window.aicToggleImageBox = function () {
-    var box = document.getElementById('aic-image-box');
-    if (!box) return;
     var models = (_statusCache && _statusCache.imageModels) || [];
     if (!models.length) { toast('Image generation is not configured yet — ask an admin to add an image-capable provider/model.'); return; }
-    var showing = box.style.display !== 'none';
-    if (showing) { box.style.display = 'none'; return; }
-    renderImageModelSelect();
-    box.style.display = '';
-    var input = document.getElementById('aic-image-prompt-input');
-    if (input) input.focus();
+    var showing = _activeComposerTool === 'image';
+    setComposerTool(showing ? '' : 'image');
+    if (!showing) {
+      renderImageModelSelect();
+      var input = document.getElementById('aic-input');
+      if (input) input.focus();
+    }
   };
-  window.aicCloseImageBox = function () {
-    var box = document.getElementById('aic-image-box');
-    if (box) box.style.display = 'none';
-  };
+  window.aicCloseImageBox = function () { if (_activeComposerTool === 'image') setComposerTool(''); };
 
   function readImageDataUrl(file) {
     return new Promise(function (resolve, reject) {
@@ -1702,32 +1746,22 @@
       renderTypedModel(kind);
     });
   }
-  function closeTypedMediaBoxes(except) {
-    ['search', 'speech', 'video'].forEach(function (kind) {
-      if (kind === except) return;
-      var box = document.getElementById('aic-' + kind + '-box');
-      if (box) box.style.display = 'none';
-    });
-  }
   function toggleTypedMediaBox(kind) {
     if (!typedModels(kind).length) { toast((kind === 'search' ? 'Web search' : kind === 'speech' ? 'Text-to-speech' : 'Video generation') + ' is not configured.', 'error'); return; }
-    var box = document.getElementById('aic-' + kind + '-box');
-    if (!box) return;
-    var showing = box.style.display !== 'none';
-    closeTypedMediaBoxes(showing ? '' : kind);
-    box.style.display = showing ? 'none' : '';
+    var showing = _activeComposerTool === kind;
+    setComposerTool(showing ? '' : kind);
     if (!showing) {
       renderTypedModel(kind);
-      var input = document.getElementById('aic-' + kind + (kind === 'search' ? '-query' : kind === 'speech' ? '-text' : '-prompt') + '-input');
+      var input = document.getElementById('aic-input');
       if (input) input.focus();
     }
   }
   window.aicToggleSearchBox = function () { toggleTypedMediaBox('search'); };
   window.aicToggleSpeechBox = function () { toggleTypedMediaBox('speech'); };
   window.aicToggleVideoBox = function () { toggleTypedMediaBox('video'); };
-  window.aicCloseSearchBox = function () { var box = document.getElementById('aic-search-box'); if (box) box.style.display = 'none'; };
-  window.aicCloseSpeechBox = function () { var box = document.getElementById('aic-speech-box'); if (box) box.style.display = 'none'; };
-  window.aicCloseVideoBox = function () { var box = document.getElementById('aic-video-box'); if (box) box.style.display = 'none'; };
+  window.aicCloseSearchBox = function () { if (_activeComposerTool === 'search') setComposerTool(''); };
+  window.aicCloseSpeechBox = function () { if (_activeComposerTool === 'speech') setComposerTool(''); };
+  window.aicCloseVideoBox = function () { if (_activeComposerTool === 'video') setComposerTool(''); };
   window.aicSearchModelChanged = function () { saveThreadModel('searchModel', (document.getElementById('aic-search-model-select') || {}).value || ''); };
   window.aicSpeechModelChanged = function () { saveThreadModel('speechModel', (document.getElementById('aic-speech-model-select') || {}).value || ''); };
   window.aicVideoModelChanged = function () { saveThreadModel('videoModel', (document.getElementById('aic-video-model-select') || {}).value || ''); };
@@ -2533,14 +2567,11 @@
   window.aicToggleGithubBox = function () {
     var box = document.getElementById('aic-github-box');
     if (!box) return;
-    var open = box.style.display !== 'none';
-    box.style.display = open ? 'none' : '';
+    var open = _activeComposerTool === 'github';
+    setComposerTool(open ? '' : 'github');
     if (!open) renderGithubPanel();
   };
-  window.aicCloseGithubBox = function () {
-    var box = document.getElementById('aic-github-box');
-    if (box) box.style.display = 'none';
-  };
+  window.aicCloseGithubBox = function () { if (_activeComposerTool === 'github') setComposerTool(''); };
   window.aicClearGithub = function () {
     var t = getThread(currentThreadId());
     if (!t) return;
@@ -2726,22 +2757,17 @@
     renderFilesBar();
     renderGithubPanel();
     renderGithubContext();
-    var box = document.getElementById('aic-persona-box');
-    if (box) box.style.display = 'none';
-    var imgBox = document.getElementById('aic-image-box');
-    if (imgBox) imgBox.style.display = 'none';
-    var githubBox = document.getElementById('aic-github-box');
-    if (githubBox) githubBox.style.display = 'none';
-    ['search', 'speech', 'video'].forEach(function (kind) {
-      var mediaBox = document.getElementById('aic-' + kind + '-box');
-      if (mediaBox) mediaBox.style.display = 'none';
-    });
+    renderComposerToolbox();
   }
 
   function setSending(on) {
     _sending = on;
     var btn = document.getElementById('aic-send-btn');
-    if (btn) { btn.disabled = on; btn.textContent = on ? 'Sending…' : 'Send'; }
+    if (btn) {
+      var labels = { image: 'Generate', search: 'Search', speech: 'Speak', video: 'Generate' };
+      btn.disabled = on;
+      btn.textContent = on ? 'Sending…' : (labels[_activeComposerTool] || 'Send');
+    }
   }
 
   window.aicKeydown = function (ev) {
@@ -2758,11 +2784,63 @@
     if (_sending) return;
     var input = document.getElementById('aic-input');
     var q = ((input && input.value) || '').trim();
-    if (!q) return;
+    if (!q && _activeComposerTool !== 'speech') return;
     if (typeof currentUser === 'undefined' || !currentUser) { toast('Pehle login karo.', 'error'); return; }
 
     var t = getThread(currentThreadId());
     if (!t) return;
+
+    // The universal composer owns the active tool. Its main input is the single
+    // prompt field; the compact panel only contains model/options/reference controls.
+    // This avoids opening a second full-width prompt box for every capability.
+    var activeTool = _activeComposerTool;
+    if (activeTool === 'search') {
+      if (!q) { toast('Enter a search query.'); return; }
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      setSending(true);
+      requestWebSearch(t, q).finally(function () { setSending(false); });
+      return;
+    }
+    if (activeTool === 'speech') {
+      var speechText = q || latestAssistantText(t);
+      if (!speechText) { toast('Enter text or generate an AI response first.'); return; }
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      setSending(true);
+      requestSpeech(t, speechText).finally(function () { setSending(false); });
+      return;
+    }
+    if (activeTool === 'video') {
+      if (!q) { toast('Describe the video to generate.'); return; }
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      setSending(true);
+      requestVideo(t, q).finally(function () { setSending(false); });
+      return;
+    }
+    if (activeTool === 'image') {
+      if (!q) { toast('Describe the image to generate or edit.'); return; }
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      if (!imageSelection(t)) {
+        if (!t.messages.length) t.title = threadTitleFromFirstMessage(q);
+        t.messages.push({ role: 'user', content: q });
+        t.messages.push({ role: 'error', content: '\u26A0\uFE0F No image-capable provider/model is configured. Ask an admin to add one in AI Study.' });
+        upsertThread(t);
+        renderThreadList();
+        renderLog();
+        toast('No image-capable provider/model is configured.', 'error');
+        return;
+      }
+      setSending(true);
+      var universalEdit = isImageEditIntent(q);
+      var universalSource = '';
+      selectedSourceImageData(t).then(function (source) {
+        universalSource = source || '';
+        if (universalEdit && !source) throw new Error('To edit an image, upload a reference image or generate an image first.');
+        return requestGeneratedImage(t, q, q, universalEdit ? source : '', universalEdit);
+      }).catch(function (err) {
+        recordImageFailure(t, q, q, universalEdit ? universalSource : '', universalEdit, err);
+      }).finally(function () { setSending(false); });
+      return;
+    }
 
     // Typed OmniRoute capabilities bypass text chat entirely. This prevents a
     // text model from pretending it searched, spoke, or rendered a video.
