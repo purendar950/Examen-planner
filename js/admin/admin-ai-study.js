@@ -193,7 +193,7 @@ function aiStudyProviderCard(pid, activePid) {
     ? '<a class="ai-provider-link" href="' + esc(provider.keyUrl) + '" target="_blank" rel="noopener">Get API key ↗</a>'
     : '<span class="ai-provider-link is-muted">Private endpoint</span>';
   var directBrowserBox = pid === 'omniroute'
-    ? '<label class="ai-switch-row ai-provider-direct-toggle" for="omniroute-browser-direct"><span><strong>Direct browser requests</strong><small>Send OmniRoute chat, image generation, search, speech and video directly from AI Chat. This exposes the first configured OmniRoute key to authorized browsers and requires OmniRoute CORS to allow this app.</small></span><span class="ai-toggle"><input id="omniroute-browser-direct" type="checkbox"' + (AI_CONFIG && AI_CONFIG.omnirouteBrowserDirect ? ' checked' : '') + '><i></i></span></label>'
+    ? '<label class="ai-switch-row ai-provider-direct-toggle" for="omniroute-browser-direct"><span><strong>Direct provider requests</strong><small>Send ordinary AI chat and supported image requests directly from AI Chat using Firebase-configured provider keys. This exposes the first key for each configured provider to authorized browsers and requires every provider’s CORS policy to allow this app. Coding/workspace requests remain on the secure proxy.</small></span><span class="ai-toggle"><input id="omniroute-browser-direct" type="checkbox"' + (AI_CONFIG && AI_CONFIG.omnirouteBrowserDirect ? ' checked' : '') + '><i></i></span></label>'
     : '';
 
   var metricsRow = '<div class="ai-provider-metrics">' +

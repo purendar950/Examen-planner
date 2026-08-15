@@ -498,40 +498,93 @@
     });
   }
 
-  /* ── direct OmniRoute transport ────────────────────────────────────────
-     Direct mode is opt-in from the admin panel because it exposes the first
-     configured OmniRoute key to an authorized browser session. Render remains
-     the fallback transport and still handles coding/workspace requests. ── */
-  function directOmniRouteConfig() {
-    var cfg = _statusCache && _statusCache.omnirouteDirect;
+  /* ── direct provider transport ─────────────────────────────────────────
+     Direct mode is opt-in from AI Study. Firebase-stored keys are bootstrapped
+     only into authorized sessions after the admin enables the setting. Render
+     remains the protected path for coding/workspace/RAG requests. ── */
+  function directProviderConfig(provider) {
+    var pid = String(provider || '').toLowerCase();
+    var all = _statusCache && _statusCache.directProviders;
+    var cfg = all && all[pid];
+    if (!cfg && pid === 'omniroute') cfg = _statusCache && _statusCache.omnirouteDirect;
     return cfg && cfg.enabled && cfg.apiKey ? cfg : null;
   }
-  function omniRouteModelId(key) {
+  function providerFromModelKey(key) {
     var raw = String(key || '');
-    if (raw.indexOf('::') !== -1) return raw.split('::').slice(1).join('::');
-    if (raw.indexOf('/') !== -1) return raw.split('/').slice(1).join('/');
+    var split = raw.indexOf('::');
+    if (split > 0) return raw.slice(0, split).toLowerCase();
+    if (/^omniroute\//i.test(raw)) return 'omniroute';
+    return '';
+  }
+  function directModelId(key) {
+    var raw = String(key || '');
+    var split = raw.indexOf('::');
+    if (split >= 0) return raw.slice(split + 2);
+    if (/^omniroute\//i.test(raw)) return raw.slice('omniroute/'.length);
     return raw;
   }
-  function isDirectOmniRouteKey(key) {
-    return /^(?:omniroute::|omniroute\/)/i.test(String(key || ''));
-  }
-  function directOmniRouteFetch(kind, options) {
+  function omniRouteModelId(key) { return directModelId(key); }
+  function isDirectOmniRouteKey(key) { return providerFromModelKey(key) === 'omniroute' && !!directProviderConfig('omniroute'); }
+  function directProviderFetch(provider, kind, options) {
     options = options || {};
-    var cfg = directOmniRouteConfig();
-    if (!cfg) return Promise.reject(new Error('Direct OmniRoute mode is not enabled by the administrator.'));
-    var url = cfg[kind + 'Url'];
-    if (!url) return Promise.reject(new Error('Direct OmniRoute ' + kind + ' endpoint is not configured.'));
+    var cfg = directProviderConfig(provider);
+    if (!cfg) return Promise.reject(new Error('Direct ' + provider + ' mode is not enabled by the administrator.'));
+    var url = kind === 'images' ? (cfg.imageUrl || cfg.imagesUrl) : cfg[kind + 'Url'];
+    if (!url && kind === 'chat') url = cfg.chatUrl;
+    if (!url) return Promise.reject(new Error('Direct ' + provider + ' ' + kind + ' endpoint is not configured.'));
     var controller = window.AbortController ? new AbortController() : null;
     var timeout = Number(options.timeoutMs || 90000);
     var timer = controller ? setTimeout(function () { controller.abort(); }, Math.max(5000, timeout)) : null;
-    var headers = Object.assign({}, options.headers || {}, {
-      Authorization: 'Bearer ' + cfg.apiKey,
-      'ngrok-skip-browser-warning': 'true'
-    });
+    var headers = Object.assign({}, options.headers || {});
+    if (cfg.transport === 'google_interactions') headers['x-goog-api-key'] = cfg.apiKey;
+    else headers.Authorization = 'Bearer ' + cfg.apiKey;
+    if (provider === 'omniroute') headers['ngrok-skip-browser-warning'] = 'true';
+    if (provider === 'openrouter') {
+      headers['HTTP-Referer'] = 'https://purendar950.github.io/Examen-planner/';
+      headers['X-Title'] = 'Examen Planner AI Chat';
+    }
     var requestOptions = Object.assign({}, options, { headers: headers });
     delete requestOptions.timeoutMs;
     if (controller) requestOptions.signal = controller.signal;
     return fetch(url, requestOptions).finally(function () { if (timer) clearTimeout(timer); });
+  }
+  function directOmniRouteConfig() { return directProviderConfig('omniroute'); }
+  function directOmniRouteFetch(kind, options) { return directProviderFetch('omniroute', kind, options); }
+  function directChatPayload(provider, body) {
+    var messages = directChatMessages(body);
+    var cfg = directProviderConfig(provider);
+    if (cfg && cfg.transport === 'google_interactions') {
+      var system = [], turns = [];
+      messages.forEach(function (message) {
+        if (message.role === 'system') system.push(message.content);
+        else turns.push({ type: message.role === 'assistant' ? 'model_output' : 'user_input', content: [{ type: 'text', text: message.content }] });
+      });
+      var input = turns.length === 1 && turns[0].type === 'user_input' ? turns[0].content[0].text : turns;
+      var nativeBody = {
+        model: directModelId(body && body.model), input: input,
+        generation_config: { temperature: 0.7, max_output_tokens: 4096 }
+      };
+      if (system.length) nativeBody.system_instruction = system.join('\\n\\n');
+      return nativeBody;
+    }
+    return { model: directModelId(body && body.model), messages: messages, stream: false };
+  }
+  function directChatAnswer(provider, payload) {
+    var answer = '';
+    if (provider === 'google_interactions') {
+      (payload && payload.steps || []).forEach(function (step) {
+        if (!step || step.type !== 'model_output') return;
+        (step.content || []).forEach(function (part) { if (part && part.type === 'text') answer += String(part.text || ''); });
+      });
+      if (!answer && payload && Array.isArray(payload.outputs)) payload.outputs.forEach(function (part) { if (part && part.type === 'text') answer += String(part.text || ''); });
+      if (!answer && payload) answer = String(payload.output_text || '');
+    } else {
+      var choices = payload && Array.isArray(payload.choices) ? payload.choices : [];
+      var message = choices[0] && choices[0].message;
+      answer = message && message.content;
+      if (Array.isArray(answer)) answer = answer.map(function (part) { return typeof part === 'string' ? part : (part && (part.text || part.content) || ''); }).join('');
+    }
+    return String(answer || '').trim();
   }
   function directChatMessages(body) {
     var messages = [];
@@ -1180,26 +1233,75 @@
     if (currentThreadId() === cur.id) renderLog();
   }
 
-  function directImageResponse(response, model) {
+  function directImageResponse(response, provider, model) {
     if (!response.ok) return response.json().catch(function () { return {}; }).then(function (j) {
       var detail = j && (j.detail || j.message || j.error);
       if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
-      throw new Error(String(detail || 'Direct OmniRoute image request failed (HTTP ' + response.status + ')').slice(0, 500));
+      throw new Error(String(detail || 'Direct ' + provider + ' image request failed (HTTP ' + response.status + ')').slice(0, 500));
     });
     return response.json().then(function (payload) {
-      var items = payload && Array.isArray(payload.data) ? payload.data : [];
-      var first = items[0] || {};
-      var raw = first.b64_json || first.b64 || first.image_base64 || first.url || '';
-      if (!raw) throw new Error('Direct OmniRoute returned no image data.');
-      var source = String(raw);
-      if (source.indexOf('data:') !== 0 && source.indexOf('http') !== 0) source = 'data:image/png;base64,' + source;
+      var raw = '', mime = 'image/png';
+      function visit(value) {
+        if (!value || raw) return;
+        if (Array.isArray(value)) { value.forEach(visit); return; }
+        if (typeof value !== 'object') return;
+        var kind = String(value.type || '').toLowerCase();
+        var data = value.b64_json || value.b64 || value.image_base64 || value.data || (value.inline_data && value.inline_data.data);
+        var candidateMime = value.mime_type || value.mimeType || value.content_type || (value.inline_data && value.inline_data.mime_type);
+        if (data && (kind.indexOf('image') >= 0 || kind === '' || value.b64_json || value.image_base64 || value.inline_data)) {
+          raw = String(data); if (candidateMime) mime = String(candidateMime); return;
+        }
+        ['output_image', 'output', 'steps', 'content', 'parts', 'data'].forEach(function (key) { if (value[key]) visit(value[key]); });
+      }
+      visit(payload);
+      if (!raw && payload && Array.isArray(payload.data)) {
+        var first = payload.data[0] || {};
+        raw = String(first.b64_json || first.b64 || first.image_base64 || first.url || '');
+        mime = first.media_type || mime;
+      }
+      if (!raw) throw new Error('Direct ' + provider + ' returned no image data.');
+      var source = raw;
+      if (source.indexOf('data:') !== 0 && source.indexOf('http') !== 0) source = 'data:' + mime + ';base64,' + source;
       return fetch(source).then(function (imageResponse) {
-        if (!imageResponse.ok) throw new Error('Could not read the direct OmniRoute image response.');
+        if (!imageResponse.ok) throw new Error('Could not read the direct ' + provider + ' image response.');
         return imageResponse.blob();
       }).then(function (blob) {
-        return { blob: blob, provider: 'omniroute', model: model };
+        return { blob: blob, provider: provider, model: model };
       });
     });
+  }
+  function directImageCandidates(thread, selected) {
+    var all = [], seen = {};
+    function add(item) {
+      if (!item || !directProviderConfig(item.provider)) return;
+      var key = item.provider + '::' + item.model;
+      if (seen[key]) return;
+      seen[key] = true; all.push(item);
+    }
+    add(selected);
+    var groups = catalogGroups('imageProviderGroups', 'imageModels');
+    var preferredProviders = ['openrouter', 'google', 'omniroute'];
+    preferredProviders.forEach(function (pid) {
+      groups.forEach(function (group) { if (group.provider !== pid) return; (group.models || []).forEach(function (m) {
+        add({ key: m.key, provider: pid, model: m.model, label: group.label + ' / ' + m.label });
+      }); });
+    });
+    return all.slice(0, 12);
+  }
+  function requestDirectImageCandidate(candidate, prompt) {
+    var provider = candidate.provider, model = candidate.model, body;
+    var cfg = directProviderConfig(provider);
+    if (cfg && cfg.transport === 'google_interactions') {
+      body = { model: model, input: prompt, response_format: { type: 'image' } };
+    } else if (provider === 'openrouter') {
+      body = { model: model, prompt: prompt, aspect_ratio: '1:1' };
+    } else {
+      body = { model: model, prompt: prompt, n: 1, size: '1024x1024', response_format: 'b64_json' };
+    }
+    return directProviderFetch(provider, 'images', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 150000,
+      body: JSON.stringify(body)
+    }).then(function (r) { return directImageResponse(r, provider, model); });
   }
 
   function requestGeneratedImage(thread, prompt, userContent, sourceImageData, isEdit) {
@@ -1226,14 +1328,15 @@
     renderLog();
 
     var imageRequest;
-    // Native OmniRoute generation can bypass Render. Image editing remains on
-    // the proxy because its multipart contract and binary source handling are
-    // provider-specific; the ordinary generation path is fully direct.
-    if (!isEdit && selected.provider === 'omniroute' && directOmniRouteConfig()) {
-      imageRequest = directOmniRouteFetch('images', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 150000,
-        body: JSON.stringify({ model: selected.model, prompt: prompt, n: 1, size: '1024x1024', response_format: 'b64_json' })
-      }).then(function (r) { return directImageResponse(r, selected.model); });
+    // Native generation can bypass Render for every direct-enabled image
+    // provider. Try the selected model first, then other live/configured image
+    // models, without sending the failed direct request through Render. Image
+    // editing remains on the proxy because its multipart contract is provider-specific.
+    var directCandidates = !isEdit ? directImageCandidates(thread, selected) : [];
+    if (directCandidates.length) {
+      imageRequest = directCandidates.reduce(function (chain, candidate) {
+        return chain.catch(function (lastError) { return requestDirectImageCandidate(candidate, prompt); });
+      }, Promise.reject(new Error('No direct image candidate succeeded.')));
     } else {
       imageRequest = backendAuthFetch('/api/ai-chat/image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2608,29 +2711,38 @@
         .finally(function () { setSending(false); });
     }
 
-    var directChatEligible = isDirectOmniRouteKey(body.model) && directOmniRouteConfig()
+    var directProvider = providerFromModelKey(body.model);
+    var directChatEligible = !!directProviderConfig(directProvider)
       && !codingIntent && !requestedWorkspace && !body.github && !body.contextFiles.length
       && (!body.web || body.web === 'off');
     if (directChatEligible) {
-      directOmniRouteFetch('chat', {
+      directProviderFetch(directProvider, 'chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: body.timeoutMs,
-        body: JSON.stringify({ model: omniRouteModelId(body.model), messages: directChatMessages(body), stream: false })
+        body: JSON.stringify(directChatPayload(directProvider, body))
       }).then(function (r) {
-        if (!r.ok) return responseError(r, 'Direct OmniRoute chat failed.');
+        if (!r.ok) return responseError(r, 'Direct ' + directProvider + ' chat failed.');
         return r.json();
       }).then(function (payload) {
-        var choices = payload && Array.isArray(payload.choices) ? payload.choices : [];
-        var message = choices[0] && choices[0].message;
-        var answer = message && message.content;
-        if (Array.isArray(answer)) answer = answer.map(function (part) { return typeof part === 'string' ? part : (part && (part.text || part.content) || ''); }).join('');
-        if (!String(answer || '').trim()) throw new Error('Direct OmniRoute returned an empty answer.');
-        acc = String(answer);
+        var answer = directChatAnswer(directProvider, payload);
+        if (!answer) throw new Error('Direct ' + directProvider + ' returned an empty answer.');
+        acc = answer;
         gotChunk = true;
         finishSuccess();
       }).catch(function (err) {
-        // CORS, a tunnel outage, or an unsupported direct route should not lose
-        // the turn: reuse the protected Render request as the retry transport.
-        fallbackToBlocking(err);
+        // Direct provider failures are shown locally instead of silently routing
+        // the same request through Render. Coding/workspace requests remain on
+        // the protected proxy path by design.
+        if (settled) return;
+        settled = true;
+        var cur = getThread(t.id);
+        if (cur) {
+          var last = cur.messages[cur.messages.length - 1];
+          if (last && last.role === 'assistant' && !last.content) cur.messages.pop();
+          cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + errorText(err), retry: { kind: 'text', q: q } });
+          upsertThread(cur);
+          if (currentThreadId() === t.id) renderLog();
+        }
+        setSending(false);
       });
       return;
     }

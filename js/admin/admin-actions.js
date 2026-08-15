@@ -1129,7 +1129,8 @@ async function saveStudyAiConfig() {
   });
   const model = provider === 'omniroute' ? 'auto' : (((document.getElementById('study-model') || {}).value) || p.def).trim();
   const activeKeys = allKeys[provider] || [];
-  const omnirouteBrowserDirect = !!((document.getElementById('omniroute-browser-direct') || {}).checked);
+  const browserDirectEnabled = !!((document.getElementById('omniroute-browser-direct') || {}).checked);
+  const omnirouteBrowserDirect = browserDirectEnabled;
   if (!activeKeys.length) {
     showToast('⚠️ Active provider (' + p.label + ') has no key');
   }
@@ -1140,6 +1141,8 @@ async function saveStudyAiConfig() {
     studyApiKeys: activeKeys, studyModel: model, studyBaseUrl: p.baseUrl,
     studyTransport: p.transport || 'openai_chat',
     omnirouteBrowserDirect: omnirouteBrowserDirect,
+    browserDirectEnabled: browserDirectEnabled,
+    browserDirectProviders: browserDirectEnabled ? STUDY_PROVIDER_ORDER.filter(function (k) { return k !== 'kiro'; }) : [],
     savedAt: firebase.firestore.FieldValue.serverTimestamp()
   };
   STUDY_PROVIDER_ORDER.forEach(function (k) { payload[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
@@ -1152,6 +1155,8 @@ async function saveStudyAiConfig() {
     AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
     AI_CONFIG.studyTransport = p.transport || 'openai_chat';
     AI_CONFIG.omnirouteBrowserDirect = omnirouteBrowserDirect;
+    AI_CONFIG.browserDirectEnabled = browserDirectEnabled;
+    AI_CONFIG.browserDirectProviders = browserDirectEnabled ? STUDY_PROVIDER_ORDER.filter(function (k) { return k !== 'kiro'; }) : [];
     showToast('✅ Study AI saved — active: ' + p.label +
               ' (' + activeKeys.length + ' key' + (activeKeys.length === 1 ? '' : 's') + ')');
     render();

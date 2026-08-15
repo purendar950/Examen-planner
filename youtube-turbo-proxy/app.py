@@ -1867,10 +1867,10 @@ def _ai_chat_image_candidates(models, picked, max_n=None):
     if not picked:
         return []
     try:
-        cap = int(max_n if max_n is not None else os.environ.get("IMAGE_FALLBACK_MAX", "4"))
+        cap = int(max_n if max_n is not None else os.environ.get("IMAGE_FALLBACK_MAX", "12"))
     except (TypeError, ValueError):
-        cap = 4
-    cap = max(1, min(cap, 8))
+        cap = 12
+    cap = max(1, min(cap, 12))
     selected_key = _ai_chat_model_key(picked.get("provider"), picked.get("model"))
     out = [picked]
     remaining = [m for m in (models or [])
@@ -8888,7 +8888,7 @@ _OMNIROUTE_IMAGE_ID_MARKERS = (
 )
 _OMNIROUTE_NOT_IMAGE_MARKERS = (
     "veo", "sora", "kling", "runway", "hailuo", "musicgen", "lyria",
-    "whisper", "tts", "speech", "audio", "polly", "embedding", "embed",
+    "whisper", "tts", "speech", "audio", "polly", "codex", "embedding", "embed",
     "rerank", "moderation", "safety", "video", "transcri",
 )
 _OMNIROUTE_IMAGE_TYPES = {"image", "images", "text-to-image", "text_to_image", "image-generation"}
@@ -12464,15 +12464,72 @@ def _ai_chat_authorize():
     return user, chat_cfg, is_admin, None
 
 
+def _browser_direct_provider_configs(cfg):
+    """Return explicitly enabled browser-direct provider bootstrap metadata.
+
+    Provider keys remain in Firebase/config/ai and are never bundled into the
+    static app. When an admin opts into direct mode, the protected status route
+    returns only the first key for each configured provider so ordinary chat,
+    native image generation, and compatible typed requests can bypass Render.
+    Coding/workspace requests still remain on the proxy because they need the
+    server-side repository and artifact pipeline.
+    """
+    cfg = cfg or {}
+    enabled_all = bool(cfg.get("browserDirectEnabled"))
+    requested = cfg.get("browserDirectProviders")
+    if isinstance(requested, dict):
+        enabled_ids = {str(pid).strip().lower() for pid, value in requested.items() if value}
+    elif isinstance(requested, list):
+        enabled_ids = {str(pid).strip().lower() for pid in requested}
+    else:
+        # Backward compatibility: the old checkbox enabled OmniRoute only.
+        enabled_ids = {"omniroute"} if cfg.get("omnirouteBrowserDirect") else set()
+    if enabled_all and not enabled_ids:
+        enabled_ids = {pid for pid in STUDY_PROVIDER_IDS if pid != "kiro"}
+    if not enabled_ids:
+        return {}
+
+    out = {}
+    for pid in STUDY_PROVIDER_IDS:
+        if pid == "kiro" or pid not in enabled_ids or not _provider_configured(cfg, pid):
+            continue
+        provider = STUDY_TEST_PROVIDERS.get(pid) or {}
+        keys = _configured_provider_keys(cfg, pid)
+        chat_url = str(provider.get("url") or "").strip()
+        if not keys or not chat_url:
+            continue
+        transport = str(provider.get("transport") or "openai_chat").strip().lower()
+        item = {
+            "enabled": True,
+            "provider": pid,
+            "apiKey": keys[0],
+            "chatUrl": chat_url,
+            "transport": transport,
+        }
+        if pid == "google":
+            interactions = STUDY_TEST_PROVIDERS.get("google_interactions") or {}
+            item["imageUrl"] = str(interactions.get("url") or "").strip()
+        elif pid in IMAGE_PROVIDER_ENDPOINTS:
+            item["imageUrl"] = IMAGE_PROVIDER_ENDPOINTS[pid]
+        if pid == "omniroute":
+            item.update({
+                "searchUrl": OMNIROUTE_SEARCH_URL,
+                "speechUrl": OMNIROUTE_TTS_URL,
+                "videoUrl": OMNIROUTE_VIDEO_URL,
+            })
+        out[pid] = item
+    return out
+
+
 @app.get("/api/ai-chat/status")
 def api_ai_chat_status():
-    """Whether the AI Chat tab should be visible for the caller, and — if so —
-    every configured provider/model they may pick from (the SAME universe the
-    Study AI tutor already exposes — no separate admin curation for this
-    feature) plus which of those support native image generation. No
-    Pro/entitlement check on purpose — the admin's allowlist is the sole gate
-    for this feature. Model API keys never reach the browser; only labels +
-    an opaque `key` string (used to select a model on later requests) do."""
+    """Return authorized AI Chat catalogs and optional direct-provider metadata.
+
+    Model API keys never reach the browser unless the administrator explicitly
+    enables browser-direct mode in Firebase-backed AI Study settings. In that
+    mode the first configured key for each selected direct provider is returned
+    only to an already authorized AI Chat session.
+    """
     user, err = _require_firebase_user()
     if err:
         return jsonify(err[0]), err[1]
@@ -12487,6 +12544,7 @@ def api_ai_chat_status():
     search_models, speech_models, video_models = [], [], []
     provider_groups, image_provider_groups = [], []
     omniroute_direct = None
+    direct_providers = {}
     catalog_refreshing = False
     if allowed:
         raw_cfg = _load_study_raw_cfg()
@@ -12501,22 +12559,8 @@ def api_ai_chat_status():
                         for m in available_images]
         provider_groups = _ai_chat_model_groups(available)
         image_provider_groups = _ai_chat_model_groups(available_images)
-        # Direct browser mode is deliberately opt-in because the browser must
-        # receive an OmniRoute credential. The normal proxy path keeps all keys
-        # server-side. Only the first configured key is exposed to an already
-        # authorized AI Chat user when the admin explicitly enables this field.
-        if raw_cfg.get("omnirouteBrowserDirect") and _provider_configured(raw_cfg, "omniroute"):
-            direct_keys = _configured_provider_keys(raw_cfg, "omniroute")
-            if direct_keys:
-                omniroute_direct = {
-                    "enabled": True,
-                    "chatUrl": OMNIROUTE_URL,
-                    "imagesUrl": OMNIROUTE_IMAGES_URL,
-                    "searchUrl": OMNIROUTE_SEARCH_URL,
-                    "speechUrl": OMNIROUTE_TTS_URL,
-                    "videoUrl": OMNIROUTE_VIDEO_URL,
-                    "apiKey": direct_keys[0],
-                }
+        direct_providers = _browser_direct_provider_configs(raw_cfg)
+        omniroute_direct = direct_providers.get("omniroute")
         if _provider_configured(raw_cfg, "omniroute"):
             search_models = [{"key": "omniroute/" + model, "label": "OmniRoute — " + model}
                              for model in _omniroute_typed_catalog(raw_cfg, "search")]
@@ -12537,6 +12581,8 @@ def api_ai_chat_status():
                     "speechEnabled": bool(allowed and speech_models),
                     "videoEnabled": bool(allowed and video_models),
                     "ragEnabled": bool(allowed and _vec_enabled()),
+                    "browserDirectEnabled": bool(allowed and direct_providers),
+                    "directProviders": direct_providers,
                     "omnirouteDirect": omniroute_direct})
 
 
