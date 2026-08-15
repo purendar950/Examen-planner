@@ -2502,9 +2502,9 @@ registerAccountCommand({ name: 'addmock', regex: /^\/addmock(?:@\w+)?(?:\s+([\s\
    source of truth and puts this bot on the same contract as the other
    server-side consumers, so switching provider needs no code change here.
 
-   It matters most for the current selection, OmniRoute: it is reached over an
-   ngrok dev domain, so its URL changes. Taking the URL from studyBaseUrl means
-   the admin re-saves the card and the bot follows, with no redeploy.
+   OmniRoute is the exception: its changing gateway URL is server-owned through
+   OMNIROUTE_URL on Render, so the browser never persists a dead/private route.
+   The bot and Flask proxy intentionally use the same environment contract.
 
    `groqApiKey` remains a fallback so /ask still works on an installation that
    only ever configured the auto-scheduler.
@@ -2557,16 +2557,36 @@ function studyApiKeyList(raw) {
   return list.map(key => String(key == null ? '' : key).trim()).filter(Boolean);
 }
 
+function normalizeOmniRouteApiBase(value) {
+  let base = normalizeAppBaseUrl(value);
+  if (!base) return '';
+  const suffixes = ['/chat/completions', '/images/generations', '/images/edits', '/models'];
+  for (const suffix of suffixes) {
+    if (base.endsWith(suffix)) {
+      base = base.slice(0, -suffix.length).replace(/\/+$/, '');
+      break;
+    }
+  }
+  if (!base.endsWith('/v1')) base += '/v1';
+  return base;
+}
+
+const OMNIROUTE_API_BASE = normalizeOmniRouteApiBase(process.env.OMNIROUTE_URL);
+
 /* → { provider, url, keys, model } or null when the panel has not configured a
-   usable provider. A base that is not an absolute http(s) URL is a typo in the
-   panel, and must not be turned into a request. */
+   usable provider. OmniRoute's base is server-owned because exposing a mutable
+   gateway endpoint in the browser admin bundle left the bot pinned to dead
+   ngrok URLs. Other providers retain their panel-managed base. */
 function studyProviderFromConfig(cfg) {
   cfg = cfg && typeof cfg === 'object' ? cfg : {};
   /* `google_interactions` speaks a different protocol; only the OpenAI-compatible
      transport is understood here, so anything else falls through to the
      fallback rather than being sent a body it cannot read. */
   if (String(cfg.studyTransport || 'openai_chat') !== 'openai_chat') return null;
-  const base = normalizeAppBaseUrl(cfg.studyBaseUrl);
+  const providerId = String(cfg.studyProvider || 'study').trim().toLowerCase();
+  const base = providerId === 'omniroute'
+    ? OMNIROUTE_API_BASE
+    : normalizeAppBaseUrl(cfg.studyBaseUrl);
   const keys = studyApiKeyList(cfg.studyApiKeys);
   if (!base || !keys.length) return null;
   return {
@@ -2603,7 +2623,7 @@ const FAILOVER_PROVIDERS = [
   { id: 'hcnsec',      keyField: 'hcnsecApiKeys',      modelField: 'hcnsecModel',      baseUrl: 'https://api.hcnsec.cn/v1',                            defaultModel: 'DeepSeek-V4-Pro' },
   { id: 'bluesminds',  keyField: 'bluesmindsApiKeys',  modelField: 'bluesmindsModel',  baseUrl: 'https://api.bluesminds.com/v1',                       defaultModel: 'gpt-5.2-chat' },
   { id: 'aicampus',    keyField: 'aicampusApiKeys',    modelField: 'aicampusModel',    baseUrl: 'https://ai-hub.aicampus.my/v1',                       defaultModel: 'minimax-m3' },
-  { id: 'omniroute',   keyField: 'omnirouteApiKeys',   modelField: 'omnirouteModel',   baseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1',     defaultModel: 'auto' },
+  { id: 'omniroute',   keyField: 'omnirouteApiKeys',   modelField: 'omnirouteModel',   baseUrl: OMNIROUTE_API_BASE,                                      defaultModel: 'auto' },
   { id: 'kiro',        keyField: 'kiroApiKeys',        modelField: 'kiroModel',        baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1',           defaultModel: 'auto' },
 ];
 
@@ -2615,6 +2635,7 @@ function buildFallbackProviderList(cfg, excludeProvider) {
   const excludeUrl = excludeProvider ? excludeProvider.url : null;
 
   for (const entry of FAILOVER_PROVIDERS) {
+    if (!entry.baseUrl) continue;
     const keys = studyApiKeyList(cfg[entry.keyField]);
     if (!keys.length) continue;
     const url = `${entry.baseUrl}/chat/completions`;

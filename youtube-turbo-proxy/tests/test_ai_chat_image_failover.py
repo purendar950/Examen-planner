@@ -51,7 +51,9 @@ check("backend route calls the shared-failure classifier", "_ai_chat_image_share
 
 check("frontend direct fallback tracks blocked providers", "blockedProviders = {}" in JS)
 check("frontend direct fallback classifies shared failures", "function sharedProviderFailure(provider, detail)" in JS)
-check("frontend normalizes OpenRouter credit errors", "configured OpenRouter account has no image credits" in JS)
+check("frontend blocks nested incompatible OmniRoute routes",
+      "OMNIROUTE_IMAGE_BLOCKLIST.indexOf(segments[i])" in JS and
+      "segments.length - 1" in JS)
 
 print("AI Chat image failover regression checks")
 for row in RESULTS:
