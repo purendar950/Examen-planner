@@ -1464,6 +1464,14 @@
     var detail = e && (e.message || e.detail || e.error) ? (e.message || e.detail || e.error) : 'Image generation failed';
     if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
     if (/failed to fetch|networkerror/i.test(String(detail))) detail = 'Image request could not reach either configured backend. ' + detail;
+    var text = String(detail);
+    var hasCredits = /insufficient credits|never purchased credits|purchase more at https:\/\/openrouter\.ai\/settings\/credits/i.test(text);
+    var hasGeminiLimit = /gemini[^|]*(?:http\s*429|rate[\s_-]*limit|try again shortly)/i.test(text);
+    if (hasCredits && hasGeminiLimit) {
+      detail = 'Gemini is temporarily rate-limited, and the configured OpenRouter account has no image credits. Add OpenRouter credits or configure another funded image provider, then retry.';
+    } else if (hasCredits) {
+      detail = 'The configured OpenRouter account has no image credits. Add credits or configure another funded image provider, then retry.';
+    }
     return String(detail).slice(0, 500);
   }
   function recordImageFailure(thread, prompt, userContent, sourceImageData, isEdit, e) {
@@ -1559,11 +1567,19 @@
     }).then(function (r) { return directImageResponse(r, provider, model); });
   }
   function requestDirectImageCandidates(candidates, prompt) {
-    var errors = [], startedAt = Date.now(), deadline = startedAt + DIRECT_IMAGE_TOTAL_TIMEOUT_MS;
+    var errors = [], blockedProviders = {}, startedAt = Date.now(), deadline = startedAt + DIRECT_IMAGE_TOTAL_TIMEOUT_MS;
+    function sharedProviderFailure(provider, detail) {
+      var text = String(detail || '').toLowerCase();
+      if (provider === 'google') return /http\s*429|rate[\s_-]*limit|quota|resource exhausted|try again shortly/.test(text);
+      if (provider === 'openrouter') return /http\s*402|insufficient credits|never purchased credits|purchase more|payment required/.test(text);
+      if (provider === 'omniroute') return /http\s*404|returned\s+404|endpoint[^.]{0,80}unavailable|ngrok[^.]{0,80}(offline|down)/.test(text);
+      return false;
+    }
     function attempt(index) {
+      while (index < candidates.length && blockedProviders[String(candidates[index].provider || '').toLowerCase()]) index += 1;
       if (index >= candidates.length) {
         var detail = errors.length ? errors.join(' | ') : 'No direct image candidate succeeded.';
-        throw new Error('Image generation failed after trying ' + candidates.length + ' configured models: ' + detail.slice(0, 900));
+        throw new Error('Image generation failed after provider failover: ' + detail.slice(0, 900));
       }
       var candidate = candidates[index];
       var remaining = deadline - Date.now();
@@ -1572,7 +1588,10 @@
       }
       return requestDirectImageCandidate(candidate, prompt, Math.min(150000, remaining)).catch(function (error) {
         var label = (candidate.provider || 'provider') + '/' + (candidate.model || 'image model');
-        errors.push(label + ': ' + String(error && error.message || error || 'request failed').slice(0, 220));
+        var message = String(error && error.message || error || 'request failed').slice(0, 220);
+        errors.push(label + ': ' + message);
+        var provider = String(candidate.provider || '').toLowerCase();
+        if (sharedProviderFailure(provider, message)) blockedProviders[provider] = true;
         return attempt(index + 1);
       });
     }

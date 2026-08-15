@@ -1935,6 +1935,25 @@ def _ai_chat_image_candidates(models, picked, max_n=None):
     return out
 
 
+def _ai_chat_image_shared_failure(provider, detail):
+    """Return True when retrying another model on the same provider cannot help.
+
+    Image catalogs can contain dozens of models, but some failures belong to the
+    shared provider account or transport rather than the selected model. In
+    those cases, continuing the full catalog creates a slow, noisy 502 while
+    never changing the underlying result.
+    """
+    provider = str(provider or "").strip().lower()
+    text = str(detail or "").lower()
+    if provider == "google":
+        return bool(re.search(r"http\s*429|rate[\s_-]*limit|quota|resource exhausted|try again shortly", text))
+    if provider == "openrouter":
+        return bool(re.search(r"http\s*402|insufficient credits|never purchased credits|purchase more|account[^.]{0,80}credit|payment required", text))
+    if provider == "omniroute":
+        return bool(re.search(r"http\s*404|returned\s+404|endpoint[^.]{0,80}unavailable|ngrok[^.]{0,80}(offline|down)", text))
+    return False
+
+
 def _ai_chat_tab_sys(persona=None):
     today = datetime.now(timezone.utc).strftime("%d %B %Y")
     base = ("You are a helpful, friendly AI assistant inside a study-planner app "
@@ -13751,17 +13770,31 @@ def api_ai_chat_image():
     if source_image:
         candidates = [candidate for candidate in candidates if candidate["provider"] == "omniroute"]
     failures = []
+    blocked_providers = set()
+    attempted = 0
+    skipped = 0
     for candidate in candidates:
-        data, result = _ai_chat_generate_image(raw_cfg, candidate["provider"], candidate["model"],
+        provider = str(candidate.get("provider") or "").strip().lower()
+        if provider in blocked_providers:
+            skipped += 1
+            continue
+        attempted += 1
+        data, result = _ai_chat_generate_image(raw_cfg, provider, candidate["model"],
                                                prompt, body.get("aspectRatio"), source_image or None)
         if data is not None:
             response = Response(data, mimetype=result)
             response.headers["X-Image-Provider"] = str(candidate["provider"])
             response.headers["X-Image-Model"] = str(candidate["model"])
             return response
-        failures.append("%s/%s: %s" % (candidate["provider"], candidate["model"], result))
-    detail = "Image generation failed after trying %d configured model%s. %s" % (
-        len(candidates), "" if len(candidates) == 1 else "s", " | ".join(failures)[:900])
+        result = str(result or "Image generation failed.")
+        failures.append("%s/%s: %s" % (provider, candidate["model"], result))
+        if _ai_chat_image_shared_failure(provider, result):
+            blocked_providers.add(provider)
+    skip_note = (" Skipped %d additional model%s after provider-wide rate-limit, "
+                 "credit, or endpoint failures." %
+                 (skipped, "" if skipped == 1 else "s")) if skipped else ""
+    detail = "Image generation failed after trying %d configured provider/model candidate%s.%s %s" % (
+        attempted, "" if attempted == 1 else "s", skip_note, " | ".join(failures)[:900])
     return jsonify({"error": "image_failed", "detail": detail}), 502
 
 
