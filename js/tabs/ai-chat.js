@@ -1780,7 +1780,7 @@
     function proxyImageRequest() {
       return backendAuthFetch('/api/ai-chat/image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        timeoutMs: 150000,
+        timeoutMs: 60000,
         body: JSON.stringify({ prompt: prompt, model: selected.key, sourceImageData: sourceImageData || undefined })
       }).then(function (r) {
         var actualProvider = r.headers.get('x-image-provider') || '';
@@ -1806,7 +1806,18 @@
     if (selectedHasDirect) {
       // User selected a model that has a built-in direct path (e.g. Pollinations).
       // Use the direct path — bypass the backend that ignores model selection.
-      imageRequest = requestDirectImageCandidate(directCandidates[0], prompt, 150000);
+      imageRequest = requestDirectImageCandidate(directCandidates[0], prompt, 120000);
+    } else if (selected.provider === 'omniroute' && directProviderConfig('omniroute')) {
+      // User selected an OmniRoute model and direct OmniRoute is configured.
+      // Try proxy first (fast, 60s timeout), then fall back to direct OmniRoute
+      // which routes the model key directly to the OmniRoute gateway.
+      var omniCandidate = { key: selected.key, provider: 'omniroute', model: selected.model, label: selected.label };
+      imageRequest = proxyImageRequest().catch(function (proxyErr) {
+        // If proxy returned a real API error (not timeout/fetch failure), show it
+        if (proxyErr && proxyErr._fromProxy) throw proxyErr;
+        // Proxy unreachable / timed out — try direct OmniRoute as fallback
+        return requestDirectImageCandidate(omniCandidate, prompt, 120000);
+      });
     } else if (directCandidates.length && !thread.imageModel) {
       // No explicit model selected (auto mode) — try proxy first, then direct fallback
       imageRequest = proxyImageRequest().catch(function (proxyErr) {
