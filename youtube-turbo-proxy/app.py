@@ -1859,9 +1859,10 @@ def _ai_chat_image_candidates(models, picked, max_n=None):
 
     The browser may remember Gemini as the selected image model, but a temporary
     Gemini quota/rate limit must not make every image request fail when the admin
-    has also configured OmniRoute image routes. Keep the user's selected model
-    first, then prefer OmniRoute's alternative routes, then other configured
-    providers. Every entry comes from the already-authorized image catalog.
+    has also configured OmniRoute or OpenRouter image routes. Keep the user's
+    selected model first, then prefer live OmniRoute routes, OpenRouter's
+    dedicated Image API, and other configured providers. Every entry comes from
+    the already-authorized image catalog.
     """
     if not picked:
         return []
@@ -1875,11 +1876,15 @@ def _ai_chat_image_candidates(models, picked, max_n=None):
     remaining = [m for m in (models or [])
                  if isinstance(m, dict)
                  and _ai_chat_model_key(m.get("provider"), m.get("model")) != selected_key]
-    # OmniRoute is deliberately first among fallbacks because it exposes the
-    # alternative image families advertised in its live catalog.
-    remaining.sort(key=lambda m: (0 if m.get("provider") == "omniroute" else 1,
-                                  str(m.get("provider") or ""),
-                                  str(m.get("model") or "")))
+    # Prefer image-specific alternatives before cycling through unrelated
+    # configured text providers. OpenRouter remains useful when every direct
+    # Gemini model is rate-limited, while OmniRoute is preferred only when its
+    # live catalog probe has confirmed that its tunnel is reachable.
+    def _fallback_priority(candidate):
+        provider = candidate.get("provider")
+        return (0 if provider == "omniroute" else 1 if provider == "openrouter" else 2,
+                str(provider or ""), str(candidate.get("model") or ""))
+    remaining.sort(key=_fallback_priority)
     for candidate in remaining:
         if len(out) >= cap:
             break
@@ -2149,6 +2154,64 @@ def _omniroute_image_model_id_is_route_compatible(model_id):
     return True
 
 
+def _openrouter_fetch_image_model_ids(cfg, force=False):
+    """Discover OpenRouter's dedicated Image API models.
+
+    OpenRouter keeps image routes in a separate catalog from chat models. The
+    catalog is optional: when no OpenRouter key is configured, or the catalog
+    is temporarily unavailable, callers retain the documented built-in image
+    fallback instead of treating the provider as configured.
+    """
+    now = time.time()
+    if (not force and now - _openrouter_image_models_cache["ts"] < _OPENROUTER_IMAGE_MODELS_TTL):
+        return list(_openrouter_image_models_cache["ids"])
+    keys = _configured_provider_keys(cfg, "openrouter")
+    if not keys:
+        return []
+    last_error = ""
+    for key in keys:
+        try:
+            response = requests.get(
+                OPENROUTER_IMAGE_MODELS_URL,
+                headers={
+                    "Authorization": "Bearer %s" % key,
+                    "HTTP-Referer": "https://purendar950.github.io/Examen-planner/",
+                    "X-Title": "Examen Planner AI Chat",
+                },
+                timeout=min(30, IMAGE_GEN_TIMEOUT),
+            )
+        except requests.RequestException as exc:
+            last_error = str(exc)[:180]
+            continue
+        if response.status_code >= 400:
+            last_error = "HTTP %s" % response.status_code
+            continue
+        try:
+            payload = response.json()
+        except ValueError:
+            last_error = "invalid JSON"
+            continue
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        ids = []
+        if isinstance(rows, list):
+            for row in rows:
+                if isinstance(row, str):
+                    model_id = row.strip()
+                elif isinstance(row, dict):
+                    model_id = str(row.get("id") or row.get("model") or "").strip()
+                else:
+                    model_id = ""
+                if model_id:
+                    ids.append(model_id)
+        ids = _clean_omniroute_catalog_ids(ids)
+        if ids:
+            _openrouter_image_models_cache.update({"ts": now, "ids": ids, "error": ""})
+            return ids
+        last_error = "catalog returned no image models"
+    _openrouter_image_models_cache.update({"ts": now, "error": last_error})
+    return list(_openrouter_image_models_cache["ids"])
+
+
 def _omniroute_snapshot_ids(cfg, kind):
     """Read one typed, machine-managed OmniRoute catalog from config/ai.
 
@@ -2196,10 +2259,24 @@ def _merge_unique_model_ids(*lists):
 #      time the catalog syncs, silently turning image generation off again.
 # Hence: a separate default catalog below, overridable from a separate config
 # field (config/ai.imageModels) that no chat-catalog refresh ever touches.
+OPENROUTER_IMAGES_URL = os.environ.get(
+    "OPENROUTER_IMAGES_URL", "https://openrouter.ai/api/v1/images"
+).strip().rstrip("/")
+OPENROUTER_IMAGE_MODELS_URL = os.environ.get(
+    "OPENROUTER_IMAGE_MODELS_URL", "https://openrouter.ai/api/v1/images/models"
+).strip().rstrip("/")
+_OPENROUTER_IMAGE_MODELS_TTL = max(60, min(
+    int(os.environ.get("OPENROUTER_IMAGE_MODELS_TTL", "900")), 3600))
+_openrouter_image_models_cache = {"ts": 0.0, "ids": [], "error": ""}
+
 IMAGE_PROVIDER_MODELS = {
     # Gemini's native image ("Nano Banana") models, called through the
     # Interactions API by _ai_chat_generate_image.
     "google": ["gemini-3.1-flash-image", "gemini-2.5-flash-image", "gemini-3-pro-image"],
+    # OpenRouter's dedicated Image API. This default is a documented image
+    # route; the live /images/models catalog is merged when an OpenRouter key
+    # is configured, so newer image models become available automatically.
+    "openrouter": ["bytedance-seed/seedream-4.5"],
     # OmniRoute's list is NOT hardcoded — it is discovered live from its
     # /v1/models catalog by _omniroute_fetch_image_model_ids() (see
     # _effective_image_models below), because the router's line-up changes
@@ -2209,12 +2286,15 @@ IMAGE_PROVIDER_MODELS = {
 }
 # Which transport each image provider speaks. "gemini_interactions" =
 # Google's Interactions API; "openai_images" = the standard OpenAI
-# POST /v1/images/generations contract that OmniRoute exposes.
+# POST /v1/images/generations contract that OmniRoute exposes; "openrouter_images"
+# = OpenRouter's dedicated POST /api/v1/images contract.
 IMAGE_PROVIDER_TRANSPORT = {
     "google": "gemini_interactions",
+    "openrouter": "openrouter_images",
     "omniroute": "openai_images",
 }
 IMAGE_PROVIDER_ENDPOINTS = {
+    "openrouter": OPENROUTER_IMAGES_URL,
     "omniroute": OMNIROUTE_IMAGES_URL,
 }
 
@@ -2251,6 +2331,12 @@ def _effective_image_models(cfg):
                 discovered = _omniroute_fetch_image_model_ids()
             out[pid] = [model_id for model_id in _merge_unique_model_ids(discovered, fallback)
                         if _omniroute_image_model_id_is_route_compatible(model_id)]
+        elif pid == "openrouter":
+            # OpenRouter keeps dedicated image models in a separate catalog.
+            # Refresh it only when an OpenRouter key is configured; a failed
+            # catalog probe must not erase the documented fallback model.
+            discovered = _openrouter_fetch_image_model_ids(cfg)
+            out[pid] = _merge_unique_model_ids(cleaned, discovered, default)
         elif cleaned:
             # Keep the administrator-selected models first, but do not discard
             # the provider's known image fallbacks. A single Gemini model can
@@ -2270,7 +2356,8 @@ def _ai_chat_image_models(cfg):
 
     Only providers with a server-side image code path are listed — see
     IMAGE_PROVIDER_TRANSPORT (`google` via the Gemini Interactions API,
-    `omniroute` via the standard OpenAI /v1/images/generations contract).
+    `openrouter` via the dedicated OpenRouter Image API, and `omniroute`
+    via the standard OpenAI /v1/images/generations contract).
     `google_interactions` is intentionally excluded: it denotes the
     interactions transport for chat and would just duplicate the same Gemini
     models under a second label."""
@@ -2526,8 +2613,9 @@ def _ai_chat_search(cfg, model_id, query, search_type="web", max_results=6):
 
 def _ai_chat_generate_image(cfg, provider, model_id, prompt, aspect_ratio=None, source_image=None):
     """Generate one image. Dispatches on the provider's image transport:
-      google    -> Gemini Interactions API (response_format {"type":"image"})
-      omniroute -> standard OpenAI POST /v1/images/generations
+      google     -> Gemini Interactions API
+      openrouter -> OpenRouter dedicated Image API
+      omniroute  -> standard OpenAI POST /v1/images/generations
     Returns (bytes, content_type) or (None, error_message).
 
     Keys are read straight from the provider's configured key list rather than
@@ -2547,12 +2635,16 @@ def _ai_chat_generate_image(cfg, provider, model_id, prompt, aspect_ratio=None, 
     if not keys:
         label = STUDY_PROVIDER_LABELS.get(provider, provider.title())
         return None, "No %s API key is configured for image generation." % label
-    if transport == "openai_images":
+    if transport in ("openai_images", "openrouter_images"):
         endpoint = IMAGE_PROVIDER_ENDPOINTS.get(provider)
         if not endpoint:
             return None, "No image endpoint is configured for that provider."
         if source_image:
+            if transport == "openrouter_images":
+                return None, "OpenRouter image editing is not enabled for this model."
             return _generate_image_openai_edits_api(OMNIROUTE_EDITS_URL, keys, model_id, prompt, source_image)
+        if transport == "openrouter_images":
+            return _generate_image_openrouter_images_api(endpoint, keys, model_id, prompt, aspect_ratio)
         return _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_ratio)
     if source_image:
         return None, "This Gemini transport does not support image edits; choose an OmniRoute image model."
@@ -2575,6 +2667,84 @@ def _aspect_ratio_to_size(aspect_ratio, base=1024):
     if w >= h:
         return "%dx%d" % (base, max(256, int(round(base * h / w / 64)) * 64))
     return "%dx%d" % (max(256, int(round(base * w / h / 64)) * 64), base)
+
+
+def _generate_image_openrouter_images_api(endpoint, keys, model_id, prompt, aspect_ratio=None):
+    """Call OpenRouter's dedicated Image API.
+
+    Unlike the OpenAI-compatible OmniRoute endpoint, OpenRouter's native
+    endpoint does not require ``size`` or ``response_format`` fields. It
+    returns the same normalized ``data`` list, usually with ``b64_json`` and
+    sometimes with a hosted ``url``; accepting both keeps the proxy contract
+    stable for the browser.
+    """
+    body = {"model": str(model_id or "").strip(), "prompt": prompt}
+    if aspect_ratio:
+        body["aspect_ratio"] = str(aspect_ratio)[:12]
+    last_err = "OpenRouter image generation failed."
+    for key in keys:
+        try:
+            response = requests.post(
+                endpoint,
+                headers={
+                    "Authorization": "Bearer %s" % key,
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://purendar950.github.io/Examen-planner/",
+                    "X-Title": "Examen Planner AI Chat",
+                },
+                json=body,
+                timeout=IMAGE_GEN_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            last_err = "OpenRouter image request failed: %s" % str(exc)[:150]
+            continue
+        if response.status_code == 429:
+            last_err = "OpenRouter returned HTTP 429 (try another model/provider shortly)."
+            continue
+        if response.status_code >= 500:
+            last_err = "OpenRouter returned HTTP %s (try again shortly)." % response.status_code
+            continue
+        if response.status_code >= 400:
+            detail = ""
+            try:
+                payload = response.json()
+                err = payload.get("error") if isinstance(payload, dict) else None
+                detail = (err.get("message") if isinstance(err, dict) else str(err or ""))[:240]
+            except Exception:  # noqa: BLE001
+                detail = response.text[:240]
+            return None, ("OpenRouter rejected the image request: %s" % detail
+                          if detail else "OpenRouter returned HTTP %s." % response.status_code)
+        try:
+            payload = response.json()
+        except ValueError:
+            return None, "OpenRouter returned an unreadable image response."
+        items = payload.get("data") if isinstance(payload, dict) else None
+        first = items[0] if isinstance(items, list) and items and isinstance(items[0], dict) else None
+        if not first:
+            return None, "OpenRouter returned no image for this prompt."
+        b64 = first.get("b64_json") or first.get("b64") or first.get("image_base64")
+        if b64:
+            try:
+                b64 = str(b64)
+                mime = "image/png"
+                if b64.startswith("data:") and "," in b64:
+                    header, b64 = b64.split(",", 1)
+                    mime = header[5:].split(";", 1)[0] or mime
+                return base64.b64decode(b64), mime
+            except Exception:  # noqa: BLE001
+                return None, "OpenRouter returned malformed image data."
+        url = first.get("url")
+        if url:
+            try:
+                image_response = requests.get(url, timeout=IMAGE_GEN_TIMEOUT)
+                ctype = image_response.headers.get("Content-Type", "image/png").split(";", 1)[0].strip()
+                if image_response.status_code == 200 and image_response.content and ctype.startswith("image/"):
+                    return image_response.content, ctype
+                return None, "Could not download the OpenRouter generated image."
+            except requests.RequestException as exc:
+                return None, "Could not download the OpenRouter generated image: %s" % str(exc)[:120]
+        return None, "OpenRouter returned no usable image data."
+    return None, last_err
 
 
 def _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_ratio=None):
@@ -12982,7 +13152,7 @@ def api_ai_chat_delete_file(file_id):
 
 @app.route("/api/ai-chat/image", methods=["POST"])
 def api_ai_chat_image():
-    """Generate an image through a configured Google or OmniRoute image model.
+    """Generate an image through a configured image provider.
     Returns validated image bytes directly so the browser can render the result
     without exposing provider credentials or upstream URLs."""
     user, _chat_cfg, _is_admin, err = _ai_chat_authorize()
