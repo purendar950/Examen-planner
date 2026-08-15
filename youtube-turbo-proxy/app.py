@@ -2019,6 +2019,26 @@ def _ai_chat_image_shared_failure(provider, detail):
     return False
 
 
+# The browser accepts two edit formats and applies them per file, with a
+# checkpoint the student can undo. Search/replace is described first and named as
+# the preferred one because it carries no line numbers: models miscount `@@`
+# headers constantly, and the applier used to reject an entire multi-file patch
+# over one wrong count — which pushed models back into rewriting whole files.
+# Unified diff stays supported, since stronger models emit it well.
+_AI_CHAT_EDIT_FORMAT = (
+    "EDIT FORMAT: prefer search/replace blocks. Write the path on its own line as "
+    "`FILE: relative/path.ext`, then a fenced block containing `<<<<<<< SEARCH`, "
+    "the exact current lines, `=======`, the replacement lines, and "
+    "`>>>>>>> REPLACE`. Repeat the SEARCH/REPLACE pair once per separate edit in "
+    "that file. Copy the SEARCH lines exactly as they appear in the file you were "
+    "shown, including indentation, and include just enough lines to be unique. To "
+    "append new code leave the SEARCH section empty. A unified diff using "
+    "`diff --git a/path b/path`, `--- a/path`, `+++ b/path` and `@@` hunks is also "
+    "accepted; prefer it only when you can reproduce context exactly. Never return "
+    "a complete file for an edit unless the student explicitly asks for one."
+)
+
+
 def _ai_chat_tab_sys(persona=None):
     today = datetime.now(timezone.utc).strftime("%d %B %Y")
     base = ("You are a helpful, friendly AI assistant inside a study-planner app "
@@ -13616,8 +13636,8 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
         sysmsg += ("\n\nCODING WORKSPACE MODE: Treat this as an engineering task. First state the "
                    "goal and assumptions briefly. If repository or active file context is present, "
                    "name the relevant file paths and explain the smallest safe change. For an active "
-                   "file, never rewrite the complete file unless explicitly requested: return an exact "
-                   "unified diff with @@ hunks that can be reviewed and applied in the browser. "
+                   "file, never rewrite the complete file unless explicitly requested: return a "
+                   "reviewable edit that the browser can apply. " + _AI_CHAT_EDIT_FORMAT + " "
                    "Return complete code only for a new file or an explicit full-replacement request. "
                    "Include a concise verification section with tests, commands, expected results, "
                    "and limitations. Never claim that code was executed, a file was changed, or a "
@@ -13691,22 +13711,29 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                        "Current content:\n```%s\n%s\n```\n"
                        "PATCH-ONLY EDIT CONTRACT: when the student asks to improve, fix, refactor, "
                        "or change this active file, make the smallest necessary edit and do not return "
-                       "the complete file. Return exactly one fenced path-aware diff block with exact "
-                       "@@ hunk counts and current-file context. Then add a short explanation and "
-                       "verification steps outside the diff. Only return a full file when explicitly "
-                       "requested or when creating a new file.\n" %
-                       (active_path, active_language, active_language, active_content))
+                       "the complete file. %s Then add a short explanation and verification steps "
+                       "outside the edit blocks. Only return a full file when explicitly requested or "
+                       "when creating a new file.\n" %
+                       (active_path, active_language, active_language, active_content,
+                        _AI_CHAT_EDIT_FORMAT))
         else:
-            workspace_dump = "\n\n".join("PATH: %s\nLANGUAGE: %s\n```%s\n%s\n```" % item for item in normalized_files)
+            # The format string needs the language twice — once as the LANGUAGE
+            # label and once as the fence tag — but `item` is a 3-tuple of
+            # (path, language, content). Interpolating the tuple directly raised
+            # "TypeError: not enough arguments for format string" on every
+            # multi-file workspace request, so multi-file editing always failed
+            # before the model was ever called. The single-file branch above
+            # already passes the language twice; this mirrors it.
+            workspace_dump = "\n\n".join(
+                "PATH: %s\nLANGUAGE: %s\n```%s\n%s\n```" % (path, language, language, content)
+                for path, language, content in normalized_files)
             sysmsg += ("\n\nACTIVE LOCAL WORKSPACE FILE SET (the browser owns these files; they have not been "
-                       "written to GitHub or the server):\n%s\n\nMULTI-FILE PATCH CONTRACT: the selected files are the only files you may edit. Return "
-                       "exactly one fenced unified diff containing one path-aware section per changed "
-                       "file, using `diff --git a/path b/path`, `--- a/path`, `+++ b/path`, and exact "
-                       "@@` hunk counts. Preserve unchanged context lines. Do not return complete "
-                       "files, do not edit unselected files, and do not emit a replacement file. "
-                       "Follow the diff with a concise summary and verification steps outside the diff. "
-                       "If only one file needs a change, emit one file section. If no change is needed, "
-                       "say so without a diff.\n" % workspace_dump)
+                       "written to GitHub or the server):\n%s\n\nMULTI-FILE EDIT CONTRACT: the selected files are the only files you may "
+                       "edit. %s Group the edits for one file together and repeat the `FILE:` header "
+                       "for each file you change. Do not edit unselected files. Follow the edits with a "
+                       "concise summary and verification steps outside the blocks. If only one file "
+                       "needs a change, edit only that file. If no change is needed, say so without "
+                       "emitting an edit block.\n" % (workspace_dump, _AI_CHAT_EDIT_FORMAT))
     messages = [{"role": "system", "content": sysmsg}]
 
     history = body.get("history") or []

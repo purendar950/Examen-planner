@@ -2748,7 +2748,7 @@
     var t = getThread(currentThreadId()), file = activeWorkspaceFile(t), input = document.getElementById('aic-input');
     if (!file || !input) { toast('Open a code file first.', 'error'); return; }
     var paths = workspacePatchFiles(t).map(function (item) { return item.path; });
-    input.value = 'Improve only the necessary parts of the selected workspace files (' + paths.join(', ') + '). Do not rewrite complete files. Return one path-aware multi-file unified diff with exact hunks, followed by a brief explanation and verification steps.';
+    input.value = 'Improve only the necessary parts of the selected workspace files (' + paths.join(', ') + '). Do not rewrite complete files. For each change give a FILE: path line and a <<<<<<< SEARCH / ======= / >>>>>>> REPLACE block copying the current lines exactly, followed by a brief explanation and verification steps.';
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 180) + 'px';
     input.focus();
@@ -2777,61 +2777,258 @@
     return sections;
   }
   function comparablePath(path) { return String(path || '').replace(/^(?:a|b)\//, '').replace(/^\.\//, ''); }
-  function applyUnifiedDiff(source, patch) {
-    var src = String(source || '').replace(/\r\n/g, '\n').split('\n');
-    var lines = String(patch || '').replace(/\r\n/g, '\n').split('\n');
-    var out = [], cursor = 0, i = 0, sawHunk = false;
-    while (i < lines.length) {
-      var hunk = lines[i].match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-      if (!hunk) { i += 1; continue; }
-      sawHunk = true;
-      var oldExpected = hunk[2] == null ? 1 : Number(hunk[2]);
-      var newExpected = hunk[4] == null ? 1 : Number(hunk[4]);
-      var oldConsumed = 0, newProduced = 0;
-      var oldStart = Math.max(0, Number(hunk[1]) - 1);
-      while (cursor < oldStart) out.push(src[cursor++]);
-      i += 1;
-      while (i < lines.length && !/^@@ /.test(lines[i]) && !/^diff --git /.test(lines[i])) {
-        var line = lines[i];
-        if (line === '\\ No newline at end of file') { i += 1; continue; }
-        var marker = line.charAt(0), value = line.slice(1);
-        if (marker === ' ') { if (src[cursor] !== value) return { error: 'Patch context does not match ' + (cursor + 1) + '. Refresh the file and ask AI for a new diff.' }; out.push(src[cursor++]); oldConsumed += 1; newProduced += 1; }
-        else if (marker === '-') { if (src[cursor] !== value) return { error: 'Patch removal does not match line ' + (cursor + 1) + '.' }; cursor += 1; oldConsumed += 1; }
-        else if (marker === '+') { out.push(value); newProduced += 1; }
-        else if (line !== '') return { error: 'Unsupported patch line: ' + line.slice(0, 80) };
-        i += 1;
-      }
-      if (oldConsumed !== oldExpected || newProduced !== newExpected) return { error: 'Patch hunk line counts do not match its header. Ask AI for a fresh diff.' };
+  /* ── Locating edits in a file ──────────────────────────────────────────────
+     Models are unreliable about two things: the line numbers in `@@` headers,
+     and reproducing context lines byte-for-byte (indentation and trailing
+     whitespace drift constantly). The previous applier demanded both, aborted
+     the whole patch on the first mismatch, and that is why the model kept
+     falling back to rewriting entire files.
+
+     So the stated line is treated as a hint, not a fact. We search outward from
+     it in three widening tiers: exact, ignoring trailing whitespace, then
+     ignoring all internal whitespace. The loosest tier needs at least two
+     non-blank lines to anchor on, because a single re-spaced line matches in too
+     many places to be safe. */
+  function looseLine(line) { return String(line == null ? '' : line).replace(/\s+/g, ' ').trim(); }
+  function linesMatchAt(hay, needle, at, tier) {
+    if (at < 0 || at + needle.length > hay.length) return false;
+    for (var i = 0; i < needle.length; i += 1) {
+      var a = String(hay[at + i] == null ? '' : hay[at + i]), b = String(needle[i] == null ? '' : needle[i]);
+      if (tier === 0) { if (a !== b) return false; }
+      else if (tier === 1) { if (a.replace(/\s+$/, '') !== b.replace(/\s+$/, '')) return false; }
+      else if (looseLine(a) !== looseLine(b)) return false;
     }
-    if (!sawHunk) return { error: 'No unified diff hunk was found.' };
+    return true;
+  }
+  function findLines(hay, needle, hinted, from) {
+    if (!needle.length) return { at: Math.max(from, Math.min(hinted, hay.length)), tier: 0 };
+    var anchors = needle.filter(function (line) { return String(line || '').trim(); }).length;
+    var start = Math.max(from, 0), maxTier = anchors >= 2 ? 2 : 1;
+    for (var tier = 0; tier <= maxTier; tier += 1) {
+      var hint = Math.max(start, Math.min(hinted, hay.length));
+      if (linesMatchAt(hay, needle, hint, tier)) return { at: hint, tier: tier };
+      for (var delta = 1; delta <= hay.length; delta += 1) {
+        var down = hint + delta, up = hint - delta;
+        if (down >= start && linesMatchAt(hay, needle, down, tier)) return { at: down, tier: tier };
+        if (up >= start && linesMatchAt(hay, needle, up, tier)) return { at: up, tier: tier };
+        if (down > hay.length && up < start) break;
+      }
+    }
+    return null;
+  }
+  /* Hunks are kept as ordered ops rather than pre-joined text so that context
+     lines can be taken from the FILE when applying. A loose-tier match means the
+     model's context differs cosmetically from reality; echoing its version back
+     would silently reformat lines it was never asked to touch. */
+  function parseHunks(patch) {
+    var lines = String(patch || '').replace(/\r\n/g, '\n').split('\n');
+    var hunks = [], cur = null, i;
+    for (i = 0; i < lines.length; i += 1) {
+      var line = lines[i];
+      var header = line.match(/^\s*@@+\s*-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s*@@/);
+      if (header) { cur = { start: Math.max(0, Number(header[1]) - 1), ops: [] }; hunks.push(cur); continue; }
+      if (!cur) continue;
+      if (/^diff --git /.test(line) || /^index /.test(line) || /^--- /.test(line) || /^\+\+\+ /.test(line)) { cur = null; continue; }
+      if (line === '\\ No newline at end of file') continue;
+      var marker = line.charAt(0), value = line.slice(1);
+      if (marker === ' ') cur.ops.push({ type: ' ', value: value });
+      else if (marker === '-') cur.ops.push({ type: '-', value: value });
+      else if (marker === '+') cur.ops.push({ type: '+', value: value });
+      /* A wholly empty line is an unchanged blank line whose leading space was
+         trimmed somewhere between the model and the fence. */
+      else if (line === '') cur.ops.push({ type: ' ', value: '' });
+    }
+    hunks.forEach(function (hunk) {
+      /* Drop trailing blank context so a stray newline before the closing fence
+         cannot invent a line the file does not have. */
+      while (hunk.ops.length && hunk.ops[hunk.ops.length - 1].type === ' '
+             && hunk.ops[hunk.ops.length - 1].value === '') hunk.ops.pop();
+      hunk.old = hunk.ops.filter(function (op) { return op.type !== '+'; })
+                         .map(function (op) { return op.value; });
+    });
+    return hunks.filter(function (hunk) { return hunk.ops.length; });
+  }
+  /* ''.split('\n') is [''], which would seed a brand-new file with a leading
+     blank line when an edit creates one from nothing. */
+  function sourceLines(source) {
+    var text = String(source == null ? '' : source).replace(/\r\n/g, '\n');
+    return text === '' ? [] : text.split('\n');
+  }
+  function applyUnifiedDiff(source, patch) {
+    var src = sourceLines(source);
+    var hunks = parseHunks(patch);
+    if (!hunks.length) return { error: 'no unified diff hunk was found' };
+    var out = [], cursor = 0, fuzzy = 0, i;
+    for (i = 0; i < hunks.length; i += 1) {
+      var hunk = hunks[i];
+      var found = findLines(src, hunk.old, hunk.start, cursor);
+      if (!found) {
+        var anchor = (hunk.old.find(function (line) { return String(line || '').trim(); }) || '').trim();
+        return { error: 'hunk ' + (i + 1) + ' does not match the current file'
+                        + (anchor ? ' near "' + anchor.slice(0, 60) + '"' : '') };
+      }
+      if (found.at !== hunk.start || found.tier > 0) fuzzy += 1;
+      while (cursor < found.at) out.push(src[cursor++]);
+      var oldIndex = 0;
+      hunk.ops.forEach(function (op) {
+        if (op.type === ' ') { out.push(src[found.at + oldIndex]); oldIndex += 1; }
+        else if (op.type === '-') { oldIndex += 1; }
+        else out.push(op.value);
+      });
+      cursor = found.at + hunk.old.length;
+    }
     while (cursor < src.length) out.push(src[cursor++]);
-    return { content: out.join('\n') };
+    return { content: out.join('\n'), edits: hunks.length, fuzzy: fuzzy };
+  }
+  /* ── SEARCH/REPLACE edit blocks ────────────────────────────────────────────
+     A second accepted edit format:
+
+       FILE: js/app.js
+       <<<<<<< SEARCH
+       const x = 1;
+       =======
+       const x = 2;
+       >>>>>>> REPLACE
+
+     There are no line numbers to get wrong, which makes it markedly more
+     reliable than unified diff on the free models this app routes through. It is
+     parsed line by line rather than with one regex: marker widths vary between
+     models, and a pattern covering every shape plus optional FILE: headers would
+     be unreadable. */
+  function safeArtifactPath(value) {
+    var path = String(value || '').trim().replace(/^['"]|['"]$/g, '').replace(/^\/+/, '');
+    if (!path || path.indexOf('..') !== -1) return '';
+    return path.slice(0, 180);
+  }
+  function hasSearchReplace(code) {
+    return /^\s*<{5,}\s*SEARCH\b/im.test(String(code || ''));
+  }
+  function parseSearchReplaceBlocks(code, fallbackPath) {
+    var lines = String(code || '').replace(/\r\n/g, '\n').split('\n');
+    var blocks = [], path = safeArtifactPath(fallbackPath), i = 0;
+    while (i < lines.length) {
+      var head = lines[i].match(/^\s*(?:FILE|PATH)\s*:\s*(.+?)\s*$/i);
+      if (head) { path = safeArtifactPath(head[1]) || path; i += 1; continue; }
+      if (/^\s*<{5,}\s*SEARCH\b/i.test(lines[i])) {
+        var search = [], replace = [], stage = 'search';
+        i += 1;
+        while (i < lines.length) {
+          if (stage === 'search' && /^\s*={5,}\s*$/.test(lines[i])) { stage = 'replace'; i += 1; continue; }
+          if (/^\s*>{5,}\s*REPLACE\b/i.test(lines[i])) { i += 1; break; }
+          (stage === 'search' ? search : replace).push(lines[i]);
+          i += 1;
+        }
+        if (path) blocks.push({ path: path, search: search, replace: replace });
+        continue;
+      }
+      i += 1;
+    }
+    return blocks;
+  }
+  function applySearchReplace(source, blocks) {
+    var src = sourceLines(source);
+    var fuzzy = 0, cursor = 0, i;
+    for (i = 0; i < blocks.length; i += 1) {
+      var block = blocks[i];
+      /* An empty SEARCH means "append", which is how models express adding a new
+         function or import to a file they were not given in full. */
+      if (!block.search.length) { src = src.concat(block.replace); cursor = src.length; continue; }
+      var found = findLines(src, block.search, cursor, 0);
+      if (!found) {
+        var anchor = (block.search.find(function (line) { return String(line || '').trim(); }) || '').trim();
+        return { error: 'search block ' + (i + 1) + ' was not found in the file'
+                        + (anchor ? ' near "' + anchor.slice(0, 60) + '"' : '') };
+      }
+      if (found.tier > 0) fuzzy += 1;
+      src = src.slice(0, found.at).concat(block.replace, src.slice(found.at + block.search.length));
+      cursor = found.at + block.replace.length;
+    }
+    return { content: src.join('\n'), edits: blocks.length, fuzzy: fuzzy };
+  }
+  function isApplyableCode(code, lang) {
+    return isDiffCode(code, lang) || hasSearchReplace(code);
+  }
+  /* Group every edit in the artifact by target path, so one unresolvable file
+     cannot discard the edits that did apply cleanly. */
+  function collectArtifactEdits(code, activePath) {
+    var plans = [];
+    function planFor(path) {
+      var key = comparablePath(path);
+      var found = plans.find(function (plan) { return plan.key === key; });
+      if (!found) { found = { key: key, path: path, blocks: [], patch: '' }; plans.push(found); }
+      return found;
+    }
+    if (hasSearchReplace(code)) {
+      parseSearchReplaceBlocks(code, activePath).forEach(function (block) {
+        planFor(block.path).blocks.push(block);
+      });
+      return plans;
+    }
+    splitMultiFilePatch(code).forEach(function (section) {
+      var target = patchTargetPaths(section)[0] || activePath;
+      if (!target) return;
+      var plan = planFor(target);
+      plan.patch += (plan.patch ? '\n' : '') + section;
+      plan.createsFile = plan.createsFile || /^---\s+\/dev\/null/m.test(section);
+      plan.deletesFile = plan.deletesFile || /^\+\+\+\s+\/dev\/null/m.test(section);
+    });
+    return plans;
   }
   window.aicApplyArtifact = function (btn) {
-    var card = btn && btn.closest('.aic-code-artifact'), t = getThread(currentThreadId()), ws, patch, sections, drafts = [], seen = {};
+    var card = btn && btn.closest('.aic-code-artifact'), t = getThread(currentThreadId());
     if (!card || !t) return;
-    ws = workspaceState(t);
-    patch = card.getAttribute('data-code') || '';
-    sections = splitMultiFilePatch(patch);
-    sections.forEach(function (section) {
-      var targets = patchTargetPaths(section), target = comparablePath(targets[0] || ''), file, result;
-      if (!target || seen[target]) return;
-      seen[target] = true;
-      file = ws.files.find(function (item) { return comparablePath(item.path) === target; });
-      if (!file) { drafts.push({ error: 'Patch targets ' + target + ', but that file is not open in the workspace.' }); return; }
-      result = applyUnifiedDiff(file.content, section);
-      if (result.error) drafts.push({ error: target + ': ' + result.error });
-      else drafts.push({ file: file, content: result.content });
+    var ws = workspaceState(t), code = card.getAttribute('data-code') || '';
+    var plans = collectArtifactEdits(code, ws.activePath);
+    if (!plans.length) { toast('No path-aware file edits were found in this block.', 'error'); return; }
+    var applied = [], failed = [], created = [], fuzzy = 0;
+    plans.forEach(function (plan) {
+      var file = ws.files.find(function (item) { return comparablePath(item.path) === plan.key; });
+      if (plan.deletesFile) { failed.push(plan.path + ': deleting files is not applied automatically'); return; }
+      if (!file) {
+        /* A diff against /dev/null, or a SEARCH/REPLACE block with nothing to
+           search for, is a new file rather than a failed edit. */
+        var isNew = plan.createsFile
+          || (plan.blocks.length && plan.blocks.every(function (block) { return !block.search.length; }));
+        if (!isNew) { failed.push(plan.path + ': not open in the workspace'); return; }
+        var seedResult = plan.blocks.length
+          ? applySearchReplace('', plan.blocks)
+          : applyUnifiedDiff('', plan.patch);
+        if (seedResult.error) { failed.push(plan.path + ': ' + seedResult.error); return; }
+        created.push({ path: plan.path, language: workspaceLanguage(plan.path), content: seedResult.content,
+                       originalContent: '', dirty: true, source: 'ai-artifact', revision: 0 });
+        return;
+      }
+      var result = plan.blocks.length
+        ? applySearchReplace(file.content, plan.blocks)
+        : applyUnifiedDiff(file.content, plan.patch);
+      if (result.error) { failed.push(comparablePath(file.path) + ': ' + result.error); return; }
+      fuzzy += result.fuzzy || 0;
+      applied.push({ file: file, content: result.content, edits: result.edits || 0 });
     });
-    if (!drafts.length) { toast('No path-aware file patches were found.', 'error'); return; }
-    var failure = drafts.find(function (item) { return item.error; });
-    if (failure) { toast(failure.error + ' No files were changed.', 'error'); return; }
-    saveWorkspaceCheckpoint(t, 'Before applying AI patch');
-    drafts.forEach(function (item) { item.file.content = item.content; item.file.dirty = true; });
+    if (!applied.length && !created.length) {
+      toast('Could not apply this edit — ' + (failed[0] || 'no matching files') + '.', 'error');
+      return;
+    }
+    saveWorkspaceCheckpoint(t, 'Before applying AI edit');
+    applied.forEach(function (item) { item.file.content = item.content; item.file.dirty = true; });
+    created.forEach(function (file) { ws.files.push(file); ws.activePath = file.path; });
+    if (created.length) {
+      ws.selectedPaths = ws.selectedPaths || [];
+      created.forEach(function (file) {
+        if (ws.selectedPaths.indexOf(file.path) === -1) ws.selectedPaths.push(file.path);
+      });
+    }
     ws.lastRun = null;
     upsertThread(t);
     renderWorkspace();
-    toast('Applied reviewed patch to ' + drafts.length + ' file' + (drafts.length === 1 ? '' : 's') + '. Review before saving.', 'success');
+    var touched = applied.length + created.length;
+    var note = 'Applied to ' + touched + ' of ' + plans.length + ' file' + (plans.length === 1 ? '' : 's');
+    if (created.length) note += ' · created ' + created.length;
+    /* Say when context had to be matched loosely: the edit landed, but the
+       model's idea of the file was slightly stale and it is worth a look. */
+    if (fuzzy) note += ' · ' + fuzzy + ' relocated';
+    if (failed.length) note += ' · skipped ' + failed[0];
+    toast(note + '. Review before saving.', failed.length ? 'info' : 'success');
   };
   window.aicWorkspaceRun = function () {
     var t = getThread(currentThreadId()), file = activeWorkspaceFile(t);
@@ -2874,7 +3071,7 @@
   window.aicWorkspaceFixRun = function () {
     var t = getThread(currentThreadId()), file = activeWorkspaceFile(t), result = workspaceState(t) && workspaceState(t).lastRun, input = document.getElementById('aic-input');
     if (!file || !result || !input) return;
-    input.value = 'Fix the active file ' + file.path + ' using this exact run output. Make the smallest necessary change; return a unified diff only, not a complete rewritten file.\n\nRUN OUTPUT:\n' + [result.stdout || '', result.stderr || '', result.detail || ''].filter(Boolean).join('\n');
+    input.value = 'Fix the active file ' + file.path + ' using this exact run output. Make the smallest necessary change; return a FILE: path line plus <<<<<<< SEARCH / ======= / >>>>>>> REPLACE blocks, not a complete rewritten file.\n\nRUN OUTPUT:\n' + [result.stdout || '', result.stderr || '', result.detail || ''].filter(Boolean).join('\n');
     input.style.height = 'auto';
     input.style.height = Math.min(input.scrollHeight, 180) + 'px';
     input.focus();
@@ -3001,6 +3198,9 @@
     var raw = String(code || '').replace(/\r\n/g, '\n');
     var normalizedLang = codingLanguage(lang);
     var diff = isDiffCode(raw, normalizedLang);
+    var searchReplace = hasSearchReplace(raw);
+    /* Both formats get the Apply button; only unified diff gets +/- colouring. */
+    var editable = diff || searchReplace;
     var lines = raw.split('\n');
     if (lines.length && lines[lines.length - 1] === '') lines.pop();
     var rendered = lines.map(function (line, lineIndex) {
@@ -3012,15 +3212,25 @@
       }
       return '<span class="aic-code-line' + cls + '"><span class="aic-code-ln">' + (lineIndex + 1) + '</span>' + esc(line) + '</span>';
     }).join('');
-    var targetPaths = diff ? patchTargetPaths(raw) : [], targetPath = targetPaths.join(',');
-    var safeTitle = title || (diff ? (targetPaths.length > 1 ? 'Suggested multi-file patch' : 'Suggested patch') : 'Code artifact');
-    var fixPrompt = diff
-      ? 'Review this suggested patch and return a corrected unified diff only. Do not rewrite the complete file. Preserve unchanged lines and include exact @@ hunks.\n\n```diff\n' + raw + '\n```'
-      : 'Review and improve this code. If an active file is open, change only the necessary lines and return a unified diff; otherwise return a complete new-file artifact.' + (normalizedLang !== 'text' ? '\nLanguage: ' + normalizedLang : '') + '\n\n```' + normalizedLang + '\n' + raw + '\n```';
+    var targetPaths = [];
+    if (searchReplace) {
+      parseSearchReplaceBlocks(raw, '').forEach(function (block) {
+        if (block.path && targetPaths.indexOf(block.path) === -1) targetPaths.push(block.path);
+      });
+    } else if (diff) {
+      targetPaths = patchTargetPaths(raw);
+    }
+    var targetPath = targetPaths.join(',');
+    var safeTitle = title || (editable
+      ? (targetPaths.length > 1 ? 'Suggested multi-file edit' : 'Suggested edit')
+      : 'Code artifact');
+    var fixPrompt = editable
+      ? 'This suggested edit did not apply. Return a corrected edit only, not a complete file. Prefer a FILE: path line plus <<<<<<< SEARCH / ======= / >>>>>>> REPLACE blocks, copying the current file lines exactly.\n\n```' + (searchReplace ? 'text' : 'diff') + '\n' + raw + '\n```'
+      : 'Review and improve this code. If an active file is open, change only the necessary lines and return SEARCH/REPLACE edit blocks; otherwise return a complete new-file artifact.' + (normalizedLang !== 'text' ? '\nLanguage: ' + normalizedLang : '') + '\n\n```' + normalizedLang + '\n' + raw + '\n```';
     return '<section class="aic-code-artifact" data-code="' + escAttr(raw) + '" data-language="' + escAttr(normalizedLang) + '" data-target="' + escAttr(targetPath) + '">' +
       '<div class="aic-code-head"><span class="aic-code-title">' + esc(safeTitle) + '</span><span class="aic-code-lang">' + esc(normalizedLang) + '</span>' +
-      '<button type="button" onclick="aicCopyArtifact(this)">Copy</button><button type="button" onclick="aicDownloadArtifact(this)">Download</button>' + (diff ? '<button type="button" onclick="aicApplyArtifact(this)">Apply to file</button>' : '') + '<button type="button" class="aic-code-fix" data-fix="' + escAttr(fixPrompt) + '" onclick="aicFixArtifact(this)">Try fixing</button></div>' +
-      '<pre class="aic-code-body">' + rendered + '</pre>' + (diff ? '<div class="aic-code-status">Suggested ' + (targetPaths.length > 1 ? 'multi-file diff · ' + esc(targetPaths.join(', ')) : 'diff · ' + esc(targetPaths[0] || 'active file')) + ' · all files are validated before application.</div>' : '') + '</section>';
+      '<button type="button" onclick="aicCopyArtifact(this)">Copy</button><button type="button" onclick="aicDownloadArtifact(this)">Download</button>' + (editable ? '<button type="button" onclick="aicApplyArtifact(this)">Apply to file</button>' : '') + '<button type="button" class="aic-code-fix" data-fix="' + escAttr(fixPrompt) + '" onclick="aicFixArtifact(this)">Try fixing</button></div>' +
+      '<pre class="aic-code-body">' + rendered + '</pre>' + (editable ? '<div class="aic-code-status">' + (searchReplace ? 'Search/replace edit' : 'Unified diff') + ' · ' + (targetPaths.length ? esc(targetPaths.join(', ')) : 'active file') + ' · applied per file, with a checkpoint you can undo.</div>' : '') + '</section>';
   }
   function renderAssistantBody(text, message) {
     var source = String(text || '');
@@ -3277,7 +3487,11 @@
     var existingWorkspace = workspaceRequest(t);
     var requestedWorkspace = creatingProject ? null : existingWorkspace;
     var workspaceEditIntent = !!existingWorkspace && /\b(improve|change|modify|update|remove|add|replace|refactor|fix|debug|edit|rewrite)\b/i.test(q);
-    var codingIntent = creatingProject || isCodingRequest(q) || workspaceEditIntent;
+    /* t.codingMode is the ⌘ Coding chip. It used to be stored per thread and
+       never sent, so coding behaviour depended entirely on the prompt tripping
+       isCodingRequest() — the button did nothing. Honouring it lets the user turn
+       the patch contracts on when their wording misses the keyword heuristics. */
+    var codingIntent = !!t.codingMode || creatingProject || isCodingRequest(q) || workspaceEditIntent;
     var projectWorkflow = creatingProject || largeProject || workspaceEditIntent || !!(projectState(t) && projectState(t).active && /\b(continue|next milestone|finish|complete|verify|test|run|polish)\b/i.test(q));
     if (projectWorkflow) beginProject(t, q, creatingProject ? 'create' : 'edit');
     var body = {
