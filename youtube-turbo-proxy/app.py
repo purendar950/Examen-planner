@@ -1058,6 +1058,17 @@ OMNIROUTE_EDITS_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/edits"
 OMNIROUTE_SEARCH_URL = OMNIROUTE_URL.replace("/chat/completions", "/search")
 OMNIROUTE_TTS_URL = OMNIROUTE_URL.replace("/chat/completions", "/audio/speech")
 OMNIROUTE_VIDEO_URL = OMNIROUTE_URL.replace("/chat/completions", "/videos/generations")
+# OpenRouter exposes video generation as an asynchronous API. It is used only
+# as a server-side fallback when the configured OmniRoute video route is absent
+# or unavailable; keys never reach the browser.
+OPENROUTER_VIDEO_URL = os.environ.get(
+    "OPENROUTER_VIDEO_URL", "https://openrouter.ai/api/v1/videos"
+).strip().rstrip("/")
+OPENROUTER_VIDEO_FALLBACK_MODELS = [
+    value.strip() for value in os.environ.get(
+        "OPENROUTER_VIDEO_MODELS", "google/veo-3.1,minimax/hailuo-3"
+    ).split(",") if value.strip()
+]
 # Typed OmniRoute routes expose their own catalogs. Keep this cache short so a
 # newly-enabled provider appears without making every chat-status request block.
 _OMNIROUTE_TYPED_CATALOG_TTL = max(60, min(int(os.environ.get("OMNIROUTE_TYPED_CATALOG_TTL", "300")), 1800))
@@ -2496,9 +2507,14 @@ def _run_ai_chat_video_job(job_id):
         job["status"] = "running"
         job["updated_at"] = time.time()
     try:
-        result, detail, content_type, used_model = _ai_chat_generate_video(
-            job["cfg"], job["requested_model"], job["prompt"],
-            job["aspect_ratio"], job.get("duration"), job.get("source_image"))
+        if str(job.get("requested_model") or "").startswith("openrouter/"):
+            result, detail, content_type, used_model = _openrouter_generate_video(
+                job["cfg"], job["requested_model"], job["prompt"],
+                job["aspect_ratio"], job.get("duration"), job.get("source_image"))
+        else:
+            result, detail, content_type, used_model = _ai_chat_generate_video(
+                job["cfg"], job["requested_model"], job["prompt"],
+                job["aspect_ratio"], job.get("duration"), job.get("source_image"))
         with _ai_chat_video_jobs_lock:
             if detail:
                 job["status"] = "failed"
@@ -2542,13 +2558,22 @@ def api_ai_chat_video_job_start():
     if err:
         return jsonify(err[0]), err[1]
     raw_cfg = _load_study_raw_cfg()
-    if not _provider_configured(raw_cfg, "omniroute"):
+    omniroute_configured = _provider_configured(raw_cfg, "omniroute")
+    openrouter_configured = _provider_configured(raw_cfg, "openrouter")
+    if not omniroute_configured and not openrouter_configured:
         return jsonify({"error": "video_not_configured",
-                        "detail": "OmniRoute video generation is not configured."}), 503
+                        "detail": "No video provider is configured. Add an OmniRoute or OpenRouter API key."}), 503
     body = request.get_json(silent=True) or {}
     model = _typed_request_model(body.get("model"), "video")
-    if not _typed_model_allowed(raw_cfg, "video", model):
+    explicit_openrouter = model.startswith("openrouter/")
+    if explicit_openrouter:
+        model_name = model[len("openrouter/"):]
+        if not openrouter_configured or model_name not in OPENROUTER_VIDEO_FALLBACK_MODELS:
+            return jsonify({"error": "video_model_invalid", "detail": "That OpenRouter video model is not available."}), 400
+    elif omniroute_configured and not _typed_model_allowed(raw_cfg, "video", model):
         return jsonify({"error": "video_model_invalid", "detail": "That video model is not available."}), 400
+    elif not omniroute_configured and openrouter_configured:
+        model = "openrouter/" + (OPENROUTER_VIDEO_FALLBACK_MODELS[0] if OPENROUTER_VIDEO_FALLBACK_MODELS else "")
     prompt = str(body.get("prompt") or "").strip()[:2000]
     if not prompt:
         return jsonify({"error": "missing_prompt", "detail": "Video prompt is required."}), 400
@@ -2806,6 +2831,149 @@ def _omniroute_video_candidates(cfg, requested):
     return values[:8]
 
 
+def _openrouter_video_completed_url(payload):
+    """Find a completed OpenRouter video URL across documented response shapes."""
+    if not isinstance(payload, dict):
+        return ""
+    candidates = []
+    for key in ("unsigned_urls", "unsignedUrls", "video_urls", "videoUrls"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            candidates.extend(value)
+        elif isinstance(value, str):
+            candidates.append(value)
+    video = payload.get("video")
+    if isinstance(video, dict):
+        candidates.extend([video.get("url"), video.get("uri")])
+    for key in ("url", "uri", "download_url", "downloadUrl"):
+        candidates.append(payload.get(key))
+    for value in candidates:
+        value = str(value or "").strip()
+        if value.startswith("https://") or value.startswith("http://"):
+            return value
+    for value in (payload.get("data"), payload.get("result"), payload.get("output")):
+        found = _openrouter_video_completed_url(value)
+        if found:
+            return found
+    return ""
+
+
+def _openrouter_video_error(response, label="OpenRouter video"):
+    detail = ""
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                detail = error.get("message") or error.get("detail") or ""
+            detail = detail or payload.get("detail") or payload.get("message") or ""
+    except Exception:  # noqa: BLE001
+        pass
+    return "%s returned HTTP %s%s" % (
+        label, response.status_code,
+        ": %s" % str(detail)[:240] if detail else ".",
+    )
+
+
+def _openrouter_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration=None, source_image=None):
+    """Submit and poll an OpenRouter video job, returning downloaded media."""
+    keys = _configured_provider_keys(cfg, "openrouter")
+    if not keys:
+        return None, "OpenRouter video fallback is not configured.", "", str(model_id or "")
+    model = str(model_id or "").strip()
+    if model.startswith("openrouter/"):
+        model = model[len("openrouter/"):]
+    model = model or (OPENROUTER_VIDEO_FALLBACK_MODELS[0] if OPENROUTER_VIDEO_FALLBACK_MODELS else "")
+    if not model:
+        return None, "No OpenRouter video model is configured.", "", "openrouter/"
+    body = {"model": model, "prompt": str(prompt or "").strip()[:2000]}
+    if aspect_ratio:
+        body["aspect_ratio"] = str(aspect_ratio)[:12]
+    if duration is not None:
+        try:
+            body["duration"] = max(1, min(30, int(duration)))
+        except (TypeError, ValueError):
+            pass
+    if source_image:
+        body["input_references"] = [str(source_image)[:16 * 1024 * 1024]]
+    last_err = "OpenRouter video generation failed."
+    for key in keys:
+        headers = {"Authorization": "Bearer %s" % key, "Content-Type": "application/json",
+                   "HTTP-Referer": "https://purendar950.github.io/Examen-planner/",
+                   "X-Title": "StudyPlanner AI Chat"}
+        try:
+            response = requests.post(OPENROUTER_VIDEO_URL, headers=headers, json=body, timeout=60)
+        except requests.RequestException as exc:
+            last_err = "OpenRouter video request failed: %s" % str(exc)[:180]
+            continue
+        if response.status_code >= 400:
+            last_err = _openrouter_video_error(response)
+            if response.status_code in (401, 403, 408, 429) or response.status_code >= 500:
+                continue
+            return None, last_err, "", "openrouter/" + model
+        try:
+            job = response.json() or {}
+        except ValueError:
+            last_err = "OpenRouter returned an unreadable video job response."
+            continue
+        job_id = str(job.get("id") or job.get("job_id") or "").strip()
+        if not job_id:
+            url = _openrouter_video_completed_url(job)
+            if url:
+                try:
+                    media = requests.get(url, timeout=180)
+                    media.raise_for_status()
+                    return media.content, None, "video/mp4", "openrouter/" + model
+                except requests.RequestException as exc:
+                    last_err = "OpenRouter video download failed: %s" % str(exc)[:180]
+                    continue
+            last_err = "OpenRouter did not return a video job ID."
+            continue
+        status_url = str(job.get("polling_url") or job.get("pollingUrl") or "").strip()
+        if not status_url.startswith("https://openrouter.ai/"):
+            status_url = OPENROUTER_VIDEO_URL + "/" + job_id
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            try:
+                status_response = requests.get(status_url, headers={"Authorization": "Bearer %s" % key}, timeout=30)
+            except requests.RequestException as exc:
+                last_err = "OpenRouter video status failed: %s" % str(exc)[:180]
+                time.sleep(3)
+                continue
+            if status_response.status_code >= 400:
+                last_err = _openrouter_video_error(status_response, "OpenRouter video status")
+                if status_response.status_code in (408, 429) or status_response.status_code >= 500:
+                    time.sleep(3)
+                    continue
+                break
+            try:
+                state = status_response.json() or {}
+            except ValueError:
+                last_err = "OpenRouter returned an unreadable video status."
+                break
+            status = str(state.get("status") or state.get("state") or "").lower()
+            if status in ("failed", "error", "cancelled", "canceled"):
+                last_err = str(state.get("error") or state.get("message") or "OpenRouter video generation failed.")[:500]
+                break
+            url = _openrouter_video_completed_url(state)
+            if status in ("completed", "complete", "succeeded", "success") or url:
+                if not url:
+                    last_err = "OpenRouter marked the video complete but returned no download URL."
+                    break
+                try:
+                    media = requests.get(url, timeout=180)
+                    media.raise_for_status()
+                    content_type = (media.headers.get("Content-Type") or "video/mp4").split(";", 1)[0].strip().lower()
+                    if not content_type.startswith("video/"):
+                        content_type = "video/mp4"
+                    return media.content, None, content_type, "openrouter/" + model
+                except requests.RequestException as exc:
+                    last_err = "OpenRouter video download failed: %s" % str(exc)[:180]
+                    break
+            time.sleep(3)
+    return None, last_err, "", "openrouter/" + model
+
+
 def _ai_chat_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration=None, source_image=None):
     prompt = str(prompt or "").strip()[:2000]
     if not prompt:
@@ -2827,9 +2995,23 @@ def _ai_chat_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration
         if result is not None:
             return result, None, content_type, candidate
         failures.append("%s: %s" % (candidate, detail or "empty response"))
+    route_unavailable = any("endpoint is unavailable" in failure.lower()
+                            or "returned http 404" in failure.lower()
+                            for failure in failures)
+    requested = str(model_id or "").strip()
+    if route_unavailable and _provider_configured(cfg, "openrouter"):
+        fallback_models = OPENROUTER_VIDEO_FALLBACK_MODELS or [""]
+        openrouter_failures = []
+        for fallback_model in fallback_models:
+            result, fallback_detail, content_type, used_model = _openrouter_generate_video(
+                cfg, fallback_model, prompt, aspect_ratio, duration, source_image)
+            if result is not None:
+                return result, None, content_type, used_model
+            openrouter_failures.append(fallback_detail or "empty response")
+        failures.append("OpenRouter fallback: %s" % " | ".join(openrouter_failures))
     detail = "Video generation failed after trying %d model%s. %s" % (
         len(failures), "" if len(failures) == 1 else "s", " | ".join(failures)[:1200])
-    return None, detail, "", str(model_id or "").strip()
+    return None, detail, "", requested
 
 
 def _ai_chat_search(cfg, model_id, query, search_type="web", max_results=6):
@@ -12835,6 +13017,9 @@ def api_ai_chat_status():
                              for model in _omniroute_typed_catalog(raw_cfg, "speech")]
             video_models = [{"key": "omniroute/" + model, "label": "OmniRoute — " + model}
                             for model in _omniroute_typed_catalog(raw_cfg, "video")]
+        if _provider_configured(raw_cfg, "openrouter"):
+            video_models.extend({"key": "openrouter/" + model, "label": "OpenRouter — " + model}
+                                 for model in OPENROUTER_VIDEO_FALLBACK_MODELS)
     return jsonify({"ok": True, "enabled": allowed, "models": models,
                     "providerGroups": provider_groups,
                     "imageModels": image_models,

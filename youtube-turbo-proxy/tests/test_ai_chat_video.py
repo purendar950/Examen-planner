@@ -70,6 +70,11 @@ check("frontend polls asynchronous video jobs", "/api/ai-chat/video/jobs/' + enc
 check("frontend downloads completed video separately", "/media', { timeoutMs: 300000 }" in JS)
 check("frontend allows long-running video polling", "30 * 60 * 1000" in JS)
 check("direct video falls back to a proxy job", "return startProxyJob();" in JS)
+check("OpenRouter video fallback endpoint is configured", "OPENROUTER_VIDEO_URL" in SRC and "https://openrouter.ai/api/v1/videos" in SRC)
+check("OpenRouter video models are configurable", "OPENROUTER_VIDEO_FALLBACK_MODELS" in SRC and "OPENROUTER_VIDEO_MODELS" in SRC)
+check("OpenRouter models are exposed with provider-prefixed keys", '"key": "openrouter/" + model' in SRC)
+check("OpenRouter jobs use the async worker", 'startswith("openrouter/")' in SRC and "_openrouter_generate_video" in SRC)
+check("OmniRoute route failure triggers OpenRouter fallback", 'route_unavailable' in SRC and 'OpenRouter fallback:' in SRC)
 
 print("AI Chat video regression checks")
 print("\n".join(RESULTS))
