@@ -337,7 +337,9 @@ function toggleWebSearchSecrets(button) {
 function aiStudyChatMarkup() {
   var cfg = AI_CHAT_CONFIG || {};
   var emails = Array.isArray(cfg.allowedEmails) ? cfg.allowedEmails.join('\n') : '';
-  var grantCount = cfg.allowedUsers ? Object.keys(cfg.allowedUsers).length : 0;
+  var uidGrantCount = cfg.allowedUsers ? Object.keys(cfg.allowedUsers).length : 0;
+  var emailGrantCount = Array.isArray(cfg.allowedEmails) ? cfg.allowedEmails.length : 0;
+  var grantCount = Math.max(uidGrantCount, emailGrantCount);
   var isImageModelName = function (m) {
     var lowered = String(m || '').toLowerCase();
     return lowered.indexOf('image') !== -1 || lowered.indexOf('nano-banana') !== -1 || lowered.indexOf('imagen') !== -1;

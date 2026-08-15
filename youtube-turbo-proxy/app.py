@@ -211,7 +211,11 @@ def _require_firebase_user():
     uid = str(decoded.get("uid") or "").strip()
     if not uid:
         return None, ({"error": "unauthorized", "detail": "Firebase token has no user ID."}, 401)
-    return {"uid": uid, "claims": decoded}, None
+    return {
+        "uid": uid,
+        "email": str(decoded.get("email") or "").strip().lower(),
+        "claims": decoded,
+    }, None
 
 
 def _active_pro_entitlement(user_data):
@@ -1705,13 +1709,17 @@ _ai_chat_cfg_cache = {"ts": 0.0, "data": None}
 
 
 def _load_ai_chat_config():
-    """Returns {allowed_users: set(uid)}. Fails closed (empty allowlist) if the
-    doc is missing, unreadable, or Firestore is unavailable — nobody gets
-    access rather than everybody.
+    """Returns the AI Chat allowlist using UID-first identity matching.
+
+    The UID map remains authoritative for normal operation. The normalized
+    email list is retained as a compatibility fallback for older admin saves
+    that resolved the display email but failed to persist the corresponding UID.
+    It is matched only against the email claim from a server-verified Firebase
+    ID token; browser-supplied email fields are never consulted.
 
     v3 schema (config/aiChat):
       allowedUsers  : {uid: true}
-      allowedEmails : [email, ...] — display mirror only, never trusted for auth
+      allowedEmails : [email, ...] — admin-managed compatibility allowlist
 
     Unlike v1/v2, this doc no longer curates WHICH models are selectable —
     every provider/model the admin has configured anywhere in the AI Study
@@ -1723,7 +1731,7 @@ def _load_ai_chat_config():
     now = time.time()
     if _ai_chat_cfg_cache["data"] is not None and now - _ai_chat_cfg_cache["ts"] < AI_CHAT_TTL:
         return _ai_chat_cfg_cache["data"]
-    out = {"allowed_users": set()}
+    out = {"allowed_users": set(), "allowed_emails": set()}
     if _fb_db:
         try:
             doc = _fb_db.collection("config").document("aiChat").get()
@@ -1732,7 +1740,16 @@ def _load_ai_chat_config():
                 allowed = d.get("allowedUsers") or {}
                 if isinstance(allowed, list):
                     allowed = {u: True for u in allowed}
-                out["allowed_users"] = {u for u, v in allowed.items() if v}
+                out["allowed_users"] = {str(u).strip() for u, v in allowed.items() if v and str(u).strip()}
+                raw_emails = d.get("allowedEmails") or []
+                if isinstance(raw_emails, str):
+                    raw_emails = [raw_emails]
+                if isinstance(raw_emails, (list, tuple, set)):
+                    out["allowed_emails"] = {
+                        str(email).strip().lower()
+                        for email in raw_emails
+                        if str(email).strip()
+                    }
         except Exception as exc:  # noqa: BLE001
             log.warning("config/aiChat read failed: %s", exc)
     _ai_chat_cfg_cache["ts"] = now
@@ -12452,6 +12469,23 @@ def api_tutor():
                     "web": data["web"], "quota": data["quota"]})
 
 
+def _ai_chat_allowlisted(user, chat_cfg, is_admin=False):
+    """Check AI Chat entitlement using verified identity claims only.
+
+    UID membership is checked first. The email fallback exists for legacy
+    allowlist documents and uses only the email claim from the ID token that
+    _require_firebase_user() has already verified with Firebase Admin.
+    """
+    if is_admin:
+        return True
+    uid = str((user or {}).get("uid") or "").strip()
+    if uid and uid in (chat_cfg or {}).get("allowed_users", set()):
+        return True
+    claims = (user or {}).get("claims") or {}
+    email = str((user or {}).get("email") or claims.get("email") or "").strip().lower()
+    return bool(email and email in (chat_cfg or {}).get("allowed_emails", set()))
+
+
 def _ai_chat_authorize():
     """Shared auth+allowlist check for every /api/ai-chat* route. Returns
     (user, chat_cfg, is_admin, err) where err is an (payload, status) tuple to
@@ -12465,7 +12499,7 @@ def _ai_chat_authorize():
         _, is_admin = _cached_user_data_and_admin(uid)
     except Exception:  # noqa: BLE001
         is_admin = False
-    if not is_admin and uid not in chat_cfg["allowed_users"]:
+    if not _ai_chat_allowlisted(user, chat_cfg, is_admin):
         return None, None, False, ({"error": "forbidden",
                                     "detail": "AI Chat is not enabled for this account."}, 403)
     return user, chat_cfg, is_admin, None
@@ -12546,7 +12580,7 @@ def api_ai_chat_status():
     except Exception:  # noqa: BLE001
         is_admin = False
     chat_cfg = _load_ai_chat_config()
-    allowed = bool(is_admin or uid in chat_cfg["allowed_users"])
+    allowed = _ai_chat_allowlisted(user, chat_cfg, is_admin)
     models, image_models = [], []
     search_models, speech_models, video_models = [], [], []
     provider_groups, image_provider_groups = [], []

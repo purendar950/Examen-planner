@@ -1411,14 +1411,46 @@ async function saveAiChatConfig() {
   const emailsRaw = (document.getElementById('aichat-emails') || {}).value || '';
   const emails = emailsRaw.split(/[\n,]+/).map(function (e) { return e.trim().toLowerCase(); }).filter(Boolean);
   const allowedUsers = {}, resolved = [], unresolved = [];
-  emails.forEach(function (em) {
-    const u = (typeof USERS !== 'undefined' ? USERS : []).find(function (x) { return (x.p && (x.p.email || '').toLowerCase()) === em; });
-    if (u) { allowedUsers[u.id] = true; resolved.push(em); } else { unresolved.push(em); }
-  });
+  const knownUsers = (typeof USERS !== 'undefined' ? USERS : []);
+
+  // Resolve against the current in-memory directory first, then query the
+  // authoritative Firestore users collection. The previous implementation
+  // silently marked users as unresolved when USERS was stale or incomplete.
+  for (const em of emails) {
+    let u = knownUsers.find(function (x) {
+      return x && x.id && x.p && (x.p.email || '').toLowerCase() === em;
+    });
+    if (!u && typeof db !== 'undefined' && db) {
+      const lookups = ['p.email', 'email', 'profile.email'];
+      for (const field of lookups) {
+        try {
+          const snap = await db.collection('users').where(field, '==', em).limit(1).get();
+          if (!snap.empty) {
+            const doc = snap.docs[0];
+            u = { id: doc.id, p: (doc.data() || {}).p || {} };
+            break;
+          }
+        } catch (lookupErr) {
+          // Some legacy collections do not have the queried field/index;
+          // continue with the next compatible shape rather than aborting save.
+        }
+      }
+    }
+    // If an administrator is granting the currently signed-in account,
+    // Firebase Auth is the authoritative source for its UID.
+    if (!u && typeof auth !== 'undefined' && auth && auth.currentUser &&
+        String(auth.currentUser.email || '').toLowerCase() === em) {
+      u = { id: auth.currentUser.uid, p: { email: em } };
+    }
+    if (u && u.id) { allowedUsers[u.id] = true; resolved.push(em); }
+    else { unresolved.push(em); }
+  }
   try {
     await db.collection('config').doc('aiChat').set({
       allowedUsers: allowedUsers,
-      allowedEmails: resolved,
+      // Preserve every explicit admin entry. Verified-token email matching on
+      // the proxy keeps this reliable even when the user directory is stale.
+      allowedEmails: emails,
       // Cleared: older configs curated a fixed model list / image toggle here.
       // Both are now auto-derived from the provider portfolio, so these
       // fields would otherwise linger unused and confusing in Firestore.
@@ -1428,8 +1460,8 @@ async function saveAiChatConfig() {
       model: firebase.firestore.FieldValue.delete(),
       savedAt: firebase.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
-    AI_CHAT_CONFIG = Object.assign({}, AI_CHAT_CONFIG, { allowedUsers: allowedUsers, allowedEmails: resolved });
-    var msg = '✅ AI Chat access saved — ' + resolved.length + ' user(s) granted.';
+    AI_CHAT_CONFIG = Object.assign({}, AI_CHAT_CONFIG, { allowedUsers: allowedUsers, allowedEmails: emails });
+    var msg = '✅ AI Chat access saved — ' + emails.length + ' user(s) recorded.';
     if (unresolved.length) msg += ' ⚠️ Not found: ' + unresolved.join(', ');
     showToast(msg);
     render();

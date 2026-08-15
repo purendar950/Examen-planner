@@ -45,6 +45,9 @@
   var _checked = false;      // avoid re-checking /status on every page switch
   var _accessListenerBound = false;
   var _accessRetryTimer = null;
+  var _accessRecheckTimer = null;
+  var _accessRetryCount = 0;
+  var _accessRequestInFlight = false;
   var _sending = false;
   var _statusCache = null;   // last /api/ai-chat/status response {enabled, models, imageModels, imageEnabled, ragEnabled}
   var _catalogRefreshTimer = null;
@@ -725,9 +728,40 @@
     }, 1200);
   }
 
+  function clearAccessTimers() {
+    if (_accessRetryTimer) { clearTimeout(_accessRetryTimer); _accessRetryTimer = null; }
+    if (_accessRecheckTimer) { clearTimeout(_accessRecheckTimer); _accessRecheckTimer = null; }
+  }
+
+  function scheduleAccessRecheck(delay) {
+    if (_accessRecheckTimer) clearTimeout(_accessRecheckTimer);
+    if (typeof currentUser === 'undefined' || !currentUser) { _accessRecheckTimer = null; return; }
+    _accessRecheckTimer = setTimeout(function () {
+      _accessRecheckTimer = null;
+      checkAccess();
+    }, Math.max(500, Number(delay) || 30000));
+  }
+
+  function scheduleAccessRetry() {
+    if (_accessRetryTimer) return;
+    var delay = Math.min(15000, 1000 * Math.pow(2, Math.min(_accessRetryCount, 4)));
+    _accessRetryCount += 1;
+    _accessRetryTimer = setTimeout(function () {
+      _accessRetryTimer = null;
+      checkAccess();
+    }, delay);
+  }
+
   function checkAccess() {
     if (typeof currentUser === 'undefined' || !currentUser) return false;
-    if (typeof _fbReady === 'undefined' || !_fbReady) return false;   // no backend identity offline
+    if (typeof _fbReady === 'undefined' || !_fbReady) {
+      // Firebase may restore the session after the first page-load check.
+      // Keep retrying until the verified identity transport is ready.
+      scheduleAccessRetry();
+      return false;
+    }
+    if (_accessRequestInFlight) return true;
+    _accessRequestInFlight = true;
     backendAuthFetch('/api/ai-chat/status')
       .then(function (r) {
         return r.json().then(function (j) {
@@ -740,6 +774,7 @@
         });
       })
       .then(function (j) {
+        _accessRetryCount = 0;
         _statusCache = j || null;
         var nav = document.getElementById('nav-ai-chat');
         var enabled = !!(j && j.enabled);
@@ -747,26 +782,35 @@
         if (!enabled) {
           var pg = document.getElementById('page-ai-chat');
           if (pg && pg.classList.contains('active') && typeof switchPage === 'function') switchPage('dashboard');
-          return;
+        } else {
+          renderModelSelect();
+          renderTypedMediaControls();
+          var imageBtn = document.getElementById('aic-image-btn');
+          if (imageBtn) imageBtn.style.display = (j && j.imageEnabled) ? '' : 'none';
+          var attachBtn = document.getElementById('aic-attach-btn');
+          if (attachBtn) attachBtn.style.display = (j && j.ragEnabled) ? '' : 'none';
+          scheduleCatalogRefresh(j);
         }
-        renderModelSelect();
-        renderTypedMediaControls();
-        var imageBtn = document.getElementById('aic-image-btn');
-        if (imageBtn) imageBtn.style.display = (j && j.imageEnabled) ? '' : 'none';
-        var attachBtn = document.getElementById('aic-attach-btn');
-        if (attachBtn) attachBtn.style.display = (j && j.ragEnabled) ? '' : 'none';
-        scheduleCatalogRefresh(j);
+        // Keep the gate live for session restoration, admin allowlist changes,
+        // proxy failover recovery, and users who leave the tab open overnight.
+        scheduleAccessRecheck(30000);
       })
       .catch(function (err) {
-        // Auth restoration and backend failover can finish after the first
-        // page check. Retry transient failures instead of keeping an eligible
-        // tab hidden forever because one early request saw 503/401/network.
-        if (_accessRetryTimer || (err && err.status === 403)) return;
-        _accessRetryTimer = setTimeout(function () {
-          _accessRetryTimer = null;
-          checkAccess();
-        }, 1500);
-      });
+        var nav = document.getElementById('nav-ai-chat');
+        if (err && err.status === 403) {
+          // A real denial remains hidden, but still re-checks so a later admin
+          // allowlist save takes effect without requiring a hard refresh.
+          if (nav) nav.style.display = 'none';
+          _accessRetryCount = 0;
+          scheduleAccessRecheck(30000);
+        } else {
+          // Never turn a transient 401/5xx/network failure into a permanent
+          // hidden tab. Preserve any previously granted visibility and retry
+          // with exponential backoff before falling back to the 30s poll.
+          scheduleAccessRetry();
+        }
+      })
+      .finally(function () { _accessRequestInFlight = false; });
     return true;
   }
 
@@ -776,12 +820,16 @@
     _accessListenerBound = true;
     auth.onAuthStateChanged(function (user) {
       resetThreadCacheForUser(user && user.uid);
+      clearAccessTimers();
+      _accessRetryCount = 0;
+      _accessRequestInFlight = false;
       if (user) {
         _checked = true;
         hydrateThreadStorage();
         setTimeout(checkAccess, 0);
       } else {
         _checked = false;
+        _statusCache = null;
         var nav = document.getElementById('nav-ai-chat');
         if (nav) nav.style.display = 'none';
       }
