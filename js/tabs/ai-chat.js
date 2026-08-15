@@ -1698,39 +1698,64 @@
     renderLog();
 
     var imageRequest;
-    // Native generation can bypass Render for every direct-enabled image
-    // provider. Try the selected model first, then other live/configured image
-    // models, without sending the failed direct request through Render. Image
-    // editing remains on the proxy because its multipart contract is provider-specific.
+    // Two-phase strategy for maximum reliability:
+    //
+    // Phase 1 — Proxy path (respects the selected model key):
+    //   The backend /api/ai-chat/image endpoint receives the full model key
+    //   (e.g. "omniroute::gpt-5.6-sol") and should route accordingly. This
+    //   path ALWAYS works regardless of which direct providers are configured.
+    //
+    // Phase 2 — Direct candidates (bypasses the proxy, talks to providers
+    //   directly): If Phase 1 fails, try direct-enabled providers as fallback.
+    //   This catches cases where the proxy is down but Google/OpenRouter
+    //   direct endpoints are alive.
+    //
+    // Image editing always goes through the proxy because its multipart
+    // contract is provider-specific.
     var directCandidates = !isEdit ? directImageCandidates(thread, selected) : [];
-    if (directCandidates.length) {
-      imageRequest = requestDirectImageCandidates(directCandidates, prompt);
-    } else {
-      imageRequest = backendAuthFetch('/api/ai-chat/image', {
+
+    function proxyImageRequest() {
+      return backendAuthFetch('/api/ai-chat/image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        // Image diffusion can exceed the normal chat budget, especially after a
-        // Render cold start. Keep this longer than the server's 120s provider
-        // budget so the browser never aborts a valid generation prematurely.
         timeoutMs: 150000,
         body: JSON.stringify({ prompt: prompt, model: selected.key, sourceImageData: sourceImageData || undefined })
       }).then(function (r) {
-      // The backend may fall back to a different provider/model. Capture the
-      // response metadata before consuming the image body so the result card and
-      // local conversation history identify what actually generated the image.
-      var actualProvider = r.headers.get('x-image-provider') || '';
-      var actualModel = r.headers.get('x-image-model') || '';
-      var contentType = (r.headers.get('content-type') || '').toLowerCase();
-      if (!r.ok || !contentType.startsWith('image/')) {
-        return r.json().catch(function () { return {}; }).then(function (j) {
-          var detail = j && (j.detail || j.message || j.error);
-          if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
-          throw new Error(String(detail || (!r.ok ? 'Image generation failed (HTTP ' + r.status + ')' : 'The image service returned no image data')).slice(0, 500));
-        });
-      }
+        var actualProvider = r.headers.get('x-image-provider') || '';
+        var actualModel = r.headers.get('x-image-model') || '';
+        var contentType = (r.headers.get('content-type') || '').toLowerCase();
+        if (!r.ok || !contentType.startsWith('image/')) {
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            var detail = j && (j.detail || j.message || j.error);
+            if (detail && typeof detail === 'object') detail = detail.message || JSON.stringify(detail);
+            var errMsg = String(detail || (!r.ok ? 'Image generation failed (HTTP ' + r.status + ')' : 'The image service returned no image data')).slice(0, 500);
+            // Preserve the original error so the user can see what the proxy returned
+            var enhancedErr = new Error(errMsg);
+            enhancedErr._fromProxy = true;
+            enhancedErr._proxyDetail = errMsg;
+            throw enhancedErr;
+          });
+        }
         return r.blob().then(function (blob) {
           return { blob: blob, provider: actualProvider, model: actualModel };
         });
       });
+    }
+
+    if (directCandidates.length) {
+      // Try proxy first (respects selected model), then direct candidates as fallback
+      imageRequest = proxyImageRequest().catch(function (proxyErr) {
+        // If the proxy returned a clear image (not a routing error), don't retry
+        if (proxyErr && proxyErr._fromProxy) {
+          // Re-throw the proxy error — direct candidates won't help if the
+          // proxy itself returned a proper error response about the model
+          throw proxyErr;
+        }
+        // Proxy network error / timeout — try direct candidates
+        return requestDirectImageCandidates(directCandidates, prompt);
+      });
+    } else {
+      // No direct candidates configured — proxy only
+      imageRequest = proxyImageRequest();
     }
     return imageRequest.then(function (result) {
       var blob = result && result.blob;
