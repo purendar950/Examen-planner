@@ -1567,11 +1567,11 @@
     }).then(function (r) { return directImageResponse(r, provider, model); });
   }
   function requestDirectImageCandidates(candidates, prompt) {
-    var errors = [], blockedProviders = {}, startedAt = Date.now(), deadline = startedAt + DIRECT_IMAGE_TOTAL_TIMEOUT_MS;
+    var errors = [], blockedProviders = {}, blockedReasons = {}, startedAt = Date.now(), deadline = startedAt + DIRECT_IMAGE_TOTAL_TIMEOUT_MS;
     function sharedProviderFailure(provider, detail) {
       var text = String(detail || '').toLowerCase();
       if (provider === 'google') return /http\s*429|rate[\s_-]*limit|quota|resource exhausted|try again shortly/.test(text);
-      if (provider === 'openrouter') return /http\s*402|insufficient credits|never purchased credits|purchase more|payment required/.test(text);
+      if (provider === 'openrouter') return /http\s*402|http\s*429|rate[\s_-]*limit|quota|resource exhausted|insufficient credits|never purchased credits|purchase more|account[^.]{0,100}(?:credit|rate)|payment required|try again shortly/.test(text);
       if (provider === 'omniroute') return /http\s*404|returned\s+404|endpoint[^.]{0,80}unavailable|ngrok[^.]{0,80}(offline|down)/.test(text);
       return false;
     }
@@ -1579,6 +1579,9 @@
       while (index < candidates.length && blockedProviders[String(candidates[index].provider || '').toLowerCase()]) index += 1;
       if (index >= candidates.length) {
         var detail = errors.length ? errors.join(' | ') : 'No direct image candidate succeeded.';
+        if (Object.keys(blockedReasons).length) {
+          detail += ' Provider account limits may require waiting, adding image credits, or configuring another image provider.';
+        }
         throw new Error('Image generation failed after provider failover: ' + detail.slice(0, 900));
       }
       var candidate = candidates[index];
@@ -1591,7 +1594,10 @@
         var message = String(error && error.message || error || 'request failed').slice(0, 220);
         errors.push(label + ': ' + message);
         var provider = String(candidate.provider || '').toLowerCase();
-        if (sharedProviderFailure(provider, message)) blockedProviders[provider] = true;
+        if (sharedProviderFailure(provider, message)) {
+          blockedProviders[provider] = true;
+          blockedReasons[provider] = message;
+        }
         return attempt(index + 1);
       });
     }

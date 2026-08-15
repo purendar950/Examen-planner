@@ -437,6 +437,25 @@ check("direct browser image fallback supports the complete live catalog",
       "DIRECT_IMAGE_CANDIDATE_MAX = 64" in io.open(_AI_CHAT_JS, encoding="utf-8").read(),
       "frontend fallback ceiling regressed")
 
+# Provider-account failures must stop the retry cascade for that provider, while
+# ordinary model-specific failures must remain eligible for another model.
+_failure_ns = {"re": re}
+exec(section("def _ai_chat_image_shared_failure", "def _ai_chat_tab_sys"), _failure_ns)
+_shared_failure = _failure_ns["_ai_chat_image_shared_failure"]
+check("OpenRouter HTTP 429 blocks provider-wide retries",
+      _shared_failure("openrouter", "OpenRouter returned HTTP 429 (try another model/provider shortly)."))
+check("OpenRouter account rate limit blocks provider-wide retries",
+      _shared_failure("openrouter", "Your account is rate limited for image generation."))
+check("OpenRouter credit failure blocks provider-wide retries",
+      _shared_failure("openrouter", "OpenRouter rejected the image request: insufficient credits."))
+check("OpenRouter model-specific failure remains retryable",
+      not _shared_failure("openrouter", "The selected image model is unavailable."))
+check("browser failover explains provider account remediation",
+      "Provider account limits may require waiting, adding image credits, or configuring another image provider." in io.open(_AI_CHAT_JS, encoding="utf-8").read())
+check("proxy failure explains provider account remediation",
+      "Check the configured image-provider quota/credits, wait for a rate limit" in SRC and
+      "configure another image-capable provider." in SRC)
+
 print("AI Chat — chat vs image model separation")
 print("\n".join(_RESULTS))
 if _FAILED:
