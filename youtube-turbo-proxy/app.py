@@ -1923,10 +1923,27 @@ def _ai_chat_image_candidates(models, picked, max_n=None):
     # configured text providers. OpenRouter remains useful when every direct
     # Gemini model is rate-limited, while OmniRoute is preferred only when its
     # live catalog probe has confirmed that its tunnel is reachable.
+    def _omniroute_model_rank(model_id):
+        """Tier/position within the verified-working order.
+
+        Sorting OmniRoute routes by model NAME used to bury the only working
+        routes at the end of the cascade: `pollinations/*` sorts after
+        `codex/*`, `lmarena/*` (24 dead routes) and `openrouter/*`, so a
+        request spent its whole deadline on models the account cannot use.
+        """
+        value = str(model_id or "").strip()
+        if value in OMNIROUTE_IMAGE_PREFERRED_MODELS:
+            return (0, OMNIROUTE_IMAGE_PREFERRED_MODELS.index(value))
+        if value.lower().startswith(OMNIROUTE_IMAGE_DEPRIORITISED_PREFIXES):
+            return (2, 0)
+        return (1, 0)
+
     def _fallback_priority(candidate):
         provider = candidate.get("provider")
+        model = str(candidate.get("model") or "")
+        tier, position = _omniroute_model_rank(model) if provider == "omniroute" else (1, 0)
         return (0 if provider == "omniroute" else 1 if provider == "openrouter" else 2,
-                str(provider or ""), str(candidate.get("model") or ""))
+                tier, position, str(provider or ""), model)
     remaining.sort(key=_fallback_priority)
     for candidate in remaining:
         if len(out) >= cap:
@@ -2397,8 +2414,9 @@ def _effective_image_models(cfg):
                 _omniroute_refresh_image_models_async()
             else:
                 discovered = _omniroute_fetch_image_model_ids()
-            out[pid] = [model_id for model_id in _merge_unique_model_ids(discovered, fallback)
-                        if _omniroute_image_model_id_is_route_compatible(model_id)]
+            out[pid] = _omniroute_image_order(
+                [model_id for model_id in _merge_unique_model_ids(discovered, fallback)
+                 if _omniroute_image_model_id_is_route_compatible(model_id)])
         elif pid == "openrouter":
             # OpenRouter keeps dedicated image models in a separate catalog.
             # Refresh it only when an OpenRouter key is configured; a failed
@@ -2489,6 +2507,57 @@ def _omniroute_video_order(ids):
     return [value for value in OMNIROUTE_VIDEO_PREFERRED_MODELS if value in values] + [
         value for value in values if value not in OMNIROUTE_VIDEO_PREFERRED_MODELS
     ]
+
+
+# OmniRoute advertises ~62 image routes, but most are unusable on a free/BYOK
+# account: the upstream rejects them for billing or auth reasons that no retry
+# can fix. Probing all 62 in catalog order therefore burns the request deadline
+# on guaranteed failures before reaching a route that works.
+#
+# The list below was produced by generating the same prompt against every
+# advertised image model and keeping the ones that returned real bytes, ordered
+# by observed output quality/latency. `codex/*` sit last because they answer
+# with a hosted URL, which costs an extra server-side download hop.
+OMNIROUTE_IMAGE_PREFERRED_MODELS = [
+    "pollinations/flux",
+    "pollinations/zimage",
+    "pollinations/gptimage",
+    "pollinations/klein",
+    "nanogpt/hidream",
+    "nvidia/black-forest-labs/flux.1-dev",
+    "nvidia/black-forest-labs/flux.2-klein-4b",
+    "codex/gpt-5.6-terra",
+    "codex/gpt-5.6-luna",
+]
+# Prefixes whose failures were account-wide rather than model-specific
+# ("User not found", "never purchased credits", "requires a valid credit card",
+# "model is deprecated"). They stay selectable — an admin may well connect these
+# providers later — but they must not be tried before the verified routes.
+OMNIROUTE_IMAGE_DEPRIORITISED_PREFIXES = (
+    "lmarena/",
+    "openrouter/",
+    "vercel-ai-gateway/",
+    "huggingface/",
+)
+
+
+def _omniroute_image_order(ids):
+    """Order image routes: verified-working first, then unknown, then known-bad.
+
+    Mirrors _omniroute_video_order. Nothing is dropped, so a newly connected
+    provider still appears in the picker; only the attempt order changes.
+    """
+    values = []
+    for value in list(ids or []):
+        value = str(value or "").strip()
+        if value and value not in values:
+            values.append(value)
+    preferred = [value for value in OMNIROUTE_IMAGE_PREFERRED_MODELS if value in values]
+    remaining = [value for value in values if value not in preferred]
+    deprioritised = [value for value in remaining
+                     if value.lower().startswith(OMNIROUTE_IMAGE_DEPRIORITISED_PREFIXES)]
+    neutral = [value for value in remaining if value not in deprioritised]
+    return preferred + neutral + deprioritised
 
 
 # Video providers can take minutes and often return a large binary. Keep the
@@ -13747,7 +13816,7 @@ def api_ai_chat_image():
     # The status endpoint refresh is intentionally asynchronous, but an image
     # request must not keep using a stale snapshot that points at 404 models.
     if _provider_configured(raw_cfg, "omniroute"):
-        live_omni_ids = _omniroute_fetch_image_model_ids(force=True)
+        live_omni_ids = _omniroute_image_order(_omniroute_fetch_image_model_ids(force=True))
         if live_omni_ids:
             existing = [candidate for candidate in image_models if candidate["provider"] != "omniroute"]
             existing += [{"provider": "omniroute", "model": model_id,
@@ -13759,17 +13828,12 @@ def api_ai_chat_image():
             # Instead of removing all OmniRoute models, add a fallback set of
             # known working image models that OmniRoute typically supports.
             log.warning("OmniRoute image catalog empty; using fallback image models")
-            fallback_image_models = [
-                "codex/gpt",  # Popular GPT-based image generation
-                "flux/dev", "flux/schnell", "flux/pro", "flux-1.1/pro",
-                "stable-diffusion/xl", "stable-diffusion/3", "stable-diffusion-3/medium",
-                "stable-diffusion-3.5/large", "stable-diffusion-3.5/large-turbo",
-                "recraft/v3", "ideogram/v2", "ideogram/v2-turbo",
-                "black-forest-labs/flux-dev", "black-forest-labs/flux-schnell",
-                "black-forest-labs/flux-pro", "black-forest-labs/flux-1.1-pro",
-                "stabilityai/stable-diffusion-xl-base-1.0",
-                "stabilityai/stable-diffusion-3-medium",
-            ]
+            # These must be IDs the router actually publishes. The previous list
+            # used invented shapes ("flux/dev", "stable-diffusion/xl",
+            # "codex/gpt") that match nothing in OmniRoute's catalog, so every
+            # entry failed with "Invalid image model" and the fallback path could
+            # never recover a request. Real IDs are provider-qualified.
+            fallback_image_models = list(OMNIROUTE_IMAGE_PREFERRED_MODELS)
             existing = [candidate for candidate in image_models if candidate["provider"] != "omniroute"]
             existing += [{"provider": "omniroute", "model": model_id,
                           "label": "OmniRoute — " + model_id}
