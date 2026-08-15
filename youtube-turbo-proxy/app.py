@@ -2344,6 +2344,7 @@ IMAGE_PROVIDER_MODELS = {
     # because the router's line-up changes without notice. The default list
     # contains widely-supported image models that work when the catalog is unreachable.
     "omniroute": [
+        "codex/gpt",  # Popular GPT-based image generation model
         "flux/dev", "flux/schnell", "flux/pro",
         "stable-diffusion/xl", "stable-diffusion/3",
         "recraft/v3", "ideogram/v2",
@@ -13759,6 +13760,7 @@ def api_ai_chat_image():
             # known working image models that OmniRoute typically supports.
             log.warning("OmniRoute image catalog empty; using fallback image models")
             fallback_image_models = [
+                "codex/gpt",  # Popular GPT-based image generation
                 "flux/dev", "flux/schnell", "flux/pro", "flux-1.1/pro",
                 "stable-diffusion/xl", "stable-diffusion/3", "stable-diffusion-3/medium",
                 "stable-diffusion-3.5/large", "stable-diffusion-3.5/large-turbo",
