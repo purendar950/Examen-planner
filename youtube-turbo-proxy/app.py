@@ -2411,10 +2411,11 @@ def _effective_image_models(cfg):
 
 
 def _ai_chat_image_models(cfg):
-    """Image-capable models the caller can generate with: every model from the
-    dedicated image catalog whose provider has a key configured, PLUS any
-    image-named model an admin hand-added to that provider's regular model list
-    (so a manual addition still works until the next catalog refresh strips it).
+    """Image-capable models the caller can generate with: ONLY OmniRoute models.
+    
+    Google Gemini and OpenRouter are excluded to prevent fallback to rate-limited
+    or credit-consuming providers. OmniRoute provides sufficient image generation
+    coverage with its 60+ models including Flux, Stable Diffusion, and others.
 
     Only providers with a server-side image code path are listed — see
     IMAGE_PROVIDER_TRANSPORT (`google` via the Gemini Interactions API,
@@ -2428,7 +2429,8 @@ def _ai_chat_image_models(cfg):
     # reading the filtered list would never surface a hand-added image model.
     eff_text = _effective_provider_models_raw(cfg)
     out, seen = [], set()
-    for pid in IMAGE_PROVIDER_MODELS:
+    # ONLY use OmniRoute for image generation - filter out Google/OpenRouter
+    for pid in ["omniroute"]:  # Was: IMAGE_PROVIDER_MODELS
         if not _provider_configured(cfg, pid):
             continue
         label = STUDY_PROVIDER_LABELS.get(pid, pid.title())
@@ -13767,7 +13769,11 @@ def api_ai_chat_image():
         return jsonify({"error": "image_edit_not_configured",
                         "detail": "Image editing requires a configured OmniRoute image provider/model."}), 503
     candidates = _ai_chat_image_candidates(image_models, picked)
+    # ONLY use OmniRoute for image generation - filter out Google/OpenRouter
+    # to prevent fallback to rate-limited Gemini or expensive OpenRouter credits
+    candidates = [candidate for candidate in candidates if candidate["provider"] == "omniroute"]
     if source_image:
+        # Image editing already requires OmniRoute, this is redundant but kept for clarity
         candidates = [candidate for candidate in candidates if candidate["provider"] == "omniroute"]
     failures = []
     blocked_providers = set()
