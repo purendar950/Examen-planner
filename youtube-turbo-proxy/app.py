@@ -2425,6 +2425,25 @@ OMNIROUTE_VIDEO_FALLBACK_MODELS = [
     "deepinfra/Wan-AI/Wan2.2-T2V-A14B", "deepinfra/Wan-AI/Wan2.2-TI2V-5B",
     "deepinfra/Wan-AI/Wan2.7-T2V", "deepinfra/Lightricks/LTX-2.3-Distilled",
 ]
+# OmniRoute's video registry can publish a provider that is visible in the
+# catalog but currently rejects the typed endpoint with `publication/video`.
+# Keep the free VEO and DeepInfra handlers ahead of that entry for the default
+# selection, while still retaining every catalog model as an explicit choice.
+OMNIROUTE_VIDEO_PREFERRED_MODELS = [
+    "veo-free/veo", "veoaifree-web/veo",
+    "deepinfra/Wan-AI/Wan2.2-T2V-A14B", "deepinfra/Wan-AI/Wan2.7-T2V",
+    "pollinations/default",
+]
+
+def _omniroute_video_order(ids):
+    values = []
+    for value in list(ids or []):
+        value = str(value or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return [value for value in OMNIROUTE_VIDEO_PREFERRED_MODELS if value in values] + [
+        value for value in values if value not in OMNIROUTE_VIDEO_PREFERRED_MODELS
+    ]
 
 
 def _omniroute_typed_catalog(cfg, kind):
@@ -2488,6 +2507,8 @@ def _omniroute_typed_catalog(cfg, kind):
         except (requests.RequestException, ValueError, TypeError):
             continue
     ids = discovered or list(cached.get("ids") or fallback)
+    if kind == "video":
+        ids = _omniroute_video_order(ids)
     if ids:
         _omniroute_typed_catalog_cache[kind] = {"ts": now, "ids": list(ids)}
     return ids
@@ -2546,7 +2567,7 @@ def _omniroute_json_request(cfg, endpoint, body, label, timeout=90):
     return None, last_err
 
 
-def _omniroute_binary_request(cfg, endpoint, body, label, timeout=180):
+def _omniroute_binary_request(cfg, endpoint, body, label, timeout=180, media_kind=""):
     keys = _configured_provider_keys(cfg, "omniroute")
     if not keys:
         return None, "OmniRoute is not configured. Ask an admin to add an OmniRoute API key.", ""
@@ -2569,8 +2590,13 @@ def _omniroute_binary_request(cfg, endpoint, body, label, timeout=180):
             if response.status_code in (401, 403, 408, 429) or response.status_code >= 500:
                 continue
             return None, last_err, ""
-        ctype = (response.headers.get("Content-Type") or "application/octet-stream").split(";", 1)[0].strip()
-        if response.content and (ctype.startswith("audio/") or ctype.startswith("video/") or ctype == "application/octet-stream"):
+        ctype = (response.headers.get("Content-Type") or "application/octet-stream").split(";", 1)[0].strip().lower()
+        # Some OmniRoute provider adapters expose a publication MIME such as
+        # `publication/video` even though the body is a playable MP4. Treat it
+        # as binary video and give the browser a standard media type.
+        if response.content and (ctype.startswith("audio/") or ctype.startswith("video/") or ctype == "application/octet-stream" or (media_kind == "video" and ctype.endswith("/video"))):
+            if media_kind == "video" and (ctype == "application/octet-stream" or ctype.endswith("/video")):
+                ctype = "video/mp4"
             return response.content, None, ctype
         try:
             payload = response.json()
@@ -2590,20 +2616,48 @@ def _ai_chat_generate_speech(cfg, model_id, text, voice="alloy", response_format
     return _omniroute_binary_request(cfg, OMNIROUTE_TTS_URL, body, "Text-to-speech", timeout=120)
 
 
+def _omniroute_video_candidates(cfg, requested):
+    requested = str(requested or "").strip()
+    discovered = _omniroute_typed_catalog(cfg, "video")
+    # Older threads may still remember pollinations/default, which is the
+    # model associated with the `publication/video` rejection. Do not make a
+    # stale default consume the entire request; let the compatible providers
+    # take the first attempt. Explicitly selected non-default models stay first.
+    first = (OMNIROUTE_VIDEO_PREFERRED_MODELS + [requested]
+             if requested == "pollinations/default"
+             else [requested] + OMNIROUTE_VIDEO_PREFERRED_MODELS)
+    values = []
+    for value in first + list(discovered or []) + list(OMNIROUTE_VIDEO_FALLBACK_MODELS):
+        value = str(value or "").strip()
+        if value and value not in values:
+            values.append(value)
+    return values[:8]
+
+
 def _ai_chat_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration=None, source_image=None):
-    body = {"model": str(model_id or "").strip(), "prompt": str(prompt or "").strip()[:2000]}
-    if aspect_ratio:
-        body["aspect_ratio"] = str(aspect_ratio)[:12]
-    if duration is not None:
-        try:
-            body["duration"] = max(1, min(30, int(duration)))
-        except (TypeError, ValueError):
-            pass
-    if source_image:
-        body["image"] = str(source_image)[:16 * 1024 * 1024]
-    if not body["prompt"]:
-        return None, "Video prompt is empty.", ""
-    return _omniroute_binary_request(cfg, OMNIROUTE_VIDEO_URL, body, "Video generation", timeout=300)
+    prompt = str(prompt or "").strip()[:2000]
+    if not prompt:
+        return None, "Video prompt is empty.", "", str(model_id or "").strip()
+    failures = []
+    for candidate in _omniroute_video_candidates(cfg, model_id):
+        body = {"model": candidate, "prompt": prompt}
+        if aspect_ratio:
+            body["aspect_ratio"] = str(aspect_ratio)[:12]
+        if duration is not None:
+            try:
+                body["duration"] = max(1, min(30, int(duration)))
+            except (TypeError, ValueError):
+                pass
+        if source_image:
+            body["image"] = str(source_image)[:16 * 1024 * 1024]
+        result, detail, content_type = _omniroute_binary_request(
+            cfg, OMNIROUTE_VIDEO_URL, body, "Video generation", timeout=300, media_kind="video")
+        if result is not None:
+            return result, None, content_type, candidate
+        failures.append("%s: %s" % (candidate, detail or "empty response"))
+    detail = "Video generation failed after trying %d model%s. %s" % (
+        len(failures), "" if len(failures) == 1 else "s", " | ".join(failures)[:1200])
+    return None, detail, "", str(model_id or "").strip()
 
 
 def _ai_chat_search(cfg, model_id, query, search_type="web", max_results=6):
@@ -13414,16 +13468,16 @@ def api_ai_chat_video():
         return jsonify({"error": "missing_prompt", "detail": "Video prompt is required."}), 400
     if not _is_unlimited(user["uid"]) and not _rate_ok("aichat_video", user["uid"], 8, 3600):
         return jsonify({"error": "rate_limited", "detail": "Video generation limit reached. Try later."}), 429
-    result, detail, content_type = _ai_chat_generate_video(
+    result, detail, content_type, used_model = _ai_chat_generate_video(
         raw_cfg, model, prompt, body.get("aspectRatio") or "16:9", body.get("duration"), body.get("sourceImage"))
     if detail:
         return jsonify({"error": "video_failed", "detail": detail}), 502
     if isinstance(result, (bytes, bytearray)):
         response = Response(bytes(result), mimetype=content_type or "video/mp4")
-        response.headers["X-Video-Model"] = model
+        response.headers["X-Video-Model"] = used_model or model
         return response
     if isinstance(result, dict):
-        return jsonify({"ok": True, "model": model, "video": result})
+        return jsonify({"ok": True, "model": used_model or model, "video": result})
     return jsonify({"error": "video_empty", "detail": "The video provider returned no video."}), 502
 
 
