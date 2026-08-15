@@ -1786,7 +1786,7 @@
     function proxyImageRequest() {
       return backendAuthFetch('/api/ai-chat/image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        timeoutMs: 60000,
+        timeoutMs: 150000,
         body: JSON.stringify({ prompt: prompt, model: selected.key, sourceImageData: sourceImageData || undefined })
       }).then(function (r) {
         var actualProvider = r.headers.get('x-image-provider') || '';
