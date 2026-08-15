@@ -51,7 +51,7 @@ candidates_ns["_omniroute_typed_catalog"] = lambda cfg, kind: [
 exec(SRC[candidates_start:candidates_end], candidates_ns)
 candidates = candidates_ns["_omniroute_video_candidates"]({}, "pollinations/default")
 check("stale Pollinations selection tries VEO first", candidates[0] == "veo-free/veo", candidates)
-check("stale Pollinations selection remains available as a later candidate", "pollinations/default" in candidates, candidates)
+check("stale Pollinations selection is filtered out", "pollinations/default" not in candidates, candidates)
 
 # Source-level guards for the response and routing contracts.
 check("video binary helper accepts a media kind", "media_kind=\"\"" in SRC)

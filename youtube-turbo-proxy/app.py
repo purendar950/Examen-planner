@@ -2818,15 +2818,16 @@ def _omniroute_video_candidates(cfg, requested):
     discovered = _omniroute_typed_catalog(cfg, "video")
     # Older threads may still remember pollinations/default, which is the
     # model associated with the `publication/video` rejection. Do not make a
-    # stale default consume the entire request; let the compatible providers
-    # take the first attempt. Explicitly selected non-default models stay first.
-    first = (OMNIROUTE_VIDEO_PREFERRED_MODELS + [requested]
-             if requested == "pollinations/default"
-             else [requested] + OMNIROUTE_VIDEO_PREFERRED_MODELS)
+    # stale default consume the request or appear as the selected fallback;
+    # route only through providers that have a usable typed video handler.
+    stale = {"pollinations/default"}
+    first = ([value for value in OMNIROUTE_VIDEO_PREFERRED_MODELS if value not in stale]
+             if requested in stale
+             else [requested] + [value for value in OMNIROUTE_VIDEO_PREFERRED_MODELS if value not in stale])
     values = []
     for value in first + list(discovered or []) + list(OMNIROUTE_VIDEO_FALLBACK_MODELS):
         value = str(value or "").strip()
-        if value and value not in values:
+        if value and value not in stale and value not in values:
             values.append(value)
     return values[:8]
 

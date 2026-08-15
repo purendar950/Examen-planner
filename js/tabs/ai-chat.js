@@ -1714,8 +1714,24 @@
   };
 
   /* ── web search, speech, and video generation ───────────────────────── */
+  function isKnownUnavailableVideoModel(key) {
+    var value = String(key || '').toLowerCase();
+    if (value.indexOf('omniroute/') === 0 || value.indexOf('openrouter/') === 0) value = value.slice(value.indexOf('/') + 1);
+    return value === 'pollinations/default' || value.indexOf('pollinations/') === 0;
+  }
   function typedModels(kind) {
-    return (_statusCache && Array.isArray(_statusCache[kind + 'Models'])) ? _statusCache[kind + 'Models'] : [];
+    var models = (_statusCache && Array.isArray(_statusCache[kind + 'Models'])) ? _statusCache[kind + 'Models'] : [];
+    if (kind !== 'video') return models;
+    var usable = models.filter(function (m) { return !isKnownUnavailableVideoModel(m && m.key); });
+    // Prefer a real OpenRouter fallback or a known handler-backed OmniRoute model
+    // when the catalog arrives without an explicit saved selection.
+    return usable.sort(function (a, b) {
+      var ak = String((a && a.key) || '').toLowerCase();
+      var bk = String((b && b.key) || '').toLowerCase();
+      var ar = ak.indexOf('openrouter/') === 0 ? 0 : ak.indexOf('veo-free/') === 0 ? 1 : 2;
+      var br = bk.indexOf('openrouter/') === 0 ? 0 : bk.indexOf('veo-free/') === 0 ? 1 : 2;
+      return ar - br;
+    });
   }
   function typedModel(kind, thread) {
     var models = typedModels(kind);
