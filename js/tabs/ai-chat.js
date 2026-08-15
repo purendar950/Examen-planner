@@ -1914,7 +1914,7 @@
         .catch(fail);
     }
     function startProxyJob() {
-      return backendAuthFetch('/api/ai-chat/video/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: body.aspect_ratio, duration: body.duration, sourceImage: body.source_image || '' }) })
+      return backendAuthFetch('/api/ai-chat/video/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 60000, body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: body.aspect_ratio, duration: body.duration, sourceImage: body.source_image || '' }) })
         .then(function (r) { if (!r.ok) return responseError(r, 'Video job could not be started.'); return r.json(); })
         .then(function (job) {
           var cur = getThread(thread.id); if (cur) { cur.pendingVideoJob = { id: job.jobId || job.id, prompt: prompt, model: selected.key }; upsertThread(cur); }
