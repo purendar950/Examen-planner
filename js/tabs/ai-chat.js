@@ -55,6 +55,10 @@
   // A pending image request cannot survive a full page refresh. Live requests
   // are protected by _activeImageRequests; anything else is recoverable via retry.
   var DIRECT_IMAGE_TOTAL_TIMEOUT_MS = 240 * 1000;
+  // OmniRoute currently exposes 62 image-generation models. Keep all live
+  // image-capable candidates usable, with a defensive upper bound rather than
+  // silently truncating the catalog to the old 12-model window.
+  var DIRECT_IMAGE_CANDIDATE_MAX = 64;
 
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
@@ -1329,7 +1333,7 @@
         add({ key: m.key, provider: pid, model: m.model, label: group.label + ' / ' + m.label });
       }); });
     });
-    return all.slice(0, 12);
+    return all.slice(0, DIRECT_IMAGE_CANDIDATE_MAX);
   }
   function requestDirectImageCandidate(candidate, prompt, timeoutMs) {
     var provider = candidate.provider, model = candidate.model, body;

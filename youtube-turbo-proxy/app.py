@@ -1858,22 +1858,27 @@ def _ai_chat_resolve_model(models, requested_key):
 
 
 def _ai_chat_image_candidates(models, picked, max_n=None):
-    """Return a bounded, deterministic fallback list for image generation.
+    """Return a deterministic fallback list for image generation.
 
     The browser may remember Gemini as the selected image model, but a temporary
     Gemini quota/rate limit must not make every image request fail when the admin
     has also configured OmniRoute or OpenRouter image routes. Keep the user's
     selected model first, then prefer live OmniRoute routes, OpenRouter's
     dedicated Image API, and other configured providers. Every entry comes from
-    the already-authorized image catalog.
+    the already-authorized image catalog. The list can include the complete live
+    catalog (currently about 62 OmniRoute image routes); each provider adapter
+    still has its own request timeout and the frontend has a total deadline.
     """
     if not picked:
         return []
     try:
-        cap = int(max_n if max_n is not None else os.environ.get("IMAGE_FALLBACK_MAX", "12"))
+        # OmniRoute currently advertises 62 image-generation models. Keep the
+        # full catalog usable by default while retaining an operator-configurable
+        # upper bound so a malformed catalog cannot create an unbounded cascade.
+        cap = int(max_n if max_n is not None else os.environ.get("IMAGE_FALLBACK_MAX", "64"))
     except (TypeError, ValueError):
-        cap = 12
-    cap = max(1, min(cap, 12))
+        cap = 64
+    cap = max(1, min(cap, 64))
     selected_key = _ai_chat_model_key(picked.get("provider"), picked.get("model"))
     out = [picked]
     remaining = [m for m in (models or [])

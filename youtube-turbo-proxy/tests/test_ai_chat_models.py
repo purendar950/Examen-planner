@@ -423,6 +423,20 @@ check("image persistence uses its own atomic field paths",
       "omnirouteCatalog.chatModels" not in fake_doc.writes[-1][1],
       fake_doc.writes[-1])
 
+# The live OmniRoute UI currently advertises 62 image-generation models. The
+# catalog itself is already preserved in full; these guards prevent a future
+# change from silently reinstating the old 12-candidate fallback ceiling.
+check("image fallback default supports the complete live catalog",
+      'os.environ.get("IMAGE_FALLBACK_MAX", "64")' in SRC and
+      "min(cap, 64)" in SRC,
+      "backend fallback ceiling regressed")
+_AI_CHAT_JS = os.path.abspath(os.path.join(
+    os.path.dirname(__file__), "../../js/tabs/ai-chat.js"
+))
+check("direct browser image fallback supports the complete live catalog",
+      "DIRECT_IMAGE_CANDIDATE_MAX = 64" in io.open(_AI_CHAT_JS, encoding="utf-8").read(),
+      "frontend fallback ceiling regressed")
+
 print("AI Chat — chat vs image model separation")
 print("\n".join(_RESULTS))
 if _FAILED:
