@@ -2653,7 +2653,10 @@
       if (cursor < source.length) html += mdLite(source.slice(cursor));
       return generatedFileBundleHtml(message) + html;
     }
-    var rendered = isDiffCode(source, 'diff') ? codeArtifactHtml(source, 'diff', 0, 'Suggested patch') : mdLite(source);
+    // Only classify an unfenced response as a patch when its content actually
+    // has unified-diff markers. Passing the literal "diff" as the language here
+    // made every ordinary chat reply look like a Suggested patch.
+    var rendered = isDiffCode(source, '') ? codeArtifactHtml(source, 'diff', 0, 'Suggested patch') : mdLite(source);
     return generatedFileBundleHtml(message) + rendered;
   }
   window.aicCopyArtifact = function (btn) {
