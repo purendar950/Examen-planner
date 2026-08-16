@@ -71,6 +71,70 @@ function load(fields = {}) {
 
 const { parseClock, ytFitsWhole, isOversizedFailure, ytSizeAdvice, YT_WHOLE_VIDEO_CHARS } = load();
 
+console.log('\nPanel controls survive the composer-toolbox hide rule');
+
+/* The YouTube panel is mounted INSIDE #aic-composer-toolbox, which hides
+   .aic-image-prompt, .aic-media-prompt and .aic-send outright — for a
+   prompt-driven tool the composer's own textarea is the prompt and its Send
+   button submits, so the in-panel duplicates are redundant. This panel instead
+   configures an attachment, so its URL field and Attach button are neither. The
+   first cut reused those exact classes and both controls vanished, leaving no
+   way to attach a video at all: the panel rendered with only the optional
+   Section inputs visible. */
+const hiddenInToolbox = (() => {
+  const rule = source
+    .split('\n')
+    .find((line) => line.includes('.aic-composer-toolbox .aic-image-prompt'));
+  assert.ok(rule, 'could not find the composer-toolbox hide rule');
+  assert.match(rule, /display:\s*none/, 'the rule is expected to hide these');
+  return [...rule.matchAll(/\.aic-composer-toolbox\s+\.([\w-]+)/g)].map((m) => m[1]);
+})();
+
+const youtubeBoxMarkup = (() => {
+  const line = source.split('\n').find((l) => l.includes('id="aic-youtube-box"'));
+  assert.ok(line, 'could not find the YouTube panel markup');
+  return line;
+})();
+
+test('the hide rule is understood to cover the classes it always has', () => {
+  for (const cls of ['aic-image-prompt', 'aic-media-prompt', 'aic-send']) {
+    assert.ok(hiddenInToolbox.includes(cls), `expected the rule to hide .${cls}`);
+  }
+});
+
+test('no control in the YouTube panel wears a class the toolbox hides', () => {
+  const classAttrs = [...youtubeBoxMarkup.matchAll(/class="([^"]*)"/g)]
+    .flatMap((m) => m[1].split(/\s+/))
+    .filter(Boolean);
+  const collisions = classAttrs.filter((c) => hiddenInToolbox.includes(c));
+  assert.deepEqual(
+    collisions, [],
+    `these classes are hidden inside the composer toolbox: ${collisions.join(', ')}`
+  );
+});
+
+test('the URL field and Attach button are actually present in the panel', () => {
+  assert.match(youtubeBoxMarkup, /id="aic-yt-url-input"/, 'URL field missing');
+  assert.match(youtubeBoxMarkup, /aicAttachYoutubeFromInput\(\)/, 'Attach action missing');
+  assert.match(youtubeBoxMarkup, /class="aic-yt-url"/, 'URL field should use its own class');
+  assert.match(youtubeBoxMarkup, /class="aic-yt-attach"/, 'Attach should use its own class');
+});
+
+test('both replacement classes are actually styled, not just renamed', () => {
+  // Renaming away from a hidden class fixes nothing if the new class has no rule:
+  // the field would render unstyled and the button would lose its affordance.
+  assert.match(source, /\.aic-yt-url\{[^}]*padding/, '.aic-yt-url needs styling');
+  assert.match(source, /\.aic-yt-attach\{[^}]*background/, '.aic-yt-attach needs styling');
+});
+
+test('the language picker is gone, so one cached transcript is shared per video', () => {
+  // The cache is keyed by video AND language while every other consumer asks for
+  // "auto", so offering a language guaranteed a miss and a duplicate B2 object.
+  assert.doesNotMatch(source, /aic-yt-lang-select/,
+    'the language picker should be removed entirely');
+  assert.match(source, /var YT_LANG = 'auto'/, 'attachments should pin auto');
+});
+
 console.log('\nSection time parsing');
 
 test('a blank field means "no bound", not zero', () => {
