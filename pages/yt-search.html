@@ -1,0 +1,149 @@
+<div class="page" id="page-yt-search">
+<style>
+/* TOP BAR */
+/* YOUTUBE SECTION */
+#page-yt-search{min-height:70vh;padding:22px 16px 40px}
+#page-yt-search .youtube-shell{width:min(1180px,100%);margin:0 auto}
+#page-yt-search .youtube-head{display:flex;align-items:end;justify-content:space-between;gap:16px;margin-bottom:14px}
+#page-yt-search .youtube-title{font-size:22px;font-weight:950;letter-spacing:-.5px}
+#page-yt-search .youtube-sub{margin-top:4px;color:#8f96a3;font-size:11px;line-height:1.45}
+#page-yt-search .youtube-search-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:9px;margin-bottom:16px}
+#page-yt-search .youtube-search{
+  width:100%;min-width:0;border:1px solid #2b2f3a;border-radius:13px;
+  background:#151820;color:#fff;padding:11px 13px;outline:none
+}
+#page-yt-search .youtube-search:focus{border-color:#6555bc}
+#page-yt-search .youtube-search-btn{
+  border:1px solid #343946;border-radius:13px;padding:10px 15px;
+  background:#f4f5f7;color:#0a0b0e;font-weight:900
+}
+#page-yt-search .youtube-search-filters{display:flex;align-items:center;gap:7px;margin:-7px 0 12px}
+#page-yt-search .youtube-search-filter{border:1px solid #2d323e;border-radius:999px;background:#12151c;color:#9098a5;font-size:9.5px;font-weight:850;padding:6px 10px}
+#page-yt-search .youtube-search-filter.active{border-color:#4f5665;background:#f4f5f7;color:#0a0b0e}
+#page-yt-search .youtube-player-card{display:none;margin:0 0 22px}
+#page-yt-search .youtube-player-card.show{display:block}
+#page-yt-search .youtube-player-ratio{position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#000;border:1px solid #20242d}
+#page-yt-search .youtube-player-ratio iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+#page-yt-search .youtube-now{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px}
+#page-yt-search .youtube-now-title{min-width:0;font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#page-yt-search .youtube-now-label{flex:0 0 auto;color:#8f96a3;font-size:9px;text-transform:uppercase;letter-spacing:.5px}
+#page-yt-search .youtube-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+#page-yt-search .youtube-card{border:0;padding:0;background:transparent;color:inherit;text-align:left;min-width:0}
+#page-yt-search .youtube-thumb{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#151820;border:1px solid #20242d}
+#page-yt-search .youtube-thumb img{width:100%;height:100%;display:block;object-fit:cover}
+#page-yt-search .youtube-play-badge{position:absolute;left:8px;bottom:8px;padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.76);font-size:9px;font-weight:950;color:#fff}
+#page-yt-search .youtube-card-title{margin-top:7px;font-size:11px;font-weight:900;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#page-yt-search .youtube-card-met
+#page-yt-search .youtube-empty{display:none;padding:20px 12px;text-align:center;color:#8d94a0;font-size:11px;border:1px dashed #292e38;border-radius:13px}
+#page-yt-search .youtube-empty.show{display:block}
+#page-yt-search .youtube-hint{margin:9px 1px 18px;color:#707784;font-size:9.5px;line-height:1.45}
+#page-yt-search .youtube-recent{display:none;margin:2px 0 18px}
+#page-yt-search .youtube-recent.show{display:block}
+#page-yt-search .youtube-recent-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:9px}
+#page-yt-search .youtube-recent-title{font-size:12px;font-weight:900}
+#page-yt-search .youtube-recent-clear{border:0;background:transparent;color:#777f8c;font-size:9px;font-weight:800;padding:4px 2px}
+#page-yt-search .youtube-recent-row{display:flex;gap:9px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;overscroll-behavior-inline:contain}
+#page-yt-search .youtube-recent-row::-webkit-scrollbar{display:none}
+#page-yt-search .youtube-recent-card{flex:0 0 148px;border:0;padding:0;background:transparent;color:inherit;text-align:left;min-width:0}
+#page-yt-search .youtube-recent-thumb{aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:#151820;border:1px solid #20242d}
+#page-yt-search .youtube-recent-thumb img{width:100%;height:100%;display:block;object-fit:cover}
+#page-yt-search .youtube-recent-card-title{margin-top:5px;font-size:9.5px;font-weight:850;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* API setup */
+#page-yt-search .youtube-api-setup{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-5px 1px 16px}
+#page-yt-search .youtube-api-toggle,#page-yt-search .youtube-api-save,#page-yt-search .youtube-api-clear,#page-yt-search .youtube-more-btn{
+  border:1px solid #2d323e;border-radius:10px;background:#12151c;color:#d8dbe3;
+  font-size:9.5px;font-weight:800;padding:7px 10px
+}
+#page-yt-search .youtube-api-toggle.ready{border-color:#274d3a;color:#8bd3ad;background:#0d1712}
+#page-yt-search .youtube-api-panel{display:none;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;width:100%;max-width:650px}
+#page-yt-search .youtube-api-panel.show{display:grid}
+#page-yt-search .youtube-api-key{width:100%;min-width:0;border:1px solid #2b2f3a;border-radius:10px;background:#0e1016;color:#fff;padding:8px 10px;font-size:10px;outline:none}
+#page-yt-search .youtube-api-note{width:100%;color:#666e7c;font-size:8.8px;line-height:1.4}
+#page-yt-search .youtube-more-wrap{display:none;text-align:center;margin-top:16px}#page-yt-search .youtube-more-wrap.show{display:block}
+/* Local file fallback */
+#page-yt-search .youtube-local-fallback{display:none;position:absolute;inset:0;background:#0c0e13;align-items:center;justify-content:center;text-align:center;padding:18px}
+#page-yt-search .youtube-local-fallback.show{display:flex}
+#page-yt-search .youtube-local-box{max-width:520px}
+#page-yt-search .youtube-local-box img{width:min(420px,100%);aspect-ratio:16/9;object-fit:cover;border-radius:12px;border:1px solid #262b36;display:block;margin:0 auto 12px}
+#page-yt-search .youtube-local-title{font-size:13px;font-weight:900;color:#fff;margin-bottom:5px}
+#page-yt-search .youtube-local-text{font-size:10.5px;line-height:1.45;color:#8f96a3;margin-bottom:12px}
+#page-yt-search .youtube-local-open{border:1px solid #343946;border-radius:10px;background:#f4f5f7;color:#0a0b0e;font-weight:900;padding:9px 13px;font-size:11px}
+/* Footer */
+.site-footer 
+@media(max-width:640px){
+  #page-yt-search{padding:18px 12px 34px}
+  #page-yt-search .youtube-head{align-items:flex-start;flex-direction:column;gap:3px}
+  #page-yt-search .youtube-title{font-size:19px}
+  #page-yt-search .youtube-search-row{grid-template-columns:1fr auto}
+  #page-yt-search .youtube-search{padding:10px 11px;font-size:12px}
+  #page-yt-search .youtube-search-btn{padding:9px 12px;font-size:11px}
+  #page-yt-search .youtube-player-ratio{border-radius:12px}
+  #page-yt-search .youtube-grid{gap:9px}
+  #page-yt-search .youtube-card-title{font-size:10px}
+  #page-yt-search .youtube-card-met
+  #page-yt-search .youtube-api-panel{grid-template-columns:1fr auto}
+  #page-yt-search .youtube-api-clear{grid-column:2}#page-yt-search .youtube-api-note{grid-column:1/-1}
+}
+@media(min-width:850px){
+  #page-yt-search{padding:30px 24px 54px}
+  #page-yt-search .youtube-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+  #page-yt-search .youtube-player-card{width:min(920px,100%)}
+}
+</style>
+<section id="youtubePage" aria-label="YouTube">
+  <div class="youtube-shell">
+    <div class="youtube-head">
+      <div>
+        <div class="youtube-title">YT Search</div>
+        <div class="youtube-sub">Search YouTube, pick a suggestion, or paste a YouTube link / video ID.</div>
+      </div>
+    </div>
+
+    <div class="youtube-search-row">
+      <input id="youtubeSearch" class="youtube-search" type="search" placeholder="Search YouTube or paste a link..." autocomplete="off">
+      <button id="youtubeSearchBtn" class="youtube-search-btn" type="button">Go</button>
+    </div>
+    <div class="youtube-search-filters" role="group" aria-label="YouTube search filter">
+      <button class="youtube-search-filter active" type="button" data-youtube-search-filter="all" aria-pressed="true">All</button>
+      <button class="youtube-search-filter" type="button" data-youtube-search-filter="live" aria-pressed="false">Live</button>
+      <button class="youtube-search-filter" type="button" data-youtube-search-filter="playlists" aria-pressed="false">Playlists</button>
+    </div>
+    <div id="youtubeHint" class="youtube-hint">Search works automatically — official key where allowed, otherwise a public search mirror. Add your own restricted YouTube Data API key below for the most reliable search.</div>
+    <div id="youtubeApiSetup" class="youtube-api-setup">
+      <button id="youtubeApiToggle" class="youtube-api-toggle" type="button">Enable full search</button>
+      <div id="youtubeApiPanel" class="youtube-api-panel">
+        <input id="youtubeApiKey" class="youtube-api-key" type="password" autocomplete="off" placeholder="Paste restricted YouTube Data API key">
+        <button id="youtubeApiSave" class="youtube-api-save" type="button">Save</button>
+        <button id="youtubeApiClear" class="youtube-api-clear" type="button">Clear</button>
+      </div>
+      <div class="youtube-api-note">For a public site, restrict the key to your domain and to YouTube Data API v3. Without a key, the page automatically uses a public mirror and direct YouTube links still work.</div>
+    </div>
+
+    <div id="youtubePlayerCard" class="youtube-player-card">
+      <div class="youtube-player-ratio">
+        <iframe id="youtubePlayer" title="YouTube player"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowfullscreen
+          referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <div id="youtubeLocalFallback" class="youtube-local-fallback" aria-live="polite"></div>
+      </div>
+      <div class="youtube-now">
+        <div id="youtubeNowTitle" class="youtube-now-title">YouTube video</div>
+        <div class="youtube-now-label">Now Playing</div>
+      </div>
+    </div>
+
+    <section id="youtubeRecent" class="youtube-recent" aria-label="Recently watched on YouTube">
+      <div class="youtube-recent-head">
+        <div class="youtube-recent-title">Recently Watched</div>
+        <button id="youtubeRecentClear" class="youtube-recent-clear" type="button">Clear</button>
+      </div>
+      <div id="youtubeRecentRow" class="youtube-recent-row"></div>
+    </section>
+
+    <div id="youtubeGrid" class="youtube-grid"></div>
+    <div id="youtubeEmpty" class="youtube-empty">No videos found. Try another search or paste a YouTube link/video ID.</div>
+    <div id="youtubeMoreWrap" class="youtube-more-wrap"><button id="youtubeMoreBtn" class="youtube-more-btn" type="button">Load more</button></div>
+  </div>
+</section>
+</div>
