@@ -969,6 +969,23 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
                 _transcript_cache[ckey] = {"ts": time.time(), "data": fs}
             return fs
 
+    # An explicit language that misses is still very likely to be on disk under
+    # "auto": every other caller in this app asks for "auto", and for a Hindi
+    # lecture "auto" resolves to the Hindi track anyway. Without this, asking for
+    # 'hi' re-extracts a video the app already has — minutes of yt-dlp work, a
+    # second stored copy of identical captions, and a fresh chance of hitting
+    # YouTube's bot check. Only reused when the stored track REALLY is the
+    # language asked for, so this stays a cache hit and not a silent substitution.
+    if not force and not _is_auto_lang(lang):
+        shared = _transcript_get(_fs_doc_id(video_id, "auto"))
+        if shared and shared.get("segments"):
+            want = str(lang).strip().lower().split("-")[0]
+            got = str(shared.get("chosen_lang") or "").strip().lower().split("-")[0]
+            if want and want == got:
+                with _transcript_lock:
+                    _transcript_cache[ckey] = {"ts": time.time(), "data": shared}
+                return shared
+
     with _extract_sem:
         with _transcript_lock:               # re-check after acquiring the sem
             hit = _transcript_cache.get(ckey)

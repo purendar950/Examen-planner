@@ -354,6 +354,65 @@ check("a fetch failure is swallowed", isinstance(boom, str) and boom)
 check("a fetch failure is disclosed to the model", "UNAVAILABLE" in boom, boom[:200])
 check("a fetch failure suggests a retry", "re-attach" in boom, boom[:400])
 
+print("\n\u2500\u2500 6. an explicit language reuses the shared 'auto' cache entry \u2500\u2500")
+# The transcript cache is keyed by video AND language, while every other caller in
+# app.py asks for "auto". So a request for 'hi' used to miss the entry the app had
+# already stored on B2 and re-extract the whole lecture from YouTube — minutes of
+# work, a duplicate stored copy, and a fresh chance of tripping the bot check.
+_lookups = []
+
+
+def _fake_get(doc_id):
+    _lookups.append(doc_id)
+    if doc_id.endswith("_auto"):
+        return {"segments": [{"start": 0.0, "dur": 5.0, "text": "namaste"}],
+                "text": "namaste", "chosen_lang": "hi"}
+    return None
+
+
+reuse_ns = {
+    "os": os, "re": re, "time": __import__("time"),
+    "log": type("_L", (), {"warning": lambda *a, **k: None,
+                           "info": lambda *a, **k: None})(),
+    "TRANSCRIPT_TTL": 30 * 24 * 3600,
+    "_transcript_cache": {},
+    "_transcript_lock": __import__("threading").Lock(),
+    "_transcript_get": _fake_get,
+    "_fs_doc_id": lambda *parts: "_".join(str(p) for p in parts),
+}
+exec(section("def _is_auto_lang(lang):", "def _pick_caption_url("), reuse_ns)
+# Only the cache-resolution prologue is exercised; the yt-dlp extraction below it
+# is what these checks prove is NOT reached.
+_prologue = section("    ckey = \"%s:%s\" % (video_id, lang)", "    with _extract_sem:")
+exec("def resolve(video_id, lang='auto', force=False):\n"
+     + _prologue + "\n    return None", reuse_ns)
+resolve = reuse_ns["resolve"]
+
+del _lookups[:]
+hit = resolve("dQw4w9WgXcQ", "hi")
+check("asking for 'hi' finds the stored 'auto' transcript",
+      hit is not None and hit.get("text") == "namaste", hit)
+check("it looked under the shared 'auto' key",
+      any(d.endswith("_auto") for d in _lookups), _lookups)
+check("the reused entry is the real Hindi track, not a substitution",
+      hit and hit.get("chosen_lang") == "hi", hit)
+
+del _lookups[:]
+reuse_ns["_transcript_cache"].clear()
+check("asking for a language the stored track is NOT gives no false hit",
+      resolve("dQw4w9WgXcQ", "ta") is None)
+
+del _lookups[:]
+reuse_ns["_transcript_cache"].clear()
+check("'auto' itself does not double-check the same key",
+      resolve("dQw4w9WgXcQ", "auto") is not None
+      and len([d for d in _lookups if d.endswith("_auto")]) == 1, _lookups)
+
+del _lookups[:]
+reuse_ns["_transcript_cache"].clear()
+check("force=True refuses every cache and goes back to YouTube",
+      resolve("dQw4w9WgXcQ", "hi", force=True) is None, _lookups)
+
 print("\n" + "\n".join(_RESULTS))
 if _FAILED:
     print("\n%d check(s) FAILED: %s" % (len(_FAILED), ", ".join(_FAILED)))
