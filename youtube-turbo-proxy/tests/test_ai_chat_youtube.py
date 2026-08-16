@@ -257,6 +257,13 @@ check("the block carries a resolvable link", "https://youtu.be/dQw4w9WgXcQ" in b
 check("the caption language is disclosed", "en" in block)
 check("an auto-generated track is flagged as such", "auto-generated" in block, block[:400])
 check("the handling rule is included", "HOW TO USE THE ATTACHED VIDEO" in block)
+check("the model is told the server already loaded the transcript",
+      "server has already loaded this attached transcript" in block, block[:500])
+check("a transcript capability question must be answered truthfully",
+      "answer yes" in block and "Never claim that you cannot receive or process this transcript" in block,
+      block[:700])
+check("the model must not ask for an already attached transcript again",
+      "never ask the student to upload or paste it again" in block, block[:700])
 check("the rule warns about mis-transcription", "machine-transcribed" in block)
 check("the rule forbids invented timestamps", "Never invent a timestamp" in block)
 check("the transcript body is present", "[0:00] sentence 0" in block)
@@ -352,6 +359,8 @@ check("no room left carries NO transcript body",
 check("no room left still names the video", "Thermodynamics Lecture 12" in noroom)
 check("no room left is actionable", "larger context window" in noroom, noroom[:400])
 check("no room left forbids guessing", "Do not guess" in noroom, noroom[:400])
+check("no-room state never falsely claims the transcript was loaded",
+      "server has already loaded this attached transcript" not in noroom)
 
 print("\n\u2500\u2500 5. inputs that must not raise \u2500\u2500")
 check("no youtube key -> no block", context({}, big, 0) == "")
@@ -376,11 +385,15 @@ check("no captions is stated explicitly", "NO CAPTIONS" in nocap, nocap[:200])
 check("no captions forbids inventing content", "do not invent" in nocap, nocap[:400])
 check("no captions carries no transcript rule",
       "HOW TO USE THE ATTACHED VIDEO" not in nocap)
+check("no captions never claims a transcript was loaded",
+      "server has already loaded this attached transcript" not in nocap)
 
 boom = context({"youtube": {"id": "explodes000"}}, big, 0)
 check("a fetch failure is swallowed", isinstance(boom, str) and boom)
 check("a fetch failure is disclosed to the model", "UNAVAILABLE" in boom, boom[:200])
 check("a fetch failure suggests a retry", "re-attach" in boom, boom[:400])
+check("an unavailable transcript never falsely claims it was loaded",
+      "server has already loaded this attached transcript" not in boom)
 
 print("\n\u2500\u2500 5b. the route's real context window drives the budget \u2500\u2500")
 # Verified against a live OmniRoute /v1/models response: 5509 routes, 5386 of them

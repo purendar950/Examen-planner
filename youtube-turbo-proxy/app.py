@@ -11679,6 +11679,11 @@ def _ai_chat_transcript_chars(ai, text, history_chars=0):
 # use the correct term, rather than faithfully copying the noise.
 _YOUTUBE_TRANSCRIPT_RULE = (
     "\n\nHOW TO USE THE ATTACHED VIDEO\n"
+    "The server has already loaded this attached transcript into your context; "
+    "it is available for you to read and use now. If the student asks whether "
+    "you can access, receive, or read it, answer yes and briefly identify the "
+    "video before helping. Never claim that you cannot receive or process this "
+    "transcript, and never ask the student to upload or paste it again.\n"
     "The student attached a YouTube video to this conversation. The TRANSCRIPT "
     "below is its captions and is the primary source for anything they ask about "
     "\u201cthis video\u201d, \u201cthe lecture\u201d, or \u201cit\u201d.\n"
