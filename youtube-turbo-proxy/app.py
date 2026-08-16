@@ -673,6 +673,64 @@ def _transcript_get(doc_id):
     return idx
 
 
+def _transcript_storage_info(doc_id):
+    """Describe where an attached transcript is persisted without exposing
+    bucket names, endpoints, or credentials.
+
+    AI Chat uses this metadata to render the cached transcript as a real file
+    attachment. The object key is stable and safe to show; the bucket remains a
+    private deployment detail. A missing index is checked against object storage
+    so a successful B2 upload whose Firestore index failed is still identified.
+    """
+    object_key = _s3_obj_key(doc_id, prefix="transcripts")
+    idx = _fs_get("transcripts", doc_id)
+    if idx and idx.get("store") == "b2":
+        store = "backblaze_b2"
+    elif idx and idx.get("segments") is not None:
+        store = "firestore"
+    elif _s3_enabled() and _s3_exists(doc_id, prefix="transcripts"):
+        store = "backblaze_b2"
+    else:
+        # Extraction succeeded, but no durable copy could be confirmed. The
+        # process-memory cache can still serve this Render instance.
+        store = "memory"
+    return {
+        "name": "%s.json" % doc_id,
+        "document_id": doc_id,
+        "object_key": object_key if store == "backblaze_b2" else None,
+        "store": store,
+        "ready": store in ("backblaze_b2", "firestore"),
+    }
+
+
+def _transcript_file_info(video_id, lang, data=None):
+    """Return metadata for the document that actually backs this response.
+
+    Older explicit-language requests may reuse the shared ``auto`` transcript.
+    Check the requested key first, then the shared key, so the UI never labels
+    that body as a nonexistent ``<video>__<language>.json`` object.
+    """
+    requested_id = _fs_doc_id(video_id, lang)
+    normalized = str(lang or "auto").strip().lower()
+    data_lang = str((data or {}).get("requested_lang") or normalized).strip().lower()
+    auto_id = _fs_doc_id(video_id, "auto")
+    # _extract_transcript returns the shared document unchanged when an explicit
+    # language aliases its matching auto track, so requested_lang identifies the
+    # real persisted key without guessing from chosen_lang.
+    if normalized not in ("", "auto", "any") and data_lang in ("", "auto", "any"):
+        candidates = [auto_id, requested_id]
+    else:
+        candidates = [requested_id]
+    first = None
+    for candidate in candidates:
+        info = _transcript_storage_info(candidate)
+        if first is None:
+            first = info
+        if info.get("ready"):
+            return info
+    return first or _transcript_storage_info(requested_id)
+
+
 def _study_exists(doc_id):
     """Return whether a saved note exists, including orphaned B2 bodies.
 
@@ -6573,7 +6631,19 @@ def api_transcript():
         return jsonify({"error": "missing or invalid ?id "
                         "(11-char video id or a YouTube URL)"}), 400
     try:
-        data = _extract_transcript(video_id, lang)
+        requested_doc_id = (request.args.get("documentId") or "").strip()
+        allowed_doc_ids = {_fs_doc_id(video_id, lang), _fs_doc_id(video_id, "auto")}
+        # Download requests carry the server-issued document ID so they read the
+        # exact cached body displayed in the attachment card. Invalid/foreign IDs
+        # are ignored rather than becoming an arbitrary object-storage lookup.
+        data = _transcript_get(requested_doc_id) if requested_doc_id in allowed_doc_ids else None
+        if data is None:
+            data = _extract_transcript(video_id, lang)
+        # Expose only non-secret attachment metadata. The browser can show the
+        # transcript as a real file and its exact object key, while bucket name,
+        # endpoint, and credentials stay private on the server.
+        data = {**data, "transcript_file":
+                _transcript_file_info(video_id, lang, data)}
         if not data["segments"]:
             # Not an error — the video may simply have no captions for this lang.
             return jsonify({**data, "warning": "no_captions",
@@ -6586,7 +6656,9 @@ def api_transcript():
             # cookies — pull the latest from Firestore and retry once.
             if refresh_cookies() and _cookie_source == "firestore":
                 try:
-                    return jsonify(_extract_transcript(video_id, lang, force=True))
+                    data = _extract_transcript(video_id, lang, force=True)
+                    return jsonify({**data, "transcript_file":
+                                    _transcript_file_info(video_id, lang, data)})
                 except Exception:  # noqa: BLE001
                     pass
             return jsonify({"error": "youtube_bot_check",
@@ -11634,10 +11706,11 @@ _YOUTUBE_TRANSCRIPT_RULE = (
 def _ai_chat_youtube_context(body, ai, history_chars=0):
     """The TRANSCRIPT block for a chat with a YouTube video attached.
 
-    The browser sends only {id, lang}: the transcript itself is re-read here from
-    the same three-tier cache /api/transcript uses (memory -> Firestore -> S3), so
-    a 300 KB lecture is never shipped up on every message and the real `segments`
-    stay available for stamping and windowing.
+    The browser sends a server-issued document ID with {id, lang}. The matching
+    transcript is read from the same three-tier cache /api/transcript uses
+    (memory -> Firestore -> S3); if that durable body disappeared, extraction is
+    retried by video/language. A 300 KB lecture is therefore never shipped up on
+    every message and the real `segments` stay available for stamping/windowing.
 
     Returns '' when nothing is attached. A fetch failure returns a short note
     rather than raising — losing the transcript must degrade the answer, not fail
@@ -11649,8 +11722,12 @@ def _ai_chat_youtube_context(body, ai, history_chars=0):
     if not video_id:
         return ""
     lang = (str(raw.get("lang") or "auto").strip() or "auto")[:16]
+    document_id = str(raw.get("documentId") or "").strip()
+    allowed_doc_ids = {_fs_doc_id(video_id, lang), _fs_doc_id(video_id, "auto")}
     try:
-        data = _extract_transcript(video_id, lang)
+        data = _transcript_get(document_id) if document_id in allowed_doc_ids else None
+        if data is None:
+            data = _extract_transcript(video_id, lang)
     except Exception as exc:  # noqa: BLE001
         app.logger.warning("ai-chat youtube transcript failed for %s: %s", video_id, exc)
         return ("\n\nATTACHED YOUTUBE VIDEO (UNAVAILABLE)\nThe student attached "

@@ -474,5 +474,141 @@ test('an already-sectioned attachment is told to shorten it, not to set one', ()
   assert.doesNotMatch(advice, /set a Section/);
 });
 
+console.log('\nTranscript attachment is a visible, downloadable server file');
+
+function loadTranscriptFile(att) {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(
+    [
+      section('function transcriptFileInfo(att) {', 'function renderYoutubeBar()'),
+      'globalThis.transcriptFileInfo = transcriptFileInfo;',
+      'globalThis.transcriptStoreLabel = transcriptStoreLabel;',
+      'globalThis.transcriptDownloadPayload = transcriptDownloadPayload;'
+    ].join('\n'),
+    context
+  );
+  return {
+    file: context.transcriptFileInfo(att),
+    label: (file) => context.transcriptStoreLabel(file),
+    downloadPayload: (data) => context.transcriptDownloadPayload(data)
+  };
+}
+
+test('an old backend response never fabricates a durable B2 object', () => {
+  const { file, label } = loadTranscriptFile({ id: 'dQw4w9WgXcQ', requestedLang: 'auto' });
+  assert.equal(file.name, 'dQw4w9WgXcQ__auto.json');
+  assert.equal(file.documentId, 'dQw4w9WgXcQ__auto');
+  assert.equal(file.objectKey, null);
+  assert.equal(file.ready, false);
+  assert.equal(label(file), 'storage not confirmed');
+});
+
+test('confirmed backend storage metadata wins over the rollout fallback', () => {
+  const server = {
+    name: 'custom.json', document_id: 'custom',
+    object_key: 'transcripts/custom.json', store: 'backblaze_b2', ready: true
+  };
+  const { file, label } = loadTranscriptFile({ id: 'dQw4w9WgXcQ', transcriptFile: server });
+  assert.equal(file.name, server.name);
+  assert.equal(file.objectKey, server.object_key);
+  assert.equal(file.store, 'backblaze_b2');
+  assert.equal(label(file), 'Backblaze B2');
+});
+
+test('download exports the persisted transcript body, not response metadata', () => {
+  const { downloadPayload } = loadTranscriptFile({ id: 'dQw4w9WgXcQ' });
+  const payload = downloadPayload({
+    id: 'dQw4w9WgXcQ', segment_count: 1,
+    segments: [{ start: 0, text: 'hello' }], text: 'hello',
+    transcript_file: { document_id: 'dQw4w9WgXcQ__auto' }
+  });
+  assert.equal(payload.text, 'hello');
+  assert.equal(payload.transcript_file, undefined);
+});
+
+test('download refuses a 200 no-captions response instead of saving an empty file', () => {
+  const { downloadPayload } = loadTranscriptFile({ id: 'dQw4w9WgXcQ' });
+  assert.throws(() => downloadPayload({ warning: 'no_captions', segment_count: 0, segments: [] }),
+    /no longer has a transcript/i);
+});
+
+test('the attachment renderer outputs the confirmed Backblaze file card', () => {
+  const bar = { style: {}, innerHTML: '' };
+  const att = {
+    id: 'dQw4w9WgXcQ', title: 'Thermodynamics Lecture', requestedLang: 'auto',
+    lang: 'en', duration: 3600,
+    transcriptFile: {
+      name: 'dQw4w9WgXcQ__auto.json', document_id: 'dQw4w9WgXcQ__auto',
+      object_key: 'transcripts/dQw4w9WgXcQ__auto.json', store: 'backblaze_b2', ready: true
+    }
+  };
+  const context = {
+    document: { getElementById: (id) => id === 'aic-yt-bar' ? bar : null },
+    getThread: () => ({ youtube: att }), currentThreadId: () => 't1',
+    fmtClock: () => '1:00:00', ytFitsWhole: () => true,
+    esc: (value) => String(value), escAttr: (value) => String(value), YT_ACTIONS: []
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    [
+      'function ytAttachment(thread) { return thread && thread.youtube && thread.youtube.id ? thread.youtube : null; }',
+      section('function transcriptFileInfo(att) {', 'function renderYoutubeBar()'),
+      section('function renderYoutubeBar() {', 'function renderYoutubeCurrent()'),
+      'renderYoutubeBar();'
+    ].join('\n'),
+    context
+  );
+  assert.equal(bar.style.display, 'flex');
+  assert.match(bar.innerHTML, /dQw4w9WgXcQ__auto\.json/);
+  assert.match(bar.innerHTML, /Backblaze object/);
+  assert.match(bar.innerHTML, /transcripts\/dQw4w9WgXcQ__auto\.json/);
+  assert.match(bar.innerHTML, /YouTube source: Thermodynamics Lecture/);
+  assert.match(bar.innerHTML, /aicDownloadYoutubeTranscript\(\)/);
+});
+
+test('the attachment renderer shows a filename, exact object key, and download action', () => {
+  const renderer = section('function renderYoutubeBar() {', 'function renderYoutubeCurrent()');
+  assert.match(renderer, /file\.name/, 'visible filename missing');
+  assert.match(renderer, /file\.objectKey/, 'visible storage location missing');
+  assert.match(renderer, /aicDownloadYoutubeTranscript\(\)/, 'download action missing');
+  assert.match(source, /window\.aicDownloadYoutubeTranscript = function/, 'download handler missing');
+});
+
+test('attaching stores the transcript_file metadata returned by the backend', () => {
+  const attach = section('function attachYoutube(videoId, fallbackTitle) {', '/* ── file upload / RAG');
+  assert.match(attach, /transcriptFile:\s*d\.transcript_file/);
+  assert.match(attach, /object_key:\s*null[\s\S]*store:\s*'unknown'[\s\S]*ready:\s*false/,
+    'an old backend response must remain explicitly unverified');
+});
+
+test('Download and Send carry the same server-issued transcript document ID', () => {
+  const download = section('window.aicDownloadYoutubeTranscript = function () {', 'window.aicYoutubeAction');
+  const send = section('window.aicSend = function (ev) {', '/* auto-grow the textarea');
+  assert.match(download, /documentId=' \+ encodeURIComponent\(file\.documentId\)/);
+  assert.match(send, /documentId:\s*transcriptFileInfo\(t\.youtube\)\.documentId/);
+});
+
+console.log('\nEvery Send exit explains itself');
+
+test('busy, blank, and missing-thread Send exits all notify the student', () => {
+  const send = section('window.aicSend = function (ev) {', '/* auto-grow the textarea');
+  assert.match(send, /if \(_sending\) \{ toast\(/, 'busy Send should notify');
+  assert.match(send, /if \(!q && _activeComposerTool !== 'speech'\) \{ toast\(/,
+    'blank Send should notify');
+  assert.match(send, /if \(!t\) \{ toast\(/, 'missing-thread Send should notify');
+});
+
+test('media retry failures use the same visible failure helper', () => {
+  const retry = section('window.aicRetryMessage = function (btn) {', '/* ── YouTube transcript attachment');
+  assert.match(retry, /mediaRetry\s*\n\s*\.catch\(function \(err\) \{ mediaFailed\(/,
+    'media retry rejection must be caught');
+});
+
+test('late app-shell initialization retries instead of disappearing silently', () => {
+  assert.match(source, /function ensurePageInjected\(attempt\)/);
+  assert.match(source, /setTimeout\(function \(\) \{ ensurePageInjected\(attempt \+ 1\); \}, 250\)/);
+});
+
 console.log(`\n${results.join('\n')}`);
 console.log(`\n${results.length} checks${process.exitCode ? ' — FAILURES ABOVE' : ' passed'}`);

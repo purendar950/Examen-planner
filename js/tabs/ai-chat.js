@@ -418,10 +418,13 @@
     /* Attached-video bar: sits with the files bar so every piece of thread
        context the model will see is visible in one place above the composer. */
     .aic-yt-bar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;max-width:none;margin:0;padding:0 clamp(1rem,4vw,3.5rem) .45rem;color:var(--muted);font-size:.7rem;}
-    .aic-yt-pill{display:flex;align-items:center;gap:6px;max-width:100%;padding:4px 9px;border:1px solid color-mix(in srgb,#c4302b 38%,var(--border));border-radius:999px;background:color-mix(in srgb,#c4302b 8%,var(--surface));color:var(--text);font-size:.68rem;}
-    .aic-yt-pill .aic-yt-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(46vw,420px);}
-    .aic-yt-pill .aic-yt-meta{color:var(--muted);}
-    .aic-yt-pill button{padding:0;border:0;background:none;color:inherit;cursor:pointer;font-size:.85em;}
+    .aic-yt-pill{display:flex;align-items:center;gap:8px;max-width:100%;padding:7px 10px;border:1px solid color-mix(in srgb,#c4302b 38%,var(--border));border-radius:11px;background:color-mix(in srgb,#c4302b 8%,var(--surface));color:var(--text);font-size:.68rem;}
+    .aic-yt-file-icon{display:grid;place-items:center;width:25px;height:25px;flex:0 0 auto;border-radius:7px;background:color-mix(in srgb,#c4302b 16%,var(--surface));font-size:.82rem;}
+    .aic-yt-file-copy{display:grid;min-width:0;gap:1px;}.aic-yt-pill .aic-yt-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(46vw,420px);font-weight:750;}
+    .aic-yt-pill .aic-yt-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(60vw,620px);color:var(--muted);font-size:.64rem;}
+    .aic-yt-pill button{padding:2px 4px;border:0;border-radius:5px;background:none;color:inherit;cursor:pointer;font-size:.85em;}.aic-yt-pill button:hover{background:color-mix(in srgb,var(--border) 45%,transparent);}
+    .aic-yt-location{flex:1 1 100%;margin:0;color:var(--muted);font-size:.64rem;line-height:1.35;}.aic-yt-location code{color:var(--text);font-size:inherit;word-break:break-all;}
+    .aic-yt-source{flex:1 1 100%;margin:0;color:var(--muted);font-size:.65rem;line-height:1.35;}
     .aic-yt-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
     .aic-yt-chip{padding:3px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:.66rem;cursor:pointer;transition:border-color .16s ease-out,color .16s ease-out,background .16s ease-out;}
     .aic-yt-chip:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent);color:var(--text);}
@@ -631,9 +634,9 @@
 </div>`;
 
   function injectPage() {
-    if (document.getElementById('page-ai-chat')) return;
+    if (document.getElementById('page-ai-chat')) return true;
     var mc = document.querySelector('.main-content');
-    if (!mc) return;
+    if (!mc) return false;
     var page = document.createElement('div');
     page.className = 'page';
     page.id = 'page-ai-chat';
@@ -642,6 +645,17 @@
     mountComposerToolbox(page);
     applySidebarState();
     injectNavTab();
+    return true;
+  }
+
+  function ensurePageInjected(attempt) {
+    if (injectPage()) return;
+    attempt = Number(attempt) || 0;
+    if (attempt < 20) {
+      setTimeout(function () { ensurePageInjected(attempt + 1); }, 250);
+      return;
+    }
+    console.error('[ai-chat] app shell did not load; AI Chat could not initialize');
   }
 
   function mountComposerToolbox(page) {
@@ -964,7 +978,7 @@
     if (typeof currentUser !== 'undefined' && currentUser) hydrateThreadStorage();
   });
   window.addEventListener('load', function () {
-    injectPage();
+    ensurePageInjected(0);
     bindAuthAccessListener();
     if (typeof currentUser !== 'undefined' && currentUser) hydrateThreadStorage();
     setTimeout(function () { _checked = true; checkAccess(); }, 800);
@@ -1296,7 +1310,7 @@
   };
 
   window.aicRetryMessage = function (btn) {
-    if (_sending) return;
+    if (_sending) { toast('Please wait for the current request to finish.'); return; }
     var row = btn && btn.closest('.aic-msg-row');
     var t = getThread(currentThreadId());
     var index = row ? Number(row.getAttribute('data-index')) : -1;
@@ -1340,7 +1354,9 @@
     } else if (retryKind === 'search' || retryKind === 'speech' || retryKind === 'video') {
       setSending(true);
       var mediaRetry = retryKind === 'search' ? requestWebSearch(t, retryPrompt) : (retryKind === 'speech' ? requestSpeech(t, retryPrompt) : requestVideo(t, retryPrompt));
-      mediaRetry.finally(function () { setSending(false); });
+      mediaRetry
+        .catch(function (err) { mediaFailed(t.id, retryKind, retryPrompt, err); })
+        .finally(function () { setSending(false); });
     } else {
       var retryInput = document.getElementById('aic-input');
       if (retryInput) retryInput.value = q;
@@ -1433,12 +1449,53 @@
     return (thread && thread.youtube && thread.youtube.id) ? thread.youtube : null;
   }
 
+  /* The transcript body remains in the server cache, but it is still a file the
+     student attached to this conversation. Keep the filename/object key aligned
+     with app.py's _fs_doc_id + _s3_obj_key so the UI can say exactly which B2
+     object backs the attachment without exposing the private bucket or keys. */
+  function transcriptFileInfo(att) {
+    att = att || {};
+    var requestedLang = att.requestedLang || 'auto';
+    var docId = (String(att.id || '') + '__' + String(requestedLang))
+      .replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 1400);
+    var server = att.transcriptFile || {};
+    return {
+      name: server.name || (docId + '.json'),
+      documentId: server.document_id || docId,
+      objectKey: Object.prototype.hasOwnProperty.call(server, 'object_key') ? server.object_key : null,
+      store: server.store || 'unknown',
+      ready: server.ready === true
+    };
+  }
+
+  function transcriptStoreLabel(file) {
+    if (file.store === 'backblaze_b2') return 'Backblaze B2';
+    if (file.store === 'firestore') return 'Firestore fallback';
+    if (file.store === 'memory') return 'temporary server cache';
+    return 'storage not confirmed';
+  }
+
+  function transcriptDownloadPayload(data) {
+    data = data || {};
+    if (data.warning === 'no_captions' || !Number(data.segment_count) ||
+        !(data.segments && data.segments.length)) {
+      throw new Error('This video no longer has a transcript available to download.');
+    }
+    // transcript_file is response metadata, not part of the persisted body.
+    // Removing it makes the download match the cached JSON document itself.
+    var payload = Object.assign({}, data);
+    delete payload.transcript_file;
+    return payload;
+  }
+
   function renderYoutubeBar() {
     var bar = document.getElementById('aic-yt-bar');
     if (!bar) return;
     var att = ytAttachment(getThread(currentThreadId()));
     if (!att) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
-    var meta = [];
+    var file = transcriptFileInfo(att);
+    var persistence = file.ready ? 'Persisted' : (file.store === 'memory' ? 'Session cache only' : 'Storage unconfirmed');
+    var meta = ['Transcript file', persistence, transcriptStoreLabel(file)];
     if (att.duration) meta.push(fmtClock(att.duration));
     if (att.lang) meta.push(att.lang + (att.kind === 'auto' ? ' auto' : ''));
     // A chosen section is the most important thing to show: it changes what the
@@ -1457,10 +1514,22 @@
         ' long \u2014 too long to fit in one request, so only its earlier part will be used. ' +
         'For full coverage, set a <strong>Section</strong> and work through it piece by piece.</p>';
     }
-    bar.innerHTML = '<span class="aic-yt-pill" title="' + escAttr(att.title || att.id) + '">\u25B6' +
-      '<span class="aic-yt-name">' + esc(att.title || att.id) + '</span>' +
-      (meta.length ? '<span class="aic-yt-meta">\u00B7 ' + esc(meta.join(' \u00B7 ')) + '</span>' : '') +
-      '<button onclick="aicRemoveYoutube()" title="Remove this video from the chat">\u2715</button></span>' +
+    var locationHtml = file.objectKey
+      ? (file.store === 'backblaze_b2' ? 'Backblaze object' : 'Server object key') + ': <code>' + esc(file.objectKey) + '</code> \u00B7 private, server-side'
+      : (file.store === 'firestore'
+        ? 'Firestore document: <code>transcripts/' + esc(file.documentId) + '</code> \u00B7 private, server-side'
+        : (file.store === 'memory'
+          ? 'Persistent storage is not confirmed; this transcript is available only from the current server cache.'
+          : 'Storage location was not reported by the server. Re-attach after the backend update to verify persistence.'));
+    var attachmentTitle = 'Attached transcript file. The AI reads this JSON from the server cache; the full transcript is not copied into browser storage.';
+    bar.innerHTML = '<span class="aic-yt-pill" title="' + escAttr(attachmentTitle) + '">' +
+      '<span class="aic-yt-file-icon" aria-hidden="true">\uD83D\uDCCE</span>' +
+      '<span class="aic-yt-file-copy"><span class="aic-yt-name">' + esc(file.name) + '</span>' +
+      '<span class="aic-yt-meta">' + esc(meta.join(' \u00B7 ')) + '</span></span>' +
+      '<button type="button" onclick="aicDownloadYoutubeTranscript()" title="Download this transcript JSON">\u2193</button>' +
+      '<button type="button" onclick="aicRemoveYoutube()" title="Remove this transcript from the chat">\u2715</button></span>' +
+      '<p class="aic-yt-location">' + locationHtml + '</p>' +
+      '<p class="aic-yt-source">YouTube source: ' + esc(att.title || att.id) + '</p>' +
       '<span class="aic-yt-actions">' + YT_ACTIONS.map(function (a, i) {
         return '<button type="button" class="aic-yt-chip" onclick="aicYoutubeAction(' + i + ')">' + esc(a.label) + '</button>';
       }).join('') +
@@ -1526,7 +1595,40 @@
     t.youtube = null;
     upsertThread(t);
     renderYoutubeBar();
-    toast('Video removed from this chat.');
+    toast('Transcript file removed from this chat.');
+  };
+
+  window.aicDownloadYoutubeTranscript = function () {
+    var att = ytAttachment(getThread(currentThreadId()));
+    if (!att) { toast('No transcript file is attached.', 'error'); return; }
+    var file = transcriptFileInfo(att);
+    toast('Preparing ' + file.name + '\u2026', 'info');
+    backendAuthFetch('/api/transcript?id=' + encodeURIComponent(att.id) + '&lang=' +
+      encodeURIComponent(att.requestedLang || 'auto') + '&documentId=' + encodeURIComponent(file.documentId),
+      { timeoutMs: 180000 })
+      .then(function (r) {
+        return r.json().then(function (data) {
+          if (!r.ok) throw new Error((data && (data.detail || data.error)) || ('HTTP ' + r.status));
+          return data || {};
+        });
+      })
+      .then(function (data) {
+        var payload = transcriptDownloadPayload(data);
+        var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = file.name;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        toast('Downloaded ' + file.name + '.', 'success');
+      })
+      .catch(function (err) {
+        toast('Could not download transcript: ' + String((err && err.message) || err || 'network error'), 'error');
+      });
   };
 
   window.aicYoutubeAction = function (i) {
@@ -1705,7 +1807,7 @@
   var YT_LANG = 'auto';
 
   function attachYoutube(videoId, fallbackTitle) {
-    if (_ytAttachInFlight) return;
+    if (_ytAttachInFlight) { toast('The transcript file is already being prepared.'); return; }
     var lang = YT_LANG;
     var range = readRangeInputs();
     if (range.error) { toast(range.error, 'error'); return; }
@@ -1751,9 +1853,11 @@
         var segments = d.segments || [];
         var last = segments.length ? segments[segments.length - 1] : null;
         var t = getThread(threadId);
-        if (!t) { ytProgStop(); return; }
+        if (!t) { fail('The chat was closed before the transcript finished. Attach it again in the current chat.'); return; }
+        var resolvedId = d.id || videoId;
+        var transcriptDocId = (String(resolvedId) + '__' + lang).replace(/[^A-Za-z0-9_.-]/g, '_').slice(0, 1400);
         t.youtube = {
-          id: d.id || videoId,
+          id: resolvedId,
           title: d.title || fallbackTitle || videoId,
           lang: d.chosen_lang || d.detected_language || lang,
           kind: d.kind || '',
@@ -1763,6 +1867,13 @@
           duration: last ? Math.round((Number(last.start) || 0) + (Number(last.dur) || 0)) : 0,
           charCount: d.char_count || 0,
           segmentCount: d.segment_count || segments.length,
+          transcriptFile: d.transcript_file || {
+            name: transcriptDocId + '.json',
+            document_id: transcriptDocId,
+            object_key: null,
+            store: 'unknown',
+            ready: false
+          },
           startS: range.startS,
           endS: range.endS,
           attachedAt: Date.now()
@@ -3856,14 +3967,14 @@
      failure (mirrors ai-tutor.js's stream/fallback pattern) ── */
   window.aicSend = function (ev) {
     if (ev) ev.preventDefault();
-    if (_sending) return;
+    if (_sending) { toast('Your previous message is still being sent.'); return; }
     var input = document.getElementById('aic-input');
     var q = ((input && input.value) || '').trim();
-    if (!q && _activeComposerTool !== 'speech') return;
+    if (!q && _activeComposerTool !== 'speech') { toast('Type a message before pressing Send.'); if (input) input.focus(); return; }
     if (typeof currentUser === 'undefined' || !currentUser) { toast('Pehle login karo.', 'error'); return; }
 
     var t = getThread(currentThreadId());
-    if (!t) return;
+    if (!t) { toast('Could not open this conversation. Start a new chat and try again.', 'error'); return; }
 
     // The universal composer owns the active tool. Its main input is the single
     // prompt field; the compact panel only contains model/options/reference controls.
@@ -4042,6 +4153,7 @@
         ? {
           id: t.youtube.id,
           lang: t.youtube.requestedLang || 'auto',
+          documentId: transcriptFileInfo(t.youtube).documentId,
           startS: t.youtube.startS == null ? null : t.youtube.startS,
           endS: t.youtube.endS == null ? null : t.youtube.endS
         }
