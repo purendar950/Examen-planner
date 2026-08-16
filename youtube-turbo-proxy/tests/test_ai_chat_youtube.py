@@ -60,6 +60,8 @@ def const(name):
 
 # ── load: the transcript/budget helpers, with the fetch layer stubbed ─────────
 _FETCH_CALLS = []
+# Route ID -> advertised input window, standing in for the cached catalog.
+_ROUTE_CTX = {}
 
 
 def _fake_extract_transcript(video_id, lang="auto", force=False, persist=True):
@@ -77,6 +79,10 @@ def load():
         "re": re,
         "app": type("_App", (), {"logger": type("_L", (), {"warning": lambda *a, **k: None})()})(),
         "_extract_transcript": _fake_extract_transcript,
+        # The live OmniRoute catalog supplies a route's real input window. Stubbed
+        # per test via _ROUTE_CTX so the suite stays offline; the parsing of the
+        # catalog response itself is checked separately below.
+        "_omniroute_model_ctx": lambda model_id: _ROUTE_CTX.get(model_id, 0),
     }
     for name in ("_TUTOR_MAX_TOKENS", "AI_CHAT_TRANSCRIPT_CHARS", "_DEFAULT_CTX_TOKENS"):
         exec(const(name), ns)
@@ -84,6 +90,7 @@ def load():
     exec(section("def _model_ctx_tokens(ai):", "def _chars_per_token("), ns)
     exec(section("def _chars_per_token(text):", "def _tutor_context_chars("), ns)
     exec(section("def _parse_video_id(s):", "def _transcript_ydl_opts("), ns)
+    exec(section("def _omniroute_item_ctx(item):", "def _omniroute_model_ctx("), ns)
     exec(section("def _fmt_ts(seconds):", "def _transcript_stamped("), ns)
     exec(section("def _transcript_stamped(t, cap, stamp_every=30.0):",
                  "def _transcript_duration("), ns)
@@ -353,6 +360,61 @@ boom = context({"youtube": {"id": "explodes000"}}, big, 0)
 check("a fetch failure is swallowed", isinstance(boom, str) and boom)
 check("a fetch failure is disclosed to the model", "UNAVAILABLE" in boom, boom[:200])
 check("a fetch failure suggests a retry", "re-attach" in boom, boom[:400])
+
+print("\n\u2500\u2500 5b. the route's real context window drives the budget \u2500\u2500")
+# Verified against a live OmniRoute /v1/models response: 5509 routes, 5386 of them
+# advertising a window, 2135 with room for a ~200k-token lecture, 1015 at exactly
+# 1000000 — and mistral-large at 128000, not the 200000 the provider-keyed guess
+# assumed. Context belongs to the ROUTE, not the model name: the same catalog
+# lists nara/mistral-large at 252000 and bm/mistralai/mistral-large at 128000.
+_ctx_item = ns["_omniroute_item_ctx"]
+check("max_input_tokens is preferred over context_length",
+      _ctx_item({"max_input_tokens": 1000000, "context_length": 1050000}) == 1000000)
+check("context_length is used when max_input_tokens is absent",
+      _ctx_item({"context_length": 128000}) == 128000)
+check("a route advertising nothing yields 0, so the provider default applies",
+      _ctx_item({}) == 0)
+check("junk figures are refused rather than trusted",
+      _ctx_item({"max_input_tokens": "lots"}) == 0
+      and _ctx_item({"max_input_tokens": -5}) == 0
+      and _ctx_item({"max_input_tokens": 12}) == 0
+      and _ctx_item({"max_input_tokens": 99999999999}) == 0)
+
+hindi = "\u0915" * 245000          # a 5:40:23 Hindi lecture, ~245k characters
+_ROUTE_CTX.clear()
+
+_ROUTE_CTX["bynara/mistral-large"] = 128000
+tight = budget({"provider": "omniroute", "model": "bynara/mistral-large"}, hindi, 0)
+_ROUTE_CTX["kc/openrouter/auto"] = 2000000
+_ROUTE_CTX["nara/gemini-2.5-pro"] = 1000000
+roomy = budget({"provider": "omniroute", "model": "nara/gemini-2.5-pro"}, hindi, 0)
+
+check("a 128k route is budgeted well below the whole lecture",
+      0 < tight < len(hindi), (tight, len(hindi)))
+check("a 1M route can take the WHOLE 5:40:23 lecture",
+      roomy >= len(hindi), (roomy, len(hindi)))
+check("a bigger window yields a bigger budget", roomy > tight, (roomy, tight))
+# The regression that matters: the route's real 128000 must beat the 200000
+# provider-keyed guess, which is what silently over-budgeted mistral-large into a
+# context-length 400 while looking like a successful send.
+_ROUTE_CTX.pop("bynara/mistral-large")
+guessed = budget({"provider": "omniroute", "model": "bynara/mistral-large"}, hindi, 0)
+_ROUTE_CTX["bynara/mistral-large"] = 128000
+check("the catalog's 128k wins over the 200k provider default",
+      tight < guessed, (tight, guessed))
+check("an unknown route falls back to the provider default rather than 0",
+      budget({"provider": "omniroute", "model": "who/knows"}, hindi, 0) > 0)
+check("a small-context provider is still respected when the catalog is silent",
+      budget({"provider": "cerebras", "model": "unlisted"}, hindi, 0) < tight,
+      budget({"provider": "cerebras", "model": "unlisted"}, hindi, 0))
+
+# The ceiling must not quietly become the binding limit again.
+check("the backstop admits a full multi-hour lecture",
+      ns["AI_CHAT_TRANSCRIPT_CHARS"] >= 245000, ns["AI_CHAT_TRANSCRIPT_CHARS"])
+full = context({"youtube": {"id": "dQw4w9WgXcQ"}},
+               {"provider": "omniroute", "model": "nara/gemini-2.5-pro"}, 0)
+check("a lecture that fits is NOT labelled partial on a 1M route",
+      "LONGER than fits" not in full, full[:300])
 
 print("\n\u2500\u2500 6. an explicit language reuses the shared 'auto' cache entry \u2500\u2500")
 # The transcript cache is keyed by video AND language, while every other caller in

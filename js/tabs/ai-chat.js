@@ -1623,17 +1623,49 @@
     return { startS: from, endS: to };
   }
 
-  /* Mirrors the backend's AI_CHAT_TRANSCRIPT_CHARS ceiling, which is the binding
-     limit for the large-context models this chat normally uses. Only a hint: the
-     browser cannot know the selected model's real context window, and a small one
-     (Cerebras/Kiro at 8192 tokens) will be cut back further server-side — which
-     the answer then states for itself. Erring towards silence is deliberate; a
-     warning on a video that actually fits would train the student to ignore it. */
-  var YT_WHOLE_VIDEO_CHARS = 120000;
+  /* Backstop matching the server's AI_CHAT_TRANSCRIPT_CHARS. Only reached when
+     the selected route's real window is unknown — the server sizes the transcript
+     against that window, and OmniRoute publishes routes from 8k to 2M tokens, so
+     a single fixed number cannot describe them all. */
+  var YT_WHOLE_VIDEO_CHARS = 400000;
 
+  /* Devanagari costs roughly one token per 1.2 characters against Latin's ~4, so
+     a Hindi lecture consumes about three times the context of an English one of
+     the same length. Mirrors the server's _chars_per_token closely enough for a
+     yes/no hint. */
+  function ytCharsPerToken(att) {
+    return /[\u0900-\u097F]/.test((att && att.title) || '') || (att && att.lang) === 'hi' ? 1.2 : 4;
+  }
+
+  /* Whether the whole video can go in one request. Judged against the SELECTED
+     route's advertised input window when the backend knows it, because the same
+     model name varies wildly by route — the catalog lists mistral-large at
+     128000 on one and 262144 on another. Only a hint: the server does the real
+     budgeting and states the covered range in its own answer. Erring towards
+     silence is deliberate, since a warning on a video that actually fits would
+     train the student to ignore it. */
   function ytFitsWhole(att) {
     if (!att || !att.charCount) return true;
-    return att.charCount <= YT_WHOLE_VIDEO_CHARS;
+    var ctxTokens = selectedModelContextTokens();
+    if (!ctxTokens) return att.charCount <= YT_WHOLE_VIDEO_CHARS;
+    // Leave the same room the server reserves for the answer and the wrapper.
+    var usable = Math.max(0, ctxTokens - 4096 - 2500) * ytCharsPerToken(att);
+    return att.charCount <= Math.min(usable, YT_WHOLE_VIDEO_CHARS);
+  }
+
+  /* The selected route's input window in tokens, as reported by
+     /api/ai-chat/status, or 0 when the backend could not describe it. */
+  function selectedModelContextTokens() {
+    var sel = document.getElementById('aic-model-select');
+    var key = (sel && sel.value) || (getThread(currentThreadId()) || {}).model || '';
+    var models = (_statusCache && _statusCache.models) || [];
+    for (var i = 0; i < models.length; i += 1) {
+      var m = models[i];
+      if (!m) continue;
+      var mk = m.key || ((m.provider || '') + '::' + (m.model || ''));
+      if (mk === key || m.model === key) return Number(m.contextTokens) || 0;
+    }
+    return 0;
   }
 
   /* A provider rejecting the prompt for its size, or timing out on a huge one, is

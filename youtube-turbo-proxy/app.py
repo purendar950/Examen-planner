@@ -1164,12 +1164,18 @@ _TUTOR_MAX_TOKENS = int(os.environ.get("TUTOR_MAX_TOKENS", "4096"))
 # (the notes Ask/Verify actions, and the whole-note check). Also bounded per
 # request against the model's own context budget - see _tutor_prepare.
 NOTE_EXCERPT_CHARS = int(os.environ.get("TUTOR_NOTE_EXCERPT_CHARS", "12000"))
-# Safety ceiling on the YouTube transcript attached to an AI Chat thread (see
-# _ai_chat_transcript_chars, which is what actually sizes it per model). Lower
-# than the tutor's ceiling on purpose: the tutor sends 8 history turns of 2000
-# chars, AI Chat sends up to 20 of 4000, so the same transcript leaves far less
-# room here. Env-tunable.
-AI_CHAT_TRANSCRIPT_CHARS = int(os.environ.get("AI_CHAT_TRANSCRIPT_CHARS", "120000"))
+# Backstop on the YouTube transcript attached to an AI Chat thread. The real
+# limit is _ai_chat_transcript_chars, which sizes the transcript against the
+# selected route's actual input window; this only bounds a pathological case.
+#
+# It was 120000, which quietly became the binding limit for every request. A
+# 5:40:23 Hindi lecture is ~245000 characters, so half of it was dropped even on
+# routes advertising 1000000 input tokens — and the truncation happened while
+# building the prompt, upstream of OmniRoute's provider failover, so no amount of
+# failing over could recover text that was never sent. Raised to admit a full
+# multi-hour lecture on a route that genuinely has room; small-context routes are
+# still cut back by the per-model budget, not by this. Env-tunable.
+AI_CHAT_TRANSCRIPT_CHARS = int(os.environ.get("AI_CHAT_TRANSCRIPT_CHARS", "400000"))
 # Notes generation is chunked ONLY so a single call doesn't run forever. The
 # response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
 # what actually prevents Cloudflare's ~100s 524 (tokens keep the connection
@@ -1842,7 +1848,15 @@ def _ai_chat_available_models(cfg):
             continue
         label = STUDY_PROVIDER_LABELS.get(pid, pid.title())
         for model in eff.get(pid, []):
-            out.append({"provider": pid, "model": model, "label": label})
+            entry = {"provider": pid, "model": model, "label": label}
+            # The route's advertised input window, when the live catalog knows it.
+            # Lets the browser say whether an attached video fits BEFORE the
+            # student asks, instead of discovering it from a truncated answer.
+            # Omitted rather than guessed when unknown.
+            window = _omniroute_model_ctx(model)
+            if window:
+                entry["contextTokens"] = window
+            out.append(entry)
     return out
 
 
@@ -5801,6 +5815,17 @@ _CTX_INPUT_FRAC = float(os.environ.get("STUDY_CTX_INPUT_FRAC", "0.40"))
 
 
 def _model_ctx_tokens(ai):
+    """The selected route's input window in tokens.
+
+    The live OmniRoute catalog wins when it knows the route, because a
+    provider-keyed guess is wrong in both directions: it treated every Bynara
+    model as 200000 when mistral-large is really 128000 (over-budgeting a prompt
+    into a 400), and it capped genuine 1000000-token routes at the same 200000
+    (needlessly truncating a long lecture that would have fitted whole).
+    Providers the catalog cannot describe keep the previous default."""
+    routed = _omniroute_model_ctx(ai.get("model"))
+    if routed:
+        return routed
     return _PROVIDER_CTX_TOKENS.get((ai.get("provider") or "").lower(), _DEFAULT_CTX_TOKENS)
 
 
@@ -9384,7 +9409,13 @@ _OMNIROUTE_AUTO_FAMILY_LABELS = {
     "auto/gemma": "Gemma family",
 }
 
-_omniroute_models_cache = {"ts": 0.0, "attempt_ts": 0.0, "ids": []}
+# `ctx` maps a route ID -> its advertised input window in tokens, captured from
+# the same /v1/models response that supplies `ids` (no extra request). Context is
+# a property of the ROUTE, not the model name: the catalog publishes
+# nara/mistral-large at 252000, kc/mistralai/mistral-large-2512 at 262144 and
+# bm/mistralai/mistral-large at 128000. A name-keyed table would be wrong for
+# most routes, which is why this is read from the catalog rather than hardcoded.
+_omniroute_models_cache = {"ts": 0.0, "attempt_ts": 0.0, "ids": [], "ctx": {}}
 _omniroute_models_lock = threading.Lock()
 _omniroute_refresh_guard = threading.Lock()
 _omniroute_refresh_running = False
@@ -9448,6 +9479,40 @@ def _omniroute_refresh_models_async():
     threading.Thread(target=refresh, name="omniroute-chat-catalog", daemon=True).start()
 
 
+def _omniroute_item_ctx(item):
+    """A /models entry's advertised INPUT window in tokens, or 0.
+
+    max_input_tokens is preferred over context_length because context_length
+    covers input and output together on some routes, and budgeting a prompt
+    against it would leave nothing for the answer. Absurd values are ignored
+    rather than trusted: ~97.8% of the catalog carries a figure, and the
+    remainder must fall back to the provider default, not to nonsense."""
+    for field in ("max_input_tokens", "context_length"):
+        try:
+            window = int(item.get(field) or 0)
+        except (TypeError, ValueError):
+            continue
+        if 1024 <= window <= 10_000_000:
+            return window
+    return 0
+
+
+def _omniroute_model_ctx(model_id):
+    """A route's input window from the cached catalog, or 0 if unknown.
+
+    Deliberately cache-only: this is called while building every prompt, so it
+    must never block on the network. The catalog is refreshed by /api/status and
+    the background refresher; until one lands, callers fall back to the provider
+    default exactly as before."""
+    model_id = str(model_id or "").strip()
+    if not model_id:
+        return 0
+    try:
+        return int(_omniroute_models_cache.get("ctx", {}).get(model_id) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _omniroute_item_is_chat(item, model_id):
     """Whether a /models entry can safely serve text chat completions."""
     model_type = str(item.get("type") or "").strip().lower()
@@ -9495,12 +9560,24 @@ def _omniroute_fetch_model_ids():
                 payload = r.json() or {}
                 data = payload.get("data") if isinstance(payload, dict) else []
                 candidates, seen = [], set()
+                ctx_map = {}
                 for item in data or []:
                     if not isinstance(item, dict):
                         continue
                     model_id = str(item.get("id") or "").strip()
                     if not model_id or not _omniroute_item_is_chat(item, model_id):
                         continue
+                    # Record the advertised input window. Prefer max_input_tokens
+                    # over context_length: context_length covers input AND output
+                    # on some routes, and budgeting a prompt against it would
+                    # leave no room for the answer.
+                    window = _omniroute_item_ctx(item)
+                    if window:
+                        # One ID can appear under several route records; keep the
+                        # smallest so the budget is never larger than a route
+                        # actually serving the request can accept.
+                        prev = ctx_map.get(model_id)
+                        ctx_map[model_id] = min(prev, window) if prev else window
                     # The catalog can publish one ID through several route
                     # types. Retain it when at least one record explicitly
                     # supports text chat; ID-family filtering above still
@@ -9511,6 +9588,9 @@ def _omniroute_fetch_model_ids():
                 ids = candidates
                 if ids:
                     _omniroute_models_cache["ids"] = ids
+                    # Replaced wholesale alongside ids so a route that has
+                    # disappeared cannot leave a stale window behind.
+                    _omniroute_models_cache["ctx"] = ctx_map
                     _omniroute_models_cache["ts"] = now
                     _persist_omniroute_catalog("chat", ids)
                     return list(ids)
@@ -13558,8 +13638,13 @@ def api_ai_chat_status():
         available = _ai_chat_available_models(raw_cfg)
         catalog_refreshing = bool(globals().get("_omniroute_refresh_running", False))
         available_images = _ai_chat_image_models(raw_cfg)
-        models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
-                   "label": "%s — %s" % (m["label"], m["model"])}
+        # contextTokens is carried through so the browser can tell the student
+        # whether an attached video fits BEFORE they ask. Rebuilding this list with
+        # only key+label would drop it silently.
+        models = [dict({"key": _ai_chat_model_key(m["provider"], m["model"]),
+                        "label": "%s — %s" % (m["label"], m["model"])},
+                       **({"contextTokens": m["contextTokens"]}
+                          if m.get("contextTokens") else {}))
                   for m in available]
         image_models = [{"key": _ai_chat_model_key(m["provider"], m["model"]),
                          "label": "%s — %s" % (m["label"], m["model"])}
