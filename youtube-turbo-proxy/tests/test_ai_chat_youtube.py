@@ -79,6 +79,8 @@ def load():
         "re": re,
         "app": type("_App", (), {"logger": type("_L", (), {"warning": lambda *a, **k: None})()})(),
         "_extract_transcript": _fake_extract_transcript,
+        "_transcript_get": lambda doc_id: None,
+        "_fs_doc_id": lambda video_id, lang: "%s__%s" % (video_id, lang),
         # The live OmniRoute catalog supplies a route's real input window. Stubbed
         # per test via _ROUTE_CTX so the suite stays offline; the parsing of the
         # catalog response itself is checked separately below.
@@ -261,6 +263,25 @@ check("the transcript body is present", "[0:00] sentence 0" in block)
 check("the transcript was read exactly once", len(_FETCH_CALLS) == 1, _FETCH_CALLS)
 check("the requested language reached the extractor",
       _FETCH_CALLS[0] == ("dQw4w9WgXcQ", "auto"), _FETCH_CALLS)
+
+# Once attached, Send carries the document ID returned by /api/transcript. The
+# context builder must read that exact persisted body before considering another
+# extraction, otherwise the visible file card would not be the artifact used.
+_doc_reads = []
+def _read_attached_doc(doc_id):
+    _doc_reads.append(doc_id)
+    return dict(_TRANSCRIPT) if doc_id == "dQw4w9WgXcQ__auto" else None
+ns["_transcript_get"] = _read_attached_doc
+del _FETCH_CALLS[:]
+bound_block = context({"youtube": {
+    "id": "dQw4w9WgXcQ", "lang": "auto", "documentId": "dQw4w9WgXcQ__auto"
+}}, big, 0)
+check("Send reads the exact transcript document attached in the browser",
+      _doc_reads == ["dQw4w9WgXcQ__auto"] and "[0:00] sentence 0" in bound_block,
+      _doc_reads)
+check("a valid attached document avoids a second extraction",
+      _FETCH_CALLS == [], _FETCH_CALLS)
+ns["_transcript_get"] = lambda doc_id: None
 
 check("a full lecture claims no partial coverage",
       "LONGER than fits" not in block, block[:400])
@@ -474,6 +495,69 @@ del _lookups[:]
 reuse_ns["_transcript_cache"].clear()
 check("force=True refuses every cache and goes back to YouTube",
       resolve("dQw4w9WgXcQ", "hi", force=True) is None, _lookups)
+
+print("\n── 7. visible transcript-file storage metadata ──")
+_storage_state = {"idx": None, "docs": {}, "enabled": True, "exists": False}
+storage_ns = {
+    "_re_fs": re,
+    "_fs_get": lambda collection, doc_id: _storage_state["docs"].get(doc_id, _storage_state["idx"]),
+    "_s3_enabled": lambda: _storage_state["enabled"],
+    "_s3_exists": lambda doc_id, prefix="study": _storage_state["exists"],
+    "_s3_obj_key": lambda doc_id, prefix="study": "%s/%s.json" % (prefix, doc_id),
+}
+exec(section("def _fs_doc_id(*parts):", "def _fs_get("), storage_ns)
+exec(section("def _transcript_storage_info(doc_id):", "def _study_exists("), storage_ns)
+file_doc_id = storage_ns["_fs_doc_id"]("dQw4w9WgXcQ", "auto")
+storage_info = storage_ns["_transcript_storage_info"]
+check("the transcript document ID joins video and requested language",
+      file_doc_id == "dQw4w9WgXcQ__auto", file_doc_id)
+
+_storage_state.update(idx={"store": "b2", "segment_count": 12}, exists=False)
+b2_file = storage_info(file_doc_id)
+check("a B2 index is reported as Backblaze storage",
+      b2_file["store"] == "backblaze_b2" and b2_file["ready"] is True, b2_file)
+check("the visible filename is the cached JSON document",
+      b2_file["name"] == "dQw4w9WgXcQ__auto.json", b2_file)
+check("the exact private object key is exposed without a bucket or endpoint",
+      b2_file["object_key"] == "transcripts/dQw4w9WgXcQ__auto.json", b2_file)
+
+_storage_state.update(idx={"segments": [], "text": ""}, exists=False)
+firestore_file = storage_info(file_doc_id)
+check("a legacy full document is truthfully labelled as Firestore fallback",
+      firestore_file["store"] == "firestore" and firestore_file["object_key"] is None,
+      firestore_file)
+
+_storage_state.update(idx=None, enabled=True, exists=True)
+orphan_file = storage_info(file_doc_id)
+check("an orphaned object body is still recognised as Backblaze storage",
+      orphan_file["store"] == "backblaze_b2" and orphan_file["ready"] is True,
+      orphan_file)
+
+_storage_state.update(idx=None, enabled=True, exists=False)
+memory_file = storage_info(file_doc_id)
+check("an unpersisted extraction is not falsely called a durable file",
+      memory_file["store"] == "memory" and memory_file["ready"] is False
+      and memory_file["object_key"] is None, memory_file)
+
+_storage_state.update(idx=None, docs={
+    "dQw4w9WgXcQ__auto": {"store": "b2", "chosen_lang": "hi", "segment_count": 12}
+}, exists=False)
+aliased_file = storage_ns["_transcript_file_info"](
+    "dQw4w9WgXcQ", "hi", {"requested_lang": "auto", "chosen_lang": "hi"})
+check("an explicit-language alias reports the actual shared auto object",
+      aliased_file["document_id"] == "dQw4w9WgXcQ__auto"
+      and aliased_file["object_key"] == "transcripts/dQw4w9WgXcQ__auto.json",
+      aliased_file)
+
+route_source = section('@app.get("/api/transcript")', '# Small self-contained page')
+check("the transcript API includes non-secret file metadata",
+      '"transcript_file"' in route_source and "_transcript_file_info" in route_source)
+check("download document IDs are restricted to this video and language",
+      'requested_doc_id in allowed_doc_ids' in route_source,
+      route_source[route_source.find('requested_doc_id'):route_source.find('requested_doc_id') + 500])
+check("the API never exposes object-storage credentials",
+      all(secret not in route_source for secret in
+          ("S3_SECRET_ACCESS_KEY", "S3_ACCESS_KEY_ID", "_S3_SECRET", "_S3_KEY")))
 
 print("\n" + "\n".join(_RESULTS))
 if _FAILED:

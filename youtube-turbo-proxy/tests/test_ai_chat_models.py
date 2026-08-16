@@ -15,10 +15,11 @@ Two bugs this locks down, both of which made image generation impossible:
      every image model and image generation turned itself off — the reported
      "still not able to generate image".
 
-The fix under test: a dedicated IMAGE_PROVIDER_MODELS catalog, overridable from
-its own config/ai.imageModels field that no chat-catalog refresh touches, plus
-_ai_chat_available_models() filtering image ids out of the chat list so the two
-lists are provably disjoint.
+The contracts under test: image-capable IDs stay out of every text catalog,
+image configuration lives under config/ai.imageModels, and the public image
+picker intentionally exposes only configured OmniRoute routes. Live/cached
+OmniRoute discovery remains authoritative while manual IDs act as durable
+fallbacks, so a text-catalog refresh cannot disable image generation.
 
 Executed by slicing the relevant functions out of the real app.py (same
 convention as test_tutor.py / test_design_failover.py) so no Flask app, Firebase
@@ -76,14 +77,24 @@ def load():
         # fetch/caching path is exercised separately by the id-classification
         # checks further down.
         "_omniroute_fetch_image_model_ids": lambda: ["pol/flux-schnell", "cx/dall-e-3"],
+        # Cached live OmniRoute routes make this sliced catalog deterministic.
+        # The dedicated cache/refresh behaviour is exercised later in this file.
+        "_omniroute_image_models_cache": {
+            "ts": time.time(), "attempt_ts": time.time(),
+            "ids": ["pol/flux-schnell", "cx/dall-e-3"], "error": "",
+        },
+        "_omniroute_refresh_image_models_async": lambda: None,
         # The OpenRouter image catalog is optional and must stay offline in this
         # sliced-helper test; no credential means the production helper returns [].
         "_configured_provider_keys": lambda cfg, pid: [],
+        # _ai_chat_available_models asks for cached route context metadata. This
+        # suite tests chat/image separation, so a cache miss is the correct stub.
+        "_omniroute_model_ctx": lambda model_id: 0,
     }
     exec(section("IMAGE_MODEL_MARKERS = ", "# Video providers can take minutes"), ns)
     exec(section("def _effective_provider_models_raw(cfg):", "def _model_provider("), ns)
     exec(section("def _ai_chat_available_models(cfg):", "def _ai_chat_model_key("), ns)
-    ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral")
+    ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral", "omniroute")
     return ns
 
 
@@ -94,7 +105,7 @@ image_models = lambda cfg: [m["model"] for m in ns["_ai_chat_image_models"](cfg)
 # ── 1. Fresh install, no admin overrides ─────────────────────────────────────
 chat, imgs = chat_models({}), image_models({})
 check("fresh: image list is non-empty", len(imgs) > 0, imgs)
-check("fresh: a Gemini image model is offered", "gemini-3.1-flash-image" in imgs, imgs)
+check("fresh: an OmniRoute image model is offered", "pol/flux-schnell" in imgs, imgs)
 check("fresh: chat list contains no image models",
       not any(ns["_is_image_model_name"](m) for m in chat), chat)
 check("fresh: the two lists are disjoint", not (set(chat) & set(imgs)), set(chat) & set(imgs))
@@ -109,33 +120,30 @@ check("after a chat-catalog refresh: chat list stays image-free",
 
 # ── 3. An admin hand-added an image id into the regular model list ───────────
 manual = {"providerModels": {"google": ["gemini-flash-latest", "gemini-9.9-flash-image"]}}
-check("hand-added image model appears in the image list",
-      "gemini-9.9-flash-image" in image_models(manual), image_models(manual))
+check("hand-added Google image model does not cross the OmniRoute-only picker boundary",
+      "gemini-9.9-flash-image" not in image_models(manual), image_models(manual))
 check("hand-added image model is kept OUT of the chat list",
       "gemini-9.9-flash-image" not in chat_models(manual), chat_models(manual))
 
-# ── 4. The dedicated imageModels override is preferred but does not remove
-#       known provider fallbacks. A provider can exhaust one image model after a
-#       successful request while another model on the same configured key works.
-override = {"imageModels": {"google": ["my-custom-image-model"]}}
-check("imageModels override is honoured",
+# ── 4. OmniRoute imageModels are durable fallbacks merged with live routes. ───
+#       Discovery remains authoritative, so a custom fallback need not be first.
+override = {"imageModels": {"omniroute": ["my-custom-image-model"]}}
+check("OmniRoute imageModels fallback is honoured",
       "my-custom-image-model" in image_models(override), image_models(override))
-check("imageModels override keeps built-in fallbacks",
-      "gemini-3.1-flash-image" in image_models(override), image_models(override))
-check("imageModels override keeps custom model first",
-      image_models(override)[0] == "my-custom-image-model", image_models(override))
+check("OmniRoute imageModels keeps cached live routes",
+      "pol/flux-schnell" in image_models(override), image_models(override))
 check("imageModels override does not leak into the chat list",
       "my-custom-image-model" not in chat_models(override), chat_models(override))
 
-# ── 5. An empty override falls back to the defaults rather than disabling ────
-empty_override = {"imageModels": {"google": []}}
-check("empty imageModels override falls back to defaults",
-      "gemini-3.1-flash-image" in image_models(empty_override), image_models(empty_override))
+# ── 5. An empty override keeps the live/cached catalog rather than disabling ─
+empty_override = {"imageModels": {"omniroute": []}}
+check("empty imageModels override keeps live routes",
+      "pol/flux-schnell" in image_models(empty_override), image_models(empty_override))
 
 # ── 6. A provider with no API key contributes nothing ────────────────────────
 ns["_provider_configured"] = lambda cfg, pid: False
 check("no API key configured: image list is empty", image_models({}) == [], image_models({}))
-ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral")
+ns["_provider_configured"] = lambda cfg, pid: pid in ("google", "mistral", "omniroute")
 
 # ── 7. Model-name classification ─────────────────────────────────────────────
 for name in ("gemini-3.1-flash-image", "gemini-2.5-flash-image", "imagen-4",
@@ -163,8 +171,8 @@ check("central: text catalog keeps the real chat model",
       "gemini-flash-latest" in text_catalog, text_catalog)
 check("central: RAW catalog still exposes them for the image picker",
       "gemini-3.1-flash-image" in raw_catalog, raw_catalog)
-check("central: hand-added image model still reaches the image picker",
-      "gemini-3.1-flash-image" in image_models(polluted), image_models(polluted))
+check("central: Google image ids do not cross the OmniRoute-only picker boundary",
+      "gemini-3.1-flash-image" not in image_models(polluted), image_models(polluted))
 check("central: AI Chat list inherits the central filter",
       not any(ns["_is_image_model_name"](m) for m in chat_models(polluted)),
       chat_models(polluted))
@@ -388,6 +396,7 @@ ns5 = {
 exec(section("def _clean_omniroute_catalog_ids(", "# Image models live"), ns5)
 exec(section("_OMNIROUTE_AUTO_FALLBACK = ", "_omniroute_models_cache = "), ns5)
 exec(section("def _persist_omniroute_catalog(", "def _omniroute_refresh_models_async("), ns5)
+exec(section("def _omniroute_item_ctx(item):", "def _omniroute_model_ctx("), ns5)
 exec(section("def _omniroute_item_is_chat(", "# ---- OmniRoute IMAGE models"), ns5)
 ns5["_omniroute_models_cache"] = {"ts": 0.0, "attempt_ts": 0.0, "ids": []}
 ns5["_omniroute_models_lock"] = threading.Lock()
