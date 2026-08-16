@@ -969,6 +969,23 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
                 _transcript_cache[ckey] = {"ts": time.time(), "data": fs}
             return fs
 
+    # An explicit language that misses is still very likely to be on disk under
+    # "auto": every other caller in this app asks for "auto", and for a Hindi
+    # lecture "auto" resolves to the Hindi track anyway. Without this, asking for
+    # 'hi' re-extracts a video the app already has — minutes of yt-dlp work, a
+    # second stored copy of identical captions, and a fresh chance of hitting
+    # YouTube's bot check. Only reused when the stored track REALLY is the
+    # language asked for, so this stays a cache hit and not a silent substitution.
+    if not force and not _is_auto_lang(lang):
+        shared = _transcript_get(_fs_doc_id(video_id, "auto"))
+        if shared and shared.get("segments"):
+            want = str(lang).strip().lower().split("-")[0]
+            got = str(shared.get("chosen_lang") or "").strip().lower().split("-")[0]
+            if want and want == got:
+                with _transcript_lock:
+                    _transcript_cache[ckey] = {"ts": time.time(), "data": shared}
+                return shared
+
     with _extract_sem:
         with _transcript_lock:               # re-check after acquiring the sem
             hit = _transcript_cache.get(ckey)
@@ -11316,13 +11333,19 @@ def _transcript_stamped(t, cap, stamp_every=30.0):
     only invent times — so segments are bucketed into stamped lines instead.
 
     Buckets are built from `segments`; a transcript with no segments (or one
-    whose stamps would not fit) falls back to a plain head slice of `text`."""
+    whose stamps would not fit) falls back to a plain head slice of `text`.
+
+    Returns (block, complete). `complete` is False when `cap` stopped the render
+    early, and it is the ONLY safe way to know: `cap` bounds this rendered block,
+    which carries a "[m:ss] " prefix per bucket that the raw text does not, so
+    comparing the two lengths reports a clip that did not happen and misses one
+    that did."""
     if cap <= 0:
-        return ""
+        return "", False
     text = t.get("text") or ""
     segments = t.get("segments") or []
     if not segments:
-        return text[:cap]
+        return text[:cap], len(text) <= cap
 
     lines = []
     used = 0
@@ -11353,7 +11376,7 @@ def _transcript_stamped(t, cap, stamp_every=30.0):
             # a half sentence attributed to a timestamp it doesn't belong to.
             if line is not None:
                 if used + len(line) + 1 > cap:
-                    return "\n".join(lines) if lines else text[:cap]
+                    return ("\n".join(lines), False) if lines else (text[:cap], False)
                 lines.append(line)
                 used += len(line) + 1
         if bucket_start is None:
@@ -11361,9 +11384,100 @@ def _transcript_stamped(t, cap, stamp_every=30.0):
         bucket.append(piece)
 
     tail = flush()
-    if tail is not None and used + len(tail) + 1 <= cap:
+    if tail is not None:
+        if used + len(tail) + 1 > cap:
+            return ("\n".join(lines), False) if lines else (text[:cap], False)
         lines.append(tail)
-    return "\n".join(lines) if lines else text[:cap]
+    return ("\n".join(lines), True) if lines else (text[:cap], len(text) <= cap)
+
+
+def _transcript_duration(data):
+    """Runtime covered by the captions, from the last cue. Not the video's real
+    duration (captions can stop early) but the right basis for a time window."""
+    segments = data.get("segments") or []
+    if not segments:
+        return None
+    try:
+        last = segments[-1]
+        return float(last.get("start") or 0.0) + float(last.get("dur") or 0.0)
+    except (TypeError, ValueError):
+        return None
+
+
+def _clip_seconds(value, limit=None):
+    """A caller-supplied offset in seconds, or None. Rejects NaN/inf so a junk
+    window can never poison the slice arithmetic."""
+    try:
+        secs = float(value)
+    except (TypeError, ValueError):
+        return None
+    if secs != secs or secs in (float("inf"), float("-inf")):
+        return None
+    secs = max(0.0, secs)
+    if limit is not None and limit > 0:
+        secs = min(secs, limit)
+    return secs
+
+
+def _transcript_slice(data, start_s=None, end_s=None):
+    """A {text, segments} view of the transcript limited to [start_s, end_s].
+
+    A multi-hour lecture cannot fit any model's context window, and silently
+    feeding only its opening hour is the worst outcome — the student asks for "a
+    formula sheet from this video" and gets one covering a third of it without
+    being told. A window lets them work through such a lecture in sections.
+
+    Cues that merely OVERLAP the window are kept, so a sentence straddling the
+    boundary is not lost. A nonsensical or empty window is ignored rather than
+    honoured, since dropping the transcript entirely would be worse."""
+    if start_s is None and end_s is None:
+        return data
+    segments = data.get("segments") or []
+    if not segments:
+        return data
+    lo = start_s if start_s is not None else 0.0
+    hi = end_s if end_s is not None else float("inf")
+    if hi <= lo:
+        return data
+    kept = []
+    for seg in segments:
+        try:
+            start = float(seg.get("start") or 0.0)
+        except (TypeError, ValueError):
+            start = 0.0
+        try:
+            dur = float(seg.get("dur") or 0.0)
+        except (TypeError, ValueError):
+            dur = 0.0
+        if start + dur < lo or start >= hi:
+            continue
+        kept.append(seg)
+    if not kept:
+        return data
+    view = dict(data)
+    view["segments"] = kept
+    view["text"] = "\n".join(str(seg.get("text") or "") for seg in kept)
+    return view
+
+
+def _stamped_span(block):
+    """(first, last) [m:ss] marker of a stamped block in seconds, or (None, None).
+
+    Read back off the rendered block rather than taken from the requested window,
+    so the range advertised to the model is the range actually in front of it. The
+    two differ: a slice keeps the cue that overlaps its boundary, and the token
+    budget decides where the text really stops."""
+    marks = re.findall(r"^\[(\d+):(\d{2})(?::(\d{2}))?\]", block or "", re.M)
+    if not marks:
+        return None, None
+
+    def secs(m):
+        a, b, c = m
+        if c:
+            return int(a) * 3600 + int(b) * 60 + int(c)
+        return int(a) * 60 + int(b)
+
+    return secs(marks[0]), secs(marks[-1])
 
 
 def _ai_chat_transcript_chars(ai, text, history_chars=0):
@@ -11398,7 +11512,12 @@ def _ai_chat_transcript_chars(ai, text, history_chars=0):
     if budget_tokens <= 0:
         return 0
     cap = int(budget_tokens * _chars_per_token(text))
-    return min(len(text), cap, AI_CHAT_TRANSCRIPT_CHARS)
+    # Deliberately NOT clamped to len(text). This budgets the RENDERED block,
+    # which is longer than the raw transcript by one "[m:ss] " prefix per bucket,
+    # so clamping here would clip that overhead off the tail of every transcript
+    # even when the model had ample room. _transcript_stamped stops when the cues
+    # run out and reports whether it finished.
+    return min(cap, AI_CHAT_TRANSCRIPT_CHARS)
 
 
 # Captions are what the speaker SAID, transcribed by machine. Auto-generated
@@ -11467,7 +11586,13 @@ def _ai_chat_youtube_context(body, ai, history_chars=0):
                 "what the video says."
                 % (str(data.get("title") or "Untitled")[:200], video_id))
 
-    full = data.get("text") or ""
+    total_s = _transcript_duration(data)
+    start_s = _clip_seconds(raw.get("startS"), total_s)
+    end_s = _clip_seconds(raw.get("endS"), total_s)
+    view = _transcript_slice(data, start_s, end_s)
+    windowed = view is not data
+
+    full = view.get("text") or ""
     cap = _ai_chat_transcript_chars(ai, full, history_chars)
     title = str(data.get("title") or "Untitled")[:200]
     if cap <= 0:
@@ -11481,17 +11606,37 @@ def _ai_chat_youtube_context(body, ai, history_chars=0):
                 "suggest either starting a new chat for this video or switching "
                 "to a model with a larger context window. Do not guess at what "
                 "the video says." % (title, video_id))
-    block = _transcript_stamped(data, cap)
-    # Compare the BUDGET against the transcript, not the rendered block against
-    # it: the block carries timestamps the raw text does not, so its length runs
-    # ahead of the source and a near-complete clip could read as complete.
-    truncated = cap < len(full)
+    block, complete = _transcript_stamped(view, cap)
+    truncated = not complete
+
+    # Say exactly which part of the lecture this is. "TRUNCATED" on its own
+    # invites the model to imply it covered the whole thing; naming the range
+    # lets it tell the student what it actually read, and lets them ask for the
+    # next section.
+    scope = ""
+    if windowed or truncated:
+        covered_from, covered_to = _stamped_span(block)
+        if covered_from is None:
+            covered_from = start_s or 0
+        if covered_to is None:
+            covered_to = end_s if end_s is not None else total_s
+        parts = ["covering %s\u2013%s" % (_fmt_ts(covered_from),
+                                          _fmt_ts(covered_to) if covered_to else "end")]
+        if total_s:
+            parts.append("of %s total" % _fmt_ts(total_s))
+        scope = " \u2014 " + " ".join(parts)
+        if truncated:
+            scope += ("; the lecture is LONGER than fits in one request, so this "
+                      "is only that portion. Do not imply you covered the whole "
+                      "video, and if the student needs the rest, tell them to "
+                      "attach it again with a later time range")
+
     header = "\n\nTRANSCRIPT of the attached video \u2014 \u201c%s\u201d (https://youtu.be/%s, captions: %s%s)%s:\n" % (
         title,
         video_id,
         str(data.get("chosen_lang") or data.get("detected_language") or "unknown")[:24],
         ", auto-generated" if str(data.get("kind") or "") == "auto" else "",
-        " \u2014 TRUNCATED, this is the earlier part of the lecture only" if truncated else "",
+        scope,
     )
     return _YOUTUBE_TRANSCRIPT_RULE + header + block
 

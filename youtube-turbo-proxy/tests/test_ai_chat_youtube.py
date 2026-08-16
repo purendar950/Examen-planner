@@ -86,7 +86,8 @@ def load():
     exec(section("def _parse_video_id(s):", "def _transcript_ydl_opts("), ns)
     exec(section("def _fmt_ts(seconds):", "def _transcript_stamped("), ns)
     exec(section("def _transcript_stamped(t, cap, stamp_every=30.0):",
-                 "def _ai_chat_transcript_chars("), ns)
+                 "def _transcript_duration("), ns)
+    exec(section("def _transcript_duration(data):", "def _ai_chat_transcript_chars("), ns)
     exec(section("def _ai_chat_transcript_chars(ai, text, history_chars=0):",
                  "# Captions are what the speaker SAID"), ns)
     exec(section("_YOUTUBE_TRANSCRIPT_RULE = (", "def _ai_chat_youtube_context("), ns)
@@ -114,9 +115,18 @@ _TRANSCRIPT = {
 
 ns = load()
 fmt_ts = ns["_fmt_ts"]
-stamped = ns["_transcript_stamped"]
 budget = ns["_ai_chat_transcript_chars"]
 context = ns["_ai_chat_youtube_context"]
+_stamped_raw = ns["_transcript_stamped"]
+
+
+def stamped(t, cap, stamp_every=30.0):
+    """Just the block, for the many checks that only care about the text."""
+    return _stamped_raw(t, cap, stamp_every)[0]
+
+
+def stamped_complete(t, cap, stamp_every=30.0):
+    return _stamped_raw(t, cap, stamp_every)[1]
 
 print("\n\u2500\u2500 1. timestamp formatting \u2500\u2500")
 check("0s renders as 0:00", fmt_ts(0) == "0:00", fmt_ts(0))
@@ -161,6 +171,25 @@ check("a capped block ends on a WHOLE stamped line",
 check("cap 0 yields nothing", stamped(_TRANSCRIPT, 0) == "")
 check("a segmentless transcript falls back to a plain head slice",
       stamped({"text": "abcdefghij", "segments": []}, 4) == "abcd")
+
+# Completeness is reported, not inferred from length. This is what stops the
+# rendered block's own [m:ss] prefixes from being mistaken for clipped content.
+check("a generous cap reports the render as complete",
+      stamped_complete(_TRANSCRIPT, 10 ** 9) is True)
+check("a tight cap reports the render as incomplete",
+      stamped_complete(_TRANSCRIPT, 500) is False)
+check("cap 0 reports incomplete", stamped_complete(_TRANSCRIPT, 0) is False)
+check("a whole segmentless transcript reports complete",
+      stamped_complete({"text": "abc", "segments": []}, 100) is True)
+check("a clipped segmentless transcript reports incomplete",
+      stamped_complete({"text": "abcdefghij", "segments": []}, 4) is False)
+# The regression itself: a cap equal to the RAW length must not be reported as a
+# complete render, because the markers push the block past it.
+check("a cap equal to the raw length is NOT complete (markers do not fit)",
+      stamped_complete(_TRANSCRIPT, len(_TRANSCRIPT["text"])) is False)
+check("the last cue survives when the budget allows the markers too",
+      "sentence 479" in stamped(_TRANSCRIPT, int(len(_TRANSCRIPT["text"]) * 1.3)),
+      stamped(_TRANSCRIPT, int(len(_TRANSCRIPT["text"]) * 1.3))[-80:])
 check("a transcript whose first line exceeds the cap still returns text",
       len(stamped(_TRANSCRIPT, 12)) > 0, stamped(_TRANSCRIPT, 12))
 # A blank caption cue must not open a bucket, otherwise the marker would point at
@@ -177,8 +206,11 @@ big = {"provider": "google"}
 small = {"provider": "cerebras"}        # 8192-token context
 text = _TRANSCRIPT["text"]
 
-check("a big-context model gets the whole lecture",
-      budget(big, text, 0) == len(text), (budget(big, text, 0), len(text)))
+# The budget governs the RENDERED block, so for a big-context model it must be
+# at least the raw length PLUS room for the markers — clamping it to len(text)
+# was silently clipping the tail off every transcript.
+check("a big-context model can afford the whole lecture and its markers",
+      budget(big, text, 0) >= len(text) * 1.05, (budget(big, text, 0), len(text)))
 check("a small-context model gets strictly less",
       budget(small, text, 0) < len(text), budget(small, text, 0))
 check("a small-context budget still leaves usable context",
@@ -223,20 +255,64 @@ check("the transcript was read exactly once", len(_FETCH_CALLS) == 1, _FETCH_CAL
 check("the requested language reached the extractor",
       _FETCH_CALLS[0] == ("dQw4w9WgXcQ", "auto"), _FETCH_CALLS)
 
-check("a full lecture is NOT labelled truncated",
-      "TRUNCATED" not in block, block[:400])
+check("a full lecture claims no partial coverage",
+      "LONGER than fits" not in block, block[:400])
+check("a full lecture needs no coverage range", "covering" not in block, block[:400])
 
 # A small-context model on a FRESH thread: there is room for part of the lecture,
-# so the transcript is clipped and the clipping is disclosed.
+# so the transcript is clipped and the clipping is disclosed WITH its real range.
 small_block = context({"youtube": {"id": "dQw4w9WgXcQ"}}, small, 0)
-check("a clipped lecture IS labelled truncated", "TRUNCATED" in small_block,
-      small_block[:400])
-check("the truncation notice says which part was kept",
-      "earlier part" in small_block, small_block[:400])
+check("a clipped lecture says it is only a portion",
+      "LONGER than fits" in small_block, small_block[:500])
+check("a clipped lecture names the range it actually covers",
+      "covering 0:00\u2013" in small_block, small_block[:500])
+check("a clipped lecture states the full runtime for contrast",
+      "of 39:" in small_block or "of 40:" in small_block, small_block[:500])
+check("a clipped lecture forbids implying full coverage",
+      "Do not imply you covered the whole" in small_block, small_block[:500])
+check("a clipped lecture points at the time-range workaround",
+      "later time range" in small_block, small_block[:500])
 check("a clipped lecture still carries real transcript body",
       "[0:00] sentence 0" in small_block)
 check("a clipped lecture is shorter than the full one",
       len(small_block) < len(block), (len(small_block), len(block)))
+# The named range must reflect what was really included, not the whole lecture.
+_covered = re.search(r"covering 0:00\u2013(\d+):(\d{2})", small_block)
+check("the named end is a real marker from the block, well short of the end",
+      bool(_covered) and int(_covered.group(1)) < 39,
+      _covered.group(0) if _covered else None)
+
+print("\n\u2500\u2500 4b. an explicit time window \u2500\u2500")
+win = context({"youtube": {"id": "dQw4w9WgXcQ", "startS": 600, "endS": 900}}, big, 0)
+check("a window drops speech from before it", "[0:00] sentence 0" not in win, win[:300])
+check("a window keeps speech inside it", "[10:25]" in win, win[:400])
+check("a window drops speech from after it", "[16:00]" not in win)
+# A slice keeps the cue OVERLAPPING its start (the 9:55 cue runs to 10:00), so
+# the block opens a few seconds early — and the header must say 9:55, not the
+# requested 10:00, because it reports what is actually there.
+check("a window keeps the cue overlapping its start", "[9:55]" in win, win[:300])
+check("a window reports the range actually included, not the one requested",
+      "covering 9:55\u2013" in win, win[:500])
+check("a window reports its real end", "\u201314:55" in win, win[:500])
+check("a window is much smaller than the whole lecture",
+      len(win) < len(block) / 3, (len(win), len(block)))
+check("a window alone is not called a truncation",
+      "LONGER than fits" not in win, win[:500])
+
+# Junk / degenerate windows must fall back to the whole transcript rather than
+# dropping the video or slicing to nothing.
+for label, att in (
+    ("an inverted window", {"startS": 900, "endS": 600}),
+    ("a zero-length window", {"startS": 600, "endS": 600}),
+    ("a non-numeric window", {"startS": "abc", "endS": "xyz"}),
+    ("a negative start", {"startS": -50}),
+    ("a window past the end", {"startS": 999999}),
+):
+    att = dict(att)
+    att["id"] = "dQw4w9WgXcQ"
+    out = context({"youtube": att}, big, 0)
+    check("%s still yields a usable transcript" % label,
+          "sentence" in out and len(out) > 1000, (label, len(out)))
 
 # The same small model once the thread has grown: no room at all. The video must
 # be dropped with an explanation rather than overflowing the model's window.
@@ -277,6 +353,65 @@ boom = context({"youtube": {"id": "explodes000"}}, big, 0)
 check("a fetch failure is swallowed", isinstance(boom, str) and boom)
 check("a fetch failure is disclosed to the model", "UNAVAILABLE" in boom, boom[:200])
 check("a fetch failure suggests a retry", "re-attach" in boom, boom[:400])
+
+print("\n\u2500\u2500 6. an explicit language reuses the shared 'auto' cache entry \u2500\u2500")
+# The transcript cache is keyed by video AND language, while every other caller in
+# app.py asks for "auto". So a request for 'hi' used to miss the entry the app had
+# already stored on B2 and re-extract the whole lecture from YouTube — minutes of
+# work, a duplicate stored copy, and a fresh chance of tripping the bot check.
+_lookups = []
+
+
+def _fake_get(doc_id):
+    _lookups.append(doc_id)
+    if doc_id.endswith("_auto"):
+        return {"segments": [{"start": 0.0, "dur": 5.0, "text": "namaste"}],
+                "text": "namaste", "chosen_lang": "hi"}
+    return None
+
+
+reuse_ns = {
+    "os": os, "re": re, "time": __import__("time"),
+    "log": type("_L", (), {"warning": lambda *a, **k: None,
+                           "info": lambda *a, **k: None})(),
+    "TRANSCRIPT_TTL": 30 * 24 * 3600,
+    "_transcript_cache": {},
+    "_transcript_lock": __import__("threading").Lock(),
+    "_transcript_get": _fake_get,
+    "_fs_doc_id": lambda *parts: "_".join(str(p) for p in parts),
+}
+exec(section("def _is_auto_lang(lang):", "def _pick_caption_url("), reuse_ns)
+# Only the cache-resolution prologue is exercised; the yt-dlp extraction below it
+# is what these checks prove is NOT reached.
+_prologue = section("    ckey = \"%s:%s\" % (video_id, lang)", "    with _extract_sem:")
+exec("def resolve(video_id, lang='auto', force=False):\n"
+     + _prologue + "\n    return None", reuse_ns)
+resolve = reuse_ns["resolve"]
+
+del _lookups[:]
+hit = resolve("dQw4w9WgXcQ", "hi")
+check("asking for 'hi' finds the stored 'auto' transcript",
+      hit is not None and hit.get("text") == "namaste", hit)
+check("it looked under the shared 'auto' key",
+      any(d.endswith("_auto") for d in _lookups), _lookups)
+check("the reused entry is the real Hindi track, not a substitution",
+      hit and hit.get("chosen_lang") == "hi", hit)
+
+del _lookups[:]
+reuse_ns["_transcript_cache"].clear()
+check("asking for a language the stored track is NOT gives no false hit",
+      resolve("dQw4w9WgXcQ", "ta") is None)
+
+del _lookups[:]
+reuse_ns["_transcript_cache"].clear()
+check("'auto' itself does not double-check the same key",
+      resolve("dQw4w9WgXcQ", "auto") is not None
+      and len([d for d in _lookups if d.endswith("_auto")]) == 1, _lookups)
+
+del _lookups[:]
+reuse_ns["_transcript_cache"].clear()
+check("force=True refuses every cache and goes back to YouTube",
+      resolve("dQw4w9WgXcQ", "hi", force=True) is None, _lookups)
 
 print("\n" + "\n".join(_RESULTS))
 if _FAILED:
