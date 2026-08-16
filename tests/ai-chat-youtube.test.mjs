@@ -590,6 +590,156 @@ test('Download and Send carry the same server-issued transcript document ID', ()
   assert.match(send, /documentId:\s*transcriptFileInfo\(t\.youtube\)\.documentId/);
 });
 
+console.log('\nSmall study artifacts complete in one response');
+
+function loadProjectClassifiers() {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(
+    [
+      section('function isLargeProjectRequest(prompt) {', 'function projectTitleFromPrompt(prompt) {'),
+      section('function isCreationRequest(prompt) {', 'function artifactExtension(language) {'),
+      'globalThis.isCreationRequest = isCreationRequest;',
+      'globalThis.isLargeProjectRequest = isLargeProjectRequest;',
+      'globalThis.isSingleFileStudyArtifactRequest = isSingleFileStudyArtifactRequest;',
+      'globalThis.shouldUseProjectWorkflow = shouldUseProjectWorkflow;'
+    ].join('\n'),
+    context
+  );
+  return context;
+}
+
+const projectClassifiers = loadProjectClassifiers();
+const exactFormulaSheetPrompt = 'Make a structured formula sheet using figures and use html css and js';
+
+test('the reported formula-sheet prompt is a small one-shot creation', () => {
+  assert.equal(projectClassifiers.isCreationRequest(exactFormulaSheetPrompt), true);
+  assert.equal(projectClassifiers.isLargeProjectRequest(exactFormulaSheetPrompt), false);
+  assert.equal(projectClassifiers.isSingleFileStudyArtifactRequest(exactFormulaSheetPrompt), true);
+  assert.equal(projectClassifiers.shouldUseProjectWorkflow(
+    exactFormulaSheetPrompt, true, false, false, { active: true }
+  ), false, 'a stale active plan must not force a scaffold milestone');
+});
+
+test('explicit separate-file requests are not forced into one HTML file', () => {
+  assert.equal(projectClassifiers.isSingleFileStudyArtifactRequest(
+    'Make a formula sheet using HTML CSS and JS in three separate files'
+  ), false);
+});
+
+test('non-formula study pages are not forced through geometry validation', () => {
+  assert.equal(projectClassifiers.isSingleFileStudyArtifactRequest(
+    'Make revision notes for Indian history using HTML CSS and JavaScript'
+  ), false);
+});
+
+test('a detailed formula-sheet prompt keeps one-file precedence over length heuristics', () => {
+  const detailed = `${exactFormulaSheetPrompt}. Include every transcript timestamp, labelled diagrams, searchable cards, mobile layout, print styles, definitions, derivations, examples, accessibility labels, navigation, and a compact revision mode for students preparing for examinations.`;
+  assert.equal(projectClassifiers.isSingleFileStudyArtifactRequest(detailed), true);
+  assert.equal(projectClassifiers.isLargeProjectRequest(detailed), true,
+    'the generic heuristic is intentionally broad');
+  const send = section('window.aicSend = function (ev) {', '/* auto-grow the textarea');
+  assert.match(send, /var largeProject = !singleFileStudyArtifact && isLargeProjectRequest\(q\)/,
+    'explicit formula-sheet intent must override generic prompt length');
+});
+
+test('genuinely large apps and explicit continuation retain project milestones', () => {
+  const large = 'Build a complete responsive HTML dashboard project with login, database, backend API, admin screens, deployment, and multiple pages';
+  assert.equal(projectClassifiers.isLargeProjectRequest(large), true);
+  assert.equal(projectClassifiers.shouldUseProjectWorkflow(large, true, true, false, null), true);
+  assert.equal(projectClassifiers.shouldUseProjectWorkflow(
+    'Continue the next milestone', false, false, false, { active: true }
+  ), true);
+});
+
+test('Send omits project state and requests one HTML artifact for the exact prompt', () => {
+  const send = section('window.aicSend = function (ev) {', '/* auto-grow the textarea');
+  assert.match(send, /project:\s*projectWorkflow \? projectPayload\(t\) : null/);
+  assert.match(send, /artifactMode:\s*singleFileStudyArtifact \? 'single-html-study' : ''/);
+  assert.match(send, /timeoutMs:\s*singleFileStudyArtifact \? 240000/,
+    'an automatic repair attempt needs enough time to finish');
+  assert.match(send, /if \(creatingProject && !projectWorkflow/,
+    'small creation should retire a stale milestone plan');
+});
+
+test('single-file study tools keep inline JavaScript in the sandboxed preview', () => {
+  const preview = section('function previewHtml(t) {', 'function refreshWorkspacePreview(t) {');
+  assert.match(preview, /var inlineScripts = \[\]/);
+  assert.match(preview, /inlineScripts\.push\(String\(code\)\)/);
+  assert.match(preview, /var scripts = inlineScripts\.concat/);
+  assert.match(preview, /if \(!\/\\bsrc\\s\*=\/i\.test/,
+    'external script sources must remain blocked');
+});
+
+function loadStudyArtifactValidator() {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(
+    [
+      section('function isCreationRequest(prompt) {', 'function materializeCreationArtifacts'),
+      'globalThis.singleHtmlStudyArtifactIssue = singleHtmlStudyArtifactIssue;'
+    ].join('\n'),
+    context
+  );
+  return context.singleHtmlStudyArtifactIssue;
+}
+
+const studyArtifactIssue = loadStudyArtifactValidator();
+const substantiveStudyText = Array.from({ length: 40 }, (_, index) =>
+  `<p>Triangle area and perimeter revision explanation ${index + 1}: choose the correct base, height, radius, diagonal, sector, arc, rectangle, square, rhombus, trapezium, circle, Heron semiperimeter and circumference rule.</p>`
+).join('\n');
+const completeStudyHtml = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Mensuration Formula Sheet</title>
+<style>body{font-family:sans-serif}.card{padding:1rem}.hidden{display:none}svg{border:1px solid}</style></head>
+<body><input id="search" aria-label="Search formulas">
+<nav><button data-topic="triangle">Triangle</button></nav>
+<main>${substantiveStudyText}
+<section class="card">[0:15] Triangle area: A = 1/2 × b × h</section>
+<section class="card">[4:20] Rectangle perimeter: P = 2(l + w)</section>
+<section class="card">[9:05] Circle area: A = πr²</section>
+<section class="card">[12:40] Circumference: C = 2πr</section>
+<section>Heron: Area = √(s(s-a)(s-b)(s-c)); diagonal and sector formulas are searchable.</section>
+<svg viewBox="0 0 200 120" aria-label="Labelled triangle"><title>Triangle with base and height</title><path d="M20 100L100 20L180 100Z"/><text x="92" y="115">base b</text><text x="105" y="65">height h</text></svg>
+<svg viewBox="0 0 200 120" aria-label="Labelled circle"><title>Circle with radius</title><circle cx="100" cy="60" r="45"/><text x="105" y="55">radius r</text></svg>
+</main><script>document.querySelector('#search').addEventListener('input', function (event) { document.querySelectorAll('.card').forEach(function (card) { card.classList.toggle('hidden', !card.textContent.toLowerCase().includes(event.target.value.toLowerCase())); }); });</script>
+</body></html>`;
+function namedHtmlArtifact(html) { return `FILE: index.html\n\n\`\`\`html\n${html}\n\`\`\``; }
+
+test('the artifact validator accepts a complete interactive one-file formula sheet', () => {
+  assert.equal(studyArtifactIssue(namedHtmlArtifact(completeStudyHtml), true), '');
+});
+
+test('an unnamed HTML fence cannot bypass the exact FILE: index.html contract', () => {
+  assert.match(studyArtifactIssue(`\`\`\`html\n${completeStudyHtml}\n\`\`\``, true),
+    /exactly one FILE: index\.html/i);
+});
+
+test('the headings-only scaffold from the bug report is rejected, not saved', () => {
+  const scaffold = `<!doctype html><html><head><style>body{font-family:sans-serif}</style></head><body>
+    <h2>Triangle</h2><section></section><h2>Quadrilateral</h2><section></section>
+    <h2>Circle</h2><section></section><script>document.querySelector('body');</script></body></html>`;
+  assert.match(studyArtifactIssue(namedHtmlArtifact(scaffold), true), /too short|formulas/i);
+});
+
+test('JavaScript assignments cannot masquerade as displayed equations', () => {
+  const noDisplayedEquations = completeStudyHtml
+    .replace(/<section class="card">[\s\S]*?<\/section>\n<section class="card">[\s\S]*?<\/section>\n<section class="card">[\s\S]*?<\/section>\n<section class="card">[\s\S]*?<\/section>/,
+      '<section>[0:15] [4:20] [9:05] Formula explanations without symbolic equations.</section>')
+    .replace(/<section>Heron:[\s\S]*?<\/section>/, '<section>Heron area and sector formula explanation.</section>');
+  assert.match(studyArtifactIssue(namedHtmlArtifact(noDisplayedEquations), true), /formulas and equations/i);
+});
+
+test('two empty or unlabelled SVG boxes do not satisfy the figure requirement', () => {
+  const unlabelled = completeStudyHtml.replace(/<svg[\s\S]*?<\/svg>/g, '<svg viewBox="0 0 10 10"><path d="M0 0L10 10"/></svg>');
+  assert.match(studyArtifactIssue(namedHtmlArtifact(unlabelled), true), /need visible or accessible labels/i);
+});
+
+test('all generation completion paths pass the artifact mode into validation', () => {
+  const send = section('window.aicSend = function (ev) {', '/* auto-grow the textarea');
+  const wired = send.match(/materializeCreationArtifacts\(cur,\s*last,\s*q,\s*body\.artifactMode\)/g) || [];
+  assert.equal(wired.length, 2, 'both streaming and blocking completion paths must validate');
+});
+
 console.log('\nComposer submission uses programmatic DOM listeners');
 
 function composerMarkup() {

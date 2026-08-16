@@ -11708,6 +11708,53 @@ _YOUTUBE_TRANSCRIPT_RULE = (
 )
 
 
+# Formula *discourse* cues rather than subject names. A five-hour geometry
+# lecture says "area", "triangle" and "base" almost continuously, so using
+# those as anchors retains nearly the entire transcript. These phrases identify
+# where the teacher states or derives a formula and work across subjects.
+_FORMULA_TRANSCRIPT_RE = re.compile(
+    r"\bformula(?:s)?\b|\bequations?\b|\bequals?\b|\bequal\s+to\b|"
+    r"\bhalf|\bsquared?\b|\bcubed?\b|\b(?:under\s*)?root\b|\bproduct\s+of\b|"
+    r"\bsum\s+of\b|\bdivided\s+by\b|\bmultiplied\s+by\b|\bplus\b|\bminus\b|"
+    r"(?:[a-z0-9]\s*[=+*/^²³]|[=+*/^]\s*[a-z0-9])|"
+    r"\u092b\u093e\u0930\u094d\u092e\u0942\u0932|\u092b\u0949\u0930\u094d\u092e\u0942\u0932|\u0938\u0942\u0924\u094d\u0930|\u0938\u092e\u0940\u0915\u0930\u0923|\u092c\u0930\u093e\u092c\u0930|\u0907\u0915\u094d\u0935\u0932|"
+    r"\u0915\u094d\u092f\u093e\s+\u0939\u094b\s+\u091c\u093e\u090f\u0917\u093e|\u0915\u094d\u092f\u093e\s+\u0939\u094b\u0917\u093e|\u0928\u093f\u0915\u0932\u0947\u0917\u093e|"
+    r"\u0906\u0927\u093e|\u0938\u094d\u0915\u094d\u0935\u093e\u092f\u0930|\u0915\u094d\u092f\u0942\u092c|\u0930\u0942\u091f|\u0917\u0941\u0923\u093e|\u092d\u093e\u0917|\u091c\u094b\u0921\u093c|\u0918\u091f\u093e|\u092a\u094d\u0932\u0938|\u092e\u093e\u0907\u0928\u0938",
+    re.I,
+)
+
+
+def _formula_transcript_view(data, neighbor_count=1):
+    """Compact a long lecture to every formula/topic cue plus nearby context.
+
+    A self-contained visual formula sheet needs the mathematical passages, not
+    five hours of greetings, study advice and worked-question repetition. This
+    deterministic selection happens before the model call, retains original
+    timestamped mathematical context instead of repeatedly sending the entire
+    lecture merely to ask the model to rediscover the relevant passages.
+    """
+    segments = data.get("segments") if isinstance(data, dict) else None
+    if not isinstance(segments, list) or not segments:
+        return data, 0, len(segments or [])
+    hits = []
+    for index, segment in enumerate(segments):
+        text = str(segment.get("text") or "") if isinstance(segment, dict) else ""
+        if _FORMULA_TRANSCRIPT_RE.search(text):
+            hits.append(index)
+    if not hits:
+        return data, 0, len(segments)
+    keep = set()
+    radius = max(0, min(int(neighbor_count or 0), 4))
+    for index in hits:
+        keep.update(range(max(0, index - radius), min(len(segments), index + radius + 1)))
+    selected = [segments[index] for index in sorted(keep)]
+    compact = dict(data)
+    compact["segments"] = selected
+    compact["text"] = "\n".join(str(item.get("text") or "").strip()
+                                  for item in selected if str(item.get("text") or "").strip())
+    return compact, len(hits), len(selected)
+
+
 def _ai_chat_youtube_context(body, ai, history_chars=0):
     """The TRANSCRIPT block for a chat with a YouTube video attached.
 
@@ -11753,6 +11800,17 @@ def _ai_chat_youtube_context(body, ai, history_chars=0):
     end_s = _clip_seconds(raw.get("endS"), total_s)
     view = _transcript_slice(data, start_s, end_s)
     windowed = view is not data
+    study_artifact = str(body.get("artifactMode") or "").strip().lower() == "single-html-study"
+    formula_focus = study_artifact and bool(re.search(
+        r"\b(?:formula|equation)\b|\u0938\u0942\u0924\u094d\u0930|\u092b\u0949\u0930\u094d\u092e\u0942\u0932\u093e|\u0938\u092e\u0940\u0915\u0930\u0923",
+        str(body.get("q") or ""), re.I))
+    formula_hits = 0
+    formula_segments = 0
+    if formula_focus:
+        # Respect an explicit Section first. If that section has no formula
+        # cues, the helper returns the full section rather than leaking speech
+        # from elsewhere in the lecture.
+        view, formula_hits, formula_segments = _formula_transcript_view(view)
 
     full = view.get("text") or ""
     cap = _ai_chat_transcript_chars(ai, full, history_chars)
@@ -11793,11 +11851,17 @@ def _ai_chat_youtube_context(body, ai, history_chars=0):
                       "video, and if the student needs the rest, tell them to "
                       "attach it again with a later time range")
 
-    header = "\n\nTRANSCRIPT of the attached video \u2014 \u201c%s\u201d (https://youtu.be/%s, captions: %s%s)%s:\n" % (
+    selection = ""
+    if formula_focus and formula_hits:
+        selection = ("; formula-focused extraction: %d matching cues with %d "
+                     "timestamped surrounding segments retained from the full lecture"
+                     % (formula_hits, formula_segments))
+    header = "\n\nTRANSCRIPT of the attached video \u2014 \u201c%s\u201d (https://youtu.be/%s, captions: %s%s%s)%s:\n" % (
         title,
         video_id,
         str(data.get("chosen_lang") or data.get("detected_language") or "unknown")[:24],
         ", auto-generated" if str(data.get("kind") or "") == "auto" else "",
+        selection,
         scope,
     )
     return _YOUTUBE_TRANSCRIPT_RULE + header + block
@@ -14144,6 +14208,8 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
         workflow_mode = "editor"
     if coding_requested:
         fresh_project = str(body.get("editMode") or "").strip().lower() == "new-file" and not body.get("workspace")
+        artifact_mode = str(body.get("artifactMode") or "").strip().lower()
+        single_html_study = fresh_project and artifact_mode == "single-html-study"
         if project_active:
             steps = project.get("steps") if isinstance(project.get("steps"), list) else []
             step_text = ", ".join("%s=%s" % (str(item.get("label") or item.get("id") or "step"), str(item.get("status") or "pending")) for item in steps if isinstance(item, dict))[:1200]
@@ -14165,17 +14231,31 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                    "and limitations. Never claim that code was executed, a file was changed, or a "
                    "repository was modified unless a trusted tool result is included in the conversation. "
                    + ("This is a FRESH PROJECT request. Ignore implementation details from older projects in the supplied history unless the user explicitly asks to reuse them. Design the requested project from its current description and emit the complete named files needed to run it. " if fresh_project else "")
-                   + ("ARCHITECT MODE: do not emit FILE artifacts, complete code, or diffs. Return a concise implementation plan, proposed file tree, dependencies, risks, and verification strategy. Do not claim that changes were applied. " if workflow_mode == "architect" else "EDITOR MODE: apply only the approved current milestone. Return named files for new files or a focused unified diff for existing files, followed by verification steps. ")
+                   + ("ARCHITECT MODE: do not emit FILE artifacts, complete code, or diffs. Return a concise implementation plan, proposed file tree, dependencies, risks, and verification strategy. Do not claim that changes were applied. " if workflow_mode == "architect" else ("EDITOR MODE: apply only the approved current milestone. Return named files for new files or a focused unified diff for existing files, followed by verification steps. " if project_active else "EDITOR MODE: complete the full small request now; there is no milestone or later implementation step. Return every finished file needed to run it, followed by verification steps. "))
                    + "If the user provides an error, explain the likely cause and end with the smallest "
                    "corrected patch. Keep explanatory prose outside code fences so the app can render "
                    "the result as a reviewable artifact. CREATION ARTIFACT CONTRACT: when no active "
                    "workspace file is present and the student asks to create a new project, produce "
                    "complete named files instead of an unnamed code dump. Before each fenced block, "
                    "write exactly `FILE: relative/path.ext` on its own line, followed by a fenced block "
-                   "using the correct language. For a web program, prefer a small coherent bundle such "
-                   "as index.html, styles.css, and app.js. Keep explanation and usage steps outside the "
-                   "file blocks. Do not claim that files were written to GitHub; the browser will create "
-                   "local reviewable workspace files from these artifacts.")
+                   "using the correct language. Unless a later artifact-mode contract requires one file, "
+                   "a web program may use a small coherent bundle such as index.html, styles.css, and app.js. "
+                   "Keep explanation and usage steps outside the file blocks. Do not claim that files were "
+                   "written to GitHub; the browser will create local reviewable workspace files from these artifacts.")
+        if single_html_study:
+            sysmsg += ("\n\nSELF-CONTAINED STUDY ARTIFACT CONTRACT (higher priority than the generic "
+                       "creation contract): Return exactly one named artifact, `FILE: index.html`, followed "
+                       "by one complete `html` fenced block. Put all CSS in a `<style>` element and all "
+                       "JavaScript in a `<script>` element inside that same HTML file; do not emit separate "
+                       "CSS or JS files. Complete the requested study tool in this response. Never return a "
+                       "scaffold, placeholder sections, TODOs, sample-only content, or a NEXT MILESTONE. "
+                       "For a transcript-grounded formula sheet, extract and render the actual formulas, "
+                       "equations, definitions, constants, and useful timestamps from the supplied transcript. "
+                       "Headings without substantive formula content are a failed result. Build clear figures "
+                       "with inline SVG and labels (not empty boxes), and include useful JavaScript interaction "
+                       "such as search/filtering, section navigation, or collapsible formula cards. The file "
+                       "must open and work by itself with no build step or external local assets. Prioritize "
+                       "finished study content and valid closing HTML over explanatory prose.")
     web_sources = []
 
     web_pref = body.get("web")
@@ -14280,6 +14360,78 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
     return None, messages, ai, _web_sources_public(web_sources)
 
 
+def _single_html_study_issue(answer, require_timestamps=False):
+    """Return why a generated study artifact is unsafe to materialize, or ''.
+
+    This mirrors the browser's final guard closely enough to trigger one
+    server-side regeneration before any partial stream reaches the student.
+    The browser still validates independently because responses can be changed
+    by proxies, old deployments, or future providers.
+    """
+    source = str(answer or "")
+    blocks = re.findall(
+        r"(?:^|\n)\s*(?:FILE|PATH)\s*:\s*([^\n`]+)\s*\n\s*```([^\n`]*)\n([\s\S]*?)```",
+        source, re.I)
+    if len(blocks) != 1 or blocks[0][0].strip().strip("'\"").lstrip("/").lower() != "index.html":
+        return "expected exactly one FILE: index.html artifact"
+    html = str(blocks[0][2] or "")
+    if len(html) < 3000:
+        return "the HTML is too short to contain a complete formula sheet"
+    if not re.search(r"<style\b[\s\S]*?</style>", html, re.I):
+        return "inline CSS is missing"
+    if not re.search(r"<script\b[\s\S]*?</script>", html, re.I):
+        return "inline JavaScript is missing"
+    study_markup = re.sub(r"<style\b[\s\S]*?</style>|<script\b[\s\S]*?</script>", " ", html,
+                          flags=re.I)
+    figures = re.findall(r"<svg\b[\s\S]*?</svg>", study_markup, re.I)
+    if len(figures) < 2:
+        return "at least two labelled SVG figures are required"
+    if sum(bool(re.search(r"<text\b|<title\b|aria-label\s*=", figure, re.I))
+           for figure in figures) < 2:
+        return "the SVG figures need visible or accessible labels"
+    plain = re.sub(r"<[^>]+>", " ", study_markup)
+    formula_words = re.findall(
+        r"\b(?:area|perimeter|circumference|heron|pythagoras|diagonal|semiperimeter|"
+        r"inradius|circumradius|sector|arc|triangle|rectangle|square|rhombus|"
+        r"trapezium|circle)\b", plain, re.I)
+    equations = re.findall(r"=", plain)
+    if len(formula_words) < 8 or len(equations) < 4:
+        return "substantive formulas and equations are missing"
+    if require_timestamps and len(re.findall(r"\[\d+:\d{2}(?::\d{2})?\]", plain)) < 3:
+        return "transcript timestamps are missing"
+    if not re.search(r"addEventListener|querySelector|classList|\.filter\s*\(", html, re.I):
+        return "useful JavaScript interaction is missing"
+    if not re.search(r"</body>\s*</html>\s*$", html, re.I):
+        return "the HTML document is incomplete or truncated"
+    if re.search(r"next milestone|\bTODO\b|placeholder section|implemented in the next|sample-only",
+                 plain, re.I):
+        return "placeholder or future-milestone content is not allowed"
+    return ""
+
+
+def _ai_chat_answer_with_artifact_retry(messages, ai, body):
+    """Generate a blocking answer, retrying one invalid study artifact once."""
+    answer = _ai_chat(messages, ai, max_tokens=_TUTOR_MAX_TOKENS)
+    if str(body.get("artifactMode") or "").strip().lower() != "single-html-study":
+        return answer, False, ""
+    issue = _single_html_study_issue(answer, require_timestamps=bool(body.get("youtube")))
+    if not issue:
+        return answer, False, ""
+    repaired = [dict(message) for message in messages]
+    if repaired and repaired[0].get("role") == "system":
+        repaired[0]["content"] = str(repaired[0].get("content") or "") + (
+            "\n\nAUTOMATED ARTIFACT RETRY: The previous generation failed validation because %s. "
+            "Regenerate the complete FILE: index.html from scratch now. Keep prose and visual "
+            "decoration concise enough to finish within the output limit; preserve the actual "
+            "formulas, timestamps, two labelled SVG figures, and working interaction. Close the "
+            "HTML and code fence. Do not mention this retry." % issue)
+    answer = _ai_chat(repaired, ai, max_tokens=_TUTOR_MAX_TOKENS)
+    final_issue = _single_html_study_issue(answer, require_timestamps=bool(body.get("youtube")))
+    if final_issue:
+        raise RuntimeError("AI returned an invalid study artifact after automatic retry: %s" % final_issue)
+    return answer, True, ""
+
+
 @app.route("/api/ai-chat", methods=["POST"])
 def api_ai_chat():
     """Standalone AI Chat tab, blocking variant — no video/transcript involved.
@@ -14298,12 +14450,15 @@ def api_ai_chat():
         return jsonify(err[0]), err[1]
 
     try:
-        answer = _ai_chat(messages, ai, max_tokens=_TUTOR_MAX_TOKENS)
+        answer, artifact_retried, artifact_issue = _ai_chat_answer_with_artifact_retry(
+            messages, ai, body)
     except Exception as exc:  # noqa: BLE001
         return jsonify({"error": "ai_failed", "detail": str(exc)[:200]}), 502
 
     return jsonify({"answer": answer, "provider": _ai_display_provider(ai),
-                    "model": _ai_display_model(ai), "web": web})
+                    "model": _ai_display_model(ai), "web": web,
+                    "artifact_retried": artifact_retried,
+                    "artifact_issue": artifact_issue})
 
 
 @app.route("/api/ai-chat/stream", methods=["POST"])
@@ -14327,6 +14482,27 @@ def api_ai_chat_stream():
     _sse_headers = {"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"}
 
     def gen():
+        if str(body.get("artifactMode") or "").strip().lower() == "single-html-study":
+            # A partial study file must never be streamed into the workspace.
+            # Buffer it, validate it and retry once before releasing any chunks.
+            try:
+                answer, artifact_retried, artifact_issue = _ai_chat_answer_with_artifact_retry(
+                    messages, ai, body)
+            except Exception as exc:  # noqa: BLE001
+                yield _sse("error", {"error": "ai_failed", "detail": str(exc)[:200]})
+                return
+            answer = str(answer or "")
+            yield _sse("meta", {"provider": _ai_display_provider(ai),
+                                "model": _ai_display_model(ai), "web": web,
+                                "artifact_retried": artifact_retried,
+                                "artifact_issue": artifact_issue})
+            for offset in range(0, len(answer), 1200):
+                yield _sse("chunk", {"t": answer[offset:offset + 1200]})
+            if not answer:
+                yield _sse("error", {"error": "ai_failed", "detail": "empty response"})
+                return
+            yield _sse("done", {})
+            return
         yield _sse("meta", {"provider": _ai_display_provider(ai),
                             "model": _ai_display_model(ai), "web": web})
         produced = False

@@ -2950,6 +2950,17 @@
     var featureWords = (source.match(/\b(feature|screen|page|component|dashboard|auth|login|database|api|backend|frontend|responsive|deploy|admin|workspace|multi file|multiple files|full app|complete app|production|project)\b/g) || []).length;
     return isCreationRequest(source) && (featureWords >= 2 || source.length >= 180);
   }
+  function isSingleFileStudyArtifactRequest(prompt) {
+    var source = String(prompt || '').toLowerCase();
+    if (/\b(separate files?|multiple files?|multi[ -]file|three files?|3 files?)\b/.test(source)) return false;
+    var studyArtifact = /\bformula sheet\b/.test(source);
+    var webStack = /\bhtml\b/.test(source) && /\bcss\b/.test(source) && /\b(?:javascript|js)\b/.test(source);
+    return isCreationRequest(source) && studyArtifact && webStack;
+  }
+  function shouldUseProjectWorkflow(prompt, creatingProject, largeProject, workspaceEditIntent, project) {
+    var continuing = !creatingProject && !!(project && project.active) && /\b(continue|next milestone|finish|complete|verify|test|run|polish)\b/i.test(String(prompt || ''));
+    return !!(largeProject || workspaceEditIntent || continuing);
+  }
   function projectTitleFromPrompt(prompt) {
     var source = String(prompt || '').replace(/\s+/g, ' ').trim();
     source = source.replace(/^\s*(please\s+)?(create|make|build|generate|write|scaffold|prototype|design|new)\s+/i, '').replace(/\s+(for|with|using)\s+.*$/i, '').trim();
@@ -3065,8 +3076,17 @@
     var html = htmlFile ? String(htmlFile.content || '') : '<!doctype html><html><head><meta charset="utf-8"><title>CSS preview</title></head><body><main class="preview-sample"><h1>CSS live preview</h1><p>Edit an HTML file in this workspace to preview your own markup.</p><button>Example button</button></main></body></html>';
     var css = ws.files.filter(function (f) { return workspaceLanguage(f.path) === 'css'; }).map(function (f) { return '\n/* ' + f.path.replace(/[*/]/g, '') + ' */\n' + String(f.content || ''); }).join('\n');
     if (lang === 'css') css += '\n' + String(file.content || '');
-    var scripts = ws.files.filter(function (f) { return workspaceLanguage(f.path) === 'javascript'; }).map(function (f) { return String(f.content || ''); }).filter(Boolean);
-    html = html.replace(/<script[\s\S]*?<\/script>/gi, '').replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '').replace(/javascript\s*:/gi, '');
+    var inlineScripts = [];
+    html = html.replace(/<script([^>]*)>([\s\S]*?)<\/script>/gi, function (_match, attrs, code) {
+      // The preview iframe is sandboxed with scripts but without same-origin
+      // access. Preserve only inline code; external src scripts are intentionally
+      // omitted so a generated standalone study tool works without granting
+      // arbitrary network-loaded code access.
+      if (!/\bsrc\s*=/i.test(String(attrs || '')) && String(code || '').trim()) inlineScripts.push(String(code));
+      return '';
+    });
+    var scripts = inlineScripts.concat(ws.files.filter(function (f) { return workspaceLanguage(f.path) === 'javascript'; }).map(function (f) { return String(f.content || ''); }).filter(Boolean));
+    html = html.replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*')/gi, '').replace(/javascript\s*:/gi, '');
     var style = '<style>html,body{min-height:100%;}body{margin:0;padding:20px;font-family:system-ui,sans-serif;}'+css+'</style>';
     var scriptTag = scripts.length ? '<script>\\n' + scripts.join('\\n;\\n').replace(/<\/script/gi, '<\\/script') + '\\n</script>' : '';
     if (/<head[\s>]/i.test(html)) html = html.replace(/<\/head>/i, style + '</head>');
@@ -3207,8 +3227,41 @@
     }
     return out.slice(0, 12);
   }
-  function materializeCreationArtifacts(t, message, prompt) {
+  function singleHtmlStudyArtifactIssue(text, requireTimestamps) {
+    var source = String(text || ''), namedBlocks = [], named = /(?:^|\n)\s*(?:FILE|PATH)\s*:\s*([^\n`]+)\s*\n\s*```([^\n`]*)\n([\s\S]*?)```/gi, match;
+    while ((match = named.exec(source))) {
+      namedBlocks.push({ path: String(match[1] || '').trim().replace(/^['\"]|['\"]$/g, '').replace(/^\/+/, ''), content: match[3].replace(/^\n/, '') });
+    }
+    if (namedBlocks.length !== 1 || namedBlocks[0].path.toLowerCase() !== 'index.html') return 'expected exactly one FILE: index.html artifact';
+    var html = String(namedBlocks[0].content || '');
+    if (html.length < 3000) return 'the HTML is too short to contain a complete formula sheet';
+    if (!/<style\b[\s\S]*?<\/style>/i.test(html)) return 'inline CSS is missing';
+    if (!/<script\b[\s\S]*?<\/script>/i.test(html)) return 'inline JavaScript is missing';
+    var studyMarkup = html.replace(/<style\b[\s\S]*?<\/style>/gi, ' ').replace(/<script\b[\s\S]*?<\/script>/gi, ' ');
+    var figures = studyMarkup.match(/<svg\b[\s\S]*?<\/svg>/gi) || [];
+    if (figures.length < 2) return 'at least two labelled SVG figures are required';
+    if (figures.filter(function (svg) { return /<text\b|<title\b|aria-label\s*=/i.test(svg); }).length < 2) return 'the SVG figures need visible or accessible labels';
+    var plain = studyMarkup.replace(/<[^>]+>/g, ' ').replace(/&(?:times|divide|minus|plusmn);/gi, ' × ');
+    var formulaWords = plain.match(/\b(area|perimeter|circumference|heron|pythagoras|diagonal|semiperimeter|inradius|circumradius|sector|arc|triangle|rectangle|square|rhombus|trapezium|circle)\b/gi) || [];
+    var equations = plain.match(/=/g) || [];
+    if (formulaWords.length < 8 || equations.length < 4) return 'substantive formulas and equations are missing';
+    if (requireTimestamps && (plain.match(/\[\d+:\d{2}(?::\d{2})?\]/g) || []).length < 3) return 'transcript timestamps are missing';
+    if (!/addEventListener|querySelector|classList|\.filter\s*\(/i.test(html)) return 'useful JavaScript interaction is missing';
+    if (!/<\/body>\s*<\/html>\s*$/i.test(html)) return 'the HTML document is incomplete or truncated';
+    if (/next milestone|\bTODO\b|placeholder section|implemented in the next|sample-only/i.test(plain)) return 'placeholder or future-milestone content is not allowed';
+    return '';
+  }
+  function materializeCreationArtifacts(t, message, prompt, artifactMode) {
     if (!isCreationRequest(prompt)) return [];
+    if (artifactMode === 'single-html-study') {
+      var issue = singleHtmlStudyArtifactIssue(message && message.content, !!ytAttachment(t));
+      if (issue) {
+        message.role = 'error';
+        message.content = '\u26A0\uFE0F The AI returned an incomplete formula sheet: ' + issue + '. It was not saved. Retry to regenerate the complete standalone HTML.';
+        message.retry = { kind: 'text', q: prompt };
+        return [];
+      }
+    }
     var ws = workspaceState(t), blocks = creationArtifactBlocks(message && message.content, prompt);
     if (!ws || !message || !blocks.length || (message.workspaceArtifacts && message.workspaceArtifacts.length)) return blocks;
     var paths = [];
@@ -4144,7 +4197,11 @@
     // in this thread. Otherwise the backend correctly sees a workspace, enters
     // PATCH-ONLY mode, and refuses to emit the named files needed for creation.
     var creatingProject = isCreationRequest(q);
-    var largeProject = isLargeProjectRequest(q);
+    var singleFileStudyArtifact = creatingProject && isSingleFileStudyArtifactRequest(q);
+    // An explicit one-file formula sheet remains a one-shot artifact even when
+    // the student gives a detailed prompt longer than the generic project-size
+    // heuristic. Only explicit multi-file wording opts it out above.
+    var largeProject = !singleFileStudyArtifact && isLargeProjectRequest(q);
     if (creatingProject) resetStaleGeneratedWorkspace(t);
     // For ordinary edits this is equivalent to the legacy workspace: workspaceRequest(t) path.
     var existingWorkspace = workspaceRequest(t);
@@ -4155,8 +4212,19 @@
        isCodingRequest() — the button did nothing. Honouring it lets the user turn
        the patch contracts on when their wording misses the keyword heuristics. */
     var codingIntent = !!t.codingMode || creatingProject || isCodingRequest(q) || workspaceEditIntent;
-    var projectWorkflow = creatingProject || largeProject || workspaceEditIntent || !!(projectState(t) && projectState(t).active && /\b(continue|next milestone|finish|complete|verify|test|run|polish)\b/i.test(q));
-    if (projectWorkflow) beginProject(t, q, creatingProject ? 'create' : 'edit');
+    var activeProject = projectState(t);
+    var projectWorkflow = shouldUseProjectWorkflow(q, creatingProject, largeProject, workspaceEditIntent, activeProject);
+    // Small creations (formula sheets, calculators, compact demos) must be
+    // completed in one response. A stale project plan would reintroduce a
+    // "scaffold first / implement later" contract even when projectWorkflow is
+    // false, so retire only the plan; resetStaleGeneratedWorkspace above already
+    // protects local/GitHub/dirty files.
+    if (creatingProject && !projectWorkflow && activeProject && activeProject.active) {
+      t.project = projectDefaultState();
+      upsertThread(t);
+      renderProjectPlan();
+    }
+    if (projectWorkflow) beginProject(t, q, largeProject && creatingProject ? 'create' : 'edit');
     var body = {
       q: q, history: contextHistory, threadId: t.id,
       // Coding mode is a preference, not a command to turn “Hi” into a file.
@@ -4171,7 +4239,8 @@
       repositoryMap: requestedWorkspace ? generateRepoMap(t) : '',
       contextFiles: requestedWorkspace && requestedWorkspace.contextFiles ? requestedWorkspace.contextFiles : [],
       workflowMode: (projectState(t) && projectState(t).workflowMode) || 'editor',
-      project: projectPayload(t),
+      project: projectWorkflow ? projectPayload(t) : null,
+      artifactMode: singleFileStudyArtifact ? 'single-html-study' : '',
       // Only the identifier travels: the backend re-reads the transcript from
       // its own cache and sizes it against the chosen model's context window.
       youtube: ytAttachment(t)
@@ -4184,7 +4253,7 @@
         }
         : null,
       localMemory: localMemoryContext(t),
-      timeoutMs: codingIntent ? 90000 : 30000,
+      timeoutMs: singleFileStudyArtifact ? 240000 : (codingIntent ? 90000 : 30000),
       imageContext: (function () {
         for (var i = t.messages.length - 1; i >= 0; i -= 1) {
           var m = t.messages[i];
@@ -4217,7 +4286,7 @@
         var last = cur.messages[cur.messages.length - 1];
         if (last && last.role === 'assistant' && !last.content) last.content = acc;
         else { last = { role: 'assistant', content: acc }; cur.messages.push(last); }
-        materializeCreationArtifacts(cur, last, q);
+        materializeCreationArtifacts(cur, last, q, body.artifactMode);
         var project = projectState(cur);
         if (project && project.active && projectWorkflow && !(last.workspaceArtifacts && last.workspaceArtifacts.length) && !requestedWorkspace) {
           project.status = 'blocked'; project.warning = 'No workspace files were returned for this milestone. Ask for a smaller named-file step before continuing.'; setProjectStep(project, 'scaffold', 'blocked'); project.updatedAt = Date.now();
@@ -4270,7 +4339,7 @@
           if (res.ok && res.data && res.data.answer) {
             if (last && last.role === 'assistant') last.content = res.data.answer;
             else { last = { role: 'assistant', content: res.data.answer }; cur.messages.push(last); }
-            materializeCreationArtifacts(cur, last, q);
+            materializeCreationArtifacts(cur, last, q, body.artifactMode);
             var project = projectState(cur);
             if (project && project.active && projectWorkflow && !(last.workspaceArtifacts && last.workspaceArtifacts.length) && !requestedWorkspace) {
               project.status = 'blocked'; project.warning = 'No workspace files were returned for this milestone. Continue with a smaller, named-file request.'; setProjectStep(project, 'scaffold', 'blocked'); project.updatedAt = Date.now();

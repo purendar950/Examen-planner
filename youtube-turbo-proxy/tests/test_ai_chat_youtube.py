@@ -334,6 +334,89 @@ check("a window is much smaller than the whole lecture",
 check("a window alone is not called a truncation",
       "LONGER than fits" not in win, win[:500])
 
+print("\n\u2500\u2500 4c. formula-focused artifact transcript \u2500\u2500")
+formula_view = ns["_formula_transcript_view"]
+_formula_segments = [
+    {"start": float(i * 5), "dur": 5.0,
+     "text": ("the key formula is area equals base times height" if i == 5
+              else "ordinary discussion segment %d" % i)}
+    for i in range(12)
+]
+_formula_data = {
+    "id": "dQw4w9WgXcQ", "title": "Formula Lecture", "chosen_lang": "en",
+    "segments": _formula_segments,
+    "text": "\n".join(item["text"] for item in _formula_segments),
+}
+_compact, _hit_count, _kept_count = formula_view(_formula_data)
+check("formula compaction finds a discourse cue", _hit_count == 1, _hit_count)
+check("formula compaction keeps the cue plus one neighbour on each side",
+      _kept_count == 3 and len(_compact["segments"]) == 3, _kept_count)
+check("the compact view retains original timestamps",
+      [_compact["segments"][0]["start"], _compact["segments"][-1]["start"]] == [20.0, 30.0],
+      [_compact["segments"][0]["start"], _compact["segments"][-1]["start"]])
+check("compaction does not mutate the cached transcript",
+      len(_formula_data["segments"]) == 12 and "ordinary discussion segment 0" in _formula_data["text"])
+_no_cues = {"segments": [{"start": 0, "text": "ordinary introduction"}],
+            "text": "ordinary introduction"}
+_no_cue_view, _no_cue_hits, _no_cue_kept = formula_view(_no_cues)
+check("a transcript with no formula cue safely falls back to the original",
+      _no_cue_view is _no_cues and _no_cue_hits == 0 and _no_cue_kept == 1)
+_spoken_formula = {
+    "segments": [{"start": i * 5, "text": ("area is half base times height" if i == 4
+                                              else "ordinary speech %d" % i)}
+                 for i in range(8)],
+    "text": "ordinary",
+}
+_spoken_view, _spoken_hits, _spoken_kept = formula_view(_spoken_formula)
+check("equation-like speech is retained even when it never says formula or equals",
+      _spoken_hits == 1 and "area is half base times height" in _spoken_view["text"],
+      (_spoken_hits, _spoken_view["text"]))
+
+# Exercise the real context integration, not only the helper. The artifact mode
+# must compact formula-sheet requests, while ordinary revision notes continue to
+# receive the normal transcript rather than losing non-formula lecture content.
+_original_transcript = dict(_TRANSCRIPT)
+try:
+    _TRANSCRIPT.clear()
+    _TRANSCRIPT.update(_formula_data)
+    del _FETCH_CALLS[:]
+    _artifact_block = context({
+        "q": "Make a formula sheet using HTML CSS and JavaScript",
+        "artifactMode": "single-html-study",
+        "youtube": {"id": "dQw4w9WgXcQ"},
+    }, big, 0)
+    _revision_block = context({
+        "q": "Make revision notes using HTML CSS and JavaScript",
+        "artifactMode": "single-html-study",
+        "youtube": {"id": "dQw4w9WgXcQ"},
+    }, big, 0)
+    _formula_window_block = context({
+        "q": "Make a formula sheet using HTML CSS and JavaScript",
+        "artifactMode": "single-html-study",
+        "youtube": {"id": "dQw4w9WgXcQ", "startS": 0, "endS": 15},
+    }, big, 0)
+finally:
+    _TRANSCRIPT.clear()
+    _TRANSCRIPT.update(_original_transcript)
+check("formula artifact context discloses focused extraction",
+      "formula-focused extraction: 1 matching cues with 3" in _artifact_block,
+      _artifact_block[:500])
+check("formula artifact context keeps the stated formula and neighbours",
+      "key formula is area equals base times height" in _artifact_block
+      and "ordinary discussion segment 4" in _artifact_block)
+check("formula artifact context removes distant unrelated speech",
+      "ordinary discussion segment 0" not in _artifact_block
+      and "ordinary discussion segment 11" not in _artifact_block)
+check("generic revision notes are not incorrectly formula-compacted",
+      "formula-focused extraction" not in _revision_block
+      and "ordinary discussion segment 0" in _revision_block
+      and "ordinary discussion segment 11" in _revision_block)
+check("an explicit formula-sheet Section never leaks formulas from outside its range",
+      "ordinary discussion segment 0" in _formula_window_block
+      and "key formula is area equals base times height" not in _formula_window_block
+      and "covering 0:00" in _formula_window_block,
+      _formula_window_block[:600])
+
 # Junk / degenerate windows must fall back to the whole transcript rather than
 # dropping the video or slicing to nothing.
 for label, att in (
@@ -571,6 +654,94 @@ check("download document IDs are restricted to this video and language",
 check("the API never exposes object-storage credentials",
       all(secret not in route_source for secret in
           ("S3_SECRET_ACCESS_KEY", "S3_ACCESS_KEY_ID", "_S3_SECRET", "_S3_KEY")))
+
+print("\n── 8. complete single-file study artifact contract ──")
+builder_source = section("def _ai_chat_build_messages(chat_cfg, body, thread_id):",
+                         '@app.route("/api/ai-chat", methods=["POST"])')
+check("the backend recognizes the single HTML study artifact mode",
+      'artifact_mode == "single-html-study"' in builder_source)
+check("small editor requests are completed now, not split into milestones",
+      "complete the full small request now; there is no milestone" in builder_source)
+check("the study artifact is exactly one self-contained index.html",
+      "Return exactly one named artifact" in builder_source
+      and "`FILE: index.html`" in builder_source
+      and "all CSS in a `<style>` element" in builder_source
+      and "all " in builder_source and "JavaScript in a `<script>` element" in builder_source)
+check("headings and placeholders are explicitly rejected",
+      "Headings without substantive formula content" in builder_source
+      and "failed result" in builder_source
+      and "Never return a " in builder_source
+      and "scaffold, placeholder sections, TODOs" in builder_source)
+check("formula, SVG figure, timestamp, and interaction content are required",
+      all(term in builder_source for term in
+          ("actual formulas", "useful timestamps", "inline SVG", "useful JavaScript interaction")))
+
+print("\n\u2500\u2500 9. invalid artifact auto-repair \u2500\u2500")
+artifact_ns = {"re": re, "_TUTOR_MAX_TOKENS": 4096}
+exec(section("def _single_html_study_issue(answer, require_timestamps=False):",
+             '@app.route("/api/ai-chat", methods=["POST"])'), artifact_ns)
+artifact_issue = artifact_ns["_single_html_study_issue"]
+artifact_retry = artifact_ns["_ai_chat_answer_with_artifact_retry"]
+_study_rows = "".join(
+    "<p>Triangle area perimeter circle circumference Heron diagonal sector arc "
+    "rectangle square rhombus trapezium formula explanation.</p>" for _ in range(40))
+_valid_html = ("<!doctype html><html><head><style>.hidden{display:none}</style></head><body>"
+               + _study_rows
+               + "<p>[0:15] A = b*h</p><p>[1:20] P = 2*a</p>"
+                 "<p>[2:35] C = 2*pi*r</p><p>A = pi*r*r</p>"
+                 "<svg aria-label='triangle'><title>Triangle</title><text>base</text></svg>"
+                 "<svg aria-label='circle'><title>Circle</title><text>radius</text></svg>"
+                 "<script>document.querySelector('p').addEventListener('click', function () { "
+                 "this.classList.toggle('hidden'); });</script></body></html>")
+_valid_artifact = "FILE: index.html\n```html\n%s\n```" % _valid_html
+_invalid_artifact = "FILE: index.html\n```html\n<html><body><h2>Triangle</h2>"
+check("server validator accepts a complete standalone artifact",
+      artifact_issue(_valid_artifact, require_timestamps=True) == "")
+check("server validator catches a truncated headings-only response",
+      bool(artifact_issue(_invalid_artifact, require_timestamps=True)))
+
+_calls = []
+def _scripted_chat(messages, ai, max_tokens=0):
+    _calls.append((messages, max_tokens))
+    return _scripted_chat.answers.pop(0)
+artifact_ns["_ai_chat"] = _scripted_chat
+_scripted_chat.answers = [_valid_artifact]
+_answer, _retried, _final_issue = artifact_retry([], {}, {"artifactMode": "single-html-study",
+                                                            "youtube": {"id": "x"}})
+check("a valid first artifact is returned without a redundant model call",
+      _answer == _valid_artifact and not _retried and not _final_issue and len(_calls) == 1,
+      (len(_calls), _retried, _final_issue))
+_calls[:] = []
+_scripted_chat.answers = [_invalid_artifact, _valid_artifact]
+_messages = [{"role": "system", "content": "artifact contract"},
+             {"role": "user", "content": "make it"}]
+_answer, _retried, _final_issue = artifact_retry(
+    _messages, {}, {"artifactMode": "single-html-study", "youtube": {"id": "x"}})
+check("an invalid first artifact automatically regenerates exactly once",
+      _answer == _valid_artifact and _retried and not _final_issue and len(_calls) == 2,
+      (len(_calls), _retried, _final_issue))
+check("the repair request identifies the failure and demands concise completion",
+      len(_calls) == 2
+      and "AUTOMATED ARTIFACT RETRY" in _calls[1][0][0]["content"]
+      and "output limit" in _calls[1][0][0]["content"],
+      _calls[1][0][0]["content"][-400:] if len(_calls) == 2 else _calls)
+_calls[:] = []
+_scripted_chat.answers = [_invalid_artifact, _invalid_artifact]
+_second_invalid_error = ""
+try:
+    artifact_retry(_messages, {}, {"artifactMode": "single-html-study", "youtube": {"id": "x"}})
+except RuntimeError as exc:
+    _second_invalid_error = str(exc)
+check("a second invalid artifact becomes an API error instead of being released",
+      len(_calls) == 2 and "invalid study artifact after automatic retry" in _second_invalid_error,
+      (len(_calls), _second_invalid_error))
+route_source = section('@app.route("/api/ai-chat", methods=["POST"])',
+                       '@app.route("/api/ai-chat/files", methods=["GET", "POST"])')
+check("blocking and streaming endpoints both use validated artifact retry",
+      route_source.count("_ai_chat_answer_with_artifact_retry(") >= 2)
+check("artifact streaming is buffered before chunks are released",
+      "A partial study file must never be streamed" in route_source
+      and 'range(0, len(answer), 1200)' in route_source)
 
 print("\n" + "\n".join(_RESULTS))
 if _FAILED:
