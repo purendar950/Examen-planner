@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { JSDOM } from 'jsdom';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = readFileSync(resolve(root, 'js/tabs/ai-chat.js'), 'utf8');
@@ -587,6 +588,129 @@ test('Download and Send carry the same server-issued transcript document ID', ()
   const send = section('window.aicSend = function (ev) {', '/* auto-grow the textarea');
   assert.match(download, /documentId=' \+ encodeURIComponent\(file\.documentId\)/);
   assert.match(send, /documentId:\s*transcriptFileInfo\(t\.youtube\)\.documentId/);
+});
+
+console.log('\nComposer submission uses programmatic DOM listeners');
+
+function composerMarkup() {
+  const marker = 'var MARKUP = `';
+  const start = source.indexOf(marker);
+  const end = source.indexOf('`;\n\n  function dispatchComposerSend', start + marker.length);
+  assert.ok(start !== -1 && end > start, 'could not locate AI Chat markup');
+  return source.slice(start + marker.length, end);
+}
+
+function loadComposerBinding(sendHandler = () => {}) {
+  const dom = new JSDOM(`<!doctype html><body>${composerMarkup()}</body>`);
+  const notifications = [];
+  const errors = [];
+  const context = {
+    window: dom.window,
+    document: dom.window.document,
+    toast: (message, kind) => notifications.push({ message, kind }),
+    console: { error: (message) => errors.push(message) }
+  };
+  if (sendHandler) dom.window.aicSend = sendHandler;
+  vm.createContext(context);
+  vm.runInContext(
+    [
+      section('function dispatchComposerSend(ev) {', 'function injectPage() {'),
+      'globalThis.bindComposerSubmission = bindComposerSubmission;'
+    ].join('\n'),
+    context
+  );
+  const page = dom.window.document;
+  assert.equal(context.bindComposerSubmission(page), true, 'initial binding should succeed');
+  return { context, dom, page, notifications, errors };
+}
+
+test('the critical Send controls no longer depend on inline event attributes', () => {
+  const dom = new JSDOM(composerMarkup());
+  const doc = dom.window.document;
+  assert.equal(doc.querySelector('.aic-form').hasAttribute('onsubmit'), false);
+  assert.equal(doc.querySelector('#aic-input').hasAttribute('onkeydown'), false);
+  assert.equal(doc.querySelector('#aic-send-btn').type, 'button');
+  dom.window.close();
+});
+
+test('one visible Send-button click dispatches exactly once', () => {
+  let calls = 0;
+  const fixture = loadComposerBinding(() => { calls += 1; });
+  fixture.page.querySelector('#aic-send-btn').click();
+  assert.equal(calls, 1);
+  fixture.dom.window.close();
+});
+
+test('Enter dispatches exactly once while Shift+Enter keeps a new line', () => {
+  let calls = 0;
+  const fixture = loadComposerBinding(() => { calls += 1; });
+  const input = fixture.page.querySelector('#aic-input');
+  const enter = new fixture.dom.window.KeyboardEvent('keydown', {
+    key: 'Enter', bubbles: true, cancelable: true
+  });
+  input.dispatchEvent(enter);
+  assert.equal(calls, 1);
+  assert.equal(enter.defaultPrevented, true);
+
+  const shifted = new fixture.dom.window.KeyboardEvent('keydown', {
+    key: 'Enter', shiftKey: true, bubbles: true, cancelable: true
+  });
+  input.dispatchEvent(shifted);
+  assert.equal(calls, 1, 'Shift+Enter must not send');
+  assert.equal(shifted.defaultPrevented, false);
+  fixture.dom.window.close();
+});
+
+test('a form submit dispatches exactly once and is prevented', () => {
+  let calls = 0;
+  const fixture = loadComposerBinding(() => { calls += 1; });
+  const submit = new fixture.dom.window.Event('submit', { bubbles: true, cancelable: true });
+  const notCancelled = fixture.page.querySelector('.aic-form').dispatchEvent(submit);
+  assert.equal(calls, 1);
+  assert.equal(notCancelled, false);
+  assert.equal(submit.defaultPrevented, true);
+  fixture.dom.window.close();
+});
+
+test('binding twice does not duplicate Send dispatch', () => {
+  let calls = 0;
+  const fixture = loadComposerBinding(() => { calls += 1; });
+  assert.equal(fixture.context.bindComposerSubmission(fixture.page), false);
+  fixture.page.querySelector('#aic-send-btn').click();
+  assert.equal(calls, 1);
+  fixture.dom.window.close();
+});
+
+test('a missing Send handler visibly fails and still prevents form navigation', () => {
+  const fixture = loadComposerBinding(null);
+  const submit = new fixture.dom.window.Event('submit', { bubbles: true, cancelable: true });
+  const notCancelled = fixture.page.querySelector('.aic-form').dispatchEvent(submit);
+  assert.equal(notCancelled, false);
+  assert.equal(submit.defaultPrevented, true);
+  assert.equal(fixture.notifications.length, 1);
+  assert.equal(fixture.notifications[0].kind, 'error');
+  assert.match(fixture.notifications[0].message, /could not send/i);
+  assert.equal(fixture.errors.length, 1);
+  fixture.dom.window.close();
+});
+
+test('reparented Save and Close tool buttons never submit the composer', () => {
+  let sends = 0;
+  const fixture = loadComposerBinding(() => { sends += 1; });
+  const toolbox = fixture.page.querySelector('#aic-composer-toolbox');
+  for (const kind of ['persona', 'github', 'youtube', 'image', 'search', 'speech', 'video']) {
+    toolbox.appendChild(fixture.page.querySelector(`#aic-${kind}-box`));
+  }
+  const controls = [...toolbox.querySelectorAll(
+    'button[onclick="aicSavePersona()"], button[onclick^="aicClose"]'
+  )];
+  assert.equal(controls.length, 7, `expected seven Save/Close controls, found ${controls.length}`);
+  for (const control of controls) {
+    assert.equal(control.type, 'button', `${control.textContent.trim()} must not submit`);
+    control.click();
+  }
+  assert.equal(sends, 0);
+  fixture.dom.window.close();
 });
 
 console.log('\nEvery Send exit explains itself');
