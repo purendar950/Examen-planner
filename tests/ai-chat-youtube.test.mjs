@@ -140,6 +140,110 @@ test('the language picker is gone, so one cached transcript is shared per video'
   assert.match(source, /var YT_LANG = 'auto'/, 'attachments should pin auto');
 });
 
+console.log('\nQuick actions must reach chat, not a media generator');
+
+/* The reported "clicking Send does nothing". isVideoIntent is anchored at ^ and
+   fires on a generation verb followed by "video" within 100 characters, which
+   "Make structured revision notes from this video" satisfies exactly — so Notes
+   and Quiz were routed to AI video GENERATION. requestVideo's first line
+   Promise.reject()s when no video model is configured, and aicSend called it with
+   .finally() but no .catch(), so the rejection vanished: composer cleared, button
+   reset, nothing shown anywhere. Two layers are asserted here — the prompts no
+   longer trip the heuristic, AND aicSend suppresses it when a video is attached,
+   which is what protects whatever the student types themselves. */
+const intents = (() => {
+  const ctx = { };
+  vm.createContext(ctx);
+  vm.runInContext(
+    [
+      // isImageIntent delegates to isImageEditIntent, so the real one is loaded
+      // rather than stubbed — a stub would change what counts as image intent and
+      // the checks below would prove nothing about the shipped behaviour.
+      section('function isImageIntent(text) {', 'function removePendingImageMessages'),
+      section('function isSearchIntent(text) {', 'function isSpeechIntent'),
+      section('function isSpeechIntent(text) {', 'function isVideoIntent'),
+      section('function isVideoIntent(text) {', 'function latestAssistantText'),
+      'globalThis.isImageIntent = isImageIntent;',
+      'globalThis.isSearchIntent = isSearchIntent;',
+      'globalThis.isSpeechIntent = isSpeechIntent;',
+      'globalThis.isVideoIntent = isVideoIntent;'
+    ].join('\n'),
+    ctx
+  );
+  return ctx;
+})();
+
+const quickPrompts = [...section('var YT_ACTIONS = [', '];')
+  .matchAll(/prompt:\s*'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\'/g, "'"));
+
+test('all seven quick-action prompts were found', () => {
+  assert.equal(quickPrompts.length, 7, `found ${quickPrompts.length}`);
+});
+
+test('no quick action is mistaken for a VIDEO generation request', () => {
+  const broken = quickPrompts.filter((p) => intents.isVideoIntent(p));
+  assert.deepEqual(broken, [], `these would generate a video: ${broken.join(' | ')}`);
+});
+
+test('no quick action is mistaken for an IMAGE generation request', () => {
+  const broken = quickPrompts.filter((p) => intents.isImageIntent(p));
+  assert.deepEqual(broken, [], `these would generate an image: ${broken.join(' | ')}`);
+});
+
+test('no quick action is mistaken for a web SEARCH or SPEECH request', () => {
+  const broken = quickPrompts.filter((p) => intents.isSearchIntent(p) || intents.isSpeechIntent(p));
+  assert.deepEqual(broken, [], `these would be misrouted: ${broken.join(' | ')}`);
+});
+
+test('the exact prompt from the bug report no longer routes to video', () => {
+  assert.equal(
+    intents.isVideoIntent(
+      'Make structured revision notes from this video. Use headings and bullet '
+      + 'points, keep every formula and definition, and cite the [m:ss] timestamp '
+      + 'for each section.'
+    ),
+    true,
+    'the heuristic itself still matches this wording — which is why the guard exists'
+  );
+  assert.equal(intents.isVideoIntent(quickPrompts[0]), false,
+    'but the shipped Notes prompt must not match');
+});
+
+test('aicSend suppresses the video heuristic when a lecture is attached', () => {
+  // The guard, not the wording, is what protects a student typing "make a
+  // summary of this video" by hand.
+  assert.match(source, /var ytAttached = !!ytAttachment\(t\)/,
+    'aicSend should compute whether a video is attached');
+  assert.match(source, /if \(!ytAttached && isVideoIntent\(q\)\)/,
+    'the video heuristic must be skipped when a video is attached');
+});
+
+test('a genuine video request still works when nothing is attached', () => {
+  assert.equal(intents.isVideoIntent('make a video of a spinning cube'), true);
+  assert.equal(intents.isVideoIntent('generate a short animation'), true);
+});
+
+console.log('\nFailed media requests are never silent');
+
+test('every media call surfaces its rejection instead of swallowing it', () => {
+  // requestVideo/requestSpeech/requestWebSearch all Promise.reject() immediately
+  // when no model is configured. A .finally() without a .catch() resets the Send
+  // button and shows nothing at all, which reads as a dead button.
+  const orphans = [...source.matchAll(
+    /request(?:WebSearch|Speech|Video)\([^)]*\)\s*\.finally/g
+  )].map((m) => m[0]);
+  assert.deepEqual(orphans, [],
+    `these reject silently, with no .catch(): ${orphans.join(' | ')}`);
+});
+
+test('the failure helper records an error and offers a plain-chat retry', () => {
+  const helper = section('function mediaFailed(threadId, kind, q, err) {', '\n  function requestVideo');
+  assert.match(helper, /role: 'error'/, 'should push a visible error message');
+  assert.match(helper, /retry: \{ kind: 'text'/,
+    "retry should be 'text' so a misrouted prompt can be resent as chat");
+  assert.match(helper, /toast\(/, 'should also toast');
+});
+
 console.log('\nSection time parsing');
 
 test('a blank field means "no bound", not zero', () => {

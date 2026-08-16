@@ -1415,8 +1415,13 @@
      edit or ignore them, which is the point: the attachment is general context,
      not a fixed menu of study buttons like the video tutor's. */
   var YT_ACTIONS = [
-    { label: 'Notes', prompt: 'Make structured revision notes from this video. Use headings and bullet points, keep every formula and definition, and cite the [m:ss] timestamp for each section.' },
-    { label: 'Quiz', prompt: 'Create 10 multiple-choice questions from this video. Four options each, mark the correct answer, and add a one-line explanation with the [m:ss] timestamp it came from.' },
+    // Phrased source-first, not verb-first. isVideoIntent is anchored at ^ and
+    // fires on a generation verb followed by "video" within 100 characters, so
+    // "Make structured revision notes from this video" read as a request to
+    // GENERATE a video. Leading with the source defeats that, and the guard in
+    // aicSend covers anything the student types themselves.
+    { label: 'Notes', prompt: 'From this lecture, write structured revision notes. Use headings and bullet points, keep every formula and definition, and cite the [m:ss] timestamp for each section.' },
+    { label: 'Quiz', prompt: 'From this lecture, write 10 multiple-choice questions. Four options each, mark the correct answer, and add a one-line explanation with the [m:ss] timestamp it came from.' },
     { label: 'Flashcards', prompt: 'Turn this video into flashcards. One question and answer per line, formatted as Q: ... / A: ..., covering every key fact, definition and formula.' },
     { label: 'Summary', prompt: 'Summarise this video in about 200 words, then list the 5 most important takeaways.' },
     { label: 'Outline', prompt: 'Give me a timestamped outline of this video: every topic covered, in order, each with its [m:ss] start time.' },
@@ -2667,7 +2672,7 @@
       : backendAuthFetch('/api/ai-chat/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: query, model: selected.key, searchType: 'web', maxResults: maxResults }) }).then(function (r) { return r.ok ? r.json() : responseError(r, 'Web search failed.'); });
     return request.then(function (payload) { var cur = getThread(thread.id); if (!cur) return; cur.messages.push({ role: 'assistant', content: 'Web search results for ' + query, mediaType: 'search', search: payload || { query: query, results: [] } }); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Web search failed.'), retry: { kind: 'search', q: query } }); upsertThread(cur); renderLog(); } });
   }
-  window.aicSearchWeb = function () { if (_sending) return; var input = document.getElementById('aic-search-query-input'); var query = String((input && input.value) || '').trim() || String((document.getElementById('aic-input') || {}).value || '').trim(); if (!query) { toast('Enter a search query.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (input) input.value = ''; setSending(true); requestWebSearch(t, query).finally(function () { setSending(false); }); };
+  window.aicSearchWeb = function () { if (_sending) return; var input = document.getElementById('aic-search-query-input'); var query = String((input && input.value) || '').trim() || String((document.getElementById('aic-input') || {}).value || '').trim(); if (!query) { toast('Enter a search query.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (input) input.value = ''; setSending(true); requestWebSearch(t, query).catch(function (err) { mediaFailed(t.id, 'search', query, err); }).finally(function () { setSending(false); }); };
   function requestSpeech(thread, text) {
     var selected = typedModel('speech', thread); if (!selected) return Promise.reject(new Error('No speech model is configured.'));
     mediaUserMessage(thread, '♬ Read aloud: ' + text.slice(0, 500));
@@ -2678,7 +2683,27 @@
       : backendAuthFetch('/api/ai-chat/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: text, model: selected.key, voice: body.voice, responseFormat: 'mp3' }) });
     return request.then(function (r) { if (!r.ok) return responseError(r, 'Text-to-speech failed.'); var type = (r.headers.get('content-type') || '').toLowerCase(); return type.indexOf('audio/') === 0 ? r.blob().then(function (blob) { return { blob: blob }; }) : r.json().then(function (payload) { return { payload: payload }; }); }).then(function (result) { var cur = getThread(thread.id); if (!cur) return; var message = { role: 'assistant', content: 'Audio narration generated.', mediaType: 'audio', speechText: text, speechModel: selected.key }; if (result.blob) return storeBinaryMedia(cur, message, result.blob, 'audio').then(function () { cur.messages.push(message); upsertThread(cur); renderLog(); }); var source = mediaSourceFromJson(result.payload, 'audio'); if (!source) throw new Error('The speech service returned no audio data.'); message.audioData = source.indexOf('data:') === 0 || source.indexOf('http') === 0 ? source : 'data:audio/mpeg;base64,' + source; cur.messages.push(message); upsertThread(cur); renderLog(); }).catch(function (e) { var cur = getThread(thread.id); if (cur) { cur.messages.push({ role: 'error', content: '⚠️ ' + (e.message || 'Text-to-speech failed.'), retry: { kind: 'speech', q: text } }); upsertThread(cur); renderLog(); } });
   }
-  window.aicGenerateSpeech = function () { if (_sending) return; var field = document.getElementById('aic-speech-text-input'); var t = getThread(currentThreadId()); var text = String((field && field.value) || '').trim() || latestAssistantText(t); if (!text) { toast('Enter text or generate an AI response first.'); return; } if (field) field.value = ''; setSending(true); requestSpeech(t, text).finally(function () { setSending(false); }); };
+  window.aicGenerateSpeech = function () { if (_sending) return; var field = document.getElementById('aic-speech-text-input'); var t = getThread(currentThreadId()); var text = String((field && field.value) || '').trim() || latestAssistantText(t); if (!text) { toast('Enter text or generate an AI response first.'); return; } if (field) field.value = ''; setSending(true); requestSpeech(t, text).catch(function (err) { mediaFailed(t && t.id, 'speech', text, err); }).finally(function () { setSending(false); }); };
+  /* A rejected media request has to say so. The search, speech and video branches
+     used .finally() without .catch(), so a rejection reset the Send button and
+     produced NOTHING — no log entry, no toast, just a cleared composer, which is
+     indistinguishable from a dead button. The commonest rejection is the very
+     first line of each request helper: "no model is configured" rejects
+     immediately, so a misrouted prompt failed completely silently.
+
+     `retry` is deliberately 'text': if the prompt landed here by a bad intent
+     guess, retrying it as ordinary chat is the recovery the student wants. */
+  function mediaFailed(threadId, kind, q, err) {
+    var msg = String((err && err.message) || ('The ' + kind + ' request failed.')).slice(0, 300);
+    var cur = getThread(threadId);
+    if (cur) {
+      cur.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + msg, retry: { kind: 'text', q: q } });
+      upsertThread(cur);
+      if (currentThreadId() === cur.id) renderLog();
+    }
+    toast(msg, 'error');
+  }
+
   function requestVideo(thread, prompt) {
     var selected = typedModel('video', thread); if (!selected) return Promise.reject(new Error('No video model is configured.'));
     mediaUserMessage(thread, '▣ Generate video: ' + prompt);
@@ -2732,7 +2757,7 @@
     }
     return startProxyJob().catch(fail);
   }
-  window.aicGenerateVideo = function () { if (_sending) return; var field = document.getElementById('aic-video-prompt-input'); var prompt = String((field && field.value) || '').trim(); if (!prompt) { toast('Describe the video to generate.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (field) field.value = ''; setSending(true); requestVideo(t, prompt).finally(function () { setSending(false); }); };
+  window.aicGenerateVideo = function () { if (_sending) return; var field = document.getElementById('aic-video-prompt-input'); var prompt = String((field && field.value) || '').trim(); if (!prompt) { toast('Describe the video to generate.'); return; } var t = getThread(currentThreadId()); if (!t) return; if (field) field.value = ''; setSending(true); requestVideo(t, prompt).catch(function (err) { mediaFailed(t.id, 'video', prompt, err); }).finally(function () { setSending(false); }); };
 
   /* ── GitHub repository context ──────────────────────────────────────── */
   function githubState(t) {
@@ -3843,12 +3868,19 @@
     // The universal composer owns the active tool. Its main input is the single
     // prompt field; the compact panel only contains model/options/reference controls.
     // This avoids opening a second full-width prompt box for every capability.
+    // Whether this thread has a lecture attached. It suppresses the video-intent
+    // heuristic further down: with a video attached, the word "video" appears in
+    // almost every legitimate question about it.
+    var ytAttached = !!ytAttachment(t);
+
     var activeTool = _activeComposerTool;
     if (activeTool === 'search') {
       if (!q) { toast('Enter a search query.'); return; }
       if (input) { input.value = ''; input.style.height = 'auto'; }
       setSending(true);
-      requestWebSearch(t, q).finally(function () { setSending(false); });
+      requestWebSearch(t, q)
+        .catch(function (err) { mediaFailed(t.id, 'search', q, err); })
+        .finally(function () { setSending(false); });
       return;
     }
     if (activeTool === 'speech') {
@@ -3856,14 +3888,18 @@
       if (!speechText) { toast('Enter text or generate an AI response first.'); return; }
       if (input) { input.value = ''; input.style.height = 'auto'; }
       setSending(true);
-      requestSpeech(t, speechText).finally(function () { setSending(false); });
+      requestSpeech(t, speechText)
+        .catch(function (err) { mediaFailed(t.id, 'speech', speechText, err); })
+        .finally(function () { setSending(false); });
       return;
     }
     if (activeTool === 'video') {
       if (!q) { toast('Describe the video to generate.'); return; }
       if (input) { input.value = ''; input.style.height = 'auto'; }
       setSending(true);
-      requestVideo(t, q).finally(function () { setSending(false); });
+      requestVideo(t, q)
+        .catch(function (err) { mediaFailed(t.id, 'video', q, err); })
+        .finally(function () { setSending(false); });
       return;
     }
     if (activeTool === 'image') {
@@ -3897,19 +3933,31 @@
     if (isSearchIntent(q)) {
       if (input) { input.value = ''; input.style.height = 'auto'; }
       setSending(true);
-      requestWebSearch(t, q).finally(function () { setSending(false); });
+      requestWebSearch(t, q)
+        .catch(function (err) { mediaFailed(t.id, 'search', q, err); })
+        .finally(function () { setSending(false); });
       return;
     }
     if (isSpeechIntent(q)) {
       if (input) { input.value = ''; input.style.height = 'auto'; }
       setSending(true);
-      requestSpeech(t, q).finally(function () { setSending(false); });
+      requestSpeech(t, q)
+        .catch(function (err) { mediaFailed(t.id, 'speech', q, err); })
+        .finally(function () { setSending(false); });
       return;
     }
-    if (isVideoIntent(q)) {
+    // NOT when a video is attached. isVideoIntent fires on a generation verb
+    // followed by "video" within 100 characters, which "Make structured revision
+    // notes from this video" satisfies exactly — so asking for notes about a
+    // lecture was being routed to AI video GENERATION. With a lecture attached the
+    // student is asking about it, not asking for one to be made; the explicit
+    // ▣ Video tool still works, since that is a stated intent rather than a guess.
+    if (!ytAttached && isVideoIntent(q)) {
       if (input) { input.value = ''; input.style.height = 'auto'; }
       setSending(true);
-      requestVideo(t, q).finally(function () { setSending(false); });
+      requestVideo(t, q)
+        .catch(function (err) { mediaFailed(t.id, 'video', q, err); })
+        .finally(function () { setSending(false); });
       return;
     }
 
