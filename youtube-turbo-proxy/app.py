@@ -1147,6 +1147,12 @@ _TUTOR_MAX_TOKENS = int(os.environ.get("TUTOR_MAX_TOKENS", "4096"))
 # (the notes Ask/Verify actions, and the whole-note check). Also bounded per
 # request against the model's own context budget - see _tutor_prepare.
 NOTE_EXCERPT_CHARS = int(os.environ.get("TUTOR_NOTE_EXCERPT_CHARS", "12000"))
+# Safety ceiling on the YouTube transcript attached to an AI Chat thread (see
+# _ai_chat_transcript_chars, which is what actually sizes it per model). Lower
+# than the tutor's ceiling on purpose: the tutor sends 8 history turns of 2000
+# chars, AI Chat sends up to 20 of 4000, so the same transcript leaves far less
+# room here. Env-tunable.
+AI_CHAT_TRANSCRIPT_CHARS = int(os.environ.get("AI_CHAT_TRANSCRIPT_CHARS", "120000"))
 # Notes generation is chunked ONLY so a single call doesn't run forever. The
 # response is STREAMED (see _AI_STREAM), and streaming — not small chunks — is
 # what actually prevents Cloudflare's ~100s 524 (tokens keep the connection
@@ -11286,6 +11292,210 @@ def _transcript_window(t, cap, center_s=None):
     return window or text[:cap]
 
 
+def _fmt_ts(seconds):
+    """Seconds -> m:ss (or h:mm:ss past an hour), matching how YouTube itself
+    labels timestamps so a cited moment is directly scrubbable."""
+    try:
+        total = max(0, int(float(seconds)))
+    except (TypeError, ValueError):
+        return "0:00"
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return "%d:%02d:%02d" % (hours, minutes, secs)
+    return "%d:%02d" % (minutes, secs)
+
+
+def _transcript_stamped(t, cap, stamp_every=30.0):
+    """Transcript for the prompt with a [m:ss] marker roughly every
+    `stamp_every` seconds, at most `cap` characters.
+
+    The tutor feeds the model an unstamped wall of text because it answers about
+    a video the student is already watching. A chat asked for "notes" or a
+    "timestamped outline" has no such anchor, and without markers the model can
+    only invent times — so segments are bucketed into stamped lines instead.
+
+    Buckets are built from `segments`; a transcript with no segments (or one
+    whose stamps would not fit) falls back to a plain head slice of `text`."""
+    if cap <= 0:
+        return ""
+    text = t.get("text") or ""
+    segments = t.get("segments") or []
+    if not segments:
+        return text[:cap]
+
+    lines = []
+    used = 0
+    bucket = []
+    bucket_start = None
+
+    def flush():
+        if not bucket:
+            return None
+        return "[%s] %s" % (_fmt_ts(bucket_start), " ".join(bucket))
+
+    for seg in segments:
+        piece = str(seg.get("text") or "").strip()
+        if not piece:
+            continue
+        try:
+            start = float(seg.get("start") or 0.0)
+        except (TypeError, ValueError):
+            start = 0.0
+        # Close the bucket BEFORE adding the segment that runs past the window,
+        # so each marker lands on a ~stamp_every boundary and the line it labels
+        # only contains speech from that window. Adding first and then checking
+        # would push every marker later than the speech it introduces.
+        if bucket_start is not None and start - bucket_start >= stamp_every:
+            line = flush()
+            bucket, bucket_start = [], None
+            # Stop at the last line that fits WHOLE, so the prompt never ends on
+            # a half sentence attributed to a timestamp it doesn't belong to.
+            if line is not None:
+                if used + len(line) + 1 > cap:
+                    return "\n".join(lines) if lines else text[:cap]
+                lines.append(line)
+                used += len(line) + 1
+        if bucket_start is None:
+            bucket_start = start
+        bucket.append(piece)
+
+    tail = flush()
+    if tail is not None and used + len(tail) + 1 <= cap:
+        lines.append(tail)
+    return "\n".join(lines) if lines else text[:cap]
+
+
+def _ai_chat_transcript_chars(ai, text, history_chars=0):
+    """How many transcript chars the AI Chat prompt can afford.
+
+    Deliberately NOT _tutor_context_chars: that one reserves a flat ~3800 tokens
+    for history because the tutor sends 8 turns capped at 2000 chars. AI Chat
+    sends up to 20 turns capped at 4000 (80k chars, ~20k tokens), so reusing the
+    tutor budget would overflow an 8192-token provider (Cerebras/Kiro) as soon as
+    the thread got long. The real history size is passed in and charged for."""
+    text = text or ""
+    if not text:
+        return 0
+    ctx = _model_ctx_tokens(ai)
+    # Reserve for the answer. _TUTOR_MAX_TOKENS (4096) is over half of an
+    # 8192-token window on its own, so it is scaled down for small models rather
+    # than applied flat — a flat reserve plus the system overhead below already
+    # exceeded such a window before any transcript was added, which is how the
+    # old floor came to guarantee the very overflow it looked like it prevented.
+    output_reserve = min(_TUTOR_MAX_TOKENS, max(1024, int(ctx * 0.25)))
+    # The system wrapper: chat instructions, the transcript rule, tool contracts,
+    # world context.
+    sysmsg_reserve = 2500
+    # History is mixed-script and already truncated by the caller; 4 chars/token
+    # is the right estimate for it, while the transcript gets its own ratio
+    # (Hindi/Devanagari packs ~1.2 chars per token — see _chars_per_token).
+    # Charged in FULL and deliberately un-floored: if a long thread leaves no
+    # room, the honest answer is zero, and the caller says so out loud instead of
+    # slipping a token count past the model's limit.
+    history_tokens = int(max(0, history_chars) / 4.0)
+    budget_tokens = ctx - output_reserve - sysmsg_reserve - history_tokens
+    if budget_tokens <= 0:
+        return 0
+    cap = int(budget_tokens * _chars_per_token(text))
+    return min(len(text), cap, AI_CHAT_TRANSCRIPT_CHARS)
+
+
+# Captions are what the speaker SAID, transcribed by machine. Auto-generated
+# tracks mishear technical terms, names and numbers constantly, and a student
+# asking for notes or a quiz will carry any such error straight into revision —
+# so the model is told to treat a garbled term as a transcription artefact and
+# use the correct term, rather than faithfully copying the noise.
+_YOUTUBE_TRANSCRIPT_RULE = (
+    "\n\nHOW TO USE THE ATTACHED VIDEO\n"
+    "The student attached a YouTube video to this conversation. The TRANSCRIPT "
+    "below is its captions and is the primary source for anything they ask about "
+    "\u201cthis video\u201d, \u201cthe lecture\u201d, or \u201cit\u201d.\n"
+    "- Each line is prefixed with the timestamp the passage was spoken at, e.g. "
+    "[12:30]. Cite moments in that same [m:ss] form whenever it helps the student "
+    "scrub back \u2014 especially in notes, outlines and summaries. Never invent a "
+    "timestamp that is not in the transcript.\n"
+    "- Captions are machine-transcribed and are often wrong about technical "
+    "terms, names, formulae and numbers. When a word is clearly a mishearing, "
+    "silently use the term the speaker obviously meant; do not copy the garbled "
+    "form into notes, and do not build a quiz question on top of it.\n"
+    "- The transcript carries no diagrams, slides or on-screen text. If the "
+    "answer plainly depends on something shown rather than said, say so instead "
+    "of guessing at it.\n"
+    "- Stay in the video's scope for video-scoped requests, but the transcript is "
+    "not a cage: if the student asks a general question, or the lecture skips a "
+    "prerequisite they need, answer properly from your own knowledge and mark "
+    "clearly which part was not in the video.\n"
+    "- A long lecture may be truncated before the end. If the transcript is "
+    "marked truncated, say which portion you covered rather than implying you "
+    "summarised the whole thing."
+)
+
+
+def _ai_chat_youtube_context(body, ai, history_chars=0):
+    """The TRANSCRIPT block for a chat with a YouTube video attached.
+
+    The browser sends only {id, lang}: the transcript itself is re-read here from
+    the same three-tier cache /api/transcript uses (memory -> Firestore -> S3), so
+    a 300 KB lecture is never shipped up on every message and the real `segments`
+    stay available for stamping and windowing.
+
+    Returns '' when nothing is attached. A fetch failure returns a short note
+    rather than raising — losing the transcript must degrade the answer, not fail
+    the whole chat request."""
+    raw = body.get("youtube")
+    if not isinstance(raw, dict):
+        return ""
+    video_id = _parse_video_id(str(raw.get("id") or raw.get("url") or ""))
+    if not video_id:
+        return ""
+    lang = (str(raw.get("lang") or "auto").strip() or "auto")[:16]
+    try:
+        data = _extract_transcript(video_id, lang)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.warning("ai-chat youtube transcript failed for %s: %s", video_id, exc)
+        return ("\n\nATTACHED YOUTUBE VIDEO (UNAVAILABLE)\nThe student attached "
+                "https://youtu.be/%s but its captions could not be read just now. "
+                "Say so plainly in one line, answer from your own knowledge if you "
+                "can, and suggest they re-attach the video." % video_id)
+    if not (data.get("segments") or data.get("text")):
+        return ("\n\nATTACHED YOUTUBE VIDEO (NO CAPTIONS)\nThe student attached "
+                "\u201c%s\u201d (https://youtu.be/%s), but this video has no "
+                "captions, so its content is unavailable. Tell them in one line "
+                "that the video has no subtitles to read, and offer to help from "
+                "the title or from your own knowledge instead \u2014 do not invent "
+                "what the video says."
+                % (str(data.get("title") or "Untitled")[:200], video_id))
+
+    full = data.get("text") or ""
+    cap = _ai_chat_transcript_chars(ai, full, history_chars)
+    title = str(data.get("title") or "Untitled")[:200]
+    if cap <= 0:
+        # A small-context model on a long thread. Slipping in a token sliver here
+        # would push the request past the model's window and 400 the whole chat,
+        # so the video is dropped and the student is told what to do about it.
+        return ("\n\nATTACHED YOUTUBE VIDEO (NO ROOM LEFT)\nThe student attached "
+                "\u201c%s\u201d (https://youtu.be/%s), but this conversation is "
+                "already too long for the selected model to hold the video as "
+                "well, so its transcript was left out. Say so in one line and "
+                "suggest either starting a new chat for this video or switching "
+                "to a model with a larger context window. Do not guess at what "
+                "the video says." % (title, video_id))
+    block = _transcript_stamped(data, cap)
+    # Compare the BUDGET against the transcript, not the rendered block against
+    # it: the block carries timestamps the raw text does not, so its length runs
+    # ahead of the source and a near-complete clip could read as complete.
+    truncated = cap < len(full)
+    header = "\n\nTRANSCRIPT of the attached video \u2014 \u201c%s\u201d (https://youtu.be/%s, captions: %s%s)%s:\n" % (
+        title,
+        video_id,
+        str(data.get("chosen_lang") or data.get("detected_language") or "unknown")[:24],
+        ", auto-generated" if str(data.get("kind") or "") == "auto" else "",
+        " \u2014 TRUNCATED, this is the earlier part of the lecture only" if truncated else "",
+    )
+    return _YOUTUBE_TRANSCRIPT_RULE + header + block
+
+
 def _tutor_sys(title, out_lang, has_web, has_note=False):
     """System prompt for the video-scope tutor.
 
@@ -13667,6 +13877,19 @@ def _ai_chat_build_messages(chat_cfg, body, thread_id):
                               "question — newer and more reliable than your "
                               "training data):\n%s" % _web_context_block(results))
     sysmsg += _world_context()
+
+    # A YouTube video attached to the thread is the student's primary source, so
+    # it goes in ahead of any uploaded files. Its budget has to charge for the
+    # history this request will actually carry, so measure that the same way the
+    # history loop below truncates it (last 20 turns, 4000 chars each) rather
+    # than guessing.
+    history_chars = 0
+    pending_history = body.get("history") or []
+    if isinstance(pending_history, list):
+        for item in pending_history[-20:]:
+            if isinstance(item, dict) and item.get("content"):
+                history_chars += min(len(str(item["content"])), 4000)
+    sysmsg += _ai_chat_youtube_context(body, ai, history_chars)
 
     file_rows = _ai_chat_retrieve_file_context(q, thread_id) if thread_id else []
     if file_rows:

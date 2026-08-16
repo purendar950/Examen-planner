@@ -77,3 +77,6 @@ jobs:
 
       - name: AI Chat — chat vs image model separation
         run: python youtube-turbo-proxy/tests/test_ai_chat_models.py
+
+      - name: AI Chat — attached YouTube transcript context
+        run: python youtube-turbo-proxy/tests/test_ai_chat_youtube.py
