@@ -192,6 +192,9 @@
       <div class="nav-tab" onclick="switchPage('youtube')" id="nav-youtube" title="YouTube">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="4"></rect><path d="m10 9 5 3-5 3z" fill="currentColor" stroke="none"></path></svg></span><span class="nav-tab-label"> YouTube</span>
       </div>
+      <div class="nav-tab" onclick="switchPage('yt-search')" id="nav-yt-search" title="YT Search">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg></span><span class="nav-tab-label"> YT Search</span>
+      </div>
       <div class="nav-tab" onclick="switchPage('yt-organiser')" id="nav-yt-organiser" title="Course Library">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17.5H6.5A2.5 2.5 0 0 0 4 23z"></path><path d="M4 5.5V20.5M8 7h8M8 11h8M8 15h5"></path></svg></span><span class="nav-tab-label"> Course Library</span>
       </div>
@@ -295,6 +298,7 @@
     <div data-include="pages/planner.html"></div>
     <!-- ═══ YOUTUBE WATCH + STANDALONE COURSE LIBRARY PAGES ═══ -->
     <div data-include="pages/youtube.html"></div>
+    <div data-include="pages/yt-search.html"></div>
     <!-- ═══ MULTI-VIDEO NOTEBOOK PAGE (notes merged/compiled across lectures) ═══ -->
     <div data-include="pages/yt-notebook.html"></div>
     <!-- ═══ ANALYSIS PAGE (includes Revision sub-tab) ═══ -->
@@ -578,6 +582,7 @@
 <!-- Multi-video notebook: needs the organiser's library + fetchers above it, and
      window.AiNotesKit from ai-tutor.js (loaded later — only used on click). -->
 <script defer src="js/tabs/yt-notebook.js"></script>
+<script defer src="js/tabs/yt-search.js"></script>
 <!-- The AI notes library indexes both single-lecture notes and notebooks.
      Versioned because Vite copies js/ verbatim: without a ?v= a change here
      ships but browsers keep serving the cached copy (see
