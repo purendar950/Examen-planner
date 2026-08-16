@@ -49,13 +49,18 @@ function load(fields = {}) {
     'aic-yt-to-input': { value: fields.to ?? '' }
   };
   const context = {
-    document: { getElementById: (id) => elements[id] || null }
+    document: { getElementById: (id) => elements[id] || null },
+    // No status payload and no thread: stands for "the selected route's window is
+    // unknown", which is what makes ytFitsWhole fall back to the backstop.
+    _statusCache: null,
+    getThread: () => null,
+    currentThreadId: () => 't1'
   };
   vm.createContext(context);
   vm.runInContext(
     [
       section('function parseClock(raw) {', 'function readRangeInputs()'),
-      section('function readRangeInputs() {', "/* Mirrors the backend's"),
+      section('function readRangeInputs() {', '/* Backstop matching the'),
       section('var YT_WHOLE_VIDEO_CHARS =', '  var _ytAttachInFlight'),
       'globalThis.parseClock = parseClock;',
       'globalThis.readRangeInputs = readRangeInputs;',
@@ -240,14 +245,81 @@ test('a normal lecture fits and is NOT warned about', () => {
   assert.equal(ytFitsWhole({ charCount: 35000 }), true);
 });
 
-test('a transcript at the ceiling still fits', () => {
+test('a transcript at the backstop still fits', () => {
   assert.equal(ytFitsWhole({ charCount: YT_WHOLE_VIDEO_CHARS }), true);
 });
 
-test('a multi-hour lecture is flagged as not fitting', () => {
-  // The reported case: 5:40:23, which is ~180k-245k characters of captions.
-  assert.equal(ytFitsWhole({ charCount: 200000 }), false);
+test('an implausibly huge transcript is flagged even with no route info', () => {
   assert.equal(ytFitsWhole({ charCount: YT_WHOLE_VIDEO_CHARS + 1 }), false);
+});
+
+/* The route's real window decides, not a fixed number. Verified against a live
+   OmniRoute /v1/models response: 5509 routes, windows from 8k to 2M, and the same
+   model name differing by route (mistral-large is 128000 on one, 262144 on
+   another). A 5:40:23 Hindi lecture is ~245k characters, which does NOT fit a
+   128k-token route but fits a 1M one with room to spare — so a single hardcoded
+   threshold would have to be wrong in one direction or the other. */
+function loadWithRoute({ contextTokens, selectedKey = 'omniroute::r' } = {}) {
+  const elements = {
+    'aic-yt-from-input': { value: '' },
+    'aic-yt-to-input': { value: '' },
+    'aic-model-select': { value: selectedKey }
+  };
+  const context = {
+    document: { getElementById: (id) => elements[id] || null },
+    _statusCache: {
+      models: [{ key: 'omniroute::r', model: 'r', provider: 'omniroute', contextTokens }]
+    },
+    getThread: () => ({ model: selectedKey }),
+    currentThreadId: () => 't1'
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    [
+      section('function parseClock(raw) {', 'function readRangeInputs()'),
+      section('function readRangeInputs() {', '/* Backstop matching the'),
+      section('var YT_WHOLE_VIDEO_CHARS =', '  var _ytAttachInFlight'),
+      'globalThis.ytFitsWhole = ytFitsWhole;',
+      'globalThis.selectedModelContextTokens = selectedModelContextTokens;'
+    ].join('\n'),
+    context
+  );
+  return context;
+}
+
+const HINDI_5H40 = { charCount: 245000, lang: 'hi', title: '2D MENSURATION ONE SHOT' };
+
+test('the selected route\'s window is read from the status payload', () => {
+  const { selectedModelContextTokens } = loadWithRoute({ contextTokens: 1000000 });
+  assert.equal(selectedModelContextTokens(), 1000000);
+});
+
+test('a 5:40:23 Hindi lecture does NOT fit a 128k route', () => {
+  const { ytFitsWhole: fits } = loadWithRoute({ contextTokens: 128000 });
+  assert.equal(fits(HINDI_5H40), false);
+});
+
+test('the same lecture DOES fit a 1M route, so no warning is shown', () => {
+  const { ytFitsWhole: fits } = loadWithRoute({ contextTokens: 1000000 });
+  assert.equal(fits(HINDI_5H40), true);
+});
+
+test('an 8k route rejects even a short video', () => {
+  const { ytFitsWhole: fits } = loadWithRoute({ contextTokens: 8192 });
+  assert.equal(fits({ charCount: 35000 }), false);
+});
+
+test('Devanagari is charged more context than Latin of the same length', () => {
+  const { ytFitsWhole: fits } = loadWithRoute({ contextTokens: 128000 });
+  const chars = 300000;
+  assert.equal(fits({ charCount: chars, lang: 'en' }), true, 'Latin should fit');
+  assert.equal(fits({ charCount: chars, lang: 'hi' }), false, 'Devanagari should not');
+});
+
+test('an undescribed route falls back to the backstop rather than warning always', () => {
+  const { ytFitsWhole: fits } = loadWithRoute({ contextTokens: 0 });
+  assert.equal(fits({ charCount: 35000 }), true);
+  assert.equal(fits({ charCount: 500000 }), false);
 });
 
 console.log('\nOversized-prompt detection');
