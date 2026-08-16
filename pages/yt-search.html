@@ -27,6 +27,20 @@
 #page-yt-search .youtube-now{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px}
 #page-yt-search .youtube-now-title{min-width:0;font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #page-yt-search .youtube-now-label{flex:0 0 auto;color:#8f96a3;font-size:9px;text-transform:uppercase;letter-spacing:.5px}
+#page-yt-search .youtube-search-modes{display:flex;align-items:center;gap:7px;margin:0 0 10px}
+#page-yt-search .youtube-search-mode{border:1px solid #2d323e;border-radius:999px;background:#12151c;color:#9098a5;font-size:9.5px;font-weight:850;padding:6px 12px;cursor:pointer}
+#page-yt-search .youtube-search-mode.active{border-color:#4f5665;background:#f4f5f7;color:#0a0b0e}
+#page-yt-search .yt-search-turbo{position:absolute;inset:0;display:none;background:#000}
+#page-yt-search .yt-search-turbo.show{display:block}
+#page-yt-search .yt-search-turbo video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
+#page-yt-search .yt-search-turbo-status{position:absolute;inset:0;z-index:3;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,.82);color:#fff;text-align:center;padding:18px;font-size:12px;line-height:1.5}
+#page-yt-search .yt-search-turbo-status.show{display:flex}
+#page-yt-search .yt-search-turbo-status .sp{width:30px;height:30px;border:3px solid rgba(255,255,255,.25);border-top-color:#22c55e;border-radius:50%;animation:ytsearchspin .8s linear infinite}
+@keyframes ytsearchspin{to{transform:rotate(360deg)}}
+#page-yt-search .yt-search-turbo-bar{display:none;align-items:center;gap:7px;margin-top:9px;flex-wrap:wrap}
+#page-yt-search .yt-search-turbo-bar.show{display:flex}
+#page-yt-search .yt-search-turbo-bar 
+#page-yt-search .yt-search-turbo-bar button.active{border-color:#22c55e;color:#8bd3ad;background:rgba(34,197,94,.12)}
 #page-yt-search .youtube-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
 #page-yt-search .youtube-card{border:0;padding:0;background:transparent;color:inherit;text-align:left;min-width:0}
 #page-yt-search .youtube-thumb{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#151820;border:1px solid #20242d}
@@ -120,12 +134,28 @@
     </div>
 
     <div id="youtubePlayerCard" class="youtube-player-card">
+      <div class="youtube-search-modes" role="group" aria-label="Player mode">
+        <button class="youtube-search-mode active" type="button" data-yt-search-mode="normal" aria-pressed="true">Normal</button>
+        <button class="youtube-search-mode" type="button" data-yt-search-mode="turbo" aria-pressed="false">⚡ Turbo</button>
+        <button class="youtube-search-mode" type="button" data-yt-search-mode="ronflix" aria-pressed="false">RonFlix</button>
+      </div>
       <div class="youtube-player-ratio">
         <iframe id="youtubePlayer" title="YouTube player"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowfullscreen
           referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <div id="ytSearchTurbo" class="yt-search-turbo">
+          <video id="ytSearchTurboVideo" controls playsinline></video>
+          <div id="ytSearchTurboStatus" class="yt-search-turbo-status"></div>
+        </div>
         <div id="youtubeLocalFallback" class="youtube-local-fallback" aria-live="polite"></div>
+      </div>
+      <div class="yt-search-turbo-bar" id="ytSearchTurboBar">
+        <button type="button" data-yt-search-speed="1">1x</button>
+        <button type="button" data-yt-search-speed="2">2x</button>
+        <button type="button" data-yt-search-speed="3">3x</button>
+        <button type="button" data-yt-search-speed="4">4x</button>
+        <button type="button" id="ytSearchPip" title="Picture-in-Picture">⛶ PiP</button>
       </div>
       <div class="youtube-now">
         <div id="youtubeNowTitle" class="youtube-now-title">YouTube video</div>

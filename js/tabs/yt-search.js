@@ -207,58 +207,56 @@
 
   function play(id,title="YouTube video"){
     if(!/^[A-Za-z0-9_-]{11}$/.test(id||""))return;
+    currentPlayId=id; currentPlayTitle=title; currentPlayKind="video";
     ytNow.textContent=title;
     ytPlayerCard.classList.add("show");
     rememberWatched(id,title,"video");
+    if(playerMode==="turbo" && !localNoHttpReferer){ startTurbo(id,title); return; }
+    loadIframe(id,title,"video");
+  }
 
+  function loadIframe(id,title,kind){
+    stopTurbo(false);
     if(localNoHttpReferer){
       ytPlayer.removeAttribute("src");
       ytPlayer.style.display="none";
       ytLocalFallback.classList.add("show");
+      const thumb=kind==="list"?PLAYLIST_THUMB:`https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg`;
       ytLocalFallback.innerHTML=`<div class="youtube-local-box">
-        <img src="https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg" alt="">
+        <img src="${thumb}" alt="">
         <div class="youtube-local-title">${esc(title)}</div>
         <div class="youtube-local-text">YouTube embeds need an HTTP Referer. Serve this page over HTTPS (or http://localhost) for in-page playback.</div>
-        <button class="youtube-local-open" type="button" data-open-youtube="${esc(id)}" data-open-kind="video">Open on YouTube</button>
+        <button class="youtube-local-open" type="button" data-open-youtube="${esc(id)}" data-open-kind="${kind==="list"?"list":"video"}">Open on YouTube</button>
       </div>`;
       ytHint.textContent="Local file preview detected — UI/search works here; embedded playback needs HTTPS or localhost.";
     }else{
       ytLocalFallback.classList.remove("show");
       ytLocalFallback.innerHTML="";
       ytPlayer.style.display="block";
-      ytPlayer.src=`https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0&autoplay=1&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
+      ytPlayer.src=kind==="list"
+        ?`https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(id)}&autoplay=1&playsinline=1&origin=${encodeURIComponent(location.origin)}`
+        :`https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0&autoplay=1&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
     }
+    scrollToPlayer();
+  }
 
+  function scrollToPlayer(){
     const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
     window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
   }
 
   function playPlaylist(id,title="YouTube playlist"){
     if(!/^[A-Za-z0-9_-]{10,}$/.test(id||""))return;
+    currentPlayId=id; currentPlayTitle=title; currentPlayKind="list";
     ytNow.textContent=title;
     ytPlayerCard.classList.add("show");
     rememberWatched(id,title,"list",PLAYLIST_THUMB);
-
-    if(localNoHttpReferer){
-      ytPlayer.removeAttribute("src");
-      ytPlayer.style.display="none";
-      ytLocalFallback.classList.add("show");
-      ytLocalFallback.innerHTML=`<div class="youtube-local-box">
-        <img src="${PLAYLIST_THUMB}" alt="">
-        <div class="youtube-local-title">${esc(title)}</div>
-        <div class="youtube-local-text">YouTube playlist embeds need an HTTP Referer. Serve this page over HTTPS (or http://localhost) for in-page playback.</div>
-        <button class="youtube-local-open" type="button" data-open-youtube="${esc(id)}" data-open-kind="list">Open on YouTube</button>
-      </div>`;
-      ytHint.textContent="Local file preview detected — UI/search works here; embedded playback needs HTTPS or localhost.";
-    }else{
-      ytLocalFallback.classList.remove("show");
-      ytLocalFallback.innerHTML="";
-      ytPlayer.style.display="block";
-      ytPlayer.src=`https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(id)}&autoplay=1&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
+    if(playerMode==="turbo"){
+      if(typeof showToast==="function") showToast("Playlists play in the normal player. Turbo supports individual videos only.","info");
+      playerMode="normal";
+      setModeBtns();
     }
-
-    const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
-    window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
+    loadIframe(id,title,"list");
   }
 
   async function youtubeApi(path,params){
@@ -541,9 +539,170 @@
     await keywordSearch(q);
   }
 
+
+  const modeBtns=[...document.querySelectorAll("[data-yt-search-mode]")];
+  const turboBox=document.getElementById("ytSearchTurbo");
+  const turboStatus=document.getElementById("ytSearchTurboStatus");
+  const turboBar=document.getElementById("ytSearchTurboBar");
+  const speedBtns=[...document.querySelectorAll("[data-yt-search-speed]")];
+  const pipBtn=document.getElementById("ytSearchPip");
+  const TURBO_BACKEND_URL="https://youtube-turbo-proxy-gej4.onrender.com";
+  let playerMode="normal";
+  let currentPlayId="",currentPlayTitle="",currentPlayKind="video";
+  let turboVideo=null,turboSpeed=1,turboFetchCtrl=null;
+
+  function isProUser(){
+    try{ return typeof ezIsPro==="function"?!!ezIsPro():true; }catch(_){ return true; }
+  }
+
+  function turboBase(){
+    try{
+      if(window.PrepPathBackend && typeof window.PrepPathBackend.baseUrl==="function"){
+        const b=window.PrepPathBackend.baseUrl();
+        if(b) return String(b).replace(/\/+$/,"");
+      }
+    }catch(_){ }
+    return TURBO_BACKEND_URL;
+  }
+
+  function setTurboStatus(show,html){
+    if(!turboStatus) return;
+    turboStatus.classList.toggle("show",!!show);
+    turboStatus.innerHTML=show?`<span class="sp"></span><span>${esc(html||"")}</span>`:"";
+  }
+
+  function ensureTurboVideo(){
+    if(turboVideo && turboVideo.parentNode===turboBox) return turboVideo;
+    turboVideo=document.getElementById("ytSearchTurboVideo")||null;
+    if(!turboVideo){
+      turboVideo=document.createElement("video");
+      turboVideo.id="ytSearchTurboVideo";
+      turboVideo.setAttribute("playsinline","");
+      turboVideo.setAttribute("controls","");
+    }
+    if(turboVideo.parentNode!==turboBox && turboBox) turboBox.appendChild(turboVideo);
+    turboVideo.setAttribute("crossorigin","anonymous");
+    return turboVideo;
+  }
+
+  function stopTurbo(resetStatus=true){
+    if(turboFetchCtrl){ try{turboFetchCtrl.abort();}catch(_){ } turboFetchCtrl=null; }
+    if(turboVideo){
+      try{ turboVideo.pause(); }catch(_){ }
+      turboVideo.removeAttribute("src");
+      try{ turboVideo.load(); }catch(_){ }
+    }
+    if(turboBox) turboBox.classList.remove("show");
+    if(turboBar) turboBar.classList.remove("show");
+    if(resetStatus) setTurboStatus(false,"");
+  }
+
+  function setModeBtns(){
+    modeBtns.forEach(b=>{
+      const on=b.dataset.ytSearchMode===playerMode;
+      b.classList.toggle("active",on);
+      b.setAttribute("aria-pressed",String(on));
+    });
+    const turboOn=playerMode==="turbo";
+    if(turboBox) turboBox.classList.toggle("show",turboOn);
+    if(turboBar) turboBar.classList.toggle("show",turboOn);
+    if(!turboOn) stopTurbo(false);
+  }
+
+  async function startTurbo(id,title){
+    currentPlayId=id; currentPlayTitle=title; currentPlayKind="video";
+    ytNow.textContent=title;
+    ytPlayerCard.classList.add("show");
+    rememberWatched(id,title,"video");
+    if(!isProUser()){
+      if(typeof showToast==="function") showToast("⚡ Turbo Player (4x speed + Picture-in-Picture) — Pro feature","info");
+      else if(typeof ezLockedMsg==="function") ezLockedMsg("⚡ Turbo Player (4x speed + Picture-in-Picture)");
+      playerMode="normal";
+      setModeBtns();
+      loadIframe(id,title,"video");
+      return;
+    }
+    stopTurbo(false);
+    ensureTurboVideo();
+    setModeBtns();
+    ytPlayer.style.display="none";
+    ytLocalFallback.classList.remove("show");
+    ytLocalFallback.innerHTML="";
+    setTurboStatus(true,"⚡ Turbo: fetching stream… (first load can take ~30–60s if the server was asleep)");
+    const base=turboBase();
+    const ctrl=new AbortController();
+    turboFetchCtrl=ctrl;
+    const timer=setTimeout(()=>ctrl.abort(),95000);
+    try{
+      const r=await fetch(base+"/api/info?id="+encodeURIComponent(id),{signal:ctrl.signal});
+      const d=await r.json().catch(()=>({}));
+      clearTimeout(timer);
+      if(!r.ok || !d || !d.formats || !d.formats.length) throw new Error((d&&(d.detail||d.error))||"no stream");
+      const f=d.formats[0];
+      turboVideo.src=base+"/api/stream?id="+encodeURIComponent(id)+"&itag="+encodeURIComponent(f.itag);
+      turboVideo.defaultPlaybackRate=turboSpeed;
+      turboVideo.playbackRate=turboSpeed;
+      setTurboStatus(true,"⚡ Turbo: stream found — preparing video…");
+      const mediaTimer=setTimeout(()=>{ try{ turboVideo.onerror&&turboVideo.onerror(); }catch(_){ } },45000);
+      const ok=await new Promise(res=>{
+        turboVideo.onloadedmetadata=()=>res(true);
+        turboVideo.onerror=()=>res(false);
+      });
+      clearTimeout(mediaTimer);
+      if(!ok) throw new Error("stream failed to load");
+      if(turboFetchCtrl!==ctrl) return;
+      setTurboStatus(false,"");
+      const p=turboVideo.play();
+      if(p&&p.catch) p.catch(()=>{});
+    }catch(err){
+      clearTimeout(timer);
+      console.warn("YT Search turbo:",err);
+      if(turboFetchCtrl===ctrl) turboFetchCtrl=null;
+      if(currentPlayId===id && playerMode==="turbo"){
+        playerMode="normal";
+        setModeBtns();
+        if(typeof showToast==="function") showToast("Turbo is unavailable — switched to the normal player.","info");
+        loadIframe(id,title,"video");
+      }
+    }
+  }
+
+  modeBtns.forEach(b=>b.addEventListener("click",()=>{
+    const m=b.dataset.ytSearchMode;
+    if(m==="turbo" && currentPlayKind==="list"){
+      if(typeof showToast==="function") showToast("Turbo supports individual videos only. Playlists use the normal player.","info");
+      return;
+    }
+    playerMode=m;
+    setModeBtns();
+    if(currentPlayId){
+      if(playerMode==="turbo" && currentPlayKind==="video") startTurbo(currentPlayId,currentPlayTitle);
+      else loadIframe(currentPlayId,currentPlayTitle,currentPlayKind);
+    }
+  }));
+
+  speedBtns.forEach(b=>b.addEventListener("click",()=>{
+    const rate=parseFloat(b.dataset.ytSearchSpeed)||1;
+    turboSpeed=rate;
+    speedBtns.forEach(x=>x.classList.toggle("active",x.dataset.ytSearchSpeed===String(rate)));
+    if(turboVideo){ turboVideo.defaultPlaybackRate=rate; turboVideo.playbackRate=rate; }
+  }));
+
+  pipBtn?.addEventListener("click",async()=>{
+    if(!turboVideo||!turboVideo.src) return;
+    try{
+      if(document.pictureInPictureElement===turboVideo) await document.exitPictureInPicture();
+      else await turboVideo.requestPictureInPicture();
+    }catch(err){
+      if(typeof showToast==="function") showToast("Picture-in-Picture is not supported in this browser.","info");
+    }
+  });
+
   function stopPlayer(){
+    stopTurbo(false);
     ytPlayer.removeAttribute("src");
     ytPlayerCard.classList.remove("show");
+    currentPlayId="";
   }
 
   ytGrid.addEventListener("click",e=>{
@@ -605,6 +764,8 @@
 
   setSearchFilter("all");
   updateApiUi();
+  setModeBtns();
+  speedBtns.forEach(x=>x.classList.toggle("active",x.dataset.ytSearchSpeed==="1"));
   renderRecent();
   loadPopular();
 })()
