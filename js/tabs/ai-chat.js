@@ -429,6 +429,24 @@
     .aic-yt-current strong{color:var(--text);font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:min(40vw,360px);}
     .aic-yt-current button{padding:3px 9px;border:1px solid var(--accent);border-radius:7px;background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--text);font-size:.68rem;cursor:pointer;}
     .aic-yt-current button:hover{background:color-mix(in srgb,var(--accent) 20%,transparent);}
+    /* Transcript progress. Captions for a multi-hour lecture take a while to
+       extract, and a single toast made that look like a dead button. */
+    .aic-yt-progress{display:none;margin-top:8px;}
+    .aic-yt-progress-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:5px;font-size:.68rem;color:var(--muted);}
+    .aic-yt-progress-stage{color:var(--text);font-weight:600;}
+    .aic-yt-progress-track{position:relative;height:6px;border-radius:999px;background:color-mix(in srgb,var(--border) 55%,transparent);overflow:hidden;}
+    .aic-yt-progress-fill{height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent) 55%,#4ade80));transition:width .45s cubic-bezier(.22,.61,.36,1);}
+    /* A moving sheen over the fill: the server sends no progress events, so this
+       is what distinguishes "still working" from "stalled". */
+    .aic-yt-progress-fill::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.45),transparent);animation:aic-yt-sheen 1.35s linear infinite;}
+    .aic-yt-progress.is-done .aic-yt-progress-fill::after{animation:none;}
+    .aic-yt-progress.is-failed .aic-yt-progress-fill{background:#c54b43;}
+    .aic-yt-progress.is-failed .aic-yt-progress-fill::after{animation:none;}
+    @keyframes aic-yt-sheen{from{transform:translateX(-100%);}to{transform:translateX(100%);}}
+    @media (prefers-reduced-motion:reduce){.aic-yt-progress-fill::after{animation:none;}.aic-yt-progress-fill{transition:none;}}
+    .aic-yt-warn{width:100%;margin:0;padding:6px 9px;border:1px solid rgba(214,158,46,.4);border-radius:8px;background:rgba(214,158,46,.1);color:var(--text);font-size:.67rem;line-height:1.45;}
+    .aic-yt-range{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:.68rem;color:var(--muted);}
+    .aic-yt-range input{width:74px;padding:5px 7px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);font-size:.68rem;}
     .aic-github-context strong{color:var(--text);}
     .aic-code-workspace{display:none;width:min(100%,1120px);margin:0 auto .7rem;border:1px solid color-mix(in srgb,var(--border) 82%,transparent);border-radius:14px;background:var(--surface);box-shadow:0 7px 24px rgba(28,24,20,.07);overflow:hidden;}
     .aic-workspace-head{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid color-mix(in srgb,var(--border) 65%,transparent);background:color-mix(in srgb,var(--card) 88%,transparent);}
@@ -567,7 +585,7 @@
       <div class="aic-image-label"><span id="aic-image-catalog-status">Generate an image</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseImageBox()">× Close</button></div>
       <div class="aic-image-row"><select class="aic-select" id="aic-image-provider-select" onchange="aicImageProviderChanged()" title="Image provider"></select><select class="aic-select" id="aic-image-omniroute-provider-select" onchange="aicImageOmniRouteProviderChanged()" title="OmniRoute image provider" style="display:none;"></select><select class="aic-select" id="aic-image-model-select" onchange="aicImageModelChanged()" title="Image model"></select><label class="aic-image-source" title="Upload an image to edit">＋ Reference<input type="file" id="aic-image-source-input" accept="image/png,image/jpeg,image/webp" onchange="aicImageSourceSelected(event)"></label><span id="aic-image-source-name" class="aic-image-source-name"></span><input type="text" id="aic-image-prompt-input" class="aic-image-prompt" placeholder="Describe an image to create or edit…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicGenerateImage();}"><button class="aic-send" type="button" onclick="aicGenerateImage()">Generate</button></div>
     </div>
-    <div class="aic-media-box" id="aic-youtube-box" style="display:none;"><div class="aic-media-label"><span>Attach a YouTube video</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseYoutubeBox()">× Close</button></div><div id="aic-yt-current" class="aic-yt-current" style="display:none;"></div><div class="aic-media-row"><input type="text" id="aic-yt-url-input" class="aic-media-prompt" placeholder="Paste a YouTube link or video ID…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicAttachYoutubeFromInput();}"><select class="aic-select" id="aic-yt-lang-select" title="Caption language"><option value="auto" selected>Auto-detect captions</option><option value="en">English</option><option value="hi">Hindi</option></select><button class="aic-send" type="button" onclick="aicAttachYoutubeFromInput()">Attach</button></div><p class="aic-media-hint">The video's captions become context for this whole chat — then ask for notes, a quiz, flashcards, or anything else.</p></div>
+    <div class="aic-media-box" id="aic-youtube-box" style="display:none;"><div class="aic-media-label"><span>Attach a YouTube video</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseYoutubeBox()">× Close</button></div><div id="aic-yt-current" class="aic-yt-current" style="display:none;"></div><div class="aic-media-row"><input type="text" id="aic-yt-url-input" class="aic-media-prompt" placeholder="Paste a YouTube link or video ID…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicAttachYoutubeFromInput();}"><select class="aic-select" id="aic-yt-lang-select" title="Caption language"><option value="auto" selected>Auto-detect captions</option><option value="en">English</option><option value="hi">Hindi</option></select><button class="aic-send" type="button" onclick="aicAttachYoutubeFromInput()">Attach</button></div><div class="aic-media-row aic-yt-range"><span>Section (optional):</span><input type="text" id="aic-yt-from-input" placeholder="from" title="Start time, e.g. 1:30:00 or 90 for 90 minutes"><span>\u2192</span><input type="text" id="aic-yt-to-input" placeholder="to" title="End time, e.g. 2:00:00 or 120 for 120 minutes"><span id="aic-yt-range-hint"></span></div><div class="aic-yt-progress" id="aic-yt-progress"><div class="aic-yt-progress-head"><span class="aic-yt-progress-stage" id="aic-yt-progress-stage">Starting\u2026</span><span id="aic-yt-progress-time"></span></div><div class="aic-yt-progress-track"><div class="aic-yt-progress-fill" id="aic-yt-progress-fill"></div></div></div><p class="aic-media-hint">The video's captions become context for this whole chat — then ask for notes, a quiz, flashcards, or anything else. Long lectures do not fit in one request: set a section to work through them piece by piece.</p></div>
     <div class="aic-media-box" id="aic-search-box" style="display:none;"><div class="aic-media-label"><span id="aic-search-catalog-status">Search the web</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseSearchBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-search-model-select" onchange="aicSearchModelChanged()" title="Search model"></select><input type="text" id="aic-search-query-input" class="aic-media-prompt" placeholder="Search the web…" onkeydown="if(event.key==='Enter'){event.preventDefault();aicSearchWeb();}"><select class="aic-select" id="aic-search-limit-select" title="Number of results"><option value="4">4 results</option><option value="6" selected>6 results</option><option value="10">10 results</option></select><button class="aic-send" type="button" onclick="aicSearchWeb()">Search</button></div><p class="aic-media-hint">Search results stay in this local conversation with source links and snippets.</p></div>
     <div class="aic-media-box" id="aic-speech-box" style="display:none;"><div class="aic-media-label"><span id="aic-speech-catalog-status">Read text aloud</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseSpeechBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-speech-model-select" onchange="aicSpeechModelChanged()" title="Speech model"></select><select class="aic-select" id="aic-speech-voice-select" title="Voice"><option value="alloy">Alloy</option><option value="ash">Ash</option><option value="coral">Coral</option><option value="echo">Echo</option><option value="fable">Fable</option><option value="onyx">Onyx</option><option value="nova">Nova</option><option value="sage">Sage</option><option value="shimmer">Shimmer</option></select><textarea id="aic-speech-text-input" class="aic-media-prompt" placeholder="Paste text to speak, or leave blank to use the latest AI response…"></textarea><button class="aic-send" type="button" onclick="aicGenerateSpeech()">Speak</button></div><p class="aic-media-hint">Audio is generated inline and can be played or downloaded from the conversation.</p></div>
     <div class="aic-media-box" id="aic-video-box" style="display:none;"><div class="aic-media-label"><span id="aic-video-catalog-status">Generate a video</span><button class="aic-icon-btn" style="padding:3px 7px;" onclick="aicCloseVideoBox()">× Close</button></div><div class="aic-media-row"><select class="aic-select" id="aic-video-model-select" onchange="aicVideoModelChanged()" title="Video model"></select><select class="aic-select" id="aic-video-aspect-select" title="Aspect ratio"><option value="16:9" selected>16:9 landscape</option><option value="9:16">9:16 portrait</option><option value="1:1">1:1 square</option></select><select class="aic-select" id="aic-video-duration-select" title="Duration"><option value="5" selected>5 seconds</option><option value="10">10 seconds</option><option value="15">15 seconds</option><option value="30">30 seconds</option></select><textarea id="aic-video-prompt-input" class="aic-media-prompt" placeholder="Describe the video to generate…"></textarea><button class="aic-send" type="button" onclick="aicGenerateVideo()">Generate</button></div><p class="aic-media-hint">Video generation may take a few minutes. Keep this chat open while the provider responds.</p></div>
@@ -1406,14 +1424,31 @@
     var meta = [];
     if (att.duration) meta.push(fmtClock(att.duration));
     if (att.lang) meta.push(att.lang + (att.kind === 'auto' ? ' auto' : ''));
+    // A chosen section is the most important thing to show: it changes what the
+    // answer can possibly cover.
+    var windowed = att.startS != null || att.endS != null;
+    if (windowed) {
+      meta.push('section ' + fmtClock(att.startS || 0) + '\u2013' +
+        (att.endS != null ? fmtClock(att.endS) : 'end'));
+    }
     bar.style.display = 'flex';
+    var warn = '';
+    if (!windowed && !ytFitsWhole(att)) {
+      // Silence here is what makes a long lecture feel broken: the answer covers
+      // the opening and the student has no idea the rest was never read.
+      warn = '<p class="aic-yt-warn">\u26A0\uFE0F This lecture is ' + esc(fmtClock(att.duration)) +
+        ' long \u2014 too long to fit in one request, so only its earlier part will be used. ' +
+        'For full coverage, set a <strong>Section</strong> and work through it piece by piece.</p>';
+    }
     bar.innerHTML = '<span class="aic-yt-pill" title="' + escAttr(att.title || att.id) + '">\u25B6' +
       '<span class="aic-yt-name">' + esc(att.title || att.id) + '</span>' +
       (meta.length ? '<span class="aic-yt-meta">\u00B7 ' + esc(meta.join(' \u00B7 ')) + '</span>' : '') +
       '<button onclick="aicRemoveYoutube()" title="Remove this video from the chat">\u2715</button></span>' +
       '<span class="aic-yt-actions">' + YT_ACTIONS.map(function (a, i) {
         return '<button type="button" class="aic-yt-chip" onclick="aicYoutubeAction(' + i + ')">' + esc(a.label) + '</button>';
-      }).join('') + '</span>';
+      }).join('') +
+      '<button type="button" class="aic-yt-chip" onclick="aicToggleYoutubeBox()" title="Change the section or re-attach">\u2699 Section</button></span>' +
+      warn;
   }
 
   function renderYoutubeCurrent() {
@@ -1432,14 +1467,29 @@
     setComposerTool(showing ? '' : 'youtube');
     if (showing) return;
     renderYoutubeCurrent();
+    var att = ytAttachment(getThread(currentThreadId()));
     var input = document.getElementById('aic-yt-url-input');
-    // Prefill with the tab's video so one Enter is enough, while still leaving
-    // the field editable for a different link.
-    var vid = ytTabVideoId();
+    // Prefill with the attached video if there is one, else the tab's video, so
+    // adjusting a section does not mean re-pasting the link.
+    var vid = (att && att.id) || ytTabVideoId();
     if (input) {
       if (vid && !input.value) input.value = 'https://youtu.be/' + vid;
       input.focus();
       input.select();
+    }
+    var from = document.getElementById('aic-yt-from-input');
+    var to = document.getElementById('aic-yt-to-input');
+    if (att && from && !from.value && att.startS != null) from.value = fmtClock(att.startS);
+    if (att && to && !to.value && att.endS != null) to.value = fmtClock(att.endS);
+    var hint = document.getElementById('aic-yt-range-hint');
+    if (hint) {
+      hint.textContent = att && att.duration
+        ? 'video is ' + fmtClock(att.duration) + ' long'
+        : 'leave blank for the whole video';
+    }
+    if (att && att.requestedLang) {
+      var langSel = document.getElementById('aic-yt-lang-select');
+      if (langSel) langSel.value = att.requestedLang;
     }
   };
   window.aicCloseYoutubeBox = function () { if (_activeComposerTool === 'youtube') setComposerTool(''); };
@@ -1478,39 +1528,174 @@
     try { input.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
   };
 
+  /* ── transcript progress ──────────────────────────────────────────────────
+     /api/transcript is one blocking request that can run for a minute on a long
+     lecture (yt-dlp metadata, then the caption download, then parsing), and it
+     emits no progress events. So the bar eases towards a per-stage ceiling and
+     never reaches it on its own: movement means "still working", the stage label
+     says what is happening, and only the real response completes it. It does not
+     pretend to know a percentage the server never sent. ── */
+  var _ytProg = { timer: null, pct: 0, ceiling: 0, started: 0 };
+
+  function ytProgPaint() {
+    var fill = document.getElementById('aic-yt-progress-fill');
+    var time = document.getElementById('aic-yt-progress-time');
+    if (fill) fill.style.width = _ytProg.pct.toFixed(1) + '%';
+    if (time) {
+      var secs = Math.round((Date.now() - _ytProg.started) / 1000);
+      time.textContent = secs > 0 ? secs + 's' : '';
+    }
+  }
+
+  function ytProgStage(label, ceiling) {
+    var el = document.getElementById('aic-yt-progress-stage');
+    if (el) el.textContent = label;
+    _ytProg.ceiling = ceiling;
+    ytProgPaint();
+  }
+
+  function ytProgStart(label) {
+    var box = document.getElementById('aic-yt-progress');
+    if (box) { box.style.display = 'block'; box.className = 'aic-yt-progress'; }
+    _ytProg.pct = 0;
+    _ytProg.started = Date.now();
+    ytProgStage(label, 12);
+    if (_ytProg.timer) clearInterval(_ytProg.timer);
+    _ytProg.timer = setInterval(function () {
+      // Asymptotic approach: fast at first, never quite arriving.
+      _ytProg.pct += Math.max(0.08, (_ytProg.ceiling - _ytProg.pct) * 0.05);
+      if (_ytProg.pct > _ytProg.ceiling) _ytProg.pct = _ytProg.ceiling;
+      ytProgPaint();
+    }, 220);
+  }
+
+  function ytProgStop() {
+    if (_ytProg.timer) { clearInterval(_ytProg.timer); _ytProg.timer = null; }
+  }
+
+  function ytProgFinish(label) {
+    ytProgStop();
+    var box = document.getElementById('aic-yt-progress');
+    if (box) box.className = 'aic-yt-progress is-done';
+    _ytProg.pct = 100;
+    ytProgStage(label || 'Done', 100);
+    setTimeout(function () {
+      var el = document.getElementById('aic-yt-progress');
+      // Only hide if no newer run has started in the meantime.
+      if (el && !_ytProg.timer) el.style.display = 'none';
+    }, 900);
+  }
+
+  function ytProgFail(label) {
+    ytProgStop();
+    var box = document.getElementById('aic-yt-progress');
+    if (box) box.className = 'aic-yt-progress is-failed';
+    _ytProg.pct = 100;
+    ytProgStage(label || 'Failed', 100);
+  }
+
+  /* "1:30:00" / "90:00" / "90" (bare minutes) -> seconds. Bare numbers are read
+     as MINUTES because that is how a student describes a spot in a lecture. */
+  function parseClock(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s) return null;
+    if (!/^[0-9]+(:[0-5]?[0-9]){0,2}$/.test(s)) return NaN;
+    var parts = s.split(':').map(Number);
+    if (parts.some(function (n) { return isNaN(n); })) return NaN;
+    if (parts.length === 1) return parts[0] * 60;
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+
+  function readRangeInputs() {
+    var from = parseClock((document.getElementById('aic-yt-from-input') || {}).value);
+    var to = parseClock((document.getElementById('aic-yt-to-input') || {}).value);
+    if (isNaN(from) || isNaN(to)) return { error: 'Use a time like 1:30:00, or a plain number of minutes.' };
+    if (from != null && to != null && to <= from) return { error: 'The section\u2019s end must be after its start.' };
+    return { startS: from, endS: to };
+  }
+
+  /* Mirrors the backend's AI_CHAT_TRANSCRIPT_CHARS ceiling, which is the binding
+     limit for the large-context models this chat normally uses. Only a hint: the
+     browser cannot know the selected model's real context window, and a small one
+     (Cerebras/Kiro at 8192 tokens) will be cut back further server-side — which
+     the answer then states for itself. Erring towards silence is deliberate; a
+     warning on a video that actually fits would train the student to ignore it. */
+  var YT_WHOLE_VIDEO_CHARS = 120000;
+
+  function ytFitsWhole(att) {
+    if (!att || !att.charCount) return true;
+    return att.charCount <= YT_WHOLE_VIDEO_CHARS;
+  }
+
+  /* A provider rejecting the prompt for its size, or timing out on a huge one, is
+     the normal failure for a multi-hour lecture. The raw upstream wording
+     ("context_length_exceeded", "reduce the length of the messages") tells a
+     student nothing they can act on, so it is translated into the one thing that
+     actually fixes it. */
+  function isOversizedFailure(msg) {
+    return /context[_\s-]?length|context\s+window|too\s+many\s+tokens|reduce\s+the\s+length|maximum\s+context|prompt\s+is\s+too\s+long|input\s+too\s+long|request\s+too\s+large|payload\s+too\s+large|\b413\b/i
+      .test(String(msg || ''));
+  }
+
+  function ytSizeAdvice(body) {
+    if (!body || !body.youtube) return '';
+    var windowed = body.youtube.startS != null || body.youtube.endS != null;
+    return windowed
+      ? ' The attached section is still too large for this model. Try a shorter section, or switch to a model with a bigger context window.'
+      : ' The attached video is too long for this model to read in one request. Open \u25B6 YouTube, set a Section (say 0:00 \u2192 45:00), and ask again for that part.';
+  }
+
   var _ytAttachInFlight = false;
 
   function attachYoutube(videoId, fallbackTitle) {
     if (_ytAttachInFlight) return;
     var lang = (document.getElementById('aic-yt-lang-select') || {}).value || 'auto';
+    var range = readRangeInputs();
+    if (range.error) { toast(range.error, 'error'); return; }
     var threadId = currentThreadId();
     _ytAttachInFlight = true;
-    toast('Reading captions\u2026');
+    ytProgStart('Contacting the transcript server\u2026');
+
+    function fail(message) {
+      ytProgFail(message);
+      toast(message, 'error');
+    }
+
     // Fetched once, purely to prove the captions exist and to show the student
     // what they attached. The body is discarded; the backend re-reads it.
-    backendAuthFetch('/api/transcript?id=' + encodeURIComponent(videoId) + '&lang=' + encodeURIComponent(lang))
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, data: j || {} }; }); })
+    //
+    // The explicit timeout is essential: backend-router defaults to 12s, which a
+    // multi-hour lecture cannot possibly beat on a cold cache — the request was
+    // aborted, retried against the backup server, and surfaced as a bare
+    // "network error" with no hint that it had simply run out of time.
+    backendAuthFetch('/api/transcript?id=' + encodeURIComponent(videoId) + '&lang=' + encodeURIComponent(lang),
+                     { timeoutMs: 180000 })
+      .then(function (r) {
+        ytProgStage('Parsing captions\u2026', 96);
+        return r.json().then(function (j) { return { ok: r.ok, status: r.status, data: j || {} }; });
+      })
       .then(function (res) {
         var d = res.data;
         if (!res.ok) {
           // The backend distinguishes a bot-gated video from a generic failure;
           // only the former is fixable, and only by an admin.
           if (d.error === 'youtube_bot_check') {
-            toast('YouTube is bot-gating this video. An admin needs to refresh the YouTube cookies.', 'error');
+            fail('YouTube is bot-gating this video. An admin needs to refresh the YouTube cookies in the admin panel.');
           } else {
-            toast('Could not read captions: ' + (d.detail || d.error || 'unknown error'), 'error');
+            fail('Could not read captions: ' + (d.detail || d.error || ('HTTP ' + res.status)));
           }
           return;
         }
         // A caption-less video is a 200 with warning:'no_captions', NOT an error.
         if (d.warning === 'no_captions' || !d.segment_count) {
-          toast('This video has no subtitles, so there is nothing to read.', 'error');
+          fail('This video has no subtitles, so there is nothing to read.');
           return;
         }
         var segments = d.segments || [];
         var last = segments.length ? segments[segments.length - 1] : null;
         var t = getThread(threadId);
-        if (!t) return;
+        if (!t) { ytProgStop(); return; }
         t.youtube = {
           id: d.id || videoId,
           title: d.title || fallbackTitle || videoId,
@@ -1522,14 +1707,24 @@
           duration: last ? Math.round((Number(last.start) || 0) + (Number(last.dur) || 0)) : 0,
           charCount: d.char_count || 0,
           segmentCount: d.segment_count || segments.length,
+          startS: range.startS,
+          endS: range.endS,
           attachedAt: Date.now()
         };
         upsertThread(t);
+        ytProgFinish('Captions ready');
         renderYoutubeBar();
         setComposerTool('');
         toast('Attached \u201c' + (t.youtube.title || videoId) + '\u201d \u2014 ask for notes, a quiz, anything.');
       })
-      .catch(function () { toast('Could not read captions \u2014 network error.', 'error'); })
+      .catch(function (err) {
+        var msg = String((err && err.message) || err || '');
+        if (/timed out|abort/i.test(msg)) {
+          fail('Reading the captions took too long. Very long videos can need a second attempt — the server caches what it managed to fetch, so retrying is usually faster.');
+        } else {
+          fail('Could not read captions: ' + (msg || 'network error') );
+        }
+      })
       .finally(function () { _ytAttachInFlight = false; });
   }
 
@@ -3745,7 +3940,12 @@
       // Only the identifier travels: the backend re-reads the transcript from
       // its own cache and sizes it against the chosen model's context window.
       youtube: ytAttachment(t)
-        ? { id: t.youtube.id, lang: t.youtube.requestedLang || 'auto' }
+        ? {
+          id: t.youtube.id,
+          lang: t.youtube.requestedLang || 'auto',
+          startS: t.youtube.startS == null ? null : t.youtube.startS,
+          endS: t.youtube.endS == null ? null : t.youtube.endS
+        }
         : null,
       localMemory: localMemoryContext(t),
       timeoutMs: codingIntent ? 90000 : 30000,
@@ -3795,11 +3995,33 @@
     function errorText(err) {
       if (!err) return 'Unknown request failure';
       var msg = String(err.message || err.detail || err.error || err);
-      if (err.name === 'AbortError' || /aborted|abort/i.test(msg)) msg = 'Request timed out or was aborted';
-      return msg.slice(0, 300);
+      if (err.name === 'AbortError' || /aborted|abort/i.test(msg)) {
+        msg = 'The request timed out.' + (body.youtube
+          ? ' A long transcript makes every attempt slow, so a shorter Section will also make it faster.' : '');
+      }
+      // Advice is appended AFTER the slice so a long upstream message cannot
+      // swallow the only actionable part.
+      var out = msg.slice(0, 300);
+      if (isOversizedFailure(msg)) out += ytSizeAdvice(body);
+      return out;
     }
-    function fallbackToBlocking() {
+    function fallbackToBlocking(streamError) {
       if (settled) return;
+      // Re-POSTing an identical prompt that was just rejected for being too big
+      // cannot succeed; it only doubles the wait before the student sees why.
+      if (streamError && isOversizedFailure(String((streamError && streamError.message) || streamError))) {
+        settled = true;
+        var over = getThread(t.id);
+        if (over) {
+          var lastOver = over.messages[over.messages.length - 1];
+          if (lastOver && lastOver.role === 'assistant' && !lastOver.content) over.messages.pop();
+          over.messages.push({ role: 'error', content: '\u26A0\uFE0F ' + errorText(streamError), retry: { kind: 'text', q: q } });
+          upsertThread(over);
+          if (currentThreadId() === t.id) renderLog();
+        }
+        setSending(false);
+        return;
+      }
       settled = true;
       backendAuthFetch('/api/ai-chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), timeoutMs: body.timeoutMs
@@ -3818,7 +4040,9 @@
               project.status = 'blocked'; project.warning = 'No workspace files were returned for this milestone. Continue with a smaller, named-file request.'; setProjectStep(project, 'scaffold', 'blocked'); project.updatedAt = Date.now();
             }
           } else {
-            var msg = (res.data && (res.data.detail || res.data.error)) || 'Something went wrong. Try again.';
+            var raw = (res.data && (res.data.detail || res.data.error)) || 'Something went wrong. Try again.';
+            var msg = String(raw).slice(0, 300);
+            if (isOversizedFailure(raw)) msg += ytSizeAdvice(body);
             if (last && last.role === 'assistant' && !last.content) cur.messages.pop();
             cur.messages.push({ role: 'error', content: '\u26a0\uFE0F ' + msg, retry: { kind: 'text', q: q } });
           }
