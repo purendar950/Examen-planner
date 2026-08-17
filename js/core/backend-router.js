@@ -1,7 +1,8 @@
 /* StudyPlanner backend registry.
    A single routing layer keeps Turbo, AI Chat, tutor, Telegram helpers, and admin
-   tools on the same primary/backup policy. Server configuration is admin-owned
-   in config/turbo; localStorage remains a compatibility fallback only. */
+   tools on the same policy: automatic/manual failover or one admin-enforced
+   server. Configuration is admin-owned in config/turbo; localStorage remains a
+   compatibility fallback only. */
 (function () {
   'use strict';
 
@@ -15,6 +16,7 @@
     mode: 'auto',
     manualServerId: '',
     remoteLoaded: false,
+    remoteUid: '',
     authBound: false,
     activeId: '',
     health: {},
@@ -48,9 +50,9 @@
       var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
       if (saved && Array.isArray(saved.servers)) {
         state.servers = normalizeServers(saved.servers);
-        state.mode = saved.mode === 'manual' ? 'manual' : 'auto';
+        state.mode = saved.mode === 'strict' ? 'strict' : (saved.mode === 'manual' ? 'manual' : 'auto');
         state.manualServerId = String(saved.manualServerId || '');
-        state.activeId = String(saved.activeId || '');
+        state.activeId = state.mode === 'strict' ? state.manualServerId : String(saved.activeId || '');
       } else {
         var legacy = cleanUrl(localStorage.getItem('turboBackendUrl'));
         if (legacy && legacy !== DEFAULT_SERVERS[0].url) state.servers = normalizeServers([{ id: 'legacy', label: 'Saved server', url: legacy }, DEFAULT_SERVERS[0], DEFAULT_SERVERS[1]]);
@@ -64,10 +66,16 @@
   }
   function enabledServers() { return state.servers.filter(function (server) { return server.enabled !== false; }); }
   function serverCooling(server) {
-    return state.mode !== 'manual' && Number(state.cooldownUntil[server.id] || 0) > Date.now();
+    return state.mode !== 'manual' && state.mode !== 'strict' && Number(state.cooldownUntil[server.id] || 0) > Date.now();
   }
   function orderedServers() {
     var all = enabledServers();
+    // Strict mode is an admin-enforced route, not a preference. Return only the
+    // selected enabled server and fail closed when that selection is missing.
+    // Never let cooldown recovery or active-server affinity reintroduce backups.
+    if (state.mode === 'strict') {
+      return all.filter(function (server) { return server.id === state.manualServerId; }).slice(0, 1);
+    }
     var list = all.filter(function (server) { return !serverCooling(server); });
     // Never leave the app without an attempt path if every server is cooling;
     // retry the full enabled set once so a recovered backend can be detected.
@@ -90,7 +98,9 @@
   function mark(server, ok, detail) {
     state.health[server.id] = { ok: !!ok, detail: detail || '', checkedAt: Date.now() };
     if (ok) {
-      state.activeId = server.id;
+      // Health-checking every registered server must not change the route in
+      // strict mode. Only the admin-selected server can become active there.
+      if (state.mode !== 'strict' || server.id === state.manualServerId) state.activeId = server.id;
       delete state.cooldownUntil[server.id];
       writeLocal();
     } else {
@@ -110,27 +120,108 @@
   function applyConfig(config, persist) {
     config = config || {};
     if (Array.isArray(config.servers) && config.servers.length) state.servers = normalizeServers(config.servers);
-    if (config.mode === 'manual' || config.mode === 'auto') state.mode = config.mode;
+    if (config.mode === 'strict' || config.mode === 'manual' || config.mode === 'auto') state.mode = config.mode;
     if (config.manualServerId != null) state.manualServerId = String(config.manualServerId || '');
     if (!state.servers.some(function (server) { return server.id === state.manualServerId; })) state.manualServerId = '';
+    if (state.mode === 'strict') state.activeId = state.manualServerId;
     if (persist !== false) writeLocal();
     emit();
     return getSnapshot();
   }
   function getFirebaseHandles() { return window.PrepPathFirebase || window.PrepPathAdminFirebase || null; }
+  var remoteLoadPromise = null;
+  var policyUnsubscribe = null;
+  var policyGeneration = 0;
+
+  function waitForInitialAuth(handles) {
+    if (!handles || !handles.auth) return Promise.resolve();
+    if (handles.authReady && typeof handles.authReady.then === 'function') return handles.authReady;
+    return new Promise(function (resolve, reject) {
+      var stop = function () {};
+      stop = handles.auth.onAuthStateChanged(function () { stop(); resolve(); }, function (error) { stop(); reject(error); });
+    });
+  }
+  function authoritativeConfig(snap) {
+    var data = snap && snap.exists ? (snap.data() || {}) : {};
+    return {
+      servers: Array.isArray(data.backendServers) && data.backendServers.length ? data.backendServers : DEFAULT_SERVERS,
+      mode: data.backendMode === 'strict' ? 'strict' : (data.backendMode === 'manual' ? 'manual' : 'auto'),
+      manualServerId: data.backendManualServerId == null ? '' : String(data.backendManualServerId)
+    };
+  }
+  function applyAuthoritativeSnapshot(snap) {
+    applyConfig(authoritativeConfig(snap), true);
+    state.remoteLoaded = true;
+    emit();
+    return getSnapshot();
+  }
+  function stopPolicySubscription() {
+    if (policyUnsubscribe) {
+      try { policyUnsubscribe(); } catch (e) {}
+      policyUnsubscribe = null;
+    }
+  }
+  function resetRemotePolicy(uid) {
+    policyGeneration += 1;
+    stopPolicySubscription();
+    remoteLoadPromise = null;
+    state.remoteLoaded = false;
+    state.remoteUid = String(uid || '');
+    emit();
+  }
+  function subscribePolicy(handles, uid, generation) {
+    if (policyUnsubscribe || !handles || !handles.db) return;
+    var ref = handles.db.collection('config').doc('turbo');
+    policyUnsubscribe = ref.onSnapshot({ includeMetadataChanges: true }, function (snap) {
+      if (generation !== policyGeneration || state.remoteUid !== uid) return;
+      // Local cache and pending Admin writes are not authoritative. The Admin
+      // policy becomes active in this tab only after Firestore confirms it.
+      if (snap.metadata && (snap.metadata.fromCache || snap.metadata.hasPendingWrites)) return;
+      applyAuthoritativeSnapshot(snap);
+    }, function (error) {
+      if (generation !== policyGeneration) return;
+      console.warn('[backend] policy subscription failed:', error && (error.code || error.message) || error);
+      stopPolicySubscription();
+      state.remoteLoaded = false;
+      emit();
+    });
+  }
   async function loadRemote() {
     var handles = getFirebaseHandles();
     if (!handles || !handles.db) return getSnapshot();
-    if (handles.auth && !handles.auth.currentUser) return getSnapshot();
-    try {
-      var snap = await handles.db.collection('config').doc('turbo').get();
-      if (snap.exists) {
-        var data = snap.data() || {};
-        applyConfig({ servers: data.backendServers, mode: data.backendMode, manualServerId: data.backendManualServerId }, false);
-        state.remoteLoaded = true;
+    await waitForInitialAuth(handles);
+    var user = handles.auth && handles.auth.currentUser;
+    if (handles.auth && !user) throw new Error('Please sign in before using the backend service.');
+    var uid = user ? String(user.uid || '') : 'no-auth-provider';
+    if (state.remoteUid !== uid) resetRemotePolicy(uid);
+    if (state.remoteLoaded) return getSnapshot();
+    if (remoteLoadPromise) return remoteLoadPromise;
+    var generation = policyGeneration;
+    var ref = handles.db.collection('config').doc('turbo');
+    var loadPromise = ref.get({ source: 'server' }).then(function (snap) {
+      if (generation !== policyGeneration || state.remoteUid !== uid) return getSnapshot();
+      var result = applyAuthoritativeSnapshot(snap);
+      subscribePolicy(handles, uid, generation);
+      return result;
+    });
+    remoteLoadPromise = loadPromise;
+    return loadPromise.then(function (result) {
+      if (remoteLoadPromise === loadPromise) remoteLoadPromise = null;
+      return result;
+    }, function (error) {
+      if (remoteLoadPromise === loadPromise) remoteLoadPromise = null;
+      if (generation === policyGeneration) {
+        state.remoteLoaded = false;
         emit();
       }
-    } catch (e) {}
+      throw error;
+    });
+  }
+  async function syncRemotePolicyBeforeRequest() {
+    var handles = getFirebaseHandles();
+    // When Firebase exists, the server-confirmed Admin policy is mandatory.
+    // Local/default routing remains only for deployments without Firebase.
+    if (handles && handles.db) await loadRemote();
     return getSnapshot();
   }
   function withTimeout(signal, ms) {
@@ -144,8 +235,11 @@
   }
   async function request(path, options) {
     options = Object.assign({}, options || {});
+    await syncRemotePolicyBeforeRequest();
     var servers = orderedServers();
-    if (!servers.length) throw new Error('No backend servers are configured.');
+    if (!servers.length) throw new Error(state.mode === 'strict'
+      ? 'The selected backend server is not configured or enabled.'
+      : 'No backend servers are configured.');
     var lastError = null;
     var attempts = [];
     for (var i = 0; i < servers.length; i += 1) {
@@ -198,8 +292,17 @@
       return { id: target.id, ok: false, status: 0, detail: e && e.message ? e.message : 'Network error' };
     }
   }
+  // Explicit Admin diagnostics checks the whole registry; automatic app startup
+  // checks only servers that the current policy is allowed to route through.
   async function probeAll() { return Promise.all(state.servers.map(probe)); }
-  function baseUrl() { return (orderedServers()[0] || DEFAULT_SERVERS[0]).url; }
+  async function probeRoutable() { return Promise.all(orderedServers().map(probe)); }
+  function baseUrl() {
+    var selected = orderedServers()[0];
+    // Direct media URLs must obey strict mode too; silently returning the old
+    // primary here would bypass the admin's selected-server-only policy.
+    if (!selected && state.mode === 'strict') return '';
+    return (selected || DEFAULT_SERVERS[0]).url;
+  }
   function configure(config, persist) { return applyConfig(config, persist); }
   async function responseErrorDetail(response) {
     if (!response || response.ok) return '';
@@ -226,13 +329,28 @@
     var handles = getFirebaseHandles();
     if (!handles || !handles.auth || state.authBound) return;
     state.authBound = true;
-    handles.auth.onAuthStateChanged(function (user) { if (user) loadRemote(); });
+    handles.auth.onAuthStateChanged(function (user) {
+      var uid = user ? String(user.uid || '') : '';
+      if (state.remoteUid !== uid) resetRemotePolicy(uid);
+      if (user) loadRemoteAndProbe();
+    });
+  }
+  function loadRemoteAndProbe() {
+    return Promise.resolve(loadRemote()).then(function () {
+      return state.remoteLoaded ? probeRoutable() : [];
+    }).catch(function (error) {
+      // Requests still fail closed and retry the authoritative bootstrap. This
+      // startup helper is best-effort so a temporary Firestore outage does not
+      // create an unhandled rejection in the page.
+      if (error) console.warn('[backend] policy bootstrap failed:', error.code || error.message || error);
+    });
   }
   window.PrepPathBackend = Object.freeze({
     fetch: request,
     probe: probe,
     probeAll: probeAll,
     loadRemote: loadRemote,
+    syncPolicy: syncRemotePolicyBeforeRequest,
     configure: configure,
     getConfig: getSnapshot,
     baseUrl: baseUrl,
@@ -241,12 +359,12 @@
   if (window.addEventListener) {
     window.addEventListener('preppath:firebase-ready', function () {
       bindAuth();
-      Promise.resolve(loadRemote()).then(function () { return probeAll(); }).catch(function () {});
+      loadRemoteAndProbe();
     });
     bindAuth();
     setTimeout(function () {
       bindAuth();
-      Promise.resolve(loadRemote()).then(function () { return probeAll(); }).catch(function () {});
+      loadRemoteAndProbe();
     }, 900);
   }
 })();

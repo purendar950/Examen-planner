@@ -107,9 +107,7 @@ async function testStudyProviders() {
     var idToken = await adminUser.getIdToken();
     var fetchOptions = { headers: { Authorization: 'Bearer ' + idToken } };
     if (controller) fetchOptions.signal = controller.signal;
-    var response = window.PrepPathBackend
-      ? await window.PrepPathBackend.fetch('/api/study/test', fetchOptions)
-      : await fetch(STUDY_BACKEND + '/api/study/test', fetchOptions);
+    var response = await adminBackendFetch('/api/study/test', fetchOptions);
     var payload = await response.json();
     if (payload && payload.error) throw new Error(payload.detail || payload.error);
     _aiStudyHealth = payload && payload.results ? payload.results : {};

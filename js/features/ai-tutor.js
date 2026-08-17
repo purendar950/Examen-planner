@@ -15,8 +15,6 @@
 (function () {
   'use strict';
 
-  var BACKEND = (localStorage.getItem('turboBackendUrl')
-    || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
   var LANG_KEY = 'aiStudyLang';
   var MODEL_KEY = 'aiStudyModel';
   var PROVIDER_KEY = 'aiStudyProvider';
@@ -1646,9 +1644,10 @@
     return getFirebaseIdToken().then(function (token) {
       var headers = Object.assign({}, options.headers || {}, { Authorization: 'Bearer ' + token });
       var requestOptions = Object.assign({}, options, { headers: headers });
-      return window.PrepPathBackend
-        ? window.PrepPathBackend.fetch(path, requestOptions)
-        : fetch(BACKEND + path, requestOptions);
+      if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
+        throw new Error('Backend routing is unavailable. Reload the app.');
+      }
+      return window.PrepPathBackend.fetch(path, requestOptions);
     });
   }
   function apiGet(path, signal) {
