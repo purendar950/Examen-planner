@@ -72,7 +72,17 @@ if (_configFilled) {
       }
     });
     _fbReady = true;
-    window.PrepPathFirebase = { db: db, auth: auth };
+    // Resolve only after Firebase Auth has restored (or rejected) the persisted
+    // session. Backend routing awaits this before loading the Admin policy, so
+    // the first request cannot leave on stale local routing during startup.
+    let stopAuthReady = function() {};
+    const authReady = new Promise((resolve, reject) => {
+      stopAuthReady = auth.onAuthStateChanged(
+        () => { stopAuthReady(); resolve(); },
+        (error) => { stopAuthReady(); reject(error); }
+      );
+    });
+    window.PrepPathFirebase = { db: db, auth: auth, authReady: authReady };
     window.dispatchEvent(new CustomEvent('preppath:firebase-ready'));
     console.log('✅ Firebase connected:', FIREBASE_CONFIG.projectId);
   } catch(e) {
@@ -107,7 +117,12 @@ if (_configFilled) {
    Protected services verify this Firebase ID token server-side. Keep token
    acquisition here so feature modules never fall back to caller-supplied UIDs. */
 async function getFirebaseIdToken(forceRefresh) {
-  if (!_fbReady || !auth || !auth.currentUser) {
+  if (!_fbReady || !auth) {
+    throw new Error('Please sign in to use this feature.');
+  }
+  const handles = window.PrepPathFirebase;
+  if (handles && handles.authReady) await handles.authReady;
+  if (!auth.currentUser) {
     throw new Error('Please sign in to use this feature.');
   }
   return auth.currentUser.getIdToken(!!forceRefresh);

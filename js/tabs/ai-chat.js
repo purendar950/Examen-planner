@@ -39,8 +39,6 @@
 (function () {
   'use strict';
 
-  var BACKEND = (localStorage.getItem('turboBackendUrl')
-    || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
   var HISTORY_MAX = 20;      // messages kept as context sent to the backend
   var _checked = false;      // avoid re-checking /status on every page switch
   var _accessListenerBound = false;
@@ -750,9 +748,10 @@
     return getFirebaseIdToken().then(function (token) {
       var headers = Object.assign({}, options.headers || {}, { Authorization: 'Bearer ' + token });
       var requestOptions = Object.assign({}, options, { headers: headers });
-      return window.PrepPathBackend
-        ? window.PrepPathBackend.fetch(path, requestOptions)
-        : fetch(BACKEND + path, requestOptions);
+      if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
+        throw new Error('Backend routing is unavailable. Reload the app.');
+      }
+      return window.PrepPathBackend.fetch(path, requestOptions);
     });
   }
 
@@ -4412,9 +4411,10 @@
         body: JSON.stringify(body),
         timeoutMs: body.timeoutMs
       };
-      return window.PrepPathBackend
-        ? window.PrepPathBackend.fetch('/api/ai-chat/stream', requestOptions)
-        : fetch(BACKEND + '/api/ai-chat/stream', requestOptions);
+      if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
+        throw new Error('Backend routing is unavailable. Reload the app.');
+      }
+      return window.PrepPathBackend.fetch('/api/ai-chat/stream', requestOptions);
     }).then(function (r) {
       if (!r.ok || !r.body || !window.TextDecoder) return Promise.reject(new Error('no-stream'));
       var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';

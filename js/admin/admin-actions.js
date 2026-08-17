@@ -759,10 +759,15 @@ const STUDY_PROVIDERS = {
               note: 'Kiro CLI headless · API key stays on the Kiro server', keyUrl: 'https://app.kiro.dev' },
 };
 const STUDY_PROVIDER_ORDER = ['bynara', 'mistral', 'cerebras', 'openrouter', 'nvidia', 'google', 'google_interactions', 'hcnsec', 'bluesminds', 'aicampus', 'omniroute', 'kiro'];
-/* The AI Study proxy (same default ai-tutor.js uses). Health checks run there —
-   provider APIs block direct browser calls (CORS), so the proxy pings them. */
-const STUDY_BACKEND = (localStorage.getItem('turboBackendUrl')
-  || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
+/* All AI Study/Tutor/Turbo proxy traffic must cross the Admin-owned router.
+   The dedicated Telegram bot is a separate service and is intentionally not
+   covered by this registry. */
+function adminBackendFetch(path, options) {
+  if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
+    return Promise.reject(new Error('Backend routing is unavailable. Reload the Admin page.'));
+  }
+  return window.PrepPathBackend.fetch(path, options);
+}
 
 /* Friendly label for a failed health-check HTTP status. */
 function studyTestMsg(status) {
@@ -782,9 +787,7 @@ async function testStudyProvidersLegacy() {
   try {
     var token = await auth.currentUser.getIdToken();
     var requestOptions = { headers: { 'Authorization': 'Bearer ' + token } };
-    var r = window.PrepPathBackend
-      ? await window.PrepPathBackend.fetch('/api/study/test', requestOptions)
-      : await fetch(STUDY_BACKEND + '/api/study/test', requestOptions);
+    var r = await adminBackendFetch('/api/study/test', requestOptions);
     var j = await r.json();
     if (j && j.error) { if (out) out.innerHTML = '⚠️ ' + esc(j.detail || j.error); return; }
     var res = (j && j.results) || {};
@@ -941,9 +944,7 @@ async function syncDailyModelCatalogs(button) {
   try {
     var token = await auth.currentUser.getIdToken();
     var requestOptions = { method: 'POST', headers: { 'Authorization': 'Bearer ' + token } };
-    var response = window.PrepPathBackend
-      ? await window.PrepPathBackend.fetch('/api/admin/model-catalogs/sync', requestOptions)
-      : await fetch(STUDY_BACKEND + '/api/admin/model-catalogs/sync', requestOptions);
+    var response = await adminBackendFetch('/api/admin/model-catalogs/sync', requestOptions);
     var payload = await response.json().catch(function () { return {}; });
     await loadAiStudyData();
     var failures = Object.keys(payload.results || {}).filter(function (pid) { return !payload.results[pid].ok; });
@@ -1862,17 +1863,18 @@ function renderSettings() {
   var backendManual = (CONFIG && CONFIG.turbo && CONFIG.turbo.backendManualServerId) || backendSnapshot.manualServerId || '';
   var backendCard = '<div class="card" style="margin-bottom:1rem;">' +
     '<h3 style="margin-bottom:0.5rem;">&#127760; Backend Server Routing</h3>' +
-    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Manage Render and other proxy servers used by the app. <strong>Auto</strong> tries the healthiest server and switches after a timeout, network error, 429, or 5xx response. <strong>Manual preference</strong> starts with your selected server but keeps failover available if it fails.</p>' +
+    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Manage Render proxy servers used for AI notes, Tutor, transcripts, Turbo video, and proxy media. <strong>Auto</strong> tries the healthiest server. <strong>Manual preference</strong> starts with your selected server but keeps failover. <strong>Selected server only</strong> sends these proxy requests exclusively to that server and never falls back. The separate Telegram bot service is not changed here.</p>' +
     '<div class="row" style="gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:0.85rem;">' +
       '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Routing mode' +
         '<select id="cfg-backend-mode" style="min-width:210px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
           '<option value="auto"' + (backendMode === 'auto' ? ' selected' : '') + '>Auto failover</option>' +
           '<option value="manual"' + (backendMode === 'manual' ? ' selected' : '') + '>Manual preference + failover</option>' +
+          '<option value="strict"' + (backendMode === 'strict' ? ' selected' : '') + '>Selected server only (no failover)</option>' +
         '</select>' +
       '</label>' +
-      '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Preferred server' +
+      '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Preferred / selected server' +
         '<select id="cfg-backend-manual" style="min-width:250px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
-          '<option value="">Use health/order</option>' +
+          '<option value="">Use health/order (Auto or Manual only)</option>' +
           backendServers.map(function(server) { return '<option value="' + esc(server.id) + '"' + (backendManual === server.id ? ' selected' : '') + '>' + esc(server.label || server.id) + '</option>'; }).join('') +
         '</select>' +
       '</label>' +
@@ -2069,23 +2071,19 @@ async function saveTurboCookies() {
   } catch(e) { showToast('Save failed: ' + e.message); }
 }
 
-/* Ping the Turbo backend /health so the admin can see if it's up + cookie state.
-   Backend URL defaults to the deployed service; override with
-   localStorage.setItem('turboBackendUrl', '<url>'). */
+/* Ping the currently selected/routable Turbo backend /health. */
 async function checkTurboBackend() {
   var el = document.getElementById('turbo-backend-status');
-  var url = window.PrepPathBackend ? window.PrepPathBackend.baseUrl() : (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
+  var url = window.PrepPathBackend ? window.PrepPathBackend.baseUrl() : '';
   var revealResult = function() {
     if (!el) return;
     el.focus({ preventScroll: true });
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
-  if (el) el.textContent = '⏳ Checking ' + url + '/health …';
+  if (el) el.textContent = '⏳ Checking ' + (url || 'selected backend') + '/health …';
   try {
-    var r = window.PrepPathBackend
-      ? await window.PrepPathBackend.fetch('/health', { timeoutMs: 12000 })
-      : await fetch(url + '/health');
-    url = window.PrepPathBackend ? window.PrepPathBackend.baseUrl() : url;
+    var r = await adminBackendFetch('/health', { timeoutMs: 12000 });
+    url = window.PrepPathBackend.baseUrl();
     var d = await r.json();
     if (el) el.innerHTML = (d.pot_provider ? '🟢' : '🟡') +
       ' Backend online — cookies: <b>' + (d.cookies ? 'yes' : 'no') + '</b>' +
@@ -2576,23 +2574,28 @@ function backendRowsFromForm() {
     return { id: id, label: (labelInput ? labelInput.value : id).trim() || id, url: (urlInput ? urlInput.value : '').trim().replace(/\/+$/, ''), enabled: true };
   }).filter(function(server) { return /^https?:\/\//i.test(server.url); });
 }
-function backendConfigInMemory(servers, mode, manualServerId) {
+function backendConfigInMemory(servers, mode, manualServerId, applyRouter) {
+  var normalizedMode = mode === 'strict' ? 'strict' : (mode === 'manual' ? 'manual' : 'auto');
   CONFIG.turbo = Object.assign({}, CONFIG.turbo || {}, {
     backendServers: servers,
-    backendMode: mode === 'manual' ? 'manual' : 'auto',
+    backendMode: normalizedMode,
     backendManualServerId: manualServerId || ''
   });
-  if (window.PrepPathBackend) window.PrepPathBackend.configure({ servers: servers, mode: mode, manualServerId: manualServerId }, true);
+  if (applyRouter && window.PrepPathBackend) {
+    window.PrepPathBackend.configure({ servers: servers, mode: normalizedMode, manualServerId: manualServerId }, true);
+  }
 }
 async function saveBackendRegistry() {
   var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
   var manualServerId = (document.getElementById('cfg-backend-manual') || {}).value || '';
   var servers = backendRowsFromForm();
   if (!servers.length) { showToast('Add at least one valid HTTPS server URL.', 'error'); return; }
-  if (mode === 'manual' && manualServerId && !servers.some(function(server) { return server.id === manualServerId; })) {
-    showToast('Choose a valid preferred server.', 'error'); return;
+  if (mode === 'strict' && !manualServerId) {
+    showToast('Choose the server that must be used in selected-server-only mode.', 'error'); return;
   }
-  backendConfigInMemory(servers, mode, manualServerId);
+  if ((mode === 'manual' || mode === 'strict') && manualServerId && !servers.some(function(server) { return server.id === manualServerId; })) {
+    showToast(mode === 'strict' ? 'Choose a valid selected server.' : 'Choose a valid preferred server.', 'error'); return;
+  }
   try {
     await db.collection('config').doc('turbo').set({
       backendServers: servers,
@@ -2601,8 +2604,13 @@ async function saveBackendRegistry() {
       backendUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedBy: auth.currentUser ? (auth.currentUser.email || auth.currentUser.uid) : ''
     }, { merge: true });
+    // Publish locally only after Firestore accepts the policy. Failed saves must
+    // never leave this Admin device using a route other clients did not receive.
+    backendConfigInMemory(servers, mode, manualServerId, true);
     var status = document.getElementById('backend-server-status');
-    if (status) status.textContent = 'Saved. New requests use ' + (mode === 'manual' ? 'the selected preference with failover.' : 'automatic health-aware failover.');
+    if (status) status.textContent = 'Saved. New requests use ' + (mode === 'strict'
+      ? 'only the selected server, with no failover.'
+      : mode === 'manual' ? 'the selected preference with failover.' : 'automatic health-aware failover.');
     showToast('Backend server routing saved.');
     render();
   } catch (e) {
@@ -2632,6 +2640,10 @@ function removeBackendServer(id) {
   if (!servers.length) { showToast('At least one server must remain.', 'error'); return; }
   var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
   var manual = (document.getElementById('cfg-backend-manual') || {}).value || '';
+  if (mode === 'strict' && manual === id) {
+    showToast('Select another server or change routing mode before removing the server in use.', 'error');
+    return;
+  }
   if (manual === id) manual = '';
   backendConfigInMemory(servers, mode, manual);
   showToast('Server removed locally. Click Save routing to publish the change.');
@@ -2641,9 +2653,15 @@ async function checkBackendServers() {
   var status = document.getElementById('backend-server-status');
   if (status) status.textContent = 'Checking server health…';
   try {
-    var results = window.PrepPathBackend ? await window.PrepPathBackend.probeAll() : [];
-    var good = results.filter(function(result) { return result.ok; }).length;
-    if (status) status.textContent = good + ' of ' + results.length + ' server(s) healthy. Automatic failover will avoid failed servers.';
+    var draftServers = backendRowsFromForm();
+    var results = window.PrepPathBackend
+      ? await Promise.all(draftServers.map(function(server) { return window.PrepPathBackend.probe(server); }))
+      : [];
+    var good = results.filter(function(result) { return result && result.ok; }).length;
+    var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
+    if (status) status.textContent = good + ' of ' + results.length + ' server(s) healthy. ' + (mode === 'strict'
+      ? 'Only the selected server will receive proxy requests.'
+      : 'Failover will avoid failed servers when possible.');
     render();
   } catch (e) {
     if (status) status.textContent = 'Health check failed: ' + (e.message || e);

@@ -23,8 +23,6 @@
 
   var SUPA_URL  = 'https://aqxglvtndssjkqluvzpl.supabase.co';
   var SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxeGdsdnRuZHNzamtxbHV2enBsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUyNTgzMDcsImV4cCI6MjEwMDgzNDMwN30.ArJZRjAH153udthHZlAau8WnQH2bkBIxOveAEX1otMA';
-  var BACKEND = (localStorage.getItem('turboBackendUrl')
-    || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
 
   var _client = null;
   function client() {
@@ -287,9 +285,10 @@
           video_id: _lastVideoId || videoId || ''
         })
       };
-      return window.PrepPathBackend
-        ? window.PrepPathBackend.fetch('/api/tutor/memory-update', requestOptions)
-        : fetch(BACKEND + '/api/tutor/memory-update', requestOptions);
+      if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function') {
+        throw new Error('Backend routing is unavailable. Reload the app.');
+      }
+      return window.PrepPathBackend.fetch('/api/tutor/memory-update', requestOptions);
     }).then(function (r) {
       // A 429/502/503 body parses as JSON too, just without the four expected
       // keys, so a failed generation used to look like a successful no-op.

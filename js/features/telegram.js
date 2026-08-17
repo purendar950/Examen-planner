@@ -238,9 +238,19 @@ function resolveTelegramTaskSubjects() {
 }
 
 /* Base URL of the proxy that streams Telegram-hosted images (/tg-photo). */
+function tgStrictBackendRouting() {
+  try {
+    return !!(window.PrepPathBackend && window.PrepPathBackend.getConfig &&
+      window.PrepPathBackend.getConfig().mode === 'strict');
+  } catch (e) { return false; }
+}
 function tgProxyBase() {
   var custom = '';
   try { custom = localStorage.getItem('turboBackendUrl') || ''; } catch (e) {}
+  // A legacy per-device override must not bypass an admin-enforced strict route.
+  if (tgStrictBackendRouting()) {
+    return ((window.PrepPathBackend && window.PrepPathBackend.baseUrl()) || '').replace(/\/+$/, '');
+  }
   return (custom || (window.PrepPathBackend && window.PrepPathBackend.baseUrl()) || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
 }
 
@@ -258,9 +268,18 @@ function tgHydrateImage(img, fileId) {
     getFirebaseIdToken().then(function (token) {
       var photoPath = '/tg-photo?file_id=' + encodeURIComponent(fileId);
       var requestOptions = { headers: { Authorization: 'Bearer ' + token } };
-      return window.PrepPathBackend && !localStorage.getItem('turboBackendUrl')
-        ? window.PrepPathBackend.fetch(photoPath, requestOptions)
-        : fetch(tgProxyBase() + photoPath, requestOptions);
+      if (!window.PrepPathBackend || typeof window.PrepPathBackend.fetch !== 'function' ||
+          typeof window.PrepPathBackend.syncPolicy !== 'function') {
+        throw new Error('Backend routing is unavailable. Reload the app.');
+      }
+      return window.PrepPathBackend.syncPolicy().then(function (config) {
+        var strictBackend = !!(config && config.mode === 'strict');
+        var legacyOverride = '';
+        try { legacyOverride = localStorage.getItem('turboBackendUrl') || ''; } catch (e) {}
+        return strictBackend || !legacyOverride
+          ? window.PrepPathBackend.fetch(photoPath, requestOptions)
+          : fetch(tgProxyBase() + photoPath, requestOptions);
+      });
     }).then(function (response) {
       if (!response.ok) {
         var error = new Error('photo unavailable');
