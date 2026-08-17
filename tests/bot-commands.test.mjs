@@ -294,9 +294,10 @@ test('date helpers reject malformed input instead of guessing', () => {
    OmniRoute's ngrok URL can change without a redeploy. */
 let askFetchCalls = [];
 let askFetchQueue = [];
+const askProcess = { env: { OMNIROUTE_URL: 'https://env-fallback.ngrok-free.dev/v1/chat/completions' } };
 const askApi = vm.runInNewContext(
   section('const ASK_TIMEOUT_MS', 'bot.onText(/^\\/ask')
-  + ';({ studyProviderFromConfig, groqFallbackProvider, callStudyProvider, buildTutorMessages, studyApiKeyList })',
+  + ';({ studyProviderFromConfig, groqFallbackProvider, callStudyProvider, buildTutorMessages, studyApiKeyList, normalizeOmnirouteBaseUrl, resolveOmnirouteBaseUrl, buildFallbackProviderList })',
   {
     /* The real validator, so a base the bot would reject is rejected here too. */
     normalizeAppBaseUrl: value => {
@@ -308,6 +309,8 @@ const askApi = vm.runInNewContext(
         return candidate;
       } catch (error) { return ''; }
     },
+    URL,
+    process: askProcess,
     AbortSignal: { timeout: () => undefined },
     fetch: async (url, init) => {
       askFetchCalls.push({ url, init });
@@ -327,18 +330,52 @@ const askApi = vm.runInNewContext(
 const OMNIROUTE_CONFIG = {
   enabled: true,
   studyProvider: 'omniroute',
+  omnirouteBaseUrl: 'https://precut-uniformly-handsfree.ngrok-free.dev/v1',
+  /* The retired generic mirror must never override the dedicated endpoint. */
   studyBaseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1',
   studyApiKeys: ['key-one', 'key-two'],
   studyModel: 'auto',
   studyTransport: 'openai_chat'
 };
 
-test('the selected study provider is used, not a hard-coded one', () => {
+test('the selected OmniRoute provider uses the Admin-editable endpoint', () => {
   const provider = askApi.studyProviderFromConfig(OMNIROUTE_CONFIG);
   assert.equal(provider.provider, 'omniroute');
-  assert.equal(provider.url, 'https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions');
+  assert.equal(provider.url, 'https://precut-uniformly-handsfree.ngrok-free.dev/v1/chat/completions');
   assert.equal(provider.model, 'auto');
   assert.deepEqual(Array.from(provider.keys), ['key-one', 'key-two']);
+});
+
+test('OmniRoute endpoint validation canonicalizes chat URLs and rejects unsafe targets', () => {
+  assert.equal(askApi.normalizeOmnirouteBaseUrl('https://next-route.ngrok-free.dev/v1/chat/completions/'),
+    'https://next-route.ngrok-free.dev/v1');
+  for (const value of [
+    'http://next-route.ngrok-free.dev/v1',
+    'https://next-route.ngrok-free.dev:8443/v1',
+    'https://user:pass@next-route.ngrok-free.dev/v1',
+    'https://next-route.ngrok-free.dev/v1?x=1',
+    'https://ngrok-free.dev/v1',
+    'https://next-route.ngrok-free.dev.evil.test/v1',
+    'https://example.com/v1',
+    'https://squeak-earthly-obliged.ngrok-free.dev/v1'
+  ]) assert.equal(askApi.normalizeOmnirouteBaseUrl(value), '', value);
+});
+
+test('OmniRoute resolver honors dedicated, legacy, env, then default precedence', () => {
+  assert.equal(askApi.resolveOmnirouteBaseUrl(OMNIROUTE_CONFIG),
+    'https://precut-uniformly-handsfree.ngrok-free.dev/v1');
+  assert.equal(askApi.resolveOmnirouteBaseUrl({
+    studyProvider: 'omniroute', studyTransport: 'openai_chat',
+    studyBaseUrl: 'https://legacy-live.ngrok-free.dev/v1'
+  }), 'https://legacy-live.ngrok-free.dev/v1');
+  assert.equal(askApi.resolveOmnirouteBaseUrl({
+    studyProvider: 'omniroute', studyBaseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1'
+  }), 'https://env-fallback.ngrok-free.dev/v1');
+  const previous = askProcess.env.OMNIROUTE_URL;
+  askProcess.env.OMNIROUTE_URL = '';
+  assert.equal(askApi.resolveOmnirouteBaseUrl({}),
+    'https://precut-uniformly-handsfree.ngrok-free.dev/v1');
+  askProcess.env.OMNIROUTE_URL = previous;
 });
 
 test('keys are accepted as an array or as typed text', () => {
@@ -347,19 +384,31 @@ test('keys are accepted as an array or as typed text', () => {
   assert.deepEqual(Array.from(askApi.studyApiKeyList(undefined)), []);
 });
 
-test('an unusable provider config resolves to null instead of a bad request', () => {
-  assert.equal(askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyApiKeys: [] }), null, 'no keys');
-  assert.equal(askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyBaseUrl: '' }), null, 'no base url');
-  assert.equal(askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyBaseUrl: 'not a url' }), null, 'malformed base');
+test('an unusable non-OmniRoute provider config resolves to null instead of a bad request', () => {
+  const generic = { ...OMNIROUTE_CONFIG, studyProvider: 'custom', omnirouteBaseUrl: undefined };
+  assert.equal(askApi.studyProviderFromConfig({ ...generic, studyApiKeys: [] }), null, 'no keys');
+  assert.equal(askApi.studyProviderFromConfig({ ...generic, studyBaseUrl: '' }), null, 'no base url');
+  assert.equal(askApi.studyProviderFromConfig({ ...generic, studyBaseUrl: 'not a url' }), null, 'malformed base');
   /* Gemini Interactions speaks a different protocol — it must fall through
      rather than be sent an OpenAI chat body. */
   assert.equal(askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyTransport: 'google_interactions' }), null);
   assert.equal(askApi.studyProviderFromConfig({}), null);
 });
 
-test('a trailing slash on the base URL does not double up', () => {
-  const provider = askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG, studyBaseUrl: 'https://host.dev/v1///' });
+test('a trailing slash on a generic base URL does not double up', () => {
+  const provider = askApi.studyProviderFromConfig({ ...OMNIROUTE_CONFIG,
+    studyProvider: 'custom', omnirouteBaseUrl: undefined, studyBaseUrl: 'https://host.dev/v1///' });
   assert.equal(provider.url, 'https://host.dev/v1/chat/completions');
+});
+
+test('OmniRoute failover uses the same live endpoint and excludes an attempted primary', () => {
+  const cfg = { ...OMNIROUTE_CONFIG, omnirouteApiKeys: ['fallback-key'] };
+  const fallbacks = askApi.buildFallbackProviderList(cfg, askApi.groqFallbackProvider({ groqApiKey: 'gsk_x' }));
+  const omni = Array.from(fallbacks).find(provider => provider.provider === 'omniroute');
+  assert.equal(omni.url, 'https://precut-uniformly-handsfree.ngrok-free.dev/v1/chat/completions');
+  assert.deepEqual(Array.from(omni.keys), ['fallback-key']);
+  assert.equal(askApi.buildFallbackProviderList(cfg, askApi.studyProviderFromConfig(cfg))
+    .some(provider => provider.provider === 'omniroute'), false);
 });
 
 test('Groq remains the fallback when no study provider is configured', () => {

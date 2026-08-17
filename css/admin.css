@@ -550,6 +550,12 @@ html[data-theme="dark"] a { color:var(--accent); }
 .ai-provider-health.is-idle { color:var(--muted); }
 .ai-provider-endpoint { min-width:0; display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px; color:var(--muted); font-size:.59rem; }
 .ai-provider-endpoint code { min-width:0; overflow:hidden; color:var(--ai-slate); font-size:.58rem; text-overflow:ellipsis; white-space:nowrap; }
+.ai-provider-endpoint--editable { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; }
+.ai-provider-endpoint--editable label { color:var(--muted); font-size:.59rem; }
+.ai-provider-endpoint-input { width:100%; min-width:0; min-height:32px; padding:6px 8px; border:1px solid var(--ai-line); border-radius:7px; background:var(--ai-soft); color:var(--ai-ink); font-family:monospace; font-size:.58rem; }
+.ai-provider-endpoint-input:focus { border-color:var(--ai-focus); outline:2px solid rgba(40,120,240,.12); outline-offset:1px; }
+.ai-provider-endpoint--editable small { grid-column:1 / -1; color:var(--muted); font-size:.55rem; line-height:1.35; }
+.ai-provider-endpoint--editable small code { color:var(--ai-slate); font-size:inherit; }
 .ai-secret-label { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
 .ai-secret-label label { color:var(--ai-slate); font-size:.62rem; font-weight:750; }
 .ai-secret-label button { padding:2px 5px; border:0; background:transparent; color:var(--ai-blue); font-size:.59rem; font-weight:750; cursor:pointer; }
@@ -655,7 +661,7 @@ html[data-theme="dark"] .ai-fintech {
 html[data-theme="dark"] .ai-command-hero { border-color:#2B3852; box-shadow:none; }
 html[data-theme="dark"] .ai-kpi,html[data-theme="dark"] .ai-panel,html[data-theme="dark"] .ai-section-nav { background:#151C29; }
 html[data-theme="dark"] .ai-provider-card { background:#151C29; }
-html[data-theme="dark"] .ai-secret-field,html[data-theme="dark"] .ai-field select,html[data-theme="dark"] .ai-inline-form input,html[data-theme="dark"] .ai-grant-editor textarea { background:#101622; color:var(--text); }
+html[data-theme="dark"] .ai-secret-field,html[data-theme="dark"] .ai-provider-endpoint-input,html[data-theme="dark"] .ai-field select,html[data-theme="dark"] .ai-inline-form input,html[data-theme="dark"] .ai-grant-editor textarea { background:#101622; color:var(--text); }
 html[data-theme="dark"] .ai-provider-card:hover { border-color:#3A465D; box-shadow:none; }
 html[data-theme="dark"] .ai-provider-savebar { background:rgba(18,185,129,.07); }
 html[data-theme="dark"] .ai-toggle i { background:#354158; }

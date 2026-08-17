@@ -117,7 +117,7 @@ FAILOVER_PROVIDERS = [
   { id: 'hcnsec',      keyField: 'hcnsecApiKeys',      modelField: 'hcnsecModel',      baseUrl: 'https://api.hcnsec.cn/v1',                            defaultModel: 'DeepSeek-V4-Pro' },
   { id: 'bluesminds',  keyField: 'bluesmindsApiKeys',  modelField: 'bluesmindsModel',  baseUrl: 'https://api.bluesminds.com/v1',                       defaultModel: 'gpt-5.2-chat' },
   { id: 'aicampus',    keyField: 'aicampusApiKeys',    modelField: 'aicampusModel',    baseUrl: 'https://ai-hub.aicampus.my/v1',                       defaultModel: 'minimax-m3' },
-  { id: 'omniroute',   keyField: 'omnirouteApiKeys',   modelField: 'omnirouteModel',   baseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1',     defaultModel: 'auto' },
+  { id: 'omniroute',   keyField: 'omnirouteApiKeys',   modelField: 'omnirouteModel',   baseUrl: 'resolved from config/ai.omnirouteBaseUrl',                     defaultModel: 'auto' },
   { id: 'kiro',        keyField: 'kiroApiKeys',        modelField: 'kiroModel',        baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1',           defaultModel: 'auto' },
 ]
 // NOTE: google_interactions is intentionally excluded (transport !== 'openai_chat')

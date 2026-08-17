@@ -2557,20 +2557,60 @@ function studyApiKeyList(raw) {
   return list.map(key => String(key == null ? '' : key).trim()).filter(Boolean);
 }
 
+/* OmniRoute runs on an account-owned ngrok Dev Domain. Keep one strict
+   canonicalizer shared by the selected route and failover route so an Admin
+   endpoint update takes effect on the next /ask request without a bot redeploy. */
+const OMNIROUTE_DEFAULT_BASE_URL = 'https://precut-uniformly-handsfree.ngrok-free.dev/v1';
+const OMNIROUTE_RETIRED_BASE_URL = 'https://squeak-earthly-obliged.ngrok-free.dev/v1';
+
+function normalizeOmnirouteBaseUrl(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw || raw.includes('\\')) return '';
+  try {
+    const parsed = new URL(raw);
+    const hostname = parsed.hostname.toLowerCase();
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port
+        || parsed.search || parsed.hash
+        || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ngrok-free\.dev$/.test(hostname)) return '';
+    let path = parsed.pathname.replace(/\/+$/, '');
+    if (path === '/v1/chat/completions') path = '/v1';
+    if (path !== '/v1') return '';
+    const base = `https://${hostname}/v1`;
+    return base === OMNIROUTE_RETIRED_BASE_URL ? '' : base;
+  } catch (error) { return ''; }
+}
+
+function resolveOmnirouteBaseUrl(cfg) {
+  cfg = cfg && typeof cfg === 'object' ? cfg : {};
+  const candidates = [cfg.omnirouteBaseUrl];
+  const active = String(cfg.studyProvider || '').trim().toLowerCase();
+  const transport = String(cfg.studyTransport || 'openai_chat').trim().toLowerCase();
+  if (active === 'omniroute' && transport === 'openai_chat') candidates.push(cfg.studyBaseUrl);
+  candidates.push(process.env.OMNIROUTE_URL, OMNIROUTE_DEFAULT_BASE_URL);
+  for (const candidate of candidates) {
+    const normalized = normalizeOmnirouteBaseUrl(candidate);
+    if (normalized) return normalized;
+  }
+  return OMNIROUTE_DEFAULT_BASE_URL;
+}
+
 /* → { provider, url, keys, model } or null when the panel has not configured a
-   usable provider. A base that is not an absolute http(s) URL is a typo in the
-   panel, and must not be turned into a request. */
+   usable provider. OmniRoute resolves its dedicated live endpoint; other
+   providers continue to use the selected provider mirror. */
 function studyProviderFromConfig(cfg) {
   cfg = cfg && typeof cfg === 'object' ? cfg : {};
   /* `google_interactions` speaks a different protocol; only the OpenAI-compatible
      transport is understood here, so anything else falls through to the
      fallback rather than being sent a body it cannot read. */
   if (String(cfg.studyTransport || 'openai_chat') !== 'openai_chat') return null;
-  const base = normalizeAppBaseUrl(cfg.studyBaseUrl);
+  const provider = String(cfg.studyProvider || 'study').slice(0, 40);
+  const base = provider.toLowerCase() === 'omniroute'
+    ? resolveOmnirouteBaseUrl(cfg)
+    : normalizeAppBaseUrl(cfg.studyBaseUrl);
   const keys = studyApiKeyList(cfg.studyApiKeys);
   if (!base || !keys.length) return null;
   return {
-    provider: String(cfg.studyProvider || 'study').slice(0, 40),
+    provider,
     url: `${base}/chat/completions`,
     keys,
     model: String(cfg.studyModel || '').trim() || 'auto'
@@ -2603,7 +2643,7 @@ const FAILOVER_PROVIDERS = [
   { id: 'hcnsec',      keyField: 'hcnsecApiKeys',      modelField: 'hcnsecModel',      baseUrl: 'https://api.hcnsec.cn/v1',                            defaultModel: 'DeepSeek-V4-Pro' },
   { id: 'bluesminds',  keyField: 'bluesmindsApiKeys',  modelField: 'bluesmindsModel',  baseUrl: 'https://api.bluesminds.com/v1',                       defaultModel: 'gpt-5.2-chat' },
   { id: 'aicampus',    keyField: 'aicampusApiKeys',    modelField: 'aicampusModel',    baseUrl: 'https://ai-hub.aicampus.my/v1',                       defaultModel: 'minimax-m3' },
-  { id: 'omniroute',   keyField: 'omnirouteApiKeys',   modelField: 'omnirouteModel',   baseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1',     defaultModel: 'auto' },
+  { id: 'omniroute',   keyField: 'omnirouteApiKeys',   modelField: 'omnirouteModel',   baseUrl: '',                                                   defaultModel: 'auto' },
   { id: 'kiro',        keyField: 'kiroApiKeys',        modelField: 'kiroModel',        baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1',           defaultModel: 'auto' },
 ];
 
@@ -2617,7 +2657,8 @@ function buildFallbackProviderList(cfg, excludeProvider) {
   for (const entry of FAILOVER_PROVIDERS) {
     const keys = studyApiKeyList(cfg[entry.keyField]);
     if (!keys.length) continue;
-    const url = `${entry.baseUrl}/chat/completions`;
+    const baseUrl = entry.id === 'omniroute' ? resolveOmnirouteBaseUrl(cfg) : entry.baseUrl;
+    const url = `${baseUrl}/chat/completions`;
     if (url === excludeUrl) continue;
     const model = (cfg[entry.modelField] || entry.defaultModel || 'auto').trim();
     result.push({ provider: entry.id, url, keys, model });
