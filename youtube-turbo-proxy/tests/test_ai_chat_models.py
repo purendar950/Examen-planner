@@ -247,7 +247,7 @@ for r in ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"):
 # Execute the production helpers with a process-RAM cache that starts empty,
 # exactly as it does after a Render restart while the ngrok catalog is offline.
 OMNI_BASE = "https://example.invalid/v1"
-LOCAL_OMNI_BASE = "http://10.74.7.68:20128/v1"
+LOCAL_OMNI_BASE = "http://localhost:20128/v1"
 ns4_chat_cache = {"ts": 0.0, "attempt_ts": 0.0, "ids": [], "ctx": {}}
 ns4 = {
     "os": os, "re": re, "time": time, "threading": threading,
@@ -448,19 +448,22 @@ check("image persistence uses its own atomic field paths",
       "omnirouteCatalog.chatModels" not in fake_doc.writes[-1][1],
       fake_doc.writes[-1])
 
-# A local deployment keeps its discovered catalog in its endpoint-keyed RAM
-# cache. It must not publish a private address or replace the public deployment's
-# shared durable snapshot in config/ai.
+# An opted-in Admin-local deployment keeps its discovered catalog in its
+# endpoint-keyed RAM cache. It must not publish a private address or replace the
+# public deployment's shared durable snapshot in config/ai.
 writes_before_local = len(fake_doc.writes)
 public_catalog_before_local = dict(ns5["_study_raw_cfg_cache"]["data"]["omnirouteCatalog"])
 local_persisted = ns5["_persist_omniroute_catalog"](
     "chat", ["local/private-route"], LOCAL_OMNI_BASE)
-check("local deployment never overwrites the shared public catalog",
+check("Admin-local deployment never overwrites the shared public catalog",
       not local_persisted and len(fake_doc.writes) == writes_before_local and
       ns5["_study_raw_cfg_cache"]["data"]["omnirouteCatalog"] == public_catalog_before_local,
       (local_persisted, fake_doc.writes))
-check("local deployment never persists its private address",
+check("Admin-local deployment never persists its private address",
       LOCAL_OMNI_BASE not in repr(fake_doc.writes), fake_doc.writes)
+check("image generation refresh uses the same resolved config as generation",
+      "_omniroute_fetch_image_model_ids(force=True, cfg=raw_cfg)" in SRC,
+      "forced image refresh omitted raw_cfg")
 
 # The live OmniRoute UI currently advertises 62 image-generation models. The
 # catalog itself is already preserved in full; these guards prevent a future

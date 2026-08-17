@@ -1,0 +1,60 @@
+{
+  "publicAccepted": [
+    ["https://next-route.ngrok-free.dev/v1", "https://next-route.ngrok-free.dev/v1"],
+    ["https://NEXT-route.ngrok-free.dev/v1/chat/completions/", "https://next-route.ngrok-free.dev/v1"]
+  ],
+  "publicRejected": [
+    "http://next-route.ngrok-free.dev/v1",
+    "https://next-route.ngrok-free.dev:443/v1",
+    "https://user:pass@next-route.ngrok-free.dev/v1",
+    "https://next-route.ngrok-free.dev/v1?x=1",
+    "https://next-route.ngrok-free.dev/v1#fragment",
+    "https://ngrok-free.dev/v1",
+    "https://next-route.ngrok-free.dev.evil.test/v1",
+    "https://example.com/v1",
+    "https://squeak-earthly-obliged.ngrok-free.dev/v1",
+    "https://next-route.ngrok-free.dev/v1////",
+    "https://next-route.ngrok-free.dev/x/../v1",
+    "https://next-route.ngrok-free.dev/v1/%2e%2e/v1",
+    "https://@next-route.ngrok-free.dev/v1",
+    "https://next-route.ngrok-free.dev/v1?",
+    "https://next-route.ngrok-free.dev/v1#",
+    "https://next-route.ngrok-free.dev/v1\n"
+  ],
+  "accepted": [
+    ["http://10.74.7.68:20128/v1", "http://10.74.7.68:20128/v1"],
+    ["http://LOCALHOST:20128/v1/chat/completions/", "http://localhost:20128/v1"],
+    ["https://192.168.1.4:443/v1/", "https://192.168.1.4:443/v1"],
+    ["http://127.0.0.1:080/v1", "http://127.0.0.1:80/v1"],
+    ["https://localhost/v1", "https://localhost/v1"]
+  ],
+  "rejected": [
+    "http://169.254.169.254/v1",
+    "http://100.64.0.1/v1",
+    "http://localhost.example:20128/v1",
+    "http://example.com/v1",
+    "http://user:pass@localhost:20128/v1",
+    "http://user:pass@10.74.7.68:20128/v1",
+    "http://10.74.7.68:20128/admin",
+    "http://10.74.7.68:20128/v1?next=metadata",
+    "http://10.74.7.68:20128/v1#fragment",
+    "http://127.1/v1",
+    "http://2130706433/v1",
+    "http://0x7f000001/v1",
+    "http://0177.0.0.1/v1",
+    "http://127.000.0.1/v1",
+    "http://localhost:20128/v1////",
+    "http://localhost/v1/a/..",
+    "http://localhost/v1/%2e%2e/v1",
+    "http://localhost/v1/chat/../chat/completions",
+    "http://localhost:/v1",
+    "http://@localhost:20128/v1",
+    "http://:@localhost:20128/v1",
+    "http://localhost:20128/v1?",
+    "http://localhost:20128/v1#",
+    "http://[::1]:20128/v1",
+    "http://localho\nst:20128/v1",
+    "http://localhost:\t20128/v1",
+    "http://127.0.0.1\r:20128/v1"
+  ]
+}

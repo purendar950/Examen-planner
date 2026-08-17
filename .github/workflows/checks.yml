@@ -63,6 +63,9 @@ jobs:
       - name: Byte-compile the proxy
         run: python -m py_compile youtube-turbo-proxy/app.py
 
+      - name: OmniRoute endpoint security and precedence
+        run: python youtube-turbo-proxy/tests/test_omniroute_endpoint.py
+
       - name: AI Tutor server logic
         run: python youtube-turbo-proxy/tests/test_tutor.py
 

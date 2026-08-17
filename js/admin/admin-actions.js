@@ -723,18 +723,56 @@ const OMNIROUTE_DEFAULT_BASE_URL = 'https://precut-uniformly-handsfree.ngrok-fre
 const OMNIROUTE_RETIRED_BASE_URL = 'https://squeak-earthly-obliged.ngrok-free.dev/v1';
 
 function normalizeOmnirouteBaseUrl(value) {
-  var raw = String(value || '').trim();
+  var original = String(value || '');
+  if (/[\u0000-\u001f\u007f]/.test(original)) return '';
+  var raw = original.trim();
   if (!raw || raw.indexOf('\\') !== -1) return '';
   try {
+    var authorityMatch = raw.match(/^https:\/\/([^\/?#]+)(?=\/|$)/i);
+    if (!authorityMatch || authorityMatch[1].indexOf('@') !== -1 || authorityMatch[1].indexOf(':') !== -1) return '';
+    var hostname = authorityMatch[1].toLowerCase();
+    var rawPath = raw.slice(authorityMatch[0].length);
+    var allowedPath = rawPath === '/v1' || rawPath === '/v1/' ||
+      rawPath === '/v1/chat/completions' || rawPath === '/v1/chat/completions/';
     var parsed = new URL(raw);
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash) return '';
-    if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ngrok-free\.dev$/.test(parsed.hostname.toLowerCase())) return '';
-    var path = parsed.pathname.replace(/\/+$/, '');
-    if (path === '/v1/chat/completions') path = '/v1';
-    if (path !== '/v1') return '';
-    var base = 'https://' + parsed.hostname.toLowerCase() + '/v1';
+    if (!allowedPath || parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash) return '';
+    if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ngrok-free\.dev$/.test(hostname)) return '';
+    var base = 'https://' + hostname + '/v1';
     return base === OMNIROUTE_RETIRED_BASE_URL ? '' : base;
   } catch (e) { return ''; }
+}
+function normalizeOmnirouteLocalBaseUrl(value) {
+  var original = String(value || '');
+  if (/[\u0000-\u001f\u007f]/.test(original)) return '';
+  var raw = original.trim();
+  if (!raw || raw.indexOf('\\') !== -1) return '';
+  try {
+    var authorityMatch = raw.match(/^https?:\/\/([^\/?#]+)(?=\/|$)/i);
+    if (!authorityMatch || authorityMatch[1].indexOf('@') !== -1) return '';
+    var authorityParts = authorityMatch[1].match(/^([^:]+)(?::([0-9]+))?$/);
+    if (!authorityParts || authorityMatch[1].slice(-1) === ':') return '';
+    var hostname = authorityParts[1].toLowerCase();
+    var port = authorityParts[2] ? String(Number(authorityParts[2])) : '';
+    var parts = hostname.split('.');
+    var octets = parts.map(Number);
+    var privateIpv4 = octets.length === 4 && octets.every(function (part, index) {
+      return /^(?:0|[1-9][0-9]{0,2})$/.test(parts[index]) &&
+        Number.isInteger(part) && part >= 0 && part <= 255;
+    }) && (octets[0] === 10 ||
+      (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] === 192 && octets[1] === 168) || octets[0] === 127);
+    var parsed = new URL(raw);
+    var rawPath = raw.slice(authorityMatch[0].length);
+    var allowedPath = rawPath === '/v1' || rawPath === '/v1/' ||
+      rawPath === '/v1/chat/completions' || rawPath === '/v1/chat/completions/';
+    if ((hostname !== 'localhost' && !privateIpv4) || !allowedPath ||
+        (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+        parsed.username || parsed.password || parsed.search || parsed.hash) return '';
+    return parsed.protocol + '//' + hostname + (port ? ':' + port : '') + '/v1';
+  } catch (e) { return ''; }
+}
+function omnirouteLocalBaseUrl() {
+  return normalizeOmnirouteLocalBaseUrl(AI_CONFIG && AI_CONFIG.omnirouteLocalBaseUrl);
 }
 function omnirouteBaseUrl() {
   var configured = normalizeOmnirouteBaseUrl(AI_CONFIG && AI_CONFIG.omnirouteBaseUrl);
@@ -1125,7 +1163,8 @@ function parseCurlIntoStudy() {
   var pid = '';
   if (/\/v1beta\/interactions(?:[/?#]|$)/i.test(url)) pid = 'google_interactions';
   var pastedOmnirouteBase = normalizeOmnirouteBaseUrl(url);
-  if (!pid && pastedOmnirouteBase) pid = 'omniroute';
+  var pastedOmnirouteLocalBase = normalizeOmnirouteLocalBaseUrl(url);
+  if (!pid && (pastedOmnirouteBase || pastedOmnirouteLocalBase)) pid = 'omniroute';
   STUDY_PROVIDER_ORDER.forEach(function (k) {
     var expectedHost = k === 'omniroute' ? new URL(omnirouteBaseUrl()).host : STUDY_PROVIDERS[k].host;
     if (!pid && expectedHost && host.indexOf(expectedHost) !== -1) pid = k;
@@ -1141,6 +1180,10 @@ function parseCurlIntoStudy() {
   if (pid === 'omniroute' && pastedOmnirouteBase) {
     var endpointInput = document.getElementById('study-base-url-omniroute');
     if (endpointInput) endpointInput.value = pastedOmnirouteBase;
+  }
+  if (pid === 'omniroute' && pastedOmnirouteLocalBase) {
+    var localEndpointInput = document.getElementById('study-local-base-url-omniroute');
+    if (localEndpointInput) localEndpointInput.value = pastedOmnirouteLocalBase;
   }
   var radio = document.querySelector('input[name="study-active"][value="' + pid + '"]');
   if (radio) radio.checked = true;
@@ -1170,6 +1213,14 @@ async function saveStudyAiConfig() {
     if (endpointInput) endpointInput.focus();
     return;
   }
+  const localEndpointInput = document.getElementById('study-local-base-url-omniroute');
+  const localEndpointRaw = String(localEndpointInput ? localEndpointInput.value : omnirouteLocalBaseUrl()).trim();
+  const omnirouteLocalBase = normalizeOmnirouteLocalBaseUrl(localEndpointRaw);
+  if (localEndpointRaw && !omnirouteLocalBase) {
+    showToast('⚠️ Local OmniRoute must use localhost or a private IPv4 address and end in /v1.');
+    if (localEndpointInput) localEndpointInput.focus();
+    return;
+  }
   const activeBaseUrl = provider === 'omniroute' ? omnirouteBase : p.baseUrl;
   const browserDirectEnabled = !!((document.getElementById('omniroute-browser-direct') || {}).checked);
   const omnirouteBrowserDirect = browserDirectEnabled;
@@ -1182,6 +1233,7 @@ async function saveStudyAiConfig() {
     studyProvider: provider,
     studyApiKeys: activeKeys, studyModel: model, studyBaseUrl: activeBaseUrl,
     omnirouteBaseUrl: omnirouteBase,
+    omnirouteLocalBaseUrl: omnirouteLocalBase,
     studyTransport: p.transport || 'openai_chat',
     omnirouteBrowserDirect: omnirouteBrowserDirect,
     browserDirectEnabled: browserDirectEnabled,
@@ -1196,6 +1248,7 @@ async function saveStudyAiConfig() {
     STUDY_PROVIDER_ORDER.forEach(function (k) { AI_CONFIG[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
     AI_CONFIG[p.modelField] = model;
     AI_CONFIG.omnirouteBaseUrl = omnirouteBase;
+    AI_CONFIG.omnirouteLocalBaseUrl = omnirouteLocalBase;
     AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = activeBaseUrl;
     AI_CONFIG.studyTransport = p.transport || 'openai_chat';
     AI_CONFIG.omnirouteBrowserDirect = omnirouteBrowserDirect;
