@@ -79,6 +79,16 @@ a{color:inherit;text-decoration:none}
 .yt-search-turbo-bar.show{display:flex}
 .yt-search-turbo-bar button{border:1px solid #2d323e;border-radius:999px;background:#12151c;color:#d8dbe3;font-size:9.5px;font-weight:800;padding:5px 11px;cursor:pointer}
 .yt-search-turbo-bar button.active{border-color:#22c55e;color:#8bd3ad;background:rgba(34,197,94,.12)}
+.yt-search-ronflix{position:absolute;inset:0;display:none;background:#000}
+.yt-search-ronflix.show{display:block}
+.yt-search-ronflix video{width:100%;height:100%;display:block;background:#000;object-fit:contain}
+.yt-search-ronflix-status{position:absolute;inset:0;z-index:3;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,.82);color:#fff;text-align:center;padding:18px;font-size:12px;line-height:1.5}
+.yt-search-ronflix-status.show{display:flex}
+.yt-search-ronflix-status .sp{width:30px;height:30px;border:3px solid rgba(255,255,255,.25);border-top-color:#7c5cff;border-radius:50%;animation:ytsearchspin .8s linear infinite}
+.yt-search-ronflix-bar{display:none;align-items:center;gap:7px;margin-top:9px;flex-wrap:wrap}
+.yt-search-ronflix-bar.show{display:flex}
+.yt-search-ronflix-bar button{border:1px solid #2d323e;border-radius:999px;background:#12151c;color:#d8dbe3;font-size:9.5px;font-weight:800;padding:5px 11px;cursor:pointer}
+.yt-search-ronflix-bar button.active{border-color:#7c5cff;color:#b8a6ff;background:rgba(124,92,255,.12)}
 .youtube-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
 .youtube-card{border:0;padding:0;background:transparent;color:inherit;text-align:left;min-width:0}
 .youtube-thumb{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#151820;border:1px solid #20242d}
@@ -204,9 +214,9 @@ a{color:inherit;text-decoration:none}
           <video id="ytSearchTurboVideo" controls playsinline></video>
           <div id="ytSearchTurboStatus" class="yt-search-turbo-status"></div>
         </div>
-        <div id="ytSearchRonflix" class="yt-search-turbo">
+        <div id="ytSearchRonflix" class="yt-search-ronflix">
           <video id="ytSearchRonflixVideo" controls playsinline></video>
-          <div id="ytSearchRonflixStatus" class="yt-search-turbo-status"></div>
+          <div id="ytSearchRonflixStatus" class="yt-search-ronflix-status"></div>
         </div>
         <div id="youtubeLocalFallback" class="youtube-local-fallback" aria-live="polite"></div>
       </div>
@@ -216,6 +226,13 @@ a{color:inherit;text-decoration:none}
         <button type="button" data-yt-search-speed="3">3x</button>
         <button type="button" data-yt-search-speed="4">4x</button>
         <button type="button" id="ytSearchPip" title="Picture-in-Picture">⛶ PiP</button>
+      </div>
+      <div class="yt-search-ronflix-bar" id="ytSearchRonflixBar">
+        <button type="button" data-yt-search-speed="1">1x</button>
+        <button type="button" data-yt-search-speed="2">2x</button>
+        <button type="button" data-yt-search-speed="3">3x</button>
+        <button type="button" data-yt-search-speed="4">4x</button>
+        <button type="button" id="ytSearchRonflixPip" title="Picture-in-Picture">⛶ PiP</button>
       </div>
       <div class="youtube-now">
         <div id="youtubeNowTitle" class="youtube-now-title">YouTube video</div>
@@ -253,11 +270,11 @@ a{color:inherit;text-decoration:none}
   const BUILTIN_YOUTUBE_API_KEY="AIzaSyDLoI3dxX2IJOkYMDNZuNM2WBSdNA22BlM";
   const PIPED_INSTANCES=[
     "https://api.piped.private.coffee",
-    "https://pipedapi.kavin.rocks",
     "https://pipedapi.adminforge.de",
-    "https://pipedapi.reallyaweso.me",
     "https://pipedapi.ducks.party",
-    "https://pipedapi.leptons.xyz"
+    "https://pipedapi.leptons.xyz",
+    "https://pipedapi.kavin.rocks",
+    "https://pipedapi.reallyaweso.me"
   ];
   const sampleVideos=[
     {id:"sEBbMyp8lKY",title:"YouTube Embed Test",meta:"Sample video",tags:"sample test embed"},
@@ -802,6 +819,8 @@ a{color:inherit;text-decoration:none}
   let ronflixVideo=null,ronflixSpeed=1,ronflixFetchCtrl=null;
   const ronflixBox=document.getElementById("ytSearchRonflix");
   const ronflixStatus=document.getElementById("ytSearchRonflixStatus");
+  const ronflixBar=document.getElementById("ytSearchRonflixBar");
+  const ronflixPipBtn=document.getElementById("ytSearchRonflixPip");
 
   function isProUser(){
     try{ return typeof ezIsPro==="function"?!!ezIsPro():true; }catch(_){ return true; }
@@ -876,6 +895,7 @@ a{color:inherit;text-decoration:none}
       try{ ronflixVideo.load(); }catch(_){ }
     }
     if(ronflixBox) ronflixBox.classList.remove("show");
+    if(ronflixBar) ronflixBar.classList.remove("show");
     if(resetStatus) setRonflixStatus(false,"");
   }
 
@@ -890,62 +910,54 @@ a{color:inherit;text-decoration:none}
     ytPlayer.style.display="none";
     ytLocalFallback.classList.remove("show");
     ytLocalFallback.innerHTML="";
-    setRonflixStatus(true,"RonFlix: fetching stream via Piped...");
+    setRonflixStatus(true,"<b>RonFlix</b>: fetching stream via Piped...");
     const ctrl=new AbortController();
     ronflixFetchCtrl=ctrl;
     const timer=setTimeout(()=>ctrl.abort(),60000);
     try{
       const streamData=await pipedRequest("/streams/"+encodeURIComponent(id),{});
       clearTimeout(timer);
-      if(!streamData) throw new Error("No stream data");
+      if(!streamData) throw new Error("No stream data from Piped API");
       const videoStreams=streamData.videoStreams||[];
       const audioStreams=streamData.audioStreams||[];
-      if(!videoStreams.length) throw new Error("No video streams available");
-      const adaptive=videoStreams.filter(s=>s.videoOnly===true||s.videoOnly==="true");
-      let streamUrl;
-      if(adaptive.length){
-        const sorted=adaptive.sort((a,b)=>(parseInt(b.quality)||0)-(parseInt(a.quality)||0));
-        const chosen=sorted.find(s=>/720|480|360/.test(s.quality))||sorted[0];
-        streamUrl=chosen.url;
-        const bestAudio=audioStreams.sort((a,b)=>(parseInt(b.bitrate)||0)-(parseInt(a.bitrate)||0))[0];
-        if(bestAudio){
-          ronflixVideo.src="";
-          const combo=new MediaSource();
-          ronflixVideo.src=URL.createObjectURL(combo);
-        }else{
-          ronflixVideo.src=streamUrl;
-        }
-      }else{
-        const sorted=videoStreams.filter(s=>s.url).sort((a,b)=>(parseInt(b.quality)||0)-(parseInt(a.quality)||0));
-        const chosen=sorted.find(s=>/720|480/.test(s.quality))||sorted[0];
-        streamUrl=chosen.url;
-        ronflixVideo.src=streamUrl;
+      if(!videoStreams.length) throw new Error("No video streams returned by Piped");
+      function pickBestStream(streams){
+        if(!streams||!streams.length) return null;
+        const accessible=streams.filter(s=>s.url);
+        if(!accessible.length) return null;
+        const proxyStreams=accessible.filter(s=>/proxy|googlevideo|videoplayback/i.test(s.url));
+        const pool=proxyStreams.length?proxyStreams:accessible;
+        const withQuality=pool.map(s=>({...s,_q:parseInt((s.quality||"").match(/\d+/)?.[0]||"0")}));
+        withQuality.sort((a,b)=>b._q-a._q);
+        const hd=withQuality.find(s=>s._q>=720);
+        const sd=withQuality.find(s=>s._q>=360&&s._q<720);
+        return hd||sd||withQuality[0];
       }
-      if(!streamUrl) throw new Error("No playable stream found");
+      let chosen=pickBestStream(videoStreams);
+      if(!chosen) throw new Error("No playable stream found in Piped response");
+      let streamUrl=chosen.url;
+      setRonflixStatus(true,"<b>RonFlix</b>: stream found — loading video...");
       ronflixVideo.src=streamUrl;
       ronflixVideo.defaultPlaybackRate=ronflixSpeed;
       ronflixVideo.playbackRate=ronflixSpeed;
-      setRonflixStatus(true,"RonFlix: stream found — loading video...");
       const mediaTimer=setTimeout(()=>{ try{ ronflixVideo.onerror&&ronflixVideo.onerror(); }catch(_){ } },30000);
       const ok=await new Promise(res=>{
         ronflixVideo.onloadedmetadata=()=>res(true);
         ronflixVideo.onerror=()=>res(false);
       });
       clearTimeout(mediaTimer);
-      if(!ok) throw new Error("stream failed to load");
+      if(!ok) throw new Error("Stream URL loaded but video failed to play — may be CORS blocked");
       if(ronflixFetchCtrl!==ctrl) return;
       setRonflixStatus(false,"");
+      if(ronflixBar) ronflixBar.classList.add("show");
       const p=ronflixVideo.play();
       if(p&&p.catch) p.catch(()=>{});
     }catch(err){
       clearTimeout(timer);
-      console.warn("RonFlix stream:",err);
+      console.warn("RonFlix stream error:",err);
       if(ronflixFetchCtrl===ctrl) ronflixFetchCtrl=null;
       if(currentPlayId===id && playerMode==="ronflix"){
-        playerMode="normal";
-        setModeBtns();
-        if(typeof showToast==="function") showToast("RonFlix stream unavailable — switched to normal player.","info");
-        loadIframe(id,title,"video");
+        setRonflixStatus(true,"<b>RonFlix</b>: " + esc(err.message||"Stream unavailable") + "<br><small>Try Normal or Turbo mode, or paste the video URL directly.</small>");
       }
     }
   }
@@ -961,6 +973,7 @@ a{color:inherit;text-decoration:none}
     if(turboBox) turboBox.classList.toggle("show",turboOn);
     if(turboBar) turboBar.classList.toggle("show",turboOn);
     if(ronflixBox) ronflixBox.classList.toggle("show",ronflixOn);
+    if(ronflixBar) ronflixBar.classList.toggle("show",ronflixOn&&ronflixVideo&&ronflixVideo.src&&!ronflixStatus?.classList.contains("show"));
     if(!turboOn) stopTurbo(false);
     if(!ronflixOn) stopRonflix(false);
   }
@@ -1057,8 +1070,19 @@ a{color:inherit;text-decoration:none}
     }
   });
 
+  ronflixPipBtn?.addEventListener("click",async()=>{
+    if(!ronflixVideo||!ronflixVideo.src) return;
+    try{
+      if(document.pictureInPictureElement===ronflixVideo) await document.exitPictureInPicture();
+      else await ronflixVideo.requestPictureInPicture();
+    }catch(err){
+      if(typeof showToast==="function") showToast("Picture-in-Picture is not supported in this browser.","info");
+    }
+  });
+
   function stopPlayer(){
     stopTurbo(false);
+    stopRonflix(false);
     ytPlayer.removeAttribute("src");
     ytPlayerCard.classList.remove("show");
     currentPlayId="";
