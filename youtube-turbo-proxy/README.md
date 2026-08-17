@@ -78,6 +78,48 @@ docker run -p 8080:8080 -e YT_COOKIES="$(cat cookies.txt)" turbo-proxy
 # then: curl "http://localhost:8080/api/info?id=dQw4w9WgXcQ"
 ```
 
+## Local OmniRoute upstream (avoid ngrok transfer)
+
+`10.74.7.68:20128/v1` is an OpenAI-compatible **upstream**, not a PrepPath
+backend. Do not put that `/v1` URL directly into Admin → Backend Server Routing:
+the app needs this proxy's `/health`, `/api/status`, `/api/study`, `/api/ai-chat`,
+and other routes.
+
+Run this proxy on a machine/container that can reach the private OmniRoute
+service, and set the deployment-only override:
+
+```bash
+docker build -t turbo-proxy youtube-turbo-proxy
+docker run --rm -p 8080:8080 \
+  -e OMNIROUTE_LOCAL_URL="http://10.74.7.68:20128/v1" \
+  -e FIREBASE_SERVICE_ACCOUNT="$FIREBASE_SERVICE_ACCOUNT" \
+  turbo-proxy
+```
+
+The override accepts only literal RFC1918 or loopback IPv4 addresses, HTTP(S),
+and an exact `/v1` (or `/v1/chat/completions`) path. It is read only from the
+local process environment; a Firestore/Admin value cannot redirect Render or
+the bot into a private network. When set, all server-side OmniRoute chat,
+catalog, image, search, speech, and video requests use the local service. The
+public ngrok URL remains in Firestore for Render and browser-direct clients.
+`GET /health` reports `"omniroute_upstream":"local"` without exposing the LAN
+address.
+
+To let users choose this server:
+
+1. Expose the **proxy root** (port 8080 above) through a trusted HTTPS hostname
+   reachable by those users over LAN/VPN, for example `https://prep-proxy.lan`.
+2. Add that HTTPS proxy root in **Admin → Settings → Backend Server Routing**.
+3. Choose **Manual preference + failover** while testing, or **Selected server
+   only** after every intended device can reach it.
+
+The production app is HTTPS, so `http://10.74.7.68:8080` is normally blocked as
+mixed content. A trusted HTTPS reverse proxy/certificate is required. Internet
+users who are not on the LAN/VPN cannot reach a private `10.x` address; serve a
+public HTTPS proxy or VPN path if they must use this upstream. If the Telegram
+bot runs on the same network, set the same `OMNIROUTE_LOCAL_URL` on the bot
+service; otherwise leave it unset and the bot keeps using the public endpoint.
+
 ## Frontend
 
 The app calls this service only when the user opts into **⚡ Turbo** mode; if the
