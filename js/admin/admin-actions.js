@@ -719,6 +719,32 @@ async function saveGroqConfig() {
    with a `transport` use a dedicated proxy adapter. Each provider keeps its own
    key(s)/model in config/ai so switching never wipes the others; the selected
    provider is mirrored into the legacy generic Study fields as well. */
+const OMNIROUTE_DEFAULT_BASE_URL = 'https://precut-uniformly-handsfree.ngrok-free.dev/v1';
+const OMNIROUTE_RETIRED_BASE_URL = 'https://squeak-earthly-obliged.ngrok-free.dev/v1';
+
+function normalizeOmnirouteBaseUrl(value) {
+  var raw = String(value || '').trim();
+  if (!raw || raw.indexOf('\\') !== -1) return '';
+  try {
+    var parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port || parsed.search || parsed.hash) return '';
+    if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ngrok-free\.dev$/.test(parsed.hostname.toLowerCase())) return '';
+    var path = parsed.pathname.replace(/\/+$/, '');
+    if (path === '/v1/chat/completions') path = '/v1';
+    if (path !== '/v1') return '';
+    var base = 'https://' + parsed.hostname.toLowerCase() + '/v1';
+    return base === OMNIROUTE_RETIRED_BASE_URL ? '' : base;
+  } catch (e) { return ''; }
+}
+function omnirouteBaseUrl() {
+  var configured = normalizeOmnirouteBaseUrl(AI_CONFIG && AI_CONFIG.omnirouteBaseUrl);
+  if (configured && configured !== OMNIROUTE_RETIRED_BASE_URL) return configured;
+  return OMNIROUTE_DEFAULT_BASE_URL;
+}
+function studyBaseUrlFor(pid) {
+  return pid === 'omniroute' ? omnirouteBaseUrl() : ((STUDY_PROVIDERS[pid] || {}).baseUrl || '');
+}
+
 const STUDY_PROVIDERS = {
   bynara:   { label: 'Bynara',   host: 'router.bynara.id', baseUrl: '',                           keyField: 'bynaraApiKeys',   modelField: 'bynaraModel',
               models: ['mistral-large', 'mistral-medium-3-5', 'tencent-hy3'], def: 'mistral-large',
@@ -750,7 +776,7 @@ const STUDY_PROVIDERS = {
   aicampus: { label: 'AICampus', host: 'ai-hub.aicampus.my', baseUrl: 'https://ai-hub.aicampus.my/v1', keyField: 'aicampusApiKeys', modelField: 'aicampusModel',
               models: ['minimax-m3', 'kimi-k2.7-code'], def: 'minimax-m3',
               note: 'OpenAI-compatible AI Hub (keys start with sk-hub-)', keyUrl: '' },
-  omniroute: { label: 'OmniRoute', host: 'squeak-earthly-obliged.ngrok-free.dev', baseUrl: 'https://squeak-earthly-obliged.ngrok-free.dev/v1', keyField: 'omnirouteApiKeys', modelField: 'omnirouteModel',
+  omniroute: { label: 'OmniRoute', host: 'precut-uniformly-handsfree.ngrok-free.dev', baseUrl: OMNIROUTE_DEFAULT_BASE_URL, keyField: 'omnirouteApiKeys', modelField: 'omnirouteModel',
               models: ['auto', 'auto/best-coding', 'auto/best-reasoning', 'auto/best-fast', 'auto/best-chat', 'auto/best-vision', 'auto/best-coding-fast', 'auto/pro-coding', 'auto/pro-reasoning', 'auto/pro-vision', 'auto/pro-chat', 'auto/pro-fast', 'auto/coding', 'auto/reasoning', 'auto/fast', 'auto/chat', 'auto/cheap', 'auto/offline', 'auto/smart', 'auto/vision', 'auto/multimodal', 'auto/claude-opus', 'auto/claude-sonnet', 'auto/gemini', 'auto/glm', 'auto/minimax', 'auto/mimo', 'auto/zai', 'auto/llama', 'auto/gemma', 'auto/best-free'], def: 'auto',
               note: 'ngrok Dev Domain · auto/* routing aliases (live list surfaced in the app)', keyUrl: '' },
   kiro:     { label: 'Kiro', host: 'kiro-key-test-s6io.onrender.com', baseUrl: 'https://kiro-key-test-s6io.onrender.com/v1', keyField: 'kiroApiKeys', modelField: 'kiroModel',
@@ -1098,8 +1124,11 @@ function parseCurlIntoStudy() {
   try { host = url ? new URL(url).host : ''; } catch (e) { host = ''; }
   var pid = '';
   if (/\/v1beta\/interactions(?:[/?#]|$)/i.test(url)) pid = 'google_interactions';
+  var pastedOmnirouteBase = normalizeOmnirouteBaseUrl(url);
+  if (!pid && pastedOmnirouteBase) pid = 'omniroute';
   STUDY_PROVIDER_ORDER.forEach(function (k) {
-    if (!pid && STUDY_PROVIDERS[k].host && host.indexOf(STUDY_PROVIDERS[k].host) !== -1) pid = k;
+    var expectedHost = k === 'omniroute' ? new URL(omnirouteBaseUrl()).host : STUDY_PROVIDERS[k].host;
+    if (!pid && expectedHost && host.indexOf(expectedHost) !== -1) pid = k;
   });
   if (!pid) {
     showToast('⚠️ Unknown host "' + (host || '?') + '". Paste a cURL snippet for any provider shown above.');
@@ -1108,6 +1137,10 @@ function parseCurlIntoStudy() {
   if (key) {
     var kb = document.getElementById('study-key-' + pid);
     if (kb) kb.value = key;
+  }
+  if (pid === 'omniroute' && pastedOmnirouteBase) {
+    var endpointInput = document.getElementById('study-base-url-omniroute');
+    if (endpointInput) endpointInput.value = pastedOmnirouteBase;
   }
   var radio = document.querySelector('input[name="study-active"][value="' + pid + '"]');
   if (radio) radio.checked = true;
@@ -1130,6 +1163,14 @@ async function saveStudyAiConfig() {
   });
   const model = provider === 'omniroute' ? 'auto' : (((document.getElementById('study-model') || {}).value) || p.def).trim();
   const activeKeys = allKeys[provider] || [];
+  const endpointInput = document.getElementById('study-base-url-omniroute');
+  const omnirouteBase = normalizeOmnirouteBaseUrl(endpointInput ? endpointInput.value : omnirouteBaseUrl());
+  if (!omnirouteBase) {
+    showToast('⚠️ Enter an HTTPS ngrok-free.dev URL ending in /v1 for OmniRoute.');
+    if (endpointInput) endpointInput.focus();
+    return;
+  }
+  const activeBaseUrl = provider === 'omniroute' ? omnirouteBase : p.baseUrl;
   const browserDirectEnabled = !!((document.getElementById('omniroute-browser-direct') || {}).checked);
   const omnirouteBrowserDirect = browserDirectEnabled;
   if (!activeKeys.length) {
@@ -1139,7 +1180,8 @@ async function saveStudyAiConfig() {
   // studyModel / studyBaseUrl) — the only fields youtube-turbo-proxy reads.
   const payload = {
     studyProvider: provider,
-    studyApiKeys: activeKeys, studyModel: model, studyBaseUrl: p.baseUrl,
+    studyApiKeys: activeKeys, studyModel: model, studyBaseUrl: activeBaseUrl,
+    omnirouteBaseUrl: omnirouteBase,
     studyTransport: p.transport || 'openai_chat',
     omnirouteBrowserDirect: omnirouteBrowserDirect,
     browserDirectEnabled: browserDirectEnabled,
@@ -1153,7 +1195,8 @@ async function saveStudyAiConfig() {
     AI_CONFIG.studyProvider = provider;
     STUDY_PROVIDER_ORDER.forEach(function (k) { AI_CONFIG[STUDY_PROVIDERS[k].keyField] = allKeys[k]; });
     AI_CONFIG[p.modelField] = model;
-    AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = p.baseUrl;
+    AI_CONFIG.omnirouteBaseUrl = omnirouteBase;
+    AI_CONFIG.studyApiKeys = activeKeys; AI_CONFIG.studyModel = model; AI_CONFIG.studyBaseUrl = activeBaseUrl;
     AI_CONFIG.studyTransport = p.transport || 'openai_chat';
     AI_CONFIG.omnirouteBrowserDirect = omnirouteBrowserDirect;
     AI_CONFIG.browserDirectEnabled = browserDirectEnabled;

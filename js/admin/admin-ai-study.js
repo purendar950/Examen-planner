@@ -185,7 +185,10 @@ function aiStudyProviderCard(pid, activePid) {
   var configured = keys.length > 0;
   var stateClass = active ? 'is-active' : (configured ? 'is-ready' : 'is-empty');
   var stateText = active ? 'Live route' : (configured ? 'Standby' : 'Setup');
-  var endpoint = provider.baseUrl || 'Managed by Bynara';
+  var endpoint = studyBaseUrlFor(pid) || 'Managed by Bynara';
+  var endpointBox = pid === 'omniroute'
+    ? '<div class="ai-provider-endpoint ai-provider-endpoint--editable"><label for="study-base-url-omniroute">Endpoint</label><input id="study-base-url-omniroute" class="ai-provider-endpoint-input" type="url" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" value="' + esc(omnirouteBaseUrl()) + '" aria-describedby="study-base-url-omniroute-help"><small id="study-base-url-omniroute-help">HTTPS ngrok Dev Domain ending in <code>/v1</code>. Save to apply it immediately.</small></div>'
+    : '<div class="ai-provider-endpoint" title="' + esc(endpoint) + '"><span>Endpoint</span><code>' + esc(endpoint.replace(/^https?:\/\//, '')) + '</code></div>';
   var health = aiStudyHealthState(pid);
   var keyLink = provider.keyUrl
     ? '<a class="ai-provider-link" href="' + esc(provider.keyUrl) + '" target="_blank" rel="noopener">Get API key ↗</a>'
@@ -212,7 +215,7 @@ function aiStudyProviderCard(pid, activePid) {
       '<span id="study-badge-' + pid + '" class="ai-provider-state ' + stateClass + '"><i></i>' + stateText + '</span>' +
     '</div>' +
     metricsRow +
-    '<div class="ai-provider-endpoint" title="' + esc(endpoint) + '"><span>Endpoint</span><code>' + esc(endpoint.replace(/^https?:\/\//, '')) + '</code></div>' +
+    endpointBox +
     credentialsBox +
     directBrowserBox +
     '<div class="ai-provider-card-foot"><span>' + esc(provider.note) + '</span>' + keyLink + '</div>' +

@@ -58,6 +58,12 @@ def section(start_marker, end_marker):
 
 def load():
     """Execute just the model-catalog helpers with stub providers."""
+    image_cache = {
+        "https://example.invalid/v1": {
+            "ts": time.time(), "attempt_ts": time.time(),
+            "ids": ["pol/flux-schnell", "cx/dall-e-3"], "error": "",
+        },
+    }
     ns = {
         "os": os,
         "re": re,
@@ -69,27 +75,27 @@ def load():
             "google": ["gemini-flash-latest", "gemini-2.5-flash"],
             "mistral": ["mistral-large-latest"],
         },
-        "_omniroute_catalog_flat": lambda: [],
-        # Real value is derived from OMNIROUTE_URL; the tests never call out.
-        "OMNIROUTE_IMAGES_URL": "https://example.invalid/v1/images/generations",
+        "_omniroute_catalog_flat": lambda ids=None: [],
         # OmniRoute's image list is discovered live from its /v1/models catalog.
         # Stubbed here so the suite stays offline and deterministic; the live
         # fetch/caching path is exercised separately by the id-classification
         # checks further down.
-        "_omniroute_fetch_image_model_ids": lambda: ["pol/flux-schnell", "cx/dall-e-3"],
+        "_omniroute_fetch_image_model_ids": lambda *args, **kwargs: ["pol/flux-schnell", "cx/dall-e-3"],
         # Cached live OmniRoute routes make this sliced catalog deterministic.
         # The dedicated cache/refresh behaviour is exercised later in this file.
-        "_omniroute_image_models_cache": {
-            "ts": time.time(), "attempt_ts": time.time(),
-            "ids": ["pol/flux-schnell", "cx/dall-e-3"], "error": "",
-        },
-        "_omniroute_refresh_image_models_async": lambda: None,
+        "_omniroute_image_models_cache": image_cache,
+        "_omniroute_image_cache_for": lambda cfg=None, base_url=None: (
+            "https://example.invalid/v1",
+            image_cache["https://example.invalid/v1"]
+        ),
+        "_resolve_omniroute_base_url": lambda cfg=None: "https://example.invalid/v1",
+        "_omniroute_refresh_image_models_async": lambda *args, **kwargs: None,
         # The OpenRouter image catalog is optional and must stay offline in this
         # sliced-helper test; no credential means the production helper returns [].
         "_configured_provider_keys": lambda cfg, pid: [],
         # _ai_chat_available_models asks for cached route context metadata. This
         # suite tests chat/image separation, so a cache miss is the correct stub.
-        "_omniroute_model_ctx": lambda model_id: 0,
+        "_omniroute_model_ctx": lambda model_id, **kwargs: 0,
     }
     exec(section("IMAGE_MODEL_MARKERS = ", "# Video providers can take minutes"), ns)
     exec(section("def _effective_provider_models_raw(cfg):", "def _model_provider("), ns)
@@ -240,23 +246,28 @@ for r in ("1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"):
 # ── 10. Durable OmniRoute catalogs + cold-start provider grouping ───────────
 # Execute the production helpers with a process-RAM cache that starts empty,
 # exactly as it does after a Render restart while the ngrok catalog is offline.
+OMNI_BASE = "https://example.invalid/v1"
+ns4_chat_cache = {"ts": 0.0, "attempt_ts": 0.0, "ids": [], "ctx": {}}
 ns4 = {
     "os": os, "re": re, "time": time, "threading": threading,
     "STUDY_PROVIDER_MODELS": {"omniroute": ["auto"]},
+    "_resolve_omniroute_base_url": lambda cfg=None: (cfg or {}).get("omnirouteBaseUrl") or OMNI_BASE,
+    "_omniroute_models_cache_for": lambda cfg=None, base_url=None: (OMNI_BASE, ns4_chat_cache),
     # Keep the optional OpenRouter catalog lookup offline in this sliced test.
     "_configured_provider_keys": lambda cfg, pid: [],
 }
 exec(section("def _clean_omniroute_catalog_ids(", "# Image models live"), ns4)
 exec(section("_OMNIROUTE_AUTO_FALLBACK = ", "_omniroute_models_cache = "), ns4)
 exec(section("def _omniroute_item_is_chat(", "def _omniroute_fetch_model_ids("), ns4)
-ns4["_omniroute_models_cache"] = {"ts": 0.0, "attempt_ts": 0.0, "ids": []}
-ns4["_omniroute_refresh_models_async"] = lambda: None
+ns4["_omniroute_models_cache"] = {OMNI_BASE: ns4_chat_cache}
+ns4["_omniroute_refresh_models_async"] = lambda *args, **kwargs: None
 exec(section("def _omniroute_auto_models(", "def _effective_provider_models_raw("), ns4)
 exec(section("def _effective_provider_models_raw(cfg):", "def _model_provider("), ns4)
 exec(section("def _ai_chat_model_key(", "def _ai_chat_tab_sys("), ns4)
 
 durable_cfg = {
     "omnirouteCatalog": {
+        "chatBaseUrl": OMNI_BASE,
         "chatModels": [
             "openrouter/gpt-5", "nvidia/nemotron", "mistral/large",
             "pol/fast-chat", "pol/flux-schnell", "veo-free/veo-3", "cx/whisper-large",
@@ -310,7 +321,7 @@ check("complete catalog keeps direct model IDs",
 # reclassified after restart, while still blocking obvious video/audio/etc.
 exec(section("_OMNIROUTE_IMAGE_ID_MARKERS = ", "_omniroute_image_models_cache = "), ns4)
 image_snapshot = ns4["_omniroute_snapshot_ids"]({
-    "omnirouteCatalog": {"imageModels": [
+    "omnirouteCatalog": {"imageBaseUrl": OMNI_BASE, "imageModels": [
         "zw/brand-new-renderer", "cx/seedream-4.5", "veo-free/veo-3",
         "cx/sora-2", "af/text-embedding-3",
     ]}
@@ -320,24 +331,24 @@ check("typed image snapshot preserves metadata-only image ids",
 check("typed image snapshot excludes video and embedding ids",
       not ({"veo-free/veo-3", "cx/sora-2", "af/text-embedding-3"} & set(image_snapshot)),
       image_snapshot)
-ns4["OMNIROUTE_IMAGES_URL"] = "https://example.invalid/v1/images/generations"
 exec(section("IMAGE_MODEL_MARKERS = ", "# Video providers can take minutes"), ns4)
-ns4["_omniroute_image_models_cache"] = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
-ns4["_omniroute_refresh_image_models_async"] = lambda: None
-ns4["_omniroute_fetch_image_model_ids"] = lambda: []
+ns4_image_cache = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
+ns4["_omniroute_image_models_cache"] = {OMNI_BASE: ns4_image_cache}
+ns4["_omniroute_image_cache_for"] = lambda cfg=None, base_url=None: (OMNI_BASE, ns4_image_cache)
+ns4["_omniroute_refresh_image_models_async"] = lambda *args, **kwargs: None
+ns4["_omniroute_fetch_image_model_ids"] = lambda *args, **kwargs: []
 effective_images = ns4["_effective_image_models"]({
-    "omnirouteCatalog": {"imageModels": ["zw/brand-new-renderer"]},
+    "omnirouteCatalog": {"imageBaseUrl": OMNI_BASE, "imageModels": ["zw/brand-new-renderer"]},
     "imageModels": {"omniroute": ["cx/seedream-4.5"]},
 })["omniroute"]
 check("image picker receives durable and legacy OmniRoute image fallbacks",
       effective_images == ["zw/brand-new-renderer", "cx/seedream-4.5"],
       effective_images)
 image_refresh_calls = []
-ns4["_omniroute_image_models_cache"] = {
-    "ids": ["zw/ram-only-image"], "ts": 0.0, "attempt_ts": 0.0,
-}
-ns4["_omniroute_refresh_image_models_async"] = lambda: image_refresh_calls.append(True)
-ns4["_omniroute_fetch_image_model_ids"] = lambda: (_ for _ in ()).throw(
+ns4_image_cache.clear()
+ns4_image_cache.update({"ids": ["zw/ram-only-image"], "ts": 0.0, "attempt_ts": 0.0})
+ns4["_omniroute_refresh_image_models_async"] = lambda *args, **kwargs: image_refresh_calls.append(True)
+ns4["_omniroute_fetch_image_model_ids"] = lambda *args, **kwargs: (_ for _ in ()).throw(
     AssertionError("stale RAM fallback must not refresh synchronously"))
 ram_only_images = ns4["_effective_image_models"]({})["omniroute"]
 check("stale RAM-only image catalog is served without blocking on the tunnel",
@@ -384,12 +395,16 @@ class _Requests:
 
 
 fake_doc = _FakeDoc()
+ns5_cache = {"ts": 0.0, "attempt_ts": 0.0, "ids": [], "ctx": {}}
 ns5 = {
     "datetime": datetime, "timezone": timezone, "time": time,
     "threading": threading, "_fb_db": _FakeDb(fake_doc),
     "_study_raw_cfg_cache": {"ts": 0.0, "data": {}},
     "log": type("_L", (), {"warning": lambda *a, **k: None})(),
-    "OMNIROUTE_MODELS_URL": "https://example.invalid/v1/models",
+    "_canonicalize_omniroute_base_url": lambda value: OMNI_BASE if value else "",
+    "_resolve_omniroute_base_url": lambda cfg=None: OMNI_BASE,
+    "_omniroute_endpoints": lambda cfg=None, base_url=None: {"models": OMNI_BASE + "/models"},
+    "_omniroute_models_cache_for": lambda cfg=None, base_url=None: (OMNI_BASE, ns5_cache),
     "_OMNIROUTE_MODELS_TTL": 600, "_OMNIROUTE_FAILURE_TTL": 30,
     "_OMNIROUTE_MODELS_TIMEOUT": 60,
 }
@@ -398,7 +413,7 @@ exec(section("_OMNIROUTE_AUTO_FALLBACK = ", "_omniroute_models_cache = "), ns5)
 exec(section("def _persist_omniroute_catalog(", "def _omniroute_refresh_models_async("), ns5)
 exec(section("def _omniroute_item_ctx(item):", "def _omniroute_model_ctx("), ns5)
 exec(section("def _omniroute_item_is_chat(", "# ---- OmniRoute IMAGE models"), ns5)
-ns5["_omniroute_models_cache"] = {"ts": 0.0, "attempt_ts": 0.0, "ids": []}
+ns5["_omniroute_models_cache"] = {OMNI_BASE: ns5_cache}
 ns5["_omniroute_models_lock"] = threading.Lock()
 ns5["requests"] = _Requests(_Response(200, {"data": [
     {"id": "openrouter/gpt-5", "type": "chat", "output_modalities": ["text"]},
@@ -416,8 +431,8 @@ check("live success persists chatModels with field-path merge",
 # Force expiry, then emulate the currently observed ngrok HTTP 404. The fetch
 # must return RAM last-good and must not write/erase the durable snapshot.
 writes_after_success = len(fake_doc.writes)
-ns5["_omniroute_models_cache"]["ts"] = 0.0
-ns5["_omniroute_models_cache"]["attempt_ts"] = 0.0
+ns5_cache["ts"] = 0.0
+ns5_cache["attempt_ts"] = 0.0
 ns5["requests"].response = _Response(404)
 after_404 = ns5["_omniroute_fetch_model_ids"]()
 check("later HTTP 404 retains last-good live ids", after_404 == live_ids, after_404)
@@ -426,7 +441,7 @@ check("later HTTP 404 never erases the durable snapshot",
 
 # Chat and image persistence target independent nested fields, preventing the
 # two asynchronous refreshes from replacing one another.
-ns5["_persist_omniroute_catalog"]("image", ["zw/seedream-4.5"])
+ns5["_persist_omniroute_catalog"]("image", ["zw/seedream-4.5"], OMNI_BASE)
 check("image persistence uses its own atomic field paths",
       "omnirouteCatalog.imageModels" in fake_doc.writes[-1][1] and
       "omnirouteCatalog.chatModels" not in fake_doc.writes[-1][1],

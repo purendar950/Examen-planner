@@ -84,7 +84,7 @@ def load():
         # The live OmniRoute catalog supplies a route's real input window. Stubbed
         # per test via _ROUTE_CTX so the suite stays offline; the parsing of the
         # catalog response itself is checked separately below.
-        "_omniroute_model_ctx": lambda model_id: _ROUTE_CTX.get(model_id, 0),
+        "_omniroute_model_ctx": lambda model_id, **kwargs: _ROUTE_CTX.get(model_id, 0),
     }
     for name in ("_TUTOR_MAX_TOKENS", "AI_CHAT_TRANSCRIPT_CHARS", "_DEFAULT_CTX_TOKENS"):
         exec(const(name), ns)

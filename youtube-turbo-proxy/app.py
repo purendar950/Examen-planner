@@ -36,6 +36,7 @@ import logging
 import secrets
 import math
 import concurrent.futures
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -1113,26 +1114,76 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Bynara: OpenAI-compatible, ~1M context. URL is fixed so the admin only sets
 # key(s) + model. Multiple keys enable automatic failover on limit/error.
 BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
-# OmniRoute is exposed through the account's persistent ngrok Dev Domain.
-# The browser never calls this URL directly; all traffic is routed through this
-# proxy so credentials, rate limits, transcript caching, and audit metadata stay
-# server-side. ngrok's browser-warning bypass is applied by _ai_headers().
-OMNIROUTE_URL = os.environ.get(
-    "OMNIROUTE_URL",
-    "https://squeak-earthly-obliged.ngrok-free.dev/v1/chat/completions",
-).strip().rstrip("/")
-# OmniRoute also exposes the standard OpenAI Images endpoint alongside chat.
-# Define it next to the source URL because image-provider configuration is
-# initialized earlier during module import.
-OMNIROUTE_IMAGES_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/generations")
-# OmniRoute's current public API does not expose a GET /v1/images/models route;
-# image-capable entries are advertised in the normal /v1/models catalog and
-# filtered by output metadata/name markers below.
-OMNIROUTE_IMAGE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
-OMNIROUTE_EDITS_URL = OMNIROUTE_URL.replace("/chat/completions", "/images/edits")
-OMNIROUTE_SEARCH_URL = OMNIROUTE_URL.replace("/chat/completions", "/search")
-OMNIROUTE_TTS_URL = OMNIROUTE_URL.replace("/chat/completions", "/audio/speech")
-OMNIROUTE_VIDEO_URL = OMNIROUTE_URL.replace("/chat/completions", "/videos/generations")
+# OmniRoute is exposed through an account-owned ngrok Dev Domain. The endpoint
+# can change without a deployment, so every runtime call resolves the current
+# config/ai value and derives its typed route from one canonical /v1 base.
+OMNIROUTE_DEFAULT_BASE_URL = "https://precut-uniformly-handsfree.ngrok-free.dev/v1"
+OMNIROUTE_RETIRED_BASE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1"
+_OMNIROUTE_HOST_RE = re.compile(
+    r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ngrok-free\.dev$"
+)
+
+
+def _canonicalize_omniroute_base_url(value):
+    """Return a safe OmniRoute /v1 base, or an empty string.
+
+    Only account ngrok Dev Domains are accepted. Credentials, ports, queries,
+    fragments, non-HTTPS schemes, lookalike hosts, and arbitrary paths are
+    rejected. A full chat-completions URL is accepted for migration and reduced
+    to the same canonical base. The retired tunnel is deliberately invalid.
+    """
+    candidate = str(value or "").strip()
+    if not candidate or "\\" in candidate:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(candidate)
+        hostname = (parsed.hostname or "").lower()
+        if (parsed.scheme.lower() != "https" or parsed.username or parsed.password
+                or parsed.port is not None or parsed.query or parsed.fragment
+                or not _OMNIROUTE_HOST_RE.fullmatch(hostname)
+                or parsed.path not in ("/v1", "/v1/", "/v1/chat/completions",
+                                       "/v1/chat/completions/")):
+            return ""
+    except (TypeError, ValueError):
+        return ""
+    base = "https://%s/v1" % hostname
+    return "" if base == OMNIROUTE_RETIRED_BASE_URL else base
+
+
+def _resolve_omniroute_base_url(cfg=None):
+    """Resolve OmniRoute with config -> active legacy -> env -> default precedence."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    candidates = [cfg.get("omnirouteBaseUrl")]
+    active = str(cfg.get("studyProvider") or "").strip().lower()
+    transport = str(cfg.get("studyTransport") or "openai_chat").strip().lower()
+    if active == "omniroute" and transport == "openai_chat":
+        candidates.append(cfg.get("studyBaseUrl"))
+    candidates.extend([os.environ.get("OMNIROUTE_URL"), OMNIROUTE_DEFAULT_BASE_URL])
+    for candidate in candidates:
+        canonical = _canonicalize_omniroute_base_url(candidate)
+        if canonical:
+            return canonical
+    # The compiled-in default is validated by construction; keep this explicit
+    # return so a malformed environment value can never make routing empty.
+    return OMNIROUTE_DEFAULT_BASE_URL
+
+
+def _omniroute_endpoints(cfg=None, base_url=None):
+    """Derive every OmniRoute capability URL from one resolved base."""
+    base = (_canonicalize_omniroute_base_url(base_url)
+            if base_url else _resolve_omniroute_base_url(cfg))
+    if not base:
+        base = OMNIROUTE_DEFAULT_BASE_URL
+    return {
+        "base": base,
+        "chat": base + "/chat/completions",
+        "models": base + "/models",
+        "images": base + "/images/generations",
+        "edits": base + "/images/edits",
+        "search": base + "/search",
+        "speech": base + "/audio/speech",
+        "video": base + "/videos/generations",
+    }
 # OpenRouter exposes video generation as an asynchronous API. It is used only
 # as a server-side fallback when the configured OmniRoute video route is absent
 # or unavailable; keys never reach the browser.
@@ -1911,7 +1962,7 @@ def _ai_chat_available_models(cfg):
             # Lets the browser say whether an attached video fits BEFORE the
             # student asks, instead of discovering it from a truncated answer.
             # Omitted rather than guessed when unknown.
-            window = _omniroute_model_ctx(model)
+            window = _omniroute_model_ctx(model, cfg=cfg)
             if window:
                 entry["contextTokens"] = window
             out.append(entry)
@@ -2465,8 +2516,12 @@ def _omniroute_snapshot_ids(cfg, kind):
     Obvious non-image media/embedding IDs are still rejected.
     """
     field = "chatModels" if kind == "chat" else "imageModels"
+    base_field = "chatBaseUrl" if kind == "chat" else "imageBaseUrl"
     catalog = (cfg or {}).get("omnirouteCatalog") or {}
-    ids = _clean_omniroute_catalog_ids(catalog.get(field) if isinstance(catalog, dict) else [])
+    if (not isinstance(catalog, dict)
+            or catalog.get(base_field) != _resolve_omniroute_base_url(cfg)):
+        return []
+    ids = _clean_omniroute_catalog_ids(catalog.get(field))
     if kind == "chat" and "_omniroute_item_is_chat" in globals():
         ids = [model_id for model_id in ids
                if _omniroute_item_is_chat({}, model_id)]
@@ -2543,7 +2598,6 @@ IMAGE_PROVIDER_TRANSPORT = {
 }
 IMAGE_PROVIDER_ENDPOINTS = {
     "openrouter": OPENROUTER_IMAGES_URL,
-    "omniroute": OMNIROUTE_IMAGES_URL,
 }
 
 
@@ -2570,13 +2624,13 @@ def _effective_image_models(cfg):
             # and refresh the live (~62 model) catalog in the background.
             # Without any fallback, do one synchronous discovery so a fresh
             # install can populate the picker on its first status request.
-            cached = (list(_omniroute_image_models_cache.get("ids") or [])
-                      if "_omniroute_image_models_cache" in globals() else [])
+            _, image_cache = _omniroute_image_cache_for(cfg)
+            cached = list(image_cache.get("ids") or [])
             if fallback or cached:
                 discovered = cached
-                _omniroute_refresh_image_models_async()
+                _omniroute_refresh_image_models_async(cfg)
             else:
-                discovered = _omniroute_fetch_image_model_ids()
+                discovered = _omniroute_fetch_image_model_ids(cfg=cfg)
             out[pid] = _omniroute_image_order(
                 [model_id for model_id in _merge_unique_model_ids(discovered, fallback)
                  if _omniroute_image_model_id_is_route_compatible(model_id)])
@@ -2921,17 +2975,19 @@ def _omniroute_typed_catalog(cfg, kind):
         "speech": OMNIROUTE_SPEECH_FALLBACK_MODELS,
         "video": OMNIROUTE_VIDEO_FALLBACK_MODELS,
     }.get(kind, [])
+    endpoints = _omniroute_endpoints(cfg)
+    cache_key = (endpoints["base"], kind)
     now = time.time()
-    cached = _omniroute_typed_catalog_cache.get(kind) or {}
+    cached = _omniroute_typed_catalog_cache.get(cache_key) or {}
     if cached.get("ids") and now - float(cached.get("ts") or 0) < _OMNIROUTE_TYPED_CATALOG_TTL:
         return list(cached["ids"])
     if not _provider_configured(cfg, "omniroute"):
         return []
     keys = _configured_provider_keys(cfg, "omniroute")
     urls = {
-        "search": [OMNIROUTE_SEARCH_URL],
-        "video": [OMNIROUTE_VIDEO_URL],
-        "speech": [OMNIROUTE_MODELS_URL],
+        "search": [endpoints["search"]],
+        "video": [endpoints["video"]],
+        "speech": [endpoints["models"]],
     }.get(kind, [])
     discovered = []
     for url in urls:
@@ -2973,7 +3029,7 @@ def _omniroute_typed_catalog(cfg, kind):
     if kind == "video":
         ids = _omniroute_video_order(ids)
     if ids:
-        _omniroute_typed_catalog_cache[kind] = {"ts": now, "ids": list(ids)}
+        _omniroute_typed_catalog_cache[cache_key] = {"ts": now, "ids": list(ids)}
     return ids
 
 
@@ -3076,7 +3132,8 @@ def _ai_chat_generate_speech(cfg, model_id, text, voice="alloy", response_format
             "response_format": str(response_format or "mp3")[:12]}
     if not body["input"]:
         return None, "Speech text is empty.", ""
-    return _omniroute_binary_request(cfg, OMNIROUTE_TTS_URL, body, "Text-to-speech", timeout=120)
+    return _omniroute_binary_request(
+        cfg, _omniroute_endpoints(cfg)["speech"], body, "Text-to-speech", timeout=120)
 
 
 def _omniroute_video_candidates(cfg, requested):
@@ -3275,7 +3332,8 @@ def _ai_chat_generate_video(cfg, model_id, prompt, aspect_ratio="16:9", duration
         if source_image:
             body["image"] = str(source_image)[:16 * 1024 * 1024]
         result, detail, content_type = _omniroute_binary_request(
-            cfg, OMNIROUTE_VIDEO_URL, body, "Video generation", timeout=300, media_kind="video")
+            cfg, _omniroute_endpoints(cfg)["video"], body,
+            "Video generation", timeout=300, media_kind="video")
         if result is not None:
             return result, None, content_type, candidate
         failure_text = detail or "empty response"
@@ -3322,7 +3380,8 @@ def _ai_chat_search(cfg, model_id, query, search_type="web", max_results=6):
         limit = 6
     body = {"model": str(model_id or "duckduckgo-free").strip(), "query": query,
             "search_type": str(search_type or "web")[:20], "max_results": limit}
-    payload, error = _omniroute_json_request(cfg, OMNIROUTE_SEARCH_URL, body, "Web search", timeout=60)
+    payload, error = _omniroute_json_request(
+        cfg, _omniroute_endpoints(cfg)["search"], body, "Web search", timeout=60)
     if error:
         return None, error
     rows = payload.get("data") if isinstance(payload, dict) else []
@@ -3367,13 +3426,16 @@ def _ai_chat_generate_image(cfg, provider, model_id, prompt, aspect_ratio=None, 
         label = STUDY_PROVIDER_LABELS.get(provider, provider.title())
         return None, "No %s API key is configured for image generation." % label
     if transport in ("openai_images", "openrouter_images"):
-        endpoint = IMAGE_PROVIDER_ENDPOINTS.get(provider)
+        omniroute_endpoints = _omniroute_endpoints(cfg) if provider == "omniroute" else None
+        endpoint = (omniroute_endpoints["images"] if omniroute_endpoints
+                    else IMAGE_PROVIDER_ENDPOINTS.get(provider))
         if not endpoint:
             return None, "No image endpoint is configured for that provider."
         if source_image:
             if transport == "openrouter_images":
                 return None, "OpenRouter image editing is not enabled for this model."
-            return _generate_image_openai_edits_api(OMNIROUTE_EDITS_URL, keys, model_id, prompt, source_image)
+            return _generate_image_openai_edits_api(
+                omniroute_endpoints["edits"], keys, model_id, prompt, source_image)
         if transport == "openrouter_images":
             return _generate_image_openrouter_images_api(endpoint, keys, model_id, prompt, aspect_ratio)
         return _generate_image_openai_images_api(endpoint, keys, model_id, prompt, aspect_ratio)
@@ -5881,7 +5943,7 @@ def _model_ctx_tokens(ai):
     into a 400), and it capped genuine 1000000-token routes at the same 200000
     (needlessly truncating a long lecture that would have fitted whole).
     Providers the catalog cannot describe keep the previous default."""
-    routed = _omniroute_model_ctx(ai.get("model"))
+    routed = _omniroute_model_ctx(ai.get("model"), base_url=ai.get("base_url"))
     if routed:
         return routed
     return _PROVIDER_CTX_TOKENS.get((ai.get("provider") or "").lower(), _DEFAULT_CTX_TOKENS)
@@ -9378,11 +9440,20 @@ STUDY_TEST_PROVIDERS = {
     "bluesminds": {"url": "https://api.bluesminds.com/v1/chat/completions", "keyField": "bluesmindsApiKeys", "modelField": "bluesmindsModel", "def": "gpt-5.2-chat"},
     # AICampus AI Hub gateway (OpenAI-compatible, multi-model; keys start with sk-hub-).
     "aicampus":   {"url": "https://ai-hub.aicampus.my/v1/chat/completions", "keyField": "aicampusApiKeys", "modelField": "aicampusModel", "def": "minimax-m3"},
-    # OmniRoute through the stable ngrok Dev Domain (OpenAI-compatible router).
-    "omniroute":  {"url": OMNIROUTE_URL, "keyField": "omnirouteApiKeys", "modelField": "omnirouteModel", "def": "auto"},
+    # OmniRoute URL is resolved from each loaded config by _study_provider_url().
+    "omniroute":  {"url": "", "keyField": "omnirouteApiKeys", "modelField": "omnirouteModel", "def": "auto"},
     # Kiro CLI backend (OpenAI-compatible wrapper around kiro-cli headless mode).
     "kiro":       {"url": "https://kiro-key-test-s6io.onrender.com/v1/chat/completions", "keyField": "kiroApiKeys", "modelField": "kiroModel", "def": "auto"},
 }
+
+
+def _study_provider_url(cfg, pid, meta=None):
+    """Return the current endpoint for one provider without mutating registry defaults."""
+    if pid == "omniroute":
+        return _omniroute_endpoints(cfg)["chat"]
+    return str((meta or STUDY_TEST_PROVIDERS.get(pid) or {}).get("url") or "").strip()
+
+
 # Selectable models per provider (mirrors the admin panel's STUDY_PROVIDERS).
 # Surfaced via /api/status so the study panel's model dropdown only offers the
 # ACTIVE provider's models — so whatever the user picks is always valid.
@@ -9414,7 +9485,6 @@ STUDY_PROVIDER_LABELS = {"openrouter": "OpenRouter", "nvidia": "NVIDIA", "google
 # must reflect the complete live catalog immediately. Availability is resolved
 # when a selected model is called; using asynchronous one-model health probes as
 # a visibility gate previously left the picker permanently stuck on Auto.
-OMNIROUTE_MODELS_URL = OMNIROUTE_URL.replace("/chat/completions", "/models")
 # Used for AI Chat image generation (see _generate_image_openai_images_api).
 _OMNIROUTE_MODELS_TTL = int(os.environ.get("OMNIROUTE_MODELS_TTL", "600"))
 # The live /v1/models catalog can exceed 1.8 MB and takes several seconds to
@@ -9487,66 +9557,70 @@ _OMNIROUTE_AUTO_FAMILY_LABELS = {
 # nara/mistral-large at 252000, kc/mistralai/mistral-large-2512 at 262144 and
 # bm/mistralai/mistral-large at 128000. A name-keyed table would be wrong for
 # most routes, which is why this is read from the catalog rather than hardcoded.
-_omniroute_models_cache = {"ts": 0.0, "attempt_ts": 0.0, "ids": [], "ctx": {}}
+_omniroute_models_cache = {}
 _omniroute_models_lock = threading.Lock()
 _omniroute_refresh_guard = threading.Lock()
-_omniroute_refresh_running = False
+_omniroute_refresh_running = set()
 
 
-def _persist_omniroute_catalog(kind, ids):
-    """Atomically persist a successful typed live discovery to config/ai.
+def _omniroute_models_cache_for(cfg=None, base_url=None):
+    base = ((_canonicalize_omniroute_base_url(base_url)
+             if base_url else _resolve_omniroute_base_url(cfg))
+            or OMNIROUTE_DEFAULT_BASE_URL)
+    return base, _omniroute_models_cache.setdefault(
+        base, {"ts": 0.0, "attempt_ts": 0.0, "ids": [], "ctx": {}})
 
-    Field-path merging is important: chat and image refresh threads may finish
-    concurrently, and neither is allowed to replace the other's last-good
-    snapshot. Failed/empty discoveries never call this helper.
-    """
+
+def _persist_omniroute_catalog(kind, ids, base_url):
+    """Atomically persist one successful discovery with its source endpoint."""
     field = "chatModels" if kind == "chat" else "imageModels"
     updated_field = "chatUpdatedAt" if kind == "chat" else "imageUpdatedAt"
+    base_field = "chatBaseUrl" if kind == "chat" else "imageBaseUrl"
     cleaned = _clean_omniroute_catalog_ids(ids)
-    if not cleaned or not _fb_db:
+    canonical_base = _canonicalize_omniroute_base_url(base_url)
+    if not cleaned or not canonical_base or not _fb_db:
         return False
     updated_at = datetime.now(timezone.utc)
-    data = {"omnirouteCatalog": {field: cleaned, updated_field: updated_at}}
+    data = {"omnirouteCatalog": {
+        field: cleaned, updated_field: updated_at, base_field: canonical_base}}
     merge_fields = ["omnirouteCatalog.%s" % field,
-                    "omnirouteCatalog.%s" % updated_field]
+                    "omnirouteCatalog.%s" % updated_field,
+                    "omnirouteCatalog.%s" % base_field]
     try:
         _fb_db.collection("config").document("ai").set(data, merge=merge_fields)
-        # Keep this process's short raw-config cache coherent as well. The live
-        # IDs already serve the current response; this prevents a later status
-        # request from briefly seeing an older snapshot.
         cached_cfg = _study_raw_cfg_cache.get("data")
         if isinstance(cached_cfg, dict):
             catalog = cached_cfg.setdefault("omnirouteCatalog", {})
             if isinstance(catalog, dict):
                 catalog[field] = list(cleaned)
                 catalog[updated_field] = updated_at
+                catalog[base_field] = canonical_base
         return True
     except Exception as exc:  # noqa: BLE001
         log.warning("OmniRoute %s catalog persistence failed: %s", kind, exc)
         return False
 
 
-def _omniroute_refresh_models_async():
+def _omniroute_refresh_models_async(cfg=None):
     """Refresh chat routes without delaying status when a fallback exists."""
-    global _omniroute_refresh_running
+    base, cache = _omniroute_models_cache_for(cfg)
     now = time.time()
-    cached = _omniroute_models_cache["ids"]
-    if cached and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+    cached = cache["ids"]
+    if cached and now - cache["ts"] < _OMNIROUTE_MODELS_TTL:
         return
-    if now - _omniroute_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+    if now - cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
         return
     with _omniroute_refresh_guard:
-        if _omniroute_refresh_running:
+        if base in _omniroute_refresh_running:
             return
-        _omniroute_refresh_running = True
+        _omniroute_refresh_running.add(base)
 
     def refresh():
-        global _omniroute_refresh_running
         try:
-            _omniroute_fetch_model_ids()
+            _omniroute_fetch_model_ids(base_url=base)
         finally:
             with _omniroute_refresh_guard:
-                _omniroute_refresh_running = False
+                _omniroute_refresh_running.discard(base)
 
     threading.Thread(target=refresh, name="omniroute-chat-catalog", daemon=True).start()
 
@@ -9569,18 +9643,14 @@ def _omniroute_item_ctx(item):
     return 0
 
 
-def _omniroute_model_ctx(model_id):
-    """A route's input window from the cached catalog, or 0 if unknown.
-
-    Deliberately cache-only: this is called while building every prompt, so it
-    must never block on the network. The catalog is refreshed by /api/status and
-    the background refresher; until one lands, callers fall back to the provider
-    default exactly as before."""
+def _omniroute_model_ctx(model_id, cfg=None, base_url=None):
+    """A route's cached input window for the resolved endpoint, or 0."""
     model_id = str(model_id or "").strip()
     if not model_id:
         return 0
     try:
-        return int(_omniroute_models_cache.get("ctx", {}).get(model_id) or 0)
+        _, cache = _omniroute_models_cache_for(cfg, base_url)
+        return int(cache.get("ctx", {}).get(model_id) or 0)
     except (TypeError, ValueError):
         return 0
 
@@ -9601,30 +9671,26 @@ def _omniroute_item_is_chat(item, model_id):
     return not any(marker in lowered_id for marker in _OMNIROUTE_NON_CHAT_ID_MARKERS)
 
 
-def _omniroute_fetch_model_ids():
-    """All text/chat IDs from OmniRoute /v1/models, cached server-side.
-
-    A stale last-good list remains usable during an outage. Failed cold-start
-    refreshes are negatively cached for a short interval so one /api/status
-    request cannot block repeatedly before returning the Auto fallback.
-    """
+def _omniroute_fetch_model_ids(cfg=None, base_url=None):
+    """All text/chat IDs from this config's OmniRoute /models endpoint."""
+    base, cache = _omniroute_models_cache_for(cfg, base_url)
     now = time.time()
-    cached_ids = _omniroute_models_cache["ids"]
-    if cached_ids and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+    cached_ids = cache["ids"]
+    if cached_ids and now - cache["ts"] < _OMNIROUTE_MODELS_TTL:
         return list(cached_ids)
-    if now - _omniroute_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+    if now - cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
         return list(cached_ids)
     with _omniroute_models_lock:
         now = time.time()
-        cached_ids = _omniroute_models_cache["ids"]
-        if cached_ids and now - _omniroute_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+        cached_ids = cache["ids"]
+        if cached_ids and now - cache["ts"] < _OMNIROUTE_MODELS_TTL:
             return list(cached_ids)
-        if now - _omniroute_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+        if now - cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
             return list(cached_ids)
-        _omniroute_models_cache["attempt_ts"] = now
+        cache["attempt_ts"] = now
         try:
             r = requests.get(
-                OMNIROUTE_MODELS_URL,
+                _omniroute_endpoints(base_url=base)["models"],
                 headers={"ngrok-skip-browser-warning": "true"},
                 timeout=_OMNIROUTE_MODELS_TIMEOUT,
             )
@@ -9639,37 +9705,23 @@ def _omniroute_fetch_model_ids():
                     model_id = str(item.get("id") or "").strip()
                     if not model_id or not _omniroute_item_is_chat(item, model_id):
                         continue
-                    # Record the advertised input window. Prefer max_input_tokens
-                    # over context_length: context_length covers input AND output
-                    # on some routes, and budgeting a prompt against it would
-                    # leave no room for the answer.
                     window = _omniroute_item_ctx(item)
                     if window:
-                        # One ID can appear under several route records; keep the
-                        # smallest so the budget is never larger than a route
-                        # actually serving the request can accept.
                         prev = ctx_map.get(model_id)
                         ctx_map[model_id] = min(prev, window) if prev else window
-                    # The catalog can publish one ID through several route
-                    # types. Retain it when at least one record explicitly
-                    # supports text chat; ID-family filtering above still
-                    # excludes ambiguous image/audio/video model names.
                     if model_id not in seen:
                         seen.add(model_id)
                         candidates.append(model_id)
-                ids = candidates
-                if ids:
-                    _omniroute_models_cache["ids"] = ids
-                    # Replaced wholesale alongside ids so a route that has
-                    # disappeared cannot leave a stale window behind.
-                    _omniroute_models_cache["ctx"] = ctx_map
-                    _omniroute_models_cache["ts"] = now
-                    _persist_omniroute_catalog("chat", ids)
-                    return list(ids)
+                if candidates:
+                    cache["ids"] = candidates
+                    cache["ctx"] = ctx_map
+                    cache["ts"] = now
+                    _persist_omniroute_catalog("chat", candidates, base)
+                    return list(candidates)
             log.warning("OmniRoute /models refresh: HTTP %s", r.status_code)
         except Exception as exc:  # noqa: BLE001
             log.warning("OmniRoute /models refresh failed: %s", exc)
-        return list(_omniroute_models_cache["ids"])
+        return list(cache["ids"])
 
 
 # ---- OmniRoute IMAGE models -----------------------------------------------
@@ -9703,33 +9755,40 @@ _OMNIROUTE_NOT_IMAGE_MARKERS = (
     "rerank", "moderation", "safety", "video", "transcri",
 )
 _OMNIROUTE_IMAGE_TYPES = {"image", "images", "text-to-image", "text_to_image", "image-generation"}
-_omniroute_image_models_cache = {"ids": [], "ts": 0.0, "attempt_ts": 0.0}
+_omniroute_image_models_cache = {}
 _omniroute_image_models_lock = threading.Lock()
 _omniroute_image_refresh_guard = threading.Lock()
-_omniroute_image_refresh_running = False
+_omniroute_image_refresh_running = set()
 
 
-def _omniroute_refresh_image_models_async():
-    """Refresh the image catalog without delaying status when fallbacks exist."""
-    global _omniroute_image_refresh_running
+def _omniroute_image_cache_for(cfg=None, base_url=None):
+    base = ((_canonicalize_omniroute_base_url(base_url)
+             if base_url else _resolve_omniroute_base_url(cfg))
+            or OMNIROUTE_DEFAULT_BASE_URL)
+    return base, _omniroute_image_models_cache.setdefault(
+        base, {"ids": [], "ts": 0.0, "attempt_ts": 0.0})
+
+
+def _omniroute_refresh_image_models_async(cfg=None):
+    """Refresh this endpoint's image catalog without delaying status."""
+    base, cache = _omniroute_image_cache_for(cfg)
     now = time.time()
-    cached = _omniroute_image_models_cache["ids"]
-    if cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+    cached = cache["ids"]
+    if cached and now - cache["ts"] < _OMNIROUTE_MODELS_TTL:
         return
-    if now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+    if now - cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
         return
     with _omniroute_image_refresh_guard:
-        if _omniroute_image_refresh_running:
+        if base in _omniroute_image_refresh_running:
             return
-        _omniroute_image_refresh_running = True
+        _omniroute_image_refresh_running.add(base)
 
     def refresh():
-        global _omniroute_image_refresh_running
         try:
-            _omniroute_fetch_image_model_ids()
+            _omniroute_fetch_image_model_ids(base_url=base)
         finally:
             with _omniroute_image_refresh_guard:
-                _omniroute_image_refresh_running = False
+                _omniroute_image_refresh_running.discard(base)
 
     threading.Thread(target=refresh, name="omniroute-image-catalog", daemon=True).start()
 
@@ -9771,31 +9830,34 @@ def _omniroute_item_is_image(item, model_id):
     return _omniroute_id_is_image(model_id)
 
 
-def _omniroute_fetch_image_model_ids(force=False):
-    """Return the exact model IDs accepted by OmniRoute's image route.
+def _omniroute_fetch_image_model_ids(force=False, cfg=None, base_url=None):
+    """Return the exact model IDs accepted by this config's image route.
 
     The current OmniRoute public API exposes image-capable entries through the
     broad ``GET /v1/models`` catalog. Filter that catalog using output metadata
     and image-model markers, while retaining persisted image IDs during a
     temporary tunnel/catalog outage.
     """
+    base = (_canonicalize_omniroute_base_url(base_url)
+            if base_url else _resolve_omniroute_base_url(cfg))
+    current_base, cache = _omniroute_image_cache_for(base_url=base)
     now = time.time()
-    cached = _omniroute_image_models_cache["ids"]
-    if not force and cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+    cached = cache["ids"]
+    if not force and cached and now - cache["ts"] < _OMNIROUTE_MODELS_TTL:
         return list(cached)
-    if not force and now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+    if not force and now - cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
         return list(cached)
     with _omniroute_image_models_lock:
         now = time.time()
-        cached = _omniroute_image_models_cache["ids"]
-        if not force and cached and now - _omniroute_image_models_cache["ts"] < _OMNIROUTE_MODELS_TTL:
+        cached = cache["ids"]
+        if not force and cached and now - cache["ts"] < _OMNIROUTE_MODELS_TTL:
             return list(cached)
-        if not force and now - _omniroute_image_models_cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
+        if not force and now - cache["attempt_ts"] < _OMNIROUTE_FAILURE_TTL:
             return list(cached)
-        _omniroute_image_models_cache["attempt_ts"] = now
+        cache["attempt_ts"] = now
         headers = {"ngrok-skip-browser-warning": "true"}
         try:
-            for catalog_url in (OMNIROUTE_IMAGE_MODELS_URL,):
+            for catalog_url in (_omniroute_endpoints(base_url=current_base)["models"],):
                 r = requests.get(catalog_url, headers=headers, timeout=_OMNIROUTE_MODELS_TIMEOUT)
                 if r.status_code != 200:
                     log.warning("OmniRoute image catalog refresh %s: HTTP %s", catalog_url, r.status_code)
@@ -9817,16 +9879,16 @@ def _omniroute_fetch_image_model_ids(force=False):
                         seen.add(model_id)
                         ids.append(model_id)
                 if ids:
-                    _omniroute_image_models_cache["ids"] = ids
-                    _omniroute_image_models_cache["ts"] = now
-                    _persist_omniroute_catalog("image", ids)
+                    cache["ids"] = ids
+                    cache["ts"] = now
+                    _persist_omniroute_catalog("image", ids, current_base)
                     return list(ids)
         except Exception as exc:  # noqa: BLE001
             log.warning("OmniRoute image catalog refresh failed: %s", exc)
         # A forced refresh is used by the image route as a reachability check.
         # Never return stale IDs in that mode: they can point at a dead tunnel
         # and turn every fallback attempt into another 404.
-        return [] if force else list(_omniroute_image_models_cache["ids"])
+        return [] if force else list(cache["ids"])
 
 
 def _omniroute_auto_models(ids=None):
@@ -9888,8 +9950,9 @@ def _omniroute_catalog_providers(ids=None):
 
 
 def _omniroute_catalog_available(cfg=None):
-    """Whether live RAM or durable config contains concrete provider routes."""
-    ids = list(_omniroute_models_cache["ids"])
+    """Whether this endpoint's live RAM or durable config has concrete routes."""
+    _, cache = _omniroute_models_cache_for(cfg)
+    ids = list(cache.get("ids") or [])
     if cfg is not None:
         ids = _merge_unique_model_ids(
             ids,
@@ -9932,12 +9995,13 @@ def _effective_provider_models_raw(cfg):
             fallback = [model_id for model_id in
                         _merge_unique_model_ids(durable, legacy)
                         if _omniroute_item_is_chat({}, model_id)]
-            cached = list(_omniroute_models_cache.get("ids") or [])
+            _, route_cache = _omniroute_models_cache_for(cfg)
+            cached = list(route_cache.get("ids") or [])
             if fallback or cached:
                 catalog_ids = _merge_unique_model_ids(cached, fallback)
-                _omniroute_refresh_models_async()
+                _omniroute_refresh_models_async(cfg)
             else:
-                catalog_ids = _omniroute_fetch_model_ids()
+                catalog_ids = _omniroute_fetch_model_ids(cfg=cfg)
             # The same complete set drives selectors and request validation, so
             # every visible canonical model ID is forwarded unchanged.
             out[pid] = _omniroute_catalog_flat(catalog_ids)
@@ -10534,7 +10598,7 @@ def _ai_for_provider(cfg, pid, model=None):
         log.warning("Replacing unavailable %s model %s with the current catalog default", pid, selected_model)
         selected_model = allowed_models[0] if allowed_models else meta["def"]
     ai = {
-        "base_url": meta["url"],
+        "base_url": _study_provider_url(cfg, pid, meta),
         "keys": keys,
         "model": selected_model,
         "big_context": pid not in _NOT_BIG_CONTEXT,
@@ -10637,10 +10701,11 @@ def api_study_test():
             continue
         t0 = time.time()
         try:
+            provider_url = _study_provider_url(cfg, pid, meta)
             probe_ai = {
                 "provider": pid,
                 "transport": meta.get("transport", "openai_chat"),
-                "base_url": meta["url"],
+                "base_url": provider_url,
                 "model": model,
             }
             if _is_google_interactions(probe_ai):
@@ -10649,7 +10714,7 @@ def api_study_test():
                 probe_url = _google_interactions_url(probe_ai)
             else:
                 probe_body = {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}
-                probe_url = meta["url"]
+                probe_url = provider_url
             r = requests.post(
                 probe_url,
                 headers=_ai_headers(probe_ai, keys[0]),
@@ -13728,7 +13793,7 @@ def _browser_direct_provider_configs(cfg):
             continue
         provider = STUDY_TEST_PROVIDERS.get(pid) or {}
         keys = _configured_provider_keys(cfg, pid)
-        chat_url = str(provider.get("url") or "").strip()
+        chat_url = _study_provider_url(cfg, pid, provider)
         if not keys or not chat_url:
             continue
         transport = str(provider.get("transport") or "openai_chat").strip().lower()
@@ -13742,13 +13807,15 @@ def _browser_direct_provider_configs(cfg):
         if pid == "google":
             interactions = STUDY_TEST_PROVIDERS.get("google_interactions") or {}
             item["imageUrl"] = str(interactions.get("url") or "").strip()
-        elif pid in IMAGE_PROVIDER_ENDPOINTS:
-            item["imageUrl"] = IMAGE_PROVIDER_ENDPOINTS[pid]
+        elif pid in IMAGE_PROVIDER_ENDPOINTS or pid == "omniroute":
+            item["imageUrl"] = (_omniroute_endpoints(cfg)["images"] if pid == "omniroute"
+                                else IMAGE_PROVIDER_ENDPOINTS[pid])
         if pid == "omniroute":
+            endpoints = _omniroute_endpoints(cfg)
             item.update({
-                "searchUrl": OMNIROUTE_SEARCH_URL,
-                "speechUrl": OMNIROUTE_TTS_URL,
-                "videoUrl": OMNIROUTE_VIDEO_URL,
+                "searchUrl": endpoints["search"],
+                "speechUrl": endpoints["speech"],
+                "videoUrl": endpoints["video"],
             })
         out[pid] = item
     return out
