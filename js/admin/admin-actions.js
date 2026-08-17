@@ -1906,7 +1906,7 @@ function renderSettings() {
   var backendManual = (CONFIG && CONFIG.turbo && CONFIG.turbo.backendManualServerId) || backendSnapshot.manualServerId || '';
   var backendCard = '<div class="card" style="margin-bottom:1rem;">' +
     '<h3 style="margin-bottom:0.5rem;">&#127760; Backend Server Routing</h3>' +
-    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Manage Render proxy servers used for AI notes, Tutor, transcripts, Turbo video, and proxy media. <strong>Auto</strong> tries the healthiest server. <strong>Manual preference</strong> starts with your selected server but keeps failover. <strong>Selected server only</strong> sends these proxy requests exclusively to that server and never falls back. The separate Telegram bot service is not changed here.</p>' +
+    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Manage full <code>youtube-turbo-proxy</code> servers used for AI notes, Tutor, transcripts, Turbo video, and proxy media. <strong>Auto</strong> tries the healthiest server. <strong>Manual preference</strong> starts with your selected server but keeps failover. <strong>Selected server only</strong> sends these proxy requests exclusively to that server and never falls back. The separate Telegram bot service is not changed here. A Local Server URL must be the proxy root (for example <code>https://proxy.your-lan.example</code>), never the raw OmniRoute <code>…/v1</code> endpoint.</p>' +
     '<div class="row" style="gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:0.85rem;">' +
       '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Routing mode' +
         '<select id="cfg-backend-mode" style="min-width:210px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
@@ -1939,11 +1939,11 @@ function renderSettings() {
     '</div>' +
     '<div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px;">' +
       '<input id="cfg-backend-new-label" placeholder="New server label" style="flex:0 1 180px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
-      '<input id="cfg-backend-new-url" placeholder="https://your-backup.example.com" style="flex:1 1 280px;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:monospace;font-size:.78rem;">' +
+      '<input id="cfg-backend-new-url" placeholder="https://your-proxy.example.com (proxy root, no /v1)" style="flex:1 1 280px;padding:8px;border:1px solid var(--border);border-radius:8px;font-family:monospace;font-size:.78rem;">' +
       '<button class="btn btn-blue" onclick="addBackendServer()">＋ Add server</button>' +
     '</div>' +
     '<div id="backend-server-status" class="muted" role="status" tabindex="-1" style="font-size:.78rem;margin-top:8px;"></div>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:7px;line-height:1.55;">Current backup: <code>https://youtube-turbo-proxy.onrender.com</code>. The app stores the registry in <code>config/turbo</code>; server credentials are never entered here.</div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:7px;line-height:1.55;">Current backup: <code>https://youtube-turbo-proxy.onrender.com</code>. The app stores the registry in <code>config/turbo</code>; server credentials are never entered here.<br><strong>Local OmniRoute:</strong> run this repository’s proxy on the Local Server with <code>OMNIROUTE_LOCAL_URL=http://10.74.7.68:20128/v1</code>, then register the proxy’s HTTPS root here. Devices must be able to reach that proxy over LAN/VPN; public users cannot directly reach a private <code>10.x</code> address.</div>' +
     '</div>';
   return turboCard + backendCard +
     '<div class="card" style="margin-bottom:1rem;">' +

@@ -294,10 +294,13 @@ test('date helpers reject malformed input instead of guessing', () => {
    OmniRoute's ngrok URL can change without a redeploy. */
 let askFetchCalls = [];
 let askFetchQueue = [];
-const askProcess = { env: { OMNIROUTE_URL: 'https://env-fallback.ngrok-free.dev/v1/chat/completions' } };
+const askProcess = { env: {
+  OMNIROUTE_LOCAL_URL: '',
+  OMNIROUTE_URL: 'https://env-fallback.ngrok-free.dev/v1/chat/completions'
+} };
 const askApi = vm.runInNewContext(
   section('const ASK_TIMEOUT_MS', 'bot.onText(/^\\/ask')
-  + ';({ studyProviderFromConfig, groqFallbackProvider, callStudyProvider, buildTutorMessages, studyApiKeyList, normalizeOmnirouteBaseUrl, resolveOmnirouteBaseUrl, buildFallbackProviderList })',
+  + ';({ studyProviderFromConfig, groqFallbackProvider, callStudyProvider, buildTutorMessages, studyApiKeyList, normalizeOmnirouteBaseUrl, normalizeOmnirouteLocalBaseUrl, resolveOmniroutePublicBaseUrl, resolveOmnirouteBaseUrl, buildFallbackProviderList })',
   {
     /* The real validator, so a base the bot would reject is rejected here too. */
     normalizeAppBaseUrl: value => {
@@ -376,6 +379,39 @@ test('OmniRoute resolver honors dedicated, legacy, env, then default precedence'
   assert.equal(askApi.resolveOmnirouteBaseUrl({}),
     'https://precut-uniformly-handsfree.ngrok-free.dev/v1');
   askProcess.env.OMNIROUTE_URL = previous;
+});
+
+test('a local bot deployment prefers only its private environment override', () => {
+  const previous = askProcess.env.OMNIROUTE_LOCAL_URL;
+  askProcess.env.OMNIROUTE_LOCAL_URL = 'http://10.74.7.68:20128/v1/chat/completions';
+  assert.equal(askApi.resolveOmnirouteBaseUrl(OMNIROUTE_CONFIG),
+    'http://10.74.7.68:20128/v1');
+  assert.equal(askApi.resolveOmniroutePublicBaseUrl(OMNIROUTE_CONFIG),
+    'https://precut-uniformly-handsfree.ngrok-free.dev/v1');
+  assert.equal(askApi.studyProviderFromConfig(OMNIROUTE_CONFIG).url,
+    'http://10.74.7.68:20128/v1/chat/completions');
+  askProcess.env.OMNIROUTE_LOCAL_URL = previous;
+});
+
+test('local OmniRoute validation rejects public, metadata, hostname and arbitrary paths', () => {
+  assert.equal(askApi.normalizeOmnirouteLocalBaseUrl('https://192.168.1.4:443/v1/'),
+    'https://192.168.1.4/v1');
+  for (const value of [
+    'http://169.254.169.254/v1',
+    'http://100.64.0.1/v1',
+    'http://localhost:20128/v1',
+    'http://example.com/v1',
+    'http://user:pass@10.74.7.68:20128/v1',
+    'http://10.74.7.68:20128/admin'
+  ]) assert.equal(askApi.normalizeOmnirouteLocalBaseUrl(value), '', value);
+});
+
+test('invalid local environment values fall back to the public resolver', () => {
+  const previous = askProcess.env.OMNIROUTE_LOCAL_URL;
+  askProcess.env.OMNIROUTE_LOCAL_URL = 'http://169.254.169.254/v1';
+  assert.equal(askApi.resolveOmnirouteBaseUrl(OMNIROUTE_CONFIG),
+    'https://precut-uniformly-handsfree.ngrok-free.dev/v1');
+  askProcess.env.OMNIROUTE_LOCAL_URL = previous;
 });
 
 test('keys are accepted as an array or as typed text', () => {

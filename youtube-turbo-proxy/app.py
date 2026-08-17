@@ -36,6 +36,7 @@ import logging
 import secrets
 import math
 import concurrent.futures
+import ipaddress
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 
@@ -1114,24 +1115,24 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Bynara: OpenAI-compatible, ~1M context. URL is fixed so the admin only sets
 # key(s) + model. Multiple keys enable automatic failover on limit/error.
 BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
-# OmniRoute is exposed through an account-owned ngrok Dev Domain. The endpoint
-# can change without a deployment, so every runtime call resolves the current
-# config/ai value and derives its typed route from one canonical /v1 base.
+# OmniRoute normally uses an account-owned ngrok Dev Domain. A self-hosted
+# proxy can set OMNIROUTE_LOCAL_URL to an exact RFC1918/loopback /v1 endpoint;
+# that deployment-only override never comes from Firestore and therefore does
+# not turn the Admin-editable public URL into a private-network SSRF primitive.
 OMNIROUTE_DEFAULT_BASE_URL = "https://precut-uniformly-handsfree.ngrok-free.dev/v1"
 OMNIROUTE_RETIRED_BASE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1"
 _OMNIROUTE_HOST_RE = re.compile(
     r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ngrok-free\.dev$"
 )
+_OMNIROUTE_LOCAL_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8",
+))
+_OMNIROUTE_PATHS = ("/v1", "/v1/", "/v1/chat/completions",
+                    "/v1/chat/completions/")
 
 
 def _canonicalize_omniroute_base_url(value):
-    """Return a safe OmniRoute /v1 base, or an empty string.
-
-    Only account ngrok Dev Domains are accepted. Credentials, ports, queries,
-    fragments, non-HTTPS schemes, lookalike hosts, and arbitrary paths are
-    rejected. A full chat-completions URL is accepted for migration and reduced
-    to the same canonical base. The retired tunnel is deliberately invalid.
-    """
+    """Return a safe public OmniRoute /v1 base, or an empty string."""
     candidate = str(value or "").strip()
     if not candidate or "\\" in candidate:
         return ""
@@ -1141,8 +1142,7 @@ def _canonicalize_omniroute_base_url(value):
         if (parsed.scheme.lower() != "https" or parsed.username or parsed.password
                 or parsed.port is not None or parsed.query or parsed.fragment
                 or not _OMNIROUTE_HOST_RE.fullmatch(hostname)
-                or parsed.path not in ("/v1", "/v1/", "/v1/chat/completions",
-                                       "/v1/chat/completions/")):
+                or parsed.path not in _OMNIROUTE_PATHS):
             return ""
     except (TypeError, ValueError):
         return ""
@@ -1150,8 +1150,51 @@ def _canonicalize_omniroute_base_url(value):
     return "" if base == OMNIROUTE_RETIRED_BASE_URL else base
 
 
-def _resolve_omniroute_base_url(cfg=None):
-    """Resolve OmniRoute with config -> active legacy -> env -> default precedence."""
+def _canonicalize_omniroute_local_base_url(value):
+    """Return a deployment-local RFC1918/loopback /v1 base, or empty.
+
+    Hostnames are deliberately refused: accepting DNS here would let resolution
+    drift to a public, metadata, or unrelated private address after validation.
+    The exact value is read only from OMNIROUTE_LOCAL_URL on the process that
+    has a route to the local service.
+    """
+    candidate = str(value or "").strip()
+    if not candidate or "\\" in candidate:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(candidate)
+        hostname = (parsed.hostname or "").lower()
+        address = ipaddress.ip_address(hostname)
+        port = parsed.port
+        if (address.version != 4
+                or not any(address in network for network in _OMNIROUTE_LOCAL_NETWORKS)
+                or parsed.scheme.lower() not in ("http", "https")
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path not in _OMNIROUTE_PATHS):
+            return ""
+    except (TypeError, ValueError):
+        return ""
+    authority = hostname + ((":" + str(port)) if port is not None else "")
+    return "%s://%s/v1" % (parsed.scheme.lower(), authority)
+
+
+def _configured_omniroute_local_base_url():
+    return _canonicalize_omniroute_local_base_url(
+        os.environ.get("OMNIROUTE_LOCAL_URL"))
+
+
+def _canonicalize_omniroute_runtime_base_url(value):
+    """Accept public bases, plus only the exact operator-configured local base."""
+    public = _canonicalize_omniroute_base_url(value)
+    if public:
+        return public
+    local = _canonicalize_omniroute_local_base_url(value)
+    configured = _configured_omniroute_local_base_url()
+    return local if local and configured and secrets.compare_digest(local, configured) else ""
+
+
+def _resolve_omniroute_public_base_url(cfg=None):
+    """Resolve the public HTTPS endpoint used by Render/browser-direct clients."""
     cfg = cfg if isinstance(cfg, dict) else {}
     candidates = [cfg.get("omnirouteBaseUrl")]
     active = str(cfg.get("studyProvider") or "").strip().lower()
@@ -1163,14 +1206,18 @@ def _resolve_omniroute_base_url(cfg=None):
         canonical = _canonicalize_omniroute_base_url(candidate)
         if canonical:
             return canonical
-    # The compiled-in default is validated by construction; keep this explicit
-    # return so a malformed environment value can never make routing empty.
     return OMNIROUTE_DEFAULT_BASE_URL
 
 
+def _resolve_omniroute_base_url(cfg=None):
+    """Prefer this deployment's private upstream, then the public endpoint."""
+    return (_configured_omniroute_local_base_url()
+            or _resolve_omniroute_public_base_url(cfg))
+
+
 def _omniroute_endpoints(cfg=None, base_url=None):
-    """Derive every OmniRoute capability URL from one resolved base."""
-    base = (_canonicalize_omniroute_base_url(base_url)
+    """Derive every OmniRoute capability URL from one trusted resolved base."""
+    base = (_canonicalize_omniroute_runtime_base_url(base_url)
             if base_url else _resolve_omniroute_base_url(cfg))
     if not base:
         base = OMNIROUTE_DEFAULT_BASE_URL
@@ -6637,6 +6684,11 @@ def health():
         "cached_transcripts": len(_transcript_cache),
         "persistent_cache": bool(_fb_db),   # Firestore-backed (survives restarts)
         "object_storage": _s3_enabled(),    # study/transcript bodies on B2 / R2
+        # Deployment-only local OmniRoute routing. Expose only the mode, never
+        # the private address; operators can verify that this proxy bypasses
+        # ngrok without publishing LAN topology from the unauthenticated route.
+        "omniroute_upstream": ("local" if _configured_omniroute_local_base_url()
+                               else "public"),
         # Advanced (library-scope) tutor. False => it still answers, but via
         # title-keyword fallback instead of semantic search.
         "vector_search": _vec_enabled(),
@@ -9564,7 +9616,7 @@ _omniroute_refresh_running = set()
 
 
 def _omniroute_models_cache_for(cfg=None, base_url=None):
-    base = ((_canonicalize_omniroute_base_url(base_url)
+    base = ((_canonicalize_omniroute_runtime_base_url(base_url)
              if base_url else _resolve_omniroute_base_url(cfg))
             or OMNIROUTE_DEFAULT_BASE_URL)
     return base, _omniroute_models_cache.setdefault(
@@ -9572,7 +9624,13 @@ def _omniroute_models_cache_for(cfg=None, base_url=None):
 
 
 def _persist_omniroute_catalog(kind, ids, base_url):
-    """Atomically persist one successful discovery with its source endpoint."""
+    """Persist public discovery only; deployment-local catalogs stay in RAM.
+
+    Local and public proxy instances share config/ai. Persisting a private base
+    would expose LAN topology and make the two deployments overwrite each
+    other's single durable catalog slot, so only the canonical public endpoint
+    may update Firestore.
+    """
     field = "chatModels" if kind == "chat" else "imageModels"
     updated_field = "chatUpdatedAt" if kind == "chat" else "imageUpdatedAt"
     base_field = "chatBaseUrl" if kind == "chat" else "imageBaseUrl"
@@ -9762,7 +9820,7 @@ _omniroute_image_refresh_running = set()
 
 
 def _omniroute_image_cache_for(cfg=None, base_url=None):
-    base = ((_canonicalize_omniroute_base_url(base_url)
+    base = ((_canonicalize_omniroute_runtime_base_url(base_url)
              if base_url else _resolve_omniroute_base_url(cfg))
             or OMNIROUTE_DEFAULT_BASE_URL)
     return base, _omniroute_image_models_cache.setdefault(
@@ -9838,7 +9896,7 @@ def _omniroute_fetch_image_model_ids(force=False, cfg=None, base_url=None):
     and image-model markers, while retaining persisted image IDs during a
     temporary tunnel/catalog outage.
     """
-    base = (_canonicalize_omniroute_base_url(base_url)
+    base = (_canonicalize_omniroute_runtime_base_url(base_url)
             if base_url else _resolve_omniroute_base_url(cfg))
     current_base, cache = _omniroute_image_cache_for(base_url=base)
     now = time.time()
@@ -13793,7 +13851,14 @@ def _browser_direct_provider_configs(cfg):
             continue
         provider = STUDY_TEST_PROVIDERS.get(pid) or {}
         keys = _configured_provider_keys(cfg, pid)
-        chat_url = _study_provider_url(cfg, pid, provider)
+        # A deployment-local HTTP/RFC1918 override is safe for this proxy to
+        # call, but must never be handed to an HTTPS browser. Browser-direct
+        # stays on the public endpoint; normal proxied requests use local-first.
+        browser_omni_endpoints = (_omniroute_endpoints(
+            base_url=_resolve_omniroute_public_base_url(cfg))
+            if pid == "omniroute" else None)
+        chat_url = (browser_omni_endpoints["chat"] if browser_omni_endpoints
+                    else _study_provider_url(cfg, pid, provider))
         if not keys or not chat_url:
             continue
         transport = str(provider.get("transport") or "openai_chat").strip().lower()
@@ -13808,10 +13873,10 @@ def _browser_direct_provider_configs(cfg):
             interactions = STUDY_TEST_PROVIDERS.get("google_interactions") or {}
             item["imageUrl"] = str(interactions.get("url") or "").strip()
         elif pid in IMAGE_PROVIDER_ENDPOINTS or pid == "omniroute":
-            item["imageUrl"] = (_omniroute_endpoints(cfg)["images"] if pid == "omniroute"
+            item["imageUrl"] = (browser_omni_endpoints["images"] if pid == "omniroute"
                                 else IMAGE_PROVIDER_ENDPOINTS[pid])
         if pid == "omniroute":
-            endpoints = _omniroute_endpoints(cfg)
+            endpoints = browser_omni_endpoints
             item.update({
                 "searchUrl": endpoints["search"],
                 "speechUrl": endpoints["speech"],

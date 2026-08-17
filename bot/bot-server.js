@@ -2580,7 +2580,30 @@ function normalizeOmnirouteBaseUrl(value) {
   } catch (error) { return ''; }
 }
 
-function resolveOmnirouteBaseUrl(cfg) {
+function normalizeOmnirouteLocalBaseUrl(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw || raw.includes('\\')) return '';
+  try {
+    const parsed = new URL(raw);
+    const hostname = parsed.hostname;
+    const octets = hostname.split('.').map(Number);
+    const privateIpv4 = octets.length === 4
+      && octets.every((part, index) => Number.isInteger(part) && part >= 0 && part <= 255
+        && String(part) === hostname.split('.')[index])
+      && (octets[0] === 10
+        || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+        || (octets[0] === 192 && octets[1] === 168)
+        || octets[0] === 127);
+    let path = parsed.pathname.replace(/\/+$/, '');
+    if (path === '/v1/chat/completions') path = '/v1';
+    if (!privateIpv4 || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+        || parsed.username || parsed.password || parsed.search || parsed.hash
+        || path !== '/v1') return '';
+    return `${parsed.protocol}//${hostname}${parsed.port ? `:${parsed.port}` : ''}/v1`;
+  } catch (error) { return ''; }
+}
+
+function resolveOmniroutePublicBaseUrl(cfg) {
   cfg = cfg && typeof cfg === 'object' ? cfg : {};
   const candidates = [cfg.omnirouteBaseUrl];
   const active = String(cfg.studyProvider || '').trim().toLowerCase();
@@ -2592,6 +2615,13 @@ function resolveOmnirouteBaseUrl(cfg) {
     if (normalized) return normalized;
   }
   return OMNIROUTE_DEFAULT_BASE_URL;
+}
+
+function resolveOmnirouteBaseUrl(cfg) {
+  /* Only this process's environment may opt into a private upstream. Firestore
+     cannot redirect the bot to arbitrary LAN/metadata services. */
+  return normalizeOmnirouteLocalBaseUrl(process.env.OMNIROUTE_LOCAL_URL)
+    || resolveOmniroutePublicBaseUrl(cfg);
 }
 
 /* → { provider, url, keys, model } or null when the panel has not configured a
