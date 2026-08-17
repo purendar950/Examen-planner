@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HomeRoom Launcher</string>
+    <string name="toast_assigned">Assigned to that slot</string>
+    <string name="toast_empty_slot">This slot is empty. Long-press to assign an app.</string>
+    <string name="toast_set_launcher">To use this as your home screen, choose it after pressing Home.</string>
+</resources>
