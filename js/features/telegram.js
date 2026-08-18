@@ -249,9 +249,9 @@ function tgProxyBase() {
   try { custom = localStorage.getItem('turboBackendUrl') || ''; } catch (e) {}
   // A legacy per-device override must not bypass an admin-enforced strict route.
   if (tgStrictBackendRouting()) {
-    return ((window.PrepPathBackend && window.PrepPathBackend.baseUrl()) || '').replace(/\/+$/, '');
+    return ((window.PrepPathBackend && window.PrepPathBackend.baseUrl('media')) || '').replace(/\/+$/, '');
   }
-  return (custom || (window.PrepPathBackend && window.PrepPathBackend.baseUrl()) || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
+  return (custom || (window.PrepPathBackend && window.PrepPathBackend.baseUrl('media')) || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
 }
 
 /* Telegram media is protected by Firebase identity, so <img src> cannot fetch

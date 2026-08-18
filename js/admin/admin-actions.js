@@ -1995,42 +1995,68 @@ function renderSettings() {
     '<div id="turbo-backend-status" class="muted" role="status" tabindex="-1" style="font-size:0.78rem;margin-top:6px;"></div>' +
     '<div class="muted" style="font-size:0.72rem;margin-top:6px;">&#128274; Admin-only Firestore (config/turbo). Backend ko <code>FIREBASE_SERVICE_ACCOUNT</code> env var chahiye (bot wala hi) taaki ye padh sake. Code mein kabhi save nahi hota.</div>' +
     '</div>';
-  var backendSnapshot = window.PrepPathBackend ? window.PrepPathBackend.getConfig() : { servers: [] , mode: 'auto', manualServerId: '' };
-  var backendServers = (CONFIG && CONFIG.turbo && Array.isArray(CONFIG.turbo.backendServers) && CONFIG.turbo.backendServers.length)
-    ? CONFIG.turbo.backendServers
-    : (backendSnapshot.servers || []);
-  var backendMode = (CONFIG && CONFIG.turbo && CONFIG.turbo.backendMode) || backendSnapshot.mode || 'auto';
-  var backendManual = (CONFIG && CONFIG.turbo && CONFIG.turbo.backendManualServerId) || backendSnapshot.manualServerId || '';
-  var backendCard = '<div class="card" style="margin-bottom:1rem;">' +
-    '<div class="row" style="align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:0.5rem;"><h3 style="margin:0;">&#127760; Backend Server Routing</h3><button class="btn btn-blue" type="button" onclick="openOmnirouteEndpoints()">Configure OmniRoute endpoints</button></div>' +
-    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Manage full <code>youtube-turbo-proxy</code> servers used for AI notes, Tutor, transcripts, Turbo video, and proxy media. <strong>Auto</strong> tries the healthiest server. <strong>Manual preference</strong> starts with your selected server but keeps failover. <strong>Selected server only</strong> sends these proxy requests exclusively to that server and never falls back. The separate Telegram bot service is not changed here. <strong>Add server accepts only a trusted HTTPS full proxy root</strong> (for example <code>https://proxy.your-lan.example</code>), never a raw OmniRoute <code>…/v1</code> upstream. Use the button above to edit the public/ngrok and local upstream addresses in AI Study.</p>' +
-    '<div class="row" style="gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:0.85rem;">' +
-      '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Routing mode' +
-        '<select id="cfg-backend-mode" style="min-width:210px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
-          '<option value="auto"' + (backendMode === 'auto' ? ' selected' : '') + '>Auto failover</option>' +
-          '<option value="manual"' + (backendMode === 'manual' ? ' selected' : '') + '>Manual preference + failover</option>' +
-          '<option value="strict"' + (backendMode === 'strict' ? ' selected' : '') + '>Selected server only (no failover)</option>' +
-        '</select>' +
-      '</label>' +
-      '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Preferred / selected server' +
-        '<select id="cfg-backend-manual" style="min-width:250px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
-          '<option value="">Use health/order (Auto or Manual only)</option>' +
-          backendServers.map(function(server) { return '<option value="' + esc(server.id) + '"' + (backendManual === server.id ? ' selected' : '') + '>' + esc(server.label || server.id) + '</option>'; }).join('') +
-        '</select>' +
-      '</label>' +
-      '<button class="btn btn-green" onclick="saveBackendRegistry()">&#128190; Save routing</button>' +
-      '<button class="btn btn-gray" onclick="checkBackendServers()">&#128268; Check all</button>' +
+  var backendSnapshot = window.PrepPathBackend ? window.PrepPathBackend.getConfig() : { servers: [], mediaMode: 'auto', mediaServerId: '', aiMode: 'auto', aiServerId: '' };
+  var turboConfig = (CONFIG && CONFIG.turbo) || {};
+  var backendServers = (Array.isArray(turboConfig.backendSplitServers) && turboConfig.backendSplitServers.length)
+    ? turboConfig.backendSplitServers
+    : ((Array.isArray(turboConfig.backendServers) && turboConfig.backendServers.length)
+      ? turboConfig.backendServers
+      : (backendSnapshot.servers || []));
+  backendServers = backendServers.map(function(server) {
+    var routes = Array.isArray(server.routes) && server.routes.length ? server.routes : ['media', 'ai'];
+    return Object.assign({}, server, { routes: routes.filter(function(route) { return route === 'media' || route === 'ai'; }) });
+  });
+  var legacyBackendMode = turboConfig.backendMode || backendSnapshot.mode || 'auto';
+  var legacyBackendServer = turboConfig.backendManualServerId || backendSnapshot.manualServerId || '';
+  var backendMediaMode = turboConfig.backendMediaMode || backendSnapshot.mediaMode || legacyBackendMode;
+  var backendMediaServer = Object.prototype.hasOwnProperty.call(turboConfig, 'backendMediaServerId')
+    ? String(turboConfig.backendMediaServerId || '')
+    : (backendSnapshot.mediaServerId || legacyBackendServer);
+  var backendAiMode = turboConfig.backendAiMode || backendSnapshot.aiMode || legacyBackendMode;
+  var backendAiServer = Object.prototype.hasOwnProperty.call(turboConfig, 'backendAiServerId')
+    ? String(turboConfig.backendAiServerId || '')
+    : (backendSnapshot.aiServerId || legacyBackendServer);
+  var backendModeOptions = function(selected) {
+    return '<option value="auto"' + (selected === 'auto' ? ' selected' : '') + '>Auto health-aware failover</option>' +
+      '<option value="manual"' + (selected === 'manual' ? ' selected' : '') + '>Prefer selected + failover</option>' +
+      '<option value="strict"' + (selected === 'strict' ? ' selected' : '') + '>Selected server only</option>';
+  };
+  var backendServerOptions = function(selected, routeKind) {
+    return '<option value="">Choose a full proxy server</option>' + backendServers.filter(function(server) {
+      return server.routes.indexOf(routeKind) !== -1;
+    }).map(function(server) {
+      return '<option value="' + esc(server.id) + '"' + (selected === server.id ? ' selected' : '') + '>' + esc(server.label || server.id) + '</option>';
+    }).join('');
+  };
+  var backendCard = '<div class="card backend-role-routing" style="margin-bottom:1rem;">' +
+    '<div class="row" style="align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:0.5rem;"><h3 style="margin:0;">&#127760; Server Role Routing</h3><button class="btn btn-blue" type="button" onclick="openOmnirouteEndpoints()">Configure OmniRoute local / ngrok</button></div>' +
+    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Assign complete <code>youtube-turbo-proxy</code> HTTPS roots by workload. Use each server row’s Media / AI checks to define which role may use it. Keep transcript extraction and Turbo media on a public Render server, while AI notes, Tutor, and AI Chat can use a separately deployed AI proxy. These selectors never accept the raw OmniRoute <code>…/v1</code> address; configure that upstream from the separate AI Study panel.</p>' +
+    '<div class="backend-role-grid">' +
+      '<section class="backend-role-card backend-role-card--media"><span class="backend-role-eyebrow">Public media infrastructure</span><h4>Turbo &amp; Transcript Server</h4><p>Handles YouTube transcript extraction, Turbo <code>/api/info</code> and <code>/api/stream</code>, plus protected proxy media. Render is recommended so these features remain available when the local AI machine is offline.</p>' +
+        '<label>Routing behavior<select id="cfg-backend-media-mode">' + backendModeOptions(backendMediaMode) + '</select></label>' +
+        '<label>Render / media full proxy<select id="cfg-backend-media-server">' + backendServerOptions(backendMediaServer, 'media') + '</select></label>' +
+      '</section>' +
+      '<section class="backend-role-card backend-role-card--ai"><span class="backend-role-eyebrow">Generation infrastructure</span><h4>AI Notes, Tutor &amp; AI Chat</h4><p>Handles every proxied <code>/api/study</code>, <code>/api/tutor</code>, and <code>/api/ai-chat</code> request. Use Selected server only to guarantee that authorized AI traffic cannot fall back to the transcript server.</p>' +
+        '<label>Routing behavior<select id="cfg-backend-ai-mode">' + backendModeOptions(backendAiMode) + '</select></label>' +
+        '<label>AI generation full proxy<select id="cfg-backend-ai-server">' + backendServerOptions(backendAiServer, 'ai') + '</select></label>' +
+      '</section>' +
     '</div>' +
+    '<div class="backend-role-actions"><button class="btn btn-green" onclick="saveBackendRegistry()">&#128190; Save role routing</button><button class="btn btn-gray" onclick="checkBackendServers()">&#128268; Check all proxy servers</button><span class="muted">Browser-direct AI requests bypass the AI proxy; keep that option off for proxy-only routing.</span></div>' +
     '<div style="display:grid;gap:8px;">' +
       backendServers.map(function(server) {
         var healthServer = (backendSnapshot.servers || []).find(function(item) { return item.id === server.id; });
         var health = healthServer && healthServer.health;
         var serverUrlValid = !!normalizeBackendProxyRoot(server.url);
         var healthText = !serverUrlValid ? '&#9888; HTTPS proxy root required' : (health ? (health.ok ? '&#9989; healthy' : '&#10060; ' + esc(health.detail || 'failed')) : '&#8226; not checked');
-        return '<div data-backend-server-row data-server-id="' + esc(server.id) + '" style="display:grid;grid-template-columns:minmax(130px,0.7fr) minmax(240px,1.5fr) auto auto;gap:8px;align-items:center;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2,#f8fafc);">' +
-          '<input data-server-label value="' + esc(server.label || server.id) + '" aria-label="Server label" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;">' +
-          '<input data-server-url value="' + esc(server.url) + '" aria-label="Server URL"' + (serverUrlValid ? '' : ' aria-invalid="true"') + ' inputmode="url" style="width:100%;padding:7px;border:1px solid ' + (serverUrlValid ? 'var(--border)' : 'var(--red)') + ';border-radius:7px;font-family:monospace;font-size:.78rem;">' +
-          '<span class="muted" style="font-size:.74rem;white-space:nowrap;">' + healthText + '</span>' +
+        var routes = Array.isArray(server.routes) && server.routes.length ? server.routes : ['media', 'ai'];
+        return '<div class="backend-server-row" data-backend-server-row data-server-id="' + esc(server.id) + '">' +
+          '<input data-server-label value="' + esc(server.label || server.id) + '" aria-label="Server label">' +
+          '<input data-server-url value="' + esc(server.url) + '" aria-label="Server URL"' + (serverUrlValid ? '' : ' aria-invalid="true"') + ' inputmode="url" style="border-color:' + (serverUrlValid ? 'var(--border)' : 'var(--red)') + ';font-family:monospace;font-size:.78rem;">' +
+          '<span class="backend-server-roles" aria-label="Eligible routes">' +
+            '<label><input type="checkbox" data-server-media' + (routes.indexOf('media') !== -1 ? ' checked' : '') + '> Media</label>' +
+            '<label><input type="checkbox" data-server-ai' + (routes.indexOf('ai') !== -1 ? ' checked' : '') + '> AI</label>' +
+          '</span>' +
+          '<span class="muted backend-server-health">' + healthText + '</span>' +
           '<button class="btn btn-gray" onclick="removeBackendServer(\'' + esc(server.id) + '\')" style="padding:5px 9px;">Remove</button>' +
         '</div>';
       }).join('') +
@@ -2041,7 +2067,7 @@ function renderSettings() {
       '<button class="btn btn-blue" onclick="addBackendServer()">＋ Add server</button>' +
     '</div>' +
     '<div id="backend-server-status" class="muted" role="status" tabindex="-1" style="font-size:.78rem;margin-top:8px;"></div>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:7px;line-height:1.55;">Current backup: <code>https://youtube-turbo-proxy.onrender.com</code>. The app stores the registry in <code>config/turbo</code>; server credentials are never entered here.<br><strong>Local OmniRoute flow:</strong> configure the changeable raw upstream (for example <code>http://localhost:20128/v1</code> or a private LAN IPv4) from <strong>AI Study → OmniRoute endpoints</strong>. The full proxy deployment must set <code>OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1</code>. Register that proxy’s trusted HTTPS root here, choose <strong>Selected server only</strong>, and keep browser-direct requests off to force all authorized AI proxy traffic through it. Devices still need LAN/VPN reachability; public users cannot directly reach a private address.</div>' +
+    '<div class="muted backend-role-help">The registry is stored in <code>config/turbo</code>. Existing installations automatically use their old single-server policy for both roles until this form is saved.<br><strong>AI local/ngrok setup:</strong> the AI Generation selection above is a trusted HTTPS <em>full proxy root</em>. Configure that proxy’s raw OmniRoute upstream separately under <strong>AI Study → OmniRoute endpoints</strong>, using <code>http://localhost:20128/v1</code>, a reachable private IPv4, or the public ngrok <code>/v1</code> fallback. The AI proxy needs <code>OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1</code> to honor an Admin local address. Public users cannot reach a private LAN proxy unless its full proxy root is exposed through trusted HTTPS/VPN.</div>' +
     '</div>';
   return turboCard + backendCard +
     '<div class="card" style="margin-bottom:1rem;">' +
@@ -2215,7 +2241,7 @@ async function saveTurboCookies() {
 /* Ping the currently selected/routable Turbo backend /health. */
 async function checkTurboBackend() {
   var el = document.getElementById('turbo-backend-status');
-  var url = window.PrepPathBackend ? window.PrepPathBackend.baseUrl() : '';
+  var url = window.PrepPathBackend ? window.PrepPathBackend.baseUrl('media') : '';
   var revealResult = function() {
     if (!el) return;
     el.focus({ preventScroll: true });
@@ -2223,8 +2249,8 @@ async function checkTurboBackend() {
   };
   if (el) el.textContent = '⏳ Checking ' + (url || 'selected backend') + '/health …';
   try {
-    var r = await adminBackendFetch('/health', { timeoutMs: 12000 });
-    url = window.PrepPathBackend.baseUrl();
+    var r = await adminBackendFetch('/health', { timeoutMs: 12000, backendRoute: 'media' });
+    url = window.PrepPathBackend.baseUrl('media');
     var d = await r.json();
     if (el) el.innerHTML = (d.pot_provider ? '🟢' : '🟡') +
       ' Backend online — cookies: <b>' + (d.cookies ? 'yes' : 'no') + '</b>' +
@@ -2724,7 +2750,15 @@ function backendRowsFromForm() {
     var id = row.getAttribute('data-server-id') || ('server-' + (index + 1));
     var labelInput = row.querySelector('[data-server-label]');
     var urlInput = row.querySelector('[data-server-url]');
-    return { id: id, label: (labelInput ? labelInput.value : id).trim() || id, url: (urlInput ? urlInput.value : '').trim(), enabled: true };
+    var mediaInput = row.querySelector('[data-server-media]');
+    var aiInput = row.querySelector('[data-server-ai]');
+    var routes = [];
+    if (!mediaInput && !aiInput) routes = ['media', 'ai'];
+    else {
+      if (mediaInput && mediaInput.checked) routes.push('media');
+      if (aiInput && aiInput.checked) routes.push('ai');
+    }
+    return { id: id, label: (labelInput ? labelInput.value : id).trim() || id, url: (urlInput ? urlInput.value : '').trim(), enabled: true, routes: routes };
   });
 }
 function backendFormHasInvalidUrls() {
@@ -2735,47 +2769,100 @@ function normalizedBackendRowsFromForm() {
     return Object.assign({}, server, { url: normalizeBackendProxyRoot(server.url) });
   }).filter(function(server) { return !!server.url; });
 }
-function backendConfigInMemory(servers, mode, manualServerId, applyRouter) {
-  var normalizedMode = mode === 'strict' ? 'strict' : (mode === 'manual' ? 'manual' : 'auto');
+function backendPolicyFromForm() {
+  return {
+    mediaMode: ((document.getElementById('cfg-backend-media-mode') || {}).value) || 'auto',
+    mediaServerId: ((document.getElementById('cfg-backend-media-server') || {}).value) || '',
+    aiMode: ((document.getElementById('cfg-backend-ai-mode') || {}).value) || 'auto',
+    aiServerId: ((document.getElementById('cfg-backend-ai-server') || {}).value) || ''
+  };
+}
+function normalizeBackendPolicy(policy) {
+  policy = policy || {};
+  return {
+    mediaMode: policy.mediaMode === 'strict' ? 'strict' : (policy.mediaMode === 'manual' ? 'manual' : 'auto'),
+    mediaServerId: String(policy.mediaServerId || ''),
+    aiMode: policy.aiMode === 'strict' ? 'strict' : (policy.aiMode === 'manual' ? 'manual' : 'auto'),
+    aiServerId: String(policy.aiServerId || '')
+  };
+}
+function backendConfigInMemory(servers, policy, applyRouter) {
+  policy = normalizeBackendPolicy(policy);
+  var mediaServers = servers.filter(function(server) { return server.routes.indexOf('media') !== -1; });
   CONFIG.turbo = Object.assign({}, CONFIG.turbo || {}, {
-    backendServers: servers,
-    backendMode: normalizedMode,
-    backendManualServerId: manualServerId || ''
+    backendSplitServers: servers,
+    // Legacy clients see only media-eligible hosts, so their auto/manual
+    // failover cannot cross onto a private AI proxy.
+    backendServers: mediaServers,
+    backendMode: policy.mediaMode,
+    backendManualServerId: policy.mediaServerId,
+    backendMediaMode: policy.mediaMode,
+    backendMediaServerId: policy.mediaServerId,
+    backendAiMode: policy.aiMode,
+    backendAiServerId: policy.aiServerId
   });
   if (applyRouter && window.PrepPathBackend) {
-    window.PrepPathBackend.configure({ servers: servers, mode: normalizedMode, manualServerId: manualServerId }, true);
+    window.PrepPathBackend.configure({
+      servers: servers,
+      mode: policy.mediaMode,
+      manualServerId: policy.mediaServerId,
+      mediaMode: policy.mediaMode,
+      mediaServerId: policy.mediaServerId,
+      aiMode: policy.aiMode,
+      aiServerId: policy.aiServerId
+    }, true);
   }
 }
 async function saveBackendRegistry() {
-  var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
-  var manualServerId = (document.getElementById('cfg-backend-manual') || {}).value || '';
+  var policy = normalizeBackendPolicy(backendPolicyFromForm());
   if (backendFormHasInvalidUrls()) {
     showToast('Every backend must be a trusted HTTPS full proxy root with no path, query, or fragment.', 'error'); return;
   }
   var servers = normalizedBackendRowsFromForm();
   if (!servers.length) { showToast('Add at least one valid HTTPS server URL.', 'error'); return; }
-  if (mode === 'strict' && !manualServerId) {
-    showToast('Choose the server that must be used in selected-server-only mode.', 'error'); return;
+  if (servers.some(function(server) { return !server.routes.length; })) {
+    showToast('Assign every proxy server to Media, AI, or both roles.', 'error'); return;
   }
-  if ((mode === 'manual' || mode === 'strict') && manualServerId && !servers.some(function(server) { return server.id === manualServerId; })) {
-    showToast(mode === 'strict' ? 'Choose a valid selected server.' : 'Choose a valid preferred server.', 'error'); return;
+  if (!servers.some(function(server) { return server.routes.indexOf('media') !== -1; }) ||
+      !servers.some(function(server) { return server.routes.indexOf('ai') !== -1; })) {
+    showToast('Keep at least one Media server and one AI server in the registry.', 'error'); return;
+  }
+  var serverExists = function(id, routeKind) {
+    return !!id && servers.some(function(server) { return server.id === id && server.routes.indexOf(routeKind) !== -1; });
+  };
+  if ((policy.mediaMode === 'manual' || policy.mediaMode === 'strict') && !serverExists(policy.mediaServerId, 'media')) {
+    showToast('Choose a valid Turbo & Transcript server for ' + (policy.mediaMode === 'strict' ? 'Selected server only.' : 'manual preference.'), 'error'); return;
+  }
+  if ((policy.aiMode === 'manual' || policy.aiMode === 'strict') && !serverExists(policy.aiServerId, 'ai')) {
+    showToast('Choose a valid AI Generation server for ' + (policy.aiMode === 'strict' ? 'Selected server only.' : 'manual preference.'), 'error'); return;
+  }
+  if (policy.mediaServerId && !serverExists(policy.mediaServerId, 'media')) {
+    showToast('Choose a valid Turbo & Transcript server.', 'error'); return;
+  }
+  if (policy.aiServerId && !serverExists(policy.aiServerId, 'ai')) {
+    showToast('Choose a valid AI Generation server.', 'error'); return;
   }
   try {
+    var mediaServers = servers.filter(function(server) { return server.routes.indexOf('media') !== -1; });
     await db.collection('config').doc('turbo').set({
-      backendServers: servers,
-      backendMode: mode,
-      backendManualServerId: manualServerId,
+      backendSplitServers: servers,
+      backendServers: mediaServers,
+      // Old clients keep their media auto/manual policy but can see only media hosts.
+      backendMode: policy.mediaMode,
+      backendManualServerId: policy.mediaServerId,
+      backendMediaMode: policy.mediaMode,
+      backendMediaServerId: policy.mediaServerId,
+      backendAiMode: policy.aiMode,
+      backendAiServerId: policy.aiServerId,
       backendUpdatedAt: firebase.firestore.FieldValue.serverTimestamp(),
       updatedBy: auth.currentUser ? (auth.currentUser.email || auth.currentUser.uid) : ''
     }, { merge: true });
-    // Publish locally only after Firestore accepts the policy. Failed saves must
-    // never leave this Admin device using a route other clients did not receive.
-    backendConfigInMemory(servers, mode, manualServerId, true);
+    backendConfigInMemory(servers, policy, true);
     var status = document.getElementById('backend-server-status');
-    if (status) status.textContent = 'Saved. New requests use ' + (mode === 'strict'
-      ? 'only the selected server, with no failover.'
-      : mode === 'manual' ? 'the selected preference with failover.' : 'automatic health-aware failover.');
-    showToast('Backend server routing saved.');
+    if (status) status.textContent = 'Saved separate routes. Turbo/transcripts: ' + policy.mediaMode +
+      (policy.mediaServerId ? ' · ' + policy.mediaServerId : '') + '. AI generation: ' + policy.aiMode +
+      (policy.aiServerId ? ' · ' + policy.aiServerId : '') + '.';
+    showToast('Separate media and AI server routing saved.');
     render();
   } catch (e) {
     showToast('Could not save server routing: ' + (e.message || e), 'error');
@@ -2793,25 +2880,27 @@ function addBackendServer() {
   var baseId = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'server';
   var id = baseId, n = 2;
   while (servers.some(function(server) { return server.id === id; })) id = baseId + '-' + n++;
-  servers.push({ id: id, label: label, url: url, enabled: true });
-  var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
-  var manual = (document.getElementById('cfg-backend-manual') || {}).value || '';
-  backendConfigInMemory(servers, mode, manual);
-  showToast('Server added locally. Click Save routing to publish it.');
+  servers.push({ id: id, label: label, url: url, enabled: true, routes: ['media', 'ai'] });
+  var policy = backendPolicyFromForm();
+  backendConfigInMemory(servers, policy);
+  showToast('Server added locally. Click Save role routing to publish it.');
   render();
 }
 function removeBackendServer(id) {
   var servers = backendRowsFromForm().filter(function(server) { return server.id !== id; });
   if (!servers.length) { showToast('At least one server must remain.', 'error'); return; }
-  var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
-  var manual = (document.getElementById('cfg-backend-manual') || {}).value || '';
-  if (mode === 'strict' && manual === id) {
-    showToast('Select another server or change routing mode before removing the server in use.', 'error');
+  var policy = normalizeBackendPolicy(backendPolicyFromForm());
+  var strictRole = policy.mediaMode === 'strict' && policy.mediaServerId === id
+    ? 'Turbo & Transcript'
+    : (policy.aiMode === 'strict' && policy.aiServerId === id ? 'AI Generation' : '');
+  if (strictRole) {
+    showToast('Select another ' + strictRole + ' server or change that role’s routing mode before removing it.', 'error');
     return;
   }
-  if (manual === id) manual = '';
-  backendConfigInMemory(servers, mode, manual);
-  showToast('Server removed locally. Click Save routing to publish the change.');
+  if (policy.mediaServerId === id) policy.mediaServerId = '';
+  if (policy.aiServerId === id) policy.aiServerId = '';
+  backendConfigInMemory(servers, policy);
+  showToast('Server removed locally. Click Save role routing to publish the change.');
   render();
 }
 async function checkBackendServers() {
@@ -2824,13 +2913,13 @@ async function checkBackendServers() {
     }
     var draftServers = normalizedBackendRowsFromForm();
     var results = window.PrepPathBackend
-      ? await Promise.all(draftServers.map(function(server) { return window.PrepPathBackend.probe(server); }))
+      ? await Promise.all(draftServers.map(function(server) { return window.PrepPathBackend.probeRoutes(server); }))
       : [];
     var good = results.filter(function(result) { return result && result.ok; }).length;
-    var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
-    if (status) status.textContent = good + ' of ' + results.length + ' server(s) healthy. ' + (mode === 'strict'
-      ? 'Only the selected server will receive proxy requests.'
-      : 'Failover will avoid failed servers when possible.');
+    var policy = normalizeBackendPolicy(backendPolicyFromForm());
+    if (status) status.textContent = good + ' of ' + results.length + ' proxy server(s) healthy. Turbo/transcripts: ' +
+      policy.mediaMode + (policy.mediaServerId ? ' · ' + policy.mediaServerId : '') + '. AI generation: ' +
+      policy.aiMode + (policy.aiServerId ? ' · ' + policy.aiServerId : '') + '.';
     render();
   } catch (e) {
     if (status) status.textContent = 'Health check failed: ' + (e.message || e);
@@ -2838,7 +2927,10 @@ async function checkBackendServers() {
   }
 }
 window.addEventListener('preppath:backend-status', function(event) {
-  var active = event.detail && event.detail.activeId;
+  var detail = (event && event.detail) || {};
   var status = document.getElementById('backend-server-status');
-  if (status && active) status.textContent = 'Active server: ' + active;
+  if (status && (detail.mediaActiveId || detail.aiActiveId)) {
+    status.textContent = 'Active routes — Turbo/transcripts: ' + (detail.mediaActiveId || 'not selected') +
+      ' · AI generation: ' + (detail.aiActiveId || 'not selected');
+  }
 });

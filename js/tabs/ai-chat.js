@@ -2873,19 +2873,44 @@
         .catch(fail);
     }
     function startProxyJob() {
-      return backendAuthFetch('/api/ai-chat/video/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 60000, body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: body.aspect_ratio, duration: body.duration, sourceImage: body.source_image || '' }) })
-        .then(function (r) { if (!r.ok) return responseError(r, 'Video job could not be started.'); return r.json(); })
+      var backendServerId = '';
+      if (!window.PrepPathBackend || typeof window.PrepPathBackend.selectServer !== 'function') {
+        return Promise.reject(new Error('Backend routing is unavailable. Reload the app.'));
+      }
+      return window.PrepPathBackend.selectServer('ai').then(function (owner) {
+        backendServerId = owner && owner.id || '';
+        if (!backendServerId) throw new Error('No AI backend server is available for this job.');
+        var pendingThread = getThread(thread.id);
+        if (pendingThread) {
+          pendingThread.pendingVideoJob = {
+            id: '', prompt: prompt, model: selected.key,
+            backendServerId: backendServerId, startedAt: Date.now(), starting: true
+          };
+          upsertThread(pendingThread);
+        }
+        return backendAuthFetch('/api/ai-chat/video/jobs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, timeoutMs: 60000,
+          backendServerId: backendServerId,
+          body: JSON.stringify({ prompt: prompt, model: selected.key, aspectRatio: body.aspect_ratio, duration: body.duration, sourceImage: body.source_image || '' })
+        });
+      }).then(function (r) {
+          var owner = window.PrepPathBackend && typeof window.PrepPathBackend.serverForResponse === 'function'
+            ? window.PrepPathBackend.serverForResponse(r) : null;
+          if (owner && owner.id) backendServerId = owner.id;
+          if (!r.ok) return responseError(r, 'Video job could not be started.');
+          return r.json();
+        })
         .then(function (job) {
-          var cur = getThread(thread.id); if (cur) { cur.pendingVideoJob = { id: job.jobId || job.id, prompt: prompt, model: selected.key }; upsertThread(cur); }
+          var cur = getThread(thread.id); if (cur) { cur.pendingVideoJob = { id: job.jobId || job.id, prompt: prompt, model: selected.key, backendServerId: backendServerId, startedAt: Date.now() }; upsertThread(cur); }
           var jobId = job.jobId || job.id; if (!jobId) throw new Error('The video service did not return a job ID.');
           var startedAt = Date.now();
           function poll() {
             if (Date.now() - startedAt > 30 * 60 * 1000) throw new Error('Video generation is taking longer than 30 minutes. The job was left on the server; retry from the conversation later.');
-            return backendAuthFetch('/api/ai-chat/video/jobs/' + encodeURIComponent(jobId), { timeoutMs: 15000 })
+            return backendAuthFetch('/api/ai-chat/video/jobs/' + encodeURIComponent(jobId), { timeoutMs: 15000, backendServerId: backendServerId })
               .then(function (r) { if (!r.ok) return responseError(r, 'Unable to check video progress.'); return r.json(); })
               .then(function (state) {
                 if (typing) typing.textContent = state.status === 'running' ? 'Generating video… this can take a few minutes (' + (state.model || selected.label || selected.key) + ')' : 'Video job queued…';
-                if (state.status === 'completed') return backendAuthFetch('/api/ai-chat/video/jobs/' + encodeURIComponent(jobId) + '/media', { timeoutMs: 300000 }).then(function (r) { return consume(r, state.model || selected.key); });
+                if (state.status === 'completed') return backendAuthFetch('/api/ai-chat/video/jobs/' + encodeURIComponent(jobId) + '/media', { timeoutMs: 300000, backendServerId: backendServerId }).then(function (r) { return consume(r, state.model || selected.key); });
                 if (state.status === 'failed' || state.status === 'cancelled') throw new Error(state.error || 'Video generation failed.');
                 return new Promise(function (resolve) { setTimeout(function () { resolve(poll()); }, Math.max(1500, Number(state.pollAfterMs) || 2500)); });
               });

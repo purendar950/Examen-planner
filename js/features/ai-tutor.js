@@ -1650,6 +1650,21 @@
       return window.PrepPathBackend.fetch(path, requestOptions);
     });
   }
+  function backendResponseServer(response) {
+    return window.PrepPathBackend && typeof window.PrepPathBackend.serverForResponse === 'function'
+      ? window.PrepPathBackend.serverForResponse(response)
+      : null;
+  }
+  function reserveBackendServer(routeKind, existingId) {
+    if (existingId) return Promise.resolve(String(existingId));
+    if (!window.PrepPathBackend || typeof window.PrepPathBackend.selectServer !== 'function') {
+      return Promise.reject(new Error('Backend routing is unavailable. Reload the app.'));
+    }
+    return window.PrepPathBackend.selectServer(routeKind).then(function (owner) {
+      if (!owner || !owner.id) throw new Error('No backend server is available for this job.');
+      return owner.id;
+    });
+  }
   function apiGet(path, signal) {
     return backendAuthFetch(path, signal ? { signal: signal } : {}).then(function (r) { return r.json(); });
   }
@@ -1752,9 +1767,11 @@
       targetEl.innerHTML = notesStageMessageHtml('error', 'Notes could not be prepared', (result && (result.error || result.detail)) || 'Generation failed.');
     }
   }
-  function requestStudyJobStop(jobId, attempt) {
+  function requestStudyJobStop(jobId, attempt, backendServerId) {
     if (_activeStudyJobId !== jobId) return;
-    backendAuthFetch('/api/study/jobs/' + encodeURIComponent(jobId), { method: 'DELETE' })
+    backendAuthFetch('/api/study/jobs/' + encodeURIComponent(jobId), {
+      method: 'DELETE', backendServerId: backendServerId || ''
+    })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, data: j || {} }; }); })
       .then(function (res) {
         if (!res.ok) throw new Error((res.data && res.data.error) || 'stop_not_confirmed');
@@ -1769,7 +1786,7 @@
         // `stopRequested` flag makes the intent survive a refresh as well.
         if (_activeStudyJobId === jobId) {
           var delay = Math.min(8000, 800 * Math.pow(2, Math.min(attempt, 3)));
-          setTimeout(function () { requestStudyJobStop(jobId, attempt + 1); }, delay);
+          setTimeout(function () { requestStudyJobStop(jobId, attempt + 1, backendServerId); }, delay);
         }
       });
   }
@@ -1781,7 +1798,7 @@
       if (saved && saved.jobId === jobId) { saved.stopRequested = true; saveStudyJob(saved); }
       var targetEl = contentEl();
       if (targetEl && targetEl.isConnected) targetEl.innerHTML = notesStageMessageHtml('stopped', 'Stopping note generation', 'Waiting for the AI proxy to confirm cancellation…');
-      requestStudyJobStop(jobId, 0);
+      requestStudyJobStop(jobId, 0, saved && saved.backendServerId);
     }
     if (_genAbort) { try { _genAbort.abort(); } catch (e) {} }
     _genAbort = null;
@@ -4150,8 +4167,9 @@
     }
     function connect() {
       if (!alive()) return;
-      backendAuthFetch(cfg.path + '?offset=' + encodeURIComponent(cfg.getOffset()),
-        cfg.signal ? { signal: cfg.signal } : {}).then(function (r) {
+      var streamOptions = cfg.signal ? { signal: cfg.signal } : {};
+      if (cfg.backendServerId) streamOptions.backendServerId = cfg.backendServerId;
+      backendAuthFetch(cfg.path + '?offset=' + encodeURIComponent(cfg.getOffset()), streamOptions).then(function (r) {
         if (r.ok && r.body && window.TextDecoder) return r;
         return r.json().catch(function () { return {}; }).then(function (j) { j._httpStatus = r.status; throw j; });
       }).then(function (r) {
@@ -4191,7 +4209,6 @@
       lang: lang, focus: focus || '', force: !!force, requirements: requirements || ''
     };
     _genControlsStudyJob = true;
-    saveStudyJob(job);                 // persist BEFORE POST, not after it returns
     function jobRequestError(r) {
       return r.json().catch(function () { return {}; }).then(function (j) {
         j = j || {}; j._httpStatus = r.status;
@@ -4203,8 +4220,12 @@
     // second model to design, so never send it (matches the server, which
     // ignores design_model/design_provider unless style="html" anyway).
     var wantsDesignAi = job.style === 'html';
-    backendAuthFetch('/api/study/jobs', {
+    reserveBackendServer('ai', job.backendServerId).then(function (ownerId) {
+      job.backendServerId = ownerId;
+      saveStudyJob(job);               // owner + opaque id persist BEFORE POST
+      return backendAuthFetch('/api/study/jobs', {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: signal,
+      backendServerId: job.backendServerId || '',
       body: JSON.stringify({
         jobId: job.jobId, id: vid, mode: mode, out: lang,
         model: outModel(), provider: outProvider(), style: style || '',
@@ -4217,7 +4238,12 @@
         // never has to guess a missing key apart from an intentionally blank one.
         requirements: job.requirements || ''
       })
-    }).then(function (r) { return r.ok ? r.json() : jobRequestError(r); }).then(function (created) {
+    });
+    }).then(function (r) {
+      var owner = backendResponseServer(r);
+      if (owner && owner.id) { job.backendServerId = owner.id; saveStudyJob(job); }
+      return r.ok ? r.json() : jobRequestError(r);
+    }).then(function (created) {
       if (created && created.jobId) {
         job.jobId = created.jobId;
         saveStudyJob(job);
@@ -4386,6 +4412,7 @@
     }
     follower = followJobStream({
       path: '/api/study/jobs/' + encodeURIComponent(job.jobId) + '/stream',
+      backendServerId: job.backendServerId || '',
       signal: signal,
       getOffset: function () { return utf8Length(acc); },
       isAlive: function () { return !done && ownsStudyTarget(); },
@@ -4422,7 +4449,7 @@
       _genUserStopped = true;
       targetEl.innerHTML = notesStageMessageHtml('stopped', 'Stopping note generation', 'Waiting for the AI proxy to confirm cancellation…');
       saveStudyJob(job);
-      requestStudyJobStop(job.jobId, 0);
+      requestStudyJobStop(job.jobId, 0, job.backendServerId);
       return;
     }
     targetEl.innerHTML = notesLoadingHtml(job.mode, job.style, job.lang, false);
@@ -5531,6 +5558,22 @@
      caption tracks. It is never an LLM-generated "transcript". */
   var _libCoverage = null, _libCoverageKey = '';
   var _preparePollTimer = 0;
+  var PREPARE_SERVER_KEY = 'aiTutorPreparationServersV1';
+  function preparationServerMap() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(PREPARE_SERVER_KEY) || '{}');
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch (e) { return {}; }
+  }
+  function preparationServerId(courseId) {
+    return String(preparationServerMap()[courseId] || '');
+  }
+  function savePreparationServer(courseId, serverId) {
+    var saved = preparationServerMap();
+    if (serverId) saved[courseId] = String(serverId);
+    else delete saved[courseId];
+    try { localStorage.setItem(PREPARE_SERVER_KEY, JSON.stringify(saved)); } catch (e) {}
+  }
   function paintLibraryCoverage(text) {
     var el = document.getElementById('ai-lib-coverage');
     if (el) el.innerHTML = text;
@@ -5577,7 +5620,10 @@
     var scopeKey = 'course:' + courseId;
     stopPreparationPolling();
     if (!courseId || !isActivePlaylistScope(scopeKey)) return;
-    backendAuthFetch('/api/tutor/library/prepare?course_id=' + encodeURIComponent(courseId))
+    var backendServerId = preparationServerId(courseId);
+    backendAuthFetch('/api/tutor/library/prepare?course_id=' + encodeURIComponent(courseId), {
+      backendServerId: backendServerId
+    })
       .then(function (r) { return r.json(); })
       .then(function (job) {
         if (!isActivePlaylistScope(scopeKey)) return;
@@ -5586,6 +5632,7 @@
         if (job.status === 'queued' || job.status === 'running') {
           _preparePollTimer = setTimeout(function () { pollPlaylistPreparation(courseId); }, 2500);
         } else {
+          savePreparationServer(courseId, '');
           refreshLibraryCoverage(true);
         }
       }).catch(function () {});
@@ -5596,9 +5643,13 @@
     if (!courseId || !isActivePlaylistScope(scopeKey)) return;
     var btn = document.getElementById('ai-prepare-playlist');
     if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
-    backendAuthFetch('/api/tutor/library/prepare', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ course_id: courseId })
+    reserveBackendServer('ai', preparationServerId(courseId)).then(function (ownerId) {
+      savePreparationServer(courseId, ownerId);
+      return backendAuthFetch('/api/tutor/library/prepare', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        backendServerId: ownerId,
+        body: JSON.stringify({ course_id: courseId })
+      });
     }).then(function (r) { return r.json(); }).then(function (job) {
       if (!isActivePlaylistScope(scopeKey)) return;
       if (!job || job.error) {
@@ -5621,10 +5672,14 @@
     var courseId = tutorCourseId();
     var scopeKey = 'course:' + courseId;
     if (!courseId || !isActivePlaylistScope(scopeKey)) return;
-    backendAuthFetch('/api/tutor/library/prepare?course_id=' + encodeURIComponent(courseId), { method: 'DELETE' })
+    var backendServerId = preparationServerId(courseId);
+    backendAuthFetch('/api/tutor/library/prepare?course_id=' + encodeURIComponent(courseId), {
+      method: 'DELETE', backendServerId: backendServerId
+    })
       .then(function (r) { return r.json(); }).then(function (job) {
         if (!isActivePlaylistScope(scopeKey)) return;
         stopPreparationPolling();
+        savePreparationServer(courseId, '');
         paintTutorPreparation(job);
         refreshLibraryCoverage(true);
       }).catch(function () {});
@@ -5666,7 +5721,9 @@
         if (courseMode) {
           paintTutorPreparation(j.preparation || { status: 'idle' });
           var job = j.preparation;
-          if (job && (job.status === 'queued' || job.status === 'running')) pollPlaylistPreparation(courseId);
+          if (preparationServerId(courseId) || (job && (job.status === 'queued' || job.status === 'running'))) {
+            pollPlaylistPreparation(courseId);
+          }
         }
       }).catch(function () {
         if (isLibraryScope() && activeLibraryScopeKey() === key) paintLibraryCoverage('');
@@ -8779,6 +8836,8 @@
      drifts. Deliberately narrow: no panel state, no tutor, no player. */
   window.AiNotesKit = {
     authFetch: backendAuthFetch,        // adds the Firebase ID token
+    reserveServer: reserveBackendServer,
+    responseServer: backendResponseServer,
     follow: followJobStream,            // reconnecting job stream reader
     newJobId: newStudyJobId,
     utf8Length: utf8Length,
