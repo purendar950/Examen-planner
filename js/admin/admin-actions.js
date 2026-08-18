@@ -2004,7 +2004,10 @@ function renderSettings() {
       : (backendSnapshot.servers || []));
   backendServers = backendServers.map(function(server) {
     var routes = Array.isArray(server.routes) && server.routes.length ? server.routes : ['media', 'ai'];
-    return Object.assign({}, server, { routes: routes.filter(function(route) { return route === 'media' || route === 'ai'; }) });
+    return Object.assign({}, server, {
+      url: canonicalizeRetiredBackendProxyRoot(server.url),
+      routes: routes.filter(function(route) { return route === 'media' || route === 'ai'; })
+    });
   });
   var legacyBackendMode = turboConfig.backendMode || backendSnapshot.mode || 'auto';
   var legacyBackendServer = turboConfig.backendManualServerId || backendSnapshot.manualServerId || '';
@@ -2736,7 +2739,7 @@ async function toggleDnsGlobal(checked) {
 function normalizeBackendProxyRoot(value) {
   var original = String(value || '');
   if (/[\u0000-\u001f\u007f]/.test(original)) return '';
-  var raw = original.trim();
+  var raw = canonicalizeRetiredBackendProxyRoot(original).trim();
   if (!raw || raw.indexOf('\\') !== -1 || raw.indexOf('?') !== -1 || raw.indexOf('#') !== -1) return '';
   try {
     var parsed = new URL(raw);
@@ -2744,6 +2747,14 @@ function normalizeBackendProxyRoot(value) {
         parsed.search || parsed.hash || (parsed.pathname && parsed.pathname !== '/')) return '';
     return parsed.origin;
   } catch (e) { return ''; }
+}
+function canonicalizeRetiredBackendProxyRoot(value) {
+  var original = String(value || '');
+  var trimmed = original.trim().replace(/\/+$/, '');
+  if (/^https:\/\/youtube-turbo-proxy(?:-gej4)?\.onrender\.com$/i.test(trimmed)) {
+    return 'https://youtube-turbo-proxy-new.onrender.com';
+  }
+  return original;
 }
 function backendRowsFromForm() {
   return Array.from(document.querySelectorAll('[data-backend-server-row]')).map(function(row, index) {

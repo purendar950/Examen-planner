@@ -529,7 +529,7 @@
 <script type="module" src="src/main.js"></script>
 <!-- core + shared -->
 <script defer src="js/core/firebase.js"></script>
-<script defer src="js/core/backend-router.js"></script>
+<script defer src="js/core/backend-router.js?v=20260818a"></script>
 <!-- exams.js split into one file per exam + an index assembler (see
      js/data/exams/index.js header comment) — index.js MUST load last. -->
 <script defer src="js/data/exams/cgl.js"></script>
@@ -547,7 +547,7 @@
 <script defer src="js/core/persistence.js"></script>
 <script defer src="js/core/offline.js"></script>
 <script defer src="js/core/dialog.js"></script>
-<script defer src="js/features/telegram.js?v=4"></script>
+<script defer src="js/features/telegram.js?v=20260818a"></script>
 <script defer src="js/core/app-init.js"></script>
 <script defer src="js/core/navigation.js"></script>
 <script defer src="js/features/countdown.js"></script>
@@ -624,7 +624,7 @@
      for real 4x speed + native PiP; falls back to the iframe on any failure.
      Must load AFTER youtube.js (wraps ytDoLoad/ytSetSpeed/ytPiP) and after the
      gating file (uses ezIsPro/ezLockedMsg). -->
-<script defer src="js/features/turbo-player.js?v=20260724b"></script>
+<script defer src="js/features/turbo-player.js?v=20260818a"></script>
 <!-- 🧠 Tutor memory (Supabase-backed, cross-session + cross-model) — must load
      AFTER vendor/supabase.js (line ~550) and js/core/firebase.js (uses
      getFirebaseIdToken) and BEFORE ai-tutor.js, which reads window.TutorMemory. -->

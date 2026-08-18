@@ -5,9 +5,16 @@
 (function () {
   'use strict';
 
+  // The former Render service names below were suspended. Keep their exact
+  // addresses only as migration markers; requests must now use the deployed
+  // service that the health monitor already keeps warm.
+  var ACTIVE_RENDER_PROXY_URL = 'https://youtube-turbo-proxy-new.onrender.com';
+  var RETIRED_RENDER_PROXY_URLS = [
+    'https://youtube-turbo-proxy-gej4.onrender.com',
+    'https://youtube-turbo-proxy.onrender.com'
+  ];
   var DEFAULT_SERVERS = [
-    { id: 'render-primary', label: 'Render primary', url: 'https://youtube-turbo-proxy-gej4.onrender.com', enabled: true, routes: ['media', 'ai'] },
-    { id: 'render-secondary', label: 'Render backup', url: 'https://youtube-turbo-proxy.onrender.com', enabled: true, routes: ['media', 'ai'] }
+    { id: 'render-primary', label: 'Render proxy', url: ACTIVE_RENDER_PROXY_URL, enabled: true, routes: ['media', 'ai'] }
   ];
   var STORAGE_KEY = 'preppath_backend_registry_v1';
   /* Per-route request budgets. The media/transcript route talks to cheap proxy
@@ -68,6 +75,53 @@
 
   function cleanUrl(url) {
     return String(url || '').trim().replace(/\/+$/, '');
+  }
+  function isRetiredRenderProxyUrl(url) {
+    return RETIRED_RENDER_PROXY_URLS.indexOf(cleanUrl(url)) !== -1;
+  }
+  /* A previous deployment pointed both built-in servers at now-suspended
+     Render services. The backend policy is Firestore-authoritative, so merely
+     changing DEFAULT_SERVERS would not help existing signed-in users: their
+     cached/remote policy would restore those dead hosts before every request.
+     Migrate only these two exact known-retired URLs, preserving all other
+     administrator-managed servers and routing modes. */
+  function migrateSuspendedRenderProxyConfig(config) {
+    config = config || {};
+    if (!Array.isArray(config.servers) || !config.servers.length) return config;
+    var retiredIds = [];
+    var retained = [];
+    config.servers.forEach(function (item, index) {
+      var url = typeof item === 'string' ? item : (item && item.url);
+      if (isRetiredRenderProxyUrl(url)) {
+        retiredIds.push(item && typeof item === 'object' && item.id
+          ? String(item.id)
+          : safeId('', 'server-' + (index + 1)));
+        return;
+      }
+      retained.push(item);
+    });
+    if (!retiredIds.length && retained.length === config.servers.length) return config;
+
+    var replacement = retained.find(function (item) {
+      var url = typeof item === 'string' ? item : (item && item.url);
+      return cleanUrl(url) === ACTIVE_RENDER_PROXY_URL;
+    });
+    if (!replacement) {
+      replacement = DEFAULT_SERVERS[0];
+      retained.push(replacement);
+    }
+    var replacementId = typeof replacement === 'string' ? 'render-primary' : String(replacement.id || 'render-primary');
+    var migrated = Object.assign({}, config, { servers: retained });
+    ['manualServerId', 'mediaServerId', 'aiServerId'].forEach(function (key) {
+      if (retiredIds.indexOf(String(migrated[key] || '')) !== -1) migrated[key] = replacementId;
+    });
+    if (migrated.activeIds && typeof migrated.activeIds === 'object') {
+      migrated.activeIds = Object.assign({}, migrated.activeIds);
+      ['media', 'ai'].forEach(function (routeKind) {
+        if (retiredIds.indexOf(String(migrated.activeIds[routeKind] || '')) !== -1) migrated.activeIds[routeKind] = replacementId;
+      });
+    }
+    return migrated;
   }
   function safeId(value, fallback) {
     var id = String(value || '').trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '');
@@ -130,20 +184,32 @@
       if (saved && (Array.isArray(saved.splitServers) || Array.isArray(saved.servers))) {
         // New clients keep the full role-tagged registry separately. The legacy
         // `servers` projection is media-only so older tabs cannot call AI hosts.
-        state.servers = normalizeServers(Array.isArray(saved.splitServers) ? saved.splitServers : saved.servers);
-        var legacyMode = normalizeMode(saved.mode);
-        var legacyServerId = String(saved.manualServerId || '');
-        state.mediaMode = normalizeMode(saved.mediaMode == null ? legacyMode : saved.mediaMode);
-        state.mediaServerId = String(saved.mediaServerId == null ? legacyServerId : saved.mediaServerId || '');
-        state.aiMode = normalizeMode(saved.aiMode == null ? legacyMode : saved.aiMode);
-        state.aiServerId = String(saved.aiServerId == null ? legacyServerId : saved.aiServerId || '');
-        var savedActiveIds = saved.activeIds || {};
-        var legacyActiveId = String(saved.activeId || '');
+        var savedConfig = migrateSuspendedRenderProxyConfig({
+          servers: Array.isArray(saved.splitServers) ? saved.splitServers : saved.servers,
+          mode: saved.mode,
+          manualServerId: saved.manualServerId,
+          mediaMode: saved.mediaMode,
+          mediaServerId: saved.mediaServerId,
+          aiMode: saved.aiMode,
+          aiServerId: saved.aiServerId,
+          activeIds: saved.activeIds,
+          activeId: saved.activeId
+        });
+        state.servers = normalizeServers(savedConfig.servers);
+        var legacyMode = normalizeMode(savedConfig.mode);
+        var legacyServerId = String(savedConfig.manualServerId || '');
+        state.mediaMode = normalizeMode(savedConfig.mediaMode == null ? legacyMode : savedConfig.mediaMode);
+        state.mediaServerId = String(savedConfig.mediaServerId == null ? legacyServerId : savedConfig.mediaServerId || '');
+        state.aiMode = normalizeMode(savedConfig.aiMode == null ? legacyMode : savedConfig.aiMode);
+        state.aiServerId = String(savedConfig.aiServerId == null ? legacyServerId : savedConfig.aiServerId || '');
+        var savedActiveIds = savedConfig.activeIds || {};
+        var legacyActiveId = String(savedConfig.activeId || '');
         state.activeIds.media = state.mediaMode === 'strict' ? state.mediaServerId : String(savedActiveIds.media || legacyActiveId);
         state.activeIds.ai = state.aiMode === 'strict' ? state.aiServerId : String(savedActiveIds.ai || legacyActiveId);
       } else {
         var legacy = cleanUrl(localStorage.getItem('turboBackendUrl'));
-        if (legacy && legacy !== DEFAULT_SERVERS[0].url) state.servers = normalizeServers([{ id: 'legacy', label: 'Saved server', url: legacy }, DEFAULT_SERVERS[0], DEFAULT_SERVERS[1]]);
+        if (isRetiredRenderProxyUrl(legacy)) legacy = ACTIVE_RENDER_PROXY_URL;
+        if (legacy && legacy !== DEFAULT_SERVERS[0].url) state.servers = normalizeServers([{ id: 'legacy', label: 'Saved server', url: legacy }, DEFAULT_SERVERS[0]]);
       }
     } catch (e) {}
   }
@@ -253,7 +319,7 @@
     };
   }
   function applyConfig(config, persist) {
-    config = config || {};
+    config = migrateSuspendedRenderProxyConfig(config || {});
     if (Array.isArray(config.servers) && config.servers.length) state.servers = normalizeServers(config.servers);
     var legacyModeProvided = config.mode === 'strict' || config.mode === 'manual' || config.mode === 'auto';
     var legacyMode = legacyModeProvided ? normalizeMode(config.mode) : null;
@@ -291,7 +357,7 @@
     var splitServers = Array.isArray(data.backendSplitServers) && data.backendSplitServers.length
       ? data.backendSplitServers
       : (Array.isArray(data.backendServers) && data.backendServers.length ? data.backendServers : DEFAULT_SERVERS);
-    return {
+    return migrateSuspendedRenderProxyConfig({
       servers: splitServers,
       mode: legacyMode,
       manualServerId: legacyServerId,
@@ -299,7 +365,7 @@
       mediaServerId: data.backendMediaServerId == null ? legacyServerId : String(data.backendMediaServerId || ''),
       aiMode: data.backendAiMode == null ? legacyMode : normalizeMode(data.backendAiMode),
       aiServerId: data.backendAiServerId == null ? legacyServerId : String(data.backendAiServerId || '')
-    };
+    });
   }
   function applyAuthoritativeSnapshot(snap) {
     applyConfig(authoritativeConfig(snap), true);
