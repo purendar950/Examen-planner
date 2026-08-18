@@ -865,6 +865,38 @@
     }
     return String(answer || '').trim();
   }
+  /* A deliberately narrow bridge for sibling StudyPlanner modules. It exposes
+     completion only—not the provider configuration or key—and uses the same
+     already-authorized, browser-direct provider session as AI Chat. This is
+     useful as a last-resort answer path when the full proxy is unreachable;
+     callers must clearly disclose when their richer server context is absent. */
+  window.PrepPathDirectAI = Object.freeze({
+    available: function (provider) { return !!directProviderConfig(provider); },
+    complete: function (request) {
+      request = request || {};
+      var provider = String(request.provider || '').toLowerCase();
+      if (!directProviderConfig(provider)) {
+        return Promise.reject(new Error('Browser-direct AI is not enabled for the selected provider.'));
+      }
+      var body = {
+        q: String(request.question || ''), model: String(request.model || ''),
+        persona: String(request.instructions || ''),
+        history: Array.isArray(request.history) ? request.history : []
+      };
+      return directProviderFetch(provider, 'chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        timeoutMs: Number(request.timeoutMs || 90000),
+        body: JSON.stringify(directChatPayload(provider, body))
+      }).then(function (response) {
+        if (!response.ok) return responseError(response, 'Direct ' + provider + ' chat failed.');
+        return response.json();
+      }).then(function (payload) {
+        var answer = directChatAnswer(provider, payload);
+        if (!answer) throw new Error('Browser-direct AI returned an empty answer.');
+        return answer;
+      });
+    }
+  });
   function directChatMessages(body) {
     var messages = [];
     if (body && body.persona) messages.push({ role: 'system', content: String(body.persona).slice(0, 8000) });

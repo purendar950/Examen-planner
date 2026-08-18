@@ -6251,6 +6251,48 @@
     }
   }
 
+  /* Browser-direct AI Chat can be enabled by an administrator for a selected
+     provider. The normal Tutor remains server-grounded by default; this helper
+     is a recovery-only path after BOTH Tutor proxy transports fail. It must not
+     pretend to have the transcript, web evidence, note anchoring, Library
+     retrieval, or quota checks that only the proxy provides. */
+  function directTutorAnswer(context) {
+    var bridge = window.PrepPathDirectAI;
+    var provider = String(context && context.provider || '').toLowerCase();
+    if (!bridge || typeof bridge.available !== 'function' || typeof bridge.complete !== 'function' ||
+        !provider || !bridge.available(provider)) {
+      return Promise.reject(new Error('Browser-direct AI is not available for the selected provider.'));
+    }
+    var video = context.videoTitle || 'the current video';
+    var instructions =
+      'You are a helpful study tutor. This is a browser-direct emergency answer for "' + video + '". ' +
+      'You do NOT have the video transcript, captions, current web sources, notes, or library search results. ' +
+      'Never claim that you watched the video or state video-specific facts as certain. ' +
+      'Give a clear general explanation and a simple example for the student\'s question. ' +
+      'If the question needs an exact point from the video, ask the student to paste that point or a timestamp.';
+    return bridge.complete({
+      provider: provider,
+      model: context.model || '',
+      question: context.question || '',
+      history: context.history || [],
+      instructions: instructions,
+      timeoutMs: GENERATION_TIMEOUT_MS
+    });
+  }
+  function finishDirectTutorAnswer(historyKey, turnId, liveEl, context, originalError) {
+    return directTutorAnswer(context).then(function (answer) {
+      var labelled = '⚡ Browser-direct backup — this answer has no video captions, web sources, or library context.\n\n' + answer;
+      saveTutorAnswer(historyKey, turnId, labelled);
+      finishTutorBubble(historyKey, turnId, liveEl, labelled);
+      return true;
+    }).catch(function () {
+      var answer = tutorErrorMessage(originalError);
+      saveTutorAnswer(historyKey, turnId, answer);
+      finishTutorBubble(historyKey, turnId, liveEl, answer);
+      return false;
+    });
+  }
+
   /* Transport failures used to be stringified straight into the chat, so a
      student read "Error: Request timed out after 12000 ms from render storebook"
      — the proxy's internal label and a millisecond count mean nothing to them,
@@ -6282,7 +6324,7 @@
   // Classic one-shot request — the fallback when streaming isn't available or
   // fails. The user turn is already pushed + saved by sendTutor; this only adds
   // the assistant reply. `histForApi` is the trimmed history to send.
-  function sendTutorOnce(requestBody, historyKey, turnId, liveEl, oncePath) {
+  function sendTutorOnce(requestBody, historyKey, turnId, liveEl, oncePath, directContext) {
     backendAuthFetch(oncePath || '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       // No headers arrive until the model has written the entire answer, so this
@@ -6298,6 +6340,10 @@
       saveTutorAnswer(historyKey, turnId, answer, web);
       finishTutorBubble(historyKey, turnId, liveEl, answer, web);
     }).catch(function (e) {
+      if (directContext) {
+        finishDirectTutorAnswer(historyKey, turnId, liveEl, directContext, e);
+        return;
+      }
       var answer = tutorErrorMessage(e);
       saveTutorAnswer(historyKey, turnId, answer);
       finishTutorBubble(historyKey, turnId, liveEl, answer);
@@ -6368,6 +6414,13 @@
     // after the student changes playlists; its one-shot fallback must still
     // search the original playlist and save into that same conversation.
     var requestBody = tutorBody(vid, question, mode, histForApi, opts);
+    // If the proxy cannot be reached at all, a user who already has AI Chat's
+    // administrator-authorized browser-direct provider session may still get a
+    // clearly labelled general answer. Video grounding stays proxy-only.
+    var directContext = !lib ? {
+      provider: outProvider(), model: outModel(), question: question,
+      history: histForApi, videoTitle: curTitle()
+    } : null;
 
     // Live assistant bubble we grow as chunks arrive (only when the tutor tab is
     // visible). Starts as a "thinking…" spinner; the first chunk replaces it.
@@ -6420,7 +6473,7 @@
       if (done) return;
       streamPainter.cancel();
       done = true;
-      sendTutorOnce(requestBody, historyKey, turnId, liveEl, oncePath);
+      sendTutorOnce(requestBody, historyKey, turnId, liveEl, oncePath, directContext);
     }
     function handleFrame(frame) {
       var ev = 'message', data = '';

@@ -436,11 +436,26 @@ await test('the tutor sends its own budgets for streaming and one-shot generatio
   assert.ok(/apiGet\([^)]*GENERATION_TIMEOUT_MS\)/.test(tutorSource), 'study generation passes the budget');
 });
 
+await test('a browser-direct Tutor backup is clearly limited to an already-authorized AI Chat provider', async () => {
+  assert.match(chatSource, /window\.PrepPathDirectAI = Object\.freeze/);
+  assert.match(chatSource, /Browser-direct AI is not enabled for the selected provider/);
+  const bridgeSource = chatSource.slice(
+    chatSource.indexOf('window.PrepPathDirectAI = Object.freeze'),
+    chatSource.indexOf('function directChatMessages')
+  );
+  assert.doesNotMatch(bridgeSource, /apiKey|directProviders/, 'the bridge must not expose provider credentials or configuration');
+  assert.match(tutorSource, /function directTutorAnswer\(context\)/);
+  assert.match(tutorSource, /video transcript, captions, current web sources, notes, or library search results/i);
+  assert.match(tutorSource, /var directContext = !lib \?/);
+  assert.match(tutorSource, /sendTutorOnce\(requestBody, historyKey, turnId, liveEl, oncePath, directContext\)/);
+  assert.match(tutorSource, /Browser-direct backup — this answer has no video captions, web sources, or library context/);
+});
+
 await test('a transport failure reaches the student as advice, not a proxy label', async () => {
   // The chat used to persist `String(error)`, e.g. "Error: Request timed out
   // after 12000 ms from render storebook", which blames the student's question.
   assert.match(tutorSource, /function tutorErrorMessage\(error\)/);
-  assert.match(tutorSource, /catch\(function \(e\) \{\s*var answer = tutorErrorMessage\(e\);/);
+  assert.match(tutorSource, /catch\(function \(e\) \{[\s\S]{0,260}?tutorErrorMessage\(e\);/);
   const message = /if \(\/timed out\|abort\/i\.test\(raw\)\) \{\s*return '([^']*)' \+\s*'([^']*)';/.exec(tutorSource);
   assert.ok(message, 'the timeout branch returns a student-facing string');
   const text = message[1] + message[2];
