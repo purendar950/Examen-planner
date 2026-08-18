@@ -6263,8 +6263,13 @@
       return '\u26a0 The tutor took too long to answer. The AI server may have been asleep — ' +
              'ask again and it should reply now.';
     }
+    /* The router already retried this several times over a few seconds, so a
+       transient cold-start reset is ruled out by the time we get here — the
+       server is genuinely unreachable or still waking. Name both causes rather
+       than blaming the student's connection, which is usually fine. */
     if (/failed to fetch|network ?error|networkerror/i.test(raw)) {
-      return '\u26a0 Could not reach the AI server. Check your connection and try again.';
+      return '\u26a0 Could not reach the AI server — it may still be starting up. ' +
+             'Wait a few seconds and ask again, or check your connection.';
     }
     if (/service suspended|HTTP 50[234]/i.test(raw)) {
       return '\u26a0 The AI server is temporarily unavailable. Please try again in a minute.';
