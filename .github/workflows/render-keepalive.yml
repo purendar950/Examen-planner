@@ -1,0 +1,104 @@
+name: Render Keep-Alive
+
+# ═══════════════════════════════════════════════════════════════
+# Render's free plan spins a web service down after ~15 minutes of
+# inactivity. The next request then has to boot the container, which takes
+# 30-60s — and while it boots, the edge REJECTS connections rather than
+# holding them. In the browser that arrives as `Failed to fetch`, which is
+# indistinguishable from an outage.
+#
+# That is the root cause behind the AI Tutor errors fixed symptomatically
+# in #754 (a 12s abort that could never outlast a cold start) and #755 (an
+# in-place retry for the reset). Those make the failure survivable; this
+# removes it, by never letting the service go idle for 15 minutes.
+#
+# WHY A PING LOOP RATHER THAN JUST A TIGHTER CRON
+#   GitHub's scheduler is best-effort and drops or delays runs under load,
+#   and every `*/N` cron in the world is queued at the same instants. A
+#   single 10-minute cron would therefore leave >15 minute holes whenever a
+#   run slipped. Each run instead pings for ~12 minutes, so consecutive
+#   runs overlap and one dropped run cannot open a spin-down window.
+#
+# HONEST LIMIT: this makes spin-down unlikely, not impossible. Only a paid
+# instance removes it outright. It also cannot revive a service that has
+# been SUSPENDED (HTTP 503 + `x-render-routing: suspend`) — that is an
+# account/billing state, not idleness, and needs the dashboard.
+# ═══════════════════════════════════════════════════════════════
+
+on:
+  schedule:
+    # Every 10 minutes, deliberately offset off the hour: GitHub queues
+    # every :00 cron at once and sheds load.
+    - cron: '3,13,23,33,43,53 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Overlapping runs are the POINT (they bridge scheduler jitter), so this
+  # must never cancel an in-flight run.
+  group: render-keepalive-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Keep the proxy warm
+        env:
+          # The AI + media proxy the app actually routes to. Add more URLs
+          # space-separated; each is pinged on every pass.
+          TARGETS: 'https://youtube-turbo-proxy-new.onrender.com'
+        run: |
+          set -uo pipefail
+
+          PASSES=7          # 7 passes, 2 min apart => ~12 min of coverage
+          INTERVAL=120
+          any_ok=0
+          declare -A last_code
+
+          for pass in $(seq 1 "$PASSES"); do
+            for url in $TARGETS; do
+              # curl's -w already prints 000 on a connection failure, so
+              # `|| true` is used rather than echoing a fallback (which
+              # would concatenate into "000000").
+              code=$(curl -s -o /tmp/health.json -w '%{http_code}' --max-time 60 \
+                "$url/health") || true
+              code="${code:-000}"
+              last_code["$url"]="$code"
+
+              if [ "$code" = "200" ]; then
+                any_ok=1
+                echo "pass $pass  ✅ $url -> 200"
+              else
+                echo "pass $pass  ⚠ $url -> HTTP $code"
+                head -c 200 /tmp/health.json 2>/dev/null || true
+                echo
+              fi
+            done
+
+            # No sleep after the final pass — it would just idle the runner.
+            [ "$pass" -lt "$PASSES" ] && sleep "$INTERVAL"
+          done
+
+          echo
+          echo "── final state ──"
+          for url in $TARGETS; do
+            code="${last_code[$url]}"
+            echo "$url -> HTTP $code"
+            case "$code" in
+              200) ;;
+              503) echo "::error::$url is SUSPENDED or unavailable. Check for 'x-render-routing: suspend' — a suspended service cannot be woken by pinging; fix it in the Render dashboard." ;;
+              000) echo "::error::Could not connect to $url. If DNS fails the service was DELETED or renamed, so the URL in Admin → Backend servers is now wrong." ;;
+              *)   echo "::error::$url returned HTTP $code instead of 200." ;;
+            esac
+          done
+
+          # Only fail when NOTHING responded: a single bad target among
+          # several should be visible without masking a working one.
+          if [ "$any_ok" = "0" ]; then
+            echo "::error::No target responded 200 — the proxy is not merely asleep."
+            exit 1
+          fi

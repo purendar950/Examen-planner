@@ -52,6 +52,9 @@ function createRouter(fetchImpl, savedLocal = null, remoteData = null) {
   };
   const window = {
     fetch: fetchImpl,
+    // The app is served over HTTPS (GitHub Pages), which is what makes an
+    // http:// backend unreachable. Every fixture server below is https://.
+    location: { protocol: 'https:' },
     dispatchEvent() {},
     PrepPathFirebase: remoteHandles,
     PrepPathAdminFirebase: null
@@ -488,6 +491,23 @@ await test('a cancelled caller is never retried into', async () => {
   const api = splitRouter(async () => { calls += 1; controller.abort(); throw connectionFailure(); });
   await assert.rejects(api.fetch('/api/tutor', { method: 'POST', signal: controller.signal }));
   assert.equal(calls, 1, 'Stop must not be turned into more traffic');
+});
+
+await test('an http:// backend fails with the real reason, not a generic network error', async () => {
+  // Mixed content is blocked by the browser and reported only as "Failed to
+  // fetch", so a local/ngrok/mistyped AI URL was indistinguishable from an
+  // outage — undiagnosable from the UI. It must name the URL and the fix.
+  let calls = 0;
+  const INSECURE = { id: 'local-ai', label: 'Local AI proxy', url: 'http://192.168.1.50:8080', enabled: true, routes: ['ai'] };
+  const { api } = createRouter(async () => { calls += 1; return response(200); });
+  api.configure({ servers: [MEDIA, INSECURE], aiMode: 'strict', aiServerId: INSECURE.id }, false);
+  await assert.rejects(api.fetch('/api/tutor', { method: 'POST' }), (error) => {
+    assert.match(error.message, /insecure http:\/\/ address/);
+    assert.match(error.message, /http:\/\/192\.168\.1\.50:8080/, 'names the offending URL');
+    assert.match(error.message, /Admin → Backend servers/, 'names where to fix it');
+    return true;
+  });
+  assert.equal(calls, 0, 'never spends the timeout budget on a request the browser blocks');
 });
 
 console.log('Independent backend role routing');
