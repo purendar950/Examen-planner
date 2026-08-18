@@ -17,6 +17,25 @@
      that do genuinely long work (one-shot notes, tutor fallback) still pass an
      explicit timeoutMs; this is only the floor for callers that pass none. */
   var DEFAULT_TIMEOUT_MS = { media: 12000, ai: 45000 };
+  /* A cold-starting Render instance rejects the connection *instantly* rather
+     than holding it, so the failure is a network error and no timeout budget can
+     absorb it — the student just saw "Could not reach the AI server". The next
+     attempt a few seconds later usually lands on the now-awake instance, so the
+     AI route retries in place. Media keeps zero retries: it has real failover
+     servers and must stay snappy. */
+  var NETWORK_RETRIES = { media: 0, ai: 2 };
+  var NETWORK_RETRY_DELAY_MS = [1500, 4000];
+  function wait(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+  /* Deliberately narrow: only the browser's own connection-level failures.
+     An HTTP error means the server answered and must follow the normal failover
+     path, and an abort means we already waited the whole budget (or the caller
+     cancelled), so neither is retried. */
+  function isConnectionFailure(error) {
+    if (!error || error.name === 'AbortError') return false;
+    return /failed to fetch|networkerror|network error|load failed/i.test(String(error.message || ''));
+  }
   var responseServers = new WeakMap();
   var state = {
     servers: DEFAULT_SERVERS.slice(),
@@ -360,6 +379,33 @@
       : 'No backend servers are configured for the ' + routeKind + ' route.');
     return { id: selected.id, url: selected.url, route: routeKind };
   }
+  /* One server, plus in-place retries for connection failures only. Retrying a
+     connection failure is safe even for a POST: the request never reached the
+     server, so nothing can be applied twice. */
+  async function attemptServer(server, path, options, timeoutMs, retries) {
+    var url = server.url + (String(path || '').charAt(0) === '/' ? path : '/' + path);
+    var lastFetchError = null;
+    for (var attempt = 0; attempt <= retries; attempt += 1) {
+      if (attempt) {
+        // A caller that cancelled (Stop, tab change) must not be retried into.
+        if (options.signal && options.signal.aborted) break;
+        await wait(NETWORK_RETRY_DELAY_MS[Math.min(attempt - 1, NETWORK_RETRY_DELAY_MS.length - 1)]);
+      }
+      var timed = withTimeout(options.signal, timeoutMs);
+      var requestOptions = Object.assign({}, options, { signal: timed.signal });
+      delete requestOptions.timeoutMs;
+      try {
+        var response = await window.fetch(url, requestOptions);
+        timed.clear();
+        return { response: response, error: null };
+      } catch (error) {
+        timed.clear();
+        lastFetchError = error;
+        if (!isConnectionFailure(error)) break;
+      }
+    }
+    return { response: null, error: lastFetchError };
+  }
   async function request(path, options) {
     options = Object.assign({}, options || {});
     await syncRemotePolicyBeforeRequest();
@@ -391,14 +437,12 @@
     // Resolved once so the abort timer and the reported timeout can never
     // disagree — the message used to hardcode 12000 independently of the timer.
     var timeoutMs = resolveTimeoutMs(options, routeKind);
+    var retries = NETWORK_RETRIES[routeKind] || 0;
     for (var i = 0; i < servers.length; i += 1) {
       var server = servers[i];
-      var timed = withTimeout(options.signal, timeoutMs);
-      var requestOptions = Object.assign({}, options, { signal: timed.signal });
-      delete requestOptions.timeoutMs;
-      try {
-        var response = await window.fetch(server.url + (String(path || '').charAt(0) === '/' ? path : '/' + path), requestOptions);
-        timed.clear();
+      var outcome = await attemptServer(server, path, options, timeoutMs, retries);
+      if (outcome.response) {
+        var response = outcome.response;
         if (response.ok || (response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429)) {
           responseServers.set(response, { id: server.id, url: server.url, route: routeKind });
           mark(server, true, 'HTTP ' + response.status, routeKind);
@@ -408,8 +452,8 @@
         lastError = new Error('HTTP ' + response.status + ' from ' + server.label + (responseDetail ? ': ' + responseDetail : ''));
         attempts.push(lastError.message);
         mark(server, false, lastError.message, routeKind);
-      } catch (error) {
-        timed.clear();
+      } else {
+        var error = outcome.error;
         if (error && error.name === 'AbortError') {
           lastError = new Error('Request timed out after ' + timeoutMs + ' ms from ' + server.label);
         } else {

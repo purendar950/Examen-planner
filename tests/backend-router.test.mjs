@@ -445,6 +445,51 @@ await test('a transport failure reaches the student as advice, not a proxy label
   assert.match(text, /ask again/i, 'it tells the student what to do next');
 });
 
+/* Cold-start connection resets. A sleeping Render instance refuses the
+   connection instantly, so this is a network error rather than a timeout and no
+   budget can absorb it — the student saw "Could not reach the AI server". */
+function connectionFailure() { return new TypeError('Failed to fetch'); }
+
+await test('an AI connection failure is retried in place until the instance wakes', async () => {
+  let calls = 0;
+  const api = splitRouter(async () => {
+    calls += 1;
+    if (calls < 3) throw connectionFailure();   // spinning up, then awake
+    return response(200, { answer: 'hi' });
+  });
+  const r = await api.fetch('/api/tutor', { method: 'POST' });
+  assert.equal(r.status, 200);
+  assert.equal(calls, 3, 'retried twice before succeeding');
+});
+
+await test('the media route never retries in place — it has real failover', async () => {
+  let calls = 0;
+  const api = splitRouter(async () => { calls += 1; throw connectionFailure(); });
+  await assert.rejects(api.fetch('/api/transcript?id=x'));
+  assert.equal(calls, 1);
+});
+
+await test('only connection failures are retried, never HTTP errors or aborts', async () => {
+  let httpCalls = 0;
+  const httpApi = splitRouter(async () => { httpCalls += 1; return response(500); });
+  await assert.rejects(httpApi.fetch('/api/tutor', { method: 'POST' }));
+  assert.equal(httpCalls, 1, 'a 500 means the server answered; retrying is not our call');
+
+  let abortCalls = 0;
+  const abortApi = splitRouter(async () => { abortCalls += 1; throw abortError(); });
+  await assert.rejects(abortApi.fetch('/api/tutor', { method: 'POST' }),
+    /timed out after 45000 ms/);
+  assert.equal(abortCalls, 1, 'the full budget was already spent');
+});
+
+await test('a cancelled caller is never retried into', async () => {
+  let calls = 0;
+  const controller = new AbortController();
+  const api = splitRouter(async () => { calls += 1; controller.abort(); throw connectionFailure(); });
+  await assert.rejects(api.fetch('/api/tutor', { method: 'POST', signal: controller.signal }));
+  assert.equal(calls, 1, 'Stop must not be turned into more traffic');
+});
+
 console.log('Independent backend role routing');
 console.log(results.join('\n'));
 if (!process.exitCode) console.log(`\n${results.length} checks passed`);
