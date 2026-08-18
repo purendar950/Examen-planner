@@ -579,7 +579,7 @@ function setTab(t, options) {
     } catch(e) {}
   }
   if (t === 'telegram' && !TG_CONFIG.loaded) loadTelegramData();
-  if (t === 'aistudy' && (!AI_CONFIG.loaded || !AI_CHAT_CONFIG.loaded)) loadAiStudyData();
+  if (t === 'aistudy' && (!AI_CONFIG.loaded || !AI_LIMITS.loaded || !AI_CHAT_CONFIG.loaded)) loadAiStudyData();
   if (t === 'reports' && !REPORTS_LOADED) loadReportsData();
   if (t === 'dnsAdblock' && !DNS_CONFIG.loaded) loadDnsAdblockData();
   render();
