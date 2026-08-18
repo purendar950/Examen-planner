@@ -29,8 +29,8 @@
 (function () {
   "use strict";
 
-  var SUPA_URL  = 'https://deefmrmmjlknotzpceqp.supabase.co';
-  var SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRlZWZtcm1tamxrbm90enBjZXFwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQyMTMwNzMsImV4cCI6MjA5OTc4OTA3M30.53-6HdN8umsqrHsaoSNX-o1VFdJbZdN6_mnYZ1bCN8A';
+  var SUPA_URL  = 'https://bhhxulecdpqnsiaogmoc.supabase.co';
+  var SUPA_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJoaHh1bGVjZHBxbnNpYW9nbW9jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1MjQ2MTYsImV4cCI6MjA5ODEwMDYxNn0.vdqIwXiIx9OSIoiBkX_o78MbYSDp5dN6303xKuXn4P4';
 
   // Legacy content worker (GitHub-hosted JSON). Optional fallback.
   var GATEKEEPER_URL = 'https://gatekeeper-api.sscjourney2official.workers.dev/';
@@ -176,7 +176,10 @@
         if (!supa || !testId) return [];
         var q = supa.from('mock_attempts').select('*').eq('test_id', testId);
         if (userId) q = q.eq('user_id', userId);
-        var res = await q.order('created_at', { ascending: false }).limit(50);
+        // mock_attempts timestamps its rows submitted_at, NOT created_at.
+        // Ordering by created_at made PostgREST reject the whole query, so this
+        // returned [] and "Previous Results" always looked empty.
+        var res = await q.order('submitted_at', { ascending: false }).limit(50);
         if (res.error) { console.warn('[supabase-config] getAttempts:', res.error.message); return []; }
         return res.data || [];
       } catch (e) {
