@@ -64,9 +64,62 @@ _env_allowed_origins = [origin.strip().rstrip("/") for origin in
                         if origin.strip()]
 ALLOWED_ORIGINS = tuple(dict.fromkeys(
     [origin.rstrip("/") for origin in _DEFAULT_ALLOWED_ORIGINS] + _env_allowed_origins))
+# supports_credentials=True because every browser request to this proxy carries
+# a Firebase ID token in the Authorization header. flask-cors only emits
+# `Access-Control-Allow-Credentials: true` when this flag is set, and without it
+# credentialed cross-origin fetches (which is what the entire app uses for auth)
+# are rejected by the browser even when the rest of the CORS preflight succeeds.
+# This was the proximate cause of the /api/ai-chat/status CORS block reported in
+# the network-console analysis (Issue #2): the preflight "passed" but the actual
+# credentialed GET was rejected because the response lacked the credentials
+# allow-flag.
 CORS(app, origins=ALLOWED_ORIGINS, methods=["GET", "POST", "DELETE", "OPTIONS"],
      allow_headers=["Authorization", "Content-Type"],
-     expose_headers=["X-Image-Provider", "X-Image-Model"])
+     expose_headers=["X-Image-Provider", "X-Image-Model"],
+     supports_credentials=True)
+
+
+def _cors_origin_for_request():
+    """Return the allowlisted Origin to reflect for the current request, or "".
+
+    Mirrors the per-origin reflection already used inline on /api/stream and
+    /tg-photo, so the same logic can be reused by the global after_request hook
+    (Issue #2) and by streaming SSE responses that bypass flask-cors'
+    after_request (Issue #1). Never returns "*" — every response carries the
+    specific allowlisted origin, which is required for credentialed requests.
+    """
+    origin = (request.headers.get("Origin") or "").rstrip("/")
+    if origin and origin in ALLOWED_ORIGINS:
+        return origin
+    return ""
+
+
+@app.after_request
+def _ensure_cors_headers(response):
+    """Defensive CORS hook that runs after EVERY response, including OPTIONS
+    preflights and jsonify bodies that may slip past flask-cors' own
+    after_request on some Flask / flask-cors combinations (the symptom reported
+    for /api/ai-chat/status — Issue #2). Streaming SSE responses returned via
+    `Response(stream_with_context(...))` ALSO bypass flask-cors' after_request
+    in practice, so this hook catches the OPTIONS preflight for the stream
+    route too; the actual streaming GET additionally sets the headers inline
+    (see /api/study/jobs/<job_id>/stream) because once the generator is
+    streaming, after_request may fire before the browser has even read the
+    headers.
+    """
+    origin = _cors_origin_for_request()
+    if not origin:
+        return response
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Vary"] = "Origin"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type"
+    if request.method == "OPTIONS" and "Access-Control-Max-Age" not in response.headers:
+        response.headers["Access-Control-Max-Age"] = "86400"
+    return response
+
+
 MAX_TELEGRAM_IMAGE_BYTES = int(os.environ.get("MAX_TELEGRAM_IMAGE_BYTES", str(8 * 1024 * 1024)))
 
 # ------------------------------------------------------------------ config
@@ -7541,8 +7594,26 @@ def api_study_job_stream(job_id):
         elif status == "failed":
             yield sse("error", {"error": "ai_failed", "detail": error or "Generation failed."})
 
+    # Issue #1 fix: streaming SSE Responses returned via stream_with_context
+    # bypass flask-cors' after_request in practice (the response object is
+    # already streaming once the generator starts), so the
+    # Access-Control-Allow-Origin header would never be set on the actual
+    # streaming GET. That made every "Generate Notes" GET to .../stream?offset=0
+    # hit `No 'Access-Control-Allow-Origin' header` and the browser blocked the
+    # whole fetch before one byte of SSE reached the client — kit.follow()
+    # immediately rejected and the UI surfaced "AI proxy restarted". The
+    # OPTIONS preflight for this route IS covered by the global
+    # _ensure_cors_headers after_request hook; this inline header covers the
+    # actual streaming GET. Pattern mirrors /api/stream and /tg-photo.
+    stream_headers = {"Cache-Control": "no-cache, no-transform",
+                      "X-Accel-Buffering": "no"}
+    origin = _cors_origin_for_request()
+    if origin:
+        stream_headers["Access-Control-Allow-Origin"] = origin
+        stream_headers["Vary"] = "Origin"
+        stream_headers["Access-Control-Allow-Credentials"] = "true"
     return Response(stream_with_context(follow()), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+                    headers=stream_headers)
 
 
 # ── Multi-video notebooks ("bundles") ──────────────────────────────────────
