@@ -369,6 +369,82 @@ await test('old localStorage shape migrates both roles without a rewrite require
   assert.equal(snapshot.aiServerId, AI.id);
 });
 
+/* Request budgets. The reported bug was an AI tutor answer that always failed
+   with "Request timed out after 12000 ms": the router applied one flat
+   media-sized budget to every route, so the abort always fired while the model
+   was still generating. Aborting the fetch immediately lets these assert the
+   resolved budget through the public error message without real waiting. */
+function abortError() {
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+function splitRouter(fetchImpl) {
+  const { api } = createRouter(fetchImpl);
+  api.configure({
+    servers: [MEDIA, AI],
+    mediaMode: 'strict', mediaServerId: MEDIA.id,
+    aiMode: 'strict', aiServerId: AI.id
+  }, false);
+  return api;
+}
+
+await test('AI generation gets a longer budget than the media route', async () => {
+  const api = splitRouter(async () => { throw abortError(); });
+  await assert.rejects(api.fetch('/api/tutor/stream', { method: 'POST' }),
+    /timed out after 45000 ms from Local AI proxy/);
+  // The media route must keep failing over fast — it is not LLM work.
+  await assert.rejects(api.fetch('/api/transcript?id=x'),
+    /timed out after 12000 ms from Render media/);
+});
+
+await test('an explicit timeout is honoured and reported, never a hardcoded default', async () => {
+  const api = splitRouter(async () => { throw abortError(); });
+  // The message used to print `options.timeoutMs || 12000` independently of the
+  // timer, so an overridden budget was reported as 12000 and read as a bug.
+  await assert.rejects(api.fetch('/api/tutor', { method: 'POST', timeoutMs: 180000 }),
+    /timed out after 180000 ms from Local AI proxy/);
+  await assert.rejects(api.fetch('/api/info?id=x', { timeoutMs: 3000 }),
+    /timed out after 3000 ms from Render media/);
+});
+
+await test('the timeout is consumed by the router and never forwarded to fetch', async () => {
+  let seen;
+  const api = splitRouter(async (url, options) => { seen = options; return response(200); });
+  await api.fetch('/api/tutor', { method: 'POST', timeoutMs: 180000 });
+  assert.equal(Object.hasOwn(seen, 'timeoutMs'), false);
+  assert.ok(seen.signal, 'the router still supplies its own abort signal');
+});
+
+await test('the tutor sends its own budgets for streaming and one-shot generation', async () => {
+  // A stream only needs to *start* before the deadline, so it carries the
+  // connect-time budget; the one-shot reply has to finish generating before any
+  // headers arrive, so it carries the full generation budget.
+  assert.match(tutorSource, /var STREAM_START_TIMEOUT_MS = (\d+);/);
+  assert.match(tutorSource, /var GENERATION_TIMEOUT_MS = (\d+);/);
+  const streamBudget = Number(/var STREAM_START_TIMEOUT_MS = (\d+);/.exec(tutorSource)[1]);
+  const generationBudget = Number(/var GENERATION_TIMEOUT_MS = (\d+);/.exec(tutorSource)[1]);
+  assert.ok(streamBudget >= 60000, 'a stream must survive a cold start');
+  assert.ok(generationBudget > streamBudget, 'a full generation needs more room than a connect');
+  assert.match(tutorSource, /backendAuthFetch\(streamPath,[\s\S]{0,500}?timeoutMs: STREAM_START_TIMEOUT_MS/);
+  assert.match(tutorSource, /backendAuthFetch\(oncePath \|\| '\/api\/tutor',[\s\S]{0,500}?timeoutMs: GENERATION_TIMEOUT_MS/);
+  // Synchronous study generation shares the one-shot failure mode.
+  assert.match(tutorSource, /function apiGet\(path, signal, timeoutMs\)/);
+  assert.ok(/apiGet\([^)]*GENERATION_TIMEOUT_MS\)/.test(tutorSource), 'study generation passes the budget');
+});
+
+await test('a transport failure reaches the student as advice, not a proxy label', async () => {
+  // The chat used to persist `String(error)`, e.g. "Error: Request timed out
+  // after 12000 ms from render storebook", which blames the student's question.
+  assert.match(tutorSource, /function tutorErrorMessage\(error\)/);
+  assert.match(tutorSource, /catch\(function \(e\) \{\s*var answer = tutorErrorMessage\(e\);/);
+  const message = /if \(\/timed out\|abort\/i\.test\(raw\)\) \{\s*return '([^']*)' \+\s*'([^']*)';/.exec(tutorSource);
+  assert.ok(message, 'the timeout branch returns a student-facing string');
+  const text = message[1] + message[2];
+  assert.doesNotMatch(text, /\d{4,} ?ms|storebook/, 'no millisecond counts or server labels');
+  assert.match(text, /ask again/i, 'it tells the student what to do next');
+});
+
 console.log('Independent backend role routing');
 console.log(results.join('\n'));
 if (!process.exitCode) console.log(`\n${results.length} checks passed`);

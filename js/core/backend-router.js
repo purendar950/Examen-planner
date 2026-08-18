@@ -10,6 +10,13 @@
     { id: 'render-secondary', label: 'Render backup', url: 'https://youtube-turbo-proxy.onrender.com', enabled: true, routes: ['media', 'ai'] }
   ];
   var STORAGE_KEY = 'preppath_backend_registry_v1';
+  /* Per-route request budgets. The media/transcript route talks to cheap proxy
+     endpoints and should fail over fast. The AI route fronts LLM generation on
+     a Render instance that may be cold-starting, so a 12s budget guaranteed a
+     spurious "Request timed out" long before the model could answer. Callers
+     that do genuinely long work (one-shot notes, tutor fallback) still pass an
+     explicit timeoutMs; this is only the floor for callers that pass none. */
+  var DEFAULT_TIMEOUT_MS = { media: 12000, ai: 45000 };
   var responseServers = new WeakMap();
   var state = {
     servers: DEFAULT_SERVERS.slice(),
@@ -37,6 +44,11 @@
   }
   function normalizeRouteKind(value) {
     return value === 'ai' ? 'ai' : 'media';
+  }
+  function resolveTimeoutMs(options, routeKind) {
+    var requested = Number(options && options.timeoutMs);
+    if (requested > 0) return requested;
+    return DEFAULT_TIMEOUT_MS[normalizeRouteKind(routeKind)] || DEFAULT_TIMEOUT_MS.media;
   }
   function normalizeRoutes(value, fallback) {
     var explicit = Array.isArray(value);
@@ -376,9 +388,12 @@
       : 'No backend servers are configured for the ' + routeKind + ' route.');
     var lastError = null;
     var attempts = [];
+    // Resolved once so the abort timer and the reported timeout can never
+    // disagree — the message used to hardcode 12000 independently of the timer.
+    var timeoutMs = resolveTimeoutMs(options, routeKind);
     for (var i = 0; i < servers.length; i += 1) {
       var server = servers[i];
-      var timed = withTimeout(options.signal, options.timeoutMs || 12000);
+      var timed = withTimeout(options.signal, timeoutMs);
       var requestOptions = Object.assign({}, options, { signal: timed.signal });
       delete requestOptions.timeoutMs;
       try {
@@ -396,7 +411,7 @@
       } catch (error) {
         timed.clear();
         if (error && error.name === 'AbortError') {
-          lastError = new Error('Request timed out after ' + (options.timeoutMs || 12000) + ' ms from ' + server.label);
+          lastError = new Error('Request timed out after ' + timeoutMs + ' ms from ' + server.label);
         } else {
           lastError = new Error((error && error.message ? error.message : 'Network error') + ' from ' + server.label);
         }
