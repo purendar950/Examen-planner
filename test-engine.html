@@ -3692,8 +3692,13 @@ function showSavePopup(message) {
   // 🚩 REPORTS: sent via the secure server-side proxy (token lives in Firestore
   // config/reports, managed from the admin panel — never exposed here).
 const REPORT_PROXY_URL = (function(){
-  try { return (localStorage.getItem('turboBackendUrl') || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, ''); }
-  catch (e) { return 'https://youtube-turbo-proxy-gej4.onrender.com'; }
+  try {
+    var configured = (localStorage.getItem('turboBackendUrl') || '').replace(/\/+$/, '');
+    if (/^https:\/\/youtube-turbo-proxy(?:-gej4)?\.onrender\.com$/i.test(configured)) {
+      configured = 'https://youtube-turbo-proxy-new.onrender.com';
+    }
+    return configured || 'https://youtube-turbo-proxy-new.onrender.com';
+  } catch (e) { return 'https://youtube-turbo-proxy-new.onrender.com'; }
 })();
 
 // 1. Control Modal Visibility
