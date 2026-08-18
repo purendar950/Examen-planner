@@ -436,7 +436,7 @@ await test('the tutor sends its own budgets for streaming and one-shot generatio
   assert.ok(/apiGet\([^)]*GENERATION_TIMEOUT_MS\)/.test(tutorSource), 'study generation passes the budget');
 });
 
-await test('a browser-direct Tutor backup is clearly limited to an already-authorized AI Chat provider', async () => {
+await test('a browser-direct Tutor backup retrieves bounded video captions through the media route', async () => {
   assert.match(chatSource, /window\.PrepPathDirectAI = Object\.freeze/);
   assert.match(chatSource, /Browser-direct AI is not enabled for the selected provider/);
   const bridgeSource = chatSource.slice(
@@ -444,11 +444,21 @@ await test('a browser-direct Tutor backup is clearly limited to an already-autho
     chatSource.indexOf('function directChatMessages')
   );
   assert.doesNotMatch(bridgeSource, /apiKey|directProviders/, 'the bridge must not expose provider credentials or configuration');
-  assert.match(tutorSource, /function directTutorAnswer\(context\)/);
-  assert.match(tutorSource, /video transcript, captions, current web sources, notes, or library search results/i);
+  assert.match(chatSource, /sourceContext: String\(request\.sourceContext \|\| ''\)/);
+  assert.match(chatSource, /BEGIN UNTRUSTED SOURCE DATA/);
+  assert.match(tutorSource, /function allowDirectTutorCaptionTransfer\(context, provider\)/);
+  assert.match(tutorSource, /captions stayed private on this device/);
+  assert.match(tutorSource, /DIRECT_TUTOR_CAPTION_TIMEOUT_MS = 15000/);
+  assert.match(tutorSource, /DIRECT_TUTOR_GENERATION_TIMEOUT_MS = 90000/);
+  assert.match(tutorSource, /function fetchDirectTutorTranscript\(context\)/);
+  assert.match(tutorSource, /backendAuthFetch\('\/api\/transcript\?id=' \+ encodeURIComponent\(videoId\) \+ '&lang=auto'/);
+  assert.match(tutorSource, /var DIRECT_TUTOR_CAPTION_CHARS = 24000;/);
+  assert.match(tutorSource, /sourceContext: hasCaptions \? captions\.text : ''/);
   assert.match(tutorSource, /var directContext = !lib \?/);
+  assert.match(tutorSource, /videoId: vid/);
+  assert.match(tutorSource, /grounded in a selected retrieved video-caption excerpt/);
+  assert.match(tutorSource, /captions could not be retrieved; this answer has no video captions/);
   assert.match(tutorSource, /sendTutorOnce\(requestBody, historyKey, turnId, liveEl, oncePath, directContext\)/);
-  assert.match(tutorSource, /Browser-direct backup — this answer has no video captions, web sources, or library context/);
 });
 
 await test('a transport failure reaches the student as advice, not a proxy label', async () => {

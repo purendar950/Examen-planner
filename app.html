@@ -605,7 +605,7 @@
 <script defer src="js/playlist-quizzes.js"></script>
 <script defer src="js/tabs/saved-questions.js"></script>
 <script defer src="js/tabs/profile.js"></script>
-<script defer src="js/tabs/ai-chat.js?v=20260818-tutor-direct"></script>
+<script defer src="js/tabs/ai-chat.js?v=20260818-tutor-captions"></script>
 <script defer src="js/tabs/formula.js?v=7"></script>
 <script defer src="js/tabs/calc.js?v=6"></script>
 <!-- cross-cutting features (load after tabs; they wrap tab functions) -->
@@ -630,7 +630,7 @@
      getFirebaseIdToken) and BEFORE ai-tutor.js, which reads window.TutorMemory. -->
 <script defer src="js/features/tutor-memory.js?v=20260805b"></script>
 <!-- AI Study panel (Notes/Quiz/Cards/Tutor) — after youtube.js, yt-screenshots.js, turbo-player.js -->
-<script defer src="js/features/ai-tutor.js?v=20260818b"></script>
+<script defer src="js/features/ai-tutor.js?v=20260818c"></script>
 <!-- 💬 Floating AI Tutor bubble — makes the tutor reachable from every page.
      Holds NO chat logic of its own: it opens a window and ai-tutor.js re-parents
      its single chat node into it. Must load AFTER ai-tutor.js (uses
