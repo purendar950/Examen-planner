@@ -1645,7 +1645,8 @@
   /* ══════════════════ SYNC INDICATOR ══════════════════ */
   .sync-indicator {
     font-size:0.68rem; color:var(--muted); display:flex;
-    align-items:center; gap:4px; transition:color 0.3s; white-space:nowrap;
+    align-items:center; gap:4px; transition:color 0.3s, min-width 0.3s; white-space:nowrap;
+    min-width: 106px; /* reserve space for "Saving..." to prevent topbar layout shift */
   }
   .sync-indicator.saving { color:var(--amber); }
   .sync-indicator.saved  { color:var(--accent); }
