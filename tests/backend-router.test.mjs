@@ -362,6 +362,24 @@ await test('authoritative legacy documents still map one registry and policy to 
   assert.equal(api.baseUrl('ai'), AI.url);
 });
 
+await test('the missing "-proxy" typo host has no real service and is migrated like a retired proxy', async () => {
+  // https://youtube-turbo-new.onrender.com (missing "-proxy") resolves to no
+  // Render service at all (x-render-routing: no-server), so every request
+  // against it fails without ever producing CORS headers — surfacing in the
+  // browser as a misleading "blocked by CORS policy" error instead of the
+  // real cause. Treat it exactly like the other retired/typo hosts: rewrite
+  // it to the live proxy rather than registering it as a distinct server.
+  const TYPO = { id: 'typo-host', label: 'Old AI proxy', url: 'https://youtube-turbo-new.onrender.com', enabled: true, routes: ['ai'] };
+  const { api } = createRouter(async () => response());
+  const snapshot = api.configure({
+    servers: [MEDIA, TYPO],
+    mediaMode: 'strict', mediaServerId: MEDIA.id,
+    aiMode: 'strict', aiServerId: TYPO.id
+  }, false);
+  assert.equal(api.baseUrl('ai'), 'https://youtube-turbo-proxy-new.onrender.com');
+  assert.ok(!snapshot.servers.some(server => server.url === TYPO.url), 'the dead host is not kept as a server');
+});
+
 await test('old localStorage shape migrates both roles without a rewrite requirement', async () => {
   const saved = JSON.stringify({ servers: [legacyServer(MEDIA), legacyServer(AI)], mode: 'manual', manualServerId: AI.id, activeId: MEDIA.id });
   const { api } = createRouter(async () => response(), saved);

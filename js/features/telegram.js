@@ -254,6 +254,11 @@ function tgProxyBase() {
   if (/^https:\/\/youtube-turbo-proxy(?:-gej4)?\.onrender\.com\/?$/i.test(custom)) {
     custom = 'https://youtube-turbo-proxy-new.onrender.com';
   }
+  // Guard against the missing-"-proxy" typo host, which has no Render service
+  // behind it (every request fails and surfaces as a misleading CORS error).
+  if (/^https:\/\/youtube-turbo-new\.onrender\.com\/?$/i.test(custom)) {
+    custom = 'https://youtube-turbo-proxy-new.onrender.com';
+  }
   return (custom || (window.PrepPathBackend && window.PrepPathBackend.baseUrl('media')) || 'https://youtube-turbo-proxy-new.onrender.com').replace(/\/+$/, '');
 }
 
