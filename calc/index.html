@@ -87,6 +87,22 @@ input{font-family:inherit}
 /* multi-line questions (e.g. writing out a whole table) stack one row per line */
 .qline.qline-rows{flex-direction:column;align-items:center;gap:8px;font-size:23px}
 .qline .qrow{display:flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap}
+
+/* Writing Table: split the rows into two balanced sections so every answer
+   box and the full keypad remain visible in the embedded practice frame. */
+.qwrap.table-practice{padding-top:0}
+.qwrap.table-practice .qcard{min-height:0;padding:18px 16px}
+.qwrap.table-practice .qline.qline-rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:min(100%,620px);column-gap:32px;font-size:21px}
+.qwrap.table-practice .qtable-section{display:grid;align-content:start;gap:7px}
+#keypad.table-keypad{max-width:560px;margin:0 auto;padding-top:10px;gap:6px}
+#keypad.table-keypad .kb{min-height:44px;font-size:20px}
+@media(max-width:520px){
+  .qwrap.table-practice .qcard{padding:14px 10px}
+  .qwrap.table-practice .qline.qline-rows{column-gap:10px;font-size:18px}
+  .qwrap.table-practice .qtable-section{gap:5px}
+  .qwrap.table-practice .qline .qrow{gap:5px}
+  #keypad.table-keypad .kb{min-height:40px;font-size:18px}
+}
 @keyframes shake{25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
 #feedback{height:26px;font-size:16px;font-weight:700;text-align:center;margin-top:10px}
 #feedback .ok{color:#7dffb0}
@@ -1174,7 +1190,12 @@ function questionHTML(id){
     case"mult1":case"mult2d":case"mult3d":return `${numSpan(cur.q[0])} ${opSpan("×")} ${numSpan(cur.q[1])} ${opSpan("=")} ${ansSpan(0)}`;
     case"mult2":return `${numSpan(cur.q[0])} ${opSpan("×")} ${ansSpan(0)} ${opSpan("=")} ${numSpan(cur.q[3])}`;
     case"mult3":return `${ansSpan(0)} ${opSpan("×")} ${ansSpan(1)} ${opSpan("=")} ${numSpan(cur.q[2])}`;
-    case"tablewrite":{const n=cur.q[0],from=cur.q[1];return cur.ans.map((_,i)=>`<span class="qrow">${numSpan(n)} ${opSpan("×")} ${numSpan(from+i)} ${opSpan("=")} ${ansSpan(i)}</span>`).join("");}
+    case"tablewrite":{
+      const n=cur.q[0],from=cur.q[1];
+      const rows=cur.ans.map((_,i)=>`<span class="qrow">${numSpan(n)} ${opSpan("×")} ${numSpan(from+i)} ${opSpan("=")} ${ansSpan(i)}</span>`);
+      const splitAt=Math.ceil(rows.length/2);
+      return `<div class="qtable-section">${rows.slice(0,splitAt).join("")}</div><div class="qtable-section">${rows.slice(splitAt).join("")}</div>`;
+    }
     case"squares":return `${numSpan(cur.q[0])}${supSpan("2")} ${opSpan("=")} ${ansSpan(0)}`;
     case"sqroots":return `${opSpan("√")}${numSpan(cur.q[0])} ${opSpan("=")} ${ansSpan(0)}`;
     case"cubes":return `${numSpan(cur.q[0])}${supSpan("3")} ${opSpan("=")} ${ansSpan(0)}`;
@@ -1195,8 +1216,11 @@ function questionHTML(id){
 }
 function renderQ(){
   if(!cur)return;
+  const isTablePractice=Boolean(cur.rows);
   const line=$("qline");
-  line.className="qline"+(cur.rows?" qline-rows":"");
+  line.className="qline"+(isTablePractice?" qline-rows":"");
+  line.closest(".qwrap").classList.toggle("table-practice",isTablePractice);
+  $("keypad").classList.toggle("table-keypad",isTablePractice);
   line.innerHTML=questionHTML(curQuizId);
 }
 
