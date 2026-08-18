@@ -522,6 +522,31 @@ await test('an http:// backend fails with the real reason, not a generic network
   assert.equal(calls, 0, 'never spends the timeout budget on a request the browser blocks');
 });
 
+await test('an unreachable AI server distinguishes "not deployed" from "no network"', async () => {
+  /* This is the fault that cost three days: Render's 502 no-deploy / 503 suspend
+     pages carry no CORS header, so the browser hides the status and reports a
+     plain network failure — identical to being offline. A no-cors probe resolves
+     opaquely if the HOST replied, which separates the two. */
+  let notRunning = 0;
+  const running = splitRouter(async (url, options) => {
+    notRunning += 1;
+    if (options && options.mode === 'no-cors') return response(0);   // opaque: host answered
+    throw connectionFailure();
+  });
+  await assert.rejects(running.fetch('/api/tutor', { method: 'POST' }), (error) => {
+    assert.match(error.message, /service is not running/);
+    assert.match(error.message, /Render dashboard/);
+    return true;
+  });
+
+  const offline = splitRouter(async () => { throw connectionFailure(); });
+  await assert.rejects(offline.fetch('/api/tutor', { method: 'POST' }), (error) => {
+    assert.match(error.message, /could not be reached at all/);
+    assert.doesNotMatch(error.message, /not running/, 'must not blame a deploy when the host is dark');
+    return true;
+  });
+});
+
 console.log('Independent backend role routing');
 console.log(results.join('\n'));
 if (!process.exitCode) console.log(`\n${results.length} checks passed`);

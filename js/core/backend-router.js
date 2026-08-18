@@ -47,6 +47,24 @@
     }
     return '';
   }
+  /* "Failed to fetch" conflates two very different faults, and the difference is
+     invisible to JS: a platform error page (Render's 502 `no-deploy` / 503
+     `suspend`) carries NO Access-Control-Allow-Origin header, because the app
+     never ran to add one — so the browser hides the status and reports a network
+     failure, identical to having no internet.
+
+     A `no-cors` probe resolves opaquely whenever the HOST answered at all, which
+     separates "the service is not running" from "the host is unreachable". That
+     distinction is the whole diagnosis, and it is not otherwise recoverable. */
+  async function unreachableReason(server) {
+    try {
+      await window.fetch(server.url + '/health', { method: 'GET', mode: 'no-cors', cache: 'no-store' });
+      return ' The host answered but the reply was not readable by the browser, which means ' +
+             'the service is not running — no successful deployment, or suspended. Check the Render dashboard.';
+    } catch (e) {
+      return ' The host could not be reached at all (DNS or network failure), so the URL may be wrong.';
+    }
+  }
   function isConnectionFailure(error) {
     if (!error || error.name === 'AbortError') return false;
     return /failed to fetch|networkerror|network error|load failed/i.test(String(error.message || ''));
@@ -489,8 +507,15 @@
           lastError = new Error('Request timed out after ' + timeoutMs + ' ms from ' +
             server.label + ' (' + server.url + ')');
         } else {
+          var reason = '';
+          // Only worth classifying for AI generation, and never after the caller
+          // cancelled — Stop must not turn into extra traffic.
+          if (routeKind === 'ai' && isConnectionFailure(error) &&
+              !(options.signal && options.signal.aborted)) {
+            reason = await unreachableReason(server);
+          }
           lastError = new Error((error && error.message ? error.message : 'Network error') +
-            ' from ' + server.label + ' (' + server.url + ')');
+            ' from ' + server.label + ' (' + server.url + ').' + reason);
         }
         attempts.push(lastError.message);
         mark(server, false, lastError.message || 'Network error', routeKind);
