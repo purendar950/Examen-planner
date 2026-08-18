@@ -405,8 +405,10 @@ await test('an explicit timeout is honoured and reported, never a hardcoded defa
   const api = splitRouter(async () => { throw abortError(); });
   // The message used to print `options.timeoutMs || 12000` independently of the
   // timer, so an overridden budget was reported as 12000 and read as a bug.
+  // The URL is included because an admin-chosen label need not resemble the host,
+  // so without it a transport failure names nothing you can act on.
   await assert.rejects(api.fetch('/api/tutor', { method: 'POST', timeoutMs: 180000 }),
-    /timed out after 180000 ms from Local AI proxy/);
+    /timed out after 180000 ms from Local AI proxy \(https:\/\/ai\.example\.com\)/);
   await assert.rejects(api.fetch('/api/info?id=x', { timeoutMs: 3000 }),
     /timed out after 3000 ms from Render media/);
 });
@@ -441,11 +443,21 @@ await test('a transport failure reaches the student as advice, not a proxy label
   // after 12000 ms from render storebook", which blames the student's question.
   assert.match(tutorSource, /function tutorErrorMessage\(error\)/);
   assert.match(tutorSource, /catch\(function \(e\) \{\s*var answer = tutorErrorMessage\(e\);/);
-  const message = /if \(\/timed out\|abort\/i\.test\(raw\)\) \{\s*return '([^']*)' \+\s*'([^']*)';/.exec(tutorSource);
+  const message = /if \(\/timed out\|abort\/i\.test\(raw\)\) \{\s*return '([^']*)' \+\s*'([^']*)' \+ tutorErrorDetail\(raw\);/.exec(tutorSource);
   assert.ok(message, 'the timeout branch returns a student-facing string');
   const text = message[1] + message[2];
-  assert.doesNotMatch(text, /\d{4,} ?ms|storebook/, 'no millisecond counts or server labels');
+  assert.doesNotMatch(text, /\d{4,} ?ms|storebook/, 'the human sentence carries no ms count or server label');
   assert.match(text, /ask again/i, 'it tells the student what to do next');
+
+  /* The raw reason is appended on purpose. A student on a tablet has no
+     DevTools, so without it every transport failure looks identical and the
+     only available report — the sentence — cannot distinguish a sleeping server
+     from a wrong hostname or a blocked address. */
+  assert.match(tutorSource, /function tutorErrorDetail\(raw\)/);
+  assert.match(tutorSource, /return '\\n\\n`' \+ text\.slice\(0, 300\) \+ '`';/,
+    'the detail is truncated and fenced so it cannot blow up the bubble');
+  assert.match(tutorSource, /failed to fetch[\s\S]{0,300}?tutorErrorDetail\(raw\)/,
+    'the unreachable-server branch carries the detail too');
 });
 
 /* Cold-start connection resets. A sleeping Render instance refuses the

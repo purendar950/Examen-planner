@@ -6257,11 +6257,21 @@
      and it reads as if their question was wrong. Translate the shapes we know
      into something that says what to do next. These strings are persisted into
      the saved transcript, so they have to stand on their own. */
+  /* A friendly sentence alone made these failures undiagnosable: a student on a
+     tablet has no DevTools, so the only report available was the sentence itself,
+     which is identical for a sleeping server, a wrong hostname, a dead tunnel and
+     a blocked address. The raw reason (now including the URL) is appended as code
+     so one screenshot is enough to tell those apart. */
+  function tutorErrorDetail(raw) {
+    var text = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return '\n\n`' + text.slice(0, 300) + '`';
+  }
   function tutorErrorMessage(error) {
     var raw = String((error && error.message) || error || '');
     if (/timed out|abort/i.test(raw)) {
       return '\u26a0 The tutor took too long to answer. The AI server may have been asleep — ' +
-             'ask again and it should reply now.';
+             'ask again and it should reply now.' + tutorErrorDetail(raw);
     }
     /* The router already retried this several times over a few seconds, so a
        transient cold-start reset is ruled out by the time we get here — the
@@ -6269,12 +6279,15 @@
        than blaming the student's connection, which is usually fine. */
     if (/failed to fetch|network ?error|networkerror/i.test(raw)) {
       return '\u26a0 Could not reach the AI server — it may still be starting up. ' +
-             'Wait a few seconds and ask again, or check your connection.';
+             'Wait a few seconds and ask again, or check your connection.' + tutorErrorDetail(raw);
     }
     if (/service suspended|HTTP 50[234]/i.test(raw)) {
       return '\u26a0 The AI server is temporarily unavailable. Please try again in a minute.';
     }
     if (/sign in/i.test(raw)) return '\u26a0 ' + raw;
+    if (/insecure http:\/\/|not configured|no backend servers|not available for the selected route/i.test(raw)) {
+      return '\u26a0 ' + raw;   // already a precise, admin-actionable statement
+    }
     // Unrecognised failures still surface verbatim: hiding them would make a
     // genuine backend bug undebuggable from a student's screenshot.
     return '\u26a0 ' + (raw || 'The tutor could not answer. Please try again.');

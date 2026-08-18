@@ -480,10 +480,17 @@
         mark(server, false, lastError.message, routeKind);
       } else {
         var error = outcome.error;
+        /* The URL is part of the message because a transport failure carries no
+           other clue about WHICH host failed. Without it, "Failed to fetch from
+           <label>" cannot be told apart from a wrong hostname, a dead tunnel or
+           a blocked address — and the label is admin-chosen, so it need not
+           resemble the URL at all. */
         if (error && error.name === 'AbortError') {
-          lastError = new Error('Request timed out after ' + timeoutMs + ' ms from ' + server.label);
+          lastError = new Error('Request timed out after ' + timeoutMs + ' ms from ' +
+            server.label + ' (' + server.url + ')');
         } else {
-          lastError = new Error((error && error.message ? error.message : 'Network error') + ' from ' + server.label);
+          lastError = new Error((error && error.message ? error.message : 'Network error') +
+            ' from ' + server.label + ' (' + server.url + ')');
         }
         attempts.push(lastError.message);
         mark(server, false, lastError.message || 'Network error', routeKind);
