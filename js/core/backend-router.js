@@ -32,6 +32,21 @@
      An HTTP error means the server answered and must follow the normal failover
      path, and an abort means we already waited the whole budget (or the caller
      cancelled), so neither is retried. */
+  /* An HTTPS page cannot call an http:// backend: the browser blocks it as mixed
+     content and surfaces only "Failed to fetch", which is indistinguishable from
+     a dead server — so a mistyped, local or expired-tunnel AI URL looks exactly
+     like an outage and cannot be diagnosed from the UI. Name it instead. app.py
+     makes the same point about its local OmniRoute override never being handed
+     to a browser. */
+  function blockedBackendReason(url) {
+    try {
+      if (window.location.protocol !== 'https:') return '';
+    } catch (e) { return ''; }
+    if (/^http:\/\//i.test(String(url || ''))) {
+      return 'is an insecure http:// address, which this HTTPS site is blocked from calling';
+    }
+    return '';
+  }
   function isConnectionFailure(error) {
     if (!error || error.name === 'AbortError') return false;
     return /failed to fetch|networkerror|network error|load failed/i.test(String(error.message || ''));
@@ -440,6 +455,17 @@
     var retries = NETWORK_RETRIES[routeKind] || 0;
     for (var i = 0; i < servers.length; i += 1) {
       var server = servers[i];
+      // Fail with the real reason rather than spending the whole timeout budget
+      // on a request the browser is never going to send.
+      var blocked = blockedBackendReason(server.url);
+      if (blocked) {
+        lastError = new Error('The ' + (routeKind === 'ai' ? 'AI' : 'media') + ' server "' +
+          server.label + '" (' + server.url + ') ' + blocked +
+          '. Set an https:// URL for it in Admin → Backend servers.');
+        attempts.push(lastError.message);
+        mark(server, false, lastError.message, routeKind);
+        continue;
+      }
       var outcome = await attemptServer(server, path, options, timeoutMs, retries);
       if (outcome.response) {
         var response = outcome.response;
