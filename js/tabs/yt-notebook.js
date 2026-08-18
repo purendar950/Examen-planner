@@ -814,7 +814,6 @@ function ytnbStart(job, isResume) {
   // the same provider/model even if the admin changes the active default.
   job.provider = job.provider || kit.provider();
   job.model = job.model || kit.model();
-  ytnbSaveJob(job);                       // persist BEFORE the POST, so a reload retries the same id
   ytnbShowView('run');
   const out = document.getElementById('ytnb-output');
   const title = document.getElementById('ytnb-run-title');
@@ -831,15 +830,25 @@ function ytnbStart(job, isResume) {
   })), {}, 'queued');
   ytnbSetTools('<button class="ytnb-chip danger" onclick="ytnbStop()">⏹ Stop</button>');
 
-  kit.authFetch('/api/study/bundles', {
+  const ownerReady = kit.reserveServer
+    ? kit.reserveServer('ai', job.backendServerId)
+    : Promise.reject(new Error('Backend routing is unavailable. Reload the app.'));
+  ownerReady.then(function (ownerId) {
+    job.backendServerId = ownerId;
+    ytnbSaveJob(job);                     // owner + opaque id persist BEFORE POST
+    return kit.authFetch('/api/study/bundles', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
+    backendServerId: job.backendServerId || '',
     body: JSON.stringify({
       jobId: job.jobId, video_ids: job.ids, course_id: job.courseId || '',
       shape: job.shape, mode: job.mode, style: job.style || '', out: job.lang,
       model: job.model, provider: job.provider,
       refresh: job.force ? 1 : 0, rebuild: job.rebuild ? 1 : 0
     })
+  });
   }).then(function (r) {
+    const owner = kit.responseServer ? kit.responseServer(r) : null;
+    if (owner && owner.id) { job.backendServerId = owner.id; ytnbSaveJob(job); }
     if (r.ok) return r.json();
     return r.json().catch(() => ({})).then(function (j) {
       j = j || {}; j._httpStatus = r.status; throw j;
@@ -921,6 +930,7 @@ function ytnbStream(job, created) {
 
   run.follower = kit.follow({
     path: '/api/study/jobs/' + encodeURIComponent(job.jobId) + '/stream',
+    backendServerId: job.backendServerId || '',
     getOffset: () => kit.utf8Length(run.acc),
     isAlive: () => !run.done && ytnbRunViewActive(),
     onFrame: function (ev, obj) {
@@ -1081,7 +1091,9 @@ function ytnbStop() {
   const job = ytnbReadJob();
   if (!kit || !job) { ytnbBackToPicker(); return; }
   ytnbSetTools('<span class="ytnb-note">Stopping…</span>');
-  kit.authFetch('/api/study/jobs/' + encodeURIComponent(job.jobId), { method: 'DELETE' })
+  kit.authFetch('/api/study/jobs/' + encodeURIComponent(job.jobId), {
+    method: 'DELETE', backendServerId: job.backendServerId || ''
+  })
     .then(function () { ytnbEnded(job, 'stopped'); })
     .catch(function () { ytnbEnded(job, 'stopped'); });
 }

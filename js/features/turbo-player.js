@@ -474,7 +474,10 @@
     (window.PrepPathBackend && typeof window.PrepPathBackend.fetch === 'function'
       ? window.PrepPathBackend.fetch(infoPath, { signal: ctrl.signal, timeoutMs: 95000 })
       : Promise.reject(new Error('Backend routing is unavailable. Reload the app.')))
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (r) {
+        var owner = window.PrepPathBackend.serverForResponse(r);
+        return r.json().then(function (d) { return { ok: r.ok, d: d, owner: owner }; });
+      })
       .then(function (res) {
         clearTimeout(timer);
         if (seq !== turboLoadSeq || !turboPendingLoad || turboPendingLoad.seq !== seq) return;
@@ -484,7 +487,8 @@
         turboVidTitle = (res.d && res.d.title) || turboVidTitle;
         var f = res.d.formats[0];              // highest single-file quality
         var current = (typeof ytSpeedCurrent !== 'undefined') ? ytSpeedCurrent : 1;
-        var streamBase = window.PrepPathBackend.baseUrl();
+        if (!res.owner || !res.owner.url) throw new Error('Turbo server affinity is unavailable. Reload the app.');
+        var streamBase = res.owner.url;
         var streamUrl = streamBase + '/api/stream?id=' + encodeURIComponent(id) + '&itag=' + encodeURIComponent(f.itag);
         // Each asynchronous load owns a fresh media element. Event closures now
         // carry immutable seq/id/source identity, so an old queued media event

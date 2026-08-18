@@ -124,6 +124,8 @@ await test('server-accepted video IDs replace a broader pre-cap selection', asyn
   const kit = {
     provider: () => 'gemini', model: () => 'model-a',
     stageMessage: () => '',
+    reserveServer: async () => 'ai-owner',
+    responseServer: () => ({ id: 'ai-owner' }),
     authFetch: async () => ({
       ok: true,
       json: async () => ({

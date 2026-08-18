@@ -316,7 +316,7 @@ test('OmniRoute endpoint editors have one prominent owner in AI Study', () => {
   assert.match(panel, /Public \/ ngrok endpoint/);
   assert.match(panel, /Local upstream/);
   assert.match(panel, /OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1/);
-  assert.match(panel, /Do not add either <code>\/v1<\/code> address as a Backend Server/);
+  assert.match(panel, /Do not add either <code>\/v1<\/code> address as a proxy server/);
   assert.match(panel, /bypass the selected backend proxy/);
   assert.match(panel, /onclick="saveOmnirouteEndpoints\(\)"/);
   assert.match(panel, /Provider credentials, model selection, and active provider selection remain unchanged/);
@@ -340,11 +340,29 @@ test('AI Study surfaces OmniRoute endpoints before the provider portfolio', () =
 });
 
 test('Settings links to the endpoint panel and distinguishes upstreams from proxy roots', () => {
-  assert.match(adminSource, /Configure OmniRoute endpoints/);
+  assert.match(adminSource, /Server Role Routing/);
+  assert.match(adminSource, /Configure OmniRoute local \/ ngrok/);
   assert.match(adminSource, /onclick="openOmnirouteEndpoints\(\)"/);
-  assert.match(adminSource, /Add server accepts only a trusted HTTPS full proxy root/);
+  assert.match(adminSource, /Assign complete <code>youtube-turbo-proxy<\/code> HTTPS roots by workload/);
   assert.match(adminSource, /AI Study → OmniRoute endpoints/);
-  assert.match(adminSource, /choose <strong>Selected server only<\/strong>/);
+  assert.match(adminSource, /Use Selected server only to guarantee/);
+  assert.match(adminSource, /Turbo &amp; Transcript Server/);
+  assert.match(adminSource, /AI Notes, Tutor &amp; AI Chat/);
+  for (const id of [
+    'cfg-backend-media-mode',
+    'cfg-backend-media-server',
+    'cfg-backend-ai-mode',
+    'cfg-backend-ai-server'
+  ]) assert.match(adminSource, new RegExp('id="' + id + '"'));
+  for (const field of [
+    'backendSplitServers',
+    'backendMediaMode',
+    'backendMediaServerId',
+    'backendAiMode',
+    'backendAiServerId'
+  ]) assert.match(adminSource, new RegExp(field + ':'));
+  assert.match(adminSource, /backendMode: policy\.mediaMode/);
+  assert.match(adminSource, /backendManualServerId: policy\.mediaServerId/);
 
   const navigation = sourceSection(adminAiStudySource,
     'function aiStudyScrollTo(', 'function aiStudyOmnirouteEndpointsMarkup(');
@@ -420,16 +438,76 @@ const adminOmnirouteApi = vm.runInNewContext(
 );
 
 let backendRowFixtures = [];
+const backendControls = {
+  'cfg-backend-media-mode': { value: 'auto' },
+  'cfg-backend-media-server': { value: '' },
+  'cfg-backend-ai-mode': { value: 'auto' },
+  'cfg-backend-ai-server': { value: '' },
+  'cfg-backend-new-label': { value: '' },
+  'cfg-backend-new-url': { value: '' },
+  'backend-server-status': { textContent: '' }
+};
+const backendAdminConfig = { turbo: {} };
+const backendAdminWrites = [];
+const backendRouterConfigures = [];
+const backendToasts = [];
+let backendRenderCount = 0;
 const adminBackendRegistryApi = vm.runInNewContext(
-  sourceSection(adminSource, 'function normalizeBackendProxyRoot(', 'function backendConfigInMemory(')
-  + ';({ normalizeBackendProxyRoot, backendRowsFromForm, backendFormHasInvalidUrls, normalizedBackendRowsFromForm })',
-  { URL, document: { querySelectorAll: () => backendRowFixtures } }
+  sourceSection(adminSource, 'function normalizeBackendProxyRoot(', 'async function checkBackendServers()')
+  + ';({ normalizeBackendProxyRoot, backendRowsFromForm, backendFormHasInvalidUrls, normalizedBackendRowsFromForm, backendPolicyFromForm, normalizeBackendPolicy, backendConfigInMemory, saveBackendRegistry, addBackendServer, removeBackendServer })',
+  {
+    URL,
+    document: {
+      querySelectorAll: () => backendRowFixtures,
+      getElementById: id => backendControls[id] || null
+    },
+    CONFIG: backendAdminConfig,
+    window: { PrepPathBackend: {
+      configure: (payload, persist) => backendRouterConfigures.push({
+        payload: JSON.parse(JSON.stringify(payload)), persist
+      })
+    } },
+    db: { collection: collection => ({ doc: doc => ({
+      set: async (payload, options) => backendAdminWrites.push({
+        collection, doc, payload: JSON.parse(JSON.stringify(payload)),
+        options: JSON.parse(JSON.stringify(options))
+      })
+    }) }) },
+    firebase: { firestore: { FieldValue: { serverTimestamp: () => 'server-time' } } },
+    auth: { currentUser: { email: 'admin@example.test' } },
+    showToast: (message, kind) => backendToasts.push({ message, kind }),
+    render: () => { backendRenderCount += 1; }
+  }
 );
-function backendRowFixture(id, label, url) {
+function backendRowFixture(id, label, url, routes = ['media', 'ai']) {
   return {
     getAttribute: name => name === 'data-server-id' ? id : '',
-    querySelector: selector => selector === '[data-server-label]' ? { value: label } : { value: url }
+    querySelector: selector => {
+      if (selector === '[data-server-label]') return { value: label };
+      if (selector === '[data-server-url]') return { value: url };
+      if (selector === '[data-server-media]') return { checked: routes.includes('media') };
+      if (selector === '[data-server-ai]') return { checked: routes.includes('ai') };
+      return null;
+    }
   };
+}
+function resetBackendAdminHarness() {
+  backendRowFixtures = [
+    backendRowFixture('render-media', 'Render media', 'https://media.example.test', ['media']),
+    backendRowFixture('local-ai', 'AI proxy', 'https://ai.example.test', ['ai'])
+  ];
+  Object.assign(backendControls['cfg-backend-media-mode'], { value: 'strict' });
+  Object.assign(backendControls['cfg-backend-media-server'], { value: 'render-media' });
+  Object.assign(backendControls['cfg-backend-ai-mode'], { value: 'manual' });
+  Object.assign(backendControls['cfg-backend-ai-server'], { value: 'local-ai' });
+  backendControls['cfg-backend-new-label'].value = '';
+  backendControls['cfg-backend-new-url'].value = '';
+  backendControls['backend-server-status'].textContent = '';
+  backendAdminConfig.turbo = {};
+  backendAdminWrites.length = 0;
+  backendRouterConfigures.length = 0;
+  backendToasts.length = 0;
+  backendRenderCount = 0;
 }
 
 const adminInputs = {
@@ -518,6 +596,152 @@ test('backend row editing preserves invalid legacy entries until the Admin fixes
     .filter(server => server.id !== 'legacy-http');
   assert.equal(afterRemovingOne.length, 1, 'an all-invalid registry can remove one legacy row at a time');
   backendRowFixtures = [];
+});
+
+await testAsync('backend routing save persists both roles and mirrors media for legacy clients', async () => {
+  resetBackendAdminHarness();
+  await adminBackendRegistryApi.saveBackendRegistry();
+
+  assert.equal(backendAdminWrites.length, 1);
+  const write = backendAdminWrites[0];
+  assert.equal(write.collection, 'config');
+  assert.equal(write.doc, 'turbo');
+  assert.deepEqual(write.options, { merge: true });
+  assert.deepEqual(write.payload.backendSplitServers, [
+    { id: 'render-media', label: 'Render media', url: 'https://media.example.test', enabled: true, routes: ['media'] },
+    { id: 'local-ai', label: 'AI proxy', url: 'https://ai.example.test', enabled: true, routes: ['ai'] }
+  ]);
+  assert.deepEqual(write.payload.backendServers, [
+    { id: 'render-media', label: 'Render media', url: 'https://media.example.test', enabled: true, routes: ['media'] }
+  ]);
+  assert.deepEqual({
+    backendMode: write.payload.backendMode,
+    backendManualServerId: write.payload.backendManualServerId,
+    backendMediaMode: write.payload.backendMediaMode,
+    backendMediaServerId: write.payload.backendMediaServerId,
+    backendAiMode: write.payload.backendAiMode,
+    backendAiServerId: write.payload.backendAiServerId
+  }, {
+    backendMode: 'strict',
+    backendManualServerId: 'render-media',
+    backendMediaMode: 'strict',
+    backendMediaServerId: 'render-media',
+    backendAiMode: 'manual',
+    backendAiServerId: 'local-ai'
+  });
+  assert.equal(write.payload.backendUpdatedAt, 'server-time');
+  assert.equal(write.payload.updatedBy, 'admin@example.test');
+
+  assert.equal(backendRouterConfigures.length, 1);
+  assert.equal(backendRouterConfigures[0].persist, true);
+  assert.deepEqual(backendRouterConfigures[0].payload, {
+    servers: write.payload.backendSplitServers,
+    mode: 'strict',
+    manualServerId: 'render-media',
+    mediaMode: 'strict',
+    mediaServerId: 'render-media',
+    aiMode: 'manual',
+    aiServerId: 'local-ai'
+  });
+  assert.equal(backendAdminConfig.turbo.backendMode, 'strict');
+  assert.equal(backendAdminConfig.turbo.backendManualServerId, 'render-media');
+  assert.equal(backendAdminConfig.turbo.backendAiServerId, 'local-ai');
+  assert.equal(backendRenderCount, 1);
+});
+
+await testAsync('manual and strict routing reject missing role selections', async () => {
+  const invalidPolicies = [
+    { control: 'cfg-backend-media-mode', mode: 'strict', selection: 'cfg-backend-media-server', id: '', role: 'Turbo & Transcript' },
+    { control: 'cfg-backend-media-mode', mode: 'manual', selection: 'cfg-backend-media-server', id: 'missing', role: 'Turbo & Transcript' },
+    { control: 'cfg-backend-ai-mode', mode: 'strict', selection: 'cfg-backend-ai-server', id: '', role: 'AI Generation' },
+    { control: 'cfg-backend-ai-mode', mode: 'manual', selection: 'cfg-backend-ai-server', id: 'missing', role: 'AI Generation' }
+  ];
+  for (const invalid of invalidPolicies) {
+    resetBackendAdminHarness();
+    backendControls[invalid.control].value = invalid.mode;
+    backendControls[invalid.selection].value = invalid.id;
+    await adminBackendRegistryApi.saveBackendRegistry();
+    assert.equal(backendAdminWrites.length, 0, `${invalid.role} ${invalid.mode} must not save`);
+    assert.equal(backendRouterConfigures.length, 0, `${invalid.role} ${invalid.mode} must not configure the router`);
+    assert.equal(backendToasts.length, 1);
+    assert.equal(backendToasts[0].kind, 'error');
+    assert.match(backendToasts[0].message, new RegExp(invalid.role.replace('&', '&')));
+  }
+});
+
+await testAsync('backend registry rejects unassigned servers and cross-role selections', async () => {
+  resetBackendAdminHarness();
+  backendRowFixtures[1] = backendRowFixture('local-ai', 'AI proxy', 'https://ai.example.test', []);
+  await adminBackendRegistryApi.saveBackendRegistry();
+  assert.equal(backendAdminWrites.length, 0);
+  assert.match(backendToasts[0].message, /Assign every proxy server/);
+
+  resetBackendAdminHarness();
+  backendControls['cfg-backend-media-server'].value = 'local-ai';
+  await adminBackendRegistryApi.saveBackendRegistry();
+  assert.equal(backendAdminWrites.length, 0);
+  assert.match(backendToasts[0].message, /valid Turbo & Transcript server/);
+});
+
+test('adding and removing backend drafts preserves independent role policies', () => {
+  resetBackendAdminHarness();
+  backendControls['cfg-backend-new-label'].value = 'Backup AI';
+  backendControls['cfg-backend-new-url'].value = 'https://backup.example.test/';
+  adminBackendRegistryApi.addBackendServer();
+
+  assert.equal(backendAdminConfig.turbo.backendSplitServers.length, 3);
+  assert.equal(backendAdminConfig.turbo.backendServers.length, 2, 'legacy registry contains only media-eligible hosts');
+  assert.deepEqual({
+    mediaMode: backendAdminConfig.turbo.backendMediaMode,
+    mediaServerId: backendAdminConfig.turbo.backendMediaServerId,
+    aiMode: backendAdminConfig.turbo.backendAiMode,
+    aiServerId: backendAdminConfig.turbo.backendAiServerId
+  }, { mediaMode: 'strict', mediaServerId: 'render-media', aiMode: 'manual', aiServerId: 'local-ai' });
+  assert.equal(backendAdminWrites.length, 0, 'draft changes must wait for Save role routing');
+
+  backendRowFixtures = backendAdminConfig.turbo.backendSplitServers.map(server =>
+    backendRowFixture(server.id, server.label, server.url, server.routes));
+  adminBackendRegistryApi.removeBackendServer('backup-ai');
+  assert.equal(backendAdminConfig.turbo.backendSplitServers.length, 2);
+  assert.equal(backendAdminConfig.turbo.backendServers.length, 1);
+  assert.equal(backendAdminConfig.turbo.backendMediaServerId, 'render-media');
+  assert.equal(backendAdminConfig.turbo.backendAiServerId, 'local-ai');
+
+  backendRowFixtures = backendAdminConfig.turbo.backendSplitServers.map(server =>
+    backendRowFixture(server.id, server.label, server.url, server.routes));
+  adminBackendRegistryApi.removeBackendServer('local-ai');
+  assert.equal(backendAdminConfig.turbo.backendMediaServerId, 'render-media');
+  assert.equal(backendAdminConfig.turbo.backendMediaMode, 'strict');
+  assert.equal(backendAdminConfig.turbo.backendAiServerId, '');
+  assert.equal(backendAdminConfig.turbo.backendAiMode, 'manual');
+});
+
+test('a server selected by either strict role cannot be removed', () => {
+  for (const strictRole of [
+    { mode: 'cfg-backend-media-mode', selection: 'cfg-backend-media-server', id: 'render-media', label: 'Turbo & Transcript' },
+    { mode: 'cfg-backend-ai-mode', selection: 'cfg-backend-ai-server', id: 'local-ai', label: 'AI Generation' }
+  ]) {
+    resetBackendAdminHarness();
+    backendControls[strictRole.mode].value = 'strict';
+    backendControls[strictRole.selection].value = strictRole.id;
+    backendAdminConfig.turbo = {
+      backendServers: backendRowFixtures.map(row => ({
+        id: row.getAttribute('data-server-id'),
+        label: row.querySelector('[data-server-label]').value,
+        url: row.querySelector('[data-server-url]').value,
+        enabled: true
+      })),
+      sentinel: 'unchanged'
+    };
+    const before = JSON.stringify(backendAdminConfig.turbo);
+    adminBackendRegistryApi.removeBackendServer(strictRole.id);
+    assert.equal(JSON.stringify(backendAdminConfig.turbo), before);
+    assert.equal(backendRenderCount, 0);
+    assert.deepEqual(backendToasts, [{
+      message: `Select another ${strictRole.label} server or change that role’s routing mode before removing it.`,
+      kind: 'error'
+    }]);
+  }
 });
 
 test('the selected OmniRoute provider uses the Admin-editable endpoint', () => {

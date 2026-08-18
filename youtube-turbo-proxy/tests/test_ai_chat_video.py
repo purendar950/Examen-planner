@@ -67,7 +67,10 @@ check("video jobs advertise a polling cadence", '"pollAfterMs": 2500' in SRC)
 check("video provider keeps a media timeout", 'media_kind="video"' in SRC and 'timeout=300' in SRC)
 check("frontend starts asynchronous video jobs", "/api/ai-chat/video/jobs" in JS)
 check("frontend polls asynchronous video jobs", "/api/ai-chat/video/jobs/' + encodeURIComponent(jobId)" in JS)
-check("frontend downloads completed video separately", "/media', { timeoutMs: 300000 }" in JS)
+check(
+    "frontend downloads completed video separately on its owning proxy",
+    "/media', { timeoutMs: 300000, backendServerId: backendServerId }" in JS,
+)
 check("frontend allows long-running video polling", "30 * 60 * 1000" in JS)
 check("direct video falls back to a proxy job", "return startProxyJob();" in JS)
 check("OpenRouter video fallback endpoint is configured", "OPENROUTER_VIDEO_URL" in SRC and "https://openrouter.ai/api/v1/videos" in SRC)
