@@ -28,6 +28,11 @@
   if (/^https:\/\/youtube-turbo-proxy(?:-gej4)?\.onrender\.com\/?$/i.test(configuredTurboBackendUrl)) {
     configuredTurboBackendUrl = 'https://youtube-turbo-proxy-new.onrender.com';
   }
+  // Guard against the missing-"-proxy" typo host, which has no Render service
+  // behind it (every request fails and surfaces as a misleading CORS error).
+  if (/^https:\/\/youtube-turbo-new\.onrender\.com\/?$/i.test(configuredTurboBackendUrl)) {
+    configuredTurboBackendUrl = 'https://youtube-turbo-proxy-new.onrender.com';
+  }
   var TURBO_BACKEND_URL = (configuredTurboBackendUrl
     || 'https://youtube-turbo-proxy-new.onrender.com').replace(/\/+$/, '');
 

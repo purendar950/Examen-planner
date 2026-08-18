@@ -2754,6 +2754,11 @@ function canonicalizeRetiredBackendProxyRoot(value) {
   if (/^https:\/\/youtube-turbo-proxy(?:-gej4)?\.onrender\.com$/i.test(trimmed)) {
     return 'https://youtube-turbo-proxy-new.onrender.com';
   }
+  // Guard against the missing-"-proxy" typo: this host has no Render service
+  // behind it at all, so anything saved with it fails every request.
+  if (/^https:\/\/youtube-turbo-new\.onrender\.com$/i.test(trimmed)) {
+    return 'https://youtube-turbo-proxy-new.onrender.com';
+  }
   return original;
 }
 function backendRowsFromForm() {

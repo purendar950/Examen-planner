@@ -11,7 +11,14 @@
   var ACTIVE_RENDER_PROXY_URL = 'https://youtube-turbo-proxy-new.onrender.com';
   var RETIRED_RENDER_PROXY_URLS = [
     'https://youtube-turbo-proxy-gej4.onrender.com',
-    'https://youtube-turbo-proxy.onrender.com'
+    'https://youtube-turbo-proxy.onrender.com',
+    // Not a real prior deployment — a missing "-proxy" typo (e.g. pasted into
+    // Admin -> Server Role Routing or localStorage.turboBackendUrl) that
+    // resolves to no Render service at all (x-render-routing: no-server), so
+    // every AI/media request against it fails and surfaces as a misleading
+    // "blocked by CORS policy" console error (no response == no CORS headers
+    // to read). Treat it the same as a retired host and correct it in place.
+    'https://youtube-turbo-new.onrender.com'
   ];
   var DEFAULT_SERVERS = [
     { id: 'render-primary', label: 'Render proxy', url: ACTIVE_RENDER_PROXY_URL, enabled: true, routes: ['media', 'ai'] }
