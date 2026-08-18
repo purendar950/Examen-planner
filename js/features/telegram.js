@@ -251,7 +251,7 @@ function tgProxyBase() {
   if (tgStrictBackendRouting()) {
     return ((window.PrepPathBackend && window.PrepPathBackend.baseUrl('media')) || '').replace(/\/+$/, '');
   }
-  return (custom || (window.PrepPathBackend && window.PrepPathBackend.baseUrl('media')) || 'https://youtube-turbo-proxy-gej4.onrender.com').replace(/\/+$/, '');
+  return (custom || (window.PrepPathBackend && window.PrepPathBackend.baseUrl('media')) || 'https://youtube-turbo-proxy-new.onrender.com').replace(/\/+$/, '');
 }
 
 /* Telegram media is protected by Firebase identity, so <img src> cannot fetch

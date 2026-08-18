@@ -5,9 +5,18 @@
 (function () {
   'use strict';
 
+  /* The live proxy. The two previous defaults both answer 503 with
+     `x-render-routing: suspend`, so a client that fell back to them had no
+     working backend at all — and because Render's suspend page carries no CORS
+     header, that arrived in the browser as "Failed to fetch" rather than 503.
+     The ids are deliberately unchanged so a persisted activeId/manualServerId
+     from an older tab still resolves to a real entry.
+
+     NOTE: this is only the fallback. The Admin-owned Firestore registry
+     (config/turbo → backendSplitServers) overrides it whenever present. */
   var DEFAULT_SERVERS = [
-    { id: 'render-primary', label: 'Render primary', url: 'https://youtube-turbo-proxy-gej4.onrender.com', enabled: true, routes: ['media', 'ai'] },
-    { id: 'render-secondary', label: 'Render backup', url: 'https://youtube-turbo-proxy.onrender.com', enabled: true, routes: ['media', 'ai'] }
+    { id: 'render-primary', label: 'Render primary', url: 'https://youtube-turbo-proxy-new.onrender.com', enabled: true, routes: ['media', 'ai'] },
+    { id: 'render-secondary', label: 'Render backup', url: 'https://youtube-turbo-proxy-gej4.onrender.com', enabled: true, routes: ['media', 'ai'] }
   ];
   var STORAGE_KEY = 'preppath_backend_registry_v1';
   /* Per-route request budgets. The media/transcript route talks to cheap proxy
