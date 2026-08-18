@@ -221,13 +221,18 @@ function toggleChapter(chId, subId) {
   }
   saveProgress();
 
-  // Update DOM
+  // Update DOM. Guarded because this is also called from the dashboard's
+  // "today's priorities" list, where the syllabus rows are not rendered.
   const item = document.getElementById('chi-' + chId);
   const chk = document.getElementById('chk-' + chId);
-  item.dataset.done = String(appState.progress[chId].done);
-  item.classList.toggle('completed', appState.progress[chId].done);
-  chk.classList.toggle('checked', appState.progress[chId].done);
-  chk.textContent = appState.progress[chId].done ? '✓' : '';
+  if (item) {
+    item.dataset.done = String(appState.progress[chId].done);
+    item.classList.toggle('completed', appState.progress[chId].done);
+  }
+  if (chk) {
+    chk.classList.toggle('checked', appState.progress[chId].done);
+    chk.textContent = appState.progress[chId].done ? '✓' : '';
+  }
 
   updateSubjectBadge(subId);
   applyFilter();

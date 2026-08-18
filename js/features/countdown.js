@@ -52,26 +52,34 @@ function updateExamDate(val, save=true) {
 }
 
 function startCountdown() {
+  let lastDays = null;
   function tick() {
     const target = new Date(safeExamDate() + 'T09:00:00');
     const now = new Date();
     let diff = target - now;
     if (!isFinite(diff) || diff < 0) diff = 0;
     const days = Math.floor(diff / 86400000);
-    const pad = n => String(n).padStart(2,'0');
-    document.getElementById('cd-days').textContent = pad(days);
+    if (days === lastDays) return; // only the day count is shown — skip no-op writes
+    lastDays = days;
 
-    // chapters per day — use cached count; only recalculate when cache is invalidated
-    if (_cachedRemainingCount === null) {
-      _cachedRemainingCount = getActiveSubjects().reduce(
-        (t, s) => t + s.chapters.filter(c => !(appState.progress[c.id]?.done)).length, 0
-      );
+    const el = document.getElementById('cd-days');
+    if (el) el.textContent = String(days).padStart(2, '0');
+
+    // Pace lives on the dashboard, which grades the number (achievable /
+    // ambitious / unrealistic) instead of printing a bare ratio.
+    if (typeof dashUpdatePace === 'function') {
+      // Reuse the countdown's cached remaining count to avoid a second scan.
+      if (_cachedRemainingCount === null) {
+        _cachedRemainingCount = getActiveSubjects().reduce(
+          (t, s) => t + s.chapters.filter(c => !(appState.progress[c.id]?.done)).length, 0
+        );
+      }
+      try { dashUpdatePace(_cachedRemainingCount, days); } catch (e) {}
     }
-    const chapPerDay = days > 0 ? Math.ceil(_cachedRemainingCount / days) : _cachedRemainingCount;
-    const cpd = document.getElementById('chapters-per-day');
-    if (cpd) cpd.textContent = isFinite(chapPerDay) ? chapPerDay : _cachedRemainingCount;
   }
   tick();
-  countdownInterval = setInterval(tick, 1000);
+  // The display only changes once a day; a minute is plenty and avoids 86,400
+  // pointless DOM writes per day.
+  countdownInterval = setInterval(tick, 60000);
 }
 

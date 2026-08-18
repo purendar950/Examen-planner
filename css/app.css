@@ -5859,6 +5859,13 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
 .fin-readiness-metrics span { color: var(--muted); font-size: .63rem; letter-spacing: .05em; text-transform: uppercase; }
 .fin-readiness-metrics strong { margin-top: 4px; color: var(--text); font-size: .85rem; }
 .fin-readiness-metrics .fin-warm { color: var(--fin-warning); }
+/* Exam proximity is the most consequential number on the page — let it shout
+   once it is genuinely close instead of sitting as quiet tertiary text. */
+.fin-readiness-metrics > div.is-soon { border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.07); }
+.fin-readiness-metrics > div.is-soon strong { color: var(--fin-warning); }
+.fin-readiness-metrics > div.is-urgent { border-color: rgba(239,68,68,.4); background: rgba(239,68,68,.08); }
+.fin-readiness-metrics > div.is-urgent strong { color: #ff8080; }
+.fin-readiness-metrics > div.is-urgent b { font-size: 1.05rem; }
 .fin-readiness-footer {
   position: relative; z-index: 1; display: flex; align-items: center; gap: .7rem;
   margin-top: 1.35rem; padding-top: 1rem; border-top: 1px solid var(--fin-line);
@@ -5897,10 +5904,20 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
   min-height: 52px; padding: .7rem 0; background: transparent; border: 0; border-bottom: 1px solid var(--fin-line); border-radius: 0;
 }
 .fin-focus-card .dash-todo-item:hover { padding-left: .35rem; transform: none; }
+/* Real tick-box: the row used to show a two-digit index in a checkbox-shaped
+   div, which looked interactive but did nothing. Now it completes the chapter. */
 .fin-focus-card .dash-todo-check {
-  display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--border);
-  border-radius: 7px; color: var(--muted); font-size: .65rem; font-weight: 800; opacity: 1;
+  display: grid; width: 22px; height: 22px; padding: 0; place-items: center;
+  background: transparent; border: 1.5px solid var(--border); border-radius: 7px;
+  color: transparent; font-size: .7rem; font-weight: 800; line-height: 1; opacity: 1;
+  cursor: pointer; transition: border-color .15s, background .15s, color .15s;
 }
+.fin-focus-card .dash-todo-check::after { content: '✓'; }
+.fin-focus-card .dash-todo-check:hover,
+.fin-focus-card .dash-todo-check:focus-visible {
+  color: var(--accent); background: var(--accent-dim); border-color: var(--accent);
+}
+.fin-focus-card .dash-todo-item:hover .dash-todo-check { border-color: var(--muted); }
 .fin-focus-card .dash-todo-name { font-size: .85rem; }
 .fin-focus-card .dash-todo-sub { margin-top: 2px; color: var(--muted); font-size: .68rem; }
 .fin-focus-card .dash-todo-tag { max-width: 170px; padding: 4px 8px; border-radius: 7px; font-size: .61rem; }
@@ -5942,6 +5959,40 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
 .fin-pace-value { display: flex; align-items: baseline; gap: 5px; margin-left: auto; white-space: nowrap; }
 .fin-pace-value strong { color: var(--accent); font-size: 1.25rem; }
 .fin-pace-value span { color: var(--muted); font-size: .65rem; }
+
+/* Pace states. A target of 23 chapters/day is not a goal, it is a warning, so
+   the card recolours and offers a way out rather than stating it neutrally. */
+.fin-pace-action {
+  flex: none; padding: .5rem .8rem; color: var(--accent); background: var(--accent-dim);
+  border: 1px solid rgba(0,200,150,.22); border-radius: 9px;
+  font-size: .69rem; font-weight: 800; cursor: pointer; white-space: nowrap;
+  transition: background .15s, border-color .15s;
+}
+.fin-pace-action:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.fin-pace-card.is-tight {
+  background: linear-gradient(90deg, rgba(245,158,11,.1), rgba(245,158,11,.03));
+  border-color: rgba(245,158,11,.28);
+}
+.fin-pace-card.is-tight .fin-pace-icon,
+.fin-pace-card.is-tight .fin-pace-value strong { color: var(--fin-warning); }
+.fin-pace-card.is-tight .fin-pace-icon { background: rgba(245,158,11,.13); }
+.fin-pace-card.is-tight .fin-pace-action {
+  color: var(--fin-warning); background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.3);
+}
+.fin-pace-card.is-risk {
+  background: linear-gradient(90deg, rgba(239,68,68,.11), rgba(239,68,68,.03));
+  border-color: rgba(239,68,68,.32);
+}
+.fin-pace-card.is-risk .fin-pace-icon,
+.fin-pace-card.is-risk .fin-pace-value strong { color: #ff8080; }
+.fin-pace-card.is-risk .fin-pace-icon { background: rgba(239,68,68,.14); }
+.fin-pace-card.is-risk .fin-pace-action {
+  color: #ff8080; background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.32);
+}
+html[data-theme="light"] .fin-pace-card.is-risk .fin-pace-icon,
+html[data-theme="light"] .fin-pace-card.is-risk .fin-pace-value strong,
+html[data-theme="light"] .fin-pace-card.is-risk .fin-pace-action,
+html[data-theme="light"] .fin-readiness-metrics > div.is-urgent strong { color: #b42318; }
 
 .fin-section { margin-top: 2rem; }
 .fin-section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: .85rem; }
@@ -6033,6 +6084,21 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
 .fintech-dashboard .empty-state p { margin-top: .7rem; color: var(--muted); font-size: .76rem; }
 .fintech-dashboard .empty-state button { margin-top: .8rem; padding: .55rem .85rem; color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(0,200,150,.18); border-radius: 9px; font-size: .7rem; font-weight: 800; cursor: pointer; }
 
+/* Landing flash for a chapter opened from the dashboard's priority list, so the
+   deep link is obvious rather than dumping the user mid-page with no cue. */
+.chapter-item.dash-jump-target {
+  background: var(--accent-dim) !important;
+  box-shadow: inset 3px 0 0 var(--accent);
+  animation: dashJumpFade 1.8s ease-out;
+}
+@keyframes dashJumpFade {
+  0%, 55% { background: var(--accent-dim); }
+  100% { background: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chapter-item.dash-jump-target { animation: none; }
+}
+
 html[data-theme="light"] .fintech-dashboard {
   --fin-shadow: 0 1px 2px rgba(15,42,35,.04), 0 14px 32px -22px rgba(15,42,35,.22);
   --fin-warning: #875000;
@@ -6093,6 +6159,7 @@ html[data-theme="light"] .fintech-dashboard {
   .fin-stat-value { font-size: 1.4rem; }
   .fin-pace-card { align-items: flex-start; flex-wrap: wrap; }
   .fin-pace-value { width: 100%; margin-left: 2.9rem; }
+  .fin-pace-action { width: 100%; margin-top: .3rem; }
   .fin-analysis-card { display: block; }
   .fin-analysis-arrow { display: none; }
   .fin-analysis-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 1rem; }
