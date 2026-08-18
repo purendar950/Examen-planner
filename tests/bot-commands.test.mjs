@@ -21,13 +21,20 @@ import vm from 'node:vm';
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = readFileSync(resolve(rootDir, 'bot/bot-server.js'), 'utf8');
+const adminSource = readFileSync(resolve(rootDir, 'js/admin/admin-actions.js'), 'utf8');
+const omnirouteLocalUrlCases = JSON.parse(readFileSync(
+  resolve(rootDir, 'tests/omniroute-local-url-cases.json'), 'utf8'));
 const tgLib = createRequire(import.meta.url)(resolve(rootDir, 'scripts/telegram-lib.js'));
 
-function section(from, to) {
-  const start = source.indexOf(from);
-  const end = source.indexOf(to, start + 1);
+function sourceSection(text, from, to) {
+  const start = text.indexOf(from);
+  const end = text.indexOf(to, start + 1);
   assert.ok(start !== -1 && end > start, `could not locate section: ${from}`);
-  return source.slice(start, end);
+  return text.slice(start, end);
+}
+
+function section(from, to) {
+  return sourceSection(source, from, to);
 }
 
 /* Fixed "today" so a countdown or streak cannot drift with the clock. */
@@ -296,6 +303,7 @@ let askFetchCalls = [];
 let askFetchQueue = [];
 const askProcess = { env: {
   OMNIROUTE_LOCAL_URL: '',
+  OMNIROUTE_ALLOW_ADMIN_LOCAL_URL: '',
   OMNIROUTE_URL: 'https://env-fallback.ngrok-free.dev/v1/chat/completions'
 } };
 const askApi = vm.runInNewContext(
@@ -330,6 +338,46 @@ const askApi = vm.runInNewContext(
   }
 );
 
+const adminOmnirouteApi = vm.runInNewContext(
+  sourceSection(adminSource, 'function normalizeOmnirouteBaseUrl(', 'function omnirouteBaseUrl()')
+  + ';({ normalizeOmnirouteBaseUrl, normalizeOmnirouteLocalBaseUrl })',
+  { URL, OMNIROUTE_RETIRED_BASE_URL: 'https://squeak-earthly-obliged.ngrok-free.dev/v1' }
+);
+
+const adminInputs = {
+  'study-key-omniroute': { value: 'admin-key' },
+  'study-model': { value: 'auto' },
+  'study-base-url-omniroute': { value: 'https://precut-uniformly-handsfree.ngrok-free.dev/v1', focus() {} },
+  'study-local-base-url-omniroute': { value: 'http://localhost:20128/v1', focus() {} },
+  'omniroute-browser-direct': { checked: false }
+};
+const adminWrites = [];
+const adminConfig = {};
+const adminSaveApi = vm.runInNewContext(
+  sourceSection(adminSource, 'async function saveStudyAiConfig()', '/* ── AI Study controls')
+  + ';({ saveStudyAiConfig })',
+  {
+    selectedStudyProvider: () => 'omniroute',
+    STUDY_PROVIDER_ORDER: ['omniroute'],
+    STUDY_PROVIDERS: { omniroute: {
+      label: 'OmniRoute', baseUrl: '', def: 'auto', transport: 'openai_chat',
+      keyField: 'omnirouteApiKeys', modelField: 'omnirouteModel'
+    } },
+    splitStudyKeys: raw => String(raw || '').split(/[\n,]+/).map(value => value.trim()).filter(Boolean),
+    document: { getElementById: id => adminInputs[id] || null },
+    normalizeOmnirouteBaseUrl: adminOmnirouteApi.normalizeOmnirouteBaseUrl,
+    normalizeOmnirouteLocalBaseUrl: adminOmnirouteApi.normalizeOmnirouteLocalBaseUrl,
+    omnirouteBaseUrl: () => 'https://precut-uniformly-handsfree.ngrok-free.dev/v1',
+    omnirouteLocalBaseUrl: () => '',
+    firebase: { firestore: { FieldValue: { serverTimestamp: () => 'server-time' } } },
+    db: { collection: () => ({ doc: () => ({
+      set: async payload => { adminWrites.push(JSON.parse(JSON.stringify(payload))); }
+    }) }) },
+    AI_CONFIG: adminConfig,
+    showToast() {}, render() {}
+  }
+);
+
 const OMNIROUTE_CONFIG = {
   enabled: true,
   studyProvider: 'omniroute',
@@ -349,19 +397,15 @@ test('the selected OmniRoute provider uses the Admin-editable endpoint', () => {
   assert.deepEqual(Array.from(provider.keys), ['key-one', 'key-two']);
 });
 
-test('OmniRoute endpoint validation canonicalizes chat URLs and rejects unsafe targets', () => {
-  assert.equal(askApi.normalizeOmnirouteBaseUrl('https://next-route.ngrok-free.dev/v1/chat/completions/'),
-    'https://next-route.ngrok-free.dev/v1');
-  for (const value of [
-    'http://next-route.ngrok-free.dev/v1',
-    'https://next-route.ngrok-free.dev:8443/v1',
-    'https://user:pass@next-route.ngrok-free.dev/v1',
-    'https://next-route.ngrok-free.dev/v1?x=1',
-    'https://ngrok-free.dev/v1',
-    'https://next-route.ngrok-free.dev.evil.test/v1',
-    'https://example.com/v1',
-    'https://squeak-earthly-obliged.ngrok-free.dev/v1'
-  ]) assert.equal(askApi.normalizeOmnirouteBaseUrl(value), '', value);
+test('public OmniRoute validation is identical in Admin and bot', () => {
+  for (const [value, expected] of omnirouteLocalUrlCases.publicAccepted) {
+    assert.equal(askApi.normalizeOmnirouteBaseUrl(value), expected, value);
+    assert.equal(adminOmnirouteApi.normalizeOmnirouteBaseUrl(value), expected, `Admin: ${value}`);
+  }
+  for (const value of omnirouteLocalUrlCases.publicRejected) {
+    assert.equal(askApi.normalizeOmnirouteBaseUrl(value), '', value);
+    assert.equal(adminOmnirouteApi.normalizeOmnirouteBaseUrl(value), '', `Admin: ${value}`);
+  }
 });
 
 test('OmniRoute resolver honors dedicated, legacy, env, then default precedence', () => {
@@ -393,17 +437,44 @@ test('a local bot deployment prefers only its private environment override', () 
   askProcess.env.OMNIROUTE_LOCAL_URL = previous;
 });
 
-test('local OmniRoute validation rejects public, metadata, hostname and arbitrary paths', () => {
-  assert.equal(askApi.normalizeOmnirouteLocalBaseUrl('https://192.168.1.4:443/v1/'),
-    'https://192.168.1.4/v1');
-  for (const value of [
-    'http://169.254.169.254/v1',
-    'http://100.64.0.1/v1',
-    'http://localhost:20128/v1',
-    'http://example.com/v1',
-    'http://user:pass@10.74.7.68:20128/v1',
-    'http://10.74.7.68:20128/admin'
-  ]) assert.equal(askApi.normalizeOmnirouteLocalBaseUrl(value), '', value);
+test('local OmniRoute validation is identical in Admin and bot', () => {
+  for (const [value, expected] of omnirouteLocalUrlCases.accepted) {
+    assert.equal(askApi.normalizeOmnirouteLocalBaseUrl(value), expected, value);
+    assert.equal(adminOmnirouteApi.normalizeOmnirouteLocalBaseUrl(value), expected, `Admin: ${value}`);
+  }
+  for (const value of omnirouteLocalUrlCases.rejected) {
+    assert.equal(askApi.normalizeOmnirouteLocalBaseUrl(value), '', value);
+    assert.equal(adminOmnirouteApi.normalizeOmnirouteLocalBaseUrl(value), '', `Admin: ${value}`);
+  }
+});
+
+await testAsync('Admin saves, reloads in memory, and clears the local OmniRoute endpoint', async () => {
+  adminWrites.length = 0;
+  adminInputs['study-local-base-url-omniroute'].value = 'http://localhost:20128/v1';
+  await adminSaveApi.saveStudyAiConfig();
+  assert.equal(adminWrites[0].omnirouteLocalBaseUrl, 'http://localhost:20128/v1');
+  assert.equal(adminConfig.omnirouteLocalBaseUrl, 'http://localhost:20128/v1');
+  adminInputs['study-local-base-url-omniroute'].value = '';
+  await adminSaveApi.saveStudyAiConfig();
+  assert.equal(adminWrites[1].omnirouteLocalBaseUrl, '');
+  assert.equal(adminConfig.omnirouteLocalBaseUrl, '');
+});
+
+test('an Admin local endpoint requires per-deployment opt-in', () => {
+  const cfg = { ...OMNIROUTE_CONFIG, omnirouteLocalBaseUrl: 'http://localhost:20128/v1' };
+  const previousAllow = askProcess.env.OMNIROUTE_ALLOW_ADMIN_LOCAL_URL;
+  askProcess.env.OMNIROUTE_ALLOW_ADMIN_LOCAL_URL = '';
+  assert.equal(askApi.resolveOmnirouteBaseUrl(cfg),
+    'https://precut-uniformly-handsfree.ngrok-free.dev/v1');
+  askProcess.env.OMNIROUTE_ALLOW_ADMIN_LOCAL_URL = '1';
+  assert.equal(askApi.resolveOmnirouteBaseUrl(cfg), 'http://localhost:20128/v1');
+  assert.equal(askApi.studyProviderFromConfig(cfg).url,
+    'http://localhost:20128/v1/chat/completions');
+  const fallbacks = askApi.buildFallbackProviderList(
+    { ...cfg, studyProvider: 'mistral', omnirouteApiKeys: ['fallback-key'] }, null);
+  assert.equal(Array.from(fallbacks).find(provider => provider.provider === 'omniroute').url,
+    'http://localhost:20128/v1/chat/completions');
+  askProcess.env.OMNIROUTE_ALLOW_ADMIN_LOCAL_URL = previousAllow;
 });
 
 test('invalid local environment values fall back to the public resolver', () => {

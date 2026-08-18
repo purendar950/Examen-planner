@@ -80,45 +80,76 @@ docker run -p 8080:8080 -e YT_COOKIES="$(cat cookies.txt)" turbo-proxy
 
 ## Local OmniRoute upstream (avoid ngrok transfer)
 
-`10.74.7.68:20128/v1` is an OpenAI-compatible **upstream**, not a PrepPath
-backend. Do not put that `/v1` URL directly into Admin → Backend Server Routing:
-the app needs this proxy's `/health`, `/api/status`, `/api/study`, `/api/ai-chat`,
-and other routes.
+A URL such as `10.74.7.68:20128/v1` or `localhost:20128/v1` is an
+OpenAI-compatible **upstream**, not a PrepPath backend. Do not put that `/v1`
+URL directly into Admin → Backend Server Routing: the app needs this proxy's
+`/health`, `/api/status`, `/api/study`, `/api/ai-chat`, and other routes.
 
-Run this proxy on a machine/container that can reach the private OmniRoute
-service, and set the deployment-only override:
+### Admin-managed address (recommended for changing networks)
+
+Run the proxy with explicit permission to consume the separate Admin local
+field:
 
 ```bash
 docker build -t turbo-proxy youtube-turbo-proxy
+docker run --rm -p 8080:8080 \
+  -e OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1 \
+  -e FIREBASE_SERVICE_ACCOUNT="$FIREBASE_SERVICE_ACCOUNT" \
+  turbo-proxy
+```
+
+Then open **Admin → AI Study → OmniRoute → Local upstream**, enter the current
+address (for example `http://10.74.7.68:20128/v1`), and save provider routing.
+You can update this field whenever the network address changes without
+rebuilding the proxy. Each proxy or bot must set
+`OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1` independently; deployments without that
+flag ignore the Admin local field and continue using the public HTTPS endpoint.
+
+For a fixed operator-controlled address, `OMNIROUTE_LOCAL_URL` still has highest
+precedence:
+
+```bash
 docker run --rm -p 8080:8080 \
   -e OMNIROUTE_LOCAL_URL="http://10.74.7.68:20128/v1" \
   -e FIREBASE_SERVICE_ACCOUNT="$FIREBASE_SERVICE_ACCOUNT" \
   turbo-proxy
 ```
 
-The override accepts only literal RFC1918 or loopback IPv4 addresses, HTTP(S),
-and an exact `/v1` (or `/v1/chat/completions`) path. It is read only from the
-local process environment; a Firestore/Admin value cannot redirect Render or
-the bot into a private network. When set, all server-side OmniRoute chat,
-catalog, image, search, speech, and video requests use the local service. The
-public ngrok URL remains in Firestore for Render and browser-direct clients.
-`GET /health` reports `"omniroute_upstream":"local"` without exposing the LAN
-address.
+Both modes accept only exact `localhost`, RFC1918/loopback IPv4 addresses,
+HTTP(S), and `/v1` (or `/v1/chat/completions`). Public IPs, arbitrary DNS names,
+metadata/link-local addresses, credentials, queries, fragments, and other paths
+are rejected. When enabled, all server-side OmniRoute chat, catalog, image,
+search, speech, and video requests use the local service. The public ngrok URL
+remains separate for Render and browser-direct clients. `GET /health` reports
+`"omniroute_upstream":"local"` without exposing the address.
+
+`localhost` is relative to the process network namespace. It works when the
+proxy runs directly on the same machine as OmniRoute. Inside ordinary Docker,
+`localhost` means the proxy container—not the Docker host or another container.
+Use the host's reachable private IPv4 address, or intentionally run on Linux
+host networking when OmniRoute listens on the host:
+
+```bash
+docker run --rm --network=host \
+  -e OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1 \
+  -e FIREBASE_SERVICE_ACCOUNT="$FIREBASE_SERVICE_ACCOUNT" \
+  turbo-proxy
+```
+
+Arbitrary names such as `host.docker.internal` and Compose service names remain
+rejected; use a literal private address instead.
 
 To let users choose this server:
 
-1. Expose the **proxy root** (port 8080 above) through a trusted HTTPS hostname
+1. Expose the **proxy root** (port 8080) through a trusted HTTPS hostname
    reachable by those users over LAN/VPN, for example `https://prep-proxy.lan`.
 2. Add that HTTPS proxy root in **Admin → Settings → Backend Server Routing**.
 3. Choose **Manual preference + failover** while testing, or **Selected server
    only** after every intended device can reach it.
 
-The production app is HTTPS, so `http://10.74.7.68:8080` is normally blocked as
-mixed content. A trusted HTTPS reverse proxy/certificate is required. Internet
-users who are not on the LAN/VPN cannot reach a private `10.x` address; serve a
-public HTTPS proxy or VPN path if they must use this upstream. If the Telegram
-bot runs on the same network, set the same `OMNIROUTE_LOCAL_URL` on the bot
-service; otherwise leave it unset and the bot keeps using the public endpoint.
+The production app is HTTPS, so a direct `http://10.x.x.x:8080` proxy root is
+normally blocked as mixed content. A trusted HTTPS reverse proxy/certificate is
+required. Internet users outside the LAN/VPN need a public HTTPS route or VPN.
 
 ## Frontend
 

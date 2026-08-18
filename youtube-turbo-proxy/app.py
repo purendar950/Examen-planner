@@ -1116,9 +1116,10 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # key(s) + model. Multiple keys enable automatic failover on limit/error.
 BYNARA_URL = "https://router.bynara.id/v1/chat/completions"
 # OmniRoute normally uses an account-owned ngrok Dev Domain. A self-hosted
-# proxy can set OMNIROUTE_LOCAL_URL to an exact RFC1918/loopback /v1 endpoint;
-# that deployment-only override never comes from Firestore and therefore does
-# not turn the Admin-editable public URL into a private-network SSRF primitive.
+# proxy can pin OMNIROUTE_LOCAL_URL, or explicitly opt into the separately
+# Admin-managed local field with OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1. Both paths
+# accept only an exact private/loopback target and never alter browser-direct
+# or public fallback metadata.
 OMNIROUTE_DEFAULT_BASE_URL = "https://precut-uniformly-handsfree.ngrok-free.dev/v1"
 OMNIROUTE_RETIRED_BASE_URL = "https://squeak-earthly-obliged.ngrok-free.dev/v1"
 _OMNIROUTE_HOST_RE = re.compile(
@@ -1133,8 +1134,12 @@ _OMNIROUTE_PATHS = ("/v1", "/v1/", "/v1/chat/completions",
 
 def _canonicalize_omniroute_base_url(value):
     """Return a safe public OmniRoute /v1 base, or an empty string."""
-    candidate = str(value or "").strip()
-    if not candidate or "\\" in candidate:
+    raw = str(value or "")
+    if any(ord(char) < 32 or ord(char) == 127 for char in raw):
+        return ""
+    candidate = raw.strip()
+    if (not candidate or "\\" in candidate
+            or any(delimiter in candidate for delimiter in ("@", "?", "#"))):
         return ""
     try:
         parsed = urllib.parse.urlsplit(candidate)
@@ -1151,23 +1156,32 @@ def _canonicalize_omniroute_base_url(value):
 
 
 def _canonicalize_omniroute_local_base_url(value):
-    """Return a deployment-local RFC1918/loopback /v1 base, or empty.
+    """Return a local RFC1918/loopback/localhost /v1 base, or empty.
 
-    Hostnames are deliberately refused: accepting DNS here would let resolution
-    drift to a public, metadata, or unrelated private address after validation.
-    The exact value is read only from OMNIROUTE_LOCAL_URL on the process that
-    has a route to the local service.
+    Arbitrary hostnames are deliberately refused: accepting DNS here would let
+    resolution drift to a public, metadata, or unrelated private address after
+    validation. Exact ``localhost`` is allowed for a native process or shared
+    network namespace; its meaning inside Docker is documented separately.
     """
-    candidate = str(value or "").strip()
-    if not candidate or "\\" in candidate:
+    raw = str(value or "")
+    if any(ord(char) < 32 or ord(char) == 127 for char in raw):
+        return ""
+    candidate = raw.strip()
+    if (not candidate or "\\" in candidate
+            or any(delimiter in candidate for delimiter in ("@", "?", "#"))):
         return ""
     try:
         parsed = urllib.parse.urlsplit(candidate)
         hostname = (parsed.hostname or "").lower()
-        address = ipaddress.ip_address(hostname)
         port = parsed.port
-        if (address.version != 4
-                or not any(address in network for network in _OMNIROUTE_LOCAL_NETWORKS)
+        if parsed.netloc.endswith(":"):
+            return ""
+        private_target = hostname == "localhost"
+        if not private_target:
+            address = ipaddress.ip_address(hostname)
+            private_target = (address.version == 4 and any(
+                address in network for network in _OMNIROUTE_LOCAL_NETWORKS))
+        if (not private_target
                 or parsed.scheme.lower() not in ("http", "https")
                 or parsed.username or parsed.password or parsed.query or parsed.fragment
                 or parsed.path not in _OMNIROUTE_PATHS):
@@ -1178,19 +1192,40 @@ def _canonicalize_omniroute_local_base_url(value):
     return "%s://%s/v1" % (parsed.scheme.lower(), authority)
 
 
-def _configured_omniroute_local_base_url():
-    return _canonicalize_omniroute_local_base_url(
+def _omniroute_admin_local_enabled():
+    return str(os.environ.get("OMNIROUTE_ALLOW_ADMIN_LOCAL_URL") or "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _configured_omniroute_local_base_url(cfg=None):
+    pinned = _canonicalize_omniroute_local_base_url(
         os.environ.get("OMNIROUTE_LOCAL_URL"))
+    if pinned:
+        return pinned
+    if _omniroute_admin_local_enabled() and isinstance(cfg, dict):
+        return _canonicalize_omniroute_local_base_url(
+            cfg.get("omnirouteLocalBaseUrl"))
+    return ""
+
+
+def _omniroute_upstream_mode(cfg=None):
+    return "local" if _configured_omniroute_local_base_url(cfg) else "public"
 
 
 def _canonicalize_omniroute_runtime_base_url(value):
-    """Accept public bases, plus only the exact operator-configured local base."""
+    """Accept public bases and local bases trusted by this deployment."""
     public = _canonicalize_omniroute_base_url(value)
     if public:
         return public
     local = _canonicalize_omniroute_local_base_url(value)
-    configured = _configured_omniroute_local_base_url()
-    return local if local and configured and secrets.compare_digest(local, configured) else ""
+    pinned = _canonicalize_omniroute_local_base_url(
+        os.environ.get("OMNIROUTE_LOCAL_URL"))
+    if local and pinned and secrets.compare_digest(local, pinned):
+        return local
+    # With this explicit deployment gate, local bases passed by internal
+    # catalog workers may come from the Admin field resolved before the worker
+    # started. No request-controlled value reaches this helper.
+    return local if local and _omniroute_admin_local_enabled() else ""
 
 
 def _resolve_omniroute_public_base_url(cfg=None):
@@ -1210,8 +1245,8 @@ def _resolve_omniroute_public_base_url(cfg=None):
 
 
 def _resolve_omniroute_base_url(cfg=None):
-    """Prefer this deployment's private upstream, then the public endpoint."""
-    return (_configured_omniroute_local_base_url()
+    """Prefer this deployment's pinned/Admin local upstream, then public."""
+    return (_configured_omniroute_local_base_url(cfg)
             or _resolve_omniroute_public_base_url(cfg))
 
 
@@ -6687,8 +6722,7 @@ def health():
         # Deployment-only local OmniRoute routing. Expose only the mode, never
         # the private address; operators can verify that this proxy bypasses
         # ngrok without publishing LAN topology from the unauthenticated route.
-        "omniroute_upstream": ("local" if _configured_omniroute_local_base_url()
-                               else "public"),
+        "omniroute_upstream": _omniroute_upstream_mode(_load_study_raw_cfg()),
         # Advanced (library-scope) tutor. False => it still answers, but via
         # title-keyword fallback instead of semantic search.
         "vector_search": _vec_enabled(),
@@ -14734,7 +14768,8 @@ def api_ai_chat_image():
     # The status endpoint refresh is intentionally asynchronous, but an image
     # request must not keep using a stale snapshot that points at 404 models.
     if _provider_configured(raw_cfg, "omniroute"):
-        live_omni_ids = _omniroute_image_order(_omniroute_fetch_image_model_ids(force=True))
+        live_omni_ids = _omniroute_image_order(
+            _omniroute_fetch_image_model_ids(force=True, cfg=raw_cfg))
         if live_omni_ids:
             existing = [candidate for candidate in image_models if candidate["provider"] != "omniroute"]
             existing += [{"provider": "omniroute", "model": model_id,

@@ -2564,42 +2564,56 @@ const OMNIROUTE_DEFAULT_BASE_URL = 'https://precut-uniformly-handsfree.ngrok-fre
 const OMNIROUTE_RETIRED_BASE_URL = 'https://squeak-earthly-obliged.ngrok-free.dev/v1';
 
 function normalizeOmnirouteBaseUrl(value) {
-  const raw = String(value == null ? '' : value).trim();
+  const original = String(value == null ? '' : value);
+  if (/[\u0000-\u001f\u007f]/.test(original)) return '';
+  const raw = original.trim();
   if (!raw || raw.includes('\\')) return '';
   try {
+    const authorityMatch = raw.match(/^https:\/\/([^\/?#]+)(?=\/|$)/i);
+    if (!authorityMatch || authorityMatch[1].includes('@') || authorityMatch[1].includes(':')) return '';
+    const hostname = authorityMatch[1].toLowerCase();
+    const rawPath = raw.slice(authorityMatch[0].length);
+    const allowedPath = rawPath === '/v1' || rawPath === '/v1/'
+      || rawPath === '/v1/chat/completions' || rawPath === '/v1/chat/completions/';
     const parsed = new URL(raw);
-    const hostname = parsed.hostname.toLowerCase();
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port
+    if (!allowedPath || parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port
         || parsed.search || parsed.hash
         || !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+ngrok-free\.dev$/.test(hostname)) return '';
-    let path = parsed.pathname.replace(/\/+$/, '');
-    if (path === '/v1/chat/completions') path = '/v1';
-    if (path !== '/v1') return '';
     const base = `https://${hostname}/v1`;
     return base === OMNIROUTE_RETIRED_BASE_URL ? '' : base;
   } catch (error) { return ''; }
 }
 
 function normalizeOmnirouteLocalBaseUrl(value) {
-  const raw = String(value == null ? '' : value).trim();
+  const original = String(value == null ? '' : value);
+  if (/[\u0000-\u001f\u007f]/.test(original)) return '';
+  const raw = original.trim();
   if (!raw || raw.includes('\\')) return '';
   try {
-    const parsed = new URL(raw);
-    const hostname = parsed.hostname;
-    const octets = hostname.split('.').map(Number);
+    const authorityMatch = raw.match(/^https?:\/\/([^\/?#]+)(?=\/|$)/i);
+    if (!authorityMatch || authorityMatch[1].includes('@')) return '';
+    const authorityParts = authorityMatch[1].match(/^([^:]+)(?::([0-9]+))?$/);
+    if (!authorityParts || authorityMatch[1].endsWith(':')) return '';
+    const hostname = authorityParts[1].toLowerCase();
+    const port = authorityParts[2] ? String(Number(authorityParts[2])) : '';
+    const hostParts = hostname.split('.');
+    const octets = hostParts.map(Number);
     const privateIpv4 = octets.length === 4
-      && octets.every((part, index) => Number.isInteger(part) && part >= 0 && part <= 255
-        && String(part) === hostname.split('.')[index])
+      && octets.every((part, index) => /^(?:0|[1-9][0-9]{0,2})$/.test(hostParts[index])
+        && Number.isInteger(part) && part >= 0 && part <= 255)
       && (octets[0] === 10
         || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
         || (octets[0] === 192 && octets[1] === 168)
         || octets[0] === 127);
-    let path = parsed.pathname.replace(/\/+$/, '');
-    if (path === '/v1/chat/completions') path = '/v1';
-    if (!privateIpv4 || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
-        || parsed.username || parsed.password || parsed.search || parsed.hash
-        || path !== '/v1') return '';
-    return `${parsed.protocol}//${hostname}${parsed.port ? `:${parsed.port}` : ''}/v1`;
+    const localTarget = hostname === 'localhost' || privateIpv4;
+    const parsed = new URL(raw);
+    const rawPath = raw.slice(authorityMatch[0].length);
+    const allowedPath = rawPath === '/v1' || rawPath === '/v1/'
+      || rawPath === '/v1/chat/completions' || rawPath === '/v1/chat/completions/';
+    if (!localTarget || !allowedPath
+        || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')
+        || parsed.username || parsed.password || parsed.search || parsed.hash) return '';
+    return `${parsed.protocol}//${hostname}${port ? `:${port}` : ''}/v1`;
   } catch (error) { return ''; }
 }
 
@@ -2617,11 +2631,23 @@ function resolveOmniroutePublicBaseUrl(cfg) {
   return OMNIROUTE_DEFAULT_BASE_URL;
 }
 
+function omnirouteAdminLocalEnabled() {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(process.env.OMNIROUTE_ALLOW_ADMIN_LOCAL_URL || '').trim().toLowerCase());
+}
+
 function resolveOmnirouteBaseUrl(cfg) {
-  /* Only this process's environment may opt into a private upstream. Firestore
-     cannot redirect the bot to arbitrary LAN/metadata services. */
-  return normalizeOmnirouteLocalBaseUrl(process.env.OMNIROUTE_LOCAL_URL)
-    || resolveOmniroutePublicBaseUrl(cfg);
+  /* A pinned process value always wins. The separate Admin local field is
+     trusted only when this individual deployment explicitly opts in; public
+     bots therefore cannot be redirected into their own LAN or localhost. */
+  const pinned = normalizeOmnirouteLocalBaseUrl(process.env.OMNIROUTE_LOCAL_URL);
+  if (pinned) return pinned;
+  if (omnirouteAdminLocalEnabled()) {
+    const adminLocal = normalizeOmnirouteLocalBaseUrl(
+      cfg && typeof cfg === 'object' ? cfg.omnirouteLocalBaseUrl : '');
+    if (adminLocal) return adminLocal;
+  }
+  return resolveOmniroutePublicBaseUrl(cfg);
 }
 
 /* → { provider, url, keys, model } or null when the panel has not configured a
