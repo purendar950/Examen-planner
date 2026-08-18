@@ -5,6 +5,7 @@
 
 var _aiStudyHealth = null;
 var _aiStudyLastTested = null;
+var _aiStudyOmnirouteFocusToken = 0;
 
 function aiStudyProviderInitials(label) {
   return String(label || 'AI').replace(/[^A-Za-z0-9 ]/g, '').split(/\s+/).filter(Boolean)
@@ -48,9 +49,43 @@ function aiStudyReload() {
   loadAiStudyData();
 }
 
-function aiStudyScrollTo(id) {
+function aiStudyScrollTo(id, focusTarget) {
   var target = document.getElementById(id);
-  if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!target) return false;
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (focusTarget && typeof target.focus === 'function') target.focus({ preventScroll: true });
+  return true;
+}
+
+function aiStudyFocusOmnirouteEndpoints(token) {
+  if (token !== _aiStudyOmnirouteFocusToken || typeof TAB === 'undefined' || TAB !== 'aistudy') return;
+  if (aiStudyScrollTo('ai-omniroute-endpoints', true)) return;
+  setTimeout(function () { aiStudyFocusOmnirouteEndpoints(token); }, 100);
+}
+
+function openOmnirouteEndpoints() {
+  var focusToken = ++_aiStudyOmnirouteFocusToken;
+  if (typeof TAB === 'undefined' || TAB !== 'aistudy') setTab('aistudy', { focus: false });
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(function () { aiStudyFocusOmnirouteEndpoints(focusToken); });
+  } else {
+    aiStudyFocusOmnirouteEndpoints(focusToken);
+  }
+}
+
+function aiStudyOmnirouteEndpointsMarkup() {
+  var localBase = omnirouteLocalBaseUrl();
+  var browserDirect = !!(AI_CONFIG && AI_CONFIG.omnirouteBrowserDirect);
+  return '<section id="ai-omniroute-endpoints" class="ai-panel ai-anchor-section ai-omniroute-panel" tabindex="-1" aria-labelledby="ai-omniroute-endpoints-title">' +
+    '<div class="ai-panel-heading"><div><span class="ai-panel-eyebrow">OmniRoute connection</span><h3 id="ai-omniroute-endpoints-title">Public & local endpoint setup</h3><p>Update the ngrok address when your public tunnel changes, or point an opted-in proxy deployment at OmniRoute on the same machine or private network.</p></div><span class="ai-route-badge">/v1 upstreams</span></div>' +
+    '<div class="ai-omniroute-endpoint-grid">' +
+      '<div class="ai-omniroute-endpoint-field"><label for="study-base-url-omniroute">Public / ngrok endpoint</label><input id="study-base-url-omniroute" class="ai-provider-endpoint-input" type="url" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" value="' + esc(omnirouteBaseUrl()) + '" aria-describedby="study-base-url-omniroute-help"><small id="study-base-url-omniroute-help">Required HTTPS ngrok Dev Domain ending in <code>/v1</code>. Public deployments and browser-direct mode use this fallback.</small></div>' +
+      '<div class="ai-omniroute-endpoint-field"><label for="study-local-base-url-omniroute">Local upstream</label><input id="study-local-base-url-omniroute" class="ai-provider-endpoint-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://localhost:20128/v1 or private IPv4" value="' + esc(localBase) + '" aria-describedby="study-local-base-url-omniroute-help"><small id="study-local-base-url-omniroute-help">Optional raw OmniRoute <code>/v1</code> upstream. The proxy uses it only with <code>OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1</code>; <code>localhost</code> means the proxy host itself.</small></div>' +
+    '</div>' +
+    '<div class="ai-omniroute-routing-note"><strong>Do not add either <code>/v1</code> address as a Backend Server.</strong><span>Settings → Backend Server Routing expects the trusted HTTPS root of the full <code>youtube-turbo-proxy</code> service, which exposes routes such as <code>/health</code>, <code>/api/study</code>, <code>/api/tutor</code>, and <code>/api/ai-chat</code>.</span></div>' +
+    '<label class="ai-switch-row ai-omniroute-direct-toggle" for="omniroute-browser-direct"><span><strong>Direct provider requests</strong><small>When enabled, ordinary AI Chat and supported image requests bypass the selected backend proxy and use provider keys in the browser. Keep this off if every authorized AI request must pass through your selected local proxy. Coding/workspace requests always remain on the secure proxy.</small></span><span class="ai-toggle"><input id="omniroute-browser-direct" type="checkbox"' + (browserDirect ? ' checked' : '') + '><i></i></span></label>' +
+    '<div class="ai-omniroute-actions"><span>Saves only these two endpoints and the direct-request setting. Provider credentials, model selection, and active provider selection remain unchanged.</span><button class="ai-btn ai-btn-dark" type="button" onclick="saveOmnirouteEndpoints()">Save OmniRoute endpoints</button></div>' +
+  '</section>';
 }
 
 function aiStudyHealthMarkup(results) {
@@ -187,15 +222,12 @@ function aiStudyProviderCard(pid, activePid) {
   var stateText = active ? 'Live route' : (configured ? 'Standby' : 'Setup');
   var endpoint = studyBaseUrlFor(pid) || 'Managed by Bynara';
   var endpointBox = pid === 'omniroute'
-    ? '<div class="ai-provider-endpoint ai-provider-endpoint--editable"><label for="study-base-url-omniroute">Public endpoint</label><input id="study-base-url-omniroute" class="ai-provider-endpoint-input" type="url" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" value="' + esc(omnirouteBaseUrl()) + '" aria-describedby="study-base-url-omniroute-help"><small id="study-base-url-omniroute-help">HTTPS ngrok Dev Domain ending in <code>/v1</code>. Used by public deployments and browser-direct mode.</small><label for="study-local-base-url-omniroute">Local upstream</label><input id="study-local-base-url-omniroute" class="ai-provider-endpoint-input" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="http://localhost:20128/v1 or private IPv4" value="' + esc(omnirouteLocalBaseUrl()) + '" aria-describedby="study-local-base-url-omniroute-help"><small id="study-local-base-url-omniroute-help">Optional. Only deployments with <code>OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1</code> use it; other servers keep the public endpoint.</small></div>'
+    ? '<div class="ai-provider-endpoint ai-provider-endpoint--summary"><div><span>Public / ngrok</span><code id="study-omniroute-public-summary">' + esc(omnirouteBaseUrl()) + '</code></div><div><span>Local upstream</span><code id="study-omniroute-local-summary">' + esc(omnirouteLocalBaseUrl() || 'Not configured — public fallback') + '</code></div><button class="ai-btn ai-btn-soft" type="button" onclick="openOmnirouteEndpoints()">Edit endpoints</button></div>'
     : '<div class="ai-provider-endpoint" title="' + esc(endpoint) + '"><span>Endpoint</span><code>' + esc(endpoint.replace(/^https?:\/\//, '')) + '</code></div>';
   var health = aiStudyHealthState(pid);
   var keyLink = provider.keyUrl
     ? '<a class="ai-provider-link" href="' + esc(provider.keyUrl) + '" target="_blank" rel="noopener">Get API key ↗</a>'
     : '<span class="ai-provider-link is-muted">Private endpoint</span>';
-  var directBrowserBox = pid === 'omniroute'
-    ? '<label class="ai-switch-row ai-provider-direct-toggle" for="omniroute-browser-direct"><span><strong>Direct provider requests</strong><small>Send ordinary AI chat and supported image requests directly from AI Chat using Firebase-configured provider keys. This exposes the first key for each configured provider to authorized browsers and requires every provider’s CORS policy to allow this app. Coding/workspace requests remain on the secure proxy.</small></span><span class="ai-toggle"><input id="omniroute-browser-direct" type="checkbox"' + (AI_CONFIG && AI_CONFIG.omnirouteBrowserDirect ? ' checked' : '') + '><i></i></span></label>'
-    : '';
 
   var metricsRow = '<div class="ai-provider-metrics">' +
         '<span><b>' + keys.length + '</b> key' + (keys.length === 1 ? '' : 's') + '</span>' +
@@ -217,7 +249,6 @@ function aiStudyProviderCard(pid, activePid) {
     metricsRow +
     endpointBox +
     credentialsBox +
-    directBrowserBox +
     '<div class="ai-provider-card-foot"><span>' + esc(provider.note) + '</span>' + keyLink + '</div>' +
   '</article>';
 }
@@ -462,6 +493,7 @@ function renderAiStudy() {
     '</section>' +
 
     '<nav class="ai-section-nav" aria-label="AI Study sections">' +
+      '<button type="button" onclick="aiStudyScrollTo(\'ai-omniroute-endpoints\',true)">OmniRoute endpoints</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-providers\')">Provider portfolio</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-routing\')">Routing & models</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-free-model-refresh\')">Free-model refresh</button>' +
@@ -470,6 +502,8 @@ function renderAiStudy() {
       '<button type="button" onclick="aiStudyScrollTo(\'ai-policy\')">Access policy</button>' +
       '<button type="button" onclick="aiStudyScrollTo(\'ai-chat-access\')">AI Chat tab</button>' +
     '</nav>' +
+
+    aiStudyOmnirouteEndpointsMarkup() +
 
     '<section id="ai-providers" class="ai-panel ai-anchor-section">' +
       '<div class="ai-panel-heading"><div><span class="ai-panel-eyebrow">Provider portfolio</span><h3>Credential vault & failover routes</h3><p>Choose the live route and maintain independent credentials for every provider.</p></div><div class="ai-heading-metric"><strong>' + configuredCount + '</strong><span>funded routes</span></div></div>' +

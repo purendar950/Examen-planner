@@ -522,6 +522,23 @@ html[data-theme="dark"] a { color:var(--accent); }
 .ai-route-badge,.ai-code-icon { display:grid; flex:0 0 auto; place-items:center; border:1px solid var(--ai-line); border-radius:9px; background:var(--ai-soft); color:var(--ai-violet); font-family:monospace; font-size:.68rem; }
 .ai-route-badge { min-height:30px; padding:4px 9px; }
 .ai-code-icon { width:36px; height:36px; }
+.ai-anchor-section { scroll-margin-top:18px; }
+.ai-omniroute-panel { border-color:rgba(115,87,232,.3); background:linear-gradient(135deg,rgba(115,87,232,.055),rgba(40,120,240,.025) 52%,var(--card)); box-shadow:0 10px 28px rgba(66,54,140,.08); }
+.ai-omniroute-panel:focus { outline:3px solid rgba(40,120,240,.2); outline-offset:3px; }
+.ai-omniroute-endpoint-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.ai-omniroute-endpoint-field { min-width:0; padding:13px; border:1px solid var(--ai-line); border-radius:11px; background:var(--card); }
+.ai-omniroute-endpoint-field label { display:block; margin-bottom:7px; color:var(--ai-ink); font-size:.78rem; font-weight:800; }
+.ai-omniroute-endpoint-field .ai-provider-endpoint-input { min-height:41px; padding:8px 10px; background:var(--ai-soft); font-size:.75rem; }
+.ai-omniroute-endpoint-field small { display:block; margin-top:7px; color:var(--muted); font-size:.75rem; line-height:1.5; }
+.ai-omniroute-endpoint-field small code,.ai-omniroute-routing-note code { color:var(--ai-slate); font-size:inherit; overflow-wrap:anywhere; }
+.ai-omniroute-routing-note { display:flex; align-items:flex-start; gap:10px; margin-top:12px; padding:11px 12px; border:1px solid rgba(229,154,22,.22); border-radius:10px; background:rgba(229,154,22,.065); }
+.ai-omniroute-routing-note strong { flex:0 0 auto; color:var(--ai-ink); font-size:.75rem; }
+.ai-omniroute-routing-note span { color:var(--muted); font-size:.75rem; line-height:1.48; }
+.ai-omniroute-direct-toggle { margin-top:12px; overflow:hidden; border:1px solid var(--ai-line); border-radius:11px; background:var(--card); }
+.ai-omniroute-direct-toggle strong { font-size:.78rem; }
+.ai-omniroute-direct-toggle small { max-width:760px; font-size:.75rem; }
+.ai-omniroute-actions { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-top:12px; }
+.ai-omniroute-actions > span { color:var(--muted); font-size:.75rem; line-height:1.4; }
 
 .ai-provider-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
 .ai-provider-card { min-width:0; padding:13px; border:1px solid var(--ai-line); border-radius:13px; background:var(--card); transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease; }
@@ -556,6 +573,12 @@ html[data-theme="dark"] a { color:var(--accent); }
 .ai-provider-endpoint-input:focus { border-color:var(--ai-focus); outline:2px solid rgba(40,120,240,.12); outline-offset:1px; }
 .ai-provider-endpoint--editable small { grid-column:1 / -1; color:var(--muted); font-size:.55rem; line-height:1.35; }
 .ai-provider-endpoint--editable small code { color:var(--ai-slate); font-size:inherit; }
+.ai-provider-endpoint--summary { display:grid; grid-template-columns:minmax(0,1fr); align-items:stretch; gap:6px; padding:8px; border:1px solid var(--ai-line); border-radius:9px; background:var(--ai-soft); }
+.ai-provider-endpoint--summary > div { min-width:0; }
+.ai-provider-endpoint--summary span,.ai-provider-endpoint--summary code { display:block; }
+.ai-provider-endpoint--summary span { margin-bottom:2px; color:var(--muted); font-size:.72rem; font-weight:750; }
+.ai-provider-endpoint--summary code { overflow:hidden; color:var(--ai-slate); font-size:.72rem; text-overflow:ellipsis; white-space:nowrap; }
+.ai-provider-endpoint--summary .ai-btn { width:100%; min-height:32px; margin-top:2px; padding:5px 8px; font-size:.72rem; }
 .ai-secret-label { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:4px; }
 .ai-secret-label label { color:var(--ai-slate); font-size:.62rem; font-weight:750; }
 .ai-secret-label button { padding:2px 5px; border:0; background:transparent; color:var(--ai-blue); font-size:.59rem; font-weight:750; cursor:pointer; }
@@ -660,6 +683,8 @@ html[data-theme="dark"] .ai-fintech {
 }
 html[data-theme="dark"] .ai-command-hero { border-color:#2B3852; box-shadow:none; }
 html[data-theme="dark"] .ai-kpi,html[data-theme="dark"] .ai-panel,html[data-theme="dark"] .ai-section-nav { background:#151C29; }
+html[data-theme="dark"] .ai-omniroute-panel { border-color:#443B70; background:linear-gradient(135deg,rgba(115,87,232,.1),rgba(40,120,240,.045) 52%,#151C29); box-shadow:none; }
+html[data-theme="dark"] .ai-omniroute-endpoint-field,html[data-theme="dark"] .ai-omniroute-direct-toggle { background:#101622; }
 html[data-theme="dark"] .ai-provider-card { background:#151C29; }
 html[data-theme="dark"] .ai-secret-field,html[data-theme="dark"] .ai-provider-endpoint-input,html[data-theme="dark"] .ai-field select,html[data-theme="dark"] .ai-inline-form input,html[data-theme="dark"] .ai-grant-editor textarea { background:#101622; color:var(--text); }
 html[data-theme="dark"] .ai-provider-card:hover { border-color:#3A465D; box-shadow:none; }
@@ -676,6 +701,8 @@ html[data-theme="dark"] .ai-toggle i::after { background:#F1F5F9; }
   .ai-command-hero { min-height:0; align-items:flex-start; flex-direction:column; padding:22px; }
   .ai-command-actions { width:100%; justify-content:flex-start; }
   .ai-command-actions .ai-btn { flex:1; }
+  .ai-omniroute-endpoint-grid { grid-template-columns:1fr; }
+  .ai-omniroute-routing-note { flex-direction:column; }
   .ai-provider-grid,.ai-policy-grid { grid-template-columns:1fr; }
   .ai-provider-savebar { align-items:stretch; flex-direction:column; }
   .ai-provider-savebar .ai-btn { width:100%; }
@@ -692,6 +719,10 @@ html[data-theme="dark"] .ai-toggle i::after { background:#F1F5F9; }
   .ai-kpi { padding:12px; }
   .ai-panel { padding:14px; }
   .ai-panel-heading { align-items:flex-start; flex-direction:column; gap:8px; }
+  .ai-omniroute-actions { align-items:stretch; flex-direction:column; }
+  .ai-omniroute-actions .ai-btn { width:100%; }
+  .ai-omniroute-routing-note,.ai-omniroute-endpoint-field { padding:10px; }
+  .ai-provider-endpoint--summary code { overflow-wrap:anywhere; white-space:normal; }
   .ai-heading-metric { padding:0; border:0; text-align:left; }
   .ai-provider-card-head { align-items:flex-start; }
   .ai-provider-metrics { flex-wrap:wrap; }

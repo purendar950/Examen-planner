@@ -1196,6 +1196,61 @@ function parseCurlIntoStudy() {
   showToast('✅ Detected ' + STUDY_PROVIDERS[pid].label +
             (key ? ' · key' : ' · (no key found)') + (model ? ' · ' + model : '') + ' — review & Save');
 }
+function readOmnirouteEndpointForm() {
+  const endpointInput = document.getElementById('study-base-url-omniroute');
+  const baseUrl = normalizeOmnirouteBaseUrl(endpointInput ? endpointInput.value : omnirouteBaseUrl());
+  if (!baseUrl) {
+    showToast('⚠️ Enter an HTTPS ngrok-free.dev URL ending in /v1 for OmniRoute.');
+    if (endpointInput) endpointInput.focus();
+    return null;
+  }
+  const localEndpointInput = document.getElementById('study-local-base-url-omniroute');
+  const localRaw = String(localEndpointInput ? localEndpointInput.value : omnirouteLocalBaseUrl()).trim();
+  const localBaseUrl = normalizeOmnirouteLocalBaseUrl(localRaw);
+  if (localRaw && !localBaseUrl) {
+    showToast('⚠️ Local OmniRoute must use localhost or a private IPv4 address and end in /v1.');
+    if (localEndpointInput) localEndpointInput.focus();
+    return null;
+  }
+  return {
+    baseUrl: baseUrl,
+    localBaseUrl: localBaseUrl,
+    browserDirectEnabled: !!((document.getElementById('omniroute-browser-direct') || {}).checked)
+  };
+}
+
+async function saveOmnirouteEndpoints() {
+  const endpoints = readOmnirouteEndpointForm();
+  if (!endpoints) return;
+  const payload = {
+    omnirouteBaseUrl: endpoints.baseUrl,
+    omnirouteLocalBaseUrl: endpoints.localBaseUrl,
+    omnirouteBrowserDirect: endpoints.browserDirectEnabled,
+    browserDirectEnabled: endpoints.browserDirectEnabled,
+    browserDirectProviders: endpoints.browserDirectEnabled ? STUDY_PROVIDER_ORDER.filter(function (k) { return k !== 'kiro'; }) : [],
+    savedAt: firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if (activeStudyProvider() === 'omniroute') payload.studyBaseUrl = endpoints.baseUrl;
+  try {
+    await db.collection('config').doc('ai').set(payload, { merge: true });
+    AI_CONFIG.omnirouteBaseUrl = endpoints.baseUrl;
+    AI_CONFIG.omnirouteLocalBaseUrl = endpoints.localBaseUrl;
+    AI_CONFIG.omnirouteBrowserDirect = endpoints.browserDirectEnabled;
+    AI_CONFIG.browserDirectEnabled = endpoints.browserDirectEnabled;
+    AI_CONFIG.browserDirectProviders = payload.browserDirectProviders;
+    if (payload.studyBaseUrl) AI_CONFIG.studyBaseUrl = payload.studyBaseUrl;
+    var publicInput = document.getElementById('study-base-url-omniroute');
+    var localInput = document.getElementById('study-local-base-url-omniroute');
+    var publicSummary = document.getElementById('study-omniroute-public-summary');
+    var localSummary = document.getElementById('study-omniroute-local-summary');
+    if (publicInput) publicInput.value = endpoints.baseUrl;
+    if (localInput) localInput.value = endpoints.localBaseUrl;
+    if (publicSummary) publicSummary.textContent = endpoints.baseUrl;
+    if (localSummary) localSummary.textContent = endpoints.localBaseUrl || 'Not configured — public fallback';
+    showToast('✅ OmniRoute endpoints saved. Provider credentials and active provider selection were not changed.');
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
 async function saveStudyAiConfig() {
   const provider = selectedStudyProvider();
   const p = STUDY_PROVIDERS[provider] || STUDY_PROVIDERS.bynara;
@@ -1206,23 +1261,12 @@ async function saveStudyAiConfig() {
   });
   const model = provider === 'omniroute' ? 'auto' : (((document.getElementById('study-model') || {}).value) || p.def).trim();
   const activeKeys = allKeys[provider] || [];
-  const endpointInput = document.getElementById('study-base-url-omniroute');
-  const omnirouteBase = normalizeOmnirouteBaseUrl(endpointInput ? endpointInput.value : omnirouteBaseUrl());
-  if (!omnirouteBase) {
-    showToast('⚠️ Enter an HTTPS ngrok-free.dev URL ending in /v1 for OmniRoute.');
-    if (endpointInput) endpointInput.focus();
-    return;
-  }
-  const localEndpointInput = document.getElementById('study-local-base-url-omniroute');
-  const localEndpointRaw = String(localEndpointInput ? localEndpointInput.value : omnirouteLocalBaseUrl()).trim();
-  const omnirouteLocalBase = normalizeOmnirouteLocalBaseUrl(localEndpointRaw);
-  if (localEndpointRaw && !omnirouteLocalBase) {
-    showToast('⚠️ Local OmniRoute must use localhost or a private IPv4 address and end in /v1.');
-    if (localEndpointInput) localEndpointInput.focus();
-    return;
-  }
+  const endpoints = readOmnirouteEndpointForm();
+  if (!endpoints) return;
+  const omnirouteBase = endpoints.baseUrl;
+  const omnirouteLocalBase = endpoints.localBaseUrl;
   const activeBaseUrl = provider === 'omniroute' ? omnirouteBase : p.baseUrl;
-  const browserDirectEnabled = !!((document.getElementById('omniroute-browser-direct') || {}).checked);
+  const browserDirectEnabled = endpoints.browserDirectEnabled;
   const omnirouteBrowserDirect = browserDirectEnabled;
   if (!activeKeys.length) {
     showToast('⚠️ Active provider (' + p.label + ') has no key');
@@ -1958,8 +2002,8 @@ function renderSettings() {
   var backendMode = (CONFIG && CONFIG.turbo && CONFIG.turbo.backendMode) || backendSnapshot.mode || 'auto';
   var backendManual = (CONFIG && CONFIG.turbo && CONFIG.turbo.backendManualServerId) || backendSnapshot.manualServerId || '';
   var backendCard = '<div class="card" style="margin-bottom:1rem;">' +
-    '<h3 style="margin-bottom:0.5rem;">&#127760; Backend Server Routing</h3>' +
-    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Manage full <code>youtube-turbo-proxy</code> servers used for AI notes, Tutor, transcripts, Turbo video, and proxy media. <strong>Auto</strong> tries the healthiest server. <strong>Manual preference</strong> starts with your selected server but keeps failover. <strong>Selected server only</strong> sends these proxy requests exclusively to that server and never falls back. The separate Telegram bot service is not changed here. A Local Server URL must be the proxy root (for example <code>https://proxy.your-lan.example</code>), never the raw OmniRoute <code>…/v1</code> endpoint.</p>' +
+    '<div class="row" style="align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:0.5rem;"><h3 style="margin:0;">&#127760; Backend Server Routing</h3><button class="btn btn-blue" type="button" onclick="openOmnirouteEndpoints()">Configure OmniRoute endpoints</button></div>' +
+    '<p class="muted" style="font-size:0.85rem;line-height:1.65;margin-bottom:0.85rem;">Manage full <code>youtube-turbo-proxy</code> servers used for AI notes, Tutor, transcripts, Turbo video, and proxy media. <strong>Auto</strong> tries the healthiest server. <strong>Manual preference</strong> starts with your selected server but keeps failover. <strong>Selected server only</strong> sends these proxy requests exclusively to that server and never falls back. The separate Telegram bot service is not changed here. <strong>Add server accepts only a trusted HTTPS full proxy root</strong> (for example <code>https://proxy.your-lan.example</code>), never a raw OmniRoute <code>…/v1</code> upstream. Use the button above to edit the public/ngrok and local upstream addresses in AI Study.</p>' +
     '<div class="row" style="gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:0.85rem;">' +
       '<label style="display:flex;flex-direction:column;gap:5px;font-size:0.78rem;font-weight:700;">Routing mode' +
         '<select id="cfg-backend-mode" style="min-width:210px;padding:8px;border:1px solid var(--border);border-radius:8px;">' +
@@ -1981,10 +2025,11 @@ function renderSettings() {
       backendServers.map(function(server) {
         var healthServer = (backendSnapshot.servers || []).find(function(item) { return item.id === server.id; });
         var health = healthServer && healthServer.health;
-        var healthText = health ? (health.ok ? '&#9989; healthy' : '&#10060; ' + esc(health.detail || 'failed')) : '&#8226; not checked';
+        var serverUrlValid = !!normalizeBackendProxyRoot(server.url);
+        var healthText = !serverUrlValid ? '&#9888; HTTPS proxy root required' : (health ? (health.ok ? '&#9989; healthy' : '&#10060; ' + esc(health.detail || 'failed')) : '&#8226; not checked');
         return '<div data-backend-server-row data-server-id="' + esc(server.id) + '" style="display:grid;grid-template-columns:minmax(130px,0.7fr) minmax(240px,1.5fr) auto auto;gap:8px;align-items:center;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2,#f8fafc);">' +
           '<input data-server-label value="' + esc(server.label || server.id) + '" aria-label="Server label" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;">' +
-          '<input data-server-url value="' + esc(server.url) + '" aria-label="Server URL" inputmode="url" style="width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-family:monospace;font-size:.78rem;">' +
+          '<input data-server-url value="' + esc(server.url) + '" aria-label="Server URL"' + (serverUrlValid ? '' : ' aria-invalid="true"') + ' inputmode="url" style="width:100%;padding:7px;border:1px solid ' + (serverUrlValid ? 'var(--border)' : 'var(--red)') + ';border-radius:7px;font-family:monospace;font-size:.78rem;">' +
           '<span class="muted" style="font-size:.74rem;white-space:nowrap;">' + healthText + '</span>' +
           '<button class="btn btn-gray" onclick="removeBackendServer(\'' + esc(server.id) + '\')" style="padding:5px 9px;">Remove</button>' +
         '</div>';
@@ -1996,7 +2041,7 @@ function renderSettings() {
       '<button class="btn btn-blue" onclick="addBackendServer()">＋ Add server</button>' +
     '</div>' +
     '<div id="backend-server-status" class="muted" role="status" tabindex="-1" style="font-size:.78rem;margin-top:8px;"></div>' +
-    '<div class="muted" style="font-size:.72rem;margin-top:7px;line-height:1.55;">Current backup: <code>https://youtube-turbo-proxy.onrender.com</code>. The app stores the registry in <code>config/turbo</code>; server credentials are never entered here.<br><strong>Local OmniRoute:</strong> run this repository’s proxy on the Local Server with <code>OMNIROUTE_LOCAL_URL=http://10.74.7.68:20128/v1</code>, then register the proxy’s HTTPS root here. Devices must be able to reach that proxy over LAN/VPN; public users cannot directly reach a private <code>10.x</code> address.</div>' +
+    '<div class="muted" style="font-size:.72rem;margin-top:7px;line-height:1.55;">Current backup: <code>https://youtube-turbo-proxy.onrender.com</code>. The app stores the registry in <code>config/turbo</code>; server credentials are never entered here.<br><strong>Local OmniRoute flow:</strong> configure the changeable raw upstream (for example <code>http://localhost:20128/v1</code> or a private LAN IPv4) from <strong>AI Study → OmniRoute endpoints</strong>. The full proxy deployment must set <code>OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1</code>. Register that proxy’s trusted HTTPS root here, choose <strong>Selected server only</strong>, and keep browser-direct requests off to force all authorized AI proxy traffic through it. Devices still need LAN/VPN reachability; public users cannot directly reach a private address.</div>' +
     '</div>';
   return turboCard + backendCard +
     '<div class="card" style="margin-bottom:1rem;">' +
@@ -2662,13 +2707,33 @@ async function toggleDnsGlobal(checked) {
 }
 
 /* ── Backend server registry ── */
+function normalizeBackendProxyRoot(value) {
+  var original = String(value || '');
+  if (/[\u0000-\u001f\u007f]/.test(original)) return '';
+  var raw = original.trim();
+  if (!raw || raw.indexOf('\\') !== -1 || raw.indexOf('?') !== -1 || raw.indexOf('#') !== -1) return '';
+  try {
+    var parsed = new URL(raw);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password ||
+        parsed.search || parsed.hash || (parsed.pathname && parsed.pathname !== '/')) return '';
+    return parsed.origin;
+  } catch (e) { return ''; }
+}
 function backendRowsFromForm() {
   return Array.from(document.querySelectorAll('[data-backend-server-row]')).map(function(row, index) {
     var id = row.getAttribute('data-server-id') || ('server-' + (index + 1));
     var labelInput = row.querySelector('[data-server-label]');
     var urlInput = row.querySelector('[data-server-url]');
-    return { id: id, label: (labelInput ? labelInput.value : id).trim() || id, url: (urlInput ? urlInput.value : '').trim().replace(/\/+$/, ''), enabled: true };
-  }).filter(function(server) { return /^https?:\/\//i.test(server.url); });
+    return { id: id, label: (labelInput ? labelInput.value : id).trim() || id, url: (urlInput ? urlInput.value : '').trim(), enabled: true };
+  });
+}
+function backendFormHasInvalidUrls() {
+  return backendRowsFromForm().some(function(server) { return !normalizeBackendProxyRoot(server.url); });
+}
+function normalizedBackendRowsFromForm() {
+  return backendRowsFromForm().map(function(server) {
+    return Object.assign({}, server, { url: normalizeBackendProxyRoot(server.url) });
+  }).filter(function(server) { return !!server.url; });
 }
 function backendConfigInMemory(servers, mode, manualServerId, applyRouter) {
   var normalizedMode = mode === 'strict' ? 'strict' : (mode === 'manual' ? 'manual' : 'auto');
@@ -2684,7 +2749,10 @@ function backendConfigInMemory(servers, mode, manualServerId, applyRouter) {
 async function saveBackendRegistry() {
   var mode = (document.getElementById('cfg-backend-mode') || {}).value || 'auto';
   var manualServerId = (document.getElementById('cfg-backend-manual') || {}).value || '';
-  var servers = backendRowsFromForm();
+  if (backendFormHasInvalidUrls()) {
+    showToast('Every backend must be a trusted HTTPS full proxy root with no path, query, or fragment.', 'error'); return;
+  }
+  var servers = normalizedBackendRowsFromForm();
   if (!servers.length) { showToast('Add at least one valid HTTPS server URL.', 'error'); return; }
   if (mode === 'strict' && !manualServerId) {
     showToast('Choose the server that must be used in selected-server-only mode.', 'error'); return;
@@ -2716,11 +2784,12 @@ async function saveBackendRegistry() {
 function addBackendServer() {
   var labelEl = document.getElementById('cfg-backend-new-label');
   var urlEl = document.getElementById('cfg-backend-new-url');
-  var url = (urlEl ? urlEl.value : '').trim().replace(/\/+$/, '');
+  var rawUrl = (urlEl ? urlEl.value : '').trim();
+  var url = normalizeBackendProxyRoot(rawUrl);
   var label = (labelEl ? labelEl.value : '').trim() || 'Backup server';
-  if (!/^https?:\/\//i.test(url)) { showToast('Enter a complete HTTPS server URL.', 'error'); return; }
+  if (!url) { showToast('Enter a trusted HTTPS full proxy root with no path, query, or fragment.', 'error'); return; }
   var servers = backendRowsFromForm();
-  if (servers.some(function(server) { return server.url === url; })) { showToast('That server is already listed.', 'error'); return; }
+  if (servers.some(function(server) { return normalizeBackendProxyRoot(server.url) === url; })) { showToast('That server is already listed.', 'error'); return; }
   var baseId = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'server';
   var id = baseId, n = 2;
   while (servers.some(function(server) { return server.id === id; })) id = baseId + '-' + n++;
@@ -2749,7 +2818,11 @@ async function checkBackendServers() {
   var status = document.getElementById('backend-server-status');
   if (status) status.textContent = 'Checking server health…';
   try {
-    var draftServers = backendRowsFromForm();
+    if (backendFormHasInvalidUrls()) {
+      if (status) status.textContent = 'Fix every invalid backend URL before running health checks.';
+      return;
+    }
+    var draftServers = normalizedBackendRowsFromForm();
     var results = window.PrepPathBackend
       ? await Promise.all(draftServers.map(function(server) { return window.PrepPathBackend.probe(server); }))
       : [];

@@ -22,6 +22,9 @@ import vm from 'node:vm';
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = readFileSync(resolve(rootDir, 'bot/bot-server.js'), 'utf8');
 const adminSource = readFileSync(resolve(rootDir, 'js/admin/admin-actions.js'), 'utf8');
+const adminAiStudySource = readFileSync(resolve(rootDir, 'js/admin/admin-ai-study.js'), 'utf8');
+const adminCoreSource = readFileSync(resolve(rootDir, 'js/admin/admin-core.js'), 'utf8');
+const adminCssSource = readFileSync(resolve(rootDir, 'css/admin.css'), 'utf8');
 const omnirouteLocalUrlCases = JSON.parse(readFileSync(
   resolve(rootDir, 'tests/omniroute-local-url-cases.json'), 'utf8'));
 const tgLib = createRequire(import.meta.url)(resolve(rootDir, 'scripts/telegram-lib.js'));
@@ -294,6 +297,78 @@ test('date helpers reject malformed input instead of guessing', () => {
   assert.equal(api.isDateString(undefined), false);
 });
 
+/* ── OmniRoute Admin discoverability ─────────────────────────────────────── */
+test('OmniRoute endpoint editors have one prominent owner in AI Study', () => {
+  for (const id of [
+    'study-base-url-omniroute',
+    'study-base-url-omniroute-help',
+    'study-local-base-url-omniroute',
+    'study-local-base-url-omniroute-help',
+    'omniroute-browser-direct'
+  ]) {
+    const declarations = adminAiStudySource.match(new RegExp('\\bid="' + id + '"', 'g')) || [];
+    assert.equal(declarations.length, 1, `${id} must be rendered exactly once`);
+  }
+
+  const panel = sourceSection(adminAiStudySource,
+    'function aiStudyOmnirouteEndpointsMarkup()', 'function aiStudyHealthMarkup(');
+  assert.match(panel, /id="ai-omniroute-endpoints"/);
+  assert.match(panel, /Public \/ ngrok endpoint/);
+  assert.match(panel, /Local upstream/);
+  assert.match(panel, /OMNIROUTE_ALLOW_ADMIN_LOCAL_URL=1/);
+  assert.match(panel, /Do not add either <code>\/v1<\/code> address as a Backend Server/);
+  assert.match(panel, /bypass the selected backend proxy/);
+  assert.match(panel, /onclick="saveOmnirouteEndpoints\(\)"/);
+  assert.match(panel, /Provider credentials, model selection, and active provider selection remain unchanged/);
+  assert.match(panel, /Save OmniRoute endpoints/);
+});
+
+test('AI Study surfaces OmniRoute endpoints before the provider portfolio', () => {
+  const rendered = sourceSection(adminAiStudySource, 'function renderAiStudy()', "  '</div>';\n}");
+  const navTarget = rendered.indexOf('>OmniRoute endpoints</button>');
+  const providerNavTarget = rendered.indexOf('>Provider portfolio</button>');
+  const panel = rendered.indexOf('aiStudyOmnirouteEndpointsMarkup()');
+  const portfolio = rendered.indexOf('<section id="ai-providers"');
+  assert.ok(navTarget !== -1 && navTarget < providerNavTarget, 'endpoint navigation must be first');
+  assert.ok(panel !== -1 && portfolio !== -1 && panel < portfolio, 'endpoint panel must precede providers');
+
+  const card = sourceSection(adminAiStudySource,
+    'function aiStudyProviderCard(', 'function aiStudyFreeModelSyncTime(');
+  assert.match(card, /ai-provider-endpoint--summary/);
+  assert.match(card, /onclick="openOmnirouteEndpoints\(\)"/);
+  assert.doesNotMatch(card, /id="study-(?:local-)?base-url-omniroute"/);
+});
+
+test('Settings links to the endpoint panel and distinguishes upstreams from proxy roots', () => {
+  assert.match(adminSource, /Configure OmniRoute endpoints/);
+  assert.match(adminSource, /onclick="openOmnirouteEndpoints\(\)"/);
+  assert.match(adminSource, /Add server accepts only a trusted HTTPS full proxy root/);
+  assert.match(adminSource, /AI Study → OmniRoute endpoints/);
+  assert.match(adminSource, /choose <strong>Selected server only<\/strong>/);
+
+  const navigation = sourceSection(adminAiStudySource,
+    'function aiStudyScrollTo(', 'function aiStudyOmnirouteEndpointsMarkup(');
+  assert.match(navigation, /setTab\('aistudy', \{ focus: false \}\)/);
+  assert.match(navigation, /setTimeout/);
+  assert.match(navigation, /_aiStudyOmnirouteFocusToken/);
+  assert.match(navigation, /TAB !== 'aistudy'/);
+  assert.doesNotMatch(navigation, />= 60/);
+  assert.match(navigation, /scrollIntoView/);
+  assert.match(navigation, /focus\(\{ preventScroll: true \}\)/);
+
+  const setTabSource = sourceSection(adminCoreSource, 'function setTab(', 'async function loadDnsAdblockData(');
+  assert.match(setTabSource, /!AI_CONFIG\.loaded \|\| !AI_LIMITS\.loaded \|\| !AI_CHAT_CONFIG\.loaded/);
+});
+
+test('OmniRoute endpoint panel has desktop, dark, and mobile styles', () => {
+  assert.match(adminCssSource, /\.ai-omniroute-panel \{/);
+  assert.match(adminCssSource, /\.ai-omniroute-endpoint-grid \{/);
+  assert.match(adminCssSource, /\.ai-provider-endpoint--summary \{/);
+  assert.match(adminCssSource, /html\[data-theme="dark"\] \.ai-omniroute-panel/);
+  assert.match(adminCssSource, /@media \(max-width:760px\)[\s\S]*?\.ai-omniroute-endpoint-grid \{ grid-template-columns:1fr; \}/);
+  assert.match(adminCssSource, /@media \(max-width:520px\)[\s\S]*?\.ai-omniroute-actions/);
+});
+
 /* ── /ask provider routing ───────────────────────────────────────────────── */
 /* The admin panel writes a flattened mirror of the selected provider into
    config/ai (studyProvider / studyBaseUrl / studyApiKeys / studyModel /
@@ -344,20 +419,36 @@ const adminOmnirouteApi = vm.runInNewContext(
   { URL, OMNIROUTE_RETIRED_BASE_URL: 'https://squeak-earthly-obliged.ngrok-free.dev/v1' }
 );
 
+let backendRowFixtures = [];
+const adminBackendRegistryApi = vm.runInNewContext(
+  sourceSection(adminSource, 'function normalizeBackendProxyRoot(', 'function backendConfigInMemory(')
+  + ';({ normalizeBackendProxyRoot, backendRowsFromForm, backendFormHasInvalidUrls, normalizedBackendRowsFromForm })',
+  { URL, document: { querySelectorAll: () => backendRowFixtures } }
+);
+function backendRowFixture(id, label, url) {
+  return {
+    getAttribute: name => name === 'data-server-id' ? id : '',
+    querySelector: selector => selector === '[data-server-label]' ? { value: label } : { value: url }
+  };
+}
+
 const adminInputs = {
   'study-key-omniroute': { value: 'admin-key' },
   'study-model': { value: 'auto' },
   'study-base-url-omniroute': { value: 'https://precut-uniformly-handsfree.ngrok-free.dev/v1', focus() {} },
   'study-local-base-url-omniroute': { value: 'http://localhost:20128/v1', focus() {} },
+  'study-omniroute-public-summary': { textContent: '' },
+  'study-omniroute-local-summary': { textContent: '' },
   'omniroute-browser-direct': { checked: false }
 };
 const adminWrites = [];
 const adminConfig = {};
 const adminSaveApi = vm.runInNewContext(
-  sourceSection(adminSource, 'async function saveStudyAiConfig()', '/* ── AI Study controls')
-  + ';({ saveStudyAiConfig })',
+  sourceSection(adminSource, 'function readOmnirouteEndpointForm()', '/* ── AI Study controls')
+  + ';({ saveOmnirouteEndpoints, saveStudyAiConfig })',
   {
     selectedStudyProvider: () => 'omniroute',
+    activeStudyProvider: () => 'omniroute',
     STUDY_PROVIDER_ORDER: ['omniroute'],
     STUDY_PROVIDERS: { omniroute: {
       label: 'OmniRoute', baseUrl: '', def: 'auto', transport: 'openai_chat',
@@ -388,6 +479,46 @@ const OMNIROUTE_CONFIG = {
   studyModel: 'auto',
   studyTransport: 'openai_chat'
 };
+
+test('Backend Server Routing accepts only trusted HTTPS full proxy roots', () => {
+  assert.equal(adminBackendRegistryApi.normalizeBackendProxyRoot('https://proxy.example.com/'),
+    'https://proxy.example.com');
+  assert.equal(adminBackendRegistryApi.normalizeBackendProxyRoot('https://proxy.example.com:8443'),
+    'https://proxy.example.com:8443');
+  for (const rejected of [
+    'http://proxy.example.com',
+    'https://proxy.example.com/v1',
+    'https://proxy.example.com/api/study',
+    'https://user:pass@proxy.example.com',
+    'https://proxy.example.com?route=local',
+    'https://proxy.example.com#local',
+    'https://proxy.example.com?',
+    'https://proxy.example.com#',
+    'not-a-url'
+  ]) {
+    assert.equal(adminBackendRegistryApi.normalizeBackendProxyRoot(rejected), '', rejected);
+  }
+});
+
+test('backend row editing preserves invalid legacy entries until the Admin fixes or removes them', () => {
+  backendRowFixtures = [
+    backendRowFixture('valid', 'Valid proxy', 'https://proxy.example.com/'),
+    backendRowFixture('legacy-http', 'Old local proxy', 'http://10.0.0.5:5000'),
+    backendRowFixture('legacy-path', 'Old path', 'https://proxy.example.com/v1')
+  ];
+  assert.equal(adminBackendRegistryApi.backendRowsFromForm().length, 3, 'raw edits must keep every row');
+  assert.equal(adminBackendRegistryApi.normalizedBackendRowsFromForm().length, 1, 'only valid roots can be saved or probed');
+  assert.equal(adminBackendRegistryApi.backendFormHasInvalidUrls(), true);
+
+  backendRowFixtures = [
+    backendRowFixture('legacy-http', 'Old local proxy', 'http://10.0.0.5:5000'),
+    backendRowFixture('legacy-path', 'Old path', 'https://proxy.example.com/v1')
+  ];
+  const afterRemovingOne = Array.from(adminBackendRegistryApi.backendRowsFromForm())
+    .filter(server => server.id !== 'legacy-http');
+  assert.equal(afterRemovingOne.length, 1, 'an all-invalid registry can remove one legacy row at a time');
+  backendRowFixtures = [];
+});
 
 test('the selected OmniRoute provider uses the Admin-editable endpoint', () => {
   const provider = askApi.studyProviderFromConfig(OMNIROUTE_CONFIG);
@@ -448,8 +579,27 @@ test('local OmniRoute validation is identical in Admin and bot', () => {
   }
 });
 
+await testAsync('the endpoint save cannot publish staged provider credentials or model changes', async () => {
+  adminWrites.length = 0;
+  adminInputs['study-key-omniroute'].value = 'staged-unsaved-key';
+  adminInputs['study-model'].value = 'staged-unsaved-model';
+  adminInputs['study-local-base-url-omniroute'].value = 'http://10.74.7.68:20128/v1';
+  adminInputs['omniroute-browser-direct'].checked = false;
+  await adminSaveApi.saveOmnirouteEndpoints();
+  assert.equal(adminWrites.length, 1);
+  assert.equal(adminWrites[0].omnirouteLocalBaseUrl, 'http://10.74.7.68:20128/v1');
+  assert.equal(adminWrites[0].studyBaseUrl, 'https://precut-uniformly-handsfree.ngrok-free.dev/v1');
+  assert.ok(!Object.hasOwn(adminWrites[0], 'studyProvider'));
+  assert.ok(!Object.hasOwn(adminWrites[0], 'studyApiKeys'));
+  assert.ok(!Object.hasOwn(adminWrites[0], 'studyModel'));
+  assert.ok(!Object.hasOwn(adminWrites[0], 'omnirouteApiKeys'));
+  assert.equal(adminInputs['study-omniroute-local-summary'].textContent, 'http://10.74.7.68:20128/v1');
+});
+
 await testAsync('Admin saves, reloads in memory, and clears the local OmniRoute endpoint', async () => {
   adminWrites.length = 0;
+  adminInputs['study-key-omniroute'].value = 'admin-key';
+  adminInputs['study-model'].value = 'auto';
   adminInputs['study-local-base-url-omniroute'].value = 'http://localhost:20128/v1';
   await adminSaveApi.saveStudyAiConfig();
   assert.equal(adminWrites[0].omnirouteLocalBaseUrl, 'http://localhost:20128/v1');
