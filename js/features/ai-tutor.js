@@ -1637,6 +1637,18 @@
     var e = (j && (j.error || j.detail)) || 'Failed';
     return '<div class="ai-muted" style="color:#e06">\u26a0 ' + esc(e) + (j && j.detail && j.error ? ' — ' + esc(j.detail) : '') + '</div>';
   }
+  /* ── Request budgets ──────────────────────────────────────────────────────
+     Every call in this module used to inherit the router's short media-route
+     default, which aborted LLM work long before it could finish. Two distinct
+     budgets are needed because the router's timer only guards the *response
+     headers*: a stream just has to start in time, while a one-shot request has
+     to complete the whole generation before its headers arrive.
+
+     The stream budget is deliberately generous because a sleeping Render
+     instance can take ~30-60s just to accept the connection. */
+  var STREAM_START_TIMEOUT_MS = 75000;    // time for a stream to send its first byte
+  var GENERATION_TIMEOUT_MS = 180000;     // time for a whole one-shot generation
+
   // Backend identity comes exclusively from the Firebase ID token. Never send
   // a UID as an entitlement signal: a caller can forge it.
   function backendAuthFetch(path, options) {
@@ -1665,8 +1677,14 @@
       return owner.id;
     });
   }
-  function apiGet(path, signal) {
-    return backendAuthFetch(path, signal ? { signal: signal } : {}).then(function (r) { return r.json(); });
+  // `timeoutMs` is opt-in: metadata lookups keep the router's fast route default
+  // so a dead server is still detected quickly, while generation call sites pass
+  // GENERATION_TIMEOUT_MS explicitly.
+  function apiGet(path, signal, timeoutMs) {
+    var options = {};
+    if (signal) options.signal = signal;
+    if (timeoutMs) options.timeoutMs = timeoutMs;
+    return backendAuthFetch(path, options).then(function (r) { return r.json(); });
   }
 
   /* ── Generate ⇄ Stop control ──────────────────────────────────────────────
@@ -4100,7 +4118,7 @@
     url += requirementsParam(requirements);
     if (focus) url += '&focus=' + encodeURIComponent(focus);
     if (force) url += '&refresh=1';
-    apiGet(url, signal).then(function (j) {
+    apiGet(url, signal, GENERATION_TIMEOUT_MS).then(function (j) {
       if (canRender && !canRender()) return;
       _genEnd(btnId);
       var box = targetEl || contentEl();
@@ -5191,7 +5209,7 @@
     if (!vid) return;
     try { if (typeof showToast === 'function') showToast('Loading shared MCQ test\u2026', 'info'); } catch (e) {}
     var url = '/api/study?id=' + vid + '&mode=notes&style=mcq&out=' + encodeURIComponent(lang || outLang());
-    apiGet(url).then(function (j) {
+    apiGet(url, null, GENERATION_TIMEOUT_MS).then(function (j) {
       if (j && (j.error === 'no_captions' || j.warning === 'no_captions')) { alert('This shared video has no captions.'); return; }
       if (j && j.error) { alert('Could not load the shared test: ' + j.error); return; }
       var qs = parseMcqNotes(j.content || '');
@@ -5233,7 +5251,7 @@
     if (focus) qurl += '&focus=' + encodeURIComponent(focus);
     if (force) qurl += '&refresh=1';
     var signal = _genStart('ai-quiz-go');
-    apiGet(qurl, signal).then(function (j) {
+    apiGet(qurl, signal, GENERATION_TIMEOUT_MS).then(function (j) {
       _genEnd('ai-quiz-go');
       if (j.error && j.error !== 'no_captions') { contentEl().innerHTML = errHtml(j); return; }
       var qs = j.questions || [];
@@ -6233,13 +6251,38 @@
     }
   }
 
+  /* Transport failures used to be stringified straight into the chat, so a
+     student read "Error: Request timed out after 12000 ms from render storebook"
+     — the proxy's internal label and a millisecond count mean nothing to them,
+     and it reads as if their question was wrong. Translate the shapes we know
+     into something that says what to do next. These strings are persisted into
+     the saved transcript, so they have to stand on their own. */
+  function tutorErrorMessage(error) {
+    var raw = String((error && error.message) || error || '');
+    if (/timed out|abort/i.test(raw)) {
+      return '\u26a0 The tutor took too long to answer. The AI server may have been asleep — ' +
+             'ask again and it should reply now.';
+    }
+    if (/failed to fetch|network ?error|networkerror/i.test(raw)) {
+      return '\u26a0 Could not reach the AI server. Check your connection and try again.';
+    }
+    if (/service suspended|HTTP 50[234]/i.test(raw)) {
+      return '\u26a0 The AI server is temporarily unavailable. Please try again in a minute.';
+    }
+    if (/sign in/i.test(raw)) return '\u26a0 ' + raw;
+    // Unrecognised failures still surface verbatim: hiding them would make a
+    // genuine backend bug undebuggable from a student's screenshot.
+    return '\u26a0 ' + (raw || 'The tutor could not answer. Please try again.');
+  }
   // Classic one-shot request — the fallback when streaming isn't available or
   // fails. The user turn is already pushed + saved by sendTutor; this only adds
   // the assistant reply. `histForApi` is the trimmed history to send.
   function sendTutorOnce(requestBody, historyKey, turnId, liveEl, oncePath) {
     backendAuthFetch(oncePath || '/api/tutor', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: requestBody
+      // No headers arrive until the model has written the entire answer, so this
+      // needs the full generation budget rather than a connect-time one.
+      body: requestBody, timeoutMs: GENERATION_TIMEOUT_MS
     }).then(function (r) { return r.json(); }).then(function (j) {
       var answer = j.error ? ('\u26a0 ' + (j.detail || j.error)) : (j.answer || '(no answer)');
       var web = (!j.error && j.web) || null;
@@ -6250,7 +6293,7 @@
       saveTutorAnswer(historyKey, turnId, answer, web);
       finishTutorBubble(historyKey, turnId, liveEl, answer, web);
     }).catch(function (e) {
-      var answer = '\u26a0 ' + String(e);
+      var answer = tutorErrorMessage(e);
       saveTutorAnswer(historyKey, turnId, answer);
       finishTutorBubble(historyKey, turnId, liveEl, answer);
     });
@@ -6430,7 +6473,10 @@
 
     backendAuthFetch(streamPath, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: requestBody
+      // The router clears its timer as soon as the response headers land, so this
+      // budget only covers "did the stream start" — long answers are never cut
+      // off mid-sentence by it. It has to absorb a Render cold start.
+      body: requestBody, timeoutMs: STREAM_START_TIMEOUT_MS
     }).then(function (r) {
       if (!r.ok || !r.body || !window.TextDecoder) { throw new Error('nostream'); }
       var reader = r.body.getReader(), dec = new TextDecoder(), buf = '';
@@ -7751,7 +7797,7 @@
     var requestId = ++_studyPaintRequest;
     apiGet('/api/study?id=' + encodeURIComponent(vid) + '&mode=poster&out=' +
       encodeURIComponent(lang) + '&style=' + encodeURIComponent(kind) +
-      (force ? '&refresh=1' : '') + modelParam(), signal)
+      (force ? '&refresh=1' : '') + modelParam(), signal, GENERATION_TIMEOUT_MS)
       .then(function (j) {
         if (requestId !== _studyPaintRequest || curVid() !== vid || state.tab !== 'poster') return;
         _genEnd('ai-poster-go');
