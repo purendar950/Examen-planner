@@ -38,7 +38,8 @@
   var editorTab = 'editor';
   var expandedSubjects = {};
   var dragState = null;
-  var aiModels = [];
+  var aiProviderGroups = [];
+  var selectedAIProvider = '';
   var selectedAIModel = '';
   var aiModelsLoaded = false;
 
@@ -149,31 +150,22 @@
     /* AI Create tab (right panel) */
     '.sb-ai-create{padding:16px;}',
     '.sb-ai-create-label{font-size:0.75rem;color:#9ca3af;margin-bottom:6px;font-weight:500;display:flex;align-items:center;gap:6px;}',
-    '.sb-ai-create-model-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;}',
-    '.sb-ai-model-badge{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.3);border-radius:8px;font-size:0.75rem;color:#c4b5fd;font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
-    '.sb-ai-model-badge .sb-ai-model-dot{width:6px;height:6px;border-radius:50%;background:#a855f7;flex-shrink:0;}',
-    '.sb-ai-model-sel{padding:5px 8px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#d1d5db;font-size:0.72rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;max-width:150px;flex:1;}',
+    '.sb-ai-model-row{display:flex;align-items:center;gap:6px;margin-bottom:14px;min-width:0;}',
+    '.sb-ai-model-label{font-size:0.65rem;color:#666;white-space:nowrap;}',
+    '.sb-ai-model-sel{flex:1;min-width:0;padding:7px 9px;background:#2a2a2a;border:1px solid #333;border-radius:9px;color:#d1d5db;font-size:0.74rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;max-width:100%;}',
     '.sb-ai-model-sel:focus{border-color:#a855f7;}',
+    '.sb-ai-model-display{display:flex;align-items:center;gap:5px;padding:6px 10px;background:rgba(124,58,237,0.1);border:1px solid rgba(124,58,237,0.25);border-radius:9px;margin-bottom:10px;min-width:0;}',
+    '.sb-ai-model-display .sb-md-dot{width:6px;height:6px;border-radius:50%;background:#a855f7;flex-shrink:0;}',
+    '.sb-ai-model-display .sb-md-text{font-size:0.72rem;color:#c4b5fd;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}',
     '.sb-ai-create textarea{width:100%;min-height:80px;max-height:180px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#fff;padding:10px;font-size:0.82rem;resize:vertical;font-family:inherit;outline:none;box-sizing:border-box;line-height:1.5;}',
     '.sb-ai-create textarea:focus{border-color:#a855f7;}',
     '.sb-ai-create textarea::placeholder{color:#666;}',
     '.sb-ai-create-row{display:flex;gap:6px;margin-top:8px;}',
-    '.sb-ai-create select{flex:1;padding:7px 8px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#d1d5db;font-size:0.78rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;}',
-    '.sb-ai-create select:focus{border-color:#a855f7;}',
+    '.sb-ai-create select.sb-ai-field-sel{flex:1;padding:7px 8px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#d1d5db;font-size:0.78rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;}',
+    '.sb-ai-create select.sb-ai-field-sel:focus{border-color:#a855f7;}',
     '.sb-ai-create-generate{padding:8px 16px;background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;border-radius:8px;color:#fff;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;transition:opacity 0.2s;}',
     '.sb-ai-create-generate:hover{opacity:0.9;}',
     '.sb-ai-create-generate:disabled{opacity:0.5;cursor:not-allowed;}',
-    '.sb-ai-models-loading{font-size:0.7rem;color:#666;margin-bottom:10px;}',
-    '.sb-ai-models-list{margin-bottom:12px;max-height:130px;overflow-y:auto;border:1px solid #2a2a2a;border-radius:8px;}',
-    '.sb-ai-models-list::-webkit-scrollbar{width:3px;}',
-    '.sb-ai-models-list::-webkit-scrollbar-thumb{background:#333;border-radius:2px;}',
-    '.sb-ai-model-item{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;font-size:0.78rem;color:#9ca3af;transition:all 0.12s;border-bottom:1px solid #222;}',
-    '.sb-ai-model-item:last-child{border-bottom:none;}',
-    '.sb-ai-model-item:hover{background:#2a2a2a;color:#fff;}',
-    '.sb-ai-model-item.active{background:rgba(124,58,237,0.1);color:#c4b5fd;}',
-    '.sb-ai-model-item .sb-mi-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
-    '.sb-ai-model-item .sb-mi-check{color:#a855f7;font-size:0.7rem;opacity:0;}',
-    '.sb-ai-model-item.active .sb-mi-check{opacity:1;}',
 
     /* Filter chips (horizontal scroll) */
     '.sb-filter-chips{display:flex;gap:6px;padding:0 16px 12px;overflow-x:auto;flex-shrink:0;}',
@@ -907,52 +899,99 @@
   function fetchAIModels() {
     if (aiModelsLoaded) return Promise.resolve();
     return backendFetch('/api/ai-chat/status').then(function (resp) { return resp.json(); }).then(function (data) {
-      if (data && Array.isArray(data.models)) {
-        aiModels = data.models.map(function (m) {
-          return { key: m.key || m.id || m, label: m.label || m.name || m.key || m };
+      if (data && Array.isArray(data.providerGroups)) {
+        aiProviderGroups = data.providerGroups;
+        aiProviderGroups.forEach(function (g) {
+          if (!selectedAIProvider && g.models && g.models.length > 0) {
+            selectedAIProvider = g.key || g.provider;
+            selectedAIModel = (g.models[0] && g.models[0].key) || '';
+          }
         });
-        if (aiModels.length > 0 && !selectedAIModel) selectedAIModel = aiModels[0].key;
+      } else if (data && Array.isArray(data.models)) {
+        aiProviderGroups = [{ key: 'default', provider: 'default', label: 'Models', models: data.models.map(function (m) { return { key: m.key || m.id || m, label: m.label || m.name || m.key || m }; }) }];
+        if (data.models.length > 0 && !selectedAIModel) {
+          selectedAIProvider = 'default';
+          selectedAIModel = data.models[0].key || data.models[0].id || '';
+        }
       }
       aiModelsLoaded = true;
     }).catch(function () {
-      aiModels = [];
       aiModelsLoaded = true;
     });
+  }
+
+  function _providerForModel(modelKey) {
+    for (var i = 0; i < aiProviderGroups.length; i++) {
+      var g = aiProviderGroups[i];
+      if (g.models) for (var j = 0; j < g.models.length; j++) {
+        if (g.models[j].key === modelKey) return g;
+      }
+    }
+    return aiProviderGroups[0] || null;
+  }
+
+  function _currentModelLabel() {
+    var g = _providerForModel(selectedAIModel);
+    if (!g || !g.models) return selectedAIModel || 'Default';
+    var m = g.models.find(function (x) { return x.key === selectedAIModel; });
+    return (m && m.label) || selectedAIModel || 'Default';
+  }
+
+  function _currentProviderLabel() {
+    var g = aiProviderGroups.find(function (x) { return (x.key || x.provider) === selectedAIProvider; });
+    return (g && g.label) || selectedAIProvider || 'Provider';
   }
 
   function renderAICreatePanel() {
     var container = document.getElementById('sb-ai-create-content');
     if (!container) return;
-    var modelDisplay = selectedAIModel ? selectedAIModel : 'Default';
-    var modelBadge = '<div class="sb-ai-model-badge"><span class="sb-ai-model-dot"></span>' + esc(modelDisplay) + '</div>';
 
-    var modelListHTML = '';
-    if (aiModels.length > 0) {
-      modelListHTML = '<div class="sb-ai-models-list">';
-      aiModels.forEach(function (m) {
-        var isActive = m.key === selectedAIModel ? ' active' : '';
-        modelListHTML += '<div class="sb-ai-model-item' + isActive + '" data-model-key="' + escAttr(m.key) + '"><span class="sb-mi-name">' + esc(m.label) + '</span><span class="sb-mi-check">\u2713</span></div>';
-      });
-      modelListHTML += '</div>';
-    } else if (aiModelsLoaded) {
-      modelListHTML = '<div style="font-size:0.72rem;color:#666;margin-bottom:12px;">No models available</div>';
-    } else {
-      modelListHTML = '<div class="sb-ai-models-loading">\u23F3 Loading models...</div>';
-    }
+    /* Build provider options */
+    var provOpts = '';
+    aiProviderGroups.forEach(function (g) {
+      var pKey = g.key || g.provider || '';
+      var count = (g.models && g.models.length) || 0;
+      var sel = pKey === selectedAIProvider ? ' selected' : '';
+      provOpts += '<option value="' + escAttr(pKey) + '"' + sel + '>' + esc((g.label || pKey) + ' (' + count + ')') + '</option>';
+    });
+    if (!provOpts) provOpts = '<option value="">No provider</option>';
+
+    /* Build model options for selected provider */
+    var group = aiProviderGroups.find(function (g) { return (g.key || g.provider) === selectedAIProvider; });
+    var models = (group && group.models) || [];
+    var modelOpts = '';
+    models.forEach(function (m) {
+      var sel = m.key === selectedAIModel ? ' selected' : '';
+      modelOpts += '<option value="' + escAttr(m.key) + '"' + sel + '>' + esc(m.label || m.key) + '</option>';
+    });
+    if (!modelOpts) modelOpts = '<option value="">No model</option>';
+
+    /* Display badge */
+    var displayLabel = _currentModelLabel();
 
     container.innerHTML =
       '<div class="sb-ai-create">' +
         '<div class="sb-ai-create-label">\u2728 AI Note Creator</div>' +
-        '<div class="sb-ai-create-model-row">' +
-          '<span style="font-size:0.72rem;color:#666;white-space:nowrap;">Model:</span>' +
-          modelBadge +
+        /* current model display */
+        '<div class="sb-ai-model-display" id="sb-ai-model-display">' +
+          '<span class="sb-md-dot"></span>' +
+          '<span class="sb-md-text" id="sb-ai-model-display-text">' + esc(displayLabel) + '</span>' +
         '</div>' +
-        modelListHTML +
-        '<div class="sb-ai-create-label">Describe your note</div>' +
+        /* provider + model selects */
+        '<div class="sb-ai-model-row">' +
+          '<span class="sb-ai-model-label">Provider</span>' +
+          '<select class="sb-ai-model-sel" id="sb-ai-provider-sel" title="AI provider">' + provOpts + '</select>' +
+        '</div>' +
+        '<div class="sb-ai-model-row">' +
+          '<span class="sb-ai-model-label">Model</span>' +
+          '<select class="sb-ai-model-sel" id="sb-ai-model-sel" title="AI model">' + modelOpts + '</select>' +
+        '</div>' +
+        /* prompt */
+        '<div class="sb-ai-create-label" style="margin-top:14px;">Describe your note</div>' +
         '<textarea id="sb-ai-prompt" placeholder="e.g. Newton\'s Laws of Motion summary with key formulas"></textarea>' +
         '<div class="sb-ai-create-row">' +
-          '<select id="sb-ai-subject"><option value="">Subject</option></select>' +
-          '<select id="sb-ai-folder"><option value="">Folder</option></select>' +
+          '<select id="sb-ai-subject" class="sb-ai-field-sel"><option value="">Subject</option></select>' +
+          '<select id="sb-ai-folder" class="sb-ai-field-sel"><option value="">Folder</option></select>' +
           '<button class="sb-ai-create-generate" id="sb-ai-generate-btn">Generate \u2728</button>' +
         '</div>' +
       '</div>';
@@ -972,14 +1011,27 @@
     var genBtn = document.getElementById('sb-ai-generate-btn');
     if (genBtn) genBtn.addEventListener('click', function () { aiGenerateNote(); });
 
-    /* model list click handler */
-    var modelItems = container.querySelectorAll('.sb-ai-model-item');
-    modelItems.forEach(function (item) {
-      item.addEventListener('click', function () {
-        selectedAIModel = item.dataset.modelKey;
+    /* provider change → update model list */
+    var provSel = document.getElementById('sb-ai-provider-sel');
+    if (provSel) {
+      provSel.addEventListener('change', function () {
+        selectedAIProvider = provSel.value;
+        var g = aiProviderGroups.find(function (x) { return (x.key || x.provider) === selectedAIProvider; });
+        var ms = (g && g.models) || [];
+        if (ms.length > 0) selectedAIModel = ms[0].key;
         renderAICreatePanel();
       });
-    });
+    }
+
+    /* model change → update display badge */
+    var modelSel = document.getElementById('sb-ai-model-sel');
+    if (modelSel) {
+      modelSel.addEventListener('change', function () {
+        selectedAIModel = modelSel.value;
+        var displayText = document.getElementById('sb-ai-model-display-text');
+        if (displayText) displayText.textContent = _currentModelLabel();
+      });
+    }
   }
 
   /* ── note CRUD ── */
