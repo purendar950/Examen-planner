@@ -150,13 +150,10 @@
     /* AI Create tab (right panel) */
     '.sb-ai-create{padding:16px;}',
     '.sb-ai-create-label{font-size:0.75rem;color:#9ca3af;margin-bottom:6px;font-weight:500;display:flex;align-items:center;gap:6px;}',
-    '.sb-ai-model-row{display:flex;align-items:center;gap:6px;margin-bottom:14px;min-width:0;}',
-    '.sb-ai-model-label{font-size:0.65rem;color:#666;white-space:nowrap;}',
-    '.sb-ai-model-sel{flex:1;min-width:0;padding:7px 9px;background:#2a2a2a;border:1px solid #333;border-radius:9px;color:#d1d5db;font-size:0.74rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;max-width:100%;}',
+    '.sb-ai-model-box{display:flex;align-items:center;gap:6px;padding:7px 10px;background:rgba(124,58,237,0.08);border:1px solid rgba(124,58,237,0.22);border-radius:10px;margin-bottom:14px;min-width:0;}',
+    '.sb-ai-model-box-label{font-size:0.63rem;color:#7c6faa;white-space:nowrap;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;}',
+    '.sb-ai-model-sel{flex:1;min-width:0;padding:6px 8px;background:#2a2a2a;border:1px solid #333;border-radius:7px;color:#d1d5db;font-size:0.72rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;max-width:100%;}',
     '.sb-ai-model-sel:focus{border-color:#a855f7;}',
-    '.sb-ai-model-display{display:flex;align-items:center;gap:5px;padding:6px 10px;background:rgba(124,58,237,0.1);border:1px solid rgba(124,58,237,0.25);border-radius:9px;margin-bottom:10px;min-width:0;}',
-    '.sb-ai-model-display .sb-md-dot{width:6px;height:6px;border-radius:50%;background:#a855f7;flex-shrink:0;}',
-    '.sb-ai-model-display .sb-md-text{font-size:0.72rem;color:#c4b5fd;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}',
     '.sb-ai-create textarea{width:100%;min-height:80px;max-height:180px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#fff;padding:10px;font-size:0.82rem;resize:vertical;font-family:inherit;outline:none;box-sizing:border-box;line-height:1.5;}',
     '.sb-ai-create textarea:focus{border-color:#a855f7;}',
     '.sb-ai-create textarea::placeholder{color:#666;}',
@@ -966,28 +963,17 @@
     });
     if (!modelOpts) modelOpts = '<option value="">No model</option>';
 
-    /* Display badge */
-    var displayLabel = _currentModelLabel();
-
     container.innerHTML =
       '<div class="sb-ai-create">' +
         '<div class="sb-ai-create-label">\u2728 AI Note Creator</div>' +
-        /* current model display */
-        '<div class="sb-ai-model-display" id="sb-ai-model-display">' +
-          '<span class="sb-md-dot"></span>' +
-          '<span class="sb-md-text" id="sb-ai-model-display-text">' + esc(displayLabel) + '</span>' +
-        '</div>' +
-        /* provider + model selects */
-        '<div class="sb-ai-model-row">' +
-          '<span class="sb-ai-model-label">Provider</span>' +
+        /* Single box containing provider + model selects */
+        '<div class="sb-ai-model-box" id="sb-ai-model-box">' +
+          '<span class="sb-ai-model-box-label">Model</span>' +
           '<select class="sb-ai-model-sel" id="sb-ai-provider-sel" title="AI provider">' + provOpts + '</select>' +
-        '</div>' +
-        '<div class="sb-ai-model-row">' +
-          '<span class="sb-ai-model-label">Model</span>' +
           '<select class="sb-ai-model-sel" id="sb-ai-model-sel" title="AI model">' + modelOpts + '</select>' +
         '</div>' +
         /* prompt */
-        '<div class="sb-ai-create-label" style="margin-top:14px;">Describe your note</div>' +
+        '<div class="sb-ai-create-label" style="margin-top:4px;">Describe your note</div>' +
         '<textarea id="sb-ai-prompt" placeholder="e.g. Newton\'s Laws of Motion summary with key formulas"></textarea>' +
         '<div class="sb-ai-create-row">' +
           '<select id="sb-ai-subject" class="sb-ai-field-sel"><option value="">Subject</option></select>' +
@@ -1023,13 +1009,11 @@
       });
     }
 
-    /* model change → update display badge */
+    /* model change → update selected */
     var modelSel = document.getElementById('sb-ai-model-sel');
     if (modelSel) {
       modelSel.addEventListener('change', function () {
         selectedAIModel = modelSel.value;
-        var displayText = document.getElementById('sb-ai-model-display-text');
-        if (displayText) displayText.textContent = _currentModelLabel();
       });
     }
   }
@@ -1130,9 +1114,9 @@
       { role: 'system', content: 'You are a study note creator. Given a topic, create a concise, well-structured study note with a clear title and content. Use bullet points and key terms. Keep it focused for exam preparation. Reply in JSON format: {"title": "...", "content": "...", "category": "normal|important|revision|formula|exam_trap"}' },
       { role: 'user', content: prompt }
     ];
-    var reqBody = { messages: messages, stream: false };
+    var reqBody = { messages: messages };
     if (selectedAIModel) reqBody.model = selectedAIModel;
-    backendFetch('/api/ai-chat/stream', {
+    backendFetch('/api/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reqBody)
@@ -1140,9 +1124,13 @@
       return resp.json();
     }).then(function (data) {
       var text = '';
-      if (data && typeof data.message === 'string') text = data.message;
-      else if (data && data.choices && data.choices[0]) text = data.choices[0].message || data.choices[0].text || '';
-      else if (data && typeof data === 'string') text = data;
+      /* Blocking endpoint returns {answer: "..."} */
+      if (data && typeof data.answer === 'string') text = data.answer;
+      else if (data && typeof data.message === 'string') text = data.message;
+      else if (data && data.choices && data.choices[0]) {
+        var choice = data.choices[0];
+        text = choice.message && (choice.message.content || choice.message) || choice.text || '';
+      }
       var parsed = null;
       try {
         var jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -1185,22 +1173,24 @@
     };
     var systemPrompt = prompts[tool] || 'Help improve this note:';
     toast('AI processing ' + tool + '...', 'info');
-    backendFetch('/api/ai-chat/stream', {
+    backendFetch('/api/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: [
           { role: 'system', content: 'You are a study assistant. ' + systemPrompt + ' Reply with the improved content only, no explanations.' },
           { role: 'user', content: 'Title: ' + (note.title || '') + '\n\nContent:\n' + (note.content || '') }
-        ],
-        stream: false
+        ]
       })
     }).then(function (resp) { return resp.json(); })
     .then(function (data) {
       var text = '';
-      if (data && typeof data.message === 'string') text = data.message;
-      else if (data && data.choices && data.choices[0]) text = data.choices[0].message || data.choices[0].text || '';
-      else if (data && typeof data === 'string') text = data;
+      if (data && typeof data.answer === 'string') text = data.answer;
+      else if (data && typeof data.message === 'string') text = data.message;
+      else if (data && data.choices && data.choices[0]) {
+        var choice = data.choices[0];
+        text = choice.message && (choice.message.content || choice.message) || choice.text || '';
+      }
       if (text) {
         note.content = text;
         note.updatedAt = now();
@@ -1220,22 +1210,24 @@
       return (i + 1) + '. Title: "' + (n.title || 'Untitled') + '" | Subject: ' + (n.subject || 'none') + ' | Category: ' + (n.category || 'normal');
     }).join('\n');
     var folderNames = folders.filter(function (f) { return !f.parentId; }).map(function (f) { return f.name; }).join(', ');
-    backendFetch('/api/ai-chat/stream', {
+    backendFetch('/api/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: [
           { role: 'system', content: 'You are a study organizer. Given a list of notes, suggest categories and subjects for each. Reply ONLY in JSON array format: [{"index": 1, "category": "normal|important|revision|formula|exam_trap", "subject": "Physics"}, ...]. Available folders: ' + (folderNames || 'none') + '. If a subject doesn\'t match an existing folder, suggest a new one in the "subject" field.' },
           { role: 'user', content: noteSummaries }
-        ],
-        stream: false
+        ]
       })
     }).then(function (resp) { return resp.json(); })
     .then(function (data) {
       var text = '';
-      if (data && typeof data.message === 'string') text = data.message;
-      else if (data && data.choices && data.choices[0]) text = data.choices[0].message || data.choices[0].text || '';
-      else if (data && typeof data === 'string') text = data;
+      if (data && typeof data.answer === 'string') text = data.answer;
+      else if (data && typeof data.message === 'string') text = data.message;
+      else if (data && data.choices && data.choices[0]) {
+        var choice = data.choices[0];
+        text = choice.message && (choice.message.content || choice.message) || choice.text || '';
+      }
       try {
         var jsonMatch = text.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
