@@ -38,6 +38,9 @@
   var editorTab = 'editor';
   var expandedSubjects = {};
   var dragState = null;
+  var aiModels = [];
+  var selectedAIModel = '';
+  var aiModelsLoaded = false;
 
   /* ── helpers ── */
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -143,22 +146,34 @@
     '.sb-board-btn{padding:6px 10px;background:transparent;border:1px solid #374151;border-radius:6px;color:#9ca3af;font-size:0.75rem;cursor:pointer;font-family:inherit;display:flex;align-items:center;gap:5px;transition:all 0.15s;}',
     '.sb-board-btn:hover{border-color:#6b7280;color:#fff;background:rgba(255,255,255,0.03);}',
 
-    /* AI Note Creator (collapsible) */
-    '.sb-ai-box{margin:0 16px 10px;background:#262626;border:1px solid #333;border-radius:10px;overflow:hidden;}',
-    '.sb-ai-box-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;}',
-    '.sb-ai-box-header h4{font-size:0.82rem;font-weight:600;color:#d1d5db;display:flex;align-items:center;gap:8px;margin:0;}',
-    '.sb-ai-box-arrow{color:#9ca3af;font-size:0.7rem;transition:transform 0.2s;}',
-    '.sb-ai-box-arrow.open{transform:rotate(180deg);}',
-    '.sb-ai-box-body{padding:0 14px 12px;}',
-    '.sb-ai-box textarea{width:100%;min-height:56px;max-height:110px;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;padding:10px;font-size:0.8rem;resize:vertical;font-family:inherit;outline:none;box-sizing:border-box;}',
-    '.sb-ai-box textarea:focus{border-color:#a855f7;}',
-    '.sb-ai-box textarea::placeholder{color:#666;}',
-    '.sb-ai-box-row{display:flex;gap:6px;margin-top:8px;}',
-    '.sb-ai-box select{flex:1;padding:6px 8px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#d1d5db;font-size:0.75rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;}',
-    '.sb-ai-box select:focus{border-color:#a855f7;}',
-    '.sb-ai-box-generate{padding:7px 14px;background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;border-radius:8px;color:#fff;font-size:0.8rem;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;transition:opacity 0.2s;}',
-    '.sb-ai-box-generate:hover{opacity:0.9;}',
-    '.sb-ai-box-generate:disabled{opacity:0.5;cursor:not-allowed;}',
+    /* AI Create tab (right panel) */
+    '.sb-ai-create{padding:16px;}',
+    '.sb-ai-create-label{font-size:0.75rem;color:#9ca3af;margin-bottom:6px;font-weight:500;display:flex;align-items:center;gap:6px;}',
+    '.sb-ai-create-model-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;}',
+    '.sb-ai-model-badge{display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:rgba(124,58,237,0.12);border:1px solid rgba(124,58,237,0.3);border-radius:8px;font-size:0.75rem;color:#c4b5fd;font-weight:600;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+    '.sb-ai-model-badge .sb-ai-model-dot{width:6px;height:6px;border-radius:50%;background:#a855f7;flex-shrink:0;}',
+    '.sb-ai-model-sel{padding:5px 8px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#d1d5db;font-size:0.72rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;max-width:150px;flex:1;}',
+    '.sb-ai-model-sel:focus{border-color:#a855f7;}',
+    '.sb-ai-create textarea{width:100%;min-height:80px;max-height:180px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#fff;padding:10px;font-size:0.82rem;resize:vertical;font-family:inherit;outline:none;box-sizing:border-box;line-height:1.5;}',
+    '.sb-ai-create textarea:focus{border-color:#a855f7;}',
+    '.sb-ai-create textarea::placeholder{color:#666;}',
+    '.sb-ai-create-row{display:flex;gap:6px;margin-top:8px;}',
+    '.sb-ai-create select{flex:1;padding:7px 8px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#d1d5db;font-size:0.78rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;}',
+    '.sb-ai-create select:focus{border-color:#a855f7;}',
+    '.sb-ai-create-generate{padding:8px 16px;background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;border-radius:8px;color:#fff;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;transition:opacity 0.2s;}',
+    '.sb-ai-create-generate:hover{opacity:0.9;}',
+    '.sb-ai-create-generate:disabled{opacity:0.5;cursor:not-allowed;}',
+    '.sb-ai-models-loading{font-size:0.7rem;color:#666;margin-bottom:10px;}',
+    '.sb-ai-models-list{margin-bottom:12px;max-height:130px;overflow-y:auto;border:1px solid #2a2a2a;border-radius:8px;}',
+    '.sb-ai-models-list::-webkit-scrollbar{width:3px;}',
+    '.sb-ai-models-list::-webkit-scrollbar-thumb{background:#333;border-radius:2px;}',
+    '.sb-ai-model-item{display:flex;align-items:center;justify-content:space-between;padding:7px 10px;cursor:pointer;font-size:0.78rem;color:#9ca3af;transition:all 0.12s;border-bottom:1px solid #222;}',
+    '.sb-ai-model-item:last-child{border-bottom:none;}',
+    '.sb-ai-model-item:hover{background:#2a2a2a;color:#fff;}',
+    '.sb-ai-model-item.active{background:rgba(124,58,237,0.1);color:#c4b5fd;}',
+    '.sb-ai-model-item .sb-mi-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+    '.sb-ai-model-item .sb-mi-check{color:#a855f7;font-size:0.7rem;opacity:0;}',
+    '.sb-ai-model-item.active .sb-mi-check{opacity:1;}',
 
     /* Filter chips (horizontal scroll) */
     '.sb-filter-chips{display:flex;gap:6px;padding:0 16px 12px;overflow-x:auto;flex-shrink:0;}',
@@ -225,7 +240,7 @@
     /* ── RIGHT PANEL (~380px) ── */
     '.sb-right{width:380px;min-width:380px;background:#1a1a1a;border-left:1px solid #2a2a2a;display:flex;flex-direction:column;overflow:hidden;}',
     '.sb-editor-tabs{display:flex;border-bottom:1px solid #2a2a2a;flex-shrink:0;}',
-    '.sb-editor-tab{flex:1;padding:10px 8px;text-align:center;font-size:0.8rem;color:#9ca3af;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s;font-weight:500;white-space:nowrap;}',
+    '.sb-editor-tab{flex:1;padding:10px 6px;text-align:center;font-size:0.72rem;color:#9ca3af;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.15s;font-weight:500;white-space:nowrap;}',
     '.sb-editor-tab:hover{color:#fff;}',
     '.sb-editor-tab.active{color:#eab308;border-bottom-color:#eab308;}',
     '.sb-editor-body{flex:1;overflow-y:auto;padding:16px;}',
@@ -294,14 +309,14 @@
     '.sb-modal-ok{padding:8px 16px;background:#eab308;border:none;border-radius:8px;color:#000;cursor:pointer;font-weight:600;font-family:inherit;font-size:0.82rem;}',
 
     /* Tab panels */
-    '.sb-ai-panel,.sb-revision-panel{display:none;}',
-    '.sb-ai-panel.active,.sb-revision-panel.active{display:block;}',
+    '.sb-ai-panel,.sb-revision-panel,.sb-create-panel{display:none;}',
+    '.sb-ai-panel.active,.sb-revision-panel.active,.sb-create-panel.active{display:block;}',
     '.sb-editor-panel{display:none;}',
     '.sb-editor-panel.active{display:block;}',
 
     /* ── responsive ── */
     '@media(max-width:1200px){.sb-left{width:230px;min-width:230px;}.sb-right{width:320px;min-width:320px;}.sb-cork-inner{columns:2;}}',
-    '@media(max-width:900px){.sb-left{display:none;}.sb-right{display:none;}.sb-center{width:100%;}.sb-cork-inner{columns:2;}#page-sticky-notes.active{height:calc(100vh - 56px);}}',
+    '@media(max-width:900px){.sb-left{display:none;}.sb-right{width:320px;min-width:320px;max-width:90vw;position:fixed;top:74px;right:0;bottom:0;z-index:80;box-shadow:-4px 0 20px rgba(0,0,0,0.5);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s ease;}.sb-right.sb-right-open{transform:translateX(0);}.sb-center{width:100%;}.sb-cork-inner{columns:2;}#page-sticky-notes.active{height:calc(100vh - 56px);}}',
     '@media(max-width:600px){.sb-cork-inner{columns:1;}#page-sticky-notes.active{height:calc(100vh - 52px);}}'
   ].join('\n');
 
@@ -348,21 +363,6 @@
           '</div>' +
         '</div>' +
       '</div>' +
-      /* AI Note Creator */
-      '<div class="sb-ai-box" id="sb-ai-box">' +
-        '<div class="sb-ai-box-header" id="sb-ai-box-toggle">' +
-          '<h4>\u2728 AI Note Creator</h4>' +
-          '<span class="sb-ai-box-arrow" id="sb-ai-box-arrow">\u25BC</span>' +
-        '</div>' +
-        '<div class="sb-ai-box-body" id="sb-ai-box-body" style="display:none">' +
-          '<textarea id="sb-ai-prompt" placeholder="Describe what note you want... e.g. Newton\'s Laws of Motion summary"></textarea>' +
-          '<div class="sb-ai-box-row">' +
-            '<select id="sb-ai-subject"><option value="">Subject</option></select>' +
-            '<select id="sb-ai-folder"><option value="">Folder</option></select>' +
-            '<button class="sb-ai-box-generate" id="sb-ai-generate-btn">Generate \u2728</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
       /* Filter chips */
       '<div class="sb-filter-chips" id="sb-filter-chips"></div>' +
       /* Folders */
@@ -381,12 +381,14 @@
     /* ── RIGHT PANEL ── */
     '<div class="sb-right" id="sb-right">' +
       '<div class="sb-editor-tabs">' +
-        '<div class="sb-editor-tab active" data-tab="editor">\uD83D\uDCDD Note Editor</div>' +
-        '<div class="sb-editor-tab" data-tab="ai">\uD83E\uDD16 AI Assistant</div>' +
+        '<div class="sb-editor-tab" data-tab="editor">\uD83D\uDCDD Editor</div>' +
+        '<div class="sb-editor-tab active" data-tab="create">\u2728 AI Create</div>' +
+        '<div class="sb-editor-tab" data-tab="ai">\uD83E\uDD16 AI Tools</div>' +
         '<div class="sb-editor-tab" data-tab="revision">\uD83D\uDD04 Revision</div>' +
       '</div>' +
       '<div class="sb-editor-body" id="sb-editor-body">' +
-        '<div class="sb-editor-panel active" id="sb-panel-editor"><div id="sb-editor-form"></div></div>' +
+        '<div class="sb-editor-panel" id="sb-panel-editor"><div id="sb-editor-form"></div></div>' +
+        '<div class="sb-create-panel active" id="sb-panel-create"><div id="sb-ai-create-content"></div></div>' +
         '<div class="sb-ai-panel" id="sb-panel-ai"><div class="sb-ai-tools" id="sb-ai-tools"></div><button class="sb-open-chat" id="sb-open-chat-btn">\uD83D\uDCAC Open in AI Chat</button></div>' +
         '<div class="sb-revision-panel" id="sb-panel-revision"><div id="sb-revision-content"></div></div>' +
       '</div>' +
@@ -413,6 +415,7 @@
     loadLocal();
     renderAll();
     loadFromFirebase();
+    fetchAIModels().then(function () { renderAICreatePanel(); });
   }
 
   function injectNavTab() {
@@ -479,14 +482,13 @@
     renderBoard();
     renderEditor();
     renderStats();
-    renderAIBoxDropdowns();
+    renderAICreatePanel();
   }
 
   function renderSidebar() {
     renderFilterChips();
     renderFolderTree();
     renderStats();
-    renderAIBoxDropdowns();
   }
 
   function renderFilterChips() {
@@ -693,15 +695,6 @@
     setNum('sb-history-count', notes.length);
   }
 
-  function renderAIBoxDropdowns() {
-    var subSel = document.getElementById('sb-ai-subject');
-    var foldSel = document.getElementById('sb-ai-folder');
-    if (!subSel || !foldSel) return;
-    var subjects = getSubjectsList();
-    subSel.innerHTML = '<option value="">Subject</option>' + subjects.map(function (s) { return '<option value="' + escAttr(s) + '">' + esc(s) + '</option>'; }).join('');
-    foldSel.innerHTML = '<option value="">Folder</option>' + folders.filter(function (f) { return !f.parentId; }).map(function (f) { return '<option value="' + f.id + '">' + esc(f.name) + '</option>'; }).join('');
-  }
-
   /* ── event binding ── */
   function bindEvents() {
     var page = document.getElementById('page-sticky-notes');
@@ -781,7 +774,7 @@
         tabs.forEach(function (t) { t.classList.remove('active'); });
         tab.classList.add('active');
         editorTab = tab.dataset.tab;
-        var panels = { editor: 'sb-panel-editor', ai: 'sb-panel-ai', revision: 'sb-panel-revision' };
+        var panels = { editor: 'sb-panel-editor', create: 'sb-panel-create', ai: 'sb-panel-ai', revision: 'sb-panel-revision' };
         Object.keys(panels).forEach(function (k) {
           var p = document.getElementById(panels[k]);
           if (p) p.classList.toggle('active', k === editorTab);
@@ -801,13 +794,7 @@
     var addBtn = document.getElementById('sb-add-note-btn');
     if (addBtn) addBtn.addEventListener('click', function () { createNewNote(); });
 
-    /* AI box toggle */
-    var aiBoxToggle = document.getElementById('sb-ai-box-toggle');
-    if (aiBoxToggle) {
-      aiBoxToggle.addEventListener('click', function () { toggleAICreateBox(); });
-    }
-
-    /* AI generate */
+    /* AI generate (right panel) */
     var genBtn = document.getElementById('sb-ai-generate-btn');
     if (genBtn) genBtn.addEventListener('click', function () { aiGenerateNote(); });
 
@@ -916,12 +903,83 @@
     });
   }
 
-  function toggleAICreateBox() {
-    aiCreateOpen = !aiCreateOpen;
-    var box = document.getElementById('sb-ai-box-body');
-    var arrow = document.getElementById('sb-ai-box-arrow');
-    if (box) box.style.display = aiCreateOpen ? 'block' : 'none';
-    if (arrow) arrow.classList.toggle('open', aiCreateOpen);
+  /* ── AI Create panel (right panel) ── */
+  function fetchAIModels() {
+    if (aiModelsLoaded) return Promise.resolve();
+    return backendFetch('/api/ai-chat/status').then(function (resp) { return resp.json(); }).then(function (data) {
+      if (data && Array.isArray(data.models)) {
+        aiModels = data.models.map(function (m) {
+          return { key: m.key || m.id || m, label: m.label || m.name || m.key || m };
+        });
+        if (aiModels.length > 0 && !selectedAIModel) selectedAIModel = aiModels[0].key;
+      }
+      aiModelsLoaded = true;
+    }).catch(function () {
+      aiModels = [];
+      aiModelsLoaded = true;
+    });
+  }
+
+  function renderAICreatePanel() {
+    var container = document.getElementById('sb-ai-create-content');
+    if (!container) return;
+    var modelDisplay = selectedAIModel ? selectedAIModel : 'Default';
+    var modelBadge = '<div class="sb-ai-model-badge"><span class="sb-ai-model-dot"></span>' + esc(modelDisplay) + '</div>';
+
+    var modelListHTML = '';
+    if (aiModels.length > 0) {
+      modelListHTML = '<div class="sb-ai-models-list">';
+      aiModels.forEach(function (m) {
+        var isActive = m.key === selectedAIModel ? ' active' : '';
+        modelListHTML += '<div class="sb-ai-model-item' + isActive + '" data-model-key="' + escAttr(m.key) + '"><span class="sb-mi-name">' + esc(m.label) + '</span><span class="sb-mi-check">\u2713</span></div>';
+      });
+      modelListHTML += '</div>';
+    } else if (aiModelsLoaded) {
+      modelListHTML = '<div style="font-size:0.72rem;color:#666;margin-bottom:12px;">No models available</div>';
+    } else {
+      modelListHTML = '<div class="sb-ai-models-loading">\u23F3 Loading models...</div>';
+    }
+
+    container.innerHTML =
+      '<div class="sb-ai-create">' +
+        '<div class="sb-ai-create-label">\u2728 AI Note Creator</div>' +
+        '<div class="sb-ai-create-model-row">' +
+          '<span style="font-size:0.72rem;color:#666;white-space:nowrap;">Model:</span>' +
+          modelBadge +
+        '</div>' +
+        modelListHTML +
+        '<div class="sb-ai-create-label">Describe your note</div>' +
+        '<textarea id="sb-ai-prompt" placeholder="e.g. Newton\'s Laws of Motion summary with key formulas"></textarea>' +
+        '<div class="sb-ai-create-row">' +
+          '<select id="sb-ai-subject"><option value="">Subject</option></select>' +
+          '<select id="sb-ai-folder"><option value="">Folder</option></select>' +
+          '<button class="sb-ai-create-generate" id="sb-ai-generate-btn">Generate \u2728</button>' +
+        '</div>' +
+      '</div>';
+
+    /* populate subject/folder dropdowns */
+    var subSel = document.getElementById('sb-ai-subject');
+    var foldSel = document.getElementById('sb-ai-folder');
+    if (subSel) {
+      var subjects = getSubjectsList();
+      subSel.innerHTML = '<option value="">Subject</option>' + subjects.map(function (s) { return '<option value="' + escAttr(s) + '">' + esc(s) + '</option>'; }).join('');
+    }
+    if (foldSel) {
+      foldSel.innerHTML = '<option value="">Folder</option>' + folders.filter(function (f) { return !f.parentId; }).map(function (f) { return '<option value="' + f.id + '">' + esc(f.name) + '</option>'; }).join('');
+    }
+
+    /* re-bind generate button */
+    var genBtn = document.getElementById('sb-ai-generate-btn');
+    if (genBtn) genBtn.addEventListener('click', function () { aiGenerateNote(); });
+
+    /* model list click handler */
+    var modelItems = container.querySelectorAll('.sb-ai-model-item');
+    modelItems.forEach(function (item) {
+      item.addEventListener('click', function () {
+        selectedAIModel = item.dataset.modelKey;
+        renderAICreatePanel();
+      });
+    });
   }
 
   /* ── note CRUD ── */
@@ -1000,7 +1058,7 @@
       var parentEl = document.getElementById('sb-folder-parent-input');
       var parentId = parentEl ? parentEl.value : '';
       folders.push({ id: genId(), name: name, subject: name, parentId: parentId, color: '', createdAt: now(), updatedAt: now() });
-      persist(); renderFolderTree(); renderStats(); renderAIBoxDropdowns();
+      persist(); renderFolderTree(); renderStats();
       overlay.remove();
       toast('Folder created \u2713', 'success');
     });
@@ -1020,10 +1078,12 @@
       { role: 'system', content: 'You are a study note creator. Given a topic, create a concise, well-structured study note with a clear title and content. Use bullet points and key terms. Keep it focused for exam preparation. Reply in JSON format: {"title": "...", "content": "...", "category": "normal|important|revision|formula|exam_trap"}' },
       { role: 'user', content: prompt }
     ];
+    var reqBody = { messages: messages, stream: false };
+    if (selectedAIModel) reqBody.model = selectedAIModel;
     backendFetch('/api/ai-chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: messages, stream: false })
+      body: JSON.stringify(reqBody)
     }).then(function (resp) {
       return resp.json();
     }).then(function (data) {
