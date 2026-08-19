@@ -1,38 +1,28 @@
 /*
- * PrepPath — Daily Telegram study-plan sender
+ * PrepPath — Daily Telegram Morning Dashboard Sender (v5)
  * ────────────────────────────────────────────────────────────────────────────────────────
  * Runs in GitHub Actions (see .github/workflows/daily-telegram.yml).
  *
- * For every user who has:
- *   - appState.telegram.enabled  = true
- *   - appState.telegram.chatId   = a numeric Telegram chat ID
- * it reads their precomputed digest for today and sends it via Telegram Bot API.
+ * For every Pro user with appState.telegram.enabled=true and a chatId,
+ * sends a SINGLE interactive morning dashboard with inline navigation buttons.
  *
  * Required GitHub secrets:
  *   TELEGRAM_BOT_TOKEN        – from @BotFather
- *   FIREBASE_SERVICE_ACCOUNT  – full service-account JSON (one line or pretty-printed)
+ *   FIREBASE_SERVICE_ACCOUNT  – full service-account JSON
  *
- * The digest is built in the browser (buildTelegramDigest in app.html) and
- * stored at Firestore: users/{uid}.appState.telegram.digest = { 'YYYY-MM-DD': text }
- *
- * v4 — Animated cascade: 3 sequential messages with delays,
- * <tg-spoiler> quote reveal, gradient emoji progress, status dots.
+ * v5 — Single-message interactive dashboard with date navigation.
+ * Replaces the old 3-message animated cascade.
  * ────────────────────────────────────────────────────────────────────────────────────────
  */
 
 const admin = require('firebase-admin');
 const { isProUser } = require('../shared/proGating');
+const { todayIST, istMinutesNow, istClockNow, hr } = require('./telegram-lib');
 const {
-  todayIST, istMinutesNow, istClockNow,
-  sendTelegramMessage: _sendTelegramMessage,
-  sendSequentialMessages,
-  fmtDM, fmtDMDay, escHtml, capLines, capTaskLines,
-  scheduledCourseVideos, buildTaskSections,
-  progressBar, gradientBar, hr, dotHr, sparkleHr, dailyQuote, todayTotalTasks,
-  boxTop, boxBottom, boxMid,
-  subjectEmoji, sectionHeader, completionBadge, miniStats, statPill,
-  statusDot, spoiler, taskBullet, labelPill,
-} = require('./telegram-lib');
+  sendTelegramMessageWithKeyboard,
+  buildMorningDashboard,
+  morningKeyboard,
+} = require('./telegram-dashboard');
 
 /* ── 1. Validate secrets ──────────────────────────────────────── */
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -51,7 +41,7 @@ try {
 }
 if (!svc.project_id || !svc.private_key) {
   console.error('❌ FIREBASE_SERVICE_ACCOUNT JSON is incomplete (missing project_id or private_key).');
-  console.error('   Make sure you pasted the ENTIRE JSON from Firebase Console → Service accounts → Generate new private key.');
+  console.error('   Make sure you pasted the ENTIRE JSON from Firebase Console.');
   process.exit(1);
 }
 console.log(`✅ Firebase project: ${svc.project_id}`);
@@ -60,155 +50,7 @@ console.log(`✅ Firebase project: ${svc.project_id}`);
 admin.initializeApp({ credential: admin.credential.cert(svc) });
 const db = admin.firestore();
 
-/* ── 3. Helpers ──────────────────────────────────────── */
-function sendTelegramMessage(chatId, text) {
-  return _sendTelegramMessage(BOT_TOKEN, chatId, text);
-}
-
-function sendCascade(chatId, messages) {
-  return sendSequentialMessages(BOT_TOKEN, chatId, messages, 1200);
-}
-
-/* ── Pro check ─────────────────────────────────────────────────
-   Delegated to shared/proGating.js. */
-
-/* ── 4. Main ──────────────────────────────────────── */
-
-/* Build 3 sequential messages for the animated cascade effect:
- *   Message 1: Header card + progress (the "teaser")
- *   Message 2: Study topics + Tasks + Videos (the "meat")
- *   Message 3: Motivational quote in spoiler (the "reward")
- *
- * Returns an array of message strings (1-3 items).
- * Falls back to single-message mode for empty state. */
-function buildMessage(name, appState, topicDigest, today) {
-  const { todoLines, videoItems, doneCount } = buildTaskSections(appState, today);
-  const totalCount = todayTotalTasks(appState, today);
-  const total = totalCount + doneCount;
-  const todayPending = todoLines.filter(t => !t.overdue).length;
-  const overdueCount = todoLines.filter(t => t.overdue).length;
-  const hasContent = (topicDigest && topicDigest.trim()) || todoLines.length || videoItems.length;
-  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
-
-  if (!hasContent) {
-    /* Empty state — single message, no cascade */
-    const parts = [];
-    parts.push(boxTop());
-    parts.push(`<b>☀️  Good Morning, ${escHtml(name)}!</b>`);
-    parts.push(boxMid());
-    parts.push(`📅  <b>${fmtDMDay(today)}</b>`);
-    parts.push('');
-    parts.push('<b>📋  No plan scheduled today</b>');
-    parts.push(dotHr());
-    parts.push('<i>💡 App kholo → Planner mein add karo → Save karo</i>');
-    parts.push(boxMid());
-    parts.push(sparkleHr());
-    parts.push(spoiler(`<i>💬  “${dailyQuote(today)}”</i>`));
-    parts.push(sparkleHr());
-    parts.push(boxBottom());
-    parts.push(`<a href="https://examzen.in">🏠  StudyPlanner</a>`);
-    return { messages: [parts.join('\n')], hasContent: false };
-  }
-
-  /* ── MESSAGE 1: HEADER + PROGRESS (the teaser) ── */
-  const msg1 = [];
-  msg1.push(boxTop());
-  msg1.push(`<b>☀️  Good Morning, ${escHtml(name)}!</b>`);
-  msg1.push(boxMid());
-  msg1.push(`📅  <b>${fmtDMDay(today)}</b>`);
-  msg1.push('');
-  if (total > 0) {
-    msg1.push(labelPill('📊', `${statusDot(pct)}  ${doneCount}/${total} done  ·  ${todayPending} pending  ·  ${overdueCount} overdue`));
-    msg1.push('');
-    msg1.push(gradientBar(doneCount, total));
-    msg1.push(progressBar(doneCount, total));
-  }
-  msg1.push(boxBottom());
-
-  /* ── MESSAGE 2: CONTENT (study plan + tasks + videos) ── */
-  const msg2 = [];
-  let hasMsg2Content = false;
-
-  /* Study Topics */
-  if (topicDigest && topicDigest.trim()) {
-    hasMsg2Content = true;
-    msg2.push(boxTop());
-    msg2.push(sectionHeader('📚', 'Study Plan'));
-    msg2.push(hr());
-    const topicLines = topicDigest.trim().split('\n').filter(l => l.trim());
-    topicLines.forEach((line, i) => {
-      const emoji = subjectEmoji(line);
-      msg2.push(`  <code>${String(i + 1).padStart(2, '0')}</code>  ${emoji}  ${line}`);
-    });
-  }
-
-  /* Today's Tasks */
-  if (todoLines.length) {
-    const todayTasks = todoLines.filter(t => !t.overdue);
-    const overdueTasks = todoLines.filter(t => t.overdue);
-
-    if (todayTasks.length) {
-      if (hasMsg2Content) msg2.push('');
-      hasMsg2Content = true;
-      if (!topicDigest || !topicDigest.trim()) msg2.push(boxTop());
-      msg2.push(sectionHeader('✅', "Today's Tasks"));
-      msg2.push(hr());
-      todayTasks.forEach(t => { msg2.push(`  ${t.line}`); });
-    }
-
-    if (overdueTasks.length) {
-      if (hasMsg2Content) msg2.push('');
-      hasMsg2Content = true;
-      if (!topicDigest || !topicDigest.trim()) msg2.push(boxTop());
-      msg2.push(`<b>⚠️  OVERDUE (${overdueTasks.length})</b>`);
-      msg2.push(dotHr());
-      overdueTasks.forEach(t => { msg2.push(`  ${t.line}`); });
-    }
-
-    if (doneCount > 0) {
-      msg2.push('');
-      msg2.push(`<i>✅  ${doneCount} task${doneCount > 1 ? 's' : ''} already completed</i>`);
-    }
-  } else if (doneCount > 0) {
-    if (!topicDigest || !topicDigest.trim()) msg2.push(boxTop());
-    hasMsg2Content = true;
-    msg2.push('');
-    msg2.push(`<b>✨  ALL TASKS DONE!</b>`);
-    msg2.push(`<i>Sab ${doneCount} tasks done — shabash! 🎉</i>`);
-  }
-
-  /* Videos */
-  if (videoItems.length) {
-    if (hasMsg2Content) msg2.push('');
-    hasMsg2Content = true;
-    if (!topicDigest || !topicDigest.trim()) msg2.push(boxTop());
-    msg2.push(sectionHeader('🎬', 'Videos'));
-    msg2.push(hr());
-    videoItems.forEach((v, i) => {
-      const emoji = subjectEmoji(v.title);
-      msg2.push(`  <code>${String(i + 1).padStart(2, '0')}</code>  ${emoji}  <a href="${v.url}">${escHtml(v.title)}</a>`);
-    });
-  }
-
-  if (hasMsg2Content) {
-    msg2.push(boxBottom());
-  }
-
-  /* ── MESSAGE 3: SPOILER QUOTE (the reward — tap to reveal!) ── */
-  const msg3 = [];
-  msg3.push(sparkleHr());
-  msg3.push(spoiler(`<i>💬  “${dailyQuote(today)}”</i>`));
-  msg3.push(sparkleHr());
-  msg3.push(`<a href="https://examzen.in">🏠  StudyPlanner</a>`);
-
-  /* Combine into cascade messages array */
-  const messages = [];
-  messages.push(msg1.join('\n'));
-  if (hasMsg2Content) messages.push(msg2.join('\n'));
-  messages.push(msg3.join('\n'));
-
-  return { messages, hasContent: true };
-}
+/* ── 3. Main ──────────────────────────────────────── */
 
 async function main() {
   const today = todayIST();
@@ -221,14 +63,14 @@ async function main() {
   try {
     const cfgSnap = await db.collection('config').doc('telegram').get();
     cfg = cfgSnap.exists ? (cfgSnap.data() || {}) : {};
-  } catch (e) { console.warn('\u26A0\uFE0F  Could not read config/telegram:', e.message); }
+  } catch (e) { console.warn('⚠\uFE0F  Could not read config/telegram:', e.message); }
 
   const sendTime = /^\d{1,2}:\d{2}$/.test(cfg.sendTime) ? cfg.sendTime : '06:00';
   const [sh, sm] = sendTime.split(':').map(n => parseInt(n, 10));
   const targetMin = (sh * 60) + sm;
 
   if (forced) {
-    console.log('\uD83D\uDE80 Manual run (workflow_dispatch) — bypassing schedule gate.');
+    console.log('\uD83D\uDE80 Manual run (workflow_dispatch) \u2014 bypassing schedule gate.');
   } else {
     if (cfg.lastSentDate === today) {
       console.log(`\u23ED  Already auto-sent today (${today}). Nothing to do.`);
@@ -248,7 +90,7 @@ async function main() {
     );
   } catch (e) { console.warn('\u26A0\uFE0F  Could not record lastSentDate:', e.message); }
 
-  console.log(`\uD83D\uDCC5 Sending plans for ${today}`);
+  console.log(`\uD83D\uDCC5 Sending morning dashboards for ${today}`);
 
   const snap = await db.collection('users').get();
   console.log(`\uD83D\uDC65 Total users in Firestore: ${snap.size}`);
@@ -267,7 +109,7 @@ async function main() {
 
     if (!adminUids.has(doc.id) && !isProUser(data, today)) {
       skippedFree++;
-      console.log(`  \uD83D\uDC8E Skipped (not Pro) → ${doc.id} chat:${tg.chatId}`);
+      console.log(`  \uD83D\uDC8E Skipped (not Pro) \u2192 ${doc.id} chat:${tg.chatId}`);
       continue;
     }
 
@@ -278,21 +120,23 @@ async function main() {
                     ? data.profile.name.split(' ')[0]
                     : 'there';
 
-    const built = buildMessage(name, aState, plan, today);
+    const built = buildMorningDashboard(name, aState, plan, today);
+    const keyboard = morningKeyboard(today);
+
     if (!built.hasContent) noDigest++;
 
     try {
-      /* v4: Send as animated cascade (multiple sequential messages) */
-      await sendCascade(tg.chatId, built.messages);
+      /* v5: Send single interactive dashboard with inline keyboard */
+      await sendTelegramMessageWithKeyboard(BOT_TOKEN, tg.chatId, built.text, keyboard);
       sent++;
-      console.log(`  ✅ Sent (${built.messages.length} msgs) → ${doc.id} (${name}) chat:${tg.chatId}`);
+      console.log(`  \u2705 Sent (1 dashboard) \u2192 ${doc.id} (${name}) chat:${tg.chatId}`);
     } catch (e) {
       if (e.skip) {
-        console.log(`  ⚠️  Skipped (blocked/not found) → ${doc.id} chat:${tg.chatId}: ${e.message}`);
+        console.log(`  \u26A0\uFE0F  Skipped (blocked/not found) \u2192 ${doc.id} chat:${tg.chatId}: ${e.message}`);
         skipped++;
       } else {
         failed++;
-        console.error(`  ❌ Failed → ${doc.id}: ${e.message}`);
+        console.error(`  \u274C Failed \u2192 ${doc.id}: ${e.message}`);
       }
     }
   }
@@ -301,15 +145,15 @@ async function main() {
   console.log(`Done. Sent=${sent}  Skipped=${skipped}  SkippedFree=${skippedFree}  Failed=${failed}  NoDigest=${noDigest}`);
 
   if (noDigest > 0) {
-    console.log(`ℹ️  ${noDigest} user(s) got fallback message — they haven't set up a study plan yet.`);
+    console.log(`\u2139\uFE0F  ${noDigest} user(s) got empty dashboard \u2014 they haven't set up a study plan yet.`);
   }
   if (failed > 0) {
-    console.log('\u26A0\uFE0F  Some sends failed — check the error lines above.');
+    console.log('\u26A0\uFE0F  Some sends failed \u2014 check the error lines above.');
     process.exit(1);
   }
 }
 
 main().catch(e => {
-  console.error('❌ Fatal error:', e.message);
+  console.error('\u274C Fatal error:', e.message);
   process.exit(1);
 });

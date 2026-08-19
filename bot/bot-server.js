@@ -1037,6 +1037,225 @@ bot.on('callback_query', async (query) => {
   }
 });
 
+/* ── Dashboard navigation & action callbacks (v5) ───────────────────────
+   Handles:
+     pm:prev|today|next:DATE  — morning dashboard date navigation
+     pe:prev|today|next:DATE  — evening dashboard date navigation
+     pe:finish:DATE           — evening "finish now" action
+     pe:move:DATE             — evening "move to tomorrow" action
+   Callback data format:  pm:ACTION:DATE  or  pe:ACTION:DATE
+   where ACTION = prev | today | next | finish | move
+   and DATE = YYYY-MM-DD (the currently-viewed date). */
+bot.on('callback_query', async (query) => {
+  const data = query && query.data ? String(query.data) : '';
+  /* Only handle dashboard callbacks */
+  const pmMatch = data.match(/^pm:(prev|today|next):(\d{4}-\d{2}-\d{2})$/);
+  const peMatch = data.match(/^pe:(prev|today|next|finish|move):(\d{4}-\d{2}-\d{2})$/);
+  const match = pmMatch || peMatch;
+  if (!match) return;
+
+  const prefix = pmMatch ? 'pm' : 'pe';
+  const action = match[1];
+  const viewDate = match[2];
+
+  const chatId = query.message && query.message.chat ? String(query.message.chat.id) : '';
+  const chatType = query.message && query.message.chat ? query.message.chat.type : '';
+  const messageId = query.message && query.message.message_id ? query.message.message_id : null;
+  const fromId = query.from && query.from.id ? String(query.from.id) : '';
+
+  if (!db || !chatId || chatType !== 'private' || !fromId || !messageId) {
+    bot.answerCallbackQuery(query.id, { text: 'Dashboard is only available in your private bot chat.', show_alert: true }).catch(() => {});
+    return;
+  }
+
+  try {
+    /* 1. Identify the user — verify the chat belongs to the callback sender */
+    const user = await findUserByChatId(chatId);
+    if (!user) {
+      bot.answerCallbackQuery(query.id, { text: 'Account not linked. Use /start first.', show_alert: true }).catch(() => {});
+      return;
+    }
+    /* Security: ensure the callback is from the same Telegram account */
+    const expectedTgUid = String(user.data.appState && user.data.appState.telegram && user.data.appState.telegram.telegramUserId || '');
+    if (expectedTgUid && expectedTgUid !== fromId) {
+      bot.answerCallbackQuery(query.id, { text: 'This dashboard belongs to another account.', show_alert: true }).catch(() => {});
+      return;
+    }
+
+    /* 2. Calculate target date */
+    let targetDate = viewDate;
+    if (action === 'prev') {
+      targetDate = shiftDateForBot(viewDate, -1);
+    } else if (action === 'next') {
+      targetDate = shiftDateForBot(viewDate, 1);
+    } else if (action === 'today') {
+      targetDate = todayIST();
+    }
+    /* finish and move keep the same date */
+
+    /* 3. Handle action buttons (finish, move) */
+    if (prefix === 'pe' && action === 'finish') {
+      /* FINISH NOW — send a link to the planner */
+      const appUrl = appBaseUrlForRequest({ headers: { origin: '' } }) + '/pages/planner.html';
+      await bot.sendMessage(chatId,
+        `\uD83D\uDD25 <b>Finish your tasks!</b>\n\nOpen your planner to complete pending tasks:\n<a href="${appUrl}">\uD83D\uDCD6 Open Planner</a>`,
+        { parse_mode: 'HTML', disable_web_page_preview: true }
+      );
+      await bot.answerCallbackQuery(query.id, { text: 'Opening planner...' });
+      return;
+    }
+
+    if (prefix === 'pe' && action === 'move') {
+      /* MOVE TO TOMORROW — move the first pending non-overdue task to tomorrow */
+      const appState = user.data.appState || {};
+      const tasks = appState.tasks || {};
+      const dayTasks = Array.isArray(tasks[viewDate]) ? tasks[viewDate] : [];
+      const isDone = t => t && (t.done === true || t.status === 'done');
+      const pendingTask = dayTasks.find(t => t && !isDone(t) && !t.overdue && t.type !== 'video');
+
+      if (!pendingTask) {
+        await bot.answerCallbackQuery(query.id, { text: 'No pending tasks to move.', show_alert: true });
+        return;
+      }
+
+      /* Move the task: remove from current date, add to tomorrow */
+      const tomorrow = shiftDateForBot(viewDate, 1);
+      const taskRef = { ...pendingTask, originalDate: pendingTask.originalDate || viewDate };
+
+      /* Build updated task arrays */
+      const updatedDayTasks = dayTasks.filter(t => t !== pendingTask);
+      const tomorrowTasks = Array.isArray(tasks[tomorrow]) ? [...tasks[tomorrow]] : [];
+      tomorrowTasks.push(taskRef);
+
+      /* Update Firestore */
+      await db.collection('users').doc(user.uid).set({
+        'appState.tasks': {
+          [viewDate]: updatedDayTasks,
+          [tomorrow]: tomorrowTasks,
+        },
+      }, { merge: true });
+
+      /* Rebuild the dashboard for the current date */
+      const freshState = { ...appState, tasks: { ...tasks, [viewDate]: updatedDayTasks, [tomorrow]: tomorrowTasks } };
+      const name = (user.data.profile && user.data.profile.name)
+        ? user.data.profile.name.split(' ')[0] : 'there';
+      const dashboardResult = buildEveningDashboardForBot(name, freshState, viewDate);
+      const keyboard = eveningKeyboardForBot(viewDate);
+
+      if (dashboardResult.hasContent) {
+        try {
+          await bot.editMessageText(dashboardResult.text, {
+            chat_id: chatId,
+            message_id: messageId,
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            reply_markup: keyboard,
+          });
+        } catch (editErr) {
+          /* If edit fails (message too old), send a fresh message */
+          console.warn(`Dashboard edit failed, sending fresh: ${editErr.message}`);
+          await bot.sendMessage(chatId, dashboardResult.text, {
+            parse_mode: 'HTML',
+            disable_web_page_preview: true,
+            reply_markup: keyboard,
+          });
+        }
+      }
+
+      const remaining = updatedDayTasks.filter(t => t && !isDone(t) && t.type !== 'video').length;
+      await bot.answerCallbackQuery(query.id, { text: `Moved! ${remaining} task${remaining !== 1 ? 's' : ''} remaining.` });
+      console.log(`Moved task for uid:${user.uid} from ${viewDate} to ${tomorrow}`);
+      return;
+    }
+
+    /* 4. Navigation (prev/today/next) — rebuild and edit the message */
+    const appState = user.data.appState || {};
+    const name = (user.data.profile && user.data.profile.name)
+      ? user.data.profile.name.split(' ')[0] : 'there';
+
+    let dashboardResult;
+    let keyboard;
+
+    if (prefix === 'pm') {
+      const digest = (appState.telegram && appState.telegram.digest) || {};
+      const plan = digest[targetDate];
+      dashboardResult = buildMorningDashboardForBot(name, appState, plan, targetDate);
+      keyboard = morningKeyboardForBot(targetDate);
+    } else {
+      dashboardResult = buildEveningDashboardForBot(name, appState, targetDate);
+      keyboard = eveningKeyboardForBot(targetDate);
+    }
+
+    /* Handle empty date gracefully */
+    if (!dashboardResult.text) {
+      const label = prefix === 'pm' ? 'No tasks' : 'No tasks';
+      dashboardResult = { text: `\u2139\uFE0F ${label} for ${targetDate}`, hasContent: false };
+    }
+
+    try {
+      await bot.editMessageText(dashboardResult.text, {
+        chat_id: chatId,
+        message_id: messageId,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+        reply_markup: keyboard,
+      });
+    } catch (editErr) {
+      /* If the message is too old to edit, send a fresh one */
+      const desc = (editErr.response && editErr.response.body && editErr.response.body.description) || editErr.message || '';
+      console.warn(`Dashboard edit failed (uid:${user.uid}): ${desc}`);
+      if (desc.includes("can't be edited") || desc.includes('not found')) {
+        await bot.sendMessage(chatId, dashboardResult.text, {
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+          reply_markup: keyboard,
+        });
+        await bot.answerCallbackQuery(query.id, { text: 'Opened fresh dashboard.' });
+      } else {
+        await bot.answerCallbackQuery(query.id, { text: 'Could not update dashboard. Try again.', show_alert: true });
+      }
+      return;
+    }
+
+    /* Answer the callback to stop the loading spinner */
+    await bot.answerCallbackQuery(query.id, { text: `Viewing ${targetDate}` });
+
+  } catch (error) {
+    console.error('Dashboard callback failed:', error.message);
+    bot.answerCallbackQuery(query.id, { text: 'Something went wrong. Please try again.', show_alert: true }).catch(() => {});
+  }
+});
+
+/* ── Dashboard helper functions for bot-server ───────────────────────── */
+
+/** Shift an ISO date string by N days (bot-local copy for the callback handler). */
+function shiftDateForBot(ds, n) {
+  const dt = new Date(ds + 'T12:00:00Z');
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+}
+
+/** Import dashboard builders. Loaded lazily to avoid circular deps. */
+let _dashboardLib = null;
+function getDashboardLib() {
+  if (_dashboardLib) return _dashboardLib;
+  _dashboardLib = require('../scripts/telegram-dashboard');
+  return _dashboardLib;
+}
+
+function buildMorningDashboardForBot(name, appState, topicDigest, dateStr) {
+  return getDashboardLib().buildMorningDashboard(name, appState, topicDigest, dateStr);
+}
+function buildEveningDashboardForBot(name, appState, dateStr) {
+  return getDashboardLib().buildEveningDashboard(name, appState, dateStr);
+}
+function morningKeyboardForBot(dateStr) {
+  return getDashboardLib().morningKeyboard(dateStr);
+}
+function eveningKeyboardForBot(dateStr) {
+  return getDashboardLib().eveningKeyboard(dateStr);
+}
+
 /* ════════════════════════════════════════════════════════════════════════════
    AI AUTO-SCHEDULE — handle any non-command text message
    ════════════════════════════════════════════════════════════════════════════ */
