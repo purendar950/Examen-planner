@@ -33,7 +33,8 @@
     { key: 'explain', icon: '\uD83D\uDCA1', label: 'Explain' },
     { key: 'simplify', icon: '\uD83D\uDD0D', label: 'Simplify' },
     { key: 'mnemonic', icon: '\uD83E\uDDE0', label: 'Mnemonic' },
-    { key: 'quiz', icon: '\uD83D\uDCDD', label: 'Make Quiz' }
+    { key: 'quiz', icon: '\uD83D\uDCDD', label: 'Make Quiz' },
+    { key: 'custom', icon: '\u2699\uFE0F', label: 'More Options' }
   ];
   var AI_DEPTHS = [
     { key: 'quick', label: 'Quick' },
@@ -433,6 +434,22 @@
     '.sb-ai-tool{padding:10px;background:#2a2a2a;border:1px solid #333;border-radius:8px;cursor:pointer;font-size:0.78rem;color:#9ca3af;text-align:center;transition:all 0.15s;display:flex;align-items:center;justify-content:center;gap:6px;font-family:inherit;}',
     '.sb-ai-tool:hover{border-color:#a855f7;color:#a855f7;background:rgba(168,85,247,0.08);}',
     '.sb-ai-tool:disabled{opacity:0.5;cursor:not-allowed;}',
+    '.sb-ai-tool[data-ai-tool="custom"]{border-color:rgba(234,179,8,0.35);color:#eab308;background:rgba(234,179,8,0.06);}',
+    '.sb-ai-tool[data-ai-tool="custom"]:hover{border-color:#eab308;color:#fde68a;background:rgba(234,179,8,0.12);}',
+    '.sb-custom-ai-modal{max-width:560px;padding:0;overflow:hidden;}',
+    '.sb-custom-ai-header{padding:20px 22px 16px;background:linear-gradient(135deg,rgba(234,179,8,0.16),rgba(124,58,237,0.1));border-bottom:1px solid rgba(234,179,8,0.18);}',
+    '.sb-custom-ai-title{font-size:1rem;color:#fff;font-weight:700;}',
+    '.sb-custom-ai-subtitle{font-size:0.75rem;color:#9ca3af;line-height:1.45;margin-top:5px;}',
+    '.sb-custom-ai-body{padding:18px 22px 4px;}',
+    '.sb-custom-ai-label{display:block;color:#d1d5db;font-size:0.75rem;font-weight:600;margin-bottom:7px;}',
+    '.sb-custom-ai-textarea{width:100%;min-height:130px;box-sizing:border-box;resize:vertical;padding:11px 12px;background:#151515;border:1px solid #3b3b3b;border-radius:9px;color:#f3f4f6;font:0.84rem/1.55 var(--font),sans-serif;outline:none;}',
+    '.sb-custom-ai-textarea:focus{border-color:#eab308;box-shadow:0 0 0 3px rgba(234,179,8,0.12);}',
+    '.sb-custom-ai-examples{color:#6b7280;font-size:0.7rem;line-height:1.5;margin-top:8px;}',
+    '.sb-custom-ai-actions{display:flex;justify-content:flex-end;gap:8px;padding:15px 22px 20px;margin-top:10px;border-top:1px solid #2a2a2a;background:rgba(255,255,255,0.02);}',
+    '.sb-custom-ai-generate{padding:9px 15px;background:linear-gradient(135deg,#eab308,#f59e0b);border:1px solid transparent;border-radius:8px;color:#1c1917;font:700 0.78rem var(--font),sans-serif;cursor:pointer;}',
+    '.sb-custom-ai-generate:hover{filter:brightness(1.08);}',
+    '.sb-custom-ai-generate:disabled{opacity:0.55;cursor:not-allowed;}',
+    '@media(max-width:600px){.sb-custom-ai-modal{max-width:calc(100% - 4px);}.sb-custom-ai-header,.sb-custom-ai-body{padding-left:16px;padding-right:16px;}.sb-custom-ai-actions{padding-left:16px;padding-right:16px;}}',
     '.sb-open-chat{width:100%;margin-top:12px;padding:10px;background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;border-radius:8px;color:#fff;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:8px;transition:opacity 0.2s;}',
     '.sb-open-chat:hover{opacity:0.9;}',
 
@@ -1574,6 +1591,80 @@
     return AI_TOOLS.find(function (t) { return t.key === tool; }) || { key: tool, icon: '\u2728', label: tool };
   }
 
+  function showCustomAIRequestDialog(note) {
+    var existing = document.getElementById('sb-custom-ai-overlay');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.className = 'sb-modal-overlay';
+    overlay.id = 'sb-custom-ai-overlay';
+    overlay.innerHTML =
+      '<div class="sb-modal sb-custom-ai-modal" role="dialog" aria-modal="true" aria-labelledby="sb-custom-ai-title">' +
+        '<div class="sb-custom-ai-header">' +
+          '<div class="sb-custom-ai-title" id="sb-custom-ai-title">\u2699\uFE0F More Options</div>' +
+          '<div class="sb-custom-ai-subtitle">Tell the AI exactly what you want to do with the selected note. Your original note will stay unchanged until you approve the result.</div>' +
+        '</div>' +
+        '<div class="sb-custom-ai-body">' +
+          '<label class="sb-custom-ai-label" for="sb-custom-ai-input">What should the AI do?</label>' +
+          '<textarea class="sb-custom-ai-textarea" id="sb-custom-ai-input" placeholder="e.g. Add an exam-focused example and list the most common mistakes."></textarea>' +
+          '<div class="sb-custom-ai-examples">Examples: “Add extra information”, “Explain this for a beginner”, “Add a real-world example”, “Translate into Hindi”, or “Make this more exam-focused”.</div>' +
+        '</div>' +
+        '<div class="sb-custom-ai-actions">' +
+          '<button type="button" class="sb-modal-cancel" id="sb-custom-ai-cancel">Cancel</button>' +
+          '<button type="button" class="sb-custom-ai-generate" id="sb-custom-ai-generate">Generate Result</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    var input = document.getElementById('sb-custom-ai-input');
+    var cancel = document.getElementById('sb-custom-ai-cancel');
+    var generate = document.getElementById('sb-custom-ai-generate');
+    var closed = false;
+    function close() { closed = true; document.removeEventListener('keydown', onKeyDown); overlay.remove(); }
+    function onKeyDown(e) { if (e.key === 'Escape') close(); }
+    document.addEventListener('keydown', onKeyDown);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    if (cancel) cancel.addEventListener('click', close);
+    if (input) {
+      setTimeout(function () { input.focus(); }, 30);
+      input.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && generate) generate.click();
+      });
+    }
+    if (!generate) return;
+    generate.addEventListener('click', function () {
+      var request = input ? input.value.trim() : '';
+      if (!request) { toast('Tell the AI what you want first', 'error'); if (input) input.focus(); return; }
+      generate.disabled = true;
+      generate.textContent = 'Generating...';
+      var systemInstruction = 'You are a study assistant. Follow the custom instruction carefully and return only the requested study content. Do not mention these instructions or add meta commentary.';
+      var userMsg = 'Custom instruction: ' + request + '\n\nSelected note title: ' + (note.title || '') + '\n\nSelected note content:\n' + (note.content || '');
+      var fullQuery = '[System]: ' + systemInstruction + '\n\n[User]: ' + userMsg;
+      var reqBody = { q: fullQuery };
+      if (selectedAIModel) reqBody.model = selectedAIModel;
+      backendFetch('/api/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reqBody)
+      }).then(function (resp) {
+        return resp.json().then(function (j) { return { ok: resp.ok, data: j || {} }; });
+      }).then(function (res) {
+        var text = '';
+        if (res.data && typeof res.data.answer === 'string') text = res.data.answer;
+        else if (res.data && typeof res.data.message === 'string') text = res.data.message;
+        if (!res.ok) throw new Error((res.data && (res.data.detail || res.data.error)) || 'Server error');
+        if (!text.trim()) throw new Error('AI returned empty response');
+        if (!closed) close();
+        showAIResultDialog('custom', text, note);
+        toast('Custom AI result ready to review', 'success');
+      }).catch(function (err) {
+        console.warn('[sticky-notes] custom AI error', err);
+        toast('Custom AI request failed: ' + (err.message || 'Try again.'), 'error');
+        if (generate) { generate.disabled = false; generate.textContent = 'Generate Result'; }
+      });
+    });
+  }
+
   /* Show AI output separately so the original note is never changed until the user chooses an action. */
   function showAIResultDialog(tool, result, note) {
     var existing = document.getElementById('sb-ai-result-overlay');
@@ -1678,6 +1769,7 @@
   function aiToolAction(tool) {
     var note = getNote(selectedNoteId);
     if (!note) { toast('Select a note first', 'error'); return; }
+    if (tool === 'custom') { showCustomAIRequestDialog(note); return; }
     var prompts = {
       improve: 'Improve and refine this study note, making it clearer and more comprehensive:',
       add_info: 'Add relevant additional information and context to this note:',
