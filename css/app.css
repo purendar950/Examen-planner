@@ -5781,9 +5781,20 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
 .fintech-dashboard strong,
 .fintech-dashboard b { font-variant-numeric: tabular-nums; }
 
+.fin-dashboard-topbar{display:flex;align-items:center;justify-content:center;gap:1rem;margin:0 0 1.15rem;min-height:42px;}
+.fin-dashboard-search{display:flex;align-items:center;gap:.65rem;width:min(360px,48vw);padding:.58rem .72rem;border:1px solid var(--fin-line);border-radius:11px;background:rgba(8,15,30,.72);color:var(--muted);box-shadow:0 12px 28px rgba(0,0,0,.12);}
+.fin-dashboard-search>span{font-size:1.1rem;line-height:1;}
+.fin-dashboard-search input{min-width:0;flex:1;background:transparent;border:0;outline:0;color:var(--text);font:500 .75rem var(--font),sans-serif;}
+.fin-dashboard-search input::placeholder{color:#7b8498;}
+.fin-dashboard-search kbd{padding:.22rem .4rem;border:1px solid var(--fin-line);border-radius:5px;color:#8c95a8;font:600 .6rem var(--font),sans-serif;white-space:nowrap;}
+.fin-dashboard-tools{display:flex;align-items:center;gap:.55rem;margin-left:auto;}
+.fin-tool-btn{position:relative;display:grid;width:34px;height:34px;place-items:center;border:1px solid var(--fin-line);border-radius:10px;background:rgba(8,15,30,.55);color:#cbd5e1;cursor:pointer;font-size:1rem;}
+.fin-tool-btn:hover{border-color:rgba(0,200,150,.45);color:var(--accent);}
+.fin-notification-btn span{position:absolute;right:-4px;top:-5px;display:grid;width:16px;height:16px;place-items:center;border-radius:50%;background:#ef4444;color:#fff;font:700 .58rem var(--font),sans-serif;}
+.fin-dashboard-avatar{display:grid;width:34px;height:34px;place-items:center;border:2px solid rgba(0,200,150,.32);border-radius:50%;background:linear-gradient(135deg,#7c3aed,#00c896);color:#fff;font:800 .8rem var(--font),sans-serif;}
 .fin-page-head {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.15rem;
 }
 .fin-eyebrow,
 .fin-card-kicker {
@@ -5814,9 +5825,19 @@ body.ai-notes-focus-open { overflow: hidden !important; overscroll-behavior: non
 .fin-head-exam strong { margin-top: 4px; font-size: .9rem; }
 
 .fin-hero-grid {
-  display: grid; grid-template-columns: minmax(0, 1.14fr) minmax(380px, .86fr);
-  gap: 1.15rem; align-items: stretch;
+  display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr) minmax(245px, .8fr);
+  gap: .85rem; align-items: stretch;
 }
+.fin-quick-card{display:flex;flex-direction:column;min-height:330px;padding:1.35rem;background:var(--fin-panel);border:1px solid var(--fin-line);border-radius:24px;box-shadow:var(--fin-shadow);}
+.fin-quick-card>.fin-card-kicker{margin-bottom:.85rem;}
+.fin-quick-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.62rem;}
+.fin-quick-card .fin-stat-card{min-width:0;padding:.78rem;background:var(--fin-panel-soft);border:1px solid var(--fin-line);border-radius:13px;box-shadow:none;}
+.fin-quick-card .fin-stat-icon{width:28px;height:28px;border-radius:8px;font-size:.78rem;}
+.fin-quick-card .fin-stat-trend{font-size:.56rem;}
+.fin-quick-card .fin-stat-value{font-size:1.25rem;}
+.fin-quick-card .fin-stat-label{font-size:.58rem;}
+.fin-quick-link{display:inline-flex;align-items:center;gap:.45rem;margin-top:auto;padding:.6rem 0 0;border:0;background:none;color:var(--accent);font:800 .7rem var(--font),sans-serif;cursor:pointer;}
+.fin-quick-link:hover{color:#7ff4d2;}
 .fin-readiness-card,
 .fin-focus-card,
 .fin-stat-card,
@@ -6041,6 +6062,7 @@ html[data-theme="light"] .fintech-dashboard {
 @media (max-width: 1100px) {
   .main-content:has(#page-dashboard.active) { padding-inline: 1.5rem; }
   .fin-hero-grid { grid-template-columns: 1fr; }
+  .fin-quick-card { min-height: 0; }
   .fin-readiness-card,
   .fin-focus-card { min-height: 0; }
   .fin-operations-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
@@ -6053,6 +6075,9 @@ html[data-theme="light"] .fintech-dashboard {
 
 @media (max-width: 720px) {
   .main-content:has(#page-dashboard.active) { padding: 1.25rem 1rem 4rem; }
+  .fin-dashboard-topbar{justify-content:space-between;gap:.6rem;}
+  .fin-dashboard-search{width:auto;flex:1;}
+  .fin-dashboard-tools{margin-left:0;}
   .fin-page-head { align-items: flex-start; }
   .fin-page-head h1 { font-size: 1.75rem; }
   .fin-head-exam { min-width: 180px; }
@@ -6072,6 +6097,9 @@ html[data-theme="light"] .fintech-dashboard {
 
 @media (max-width: 520px) {
   .main-content:has(#page-dashboard.active) { padding-inline: .75rem; }
+  .fin-dashboard-topbar{align-items:stretch;flex-wrap:wrap;}
+  .fin-dashboard-search{width:100%;flex:1 0 100%;}
+  .fin-dashboard-tools{margin-left:auto;}
   .fin-page-head { display: block; }
   .fin-page-head p { font-size: .78rem; }
   .fin-head-exam { margin-top: 1rem; text-align: left; }

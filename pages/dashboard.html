@@ -1,5 +1,11 @@
     <div class="page active fintech-dashboard" id="page-dashboard">
 
+      <!-- Reference-style dashboard utility header -->
+      <div class="fin-dashboard-topbar" aria-label="Dashboard tools">
+        <label class="fin-dashboard-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Search anything…" aria-label="Search dashboard" onkeydown="if(event.key==='Enter'){event.preventDefault();if(typeof showToast==='function')showToast('Use the navigation or dashboard cards to open this section.','info');}"><kbd>Ctrl /</kbd></label>
+        <div class="fin-dashboard-tools"><button type="button" class="fin-tool-btn" aria-label="Theme" title="Theme">☼</button><button type="button" class="fin-tool-btn fin-notification-btn" aria-label="Notifications" title="Notifications">♧<span>3</span></button><div class="fin-dashboard-avatar" aria-label="Account">P</div></div>
+      </div>
+
       <!-- Dashboard introduction -->
       <section class="fin-page-head" aria-labelledby="fin-dashboard-title">
         <div>
@@ -76,29 +82,16 @@
             <span>One priority from each subject</span>
           </div>
         </article>
-      </section>
 
-      <!-- Key syllabus metrics -->
-      <section class="fin-stat-grid" aria-label="Key syllabus metrics">
-        <article class="fin-stat-card">
-          <div class="fin-stat-top"><span class="fin-stat-icon fin-blue">▦</span><span class="fin-stat-trend">Portfolio</span></div>
-          <strong class="fin-stat-value" id="stat-total">0</strong>
-          <span class="fin-stat-label">Total chapters</span>
-        </article>
-        <article class="fin-stat-card">
-          <div class="fin-stat-top"><span class="fin-stat-icon fin-green">✓</span><span class="fin-stat-trend fin-positive">Covered</span></div>
-          <strong class="fin-stat-value" id="stat-done">0</strong>
-          <span class="fin-stat-label">Completed chapters</span>
-        </article>
-        <article class="fin-stat-card">
-          <div class="fin-stat-top"><span class="fin-stat-icon fin-amber">◷</span><span class="fin-stat-trend fin-warning">Open</span></div>
-          <strong class="fin-stat-value" id="stat-remaining">0</strong>
-          <span class="fin-stat-label">Remaining chapters</span>
-        </article>
-        <article class="fin-stat-card">
-          <div class="fin-stat-top"><span class="fin-stat-icon fin-purple">◇</span><span class="fin-stat-trend">Saved</span></div>
-          <strong class="fin-stat-value" id="stat-bookmarked">0</strong>
-          <span class="fin-stat-label">Bookmarked chapters</span>
+        <article class="fin-quick-card" aria-label="Quick stats">
+          <div class="fin-card-kicker">Quick stats</div>
+          <div class="fin-quick-grid">
+            <div class="fin-stat-card"><div class="fin-stat-top"><span class="fin-stat-icon fin-blue">▦</span><span class="fin-stat-trend">Portfolio</span></div><strong class="fin-stat-value" id="stat-total">0</strong><span class="fin-stat-label">Total chapters</span></div>
+            <div class="fin-stat-card"><div class="fin-stat-top"><span class="fin-stat-icon fin-green">✓</span><span class="fin-stat-trend fin-positive">Covered</span></div><strong class="fin-stat-value" id="stat-done">0</strong><span class="fin-stat-label">Completed chapters</span></div>
+            <div class="fin-stat-card"><div class="fin-stat-top"><span class="fin-stat-icon fin-amber">◷</span><span class="fin-stat-trend fin-warning">Open</span></div><strong class="fin-stat-value" id="stat-remaining">0</strong><span class="fin-stat-label">Remaining chapters</span></div>
+            <div class="fin-stat-card"><div class="fin-stat-top"><span class="fin-stat-icon fin-purple">◇</span><span class="fin-stat-trend">Saved</span></div><strong class="fin-stat-value" id="stat-bookmarked">0</strong><span class="fin-stat-label">Bookmarked chapters</span></div>
+          </div>
+          <button class="fin-quick-link" onclick="switchPage('analysis')">View analytics <span>→</span></button>
         </article>
       </section>
 
