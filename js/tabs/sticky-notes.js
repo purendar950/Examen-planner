@@ -62,8 +62,10 @@
   var dragState = null;
   var suppressClickUntil = 0;
   var aiProviderGroups = [];
+  var aiImageProviderGroups = [];
   var selectedAIProvider = '';
   var selectedAIModel = '';
+  var selectedAIImageModel = '';
   var selectedAIDepth = 'standard';
   var aiModelsLoaded = false;
 
@@ -593,6 +595,8 @@
     '.sb-image-ai-modal{width:min(620px,calc(100% - 28px));background:#1e1e1e;border:1px solid #3b3b3b;border-radius:14px;padding:20px;box-shadow:0 24px 70px rgba(0,0,0,.55);}',
     '.sb-image-ai-modal h3{margin:0;color:#fff;font-size:1rem;}',
     '.sb-image-ai-modal p{margin:7px 0 14px;color:#9ca3af;font-size:.76rem;line-height:1.45;}',
+    '.sb-image-ai-model-label{display:block;margin:0 0 5px;color:#c4b5fd;font-size:.72rem;font-weight:700;}',
+    '.sb-image-ai-model{margin-bottom:12px;}',
     '.sb-image-ai-prompt{width:100%;min-height:92px;resize:vertical;box-sizing:border-box;padding:10px;background:#151515;border:1px solid #3b3b3b;border-radius:8px;color:#f3f4f6;font:.82rem/1.5 var(--font),sans-serif;outline:0;}',
     '.sb-image-ai-prompt:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,.12);}',
     '.sb-camera-modal{width:min(640px,calc(100% - 28px));background:#1e1e1e;border:1px solid #3b3b3b;border-radius:14px;padding:16px;box-shadow:0 24px 70px rgba(0,0,0,.6);}',
@@ -1536,6 +1540,11 @@
         return j;
       });
     }).then(function (data) {
+      if (data && Array.isArray(data.imageProviderGroups)) {
+        aiImageProviderGroups = data.imageProviderGroups;
+      } else if (data && Array.isArray(data.imageModels)) {
+        aiImageProviderGroups = [{ key: 'image', provider: 'image', label: 'Image Models', models: data.imageModels.map(function (m) { return { key: m.key || m.id || m, label: m.label || m.name || m.key || m, model: m.model || m.id || m.key || m }; }) }];
+      }
       if (data && Array.isArray(data.providerGroups)) {
         aiProviderGroups = data.providerGroups;
         aiProviderGroups.forEach(function (g) {
@@ -1556,6 +1565,37 @@
       console.warn('[sticky-notes] Failed to load AI models', err);
       aiModelsLoaded = true;
     });
+  }
+
+  function imageModelChoices() {
+    var out = [], seen = {};
+    function addModel(group, model) {
+      var key = String((model && (model.key || model.id || model.model)) || '');
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      out.push({ key: key, label: String((model && (model.label || model.name || model.model)) || key), provider: (group && (group.provider || group.key)) || '' });
+    }
+    (aiImageProviderGroups || []).forEach(function (group) { (group.models || []).forEach(function (model) { addModel(group, model); }); });
+    if (!out.length) {
+      (aiProviderGroups || []).forEach(function (group) {
+        (group.models || []).forEach(function (model) {
+          var key = String((model && (model.key || model.model)) || '').toLowerCase();
+          var label = String((model && (model.label || model.name || model.model)) || '').toLowerCase();
+          if (/vision|multimodal|image|nano-banana|imagen/.test(key + ' ' + label)) addModel(group, model);
+        });
+      });
+    }
+    return out;
+  }
+
+  function defaultImageModel() {
+    var choices = imageModelChoices();
+    if (!choices.length) return 'auto/best-vision';
+    var selected = choices.find(function (item) { return item.key === selectedAIImageModel; });
+    if (selected) return selected.key;
+    selected = choices.find(function (item) { return /vision|multimodal/i.test(item.key + ' ' + item.label); }) || choices[0];
+    selectedAIImageModel = selected.key;
+    return selected.key;
   }
 
   function _providerForModel(modelKey) {
@@ -2263,9 +2303,14 @@
     var overlay = document.createElement('div');
     overlay.className = 'sb-modal-overlay sb-image-ai-overlay';
     overlay.id = 'sb-image-ai-overlay';
-    overlay.innerHTML = '<div class="sb-image-ai-modal" role="dialog" aria-modal="true" aria-labelledby="sb-image-ai-title"><h3 id="sb-image-ai-title">Send image directly to AI</h3><p>The image will be resized in your browser and sent to a vision-capable AI. Choose what you want the AI to return.</p><textarea class="sb-image-ai-prompt" id="sb-image-ai-prompt" placeholder="For example: Extract all text and format it as a clear study note.">Extract all readable text and convert it into a clean, well-structured study note. Preserve facts and do not invent information.</textarea><div class="sb-ocr-modal-actions"><button type="button" class="sb-ocr-cancel" id="sb-image-ai-cancel">Cancel</button><button type="button" class="sb-ocr-replace" id="sb-image-ai-send">Send Image to AI</button></div></div>';
+    var choices = imageModelChoices();
+    var defaultModel = defaultImageModel();
+    var modelOptions = choices.length ? choices.map(function (item) { return '<option value="' + escAttr(item.key) + '"' + (item.key === defaultModel ? ' selected' : '') + '>' + esc(item.label) + '</option>'; }).join('') : '<option value="auto/best-vision" selected>Automatic best vision model</option>';
+    overlay.innerHTML = '<div class="sb-image-ai-modal" role="dialog" aria-modal="true" aria-labelledby="sb-image-ai-title"><h3 id="sb-image-ai-title">Send image directly to AI</h3><p>The image will be resized in your browser and sent to a vision-capable AI. Choose what you want the AI to return.</p><label class="sb-image-ai-model-label" for="sb-image-ai-model">Image AI model</label><select class="sb-select sb-image-ai-model" id="sb-image-ai-model">' + modelOptions + '</select><textarea class="sb-image-ai-prompt" id="sb-image-ai-prompt" placeholder="For example: Extract all text and format it as a clear study note.">Extract all readable text and convert it into a clean, well-structured study note. Preserve facts and do not invent information.</textarea><div class="sb-ocr-modal-actions"><button type="button" class="sb-ocr-cancel" id="sb-image-ai-cancel">Cancel</button><button type="button" class="sb-ocr-replace" id="sb-image-ai-send">Send Image to AI</button></div></div>';
     document.body.appendChild(overlay);
     var promptEl = document.getElementById('sb-image-ai-prompt');
+    var modelEl = document.getElementById('sb-image-ai-model');
+    if (modelEl) modelEl.addEventListener('change', function () { selectedAIImageModel = modelEl.value; });
     if (promptEl) promptEl.focus();
     function close() { document.removeEventListener('keydown', onKeyDown); overlay.remove(); }
     function onKeyDown(e) { if (e.key === 'Escape') close(); }
@@ -2278,7 +2323,8 @@
       var prompt = promptEl ? promptEl.value.trim() : '';
       if (!prompt) { toast('Tell the AI what to do with the image.', 'error'); return; }
       send.disabled = true; send.textContent = 'Sending…';
-      imageToDataURL(file).then(function (dataURL) { return requestDirectImageAI(dataURL, prompt, createMode, close); }).catch(function (err) {
+      var imageModel = modelEl ? modelEl.value : defaultImageModel();
+      imageToDataURL(file).then(function (dataURL) { return requestDirectImageAI(dataURL, prompt, createMode, close, imageModel); }).catch(function (err) {
         console.warn('[sticky-notes] direct image AI error', err);
         send.disabled = false; send.textContent = 'Send Image to AI';
         toast('Image could not be prepared: ' + (err.message || 'Try another image.'), 'error');
@@ -2286,10 +2332,10 @@
     });
   }
 
-  function requestDirectImageAI(dataURL, prompt, createMode, closePrompt) {
+  function requestDirectImageAI(dataURL, prompt, createMode, closePrompt, imageModel) {
     toast('Sending image to AI…', 'info');
-    var reqBody = { q: prompt, image: dataURL, image_url: dataURL, images: [dataURL], vision: true };
-    if (selectedAIModel) reqBody.model = selectedAIModel;
+    var chosenImageModel = imageModel || defaultImageModel();
+    var reqBody = { q: prompt, image: dataURL, image_url: dataURL, images: [dataURL], vision: true, imageModel: chosenImageModel, image_model: chosenImageModel, model: chosenImageModel };
     return backendFetch('/api/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reqBody) })
       .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, data: j || {} }; }); })
       .then(function (res) {
