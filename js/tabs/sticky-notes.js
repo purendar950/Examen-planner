@@ -480,6 +480,36 @@
     '.sb-organize-change b{color:#eab308;font-weight:600;}',
     '.sb-organize-empty{font-size:0.82rem;color:#666;text-align:center;padding:24px 10px;}',
 
+    /* AI result dialog */
+    '.sb-ai-result-overlay{background:rgba(0,0,0,0.72);backdrop-filter:blur(3px);padding:16px;box-sizing:border-box;}',
+    '.sb-ai-result-modal{position:relative;width:min(680px,100%);max-width:680px;padding:0;overflow:hidden;box-shadow:0 24px 70px rgba(0,0,0,0.5);animation:sb-ai-result-in .18s cubic-bezier(0.23,1,0.32,1);}',
+    '@keyframes sb-ai-result-in{from{opacity:0;transform:translateY(10px) scale(0.97);}to{opacity:1;transform:translateY(0) scale(1);}}',
+    '.sb-ai-result-header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:20px 22px 16px;background:linear-gradient(135deg,rgba(124,58,237,0.22),rgba(168,85,247,0.08));border-bottom:1px solid rgba(168,85,247,0.2);}',
+    '.sb-ai-result-heading{min-width:0;}',
+    '.sb-ai-result-title{font-size:1.05rem;color:#fff;font-weight:700;line-height:1.3;}',
+    '.sb-ai-result-subtitle{font-size:0.75rem;color:#a78bfa;margin-top:5px;line-height:1.4;}',
+    '.sb-ai-result-close{width:30px;height:30px;flex:0 0 auto;border:1px solid #444;border-radius:7px;background:#2a2a2a;color:#9ca3af;font-size:1.2rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}',
+    '.sb-ai-result-close:hover{color:#fff;background:#333;border-color:#666;}',
+    '.sb-ai-result-body{padding:18px 22px 8px;}',
+    '.sb-ai-result-label{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#d1d5db;font-size:0.75rem;font-weight:600;margin-bottom:7px;}',
+    '.sb-ai-result-note{font-size:0.68rem;color:#6b7280;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+    '.sb-ai-result-textarea{width:100%;min-height:260px;max-height:52vh;resize:vertical;box-sizing:border-box;padding:13px 14px;background:#151515;border:1px solid #3b3b3b;border-radius:9px;color:#f3f4f6;font:0.84rem/1.6 var(--font),sans-serif;outline:none;}',
+    '.sb-ai-result-textarea:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,0.12);}',
+    '.sb-ai-result-hint{color:#6b7280;font-size:0.7rem;line-height:1.45;margin:9px 0 2px;}',
+    '.sb-ai-result-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:15px 22px 20px;background:rgba(255,255,255,0.02);border-top:1px solid #2a2a2a;}',
+    '.sb-ai-result-actions-spacer{flex:1;}',
+    '.sb-ai-result-btn{padding:9px 13px;border-radius:8px;font:600 0.78rem var(--font),sans-serif;cursor:pointer;transition:all 0.15s;}',
+    '.sb-ai-result-btn:active{transform:scale(0.97);}',
+    '.sb-ai-result-copy{background:#2a2a2a;border:1px solid #444;color:#d1d5db;}',
+    '.sb-ai-result-copy:hover{background:#333;border-color:#666;color:#fff;}',
+    '.sb-ai-result-discard{background:transparent;border:1px solid #444;color:#9ca3af;}',
+    '.sb-ai-result-discard:hover{background:#2a2a2a;color:#fff;border-color:#666;}',
+    '.sb-ai-result-add{background:rgba(124,58,237,0.16);border:1px solid rgba(168,85,247,0.45);color:#d8b4fe;}',
+    '.sb-ai-result-add:hover{background:rgba(124,58,237,0.28);border-color:#a855f7;}',
+    '.sb-ai-result-replace{background:linear-gradient(135deg,#7c3aed,#a855f7);border:1px solid transparent;color:#fff;}',
+    '.sb-ai-result-replace:hover{filter:brightness(1.1);}',
+    '@media(max-width:600px){.sb-ai-result-modal{max-height:calc(100vh - 32px);overflow-y:auto;}.sb-ai-result-header{padding:16px;}.sb-ai-result-body{padding:15px 16px 8px;}.sb-ai-result-actions{padding:13px 16px 16px;}.sb-ai-result-actions-spacer{display:none;}.sb-ai-result-btn{flex:1;min-width:calc(50% - 8px);}.sb-ai-result-replace{order:1;}.sb-ai-result-add{order:2;}.sb-ai-result-copy{order:3;}.sb-ai-result-discard{order:4;}}',
+
     /* Tab panels */
     '.sb-ai-panel,.sb-revision-panel,.sb-create-panel{display:none;}',
     '.sb-ai-panel.active,.sb-revision-panel.active,.sb-create-panel.active{display:block;}',
@@ -1529,6 +1559,98 @@
     });
   }
 
+  function getAIToolDefinition(tool) {
+    return AI_TOOLS.find(function (t) { return t.key === tool; }) || { key: tool, icon: '\u2728', label: tool };
+  }
+
+  /* Show AI output separately so the original note is never changed until the user chooses an action. */
+  function showAIResultDialog(tool, result, note) {
+    var existing = document.getElementById('sb-ai-result-overlay');
+    if (existing) existing.remove();
+
+    var def = getAIToolDefinition(tool);
+    var overlay = document.createElement('div');
+    overlay.className = 'sb-modal-overlay sb-ai-result-overlay';
+    overlay.id = 'sb-ai-result-overlay';
+    overlay.setAttribute('role', 'presentation');
+    overlay.innerHTML =
+      '<div class="sb-modal sb-ai-result-modal" role="dialog" aria-modal="true" aria-labelledby="sb-ai-result-title">' +
+        '<div class="sb-ai-result-header">' +
+          '<div class="sb-ai-result-heading">' +
+            '<div class="sb-ai-result-title" id="sb-ai-result-title">' + def.icon + ' ' + esc(def.label) + ' Result</div>' +
+            '<div class="sb-ai-result-subtitle">Review the AI suggestion before changing your Sticky Note.</div>' +
+          '</div>' +
+          '<button type="button" class="sb-ai-result-close" id="sb-ai-result-close" aria-label="Close AI result">&times;</button>' +
+        '</div>' +
+        '<div class="sb-ai-result-body">' +
+          '<div class="sb-ai-result-label"><span>AI-generated result</span><span class="sb-ai-result-note">For: ' + esc(note.title || 'Untitled') + '</span></div>' +
+          '<textarea class="sb-ai-result-textarea" id="sb-ai-result-text" spellcheck="true"></textarea>' +
+          '<div class="sb-ai-result-hint">You can edit the result here before copying it, adding it to the note, or replacing the original.</div>' +
+        '</div>' +
+        '<div class="sb-ai-result-actions">' +
+          '<button type="button" class="sb-ai-result-btn sb-ai-result-copy" id="sb-ai-result-copy">Copy</button>' +
+          '<span class="sb-ai-result-actions-spacer"></span>' +
+          '<button type="button" class="sb-ai-result-btn sb-ai-result-discard" id="sb-ai-result-discard">Close</button>' +
+          '<button type="button" class="sb-ai-result-btn sb-ai-result-add" id="sb-ai-result-add">Add Below Original</button>' +
+          '<button type="button" class="sb-ai-result-btn sb-ai-result-replace" id="sb-ai-result-replace">Replace Note</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    var resultEl = document.getElementById('sb-ai-result-text');
+    if (resultEl) {
+      resultEl.value = result;
+      setTimeout(function () { resultEl.focus(); resultEl.setSelectionRange(0, 0); }, 30);
+    }
+
+    function close() { document.removeEventListener('keydown', onKeyDown); overlay.remove(); }
+    function getResultText() { return resultEl ? resultEl.value.trim() : String(result || '').trim(); }
+    function getCurrentNote() {
+      var current = getNote(note.id);
+      if (!current) { toast('The original note is no longer available', 'error'); close(); return null; }
+      return current;
+    }
+    function updateNote(mode) {
+      var value = getResultText();
+      if (!value) { toast('The AI result is empty', 'error'); return; }
+      var current = getCurrentNote();
+      if (!current) return;
+      if (mode === 'add') {
+        current.content = current.content ? current.content + '\n\n' + value : value;
+      } else {
+        current.content = value;
+      }
+      current.updatedAt = now();
+      persist(); renderBoard(); renderEditor();
+      close();
+      toast(mode === 'add' ? 'AI result added below the original \u2713' : 'Note replaced with AI result \u2713', 'success');
+    }
+
+    var closeBtn = document.getElementById('sb-ai-result-close');
+    var discardBtn = document.getElementById('sb-ai-result-discard');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    if (discardBtn) discardBtn.addEventListener('click', close);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    function onKeyDown(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKeyDown); } }
+    document.addEventListener('keydown', onKeyDown);
+
+    var copyBtn = document.getElementById('sb-ai-result-copy');
+    if (copyBtn) copyBtn.addEventListener('click', function () {
+      var value = getResultText();
+      if (!value) { toast('Nothing to copy', 'error'); return; }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(value).then(function () { toast('AI result copied \u2713', 'success'); }).catch(function () { toast('Copy failed — select the text manually', 'error'); });
+      } else {
+        resultEl.focus(); resultEl.select();
+        try { document.execCommand('copy'); toast('AI result copied \u2713', 'success'); } catch (e) { toast('Copy failed — select the text manually', 'error'); }
+      }
+    });
+    var addBtn = document.getElementById('sb-ai-result-add');
+    if (addBtn) addBtn.addEventListener('click', function () { updateNote('add'); });
+    var replaceBtn = document.getElementById('sb-ai-result-replace');
+    if (replaceBtn) replaceBtn.addEventListener('click', function () { updateNote('replace'); });
+  }
+
   function aiToolAction(tool) {
     var note = getNote(selectedNoteId);
     if (!note) { toast('Select a note first', 'error'); return; }
@@ -1557,10 +1679,8 @@
       if (res.data && typeof res.data.answer === 'string') text = res.data.answer;
       else if (res.data && typeof res.data.message === 'string') text = res.data.message;
       if (text) {
-        note.content = text;
-        note.updatedAt = now();
-        persist(); renderBoard(); renderEditor();
-        toast('AI ' + tool + ' applied \u2713', 'success');
+        showAIResultDialog(tool, text, note);
+        toast('AI result ready to review', 'success');
       } else {
         toast('AI returned empty response', 'error');
       }
