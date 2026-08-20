@@ -493,6 +493,17 @@
     '.sb-ai-result-body{padding:18px 22px 8px;}',
     '.sb-ai-result-label{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#d1d5db;font-size:0.75rem;font-weight:600;margin-bottom:7px;}',
     '.sb-ai-result-note{font-size:0.68rem;color:#6b7280;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+    '.sb-ai-result-edit-toggle{padding:4px 8px;background:transparent;border:1px solid #444;border-radius:6px;color:#a78bfa;font:600 0.68rem var(--font),sans-serif;cursor:pointer;white-space:nowrap;}',
+    '.sb-ai-result-edit-toggle:hover{background:rgba(168,85,247,0.1);border-color:#a855f7;color:#d8b4fe;}',
+    '.sb-ai-result-preview{min-height:260px;max-height:52vh;overflow-y:auto;box-sizing:border-box;padding:13px 14px;background:#151515;border:1px solid #3b3b3b;border-radius:9px;color:#f3f4f6;font-size:0.84rem;line-height:1.6;}',
+    '.sb-ai-result-preview p{margin:0 0 8px;}',
+    '.sb-ai-result-preview p:last-child{margin-bottom:0;}',
+    '.sb-ai-result-preview .sb-note-heading{font-size:0.95rem;color:#fff;margin:12px 0 6px;font-weight:700;}',
+    '.sb-ai-result-preview .sb-note-heading:first-child{margin-top:0;}',
+    '.sb-ai-result-preview ul,.sb-ai-result-preview ol{margin:0 0 8px;padding-left:20px;}',
+    '.sb-ai-result-preview li{margin-bottom:4px;}',
+    '.sb-ai-result-preview strong{color:#fff;font-weight:700;}',
+    '.sb-ai-result-preview code{background:#2a2a2a;padding:2px 5px;border-radius:4px;color:#d8b4fe;}',
     '.sb-ai-result-textarea{width:100%;min-height:260px;max-height:52vh;resize:vertical;box-sizing:border-box;padding:13px 14px;background:#151515;border:1px solid #3b3b3b;border-radius:9px;color:#f3f4f6;font:0.84rem/1.6 var(--font),sans-serif;outline:none;}',
     '.sb-ai-result-textarea:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,0.12);}',
     '.sb-ai-result-hint{color:#6b7280;font-size:0.7rem;line-height:1.45;margin:9px 0 2px;}',
@@ -1583,9 +1594,10 @@
           '<button type="button" class="sb-ai-result-close" id="sb-ai-result-close" aria-label="Close AI result">&times;</button>' +
         '</div>' +
         '<div class="sb-ai-result-body">' +
-          '<div class="sb-ai-result-label"><span>AI-generated result</span><span class="sb-ai-result-note">For: ' + esc(note.title || 'Untitled') + '</span></div>' +
-          '<textarea class="sb-ai-result-textarea" id="sb-ai-result-text" spellcheck="true"></textarea>' +
-          '<div class="sb-ai-result-hint">You can edit the result here before copying it, adding it to the note, or replacing the original.</div>' +
+          '<div class="sb-ai-result-label"><span>AI-generated result</span><span class="sb-ai-result-note">For: ' + esc(note.title || 'Untitled') + '</span><button type="button" class="sb-ai-result-edit-toggle" id="sb-ai-result-edit-toggle">Edit Text</button></div>' +
+          '<div class="sb-ai-result-preview sb-note-body" id="sb-ai-result-preview" aria-live="polite"></div>' +
+          '<textarea class="sb-ai-result-textarea" id="sb-ai-result-text" spellcheck="true" style="display:none;"></textarea>' +
+          '<div class="sb-ai-result-hint">Markdown is formatted for easier reading. Use Edit Text if you want to change the AI result before copying or applying it.</div>' +
         '</div>' +
         '<div class="sb-ai-result-actions">' +
           '<button type="button" class="sb-ai-result-btn sb-ai-result-copy" id="sb-ai-result-copy">Copy</button>' +
@@ -1598,10 +1610,22 @@
     document.body.appendChild(overlay);
 
     var resultEl = document.getElementById('sb-ai-result-text');
-    if (resultEl) {
-      resultEl.value = result;
-      setTimeout(function () { resultEl.focus(); resultEl.setSelectionRange(0, 0); }, 30);
-    }
+    var previewEl = document.getElementById('sb-ai-result-preview');
+    var editToggle = document.getElementById('sb-ai-result-edit-toggle');
+    var isEditing = false;
+    if (resultEl) resultEl.value = result;
+    if (previewEl) previewEl.innerHTML = renderNoteBody(result, note.title || '');
+    if (editToggle) editToggle.addEventListener('click', function () {
+      isEditing = !isEditing;
+      if (resultEl) resultEl.style.display = isEditing ? 'block' : 'none';
+      if (previewEl) previewEl.style.display = isEditing ? 'none' : 'block';
+      editToggle.textContent = isEditing ? 'Preview' : 'Edit Text';
+      if (isEditing && resultEl) { resultEl.focus(); resultEl.setSelectionRange(resultEl.value.length, resultEl.value.length); }
+      if (!isEditing && previewEl && resultEl) previewEl.innerHTML = renderNoteBody(resultEl.value, note.title || '');
+    });
+    if (resultEl) resultEl.addEventListener('input', function () {
+      if (previewEl) previewEl.innerHTML = renderNoteBody(resultEl.value, note.title || '');
+    });
 
     function close() { document.removeEventListener('keydown', onKeyDown); overlay.remove(); }
     function getResultText() { return resultEl ? resultEl.value.trim() : String(result || '').trim(); }
