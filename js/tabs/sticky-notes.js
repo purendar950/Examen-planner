@@ -2135,6 +2135,14 @@
   }
 
   function imageToDataURL(file) {
+    if (file && /image\/(heic|heif)/i.test(file.type || '') || file && /\.(heic|heif)$/i.test(file.name || '')) {
+      if (typeof window.heic2any !== 'function') return Promise.reject(new Error('HEIC/HEIF decoder is still loading. Refresh and try again.'));
+      return window.heic2any({ blob: file, toType: 'image/jpeg', quality: 0.84 }).then(function (converted) {
+        var blob = Array.isArray(converted) ? converted[0] : converted;
+        if (!blob) throw new Error('HEIC/HEIF conversion returned no image');
+        return imageToDataURL(blob);
+      });
+    }
     return new Promise(function (resolve, reject) {
       if (!file) { reject(new Error('No image was selected')); return; }
       var objectURL = null;
