@@ -317,10 +317,17 @@
     '.sb-cork-inner{columns:3;column-gap:16px;}',
 
     /* Sticky notes */
-    '.sb-note{break-inside:avoid;margin-bottom:18px;border-radius:12px;padding:18px 14px 12px;position:relative;cursor:grab;transition:box-shadow 0.2s,transform 0.15s;min-height:100px;box-shadow:0 8px 16px -4px rgba(0,0,0,0.35),0 3px 6px -2px rgba(0,0,0,0.2);}',
-    '.sb-note:hover{box-shadow:0 16px 24px -6px rgba(0,0,0,0.45),0 6px 10px -4px rgba(0,0,0,0.25);z-index:2;filter:brightness(1.02);}',
-    '.sb-note.selected{outline:3px solid #eab308;outline-offset:2px;z-index:3;}',
-    '.sb-note.dragging{opacity:0.6;cursor:grabbing;z-index:10;}',
+    '.sb-note{break-inside:avoid;margin-bottom:18px;position:relative;}',
+    '.sb-note:hover{z-index:2;}',
+    '.sb-note.selected{z-index:3;}',
+    '.sb-note.dragging{z-index:10;}',
+    /* Rotation lives on this inner card, not on .sb-note itself: browsers don't reliably honor
+       break-inside:avoid on a transformed element inside CSS multi-column layout, which was
+       cutting off the footer (star/more buttons) on notes that landed near a column break. */
+    '.sb-note-card{border-radius:12px;padding:18px 14px 12px;position:relative;cursor:grab;transition:box-shadow 0.2s,transform 0.15s;min-height:100px;box-shadow:0 8px 16px -4px rgba(0,0,0,0.35),0 3px 6px -2px rgba(0,0,0,0.2);}',
+    '.sb-note-card:hover{box-shadow:0 16px 24px -6px rgba(0,0,0,0.45),0 6px 10px -4px rgba(0,0,0,0.25);filter:brightness(1.02);}',
+    '.sb-note.selected .sb-note-card{outline:3px solid #eab308;outline-offset:2px;}',
+    '.sb-note.dragging .sb-note-card{opacity:0.6;cursor:grabbing;}',
     '.sb-note-color-yellow{background:#fef08a;}',
     '.sb-note-color-blue{background:#bfdbfe;}',
     '.sb-note-color-green{background:#bbf7d0;}',
@@ -376,7 +383,7 @@
     '.sb-note-action{width:auto;height:auto;padding:2px;border:none;background:transparent;border-radius:4px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:rgba(41,37,36,0.45);transition:color 0.15s,transform 0.15s;}',
     '.sb-note-action:hover{color:#1c1917;transform:scale(1.15);}',
     '.sb-note-action.pinned{color:#d97706;}',
-    '.sb-note-more{font-size:1.05rem;font-weight:900;letter-spacing:-1px;line-height:0.5;padding-bottom:6px;}',
+    '.sb-note-more{font-size:1.05rem;font-weight:900;letter-spacing:-1px;line-height:1;}',
     '.sb-ai-badge{display:inline-flex;align-items:center;gap:3px;font-size:0.6rem;padding:2px 6px;background:rgba(124,58,237,0.12);border-radius:99px;color:#7c3aed;margin-top:6px;}',
 
     /* Empty board state */
@@ -800,19 +807,21 @@
       var starIcon = n.pinned
         ? '<svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor"><path d="M10 1.6l2.55 5.66 6.17.66-4.62 4.24 1.24 6.06L10 15.1l-5.34 3.12 1.24-6.06L1.28 7.92l6.17-.66z"/></svg>'
         : '<svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10 1.6l2.55 5.66 6.17.66-4.62 4.24 1.24 6.06L10 15.1l-5.34 3.12 1.24-6.06L1.28 7.92l6.17-.66z"/></svg>';
-      html += '<div class="sb-note sb-note-color-' + color + sel + '" data-note-id="' + n.id + '" style="transform:rotate(' + rot + 'deg)">' +
-        '<div class="sb-note-pin"></div>' +
-        '<div class="sb-note-title">' + esc(n.title || 'Untitled') + '</div>' +
-        '<div class="sb-note-body">' + renderNoteBody(n.content || '', n.title || '') + '</div>' +
-        (n.aiGenerated ? '<div class="sb-ai-badge">\uD83E\uDD16 AI Generated</div>' : '') +
-        '<div class="sb-note-footer">' +
-          '<div class="sb-note-tags">' +
-            (meta ? '<span class="sb-note-cat sb-note-cat-' + n.category + '" style="color:' + meta.color + '"><span class="sb-note-cat-icon">' + meta.icon + '</span>' + esc(meta.label) + '</span>' : '') +
-            (n.subject ? '<span class="sb-note-subject">' + esc(n.subject) + '</span>' : '') +
-          '</div>' +
-          '<div class="sb-note-actions">' +
-            '<button class="sb-note-action sb-note-star' + pinCls + '" data-action="pin" title="' + (n.pinned ? 'Unpin' : 'Pin') + '">' + starIcon + '</button>' +
-            '<button class="sb-note-action sb-note-more" data-action="menu" title="Open">\u22EF</button>' +
+      html += '<div class="sb-note' + sel + '" data-note-id="' + n.id + '">' +
+        '<div class="sb-note-card sb-note-color-' + color + '" style="transform:rotate(' + rot + 'deg)">' +
+          '<div class="sb-note-pin"></div>' +
+          '<div class="sb-note-title">' + esc(n.title || 'Untitled') + '</div>' +
+          '<div class="sb-note-body">' + renderNoteBody(n.content || '', n.title || '') + '</div>' +
+          (n.aiGenerated ? '<div class="sb-ai-badge">\uD83E\uDD16 AI Generated</div>' : '') +
+          '<div class="sb-note-footer">' +
+            '<div class="sb-note-tags">' +
+              (meta ? '<span class="sb-note-cat sb-note-cat-' + n.category + '" style="color:' + meta.color + '"><span class="sb-note-cat-icon">' + meta.icon + '</span>' + esc(meta.label) + '</span>' : '') +
+              (n.subject ? '<span class="sb-note-subject">' + esc(n.subject) + '</span>' : '') +
+            '</div>' +
+            '<div class="sb-note-actions">' +
+              '<button class="sb-note-action sb-note-star' + pinCls + '" data-action="pin" title="' + (n.pinned ? 'Unpin' : 'Pin') + '">' + starIcon + '</button>' +
+              '<button class="sb-note-action sb-note-more" data-action="menu" title="Open">\u22EF</button>' +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</div>';
