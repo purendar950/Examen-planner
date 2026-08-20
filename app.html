@@ -583,6 +583,8 @@
      window.AiNotesKit from ai-tutor.js (loaded later — only used on click). -->
 <script defer src="js/tabs/yt-notebook.js"></script>
 <script defer src="js/tabs/yt-search.js"></script>
+<!-- Local OCR engine: image text is processed in the browser and is not sent to generative AI. -->
+<script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script defer src="js/tabs/sticky-notes.js"></script>
 <!-- The AI notes library indexes both single-lecture notes and notebooks.
      Versioned because Vite copies js/ verbatim: without a ?v= a change here

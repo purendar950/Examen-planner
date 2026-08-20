@@ -508,6 +508,11 @@
     '.sb-input{width:100%;padding:8px 10px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#fff;font-size:0.85rem;font-family:inherit;outline:none;box-sizing:border-box;}',
     '.sb-input:focus{border-color:#eab308;}',
     '.sb-textarea{width:100%;min-height:140px;padding:10px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#fff;font-size:0.82rem;resize:vertical;font-family:inherit;outline:none;box-sizing:border-box;line-height:1.5;}',
+    '.sb-ocr-tools{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;}',
+    '.sb-ocr-btn{flex:1;min-width:120px;padding:7px 9px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.35);border-radius:7px;color:#facc15;font:600 0.72rem var(--font),sans-serif;cursor:pointer;transition:all .15s;}',
+    '.sb-ocr-btn:hover{background:rgba(234,179,8,0.16);border-color:#eab308;color:#fde68a;}',
+    '.sb-ocr-status{display:none;margin-top:7px;font-size:0.7rem;color:#a3a3a3;line-height:1.35;}',
+    '.sb-ocr-status.active{display:block;}',
     '.sb-textarea:focus{border-color:#eab308;}',
     '.sb-format-bar{display:flex;gap:4px;margin-bottom:6px;}',
     '.sb-format-btn{width:28px;height:28px;background:#2a2a2a;border:1px solid #333;border-radius:4px;color:#9ca3af;cursor:pointer;font-size:0.75rem;display:flex;align-items:center;justify-content:center;transition:all 0.15s;}',
@@ -565,6 +570,24 @@
     '.sb-no-selection svg{width:48px;height:48px;margin-bottom:12px;opacity:0.3;stroke:#4b5563;}',
     '.sb-no-selection p{font-size:0.88rem;color:#9ca3af;}',
     '.sb-no-selection small{font-size:0.75rem;color:#555;margin-top:4px;}',
+
+    /* OCR modal */
+    '.sb-ocr-modal{width:min(680px,calc(100% - 28px));max-height:min(86vh,720px);overflow-y:auto;background:#1e1e1e;border:1px solid #3b3b3b;border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.55);padding:20px;}',
+    '.sb-ocr-modal h3{margin:0;color:#fff;font-size:1rem;}',
+    '.sb-ocr-modal p{margin:7px 0 14px;color:#9ca3af;font-size:.76rem;line-height:1.45;}',
+    '.sb-ocr-result{width:100%;min-height:220px;resize:vertical;box-sizing:border-box;padding:11px;background:#151515;border:1px solid #3b3b3b;border-radius:8px;color:#f3f4f6;font:.82rem/1.55 var(--font),sans-serif;outline:0;}',
+    '.sb-ocr-result:focus{border-color:#eab308;box-shadow:0 0 0 3px rgba(234,179,8,.12);}',
+    '.sb-ocr-progress{display:none;color:#facc15;font-size:.74rem;padding:10px 0;}',
+    '.sb-ocr-progress.active{display:block;}',
+    '.sb-ocr-ai-row{display:flex;gap:8px;align-items:center;margin-top:10px;}',
+    '.sb-ocr-ai-row .sb-select{flex:1;min-width:0;}',
+    '.sb-ocr-ai-btn{padding:8px 12px;white-space:nowrap;border:1px solid rgba(124,58,237,.5);border-radius:7px;background:rgba(124,58,237,.18);color:#d8b4fe;font:600 .75rem var(--font),sans-serif;cursor:pointer;}',
+    '.sb-ocr-ai-btn:hover{background:rgba(124,58,237,.3);border-color:#a855f7;}',
+    '.sb-ocr-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;}',
+    '.sb-ocr-modal-actions button{padding:8px 12px;border-radius:7px;font:600 .75rem var(--font),sans-serif;cursor:pointer;}',
+    '.sb-ocr-cancel{background:#2a2a2a;border:1px solid #444;color:#d1d5db;}',
+    '.sb-ocr-append{background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);color:#fde68a;}',
+    '.sb-ocr-replace{background:#eab308;border:1px solid transparent;color:#000;}',
 
     /* Modal */
     '.sb-modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:1000;display:flex;align-items:center;justify-content:center;}',
@@ -1006,8 +1029,12 @@
           '<button class="sb-format-btn" title="Italic" data-fmt="italic">I</button>' +
           '<button class="sb-format-btn" title="List" data-fmt="list">\u2630</button>' +
         '</div>' +
-        '<textarea class="sb-textarea" id="sb-edit-content" placeholder="Write your note...">' + esc(note.content || '') + '</textarea>' +
-      '</div>' +
+          '<textarea class="sb-textarea" id="sb-edit-content" placeholder="Write your note...">' + esc(note.content || '') + '</textarea>' +
+          '<div class="sb-ocr-tools"><button type="button" class="sb-ocr-btn" id="sb-ocr-upload-btn">\uD83D\uDCF7 Scan Photo / Screenshot</button><button type="button" class="sb-ocr-btn" id="sb-ocr-camera-btn">\uD83D\uDCF9 Use Camera</button></div>' +
+          '<input type="file" id="sb-ocr-file-input" accept="image/*" hidden>' +
+          '<input type="file" id="sb-ocr-camera-input" accept="image/*" capture="environment" hidden>' +
+          '<div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div>' +
+        '</div>' +
       '<div class="sb-field"><label>Subject</label><select class="sb-select" id="sb-edit-subject"><option value="">None</option>' + getSubjectOptions(note.subject) + '</select></div>' +
       '<div class="sb-field"><label>Folder</label><select class="sb-select" id="sb-edit-folder"><option value="">None</option>' + getFolderOptions(note.folderId) + '</select></div>' +
       '<div class="sb-field"><label>Color</label><div class="sb-color-picker" id="sb-color-picker">' + getColorPicker(note.color || 'yellow') + '</div></div>' +
@@ -1186,6 +1213,22 @@
       searchQuery = '';
       if (searchInput) { searchInput.value = ''; searchInput.focus(); }
       renderBoard();
+    });
+
+    /* local OCR controls */
+    page.addEventListener('click', function (e) {
+      if (e.target.closest('#sb-ocr-upload-btn')) {
+        var uploadInput = document.getElementById('sb-ocr-file-input');
+        if (uploadInput) uploadInput.click();
+      }
+      if (e.target.closest('#sb-ocr-camera-btn')) {
+        var cameraInput = document.getElementById('sb-ocr-camera-input');
+        if (cameraInput) cameraInput.click();
+      }
+    });
+    page.addEventListener('change', function (e) {
+      var input = e.target.closest('#sb-ocr-file-input,#sb-ocr-camera-input');
+      if (input && input.files && input.files[0]) runLocalOCR(input.files[0]);
     });
 
     /* filter chips */
@@ -2034,6 +2077,113 @@
     if (addBtn) addBtn.addEventListener('click', function () { updateNote('add'); });
     var replaceBtn = document.getElementById('sb-ai-result-replace');
     if (replaceBtn) replaceBtn.addEventListener('click', function () { updateNote('replace'); });
+  }
+
+  function setOCRStatus(message, active) {
+    var status = document.getElementById('sb-ocr-status');
+    if (!status) return;
+    status.textContent = message || '';
+    status.classList.toggle('active', !!active);
+  }
+
+  function runLocalOCR(file) {
+    if (!window.Tesseract || typeof window.Tesseract.recognize !== 'function') {
+      toast('OCR engine is still loading. Please try again in a moment.', 'error');
+      return;
+    }
+    setOCRStatus('Reading image locally… 0%', true);
+    toast('Extracting text locally from the image…', 'info');
+    window.Tesseract.recognize(file, 'eng', {
+      logger: function (info) {
+        if (info && info.status && typeof info.progress === 'number') setOCRStatus('Reading image locally… ' + Math.round(info.progress * 100) + '%', true);
+      }
+    }).then(function (result) {
+      var text = result && result.data ? String(result.data.text || '').trim() : '';
+      setOCRStatus('', false);
+      if (!text) { toast('No readable text was found in that image.', 'error'); return; }
+      showOCRResultDialog(text);
+      toast('Text extracted. Review it before saving.', 'success');
+    }).catch(function (err) {
+      console.warn('[sticky-notes] local OCR error', err);
+      setOCRStatus('', false);
+      toast('OCR could not read this image. Try a clearer photo.', 'error');
+    });
+  }
+
+  function showOCRResultDialog(text) {
+    var existing = document.getElementById('sb-ocr-result-overlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.className = 'sb-modal-overlay sb-ocr-result-overlay';
+    overlay.id = 'sb-ocr-result-overlay';
+    overlay.innerHTML =
+      '<div class="sb-ocr-modal" role="dialog" aria-modal="true" aria-labelledby="sb-ocr-title">' +
+        '<h3 id="sb-ocr-title">OCR text extracted</h3>' +
+        '<p>Review or correct the locally extracted text. You can save it directly, or optionally send this text to AI for formatting or improvement.</p>' +
+        '<textarea class="sb-ocr-result" id="sb-ocr-result-text"></textarea>' +
+        '<div class="sb-ocr-progress" id="sb-ocr-ai-progress"></div>' +
+        '<div class="sb-ocr-ai-row"><select class="sb-select" id="sb-ocr-ai-action"><option value="format">Clean formatting</option><option value="improve">Improve explanation</option><option value="simplify">Simplify</option><option value="add_info">Add information</option><option value="mnemonic">Create mnemonic</option><option value="quiz">Make quiz</option></select><button type="button" class="sb-ocr-ai-btn" id="sb-ocr-send-ai">Send to AI</button></div>' +
+        '<div class="sb-ocr-modal-actions"><button type="button" class="sb-ocr-cancel" id="sb-ocr-cancel">Cancel</button><button type="button" class="sb-ocr-append" id="sb-ocr-append">Add Below Original</button><button type="button" class="sb-ocr-replace" id="sb-ocr-replace">Use as Note Content</button></div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    var resultEl = document.getElementById('sb-ocr-result-text');
+    if (resultEl) { resultEl.value = text; resultEl.focus(); }
+    function close() { document.removeEventListener('keydown', onKeyDown); overlay.remove(); }
+    function onKeyDown(e) { if (e.key === 'Escape') close(); }
+    function currentText() { return resultEl ? resultEl.value.trim() : ''; }
+    function apply(mode) {
+      var contentEl = document.getElementById('sb-edit-content');
+      var value = currentText();
+      if (!contentEl || !value) { toast('There is no OCR text to insert.', 'error'); return; }
+      contentEl.value = mode === 'append' && contentEl.value.trim() ? contentEl.value.trimEnd() + '\n\n' + value : value;
+      contentEl.dispatchEvent(new Event('input', { bubbles: true }));
+      close();
+      toast(mode === 'append' ? 'OCR text added below the original' : 'OCR text inserted into the note', 'success');
+    }
+    document.addEventListener('keydown', onKeyDown);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    var cancel = document.getElementById('sb-ocr-cancel');
+    if (cancel) cancel.addEventListener('click', close);
+    var append = document.getElementById('sb-ocr-append');
+    if (append) append.addEventListener('click', function () { apply('append'); });
+    var replace = document.getElementById('sb-ocr-replace');
+    if (replace) replace.addEventListener('click', function () { apply('replace'); });
+    var aiBtn = document.getElementById('sb-ocr-send-ai');
+    if (aiBtn) aiBtn.addEventListener('click', function () {
+      var note = getNote(selectedNoteId);
+      var action = (document.getElementById('sb-ocr-ai-action') || {}).value || 'format';
+      var value = currentText();
+      if (!note || !value) { toast('Add OCR text before sending it to AI.', 'error'); return; }
+      requestOCRAI(action, value, note, close);
+    });
+  }
+
+  function requestOCRAI(action, text, note, closeOCR) {
+    var progress = document.getElementById('sb-ocr-ai-progress');
+    if (progress) { progress.textContent = 'Sending extracted text to AI…'; progress.classList.add('active'); }
+    var prompts = {
+      format: 'Clean up OCR errors and convert this extracted text into clear Markdown study-note formatting. Preserve the meaning and do not invent facts.',
+      improve: 'Improve this extracted study note so it is clearer and more useful for revision, while preserving the original facts.',
+      simplify: 'Simplify this extracted study note into concise, easy-to-revise language without losing important facts.',
+      add_info: 'Add relevant study context to this extracted note, clearly separating additions from the original content.',
+      mnemonic: 'Create a memorable mnemonic for the key facts in this extracted study note.',
+      quiz: 'Create three revision questions and answers from this extracted study note.'
+    };
+    var query = '[System]: You are a careful study assistant. ' + (prompts[action] || prompts.format) + ' Reply with the result only.\n\n[User]: Extracted OCR text:\n' + text;
+    var reqBody = { q: query };
+    if (selectedAIModel) reqBody.model = selectedAIModel;
+    backendFetch('/api/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reqBody) })
+      .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, data: j || {} }; }); })
+      .then(function (res) {
+        var result = res.data && (res.data.answer || res.data.message);
+        if (!res.ok || !result) throw new Error((res.data && (res.data.detail || res.data.error)) || 'AI returned an empty response');
+        if (closeOCR) closeOCR();
+        showAIResultDialog('custom', String(result), note);
+        toast('AI result ready to review', 'success');
+      }).catch(function (err) {
+        if (progress) { progress.textContent = ''; progress.classList.remove('active'); }
+        toast('AI enhancement failed: ' + (err.message || 'Try again.'), 'error');
+      });
   }
 
   function aiToolAction(tool) {
