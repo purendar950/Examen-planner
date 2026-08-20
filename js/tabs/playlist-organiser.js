@@ -349,7 +349,31 @@ function ytoLib() {
   return appState.ytoLibrary;
 }
 
+/* Per-video thumbnails are derivable from the YouTube video id and are never
+   rendered by the Course Library. Keeping one URL per video made otherwise
+   valid libraries needlessly large and could push the single synced appState
+   document over Firestore's 1 MiB limit. Keep the course cover thumbnail, but
+   remove this redundant field from every video row. */
+function ytoCompactLibraryForSync() {
+  const lib = appState && appState.ytoLibrary;
+  if (!lib || typeof lib !== 'object') return false;
+  let changed = false;
+  Object.keys(lib).forEach(function (courseId) {
+    const course = lib[courseId];
+    if (!course || !Array.isArray(course.videos)) return;
+    course.videos.forEach(function (video) {
+      if (!video || typeof video !== 'object') return;
+      if (Object.prototype.hasOwnProperty.call(video, 'thumb')) {
+        delete video.thumb;
+        changed = true;
+      }
+    });
+  });
+  return changed;
+}
+
 function ytoPersist() {
+  ytoCompactLibraryForSync();
   try { localStorage.setItem('yto_lib_v2', JSON.stringify(appState.ytoLibrary || {})); } catch(e) {}
   ytoRenderMainSidebar();
   saveProgress(); // syncs to Firestore
@@ -367,6 +391,13 @@ function ytoLoad() {
       const cached = JSON.parse(localStorage.getItem('yto_lib_v2') || 'null');
       if (cached && Object.keys(cached).length) appState.ytoLibrary = cached;
     } catch(e) {}
+  }
+  // Migrate libraries created before the compact sync format. This runs after
+  // loginUser has hydrated appState, so the migration is also sent to Firestore
+  // and becomes available on the next device instead of remaining local-only.
+  if (ytoCompactLibraryForSync()) {
+    try { localStorage.setItem('yto_lib_v2', JSON.stringify(appState.ytoLibrary || {})); } catch(e) {}
+    try { saveProgress(); } catch(e) {}
   }
   ytoRenderMainSidebar();
   ytoRenderLibrary();
@@ -491,7 +522,9 @@ async function ytoLoadPlaylist() {
   const durMap = await ytFetchDurations(videos).catch(() => ({}));
   loadBtn.disabled = false; loadBtn.innerHTML = orig;
 
-  const entry = ytoUpsertPlaylistCourse(plId, { info, videos, durMap });
+  // Per-video thumbnails are derived from the YouTube id at render time; keep
+  // this import slim so a large ordinary playlist cannot break cloud sync.
+  const entry = ytoUpsertPlaylistCourse(plId, { info, videos, durMap }, { slim: true });
   ytoPersist();
   document.getElementById('yto-url-input').value = '';
   showToast(`✅ "${entry.title}" saved — ${entry.videos.length} videos · ${ytoFmtHM(ytoTotalSecs(entry))}`, 'success');
@@ -528,7 +561,7 @@ async function ytoLoadSingleVideo(vId) {
     title: existing?.title || title,
     channel: existing?.channel || channel,
     thumb: existing?.thumb || thumb,
-    videos: [{ id: vId, title: existing?.videos?.[0]?.title || title, thumb, dur }],
+    videos: [{ id: vId, title: existing?.videos?.[0]?.title || title, dur }],
     watched: existing?.watched || {},
     lastVideo: existing?.lastVideo || vId,
     plan: existing?.plan || null,
@@ -578,7 +611,8 @@ async function ytoBackfillVideoMeta(pl) {
     if (!info) continue;
     if (info.title && (!v.title || /^Video\s+\d+$/.test(v.title))) { v.title = info.title; changed = true; }
     if (info.duration && !v.dur) { v.dur = info.duration; changed = true; }
-    if (info.thumb && !v.thumb)  { v.thumb = info.thumb; changed = true; }
+    // Per-video thumbnails are intentionally not persisted; the video id is
+    // enough to reconstruct the standard YouTube thumbnail when needed.
   }
   if (changed) ytoPersist();
   return changed;

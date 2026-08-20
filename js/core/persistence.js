@@ -182,6 +182,42 @@ function _firestoreSafeFocusMarks(focusMarks) {
   return out;
 }
 
+/* Course Library entries historically stored a thumbnail URL on every video
+   row even though the UI only needs the video id to derive the same YouTube
+   image. A large playlist collection could therefore make the monolithic
+   users/{uid}.appState document exceed Firestore's 1 MiB limit. Compact this
+   field at the persistence boundary as well as at import time, so older data
+   is repaired the next time any save succeeds. */
+function _firestoreSafeLibrary(library) {
+  if (!library || typeof library !== 'object') return library;
+  const out = {};
+  Object.keys(library).forEach(function(courseId) {
+    const course = library[courseId];
+    if (!course || typeof course !== 'object' || !Array.isArray(course.videos)) {
+      out[courseId] = course;
+      return;
+    }
+    out[courseId] = Object.assign({}, course, {
+      videos: course.videos.map(function(video) {
+        if (!video || typeof video !== 'object') return video;
+        const compact = Object.assign({}, video);
+        delete compact.thumb;
+        return compact;
+      })
+    });
+  });
+  return out;
+}
+
+function _firestoreSafeAppState(state) {
+  const safe = Object.assign({}, state || {});
+  if (safe.ytoLibrary && typeof safe.ytoLibrary === 'object') {
+    safe.ytoLibrary = _firestoreSafeLibrary(safe.ytoLibrary);
+  }
+  safe.focusMarks = _firestoreSafeFocusMarks(safe.focusMarks);
+  return safe;
+}
+
 async function saveProgressNow() {
   if (!currentUser) return false;
   const saveUid = currentUser.uid;
@@ -219,11 +255,12 @@ async function saveProgressNow() {
     return true;
   } // Nothing changed
 
-  /* Pre-flight size guard. If the serialized state is over the Firestore
-     per-document limit, the write is guaranteed to fail — so surface a
-     specific, actionable message instead of a silent retry loop. The local
-     cache write in saveProgress() already preserved the data on this device. */
-  const bytes = _docByteSize(json);
+  /* Pre-flight size guard. Measure the exact sanitized payload that will be
+     sent to Firestore. The local cache keeps the richer in-memory shape, while
+     the cloud copy omits only fields that the UI can reconstruct. */
+  const firestorePayload = _firestoreSafeAppState(stateToSave);
+  const firestoreJson = JSON.stringify(firestorePayload);
+  const bytes = _docByteSize(firestoreJson);
   if (bytes >= FIRESTORE_DOC_LIMIT) {
     _localDirty = true;
     _markPendingSync(saveUid, stateToSave);
@@ -243,10 +280,8 @@ async function saveProgressNow() {
   try {
     const svc = _storageService();
     // Only the Firestore write needs the sanitized shape — local cache/queue
-    // writes above already used stateToSave as-is.
-    const firestorePayload = Object.assign({}, stateToSave, {
-      focusMarks: _firestoreSafeFocusMarks(stateToSave.focusMarks)
-    });
+    // writes above already used stateToSave as-is. The payload was built for
+    // the size check above and is reused here to keep both decisions identical.
     if (svc) {
       await svc.saveUserState(saveUid, firestorePayload);
     } else {

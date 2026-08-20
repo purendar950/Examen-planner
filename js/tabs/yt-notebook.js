@@ -490,7 +490,10 @@ async function ytnbImportUrl() {
         return;
       }
       const durMap = await ytFetchDurations(videos).catch(() => ({}));
-      const entry = ytoUpsertPlaylistCourse(plId, { info: info, videos: videos, durMap: durMap });
+      // Keep notebook imports on the compact course format too; otherwise this
+      // entry point could reintroduce redundant per-video thumbnails and make
+      // the whole appState document fail to sync.
+      const entry = ytoUpsertPlaylistCourse(plId, { info: info, videos: videos, durMap: durMap }, { slim: true });
       await ytnbPersistImportedLibrary();
       done();
       input.value = '';
