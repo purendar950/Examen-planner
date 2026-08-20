@@ -35,6 +35,16 @@
     { key: 'mnemonic', icon: '\uD83E\uDDE0', label: 'Mnemonic' },
     { key: 'quiz', icon: '\uD83D\uDCDD', label: 'Make Quiz' }
   ];
+  var AI_DEPTHS = [
+    { key: 'quick', label: 'Quick' },
+    { key: 'standard', label: 'Standard' },
+    { key: 'deep', label: 'Deep' }
+  ];
+  var DEPTH_PROMPTS = {
+    quick: 'You are writing a SHORT sticky note for quick exam revision \u2014 like a small index card, NOT a full explanation. Given a topic, write a short title (2-6 words) and just 3-5 crisp one-line bullet points covering only the single most essential facts, a formula, or a definition. Do NOT add headings, sub-sections, or labels like "Key Terms:", "Formula:", "Units:", "Example:" \u2014 just plain short bullet points, nothing else. Do NOT write more than 5 bullets and do NOT explain any point in more than one short sentence. The whole note (all bullets combined) must be under 50 words total. Your response must ONLY be a valid JSON object with exactly these three fields: "title" (2-6 words), "content" (3-5 short bullet points, each on its own line starting with "- "), "category" (one of: normal, important, revision, formula, exam_trap). Do NOT wrap the JSON in code blocks, do NOT add any text before or after the JSON.',
+    standard: 'You are writing a STANDARD sticky note for exam revision \u2014 more than a bare index card, but still compact enough to read in under a minute. Given a topic, decide the most useful structure for THAT topic: for a formula or numerical concept, cover the formula, what each symbol means, when to use it, and a short example. For a law, rule, or process, cover a one-line definition, the key points or steps, and one short example. For a constitutional article, policy, or historical fact, cover its meaning, who or what it applies to, and one relevant exception or case only if genuinely important. Whatever the topic, end with a short "Exam Trap" line (a common mistake or confusion) if one exists, and a short mnemonic if one naturally fits \u2014 skip a section entirely rather than padding it with filler. Use up to 3 short "# Heading" lines to separate sections, with 1-3 bullet points (starting with "- ") under each. Keep the whole note between 80 and 160 words total. Your response must ONLY be a valid JSON object with exactly these three fields: "title" (2-6 words), "content" (the structured note as described, headings and bullets each on their own line), "category" (one of: normal, important, revision, formula, exam_trap). Do NOT wrap the JSON in code blocks, do NOT add any text before or after the JSON.',
+    deep: 'You are writing a DEEP, complete sticky note for exam revision \u2014 this can be as long as needed to properly cover the topic, but still exam-focused, not a textbook essay. Given a topic, decide the most useful structure for THAT topic: for a formula or numerical concept, cover the formula, what each symbol means, when and how to use it, a worked example, and a common calculation mistake. For a law, rule, or process, cover a one-line definition, each law or step explained individually, at least one real example, and how they connect. For a constitutional article, policy, or historical fact, cover its meaning, who or what it applies to, any important exception, case, or related article, and brief context. Always end with a clear "Exam Trap" section (common mistakes or confusions with similar concepts) and a memorable mnemonic if one genuinely helps. Use "# Heading" lines to separate sections (e.g. Definition/Formula, Details, Example, Exam Trap, Mnemonic, as relevant to the topic), with bullet points (starting with "- ") under each heading. Aim for 200-350 words total \u2014 thorough but never repetitive or padded. Your response must ONLY be a valid JSON object with exactly these three fields: "title" (2-6 words), "content" (the structured note as described, headings and bullets each on their own line), "category" (one of: normal, important, revision, formula, exam_trap). Do NOT wrap the JSON in code blocks, do NOT add any text before or after the JSON.'
+  };
   var NOTES_KEY = 'preppath_sticky_notes';
   var FOLDERS_KEY = 'preppath_sticky_folders';
 
@@ -52,6 +62,7 @@
   var aiProviderGroups = [];
   var selectedAIProvider = '';
   var selectedAIModel = '';
+  var selectedAIDepth = 'standard';
   var aiModelsLoaded = false;
 
   /* ── helpers ── */
@@ -246,6 +257,10 @@
     '.sb-ai-create textarea{width:100%;min-height:80px;max-height:180px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#fff;padding:10px;font-size:0.82rem;resize:vertical;font-family:inherit;outline:none;box-sizing:border-box;line-height:1.5;}',
     '.sb-ai-create textarea:focus{border-color:#a855f7;}',
     '.sb-ai-create textarea::placeholder{color:#666;}',
+    '.sb-ai-depth-row{display:flex;gap:6px;margin-top:6px;}',
+    '.sb-ai-depth-btn{flex:1;padding:7px 6px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#9ca3af;font-size:0.78rem;font-family:inherit;cursor:pointer;transition:background 0.15s,color 0.15s,border-color 0.15s;}',
+    '.sb-ai-depth-btn:hover{border-color:#7c3aed;}',
+    '.sb-ai-depth-btn.active{background:linear-gradient(135deg,#7c3aed,#a855f7);border-color:transparent;color:#fff;font-weight:600;}',
     '.sb-ai-create-row{display:flex;gap:6px;margin-top:8px;}',
     '.sb-ai-create select.sb-ai-field-sel{flex:1;padding:7px 8px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#d1d5db;font-size:0.78rem;font-family:inherit;outline:none;appearance:none;cursor:pointer;}',
     '.sb-ai-create select.sb-ai-field-sel:focus{border-color:#a855f7;}',
@@ -446,6 +461,17 @@
     '.sb-modal-actions{display:flex;gap:10px;margin-top:16px;justify-content:flex-end;}',
     '.sb-modal-cancel{padding:8px 16px;background:#2a2a2a;border:1px solid #333;border-radius:8px;color:#9ca3af;cursor:pointer;font-family:inherit;font-size:0.82rem;}',
     '.sb-modal-ok{padding:8px 16px;background:#eab308;border:none;border-radius:8px;color:#000;cursor:pointer;font-weight:600;font-family:inherit;font-size:0.82rem;}',
+    '.sb-modal-wide{max-width:560px;max-height:82vh;overflow-y:auto;}',
+    '.sb-organize-note{font-size:0.78rem;color:#9ca3af;margin-bottom:10px;}',
+    '.sb-organize-selectall{font-size:0.78rem;color:#e5e5e5;display:flex;align-items:center;gap:8px;cursor:pointer;padding-bottom:10px;border-bottom:1px solid #333;margin-bottom:10px;}',
+    '.sb-organize-list{display:flex;flex-direction:column;gap:8px;max-height:48vh;overflow-y:auto;}',
+    '.sb-organize-row{display:flex;align-items:flex-start;gap:10px;padding:9px 10px;background:#2a2a2a;border-radius:8px;}',
+    '.sb-organize-row input[type=checkbox]{margin-top:3px;accent-color:#eab308;cursor:pointer;flex-shrink:0;}',
+    '.sb-organize-info{flex:1;min-width:0;}',
+    '.sb-organize-title{font-size:0.82rem;color:#e5e5e5;font-weight:600;margin-bottom:2px;}',
+    '.sb-organize-change{font-size:0.75rem;color:#9ca3af;}',
+    '.sb-organize-change b{color:#eab308;font-weight:600;}',
+    '.sb-organize-empty{font-size:0.82rem;color:#666;text-align:center;padding:24px 10px;}',
 
     /* Tab panels */
     '.sb-ai-panel,.sb-revision-panel,.sb-create-panel{display:none;}',
@@ -590,8 +616,36 @@
   function getSubjectOptions(selected) {
     return getSubjectsList().map(function (s) { return '<option value="' + escAttr(s) + '"' + (s === selected ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('');
   }
+  /* Recursive folder helpers (any nesting depth via parentId chain) */
+  function getChildFolders(parentId) {
+    var pid = parentId || '';
+    return folders.filter(function (f) { return (f.parentId || '') === pid; });
+  }
+  function flattenFolderTree(parentId, depth) {
+    var pid = parentId || '';
+    var d = depth || 0;
+    var result = [];
+    getChildFolders(pid).forEach(function (f) {
+      result.push({ id: f.id, name: f.name, depth: d });
+      if (d < 5) { result = result.concat(flattenFolderTree(f.id, d + 1)); }
+    });
+    return result;
+  }
+  function getDescendantFolderIds(folderId, depth) {
+    var d = depth || 0;
+    var ids = [folderId];
+    if (d < 5) {
+      getChildFolders(folderId).forEach(function (child) {
+        ids = ids.concat(getDescendantFolderIds(child.id, d + 1));
+      });
+    }
+    return ids;
+  }
   function getFolderOptions(selectedId) {
-    return folders.filter(function (f) { return !f.parentId; }).map(function (f) { return '<option value="' + f.id + '"' + (f.id === selectedId ? ' selected' : '') + '>' + esc(f.name) + '</option>'; }).join('');
+    return flattenFolderTree().map(function (f) {
+      var indent = f.depth > 0 ? (new Array(f.depth + 1).join('\u00A0\u00A0') + '\u21B3 ') : '';
+      return '<option value="' + f.id + '"' + (f.id === selectedId ? ' selected' : '') + '>' + indent + esc(f.name) + '</option>';
+    }).join('');
   }
   function getColorPicker(active) {
     return COLORS.map(function (c) {
@@ -652,6 +706,28 @@
     el.innerHTML = html;
   }
 
+  function folderNoteCount(folder) {
+    var ids = getDescendantFolderIds(folder.id);
+    return notes.filter(function (n) {
+      return ids.indexOf(n.folderId) > -1 || (!folder.parentId && n.subject === folder.name);
+    }).length;
+  }
+  function renderFolderNode(folder, depth, htmlParts) {
+    var isExpanded = expandedSubjects[folder.id];
+    var count = folderNoteCount(folder);
+    var icon = depth === 0 ? (isExpanded ? '\uD83D\uDCC2' : '\uD83D\uDCC1') : '\uD83D\uDCC4';
+    var indentAttr = depth > 0 ? ' style="margin-left:' + (depth * 14) + 'px;"' : '';
+    htmlParts.push(
+      '<div class="sb-folder-item' + (selectedFolderId === folder.id ? ' active' : '') + '" data-folder="' + folder.id + '"' + indentAttr + '>' +
+        '<span class="sb-fi-icon">' + icon + '</span>' +
+        '<span class="sb-fi-name">' + esc(folder.name) + '</span>' +
+        '<span class="sb-fi-count">' + count + '</span>' +
+      '</div>'
+    );
+    if (isExpanded && depth < 5) {
+      getChildFolders(folder.id).forEach(function (child) { renderFolderNode(child, depth + 1, htmlParts); });
+    }
+  }
   function renderFolderTree() {
     var el = document.getElementById('sb-folder-tree');
     if (!el) return;
@@ -659,30 +735,9 @@
       el.innerHTML = '<div style="padding:10px;color:#666;font-size:0.78rem;">No folders yet</div>';
       return;
     }
-    var subjects = {};
-    folders.forEach(function (f) { if (!f.parentId) subjects[f.id] = f; });
-    var html = '';
-    Object.keys(subjects).forEach(function (sid) {
-      var sub = subjects[sid];
-      var noteCount = notes.filter(function (n) { return n.folderId === sid || n.subject === sub.name; }).length;
-      var isExpanded = expandedSubjects[sid];
-      html += '<div class="sb-folder-item' + (selectedFolderId === sid ? ' active' : '') + '" data-folder="' + sid + '">' +
-        '<span class="sb-fi-icon">' + (isExpanded ? '\uD83D\uDCC2' : '\uD83D\uDCC1') + '</span>' +
-        '<span class="sb-fi-name">' + esc(sub.name) + '</span>' +
-        '<span class="sb-fi-count">' + noteCount + '</span>' +
-      '</div>';
-      if (isExpanded) {
-        folders.filter(function (f) { return f.parentId === sid; }).forEach(function (child) {
-          var cn = notes.filter(function (n) { return n.folderId === child.id; }).length;
-          html += '<div class="sb-subfolder"><div class="sb-folder-item' + (selectedFolderId === child.id ? ' active' : '') + '" data-folder="' + child.id + '">' +
-            '<span class="sb-fi-icon">\uD83D\uDCC4</span>' +
-            '<span class="sb-fi-name">' + esc(child.name) + '</span>' +
-            '<span class="sb-fi-count">' + cn + '</span>' +
-          '</div></div>';
-        });
-      }
-    });
-    el.innerHTML = html;
+    var htmlParts = [];
+    getChildFolders('').forEach(function (top) { renderFolderNode(top, 0, htmlParts); });
+    el.innerHTML = htmlParts.join('');
   }
 
   function getFilteredNotes() {
@@ -696,8 +751,7 @@
       });
     }
     if (selectedFolderId) {
-      var folderIds = [selectedFolderId];
-      folders.forEach(function (f) { if (f.parentId === selectedFolderId) folderIds.push(f.id); });
+      var folderIds = getDescendantFolderIds(selectedFolderId);
       result = result.filter(function (n) { return folderIds.indexOf(n.folderId) > -1; });
     }
     switch (activeFilter) {
@@ -865,7 +919,7 @@
         if (!item) return;
         var fid = item.dataset.folder;
         var folder = folders.find(function (f) { return f.id === fid; });
-        if (folder && !folder.parentId) expandedSubjects[fid] = !expandedSubjects[fid];
+        if (folder && getChildFolders(fid).length > 0) expandedSubjects[fid] = !expandedSubjects[fid];
         selectedFolderId = selectedFolderId === fid ? null : fid;
         renderFolderTree(); renderBoard();
       });
@@ -1158,6 +1212,13 @@
         /* prompt */
         '<div class="sb-ai-create-label" style="margin-top:4px;">Describe your note</div>' +
         '<textarea id="sb-ai-prompt" placeholder="e.g. Newton\'s Laws of Motion summary with key formulas"></textarea>' +
+        /* depth */
+        '<div class="sb-ai-create-label" style="margin-top:8px;">Depth</div>' +
+        '<div class="sb-ai-depth-row" id="sb-ai-depth-row">' +
+          AI_DEPTHS.map(function (d) {
+            return '<button type="button" class="sb-ai-depth-btn' + (d.key === selectedAIDepth ? ' active' : '') + '" data-depth="' + d.key + '">' + esc(d.label) + '</button>';
+          }).join('') +
+        '</div>' +
         '<div class="sb-ai-create-row">' +
           '<select id="sb-ai-subject" class="sb-ai-field-sel"><option value="">Subject</option></select>' +
           '<select id="sb-ai-folder" class="sb-ai-field-sel"><option value="">Folder</option></select>' +
@@ -1173,12 +1234,23 @@
       subSel.innerHTML = '<option value="">Subject</option>' + subjects.map(function (s) { return '<option value="' + escAttr(s) + '">' + esc(s) + '</option>'; }).join('');
     }
     if (foldSel) {
-      foldSel.innerHTML = '<option value="">Folder</option>' + folders.filter(function (f) { return !f.parentId; }).map(function (f) { return '<option value="' + f.id + '">' + esc(f.name) + '</option>'; }).join('');
+      foldSel.innerHTML = '<option value="">Folder</option>' + getFolderOptions();
     }
 
     /* re-bind generate button */
     var genBtn = document.getElementById('sb-ai-generate-btn');
     if (genBtn) genBtn.addEventListener('click', function () { aiGenerateNote(); });
+
+    /* depth buttons */
+    var depthRow = document.getElementById('sb-ai-depth-row');
+    if (depthRow) {
+      depthRow.addEventListener('click', function (e) {
+        var btn = e.target.closest('.sb-ai-depth-btn');
+        if (!btn) return;
+        selectedAIDepth = btn.dataset.depth;
+        depthRow.querySelectorAll('.sb-ai-depth-btn').forEach(function (b) { b.classList.toggle('active', b.dataset.depth === selectedAIDepth); });
+      });
+    }
 
     /* provider change → update model list */
     var provSel = document.getElementById('sb-ai-provider-sel');
@@ -1255,9 +1327,9 @@
     overlay.innerHTML = '<div class="sb-modal">' +
       '<h3>\uD83D\uDCC1 New Folder</h3>' +
       '<input type="text" id="sb-folder-name-input" placeholder="Folder name (e.g. Physics)" maxlength="50">' +
-      '<div style="margin-top:12px;"><label style="font-size:0.75rem;color:#9ca3af;display:block;margin-bottom:5px;">Parent Subject (optional)</label>' +
+      '<div style="margin-top:12px;"><label style="font-size:0.75rem;color:#9ca3af;display:block;margin-bottom:5px;">Parent Folder (optional)</label>' +
       '<select class="sb-select" id="sb-folder-parent-input"><option value="">Top-level folder</option>' +
-      folders.filter(function (f) { return !f.parentId; }).map(function (f) { return '<option value="' + f.id + '">' + esc(f.name) + '</option>'; }).join('') +
+      getFolderOptions() +
       '</select></div>' +
       '<div class="sb-modal-actions">' +
         '<button class="sb-modal-cancel" id="sb-folder-cancel">Cancel</button>' +
@@ -1295,7 +1367,7 @@
     if (genBtn) { genBtn.disabled = true; genBtn.textContent = 'Generating...'; }
 
     /* Build the query using the same format as ai-chat.js: q + history */
-    var systemInstruction = 'You are writing a SHORT sticky note for quick exam revision \u2014 like a small index card, NOT a full explanation. Given a topic, write a short title (2-6 words) and just 3-5 crisp one-line bullet points covering only the single most essential facts, a formula, or a definition. Do NOT add headings, sub-sections, or labels like "Key Terms:", "Formula:", "Units:", "Example:" \u2014 just plain short bullet points, nothing else. Do NOT write more than 5 bullets and do NOT explain any point in more than one short sentence. The whole note (all bullets combined) must be under 50 words total. Your response must ONLY be a valid JSON object with exactly these three fields: "title" (2-6 words), "content" (3-5 short bullet points, each on its own line starting with "- "), "category" (one of: normal, important, revision, formula, exam_trap). Do NOT wrap the JSON in code blocks, do NOT add any text before or after the JSON.';
+    var systemInstruction = DEPTH_PROMPTS[selectedAIDepth] || DEPTH_PROMPTS.standard;
     var fullQuery = '[System]: ' + systemInstruction + '\n\n[User]: ' + prompt;
 
     var reqBody = { q: fullQuery };
@@ -1491,12 +1563,14 @@
 
   function aiOrganize() {
     if (notes.length === 0) { toast('No notes to organize', 'info'); return; }
+    var ORGANIZE_CAP = 20;
+    var scoped = notes.slice(0, ORGANIZE_CAP);
     toast('AI organizing your notes...', 'info');
-    var noteSummaries = notes.slice(0, 20).map(function (n, i) {
+    var noteSummaries = scoped.map(function (n, i) {
       return (i + 1) + '. Title: "' + (n.title || 'Untitled') + '" | Subject: ' + (n.subject || 'none') + ' | Category: ' + (n.category || 'normal');
     }).join('\n');
     var folderNames = folders.filter(function (f) { return !f.parentId; }).map(function (f) { return f.name; }).join(', ');
-    var systemInstruction = 'You are a study organizer. Given a list of notes, suggest categories and subjects for each. Reply ONLY in JSON array format: [{"index": 1, "category": "normal|important|revision|formula|exam_trap", "subject": "Physics"}, ...]. Available folders: ' + (folderNames || 'none') + '. If a subject doesn\'t match an existing folder, suggest a new one in the "subject" field.';
+    var systemInstruction = 'You are a study organizer. Given a list of notes, suggest categories and subjects for each. Reply ONLY in JSON array format: [{"index": 1, "category": "normal|important|revision|formula|exam_trap", "subject": "Physics"}, ...]. Available folders: ' + (folderNames || 'none') + '. If a subject doesn\'t match an existing folder, suggest a new one in the "subject" field. Only include an entry if you are actually suggesting a change from its current subject/category.';
     var fullQuery = '[System]: ' + systemInstruction + '\n\n[User]: ' + noteSummaries;
     var reqBody = { q: fullQuery };
     if (selectedAIModel) reqBody.model = selectedAIModel;
@@ -1514,17 +1588,17 @@
       try {
         var jsonMatch = text.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
-          var suggestions = JSON.parse(jsonMatch[0]);
-          var changed = 0;
-          suggestions.forEach(function (s) {
+          var raw = JSON.parse(jsonMatch[0]);
+          var suggestions = [];
+          raw.forEach(function (s) {
             var idx = (s.index || 1) - 1;
-            if (notes[idx]) {
-              if (s.category && CATEGORIES.indexOf(s.category) > -1) { notes[idx].category = s.category; changed++; }
-              if (s.subject) { notes[idx].subject = s.subject; changed++; }
-            }
+            var note = scoped[idx];
+            if (!note) return;
+            var newCategory = (s.category && CATEGORIES.indexOf(s.category) > -1 && s.category !== (note.category || 'normal')) ? s.category : null;
+            var newSubject = (s.subject && s.subject !== (note.subject || '')) ? s.subject : null;
+            if (newCategory || newSubject) suggestions.push({ noteId: note.id, title: note.title, curSubject: note.subject, curCategory: note.category, newSubject: newSubject, newCategory: newCategory });
           });
-          persist(); renderAll();
-          toast('AI organized ' + changed + ' notes \u2713', 'success');
+          showOrganizeReview(suggestions, notes.length, ORGANIZE_CAP);
           return;
         }
       } catch (e) {}
@@ -1532,6 +1606,66 @@
     }).catch(function (err) {
       console.warn('[sticky-notes] AI organize error', err);
       toast('AI organize failed: ' + (err.message || 'Try again.'), 'error');
+    });
+  }
+
+  function showOrganizeReview(suggestions, totalNotes, cap) {
+    var overlay = document.createElement('div');
+    overlay.className = 'sb-modal-overlay';
+    var capNote = totalNotes > cap ? '<div class="sb-organize-note">Showing suggestions for the first ' + cap + ' of ' + totalNotes + ' notes.</div>' : '';
+    var body;
+    if (suggestions.length === 0) {
+      body = capNote + '<div class="sb-organize-empty">AI found nothing worth reorganizing \u2713</div>' +
+        '<div class="sb-modal-actions"><button class="sb-modal-ok" id="sb-organize-close">Close</button></div>';
+    } else {
+      var rows = suggestions.map(function (s, i) {
+        var from = (s.curSubject || '\u2014') + ' / ' + (CAT_LABELS[s.curCategory] || s.curCategory || 'Normal');
+        var to = (s.newSubject || s.curSubject || '\u2014') + ' / ' + (CAT_LABELS[s.newCategory || s.curCategory] || 'Normal');
+        return '<div class="sb-organize-row">' +
+          '<input type="checkbox" class="sb-organize-chk" data-i="' + i + '" checked>' +
+          '<div class="sb-organize-info">' +
+            '<div class="sb-organize-title">' + esc(s.title || 'Untitled') + '</div>' +
+            '<div class="sb-organize-change">' + esc(from) + ' \u2192 <b>' + esc(to) + '</b></div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      body = capNote +
+        '<label class="sb-organize-selectall"><input type="checkbox" id="sb-organize-selectall" checked> Select all (' + suggestions.length + ' suggested change' + (suggestions.length > 1 ? 's' : '') + ')</label>' +
+        '<div class="sb-organize-list">' + rows + '</div>' +
+        '<div class="sb-modal-actions">' +
+          '<button class="sb-modal-cancel" id="sb-organize-cancel">Cancel</button>' +
+          '<button class="sb-modal-ok" id="sb-organize-confirm">Confirm Organization</button>' +
+        '</div>';
+    }
+    overlay.innerHTML = '<div class="sb-modal sb-modal-wide"><h3>\u2728 AI Organize \u2014 Review Changes</h3>' + body + '</div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+
+    var closeBtn = document.getElementById('sb-organize-close');
+    if (closeBtn) closeBtn.addEventListener('click', function () { overlay.remove(); });
+    var cancelBtn = document.getElementById('sb-organize-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', function () { overlay.remove(); });
+
+    var selectAll = document.getElementById('sb-organize-selectall');
+    if (selectAll) selectAll.addEventListener('change', function () {
+      overlay.querySelectorAll('.sb-organize-chk').forEach(function (c) { c.checked = selectAll.checked; });
+    });
+
+    var confirmBtn = document.getElementById('sb-organize-confirm');
+    if (confirmBtn) confirmBtn.addEventListener('click', function () {
+      var changed = 0;
+      overlay.querySelectorAll('.sb-organize-chk').forEach(function (chk) {
+        if (!chk.checked) return;
+        var s = suggestions[parseInt(chk.dataset.i, 10)];
+        var note = s && getNote(s.noteId);
+        if (!note) return;
+        if (s.newCategory) note.category = s.newCategory;
+        if (s.newSubject) note.subject = s.newSubject;
+        if (s.newCategory || s.newSubject) { note.updatedAt = now(); changed++; }
+      });
+      persist(); renderAll();
+      overlay.remove();
+      toast('AI organized ' + changed + ' note' + (changed !== 1 ? 's' : '') + ' \u2713', 'success');
     });
   }
 
