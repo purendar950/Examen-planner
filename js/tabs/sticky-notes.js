@@ -570,6 +570,9 @@
     '.sb-no-selection svg{width:48px;height:48px;margin-bottom:12px;opacity:0.3;stroke:#4b5563;}',
     '.sb-no-selection p{font-size:0.88rem;color:#9ca3af;}',
     '.sb-no-selection small{font-size:0.75rem;color:#555;margin-top:4px;}',
+    '.sb-no-selection-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:center;margin-top:16px;max-width:260px;}',
+    '.sb-empty-ocr-btn{padding:8px 10px;background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.35);border-radius:7px;color:#facc15;font:600 .72rem var(--font),sans-serif;cursor:pointer;}',
+    '.sb-empty-ocr-btn:hover{background:rgba(234,179,8,.16);border-color:#eab308;}',
 
     /* OCR modal */
     '.sb-ocr-modal{width:min(680px,calc(100% - 28px));max-height:min(86vh,720px);overflow-y:auto;background:#1e1e1e;border:1px solid #3b3b3b;border-radius:14px;box-shadow:0 24px 70px rgba(0,0,0,.55);padding:20px;}',
@@ -1012,7 +1015,7 @@
     if (!formEl || !footer) return;
     var note = getNote(selectedNoteId);
     if (!note) {
-      formEl.innerHTML = '<div class="sb-no-selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 9h6M9 13h4"></path></svg><p>Select a note to edit</p><small>Click any sticky note on the board</small></div>';
+      formEl.innerHTML = '<div class="sb-no-selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 9h6M9 13h4"></path></svg><p>Select a note to edit</p><small>Or create a new note directly from a photo</small><div class="sb-no-selection-actions"><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-upload-btn">\uD83D\DCF7 Scan Photo / Screenshot</button><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-camera-btn">\uD83D\DCF9 Use Camera</button></div><input type="file" id="sb-ocr-new-file-input" accept="image/*" hidden><input type="file" id="sb-ocr-new-camera-input" accept="image/*" capture="environment" hidden><div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div></div>';
       footer.style.display = 'none';
       renderAITools(null);
       renderRevision(null);
@@ -1217,17 +1220,17 @@
 
     /* local OCR controls */
     page.addEventListener('click', function (e) {
-      if (e.target.closest('#sb-ocr-upload-btn')) {
-        var uploadInput = document.getElementById('sb-ocr-file-input');
+      if (e.target.closest('#sb-ocr-upload-btn') || e.target.closest('#sb-ocr-new-upload-btn')) {
+        var uploadInput = document.getElementById(e.target.closest('#sb-ocr-new-upload-btn') ? 'sb-ocr-new-file-input' : 'sb-ocr-file-input');
         if (uploadInput) uploadInput.click();
       }
-      if (e.target.closest('#sb-ocr-camera-btn')) {
-        var cameraInput = document.getElementById('sb-ocr-camera-input');
+      if (e.target.closest('#sb-ocr-camera-btn') || e.target.closest('#sb-ocr-new-camera-btn')) {
+        var cameraInput = document.getElementById(e.target.closest('#sb-ocr-new-camera-btn') ? 'sb-ocr-new-camera-input' : 'sb-ocr-camera-input');
         if (cameraInput) cameraInput.click();
       }
     });
     page.addEventListener('change', function (e) {
-      var input = e.target.closest('#sb-ocr-file-input,#sb-ocr-camera-input');
+      var input = e.target.closest('#sb-ocr-file-input,#sb-ocr-camera-input,#sb-ocr-new-file-input,#sb-ocr-new-camera-input');
       if (input && input.files && input.files[0]) runLocalOCR(input.files[0]);
     });
 
@@ -1654,9 +1657,9 @@
   }
 
   /* ── note CRUD ── */
-  function createNewNote() {
+  function createNewNote(title, content) {
     var note = {
-      id: genId(), title: '', content: '', subject: '', folderId: '',
+      id: genId(), title: typeof title === 'string' ? title : '', content: typeof content === 'string' ? content : '', subject: '', folderId: '',
       color: nextCardColor(), colorSource: 'auto', category: 'normal', pinned: false, aiGenerated: false,
       position: { x: 0, y: 0 },
       revision: { nextReview: '', interval: 1, difficulty: 'Not set', lastReviewed: '' },
@@ -2101,7 +2104,7 @@
       var text = result && result.data ? String(result.data.text || '').trim() : '';
       setOCRStatus('', false);
       if (!text) { toast('No readable text was found in that image.', 'error'); return; }
-      showOCRResultDialog(text);
+      showOCRResultDialog(text, !getNote(selectedNoteId));
       toast('Text extracted. Review it before saving.', 'success');
     }).catch(function (err) {
       console.warn('[sticky-notes] local OCR error', err);
@@ -2110,7 +2113,12 @@
     });
   }
 
-  function showOCRResultDialog(text) {
+  function deriveOCRTitle(text) {
+    var firstLine = String(text || '').split(/\r?\n/).map(function (line) { return line.replace(/^\s*[#>*-]+\s*/, '').trim(); }).find(function (line) { return line; });
+    return (firstLine || 'Scanned Note').slice(0, 100);
+  }
+
+  function showOCRResultDialog(text, createMode) {
     var existing = document.getElementById('sb-ocr-result-overlay');
     if (existing) existing.remove();
     var overlay = document.createElement('div');
@@ -2123,7 +2131,7 @@
         '<textarea class="sb-ocr-result" id="sb-ocr-result-text"></textarea>' +
         '<div class="sb-ocr-progress" id="sb-ocr-ai-progress"></div>' +
         '<div class="sb-ocr-ai-row"><select class="sb-select" id="sb-ocr-ai-action"><option value="format">Clean formatting</option><option value="improve">Improve explanation</option><option value="simplify">Simplify</option><option value="add_info">Add information</option><option value="mnemonic">Create mnemonic</option><option value="quiz">Make quiz</option></select><button type="button" class="sb-ocr-ai-btn" id="sb-ocr-send-ai">Send to AI</button></div>' +
-        '<div class="sb-ocr-modal-actions"><button type="button" class="sb-ocr-cancel" id="sb-ocr-cancel">Cancel</button><button type="button" class="sb-ocr-append" id="sb-ocr-append">Add Below Original</button><button type="button" class="sb-ocr-replace" id="sb-ocr-replace">Use as Note Content</button></div>' +
+        '<div class="sb-ocr-modal-actions"><button type="button" class="sb-ocr-cancel" id="sb-ocr-cancel">Cancel</button><button type="button" class="sb-ocr-append" id="sb-ocr-append">' + (createMode ? 'Create Sticky Note' : 'Add Below Original') + '</button><button type="button" class="sb-ocr-replace" id="sb-ocr-replace">' + (createMode ? 'Create & Use Text' : 'Use as Note Content') + '</button></div>' +
       '</div>';
     document.body.appendChild(overlay);
     var resultEl = document.getElementById('sb-ocr-result-text');
@@ -2134,7 +2142,14 @@
     function apply(mode) {
       var contentEl = document.getElementById('sb-edit-content');
       var value = currentText();
-      if (!contentEl || !value) { toast('There is no OCR text to insert.', 'error'); return; }
+      if (!value) { toast('There is no OCR text to insert.', 'error'); return; }
+      if (createMode && !getNote(selectedNoteId)) {
+        createNewNote(deriveOCRTitle(value), value);
+        close();
+        toast('New Sticky Note created from OCR', 'success');
+        return;
+      }
+      if (!contentEl) { toast('Select a note before inserting OCR text.', 'error'); return; }
       contentEl.value = mode === 'append' && contentEl.value.trim() ? contentEl.value.trimEnd() + '\n\n' + value : value;
       contentEl.dispatchEvent(new Event('input', { bubbles: true }));
       close();
@@ -2153,7 +2168,12 @@
       var note = getNote(selectedNoteId);
       var action = (document.getElementById('sb-ocr-ai-action') || {}).value || 'format';
       var value = currentText();
-      if (!note || !value) { toast('Add OCR text before sending it to AI.', 'error'); return; }
+      if (!value) { toast('Add OCR text before sending it to AI.', 'error'); return; }
+      if (!note && createMode) {
+        createNewNote(deriveOCRTitle(value), value);
+        note = getNote(selectedNoteId);
+      }
+      if (!note) { toast('Select a note before sending OCR text to AI.', 'error'); return; }
       requestOCRAI(action, value, note, close);
     });
   }
