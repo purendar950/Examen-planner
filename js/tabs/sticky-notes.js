@@ -46,6 +46,74 @@
   /* ── helpers ── */
   function esc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function escAttr(s) { return esc(s).replace(/"/g, '&quot;'); }
+
+  /* If an AI response's JSON parsing failed upstream and the raw ```json {...}``` blob
+     ended up stored as note content, recover the actual note text from it instead of
+     showing the raw JSON/code-fence wrapper to the user. */
+  function sanitizeAIContent(text) {
+    if (!text) return '';
+    var t = String(text);
+    /* Strip a leading/trailing code-fence marker independently, in case the AI's
+       response (or a previously-saved broken note) is missing one side of it. */
+    t = t.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '');
+    /* If it still looks like a raw {"title":...,"content":...} payload, recover the
+       actual note text from the "content" field instead of showing raw JSON. */
+    if (/"content"\s*:\s*"/.test(t) && /"title"\s*:\s*"/.test(t)) {
+      var cM = t.match(/"content"\s*:\s*"((?:[^"\\]|\\[\s\S])*)"/);
+      if (cM) t = cM[1].replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"');
+      else t = t.replace(/^\s*\{\s*/, '').replace(/\s*\}\s*$/, '');
+    }
+    return t;
+  }
+
+  /* Render note content (markdown-ish AI output) as clean HTML for the cork-board card:
+     bullet/numbered lists, **bold**, *italics*, `code`, and heading lines become proper
+     elements instead of raw '#'/'*'/'-' characters. Escapes text before formatting so
+     nothing unsafe is ever injected. */
+  function renderNoteBody(content, title) {
+    var text = sanitizeAIContent(content);
+    if (!text) return '';
+    var lines = text.replace(/\r\n/g, '\n').split('\n');
+    /* Drop a leading heading line that just repeats the note title */
+    if (lines.length) {
+      var firstStripped = lines[0].replace(/^#{1,6}\s*/, '').replace(/\*\*/g, '').trim().toLowerCase();
+      if (title && firstStripped && firstStripped === String(title).trim().toLowerCase()) lines.shift();
+    }
+    while (lines.length && !lines[0].trim()) lines.shift();
+
+    function inline(s) {
+      return esc(s)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>');
+    }
+
+    var html = '', inList = false, listType = '';
+    function closeList() { if (inList) { html += (listType === 'ol' ? '</ol>' : '</ul>'); inList = false; } }
+
+    lines.forEach(function (raw) {
+      var trimmed = raw.trim();
+      if (!trimmed) { closeList(); return; }
+      var headingM = trimmed.match(/^#{1,6}\s+(.*)$/);
+      var bulletM = trimmed.match(/^[-*]\s+(.*)$/);
+      var numM = trimmed.match(/^\d+[.)]\s+(.*)$/);
+      if (headingM) {
+        closeList();
+        html += '<p class="sb-note-heading">' + inline(headingM[1]) + '</p>';
+      } else if (bulletM) {
+        if (!inList || listType !== 'ul') { closeList(); html += '<ul>'; inList = true; listType = 'ul'; }
+        html += '<li>' + inline(bulletM[1]) + '</li>';
+      } else if (numM) {
+        if (!inList || listType !== 'ol') { closeList(); html += '<ol>'; inList = true; listType = 'ol'; }
+        html += '<li>' + inline(numM[1]) + '</li>';
+      } else {
+        closeList();
+        html += '<p>' + inline(trimmed) + '</p>';
+      }
+    });
+    closeList();
+    return html;
+  }
   function toast(m, t) { try { showToast(m, t); } catch (e) { console.warn('[sticky-notes]', m); } }
   function getUid() { try { return (typeof currentUser !== 'undefined' && currentUser && currentUser.uid) || 'guest'; } catch (e) { return 'guest'; } }
   function genId() { return 'sn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
@@ -236,7 +304,17 @@
     '.sb-note-pin{width:16px;height:16px;background:radial-gradient(circle at 30% 30%,#ff6b6b,#c92a2a);border-radius:50%;position:absolute;top:-8px;left:50%;transform:translateX(-50%);box-shadow:0 2px 4px rgba(0,0,0,0.3);z-index:1;}',
     '.sb-note-pin::after{content:"";position:absolute;top:2px;left:3px;width:4px;height:4px;background:rgba(255,255,255,0.6);border-radius:50%;}',
     '.sb-note-title{font-size:0.9rem;font-weight:700;color:#374151;margin-bottom:6px;line-height:1.3;word-break:break-word;}',
-    '.sb-note-body{font-size:0.8rem;color:#4b5563;line-height:1.4;word-break:break-word;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;}',
+    '.sb-note-body{font-size:0.8rem;color:#4b5563;line-height:1.45;word-break:break-word;}',
+    '.sb-note-body p{margin:0 0 6px;}',
+    '.sb-note-body p:last-child{margin-bottom:0;}',
+    '.sb-note-body .sb-note-heading{font-weight:700;color:#374151;margin:8px 0 4px;}',
+    '.sb-note-body .sb-note-heading:first-child{margin-top:0;}',
+    '.sb-note-body ul,.sb-note-body ol{margin:0 0 6px;padding-left:16px;}',
+    '.sb-note-body ul:last-child,.sb-note-body ol:last-child{margin-bottom:0;}',
+    '.sb-note-body li{margin-bottom:3px;}',
+    '.sb-note-body li::marker{color:#6b7280;}',
+    '.sb-note-body strong{color:#1f2937;font-weight:700;}',
+    '.sb-note-body code{background:rgba(0,0,0,0.08);padding:1px 4px;border-radius:3px;font-size:0.75em;}',
     '.sb-note-footer{display:flex;align-items:center;justify-content:space-between;margin-top:8px;padding-top:6px;border-top:1px solid rgba(0,0,0,0.08);}',
     '.sb-note-tags{display:flex;gap:4px;flex-wrap:wrap;flex:1;}',
     '.sb-note-tag{font-size:0.65rem;padding:2px 6px;background:rgba(0,0,0,0.08);border-radius:99px;color:#374151;}',
@@ -627,7 +705,7 @@
       html += '<div class="sb-note sb-note-color-' + color + sel + '" data-note-id="' + n.id + '" style="transform:rotate(' + rot + 'deg)">' +
         '<div class="sb-note-pin"></div>' +
         '<div class="sb-note-title">' + esc(n.title || 'Untitled') + '</div>' +
-        '<div class="sb-note-body">' + esc(n.content || '') + '</div>' +
+        '<div class="sb-note-body">' + renderNoteBody(n.content || '', n.title || '') + '</div>' +
         (n.aiGenerated ? '<div class="sb-ai-badge">\uD83E\uDD16 AI Generated</div>' : '') +
         '<div class="sb-note-footer">' +
           '<div class="sb-note-tags">' +
@@ -1216,7 +1294,7 @@
         }
       } catch (e) {}
       var previewTitle = (parsed && parsed.title) || prompt.slice(0, 60);
-      var previewContent = (parsed && parsed.content) || text;
+      var previewContent = (parsed && parsed.content) || sanitizeAIContent(text);
       var previewCategory = (parsed && parsed.category) || 'normal';
       if (CATEGORIES.indexOf(previewCategory) === -1) previewCategory = 'normal';
       console.log('[sticky-notes] Parsed:', parsed ? 'title=' + previewTitle.slice(0, 40) + ', content=' + previewContent.slice(0, 60) : 'FAILED to parse JSON');
