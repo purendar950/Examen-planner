@@ -1022,7 +1022,7 @@
     if (!formEl || !footer) return;
     var note = getNote(selectedNoteId);
     if (!note) {
-      formEl.innerHTML = '<div class="sb-no-selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 9h6M9 13h4"></path></svg><p>Select a note to edit</p><small>Or create a new note directly from a photo</small><div class="sb-no-selection-actions"><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-upload-btn">\uD83D\DCF7 Scan Photo / Screenshot</button><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-camera-btn">\uD83D\DCF9 Use Camera</button><button type="button" class="sb-empty-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-new-upload-btn">\u2728 Send Image to AI</button><button type="button" class="sb-empty-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-new-camera-btn">\uD83D\DCF8 Take Photo & Send to AI</button></div><input type="file" id="sb-ocr-new-file-input" accept="image/*" hidden><input type="file" id="sb-ocr-new-camera-input" accept="image/*" capture="environment" hidden><input type="file" id="sb-direct-ai-new-file-input" accept="image/*" hidden><input type="file" id="sb-direct-ai-new-camera-input" accept="image/*" capture="environment" hidden><div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div></div>';
+      formEl.innerHTML = '<div class="sb-no-selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 9h6M9 13h4"></path></svg><p>Select a note to edit</p><small>Or create a new note directly from a photo</small><div class="sb-no-selection-actions"><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-upload-btn">\uD83D\DCF7 Scan Photo / Screenshot</button><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-camera-btn">\uD83D\DCF9 Use Camera</button><button type="button" class="sb-empty-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-new-upload-btn">\u2728 Send Image to AI</button><button type="button" class="sb-empty-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-new-camera-btn">\uD83D\DCF8 Take Photo & Send to AI</button></div><input type="file" id="sb-ocr-new-file-input" accept="image/*,.heic,.heif" hidden><input type="file" id="sb-ocr-new-camera-input" accept="image/*,.heic,.heif" capture="environment" hidden><input type="file" id="sb-direct-ai-new-file-input" accept="image/*,.heic,.heif" hidden><input type="file" id="sb-direct-ai-new-camera-input" accept="image/*,.heic,.heif" capture="environment" hidden><div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div></div>';
       footer.style.display = 'none';
       renderAITools(null);
       renderRevision(null);
@@ -1041,9 +1041,9 @@
         '</div>' +
           '<textarea class="sb-textarea" id="sb-edit-content" placeholder="Write your note...">' + esc(note.content || '') + '</textarea>' +
           '<div class="sb-ocr-tools"><button type="button" class="sb-ocr-btn" id="sb-ocr-upload-btn">\uD83D\uDCF7 Scan Photo / Screenshot</button><button type="button" class="sb-ocr-btn" id="sb-ocr-camera-btn">\uD83D\uDCF9 Use Camera</button><button type="button" class="sb-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-upload-btn">\u2728 Send Image to AI</button><button type="button" class="sb-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-camera-btn">\uD83D\uDCF8 Take Photo & Send to AI</button></div>' +
-          '<input type="file" id="sb-ocr-file-input" accept="image/*" hidden>' +
-          '<input type="file" id="sb-ocr-camera-input" accept="image/*" capture="environment" hidden>' +
-          '<input type="file" id="sb-direct-ai-file-input" accept="image/*" hidden><input type="file" id="sb-direct-ai-camera-input" accept="image/*" capture="environment" hidden>' +
+          '<input type="file" id="sb-ocr-file-input" accept="image/*,.heic,.heif" hidden>' +
+          '<input type="file" id="sb-ocr-camera-input" accept="image/*,.heic,.heif" capture="environment" hidden>' +
+          '<input type="file" id="sb-direct-ai-file-input" accept="image/*,.heic,.heif" hidden><input type="file" id="sb-direct-ai-camera-input" accept="image/*,.heic,.heif" capture="environment" hidden>' +
           '<div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div>' +
         '</div>' +
       '<div class="sb-field"><label>Subject</label><select class="sb-select" id="sb-edit-subject"><option value="">None</option>' + getSubjectOptions(note.subject) + '</select></div>' +
@@ -2133,25 +2133,51 @@
 
   function imageToDataURL(file) {
     return new Promise(function (resolve, reject) {
-      var reader = new FileReader();
-      reader.onerror = reject;
-      reader.onload = function () {
-        var img = new Image();
-        img.onerror = reject;
-        img.onload = function () {
+      if (!file) { reject(new Error('No image was selected')); return; }
+      var objectURL = null;
+      var finished = false;
+      function finishError(err) {
+        if (finished) return;
+        finished = true;
+        if (objectURL) URL.revokeObjectURL(objectURL);
+        reject(err instanceof Error ? err : new Error('The browser could not decode this image format'));
+      }
+      function drawSource(source, width, height, closeSource) {
+        if (finished) return;
+        try {
           var max = 1800;
-          var scale = Math.min(1, max / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+          var scale = Math.min(1, max / Math.max(width || 1, height || 1));
           var canvas = document.createElement('canvas');
-          canvas.width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
-          canvas.height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
-          var ctx = canvas.getContext('2d');
+          canvas.width = Math.max(1, Math.round((width || 1) * scale));
+          canvas.height = Math.max(1, Math.round((height || 1) * scale));
+          var ctx = canvas.getContext('2d', { alpha: false });
+          if (!ctx) throw new Error('Canvas is unavailable');
           ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          resolve(canvas.toDataURL('image/jpeg', 0.84));
-        };
-        img.src = reader.result;
-      };
-      reader.readAsDataURL(file);
+          ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+          var dataURL = canvas.toDataURL('image/jpeg', 0.84);
+          if (!dataURL || dataURL === 'data:,') throw new Error('Image conversion returned no data');
+          finished = true;
+          if (objectURL) URL.revokeObjectURL(objectURL);
+          if (closeSource && source.close) source.close();
+          resolve(dataURL);
+        } catch (err) { finishError(err); }
+      }
+      function fallbackImageElement() {
+        try {
+          objectURL = URL.createObjectURL(file);
+          var img = new Image();
+          img.onload = function () { drawSource(img, img.naturalWidth || img.width, img.naturalHeight || img.height, false); };
+          img.onerror = function () { finishError(new Error('This camera format is not supported by the browser')); };
+          img.src = objectURL;
+        } catch (err) { finishError(err); }
+      }
+      if (window.createImageBitmap) {
+        window.createImageBitmap(file, { imageOrientation: 'from-image' }).then(function (bitmap) {
+          drawSource(bitmap, bitmap.width, bitmap.height, true);
+        }).catch(fallbackImageElement);
+      } else {
+        fallbackImageElement();
+      }
     });
   }
 
