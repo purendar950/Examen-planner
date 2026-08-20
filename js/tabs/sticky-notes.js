@@ -511,6 +511,8 @@
     '.sb-ocr-tools{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;}',
     '.sb-ocr-btn{flex:1;min-width:120px;padding:7px 9px;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.35);border-radius:7px;color:#facc15;font:600 0.72rem var(--font),sans-serif;cursor:pointer;transition:all .15s;}',
     '.sb-ocr-btn:hover{background:rgba(234,179,8,0.16);border-color:#eab308;color:#fde68a;}',
+    '.sb-direct-ai-btn{border-color:rgba(168,85,247,.5);background:rgba(168,85,247,.12);color:#d8b4fe;}',
+    '.sb-direct-ai-btn:hover{background:rgba(168,85,247,.24);border-color:#a855f7;color:#f3e8ff;}',
     '.sb-ocr-status{display:none;margin-top:7px;font-size:0.7rem;color:#a3a3a3;line-height:1.35;}',
     '.sb-ocr-status.active{display:block;}',
     '.sb-textarea:focus{border-color:#eab308;}',
@@ -588,6 +590,11 @@
     '.sb-ocr-ai-btn:hover{background:rgba(124,58,237,.3);border-color:#a855f7;}',
     '.sb-ocr-modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap;}',
     '.sb-ocr-modal-actions button{padding:8px 12px;border-radius:7px;font:600 .75rem var(--font),sans-serif;cursor:pointer;}',
+    '.sb-image-ai-modal{width:min(620px,calc(100% - 28px));background:#1e1e1e;border:1px solid #3b3b3b;border-radius:14px;padding:20px;box-shadow:0 24px 70px rgba(0,0,0,.55);}',
+    '.sb-image-ai-modal h3{margin:0;color:#fff;font-size:1rem;}',
+    '.sb-image-ai-modal p{margin:7px 0 14px;color:#9ca3af;font-size:.76rem;line-height:1.45;}',
+    '.sb-image-ai-prompt{width:100%;min-height:92px;resize:vertical;box-sizing:border-box;padding:10px;background:#151515;border:1px solid #3b3b3b;border-radius:8px;color:#f3f4f6;font:.82rem/1.5 var(--font),sans-serif;outline:0;}',
+    '.sb-image-ai-prompt:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,.12);}',
     '.sb-ocr-cancel{background:#2a2a2a;border:1px solid #444;color:#d1d5db;}',
     '.sb-ocr-append{background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);color:#fde68a;}',
     '.sb-ocr-replace{background:#eab308;border:1px solid transparent;color:#000;}',
@@ -1015,7 +1022,7 @@
     if (!formEl || !footer) return;
     var note = getNote(selectedNoteId);
     if (!note) {
-      formEl.innerHTML = '<div class="sb-no-selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 9h6M9 13h4"></path></svg><p>Select a note to edit</p><small>Or create a new note directly from a photo</small><div class="sb-no-selection-actions"><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-upload-btn">\uD83D\DCF7 Scan Photo / Screenshot</button><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-camera-btn">\uD83D\DCF9 Use Camera</button></div><input type="file" id="sb-ocr-new-file-input" accept="image/*" hidden><input type="file" id="sb-ocr-new-camera-input" accept="image/*" capture="environment" hidden><div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div></div>';
+      formEl.innerHTML = '<div class="sb-no-selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 9h6M9 13h4"></path></svg><p>Select a note to edit</p><small>Or create a new note directly from a photo</small><div class="sb-no-selection-actions"><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-upload-btn">\uD83D\DCF7 Scan Photo / Screenshot</button><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-camera-btn">\uD83D\DCF9 Use Camera</button><button type="button" class="sb-empty-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-new-upload-btn">\u2728 Send Image to AI</button></div><input type="file" id="sb-ocr-new-file-input" accept="image/*" hidden><input type="file" id="sb-ocr-new-camera-input" accept="image/*" capture="environment" hidden><input type="file" id="sb-direct-ai-new-file-input" accept="image/*" hidden><div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div></div>';
       footer.style.display = 'none';
       renderAITools(null);
       renderRevision(null);
@@ -1033,9 +1040,10 @@
           '<button class="sb-format-btn" title="List" data-fmt="list">\u2630</button>' +
         '</div>' +
           '<textarea class="sb-textarea" id="sb-edit-content" placeholder="Write your note...">' + esc(note.content || '') + '</textarea>' +
-          '<div class="sb-ocr-tools"><button type="button" class="sb-ocr-btn" id="sb-ocr-upload-btn">\uD83D\uDCF7 Scan Photo / Screenshot</button><button type="button" class="sb-ocr-btn" id="sb-ocr-camera-btn">\uD83D\uDCF9 Use Camera</button></div>' +
+          '<div class="sb-ocr-tools"><button type="button" class="sb-ocr-btn" id="sb-ocr-upload-btn">\uD83D\uDCF7 Scan Photo / Screenshot</button><button type="button" class="sb-ocr-btn" id="sb-ocr-camera-btn">\uD83D\uDCF9 Use Camera</button><button type="button" class="sb-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-upload-btn">\u2728 Send Image to AI</button></div>' +
           '<input type="file" id="sb-ocr-file-input" accept="image/*" hidden>' +
           '<input type="file" id="sb-ocr-camera-input" accept="image/*" capture="environment" hidden>' +
+          '<input type="file" id="sb-direct-ai-file-input" accept="image/*" hidden>' +
           '<div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div>' +
         '</div>' +
       '<div class="sb-field"><label>Subject</label><select class="sb-select" id="sb-edit-subject"><option value="">None</option>' + getSubjectOptions(note.subject) + '</select></div>' +
@@ -1228,10 +1236,16 @@
         var cameraInput = document.getElementById(e.target.closest('#sb-ocr-new-camera-btn') ? 'sb-ocr-new-camera-input' : 'sb-ocr-camera-input');
         if (cameraInput) cameraInput.click();
       }
+      if (e.target.closest('#sb-direct-ai-upload-btn') || e.target.closest('#sb-direct-ai-new-upload-btn')) {
+        var aiInput = document.getElementById(e.target.closest('#sb-direct-ai-new-upload-btn') ? 'sb-direct-ai-new-file-input' : 'sb-direct-ai-file-input');
+        if (aiInput) aiInput.click();
+      }
     });
     page.addEventListener('change', function (e) {
-      var input = e.target.closest('#sb-ocr-file-input,#sb-ocr-camera-input,#sb-ocr-new-file-input,#sb-ocr-new-camera-input');
-      if (input && input.files && input.files[0]) runLocalOCR(input.files[0]);
+      var input = e.target.closest('#sb-ocr-file-input,#sb-ocr-camera-input,#sb-ocr-new-file-input,#sb-ocr-new-camera-input,#sb-direct-ai-file-input,#sb-direct-ai-new-file-input');
+      if (!input || !input.files || !input.files[0]) return;
+      if (input.id.indexOf('sb-direct-ai-') === 0) runDirectImageAI(input.files[0], !getNote(selectedNoteId));
+      else runLocalOCR(input.files[0]);
     });
 
     /* filter chips */
@@ -2113,12 +2127,87 @@
     });
   }
 
+  function imageToDataURL(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onerror = reject;
+      reader.onload = function () {
+        var img = new Image();
+        img.onerror = reject;
+        img.onload = function () {
+          var max = 1800;
+          var scale = Math.min(1, max / Math.max(img.naturalWidth || img.width, img.naturalHeight || img.height));
+          var canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round((img.naturalWidth || img.width) * scale));
+          canvas.height = Math.max(1, Math.round((img.naturalHeight || img.height) * scale));
+          var ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.84));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function runDirectImageAI(file, createMode) {
+    showDirectImagePrompt(file, createMode);
+  }
+
+  function showDirectImagePrompt(file, createMode) {
+    var existing = document.getElementById('sb-image-ai-overlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.className = 'sb-modal-overlay sb-image-ai-overlay';
+    overlay.id = 'sb-image-ai-overlay';
+    overlay.innerHTML = '<div class="sb-image-ai-modal" role="dialog" aria-modal="true" aria-labelledby="sb-image-ai-title"><h3 id="sb-image-ai-title">Send image directly to AI</h3><p>The image will be resized in your browser and sent to a vision-capable AI. Choose what you want the AI to return.</p><textarea class="sb-image-ai-prompt" id="sb-image-ai-prompt" placeholder="For example: Extract all text and format it as a clear study note.">Extract all readable text and convert it into a clean, well-structured study note. Preserve facts and do not invent information.</textarea><div class="sb-ocr-modal-actions"><button type="button" class="sb-ocr-cancel" id="sb-image-ai-cancel">Cancel</button><button type="button" class="sb-ocr-replace" id="sb-image-ai-send">Send Image to AI</button></div></div>';
+    document.body.appendChild(overlay);
+    var promptEl = document.getElementById('sb-image-ai-prompt');
+    if (promptEl) promptEl.focus();
+    function close() { document.removeEventListener('keydown', onKeyDown); overlay.remove(); }
+    function onKeyDown(e) { if (e.key === 'Escape') close(); }
+    document.addEventListener('keydown', onKeyDown);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    var cancel = document.getElementById('sb-image-ai-cancel');
+    if (cancel) cancel.addEventListener('click', close);
+    var send = document.getElementById('sb-image-ai-send');
+    if (send) send.addEventListener('click', function () {
+      var prompt = promptEl ? promptEl.value.trim() : '';
+      if (!prompt) { toast('Tell the AI what to do with the image.', 'error'); return; }
+      send.disabled = true; send.textContent = 'Sending…';
+      imageToDataURL(file).then(function (dataURL) { return requestDirectImageAI(dataURL, prompt, createMode, close); }).catch(function (err) {
+        console.warn('[sticky-notes] direct image AI error', err);
+        send.disabled = false; send.textContent = 'Send Image to AI';
+        toast('Image could not be prepared: ' + (err.message || 'Try another image.'), 'error');
+      });
+    });
+  }
+
+  function requestDirectImageAI(dataURL, prompt, createMode, closePrompt) {
+    toast('Sending image to AI…', 'info');
+    var reqBody = { q: prompt, image: dataURL, image_url: dataURL, images: [dataURL], vision: true };
+    if (selectedAIModel) reqBody.model = selectedAIModel;
+    return backendFetch('/api/ai-chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reqBody) })
+      .then(function (resp) { return resp.json().then(function (j) { return { ok: resp.ok, data: j || {} }; }); })
+      .then(function (res) {
+        var text = res.data && (res.data.answer || res.data.message);
+        if (!res.ok || !text) throw new Error((res.data && (res.data.detail || res.data.error)) || 'The selected AI endpoint did not return a result');
+        if (closePrompt) closePrompt();
+        showOCRResultDialog(String(text), createMode, 'AI image result ready to review');
+        toast('Image AI result ready to review', 'success');
+      }).catch(function (err) {
+        toast('Direct image AI failed: ' + (err.message || 'The selected model may not support images.'), 'error');
+        throw err;
+      });
+  }
+
   function deriveOCRTitle(text) {
     var firstLine = String(text || '').split(/\r?\n/).map(function (line) { return line.replace(/^\s*[#>*-]+\s*/, '').trim(); }).find(function (line) { return line; });
     return (firstLine || 'Scanned Note').slice(0, 100);
   }
 
-  function showOCRResultDialog(text, createMode) {
+  function showOCRResultDialog(text, createMode, heading) {
     var existing = document.getElementById('sb-ocr-result-overlay');
     if (existing) existing.remove();
     var overlay = document.createElement('div');
@@ -2126,7 +2215,7 @@
     overlay.id = 'sb-ocr-result-overlay';
     overlay.innerHTML =
       '<div class="sb-ocr-modal" role="dialog" aria-modal="true" aria-labelledby="sb-ocr-title">' +
-        '<h3 id="sb-ocr-title">OCR text extracted</h3>' +
+        '<h3 id="sb-ocr-title">' + esc(heading || 'OCR text extracted') + '</h3>' +
         '<p>Review or correct the locally extracted text. You can save it directly, or optionally send this text to AI for formatting or improvement.</p>' +
         '<textarea class="sb-ocr-result" id="sb-ocr-result-text"></textarea>' +
         '<div class="sb-ocr-progress" id="sb-ocr-ai-progress"></div>' +
