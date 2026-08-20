@@ -1022,7 +1022,7 @@
     if (!formEl || !footer) return;
     var note = getNote(selectedNoteId);
     if (!note) {
-      formEl.innerHTML = '<div class="sb-no-selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 9h6M9 13h4"></path></svg><p>Select a note to edit</p><small>Or create a new note directly from a photo</small><div class="sb-no-selection-actions"><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-upload-btn">\uD83D\DCF7 Scan Photo / Screenshot</button><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-camera-btn">\uD83D\DCF9 Use Camera</button><button type="button" class="sb-empty-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-new-upload-btn">\u2728 Send Image to AI</button></div><input type="file" id="sb-ocr-new-file-input" accept="image/*" hidden><input type="file" id="sb-ocr-new-camera-input" accept="image/*" capture="environment" hidden><input type="file" id="sb-direct-ai-new-file-input" accept="image/*" hidden><div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div></div>';
+      formEl.innerHTML = '<div class="sb-no-selection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 9h6M9 13h4"></path></svg><p>Select a note to edit</p><small>Or create a new note directly from a photo</small><div class="sb-no-selection-actions"><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-upload-btn">\uD83D\DCF7 Scan Photo / Screenshot</button><button type="button" class="sb-empty-ocr-btn" id="sb-ocr-new-camera-btn">\uD83D\DCF9 Use Camera</button><button type="button" class="sb-empty-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-new-upload-btn">\u2728 Send Image to AI</button><button type="button" class="sb-empty-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-new-camera-btn">\uD83D\DCF8 Take Photo & Send to AI</button></div><input type="file" id="sb-ocr-new-file-input" accept="image/*" hidden><input type="file" id="sb-ocr-new-camera-input" accept="image/*" capture="environment" hidden><input type="file" id="sb-direct-ai-new-file-input" accept="image/*" hidden><input type="file" id="sb-direct-ai-new-camera-input" accept="image/*" capture="environment" hidden><div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div></div>';
       footer.style.display = 'none';
       renderAITools(null);
       renderRevision(null);
@@ -1040,10 +1040,10 @@
           '<button class="sb-format-btn" title="List" data-fmt="list">\u2630</button>' +
         '</div>' +
           '<textarea class="sb-textarea" id="sb-edit-content" placeholder="Write your note...">' + esc(note.content || '') + '</textarea>' +
-          '<div class="sb-ocr-tools"><button type="button" class="sb-ocr-btn" id="sb-ocr-upload-btn">\uD83D\uDCF7 Scan Photo / Screenshot</button><button type="button" class="sb-ocr-btn" id="sb-ocr-camera-btn">\uD83D\uDCF9 Use Camera</button><button type="button" class="sb-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-upload-btn">\u2728 Send Image to AI</button></div>' +
+          '<div class="sb-ocr-tools"><button type="button" class="sb-ocr-btn" id="sb-ocr-upload-btn">\uD83D\uDCF7 Scan Photo / Screenshot</button><button type="button" class="sb-ocr-btn" id="sb-ocr-camera-btn">\uD83D\uDCF9 Use Camera</button><button type="button" class="sb-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-upload-btn">\u2728 Send Image to AI</button><button type="button" class="sb-ocr-btn sb-direct-ai-btn" id="sb-direct-ai-camera-btn">\uD83D\uDCF8 Take Photo & Send to AI</button></div>' +
           '<input type="file" id="sb-ocr-file-input" accept="image/*" hidden>' +
           '<input type="file" id="sb-ocr-camera-input" accept="image/*" capture="environment" hidden>' +
-          '<input type="file" id="sb-direct-ai-file-input" accept="image/*" hidden>' +
+          '<input type="file" id="sb-direct-ai-file-input" accept="image/*" hidden><input type="file" id="sb-direct-ai-camera-input" accept="image/*" capture="environment" hidden>' +
           '<div class="sb-ocr-status" id="sb-ocr-status" aria-live="polite"></div>' +
         '</div>' +
       '<div class="sb-field"><label>Subject</label><select class="sb-select" id="sb-edit-subject"><option value="">None</option>' + getSubjectOptions(note.subject) + '</select></div>' +
@@ -1240,9 +1240,13 @@
         var aiInput = document.getElementById(e.target.closest('#sb-direct-ai-new-upload-btn') ? 'sb-direct-ai-new-file-input' : 'sb-direct-ai-file-input');
         if (aiInput) aiInput.click();
       }
+      if (e.target.closest('#sb-direct-ai-camera-btn') || e.target.closest('#sb-direct-ai-new-camera-btn')) {
+        var aiCameraInput = document.getElementById(e.target.closest('#sb-direct-ai-new-camera-btn') ? 'sb-direct-ai-new-camera-input' : 'sb-direct-ai-camera-input');
+        if (aiCameraInput) aiCameraInput.click();
+      }
     });
     page.addEventListener('change', function (e) {
-      var input = e.target.closest('#sb-ocr-file-input,#sb-ocr-camera-input,#sb-ocr-new-file-input,#sb-ocr-new-camera-input,#sb-direct-ai-file-input,#sb-direct-ai-new-file-input');
+      var input = e.target.closest('#sb-ocr-file-input,#sb-ocr-camera-input,#sb-ocr-new-file-input,#sb-ocr-new-camera-input,#sb-direct-ai-file-input,#sb-direct-ai-camera-input,#sb-direct-ai-new-file-input,#sb-direct-ai-new-camera-input');
       if (!input || !input.files || !input.files[0]) return;
       if (input.id.indexOf('sb-direct-ai-') === 0) runDirectImageAI(input.files[0], !getNote(selectedNoteId));
       else runLocalOCR(input.files[0]);
