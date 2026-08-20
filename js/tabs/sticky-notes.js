@@ -452,7 +452,7 @@
     '.sb-detail-time{opacity:0.72;white-space:nowrap;}',
     '.sb-detail-card .sb-note-title{font-family:"Segoe Print","Bradley Hand","Comic Sans MS",cursive;font-size:clamp(1.65rem,3.8vw,2.8rem);line-height:1.14;margin:14px 0 9px;text-align:center;letter-spacing:0.01em;}',
     '.sb-detail-divider{height:2px;width:58%;margin:0 auto 15px;background:rgba(119,69,28,0.34);border-radius:99px;}',
-    '.sb-detail-body{flex:0 1 auto;min-height:0;max-height:calc(100vh - 270px);overflow-y:auto;padding:0 8px 8px;font-size:clamp(0.88rem,1.15vw,1.02rem);line-height:1.52;column-count:3;column-gap:28px;column-rule:1px solid rgba(73,49,22,0.17);}',
+    '.sb-detail-body{flex:0 1 auto;min-height:0;max-height:calc(100vh - 270px);overflow-y:auto;padding:0 8px 8px;font-size:clamp(0.88rem,1.15vw,1.02rem);line-height:1.52;column-count:3;column-gap:28px;column-rule:1px solid rgba(73,49,22,0.17);touch-action:pan-y;}',
     '.sb-detail-body p,.sb-detail-body ul,.sb-detail-body ol{break-inside:avoid;}',
     '.sb-detail-body p{margin:0 0 10px;}',
     '.sb-detail-body .sb-note-heading{break-after:avoid;color:#5b3b25;font-size:1.08em;margin:12px 0 6px;text-decoration:underline;text-decoration-color:rgba(119,69,28,0.28);text-underline-offset:4px;}',
@@ -1131,11 +1131,22 @@
     if (prev) prev.addEventListener('click', function () { navigate(-1); });
     if (next) next.addEventListener('click', function () { navigate(1); });
     var touchStartX = 0;
-    overlay.addEventListener('touchstart', function (e) { if (e.changedTouches[0]) touchStartX = e.changedTouches[0].screenX; }, { passive: true });
-    overlay.addEventListener('touchend', function (e) {
+    var touchStartY = 0;
+    var touchSwipeAllowed = false;
+    overlay.addEventListener('touchstart', function (e) {
       if (!e.changedTouches[0]) return;
-      var delta = e.changedTouches[0].screenX - touchStartX;
-      if (Math.abs(delta) > 55) navigate(delta < 0 ? 1 : -1);
+      var target = e.target;
+      var textArea = target.closest('.sb-detail-body,.sb-note-title,.sb-detail-topline,.sb-detail-footer,button,[data-detail-action]');
+      touchSwipeAllowed = !textArea && !!target.closest('.sb-detail-card');
+      touchStartX = e.changedTouches[0].clientX;
+      touchStartY = e.changedTouches[0].clientY;
+    }, { passive: true });
+    overlay.addEventListener('touchend', function (e) {
+      if (!touchSwipeAllowed || !e.changedTouches[0]) { touchSwipeAllowed = false; return; }
+      var deltaX = e.changedTouches[0].clientX - touchStartX;
+      var deltaY = e.changedTouches[0].clientY - touchStartY;
+      touchSwipeAllowed = false;
+      if (Math.abs(deltaX) > 75 && Math.abs(deltaX) > Math.abs(deltaY) * 1.35) navigate(deltaX < 0 ? 1 : -1);
     }, { passive: true });
     renderDetail();
   }
