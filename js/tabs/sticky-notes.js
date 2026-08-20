@@ -595,6 +595,10 @@
     '.sb-image-ai-modal p{margin:7px 0 14px;color:#9ca3af;font-size:.76rem;line-height:1.45;}',
     '.sb-image-ai-prompt{width:100%;min-height:92px;resize:vertical;box-sizing:border-box;padding:10px;background:#151515;border:1px solid #3b3b3b;border-radius:8px;color:#f3f4f6;font:.82rem/1.5 var(--font),sans-serif;outline:0;}',
     '.sb-image-ai-prompt:focus{border-color:#a855f7;box-shadow:0 0 0 3px rgba(168,85,247,.12);}',
+    '.sb-camera-modal{width:min(640px,calc(100% - 28px));background:#1e1e1e;border:1px solid #3b3b3b;border-radius:14px;padding:16px;box-shadow:0 24px 70px rgba(0,0,0,.6);}',
+    '.sb-camera-modal h3{margin:0 0 10px;color:#fff;font-size:1rem;}',
+    '.sb-camera-video{display:block;width:100%;max-height:62vh;object-fit:contain;background:#050505;border-radius:10px;border:1px solid #333;}',
+    '.sb-camera-help{margin:8px 0 0;color:#9ca3af;font-size:.72rem;line-height:1.4;}',
     '.sb-ocr-cancel{background:#2a2a2a;border:1px solid #444;color:#d1d5db;}',
     '.sb-ocr-append{background:rgba(234,179,8,.12);border:1px solid rgba(234,179,8,.4);color:#fde68a;}',
     '.sb-ocr-replace{background:#eab308;border:1px solid transparent;color:#000;}',
@@ -1241,8 +1245,7 @@
         if (aiInput) aiInput.click();
       }
       if (e.target.closest('#sb-direct-ai-camera-btn') || e.target.closest('#sb-direct-ai-new-camera-btn')) {
-        var aiCameraInput = document.getElementById(e.target.closest('#sb-direct-ai-new-camera-btn') ? 'sb-direct-ai-new-camera-input' : 'sb-direct-ai-camera-input');
-        if (aiCameraInput) aiCameraInput.click();
+        openCameraCapture(!!e.target.closest('#sb-direct-ai-new-camera-btn'));
       }
     });
     page.addEventListener('change', function (e) {
@@ -2183,6 +2186,67 @@
 
   function runDirectImageAI(file, createMode) {
     showDirectImagePrompt(file, createMode);
+  }
+
+  function openCameraCapture(createMode) {
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      var fallback = document.getElementById(createMode ? 'sb-direct-ai-new-camera-input' : 'sb-direct-ai-camera-input');
+      if (fallback) fallback.click();
+      else toast('Camera capture is not supported in this browser.', 'error');
+      return;
+    }
+    var existing = document.getElementById('sb-camera-capture-overlay');
+    if (existing) existing.remove();
+    var overlay = document.createElement('div');
+    overlay.className = 'sb-modal-overlay sb-camera-capture-overlay';
+    overlay.id = 'sb-camera-capture-overlay';
+    overlay.innerHTML = '<div class="sb-camera-modal" role="dialog" aria-modal="true" aria-labelledby="sb-camera-title"><h3 id="sb-camera-title">Take a photo for AI</h3><video class="sb-camera-video" id="sb-camera-video" autoplay playsinline muted></video><p class="sb-camera-help">Point the camera at the page or question, then capture a clear frame.</p><div class="sb-ocr-modal-actions"><button type="button" class="sb-ocr-cancel" id="sb-camera-cancel">Cancel</button><button type="button" class="sb-ocr-replace" id="sb-camera-capture">Capture & Send to AI</button></div></div>';
+    document.body.appendChild(overlay);
+    var video = document.getElementById('sb-camera-video');
+    var stream = null;
+    var closed = false;
+    function stop() {
+      if (closed) return;
+      closed = true;
+      if (stream) stream.getTracks().forEach(function (track) { track.stop(); });
+      overlay.remove();
+    }
+    function fallback() {
+      stop();
+      var input = document.getElementById(createMode ? 'sb-direct-ai-new-camera-input' : 'sb-direct-ai-camera-input');
+      if (input) input.click();
+    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+      .then(function (result) {
+        if (closed) { result.getTracks().forEach(function (track) { track.stop(); }); return; }
+        stream = result;
+        video.srcObject = stream;
+      })
+      .catch(function (err) {
+        console.warn('[sticky-notes] camera permission/capture error', err);
+        toast('Camera permission was not available. Choose an image instead.', 'error');
+        fallback();
+      });
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) stop(); });
+    var cancel = document.getElementById('sb-camera-cancel');
+    if (cancel) cancel.addEventListener('click', stop);
+    var capture = document.getElementById('sb-camera-capture');
+    if (capture) capture.addEventListener('click', function () {
+      if (!video.videoWidth || !video.videoHeight) { toast('Camera is still starting. Try again in a moment.', 'error'); return; }
+      var canvas = document.createElement('canvas');
+      var max = 1800;
+      var scale = Math.min(1, max / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      var ctx = canvas.getContext('2d', { alpha: false });
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(function (blob) {
+        if (!blob) { toast('The camera frame could not be converted.', 'error'); return; }
+        stop();
+        showDirectImagePrompt(new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' }), createMode);
+      }, 'image/jpeg', 0.88);
+    });
   }
 
   function showDirectImagePrompt(file, createMode) {
