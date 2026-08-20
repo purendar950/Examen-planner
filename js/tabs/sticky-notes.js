@@ -303,6 +303,13 @@
     '.sb-note-color-orange{background:#fed7aa;}',
     '.sb-note-pin{width:16px;height:16px;background:radial-gradient(circle at 30% 30%,#ff6b6b,#c92a2a);border-radius:50%;position:absolute;top:-8px;left:50%;transform:translateX(-50%);box-shadow:0 2px 4px rgba(0,0,0,0.3);z-index:1;}',
     '.sb-note-pin::after{content:"";position:absolute;top:2px;left:3px;width:4px;height:4px;background:rgba(255,255,255,0.6);border-radius:50%;}',
+    /* Pin colour follows the note colour, like the reference cork-board */
+    '.sb-note-color-yellow .sb-note-pin{background:radial-gradient(circle at 30% 30%,#fde047,#ca8a04);}',
+    '.sb-note-color-blue .sb-note-pin{background:radial-gradient(circle at 30% 30%,#60a5fa,#1d4ed8);}',
+    '.sb-note-color-green .sb-note-pin{background:radial-gradient(circle at 30% 30%,#4ade80,#15803d);}',
+    '.sb-note-color-pink .sb-note-pin{background:radial-gradient(circle at 30% 30%,#fb7185,#be123c);}',
+    '.sb-note-color-purple .sb-note-pin{background:radial-gradient(circle at 30% 30%,#c084fc,#7e22ce);}',
+    '.sb-note-color-orange .sb-note-pin{background:radial-gradient(circle at 30% 30%,#fb923c,#c2410c);}',
     '.sb-note-title{font-size:0.9rem;font-weight:700;color:#374151;margin-bottom:6px;line-height:1.3;word-break:break-word;}',
     '.sb-note-body{font-size:0.8rem;color:#4b5563;line-height:1.45;word-break:break-word;}',
     '.sb-note-body p{margin:0 0 6px;}',
@@ -1250,7 +1257,7 @@
     if (genBtn) { genBtn.disabled = true; genBtn.textContent = 'Generating...'; }
 
     /* Build the query using the same format as ai-chat.js: q + history */
-    var systemInstruction = 'You are a study note creator. Given a topic, create a concise, well-structured study note with a clear title and content. Use bullet points and key terms. Keep it focused for exam preparation. Your response must ONLY be a valid JSON object with exactly these three fields: "title" (short title), "content" (detailed note with bullet points, newlines, formulas), "category" (one of: normal, important, revision, formula, exam_trap). Do NOT wrap the JSON in code blocks, do NOT add any text before or after the JSON.';
+    var systemInstruction = 'You are writing a SHORT sticky note for quick exam revision \u2014 like a small index card, NOT a full explanation. Given a topic, write a short title (2-6 words) and just 3-5 crisp one-line bullet points covering only the single most essential facts, a formula, or a definition. Do NOT add headings, sub-sections, or labels like "Key Terms:", "Formula:", "Units:", "Example:" \u2014 just plain short bullet points, nothing else. Do NOT write more than 5 bullets and do NOT explain any point in more than one short sentence. The whole note (all bullets combined) must be under 50 words total. Your response must ONLY be a valid JSON object with exactly these three fields: "title" (2-6 words), "content" (3-5 short bullet points, each on its own line starting with "- "), "category" (one of: normal, important, revision, formula, exam_trap). Do NOT wrap the JSON in code blocks, do NOT add any text before or after the JSON.';
     var fullQuery = '[System]: ' + systemInstruction + '\n\n[User]: ' + prompt;
 
     var reqBody = { q: fullQuery };
