@@ -88,9 +88,10 @@
   }
   function persist() { saveLocal(); saveToFirebase(); }
 
-  /* ── backend helper for AI ── */
+  /* ── backend helper for AI (matches ai-chat.js backendAuthFetch pattern) ── */
   function backendFetch(path, options) {
     options = options || {};
+    /* Always route through the backend proxy (same as ai-chat.js backendAuthFetch) */
     if (typeof getFirebaseIdToken === 'function') {
       return getFirebaseIdToken().then(function (token) {
         var headers = Object.assign({}, options.headers || {}, { Authorization: 'Bearer ' + token });
@@ -104,6 +105,7 @@
     if (window.PrepPathBackend && typeof window.PrepPathBackend.fetch === 'function') {
       return Promise.resolve(window.PrepPathBackend.fetch(path, options));
     }
+    console.warn('[sticky-notes] No backend available — Firebase auth and PrepPathBackend both missing');
     return Promise.reject(new Error('No backend available'));
   }
 
@@ -171,6 +173,25 @@
     '.sb-ai-create-generate{padding:8px 16px;background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;border-radius:8px;color:#fff;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:inherit;white-space:nowrap;transition:opacity 0.2s;}',
     '.sb-ai-create-generate:hover{opacity:0.9;}',
     '.sb-ai-create-generate:disabled{opacity:0.5;cursor:not-allowed;}',
+    /* ── AI Preview Box ── */
+    '.sb-ai-preview{margin-top:14px;border:1px solid rgba(124,58,237,0.3);border-radius:10px;background:rgba(124,58,237,0.04);overflow:hidden;}',
+    '.sb-ai-preview-header{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:rgba(124,58,237,0.1);border-bottom:1px solid rgba(124,58,237,0.15);}',
+    '.sb-ai-preview-title{font-size:0.75rem;color:#c4b5fd;font-weight:600;}',
+    '.sb-ai-preview-badge{font-size:0.65rem;color:#a78bfa;background:rgba(124,58,237,0.15);padding:2px 8px;border-radius:99px;font-weight:500;}',
+    '.sb-ai-preview-body{padding:12px;}',
+    '.sb-ai-preview-field{margin-bottom:8px;}',
+    '.sb-ai-preview-label{font-size:0.68rem;color:#9ca3af;margin-bottom:4px;display:block;font-weight:500;}',
+    '.sb-ai-preview-input{width:100%;padding:7px 10px;background:#2a2a2a;border:1px solid #333;border-radius:7px;color:#fff;font-size:0.8rem;font-family:inherit;outline:none;box-sizing:border-box;}',
+    '.sb-ai-preview-input:focus{border-color:#a855f7;}',
+    '.sb-ai-preview-textarea{width:100%;min-height:120px;max-height:250px;padding:10px;background:#2a2a2a;border:1px solid #333;border-radius:7px;color:#fff;font-size:0.8rem;font-family:inherit;outline:none;resize:vertical;box-sizing:border-box;line-height:1.5;}',
+    '.sb-ai-preview-textarea:focus{border-color:#a855f7;}',
+    '.sb-ai-preview-actions{display:flex;gap:8px;padding:10px 12px;background:rgba(124,58,237,0.06);border-top:1px solid rgba(124,58,237,0.12);}',
+    '.sb-ai-preview-add{flex:1;padding:8px 14px;background:linear-gradient(135deg,#7c3aed,#a855f7);border:none;border-radius:8px;color:#fff;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity 0.2s;}',
+    '.sb-ai-preview-add:hover{opacity:0.9;}',
+    '.sb-ai-preview-cancel{padding:8px 14px;background:#2d2d2d;border:1px solid #444;border-radius:8px;color:#d1d5db;font-size:0.82rem;font-weight:500;cursor:pointer;font-family:inherit;transition:all 0.2s;}',
+    '.sb-ai-preview-cancel:hover{background:#333;border-color:#555;color:#fff;}',
+    '.sb-ai-preview-regenerate{padding:8px 14px;background:transparent;border:1px solid rgba(124,58,237,0.3);border-radius:8px;color:#c4b5fd;font-size:0.82rem;font-weight:500;cursor:pointer;font-family:inherit;transition:all 0.2s;}',
+    '.sb-ai-preview-regenerate:hover{background:rgba(124,58,237,0.1);border-color:#a855f7;}',
 
     /* Filter chips (horizontal scroll) */
     '.sb-filter-chips{display:flex;gap:6px;padding:0 16px 12px;overflow-x:auto;flex-shrink:0;}',
@@ -928,7 +949,12 @@
   /* ── AI Create panel (right panel) ── */
   function fetchAIModels() {
     if (aiModelsLoaded) return Promise.resolve();
-    return backendFetch('/api/ai-chat/status').then(function (resp) { return resp.json(); }).then(function (data) {
+    return backendFetch('/api/ai-chat/status').then(function (resp) {
+      return resp.json().then(function (j) {
+        if (!resp.ok) throw new Error((j && (j.detail || j.error)) || ('HTTP ' + resp.status));
+        return j;
+      });
+    }).then(function (data) {
       if (data && Array.isArray(data.providerGroups)) {
         aiProviderGroups = data.providerGroups;
         aiProviderGroups.forEach(function (g) {
@@ -945,7 +971,8 @@
         }
       }
       aiModelsLoaded = true;
-    }).catch(function () {
+    }).catch(function (err) {
+      console.warn('[sticky-notes] Failed to load AI models', err);
       aiModelsLoaded = true;
     });
   }
@@ -1143,39 +1170,118 @@
     var prompt = promptEl ? promptEl.value.trim() : '';
     if (!prompt) { toast('Describe what note you want', 'error'); return; }
     if (genBtn) { genBtn.disabled = true; genBtn.textContent = 'Generating...'; }
-    var messages = [
-      { role: 'system', content: 'You are a study note creator. Given a topic, create a concise, well-structured study note with a clear title and content. Use bullet points and key terms. Keep it focused for exam preparation. Reply in JSON format: {"title": "...", "content": "...", "category": "normal|important|revision|formula|exam_trap"}' },
-      { role: 'user', content: prompt }
-    ];
-    var reqBody = { messages: messages };
+
+    /* Build the query using the same format as ai-chat.js: q + history */
+    var systemInstruction = 'You are a study note creator. Given a topic, create a concise, well-structured study note with a clear title and content. Use bullet points and key terms. Keep it focused for exam preparation. Reply in JSON format: {"title": "...", "content": "...", "category": "normal|important|revision|formula|exam_trap"}';
+    var fullQuery = '[System]: ' + systemInstruction + '\n\n[User]: ' + prompt;
+
+    var reqBody = { q: fullQuery };
     if (selectedAIModel) reqBody.model = selectedAIModel;
+
     backendFetch('/api/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reqBody)
     }).then(function (resp) {
-      return resp.json();
-    }).then(function (data) {
-      var text = '';
-      /* Blocking endpoint returns {answer: "..."} */
-      if (data && typeof data.answer === 'string') text = data.answer;
-      else if (data && typeof data.message === 'string') text = data.message;
-      else if (data && data.choices && data.choices[0]) {
-        var choice = data.choices[0];
-        text = choice.message && (choice.message.content || choice.message) || choice.text || '';
+      return resp.json().then(function (j) { return { ok: resp.ok, data: j || {} }; });
+    }).then(function (res) {
+      if (!res.ok) {
+        var errMsg = (res.data && (res.data.detail || res.data.error)) || 'Server error';
+        throw new Error(String(errMsg).slice(0, 200));
       }
+      var text = '';
+      if (res.data && typeof res.data.answer === 'string') text = res.data.answer;
+      else if (res.data && typeof res.data.message === 'string') text = res.data.message;
+      if (!text) throw new Error('Empty response from AI');
+
+      /* Try to parse the JSON the AI was asked to return */
       var parsed = null;
       try {
         var jsonMatch = text.match(/\{[\s\S]*\}/);
         if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
       } catch (e) {}
-      var title = (parsed && parsed.title) || prompt.slice(0, 50);
-      var content = (parsed && parsed.content) || text;
-      var category = (parsed && parsed.category) || 'normal';
+      var previewTitle = (parsed && parsed.title) || prompt.slice(0, 60);
+      var previewContent = (parsed && parsed.content) || text;
+      var previewCategory = (parsed && parsed.category) || 'normal';
+      if (CATEGORIES.indexOf(previewCategory) === -1) previewCategory = 'normal';
+
+      /* Show the preview/edit box instead of creating note directly */
+      showAIPreviewBox({
+        title: previewTitle,
+        content: previewContent,
+        category: previewCategory,
+        subject: subEl ? subEl.value : '',
+        folderId: foldEl ? foldEl.value : '',
+        originalPrompt: prompt
+      });
+    }).catch(function (err) {
+      console.warn('[sticky-notes] AI generate error', err);
+      toast('AI generation failed: ' + (err.message || 'Try again.'), 'error');
+    }).then(function () {
+      if (genBtn) { genBtn.disabled = false; genBtn.textContent = 'Generate \u2728'; }
+    });
+  }
+
+  /* ── Show AI preview/edit box ── */
+  function showAIPreviewBox(opts) {
+    /* Remove any existing preview */
+    var existing = document.getElementById('sb-ai-preview-box');
+    if (existing) existing.remove();
+
+    /* Category options */
+    var catOpts = CATEGORIES.map(function (c) {
+      return '<option value="' + c + '"' + (c === opts.category ? ' selected' : '') + '>' + CAT_LABELS[c] + '</option>';
+    }).join('');
+
+    var box = document.createElement('div');
+    box.className = 'sb-ai-preview';
+    box.id = 'sb-ai-preview-box';
+    box.innerHTML =
+      '<div class="sb-ai-preview-header">' +
+        '<span class="sb-ai-preview-title">\u2728 Preview Generated Note</span>' +
+        '<span class="sb-ai-preview-badge">Editable</span>' +
+      '</div>' +
+      '<div class="sb-ai-preview-body">' +
+        '<div class="sb-ai-preview-field">' +
+          '<label class="sb-ai-preview-label">Title</label>' +
+          '<input type="text" class="sb-ai-preview-input" id="sb-ai-preview-title" value="' + escAttr(opts.title) + '">' +
+        '</div>' +
+        '<div class="sb-ai-preview-field">' +
+          '<label class="sb-ai-preview-label">Content</label>' +
+          '<textarea class="sb-ai-preview-textarea" id="sb-ai-preview-content">' + esc(opts.content) + '</textarea>' +
+        '</div>' +
+        '<div class="sb-ai-preview-field">' +
+          '<label class="sb-ai-preview-label">Category</label>' +
+          '<select class="sb-ai-preview-input" id="sb-ai-preview-category" style="cursor:pointer;">' + catOpts + '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="sb-ai-preview-actions">' +
+        '<button class="sb-ai-preview-cancel" id="sb-ai-preview-cancel">Cancel</button>' +
+        '<button class="sb-ai-preview-regenerate" id="sb-ai-preview-regenerate">\uD83D\uDD04 Retry</button>' +
+        '<button class="sb-ai-preview-add" id="sb-ai-preview-add">Add to Board \u2713</button>' +
+      '</div>';
+
+    /* Insert after the AI create form */
+    var createPanel = document.querySelector('.sb-ai-create');
+    if (createPanel) createPanel.appendChild(box);
+    else {
+      var container = document.getElementById('sb-ai-create-content');
+      if (container) container.appendChild(box);
+    }
+
+    /* Scroll the preview into view */
+    box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    /* Add to Board */
+    var addBtn = document.getElementById('sb-ai-preview-add');
+    if (addBtn) addBtn.addEventListener('click', function () {
+      var titleVal = (document.getElementById('sb-ai-preview-title') || {}).value || opts.title;
+      var contentVal = (document.getElementById('sb-ai-preview-content') || {}).value || opts.content;
+      var catVal = (document.getElementById('sb-ai-preview-category') || {}).value || opts.category;
       var note = {
-        id: genId(), title: title, content: content,
-        subject: subEl ? subEl.value : '', folderId: foldEl ? foldEl.value : '',
-        color: 'yellow', category: category, pinned: false, aiGenerated: true,
+        id: genId(), title: titleVal.trim(), content: contentVal,
+        subject: opts.subject, folderId: opts.folderId,
+        color: 'yellow', category: catVal, pinned: false, aiGenerated: true,
         position: { x: 0, y: 0 },
         revision: { nextReview: '', interval: 1, difficulty: 'Not set', lastReviewed: '' },
         createdAt: now(), updatedAt: now(), rotation: randomRotation()
@@ -1183,13 +1289,23 @@
       notes.unshift(note);
       selectedNoteId = note.id;
       persist(); renderAll();
+      /* Clear the prompt */
+      var promptEl = document.getElementById('sb-ai-prompt');
       if (promptEl) promptEl.value = '';
-      toast('AI note created \u2713', 'success');
-    }).catch(function (err) {
-      console.warn('[sticky-notes] AI generate error', err);
-      toast('AI generation failed. Try again.', 'error');
-    }).then(function () {
-      if (genBtn) { genBtn.disabled = false; genBtn.textContent = 'Generate \u2728'; }
+      /* Remove preview box */
+      box.remove();
+      toast('AI note added to board \u2713', 'success');
+    });
+
+    /* Cancel */
+    var cancelBtn = document.getElementById('sb-ai-preview-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', function () { box.remove(); });
+
+    /* Regenerate */
+    var regenBtn = document.getElementById('sb-ai-preview-regenerate');
+    if (regenBtn) regenBtn.addEventListener('click', function () {
+      box.remove();
+      aiGenerateNote();
     });
   }
 
@@ -1204,35 +1320,33 @@
       mnemonic: 'Create a mnemonic or memory trick to help remember this:',
       quiz: 'Create 3 quiz questions based on this note, with answers:'
     };
-    var systemPrompt = prompts[tool] || 'Help improve this note:';
+    var systemInstruction = 'You are a study assistant. ' + (prompts[tool] || 'Help improve this note:') + ' Reply with the improved content only, no explanations.';
+    var userMsg = 'Title: ' + (note.title || '') + '\n\nContent:\n' + (note.content || '');
+    var fullQuery = '[System]: ' + systemInstruction + '\n\n[User]: ' + userMsg;
     toast('AI processing ' + tool + '...', 'info');
+    var reqBody = { q: fullQuery };
+    if (selectedAIModel) reqBody.model = selectedAIModel;
     backendFetch('/api/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [
-          { role: 'system', content: 'You are a study assistant. ' + systemPrompt + ' Reply with the improved content only, no explanations.' },
-          { role: 'user', content: 'Title: ' + (note.title || '') + '\n\nContent:\n' + (note.content || '') }
-        ]
-      })
-    }).then(function (resp) { return resp.json(); })
-    .then(function (data) {
+      body: JSON.stringify(reqBody)
+    }).then(function (resp) {
+      return resp.json().then(function (j) { return { ok: resp.ok, data: j || {} }; });
+    }).then(function (res) {
       var text = '';
-      if (data && typeof data.answer === 'string') text = data.answer;
-      else if (data && typeof data.message === 'string') text = data.message;
-      else if (data && data.choices && data.choices[0]) {
-        var choice = data.choices[0];
-        text = choice.message && (choice.message.content || choice.message) || choice.text || '';
-      }
+      if (res.data && typeof res.data.answer === 'string') text = res.data.answer;
+      else if (res.data && typeof res.data.message === 'string') text = res.data.message;
       if (text) {
         note.content = text;
         note.updatedAt = now();
         persist(); renderBoard(); renderEditor();
         toast('AI ' + tool + ' applied \u2713', 'success');
+      } else {
+        toast('AI returned empty response', 'error');
       }
     }).catch(function (err) {
       console.warn('[sticky-notes] AI tool error', err);
-      toast('AI tool failed. Try again.', 'error');
+      toast('AI tool failed: ' + (err.message || 'Try again.'), 'error');
     });
   }
 
@@ -1243,24 +1357,21 @@
       return (i + 1) + '. Title: "' + (n.title || 'Untitled') + '" | Subject: ' + (n.subject || 'none') + ' | Category: ' + (n.category || 'normal');
     }).join('\n');
     var folderNames = folders.filter(function (f) { return !f.parentId; }).map(function (f) { return f.name; }).join(', ');
+    var systemInstruction = 'You are a study organizer. Given a list of notes, suggest categories and subjects for each. Reply ONLY in JSON array format: [{"index": 1, "category": "normal|important|revision|formula|exam_trap", "subject": "Physics"}, ...]. Available folders: ' + (folderNames || 'none') + '. If a subject doesn\'t match an existing folder, suggest a new one in the "subject" field.';
+    var fullQuery = '[System]: ' + systemInstruction + '\n\n[User]: ' + noteSummaries;
+    var reqBody = { q: fullQuery };
+    if (selectedAIModel) reqBody.model = selectedAIModel;
     backendFetch('/api/ai-chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [
-          { role: 'system', content: 'You are a study organizer. Given a list of notes, suggest categories and subjects for each. Reply ONLY in JSON array format: [{"index": 1, "category": "normal|important|revision|formula|exam_trap", "subject": "Physics"}, ...]. Available folders: ' + (folderNames || 'none') + '. If a subject doesn\'t match an existing folder, suggest a new one in the "subject" field.' },
-          { role: 'user', content: noteSummaries }
-        ]
-      })
-    }).then(function (resp) { return resp.json(); })
-    .then(function (data) {
+      body: JSON.stringify(reqBody)
+    }).then(function (resp) {
+      return resp.json().then(function (j) { return { ok: resp.ok, data: j || {} }; });
+    })
+    .then(function (res) {
       var text = '';
-      if (data && typeof data.answer === 'string') text = data.answer;
-      else if (data && typeof data.message === 'string') text = data.message;
-      else if (data && data.choices && data.choices[0]) {
-        var choice = data.choices[0];
-        text = choice.message && (choice.message.content || choice.message) || choice.text || '';
-      }
+      if (res.data && typeof res.data.answer === 'string') text = res.data.answer;
+      else if (res.data && typeof res.data.message === 'string') text = res.data.message;
       try {
         var jsonMatch = text.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
@@ -1281,7 +1392,7 @@
       toast('Could not parse AI response', 'error');
     }).catch(function (err) {
       console.warn('[sticky-notes] AI organize error', err);
-      toast('AI organize failed', 'error');
+      toast('AI organize failed: ' + (err.message || 'Try again.'), 'error');
     });
   }
 
