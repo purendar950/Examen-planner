@@ -144,6 +144,27 @@
   function todayStr() { return new Date().toISOString().slice(0, 10); }
   function randomRotation() { return (Math.random() * 4 - 2).toFixed(2); }
   function randomColor() { return COLORS[Math.floor(Math.random() * COLORS.length)]; }
+  function nextCardColor() {
+    var used = {};
+    notes.forEach(function (n) { if (n && COLORS.indexOf(n.color) > -1) used[n.color] = true; });
+    for (var i = 0; i < COLORS.length; i++) if (!used[COLORS[i]]) return COLORS[i];
+    return COLORS[notes.length % COLORS.length];
+  }
+  /* Give legacy/automatic cards a varied palette, but never overwrite a color chosen manually. */
+  function normalizeCardColors() {
+    var used = {}, changed = false;
+    notes.forEach(function (n, i) {
+      if (!n || typeof n !== 'object') return;
+      var valid = COLORS.indexOf(n.color) > -1;
+      if (n.colorSource === 'manual' && valid) { used[n.color] = true; return; }
+      var candidate = null;
+      for (var j = 0; j < COLORS.length; j++) if (!used[COLORS[j]]) { candidate = COLORS[j]; break; }
+      if (!candidate) candidate = COLORS[i % COLORS.length];
+      if (n.color !== candidate || n.colorSource !== 'auto') { n.color = candidate; n.colorSource = 'auto'; changed = true; }
+      used[candidate] = true;
+    });
+    return changed;
+  }
   function setNum(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
 
   /* ── persistence ── */
@@ -152,6 +173,7 @@
     try { folders = JSON.parse(localStorage.getItem(FOLDERS_KEY) || '[]'); } catch (e) { folders = []; }
     if (!Array.isArray(notes)) notes = [];
     if (!Array.isArray(folders)) folders = [];
+    if (normalizeCardColors()) saveLocal();
   }
   function saveLocal() {
     try { localStorage.setItem(NOTES_KEY, JSON.stringify(notes)); } catch (e) {}
@@ -173,6 +195,7 @@
         var d = snap.data();
         if (Array.isArray(d.stickyNotes) && d.stickyNotes.length > notes.length) { notes = d.stickyNotes; saveLocal(); }
         if (Array.isArray(d.stickyFolders) && d.stickyFolders.length > folders.length) { folders = d.stickyFolders; saveLocal(); }
+        if (normalizeCardColors()) { saveLocal(); saveToFirebase(); }
         renderAll();
       }).catch(function () {});
     } catch (e) {}
@@ -1241,7 +1264,7 @@
       if (!swatch) return;
       var color = swatch.dataset.color;
       var note = getNote(selectedNoteId);
-      if (note) { note.color = color; persist(); renderBoard(); renderEditor(); }
+      if (note) { note.color = color; note.colorSource = 'manual'; persist(); renderBoard(); renderEditor(); }
     });
 
     /* revision interval + mark reviewed (delegated) */
@@ -1467,7 +1490,7 @@
   function createNewNote() {
     var note = {
       id: genId(), title: '', content: '', subject: '', folderId: '',
-      color: randomColor(), category: 'normal', pinned: false, aiGenerated: false,
+      color: nextCardColor(), colorSource: 'auto', category: 'normal', pinned: false, aiGenerated: false,
       position: { x: 0, y: 0 },
       revision: { nextReview: '', interval: 1, difficulty: 'Not set', lastReviewed: '' },
       createdAt: now(), updatedAt: now(), rotation: randomRotation()
@@ -1682,7 +1705,7 @@
       var note = {
         id: genId(), title: titleVal.trim(), content: contentVal,
         subject: opts.subject, folderId: opts.folderId,
-        color: 'yellow', category: catVal, pinned: false, aiGenerated: true,
+        color: nextCardColor(), colorSource: 'auto', category: catVal, pinned: false, aiGenerated: true,
         position: { x: 0, y: 0 },
         revision: { nextReview: '', interval: 1, difficulty: 'Not set', lastReviewed: '' },
         createdAt: now(), updatedAt: now(), rotation: randomRotation()
