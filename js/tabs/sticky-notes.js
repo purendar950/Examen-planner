@@ -325,7 +325,7 @@
     /* Rotation lives on this inner card, not on .sb-note itself: browsers don't reliably honor
        break-inside:avoid on a transformed element inside CSS multi-column layout, which was
        cutting off the footer (star/more buttons) on notes that landed near a column break. */
-    '.sb-note-card{display:flex;flex-direction:column;border-radius:2px;padding:22px 16px 13px;position:relative;cursor:grab;transition:box-shadow 0.2s,filter 0.2s;min-height:190px;overflow:visible;box-shadow:0 13px 18px -7px rgba(0,0,0,0.5),0 4px 7px -3px rgba(0,0,0,0.32),inset 0 1px 0 rgba(255,255,255,0.45);}',
+    '.sb-note-card{display:flex;flex-direction:column;border-radius:2px;padding:22px 16px 13px;position:relative;cursor:grab;transition:box-shadow 0.2s,filter 0.2s;height:238px;min-height:238px;box-sizing:border-box;overflow:visible;box-shadow:0 13px 18px -7px rgba(0,0,0,0.5),0 4px 7px -3px rgba(0,0,0,0.32),inset 0 1px 0 rgba(255,255,255,0.45);}',
     '.sb-note-card::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:0.44;background-image:repeating-linear-gradient(0deg,rgba(92,64,33,0.045) 0,rgba(92,64,33,0.045) 1px,transparent 1px,transparent 4px),repeating-linear-gradient(90deg,rgba(255,255,255,0.065) 0,rgba(255,255,255,0.065) 1px,transparent 1px,transparent 6px),radial-gradient(circle at 14% 10%,rgba(255,255,255,0.28),transparent 35%),radial-gradient(circle at 88% 88%,rgba(91,57,18,0.11),transparent 44%);mix-blend-mode:multiply;}',
     '.sb-note-card::after{content:"";position:absolute;left:0;right:0;top:0;height:12px;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,0.23),transparent);opacity:0.8;}',
     '.sb-note-card:hover{box-shadow:0 19px 26px -8px rgba(0,0,0,0.56),0 7px 11px -4px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.5);filter:brightness(1.03) saturate(1.04);}',
@@ -362,6 +362,19 @@
     '.sb-note-color-gray .sb-note-pin{background:radial-gradient(circle at 32% 28%,#94a3b8,#475569 75%);}',
     '.sb-note-title{font-family:Georgia,"Times New Roman",serif;font-size:1.02rem;font-style:italic;font-weight:700;color:#292524;margin:2px 0 8px;line-height:1.25;word-break:break-word;text-align:center;letter-spacing:0.01em;}',
     '.sb-note-body{flex:1;min-height:0;font-size:0.82rem;color:#3b332d;line-height:1.48;word-break:break-word;}',
+    '.sb-note-card .sb-note-body{position:relative;overflow:hidden;}',
+    '.sb-note-card .sb-note-body::after{content:"";position:absolute;left:0;right:0;bottom:0;height:28px;pointer-events:none;background:linear-gradient(to bottom,rgba(254,240,138,0),rgba(254,240,138,0.96));}',
+    '.sb-note-color-blue .sb-note-body::after{background:linear-gradient(to bottom,rgba(191,219,254,0),rgba(191,219,254,0.96));}',
+    '.sb-note-color-green .sb-note-body::after{background:linear-gradient(to bottom,rgba(187,247,208,0),rgba(187,247,208,0.96));}',
+    '.sb-note-color-pink .sb-note-body::after{background:linear-gradient(to bottom,rgba(254,205,211,0),rgba(254,205,211,0.96));}',
+    '.sb-note-color-purple .sb-note-body::after{background:linear-gradient(to bottom,rgba(233,213,255,0),rgba(233,213,255,0.96));}',
+    '.sb-note-color-orange .sb-note-body::after{background:linear-gradient(to bottom,rgba(254,215,170,0),rgba(254,215,170,0.96));}',
+    '.sb-note-color-red .sb-note-body::after{background:linear-gradient(to bottom,rgba(252,165,165,0),rgba(252,165,165,0.96));}',
+    '.sb-note-color-teal .sb-note-body::after{background:linear-gradient(to bottom,rgba(153,246,228,0),rgba(153,246,228,0.96));}',
+    '.sb-note-color-indigo .sb-note-body::after{background:linear-gradient(to bottom,rgba(199,210,254,0),rgba(199,210,254,0.96));}',
+    '.sb-note-color-cyan .sb-note-body::after{background:linear-gradient(to bottom,rgba(165,243,252,0),rgba(165,243,252,0.96));}',
+    '.sb-note-color-lime .sb-note-body::after{background:linear-gradient(to bottom,rgba(217,249,157,0),rgba(217,249,157,0.96));}',
+    '.sb-note-color-gray .sb-note-body::after{background:linear-gradient(to bottom,rgba(226,232,240,0),rgba(226,232,240,0.96));}',
     '.sb-note-body p{margin:0 0 6px;}',
     '.sb-note-body p:last-child{margin-bottom:0;}',
     '.sb-note-body .sb-note-heading{font-weight:700;color:#292524;margin:8px 0 4px;}',
@@ -582,7 +595,7 @@
     /* ── responsive ── */
     '@media(max-width:1200px){.sb-left:not(.sb-collapsed){width:230px;}.sb-right:not(.sb-collapsed){width:320px;}.sb-cork-inner{gap:24px 16px;}}',
     '@media(max-width:900px){.sb-left{display:none;}.sb-right:not(.sb-collapsed){width:320px;max-width:90vw;position:fixed;top:74px;right:0;bottom:0;z-index:80;box-shadow:-4px 0 20px rgba(0,0,0,0.5);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s ease;}.sb-right.sb-right-open{transform:translateX(0);}.sb-right.sb-collapsed{transform:translateX(100%);}.sb-center{width:100%;}.sb-cork-inner{grid-template-columns:repeat(2,minmax(0,1fr));gap:24px 16px;}#page-sticky-notes.active{height:calc(100vh - 56px);}}',
-    '@media(max-width:600px){.sb-cork{padding:22px 16px 30px;}.sb-cork-inner{grid-template-columns:1fr;gap:22px 0;}.sb-note-card{min-height:180px;}#page-sticky-notes.active{height:calc(100vh - 52px);}}'
+    '@media(max-width:600px){.sb-cork{padding:22px 16px 30px;}.sb-cork-inner{grid-template-columns:1fr;gap:22px 0;}.sb-note-card{height:220px;min-height:220px;}#page-sticky-notes.active{height:calc(100vh - 52px);}}'
   ].join('\n');
 
   /* ── HTML markup (matched to reference screenshot) ── */
