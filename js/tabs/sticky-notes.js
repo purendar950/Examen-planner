@@ -1172,7 +1172,7 @@
     if (genBtn) { genBtn.disabled = true; genBtn.textContent = 'Generating...'; }
 
     /* Build the query using the same format as ai-chat.js: q + history */
-    var systemInstruction = 'You are a study note creator. Given a topic, create a concise, well-structured study note with a clear title and content. Use bullet points and key terms. Keep it focused for exam preparation. Reply in JSON format: {"title": "...", "content": "...", "category": "normal|important|revision|formula|exam_trap"}';
+    var systemInstruction = 'You are a study note creator. Given a topic, create a concise, well-structured study note with a clear title and content. Use bullet points and key terms. Keep it focused for exam preparation. Your response must ONLY be a valid JSON object with exactly these three fields: "title" (short title), "content" (detailed note with bullet points, newlines, formulas), "category" (one of: normal, important, revision, formula, exam_trap). Do NOT wrap the JSON in code blocks, do NOT add any text before or after the JSON.';
     var fullQuery = '[System]: ' + systemInstruction + '\n\n[User]: ' + prompt;
 
     var reqBody = { q: fullQuery };
@@ -1193,17 +1193,33 @@
       if (res.data && typeof res.data.answer === 'string') text = res.data.answer;
       else if (res.data && typeof res.data.message === 'string') text = res.data.message;
       if (!text) throw new Error('Empty response from AI');
+      console.log('[sticky-notes] AI raw response:', text.slice(0, 500));
 
       /* Try to parse the JSON the AI was asked to return */
       var parsed = null;
       try {
-        var jsonMatch = text.match(/\{[\s\S]*\}/);
-        if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+        /* Strip markdown code fences if present */
+        var cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/,'');
+        /* Try direct parse first */
+        try { parsed = JSON.parse(cleaned); } catch (e1) {
+          /* Regex extraction: most reliable for AI-generated JSON with formatting issues */
+          var tM = cleaned.match(/"title"\s*:\s*"((?:[^"\\]|\\[\s\S])*)"/);
+          var cM = cleaned.match(/"content"\s*:\s*"((?:[^"\\]|\\[\s\S])*)"/);
+          var catM = cleaned.match(/"category"\s*:\s*"((?:[^"\\]|\\[\s\S])*)"/);
+          if (tM || cM) {
+            parsed = {
+              title: tM ? tM[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : '',
+              content: cM ? cM[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : '',
+              category: catM ? catM[1] : 'normal'
+            };
+          }
+        }
       } catch (e) {}
       var previewTitle = (parsed && parsed.title) || prompt.slice(0, 60);
       var previewContent = (parsed && parsed.content) || text;
       var previewCategory = (parsed && parsed.category) || 'normal';
       if (CATEGORIES.indexOf(previewCategory) === -1) previewCategory = 'normal';
+      console.log('[sticky-notes] Parsed:', parsed ? 'title=' + previewTitle.slice(0, 40) + ', content=' + previewContent.slice(0, 60) : 'FAILED to parse JSON');
 
       /* Show the preview/edit box instead of creating note directly */
       showAIPreviewBox({
