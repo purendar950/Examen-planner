@@ -32,6 +32,13 @@
   let currentQuery="";
   let currentSearchFilter="all";
   let nextPageToken="";
+  let searchPlayerMode="normal";
+  let searchPlayId="";
+  let searchPlayTitle="";
+  let searchPlayKind="video";
+  let searchRonflixCtrl=null;
+  let searchRonflixSeq=0;
+  let searchRonflixSpeed=1;
 
   function shuffled(list){
     const out=[...list];
@@ -98,6 +105,12 @@
   const recentSection=document.getElementById("youtubeRecent");
   const recentRow=document.getElementById("youtubeRecentRow");
   const recentClear=document.getElementById("youtubeRecentClear");
+  const searchModeBtns=[...document.querySelectorAll("[data-yt-search-mode]")];
+  const searchRonflixBox=document.getElementById("ytSearchRonflix");
+  const searchRonflixVideo=document.getElementById("ytSearchRonflixVideo");
+  const searchRonflixStatus=document.getElementById("ytSearchRonflixStatus");
+  const searchRonflixBar=document.getElementById("ytSearchRonflixBar");
+  const searchRonflixPip=document.getElementById("ytSearchRonflixPip");
   const localNoHttpReferer=["content:","file:"].includes(location.protocol);
 
   function esc(value){
@@ -205,11 +218,102 @@
     });
   }
 
+  function setSearchMode(mode){
+    searchPlayerMode=mode==="ronflix"?"ronflix":"normal";
+    searchModeBtns.forEach(btn=>{
+      const active=btn.dataset.ytSearchMode===searchPlayerMode;
+      btn.classList.toggle("active",active);
+      btn.setAttribute("aria-pressed",String(active));
+    });
+    if(searchRonflixBar) searchRonflixBar.classList.toggle("show",searchPlayerMode==="ronflix" && !!searchRonflixVideo?.src);
+    if(searchPlayerMode!=="ronflix") stopSearchRonflix();
+  }
+
+  function setSearchRonflixStatus(message){
+    if(!searchRonflixStatus)return;
+    searchRonflixStatus.classList.toggle("show",!!message);
+    searchRonflixStatus.innerHTML=message?`<span class="yt-search-ronflix-spinner"></span><span>${esc(message)}</span>`:"";
+  }
+
+  function stopSearchRonflix(){
+    searchRonflixSeq++;
+    if(searchRonflixCtrl){try{searchRonflixCtrl.abort();}catch(_){ } searchRonflixCtrl=null;}
+    if(searchRonflixVideo){
+      try{searchRonflixVideo.pause();}catch(_){ }
+      searchRonflixVideo.removeAttribute("src");
+      try{searchRonflixVideo.load();}catch(_){ }
+      searchRonflixVideo.style.display="none";
+    }
+    if(searchRonflixBox)searchRonflixBox.classList.remove("show");
+    if(searchRonflixBar)searchRonflixBar.classList.remove("show");
+    setSearchRonflixStatus("");
+  }
+
+  async function startSearchRonflix(id,title){
+    if(!searchRonflixVideo || !window.RonflixStream){
+      setSearchMode("normal");
+      play(id,title);
+      return;
+    }
+    stopSearchRonflix();
+    const seq=++searchRonflixSeq;
+    const ctrl=new AbortController();
+    searchRonflixCtrl=ctrl;
+    if(searchRonflixBox)searchRonflixBox.classList.add("show");
+    ytPlayer.style.display="none";
+    ytPlayer.removeAttribute("src");
+    ytLocalFallback.classList.remove("show");
+    ytLocalFallback.innerHTML="";
+    searchRonflixVideo.style.display="none";
+    setSearchRonflixStatus("RonFlix: fetching stream…");
+    try{
+      const stream=await window.RonflixStream.getVideoStream(id,{signal:ctrl.signal,timeoutMs:12000});
+      if(seq!==searchRonflixSeq||ctrl.signal.aborted)return;
+      searchRonflixVideo.src=stream.url;
+      searchRonflixVideo.defaultPlaybackRate=searchRonflixSpeed;
+      searchRonflixVideo.playbackRate=searchRonflixSpeed;
+      setSearchRonflixStatus("RonFlix: stream found — preparing video…");
+      await new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>reject(new Error("stream timeout")),30000);
+        const loaded=()=>{clearTimeout(timer);cleanup();resolve();};
+        const failed=()=>{clearTimeout(timer);cleanup();reject(new Error("stream failed to load (possibly CORS blocked)"));};
+        const cleanup=()=>{searchRonflixVideo.removeEventListener("loadedmetadata",loaded);searchRonflixVideo.removeEventListener("error",failed);};
+        searchRonflixVideo.addEventListener("loadedmetadata",loaded,{once:true});
+        searchRonflixVideo.addEventListener("error",failed,{once:true});
+        searchRonflixVideo.load();
+      });
+      if(seq!==searchRonflixSeq||ctrl.signal.aborted)return;
+      searchRonflixVideo.style.display="block";
+      setSearchRonflixStatus("");
+      if(searchRonflixBar)searchRonflixBar.classList.add("show");
+      const p=searchRonflixVideo.play();
+      if(p&&p.catch)p.catch(()=>{});
+    }catch(error){
+      if(seq!==searchRonflixSeq||ctrl.signal.aborted)return;
+      console.warn("YT Search RonFlix:",error);
+      setSearchRonflixStatus("RonFlix failed: "+(error.message||"stream unavailable"));
+      setSearchMode("normal");
+      play(id,title);
+    }
+  }
+
   function play(id,title="YouTube video"){
     if(!/^[A-Za-z0-9_-]{11}$/.test(id||""))return;
+    searchPlayId=id; searchPlayTitle=title; searchPlayKind="video";
     ytNow.textContent=title;
     ytPlayerCard.classList.add("show");
     rememberWatched(id,title,"video");
+    if(searchPlayerMode==="ronflix"){
+      startSearchRonflix(id,title);
+    }else{
+      stopSearchRonflix();
+    }
+
+    if(searchPlayerMode==="ronflix"){
+      const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
+      window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
+      return;
+    }
 
     if(localNoHttpReferer){
       ytPlayer.removeAttribute("src");
@@ -235,6 +339,8 @@
 
   function playPlaylist(id,title="YouTube playlist"){
     if(!/^[A-Za-z0-9_-]{10,}$/.test(id||""))return;
+    if(searchPlayerMode==="ronflix") setSearchMode("normal");
+    searchPlayId=id; searchPlayTitle=title; searchPlayKind="list";
     ytNow.textContent=title;
     ytPlayerCard.classList.add("show");
     rememberWatched(id,title,"list",PLAYLIST_THUMB);
@@ -285,6 +391,9 @@
   }
 
   async function pipedRequest(path,params={}){
+    if(window.RonflixStream && typeof window.RonflixStream.request==="function"){
+      return window.RonflixStream.request(path,params,{timeoutMs:9000});
+    }
     const qs=new URLSearchParams(params).toString();
     let ordered=[...PIPED_INSTANCES];
     if(pipedBase && ordered.includes(pipedBase)){
@@ -542,8 +651,10 @@
   }
 
   function stopPlayer(){
+    stopSearchRonflix();
     ytPlayer.removeAttribute("src");
     ytPlayerCard.classList.remove("show");
+    searchPlayId="";
   }
 
   ytGrid.addEventListener("click",e=>{
@@ -569,6 +680,35 @@
     localStorage.removeItem(YOUTUBE_WATCH_HISTORY_KEY);
     renderRecent();
   });
+
+  searchModeBtns.forEach(btn=>btn.addEventListener("click",()=>{
+    const mode=btn.dataset.ytSearchMode;
+    if(mode==="ronflix" && searchPlayKind==="list"){
+      setSearchMode("normal");
+      if(typeof showToast==="function")showToast("RonFlix individual videos ke liye hai — playlist normal player mein chalegi.","info");
+      return;
+    }
+    setSearchMode(mode);
+    if(searchPlayId){
+      if(searchPlayerMode==="ronflix") startSearchRonflix(searchPlayId,searchPlayTitle);
+      else if(searchPlayKind==="list") playPlaylist(searchPlayId,searchPlayTitle);
+      else play(searchPlayId,searchPlayTitle);
+    }
+  }));
+  document.querySelectorAll("[data-yt-search-speed]").forEach(btn=>btn.addEventListener("click",()=>{
+    searchRonflixSpeed=parseFloat(btn.dataset.ytSearchSpeed)||1;
+    document.querySelectorAll("[data-yt-search-speed]").forEach(item=>item.classList.toggle("active",item===btn));
+    if(searchRonflixVideo){searchRonflixVideo.defaultPlaybackRate=searchRonflixSpeed;searchRonflixVideo.playbackRate=searchRonflixSpeed;}
+  }));
+  searchRonflixPip?.addEventListener("click",async()=>{
+    if(!searchRonflixVideo?.src)return;
+    try{
+      if(document.pictureInPictureElement===searchRonflixVideo)await document.exitPictureInPicture();
+      else await searchRonflixVideo.requestPictureInPicture();
+    }catch(_){if(typeof showToast==="function")showToast("RonFlix PiP browser mein supported nahi hai.","info");}
+  });
+  document.querySelectorAll("[data-yt-search-speed]").forEach(btn=>btn.classList.toggle("active",btn.dataset.ytSearchSpeed==="1"));
+  setSearchMode("normal");
 
   ytBtn.addEventListener("click",submit);
   ytInput.addEventListener("keydown",e=>{if(e.key==="Enter")submit();});
