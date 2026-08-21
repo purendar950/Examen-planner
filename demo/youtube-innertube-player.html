@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTube Innertube Player</title>
+<style>
+:root { --bg:#0f0f0f; --card:#1c1c1c; --accent:#ff0000; --text:#fff; --muted:#aaa; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:var(--bg); color:var(--text); font-family:-apple-system,'Segoe UI',Roboto,sans-serif; min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:24px 16px; }
+h1 { font-size:20px; font-weight:700; margin-bottom:4px; }
+.sub { color:var(--muted); font-size:13px; margin-bottom:20px; }
+.search-bar { display:flex; gap:8px; width:100%; max-width:640px; margin-bottom:20px; }
+.search-bar input { flex:1; background:var(--card); border:1px solid #333; border-radius:8px; padding:10px 14px; color:var(--text); font-size:15px; outline:none; transition:border .2s; }
+.search-bar input:focus { border-color:var(--accent); }
+.search-bar button { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+.backend-bar { display:flex; gap:8px; width:100%; max-width:640px; margin:-12px 0 20px; }
+.backend-bar input { flex:1; background:var(--card); border:1px solid #333; border-radius:8px; padding:9px 12px; color:var(--text); font-size:13px; outline:none; }
+.backend-bar input:focus { border-color:#666; }
+.player-wrap { width:100%; max-width:960px; aspect-ratio:16/9; background:#000; border-radius:12px; overflow:hidden; position:relative; display:none; }
+.player-wrap video, .player-wrap iframe { width:100%; height:100%; border:none; }
+.info { width:100%; max-width:960px; margin-top:12px; display:none; }
+.info h2 { font-size:17px; font-weight:600; line-height:1.3; }
+.info p { color:var(--muted); font-size:13px; margin-top:4px; }
+.formats { width:100%; max-width:960px; margin-top:16px; display:none; }
+.formats h3 { font-size:14px; font-weight:600; margin-bottom:8px; color:var(--muted); }
+.format-row { display:flex; justify-content:space-between; align-items:center; background:var(--card); border-radius:8px; padding:10px 14px; margin-bottom:6px; cursor:pointer; transition:background .2s; }
+.format-row:hover { background:#2a2a2a; }
+.format-row.active { border:1px solid var(--accent); }
+.format-label { font-size:13px; font-weight:500; }
+.format-detail { font-size:11px; color:var(--muted); }
+.status { color:var(--muted); font-size:13px; margin-top:12px; text-align:center; min-height:20px; }
+.error-box { background:#3d1111; border:1px solid #722; border-radius:8px; padding:14px 18px; max-width:640px; margin-top:16px; display:none; font-size:13px; color:#f88; }
+.fallback-btn { display:inline-block; margin-top:12px; background:#272727; color:#fff; border:1px solid #444; border-radius:20px; padding:8px 20px; font-size:13px; cursor:pointer; text-decoration:none; }
+.speed-bar { width:100%; max-width:960px; margin-top:10px; display:none; align-items:center; gap:8px; flex-wrap:wrap; }
+.speed-label { font-size:12px; color:var(--muted); font-weight:600; min-width:70px; }
+.speed-btn { background:var(--card); color:var(--text); border:1px solid #333; border-radius:6px; padding:6px 12px; font-size:13px; cursor:pointer; transition:all .15s; }
+.speed-btn:hover { border-color:#555; }
+.speed-btn.active { background:var(--accent); border-color:var(--accent); font-weight:700; }
+.speed-custom { display:flex; align-items:center; gap:6px; margin-left:auto; }
+.speed-custom input { width:64px; background:var(--card); border:1px solid #333; border-radius:6px; padding:6px 8px; color:var(--text); font-size:13px; text-align:center; outline:none; }
+.speed-custom input:focus { border-color:var(--accent); }
+.speed-custom button { background:#272727; color:#fff; border:1px solid #444; border-radius:6px; padding:6px 10px; font-size:12px; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<h1>▶️ YouTube Innertube Player</h1>
+<p class="sub">Native playback through the app's server-side YouTube extractor</p>
+
+<div class="search-bar">
+  <input id="videoUrl" type="text" placeholder="Paste a YouTube URL or video ID…" value="">
+  <button onclick="loadVideo()">Play</button>
+</div>
+
+<div class="backend-bar">
+  <input id="backendUrl" type="url" placeholder="Extractor backend URL" aria-label="Extractor backend URL">
+</div>
+
+<div class="player-wrap" id="playerWrap">
+  <video id="videoPlayer" controls playsinline></video>
+</div>
+
+<div class="info" id="videoInfo">
+  <h2 id="videoTitle"></h2>
+  <p id="videoAuthor"></p>
+</div>
+
+<div class="speed-bar" id="speedBar">
+  <span class="speed-label">⚡ Speed</span>
+  <button class="speed-btn" data-speed="0.25">0.25×</button>
+  <button class="speed-btn" data-speed="0.5">0.5×</button>
+  <button class="speed-btn" data-speed="0.75">0.75×</button>
+  <button class="speed-btn active" data-speed="1">1×</button>
+  <button class="speed-btn" data-speed="1.25">1.25×</button>
+  <button class="speed-btn" data-speed="1.5">1.5×</button>
+  <button class="speed-btn" data-speed="1.75">1.75×</button>
+  <button class="speed-btn" data-speed="2">2×</button>
+  <button class="speed-btn" data-speed="3">3×</button>
+  <button class="speed-btn" data-speed="4">4×</button>
+  <button class="speed-btn" data-speed="5">5×</button>
+  <span class="speed-custom">
+    <input id="customSpeedInput" type="number" step="0.05" min="0.06" max="16" placeholder="Custom" value="">
+    <button onclick="setCustomSpeed()">Set</button>
+  </span>
+</div>
+
+<div class="formats" id="formatList">
+  <h3>Available Streams (tap to switch quality)</h3>
+  <div id="formatRows"></div>
+</div>
+
+<div class="status" id="statusText"></div>
+<div class="error-box" id="errorBox"></div>
+
+<script>
+/* Browsers cannot send the Android client's User-Agent or read Google's
+   non-CORS Innertube response. The repository extractor performs that request
+   server-side and byte-proxies the resulting media URLs. */
+const DEFAULT_BACKEND = 'https://youtube-turbo-proxy-new.onrender.com';
+
+let currentStreams = [];
+let currentVideoId = '';
+
+function backendBase() {
+  const params = new URLSearchParams(location.search);
+  const configured = document.getElementById('backendUrl').value.trim()
+    || params.get('backend')
+    || localStorage.getItem('turboBackendUrl')
+    || DEFAULT_BACKEND;
+  return configured.replace(/\/+$/, '');
+}
+
+function streamUrl(videoId, itag) {
+  return `${backendBase()}/api/stream?id=${encodeURIComponent(videoId)}&itag=${encodeURIComponent(itag)}`;
+}
+
+async function fetchVideoInfo(videoId) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  try {
+    const res = await fetch(`${backendBase()}/api/info?id=${encodeURIComponent(videoId)}`, {
+      signal: controller.signal
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || data.error || `HTTP ${res.status}`);
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function formatDuration(seconds) {
+  if (!seconds) return '';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m + ':' + String(s).padStart(2, '0');
+}
+
+function renderFormats(streams) {
+  const container = document.getElementById('formatRows');
+  container.innerHTML = '';
+  streams.forEach((stream, i) => {
+    const row = document.createElement('div');
+    row.className = 'format-row' + (i === 0 ? ' active' : '');
+    row.onclick = () => selectStream(i);
+    const label = document.createElement('span');
+    label.className = 'format-label';
+    label.textContent = stream.label;
+    const detail = document.createElement('span');
+    detail.className = 'format-detail';
+    detail.textContent = [stream.container, formatDuration(stream.duration)].filter(Boolean).join(' · ');
+    row.appendChild(label);
+    row.appendChild(detail);
+    container.appendChild(row);
+  });
+}
+
+function selectStream(index) {
+  const stream = currentStreams[index];
+  if (!stream) return;
+  const video = document.getElementById('videoPlayer');
+  const currentTime = video.currentTime;
+  video.src = streamUrl(currentVideoId, stream.itag);
+  video.currentTime = currentTime;
+  video.play().catch(() => {});
+  document.querySelectorAll('.format-row').forEach((r, i) => r.classList.toggle('active', i === index));
+}
+
+function showFallback(videoId) {
+  const wrap = document.getElementById('playerWrap');
+  wrap.innerHTML = '<iframe src="https://www.youtube.com/embed/' + videoId + '?autoplay=1" allowfullscreen allow="autoplay; encrypted-media"></iframe>';
+  setStatus('Using YouTube embed fallback.');
+}
+
+function setStatus(text) {
+  document.getElementById('statusText').textContent = text;
+}
+
+function setPlaybackRate(rate) {
+  const video = document.getElementById('videoPlayer');
+  if (!video) return;
+  video.playbackRate = rate;
+  document.querySelectorAll('.speed-btn').forEach(btn => {
+    btn.classList.toggle('active', parseFloat(btn.dataset.speed) === rate);
+  });
+}
+
+function setCustomSpeed() {
+  const input = document.getElementById('customSpeedInput');
+  const rate = parseFloat(input.value);
+  if (isNaN(rate) || rate < 0.06 || rate > 16) return;
+  setPlaybackRate(rate);
+  document.querySelectorAll('.speed-btn').forEach(btn => btn.classList.remove('active'));
+}
+
+function showError(msg) {
+  const box = document.getElementById('errorBox');
+  box.textContent = msg;
+  box.style.display = 'block';
+}
+
+function hideError() {
+  document.getElementById('errorBox').style.display = 'none';
+}
+
+async function loadVideo() {
+  const input = document.getElementById('videoUrl').value;
+  const videoId = extractVideoId(input);
+  if (!videoId) { showError('Could not parse a valid YouTube video ID from that input.'); return; }
+
+  hideError();
+  localStorage.setItem('turboBackendUrl', backendBase());
+  setStatus('Extracting playable streams…');
+  currentVideoId = videoId;
+
+  try {
+    const data = await fetchVideoInfo(videoId);
+    const title = data.title || 'Untitled';
+    const author = data.uploader || '';
+    const duration = Math.round(Number(data.duration) || 0);
+
+    document.getElementById('videoTitle').textContent = title;
+    document.getElementById('videoAuthor').textContent = author ? 'by ' + author : '';
+    document.getElementById('videoInfo').style.display = 'block';
+
+    currentStreams = (data.formats || [])
+      .filter(format => format.itag && Number(format.height) > 0)
+      .map(format => ({
+        label: `${Number(format.height) === 360 ? '🎬' : '📹'} ${format.quality || format.height + 'p'}`,
+        container: format.ext ? format.ext.toUpperCase() : '',
+        duration,
+        itag: String(format.itag)
+      }));
+
+    if (!currentStreams.length) {
+      showError('No playable video stream found. Falling back to embed…');
+      setTimeout(() => showFallback(videoId), 1500);
+      return;
+    }
+
+    renderFormats(currentStreams);
+    document.getElementById('formatList').style.display = 'block';
+
+    const wrap = document.getElementById('playerWrap');
+    wrap.style.display = 'block';
+    wrap.innerHTML = '<video id="videoPlayer" controls playsinline autoplay></video>';
+
+    const startIndex = currentStreams.findIndex(stream => Number(stream.itag) === 18);
+    const selectedIndex = startIndex === -1 ? 0 : startIndex;
+    const video = document.getElementById('videoPlayer');
+    video.src = streamUrl(videoId, currentStreams[selectedIndex].itag);
+    video.play().catch(() => {});
+    document.querySelectorAll('.format-row').forEach((row, index) => row.classList.toggle('active', index === selectedIndex));
+
+    document.getElementById('speedBar').style.display = 'flex';
+    document.querySelectorAll('.speed-btn').forEach(button => {
+      button.onclick = () => setPlaybackRate(parseFloat(button.dataset.speed));
+    });
+
+    setStatus(`Playing through the extractor (${currentStreams.length} video formats · tap ⚡ for speed)`);
+  } catch (error) {
+    console.error(error);
+    const detail = error.name === 'AbortError'
+      ? 'extraction timed out'
+      : error.name === 'TypeError'
+        ? 'network/CORS blocked; open the page from an allowed app origin'
+        : error.message;
+    showError('Extractor error: ' + detail + '. Falling back to embed…');
+    setTimeout(() => showFallback(videoId), 1500);
+  }
+}
+
+document.getElementById('videoUrl').addEventListener('keydown', e => {
+  if (e.key === 'Enter') loadVideo();
+});
+document.getElementById('backendUrl').value = new URLSearchParams(location.search).get('backend')
+  || localStorage.getItem('turboBackendUrl')
+  || DEFAULT_BACKEND;
+
+if (location.protocol === 'file:') {
+  setStatus('For extractor playback, open this page from http://localhost:5173 or the deployed app origin.');
+}
+</script>
+</body>
+</html>
