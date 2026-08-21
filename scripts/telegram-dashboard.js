@@ -219,6 +219,30 @@ function getTopPriorities(todoLines) {
   return combined;
 }
 
+/** Convert the subject icon into a compact, stable group label. */
+function subjectLabel(emoji, fallbackText) {
+  const labels = {
+    '\u2696\uFE0F': 'POLITY',
+    '\u{1F30D}': 'GEOGRAPHY',
+    '\u{1F9EE}': 'MATHS',
+    '\u{1F9E0}': 'REASONING',
+    '\u{1F4D6}': 'ENGLISH',
+    '\u{1F4B0}': 'ECONOMICS',
+    '\u{1F3DB}\uFE0F': 'HISTORY',
+    '\u{1F52C}': 'SCIENCE',
+    '\u{1F4F0}': 'CURRENT AFFAIRS',
+    '\u2753': 'GENERAL KNOWLEDGE',
+    '\u270D\uFE0F': 'WRITING',
+    '\u{1F4DD}': 'PRACTICE',
+    '\u{1F504}': 'REVISION',
+    '\u{1F3AC}': 'VIDEOS',
+    '\u{1F4CA}': 'DATA INTERPRETATION',
+    '\u27A4': 'TASKS',
+  };
+  if (labels[emoji]) return labels[emoji];
+  return String(fallbackText || 'Tasks').trim().split(/\s+/).slice(0, 3).join(' ').toUpperCase();
+}
+
 /** Group tasks by subject for the study plan section.
  *  Returns an array of { emoji, subject, tasks: string[] }. */
 function groupTasksBySubject(todoLines) {
@@ -226,9 +250,9 @@ function groupTasksBySubject(todoLines) {
   for (const t of todoLines) {
     if (t.overdue) continue; // overdue shown separately
     const raw = t.rawText || 'Other';
-    const emoji = subjectEmoji(raw);
-    const key = emoji || '\u27A4';
-    if (!groups[key]) groups[key] = { emoji, tasks: [] };
+    const emoji = subjectEmoji(raw) || '\u27A4';
+    const key = emoji;
+    if (!groups[key]) groups[key] = { emoji, subject: subjectLabel(emoji, raw), tasks: [] };
     groups[key].tasks.push(t.line);
   }
   return Object.values(groups);
@@ -335,9 +359,9 @@ function buildMorningDashboard(name, appState, topicDigest, dateStr) {
 
     /* Task groups by subject */
     subjectGroups.forEach(g => {
-      L.push(`${g.emoji} ${g.tasks.length > 0 ? escHtml(g.tasks[0].rawText || '').split(' ')[0].toUpperCase() : 'TASKS'}`);
+      L.push(`${g.emoji} ${g.subject || 'TASKS'}`);
       g.tasks.slice(0, 4).forEach(t => {
-        L.push(`  \u25CB ${t}`);
+        L.push(`  ${t}`);
       });
       if (g.tasks.length > 4) {
         L.push(`  <i>...+${g.tasks.length - 4} more</i>`);
@@ -350,7 +374,7 @@ function buildMorningDashboard(name, appState, topicDigest, dateStr) {
   if (videoItems.length > 0) {
     L.push(`\uD83C\uDFAC VIDEOS`);
     videoItems.slice(0, 4).forEach(v => {
-      const emoji = subjectEmoji(v.title);
+      const emoji = '\u{1F3AC}';
       L.push(`  \u25B6 ${emoji} <a href="${v.url}">${escHtml(v.title.length > 40 ? v.title.slice(0, 40) + '...' : v.title)}</a>`);
     });
     if (videoItems.length > 4) {
@@ -444,7 +468,7 @@ function buildEveningDashboard(name, appState, dateStr) {
   if (videoItems.length > 0) {
     L.push(`\uD83C\uDFAC VIDEOS PENDING`);
     videoItems.slice(0, 3).forEach(v => {
-      const emoji = subjectEmoji(v.title);
+      const emoji = '\u{1F3AC}';
       L.push(`  \u25B6 ${emoji} <a href="${v.url}">${escHtml(v.title.length > 40 ? v.title.slice(0, 40) + '...' : v.title)}</a>`);
     });
     if (videoItems.length > 3) {

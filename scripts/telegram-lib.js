@@ -197,22 +197,22 @@ function taskBullet(isDone, isOverdue) {
 function subjectEmoji(text) {
   if (!text) return '';
   const t = text.toLowerCase();
-  if (/polity|constitution|article|fundamental|dp|amendment|parliament|supreme court|high court| judiciary|pi|laxmikanth|magna carta|preamble/i.test(t)) return '\u2696\uFE0F';
-  if (/geography|climate|map|river|mountain|ocean|soil|monsoon|latitud|longitude|earthquake|volcano/i.test(t)) return '\u1F30D';
-  if (/math|calcul|number|algebra|geometry|trigon|profit|loss|percent|speed|time.*work|interest|simplif|averag|ratio|proportion|lcm|hcf|mensur/i.test(t)) return '\u1F9EE';
-  if (/reason|syllog|coding|decod|seri|analog|blood relat|direc|dice|calendar|rank|puzzle|mirror|water/i.test(t)) return '\u1F9E0';
-  if (/english|gram|vocab|comprehen|cloze|error|spot|fill|phras|idiom|synonym|antonym|passage|sentence/i.test(t)) return '\u1F4D6';
-  if (/econom|budget|plan|gdp|inflat|tax|market|bank|rbi|sebi|supply|demand|niti|five year/i.test(t)) return '\u1F4B0';
-  if (/histor|mughal|british|ancient|medieval|modern|freedom|independ|guerilla|dynasty|empire|sultanate|vijay/i.test(t)) return '\u1F3DB\uFE0F';
-  if (/science|physics|chemistry|biolog|botan|zoolog|cell|atom|gravit|element|reaction|geneti|evolut|digest/i.test(t)) return '\u1F52C';
-  if (/current affair|news|event|award|appointment|sport|summit|index|report|committee|mission|scheme|yojana/i.test(t)) return '\u1F4F0';
+  if (/polity|constitution|article|fundamental|\bdp\b|amendment|parliament|supreme court|high court| judiciary|\bpi\b|laxmikanth|magna carta|preamble/i.test(t)) return '\u2696\uFE0F';
+  if (/geography|climate|map|river|mountain|ocean|soil|monsoon|latitud|longitude|earthquake|volcano/i.test(t)) return '\u{1F30D}';
+  if (/math|calcul|number|algebra|geometry|trigon|profit|loss|percent|speed|time.*work|interest|simplif|averag|ratio|proportion|lcm|hcf|mensur/i.test(t)) return '\u{1F9EE}';
+  if (/reason|syllog|coding|decod|seri|analog|blood relat|direc|dice|calendar|rank|puzzle|mirror|water/i.test(t)) return '\u{1F9E0}';
+  if (/english|gram|vocab|comprehen|cloze|error|spot|fill|phras|idiom|synonym|antonym|passage|sentence/i.test(t)) return '\u{1F4D6}';
+  if (/econom|budget|plan|gdp|inflat|tax|market|bank|rbi|sebi|supply|demand|niti|five year/i.test(t)) return '\u{1F4B0}';
+  if (/histor|mughal|british|ancient|medieval|modern|freedom|independ|guerilla|dynasty|empire|sultanate|vijay/i.test(t)) return '\u{1F3DB}\uFE0F';
+  if (/science|physics|chemistry|biolog|botan|zoolog|cell|atom|gravit|element|reaction|geneti|evolut|digest/i.test(t)) return '\u{1F52C}';
+  if (/current affair|news|event|award|appointment|sport|summit|index|report|committee|mission|scheme|yojana/i.test(t)) return '\u{1F4F0}';
   if (/gk|general know|static|national|capital|currenc|symbol|festival|dance|river/i.test(t)) return '\u2753';
   if (/essay|writ|letter|pr\u00e9cis|comprehension|draft/i.test(t)) return '\u270D\uFE0F';
-  if (/mock|test|practice|solve|attempt|question|quiz|mcq|previous year|pyq/i.test(t)) return '\u1F4DD';
-  if (/revision|revise|review|re-read|doobara/i.test(t)) return '\u1F504';
-  if (/video|lecture|watch|see|youtube|class/i.test(t)) return '\u1F3AC';
-  if (/di|data interpret|chart|graph|table/i.test(t)) return '\u1F4CA';
-  if (/current af|ca/i.test(t)) return '\u1F4F0';
+  if (/mock|test|practice|solve|attempt|question|quiz|mcq|previous year|pyq/i.test(t)) return '\u{1F4DD}';
+  if (/revision|revise|review|re-read|doobara/i.test(t)) return '\u{1F504}';
+  if (/video|lecture|watch|see|youtube|class/i.test(t)) return '\u{1F3AC}';
+  if (/di|data interpret|chart|graph|table/i.test(t)) return '\u{1F4CA}';
+  if (/current af|ca/i.test(t)) return '\u{1F4F0}';
   return '\u27A4'; // default arrow bullet
 }
 
@@ -263,10 +263,10 @@ function eveningEncouragement(done, total) {
   if (total === 0) return '';
   const pct = Math.round((done / total) * 100);
   if (pct === 100) return '\u2728 Sab ho gaya! Aaj ka target complete. Relax karo, kal naya energy ke saath aao!';
-  if (pct >= 75)  return '\u1F4AA Almost there! Bas thoda aur, tum kar sakte ho!';
+  if (pct >= 75)  return '\u{1F4AA} Almost there! Bas thoda aur, tum kar sakte ho!';
   if (pct >= 50)  return '\u26A1 Half done! Ab speed badhao, finish strong!';
-  if (pct >= 25)  return '\u1F525 Good start! Ab aur push karo, target achieve karo!';
-  return '\u1F4A1 Abhi start karo! Ek task complete karo, momentum aa jayega.';
+  if (pct >= 25)  return '\u{1F525} Good start! Ab aur push karo, target achieve karo!';
+  return '\u{1F4A1} Abhi start karo! Ek task complete karo, momentum aa jayega.';
 }
 
 /** Count total today tasks (done + pending, excluding videos) for progress calc. */
