@@ -22,8 +22,22 @@
 #page-yt-search .youtube-search-filter.active{border-color:#4f5665;background:#f4f5f7;color:#0a0b0e}
 #page-yt-search .youtube-player-card{display:none;margin:0 0 22px}
 #page-yt-search .youtube-player-card.show{display:block}
+#page-yt-search .youtube-search-modes{display:flex;align-items:center;gap:7px;margin:0 0 10px}
+#page-yt-search .youtube-search-mode{border:1px solid #2d323e;border-radius:999px;background:#12151c;color:#9098a5;font-size:9.5px;font-weight:850;padding:6px 12px;cursor:pointer}
+#page-yt-search .youtube-search-mode.active{border-color:#8b5cf6;background:rgba(139,92,246,.14);color:#ddd6fe}
 #page-yt-search .youtube-player-ratio{position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#000;border:1px solid #20242d}
 #page-yt-search .youtube-player-ratio iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+#page-yt-search .yt-search-ronflix{position:absolute;inset:0;display:none;background:#000;z-index:2}
+#page-yt-search .yt-search-ronflix.show{display:block}
+#page-yt-search .yt-search-ronflix video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
+#page-yt-search .yt-search-ronflix-status{position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,.84);color:#fff;text-align:center;padding:18px;font-size:11px;line-height:1.5}
+#page-yt-search .yt-search-ronflix-status.show{display:flex}
+#page-yt-search .yt-search-ronflix-spinner{width:28px;height:28px;border:3px solid rgba(255,255,255,.25);border-top-color:#8b5cf6;border-radius:50%;animation:ytSearchRonflixSpin .8s linear infinite}
+@keyframes ytSearchRonflixSpin{to{transform:rotate(360deg)}}
+#page-yt-search .yt-search-ronflix-bar{display:none;align-items:center;gap:7px;margin-top:9px;flex-wrap:wrap}
+#page-yt-search .yt-search-ronflix-bar.show{display:flex}
+#page-yt-search .yt-search-ronflix-bar button{border:1px solid #2d323e;border-radius:999px;background:#12151c;color:#d8dbe3;font-size:9.5px;font-weight:800;padding:5px 11px;cursor:pointer}
+#page-yt-search .yt-search-ronflix-bar button.active{border-color:#8b5cf6;color:#ddd6fe;background:rgba(139,92,246,.14)}
 #page-yt-search .youtube-now{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px}
 #page-yt-search .youtube-now-title{min-width:0;font-size:12px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #page-yt-search .youtube-now-label{flex:0 0 auto;color:#8f96a3;font-size:9px;text-transform:uppercase;letter-spacing:.5px}
@@ -120,12 +134,27 @@
     </div>
 
     <div id="youtubePlayerCard" class="youtube-player-card">
+      <div class="youtube-search-modes" role="group" aria-label="YT Search player mode">
+        <button class="youtube-search-mode active" type="button" data-yt-search-mode="normal" aria-pressed="true">Normal</button>
+        <button class="youtube-search-mode" type="button" data-yt-search-mode="ronflix" aria-pressed="false">◈ RonFlix</button>
+      </div>
       <div class="youtube-player-ratio">
         <iframe id="youtubePlayer" title="YouTube player"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
           allowfullscreen
           referrerpolicy="strict-origin-when-cross-origin"></iframe>
+        <div id="ytSearchRonflix" class="yt-search-ronflix">
+          <video id="ytSearchRonflixVideo" controls playsinline></video>
+          <div id="ytSearchRonflixStatus" class="yt-search-ronflix-status"></div>
+        </div>
         <div id="youtubeLocalFallback" class="youtube-local-fallback" aria-live="polite"></div>
+      </div>
+      <div class="yt-search-ronflix-bar" id="ytSearchRonflixBar">
+        <button type="button" data-yt-search-speed="1">1×</button>
+        <button type="button" data-yt-search-speed="1.5">1.5×</button>
+        <button type="button" data-yt-search-speed="2">2×</button>
+        <button type="button" data-yt-search-speed="3">3×</button>
+        <button type="button" id="ytSearchRonflixPip" title="Picture-in-Picture">▣ PiP</button>
       </div>
       <div class="youtube-now">
         <div id="youtubeNowTitle" class="youtube-now-title">YouTube video</div>
