@@ -454,11 +454,36 @@ await test('the tutor sends its own budgets for streaming and one-shot generatio
   assert.ok(/apiGet\([^)]*GENERATION_TIMEOUT_MS\)/.test(tutorSource), 'study generation passes the budget');
 });
 
+await test('a browser-direct Tutor backup retrieves bounded video captions through the media route', async () => {
+  assert.match(chatSource, /window\.PrepPathDirectAI = Object\.freeze/);
+  assert.match(chatSource, /Browser-direct AI is not enabled for the selected provider/);
+  const bridgeSource = chatSource.slice(
+    chatSource.indexOf('window.PrepPathDirectAI = Object.freeze'),
+    chatSource.indexOf('function directChatMessages')
+  );
+  assert.doesNotMatch(bridgeSource, /apiKey|directProviders/, 'the bridge must not expose provider credentials or configuration');
+  assert.match(chatSource, /sourceContext: String\(request\.sourceContext \|\| ''\)/);
+  assert.match(chatSource, /BEGIN UNTRUSTED SOURCE DATA/);
+  assert.match(tutorSource, /function allowDirectTutorCaptionTransfer\(context, provider\)/);
+  assert.match(tutorSource, /captions stayed private on this device/);
+  assert.match(tutorSource, /DIRECT_TUTOR_CAPTION_TIMEOUT_MS = 15000/);
+  assert.match(tutorSource, /DIRECT_TUTOR_GENERATION_TIMEOUT_MS = 90000/);
+  assert.match(tutorSource, /function fetchDirectTutorTranscript\(context\)/);
+  assert.match(tutorSource, /backendAuthFetch\('\/api\/transcript\?id=' \+ encodeURIComponent\(videoId\) \+ '&lang=auto'/);
+  assert.match(tutorSource, /var DIRECT_TUTOR_CAPTION_CHARS = 24000;/);
+  assert.match(tutorSource, /sourceContext: hasCaptions \? captions\.text : ''/);
+  assert.match(tutorSource, /var directContext = !lib \?/);
+  assert.match(tutorSource, /videoId: vid/);
+  assert.match(tutorSource, /grounded in a selected retrieved video-caption excerpt/);
+  assert.match(tutorSource, /captions could not be retrieved; this answer has no video captions/);
+  assert.match(tutorSource, /sendTutorOnce\(requestBody, historyKey, turnId, liveEl, oncePath, directContext\)/);
+});
+
 await test('a transport failure reaches the student as advice, not a proxy label', async () => {
   // The chat used to persist `String(error)`, e.g. "Error: Request timed out
   // after 12000 ms from render storebook", which blames the student's question.
   assert.match(tutorSource, /function tutorErrorMessage\(error\)/);
-  assert.match(tutorSource, /catch\(function \(e\) \{\s*var answer = tutorErrorMessage\(e\);/);
+  assert.match(tutorSource, /catch\(function \(e\) \{[\s\S]{0,260}?tutorErrorMessage\(e\);/);
   const message = /if \(\/timed out\|abort\/i\.test\(raw\)\) \{\s*return '([^']*)' \+\s*'([^']*)';/.exec(tutorSource);
   assert.ok(message, 'the timeout branch returns a student-facing string');
   const text = message[1] + message[2];
