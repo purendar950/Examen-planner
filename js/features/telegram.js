@@ -617,10 +617,37 @@ function drainMockAttempts(snapData) {
   } catch (e) {}
 }
 
+/* Firestore can emit several snapshots while an import is being saved and
+   acknowledged. Serialize drains so a later snapshot cannot race the first one
+   and clear a newer inbox item. */
+let _telegramInboxDrainPromise = Promise.resolve();
+
+async function ackTelegramInboxItems(itemIds) {
+  if (!db || !currentUser || !itemIds || !itemIds.length || typeof db.runTransaction !== 'function') return false;
+  const ids = new Set(itemIds.map(id => String(id)));
+  const ref = db.collection('users').doc(currentUser.uid);
+  await db.runTransaction(async transaction => {
+    const snap = await transaction.get(ref);
+    const data = snap && snap.exists ? (snap.data() || {}) : {};
+    const latest = Array.isArray(data.telegramInbox) ? data.telegramInbox : [];
+    const remaining = latest.filter(item => !item || !ids.has(String(item.id == null ? '' : item.id)));
+    transaction.update(ref, { telegramInbox: remaining });
+  });
+  return true;
+}
+
 /* Drain the telegramInbox array from a Firestore user-doc snapshot into the
-   planner. Safe to call on every snapshot — it no-ops when the inbox is empty
-   and clears the inbox after merging so items are processed exactly once. */
+   planner. Safe to call on every snapshot — it no-ops when the inbox is empty,
+   saves imported tasks first, and only then acknowledges those exact inbox
+   items. */
 function drainTelegramInbox(snapData) {
+  _telegramInboxDrainPromise = _telegramInboxDrainPromise
+    .then(() => _drainTelegramInbox(snapData))
+    .catch(error => console.warn('[telegram] inbox drain failed:', error && error.message ? error.message : error));
+  return _telegramInboxDrainPromise;
+}
+
+async function _drainTelegramInbox(snapData) {
   try {
     const inbox = snapData && snapData.telegramInbox;
     if (!Array.isArray(inbox) || !inbox.length) return;
@@ -634,38 +661,51 @@ function drainTelegramInbox(snapData) {
        drain idempotent: each texted task is materialised exactly once, ever, so
        deleting it makes it stay deleted. */
     if (!Array.isArray(appState.telegramProcessedIds)) appState.telegramProcessedIds = [];
-    const processed = new Set(appState.telegramProcessedIds);
+    const processed = new Set(appState.telegramProcessedIds.map(id => String(id)));
 
     const fmt = (typeof fmtDate === 'function') ? fmtDate : (d => d.toISOString().slice(0, 10));
     const todayStr = fmt(new Date());
     let added = 0;
     let imgAdded = 0;
     const newlyProcessed = [];
+    const ackIds = [];
+    const queueAck = id => {
+      if (id && !ackIds.includes(id)) ackIds.push(id);
+    };
 
     inbox.forEach(item => {
       if (!item) return;
 
       /* Already materialised once — never re-add (even if the user deleted it). */
-      if (item.id != null && processed.has(item.id)) return;
-      if (item.id != null) { processed.add(item.id); newlyProcessed.push(item.id); }
+      const itemId = item.id == null ? '' : String(item.id);
+      if (itemId && processed.has(itemId)) { queueAck(itemId); return; }
+      if (itemId) { processed.add(itemId); newlyProcessed.push(itemId); }
 
       /* Images the user sent the bot → Uploads store (organised in Uploads tab). */
-      if (item.kind === 'image') { if (addTgUploadImage(item)) imgAdded++; return; }
+      if (item.kind === 'image') {
+        if (addTgUploadImage(item)) {
+          imgAdded++;
+          queueAck(itemId);
+        } else if (itemId) {
+          newlyProcessed.splice(newlyProcessed.indexOf(itemId), 1);
+        }
+        return;
+      }
 
       const date = /^\d{4}-\d{2}-\d{2}$/.test(item.date) ? item.date : todayStr;
       if (!appState.tasks[date]) appState.tasks[date] = [];
       const list = appState.tasks[date];
 
       /* De-dupe: same video already on the day, or same text already added from Telegram. */
-      if (item.videoId && list.some(t => t.videoId === item.videoId)) return;
+      if (item.videoId && list.some(t => t.videoId === item.videoId)) { queueAck(itemId); return; }
       const txt = (item.text || item.title || '').trim();
-      if (!item.videoId && txt && list.some(t => t.fromTelegram && (t.text || '').trim().toLowerCase() === txt.toLowerCase())) return;
+      if (!item.videoId && txt && list.some(t => t.fromTelegram && (t.text || '').trim().toLowerCase() === txt.toLowerCase())) { queueAck(itemId); return; }
 
       /* Stay-deleted guard for inbox items with no stable id (which the
          telegramProcessedIds ledger can't track): if the user already deleted
          this exact video/text, don't recreate it on a later snapshot. */
       if (typeof isTaskDeleted === 'function' &&
-          isTaskDeleted(item.videoId ? { videoId: item.videoId } : { text: txt })) return;
+          isTaskDeleted(item.videoId ? { videoId: item.videoId } : { text: txt })) { queueAck(itemId); return; }
 
       const task = {
         id: 'tg_' + (item.id || (Date.now().toString())) + Math.random().toString(36).slice(2, 6),
@@ -684,6 +724,7 @@ function drainTelegramInbox(snapData) {
         task.url = item.url || ('https://www.youtube.com/watch?v=' + item.videoId);
       }
       list.push(task);
+      queueAck(itemId);
       added++;
     });
 
@@ -696,27 +737,47 @@ function drainTelegramInbox(snapData) {
         .slice(-MAX_PROCESSED);
     }
 
-    /* Clear the server inbox so items aren't re-added on the next snapshot. */
-    try {
-      if (db && currentUser) db.collection('users').doc(currentUser.uid).update({ telegramInbox: [] }).catch(() => {});
-    } catch (e) {}
-
-    /* Persist even when nothing was newly added but the ledger grew, so the
-       "process once" guarantee is durable. Only surface UI when tasks actually
-       appeared. */
-    if (added || newlyProcessed.length) {
-      if (typeof saveProgress === 'function') saveProgress();
+    /* Save the materialized task before acknowledging the server inbox. The
+       old flow cleared telegramInbox first and used a debounced save, so a
+       stale/failed write could consume the Telegram item without leaving a
+       durable To-Do entry. */
+    let persisted = true;
+    if (added || newlyProcessed.length || imgAdded) {
+      try {
+        persisted = typeof saveProgressNow === 'function'
+          ? (await saveProgressNow()) !== false
+          : false;
+      } catch (error) {
+        persisted = false;
+        console.warn('[telegram] imported task save failed:', error && error.message ? error.message : error);
+      }
     }
+
+    if (!persisted && newlyProcessed.length) {
+      const failedIds = new Set(newlyProcessed.map(id => String(id)));
+      appState.telegramProcessedIds = appState.telegramProcessedIds
+        .filter(id => !failedIds.has(String(id)));
+    }
+
+    /* A transaction removes only the IDs handled by this snapshot, preserving
+       any Telegram item that arrived while the save was in flight. If the save
+       failed, leave the inbox untouched so the next snapshot can retry it. */
+    if (persisted && ackIds.length) {
+      try { await ackTelegramInboxItems(ackIds); }
+      catch (error) { console.warn('[telegram] inbox acknowledgement failed:', error && error.message ? error.message : error); }
+    }
+
+    /* Refresh the visible planner even when cloud sync is temporarily offline;
+       saveProgressNow has already placed the state in the local retry queue. */
     if (added) {
       resolveTelegramTaskSubjects();
       try { if (typeof buildPlannerCalendar === 'function') buildPlannerCalendar(); } catch (e) {}
       if (typeof showToast === 'function') {
-        showToast('📩 ' + added + ' naya task' + (added > 1 ? 's' : '') + ' Telegram se add hua! Planner check karo.', 'success');
+        showToast('📩 ' + added + ' naya task' + (added > 1 ? 's' : '') + ' Telegram se add hua! Planner check karo.', persisted ? 'success' : 'info');
       }
     }
 
     if (imgAdded) {
-      if (typeof saveProgress === 'function') saveProgress();
       try { if (typeof ssUpdateBadge === 'function') ssUpdateBadge(); } catch (e) {}
       /* Live-refresh the Analysis tab if it's open. */
       try {
@@ -724,7 +785,7 @@ function drainTelegramInbox(snapData) {
         if (typeof anRender === 'function' && pg && pg.classList.contains('active')) anRender();
       } catch (e) {}
       if (typeof showToast === 'function') {
-        showToast('🖼️ ' + imgAdded + ' image Telegram se aayi — Analysis → 📥 Uploads dekho.', 'success');
+        showToast('🖼️ ' + imgAdded + ' image Telegram se aayi — Analysis → 📥 Uploads dekho.', persisted ? 'success' : 'info');
       }
     }
   } catch (e) {}
