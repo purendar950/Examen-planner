@@ -20,8 +20,16 @@ function dashGreeting() {
   return 'Good evening,';
 }
 function applyDashboardV2LayoutFixes() {
-  const page = document.getElementById('page-dashboard');
-  if (page) page.classList.add('reference-replica');
+  if (document.getElementById('dashboard-shell-fix')) return;
+  const style = document.createElement('style');
+  style.id = 'dashboard-shell-fix';
+  style.textContent = `
+    body:has(#page-dashboard.active) .topbar,
+    body:has(#page-dashboard.active) .nav-tabs { display:flex !important; }
+    body:has(#page-dashboard.active) #app { margin-left:initial !important; padding:initial !important; max-width:initial !important; width:initial !important; }
+    body:has(#page-dashboard.active) .ref-nav { display:none !important; }
+  `;
+  document.head.appendChild(style);
 }
 function updateDashboard() {
   applyDashboardV2LayoutFixes();
@@ -33,7 +41,6 @@ function updateDashboard() {
   const bookmarked = allChapters.filter(c => appState.progress[c.id]?.bookmarked).length;
   const remaining = total - done;
   const pct = total > 0 ? Math.round(done / total * 100) : 0;
-
   try {
     const ex = (typeof ALL_EXAMS !== 'undefined' && ALL_EXAMS[currentExam]) ? ALL_EXAMS[currentExam] : null;
     if ($('dash-exam-title') && ex) $('dash-exam-title').textContent = ex.fullName || ex.name || 'Your Exam';
@@ -43,7 +50,6 @@ function updateDashboard() {
   if ($('dash-username')) $('dash-username').textContent = name;
   if ($('ref-user-name')) $('ref-user-name').textContent = name;
   if ($('dv-avatar')) $('dv-avatar').textContent = (name || 'P').trim().charAt(0).toUpperCase();
-
   const rankEl = $('dash-target-rank');
   if (rankEl) {
     let tRank = '';
@@ -53,7 +59,6 @@ function updateDashboard() {
     if (tRank) { rankEl.textContent = tRank; rankEl.style.display = ''; }
     else { rankEl.textContent = ''; rankEl.style.display = 'none'; }
   }
-
   if ($('stat-total')) $('stat-total').textContent = total;
   if ($('stat-done')) $('stat-done').textContent = done;
   if ($('stat-remaining')) $('stat-remaining').textContent = remaining;
@@ -66,12 +71,10 @@ function updateDashboard() {
   if (bar) bar.style.width = pct + '%';
   const ring = $('dash-syllabus-ring');
   if (ring) ring.style.strokeDashoffset = (326.726 * (1 - pct / 100)).toFixed(1);
-
   const readinessTitle = $('dash-readiness-title');
   const readinessNote = $('dash-readiness-note');
   if (readinessTitle) readinessTitle.textContent = pct >= 100 ? 'Syllabus covered' : pct >= 75 ? 'Ready for the final stretch' : pct >= 40 ? 'Momentum is building' : pct > 0 ? 'Keep compounding progress' : 'Build your momentum';
   if (readinessNote) readinessNote.textContent = remaining + ' chapter' + (remaining === 1 ? '' : 's') + ' remain.';
-
   const focusCount = $('dash-focus-count');
   const todoEl = $('dash-today-list');
   if (todoEl) {
@@ -93,7 +96,6 @@ function updateDashboard() {
       }).join('');
     }
   }
-
   const container = $('subject-progress-cards');
   if (container) {
     container.innerHTML = subjects.map((sub, index) => {
@@ -110,7 +112,6 @@ function updateDashboard() {
         '<div class="ref-subj-btn">Continue&nbsp; →</div></article>';
     }).join('');
   }
-
   const recentEl = $('recent-activity-list');
   if (recentEl) {
     const completed = allChapters
@@ -127,7 +128,6 @@ function updateDashboard() {
       }).join('') + '</div>';
     }
   }
-
   const lv = appState.ytLastVideo;
   const contCard = $('yt-continue-card');
   if (lv && lv.id && contCard) {
