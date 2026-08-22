@@ -213,6 +213,9 @@
       <div class="nav-tab" onclick="switchPage('calc')" id="nav-calc" title="Calculation Practice">
         <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"></rect><path d="M8 6h8M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"></path></svg></span><span class="nav-tab-label"> Calculation Practice</span>
       </div>
+      <div class="nav-tab" onclick="switchPage('study-circle')" id="nav-study-circle" title="Focus Circle">
+        <span class="tab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M12 2a10 10 0 0 1 10 10 10 10 0 0 1-10 10A10 10 0 0 1 2 12 10 10 0 0 1 12 2z" fill="none" stroke="currentColor" stroke-width="2"></path></svg></span><span class="nav-tab-label"> Focus Circle</span>
+      </div>
     </div>
     <!-- Saved courses are not listed in the rail: the library grows without a
          bound and pushed the navigation and the account dock off screen.
@@ -309,6 +312,7 @@
     <div data-include="pages/formula.html"></div>
     <!-- ═══ CALCULATION PRACTICE PAGE (lazy-loaded calc/index.html in an iframe) ═══ -->
     <div data-include="pages/calc.html"></div>
+    <div data-include="pages/study-circle.html"></div>
   </div><!-- /main-content -->
 
   <!-- ═══ ONBOARDING + STUDY PROFILE WIZARD (3 steps) ═══ -->
@@ -625,6 +629,8 @@
      but the whole point of that feature is not showing a wrong number. -->
 <script defer src="js/features/preppath-phase4-gating.js?v=20260809a"></script>
 <script defer src="js/features/preppath-phase5-trial.js"></script>
+<script defer src="js/data/study-circles.js"></script>
+<script defer src="js/features/focus-circle.js"></script>
 <!-- ⚡ Turbo Player (Pro-only, opt-in): plays via youtube-turbo-proxy backend
      for real 4x speed + native PiP; falls back to the iframe on any failure.
      Must load AFTER youtube.js (wraps ytDoLoad/ytSetSpeed/ytPiP) and after the

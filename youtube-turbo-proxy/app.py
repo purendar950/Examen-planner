@@ -29,6 +29,7 @@ Reliability notes:
 import os
 import time
 import base64
+import gc
 import hashlib
 import hmac
 import threading
@@ -1153,6 +1154,15 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
             raise last_err or RuntimeError("extraction failed")
 
         cap_url, chosen_lang, kind = _pick_caption_url(raw, lang)
+        title = raw.get("title")
+        detected_language = raw.get("language")
+        languages_manual = sorted(
+            key for key in (raw.get("subtitles") or {}) if key != "live_chat")
+        languages_auto = sorted((raw.get("automatic_captions") or {}).keys())
+        n_manual_langs = len(languages_manual)
+        n_auto_langs = len(languages_auto)
+        del raw
+        gc.collect()
         segments = []
         http_status = None
         if cap_url:
@@ -1166,13 +1176,13 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
         text = "\n".join(s["text"] for s in segments)
         data = {
             "id": video_id,
-            "title": raw.get("title"),
+            "title": title,
             "requested_lang": lang,
-            "detected_language": raw.get("language"),   # what YouTube says the video is
+            "detected_language": detected_language,
             "chosen_lang": chosen_lang,                 # the caption track we used
             "kind": kind,                               # manual | auto | None
-            "languages_manual": sorted(k for k in (raw.get("subtitles") or {}) if k != "live_chat"),
-            "languages_auto": sorted((raw.get("automatic_captions") or {}).keys()),
+            "languages_manual": languages_manual,
+            "languages_auto": languages_auto,
             "segment_count": len(segments),
             "char_count": len(text),
             "segments": segments,                       # full timestamped list
@@ -1181,8 +1191,8 @@ def _extract_transcript(video_id, lang="auto", force=False, persist=True):
             "_debug": {
                 "had_caption_url": bool(cap_url),
                 "caption_http_status": http_status,
-                "n_manual_langs": len(raw.get("subtitles") or {}),
-                "n_auto_langs": len(raw.get("automatic_captions") or {}),
+                "n_manual_langs": n_manual_langs,
+                "n_auto_langs": n_auto_langs,
             },
         }
         with _transcript_lock:
@@ -1605,6 +1615,11 @@ def _study_cache_put(ckey, data):
 # reconnect and pick up from the exact character offset it had already rendered.
 STUDY_JOB_TTL = int(os.environ.get("STUDY_JOB_TTL", str(6 * 3600)))
 STUDY_JOB_PERSIST_SEC = float(os.environ.get("STUDY_JOB_PERSIST_SEC", "5"))
+STUDY_TEXT_WORKERS = max(1, min(4, int(os.environ.get("STUDY_TEXT_WORKERS", "1"))))
+_STUDY_ACTIVE_JOB_LIMIT = max(
+    STUDY_TEXT_WORKERS,
+    min(24, int(os.environ.get("STUDY_ACTIVE_JOB_LIMIT", "6"))))
+_study_text_worker_sem = threading.Semaphore(STUDY_TEXT_WORKERS)
 _study_jobs = {}
 _study_jobs_lock = threading.RLock()
 # A Stop can arrive while the create request is still in flight. Keep a short
@@ -7386,24 +7401,22 @@ def _run_study_job(job_id):
         # Design meta is written straight onto the job so /stream and
         # /api/study/jobs/<id> can report which model produced the stylesheet
         # while the body is still being written.
-        for piece in _stream_study_text(job["mode"], gen_text, job["out_lang"],
-                                         job["ai"], head, job["style"],
-                                         cancel_event=job["cancel_event"],
-                                         design_ai=job.get("design_ai"),
-                                         meta=job,
-                                         requirements=job.get("requirements", "")):
-            if _study_job_stop_requested(job):
-                _set_study_job_terminal(job, "stopped")
-                return
-            with _study_jobs_lock:
-                # OmniRoute receives the concrete route in upstream response
-                # headers before its first content piece. Publish it with that
-                # first job snapshot so the live notes caption is accurate.
-                job["model"] = _ai_display_model(job["ai"])
-                job["provider"] = _ai_display_provider(job["ai"])
-                job["content"] += piece
-                job["updated_at"] = int(time.time())
-            _study_job_persist(job)
+        with _study_text_worker_sem:
+            for piece in _stream_study_text(job["mode"], gen_text, job["out_lang"],
+                                             job["ai"], head, job["style"],
+                                             cancel_event=job["cancel_event"],
+                                             design_ai=job.get("design_ai"),
+                                             meta=job,
+                                             requirements=job.get("requirements", "")):
+                if _study_job_stop_requested(job):
+                    _set_study_job_terminal(job, "stopped")
+                    return
+                with _study_jobs_lock:
+                    job["model"] = _ai_display_model(job["ai"])
+                    job["provider"] = _ai_display_provider(job["ai"])
+                    job["content"] += piece
+                    job["updated_at"] = int(time.time())
+                _study_job_persist(job)
 
         if _study_job_stop_requested(job):
             _set_study_job_terminal(job, "stopped")
@@ -7489,6 +7502,15 @@ def api_study_jobs_start():
     requirements = _clean_requirements(payload.get("requirements") or payload.get("instructions"))
     if mode != "notes":
         requirements = ""
+
+    _cleanup_study_jobs()
+    with _study_jobs_lock:
+        active_jobs = sum(
+            job.get("status") in ("queued", "running")
+            for job in _study_jobs.values())
+    if active_jobs >= _STUDY_ACTIVE_JOB_LIMIT:
+        return jsonify({"error": "study_busy",
+                        "detail": "Too many generations are running. Try again shortly."}), 429
 
     was_stopped = _study_job_was_stopped(job_id)
     ai = _load_ai_config(str(payload.get("model") or "").strip()[:80] or None,
@@ -7679,8 +7701,7 @@ def api_study_job_stream(job_id):
 STUDY_BUNDLE_MAX_VIDEOS = max(2, min(40, int(os.environ.get("STUDY_BUNDLE_MAX_VIDEOS", "15"))))
 # A bundle holds its worker for minutes. Bound how many run at once per instance
 # so they can never starve single-video generation or the control endpoints.
-_study_bundle_worker_sem = threading.Semaphore(
-    max(1, int(os.environ.get("STUDY_BUNDLE_WORKERS", "1"))))
+_study_bundle_worker_sem = _study_text_worker_sem
 # How many lectures ONE notebook reads at the same time. Lectures are entirely
 # independent — own transcript download, own AI stream — so reading them strictly
 # one after another made a notebook cost (lectures x per-lecture time) by
@@ -8907,6 +8928,15 @@ def api_study_bundle_start():
         if existing.get("owner_uid") != uid:
             return jsonify({"error": "job_not_found"}), 404
         return jsonify(_study_job_public(existing))
+
+    _cleanup_study_jobs()
+    with _study_jobs_lock:
+        active_jobs = sum(
+            job.get("status") in ("queued", "running")
+            for job in _study_jobs.values())
+    if active_jobs >= _STUDY_ACTIVE_JOB_LIMIT:
+        return jsonify({"error": "study_busy",
+                        "detail": "Too many generations are running. Try again shortly."}), 429
 
     shape = str(payload.get("shape") or "merge").strip().lower()
     if shape not in _BUNDLE_SHAPES:

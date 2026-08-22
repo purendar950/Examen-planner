@@ -1,0 +1,106 @@
+<div class="page" id="page-study-circle">
+  <div class="page-header" style="padding:1.25rem 1.5rem 0.5rem;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:1.4rem;">🎯</span>
+      <div>
+        <div class="section-title" style="margin:0;font-size:1.15rem;">Focus Circle</div>
+        <span class="page-subtitle" style="font-size:.78rem;color:var(--muted);" id="fc-sub">Study together, stay accountable.</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding:0 1.5rem 2rem;">
+
+    <!-- Live summary banner -->
+    <div id="fc-live-banner" style="background:var(--accent-dim);border:1px solid rgba(0,200,150,.3);border-radius:12px;padding:.75rem 1.1rem;margin-bottom:1.25rem;display:flex;align-items:center;gap:10px;">
+      <span id="fc-live-dot" style="width:10px;height:10px;border-radius:50%;background:var(--accent);display:inline-block;animation:pulse 1.5s infinite;"></span>
+      <span id="fc-live-text" style="font-size:.82rem;color:var(--text);">Loading live stats…</span>
+    </div>
+
+    <!-- Tabs -->
+    <div style="display:flex;gap:6px;margin-bottom:1rem;" id="fc-tabs-row">
+      <button class="fc-tab active" data-tab="my" onclick="fcSwitchTab('my')" style="padding:6px 14px;border-radius:99px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:600;">My Circles</button>
+      <button class="fc-tab" data-tab="discover" onclick="fcSwitchTab('discover')" style="padding:6px 14px;border-radius:99px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:600;">Discover</button>
+      <button class="fc-tab" data-tab="join" onclick="fcSwitchTab('join')" style="padding:6px 14px;border-radius:99px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:.8rem;font-weight:600;">Join by Code</button>
+    </div>
+
+    <!-- My Circles -->
+    <div id="fc-panel-my">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem;">
+        <span style="font-size:.85rem;font-weight:700;color:var(--text);">Your circles</span>
+        <button onclick="fcOpenCreateModal()" id="fc-create-btn" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:.78rem;font-weight:700;cursor:pointer;">＋ Create</button>
+      </div>
+      <div id="fc-my-list"><p style="color:var(--muted);font-size:.82rem;">Loading…</p></div>
+    </div>
+
+    <!-- Discover -->
+    <div id="fc-panel-discover" style="display:none;">
+      <input type="search" id="fc-search" placeholder="Search public circles…" oninput="fcDebounceSearch()" style="width:100%;padding:8px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.82rem;margin-bottom:.75rem;">
+      <div id="fc-discover-list"><p style="color:var(--muted);font-size:.82rem;">Loading…</p></div>
+    </div>
+
+    <!-- Join by Code -->
+    <div id="fc-panel-join" style="display:none;">
+      <div style="max-width:360px;margin:0 auto;text-align:center;padding:1.5rem;background:var(--surface);border:1px solid var(--border);border-radius:12px;">
+        <p style="font-size:.85rem;color:var(--text);font-weight:600;margin-bottom:1rem;">Enter the 6-character code your friend shared:</p>
+        <input type="text" id="fc-join-code" maxlength="6" placeholder="ABC123"
+               style="width:100%;padding:10px;text-align:center;font-size:1.3rem;letter-spacing:8px;text-transform:uppercase;background:var(--bg);border:2px solid var(--accent);border-radius:8px;color:var(--accent);font-weight:800;outline:none;"
+               onkeydown="if(event.key==='Enter')fcJoinByCode()">
+        <br><br>
+        <button onclick="fcJoinByCode()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:10px 28px;font-size:.9rem;font-weight:700;cursor:pointer;">Join Circle</button>
+        <p id="fc-join-error" style="color:var(--red);font-size:.78rem;margin-top:.5rem;display:none;"></p>
+      </div>
+    </div>
+
+    <!-- Create Modal -->
+    <div id="fc-create-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:99999;display:none;align-items:center;justify-content:center;" onclick="if(event.target===this)fcCloseCreateModal()">
+      <div style="background:var(--card);border-radius:16px;padding:1.5rem;width:min(380px,90vw);box-shadow:0 20px 60px rgba(0,0,0,.3);">
+        <h3 style="margin:0 0 .75rem;font-size:1rem;color:var(--text);">Create Focus Circle</h3>
+        <label style="font-size:.78rem;color:var(--muted);display:block;margin-bottom:.35rem;">Circle name</label>
+        <input type="text" id="fc-new-name" placeholder="e.g. UPSC 2027 Warriors" style="width:100%;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem;margin-bottom:.75rem;">
+        <label style="font-size:.78rem;color:var(--muted);display:block;margin-bottom:.35rem;">Visibility</label>
+        <select id="fc-new-vis" style="width:100%;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem;margin-bottom:1rem;">
+          <option value="public">🌐 Public — anyone can join</option>
+          <option value="private">🔒 Private — invite-only (code)</option>
+        </select>
+        <div id="fc-create-gate" style="display:none;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:.65rem .85rem;margin-bottom:1rem;">
+          <span style="font-size:.72rem;color:var(--amber);font-weight:600;" id="fc-gate-text"></span>
+          <div style="height:4px;background:var(--border);border-radius:99px;margin-top:6px;"><div id="fc-gate-bar" style="height:100%;background:var(--amber);border-radius:99px;transition:width .4s;"></div></div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button onclick="fcCloseCreateModal()" style="background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:7px 16px;font-size:.8rem;">Cancel</button>
+          <button onclick="fcDoCreate()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:7px 18px;font-size:.8rem;font-weight:700;">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Circle Detail Modal -->
+    <div id="fc-detail-overlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:99999;display:none;align-items:center;justify-content:center;" onclick="if(event.target===this)fcCloseDetail()">
+      <div style="background:var(--card);border-radius:16px;padding:1.5rem;width:min(420px,92vw);max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:.75rem;">
+          <div><h3 id="fc-detail-name" style="margin:0;font-size:1.05rem;color:var(--text);"></h3>
+          <span id="fc-detail-meta" style="font-size:.72rem;color:var(--muted);"></span></div>
+          <button onclick="fcCloseDetail()" style="background:none;border:none;color:var(--muted);font-size:1.2rem;cursor:pointer;">✕</button>
+        </div>
+        <div id="fc-detail-members"></div>
+        <div id="fc-detail-actions" style="margin-top:1rem;display:flex;gap:8px;flex-wrap:wrap;"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+@keyframes fc-pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+.fc-dot-focusing { width:8px;height:8px;border-radius:50%;background:#22c55e;display:inline-block;margin-right:6px;animation:fc-pulse 1.5s infinite; }
+.fc-dot-idle { width:8px;height:8px;border-radius:50%;background:var(--border);display:inline-block;margin-right:6px; }
+.fc-member-card { display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:6px; }
+.fc-avatar { width:32px;height:32px;border-radius:50%;object-fit:cover;background:var(--border);flex-shrink:0; }
+.fc-circle-card { background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:10px;padding:.75rem 1rem;margin-bottom:.6rem;cursor:pointer;transition:border-color .2s; }
+.fc-circle-card:hover { border-color:var(--accent); }
+.fc-badge { font-size:.62rem;padding:2px 7px;border-radius:99px;font-weight:700;white-space:nowrap; }
+.fc-badge-owner { background:rgba(245,158,11,.12);color:#f59e0b; }
+.fc-badge-premium { background:rgba(168,85,247,.12);color:#a855f7; }
+.fc-badge-public { background:rgba(59,130,246,.1);color:#3b82f6; }
+.fc-badge-private { background:rgba(156,163,175,.12);color:#9ca3af; }
+</style>

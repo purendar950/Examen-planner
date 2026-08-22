@@ -87,7 +87,7 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
   toggle.click();
 
   assert.equal(window.ytRonflixGetState().enabled, false);
-  assert.equal(toggle.textContent, '◈ RonFlix OFF');
+  assert.equal(toggle.textContent, '◈ RonFlix');
   assert.equal(toggle.getAttribute('aria-pressed'), 'false');
   assert.deepEqual(calls.at(-1), { type: 'video', id: videoId }, 'turning RonFlix off must call the normal loader');
   assert.equal(iframe.style.display, 'block', 'turning RonFlix off must restore the iframe surface');
@@ -113,7 +113,7 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
   assert.equal(toggle.textContent, '◈ RonFlix ON');
 
   toggle.click();
-  assert.equal(toggle.textContent, '◈ RonFlix OFF');
+  assert.equal(toggle.textContent, '◈ RonFlix');
   assert.deepEqual(calls.at(-1), { type: 'video', id: videoId }, 'playlist item must return to the same normal video');
   console.log('ronflix toggle harness passed');
 })().catch((error) => {

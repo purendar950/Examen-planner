@@ -18,6 +18,7 @@
   var ronflixWatchLastTs = 0;
   var ronflixLastSave = 0;
   var ronflixPreviousLoad = null;
+  var ronflixPendingEnable = false;
   var ronflixWrappedLoad = null;
   var ronflixPreviousSpeed = null;
   var normalRestoreSeq = 0;
@@ -77,7 +78,9 @@
       '.yt-ronflix-spinner{width:30px;height:30px;border:3px solid rgba(255,255,255,.25);border-top-color:#8b5cf6;border-radius:50%;animation:ytRonflixSpin .8s linear infinite;}' +
       '@keyframes ytRonflixSpin{to{transform:rotate(360deg)}}' +
       '.yt-ronflix-toggle{border-color:#8b5cf6!important;color:#c4b5fd!important;}' +
-      '.yt-ronflix-toggle.on{background:rgba(139,92,246,.14)!important;color:#ddd6fe!important;}';
+      '.yt-ronflix-toggle.on{background:rgba(139,92,246,.14)!important;color:#ddd6fe!important;}' +
+      '.yt-ronflix-toggle.loading{border-color:#8b5cf6!important;color:#c4b5fd!important;background:rgba(139,92,246,.08)!important;animation:ytRonflixPulse 1s ease-in-out infinite;}' +
+      '@keyframes ytRonflixPulse{0%,100%{opacity:.7}50%{opacity:1}}';
     document.head.appendChild(style);
   }
 
@@ -348,6 +351,7 @@
           updateToggleUi();
           ronflixWatchLastTs = Date.now();
           ronflixLastSave = Date.now();
+          setButtonLoading(false);
           setStatus('');
           video.style.display = 'block';
           var play = video.play();
@@ -370,16 +374,33 @@
       });
   }
 
+  function setButtonLoading(loading) {
+    var button = document.getElementById('yt-ronflix-toggle');
+    if (!button) return;
+    button.classList.toggle('loading', !!loading);
+    if (loading) {
+      button.textContent = '\u25c8 RonFlix\u2026';
+      button.disabled = true;
+    } else {
+      updateToggleUi();
+    }
+  }
+
   function updateToggleUi() {
     var button = document.getElementById('yt-ronflix-toggle');
     if (!button) return;
     var active = !!(ronflixEnabled && ronflixActiveNow);
+    var hasVideo = !!validId(currentId());
     button.classList.toggle('on', active);
-    button.textContent = active ? '◈ RonFlix ON' : '◈ RonFlix OFF';
+    button.textContent = active ? '\u25c8 RonFlix ON' : (hasVideo ? '\u25c8 RonFlix' : '\u25c8 RonFlix (load video first)');
+    button.disabled = !hasVideo && !active;
+    button.style.opacity = (!hasVideo && !active) ? '0.5' : '';
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
     button.title = active
-      ? 'RonFlix ON — native playback through the public stream mirror. Click to turn off.'
-      : 'RonFlix OFF — click to play this individual video through RonFlix/Piped.';
+      ? 'RonFlix ON — native playback through the stream mirror. Click to turn off.'
+      : hasVideo
+        ? 'RonFlix — click to play this video through the RonFlix server.'
+        : 'Load a video first, then click RonFlix to switch playback.';
   }
 
   function reloadCurrent() {
@@ -390,10 +411,14 @@
 
   function setEnabled(next) {
     next = !!next;
+    console.log('[RonFlix] toggle clicked, enabling:', next, 'currentId:', currentId());
     if (next && !validId(currentId())) {
-      showToastSafe('RonFlix individual videos ke liye hai — playlist normal player mein chalegi.', 'info');
+      ronflixPendingEnable = true;
+      updateToggleUi();
+      showToastSafe('Pehle ek video load karo — phir RonFlix auto-on ho jayega.', 'info');
       return;
     }
+    ronflixPendingEnable = false;
     if (next === ronflixEnabled) return;
     if (next && typeof window.ytTurboGetState === 'function') {
       var turbo = window.ytTurboGetState();
@@ -416,16 +441,28 @@
     return { enabled: ronflixEnabled, active: isActive(), videoId: ronflixId, title: ronflixTitle };
   };
 
+  function maybeAutoEnable() {
+    if (ronflixPendingEnable && !ronflixEnabled && validId(currentId())) {
+      ronflixPendingEnable = false;
+      setEnabled(true);
+    }
+  }
+
   function initUi() {
     var bar = document.getElementById('yt-speed-bar');
-    if (!bar) return;
+    if (!bar) return false;
     injectStyles();
-    var controls = document.getElementById('yt-turbo-controls');
+    var controls = document.getElementById('yt-ronflix-controls');
     if (!controls) {
       controls = document.createElement('div');
-      controls.id = 'yt-turbo-controls';
+      controls.id = 'yt-ronflix-controls';
       controls.style.cssText = 'display:flex;flex-direction:column;gap:4px;align-items:stretch;';
-      bar.insertBefore(controls, bar.firstChild);
+      var turboControls = document.getElementById('yt-turbo-controls');
+      if (turboControls && turboControls.parentNode === bar) {
+        bar.insertBefore(controls, turboControls.nextSibling);
+      } else {
+        bar.insertBefore(controls, bar.firstChild);
+      }
     }
     var button = document.getElementById('yt-ronflix-toggle');
     if (!button) {
@@ -444,7 +481,17 @@
       return window.ytToggleRonflix();
     };
     updateToggleUi();
+    return true;
   }
+
+  // Auto-enable watcher: checks every second whether the user asked for
+  // RonFlix before a video was loaded, and enables it once one is ready.
+  setInterval(function () {
+    if (document.getElementById('yt-ronflix-toggle')) {
+      updateToggleUi();
+      maybeAutoEnable();
+    }
+  }, 1000);
 
   /* Capture the already-wrapped loader, so Turbo remains the fallback and keeps
      all of its existing Pro gating and stream behavior. */
@@ -500,6 +547,9 @@
 
   if (typeof onPageActivated === 'function') onPageActivated('youtube', function () { setTimeout(initUi, 60); });
   window.addEventListener('load', function () { setTimeout(initUi, 800); });
+  setTimeout(function () { initUi(); }, 2000);
+  setTimeout(function () { initUi(); }, 5000);
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(initUi, 100); });
   document.addEventListener('visibilitychange', function () { if (document.hidden && isActive()) { saveProgress(); flushWatchTime(); } });
   window.addEventListener('pagehide', function () { if (isActive()) { saveProgress(); flushWatchTime(); } });
 })();
