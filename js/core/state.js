@@ -66,7 +66,8 @@ let appState = {
     history: []
   },
   fcCircleIds: [],
-  fcPinnedIds: []
+  fcPinnedIds: [],
+  fcRequestIds: []
 };
 
 let currentFilter = 'all';

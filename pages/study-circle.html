@@ -63,6 +63,10 @@
           <option value="public">🌐 Public — anyone can join</option>
           <option value="private">🔒 Private — invite-only (code)</option>
         </select>
+        <label id="fc-approval-row" style="display:flex;align-items:center;gap:8px;font-size:.76rem;color:var(--muted);margin-bottom:1rem;">
+          <input type="checkbox" id="fc-new-approval" style="accent-color:var(--accent);">
+          Require owner approval before public joins
+        </label>
         <div id="fc-create-gate" style="display:none;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);border-radius:8px;padding:.65rem .85rem;margin-bottom:1rem;">
           <span style="font-size:.72rem;color:var(--amber);font-weight:600;" id="fc-gate-text"></span>
           <div style="height:4px;background:var(--border);border-radius:99px;margin-top:6px;"><div id="fc-gate-bar" style="height:100%;background:var(--amber);border-radius:99px;transition:width .4s;"></div></div>
@@ -70,6 +74,24 @@
         <div style="display:flex;gap:8px;justify-content:flex-end;">
           <button onclick="fcCloseCreateModal()" style="background:transparent;border:1px solid var(--border);color:var(--muted);border-radius:8px;padding:7px 16px;font-size:.8rem;">Cancel</button>
           <button onclick="fcDoCreate()" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:7px 18px;font-size:.8rem;font-weight:700;">Create</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Circle Room -->
+    <div id="fc-room-overlay" style="position:fixed;inset:0;background:var(--bg, var(--surface));z-index:999999;display:none;">
+      <div style="height:100%;max-width:760px;margin:auto;display:flex;flex-direction:column;background:var(--card);">
+        <div style="display:flex;align-items:center;gap:10px;padding:.85rem 1rem;border-bottom:1px solid var(--border);">
+          <button onclick="fcCloseRoom()" style="background:none;border:none;color:var(--text);font-size:1.15rem;cursor:pointer;">←</button>
+          <div style="flex:1;min-width:0;">
+            <h3 id="fc-room-name" style="margin:0;font-size:.98rem;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></h3>
+            <span id="fc-room-meta" style="font-size:.68rem;color:var(--muted);"></span>
+          </div>
+        </div>
+        <div id="fc-room-messages" style="flex:1;overflow-y:auto;padding:1rem;"></div>
+        <div style="display:flex;gap:8px;padding:.75rem 1rem;border-top:1px solid var(--border);background:var(--surface);">
+          <input id="fc-room-input" placeholder="Message your circle…" maxlength="1000" onkeydown="if(event.key==='Enter')fcSendRoomMessage()" style="flex:1;padding:9px 12px;background:var(--card);border:1px solid var(--border);border-radius:99px;color:var(--text);font-size:.82rem;">
+          <button onclick="fcSendRoomMessage()" style="background:var(--accent);color:#fff;border:none;border-radius:99px;padding:9px 16px;font-size:.78rem;font-weight:700;cursor:pointer;">Send</button>
         </div>
       </div>
     </div>
