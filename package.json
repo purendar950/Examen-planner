@@ -30,7 +30,8 @@
     "test:tutor-backend": "python3 youtube-turbo-proxy/tests/test_tutor.py",
     "test:notebook-backend": "python3 youtube-turbo-proxy/tests/test_notebook.py",
     "test:design-failover-backend": "python3 youtube-turbo-proxy/tests/test_design_failover.py",
-    "test:requirements-box-backend": "python3 youtube-turbo-proxy/tests/test_requirements_box.py"
+    "test:requirements-box-backend": "python3 youtube-turbo-proxy/tests/test_requirements_box.py",
+    "test:focus-circle": "node tests/focus-circle.test.mjs"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",

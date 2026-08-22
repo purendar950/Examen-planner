@@ -3,6 +3,8 @@
    Collections:
      studyCircles/{cid}
      studyCircles/{cid}/members/{uid}
+     studyCircles/{cid}/joinRequests/{uid}
+     studyCircles/{cid}/messages/{messageId}
      fc_presence/{uid}  (global focus presence)
    User's own circle IDs are mirrored in appState.fcCircleIds
    so "my circles" works without a collection-group query.
@@ -34,7 +36,21 @@ function creationEligibility() {
   };
 }
 
-async function createCircle(name, visibility) {
+function _memberProfile(role) {
+  return {
+    uid: currentUser.uid,
+    name: currentUser.displayName || 'Learner',
+    avatar: currentUser.photoURL || '',
+    role,
+    joinedAt: new Date().toISOString(),
+    isPremium: typeof ezIsPro === 'function' && ezIsPro(),
+    isFocusing: false,
+    weeklyFocusMinutes: 0,
+    weekKey: _currentWeekKey()
+  };
+}
+
+async function createCircle(name, visibility, approvalRequired = false) {
   const database = fcDb();
   if (!database) throw new Error('Firebase not configured');
   if (!currentUser) throw new Error('Not signed in');
@@ -52,20 +68,11 @@ async function createCircle(name, visibility) {
     createdAt: now,
     memberCount: 1,
     focusingCount: 0,
-    maxMembers: null
+    maxMembers: null,
+    approvalRequired: visibility !== 'private' && !!approvalRequired
   });
   const cid = ref.id;
-  await ref.collection('members').doc(currentUser.uid).set({
-    uid: currentUser.uid,
-    name: currentUser.displayName || 'Learner',
-    avatar: currentUser.photoURL || '',
-    role: 'owner',
-    joinedAt: now,
-    isPremium: typeof ezIsPro === 'function' && ezIsPro(),
-    isFocusing: false,
-    weeklyFocusMinutes: 0,
-    weekKey: _currentWeekKey()
-  });
+  await ref.collection('members').doc(currentUser.uid).set(_memberProfile('owner'));
   _trackMembership(cid, true);
   return { circleId: cid, joinCode: code };
 }
@@ -98,25 +105,126 @@ async function _joinCircle(cid, data) {
   const existing = await memberRef.get();
   if (existing.exists) return { alreadyMember: true, circleId: cid };
   if (data.maxMembers && data.memberCount >= data.maxMembers) throw new Error('Circle is full.');
-  const now = new Date().toISOString();
   const batch = database.batch();
-  batch.set(memberRef, {
-    uid: currentUser.uid,
-    name: currentUser.displayName || 'Learner',
-    avatar: currentUser.photoURL || '',
-    role: 'member',
-    joinedAt: now,
-    isPremium: typeof ezIsPro === 'function' && ezIsPro(),
-    isFocusing: false,
-    weeklyFocusMinutes: 0,
-    weekKey: _currentWeekKey()
-  });
+  batch.set(memberRef, _memberProfile('member'));
+  batch.set(database.collection('studyCircles').doc(cid).collection('joinRequests').doc(currentUser.uid), {
+    status: 'approved', respondedAt: new Date().toISOString()
+  }, { merge: true });
   batch.update(database.collection('studyCircles').doc(cid), {
     memberCount: firebase.firestore.FieldValue.increment(1)
   });
   await batch.commit();
   _trackMembership(cid, true);
   return { alreadyMember: false, circleId: cid };
+}
+
+async function requestToJoin(circleId) {
+  const database = fcDb();
+  if (!database) throw new Error('Firebase not configured');
+  if (!currentUser) throw new Error('Not signed in');
+  const circleRef = database.collection('studyCircles').doc(circleId);
+  const [circleDoc, memberDoc] = await Promise.all([
+    circleRef.get(),
+    circleRef.collection('members').doc(currentUser.uid).get()
+  ]);
+  if (!circleDoc.exists) throw new Error('Circle not found.');
+  if (memberDoc.exists) return { status: 'member', circleId };
+  if (!circleDoc.data().approvalRequired) {
+    const result = await _joinCircle(circleId, circleDoc.data());
+    return { ...result, status: 'approved' };
+  }
+  await circleRef.collection('joinRequests').doc(currentUser.uid).set({
+    uid: currentUser.uid,
+    name: currentUser.displayName || 'Learner',
+    avatar: currentUser.photoURL || '',
+    status: 'pending',
+    requestedAt: new Date().toISOString()
+  });
+  _trackRequest(circleId, true);
+  return { status: 'pending', circleId };
+}
+
+async function approveJoinRequest(cid, userId) {
+  const database = fcDb();
+  if (!database || !currentUser) throw new Error('Not signed in');
+  const circleRef = database.collection('studyCircles').doc(cid);
+  const requestRef = circleRef.collection('joinRequests').doc(userId);
+  await database.runTransaction(async transaction => {
+    const [circleDoc, requestDoc] = await transaction.getAll(circleRef, requestRef);
+    if (!circleDoc.exists || !requestDoc.exists) throw new Error('Request is no longer available.');
+    if (circleDoc.data().ownerId !== currentUser.uid) throw new Error('Only the owner can approve requests.');
+    if (requestDoc.data().status === 'approved') return;
+    if ((circleDoc.data().maxMembers || 0) <= (circleDoc.data().memberCount || 0)) throw new Error('Circle is full.');
+    transaction.set(circleRef.collection('members').doc(userId), {
+      uid: userId,
+      name: requestDoc.data().name || 'Learner',
+      avatar: requestDoc.data().avatar || '',
+      role: 'member',
+      joinedAt: new Date().toISOString(),
+      isPremium: false,
+      isFocusing: false,
+      weeklyFocusMinutes: 0,
+      weekKey: _currentWeekKey()
+    });
+    transaction.update(circleRef, { memberCount: firebase.firestore.FieldValue.increment(1) });
+    transaction.update(requestRef, { status: 'approved', respondedAt: new Date().toISOString() });
+  });
+  return { approved: true };
+}
+
+async function rejectJoinRequest(cid, userId) {
+  const database = fcDb();
+  if (!database || !currentUser) throw new Error('Not signed in');
+  await database.collection('studyCircles').doc(cid)
+    .collection('joinRequests').doc(userId).update({
+      status: 'rejected',
+      respondedAt: new Date().toISOString()
+    });
+}
+
+async function getJoinRequests(cid) {
+  const database = fcDb();
+  if (!database) return [];
+  const snap = await database.collection('studyCircles').doc(cid)
+    .collection('joinRequests').where('status', '==', 'pending').get();
+  return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+    .sort((a, b) => String(a.requestedAt || '').localeCompare(String(b.requestedAt || '')));
+}
+
+function watchJoinRequest(cid, callback) {
+  const database = fcDb();
+  if (!database || !currentUser) return () => {};
+  return database.collection('studyCircles').doc(cid)
+    .collection('joinRequests').doc(currentUser.uid)
+    .onSnapshot(doc => callback(doc.exists ? { id: doc.id, ...doc.data() } : null));
+}
+
+function subscribeMessages(cid, callback, errorCallback) {
+  const database = fcDb();
+  if (!database) {
+    errorCallback && errorCallback(new Error('Firebase not configured'));
+    return () => {};
+  }
+  return database.collection('studyCircles').doc(cid).collection('messages')
+    .orderBy('createdAt', 'asc').limitToLast(120)
+    .onSnapshot(snap => callback(snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))), error => {
+      console.error('Focus Circle messages:', error);
+      errorCallback && errorCallback(error);
+    });
+}
+
+async function sendMessage(cid, text) {
+  const value = String(text || '').trim().slice(0, 1000);
+  if (!value) return;
+  const database = fcDb();
+  if (!database || !currentUser) throw new Error('Not signed in');
+  await database.collection('studyCircles').doc(cid).collection('messages').add({
+    uid: currentUser.uid,
+    name: currentUser.displayName || 'Learner',
+    avatar: currentUser.photoURL || '',
+    text: value,
+    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
 }
 
 async function leaveCircle(cid) {
@@ -278,10 +386,21 @@ function _trackMembership(cid, joining) {
   saveProgress();
 }
 
+function _trackRequest(cid, pending) {
+  if (typeof appState === 'undefined') return;
+  appState.fcRequestIds = Array.isArray(appState.fcRequestIds) ? appState.fcRequestIds : [];
+  const index = appState.fcRequestIds.indexOf(cid);
+  if (pending && index < 0) appState.fcRequestIds.push(cid);
+  if (!pending && index >= 0) appState.fcRequestIds.splice(index, 1);
+  saveProgress();
+}
+
 window.FocusCircleData = {
   createCircle, joinByCode, joinPublic, leaveCircle,
   setVisibility, renameCircle, togglePin, removeMember,
   getMyCircles, listPublicCircles, getCircleDetail,
+  requestToJoin, approveJoinRequest, rejectJoinRequest,
+  getJoinRequests, watchJoinRequest, subscribeMessages, sendMessage,
   setPresence, recordFocusMinutes, getLiveSummary,
   creationEligibility, generateJoinCode, REQUIRED_STREAK
 };
