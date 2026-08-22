@@ -3,6 +3,56 @@
 @container (max-width:1050px){.dashboard-v2 .dv-grid-top{grid-template-columns:minmax(0,.95fr) minmax(0,1.25fr)}.dashboard-v2 .dv-quick{grid-column:1/-1}.dashboard-v2 .dv-ops{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-v2 .dv-subjects{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-v2 .dv-recent{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-v2 .dv-analysis{grid-template-columns:1fr}}
 @container (max-width:720px){.dashboard-v2 .dv-head{align-items:flex-start;flex-direction:column}.dashboard-v2 .dv-head-actions{width:100%}.dashboard-v2 .dv-grid-top,.dashboard-v2 .dv-mid-row{grid-template-columns:1fr}.dashboard-v2 .dv-ops,.dashboard-v2 .dv-subjects{grid-template-columns:1fr}.dashboard-v2 .dv-recent{grid-template-columns:1fr}.dashboard-v2 .dv-recent-item{border-right:0;border-bottom:1px solid rgba(148,163,184,.08)}}
 @container (max-width:430px){.dashboard-v2 .dv-head-actions{flex-direction:column}.dashboard-v2 .dv-exam{width:100%}.dashboard-v2 .dv-readiness-main{flex-direction:column}.dashboard-v2 .dv-readiness-copy{width:100%}.dashboard-v2 .dv-member-grid{grid-template-columns:1fr}.dashboard-v2 .dv-analysis-stats{grid-template-columns:1fr}}
+
+/* Colorful premium glass treatment — dashboard only. */
+.dashboard-v2{
+  --glow-green:rgba(0,229,160,.16);
+  --glow-blue:rgba(59,156,255,.15);
+  --glow-purple:rgba(168,85,247,.15);
+  --glow-cyan:rgba(22,217,227,.13);
+  --glow-amber:rgba(251,191,36,.14);
+  --glow-pink:rgba(236,72,153,.12);
+}
+.dashboard-v2 .dv-card{
+  position:relative;
+  background:linear-gradient(145deg,rgba(20,33,53,.98),rgba(8,17,30,.98));
+  border-color:rgba(255,255,255,.075);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 12px 32px rgba(0,0,0,.18);
+  transition:transform .22s ease,border-color .22s ease,box-shadow .22s ease;
+}
+.dashboard-v2 .dv-card::after{
+  content:"";position:absolute;top:-80px;right:-70px;width:180px;height:180px;border-radius:50%;
+  background:var(--card-glow,var(--glow-green));filter:blur(38px);opacity:.85;pointer-events:none;
+}
+.dashboard-v2 .dv-card>*{position:relative;z-index:1}
+.dashboard-v2 .dv-card:hover{
+  transform:translateY(-2px);
+  border-color:var(--card-accent,rgba(255,255,255,.15));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 16px 40px rgba(0,0,0,.24),0 0 24px var(--card-glow,var(--glow-green));
+}
+.dashboard-v2 .dv-readiness{--card-accent:rgba(0,229,160,.5);--card-glow:var(--glow-green)}
+.dashboard-v2 .dv-mission{--card-accent:rgba(59,156,255,.5);--card-glow:var(--glow-blue)}
+.dashboard-v2 .dv-quick{--card-accent:rgba(168,85,247,.5);--card-glow:var(--glow-purple)}
+.dashboard-v2 .dv-target{--card-accent:rgba(20,184,166,.5);--card-glow:rgba(20,184,166,.14)}
+.dashboard-v2 .dv-member{--card-accent:rgba(192,132,252,.5);--card-glow:rgba(192,132,252,.16)}
+.dashboard-v2 .dv-op:nth-child(1){--card-accent:rgba(168,85,247,.52);--card-glow:rgba(168,85,247,.14)}
+.dashboard-v2 .dv-op:nth-child(2){--card-accent:rgba(59,156,255,.52);--card-glow:rgba(59,156,255,.14)}
+.dashboard-v2 .dv-op:nth-child(3){--card-accent:rgba(0,229,160,.52);--card-glow:rgba(0,229,160,.14)}
+.dashboard-v2 .dv-op:nth-child(4){--card-accent:rgba(251,191,36,.52);--card-glow:rgba(251,191,36,.14)}
+.dashboard-v2 .dv-analysis{--card-accent:rgba(22,217,227,.5);--card-glow:var(--glow-cyan)}
+.dashboard-v2 .dv-subject{--card-accent:rgba(59,156,255,.48);--card-glow:rgba(59,156,255,.12)}
+.dashboard-v2 .dv-subject:nth-child(2){--card-accent:rgba(22,217,227,.48);--card-glow:rgba(22,217,227,.12)}
+.dashboard-v2 .dv-subject:nth-child(3){--card-accent:rgba(251,146,60,.5);--card-glow:rgba(251,146,60,.13)}
+.dashboard-v2 .dv-subject:nth-child(4){--card-accent:rgba(192,132,252,.5);--card-glow:rgba(192,132,252,.14)}
+.dashboard-v2 #recent-activity-list{--card-accent:rgba(236,72,153,.45);--card-glow:var(--glow-pink)}
+.dashboard-v2 .dv-kicker{color:#a9b8cc}
+.dashboard-v2 .dv-readiness .dv-kicker{color:#4ee7ba}
+.dashboard-v2 .dv-mission .dv-kicker{color:#68adff}
+.dashboard-v2 .dv-quick .dv-kicker{color:#c08cff}
+.dashboard-v2 .dv-target-icon{box-shadow:0 0 16px rgba(20,184,166,.16)}
+.dashboard-v2 .dv-member{box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 12px 34px rgba(168,85,247,.08)}
+.dashboard-v2 .dv-op-icon,.dashboard-v2 .dv-stat-icon{filter:drop-shadow(0 0 8px currentColor)}
+@media (hover:none){.dashboard-v2 .dv-card:hover{transform:none}}
 </style>
 <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" alt="" style="display:none" onload="(function(){var s=document.createElement('script');s.src='js/tabs/dashboard-reference-data.js';document.head.appendChild(s);this.remove()}).call(this)">
 <div class="page active dashboard-v2" id="page-dashboard">
