@@ -394,9 +394,16 @@
       button.type = 'button';
       button.id = 'yt-ronflix-toggle';
       button.className = 'yt-turbo-toggle yt-ronflix-toggle';
-      button.onclick = window.ytToggleRonflix;
       controls.appendChild(button);
     }
+    // The page can retain an existing control across tab activation or a
+    // partial re-render. Always rebind the visible button instead of only
+    // binding newly-created nodes; otherwise the OFF button can be clickable
+    // in appearance but inert in behavior.
+    button.onclick = function (event) {
+      if (event) event.preventDefault();
+      return window.ytToggleRonflix();
+    };
     updateToggleUi();
   }
 

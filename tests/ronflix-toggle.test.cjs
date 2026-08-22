@@ -37,7 +37,7 @@ window.RonflixStream = {
   },
 };
 window.showToast = () => {};
-window.onPageActivated = () => {};
+window.onPageActivated = (page, callback) => callback();
 window.saveProgress = () => {};
 window.creditVideoWatchTime = () => {};
 window.ytResumeSeconds = () => 0;
@@ -69,12 +69,14 @@ context.window = window;
 vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), context);
 
 (async () => {
-  window.ytToggleRonflix();
+  await new Promise((resolve) => setTimeout(resolve, 75));
+  const toggle = window.document.getElementById('yt-ronflix-toggle');
+  assert.equal(typeof toggle.onclick, 'function', 'visible RonFlix button must have a click handler');
+  toggle.click();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(window.ytRonflixGetState().enabled, true);
   assert.equal(streamCalls, 1, 'enabling RonFlix must fetch the selected video from RonFlix');
   assert.equal(window.ytRonflixGetState().active, true, 'enabling RonFlix must activate native playback');
-  const toggle = window.document.getElementById('yt-ronflix-toggle');
   assert.equal(toggle.textContent, '◈ RonFlix ON');
   assert.equal(toggle.getAttribute('aria-pressed'), 'true');
 
@@ -82,7 +84,7 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
   assert.ok(nativeVideo, 'Ronflix should create its native video element');
   assert.equal(nativeVideo.style.display, 'block');
   iframe.style.display = 'none';
-  window.ytToggleRonflix();
+  toggle.click();
 
   assert.equal(window.ytRonflixGetState().enabled, false);
   assert.equal(toggle.textContent, '◈ RonFlix OFF');
@@ -104,13 +106,13 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
     getVideoData: () => ({ video_id: videoId, title: 'Playlist item' }),
     pauseVideo: () => {},
   };
-  window.ytToggleRonflix();
+  toggle.click();
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(streamCalls, 2, 'a playlist item must be playable through RonFlix');
   assert.equal(window.ytRonflixGetState().active, true);
   assert.equal(toggle.textContent, '◈ RonFlix ON');
 
-  window.ytToggleRonflix();
+  toggle.click();
   assert.equal(toggle.textContent, '◈ RonFlix OFF');
   assert.deepEqual(calls.at(-1), { type: 'video', id: videoId }, 'playlist item must return to the same normal video');
   console.log('ronflix toggle harness passed');
