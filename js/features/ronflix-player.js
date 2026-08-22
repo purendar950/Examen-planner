@@ -18,6 +18,7 @@
   var ronflixWatchLastTs = 0;
   var ronflixLastSave = 0;
   var ronflixPreviousLoad = null;
+  var ronflixPendingEnable = false;
   var ronflixWrappedLoad = null;
   var ronflixPreviousSpeed = null;
   var normalRestoreSeq = 0;
@@ -374,12 +375,19 @@
     var button = document.getElementById('yt-ronflix-toggle');
     if (!button) return;
     var active = !!(ronflixEnabled && ronflixActiveNow);
+    var hasVideo = !!validId(currentId());
     button.classList.toggle('on', active);
-    button.textContent = active ? '◈ RonFlix ON' : '◈ RonFlix OFF';
+    button.textContent = active
+      ? '\u25c8 RonFlix ON'
+      : (hasVideo ? '\u25c8 RonFlix' : '\u25c8 RonFlix (load video)');
+    button.disabled = !hasVideo && !active;
+    button.style.opacity = (!hasVideo && !active) ? '0.55' : '';
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
     button.title = active
-      ? 'RonFlix ON — native playback through the public stream mirror. Click to turn off.'
-      : 'RonFlix OFF — click to play this individual video through RonFlix/Piped.';
+      ? 'RonFlix ON — playing via the RonFlix server. Click to switch back.'
+      : hasVideo
+        ? 'RonFlix — click to play this video through the RonFlix/Piped server.'
+        : 'Load a YouTube video first, then click RonFlix to switch playback.';
   }
 
   function reloadCurrent() {
@@ -390,10 +398,15 @@
 
   function setEnabled(next) {
     next = !!next;
+    console.log('[RonFlix] toggle clicked — enabling:', next, '| currentId:', currentId());
     if (next && !validId(currentId())) {
-      showToastSafe('RonFlix individual videos ke liye hai — playlist normal player mein chalegi.', 'info');
+      // No video loaded yet: remember the intent and tell the user clearly.
+      ronflixPendingEnable = true;
+      updateToggleUi();
+      showToastSafe('Pehle ek video load karo, phir RonFlix auto-on ho jayega.', 'info');
       return;
     }
+    ronflixPendingEnable = false;
     if (next === ronflixEnabled) return;
     if (next && typeof window.ytTurboGetState === 'function') {
       var turbo = window.ytTurboGetState();
@@ -408,7 +421,16 @@
     } else {
       reloadCurrent();
     }
-    showToastSafe(next ? '◈ RonFlix ON — native stream player' : 'RonFlix OFF — normal player', next ? 'success' : 'info');
+    showToastSafe(next ? '\u25c8 RonFlix ON — native stream player' : 'RonFlix OFF — normal player', next ? 'success' : 'info');
+  }
+
+  // Called by the periodic watcher: if the user asked to enable RonFlix before
+  // a video was loaded, auto-enable now that one is available.
+  function maybeAutoEnable() {
+    if (ronflixPendingEnable && !ronflixEnabled && validId(currentId())) {
+      ronflixPendingEnable = false;
+      setEnabled(true);
+    }
   }
 
   window.ytToggleRonflix = function () { setEnabled(!ronflixEnabled); };
@@ -418,7 +440,7 @@
 
   function initUi() {
     var bar = document.getElementById('yt-speed-bar');
-    if (!bar) return;
+    if (!bar) return false;
     injectStyles();
     var controls = document.getElementById('yt-turbo-controls');
     if (!controls) {
@@ -435,15 +457,15 @@
       button.className = 'yt-turbo-toggle yt-ronflix-toggle';
       controls.appendChild(button);
     }
-    // The page can retain an existing control across tab activation or a
-    // partial re-render. Always rebind the visible button instead of only
-    // binding newly-created nodes; otherwise the OFF button can be clickable
-    // in appearance but inert in behavior.
+    // Always rebind the visible button. The YouTube/Turbo UI can re-render and
+    // replace nodes; if we only bound newly-created nodes the button could
+    // look clickable but do nothing. Re-binding on every init keeps it live.
     button.onclick = function (event) {
       if (event) event.preventDefault();
       return window.ytToggleRonflix();
     };
     updateToggleUi();
+    return true;
   }
 
   /* Capture the already-wrapped loader, so Turbo remains the fallback and keeps
@@ -498,8 +520,38 @@
     };
   }
 
-  if (typeof onPageActivated === 'function') onPageActivated('youtube', function () { setTimeout(initUi, 60); });
-  window.addEventListener('load', function () { setTimeout(initUi, 800); });
+  // Self-contained activation: do NOT depend solely on onPageActivated, because
+  // the speed bar / turbo controls may not be ready when that fires. Poll until
+  // the button exists and stays bound, and keep it synced with the player state.
+  function bootRonflixUi() {
+    if (initUi()) {
+      updateToggleUi();
+      maybeAutoEnable();
+    }
+  }
+  if (typeof onPageActivated === 'function') onPageActivated('youtube', function () { setTimeout(bootRonflixUi, 60); });
+  window.addEventListener('load', function () { setTimeout(bootRonflixUi, 800); });
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(bootRonflixUi, 100); });
+  // Fallback polling in case the above events were missed or the markup is
+  // injected late (include-loader, partial re-render, etc.).
+  var ronflixBootTries = 0;
+  var ronflixBootTimer = setInterval(function () {
+    ronflixBootTries += 1;
+    bootRonflixUi();
+    if (document.getElementById('yt-ronflix-toggle')) {
+      clearInterval(ronflixBootTimer);
+    } else if (ronflixBootTries > 40) {
+      clearInterval(ronflixBootTimer);
+    }
+  }, 500);
+  // Keep the button state in sync with whether a video is loaded, and honour a
+  // pending enable-once-a-video-loads request.
+  setInterval(function () {
+    if (document.getElementById('yt-ronflix-toggle')) {
+      updateToggleUi();
+      maybeAutoEnable();
+    }
+  }, 1000);
   document.addEventListener('visibilitychange', function () { if (document.hidden && isActive()) { saveProgress(); flushWatchTime(); } });
   window.addEventListener('pagehide', function () { if (isActive()) { saveProgress(); flushWatchTime(); } });
 })();
