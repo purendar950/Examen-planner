@@ -577,6 +577,7 @@
      every js/ and pages/ reference (see contentHashCacheBust in vite.config.mjs),
      so edited files always reload and unchanged files stay cached. Never add a
      manual ?v= here — it is stripped and replaced by the build. -->
+<script defer src="js/features/ronflix-stream.js"></script>
 <script defer src="js/tabs/youtube.js"></script>
 <script defer src="js/tabs/playlist-organiser.js"></script>
 <!-- Multi-video notebook: needs the organiser's library + fetchers above it, and
@@ -629,7 +630,6 @@
      Must load AFTER youtube.js (wraps ytDoLoad/ytSetSpeed/ytPiP) and after the
      gating file (uses ezIsPro/ezLockedMsg). -->
 <script defer src="js/features/turbo-player.js?v=20260818a"></script>
-<script defer src="js/features/ronflix-stream.js"></script>
 <script defer src="js/features/ronflix-player.js"></script>
 <!-- 🧠 Tutor memory (Supabase-backed, cross-session + cross-model) — must load
      AFTER vendor/supabase.js (line ~550) and js/core/firebase.js (uses
