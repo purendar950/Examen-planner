@@ -20,11 +20,9 @@ function dashGreeting() {
   return 'Good evening,';
 }
 function applyDashboardV2LayoutFixes() {
-  /* Reference layout is defined in pages/dashboard.html. Kept as a hook for compatibility. */
   const page = document.getElementById('page-dashboard');
   if (page) page.classList.add('reference-replica');
 }
-
 function updateDashboard() {
   applyDashboardV2LayoutFixes();
   const $ = id => document.getElementById(id);
@@ -74,7 +72,6 @@ function updateDashboard() {
   if (readinessTitle) readinessTitle.textContent = pct >= 100 ? 'Syllabus covered' : pct >= 75 ? 'Ready for the final stretch' : pct >= 40 ? 'Momentum is building' : pct > 0 ? 'Keep compounding progress' : 'Build your momentum';
   if (readinessNote) readinessNote.textContent = remaining + ' chapter' + (remaining === 1 ? '' : 's') + ' remain.';
 
-  const focusLine = $('dash-focus-line');
   const focusCount = $('dash-focus-count');
   const todoEl = $('dash-today-list');
   if (todoEl) {
@@ -84,13 +81,12 @@ function updateDashboard() {
       if (ch) nextChapters.push({ ch, sub });
     }
     if (focusCount) focusCount.textContent = nextChapters.length + ' Priority Tasks';
-    if (focusLine) focusLine.textContent = 'Today’s priorities';
     if (!nextChapters.length) {
       todoEl.innerHTML = '<div class="dv-empty">All caught up — continue with revision and mock tests.</div>';
     } else {
       todoEl.innerHTML = nextChapters.map((x, index) => {
         const numClass = index === 1 ? 'blue' : index === 2 ? 'amber' : index === 3 ? 'purple' : '';
-        return '<div class="ref-task dv-generated-todo" onclick="switchPage(\\'syllabus\\')" tabindex="0" role="button">' +
+        return '<div class="ref-task dv-generated-todo" onclick="switchPage(\'syllabus\')" tabindex="0" role="button">' +
           '<span class="ref-num ' + numClass + '">' + String(index + 1).padStart(2, '0') + '</span>' +
           '<div><div class="ref-task-name">' + escapeHtml(x.ch.name) + '</div><div class="ref-task-sub">' + escapeHtml(x.sub.name) + '</div></div>' +
           '<span class="ref-tag" style="color:' + x.sub.color + ';background:' + dashTint(x.sub.color, .09) + '">' + escapeHtml(x.sub.name) + '</span></div>';
@@ -106,7 +102,7 @@ function updateDashboard() {
       const p = t > 0 ? Math.round(d / t * 100) : 0;
       const next = sub.chapters.find(c => !appState.progress[c.id]?.done);
       const icons = ['♧','◉','▣','▤'];
-      return '<article class="ref-card ref-subject dv-subject" style="--subject-color:' + sub.color + '" onclick="switchPage(\\'syllabus\\')" tabindex="0" role="button">' +
+      return '<article class="ref-card ref-subject dv-subject" style="--subject-color:' + sub.color + '" onclick="switchPage(\'syllabus\')" tabindex="0" role="button">' +
         '<div class="ref-subj-head"><span class="ref-subj-icon">' + icons[index % icons.length] + '</span><span class="ref-subj-name">' + escapeHtml(sub.name) + '</span></div>' +
         '<div class="ref-subj-percent">' + p + '%</div><div class="ref-subj-meta">' + d + ' / ' + t + ' Topics</div>' +
         '<div class="ref-subj-bar"><div style="width:' + p + '%"></div></div>' +
