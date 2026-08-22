@@ -78,7 +78,9 @@
       '.yt-ronflix-spinner{width:30px;height:30px;border:3px solid rgba(255,255,255,.25);border-top-color:#8b5cf6;border-radius:50%;animation:ytRonflixSpin .8s linear infinite;}' +
       '@keyframes ytRonflixSpin{to{transform:rotate(360deg)}}' +
       '.yt-ronflix-toggle{border-color:#8b5cf6!important;color:#c4b5fd!important;}' +
-      '.yt-ronflix-toggle.on{background:rgba(139,92,246,.14)!important;color:#ddd6fe!important;}';
+      '.yt-ronflix-toggle.on{background:rgba(139,92,246,.14)!important;color:#ddd6fe!important;}' +
+      '.yt-ronflix-toggle.loading{border-color:#8b5cf6!important;color:#c4b5fd!important;background:rgba(139,92,246,.08)!important;animation:ytRonflixPulse 1s ease-in-out infinite;}' +
+      '@keyframes ytRonflixPulse{0%,100%{opacity:.7}50%{opacity:1}}';
     document.head.appendChild(style);
   }
 
@@ -349,6 +351,7 @@
           updateToggleUi();
           ronflixWatchLastTs = Date.now();
           ronflixLastSave = Date.now();
+          setButtonLoading(false);
           setStatus('');
           video.style.display = 'block';
           var play = video.play();
@@ -369,6 +372,18 @@
         setStatus('RonFlix failed: ' + (error.message || 'stream unavailable'));
         fallbackToPrevious(id, 'Try Turbo ya normal player.');
       });
+  }
+
+  function setButtonLoading(loading) {
+    var button = document.getElementById('yt-ronflix-toggle');
+    if (!button) return;
+    button.classList.toggle('loading', !!loading);
+    if (loading) {
+      button.textContent = '\u25c8 RonFlix\u2026';
+      button.disabled = true;
+    } else {
+      updateToggleUi();
+    }
   }
 
   function updateToggleUi() {
@@ -437,12 +452,17 @@
     var bar = document.getElementById('yt-speed-bar');
     if (!bar) return false;
     injectStyles();
-    var controls = document.getElementById('yt-turbo-controls');
+    var controls = document.getElementById('yt-ronflix-controls');
     if (!controls) {
       controls = document.createElement('div');
-      controls.id = 'yt-turbo-controls';
+      controls.id = 'yt-ronflix-controls';
       controls.style.cssText = 'display:flex;flex-direction:column;gap:4px;align-items:stretch;';
-      bar.insertBefore(controls, bar.firstChild);
+      var turboControls = document.getElementById('yt-turbo-controls');
+      if (turboControls && turboControls.parentNode === bar) {
+        bar.insertBefore(controls, turboControls.nextSibling);
+      } else {
+        bar.insertBefore(controls, bar.firstChild);
+      }
     }
     var button = document.getElementById('yt-ronflix-toggle');
     if (!button) {
