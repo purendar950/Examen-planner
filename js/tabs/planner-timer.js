@@ -28,6 +28,10 @@ function _stopActiveSession(task, opts = {}) {
   const capped = Math.min(Math.max(raw, 0), opts.maxSeconds ?? MAX_SESSION_SECONDS);
   task.totalSeconds = (task.totalSeconds || 0) + capped;
   task.activeSessionStart = null;
+  if (capped >= 60 && typeof window !== 'undefined' && window.FocusCircleData && typeof currentUser !== 'undefined' && currentUser) {
+    try { window.FocusCircleData.recordFocusMinutes(Math.round(capped / 60)); } catch (e) {}
+    try { window.FocusCircleData.setPresence(false); } catch (e) {}
+  }
 }
 
 // One-at-a-time: bank (pause) every OTHER running task so there is only ever a
@@ -55,6 +59,9 @@ function startTaskTimer(dateStr, taskId) {
   buildPlannerCalendar();
   // Auto-open the focus popup for this task (focus layer defines this).
   if (typeof openFocusPopup === 'function') openFocusPopup(dateStr, taskId);
+  if (typeof window !== 'undefined' && window.FocusCircleData && typeof currentUser !== 'undefined' && currentUser) {
+    try { window.FocusCircleData.setPresence(true); } catch (e) {}
+  }
 }
 
 function pauseTaskTimer(dateStr, taskId) {

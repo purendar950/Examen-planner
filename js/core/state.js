@@ -64,7 +64,9 @@ let appState = {
     presets: [],
     dailyPresetId: '',
     history: []
-  }
+  },
+  fcCircleIds: [],
+  fcPinnedIds: []
 };
 
 let currentFilter = 'all';
@@ -72,4 +74,3 @@ let currentSearchQuery = '';
 let countdownInterval = null;
 let _cachedRemainingCount = null; // invalidated on chapter toggle or exam switch
 let selectedPlannerDate = null;
-
