@@ -1,38 +1,12 @@
 (()=>{
-  const API_STORAGE_KEY="ronflix_youtube_api_key_v1";
-  const PIPED_BASE_KEY="ronflix_youtube_piped_base_v1";
-  const BUILTIN_YOUTUBE_API_KEY="AIzaSyDLoI3dxX2IJOkYMDNZuNM2WBSdNA22BlM";
-  const PIPED_INSTANCES=[
-    "https://api.piped.private.coffee",
-    "https://pipedapi.kavin.rocks",
-    "https://pipedapi.adminforge.de",
-    "https://pipedapi.reallyaweso.me",
-    "https://pipedapi.ducks.party",
-    "https://pipedapi.leptons.xyz"
-  ];
-  const sampleVideos=[
-    {id:"sEBbMyp8lKY",title:"YouTube Embed Test",meta:"Sample video",tags:"sample test embed"},
-    {id:"M7lc1UVf-VE",title:"YouTube Player Demo",meta:"Player test",tags:"demo developer player"},
-    {id:"dQw4w9WgXcQ",title:"Rick Astley — Never Gonna Give You Up",meta:"Music",tags:"music pop classic"},
-    {id:"9bZkp7q19f0",title:"PSY — GANGNAM STYLE",meta:"Music",tags:"music kpop popular"},
-    {id:"kJQP7kiw5Fk",title:"Luis Fonsi — Despacito",meta:"Music",tags:"music latin popular"},
-    {id:"JGwWNGJdvx8",title:"Ed Sheeran — Shape of You",meta:"Music",tags:"music pop popular"},
-    {id:"CevxZvSJLk8",title:"Katy Perry — Roar",meta:"Music",tags:"music pop"},
-    {id:"YQHsXMglC9A",title:"Adele — Hello",meta:"Music",tags:"music ballad"}
-  ];
   const YOUTUBE_SUGGESTION_HISTORY_KEY="ronflix_youtube_suggestion_history_v1";
   const YOUTUBE_WATCH_HISTORY_KEY="ronflix_youtube_watch_history_v1";
   const YOUTUBE_SUGGESTION_BATCH=16;
-  const hasUserKey=()=>!!localStorage.getItem(API_STORAGE_KEY);
-  let YOUTUBE_API_KEY=hasUserKey()?localStorage.getItem(API_STORAGE_KEY):BUILTIN_YOUTUBE_API_KEY;
-  let apiMode=hasUserKey()?"user":"builtin";
-  let pipedBase=localStorage.getItem(PIPED_BASE_KEY)||"";
   let popularPool=[];
-  let currentItems=[...sampleVideos];
+  let currentItems=[];
   let currentQuery="";
   let currentSearchFilter="all";
   let nextPageToken="";
-  let searchPlayerMode="normal";
   let searchPlayId="";
   let searchPlayTitle="";
   let searchPlayKind="video";
@@ -90,28 +64,20 @@
   const ytInput=document.getElementById("youtubeSearch");
   const ytBtn=document.getElementById("youtubeSearchBtn");
   const ytSearchFilters=[...document.querySelectorAll("[data-youtube-search-filter]")];
-  const ytPlayer=document.getElementById("youtubePlayer");
   const ytPlayerCard=document.getElementById("youtubePlayerCard");
   const ytLocalFallback=document.getElementById("youtubeLocalFallback");
   const ytNow=document.getElementById("youtubeNowTitle");
   const ytHint=document.getElementById("youtubeHint");
-  const apiToggle=document.getElementById("youtubeApiToggle");
-  const apiPanel=document.getElementById("youtubeApiPanel");
-  const apiKeyInput=document.getElementById("youtubeApiKey");
-  const apiSave=document.getElementById("youtubeApiSave");
-  const apiClear=document.getElementById("youtubeApiClear");
   const moreWrap=document.getElementById("youtubeMoreWrap");
   const moreBtn=document.getElementById("youtubeMoreBtn");
   const recentSection=document.getElementById("youtubeRecent");
   const recentRow=document.getElementById("youtubeRecentRow");
   const recentClear=document.getElementById("youtubeRecentClear");
-  const searchModeBtns=[...document.querySelectorAll("[data-yt-search-mode]")];
   const searchRonflixBox=document.getElementById("ytSearchRonflix");
   const searchRonflixVideo=document.getElementById("ytSearchRonflixVideo");
   const searchRonflixStatus=document.getElementById("ytSearchRonflixStatus");
   const searchRonflixBar=document.getElementById("ytSearchRonflixBar");
   const searchRonflixPip=document.getElementById("ytSearchRonflixPip");
-  const localNoHttpReferer=["content:","file:"].includes(location.protocol);
 
   function esc(value){
     return String(value??"").replace(/[&<>"']/g,ch=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]));
@@ -194,16 +160,6 @@
     ytEmpty.classList.toggle("show",currentItems.length===0);
   }
 
-  function updateApiUi(){
-    const userKey=localStorage.getItem(API_STORAGE_KEY);
-    apiToggle.textContent=userKey?"✓ Full search enabled":"Enable full search";
-    apiToggle.classList.toggle("ready",!!userKey);
-    if(userKey){
-      apiPanel.classList.remove("show");
-      apiKeyInput.value="";
-      ytHint.textContent="Search YouTube — tap any result to play it here.";
-    }
-  }
 
   function setMore(show){
     moreWrap.classList.toggle("show",!!show);
@@ -216,17 +172,6 @@
       btn.classList.toggle("active",active);
       btn.setAttribute("aria-pressed",String(active));
     });
-  }
-
-  function setSearchMode(mode){
-    searchPlayerMode=mode==="ronflix"?"ronflix":"normal";
-    searchModeBtns.forEach(btn=>{
-      const active=btn.dataset.ytSearchMode===searchPlayerMode;
-      btn.classList.toggle("active",active);
-      btn.setAttribute("aria-pressed",String(active));
-    });
-    if(searchRonflixBar) searchRonflixBar.classList.toggle("show",searchPlayerMode==="ronflix" && !!searchRonflixVideo?.src);
-    if(searchPlayerMode!=="ronflix") stopSearchRonflix();
   }
 
   function setSearchRonflixStatus(message){
@@ -251,8 +196,7 @@
 
   async function startSearchRonflix(id,title){
     if(!searchRonflixVideo || !window.RonflixStream){
-      setSearchMode("normal");
-      play(id,title);
+      setSearchRonflixStatus("RonFlix server client load nahi hua. Page reload karke dobara try karo.");
       return;
     }
     stopSearchRonflix();
@@ -260,8 +204,6 @@
     const ctrl=new AbortController();
     searchRonflixCtrl=ctrl;
     if(searchRonflixBox)searchRonflixBox.classList.add("show");
-    ytPlayer.style.display="none";
-    ytPlayer.removeAttribute("src");
     ytLocalFallback.classList.remove("show");
     ytLocalFallback.innerHTML="";
     searchRonflixVideo.style.display="none";
@@ -291,9 +233,7 @@
     }catch(error){
       if(seq!==searchRonflixSeq||ctrl.signal.aborted)return;
       console.warn("YT Search RonFlix:",error);
-      setSearchRonflixStatus("RonFlix failed: "+(error.message||"stream unavailable"));
-      setSearchMode("normal");
-      play(id,title);
+      setSearchRonflixStatus("RonFlix failed: "+(error.message||"stream unavailable")+". Try another video or retry.");
     }
   }
 
@@ -302,113 +242,36 @@
     searchPlayId=id; searchPlayTitle=title; searchPlayKind="video";
     ytNow.textContent=title;
     ytPlayerCard.classList.add("show");
+    ytLocalFallback.classList.remove("show");
+    ytLocalFallback.innerHTML="";
     rememberWatched(id,title,"video");
-    if(searchPlayerMode==="ronflix"){
-      startSearchRonflix(id,title);
-    }else{
-      stopSearchRonflix();
-    }
-
-    if(searchPlayerMode==="ronflix"){
-      const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
-      window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
-      return;
-    }
-
-    if(localNoHttpReferer){
-      ytPlayer.removeAttribute("src");
-      ytPlayer.style.display="none";
-      ytLocalFallback.classList.add("show");
-      ytLocalFallback.innerHTML=`<div class="youtube-local-box">
-        <img src="https://i.ytimg.com/vi/${encodeURIComponent(id)}/hqdefault.jpg" alt="">
-        <div class="youtube-local-title">${esc(title)}</div>
-        <div class="youtube-local-text">YouTube embeds need an HTTP Referer. Serve this page over HTTPS (or http://localhost) for in-page playback.</div>
-        <button class="youtube-local-open" type="button" data-open-youtube="${esc(id)}" data-open-kind="video">Open on YouTube</button>
-      </div>`;
-      ytHint.textContent="Local file preview detected — UI/search works here; embedded playback needs HTTPS or localhost.";
-    }else{
-      ytLocalFallback.classList.remove("show");
-      ytLocalFallback.innerHTML="";
-      ytPlayer.style.display="block";
-      ytPlayer.src=`https://www.youtube.com/embed/${encodeURIComponent(id)}?rel=0&autoplay=1&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
-    }
-
+    startSearchRonflix(id,title);
     const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
     window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
   }
 
   function playPlaylist(id,title="YouTube playlist"){
     if(!/^[A-Za-z0-9_-]{10,}$/.test(id||""))return;
-    if(searchPlayerMode==="ronflix") setSearchMode("normal");
     searchPlayId=id; searchPlayTitle=title; searchPlayKind="list";
     ytNow.textContent=title;
     ytPlayerCard.classList.add("show");
-    rememberWatched(id,title,"list",PLAYLIST_THUMB);
-
-    if(localNoHttpReferer){
-      ytPlayer.removeAttribute("src");
-      ytPlayer.style.display="none";
-      ytLocalFallback.classList.add("show");
-      ytLocalFallback.innerHTML=`<div class="youtube-local-box">
-        <img src="${PLAYLIST_THUMB}" alt="">
-        <div class="youtube-local-title">${esc(title)}</div>
-        <div class="youtube-local-text">YouTube playlist embeds need an HTTP Referer. Serve this page over HTTPS (or http://localhost) for in-page playback.</div>
-        <button class="youtube-local-open" type="button" data-open-youtube="${esc(id)}" data-open-kind="list">Open on YouTube</button>
-      </div>`;
-      ytHint.textContent="Local file preview detected — UI/search works here; embedded playback needs HTTPS or localhost.";
-    }else{
-      ytLocalFallback.classList.remove("show");
-      ytLocalFallback.innerHTML="";
-      ytPlayer.style.display="block";
-      ytPlayer.src=`https://www.youtube.com/embed/videoseries?list=${encodeURIComponent(id)}&autoplay=1&playsinline=1&origin=${encodeURIComponent(location.origin)}`;
-    }
-
+    stopSearchRonflix();
+    ytLocalFallback.classList.add("show");
+    ytLocalFallback.innerHTML=`<div class="youtube-local-box">
+      <img src="${PLAYLIST_THUMB}" alt="">
+      <div class="youtube-local-title">RonFlix individual video playback</div>
+      <div class="youtube-local-text">RonFlix server direct playback is available for individual videos. Search a topic and select a video result instead of a playlist.</div>
+    </div>`;
+    ytHint.textContent="RonFlix direct playback supports individual videos; playlist playback is not available in this tab.";
     const top=ytPlayerCard.getBoundingClientRect().top+window.scrollY-12;
     window.scrollTo({top,behavior:(window.innerWidth>=769?"auto":"smooth")});
   }
 
-  async function youtubeApi(path,params){
-    if(!YOUTUBE_API_KEY) throw new Error("API_KEY_REQUIRED");
-    const url=new URL(`https://www.googleapis.com/youtube/v3/${path}`);
-    Object.entries(params||{}).forEach(([k,v])=>{ if(v!==undefined && v!==null && v!=="") url.searchParams.set(k,String(v)); });
-    url.searchParams.set("key",YOUTUBE_API_KEY);
-    const r=await fetch(url);
-    const data=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(data?.error?.message||`YouTube ${r.status}`);
-    return data;
-  }
-
-  async function fetchTimeout(url,ms=6000){
-    const ctrl=new AbortController();
-    const timer=setTimeout(()=>ctrl.abort(),ms);
-    try{
-      const r=await fetch(url,{signal:ctrl.signal});
-      if(!r.ok) throw new Error("HTTP "+r.status);
-      return await r.json();
-    }finally{
-      clearTimeout(timer);
-    }
-  }
-
   async function pipedRequest(path,params={}){
-    if(window.RonflixStream && typeof window.RonflixStream.request==="function"){
-      return window.RonflixStream.request(path,params,{timeoutMs:9000});
+    if(!window.RonflixStream || typeof window.RonflixStream.request!=="function"){
+      throw new Error("RonFlix server client is unavailable");
     }
-    const qs=new URLSearchParams(params).toString();
-    let ordered=[...PIPED_INSTANCES];
-    if(pipedBase && ordered.includes(pipedBase)){
-      ordered.sort((a,b)=>a===pipedBase?-1:b===pipedBase?1:0);
-    }
-    let lastErr;
-    for(const base of ordered){
-      try{
-        const data=await fetchTimeout(`${base}${path}${qs?"?"+qs:""}`);
-        pipedBase=base;
-        try{ localStorage.setItem(PIPED_BASE_KEY,base); }catch(_){ }
-        return data;
-      }catch(e){ lastErr=e; }
-    }
-    throw lastErr||new Error("No search mirror available");
+    return window.RonflixStream.request(path,params,{timeoutMs:9000});
   }
 
   const PLAYLIST_THUMB="data:image/svg+xml,"+encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="480" height="270"><rect width="100%" height="100%" fill="#111319"/><text x="50%" y="50%" fill="#8f96a3" font-family="Arial" font-size="30" font-weight="700" text-anchor="middle" dominant-baseline="middle">Playlist</text></svg>`);
@@ -438,59 +301,6 @@
     };
   }
 
-  async function youtubePopular(){
-    try{
-      ytHint.textContent="Loading fresh YouTube suggestions…";
-      const categories=[
-        {id:"10",tag:"music"},
-        {id:"1",tag:"movies film animation"}
-      ];
-      const results=await Promise.allSettled(categories.map(cat=>
-        youtubeApi("videos",{
-          part:"snippet",chart:"mostPopular",regionCode:"IN",
-          videoCategoryId:cat.id,maxResults:35
-        })
-      ));
-      const items=[];
-      let anyFail=false;
-      results.forEach((result,index)=>{
-        if(result.status!=="fulfilled"){ anyFail=true; return; }
-        const tag=categories[index].tag;
-        (result.value.items||[]).forEach(x=>{
-          if(!x.id) return;
-          items.push({
-            id:x.id,
-            title:x.snippet?.title||"YouTube video",
-            meta:x.snippet?.channelTitle||"YouTube",
-            tags:tag
-          });
-        });
-      });
-      if(apiMode==="builtin" && anyFail){
-        apiMode="piped";
-        YOUTUBE_API_KEY="";
-        ytHint.textContent="Built-in key is restricted to ronflix.pages.dev — switching to public search mirror.";
-        return false;
-      }
-      if(!items.length){
-        if(apiMode==="user") apiPanel.classList.add("show");
-        return false;
-      }
-      popularPool=items;
-      rotatePopularSuggestions();
-      return true;
-    }catch(err){
-      console.warn("YouTube popular:",err);
-      if(apiMode==="builtin"){
-        apiMode="piped";
-        YOUTUBE_API_KEY="";
-        return false;
-      }
-      apiPanel.classList.add("show");
-      return false;
-    }
-  }
-
   async function pipedTrending(){
     const data=await pipedRequest("/trending",{region:"IN"});
     const arr=Array.isArray(data)?data:(data.items||[]);
@@ -499,85 +309,18 @@
 
   async function loadPopular(){
     currentQuery="";
-    if(apiMode==="user" || apiMode==="builtin"){
-      const ok=await youtubePopular();
-      if(ok) return;
-      if(apiMode==="user"){
-        popularPool=[...sampleVideos];
-        render(freshSuggestionBatch(popularPool,Math.min(8,popularPool.length)));
-        setMore(false);
-        return;
-      }
-    }
-    if(apiMode==="piped"){
-      try{
-        const items=await pipedTrending();
-        if(items.length){
-          popularPool=items;
-          rotatePopularSuggestions();
-          return;
-        }
-      }catch(err){ console.warn("Piped trending:",err); }
-    }
-    popularPool=[...sampleVideos];
-    render(freshSuggestionBatch(popularPool,Math.min(8,popularPool.length)));
-    setMore(false);
-    ytHint.textContent="Could not refresh suggestions. Use search or paste a direct YouTube link.";
-  }
-
-  async function youtubeKeywordSearch(q,pageToken,append){
     try{
-      ytHint.textContent=append?"Loading more…":"Searching YouTube…";
-      const isList=currentSearchFilter==="playlists";
-      const searchParams={
-        part:isList?"snippet,contentDetails":"snippet",
-        type:isList?"playlist":"video",
-        videoEmbeddable:isList?undefined:"true",
-        videoSyndicated:isList?undefined:"true",
-        safeSearch:"moderate",
-        maxResults:20,q,pageToken
-      };
-      if(currentSearchFilter==="live"){ searchParams.type="video"; searchParams.videoEmbeddable="true"; searchParams.videoSyndicated="true"; searchParams.eventType="live"; }
-      const d=await youtubeApi("search",searchParams);
-      const items=(d.items||[]).map(x=>{
-        if(isList) return {
-          id:x.id?.playlistId,kind:"list",
-          title:x.snippet?.title||"YouTube playlist",
-          meta:[x.snippet?.channelTitle||"YouTube",x.contentDetails?.itemCount?`${x.contentDetails.itemCount} videos`:null].filter(Boolean).join(" · "),
-          tags:q,
-          thumb:x.snippet?.thumbnails?.high?.url||x.snippet?.thumbnails?.default?.url||PLAYLIST_THUMB
-        };
-        return {
-          id:x.id?.videoId,kind:"video",
-          title:x.snippet?.title||"YouTube video",
-          meta:x.snippet?.channelTitle||"YouTube",
-          tags:q
-        };
-      }).filter(x=>x.id);
-      render(items,append);
-      nextPageToken=d.nextPageToken||"";
-      setMore(!!nextPageToken);
-      ytHint.textContent=currentItems.length
-        ?(currentSearchFilter==="live"?"Live now results — tap any active stream to play it here."
-          :currentSearchFilter==="playlists"?"Playlist results — tap any playlist to play it here."
-          :"YouTube results — tap any video to play it here.")
-        :(currentSearchFilter==="live"?"No active embeddable live streams found for that search."
-          :currentSearchFilter==="playlists"?"No playlists found for that search."
-          :"No embeddable YouTube videos found.");
-      return true;
+      ytHint.textContent="Loading from RonFlix server…";
+      const items=await pipedTrending();
+      if(!items.length) throw new Error("RonFlix returned no suggestions");
+      popularPool=items;
+      rotatePopularSuggestions();
     }catch(err){
-      console.warn("YouTube search:",err);
-      if(apiMode==="builtin"){
-        apiMode="piped";
-        YOUTUBE_API_KEY="";
-        ytHint.textContent="Built-in key is restricted to ronflix.pages.dev — switching to public search mirror.";
-        return false;
-      }
-      nextPageToken="";
+      console.warn("RonFlix trending:",err);
+      popularPool=[];
+      render([]);
       setMore(false);
-      ytHint.textContent=`YouTube search failed: ${err.message||"check API restrictions or quota"}.`;
-      apiPanel.classList.add("show");
-      return false;
+      ytHint.textContent="RonFlix server is unavailable right now. Retry in a minute or paste a YouTube video link.";
     }
   }
 
@@ -585,7 +328,7 @@
     const live=currentSearchFilter==="live";
     const isList=currentSearchFilter==="playlists";
     try{
-      ytHint.textContent=append?"Loading more…":"Searching via public mirror…";
+      ytHint.textContent=append?"Loading more…":"Searching via RonFlix server…";
       const params={q,region:"IN",filter:isList?"playlists":(live?"all":"videos")};
       if(pageToken) params.nextpage=pageToken;
       const data=await pipedRequest("/search",params);
@@ -607,26 +350,13 @@
       nextPageToken="";
       setMore(false);
       render([]);
-      apiPanel.classList.add("show");
-      ytHint.textContent="Search mirrors are busy right now. Add a YouTube Data API key below for reliable search, or retry in a minute.";
+      ytHint.textContent="RonFlix server is busy right now. Retry in a minute.";
     }
   }
 
   async function keywordSearch(q,pageToken="",append=false){
     currentQuery=q;
-    if(apiMode==="user" || apiMode==="builtin"){
-      const ok=await youtubeKeywordSearch(q,pageToken,append);
-      if(ok) return;
-    }
-    if(apiMode==="piped"){
-      await pipedKeywordSearch(q,pageToken,append);
-      return;
-    }
-    nextPageToken="";
-    setMore(false);
-    render([]);
-    apiPanel.classList.add("show");
-    ytHint.textContent="Search is unavailable right now. Add a YouTube Data API key below or retry in a minute.";
+    await pipedKeywordSearch(q,pageToken,append);
   }
 
   async function submit(){
@@ -652,7 +382,6 @@
 
   function stopPlayer(){
     stopSearchRonflix();
-    ytPlayer.removeAttribute("src");
     ytPlayerCard.classList.remove("show");
     searchPlayId="";
   }
@@ -681,20 +410,6 @@
     renderRecent();
   });
 
-  searchModeBtns.forEach(btn=>btn.addEventListener("click",()=>{
-    const mode=btn.dataset.ytSearchMode;
-    if(mode==="ronflix" && searchPlayKind==="list"){
-      setSearchMode("normal");
-      if(typeof showToast==="function")showToast("RonFlix individual videos ke liye hai — playlist normal player mein chalegi.","info");
-      return;
-    }
-    setSearchMode(mode);
-    if(searchPlayId){
-      if(searchPlayerMode==="ronflix") startSearchRonflix(searchPlayId,searchPlayTitle);
-      else if(searchPlayKind==="list") playPlaylist(searchPlayId,searchPlayTitle);
-      else play(searchPlayId,searchPlayTitle);
-    }
-  }));
   document.querySelectorAll("[data-yt-search-speed]").forEach(btn=>btn.addEventListener("click",()=>{
     searchRonflixSpeed=parseFloat(btn.dataset.ytSearchSpeed)||1;
     document.querySelectorAll("[data-yt-search-speed]").forEach(item=>item.classList.toggle("active",item===btn));
@@ -708,7 +423,6 @@
     }catch(_){if(typeof showToast==="function")showToast("RonFlix PiP browser mein supported nahi hai.","info");}
   });
   document.querySelectorAll("[data-yt-search-speed]").forEach(btn=>btn.classList.toggle("active",btn.dataset.ytSearchSpeed==="1"));
-  setSearchMode("normal");
 
   ytBtn.addEventListener("click",submit);
   ytInput.addEventListener("keydown",e=>{if(e.key==="Enter")submit();});
@@ -718,33 +432,12 @@
     if(q && !parseYouTubeId(q)) await keywordSearch(q);
     else if(currentSearchFilter==="live") ytHint.textContent="Live filter is on — search for currently live streams, such as news live.";
     else if(currentSearchFilter==="playlists") ytHint.textContent="Playlists filter is on — search full courses or topic playlists, e.g. rrb alp maths.";
-    else ytHint.textContent="Search YouTube — tap any result to play it here.";
+    else ytHint.textContent="Search through RonFlix server — tap any video to play it here.";
   }));
 
-  apiToggle.addEventListener("click",()=>apiPanel.classList.toggle("show"));
-  apiSave.addEventListener("click",async()=>{
-    const key=apiKeyInput.value.trim();
-    if(!key){ytHint.textContent="Paste your YouTube Data API key first.";return;}
-    YOUTUBE_API_KEY=key;
-    apiMode="user";
-    localStorage.setItem(API_STORAGE_KEY,key);
-    updateApiUi();
-    await loadPopular();
-  });
-  apiClear.addEventListener("click",()=>{
-    YOUTUBE_API_KEY="";
-    localStorage.removeItem(API_STORAGE_KEY);
-    apiKeyInput.value="";
-    apiPanel.classList.remove("show");
-    apiToggle.classList.remove("ready");
-    apiToggle.textContent="Enable full search";
-    apiMode="piped";
-    loadPopular();
-  });
   moreBtn.addEventListener("click",()=>{if(currentQuery&&nextPageToken)keywordSearch(currentQuery,nextPageToken,true);});
 
   setSearchFilter("all");
-  updateApiUi();
   renderRecent();
   loadPopular();
 })()

@@ -22,11 +22,7 @@
 #page-yt-search .youtube-search-filter.active{border-color:#4f5665;background:#f4f5f7;color:#0a0b0e}
 #page-yt-search .youtube-player-card{display:none;margin:0 0 22px}
 #page-yt-search .youtube-player-card.show{display:block}
-#page-yt-search .youtube-search-modes{display:flex;align-items:center;gap:7px;margin:0 0 10px}
-#page-yt-search .youtube-search-mode{border:1px solid #2d323e;border-radius:999px;background:#12151c;color:#9098a5;font-size:9.5px;font-weight:850;padding:6px 12px;cursor:pointer}
-#page-yt-search .youtube-search-mode.active{border-color:#8b5cf6;background:rgba(139,92,246,.14);color:#ddd6fe}
 #page-yt-search .youtube-player-ratio{position:relative;width:100%;aspect-ratio:16/9;border-radius:16px;overflow:hidden;background:#000;border:1px solid #20242d}
-#page-yt-search .youtube-player-ratio iframe{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
 #page-yt-search .yt-search-ronflix{position:absolute;inset:0;display:none;background:#000;z-index:2}
 #page-yt-search .yt-search-ronflix.show{display:block}
 #page-yt-search .yt-search-ronflix video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
@@ -62,17 +58,12 @@
 #page-yt-search .youtube-recent-thumb{aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:#151820;border:1px solid #20242d}
 #page-yt-search .youtube-recent-thumb img{width:100%;height:100%;display:block;object-fit:cover}
 #page-yt-search .youtube-recent-card-title{margin-top:5px;font-size:9.5px;font-weight:850;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* API setup */
-#page-yt-search .youtube-api-setup{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:-5px 1px 16px}
-#page-yt-search .youtube-api-toggle,#page-yt-search .youtube-api-save,#page-yt-search .youtube-api-clear,#page-yt-search .youtube-more-btn{
+  /* More results */
+#page-yt-search .youtube-more-btn{
   border:1px solid #2d323e;border-radius:10px;background:#12151c;color:#d8dbe3;
   font-size:9.5px;font-weight:800;padding:7px 10px
 }
-#page-yt-search .youtube-api-toggle.ready{border-color:#274d3a;color:#8bd3ad;background:#0d1712}
-#page-yt-search .youtube-api-panel{display:none;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;width:100%;max-width:650px}
-#page-yt-search .youtube-api-panel.show{display:grid}
-#page-yt-search .youtube-api-key{width:100%;min-width:0;border:1px solid #2b2f3a;border-radius:10px;background:#0e1016;color:#fff;padding:8px 10px;font-size:10px;outline:none}
-#page-yt-search .youtube-api-note{width:100%;color:#666e7c;font-size:8.8px;line-height:1.4}
+
 #page-yt-search .youtube-more-wrap{display:none;text-align:center;margin-top:16px}#page-yt-search .youtube-more-wrap.show{display:block}
 /* Local file fallback */
 #page-yt-search .youtube-local-fallback{display:none;position:absolute;inset:0;background:#0c0e13;align-items:center;justify-content:center;text-align:center;padding:18px}
@@ -95,8 +86,6 @@
   #page-yt-search .youtube-grid{gap:9px}
   #page-yt-search .youtube-card-title{font-size:10px}
   #page-yt-search .youtube-card-met
-  #page-yt-search .youtube-api-panel{grid-template-columns:1fr auto}
-  #page-yt-search .youtube-api-clear{grid-column:2}#page-yt-search .youtube-api-note{grid-column:1/-1}
 }
 @media(min-width:850px){
   #page-yt-search{padding:30px 24px 54px}
@@ -122,28 +111,10 @@
       <button class="youtube-search-filter" type="button" data-youtube-search-filter="live" aria-pressed="false">Live</button>
       <button class="youtube-search-filter" type="button" data-youtube-search-filter="playlists" aria-pressed="false">Playlists</button>
     </div>
-    <div id="youtubeHint" class="youtube-hint">Search works automatically — official key where allowed, otherwise a public search mirror. Add your own restricted YouTube Data API key below for the most reliable search.</div>
-    <div id="youtubeApiSetup" class="youtube-api-setup">
-      <button id="youtubeApiToggle" class="youtube-api-toggle" type="button">Enable full search</button>
-      <div id="youtubeApiPanel" class="youtube-api-panel">
-        <input id="youtubeApiKey" class="youtube-api-key" type="password" autocomplete="off" placeholder="Paste restricted YouTube Data API key">
-        <button id="youtubeApiSave" class="youtube-api-save" type="button">Save</button>
-        <button id="youtubeApiClear" class="youtube-api-clear" type="button">Clear</button>
-      </div>
-      <div class="youtube-api-note">For a public site, restrict the key to your domain and to YouTube Data API v3. Without a key, the page automatically uses a public mirror and direct YouTube links still work.</div>
-    </div>
-
+    <div id="youtubeHint" class="youtube-hint">Search and playback use the RonFlix server. Individual video results play natively through RonFlix; playlists are shown for reference only.</div>
     <div id="youtubePlayerCard" class="youtube-player-card">
-      <div class="youtube-search-modes" role="group" aria-label="YT Search player mode">
-        <button class="youtube-search-mode active" type="button" data-yt-search-mode="normal" aria-pressed="true">Normal</button>
-        <button class="youtube-search-mode" type="button" data-yt-search-mode="ronflix" aria-pressed="false">◈ RonFlix</button>
-      </div>
       <div class="youtube-player-ratio">
-        <iframe id="youtubePlayer" title="YouTube player"
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-          allowfullscreen
-          referrerpolicy="strict-origin-when-cross-origin"></iframe>
-        <div id="ytSearchRonflix" class="yt-search-ronflix">
+        <div id="ytSearchRonflix" class="yt-search-ronflix show">
           <video id="ytSearchRonflixVideo" controls playsinline></video>
           <div id="ytSearchRonflixStatus" class="yt-search-ronflix-status"></div>
         </div>
