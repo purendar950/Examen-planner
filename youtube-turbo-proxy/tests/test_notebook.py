@@ -67,6 +67,8 @@ def load_bundle():
         "_study_lock": study_lock,
         "_study_cache": study_cache,
         "_study_cache_put": study_cache_put,
+        "_study_text_worker_sem": threading.Semaphore(),
+        "_study_bundle_worker_sem": threading.Semaphore(),
         "STUDY_TTL": 3600,
         "_study_job_persist": lambda *args, **kwargs: True,
         "_study_exists": lambda fs_id: fs_id == "legacy-ready",
