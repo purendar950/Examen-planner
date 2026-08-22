@@ -1,6 +1,77 @@
 /* StudyPlanner dashboard reference: real-data enrichment. */
 (function(){
   if(window.__spDashboardDataV1)return; window.__spDashboardDataV1=true;
+
+  /* Distinct card backgrounds: colorful glass surfaces instead of one uniform dark card. */
+  (function injectDashboardCardTheme(){
+    if(document.getElementById('sp-dashboard-card-theme'))return;
+    var s=document.createElement('style');
+    s.id='sp-dashboard-card-theme';
+    s.textContent=`
+      .dashboard-v2 .dv-card{
+        background:linear-gradient(145deg,rgba(20,31,52,.96),rgba(11,20,36,.98));
+        border-color:rgba(255,255,255,.13);
+        box-shadow:0 14px 38px rgba(0,0,0,.20),inset 0 1px 0 rgba(255,255,255,.055);
+      }
+      .dashboard-v2 .dv-grid-top>.dv-readiness{
+        background:linear-gradient(145deg,rgba(0,132,105,.42),rgba(9,42,47,.96));
+        border-color:rgba(45,230,190,.34);
+      }
+      .dashboard-v2 .dv-grid-top>.dv-mission{
+        background:linear-gradient(145deg,rgba(28,91,170,.46),rgba(12,32,63,.97));
+        border-color:rgba(72,160,255,.36);
+      }
+      .dashboard-v2 .dv-grid-top>.dv-quick{
+        background:linear-gradient(145deg,rgba(102,61,170,.43),rgba(35,24,65,.97));
+        border-color:rgba(174,126,255,.34);
+      }
+      .dashboard-v2 .dv-mid-row>.dv-target{
+        background:linear-gradient(145deg,rgba(0,116,139,.44),rgba(9,35,48,.97));
+        border-color:rgba(42,211,238,.34);
+      }
+      .dashboard-v2 .dv-mid-row>.dv-member{
+        background:linear-gradient(145deg,rgba(111,54,166,.48),rgba(39,22,65,.97));
+        border-color:rgba(192,132,252,.36);
+      }
+      .dashboard-v2 .dv-ops>.revision-widget{
+        background:linear-gradient(145deg,rgba(111,54,166,.44),rgba(37,24,65,.97));
+        border-color:rgba(192,132,252,.34);
+      }
+      .dashboard-v2 .dv-ops>#mock-dash-summary{
+        background:linear-gradient(145deg,rgba(25,92,175,.46),rgba(12,32,65,.97));
+        border-color:rgba(96,165,250,.36);
+      }
+      .dashboard-v2 .dv-ops>#yt-continue-card{
+        background:linear-gradient(145deg,rgba(0,126,105,.44),rgba(8,43,43,.97));
+        border-color:rgba(52,211,153,.34);
+      }
+      .dashboard-v2 .dv-ops>#ai-notes-card{
+        background:linear-gradient(145deg,rgba(170,103,20,.46),rgba(61,39,15,.97));
+        border-color:rgba(251,191,36,.35);
+      }
+      .dashboard-v2 .dv-analysis{
+        background:linear-gradient(145deg,rgba(10,105,137,.44),rgba(9,35,52,.97));
+        border-color:rgba(34,211,238,.34);
+      }
+      .dashboard-v2 .dv-subject{
+        background:linear-gradient(145deg,color-mix(in srgb,var(--subject-color,#2f8cff) 20%,#111d31),#0b1628);
+        border:1px solid color-mix(in srgb,var(--subject-color,#2f8cff) 28%,rgba(255,255,255,.08));
+      }
+      .dashboard-v2 #recent-activity-list{
+        background:linear-gradient(145deg,rgba(157,45,104,.42),rgba(54,20,48,.97));
+        border-color:rgba(244,114,182,.34);
+      }
+      .dashboard-v2 .dv-card:hover{
+        transform:translateY(-2px);
+        border-color:rgba(255,255,255,.22);
+        box-shadow:0 18px 42px rgba(0,0,0,.25),0 0 24px rgba(80,180,255,.08),inset 0 1px 0 rgba(255,255,255,.07);
+        transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease;
+      }
+      @media (prefers-reduced-motion:reduce){.dashboard-v2 .dv-card:hover{transform:none}}
+    `;
+    document.head.appendChild(s);
+  })();
+
   function key(d){d=new Date(d);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
   function day(d){d=new Date(d);d.setHours(0,0,0,0);return d}
   function add(d,n){d=new Date(d);d.setDate(d.getDate()+n);return d}
