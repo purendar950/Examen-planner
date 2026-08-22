@@ -31,12 +31,15 @@ if [ "${#missing[@]}" -ne 0 ]; then
 fi
 
 if ! command -v deno >/dev/null 2>&1; then
-  cat <<'EOF'
-Deno was not found. Modern YouTube extraction needs a supported JavaScript runtime.
-Install Deno for your host, then run this script again. On Termux, prefer the
-Termux Deno package or a Node.js 22+ runtime configured through yt-dlp.
+  node_major="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
+  if [ "${node_major:-0}" -lt 22 ]; then
+    cat <<'EOF'
+No Deno was found, and Node.js cannot replace it because version 22+ is required.
+Install Deno or Node.js 22+, then run this script again.
 EOF
-  exit 1
+    exit 1
+  fi
+  echo "Deno not found; yt-dlp will use Node.js v${node_major}."
 fi
 
 if [ ! -d "$VENV_DIR" ]; then

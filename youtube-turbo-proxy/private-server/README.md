@@ -9,7 +9,8 @@ origin address but does not replace API authorization.
 
 - Linux servers and single-board computers.
 - macOS for development.
-- Android/Termux for personal always-plugged-in use.
+- Android through Termux + `proot-distro` Ubuntu for personal always-plugged-in
+  use.
 
 Do not expose port `8080` directly to the internet. Keep the API bound to
 loopback and publish it with Cloudflare Tunnel, Tailscale Funnel, or another
@@ -87,9 +88,42 @@ CORS already permits your GitHub Pages origin through the app defaults or
 
 - Keep one Gunicorn worker on small devices; increase workers only after
   checking memory headroom.
-- Termux devices need battery optimization disabled for Termux and stable
-  power. Use `termux-wake-lock` if available.
+- On Android, run the server inside an Ubuntu proot rather than installing its
+  GNU Python/Node dependencies directly in Termux. Keep the phone plugged in,
+  disable battery optimization for Termux, and run `termux-wake-lock`.
 - Configure `FIREBASE_SERVICE_ACCOUNT` so Firebase tokens and Firestore AI
   settings work exactly as on Render.
 - Configure YouTube cookies and AI keys through Firestore or `private.env`.
 - Check `http://127.0.0.1:8080/health` before exposing the tunnel.
+
+## Android: Termux + Ubuntu
+
+Install Termux from F-Droid or its GitHub releases—not the outdated Play Store
+build—then run these commands in Termux:
+
+```sh
+pkg update && pkg upgrade -y
+pkg install -y proot-distro termux-api
+proot-distro install ubuntu
+termux-wake-lock
+proot-distro login ubuntu
+```
+
+Inside Ubuntu:
+
+```sh
+apt update && apt upgrade -y
+apt install -y python3 python3-venv python3-pip git curl unzip \
+  ca-certificates nodejs npm procps
+curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh
+git clone https://github.com/purendar950/Examen-planner.git /opt/examzen
+cd /opt/examzen/youtube-turbo-proxy/private-server
+./setup.sh
+cp private.env.example private.env
+nano private.env
+./start.sh
+```
+
+Leave that Ubuntu session running. Open a second Termux session, enter the same
+Ubuntu container with `proot-distro login ubuntu`, install `cloudflared`, and
+run either the quick test above or your named tunnel configuration.
