@@ -11,11 +11,7 @@ function dashTint(hex, a) {
   return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
 }
 
-/* Best-effort current user's first name.
-   Delegates to the canonical resolver in js/core/ui-helpers.js so the heading,
-   the account chip and the welcome greeting cannot drift apart. The previous
-   local copy of this fallback chain also probed appState.userName, which is
-   never written anywhere in the codebase. */
+/* Best-effort current user's first name. */
 function dashUserName() {
   if (typeof ezDisplayFirstName === 'function') return ezDisplayFirstName();
   return 'Aspirant';
@@ -38,7 +34,6 @@ function updateDashboard() {
   const remaining = total - done;
   const pct = total > 0 ? Math.round(done / total * 100) : 0;
 
-  // Header: exam title, greeting, username
   try {
     const ex = (typeof ALL_EXAMS !== 'undefined' && ALL_EXAMS[currentExam]) ? ALL_EXAMS[currentExam] : null;
     if ($('dash-exam-title') && ex) $('dash-exam-title').textContent = ex.fullName || ex.name || 'Your Exam';
@@ -46,7 +41,6 @@ function updateDashboard() {
   if ($('dash-greeting')) $('dash-greeting').textContent = dashGreeting();
   if ($('dash-username')) $('dash-username').textContent = dashUserName();
 
-  // Target score / rank — its own column between name and exam date (green, black glow)
   const rankEl = $('dash-target-rank');
   if (rankEl) {
     let tRank = '';
@@ -54,8 +48,7 @@ function updateDashboard() {
     if (!tRank) { try { tRank = (window.EZ_PROFILE && EZ_PROFILE.targetScore) || ''; } catch (e) {} }
     tRank = (tRank || '').trim();
     if (tRank) {
-      rankEl.innerHTML = '<span class="dr-label">RANK</span>' +
-                         '<span class="dr-val">Target: ' + tRank + '</span>';
+      rankEl.innerHTML = '<span class="dr-label">TARGET</span> ' + escapeHtml(tRank);
       rankEl.style.display = '';
     } else {
       rankEl.innerHTML = '';
@@ -63,23 +56,19 @@ function updateDashboard() {
     }
   }
 
-  // Stats
   if ($('stat-total')) $('stat-total').textContent = total;
   if ($('stat-done')) $('stat-done').textContent = done;
   if ($('stat-remaining')) $('stat-remaining').textContent = remaining;
   if ($('stat-bookmarked')) $('stat-bookmarked').textContent = bookmarked;
   if ($('streak-count')) $('streak-count').textContent = appState.streak || 0;
+  if ($('streak-count-head')) $('streak-count-head').textContent = appState.streak || 0;
 
-  // Syllabus readiness — the headline is derived only from real completion data.
   if ($('dash-syllabus-pct')) $('dash-syllabus-pct').textContent = pct + '%';
   if ($('dash-done-frac')) $('dash-done-frac').textContent = done + ' / ' + total;
   const readinessTitle = $('dash-readiness-title');
   const readinessNote = $('dash-readiness-note');
   if (readinessTitle) {
-    readinessTitle.textContent = pct >= 100 ? 'Syllabus covered' :
-      pct >= 75 ? 'Ready for the final stretch' :
-      pct >= 40 ? 'Momentum is building' :
-      pct > 0 ? 'Keep compounding progress' : 'Build your momentum';
+    readinessTitle.textContent = pct >= 100 ? 'Syllabus covered' : pct >= 75 ? 'Ready for the final stretch' : pct >= 40 ? 'Momentum is building' : pct > 0 ? 'Keep compounding progress' : 'Build your momentum';
   }
   if (readinessNote) {
     readinessNote.textContent = pct >= 100
@@ -92,7 +81,6 @@ function updateDashboard() {
     ring.style.strokeDashoffset = (C * (1 - pct / 100)).toFixed(1);
   }
 
-  // Today's focus — next incomplete chapter from each active subject.
   const focusLine = $('dash-focus-line');
   const focusCount = $('dash-focus-count');
   const todoEl = $('dash-today-list');
@@ -109,17 +97,16 @@ function updateDashboard() {
     } else {
       if (focusLine) focusLine.textContent = 'Complete these ' + nextChapters.length + ' to stay on track';
       todoEl.innerHTML = nextChapters.map((x, index) =>
-        '<div class="dash-todo-item" onclick="switchPage(\'syllabus\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" tabindex="0" role="button">' +
-          '<div class="dash-todo-check">' + String(index + 1).padStart(2, '0') + '</div>' +
-          '<div><div class="dash-todo-name">' + escapeHtml(x.ch.name) + '</div>' +
-          '<div class="dash-todo-sub">Next incomplete chapter</div></div>' +
-          '<span class="dash-todo-tag" style="background:' + dashTint(x.sub.color, 0.14) + ';color:' + x.sub.color + ';">' + escapeHtml(x.sub.name) + '</span>' +
+        '<div class="dash-todo-item dv-generated-todo" onclick="switchPage(\'syllabus\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" tabindex="0" role="button">' +
+          '<div class="dash-todo-check dv-num">' + String(index + 1).padStart(2, '0') + '</div>' +
+          '<div><div class="dash-todo-name dv-todo-name">' + escapeHtml(x.ch.name) + '</div>' +
+          '<div class="dash-todo-sub dv-todo-sub">Next incomplete chapter</div></div>' +
+          '<span class="dash-todo-tag dv-todo-tag" style="background:' + dashTint(x.sub.color, 0.14) + ';color:' + x.sub.color + ';">' + escapeHtml(x.sub.name) + '</span>' +
         '</div>'
       ).join('');
     }
   }
 
-  // Subject allocation cards
   const container = $('subject-progress-cards');
   if (container) {
     container.innerHTML = subjects.map(sub => {
@@ -127,21 +114,21 @@ function updateDashboard() {
       const d = sub.chapters.filter(c => appState.progress[c.id]?.done).length;
       const p = t > 0 ? Math.round(d / t * 100) : 0;
       const next = sub.chapters.find(c => !appState.progress[c.id]?.done);
-      return '<div class="dash-subj" style="--subject-color:' + sub.color + '" onclick="switchPage(\'syllabus\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" tabindex="0" role="button">' +
-        '<div class="dash-subj-top">' +
+      return '<div class="dash-subj dv-subject" style="--subject-color:' + sub.color + '" onclick="switchPage(\'syllabus\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click();}" tabindex="0" role="button">' +
+        '<div class="dash-subj-top dv-subj-title">' +
           '<span class="dash-subj-name"><span class="sw" style="background:' + sub.color + ';"></span>' + escapeHtml(sub.name) + '</span>' +
           '<span class="dash-subj-frac">' + d + ' / ' + t + ' chapters</span>' +
         '</div>' +
-        '<div class="dash-subj-row">' +
-          '<div class="dash-bar"><div style="width:' + p + '%;background:' + sub.color + ';"></div></div>' +
+        '<div class="dash-subj-row dv-subj-percent-row">' +
+          '<div class="dash-bar dv-subj-bar"><div style="width:' + p + '%;background:' + sub.color + ';"></div></div>' +
           '<span class="dash-subj-pct" style="color:' + sub.color + ';">' + p + '%</span>' +
         '</div>' +
-        '<div class="dash-subj-next"><span>Next:</span><strong>' + escapeHtml(next ? next.name : 'Syllabus complete') + '</strong><span>Continue →</span></div>' +
+        '<div class="dash-subj-next dv-subj-next"><span>Next:</span> <strong>' + escapeHtml(next ? next.name : 'Syllabus complete') + '</strong></div>' +
+        '<div class="dv-subj-btn" style="--subject-color:' + sub.color + '">Continue →</div>' +
       '</div>';
     }).join('');
   }
 
-  // Recent activity
   const recentEl = $('recent-activity-list');
   if (recentEl) {
     const completed = allChapters
@@ -149,62 +136,40 @@ function updateDashboard() {
       .sort((a, b) => new Date(appState.progress[b.id].completedAt) - new Date(appState.progress[a.id].completedAt))
       .slice(0, 5);
     if (!completed.length) {
-      recentEl.innerHTML = '<div class="empty-state"><div><div class="empty-icon">✓</div><p>No chapters completed yet. Finish a priority to start your activity ledger.</p><button onclick="switchPage(\'syllabus\')">Open syllabus →</button></div></div>';
+      recentEl.innerHTML = '<div class="dv-empty"><strong>No recent completions yet</strong>Finish a priority chapter and your activity will appear here.<br><button onclick="switchPage(\'syllabus\')">Start a chapter →</button></div>';
     } else {
-      recentEl.innerHTML = '<div class="dash-recent">' + completed.map(c => {
+      recentEl.innerHTML = '<div class="dash-recent dv-recent">' + completed.map(c => {
         const sub = subjects.find(s => s.chapters.some(ch => ch.id === c.id));
         const d = new Date(appState.progress[c.id].completedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-        return '<div class="dash-r">' +
-          '<span class="dash-r-ck">✓</span>' +
-          '<div class="dash-r-i"><div class="t">' + escapeHtml(c.name) + '</div><div class="s">' + escapeHtml(sub?.name || '') + '</div></div>' +
-          '<span class="dash-r-d">' + d + '</span>' +
+        return '<div class="dash-r dv-recent-item">' +
+          '<span class="dash-r-ck dv-check">✓</span>' +
+          '<div class="dash-r-i"><div class="t dv-recent-title">' + escapeHtml(c.name) + '</div><div class="s dv-recent-sub">' + escapeHtml(sub?.name || '') + ' · ' + d + '</div></div>' +
         '</div>';
       }).join('') + '</div>';
     }
   }
 
-  // My AI Notes — a way back into anything already generated, from the page the
-  // student lands on. Owned by NotesLibrary so all three surfaces agree.
   if (window.NotesLibrary) {
     try { window.NotesLibrary.renderDashboardCard(); } catch (e) {}
   }
 
-  // Continue Watching remains visible even before the first video so the
-  // three-card operations grid never collapses or hides the feature.
   const lv = appState.ytLastVideo;
   const contCard = $('yt-continue-card');
   if (lv && lv.id && contCard) {
     const thumb = `https://i.ytimg.com/vi/${lv.id}/mqdefault.jpg`;
     const badge = lv.type === 'playlist' ? 'Playlist' : 'Video';
     contCard.innerHTML = `
-      <div class="fin-video-content">
-        <div class="fin-action-title-row">
-          <div class="fin-action-icon fin-green">▶</div>
-          <h3>Continue Watching</h3>
-          <span class="fin-arrow" aria-hidden="true">↗</span>
-        </div>
-        <div class="fin-video-main">
-          <div class="fin-video-thumb">
-            <img src="${thumb}" onerror="this.style.display='none'" alt="">
-            <span class="fin-video-play">▶</span>
-          </div>
-          <div class="fin-video-copy">
-            <strong>${escapeHtml(lv.title || 'Video')}</strong>
-            <span>${badge} · Resume your last session</span>
-          </div>
-        </div>
-        <span class="fin-video-resume">Resume learning →</span>
+      <div class="fin-video-content dv-video-content">
+        <div class="fin-action-title-row dv-op-head"><div class="fin-action-icon fin-green dv-op-icon green">▶</div><h3>Continue Watching</h3><span class="fin-arrow">↗</span></div>
+        <div class="fin-video-main dv-video-main"><div class="fin-video-thumb dv-thumb"><img src="${thumb}" onerror="this.style.display='none'" alt=""><span class="fin-video-play dv-play">▶</span></div><div class="fin-video-copy dv-video-copy"><strong>${escapeHtml(lv.title || 'Video')}</strong><span>${badge} · Resume your last session</span></div></div>
+        <span class="fin-video-resume dv-op-action green">Resume now →</span>
       </div>`;
   } else if (contCard) {
     contCard.innerHTML = `
-      <div class="fin-video-content">
-        <div class="fin-action-title-row">
-          <div class="fin-action-icon fin-green">▶</div>
-          <h3>Continue Watching</h3>
-          <span class="fin-arrow" aria-hidden="true">↗</span>
-        </div>
-        <p class="fin-action-muted">Start a course in the YouTube workspace and your latest lesson will appear here.</p>
-        <span class="fin-video-resume">Browse courses →</span>
+      <div class="fin-video-content dv-video-content">
+        <div class="fin-action-title-row dv-op-head"><div class="fin-action-icon fin-green dv-op-icon green">▶</div><h3>Continue Watching</h3><span class="fin-arrow">↗</span></div>
+        <p class="fin-action-muted muted">Start a course in the YouTube workspace and your latest lesson will appear here.</p>
+        <span class="fin-video-resume dv-op-action green">Browse courses →</span>
       </div>`;
   }
 }
