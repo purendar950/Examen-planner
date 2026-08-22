@@ -116,6 +116,7 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
   assert.equal(toggle.textContent, '◈ RonFlix');
   assert.deepEqual(calls.at(-1), { type: 'video', id: videoId }, 'playlist item must return to the same normal video');
   console.log('ronflix toggle harness passed');
+  process.exit(0);
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

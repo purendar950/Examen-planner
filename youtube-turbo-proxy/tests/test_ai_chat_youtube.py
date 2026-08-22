@@ -554,9 +554,12 @@ reuse_ns = {
     "log": type("_L", (), {"warning": lambda *a, **k: None,
                            "info": lambda *a, **k: None})(),
     "TRANSCRIPT_TTL": 30 * 24 * 3600,
+    "TRANSCRIPT_CACHE_MAX": 10,
     "_transcript_cache": {},
     "_transcript_lock": __import__("threading").Lock(),
+    "_extract_sem": __import__("threading").Semaphore(),
     "_transcript_get": _fake_get,
+    "_prune_ts_cache": lambda cache, max_entries: None,
     "_fs_doc_id": lambda *parts: "_".join(str(p) for p in parts),
 }
 exec(section("def _is_auto_lang(lang):", "def _pick_caption_url("), reuse_ns)
