@@ -72,8 +72,8 @@
     var style = document.createElement('style');
     style.id = 'yt-ronflix-style';
     style.textContent =
-      '#yt-ronflix-video{position:absolute;inset:0;width:100%;height:100%;display:none;background:#000;object-fit:contain;z-index:2;}' +
-      '#yt-ronflix-status{position:absolute;inset:0;z-index:3;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,.84);color:#fff;text-align:center;padding:18px;font-size:.85rem;line-height:1.5;}' +
+      '#yt-ronflix-video{position:absolute;top:0;left:0;width:100%;height:100%;display:none;background:#000;object-fit:contain;z-index:5;}' +
+      '#yt-ronflix-status{position:absolute;inset:0;z-index:6;display:none;flex-direction:column;align-items:center;justify-content:center;gap:10px;background:rgba(0,0,0,.84);color:#fff;text-align:center;padding:18px;font-size:.85rem;line-height:1.5;}' +
       '.yt-ronflix-spinner{width:30px;height:30px;border:3px solid rgba(255,255,255,.25);border-top-color:#8b5cf6;border-radius:50%;animation:ytRonflixSpin .8s linear infinite;}' +
       '@keyframes ytRonflixSpin{to{transform:rotate(360deg)}}' +
       '.yt-ronflix-toggle{border-color:#8b5cf6!important;color:#c4b5fd!important;}' +
@@ -183,6 +183,8 @@
     ronflixWatchLastTs = 0;
     flushWatchTime();
     saveProgress();
+    var tapResume = document.getElementById('yt-tap-resume');
+    if (tapResume && isActive()) tapResume.style.display = 'none';
     if (ronflixVideo) {
       try { ronflixVideo.pause(); } catch (e) {}
       ronflixVideo.removeAttribute('src');
@@ -247,19 +249,30 @@
   }
 
   function fallbackToPrevious(id, reason) {
+    ronflixSeq += 1;
+    if (ronflixAbort) { try { ronflixAbort.abort(); } catch (e) {} }
+    ronflixAbort = null;
     ronflixActiveNow = false;
     ronflixEnabled = false;
-    if (ronflixVideo) ronflixVideo.style.display = 'none';
-    setStatus('');
     updateToggleUi();
+    if (ronflixVideo) {
+      try { ronflixVideo.pause(); } catch (e) {}
+      ronflixVideo.removeAttribute('src');
+      try { ronflixVideo.load(); } catch (e) {}
+      ronflixVideo.style.display = 'none';
+    }
+    setStatus('');
     var iframe = document.getElementById('yt-player');
     if (iframe) iframe.style.display = 'block';
-    showToastSafe('RonFlix unavailable — previous player use kar rahe hain.' + (reason ? ' ' + reason : ''), 'info');
-    if (typeof ronflixPreviousLoad === 'function') ronflixPreviousLoad('video', id);
+    var placeholder = document.getElementById('yt-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+    showToastSafe('RonFlix unavailable — normal player use kar rahe hain.' + (reason ? ' ' + reason : ''), 'info');
+    restoreNormalPlayer('video', id);
   }
 
   function startRonflix(id, title) {
-    if (!validId(id) || !window.RonflixStream || typeof window.RonflixStream.getVideoStream !== 'function') {
+    var client = window.RonflixStream;
+    if (!validId(id) || !client || typeof (client.getAllVideoStreams || client.getVideoStream) !== 'function') {
       fallbackToPrevious(id, 'Server client load nahi hua.');
       return;
     }
@@ -275,53 +288,79 @@
     updateToggleUi();
     normalRestoreSeq += 1;
     try {
-      if (typeof ytPlayer !== 'undefined' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') ytPlayer.pauseVideo();
+      if (typeof ytPlayer !== 'undefined' && ytPlayer) {
+        if (typeof ytPlayer.stopVideo === 'function') ytPlayer.stopVideo();
+        else if (typeof ytPlayer.pauseVideo === 'function') ytPlayer.pauseVideo();
+      }
     } catch (e) {}
     var iframe = document.getElementById('yt-player');
     if (iframe) iframe.style.display = 'none';
     var placeholder = document.getElementById('yt-placeholder');
     if (placeholder) placeholder.style.display = 'none';
     video.style.display = 'none';
+    var resumeOverlay = document.getElementById('yt-tap-resume');
+    if (resumeOverlay) resumeOverlay.style.display = 'none';
     setStatus('RonFlix: fetching stream…');
-    window.RonflixStream.getVideoStream(id, { signal: ctrl.signal, timeoutMs: 12000 })
-      .then(function (stream) {
-        if (seq !== ronflixSeq || !ronflixEnabled || ctrl.signal.aborted) return;
-        video.src = stream.url;
+
+    var fetchFn = typeof client.getAllVideoStreams === 'function'
+      ? function () { return client.getAllVideoStreams(id, { signal: ctrl.signal, timeoutMs: 12000 }); }
+      : function () { return client.getVideoStream(id, { signal: ctrl.signal, timeoutMs: 12000 }).then(function (s) { return { streams: [s] }; }); };
+
+    fetchFn()
+      .then(function (result) {
+        if (seq !== ronflixSeq || !ronflixEnabled || ctrl.signal.aborted) return null;
+        var streams = result.streams || [];
+        if (!streams.length) throw new Error('No playable streams returned by RonFlix server');
+        setStatus('RonFlix: found ' + streams.length + ' stream(s), loading…');
+
         var resume = 0;
         try { if (typeof ytResumeSeconds === 'function') resume = ytResumeSeconds(id) || 0; } catch (e) {}
         video.defaultPlaybackRate = (window.ytSpeedCurrent || 1);
         video.playbackRate = (window.ytSpeedCurrent || 1);
-        setStatus('RonFlix: stream found — preparing video…');
-        return new Promise(function (resolve, reject) {
-          var timer = setTimeout(function () { reject(new Error('stream timeout')); }, 30000);
-          var loaded = function () {
-            clearTimeout(timer);
-            video.removeEventListener('loadedmetadata', loaded);
-            video.removeEventListener('error', failed);
-            resolve(resume);
-          };
-          var failed = function () {
-            clearTimeout(timer);
-            video.removeEventListener('loadedmetadata', loaded);
-            video.removeEventListener('error', failed);
-            reject(new Error('stream failed to load (possibly CORS blocked)'));
-          };
-          video.addEventListener('loadedmetadata', loaded);
-          video.addEventListener('error', failed);
-          video.load();
+
+        function attempt(index) {
+          if (index >= streams.length) return Promise.reject(new Error('All ' + streams.length + ' stream URLs failed'));
+          if (seq !== ronflixSeq || ctrl.signal.aborted) return Promise.reject(new Error('aborted'));
+          var entry = streams[index];
+          setStatus('RonFlix: loading ' + (entry.quality || 'stream') + ' (' + (index + 1) + '/' + streams.length + ')…');
+          video.src = entry.url;
+          return new Promise(function (resolve, reject) {
+            var timer = setTimeout(function () { cleanup(); reject(new Error('timeout')); }, 15000);
+            function loaded() { clearTimeout(timer); cleanup(); resolve(); }
+            function failed() { clearTimeout(timer); cleanup(); reject(new Error('load-failed')); }
+            function cleanup() {
+              video.removeEventListener('loadedmetadata', loaded);
+              video.removeEventListener('error', failed);
+            }
+            video.addEventListener('loadedmetadata', loaded);
+            video.addEventListener('error', failed);
+            video.load();
+          }).catch(function (err) {
+            console.warn('RonFlix attempt ' + (index + 1) + ' (' + (entry.quality || '?') + '):', err.message);
+            return attempt(index + 1);
+          });
+        }
+
+        return attempt(0).then(function () {
+          if (seq !== ronflixSeq || !ronflixEnabled || ctrl.signal.aborted) return;
+          try { if (resume > 0) video.currentTime = resume; } catch (e) {}
+          ronflixActiveNow = true;
+          updateToggleUi();
+          ronflixWatchLastTs = Date.now();
+          ronflixLastSave = Date.now();
+          setStatus('');
+          video.style.display = 'block';
+          var play = video.play();
+          if (play && play.catch) {
+            play.catch(function (playError) {
+              console.warn('RonFlix autoplay blocked:', playError.message || playError);
+              video.muted = true;
+              var mutedPlay = video.play();
+              if (mutedPlay && mutedPlay.catch) mutedPlay.catch(function () {});
+              showToastSafe('Tap the video to unmute.', 'info');
+            });
+          }
         });
-      })
-      .then(function (resume) {
-        if (seq !== ronflixSeq || !ronflixEnabled || ctrl.signal.aborted) return;
-        try { if (resume > 0) video.currentTime = resume; } catch (e) {}
-        ronflixActiveNow = true;
-        updateToggleUi();
-        ronflixWatchLastTs = Date.now();
-        ronflixLastSave = Date.now();
-        setStatus('');
-        video.style.display = 'block';
-        var play = video.play();
-        if (play && play.catch) play.catch(function () {});
       })
       .catch(function (error) {
         if (seq !== ronflixSeq || ctrl.signal.aborted) return;

@@ -105,6 +105,18 @@
     })[0] || null;
   }
 
+  function allPlayableStreams(data) {
+    var streams = playableVideoStreams(data);
+    if (!streams.length) return [];
+    var proxyFirst = streams.filter(function (stream) {
+      return /proxy|googlevideo|videoplayback/i.test(String(stream.url || ''));
+    });
+    var pool = proxyFirst.length ? proxyFirst : streams;
+    return pool.slice().sort(function (a, b) {
+      return qualityNumber(b) - qualityNumber(a);
+    });
+  }
+
   function getVideoStream(videoId, options) {
     if (!/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) {
       return Promise.reject(new Error('Invalid YouTube video ID'));
@@ -121,11 +133,34 @@
     });
   }
 
+  function getAllVideoStreams(videoId, options) {
+    if (!/^[A-Za-z0-9_-]{11}$/.test(String(videoId || ''))) {
+      return Promise.reject(new Error('Invalid YouTube video ID'));
+    }
+    return request('/streams/' + encodeURIComponent(videoId), {}, options).then(function (data) {
+      var candidates = allPlayableStreams(data);
+      if (!candidates.length) throw new Error('No playable RonFlix stream returned');
+      return {
+        streams: candidates.map(function (stream) {
+          return {
+            url: stream.url,
+            quality: stream.quality || stream.resolution || '',
+            format: stream.mimeType || stream.format || ''
+          };
+        }),
+        title: data.title || 'YouTube video',
+        source: base
+      };
+    });
+  }
+
   window.RonflixStream = Object.freeze({
     instances: INSTANCES.slice(),
     request: request,
     getVideoStream: getVideoStream,
+    getAllVideoStreams: getAllVideoStreams,
     pickBestStream: pickBestStream,
+    allPlayableStreams: allPlayableStreams,
     getBase: function () { return base; }
   });
 })();
