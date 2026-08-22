@@ -166,6 +166,7 @@
     if (ronflixAbort) { try { ronflixAbort.abort(); } catch (e) {} }
     ronflixAbort = null;
     ronflixActiveNow = false;
+    updateToggleUi();
     ronflixWatchLastTs = 0;
     flushWatchTime();
     saveProgress();
@@ -258,6 +259,7 @@
     ronflixId = id;
     ronflixTitle = title || currentTitle();
     ronflixActiveNow = false;
+    updateToggleUi();
     normalRestoreSeq += 1;
     try {
       if (typeof ytPlayer !== 'undefined' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') ytPlayer.pauseVideo();
@@ -300,6 +302,7 @@
         if (seq !== ronflixSeq || !ronflixEnabled || ctrl.signal.aborted) return;
         try { if (resume > 0) video.currentTime = resume; } catch (e) {}
         ronflixActiveNow = true;
+        updateToggleUi();
         ronflixWatchLastTs = Date.now();
         ronflixLastSave = Date.now();
         setStatus('');
@@ -318,11 +321,13 @@
   function updateToggleUi() {
     var button = document.getElementById('yt-ronflix-toggle');
     if (!button) return;
-    button.classList.toggle('on', ronflixEnabled);
-    button.textContent = ronflixEnabled ? '◈ RonFlix ON' : '◈ RonFlix';
-    button.title = ronflixEnabled
+    var active = !!(ronflixEnabled && ronflixActiveNow);
+    button.classList.toggle('on', active);
+    button.textContent = active ? '◈ RonFlix ON' : '◈ RonFlix OFF';
+    button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    button.title = active
       ? 'RonFlix ON — native playback through the public stream mirror. Click to turn off.'
-      : 'Play individual YouTube videos through RonFlix/Piped native playback.';
+      : 'RonFlix OFF — click to play this individual video through RonFlix/Piped.';
   }
 
   function reloadCurrent() {

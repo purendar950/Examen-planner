@@ -8,6 +8,7 @@ const dom = new JSDOM(`<!doctype html><body>
   <div id="yt-player-wrap"><div id="yt-player"></div><div id="yt-placeholder"></div></div>
   <div id="yt-speed-bar"></div>
   <button id="yt-turbo-toggle"></button>
+  <button id="yt-ronflix-toggle"></button>
 </body>`, { url: 'https://studyplanner.example/app.html' });
 const { window } = dom;
 const calls = [];
@@ -73,6 +74,9 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
   assert.equal(window.ytRonflixGetState().enabled, true);
   assert.equal(streamCalls, 1, 'enabling RonFlix must fetch the selected video from RonFlix');
   assert.equal(window.ytRonflixGetState().active, true, 'enabling RonFlix must activate native playback');
+  const toggle = window.document.getElementById('yt-ronflix-toggle');
+  assert.equal(toggle.textContent, '◈ RonFlix ON');
+  assert.equal(toggle.getAttribute('aria-pressed'), 'true');
 
   const nativeVideo = window.document.getElementById('yt-ronflix-video');
   assert.ok(nativeVideo, 'Ronflix should create its native video element');
@@ -81,6 +85,8 @@ vm.runInContext(fs.readFileSync('js/features/ronflix-player.js', 'utf8'), contex
   window.ytToggleRonflix();
 
   assert.equal(window.ytRonflixGetState().enabled, false);
+  assert.equal(toggle.textContent, '◈ RonFlix OFF');
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false');
   assert.deepEqual(calls.at(-1), { type: 'video', id: videoId }, 'turning RonFlix off must call the normal loader');
   assert.equal(iframe.style.display, 'block', 'turning RonFlix off must restore the iframe surface');
   await new Promise((resolve) => setTimeout(resolve, 1300));
