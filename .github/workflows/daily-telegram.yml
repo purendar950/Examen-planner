@@ -63,4 +63,5 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           GATED: ${{ inputs.gated }}
+          NODE_OPTIONS: --require=./telegram-v6-preload.js
         run: node send-telegram.js
