@@ -1,0 +1,10 @@
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  - hostname: examzen-api.example.com
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 30s
+      tcpKeepAlive: 30s
+  - service: http_status:404

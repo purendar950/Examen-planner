@@ -809,6 +809,7 @@ def _study_exists(doc_id):
 
 
 def _base_ydl_opts():
+    extractor_args = {"youtube-ejs": {"jitless": ["true"]}}
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -817,13 +818,15 @@ def _base_ydl_opts():
         # bgutil plugin auto-detects the provider on 127.0.0.1:4416; only pass a
         # base_url override when POT_BASE_URL is non-default.
         "socket_timeout": REQUEST_TIMEOUT,
-        "extractor_args": {"youtube-ejs": {"jitless": ["true"]}},
     }
+    runtime_choice = os.environ.get("YTDLP_JS_RUNTIME", "auto").strip().lower()
+    if runtime_choice in ("auto", "node") and not shutil.which("deno"):
+        opts["js_runtimes"] = {"node": {}}
     if _HAS_COOKIES:
         opts["cookiefile"] = COOKIES_FILE
     if POT_BASE_URL and POT_BASE_URL != "http://127.0.0.1:4416":
-        opts["extractor_args"]["youtubepot-bgutilhttp"] = {
-            "base_url": [POT_BASE_URL]}
+        extractor_args["youtubepot-bgutilhttp"] = {"base_url": [POT_BASE_URL]}
+    opts["extractor_args"] = extractor_args
     return opts
 
 

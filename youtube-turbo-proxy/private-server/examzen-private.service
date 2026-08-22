@@ -1,0 +1,17 @@
+[Unit]
+Description=ExamZen private youtube-turbo-proxy
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_USER
+WorkingDirectory=/opt/examzen/Examen-planner/youtube-turbo-proxy
+Environment=EXAMZEN_ENV_FILE=/etc/examzen/private.env
+ExecStart=/opt/examzen/Examen-planner/youtube-turbo-proxy/private-server/start.sh
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

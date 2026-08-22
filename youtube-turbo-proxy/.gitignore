@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 cookies.txt
 *.log
+.venv/
+.private-runtime/
+private.env
