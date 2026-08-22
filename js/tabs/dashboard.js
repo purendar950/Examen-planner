@@ -24,12 +24,14 @@ function applyDashboardV2LayoutFixes() {
   const style = document.createElement('style');
   style.id = 'dashboard-shell-fix';
   style.textContent = `
+    /* Dashboard styling is content-only. Never replace the StudyPlanner shell. */
     body:has(#page-dashboard.active) .topbar,
     body:has(#page-dashboard.active) .nav-tabs { display:flex !important; }
-    body:has(#page-dashboard.active) #app { margin-left:initial !important; padding:initial !important; max-width:initial !important; width:initial !important; }
     body:has(#page-dashboard.active) .ref-nav { display:none !important; }
   `;
   document.head.appendChild(style);
+  const refNav = document.querySelector('#page-dashboard .ref-nav');
+  if (refNav) refNav.remove();
 }
 function updateDashboard() {
   applyDashboardV2LayoutFixes();
