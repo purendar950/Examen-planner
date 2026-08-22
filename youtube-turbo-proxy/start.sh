@@ -3,6 +3,8 @@
 set -u
 
 POT_MAIN="/opt/bgutil/server/build/main.js"
+export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=128}"
+export DENO_V8_FLAGS="${DENO_V8_FLAGS:---max-old-space-size=96}"
 
 echo "[start] node $(node --version 2>/dev/null || echo '??')"
 echo "[start] POT server file: $POT_MAIN ($( [ -f "$POT_MAIN" ] && echo present || echo MISSING ))"
@@ -30,7 +32,7 @@ echo "[start] launching gunicorn on :${PORT:-8080}"
 exec gunicorn \
     --bind "0.0.0.0:${PORT:-8080}" \
     --workers "${WEB_WORKERS:-1}" \
-    --threads "${WEB_THREADS:-4}" \
+    --threads "${WEB_THREADS:-2}" \
     --worker-class gthread \
     --timeout "${WEB_TIMEOUT:-600}" \
     --graceful-timeout "${WEB_GRACEFUL_TIMEOUT:-30}" \
