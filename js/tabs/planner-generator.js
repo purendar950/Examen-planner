@@ -39,6 +39,23 @@ function planScopedSubjects(cfg) {
   return subs;
 }
 
+/* Topic-weight helpers — mirror Safar's effectiveSize/effortPoints logic.
+   A topic's explicit size wins; otherwise chapter difficulty maps to size:
+   Hard/Tough → big (4pt), Easy → small (1pt), everything else → medium (2pt). */
+const TOPIC_POINTS = { small: 1, medium: 2, big: 4 };
+
+function effectiveTopicSize(topic, chapter) {
+  if (topic && topic.size) return String(topic.size).toLowerCase();
+  const diff = chapter ? String(chapter.diff || chapter.difficulty || '').toLowerCase() : '';
+  if (diff === 'hard' || diff === 'tough') return 'big';
+  if (diff === 'easy') return 'small';
+  return 'medium';
+}
+
+function effectiveTopicPoints(topic, chapter) {
+  return TOPIC_POINTS[effectiveTopicSize(topic, chapter)] || 2;
+}
+
 /* ---------------------------------------------------------------------------
    buildPlanSchedule(cfg) — core day-by-day topic schedule.
    Subjects run IN PARALLEL by their frequency (subjectFreq: 1=daily,
@@ -76,6 +93,35 @@ function buildPlanSchedule(cfg, planId) {
       .map(x => x.ch);
     ordered.forEach(ch => {
       const meta = { ...ch, subName: sub.name, color: sub.color, subId: sub.id };
+      /* Topic-weighted path: when a chapter carries a `topics` array, each
+         topic becomes its own slot with effort points derived from its size
+         (or the chapter difficulty). This replaces days/gap splitting so hard
+         chapters naturally consume more calendar budget than easy ones. */
+      if (!isSingle && Array.isArray(ch.topics) && ch.topics.length > 0) {
+        const progress = appState.progress[ch.id] || {};
+        if (progress.done) return;
+        const topicProgress = progress.topicStatus || {};
+        ch.topics.forEach((topic, ti) => {
+          const tId = topic.id || `${ch.id}-t${ti}`;
+          if (topicProgress[tId] === 'done') return;
+          const pts = effectiveTopicPoints(topic, ch);
+          const sizeLabel = effectiveTopicSize(topic, ch);
+          slots.push({
+            type: 'study',
+            ch: meta,
+            topic,
+            topicId: tId,
+            part: topic.name ? `· ${topic.name}` : '',
+            partIndex: ti + 1,
+            totalParts: ch.topics.length,
+            points: pts,
+            sizeLabel,
+            planId: planKey,
+            weighted: true
+          });
+        });
+        return;
+      }
       if (isSingle) {
         if (appState.progress[ch.id]?.done) return;
         slots.push({ type:'study', ch:meta, part:'', partIndex:0, totalParts:1, planId:planKey });
@@ -121,8 +167,13 @@ function buildPlanSchedule(cfg, planId) {
          "Revise" blocks to avoid duplicating the real revision queue. */
       for (let i = 0; i < gap;  i++) slots.push({ type:'spacer', ch: meta });
     });
-    return { subId: sub.id, freq: freqOf(sub.id), offset: idx, slots };
+    const hasWeighted = slots.some(s => s.weighted);
+    return { subId: sub.id, freq: freqOf(sub.id), offset: idx, slots, weighted: hasWeighted };
   }).filter(s => s.slots.length);
+
+  /* Daily point budget: only used by subjects whose chapters carry topics.
+     Default = 6pt ≈ 3 medium topics/day. Configurable via cfg.dailyTopicPoints. */
+  const dailyPoints = Math.max(2, parseInt(cfg.dailyTopicPoints, 10) || 6);
 
   const byDate = {};
   /* AUTO-RESCHEDULE: anchor the layout to TODAY whenever the plan's start date
@@ -165,14 +216,27 @@ function buildPlanSchedule(cfg, planId) {
           added++;
         }
       } else {
-        const slot = s.slots[cursor[s.subId]];
-        /* Completing 1/N today must not compact 2/N back onto today. The next
-           sequential part becomes eligible tomorrow and naturally appears once
-           the auto-reschedule anchor advances. */
-        if (slot.notBefore && dateStr < slot.notBefore) continue;
-        dayItems.push(slot);
-        cursor[s.subId]++;
-        placed++;
+        if (s.weighted) {
+          /* Point-budget: keep pulling weighted topic slots until the daily
+             effort budget is exhausted or this subject runs out of slots. */
+          let dayPts = 0;
+          while (cursor[s.subId] < s.slots.length) {
+            const slot = s.slots[cursor[s.subId]];
+            const w = Number(slot.points) || 2;
+            if (dayPts > 0 && dayPts + w > dailyPoints) break;
+            if (slot.notBefore && dateStr < slot.notBefore) break;
+            dayItems.push(slot);
+            cursor[s.subId]++;
+            placed++;
+            dayPts += w;
+          }
+        } else {
+          const slot = s.slots[cursor[s.subId]];
+          if (slot.notBefore && dateStr < slot.notBefore) continue;
+          dayItems.push(slot);
+          cursor[s.subId]++;
+          placed++;
+        }
       }
     }
     if (dayItems.length) { byDate[dateStr] = dayItems; lastDateStr = dateStr; }
@@ -200,6 +264,7 @@ function renderTopicListItems(items, emptyMsg) {
   return visible.map(it => {
     const ch = it.ch || {};
     const isRevise = it.type === 'revise';
+    const isWeightedTopic = !!it.weighted && !!it.topicId;
     /* Study topics tied to a real chapter (ch.id) get an inline check-off box so
        the user can mark them complete straight from the planner — this writes to
        appState.progress (same store the Syllabus tab uses), keeping both in sync. */
@@ -210,31 +275,62 @@ function renderTopicListItems(items, emptyMsg) {
     const itemPlanId = it.planId || 'default';
     const isMultiPart = partIndex >= 1 && totalParts > 1 && partIndex <= totalParts;
     const partState = canCheck && isMultiPart ? getPlanPartProgress(ch.id, itemPlanId, totalParts) : null;
-    const isDone = canCheck && (isMultiPart ? partState.completed.has(partIndex) : !!progress.done);
+    const topicDone = isWeightedTopic ? !!(progress.topicStatus || {})[it.topicId] : false;
+    const isDone = canCheck && (isWeightedTopic ? topicDone : isMultiPart ? partState.completed.has(partIndex) : !!progress.done);
     /* Engine-backed revisions (from the spaced-repetition queue) are clickable:
        clicking opens the rating modal which updates mastery + reschedules. */
     const clickable = isRevise && it.fromEngine && ch.id;
     const accent = isRevise ? '#A855F7' : (ch.color || 'var(--accent)');
     const revLabel = it.dueLabel ? ` <span style="font-size:.62rem;color:#A855F7;">(${escapeHtml(it.dueLabel)})</span>` : '';
-    const tag = isRevise
+    const sizeBadge = isWeightedTopic && it.sizeLabel
+      ? `<span style="font-size:.58rem;padding:1px 5px;border-radius:3px;font-weight:700;${it.sizeLabel==='big'?'background:rgba(239,68,68,.12);color:#ef4444;':it.sizeLabel==='small'?'background:rgba(34,197,94,.12);color:#22c55e;':'background:rgba(245,158,11,.12);color:#f59e0b;'}">${it.sizeLabel==='big'?'B':it.sizeLabel==='small'?'S':'M'}</span>`
+      : '';
+    const displayName = isWeightedTopic && it.topic ? `${ch.name} · ${it.topic.name}` : ch.name;
+    const tag = sizeBadge + (isRevise
       ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:rgba(168,85,247,.12);color:#A855F7;white-space:nowrap;">${clickable ? '🔁 Revise now' : '🔁 Revise'}</span>`
-      : (ch.diff ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:var(--card);color:var(--muted);white-space:nowrap;">${escapeHtml(ch.diff)}</span>` : '');
+      : (ch.diff ? `<span style="font-size:.6rem;padding:2px 6px;border-radius:4px;background:var(--card);color:var(--muted);white-space:nowrap;">${escapeHtml(ch.diff)}</span>` : ''));
     const clickAttr = clickable
       ? ` onclick="openReviseModal('${ch.id}')" title="Click to revise &amp; rate"` : '';
     /* Leading marker: a clickable check-off box for study topics, otherwise the
        small coloured status dot used by revise/mock rows. */
     const marker = canCheck
-      ? `<div onclick="event.stopPropagation();togglePlanTopicDone('${ch.id}','${ch.subId||''}',${partIndex},${totalParts},'${itemPlanId}')" title="${isDone?'Mark as not done':'Mark complete'}" style="width:18px;height:18px;border-radius:5px;border:2px solid ${isDone?'var(--accent)':'var(--border)'};background:${isDone?'var(--accent)':'transparent'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:.72rem;line-height:1;cursor:pointer;flex-shrink:0;">${isDone?'✓':''}</div>`
+      ? `<div onclick="event.stopPropagation();${isWeightedTopic?`toggleWeightedTopicDone('${ch.id}','${it.topicId}')`:`togglePlanTopicDone('${ch.id}','${ch.subId||''}',${partIndex},${totalParts},'${itemPlanId}')`}" title="${isDone?'Mark as not done':'Mark complete'}" style="width:18px;height:18px;border-radius:5px;border:2px solid ${isDone?'var(--accent)':'var(--border)'};background:${isDone?'var(--accent)':'transparent'};color:#fff;display:flex;align-items:center;justify-content:center;font-size:.72rem;line-height:1;cursor:pointer;flex-shrink:0;">${isDone?'✓':''}</div>`
       : `<div style="width:8px;height:8px;border-radius:50%;background:${accent};flex-shrink:0;"></div>`;
     const nameStyle = `flex:1;font-size:.82rem;${isRevise?'color:#A855F7;':''}${isDone?'color:var(--muted);text-decoration:line-through;':''}`;
     return `
       <div${clickAttr} style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${accent};border-radius:8px;padding:.55rem .85rem;display:flex;align-items:center;gap:10px;${clickable?'cursor:pointer;':''}${isDone?'opacity:.7;':''}">
         ${marker}
-        <span style="${nameStyle}">${isRevise?'🔁 ':''}${escapeHtml(ch.name||'')}${revLabel} <span style="color:var(--muted);font-size:.7rem;">${it.part||''}</span></span>
+        <span style="${nameStyle}">${isRevise?'🔁 ':''}${escapeHtml(displayName||'')}${revLabel}</span>
         <span style="font-size:.62rem;color:var(--muted);white-space:nowrap;">${escapeHtml(ch.subName||'')}</span>
         ${tag}
       </div>`;
   }).join('');
+}
+
+function toggleWeightedTopicDone(chId, topicId) {
+  if (!chId || !topicId) return;
+  if (!appState.progress[chId]) appState.progress[chId] = {};
+  const p = appState.progress[chId];
+  if (!p.topicStatus) p.topicStatus = {};
+  p.topicStatus[topicId] = p.topicStatus[topicId] === 'done' ? '' : 'done';
+  const allDone = (() => {
+    try {
+      const sub = getActiveSubjects().find(s => s.chapters.some(c => c.id === chId));
+      const ch = sub ? sub.chapters.find(c => c.id === chId) : null;
+      return ch && ch.topics && ch.topics.every(t => p.topicStatus[t.id || `${chId}-t${ch.topics.indexOf(t)}`] === 'done');
+    } catch (e) { return false; }
+  })();
+  if (allDone && !p.done) {
+    p.done = true;
+    p.completedAt = new Date().toISOString();
+    showToast('All topics done — chapter complete! 🎯', 'success');
+  } else if (!allDone && p.done) {
+    delete p.done;
+    showToast('Chapter reopened — some topics are pending.', 'info');
+  }
+  saveProgress();
+  try { buildPlannerCalendar(); } catch (e) {}
+  try { generateTimetable(); } catch (e) {}
 }
 
 /* ---------------------------------------------------------------------------
@@ -665,4 +761,3 @@ function addTimetableToToday() {
     showToast('All chapters already in today\'s tasks.', 'info');
   }
 }
-

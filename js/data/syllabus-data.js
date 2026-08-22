@@ -8,9 +8,11 @@ const SUBJECTS = [
     color: '#00C896',
     chapters: [
       // Verbal Reasoning – I
-      { id:'r1', name:'Analogy – Word Analogy', sub:'Verbal Reasoning – I', diff:'Easy' },
+      { id:'r1', name:'Analogy – Word Analogy', sub:'Verbal Reasoning – I', diff:'Easy',
+        topics: [{id:'r1-t1',name:'Word pairs',size:'small'},{id:'r1-t2',name:'Practice set',size:'small'}] },
       { id:'r2', name:'Analogy – Number Analogy', sub:'Verbal Reasoning – I', diff:'Easy' },
-      { id:'r3', name:'Analogy – Alphabet Analogy', sub:'Verbal Reasoning – I', diff:'Hard' },
+      { id:'r3', name:'Analogy – Alphabet Analogy', sub:'Verbal Reasoning – I', diff:'Hard',
+        topics: [{id:'r3-t1',name:'Letter shift patterns',size:'big'},{id:'r3-t2',name:'Mixed alphabet sets',size:'medium'}] },
       { id:'r4', name:'Synonym/Antonym Based Analogy', sub:'Verbal Reasoning – I', diff:'Hard' },
       { id:'r5', name:'Classification – Odd One Out (Words)', sub:'Verbal Reasoning – I', diff:'Easy' },
       { id:'r6', name:'Classification – Numbers', sub:'Verbal Reasoning – I', diff:'Easy' },
@@ -140,7 +142,8 @@ const SUBJECTS = [
     color: '#F59E0B',
     chapters: [
       // Number System
-      { id:'q1', name:'HCF/LCM/Divisibility/Simplification', sub:'Number System & Algebra', diff:'Easy' },
+      { id:'q1', name:'HCF/LCM/Divisibility/Simplification', sub:'Number System & Algebra', diff:'Easy',
+        topics: [{id:'q1-t1',name:'HCF & LCM basics',size:'small'},{id:'q1-t2',name:'Divisibility rules',size:'small'},{id:'q1-t3',name:'Simplification shortcuts',size:'medium'}] },
       { id:'q2', name:'Surds & Indices', sub:'Number System & Algebra', diff:'Easy' },
       { id:'q3', name:'Quadratic Equations & Inequalities', sub:'Number System & Algebra', diff:'Medium' },
       { id:'q4', name:'Algebraic Identities & Factorization', sub:'Number System & Algebra', diff:'Medium' },
@@ -217,4 +220,3 @@ const SUBJECTS = [
     ]
   }
 ];
-

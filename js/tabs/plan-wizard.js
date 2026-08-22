@@ -416,12 +416,21 @@ function pwRenderSyllabusSubjectPane() {
   const rows = orderedChapters.map(ch => {
     const c = PW_STATE.syllabus.chapters[ch.id];
     const diffColor = ch.diff==='Hard' ? 'var(--amber)' : ch.diff==='Medium' ? 'var(--blue)' : 'var(--accent)';
+    const hasTopics = Array.isArray(ch.topics) && ch.topics.length > 0;
+    const topicSummary = hasTopics
+      ? `<span style="font-size:.62rem;color:var(--muted);display:block;margin-top:2px;">${ch.topics.map(t => {
+          const sz = (t.size || (ch.diff==='Hard'?'big':ch.diff==='Easy'?'small':'medium'));
+          const badge = sz==='big'?'🔴B':sz==='small'?'🟢S':'🟡M';
+          return `${badge} ${escapeHtml(t.name||'')}`;
+        }).join(' · ')}</span>`
+      : '';
     return `
       <tr style="border-bottom:1px solid var(--border);">
         <td style="padding:6px 8px;font-size:.8rem;">
           <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${sub.color||'var(--accent)'};margin-right:6px;"></span>
           ${escapeHtml(ch.name)}
           <span style="font-size:.65rem;color:${diffColor};margin-left:4px;">${ch.diff||''}</span>
+          ${topicSummary}
         </td>
         <td style="padding:6px 4px;">
           <input type="number" min="1" max="99" value="${c.order}"
@@ -432,16 +441,18 @@ function pwRenderSyllabusSubjectPane() {
                  onchange="pwReorderChapter('${ch.id}',this.value)">
         </td>
         <td style="padding:6px 4px;">
-          <input type="number" min="1" max="30" value="${c.days}"
+          ${hasTopics ? `<span style="font-size:.68rem;color:var(--accent);font-weight:700;">⚡ auto</span>`
+            : `<input type="number" min="1" max="30" value="${c.days}"
                  style="width:52px;background:var(--surface);border:1px solid var(--border);border-radius:6px;
                         color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
-                 oninput="pwUpdateChConf('${ch.id}','days',this.value)">
+                 oninput="pwUpdateChConf('${ch.id}','days',this.value)">`}
         </td>
         <td style="padding:6px 4px;">
-          <input type="number" min="0" max="14" value="${c.gap}"
+          ${hasTopics ? `<span style="font-size:.68rem;color:var(--muted);">—</span>`
+            : `<input type="number" min="0" max="14" value="${c.gap}"
                  style="width:52px;background:var(--surface);border:1px solid var(--border);border-radius:6px;
                         color:var(--text);font-size:.8rem;padding:3px 6px;outline:none;text-align:center;"
-                 oninput="pwUpdateChConf('${ch.id}','gap',this.value)">
+                 oninput="pwUpdateChConf('${ch.id}','gap',this.value)">`}
         </td>
         <td style="padding:6px 4px;">
           <input type="number" min="10" max="240" placeholder="${c.mins}" value="${c.minsOverride ? c.mins : ''}"

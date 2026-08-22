@@ -39,3 +39,59 @@ export function expandChapterSlots(chapters = [], chapterConfig = {}) {
     return [...studySlots, ...spacerSlots];
   });
 }
+
+export const TOPIC_SIZES = { SMALL: 'small', MEDIUM: 'medium', BIG: 'big' };
+export const TOPIC_POINTS = { small: 1, medium: 2, big: 4 };
+
+export function effectiveSize(topic, chapter) {
+  if (topic && topic.size) return String(topic.size).toLowerCase();
+  const diff = chapter ? String(chapter.diff || chapter.difficulty || '').toLowerCase() : '';
+  if (diff === 'hard' || diff === 'tough') return TOPIC_SIZES.BIG;
+  if (diff === 'easy') return TOPIC_SIZES.SMALL;
+  return TOPIC_SIZES.MEDIUM;
+}
+
+export function effortPoints(topic, chapter) {
+  return TOPIC_POINTS[effectiveSize(topic, chapter)] || 2;
+}
+
+export function distributeByPoints({
+  items = [],
+  startDate = new Date(),
+  dailyPoints = 6,
+  restDay = -1,
+  offDates = [],
+} = {}) {
+  const offSet = new Set(offDates);
+  const schedule = {};
+  let date = addDays(startDate, 0);
+  let pointsForDay = 0;
+
+  items.forEach((item) => {
+    while (
+      (restDay >= 0 && date.getDay() === Number(restDay)) ||
+      offSet.has(formatDate(date))
+    ) {
+      date = addDays(date, 1);
+      pointsForDay = 0;
+    }
+
+    const weight = Number(item.points) || effortPoints(item.topic, item.chapter);
+    const key = formatDate(date);
+
+    if (pointsForDay > 0 && pointsForDay + weight > dailyPoints) {
+      do { date = addDays(date, 1); } while (
+        (restDay >= 0 && date.getDay() === Number(restDay)) ||
+        offSet.has(formatDate(date))
+      );
+      pointsForDay = 0;
+    }
+
+    const dayKey = formatDate(date);
+    schedule[dayKey] ||= [];
+    schedule[dayKey].push(item);
+    pointsForDay += weight;
+  });
+
+  return schedule;
+}
