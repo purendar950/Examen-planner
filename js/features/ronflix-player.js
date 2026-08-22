@@ -374,12 +374,17 @@
     var button = document.getElementById('yt-ronflix-toggle');
     if (!button) return;
     var active = !!(ronflixEnabled && ronflixActiveNow);
+    var hasVideo = !!validId(currentId());
     button.classList.toggle('on', active);
-    button.textContent = active ? '◈ RonFlix ON' : '◈ RonFlix OFF';
+    button.textContent = active ? '\u25c8 RonFlix ON' : (hasVideo ? '\u25c8 RonFlix' : '\u25c8 RonFlix (load video first)');
+    button.disabled = !hasVideo && !active;
+    button.style.opacity = (!hasVideo && !active) ? '0.5' : '';
     button.setAttribute('aria-pressed', active ? 'true' : 'false');
     button.title = active
-      ? 'RonFlix ON — native playback through the public stream mirror. Click to turn off.'
-      : 'RonFlix OFF — click to play this individual video through RonFlix/Piped.';
+      ? 'RonFlix ON — native playback through the stream mirror. Click to turn off.'
+      : hasVideo
+        ? 'RonFlix — click to play this video through the RonFlix server.'
+        : 'Load a video first, then click RonFlix to switch playback.';
   }
 
   function reloadCurrent() {
@@ -390,8 +395,10 @@
 
   function setEnabled(next) {
     next = !!next;
+    console.log('[RonFlix] toggle clicked, enabling:', next, 'currentId:', currentId());
     if (next && !validId(currentId())) {
-      showToastSafe('RonFlix individual videos ke liye hai — playlist normal player mein chalegi.', 'info');
+      updateToggleUi();
+      showToastSafe('Pehle ek video load karo — phir RonFlix click karo.', 'info');
       return;
     }
     if (next === ronflixEnabled) return;
@@ -500,6 +507,9 @@
 
   if (typeof onPageActivated === 'function') onPageActivated('youtube', function () { setTimeout(initUi, 60); });
   window.addEventListener('load', function () { setTimeout(initUi, 800); });
+  setTimeout(function () { initUi(); }, 2000);
+  setTimeout(function () { initUi(); }, 5000);
+  document.addEventListener('DOMContentLoaded', function () { setTimeout(initUi, 100); });
   document.addEventListener('visibilitychange', function () { if (document.hidden && isActive()) { saveProgress(); flushWatchTime(); } });
   window.addEventListener('pagehide', function () { if (isActive()) { saveProgress(); flushWatchTime(); } });
 })();
