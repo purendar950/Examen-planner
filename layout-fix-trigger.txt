@@ -1,1 +1,0 @@
-Temporary trigger for the dashboard sidebar layout fix. This file can be removed by the workflow after applying the CSS override.
