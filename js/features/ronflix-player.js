@@ -18,7 +18,9 @@
   var ronflixWatchLastTs = 0;
   var ronflixLastSave = 0;
   var ronflixPreviousLoad = null;
+  var ronflixWrappedLoad = null;
   var ronflixPreviousSpeed = null;
+  var normalRestoreSeq = 0;
   var ronflixPreviousPiP = null;
 
   function validId(id) { return /^[A-Za-z0-9_-]{11}$/.test(String(id || '')); }
@@ -178,6 +180,58 @@
     if (resetStatus !== false) setStatus('');
   }
 
+  function revealNormalSurface() {
+    var iframe = document.getElementById('yt-player');
+    if (iframe) iframe.style.display = 'block';
+    var placeholder = document.getElementById('yt-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+    var wrap = playerWrap();
+    if (wrap) wrap.classList.add('ss-has-video');
+  }
+
+  function validNormalLoad(type, id) {
+    if (type === 'video') return validId(id);
+    if (type === 'playlist') return /^[A-Za-z0-9_-]{10,}$/.test(String(id || ''));
+    return false;
+  }
+
+  function normalPlayerIsReady() {
+    try {
+      return typeof ytPlayerReady !== 'undefined' && !!ytPlayerReady &&
+        typeof ytPlayer !== 'undefined' && !!ytPlayer;
+    } catch (e) { return false; }
+  }
+
+  function ensureNormalIframe(type, id, seq) {
+    if (seq !== normalRestoreSeq || ronflixEnabled || !validNormalLoad(type, id)) return;
+    var host = document.getElementById('yt-player');
+    if (!host || normalPlayerIsReady() || host.querySelector('iframe')) return;
+    if (typeof ytBuildEmbedUrl !== 'function') return;
+    var iframe = document.createElement('iframe');
+    iframe.src = ytBuildEmbedUrl(type, id);
+    iframe.title = 'YouTube player';
+    iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
+    iframe.setAttribute('allowfullscreen', '');
+    iframe.style.cssText = 'width:100%;height:100%;border:none;display:block;';
+    host.innerHTML = '';
+    host.appendChild(iframe);
+    revealNormalSurface();
+  }
+
+  function restoreNormalPlayer(type, id) {
+    if (!validNormalLoad(type, id)) return;
+    var seq = ++normalRestoreSeq;
+    revealNormalSurface();
+    if (typeof ronflixPreviousLoad === 'function') {
+      ronflixPreviousLoad(type, id);
+    } else if (typeof window.ytDoLoad === 'function' && window.ytDoLoad !== ronflixWrappedLoad) {
+      window.ytDoLoad(type, id);
+    }
+    // If the API is still pending and leaves the mount blank, restore a direct
+    // iframe after its normal startup window instead of showing a black player.
+    setTimeout(function () { ensureNormalIframe(type, id, seq); }, 1200);
+  }
+
   function fallbackToPrevious(id, reason) {
     ronflixActiveNow = false;
     ronflixEnabled = false;
@@ -204,6 +258,10 @@
     ronflixId = id;
     ronflixTitle = title || currentTitle();
     ronflixActiveNow = false;
+    normalRestoreSeq += 1;
+    try {
+      if (typeof ytPlayer !== 'undefined' && ytPlayer && typeof ytPlayer.pauseVideo === 'function') ytPlayer.pauseVideo();
+    } catch (e) {}
     var iframe = document.getElementById('yt-player');
     if (iframe) iframe.style.display = 'none';
     var placeholder = document.getElementById('yt-placeholder');
@@ -269,7 +327,8 @@
 
   function reloadCurrent() {
     var id = currentId();
-    if (validId(id) && typeof ytDoLoad === 'function') ytDoLoad('video', id);
+    if (!validId(id)) return;
+    startRonflix(id, currentTitle());
   }
 
   function setEnabled(next) {
@@ -285,8 +344,13 @@
     }
     ronflixEnabled = next;
     updateToggleUi();
-    if (!next) stopRonflix(true);
-    reloadCurrent();
+    if (!next) {
+      stopRonflix(true);
+      var normalId = currentId();
+      if (validId(normalId)) restoreNormalPlayer('video', normalId);
+    } else {
+      reloadCurrent();
+    }
     showToastSafe(next ? '◈ RonFlix ON — native stream player' : 'RonFlix OFF — normal player', next ? 'success' : 'info');
   }
 
@@ -322,7 +386,7 @@
      all of its existing Pro gating and stream behavior. */
   if (typeof ytDoLoad === 'function') {
     ronflixPreviousLoad = ytDoLoad;
-    window.ytDoLoad = ytDoLoad = function (type, id) {
+    ronflixWrappedLoad = window.ytDoLoad = ytDoLoad = function (type, id) {
       if (ronflixEnabled && type === 'video' && validId(id)) startRonflix(id, (typeof ytCurrentVideoTitle !== 'undefined' ? ytCurrentVideoTitle : 'YouTube video'));
       else {
         if (type !== 'video' && ronflixEnabled) {
@@ -330,7 +394,7 @@
           updateToggleUi();
         }
         stopRonflix(false);
-        ronflixPreviousLoad(type, id);
+        restoreNormalPlayer(type, id);
       }
     };
   }
