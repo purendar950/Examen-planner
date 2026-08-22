@@ -24,7 +24,72 @@ function dashGreeting() {
   return 'Good evening,';
 }
 
+/* Compact/full-width dashboard tuning. Kept here so the visual fix is
+   isolated from the app's global stylesheet and does not affect other pages. */
+function applyDashboardV2LayoutFixes() {
+  if (document.getElementById('dashboard-v2-layout-fixes')) return;
+  const style = document.createElement('style');
+  style.id = 'dashboard-v2-layout-fixes';
+  style.textContent = `
+    .dashboard-v2{
+      width:100%;
+      max-width:none;
+      margin:0;
+      padding:12px 20px 30px;
+    }
+    .dashboard-v2 .dv-topbar{margin-bottom:18px}
+    .dashboard-v2 .dv-head{margin-bottom:16px}
+    .dashboard-v2 .dv-grid-top{
+      width:100%;
+      grid-template-columns:minmax(270px,.95fr) minmax(420px,1.35fr) minmax(270px,.95fr);
+      gap:12px;
+      align-items:start;
+    }
+    .dashboard-v2 .dv-card-inner{padding:16px}
+    .dashboard-v2 .dv-readiness-main{gap:16px;padding:14px 0 12px}
+    .dashboard-v2 .dv-ring{width:112px;height:112px;flex-basis:112px}
+    .dashboard-v2 .dv-ring-value{font-size:29px}
+    .dashboard-v2 .dv-readiness-copy h2{font-size:18px;margin-bottom:5px}
+    .dashboard-v2 .dv-readiness-copy p{font-size:10px;line-height:1.4;margin-bottom:10px}
+    .dashboard-v2 .dv-metric{padding:7px 8px}
+    .dashboard-v2 .dv-stat{min-height:74px;padding:10px}
+    .dashboard-v2 .dv-stat-value{font-size:21px;margin-top:8px}
+    .dashboard-v2 .dv-target{margin-top:10px;padding:11px 14px}
+    .dashboard-v2 .dv-section{margin-top:20px}
+    .dashboard-v2 .dv-section-head{margin-bottom:9px}
+    .dashboard-v2 .dv-ops{gap:10px}
+    .dashboard-v2 .dv-op{min-height:160px;padding:13px}
+    .dashboard-v2 .dv-op h3{font-size:12px;margin-top:9px}
+    .dashboard-v2 .dv-op-stats{margin:13px 0 9px}
+    .dashboard-v2 .dv-op-action{left:13px;right:13px;bottom:12px;padding:7px 9px}
+    .dashboard-v2 .dv-subjects{gap:10px}
+    .dashboard-v2 .dv-subject{min-height:132px;padding:13px}
+    .dashboard-v2 .dv-subj-percent{margin-top:10px;font-size:21px}
+    .dashboard-v2 .dv-subj-next{margin-top:7px}
+    .dashboard-v2 .dv-subj-btn{margin-top:6px;padding:6px}
+    .dashboard-v2 .dv-recent-item{padding:12px}
+    .dashboard-v2 .dv-footer{padding:18px 0 2px}
+    @media(max-width:1250px){
+      .dashboard-v2 .dv-grid-top{grid-template-columns:minmax(250px,.9fr) minmax(390px,1.2fr)}
+      .dashboard-v2 .dv-quick{grid-column:1/-1}
+    }
+    @media(max-width:900px){
+      .dashboard-v2{padding:10px 14px 26px}
+      .dashboard-v2 .dv-grid-top{grid-template-columns:1fr}
+      .dashboard-v2 .dv-quick{grid-column:auto}
+      .dashboard-v2 .dv-ops{grid-template-columns:repeat(2,1fr)}
+      .dashboard-v2 .dv-subjects{grid-template-columns:repeat(2,1fr)}
+    }
+    @media(max-width:600px){
+      .dashboard-v2 .dv-ops,.dashboard-v2 .dv-subjects{grid-template-columns:1fr}
+      .dashboard-v2 .dv-readiness-main{align-items:flex-start}
+    }
+  `;
+  document.head.appendChild(style);
+}
+
 function updateDashboard() {
+  applyDashboardV2LayoutFixes();
   const $ = id => document.getElementById(id);
   const subjects = getActiveSubjects();
   const allChapters = subjects.flatMap(s => s.chapters);
