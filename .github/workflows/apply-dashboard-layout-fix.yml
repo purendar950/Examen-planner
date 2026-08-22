@@ -1,0 +1,153 @@
+name: Apply dashboard layout fix
+
+on:
+  push:
+    branches:
+      - fix/dashboard-sidebar-layout
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: "!contains(github.event.head_commit.message, '[dashboard-layout-fix-applied]')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Append sidebar-aware dashboard CSS
+        shell: bash
+        run: |
+          cat >> css/app.css <<'EOF'
+
+/* =====================================================================
+   DASHBOARD SIDEBAR-AWARE RESPONSIVE FIX
+   The desktop shell removes the sidebar from normal document flow, so
+   viewport breakpoints alone can leave the dashboard cards squeezed.
+   Use the actual main-workspace width for the dashboard layout.
+   ===================================================================== */
+@media (min-width: 901px) {
+  #app .main-content:has(#page-dashboard.active) {
+    container-type: inline-size;
+    container-name: dashboard-workspace;
+    min-width: 0;
+  }
+
+  .fintech-dashboard .fin-hero-grid {
+    grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.18fr) minmax(220px, .82fr);
+    min-width: 0;
+  }
+
+  .fintech-dashboard .fin-readiness-card,
+  .fintech-dashboard .fin-focus-card,
+  .fintech-dashboard .fin-quick-card {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .fintech-dashboard .fin-readiness-main {
+    grid-template-columns: minmax(112px, 124px) minmax(0, 1fr);
+    gap: 1rem;
+    margin-top: 1.15rem;
+  }
+
+  .fintech-dashboard .fin-score-ring,
+  .fintech-dashboard .fin-score-ring svg {
+    width: 112px;
+    height: 112px;
+  }
+
+  .fintech-dashboard .fin-readiness-copy,
+  .fintech-dashboard .fin-focus-card .dash-todo-name {
+    min-width: 0;
+  }
+
+  .fintech-dashboard .fin-readiness-copy h2 {
+    font-size: clamp(1.2rem, 2vw, 1.65rem);
+    overflow-wrap: anywhere;
+  }
+
+  .fintech-dashboard .fin-readiness-copy > p {
+    max-width: none;
+  }
+
+  .fintech-dashboard .fin-readiness-metrics {
+    gap: .35rem;
+  }
+
+  .fintech-dashboard .fin-readiness-metrics > div {
+    min-width: 0;
+    padding: .58rem .55rem;
+  }
+
+  .fintech-dashboard .fin-readiness-metrics span,
+  .fintech-dashboard .fin-readiness-metrics strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fintech-dashboard .fin-focus-card .dash-todo-item {
+    min-width: 0;
+  }
+
+  .fintech-dashboard .fin-focus-card .dash-todo-tag {
+    max-width: min(170px, 32%);
+  }
+
+  .fintech-dashboard .fin-stat-grid,
+  .fintech-dashboard .fin-stat-card {
+    min-width: 0;
+  }
+}
+
+@container dashboard-workspace (max-width: 980px) {
+  .fintech-dashboard .fin-hero-grid {
+    grid-template-columns: minmax(270px, .95fr) minmax(340px, 1.15fr);
+  }
+
+  .fintech-dashboard .fin-quick-card {
+    grid-column: 1 / -1;
+    min-height: 0;
+  }
+
+  .fintech-dashboard .fin-quick-card .fin-stat-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@container dashboard-workspace (max-width: 760px) {
+  .fintech-dashboard .fin-hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fintech-dashboard .fin-quick-card {
+    grid-column: auto;
+  }
+
+  .fintech-dashboard .fin-readiness-main {
+    grid-template-columns: 112px minmax(0, 1fr);
+  }
+}
+
+@container dashboard-workspace (max-width: 520px) {
+  .fintech-dashboard .fin-readiness-main {
+    grid-template-columns: 1fr;
+  }
+
+  .fintech-dashboard .fin-readiness-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+EOF
+
+      - name: Commit applied fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add css/app.css
+          git rm .github/workflows/apply-dashboard-layout-fix.yml
+          git commit -m "fix: make dashboard responsive to sidebar width [dashboard-layout-fix-applied]"
+          git push origin HEAD:fix/dashboard-sidebar-layout
