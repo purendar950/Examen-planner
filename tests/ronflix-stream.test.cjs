@@ -59,6 +59,15 @@ vm.runInContext(source, context);
   });
   assert.equal(noMuxed, null, 'video-only DASH entries must not be assigned to a plain video element');
 
+  const browserCompatible = context.window.RonflixStream.pickBestStream({
+    videoStreams: [
+      { quality: '1080p', format: 'WEBM', mimeType: 'video/webm', codec: 'vp9', videoOnly: false, url: 'https://proxy.example/1080.webm' },
+      { quality: '720p', format: 'MPEG_4', mimeType: 'video/mp4', codec: 'avc1.64001f', videoOnly: false, url: 'https://proxy.example/720.mp4' },
+      { quality: '1440p', format: 'HLS', mimeType: 'application/x-mpegurl', videoOnly: false, url: 'https://proxy.example/master.m3u8' },
+    ],
+  });
+  assert.equal(browserCompatible.url, 'https://proxy.example/720.mp4', 'native playback should prefer muxed MP4/H.264 over higher WebM/HLS entries');
+
   const page = fs.readFileSync('pages/yt-search.html', 'utf8');
   const search = fs.readFileSync('js/tabs/yt-search.js', 'utf8');
   const app = fs.readFileSync('app.html', 'utf8');

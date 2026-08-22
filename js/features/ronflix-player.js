@@ -246,6 +246,19 @@
     setTimeout(function () { ensureNormalIframe(type, id, seq); }, 1200);
   }
 
+  function fallbackReason(error) {
+    if (!error) return 'Try another video or retry in a minute.';
+    var status = Number(error.status || 0);
+    var message = String(error.serverMessage || error.message || '').replace(/https?:\/\/\S+/g, 'remote server').replace(/\s+/g, ' ').trim();
+    if (status === 403 || status === 429 || status >= 500 || /LOGIN_REQUIRED|not a bot|temporarily blocked/i.test(message)) {
+      return 'The Piped server was blocked or busy; try again in a minute or try another video.';
+    }
+    if (error.kind === 'media' || /media|stream failed|timeout/i.test(message)) {
+      return 'The returned media could not be played by this browser; try another video.';
+    }
+    return message ? message.slice(0, 150) : 'Try another video or retry in a minute.';
+  }
+
   function fallbackToPrevious(id, reason) {
     ronflixActiveNow = false;
     ronflixEnabled = false;
@@ -254,12 +267,91 @@
     updateToggleUi();
     var iframe = document.getElementById('yt-player');
     if (iframe) iframe.style.display = 'block';
-    showToastSafe('RonFlix unavailable — previous player use kar rahe hain.' + (reason ? ' ' + reason : ''), 'info');
+    showToastSafe('RonFlix unavailable — normal player restored. ' + (reason || 'Try another video or retry in a minute.'), 'info');
     if (typeof ronflixPreviousLoad === 'function') ronflixPreviousLoad('video', id);
   }
 
+  function nativeMediaError(video) {
+    var code = video && video.error && Number(video.error.code || 0);
+    var labels = { 1: 'media load aborted', 2: 'network error', 3: 'media decode error', 4: 'media format not supported' };
+    var error = new Error(labels[code] || 'stream failed to load');
+    error.kind = 'media';
+    error.mediaCode = code;
+    return error;
+  }
+
+  function waitForMetadata(video, candidate) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () {
+        cleanup();
+        var timeout = new Error('stream timeout');
+        timeout.kind = 'media';
+        reject(timeout);
+      }, 15000);
+      function cleanup() {
+        clearTimeout(timer);
+        video.removeEventListener('loadedmetadata', loaded);
+        video.removeEventListener('error', failed);
+      }
+      function loaded() { cleanup(); resolve(candidate); }
+      function failed() { cleanup(); reject(nativeMediaError(video)); }
+      video.addEventListener('loadedmetadata', loaded);
+      video.addEventListener('error', failed);
+      video.load();
+    });
+  }
+
+  function ronflixStreamInfo(id, ctrl, triedBases) {
+    var client = window.RonflixStream;
+    if (typeof client.getVideoStreams === 'function') {
+      return client.getVideoStreams(id, {
+        signal: ctrl.signal,
+        timeoutMs: 12000,
+        excludeBases: triedBases.slice()
+      });
+    }
+    return client.getVideoStream(id, { signal: ctrl.signal, timeoutMs: 12000 }).then(function (stream) {
+      return { streams: [stream], title: stream.title, source: stream.source || '' };
+    });
+  }
+
+  function loadRonflixStreams(id, video, ctrl, seq, triedBases) {
+    return ronflixStreamInfo(id, ctrl, triedBases).then(function (info) {
+      if (info.source && triedBases.indexOf(info.source) < 0) triedBases.push(info.source);
+      var candidates = Array.isArray(info.streams) ? info.streams.filter(function (stream) {
+        return stream && stream.url;
+      }) : [];
+      if (!candidates.length) throw new Error('No browser-compatible RonFlix stream returned');
+      var lastMediaError = null;
+      function tryCandidate(index) {
+        if (index >= candidates.length) return Promise.reject(lastMediaError || new Error('No playable RonFlix candidate returned'));
+        if (seq !== ronflixSeq || ctrl.signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
+        var candidate = candidates[index];
+        video.src = candidate.url;
+        var label = candidate.quality || candidate.format || 'stream';
+        setStatus('RonFlix: preparing ' + label + '…');
+        return waitForMetadata(video, candidate).catch(function (error) {
+          lastMediaError = error;
+          return tryCandidate(index + 1);
+        });
+      }
+      return tryCandidate(0).catch(function (error) {
+        /* A Piped API can return a valid JSON response whose media proxy is
+           stale or blocked. Re-query a different mirror before giving up. */
+        if (typeof window.RonflixStream.getVideoStreams === 'function' && info.source && triedBases.length < window.RonflixStream.instances.length) {
+          return loadRonflixStreams(id, video, ctrl, seq, triedBases).catch(function (nextError) {
+            nextError.previousMediaError = error;
+            throw nextError;
+          });
+        }
+        throw error;
+      });
+    });
+  }
+
   function startRonflix(id, title) {
-    if (!validId(id) || !window.RonflixStream || typeof window.RonflixStream.getVideoStream !== 'function') {
+    if (!validId(id) || !window.RonflixStream ||
+      (typeof window.RonflixStream.getVideoStreams !== 'function' && typeof window.RonflixStream.getVideoStream !== 'function')) {
       fallbackToPrevious(id, 'Server client load nahi hua.');
       return;
     }
@@ -283,37 +375,19 @@
     if (placeholder) placeholder.style.display = 'none';
     video.style.display = 'none';
     setStatus('RonFlix: fetching stream…');
-    window.RonflixStream.getVideoStream(id, { signal: ctrl.signal, timeoutMs: 12000 })
-      .then(function (stream) {
+    var triedBases = [];
+    var resume = 0;
+    try { if (typeof ytResumeSeconds === 'function') resume = ytResumeSeconds(id) || 0; } catch (e) {}
+    video.defaultPlaybackRate = (window.ytSpeedCurrent || 1);
+    video.playbackRate = (window.ytSpeedCurrent || 1);
+    loadRonflixStreams(id, video, ctrl, seq, triedBases)
+      .then(function () {
         if (seq !== ronflixSeq || !ronflixEnabled || ctrl.signal.aborted) return;
-        video.src = stream.url;
-        var resume = 0;
-        try { if (typeof ytResumeSeconds === 'function') resume = ytResumeSeconds(id) || 0; } catch (e) {}
-        video.defaultPlaybackRate = (window.ytSpeedCurrent || 1);
-        video.playbackRate = (window.ytSpeedCurrent || 1);
-        setStatus('RonFlix: stream found — preparing video…');
-        return new Promise(function (resolve, reject) {
-          var timer = setTimeout(function () { reject(new Error('stream timeout')); }, 30000);
-          var loaded = function () {
-            clearTimeout(timer);
-            video.removeEventListener('loadedmetadata', loaded);
-            video.removeEventListener('error', failed);
-            resolve(resume);
-          };
-          var failed = function () {
-            clearTimeout(timer);
-            video.removeEventListener('loadedmetadata', loaded);
-            video.removeEventListener('error', failed);
-            reject(new Error('stream failed to load (possibly CORS blocked)'));
-          };
-          video.addEventListener('loadedmetadata', loaded);
-          video.addEventListener('error', failed);
-          video.load();
-        });
+        return resume;
       })
-      .then(function (resume) {
+      .then(function (resumeSeconds) {
         if (seq !== ronflixSeq || !ronflixEnabled || ctrl.signal.aborted) return;
-        try { if (resume > 0) video.currentTime = resume; } catch (e) {}
+        try { if (resumeSeconds > 0) video.currentTime = resumeSeconds; } catch (e) {}
         ronflixActiveNow = true;
         updateToggleUi();
         ronflixWatchLastTs = Date.now();
@@ -326,8 +400,8 @@
       .catch(function (error) {
         if (seq !== ronflixSeq || ctrl.signal.aborted) return;
         console.warn('RonFlix player:', error);
-        setStatus('RonFlix failed: ' + (error.message || 'stream unavailable'));
-        fallbackToPrevious(id, 'Try Turbo ya normal player.');
+        setStatus('RonFlix failed: ' + fallbackReason(error));
+        fallbackToPrevious(id, fallbackReason(error));
       });
   }
 
