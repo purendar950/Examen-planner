@@ -18,6 +18,7 @@
   var ronflixWatchLastTs = 0;
   var ronflixLastSave = 0;
   var ronflixPreviousLoad = null;
+  var ronflixPendingEnable = false;
   var ronflixWrappedLoad = null;
   var ronflixPreviousSpeed = null;
   var normalRestoreSeq = 0;
@@ -397,10 +398,12 @@
     next = !!next;
     console.log('[RonFlix] toggle clicked, enabling:', next, 'currentId:', currentId());
     if (next && !validId(currentId())) {
+      ronflixPendingEnable = true;
       updateToggleUi();
-      showToastSafe('Pehle ek video load karo — phir RonFlix click karo.', 'info');
+      showToastSafe('Pehle ek video load karo — phir RonFlix auto-on ho jayega.', 'info');
       return;
     }
+    ronflixPendingEnable = false;
     if (next === ronflixEnabled) return;
     if (next && typeof window.ytTurboGetState === 'function') {
       var turbo = window.ytTurboGetState();
@@ -423,9 +426,16 @@
     return { enabled: ronflixEnabled, active: isActive(), videoId: ronflixId, title: ronflixTitle };
   };
 
+  function maybeAutoEnable() {
+    if (ronflixPendingEnable && !ronflixEnabled && validId(currentId())) {
+      ronflixPendingEnable = false;
+      setEnabled(true);
+    }
+  }
+
   function initUi() {
     var bar = document.getElementById('yt-speed-bar');
-    if (!bar) return;
+    if (!bar) return false;
     injectStyles();
     var controls = document.getElementById('yt-turbo-controls');
     if (!controls) {
@@ -451,7 +461,17 @@
       return window.ytToggleRonflix();
     };
     updateToggleUi();
+    return true;
   }
+
+  // Auto-enable watcher: checks every second whether the user asked for
+  // RonFlix before a video was loaded, and enables it once one is ready.
+  setInterval(function () {
+    if (document.getElementById('yt-ronflix-toggle')) {
+      updateToggleUi();
+      maybeAutoEnable();
+    }
+  }, 1000);
 
   /* Capture the already-wrapped loader, so Turbo remains the fallback and keeps
      all of its existing Pro gating and stream behavior. */
